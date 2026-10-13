@@ -2079,7 +2079,7 @@ for (const viewport of GRAPH_STATE_VIEWPORTS) {
       expect(trace.chips.at(-1)?.text).toBe('0 W');
       // The one sentence under the graph, and nothing else.
       expect(seen.keyText).toBe(
-        'At the line, the dashed outline is what the plan asks for now, 225 W. The trainer confirmed 0 W instead, so nothing is shaded.',
+        'At the line, the dashed outline is what the plan asks for now, 225\u00a0W. The trainer confirmed 0\u00a0W instead, so nothing is shaded.',
       );
     });
 
@@ -2111,7 +2111,7 @@ for (const viewport of GRAPH_STATE_VIEWPORTS) {
         'Target the trainer last confirmed: 100 W, where the plan asks for 75 W.',
       );
       expect(seen.keyText).toBe(
-        'At the line, the dashed outline is what the plan asks for now, 75 W. The shaded step is what the trainer confirmed instead, 100 W.',
+        'At the line, the dashed outline is what the plan asks for now, 75\u00a0W. The shaded step is what the trainer confirmed instead, 100\u00a0W.',
       );
     });
 

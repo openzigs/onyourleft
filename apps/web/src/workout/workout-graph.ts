@@ -839,12 +839,15 @@ const ASKER: Readonly<Record<HeldInstead['by'], string>> = {
  * sentence says so rather than pointing at a shape that is not there.
  */
 export function graphKeyHeld(held: HeldInstead): string {
-  const asked = `At the line, the dashed outline is what ${ASKER[held.by]} asks for now, ${String(
+  // ⚠️ A NO-BREAK space between each number and its unit: the sentence wraps,
+  // and it wrapped as "…for now, 75" / "W. The shaded step…".
+  const watts = (value: number): string => `${String(value)}\u00a0W`;
+  const asked = `At the line, the dashed outline is what ${ASKER[held.by]} asks for now, ${watts(
     held.plannedWatts,
-  )} W.`;
+  )}.`;
   return held.heldWatts > 0
-    ? `${asked} The shaded step is what the trainer confirmed instead, ${String(held.heldWatts)} W.`
-    : `${asked} The trainer confirmed ${String(held.heldWatts)} W instead, so nothing is shaded.`;
+    ? `${asked} The shaded step is what the trainer confirmed instead, ${watts(held.heldWatts)}.`
+    : `${asked} The trainer confirmed ${watts(held.heldWatts)} instead, so nothing is shaded.`;
 }
 
 /** Everything said under the graph, or an empty string when there is nothing to explain. */

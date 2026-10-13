@@ -259,8 +259,8 @@ describe('the running workout’s graph — #1307', () => {
     const root = rendered(<WorkoutGraph workout={held} />);
     const key = root.querySelector('.oyl-workout-graph__key');
     expect(key?.textContent).toBe(
-      'At the line, the dashed outline is what the plan asks for now, 150 W. The shaded step ' +
-        'is what the trainer confirmed instead, 180 W.',
+      'At the line, the dashed outline is what the plan asks for now, 150\u00a0W. The shaded step ' +
+        'is what the trainer confirmed instead, 180\u00a0W.',
     );
     // Outside the image: it is read, where the marks are not.
     expect(key?.closest('[role="img"]')).toBeNull();

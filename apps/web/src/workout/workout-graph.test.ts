@@ -714,22 +714,30 @@ describe('what is said under the graph — #1307', () => {
   it('says what the dashed outline and the shaded step at the line are, with both numbers', () => {
     const raised = input({ elapsedSeconds: 1500, holdingWatts: 140 });
     expect(workoutGraphKey(raised)).toBe(
-      'At the line, the dashed outline is what the plan asks for now, 125 W. ' +
-        'The shaded step is what the trainer confirmed instead, 140 W.',
+      'At the line, the dashed outline is what the plan asks for now, 125\u00a0W. ' +
+        'The shaded step is what the trainer confirmed instead, 140\u00a0W.',
     );
   });
 
   it('does not point at a shaded step that is not there: 0 W', () => {
     expect(graphKeyHeld({ heldWatts: 0, plannedWatts: 225, by: 'plan' })).toBe(
-      'At the line, the dashed outline is what the plan asks for now, 225 W. The trainer ' +
-        'confirmed 0 W instead, so nothing is shaded.',
+      'At the line, the dashed outline is what the plan asks for now, 225\u00a0W. The trainer ' +
+        'confirmed 0\u00a0W instead, so nothing is shaded.',
     );
+  });
+
+  it('keeps each number with its unit when the sentence wraps: a no-break space', () => {
+    const sentence = graphKeyHeld({ heldWatts: 100, plannedWatts: 75, by: 'plan' });
+    expect(sentence).toContain('75\u00a0W.');
+    expect(sentence).toContain('100\u00a0W.');
+    expect(sentence).not.toMatch(/\d W/);
+    expect(graphKeyHeld({ heldWatts: 0, plannedWatts: 225, by: 'plan' })).not.toMatch(/\d W/);
   });
 
   it('names the heart-rate hold as the one asking, inside a hold', () => {
     expect(graphKeyHeld({ heldWatts: 100, plannedWatts: 119, by: 'hold' })).toBe(
-      'At the line, the dashed outline is what the heart-rate hold asks for now, 119 W. The ' +
-        'shaded step is what the trainer confirmed instead, 100 W.',
+      'At the line, the dashed outline is what the heart-rate hold asks for now, 119\u00a0W. The ' +
+        'shaded step is what the trainer confirmed instead, 100\u00a0W.',
     );
   });
 
