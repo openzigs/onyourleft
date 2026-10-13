@@ -149,6 +149,31 @@ so they are a local gate rather than a pull-request one. And only the **debug**
 variant's merge has ever been produced; `merged-manifest.ts` looks for the
 release variant too and has never found one.
 
+### The wording checklist for the listing, the README and release notes
+
+[ADR 0048](../../docs/adr/0048-workouts-that-change-during-the-ride.md) D-12 (the
+owner's Q12 on #1233) bans a list of words from everything this project says
+about a workout, because a regulator reads intended purpose from what a product
+says about itself. `apps/web/src/privacy/no-medical-wording.test.ts` scans the
+client's source for them ([#1245](https://github.com/openzigs/onyourleft/issues/1245)).
+**No scan reaches the Play listing, the README or release notes**
+([spike 0008](../../docs/spikes/0008-eu-uk-medical-device-read.md) §8), so a
+person reads those, before every release and whenever one of them changes:
+
+- [ ] None of them says _cardiac_, _heart condition_, _rehabilitation_,
+      _patient_, _therapy_, _safe heart rate_, _protects your heart_, _medical_
+      or _clinical_, in any form. The list is `BANNED_WORDS` in
+      `apps/web/src/privacy/no-medical-wording.ts`; read it from there.
+- [ ] No heart-rate number is called a limit for health or safety. It is _the
+      range you chose_.
+- [ ] Nothing claims to prevent, treat or reduce the risk of anything, and
+      nothing says the app does not (ADR 0030 R5, its negative form included).
+- [ ] The purpose given is training: _to help you ride at the effort you
+      chose_.
+- [ ] The features are called _heart-rate hold_ and _re-plan during the ride_,
+      and none of the names ADR 0048 D-13 lists is used.
+- [ ] Screenshots in the listing show no sentence that breaks the rules above.
+
 ## 5. Android developer verification — re-checked 2026-09-16
 
 ⚠️ **This section used to be dated 2026-09-08 and to say the primary source was
