@@ -16,12 +16,16 @@
  * 3. **The privacy policy says it word for word**, so the screen and the
  *    policy cannot say two things.
  *
- * ⚠️ What the DEVICE writes into a request is #1244's
- * (`workout/replan-job.ts` §`replanInput`), which is not on this branch. The
- * three things the text says of it that the instance's lists cannot show —
- * no effort check-in ({@link NOT_SENT}), no time-in-range goal
- * ({@link GOAL_NAMED_BY}) and only the instance's own model — are pinned here
- * as sentences, and are for #1244 to hold against its own builder.
+ * 4. **What the text says of this DEVICE is true of its code** (#1244, which
+ *    merged this file in): §"what the text says of this device, held to its
+ *    code" builds a request with `workout/replan-job.ts` and reads the
+ *    session's own constants. No effort check-in ({@link NOT_SENT}), no
+ *    time-in-range goal ({@link GOAL_NAMED_BY}), only the instance's own
+ *    model, the 3 minutes, and a long workout's most recent summaries. Three
+ *    more are held where the behaviour is: nothing before the switch is on,
+ *    while paused or after the ride (`ride/controller.test.ts` §"what the
+ *    disclosure says of this device"), and the record not synced
+ *    (`instance/sync.test.ts` §"a ride's re-plan record is not synced").
  */
 
 import { readFileSync } from 'node:fs';
@@ -29,10 +33,28 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import { REPLAN_MOVE_INTERVAL_SECONDS, type WorkoutGoals } from '@onyourleft/domain';
+import {
+  beatsPerMinute,
+  REPLAN_MOVE_INTERVAL_SECONDS,
+  seconds,
+  thresholdShare,
+  type WorkoutBlock,
+  type WorkoutGoals,
+} from '@onyourleft/domain';
 
 import { bannedWordIn } from '../privacy/no-medical-wording';
 
+import {
+  goalsToSend,
+  replanInput,
+  replanInputWithin,
+  replanRequest,
+  REPLAN_SOURCE,
+  type BlockSummary,
+} from './replan-job';
+import { REASONS_NEVER_SHOWN } from './replan-reason';
+import { REPLAN_ASK_INTERVAL_SECONDS } from './replan-session';
+import { REPLAN_OFF_BUTTON } from './replan-text';
 import {
   HOLD_SENDS_NOTHING,
   REPLAN_KEEP_BUTTON,
@@ -333,6 +355,175 @@ describe('the disclosure names everything the instance can be sent, from the ins
     };
     const days = jobs.DEFAULT_RETENTION_MS / (24 * 60 * 60 * 1000);
     expect(TEXT).toContain(`for ${String(days)} days`);
+  });
+});
+
+describe('what the text says of this device, held to its code (#1244)', () => {
+  /** Every typed goal set: `GOAL_NAMED_BY`'s keys, so a goal added to the type is set here too. */
+  const EVERY_GOAL: Required<WorkoutGoals> = {
+    sessionType: 'endurance',
+    durationMinutes: 60,
+    holdRange: { low: beatsPerMinute(130), high: beatsPerMinute(142) },
+    heartRateAbove: beatsPerMinute(150),
+    powerCeiling: thresholdShare(0.8),
+    timeInRangeMinutes: 30,
+    effortCheckIns: true,
+  };
+  const BLOCKS: readonly WorkoutBlock[] = [
+    { kind: 'steady', seconds: seconds(300), target: thresholdShare(0.5), label: 'Warm up' },
+    { kind: 'ramp', seconds: seconds(300), from: thresholdShare(0.5), to: thresholdShare(0.7) },
+    {
+      kind: 'intervals',
+      repeats: 2,
+      hardSeconds: seconds(60),
+      hardTarget: thresholdShare(0.9),
+      easySeconds: seconds(60),
+      easyTarget: thresholdShare(0.5),
+    },
+    { kind: 'free-ride', seconds: seconds(300) },
+    {
+      kind: 'heart-rate-hold',
+      seconds: seconds(600),
+      range: { low: beatsPerMinute(120), high: beatsPerMinute(135) },
+      startShare: thresholdShare(0.5),
+      ceilingShare: thresholdShare(0.7),
+    },
+  ];
+  /** A summary with every figure, and an effort check-in a later build might hold. */
+  const FULL_SUMMARY = {
+    block: 0,
+    seconds: 300,
+    meanHeartRate: 131,
+    highestHeartRate: 140,
+    secondsInRange: 250,
+    meanPowerShare: 0.52,
+    meanCadence: 88,
+    rescues: 1,
+    effort: 3,
+  } as BlockSummary;
+  const built = replanRequest(
+    replanInput({
+      revision: 0,
+      summarySeq: 1,
+      currentBlock: 1,
+      goals: EVERY_GOAL,
+      blocks: BLOCKS,
+      summaries: [FULL_SUMMARY],
+    }),
+  );
+
+  it('"No effort check-in is sent": the builder writes none, even when handed one', () => {
+    const [sent] = built.input.summaries;
+    expect(sent).toBeDefined();
+    expect(Object.keys(sent ?? {})).not.toContain('effort');
+    expect(JSON.stringify(built)).not.toContain('"effort"');
+    // And every key it does write is one the text names.
+    expect(unnamed(Object.keys(sent ?? {}), SUMMARY_NAMED_BY, TEXT)).toStrictEqual([]);
+    expect(Object.keys(sent ?? {}).sort()).toStrictEqual(Object.keys(SUMMARY_NAMED_BY).sort());
+    expect(POLICY).toContain('No effort check-in is sent.');
+  });
+
+  it('"The time you want to spend in your range is not sent": the builder sends every goal the text names but that one', () => {
+    const sent = Object.keys(goalsToSend(EVERY_GOAL)).sort();
+    const named = Object.keys(GOAL_NAMED_BY)
+      .filter((goal) => goal !== 'timeInRangeMinutes')
+      .sort();
+    expect(sent).toStrictEqual(named);
+    expect(sent).not.toContain('timeInRangeMinutes');
+    expect(JSON.stringify(built)).not.toContain('timeInRange');
+    expect(TEXT).toContain(GOAL_NAMED_BY.timeInRangeMinutes);
+  });
+
+  it('"this app asks only for the model on your instance’s own machine": the one source it can name', () => {
+    expect(REPLAN_SOURCE).toBe('instance-local');
+    expect(built.source).toBe('instance-local');
+    expect(JSON.stringify(built)).not.toContain('hosted');
+    expect(TEXT).toContain("this app asks only for the model on your instance's own machine");
+  });
+
+  it('"never more often than every 3 minutes": the session’s own interval', () => {
+    expect(REPLAN_ASK_INTERVAL_SECONDS).toBe(REPLAN_MOVE_INTERVAL_SECONDS);
+    expect(REPLAN_ASK_INTERVAL_SECONDS).toBe(180);
+    expect(TEXT).toContain(
+      `never more often than every ${String(REPLAN_ASK_INTERVAL_SECONDS / 60)} minutes`,
+    );
+    expect(POLICY).toContain(
+      `as a block begins, and never less than ${String(REPLAN_ASK_INTERVAL_SECONDS / 60)} minutes after the last time`,
+    );
+  });
+
+  it('names every key of a block and of a request that the builder writes, and "two fixed words"', () => {
+    const blockKeys = [...new Set(built.input.blocks.flatMap((block) => Object.keys(block)))];
+    expect(unnamed(blockKeys, BLOCK_NAMED_BY, TEXT)).toStrictEqual([]);
+    expect(JSON.stringify(built.input.blocks)).not.toContain('Warm up');
+    expect(unnamed(Object.keys(built.input), INPUT_NAMED_BY, TEXT)).toStrictEqual([]);
+    // The request around it: the input, and the two fixed words the policy speaks of.
+    expect(Object.keys(built).sort()).toStrictEqual(['input', 'source', 'templateVersion']);
+    expect(POLICY).toContain(
+      "two fixed words that say it is a re-plan and that the model on your instance's own machine is to answer it",
+    );
+  });
+
+  it('"In a long workout … only the most recent are sent": the builder leaves out the oldest', () => {
+    const blocks = Array.from({ length: 64 }, (_, index) => BLOCKS[index % 5] as WorkoutBlock);
+    const summaries = Array.from({ length: 63 }, (_, index) => ({ ...FULL_SUMMARY, block: index }));
+    const long = replanInputWithin({
+      revision: 0,
+      summarySeq: 1,
+      currentBlock: 63,
+      goals: EVERY_GOAL,
+      blocks,
+      summaries,
+    });
+    const sent = long?.summaries.map((each) => each.block) ?? [];
+    expect(sent.length).toBeGreaterThan(0);
+    expect(sent.length).toBeLessThan(63);
+    expect(sent.at(-1)).toBe(62);
+    expect(disclosure.paragraphs[0]).toContain(
+      'In a long workout with more blocks than fit in one request, only the most recent are sent.',
+    );
+    expect(POLICY).toContain(
+      'or, in a long workout with more blocks than fit in one request, for the most recent of them',
+    );
+  });
+
+  it('"switch it off and nothing more is sent": names a control the screen has, and what it does', () => {
+    // The behaviour is `ride/controller.test.ts` §"switching re-plans off
+    // while the workout runs": every call on the instance's channel after
+    // the press is counted (none), the job in flight is cancelled, and the
+    // simulated trainer rides the loaded plan. `ride/WorkoutPanel.test.tsx`
+    // holds the control to the screen while re-plans are on. This holds the
+    // words to the control's own name.
+    expect(REPLAN_OFF_BUTTON).toBe('Switch re-plans off');
+    expect(disclosure.paragraphs[4]).toContain(
+      'You can switch re-plans off while the workout runs, and nothing more is sent for that workout.',
+    );
+    expect(POLICY).toContain(
+      `switch it off and nothing more is sent — ${REPLAN_OFF_BUTTON}, beside End workout, while the workout runs; it then stays off for the rest of that workout`,
+    );
+    expect(POLICY).toContain(
+      `Switching it off: while the workout runs, ${REPLAN_OFF_BUTTON} is beside End workout. From that press nothing more is sent for that workout, a request still out is cancelled, and a change that was waiting for the next block is dropped. It stays off for the rest of that workout`,
+    );
+  });
+
+  it('"It gives the reason only when this device can see it in what it sent": three reasons it never can', () => {
+    // `replan-reason.test.ts` holds every reason both ways.
+    expect(REASONS_NEVER_SHOWN).toStrictEqual(['goal-time-in-range', 'effort-check-in', 'on-plan']);
+    expect(POLICY).toContain(
+      'It gives the reason only when this device can see it in what it sent; otherwise it says the change alone.',
+    );
+  });
+
+  it('says where the switch is offered: signed in, with the rider’s own two thresholds', () => {
+    // `views/RideView.test.tsx` §"#1244" holds the screen to both thresholds
+    // and the sign-in; `ride/WorkoutPanel.test.tsx` to a controlled trainer.
+    expect(POLICY).toContain(
+      'If you are signed in to an instance and have set your own threshold power and threshold heart rate, the workout panel on the Ride screen has a switch',
+    );
+    expect(POLICY).toContain(
+      'If you are signed in to an instance, have set your own threshold power and threshold heart rate, and choose a workout on the Ride screen, you can switch on',
+    );
+    expect(POLICY).toContain('when you choose a workout with a trainer this app controls');
   });
 });
 

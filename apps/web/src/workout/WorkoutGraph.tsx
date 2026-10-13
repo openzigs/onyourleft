@@ -242,7 +242,12 @@ function Drawn({ workout }: WorkoutGraphProps): JSX.Element {
 
 function Strip({ workout }: WorkoutGraphProps): JSX.Element {
   const paths = useMemo(() => workoutStripPaths(workout), [workout]);
-  const name = useMemo(() => workoutGraphText(workout), [workout]);
+  // ⚠️ Named WITHOUT what a re-plan replaced (#1244's review). The strip is
+  // the last five minutes and a progress bar and draws no outline, and
+  // `workoutGraphText` ends "The dotted outline is the plan before it was
+  // changed." whenever it is handed one: a name describing a picture that
+  // is not there, from the first accepted move to the end of the workout.
+  const name = useMemo(() => workoutGraphText({ ...workout, replaced: undefined }), [workout]);
   const text = useMemo(() => workoutStripText(workout), [workout]);
   const { lane, progress } = paths;
   return (

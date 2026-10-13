@@ -5,9 +5,9 @@
  * moves an instance agent may propose, and the validator that accepts or
  * refuses one on the device.
  *
- * @unwired nothing calls it until #1244 builds the device half of re-plans
- * (`apps/web/src/workout/replan-session.ts`) and #1243 the instance job; this
- * tag is removed there.
+ * The device half that calls {@link validateProposal} is
+ * `apps/web/src/workout/replan-session.ts` (#1244); the instance job that
+ * calls {@link decodeProposal} is `apps/instance/src/analysis/` (#1243).
  *
  * ## No model text reaches a number
  *
@@ -109,7 +109,7 @@
  * (ADR 0048 D-5).
  */
 
-import type { BeatsPerMinute, Seconds, Watts } from '../quantities';
+import { seconds, type BeatsPerMinute, type Seconds, type Watts } from '../quantities';
 
 import { readWorkoutGoals, type WorkoutGoals } from './goals';
 import type { TrainerPowerRange } from './heart-rate-hold';
@@ -291,8 +291,26 @@ export interface OwnThresholds {
 }
 
 /**
+ * Why an accepted move never reached the plan being ridden (ADR 0048 D-7,
+ * D-8): the rider pressed *Keep the plan*, the ride paused or lost its
+ * trainer before the boundary, the workout ended first, or the player would
+ * not take the revised plan (`player.ts` §`revise`).
+ */
+/**
+ * Why an accepted move was not ridden. `switched-off` (#1244's review): the
+ * rider switched re-plans off for the rest of the workout while it waited.
+ */
+export const REPLAN_NOT_APPLIED = ['kept', 'paused', 'ended', 'not-taken', 'switched-off'] as const;
+
+export type ReplanNotApplied = (typeof REPLAN_NOT_APPLIED)[number];
+
+/**
  * P9: what is kept with the ride for every decision. A refusal's move is
  * present only when the proposal decoded, so nothing undecoded is kept.
+ *
+ * `not-applied` (#1244) follows an `accepted` record whose move was dropped
+ * before its boundary, and names that record's revision: without it the
+ * ride's record would say a move was made that the rider never rode.
  */
 export type ReplanRecord =
   | {
@@ -302,12 +320,27 @@ export type ReplanRecord =
       /** The revision the move made. */
       readonly revision: number;
       readonly at: Seconds;
+      /**
+       * `true` when the device did NOT say {@link reason} to the rider,
+       * because it could not see for itself that the reason's premise held
+       * (#1244's review). The reason is the proposal's and is kept either
+       * way; this says the rider was shown the move alone. Absent when the
+       * reason was said. Set by the device after the validator's decision.
+       */
+      readonly reasonNotShown?: true;
     }
   | {
       readonly decision: 'refused';
       readonly rule: ReplanRule;
       readonly move?: PlanMove | undefined;
       readonly reason?: ReasonCode | undefined;
+      readonly at: Seconds;
+    }
+  | {
+      readonly decision: 'not-applied';
+      readonly why: ReplanNotApplied;
+      /** The revision that was dropped: an `accepted` record's. */
+      readonly revision: number;
       readonly at: Seconds;
     };
 
@@ -346,6 +379,30 @@ export function loadPlan(workout: Workout): PlanRevision {
       carried: 0,
       block,
     })),
+  };
+}
+
+/**
+ * The plan after an accepted revision was dropped before its boundary
+ * (#1244): the blocks still being ridden, under a NEW revision number, with
+ * the dropped move's P4 times kept.
+ *
+ * - **The number moves on**, so a proposal computed from the dropped revision
+ *   names a revision this plan never has again, and is refused under P5.
+ * - **The times are kept**, so dropping a move does not buy another one
+ *   sooner: P4's three and ten minutes count from the move that was accepted,
+ *   whether or not it was ridden. That refuses more, never less.
+ *
+ * @param riding the plan in force, which stays.
+ * @param dropped the accepted revision that will not be ridden.
+ */
+export function planNotApplied(riding: PlanRevision, dropped: PlanRevision): PlanRevision {
+  return {
+    revision: Math.max(riding.revision, dropped.revision) + 1,
+    loaded: riding.loaded,
+    blocks: riding.blocks,
+    lastAcceptedAt: dropped.lastAcceptedAt,
+    lastHarderAt: dropped.lastHarderAt,
   };
 }
 
@@ -436,6 +493,79 @@ export function decodeProposal(value: unknown): Proposal | undefined {
   }
   const move = decodeMove(value['move']);
   return move === undefined ? undefined : { revision, summarySeq, move, reason };
+}
+
+/** A time a record may carry: a finite number of seconds, not negative. */
+function isTime(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+}
+
+/**
+ * P9: reads a value as one {@link ReplanRecord}, or as nothing (#1244). What
+ * a ride kept is read back by this before anything shows it, so a row edited
+ * by hand, or written by a later build with a move this one does not know,
+ * is no record rather than half of one. The result is a new object holding
+ * only the keys this module names, and its move and reason are read by the
+ * same lists as a proposal's ({@link decodeProposal}).
+ */
+export function readReplanRecord(value: unknown): ReplanRecord | undefined {
+  if (!isRecord(value) || !isTime(value['at'])) {
+    return undefined;
+  }
+  const at = seconds(value['at']);
+  switch (value['decision']) {
+    case 'accepted': {
+      const move = decodeMove(value['move']);
+      const { reason, revision } = value;
+      const notShown = value['reasonNotShown'];
+      // The one optional key: present only as `true`.
+      const keys =
+        notShown === undefined
+          ? ['decision', 'move', 'reason', 'revision', 'at']
+          : ['decision', 'move', 'reason', 'revision', 'at', 'reasonNotShown'];
+      return hasExactly(value, keys) &&
+        (notShown === undefined || notShown === true) &&
+        move !== undefined &&
+        isOneOf(reason, REASON_CODES) &&
+        isIndex(revision)
+        ? {
+            decision: 'accepted',
+            move,
+            reason,
+            revision,
+            at,
+            ...(notShown === true ? { reasonNotShown: true as const } : {}),
+          }
+        : undefined;
+    }
+    case 'refused': {
+      const { rule } = value;
+      if (!isOneOf(rule, REPLAN_RULES)) {
+        return undefined;
+      }
+      // A refusal carries its move and reason together, or neither.
+      if (hasExactly(value, ['decision', 'rule', 'at'])) {
+        return { decision: 'refused', rule, at };
+      }
+      const move = decodeMove(value['move']);
+      const { reason } = value;
+      return hasExactly(value, ['decision', 'rule', 'move', 'reason', 'at']) &&
+        move !== undefined &&
+        isOneOf(reason, REASON_CODES)
+        ? { decision: 'refused', rule, move, reason, at }
+        : undefined;
+    }
+    case 'not-applied': {
+      const { why, revision } = value;
+      return hasExactly(value, ['decision', 'why', 'revision', 'at']) &&
+        isOneOf(why, REPLAN_NOT_APPLIED) &&
+        isIndex(revision)
+        ? { decision: 'not-applied', why, revision, at }
+        : undefined;
+    }
+    default:
+      return undefined;
+  }
 }
 
 function blockSeconds(block: WorkoutBlock): number {

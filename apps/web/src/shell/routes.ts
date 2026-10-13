@@ -278,7 +278,13 @@ export const ROUTES: readonly RouteDefinition[] = [
     navLabel: 'Ride',
     title: 'Ride',
     summary: 'Record a ride from the sensors paired on this device.',
-    notes: ['Everything stays on this device.'],
+    // ⚠️ #1244's review: this was "Everything stays on this device.", which
+    // stopped being true of this screen when a rider could switch on
+    // *Re-plan during the ride* a few lines above it (and was already untrue
+    // of a ride whose side-camera pictures the rider had switched on sending).
+    // It claims only what holds in every state: where the ride is recorded,
+    // and that sending is something the rider switched on.
+    notes: ['Recorded on this device. Nothing is sent unless you switched that on.'],
   },
   {
     id: 'game',

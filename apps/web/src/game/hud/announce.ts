@@ -59,6 +59,7 @@
  * | `screen-off-risk` | `GameView` and `ride/RideAnnouncer.tsx` | `RideSnapshot.keepAliveFailed` (#647) |
  * | `erg-held` | `ride/RideAnnouncer.tsx` | `TrainerSnapshot.ergHeld` (#655) |
  * | `hold-changed` | `ride/RideAnnouncer.tsx` and `GameView` | `RideWorkoutSnapshot.hold`, through `workout/hold-text.ts` §`holdAnnouncement` (#1240) |
+ * | `plan-changed` | `ride/RideAnnouncer.tsx` and `GameView` | `RideWorkoutSnapshot.replan`, through `workout/replan-text.ts` §`planChangeAnnouncement` (#1244) |
  * | readings | `GameView` | `fields.ts` §`hudReadings` |
  *
  * ⚠️ **Rank 1 is broader than its name**, and the name was kept rather than
@@ -210,7 +211,8 @@ export type AnnouncementEvent =
   | { readonly kind: 'room-rider'; readonly text: string }
   | { readonly kind: 'screen-off-risk'; readonly text: string }
   | { readonly kind: 'erg-held'; readonly text: string }
-  | { readonly kind: 'hold-changed'; readonly text: string };
+  | { readonly kind: 'hold-changed'; readonly text: string }
+  | { readonly kind: 'plan-changed'; readonly text: string };
 
 /** Every kind of sentence, events and readings together. */
 export type AnnouncementKind =
@@ -236,6 +238,11 @@ export const PRIORITY: readonly AnnouncementKind[] = [
   // fault and below a held *Set* (ADR 0048 D-12). Announcements on only, at
   // most once a minute — `workout/hold-text.ts` §`holdAnnouncement`.
   'hold-changed',
+  // #1244: an accepted re-plan's one sentence, below the hold's (ADR 0048
+  // D-12). Announcements on only, once for each accepted move, and never in a
+  // segment above threshold power — `workout/replan-text.ts`
+  // §`planChangeAnnouncement`.
+  'plan-changed',
   'power-off-target',
   'distance-tick',
   'power',

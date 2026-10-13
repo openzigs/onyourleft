@@ -58,6 +58,7 @@
 import type { JSX, ReactNode } from 'react';
 
 import { RIDE_SIZE_CLASS } from '../../design/Button';
+import { REPLAN_KEEP_BUTTON } from '../../workout/replan-disclosure';
 import { useUnits } from '../../units/context';
 
 import {
@@ -190,6 +191,18 @@ export interface HudPanelProps extends Omit<HudInput, 'units'> {
    * ride with no room, and when nobody else is near.
    */
   readonly onFollowNext?: (() => void) | undefined;
+  /**
+   * *Keep the plan* — #1244, ADR 0048 D-7: set only while an accepted re-plan
+   * waits for the workout's next block, so the control is on the HUD exactly
+   * when there is a change to refuse, and a rider does not leave the game to
+   * refuse it. `undefined` at every other time, and on a ride with no workout.
+   *
+   * ⚠️ **On a row of its own under *Pause* and *End ride***, which keep their
+   * places. It is a ride-time control (`design/ride-time-controls.ts`) at
+   * #669's 48 px. `browser/ride.browser.spec.ts` §"#1244" measures it inside
+   * the viewport, and no panel over the rider at the tablet viewports.
+   */
+  readonly onKeepPlan?: (() => void) | undefined;
   readonly standingNotice?:
     | {
         readonly content: ReactNode;
@@ -318,6 +331,29 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
             </button>
           )}
         </div>
+        {/*
+          #1244: *Keep the plan*, on a row of its own under Pause and End ride
+          and only while a re-plan waits. ⚠️ **Not a third control in the row
+          above**, and that was measured: three controls share that row's
+          width equally, 72 px each on a phone, where "Keep the plan" wraps to
+          three lines and is 75 px tall — and a row stretches every control
+          in it, so *Pause* was 75 px tall with its own floor stripped and
+          `ride-targets.browser.spec.ts` could no longer tell whether the
+          declared size was what held it. On its own row it is one line, the
+          panel's width, and #669's 48 px (`RIDE_SIZE_CLASS`) rather than the
+          72 of the two a rider presses every ride. It needs no rule of its
+          own in `theme.css`: the actions panel is a column that stretches
+          its children and spaces them 8 px apart.
+        */}
+        {props.onKeepPlan === undefined ? null : (
+          <button
+            type="button"
+            className={`oyl-hud__control ${RIDE_SIZE_CLASS}`}
+            onClick={props.onKeepPlan}
+          >
+            {REPLAN_KEEP_BUTTON}
+          </button>
+        )}
         {/*
           #551: the side camera's line and its stop, as ONE row under Pause and
           End ride, so the two a rider presses every ride keep their places.

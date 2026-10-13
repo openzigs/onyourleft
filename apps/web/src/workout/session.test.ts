@@ -1729,3 +1729,68 @@ describe('what the trainer is never asked to do', () => {
     ).toHaveLength(0);
   });
 });
+
+describe('a revised plan is written at the next block, by the workout’s own writer — #1244', () => {
+  const THREE = (middle: number) =>
+    expandWorkout(workout([steady(6, 0.6), steady(6, middle), steady(6, 0.4)]));
+  const targetsWritten = (trainer: { readonly wire: readonly { bytes: readonly number[] }[] }) =>
+    trainer.wire
+      .filter((entry) => entry.bytes[0] === SET_TARGET_POWER)
+      .map((entry) => (entry.bytes[1] ?? 0) + ((entry.bytes[2] ?? 0) << 8));
+
+  it('sends the trainer nothing when the plan is revised, and the revised target at the boundary', async () => {
+    const { trainer, session } = await loop(() => THREE(1.0));
+    session.start(seconds(0));
+    await ride(session, 0, 2);
+    expect(targetsWritten(trainer)).toEqual([150]);
+
+    expect(session.revise(THREE(0.8))).toBe(true);
+    await session.settled();
+    await ride(session, 3, 5);
+    // Nothing since the revision: the block being ridden is the one loaded.
+    expect(targetsWritten(trainer)).toEqual([150]);
+    expect(trainer.targetPowerOnTheTrainer()).toBe(150);
+    expect(session.plan().waiting?.segments[1]?.from).toBe(0.8);
+
+    await ride(session, 6, 7);
+    expect(targetsWritten(trainer)).toEqual([150, 200]);
+    expect(trainer.targetPowerOnTheTrainer()).toBe(200);
+    expect(session.plan().waiting).toBeUndefined();
+  });
+
+  it('keeps the plan it had when the revision is dropped, and writes nothing for dropping it', async () => {
+    const { trainer, session } = await loop(() => THREE(1.0));
+    session.start(seconds(0));
+    await ride(session, 0, 2);
+    session.revise(THREE(0.8));
+    expect(session.keepPlan()).toBe(true);
+    await session.settled();
+    expect(targetsWritten(trainer)).toEqual([150]);
+    await ride(session, 3, 7);
+    expect(targetsWritten(trainer)).toEqual([150, 250]);
+  });
+
+  it('will not take a revision of the block being ridden', async () => {
+    const { trainer, session } = await loop(() => THREE(1.0));
+    session.start(seconds(0));
+    await ride(session, 0, 2);
+    expect(
+      session.revise(expandWorkout(workout([steady(6, 0.9), steady(6, 1.0), steady(6, 0.4)]))),
+    ).toBe(false);
+    await ride(session, 3, 5);
+    expect(targetsWritten(trainer)).toEqual([150]);
+  });
+
+  it('drops a waiting revision when the ride pauses', async () => {
+    const { trainer, session } = await loop(() => THREE(1.0));
+    session.start(seconds(0));
+    await ride(session, 0, 2);
+    session.revise(THREE(0.8));
+    session.pause(seconds(3));
+    await session.settled();
+    expect(session.plan().waiting).toBeUndefined();
+    session.resume(seconds(10));
+    await ride(session, 10, 15);
+    expect(targetsWritten(trainer).at(-1)).toBe(250);
+  });
+});

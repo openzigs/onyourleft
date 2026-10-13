@@ -66,6 +66,15 @@
  * The record's Segments line is that sentence; the "below" one is still in
  * the source, for a device that has a ride to cut from.
  *
+ * ⚠️ **Edited by #1244 (its third review), awaiting the owner's approval with
+ * that pull request's wording.** Two sentences are REWORDED in the record, in
+ * the same commit, because each had become false: the Ride screen's note,
+ * "Everything stays on this device.", is "Recorded on this device. Nothing is
+ * sent unless you switched that on." (a rider can now switch on re-plans a
+ * few lines above it); and the footer under every screen, "… No account, no
+ * server: everything here stays on this device.", is "… Your rides are kept
+ * on this device." (there has been an account and a server since ADR 0036).
+ *
  * ⚠️ **Edited by #1009, the owner's rulings of 2026-10-02.** Camera's note was
  * "Nothing is sent anywhere, and a picture is thrown away once it has been
  * looked at." — false on a screen that offers to send pictures to the rider's

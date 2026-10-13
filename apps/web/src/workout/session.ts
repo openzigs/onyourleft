@@ -80,6 +80,7 @@ import {
   type CadenceReading,
   type HeartRateHoldContext,
   type HeartRateSample,
+  type PlayerPlan,
   type PlayerState,
   type Seconds,
   type Watts,
@@ -253,15 +254,27 @@ export interface WorkoutSession {
    * top of the replacement.
    */
   supersede(): void;
+  /**
+   * Hand the player a revised plan to read from the end of the block being
+   * ridden (#1244, ADR 0048 D-2). It writes nothing: the player asks for the
+   * revised block's target at the boundary, through the same writer as every
+   * other target. `false` when the player will not take it
+   * (`player.ts` §`revise`), and then nothing has changed.
+   */
+  revise(timeline: WorkoutTimeline): boolean;
+  /** Drop a revision still waiting for its boundary: the rider's *Keep the plan*. */
+  keepPlan(): boolean;
+  /** The plan being ridden and the revision waiting, if any. Sends nothing. */
+  plan(): PlayerPlan;
   /** Resolves once no write is outstanding. For tests and for a clean teardown. */
   settled(): Promise<void>;
 }
 
 export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSession {
-  const { timeline, thresholdPower, control, powerFloor, onChange } = options;
+  const { thresholdPower, control, powerFloor, onChange } = options;
 
   const player: WorkoutPlayer = createWorkoutPlayer({
-    timeline,
+    timeline: options.timeline,
     thresholdPower,
     heartRateHold: options.heartRateHold,
     trainerRange:
@@ -651,6 +664,12 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
       void control.stop().catch(() => undefined);
       changed();
     },
+
+    // #1244. Neither tells `onChange`: the re-plan session that calls them
+    // tells its own listener once it has taken the answer in.
+    revise: (next) => player.revise(next),
+    keepPlan: () => player.keepPlan(),
+    plan: () => player.plan(),
 
     settled: () => writer.idle(),
   };

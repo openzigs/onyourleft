@@ -111,6 +111,28 @@
  * eight seconds at two thirds of a target, and the error runs the safe way. A
  * latch that a free ride cleared would put the full target that caused the
  * spiral straight back on a rider whose legs have not been tested since.
+ *
+ * ## A plan revision is read at the next block boundary, never sooner (#1244)
+ *
+ * ADR 0048 D-2: an accepted re-plan becomes a new plan revision that this
+ * player reads at the next block boundary. {@link WorkoutPlayer.revise} takes
+ * the revised timeline and keeps it WAITING; the tick that reaches the end of
+ * the block being ridden starts reading it. Until then every target comes from
+ * the plan being ridden, so nothing a revision carries can change the block a
+ * rider is in. The re-plan writes nothing: this player is still the one thing
+ * that asks for a target.
+ *
+ * ⚠️ **The player checks the revision itself, and does not take the
+ * validator's word for it.** `replan.ts` §`validateProposal` already promises
+ * that nothing at or before the block being ridden differs. `revise` compares
+ * every segment before the boundary anyway and refuses a timeline in which
+ * one differs, because a caller that handed over the wrong timeline would
+ * otherwise move the offsets under a rider mid-block.
+ *
+ * A waiting revision is dropped by {@link WorkoutPlayer.keepPlan} (the rider's
+ * *Keep the plan*), a pause, a lost link, a stop and a new start (ADR 0048
+ * D-8, item 1). A revision that is dropped is gone: the plan being ridden
+ * carries on to its end.
  */
 
 import { seconds, watts, type Seconds, type Watts } from '../quantities';
@@ -289,10 +311,67 @@ export interface WorkoutPlayer {
   linkLost(now: Seconds): PlayerState;
   /** End the workout deliberately. */
   stop(): PlayerState;
+  /**
+   * Read `next` from the end of the block being ridden (#1244, ADR 0048 D-2).
+   *
+   * Refused, and nothing kept, unless the player is running inside a block
+   * and every segment of `next` before that block's end is the segment being
+   * ridden now: same offsets, same targets, same hold. A revision already
+   * waiting is replaced.
+   *
+   * @returns whether the revision is now waiting for the boundary.
+   */
+  revise(next: WorkoutTimeline): boolean;
+  /**
+   * Drop a waiting revision: the plan being ridden stays in force.
+   *
+   * @returns whether there was one to drop.
+   */
+  keepPlan(): boolean;
+  /** The plan being ridden, and the revision waiting for the next boundary, if any. */
+  plan(): PlayerPlan;
+}
+
+/** @see WorkoutPlayer.plan */
+export interface PlayerPlan {
+  readonly riding: WorkoutTimeline;
+  readonly waiting: WorkoutTimeline | undefined;
+}
+
+/**
+ * Whether two segments, each the next in its own plan from the same start,
+ * ask the same thing of a rider over the same stretch.
+ *
+ * The start is not compared: segments are contiguous from zero, so two that
+ * follow equal segments start together. Nor are a hold's length and start
+ * share, which are the segment's own `endsAt` and `from`.
+ */
+function sameSegment(a: WorkoutSegment, b: WorkoutSegment): boolean {
+  const hold = a.hold;
+  const other = b.hold;
+  return (
+    a.endsAt === b.endsAt &&
+    a.from === b.from &&
+    a.to === b.to &&
+    a.block === b.block &&
+    (hold === undefined
+      ? other === undefined
+      : other !== undefined &&
+        hold.ceilingShare === other.ceilingShare &&
+        hold.range.low === other.range.low &&
+        hold.range.high === other.range.high)
+  );
 }
 
 export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
-  const { timeline, thresholdPower } = options;
+  const { thresholdPower } = options;
+  /** The plan being ridden. Replaced only by a waiting revision, at its boundary. */
+  let timeline = options.timeline;
+  /**
+   * A revision waiting for the end of the block it was accepted in (#1244):
+   * the timeline to read from `at`, an offset in the plan being ridden.
+   */
+  let waiting: { readonly timeline: WorkoutTimeline; readonly at: number } | undefined;
   /** The hold running in the current block, and which block that is (H11). */
   let activeHold: { readonly block: number; readonly hold: HeartRateHold } | undefined;
   let holdStatus: HoldStatus | undefined;
@@ -404,6 +483,7 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
       activeHold = undefined;
       holdStatus = undefined;
       rescueBase = undefined;
+      waiting = undefined;
       rescue.reset();
       return snapshot();
     },
@@ -413,6 +493,13 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
         return snapshot();
       }
       advance(now);
+
+      // #1244: the boundary a revision was waiting for. Before anything reads
+      // the timeline, so the first target of the next block is the revised one.
+      if (waiting !== undefined && elapsed >= waiting.at) {
+        timeline = waiting.timeline;
+        waiting = undefined;
+      }
 
       if (elapsed >= timeline.totalSeconds) {
         status = 'finished';
@@ -569,6 +656,8 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
       // until an acknowledgement that may never come.
       abandonWrite();
       inForce = undefined;
+      // ADR 0048 D-8, item 1: a pause discards a waiting re-plan.
+      waiting = undefined;
       intent = { kind: 'release', reason: 'Paused.' };
       return snapshot();
     },
@@ -632,6 +721,8 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
       runningSince = undefined;
       abandonWrite();
       inForce = undefined;
+      // ADR 0048 D-8, item 1: so does a lost link.
+      waiting = undefined;
       intent = {
         kind: 'release',
         reason: 'The trainer disconnected, so the workout is paused. Nothing has been lost.',
@@ -644,8 +735,56 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
       runningSince = undefined;
       pending = undefined;
       inForce = undefined;
+      waiting = undefined;
       intent = { kind: 'finished' };
       return snapshot();
     },
+
+    revise(next: WorkoutTimeline): boolean {
+      if (status !== 'running') {
+        return false;
+      }
+      const riding = segmentAt(timeline, seconds(elapsed));
+      if (riding === undefined) {
+        return false;
+      }
+      // The end of the BLOCK, not of the segment: an intervals block is many
+      // segments, and a revision read between two of them would change a
+      // block the rider is still in.
+      let boundary: number = riding.endsAt;
+      for (const segment of timeline.segments) {
+        if (segment.block === riding.block && segment.endsAt > boundary) {
+          boundary = segment.endsAt;
+        }
+      }
+      const before = timeline.segments.filter((segment) => segment.startsAt < boundary);
+      const revised = next.segments;
+      // A revision with fewer segments here has no `other` to match; one with
+      // more would have to differ in an earlier `endsAt`.
+      if (
+        !before.every((segment, index) => {
+          const other = revised[index];
+          return other !== undefined && sameSegment(segment, other);
+        })
+      ) {
+        return false;
+      }
+      // A revision that lengthens the block being ridden (more repeats) keeps
+      // every ridden segment equal and adds the rest after them, so it must
+      // also have left the block by the segment after `before`.
+      if (revised[before.length]?.block === riding.block) {
+        return false;
+      }
+      waiting = { timeline: next, at: boundary };
+      return true;
+    },
+
+    keepPlan(): boolean {
+      const had = waiting !== undefined;
+      waiting = undefined;
+      return had;
+    },
+
+    plan: () => ({ riding: timeline, waiting: waiting?.timeline }),
   };
 }

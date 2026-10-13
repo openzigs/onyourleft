@@ -840,6 +840,9 @@ for (const viewport of EASED_VIEWPORTS) {
  * must fall under the floor at every in-shell tablet. Without it, "every
  * control clears the fold" is as true of a page that rendered no notice.
  */
+/** `workout/replan-text.ts` §`REPLAN_OFF_BUTTON`. */
+const SWITCH_REPLANS_OFF = 'Switch re-plans off';
+
 const STANDING_NOTICES: readonly {
   readonly name: string;
   readonly query: string;
@@ -854,15 +857,33 @@ const STANDING_NOTICES: readonly {
   // #1240: a workout's heart-rate hold — its notice, with the longest sentence
   // `workout/hold-text.ts` can produce, in the running workout's section.
   { name: 'a heart-rate hold', query: '?workout=hold', labels: ['Heart-rate hold:'] },
+  // #1244: an accepted re-plan waiting for the next block — its sentence, the
+  // longest `workout/replan-text.ts` can produce, and *Keep the plan* under
+  // it, which is a ride control and so is held to the floor with the rest.
+  { name: 'a re-plan waiting', query: '?workout=replan', labels: ['Plan change:'] },
+  // #1244: the two lines that can follow it in the same place — the answer to
+  // *Keep the plan*, and the one sentence for a move a pause or a lost
+  // trainer discarded. Neither has a control of its own.
+  {
+    name: 'a re-plan the rider kept the plan from',
+    query: '?workout=replan-kept',
+    labels: ['Plan change:'],
+  },
+  {
+    name: 'a re-plan a pause discarded',
+    query: '?workout=replan-discarded',
+    labels: ['Plan change:'],
+  },
 ];
 
 const EVERY_NOTICE = {
   name: 'every standing notice at once',
   query: '?workout=eased&keepalive=failed&notification=refused&storage=full&side=lost',
   // One workout on the stub: eased, not also holding (#1240's hold has its own case).
-  labels: STANDING_NOTICES.filter((each) => each.query !== '?workout=hold').flatMap(
-    (each) => each.labels,
-  ),
+  labels: STANDING_NOTICES.filter(
+    // #1244's re-plan has its own case too, for the same reason.
+    (each) => each.query !== '?workout=hold' && !each.query.startsWith('?workout=replan'),
+  ).flatMap((each) => each.labels),
 };
 
 /** Live-group notices that are not standing IN the column. @see the #692 case */
@@ -897,6 +918,20 @@ for (const viewport of EASED_VIEWPORTS) {
         expect(during.map((each) => each.name)).toEqual(expect.arrayContaining(['Pause', 'Stop']));
         if (state.query.includes('side=lost')) {
           expect(during.map((each) => each.name)).toContain('Stop side camera');
+        }
+        // #1244: the apparatus. *Keep the plan* is on the page, so the lowest
+        // control's margin below is taken over a screen that has it.
+        if (state.query === '?workout=replan') {
+          expect(during.map((each) => each.name)).toContain('Keep the plan');
+        } else if (state.query.startsWith('?workout=replan')) {
+          // Kept or discarded: nothing is left to keep the plan from.
+          expect(during.map((each) => each.name)).not.toContain('Keep the plan');
+        }
+        // #1244's review: a workout with re-plans on always carries the
+        // control that switches them off, so every margin of these states is
+        // taken over a screen that has it.
+        if (state.query.startsWith('?workout=replan')) {
+          expect(during.map((each) => each.name)).toContain(SWITCH_REPLANS_OFF);
         }
 
         // Published BEFORE anything below is asserted, so a red run still says
@@ -1010,6 +1045,301 @@ for (const viewport of IN_THE_SHELL) {
     });
   });
 }
+
+/**
+ * #1244, #1245: **the re-plan switch, with its disclosure present.**
+ *
+ * The workout chooser of a rider who is signed in to an instance and has both
+ * their own thresholds shows *Re-plan during the ride* under the list of
+ * workouts, and under THAT the whole of `workout/replan-disclosure.ts`: nine
+ * sentences, in a column a third of a tablet wide. It is what leaves the
+ * device, so it is on the page before the switch is on and in no disclosure
+ * widget. `?replans=available` is the only state that renders it.
+ *
+ * ## What is held
+ *
+ * At every tablet, both ways up, inside the shell with the #439 insets on the
+ * engine: the SWITCH and the control that starts a workout are on the screen
+ * with no scrolling and clear of {@link FOLD_MARGIN_PIXELS}, with all nine
+ * sentences in the document and the headline starting on the screen. The
+ * 1280×800 claim is {@link TABLET_IN_THE_SHELL}'s: insets 36/32, a fold at 768.
+ *
+ * ## What is only published
+ *
+ * Where the disclosure ENDS. Nine sentences do not fit above a landscape
+ * tablet's fold in that column, and this case does not pretend they do: a
+ * rider scrolls to read to the end, and the margin (negative in landscape)
+ * is in the log. What must not happen is the text pushing the switch, or the
+ * *Ride* control, off the screen, and that is what the order is for.
+ *
+ * ## The control
+ *
+ * `disclosureBeforeTheSwitch()` moves the nine sentences above the switch on
+ * the live elements, and the switch must fall under the floor at
+ * {@link TABLET_IN_THE_SHELL}. Without it, "the switch clears the fold" is as
+ * true of a page whose disclosure is one line long.
+ */
+const REPLANS_AVAILABLE = '?replans=available';
+const REPLAN_SWITCH = 'Re-plan during the ride';
+const REPLAN_HEADLINE =
+  'This sends a summary of each block you ride to your instance, during the ride.';
+
+for (const viewport of EASED_VIEWPORTS) {
+  test.describe(`#1244 — the re-plan switch and its disclosure — ${viewport.name}`, () => {
+    test('the switch and the control that starts a workout clear the fold, with the disclosure present', async ({
+      page,
+    }, testInfo) => {
+      await open(page, viewport, REPLANS_AVAILABLE);
+      const seen = await measure(page);
+      expect(seen.scrollY).toBe(0);
+
+      // The apparatus: the disclosure is on the page, whole, before the
+      // switch is on, and in no disclosure widget.
+      const disclosure = seen.replanDisclosure;
+      expect(disclosure, 'no re-plan disclosure on the page').toBeDefined();
+      expect(disclosure?.switchedOn).toBe(false);
+      expect(disclosure?.inDisclosure).toBe(false);
+      expect(disclosure?.sentences).toHaveLength(9);
+      expect(disclosure?.sentences[0]).toBe(REPLAN_HEADLINE);
+      expect(disclosure?.sentences.at(-1)).toMatch(/^This is off\./);
+      expect(disclosure?.box.height ?? 0).toBeGreaterThan(200);
+
+      const trainer = seen.controls.filter((each) => each.group === 'trainer');
+      const theSwitch = trainer.find((each) => each.name === REPLAN_SWITCH);
+      const starts = trainer.find((each) => each.name === STARTS_A_WORKOUT);
+      expect(theSwitch, 'no re-plan switch on the page').toBeDefined();
+      expect(starts, 'no control that starts a workout on the page').toBeDefined();
+
+      const switchMargin = foldMargin(theSwitch?.box.bottom ?? Infinity, viewport);
+      const startsMargin = foldMargin(starts?.box.bottom ?? Infinity, viewport);
+      const headlineMargin = foldMargin(disclosure?.headline?.top ?? Infinity, viewport);
+      const endMargin = foldMargin(disclosure?.box.bottom ?? Infinity, viewport);
+      const note =
+        `the switch ${switchMargin.toFixed(1)} px above the fold ` +
+        `(y ${theSwitch?.box.top.toFixed(0) ?? '?'}–${theSwitch?.box.bottom.toFixed(0) ?? '?'}); ` +
+        `"${STARTS_A_WORKOUT}" ${startsMargin.toFixed(1)} px; ` +
+        `the disclosure's headline starts ${headlineMargin.toFixed(1)} px above the fold, ` +
+        `and the disclosure (${disclosure?.box.height.toFixed(0) ?? '?'} px tall) ends ` +
+        `${endMargin.toFixed(1)} px above it — at ${String(viewport.width)}×${String(viewport.height)}`;
+      testInfo.annotations.push({ type: '#1244 the re-plan switch', description: note });
+      console.log(`#1244 — the re-plan switch — ${viewport.name} — ${note}`);
+
+      for (const control of [theSwitch, starts]) {
+        if (control === undefined) continue;
+        expect(onScreen(control, viewport), describeControl(control)).toBe(true);
+      }
+      expect(switchMargin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+      expect(startsMargin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+      // The switch comes after the control that starts a workout, and the
+      // disclosure after the switch: what a rider presses first is highest.
+      expect(theSwitch?.box.top ?? 0).toBeGreaterThanOrEqual(starts?.box.bottom ?? Infinity);
+      expect(disclosure?.box.top ?? 0).toBeGreaterThanOrEqual(theSwitch?.box.top ?? Infinity);
+      // The headline — what switching it on does — starts on the screen.
+      expect(headlineMargin, note).toBeGreaterThan(0);
+      // And every other ride control is where it was: on the screen.
+      const during = seen.controls.filter(
+        (each) => each.group !== 'sensors' && each.name !== REPLAN_SWITCH,
+      );
+      expect(during.filter((each) => !onScreen(each, viewport)).map(describeControl)).toEqual([]);
+    });
+
+    test('switched on, it says so and stops saying it is off, and the switch has not moved', async ({
+      page,
+    }) => {
+      await open(page, viewport, REPLANS_AVAILABLE);
+      const before = await measure(page);
+      await page.evaluate(() => {
+        window.__oylRideView?.pressReplanSwitch();
+      });
+      const after = await measure(page);
+      expect(after.replanDisclosure?.switchedOn).toBe(true);
+      expect(after.replanDisclosure?.sentences).toHaveLength(8);
+      expect(after.replanDisclosure?.sentences.join(' ')).not.toContain('This is off');
+      expect(after.replanDisclosure?.sentences.slice(0, 8)).toEqual(
+        before.replanDisclosure?.sentences.slice(0, 8),
+      );
+      const find = (seen: RideViewMeasurement) =>
+        seen.controls.find((each) => each.group === 'trainer' && each.name === REPLAN_SWITCH);
+      expect(find(after)?.box.top).toBe(find(before)?.box.top);
+    });
+  });
+}
+
+/**
+ * #1244's third review: **the control that switches re-plans off while a
+ * workout runs** (ADR 0048 D-7), and what the screen says once it has.
+ *
+ * `?workout=replan-on` is a workout with re-plans on and nothing waiting,
+ * which is most of one; `?workout=replan` adds a waiting move, its sentence
+ * and *Keep the plan* (the #692 case above holds every control of that state
+ * to the floor, this one among them); `?workout=replan-off` is after the
+ * press. Held at every tablet, both ways up, in the shell with the insets:
+ * the control on the screen, uncovered, clear of the fold floor, at #669's
+ * 48 px, and 8 px or more from *End workout*, whose row it shares where the
+ * column is wide enough for both.
+ */
+for (const viewport of EASED_VIEWPORTS) {
+  test.describe(`#1244 — switching re-plans off mid-workout — ${viewport.name}`, () => {
+    test('the control is beside End workout, a 48 px ride-time control, clear of the fold', async ({
+      page,
+    }, testInfo) => {
+      await open(page, viewport, '?workout=replan-on');
+      const seen = await measure(page);
+      expect(seen.scrollY).toBe(0);
+      const trainer = seen.controls.filter((each) => each.group === 'trainer');
+      const off = trainer.find((each) => each.name === SWITCH_REPLANS_OFF);
+      const end = trainer.find((each) => each.name === 'End workout');
+      if (off === undefined || end === undefined) {
+        throw new Error('no Switch re-plans off or End workout on the page');
+      }
+      const margin = foldMargin(off.box.bottom, viewport);
+      const sameRow = Math.abs(off.box.top - end.box.top) <= SUBPIXEL_TOLERANCE;
+      const apart = sameRow ? off.box.left - end.box.right : off.box.top - end.box.bottom;
+      const note =
+        `${SWITCH_REPLANS_OFF} ${off.box.width.toFixed(1)}×${off.box.height.toFixed(1)}, ` +
+        `${margin.toFixed(1)} px above the fold, ${sameRow ? 'on the row of' : 'UNDER'} End workout, ` +
+        `${apart.toFixed(1)} px from it — at ${String(viewport.width)}×${String(viewport.height)}`;
+      testInfo.annotations.push({ type: '#1244 switching off', description: note });
+      console.log(`#1244 — switching re-plans off — ${viewport.name} — ${note}`);
+
+      expect(onScreen(off, viewport), describeControl(off)).toBe(true);
+      expect(margin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+      expect(off.box.height).toBeGreaterThanOrEqual(48 - SUBPIXEL_TOLERANCE);
+      expect(off.box.width).toBeGreaterThanOrEqual(48 - SUBPIXEL_TOLERANCE);
+      expect(apart, note).toBeGreaterThanOrEqual(8 - SUBPIXEL_TOLERANCE);
+      // Not before the control that ends the workout, which keeps its place.
+      expect(off.box.top).toBeGreaterThanOrEqual(end.box.top - SUBPIXEL_TOLERANCE);
+      expect(seen.replansOffLine).toBeUndefined();
+      // Every other ride control is on the screen with it.
+      const during = seen.controls.filter((each) => each.group !== 'sensors');
+      expect(during.filter((each) => !onScreen(each, viewport)).map(describeControl)).toEqual([]);
+    });
+
+    test('once off, the line that says so is where the control was, and there is no way back', async ({
+      page,
+    }) => {
+      await open(page, viewport, '?workout=replan-off');
+      const seen = await measure(page);
+      const names = seen.controls.map((each) => each.name);
+      expect(names).toContain('End workout');
+      expect(names).not.toContain(SWITCH_REPLANS_OFF);
+      expect(names).not.toContain('Keep the plan');
+      expect(names).not.toContain(REPLAN_SWITCH);
+      expect(seen.replansOffLine?.text).toContain(
+        'Re-plans are off for the rest of this workout. Nothing more is sent, and the plan stays as it is.',
+      );
+      expect(
+        foldMargin(seen.replansOffLine?.box.bottom ?? Infinity, viewport),
+      ).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+    });
+  });
+}
+
+/**
+ * #1244's third review: **a rider with many saved workouts.** The switch
+ * follows the list, with what it sends, so with twelve workouts it is far
+ * below the fold — and a rider who switched it on and scrolled back up
+ * pressed *Ride* with the switch out of sight. `?workouts=many` is that
+ * library.
+ *
+ * What was chosen, and is held here: the switch STAYS under the list, beside
+ * its disclosure (nine sentences above the list would push every *Ride* off
+ * the screen, and the switch without them would be a switch with nothing
+ * saying what it sends). While it is ON, two words beside the chooser's
+ * heading say so — "Re-plans on" — where *Ride* is pressed, on the heading's
+ * own line, so the first *Ride* and the switch do not move when it is
+ * pressed. Off — the default, which sends nothing — the chooser is as it is
+ * for a rider with no instance.
+ *
+ * Published, not held: how far below the fold the switch is.
+ */
+for (const viewport of EASED_VIEWPORTS) {
+  test(`#1244 — many saved workouts — the switch is under the list, and its state is said above it — ${viewport.name}`, async ({
+    page,
+  }, testInfo) => {
+    await open(page, viewport, `${REPLANS_AVAILABLE}&workouts=many`);
+    const off = await measure(page);
+    const rides = (seen: RideViewMeasurement) =>
+      seen.controls.filter((each) => each.group === 'trainer' && each.name.startsWith('Ride '));
+    const theSwitch = (seen: RideViewMeasurement) =>
+      seen.controls.find((each) => each.group === 'trainer' && each.name === REPLAN_SWITCH);
+    expect(rides(off)).toHaveLength(12);
+    expect(theSwitch(off), 'no re-plan switch on the page').toBeDefined();
+    // Off: nothing above the list, and the first Ride where it always is.
+    expect(off.replansOnLine).toBeUndefined();
+    const firstOff = rides(off)[0];
+    expect(firstOff?.name).toBe(STARTS_A_WORKOUT);
+
+    await page.evaluate(() => {
+      window.__oylRideView?.pressReplanSwitch();
+    });
+    const on = await measure(page);
+    expect(on.replanDisclosure?.switchedOn).toBe(true);
+    const line = on.replansOnLine;
+    const first = rides(on)[0];
+    if (line === undefined || first === undefined || firstOff === undefined) {
+      throw new Error('no line saying the switch is on, or no Ride control');
+    }
+    const switchMargin = foldMargin(theSwitch(on)?.box.bottom ?? Infinity, viewport);
+    const firstMargin = foldMargin(first.box.bottom, viewport);
+    const note =
+      `the switch ${switchMargin.toFixed(1)} px above the fold (negative: below it); ` +
+      `"${line.text}" at y ${line.box.top.toFixed(0)}–${line.box.bottom.toFixed(0)}; ` +
+      `the first Ride ${firstMargin.toFixed(1)} px above the fold with it, ` +
+      `${foldMargin(firstOff.box.bottom, viewport).toFixed(1)} px without — at ` +
+      `${String(viewport.width)}×${String(viewport.height)}`;
+    testInfo.annotations.push({ type: '#1244 many workouts', description: note });
+    console.log(`#1244 — many saved workouts — ${viewport.name} — ${note}`);
+
+    expect(line.text).toBe('Re-plans on');
+    // ⚠️ It moved nothing: the first Ride is exactly where it was with the switch off.
+    expect(first.box.top).toBe(firstOff.box.top);
+    // On the screen, above the first control that starts a workout.
+    expect(line.box.top).toBeGreaterThanOrEqual(insetsOf(viewport).top - SUBPIXEL_TOLERANCE);
+    expect(line.box.bottom).toBeLessThanOrEqual(first.box.top + SUBPIXEL_TOLERANCE);
+    expect(foldMargin(line.box.bottom, viewport), note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+    // And the first Ride is still clear of the floor with the line above it.
+    expect(onScreen(first, viewport), describeControl(first)).toBe(true);
+    expect(firstMargin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+    // The switch comes after the last workout, with its disclosure.
+    const last = rides(on).at(-1);
+    expect(theSwitch(on)?.box.top ?? 0).toBeGreaterThanOrEqual(last?.box.bottom ?? Infinity);
+    expect(on.replanDisclosure?.sentences).toHaveLength(8);
+  });
+}
+
+test(`#1244 — the control — the disclosure before the switch puts the switch under the floor — ${TABLET_IN_THE_SHELL.name}`, async ({
+  page,
+}, testInfo) => {
+  const viewport = TABLET_IN_THE_SHELL;
+  await open(page, viewport, REPLANS_AVAILABLE);
+  const marginOf = (seen: RideViewMeasurement): number =>
+    foldMargin(
+      seen.controls.find((each) => each.group === 'trainer' && each.name === REPLAN_SWITCH)?.box
+        .bottom ?? Infinity,
+      viewport,
+    );
+  const fixed = marginOf(await measure(page));
+  await page.evaluate(() => {
+    window.__oylRideView?.disclosureBeforeTheSwitch();
+  });
+  const moved = await measure(page);
+  const reverted = marginOf(moved);
+  const note = `the switch ${fixed.toFixed(1)} px above the fold → ${reverted.toFixed(1)} px with the disclosure before it`;
+  testInfo.annotations.push({ type: '#1244 control', description: note });
+  console.log(`#1244 — the control — ${viewport.name} — ${note}`);
+  // The apparatus: the control did move the text above the switch.
+  const theSwitch = moved.controls.find(
+    (each) => each.group === 'trainer' && each.name === REPLAN_SWITCH,
+  );
+  expect(moved.replanDisclosure?.box.bottom ?? Infinity).toBeLessThanOrEqual(
+    (theSwitch?.box.top ?? -Infinity) + SUBPIXEL_TOLERANCE,
+  );
+  // The fold is at 768 here: 800 less the 32 px bar.
+  expect(viewport.height - insetsOf(viewport).bottom).toBe(768);
+  expect(fixed, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+  expect(reverted, note).toBeLessThan(FOLD_MARGIN_PIXELS);
+});
 
 /**
  * #740 (#655's review, N1): a HAND-SET target the stall rescue has eased, with

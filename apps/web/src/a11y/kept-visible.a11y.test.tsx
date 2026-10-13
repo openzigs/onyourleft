@@ -139,7 +139,9 @@ const NOTHING_TUCKED = 'nothing on this route is tucked by #666';
  * wiring gate watches (§4j), and a list only this test reads is not product
  * code. Fragments where a sentence carries a number.
  */
-const RIDE_KEPT_VISIBLE: readonly string[] = ['Everything stays on this device.'];
+const RIDE_KEPT_VISIBLE: readonly string[] = [
+  'Recorded on this device. Nothing is sent unless you switched that on.',
+];
 
 /** What the populated walk's Ride screen renders: a trainer under this app's control, in ERG. */
 const RIDE_POPULATED_KEPT_VISIBLE: readonly string[] = [
@@ -347,7 +349,7 @@ const KEPT: Record<RouteId, Kept> = {
  * each is checked drawn and reachable on its route.
  */
 const NOTES: Partial<Record<RouteId, readonly string[]>> = {
-  ride: ['Everything stays on this device.'],
+  ride: ['Recorded on this device. Nothing is sent unless you switched that on.'],
   routes: [
     'A route is private until you say otherwise, and one that starts inside a privacy zone ' +
       'cannot be shared at all.',

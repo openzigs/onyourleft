@@ -1,0 +1,79 @@
+{
+  "input": {
+    "revision": 1,
+    "summarySeq": 3,
+    "currentBlock": 3,
+    "goals": {
+      "sessionType": "endurance",
+      "durationMinutes": 60,
+      "holdRange": {
+        "low": 130,
+        "high": 142
+      },
+      "heartRateAbove": 150,
+      "powerCeiling": 0.8,
+      "effortCheckIns": true
+    },
+    "blocks": [
+      {
+        "kind": "steady",
+        "seconds": 300,
+        "target": 0.5
+      },
+      {
+        "kind": "ramp",
+        "seconds": 300,
+        "from": 0.5,
+        "to": 0.8
+      },
+      {
+        "kind": "intervals",
+        "repeats": 4,
+        "hardSeconds": 60,
+        "hardTarget": 1.1,
+        "easySeconds": 60,
+        "easyTarget": 0.5
+      },
+      {
+        "kind": "free-ride",
+        "seconds": 120
+      },
+      {
+        "kind": "heart-rate-hold",
+        "seconds": 600,
+        "startShare": 0.5,
+        "ceilingShare": 0.8,
+        "range": {
+          "low": 130,
+          "high": 140
+        }
+      }
+    ],
+    "summaries": [
+      {
+        "block": 0,
+        "seconds": 300,
+        "meanHeartRate": 118,
+        "highestHeartRate": 131,
+        "meanPowerShare": 0.52,
+        "meanCadence": 88,
+        "rescues": 0
+      },
+      {
+        "block": 1,
+        "seconds": 300,
+        "meanPowerShare": 0.655,
+        "rescues": 1
+      },
+      {
+        "block": 2,
+        "seconds": 480,
+        "meanHeartRate": 151,
+        "highestHeartRate": 163,
+        "rescues": 0
+      }
+    ]
+  },
+  "templateVersion": "re-plan-1",
+  "source": "instance-local"
+}

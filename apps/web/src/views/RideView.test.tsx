@@ -57,6 +57,7 @@ import {
   createRideController,
   MANUAL_ERG_DURING_WORKOUT,
   RIDE_NOTIFICATION_REFUSED,
+  type RideWorkoutSnapshot,
 } from '../ride/controller';
 import type { RecordingCheckpointStore } from '../recording/recorder';
 import { accessibleName } from '../a11y/audit';
@@ -1153,6 +1154,8 @@ describe('#1240 — the Ride screen builds the heart-rate hold context from the 
           thresholdHeartRate: 170,
           assumed: { power: false, heartRate: false },
         },
+        // #1244: no switch was offered, so re-plans are off.
+        choices: {},
       },
     ]);
   });
@@ -1160,8 +1163,131 @@ describe('#1240 — the Ride screen builds the heart-rate hold context from the 
   it('own power without a heart rate: no context, so every hold block rides steady and says why', async () => {
     const stub = await startFor({ thresholdPower: 250 });
     expect(stub.calls.startWorkoutWith).toStrictEqual([
-      { thresholdPower: 250, heartRateHold: undefined },
+      { thresholdPower: 250, heartRateHold: undefined, choices: {} },
     ]);
+  });
+});
+
+describe('#1244 — re-plans on the Ride screen: the switch, and Keep the plan', () => {
+  const OWNER = toAthleteId('athlete-replan');
+  const record = {
+    id: workoutId('replan-w'),
+    createdBy: OWNER,
+    name: 'Tempo',
+    workout: {
+      name: 'Tempo',
+      blocks: [{ kind: 'steady' as const, seconds: seconds(600), target: thresholdShare(0.6) }],
+    },
+    createdAt: unixSeconds(1),
+    updatedAt: unixSeconds(1),
+  };
+  const theSwitch = (): HTMLInputElement | null =>
+    document.querySelector<HTMLInputElement>('input[role="switch"]');
+
+  async function showFor(
+    stub: ReturnType<typeof stubRideController>,
+    thresholds: { thresholdHeartRate?: number } = { thresholdHeartRate: 170 },
+  ): Promise<void> {
+    mounted = await mount(
+      <RideView
+        controller={stub.controller}
+        workouts={workoutStub(OWNER, [record])}
+        analysis={stubAnalysis(OWNER, [], {
+          id: OWNER,
+          displayName: 'A',
+          createdAt: unixSeconds(1),
+          thresholdPower: watts(250),
+          ...(thresholds.thresholdHeartRate === undefined
+            ? {}
+            : { thresholdHeartRate: beatsPerMinute(thresholds.thresholdHeartRate) }),
+        })}
+      />,
+    );
+    await settle();
+  }
+
+  it('offers no switch when the controller says no re-plan could happen', async () => {
+    await showFor(stubRideController(ridingSnapshot()));
+    expect(theSwitch()).toBeNull();
+  });
+
+  it('offers no switch without the rider’s own threshold heart rate — H1', async () => {
+    await showFor(stubRideController(ridingSnapshot(), true), {});
+    expect(theSwitch()).toBeNull();
+  });
+
+  it('starts a workout with re-plans off unless the rider turned the switch on', async () => {
+    const stub = stubRideController(ridingSnapshot(), true);
+    await showFor(stub);
+    expect(theSwitch()?.checked).toBe(false);
+    await activateWithKeyboard(buttonNamed('Ride Tempo'));
+    await settle();
+    expect(stub.calls.startWorkoutWith.map((each) => each.choices)).toStrictEqual([{}]);
+
+    await activateWithKeyboard(theSwitch() as HTMLElement);
+    await activateWithKeyboard(buttonNamed('Ride Tempo'));
+    await settle();
+    expect(stub.calls.startWorkoutWith.map((each) => each.choices)).toStrictEqual([
+      {},
+      { replans: true },
+    ]);
+  });
+
+  it('hands Keep the plan to the controller', async () => {
+    const stub = stubRideController({
+      ...ridingSnapshot(),
+      workout: {
+        name: 'Tempo',
+        status: 'running',
+        elapsedSeconds: 60,
+        totalSeconds: 600,
+        holdingWatts: 150,
+        nowRiding: '10 min at 60%',
+        fault: undefined,
+        rescue: undefined,
+        timeline: expandWorkout(record.workout),
+        replan: {
+          waiting: { revision: 1, sentence: 'Main set ended early, so the cool-down is next.' },
+          kept: false,
+          notice: undefined,
+        },
+      },
+    });
+    await showFor(stub);
+    await activateWithKeyboard(buttonNamed('Keep the plan'));
+    expect(stub.calls.keepThePlan).toBe(1);
+  });
+
+  it('hands Switch re-plans off to the controller, and offers it only while re-plans are on', async () => {
+    const running = (replan: NonNullable<RideWorkoutSnapshot['replan']> | undefined) => ({
+      ...ridingSnapshot(),
+      workout: {
+        name: 'Tempo',
+        status: 'running' as const,
+        elapsedSeconds: 60,
+        totalSeconds: 600,
+        holdingWatts: 150,
+        nowRiding: '10 min at 60%',
+        fault: undefined,
+        rescue: undefined,
+        timeline: expandWorkout(record.workout),
+        ...(replan === undefined ? {} : { replan }),
+      },
+    });
+    const on = stubRideController(
+      running({ waiting: undefined, kept: false, notice: undefined, off: false }),
+    );
+    await showFor(on);
+    await activateWithKeyboard(buttonNamed('Switch re-plans off'));
+    expect(on.calls.switchReplansOff).toBe(1);
+    expect(on.calls.endWorkout).toBe(0);
+    mounted?.unmount();
+
+    // A workout started with the switch off has no re-plans to switch off.
+    await showFor(stubRideController(running(undefined)));
+    expect([...document.querySelectorAll('button')].map((each) => each.textContent)).not.toContain(
+      'Switch re-plans off',
+    );
   });
 });
 

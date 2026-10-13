@@ -89,6 +89,25 @@ const EVERY_FIELD: Required<ActivityRecord> = {
     ],
     workoutFinished: true,
     ghostRaced: true,
+    // #1244, P9: one record of each shape, and a refusal with and without its move.
+    replans: [
+      {
+        decision: 'accepted',
+        move: { kind: 'shorten-block', block: 2, minutes: 2 },
+        reason: 'heart-rate-high',
+        revision: 1,
+        at: seconds(1_700_100_300),
+      },
+      { decision: 'not-applied', why: 'kept', revision: 1, at: seconds(1_700_100_320) },
+      {
+        decision: 'refused',
+        rule: 'P4',
+        move: { kind: 'swap-next-block', workoutId: 'workout-1', blockIndex: 0 },
+        reason: 'on-plan',
+        at: seconds(1_700_100_900),
+      },
+      { decision: 'refused', rule: 'P1', at: seconds(1_700_101_500) },
+    ],
   },
   createdAt: unixSeconds(1_700_200_000),
 };
