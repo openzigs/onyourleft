@@ -474,7 +474,12 @@ describe('exportActivity — what the file could not carry (#162)', () => {
 describe('exportActivity — the ride’s own splits (#221)', () => {
   /** Three forty-second laps across a 120-sample ride, written to disk. */
   async function seedLapBearingRide(): Promise<{ open: StoreHarness; ride: NewActivity }> {
-    const { open, ride } = await seedOutdoorRide();
+    // The three laps span the ride, to the second: a ride longer than its
+    // laps has a split for the rest (#1312, the suite below).
+    const { open, ride } = await seedOutdoorRide(ATHLETE_A, {
+      elapsedTime: seconds(SAMPLE_COUNT),
+      movingTime: seconds(114),
+    });
     await open.write(async (store) => {
       for (const ordinal of [0, 1, 2]) {
         await store.putLap(
@@ -519,7 +524,14 @@ describe('exportActivity — the ride’s own splits (#221)', () => {
     const { laps } = decodeTcx(textOf(file.bytes)).activity;
 
     expect(laps).toHaveLength(3);
-    expect(laps.map((lap) => lap.totalDistance)).toEqual([1_000, 2_000, 3_000]);
+    // #1312: each lap's part of the RIDE's distance, not the stored lap's own.
+    // TCX has no total but the sum of its laps, and these three state 6 km of
+    // a ride that states 120 km: a reader adding them up must get the ride.
+    expect(laps.reduce((sum, lap) => sum + (lap.totalDistance ?? 0), 0)).toBeCloseTo(
+      ride.distance,
+      6,
+    );
+    expect(laps.map((lap) => lap.totalElapsedTime)).toEqual([40, 40, 40]);
     expect(laps.map((lap) => lap.startTime)).toEqual([
       ride.startedAt,
       ride.startedAt + 40,
@@ -562,7 +574,9 @@ describe('exportActivity — the ride’s own splits (#221)', () => {
   );
 
   it('carries a sample outside every lap window rather than dropping it', async () => {
-    const { open, ride } = await seedOutdoorRide();
+    const { open, ride } = await seedOutdoorRide(ATHLETE_A, {
+      elapsedTime: seconds(SAMPLE_COUNT),
+    });
     // One lap covering the middle minute only. The samples before and after it
     // are still the rider's ride, and a file that omitted them would be lying.
     await open.write(async (store) => {
@@ -577,8 +591,10 @@ describe('exportActivity — the ride’s own splits (#221)', () => {
     const file = await exportFrom(open, ride.id, 'tcx');
     const { laps } = decodeTcx(textOf(file.bytes)).activity;
 
-    expect(laps).toHaveLength(1);
-    expect(laps[0]?.points).toHaveLength(SAMPLE_COUNT);
+    // #1312: in a split of their own on each side, where until then they were
+    // dealt into the one lap and its totals stood in for the ride's.
+    expect(laps.map((lap) => lap.points.length)).toEqual([30, 60, 30]);
+    expect(laps.reduce((sum, lap) => sum + lap.points.length, 0)).toBe(SAMPLE_COUNT);
   });
 
   it('still writes one lap spanning the ride when nothing stored any', async () => {
@@ -606,5 +622,240 @@ describe('exportActivity — the ride’s own splits (#221)', () => {
     await expect(exportFrom(open, ride.id, 'fit', ATHLETE_B)).rejects.toBeInstanceOf(
       ActivityExportError,
     );
+  });
+});
+
+describe('exportActivity — splits that add up to the whole ride (#1312)', () => {
+  /**
+   * A two-minute ride with two course laps in the middle of it: 30.4 s before
+   * the first line, 29.3 s after the last. ⚠️ The laps' own distance is the
+   * game's road and is far more than the ride's, which is the speed channel
+   * summed — the case a "the rest goes in a lap of its own" rule cannot fix,
+   * because the rest would be less than nothing.
+   */
+  async function seedCourseRide(
+    channels?: Parameters<typeof streamSetFor>[1],
+  ): Promise<{ open: StoreHarness; ride: NewActivity }> {
+    const open = createStoreHarness();
+    harness = open;
+    await seedAthletes(open);
+    const ride = rideFor(ATHLETE_A, {
+      elapsedTime: seconds(SAMPLE_COUNT),
+      movingTime: seconds(100),
+      distance: metres(1_234.5),
+    });
+    await open.write(async (store) => {
+      await store.putActivity(ride);
+      await store.putStreamSet(streamSetFor(ride, { sampleCount: SAMPLE_COUNT, ...channels }));
+      await store.putLap(
+        lapFor(ride, 0, {
+          startedAt: unixSeconds(ride.startedAt + 30.4),
+          elapsedTime: seconds(40.3),
+          movingTime: seconds(36),
+          distance: metres(5_000),
+        }),
+      );
+      await store.putLap(
+        lapFor(ride, 1, {
+          startedAt: unixSeconds(ride.startedAt + 70.7),
+          elapsedTime: seconds(20),
+          movingTime: seconds(20),
+          distance: metres(5_000),
+        }),
+      );
+    });
+    return { open, ride };
+  }
+
+  const total = (parts: readonly (number | undefined)[]): number =>
+    Math.round(parts.reduce<number>((sum, part) => sum + (part ?? 0), 0) * 1000) / 1000;
+
+  it('states TCX laps that add up to the ride’s own elapsed time and distance', async () => {
+    const { open, ride } = await seedCourseRide();
+
+    const { laps } = decodeTcx(textOf((await exportFrom(open, ride.id, 'tcx')).bytes)).activity;
+
+    // The time before the first line, the two laps, the time after the last.
+    // (TCX writes an instant to the whole second.)
+    expect(laps.map((lap) => lap.startTime)).toEqual([
+      ride.startedAt,
+      ride.startedAt + 30,
+      ride.startedAt + 70,
+      ride.startedAt + 90,
+    ]);
+    expect(laps.map((lap) => lap.totalElapsedTime)).toEqual([30.4, 40.3, 20, 29.3]);
+    // TCX has no other total, so a reader adds these up: the ride's own, and
+    // not the 10 km of road the two course laps state between them.
+    expect(total(laps.map((lap) => lap.totalElapsedTime))).toBe(ride.elapsedTime);
+    expect(total(laps.map((lap) => lap.totalDistance))).toBe(ride.distance);
+    for (const lap of laps) {
+      expect(lap.totalDistance).toBeGreaterThan(0);
+    }
+    // Shared out as the speed channel was ridden, not by the clock: the first
+    // split is the ride's distance times the part of the summed speed in its
+    // thirty slots.
+    const speed =
+      (await open.read(async (store) => store.getStreamSet(ATHLETE_A, ride.id)))?.channels.speed ??
+      [];
+    const summedSpeed = (samples: readonly (number | undefined)[]): number =>
+      samples.reduce<number>((sum, sample) => sum + (sample ?? 0), 0);
+    const share = summedSpeed(speed.slice(0, 30)) / summedSpeed(speed);
+    expect(share).not.toBeCloseTo(30.4 / 120, 3);
+    expect(laps[0]?.totalDistance).toBeCloseTo(ride.distance * share, 1);
+  });
+
+  it('deals each sample to the split whose slots it is in, as a lap’s averages count them', async () => {
+    const { open, ride } = await seedCourseRide();
+
+    const { laps } = decodeTcx(textOf((await exportFrom(open, ride.id, 'tcx')).bytes)).activity;
+
+    // `recording/laps.ts` §`courseLap`: from the slot a lap began in (30.4 is
+    // in slot 30) up to the slot it ended in (70.7 is in slot 70).
+    expect(laps.map((lap) => lap.points.length)).toEqual([30, 40, 20, 30]);
+    expect(laps[1]?.points[0]?.timestamp).toBe(ride.startedAt + 30);
+  });
+
+  it('keeps each course lap’s own totals in FIT, beside a session that states the ride’s', async () => {
+    const { open, ride } = await seedCourseRide();
+
+    const { laps, sessions, records } = decodeFitActivity(
+      (await exportFrom(open, ride.id, 'fit')).bytes,
+    ).activity;
+
+    expect(laps).toHaveLength(4);
+    expect(sessions[0]?.numLaps).toBe(4);
+    expect(records).toHaveLength(SAMPLE_COUNT);
+    // The stored laps as they were stored…
+    expect([laps[1]?.totalDistance, laps[2]?.totalDistance]).toEqual([5_000, 5_000]);
+    expect([laps[1]?.totalTimerTime, laps[2]?.totalTimerTime]).toEqual([36, 20]);
+    // …and the splits either side: the ride's time outside the laps, and the
+    // 44 s it moved outside them shared by how long each lasted.
+    expect(laps.map((lap) => lap.totalElapsedTime)).toEqual([30.4, 40.3, 20, 29.3]);
+    expect(total(laps.map((lap) => lap.totalElapsedTime))).toBe(sessions[0]?.totalElapsedTime);
+    expect(laps[0]?.totalTimerTime).toBeCloseTo((44 * 30.4) / 59.7, 2);
+    expect(laps[3]?.totalTimerTime).toBeCloseTo((44 * 29.3) / 59.7, 2);
+    expect(total(laps.map((lap) => lap.totalTimerTime))).toBeCloseTo(ride.movingTime, 2);
+    // The session is the ride's, whatever the laps add up to.
+    expect(sessions[0]?.totalElapsedTime).toBe(ride.elapsedTime);
+    expect(sessions[0]?.totalTimerTime).toBe(ride.movingTime);
+    expect(sessions[0]?.totalDistance).toBe(ride.distance);
+  });
+
+  it('shares the ride’s distance by time when no speed was recorded', async () => {
+    const { open, ride } = await seedCourseRide({ channels: ['power', 'heartRate'] });
+
+    const { laps } = decodeTcx(textOf((await exportFrom(open, ride.id, 'tcx')).bytes)).activity;
+
+    expect(total(laps.map((lap) => lap.totalDistance))).toBe(ride.distance);
+    // 30.4 s of 120 s is 312.7 m of 1234.5 m, to the tenth the file is written to.
+    expect(laps[0]?.totalDistance).toBe(312.7);
+  });
+
+  it('adds up to the ride to the tenth TCX is written to, when no lap’s own time or share is a whole tenth', async () => {
+    const open = createStoreHarness();
+    harness = open;
+    await seedAthletes(open);
+    const ride = rideFor(ATHLETE_A, { elapsedTime: seconds(100.2), distance: metres(1_000.2) });
+    await open.write(async (store) => {
+      await store.putActivity(ride);
+      // No speed on record, so the distance is shared by time: thirds of each.
+      await store.putStreamSet(
+        streamSetFor(ride, { sampleCount: SAMPLE_COUNT, channels: ['power'] }),
+      );
+      for (const ordinal of [0, 1]) {
+        await store.putLap(
+          lapFor(ride, ordinal, {
+            startedAt: unixSeconds(ride.startedAt + ordinal * 33.34),
+            elapsedTime: seconds(33.34),
+          }),
+        );
+      }
+    });
+
+    const { laps } = decodeTcx(textOf((await exportFrom(open, ride.id, 'tcx')).bytes)).activity;
+
+    // Each rounded on its own would be 33.3, 33.3 and 33.5: a tenth of a
+    // second short of the ride. Each is the difference of two running totals
+    // instead, so the tenths add up.
+    expect(laps.map((lap) => lap.totalElapsedTime)).toEqual([33.3, 33.4, 33.5]);
+    expect(total(laps.map((lap) => lap.totalElapsedTime))).toBe(100.2);
+    expect(total(laps.map((lap) => lap.totalDistance))).toBe(1_000.2);
+  });
+
+  it('still adds up to the ride when a lap row states more time than the ride has, or starts before the one before it ended', async () => {
+    const open = createStoreHarness();
+    harness = open;
+    await seedAthletes(open);
+    const ride = rideFor(ATHLETE_A, { elapsedTime: seconds(SAMPLE_COUNT) });
+    await open.write(async (store) => {
+      await store.putActivity(ride);
+      await store.putStreamSet(streamSetFor(ride, { sampleCount: SAMPLE_COUNT }));
+      // Ten minutes stated of a two-minute ride; then a row that begins and
+      // ends inside the first; then one that ends where the ride does.
+      await store.putLap(lapFor(ride, 0, { startedAt: ride.startedAt, elapsedTime: seconds(600) }));
+      await store.putLap(
+        lapFor(ride, 1, { startedAt: unixSeconds(ride.startedAt + 20), elapsedTime: seconds(40) }),
+      );
+      await store.putLap(
+        lapFor(ride, 2, { startedAt: unixSeconds(ride.startedAt + 60), elapsedTime: seconds(60) }),
+      );
+    });
+
+    const { laps } = decodeTcx(textOf((await exportFrom(open, ride.id, 'tcx')).bytes)).activity;
+
+    // No sorting and no repair of the rows — and no lap of less than no time,
+    // and a total that is the ride's.
+    expect(laps.map((lap) => lap.totalElapsedTime)).toEqual([120, 0, 0]);
+    expect(total(laps.map((lap) => lap.totalDistance))).toBe(ride.distance);
+    expect(laps.reduce((sum, lap) => sum + lap.points.length, 0)).toBe(SAMPLE_COUNT);
+  });
+
+  it('gives the splits outside the laps no moving time when the laps already state more than the ride moved', async () => {
+    const { open, ride } = await seedOutdoorRide(ATHLETE_A, {
+      elapsedTime: seconds(SAMPLE_COUNT),
+      movingTime: seconds(100),
+    });
+    await open.write(async (store) => {
+      // A minute in the middle that states 590 s of moving time.
+      await store.putLap(
+        lapFor(ride, 0, {
+          startedAt: unixSeconds(ride.startedAt + 30),
+          elapsedTime: seconds(60),
+        }),
+      );
+    });
+
+    const { laps } = decodeFitActivity((await exportFrom(open, ride.id, 'fit')).bytes).activity;
+
+    // The row is written as it is stored, and the file is still written: the
+    // ride moved no less than nothing outside it.
+    expect(laps.map((lap) => lap.totalTimerTime)).toEqual([0, 590, 0]);
+  });
+
+  it('adds no split in front of a lap that begins with the ride, and writes GPX none with no sample in it', async () => {
+    const open = createStoreHarness();
+    harness = open;
+    await seedAthletes(open);
+    // Five seconds longer than its samples: the ride was stopped a moment
+    // after the last reading, and after the lap.
+    const ride = rideFor(ATHLETE_A, {
+      hasPosition: true,
+      elapsedTime: seconds(SAMPLE_COUNT + 5),
+    });
+    await open.write(async (store) => {
+      await store.putActivity(ride);
+      await store.putStreamSet(streamSetFor(ride, { sampleCount: SAMPLE_COUNT }));
+      await store.putLap(
+        lapFor(ride, 0, { startedAt: ride.startedAt, elapsedTime: seconds(SAMPLE_COUNT) }),
+      );
+    });
+
+    const tcx = decodeTcx(textOf((await exportFrom(open, ride.id, 'tcx')).bytes)).activity;
+    expect(tcx.laps.map((lap) => lap.points.length)).toEqual([SAMPLE_COUNT, 0]);
+    expect(total(tcx.laps.map((lap) => lap.totalElapsedTime))).toBe(SAMPLE_COUNT + 5);
+
+    // GPX states no totals at all, so a segment with no point says nothing.
+    const gpx = decodeGpx(textOf((await exportFrom(open, ride.id, 'gpx')).bytes)).activity;
+    expect(gpx.laps.map((lap) => lap.points.length)).toEqual([SAMPLE_COUNT]);
   });
 });

@@ -11,7 +11,7 @@
  * closest a test gets to killing the tab.
  */
 
-import { beatsPerMinute, seconds, unixSeconds, watts } from '@onyourleft/domain';
+import { beatsPerMinute, metres, seconds, unixSeconds, watts } from '@onyourleft/domain';
 import Dexie from 'dexie';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -732,6 +732,134 @@ describe('the link from a recording to the activity it became', () => {
     expect(read?.savedAs).toBeUndefined();
   });
 });
+
+describe('the laps of a course a recording has completed (#1312)', () => {
+  const LAPS = [
+    {
+      from: { at: unixSeconds(1_700_000_006), movingTime: seconds(6) },
+      to: { at: unixSeconds(1_700_000_616.5), movingTime: seconds(590.5) },
+      distance: metres(5_000),
+      ascent: metres(42),
+    },
+    {
+      from: { at: unixSeconds(1_700_000_616.5), movingTime: seconds(590.5) },
+      to: { at: unixSeconds(1_700_000_700), movingTime: seconds(674) },
+      distance: metres(640.5),
+      partial: true,
+    },
+  ] as const;
+
+  it('come back from a fresh handle on the header and on the recovered recording', async () => {
+    // A ride recovered after a crash is saved from what `recoverRecording`
+    // hands back and nothing else (`apps/web` §`saveRecovered`), so the laps
+    // have to be on THAT read — a header that held them and a recovery that
+    // dropped them would be a write that worked and a read that cannot see it.
+    const record = recordingFor(ATHLETE_A, { courseLaps: LAPS });
+    const read = await harness.roundTrip(
+      async (store) => {
+        await store.putRecordingSession(record);
+      },
+      async (store) => ({
+        header: await store.getRecordingSession(ATHLETE_A, record.id),
+        recovered: await store.recoverRecording(ATHLETE_A, record.id),
+      }),
+    );
+    expect(read.header?.courseLaps).toEqual(LAPS);
+    expect(read.recovered?.courseLaps).toEqual(LAPS);
+  });
+
+  it('reads a header with none, or written before the field existed, as a recording with no laps', async () => {
+    const record = recordingFor(ATHLETE_A, { courseLaps: [] });
+    const read = await harness.roundTrip(
+      async (store) => {
+        await store.putRecordingSession(record);
+      },
+      async (store) => ({
+        header: await store.getRecordingSession(ATHLETE_A, record.id),
+        recovered: await store.recoverRecording(ATHLETE_A, record.id),
+      }),
+    );
+    // Nothing is written for none, so the row is the row an earlier build wrote.
+    expect(read.header).not.toHaveProperty('courseLaps');
+    expect(read.recovered?.courseLaps).toEqual([]);
+  });
+
+  it('does not hand one athlete the laps of another’s recording', async () => {
+    const record = recordingFor(ATHLETE_A, { courseLaps: LAPS });
+    const read = await harness.roundTrip(
+      async (store) => {
+        await store.putRecordingSession(record);
+      },
+      async (store) => store.recoverRecording(ATHLETE_B, record.id),
+    );
+    expect(read).toBeUndefined();
+  });
+
+  it.each([
+    ['a list that is not one', { courseLaps: 'two' }],
+    ['a mark that is not a number', { courseLaps: [{ ...rawLap(), toAt: '1700000616' }] }],
+    ['a moving time below nought', { courseLaps: [{ ...rawLap(), fromMovingSeconds: -1 }] }],
+    ['a distance that is not a number', { courseLaps: [{ ...rawLap(), distanceMetres: null }] }],
+    ['a climb that is not a number', { courseLaps: [{ ...rawLap(), ascentMetres: 'some' }] }],
+    [
+      'a distance that is no distance',
+      { courseLaps: [{ ...rawLap(), distanceMetres: Number.NaN }] },
+    ],
+    ['a climb that is no height', { courseLaps: [{ ...rawLap(), ascentMetres: Number.NaN }] }],
+    ['a mark at no instant', { courseLaps: [{ ...rawLap(), fromAt: Number.NaN }] }],
+  ])('refuses %s rather than saving a lap from it', async (_name, planted) => {
+    const record = recordingFor(ATHLETE_A);
+    await harness.write(async (store) => store.putRecordingSession(record));
+    await readRaw(async (raw) => {
+      await raw.table(TABLE.recordingSessions).update(record.id, planted);
+    });
+    await expect(
+      harness.read(async (store) => store.recoverRecording(ATHLETE_A, record.id)),
+    ).rejects.toThrow(StoreDecodeError);
+  });
+
+  it('names the lap and the field it refused', async () => {
+    const record = recordingFor(ATHLETE_A);
+    await harness.write(async (store) => store.putRecordingSession(record));
+    await readRaw(async (raw) => {
+      await raw
+        .table(TABLE.recordingSessions)
+        .update(record.id, { courseLaps: [rawLap(), { ...rawLap(), distanceMetres: null }] });
+    });
+    await expect(
+      harness.read(async (store) => store.recoverRecording(ATHLETE_A, record.id)),
+    ).rejects.toThrow('recordingSession.courseLaps[1].distance: expected a number, found object');
+  });
+
+  it('reads anything but `true` in a lap’s part-lap mark as a whole lap', async () => {
+    const record = recordingFor(ATHLETE_A);
+    await harness.write(async (store) => store.putRecordingSession(record));
+    await readRaw(async (raw) => {
+      await raw
+        .table(TABLE.recordingSessions)
+        .update(record.id, { courseLaps: [{ ...rawLap(), partial: 'yes' }] });
+    });
+    const read = await harness.read(async (store) => store.recoverRecording(ATHLETE_A, record.id));
+    expect(read?.courseLaps).toEqual([
+      {
+        from: { at: 1_700_000_006, movingTime: 6 },
+        to: { at: 1_700_000_616, movingTime: 590 },
+        distance: 5_000,
+      },
+    ]);
+  });
+});
+
+/** A stored lap as the row holds it, for planting a damaged one. */
+function rawLap(): Record<string, unknown> {
+  return {
+    fromAt: 1_700_000_006,
+    fromMovingSeconds: 6,
+    toAt: 1_700_000_616,
+    toMovingSeconds: 590,
+    distanceMetres: 5_000,
+  };
+}
 
 describe('what the checkpoints cost', () => {
   // ⚠️ The 30 s below is a **contention allowance, not a performance bound**,

@@ -103,6 +103,7 @@ erDiagram
         string  state                    "recording | paused | stopped"
         number  updatedAt                "UnixSeconds — what the recovery list orders by"
         string  pauses                   "the intervals that keep a pause apart from a dropout"
+        string  courseLaps               "optional (#1312): the laps of a course completed so far, two marks and the course's distance and climb each"
     }
     RECORDING_CHUNK {
         string  sessionId    PK "with seq: the compound primary key"

@@ -78,13 +78,14 @@ import type {
   NewActivity,
   NewLap,
   NewStreamSet,
+  RecordedCourseLap,
   StreamChannelValue,
 } from '@onyourleft/store';
 
 import { loadSummaryToStore } from '../analysis/summary';
 import { rideFactsOf } from '../progress/ride-facts';
 
-import { lapsToSave, type LapFigures } from './laps';
+import { lapsToSave } from './laps';
 
 /** The activity, the samples behind it and its laps, ready to write. */
 export interface FinishedRide {
@@ -117,11 +118,12 @@ export interface RideToSaveInput {
   readonly ghostRaced?: boolean | undefined;
   /**
    * The laps of a course the rider completed during this recording, and how
-   * to name each — #1312, `laps.ts`. Absent for a ride with no course under
-   * it, and for a recovered ride, whose laps went with the tab that held them.
+   * to name each — #1312, `laps.ts`: the two marks and the course's half of
+   * each, as the recording kept them. The rows are worked out here, from
+   * `series`. Absent for a ride with no course under it.
    */
   readonly laps?:
-    { readonly ridden: readonly LapFigures[]; readonly newLapId: () => LapId } | undefined;
+    { readonly ridden: readonly RecordedCourseLap[]; readonly newLapId: () => LapId } | undefined;
 }
 
 /**
@@ -195,7 +197,9 @@ export function rideToSave(input: RideToSaveInput): FinishedRide | undefined {
   return {
     activity,
     laps:
-      input.laps === undefined ? [] : lapsToSave(input.laps.ridden, input.id, input.laps.newLapId),
+      input.laps === undefined
+        ? []
+        : lapsToSave(input.laps.ridden, series, input.id, input.laps.newLapId),
     streams: {
       activityId: input.id,
       athleteId: input.athleteId,

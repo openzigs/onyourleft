@@ -94,6 +94,47 @@ describe('lapSummary — #1312', () => {
 
     expect(summary?.label).toBe('Lap 4');
     expect(summary?.text).toContain('10 s slower than lap 1.');
+    // And the best is the best of THIS course. Lap 2 was quicker and faster
+    // (1 km at 36 km/h), and it was another road.
+    expect(summary?.text).toContain('Best: lap 1, 10:00.');
+    expect(summary?.sentence).toContain('Your best is lap 1, 10 minutes.');
+  });
+
+  it('says nothing about a best lap with one whole lap of this course, whatever else was ridden', () => {
+    const summary = lapSummary(
+      [lap(100, { distance: metres(1_000) }), lap(90, { distance: metres(1_000) }), lap(600)],
+      'metric',
+    );
+
+    expect(summary?.text).toBe('10:00 · 201 W · 30.0 km/h · 148 bpm.');
+  });
+
+  it('takes the difference of the two times as they are shown', () => {
+    // 592.9 s is shown as 9:52 and 590.2 s as 9:50: two seconds apart on the
+    // HUD. The unrounded difference is 2.7 s, which rounds to 3.
+    const summary = lapSummary([lap(590.2), lap(592.9)], 'metric');
+
+    expect(summary?.text).toBe(
+      '9:52 · 201 W · 30.4 km/h · 148 bpm. 2 s slower than lap 1. Best: lap 1, 9:50.',
+    );
+    expect(summary?.sentence).toContain('2 seconds slower than lap 1.');
+  });
+
+  it('never calls a lap the best beside saying it took the same time as another', () => {
+    // 592.1 s against 592.8 s: quicker by a fraction, and both shown as 9:52.
+    const summary = lapSummary([lap(592.8), lap(592.1)], 'metric');
+
+    expect(summary?.text).toContain('Same time as lap 1.');
+    expect(summary?.text).toContain('Best: lap 1, 9:52.');
+    expect(summary?.text).not.toContain('Your best lap of this ride');
+    expect(summary?.sentence).not.toContain('Your best lap of this ride');
+  });
+
+  it('calls a lap the best when it is quicker by a second that is shown', () => {
+    const summary = lapSummary([lap(600), lap(592.8), lap(591.9)], 'metric');
+
+    expect(summary?.text).toContain('1 s faster than lap 2.');
+    expect(summary?.text).toContain('Your best lap of this ride.');
   });
 
   it('has nothing to show for a part lap, or for no laps', () => {

@@ -24,6 +24,7 @@ import {
   lapId as toLapId,
   type LapId,
   type NewActivity,
+  type RecordedCourseLap,
   type StreamChannelValue,
 } from '@onyourleft/store';
 import {
@@ -38,7 +39,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { hasNoLoadToWorkOut, needsLoadSummary } from '../analysis/summary';
 
 import { rideName, rideToSave, saveFinishedRide, type RideSaveStore } from './finish';
-import type { LapFigures } from './laps';
+import { riddenLap } from './laps';
 
 const ACTIVITY = toActivityId('ride-1');
 const ZONE = 'Europe/London';
@@ -313,21 +314,22 @@ describe('a save that fails leaves nothing half-written', () => {
 
 // #1312: the laps of a course ridden during the recording.
 function riddenLaps(): {
-  readonly ridden: readonly LapFigures[];
+  readonly ridden: readonly RecordedCourseLap[];
   readonly newLapId: () => LapId;
 } {
-  const whole = (offset: number, moving: number): LapFigures => ({
-    startedAt: unixSeconds(STARTED + offset),
-    elapsedTime: seconds(moving + 1),
+  const mark = (offset: number, moving: number) => ({
+    at: unixSeconds(STARTED + offset),
     movingTime: seconds(moving),
-    distance: metres(1_000),
-    averagePower: watts(200),
-    maxPower: watts(340),
-    ascent: metres(9),
   });
+  const course = { distance: metres(1_000), ascent: metres(9), partial: false };
   let next = 0;
   return {
-    ridden: [whole(0, 4), whole(5, 3), { ...whole(9, 1), distance: metres(120), partial: true }],
+    // Over `series()`: slots 0..4 (the dropout is the fifth), 5..8, and 9.
+    ridden: [
+      riddenLap(mark(0, 0), mark(5, 4), course),
+      riddenLap(mark(5, 4), mark(9, 7), course),
+      riddenLap(mark(9, 7), mark(10, 8), { ...course, distance: metres(120), partial: true }),
+    ],
     newLapId: () => toLapId(`lap-${String((next += 1))}`),
   };
 }
@@ -345,7 +347,7 @@ describe("#1312 — a ride's laps are saved with it", () => {
       [1, 3, 1_000, undefined],
       [2, 1, 120, true],
     ]);
-    expect(laps[0]).toMatchObject({ averagePower: 200, maxPower: 340, ascent: 9 });
+    expect(laps[0]).toMatchObject({ averagePower: 200, maxPower: 200, ascent: 9 });
     // Scoped: another athlete asking for this ride's laps is given none.
     expect(await harness.read(async (store) => store.listLaps(ATHLETE_B, ACTIVITY))).toEqual([]);
   });

@@ -1627,9 +1627,11 @@ export function GameView(props: GameViewProps): JSX.Element {
         events.push(holdSaid.event);
       }
       // #1312: the line of the course. The game says only WHERE it was; the
-      // lap that comes back is the recording's own (`recording/laps.ts`), so
-      // what is shown and said here is the row the ride's page will list —
-      // and with nothing recording there is no lap, and nothing is said.
+      // lap that comes back is the recording's own (`recording/laps.ts`): its
+      // times, distance and climb are the row the ride's page will list, and
+      // its averages are that row's but for a reading still on its way as the
+      // line was crossed — and with nothing recording there is no lap, and
+      // nothing is said.
       const crossed = courseLineEvent(
         chosen.profile,
         lapsDoneRef.current,

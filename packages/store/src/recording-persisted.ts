@@ -12,13 +12,15 @@
  * went wrong.
  */
 
-import { seconds, unixSeconds, type RecordedPause } from '@onyourleft/domain';
+import { metres, seconds, unixSeconds, type RecordedPause } from '@onyourleft/domain';
 
 import { StoreDecodeError } from './errors';
 import { activityId, athleteId, recordingSessionId } from './ids';
 import { decoded, decodedNumber, decodedString } from './persisted';
 import {
   RECORDING_STORED_STATES,
+  type RecordedCourseLap,
+  type RecordedLapMark,
   type RecordingSessionRecord,
   type RecordingStoredState,
 } from './recording';
@@ -44,6 +46,23 @@ export interface PersistedRecordingSession {
    * exists to make. A default here would re-hide the duplicate it prevents.
    */
   savedAs?: string;
+  /**
+   * The laps of a course completed so far — #1312. Absent with none, and on
+   * every header written before the field existed. Optional and unindexed, so
+   * no schema version moved.
+   */
+  courseLaps?: PersistedCourseLap[];
+}
+
+/** One lap of a course. @see RecordedCourseLap */
+export interface PersistedCourseLap {
+  fromAt: number;
+  fromMovingSeconds: number;
+  toAt: number;
+  toMovingSeconds: number;
+  distanceMetres: number;
+  ascentMetres?: number;
+  partial?: true;
 }
 
 /** One pause interval. `to` absent while the pause is open. */
@@ -111,6 +130,19 @@ export function toPersistedRecordingSession(
       reason: pause.reason,
     })),
     ...(record.savedAs === undefined ? {} : { savedAs: record.savedAs }),
+    ...(record.courseLaps === undefined || record.courseLaps.length === 0
+      ? {}
+      : {
+          courseLaps: record.courseLaps.map((lap) => ({
+            fromAt: lap.from.at,
+            fromMovingSeconds: lap.from.movingTime,
+            toAt: lap.to.at,
+            toMovingSeconds: lap.to.movingTime,
+            distanceMetres: lap.distance,
+            ...(lap.ascent === undefined ? {} : { ascentMetres: lap.ascent }),
+            ...(lap.partial === true ? { partial: true as const } : {}),
+          })),
+        }),
   };
 }
 
@@ -142,7 +174,40 @@ export function fromPersistedRecordingSession(
       row.savedAs === undefined
         ? undefined
         : activityId(decodedString('recordingSession.savedAs', row.savedAs)),
+    ...(row.courseLaps === undefined
+      ? {}
+      : { courseLaps: fromPersistedCourseLaps(row.courseLaps) }),
   };
+}
+
+/** @throws {StoreDecodeError} */
+function fromPersistedCourseLaps(rows: unknown): readonly RecordedCourseLap[] {
+  if (!Array.isArray(rows)) {
+    throw new StoreDecodeError(
+      `recordingSession.courseLaps: expected an array, found ${typeof rows as string}`,
+    );
+  }
+  return (rows as PersistedCourseLap[]).map((lap, index) => {
+    /** One number of one lap, through `decodedNumber` and then its unit. */
+    const quantity = <T>(name: string, value: unknown, unit: (value: number) => T): T => {
+      const field = `recordingSession.courseLaps[${String(index)}].${name}`;
+      return decoded(field, decodedNumber(field, value), unit);
+    };
+    const mark = (end: 'from' | 'to', at: unknown, moving: unknown): RecordedLapMark => ({
+      at: quantity(`${end}.at`, at, unixSeconds),
+      movingTime: quantity(`${end}.movingTime`, moving, seconds),
+    });
+    return {
+      from: mark('from', lap.fromAt, lap.fromMovingSeconds),
+      to: mark('to', lap.toAt, lap.toMovingSeconds),
+      distance: quantity('distance', lap.distanceMetres, metres),
+      ...(lap.ascentMetres === undefined
+        ? {}
+        : { ascent: quantity('ascent', lap.ascentMetres, metres) }),
+      // Only `true` is a part lap; anything else stored there is a whole one.
+      ...(lap.partial === true ? { partial: true as const } : {}),
+    };
+  });
 }
 
 /** @throws {StoreDecodeError} */

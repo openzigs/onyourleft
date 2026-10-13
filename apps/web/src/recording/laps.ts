@@ -14,6 +14,24 @@
  * | its power, heart rate and cadence | the recorded series between them — the samples the save writes |
  * | its distance and its climb | the course (`game/course-laps.ts`): the simulation's road, not a sensor |
  *
+ * ## Worked out twice, and the SAVED one is from the saved samples
+ *
+ * What the recording keeps of a lap is the first, second and fourth rows:
+ * `@onyourleft/store` §`RecordedCourseLap`, two marks and what the course
+ * says. The third is worked out from samples, and a slot can still take a
+ * reading for `DEFAULT_LATE_TOLERANCE_SECONDS` after the line is crossed.
+ *
+ * - **As the line is crossed**, {@link courseLap} over the lap's slots as they
+ *   then stand, for the HUD (`ride/controller.ts` §`noteCourseLine`).
+ * - **As the ride is saved**, {@link lapsToSave} over the series the save
+ *   writes, when every slot is final. That is the row the ride's page lists.
+ *
+ * ⚠️ **So the two can differ, by a late reading in a lap's last slots and by
+ * nothing else**: an average or a best a watt or a beat apart. The times, the
+ * distance and the climb are the marks' and the course's, and are the same in
+ * both. A recovered ride has only the second (`RecordedCourseLap` is in the
+ * checkpoint's header), and gets the same rows.
+ *
  * ⚠️ **The moving time is the recorder's, and there is no second clock**
  * (`game/hud/fields.ts` §`HudInput.movingSeconds` says why). So a lap's moving
  * time leaves out exactly what the ride's does — a pause and an auto-pause —
@@ -32,8 +50,8 @@
  * rode, and a speed made of one over a distance made of the other would be a
  * figure about neither.
  *
- * Pure: it reads no clock and no store. `ride/controller.ts` holds the laps of
- * the recording in progress and writes them when the ride is saved.
+ * Pure: it reads no clock and no store. `recording/recorder.ts` holds the laps
+ * of the recording in progress and checkpoints them; `finish.ts` writes them.
  */
 
 import {
@@ -47,16 +65,20 @@ import {
   type Seconds,
   type UnixSeconds,
 } from '@onyourleft/domain';
-import type { ActivityId, LapId, NewLap, StreamChannelValue } from '@onyourleft/store';
+import type {
+  ActivityId,
+  LapId,
+  NewLap,
+  RecordedCourseLap,
+  RecordedLapMark,
+  StreamChannelValue,
+} from '@onyourleft/store';
 
 /** What a lap states, before it has an activity to belong to. */
 export type LapFigures = Omit<NewLap, 'id' | 'activityId' | 'ordinal'>;
 
 /** One crossing of the line: the instant, and the recorder's moving time at it. */
-export interface LapMark {
-  readonly at: UnixSeconds;
-  readonly movingTime: Seconds;
-}
+export type LapMark = RecordedLapMark;
 
 /** What the course says about the stretch just ridden. */
 export interface CourseStretch {
@@ -119,26 +141,53 @@ function summarised(
   return count === 0 ? undefined : { mean: Math.round(total / count), highest };
 }
 
+/** What {@link lapSlots} reads of a series: where its slots are. */
+type LapGrid = Pick<LapSeries, 'startedAt' | 'sampleInterval' | 'sampleCount'>;
+
 /**
- * The lap between two marks.
+ * The slots a lap owns: from the slot it began in up to, and not including,
+ * the slot it ended in — so two laps in a row share no sample and leave none
+ * out between them.
+ */
+export function lapSlots(
+  grid: LapGrid,
+  from: LapMark,
+  to: LapMark,
+): { readonly first: number; readonly end: number } {
+  const slot = (at: UnixSeconds): number =>
+    Math.min(
+      grid.sampleCount,
+      Math.max(0, Math.floor((at - grid.startedAt) / grid.sampleInterval)),
+    );
+  return { first: slot(from.at), end: slot(to.at) };
+}
+
+/**
+ * The lap between two marks, from the samples of `series` in its slots
+ * ({@link lapSlots}).
  *
- * The samples are those from the slot the lap began in up to, and not
- * including, the slot it ended in — so two laps in a row share no sample and
- * leave none out between them.
+ * `offset` is the index in the recording of `series`' first slot, for a caller
+ * that hands over only the lap's own stretch of it (`session.slice`) rather
+ * than a copy of the whole ride.
  */
 export function courseLap(
   series: LapSeries,
   from: LapMark,
   to: LapMark,
   course: CourseStretch,
+  offset = 0,
 ): LapFigures {
-  const slot = (at: UnixSeconds): number =>
-    Math.min(
-      series.sampleCount,
-      Math.max(0, Math.floor((at - series.startedAt) / series.sampleInterval)),
-    );
-  const first = slot(from.at);
-  const end = slot(to.at);
+  const slots = lapSlots(
+    {
+      startedAt: series.startedAt,
+      sampleInterval: series.sampleInterval,
+      sampleCount: offset + series.sampleCount,
+    },
+    from,
+    to,
+  );
+  const first = Math.max(0, slots.first - offset);
+  const end = Math.max(first, slots.end - offset);
   const power = summarised(series.channels.power, first, end);
   const heartRate = summarised(series.channels.heartRate, first, end);
   const cadence = summarised(series.channels.cadence, first, end);
@@ -160,6 +209,28 @@ export function courseLap(
     ...(course.ascent === undefined ? {} : { ascent: course.ascent }),
     ...(course.partial ? { partial: true as const } : {}),
   };
+}
+
+/** A lap as the recording keeps it, between the two marks that ended and began it. */
+export function riddenLap(from: LapMark, to: LapMark, course: CourseStretch): RecordedCourseLap {
+  return {
+    from,
+    to,
+    distance: course.distance,
+    ...(course.ascent === undefined ? {} : { ascent: course.ascent }),
+    ...(course.partial ? { partial: true as const } : {}),
+  };
+}
+
+/** What a kept lap states, over `series` ({@link courseLap}). */
+export function lapFiguresOf(series: LapSeries, lap: RecordedCourseLap, offset = 0): LapFigures {
+  return courseLap(
+    series,
+    lap.from,
+    lap.to,
+    { distance: lap.distance, ascent: lap.ascent, partial: lap.partial === true },
+    offset,
+  );
 }
 
 /** What {@link lapAverageSpeed} and {@link bestLapIndex} read of a lap. */
@@ -202,19 +273,30 @@ export function bestLapIndex(laps: readonly TimedLap[]): number | undefined {
 }
 
 /**
- * The lap rows to write for a saved ride, in the order they were ridden.
+ * The lap rows to write for a saved ride, in the order they were ridden,
+ * worked out from `series` — the samples the save writes.
+ *
+ * ⚠️ **From the saved series and not from what the HUD was told** (the header,
+ * "Worked out twice"): by now every slot is final, so a row's averages are
+ * what anything reading the ride's samples between its two marks works out.
  *
  * ⚠️ **None at all unless the rider completed the course at least once.** A
  * ride abandoned part-way round its first lap has no laps: one row reading
  * "part lap" would be the whole ride said twice.
  */
 export function lapsToSave(
-  laps: readonly LapFigures[],
+  ridden: readonly RecordedCourseLap[],
+  series: LapSeries,
   activityId: ActivityId,
   newLapId: () => LapId,
 ): readonly NewLap[] {
-  if (!laps.some((lap) => lap.partial !== true)) {
+  if (!ridden.some((lap) => lap.partial !== true)) {
     return [];
   }
-  return laps.map((lap, ordinal) => ({ ...lap, id: newLapId(), activityId, ordinal }));
+  return ridden.map((lap, ordinal) => ({
+    ...lapFiguresOf(series, lap),
+    id: newLapId(),
+    activityId,
+    ordinal,
+  }));
 }

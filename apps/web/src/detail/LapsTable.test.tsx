@@ -33,7 +33,7 @@ import { ATHLETE_A, createStoreHarness, seedAthletes } from '@onyourleft/store/t
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { rideToSave, saveFinishedRide } from '../recording/finish';
-import { courseLap } from '../recording/laps';
+import { riddenLap } from '../recording/laps';
 import { mount, queryAll, type Mounted } from '../testing/mount';
 
 import { LAP_TIMES_NOTE, LapsTable } from './LapsTable';
@@ -199,13 +199,9 @@ describe('the laps a ride was saved with are the laps its page lists after a rel
         now: unixSeconds(started + 20),
         laps: {
           ridden: [
-            courseLap(series, mark(0), mark(6), course),
-            courseLap(series, mark(6), mark(11), course),
-            courseLap(series, mark(11), mark(12), {
-              ...course,
-              distance: metres(8),
-              partial: true,
-            }),
+            riddenLap(mark(0), mark(6), course),
+            riddenLap(mark(6), mark(11), course),
+            riddenLap(mark(11), mark(12), { ...course, distance: metres(8), partial: true }),
           ],
           newLapId: () => lapId(`lap-${String((minted += 1))}`),
         },

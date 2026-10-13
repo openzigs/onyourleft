@@ -358,10 +358,13 @@ export interface GameTrainerPort {
    *
    * ⚠️ **The lap's figures come back from the recording, never from the
    * game**: its time is the recorder's moving time and its averages are over
-   * the samples the save will write (`recording/laps.ts`), so the lap the HUD
-   * states as it ends is the row the ride's page lists afterwards. The game
-   * supplies only what the course knows — how long the lap is and how much it
-   * climbs.
+   * the recorder's samples (`recording/laps.ts`). Its times, distance and
+   * climb are the row the ride's page lists afterwards; its averages are
+   * worked out again when the ride is saved, from the samples the save
+   * writes, so they are that row's unless a reading landed in the lap's last
+   * slots after the line was crossed (`laps.ts`, "Worked out twice"). The
+   * game supplies only what the course knows — how long the lap is and how
+   * much it climbs.
    *
    * Not about the trainer, and on this port for {@link recordingMayStop}'s
    * reason. Named so nothing else in production calls a method of that name —

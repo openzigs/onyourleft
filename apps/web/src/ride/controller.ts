@@ -109,7 +109,14 @@ import {
 } from '../recording/recorder';
 import { recoverableRides, type RecoverableRide } from '../recording/recovery';
 import { rideToSave, saveFinishedRide, type RideSaveStore } from '../recording/finish';
-import { courseLap, type CourseLineEvent, type LapFigures, type LapMark } from '../recording/laps';
+import {
+  lapFiguresOf,
+  lapSlots,
+  riddenLap,
+  type CourseLineEvent,
+  type LapFigures,
+  type LapMark,
+} from '../recording/laps';
 import type { GhostOutcome } from '../game/ghost-outcome-kind';
 import { statedAverageHeartRate, type SavedRide } from './ride-result';
 
@@ -933,9 +940,11 @@ export interface RideController {
   /**
    * A game ride on a course left the line, crossed it, or ended part-way
    * round — #1312. The laps of a course belong to the RECORDING: each is
-   * worked out here from the recorder's own clock and samples
-   * (`recording/laps.ts`), kept for the recording in progress, and written
-   * with the ride when it is saved.
+   * marked here on the recorder's own clock, kept by the recorder (and so in
+   * its checkpoint, for a ride recovered after a crash), and written with the
+   * ride when it is saved — its averages worked out then, from the samples
+   * the save writes (`recording/laps.ts`). What is answered here is the same
+   * lap worked out as its line is crossed, for the HUD.
    *
    * Answers every lap of this recording so far, the one that just ended last,
    * when this call ended one — and `undefined` otherwise: a `started`, or a
@@ -1157,7 +1166,12 @@ export function createRideController(options: RideControllerOptions): RideContro
   let resultAnnounced = false;
   /** The last game ride's latched outcome, for this recording. @see RideController.noteGameRideEnded */
   let gameOutcome: GhostOutcome | undefined;
-  /** The course laps of this recording, in order. @see RideController.noteCourseLine */
+  /**
+   * The course laps of this recording as the HUD was told them, in order —
+   * each worked out as its line was crossed. What is SAVED is the recorder's
+   * `courseLaps`, worked out again from the samples the save writes.
+   * @see RideController.noteCourseLine
+   */
   let courseLaps: readonly LapFigures[] = [];
   /** Where the course lap in progress began, or `undefined` with none open — #1312. */
   let lapFrom: LapMark | undefined;
@@ -2386,8 +2400,6 @@ export function createRideController(options: RideControllerOptions): RideContro
     workoutName: string | undefined,
     outcomeInGame: GhostOutcome | undefined,
     workoutFinished?: boolean,
-    // #1312. A recovered ride passes none: its laps went with the tab.
-    laps: readonly LapFigures[] = [],
   ): Promise<void> => {
     const port = options.rideSave;
     if (port === undefined || current === undefined) {
@@ -2410,7 +2422,10 @@ export function createRideController(options: RideControllerOptions): RideContro
       // #947: what only this ride knew. A recovered ride passes neither.
       workoutFinished: workoutFinished === true,
       ghostRaced: outcomeInGame !== undefined,
-      laps: { ridden: laps, newLapId: port.newLapId },
+      // #1312. The recorder's own, so a ride finished now and one recovered
+      // after a crash are saved with their laps by the one path — and worked
+      // out from `series`, the samples this save writes (`recording/laps.ts`).
+      laps: { ridden: current.courseLaps, newLapId: port.newLapId },
     });
     const outcome = await saveFinishedRide(port.store, finished);
 
@@ -2948,7 +2963,33 @@ export function createRideController(options: RideControllerOptions): RideContro
         changed();
         return undefined;
       }
-      courseLaps = [...courseLaps, courseLap(session.series(), from, mark, event)];
+      const startedAt = session.startedAt;
+      if (recorder === undefined || startedAt === undefined) {
+        return undefined;
+      }
+      const lap = riddenLap(from, mark, event);
+      // Kept by the recorder: checkpointed with its next header, and what the
+      // save works the lap's row out from.
+      recorder.noteCourseLap(lap);
+      // ⚠️ For the HUD, over the lap's OWN slots and not `session.series()`:
+      // this runs inside the game's frame callback, and a copy of every
+      // channel of a five-hour ride on the frame the line is crossed is
+      // 18 000 slots a channel for a lap that has six hundred.
+      const grid = {
+        startedAt,
+        sampleInterval: recorder.sampleInterval,
+        sampleCount: session.sampleCount,
+      };
+      const slots = lapSlots(grid, from, mark);
+      const own = session.slice(slots.first, slots.end);
+      courseLaps = [
+        ...courseLaps,
+        lapFiguresOf(
+          { ...grid, sampleCount: own.sampleCount, channels: own.channels },
+          lap,
+          own.fromIndex,
+        ),
+      ];
       changed();
       return courseLaps;
     },
@@ -3022,7 +3063,7 @@ export function createRideController(options: RideControllerOptions): RideContro
         await stopTrainer();
         await recording().stop(at);
         changed();
-        await saveTheRide(recorder, ridden, gameOutcome, workoutFinishedInRide, courseLaps);
+        await saveTheRide(recorder, ridden, gameOutcome, workoutFinishedInRide);
       } catch (error: unknown) {
         // Fail closed (#565's second review). Nothing on today's paths throws
         // here, but if something did before `saveTheRide` set the outcome, the
@@ -3104,6 +3145,12 @@ export function createRideController(options: RideControllerOptions): RideContro
         return false;
       }
       recorder = found;
+      // #1312: the laps ridden before the crash are this recording's still, so
+      // the next one is numbered after them and compared with them. No lap is
+      // open: the game ride that was riding one went with the tab.
+      const ridden = found.session.series();
+      courseLaps = found.courseLaps.map((lap) => lapFiguresOf(ridden, lap));
+      lapFrom = undefined;
       phase = 'paused';
       clock = now();
       saveState = 'unavailable';

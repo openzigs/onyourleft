@@ -15,7 +15,10 @@ import {
   bestLapIndex,
   courseLap,
   lapAverageSpeed,
+  lapFiguresOf,
+  lapSlots,
   lapsToSave,
+  riddenLap,
   type LapFigures,
   type LapSeries,
 } from './laps';
@@ -170,24 +173,102 @@ describe('lapsToSave — #1312', () => {
     let next = 0;
     return () => lapId(`lap-${String((next += 1))}`);
   };
+  const RIDDEN = [
+    riddenLap(mark(0, 0), mark(4, 4), WHOLE),
+    riddenLap(mark(4, 4), mark(8, 7), WHOLE),
+    riddenLap(mark(8, 7), mark(10, 9), { distance: metres(300), ascent: undefined, partial: true }),
+  ];
 
   it('numbers the laps in the order they were ridden, under the ride', () => {
-    const rows = lapsToSave(
-      [timed(1_000, 100), timed(1_000, 90), timed(300, 40, true)],
-      ride,
-      ids(),
-    );
+    const rows = lapsToSave(RIDDEN, SERIES, ride, ids());
 
     expect(rows.map((row) => [row.id, row.ordinal, row.activityId, row.partial])).toEqual([
       ['lap-1', 0, ride, undefined],
       ['lap-2', 1, ride, undefined],
       ['lap-3', 2, ride, true],
     ]);
-    expect(rows[1]?.movingTime).toBe(seconds(90));
+    expect(rows[1]?.movingTime).toBe(seconds(3));
+    expect(rows[2]).not.toHaveProperty('ascent');
+  });
+
+  it('works each row out from the series it is handed: the samples the save writes', () => {
+    // The same three laps over two series that differ in one late reading:
+    // slot 7, the second lap's last, read 170 W as its line was crossed and
+    // 250 W once the reading that was still on its way had landed.
+    const landed: LapSeries = {
+      ...SERIES,
+      channels: {
+        ...SERIES.channels,
+        power: [100, 110, 120, 130, 140, 150, 160, 250, 180, 190].map(watts),
+      },
+    };
+
+    const asCrossed = lapsToSave(RIDDEN, SERIES, ride, ids());
+    const asSaved = lapsToSave(RIDDEN, landed, ride, ids());
+
+    expect([asCrossed[1]?.averagePower, asCrossed[1]?.maxPower]).toEqual([155, 170]);
+    expect([asSaved[1]?.averagePower, asSaved[1]?.maxPower]).toEqual([175, 250]);
+    // Nothing else of the lap is the samples', so nothing else moved.
+    expect({ ...asSaved[1], averagePower: 0, maxPower: 0, id: '' }).toEqual({
+      ...asCrossed[1],
+      averagePower: 0,
+      maxPower: 0,
+      id: '',
+    });
   });
 
   it('writes nothing for a ride that never completed the course', () => {
-    expect(lapsToSave([timed(300, 40, true)], ride, ids())).toEqual([]);
-    expect(lapsToSave([], ride, ids())).toEqual([]);
+    expect(lapsToSave([RIDDEN[2] as (typeof RIDDEN)[number]], SERIES, ride, ids())).toEqual([]);
+    expect(lapsToSave([], SERIES, ride, ids())).toEqual([]);
+  });
+});
+
+describe('a lap worked out from its own stretch of the recording — #1312', () => {
+  it('states what the whole series states, from a slice that holds only the lap', () => {
+    const from = mark(4, 4);
+    const to = mark(8, 8);
+    const slots = lapSlots(SERIES, from, to);
+    expect(slots).toEqual({ first: 4, end: 8 });
+
+    const own: LapSeries = {
+      startedAt: SERIES.startedAt,
+      sampleInterval: SERIES.sampleInterval,
+      sampleCount: slots.end - slots.first,
+      channels: {
+        power: SERIES.channels.power?.slice(slots.first, slots.end),
+        heartRate: SERIES.channels.heartRate?.slice(slots.first, slots.end),
+        cadence: SERIES.channels.cadence?.slice(slots.first, slots.end),
+      },
+    };
+    const lap = riddenLap(from, to, WHOLE);
+
+    expect(lapFiguresOf(own, lap, slots.first)).toEqual(lapFiguresOf(SERIES, lap));
+    expect(lapFiguresOf(own, lap, slots.first)).toEqual(courseLap(SERIES, from, to, WHOLE));
+    // Slots 4..7 and no other: 140, 150, 160, 170.
+    expect(lapFiguresOf(own, lap, slots.first).averagePower).toBe(155);
+  });
+
+  it('keeps a part lap’s mark and a climb, and neither where there is none', () => {
+    expect(riddenLap(mark(0, 0), mark(4, 4), WHOLE)).toEqual({
+      from: mark(0, 0),
+      to: mark(4, 4),
+      distance: metres(1_000),
+      ascent: metres(12),
+    });
+    const part = riddenLap(mark(0, 0), mark(4, 4), {
+      distance: metres(300),
+      ascent: undefined,
+      partial: true,
+    });
+    expect(part).toEqual({
+      from: mark(0, 0),
+      to: mark(4, 4),
+      distance: metres(300),
+      partial: true,
+    });
+    expect(lapFiguresOf(SERIES, part).partial).toBe(true);
+    expect(lapFiguresOf(SERIES, riddenLap(mark(0, 0), mark(4, 4), WHOLE))).not.toHaveProperty(
+      'partial',
+    );
   });
 });

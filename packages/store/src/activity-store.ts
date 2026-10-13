@@ -2846,6 +2846,7 @@ export class ActivityStore {
       channels,
       pauses: header.pauses,
       state: header.state,
+      courseLaps: header.courseLaps ?? [],
       chunks: prefix.rows.length,
       chunksAfterGap: stored.chunks.length - prefix.rows.length,
     };

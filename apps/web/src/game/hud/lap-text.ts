@@ -9,7 +9,8 @@
  *
  * Every figure is the recording's own (`recording/laps.ts`), handed back
  * through `trainer-port.ts` §`GameTrainerPort.courseLine` as the line is
- * crossed — so the lap the HUD states is the row the ride's page lists. This
+ * crossed — the lap the ride's page lists, whose averages the save works out
+ * again once every sample of it is final (`laps.ts`, "Worked out twice"). This
  * file formats, subtracts two moving times and chooses words; #94's fourth
  * criterion (`fields.ts`) is why it does no more.
  *
@@ -20,10 +21,22 @@
  * comparison is words — *faster*, *slower*, *best* — never a colour or an
  * arrow, so nothing about a lap is carried by colour alone (SC 1.4.1).
  *
- * ⚠️ **Compared only with whole laps of the same length.** A part lap stopped
- * short, and a lap of another course ridden earlier in the same recording is a
- * different road: "12 s faster" than either would be a sentence about nothing.
- * The best lap is `laps.ts` §`bestLapIndex`'s, which is the page's rule too.
+ * ⚠️ **Compared only with whole laps of the same length — the lap before AND
+ * the best.** A part lap stopped short, and a lap of another course ridden
+ * earlier in the same recording is a different road: "12 s faster" than
+ * either, or "Best: lap 1" of another road, would be a sentence about nothing.
+ *
+ * ⚠️ **Every comparison is made on the times as they are SHOWN**: whole
+ * seconds, floored, as `format.ts` §`formatDuration` writes them. A
+ * difference taken from the unrounded times and then rounded reads `1 s` or
+ * `3 s` beside `9:52` and `9:50`; and a best decided on a fraction of a
+ * second reads *Same time as lap 1* and *Your best lap of this ride* in one
+ * notice. So the best lap here is the one with the shortest shown time, the
+ * earlier on a tie — on one course `laps.ts` §`bestLapIndex`'s lap, which the
+ * ride's page marks, except where two laps differ by less than the second the
+ * page shows them to. (In a recording of two courses the page marks the one
+ * lap with the highest average speed; the HUD says which lap of THIS course
+ * is the best.)
  *
  * ⚠️ **No score and no trademarked name** (docs/agents/scope-and-ip.md §6):
  * plain averages, plainly named.
@@ -34,7 +47,7 @@
 import type { UnitSystem } from '@onyourleft/store';
 
 import { formatDuration } from '../../format';
-import { bestLapIndex, lapAverageSpeed, type LapFigures } from '../../recording/laps';
+import { lapAverageSpeed, type LapFigures } from '../../recording/laps';
 import { formatSpeed, measurementText } from '../../units/format';
 
 /**
@@ -72,13 +85,20 @@ function spokenDuration(totalSeconds: number): string {
   return said.length === 0 ? '0 seconds' : said.join(' ');
 }
 
+/** A time in the whole seconds it is shown and said in. */
+function shownSeconds(time: number): number {
+  return Math.max(0, Math.floor(time));
+}
+
 /** How this lap's time compares with another's, shown and said — or neither when they are level. */
 function against(
   lap: LapFigures,
   other: LapFigures,
   otherNumber: number,
 ): { readonly text: string; readonly sentence: string } {
-  const delta = Math.round(lap.movingTime - other.movingTime);
+  // Floored before subtracting, so the difference is the difference of the
+  // two times shown beside it.
+  const delta = shownSeconds(lap.movingTime) - shownSeconds(other.movingTime);
   const than = `lap ${String(otherNumber)}`;
   if (delta === 0) {
     return { text: `Same time as ${than}.`, sentence: `The same time as ${than}.` };
@@ -129,7 +149,26 @@ export function lapSummary(laps: readonly LapFigures[], units: UnitSystem): LapS
   const earlier = laps[previous];
   const compared = earlier === undefined ? undefined : against(lap, earlier, previous + 1);
 
-  const best = bestLapIndex(laps);
+  // The best of the whole laps of THIS course, this one among them, by the
+  // time each is shown with — and nothing to say with fewer than two.
+  let best: number | undefined;
+  let counted = 0;
+  laps.forEach((other, at) => {
+    if (!comparable(other)) {
+      return;
+    }
+    counted += 1;
+    const quickest = best === undefined ? undefined : laps[best];
+    if (
+      quickest === undefined ||
+      shownSeconds(other.movingTime) < shownSeconds(quickest.movingTime)
+    ) {
+      best = at;
+    }
+  });
+  if (counted < 2) {
+    best = undefined;
+  }
   const bestLap = best === undefined ? undefined : laps[best];
   const standing =
     best === undefined || bestLap === undefined

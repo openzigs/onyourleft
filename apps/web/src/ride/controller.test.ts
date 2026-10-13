@@ -97,6 +97,10 @@ import type { NewActivity, NewStreamSet } from '@onyourleft/store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_AUTO_PAUSE_AFTER_SECONDS } from '../recording/channels';
+import { exportActivity } from '../transfer/export-activity';
+import type { ActivityFileFormat } from '../transfer/file-format';
+import { importActivityFiles } from '../transfer/import-batch';
+import { webCryptoDigest } from '../transfer/browser';
 import type { RecordingCheckpointStore } from '../recording/recorder';
 
 import {
@@ -6817,7 +6821,11 @@ describe('#1312 — the laps of a course are the recording’s, and are saved wi
 
     expect(hud.courseLine?.({ kind: 'started' })).toBeUndefined();
     expect(hud.rideLapSeconds?.()).toBe(0);
-    await ride(rig, 10);
+    // Harder for the lap's last three seconds, so its average is its own and
+    // not the figure any ten seconds of this ride would give.
+    await ride(rig, 7);
+    rig.bench.rider.set({ power: watts(290) });
+    await ride(rig, 3);
     expect(hud.rideLapSeconds?.()).toBe(10);
 
     const afterOne = hud.courseLine?.({ ...WHOLE, again: true });
@@ -6880,6 +6888,12 @@ describe('#1312 — the laps of a course are the recording’s, and are saved wi
       Math.round(inLap.reduce((sum, sample) => sum + sample, 0) / inLap.length),
     );
     expect(first?.maxPower).toBe(Math.max(...inLap));
+    // And the HUD was told the same of it as the line was crossed, worked out
+    // from the lap's own slots of the recording and no others.
+    expect([afterOne?.[0]?.averagePower, afterOne?.[0]?.maxPower]).toEqual([
+      first?.averagePower,
+      first?.maxPower,
+    ]);
     rig.controller.dispose();
   });
 
@@ -6992,6 +7006,303 @@ describe('#1312 — the laps of a course are the recording’s, and are saved wi
     expect(rig.controller.getSnapshot().saveState).toBe('saved');
     expect(await lapsOf('ride-4')).toEqual([]);
     rig.controller.dispose();
+  });
+
+  it('saves each lap from the samples the save writes, a reading that landed late included', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    const hud = gameTrainerPortOver(rig.controller);
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    hud.courseLine?.({ kind: 'started' });
+    await ride(rig, 6);
+    // The recorder's clock is two seconds ahead of the readings — inside its
+    // late tolerance — as the rider crosses the line. The lap's last two
+    // slots are empty at that instant, and the readings for them are still
+    // on their way.
+    rig.bench.rider.set({ power: watts(320) });
+    await rig.controller.tick(unixSeconds(rig.bench.now + 2));
+    const told = hud.courseLine?.({ ...WHOLE, again: true })?.[0];
+    await ride(rig, 6);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect(rig.controller.getSnapshot().saveState).toBe('saved');
+
+    const saved = (await lapsOf('ride-1'))[0];
+    const streams = await harness.read(async (store) =>
+      store.getStreamSet(ATHLETE_A, activityId('ride-1')),
+    );
+    if (saved === undefined || streams === undefined || told === undefined) {
+      throw new Error('the ride or its lap was not saved');
+    }
+    const first = saved.startedAt - streams.startedAt;
+    const inLap = (streams.channels.power ?? []).slice(first, first + saved.elapsedTime);
+    const readings = inLap.filter((sample) => sample !== undefined);
+    // The reading that landed after the line is in the lap: 320 W in its last
+    // slot, where the HUD was told of six seconds at 200 W.
+    expect([told.averagePower, told.maxPower]).toEqual([200, 200]);
+    expect(inLap.at(-1)).toBe(320);
+    expect([saved.averagePower, saved.maxPower]).toEqual([217, 320]);
+    // The row is what the saved samples between its two marks give…
+    expect(saved.averagePower).toBe(
+      Math.round(readings.reduce((sum, sample) => sum + sample, 0) / readings.length),
+    );
+    expect(saved.maxPower).toBe(Math.max(...readings));
+    // …and the marks and the course's half are what the HUD was told.
+    expect(saved).toMatchObject({
+      startedAt: told.startedAt,
+      elapsedTime: told.elapsedTime,
+      movingTime: told.movingTime,
+      distance: told.distance,
+      ascent: told.ascent,
+    });
+    rig.controller.dispose();
+  });
+
+  describe('a ride the tab died in the middle of keeps the laps it had completed', () => {
+    /**
+     * Four seconds, two whole laps, and nine seconds into a third — then the
+     * tab is gone, as `dispose` leaves it (#212): the checkpoint on disk, and
+     * nothing in memory.
+     */
+    const crashedMidRide = async (): Promise<RecordingSessionId> => {
+      const rig = benchWith();
+      const hud = gameTrainerPortOver(rig.controller);
+      await rig.controller.pair('trainer');
+      await rig.controller.start();
+      await ride(rig, 4);
+      hud.courseLine?.({ kind: 'started' });
+      await ride(rig, 10);
+      hud.courseLine?.({ ...WHOLE, again: true });
+      await ride(rig, 7);
+      hud.courseLine?.({ ...WHOLE, again: true });
+      await ride(rig, 9);
+      rig.controller.dispose();
+      const id = rig.sessionIds[0];
+      if (id === undefined) {
+        throw new Error('no recording was started');
+      }
+      return id;
+    };
+
+    it('saved as it was recovered: the two laps, worked out from the recovered samples', async () => {
+      const id = await crashedMidRide();
+      const next = benchWith({ rideSave: storeSavePort() });
+      await next.controller.refreshRecoverable();
+
+      expect(await next.controller.saveRecovered(id)).toBe('saved');
+
+      const saved = await lapsOf('ride-1');
+      expect(
+        saved.map((lap) => [lap.ordinal, lap.movingTime, lap.distance, lap.ascent, lap.partial]),
+      ).toEqual([
+        [0, 10, 1_000, 14, undefined],
+        [1, 7, 1_000, 14, undefined],
+      ]);
+      // ⚠️ No third row. The lap in progress when the tab died is not saved
+      // as a part lap: how far round the rider was is the game's odometer,
+      // and that went with the tab.
+      const streams = await harness.read(async (store) =>
+        store.getStreamSet(ATHLETE_A, activityId('ride-1')),
+      );
+      const second = saved[1];
+      const from = (second?.startedAt ?? 0) - (streams?.startedAt ?? 0);
+      const inLap = (streams?.channels.power ?? [])
+        .slice(from, from + 7)
+        .filter((sample) => sample !== undefined);
+      expect(inLap.length).toBeGreaterThan(0);
+      expect(second?.averagePower).toBe(
+        Math.round(inLap.reduce((sum, sample) => sum + sample, 0) / inLap.length),
+      );
+      next.controller.dispose();
+    });
+
+    it('continued: the next lap is the third, and all three are saved', async () => {
+      const id = await crashedMidRide();
+      const next = benchWith({ rideSave: storeSavePort() });
+      const hud = gameTrainerPortOver(next.controller);
+      // The tab comes back two minutes later, as a real one comes back later
+      // than it died (each bench's clock starts at the same instant).
+      next.bench.advance(seconds(120));
+      await next.controller.pair('trainer');
+      await next.controller.refreshRecoverable();
+      expect(await next.controller.continueRecovered(id)).toBe(true);
+      // No lap is open: the game ride that was riding one went with the tab.
+      expect(hud.rideLapSeconds?.()).toBeUndefined();
+      await next.controller.resume();
+
+      hud.courseLine?.({ kind: 'started' });
+      await ride(next, 6);
+      const laps = hud.courseLine?.({ ...WHOLE, again: false });
+
+      // The HUD compares the new lap with the two ridden before the crash.
+      expect(laps?.map((lap) => lap.movingTime)).toEqual([10, 7, 6]);
+
+      // Long enough for a checkpoint to carry the third lap, then the tab
+      // dies again: the header a recovered recorder writes still has all
+      // three, where one that began again from none would have taken two
+      // laps off the disk.
+      await ride(next, 6);
+      next.controller.dispose();
+      const last = benchWith({ rideSave: storeSavePort() });
+      last.bench.advance(seconds(240));
+      await last.controller.refreshRecoverable();
+      expect(await last.controller.saveRecovered(id)).toBe('saved');
+      expect((await lapsOf('ride-1')).map((lap) => [lap.ordinal, lap.movingTime])).toEqual([
+        [0, 10],
+        [1, 7],
+        [2, 6],
+      ]);
+      last.controller.dispose();
+    });
+  });
+
+  /**
+   * Review of #1316, treated as blocking: export, erase, import again must
+   * give the ride back with the totals it was saved with. TCX has no session
+   * total — a reader sums its laps — so laps that cover only the game ride
+   * made the file state a shorter ride than was recorded.
+   *
+   * Through the real paths at both ends (§5): the recording saved by the
+   * controller into the real store, `exportActivity`, `deleteActivity`,
+   * `importActivityFiles`, and the activity read back on a fresh connection.
+   */
+  describe('export, erase, import again', () => {
+    /** Six seconds before the line, two whole laps, a part lap, five seconds after. */
+    const recorded = async (withLaps: boolean): Promise<void> => {
+      const rig = benchWith({ rideSave: storeSavePort() });
+      const port = gameTrainerPortOver(rig.controller);
+      // The same seconds ridden either way; only the line is or is not there.
+      const hud = withLaps ? port : { courseLine: () => undefined };
+      await rig.controller.pair('trainer');
+      await rig.controller.start();
+      await ride(rig, 6);
+      hud.courseLine?.({ kind: 'started' });
+      await ride(rig, 10);
+      hud.courseLine?.({ ...WHOLE, again: true });
+      await ride(rig, 4);
+      // A pause inside the second lap, so moving and elapsed time differ.
+      await rig.controller.pause();
+      await ride(rig, 5);
+      await rig.controller.resume();
+      await ride(rig, 3);
+      hud.courseLine?.({ ...WHOLE, again: true });
+      await ride(rig, 3);
+      hud.courseLine?.({
+        kind: 'lap',
+        distance: metres(280),
+        ascent: metres(2),
+        partial: true,
+        again: false,
+      });
+      await ride(rig, 5);
+      rig.controller.armStop();
+      await rig.controller.confirmStop();
+      expect(rig.controller.getSnapshot().saveState).toBe('saved');
+      rig.controller.dispose();
+    };
+
+    const exported = async (format: ActivityFileFormat): Promise<Uint8Array> =>
+      (
+        await harness.read(async (store) =>
+          exportActivity({
+            store,
+            athleteId: ATHLETE_A,
+            activityId: activityId('ride-1'),
+            format,
+          }),
+        )
+      ).file.bytes;
+
+    /** The file imported into the store, and the ride read back on a fresh connection. */
+    const importedBack = async (format: ActivityFileFormat, bytes: Uint8Array, as: string) => {
+      const report = await harness.write(async (store) =>
+        importActivityFiles({
+          sources: [{ fileName: `ride-${as}.${format}`, bytes: () => Promise.resolve(bytes) }],
+          store,
+          athleteId: ATHLETE_A,
+          newActivityId: () => activityId(`back-${as}`),
+          now: () => unixSeconds(1_800_000_000),
+          digest: webCryptoDigest,
+          timeZone: 'Europe/London',
+        }),
+      );
+      expect(report.outcomes.map((outcome) => [outcome.kind, outcome.reason])).toEqual([
+        ['imported', undefined],
+      ]);
+      const back = await harness.read(async (store) =>
+        store.getActivity(ATHLETE_A, activityId(`back-${as}`)),
+      );
+      if (back === undefined) {
+        throw new Error(`the ${format} file did not come back as a ride`);
+      }
+      return back;
+    };
+
+    /** Record the ride, export it, erase it, import the file: what was stored, and what came back. */
+    const roundTrip = async (format: ActivityFileFormat, withLaps: boolean) => {
+      await recorded(withLaps);
+      const stored = await harness.read(async (store) =>
+        store.getActivity(ATHLETE_A, activityId('ride-1')),
+      );
+      if (stored === undefined) {
+        throw new Error('the ride was not saved');
+      }
+      const laps = await lapsOf('ride-1');
+      const bytes = await exported(format);
+      // The erase: the ride, its samples and its laps.
+      expect(
+        await harness.write(async (store) => store.deleteActivity(ATHLETE_A, activityId('ride-1'))),
+      ).toBe(true);
+      const back = await importedBack(format, bytes, withLaps ? 'laps' : 'plain');
+      const totals = (ride: typeof stored) => ({
+        startedAt: ride.startedAt,
+        elapsedTime: ride.elapsedTime,
+        movingTime: ride.movingTime,
+        distance: ride.distance,
+      });
+      return { stored: totals(stored), back: totals(back), laps };
+    };
+
+    it.each<ActivityFileFormat>(['fit', 'tcx'])(
+      'gives the ride back with its own elapsed time and distance, from %s',
+      async (format) => {
+        // The same ride twice: once with no course under it, once with.
+        const plain = await roundTrip(format, false);
+        const lapped = await roundTrip(format, true);
+
+        // The premise: one ride, and laps that cover less of it than there
+        // is, in time, and far more road than its own distance.
+        expect(lapped.stored).toEqual(plain.stored);
+        expect(plain.laps).toEqual([]);
+        expect(lapped.laps).toHaveLength(3);
+        expect(lapped.laps.reduce((sum, lap) => sum + lap.elapsedTime, 0)).toBeLessThan(
+          lapped.stored.elapsedTime,
+        );
+        expect(lapped.laps.reduce((sum, lap) => sum + lap.distance, 0)).toBeGreaterThan(
+          lapped.stored.distance * 2,
+        );
+        expect(lapped.stored.movingTime).toBeLessThan(lapped.stored.elapsedTime);
+
+        // ⚠️ The laps change NOTHING in what comes back: every total is the
+        // one the same ride gives with no laps in its file.
+        expect(lapped.back).toEqual(plain.back);
+
+        // And against what was stored. The distance is the ride's own, to the
+        // tenth of a metre TCX is written to.
+        expect(Math.abs(lapped.back.distance - lapped.stored.distance)).toBeLessThanOrEqual(0.05);
+        // An import has always bounded a stated elapsed time by the span of
+        // the file's samples (`read-activity-file.ts` §`observedSpan`), and
+        // this ride's first second has no reading in it: one second, in both
+        // formats, with laps and without.
+        expect(lapped.back.elapsedTime).toBe(lapped.stored.elapsedTime - 1);
+        // FIT's session states the moving time. TCX has nowhere to state one,
+        // so an imported TCX has always read its moving time as its elapsed
+        // time — with or without laps, before #1312 and after.
+        expect(lapped.back.movingTime).toBe(
+          format === 'fit' ? lapped.stored.movingTime : lapped.back.elapsedTime,
+        );
+      },
+    );
   });
 });
 
