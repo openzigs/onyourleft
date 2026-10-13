@@ -75,10 +75,12 @@
  *    of the range the machine reported. A share that works out under it is
  *    therefore written as that minimum, and is not refused by
  *    `packages/sensors/protocol/src/fitness-machine-control.ts` with the
- *    target of the block before left on the trainer. ⚠️ Since #1305 that
- *    holds for a raise of 50 W or less: a workout's own target further under
- *    the minimum is not written at all, the trainer keeps the target it had,
- *    and the rider is told.
+ *    target of the block before left on the trainer. ⚠️ Since #1305 there
+ *    is one exception: a workout's own target more than 50 W under the
+ *    minimum is not written at all, and the rider is told, when this app
+ *    knows of no target on the trainer at or above that minimum (in the
+ *    client, a trainer it has set no target on). Wherever the trainer may
+ *    hold one, the minimum only eases and is written whatever the gap.
  * 6. **Warm-up and cool-down are the first and the last block.** The workout
  *    model marks neither, so the rule is structural: the main set is every
  *    block between them. The last block is never changed or removed by any

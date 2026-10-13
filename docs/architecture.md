@@ -1406,8 +1406,10 @@ How 2's +10 % and a replaced hold are measured is the owner's ruling of the same
 4. A free ride may be swapped in with none loaded; every other kind needs a block of its own kind
    in the loaded workout.
 5. The validator does not read the machine's minimum. The workout session raises a target it
-   writes to that minimum (`apps/web/src/workout/session.ts`, #1297), except a workout's own target
-   more than 50 W under it: for that it writes nothing and tells the rider (#1305).
+   writes to that minimum (`apps/web/src/workout/session.ts`, #1297). One exception (#1305): for a
+   workout's own target more than 50 W under the minimum it writes nothing and tells the rider,
+   when it knows of no target on the trainer at or above that minimum. Where the trainer may hold
+   one, the minimum only eases and is written whatever the gap.
 6. Warm-up and cool-down are the first and the last block.
 7. A scale is counted for each share in percentage points of the share the block joined the plan
    with, so +5 % twice is +10 % exactly; what is counted is the change reached, so a share a bound

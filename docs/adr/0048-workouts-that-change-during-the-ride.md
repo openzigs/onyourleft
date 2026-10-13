@@ -686,8 +686,18 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
     can compare the two. No code on the instance does. Whether the goal's target should be
     withheld from the job is **put to the owner**, with spike 0022 §3.4. (#1243)
 
-- **2026-10-12** — #1305 narrowed the clamp, on the owner's ruling of that day. The entry above
-  says the session raises "every workout target" under the minimum; that is now so only for a raise
-  of 50 W or less. For a workout's own target more than 50 W under the trainer's reported minimum
-  the session writes nothing, the trainer keeps the target it last accepted, and the rider is told.
-  An eased target (the stall relief, a pause, a free ride) is raised or written as before.
+- **2026-10-12** — #1305 narrowed #1297's clamp, on the owner's ruling of that day. The #1297
+  entry above says the session raises "every workout target" under the trainer's reported minimum
+  to that minimum. There is now one exception. A workout's own target more than 50 W under the
+  minimum is not written, and the rider is told, **when the session knows of no target on the
+  trainer at or above that minimum**. Where the trainer may hold one, the minimum only eases and is
+  written whatever the gap, so a recovery after a hard block is never left on the hard block's
+  target. What the session counts as a target the trainer may hold: one the control client has
+  confirmed (a hand-set target from before the workout included), one it had confirmed or attempted
+  and can no longer vouch for (a lost link, a Stop, a gradient, a write with no answer), and, when
+  the client knows of none, the last write the trainer acknowledged to that session. Only the first
+  is known to be on the machine. The control client sends nothing under the machine's minimum, so
+  in the client a refusal happens only on a trainer no target is known on. An eased target (the
+  stall relief, a pause, a free ride) is raised or written as before. H3 is unchanged: a hold
+  block's envelope starts at the machine's minimum inside the player, so the refusal never applies
+  to a hold block. (#1305)

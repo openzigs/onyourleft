@@ -1280,7 +1280,8 @@ export function createRideController(options: RideControllerOptions): RideContro
    * is the ERG spiral this program exists to prevent. What waits is anything
    * that RAISES: a new target, a workout's next interval above the trainer's
    * minimum (one under it is raised to the floor, #1297, so it passes as an
-   * ease, or is not written at all, #1305), a rescue's restore.
+   * ease, or is not written at all when that could be a large raise, #1305),
+   * a rescue's restore.
    * A gradient has no floor and always waits.
    *
    * ⚠️ **"Below the confirmed target" trusts `targetPower()`, and that is
@@ -2967,6 +2968,9 @@ export function createRideController(options: RideControllerOptions): RideContro
           setTargetPower: gatedTargets(client, connection.powerRange.minimum).setTargetPower,
           stop: () => client.stop(),
           letGo: () => releaseTrainer(client),
+          // #1305: a read. What the client believes the trainer holds, a
+          // hand-set target from before this workout included.
+          targetPower: () => client.targetPower(),
         },
         // #441: what an ease writes — the machine's own reported minimum.
         powerFloor: connection.powerRange.minimum,

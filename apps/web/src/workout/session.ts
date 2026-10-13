@@ -100,8 +100,10 @@ export const HEART_RATE_HISTORY_SECONDS = 30;
 
 /**
  * The most a workout's own target is raised to reach the trainer's reported
- * minimum, in watts (#1305). Past it the session writes nothing for that
- * target and tells the rider.
+ * minimum, in watts, when writing that minimum could RAISE what the trainer
+ * holds (#1305). Past it the session writes nothing for that target and tells
+ * the rider. A minimum at or below a target the trainer may already be
+ * holding is written whatever the gap: it can only ease.
  *
  * ⚠️ **A pick, not a measurement** (owner ruling, 2026-10-12). The minimum is
  * what the machine reported at pairing, which is untrusted input (CLAUDE.md
@@ -113,14 +115,23 @@ export const LARGEST_RAISE_WATTS = 50;
 /**
  * What the session needs from a trainer.
  *
- * `setTargetPower`, `stop` and `letGo` and nothing else — in particular
- * **not** the bare `reset`, and not `requestControl`, which the ride screen has
- * already done by the time a workout starts. Narrowed for the same reason
- * `ErgSink` is: a method that is not on the type cannot be called by a later
- * edit. `letGo` is here since #372 and is called from exactly one place,
- * {@link createWorkoutSession}'s `finish`, which runs once per session.
+ * `setTargetPower`, `stop` and `letGo` and nothing else that COMMANDS — in
+ * particular **not** the bare `reset`, and not `requestControl`, which the
+ * ride screen has already done by the time a workout starts. Narrowed for the
+ * same reason `ErgSink` is: a method that is not on the type cannot be called
+ * by a later edit. `letGo` is here since #372 and is called from exactly one
+ * place, {@link createWorkoutSession}'s `finish`, which runs once per session.
+ *
+ * `targetPower` is a read and sends nothing (#1305): what the control client
+ * believes the trainer's ERG target to be, which is how the session knows of
+ * a target set BEFORE it existed (a hand-set one on the Ride screen).
+ * ⚠️ Required, not optional: left out, every raise would be judged as if the
+ * trainer held nothing.
  */
-export type WorkoutTrainer = Pick<TrainerControl, 'setTargetPower' | 'stop' | 'letGo'>;
+export type WorkoutTrainer = Pick<
+  TrainerControl,
+  'setTargetPower' | 'stop' | 'letGo' | 'targetPower'
+>;
 
 export interface WorkoutSessionOptions {
   readonly timeline: WorkoutTimeline;
@@ -129,8 +140,9 @@ export interface WorkoutSessionOptions {
   /**
    * The lowest ERG target this trainer accepts — the minimum of the Supported
    * Power Range **the machine itself reported** (#441). What an ease writes,
-   * and what a workout target under it is raised to (#1297) when that is a
-   * raise of {@link LARGEST_RAISE_WATTS} or less (#1305).
+   * and what a workout target under it is raised to (#1297), unless that
+   * could raise what the trainer holds and is a raise of more than
+   * {@link LARGEST_RAISE_WATTS} (#1305).
    *
    * ⚠️ Required, with no default: a default would be the hard-coded floor
    * #43's criteria forbid, and a floor below the machine's minimum would be
@@ -195,8 +207,8 @@ export interface WorkoutSessionState {
    * left wondering why the resistance did not change.
    *
    * ⚠️ Also where a raise the session REFUSED to make is told (#1305): while
-   * the block's target is more than {@link LARGEST_RAISE_WATTS} under the
-   * trainer's minimum this is that sentence, in place of an older fault.
+   * the block's target is not being sent this is that sentence, in place of
+   * an older fault.
    */
   readonly lastFault: string | undefined;
 }
@@ -270,9 +282,10 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
 
   /**
    * Whether the target the workout asks for now was NOT written, because
-   * raising it to the floor would be a raise of more than
-   * {@link LARGEST_RAISE_WATTS} (#1305). Decided again on every tick that
-   * asks, and dropped by anything else the session does to the trainer.
+   * the floor is more than {@link LARGEST_RAISE_WATTS} above it and writing
+   * the floor could raise what the trainer holds (#1305). Decided again on
+   * every tick that asks, and dropped by anything else the session does to
+   * the trainer.
    */
   let raiseRefused = false;
   /** @see WorkoutSessionState.raisedFrom */
@@ -284,10 +297,42 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
     writing: writer.busy(),
     raisedFrom,
     cadenceRetained: cadence.length,
-    // Worded here, not when the raise was refused: what the trainer was last
-    // set to can change under a standing refusal (a pause eases it).
-    lastFault: raiseRefused ? raiseRefusedText(powerFloor, writer.lastWritten()) : lastFault,
+    lastFault: raiseRefused ? raiseRefusedText(powerFloor) : lastFault,
   });
+
+  /**
+   * The ERG target the trainer may be holding, as far as this app can say,
+   * or `undefined` when it knows of none (#1305). From the control client:
+   *
+   * - `confirmed`: the last target the trainer acknowledged, with nothing
+   *   since to put it in doubt. That includes one set by hand on the Ride
+   *   screen before this session existed: it went through the same client.
+   * - `unknown`: a target the client had acknowledged and can no longer vouch
+   *   for (a lost link, a Stop, a gradient), or one it attempted and got no
+   *   answer to.
+   * - `none`: the client has set no ERG target, or the machine took control
+   *   away. Then the last write the trainer acknowledged to THIS session
+   *   stands in, if there was one.
+   *
+   * ⚠️ **Only `confirmed` is known to be on the machine. The rest are
+   * counted on purpose.** The trainer may still hold them, and this file
+   * assumes throughout that a machine keeps a target until it is written
+   * another (`released` starts `false` for the same reason). If it does,
+   * writing the floor lowers what the rider is pedalling against and not
+   * writing leaves it there. If it does not, the floor is still no more than
+   * this app last asked of the same machine.
+   */
+  const mayBeHolding = (): Watts | undefined => {
+    const target = control.targetPower();
+    switch (target.kind) {
+      case 'confirmed':
+        return target.target;
+      case 'unknown':
+        return target.attempted;
+      case 'none':
+        return writer.lastWritten();
+    }
+  };
 
   const changed = (): void => {
     onChange?.(snapshot());
@@ -497,15 +542,24 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
           // `holding`.
           const asked = state.intent.watts;
           const raised = asked < powerFloor;
-          // ⚠️ #1305, owner ruling: the workout's OWN target is not raised by
-          // more than `LARGEST_RAISE_WATTS`. Nothing is written for it, so
-          // the trainer keeps whatever it last accepted, and the rider is
-          // told (`lastFault`). The player is told its ask did not land, so
-          // it asks again next tick and a ramp that climbs to within reach is
-          // written then. An EASED target (the stall relief) is not covered
-          // by the ruling and is raised as before: it exists to lower what
-          // the trainer holds, and withholding it would rescue nobody.
-          if (!state.intent.eased && powerFloor - asked > LARGEST_RAISE_WATTS) {
+          // ⚠️ #1305, owner ruling, as narrowed on the second pass: the
+          // workout's OWN target is not raised by more than
+          // `LARGEST_RAISE_WATTS` when the raise could raise what the trainer
+          // holds. Nothing is written for it, so the trainer keeps whatever
+          // it has, and the rider is told (`lastFault`). The player is told
+          // its ask did not land, so it asks again next tick and a ramp that
+          // climbs to within reach is written then.
+          //
+          // A floor at or below a target the trainer may already hold is
+          // written whatever the gap: it only eases. Refusing it left a hard
+          // block's 250 W on the machine through a 75 W recovery.
+          //
+          // An EASED target (the stall relief) is not covered by the ruling
+          // and is raised as before: it exists to lower what the trainer
+          // holds, and withholding it would rescue nobody.
+          const held = mayBeHolding();
+          const onlyEases = held !== undefined && powerFloor <= held;
+          if (!state.intent.eased && !onlyEases && powerFloor - asked > LARGEST_RAISE_WATTS) {
             raiseRefused = true;
             raisedFrom = undefined;
             player.writeFailed();
@@ -592,15 +646,16 @@ export const RELEASE_INCOMPLETE =
 
 /**
  * What a rider is told while a block's target is not being sent, because it
- * is more than {@link LARGEST_RAISE_WATTS} under the trainer's minimum (#1305).
+ * is more than {@link LARGEST_RAISE_WATTS} under the trainer's minimum and
+ * the minimum is not known to be at or below what the trainer holds (#1305).
  *
- * ⚠️ Says what the trainer was last SET to, which is the last write it
- * acknowledged to this session. Nothing is written on a refusal, so that is
- * the target the machine is left on, as far as this app can tell.
+ * ⚠️ Says nothing about what the trainer holds, because on the ride screen
+ * this app knows of nothing there when it is shown: the control client never
+ * sends a target under the machine's minimum, so any target it knows of is at
+ * or above the floor, and then the floor is written and not refused.
  */
-export function raiseRefusedText(minimum: Watts, lastSet: Watts | undefined): string {
-  const why = `This trainer's lowest target is ${String(minimum)} W, more than ${String(LARGEST_RAISE_WATTS)} W above what this block asks for, so no target was sent for it.`;
-  return lastSet === undefined ? why : `${why} The trainer was last set to ${String(lastSet)} W.`;
+export function raiseRefusedText(minimum: Watts): string {
+  return `This trainer's lowest target is ${String(minimum)} W, more than ${String(LARGEST_RAISE_WATTS)} W above what this block asks for, so no target was sent for it.`;
 }
 
 /** A target held back while the trainer is let go so it can be forgotten (#729). */
