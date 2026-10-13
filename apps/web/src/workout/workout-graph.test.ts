@@ -669,7 +669,7 @@ describe('the numbers written on the lanes — #1307', () => {
   it('writes the confirmed target and the rider’s power, in watts, on the last lane', () => {
     expect(
       workoutGraphLabels(input({ trace: [sample(300, { target: 150, power: 147.6 })] })).trace,
-    ).toEqual({ title: 'Last 5 minutes', reading: 'Target 150 W · You 148 W' });
+    ).toEqual({ title: 'Last 5 min', reading: 'Target 150 W · You 148 W' });
   });
 
   it('writes what the plan asks beside the target when the trainer holds something else', () => {

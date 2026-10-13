@@ -1961,7 +1961,7 @@ for (const viewport of EASED_VIEWPORTS) {
     // Two lanes outside a hold, each with its numbers.
     expect(seen.lanes.map((each) => each.name)).toEqual(['plan', 'trace']);
     expect(laneOf(seen, 'plan').captionText).toEqual(['Whole workout', '5:12 of 12:00']);
-    expect(laneOf(seen, 'trace').captionText[0]).toBe('Last 5 minutes');
+    expect(laneOf(seen, 'trace').captionText[0]).toBe('Last 5 min');
     expect(laneOf(seen, 'trace').captionText[1]).toMatch(/^Target 225 W · You \d+ W$/);
     // Nothing needs explaining, so nothing is said under the graph.
     expect(seen.key).toBeUndefined();
@@ -2055,47 +2055,56 @@ for (const state of LANDSCAPE_STATES) {
 
 /**
  * ⚠️ On wider fonts. The three captions of a PAUSED hold are the longest
- * there are, and on the CI runner's fonts — about 5 % wider than a Mac's —
- * the first layout of them wrapped the plan lane's, and the second left the
- * heart-rate lane 98 px of drawing; both were green on the Mac they were
- * written on. So the same case is measured with every caption's letters
- * spaced 0.02em apart, about 4 % wider: on a Mac that is nearly the
- * runner's fonts, and on the runner it is that much wider again.
+ * there are, and what fits on a Mac did not fit on the CI runner, whose fonts
+ * are wider: one layout wrapped the plan lane's caption there, and another
+ * left the heart-rate lane 98 px of drawing. Both were green where they were
+ * written. So the same case is measured again and again with the captions'
+ * letters spaced further apart, until a caption wraps:
  *
- * Measured on a Mac, for whoever changes this: the captions stay on one line
- * each up to 0.07em and wrap at 0.08em, and without the heart-rate lane's
- * floor its drawing is 108 px here where with it it is 112.
+ * - it must NOT wrap as it is, nor at 0.02em (about 4 % wider) — a margin;
+ * - at every width it fits, every lane must still have a drawing over 110 px
+ *   wide. That is the heart-rate lane's floor in `theme.css`, which only
+ *   binds once the other captions have taken the spare width.
+ *
+ * ⚠️ A SEARCH, not one fixed width. Three fixed widths were written first,
+ * and each was right for one machine's fonts and wrong for the other's.
+ * Measured on a Mac: the captions fit up to 0.09em and wrap at 0.11em.
  */
 test(`a paused hold’s three captions stay on one line each on wider fonts — #1307 — ${TABLET_IN_THE_SHELL.name}`, async ({
   page,
 }) => {
   const viewport = TABLET_IN_THE_SHELL;
   await open(page, viewport, '?workout=paused-hold');
-  /** How wide the longest caption's own TEXT is — not its lane, which may have no room to grow. */
-  const readingWidth = (): Promise<number> =>
-    page.evaluate(
-      () =>
-        document
-          .querySelector('[data-oyl-lane="trace"] .oyl-workout-graph__reading')
-          ?.getBoundingClientRect().width ?? 0,
-    );
-  const before = await readingWidth();
-  await page.addStyleTag({ content: '.oyl-workout-graph__caption { letter-spacing: 0.02em; }' });
-  const seen = await graphOnTheRideScreen(page);
-  if (seen === undefined) throw new Error('no workout graph');
-  // The apparatus: the caption's text really is wider than it was. 29
-  // characters at 0.02em of a 12.8 px face is 7 px, whatever the face.
-  expect(before).toBeGreaterThan(100);
-  expect(await readingWidth()).toBeGreaterThan(before + 5);
-  expect(seen.lanes).toHaveLength(3);
-  for (const lane of seen.lanes) {
-    expect(lane.caption.height, `${lane.name} caption`).toBeLessThanOrEqual(
-      1.7 * lane.captionFontSize,
-    );
-    expect(lane.svg.width, lane.name).toBeGreaterThan(110);
+  const fitted: number[] = [];
+  let narrowest = Infinity;
+  for (const spacing of [0, 0.02, 0.04, 0.06, 0.08, 0.1, 0.12, 0.14]) {
+    await page.evaluate((em) => {
+      const id = 'oyl-test-wider-captions';
+      const style = document.getElementById(id) ?? document.createElement('style');
+      style.id = id;
+      style.textContent = `.oyl-workout-graph__caption { letter-spacing: ${String(em)}em; }`;
+      document.head.append(style);
+    }, spacing);
+    const seen = await graphOnTheRideScreen(page);
+    if (seen === undefined) throw new Error('no workout graph');
+    expect(seen.lanes).toHaveLength(3);
+    if (seen.lanes.some((lane) => lane.caption.height > 1.7 * lane.captionFontSize)) {
+      break;
+    }
+    fitted.push(spacing);
+    for (const lane of seen.lanes) {
+      expect(lane.svg.width, `${lane.name} at ${String(spacing)}em`).toBeGreaterThan(110);
+      narrowest = Math.min(narrowest, lane.svg.width);
+    }
+    expect(seen.frameOverflow).toBeLessThanOrEqual(0);
+    expect(seen.group.bottom).toBeLessThanOrEqual(viewport.height - insetsOf(viewport).bottom);
   }
-  expect(seen.frameOverflow).toBeLessThanOrEqual(0);
-  expect(seen.group.bottom).toBeLessThanOrEqual(viewport.height - insetsOf(viewport).bottom);
+  // As it is, and 4 % wider. The search went on past that, or it found nothing.
+  expect(fitted.slice(0, 2)).toEqual([0, 0.02]);
+  expect(fitted.length).toBeLessThan(8);
+  console.log(
+    `#1307 a paused hold’s captions — ${viewport.name}: one line each up to ${String(fitted.at(-1))}em of letter-spacing; narrowest drawing ${narrowest.toFixed(1)} px`,
+  );
 });
 
 /**

@@ -1036,7 +1036,13 @@ export interface LaneLabel {
 
 export const GRAPH_TITLE_PLAN = 'Whole workout';
 export const GRAPH_TITLE_HEART_RATE = 'Heart rate';
-export const GRAPH_TITLE_TRACE = 'Last 5 minutes';
+/**
+ * ⚠️ "min", not "minutes": measured, not taste. At 1280×800 a paused hold has
+ * three captions side by side, this lane's the longest ("Paused · Target
+ * 50 W · You 0 W"), and on the CI runner's fonts they fit on one line each
+ * with less than 4 % to spare. The shorter title is 26 px.
+ */
+export const GRAPH_TITLE_TRACE = 'Last 5 min';
 
 /**
  * What the trainer holds, in the few words a caption and the HUD strip have.
