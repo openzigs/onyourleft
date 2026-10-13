@@ -841,3 +841,15 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
     saves, and a ride recovered after a crash is saved without them, as it is without
     `workoutFinished`. Carrying them in the checkpoint is
     [#1328](https://github.com/openzigs/onyourleft/issues/1328). (#1244)
+
+- **2026-10-13** — **After #1244's fourth review, one line of the entry above is withdrawn:
+  `on-plan` is never said.** That entry had *"because the workout is going to plan"* said when the
+  block just ridden had no eased target and a heart rate not outside a chosen range. The review
+  measured it holding for a block ridden at a third of its target, and for a summary with no
+  reading in it. To see that a workout is going to plan a device has to set the rider's power
+  against the target, which is the figure of how well a plan is being followed that
+  [spike 0022](../spikes/0022-re-plans-during-the-ride-patent-chart.md)'s rule R1 keeps off the
+  ride path. A premise the device may not compute is one it cannot see, so `on-plan` joins
+  `goal-time-in-range` and `effort-check-in`: the move is said alone, and P9's record carries
+  `reasonNotShown`. Four reasons can still be said: `heart-rate-high`, `heart-rate-low`,
+  `cadence-falling` and `goal-duration`. (#1244)
