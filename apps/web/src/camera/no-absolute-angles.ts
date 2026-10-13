@@ -358,14 +358,32 @@ function ruleBroken(text: string): AngleClaimFinding['rule'] | undefined {
   return first === undefined ? undefined : RULE_OF_KIND[first];
 }
 
-/** Every absolute-angle or frontal-plane claim in one file's rendered text. */
-export function angleClaimsIn(file: string, source: string): readonly AngleClaimFinding[] {
-  const findings: AngleClaimFinding[] = [];
+/** One piece of rendered text a rule fired on: where it starts, the text, and what it broke. */
+export interface RenderedTextFinding<Rule> {
+  /** 1-based, so it matches what an editor shows. */
+  readonly line: number;
+  readonly text: string;
+  readonly rule: Rule;
+}
+
+/**
+ * Every piece of one file's rendered text that `ruleBroken` fires on: each
+ * string, template and piece of JSX text on its own, and then each JSX
+ * element whole. The reading is this scan's, parsed once; the rule is the
+ * caller's, so a second wording rule (`privacy/no-medical-wording.ts`, #1245)
+ * reads the same text the same way rather than keeping a copy of the reader.
+ */
+export function renderedTextFindings<Rule>(
+  file: string,
+  source: string,
+  ruleBroken: (text: string) => Rule | undefined,
+): readonly RenderedTextFinding<Rule>[] {
+  const findings: RenderedTextFinding<Rule>[] = [];
   const parsed = parse(file, source);
   for (const { line, text } of textsOf(parsed)) {
     const rule = ruleBroken(text);
     if (rule !== undefined) {
-      findings.push({ file, line, text: text.trim(), rule });
+      findings.push({ line, text: text.trim(), rule });
     }
   }
   // A word split across elements: the element is read whole with every piece
@@ -379,10 +397,20 @@ export function angleClaimsIn(file: string, source: string): readonly AngleClaim
     );
     const rule = ruleBroken(rest);
     if (rule !== undefined) {
-      findings.push({ file, line, text: rest, rule });
+      findings.push({ line, text: rest, rule });
     }
   }
   return findings;
+}
+
+/** Every absolute-angle or frontal-plane claim in one file's rendered text. */
+export function angleClaimsIn(file: string, source: string): readonly AngleClaimFinding[] {
+  return renderedTextFindings(file, source, ruleBroken).map(({ line, text, rule }) => ({
+    file,
+    line,
+    text,
+    rule,
+  }));
 }
 
 /**

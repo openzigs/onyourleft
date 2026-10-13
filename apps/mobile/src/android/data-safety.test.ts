@@ -839,3 +839,60 @@ describe('a write-up asked of the rider’s instance (#1102, #1104 B8)', () => {
     },
   );
 });
+
+describe('block summaries sent during a ride, for a re-plan (#1245, ADR 0048 D-10)', () => {
+  const row = (dataType: string) =>
+    DATA_SAFETY_DECLARATION.find((answer) => answer.dataType === dataType);
+
+  it.each([
+    [
+      'Health and fitness — health info',
+      'its mean and highest heart rate, and how long the heart rate was inside the range the rider chose',
+    ],
+    [
+      'Health and fitness — fitness info',
+      'its mean power as a share of the rider’s threshold power, its mean cadence',
+    ],
+  ])(
+    'the %s row says what a summary carries, when it is sent, to whom, and that it is off per ride',
+    (dataType, carries) => {
+      const why = row(dataType)?.why ?? '';
+      expect(why).toContain(carries);
+      expect(why).toContain(
+        'With re-plans during the ride switched on for a ride (#1245; off at the start of every ride)',
+      );
+      expect(why).toContain('is sent during the ride to the instance the rider connected');
+      expect(why).toContain('which keeps each request for 7 days');
+      // The hosted source: the rider's own key and consent, a third party, masked.
+      expect(why).toContain(
+        'the instance sends them on, masked, to that service — a third party, already shared',
+      );
+      expect(why).toContain(
+        'No position, date, name or identifier is in a summary, and no second-by-second recording is sent',
+      );
+      // Collected and shared before this: the answers filed on Play do not move.
+      expect(row(dataType)).toMatchObject({ collected: true, shared: true, optional: true });
+    },
+  );
+
+  it('the rider’s own text row names the workout goals and what a re-plan’s model may look up', () => {
+    const answer = row('App activity — Other user-generated content');
+    expect(answer).toMatchObject({ collected: true, shared: true, optional: true });
+    expect(answer?.why).toContain(
+      'the rider’s workout goals go to their instance with each block summary, sealed',
+    );
+    expect(answer?.why).toContain(
+      'what the rider wrote about their goals and the blocks of their saved workouts, if synced',
+    );
+    expect(answer?.why).toContain('those are sent to it, masked first');
+  });
+
+  it('moves no other row: location, photos and identifiers say nothing of a re-plan', () => {
+    const others = DATA_SAFETY_DECLARATION.filter((answer) => answer.why.includes('re-plan'));
+    expect(others.map((answer) => answer.dataType)).toStrictEqual([
+      'Health and fitness — health info',
+      'Health and fitness — fitness info',
+      'App activity — Other user-generated content',
+    ]);
+  });
+});
