@@ -372,8 +372,7 @@ export interface RideWorkoutSnapshot {
    * trace is what it draws, and is not sampled while the ride is paused.
    */
   readonly live?:
-    | { readonly power: number | undefined; readonly heartRate: number | undefined }
-    | undefined;
+    { readonly power: number | undefined; readonly heartRate: number | undefined } | undefined;
   /**
    * Whether no target is being sent for the block being ridden, because it
    * would be a large raise (#1305) — the session's `raiseRefused`, the fact
