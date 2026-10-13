@@ -63,13 +63,18 @@ vi.mock('./gradient', async (importOriginal) => {
  * `announce` still runs.
  */
 const offered = vi.hoisted((): string[] => []);
+/** While `on`, the region is held by something higher: no window is open to say anything in. */
+const held = vi.hoisted(() => ({ on: false }));
 vi.mock('./hud/announce', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./hud/announce')>();
   return {
     ...actual,
     announce: (...args: Parameters<typeof actual.announce>) => {
       for (const event of args[1].events ?? []) offered.push(event.kind);
-      return actual.announce(...args);
+      return actual.announce(
+        held.on ? { ...args[0], lastSpokenAt: args[1].now } : args[0],
+        args[1],
+      );
     },
   };
 });
@@ -81,9 +86,11 @@ import {
   geographicPosition,
   kilograms,
   routeProfile,
+  metres,
   seconds,
   SIMULATION_SETPOINT_INTERVAL_SECONDS,
   watts,
+  unixSeconds,
   type RoutePoint,
 } from '@onyourleft/domain';
 import type { SimulationParameters } from '@onyourleft/sensors/protocol';
@@ -92,6 +99,7 @@ import { createSimulator, ftmsTrainer } from '@onyourleft/sensors/simulator';
 import { activityId, lapId, recordingSessionId } from '@onyourleft/store';
 import { ATHLETE_A, createStoreHarness, seedAthletes } from '@onyourleft/store/testing';
 
+import { LAP_NOTICE_SECONDS } from './hud/lap-text';
 import { createRideController } from '../ride/controller';
 import { CORRECTION_GRADE_STEP_PERCENT_PER_SECOND } from '../net/correction';
 import { roomPortOver } from '../net/room-port';
@@ -1640,3 +1648,128 @@ async function pumpWith(clock: ManualClock, count: number): Promise<void> {
     await pump(1);
   }
 }
+
+/** 300 flat metres out and back: a loop (#1312's review tests). */
+function lapCircuit(): RidableRoute {
+  const points: RoutePoint[] = [];
+  for (let index = 0; index <= 30; index += 1) {
+    const out = index <= 15 ? index : 30 - index;
+    points.push({
+      position: geographicPosition(
+        degreesLatitude(51.5 + (out * 10) / 111_320),
+        degreesLongitude(-0.12),
+      ),
+      elevation: altitudeMetres(20),
+    });
+  }
+  return {
+    id: 'route-circuit',
+    name: 'Test circuit',
+    profile: routeProfile(points, { loop: true }),
+    attempts: 0,
+  };
+}
+
+const LAP_FIGURES = {
+  startedAt: unixSeconds(1_000),
+  elapsedTime: seconds(60),
+  movingTime: seconds(60),
+  distance: metres(300),
+  averagePower: watts(300),
+};
+
+/** A port that records every line event and answers each lap with one lap. */
+function linePort(events: string[]): GameTrainerPort {
+  return {
+    ...gameTrainerPortOver(undefined),
+    courseLine: (event) => {
+      events.push(event.kind);
+      return event.kind === 'lap' ? [LAP_FIGURES] : undefined;
+    },
+  };
+}
+
+async function mountCircuit(events: string[]): Promise<void> {
+  mounted = await mount(
+    <GameView
+      port={pedallingPort(lapCircuit())}
+      trainer={linePort(events)}
+      renderer={() => Promise.resolve(capturingRenderer([]))}
+      now={() => nowMs}
+    />,
+  );
+  await settle();
+}
+
+/** Frames of ride until the line has been reported `count` times as a lap. */
+async function pumpUntilLaps(events: string[], count: number): Promise<number> {
+  let frames = 0;
+  while (events.filter((kind) => kind === 'lap').length < count && frames < 2_000) {
+    await pump(1);
+    frames += 1;
+  }
+  expect(events.filter((kind) => kind === 'lap').length).toBe(count);
+  return frames;
+}
+
+const hudText = (): string => mounted?.container.textContent ?? '';
+
+/**
+ * #1312's review: `End ride` returns to the picker in the SAME mount, so what a
+ * ride leaves in `GameView`'s refs outlives it. A second ride must begin with
+ * no laps done, no lap notice and no sentence owed.
+ */
+describe('a second game ride in one mount begins with no lap of the first — #1312', () => {
+  it('counts its own laps, and shows and says nothing the first ride owed', async () => {
+    held.on = false;
+    const events: string[] = [];
+    await mountCircuit(events);
+
+    await clickThrough(buttonStarting('Ride '));
+    const first = await pumpUntilLaps(events, 1);
+    await pumpUntilLaps(events, 2);
+    // End ride with the second lap's notice on the HUD and its sentence owed.
+    expect(hudText()).toMatch(/Lap 1: /);
+    await clickThrough(buttonStarting('End ride'));
+    await settle();
+
+    events.length = 0;
+    offered.length = 0;
+    await clickThrough(buttonStarting('Ride '));
+    // The previous ride's notice is not carried over, nor its sentence offered.
+    await pump(2);
+    expect(hudText()).not.toMatch(/Lap 1: /);
+    expect(offered).not.toContain('lap-ended');
+    // The second ride's first lap is its own: after about as long as the
+    // first's, and not once the odometer passes the first ride's two laps.
+    const second = await pumpUntilLaps(events, 1);
+    expect(second).toBeLessThanOrEqual(first + 4);
+  });
+});
+
+describe('the lap sentence is never said after its notice has gone — #1312', () => {
+  it('is taken back once the notice has gone, however long a higher event held the region', async () => {
+    const events: string[] = [];
+    await mountCircuit(events);
+    await clickThrough(buttonStarting('Ride '));
+    held.on = true;
+    try {
+      await pumpUntilLaps(events, 1);
+      // Held, so the sentence waits — and is offered while it can still be said.
+      expect(offered).toContain('lap-ended');
+      for (let frames = 0; frames < (LAP_NOTICE_SECONDS + 2) * 2; frames += 1) await pump(1);
+      expect(hudText()).not.toMatch(/Lap 1: /);
+      offered.length = 0;
+      await pump(2);
+      // The notice has gone, so the sentence is no longer offered.
+      expect(offered).not.toContain('lap-ended');
+    } finally {
+      held.on = false;
+    }
+    // And the region, free again, does not say it late.
+    await pump(4);
+    expect(
+      mounted?.container.querySelector('[data-oyl-announcer="hud"]')?.textContent ?? '',
+    ).not.toMatch(/^Lap 1:/);
+  });
+});
