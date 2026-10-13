@@ -851,7 +851,7 @@ describe('block summaries sent during a ride, for a re-plan (#1245, ADR 0048 D-1
     ],
     [
       'Health and fitness — fitness info',
-      'its mean power as a share of the rider’s threshold power, its mean cadence',
+      'its mean power as a share of the rider’s threshold power, its mean cadence and how many times the target was eased',
     ],
   ])(
     'the %s row says what a summary carries, when it is sent, to whom, and that it is off per ride',
@@ -861,12 +861,16 @@ describe('block summaries sent during a ride, for a re-plan (#1245, ADR 0048 D-1
       expect(why).toContain(
         'With re-plans during the ride switched on for a ride (#1245; off at the start of every ride)',
       );
-      expect(why).toContain('is sent during the ride to the instance the rider connected');
-      expect(why).toContain('which keeps each request for 7 days');
-      // The hosted source: the rider's own key and consent, a third party, masked.
       expect(why).toContain(
-        'the instance sends them on, masked, to that service — a third party, already shared',
+        'is sent during the ride, as a block begins and never more often than every 3 minutes, to the instance the rider connected',
       );
+      expect(why).toContain('which keeps each request for 7 days');
+      // No hosted source: #1244 asks only the instance's own model, so a re-plan shares nothing.
+      expect(why).toContain(
+        'the app asks for no hosted service for a re-plan, so a re-plan sends nothing to a third party and does not add to shared',
+      );
+      expect(why).not.toContain('the instance sends them on');
+      expect(why).not.toContain('effort check-in');
       expect(why).toContain(
         'No position, date, name or identifier is in a summary, and no second-by-second recording is sent',
       );
@@ -879,12 +883,28 @@ describe('block summaries sent during a ride, for a re-plan (#1245, ADR 0048 D-1
     const answer = row('App activity — Other user-generated content');
     expect(answer).toMatchObject({ collected: true, shared: true, optional: true });
     expect(answer?.why).toContain(
-      'the rider’s workout goals go to their instance with each block summary, sealed',
+      'go to their instance with each block summary, sealed, and the model on the instance’s own machine may look up',
     );
     expect(answer?.why).toContain(
       'what the rider wrote about their goals and the blocks of their saved workouts, if synced',
     );
-    expect(answer?.why).toContain('those are sent to it, masked first');
+    expect(answer?.why).toContain(
+      'but not the time they want to spend in their range, which the app leaves out',
+    );
+    expect(answer?.why).toContain(
+      'the app asks for no hosted service for a re-plan, so none of it is sent to a third party',
+    );
+    expect(answer?.why).not.toContain('those are sent to it, masked first');
+  });
+
+  it('the health info row names the heart-rate numbers the rider chose, which travel too', () => {
+    const why = row('Health and fitness — health info')?.why ?? '';
+    expect(why).toContain(
+      'the range of each heart-rate-hold block of the workout, in beats per minute',
+    );
+    expect(why).toContain(
+      'from their workout goals the heart-rate range and the heart rate they chose not to go above',
+    );
   });
 
   it('moves no other row: location, photos and identifiers say nothing of a re-plan', () => {

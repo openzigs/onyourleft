@@ -38,10 +38,21 @@
  *   `workout/replan-disclosure.test.ts`), and a reviewer reads the rest.
  * - **A word assembled at run time**, or split around an expression the scan
  *   cannot read (`<p>car{x}diac</p>`).
- * - **What a model is told.** The prompts in `@onyourleft/analysis` and in
- *   `apps/instance` are instructions to a model, not text a rider is shown,
- *   and they use one of these words to forbid it (*"Do not name any illness,
- *   injury or medical condition"*). They are not scanned.
+ * - **An inflection or a compound no entry names.** Each entry lists its own
+ *   forms (`BANNED_WORDS`): *therapist* and *therapeutic* are read and
+ *   *physiotherapy*, *therapeutically*, *rehabbing* and *rehabbed* are not.
+ *   Nor is a paraphrase of a phrase: *a safer heart rate*, *a safe maximum
+ *   heart rate*, *protect the heart*. D-12 is a list of nine, and the scan is
+ *   that list; a reviewer reads for the claim.
+ * - **A look-alike letter.** A Cyrillic or fullwidth letter that draws as a
+ *   Latin one makes a different word to this scan. Invisible characters are
+ *   removed because an editor or a paste can leave one by accident; a
+ *   look-alike letter takes intent, and review is what answers that.
+ * - **What a model is told by `apps/instance`.** Its prompts are instructions
+ *   to a model, not text a rider is shown, and are not scanned. Every
+ *   `packages/*` tree IS walked, `@onyourleft/analysis` included, with the
+ *   one line of its prompt that uses one of these words to forbid it excused
+ *   by equality ({@link EXEMPT}).
  * - **Anything a rider reads that is not in the scanned trees**: the Play
  *   listing, the README and release notes. Those are the reviewer checklist's
  *   (`apps/mobile/RELEASE.md` §4), which spike 0008 §8 records as unscanned.
@@ -54,23 +65,32 @@ import { visibleText } from '@onyourleft/analysis';
 import { renderedTextFindings } from '../camera/no-absolute-angles';
 
 /**
+ * What may part the words of a phrase: any white space (a line break and a
+ * non-breaking space are both `\s`), a hyphen-minus, or one of the dashes
+ * U+2010 to U+2014 — a hyphen, a non-breaking hyphen, a figure dash, an en
+ * dash and an em dash. Each renders as a join between the same two words.
+ */
+const GAP = String.raw`[\s\-\u2010-\u2014]+`;
+
+/**
  * ADR 0048 D-12's list, word for word, each with the pattern that finds it.
  * Adding or removing one is a change to that decision, not an edit here.
  *
  * Each pattern is matched against text with its invisible characters removed
- * and is case-insensitive. A phrase's words may be parted by any white space
- * or a hyphen, because that is how a line break or a non-breaking space
- * renders.
+ * and is case-insensitive. A phrase's words may be parted by {@link GAP}.
  */
 export const BANNED_WORDS = [
   { word: 'cardiac', pattern: /\bcardiac\b/i },
-  { word: 'heart condition', pattern: /\bheart[\s-]+conditions?\b/i },
+  { word: 'heart condition', pattern: new RegExp(`\\bheart${GAP}conditions?\\b`, 'i') },
   // The noun, the verb, and the short form a rider would read as the same word.
   { word: 'rehabilitation', pattern: /\brehab(?:s|ilitat\w*)?\b/i },
   { word: 'patient', pattern: /\bpatients?\b/i },
   { word: 'therapy', pattern: /\btherap(?:y|ies|ist|ists|eutic|eutics)\b/i },
-  { word: 'safe heart rate', pattern: /\bsafe[\s-]+heart[\s-]+rates?\b/i },
-  { word: 'protects your heart', pattern: /\bprotect(?:s|ed|ing)?[\s-]+your[\s-]+heart\b/i },
+  { word: 'safe heart rate', pattern: new RegExp(`\\bsafe${GAP}heart${GAP}rates?\\b`, 'i') },
+  {
+    word: 'protects your heart',
+    pattern: new RegExp(`\\bprotect(?:s|ed|ing)?${GAP}your${GAP}heart\\b`, 'i'),
+  },
   { word: 'medical', pattern: /\bmedical(?:ly)?\b/i },
   { word: 'clinical', pattern: /\bclinical(?:ly)?\b/i },
 ] as const satisfies readonly { readonly word: string; readonly pattern: RegExp }[];
@@ -104,11 +124,16 @@ export function medicalWordingIn(file: string, source: string): readonly Medical
   }));
 }
 
+/** The one line of the write-up prompts that names a banned word, in order to forbid it. */
+const PROMPT_FORBIDS_THE_WORD =
+  'Do not name any illness, injury or medical condition, and do not recommend changing any part of the bicycle or its fit.';
+
 /**
  * What is excused, where, and why — each entry names the file and **the whole
  * of the text** it excuses (equality, never containment), as
  * `no-absolute-angles.ts` §`EXEMPT` does and for its reason. An entry is a
- * decision a reviewer reads, and one that excuses nothing fails the gate.
+ * decision a reviewer reads, and one that excuses nothing fails the gate. A
+ * file outside `apps/web/src` is named relative to it, with `/`.
  */
 export const EXEMPT: readonly {
   readonly file: string;
@@ -120,6 +145,11 @@ export const EXEMPT: readonly {
     text: 'This app did not write it and cannot check it. It can be wrong. It is not medical advice.',
     why: 'ADR 0035 D-9 A, the owner’s approved framing above every model-written write-up, word for word: it is about an analysis, not a workout, and it disclaims rather than claims (ADR 0035 D-9, "A says not medical advice")',
   },
+  ...['agent-v1.ts', 'template-v1.ts', 'template-v2.ts'].map((template) => ({
+    file: `../../../packages/analysis/src/template/${template}`,
+    text: PROMPT_FORBIDS_THE_WORD,
+    why: 'an instruction to a model, not text a rider is shown: the write-up prompt uses the word to forbid it. Excused as this one whole sentence in the three prompt templates that carry it, so any other sentence in @onyourleft/analysis is still read',
+  })),
 ];
 
 /** Whether a finding is one {@link EXEMPT} excuses: the same file and the same whole text. */

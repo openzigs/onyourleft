@@ -10,10 +10,30 @@
  * things (`replan-disclosure.test.ts` holds them together, word for word).
  *
  * ⚠️ **DRAFT wording, awaiting the owner's approval**, which the pull request
- * that ships it quotes. **Nothing renders it yet**: the switch is
- * [#1244](https://github.com/openzigs/onyourleft/issues/1244)'s, which is
- * blocked on this wording and shows these sentences beside the switch — a
+ * that ships it quotes. The switch is
+ * [#1244](https://github.com/openzigs/onyourleft/issues/1244)'s, on the Ride
+ * screen's workout panel, and shows these sentences beside the switch — a
  * disclosure, so never behind a disclosure widget.
+ *
+ * ## It describes what #1244 builds, and nothing it does not
+ *
+ * - **Only the instance's own model is asked** (`instance-local`). ADR 0048
+ *   D-11 allows a hosted re-plan on the rider's own key, and the instance
+ *   (#1243) can run one, but the device builds no request for it. So there is
+ *   **no hosted form of this disclosure here**: one was drafted and removed
+ *   with #1245's review, unapproved and never rendered. A hosted re-plan needs
+ *   its own wording, approved, and the owner's answer on whether the hosted
+ *   consent must name re-plans, before any switch can ask for one.
+ * - **The goal's time-in-range target is withheld** (spike 0022's rule R1,
+ *   the owner's conservative default), and the text says so.
+ * - **A request leaves as a block begins, and at least 3 minutes after the
+ *   last** (`@onyourleft/domain` §`REPLAN_MOVE_INTERVAL_SECONDS`).
+ * - **The device sends no effort check-in**: the instance has a key for one
+ *   (`BLOCK_SUMMARY_KEYS` §`effort`) and the device does not write it, so the
+ *   text does not claim it. `replan-disclosure.test.ts` §`NOT_SENT` names it.
+ * - **The record of each decision (P9) stays on the device**, with the ride
+ *   and in the export. It is not synced
+ *   ([#1315](https://github.com/openzigs/onyourleft/issues/1315)).
  *
  * ## The rulings the wording is bound by (#1233, 2026-10-09)
  *
@@ -23,9 +43,8 @@
  *   yet ridden; the device checks it and computes every watt; it is applied at
  *   the next block boundary, with one *Keep the plan* control; off unless
  *   switched on for the ride.
- * - **Q5**: the instance's own model, or a hosted model **only on the rider's
- *   own key**, under their recorded consent naming the endpoint, masked. The
- *   operator's key is never used.
+ * - **Q5**: the instance's own model. (Q5 also allows a hosted model on the
+ *   rider's own key; nothing here asks for one — see above.)
  * - **Q10**: the name is *re-plan during the ride*.
  * - **Q12**: none of D-12's banned words (`privacy/no-medical-wording.ts`
  *   scans this file with the rest), no heart-rate number called a limit, and
@@ -40,11 +59,8 @@
  * (`DEFAULT_RETENTION_MS`, 7 days). A change to any of those is a change here
  * and in the policy.
  *
- * It names no vendor and no model (ADR 0031 D-4): a hosted service is named by
- * the address the rider agreed to.
+ * It names no vendor and no model (ADR 0031 D-4).
  */
-
-import { MASKING_LIMIT } from '../camera/hosted-model';
 
 /** The switch's label: the owner's name for the feature (Q10). */
 export const REPLAN_SWITCH_LABEL = 'Re-plan during the ride';
@@ -59,12 +75,6 @@ export const REPLAN_KEEP_BUTTON = 'Keep the plan';
 export const HOLD_SENDS_NOTHING =
   'A heart-rate hold on its own sends nothing anywhere: it runs on this device.';
 
-/** Which model the rider's instance would ask: its own, or a hosted service on the rider's key. */
-export type ReplanDisclosureSource =
-  | { readonly source: 'instance-local' }
-  /** `endpoint` is the origin the rider's hosted consent names, for example `https://api.example.com`. */
-  | { readonly source: 'instance-hosted'; readonly endpoint: string };
-
 /** The disclosure, as the Ride screen shows it beside the switch. */
 export interface ReplanDisclosure {
   readonly headline: string;
@@ -75,18 +85,41 @@ export interface ReplanDisclosure {
   readonly offUntilOn: string;
 }
 
-/** What is sent, and when. The list is `BLOCK_SUMMARY_KEYS`, in a rider's words. */
+/** When a request leaves, and what one block's summary carries: `BLOCK_SUMMARY_KEYS`, less `effort`. */
 const WHAT_IS_SENT =
-  'While it is on, this device sends your instance a summary of each block you have ridden, at ' +
-  'the end of a block, or every few minutes in a long one: how long the block lasted, your mean ' +
-  'and highest heart rate, how long your heart rate was inside the range you chose, your mean ' +
-  'power as a share of your threshold power, your mean cadence, how many times the target had ' +
-  'to be eased, and your effort check-in if you gave one. With it go the blocks of the workout ' +
-  'as it stands and your workout goals.';
+  'While it is on, as each block of the workout begins, and never more often than every 3 ' +
+  'minutes, this device sends your instance a summary of each block you have ridden so far: ' +
+  'how long the block lasted, your mean and highest heart rate, how long your heart rate was ' +
+  'inside the range you chose, your mean power as a share of your threshold power, your mean ' +
+  'cadence, and how many times the target had to be eased.';
+
+/** The plan's blocks, key by key (`replan-input.ts` §`BLOCK_FIGURES` and a hold's `range`). */
+const THE_BLOCKS =
+  'With it go the blocks of the workout as it stands and which one you are riding: the kind of ' +
+  'each block, how long it lasts, how many times an interval repeats, its power targets as ' +
+  'shares of your threshold power and, for a heart-rate hold, the range you chose in beats per ' +
+  'minute.';
+
+/** The typed goals, field by field (`@onyourleft/domain` §`WorkoutGoals`), and the one withheld. */
+const THE_GOALS =
+  'So do your workout goals: the kind of session, its length, the heart-rate range you chose ' +
+  'and the heart rate you chose not to go above, both in beats per minute, the most power as a ' +
+  'share of your threshold power, and whether you want to be asked how hard it feels. The time ' +
+  'you want to spend in your range is not sent.';
 
 const WHAT_IS_NEVER_SENT =
-  'It never sends a second-by-second recording, where you are, the date, your name or the ' +
-  "workout's name. It is sealed on this device so that only your instance can open it.";
+  'It never sends a second-by-second recording, where you are, the date, your name, the ' +
+  "workout's name, the labels of its blocks or a number of watts. It is sealed on this device " +
+  'so that only your instance can open it.';
+
+/** Who answers, what the model may look up (`replan-tools.ts`), and that it goes no further. */
+const WHO_IS_ASKED =
+  'Your instance asks a model on its own machine whether to suggest one change to the blocks ' +
+  'you have not ridden yet. The model may look up what you wrote about your goals and the ' +
+  'blocks of your saved workouts, if you synced them. It answers with one change from a fixed ' +
+  'list, or none: never with words, and never with a number of watts. None of it is sent on to ' +
+  "a hosted service: this app asks only for the model on your instance's own machine, " +
+  'whatever key you stored there.';
 
 const WHO_DECIDES =
   `This device checks every suggestion against your workout goals and the workout you loaded, ` +
@@ -95,71 +128,38 @@ const WHO_DECIDES =
 
 const WHAT_IS_KEPT =
   'Your instance keeps each request and its answer for 7 days. This device keeps each change it ' +
-  'accepted or refused with the ride, and they go to your instance with the ride if you sync it.';
+  'accepted or refused with the ride, and puts them in your account export. They are not sent ' +
+  'to your instance when you sync.';
 
-/** What the model may look up, the same on either source (`replan-tools.ts`). */
-const LOOKED_UP =
-  'what you wrote about your goals and the blocks of your saved workouts, if you synced them';
+const NOT_NEEDED =
+  'You do not need this. The workout and a heart-rate hold work without it, and without an ' +
+  'instance.';
 
-const ANSWERS_WITH =
-  'It answers with one change from a fixed list, or none: never with words, and never with a ' +
-  'number of watts.';
+const OFF_UNTIL_ON =
+  'This is off. It is off at the start of every ride, and stays off until you switch it on ' +
+  'for that ride.';
 
 /**
- * The disclosure for the model the rider's instance would ask. The hosted one
- * says everything the other does, and then who else is sent it.
+ * The disclosure beside the switch. There is one: the rider's instance asks
+ * its own model, which is the only re-plan the device can ask for.
  */
-export function replanDisclosure(source: ReplanDisclosureSource): ReplanDisclosure {
-  const notNeeded =
-    'You do not need this. The workout and a heart-rate hold work without it, and without an ' +
-    'instance.';
-  const offUntilOn =
-    'This is off. It is off at the start of every ride, and stays off until you switch it on ' +
-    'for that ride.';
-  if (source.source === 'instance-local') {
-    return {
-      headline: 'This sends a summary of each block you ride to your instance, during the ride.',
-      paragraphs: [
-        WHAT_IS_SENT,
-        WHAT_IS_NEVER_SENT,
-        'Your instance asks a model on its own machine whether to suggest one change to the ' +
-          `blocks you have not ridden yet. The model may look up ${LOOKED_UP}. ${ANSWERS_WITH}`,
-        WHO_DECIDES,
-        WHAT_IS_KEPT,
-      ],
-      notNeeded,
-      offUntilOn,
-    };
-  }
-  const { endpoint } = source;
+export function replanDisclosure(): ReplanDisclosure {
   return {
-    headline:
-      'This sends a summary of each block you ride to your instance, during the ride, and from ' +
-      `there to ${endpoint}.`,
+    headline: 'This sends a summary of each block you ride to your instance, during the ride.',
     paragraphs: [
       WHAT_IS_SENT,
+      `${THE_BLOCKS} ${THE_GOALS}`,
       WHAT_IS_NEVER_SENT,
-      `Your instance asks the service at ${endpoint}, on your own key, whether to suggest one ` +
-        'change to the blocks you have not ridden yet. It sends that service the summaries, the ' +
-        `blocks and your workout goals, and the model may look up ${LOOKED_UP}, and be sent ` +
-        `them. ${ANSWERS_WITH}`,
-      'That is a company or a computer that is not yours and not ours, and we cannot see what ' +
-        'they do with it or how long they keep it. We cannot delete it for you afterwards. It ' +
-        "sees your instance's internet address, not this device's. It is sent there only " +
-        'because you stored your own key for that service on your instance and agreed to it by ' +
-        'its address.',
-      'The numbers carry no name, no place and no date. But what you wrote yourself can say ' +
-        'anything. Before anything is sent, your instance masks it as it does for a ride ' +
-        `analysis. ${MASKING_LIMIT}`,
+      WHO_IS_ASKED,
       WHO_DECIDES,
       WHAT_IS_KEPT,
     ],
-    notNeeded,
-    offUntilOn,
+    notNeeded: NOT_NEEDED,
+    offUntilOn: OFF_UNTIL_ON,
   };
 }
 
-/** Every sentence of one disclosure, in the order the screen shows them. */
+/** Every sentence of the disclosure, in the order the screen shows them. */
 export function replanDisclosureSentences(disclosure: ReplanDisclosure): readonly string[] {
   return [
     disclosure.headline,

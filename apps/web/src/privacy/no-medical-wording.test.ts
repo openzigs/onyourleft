@@ -15,8 +15,8 @@
  * non-test source, and that is what is scanned.
  */
 
-import { readdirSync, readFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
@@ -32,17 +32,25 @@ import {
 } from './no-medical-wording';
 
 const SOURCE_ROOT = fileURLToPath(new URL('..', import.meta.url));
+const PACKAGES_ROOT = fileURLToPath(new URL('../../../../packages/', import.meta.url));
 /**
- * `@onyourleft/domain`'s `src`: a workout's own sentences and refusals, which
- * this client renders. `@onyourleft/analysis` is not walked: what it holds is
- * what a model is told, which uses one of these words to forbid it
- * (`no-medical-wording.ts` §"What it cannot see").
+ * Every package's `src`, found on disk so that a package added later is
+ * walked without anybody remembering to list it. The client imports them and
+ * renders their sentences and refusals: a workout's own from
+ * `@onyourleft/domain`, and text from `analysis`, `store`, `sensors`,
+ * `physics` and `fit`. The one prompt sentence that uses a banned word to
+ * forbid it is excused by equality (`no-medical-wording.ts` §`EXEMPT`).
  */
-const DOMAIN_SOURCE_ROOT = fileURLToPath(
-  new URL('../../../../packages/domain/src/', import.meta.url),
-);
-/** Every tree the scan walks. A finding's file is named relative to `apps/web/src`. */
-const SCAN_ROOTS = [SOURCE_ROOT, DOMAIN_SOURCE_ROOT] as const;
+const PACKAGE_SOURCE_ROOTS = readdirSync(PACKAGES_ROOT, { withFileTypes: true })
+  .filter((entry) => entry.isDirectory())
+  .map((entry) => join(PACKAGES_ROOT, entry.name, 'src'))
+  .filter((source) => existsSync(source))
+  .sort();
+const DOMAIN_SOURCE_ROOT = join(PACKAGES_ROOT, 'domain', 'src');
+/** Every tree the scan walks. A finding's file is named relative to `apps/web/src`, with `/`. */
+const SCAN_ROOTS = [SOURCE_ROOT, ...PACKAGE_SOURCE_ROOTS];
+/** A scanned file as a finding and {@link EXEMPT} name it. */
+const named = (file: string): string => relative(SOURCE_ROOT, file).split(sep).join('/');
 /** The one file the walk leaves out: the rule itself, which has to spell what it forbids. */
 const RULE_MODULE = fileURLToPath(new URL('./no-medical-wording.ts', import.meta.url));
 
@@ -128,8 +136,8 @@ describe('the scan itself can fire', () => {
   it.each(controls)(
     'goes red on %s with an invisible character inside each of its words',
     (word, sentence) => {
-      // A soft hyphen, then a zero-width space, after the second letter of every word.
-      for (const invisible of ['­', '​', '⁠']) {
+      // A soft hyphen, a zero-width space and a word joiner, after the second letter of every word.
+      for (const invisible of ['\u00ad', '\u200b', '\u2060']) {
         const split = sentence.replaceAll(/\b(\w{2})(\w)/g, `$1${invisible}$2`);
         expect(split).not.toBe(sentence);
         expect(bannedWordIn(split), JSON.stringify(split)).toBe(word);
@@ -171,8 +179,27 @@ describe('the scan itself can fire', () => {
 
   it('reads a phrase parted by a hyphen, a line break or a non-breaking space', () => {
     expect(bannedWordIn('a heart-condition')).toBe('heart condition');
-    expect(bannedWordIn('safe\nheart rate')).toBe('safe heart rate');
-    expect(bannedWordIn('it protects your heart')).toBe('protects your heart');
+    expect(bannedWordIn('safe\nheart\u00a0rate')).toBe('safe heart rate');
+    expect(bannedWordIn('it protects\u00a0your heart')).toBe('protects your heart');
+  });
+
+  // Each dash a phrase's words could be joined with, by its code point, so the source shows which.
+  it.each([
+    ['a hyphen (U+2010)', '\u2010'],
+    ['a non-breaking hyphen (U+2011)', '\u2011'],
+    ['a figure dash (U+2012)', '\u2012'],
+    ['an en dash (U+2013)', '\u2013'],
+    ['an em dash (U+2014)', '\u2014'],
+  ])('reads a phrase whose words are parted by %s', (_name, dash) => {
+    expect(bannedWordIn(`a heart${dash}condition`)).toBe('heart condition');
+    expect(bannedWordIn(`your safe${dash}heart${dash}rate`)).toBe('safe heart rate');
+    expect(bannedWordIn(`it protects${dash}your${dash}heart`)).toBe('protects your heart');
+    expect(medicalWordingIn('x.tsx', `const e = <p>safe${dash}heart rate</p>;`)).toHaveLength(1);
+  });
+
+  it('does not read a dash inside a single word as part of it', () => {
+    expect(bannedWordIn('a heart\u2013rate range')).toBeUndefined();
+    expect(bannedWordIn('medic\u2011al')).toBeUndefined();
   });
 
   it.each([
@@ -232,9 +259,8 @@ describe('the scan itself can fire', () => {
 
   it('excuses only the same file and the same whole text, never a text that contains it', () => {
     const [entry] = EXEMPT;
-    expect(EXEMPT).toHaveLength(1);
     if (entry === undefined) {
-      return;
+      throw new Error('EXEMPT is empty');
     }
     const exact = { file: entry.file, line: 1, text: entry.text, word: 'medical' } as const;
     expect(isExempt(exact)).toBe(true);
@@ -245,8 +271,19 @@ describe('the scan itself can fire', () => {
 
   it('exempts nothing about a workout, which is what this gate is for', () => {
     expect(
-      EXEMPT.filter((entry) => /^(workout|workouts|workout-goals|ride)\//.test(entry.file)),
+      EXEMPT.filter((entry) => /(^|\/)(workout|workouts|workout-goals|ride)\//.test(entry.file)),
     ).toEqual([]);
+  });
+
+  it('excuses two sentences and no more: the write-up’s framing, and one line of a prompt', () => {
+    expect([...new Set(EXEMPT.map((entry) => entry.text))]).toHaveLength(2);
+    // The prompt's sentence is excused only in a package's templates, never in the client.
+    const prompt = EXEMPT.filter((entry) => entry.file !== 'detail/write-up.ts');
+    expect(prompt.length).toBeGreaterThan(0);
+    for (const entry of prompt) {
+      expect(entry.file).toMatch(/^\.\.\/\.\.\/\.\.\/packages\/analysis\/src\/template\//);
+    }
+    expect(new Set(prompt.map((entry) => entry.text)).size).toBe(1);
   });
 });
 
@@ -254,7 +291,7 @@ describe('the scan itself can fire', () => {
 let treeFindings: readonly MedicalWordingFinding[] | undefined;
 function everyFinding(): readonly MedicalWordingFinding[] {
   treeFindings ??= scannable().flatMap((file) =>
-    medicalWordingIn(relative(SOURCE_ROOT, file), readFileSync(file, 'utf8')),
+    medicalWordingIn(named(file), readFileSync(file, 'utf8')),
   );
   return treeFindings;
 }
@@ -275,6 +312,18 @@ describe('no string in this client carries a word ADR 0048 D-12 bans (#1245)', (
       join(DOMAIN_SOURCE_ROOT, 'workout', 'goals.ts'),
     ]) {
       expect(files, held).toContain(held);
+    }
+    // Every package on disk is walked, and each gives the scan something to read.
+    expect(PACKAGE_SOURCE_ROOTS.map((root) => relative(PACKAGES_ROOT, root))).toStrictEqual(
+      ['analysis', 'domain', 'fit', 'physics', 'protocol', 'sensors', 'store'].map((name) =>
+        join(name, 'src'),
+      ),
+    );
+    for (const root of PACKAGE_SOURCE_ROOTS) {
+      expect(
+        files.some((file) => file.startsWith(root + sep)),
+        root,
+      ).toBe(true);
     }
     // Exactly one file is left out, and it is the rule's own definition.
     expect(files).not.toContain(RULE_MODULE);

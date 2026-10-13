@@ -1,6 +1,6 @@
 # On Your Left — privacy policy
 
-**Last updated: 2026-10-09.** This is the policy for the On Your Left Android app
+**Last updated: 2026-10-13.** This is the policy for the On Your Left Android app
 (`dev.openzigs.onyourleft`) and for the web client it is built from. It is the policy linked from the
 app's About page and from the Google Play listing, and those two links point at this file
 ([#95](https://github.com/openzigs/onyourleft/issues/95)).
@@ -32,7 +32,8 @@ rides — whole, their positions and heart rate included — and what goes with 
 instance, sealed on this device so that only that instance can read them, when you press *Sync now*
 on the Instance screen. If you ask it for an analysis of a ride, that ride's numbers are sent, heart
 rate included. If you switch on re-plans during a ride, a summary of each block you ride is sent,
-heart rate included. It is all described under **An instance you connect to** below, class by
+heart rate included, with the heart rates you chose for the workout and in your workout goals. It is
+all described under **An instance you connect to** below, class by
 class.
 
 That is not a promise about our intentions. It is a property of the software: the code this project
@@ -82,13 +83,16 @@ with, the operator's key is never used for you, and nothing is sent until you ha
 agreed. It is described under **Questions your instance sends to a service you agreed to** below.
 
 **The fifth thing you can switch on: re-plans during a ride.** If you are signed in to an instance
-and ride a workout, you can switch on *Re-plan during the ride* for that ride. While it is on, this
-device sends your instance a summary of each block you have ridden — never a second-by-second
-recording, and never where you are — sealed so that only your instance can open it, and your
-instance may suggest one change to the blocks you have not ridden yet. It is off at the start of
-every ride, and nothing is sent until you switch it on for that ride. A heart-rate hold on its own
-sends nothing anywhere: it runs on this device. It is described under **Block summaries sent to
-your instance during a ride** below.
+and choose a workout on the Ride screen, you can switch on *Re-plan during the ride* for that ride.
+While it is on, as each block begins, and never more often than every 3 minutes, this device sends
+your instance a summary of each block you have ridden so far — never a second-by-second recording,
+and never where you are — sealed so that only your instance can open it, with the workout's blocks
+and your workout goals, the heart rates you chose included. A model on your instance's own machine
+may suggest one change to the blocks you have not ridden yet. It is not sent on to a hosted
+service: this app never asks one for a re-plan. It is off at the start of every ride, and nothing
+is sent until you switch it on for that ride. A heart-rate hold on its own sends nothing anywhere:
+it runs on this device. It is described under **Block summaries sent to your instance during a
+ride** below.
 
 The other exception is a map, and it is described under **What leaves the device** below: when a
 ride with a GPS track is shown on a map, the map library the app uses requests map tiles from
@@ -193,8 +197,10 @@ ride sent to your own computer** below).
   service you agreed to** below.
 - **A summary of each block you ride, sent to your instance during the ride, if you switch on
   *Re-plan during the ride* for that ride** — sealed on this device for that instance alone, with
-  the workout's blocks and your workout goals, and never a second-by-second recording or a
-  position. See **Block summaries sent to your instance during a ride** below.
+  the workout's blocks, a heart-rate hold's range in beats per minute included, and your workout
+  goals, the heart rates you chose included and the time you want in your range left out. Never a
+  second-by-second recording or a position, and never sent on to a hosted service. See **Block
+  summaries sent to your instance during a ride** below.
 - **A ride's numbers sent to your own computer, when you ask for an analysis of it** — never a
   picture. See **A ride sent to your own computer** below.
 - **A question, or a ride's numbers when you ask for an analysis of it, sent to a service you
@@ -279,7 +285,7 @@ already knows, your name there, and a room you make, join and ride in.
 | Your internet address, and your device or browser type | seen by the instance, and by Cloudflare on the way to the project's own instance, as by any server you connect to. The project's own instance does not write your address to its log or its database: it holds it in memory only, for at most an hour, to limit how many requests one address can make. Cloudflare keeps a record of each request to the project's instance — your IP address, the time, and your device or browser type — that our Cloudflare account can see for up to 7 days, as it does for a map request; we do not use it or share it. Anybody else's instance decides for itself | every time the app talks to the instance | the project's own instance keeps no copy of your address to delete, and Cloudflare's record ages out of what our Cloudflare account can see after 7 days — we cannot delete it on request. For anybody else's instance, ask its operator |
 | What you sync: your rides, and what goes with them | **only if you sync** with the instance, which needs its card: *Sync now* on the Instance screen, offered once you are connected with the card ([#1195](https://github.com/openzigs/onyourleft/issues/1195)). A sync sends each ride on this device that the instance does not hold, as a file this device writes from the ride (a ride imported from a GPX or TCX file is sent as a FIT file too, not as the original), with every sample, **its positions and heart rate included, not trimmed by your privacy zones**, because it is your own copy, and with a signed record that carries the ride's name, when it started and its time zone, its elapsed and moving time, its distance and its average power if it has one — signed with this device's key; each ride's write-up and side-camera report (sentences, and the summary of how your position changed — differences, never a picture); a short summary of each ride that this device writes from its numbers, with no position, date or name in it, so that a later analysis can look back at your history; your notes on your rides, your goals and the documents you added for the analysis; your saved workouts, each one's name, description and blocks, so that an analysis can look at them; your workout goals, the numbers you chose on the workout goals screen, so that another of your devices can use them; and your answer to *May be raced* for each ride. All of it is sealed for that instance alone, as described above. The instance keeps it with your account, and shows none of it to another rider: no other rider is sent your rides, and none is sent a position. A sync also brings to this device what another of your devices synced there, your saved workouts included | when you press *Sync* | delete a ride, note, goal, document or saved workout on this device, or clear your workout goals, and then sync: the instance deletes it too, its original file with it, and keeps only a mark that it was deleted: a fingerprint of the file and when the instance received it, and nothing else of the ride. *Disconnect* and erasing this device do not reach what the instance holds; to have it all erased, ask the instance's operator, as described under **Deleting what an instance holds** below |
 | Analysis jobs and write-ups | when you ask for an analysis, the ride's numbers go to your instance; the job, its progress and its write-up are kept for 7 days, and the finished write-up with your account, so another of your devices can show it. See **A ride analysed on your instance** below | when you press the button on a ride's page | erased with your account on the instance: ask the instance's operator, as described under **Deleting what an instance holds** below |
-| Block summaries, for a re-plan during the ride | **only if you switch on *Re-plan during the ride* for a ride**: a summary of each block you have ridden — how long it lasted, your mean and highest heart rate, how long your heart rate was inside the range you chose, your mean power as a share of your threshold power, your mean cadence, how many times the target had to be eased, and your effort check-in if you gave one — with the blocks of the workout as it stands and your workout goals, sealed for that instance alone. Never a second-by-second recording, a position, a date or a name. Your instance keeps each request and its answer for 7 days. See **Block summaries sent to your instance during a ride** below | during a ride, at the end of a block, or every few minutes in a long one, while the switch is on | switch it off and nothing more is sent; each request ages out of your instance after 7 days, and is erased with your account on the instance: ask the instance's operator, as described under **Deleting what an instance holds** below |
+| Block summaries, for a re-plan during the ride | **only if you switch on *Re-plan during the ride* for a ride**: a summary of each block you have ridden so far — how long it lasted, your mean and highest heart rate, how long your heart rate was inside the range you chose, your mean power as a share of your threshold power, your mean cadence, and how many times the target had to be eased — with the blocks of the workout as it stands, a heart-rate hold's range in beats per minute included, and your workout goals, the heart rates you chose included and the time you want to spend in your range left out, sealed for that instance alone. Never a second-by-second recording, a position, a date or a name. A model on your instance's own machine reads it; this app never asks a hosted service for a re-plan. Your instance keeps each request and its answer for 7 days. See **Block summaries sent to your instance during a ride** below | during a ride, as a block begins, and never more often than every 3 minutes, while the switch is on | switch it off and nothing more is sent; each request ages out of your instance after 7 days, and is erased with your account on the instance: ask the instance's operator, as described under **Deleting what an instance holds** below |
 | A hosted model key you paste | held by your instance, encrypted, and used only for what you asked it to send that service: your own analyses and, if you separately agreed to that, your side camera's pictures. It is never sent back to this device. See **Questions your instance sends to a service you agreed to** below | when you paste it | removed when you press *Remove my key from my instance*, and erased with your account on the instance |
 | Your hosted consent | the address of the service you agreed to, and when, kept by your instance with your account and in its export | when you tick the box that agrees to it | withdrawn when you untick it, or when you store a key for another service; erased with your account on the instance |
 | Your words to mask and your privacy zones | copied to your instance so it can mask what it sends to a service — the list, and each zone's name, where it is and how large — kept with your account and in its export | when you agree to a hosted service there, and again each time you ask for an analysis by it | erased with your account on the instance: ask the instance's operator, as described under **Deleting what an instance holds** below |
@@ -594,32 +600,51 @@ to help you ride at the effort you chose. It needs no instance, and nothing abou
 device unless you sync the ride afterwards.
 
 **Re-plans during a ride are separate, and off unless you switch them on for that ride.** If you
-are signed in to an instance, the Ride screen offers a switch, *Re-plan during the ride*, when you
-ride a workout. It is off at the start of every ride. This is what you are shown beside it:
+are signed in to an instance, the workout panel on the Ride screen has a switch, *Re-plan during the
+ride*, when you choose a workout. It is off at the start of every ride. This is what you are shown
+beside it:
 
 > **This sends a summary of each block you ride to your instance, during the ride.**
 >
-> While it is on, this device sends your instance a summary of each block you have ridden, at the end of a block, or every few minutes in a long one: how long the block lasted, your mean and highest heart rate, how long your heart rate was inside the range you chose, your mean power as a share of your threshold power, your mean cadence, how many times the target had to be eased, and your effort check-in if you gave one. With it go the blocks of the workout as it stands and your workout goals.
+> While it is on, as each block of the workout begins, and never more often than every 3 minutes, this device sends your instance a summary of each block you have ridden so far: how long the block lasted, your mean and highest heart rate, how long your heart rate was inside the range you chose, your mean power as a share of your threshold power, your mean cadence, and how many times the target had to be eased.
 >
-> It never sends a second-by-second recording, where you are, the date, your name or the workout's name. It is sealed on this device so that only your instance can open it.
+> With it go the blocks of the workout as it stands and which one you are riding: the kind of each block, how long it lasts, how many times an interval repeats, its power targets as shares of your threshold power and, for a heart-rate hold, the range you chose in beats per minute. So do your workout goals: the kind of session, its length, the heart-rate range you chose and the heart rate you chose not to go above, both in beats per minute, the most power as a share of your threshold power, and whether you want to be asked how hard it feels. The time you want to spend in your range is not sent.
 >
-> Your instance asks a model on its own machine whether to suggest one change to the blocks you have not ridden yet. The model may look up what you wrote about your goals and the blocks of your saved workouts, if you synced them. It answers with one change from a fixed list, or none: never with words, and never with a number of watts.
+> It never sends a second-by-second recording, where you are, the date, your name, the workout's name, the labels of its blocks or a number of watts. It is sealed on this device so that only your instance can open it.
+>
+> Your instance asks a model on its own machine whether to suggest one change to the blocks you have not ridden yet. The model may look up what you wrote about your goals and the blocks of your saved workouts, if you synced them. It answers with one change from a fixed list, or none: never with words, and never with a number of watts. None of it is sent on to a hosted service: this app asks only for the model on your instance's own machine, whatever key you stored there.
 >
 > This device checks every suggestion against your workout goals and the workout you loaded, and works out every target itself. A change it accepts starts at the next block, never in the one you are riding, and you can press 'Keep the plan' before then.
 >
-> Your instance keeps each request and its answer for 7 days. This device keeps each change it accepted or refused with the ride, and they go to your instance with the ride if you sync it.
+> Your instance keeps each request and its answer for 7 days. This device keeps each change it accepted or refused with the ride, and puts them in your account export. They are not sent to your instance when you sync.
 >
 > You do not need this. The workout and a heart-rate hold work without it, and without an instance.
 >
 > This is off. It is off at the start of every ride, and stays off until you switch it on for that ride.
 
-- **What is sent:** the summaries, the workout's blocks as shares of your threshold power, and
-  your workout goals. Nothing else: there is no place in the request for anything more.
-- **When:** during the ride, and only while the switch is on for that ride. Nothing is sent before
-  you switch it on, after you switch it off, or after the ride ends.
+- **What is sent:** one request each time, and this is the whole of it. The summaries: for each
+  block you have ridden so far, which block it was, how long it lasted, your mean and highest heart
+  rate in beats per minute, the seconds your heart rate was inside the range you chose (for a
+  heart-rate hold), your mean power as a share of your threshold power, your mean cadence, and how
+  many times the target had to be eased. The workout's blocks as they stand: each one's kind, its
+  length in seconds, how many times an interval repeats, its power targets as shares of your
+  threshold power, and for a heart-rate hold the lowest and highest heart rate of the range you
+  chose, in beats per minute. Which block you are riding. Your workout goals: the kind of session,
+  its length, the lowest and highest heart rate of the range you chose, the heart rate you chose
+  not to go above, the most power as a share of your threshold power, and whether you want to be
+  asked how hard it feels — and not the time you want to spend in your range, which this app
+  leaves out. Two counts this device keeps for the ride: how many times the plan has changed, and
+  which request this is. And two fixed words that say it is a re-plan and that the model on your
+  instance's own machine is to answer it. Nothing else: there is no place in the request for
+  anything more. No effort check-in is sent.
+- **When:** during the ride, and only while the switch is on for that ride: as a block begins, and
+  never less than 3 minutes after the last time. Nothing is sent before you switch it on, while the
+  ride is paused, or after the ride ends.
 - **To whom:** the instance you connected, over the same connection as everything else the app
   sends it. It is encrypted end to end to your instance, so Cloudflare, which carries the traffic
   to the project's own instance, sees only ciphertext. It is never sent in plain text.
+- **No hosted service:** this app asks only for the model on your instance's own machine. It never
+  asks a hosted service for a re-plan, and a key you stored on your instance is not used for one.
 - **What comes back:** one change from a fixed list, with one reason from a fixed list, or nothing.
   No sentence a model wrote is shown or spoken: the sentence you read is this app's own.
 - **Who decides:** this device. It refuses a suggestion that is late, that names the block you are
@@ -629,34 +654,8 @@ ride a workout. It is off at the start of every ride. This is what you are shown
   its answer, for 7 days. All of it is erased with your account there, which the instance's
   operator does when you ask, as described under **Deleting what an instance holds** above.
 - **What this device keeps:** each change it accepted or refused, the rule that decided and the
-  time, with the ride. It goes with the ride when you delete it, and to your instance with the
-  ride if you sync it.
-
-**If your instance would ask a hosted service.** Your instance can ask a hosted model service
-instead of a model on its own machine, only on **your own key**, stored on your instance, and only
-if you agreed to that service by its address, as described under **Questions your instance sends
-to a service you agreed to** above. The operator's key is never used for you. Then the switch says
-this instead, with the service's address where this says *the address you agreed to*:
-
-> **This sends a summary of each block you ride to your instance, during the ride, and from there to *the address you agreed to*.**
->
-> While it is on, this device sends your instance a summary of each block you have ridden, at the end of a block, or every few minutes in a long one: how long the block lasted, your mean and highest heart rate, how long your heart rate was inside the range you chose, your mean power as a share of your threshold power, your mean cadence, how many times the target had to be eased, and your effort check-in if you gave one. With it go the blocks of the workout as it stands and your workout goals.
->
-> It never sends a second-by-second recording, where you are, the date, your name or the workout's name. It is sealed on this device so that only your instance can open it.
->
-> Your instance asks the service at *the address you agreed to*, on your own key, whether to suggest one change to the blocks you have not ridden yet. It sends that service the summaries, the blocks and your workout goals, and the model may look up what you wrote about your goals and the blocks of your saved workouts, if you synced them, and be sent them. It answers with one change from a fixed list, or none: never with words, and never with a number of watts.
->
-> That is a company or a computer that is not yours and not ours, and we cannot see what they do with it or how long they keep it. We cannot delete it for you afterwards. It sees your instance's internet address, not this device's. It is sent there only because you stored your own key for that service on your instance and agreed to it by its address.
->
-> The numbers carry no name, no place and no date. But what you wrote yourself can say anything. Before anything is sent, your instance masks it as it does for a ride analysis. Masking reduces what is sent; it does not guarantee that nothing personal gets through.
->
-> This device checks every suggestion against your workout goals and the workout you loaded, and works out every target itself. A change it accepts starts at the next block, never in the one you are riding, and you can press 'Keep the plan' before then.
->
-> Your instance keeps each request and its answer for 7 days. This device keeps each change it accepted or refused with the ride, and they go to your instance with the ride if you sync it.
->
-> You do not need this. The workout and a heart-rate hold work without it, and without an instance.
->
-> This is off. It is off at the start of every ride, and stays off until you switch it on for that ride.
+  time, with the ride. It goes with the ride when you delete it, is in the account export, and
+  *Erase everything* removes it. It is not sent to your instance when you sync.
 
 ## A ride sent to your own computer
 
