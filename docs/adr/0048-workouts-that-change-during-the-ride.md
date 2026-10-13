@@ -759,7 +759,8 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   - ⚠️ **P9's *"kept with the ride … and synced"* is half built.** The record is kept with the
     ride on the device (`packages/store` §`RideFacts.replans`) and is in the account export. It is
     **not synced**: a ride reaches an instance as its activity file, which carries none of a
-    ride's facts, and a synced record needs an item kind of its own. That is a follow-up issue.
+    ride's facts, and a synced record needs an item kind of its own. That is
+    [#1315](https://github.com/openzigs/onyourleft/issues/1315).
   - **`plan-changed` is said once for each accepted move, with announcements on**, and is held
     while the workout is in a segment above threshold power or in the last 30 s of one at it
     (D-12). A move dropped or ridden before it could be said is not said.

@@ -1467,7 +1467,8 @@ the same proposal under P5 or P2 if it arrives between two ticks. Nothing is sho
 ⚠️ **What this does not give.**
 - **P9's record is not synced.** It is on the device and in the export. A ride's facts
   (`RideFacts`) are synced by nothing today: a ride goes to an instance as its activity file, which
-  carries none of them. Syncing the record needs an item kind of its own on the instance.
+  carries none of them. Syncing the record needs an item kind of its own on the instance:
+  [#1315](https://github.com/openzigs/onyourleft/issues/1315).
 - **A rider in the game cannot keep the plan** without leaving it for the Ride screen.
 - **The switch is set as the workout starts** and cannot be turned off mid-workout; ending the
   workout ends the re-plans.
