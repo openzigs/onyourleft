@@ -769,6 +769,12 @@ export function createWorkoutPlayer(options: PlayerOptions): WorkoutPlayer {
       ) {
         return false;
       }
+      // A revision that lengthens the block being ridden (more repeats) keeps
+      // every ridden segment equal and adds the rest after them, so it must
+      // also have left the block by the segment after `before`.
+      if (revised[before.length]?.block === riding.block) {
+        return false;
+      }
       waiting = { timeline: next, at: boundary };
       return true;
     },

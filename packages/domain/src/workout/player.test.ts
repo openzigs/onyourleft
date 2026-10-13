@@ -988,6 +988,24 @@ describe('a plan revision is read at the next block boundary — #1244, ADR 0048
     expect(p.revise(four)).toBe(false);
   });
 
+  it('refuses a revision that adds repeats to the intervals block being ridden', () => {
+    const intervals = (repeats: number): WorkoutBlock => ({
+      kind: 'intervals',
+      repeats,
+      hardSeconds: seconds(30),
+      hardTarget: thresholdShare(1.2),
+      easySeconds: seconds(30),
+      easyTarget: thresholdShare(0.5),
+    });
+    const plan = (repeats: number) => expandWorkout(workout([intervals(repeats), steady(60, 0.5)]));
+    const p = player(plan(2));
+    p.start(seconds(0));
+    p.acknowledge(watts(wroteWatts(p.tick(seconds(1)).intent)));
+    p.tick(seconds(20));
+    expect(p.revise(plan(4))).toBe(false);
+    expect(p.plan().waiting).toBeUndefined();
+  });
+
   it('refuses a revision that has lost the block being ridden', () => {
     const p = player(three());
     p.start(seconds(0));
