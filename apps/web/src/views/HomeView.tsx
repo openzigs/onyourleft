@@ -173,7 +173,7 @@ function GettingStarted(): JSX.Element {
   return (
     <section className="oyl-panel oyl-home__empty" aria-labelledby="oyl-home-empty">
       <h2 id="oyl-home-empty">Nothing recorded yet</h2>
-      <p>Everything here stays on this device. To get going:</p>
+      <p>Rides you record are kept on this device. To get going:</p>
       <ol>
         <li>
           <a href={hrefFor(routeById('devices'))}>Pair a sensor or a smart trainer</a> over

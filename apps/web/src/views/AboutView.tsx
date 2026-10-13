@@ -155,14 +155,13 @@ export function AboutView(): JSX.Element {
             of yours when you connect: no ride, route, position or heart rate.
           </p>
           {/* #778, second pass: rooms shipped (#784, #785), and sync's disclosure
-            comes before sync does (#1195). `AboutView.test.tsx` pins it. */}
+            comes before sync does (#1195); #1327: sync is offered now, and it says so. `AboutView.test.tsx` pins it. */}
           <p>
             A private room you make or join sends that instance the route of a room you make, your
             power and cadence while you ride, the weight you declare as you join, and a race&rsquo;s
-            result. Syncing with it — which this version of the app does not offer yet — sends your
-            rides, whole, with their positions and heart rate (a ride&rsquo;s name and date go with
-            it), and what else goes with them, sealed on this device for that instance alone; they
-            stay on this device too.
+            result. Syncing with it sends your rides, whole, with their positions and heart rate (a
+            ride&rsquo;s name and date go with it), and what else goes with them, sealed on this
+            device for that instance alone; they stay on this device too.
           </p>
           <p>
             {/* target="_blank" so that following it inside the Android shell hands

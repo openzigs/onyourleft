@@ -163,6 +163,10 @@ describe('the home screen — #428', () => {
   it('empty: says what to do, as links, and draws no empty ride cards', async () => {
     await openHome([]);
     expect(text()).toContain('Nothing recorded yet');
+    // #1327: a rider with an instance may sync, so the empty state promises
+    // only what holds for every rider.
+    expect(text()).toContain('Rides you record are kept on this device.');
+    expect(text()).not.toMatch(/everything (here )?stays on this device/i);
     for (const destination of ['devices', 'ride', 'transfer'] as const) {
       expect(
         document.querySelector(`main a[href="${hrefFor(routeById(destination))}"]`),
