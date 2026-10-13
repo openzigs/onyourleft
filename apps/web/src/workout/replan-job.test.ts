@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 import {
   beatsPerMinute,
+  decodeProposal,
   seconds,
   thresholdShare,
   type WorkoutBlock,
@@ -367,11 +368,104 @@ describe('startReplan', () => {
     });
   });
 
+  it.each([200, 201, 204, 206])(
+    'takes only a 202 as a started job: a %i with a job id in it is a refusal',
+    async (status) => {
+      const scripted = scriptedReplans();
+      scripted.startAnswer = { status, body: { jobId: 'job-9' } };
+      expect(await startReplan(scripted.session, replanRequest(input()))).toEqual({
+        kind: 'refused',
+      });
+    },
+  );
+
   it('settles as unreachable when the call fails', async () => {
     const scripted = scriptedReplans();
     scripted.fail = 'send';
     expect(await startReplan(scripted.session, replanRequest(input()))).toEqual({
       kind: 'unreachable',
+    });
+  });
+});
+
+describe('the golden answer: one file the instance’s suite and the device’s both read', () => {
+  /**
+   * `replan-result.json` is the `result` event as the REAL instance writes
+   * it (`apps/instance` §`replan-jobs.test.ts` §"the golden answer" holds the
+   * job's stream to it). This holds the device's reader to the same file.
+   */
+  const answer = golden('replan-result.json') as {
+    event: string;
+    proposed: { status: string; proposal: unknown };
+    kept: unknown;
+    failed: unknown;
+  };
+
+  /** A channel whose stream is these events, in order. */
+  const streaming = (events: readonly { kind: string; data: string }[]) => ({
+    kind: 'open' as const,
+    token: 'session-token',
+    channel: {
+      call: () => Promise.resolve({ status: 404, body: null }),
+      stream: (
+        _path: string,
+        options: { onEvent: (event: { id: string; kind: string; data: string }) => void },
+      ) => {
+        events.forEach((event, index) => {
+          options.onEvent({ id: String(index + 1), ...event });
+        });
+        return Promise.resolve({
+          outcome: 'finished' as const,
+          lastEventId: String(events.length),
+        });
+      },
+    },
+  });
+  const read = (events: readonly { kind: string; data: string }[]) =>
+    followReplan(streaming(events), 'job-1', new AbortController().signal);
+  const event = (data: unknown, kind = answer.event) => ({ kind, data: JSON.stringify(data) });
+
+  it('reads the golden proposal, the golden kept workout and the golden failure', async () => {
+    expect(await read([event(answer.proposed)])).toStrictEqual({
+      kind: 'proposal',
+      proposal: answer.proposed.proposal,
+    });
+    expect(await read([event(answer.kept)])).toStrictEqual({ kind: 'proposal', proposal: null });
+    expect(await read([event(answer.failed)])).toStrictEqual({ kind: 'none' });
+  });
+
+  it('the golden proposal is one the device’s own decoder reads whole', () => {
+    expect(decodeProposal(answer.proposed.proposal)).toStrictEqual(answer.proposed.proposal);
+  });
+
+  it('reads it only under the golden event’s name, and skips a progress event before it', async () => {
+    expect(await read([event(answer.proposed, 'progress')])).toStrictEqual({ kind: 'lost' });
+    expect(await read([event({ step: 1 }, 'progress'), event(answer.proposed)])).toMatchObject({
+      kind: 'proposal',
+    });
+  });
+
+  it('takes the FIRST result of a stream that holds two, never the last', async () => {
+    const second = {
+      status: 'succeeded',
+      proposal: { ...(answer.proposed.proposal as object), reason: 'on-plan' },
+    };
+    expect(await read([event(answer.proposed), event(second)])).toStrictEqual({
+      kind: 'proposal',
+      proposal: answer.proposed.proposal,
+    });
+    // A failure first is the job's end: a proposal after it is not read.
+    expect(await read([event(answer.failed), event(answer.proposed)])).toStrictEqual({
+      kind: 'none',
+    });
+  });
+
+  it('does not read a status that is not the golden one as a proposal', async () => {
+    expect(
+      await read([event({ status: 'done', proposal: answer.proposed.proposal })]),
+    ).toStrictEqual({ kind: 'none' });
+    expect(await read([event({ proposal: answer.proposed.proposal })])).toStrictEqual({
+      kind: 'lost',
     });
   });
 });

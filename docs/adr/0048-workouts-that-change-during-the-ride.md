@@ -799,3 +799,45 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
     sentences are gone. Two things were added to #1245's text in place, because they are true and
     it did not say them: a long workout's most recent summaries, and that the switch is offered
     only with the rider's own two thresholds set. (#1244)
+
+- **2026-10-13** — **After #1244's third review, which found two privacy sentences false of the
+  code, more of the entries above changed before they merged.** Recorded as changes; each is the
+  implementer's choice and the owner's to change, and every string is the owner's to approve.
+  - **Re-plans can be switched off while the workout runs** (D-7: *"A per-ride switch turns
+    re-plans off"*). The first entry above said the switch *"cannot be turned off during the
+    workout"*, while the policy said *"switch it off and nothing more is sent"*. Now a control
+    beside *End workout*, *Switch re-plans off*, ends the re-plan session: no request leaves after
+    it, a job in flight is cancelled, and **a move waiting for the next block is dropped** (the
+    rider has just said no more changes; the record says `not-applied`, `switched-off`). **It does
+    not come back on for that workout**: the session is over, as at the workout's end, and a rider
+    who wants re-plans switches them on for the next one. It is a button named for what it does
+    and not the chooser's switch drawn again, because it cannot be undone. On the Ride screen
+    only; a rider in the game ends the workout or leaves the game to reach it.
+  - **A reason is said only when the device holds its premise.** D-4 has the validator check that
+    a reason is ON the list, and nothing checks that it is TRUE; the device was saying *"because
+    your heart rate stayed above the range you chose"* to a rider who had chosen no range. Each
+    reason now has a check against what the device itself sent with the request
+    (`apps/web/src/workout/replan-reason.ts`): `heart-rate-high` and `heart-rate-low` need a range
+    the rider chose for the block just ridden and a mean outside it; `cadence-falling` a fall of
+    5 rpm or more between the last two blocks; `goal-duration` a duration goal; `on-plan` a block
+    with no eased target and a heart rate not outside a chosen range. `goal-time-in-range` and
+    `effort-check-in` are never said, because the device sends neither. Where the premise does not
+    hold the move is said alone. ⚠️ **It is never a refusal**: this ADR does not say a reason must
+    be true, the move was the validator's to judge, and this decides a clause of a sentence.
+    P9's record keeps the reason either way, with `reasonNotShown` when it was not said.
+  - **D-10's three minutes are the ride's.** A second workout in one ride waits out the first
+    one's last request (the controller keeps the time), so the hour's bound of 20 is the ride's too.
+  - **A job out when control or the strap is lost is cancelled** (P6), as one is in a rescue, so
+    its answer is not accepted seconds after control returns. And **a ride paused by the rider is
+    paused for P6 from the press**, not from the next tick: an answer in that second was accepted,
+    shown and then discarded.
+  - **A discard is spoken only of a move whose own sentence was offered.** One held back above
+    threshold power and never said is taken away in silence.
+  - **The switch is off at the start of every ride as well as every workout**: its state is reset
+    when a ride starts or ends. While it is on, *"Re-plans on"* is said beside the chooser's
+    heading, because the switch itself is under the list of workouts.
+  - **The answer is bound as the request is**: `replan-result.json`, read by both suites.
+  - ⚠️ **Not built: P9's record on a recovered ride.** The decisions are in memory until the ride
+    saves, and a ride recovered after a crash is saved without them, as it is without
+    `workoutFinished`. Carrying them in the checkpoint is
+    [#1328](https://github.com/openzigs/onyourleft/issues/1328). (#1244)

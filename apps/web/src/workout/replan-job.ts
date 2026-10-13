@@ -64,8 +64,9 @@ import type { JobSession } from '../ride-analysis/instance-job';
  * are two constants. `packages/domain/src/workout/fixtures/replan-request.json`
  * is a request exactly as {@link replanRequest} builds it: `replan-job.test.ts`
  * fails when the builder stops producing it, and `apps/instance`
- * §`replan-golden.test.ts` fails when the instance's own start stops taking
- * it. So this constant, a key or a limit drifting on either side is a red
+ * §`analysis/replan-jobs.test.ts` §"the golden requests" fails when the
+ * instance's own start stops taking it. `replan-result.json` beside it does
+ * the same for the way back: the `result` event's `status` and `proposal`. So this constant, a key or a limit drifting on either side is a red
  * test on that side, not a feature that refuses every request.
  */
 export const REPLAN_TEMPLATE_VERSION = 're-plan-1';

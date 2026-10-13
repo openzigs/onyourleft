@@ -23,6 +23,9 @@ import {
   planDiscardedAnnouncement,
   REPLAN_DISCARDED,
   REPLAN_FIXED_TEXTS,
+  REPLAN_OFF_BUTTON,
+  REPLANS_OFF,
+  REPLANS_ON_BADGE,
   REPLAN_REASON_TEXTS,
   replanSentence,
 } from './replan-text';
@@ -108,6 +111,31 @@ describe('a re-plan’s one sentence', () => {
     );
   });
 
+  it('says the move alone, with a full stop, when no reason is to be said', () => {
+    expect(replanSentence({ kind: 'shorten-block', block: 2, minutes: 2 }, undefined, NEXT)).toBe(
+      'Next block shortened by 2 minutes.',
+    );
+    for (const move of EVERY_MOVE) {
+      const alone = replanSentence(move, undefined, NEXT);
+      const withReason = replanSentence(move, 'on-plan', NEXT);
+      // The same move's part, and nothing after it: no clause.
+      expect(withReason).toBe(`${alone.slice(0, -1)}, because the workout is going to plan.`);
+      expect(alone).not.toMatch(/because|to fit/);
+      expect(alone.endsWith('.')).toBe(true);
+    }
+  });
+
+  it('names the control that switches re-plans off, and what is said once it is', () => {
+    expect(REPLAN_OFF_BUTTON).toBe('Switch re-plans off');
+    expect(REPLANS_OFF).toBe(
+      'Re-plans are off for the rest of this workout. Nothing more is sent, and the plan stays as it is.',
+    );
+    expect(REPLANS_ON_BADGE).toBe('Re-plans on');
+    for (const text of [REPLAN_OFF_BUTTON, REPLANS_OFF, REPLANS_ON_BADGE]) {
+      expect(REPLAN_FIXED_TEXTS).toContain(text);
+    }
+  });
+
   it('has a reason for every reason code, and they differ', () => {
     const sentences = REASON_CODES.map((reason) =>
       replanSentence({ kind: 'end-main-set' }, reason, NEXT),
@@ -134,6 +162,7 @@ describe('a re-plan’s one sentence', () => {
       ...EVERY_MOVE.flatMap((move) =>
         REASON_CODES.map((reason) => replanSentence(move, reason, NEXT)),
       ),
+      ...EVERY_MOVE.map((move) => replanSentence(move, undefined, NEXT)),
       ...REPLAN_FIXED_TEXTS,
     ];
     expect(everything.length).toBeGreaterThan(100);
@@ -235,13 +264,26 @@ describe('when a re-plan is spoken', () => {
   });
 
   it('says a discarded move once, with its label, and each discarded move on its own', () => {
-    const first = planDiscardedAnnouncement(undefined, 3);
+    const first = planDiscardedAnnouncement(undefined, 3, 3);
     expect(first.event).toEqual({ kind: 'plan-changed', text: `Plan change: ${REPLAN_DISCARDED}` });
     expect(first.said).toBe(3);
-    expect(planDiscardedAnnouncement(first.said, 3)).toEqual({ event: undefined, said: 3 });
-    expect(planDiscardedAnnouncement(first.said, 5).event).toBeDefined();
+    expect(planDiscardedAnnouncement(first.said, 3, 3)).toEqual({ event: undefined, said: 3 });
+    expect(planDiscardedAnnouncement(first.said, 5, 5).event).toBeDefined();
     // Nothing discarded: nothing said, and what was said is remembered.
-    expect(planDiscardedAnnouncement(3, undefined)).toEqual({ event: undefined, said: 3 });
+    expect(planDiscardedAnnouncement(3, undefined, 3)).toEqual({ event: undefined, said: 3 });
+  });
+
+  it('says a discard only of the move whose own sentence was offered', () => {
+    // Held back above threshold power and never offered: taken away in silence.
+    expect(planDiscardedAnnouncement(undefined, 3, undefined)).toEqual({
+      event: undefined,
+      said: 3,
+    });
+    // An earlier move was offered, and it is a later one that was discarded.
+    expect(planDiscardedAnnouncement(undefined, 3, 2).event).toBeUndefined();
+    // And it is not said late, once the numbers meet.
+    const silent = planDiscardedAnnouncement(undefined, 3, undefined);
+    expect(planDiscardedAnnouncement(silent.said, 3, 3).event).toBeUndefined();
   });
 
   it('offers nothing when no move is waiting', () => {

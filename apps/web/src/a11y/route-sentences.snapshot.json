@@ -51,7 +51,8 @@
     "Workout",
     "Follow a structured workout on a smart trainer.",
     "Choose a workout",
-    "Everything stays on this device."
+    "Recorded on this device.",
+    "Nothing is sent unless you switched that on."
   ],
   "game empty": [
     "Trainer game",
@@ -1012,7 +1013,8 @@
     "Sensors",
     "KICKR 1F2A: Connected",
     "Pair or forget devices on Devices",
-    "Everything stays on this device."
+    "Recorded on this device.",
+    "Nothing is sent unless you switched that on."
   ],
   "game populated": [
     "Trainer game",

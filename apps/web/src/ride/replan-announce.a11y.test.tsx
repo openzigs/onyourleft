@@ -35,7 +35,12 @@ import {
   replanDisclosure,
   replanDisclosureSentences,
 } from '../workout/replan-disclosure';
-import { REPLAN_DISCARDED, type WaitingReplan } from '../workout/replan-text';
+import {
+  REPLAN_DISCARDED,
+  REPLAN_OFF_BUTTON,
+  REPLANS_OFF,
+  type WaitingReplan,
+} from '../workout/replan-text';
 
 import type { RideWorkoutSnapshot, TrainerSnapshot } from './controller';
 import { WorkoutPanel } from './WorkoutPanel';
@@ -276,12 +281,30 @@ describe('a waiting move a pause or a lost trainer discarded, on the Ride screen
   it('says it above threshold power too: a pause is not a moment to hold a sentence for', async () => {
     const heard = await ride(
       [
-        [590, undefined],
+        [100, undefined],
+        // Said in the easy block, then discarded 20 s into the block at 110 %.
+        [110, FIRST],
         [620, undefined, 1],
       ],
       storageWith(true),
     );
     expect(heard.at(-1)).toBe(DISCARDED);
+  });
+
+  it('takes away in silence a move whose own sentence was held back and never said', async () => {
+    const heard = await ride(
+      [
+        [590, undefined],
+        // Accepted 20 s into the block at 110 %: held, not said.
+        [620, FIRST],
+        [640, undefined, 1],
+        [660, undefined, 1],
+      ],
+      storageWith(true),
+    );
+    expect(heard).toEqual(['', '', '', '']);
+    // It is still on the screen: the rider could have read the move there.
+    expect(document.body.textContent).toContain(REPLAN_DISCARDED);
   });
 
   it('says nothing with announcements off, and still shows it', async () => {
@@ -366,5 +389,48 @@ describe('the switch and its disclosure, where a workout is chosen — #1244, #1
     }
     expect(block?.closest('[role="status"], [aria-live]')).toBeNull();
     expect(block?.querySelector('[role="status"], [aria-live]')).toBeNull();
+  });
+});
+
+describe('switching re-plans off while the workout runs, on the Ride screen — #1244', () => {
+  const panel = (off: boolean) =>
+    onTheRideScreen(
+      <WorkoutPanel
+        trainer={trainer}
+        workout={{
+          ...riding(100, undefined),
+          replan: { waiting: undefined, kept: false, notice: undefined, off },
+        }}
+        port={workoutStub(ATHLETE, [record])}
+        thresholdPower={watts(250)}
+        onStart={() => undefined}
+        onEnd={() => undefined}
+        onKeepPlan={() => undefined}
+        onReplansOff={() => undefined}
+        announcements={storageWith(true)}
+      />,
+    );
+
+  it('audits clean with the control on the screen, and it is in the tab order after End workout', async () => {
+    mounted = await mount(panel(false));
+    await settle();
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+    const names = tabbableElements(document).map((each) => each.textContent);
+    expect(names).toContain(REPLAN_OFF_BUTTON);
+    expect(names.indexOf(REPLAN_OFF_BUTTON)).toBe(names.indexOf('End workout') + 1);
+  });
+
+  it('audits clean once off, and says so in a region of its own: the answer to the rider’s press', async () => {
+    mounted = await mount(panel(false));
+    await settle();
+    await mounted.rerender(panel(true));
+    await settle();
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+    const said = [...document.querySelectorAll('[role="status"]')].filter((each) =>
+      (each.textContent ?? '').includes(REPLANS_OFF),
+    );
+    expect(said).toHaveLength(1);
+    // Not through the announcer's region: that one says plan changes.
+    expect(region()).toBe('');
   });
 });

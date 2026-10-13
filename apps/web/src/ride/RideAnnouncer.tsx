@@ -516,7 +516,13 @@ export function RideAnnouncer({
     }
     // #1244: a waiting move a pause or a lost trainer discarded: one
     // sentence, once, announcements ON only as the move's own was.
-    const dropped = planDiscardedAnnouncement(planDiscardedSaid.current, discardedPlan);
+    const dropped = planDiscardedAnnouncement(
+      planDiscardedSaid.current,
+      discardedPlan,
+      // Only of the move this region was offered: one held back and never
+      // said is taken away in silence.
+      planOffered.current,
+    );
     planDiscardedSaid.current = dropped.said;
     if (dropped.event !== undefined) {
       events.push(dropped.event);

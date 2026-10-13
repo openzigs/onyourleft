@@ -127,7 +127,10 @@ import {
   PLAN_KEPT,
   REPLAN_DISCARDED,
   REPLAN_LABEL,
+  REPLAN_OFF_BUTTON,
   REPLAN_STARTS_AT_NEXT_BLOCK,
+  REPLANS_OFF,
+  REPLANS_ON_BADGE,
 } from '../workout/replan-text';
 import { durationText, workoutRow } from '../workouts/library';
 
@@ -182,6 +185,19 @@ export interface WorkoutPanelProps {
   /** *Keep the plan* — #1244. Absent, the control is not shown. */
   readonly onKeepPlan?: (() => void) | undefined;
   /**
+   * *Switch re-plans off* — #1244's review, ADR 0048 D-7: shown beside *End
+   * workout* while a workout runs with re-plans on, so the policy's *"switch
+   * it off and nothing more is sent"* names a control that exists while
+   * something is being sent. Absent, the control is not shown.
+   */
+  readonly onReplansOff?: (() => void) | undefined;
+  /**
+   * Whether a ride is in progress — #1244's review. The per-ride switch goes
+   * back to off whenever this changes, so *"off at the start of every ride"*
+   * holds for a rider who switched it on and started no workout.
+   */
+  readonly rideInProgress?: boolean | undefined;
+  /**
    * Where the rider's announcement choice is read from (#397, #398) — this
    * DEVICE's storage unless a test hands in a double. The sound choice (#400)
    * is read from the same place.
@@ -228,6 +244,8 @@ export function WorkoutPanel({
   onEnd,
   replansAvailable,
   onKeepPlan,
+  onReplansOff,
+  rideInProgress,
   announcements,
   announcementPreference,
   power,
@@ -249,6 +267,10 @@ export function WorkoutPanel({
   useEffect(() => {
     if (loaded) setReplans(false);
   }, [loaded]);
+  // Off again whenever a ride starts or ends: a choice is for one ride.
+  useEffect(() => {
+    setReplans(false);
+  }, [rideInProgress]);
   const storage = announcements ?? deviceStorage();
   const [sound, setSound] = useState<CuePreference>(() => readCuePreference(storage));
   /** This panel's sounds — made once, fed on every render. @see game/audio-cues.ts */
@@ -375,9 +397,33 @@ export function WorkoutPanel({
           VISIBLE beside the ride controls, so it is the reading that moves, not
           the notice. `rideview.browser.spec.ts` §"#605" publishes the margin.
         */}
-        <Button variant="secondary" size="ride" type="button" onClick={onEnd}>
-          End workout
-        </Button>
+        {/*
+          ⚠️ #1244's review: *Switch re-plans off* on the SAME row as *End
+          workout*, and not under the plan-change notice. It is the control
+          the privacy policy names for stopping what is being sent, so it is
+          on the screen for as long as anything can be sent, where the other
+          control that ends things is; and on a row of its own under *Keep
+          the plan* it would have pushed that control down by 56 px.
+          `rideview.browser.spec.ts` §"#1244" measures both.
+        */}
+        <div className="oyl-workout-controls">
+          <Button variant="secondary" size="ride" type="button" onClick={onEnd}>
+            End workout
+          </Button>
+          {workout.replan === undefined ||
+          workout.replan.off === true ||
+          onReplansOff === undefined ? null : (
+            <Button variant="secondary" size="ride" type="button" onClick={onReplansOff}>
+              {REPLAN_OFF_BUTTON}
+            </Button>
+          )}
+        </div>
+        {workout.replan?.off !== true ? null : (
+          // The answer to the rider's own press, so it is `live` (#445).
+          <StatusMessage tone="info" live>
+            {REPLANS_OFF}
+          </StatusMessage>
+        )}
         {workout.replan?.waiting === undefined ? null : (
           // #1244: an accepted re-plan waiting for the next block. The
           // sentence, then the one control that drops it. Not `live`:
@@ -479,7 +525,23 @@ export function WorkoutPanel({
   function chooser(): JSX.Element {
     return (
       <section>
-        <h3>Ride a workout</h3>
+        <h3>
+          Ride a workout
+          {/*
+            #1244's review: the switch is UNDER the list, with what it sends,
+            so a rider with many workouts presses *Ride* with it out of
+            sight. While it is on, two words say so HERE, on the heading's
+            own line, above the first *Ride* — floated to the line's end so
+            nothing under it moves when the switch is pressed. Nothing is
+            shown while it is off, which is the default and sends nothing.
+          */}
+          {replansAvailable === true && replans ? (
+            <span className="oyl-workout-replans-on" data-oyl-replans-on="">
+              {' '}
+              {REPLANS_ON_BADGE}
+            </span>
+          ) : null}
+        </h3>
         {loadFault === undefined ? null : (
           <StatusMessage tone="warning" live>
             {loadFault}

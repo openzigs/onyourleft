@@ -75,6 +75,32 @@ export const REPLAN_UNAVAILABLE =
 export const REPLAN_DISCARDED =
   'That change was dropped because the ride paused or lost the trainer, so the plan stays as it was.';
 
+/**
+ * The control that switches re-plans off while a workout runs (ADR 0048 D-7:
+ * *"A per-ride switch turns re-plans off"*). A button named for what it does,
+ * and not the chooser's switch drawn again: once pressed it cannot be undone
+ * for that workout, and a switch that cannot be switched back is not one.
+ *
+ * ⚠️ DRAFT wording, awaiting the owner's approval with the rest.
+ */
+export const REPLAN_OFF_BUTTON = 'Switch re-plans off';
+
+/**
+ * What the panel says once re-plans are switched off for a workout, in place
+ * of {@link REPLAN_OFF_BUTTON}. Nothing more is sent for that workout, and a
+ * change that was waiting is dropped with it.
+ */
+export const REPLANS_OFF =
+  'Re-plans are off for the rest of this workout. Nothing more is sent, and the plan stays as it is.';
+
+/**
+ * Said beside the chooser's heading while the per-ride switch is on, so the
+ * choice is in sight where *Ride* is pressed however long the list is: the
+ * switch itself is under the list, with what it sends. Two words, because it
+ * shares the heading's line and must not move anything under it.
+ */
+export const REPLANS_ON_BADGE = 'Re-plans on';
+
 const REASONS: Readonly<Record<ReasonCode, string>> = {
   'heart-rate-high': 'because your heart rate stayed above the range you chose',
   'heart-rate-low': 'because your heart rate stayed below the range you chose',
@@ -130,9 +156,21 @@ function moveText(move: PlanMove, next: number): string {
  * The one sentence for an accepted move: what changes, and the reason the
  * proposal named. *"Next block shortened by 2 minutes, because your heart
  * rate stayed above the range you chose."*
+ *
+ * ⚠️ **`reason` is `undefined` when this device cannot see for itself that
+ * the reason is so** (`replan-reason.ts`), and then the move is said alone:
+ * *"Next block shortened by 2 minutes."* The reason is the model's choice
+ * from a list; a clause about the rider's heart rate is said in this
+ * device's voice only when this device holds what it says.
  */
-export function replanSentence(move: PlanMove, reason: ReasonCode, next: number): string {
-  return `${moveText(move, next)}, ${REASONS[reason]}.`;
+export function replanSentence(
+  move: PlanMove,
+  reason: ReasonCode | undefined,
+  next: number,
+): string {
+  return reason === undefined
+    ? `${moveText(move, next)}.`
+    : `${moveText(move, next)}, ${REASONS[reason]}.`;
 }
 
 /** The event both announcers offer; written out here for `hold-text.ts`'s reason. */
@@ -207,6 +245,8 @@ export function planChangeAnnouncement(
  * be offered to an announcer now, and what to remember: the revision last
  * said to have been discarded. Once for each discarded move.
  *
+ * Said only of a move whose own sentence was offered (`offered`).
+ *
  * ⚠️ No silence rule, unlike {@link planChangeAnnouncement}: a move is
  * discarded by a pause or a lost trainer, which is not a moment a rider is
  * being asked to hold a hard effort, and a sentence held until a stretch ends
@@ -215,9 +255,21 @@ export function planChangeAnnouncement(
 export function planDiscardedAnnouncement(
   said: number | undefined,
   discarded: number | undefined,
+  /**
+   * The revision whose own sentence this announcer last offered. A discard
+   * is said only of THAT move: one accepted in a hard stretch and never
+   * said, or already waiting when the screen appeared, is taken away in
+   * silence, because a voice saying a change was dropped when no change was
+   * announced tells a rider nothing they can place.
+   */
+  offered: number | undefined,
 ): { readonly event: PlanChangedEvent | undefined; readonly said: number | undefined } {
   if (discarded === undefined || discarded === said) {
     return { event: undefined, said };
+  }
+  if (discarded !== offered) {
+    // Remembered as dealt with, so it is not said late if the numbers meet.
+    return { event: undefined, said: discarded };
   }
   return {
     event: { kind: 'plan-changed', text: `${REPLAN_LABEL}: ${REPLAN_DISCARDED}` },
@@ -235,4 +287,7 @@ export const REPLAN_FIXED_TEXTS: readonly string[] = [
   PLAN_KEPT,
   REPLAN_UNAVAILABLE,
   REPLAN_DISCARDED,
+  REPLAN_OFF_BUTTON,
+  REPLANS_OFF,
+  REPLANS_ON_BADGE,
 ];

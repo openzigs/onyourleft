@@ -418,6 +418,12 @@ export interface RideReplanSnapshot {
    * {@link RideWorkoutSnapshot.timeline} goes back to the plan being ridden.
    */
   readonly discarded?: number | undefined;
+  /**
+   * The rider switched re-plans off for the rest of this workout
+   * ({@link RideController.switchReplansOff}). The screen says so in place
+   * of the control that did it, and nothing more is sent.
+   */
+  readonly off?: boolean | undefined;
 }
 
 /** What a rider chose for one workout as they started it. */
@@ -1019,6 +1025,16 @@ export interface RideController {
   replansAvailable(): boolean;
 
   /**
+   * Switch re-plans off for the rest of the workout in progress — #1244's
+   * review, ADR 0048 D-7 (*"A per-ride switch turns re-plans off"*). From
+   * this call no request leaves for that workout, a job in flight is
+   * cancelled, and a move waiting for the next block is dropped. It cannot be
+   * switched back on until another workout is started with the switch on.
+   * It writes nothing to the trainer. A no-op with no re-plans running.
+   */
+  switchReplansOff(): void;
+
+  /**
    * *Keep the plan* — #1244, ADR 0048 D-7: drop the accepted re-plan that is
    * waiting for the next block, so the plan being ridden carries on. It
    * writes nothing to the trainer. A no-op when none is waiting.
@@ -1211,6 +1227,12 @@ export function createRideController(options: RideControllerOptions): RideContro
    * {@link workoutFinishedInRide}'s reason, and cleared with it.
    */
   let replanRecords: readonly ReplanRecord[] = [];
+  /**
+   * When this ride last sent a re-plan request, on the ride's clock — kept
+   * here, above any one workout, so a second workout in the same ride waits
+   * out the first one's three minutes. Cleared with {@link replanRecords}.
+   */
+  let replanLastAskedAt: Seconds | undefined;
   /** Set when a ride saved but its checkpoint could not be removed. @see RideSnapshot.leftover */
   let leftover = false;
   let recoverable: readonly RecoverableRide[] = [];
@@ -2649,6 +2671,7 @@ export function createRideController(options: RideControllerOptions): RideContro
               kept: replan.kept,
               notice: replan.notice,
               discarded: replan.discarded,
+              off: replan.off,
             },
     };
   };
@@ -2766,7 +2789,11 @@ export function createRideController(options: RideControllerOptions): RideContro
       ride: () => {
         const state = current.session.state();
         return {
-          status: state.player.status,
+          // ⚠️ The RIDE's pause as well as the player's. `pause()` sets the
+          // phase at once and the workout's player is paused by the next
+          // tick; in the second between, an answer would be accepted, shown,
+          // and then discarded. A paused ride is paused for P6 from the press.
+          status: phase === 'paused' ? 'paused' : state.player.status,
           elapsed: state.player.elapsed,
           rescue: state.player.rescue !== undefined,
           control: control()?.hasControl() === true,
@@ -2780,6 +2807,14 @@ export function createRideController(options: RideControllerOptions): RideContro
       revise: (timeline) => current.session.revise(timeline),
       keepPlan: () => current.session.keepPlan(),
       clock: () => rideSeconds(now()),
+      // #1245's "never more often than every 3 minutes" is said of the ride:
+      // the last request's time outlives the workout that sent it.
+      asked: {
+        last: () => replanLastAskedAt,
+        note: (at) => {
+          replanLastAskedAt = at;
+        },
+      },
       onChange: changed,
     });
     changed();
@@ -3167,6 +3202,7 @@ export function createRideController(options: RideControllerOptions): RideContro
       workoutFinishedInRide = false;
       // #1244: and the re-plan decisions that went with that ride.
       replanRecords = [];
+      replanLastAskedAt = undefined;
       leftover = false;
       clock = now();
       changed();
@@ -3377,6 +3413,11 @@ export function createRideController(options: RideControllerOptions): RideContro
 
     keepThePlan(): void {
       workout?.replan?.keepThePlan();
+      changed();
+    },
+
+    switchReplansOff(): void {
+      workout?.replan?.switchOff();
       changed();
     },
 

@@ -1768,6 +1768,31 @@ describe('readReplanRecord — what a ride kept, read whole or not at all (#1244
     }
   });
 
+  it('names switching re-plans off among the reasons a move was not ridden', () => {
+    expect(REPLAN_NOT_APPLIED).toContain('switched-off');
+    expect(readReplanRecord({ ...DROPPED, why: 'switched-off' })).toEqual({
+      ...DROPPED,
+      why: 'switched-off',
+    });
+  });
+
+  it('reads an accepted move whose reason was not shown to the rider, and only as `true`', () => {
+    const quiet = { ...ACCEPTED, reasonNotShown: true };
+    expect(readReplanRecord(quiet)).toEqual(quiet);
+    // As JSON, the way a row holds it.
+    expect(readReplanRecord(JSON.parse(JSON.stringify(quiet)))).toEqual(quiet);
+    // Absent is "the reason was said", and the key is not invented.
+    expect(readReplanRecord(ACCEPTED)).not.toHaveProperty('reasonNotShown');
+    for (const value of [false, 'yes', 1, null]) {
+      expect(readReplanRecord({ ...ACCEPTED, reasonNotShown: value })).toBeUndefined();
+    }
+    // The key belongs to an accepted move only.
+    expect(readReplanRecord({ ...REFUSED, reasonNotShown: true })).toBeUndefined();
+    expect(readReplanRecord({ ...DROPPED, reasonNotShown: true })).toBeUndefined();
+    // And it is still one key too many beside another.
+    expect(readReplanRecord({ ...quiet, text: 'ease off' })).toBeUndefined();
+  });
+
   it.each([
     ['one key too many', { ...ACCEPTED, text: 'ease off' }],
     ['a move off the list', { ...ACCEPTED, move: { kind: 'extend-block', block: 3, minutes: 4 } }],

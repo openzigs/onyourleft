@@ -57,6 +57,7 @@ import {
   createRideController,
   MANUAL_ERG_DURING_WORKOUT,
   RIDE_NOTIFICATION_REFUSED,
+  type RideWorkoutSnapshot,
 } from '../ride/controller';
 import type { RecordingCheckpointStore } from '../recording/recorder';
 import { accessibleName } from '../a11y/audit';
@@ -1255,6 +1256,38 @@ describe('#1244 — re-plans on the Ride screen: the switch, and Keep the plan',
     await showFor(stub);
     await activateWithKeyboard(buttonNamed('Keep the plan'));
     expect(stub.calls.keepThePlan).toBe(1);
+  });
+
+  it('hands Switch re-plans off to the controller, and offers it only while re-plans are on', async () => {
+    const running = (replan: NonNullable<RideWorkoutSnapshot['replan']> | undefined) => ({
+      ...ridingSnapshot(),
+      workout: {
+        name: 'Tempo',
+        status: 'running' as const,
+        elapsedSeconds: 60,
+        totalSeconds: 600,
+        holdingWatts: 150,
+        nowRiding: '10 min at 60%',
+        fault: undefined,
+        rescue: undefined,
+        timeline: expandWorkout(record.workout),
+        ...(replan === undefined ? {} : { replan }),
+      },
+    });
+    const on = stubRideController(
+      running({ waiting: undefined, kept: false, notice: undefined, off: false }),
+    );
+    await showFor(on);
+    await activateWithKeyboard(buttonNamed('Switch re-plans off'));
+    expect(on.calls.switchReplansOff).toBe(1);
+    expect(on.calls.endWorkout).toBe(0);
+    mounted?.unmount();
+
+    // A workout started with the switch off has no re-plans to switch off.
+    await showFor(stubRideController(running(undefined)));
+    expect([...document.querySelectorAll('button')].map((each) => each.textContent)).not.toContain(
+      'Switch re-plans off',
+    );
   });
 });
 

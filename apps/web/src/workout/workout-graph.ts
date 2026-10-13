@@ -611,7 +611,13 @@ function planLane(input: WorkoutGraphInput): PlanLanePaths {
   );
   const topShare =
     hardest > 0 ? Math.max(hardest, FREE_RIDE_DRAWN_SHARE) / PLAN_FILL_SHARE : CHART_TOP_SHARE;
-  const scale = { endSeconds: total, topShare };
+  // ⚠️ The lane's width is the LONGER of the plan and what it replaced
+  // (#1244's review). A re-plan that shortens a workout leaves an outline
+  // that ends after the plan does; on the plan's own scale it ran past the
+  // chart's right edge (x to 1250 in a 1000-wide chart) and its tail was cut
+  // off. Everything in the lane shares this one scale.
+  const span = replaced.reduce((latest, segment) => Math.max(latest, segment.endsAt), total);
+  const scale = { endSeconds: span, topShare };
   const { before, after } = splitAt(segments, elapsed);
   // While the trainer holds something else, the rest of the block being
   // ridden is taken out of the filled part and drawn as two shapes instead.
@@ -619,13 +625,13 @@ function planLane(input: WorkoutGraphInput): PlanLanePaths {
   // ⚠️ No outline where what was asked is not known: an eased hold.
   const outlined = held?.plannedWatts === undefined ? undefined : riding;
   const toCome = riding === undefined ? after : after.slice(1);
-  const fraction = total > 0 && Number.isFinite(elapsed / total) ? elapsed / total : 0;
+  const fraction = span > 0 && Number.isFinite(elapsed / span) ? elapsed / span : 0;
   const x = fraction * CHART_WIDTH;
   let heldArea = '';
   let heldEdge = '';
-  if (riding !== undefined && heldShare !== undefined && heldShare > 0 && total > 0) {
-    const x0 = coordinate((riding.startsAt / total) * CHART_WIDTH);
-    const x1 = coordinate((riding.endsAt / total) * CHART_WIDTH);
+  if (riding !== undefined && heldShare !== undefined && heldShare > 0 && span > 0) {
+    const x0 = coordinate((riding.startsAt / span) * CHART_WIDTH);
+    const x1 = coordinate((riding.endsAt / span) * CHART_WIDTH);
     const top = coordinate(PLAN_LANE_HEIGHT - (heldShare / topShare) * PLAN_LANE_HEIGHT);
     const ground = coordinate(PLAN_LANE_HEIGHT);
     heldEdge = `M${x0} ${top}H${x1}`;

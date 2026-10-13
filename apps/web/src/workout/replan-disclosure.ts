@@ -135,10 +135,18 @@ const WHO_IS_ASKED =
   "a hosted service: this app asks only for the model on your instance's own machine, " +
   'whatever key you stored there.';
 
+/**
+ * Its last sentence is #1244's (its third review): there is a control that
+ * switches re-plans off while a workout runs (`replan-text.ts`
+ * §`REPLAN_OFF_BUTTON`), and a rider is told so before switching them on.
+ * `ride/controller.test.ts` §"switching re-plans off while the workout runs"
+ * counts the calls that leave after it: none.
+ */
 const WHO_DECIDES =
   `This device checks every suggestion against your workout goals and the workout you loaded, ` +
   'and works out every target itself. A change it accepts starts at the next block, never in ' +
-  `the one you are riding, and you can press '${REPLAN_KEEP_BUTTON}' before then.`;
+  `the one you are riding, and you can press '${REPLAN_KEEP_BUTTON}' before then. You can ` +
+  'switch re-plans off while the workout runs, and nothing more is sent for that workout.';
 
 const WHAT_IS_KEPT =
   'Your instance keeps each request and its answer for 7 days. This device keeps each change it ' +

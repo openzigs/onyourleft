@@ -52,7 +52,9 @@ import {
   REPLAN_SOURCE,
   type BlockSummary,
 } from './replan-job';
+import { REASONS_NEVER_SHOWN } from './replan-reason';
 import { REPLAN_ASK_INTERVAL_SECONDS } from './replan-session';
+import { REPLAN_OFF_BUTTON } from './replan-text';
 import {
   HOLD_SENDS_NOTHING,
   REPLAN_KEEP_BUTTON,
@@ -482,6 +484,33 @@ describe('what the text says of this device, held to its code (#1244)', () => {
     );
     expect(POLICY).toContain(
       'or, in a long workout with more blocks than fit in one request, for the most recent of them',
+    );
+  });
+
+  it('"switch it off and nothing more is sent": names a control the screen has, and what it does', () => {
+    // The behaviour is `ride/controller.test.ts` §"switching re-plans off
+    // while the workout runs": every call on the instance's channel after
+    // the press is counted (none), the job in flight is cancelled, and the
+    // simulated trainer rides the loaded plan. `ride/WorkoutPanel.test.tsx`
+    // holds the control to the screen while re-plans are on. This holds the
+    // words to the control's own name.
+    expect(REPLAN_OFF_BUTTON).toBe('Switch re-plans off');
+    expect(disclosure.paragraphs[4]).toContain(
+      'You can switch re-plans off while the workout runs, and nothing more is sent for that workout.',
+    );
+    expect(POLICY).toContain(
+      `switch it off and nothing more is sent — ${REPLAN_OFF_BUTTON}, beside End workout, while the workout runs; it then stays off for the rest of that workout`,
+    );
+    expect(POLICY).toContain(
+      `Switching it off: while the workout runs, ${REPLAN_OFF_BUTTON} is beside End workout. From that press nothing more is sent for that workout, a request still out is cancelled, and a change that was waiting for the next block is dropped. It stays off for the rest of that workout`,
+    );
+  });
+
+  it('"It gives the reason only when this device can see it in what it sent": two reasons it never can', () => {
+    // `replan-reason.test.ts` holds every reason both ways.
+    expect(REASONS_NEVER_SHOWN).toStrictEqual(['goal-time-in-range', 'effort-check-in']);
+    expect(POLICY).toContain(
+      'It gives the reason only when this device can see it in what it sent; otherwise it says the change alone.',
     );
   });
 

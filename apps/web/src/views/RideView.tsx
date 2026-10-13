@@ -313,6 +313,12 @@ function LiveRide({
           onKeepPlan={() => {
             controller.keepThePlan();
           }}
+          // #1244's review: the mid-workout off control, and the switch going
+          // back to off whenever a ride starts or ends.
+          onReplansOff={() => {
+            controller.switchReplansOff();
+          }}
+          rideInProgress={rideInProgress(snapshot.phase)}
           onStart={(record, choices) => {
             // ⚠️ Guarded rather than defaulted. The panel does not render a Start
             // control without a threshold, so this is unreachable through the UI

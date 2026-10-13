@@ -77,6 +77,9 @@ export const RIDE_TIME_CONTROLS: readonly RideTimeControl[] = [
   // #1244, ADR 0048 D-7: the one control over a re-plan, shown while an
   // accepted move waits for the next block. Pressed at the bars, mid-block.
   { surface: 'workout-panel', name: 'Keep the plan', match: 'exact' },
+  // #1244's review, ADR 0048 D-7: the mid-workout switch-off, beside *End
+  // workout* while a workout runs with re-plans on.
+  { surface: 'workout-panel', name: 'Switch re-plans off', match: 'exact' },
   // `game/hud/HudPanel.tsx` and `game/SoundControls.tsx`.
   { surface: 'game-hud', name: 'Pause', match: 'exact' },
   // The same HUD control while the ride is paused (#710's review).

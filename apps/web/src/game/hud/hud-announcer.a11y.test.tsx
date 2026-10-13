@@ -606,6 +606,19 @@ describe('a re-plan during the ride, through the game — #1244', () => {
     expect(offered.filter((kind) => kind === 'plan-changed')).toHaveLength(2);
   });
 
+  it('takes away in silence a move that was held above threshold power and never said', async () => {
+    quietRide();
+    await startRide(replanPort());
+    change = { waiting: { revision: 1, sentence: SENTENCE }, quiet: true };
+    await pump(6);
+    change = undefined;
+    discarded = 1;
+    await pump(20);
+    // Nothing was announced, so nothing is said to have been dropped.
+    expect(offered).not.toContain('plan-changed');
+    expect(region()?.textContent).not.toContain('dropped');
+  });
+
   it('does not say a discard that already stood when the ride began', async () => {
     quietRide();
     discarded = 4;

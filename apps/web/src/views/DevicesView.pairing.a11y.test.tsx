@@ -233,6 +233,7 @@ describe('#942 — the garage: one card per kind of device, its state in words',
         "startNewRide": 0,
         "startWorkout": [],
         "startWorkoutWith": [],
+        "switchReplansOff": 0,
         "tick": 0,
         "unpair": [
           "kickr",

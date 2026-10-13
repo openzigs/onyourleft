@@ -119,6 +119,7 @@ import {
   type BlockSummary,
   type ReplanInput,
 } from './replan-job';
+import { reasonPremiseHolds } from './replan-reason';
 import { REPLAN_UNAVAILABLE, replanSentence, type WaitingReplan } from './replan-text';
 
 /**
@@ -193,6 +194,17 @@ export interface ReplanSessionOptions {
   readonly keepPlan: () => boolean;
   /** The ride's clock, the one every `tick` is stamped on. */
   readonly clock: () => Seconds;
+  /**
+   * When this RIDE last sent a request, across every workout in it — the
+   * ride controller's memory, since a ride can hold more than one workout and
+   * each has a session of its own. *"Never more often than every 3 minutes"*
+   * is said of the ride (#1245's disclosure), and so is the hour's bound that
+   * follows from it: a rider who starts a second workout a minute after the
+   * first asked does not make a second request a minute after the first.
+   * Absent, the session's own last request is all it knows.
+   */
+  readonly asked?:
+    { readonly last: () => Seconds | undefined; readonly note: (at: Seconds) => void } | undefined;
   readonly onChange?: (() => void) | undefined;
 }
 
@@ -204,6 +216,12 @@ export interface ReplanState {
   readonly kept: boolean;
   /** {@link REPLAN_UNAVAILABLE}, after a request that failed. */
   readonly notice: string | undefined;
+  /**
+   * The rider switched re-plans off for the rest of this workout
+   * ({@link ReplanSession.switchOff}). Nothing more is sent, and it does not
+   * come back on until another workout is started with the switch on.
+   */
+  readonly off: boolean;
   /**
    * The revision of a waiting move that a pause or a lost trainer discarded
    * in the block being ridden (ADR 0048 D-8), for the one sentence that says
@@ -225,6 +243,16 @@ export interface ReplanSession {
   tick(now: Seconds): void;
   /** *Keep the plan*: drop the waiting move. `false` when none was waiting. */
   keepThePlan(): boolean;
+  /**
+   * The rider's mid-workout switch (ADR 0048 D-7: *"A per-ride switch turns
+   * re-plans off"*): from this call no request leaves for this workout, a
+   * job in flight is cancelled and never listened to, and a move waiting for
+   * the next block is DROPPED, so the plan being ridden carries on — a rider
+   * who has just said "no more changes" is not then handed one. It cannot be
+   * switched back on: the session is over, as after {@link stop}. `false`
+   * when it was already off or over. It writes nothing to the trainer.
+   */
+  switchOff(): boolean;
   /** The workout is over: drop everything, cancel a job in flight, and listen to nothing more. */
   stop(): void;
   state(): ReplanState;
@@ -398,6 +426,8 @@ function summaryOf(from: Gathering, endedAt: number, thresholdPower: number): Bl
 interface Flight {
   readonly abort: AbortController;
   readonly sentAt: number;
+  /** What left: a reason is said only when its premise holds in THIS (`replan-reason.ts`). */
+  readonly sent: ReplanInput;
   session: Extract<JobSession, { kind: 'open' }> | undefined;
   jobId: string | undefined;
 }
@@ -421,6 +451,8 @@ export function createReplanSession(options: ReplanSessionOptions): ReplanSessio
   /** What the last move that reached the plan replaced. */
   let replaced: readonly WorkoutSegment[] | undefined;
   let kept = false;
+  /** @see ReplanState.off */
+  let off = false;
   /** The revision of a waiting move a pause or a lost trainer discarded. @see ReplanState.discarded */
   let discarded: number | undefined;
   let notice: string | undefined;
@@ -443,6 +475,14 @@ export function createReplanSession(options: ReplanSessionOptions): ReplanSessio
 
   const changed = (): void => {
     options.onChange?.();
+  };
+
+  /** When a request last left: this session's, or an earlier workout's in the same ride. */
+  const lastAskedAt = (): number | undefined => {
+    const mine = summary?.sentAt;
+    const rides = options.asked?.last();
+    if (mine === undefined) return rides;
+    return rides === undefined ? mine : Math.max(mine, rides);
   };
 
   /** Stop listening to the request in flight, and cancel its job if it has one. */
@@ -531,7 +571,7 @@ export function createReplanSession(options: ReplanSessionOptions): ReplanSessio
   };
 
   /** A proposal arrived in time to be read. The validator decides; nothing here does. */
-  const arrived = (proposal: unknown): void => {
+  const arrived = (proposal: unknown, sent: ReplanInput): void => {
     const now = options.clock();
     const facts = options.ride();
     reconcile('paused');
@@ -566,10 +606,13 @@ export function createReplanSession(options: ReplanSessionOptions): ReplanSessio
     }
     const before = options.plan().riding;
     const timeline = expandWorkout(decided.workout);
+    // The reason is the model's. It is SAID only when this device can see its
+    // premise in what it sent, and the record says when it was not.
+    const reasonShown = reasonPremiseHolds(decided.record.reason, sent);
     // Before the record is kept: a hand-over that throws leaves no record of
     // a move that was never handed over (`run`'s caller says the one line).
     const taken = options.revise(timeline);
-    records.push(decided.record);
+    records.push(reasonShown ? decided.record : { ...decided.record, reasonNotShown: true });
     if (!taken) {
       // The player would not take it, so it is not the plan and never was.
       latest = planNotApplied(riding, decided.plan);
@@ -589,7 +632,11 @@ export function createReplanSession(options: ReplanSessionOptions): ReplanSessio
     waiting = {
       plan: decided.plan,
       timeline,
-      sentence: replanSentence(decided.record.move, decided.record.reason, decided.fromBlock),
+      sentence: replanSentence(
+        decided.record.move,
+        reasonShown ? decided.record.reason : undefined,
+        decided.fromBlock,
+      ),
       replaced: before.segments.filter((segment) => segment.block >= decided.fromBlock),
     };
     changed();
@@ -656,7 +703,7 @@ export function createReplanSession(options: ReplanSessionOptions): ReplanSessio
       changed();
       return;
     }
-    arrived(result.proposal);
+    arrived(result.proposal, from.sent);
   };
 
   const ask = (now: Seconds, where: Where): void => {
@@ -674,9 +721,11 @@ export function createReplanSession(options: ReplanSessionOptions): ReplanSessio
       return;
     }
     summary = { seq, sentAt: now };
+    options.asked?.note(now);
     const leaving: Flight = {
       abort: new AbortController(),
       sentAt: now,
+      sent: input,
       session: undefined,
       jobId: undefined,
     };
@@ -724,9 +773,16 @@ export function createReplanSession(options: ReplanSessionOptions): ReplanSessio
       }
       gather(gathering, facts);
 
+      // ⚠️ Without control or a strap as well as in a rescue (P6): a job out
+      // when the link or control goes is cancelled HERE, so its answer is
+      // not accepted seconds after control returns, from summaries of a
+      // block that was interrupted. D-8 drops a waiting move on a lost link;
+      // this is the same rule for a move that has not arrived yet.
       if (
         flight !== undefined &&
         (facts.rescue ||
+          !facts.control ||
+          !facts.heartRatePaired ||
           now - flight.sentAt > REPLAN_FRESHNESS_SECONDS ||
           where.remaining < REPLAN_BOUNDARY_LEAD_SECONDS)
       ) {
@@ -743,7 +799,7 @@ export function createReplanSession(options: ReplanSessionOptions): ReplanSessio
         !where.last &&
         where.remaining >= REPLAN_BOUNDARY_LEAD_SECONDS &&
         latest.blocks.length <= REPLAN_MAXIMUM_BLOCKS &&
-        (summary === undefined || now - summary.sentAt >= REPLAN_ASK_INTERVAL_SECONDS)
+        (lastAskedAt() === undefined || now - (lastAskedAt() ?? 0) >= REPLAN_ASK_INTERVAL_SECONDS)
       ) {
         ask(now, where);
       }
@@ -760,6 +816,26 @@ export function createReplanSession(options: ReplanSessionOptions): ReplanSessio
       kept = dropped;
       changed();
       return dropped;
+    },
+
+    switchOff(): boolean {
+      if (stopped) {
+        return false;
+      }
+      if (waiting !== undefined) {
+        // The rider said no more changes: the one waiting goes too.
+        options.keepPlan();
+        reconcile('switched-off');
+      }
+      stopped = true;
+      shut = true;
+      off = true;
+      kept = false;
+      discarded = undefined;
+      notice = undefined;
+      drop();
+      changed();
+      return true;
     },
 
     stop(): void {
@@ -781,7 +857,7 @@ export function createReplanSession(options: ReplanSessionOptions): ReplanSessio
       notice = undefined;
     },
 
-    state: () => ({ ...shown(), kept, notice }),
+    state: () => ({ ...shown(), kept, notice, off }),
 
     records: () => records,
 

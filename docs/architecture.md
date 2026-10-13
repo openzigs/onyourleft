@@ -1439,12 +1439,14 @@ sentence the device composes, and can be dropped with *Keep the plan*.
 |---|---|---|
 | The plan revision | `packages/domain/src/workout/player.ts` §`revise`, §`keepPlan`, §`plan` | the player keeps a revised timeline WAITING and starts reading it at the end of the block being ridden. It compares every segment before that boundary with the plan it is riding and refuses a timeline in which one differs, whatever the validator said. A pause, a lost link, a stop and a new start drop a waiting revision (D-8) |
 | The wire | `apps/web/src/workout/replan-job.ts` | the one builder of the request (`replanInput`, `replanInputWithin`, `replanRequest`), the start, and the stream read to its one `result`. Every key that leaves is NAMED, a goal's as a block's and a summary's are. A request is held to the instance's 8 KB input budget by leaving out the oldest summaries. A proposal is handed on undecoded. Cancelling is #1102's `cancelJob`. A `departing` boundary (`privacy/boundaries.test.ts`) |
+| The golden answer | `packages/domain/src/workout/fixtures/replan-result.json` | the `result` event's name and its data for a proposal, a kept workout and a failed job. `apps/instance` §`replan-jobs.test.ts` holds the real job's stream to it; `apps/web` §`replan-job.test.ts` holds the device's reader to it |
 | The golden requests | `packages/domain/src/workout/fixtures/replan-request.json`, `replan-request-long.json` | two requests exactly as the device builds them. `apps/web` §`replan-job.test.ts` fails when the builder stops producing them; `apps/instance` §`replan-jobs.test.ts` posts the same files to the instance's real start and fails when it stops taking them, or when its template version is not the one in the file. The two apps may not import each other, so this is what makes a drift between the two hand-written halves of the wire a red test |
 | The session | `apps/web/src/workout/replan-session.ts` | when a summary is sent, the one job in flight, when it is dropped, the call to `validateProposal`, the hand-over to the player, and P9's record. It holds no trainer and no writer |
 | The words | `apps/web/src/workout/replan-disclosure.ts` (#1245), `replan-text.ts` | `replan-disclosure.ts` owns the switch's label, the disclosure under it and the control's name, and the privacy policy is held to it word for word. `replan-text.ts` owns what is said WHILE it happens: a move's sentence (a part for the move and a part for the reason), the status lines, the one sentence for a move a pause or a lost trainer discarded, and when `plan-changed` is said |
 | The port | `apps/web/src/workout/replan-port.ts` | what the ride controller asks of the outside: is the device signed in, the sealed session, the rider's typed goals, their saved workouts. `main.tsx` §`buildReplanPort` builds the one production port |
 | The wiring | `apps/web/src/ride/controller.ts` §`startWorkout`, §`beginReplans`, §`keepThePlan` | a session is made only for a workout started with the switch on and the rider's own two thresholds; it is ticked after the workout's own tick; it is stopped after the workout's session, so a release is never behind it |
-| The screens | `ride/WorkoutPanel.tsx`, `ride/RideAnnouncer.tsx`, `game/GameView.tsx`, `game/hud/HudPanel.tsx` | the per-ride switch (off every time) with #1245's whole disclosure under it, the waiting sentence and *Keep the plan* on the Ride screen; *Keep the plan* in the game HUD's actions while a move waits, on a row of its own (`GameTrainerPort.keepThePlan`, the controller's own `keepThePlan`); `plan-changed` through each screen's one region, for a move and for its discard. ⚠️ The HUD shows no sentence and no dotted outline: its strip is the last five minutes, with no plan ahead in it |
+| The reason | `apps/web/src/workout/replan-reason.ts` | whether this device can see, in what it sent, that a proposal's reason is so. A reason is the model's choice from a list; it is SAID only when this answers yes, and otherwise the move is said alone. Never a refusal. `goal-time-in-range` and `effort-check-in` are never said: the device sends neither |
+| The screens | `ride/WorkoutPanel.tsx`, `ride/RideAnnouncer.tsx`, `game/GameView.tsx`, `game/hud/HudPanel.tsx` | the per-ride switch (off every ride and every workout) with #1245's whole disclosure under it, *"Re-plans on"* beside the chooser's heading while it is on, the waiting sentence and *Keep the plan* on the Ride screen; *Switch re-plans off* beside *End workout* while a workout runs with re-plans on (`RideController.switchReplansOff` → `ReplanSession.switchOff`: nothing more is sent, a job in flight is cancelled, a waiting move is dropped, and it stays off for that workout); *Keep the plan* in the game HUD's actions while a move waits, on a row of its own (`GameTrainerPort.keepThePlan`, the controller's own `keepThePlan`); `plan-changed` through each screen's one region, for a move and for its discard. ⚠️ The HUD shows no sentence and no dotted outline: its strip is the last five minutes, with no plan ahead in it |
 | The record | `packages/store` §`RideFacts.replans`, §`replansDropped`, `packages/domain` §`readReplanRecord` | every accepted and refused move, the rule and the time, and a move accepted and not ridden, kept with the ride and in the account export. ⚠️ A record that does not read is dropped and counted on the way in and skipped and counted on the way out: it never stops a ride being saved or read (`activity-store.replan-records.test.ts`, through the real store) |
 
 **What is sent** is `replan-job.ts` §`replanInput` and nothing else: the plan's revision, the
@@ -1455,7 +1457,8 @@ time-in-range target is withheld** (`goalsToSend`): spike 0022's rule R1, until 
 it. Only the instance's own model is asked (`REPLAN_SOURCE`); a hosted re-plan is not built.
 
 **When.** As a block begins, for the blocks ridden so far, and no sooner than three minutes after
-the last request. Never as the cool-down begins, in a block of under thirty seconds, while paused,
+the RIDE's last request (the controller keeps that time across the workouts of one ride). A job
+out when control or the strap is lost, or the rider presses Pause, is cancelled. Never as the cool-down begins, in a block of under thirty seconds, while paused,
 during a stall rescue, without trainer control or without a strap. **Nothing is sent twice, and a
 failure is never followed at once**: the next request is the next block boundary, at least three
 minutes on, whatever became of the last. A refusal on the list of PERMANENT ones
@@ -1484,12 +1487,16 @@ the same proposal under P5 or P2 if it arrives between two ticks. Nothing is sho
   (`RideFacts`) are synced by nothing today: a ride goes to an instance as its activity file, which
   carries none of them. Syncing the record needs an item kind of its own on the instance:
   [#1315](https://github.com/openzigs/onyourleft/issues/1315).
+- **P9's record does not survive a recovery.** It is in memory until the ride saves; a ride
+  recovered after a crash is saved without it:
+  [#1328](https://github.com/openzigs/onyourleft/issues/1328).
+- **A rider in the game cannot switch re-plans off** without ending the workout or leaving the
+  game: *Switch re-plans off* is on the Ride screen.
 - **A rider in the game is not SHOWN the move.** *Keep the plan* is on the HUD while one waits and
   the sentence is said, with announcements on. With them off, the control appears with no sentence
   beside it: the HUD has no place for one that a browser gate holds clear of the rider. That is
   [#1324](https://github.com/openzigs/onyourleft/issues/1324).
-- **The switch is set as the workout starts** and cannot be turned off mid-workout; ending the
-  workout ends the re-plans.
+- **Once switched off mid-workout, re-plans do not come back on for that workout.**
 - **No test here reaches a model or a trainer.** The instance is a scripted one
   (`replan-testing.ts`) and the trainer the #44 simulator. The round trip on the owner's instance
   and a real trainer is [validation 0004](validation/0004-heart-rate-hold-and-re-plans.md) Part B.

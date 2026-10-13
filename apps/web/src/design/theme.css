@@ -3422,6 +3422,26 @@ a.oyl-button {
   margin-block-start: var(--oyl-space-sm);
 }
 
+/* #1244: "Re-plans on", beside the chooser's heading while the switch under
+   the list is on. Floated to the end of the heading's own line, at body
+   size and weight, so it takes no line of its own and the first *Ride* is
+   where it was. `rideview.browser.spec.ts` §"#1244 — many saved workouts"
+   holds both. */
+.oyl-workout-replans-on {
+  float: inline-end;
+  font-size: var(--oyl-font-size-md);
+  font-weight: 400;
+}
+
+/* #1244: *End workout* and, while re-plans are on, *Switch re-plans off*, on
+   one row, 8 px apart (#669's spacing between two ride-time controls), and
+   wrapping to two rows where the column is too narrow for both. */
+.oyl-workout-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oyl-space-sm);
+}
+
 .oyl-workout-replans > [data-oyl-replan-disclosure] > p:first-child {
   margin-block-start: var(--oyl-space-xs);
 }

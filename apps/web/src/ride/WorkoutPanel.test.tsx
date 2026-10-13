@@ -33,7 +33,14 @@ import {
   replanDisclosure,
   replanDisclosureSentences,
 } from '../workout/replan-disclosure';
-import { PLAN_KEPT, REPLAN_DISCARDED, REPLAN_UNAVAILABLE } from '../workout/replan-text';
+import {
+  PLAN_KEPT,
+  REPLAN_DISCARDED,
+  REPLAN_OFF_BUTTON,
+  REPLAN_UNAVAILABLE,
+  REPLANS_OFF,
+  REPLANS_ON_BADGE,
+} from '../workout/replan-text';
 
 import type { RideWorkoutSnapshot, TrainerSnapshot } from './controller';
 import { WorkoutPanel } from './WorkoutPanel';
@@ -609,6 +616,141 @@ describe('re-plans during the ride — #1244', () => {
           (each.textContent ?? '').includes(SENTENCE) && !each.hasAttribute('data-oyl-announcer'),
       );
       expect(live).toEqual([]);
+    });
+  });
+
+  describe('switching re-plans off while the workout runs — ADR 0048 D-7', () => {
+    const on = () => waiting({ waiting: undefined });
+
+    it('offers the control beside End workout while re-plans are on, as a ride-time control', async () => {
+      let pressed = 0;
+      const view = await render({
+        workout: on(),
+        onReplansOff: () => {
+          pressed += 1;
+        },
+      });
+      const off = buttonSaying(view.container, REPLAN_OFF_BUTTON);
+      const end = buttonSaying(view.container, 'End workout');
+      expect(off?.textContent).toBe('Switch re-plans off');
+      expect(off?.classList.contains('oyl-button--ride')).toBe(true);
+      // The same row as the other control that ends something, and after it.
+      expect(off?.parentElement).toBe(end?.parentElement);
+      expect(off?.parentElement?.classList.contains('oyl-workout-controls')).toBe(true);
+      expect(
+        (end as HTMLElement).compareDocumentPosition(off as HTMLElement) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+      await activateWithKeyboard(off as HTMLElement);
+      expect(pressed).toBe(1);
+    });
+
+    it('offers it with a move waiting too, above the plan change and its Keep the plan', async () => {
+      const view = await render({
+        workout: waiting(),
+        onReplansOff: () => undefined,
+        onKeepPlan: () => undefined,
+      });
+      const text = view.container.textContent ?? '';
+      expect(text.indexOf(REPLAN_OFF_BUTTON)).toBeGreaterThan(text.indexOf('End workout'));
+      expect(text.indexOf(REPLAN_OFF_BUTTON)).toBeLessThan(text.indexOf(SENTENCE));
+      expect(buttonSaying(view.container, 'Keep the plan')).toBeDefined();
+    });
+
+    it('is not offered for a workout with no re-plans, or with nobody to hand the press to', async () => {
+      const none = await render({ workout: running(), onReplansOff: () => undefined });
+      expect(buttonSaying(none.container, REPLAN_OFF_BUTTON)).toBeUndefined();
+      none.unmount();
+      const unhandled = await render({ workout: on() });
+      expect(buttonSaying(unhandled.container, REPLAN_OFF_BUTTON)).toBeUndefined();
+    });
+
+    it('once off, says so in a live region in place of the control, and offers no way back', async () => {
+      const view = await render({
+        workout: waiting({ waiting: undefined, off: true }),
+        onReplansOff: () => undefined,
+        onKeepPlan: () => undefined,
+      });
+      expect(buttonSaying(view.container, REPLAN_OFF_BUTTON)).toBeUndefined();
+      expect(queryAll(view.container, 'input[role="switch"]')).toEqual([]);
+      const said = queryAll(view.container, '[role="status"]').find((each) =>
+        (each.textContent ?? '').includes(REPLANS_OFF),
+      );
+      expect(said).toBeDefined();
+      expect(buttonSaying(view.container, 'End workout')).toBeDefined();
+      expect(buttonSaying(view.container, 'Keep the plan')).toBeUndefined();
+    });
+
+    it('says nothing about being off while it is on', async () => {
+      const view = await render({ workout: on(), onReplansOff: () => undefined });
+      expect(view.container.textContent).not.toContain(REPLANS_OFF);
+    });
+  });
+
+  describe('the switch’s state where Ride is pressed, and at the start of every ride', () => {
+    const onLine = (root: ParentNode): string | undefined =>
+      queryAll(root, '[data-oyl-replans-on]')[0]?.textContent ?? undefined;
+
+    it('says beside the heading that it is on, only while it is on', async () => {
+      const view = await render({ replansAvailable: true });
+      expect(onLine(view.container)).toBeUndefined();
+      expect(view.container.querySelector('h3')?.textContent).toBe('Ride a workout');
+      await activateWithKeyboard(theSwitch(view.container) as HTMLElement);
+      expect(onLine(view.container)?.trim()).toBe(REPLANS_ON_BADGE);
+      // On the heading's own line, so before the first control that starts a workout.
+      const badge = queryAll(view.container, '[data-oyl-replans-on]')[0] as HTMLElement;
+      expect(badge.closest('h3')?.textContent).toBe('Ride a workout Re-plans on');
+      const ride = buttonSaying(view.container, 'Ride Sweet spot') as HTMLElement;
+      expect(badge.compareDocumentPosition(ride) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      await activateWithKeyboard(theSwitch(view.container) as HTMLElement);
+      expect(onLine(view.container)).toBeUndefined();
+    });
+
+    it('never says it where there is no switch', async () => {
+      const view = await render();
+      expect(onLine(view.container)).toBeUndefined();
+    });
+
+    it('is off again when a ride starts, and when one ends, though no workout was started', async () => {
+      const props = {
+        trainer: trainer(),
+        port: workoutStub(ATHLETE, [record()]),
+        thresholdPower: watts(250),
+        onStart: () => undefined,
+        onEnd: () => undefined,
+        replansAvailable: true,
+      };
+      const view = await render({ ...props, rideInProgress: false });
+      await activateWithKeyboard(theSwitch(view.container) as HTMLElement);
+      expect(theSwitch(view.container)?.checked).toBe(true);
+      // The ride starts: the choice made before it is not carried into it.
+      await view.rerender(<WorkoutPanel {...props} workout={undefined} rideInProgress />);
+      await settle();
+      expect(theSwitch(view.container)?.checked).toBe(false);
+      expect(onLine(view.container)).toBeUndefined();
+      // Switched on during the ride, with no workout started; the ride ends.
+      await activateWithKeyboard(theSwitch(view.container) as HTMLElement);
+      expect(theSwitch(view.container)?.checked).toBe(true);
+      await view.rerender(<WorkoutPanel {...props} workout={undefined} rideInProgress={false} />);
+      await settle();
+      expect(theSwitch(view.container)?.checked).toBe(false);
+    });
+
+    it('stays as the rider set it while the ride goes on', async () => {
+      const props = {
+        trainer: trainer(),
+        port: workoutStub(ATHLETE, [record()]),
+        thresholdPower: watts(250),
+        onStart: () => undefined,
+        onEnd: () => undefined,
+        replansAvailable: true,
+        rideInProgress: true,
+      };
+      const view = await render(props);
+      await activateWithKeyboard(theSwitch(view.container) as HTMLElement);
+      await view.rerender(<WorkoutPanel {...props} workout={undefined} power={200} />);
+      await settle();
+      expect(theSwitch(view.container)?.checked).toBe(true);
     });
   });
 

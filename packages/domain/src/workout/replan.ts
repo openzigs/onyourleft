@@ -296,7 +296,11 @@ export interface OwnThresholds {
  * trainer before the boundary, the workout ended first, or the player would
  * not take the revised plan (`player.ts` §`revise`).
  */
-export const REPLAN_NOT_APPLIED = ['kept', 'paused', 'ended', 'not-taken'] as const;
+/**
+ * Why an accepted move was not ridden. `switched-off` (#1244's review): the
+ * rider switched re-plans off for the rest of the workout while it waited.
+ */
+export const REPLAN_NOT_APPLIED = ['kept', 'paused', 'ended', 'not-taken', 'switched-off'] as const;
 
 export type ReplanNotApplied = (typeof REPLAN_NOT_APPLIED)[number];
 
@@ -316,6 +320,14 @@ export type ReplanRecord =
       /** The revision the move made. */
       readonly revision: number;
       readonly at: Seconds;
+      /**
+       * `true` when the device did NOT say {@link reason} to the rider,
+       * because it could not see for itself that the reason's premise held
+       * (#1244's review). The reason is the proposal's and is kept either
+       * way; this says the rider was shown the move alone. Absent when the
+       * reason was said. Set by the device after the validator's decision.
+       */
+      readonly reasonNotShown?: true;
     }
   | {
       readonly decision: 'refused';
@@ -505,11 +517,25 @@ export function readReplanRecord(value: unknown): ReplanRecord | undefined {
     case 'accepted': {
       const move = decodeMove(value['move']);
       const { reason, revision } = value;
-      return hasExactly(value, ['decision', 'move', 'reason', 'revision', 'at']) &&
+      const notShown = value['reasonNotShown'];
+      // The one optional key: present only as `true`.
+      const keys =
+        notShown === undefined
+          ? ['decision', 'move', 'reason', 'revision', 'at']
+          : ['decision', 'move', 'reason', 'revision', 'at', 'reasonNotShown'];
+      return hasExactly(value, keys) &&
+        (notShown === undefined || notShown === true) &&
         move !== undefined &&
         isOneOf(reason, REASON_CODES) &&
         isIndex(revision)
-        ? { decision: 'accepted', move, reason, revision, at }
+        ? {
+            decision: 'accepted',
+            move,
+            reason,
+            revision,
+            at,
+            ...(notShown === true ? { reasonNotShown: true as const } : {}),
+          }
         : undefined;
     }
     case 'refused': {

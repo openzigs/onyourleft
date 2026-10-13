@@ -70,6 +70,8 @@ interface RigOptions {
   readonly session?: () => Promise<JobSession>;
   /** In place of the player's own `revise`, for a player that will not take a plan. */
   readonly revise?: () => boolean;
+  /** The ride's own memory of when it last asked, across workouts. */
+  readonly asked?: { last: () => number | undefined; note: (at: number) => void };
 }
 
 function rig(options: RigOptions = {}) {
@@ -101,6 +103,17 @@ function rig(options: RigOptions = {}) {
     revise: options.revise ?? ((timeline) => player.revise(timeline)),
     keepPlan: () => player.keepPlan(),
     clock: () => seconds(now),
+    ...(options.asked === undefined
+      ? {}
+      : {
+          asked: {
+            last: () => {
+              const at = options.asked?.last();
+              return at === undefined ? undefined : seconds(at);
+            },
+            note: (at) => options.asked?.note(at),
+          },
+        }),
     onChange: () => {
       changes += 1;
     },
@@ -156,7 +169,7 @@ const proposal = (move: unknown, overrides: Record<string, unknown> = {}): unkno
   revision: 0,
   summarySeq: 1,
   move,
-  reason: 'heart-rate-high',
+  reason: 'on-plan',
   ...overrides,
 });
 
@@ -449,8 +462,7 @@ describe('an accepted move waits for the next block', () => {
 
     expect(r.session.state().waiting).toEqual({
       revision: 1,
-      sentence:
-        'Next block shortened by 2 minutes, because your heart rate stayed above the range you chose.',
+      sentence: 'Next block shortened by 2 minutes, because the workout is going to plan.',
     });
     expect(r.player.plan().waiting?.totalSeconds).toBe(2280);
     expect(r.player.plan().riding.totalSeconds).toBe(2400);
@@ -460,7 +472,7 @@ describe('an accepted move waits for the next block', () => {
       {
         decision: 'accepted',
         move: SHORTEN_NEXT,
-        reason: 'heart-rate-high',
+        reason: 'on-plan',
         revision: 1,
         at: START + 300,
       },
@@ -510,6 +522,7 @@ describe('Keep the plan', () => {
       waiting: undefined,
       kept: true,
       notice: undefined,
+      off: false,
       replaced: undefined,
     });
     expect(r.player.plan().waiting).toBeUndefined();
@@ -588,6 +601,7 @@ describe('a proposal the validator refuses', () => {
       waiting: undefined,
       kept: false,
       notice: undefined,
+      off: false,
       replaced: undefined,
     });
     expect(r.player.plan().waiting).toBeUndefined();
@@ -650,7 +664,7 @@ describe('a late answer is dropped', () => {
         decision: 'refused',
         rule: 'P5',
         move: SHORTEN_NEXT,
-        reason: 'heart-rate-high',
+        reason: 'on-plan',
         at: START + 361,
       },
     ]);
@@ -764,6 +778,7 @@ describe('a pause and a stall rescue', () => {
           discarded: 1,
           kept: false,
           notice: undefined,
+          off: false,
           replaced: undefined,
         });
         // Nothing is left to keep the plan from.
@@ -847,6 +862,7 @@ describe('every failure is the plan already on the device', () => {
         waiting: undefined,
         kept: false,
         notice: REPLAN_UNAVAILABLE,
+        off: false,
         replaced: undefined,
       });
       expect(r.player.plan().waiting).toBeUndefined();
@@ -1122,5 +1138,264 @@ describe('a screen is told when something it shows has changed', () => {
     const accepted = r.changes();
     r.session.keepThePlan();
     expect(r.changes()).toBeGreaterThan(accepted);
+  });
+});
+
+describe('a reason is said only when this device holds its premise — #1244’s review', () => {
+  const hold: WorkoutBlock = {
+    kind: 'heart-rate-hold',
+    seconds: seconds(300),
+    range: { low: beatsPerMinute(130), high: beatsPerMinute(140) },
+    startShare: thresholdShare(0.5),
+    ceilingShare: thresholdShare(0.8),
+  };
+  const afterAHold: Workout = {
+    name: 'Hold',
+    blocks: [hold, steady(600, 0.7), steady(600, 0.8), steady(300, 0.5)],
+  };
+
+  it('says "because your heart rate stayed above the range you chose" after a hold ridden above its range', async () => {
+    const r = rig({ workout: afterAHold });
+    r.facts.heartRate = 150;
+    await r.ride(300);
+    r.scripted.answer(proposal(SHORTEN_NEXT, { reason: 'heart-rate-high' }));
+    await r.flush();
+    expect(r.session.state().waiting?.sentence).toBe(
+      'Next block shortened by 2 minutes, because your heart rate stayed above the range you chose.',
+    );
+    // The record is the validator's own: nothing says the reason was withheld.
+    expect(r.session.records().at(-1)).toEqual({
+      decision: 'accepted',
+      move: SHORTEN_NEXT,
+      reason: 'heart-rate-high',
+      revision: 1,
+      at: START + 300,
+    });
+  });
+
+  it('says the move alone when the rider chose no range, accepts it all the same, and records that', async () => {
+    // The review's case: steady blocks, no goals, the model says heart-rate-high.
+    const r = rig();
+    r.facts.heartRate = 185;
+    await r.ride(300);
+    r.scripted.answer(proposal(SHORTEN_NEXT, { reason: 'heart-rate-high' }));
+    await r.flush();
+    expect(r.session.state().waiting?.sentence).toBe('Next block shortened by 2 minutes.');
+    // ⚠️ Not a refusal: the move was the validator's to judge, and it stands.
+    expect(r.player.plan().waiting).toBeDefined();
+    expect(r.session.records().at(-1)).toEqual({
+      decision: 'accepted',
+      move: SHORTEN_NEXT,
+      reason: 'heart-rate-high',
+      revision: 1,
+      at: START + 300,
+      reasonNotShown: true,
+    });
+    await r.ride(600);
+    expect(r.player.plan().riding.totalSeconds).toBe(2280);
+  });
+
+  it('says the move alone after a hold ridden INSIDE its range', async () => {
+    const r = rig({ workout: afterAHold });
+    r.facts.heartRate = 135;
+    await r.ride(300);
+    r.scripted.answer(proposal(SHORTEN_NEXT, { reason: 'heart-rate-high' }));
+    await r.flush();
+    expect(r.session.state().waiting?.sentence).toBe('Next block shortened by 2 minutes.');
+  });
+
+  it.each([
+    ['effort-check-in', 'this device sends no effort check-in'],
+    ['goal-time-in-range', 'this device withholds that goal'],
+  ])('never says %s: %s', async (reason) => {
+    const r = rig({ goals: { timeInRangeMinutes: 20, effortCheckIns: true } });
+    await r.ride(300);
+    r.scripted.answer(proposal(SHORTEN_NEXT, { reason }));
+    await r.flush();
+    expect(r.session.state().waiting?.sentence).toBe('Next block shortened by 2 minutes.');
+    expect(r.session.records().at(-1)).toMatchObject({ reason, reasonNotShown: true });
+  });
+
+  it('says "to fit the duration you chose" only to a rider who chose one', async () => {
+    const withGoal = rig({ goals: { durationMinutes: 40 } });
+    await withGoal.ride(300);
+    withGoal.scripted.answer(proposal(SHORTEN_NEXT, { reason: 'goal-duration' }));
+    await withGoal.flush();
+    expect(withGoal.session.state().waiting?.sentence).toBe(
+      'Next block shortened by 2 minutes, to fit the duration you chose.',
+    );
+
+    const without = rig();
+    await without.ride(300);
+    without.scripted.answer(proposal(SHORTEN_NEXT, { reason: 'goal-duration' }));
+    await without.flush();
+    expect(without.session.state().waiting?.sentence).toBe('Next block shortened by 2 minutes.');
+  });
+
+  it('reads the premise in the request the answer is for, not in what has been ridden since', async () => {
+    const r = rig({ workout: afterAHold });
+    r.facts.heartRate = 150;
+    await r.ride(300);
+    // After the request left, the heart rate comes down: the summary sent still says 150.
+    r.facts.heartRate = 120;
+    await r.ride(20);
+    r.scripted.answer(proposal(SHORTEN_NEXT, { reason: 'heart-rate-high' }));
+    await r.flush();
+    expect(r.session.state().waiting?.sentence).toContain('stayed above the range you chose');
+  });
+});
+
+describe('switching re-plans off mid-workout — ADR 0048 D-7', () => {
+  it('sends nothing more for the rest of the workout, and says it is off', async () => {
+    const r = rig();
+    await r.ride(300);
+    expect(r.scripted.starts()).toHaveLength(1);
+    r.scripted.answer(null);
+    await r.flush();
+    const before = r.scripted.requests.length;
+
+    expect(r.session.switchOff()).toBe(true);
+    expect(r.session.state()).toEqual({
+      waiting: undefined,
+      discarded: undefined,
+      kept: false,
+      notice: undefined,
+      off: true,
+      replaced: undefined,
+    });
+    // Three more block boundaries, to the end of the workout.
+    await r.ride(2100);
+    expect(r.scripted.requests).toHaveLength(before);
+    expect(r.scripted.starts()).toHaveLength(1);
+    expect(r.session.state().off).toBe(true);
+  });
+
+  it('cancels the job in flight, and ignores what it says afterwards', async () => {
+    const r = rig();
+    await r.ride(300);
+    expect(r.scripted.openStreams()).toBe(1);
+    r.session.switchOff();
+    await r.flush();
+    expect(r.scripted.cancelled).toEqual(['job-1']);
+    expect(r.scripted.openStreams()).toBe(0);
+    r.scripted.answer(proposal(SHORTEN_NEXT));
+    await r.flush();
+    expect(r.session.records()).toEqual([]);
+    expect(r.player.plan().waiting).toBeUndefined();
+    await r.ride(600);
+    expect(r.player.plan().riding.totalSeconds).toBe(2400);
+  });
+
+  it('drops a move that was waiting, records why, and rides the plan as it was', async () => {
+    const r = rig();
+    await r.ride(300);
+    r.scripted.answer(proposal(SHORTEN_NEXT));
+    await r.flush();
+    expect(r.player.plan().waiting).toBeDefined();
+
+    r.session.switchOff();
+    expect(r.player.plan().waiting).toBeUndefined();
+    expect(r.session.state()).toMatchObject({
+      waiting: undefined,
+      off: true,
+      // Not the answer to *Keep the plan*, and not a pause's discard: the
+      // line that says re-plans are off says the plan stays.
+      kept: false,
+      discarded: undefined,
+      replaced: undefined,
+    });
+    expect(r.session.records().at(-1)).toEqual({
+      decision: 'not-applied',
+      why: 'switched-off',
+      revision: 1,
+      at: START + 300,
+    });
+    await r.ride(600);
+    expect(r.player.plan().riding.totalSeconds).toBe(2400);
+    // The workout's end adds no second record for the same move.
+    r.session.stop();
+    expect(r.session.records().filter((each) => each.decision === 'not-applied')).toHaveLength(1);
+  });
+
+  it('cannot be switched back on, or off twice, and Keep the plan is nothing after it', async () => {
+    const r = rig();
+    await r.ride(300);
+    expect(r.session.switchOff()).toBe(true);
+    expect(r.session.switchOff()).toBe(false);
+    expect(r.session.keepThePlan()).toBe(false);
+    expect(r.session.state().off).toBe(true);
+  });
+
+  it('is nothing once the workout is over', async () => {
+    const r = rig();
+    await r.ride(300);
+    r.session.stop();
+    expect(r.session.switchOff()).toBe(false);
+    expect(r.session.state().off).toBe(false);
+  });
+
+  it('tells the screen', async () => {
+    const r = rig();
+    await r.ride(300);
+    const before = r.changes();
+    r.session.switchOff();
+    expect(r.changes()).toBeGreaterThan(before);
+  });
+});
+
+describe('a job in flight when control or the strap is lost — P6, D-8', () => {
+  it.each([
+    ['trainer control', 'control'],
+    ['the heart-rate strap', 'heartRatePaired'],
+  ] as const)(
+    'is cancelled when %s goes, and its answer is not accepted once it is back',
+    async (_, fact) => {
+      const r = rig();
+      await r.ride(300);
+      expect(r.scripted.openStreams()).toBe(1);
+      r.facts[fact] = false;
+      await r.ride(1);
+      expect(r.scripted.cancelled).toEqual(['job-1']);
+      // Back five ticks later, and the answer five ticks after that.
+      await r.ride(4);
+      r.facts[fact] = true;
+      await r.ride(5);
+      r.scripted.answer(proposal(SHORTEN_NEXT));
+      await r.ride(1);
+      expect(r.session.state().waiting).toBeUndefined();
+      expect(r.session.records()).toEqual([]);
+      expect(r.player.plan().waiting).toBeUndefined();
+      await r.ride(600);
+      expect(r.player.plan().riding.totalSeconds).toBe(2400);
+    },
+  );
+});
+
+describe('the three minutes are the RIDE’s, across its workouts', () => {
+  it('waits out an earlier workout’s request, and tells the ride when it asks', async () => {
+    let last: number | undefined = START + 240;
+    const noted: number[] = [];
+    const r = rig({
+      asked: {
+        last: () => last,
+        note: (at) => {
+          noted.push(at);
+          last = at;
+        },
+      },
+    });
+    // The first boundary is 300 s into this workout, 60 s after the ride last asked.
+    await r.ride(300);
+    expect(r.scripted.requests).toEqual([]);
+    // The next is 900 s in.
+    await r.ride(600);
+    expect(r.scripted.starts()).toHaveLength(1);
+    expect(noted).toEqual([START + 900]);
+  });
+
+  it('asks at its first boundary when the ride last asked three minutes ago or more', async () => {
+    const r = rig({ asked: { last: () => START + 120, note: () => undefined } });
+    await r.ride(300);
+    expect(r.scripted.starts()).toHaveLength(1);
   });
 });

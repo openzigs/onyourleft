@@ -30,6 +30,7 @@ import { BLOCK_CHART_MAX_SHAPES } from '../workouts/block-chart';
 import { BLOCK_CHART_PAINTS } from '../workouts/BlockChart';
 
 import {
+  GRAPH_KEY_REPLACED,
   workoutGraphKey,
   workoutGraphLabels,
   workoutGraphText,
@@ -214,6 +215,22 @@ describe('the running workout’s graph — #1307', () => {
     const replaced = expandWorkout({ name: 'before', blocks: [steady(1500, 0.8)] }).segments;
     const classes = classesOf(rendered(<WorkoutGraph workout={input({ replaced })} />));
     expect(classes).toContain('oyl-workout-graph__replaced');
+  });
+
+  it('does not name the HUD strip with an outline the strip does not draw — #1244’s review', () => {
+    const replaced = expandWorkout({ name: 'before', blocks: [steady(1500, 0.8)] }).segments;
+    const strip = rendered(<WorkoutStrip workout={input({ replaced })} />);
+    const named = strip.querySelector('[data-oyl-workout-graph="hud"]');
+    expect(named?.getAttribute('aria-label')).toMatch(/^Workout graph\./);
+    expect(named?.getAttribute('aria-label')).not.toContain('dotted outline');
+    expect(named?.getAttribute('aria-label')).not.toContain(GRAPH_KEY_REPLACED);
+    // …and it draws none, which is why.
+    expect(classesOf(strip).filter((name) => name.includes('replaced'))).toEqual([]);
+    // The Ride screen's graph, which DOES draw it, still says so.
+    const graph = rendered(<WorkoutGraph workout={input({ replaced })} />);
+    expect(graph.querySelector('[role="img"]')?.getAttribute('aria-label')).toContain(
+      GRAPH_KEY_REPLACED,
+    );
   });
 
   const everything = (): WorkoutGraphInput =>

@@ -280,6 +280,67 @@ describe('the golden requests the device’s own builder produces — #1244', ()
   });
 });
 
+describe('the golden answer: the `result` event a device reads — #1244', () => {
+  /**
+   * `packages/domain/src/workout/fixtures/replan-result.json` is the way
+   * back: the event's name and its data for a proposal, for a workout kept as
+   * it is, and for a failed job. This suite holds the REAL job's stream to
+   * it; `apps/web` §`replan-job.test.ts` §"the golden answer" holds the
+   * device's reader to the same file. So `status`, `proposal` and the
+   * event's name drifting on either side is a red test, not a feature that
+   * silently does nothing.
+   */
+  const answer = JSON.parse(
+    readFileSync(
+      fileURLToPath(
+        new URL(
+          '../../../../packages/domain/src/workout/fixtures/replan-result.json',
+          import.meta.url,
+        ),
+      ),
+      'utf8',
+    ),
+  ) as {
+    event: string;
+    proposed: { status: string; proposal: Proposal };
+    kept: unknown;
+    failed: { status: string; failure: string };
+  };
+
+  it('ends a job that proposed with exactly the golden event', async () => {
+    const { world: w, replans, riders } = await replanWorld(1);
+    const [anna] = riders;
+    const jobId = await started(w, anna!.token);
+    (await replans.next()).finish({ kind: 'proposed', proposal: answer.proposed.proposal });
+    await w.analysis?.idle();
+    const last = (await eventsOf(w, anna!.token, jobId)).at(-1);
+    expect(last?.kind).toBe(answer.event);
+    expect(last?.data).toStrictEqual(answer.proposed);
+    // And it is the one `result` event of the stream.
+    expect(
+      (await eventsOf(w, anna!.token, jobId)).filter((each) => each.kind === answer.event),
+    ).toHaveLength(1);
+  });
+
+  it('ends a kept workout, and a failed job, with exactly the golden events', async () => {
+    const { world: w, replans, riders } = await replanWorld(1);
+    const [anna] = riders;
+    const kept = await started(w, anna!.token);
+    (await replans.next()).finish({ kind: 'proposed', proposal: null });
+    await w.analysis?.idle();
+    expect((await eventsOf(w, anna!.token, kept)).at(-1)).toMatchObject({
+      kind: answer.event,
+      data: answer.kept,
+    });
+    expect((await eventsOf(w, anna!.token, kept)).at(-1)?.data).toStrictEqual(answer.kept);
+
+    const failed = await started(w, anna!.token);
+    (await replans.next()).finish({ kind: 'failed', why: 'not-a-proposal' });
+    await w.analysis?.idle();
+    expect((await eventsOf(w, anna!.token, failed)).at(-1)?.data).toStrictEqual(answer.failed);
+  });
+});
+
 describe('what a re-plan’s start refuses', () => {
   it.each<[string, unknown, string]>([
     ['a field it does not name', { ...replanBody(), rideId: 'r1' }, 'rideId'],

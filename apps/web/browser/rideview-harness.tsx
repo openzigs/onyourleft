@@ -132,6 +132,14 @@ const RIDER: AthleteRecord = {
   ...(REPLANS_AVAILABLE ? { thresholdHeartRate: beatsPerMinute(170) } : {}),
 };
 
+/**
+ * `rideview.html?workouts=many` — #1244's review: a rider with a LIBRARY, so
+ * the re-plan switch, which follows the list, is far below the fold. Twelve
+ * workouts, the first of them {@link WORKOUT}, so every case that looks for
+ * its *Ride* still finds it first.
+ */
+const MANY_WORKOUTS = new URLSearchParams(window.location.search).get('workouts') === 'many';
+
 const WORKOUT: WorkoutRecord = {
   id: workoutId('sweet-spot'),
   createdBy: ATHLETE,
@@ -239,17 +247,28 @@ const REPLAN_REVISED = expandWorkout({ name: 'Tempo', blocks: replanBlocks(480) 
  * - `replan-discarded` — a pause or a lost trainer dropped it: its one
  *   sentence (`replan-text.ts` §`REPLAN_DISCARDED`), the loaded plan, no
  *   outline.
+ * - `replan-on` — re-plans on and nothing waiting, which is most of a
+ *   workout: *Switch re-plans off* beside *End workout*, and nothing else.
+ * - `replan-off` — the rider switched them off: the line that says so in
+ *   place of the control.
+ *
+ * ⚠️ Every one of these but `replan-off` shows *Switch re-plans off*: a
+ * workout with re-plans on always does (#1244's review).
  */
-const REPLAN_STATE: 'waiting' | 'applied' | 'kept' | 'discarded' | undefined =
-  WORKOUT_STATE === 'replan'
-    ? 'waiting'
-    : WORKOUT_STATE === 'replan-applied'
-      ? 'applied'
-      : WORKOUT_STATE === 'replan-kept'
-        ? 'kept'
-        : WORKOUT_STATE === 'replan-discarded'
-          ? 'discarded'
-          : undefined;
+const REPLAN_STATE: 'waiting' | 'applied' | 'kept' | 'discarded' | 'on' | 'off' | undefined =
+  WORKOUT_STATE === 'replan-on'
+    ? 'on'
+    : WORKOUT_STATE === 'replan-off'
+      ? 'off'
+      : WORKOUT_STATE === 'replan'
+        ? 'waiting'
+        : WORKOUT_STATE === 'replan-applied'
+          ? 'applied'
+          : WORKOUT_STATE === 'replan-kept'
+            ? 'kept'
+            : WORKOUT_STATE === 'replan-discarded'
+              ? 'discarded'
+              : undefined;
 
 /**
  * #1307: the last five minutes the running workout's graph draws, full to its
@@ -696,6 +715,7 @@ function snapshot(): RideSnapshot {
           kept: REPLAN_STATE === 'kept',
           notice: undefined,
           discarded: REPLAN_STATE === 'discarded' ? 1 : undefined,
+          off: REPLAN_STATE === 'off',
         },
         thresholdWatts: 250,
         trace: graphTrace(applied ? 200 : 225),
@@ -807,6 +827,12 @@ export interface RideViewMeasurement {
    * its box, each sentence it shows in order, where its headline is, whether
    * a `<details>` holds any of it, and whether the switch is checked.
    */
+  /**
+   * #1244: the line above the list that says the re-plan switch is on, if it
+   * is shown; and the line that says re-plans were switched off mid-workout.
+   */
+  readonly replansOnLine: { readonly box: Box; readonly text: string } | undefined;
+  readonly replansOffLine: { readonly box: Box; readonly text: string } | undefined;
   readonly replanDisclosure:
     | {
         readonly box: Box;
@@ -1002,6 +1028,14 @@ function measure(): RideViewMeasurement {
     eased: easedNotice(),
     keepScreenOn: keepScreenOnNotice(),
     replanDisclosure: replanDisclosureShown(),
+    replansOnLine: lineOf(
+      document.querySelector('.oyl-ride__group--trainer [data-oyl-replans-on]'),
+    ),
+    replansOffLine: lineOf(
+      [...document.querySelectorAll('.oyl-ride__group--trainer .oyl-status')].find((each) =>
+        textOf(each).includes('Re-plans are off'),
+      ) ?? null,
+    ),
     notices: standingNotices(),
     metrics: metricGrid === null ? undefined : boxOf(metricGrid),
     metricsTopRow: topRowOf(metricGrid),
@@ -1243,6 +1277,10 @@ function asBefore692(): void {
 }
 
 /** #647's notice, found by its label — the words a rider reads first. */
+function lineOf(element: Element | null): { readonly box: Box; readonly text: string } | undefined {
+  return element === null ? undefined : { box: boxOf(element), text: textOf(element) };
+}
+
 function replanDisclosureShown(): RideViewMeasurement['replanDisclosure'] {
   const block = document.querySelector('.oyl-ride__group--trainer [data-oyl-replan-disclosure]');
   if (block === null) {
@@ -1428,7 +1466,20 @@ async function run(): Promise<void> {
         <AppShell
           capabilities={NO_BLUETOOTH}
           rideController={stubRideController(snapshot(), REPLANS_AVAILABLE).controller}
-          workouts={workoutStub(ATHLETE, [WORKOUT])}
+          workouts={workoutStub(
+            ATHLETE,
+            MANY_WORKOUTS
+              ? [
+                  WORKOUT,
+                  ...Array.from({ length: 11 }, (_, index) => ({
+                    ...WORKOUT,
+                    id: workoutId(`saved-${String(index + 2)}`),
+                    name: `Saved workout ${String(index + 2)}`,
+                    workout: { ...WORKOUT.workout, name: `Saved workout ${String(index + 2)}` },
+                  })),
+                ]
+              : [WORKOUT],
+          )}
           analysis={stubAnalysis(ATHLETE, [], RIDER)}
           {...(SIDE_PAIRING === undefined ? {} : { sidePairing: SIDE_PAIRING })}
         />

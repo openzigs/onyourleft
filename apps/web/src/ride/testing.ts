@@ -71,6 +71,8 @@ export interface RecordedCalls {
   endWorkout: number;
   /** #1244 — *Keep the plan*. */
   keepThePlan: number;
+  /** #1244 — *Switch re-plans off*. */
+  switchReplansOff: number;
   tick: number;
 }
 
@@ -202,6 +204,7 @@ export function stubRideController(
     clearTarget: 0,
     endWorkout: 0,
     keepThePlan: 0,
+    switchReplansOff: 0,
     tick: 0,
   };
 
@@ -328,6 +331,9 @@ export function stubRideController(
     replansAvailable: () => replansAvailable,
     keepThePlan: () => {
       calls.keepThePlan += 1;
+    },
+    switchReplansOff: () => {
+      calls.switchReplansOff += 1;
     },
     // #782: the Ride screen holds no room; `controller.test.ts` §"#782" drives the real one.
     keepAliveForRoom: () => () => undefined,

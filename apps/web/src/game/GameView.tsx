@@ -1597,6 +1597,9 @@ export function GameView(props: GameViewProps): JSX.Element {
       const planDiscarded = planDiscardedAnnouncement(
         planDiscardedSaidRef.current,
         trainerPortRef.current?.workoutPlanDiscarded?.(),
+        // Only of the move this region was offered. The HUD shows no
+        // sentence (#1324), so a held one was neither seen nor heard.
+        planOfferedRef.current,
       );
       planDiscardedSaidRef.current = planDiscarded.said;
       if (planDiscarded.event !== undefined) {
