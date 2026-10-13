@@ -1001,10 +1001,7 @@ export function AppShell(props: AppShellProps): JSX.Element {
 
         {immersive ? null : (
           <footer className="oyl-footer">
-            <p>
-              On Your Left — free and open source. No account, no server: everything here stays on
-              this device.
-            </p>
+            <p>On Your Left — free and open source. Your rides are kept on this device.</p>
           </footer>
         )}
       </div>

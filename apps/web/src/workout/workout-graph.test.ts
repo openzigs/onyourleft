@@ -594,6 +594,38 @@ describe('room for a re-plan — #1244’s seam', () => {
   });
 });
 
+describe('a re-plan that shortened the plan — #1244’s review', () => {
+  /** A 30-minute plan that was 40 minutes: the old last block ended 600 s later. */
+  const longer = expandWorkout({
+    name: 'before',
+    blocks: [steady(1800, 0.6), steady(600, 0.6)],
+  }).segments;
+
+  it('draws the whole of what was replaced inside the chart, not past its right edge', () => {
+    const { plan } = workoutGraphPaths(input({ replaced: longer, holdingWatts: undefined }));
+    const xs = points(plan.replaced).map(([x]) => x);
+    expect(Math.max(...xs)).toBeCloseTo(1000, 6);
+    expect(Math.max(...xs)).toBeLessThanOrEqual(1000);
+  });
+
+  it('draws the plan that stands on the same, longer, scale: it ends at three quarters of the lane', () => {
+    const { plan } = workoutGraphPaths(input({ replaced: longer, holdingWatts: undefined }));
+    const standing = points(plan.toCome.bands.join('') + plan.done).map(([x]) => x);
+    expect(Math.max(...standing)).toBeCloseTo(750, 6);
+    // And "now" is on it too: 300 s of 2400.
+    expect(plan.nowFraction).toBeCloseTo(300 / 2400, 6);
+  });
+
+  it('leaves the scale the plan’s own when what was replaced was no longer', () => {
+    const same = workoutGraphPaths(
+      input({ replaced: input().timeline.segments, holdingWatts: undefined }),
+    );
+    const none = workoutGraphPaths(input({ holdingWatts: undefined }));
+    expect(same.plan.nowFraction).toBe(none.plan.nowFraction);
+    expect(same.plan.done).toBe(none.plan.done);
+  });
+});
+
 describe('the graph in words — #1307', () => {
   it('says how far in, what is left of the block, the confirmed target and the rider’s power', () => {
     expect(workoutGraphText(input({ trace: [sample(300, { power: 147.6 })] }))).toBe(

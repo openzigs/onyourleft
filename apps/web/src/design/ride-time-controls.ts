@@ -74,6 +74,12 @@ export const RIDE_TIME_CONTROLS: readonly RideTimeControl[] = [
   // `ride/WorkoutPanel.tsx`.
   { surface: 'workout-panel', name: 'Ride ', match: 'prefix' },
   { surface: 'workout-panel', name: 'End workout', match: 'exact' },
+  // #1244, ADR 0048 D-7: the one control over a re-plan, shown while an
+  // accepted move waits for the next block. Pressed at the bars, mid-block.
+  { surface: 'workout-panel', name: 'Keep the plan', match: 'exact' },
+  // #1244's review, ADR 0048 D-7: the mid-workout switch-off, beside *End
+  // workout* while a workout runs with re-plans on.
+  { surface: 'workout-panel', name: 'Switch re-plans off', match: 'exact' },
   // `game/hud/HudPanel.tsx` and `game/SoundControls.tsx`.
   { surface: 'game-hud', name: 'Pause', match: 'exact' },
   // The same HUD control while the ride is paused (#710's review).
@@ -82,6 +88,9 @@ export const RIDE_TIME_CONTROLS: readonly RideTimeControl[] = [
   // #785: a private race waiting on its line — the rider who made it starts it.
   { surface: 'game-hud', name: 'Start the race', match: 'exact' },
   { surface: 'game-hud', name: 'Mute sounds', match: 'exact' },
+  // #1244: *Keep the plan* in the game too, while an accepted re-plan waits,
+  // so a rider does not leave the game to refuse a change.
+  { surface: 'game-hud', name: 'Keep the plan', match: 'exact' },
   // #940: the trainer game's pre-ride chooser, `game/StageChooser.tsx`. Its
   // *Ride* starts the ride, so it is *Start* in the ruling's four. A PREFIX,
   // because it is named after the route ("Ride Box Hill").

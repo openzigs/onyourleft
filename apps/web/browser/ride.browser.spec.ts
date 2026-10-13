@@ -3331,6 +3331,119 @@ test.describe('a running workout drawn on the HUD — #1307', () => {
 });
 
 /**
+ * #1244 — *Keep the plan* on the game's HUD, `ride-harness.tsx` §`GRAPH_REPLAN`.
+ *
+ * While an accepted re-plan waits for the workout's next block, the HUD's
+ * actions gain a third control after *Pause* and *End ride*, so a rider does
+ * not leave the game to refuse a change. The actions panel is the corner
+ * nearest the rider's back wheel, and a panel one control wider or taller is
+ * a panel nearer the rider.
+ *
+ * ## What is held
+ *
+ * At the three tablet viewports, with anchor positioning and without: the
+ * control is on the stage, inside the viewport, uncovered, at least #669's
+ * 48 px in both axes (it is the HUD row's own 72), 8 px or more from *Pause*
+ * and *End ride*, and **no panel of the HUD is over the leaning rider's
+ * box** — the same box every other case here holds panels clear of.
+ *
+ * ⚠️ The HUD's strip does NOT draw the dotted outline of what the move
+ * replaced: it is the last five minutes of power or heart rate and a progress
+ * bar (#1307), with no plan ahead in it to outline. The outline is on the
+ * Ride screen's graph (`rideview.browser.spec.ts`).
+ *
+ * ## What is only published
+ *
+ * The same reading at every other overlay viewport (the phones), where the
+ * control is held to being on the stage and uncovered and the rider's
+ * clearance is printed, not bounded: #1244's ruling is the tablet on the bars.
+ *
+ * ## The control
+ *
+ * The same ride with no re-plan waiting (`graph=plain`) has no such control,
+ * so a case that found one everywhere would not be reading this state.
+ */
+const REPLAN_ON_THE_HUD = '?trainer=workout&graph=replan';
+const KEEP_THE_PLAN = 'control: Keep the plan';
+const TABLET_VIEWPORTS: readonly Viewport[] = OVERLAY_VIEWPORTS.filter(
+  (each) => Math.min(each.width, each.height) > 480,
+);
+
+test.describe('Keep the plan on the HUD while a re-plan waits — #1244', () => {
+  test('the three tablet viewports are the ones this holds', () => {
+    expect(TABLET_VIEWPORTS.map((each) => `${String(each.width)}×${String(each.height)}`)).toEqual([
+      '1280×800',
+      '1024×768',
+      '800×1280',
+    ]);
+  });
+
+  for (const viewport of OVERLAY_VIEWPORTS) {
+    const tablet = TABLET_VIEWPORTS.includes(viewport);
+    test(`is on the stage, a ride-time control${tablet ? ', and no panel covers the rider' : ''} — ${viewport.name}`, async ({
+      page,
+    }) => {
+      // The control: no re-plan waiting, no such control.
+      await openRide(page, viewport, '?trainer=workout&graph=plain');
+      const without = await measure(page);
+      expect(without.items.map((each) => each.name)).not.toContain(KEEP_THE_PLAN);
+
+      await openRide(page, viewport, REPLAN_ON_THE_HUD);
+      for (const [how, seen] of await bothWays(page)) {
+        await test.step(how, () => {
+          const keep = seen.items.find((each) => each.name === KEEP_THE_PLAN);
+          const pause = seen.items.find((each) => each.name === 'control: Pause');
+          const end = seen.items.find((each) => each.name === 'control: End ride');
+          if (keep === undefined || pause === undefined || end === undefined) {
+            throw new Error(`no ${KEEP_THE_PLAN}, Pause or End ride among the HUD's items`);
+          }
+          const actions = seen.panels.find((each) => each.name.includes('oyl-hud__actions'));
+          const rider = riderBox(viewport);
+          const over = seen.panels
+            .filter((each) => each.box.height > 0)
+            .filter((each) => overlap(each.box, rider));
+          console.log(
+            `#1244 Keep the plan on the HUD — ${viewport.name} — ${how}: ` +
+              `${keep.box.width.toFixed(1)} × ${keep.box.height.toFixed(1)} px at ` +
+              `[${keep.box.left.toFixed(0)},${keep.box.top.toFixed(0)}]; the actions panel ` +
+              `${actions?.box.width.toFixed(0) ?? '?'} × ${actions?.box.height.toFixed(0) ?? '?'} px, ` +
+              `its top ${((actions?.box.top ?? 0) - rider.bottom).toFixed(0)} px below the rider's box` +
+              `, its left ${((actions?.box.left ?? 0) - rider.right).toFixed(0)} px right of it` +
+              `; panels over the rider: ${over.length === 0 ? 'none' : over.map(describeItem).join(', ')}`,
+          );
+
+          expect(inside(keep.box, viewport), describeItem(keep)).toBe(true);
+          expect(keep.onTop, describeItem(keep)).toBe(true);
+          expect(keep.box.width).toBeGreaterThanOrEqual(48 - SUBPIXEL_TOLERANCE);
+          expect(keep.box.height).toBeGreaterThanOrEqual(48 - SUBPIXEL_TOLERANCE);
+          // Pause and End ride are still on the stage, uncovered.
+          for (const other of [pause, end]) {
+            expect(inside(other.box, viewport), describeItem(other)).toBe(true);
+            expect(other.onTop, describeItem(other)).toBe(true);
+            // Two controls a rider presses at the bars do not touch: 8 px.
+            const apartX = Math.max(
+              keep.box.left - other.box.right,
+              other.box.left - keep.box.right,
+            );
+            const apartY = Math.max(
+              keep.box.top - other.box.bottom,
+              other.box.top - keep.box.bottom,
+            );
+            expect(
+              Math.max(apartX, apartY),
+              `${KEEP_THE_PLAN} and ${other.name} are closer than 8 px`,
+            ).toBeGreaterThanOrEqual(8 - SUBPIXEL_TOLERANCE);
+          }
+          if (tablet) {
+            expect(over.map(describeItem)).toEqual([]);
+          }
+        });
+      }
+    });
+  }
+});
+
+/**
  * #1312 — a ride on a LOOP. `?lap=riding` has a lap open, so the elevation
  * strip's sentence carries the lap's time beside its number (`fields.ts`
  * §`profileReading`): `NN% of lap N · 59:59`. `?lap=ended` adds the finished
@@ -3488,6 +3601,72 @@ test.describe('a ride on a loop — #1312', () => {
       );
       expect(collisions).toEqual([]);
       expect(clearance).toBeGreaterThanOrEqual(EASED_RIDER_CLEARANCE_PIXELS);
+    });
+  }
+});
+
+/**
+ * #1312 and #1244 together, which neither change measured alone: a lap ends
+ * while an accepted re-plan waits. The lap's notice is in the notice cell and
+ * *Keep the plan* is a row of the actions panel — a taller panel in one corner
+ * and a notice in another, on the one stage.
+ *
+ * A waiting re-plan puts NO notice on the HUD (#1324: its sentence is the
+ * region's, and its control is the row), so there is nothing here for the
+ * lap's notice to give way to; what is held is that the two do not meet: the
+ * notice whole, the control on the stage and on top, no panel over another,
+ * and on the tablets no panel over the rider — each change's own bar, with
+ * the other's furniture on the stage.
+ */
+test.describe('a lap ends while a re-plan waits — #1312 with #1244', () => {
+  // ⚠️ ONE viewport, the tightest (the smallest column layout, 360×752), and
+  // not the nine: on this fixture the lap's notice waits out the workout's
+  // own notice first, so the case takes about sixteen seconds, and nine of
+  // them is two and a half minutes of a gate whose `chromium` run has little
+  // more than one to spare (docs/agents/ci.md §4c). All nine passed when this
+  // was written, on a Mac; the one kept is where a notice has least room.
+  for (const viewport of OVERLAY_VIEWPORTS.filter(
+    (each) => each.width === 360 && each.height === 752,
+  )) {
+    const tablet = TABLET_VIEWPORTS.includes(viewport);
+    test(`the lap’s notice and Keep the plan are both on the stage, over nothing — ${viewport.name}`, async ({
+      page,
+    }) => {
+      await openRide(page, viewport, `${REPLAN_ON_THE_HUD}&lap=ended`);
+      await expect
+        .poll(async () => (await lapOnTheHud(page)).notice, { timeout: 30_000 })
+        .toContain(LAP_NOTICE_SEEN);
+
+      for (const [how, seen] of await bothWays(page)) {
+        await test.step(how, () => {
+          const keep = seen.items.find((each) => each.name === KEEP_THE_PLAN);
+          if (keep === undefined) {
+            throw new Error(`no ${KEEP_THE_PLAN} among the HUD's items`);
+          }
+          expect(inside(keep.box, viewport), describeItem(keep)).toBe(true);
+          expect(keep.onTop, describeItem(keep)).toBe(true);
+          for (const name of ['control: Pause', 'control: End ride']) {
+            const control = seen.items.find((each) => each.name === name);
+            expect(control?.onTop, name).toBe(true);
+          }
+          // The notice: whole, over no panel — the taller actions panel among them.
+          const notice = seen.panels.find((each) => each.name.includes('oyl-hud__notices'));
+          expect(notice?.box.height ?? 0).toBeGreaterThan(1);
+          expect(easedCollisions(seen, viewport)).toEqual([]);
+          const rider = riderBox(viewport);
+          const over = seen.panels
+            .filter((each) => each.box.height > 0)
+            .filter((each) => overlap(each.box, rider));
+          console.log(
+            `a lap ended while a re-plan waits, ${how} — ${viewport.name} — notice cell ` +
+              `${(notice?.box.height ?? 0).toFixed(0)} px tall; panels over the rider: ` +
+              (over.length === 0 ? 'none' : over.map(describeItem).join(', ')),
+          );
+          if (tablet) {
+            expect(over.map(describeItem)).toEqual([]);
+          }
+        });
+      }
     });
   }
 });

@@ -405,7 +405,10 @@ describe('a lap of the course, as it ends — #1312', () => {
 
   it('is the last event, and above every reading', () => {
     const rank = PRIORITY.indexOf('lap-ended');
-    expect(rank).toBe(PRIORITY.indexOf('hold-changed') + 1);
+    // Below the heart-rate hold and below an accepted re-plan (#1244): each
+    // is about the workout the trainer is being driven through.
+    expect(rank).toBeGreaterThan(PRIORITY.indexOf('hold-changed'));
+    expect(rank).toBe(PRIORITY.indexOf('plan-changed') + 1);
     for (const reading of ['power-off-target', 'distance-tick', 'power'] as const) {
       expect(rank).toBeLessThan(PRIORITY.indexOf(reading));
     }

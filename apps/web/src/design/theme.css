@@ -3401,6 +3401,68 @@ a.oyl-button {
 }
 
 /*
+ * #1244: the re-plan switch under the workout chooser's list, with #1245's
+ * disclosure under it. The switch has to be on the screen where a rider
+ * chooses a workout, and the column is short: at 1280×800 inside the Android
+ * shell the fold is at 768, and with a list's 1rem either side the switch
+ * ended 47.3 px above it on a Mac, under §4f's 50 px floor. So where the
+ * switch follows the list, the list gives up its two margins and the switch's
+ * row sits 8 px under the control that starts a workout (#669's spacing
+ * between two controls). `rideview.browser.spec.ts` §"#1244" publishes the
+ * margin and holds the floor, and its control puts the nine sentences first.
+ *
+ * Scoped by `:has()` to a list the switch follows: a rider with no instance
+ * has no switch, and their chooser is laid out as it always was.
+ */
+.oyl-ride__group--trainer ul:has(+ .oyl-workout-replans) {
+  margin-block: 0;
+}
+
+.oyl-workout-replans {
+  margin-block-start: var(--oyl-space-sm);
+}
+
+/* #1244: "Re-plans on", beside the chooser's heading while the switch under
+   the list is on: a paragraph AFTER the `h3`, not inside it, on the
+   heading's own line and at its end, so it takes no line of its own and the
+   first *Ride* is where it was. The row takes the heading's place in the
+   flow: it has the heading's margin and the heading inside it has none, and
+   the paragraph keeps the heading's line height so the row is no taller
+   with it than without. `rideview.browser.spec.ts` §"#1244 — many saved
+   workouts" holds that nothing moved. */
+.oyl-workout-heading {
+  align-items: baseline;
+  display: flex;
+  gap: var(--oyl-space-sm);
+  justify-content: space-between;
+  margin: 0 0 var(--oyl-space-sm);
+}
+
+.oyl-workout-heading > h3 {
+  margin: 0;
+}
+
+.oyl-workout-replans-on {
+  font-size: var(--oyl-font-size-md);
+  line-height: 1.2;
+  margin: 0;
+  white-space: nowrap;
+}
+
+/* #1244: *End workout* and, while re-plans are on, *Switch re-plans off*, on
+   one row, 8 px apart (#669's spacing between two ride-time controls), and
+   wrapping to two rows where the column is too narrow for both. */
+.oyl-workout-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oyl-space-sm);
+}
+
+.oyl-workout-replans > [data-oyl-replan-disclosure] > p:first-child {
+  margin-block-start: var(--oyl-space-xs);
+}
+
+/*
  * The native controls, styled — and still native. #307's third criterion, and
  * the ⚠️ attached to it: *"without replacing them. They are `<select>` and
  * `<nav>` for a reason; styling must not cost the keyboard and screen-reader

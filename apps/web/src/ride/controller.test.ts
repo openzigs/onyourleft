@@ -42,6 +42,7 @@ import {
   type RouteProfile,
   type Watts,
   type WorkoutBlock,
+  REPLAN_MOVE_INTERVAL_SECONDS,
 } from '@onyourleft/domain';
 import {
   type DeviceId,
@@ -113,6 +114,7 @@ import {
   RIDE_NOTIFICATION_REFUSED,
   type RideController,
   type RideSavePort,
+  type RideWorkoutSnapshot,
 } from './controller';
 import { gameTrainerFrom, gameTrainerPortOver } from '../game/trainer-port';
 import { createGradientSession } from '../game/gradient';
@@ -139,6 +141,9 @@ import {
 } from './simulated-trainer-testing';
 import { openWebBluetoothTrainer, type OpenTrainer, type TrainerConnection } from './trainer';
 import type { RiderPresence, RiderPresencePort } from './presence-port';
+import type { ReplanPort } from '../workout/replan-port';
+import { scriptedReplanPort, scriptedReplans } from '../workout/replan-testing';
+import { REPLAN_UNAVAILABLE } from '../workout/replan-text';
 import type { RideKeepAlivePort } from './keep-alive-port';
 import { roomPortOver } from '../net/room-port';
 import { flush, ManualClock, ScriptedRoom } from '../net/testing';
@@ -225,6 +230,8 @@ interface BenchOptions {
   readonly devices?: 'trainer' | 'trainer+strap' | 'strap' | 'two-trainers';
   /** #1240: the simulated rider, and a heart rate that answers to load. */
   readonly simulator?: Pick<SimulatorOptions, 'rider' | 'heartRate'>;
+  /** #1244: the rider's instance, goals and saved workouts, as `main.tsx` hands them over. */
+  readonly replan?: ReplanPort | undefined;
   readonly withTrainerControl?: boolean;
   /** Never answer a control point write, so a procedure stays outstanding. */
   readonly silentTrainer?: boolean;
@@ -481,6 +488,7 @@ function benchWith(options: BenchOptions = {}): Bench {
     ...(options.withTrainerControl === false ? {} : { openTrainer }),
     ...(options.rideSave === undefined ? {} : { rideSave: options.rideSave }),
     ...(options.presence === undefined ? {} : { presence: options.presence }),
+    ...(options.replan === undefined ? {} : { replan: options.replan }),
     ...(options.keepAlive === undefined ? {} : { keepAlive: options.keepAlive }),
     ...(options.notificationPermission === undefined
       ? {}
@@ -9490,5 +9498,1311 @@ describe('#1307 — what the workout’s graph is drawn from, through the real c
     expect(rig.controller.getSnapshot().workout?.trace?.length).toBe(30);
     expect(rig.written.slice(before).filter((write) => write[0] === 0x05)).toHaveLength(1);
     rig.controller.dispose();
+  });
+});
+
+describe('#1244 — re-plans during the ride, read from the simulated trainer', () => {
+  const THRESHOLD = watts(250);
+  const OWN = {
+    thresholdHeartRate: beatsPerMinute(170),
+    assumed: { power: false, heartRate: false },
+  } as const;
+
+  const steadyBlock = (length: number, share: number) => ({
+    kind: 'steady' as const,
+    seconds: seconds(length),
+    target: thresholdShare(share),
+  });
+
+  /** A minute's warm-up, two four-minute blocks and a cool-down: 125, 175, 200 and 125 W. */
+  const planned = (
+    blocks: readonly WorkoutBlock[] = [
+      steadyBlock(60, 0.5),
+      steadyBlock(240, 0.7),
+      steadyBlock(240, 0.8),
+      steadyBlock(60, 0.5),
+    ],
+  ): WorkoutRecord => ({
+    id: workoutId('planned'),
+    createdBy: ATHLETE_A,
+    name: 'Planned',
+    workout: { name: 'Planned', blocks },
+    createdAt: unixSeconds(1),
+    updatedAt: unixSeconds(1),
+  });
+
+  /** −10 % on what is left: the second four-minute block becomes 180 W. */
+  const EASE = { kind: 'scale-remaining-intervals', percent: -10 };
+
+  const proposal = (move: unknown, overrides: Record<string, unknown> = {}): unknown => ({
+    revision: 0,
+    summarySeq: 1,
+    move,
+    reason: 'on-plan',
+    ...overrides,
+  });
+
+  /**
+   * A rider on a controlled trainer with a strap, recording, on `workout`,
+   * with re-plans as `replans` says and a scripted instance behind the port.
+   */
+  async function riding(
+    options: {
+      readonly replans?: boolean | undefined;
+      readonly workout?: WorkoutRecord;
+      readonly rideSave?: RideSavePort;
+    } = {},
+  ) {
+    const scripted = scriptedReplans();
+    const { port, calls } = scriptedReplanPort(scripted);
+    const rig = benchWith({
+      devices: 'trainer+strap',
+      simulator: {
+        rider: { power: watts(150) },
+        heartRate: { kind: 'responsive', restingHeartRate: 80 },
+      },
+      replan: port,
+      rideSave: options.rideSave,
+    });
+    await rig.controller.pair('trainer');
+    await rig.controller.pair('heart-rate');
+    await rig.controller.requestTrainerControl();
+    await rig.controller.start();
+    const from = rig.written.length;
+    expect(
+      rig.controller.startWorkout(
+        options.workout ?? planned(),
+        THRESHOLD,
+        OWN,
+        options.replans === undefined ? undefined : { replans: options.replans },
+      ),
+    ).toBe(true);
+    await flushMicrotasks(20);
+    return { rig, scripted, calls, from };
+  }
+
+  /** Ride, letting every promise a tick starts run before the next. */
+  async function rideOn(rig: Bench, forSeconds: number): Promise<void> {
+    for (let index = 0; index < forSeconds; index += 1) {
+      await ride(rig, 1);
+      await flushMicrotasks(20);
+    }
+  }
+
+  const elapsedOf = (rig: Bench): number =>
+    rig.controller.getSnapshot().workout?.elapsedSeconds ?? Number.POSITIVE_INFINITY;
+
+  /**
+   * Ride until the workout's own clock reads `elapsed`. ⚠️ By the workout's
+   * clock and not by counting ticks: the simulated trainer answers a write on
+   * its next second, so a tick that writes a target moves the ride's clock
+   * two seconds.
+   */
+  async function rideTo(rig: Bench, elapsed: number): Promise<void> {
+    while (elapsedOf(rig) < elapsed) {
+      await rideOn(rig, 1);
+    }
+  }
+
+  /** Every Set Target Power on the wire since the workout began, in watts. */
+  const targetsSent = (rig: Bench, from: number): number[] =>
+    rig.written
+      .slice(from)
+      .filter((write) => write[0] === 0x05)
+      .map((write) => (write[1] ?? 0) + ((write[2] ?? 0) << 8));
+
+  const stopsSent = (rig: Bench, from = 0): number =>
+    rig.written.slice(from).filter((write) => write[0] === STOP_OR_PAUSE && write[1] === 0x01)
+      .length;
+
+  const replanOf = (rig: Bench) => rig.controller.getSnapshot().workout?.replan;
+
+  describe('the instance cannot change the current block', () => {
+    it('writes nothing for an accepted move until the block being ridden has ended', async () => {
+      const { rig, scripted, from } = await riding({ replans: true });
+      await rideTo(rig, 62);
+      expect(scripted.starts()).toHaveLength(1);
+      expect(targetsSent(rig, from)).toEqual([125, 175]);
+
+      scripted.answer(proposal(EASE));
+      await flushMicrotasks(20);
+      expect(replanOf(rig)?.waiting?.sentence).toBe('Targets before the cool-down lowered by 10%.');
+      // The whole of the block being ridden: the trainer holds what the
+      // loaded plan asked, and not one more target is written.
+      let seconds = 0;
+      while (elapsedOf(rig) < 299) {
+        await rideOn(rig, 1);
+        expect(rig.targetOnTheTrainer()).toBe(175);
+        seconds += 1;
+      }
+      expect(seconds).toBeGreaterThan(230);
+      expect(targetsSent(rig, from)).toEqual([125, 175]);
+
+      // The next block is the revised one, written by the workout's own writer.
+      await rideTo(rig, 303);
+      expect(rig.targetOnTheTrainer()).toBe(180);
+      expect(targetsSent(rig, from)).toEqual([125, 175, 180]);
+      expect(replanOf(rig)?.waiting).toBeUndefined();
+      rig.controller.dispose();
+    });
+
+    it('refuses a move that names the block being ridden, and every block rides as loaded', async () => {
+      const { rig, scripted, from } = await riding({ replans: true });
+      await rideTo(rig, 62);
+      scripted.answer(proposal({ kind: 'shorten-block', block: 1, minutes: 2 }));
+      await flushMicrotasks(20);
+      expect(replanOf(rig)?.waiting).toBeUndefined();
+      await rideTo(rig, 305);
+      // Shortened by two minutes, the 175 W block would have ended at 180 s.
+      expect(targetsSent(rig, from)).toEqual([125, 175, 200]);
+      expect(rig.targetOnTheTrainer()).toBe(200);
+      rig.controller.dispose();
+    });
+  });
+
+  describe('instance lost mid-ride', () => {
+    const withHold = (): WorkoutRecord =>
+      planned([
+        steadyBlock(60, 0.5),
+        {
+          kind: 'heart-rate-hold',
+          seconds: seconds(240),
+          range: { low: beatsPerMinute(130), high: beatsPerMinute(140) },
+          startShare: thresholdShare(0.4),
+          ceilingShare: thresholdShare(0.85),
+        },
+        steadyBlock(240, 0.8),
+        steadyBlock(60, 0.5),
+      ]);
+
+    it.each(['send', 'wait', 'receive'] as const)(
+      'a transport failing at the %s leaves the loaded plan and the heart-rate hold exactly as they were',
+      async (step) => {
+        // The same ride twice: once with re-plans off, once with the instance
+        // failing. What the trainer was sent must be the same list.
+        const control = await riding({ workout: withHold() });
+        await rideOn(control.rig, 400);
+
+        const lost = await riding({ replans: true, workout: withHold() });
+        lost.scripted.fail = step;
+        await rideOn(lost.rig, 62);
+        expect(lost.scripted.starts()).toHaveLength(1);
+        lost.scripted.answer(proposal(EASE));
+        await rideOn(lost.rig, 198);
+        // The hold is running, on the block the loaded plan put it in.
+        const hold = lost.rig.controller.getSnapshot().workout?.hold;
+        expect(hold?.range).toEqual({ low: 130, high: 140 });
+        expect(hold?.reason).not.toBe('ineligible');
+        await rideOn(lost.rig, 140);
+
+        expect(targetsSent(lost.rig, lost.from)).toEqual(targetsSent(control.rig, control.from));
+        // The hold moved the target, so the list is not a trivial one.
+        expect(new Set(targetsSent(lost.rig, lost.from)).size).toBeGreaterThan(3);
+        expect(lost.rig.targetOnTheTrainer()).toBe(control.rig.targetOnTheTrainer());
+        expect(replanOf(lost.rig)?.waiting).toBeUndefined();
+        expect(lost.rig.controller.getSnapshot().workout?.totalSeconds).toBe(600);
+        control.rig.controller.dispose();
+        lost.rig.controller.dispose();
+      },
+    );
+
+    it('says one short line, and asks nothing again until the next block', async () => {
+      const { rig, scripted } = await riding({ replans: true });
+      scripted.fail = 'send';
+      await rideOn(rig, 200);
+      expect(replanOf(rig)?.notice).toBe(REPLAN_UNAVAILABLE);
+      expect(scripted.starts()).toHaveLength(1);
+      rig.controller.dispose();
+    });
+  });
+
+  describe('late is dropped', () => {
+    it('a proposal arriving at 61 s changes nothing: the next block is the loaded one', async () => {
+      const { rig, scripted, from } = await riding({ replans: true });
+      while (scripted.starts().length === 0) {
+        await rideOn(rig, 1);
+      }
+      // ⚠️ The request left on the tick that wrote the block's target, and
+      // the simulated trainer answered that write on its next second: the
+      // ride's clock now reads one second after the request left.
+      const sentAt = rig.bench.now - 1;
+      // Sixty seconds on, the job is still listened to; at sixty-one it is not.
+      await rideOn(rig, 59);
+      expect(rig.bench.now - sentAt).toBe(60);
+      expect(scripted.cancelled).toEqual([]);
+      await rideOn(rig, 1);
+      expect(rig.bench.now - sentAt).toBe(61);
+      scripted.answer(proposal(EASE));
+      await flushMicrotasks(20);
+      expect(replanOf(rig)?.waiting).toBeUndefined();
+      // Dropped silently: the job is cancelled, and no line is shown.
+      expect(scripted.cancelled).toEqual(['job-1']);
+      expect(replanOf(rig)?.notice).toBeUndefined();
+      await rideTo(rig, 305);
+      expect(rig.targetOnTheTrainer()).toBe(200);
+      expect(targetsSent(rig, from)).toEqual([125, 175, 200]);
+      rig.controller.dispose();
+    });
+
+    it('a proposal arriving 29 s before the boundary changes nothing', async () => {
+      // A 75 s block, so its last 29 s begin inside the 60 s an answer is fresh for.
+      const { rig, scripted, from } = await riding({
+        replans: true,
+        workout: planned([
+          steadyBlock(60, 0.5),
+          steadyBlock(75, 0.7),
+          steadyBlock(240, 0.8),
+          steadyBlock(60, 0.5),
+        ]),
+      });
+      await rideTo(rig, 60 + 46);
+      // 46 s into the block: 29 s remain.
+      expect(elapsedOf(rig)).toBe(106);
+      scripted.answer(proposal(EASE));
+      await flushMicrotasks(20);
+      expect(replanOf(rig)?.waiting).toBeUndefined();
+      await rideTo(rig, 140);
+      expect(rig.targetOnTheTrainer()).toBe(200);
+      expect(targetsSent(rig, from)).toEqual([125, 175, 200]);
+      rig.controller.dispose();
+    });
+
+    it('the same proposal one second sooner is applied — the control', async () => {
+      const { rig, scripted, from } = await riding({
+        replans: true,
+        workout: planned([
+          steadyBlock(60, 0.5),
+          steadyBlock(75, 0.7),
+          steadyBlock(240, 0.8),
+          steadyBlock(60, 0.5),
+        ]),
+      });
+      await rideTo(rig, 60 + 45);
+      expect(elapsedOf(rig)).toBe(105);
+      scripted.answer(proposal(EASE));
+      await flushMicrotasks(20);
+      expect(replanOf(rig)?.waiting).toBeDefined();
+      await rideTo(rig, 140);
+      expect(targetsSent(rig, from)).toEqual([125, 175, 180]);
+      rig.controller.dispose();
+    });
+  });
+
+  describe('stop wins', () => {
+    it('Stop with a proposal in flight is one release, a cancelled job, and no later write', async () => {
+      const { rig, scripted } = await riding({ replans: true });
+      await rideOn(rig, 70);
+      expect(scripted.openStreams()).toBe(1);
+      const stopsBefore = stopsSent(rig);
+
+      rig.controller.armStop();
+      await rig.controller.confirmStop();
+      await flushMicrotasks(20);
+      expect(stopsSent(rig) - stopsBefore).toBe(1);
+      // Through #1102's cancel route.
+      expect(scripted.cancelled).toEqual(['job-1']);
+      expect(scripted.openStreams()).toBe(0);
+
+      // The proposal the instance was working on arrives anyway.
+      const writes = rig.written.length;
+      scripted.answer(proposal(EASE));
+      await flushMicrotasks(20);
+      await rideOn(rig, 300);
+      expect(rig.written.length).toBe(writes);
+      expect(rig.controller.getSnapshot().workout).toBeUndefined();
+      rig.controller.dispose();
+    });
+
+    it('Stop with an accepted move waiting is one release, and the move is never written', async () => {
+      const { rig, scripted, from } = await riding({ replans: true });
+      await rideTo(rig, 62);
+      scripted.answer(proposal(EASE));
+      await flushMicrotasks(20);
+      expect(replanOf(rig)?.waiting).toBeDefined();
+      const stopsBefore = stopsSent(rig);
+      rig.controller.armStop();
+      await rig.controller.confirmStop();
+      await flushMicrotasks(20);
+      expect(stopsSent(rig) - stopsBefore).toBe(1);
+      const writes = rig.written.length;
+      await rideOn(rig, 300);
+      expect(rig.written.length).toBe(writes);
+      expect(targetsSent(rig, from)).toEqual([125, 175]);
+      rig.controller.dispose();
+    });
+  });
+
+  describe('keep the plan', () => {
+    it('pressed before the boundary, leaves the original next block in force', async () => {
+      const { rig, scripted, from } = await riding({ replans: true });
+      await rideTo(rig, 62);
+      scripted.answer(proposal(EASE));
+      await flushMicrotasks(20);
+      expect(replanOf(rig)?.waiting).toBeDefined();
+      // The screen already shows the revised plan, and what it replaced.
+      expect(rig.controller.getSnapshot().workout?.replaced?.length).toBeGreaterThan(0);
+
+      const writes = rig.written.length;
+      rig.controller.keepThePlan();
+      // Pressing it writes nothing to the trainer.
+      expect(rig.written.length).toBe(writes);
+      expect(replanOf(rig)).toEqual({
+        waiting: undefined,
+        kept: true,
+        notice: undefined,
+        off: false,
+      });
+      expect(rig.controller.getSnapshot().workout?.replaced).toBeUndefined();
+
+      await rideTo(rig, 305);
+      expect(rig.targetOnTheTrainer()).toBe(200);
+      expect(targetsSent(rig, from)).toEqual([125, 175, 200]);
+      rig.controller.dispose();
+    });
+
+    it('is nothing when no move is waiting', async () => {
+      const { rig, from } = await riding({ replans: true });
+      await rideOn(rig, 70);
+      rig.controller.keepThePlan();
+      expect(replanOf(rig)?.kept).toBe(false);
+      await rideTo(rig, 305);
+      expect(targetsSent(rig, from)).toEqual([125, 175, 200]);
+      rig.controller.dispose();
+    });
+  });
+
+  describe('off by default', () => {
+    it.each([
+      ['no choice was made', undefined],
+      ['the switch was left off', false],
+    ] as const)(
+      'when %s, the port is never asked and nothing leaves the device',
+      async (_, replans) => {
+        const { rig, scripted, calls } = await riding({ replans });
+        await rideOn(rig, 600);
+        expect(calls).toEqual({
+          replanConnected: 0,
+          replanSession: 0,
+          replanGoals: 0,
+          replanLibrary: 0,
+        });
+        expect(scripted.requests).toEqual([]);
+        expect(replanOf(rig)).toBeUndefined();
+        rig.controller.dispose();
+      },
+    );
+
+    it('with the switch on, the same ride does ask — the control', async () => {
+      const { rig, scripted, calls } = await riding({ replans: true });
+      await rideOn(rig, 70);
+      expect(calls.replanSession).toBe(1);
+      expect(scripted.starts()).toHaveLength(1);
+      rig.controller.dispose();
+    });
+
+    it('with the switch on and no thresholds of the rider’s own, nothing is asked — H1', async () => {
+      const scripted = scriptedReplans();
+      const { port, calls } = scriptedReplanPort(scripted);
+      const rig = benchWith({ devices: 'trainer+strap', replan: port });
+      await rig.controller.pair('trainer');
+      await rig.controller.pair('heart-rate');
+      await rig.controller.requestTrainerControl();
+      await rig.controller.start();
+      rig.controller.startWorkout(planned(), THRESHOLD, undefined, { replans: true });
+      await rideOn(rig, 70);
+      expect(calls.replanGoals + calls.replanSession).toBe(0);
+      expect(scripted.requests).toEqual([]);
+      rig.controller.dispose();
+    });
+
+    it('with goals that cannot be read, nothing is asked', async () => {
+      const scripted = scriptedReplans();
+      const { port } = scriptedReplanPort(scripted, {
+        replanGoals: () => Promise.resolve('unreadable'),
+      });
+      const rig = benchWith({ devices: 'trainer+strap', replan: port });
+      await rig.controller.pair('trainer');
+      await rig.controller.pair('heart-rate');
+      await rig.controller.requestTrainerControl();
+      await rig.controller.start();
+      rig.controller.startWorkout(planned(), THRESHOLD, OWN, { replans: true });
+      await rideOn(rig, 70);
+      expect(scripted.requests).toEqual([]);
+      expect(replanOf(rig)).toBeUndefined();
+      rig.controller.dispose();
+    });
+
+    it('with the switch on and no sign-in to an instance, nothing is read and nothing is asked', async () => {
+      const scripted = scriptedReplans();
+      const { port, calls } = scriptedReplanPort(scripted, { replanConnected: () => false });
+      const rig = benchWith({ devices: 'trainer+strap', replan: port });
+      await rig.controller.pair('trainer');
+      await rig.controller.pair('heart-rate');
+      await rig.controller.requestTrainerControl();
+      await rig.controller.start();
+      rig.controller.startWorkout(planned(), THRESHOLD, OWN, { replans: true });
+      await rideOn(rig, 70);
+      expect(calls.replanGoals + calls.replanLibrary + calls.replanSession).toBe(0);
+      expect(scripted.requests).toEqual([]);
+      rig.controller.dispose();
+    });
+
+    it('with saved workouts that cannot be listed, nothing is asked and the workout rides on', async () => {
+      const scripted = scriptedReplans();
+      const { port } = scriptedReplanPort(scripted, {
+        replanLibrary: () => Promise.reject(new Error('the store is closed')),
+      });
+      const rig = benchWith({ devices: 'trainer+strap', replan: port });
+      await rig.controller.pair('trainer');
+      await rig.controller.pair('heart-rate');
+      await rig.controller.requestTrainerControl();
+      await rig.controller.start();
+      const from = rig.written.length;
+      rig.controller.startWorkout(planned(), THRESHOLD, OWN, { replans: true });
+      await rideTo(rig, 70);
+      expect(scripted.requests).toEqual([]);
+      expect(replanOf(rig)).toBeUndefined();
+      expect(targetsSent(rig, from)).toEqual([125, 175]);
+      rig.controller.dispose();
+    });
+
+    it('a workout replaced before its goals were read gets no re-plans of the first one’s', async () => {
+      const scripted = scriptedReplans();
+      let answer: (() => void) | undefined;
+      const { port } = scriptedReplanPort(scripted, {
+        replanGoals: () =>
+          new Promise((resolve) => {
+            answer = () => {
+              resolve({});
+            };
+          }),
+      });
+      const rig = benchWith({ devices: 'trainer+strap', replan: port });
+      await rig.controller.pair('trainer');
+      await rig.controller.pair('heart-rate');
+      await rig.controller.requestTrainerControl();
+      await rig.controller.start();
+      rig.controller.startWorkout(planned(), THRESHOLD, OWN, { replans: true });
+      // The rider picks another workout, with re-plans off, before the store answers.
+      rig.controller.startWorkout(planned(), THRESHOLD, OWN);
+      answer?.();
+      await rideOn(rig, 70);
+      expect(scripted.requests).toEqual([]);
+      expect(replanOf(rig)).toBeUndefined();
+      rig.controller.dispose();
+    });
+
+    it('says re-plans can be offered only while the port says the device is signed in', () => {
+      const scripted = scriptedReplans();
+      let connected = false;
+      const { port } = scriptedReplanPort(scripted, { replanConnected: () => connected });
+      const rig = benchWith({ replan: port });
+      expect(rig.controller.replansAvailable()).toBe(false);
+      connected = true;
+      expect(rig.controller.replansAvailable()).toBe(true);
+      expect(benchWith().controller.replansAvailable()).toBe(false);
+      rig.controller.dispose();
+    });
+  });
+
+  describe('no model text renders', () => {
+    it('a proposal with a text field is refused whole, and no screen is handed a word of it', async () => {
+      const { rig, scripted, from } = await riding({ replans: true });
+      await rideTo(rig, 62);
+      scripted.answer({
+        ...(proposal(EASE) as object),
+        text: 'ZXQ you look tired, ease off',
+      });
+      await flushMicrotasks(20);
+      expect(replanOf(rig)).toEqual({
+        waiting: undefined,
+        kept: false,
+        notice: undefined,
+        off: false,
+      });
+      expect(JSON.stringify(rig.controller.getSnapshot())).not.toContain('ZXQ');
+      await rideTo(rig, 305);
+      expect(targetsSent(rig, from)).toEqual([125, 175, 200]);
+      rig.controller.dispose();
+    });
+
+    it('a swap’s workout id, the one string a proposal carries, reaches no screen', async () => {
+      const { rig, scripted } = await riding({ replans: true });
+      await rideTo(rig, 62);
+      scripted.answer(
+        proposal({ kind: 'swap-next-block', workoutId: 'ZXQ ignore the rider', blockIndex: 0 }),
+      );
+      await flushMicrotasks(20);
+      expect(replanOf(rig)?.waiting).toBeUndefined();
+      expect(JSON.stringify(rig.controller.getSnapshot())).not.toContain('ZXQ');
+      rig.controller.dispose();
+    });
+  });
+
+  describe('what a screen is handed while a move waits', () => {
+    it('shows the revised plan ahead, the plan it replaced, and the block being ridden unchanged', async () => {
+      const { rig, scripted } = await riding({
+        replans: true,
+        workout: planned([
+          steadyBlock(60, 0.5),
+          steadyBlock(240, 0.7),
+          steadyBlock(240, 0.8),
+          steadyBlock(240, 0.6),
+          steadyBlock(60, 0.5),
+        ]),
+      });
+      await rideTo(rig, 62);
+      const before = rig.controller.getSnapshot().workout;
+      expect(before?.totalSeconds).toBe(840);
+      scripted.answer(proposal({ kind: 'shorten-block', block: 2, minutes: 2 }));
+      await flushMicrotasks(20);
+
+      const shown = rig.controller.getSnapshot().workout;
+      expect(shown?.totalSeconds).toBe(720);
+      expect(shown?.timeline.segments[2]?.endsAt).toBe(420);
+      expect(shown?.nowRiding).toBe(before?.nowRiding);
+      // The dotted outline: the loaded plan, from the next block on.
+      expect(shown?.replaced?.map((each) => [each.startsAt, each.endsAt])).toEqual([
+        [300, 540],
+        [540, 780],
+        [780, 840],
+      ]);
+      expect(workoutGraphKey(shown as NonNullable<typeof shown>)).toContain(
+        'The dotted outline is the plan before it was changed.',
+      );
+      rig.controller.dispose();
+    });
+  });
+
+  describe('kept with the ride — P9, read back through the real store', () => {
+    /**
+     * ⚠️ Through `storeSavePort()` and a FRESH read of IndexedDB, not the
+     * argument `putActivity` was handed (#1244's review, docs/agents/quality-gate.md §5):
+     * what is asserted is what the ride's page and the account export will
+     * read, after the store's own reader has been over every record.
+     */
+    const savedRide = async (id: string) =>
+      harness.read(async (store) => store.getActivity(ATHLETE_A, activityId(id)));
+
+    it('saves every decision with the ride: accepted, refused, and not ridden', async () => {
+      const { rig, scripted } = await riding({ replans: true, rideSave: storeSavePort() });
+      await rideTo(rig, 62);
+      scripted.answer(proposal(EASE));
+      await flushMicrotasks(20);
+      rig.controller.armStop();
+      await rig.controller.confirmStop();
+      expect(rig.controller.getSnapshot().saveState).toBe('saved');
+
+      const kept = (await savedRide('ride-1'))?.rideFacts?.replans ?? [];
+      expect(kept.map((each) => each.decision)).toEqual(['accepted', 'not-applied']);
+      expect(kept[0]).toMatchObject({ move: EASE, reason: 'on-plan', revision: 1 });
+      // `on-plan` is never said: the record keeps the reason and says so.
+      expect(kept[0]).toHaveProperty('reasonNotShown', true);
+      expect(kept[1]).toMatchObject({ why: 'ended', revision: 1 });
+      // Every record the session made is one the store reads: none was dropped.
+      expect((await savedRide('ride-1'))?.rideFacts?.replansDropped).toBeUndefined();
+      rig.controller.dispose();
+    });
+
+    it('saves a move a pause discarded as not applied, with why', async () => {
+      const { rig, scripted } = await riding({ replans: true, rideSave: storeSavePort() });
+      await rideTo(rig, 62);
+      scripted.answer(proposal(EASE));
+      await flushMicrotasks(20);
+      await rig.controller.pause();
+      await rideOn(rig, 2);
+      rig.controller.armStop();
+      await rig.controller.confirmStop();
+
+      expect((await savedRide('ride-1'))?.rideFacts?.replans).toMatchObject([
+        { decision: 'accepted', revision: 1 },
+        { decision: 'not-applied', why: 'paused', revision: 1 },
+      ]);
+      rig.controller.dispose();
+    });
+
+    it('saves a refusal with its rule, and gives the next ride none of it', async () => {
+      const { rig, scripted } = await riding({ replans: true, rideSave: storeSavePort() });
+      await rideTo(rig, 62);
+      scripted.answer(proposal({ kind: 'shorten-block', block: 1, minutes: 2 }));
+      await flushMicrotasks(20);
+      rig.controller.armStop();
+      await rig.controller.confirmStop();
+      expect((await savedRide('ride-1'))?.rideFacts?.replans).toMatchObject([
+        { decision: 'refused', rule: 'P2' },
+      ]);
+
+      expect(await rig.controller.startNewRide()).toBe(true);
+      await rig.controller.start();
+      await ride(rig, 3);
+      rig.controller.armStop();
+      await rig.controller.confirmStop();
+      const next = await savedRide('ride-2');
+      expect(next?.id).toBe('ride-2');
+      expect(next?.rideFacts?.replans).toBeUndefined();
+      rig.controller.dispose();
+    });
+
+    it('saves no key at all for a ride with no re-plan decision', async () => {
+      const { rig } = await riding({ rideSave: storeSavePort() });
+      await rideOn(rig, 70);
+      rig.controller.armStop();
+      await rig.controller.confirmStop();
+      const saved = await savedRide('ride-1');
+      expect(saved?.rideFacts).toBeDefined();
+      expect(saved?.rideFacts && 'replans' in saved.rideFacts).toBe(false);
+      rig.controller.dispose();
+    });
+
+    // That the record is NOT synced (the privacy policy's sentence, #1315) is
+    // held by `instance/sync.test.ts` §"a ride's re-plan record is not synced",
+    // through the real instance and a second device.
+  });
+
+  describe('setting re-plans up can throw, and that is no re-plans for this ride', () => {
+    it('is not an unhandled rejection, and the workout rides its loaded plan', async () => {
+      const unhandled: unknown[] = [];
+      const listener = (reason: unknown): void => {
+        unhandled.push(reason);
+      };
+      process.on('unhandledRejection', listener);
+      try {
+        const scripted = scriptedReplans();
+        const { port } = scriptedReplanPort(scripted, {
+          // Outside the one `try` in `beginReplans`, as a throw while the
+          // session is made would be: nothing in there catches it.
+          replanConnected: () => {
+            throw new Error('a port that throws where it should answer');
+          },
+        });
+        const rig = benchWith({ devices: 'trainer+strap', replan: port });
+        await rig.controller.pair('trainer');
+        await rig.controller.pair('heart-rate');
+        await rig.controller.requestTrainerControl();
+        await rig.controller.start();
+        const from = rig.written.length;
+        expect(rig.controller.startWorkout(planned(), THRESHOLD, OWN, { replans: true })).toBe(
+          true,
+        );
+        await rideTo(rig, 70);
+        // A macrotask, which is when Node reports a rejection nothing handled.
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(unhandled).toEqual([]);
+        expect(scripted.requests).toEqual([]);
+        expect(replanOf(rig)).toBeUndefined();
+        expect(targetsSent(rig, from)).toEqual([125, 175]);
+        rig.controller.dispose();
+      } finally {
+        process.off('unhandledRejection', listener);
+      }
+    });
+  });
+
+  describe('a pause or a lost trainer discards a waiting move — D-8', () => {
+    const waitingMove = async () => {
+      const started = await riding({
+        replans: true,
+        workout: planned([
+          steadyBlock(60, 0.5),
+          steadyBlock(240, 0.7),
+          steadyBlock(240, 0.8),
+          steadyBlock(240, 0.6),
+          steadyBlock(60, 0.5),
+        ]),
+      });
+      await rideTo(started.rig, 62);
+      started.scripted.answer(proposal({ kind: 'shorten-block', block: 2, minutes: 2 }));
+      await flushMicrotasks(20);
+      const shown = started.rig.controller.getSnapshot().workout;
+      expect(shown?.replan?.waiting?.revision).toBe(1);
+      expect(shown?.totalSeconds).toBe(720);
+      expect(shown?.replaced).toBeDefined();
+      return started;
+    };
+
+    it('the sentence, the graph and the lookahead all go back in the SAME snapshot as the pause', async () => {
+      const { rig, from } = await waitingMove();
+      const snapshots: (RideWorkoutSnapshot | undefined)[] = [];
+      const stop = rig.controller.subscribe(() => {
+        snapshots.push(rig.controller.getSnapshot().workout);
+      });
+      await rig.controller.pause();
+      // The workout is paused by the ride's next tick, which is where the
+      // player drops the waiting move.
+      await rideOn(rig, 1);
+      stop();
+
+      // EVERY snapshot a screen was handed on the way, the ones between the
+      // player's pause and the re-plan session's own tick among them: none
+      // shows half of it. Wherever the plan ahead is the loaded one again,
+      // the sentence, the control's reason and the dotted outline are gone
+      // and the discarded move is named; wherever it is not, none of that.
+      const after = [...snapshots, rig.controller.getSnapshot().workout];
+      expect(after.length).toBeGreaterThan(1);
+      expect(after.some((shown) => shown?.totalSeconds === 720)).toBe(true);
+      for (const shown of after) {
+        const reverted = shown?.totalSeconds === 840;
+        expect(shown?.replan?.waiting === undefined).toBe(reverted);
+        expect(shown?.replaced === undefined).toBe(reverted);
+        expect(shown?.replan?.discarded === 1).toBe(reverted);
+      }
+      const last = after.at(-1);
+      expect(last?.totalSeconds).toBe(840);
+      expect(last?.replan).toMatchObject({ waiting: undefined, discarded: 1, kept: false });
+      // And nothing of the move reached the trainer: after the loaded
+      // plan's two targets there is only the pause's own write.
+      expect(targetsSent(rig, from).filter((target) => target > 0)).toEqual([125, 175]);
+      rig.controller.dispose();
+    });
+
+    it('rides the loaded plan after the pause, and stops saying so when the block ends', async () => {
+      const { rig } = await waitingMove();
+      await rig.controller.pause();
+      await rideOn(rig, 3);
+      await rig.controller.resume();
+      await rideTo(rig, 200);
+      expect(replanOf(rig)?.discarded).toBe(1);
+      await rideTo(rig, 305);
+      expect(rig.targetOnTheTrainer()).toBe(200);
+      expect(replanOf(rig)?.discarded).toBeUndefined();
+      // The loaded block ahead is its loaded length: the move never happened.
+      expect(rig.controller.getSnapshot().workout?.totalSeconds).toBe(840);
+      rig.controller.dispose();
+    });
+
+    it('a lost trainer does the same', async () => {
+      const { rig } = await waitingMove();
+      rig.bench.device(TRAINER).script({ kind: 'disconnect' });
+      await rideOn(rig, 2);
+      const shown = rig.controller.getSnapshot().workout;
+      expect(shown?.replan).toMatchObject({ waiting: undefined, discarded: 1 });
+      expect(shown?.totalSeconds).toBe(840);
+      expect(shown?.replaced).toBeUndefined();
+      rig.controller.dispose();
+    });
+  });
+
+  describe('what the disclosure says of this device, held to the code — #1245', () => {
+    it('nothing is sent before the switch is on, while the ride is paused, or after it ends', async () => {
+      // Before the switch: `off by default`, above. Paused, across a boundary:
+      const { rig, scripted } = await riding({ replans: true });
+      await rideTo(rig, 40);
+      await rig.controller.pause();
+      // Two minutes paused: the first block would have ended in them.
+      await rideOn(rig, 120);
+      expect(scripted.requests).toEqual([]);
+      await rig.controller.resume();
+      await rideTo(rig, 62);
+      expect(scripted.starts()).toHaveLength(1);
+      // Paused with that request out: it is cancelled, and nothing follows.
+      await rig.controller.pause();
+      await rideOn(rig, 400);
+      expect(scripted.starts()).toHaveLength(1);
+      expect(scripted.cancelled).toEqual(['job-1']);
+      // After the ride ends:
+      rig.controller.armStop();
+      await rig.controller.confirmStop();
+      const sent = scripted.requests.length;
+      await rideOn(rig, 400);
+      expect(scripted.requests).toHaveLength(sent);
+      expect(scripted.starts()).toHaveLength(1);
+      rig.controller.dispose();
+    });
+
+    it('a request leaves as a block begins and never less than 3 minutes after the last', async () => {
+      const { rig, scripted } = await riding({
+        replans: true,
+        workout: planned([
+          steadyBlock(60, 0.5),
+          steadyBlock(60, 0.6),
+          steadyBlock(60, 0.7),
+          steadyBlock(60, 0.6),
+          steadyBlock(60, 0.7),
+          steadyBlock(60, 0.6),
+          steadyBlock(60, 0.5),
+        ]),
+      });
+      const sentAt: number[] = [];
+      while (elapsedOf(rig) < 400) {
+        const before = scripted.starts().length;
+        await rideOn(rig, 1);
+        if (scripted.starts().length > before) sentAt.push(elapsedOf(rig));
+      }
+      // Blocks begin at 60, 120, 180, 240, 300 and 360 s. The first request
+      // leaves at the first, and the next not until 180 s later.
+      expect(sentAt).toHaveLength(2);
+      expect(Math.floor((sentAt[0] ?? 0) / 60)).toBe(1);
+      expect(Math.floor((sentAt[1] ?? 0) / 60)).toBe(4);
+      expect((sentAt[1] ?? 0) - (sentAt[0] ?? 0)).toBeGreaterThanOrEqual(
+        REPLAN_MOVE_INTERVAL_SECONDS,
+      );
+      expect(REPLAN_MOVE_INTERVAL_SECONDS).toBe(180);
+      rig.controller.dispose();
+    });
+
+    it('what leaves holds no effort check-in, no time-in-range goal, and names only the instance’s own model', async () => {
+      const scripted = scriptedReplans();
+      const { port } = scriptedReplanPort(scripted, {
+        replanGoals: () =>
+          Promise.resolve({
+            sessionType: 'endurance',
+            durationMinutes: 60,
+            holdRange: { low: beatsPerMinute(130), high: beatsPerMinute(142) },
+            heartRateAbove: beatsPerMinute(150),
+            powerCeiling: thresholdShare(0.8),
+            timeInRangeMinutes: 30,
+            effortCheckIns: true,
+          }),
+      });
+      const rig = benchWith({
+        devices: 'trainer+strap',
+        simulator: {
+          rider: { power: watts(150) },
+          heartRate: { kind: 'responsive', restingHeartRate: 80 },
+        },
+        replan: port,
+      });
+      await rig.controller.pair('trainer');
+      await rig.controller.pair('heart-rate');
+      await rig.controller.requestTrainerControl();
+      await rig.controller.start();
+      rig.controller.startWorkout(planned(), THRESHOLD, OWN, { replans: true });
+      await rideTo(rig, 62);
+
+      const [body] = scripted.starts();
+      expect(body?.source).toBe('instance-local');
+      expect(body?.templateVersion).toBe('re-plan-1');
+      const input = body?.input as {
+        goals: Record<string, unknown>;
+        summaries: Record<string, unknown>[];
+      };
+      // The six goals the text names, and not the seventh.
+      expect(Object.keys(input.goals).sort()).toEqual([
+        'durationMinutes',
+        'effortCheckIns',
+        'heartRateAbove',
+        'holdRange',
+        'powerCeiling',
+        'sessionType',
+      ]);
+      expect(input.summaries).toHaveLength(1);
+      for (const summary of input.summaries) {
+        expect(Object.keys(summary)).not.toContain('effort');
+      }
+      const text = JSON.stringify(body);
+      expect(text).not.toContain('timeInRange');
+      expect(text).not.toContain('"effort"');
+      expect(text).not.toContain('instance-hosted');
+      rig.controller.dispose();
+    });
+  });
+
+  describe('the facts the validator is given are the ride’s own — #1244’s third review', () => {
+    /**
+     * ⚠️ What these hold is the WIRING: that the controller hands the session
+     * the truth about control, the strap and a rescue, that the session hands
+     * the validator the ride's pause and the rider's goals, and that the
+     * rider's library reaches it. The rules themselves are the validator's
+     * (`replan.test.ts`) and, with hand-written facts, the session rig's.
+     * Each case has its control beside it: the same answer, accepted, when
+     * the fact is the other way.
+     */
+    async function ridingWith(overrides: Partial<ReplanPort>, workout: WorkoutRecord = planned()) {
+      const scripted = scriptedReplans();
+      const { port } = scriptedReplanPort(scripted, overrides);
+      const rig = benchWith({
+        devices: 'trainer+strap',
+        simulator: {
+          rider: { power: watts(150) },
+          heartRate: { kind: 'responsive', restingHeartRate: 80 },
+        },
+        replan: port,
+        rideSave: storeSavePort(),
+      });
+      await rig.controller.pair('trainer');
+      await rig.controller.pair('heart-rate');
+      await rig.controller.requestTrainerControl();
+      await rig.controller.start();
+      const from = rig.written.length;
+      expect(rig.controller.startWorkout(workout, THRESHOLD, OWN, { replans: true })).toBe(true);
+      await flushMicrotasks(20);
+      return { rig, scripted, from };
+    }
+
+    /** What the ride kept of its re-plan decisions, read back from the store. */
+    const savedDecisions = async (rig: Bench) => {
+      rig.controller.armStop();
+      await rig.controller.confirmStop();
+      const saved = await harness.read(async (store) =>
+        store.getActivity(ATHLETE_A, activityId('ride-1')),
+      );
+      return saved?.rideFacts?.replans ?? [];
+    };
+
+    it('control: a job out when control is lost is cancelled, and its answer changes nothing', async () => {
+      const { rig, scripted, from } = await ridingWith({});
+      await rideTo(rig, 62);
+      expect(scripted.starts()).toHaveLength(1);
+      rig.permissionLost();
+      await rideOn(rig, 2);
+      expect(rig.controller.getSnapshot().trainer.hasControl).toBe(false);
+      expect(scripted.cancelled).toEqual(['job-1']);
+      scripted.answer(proposal(EASE));
+      await rideOn(rig, 2);
+      expect(replanOf(rig)?.waiting).toBeUndefined();
+      expect(targetsSent(rig, from)).toEqual([125, 175]);
+      expect(await savedDecisions(rig)).toEqual([]);
+      rig.controller.dispose();
+    });
+
+    it('heartRatePaired: a job out when the strap is unpaired is cancelled, and its answer changes nothing', async () => {
+      const { rig, scripted, from } = await ridingWith({});
+      await rideTo(rig, 62);
+      await rig.controller.unpair(STRAP);
+      await rideOn(rig, 2);
+      expect(scripted.cancelled).toEqual(['job-1']);
+      scripted.answer(proposal(EASE));
+      await rideOn(rig, 2);
+      expect(replanOf(rig)?.waiting).toBeUndefined();
+      await rideTo(rig, 305);
+      expect(targetsSent(rig, from)).toEqual([125, 175, 200]);
+      rig.controller.dispose();
+    });
+
+    it('rescue: a job out when the stall rescue takes the target is cancelled, and its answer changes nothing', async () => {
+      // A block at threshold, so a rider who stops pedalling is rescued.
+      const hard = planned([
+        steadyBlock(60, 0.5),
+        steadyBlock(240, 1.0),
+        steadyBlock(240, 0.8),
+        steadyBlock(60, 0.5),
+      ]);
+      const { rig, scripted } = await ridingWith({}, hard);
+      await rideTo(rig, 62);
+      expect(scripted.starts()).toHaveLength(1);
+      for (const rpm of [80, 60, 40, 20, 8, 5, 4]) {
+        rig.bench.rider.set({ cadence: revolutionsPerMinute(rpm) });
+        await rideOn(rig, 1);
+      }
+      expect(rig.controller.getSnapshot().workout?.rescue).toBeDefined();
+      expect(scripted.cancelled).toEqual(['job-1']);
+      scripted.answer(proposal(EASE));
+      await rideOn(rig, 1);
+      expect(replanOf(rig)?.waiting).toBeUndefined();
+      rig.controller.dispose();
+    });
+
+    it('rescue — the control: the same ride with the rider still pedalling takes the same answer', async () => {
+      const hard = planned([
+        steadyBlock(60, 0.5),
+        steadyBlock(240, 1.0),
+        steadyBlock(240, 0.8),
+        steadyBlock(60, 0.5),
+      ]);
+      const { rig, scripted } = await ridingWith({}, hard);
+      await rideTo(rig, 62);
+      await rideOn(rig, 7);
+      scripted.answer(proposal(EASE));
+      await rideOn(rig, 1);
+      expect(replanOf(rig)?.waiting?.revision).toBe(1);
+      rig.controller.dispose();
+    });
+
+    it('paused: an answer that lands after Pause is pressed is refused under P6, not shown and then withdrawn', async () => {
+      const { rig, scripted, from } = await ridingWith({});
+      await rideTo(rig, 62);
+      const shown: unknown[] = [];
+      const stop = rig.controller.subscribe(() => {
+        shown.push(rig.controller.getSnapshot().workout?.replan?.waiting);
+        shown.push(rig.controller.getSnapshot().workout?.replan?.discarded);
+      });
+      // ⚠️ No tick between the press and the answer: the workout's player
+      // still reads `running`, and only the ride's own phase says paused.
+      await rig.controller.pause();
+      scripted.answer(proposal(EASE));
+      await flushMicrotasks(20);
+      await rideOn(rig, 3);
+      stop();
+      // Never shown, so never withdrawn: no sentence and no discard, in any snapshot.
+      expect(shown.filter((each) => each !== undefined)).toEqual([]);
+      expect(targetsSent(rig, from).filter((target) => target > 0)).toEqual([125, 175]);
+      expect(await savedDecisions(rig)).toMatchObject([{ decision: 'refused', rule: 'P6' }]);
+      rig.controller.dispose();
+    });
+
+    /**
+     * 125, 175, 150 and 125 W. The block AHEAD is at 0.6, and the loaded
+     * workout's own peak (0.7, P3) leaves room above it: so what stands
+     * between a +5 % and that block is the rider's ceiling goal and nothing
+     * else.
+     */
+    const underSixty = (): WorkoutRecord =>
+      planned([
+        steadyBlock(60, 0.5),
+        steadyBlock(240, 0.7),
+        steadyBlock(240, 0.6),
+        steadyBlock(60, 0.5),
+      ]);
+    const RAISE = { kind: 'scale-remaining-intervals', percent: 5 };
+
+    it('goals: a +5 % scale is refused under the rider’s 0.6 ceiling goal, and the loaded block is ridden', async () => {
+      const { rig, scripted, from } = await ridingWith(
+        { replanGoals: () => Promise.resolve({ powerCeiling: thresholdShare(0.6) }) },
+        underSixty(),
+      );
+      await rideTo(rig, 62);
+      scripted.answer(proposal(RAISE));
+      await flushMicrotasks(20);
+      expect(replanOf(rig)?.waiting).toBeUndefined();
+      await rideTo(rig, 305);
+      expect(targetsSent(rig, from)).toEqual([125, 175, 150]);
+      expect(rig.targetOnTheTrainer()).toBe(150);
+      expect(await savedDecisions(rig)).toMatchObject([{ decision: 'refused' }]);
+      rig.controller.dispose();
+    });
+
+    it('goals — the control: with no ceiling goal the same +5 % is accepted, 158 W at the boundary', async () => {
+      const { rig, scripted, from } = await ridingWith({}, underSixty());
+      await rideTo(rig, 62);
+      scripted.answer(proposal(RAISE));
+      await flushMicrotasks(20);
+      expect(replanOf(rig)?.waiting?.revision).toBe(1);
+      // Nothing of it in the block being ridden.
+      while (elapsedOf(rig) < 299) {
+        await rideOn(rig, 1);
+        expect(rig.targetOnTheTrainer()).toBe(175);
+      }
+      await rideTo(rig, 305);
+      expect(targetsSent(rig, from)).toEqual([125, 175, 158]);
+      rig.controller.dispose();
+    });
+
+    const SAVED = {
+      id: 'saved-tempo',
+      workout: {
+        name: 'Saved tempo',
+        blocks: [steadyBlock(240, 0.74)],
+      },
+    };
+    const SWAP = { kind: 'swap-next-block', workoutId: 'saved-tempo', blockIndex: 0 };
+
+    it('library: a swap for a block of the rider’s own saved workout is accepted, 185 W at the boundary', async () => {
+      const { rig, scripted, from } = await ridingWith({
+        replanLibrary: () => Promise.resolve([SAVED]),
+      });
+      await rideTo(rig, 62);
+      scripted.answer(proposal(SWAP));
+      await flushMicrotasks(20);
+      expect(replanOf(rig)?.waiting?.sentence).toBe(
+        'Next block swapped for one from your saved workouts.',
+      );
+      while (elapsedOf(rig) < 299) {
+        await rideOn(rig, 1);
+        expect(rig.targetOnTheTrainer()).toBe(175);
+      }
+      await rideTo(rig, 305);
+      expect(targetsSent(rig, from)).toEqual([125, 175, 185]);
+      rig.controller.dispose();
+    });
+
+    it('library — the control: the same swap with nothing saved is refused, and the loaded block is ridden', async () => {
+      const { rig, scripted, from } = await ridingWith({});
+      await rideTo(rig, 62);
+      scripted.answer(proposal(SWAP));
+      await flushMicrotasks(20);
+      expect(replanOf(rig)?.waiting).toBeUndefined();
+      await rideTo(rig, 305);
+      expect(targetsSent(rig, from)).toEqual([125, 175, 200]);
+      rig.controller.dispose();
+    });
+
+    it('the re-plan’s tick comes after the workout’s: the request leaves in the tick the block begins in', async () => {
+      const { rig, scripted } = await riding({ replans: true });
+      // One tick at a time, to the first in which the workout is in its second block.
+      while (elapsedOf(rig) < 60) {
+        expect(scripted.starts()).toHaveLength(0);
+        await ride(rig, 1);
+        await flushMicrotasks(20);
+      }
+      // ⚠️ In THAT tick, not the next: a session ticked before the workout's
+      // own tick still sees the block that has just ended.
+      expect(scripted.starts()).toHaveLength(1);
+      const input = scripted.starts()[0]?.input as {
+        currentBlock: number;
+        summaries: { block: number; seconds: number }[];
+      };
+      expect(input.currentBlock).toBe(1);
+      expect(input.summaries).toMatchObject([{ block: 0, seconds: 60 }]);
+      rig.controller.dispose();
+    });
+  });
+
+  describe('switching re-plans off while the workout runs — ADR 0048 D-7', () => {
+    /**
+     * The privacy policy's *"switch it off and nothing more is sent"*, held to
+     * the transport: every call made on the instance's channel after the
+     * press is counted, and the simulated trainer is read to the end of the
+     * workout.
+     */
+    it('no call leaves the device after the press, to the end of the workout, and the loaded plan is ridden', async () => {
+      const { rig, scripted, calls, from } = await riding({ replans: true });
+      await rideTo(rig, 62);
+      expect(scripted.starts()).toHaveLength(1);
+      scripted.answer(null);
+      await flushMicrotasks(20);
+
+      rig.controller.switchReplansOff();
+      const requests = scripted.requests.length;
+      const sessions = calls.replanSession;
+      expect(replanOf(rig)).toMatchObject({ off: true, waiting: undefined });
+
+      // Two more block boundaries, each more than three minutes after the last request.
+      await rideTo(rig, 545);
+      expect(scripted.requests).toHaveLength(requests);
+      expect(calls.replanSession).toBe(sessions);
+      expect(scripted.starts()).toHaveLength(1);
+      expect(targetsSent(rig, from)).toEqual([125, 175, 200, 125]);
+      expect(replanOf(rig)?.off).toBe(true);
+      rig.controller.dispose();
+    });
+
+    it('the control: the same ride with the switch left on does ask again', async () => {
+      const { rig, scripted } = await riding({ replans: true });
+      await rideTo(rig, 62);
+      scripted.answer(null);
+      await rideTo(rig, 305);
+      expect(scripted.starts()).toHaveLength(2);
+      rig.controller.dispose();
+    });
+
+    it('cancels a job in flight, and its answer changes nothing', async () => {
+      const { rig, scripted, from } = await riding({ replans: true });
+      await rideTo(rig, 62);
+      rig.controller.switchReplansOff();
+      await flushMicrotasks(20);
+      expect(scripted.cancelled).toEqual(['job-1']);
+      const requests = scripted.requests.length;
+      scripted.answer(proposal(EASE));
+      await rideTo(rig, 305);
+      expect(replanOf(rig)?.waiting).toBeUndefined();
+      expect(scripted.requests).toHaveLength(requests);
+      expect(targetsSent(rig, from)).toEqual([125, 175, 200]);
+      rig.controller.dispose();
+    });
+
+    it('drops a move that was waiting: the press writes nothing, the loaded block is ridden, and the ride keeps why', async () => {
+      const { rig, scripted, from } = await riding({ replans: true, rideSave: storeSavePort() });
+      await rideTo(rig, 62);
+      scripted.answer(proposal(EASE));
+      await flushMicrotasks(20);
+      expect(replanOf(rig)?.waiting?.revision).toBe(1);
+      const written = rig.written.length;
+
+      rig.controller.switchReplansOff();
+      await flushMicrotasks(20);
+      expect(rig.written).toHaveLength(written);
+      const shown = rig.controller.getSnapshot().workout;
+      expect(shown?.replan).toMatchObject({ off: true, waiting: undefined, kept: false });
+      expect(shown?.replan?.discarded).toBeUndefined();
+      expect(shown?.replaced).toBeUndefined();
+      expect(shown?.totalSeconds).toBe(600);
+
+      await rideTo(rig, 305);
+      // 200 W, the loaded block: eased by 10 % it would have been 180.
+      expect(rig.targetOnTheTrainer()).toBe(200);
+      expect(targetsSent(rig, from)).toEqual([125, 175, 200]);
+
+      rig.controller.armStop();
+      await rig.controller.confirmStop();
+      const saved = await harness.read(async (store) =>
+        store.getActivity(ATHLETE_A, activityId('ride-1')),
+      );
+      expect(saved?.rideFacts?.replans).toMatchObject([
+        { decision: 'accepted', revision: 1 },
+        { decision: 'not-applied', why: 'switched-off', revision: 1 },
+      ]);
+      rig.controller.dispose();
+    });
+
+    it('stays off for that workout, and the next workout started with the switch on asks again', async () => {
+      const { rig, scripted } = await riding({ replans: true });
+      await rideTo(rig, 62);
+      scripted.answer(null);
+      await flushMicrotasks(20);
+      rig.controller.switchReplansOff();
+      // A second press, and *Keep the plan*, are nothing.
+      rig.controller.switchReplansOff();
+      rig.controller.keepThePlan();
+      await rideTo(rig, 305);
+      expect(scripted.starts()).toHaveLength(1);
+
+      rig.controller.endWorkout();
+      await flushMicrotasks(20);
+      expect(rig.controller.startWorkout(planned(), THRESHOLD, OWN, { replans: true })).toBe(true);
+      await flushMicrotasks(20);
+      expect(replanOf(rig)?.off).toBe(false);
+      await rideTo(rig, 62);
+      expect(scripted.starts()).toHaveLength(2);
+      rig.controller.dispose();
+    });
+
+    it('is nothing for a workout with no re-plans, and with no workout at all', async () => {
+      const { rig, scripted, calls } = await riding({});
+      await rideTo(rig, 62);
+      rig.controller.switchReplansOff();
+      expect(replanOf(rig)).toBeUndefined();
+      rig.controller.endWorkout();
+      await flushMicrotasks(20);
+      expect(() => {
+        rig.controller.switchReplansOff();
+      }).not.toThrow();
+      expect(scripted.requests).toEqual([]);
+      expect(calls.replanSession).toBe(0);
+      rig.controller.dispose();
+    });
+  });
+
+  describe('"never more often than every 3 minutes" is the RIDE’s — #1245’s sentence', () => {
+    it('a second workout started a minute after the first one asked does not ask until three minutes have passed', async () => {
+      const { rig, scripted } = await riding({ replans: true });
+      const clockAt = (): number => rig.controller.getSnapshot().elapsedSeconds;
+      await rideTo(rig, 62);
+      expect(scripted.starts()).toHaveLength(1);
+      const first = clockAt();
+      scripted.answer(null);
+      await flushMicrotasks(20);
+
+      rig.controller.endWorkout();
+      await flushMicrotasks(20);
+      expect(rig.controller.startWorkout(planned(), THRESHOLD, OWN, { replans: true })).toBe(true);
+      await flushMicrotasks(20);
+      // The second workout's first boundary: about a minute after the first request.
+      await rideTo(rig, 62);
+      expect(clockAt() - first).toBeLessThan(REPLAN_MOVE_INTERVAL_SECONDS);
+      expect(scripted.starts()).toHaveLength(1);
+      // Its next boundary is at 300 s: more than three minutes on.
+      await rideTo(rig, 302);
+      expect(scripted.starts()).toHaveLength(2);
+      expect(clockAt() - first).toBeGreaterThanOrEqual(REPLAN_MOVE_INTERVAL_SECONDS);
+      rig.controller.dispose();
+    });
+
+    it('a new ride starts its own count', async () => {
+      const { rig, scripted } = await riding({ replans: true, rideSave: storeSavePort() });
+      await rideTo(rig, 62);
+      expect(scripted.starts()).toHaveLength(1);
+      scripted.answer(null);
+      await flushMicrotasks(20);
+      rig.controller.armStop();
+      await rig.controller.confirmStop();
+      expect(await rig.controller.startNewRide()).toBe(true);
+      await rig.controller.requestTrainerControl();
+      await rig.controller.start();
+      expect(rig.controller.startWorkout(planned(), THRESHOLD, OWN, { replans: true })).toBe(true);
+      await flushMicrotasks(20);
+      await rideTo(rig, 62);
+      expect(scripted.starts()).toHaveLength(2);
+      rig.controller.dispose();
+    });
   });
 });

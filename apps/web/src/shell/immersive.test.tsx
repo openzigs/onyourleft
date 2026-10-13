@@ -176,6 +176,14 @@ describe('a ride takes the screen over — #423', () => {
       expect(element, name).not.toBeNull();
     }
     expect(document.querySelector('.oyl-game--riding')).toBeNull();
+    // #1244's review: the footer under every screen said "No account, no
+    // server: everything here stays on this device." There has been an
+    // account and a server since ADR 0036, and a rider can now switch on
+    // sending from the Ride screen above it. It says only what holds.
+    expect(chrome()['footer']?.textContent?.replace(/\s+/g, ' ').trim()).toBe(
+      'On Your Left — free and open source. Your rides are kept on this device.',
+    );
+    expect(chrome()['footer']?.textContent).not.toMatch(/no server|everything here stays/i);
   });
 
   it('renders none of it once the ride has started', async () => {

@@ -303,7 +303,23 @@ function LiveRide({
           keepAliveFailed={snapshot.keepAliveFailed}
           // #740: the choice read above, so the region and the ERG form agree.
           announcementPreference={announcements}
-          onStart={(record) => {
+          // #1244: re-plans are offered only where one could happen — an
+          // instance signed in to, and the rider's OWN two thresholds (H1).
+          replansAvailable={
+            controller.replansAvailable() &&
+            thresholdPower !== undefined &&
+            own.heartRate !== undefined
+          }
+          onKeepPlan={() => {
+            controller.keepThePlan();
+          }}
+          // #1244's review: the mid-workout off control, and the switch going
+          // back to off whenever a ride starts or ends.
+          onReplansOff={() => {
+            controller.switchReplansOff();
+          }}
+          rideInProgress={rideInProgress(snapshot.phase)}
+          onStart={(record, choices) => {
             // ⚠️ Guarded rather than defaulted. The panel does not render a Start
             // control without a threshold, so this is unreachable through the UI
             // — and a `?? watts(0)` here would make every target in the workout
@@ -324,6 +340,8 @@ function LiveRide({
                     thresholdHeartRate: own.heartRate,
                     assumed: { power: false, heartRate: false },
                   },
+              // #1244: the per-ride switch, off unless the rider turned it on.
+              choices,
             );
           }}
           onEnd={() => {

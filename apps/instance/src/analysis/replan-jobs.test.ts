@@ -11,6 +11,9 @@
  * the SESSION's from the request to the tool's read.
  */
 
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
 import type { Proposal } from '@onyourleft/domain';
 import { PROPOSAL_KEYS } from '@onyourleft/domain';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -34,6 +37,8 @@ import {
   scriptedReplanEngine,
   type ScriptedReplanEngine,
 } from './replan-testing.ts';
+import { readReplanInput, REPLAN_INPUT_BYTE_BUDGET } from './replan-input.ts';
+import { REPLAN_TEMPLATE } from './replan-template.ts';
 import type { AnalysisReads } from './tools/reads.ts';
 
 const LOOPBACK: Resolver = () => Promise.resolve(['127.0.0.1']);
@@ -209,6 +214,130 @@ describe('starting a re-plan and reading its proposal', () => {
     await w.analysis?.idle();
     const read = await w.call('GET', `/v1/analysis/jobs/${jobId}`, { token: anna!.token });
     expect((read.body as { status: string }).status).toBe('succeeded');
+  });
+});
+
+describe('the golden requests the device’s own builder produces — #1244', () => {
+  /**
+   * `packages/domain/src/workout/fixtures/replan-request*.json` are requests
+   * exactly as `apps/web` §`workout/replan-job.ts` builds them, which that
+   * app's own suite holds (`replan-job.test.ts` §"the golden requests").
+   * `apps/web` and `apps/instance` may not import each other, so the two
+   * sides of this wire are written twice; these files are what makes a
+   * drift between them a red test on the side that drifted.
+   */
+  const golden = (file: string): { input: unknown; templateVersion: unknown; source: unknown } =>
+    JSON.parse(
+      readFileSync(
+        fileURLToPath(
+          new URL(`../../../../packages/domain/src/workout/fixtures/${file}`, import.meta.url),
+        ),
+        'utf8',
+      ),
+    ) as { input: unknown; templateVersion: unknown; source: unknown };
+
+  it.each(['replan-request.json', 'replan-request-long.json'])(
+    'takes %s through the real start, and runs the job over exactly what was sent',
+    async (file) => {
+      const { world: w, riders, replans } = await replanWorld(1);
+      const body = golden(file);
+
+      const answer = await startReplan(w, riders[0]?.token ?? '', body);
+      expect(answer.status, JSON.stringify(answer.body)).toBe(202);
+
+      // Nothing dropped, nothing added, nothing rounded on the way in.
+      const run = await replans.next();
+      expect(run.job.input).toStrictEqual(body.input);
+      expect(run.job.source).toBe(body.source);
+      run.finish({ kind: 'proposed', proposal: null });
+    },
+  );
+
+  it('carries the template version this instance runs, and its own model as the source', () => {
+    for (const file of ['replan-request.json', 'replan-request-long.json']) {
+      expect(golden(file).templateVersion).toBe(REPLAN_TEMPLATE.version);
+      expect(golden(file).source).toBe('instance-local');
+    }
+  });
+
+  it('holds the long one inside the input budget, as the reader measures it', () => {
+    const read = readReplanInput(golden('replan-request-long.json').input);
+    if (!read.ok) throw new Error(JSON.stringify(read.fields));
+    const bytes = new TextEncoder().encode(JSON.stringify(read.value)).byteLength;
+    expect(bytes).toBeLessThanOrEqual(REPLAN_INPUT_BYTE_BUDGET);
+    // And it is a request that was bounded: a 64-block plan with fewer summaries than blocks ridden.
+    expect(read.value.blocks).toHaveLength(64);
+    expect(read.value.summaries.length).toBeLessThan(read.value.currentBlock);
+    expect(read.value.summaries.at(-1)?.block).toBe(read.value.currentBlock - 1);
+  });
+
+  it('sends no effort check-in and no time-in-range goal, which the instance would read', () => {
+    for (const file of ['replan-request.json', 'replan-request-long.json']) {
+      const text = JSON.stringify(golden(file));
+      expect(text).not.toContain('"effort"');
+      expect(text).not.toContain('timeInRangeMinutes');
+    }
+  });
+});
+
+describe('the golden answer: the `result` event a device reads — #1244', () => {
+  /**
+   * `packages/domain/src/workout/fixtures/replan-result.json` is the way
+   * back: the event's name and its data for a proposal, for a workout kept as
+   * it is, and for a failed job. This suite holds the REAL job's stream to
+   * it; `apps/web` §`replan-job.test.ts` §"the golden answer" holds the
+   * device's reader to the same file. So `status`, `proposal` and the
+   * event's name drifting on either side is a red test, not a feature that
+   * silently does nothing.
+   */
+  const answer = JSON.parse(
+    readFileSync(
+      fileURLToPath(
+        new URL(
+          '../../../../packages/domain/src/workout/fixtures/replan-result.json',
+          import.meta.url,
+        ),
+      ),
+      'utf8',
+    ),
+  ) as {
+    event: string;
+    proposed: { status: string; proposal: Proposal };
+    kept: unknown;
+    failed: { status: string; failure: string };
+  };
+
+  it('ends a job that proposed with exactly the golden event', async () => {
+    const { world: w, replans, riders } = await replanWorld(1);
+    const [anna] = riders;
+    const jobId = await started(w, anna!.token);
+    (await replans.next()).finish({ kind: 'proposed', proposal: answer.proposed.proposal });
+    await w.analysis?.idle();
+    const last = (await eventsOf(w, anna!.token, jobId)).at(-1);
+    expect(last?.kind).toBe(answer.event);
+    expect(last?.data).toStrictEqual(answer.proposed);
+    // And it is the one `result` event of the stream.
+    expect(
+      (await eventsOf(w, anna!.token, jobId)).filter((each) => each.kind === answer.event),
+    ).toHaveLength(1);
+  });
+
+  it('ends a kept workout, and a failed job, with exactly the golden events', async () => {
+    const { world: w, replans, riders } = await replanWorld(1);
+    const [anna] = riders;
+    const kept = await started(w, anna!.token);
+    (await replans.next()).finish({ kind: 'proposed', proposal: null });
+    await w.analysis?.idle();
+    expect((await eventsOf(w, anna!.token, kept)).at(-1)).toMatchObject({
+      kind: answer.event,
+      data: answer.kept,
+    });
+    expect((await eventsOf(w, anna!.token, kept)).at(-1)?.data).toStrictEqual(answer.kept);
+
+    const failed = await started(w, anna!.token);
+    (await replans.next()).finish({ kind: 'failed', why: 'not-a-proposal' });
+    await w.analysis?.idle();
+    expect((await eventsOf(w, anna!.token, failed)).at(-1)?.data).toStrictEqual(answer.failed);
   });
 });
 

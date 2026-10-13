@@ -81,6 +81,7 @@ import {
 } from './ride-analysis/hosted-settings';
 import type { HostedSettingsPort } from './ride-analysis/hosted-settings-port';
 import { jobSessionOf } from './ride-analysis/instance-job';
+import { createReplanPort, type ReplanPort } from './workout/replan-port';
 import type { RideAnalysisPort } from './ride-analysis/ride-analysis-port';
 import { hostedStepPort } from './ride-analysis/hosted-step';
 import { hostedModelEraser, readHostedModel } from './camera/hosted-model';
@@ -286,6 +287,7 @@ async function buildPlatform(
   probe: CapabilityProbe,
   camera: CameraController | undefined,
 ): Promise<ClientPlatform> {
+  const replan = buildReplanPort();
   const shared = {
     // #390. The camera answers "is anybody on the bike" for every recorder the
     // ride controller builds — advisory to its auto-pause and nothing else,
@@ -295,6 +297,12 @@ async function buildPlatform(
     // is GREEN in `check:wiring` (§Limits, "an optional parameter nobody
     // supplies") and in every test — `ride/presence-port.ts` records the gap.
     ...(camera === undefined ? {} : { presence: camera }),
+    // #1244. Re-plans during the ride: the rider's instance, goals and saved
+    // workouts behind one port. ⚠️ An optional option, as `presence` above
+    // is, so dropping this line is green in `check:wiring`; what holds the
+    // port's four methods is `WIRE003`, and `ride/controller.test.ts` §"#1244"
+    // drives the controller with one. Absent, no workout is ever re-planned.
+    ...(replan === undefined ? {} : { replan }),
     store: localStore(),
     athleteId: LOCAL_ATHLETE,
     // `crypto.randomUUID()` rather than a counter: two tabs recording at once
@@ -783,6 +791,34 @@ function buildRiderTextPort(): RiderTextPort {
     now: () => unixSeconds(Math.floor(Date.now() / 1000)),
     newDocumentId: () => globalThis.crypto.randomUUID(),
   };
+}
+
+/**
+ * Re-plans during the ride (#1244, ADR 0048 D-10): the ONE production place
+ * the port is built, so `check:wiring` reports `createReplanPort` if this
+ * goes. Over the sealed session the Connect screen keeps (#1192) and the one
+ * instance module (ADR 0036 D-3 (a)): the re-plan routes are sealed-only, so
+ * a device with no sealed session sends nothing.
+ *
+ * `undefined` where there is no `localStorage` or no WebCrypto, as the
+ * Connect screen's port. A rider there rides the workout they loaded.
+ */
+function buildReplanPort(): ReplanPort | undefined {
+  if (typeof localStorage === 'undefined' || globalThis.crypto?.subtle === undefined) {
+    return undefined;
+  }
+  const storage = localStorage;
+  const sealed = heldSealedSession({
+    storage,
+    loadedFrom: loadedFrom(),
+    signingKey: () => ensureDeviceSigningKey(localStore(), LOCAL_ATHLETE),
+  });
+  return createReplanPort({
+    store: localStore(),
+    athleteId: LOCAL_ATHLETE,
+    connected: () => heldInstanceSession(storage) !== undefined,
+    session: async () => jobSessionOf(await sealed()),
+  });
 }
 
 /** The workout goals panel's port (#1237): the local store, scoped to the local athlete. */

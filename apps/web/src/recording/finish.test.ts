@@ -429,6 +429,61 @@ describe("#1312 — a ride's laps are saved with it", () => {
     });
   });
 
+  /**
+   * #1312 beside #1244, after the two met on `main`: one ride can carry
+   * re-plan decisions (in the activity's own `rideFacts`) AND laps (rows of
+   * their own, written after it). Both go down, and when a lap will not, both
+   * come back out with the ride.
+   */
+  describe('a ride with re-plan decisions and laps', () => {
+    const DECISION = {
+      decision: 'not-applied',
+      why: 'kept',
+      revision: 1,
+      at: seconds(300),
+    } as const;
+
+    it('is saved with both, read back on a fresh handle', async () => {
+      await seedAthletes(harness);
+      const finished = rideToSave(input({ laps: riddenLaps(), replans: [DECISION] }));
+      expect((await harness.write(async (store) => saveFinishedRide(store, finished))).status).toBe(
+        'saved',
+      );
+
+      const ride = await harness.read(async (store) => store.getActivity(ATHLETE_A, ACTIVITY));
+      expect(ride?.rideFacts?.replans).toEqual([DECISION]);
+      expect(
+        (await harness.read(async (store) => store.listLaps(ATHLETE_A, ACTIVITY))).map(
+          (lap) => lap.ordinal,
+        ),
+      ).toEqual([0, 1, 2]);
+    });
+
+    it('goes back out whole when a lap will not go down: no ride, no decision, no lap', async () => {
+      await seedAthletes(harness);
+      const finished = rideToSave(input({ laps: riddenLaps(), replans: [DECISION] }));
+      const outcome = await harness.write(async (store) =>
+        saveFinishedRide(
+          {
+            putActivity: (record) => store.putActivity(record),
+            putStreamSet: (set) => store.putStreamSet(set),
+            deleteActivity: (athlete, id) => store.deleteActivity(athlete, id),
+            putLap: (lap) =>
+              lap.ordinal === 1 ? Promise.reject(new Error('refused')) : store.putLap(lap),
+          },
+          finished,
+        ),
+      );
+
+      expect(outcome).toMatchObject({ status: 'failed' });
+      expect(outcome).not.toHaveProperty('leftBehind');
+      expect(await harness.read(async (store) => store.getActivity(ATHLETE_A, ACTIVITY))).toBe(
+        undefined,
+      );
+      expect(await harness.read(async (store) => store.listLaps(ATHLETE_A, ACTIVITY))).toEqual([]);
+    });
+  });
+
   it('and through the real store that leaves no ride and no lap behind', async () => {
     await seedAthletes(harness);
     const finished = rideToSave(input({ laps: riddenLaps() }));

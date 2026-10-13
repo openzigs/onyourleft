@@ -86,6 +86,7 @@ import { rideInProgress, type RidePhase } from '../ride/controller';
 
 import type { GhostOutcome } from './ghost-outcome-kind';
 import type { WorkoutHold } from '../workout/hold-text';
+import { planChangeMayBeSpoken, type WaitingReplan } from '../workout/replan-text';
 import type { WorkoutGraphInput } from '../workout/workout-graph';
 
 /**
@@ -270,6 +271,35 @@ export interface GameTrainerPort {
    */
   workoutHold?(): WorkoutHold | undefined;
   /**
+   * An accepted re-plan waiting for the running workout's next block, or
+   * `undefined` when none is — #1244, `RideWorkoutSnapshot.replan`. Read on
+   * every frame, like {@link workoutHold}, and for its reason: it decides no
+   * write. The HUD's one region says its sentence once, and `quiet` is
+   * `workout/replan-text.ts` §`planChangeMayBeSpoken` answering "not now" for
+   * where the workout is. Optional for {@link workoutHold}'s reason.
+   *
+   * While it answers, the HUD's actions show *Keep the plan*
+   * ({@link keepThePlan}), so a rider does not leave the game to refuse a
+   * change.
+   */
+  workoutPlanChange?(): { readonly waiting: WaitingReplan; readonly quiet: boolean } | undefined;
+  /**
+   * The revision of a waiting re-plan that a pause or a lost trainer
+   * discarded in the block being ridden, or `undefined` — #1244,
+   * `RideReplanSnapshot.discarded`. The HUD's one region says its one
+   * sentence once (`workout/replan-text.ts` §`planDiscardedAnnouncement`).
+   * Optional for {@link workoutHold}'s reason.
+   */
+  workoutPlanDiscarded?(): number | undefined;
+  /**
+   * *Keep the plan* — #1244, ADR 0048 D-7: drop the re-plan waiting for the
+   * next block. The ride controller's own `keepThePlan`, which is what the
+   * Ride screen's control calls: one path, and it writes nothing to the
+   * trainer. A no-op when none is waiting. Optional for {@link workoutHold}'s
+   * reason.
+   */
+  keepThePlan?(): void;
+  /**
    * The workout in progress as its graph reads it, or `undefined` when there
    * is none or it has finished — #1307. The Ride screen's own snapshot object
    * (`RideWorkoutSnapshot`), so the HUD's strip and the panel's graph are one
@@ -408,6 +438,13 @@ interface GameTrainerSource {
           readonly status: string;
           readonly rescue: WorkoutRescue | undefined;
           readonly hold?: WorkoutHold | undefined;
+          /** #1244: an accepted re-plan waiting for the next block, or one discarded. */
+          readonly replan?:
+            | {
+                readonly waiting: WaitingReplan | undefined;
+                readonly discarded?: number | undefined;
+              }
+            | undefined;
           // #1307: the rest of what the graph reads. Partial only so a source
           // with no graph in it need not say; the ride controller says all of it.
         } & Partial<WorkoutGraphInput>)
@@ -436,6 +473,11 @@ interface GameTrainerSource {
    * with no recording has no laps. The ride controller always has it.
    */
   noteCourseLine?(event: CourseLineEvent): readonly LapFigures[] | undefined;
+  /**
+   * #1244. @see GameTrainerPort.keepThePlan. Optional only so a double with
+   * no workout need not say; the ride controller `main.tsx` hands over has it.
+   */
+  keepThePlan?(): void;
 }
 
 /** Whether a source's workout says enough to draw — the ride controller's always does. */
@@ -483,6 +525,25 @@ export function gameTrainerPortOver(controller: GameTrainerSource | undefined): 
     },
     workoutRescue: () => controller?.getSnapshot().workout?.rescue,
     workoutHold: () => controller?.getSnapshot().workout?.hold,
+    workoutPlanChange: () => {
+      const workout = controller?.getSnapshot().workout;
+      const waiting = workout?.replan?.waiting;
+      if (workout === undefined || waiting === undefined) {
+        return undefined;
+      }
+      // A source that says where the workout is has the silence rule applied;
+      // the ride controller always does.
+      return {
+        waiting,
+        quiet: isDrawable(workout)
+          ? !planChangeMayBeSpoken(workout.timeline, workout.elapsedSeconds)
+          : false,
+      };
+    },
+    workoutPlanDiscarded: () => controller?.getSnapshot().workout?.replan?.discarded,
+    keepThePlan: () => {
+      controller?.keepThePlan?.();
+    },
     runningWorkout: () => {
       const workout = controller?.getSnapshot().workout;
       if (workout === undefined || workout.status === 'finished') {

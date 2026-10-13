@@ -25,7 +25,10 @@ import {
   decodeProposal,
   loadPlan,
   PLAN_MOVE_KINDS,
+  planNotApplied,
   planWorkout,
+  readReplanRecord,
+  REPLAN_NOT_APPLIED,
   PROPOSAL_KEYS,
   REASON_CODES,
   REPLAN_BLOCK_MINUTES,
@@ -1693,5 +1696,125 @@ describe("the owner's rulings of 2026-10-12 — #1296", () => {
     });
     const target = sharesOf(result.workout.blocks[1] as WorkoutBlock)[0] ?? 0;
     expect(target * 200).toBeCloseTo(72, 9);
+  });
+});
+
+describe('planNotApplied — an accepted move dropped before its boundary (#1244)', () => {
+  const SCALE: PlanMove = { kind: 'scale-remaining-intervals', percent: 5 };
+  const first = accepted(proposalOf(SCALE));
+  const kept = planNotApplied(loadPlan(LOADED), first.plan);
+
+  it('keeps the blocks being ridden, not the dropped move’s', () => {
+    expect(planWorkout(kept)).toEqual(LOADED);
+    expect(planWorkout(first.plan)).not.toEqual(LOADED);
+  });
+
+  it('takes a revision number neither plan has had', () => {
+    expect(kept.revision).toBe(2);
+  });
+
+  it('refuses a proposal that names the dropped revision — P5', () => {
+    const stale = proposalOf(SCALE, { revision: first.plan.revision, summarySeq: 8 });
+    expect(ruleOf(stale, after(kept, 2000))).toBe('P5');
+    // The same proposal naming the plan that stands is read.
+    expect(ruleOf(later(SCALE, kept), after(kept, 2000))).toBe('accepted');
+  });
+
+  it('still counts the dropped move toward P4’s three minutes', () => {
+    expect(ruleOf(later({ kind: 'end-main-set' }, kept), after(kept, NOW + 179))).toBe('P4');
+    expect(ruleOf(later({ kind: 'end-main-set' }, kept), after(kept, NOW + 180))).toBe('accepted');
+  });
+
+  it('still counts a dropped harder move toward P4’s ten minutes', () => {
+    expect(ruleOf(later(SCALE, kept), after(kept, NOW + 599))).toBe('P4');
+    expect(ruleOf(later(SCALE, kept), after(kept, NOW + 600))).toBe('accepted');
+  });
+});
+
+describe('readReplanRecord — what a ride kept, read whole or not at all (#1244, P9)', () => {
+  const MOVE: PlanMove = { kind: 'extend-block', block: 3, minutes: 5 };
+  const ACCEPTED = { decision: 'accepted', move: MOVE, reason: 'on-plan', revision: 2, at: 1234 };
+  const REFUSED = { decision: 'refused', rule: 'P4', move: MOVE, reason: 'on-plan', at: 1234 };
+  const BARE = { decision: 'refused', rule: 'P1', at: 1234 };
+  const DROPPED = { decision: 'not-applied', why: 'kept', revision: 2, at: 1234 };
+
+  it.each([
+    ['an accepted move', ACCEPTED],
+    ['a refusal with its move', REFUSED],
+    ['a refusal of something that did not decode', BARE],
+    ['a move that was not ridden', DROPPED],
+  ])('reads %s as itself, in a new object', (_, record) => {
+    const read = readReplanRecord(record);
+    expect(read).toEqual(record);
+    expect(read).not.toBe(record);
+  });
+
+  it('reads every record the validator itself makes', () => {
+    const made = [
+      accepted(proposalOf({ kind: 'end-main-set' })).record,
+      decide(proposalOf(MOVE, { revision: 9 })).record,
+      decide({ nonsense: true }).record,
+    ];
+    expect(made.map((each) => each.decision)).toEqual(['accepted', 'refused', 'refused']);
+    for (const record of made) {
+      // As JSON, the way a row holds it: a refusal's absent move is no key.
+      expect(readReplanRecord(JSON.parse(JSON.stringify(record)))).toEqual(record);
+    }
+  });
+
+  it('reads every reason a move may not have been ridden for', () => {
+    for (const why of REPLAN_NOT_APPLIED) {
+      expect(readReplanRecord({ ...DROPPED, why })).toEqual({ ...DROPPED, why });
+    }
+  });
+
+  it('names switching re-plans off among the reasons a move was not ridden', () => {
+    expect(REPLAN_NOT_APPLIED).toContain('switched-off');
+    expect(readReplanRecord({ ...DROPPED, why: 'switched-off' })).toEqual({
+      ...DROPPED,
+      why: 'switched-off',
+    });
+  });
+
+  it('reads an accepted move whose reason was not shown to the rider, and only as `true`', () => {
+    const quiet = { ...ACCEPTED, reasonNotShown: true };
+    expect(readReplanRecord(quiet)).toEqual(quiet);
+    // As JSON, the way a row holds it.
+    expect(readReplanRecord(JSON.parse(JSON.stringify(quiet)))).toEqual(quiet);
+    // Absent is "the reason was said", and the key is not invented.
+    expect(readReplanRecord(ACCEPTED)).not.toHaveProperty('reasonNotShown');
+    for (const value of [false, 'yes', 1, null]) {
+      expect(readReplanRecord({ ...ACCEPTED, reasonNotShown: value })).toBeUndefined();
+    }
+    // The key belongs to an accepted move only.
+    expect(readReplanRecord({ ...REFUSED, reasonNotShown: true })).toBeUndefined();
+    expect(readReplanRecord({ ...DROPPED, reasonNotShown: true })).toBeUndefined();
+    // And it is still one key too many beside another.
+    expect(readReplanRecord({ ...quiet, text: 'ease off' })).toBeUndefined();
+  });
+
+  it.each([
+    ['one key too many', { ...ACCEPTED, text: 'ease off' }],
+    ['a move off the list', { ...ACCEPTED, move: { kind: 'extend-block', block: 3, minutes: 4 } }],
+    ['a move with a key too many', { ...ACCEPTED, move: { ...MOVE, watts: 400 } }],
+    ['a reason off the list', { ...ACCEPTED, reason: 'tired' }],
+    ['a revision that is not a count', { ...ACCEPTED, revision: -1 }],
+    [
+      'an accepted move with no move',
+      { decision: 'accepted', reason: 'on-plan', revision: 2, at: 1 },
+    ],
+    ['a rule off the list', { ...BARE, rule: 'P9' }],
+    ['a refusal with a move and no reason', { decision: 'refused', rule: 'P4', move: MOVE, at: 1 }],
+    ['a refusal with a reason and no move', { ...BARE, reason: 'on-plan' }],
+    ['a reason it was not ridden off the list', { ...DROPPED, why: 'bored' }],
+    ['a decision off the list', { ...BARE, decision: 'ignored' }],
+    ['a time that is not a number', { ...BARE, at: '1234' }],
+    ['a negative time', { ...BARE, at: -1 }],
+    ['a time that is not finite', { ...BARE, at: Number.POSITIVE_INFINITY }],
+    ['no time', { decision: 'refused', rule: 'P1' }],
+    ['a list', [BARE]],
+    ['nothing', null],
+  ])('reads %s as nothing', (_, value) => {
+    expect(readReplanRecord(value)).toBeUndefined();
   });
 });

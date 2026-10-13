@@ -1353,6 +1353,30 @@ describe('exporting the side camera’s reports (#388)', () => {
       const other = all.find((each) => each['activityId'] !== ridden.id);
       expect(other).toHaveProperty('rideFacts', null);
     });
+
+    it('carries a ride’s re-plan decisions, each with its own keys and no other — #1244', async () => {
+      const { written } = await seedLibrary(1);
+      const ridden = written[0]?.ride;
+      if (ridden === undefined) throw new Error('no ride');
+      const replans = [
+        {
+          decision: 'accepted',
+          move: { kind: 'shorten-block', block: 2, minutes: 2 },
+          reason: 'heart-rate-high',
+          revision: 1,
+          at: seconds(1_700_000_300),
+        },
+        { decision: 'not-applied', why: 'kept', revision: 1, at: seconds(1_700_000_320) },
+        { decision: 'refused', rule: 'P1', at: seconds(1_700_000_900) },
+      ] as const;
+      await harness.write(async (store) =>
+        store.setActivityRideFacts(ATHLETE_A, ridden.id, { replans }),
+      );
+      const { files } = await runExport();
+      expect(
+        entries(files).find((each) => each['activityId'] === ridden.id)?.['rideFacts'],
+      ).toStrictEqual({ replans });
+    });
   });
 
   describe('a ride’s write-up (#800, #801)', () => {

@@ -61,6 +61,7 @@
  * | `screen-off-risk` | `GameView` and `ride/RideAnnouncer.tsx` | `RideSnapshot.keepAliveFailed` (#647) |
  * | `erg-held` | `ride/RideAnnouncer.tsx` | `TrainerSnapshot.ergHeld` (#655) |
  * | `hold-changed` | `ride/RideAnnouncer.tsx` and `GameView` | `RideWorkoutSnapshot.hold`, through `workout/hold-text.ts` §`holdAnnouncement` (#1240) |
+ * | `plan-changed` | `ride/RideAnnouncer.tsx` and `GameView` | `RideWorkoutSnapshot.replan`, through `workout/replan-text.ts` §`planChangeAnnouncement` (#1244) |
  * | `lap-ended` | `GameView` | `hud/lap-text.ts` §`lapSummary`, over the laps `GameTrainerPort.courseLine` answers (#1312) |
  * | readings | `GameView` | `fields.ts` §`hudReadings` |
  *
@@ -233,6 +234,7 @@ export type AnnouncementEvent =
   | { readonly kind: 'screen-off-risk'; readonly text: string }
   | { readonly kind: 'erg-held'; readonly text: string }
   | { readonly kind: 'hold-changed'; readonly text: string }
+  | { readonly kind: 'plan-changed'; readonly text: string }
   | { readonly kind: 'lap-ended'; readonly text: string };
 
 /** Every kind of sentence, events and readings together. */
@@ -259,7 +261,14 @@ export const PRIORITY: readonly AnnouncementKind[] = [
   // fault and below a held *Set* (ADR 0048 D-12). Announcements on only, at
   // most once a minute — `workout/hold-text.ts` §`holdAnnouncement`.
   'hold-changed',
-  // #1312: a lap of the course, as it ends. The lowest event. Rank 5e.
+  // #1244: an accepted re-plan's one sentence, below the hold's (ADR 0048
+  // D-12). Announcements on only, once for each accepted move, and never in a
+  // segment above threshold power — `workout/replan-text.ts`
+  // §`planChangeAnnouncement`.
+  'plan-changed',
+  // #1312: a lap of the course, as it ends. The lowest event, BELOW an
+  // accepted re-plan: that sentence is about the workout the trainer is
+  // being driven through, and a lap is a figure about the ride. Rank 5e.
   'lap-ended',
   'power-off-target',
   'distance-tick',
