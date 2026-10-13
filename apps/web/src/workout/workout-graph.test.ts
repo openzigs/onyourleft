@@ -391,12 +391,14 @@ describe('the lane of the last few minutes — #1307', () => {
       input({ trace: [298, 299, 300].map((at) => sample(at, { target: 0, power: 0 })) }),
     );
     expect(lane.bottomWatts).toBe(0);
+    // ⚠️ Literals, not the constant: 90 of the lane's 100 units, a tenth clear
+    // of its floor. With no inset this is 100, the lane's own bottom line.
     const edge = points(lane.targetEdge).map(([, y]) => y);
-    expect(new Set(edge)).toEqual(new Set([TRACE_LANE_HEIGHT - TRACE_LANE_INSET]));
+    expect(new Set(edge)).toEqual(new Set([90]));
     // The shaded step runs from that edge down to the lane's floor.
     const area = points(lane.targetArea).map(([, y]) => y);
-    expect(Math.max(...area)).toBe(TRACE_LANE_HEIGHT);
-    expect(Math.min(...area)).toBe(TRACE_LANE_HEIGHT - TRACE_LANE_INSET);
+    expect(Math.max(...area)).toBe(100);
+    expect(Math.min(...area)).toBe(90);
   });
 
   it('uses the lane when the window already spans a lot: intervals', () => {
