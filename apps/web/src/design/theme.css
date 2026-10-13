@@ -3195,18 +3195,26 @@ a.oyl-button {
   .oyl-ride__group--graph .oyl-workout-graph__lanes {
     align-items: flex-end;
     display: flex;
-    gap: var(--oyl-space-lg);
+    gap: var(--oyl-space-md);
   }
 
   /* ⚠️ `auto`, not `0`: a lane starts as wide as its caption on ONE line and
      the lanes share what is left. With equal thirds the last lane's caption
-     — the longest — wrapped in a hold while the other two did not. And no
-     lane under 12rem, so the one with the shortest caption (heart rate) is
-     not left with the narrowest drawing. */
+     — the longest — wrapped in a hold while the other two did not.
+     The heart-rate lane has the shortest caption, so it takes the larger
+     share of what is left over and is not left with the narrowest drawing.
+     ⚠️ No floor under a lane's width. 12rem was written first, and on the CI
+     runner's fonts (about 5 % wider than a Mac's) it left too little for the
+     three captions of a PAUSED hold — "Paused · Target 50 W · You 0 W" is
+     the longest there is — and the plan lane's wrapped. With the larger
+     share above, no floor was needed: deleting it changed nothing measured. */
   .oyl-ride__group--graph .oyl-workout-graph__lane {
     flex: 1 1 auto;
     margin-top: 0;
-    min-width: 12rem;
+  }
+
+  .oyl-ride__group--graph [data-oyl-lane='heart-rate'] {
+    flex-grow: 3;
   }
 
   /* ⚠️ `width: 0` with `min-width: 100%`: drawn as wide as its lane, and
@@ -3269,14 +3277,6 @@ a.oyl-button {
 
   .oyl-ride__group--graph .oyl-workout-graph__svg {
     height: 4rem;
-  }
-
-  /* Beside the sentence a lane has less width: its floor comes down with it,
-     and only then. */
-  .oyl-ride__group--graph
-    .oyl-workout-graph:has(> .oyl-workout-graph__key)
-    .oyl-workout-graph__lane {
-    min-width: 9rem;
   }
 }
 
