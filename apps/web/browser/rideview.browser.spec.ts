@@ -2056,13 +2056,15 @@ for (const state of LANDSCAPE_STATES) {
 /**
  * ⚠️ On wider fonts. The three captions of a PAUSED hold are the longest
  * there are, and on the CI runner's fonts — about 5 % wider than a Mac's —
- * the first layout of them wrapped the plan lane's, green on the Mac it was
+ * the first layout of them wrapped the plan lane's, and the second left the
+ * heart-rate lane 98 px of drawing; both were green on the Mac they were
  * written on. So the same case is measured with every caption's letters
- * spaced 0.02em apart, about 4 % wider: on a Mac that is roughly the
+ * spaced 0.03em apart, about 5 % wider: on a Mac that is roughly the
  * runner's fonts, and on the runner it is that much wider again.
- * ⚠️ Not more. 0.05em was written first and was red on the runner, where it
- * came on top of the runner's own 5 %: the captions fit with about 10 % to
- * spare on a Mac and about 5 % on the runner, and this holds a part of that.
+ *
+ * Measured on a Mac, for whoever changes this: the captions stay on one line
+ * each up to 0.07em and wrap at 0.08em, and without the heart-rate lane's
+ * floor its drawing is 106 px here where with it it is 112.
  */
 test(`a paused hold’s three captions stay on one line each on wider fonts — #1307 — ${TABLET_IN_THE_SHELL.name}`, async ({
   page,
@@ -2070,7 +2072,7 @@ test(`a paused hold’s three captions stay on one line each on wider fonts — 
   const viewport = TABLET_IN_THE_SHELL;
   await open(page, viewport, '?workout=paused-hold');
   const plain = await graphOnTheRideScreen(page);
-  await page.addStyleTag({ content: '.oyl-workout-graph__caption { letter-spacing: 0.02em; }' });
+  await page.addStyleTag({ content: '.oyl-workout-graph__caption { letter-spacing: 0.03em; }' });
   const seen = await graphOnTheRideScreen(page);
   if (seen === undefined || plain === undefined) throw new Error('no workout graph');
   // The apparatus: the captions really are wider than they were.
@@ -2080,7 +2082,7 @@ test(`a paused hold’s three captions stay on one line each on wider fonts — 
     expect(lane.caption.height, `${lane.name} caption`).toBeLessThanOrEqual(
       1.7 * lane.captionFontSize,
     );
-    expect(lane.svg.width, lane.name).toBeGreaterThan(100);
+    expect(lane.svg.width, lane.name).toBeGreaterThan(110);
   }
   expect(seen.frameOverflow).toBeLessThanOrEqual(0);
   expect(seen.group.bottom).toBeLessThanOrEqual(viewport.height - insetsOf(viewport).bottom);

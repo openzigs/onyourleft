@@ -3211,6 +3211,14 @@ a.oyl-button {
     margin-top: 0;
   }
 
+  /* The heart-rate lane has the shortest caption, so it starts the narrowest
+     and its drawing was 98 px on the CI runner's fonts beside a paused hold's
+     long caption. 10rem leaves it 112 px of drawing after its gutter. ⚠️ On
+     this lane ONLY: the same floor on all three is what wrapped the captions. */
+  .oyl-ride__group--graph [data-oyl-lane='heart-rate'] {
+    min-width: 10rem;
+  }
+
   /* ⚠️ `width: 0` with `min-width: 100%`: drawn as wide as its lane, and
      counted as nothing when the lane's own width is worked out — or every
      lane would start from an SVG's default 300 px, not from its caption. */
