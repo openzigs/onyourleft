@@ -1624,15 +1624,20 @@ test(`#1042 — the control — the card after the readings puts Done under the 
  * GRAPH ON THE RIDE SCREEN" decides where it is drawn:
  *
  * - landscape: under the readings — across the Live group's two columns at
- *   1280×800, across the whole width at 1024×768 — with its lanes SIDE BY
- *   SIDE, and pinned to the bottom of the screen when the page is taller;
+ *   1280×800, across the whole width under both groups at 1024×768 — with
+ *   its lanes SIDE BY SIDE;
  * - upright: under the trainer group in its column, lanes stacked.
  *
- * The claim that needs a browser is the ruling's own: **the whole graph is on
- * screen without scrolling** at 1280×800 and 1024×768, in the states whose
- * notice used to push it under the fold. And, because it is pinned, the other
- * half: that what it covers when the room runs out is never a control or a
- * notice.
+ * It is in the page's own flow at every size. Two claims need a browser:
+ *
+ * 1. **At 1280×800 the whole graph is on screen without scrolling**, in the
+ *    states whose notice used to push it under the fold.
+ * 2. **At 1024×768 it lies over NO text** — no control, no notice, no trainer
+ *    or workout sentence — and the page scrolls to it. It may be under the
+ *    fold there. ⚠️ A third pass pinned it to the bottom of the screen
+ *    (`position: sticky`), and with the *Eased* notice standing it lay over
+ *    "Holding 0 W.": a picture must never cover a sentence that says what the
+ *    trainer holds.
  *
  * The fixtures (`rideview-harness.tsx` §`GRAPH_FIXTURES`): a hold that is
  * running, a target raised to the trainer's minimum, a target that steps, and
@@ -1727,14 +1732,16 @@ async function graphOnTheRideScreen(page: Page) {
       };
     });
     const groupBox = boxOf(group);
-    // Every control and notice on the Ride screen that the graph's group lies
-    // over by more than a pixel — it is pinned, so it can lie over things.
-    const covered = [
-      ...document.querySelectorAll(
-        '.oyl-ride button, .oyl-ride a[href], .oyl-ride summary, .oyl-ride input, .oyl-ride select, .oyl-ride .oyl-status',
-      ),
-    ]
+    // Everything on the Ride screen that carries text of its own — a
+    // control, a notice, a sentence, a heading, a reading — and that the
+    // graph's group lies over by more than a pixel.
+    const overText = [...document.querySelectorAll('.oyl-ride *')]
       .filter((element) => !group.contains(element))
+      .filter((element) =>
+        [...element.childNodes].some(
+          (node) => node.nodeType === Node.TEXT_NODE && (node.textContent ?? '').trim() !== '',
+        ),
+      )
       .filter((element) => {
         const rect = element.getBoundingClientRect();
         return (
@@ -1745,6 +1752,15 @@ async function graphOnTheRideScreen(page: Page) {
         );
       })
       .map((element) => (element.textContent ?? '').trim().slice(0, 40));
+    // How wide each LINE of the sentence under the graph is, top to bottom.
+    const keyLines: number[] = [];
+    if (key !== null) {
+      const range = document.createRange();
+      range.selectNodeContents(key);
+      for (const rect of range.getClientRects()) {
+        keyLines.push(rect.width);
+      }
+    }
     const reading = frame.querySelector('.oyl-workout-graph__reading');
     return {
       name: frame.getAttribute('aria-label') ?? '',
@@ -1765,7 +1781,9 @@ async function graphOnTheRideScreen(page: Page) {
       keyText: key?.textContent ?? '',
       keyFontSize: key === null ? 0 : Number.parseFloat(getComputedStyle(key).fontSize),
       lanes,
-      covered,
+      overText,
+      keyLines,
+      position: getComputedStyle(group).position,
       // Document order: live, trainer, the graph, sensors.
       order: [...document.querySelectorAll('.oyl-ride > .oyl-ride__group')].map((each) =>
         [...each.classList].find((name) => name.startsWith('oyl-ride__group--')),
@@ -1807,7 +1825,13 @@ function expectGraphLaidOut(seen: GraphSeen, viewport: Viewport): void {
   // ⚠️ The paragraph that walked the lanes top to bottom is gone (the owner's
   // ruling): the lanes carry titles.
   expect(seen.groupText).not.toMatch(/Top:|Middle:|Bottom:/);
+  // In the page's own flow, at every size: never pinned over what is above it.
+  expect(seen.position).toBe('static');
   // What is said under the graph, when anything is, is under it and legible.
+  if (seen.keyLines.length > 1) {
+    // Two lines of a length, not one line and a last "W." on its own.
+    expect(seen.keyLines.at(-1) ?? 0).toBeGreaterThan((seen.keyLines[0] ?? 0) * 0.4);
+  }
   if (seen.key !== undefined) {
     expect(seen.key.top).toBeGreaterThanOrEqual(seen.frame.bottom);
     expect(seen.key.bottom).toBeLessThanOrEqual(seen.group.bottom + 1);
@@ -1837,10 +1861,7 @@ function expectGraphLaidOut(seen: GraphSeen, viewport: Viewport): void {
         Math.abs(lane.svg.bottom - (seen.lanes[0]?.svg.bottom ?? 0)),
         lane.name,
       ).toBeLessThanOrEqual(1);
-      expect(
-        Math.abs(lane.svg.height - (viewport.width >= 1216 ? 5 : 3.5) * seen.rem),
-        lane.name,
-      ).toBeLessThanOrEqual(1);
+      expect(Math.abs(lane.svg.height - 5 * seen.rem), lane.name).toBeLessThanOrEqual(1);
       before = lane.box.right;
     } else {
       // Stacked: one above another, each its own height, sharing a left edge.
@@ -1952,55 +1973,79 @@ for (const viewport of EASED_VIEWPORTS) {
 }
 
 /**
- * The ruling: the whole graph on screen, without scrolling, in landscape —
+ * The ruling: at 1280×800 the whole graph is on screen, without scrolling —
  * in the states whose notice used to push it under the fold.
  */
-const ON_SCREEN_STATES = ['running', 'holding', 'eased', 'raised'] as const;
+const LANDSCAPE_STATES = ['running', 'holding', 'hold', 'eased', 'raised'] as const;
 
-for (const viewport of [TABLET, SMALL_TABLET]) {
-  for (const state of ON_SCREEN_STATES) {
-    test(`the whole graph is on screen without scrolling, and over no control — #1307 — ?workout=${state} — ${viewport.name}`, async ({
-      page,
-    }) => {
-      const seen = await openGraph(page, viewport, state);
-      expect(seen.scrollY).toBe(0);
-      expect(seen.viewportHeight).toBe(viewport.height);
-      // ⚠️ The GROUP: the frame, every lane in it, and the sentence under it.
-      expect(seen.group.top).toBeGreaterThanOrEqual(0);
-      expect(seen.group.bottom).toBeLessThanOrEqual(viewport.height);
-      expect(seen.frame.bottom).toBeLessThanOrEqual(viewport.height);
-      for (const lane of seen.lanes) {
-        expect(lane.svg.bottom, lane.name).toBeLessThanOrEqual(viewport.height);
-        expect(lane.caption.top, lane.name).toBeGreaterThanOrEqual(0);
-      }
-      // Larger than it was in the trainer's 360 px column.
-      expect(seen.group.width).toBeGreaterThan(700);
-      // It is pinned to the bottom of the screen when the page is taller, so
-      // it CAN lie over what is above it. Never over a control or a notice.
-      expect(seen.covered).toEqual([]);
-      expect(seen.group.top).toBeGreaterThan(seen.end.bottom);
-      // Under the readings, starting at the Live group's left edge.
-      expect(Math.abs(seen.group.left - seen.live.left)).toBeLessThanOrEqual(1);
-      const overClock = Math.max(0, seen.clock.bottom - seen.group.top);
-      // Only where the graph is UNDER the trainer group: on three columns it is beside it.
-      const overTrainer =
-        viewport.width >= 1216 ? 0 : Math.max(0, seen.trainerContentBottom - seen.group.top);
-      if (viewport.width >= 1216) {
-        // Three columns: under the Live group's two, beside the trainer's —
-        // and there is room, so it lies over nothing at all.
-        expect(seen.group.right).toBeLessThanOrEqual(seen.trainer.left);
-        expect(seen.group.top).toBeGreaterThanOrEqual(seen.liveContentBottom);
-      } else {
-        // Two columns: across both, under both groups. The reading cards
-        // tighten while it is there, which is what keeps it off the clock.
-        expect(Math.abs(seen.group.right - seen.trainer.right)).toBeLessThanOrEqual(1);
-        expect(overClock).toBeLessThanOrEqual(20);
-      }
-      console.log(
-        `#1307 the graph on screen — ?workout=${state} — ${viewport.name}: y = ${seen.group.top.toFixed(1)} to ${seen.group.bottom.toFixed(1)} of ${String(viewport.height)}, ${seen.group.width.toFixed(0)} px wide; over the clock by ${overClock.toFixed(1)} px and over the trainer group’s sentences by ${overTrainer.toFixed(1)} px`,
+for (const state of LANDSCAPE_STATES) {
+  test(`the whole graph is on screen without scrolling — #1307 — ?workout=${state} — ${TABLET.name}`, async ({
+    page,
+  }) => {
+    const viewport = TABLET;
+    const seen = await openGraph(page, viewport, state);
+    expect(seen.scrollY).toBe(0);
+    expect(seen.viewportHeight).toBe(viewport.height);
+    // ⚠️ The GROUP: the frame, every lane in it, and the sentence under it.
+    expect(seen.group.top).toBeGreaterThanOrEqual(0);
+    expect(seen.group.bottom).toBeLessThanOrEqual(viewport.height);
+    for (const lane of seen.lanes) {
+      expect(lane.svg.bottom, lane.name).toBeLessThanOrEqual(viewport.height);
+      // Every caption on ONE line — in a hold too, where there are three.
+      expect(lane.caption.height, `${lane.name} caption`).toBeLessThanOrEqual(
+        1.7 * lane.captionFontSize,
       );
+    }
+    // Larger than it was in the trainer's 360 px column.
+    expect(seen.group.width).toBeGreaterThan(700);
+    // Under the readings: from the Live group's left edge, under all of it,
+    // ending left of the trainer group — and over nothing.
+    expect(Math.abs(seen.group.left - seen.live.left)).toBeLessThanOrEqual(1);
+    expect(seen.group.right).toBeLessThanOrEqual(seen.trainer.left);
+    expect(seen.group.top).toBeGreaterThanOrEqual(seen.liveContentBottom);
+    expect(seen.overText).toEqual([]);
+    console.log(
+      `#1307 the graph on screen — ?workout=${state} — ${viewport.name}: y = ${seen.group.top.toFixed(1)} to ${seen.group.bottom.toFixed(1)} of ${String(viewport.height)}, ${seen.group.width.toFixed(0)} px wide`,
+    );
+  });
+}
+
+/**
+ * 1024×768: two columns, and no room on screen for the graph once a notice
+ * stands. It is under both groups, in the flow, and may be under the fold.
+ * What is held is that it lies over nothing, and that it can be scrolled to.
+ */
+for (const state of LANDSCAPE_STATES) {
+  test(`the graph lies over no text, and the page scrolls to it — #1307 — ?workout=${state} — ${SMALL_TABLET.name}`, async ({
+    page,
+  }) => {
+    const viewport = SMALL_TABLET;
+    const seen = await openGraph(page, viewport, state);
+    expect(seen.scrollY).toBe(0);
+    // ⚠️ No control, no notice, no sentence, no heading, no reading.
+    expect(seen.overText).toEqual([]);
+    // Under BOTH groups — below the last thing either of them says — and
+    // across both columns.
+    expect(seen.group.top).toBeGreaterThanOrEqual(seen.liveContentBottom);
+    expect(seen.group.top).toBeGreaterThanOrEqual(seen.trainerContentBottom);
+    expect(Math.abs(seen.group.left - seen.live.left)).toBeLessThanOrEqual(1);
+    expect(Math.abs(seen.group.right - seen.trainer.right)).toBeLessThanOrEqual(1);
+    expect(seen.group.width).toBeGreaterThan(700);
+    // The page scrolls to it: brought to the foot of the screen, all of it is on screen…
+    const scrolled = await page.evaluate(() => {
+      const group = document.querySelector('.oyl-ride__group--graph');
+      group?.scrollIntoView({ block: 'end' });
+      const rect = group?.getBoundingClientRect();
+      return { top: rect?.top ?? -1, bottom: rect?.bottom ?? Infinity, scrollY: window.scrollY };
     });
-  }
+    expect(scrolled.top).toBeGreaterThanOrEqual(0);
+    expect(scrolled.bottom).toBeLessThanOrEqual(viewport.height + SUBPIXEL_TOLERANCE);
+    // …and, scrolled, it still lies over nothing.
+    expect((await graphOnTheRideScreen(page))?.overText).toEqual([]);
+    console.log(
+      `#1307 the graph in the flow — ?workout=${state} — ${viewport.name}: y = ${seen.group.top.toFixed(1)} to ${seen.group.bottom.toFixed(1)} of ${String(viewport.height)} (${seen.group.bottom > viewport.height ? `${(seen.group.bottom - viewport.height).toFixed(1)} px under the fold` : 'on screen'}); scrolled ${scrolled.scrollY.toFixed(0)} px to bring it on`,
+    );
+  });
 }
 
 /** The states, one by one, at the owner's tablet both ways up. */

@@ -3151,27 +3151,22 @@ a.oyl-button {
  *   the Live group's two columns. ⚠️ Not under the trainer group: that
  *   column's height changes with a notice (*Eased*, a heart-rate hold), and
  *   at 1280×800 the notice put most of the graph under the fold. The Live
- *   group's height does not change with the workout.
+ *   group's height does not change with the workout, so the whole graph is
+ *   on screen there in every state — `rideview.browser.spec.ts` §"#1307".
  * - **Two columns, landscape** (60rem to 76rem — 1024×768): under BOTH
  *   groups, across the whole width. The Live group is one column there, its
  *   four readings are two rows, and what is left under the clock is about
- *   110 px by 430: not room for three lanes a rider can read.
+ *   110 px by 430: not room for three lanes a rider can read. ⚠️ So at
+ *   1024×768 the graph MAY be under the fold, and the page scrolls to it.
  *
  * In landscape the lanes stand SIDE BY SIDE, because what there is to spare
  * is width.
  *
- * ⚠️ **`position: sticky; bottom`, in landscape.** At 1024×768 the page is
- * taller than the screen whenever a notice stands in the trainer group, and
- * the graph's natural place is then under the fold — the defect the ruling is
- * about. So it is pinned to the bottom of the screen when the page is taller
- * than it: it is ALWAYS wholly on screen, and where the room has run out it
- * covers the foot of the column above it until the page is scrolled.
- * `rideview.browser.spec.ts` §"#1307" holds that it covers no control and no
- * notice at 1280×800 and 1024×768, and publishes what it does cover; a notice
- * is drawn over it rather than under it (below). While
- * it is there the reading cards tighten on the two-column layout — the step
- * #692 takes for a standing notice, for the same reason — which is what
- * leaves the Live column clear of it.
+ * ⚠️ **In the page's own flow, at every size — never pinned.** A third pass
+ * pinned it to the bottom of the screen (`position: sticky`) so that it was
+ * always on screen at 1024×768, and with the *Eased* notice standing it lay
+ * over "Holding 0 W.". A picture must never cover a sentence that says what
+ * the trainer holds. The spec holds that it lies over no text at all there.
  */
 .oyl-ride__group--graph .oyl-workout-graph__frame {
   margin-top: 0;
@@ -3192,21 +3187,7 @@ a.oyl-button {
 
 @media (min-width: 60rem) {
   .oyl-ride__group--graph {
-    background: var(--oyl-color-canvas);
-    bottom: var(--oyl-safe-bottom);
     grid-column: 1 / -1;
-    position: sticky;
-    z-index: 1;
-  }
-
-  /* ⚠️ A notice is never under the pinned graph. With every standing notice
-     up at once the Live column is far taller than the screen, and the graph,
-     pinned, lay over *Device full* — `rideview.browser.spec.ts` §"#692"
-     caught it. A notice is the thing that says something is wrong, so it is
-     drawn OVER the graph, and it is the picture that loses a strip. */
-  .oyl-ride:has(> .oyl-ride__group--graph) .oyl-status {
-    position: relative;
-    z-index: 2;
   }
 
   /* The lanes side by side, their drawings on one line whatever a caption
@@ -3217,35 +3198,30 @@ a.oyl-button {
     gap: var(--oyl-space-lg);
   }
 
+  /* ⚠️ `auto`, not `0`: a lane starts as wide as its caption on ONE line and
+     the lanes share what is left. With equal thirds the last lane's caption
+     — the longest — wrapped in a hold while the other two did not. And no
+     lane under 12rem, so the one with the shortest caption (heart rate) is
+     not left with the narrowest drawing. */
   .oyl-ride__group--graph .oyl-workout-graph__lane {
-    flex: 1 1 0;
+    flex: 1 1 auto;
     margin-top: 0;
-    min-width: 0;
+    min-width: 12rem;
   }
 
+  /* ⚠️ `width: 0` with `min-width: 100%`: drawn as wide as its lane, and
+     counted as nothing when the lane's own width is worked out — or every
+     lane would start from an SVG's default 300 px, not from its caption. */
   .oyl-ride__group--graph .oyl-workout-graph__svg {
-    height: 3.5rem;
+    height: 5rem;
+    min-width: 100%;
+    width: 0;
   }
 
   /* The plan lane has no scale, and side by side it shares no axis with the
      others: its drawing takes the gutter. */
   .oyl-ride__group--graph [data-oyl-lane='plan'] .oyl-workout-graph__well {
     padding-left: 0;
-  }
-}
-
-@media (min-width: 60rem) and (max-width: 75.99rem) {
-  .oyl-ride:has(> .oyl-ride__group--graph) {
-    row-gap: var(--oyl-space-sm);
-  }
-
-  .oyl-ride:has(> .oyl-ride__group--graph) .oyl-metric-grid {
-    gap: var(--oyl-space-sm);
-    margin: var(--oyl-space-sm) 0;
-  }
-
-  .oyl-ride:has(> .oyl-ride__group--graph) .oyl-metric {
-    padding: var(--oyl-space-sm);
   }
 }
 
@@ -3261,10 +3237,6 @@ a.oyl-button {
 
   .oyl-ride__group--graph {
     grid-area: graph;
-  }
-
-  .oyl-ride__group--graph .oyl-workout-graph__svg {
-    height: 5rem;
   }
 }
 
@@ -5401,9 +5373,12 @@ select.oyl-input {
   transform: translateY(-50%);
 }
 
+/* `balance`: where the sentence takes two lines they are two of a length, not
+   one line and a last "W." on its own. */
 .oyl-workout-graph__key {
   font-size: var(--oyl-font-size-sm);
   margin: var(--oyl-space-xs) 0 0;
+  text-wrap: balance;
 }
 
 .oyl-workout-graph__done {
