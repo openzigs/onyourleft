@@ -1161,6 +1161,18 @@ describe('the boundaries, each pinned — #1307’s third review', () => {
     expect(heldInstead(stuck(116, 119))?.why).toBe('different');
   });
 
+  it('a hold: what it asks NOW decides first, and exactly 2 W off is the hold’s', () => {
+    // The trainer was stuck on 100 W for ten seconds while the hold asked
+    // 90 W — and the hold now asks 98 W, which 100 W is within 2 W of.
+    expect(
+      heldInstead({ ...stuck(100, 90), hold: { reason: 'raised', target: 98 } }),
+    ).toBeUndefined();
+    // At 97 W it is 3 W off, and the ten seconds count.
+    expect(
+      heldInstead({ ...stuck(100, 90), hold: { reason: 'raised', target: 97 } })?.plannedWatts,
+    ).toBe(97);
+  });
+
   it('a hold: samples exactly 2 W apart do not count towards "stuck"', () => {
     // 100 W confirmed throughout. The hold asked 98 W (2 W off: its own) until
     // 597 s and 90 W since: stuck for 2 s, not 3. Were 2 W counted as a
