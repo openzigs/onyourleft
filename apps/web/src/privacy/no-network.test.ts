@@ -1697,3 +1697,138 @@ describe('the instance is disclosed, class by class — #778', () => {
     ).not.toContain('your internet address');
   });
 });
+
+/**
+ * **Re-plans during a ride, disclosed — #1245** (ADR 0048 D-10 and D-11; the
+ * #558 shape: each place a rider reads is checked on its own, because a search
+ * of the whole file is satisfied by any one of them).
+ *
+ * A re-plan sends per-block summaries to the rider's instance DURING a ride,
+ * through the one instance module this gate admits, so no permit changes. What
+ * changes is what that module carries, and the policy has to say, in each of
+ * the four places a rider would look: **what** is sent, **when**, **to whom**,
+ * and that it is **off unless switched on for the ride**. The section's exact
+ * sentences are pinned against the screen's own constant by
+ * `workout/replan-disclosure.test.ts`; this holds the four places together.
+ *
+ * ⚠️ It checks that the words are there, not that they are true of the build.
+ */
+const REPLAN_SECTION = 'Block summaries sent to your instance during a ride';
+const REPLAN_DISCLOSED_IN: Readonly<Record<string, readonly string[]>> = {
+  'The short version': [
+    // What, and what never.
+    'a summary of each block you have ridden so far',
+    'never a second-by-second recording',
+    'your workout goals, the heart rates you chose included',
+    // When.
+    'as each block begins, and never more often than every 3 minutes',
+    // To whom, and how; and to nobody else.
+    'sealed so that only your instance can open it',
+    "a model on your instance's own machine",
+    'it is not sent on to a hosted service: this app never asks one for a re-plan',
+    // When, and that it is off.
+    'it is off at the start of every ride, and nothing is sent until you switch it on for that ride',
+    // The hold, because riders will ask.
+    'a heart-rate hold on its own sends nothing anywhere',
+    // The sentence that used to say only a sync sends a heart rate.
+    'if you switch on re-plans during a ride, a summary of each block you ride is sent, heart rate included, with the heart rates you chose for the workout and in your workout goals',
+    `described under ${REPLAN_SECTION.toLowerCase()} below`,
+  ],
+  'What leaves the device': [
+    'a summary of each block you ride, sent to your instance during the ride',
+    'if you switch on re-plan during the ride for that ride',
+    'sealed on this device for that instance alone',
+    "a heart-rate hold's range in beats per minute included",
+    'the heart rates you chose included and the time you want in your range left out',
+    'never a second-by-second recording or a position, and never sent on to a hosted service',
+  ],
+  'An instance you connect to': [
+    '| block summaries, for a re-plan during the ride | only if you switch on re-plan during the ride for a ride',
+    'your mean and highest heart rate',
+    'your mean power as a share of your threshold power',
+    'your mean cadence',
+    "with the blocks of the workout as it stands, a heart-rate hold's range in beats per minute included, and your workout goals, the heart rates you chose included and the time you want to spend in your range left out",
+    'this app never asks a hosted service for a re-plan',
+    'never a second-by-second recording, a position, a date or a name',
+    'your instance keeps each request and its answer for 7 days',
+    'during a ride, as a block begins, and never more often than every 3 minutes, while the switch is on',
+    'switch it off and nothing more is sent',
+  ],
+  [REPLAN_SECTION]: [
+    'a heart-rate hold on its own sends nothing anywhere: it runs on this device',
+    'off unless you switch them on for that ride',
+    'it is off at the start of every ride',
+    'what is sent: one request each time, and this is the whole of it',
+    'for a heart-rate hold the lowest and highest heart rate of the range you chose, in beats per minute',
+    'the heart rate you chose not to go above',
+    'and not the time you want to spend in your range, which this app leaves out',
+    'no effort check-in is sent',
+    'when: during the ride, and only while the switch is on for that ride: as a block begins, and never less than 3 minutes after the last time',
+    'to whom: the instance you connected',
+    'it is never sent in plain text',
+    'what your instance keeps: each request',
+    'what this device keeps: each change it accepted or refused',
+    'it is not sent to your instance when you sync',
+    // No hosted source: #1244 asks only the instance's own model.
+    "no hosted service: this app asks only for the model on your instance's own machine",
+    'it never asks a hosted service for a re-plan, and a key you stored on your instance is not used for one',
+  ],
+};
+
+/** Each phrase a place does not carry, as `heading: phrase`; an absent section is one fault. */
+function replanDisclosureFaults(policy: string): readonly string[] {
+  return Object.entries(REPLAN_DISCLOSED_IN).flatMap(([heading, phrases]) => {
+    const section = normalised(policySection(policy, heading));
+    if (section === '') return [`${heading}: no such section`];
+    return phrases
+      .filter((phrase) => !section.includes(phrase))
+      .map((phrase) => `${heading}: ${phrase}`);
+  });
+}
+
+describe('re-plans during a ride are disclosed, in each place a rider reads — #1245', () => {
+  const REPOSITORY_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
+  const policy = readFileSync(join(REPOSITORY_ROOT, 'docs', 'privacy-policy.md'), 'utf8');
+
+  it('goes through the one module admitted for instance traffic, so no permit moved', () => {
+    const instanceTransport = join('instance', 'instance-transport.ts');
+    expect(
+      PERMITTED_NETWORK_CALLS.map((rule) => rule.module).filter(
+        (module) => module.startsWith('instance') || module.startsWith('workout'),
+      ),
+    ).toStrictEqual([instanceTransport, instanceTransport]);
+  });
+
+  it('says what is sent, when, to whom, and that it is off unless switched on per ride', () => {
+    expect(replanDisclosureFaults(policy)).toStrictEqual([]);
+  });
+
+  it('would find the section gone — the rule is not vacuous', () => {
+    const start = policy.indexOf(`\n## ${REPLAN_SECTION}\n`);
+    expect(start).toBeGreaterThan(0);
+    const end = policy.indexOf('\n## ', start + 1);
+    const without = policy.slice(0, start) + policy.slice(end);
+    expect(replanDisclosureFaults(without)).toContain(`${REPLAN_SECTION}: no such section`);
+  });
+
+  it.each(Object.keys(REPLAN_DISCLOSED_IN))(
+    'would find "%s" silent about it, though the other places still say so',
+    (heading) => {
+      // Each place on its own: take every line about a block summary, a
+      // re-plan, the hold or the switch out of ONE section, and only that
+      // section is red.
+      const marker = `\n## ${heading}\n`;
+      const start = policy.indexOf(marker) + marker.length;
+      const next = policy.indexOf('\n## ', start);
+      const end = next === -1 ? policy.length : next;
+      const silenced = policy
+        .slice(start, end)
+        .split('\n')
+        .filter((line) => !/block|re-plan|heart-rate hold|switch|request/i.test(line))
+        .join('\n');
+      const faults = replanDisclosureFaults(policy.slice(0, start) + silenced + policy.slice(end));
+      expect(faults.length).toBeGreaterThan(0);
+      expect(faults.every((fault) => fault.startsWith(`${heading}: `))).toBe(true);
+    },
+  );
+});
