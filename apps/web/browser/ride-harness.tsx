@@ -531,13 +531,18 @@ const RACE_PORTS =
       };
 
 /**
- * `?graph=hold`: the running workout as the HUD's graph reads it (#1307), in a
- * heart-rate hold — the TALLEST drawing, three lanes — with a trace that fills
- * its window. Fixed numbers, so two loads measure the same picture. Paired
- * with `?trainer=workout`, whose route panel it is drawn in.
+ * `?graph=hold` and `?graph=plain`: the running workout as the HUD's strip
+ * reads it (#1307). Fixed numbers, so two loads measure the same picture.
+ * Paired with `?trainer=workout`, whose route panel it is drawn in.
+ *
+ * - `hold`: in a heart-rate hold, so the strip's one lane is heart rate
+ *   against its range.
+ * - `plain`: the same plan with no hold and a target that STEPS inside the
+ *   window, so the lane is power against the confirmed target.
  */
+const GRAPH_KIND = new URLSearchParams(window.location.search).get('graph');
 const GRAPH: WorkoutGraphInput | undefined =
-  new URLSearchParams(window.location.search).get('graph') === 'hold'
+  GRAPH_KIND === 'hold' || GRAPH_KIND === 'plain'
     ? {
         elapsedSeconds: 900,
         timeline: expandWorkout({
@@ -553,15 +558,28 @@ const GRAPH: WorkoutGraphInput | undefined =
             },
           ],
         }),
-        holdingWatts: 165,
+        holdingWatts: GRAPH_KIND === 'hold' ? 165 : 175,
         thresholdWatts: 250,
-        trace: Array.from({ length: 300 }, (_, index) => ({
-          at: 601 + index,
-          target: 175 - Math.floor(index / 60) * 2,
-          power: 170 + Math.round(8 * Math.sin(index / 9)),
-          heartRate: 128 + Math.round(index / 25),
-          range: { low: 130, high: 140 },
-        })),
+        trace: Array.from({ length: 300 }, (_, index) =>
+          GRAPH_KIND === 'hold'
+            ? {
+                at: 601 + index,
+                target: 175 - Math.floor(index / 60) * 2,
+                power: 170 + Math.round(8 * Math.sin(index / 9)),
+                heartRate: 128 + Math.round(index / 25),
+                range: { low: 130, high: 140 },
+              }
+            : {
+                at: 601 + index,
+                // The write for the 70 % block lands a second after it starts,
+                // then an ease to 140 W for a minute and back: three steps.
+                target: index >= 120 && index < 180 ? 140 : 175,
+                power:
+                  (index >= 126 && index < 186 ? 142 : 173) + Math.round(8 * Math.sin(index / 9)),
+                heartRate: undefined,
+                range: undefined,
+              },
+        ),
       }
     : undefined;
 

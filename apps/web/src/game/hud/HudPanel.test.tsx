@@ -355,13 +355,17 @@ describe('the running workout’s graph on the HUD — #1307', () => {
       '.oyl-hud__route .oyl-hud__plan [data-oyl-workout-graph="hud"]',
     );
     expect(graphs).toHaveLength(1);
-    const svg = graphs[0]?.querySelector('svg');
+    const strip = graphs[0];
     // The route plan's own sizing rule, so the panel is the height it was.
-    expect(svg?.classList.contains('oyl-hud__plan-svg')).toBe(true);
-    expect(svg?.getAttribute('aria-label')).toBe(workoutGraphText(workout));
-    expect(svg?.querySelector('.oyl-workout-graph__now')?.getAttribute('data-fraction')).toBe(
+    expect(strip?.classList.contains('oyl-hud__plan-svg')).toBe(true);
+    expect(strip?.getAttribute('role')).toBe('img');
+    expect(strip?.getAttribute('aria-label')).toBe(workoutGraphText(workout));
+    expect(strip?.querySelector('.oyl-workout-strip__now')?.getAttribute('data-fraction')).toBe(
       '0.2500',
     );
+    // One lane — power against the target, outside a hold — and one line of text.
+    expect(strip?.getAttribute('data-oyl-lane')).toBe('power');
+    expect(strip?.querySelector('p')?.textContent).toBe('Target 150 W · 7:30 left in block');
     // In its place, not beside it: one thing that size in the panel.
     expect(queryAll(mounted.container, '[data-testid="oyl-hud-plan-here"]')).toHaveLength(0);
     expect(queryAll(mounted.container, '.oyl-hud__plan-svg')).toHaveLength(1);

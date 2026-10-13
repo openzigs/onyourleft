@@ -111,7 +111,12 @@ import {
 import { gameTrainerFrom, gameTrainerPortOver } from '../game/trainer-port';
 import { createGradientSession } from '../game/gradient';
 import { TargetHeldBack } from './held-back';
-import { heldInstead, TRACE_MAX_SAMPLES } from '../workout/workout-graph';
+import {
+  HELD_GRACE_SECONDS,
+  heldInstead,
+  TRACE_MAX_SAMPLES,
+  workoutGraphText,
+} from '../workout/workout-graph';
 
 import { METRIC_STALE_AFTER_SECONDS } from './metrics';
 import { targetSentence } from './TrainerPanel';
@@ -7648,6 +7653,70 @@ describe('#1307 — what the workout’s graph is drawn from, through the real c
     // And the graph, drawn from that snapshot, says both numbers.
     if (workout === undefined) throw new Error('no workout');
     expect(heldInstead(workout)).toEqual({ heldWatts: 100, plannedWatts: 75 });
+    rig.controller.dispose();
+  });
+
+  it('does not call an ordinary block change a different target: the write is on its way — #1307', async () => {
+    // 60 % then 100 % of 250 W: 150 W, then 250 W. For about a second after
+    // the boundary the trainer truthfully still holds 150 W.
+    const rig = await riding();
+    rig.controller.startWorkout(
+      savedWorkout([
+        { kind: 'steady', seconds: seconds(6), target: thresholdShare(0.6) },
+        { kind: 'steady', seconds: seconds(60), target: thresholdShare(1) },
+      ]),
+      watts(250),
+    );
+    // ⚠️ EVERY snapshot the screen is handed, not one a tick: the state this
+    // is about lasts for one acknowledgement, between two ticks' reads.
+    const seen: { at: number; holding: number | undefined; held: boolean; name: string }[] = [];
+    const stop = rig.controller.subscribe(() => {
+      const workout = rig.controller.getSnapshot().workout;
+      if (workout === undefined) return;
+      seen.push({
+        at: workout.elapsedSeconds,
+        holding: workout.holdingWatts,
+        held: heldInstead(workout) !== undefined,
+        name: workoutGraphText(workout),
+      });
+    });
+    for (let tick = 0; tick < 16; tick += 1) {
+      await ride(rig, 1);
+      await flushMicrotasks(20);
+    }
+    stop();
+    // The apparatus: the boundary was crossed, the old target was seen on the
+    // far side of it, and the new one was acknowledged.
+    const after = seen.filter((each) => each.at >= 6);
+    expect(after.some((each) => each.holding === 150)).toBe(true);
+    expect(seen.at(-1)?.holding).toBe(250);
+    expect(rig.targetOnTheTrainer()).toBe(250);
+    // And at no tick did the graph mark it, or its name say it.
+    expect(seen.filter((each) => each.held)).toEqual([]);
+    expect(seen.filter((each) => each.name.includes('where the plan asks'))).toEqual([]);
+    rig.controller.dispose();
+  });
+
+  it('still marks a block the trainer will not take, once the grace has run — #1305', async () => {
+    // A 30 % block (75 W) after a 60 % one, on a machine whose minimum is 100 W.
+    const rig = await riding({ machine: { minTargetPower: watts(100) } });
+    rig.controller.startWorkout(
+      savedWorkout([
+        { kind: 'steady', seconds: seconds(6), target: thresholdShare(0.6) },
+        { kind: 'steady', seconds: seconds(60), target: thresholdShare(0.3) },
+      ]),
+      watts(250),
+    );
+    await ride(rig, 14);
+    await flushMicrotasks(20);
+    await ride(rig, 1);
+    const workout = rig.controller.getSnapshot().workout;
+    if (workout === undefined) throw new Error('no workout');
+    expect(workout.elapsedSeconds).toBeGreaterThanOrEqual(6 + HELD_GRACE_SECONDS);
+    expect(heldInstead(workout)).toEqual({ heldWatts: 100, plannedWatts: 75 });
+    expect(workoutGraphText(workout)).toContain(
+      'Target the trainer last confirmed: 100 W, where the plan asks for 75 W.',
+    );
     rig.controller.dispose();
   });
 

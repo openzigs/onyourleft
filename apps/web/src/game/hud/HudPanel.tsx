@@ -74,7 +74,7 @@ import {
   type TrainerLine,
 } from './fields';
 import { PlanTrace } from './PlanTrace';
-import { WorkoutGraph } from '../../workout/WorkoutGraph';
+import { WorkoutStrip } from '../../workout/WorkoutGraph';
 import type { WorkoutGraphInput } from '../../workout/workout-graph';
 
 /**
@@ -245,13 +245,13 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
         {props.workout === undefined ? (
           <PlanTrace profile={props.profile} distance={props.state.ride.distance} />
         ) : (
-          // #1307: while a workout runs, its graph takes the route plan's
+          // #1307: while a workout runs, its strip takes the route plan's
           // place and its size — `oyl-hud__plan-svg` sizes both — so this
           // panel is the height it was and covers no more of the rider
           // (#1169). The workout owns the trainer then, so the road's shape
           // is not what sets the resistance; the elevation strip above stays.
           <div className="oyl-hud__plan">
-            <WorkoutGraph workout={props.workout} variant="hud" />
+            <WorkoutStrip workout={props.workout} />
           </div>
         )}
       </div>

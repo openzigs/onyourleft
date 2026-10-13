@@ -94,6 +94,7 @@ import { AppShell } from '../src/shell/AppShell';
 import { viewGroupsLoaded } from './views-loaded';
 import type { CapabilityProbe } from '../src/support/bluetooth-support';
 import { workoutRescueText } from '../src/workout/rescue-text';
+import type { WorkoutBlock } from '@onyourleft/domain';
 import type { WorkoutHold } from '../src/workout/hold-text';
 import type { WorkoutTraceSample } from '../src/workout/workout-graph';
 import { workoutStub } from '../src/workouts/testing';
@@ -195,6 +196,130 @@ function graphTrace(target: number): readonly WorkoutTraceSample[] {
     range: undefined,
   }));
 }
+
+/**
+ * #1307, second pass — three states the first pass had no fixture for, so
+ * nothing drew them and nothing gated them. Each is a whole stub workout:
+ * the plan, where the rider is in it, what the trainer holds and the last
+ * five minutes, all fixed numbers.
+ *
+ * - `?workout=holding`: a heart-rate hold that IS running, with a heart-rate
+ *   trace and its range — the three-lane drawing. (`?workout=hold` is #1240's
+ *   hold that is OFF, the longest notice; it has no range to draw.)
+ * - `?workout=raised`: a 30 % block (75 W) on a trainer whose minimum is
+ *   100 W — #1297: the plan lane's dashed outline and shaded step.
+ * - `?workout=stepped`: intervals, so the confirmed target in the third lane
+ *   is steps and the rider's power follows each one late.
+ */
+interface GraphFixture {
+  readonly name: string;
+  readonly blocks: readonly WorkoutBlock[];
+  readonly elapsedSeconds: number;
+  readonly holdingWatts: number;
+  readonly nowRiding: string;
+  readonly hold?: WorkoutHold;
+  /** The confirmed target at a second of the workout. */
+  readonly target: (at: number) => number;
+  readonly heartRate?: (at: number) => number;
+}
+
+const RUNNING_HOLD: WorkoutHold = {
+  reason: 'lowered',
+  range: { low: beatsPerMinute(130), high: beatsPerMinute(140) },
+  target: 119,
+};
+
+const GRAPH_FIXTURES: Readonly<Record<string, GraphFixture>> = {
+  holding: {
+    name: 'Endurance hold',
+    blocks: [
+      { kind: 'steady', seconds: seconds(600), target: thresholdShare(0.5) },
+      {
+        kind: 'heart-rate-hold',
+        seconds: seconds(1800),
+        range: RUNNING_HOLD.range,
+        startShare: thresholdShare(0.5),
+        ceilingShare: thresholdShare(0.8),
+      },
+      { kind: 'steady', seconds: seconds(300), target: thresholdShare(0.4) },
+    ],
+    elapsedSeconds: 1200,
+    holdingWatts: RUNNING_HOLD.target,
+    nowRiding: '30 min holding 130–140 bpm',
+    hold: RUNNING_HOLD,
+    // Raised while heart rate is under the range, then lowered as it goes over.
+    target: (at) =>
+      at < 1020 ? 125 + Math.floor((at - 900) / 30) * 3 : 137 - Math.floor((at - 1020) / 30) * 3,
+    heartRate: (at) => Math.round(127 + 16 * Math.sin(((at - 900) / 300) * 2.2) + Math.sin(at / 7)),
+  },
+  raised: {
+    name: 'Easy spin',
+    blocks: [
+      { kind: 'steady', seconds: seconds(600), target: thresholdShare(0.6) },
+      { kind: 'steady', seconds: seconds(900), target: thresholdShare(0.3) },
+      { kind: 'steady', seconds: seconds(300), target: thresholdShare(0.6) },
+    ],
+    elapsedSeconds: 780,
+    holdingWatts: 100,
+    nowRiding: '15 min at 30%',
+    target: (at) => (at <= 600 ? 150 : 100),
+  },
+  stepped: {
+    name: 'Two-minute efforts',
+    blocks: [
+      { kind: 'steady', seconds: seconds(300), target: thresholdShare(0.6) },
+      {
+        kind: 'intervals',
+        repeats: 5,
+        hardSeconds: seconds(120),
+        hardTarget: thresholdShare(1.05),
+        easySeconds: seconds(120),
+        easyTarget: thresholdShare(0.55),
+      },
+      { kind: 'steady', seconds: seconds(300), target: thresholdShare(0.5) },
+    ],
+    elapsedSeconds: 830,
+    holdingWatts: 263,
+    nowRiding: '2 min at 105%',
+    // Hard from 300 s, two minutes on and two off; the write lands a second late.
+    target: (at) => (Math.floor((at - 301) / 120) % 2 === 0 ? 263 : 138),
+  },
+};
+
+function fixtureWorkout(fixture: GraphFixture): NonNullable<RideSnapshot['workout']> {
+  const timeline = expandWorkout({ name: fixture.name, blocks: fixture.blocks });
+  const from = fixture.elapsedSeconds - 299;
+  let power = fixture.target(from);
+  const trace: WorkoutTraceSample[] = [];
+  for (let at = from; at <= fixture.elapsedSeconds; at += 1) {
+    const target = fixture.target(at);
+    // The rider closes a sixth of the gap to the target each second.
+    power += (target - power) / 6;
+    trace.push({
+      at,
+      target,
+      power: Math.round(power + 7 * Math.sin(at / 5)),
+      heartRate: fixture.heartRate?.(at),
+      range: fixture.hold === undefined ? undefined : fixture.hold.range,
+    });
+  }
+  return {
+    name: fixture.name,
+    status: 'running',
+    elapsedSeconds: fixture.elapsedSeconds,
+    totalSeconds: timeline.totalSeconds,
+    holdingWatts: fixture.holdingWatts,
+    nowRiding: fixture.nowRiding,
+    fault: undefined,
+    rescue: undefined,
+    hold: fixture.hold,
+    timeline,
+    thresholdWatts: 250,
+    trace,
+  };
+}
+
+const GRAPH_FIXTURE = WORKOUT_STATE === null ? undefined : GRAPH_FIXTURES[WORKOUT_STATE];
 
 const FLOOR: WorkoutRescue = {
   kind: 'floor',
@@ -373,6 +498,26 @@ function snapshot(): RideSnapshot {
         thresholdWatts: 250,
         trace: graphTrace(HOLD.target),
       },
+    };
+  }
+  if (GRAPH_FIXTURE !== undefined) {
+    const workout = fixtureWorkout(GRAPH_FIXTURE);
+    // The tiles say what the graph's newest sample says, so a screenshot of
+    // this state does not show two powers or a strap that is and is not there.
+    const last = workout.trace?.at(-1);
+    const at = unixSeconds(1_800_000_000);
+    return {
+      ...riding,
+      metrics: riding.metrics.map((metric) => {
+        const value =
+          metric.id === 'power'
+            ? last?.power
+            : metric.id === 'heartRate'
+              ? last?.heartRate
+              : undefined;
+        return value === undefined ? metric : { id: metric.id, state: { kind: 'live', value, at } };
+      }),
+      workout,
     };
   }
   if (WORKOUT_STATE !== 'eased' && WORKOUT_STATE !== 'running') {
@@ -1043,7 +1188,11 @@ async function run(): Promise<void> {
         (each) => textOf(each.querySelector('.oyl-status__label') ?? each) === 'Heart-rate hold:',
       ),
     );
-  } else if (WORKOUT_STATE === 'eased' || WORKOUT_STATE === 'running') {
+  } else if (
+    WORKOUT_STATE === 'eased' ||
+    WORKOUT_STATE === 'running' ||
+    GRAPH_FIXTURE !== undefined
+  ) {
     await until('the running workout', () =>
       [...document.querySelectorAll('.oyl-ride__group--trainer button')].find(
         (each) => textOf(each) === 'End workout',

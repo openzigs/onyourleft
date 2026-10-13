@@ -9,19 +9,31 @@ import { describe, expect, it } from 'vitest';
 
 import { expandWorkout, seconds, thresholdShare, type WorkoutBlock } from '@onyourleft/domain';
 
-import { blockChartPaths, CHART_TOP_SHARE, CHART_WIDTH } from '../workouts/block-chart';
+import { blockChartPaths, CHART_WIDTH } from '../workouts/block-chart';
 
 import {
+  GRAPH_KEY_HEART_RATE,
+  GRAPH_KEY_PLAN,
+  GRAPH_KEY_REPLACED,
+  GRAPH_KEY_TRACE,
+  graphKeyHeld,
   HEART_RATE_LANE_HEIGHT,
+  HELD_GRACE_SECONDS,
   heldInstead,
-  LANE_GAP,
+  PLAN_FILL_SHARE,
   PLAN_LANE_HEIGHT,
+  STRIP_PROGRESS_HEIGHT,
   TRACE_LANE_HEIGHT,
+  TRACE_LANE_INSET,
   TRACE_MAX_SAMPLES,
   TRACE_WINDOW_SECONDS,
   withTraceSample,
+  workoutGraphKey,
+  workoutGraphLabels,
   workoutGraphPaths,
   workoutGraphText,
+  workoutStripPaths,
+  workoutStripText,
   type WorkoutGraphInput,
   type WorkoutTraceSample,
 } from './workout-graph';
@@ -116,7 +128,7 @@ describe('the plan lane — #1307', () => {
   });
 
   it('outlines what is ridden and fills what is to come, cut exactly at now', () => {
-    const { plan } = workoutGraphPaths(input({ elapsedSeconds: 900 }));
+    const { plan } = workoutGraphPaths(input({ elapsedSeconds: 900, holdingWatts: 250 }));
     const now = CHART_WIDTH / 2;
     const doneXs = xs(plan.done);
     const toComeXs = plan.toCome.bands.flatMap(xs);
@@ -141,15 +153,38 @@ describe('the plan lane — #1307', () => {
     // The hardest block (100 %) is behind the rider. Were the part to come
     // scaled by itself, its 50 % block would be drawn at a different height
     // from the same block on the whole chart.
-    const whole = blockChartPaths(timeline.segments);
     const { plan } = workoutGraphPaths(input({ elapsedSeconds: 1200, holdingWatts: undefined }));
     expect(plan.toCome.bands.join('')).toBe(
       blockChartPaths(timeline.segments.slice(2), {
         endSeconds: 1800,
-        topShare: CHART_TOP_SHARE,
+        topShare: 1 / PLAN_FILL_SHARE,
       }).bands.join(''),
     );
-    expect(plan.rule).toBe(whole.rule);
+  });
+
+  it('scales the lane to the workout’s own hardest target, so the bars use it', () => {
+    // An easy workout: nothing over 60 %. On the block chart's fixed 125 %
+    // scale its tallest bar would be under half the lane.
+    const easy = expandWorkout({ name: 'easy', blocks: [steady(600, 0.6), steady(600, 0.4)] });
+    const { plan } = workoutGraphPaths(
+      input({ timeline: easy, elapsedSeconds: 0, holdingWatts: undefined }),
+    );
+    const top = Math.min(...points(plan.toCome.bands.join('')).map(([, y]) => y));
+    expect(top).toBeCloseTo(PLAN_LANE_HEIGHT * (1 - PLAN_FILL_SHARE), 6);
+    // And the 40 % block is two thirds of that height.
+    const ys = points(plan.toCome.bands.join('')).map(([, y]) => y);
+    expect(ys).toContain(Math.round((100 - (0.4 / 0.6) * 85) * 100) / 100);
+  });
+
+  it('keeps the block chart’s own scale for a workout with no target in it', () => {
+    const free = expandWorkout({
+      name: 'free',
+      blocks: [{ kind: 'free-ride', seconds: seconds(600) }],
+    });
+    const { plan } = workoutGraphPaths(
+      input({ timeline: free, elapsedSeconds: 0, holdingWatts: undefined }),
+    );
+    expect(plan.toCome.freeRide).toBe(blockChartPaths(free.segments).freeRide);
   });
 
   it('cuts a ramp at the height the plan asks for at now', () => {
@@ -162,9 +197,9 @@ describe('the plan lane — #1307', () => {
     const { plan } = workoutGraphPaths(
       input({ timeline: ramp, elapsedSeconds: 300, holdingWatts: undefined }),
     );
-    // 75 % at half way, on a scale whose top is 125 %: y = 100 − 60 = 40.
+    // 75 % at half way, on a scale where 100 % is 85 of the lane: y = 100 − 63.75.
     const cut = points(plan.done).filter(([x]) => x === CHART_WIDTH / 2);
-    expect(cut.map(([, y]) => y)).toContain(40);
+    expect(cut.map(([, y]) => y)).toContain(36.25);
   });
 });
 
@@ -214,25 +249,73 @@ describe('a block the trainer holds at something else — #1297, #1301, #1305', 
     expect(heldInstead(input({ timeline: ramp, holdingWatts: 100 }))?.heldWatts).toBe(100);
   });
 
-  it('draws the block being ridden at the height the trainer holds, not the plan’s', () => {
-    // Third block, planned 50 % (y = 60 on the 125 % scale); held 140 W is 56 %.
-    const planned = workoutGraphPaths(input({ elapsedSeconds: 1500, holdingWatts: 125 })).plan;
+  it('waits out the start of a block: a write on its way is not a different target', () => {
+    // The 100 % block (250 W) starts at 600 s. The trainer still holds 150 W
+    // until the new write is acknowledged, about a second later.
+    for (let into = 0; into < HELD_GRACE_SECONDS; into += 1) {
+      expect(
+        heldInstead(input({ elapsedSeconds: 600 + into, holdingWatts: 150 })),
+        `${String(into)} s in`,
+      ).toBeUndefined();
+    }
+    // Still 150 W once the grace has run: that is a refusal.
+    expect(
+      heldInstead(input({ elapsedSeconds: 600 + HELD_GRACE_SECONDS, holdingWatts: 150 })),
+    ).toEqual({ heldWatts: 150, plannedWatts: 250 });
+    // And nothing is drawn or said for it inside the grace.
+    const inside = input({ elapsedSeconds: 601, holdingWatts: 150 });
+    expect(workoutGraphPaths(inside).plan.asked).toBe('');
+    expect(workoutGraphText(inside)).not.toContain('where the plan asks');
+  });
+
+  const tops = (d: string): number => Math.min(...points(d).map(([, y]) => y));
+  /** y for a share of threshold on this workout's scale: 100 % is 85 of the lane. */
+  const planY = (share: number): number => Math.round((100 - share * 85) * 100) / 100;
+
+  it('draws the rest of the block being ridden as what the plan asks, outlined, and what the trainer holds, shaded', () => {
+    // Third block, planned 50 %; held 140 W is 56 %. 1500 s of 1800 s.
     const held = workoutGraphPaths(input({ elapsedSeconds: 1500, holdingWatts: 140 })).plan;
-    const tops = (d: string): number => Math.min(...points(d).map(([, y]) => y));
-    expect(tops(planned.toCome.bands.join(''))).toBe(60);
-    expect(tops(held.toCome.bands.join(''))).toBeCloseTo(100 - (0.56 / 1.25) * 100, 1);
+    // What the plan asks: an outline from now to the block's end, at 50 %.
+    expect(tops(held.asked)).toBe(planY(0.5));
+    expect(Math.min(...xs(held.asked))).toBeCloseTo((1500 / 1800) * CHART_WIDTH, 1);
+    expect(Math.max(...xs(held.asked))).toBe(CHART_WIDTH);
+    // What the trainer holds: a step over the same stretch, at 56 %.
+    expect(tops(held.heldArea)).toBe(planY(0.56));
+    expect(tops(held.heldEdge)).toBe(planY(0.56));
+    expect(Math.min(...xs(held.heldArea))).toBeCloseTo((1500 / 1800) * CHART_WIDTH, 1);
+    expect(Math.max(...xs(held.heldArea))).toBe(CHART_WIDTH);
+    expect(held.heldArea.endsWith('Z')).toBe(true);
+    // That stretch is not ALSO filled as the plan.
+    expect(held.toCome.bands.join('')).toBe('');
     // And the blocks already ridden are untouched by it.
-    expect(points(held.done).filter(([x]) => x < 600)).toEqual(
-      points(planned.done).filter(([x]) => x < 600),
-    );
+    const planned = workoutGraphPaths(input({ elapsedSeconds: 1500, holdingWatts: 125 })).plan;
+    expect(held.done).toBe(planned.done);
+    // With the trainer holding what the plan asks, neither shape is drawn.
+    expect([planned.asked, planned.heldArea, planned.heldEdge]).toEqual(['', '', '']);
+    expect(tops(planned.toCome.bands.join(''))).toBe(planY(0.5));
+  });
+
+  it('keeps every block still to come drawn as the plan asks', () => {
+    // First block (150 W planned), eased to 0 W; two blocks are still to come.
+    const eased = workoutGraphPaths(input({ elapsedSeconds: 300, holdingWatts: 0 })).plan;
+    const later = blockChartPaths(timeline.segments.slice(1), {
+      endSeconds: 1800,
+      topShare: 1 / PLAN_FILL_SHARE,
+    });
+    expect(eased.toCome.bands.join('')).toBe(later.bands.join(''));
+    expect(eased.toCome.bands.join('')).not.toBe('');
+    // The plan's height for the block being ridden is still on the picture…
+    expect(tops(eased.asked)).toBe(planY(0.6));
+    // …and at 0 W there is no step to shade.
+    expect([eased.heldArea, eased.heldEdge]).toEqual(['', '']);
   });
 
   it('raises the scale when the trainer holds more than the plan ever asks', () => {
-    // 400 W of a 250 W threshold is 160 %: above the 125 % top.
+    // 400 W of a 250 W threshold is 160 %: that, not the plan's 100 %, is the top.
     const { plan } = workoutGraphPaths(input({ elapsedSeconds: 300, holdingWatts: 400 }));
-    const ys = points(plan.toCome.bands.join('') + plan.done).map(([, y]) => y);
-    expect(Math.min(...ys)).toBeGreaterThanOrEqual(0);
-    expect(Math.min(...ys)).toBe(0);
+    expect(tops(plan.heldEdge)).toBeCloseTo(PLAN_LANE_HEIGHT * (1 - PLAN_FILL_SHARE), 6);
+    const ys = points(plan.toCome.bands.join('') + plan.done + plan.asked).map(([, y]) => y);
+    expect(Math.min(...ys)).toBeGreaterThan(tops(plan.heldEdge));
   });
 });
 
@@ -256,14 +339,21 @@ describe('the lane of the last few minutes — #1307', () => {
 
   it('draws the confirmed target as steps and power as a line, on one scale', () => {
     const { trace: lane } = workoutGraphPaths(input({ trace }));
-    // 140 W to 200 W; the room either side is half of 40 % of 200 W, 40 W.
-    expect([lane.bottomWatts, lane.topWatts]).toEqual([100, 240]);
+    // 140 W to 200 W is 60 W, under the least span (40 % of 200 W, 80 W): 10 W
+    // is added either side to reach it and 4 W more to breathe.
+    expect([lane.bottomWatts, lane.topWatts]).toEqual([120, 220]);
+    // The scale's ends are drawn inset from the lane's edges.
     const y = (watts: number): number =>
-      Math.round((TRACE_LANE_HEIGHT - ((watts - 100) / 140) * TRACE_LANE_HEIGHT) * 100) / 100;
+      Math.round(
+        (TRACE_LANE_HEIGHT -
+          TRACE_LANE_INSET -
+          ((watts - 120) / 100) * (TRACE_LANE_HEIGHT - 2 * TRACE_LANE_INSET)) *
+          100,
+      ) / 100;
     expect(points(lane.power).map(([, each]) => each)).toEqual([y(140), y(160), y(190)]);
     // The edge starts at the first target and steps to the second.
     expect(points(lane.targetEdge)[0]?.[1]).toBe(y(150));
-    expect(lane.targetEdge).toContain(`V${String(y(200))}`);
+    expect(points(lane.targetEdge).at(-1)?.[1]).toBe(y(200));
     // The area is the edge, closed down to the ground.
     expect(lane.targetArea.startsWith(lane.targetEdge)).toBe(true);
     expect(lane.targetArea.endsWith('Z')).toBe(true);
@@ -293,6 +383,65 @@ describe('the lane of the last few minutes — #1307', () => {
       expect(y).toBeLessThanOrEqual(TRACE_LANE_HEIGHT);
       expect(y).toBeGreaterThanOrEqual(0);
     }
+  });
+
+  it('draws a 0 W target above the lane’s bottom line, as a step with a height', () => {
+    // An eased workout: the trainer confirmed 0 W and the rider has stopped.
+    const { trace: lane } = workoutGraphPaths(
+      input({ trace: [298, 299, 300].map((at) => sample(at, { target: 0, power: 0 })) }),
+    );
+    expect(lane.bottomWatts).toBe(0);
+    const edge = points(lane.targetEdge).map(([, y]) => y);
+    expect(new Set(edge)).toEqual(new Set([TRACE_LANE_HEIGHT - TRACE_LANE_INSET]));
+    // The shaded step runs from that edge down to the lane's floor.
+    const area = points(lane.targetArea).map(([, y]) => y);
+    expect(Math.max(...area)).toBe(TRACE_LANE_HEIGHT);
+    expect(Math.min(...area)).toBe(TRACE_LANE_HEIGHT - TRACE_LANE_INSET);
+  });
+
+  it('uses the lane when the window already spans a lot: intervals', () => {
+    // 138 W and 263 W: 125 W apart, more than the least span, so only the
+    // breathing room is added and the two targets sit near the lane's ends.
+    const { trace: lane } = workoutGraphPaths(
+      input({
+        trace: [sample(298, { target: 138, power: 138 }), sample(300, { target: 263, power: 263 })],
+      }),
+    );
+    expect([lane.bottomWatts, lane.topWatts]).toEqual([130, 270]);
+  });
+
+  it('writes a vertex only where the target changes, so a steady target is one line', () => {
+    const { trace: lane } = workoutGraphPaths(
+      input({ trace: Array.from({ length: 300 }, (_, index) => sample(1 + index)) }),
+    );
+    expect(points(lane.targetEdge)).toHaveLength(2);
+  });
+
+  it('ends the last step at the newest sample, and a step before a gap where the gap starts', () => {
+    const x = (at: number): number =>
+      Math.round((at / TRACE_WINDOW_SECONDS) * CHART_WIDTH * 100) / 100;
+    const { trace: lane } = workoutGraphPaths(
+      input({
+        trace: [
+          sample(280),
+          sample(285),
+          // Control lost: no confirmed target from here…
+          sample(290, { target: undefined }),
+          // …and back.
+          sample(295),
+          sample(300),
+        ],
+      }),
+    );
+    const runs = lane.targetEdge.split('M').filter((run) => run !== '');
+    expect(runs).toHaveLength(2);
+    // The first run was held until the sample that has no target: 290, not 285.
+    expect(Math.max(...xs(`M${runs[0] ?? ''}`))).toBe(x(290));
+    // The last run ends at the newest sample, which is now: nothing is known after it.
+    expect(Math.max(...xs(`M${runs[1] ?? ''}`))).toBe(x(300));
+    expect(Math.min(...xs(`M${runs[1] ?? ''}`))).toBe(x(295));
+    // And the shaded area ends where its edge does.
+    expect(Math.max(...xs(lane.targetArea))).toBe(x(300));
   });
 
   it('breaks the power line at a dropout rather than drawing through it or down to zero', () => {
@@ -356,19 +505,31 @@ describe('the heart-rate lane — #1307', () => {
     sample(300, { heartRate: 141, range, target: 170 }),
   ];
 
-  it('is not drawn outside a hold, and the trace lane sits right under the plan', () => {
+  it('is not drawn outside a hold', () => {
     const paths = workoutGraphPaths(input({ trace: [sample(300, { heartRate: 120 })] }));
     expect(paths.heartRate).toBeUndefined();
-    expect(paths.traceTop).toBe(PLAN_LANE_HEIGHT + LANE_GAP);
-    expect(paths.height).toBe(PLAN_LANE_HEIGHT + LANE_GAP + TRACE_LANE_HEIGHT);
   });
 
-  it('is drawn between the plan and the trace while a hold runs', () => {
-    const paths = workoutGraphPaths(input({ trace: hold }));
-    expect(paths.heartRate).toBeDefined();
-    expect(paths.heartRateTop).toBe(PLAN_LANE_HEIGHT + LANE_GAP);
-    expect(paths.traceTop).toBe(paths.heartRateTop + HEART_RATE_LANE_HEIGHT + LANE_GAP);
-    expect(paths.height).toBe(paths.traceTop + TRACE_LANE_HEIGHT);
+  it('is drawn while a hold has run inside the window', () => {
+    expect(workoutGraphPaths(input({ trace: hold })).heartRate).toBeDefined();
+  });
+
+  it('says the range’s two edges and where each is drawn, for the numbers beside the lane', () => {
+    const lane = workoutGraphPaths(input({ trace: hold })).heartRate;
+    expect([lane?.low, lane?.high]).toEqual([130, 140]);
+    // A lane from 123 bpm (bottom) to 146 (top): 140 is 6 of 23 down, 130 is 16.
+    expect(lane?.highAt).toBeCloseTo(6 / 23, 2);
+    expect(lane?.lowAt).toBeCloseTo(16 / 23, 2);
+  });
+
+  it('draws the range’s two edges as open lines, apart from the band they bound', () => {
+    const lane = workoutGraphPaths(input({ trace: hold })).heartRate;
+    if (lane === undefined) throw new Error('no heart-rate lane');
+    expect(lane.rangeEdges.match(/M/g)).toHaveLength(2);
+    expect(lane.rangeEdges).not.toContain('Z');
+    const ys = new Set(points(lane.rangeEdges).map(([, y]) => y));
+    expect(ys).toEqual(new Set(points(lane.range).map(([, y]) => y)));
+    expect(ys.size).toBe(2);
   });
 
   it('draws the range as a band and heart rate inside, under and over it where it is', () => {
@@ -398,12 +559,11 @@ describe('the heart-rate lane — #1307', () => {
   it('shows the target the hold set easing in the lane underneath', () => {
     const { trace: lane } = workoutGraphPaths(input({ trace: hold }));
     // 180 W then 170 W: the edge steps DOWN, which is a larger y.
-    const heights = [...lane.targetEdge.matchAll(/[MV](?:-?[\d.]+ )?(-?[\d.]+)/g)].map(([, y]) =>
-      Number(y),
-    );
-    expect(heights).toHaveLength(3);
+    const heights = points(lane.targetEdge).map(([, y]) => y);
+    expect(heights).toHaveLength(4);
     expect(heights[1]).toBe(heights[0]);
     expect(heights[2]).toBeGreaterThan(heights[0] ?? Infinity);
+    expect(heights[3]).toBe(heights[2]);
   });
 });
 
@@ -416,26 +576,26 @@ describe('room for a re-plan — #1244’s seam', () => {
     const before = expandWorkout({ name: 'before', blocks: [steady(1800, 1.5)] }).segments;
     const { plan } = workoutGraphPaths(input({ replaced: before, holdingWatts: undefined }));
     expect(plan.replaced).not.toBe('');
-    // 150 % is above the default top, so the scale grows to hold it: y = 0.
-    expect(Math.min(...points(plan.replaced).map(([, y]) => y))).toBe(0);
-    // …and the plan that stands is drawn on that same scale: 100 % at a third down.
+    // 150 % is harder than anything in the plan that stands, so it sets the top.
+    expect(Math.min(...points(plan.replaced).map(([, y]) => y))).toBeCloseTo(15, 6);
+    // …and the plan that stands is drawn on that same scale: 100 % at two thirds of it.
     const standing = points(plan.toCome.bands.join('') + plan.done).map(([, y]) => y);
-    expect(Math.min(...standing)).toBeCloseTo(100 - (1 / 1.5) * 100, 1);
+    expect(Math.min(...standing)).toBeCloseTo(100 - (1 / 1.5) * 85, 1);
   });
 });
 
 describe('the graph in words — #1307', () => {
-  it('says how far in, the confirmed target and the rider’s power', () => {
+  it('says how far in, what is left of the block, the confirmed target and the rider’s power', () => {
     expect(workoutGraphText(input({ trace: [sample(300, { power: 147.6 })] }))).toBe(
-      'Workout graph. 5 min of 30 min ridden. Target the trainer last confirmed: 150 W. ' +
-        'Your power: 148 W.',
+      'Workout graph. 5 min of 30 min ridden. 5:00 left in this block. Target the trainer last ' +
+        'confirmed: 150 W. Your power: 148 W.',
     );
   });
 
   it('says both numbers when the trainer holds something the plan did not ask', () => {
     expect(workoutGraphText(input({ elapsedSeconds: 1500, holdingWatts: 140 }))).toBe(
-      'Workout graph. 25 min of 30 min ridden. Target the trainer last confirmed: 140 W, where ' +
-        'the plan asks for 125 W.',
+      'Workout graph. 25 min of 30 min ridden. 5:00 left in this block. Target the trainer last ' +
+        'confirmed: 140 W, where the plan asks for 125 W.',
     );
   });
 
@@ -444,7 +604,25 @@ describe('the graph in words — #1307', () => {
       workoutGraphText(
         input({ holdingWatts: undefined, trace: [sample(300, { power: undefined })] }),
       ),
-    ).toBe('Workout graph. 5 min of 30 min ridden.');
+    ).toBe('Workout graph. 5 min of 30 min ridden. 5:00 left in this block.');
+  });
+
+  it('says nothing is left of a block once the workout is over', () => {
+    expect(workoutGraphText(input({ elapsedSeconds: 1800, holdingWatts: undefined }))).toBe(
+      'Workout graph. 30 min of 30 min ridden.',
+    );
+  });
+
+  it('reads the sample the graph draws: nothing outside the window or later than now', () => {
+    // A sample five seconds AHEAD of now, and one older than the window.
+    const ahead = input({
+      elapsedSeconds: 400,
+      holdingWatts: undefined,
+      trace: [sample(50, { power: 111 }), sample(405, { power: 999 })],
+    });
+    expect(workoutGraphText(ahead)).not.toContain('Your power');
+    expect(workoutGraphLabels(ahead).trace.reading).toBe('No target · No power reading');
+    expect(workoutStripText(ahead)).toBe('No target · 3:20 left in block');
   });
 
   it('says heart rate and the chosen range while a hold runs', () => {
@@ -460,10 +638,187 @@ describe('the graph in words — #1307', () => {
     );
   });
 
-  it('says what the dashed outline is once a re-plan supplies one', () => {
-    expect(workoutGraphText(input())).not.toContain('dashed');
+  it('says what the dotted outline is once a re-plan supplies one', () => {
+    expect(workoutGraphText(input())).not.toContain('dotted');
     expect(workoutGraphText(input({ replaced: timeline.segments }))).toContain(
-      'The dashed outline is the plan before it was changed.',
+      'The dotted outline is the plan before it was changed.',
     );
+  });
+});
+
+describe('the numbers written on the lanes — #1307', () => {
+  const range = { low: 130, high: 140 };
+
+  it('writes the clock on the plan lane: elapsed and total', () => {
+    expect(workoutGraphLabels(input({ elapsedSeconds: 312 })).plan).toEqual({
+      title: 'Whole workout',
+      reading: '5:12 of 30:00',
+    });
+  });
+
+  it('writes the confirmed target and the rider’s power, in watts, on the last lane', () => {
+    expect(
+      workoutGraphLabels(input({ trace: [sample(300, { target: 150, power: 147.6 })] })).trace,
+    ).toEqual({ title: 'Last 5 minutes', reading: 'Target 150 W · You 148 W' });
+  });
+
+  it('writes what the plan asks beside the target when the trainer holds something else', () => {
+    expect(
+      workoutGraphLabels(
+        input({
+          elapsedSeconds: 1500,
+          holdingWatts: 140,
+          trace: [sample(1500, { target: 140, power: 139 })],
+        }),
+      ).trace.reading,
+    ).toBe('Target 140 W (plan asks 125 W) · You 139 W');
+  });
+
+  it('writes no target once the newest sample has none, never the last write', () => {
+    // Control lost: `holdingWatts` outlives the link, the sample does not carry it.
+    expect(
+      workoutGraphLabels(
+        input({ holdingWatts: 150, trace: [sample(300, { target: undefined, power: undefined })] }),
+      ).trace.reading,
+    ).toBe('No target · No power reading');
+  });
+
+  it('writes heart rate and the range only while a hold has run inside the window', () => {
+    expect(workoutGraphLabels(input({ trace: [sample(300, { heartRate: 136 })] })).heartRate).toBe(
+      undefined,
+    );
+    expect(
+      workoutGraphLabels(input({ trace: [sample(300, { heartRate: 136.4, range })] })).heartRate,
+    ).toEqual({ title: 'Heart rate', reading: '136 bpm' });
+    expect(workoutGraphLabels(input({ trace: [sample(300, { range })] })).heartRate?.reading).toBe(
+      'No reading',
+    );
+  });
+});
+
+describe('the key names every mark that is drawn — #1307', () => {
+  const range = { low: 130, high: 140 };
+
+  it('is the plan and the last minutes for a plain workout', () => {
+    expect(workoutGraphKey(input())).toBe(`${GRAPH_KEY_PLAN} ${GRAPH_KEY_TRACE}`);
+  });
+
+  it('adds the heart-rate lane while it is drawn', () => {
+    expect(workoutGraphKey(input({ trace: [sample(300, { range })] }))).toBe(
+      `${GRAPH_KEY_PLAN} ${GRAPH_KEY_HEART_RATE} ${GRAPH_KEY_TRACE}`,
+    );
+  });
+
+  it('says what the dashed outline and the shaded step at the line are, with both numbers', () => {
+    const raised = input({ elapsedSeconds: 1500, holdingWatts: 140 });
+    expect(workoutGraphKey(raised)).toBe(
+      `${GRAPH_KEY_PLAN} At the line, the dashed outline is what the plan asks for now, 125 W. ` +
+        `The shaded step is what the trainer confirmed instead, 140 W. ${GRAPH_KEY_TRACE}`,
+    );
+  });
+
+  it('does not point at a shaded step that is not there: 0 W', () => {
+    expect(graphKeyHeld({ heldWatts: 0, plannedWatts: 225 })).toBe(
+      'At the line, the dashed outline is what the plan asks for now, 225 W. The trainer ' +
+        'confirmed 0 W instead, so nothing is shaded.',
+    );
+  });
+
+  it('says what the dotted outline is once a re-plan supplies one', () => {
+    expect(workoutGraphKey(input({ replaced: timeline.segments }))).toBe(
+      `${GRAPH_KEY_PLAN} ${GRAPH_KEY_REPLACED} ${GRAPH_KEY_TRACE}`,
+    );
+  });
+});
+
+describe('the HUD’s strip: one lane, a bar and a line of text — #1307', () => {
+  const range = { low: 130, high: 140 };
+  const plain = [
+    sample(290, { target: 150, power: 140 }),
+    sample(295, { target: 150, power: 160 }),
+    sample(300, { target: 200, power: 190 }),
+  ];
+  const held = plain.map((each, index) => ({ ...each, heartRate: 128 + index * 6, range }));
+
+  it('draws power against the confirmed target outside a hold', () => {
+    const strip = workoutStripPaths(input({ trace: plain }));
+    const graph = workoutGraphPaths(input({ trace: plain }));
+    expect(strip.lane).toEqual({
+      kind: 'power',
+      target: graph.trace.targetEdge,
+      power: graph.trace.power,
+    });
+    expect(strip.lane.kind === 'power' && strip.lane.target).not.toBe('');
+    expect(strip.laneHeight).toBe(TRACE_LANE_HEIGHT);
+  });
+
+  it('draws heart rate against its range, and nothing else, while a hold is running', () => {
+    const strip = workoutStripPaths(input({ trace: held }));
+    const graph = workoutGraphPaths(input({ trace: held }));
+    expect(strip.lane).toEqual({
+      kind: 'heart-rate',
+      range: graph.heartRate?.rangeEdges,
+      heartRate: graph.heartRate?.line,
+    });
+    expect(strip.lane.kind === 'heart-rate' && strip.lane.heartRate).not.toBe('');
+    expect(strip.laneHeight).toBe(HEART_RATE_LANE_HEIGHT);
+  });
+
+  it('chooses by what is running NOW: a hold that ended inside the window is power again', () => {
+    const ended = [...held.slice(0, 2), sample(300, { target: 200, power: 190 })];
+    expect(workoutStripPaths(input({ trace: ended })).lane.kind).toBe('power');
+    // The Ride screen's graph, which has room, still draws the lane.
+    expect(workoutGraphPaths(input({ trace: ended })).heartRate).toBeDefined();
+  });
+
+  it('fills the bar as far as now and marks it, standing out of the bar', () => {
+    const { progress } = workoutStripPaths(input({ elapsedSeconds: 450 }));
+    expect(progress.nowFraction).toBeCloseTo(0.25, 6);
+    expect(Math.max(...xs(progress.done))).toBe(250);
+    expect(progress.done.endsWith('Z')).toBe(true);
+    const now = [...progress.now.matchAll(/-?[\d.]+/g)].map(Number);
+    expect(now[0]).toBe(250);
+    expect(now[1]).toBeLessThan(0);
+    expect(now[2]).toBeGreaterThan(STRIP_PROGRESS_HEIGHT);
+  });
+
+  it('has nothing ridden at the start, and keeps the mark inside the bar past the end', () => {
+    expect(workoutStripPaths(input({ elapsedSeconds: 0 })).progress.done).toBe('');
+    expect(workoutStripPaths(input({ elapsedSeconds: -5 })).progress.nowFraction).toBe(0);
+    expect(workoutStripPaths(input({ elapsedSeconds: 99_999 })).progress.nowFraction).toBe(1);
+  });
+
+  it('says the confirmed target and what is left of the block', () => {
+    expect(workoutStripText(input({ elapsedSeconds: 450, trace: [sample(450)] }))).toBe(
+      'Target 150 W · 2:30 left in block',
+    );
+  });
+
+  it('says no target where the trainer holds none, and only the target past the end', () => {
+    expect(
+      workoutStripText(input({ elapsedSeconds: 450, trace: [sample(450, { target: undefined })] })),
+    ).toBe('No target · 2:30 left in block');
+    expect(workoutStripText(input({ elapsedSeconds: 1800, trace: [sample(1800)] }))).toBe(
+      'Target 150 W',
+    );
+  });
+
+  it('says heart rate and the range in a hold, and that there is no heart rate', () => {
+    expect(workoutStripText(input({ trace: [sample(300, { heartRate: 136.4, range })] }))).toBe(
+      '136 bpm, range 130–140',
+    );
+    expect(workoutStripText(input({ trace: [sample(300, { range })] }))).toBe(
+      'No heart rate, range 130–140',
+    );
+  });
+
+  it('never writes a NaN into a path', () => {
+    const paths = workoutStripPaths(
+      input({
+        totalSeconds: 0,
+        trace: [sample(300, { heartRate: Number.NaN, range: { low: Number.NaN, high: 140 } })],
+      } as Partial<WorkoutGraphInput>),
+    );
+    expect(JSON.stringify(paths)).not.toMatch(/NaN|Infinity/);
   });
 });

@@ -40,7 +40,7 @@ import { workoutStub } from '../workouts/testing';
 
 import { HOLD_LABEL, holdSentence, type WorkoutHold } from './hold-text';
 import { workoutGraphText, type WorkoutTraceSample } from './workout-graph';
-import { WORKOUT_GRAPH_PAINTS } from './WorkoutGraph';
+import { WORKOUT_GRAPH_PAINTS, WORKOUT_STRIP_PAINTS } from './WorkoutGraph';
 
 const ATHLETE = athleteId('athlete-a');
 
@@ -157,7 +157,7 @@ const hud = (snapshot: RideWorkoutSnapshot): React.ReactElement => {
   );
 };
 
-const images = (): readonly Element[] => [...document.querySelectorAll('svg[role="img"]')];
+const images = (): readonly Element[] => [...document.querySelectorAll('[role="img"]')];
 
 describe.each([
   ['with no hold', false],
@@ -173,11 +173,30 @@ describe.each([
   it('is an image named by what it shows, and is not a tab stop', async () => {
     mounted = await mount(panel(workout(held)));
     await settle();
-    const graph = document.querySelector('[data-oyl-workout-graph="panel"] svg');
-    expect(graph?.getAttribute('role')).toBe('img');
+    const graph = document.querySelector('[data-oyl-workout-graph="panel"] [role="img"]');
+    expect(graph).not.toBeNull();
     expect(graph?.getAttribute('aria-label')).toBe(workoutGraphText(workout(held)));
     expect(graph?.hasAttribute('tabindex')).toBe(false);
-    expect(graph?.getAttribute('focusable')).toBe('false');
+    for (const svg of graph?.querySelectorAll('svg') ?? []) {
+      expect(svg.getAttribute('focusable')).toBe('false');
+    }
+  });
+
+  it('says in its name every number it writes on a lane', async () => {
+    mounted = await mount(panel(workout(held)));
+    await settle();
+    const name =
+      document
+        .querySelector('[data-oyl-workout-graph="panel"] [role="img"]')
+        ?.getAttribute('aria-label') ?? '';
+    // The numbers on the lanes are hidden with the marks, so the name carries them.
+    expect(name).toContain('5 min of 20 min ridden');
+    expect(name).toContain('5:00 left in this block');
+    expect(name).toContain(`Target the trainer last confirmed: ${String(held ? 142 : 150)} W`);
+    expect(name).toContain('Your power: 148 W');
+    if (held) {
+      expect(name).toContain('Heart rate: 142 bpm, with a chosen range of 130–140 bpm');
+    }
   });
 
   it('keeps the sentences that were there before the graph', async () => {
@@ -202,6 +221,12 @@ describe.each([
     expect(formatViolations(auditAccessibility(document))).toBe('');
     const named = images().map((image) => image.getAttribute('aria-label'));
     expect(named).toContain(workoutGraphText(workout(held)));
+    // The strip's one line is inside the image, and the image's name says its numbers.
+    const strip = document.querySelector('[data-oyl-workout-graph="hud"]');
+    expect(strip?.querySelector('p')?.getAttribute('aria-hidden')).toBe('true');
+    expect(strip?.querySelector('p')?.textContent).toBe(
+      held ? '142 bpm, range 130–140' : 'Target 150 W · 5:00 left in block',
+    );
     // Every image on the HUD has a name, and no two share one.
     expect(named.every((name) => name !== null && name !== '')).toBe(true);
     expect(new Set(named).size).toBe(named.length);
@@ -209,10 +234,14 @@ describe.each([
 });
 
 describe('the graph’s marks are declared contrast pairs — #1307', () => {
-  // What each mark is drawn OVER: the graph's own well, or a shaded step.
+  // What each mark is drawn OVER: the graph's own frame, or a shaded step.
   const OVER: Readonly<Record<string, readonly string[]>> = {
     'oyl-workout-graph__done': ['surface'],
     'oyl-workout-graph__replaced': ['surface'],
+    // The plan's outline where the trainer holds something else: over the
+    // frame when it holds less, and over the shaded step when it holds more.
+    'oyl-workout-graph__asked': ['surface', 'surfaceRaised'],
+    'oyl-workout-graph__held-edge': ['surface'],
     'oyl-workout-graph__now': ['surface'],
     'oyl-workout-graph__now-cap': ['surface'],
     'oyl-workout-graph__range-edge': ['surface'],
@@ -238,5 +267,29 @@ describe('the graph’s marks are declared contrast pairs — #1307', () => {
         ).toBe(true);
       });
     }
+  }
+
+  // The numbers written on the lanes: `theme.css` paints them these, on the frame.
+  for (const token of ['ink', 'inkMuted'] as const) {
+    it(`a lane’s number: ${token} on surface is a pair the contrast gate walks`, () => {
+      expect(
+        CONTRAST_REQUIREMENTS.some(
+          (pair) => pair.foreground === token && pair.background === 'surface',
+        ),
+      ).toBe(true);
+    });
+  }
+
+  // The HUD's strip draws on the HUD panel's own surface, and no mark of it
+  // is a filled area another crosses.
+  for (const { className, token } of WORKOUT_STRIP_PAINTS) {
+    it(`${className}: ${token} on hudSurface is a pair the contrast gate walks`, () => {
+      expect(token.startsWith('hud')).toBe(true);
+      expect(
+        CONTRAST_REQUIREMENTS.some(
+          (pair) => pair.foreground === token && pair.background === 'hudSurface',
+        ),
+      ).toBe(true);
+    });
   }
 });

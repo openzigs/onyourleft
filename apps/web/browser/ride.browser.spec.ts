@@ -2973,25 +2973,45 @@ test.describe('#1011 — route tiles, one full-width Ride, the realistic world i
 /**
  * #1307 — the running workout drawn on the HUD, `ride-harness.tsx` §`GRAPH`.
  *
- * The graph takes the route plan's place in the route panel, and the claim
+ * The strip takes the route plan's place in the route panel, and the claim
  * that needs a browser is that it takes its SIZE too: a strip two pixels
  * taller is a panel two pixels further over the rider, which is #1169's
  * subject. So each viewport is loaded twice — a workout with the route plan,
- * and the same workout with the graph (in a heart-rate hold, its tallest
- * drawing) — and the route panel must measure the same.
+ * and the same workout with the strip — and the route panel must measure the
+ * same.
  *
- * ⚠️ **802×600 is here for that comparison ONLY.** #1169 records that the
+ * The second claim is the second pass's: that what is in the strip can be
+ * READ at that size. The first pass drew three lanes in 80 px, which left a
+ * heart-rate band seven pixels tall on a near-white well. So: ONE lane, at
+ * least 36 px of it; a bar; one line of text that fits; and no surface of its
+ * own — the HUD panel's dark one, with the HUD's own inks.
+ *
+ * ⚠️ **802×600 is here for the size comparison ONLY.** #1169 records that the
  * route and actions panels lie over the rider there on `main`; this change
  * does not fix that and must not be read as measuring it. What it shows is
- * that the graph makes it no worse.
+ * that the strip makes it no worse.
  */
 interface GraphSight {
   readonly role: string | null;
   readonly name: string;
-  readonly svg: Box;
+  readonly lane: string | null;
+  readonly strip: Box;
   readonly route: Box | undefined;
-  readonly marks: readonly { readonly name: string; readonly box: Box }[];
-  readonly background: string;
+  readonly laneBox: Box | undefined;
+  readonly progressBox: Box | undefined;
+  readonly text: {
+    readonly box: Box;
+    readonly content: string;
+    readonly colour: string;
+    readonly fontSize: number;
+    /** How much wider the line is than its box: over 0 is text cut off. */
+    readonly overflow: number;
+  };
+  readonly marks: readonly { readonly name: string; readonly box: Box; readonly paint: string }[];
+  /** Every background painted by the strip or anything in it. */
+  readonly backgrounds: readonly string[];
+  readonly routeBackground: string;
+  readonly theme: string | undefined;
 }
 
 async function graphOnTheHud(page: Page): Promise<GraphSight | undefined> {
@@ -3007,24 +3027,47 @@ async function graphOnTheHud(page: Page): Promise<GraphSight | undefined> {
         height: rect.height,
       };
     };
-    const svg = document.querySelector('.oyl-hud [data-oyl-workout-graph="hud"] svg');
-    if (svg === null) return undefined;
+    const strip = document.querySelector('.oyl-hud [data-oyl-workout-graph="hud"]');
+    if (strip === null) return undefined;
     const route = document.querySelector('.oyl-hud__route');
+    const text = strip.querySelector('p');
+    const lane = strip.querySelector('.oyl-workout-strip__lane');
+    const progress = strip.querySelector('.oyl-workout-strip__progress');
+    if (text === null) throw new Error('the strip has no line of text');
+    const textStyle = getComputedStyle(text);
     return {
-      role: svg.getAttribute('role'),
-      name: svg.getAttribute('aria-label') ?? '',
-      svg: boxOf(svg),
+      role: strip.getAttribute('role'),
+      name: strip.getAttribute('aria-label') ?? '',
+      lane: strip.getAttribute('data-oyl-lane'),
+      strip: boxOf(strip),
       route: route === null ? undefined : boxOf(route),
-      marks: [...svg.querySelectorAll('path')].map((path) => ({
-        name: path.getAttribute('class') ?? '',
-        box: boxOf(path),
-      })),
-      background: getComputedStyle(svg).backgroundColor,
+      laneBox: lane === null ? undefined : boxOf(lane),
+      progressBox: progress === null ? undefined : boxOf(progress),
+      text: {
+        box: boxOf(text),
+        content: text.textContent ?? '',
+        colour: textStyle.color,
+        fontSize: Number.parseFloat(textStyle.fontSize),
+        overflow: text.scrollWidth - text.clientWidth,
+      },
+      marks: [...strip.querySelectorAll('path')].map((path) => {
+        const style = getComputedStyle(path);
+        return {
+          name: path.getAttribute('class') ?? '',
+          box: boxOf(path),
+          paint: style.stroke === 'none' ? style.fill : style.stroke,
+        };
+      }),
+      backgrounds: [strip, ...strip.querySelectorAll('*')].map(
+        (each) => getComputedStyle(each).backgroundColor,
+      ),
+      routeBackground: route === null ? '' : getComputedStyle(route).backgroundColor,
+      theme: document.documentElement.dataset.theme,
     };
   });
 }
 
-/** The route plan's box, or the graph's in its place: whichever `.oyl-hud__plan-svg` is. */
+/** The route plan's box, or the strip's in its place: whichever `.oyl-hud__plan-svg` is. */
 async function planBox(page: Page): Promise<Box | undefined> {
   return page.evaluate(() => {
     const rect = document.querySelector('.oyl-hud__plan-svg')?.getBoundingClientRect();
@@ -3049,104 +3092,180 @@ const GRAPH_VIEWPORTS: readonly (Viewport & { readonly riderClear: boolean })[] 
   { name: '#1169’s — 802×600', width: 802, height: 600, unstagedFails: true, riderClear: false },
 ];
 
+/** `tokens.ts`: `hudInk`, `hudInkMuted`, `hudBorder` — in BOTH page themes, like `HUD_SURFACE`. */
+const HUD_INK = 'rgb(245, 248, 250)';
+const HUD_INK_MUTED = 'rgb(168, 182, 194)';
+const HUD_BORDER = 'rgb(123, 139, 153)';
+const PAINTS_NOTHING = 'rgba(0, 0, 0, 0)';
+
+const STRIP_FIXTURES = [
+  {
+    graph: 'hold',
+    lane: 'heart-rate',
+    text: '140 bpm, range 130–140',
+    named: 'with a chosen range of 130–140 bpm',
+    // Dashed: what is asked. Solid: what the rider is doing.
+    asked: 'oyl-workout-strip__range',
+    doing: 'oyl-workout-strip__heart-rate',
+    absent: /target|power/,
+  },
+  {
+    graph: 'plain',
+    lane: 'power',
+    text: 'Target 175 W · 15:00 left in block',
+    named: 'Target the trainer last confirmed: 175 W.',
+    asked: 'oyl-workout-strip__target',
+    doing: 'oyl-workout-strip__power',
+    absent: /range|heart-rate/,
+  },
+] as const;
+
+/** What the strip must be for a rider to read it, whichever lane it drew. */
+function expectStripReadable(graph: GraphSight, fixture: (typeof STRIP_FIXTURES)[number]): void {
+  const { laneBox, progressBox } = graph;
+  if (laneBox === undefined || progressBox === undefined) {
+    throw new Error('the strip is missing its lane or its bar');
+  }
+  // An image with a name.
+  expect(graph.role).toBe('img');
+  expect(graph.name).toContain('Workout graph.');
+  expect(graph.name).toContain(fixture.named);
+  // ⚠️ No well of its own: nothing in the strip paints a background, so what
+  // is behind it is the HUD panel's dark surface, and its inks are the HUD's.
+  expect(new Set(graph.backgrounds)).toEqual(new Set([PAINTS_NOTHING]));
+  expect(graph.routeBackground).toBe(HUD_SURFACE);
+  expect(graph.text.colour).toBe(HUD_INK);
+  const mark = (name: string) => {
+    const found = graph.marks.find((each) => each.name === name);
+    if (found === undefined) {
+      throw new Error(`no ${name} — found: ${graph.marks.map((each) => each.name).join(', ')}`);
+    }
+    return found;
+  };
+  // ONE lane, chosen by what is running, and tall enough to read.
+  expect(graph.lane).toBe(fixture.lane);
+  expect(graph.marks.filter((each) => fixture.absent.test(each.name))).toEqual([]);
+  expect(laneBox.height).toBeGreaterThanOrEqual(36);
+  expect(mark(fixture.asked).paint).toBe(HUD_INK_MUTED);
+  expect(mark(fixture.doing).paint).toBe(HUD_INK);
+  for (const name of [fixture.asked, fixture.doing]) {
+    const { box } = mark(name);
+    // Each uses a real share of the lane, across nearly all of its width.
+    expect(box.height, name).toBeGreaterThanOrEqual(10);
+    expect(box.width, name).toBeGreaterThan(laneBox.width * 0.9);
+    expect(box.left, name).toBeGreaterThanOrEqual(laneBox.left - 2);
+    expect(box.right, name).toBeLessThanOrEqual(laneBox.right + 2);
+    expect(box.top, name).toBeGreaterThanOrEqual(laneBox.top - 2);
+    expect(box.bottom, name).toBeLessThanOrEqual(laneBox.bottom + 2);
+  }
+  // The bar: as wide as the strip, thin, with now 900 s into a 2400 s plan.
+  expect(mark('oyl-workout-strip__track').paint).toBe(HUD_BORDER);
+  expect(mark('oyl-workout-strip__done').paint).toBe(HUD_INK_MUTED);
+  expect(mark('oyl-workout-strip__now').paint).toBe(HUD_INK);
+  expect(progressBox.height).toBeGreaterThanOrEqual(6);
+  expect(progressBox.height).toBeLessThanOrEqual(10);
+  expect(Math.abs(progressBox.width - graph.strip.width)).toBeLessThanOrEqual(1);
+  const now = mark('oyl-workout-strip__now').box;
+  const along = ((now.left + now.right) / 2 - progressBox.left) / progressBox.width;
+  expect(along).toBeGreaterThan(0.36);
+  expect(along).toBeLessThan(0.39);
+  const done = mark('oyl-workout-strip__done').box;
+  expect(Math.abs(done.right - (now.left + now.right) / 2)).toBeLessThanOrEqual(2);
+  // The now mark stands out of the bar, and stays inside the strip.
+  expect(now.height).toBeGreaterThan(progressBox.height + 2);
+  expect(now.top).toBeGreaterThanOrEqual(laneBox.bottom - 1);
+  expect(now.bottom).toBeLessThanOrEqual(graph.text.box.top + 1);
+  // One line of text, whole, at a size the rest of the HUD's small text is.
+  expect(graph.text.content).toBe(fixture.text);
+  expect(graph.text.overflow).toBeLessThanOrEqual(0);
+  expect(graph.text.fontSize).toBeGreaterThanOrEqual(12);
+  expect(graph.text.box.height).toBeLessThanOrEqual(20);
+  // In order, and none over another: the lane, the bar, the line.
+  expect(laneBox.top).toBeGreaterThanOrEqual(graph.strip.top - SUBPIXEL_TOLERANCE);
+  expect(progressBox.top).toBeGreaterThanOrEqual(laneBox.bottom);
+  expect(graph.text.box.top).toBeGreaterThanOrEqual(progressBox.bottom);
+  expect(graph.text.box.bottom).toBeLessThanOrEqual(graph.strip.bottom + SUBPIXEL_TOLERANCE);
+}
+
 test.describe('a running workout drawn on the HUD — #1307', () => {
   for (const viewport of GRAPH_VIEWPORTS) {
-    test(`takes the route plan’s place and its size, and is drawn — ${viewport.name}`, async ({
+    test(`takes the route plan’s place and its size, and can be read — ${viewport.name}`, async ({
       page,
     }) => {
-      // The control: the same ride with the route plan, and no graph.
+      // The control: the same ride with the route plan, and no strip.
       await openRide(page, viewport, '?trainer=workout');
       expect(await graphOnTheHud(page)).toBeUndefined();
       const plan = await planBox(page);
       const before = await bothWays(page);
       expect(plan?.height ?? 0).toBeGreaterThan(64);
 
-      await openRide(page, viewport, '?trainer=workout&graph=hold');
-      const graph = await graphOnTheHud(page);
-      if (graph === undefined || plan === undefined) {
-        throw new Error('no workout graph on the HUD');
-      }
-      const after = await bothWays(page);
-
-      // An image with a name, on the well it paints for itself.
-      expect(graph.role).toBe('img');
-      expect(graph.name).toContain('Workout graph.');
-      expect(graph.name).toContain('with a chosen range of 130–140 bpm');
-      expect(graph.background).toBe('rgb(242, 245, 244)');
-
-      // The size the route plan had, to the pixel — border included.
-      expect(Math.abs(graph.svg.height - plan.height)).toBeLessThanOrEqual(0.5);
-      expect(Math.abs(graph.svg.width - plan.width)).toBeLessThanOrEqual(0.5);
-      console.log(
-        `#1307 the workout strip — ${viewport.name}: ${graph.svg.width.toFixed(1)} × ${graph.svg.height.toFixed(1)} px, the route plan’s ${plan.width.toFixed(1)} × ${plan.height.toFixed(1)}`,
-      );
-
-      // Every panel is where it was with the route plan, both ways.
-      for (const [index, [how, seen]] of after.entries()) {
-        await test.step(how, () => {
-          const was = before[index]?.[1];
-          const boxes = (measurement: StageMeasurement | undefined) =>
-            (measurement?.panels ?? [])
-              .filter((each) => each.box.height > 0)
-              .map(
-                (each) =>
-                  `${each.name}: ${[each.box.left, each.box.top, each.box.width, each.box.height].map((n) => n.toFixed(1)).join(' ')}`,
-              );
-          expect(boxes(seen).length).toBeGreaterThanOrEqual(4);
-          expect(boxes(seen)).toEqual(boxes(was));
-          if (viewport.riderClear) {
-            expect(
-              seen.panels
-                .filter((each) => each.box.height > 0)
-                .filter((each) => overlap(each.box, riderBox(viewport)))
-                .map(describeItem),
-            ).toEqual([]);
-          }
-        });
-      }
-
-      // And it is drawn: every lane has marks with a size, inside the strip.
-      const mark = (name: string): Box => {
-        const found = graph.marks.find((each) => each.name === name);
-        if (found === undefined) {
-          throw new Error(`no ${name} — found: ${graph.marks.map((each) => each.name).join(', ')}`);
+      for (const fixture of STRIP_FIXTURES) {
+        await openRide(page, viewport, `?trainer=workout&graph=${fixture.graph}`);
+        const graph = await graphOnTheHud(page);
+        if (graph === undefined || plan === undefined) {
+          throw new Error('no workout strip on the HUD');
         }
-        return found.box;
-      };
-      for (const name of [
-        'oyl-workout-graph__done',
-        'oyl-workout-graph__now',
-        'oyl-workout-graph__range',
-        'oyl-workout-graph__heart-rate',
-        'oyl-workout-graph__target',
-        'oyl-workout-graph__power',
-      ]) {
-        const box = mark(name);
-        expect(box.height, name).toBeGreaterThan(2);
-        expect(box.left, name).toBeGreaterThanOrEqual(graph.svg.left - SUBPIXEL_TOLERANCE);
-        expect(box.right, name).toBeLessThanOrEqual(graph.svg.right + SUBPIXEL_TOLERANCE);
-        expect(box.top, name).toBeGreaterThanOrEqual(graph.svg.top - SUBPIXEL_TOLERANCE);
-        expect(box.bottom, name).toBeLessThanOrEqual(graph.svg.bottom + SUBPIXEL_TOLERANCE);
+        const after = await bothWays(page);
+
+        // The size the route plan had, to the pixel.
+        expect(Math.abs(graph.strip.height - plan.height)).toBeLessThanOrEqual(0.5);
+        expect(Math.abs(graph.strip.width - plan.width)).toBeLessThanOrEqual(0.5);
+        console.log(
+          `#1307 the workout strip (${fixture.graph}) — ${viewport.name}: ${graph.strip.width.toFixed(1)} × ${graph.strip.height.toFixed(1)} px, the route plan’s ${plan.width.toFixed(1)} × ${plan.height.toFixed(1)}; its lane ${(graph.laneBox?.height ?? 0).toFixed(1)} px tall`,
+        );
+
+        // Every panel is where it was with the route plan, both ways.
+        for (const [index, [how, seen]] of after.entries()) {
+          await test.step(`${fixture.graph} — ${how}`, () => {
+            const was = before[index]?.[1];
+            const boxes = (measurement: StageMeasurement | undefined) =>
+              (measurement?.panels ?? [])
+                .filter((each) => each.box.height > 0)
+                .map(
+                  (each) =>
+                    `${each.name}: ${[each.box.left, each.box.top, each.box.width, each.box.height].map((n) => n.toFixed(1)).join(' ')}`,
+                );
+            expect(boxes(seen).length).toBeGreaterThanOrEqual(4);
+            expect(boxes(seen)).toEqual(boxes(was));
+            if (viewport.riderClear) {
+              expect(
+                seen.panels
+                  .filter((each) => each.box.height > 0)
+                  .filter((each) => overlap(each.box, riderBox(viewport)))
+                  .map(describeItem),
+              ).toEqual([]);
+            }
+          });
+        }
+
+        expectStripReadable(graph, fixture);
+        // The strip is inside the route panel.
+        expect(graph.route).toBeDefined();
+        expect(graph.strip.left).toBeGreaterThanOrEqual(
+          (graph.route?.left ?? Infinity) - SUBPIXEL_TOLERANCE,
+        );
+        expect(graph.strip.right).toBeLessThanOrEqual(
+          (graph.route?.right ?? 0) + SUBPIXEL_TOLERANCE,
+        );
+        expect(graph.strip.bottom).toBeLessThanOrEqual(
+          (graph.route?.bottom ?? 0) + SUBPIXEL_TOLERANCE,
+        );
       }
-      // The lanes are one above another: plan, heart rate, the last minutes.
-      expect(mark('oyl-workout-graph__now').bottom).toBeLessThanOrEqual(
-        mark('oyl-workout-graph__range').top + SUBPIXEL_TOLERANCE,
-      );
-      expect(mark('oyl-workout-graph__range').bottom).toBeLessThanOrEqual(
-        mark('oyl-workout-graph__target').top + SUBPIXEL_TOLERANCE,
-      );
-      // Now is at 900 s of a 2400 s plan: 37.5 % along.
-      const now = mark('oyl-workout-graph__now');
-      const along = ((now.left + now.right) / 2 - graph.svg.left) / graph.svg.width;
-      expect(along).toBeGreaterThan(0.36);
-      expect(along).toBeLessThan(0.39);
-      // The strip is inside the route panel.
-      expect(graph.route).toBeDefined();
-      expect(graph.svg.left).toBeGreaterThanOrEqual(
-        (graph.route?.left ?? Infinity) - SUBPIXEL_TOLERANCE,
-      );
-      expect(graph.svg.right).toBeLessThanOrEqual((graph.route?.right ?? 0) + SUBPIXEL_TOLERANCE);
-      expect(graph.svg.bottom).toBeLessThanOrEqual((graph.route?.bottom ?? 0) + SUBPIXEL_TOLERANCE);
     });
   }
+
+  test('is the same dark strip when the page is in the dark theme: the HUD keeps its own palette', async ({
+    page,
+  }) => {
+    const viewport = GRAPH_VIEWPORTS[0];
+    if (viewport === undefined) throw new Error('no viewport');
+    await page.emulateMedia({ colorScheme: 'dark' });
+    for (const fixture of STRIP_FIXTURES) {
+      await openRide(page, viewport, `?trainer=workout&graph=${fixture.graph}`);
+      const graph = await graphOnTheHud(page);
+      if (graph === undefined) throw new Error('no workout strip on the HUD');
+      expect(graph.theme).toBe('dark');
+      expectStripReadable(graph, fixture);
+    }
+  });
 });

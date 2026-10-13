@@ -387,13 +387,15 @@ describe('the running workout as a picture — #1307', () => {
       trace: [{ at: 150, target: 150, power: 152, heartRate: undefined, range: undefined }],
     });
     const view = await render({ workout });
-    const svg = view.container.querySelector('[data-oyl-workout-graph="panel"] svg');
-    expect(svg?.getAttribute('aria-label')).toBe(workoutGraphText(workout));
-    expect(svg?.getAttribute('aria-label')).toContain('Target the trainer last confirmed: 150 W.');
-    expect(svg?.querySelector('.oyl-workout-graph__now')?.getAttribute('data-fraction')).toBe(
+    const graph = view.container.querySelector('[data-oyl-workout-graph="panel"] [role="img"]');
+    expect(graph?.getAttribute('aria-label')).toBe(workoutGraphText(workout));
+    expect(graph?.getAttribute('aria-label')).toContain(
+      'Target the trainer last confirmed: 150 W.',
+    );
+    expect(graph?.querySelector('.oyl-workout-graph__now')?.getAttribute('data-fraction')).toBe(
       '0.2500',
     );
-    expect(svg?.querySelector('.oyl-workout-graph__power')).not.toBeNull();
+    expect(graph?.querySelector('.oyl-workout-graph__power')).not.toBeNull();
   });
 
   it('keeps every sentence the panel had, and puts the graph after all of them', async () => {
@@ -415,9 +417,11 @@ describe('the running workout as a picture — #1307', () => {
   it('draws what the trainer holds when that is not what the plan asks — #1297', async () => {
     // 60 % of 250 W is 150 W; the trainer confirmed 180 W.
     const view = await render({ workout: running({ holdingWatts: 180, thresholdWatts: 250 }) });
-    expect(view.container.querySelector('svg[role="img"]')?.getAttribute('aria-label')).toContain(
-      'Target the trainer last confirmed: 180 W, where the plan asks for 150 W.',
-    );
+    expect(
+      view.container
+        .querySelector('[data-oyl-workout-graph] [role="img"]')
+        ?.getAttribute('aria-label'),
+    ).toContain('Target the trainer last confirmed: 180 W, where the plan asks for 150 W.');
   });
 
   it('draws no graph where no workout is running', async () => {

@@ -465,12 +465,13 @@ describe('the heart-rate hold, through the game — #1240', () => {
     let running: WorkoutGraphInput | undefined = workout;
     await startRide({ ...holdingPort(), runningWorkout: () => running });
     await pump(2);
-    const svg = document.querySelector('.oyl-hud__route [data-oyl-workout-graph="hud"] svg');
-    expect(svg?.getAttribute('aria-label')).toBe(workoutGraphText(workout));
-    expect(svg?.getAttribute('aria-label')).toContain(
+    const strip = document.querySelector('.oyl-hud__route [data-oyl-workout-graph="hud"]');
+    expect(strip?.getAttribute('aria-label')).toBe(workoutGraphText(workout));
+    expect(strip?.getAttribute('aria-label')).toContain(
       'Heart rate: 128 bpm, with a chosen range of 130–140 bpm.',
     );
-    expect(svg?.querySelector('.oyl-workout-graph__range')).not.toBeNull();
+    expect(strip?.querySelector('.oyl-workout-strip__range')).not.toBeNull();
+    expect(strip?.querySelector('p')?.textContent).toBe('128 bpm, range 130–140');
     expect(document.querySelector('[data-testid="oyl-hud-plan-here"]')).toBeNull();
     expect(formatViolations(auditAccessibility(document))).toBe('');
 

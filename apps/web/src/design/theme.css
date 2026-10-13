@@ -5163,37 +5163,109 @@ select.oyl-input {
 }
 
 /*
- * THE RUNNING WORKOUT'S GRAPH (#1307).
+ * THE RUNNING WORKOUT'S GRAPH (#1307), on the Ride screen.
  *
  * Three lanes, one above another (`workout/workout-graph.ts`): the plan, heart
- * rate while a hold runs, and the last five minutes. The well is `surface`,
- * which the graph paints for itself on the Ride screen and on the HUD alike,
- * so every mark is a pair `tokens.ts` §CONTRAST_REQUIREMENTS already holds
- * against `surface` or, over a shaded step, against `surfaceRaised`. The
- * bands, a free ride and the threshold rule are the block chart's own rules
- * above. `workout/WorkoutGraph.tsx` §WORKOUT_GRAPH_PAINTS is the same table,
- * held to these rules by its test.
+ * rate while a hold runs, and the last five minutes. Each lane is a caption —
+ * what it is, and its numbers now — over its own drawing. The frame is
+ * `surface`, which the graph paints for itself, so every mark is a pair
+ * `tokens.ts` §CONTRAST_REQUIREMENTS already holds against `surface` or, over
+ * a shaded step, against `surfaceRaised`; the captions and the numbers on the
+ * lanes are `ink` and `inkMuted` on `surface`. The bands and a free ride are
+ * the block chart's own rules above. `workout/WorkoutGraph.tsx`
+ * §WORKOUT_GRAPH_PAINTS is the same table, held to these rules by its test.
  *
  * Nothing is told by colour alone (SC 1.4.1): ridden is an outline and to come
  * is filled; the target is a shaded step and power a line; the range is a
- * band with dashed edges and heart rate a line.
+ * band with dashed edges and heart rate a line; what the plan asks where the
+ * trainer holds something else is a dashed outline around a shaded step.
  *
- * No height here: on the HUD the size is `.oyl-hud__plan-svg`'s, and the border
- * is inside it (`box-sizing` is `border-box` on everything, at the top of this
- * file), so the panel is the height the route plan left it (#1169) —
- * `browser/ride.browser.spec.ts` §"#1307" measures the two against each other.
+ * ⚠️ The numbers are HTML, not SVG text: each drawing is stretched to its box
+ * and would stretch its text. A scale's numbers stand in a gutter left of the
+ * drawing — on the frame's own `surface`, never over a mark — and the gutter
+ * is the same on every lane, so the two five-minute lanes share a time axis.
  */
-.oyl-workout-graph__svg {
+.oyl-workout-graph__frame {
   background: var(--oyl-color-surface);
   border: 1px solid var(--oyl-color-border);
   border-radius: var(--oyl-radius);
+  margin-top: var(--oyl-space-sm);
+  padding: var(--oyl-space-xs) var(--oyl-space-sm) var(--oyl-space-sm);
+}
+
+.oyl-workout-graph__lane + .oyl-workout-graph__lane {
+  margin-top: var(--oyl-space-sm);
+}
+
+.oyl-workout-graph__caption {
+  color: var(--oyl-color-ink-muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: var(--oyl-font-size-sm);
+  gap: 0 var(--oyl-space-sm);
+  justify-content: space-between;
+  margin: 0 0 var(--oyl-space-xs);
+}
+
+.oyl-workout-graph__reading {
+  color: var(--oyl-color-ink);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+/* The lane's own bottom line. Nothing in the third lane is drawn ON it: its
+   scale ends are inset (`workout-graph.ts` §TRACE_LANE_INSET), so a 0 W
+   target is a step above this line and not a second line on top of it.
+   The left padding is the gutter the scale's numbers stand in. */
+.oyl-workout-graph__well {
+  border-bottom: 1px solid var(--oyl-color-border);
+  padding-left: 3rem;
+  position: relative;
+}
+
+.oyl-workout-graph__svg {
   display: block;
   width: 100%;
 }
 
-.oyl-workout-graph__svg--panel {
-  height: 11rem;
-  margin-top: var(--oyl-space-sm);
+.oyl-workout-graph__svg--plan {
+  height: 3.5rem;
+}
+
+.oyl-workout-graph__svg--heart-rate {
+  height: 4rem;
+}
+
+.oyl-workout-graph__svg--trace {
+  height: 5.5rem;
+}
+
+/* A number in a lane's gutter: the ends of the third lane's scale, and the
+   range's two edges in the heart-rate lane. */
+.oyl-workout-graph__scale {
+  color: var(--oyl-color-ink-muted);
+  font-size: var(--oyl-font-size-sm);
+  font-variant-numeric: tabular-nums;
+  left: 0;
+  line-height: 1;
+  position: absolute;
+}
+
+/* 10 % in from each edge: where the scale's ends are drawn (TRACE_LANE_INSET
+   of the lane's 100 units). */
+.oyl-workout-graph__scale--top {
+  top: 10%;
+  transform: translateY(-50%);
+}
+
+.oyl-workout-graph__scale--bottom {
+  bottom: 10%;
+  transform: translateY(50%);
+}
+
+/* `top` is set inline, from where that edge of the range is drawn. */
+.oyl-workout-graph__scale--edge {
+  transform: translateY(-50%);
 }
 
 .oyl-workout-graph__key {
@@ -5208,11 +5280,37 @@ select.oyl-input {
   vector-effect: non-scaling-stroke;
 }
 
+/* Dotted, where what the plan asks NOW is dashed: two outlines a rider must
+   not take for each other. */
 .oyl-workout-graph__replaced {
   fill: none;
   stroke: var(--oyl-color-ink-muted);
-  stroke-dasharray: 2 3;
-  stroke-width: 1;
+  stroke-dasharray: 1 3;
+  stroke-linecap: round;
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+/* The rest of the block being ridden, at the height the plan asks, while the
+   trainer holds something else — and what it holds, shaded like the target
+   steps in the third lane because it is the same thing. */
+.oyl-workout-graph__asked {
+  fill: none;
+  stroke: var(--oyl-color-ink-muted);
+  stroke-dasharray: 5 3;
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.oyl-workout-graph__held {
+  fill: var(--oyl-color-surface-raised);
+}
+
+.oyl-workout-graph__held-edge {
+  fill: none;
+  stroke: var(--oyl-color-ink);
+  stroke-linecap: round;
+  stroke-width: 2.5;
   vector-effect: non-scaling-stroke;
 }
 
@@ -5587,6 +5685,107 @@ select.oyl-input {
   margin: 0;
   font-size: var(--oyl-font-size-sm);
   color: var(--oyl-color-hud-ink-muted);
+}
+
+/*
+ * THE RUNNING WORKOUT'S STRIP ON THE HUD (#1307).
+ *
+ * Where the route plan is on an ordinary ride, and its size: the element
+ * carries `.oyl-hud__plan-svg` too, whose height (and the short-landscape
+ * 4.5 rem below) is the only height here, so the route panel is the height it
+ * was (#1169) — `browser/ride.browser.spec.ts` §"#1307" measures the two
+ * against each other. ⚠️ So this rule comes AFTER that one: it restates
+ * `display`.
+ *
+ * ONE lane, a thin bar of the workout, and one line of text
+ * (`workout/WorkoutGraph.tsx` §WORKOUT_STRIP_PAINTS says why, and holds these
+ * rules to its table). ⚠️ No well: it draws on the HUD panel's own
+ * `hudSurface` with the HUD's own tokens, each a pair `tokens.ts` holds
+ * against that surface.
+ */
+.oyl-workout-strip {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oyl-space-xs);
+}
+
+.oyl-workout-strip__lane {
+  display: block;
+  flex: 1 1 0;
+  min-height: 0;
+  width: 100%;
+}
+
+/* `visible`: the now mark stands out above and below the bar. */
+.oyl-workout-strip__progress {
+  display: block;
+  flex: none;
+  height: 0.5rem;
+  overflow: visible;
+  width: 100%;
+}
+
+.oyl-workout-strip__text {
+  color: var(--oyl-color-hud-ink);
+  flex: none;
+  font-size: var(--oyl-font-size-sm);
+  font-variant-numeric: tabular-nums;
+  line-height: 1rem;
+  margin: 0;
+  white-space: nowrap;
+}
+
+/* What is asked is dashed; what the rider is doing is solid. */
+.oyl-workout-strip__target {
+  fill: none;
+  stroke: var(--oyl-color-hud-ink-muted);
+  stroke-dasharray: 5 3;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.oyl-workout-strip__power {
+  fill: none;
+  stroke: var(--oyl-color-hud-ink);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.oyl-workout-strip__range {
+  fill: none;
+  stroke: var(--oyl-color-hud-ink-muted);
+  stroke-dasharray: 5 3;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.oyl-workout-strip__heart-rate {
+  fill: none;
+  stroke: var(--oyl-color-hud-ink);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.oyl-workout-strip__track {
+  fill: none;
+  stroke: var(--oyl-color-hud-border);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.oyl-workout-strip__done {
+  fill: var(--oyl-color-hud-ink-muted);
+}
+
+.oyl-workout-strip__now {
+  fill: none;
+  stroke: var(--oyl-color-hud-ink);
+  stroke-width: 3;
+  vector-effect: non-scaling-stroke;
 }
 
 /*

@@ -2497,10 +2497,15 @@ export function createRideController(options: RideControllerOptions): RideContro
 
   /**
    * One sample for the workout's graph — #1307. After the session's tick, so
-   * it is this second's state; only while the workout is running, so a pause
-   * or a finished workout adds nothing; and it READS: what the trainer
+   * it is this second's state; only while the workout is running, so a
+   * finished workout adds nothing; and it READS: what the trainer
    * acknowledged, never what was asked, and a reading that is not live as
    * nothing rather than as a zero.
+   *
+   * ⚠️ The guard's `paused` half is a belt nothing exercises: a paused RIDE
+   * does not tick the workout at all, and a workout paused by a lost link is
+   * resumed by the tick before this reads it. `controller.test.ts` holds the
+   * `finished` half.
    */
   const sampleForGraph = (current: WorkoutInProgress, at: UnixSeconds): void => {
     const state = current.session.state();
