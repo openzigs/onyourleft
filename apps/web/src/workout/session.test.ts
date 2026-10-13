@@ -1276,6 +1276,29 @@ describe('a raise of more than 50 W to the trainer’s minimum is refused only w
     expect(session.state().lastFault).toBeUndefined();
   });
 
+  it('a stall inside a refused block: the relief IS written as the minimum, on a trainer no target was known on', async () => {
+    // ⚠️ What is built, written down so it is not left to inference. The
+    // stall relief is not covered by the ruling ("stays as it is"), so it is
+    // the one write here that puts the minimum on a trainer this app knew of
+    // no target on: 75 W asked and refused, then a collapsing cadence, and
+    // 150 W on the wire.
+    const { trainer, session } = await loop(EASY, machine(150));
+    session.start(seconds(0));
+    await ride(session, 0, 1);
+    expect(targetWrites(trainer)).toStrictEqual([]);
+    expect(session.state().lastFault).toBe(REFUSED_AT_150);
+
+    await ride(session, 2, 10, (second) => ({
+      at: seconds(second),
+      cadence: revolutionsPerMinute(Math.max(20, 80 - second * 8)),
+    }));
+
+    expect(targetWrites(trainer)).toStrictEqual([targetWrite(150)]);
+    expect(trainer.targetPowerOnTheTrainer()).toBe(150);
+    expect(session.state().lastFault).toBeUndefined();
+    expect(session.state().raisedFrom).toBeUndefined();
+  });
+
   it('still raises the stall relief to the minimum, however far under it the relief falls', async () => {
     // ⚠️ Not covered by the ruling either. 350 W asked on a machine whose
     // minimum is 300 W; two thirds of 350 W is 233 W, 67 W under the minimum.
