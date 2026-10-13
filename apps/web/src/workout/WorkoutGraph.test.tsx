@@ -397,6 +397,38 @@ describe('the HUD’s strip as markup — #1307', () => {
     expect(classes.filter((name) => /target|power/.test(name))).toEqual([]);
     expect(textOf(root, 'p')).toEqual(['134 bpm, range 130–140 · Target 150 W']);
   });
+
+  it.each([
+    ['power', () => input({ status: 'paused', holdingWatts: 50 }), 'power'],
+    [
+      'heart-rate',
+      () => input({ status: 'paused', holdingWatts: 50, trace: trace(RANGE) }),
+      'heart-rate',
+    ],
+  ] as const)(
+    'draws no line while paused, in the %s lane, and keeps its text and bar — #1313',
+    (_name, make, lane) => {
+      const root = rendered(<WorkoutStrip workout={make()} />);
+      const image = root.querySelector('[role="img"]');
+      // The lane keeps its place, so the panel does not move.
+      expect(image?.getAttribute('data-oyl-lane')).toBe(lane);
+      expect(root.querySelectorAll('svg')).toHaveLength(2);
+      expect([...classesOf(root)].sort()).toEqual(
+        ['oyl-workout-strip__track', 'oyl-workout-strip__done', 'oyl-workout-strip__now'].sort(),
+      );
+      expect(textOf(root, 'p')).toEqual(['Paused · Target 50 W']);
+      // The name says what is drawn: the pause and the target, no power or heart rate.
+      const name = image?.getAttribute('aria-label') ?? '';
+      expect(name).toContain('Workout graph. Paused.');
+      expect(name).toContain('Target the trainer last confirmed: 50 W.');
+      expect(name).not.toMatch(/Your power|Heart rate|chosen range/);
+    },
+  );
+
+  it('still names the power while running, so the pause is what removes it — #1313', () => {
+    const root = rendered(<WorkoutStrip workout={input()} />);
+    expect(root.querySelector('[role="img"]')?.getAttribute('aria-label')).toContain('Your power');
+  });
 });
 
 describe('the paint tables and theme.css say the same thing — #1307', () => {

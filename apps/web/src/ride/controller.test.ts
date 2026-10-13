@@ -121,6 +121,8 @@ import {
   workoutGraphLabels,
   workoutGraphPaths,
   workoutGraphText,
+  workoutStripName,
+  workoutStripPaths,
   workoutStripText,
 } from '../workout/workout-graph';
 
@@ -7923,6 +7925,13 @@ describe('#1240 — the heart-rate hold, through the real controller, session an
     expect(workoutGraphText(paused)).not.toContain('asks');
     expect(heldInstead(paused)).toBeUndefined();
     expect(workoutGraphKey(paused)).toBe('');
+    // #1313: the strip draws no line through the pause, though the trace
+    // still carries a range and a target, and its name says no more.
+    const strip = workoutStripPaths(paused);
+    expect(strip.lane).toEqual({ kind: 'heart-rate', range: '', heartRate: '' });
+    expect(workoutStripPaths({ ...paused, status: 'running' }).lane).not.toEqual(strip.lane);
+    expect(workoutStripName(paused)).not.toMatch(/Your power|Heart rate|chosen range/);
+    expect(strip.progress.done).not.toBe('');
     rig.controller.dispose();
   });
 
