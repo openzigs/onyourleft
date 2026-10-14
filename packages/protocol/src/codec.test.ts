@@ -24,6 +24,9 @@ import {
   FLAG_COASTING,
   FLAG_PLAUSIBILITY,
   FRAME_INTERVAL_MS,
+  MAXIMUM_GAP_DECISECONDS,
+  MAXIMUM_ROSTER_NAME_LENGTH,
+  MAXIMUM_WATTS_PER_KILOGRAM_TENTHS,
   PROTOCOL_VERSION,
   REPORT_INTERVAL_MS,
   type ProtocolMessage,
@@ -62,14 +65,42 @@ const MESSAGES: readonly ProtocolMessage[] = [
     tick: 1_200,
     ackSequence: 2_399,
     riders: [
-      { riderId: 3, decimetres: 184_223, centimetresPerSecond: 1_104, draftPercent: 0, flags: 0 },
+      {
+        riderId: 3,
+        decimetres: 184_223,
+        centimetresPerSecond: 1_104,
+        draftPercent: 0,
+        flags: 0,
+        gapDeciseconds: 0,
+        wattsPerKilogramTenths: 34,
+      },
       {
         riderId: 9,
         decimetres: 183_950,
         centimetresPerSecond: 998,
         draftPercent: 27,
         flags: FLAG_PLAUSIBILITY | FLAG_COASTING,
+        gapDeciseconds: 27,
+        wattsPerKilogramTenths: 0,
       },
+      {
+        riderId: 12,
+        decimetres: 190_000,
+        centimetresPerSecond: 1_200,
+        draftPercent: 0,
+        flags: 0,
+        gapDeciseconds: -MAXIMUM_GAP_DECISECONDS,
+        wattsPerKilogramTenths: MAXIMUM_WATTS_PER_KILOGRAM_TENTHS,
+      },
+    ],
+  },
+  { type: 'roster', riders: [] },
+  {
+    type: 'roster',
+    riders: [
+      { riderId: 3, name: 'Anna' },
+      { riderId: 9, name: 'Zoë 🚲 de la Cruz' },
+      { riderId: 12, name: 'x'.repeat(MAXIMUM_ROSTER_NAME_LENGTH) },
     ],
   },
   { type: 'countdown', startsInMs: 10_000 },
@@ -98,7 +129,7 @@ describe('decode(encode(m)) ≡ m', () => {
 
   it('covers every message type', () => {
     expect(new Set(MESSAGES.map((message) => message.type))).toEqual(
-      new Set(['hello', 'report', 'welcome', 'refuse', 'frame', 'countdown', 'finish']),
+      new Set(['hello', 'report', 'welcome', 'refuse', 'roster', 'frame', 'countdown', 'finish']),
     );
   });
 
@@ -157,7 +188,13 @@ describe('the numeric edge cases of a report, property-style', () => {
 
 describe('what the decoder refuses — one check, one reason', () => {
   const hello = (overrides: Record<string, unknown> = {}): string =>
-    JSON.stringify({ type: 'hello', protocol: 1, physicsVersion: 1, ticket: 't', ...overrides });
+    JSON.stringify({
+      type: 'hello',
+      protocol: PROTOCOL_VERSION,
+      physicsVersion: 1,
+      ticket: 't',
+      ...overrides,
+    });
 
   it('accepts the unaltered message each case below alters', () => {
     expect(refusalOf(decodeClientMessage(hello(), PHYSICS))).toBe('accepted');
@@ -186,7 +223,17 @@ describe('what the decoder refuses — one check, one reason', () => {
     const frame = encodeMessage({
       type: 'frame',
       tick: 1,
-      riders: [{ riderId: 1, decimetres: 1, centimetresPerSecond: 1, draftPercent: 0, flags: 0 }],
+      riders: [
+        {
+          riderId: 1,
+          decimetres: 1,
+          centimetresPerSecond: 1,
+          draftPercent: 0,
+          flags: 0,
+          gapDeciseconds: 0,
+          wattsPerKilogramTenths: 0,
+        },
+      ],
     });
     expect(refusalOf(decodeRoomMessage(frame))).toBe('accepted');
   });
@@ -214,13 +261,15 @@ describe('what the decoder refuses — one check, one reason', () => {
   });
 
   it('refuses another protocol version, read before anything else in the hello', () => {
-    expect(refusalOf(decodeClientMessage(hello({ protocol: 2 }), PHYSICS))).toBe(
+    expect(refusalOf(decodeClientMessage(hello({ protocol: PROTOCOL_VERSION + 1 }), PHYSICS))).toBe(
       'protocol-mismatch',
     );
     // A newer client's hello with a field this build has never heard of is a
     // version mismatch, not an unknown key.
     expect(
-      refusalOf(decodeClientMessage(hello({ protocol: 2, somethingNew: true }), PHYSICS)),
+      refusalOf(
+        decodeClientMessage(hello({ protocol: PROTOCOL_VERSION + 1, somethingNew: true }), PHYSICS),
+      ),
     ).toBe('protocol-mismatch');
   });
 
@@ -238,7 +287,7 @@ describe('what the decoder refuses — one check, one reason', () => {
     expect(
       refusalOf(
         decodeClientMessage(
-          '{"type":"hello","protocol":1,"physicsVersion":1,"ticket":"t","__proto__":{}}',
+          '{"type":"hello","protocol":2,"physicsVersion":1,"ticket":"t","__proto__":{}}',
           PHYSICS,
         ),
       ),
@@ -251,12 +300,16 @@ describe('what the decoder refuses — one check, one reason', () => {
   });
 
   it('refuses a missing required key', () => {
-    const noTicket = JSON.stringify({ type: 'hello', protocol: 1, physicsVersion: 1 });
+    const noTicket = JSON.stringify({
+      type: 'hello',
+      protocol: PROTOCOL_VERSION,
+      physicsVersion: 1,
+    });
     expect(refusalOf(decodeClientMessage(noTicket, PHYSICS))).toBe('missing-key');
   });
 
   it('refuses a list over its bound, and accepts one at it', () => {
-    const row = (id: number) => [id, 1, 1, 0, 0];
+    const row = (id: number) => [id, 1, 1, 0, 0, 0, 0];
     const frame = (count: number) =>
       JSON.stringify({
         type: 'frame',
@@ -276,8 +329,8 @@ describe('what the decoder refuses — one check, one reason', () => {
       type: 'frame',
       tick: 1,
       riders: [
-        [4, 1, 1, 0, 0],
-        [4, 2, 1, 0, 0],
+        [4, 1, 1, 0, 0, 0, 0],
+        [4, 2, 1, 0, 0, 0, 0],
       ],
     });
     expect(refusalOf(decodeRoomMessage(twice))).toBe('bad-value');
@@ -291,8 +344,14 @@ describe('what the decoder refuses — one check, one reason', () => {
       hello({ ticket: 7 }),
       JSON.stringify({ type: 'refuse', reason: 'because' }),
       JSON.stringify({ type: 'frame', tick: 1, riders: [[1, 1, 1, 0]] }),
-      JSON.stringify({ type: 'frame', tick: 1, riders: [[1, 1, 1, 0, 4]] }),
-      JSON.stringify({ type: 'frame', tick: 1, riders: [[1, 1, 1, 101, 0]] }),
+      // #1347: a version-1 row — five slots — is not a version-2 row.
+      JSON.stringify({ type: 'frame', tick: 1, riders: [[1, 1, 1, 0, 0]] }),
+      JSON.stringify({ type: 'frame', tick: 1, riders: [[1, 1, 1, 0, 4, 0, 0]] }),
+      JSON.stringify({ type: 'frame', tick: 1, riders: [[1, 1, 1, 101, 0, 0, 0]] }),
+      JSON.stringify({ type: 'frame', tick: 1, riders: [[1, 1, 1, 0, 0, 36_001, 0]] }),
+      JSON.stringify({ type: 'frame', tick: 1, riders: [[1, 1, 1, 0, 0, -36_001, 0]] }),
+      JSON.stringify({ type: 'frame', tick: 1, riders: [[1, 1, 1, 0, 0, 0, 1_001]] }),
+      JSON.stringify({ type: 'frame', tick: 1, riders: [[1, 1, 1, 0, 0, 0.5, 0]] }),
       JSON.stringify({ type: 'frame', tick: 1, riders: {} }),
       JSON.stringify({
         type: 'welcome',
@@ -308,6 +367,46 @@ describe('what the decoder refuses — one check, one reason', () => {
         : decodeRoomMessage(text);
       expect(refusalOf(decoded), text).toBe('bad-value');
     }
+  });
+
+  it('refuses a roster name a stranger could deceive with — #1347', () => {
+    const roster = (name: string) => JSON.stringify({ type: 'roster', riders: [[1, name]] });
+    expect(refusalOf(decodeRoomMessage(roster('Anna')))).toBe('accepted');
+    for (const name of [
+      '',
+      ' Anna',
+      'Anna ',
+      'An\nna',
+      'An\u0007na',
+      'Anna\u202Eanna',
+      'An\u2066na',
+      'An\u200Bna',
+      'An\u00ADna',
+      'An\uD800na',
+      'x'.repeat(MAXIMUM_ROSTER_NAME_LENGTH + 1),
+    ]) {
+      expect(refusalOf(decodeRoomMessage(roster(name))), JSON.stringify(name)).toBe('bad-value');
+    }
+    expect(
+      refusalOf(
+        decodeRoomMessage(
+          JSON.stringify({
+            type: 'roster',
+            riders: [
+              [1, 'a'],
+              [1, 'b'],
+            ],
+          }),
+        ),
+      ),
+    ).toBe('bad-value');
+  });
+
+  it('refuses a version-1 hello as a different version — #1347', () => {
+    expect(PROTOCOL_VERSION).toBe(2);
+    expect(refusalOf(decodeClientMessage(hello({ protocol: 1 }), PHYSICS))).toBe(
+      'protocol-mismatch',
+    );
   });
 
   it('never puts a value from the message in a refusal’s detail', () => {

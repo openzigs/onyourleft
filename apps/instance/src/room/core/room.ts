@@ -44,6 +44,16 @@
  *   frame carries `draftPercent` 0, though the model is in `@onyourleft/physics`
  *   since #786.
  * - **What a flag does** is #69's, #785's and #789's (ADR 0028 D-2 rule 3).
+ *
+ * ## Live standings — #1347, ADR 0051
+ *
+ * Every frame row carries the **time gap** between that rider and the frame's
+ * recipient and the rider's **live W/kg**, and the room sends a `roster` of
+ * public names whenever a seat is taken or given up. Both are the room's: a gap
+ * is read from each seat's own track of where the room put it, tick by tick
+ * ({@link timeAt}), and W/kg is the power the room simulated over the mass it
+ * was declared with, which never leaves this file. The client shows them and
+ * computes neither.
  */
 
 import { gradePercent, kilograms, seconds, type Kilograms, type Seconds } from '@onyourleft/domain';
@@ -62,6 +72,9 @@ import {
   decodeClientMessage,
   FLAG_COASTING,
   FLAG_PLAUSIBILITY,
+  isPublicName,
+  MAXIMUM_GAP_DECISECONDS,
+  MAXIMUM_WATTS_PER_KILOGRAM_TENTHS,
   type FrameRider,
   type RefuseReason,
   type Report,
@@ -81,7 +94,27 @@ export interface Admission {
   readonly athleteId: string;
   /** The athlete's declared mass (ADR 0028 D-1: the one per-rider input), in kilograms. */
   readonly declaredMassKilograms: number;
+  /**
+   * What other riders call them — #1347: the instance's ONE public projection
+   * of the athlete (`auth/public-athlete.ts`, #774), and nothing else about
+   * them. A name the wire would not carry is shown as {@link UNNAMED_RIDER}.
+   */
+  readonly displayName: string;
 }
+
+/**
+ * The name a seat is given when the admission's name is not one the wire
+ * carries (`@onyourleft/protocol` §`isPublicName`) — the same word
+ * `auth/public-athlete.ts` shows for a name a moderator hid.
+ */
+export const UNNAMED_RIDER = 'Rider';
+
+/**
+ * How many ticks of each seat's track are kept for its gaps: an hour at 1 Hz,
+ * the widest gap a frame carries (`MAXIMUM_GAP_DECISECONDS`). A gap that would
+ * need an older entry is sent as the bound.
+ */
+export const TRACK_TICKS = MAXIMUM_GAP_DECISECONDS / 10;
 
 /**
  * The room's admission: a ticket in, an athlete out, or `undefined` for a
@@ -155,6 +188,17 @@ const MAXIMUM_FRAME_CENTIMETRES_PER_SECOND = 10_000;
 interface Seat {
   readonly riderId: number;
   readonly athleteId: string;
+  readonly displayName: string;
+  readonly massKilograms: number;
+  /**
+   * Where the room put this seat, one entry a tick: `track[i]` is its distance,
+   * in metres, after tick `trackStartTick + i` — never decreasing, since speed
+   * is never below 0. What a gap is read from (#1347).
+   */
+  readonly track: number[];
+  trackStartTick: number;
+  /** The power the room simulated this seat at on the last tick, in watts. */
+  lastPowerWatts: number;
   readonly conditions: RideConditions;
   readonly ceilings: CeilingWatch;
   state: SeatState;
@@ -203,17 +247,23 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
     return seat.state === 'connected' || seat.state === 'held';
   }
 
-  /** Seats whose rejoin window has run out: a race's rider did not finish; a ride's seat is given up. */
-  function expireHeldSeats(nowMs: number): void {
+  /**
+   * Seats whose rejoin window has run out: a race's rider did not finish; a
+   * ride's seat is given up, and everybody still there is sent the roster.
+   */
+  function expireHeldSeats(nowMs: number): Outbound[] {
+    let givenUp = false;
     for (const seat of seated()) {
       if (seat.state === 'held' && nowMs - seat.heldSinceMs > settings.rejoinWindowMs) {
         if (settings.kind === 'race') {
           seat.state = 'dnf';
         } else {
           seats.delete(seat.athleteId);
+          givenUp = true;
         }
       }
     }
+    return givenUp ? rosterToAll() : [];
   }
 
   function welcome(connection: ConnectionId, seat: Seat): Outbound[] {
@@ -253,7 +303,12 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
     seat.lastAdmittedSequence = undefined;
     seat.latest = undefined;
     byConnection.set(connection, seat);
-    return [...out, ...welcome(connection, seat), ...countdownTo(connection, nowMs)];
+    return [
+      ...out,
+      ...welcome(connection, seat),
+      { kind: 'send', connection, message: roster() },
+      ...countdownTo(connection, nowMs),
+    ];
   }
 
   /**
@@ -302,6 +357,11 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
     const seat: Seat = {
       riderId: nextRiderId,
       athleteId: admission.athleteId,
+      displayName: isPublicName(admission.displayName) ? admission.displayName : UNNAMED_RIDER,
+      massKilograms: admission.declaredMassKilograms,
+      track: [START_OF_RIDE.distance],
+      trackStartTick: tickNumber,
+      lastPowerWatts: 0,
       conditions: ridingConditions(mass, settings.ridingPosition),
       ceilings: new CeilingWatch(mass, settings.limits),
       state: 'connected',
@@ -320,7 +380,26 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
       phase = 'countdown';
       startsAtMs = nowMs + settings.countdownMs;
     }
-    return attach(seat, connection, nowMs);
+    // Everybody else hears the new name; the new rider hears all of them in attach.
+    return [...attach(seat, connection, nowMs), ...rosterToAll(seat.connection)];
+  }
+
+  /** Who is seated, by public name (#1347): `roster`. */
+  function roster(): RoomMessage {
+    return {
+      type: 'roster',
+      riders: seated().map((seat) => ({ riderId: seat.riderId, name: seat.displayName })),
+    };
+  }
+
+  /** The roster to every connected rider but `except` — after a seat is taken or given up. */
+  function rosterToAll(except?: ConnectionId): Outbound[] {
+    const message = roster();
+    return seated().flatMap((seat) =>
+      seat.connection === undefined || seat.connection === except
+        ? []
+        : [{ kind: 'send' as const, connection: seat.connection, message }],
+    );
   }
 
   function report(seat: Seat, message: Report, nowMs: number): void {
@@ -342,7 +421,53 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
     }
   }
 
-  function frameRider(seat: Seat): FrameRider {
+  /**
+   * The tick, with its fractional part, at which `seat` first reached
+   * `metres` — read from its track and interpolated within a tick.
+   */
+  function timeAt(seat: Seat, metres: number): number {
+    const { track } = seat;
+    const first = track[0] as number;
+    if (first >= metres) {
+      // An untrimmed track starts where the seat did, at 0 m, so this is when
+      // it set off. A trimmed one has forgotten when it was there, and its
+      // first entry is at least TRACK_TICKS old — an hour, the bound, either way.
+      return seat.trackStartTick;
+    }
+    let low = 0;
+    let high = track.length - 1;
+    // The first index at or past `metres`; the caller asks only of a seat that is there.
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      if ((track[middle] as number) >= metres) high = middle;
+      else low = middle + 1;
+    }
+    const before = track[low - 1] as number;
+    const after = track[low] as number;
+    return seat.trackStartTick + low - 1 + (metres - before) / (after - before);
+  }
+
+  /**
+   * The time gap from `recipient` to `rider`, in tenths of a second: positive
+   * when `rider` is behind, and how long ago the one in front was where the one
+   * behind is now (#1347, ADR 0051 D-3).
+   */
+  function gapDeciseconds(recipient: Seat, rider: Seat): number {
+    const mine = recipient.ride.distance;
+    const theirs = rider.ride.distance;
+    if (rider === recipient || mine === theirs) return 0;
+    const [front, back, sign] = theirs < mine ? [recipient, rider, 1] : [rider, recipient, -1];
+    const ticks = tickNumber - timeAt(front, back.ride.distance);
+    const deciseconds = Math.round(ticks * (settings.frameIntervalMs / 100));
+    return sign * Math.min(MAXIMUM_GAP_DECISECONDS, deciseconds);
+  }
+
+  function wattsPerKilogramTenths(seat: Seat): number {
+    const tenths = Math.round((seat.lastPowerWatts / seat.massKilograms) * 10);
+    return Math.min(MAXIMUM_WATTS_PER_KILOGRAM_TENTHS, tenths);
+  }
+
+  function frameRider(seat: Seat, recipient: Seat): FrameRider {
     const decimetres = Math.floor(seat.ride.distance * 10);
     const centimetres = Math.round(seat.ride.speed * 100);
     return {
@@ -354,6 +479,8 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
           : centimetres,
       draftPercent: 0,
       flags: flagsOf(seat),
+      gapDeciseconds: gapDeciseconds(recipient, seat),
+      wattsPerKilogramTenths: wattsPerKilogramTenths(seat),
     };
   }
 
@@ -375,7 +502,15 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
       },
       seat.conditions,
     );
-    seat.ceilings.record(verdict?.admissible === true ? verdict.power : 0);
+    const power = verdict?.admissible === true ? verdict.power : 0;
+    seat.ceilings.record(power);
+    seat.lastPowerWatts = power;
+    seat.track.push(seat.ride.distance);
+    if (seat.track.length > 2 * TRACK_TICKS) {
+      const drop = seat.track.length - TRACK_TICKS - 1;
+      seat.track.splice(0, drop);
+      seat.trackStartTick += drop;
+    }
     const line = settings.course.lengthMetres;
     if (settings.kind === 'race' && seat.ride.distance >= line) {
       seat.state = 'finished';
@@ -386,12 +521,12 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
   }
 
   function frames(): Outbound[] {
-    const riders = seated()
-      .filter((seat) => seat.state !== 'dnf')
-      .map(frameRider);
+    const shown = seated().filter((seat) => seat.state !== 'dnf');
     const out: Outbound[] = [];
     for (const seat of seated()) {
       if (seat.connection === undefined) continue;
+      // Per recipient since #1347: each row's gap is to the rider it is sent to.
+      const riders = shown.map((rider) => frameRider(rider, seat));
       out.push({
         kind: 'send',
         connection: seat.connection,
@@ -427,62 +562,105 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
     return out;
   }
 
-  return {
-    receive(connection, text, nowMs) {
-      expireHeldSeats(nowMs);
-      const seat = byConnection.get(connection);
-      const decoded = decodeClientMessage(text, { physicsVersion: PHYSICS_VERSION });
-      if (!decoded.ok) {
-        const { reason } = decoded.refusal;
-        if (seat === undefined) {
-          // Before a hello, the only refusals a client is told are the two
-          // that mean "a different build" (ADR 0028 D-2 rule 5).
-          return reason === 'protocol-mismatch' || reason === 'physics-mismatch'
-            ? refuseAndClose(connection, reason)
-            : [{ kind: 'close', connection }];
-        }
-        // A malformed report from a seated rider is dropped: rule 1 coasts them.
-        return [];
-      }
-      const { message } = decoded;
-      if (message.type === 'hello') {
-        return seat === undefined ? hello(connection, message.ticket, nowMs) : [];
-      }
+  function receive(connection: ConnectionId, text: string, nowMs: number): Outbound[] {
+    const seat = byConnection.get(connection);
+    const decoded = decodeClientMessage(text, { physicsVersion: PHYSICS_VERSION });
+    if (!decoded.ok) {
+      const { reason } = decoded.refusal;
       if (seat === undefined) {
-        return [{ kind: 'close', connection }];
+        // Before a hello, the only refusals a client is told are the two
+        // that mean "a different build" (ADR 0028 D-2 rule 5).
+        return reason === 'protocol-mismatch' || reason === 'physics-mismatch'
+          ? refuseAndClose(connection, reason)
+          : [{ kind: 'close', connection }];
       }
-      if (seat.state === 'connected') {
-        report(seat, message, nowMs);
-      }
+      // A malformed report from a seated rider is dropped: rule 1 coasts them.
       return [];
-    },
+    }
+    const { message } = decoded;
+    if (message.type === 'hello') {
+      return seat === undefined ? hello(connection, message.ticket, nowMs) : [];
+    }
+    if (seat === undefined) {
+      return [{ kind: 'close', connection }];
+    }
+    if (seat.state === 'connected') {
+      report(seat, message, nowMs);
+    }
+    return [];
+  }
 
-    disconnect(connection, nowMs) {
-      expireHeldSeats(nowMs);
-      const seat = byConnection.get(connection);
-      byConnection.delete(connection);
-      if (seat === undefined || seat.connection !== connection) {
-        return [];
-      }
-      seat.connection = undefined;
-      seat.latest = undefined;
-      if (seat.state === 'connected') {
-        if (phase === 'lobby' || (phase === 'countdown' && settings.kind === 'race')) {
-          // Nobody has ridden yet: a race's lobby gives the seat back at once.
-          seats.delete(seat.athleteId);
-        } else {
-          seat.state = 'held';
-          seat.heldSinceMs = nowMs;
-        }
-      }
-      if (
-        settings.kind === 'ride' &&
-        ![...seats.values()].some((s) => s.connection !== undefined)
-      ) {
-        emptySinceMs ??= nowMs;
-      }
+  function disconnect(connection: ConnectionId, nowMs: number): Outbound[] {
+    const seat = byConnection.get(connection);
+    byConnection.delete(connection);
+    if (seat === undefined || seat.connection !== connection) {
       return [];
-    },
+    }
+    seat.connection = undefined;
+    seat.latest = undefined;
+    let gaveUp = false;
+    if (seat.state === 'connected') {
+      if (phase === 'lobby' || (phase === 'countdown' && settings.kind === 'race')) {
+        // Nobody has ridden yet: a race's lobby gives the seat back at once.
+        seats.delete(seat.athleteId);
+        gaveUp = true;
+      } else {
+        seat.state = 'held';
+        seat.heldSinceMs = nowMs;
+      }
+    }
+    if (settings.kind === 'ride' && ![...seats.values()].some((s) => s.connection !== undefined)) {
+      emptySinceMs ??= nowMs;
+    }
+    return gaveUp ? rosterToAll() : [];
+  }
+
+  function tick(nowMs: number): Outbound[] {
+    if (phase === 'countdown' && nowMs >= startsAtMs) {
+      phase = 'running';
+    }
+    if (
+      settings.kind === 'ride' &&
+      phase !== 'closed' &&
+      emptySinceMs !== undefined &&
+      // Set only while nobody is connected, and cleared by any attach.
+      nowMs - emptySinceMs >= settings.emptyGraceMs
+    ) {
+      phase = 'closed';
+      return [];
+    }
+    if (phase !== 'running') {
+      return [];
+    }
+    tickNumber += 1;
+    for (const seat of seated()) {
+      if (onTheRoad(seat)) ride(seat);
+    }
+    const out = frames();
+    if (settings.kind === 'race') {
+      if (finishers.length > 0) firstFinishTick ??= tickNumber;
+      const cutOff =
+        firstFinishTick !== undefined && tickNumber - firstFinishTick >= FINISH_CUT_OFF_TICKS;
+      if (cutOff) {
+        for (const seat of seated()) if (onTheRoad(seat)) seat.state = 'dnf';
+      }
+      if (seats.size > 0 && !seated().some(onTheRoad)) {
+        out.push(...finishRace());
+      }
+    }
+    return out;
+  }
+
+  return {
+    receive: (connection, text, nowMs) => [
+      ...expireHeldSeats(nowMs),
+      ...receive(connection, text, nowMs),
+    ],
+
+    disconnect: (connection, nowMs) => [
+      ...expireHeldSeats(nowMs),
+      ...disconnect(connection, nowMs),
+    ],
 
     start(nowMs) {
       if (settings.kind !== 'race' || phase !== 'lobby') return [];
@@ -493,42 +671,7 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
       );
     },
 
-    tick(nowMs) {
-      expireHeldSeats(nowMs);
-      if (phase === 'countdown' && nowMs >= startsAtMs) {
-        phase = 'running';
-      }
-      if (
-        settings.kind === 'ride' &&
-        phase !== 'closed' &&
-        emptySinceMs !== undefined &&
-        // Set only while nobody is connected, and cleared by any attach.
-        nowMs - emptySinceMs >= settings.emptyGraceMs
-      ) {
-        phase = 'closed';
-        return [];
-      }
-      if (phase !== 'running') {
-        return [];
-      }
-      tickNumber += 1;
-      for (const seat of seated()) {
-        if (onTheRoad(seat)) ride(seat);
-      }
-      const out = frames();
-      if (settings.kind === 'race') {
-        if (finishers.length > 0) firstFinishTick ??= tickNumber;
-        const cutOff =
-          firstFinishTick !== undefined && tickNumber - firstFinishTick >= FINISH_CUT_OFF_TICKS;
-        if (cutOff) {
-          for (const seat of seated()) if (onTheRoad(seat)) seat.state = 'dnf';
-        }
-        if (seats.size > 0 && !seated().some(onTheRoad)) {
-          out.push(...finishRace());
-        }
-      }
-      return out;
-    },
+    tick: (nowMs) => [...expireHeldSeats(nowMs), ...tick(nowMs)],
 
     view() {
       return {

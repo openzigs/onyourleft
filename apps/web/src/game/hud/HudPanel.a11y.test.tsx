@@ -13,6 +13,8 @@
 import type React from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { FLAG_COASTING, FLAG_PLAUSIBILITY } from '@onyourleft/protocol';
+
 import { HudPanel, CONTROL_MINIMUM_PIXELS } from './HudPanel';
 import { RIDE_SIZE_CLASS } from '../../design/Button';
 import { NO_READING, type HudInput } from './fields';
@@ -778,5 +780,63 @@ describe('a rider riding in a wind is told so (#335)', () => {
     );
     expect(field?.querySelector('.oyl-hud__value--word')).toBeNull();
     expect(text(field?.querySelector('.oyl-hud__detail') ?? null)).toBe('headwind');
+  });
+});
+
+describe('a race’s standings — #1347, ADR 0051', () => {
+  const field = Array.from({ length: 8 }, (_, index) => ({
+    riderId: index,
+    name: ['Anna', 'Bea', 'Cat', 'Dee', 'Me', 'Fay', 'Gus', 'Hal'][index] ?? '?',
+    distanceMetres: 1_000 - index * 10,
+    gapSeconds: (index - 4) * 3,
+    wattsPerKilogram: 3 + index / 10,
+    flags: index === 6 ? FLAG_PLAUSIBILITY : index === 7 ? FLAG_COASTING : 0,
+    own: index === 4,
+  }));
+  const racing = () => props({ room: { nearby: 3, standings: field } });
+
+  it('audits clean, as an ordered list with its own name', async () => {
+    mounted = await mount(inRideScreen(<HudPanel {...racing()} />));
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+    const list = document.querySelector('section[aria-label="Race standings"] ol');
+    expect(list?.querySelectorAll('li')).toHaveLength(8);
+  });
+
+  it('marks your own row, words each gap for a screen reader, and keeps the flag in words', async () => {
+    mounted = await mount(inRideScreen(<HudPanel {...racing()} />));
+    const rows = [...document.querySelectorAll('.oyl-hud__standing')];
+    const own = rows.filter((row) => row.getAttribute('aria-current') === 'true');
+    expect(own.map((row) => text(row.querySelector('.oyl-hud__standing-name')))).toEqual(['Me']);
+    expect(text(rows[0] ?? null)).toBe('1Anna−12 s, 12 seconds ahead of you,3.0 W/kg');
+    expect(text(rows[6] ?? null)).toContain('Flagged');
+    expect(text(rows[7] ?? null)).toContain('No power');
+    expect(text(rows[7] ?? null)).not.toContain('W/kg');
+  });
+
+  it('draws five rows around yours and hides the rest by clip, never by removal', async () => {
+    mounted = await mount(inRideScreen(<HudPanel {...racing()} />));
+    const rows = [...document.querySelectorAll('.oyl-hud__standing')];
+    const drawn = rows
+      .filter((row) => !row.classList.contains('oyl-visually-hidden'))
+      .map((row) => text(row.querySelector('.oyl-hud__standing-name')));
+    expect(drawn).toEqual(['Cat', 'Dee', 'Me', 'Fay', 'Gus']);
+    for (const row of rows) {
+      expect(row.hasAttribute('hidden') || row.getAttribute('aria-hidden') === 'true').toBe(false);
+    }
+  });
+
+  it('is read on request: not a live region, and the HUD’s one region does not say it', async () => {
+    mounted = await mount(inRideScreen(<HudPanel {...racing()} />));
+    const standings = document.querySelector('.oyl-hud__standings');
+    expect(standings?.closest('[aria-live], [role="status"], [role="log"], [role="alert"]')).toBe(
+      null,
+    );
+    expect(standings?.querySelector('[aria-live], [role="status"], [role="log"]')).toBe(null);
+    expect(text(document.querySelector('[data-oyl-announcer="hud"]'))).toBe('');
+  });
+
+  it('is not on the HUD with no standings — a group ride, or a race not yet running', async () => {
+    mounted = await mount(inRideScreen(<HudPanel {...props({ room: { nearby: 2 } })} />));
+    expect(document.querySelector('.oyl-hud__standings')).toBeNull();
   });
 });

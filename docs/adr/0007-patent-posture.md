@@ -645,3 +645,15 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   participants, which stands in full; D5, which stays the procedure for that ❌ and any other; and
   D1, D2, D3, D6 and D7. A cross-rider ghost is still never placed in a live room
   ([ADR 0028](0028-racing-fairness.md) D-7.4). **Nothing here is a finding that the risk changed.**
+- **2026-10-14** — **D4's second ❌ — *"A ranked leaderboard populated by ghost participants replaying
+  prior sessions"* — is superseded by [ADR 0051](0051-live-race-standings.md) to the extent it is read
+  as reaching a ranked list of LIVE riders during a race**, on the owner's ruling of 2026-10-14 on
+  [#1347](https://github.com/openzigs/onyourleft/issues/1347), quoted in that ADR. ⚠️ **D5 step 1 is
+  NOT met**, and spike 0005 §5 Question B — whether live standings read on the *ranked list*
+  limitation of '026, '521 or '224 — was never put to counsel; ADR 0051 D-1 records the owner exercising
+  the authority D5 step 3 reserves to them and adds Question B to the counsel questions of
+  [#1234](https://github.com/openzigs/onyourleft/issues/1234), bundled with Open Question 1.
+  **Unchanged, by name**: D4's two ✅; the **ghost** half of the second ❌, which stands in full — no
+  ghost is placed in a live room ([ADR 0028](0028-racing-fairness.md) D-7.4), so no room's standings
+  can be populated by one; D5, which stays the procedure for any other ❌; and D1, D2, D3, D6 and D7.
+  **Nothing here is a finding that the risk changed.**

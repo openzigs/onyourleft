@@ -47,6 +47,7 @@ import {
 import type { UnitSystem } from '@onyourleft/store';
 
 import { formatDuration } from '../../format';
+import type { RoomStanding } from '../../net/room-session';
 import { formatDistance, formatSpeed, type Measurement } from '../../units/format';
 import type { GhostOutcome } from '../ghost-outcome';
 import type { GameState } from '../simulation';
@@ -214,16 +215,27 @@ export interface ChasedGap {
 
 /**
  * The room, on the HUD — #783: how many other riders are near, and the gap to
- * ONE rider the rider chose. **Never a list, and never an order**: ADR 0021
- * D-6 and ADR 0028 D-7.7 forbid a ranked list during a ride, and ruling Q8
- * (2026-09-28) is "only the gap to one chosen rider". A count says nothing
- * about who is ahead of whom.
+ * ONE rider the rider chose; and in a RACE, since #1347, the live standings.
+ *
+ * ⚠️ **A reviewer who remembers "never a list, and never an order" here is
+ * reading the old file.** That was ADR 0028 D-7.7 and ruling Q8 (2026-09-28);
+ * [ADR 0051](../../../../../docs/adr/0051-live-race-standings.md) supersedes
+ * both for a race on the owner's ruling of 2026-10-14. A GROUP ride still has
+ * no list and no order (ADR 0051 D-6), and a ghost ride never has one
+ * (ADR 0021 D-6, which ADR 0051 leaves standing).
  */
 export interface RoomHud {
   /** How many other riders are drawn near this one — the interest set's size. */
   readonly nearby: number;
   /** The one rider the rider chose to follow, or `undefined` until they choose. */
   readonly chosen?: ChosenRider | undefined;
+  /**
+   * A running race's standings, from the room's newest frame — #1347 —
+   * worded by `standings.ts`. Absent on a group ride, before the race is
+   * running, and while the room's connection is lost (ADR 0051 D-5: numbers
+   * the room has stopped sending are not shown as though it still were).
+   */
+  readonly standings?: readonly RoomStanding[] | undefined;
 }
 
 /** The one rider followed. @see RoomHud */

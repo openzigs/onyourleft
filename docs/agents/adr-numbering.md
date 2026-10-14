@@ -12,6 +12,11 @@ It has the same authority as the root file. Where the text below says "this file
 
 ## Which numbers were taken, and by what (from CLAUDE.md §7, "ADRs")
 
+  ⚠️ **0051 is [ADR 0051](../adr/0051-live-race-standings.md)**, taken by
+  [#1347](https://github.com/openzigs/onyourleft/issues/1347) on 2026-10-14 for live standings during
+  a race, and **accepted on the owner's ruling on that issue**. It supersedes ADR 0028 D-7.7 and,
+  for live riders, ADR 0007 D4's second ❌. A reviewer who remembers this file offering 0051 is
+  reading the old file.
   ⚠️ **0050 is [ADR 0050](../adr/0050-side-camera-pictures-to-the-riders-instance-sealed.md)**, taken by
   [#1106](https://github.com/openzigs/onyourleft/issues/1106) on 2026-10-12 for the side camera's
   pictures going to the rider's instance, sealed, and **accepted on the owner's decisions on that

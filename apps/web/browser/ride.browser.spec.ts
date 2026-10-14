@@ -3679,3 +3679,85 @@ test.describe('a lap ends while a re-plan waits — #1312 with #1244', () => {
     });
   }
 });
+
+/**
+ * #1347 — a race's live standings on the HUD, `ride-harness.tsx`
+ * §`WITH_STANDINGS`: eight riders, five rows drawn around this rider's, and
+ * the longest name a rider may choose.
+ *
+ * ## What is held
+ *
+ * At every overlay viewport the standings are on the stage, whole and
+ * uncovered by any other panel, and every reading and control the HUD had is
+ * still on it, uncovered. **At the three tablet viewports no panel of the HUD
+ * is over the leaning rider's box** — #1347's criterion 6, and the same box
+ * every other case here holds panels clear of.
+ *
+ * ## What is only published
+ *
+ * The rider's clearance at the upright phone viewports, as #1244 publishes
+ * it: the owner's rulings are for the tablet on the bars.
+ *
+ * ## What gives way
+ *
+ * A phone on its side draws no standings (`theme.css` §"A SHORT corners
+ * layout"): the list is clipped to a pixel, and held to that here, so the
+ * HUD is the HUD it was.
+ *
+ * ## The control
+ *
+ * The same race with no frame yet (`room=race`) draws no standings, so a case
+ * that found the panel everywhere would not be reading this state.
+ */
+test.describe('a race’s standings on the HUD — #1347', () => {
+  for (const viewport of OVERLAY_VIEWPORTS) {
+    const tablet = TABLET_VIEWPORTS.includes(viewport);
+    // `theme.css` §"A SHORT corners layout": at least 46 rem wide, at most 30 tall.
+    const shortCorners = viewport.width >= 736 && viewport.height <= 480;
+    test(`are ${shortCorners ? 'given way to' : 'on the stage and whole'}${tablet ? ', and no panel covers the rider' : ''} — ${viewport.name}`, async ({
+      page,
+    }) => {
+      await openRide(page, viewport, '?room=race');
+      const before = await measure(page);
+      expect(before.panels.map((each) => each.name).join(' ')).not.toContain('oyl-hud__standings');
+
+      await openRide(page, viewport, '?room=standings');
+      for (const [how, seen] of await bothWays(page)) {
+        await test.step(how, () => {
+          const standings = seen.panels.find((each) => each.name.includes('oyl-hud__standings'));
+          if (standings === undefined) throw new Error('no standings panel on the HUD');
+          if (shortCorners) {
+            // Given way: clipped to a pixel, and everything else as it was.
+            expect(standings.box.width * standings.box.height).toBeLessThanOrEqual(1);
+            for (const item of seen.items) expect(item.onTop, describeItem(item)).toBe(true);
+            return;
+          }
+          const rider = riderBox(viewport);
+          const over = seen.panels
+            .filter((each) => each.box.height > 0)
+            .filter((each) => overlap(each.box, rider));
+          const others = seen.panels.filter(
+            (each) => each !== standings && each.box.height > 0 && overlap(each.box, standings.box),
+          );
+          console.log(
+            `#1347 standings — ${viewport.name} — ${how}: ` +
+              `${standings.box.width.toFixed(0)} × ${standings.box.height.toFixed(0)} px at ` +
+              `[${standings.box.left.toFixed(0)},${standings.box.top.toFixed(0)}]; ` +
+              `${(standings.box.left - rider.right).toFixed(0)} px clear of the rider's box to its right, ` +
+              `${(rider.top - standings.box.bottom).toFixed(0)} px above it; ` +
+              `panels over the rider: ${over.length === 0 ? 'none' : over.map(describeItem).join(', ')}`,
+          );
+          expect(inside(standings.box, viewport), describeItem(standings)).toBe(true);
+          expect(standings.onTop, describeItem(standings)).toBe(true);
+          expect(others.map(describeItem), 'a panel over the standings').toEqual([]);
+          for (const item of seen.items) {
+            expect(item.onTop, describeItem(item)).toBe(true);
+          }
+          if (tablet) {
+            expect(over.map(describeItem)).toEqual([]);
+          }
+        });
+      }
+    });
+  }
+});

@@ -316,6 +316,8 @@ describe('a group ride joined by its code — #784', () => {
       centimetresPerSecond: 900,
       draftPercent: 0,
       flags: 0,
+      gapDeciseconds: 0,
+      wattsPerKilogramTenths: 0,
     });
     await sockets.say({
       type: 'welcome',

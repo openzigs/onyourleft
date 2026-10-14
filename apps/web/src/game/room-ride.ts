@@ -9,7 +9,9 @@
  * with numbers: which riders are drawn (`net/interest.ts`), where
  * (`net/snapshots.ts`, through the connection), whether the rider is corrected
  * (`net/correction.ts`), and what the HUD says — a count and one chosen gap,
- * never a list (ADR 0021 D-6, ADR 0028 D-7.7, ruling Q8).
+ * and in a running race the room's live standings (#1347, ADR 0051, which
+ * supersedes ADR 0028 D-7.7 and ruling Q8 for a race; a group ride still has
+ * no list).
  */
 
 import { pacerGap } from '@onyourleft/domain';
@@ -87,9 +89,11 @@ export function roomNotice(status: RoomSessionStatus | undefined): string | unde
 }
 
 /**
- * What a seat is called on the HUD while no room publishes a name — #783.
- * ⚠️ A seat and not a person: names come from the room's public projection
- * only (#774), and no room message carries one yet (#784, #785).
+ * What a seat is called on the HUD when the room's frame does not carry it —
+ * #783. ⚠️ A seat and not a person. Since #1347 the room sends a roster of
+ * public names (#774), and the chosen rider is called by theirs
+ * ({@link roomFrame}); this is only the fallback for a seat the newest frame
+ * does not hold.
  */
 export function seatLabel(riderId: number): string {
   return `Rider ${String(riderId + 1)}`;
@@ -174,7 +178,10 @@ export function roomFrame(
     followed === undefined
       ? undefined
       : {
-          label: seatLabel(followed.riderId),
+          // #1347: by the roster's public name, through the room's standings.
+          label:
+            room.standings().find((each) => each.riderId === followed.riderId)?.name ??
+            seatLabel(followed.riderId),
           gap: pacerGap(gapAgainst(simulation.state, followed.distanceMetres)),
         };
   return {
@@ -184,8 +191,20 @@ export function roomFrame(
         (rider) => Math.abs(rider.distanceMetres - local) <= NEARBY_METRES,
       ).length,
       ...(chosen === undefined ? {} : { chosen }),
+      ...(showsStandings(room) ? { standings: room.standings() } : {}),
     },
   };
+}
+
+/**
+ * Whether the HUD shows the room's standings now — #1347, ADR 0051: in a race,
+ * while it runs or once it is over (the last frame's order stands until the
+ * ride ends), and only while the room's connection is up. Never on a group
+ * ride (ADR 0051 D-6), and never from a frame the room may have moved past.
+ */
+export function showsStandings(room: RoomConnection): boolean {
+  const kind = room.race().kind;
+  return (kind === 'running' || kind === 'finished') && room.status().kind === 'joined';
 }
 
 /**

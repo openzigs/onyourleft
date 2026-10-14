@@ -53,6 +53,7 @@ import {
   type RoomRace,
   type RoomSample,
   type RoomSessionStatus,
+  type RoomStanding,
   type RoomTimers,
   type TicketAnswer,
 } from './room-session';
@@ -90,6 +91,12 @@ export interface RoomConnection {
    * order — or `not-a-race` for a group ride (#785). @see RoomRace
    */
   race(): RoomRace;
+  /**
+   * A race's standings, from the room's newest frame — #1347: everybody, in
+   * order along the route, with the room's gap to this rider and their W/kg.
+   * @see RoomSession.standings
+   */
+  standings(): readonly RoomStanding[];
   /** The room's newest word on THIS rider, for `correction.ts`. */
   own(): { readonly rider: DrawnRemoteRider; readonly atLocalMs: number } | undefined;
   /** Leave: close the socket, stop reconnecting, let the screen sleep. */
@@ -214,6 +221,7 @@ export function roomPortOver(
         status: () => session.status,
         others: (localMs) => session.others(localMs),
         race: () => session.race(),
+        standings: () => session.standings(),
         own: () => session.own(),
         leave: () => {
           session.leave();

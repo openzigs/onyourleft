@@ -509,7 +509,9 @@ apps/                 AGPL-3.0-or-later, without exception
                         does with a room each frame; remote riders are
                         `RiderMarker` kind `remote`, instances of the rider's
                         own meshes, and the HUD shows a COUNT and ONE chosen
-                        rider's gap — never a list (ADR 0021 D-6)
+                        rider's gap; in a running RACE, since #1347, the
+                        room's standings too (ADR 0051 — a group ride and a
+                        ghost ride still show no list)
     src/progress/       streaks and badges (#947) — derived on the device from the ride
                         summaries Home already reads and each ride's `rideFacts`
                         (`packages/store` §`RideFacts`, written at save and import,

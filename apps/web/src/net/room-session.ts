@@ -55,6 +55,7 @@ import {
   PROTOCOL_VERSION,
   type ClientMessage,
   type Finish,
+  type Frame,
   type RefuseReason,
   type RoomConfig,
 } from '@onyourleft/protocol';
@@ -153,6 +154,35 @@ export type RoomRace =
   | { readonly kind: 'running' }
   | { readonly kind: 'finished'; readonly order: readonly number[] };
 
+/**
+ * The word a rider is shown by when the room has not named their seat — the
+ * same word the instance shows for a name a moderator hid. Never `Rider N`,
+ * which would name a seat as though it were a person (#1347).
+ */
+export const UNNAMED_RIDER = 'Rider';
+
+/**
+ * One rider in a race's standings — #1347, ADR 0051: the room's newest frame,
+ * as the room sent it. **Nothing here is computed on this device** but units:
+ * the gap and the W/kg are the room's (ADR 0051 D-3), and the name is the
+ * roster's, from the instance's public projection (#774).
+ */
+export interface RoomStanding {
+  readonly riderId: number;
+  /** The roster's public name, or {@link UNNAMED_RIDER} before one arrives. */
+  readonly name: string;
+  /** Along the route, in metres — what the standings are ordered by. */
+  readonly distanceMetres: number;
+  /** The room's time gap to THIS rider, in seconds: positive when behind, negative when ahead. */
+  readonly gapSeconds: number;
+  /** Their power over the room's last tick, per kilogram they declared — never watts (ruling Q17). */
+  readonly wattsPerKilogram: number;
+  /** `@onyourleft/protocol`'s flags, as the room sent them. */
+  readonly flags: number;
+  /** Whether this row is the rider's own. */
+  readonly own: boolean;
+}
+
 /** Where a session is. */
 export type RoomSessionStatus =
   | { readonly kind: 'connecting' }
@@ -234,6 +264,10 @@ export class RoomSession {
   /** How many times a welcome has arrived: 1 is the join, more are rejoins. */
   #welcomes = 0;
   #riderId: number | undefined;
+  /** The newest frame the room sent, as it sent it: what {@link standings} reads (#1347). */
+  #newestFrame: Frame | undefined;
+  /** Public names by seat, from the room's newest roster (#1347). */
+  #names: ReadonlyMap<number, string> = new Map();
   /** Bumped per connection, so a late event from a superseded socket is ignored. */
   #generation = 0;
 
@@ -277,6 +311,28 @@ export class RoomSession {
       return { kind: 'counting', endsAtLocalMs: countdown.atLocalMs + countdown.startsInMs };
     }
     return { kind: 'waiting' };
+  }
+
+  /**
+   * Everybody in the room's newest frame, furthest along the route first (ties
+   * by seat), with the room's gap to this rider and their W/kg — #1347. Empty
+   * before the first frame. ⚠️ **Not interpolated and not extrapolated**: a
+   * standing is a number the room sent, shown as it was sent.
+   */
+  standings(): readonly RoomStanding[] {
+    const frame = this.#newestFrame;
+    if (frame === undefined) return [];
+    return [...frame.riders]
+      .sort((a, b) => b.decimetres - a.decimetres || a.riderId - b.riderId)
+      .map((rider) => ({
+        riderId: rider.riderId,
+        name: this.#names.get(rider.riderId) ?? UNNAMED_RIDER,
+        distanceMetres: rider.decimetres / 10,
+        gapSeconds: rider.gapDeciseconds / 10,
+        wattsPerKilogram: rider.wattsPerKilogramTenths / 10,
+        flags: rider.flags,
+        own: rider.riderId === this.#riderId,
+      }));
   }
 
   /** Every OTHER rider, drawn at `localMs` less the render delay. @see SnapshotBuffer.at */
@@ -405,6 +461,11 @@ export class RoomSession {
             if (this.#options.acceptFrame?.() === false) return;
             this.#framed = true;
             this.#snapshots?.push(message, this.#options.now());
+            // A frame is per recipient since #1347: its gaps are to this rider.
+            this.#newestFrame = message;
+            return;
+          case 'roster':
+            this.#names = new Map(message.riders.map((rider) => [rider.riderId, rider.name]));
             return;
           case 'countdown':
             this.#countdown = { startsInMs: message.startsInMs, atLocalMs: this.#options.now() };

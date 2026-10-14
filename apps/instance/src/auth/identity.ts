@@ -1298,11 +1298,16 @@ export function createIdentity(options: IdentityOptions): Identity {
         const held = await account(caller.athleteId);
         if (held === undefined || !held.publicRooms.eligible) return refuse('not_eligible');
       }
+      const athlete = await store.getAthlete(caller.athleteId);
+      if (athlete === undefined) return refuse('not_found');
       return {
         ok: true,
         value: tickets.mint(roomId, {
           athleteId: caller.athleteId,
           declaredMassKilograms: declaredMass,
+          // #1347: what the room shows other riders — the ONE public projection
+          // (#774), so a name a moderator hid is the hidden word here too.
+          displayName: publicAthlete(athlete).displayName,
         }),
       };
     },

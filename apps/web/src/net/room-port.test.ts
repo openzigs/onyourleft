@@ -10,7 +10,8 @@ import type {
   OpenInstanceSocket,
 } from '../instance/instance-transport';
 import { createRoomPort, roomPortOver } from './room-port';
-import { flush, ManualClock } from './testing';
+import { UNNAMED_RIDER } from './room-session';
+import { flush, frameRider, ManualClock, ScriptedRoom } from './testing';
 
 const ORIGIN = 'https://ride.example';
 
@@ -240,6 +241,95 @@ describe('a link that fails at once — #782', () => {
     ).join({ roomId: 'room-1', declaredMassKilograms: 71, sample: () => ({ powerWatts: 0 }) });
     await flush();
     expect(connection.status().kind).toBe('lost');
+    connection.leave();
+  });
+});
+
+describe('a race’s standings, read through the port — #1347', () => {
+  async function racing() {
+    const clock = new ManualClock();
+    const room = new ScriptedRoom();
+    const connection = roomPortOver(() => room.link(), { timers: clock, now: clock.now }).join({
+      roomId: 'room-1',
+      declaredMassKilograms: 71,
+      sample: () => ({ powerWatts: 0 }),
+    });
+    await flush();
+    room.accept();
+    room.welcome(1, 'race');
+    return { room, connection };
+  }
+
+  it('is empty before the room’s first frame', async () => {
+    const { room, connection } = await racing();
+    room.roster([{ riderId: 1, name: 'Me' }]);
+    expect(connection.standings()).toEqual([]);
+    connection.leave();
+  });
+
+  it('lists every rider in the newest frame by distance, named by the roster, with the room’s own gap and W/kg', async () => {
+    const { room, connection } = await racing();
+    room.roster([
+      { riderId: 0, name: 'Anna' },
+      { riderId: 1, name: 'Me' },
+      { riderId: 2, name: 'Bea' },
+    ]);
+    room.frame(1, [
+      { ...frameRider(0, 900), gapDeciseconds: -125, wattsPerKilogramTenths: 41 },
+      { ...frameRider(1, 1_000), gapDeciseconds: 0, wattsPerKilogramTenths: 35 },
+      { ...frameRider(2, 1_000), gapDeciseconds: 0, wattsPerKilogramTenths: 0, flags: 3 },
+    ]);
+    // The newest frame wins: the room moved Anna ahead.
+    room.frame(2, [
+      { ...frameRider(0, 1_100), gapDeciseconds: -82, wattsPerKilogramTenths: 42 },
+      { ...frameRider(1, 1_000), gapDeciseconds: 0, wattsPerKilogramTenths: 36 },
+      { ...frameRider(2, 1_000), gapDeciseconds: 0, wattsPerKilogramTenths: 0, flags: 3 },
+    ]);
+    expect(connection.standings()).toEqual([
+      {
+        riderId: 0,
+        name: 'Anna',
+        distanceMetres: 1_100,
+        gapSeconds: -8.2,
+        wattsPerKilogram: 4.2,
+        flags: 0,
+        own: false,
+      },
+      // Level on distance: by seat, so the order does not flicker between frames.
+      {
+        riderId: 1,
+        name: 'Me',
+        distanceMetres: 1_000,
+        gapSeconds: 0,
+        wattsPerKilogram: 3.6,
+        flags: 0,
+        own: true,
+      },
+      {
+        riderId: 2,
+        name: 'Bea',
+        distanceMetres: 1_000,
+        gapSeconds: 0,
+        wattsPerKilogram: 0,
+        flags: 3,
+        own: false,
+      },
+    ]);
+    connection.leave();
+  });
+
+  it('names a seat the roster has not named as the hidden-name word, never "Rider N"', async () => {
+    const { room, connection } = await racing();
+    room.roster([{ riderId: 1, name: 'Me' }]);
+    room.frame(1, [frameRider(1, 10), frameRider(7, 5)]);
+    expect(connection.standings().map((each) => each.name)).toEqual(['Me', UNNAMED_RIDER]);
+    expect(UNNAMED_RIDER).toBe('Rider');
+    // A later roster names them.
+    room.roster([
+      { riderId: 1, name: 'Me' },
+      { riderId: 7, name: 'Cat' },
+    ]);
+    expect(connection.standings().map((each) => each.name)).toEqual(['Me', 'Cat']);
     connection.leave();
   });
 });

@@ -94,7 +94,7 @@ import {
 
 import { scriptedSidePairing } from '../src/camera/testing';
 import { roomPortOver } from '../src/net/room-port';
-import { ScriptedRoom } from '../src/net/testing';
+import { frameRider, ScriptedRoom } from '../src/net/testing';
 import type { GamePort } from '../src/game/GameView';
 import type { GameTrainerPort } from '../src/game/trainer-port';
 import type { LapFigures } from '../src/recording/laps';
@@ -523,7 +523,28 @@ const PAUSED = new URLSearchParams(window.location.search).get('paused') === 'ye
  * use (`net/testing.ts`): welcomed as a race and sent no frame, so the race
  * waits for as long as the page is open.
  */
-const IN_A_RACE = new URLSearchParams(window.location.search).get('room') === 'race';
+const ROOM_MODE = new URLSearchParams(window.location.search).get('room');
+/**
+ * `ride.html?room=standings` — #1347: the same race, RUNNING, with eight
+ * riders in its frame and a roster naming them, so the HUD draws the race's
+ * standings — five rows around this rider's — with the longest name a
+ * rider may choose. `ride.browser.spec.ts` §"#1347" measures it.
+ */
+const WITH_STANDINGS = ROOM_MODE === 'standings';
+const IN_A_RACE = ROOM_MODE === 'race' || WITH_STANDINGS;
+
+/** The field `?room=standings` races: this rider is seat 0, fourth on the road. Gaps in tenths of a second. */
+const STANDINGS_FIELD = [
+  { riderId: 5, name: 'Anna', metres: 90, gap: -312, wkg: 41 },
+  // The longest name a rider may choose: 32 characters (`checkDisplayName`).
+  { riderId: 3, name: 'Bartholomew of the Sunday club 1', metres: 60, gap: -205, wkg: 38 },
+  { riderId: 7, name: 'Cat', metres: 30, gap: -48, wkg: 36 },
+  { riderId: 0, name: 'You on the harness', metres: 20, gap: 0, wkg: 34 },
+  { riderId: 2, name: 'Dee', metres: 15, gap: 41, wkg: 33 },
+  { riderId: 6, name: 'Effie', metres: 10, gap: 116, wkg: 0, flags: 2 },
+  { riderId: 1, name: 'Gus', metres: 5, gap: 1_234, wkg: 29, flags: 1 },
+  { riderId: 4, name: 'Hal', metres: 0, gap: 36_000, wkg: 12 },
+] as const;
 const RACE_ROOM = IN_A_RACE ? new ScriptedRoom() : undefined;
 const RACE_PORTS =
   RACE_ROOM === undefined
@@ -1121,7 +1142,22 @@ async function run(): Promise<void> {
     );
     RACE_ROOM.accept();
     RACE_ROOM.welcome(0, 'race');
-    await until('Start the race', () => labelled<HTMLButtonElement>('button', 'Start the race'));
+    if (WITH_STANDINGS) {
+      // #1347: the race is on — the room's first frame — and names its riders.
+      RACE_ROOM.roster(STANDINGS_FIELD.map(({ riderId, name }) => ({ riderId, name })));
+      RACE_ROOM.frame(
+        1,
+        STANDINGS_FIELD.map((each) => ({
+          ...frameRider(each.riderId, each.metres),
+          flags: 'flags' in each ? each.flags : 0,
+          gapDeciseconds: each.gap,
+          wattsPerKilogramTenths: each.wkg,
+        })),
+      );
+      await until('the race standings', () => document.querySelector('.oyl-hud__standings'));
+    } else {
+      await until('Start the race', () => labelled<HTMLButtonElement>('button', 'Start the race'));
+    }
   }
   // The trainer line appears once the gradient session has written once, which
   // is a frame or two in. Waiting for it is what makes it part of every

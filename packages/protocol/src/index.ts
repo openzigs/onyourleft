@@ -34,12 +34,17 @@ export type {
   RoomConfig,
   RoomKind,
   RoomMessage,
+  Roster,
+  RosterRider,
   Welcome,
 } from './messages';
 export {
   FLAG_COASTING,
   FLAG_PLAUSIBILITY,
   FRAME_INTERVAL_MS,
+  MAXIMUM_GAP_DECISECONDS,
+  MAXIMUM_ROSTER_NAME_LENGTH,
+  MAXIMUM_WATTS_PER_KILOGRAM_TENTHS,
   PROTOCOL_VERSION,
   REPORT_INTERVAL_MS,
 } from './messages';
@@ -47,6 +52,7 @@ export {
 export type { Field, Shape } from './schema';
 export {
   CLIENT_MESSAGE_TYPES,
+  isPublicName,
   MAXIMUM_MESSAGE_BYTES,
   MAXIMUM_NESTING_DEPTH,
   MAXIMUM_REPORTED_POWER_WATTS,

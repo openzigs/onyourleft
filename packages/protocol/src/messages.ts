@@ -13,7 +13,8 @@
  * client → room   hello   { protocol, physicsVersion, ticket }
  * room → client   welcome { riderId, routeRef: { sha256 }, roomConfig } | refuse { reason }
  * client → room   report  { sequence, atMs, powerWatts, cadenceRpm? }        every 500 ms
- * room → client   frame   { tick, ackSequence?, riders: [[id, dm, cm/s, draft %, flags]] }   every 1 s
+ * room → client   roster  { riders: [[id, name]] }                          on every change of who is seated
+ * room → client   frame   { tick, ackSequence?, riders: [[id, dm, cm/s, draft %, flags, gap ds, W/kg ×10]] }   every 1 s
  * room → client   countdown { startsInMs }                                  a race only
  * room → client   finish  { order: [riderId, …] }                            a race only
  * ```
@@ -34,8 +35,17 @@
  *   schema for a coordinate-named field.
  */
 
-/** The version of this wire format. A room refuses a client on any other. */
-export const PROTOCOL_VERSION = 1;
+/**
+ * The version of this wire format. A room refuses a client on any other.
+ *
+ * **2** since [#1347](https://github.com/openzigs/onyourleft/issues/1347)
+ * ([ADR 0051](../../../docs/adr/0051-live-race-standings.md)): a frame's rider
+ * gained the time gap to the recipient and the rider's live W/kg, and the room
+ * sends a {@link Roster} of public names. A version-1 hello is refused as
+ * `protocol-mismatch`, which a version-1 client already words as "update the
+ * app" — the old version is refused cleanly rather than sent rows it cannot read.
+ */
+export const PROTOCOL_VERSION = 2;
 
 /** Where a rider's hands are, fixed by the race — `@onyourleft/physics`' `RidingPosition`. */
 export type RidingPosition = 'upright' | 'hoods' | 'drops';
@@ -121,7 +131,19 @@ export const FLAG_PLAUSIBILITY = 1;
 /** The room is coasting this rider: its last report was inadmissible or never came (rule 1). */
 export const FLAG_COASTING = 2;
 
-/** One rider in a frame. On the wire, a five-slot array in this order. */
+/**
+ * The largest time gap a frame carries, in tenths of a second: an hour. A gap
+ * past it is sent as the bound (#1347), which a client words as "an hour or more".
+ */
+export const MAXIMUM_GAP_DECISECONDS = 36_000;
+
+/**
+ * The largest W/kg a frame carries, in tenths: 100 W/kg, past anything a room's
+ * own power bound and smallest admitted mass can produce. The room clamps to it.
+ */
+export const MAXIMUM_WATTS_PER_KILOGRAM_TENTHS = 1_000;
+
+/** One rider in a frame. On the wire, a seven-slot array in this order. */
 export interface FrameRider {
   readonly riderId: number;
   /** Distance along the route, in whole decimetres. */
@@ -131,6 +153,54 @@ export interface FrameRider {
   readonly draftPercent: number;
   /** {@link FLAG_PLAUSIBILITY} and {@link FLAG_COASTING}, or'd. */
   readonly flags: number;
+  /**
+   * The time gap between this rider and the frame's RECIPIENT, as the room
+   * measures it from its own positions (#1347, ADR 0051 D-3): in tenths of a
+   * second, **positive when this rider is behind the recipient** and negative
+   * when ahead; 0 in the recipient's own row. A gap is how long ago the rider in
+   * front was where the rider behind is now — never a distance divided by a
+   * speed. Bounded by {@link MAXIMUM_GAP_DECISECONDS}.
+   *
+   * ⚠️ So a frame is per recipient: two riders are sent different gaps for the
+   * same third rider. The client never computes one (ADR 0051 D-3).
+   */
+  readonly gapDeciseconds: number;
+  /**
+   * This rider's power-to-weight over the room's last tick — the power the room
+   * simulated, over their declared mass — in tenths of a W/kg (#1347). ⚠️ **The
+   * room divides; the mass never leaves it** (ADR 0028 D-3, #774), and there is
+   * no field anywhere in this format for watts beside a rider (ruling Q17).
+   * 0 for a rider the room coasted.
+   */
+  readonly wattsPerKilogramTenths: number;
+}
+
+/**
+ * The longest public name a roster carries, in UTF-16 code units: 64, which
+ * holds `@onyourleft/domain`'s 32 scalar values whatever they are.
+ */
+export const MAXIMUM_ROSTER_NAME_LENGTH = 64;
+
+/** One seat and the public name of the athlete in it. On the wire, `[id, name]`. */
+export interface RosterRider {
+  readonly riderId: number;
+  /**
+   * The athlete's display name from the instance's ONE public projection
+   * (`apps/instance` §`public-athlete.ts`, #774) — the rider-chosen,
+   * unverified name ADR 0028 D-6.5 says is shown, or the hidden-name word a
+   * moderator's hide puts in its place. Nothing else about the athlete.
+   */
+  readonly name: string;
+}
+
+/**
+ * Who is in the room, by name — #1347. Sent to a rider when they are welcomed,
+ * and to every connected rider whenever a seat is taken or given up, so names
+ * travel once and never in the once-a-second frame.
+ */
+export interface Roster {
+  readonly type: 'roster';
+  readonly riders: readonly RosterRider[];
 }
 
 /** The room's tick: the whole field, once a second. */
@@ -173,7 +243,7 @@ export interface Finish {
 export type ClientMessage = Hello | Report;
 
 /** What a room may send. */
-export type RoomMessage = Welcome | Refuse | Frame | Countdown | Finish;
+export type RoomMessage = Welcome | Refuse | Roster | Frame | Countdown | Finish;
 
 /** Every message. */
 export type ProtocolMessage = ClientMessage | RoomMessage;

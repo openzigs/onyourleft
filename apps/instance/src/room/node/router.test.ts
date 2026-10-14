@@ -235,7 +235,7 @@ describe('what is refused before any room state changes — #780 criterion 1', (
       admit: (_roomId, ticket) => {
         if (ticket !== 'good' || spent.has(ticket)) return undefined;
         spent.add(ticket);
-        return { athleteId: 'ann', declaredMassKilograms: 70 };
+        return { athleteId: 'ann', declaredMassKilograms: 70, displayName: 'Ann' };
       },
     });
     const noTicket = await join('gate', undefined);
@@ -246,10 +246,10 @@ describe('what is refused before any room state changes — #780 criterion 1', (
     expect(await noTicket.closed).toMatchObject({ code: 1008 });
     expect(await bad.closed).toEqual({ code: 4003, reason: 'ticket-refused' });
     const first = await join('gate', 'good');
-    await until(() => first.messages.length > 0, 'a welcome');
+    await until(() => first.messages.length > 1, 'a welcome and a roster');
     const reused = await join('gate', 'good');
     expect(await reused.closed).toEqual({ code: 4003, reason: 'ticket-refused' });
-    expect(first.messages.map((m) => m.type)).toEqual(['welcome']);
+    expect(first.messages.map((m) => m.type)).toEqual(['welcome', 'roster']);
   }, 30_000);
 });
 

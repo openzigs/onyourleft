@@ -164,6 +164,11 @@ export class ScriptedRoom {
     this.send({ type: 'frame', tick, riders });
   }
 
+  /** Who is in the room, by name — #1347. */
+  roster(riders: readonly { readonly riderId: number; readonly name: string }[]): void {
+    this.send({ type: 'roster', riders });
+  }
+
   /** The room (or the tunnel in front of it) closes the newest socket. */
   closeFromServer(code = 1006, reason = ''): void {
     const socket = this.socket;
@@ -181,5 +186,7 @@ export function frameRider(riderId: number, metres: number, metresPerSecond = 10
     centimetresPerSecond: Math.round(metresPerSecond * 100),
     draftPercent: 0,
     flags: 0,
+    gapDeciseconds: 0,
+    wattsPerKilogramTenths: 0,
   };
 }

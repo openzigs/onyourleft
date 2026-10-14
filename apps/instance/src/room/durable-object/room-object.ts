@@ -78,7 +78,8 @@
  * a room is one object — so the book that minted a ticket can be the book the
  * room asks, in memory, with nothing signed and no key to hold or rotate. The
  * Worker in front authenticates the rider's session and posts
- * `{athleteId, declaredMassKilograms}` to `POST …/tickets`; the object mints
+ * `{athleteId, declaredMassKilograms, displayName}` to `POST …/tickets` — the
+ * name from `auth/public-athlete.ts`'s projection (#1347); the object mints
  * from {@link DurableRoomOptions.tickets} and answers `{ticket, expiresAtMs}`.
  * ⚠️ That path trusts its caller: the Worker in front (#790) must never route
  * a client's own request to it. An eviction forgets every unspent ticket,
@@ -303,16 +304,20 @@ export class DurableRoom<Reply> {
     } catch {
       body = undefined;
     }
-    const { athleteId, declaredMassKilograms } = (body ?? {}) as Record<string, unknown>;
+    const { athleteId, declaredMassKilograms, displayName } = (body ?? {}) as Record<
+      string,
+      unknown
+    >;
     if (
       typeof athleteId !== 'string' ||
       athleteId === '' ||
       typeof declaredMassKilograms !== 'number' ||
-      !Number.isFinite(declaredMassKilograms)
+      !Number.isFinite(declaredMassKilograms) ||
+      typeof displayName !== 'string'
     ) {
-      return platform.status(400, 'expected {athleteId, declaredMassKilograms}');
+      return platform.status(400, 'expected {athleteId, declaredMassKilograms, displayName}');
     }
-    const minted = tickets.mint(roomId, { athleteId, declaredMassKilograms });
+    const minted = tickets.mint(roomId, { athleteId, declaredMassKilograms, displayName });
     return platform.status(
       200,
       JSON.stringify({ ticket: minted.ticket, expiresAtMs: minted.expiresAtMs }),

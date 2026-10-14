@@ -35,7 +35,8 @@ import {
   REFUSAL_REASONS,
   type Decoded,
 } from './codec';
-import type { ProtocolMessage } from './messages';
+import { PROTOCOL_VERSION, type ProtocolMessage } from './messages';
+import { MAXIMUM_MESSAGE_BYTES } from './schema';
 
 const SEED = 0x0768_2026;
 const CASES = 10_000;
@@ -55,7 +56,7 @@ function random(seed: number): { below(limit: number): number } {
 
 const SEEDS: readonly string[] = (
   [
-    { type: 'hello', protocol: 1, physicsVersion: 1, ticket: 'abc.DEF-123' },
+    { type: 'hello', protocol: PROTOCOL_VERSION, physicsVersion: 1, ticket: 'abc.DEF-123' },
     { type: 'report', sequence: 7, atMs: 1_727_600_000_000, powerWatts: 250.5, cadenceRpm: 88 },
     {
       type: 'welcome',
@@ -74,8 +75,31 @@ const SEEDS: readonly string[] = (
       tick: 12,
       ackSequence: 23,
       riders: [
-        { riderId: 1, decimetres: 1200, centimetresPerSecond: 950, draftPercent: 0, flags: 0 },
-        { riderId: 2, decimetres: 1190, centimetresPerSecond: 960, draftPercent: 25, flags: 2 },
+        {
+          riderId: 1,
+          decimetres: 1200,
+          centimetresPerSecond: 950,
+          draftPercent: 0,
+          flags: 0,
+          gapDeciseconds: 0,
+          wattsPerKilogramTenths: 31,
+        },
+        {
+          riderId: 2,
+          decimetres: 1190,
+          centimetresPerSecond: 960,
+          draftPercent: 25,
+          flags: 2,
+          gapDeciseconds: 11,
+          wattsPerKilogramTenths: 0,
+        },
+      ],
+    },
+    {
+      type: 'roster',
+      riders: [
+        { riderId: 1, name: 'Anna' },
+        { riderId: 2, name: 'Zoë' },
       ],
     },
     { type: 'countdown', startsInMs: 9_000 },
@@ -121,7 +145,11 @@ function mutate(text: string, rng: { below(limit: number): number }): string {
     case 6:
       return text.slice(0, at) + '['.repeat(1 + rng.below(6)) + text.slice(at);
     case 7:
-      return text.slice(0, at) + 'x'.repeat(rng.below(9000)) + text.slice(at);
+      return (
+        text.slice(0, at) +
+        'x'.repeat(rng.below(MAXIMUM_MESSAGE_BYTES + MAXIMUM_MESSAGE_BYTES / 8)) +
+        text.slice(at)
+      );
     default:
       return text.replace(
         /"[a-zA-Z]+":/,

@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import type { RoomConnection } from '../net/room-port';
 import { CORRECTION_THRESHOLD_METRES } from '../net/correction';
 import type { DrawnRemoteRider } from '../net/snapshots';
+import type { RoomRace, RoomSessionStatus, RoomStanding } from '../net/room-session';
 import {
   heldOnTheLine,
   NEARBY_METRES,
@@ -35,20 +36,27 @@ const rider = (riderId: number, distanceMetres: number): DrawnRemoteRider => ({
 function connection(
   others: readonly DrawnRemoteRider[],
   own?: { readonly rider: DrawnRemoteRider; readonly atLocalMs: number },
+  race: RoomRace = { kind: 'not-a-race' },
+  standings: readonly RoomStanding[] = [],
+  status: RoomSessionStatus['kind'] = 'joined',
 ): RoomConnection {
   return {
-    status: () => ({
-      kind: 'joined',
-      riderId: 0,
-      config: {
-        kind: 'ride',
-        ridingPosition: 'hoods',
-        reportIntervalMs: 500,
-        frameIntervalMs: 1000,
-      },
-    }),
+    status: () =>
+      status === 'joined'
+        ? {
+            kind: 'joined',
+            riderId: 0,
+            config: {
+              kind: race.kind === 'not-a-race' ? 'ride' : 'race',
+              ridingPosition: 'hoods',
+              reportIntervalMs: 500,
+              frameIntervalMs: 1000,
+            },
+          }
+        : { kind: 'lost', since: 0 },
     others: () => others,
-    race: () => ({ kind: 'not-a-race' }),
+    race: () => race,
+    standings: () => standings,
     own: () => own,
     leave: () => undefined,
   };
@@ -157,6 +165,29 @@ describe('one frame of a room ride — #782, #783', () => {
     roomFrame(connection([rider(1, 20)]), memory, simulation(), 0);
     expect(memory.following).toBeUndefined();
   });
+
+  it('calls the chosen rider by the roster’s public name once the room sends one — #1347', () => {
+    const memory = roomRideState();
+    memory.following = 2;
+    const named: RoomStanding = {
+      riderId: 2,
+      name: 'Bea',
+      distanceMetres: 40,
+      gapSeconds: -3,
+      wattsPerKilogram: 3,
+      flags: 0,
+      own: false,
+    };
+    const frame = roomFrame(
+      connection([rider(1, 20), rider(2, 40)], undefined, { kind: 'not-a-race' }, [named]),
+      memory,
+      simulation(),
+      0,
+    );
+    expect(frame.hud.chosen?.label).toBe('Bea');
+    // A group ride still shows no standings — only the one chosen rider.
+    expect(frame.hud.standings).toBeUndefined();
+  });
 });
 
 describe('who is followed next — by seat, never by who is ahead', () => {
@@ -246,5 +277,52 @@ describe('riders coming and going — #784', () => {
     const third = riderEvents(second.seen, [2, 3, 4]);
     expect(third.events).toEqual([{ kind: 'room-rider', text: 'A rider left the room.' }]);
     expect(riderEvents(third.seen, [2, 3, 4]).events).toEqual([]);
+  });
+});
+
+describe('a race’s standings on the HUD — #1347', () => {
+  const field: readonly RoomStanding[] = [
+    {
+      riderId: 3,
+      name: 'Anna',
+      distanceMetres: 120,
+      gapSeconds: -4,
+      wattsPerKilogram: 3.1,
+      flags: 0,
+      own: false,
+    },
+    {
+      riderId: 0,
+      name: 'Me',
+      distanceMetres: 100,
+      gapSeconds: 0,
+      wattsPerKilogram: 2.9,
+      flags: 0,
+      own: true,
+    },
+  ];
+
+  it('hands the room’s standings to the HUD while a race runs, and once it is over', () => {
+    for (const race of [{ kind: 'running' }, { kind: 'finished', order: [3, 0] }] as const) {
+      const frame = roomFrame(
+        connection([], undefined, race, field),
+        roomRideState(),
+        simulation(),
+        0,
+      );
+      expect(frame.hud.standings, race.kind).toEqual(field);
+    }
+  });
+
+  it('shows none on a group ride, before the race runs, or while the room is lost', () => {
+    const cases: readonly [string, RoomConnection][] = [
+      ['a group ride', connection([], undefined, { kind: 'not-a-race' }, field)],
+      ['on the line', connection([], undefined, { kind: 'waiting' }, field)],
+      ['counting down', connection([], undefined, { kind: 'counting', endsAtLocalMs: 9 }, field)],
+      ['the room lost', connection([], undefined, { kind: 'running' }, field, 'lost')],
+    ];
+    for (const [what, room] of cases) {
+      expect(roomFrame(room, roomRideState(), simulation(), 0).hud.standings, what).toBeUndefined();
+    }
   });
 });

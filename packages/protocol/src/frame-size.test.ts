@@ -11,7 +11,7 @@
  *
  * ## Is a compact binary encoding worth it? Not now
  *
- * At 1 Hz a 50-rider frame is 1 132 bytes to each of 50 riders: ~57 KB/s out of
+ * At 1 Hz a 50-rider frame was 1 132 bytes to each of 50 riders: ~57 KB/s out of
  * a room, ~0.45 Mbit/s before WebSocket framing and TCP — the same order as
  * ADR 0037 D-8.3's 0.36 Mbit/s from spike 0013, which is what an operator
  * with a home upload has to budget. A binary frame (u16 id, u32 dm, u16 cm/s,
@@ -22,13 +22,40 @@
  * thing to debug from a packet capture, for a saving compression already
  * offers. **Not built**; #763 did not ask for one, and #792's many-room hour
  * on the real runtime is what would say the upload binds first.
+ *
+ * ⚠️ **Protocol version 2 (#1347) made a rider's row seven slots**, the gap
+ * and the W/kg, and a 50-rider frame 1 475 bytes: ~74 KB/s out of a full
+ * room, ~0.59 Mbit/s before compression. The roster carries names, so it is
+ * the largest message, but it is sent when a seat changes and never per tick.
  */
 
 import { describe, expect, it } from 'vitest';
 
 import { decodeRoomMessage, encodeMessage, utf8ByteLength } from './codec';
-import type { Frame } from './messages';
+import {
+  MAXIMUM_GAP_DECISECONDS,
+  MAXIMUM_ROSTER_NAME_LENGTH,
+  MAXIMUM_WATTS_PER_KILOGRAM_TENTHS,
+  type Frame,
+  type Roster,
+} from './messages';
 import { MAXIMUM_MESSAGE_BYTES, MAXIMUM_RIDERS } from './schema';
+
+/**
+ * The largest roster (#1347): every seat taken, every name at its bound in the
+ * characters that cost the most UTF-8 per UTF-16 unit — three bytes each, as
+ * '€' is. (A character outside the BMP is two units and four bytes, so less a
+ * unit; a quotation mark escapes to two bytes.)
+ */
+function largestRoster(): Roster {
+  return {
+    type: 'roster',
+    riders: Array.from({ length: MAXIMUM_RIDERS }, (_, index) => ({
+      riderId: 2_147_483_647 - index,
+      name: '€'.repeat(MAXIMUM_ROSTER_NAME_LENGTH),
+    })),
+  };
+}
 
 function midRace(count: number): Frame {
   return {
@@ -42,6 +69,9 @@ function midRace(count: number): Frame {
       centimetresPerSecond: 1_000 + ((index * 37) % 200),
       draftPercent: index % 3 === 0 ? 0 : 20 + (index % 15),
       flags: index === 7 ? 1 : 0,
+      // #1347: gaps of a few seconds either side, and 3–4.5 W/kg.
+      gapDeciseconds: (index - 25) * 7,
+      wattsPerKilogramTenths: 30 + (index % 16),
     })),
   };
 }
@@ -57,19 +87,29 @@ function atEveryBound(count: number): Frame {
       centimetresPerSecond: 10_000,
       draftPercent: 100,
       flags: 3,
+      gapDeciseconds: -MAXIMUM_GAP_DECISECONDS,
+      wattsPerKilogramTenths: MAXIMUM_WATTS_PER_KILOGRAM_TENTHS,
     })),
   };
 }
 
 describe('frame size — #768', () => {
-  it('is 1 132 bytes for 50 riders mid-race', () => {
+  it('is 1 475 bytes for 50 riders mid-race', () => {
+    // 1 132 in protocol version 1; the gap and the W/kg are #1347's 343 more.
     const text = encodeMessage(midRace(50));
-    expect(utf8ByteLength(text)).toBe(1_132);
+    expect(utf8ByteLength(text)).toBe(1_475);
+  });
+
+  it('fits the largest legal roster inside the byte limit — #1347', () => {
+    const largest = encodeMessage(largestRoster());
+    expect(utf8ByteLength(largest)).toBe(20_828);
+    expect(utf8ByteLength(largest)).toBeLessThan(MAXIMUM_MESSAGE_BYTES);
+    expect(decodeRoomMessage(largest).ok).toBe(true);
   });
 
   it('fits the largest legal frame inside the byte limit, so a real room is never refused', () => {
     const largest = encodeMessage(atEveryBound(MAXIMUM_RIDERS));
-    expect(utf8ByteLength(largest)).toBe(3_682);
+    expect(utf8ByteLength(largest)).toBe(4_882);
     expect(utf8ByteLength(largest)).toBeLessThan(MAXIMUM_MESSAGE_BYTES);
     expect(decodeRoomMessage(largest).ok).toBe(true);
   });

@@ -2107,7 +2107,8 @@ export function GameView(props: GameViewProps): JSX.Element {
         // #1312: and the lap's, the recorder's again. @see useRideLapSeconds
         lapSeconds={lapSeconds}
         chases={chasedGaps(state, ghostRef.current, outcomeRef.current)}
-        // #783: a count and ONE chosen gap on a room ride, never a list.
+        // #783: a count and ONE chosen gap on a room ride; in a running race,
+        // since #1347 (ADR 0051), the room's standings too.
         {...(roomRef.current === undefined
           ? {}
           : { room: roomFrameRef.current?.hud ?? { nearby: 0 } })}

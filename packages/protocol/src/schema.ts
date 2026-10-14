@@ -12,16 +12,25 @@
  * key is refused, not ignored).
  */
 
-import type { ClientMessage, ProtocolMessage, RoomMessage } from './messages';
+import {
+  MAXIMUM_GAP_DECISECONDS,
+  MAXIMUM_ROSTER_NAME_LENGTH,
+  MAXIMUM_WATTS_PER_KILOGRAM_TENTHS,
+  type ClientMessage,
+  type ProtocolMessage,
+  type RoomMessage,
+} from './messages';
 
 /**
  * The most UTF-8 bytes a message may be, checked **before** it is parsed.
  *
- * The largest legal message is a frame of {@link MAXIMUM_RIDERS} riders, each
- * slot at its bound: 3 682 bytes, computed in `frame-size.test.ts`. 8 KiB
- * leaves room over that and refuses anything a real room would never send.
+ * The largest legal message is a roster of {@link MAXIMUM_RIDERS} riders, each
+ * name at its bound: 20 828 bytes, computed in `frame-size.test.ts`; the
+ * largest frame is 4 882. **32 KiB** leaves room over both and refuses
+ * anything a real room would never send. It was 8 KiB until #1347 added the
+ * roster (protocol version 2).
  */
-export const MAXIMUM_MESSAGE_BYTES = 8192;
+export const MAXIMUM_MESSAGE_BYTES = 32_768;
 
 /**
  * The deepest a message nests, checked **before** it is parsed. A frame is
@@ -94,6 +103,24 @@ const COUNT = { kind: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER } 
 const VERSION = { kind: 'integer', minimum: 1, maximum: Number.MAX_SAFE_INTEGER } as const;
 const RIDER_ID = { kind: 'integer', minimum: 0, maximum: 2_147_483_647 } as const;
 
+/**
+ * A public name, as a client will show it: one or more characters, none of
+ * them a control, a format character (which covers every bidirectional
+ * override, isolate and mark) or a default-ignorable code point, no white
+ * space at either end — `@onyourleft/domain`'s `checkDisplayName` refusals,
+ * re-checked on arrival because a name is shown to a stranger (#1347). This
+ * package depends on nothing, so the rule is restated rather than imported.
+ */
+const DISPLAY_NAME = /^(?!\s)(?!.*\s$)[^\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}\p{Cs}]+$/u;
+
+/**
+ * Whether a roster may carry `name` — the decoder's own rule, so a room can
+ * check a name before it sends one rather than have its encoder throw.
+ */
+export function isPublicName(name: string): boolean {
+  return name.length <= MAXIMUM_ROSTER_NAME_LENGTH && DISPLAY_NAME.test(name);
+}
+
 /** Everything a message carries beside its `type`, keyed by that type. */
 export const MESSAGE_FIELDS = {
   hello: {
@@ -163,6 +190,40 @@ export const MESSAGE_FIELDS = {
             },
             { name: 'draftPercent', shape: { kind: 'integer', minimum: 0, maximum: 100 } },
             { name: 'flags', shape: { kind: 'integer', minimum: 0, maximum: 3 } },
+            {
+              name: 'gapDeciseconds',
+              shape: {
+                kind: 'integer',
+                minimum: -MAXIMUM_GAP_DECISECONDS,
+                maximum: MAXIMUM_GAP_DECISECONDS,
+              },
+            },
+            {
+              name: 'wattsPerKilogramTenths',
+              shape: { kind: 'integer', minimum: 0, maximum: MAXIMUM_WATTS_PER_KILOGRAM_TENTHS },
+            },
+          ],
+        },
+      },
+    },
+  },
+  roster: {
+    riders: {
+      shape: {
+        kind: 'rows',
+        maximumLength: MAXIMUM_RIDERS,
+        row: {
+          kind: 'tuple',
+          slots: [
+            { name: 'riderId', shape: RIDER_ID },
+            {
+              name: 'name',
+              shape: {
+                kind: 'string',
+                pattern: DISPLAY_NAME,
+                maximumLength: MAXIMUM_ROSTER_NAME_LENGTH,
+              },
+            },
           ],
         },
       },
@@ -186,6 +247,7 @@ export const CLIENT_MESSAGE_TYPES: readonly ClientMessage['type'][] = ['hello', 
 export const ROOM_MESSAGE_TYPES: readonly RoomMessage['type'][] = [
   'welcome',
   'refuse',
+  'roster',
   'frame',
   'countdown',
   'finish',

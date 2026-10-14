@@ -75,6 +75,8 @@ import {
   type TrainerLine,
 } from './fields';
 import { PlanTrace } from './PlanTrace';
+import { FLAGGED_TEXT, STANDINGS_LABEL, standingLines } from './standings';
+import type { RoomStanding } from '../../net/room-session';
 import { WorkoutStrip } from '../../workout/WorkoutGraph';
 import type { WorkoutGraphInput } from '../../workout/workout-graph';
 
@@ -187,8 +189,9 @@ export interface HudPanelProps extends Omit<HudInput, 'units'> {
   /**
    * The room's one control — #783: follow the next rider near you, by the
    * room's own rider order (never by who is ahead), so the gap field is to
-   * ONE chosen rider and nothing on the HUD ranks the room. `undefined` on a
-   * ride with no room, and when nobody else is near.
+   * ONE chosen rider. `undefined` on a ride with no room, and when nobody else
+   * is near. ⚠️ Since #1347 a RACE's standings rank the room on the HUD
+   * (ADR 0051); a group ride's HUD still ranks nobody.
    */
   readonly onFollowNext?: (() => void) | undefined;
   /**
@@ -431,6 +434,18 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
       </div>
 
       {/*
+        #1347: a race's live standings — ADR 0051. Its own panel, placed by
+        the grid at the END of the middle row (`theme.css` §"THE RACE'S
+        STANDINGS"), clear of the rider at every tablet viewport
+        (`ride.browser.spec.ts` §"#1347"). ⚠️ **Not a live region**: a
+        screen reader reads it when it goes to it, and the HUD's one region
+        never says it, so nobody hears fifty names a second.
+      */}
+      {props.room?.standings === undefined || props.room.standings.length === 0 ? null : (
+        <RaceStandings standings={props.room.standings} />
+      )}
+
+      {/*
         Last in the document and placed by the grid, not by this position: a
         notice is an exception, and an exception read out after the instruments
         is the order the screen had before #423 too.
@@ -651,6 +666,48 @@ function strip(elevations: readonly number[]): string {
     parts.push(`${(index * step).toFixed(2)},${(24 - height * 24).toFixed(2)}`);
   }
   return parts.join(' ');
+}
+
+/**
+ * A race's standings — #1347. `standings.ts` words every row; this draws a
+ * window of them around the rider's own and keeps the rest in the document,
+ * clipped, for a screen reader (`standings.ts` §"Everybody is in the list").
+ * An ordered list, because the order is the point: a screen reader says
+ * "list, 12 items" and each row's place.
+ */
+function RaceStandings(props: { readonly standings: readonly RoomStanding[] }): JSX.Element {
+  const lines = standingLines(props.standings);
+  return (
+    <section className="oyl-hud__panel oyl-hud__standings" aria-label={STANDINGS_LABEL}>
+      <ol className="oyl-hud__standings-list">
+        {lines.map((line) => (
+          <li
+            key={line.riderId}
+            className={[
+              'oyl-hud__standing',
+              ...(line.own ? ['oyl-hud__standing--own'] : []),
+              ...(line.near ? ['oyl-hud__standing--near'] : []),
+              ...(line.drawn ? [] : ['oyl-visually-hidden']),
+            ].join(' ')}
+            aria-current={line.own ? 'true' : undefined}
+          >
+            <span className="oyl-hud__standing-place">{line.place}</span>
+            <span className="oyl-hud__standing-name">{line.name}</span>
+            <span className="oyl-hud__standing-gap">
+              <span aria-hidden="true">{line.gap}</span>
+              <span className="oyl-visually-hidden">, {line.gapSpoken},</span>
+            </span>
+            <span className="oyl-hud__standing-wkg">
+              {line.wattsPerKilogram}
+              {line.flagged ? (
+                <span className="oyl-hud__standing-flag"> {FLAGGED_TEXT}</span>
+              ) : null}
+            </span>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
 }
 
 export { NO_READING };

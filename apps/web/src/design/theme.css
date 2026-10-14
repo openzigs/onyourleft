@@ -6324,6 +6324,79 @@ select.oyl-input {
 }
 
 /*
+ * THE RACE'S STANDINGS — #1347, ADR 0051.
+ *
+ * One panel, rows of four cells: place, public name, the room's gap to you
+ * and live W/kg. Figures in tabular numerals so a column of gaps does not
+ * jitter as they change each second; a long name is cut with an ellipsis on
+ * the line rather than wrapping, so the panel is the same height whatever
+ * riders call themselves. Your own row is bold, and says *You* in its gap
+ * cell, so it is marked in words as well as weight.
+ */
+.oyl-hud__standings-list {
+  display: grid;
+  gap: var(--oyl-space-xs);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.oyl-hud__standing {
+  align-items: baseline;
+  display: grid;
+  font-size: var(--oyl-font-size-md);
+  font-variant-numeric: tabular-nums;
+  gap: var(--oyl-space-sm);
+  grid-template-columns: 1.5em minmax(0, 1fr) auto auto;
+}
+
+.oyl-hud__standing-place {
+  color: var(--oyl-color-hud-ink-muted);
+}
+
+.oyl-hud__standing-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.oyl-hud__standing-gap,
+.oyl-hud__standing-wkg {
+  text-align: end;
+  white-space: nowrap;
+}
+
+.oyl-hud__standing--own {
+  font-weight: 700;
+}
+
+.oyl-hud__standing-flag {
+  color: var(--oyl-color-hud-stale-ink);
+}
+
+/*
+ * THE RACE'S STANDINGS ON A PHONE — #1347. Three rows, not five: yours and one
+ * either side (`standings.ts` §`STANDINGS_DRAWN_ON_A_PHONE`). Five were
+ * measured running onto the actions panel at 736×480 and 360×752. The other
+ * two are clipped as `oyl-visually-hidden` clips, never removed, so a screen
+ * reader still reads every rider. A phone is a phone on its side under
+ * 30 rem tall, or upright under 46 rem wide.
+ */
+@media (max-height: 30rem), (width < 46rem) {
+  .oyl-hud__standing:not(.oyl-hud__standing--near) {
+    border: 0;
+    clip-path: inset(50%);
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    padding: 0;
+    position: absolute;
+    white-space: nowrap;
+    width: 1px;
+  }
+}
+
+/*
  * THE OVERLAY, both layouts — what they share (#423).
  *
  * The world fills the stage and the HUD is a grid laid over it, holding four
@@ -6389,6 +6462,19 @@ select.oyl-input {
 
   .oyl-game--riding .oyl-hud__notices {
     grid-area: notices;
+  }
+
+  /*
+   * #1347: the standings share the middle row with a notice and sit at its
+   * other end — the START edge is the notice's, the END edge the standings'
+   * — top-aligned under the secondary panel, so the middle of the row, which
+   * is the rider, stays clear. `ride.browser.spec.ts` §"#1347" measures it.
+   */
+  .oyl-game--riding .oyl-hud__standings {
+    align-self: start;
+    grid-area: notices;
+    justify-self: end;
+    width: min(100%, 17rem);
   }
 }
 
@@ -6513,6 +6599,27 @@ select.oyl-input {
   .oyl-game--riding .oyl-hud__actions,
   .oyl-game--riding .oyl-hud__route {
     width: min(100%, 16rem);
+  }
+
+  /*
+   * #1347 — ⚠️ #419 asks that what gives way be recorded: **here the race's
+   * standings are not drawn.** A phone on its side has no free cell: three
+   * rows (100 px) were measured on the actions panel at 844×390, 736×360 and
+   * 736×480, and the top and bottom panels leave under 60 px of road between
+   * them. The list is clipped as `oyl-visually-hidden` clips, never removed,
+   * so a screen reader still reads every rider; the gap to one chosen rider
+   * (#783) is still a field. A tablet, or a phone held upright, draws it.
+   */
+  .oyl-game--riding .oyl-hud__standings {
+    border: 0;
+    clip-path: inset(50%);
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    padding: 0;
+    position: absolute;
+    white-space: nowrap;
+    width: 1px;
   }
 }
 
@@ -6699,6 +6806,17 @@ select.oyl-input {
     display: grid;
     gap: var(--oyl-space-sm);
     grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  }
+
+  /* #1347: upright, the standings take the top of the empty middle row, at
+     its end edge, above the rider — three rows (§"THE RACE'S STANDINGS ON A
+     PHONE"). */
+  .oyl-game--riding .oyl-hud__standings {
+    align-self: start;
+    grid-column: 1;
+    grid-row: 4;
+    justify-self: end;
+    width: min(100%, 15rem);
   }
 }
 

@@ -75,7 +75,7 @@ describe('sockets — the Hibernation API and the attachment', () => {
     const harness = new FakeRoomHarness(conformanceSettings(), admitConformance, false);
     const socket = await hello(harness, 'ann');
     await harness.room.webSocketMessage(socket, new ArrayBuffer(8));
-    expect(types(socket)).toEqual(['welcome']);
+    expect(types(socket)).toEqual(['welcome', 'roster']);
     const stranger = new FakeSocket();
     await harness.room.webSocketMessage(stranger, helloText('ticket-bea'));
     expect(stranger.closedByObject).toBe(true);
@@ -400,12 +400,16 @@ describe('tickets from the instance’s own book — #780 wiring #772 into this 
   it('mints a ticket for the Worker in front, admits one hello with it, and refuses it spent — closing 4003', async () => {
     const now = { ms: 1_000 };
     const room = ticketedRoom(now);
-    const reply = await mint(room, { athleteId: 'ann', declaredMassKilograms: 70 });
+    const reply = await mint(room, {
+      athleteId: 'ann',
+      declaredMassKilograms: 70,
+      displayName: 'Ann',
+    });
     expect(reply.status).toBe(200);
     const { ticket } = JSON.parse((reply as { text: string }).text) as { ticket: string };
     const first = await openSocket(room);
     await room.webSocketMessage(first, helloText(ticket));
-    expect(types(first)).toEqual(['welcome']);
+    expect(types(first)).toEqual(['welcome', 'roster']);
     const again = await openSocket(room);
     await room.webSocketMessage(again, helloText(ticket));
     expect(types(again)).toEqual(['refuse', 'closed']);
@@ -417,13 +421,19 @@ describe('tickets from the instance’s own book — #780 wiring #772 into this 
   it('refuses a ticket past its thirty seconds, and a mint that names nobody', async () => {
     const now = { ms: 1_000 };
     const room = ticketedRoom(now);
-    const reply = await mint(room, { athleteId: 'ann', declaredMassKilograms: 70 });
+    const reply = await mint(room, {
+      athleteId: 'ann',
+      declaredMassKilograms: 70,
+      displayName: 'Ann',
+    });
     const { ticket } = JSON.parse((reply as { text: string }).text) as { ticket: string };
     now.ms += 30_001;
     const late = await openSocket(room);
     await room.webSocketMessage(late, helloText(ticket));
     expect(late.closeCode).toBe(4003);
     expect((await mint(room, { declaredMassKilograms: 70 })).status).toBe(400);
+    // #1347: nor one that does not say what the rider is called.
+    expect((await mint(room, { athleteId: 'ann', declaredMassKilograms: 70 })).status).toBe(400);
   });
 
   it('has no ticket path at all for a room mounted without a book', async () => {

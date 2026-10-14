@@ -571,3 +571,15 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   approval-required registration), D-7 — **D-7.4 included**, so no ghost enters a room, whatever
   [ADR 0039](0039-racing-another-riders-ghost-on-consent.md) permits for a local replay — and the
   publication rule of the 2026-09-22 entry.
+- **2026-10-14** — **D-7.7 is superseded by [ADR 0051](0051-live-race-standings.md), on the owner's
+  ruling of 2026-10-14 on [#1347](https://github.com/openzigs/onyourleft/issues/1347)**: *"for racing
+  it should show a list of people that are racing. It should include how far back each person is in
+  time and show real time w/kg"*. During a race the game now shows every rider, in order along the
+  route, with the room's time gap to the rider and their live W/kg, never watts. The ruling **Q8** of
+  2026-09-28 (*"no live standings list, only the gap to one chosen rider"*) is superseded for a race
+  by the same ADR. ⚠️ **Spike 0005 §5 Question B was never put to counsel** and the owner accepted that
+  risk; ADR 0051 D-1 adds it to the counsel questions of
+  [#1234](https://github.com/openzigs/onyourleft/issues/1234). **Unchanged, by name**: D-1 to D-6;
+  D-7.1 to D-7.6, **D-7.4 included**, so no ghost enters a room and none can be in its standings; the
+  finish order after a race, which D-7.7 decided and ADR 0051 keeps; and a group ride, which shows no
+  list (ADR 0051 D-6).

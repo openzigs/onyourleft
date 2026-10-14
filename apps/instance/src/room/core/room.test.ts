@@ -8,10 +8,18 @@ import {
   encodeMessage,
   FLAG_COASTING,
   FLAG_PLAUSIBILITY,
+  MAXIMUM_GAP_DECISECONDS,
   MAXIMUM_REPORTED_POWER_WATTS,
 } from '@onyourleft/protocol';
 
-import { FINISH_CUT_OFF_TICKS, type Outbound, type Room } from './room.ts';
+import {
+  createRoom,
+  FINISH_CUT_OFF_TICKS,
+  TRACK_TICKS,
+  UNNAMED_RIDER,
+  type Outbound,
+  type Room,
+} from './room.ts';
 import {
   closed,
   COURSE_SHA256,
@@ -76,6 +84,8 @@ describe('the handshake — ADR 0028 D-2 rule 5', () => {
           frameIntervalMs: 1000,
         },
       },
+      // #1347: and who is in the room, by public name — so far, only them.
+      { type: 'roster', riders: [{ riderId: 0, name: 'ann' }] },
     ]);
     expect(closed(out)).toEqual([]);
   });
@@ -90,7 +100,7 @@ describe('the handshake — ADR 0028 D-2 rule 5', () => {
 
   it('refuses a protocol it does not share, and closes', () => {
     const room = testRoom();
-    const out = room.receive(1, helloText('ticket-ann', { protocol: 2 }), 0);
+    const out = room.receive(1, helloText('ticket-ann', { protocol: 1 }), 0);
     expect(sentTo(out, 1)).toEqual([{ type: 'refuse', reason: 'protocol-mismatch' }]);
     expect(closed(out)).toEqual([1]);
   });
@@ -633,8 +643,8 @@ describe('a race’s countdown — #785', () => {
     expect(sentTo(started, 2)).toEqual([{ type: 'countdown', startsInMs: 10_000 }]);
     // A rider joining 4 s in is welcomed, then told the 6 s that are left.
     const late = sentTo(room.receive(3, helloText('ticket-cat'), 6_000), 3);
-    expect(late.map((m) => m.type)).toEqual(['welcome', 'countdown']);
-    expect(late[1]).toEqual({ type: 'countdown', startsInMs: 6_000 });
+    expect(late.map((m) => m.type)).toEqual(['welcome', 'roster', 'countdown']);
+    expect(late[2]).toEqual({ type: 'countdown', startsInMs: 6_000 });
     // A second start changes nothing and says nothing.
     expect(room.start(7_000)).toEqual([]);
   });
@@ -643,6 +653,7 @@ describe('a race’s countdown — #785', () => {
     const room = testRoom({ countdownMs: 1_000 });
     expect(sentTo(room.receive(1, helloText('ticket-ann'), 0), 1).map((m) => m.type)).toEqual([
       'welcome',
+      'roster',
     ]);
     room.start(0);
     room.tick(1_000);
@@ -650,6 +661,7 @@ describe('a race’s countdown — #785', () => {
     room.disconnect(1, 1_100);
     expect(sentTo(room.receive(2, helloText('ticket-ann'), 1_200), 2).map((m) => m.type)).toEqual([
       'welcome',
+      'roster',
     ]);
   });
 
@@ -754,3 +766,130 @@ describe('what a result publishes — #785, ruling Q17', () => {
     expect(ann?.wattsPerKilogram).toBeCloseTo(200 / 70, 12);
   });
 });
+
+describe('live standings — #1347, ADR 0051', () => {
+  /** The row about `riderId` in the last frame `connection` was sent. */
+  function rowOf(out: readonly Outbound[], connection: number, riderId: number) {
+    const row = lastFrame(out, connection).riders.find((r) => r.riderId === riderId);
+    if (row === undefined) throw new Error(`no row for rider ${String(riderId)}`);
+    return row;
+  }
+
+  it('names every seat by its public name, to everybody, whenever a seat is taken or given up', () => {
+    const room = testRoom({ countdownMs: 60_000 });
+    room.receive(1, helloText('ticket-ann'), 0);
+    const bob = room.receive(2, helloText('ticket-bob'), 0);
+    const both = {
+      type: 'roster',
+      riders: [
+        { riderId: 0, name: 'ann' },
+        { riderId: 1, name: 'bob' },
+      ],
+    };
+    // The new rider is told everybody; everybody else is told the new rider.
+    expect(sentTo(bob, 2).filter((m) => m.type === 'roster')).toEqual([both]);
+    expect(sentTo(bob, 1)).toEqual([both]);
+    // A lobby seat given back is a roster without it.
+    expect(sentTo(room.disconnect(2, 1_000), 1)).toEqual([
+      { type: 'roster', riders: [{ riderId: 0, name: 'ann' }] },
+    ]);
+  });
+
+  it('gives up a group ride’s seat past its window and tells whoever is left', () => {
+    const room = testRoom({ kind: 'ride', countdownMs: 0, rejoinWindowMs: 5_000 });
+    room.receive(1, helloText('ticket-ann'), 0);
+    room.receive(2, helloText('ticket-bob'), 0);
+    room.tick(SECOND);
+    room.disconnect(2, 1_500);
+    expect(sentTo(room.tick(2 * SECOND), 1).map((m) => m.type)).toEqual(['frame']);
+    const after = room.tick(7 * SECOND);
+    expect(sentTo(after, 1)[0]).toEqual({ type: 'roster', riders: [{ riderId: 0, name: 'ann' }] });
+  });
+
+  it('shows a name the wire would not carry as the hidden-name word, never the name', () => {
+    const room = createRoom(
+      roomSettings({ kind: 'race', ridingPosition: 'hoods', course: FLAT_COURSE }),
+      (ticket) => ({
+        athleteId: ticket,
+        declaredMassKilograms: 70,
+        displayName: ticket === 'a' ? 'Ann‮evil' : 'Bob',
+      }),
+    );
+    room.receive(1, helloText('a'), 0);
+    const out = room.receive(2, helloText('b'), 0);
+    expect(sentTo(out, 2).find((m) => m.type === 'roster')).toEqual({
+      type: 'roster',
+      riders: [
+        { riderId: 0, name: UNNAMED_RIDER },
+        { riderId: 1, name: 'Bob' },
+      ],
+    });
+  });
+
+  it('carries each rider’s live W/kg — this tick’s power over their declared mass — and 0 when coasted', () => {
+    const room = testRoom({ countdownMs: 0 }, { ann: 70, bob: 80 });
+    room.receive(1, helloText('ticket-ann'), 0);
+    room.receive(2, helloText('ticket-bob'), 0);
+    room.start(0);
+    second(room, 0, { 1: 350, 2: 250 });
+    const out = second(room, 1, { 1: 210 });
+    // 210 W / 70 kg = 3.0 W/kg — this tick's, not the mean of 350 and 210.
+    expect(rowOf(out, 2, 0).wattsPerKilogramTenths).toBe(30);
+    // Bob sent nothing this second: coasted, so 0 and never his last 250 W.
+    expect(rowOf(out, 1, 1).wattsPerKilogramTenths).toBe(0);
+    expect(rowOf(out, 1, 1).flags & FLAG_COASTING).toBe(FLAG_COASTING);
+    const next = second(room, 2, { 2: 260 });
+    // 260 / 80 = 3.25 W/kg, sent as tenths: 33 (rounded) — and the mass never is.
+    expect(rowOf(next, 1, 1).wattsPerKilogramTenths).toBe(33);
+    expect(JSON.stringify(sentTo(next, 1))).not.toMatch(/mass|80/i);
+  });
+
+  it('sends each rider the time gap to every other, from the room’s own track: how long ago the one in front was where the one behind is', () => {
+    const room = runningRace(['ann', 'bob'], { course: { ...FLAT_COURSE, lengthMetres: 100_000 } });
+    // Ann's distance after every tick, read from the room as an observer would.
+    const ann: number[] = [0];
+    let out: Outbound[] = [];
+    for (let t = 0; t < 60; t += 1) {
+      out = second(room, t, { 1: 300, 2: 200 });
+      ann.push(distanceOf(room, 0));
+    }
+    const bob = distanceOf(room, 1);
+    expect(bob).toBeLessThan(ann[60] as number);
+    // When Ann was where Bob is now, interpolated within the tick.
+    const after = ann.findIndex((d) => d >= bob);
+    const before = ann[after - 1] as number;
+    const at = after - 1 + (bob - before) / ((ann[after] as number) - before);
+    const expected = Math.round((60 - at) * 10);
+    expect(expected).toBeGreaterThan(30);
+    // To Ann, Bob is that far behind; to Bob, Ann is that far ahead. Own rows are 0.
+    expect(rowOf(out, 1, 1).gapDeciseconds).toBe(expected);
+    expect(rowOf(out, 2, 0).gapDeciseconds).toBe(-expected);
+    expect(rowOf(out, 1, 0).gapDeciseconds).toBe(0);
+    expect(rowOf(out, 2, 1).gapDeciseconds).toBe(0);
+    // A time and not a distance: Bob's speed would give another number.
+    const bySpeed = Math.round((((ann[60] as number) - bob) / speedOf(room, 1)) * 10);
+    expect(bySpeed).not.toBe(expected);
+  });
+
+  it('calls two riders level 0, and a gap over an hour the bound — before and after the track is trimmed', () => {
+    const room = runningRace(['ann', 'bob'], { course: { ...FLAT_COURSE, lengthMetres: 1e6 } });
+    const level = second(room, 0, {});
+    expect(rowOf(level, 1, 1).gapDeciseconds).toBe(0);
+    let out: Outbound[] = [];
+    // Bob never pedals, and stays on the line; Ann rides on.
+    for (let t = 1; t <= 2 * TRACK_TICKS + 5; t += 1) {
+      out = second(room, t, { 1: 150 });
+      if (t === TRACK_TICKS - 100) {
+        expect(rowOf(out, 1, 1).gapDeciseconds).toBe((TRACK_TICKS - 100 + 1) * 10);
+      }
+    }
+    expect(rowOf(out, 1, 1).gapDeciseconds).toBe(MAXIMUM_GAP_DECISECONDS);
+    expect(rowOf(out, 2, 0).gapDeciseconds).toBe(-MAXIMUM_GAP_DECISECONDS);
+  });
+});
+
+function speedOf(room: Room, riderId: number): number {
+  const seat = room.view().seats.find((s) => s.riderId === riderId);
+  if (seat === undefined) throw new Error(`no rider ${String(riderId)}`);
+  return seat.speedMetresPerSecond;
+}

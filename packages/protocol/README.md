@@ -27,7 +27,8 @@ position**.
 | room → client | `welcome` | `riderId`, `routeRef: { sha256 }`, `roomConfig: { kind, ridingPosition, reportIntervalMs, frameIntervalMs }` |
 | room → client | `refuse` | `reason` |
 | client → room | `report` | `sequence`, `atMs`, `powerWatts`, `cadenceRpm?` |
-| room → client | `frame` | `tick`, `ackSequence?`, `riders: [[riderId, decimetres, centimetresPerSecond, draftPercent, flags]]` |
+| room → client | `roster` | `riders: [[riderId, name]]` — public names, on every change of who is seated (#1347) |
+| room → client | `frame` | `tick`, `ackSequence?`, `riders: [[riderId, decimetres, centimetresPerSecond, draftPercent, flags, gapDeciseconds, wattsPerKilogramTenths]]` — the gap is to the frame's recipient, so a frame is per recipient (#1347, ADR 0051) |
 | room → client | `finish` | `order: [riderId, …]` |
 
 - A report carries **no `riderId`**: the room attaches it from the connection, never from the wire.
@@ -40,7 +41,7 @@ position**.
 
 `decodeClientMessage` (what a room receives) and `decodeRoomMessage` (what a client receives) never
 throw. Each returns a message or a refusal with one of eleven reasons — the order and the bounds are
-in `src/codec.ts`'s header and `src/schema.ts`. The byte limit (8 KiB of UTF-8) and the nesting
+in `src/codec.ts`'s header and `src/schema.ts`. The byte limit (32 KiB of UTF-8, 8 KiB before protocol version 2) and the nesting
 bound (3) are checked **before** the text is parsed. A hello from another protocol version or
 another physics version is refused with a reason of its own, read before any other field of the
 hello, because a newer client's hello may carry fields this build does not know.
@@ -53,9 +54,10 @@ rather than refused at the other end.
 
 ## Size
 
-A 50-rider frame mid-race is **1 132 bytes** and the largest legal frame (100 riders, every slot at
-its bound) **3 682 bytes** — both computed in `src/frame-size.test.ts`, which also says why no binary
-encoding is built.
+A 50-rider frame mid-race is **1 475 bytes** and the largest legal frame (100 riders, every slot at
+its bound) **4 882 bytes**; the largest legal message is a full roster, **20 828 bytes** — all
+computed in `src/frame-size.test.ts`, which also says why no binary encoding is built. (Version 1's
+frames were 1 132 and 3 682 bytes.)
 
 ## The fuzz
 
