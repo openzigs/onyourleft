@@ -34,7 +34,7 @@ export const SYNC_HEADING = 'Sync';
 /** What the control does, said beside it. */
 export const SYNC_LEAD =
   'Sync sends this device’s rides, and what goes with them, to this instance, sealed for it ' +
-  'alone, and brings back what your other devices sent there. Everything stays on this device ' +
+  'alone, and brings back what your other devices sent there. What it sends stays on this device ' +
   'too, and a ride you deleted here is deleted there, never brought back.';
 
 /** The control. */

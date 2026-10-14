@@ -355,7 +355,9 @@ const NOTES: Partial<Record<RouteId, readonly string[]>> = {
       'cannot be shared at all.',
   ],
   camera: ['Pictures and ride details stay on this device unless you turn on sending them below.'],
-  settings: ['Nothing here is sent anywhere, and nothing here changes what a ride recorded.'],
+  settings: [
+    'Each setting that sends something says so beside it, and nothing here changes what a ride recorded.',
+  ],
   instance: ['Your rides stay on this device.'],
   'side-camera': ['This phone keeps nothing about you afterwards.'],
 };

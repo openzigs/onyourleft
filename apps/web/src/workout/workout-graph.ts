@@ -940,11 +940,24 @@ export function workoutStripPaths(input: WorkoutGraphInput): WorkoutStripPaths {
   const heartRate =
     samples.at(-1)?.range === undefined ? undefined : heartRateLane(samples, input.elapsedSeconds);
   const trace = heartRate === undefined ? traceLane(samples, input.elapsedSeconds) : undefined;
+  // ⚠️ Paused, the lane is left EMPTY (#1313, the owner's ruling): the
+  // strip's text and bar say the pause, and a dashed target and a trace
+  // running to the right edge say a ride that is not happening. The lane
+  // keeps its kind and height so the panel does not move.
+  const drawn = !isPaused(input);
   return {
     lane:
       heartRate !== undefined
-        ? { kind: 'heart-rate', range: heartRate.rangeEdges, heartRate: heartRate.line }
-        : { kind: 'power', target: trace?.targetEdge ?? '', power: trace?.power ?? '' },
+        ? {
+            kind: 'heart-rate',
+            range: drawn ? heartRate.rangeEdges : '',
+            heartRate: drawn ? heartRate.line : '',
+          }
+        : {
+            kind: 'power',
+            target: drawn ? (trace?.targetEdge ?? '') : '',
+            power: drawn ? (trace?.power ?? '') : '',
+          },
     laneHeight: heartRate !== undefined ? HEART_RATE_LANE_HEIGHT : TRACE_LANE_HEIGHT,
     progress: {
       done: fraction > 0 ? `M0 0H${x}V${coordinate(STRIP_PROGRESS_HEIGHT)}H0Z` : '',
@@ -1140,7 +1153,13 @@ export function workoutStripText(input: WorkoutGraphInput): string {
  * name of the image. It says the numbers the picture is drawn from and
  * describes no colour.
  */
-export function workoutGraphText(input: WorkoutGraphInput): string {
+export function workoutGraphText(
+  input: WorkoutGraphInput,
+  options: { readonly lines?: boolean } = {},
+): string {
+  // `lines: false` is the HUD strip in a pause (#1313): it draws no line, so
+  // its name does not give the numbers a line would have shown.
+  const lines = options.lines ?? true;
   const parts = [
     `Workout graph.${isPaused(input) ? ' Paused.' : ''} ${durationText(
       Math.max(0, input.elapsedSeconds),
@@ -1171,13 +1190,13 @@ export function workoutGraphText(input: WorkoutGraphInput): string {
     );
   }
   const now = readingsNow(input);
-  if (finite(now.power)) {
+  if (lines && finite(now.power)) {
     parts.push(`Your power: ${String(Math.round(now.power))} W.`);
   }
   // ⚠️ While the heart-rate lane is DRAWN — a hold inside the window — and
   // not only while one is running: the name says every number on the image.
   const range = rangedSamples(windowed(input)).at(-1)?.range;
-  if (range !== undefined) {
+  if (lines && range !== undefined) {
     parts.push(
       finite(now.heartRate)
         ? `Heart rate: ${String(Math.round(now.heartRate))} bpm, with a chosen range of ` +
@@ -1189,4 +1208,10 @@ export function workoutGraphText(input: WorkoutGraphInput): string {
     parts.push(GRAPH_KEY_REPLACED);
   }
   return parts.join(' ');
+}
+
+/** The HUD strip's name: the graph's, without what the strip does not draw. */
+export function workoutStripName(input: WorkoutGraphInput): string {
+  // No outline: the strip draws none. No power or heart rate while paused: it draws no line.
+  return workoutGraphText({ ...input, replaced: undefined }, { lines: !isPaused(input) });
 }
