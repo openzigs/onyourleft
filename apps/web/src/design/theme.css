@@ -3446,12 +3446,41 @@ a.oyl-button {
    of air above and below its words with it, and the block has 8 px under it.
    Only where the switch is: a rider with no instance has no switch, and their
    chooser is laid out as it always was. */
-.oyl-ride__group--trainer h3:has(+ .oyl-workout-replans) {
+.oyl-ride__group--trainer .oyl-workout-heading:has(+ .oyl-workout-replans) {
   margin-block-end: 0;
 }
 
 .oyl-ride__group--trainer .oyl-workout-replans ~ ul {
   margin-block-start: 0;
+}
+
+/* #1244, restored by the owner's ruling of 2026-10-14 on #1332: "Re-plans
+   on", beside the chooser's heading while the switch is on — a paragraph
+   AFTER the `h3`, not inside it, so the heading is still named "Ride a
+   workout", on the heading's own line and at its end, so it takes no line of
+   its own. The row takes the heading's place in the flow: it has the
+   heading's margin (none where the switch follows it, above) and the heading
+   inside it has none, and the paragraph's line is shorter than the heading's
+   so the row is no taller with it than without. `rideview.browser.spec.ts`
+   §"#1244" and §"#1329 — many saved workouts" hold that nothing above the
+   list moves when it comes and goes. */
+.oyl-workout-heading {
+  align-items: baseline;
+  display: flex;
+  gap: var(--oyl-space-sm);
+  justify-content: space-between;
+  margin: 0 0 var(--oyl-space-sm);
+}
+
+.oyl-workout-heading > h3 {
+  margin: 0;
+}
+
+.oyl-workout-replans-on {
+  font-size: var(--oyl-font-size-md);
+  line-height: 1.2;
+  margin: 0;
+  white-space: nowrap;
 }
 
 /* #1244: *End workout* and, while re-plans are on, *Switch re-plans off*, on

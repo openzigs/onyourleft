@@ -133,6 +133,7 @@ import {
   REPLAN_OFF_BUTTON,
   REPLAN_STARTS_AT_NEXT_BLOCK,
   REPLANS_OFF,
+  REPLANS_ON_BADGE,
 } from '../workout/replan-text';
 import { durationText, workoutRow } from '../workouts/library';
 
@@ -532,7 +533,26 @@ export function WorkoutPanel({
       saved.length > 0;
     return (
       <section>
-        <h3>Ride a workout</h3>
+        {/*
+          #1244, restored on #1332 (the owner's ruling of 2026-10-14): while
+          the switch is on, two words say so HERE, on the heading's own line,
+          at its end, so nothing under them moves when the switch is pressed.
+          Nothing is shown while it is off, which is the default and sends
+          nothing.
+
+          ⚠️ BESIDE the heading, not inside it (#1244's fourth review): inside
+          the `h3` the heading's name became "Ride a workout Re-plans on",
+          and a heading is what a screen-reader user navigates by. It is a
+          paragraph straight after the heading, so it is read next.
+        */}
+        <div className="oyl-workout-heading">
+          <h3>Ride a workout</h3>
+          {offerReplans && replans ? (
+            <p className="oyl-workout-replans-on" data-oyl-replans-on="">
+              {REPLANS_ON_BADGE}
+            </p>
+          ) : null}
+        </div>
         {!offerReplans ? null : (
           // #1244: the per-ride switch, only where a workout can be started
           // and a re-plan could happen. #1329: ABOVE the list, with the

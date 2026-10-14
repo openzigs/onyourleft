@@ -1094,6 +1094,26 @@ for (const viewport of IN_THE_SHELL) {
  * the fold" is as true of a page whose disclosure is one line long.
  */
 const REPLANS_AVAILABLE = '?replans=available';
+/**
+ * #1244, restored by the owner's ruling of 2026-10-14 on #1332: *"Re-plans
+ * on"* is on the chooser heading's row — inside its box, at its end, to the
+ * right of the heading's words — and the heading is still named
+ * *Ride a workout*.
+ */
+function expectBadgeOnTheHeadingRow(seen: RideViewMeasurement, viewport: Viewport): void {
+  const badge = seen.replansOnLine;
+  const row = seen.trainerCard?.chooserHeading;
+  if (badge === undefined || row === undefined) {
+    throw new Error('no "Re-plans on" beside the chooser heading');
+  }
+  const note = `"${badge.text}" y ${badge.box.top.toFixed(1)}–${badge.box.bottom.toFixed(1)}, the heading's row y ${row.top.toFixed(1)}–${row.bottom.toFixed(1)} — ${viewport.name}`;
+  expect(badge.text).toBe('Re-plans on');
+  expect(badge.box.top, note).toBeGreaterThanOrEqual(row.top - SUBPIXEL_TOLERANCE);
+  expect(badge.box.bottom, note).toBeLessThanOrEqual(row.bottom + SUBPIXEL_TOLERANCE);
+  expect(badge.box.right, note).toBeLessThanOrEqual(row.right + SUBPIXEL_TOLERANCE);
+  expect(seen.chooserHeadingName, note).toBe('Ride a workout');
+}
+
 const REPLAN_SWITCH = 'Re-plan during the ride';
 const REPLAN_HEADLINE =
   'This sends a summary of each block you ride to your instance, during the ride.';
@@ -1168,7 +1188,7 @@ for (const viewport of EASED_VIEWPORTS) {
 
     test('switched on, it says so and stops saying it is off, and nothing above it has moved', async ({
       page,
-    }) => {
+    }, testInfo) => {
       await open(page, viewport, REPLANS_AVAILABLE);
       const before = await measure(page);
       await page.evaluate(() => {
@@ -1177,6 +1197,10 @@ for (const viewport of EASED_VIEWPORTS) {
       const after = await measure(page);
       expect(after.replanDisclosure?.switchedOn).toBe(true);
       expect(after.replanDisclosure?.sentences).toHaveLength(8);
+      // #1244, restored on #1332: "Re-plans on" beside the heading while it is
+      // on, and not while it is off; on the heading's own row.
+      expect(before.replansOnLine).toBeUndefined();
+      expectBadgeOnTheHeadingRow(after, viewport);
       expect(after.replanDisclosure?.sentences.join(' ')).not.toContain('This is off');
       expect(after.replanDisclosure?.sentences.slice(0, 8)).toEqual(
         before.replanDisclosure?.sentences.slice(0, 8),
@@ -1184,8 +1208,18 @@ for (const viewport of EASED_VIEWPORTS) {
       const find = (seen: RideViewMeasurement, name: string) =>
         seen.controls.find((each) => each.group === 'trainer' && each.name === name);
       expect(find(after, REPLAN_SWITCH)?.box.top).toBe(find(before, REPLAN_SWITCH)?.box.top);
-      // ⚠️ The first Ride is exactly where it was: the line that goes is under it.
+      // ⚠️ The first Ride is exactly where it was: the line that goes is under
+      // it, and the badge that comes is on the heading's row.
       expect(find(after, STARTS_A_WORKOUT)?.box.top).toBe(find(before, STARTS_A_WORKOUT)?.box.top);
+      expect(after.trainerCard?.chooserHeading).toEqual(before.trainerCard?.chooserHeading);
+      expect(after.replanDisclosure?.headline).toEqual(before.replanDisclosure?.headline);
+      const startsMargin = (seen: RideViewMeasurement): number =>
+        foldMargin(find(seen, STARTS_A_WORKOUT)?.box.bottom ?? Infinity, viewport);
+      const note = `the first Ride ${startsMargin(before).toFixed(1)} px above the fold with the switch off, ${startsMargin(after).toFixed(1)} px with it on and "Re-plans on" shown`;
+      testInfo.annotations.push({ type: '#1329 the badge', description: note });
+      console.log(`#1329 — the badge — ${viewport.name} — ${note}`);
+      expect(startsMargin(after), note).toBe(startsMargin(before));
+      expect(startsMargin(after), note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
     });
   });
 }
@@ -1265,9 +1299,14 @@ for (const viewport of EASED_VIEWPORTS) {
  * switch used to follow the list, so with twelve workouts it was about 740 px
  * below the fold. The owner ruled it ABOVE the list (2026-10-13): with twelve
  * workouts the switch, its headline and the first *Ride* are all on the
- * screen, and the "Re-plans on" badge beside the heading, which existed only
- * because the switch was out of sight, is gone. `?workouts=many` is that
- * library.
+ * screen. The "Re-plans on" badge beside the heading was removed with the
+ * move and the owner ruled it BACK (2026-10-14, on #1332): it is shown on
+ * the heading's row while the switch is on, and the first *Ride*'s margin is
+ * the same number with it as without it. `?workouts=many` is that library.
+ *
+ * ⚠️ The badge is on the heading's row, which scrolls with the page: a rider
+ * who has scrolled past the top of a long list sees neither it nor the
+ * switch. Nothing here holds otherwise.
  */
 for (const viewport of EASED_VIEWPORTS) {
   test(`#1329 — many saved workouts — the switch, its headline and the first Ride are on the screen — ${viewport.name}`, async ({
@@ -1302,7 +1341,7 @@ for (const viewport of EASED_VIEWPORTS) {
     expect(switchMargin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
     expect(headlineMargin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
     expect(firstMargin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
-    // The switch is above every workout, the headline between, and no badge.
+    // The switch is above every workout, and the headline between.
     expect(the.box.bottom).toBeLessThanOrEqual(first.box.top + SUBPIXEL_TOLERANCE);
     expect(headline.bottom).toBeLessThanOrEqual(first.box.top + SUBPIXEL_TOLERANCE);
     await page.evaluate(() => {
@@ -1313,7 +1352,14 @@ for (const viewport of EASED_VIEWPORTS) {
     expect(on.replanDisclosure?.sentences).toHaveLength(8);
     expect(rides(on)[0]?.box.top).toBe(first.box.top);
     expect(theSwitch(on)?.box.top).toBe(the.box.top);
-    expect(await page.getByText('Re-plans on', { exact: true }).count()).toBe(0);
+    // #1244's badge, restored on #1332: shown once, on the heading's row, and
+    // the first Ride's margin is the same number with it as without it.
+    expect(off.replansOnLine).toBeUndefined();
+    expect(await page.getByText('Re-plans on', { exact: true }).count()).toBe(1);
+    expectBadgeOnTheHeadingRow(on, viewport);
+    const onMargin = foldMargin(rides(on)[0]?.box.bottom ?? Infinity, viewport);
+    expect(onMargin, note).toBe(firstMargin);
+    expect(onMargin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
   });
 }
 

@@ -845,6 +845,13 @@ export interface RideViewMeasurement {
   /** #1329: the chooser's warning that the saved workouts could not be read. */
   readonly loadFaultLine:
     { readonly box: Box; readonly text: string; readonly onTop: boolean } | undefined;
+  /**
+   * #1244, restored on #1332: *"Re-plans on"* beside the chooser's heading,
+   * shown only while the switch is on.
+   */
+  readonly replansOnLine: { readonly box: Box; readonly text: string } | undefined;
+  /** The chooser heading's own text, which is its accessible name. */
+  readonly chooserHeadingName: string | undefined;
   /** #1244: the line that says re-plans were switched off mid-workout. */
   readonly replansOffLine: { readonly box: Box; readonly text: string } | undefined;
   readonly replanDisclosure:
@@ -956,7 +963,10 @@ export interface RideViewTrainerCard {
         readonly background: string;
       }
     | undefined;
-  /** *Ride a workout*, the chooser's `h3`, and the re-plan switch's whole row. */
+  /**
+   * The row of *Ride a workout*, the chooser's `h3`, with *"Re-plans on"*
+   * beside it while the switch is on; and the re-plan switch's whole row.
+   */
   readonly chooserHeading: Box | undefined;
   readonly switchRow: Box | undefined;
   /** The list of saved workouts, where the re-plan switch stands above it. */
@@ -1087,6 +1097,13 @@ function measure(): RideViewMeasurement {
     replanDisclosure: replanDisclosureShown(),
     trainerCard: trainerCardShown(),
     loadFaultLine: loadFaultShown(),
+    chooserHeadingName: (() => {
+      const heading = document.querySelector('.oyl-ride__group--trainer .oyl-workout-heading > h3');
+      return heading === null ? undefined : textOf(heading);
+    })(),
+    replansOnLine: lineOf(
+      document.querySelector('.oyl-ride__group--trainer [data-oyl-replans-on]'),
+    ),
     replansOffLine: lineOf(
       [...document.querySelectorAll('.oyl-ride__group--trainer .oyl-status')].find((each) =>
         textOf(each).includes('Re-plans are off'),
@@ -1433,7 +1450,7 @@ function trainerCardShown(): RideViewMeasurement['trainerCard'] {
             colour: hintStyle.color,
             background: backgroundBehind(hint),
           },
-    chooserHeading: optional('section > h3'),
+    chooserHeading: optional('.oyl-workout-heading'),
     switchRow: optional('.oyl-workout-replans > label'),
     chooserList: optional('.oyl-workout-replans ~ ul'),
   };
@@ -1470,7 +1487,7 @@ function trainerCardUntrimmed(which?: TrainerCardTrim): void {
     set('form.oyl-trainer__form > p', { 'font-size': '1rem', 'line-height': 'inherit' });
   }
   if (all || which === 'chooser-heading') {
-    set('section > h3', { 'margin-block-end': 'var(--oyl-space-sm)' });
+    set('.oyl-workout-heading', { 'margin-block-end': 'var(--oyl-space-sm)' });
   }
   if (all || which === 'headline') {
     set('[data-oyl-replan-disclosure="headline"] > p', { 'line-height': 'inherit' });

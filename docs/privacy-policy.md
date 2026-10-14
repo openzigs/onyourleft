@@ -604,7 +604,7 @@ device unless you sync the ride afterwards.
 are signed in to an instance and have set your own threshold power and threshold heart rate, the
 workout panel on the Ride screen has a switch, *Re-plan during the ride*, when you choose a workout
 with a trainer this app controls. It is off at the start of every ride. This is what you are shown
-beside it:
+with it:
 
 > **This sends a summary of each block you ride to your instance, during the ride.**
 >

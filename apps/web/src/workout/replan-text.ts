@@ -93,6 +93,14 @@ export const REPLAN_OFF_BUTTON = 'Switch re-plans off';
 export const REPLANS_OFF =
   'Re-plans are off for the rest of this workout. Nothing more is sent, and the plan stays as it is.';
 
+/**
+ * Said beside the chooser's heading while the per-ride switch is on, so the
+ * choice is in sight where *Ride* is pressed however long the list is: the
+ * switch itself is under the list, with what it sends. Two words, because it
+ * shares the heading's line and must not move anything under it.
+ */
+export const REPLANS_ON_BADGE = 'Re-plans on';
+
 const REASONS: Readonly<Record<ReasonCode, string>> = {
   'heart-rate-high': 'because your heart rate stayed above the range you chose',
   'heart-rate-low': 'because your heart rate stayed below the range you chose',
@@ -281,4 +289,5 @@ export const REPLAN_FIXED_TEXTS: readonly string[] = [
   REPLAN_DISCARDED,
   REPLAN_OFF_BUTTON,
   REPLANS_OFF,
+  REPLANS_ON_BADGE,
 ];
