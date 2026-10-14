@@ -348,3 +348,13 @@ describe('which routes are read and which are operated (#422)', () => {
     ]);
   });
 });
+
+describe("Settings' note does not claim nothing is sent — #1333", () => {
+  it('says each sending setting says so, and never that nothing is sent anywhere', () => {
+    const notes = routeById('settings').notes ?? [];
+    expect(notes).toEqual([
+      'Each setting that sends something says so beside it, and nothing here changes what a ride recorded.',
+    ]);
+    expect(notes.join(' ')).not.toMatch(/nothing here is sent anywhere/i);
+  });
+});

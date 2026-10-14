@@ -405,7 +405,9 @@ export const ROUTES: readonly RouteDefinition[] = [
     navLabel: 'Settings',
     title: 'Settings',
     summary: 'How this device shows your numbers.',
-    notes: ['Nothing here is sent anywhere, and nothing here changes what a ride recorded.'],
+    notes: [
+      'Each setting that sends something says so beside it, and nothing here changes what a ride recorded.',
+    ],
   },
   {
     id: 'about',

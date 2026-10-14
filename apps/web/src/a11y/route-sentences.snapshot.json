@@ -534,7 +534,7 @@
     "Storage",
     "iUnknown: This browser does not say whether it will remove your rides automatically when it is short of space.",
     "Clearing this browser’s site data still removes your rides, and there is no copy anywhere else — export them if you want one.",
-    "Nothing here is sent anywhere, and nothing here changes what a ride recorded."
+    "Each setting that sends something says so beside it, and nothing here changes what a ride recorded."
   ],
   "about empty": [
     "About On Your Left",
@@ -1786,7 +1786,7 @@
     "Storage",
     "iUnknown: This browser does not say whether it will remove your rides automatically when it is short of space.",
     "Clearing this browser’s site data still removes your rides, and there is no copy anywhere else — export them if you want one.",
-    "Nothing here is sent anywhere, and nothing here changes what a ride recorded."
+    "Each setting that sends something says so beside it, and nothing here changes what a ride recorded."
   ],
   "about populated": [
     "About On Your Left",
