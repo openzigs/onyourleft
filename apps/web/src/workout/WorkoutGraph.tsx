@@ -16,6 +16,7 @@ import {
   workoutGraphPaths,
   workoutGraphText,
   workoutStripPaths,
+  workoutStripName,
   workoutStripText,
   type LaneLabel,
   type WorkoutGraphInput,
@@ -247,7 +248,7 @@ function Strip({ workout }: WorkoutGraphProps): JSX.Element {
   // `workoutGraphText` ends "The dotted outline is the plan before it was
   // changed." whenever it is handed one: a name describing a picture that
   // is not there, from the first accepted move to the end of the workout.
-  const name = useMemo(() => workoutGraphText({ ...workout, replaced: undefined }), [workout]);
+  const name = useMemo(() => workoutStripName(workout), [workout]);
   const text = useMemo(() => workoutStripText(workout), [workout]);
   const { lane, progress } = paths;
   return (
