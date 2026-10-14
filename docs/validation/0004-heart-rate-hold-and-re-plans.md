@@ -410,8 +410,12 @@ before riding.
   is and shows one line with no label, never spoken: *"No re-plan could be asked for just now.
   The workout carries on as planned."* (`REPLAN_UNAVAILABLE`). It stays until an answer arrives.
   A refusal that will not change during the workout (`unauthenticated`, `validation_failed`,
-  `rate_limited`, `analysis_off`) ends the asking for that workout. Anything else is asked again
-  at the next allowed boundary (`replan-session.ts` §`PERMANENT_REFUSALS`).
+  `rate_limited`, `analysis_off`) ends the asking for that workout. A start that fails after a good
+  key read, or a failed job, is asked again at the next allowed boundary (`replan-session.ts`
+  §`PERMANENT_REFUSALS`). ⚠️ **An instance that is down is not in that class.** Every request first
+  opens a session, which reads the instance's keys; an unreachable instance closes the session with
+  `why: 'keys'`, and that ends the asking for the workout, the same as a refusal. This is a defect
+  (an outage treated as permanent), filed from B3.2, not the intended behaviour.
 - **A proposal the validator refuses, or an answer of "keep the workout"**, shows nothing.
 - **The record of every decision (P9)** is kept with the ride on the device. It is **not on any
   screen** and not synced ([#1315](https://github.com/openzigs/onyourleft/issues/1315), open).
@@ -451,7 +455,8 @@ Six blocks, so there are five boundaries and no block is the last by accident. S
 | 5 | Steady | 6 min | 65 % | 23:00 |
 | 6 | Steady (cool-down) | 5 min | 45 % | 29:00 |
 
-A request leaves at 5:00, 11:00, 17:00 and 23:00, each about the blocks ridden so far. A move it
+A request leaves at 5:00, 11:00, 17:00 and 23:00 while the plan is as loaded (a length move that
+is applied shifts every later boundary, and requests follow the boundaries), each about the blocks ridden so far. A move it
 brings back changes blocks from the one after the block that has just begun: a request at 5:00
 can change block 3 onwards. Block 6, the last, is never changed (ruling 6).
 
@@ -527,7 +532,7 @@ maximum), **P4** (rate and size) and **P9** (kept with the ride).
 
 | Step | What to do | What should happen | ⚠️ Stop if |
 |---|---|---|---|
-| B1.1 | Switch ***Re-plan during the ride*** on, check *Re-plans on* beside the heading, and press *Ride Re-plan check*. Ride from block 1 | Nothing is asked before 5:00. At 5:00, 11:00, 17:00 and 23:00 a request leaves. If a move comes back in time and is accepted, the panel shows **Plan change:** with one sentence and *"It starts with the next block."* (word for word in [What the code does](#what-the-code-does-and-where-it-says-so)), and ***Keep the plan*** under it. With announcements on it is spoken once. **The current block's target does not change**: no `0x05` between the sentence and the boundary, other than the hold's own in block 2 | the target changes before the boundary (Part B's stop condition) |
+| B1.1 | Switch ***Re-plan during the ride*** on, check *Re-plans on* beside the heading, and press *Ride Re-plan check*. Ride from block 1 | Nothing is asked before 5:00. At 5:00, 11:00, 17:00 and 23:00 a request leaves (the times move after an applied shorten or lengthen). If a move comes back in time and is accepted, the panel shows **Plan change:** with one sentence and *"It starts with the next block."* (word for word in [What the code does](#what-the-code-does-and-where-it-says-so)), and ***Keep the plan*** under it. With announcements on it is spoken once. **The current block's target does not change**: no `0x05` between the sentence and the boundary, other than the hold's own in block 2 | the target changes before the boundary (Part B's stop condition) |
 | B1.2 | Do **not** press *Keep the plan*. Ride through the boundary | At the boundary the sentence and the button go, and the next block is the **changed** one. Its `0x05` is the device's own arithmetic for the move the sentence named, at or under the peak written beside the table. A shortened or lengthened block ends when the sentence said it would | the new block's target is above the loaded workout's peak for its kind, or above your goal's ceiling |
 | B1.3 | Ride on to the end, and *End workout* | No two accepted moves less than 3 minutes apart, and no two harder ones less than 10. The cool-down is the loaded one, unshortened | |
 | B1.4 | After the ride, export (*Files → Take everything with you → Export everything*) and read this ride's `rideFacts.replans` | One record per decision: each accepted move with its move, reason and `at`; each refused proposal with its `rule`. A move that reached its block has no `not-applied` record after it | |
@@ -589,9 +594,10 @@ Two ways to make one late. Do at least the first.
 **Fails P2 or P5 if:** a re-plan sentence is shown for a request older than 60 s, or for an answer
 that arrived inside the last 30 s of the block it was asked in; or any boundary `0x05` differs from
 the loaded plan's after such an answer, read from the log. **The job table**: in B2.1 the job is
-**`cancelled`** by the device if it reached the instance, or **`failed`** with `out-of-time` if
-its 45 s ran out first, and it may never have been made at all if the start was lost. It is never
-a `succeeded` job that changed the plan.
+most likely **no row at all**: the instance is paused before 11:00, so the call that hangs is the key
+read that opens the session, and the device gives up on it before any job is started. A row
+exists only if the start got through, and then it is **`cancelled`** by the device or **`failed`**
+with `out-of-time` if its 45 s ran out first. It is never a `succeeded` job that changed the plan.
 
 ### B3 — the instance stopped mid-ride
 
@@ -600,11 +606,12 @@ most) **and ADR 0036 D-3(a)** (nothing that works with no instance starts to nee
 
 | Step | What to do | What should happen | ⚠️ Stop if |
 |---|---|---|---|
-| B3.1 | Riding block 2 with the hold running, have the instance **stopped** (`docker compose stop instance`). Ride through the 11:00 and 17:00 boundaries | The ride carries on. **The hold keeps working** in block 2. Each boundary's `0x05` is the loaded plan's. At each boundary the panel shows, with no label and not spoken, *"No re-plan could be asked for just now. The workout carries on as planned."*, one line and no more. **No write is caused by the failure**: no `0x05` at the moment the instance went, no `0x08`, no `0x00` | the target changes at the moment the instance stops, or the workout pauses or ends |
-| B3.2 | Have the instance started again (`docker compose up -d instance`; wait for `/ready`). Ride through the 23:00 boundary | Re-plans **carry on**: a request leaves at 23:00, because a request that failed is not a refusal that ends the asking. The line stays until an answer arrives. No burst: at most one job, and the job table shows one row at 23:00, not a cluster at the restart | |
+| B3.1 | Riding block 2 with the hold running, have the instance **stopped** (`docker compose stop instance`). Ride through the 11:00 and 17:00 boundaries | The ride carries on. **The hold keeps working** in block 2. Each boundary's `0x05` is the loaded plan's. From 11:00 the panel shows, and keeps showing, with no label and not spoken, *"No re-plan could be asked for just now. The workout carries on as planned."*, one line and no more. **No write is caused by the failure**: no `0x05` at the moment the instance went, no `0x08`, no `0x00` | the target changes at the moment the instance stops, or the workout pauses or ends |
+| B3.2 | Have the instance started again (`docker compose up -d instance`; wait for `/ready`). Ride through the 23:00 boundary | **By the code, no request leaves at 23:00.** The 11:00 key read found the instance unreachable, which closed the session (`why: 'keys'`) and ended the asking for this workout, so the job table shows **no row** at 17:00 or 23:00 and no burst at the restart. This is a **known defect, not a pass**: an outage is treated as permanent, against the module header. Record what you saw. If a request did leave at 23:00, record that too, as the code was then not as read | |
 
 **Fails P8 if:** any write in the log coincides with the instance stopping; the workout paused or
-ended; more than one line was shown; or more than one job was made at the restart.
+ended; more than one line was shown; or more than one job was made at the restart. B3.2 is
+**filed as a defect** when no request leaves after the restart (fail-safe, so not a P8 failure).
 
 ### B8 — *Switch re-plans off* mid-workout
 
@@ -628,7 +635,7 @@ In the P9 record, a move dropped by the press is followed by `not-applied` with 
 | Step | What to do | What should happen | ⚠️ Stop if |
 |---|---|---|---|
 | B5.1 | Re-plans on. Ride to the 5:00 boundary. **Within about 3 s after it**, while the request's job is still running, press ***Stop***, then ***Yes, stop the ride*** | **Exactly one `0x08`**, and **no `0x05` after it** for 60 s. Nothing about a re-plan is shown afterwards | — step off if the load stays (Safety item 7) |
-| B5.2 | Read the job table's newest re-plan row | The job in flight is **`cancelled`**, not left `running` | |
+| B5.2 | Read the job table's newest re-plan row | The job in flight is **`cancelled`**, not left `running`. If *Stop* landed before the start returned, **no new row** is also valid: no job was made | |
 
 **Fails D-8 if:** any `0x05` is timestamped after the `0x08`; or a re-plan sentence appears after
 *Stop*. A job left `running`, or one that was already `succeeded` before the press, is not a
