@@ -114,6 +114,15 @@
  * "123.5 km" and "234 W" on the card and in the selected ride's summary, both
  * recorded.
  *
+ * ⚠️ **Re-recorded by #1312** (its third pass), when the populated ride's
+ * laps became laps of a course: five with every figure a lap can state, the
+ * third the best and the last a part lap, where there were twelve identical
+ * ones. The ride's page gains the six headings a course lap adds, each lap's
+ * figures, "3 · Best lap", "5 · Part lap" and the note under the table. What
+ * went is the old fixture's own figures and nothing a rider is told: the
+ * numbers of laps six to twelve, "1 · Best lap" (the first of twelve equal
+ * laps), and the "—" of a lap with no power.
+ *
  * ## What it does not check
  *
  * That a sentence is in the same ORDER, or visible — `kept-visible.a11y.test`

@@ -136,6 +136,8 @@ import {
   type AnnouncerState,
 } from './hud/announce';
 import { slopeEvent, slopesOf, type Slope, type SlopeAnnounced } from './hud/climb-ahead';
+import { LAP_NOTICE_SECONDS, lapSummary, type LapSummary } from './hud/lap-text';
+import { courseEndEvent, courseLapsDone, courseLineEvent } from './course-laps';
 import type { CueOutput } from './audio-port';
 import { RideCues } from './audio-cues';
 import {
@@ -162,6 +164,7 @@ import {
   type BotPacerPlan,
   type GhostTrack,
   type Kilograms,
+  type RouteProfile,
   type Wind,
   type WorkoutRescue,
 } from '@onyourleft/domain';
@@ -452,6 +455,21 @@ function useRideMovingSeconds(trainer: GameTrainerPort | undefined): number | un
 }
 
 /**
+ * The moving time of the lap in progress, kept current — #1312. The
+ * recorder's figure, subscribed for {@link useRideMovingSeconds}'s reason: a
+ * paused GAME does not pause the recording, and the lap's clock is the
+ * recording's.
+ */
+function useRideLapSeconds(trainer: GameTrainerPort | undefined): number | undefined {
+  const watch = useCallback(
+    (listener: () => void) => trainer?.watchRide(listener) ?? watchNothing(),
+    [trainer],
+  );
+  const read = useCallback(() => trainer?.rideLapSeconds?.(), [trainer]);
+  return useSyncExternalStore(watch, read);
+}
+
+/**
  * {@link oneNoticeOnly}, kept current — #693's re-review.
  *
  * ⚠️ **Subscribed, not read during render.** A running ride re-renders on
@@ -615,6 +633,34 @@ export function GameView(props: GameViewProps): JSX.Element {
     { readonly text: string; readonly from: number } | undefined
   >(undefined);
   /**
+   * The lap that has just ended, and the ride time it ended at — #1312. On
+   * the HUD for `lap-text.ts` §`LAP_NOTICE_SECONDS` of ride, the world
+   * notice's rule, and `undefined` until the rider completes the course with
+   * a recording under the ride.
+   *
+   * ⚠️ `status`: whether the notice is itself a status message (SC 4.1.3) —
+   * `true` when the HUD's one region is NOT going to say this lap, which is
+   * with announcements off (`announce.ts`, rank 5e). The lap is gone in ten
+   * seconds and is on no other part of the stage, so with nothing saying it a
+   * screen-reader rider would have no way to it; with announcements on the
+   * region says it, and a second live region would say it twice.
+   */
+  const [lapNotice, setLapNotice] = useState<
+    { readonly summary: LapSummary; readonly from: number; readonly status: boolean } | undefined
+  >(undefined);
+  /** How many times this ride has completed its course. @see course-laps.ts */
+  const lapsDoneRef = useRef(0);
+  /** The course this ride is on, for `teardown`, which closes over nothing of the ride. */
+  const courseRef = useRef<RouteProfile | undefined>(undefined);
+  /**
+   * The finished lap's sentence, still owed to the HUD's one region, and the
+   * ride time after which it is no longer worth saying — #1312. Offered on
+   * every call until it comes back as `kind` (`announce.ts`, rank 5e).
+   */
+  const lapOwedRef = useRef<{ readonly text: string; readonly until: number } | undefined>(
+    undefined,
+  );
+  /**
    * What the trainer could be told when this ride started — #362.
    *
    * ⚠️ **Read once, at the start of the ride, and held for its length**, which
@@ -737,6 +783,8 @@ export function GameView(props: GameViewProps): JSX.Element {
   const sideCamera = useSideCamera(props.sidePairing);
   /** @see useRideMovingSeconds */
   const movingSeconds = useRideMovingSeconds(props.trainer);
+  /** @see useRideLapSeconds */
+  const lapSeconds = useRideLapSeconds(props.trainer);
   const sidePairingRef = useRef(props.sidePairing);
   sidePairingRef.current = props.sidePairing;
   const sideLostRef = useRef(false);
@@ -946,6 +994,15 @@ export function GameView(props: GameViewProps): JSX.Element {
     // ride that was on: this also runs when the picker unmounts, and that must
     // not wipe what the last ride settled.
     if (simulationRef.current !== undefined) {
+      // #1312: the lap the rider was part-way round is a PART lap of the
+      // recording, stated as one and never as a slow lap — or, on the line,
+      // nothing but that no lap is open any more.
+      const course = courseRef.current;
+      if (course !== undefined) {
+        trainerPortRef.current?.courseLine?.(
+          courseEndEvent(course, simulationRef.current.state.ride.distance),
+        );
+      }
       trainerPortRef.current?.gameRideEnded(outcomeRef.current);
     }
     // #782: leave the room — its socket, its reconnects and its hold on the
@@ -1084,6 +1141,15 @@ export function GameView(props: GameViewProps): JSX.Element {
         ...(air === undefined ? {} : { wind: air }),
       });
       simulationRef.current = simulation;
+      // #1312: the rider is on the line of this course, so a lap begins here
+      // — of the RECORDING, if there is one (`trainer-port.ts`
+      // §`GameTrainerPort.courseLine`). Beside the simulation, so `teardown`
+      // ends exactly the laps this began.
+      courseRef.current = profile;
+      lapsDoneRef.current = 0;
+      lapOwedRef.current = undefined;
+      setLapNotice(undefined);
+      props.trainer?.courseLine?.({ kind: 'started' });
       // ⚠️ #362: the line that makes #90's whole gradient path reachable from a
       // ride. `createSimulationDriver` and `createSimulationWriter` were both
       // written, both unit-tested and both green, and nothing under `apps/`
@@ -1605,6 +1671,49 @@ export function GameView(props: GameViewProps): JSX.Element {
       if (planDiscarded.event !== undefined) {
         events.push(planDiscarded.event);
       }
+      // #1312: the line of the course. The game says only WHERE it was; the
+      // lap that comes back is the recording's own (`recording/laps.ts`): its
+      // times, distance and climb are the row the ride's page will list, and
+      // its averages are that row's but for a reading still on its way as the
+      // line was crossed — and with nothing recording there is no lap, and
+      // nothing is said.
+      const crossed = courseLineEvent(
+        chosen.profile,
+        lapsDoneRef.current,
+        simulation.state.ride.distance,
+      );
+      if (crossed !== undefined) {
+        lapsDoneRef.current = courseLapsDone(chosen.profile, simulation.state.ride.distance);
+        const laps = trainerPortRef.current?.courseLine?.(crossed);
+        const summary = laps === undefined ? undefined : lapSummary(laps, unitsRef.current);
+        if (summary !== undefined) {
+          setLapNotice({
+            summary,
+            from: simulation.state.elapsed,
+            status: !announcementsRef.current.enabled,
+          });
+          lapOwedRef.current = {
+            text: summary.sentence,
+            until: simulation.state.elapsed + LAP_NOTICE_SECONDS,
+          };
+        }
+      }
+      // Said ONCE, and only while its notice is on the HUD: offered on every
+      // call until the core says it (a lower event behind a higher one is
+      // dropped, `announce.ts` rank 5e), and taken back — waiting or not —
+      // once the notice has gone, so a lap is never said late.
+      const lapOwed = lapOwedRef.current;
+      if (lapOwed !== undefined) {
+        if (simulation.state.elapsed < lapOwed.until) {
+          events.push({ kind: 'lap-ended', text: lapOwed.text });
+        } else {
+          lapOwedRef.current = undefined;
+          announcerRef.current = withdrawPending(
+            announcerRef.current,
+            (event) => event.kind === 'lap-ended',
+          );
+        }
+      }
       const heard = announce(announcerRef.current, {
         now: simulation.state.elapsed,
         readings,
@@ -1618,6 +1727,9 @@ export function GameView(props: GameViewProps): JSX.Element {
       }
       if (heard.kind === 'screen-off-risk') {
         mayStopSaidRef.current = true;
+      }
+      if (heard.kind === 'lap-ended') {
+        lapOwedRef.current = undefined;
       }
       // #400: the distance sound plays on the frame its SENTENCE is said and
       // on no other, so it is never the only carrier of a mark passed.
@@ -1992,6 +2104,8 @@ export function GameView(props: GameViewProps): JSX.Element {
         // `elapsed`, which is a second clock that does not know about the
         // recorder's auto-pause. @see useRideMovingSeconds
         movingSeconds={movingSeconds}
+        // #1312: and the lap's, the recorder's again. @see useRideLapSeconds
+        lapSeconds={lapSeconds}
         chases={chasedGaps(state, ghostRef.current, outcomeRef.current)}
         // #783: a count and ONE chosen gap on a room ride, never a list.
         {...(roomRef.current === undefined
@@ -2238,6 +2352,21 @@ export function GameView(props: GameViewProps): JSX.Element {
             </StatusMessage>
           ),
         ]}
+        // #1312: the lap that has just ended — its time and averages, and how
+        // it compares, in words (`hud/lap-text.ts`). For LAP_NOTICE_SECONDS of
+        // ride and then out of the way, the world notice's rule: on a phone a
+        // notice costs the route panel's cell (#437). Not `live`: the HUD's
+        // one region says it, once (`announce.ts` rank 5e). A prop of its own
+        // rather than one more of `notices`, because the HUD shows it only
+        // when the cell is otherwise empty. @see HudPanelProps.lapNotice
+        lapNotice={
+          lapNotice === undefined ||
+          (state?.elapsed ?? 0) - lapNotice.from >= LAP_NOTICE_SECONDS ? undefined : (
+            <StatusMessage tone="info" label={lapNotice.summary.label} live={lapNotice.status}>
+              {lapNotice.summary.text}
+            </StatusMessage>
+          )
+        }
       />
     </section>
   );

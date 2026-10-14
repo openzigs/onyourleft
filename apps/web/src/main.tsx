@@ -16,6 +16,7 @@ import {
   activityId,
   cameraFrameId,
   ensureDeviceSigningKey,
+  lapId,
   openActivityStore,
   recordingSessionId,
   routeId,
@@ -315,6 +316,8 @@ async function buildPlatform(
     rideSave: {
       store: localStore(),
       newActivityId: () => activityId(globalThis.crypto.randomUUID()),
+      // #1312: one for each lap of a course a game ride completed.
+      newLapId: () => lapId(globalThis.crypto.randomUUID()),
       // #232: a file the rider decides was a course after all. A separate
       // generator rather than a cast, for the reason `store-port.ts` gives.
       newRouteId: () => routeId(globalThis.crypto.randomUUID()),

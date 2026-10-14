@@ -603,7 +603,10 @@ describe('the lap table', () => {
     mounted = await open(indoorRide());
     const rows = queryAll(document, 'table.oyl-table tbody tr');
     expect(rows).toHaveLength(2);
-    expect(rows[0]?.querySelector('th')?.textContent).toBe('1');
+    // #1312: the page marks the best lap in the row's own header. The stub's
+    // two laps took the same time, and the earlier of two equal laps is it
+    // (`detail/LapsTable.test.tsx` holds the rule's other cases).
+    expect(rows[0]?.querySelector('th')?.textContent).toBe('1 · Best lap');
     expect(rows[1]?.querySelector('th')?.textContent).toBe('2');
   });
 
