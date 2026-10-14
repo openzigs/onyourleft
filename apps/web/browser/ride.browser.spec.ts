@@ -3141,15 +3141,16 @@ const STRIP_FIXTURES = [
     absent: /range|heart-rate/,
   },
   {
-    // Paused: the trainer was eased to its 50 W minimum. ⚠️ The line says
-    // THAT, not the newest sample's 175 W, which is what is still drawn.
+    // Paused: the trainer was eased to its 50 W minimum. The line says THAT.
+    // #1313 (the owner's ruling): no target or trace line is drawn through a
+    // pause, so the lane is empty, and the name says nothing a line would.
     graph: 'paused',
     lane: 'power',
     text: 'Paused · Target 50 W',
     named: 'Workout graph. Paused.',
-    asked: 'oyl-workout-strip__target',
-    doing: 'oyl-workout-strip__power',
-    absent: /range|heart-rate/,
+    asked: undefined,
+    doing: undefined,
+    absent: /target|power|range|heart-rate/,
   },
 ] as const;
 
@@ -3179,11 +3180,19 @@ function expectStripReadable(graph: GraphSight, fixture: (typeof STRIP_FIXTURES)
   expect(graph.lane).toBe(fixture.lane);
   expect(graph.marks.filter((each) => fixture.absent.test(each.name))).toEqual([]);
   expect(laneBox.height).toBeGreaterThanOrEqual(36);
-  expect(mark(fixture.asked).paint).toBe(HUD_INK_MUTED);
+  if (fixture.asked !== undefined) {
+    expect(mark(fixture.asked).paint).toBe(HUD_INK_MUTED);
+  }
   if (fixture.doing !== undefined) {
     expect(mark(fixture.doing).paint).toBe(HUD_INK);
   }
-  for (const name of [fixture.asked, ...(fixture.doing === undefined ? [] : [fixture.doing])]) {
+  if (fixture.graph === 'paused') {
+    expect(graph.name).not.toMatch(/Your power|Heart rate|chosen range/);
+  }
+  for (const name of [
+    ...(fixture.asked === undefined ? [] : [fixture.asked]),
+    ...(fixture.doing === undefined ? [] : [fixture.doing]),
+  ]) {
     const { box } = mark(name);
     // Each uses a real share of the lane, across nearly all of its width.
     expect(box.height, name).toBeGreaterThanOrEqual(10);
