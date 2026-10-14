@@ -3352,6 +3352,27 @@ a.oyl-button {
 }
 
 /*
+ * #1329 (owner ruling, 2026-10-13, "trim the trainer card"): the Ride screen's
+ * trainer column is short, and the re-plan switch and its headline are above
+ * the workout list, so the card gives up what its paragraphs spent on gaps.
+ * The control sentence had its own font's 1.25rem above and below (20 px, the
+ * heading's 8 px collapsing into it); it now sits 8 px under the heading, and
+ * with the ERG line's -8 px (#503) the ERG line is 8 px under it. The ERG line
+ * had a paragraph's 1rem under it and now has 8 px. 24 px in all, on every
+ * font, in every state of the screen; no text changes size here.
+ * `rideview.browser.spec.ts` §"#1329 — the trainer card's gaps" holds each of
+ * the three, and its control puts them back. Scoped to the Ride screen's
+ * trainer group, as #669's rule below is.
+ */
+.oyl-ride__group--trainer .oyl-trainer__state {
+  margin-block: var(--oyl-space-sm) var(--oyl-space-md);
+}
+
+.oyl-ride__group--trainer .oyl-trainer__erg {
+  margin-bottom: var(--oyl-space-sm);
+}
+
+/*
  * #503: the ERG line under the control sentence. Control and ERG were one
  * sentence until then; as two, the paragraph gap between them cost the
  * workout's Ride its margin to the fold inside the Android shell
@@ -3394,9 +3415,19 @@ a.oyl-button {
  * workout chooser" publishes the margin and holds the floor. Scoped to the
  * Ride screen's trainer group: Settings and Analysis use the same row class
  * for forms of their own.
+ *
+ * #1329 (owner ruling, 2026-10-13): at the SMALL size, close-set. It is the
+ * form's helper text, which is what `--oyl-font-size-sm` is for
+ * (`design/tokens.ts` §`FONT_SIZE_TOKENS`), and at the body size it was three
+ * lines, 74 px, between *Set target* and the workout's *Ride*; small, it is
+ * two (33 px) on a Mac's fonts and on the CI runner's. Its ink is unchanged:
+ * `.oyl-muted` on `surface`, a declared contrast pair. The same spec section
+ * holds the size and reads the contrast back off the page.
  */
 .oyl-ride__group--trainer form.oyl-trainer__form > p {
   flex-basis: 100%;
+  font-size: var(--oyl-font-size-sm);
+  line-height: 1.3;
   margin: 0;
 }
 
@@ -3404,20 +3435,23 @@ a.oyl-button {
  * #1244, #1329: the re-plan switch ABOVE the workout chooser's list, with the
  * headline of #1245's disclosure under it; the other eight sentences are
  * under the list. `rideview.browser.spec.ts` §"#1244" publishes the margins
- * and holds the floor for the switch, its headline and the first *Ride*.
+ * and holds the 50 px floor for the switch, its headline and the first *Ride*.
  */
 .oyl-workout-replans {
   margin-block: 0 var(--oyl-space-sm);
 }
 
-/* The list gives up its top margin to the switch's 8 px, and the headline sits
-   straight under the switch's own 44 px row: the column is short (#1329). */
-.oyl-ride__group--trainer .oyl-workout-replans ~ ul {
-  margin-block-start: 0;
+/* The chooser's heading and its list each give up a margin to the switch: the
+   switch's own row is 44 px tall around one line of text, so it brings 10 px
+   of air above and below its words with it, and the block has 8 px under it.
+   Only where the switch is: a rider with no instance has no switch, and their
+   chooser is laid out as it always was. */
+.oyl-ride__group--trainer h3:has(+ .oyl-workout-replans) {
+  margin-block-end: 0;
 }
 
-.oyl-workout-replans-rest {
-  margin-block-start: var(--oyl-space-sm);
+.oyl-ride__group--trainer .oyl-workout-replans ~ ul {
+  margin-block-start: 0;
 }
 
 /* #1244: *End workout* and, while re-plans are on, *Switch re-plans off*, on
@@ -3430,10 +3464,12 @@ a.oyl-button {
 }
 
 .oyl-workout-replans > [data-oyl-replan-disclosure] > p:first-child {
-  /* The headline is the one sentence above the list, and the column is short
-     (#1329): small and close-set, so it takes two lines and not three where
-     the fonts are wider. It stays bold, and its wording is the approved one. */
-  font-size: var(--oyl-font-size-sm);
+  /* The headline is the one sentence above the list (#1329). At the BODY size,
+     as the eight sentences under the list are, and bold; it was small for one
+     review and the owner ruled it back. Close-set, as a heading of two or
+     three lines is: on the CI runner's fonts it is three lines, and at the
+     body's 1.55 those cost the first *Ride* 12 px more of its margin. Straight
+     under the switch's row, with no margin of its own. */
   line-height: 1.3;
   margin-block: 0;
 }

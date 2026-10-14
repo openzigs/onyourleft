@@ -622,7 +622,7 @@ export function WorkoutPanel({
         {!offerReplans ? null : (
           // #1244: the disclosure's remaining sentences, in their order, under
           // the list (#1329): the headline and the switch are above it.
-          <div className="oyl-workout-replans-rest" data-oyl-replan-disclosure="rest">
+          <div data-oyl-replan-disclosure="rest">
             {disclosure.paragraphs.map((paragraph) => (
               <p key={paragraph}>{paragraph}</p>
             ))}
