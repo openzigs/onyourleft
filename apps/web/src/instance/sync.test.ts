@@ -2155,6 +2155,18 @@ describe('a pull does not undo a change made here while it waited on the instanc
 
   const nothing = (): Promise<void> => Promise.resolve();
 
+  /** A on the instance, B linked but never synced: B's first sync pulls what B never held. */
+  async function firstPull(save: (store: HeldStore) => Promise<unknown>) {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, ['nominal-outdoor-ride.fit']);
+    await a.on.harness.write(save);
+    expect((await a.sync()).failures).toStrictEqual([]);
+    const b = await linkedDevice(world.url, origin, a.on);
+    await b.on.harness.write((store) => ensureLocalAthlete(store, NOW));
+    return { a, b };
+  }
+
   describe('a goal, note or document (rule 8)', () => {
     const goal = riderTextFor(LOCAL_ATHLETE, 'goal');
     const withText = (text: string) => (store: HeldStore) => store.putRiderText({ ...goal, text });
@@ -2188,6 +2200,13 @@ describe('a pull does not undo a change made here while it waited on the instanc
       // them there. Not this issue's to overrule — the PR says so.
       expect(await b.sync()).toMatchObject({ textsPulled: 1, textsDeletedOnInstance: 0 });
       expect((await goalOn(b.on))?.text).toBe('Climb Ventoux.');
+    }, 60_000);
+
+    it('keeps a text typed here in the wait of a first sync, never held before', async () => {
+      const { b } = await firstPull(withText('Ride a century.'));
+      const report = await syncEditingBefore(b.on, 'putRiderText', withText('Typed on B.'));
+      expect(report).toMatchObject({ textsPulled: 0, failures: [] });
+      expect((await goalOn(b.on))?.text).toBe('Typed on B.');
     }, 60_000);
 
     it('still pulls when nothing changed here in the wait', async () => {
@@ -2245,6 +2264,15 @@ describe('a pull does not undo a change made here while it waited on the instanc
       expect(await workoutsOn(b.on)).toStrictEqual([]);
     }, 60_000);
 
+    it('keeps a workout saved here in the wait of a first sync, never held before', async () => {
+      const { b } = await firstPull((store) => store.putWorkout(workout));
+      const report = await syncEditingBefore(b.on, 'putWorkout', (store) =>
+        store.putWorkout(named('Typed on B')),
+      );
+      expect(report).toMatchObject({ workoutsPulled: 0, failures: [] });
+      expect((await workoutsOn(b.on)).map((row) => row.name)).toStrictEqual(['Typed on B']);
+    }, 60_000);
+
     it('still pulls when nothing changed here in the wait', async () => {
       const { b } = await pending();
       const report = await syncEditingBefore(b.on, 'putWorkout', nothing);
@@ -2292,6 +2320,15 @@ describe('a pull does not undo a change made here while it waited on the instanc
       expect(await instanceItem(a.on, 'workout-goal', 'goals')).toBeUndefined();
       expect(await b.sync()).toMatchObject({ workoutGoalsPulled: 0, failures: [] });
       expect(await goalsOn(b.on)).toStrictEqual({ status: 'none' });
+    }, 60_000);
+
+    it('keeps goals typed here in the wait of a first sync, never held before', async () => {
+      const { b } = await firstPull((store) => store.putWorkoutGoals(goals(60)));
+      const report = await syncEditingBefore(b.on, 'putWorkoutGoals', (store) =>
+        store.putWorkoutGoals(goals(45)),
+      );
+      expect(report).toMatchObject({ workoutGoalsPulled: 0, failures: [] });
+      expect(await goalsOn(b.on)).toStrictEqual({ status: 'kept', record: goals(45) });
     }, 60_000);
 
     it('still pulls when nothing changed here in the wait', async () => {

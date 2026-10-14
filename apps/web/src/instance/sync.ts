@@ -1281,6 +1281,9 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
       createdAt: local?.createdAt ?? now,
       updatedAt: now,
     };
+    // `read` is also undefined for a workout here that cannot be encoded, and
+    // then the condition accepts it: unreachable, `syncWorkout` answers
+    // `not-a-workout` for such a row before it pulls.
     const read = local === undefined ? undefined : workoutBody(local);
     try {
       await store.putWorkout(record, {
