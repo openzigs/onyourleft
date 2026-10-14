@@ -85,7 +85,11 @@ describe('the sync manifest (#776)', () => {
     const everything = (await manifestOf(world, rider!)).map((entry) => entry.key);
     expect(seen.sort(), 'no entry missed').toEqual(everything.sort());
     expect(everything).toHaveLength(5 + 2 * 6);
-  });
+    // 1 174 ms on green `main` (38462922816, EPYC 7763) and 3 247 ms
+    // under coverage (nightly 38279988356, EPYC 9V74), 65 % of Vitest's 5 s
+    // default. About three times the slowest CI figure (docs/agents/ci.md §4c,
+    // #1262); nothing it does is changed.
+  }, 10_000);
 
   it('says which ride an activity is, and refuses a cursor it did not write', async () => {
     const setup = await syncWorld(1);
@@ -110,10 +114,13 @@ describe('the sync manifest (#776)', () => {
  * Under coverage on the CI runner this case took 2 944 ms (run 38048816433,
  * EPYC 9V74) and 4 001 ms (run 38051571333, `main`, EPYC 7763) — 80 % of
  * Vitest's 5 s default — and ran past 5 s on run 38052735064 (EPYC 9V74), with
- * nothing hung; 968 ms locally without coverage. About three times the slowest
- * green figure (docs/agents/ci.md §4c); nothing it drives is trimmed.
+ * nothing hung; 968 ms locally without coverage. It had 15 s from then until
+ * #1262, which read 5 834 ms on green `main` (38337365635, EPYC 7763; 5 025 ms
+ * on 38598735374, Xeon 8573C) and 11 139 ms under coverage (nightly
+ * 38279988356, EPYC 9V74): 74 % of 15 s. About three times the slowest CI
+ * figure (docs/agents/ci.md §4c); nothing it drives is trimmed.
  */
-const THREE_ATHLETES_CASE_MS = 15_000;
+const THREE_ATHLETES_CASE_MS = 35_000;
 
 describe('three athletes, the same keys, the same file (#776)', () => {
   it(
