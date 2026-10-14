@@ -304,6 +304,16 @@ export interface HudInput {
    * the rider has not moved.
    */
   readonly movingSeconds?: number | undefined;
+  /**
+   * The moving time of the lap in progress, in seconds — #1312. **The
+   * recorder's again** ({@link movingSeconds} says why there is no other
+   * clock): `RideSnapshot.courseLapSeconds`, its moving time since the rider
+   * last crossed the line, read through `trainer-port.ts`
+   * §`GameTrainerPort.rideLapSeconds`. `undefined` where nothing is being
+   * recorded, and then no lap time is stated. {@link profileReading} is where
+   * it is shown, and says why it is not a field of its own.
+   */
+  readonly lapSeconds?: number | undefined;
 }
 
 /**
@@ -791,8 +801,27 @@ export interface ProfileReading {
  * past its end exactly as it did before, because there the rider really has
  * finished. `plan.ts` §`planLap` is where "which lap" is decided, and it returns
  * nothing at all for a route that is not a loop.
+ *
+ * ⚠️ **The lap's TIME is said here too, and not in a field of its own — #1312,
+ * measured rather than chosen.** As an eighth secondary field it put the
+ * secondary panel over the rider at 736×360 on the widest ride a picker can
+ * start (a pacer, a ghost, a wind and a loop — in the pinned Chromium on a
+ * Mac, with the ride harness's `?lap=ended` fixture, the panel was 182 px
+ * tall there): the layout has no row left to give. This sentence already
+ * said which lap the rider is on, so the lap's time joins the lap's number:
+ * `25% of lap 2 · 4:12`. It costs no cell, and it is where a rider already
+ * looks to see how far round they are. The time is the RECORDER's
+ * ({@link HudInput.lapSeconds}), `m:ss` as every duration read once is
+ * (`format.ts` §`DurationHours`); with nothing recording there is no lap
+ * time, and the sentence is the one it always was.
+ *
+ * @param lapSeconds {@link HudInput.lapSeconds}.
  */
-export function profileReading(state: GameState, profile: RouteProfile): ProfileReading {
+export function profileReading(
+  state: GameState,
+  profile: RouteProfile,
+  lapSeconds?: number,
+): ProfileReading {
   const distance = state.ride.distance as number;
   const position = planProgress(profile, distance);
   const lap = planLap(profile, distance);
@@ -801,10 +830,16 @@ export function profileReading(state: GameState, profile: RouteProfile): Profile
   // different rides. `per cent` is spelled out in the label because a screen
   // reader announcing `%` is the one place the two audiences differ.
   const where = lap === undefined ? 'complete' : `of lap ${String(lap)}`;
+  const time =
+    lap === undefined || lapSeconds === undefined || !Number.isFinite(lapSeconds)
+      ? undefined
+      : formatDuration(lapSeconds);
   return {
     position,
-    text: `${percent}% ${where}`,
-    label: `Route profile, ${percent} per cent ${where}`,
+    text: `${percent}% ${where}${time === undefined ? '' : ` · ${time}`}`,
+    label: `Route profile, ${percent} per cent ${where}${
+      time === undefined ? '' : `, lap time ${time}`
+    }`,
   };
 }
 

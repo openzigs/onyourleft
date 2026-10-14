@@ -90,6 +90,7 @@ export function idleSnapshot(): RideSnapshot {
     stopArmed: false,
     elapsedSeconds: 0,
     movingSeconds: 0,
+    courseLapSeconds: undefined,
     sampleCount: 0,
     metrics: RIDE_METRIC_IDS.map((id) => ({ id, state: { kind: 'unpaired' } })),
     sensors: [],
@@ -267,6 +268,8 @@ export function stubRideController(
     noteGameRideEnded: (outcome) => {
       calls.noteGameRideEnded.push(outcome);
     },
+    // #1312: the stub records nothing, so a line crossed over it ends no lap.
+    noteCourseLine: () => undefined,
     // #1042: these two DO move the stub's snapshot, because what a test reads
     // is whether a screen mounted again sees what the first one recorded —
     // which is the whole of #1049's review finding. The rules around them

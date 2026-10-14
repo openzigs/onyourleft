@@ -28,7 +28,12 @@
  * 2. Write the streams. If this throws, the activity is deleted again, because
  *    a row with no samples behind it is a ride that shows in the library and
  *    opens to nothing.
- * 3. **Only then** discard the checkpoint — and that step belongs to the
+ * 3. Write the laps (#1312), when the ride has any. A lap needs its activity
+ *    behind it (`putLap` refuses one without), and a failure here takes the
+ *    activity back too — `deleteActivity` takes its streams and laps with it —
+ *    so a ride is never saved with some of its laps and a sentence saying all
+ *    is well.
+ * 4. **Only then** discard the checkpoint — and that step belongs to the
  *    caller, not here. Until the activity is durable the checkpoint is the only
  *    copy, and a discard that ran first would turn a failed save into a lost
  *    ride rather than a retryable one.
@@ -70,18 +75,25 @@ import {
 import type {
   ActivityId,
   AthleteId,
+  LapId,
   NewActivity,
+  NewLap,
   NewStreamSet,
+  RecordedCourseLap,
   StreamChannelValue,
 } from '@onyourleft/store';
 
 import { loadSummaryToStore } from '../analysis/summary';
 import { rideFactsOf } from '../progress/ride-facts';
 
-/** The activity and the samples behind it, ready to write. */
+import { lapsToSave } from './laps';
+
+/** The activity, the samples behind it and its laps, ready to write. */
 export interface FinishedRide {
   readonly activity: NewActivity;
   readonly streams: NewStreamSet;
+  /** The laps of a course ridden during it, in order — #1312. Usually none. */
+  readonly laps: readonly NewLap[];
 }
 
 export interface RideToSaveInput {
@@ -105,6 +117,14 @@ export interface RideToSaveInput {
   readonly workoutFinished?: boolean | undefined;
   /** This ride raced the rider's own ghost and the race settled — #947's ghost badge. */
   readonly ghostRaced?: boolean | undefined;
+  /**
+   * The laps of a course the rider completed during this recording, and how
+   * to name each — #1312, `laps.ts`: the two marks and the course's half of
+   * each, as the recording kept them. The rows are worked out here, from
+   * `series`. Absent for a ride with no course under it.
+   */
+  readonly laps?:
+    { readonly ridden: readonly RecordedCourseLap[]; readonly newLapId: () => LapId } | undefined;
   /**
    * Every re-plan decision made on this ride — #1244, ADR 0048 D-6 P9. Kept
    * with the ride on this device (`packages/store` §`RideFacts.replans`).
@@ -183,6 +203,10 @@ export function rideToSave(input: RideToSaveInput): FinishedRide | undefined {
 
   return {
     activity,
+    laps:
+      input.laps === undefined
+        ? []
+        : lapsToSave(input.laps.ridden, series, input.id, input.laps.newLapId),
     streams: {
       activityId: input.id,
       athleteId: input.athleteId,
@@ -248,6 +272,7 @@ function averagePowerOf(power: readonly (Watts | undefined)[] | undefined): Watt
 export interface RideSaveStore {
   putActivity(record: NewActivity): Promise<ActivityId>;
   putStreamSet(set: NewStreamSet): Promise<ActivityId>;
+  putLap(record: NewLap): Promise<LapId>;
   deleteActivity(athleteId: AthleteId, id: ActivityId): Promise<boolean>;
 }
 
@@ -255,7 +280,24 @@ export type RideSaveOutcome =
   | { readonly status: 'saved'; readonly id: ActivityId }
   /** Nothing was ridden. Not a failure, and the caller says so differently. */
   | { readonly status: 'empty' }
-  | { readonly status: 'failed'; readonly error: Error };
+  | {
+      readonly status: 'failed';
+      readonly error: Error;
+      /**
+       * The save failed part-way AND taking what it had written back out
+       * failed too (the delete threw): the activity is still in the store,
+       * without all of its samples or laps. `true` only then — not when the
+       * delete answers that there was nothing to remove. The checkpoint is kept as for any
+       * failure, so saving again writes the ride a second time — which is why
+       * the rider is told ({@link RIDE_LEFT_BEHIND}) rather than left to find
+       * two rides.
+       */
+      readonly leftBehind?: true;
+    };
+
+/** Said after the reason a save failed, when {@link RideSaveOutcome} `leftBehind`. */
+export const RIDE_LEFT_BEHIND =
+  'part of the ride was written and could not be removed, so saving it again may list it twice';
 
 /**
  * Write a finished ride, activity first.
@@ -281,15 +323,63 @@ export async function saveFinishedRide(
     await store.putStreamSet(finished.streams);
   } catch (error: unknown) {
     // The activity goes back, for the importer's reason: a row with no samples
-    // behind it shows in the library and opens to nothing. The cleanup's own
-    // failure is swallowed so the rider is told the original cause — a full
-    // disk — rather than whatever the tidy-up hit on the way out.
-    await store
-      .deleteActivity(finished.activity.athleteId, finished.activity.id)
-      .catch(() => false);
-    return { status: 'failed', error: asError(error) };
+    // behind it shows in the library and opens to nothing.
+    return failedAndTakenBack(store, finished, error);
+  }
+  try {
+    // #1312. In order, so a reader that stops at the first failure has the
+    // laps it has in the order they were ridden.
+    //
+    // ⚠️ **One transaction per lap, after the streams', and not one for the
+    // ride.** `packages/store` has no write that takes an activity, its
+    // samples and its laps together, and adding one is a new write path with
+    // its own broken-store fakes (docs/agents/store-harness.md) — its own
+    // change. Until then a crash between two of these leaves an activity
+    // whose checkpoint is not yet marked saved, so the ride is offered for
+    // saving again: the window `putStreamSet` already had, one write per lap
+    // wider.
+    for (const lap of finished.laps) {
+      await store.putLap(lap);
+    }
+  } catch (error: unknown) {
+    // The whole ride goes back, laps and streams with it (`deleteActivity`
+    // cascades both): the checkpoint is still there, and a ride saved with
+    // two of its five laps would say something no rider rode.
+    return failedAndTakenBack(store, finished, error);
   }
   return { status: 'saved', id: finished.activity.id };
+}
+
+/**
+ * The failure to report after a save that got part-way: the ORIGINAL cause —
+ * a full disk, not whatever the tidy-up hit on the way out — and whether the
+ * tidy-up worked.
+ *
+ * ⚠️ **A tidy-up that fails is said, not swallowed** (#1316's third review).
+ * It used to be `.catch(() => false)` and nothing more: the outcome read
+ * `failed`, the ride was in the library with some of its laps, and the retry
+ * the rider was offered wrote a second copy with nothing saying why there
+ * were two.
+ */
+async function failedAndTakenBack(
+  store: RideSaveStore,
+  finished: FinishedRide,
+  error: unknown,
+): Promise<RideSaveOutcome> {
+  // ⚠️ Left behind only when the delete itself FAILED. `false` is the store's
+  // "there was no such ride": nothing is there to list twice — another tab
+  // took it out first — so nothing is said of it.
+  const leftBehind = await store
+    .deleteActivity(finished.activity.athleteId, finished.activity.id)
+    .then(
+      () => false,
+      () => true,
+    );
+  return {
+    status: 'failed',
+    error: asError(error),
+    ...(leftBehind ? { leftBehind: true as const } : {}),
+  };
 }
 
 function asError(value: unknown): Error {

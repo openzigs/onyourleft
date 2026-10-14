@@ -12,13 +12,14 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { distanceBetween, seconds, unixSeconds } from '@onyourleft/domain';
+import { distanceBetween, metres, seconds, unixSeconds, watts } from '@onyourleft/domain';
 import {
   decodeFitActivity,
   decodeGpx,
   decodeTcx,
   encodeFitActivity,
   encodeGpx,
+  encodeTcx,
   trackPointsOf,
   type FitRecord,
   type TrackPoint,
@@ -408,3 +409,39 @@ function startOf(record: FitRecord): number {
   }
   return timestamp.instant;
 }
+
+describe('readActivityFile — totals a file states lap by lap (#1312)', () => {
+  it('adds up decimals as the file wrote them, not as floats', () => {
+    const start = 1_800_000_000;
+    const lap = (from: number, elapsed: number, distance: number) => ({
+      startTime: unixSeconds(start + from),
+      totalElapsedTime: seconds(elapsed),
+      totalDistance: metres(distance),
+      points: [0, 1].map((offset) => ({
+        timestamp: unixSeconds(start + from + offset * 20),
+        position: undefined,
+        altitude: undefined,
+        distance: undefined,
+        speed: undefined,
+        heartRate: undefined,
+        cadence: undefined,
+        power: watts(200),
+        temperature: undefined,
+      })),
+    });
+    // 10.1 + 20.2 + 30.3 is 60.599999999999994 in floats, and 0.1 + 0.2 + 0.4
+    // is 0.7000000000000001. The file says 60.6 s and 0.7 m.
+    const file = encodeTcx({
+      startTime: unixSeconds(start),
+      name: undefined,
+      sport: 'cycling',
+      creator: undefined,
+      laps: [lap(0, 10.1, 0.1), lap(30, 20.2, 0.2), lap(60, 30.3, 0.4)],
+    });
+
+    const ride = readActivityFile('laps.tcx', new TextEncoder().encode(file));
+
+    expect(ride.elapsedTime).toBe(60.6);
+    expect(ride.distance).toBe(0.7);
+  });
+});

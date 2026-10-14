@@ -81,6 +81,7 @@
 import type { WorkoutRescue } from '@onyourleft/domain';
 import type { TrainerControl } from '@onyourleft/sensors/protocol';
 
+import type { CourseLineEvent, LapFigures } from '../recording/laps';
 import { rideInProgress, type RidePhase } from '../ride/controller';
 
 import type { GhostOutcome } from './ghost-outcome-kind';
@@ -378,6 +379,40 @@ export interface GameTrainerPort {
    * `subscribe` — so `WIRE003` goes red if `GameView` stops calling it.
    */
   watchRide(listener: () => void): () => void;
+  /**
+   * The rider left the line of a course, crossed it, or ended the game ride
+   * part-way round — #1312. `GameView` calls it with `course-laps.ts`'s
+   * events; the answer is every lap of the RECORDING so far, the one that
+   * just ended last, or `undefined` when this call ended none or nothing is
+   * being recorded.
+   *
+   * ⚠️ **The lap's figures come back from the recording, never from the
+   * game**: its time is the recorder's moving time and its averages are over
+   * the recorder's samples (`recording/laps.ts`). Its times, distance and
+   * climb are the row the ride's page lists afterwards; its averages are
+   * worked out again when the ride is saved, from the samples the save
+   * writes, so they are that row's unless a reading landed in the lap's last
+   * slots after the line was crossed (`laps.ts`, "Worked out twice"). The
+   * game supplies only what the course knows — how long the lap is and how
+   * much it climbs.
+   *
+   * Not about the trainer, and on this port for {@link recordingMayStop}'s
+   * reason. Named so nothing else in production calls a method of that name —
+   * the controller's is `noteCourseLine` — so `WIRE003` goes red if
+   * `GameView` stops calling it. Optional, like {@link workoutHold}, so a
+   * double with no recording need not say so; `gameTrainerPortOver` always
+   * supplies it.
+   */
+  courseLine?(event: CourseLineEvent): readonly LapFigures[] | undefined;
+  /**
+   * The moving time of the course lap in progress, in seconds — #1312:
+   * `RideSnapshot.courseLapSeconds`, the recorder's clock again
+   * ({@link rideMovingSeconds}), so the lap time on the HUD stops when the
+   * ride's does. `undefined` with no lap open or nothing recording. Read
+   * through {@link watchRide} like the moving time, and optional for
+   * {@link courseLine}'s reason.
+   */
+  rideLapSeconds?(): number | undefined;
 }
 
 /** What {@link gameTrainerFrom} reads of the ride screen's `TrainerSnapshot`. */
@@ -423,6 +458,8 @@ interface GameTrainerSource {
      */
     readonly phase?: RidePhase;
     readonly movingSeconds?: number;
+    /** #1312. @see GameTrainerPort.rideLapSeconds */
+    readonly courseLapSeconds?: number | undefined;
   };
   simulationControl(): GradientTrainer | undefined;
   requestTrainerControl(): Promise<void>;
@@ -430,6 +467,12 @@ interface GameTrainerSource {
   subscribe(listener: () => void): () => void;
   /** #1042. @see GameTrainerPort.gameRideEnded */
   noteGameRideEnded(outcome: GhostOutcome | undefined): void;
+  /**
+   * #1312. @see GameTrainerPort.courseLine. Optional for
+   * {@link GameTrainerSource.getSnapshot}'s `keepAliveFailed` reason: a source
+   * with no recording has no laps. The ride controller always has it.
+   */
+  noteCourseLine?(event: CourseLineEvent): readonly LapFigures[] | undefined;
   /**
    * #1244. @see GameTrainerPort.keepThePlan. Optional only so a double with
    * no workout need not say; the ride controller `main.tsx` hands over has it.
@@ -515,6 +558,14 @@ export function gameTrainerPortOver(controller: GameTrainerSource | undefined): 
       controller?.noteGameRideEnded(outcome);
     },
     watchRide: (listener) => controller?.subscribe(listener) ?? NOT_WATCHING,
+    courseLine: (event) => controller?.noteCourseLine?.(event),
+    rideLapSeconds: () => {
+      // The phase and the time from one snapshot, as the moving time's are.
+      const snapshot = controller?.getSnapshot();
+      return snapshot?.phase !== undefined && rideInProgress(snapshot.phase)
+        ? snapshot.courseLapSeconds
+        : undefined;
+    },
     rideMovingSeconds: () => {
       // One snapshot read for both, so the phase and the time are one moment.
       const snapshot = controller?.getSnapshot();

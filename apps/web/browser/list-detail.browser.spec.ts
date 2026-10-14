@@ -1750,3 +1750,131 @@ test.describe('#1072 — a card is not carried under reduced motion', () => {
     expect(moved.length, 'the control did not move: the reading is blind').toBeGreaterThan(0);
   });
 });
+
+/**
+ * #1312 — the ride page's lap table, scrolled to its last column.
+ *
+ * A ride with every figure a lap can state has eleven columns, which is wider
+ * than the ride page's column, so the table is read scrolled sideways inside
+ * its region (`design/ScrollTable.tsx`). Scrolled, the Lap column used to be
+ * gone, and with it which lap a figure is and which lap is the best (#1316's
+ * second pass saw it in a screenshot; no gate case laid the table out). Its
+ * first column is sticky now (`theme.css` §`.oyl-table--laps`).
+ *
+ * The fixture is `testing/populated-shell.tsx` §`POPULATED_LAPS`: five laps,
+ * the third the best and the last a part lap. In light and in dark, because a
+ * sticky cell is only as good as its own background: a transparent one shows
+ * the figures through the lap's number.
+ *
+ * ⚠️ **The control is in the case**: the same table with the class taken off
+ * has its Lap column scrolled out of the region, which is what makes "it is
+ * still on screen" a finding about the class and not about the table.
+ */
+test.describe('#1312 — the lap table keeps its Lap column when it is scrolled', () => {
+  for (const theme of ['light', 'dark'] as const) {
+    test.describe(theme, () => {
+      test.use({ colorScheme: theme });
+
+      test(`scrolled to its last column at ${TABLET_IN_THE_SHELL.name}, every lap’s name is still on screen`, async ({
+        page,
+      }) => {
+        await open(page, TABLET_IN_THE_SHELL);
+        await page.evaluate(() => {
+          window.location.hash = '#/activities/ride-0';
+        });
+        const table = page.locator('table.oyl-table--laps');
+        await expect(table).toBeVisible();
+        await table.scrollIntoViewIfNeeded();
+
+        const measure = async () =>
+          table.evaluate((element) => {
+            const region = element.closest<HTMLElement>('.oyl-scroll-region');
+            if (region === null) {
+              throw new Error('the lap table is in no scroll region');
+            }
+            region.scrollLeft = region.scrollWidth;
+            const frame = region.getBoundingClientRect();
+            const inside = (cell: Element): boolean => {
+              const box = cell.getBoundingClientRect();
+              return box.left >= frame.left - 0.5 && box.right <= frame.right + 0.5;
+            };
+            /** Whether the cell is what is painted at its own middle: nothing scrolled over it. */
+            const onTop = (cell: Element): boolean => {
+              const box = cell.getBoundingClientRect();
+              const hit = document.elementFromPoint(
+                box.left + box.width / 2,
+                box.top + box.height / 2,
+              );
+              return hit !== null && cell.contains(hit);
+            };
+            const names = [...element.querySelectorAll('tbody th')];
+            const headings = [...element.querySelectorAll('thead th')];
+            const plain = names[0]?.getBoundingClientRect().height ?? 0;
+            return {
+              wider: region.scrollWidth - region.clientWidth,
+              scrolled: region.scrollLeft,
+              names: names.map((cell) => ({
+                text: cell.textContent,
+                seen: inside(cell) && onTop(cell),
+                // One line: no taller than the row of a lap with no mark.
+                oneLine: cell.getBoundingClientRect().height <= plain + 0.5,
+                background: getComputedStyle(cell).backgroundColor,
+                edge: getComputedStyle(cell).boxShadow,
+              })),
+              lapHeading: headings[0] !== undefined && inside(headings[0]) && onTop(headings[0]),
+              lastHeading: {
+                text: headings.at(-1)?.textContent,
+                seen: headings.at(-1) !== undefined && inside(headings.at(-1) as Element),
+              },
+            };
+          });
+
+        const seen = await measure();
+        // The premise: the table is wider than its region, and was scrolled.
+        expect(seen.wider).toBeGreaterThan(20);
+        expect(seen.scrolled).toBeGreaterThan(20);
+        expect(seen.lastHeading).toEqual({ text: 'Climb (m)', seen: true });
+        // Every lap's name, the best lap's and the part lap's among them, on
+        // screen beside the last column — and each on one line at this width.
+        expect(seen.names.map((name) => name.text)).toEqual([
+          '1',
+          '2',
+          '3 · Best lap',
+          '4',
+          '5 · Part lap',
+        ]);
+        expect(seen.names.filter((name) => !name.seen).map((name) => name.text)).toEqual([]);
+        expect(seen.names.filter((name) => !name.oneLine).map((name) => name.text)).toEqual([]);
+        expect(seen.lapHeading).toBe(true);
+        // A background of its own that is wholly opaque — `rgb(r, g, b)`, with
+        // no alpha in it at all — or the figures show through the number; and
+        // an edge, so a figure cut off under the column reads as cut off.
+        for (const name of seen.names) {
+          expect(name.background).toMatch(/^rgb\(\d+, \d+, \d+\)$/);
+          expect(name.edge).not.toBe('none');
+        }
+        console.log(
+          `#1312 lap table, ${theme} — ${TABLET_IN_THE_SHELL.name} — ${String(seen.wider)} px wider than its region`,
+        );
+
+        // The control: without the class the Lap column scrolls away.
+        await table.evaluate((element) => {
+          element.classList.remove('oyl-table--laps');
+        });
+        const control = await page
+          .locator('table.oyl-table')
+          .first()
+          .evaluate((element) => {
+            const region = element.closest<HTMLElement>('.oyl-scroll-region');
+            if (region === null) return [];
+            region.scrollLeft = region.scrollWidth;
+            const frame = region.getBoundingClientRect();
+            return [...element.querySelectorAll('tbody th')].map(
+              (cell) => cell.getBoundingClientRect().left >= frame.left - 0.5,
+            );
+          });
+        expect(control).toEqual([false, false, false, false, false]);
+      });
+    });
+  }
+});
