@@ -342,11 +342,13 @@ import {
   isPhotographic,
   REALISTIC_STRUCTURE_SURFACES,
   REALISTIC_SURFACES,
-  REALISTIC_VEGETATION,
+  REALISTIC_TREES_DEFAULT,
   REALISTIC_VEGETATION_KINDS,
+  realisticVegetation,
   realisticUrl,
   type RealisticBicycleMap,
   type RealisticRiderMap,
+  type RealisticTrees,
   type RealisticVegetationKind,
   type RealisticWorldOutcome,
   type StructureSurface,
@@ -5468,6 +5470,8 @@ interface RealisticWorld {
   /** The ground's verge and its rock and scree — #627. */
   readonly verge: { readonly colour: Texture; readonly normal: Texture };
   readonly rock: { readonly colour: Texture; readonly normal: Texture };
+  /** The bare rock a steep bank wears — #1274, ambientCG's. */
+  readonly crag: { readonly colour: Texture; readonly normal: Texture };
   readonly vegetation: ReadonlyMap<RealisticVegetationKind, readonly RealisticShape[]>;
   /** The structures' photographic surfaces — ADR 0026 D-12 layer 3, #475. */
   readonly structures: ReadonlyMap<
@@ -5792,15 +5796,10 @@ export function realisticTextureReport(): readonly RealisticTextureReport[] {
     });
   };
   add(world.sky.texture, 'sky');
-  for (const map of [world.road.colour, world.road.normal]) add(map, 'road');
-  for (const map of [world.ground.colour, world.ground.normal]) add(map, 'ground');
-  for (const map of [
-    world.verge.colour,
-    world.verge.normal,
-    world.rock.colour,
-    world.rock.normal,
-  ]) {
-    add(map, 'ground');
+  // The road's two, and every map the ground blends — the grass, #627's verge
+  // and rock, #1274's crag — as the ground's.
+  for (const map of surfaceMapsOf(world)) {
+    add(map, map === world.road.colour || map === world.road.normal ? 'road' : 'ground');
   }
   for (const maps of world.structures.values()) {
     add(maps.colour, 'structure');
@@ -5837,14 +5836,7 @@ export function uploadRealisticTexturesOf(view: GameView, textures?: readonly Te
     (world === undefined
       ? []
       : [
-          world.road.colour,
-          world.road.normal,
-          world.ground.colour,
-          world.ground.normal,
-          world.verge.colour,
-          world.verge.normal,
-          world.rock.colour,
-          world.rock.normal,
+          ...surfaceMapsOf(world),
           ...[...world.structures.values()].flatMap((maps) => [maps.colour, maps.normal]),
           ...REALISTIC_BICYCLE_MAP_NAMES.map((map) => world.bicycle[map]),
           ...REALISTIC_RIDER_MAP_NAMES.map((map) => world.rider[map]),
@@ -5931,6 +5923,11 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
       colour: texture(() => loaders.texture(realisticUrl(REALISTIC_SURFACES.rock.colour))),
       normal: texture(() => loaders.texture(realisticUrl(REALISTIC_SURFACES.rock.normal))),
     };
+    // #1274: the bare rock of a steep bank, loaded and settled with the rest.
+    const crag = {
+      colour: texture(() => loaders.texture(realisticUrl(REALISTIC_SURFACES.crag.colour))),
+      normal: texture(() => loaders.texture(realisticUrl(REALISTIC_SURFACES.crag.normal))),
+    };
     const rider = model(() => loaders.model(realisticUrl(REALISTIC_RIDER)));
     // #966: the wordmark, loaded and settled with everything else.
     const wordmark = texture(() => loaders.texture(realisticUrl(REALISTIC_WORDMARK)));
@@ -5957,7 +5954,9 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
     }));
     const shapes = REALISTIC_VEGETATION_KINDS.map((kind) => ({
       kind,
-      models: REALISTIC_VEGETATION[kind].map(
+      // #1283, #1294: the trees are the generated ones, or — for the owner's
+      // page — the scans they replaced. @see setRealisticTrees
+      models: realisticVegetation(realisticTrees)[kind].map(
         ({ name, file, impostor, impostorNormals, middle }) => ({
           name,
           scene: model(() => loaders.model(realisticUrl(file))),
@@ -5995,6 +5994,8 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
       verge.normal,
       rock.colour,
       rock.normal,
+      crag.colour,
+      crag.normal,
       rider,
       wordmark,
       ...riderMaps.map((each) => each.texture),
@@ -6040,6 +6041,7 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
       rock.colour,
       rock.normal,
     ]);
+    const [cragColour, cragNormal] = await Promise.all([crag.colour, crag.normal]);
     for (const surface of [
       roadColour,
       roadNormal,
@@ -6049,6 +6051,8 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
       vergeNormal,
       rockColour,
       rockNormal,
+      cragColour,
+      cragNormal,
     ]) {
       surface.wrapS = RepeatWrapping;
       surface.wrapT = RepeatWrapping;
@@ -6058,6 +6062,7 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
     groundColour.colorSpace = SRGBColorSpace;
     vergeColour.colorSpace = SRGBColorSpace;
     rockColour.colorSpace = SRGBColorSpace;
+    cragColour.colorSpace = SRGBColorSpace;
     const structures = new Map<
       Exclude<StructureSurface, 'painted'>,
       { readonly colour: Texture; readonly normal: Texture }
@@ -6131,6 +6136,7 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
       ground: { colour: groundColour, normal: groundNormal },
       verge: { colour: vergeColour, normal: vergeNormal },
       rock: { colour: rockColour, normal: rockNormal },
+      crag: { colour: cragColour, normal: cragNormal },
       vegetation,
       structures,
       body,
@@ -6182,6 +6188,31 @@ let realisticMaterialsMerged = true;
  */
 export function setRealisticMaterialsMerged(on: boolean): void {
   realisticMaterialsMerged = on;
+}
+
+/** Which trees the next realistic load draws. @see setRealisticTrees */
+let realisticTrees: RealisticTrees = REALISTIC_TREES_DEFAULT;
+
+/**
+ * Makes the NEXT realistic load draw its trees from the scans, as every load
+ * did before #1283 — or, with `'generated'`, from the generated trees, as the
+ * product does (`realistic-assets.ts` §`REALISTIC_TREES_DEFAULT`), or with
+ * `'scanned-conifers'` the generated broadleaves beside the scanned firs, as
+ * every load did between #1283 and #1294. Only the one set asked for is
+ * fetched, decoded and held.
+ *
+ * ADR 0049 D-1 keeps a generated tree only where the tablet measurement says
+ * it should, so until that row is in, the scans are one switch away: the
+ * owner's page loads them with `?levers=-generated-trees` or, for the firs
+ * alone, `?levers=-generated-conifers`, and the browser gate measures the
+ * generated set and the scans at the same route positions with the same camera.
+ *
+ * @test-facing `apps/web/browser/realistic-harness.ts` and
+ * `apps/web/browser/game-harness.ts` §`treeLevelRun` load the scans with it; the
+ * product never calls it
+ */
+export function setRealisticTrees(trees: RealisticTrees): void {
+  realisticTrees = trees;
 }
 
 /** The load a ride is waiting on, if one is in flight. @see loadRealisticWorldOnce */
@@ -6266,23 +6297,28 @@ export function realisticWorldLoaded(): boolean {
   return realisticWorld !== undefined;
 }
 
+/**
+ * Every map of the road's and the ground's surfaces, the road's two first —
+ * #1274. ⚠️ **One list, where five places each typed their own**: what is
+ * reported to the browser gate, what is uploaded for it, what is filtered
+ * anisotropically, and what is let go of when a world is replaced or evicted.
+ * A surface added to one of five and not another was a texture held for ever,
+ * or drawn shimmering, with nothing to say so; `crag` was the fifth name to be
+ * added to all of them by hand.
+ */
+function surfaceMapsOf(world: RealisticWorld): readonly Texture[] {
+  return [world.road, world.ground, world.verge, world.rock, world.crag].flatMap((maps) => [
+    maps.colour,
+    maps.normal,
+  ]);
+}
+
 /** Releases a realistic world that another has replaced. */
 function releaseRealisticWorld(world: RealisticWorld): void {
   world.sky.texture.dispose();
   world.banners?.texture.dispose();
   world.wordmark.dispose();
-  for (const texture of [
-    world.road.colour,
-    world.road.normal,
-    world.ground.colour,
-    world.ground.normal,
-    world.verge.colour,
-    world.verge.normal,
-    world.rock.colour,
-    world.rock.normal,
-  ]) {
-    texture.dispose();
-  }
+  for (const texture of surfaceMapsOf(world)) texture.dispose();
   for (const shapes of world.vegetation.values()) {
     for (const shape of shapes) releaseRealisticShape(shape);
   }
@@ -9282,6 +9318,11 @@ const PLANAR_UV = /* glsl */ `
 interface GroundBlendMaps {
   readonly verge?: { readonly colour: Texture; readonly normal: Texture };
   readonly rock?: { readonly colour: Texture; readonly normal: Texture };
+  /**
+   * The bare rock a steep bank wears — #1274. `rock` wore the banks too until
+   * then, and keeps the scree.
+   */
+  readonly crag?: { readonly colour: Texture; readonly normal: Texture };
   /** `landform.ts` §`TerrainMesh.treeLine`, written by `TerrainBelt.update`. */
   readonly treeLine: { value: number };
 }
@@ -9295,9 +9336,11 @@ const NO_TREE_LINE = 1e9;
 
 /**
  * Each ground material's blend switches — #627: verge, rock and scree, each 1
- * in the product and 0 in the browser gate's control. @see groundBlendOf
+ * in the product and 0 in the browser gate's control; and since #1274 a
+ * fourth, how much of a steep bank's rock is the crag's photograph rather than
+ * the scree's. @see groundBlendOf
  */
-const GROUND_BLEND_SHARES = new WeakMap<Material, Vector3>();
+const GROUND_BLEND_SHARES = new WeakMap<Material, Vector4>();
 
 const GROUND_BLEND_VERTEX_PARS = /* glsl */ `
 varying vec3 vOylGround;
@@ -9325,17 +9368,22 @@ uniform sampler2D vergeMap;
 uniform sampler2D vergeNormalMap;
 uniform sampler2D rockMap;
 uniform sampler2D rockNormalMap;
+uniform sampler2D cragMap;
+uniform sampler2D cragNormalMap;
 uniform float treeLine;
-uniform vec3 groundShares;
+uniform vec4 groundShares;
 varying vec3 vOylGround;
 varying float vOylGroundUp;
 float oylVergeShare = 0.0;
 float oylRockShare = 0.0;
+float oylCragShare = 0.0;
 vec3 oylVergeTexel = vec3(1.0);
 vec3 oylRockTexel = vec3(1.0);
+vec3 oylCragTexel = vec3(1.0);
 vec3 oylGroundWorld = vec3(1.0);
 vec2 oylVergeUv() { return vOylGround.xz / ${glslFloat(REALISTIC_SURFACES.verge.tileMetres)}; }
 vec2 oylRockUv() { return vOylGround.xz / ${glslFloat(REALISTIC_SURFACES.rock.tileMetres)}; }
+vec2 oylCragUv() { return vOylGround.xz / ${glslFloat(REALISTIC_SURFACES.crag.tileMetres)}; }
 vec3 oylGroundNormal(vec2 grassUv) {
   vec3 grass = texture2D(normalMap, grassUv).xyz;
   float oylBias = exp2(oylTextureLodBias);
@@ -9345,14 +9393,23 @@ vec3 oylGroundNormal(vec2 grassUv) {
   vec2 rockUv = oylRockUv();
   vec2 rockDx = dFdx(rockUv) * oylBias;
   vec2 rockDy = dFdy(rockUv) * oylBias;
+  vec2 cragUv = oylCragUv();
+  vec2 cragDx = dFdx(cragUv) * oylBias;
+  vec2 cragDy = dFdy(cragUv) * oylBias;
   vec3 texel = grass;
   if (oylVergeShare > 0.0) {
     texel = mix(texel, textureGrad(vergeNormalMap, vergeUv, vergeDx, vergeDy).xyz, oylVergeShare);
   }
-  if (oylRockShare > 0.0) {
-    texel = mix(texel, textureGrad(rockNormalMap, rockUv, rockDx, rockDy).xyz, oylRockShare);
+  // #1274: the stone is the scree's map and the crag's, each by its own share.
+  float oylScreeShare = oylRockShare - oylCragShare;
+  vec3 stone = vec3(0.0);
+  if (oylScreeShare > 0.0) {
+    stone += textureGrad(rockNormalMap, rockUv, rockDx, rockDy).xyz * oylScreeShare;
   }
-  return texel;
+  if (oylCragShare > 0.0) {
+    stone += textureGrad(cragNormalMap, cragUv, cragDx, cragDy).xyz * oylCragShare;
+  }
+  return texel * (1.0 - oylRockShare) + stone;
 }
 `;
 
@@ -9371,6 +9428,10 @@ const GROUND_BLEND_SHARES_GLSL = /* glsl */ `
   float oylRock = (1.0 - smoothstep(${glslFloat(Math.cos((ROCK_SLOPE_DEGREES[1] * Math.PI) / 180))}, ${glslFloat(Math.cos((ROCK_SLOPE_DEGREES[0] * Math.PI) / 180))}, vOylGroundUp)) * groundShares.y;
   float oylScree = smoothstep(treeLine - ${glslFloat(SCREE_BAND_METRES)}, treeLine + ${glslFloat(SCREE_BAND_METRES)}, vOylGround.y) * groundShares.z;
   oylRockShare = max(oylRock, oylScree);
+  // #1274: of that stone, the slope's part is the crag — a rock face — and
+  // what is left is the scree's loose stones. Never more than the stone there
+  // is, because the slope's share is one of the two the stone is the larger of.
+  oylCragShare = oylRock * groundShares.w;
   oylVergeShare = oylVerge * (1.0 - oylRockShare);
   {
     float oylBias = exp2(oylTextureLodBias);
@@ -9380,13 +9441,20 @@ const GROUND_BLEND_SHARES_GLSL = /* glsl */ `
     vec2 rockUv = oylRockUv();
     vec2 rockDx = dFdx(rockUv) * oylBias;
     vec2 rockDy = dFdy(rockUv) * oylBias;
+    vec2 cragUv = oylCragUv();
+    vec2 cragDx = dFdx(cragUv) * oylBias;
+    vec2 cragDy = dFdy(cragUv) * oylBias;
     if (oylVergeShare > 0.0) {
       oylVergeTexel = textureGrad(vergeMap, vergeUv, vergeDx, vergeDy).rgb
         / max(textureLod(vergeMap, vec2(0.5), 16.0).rgb, vec3(1e-3));
     }
-    if (oylRockShare > 0.0) {
+    if (oylRockShare - oylCragShare > 0.0) {
       oylRockTexel = textureGrad(rockMap, rockUv, rockDx, rockDy).rgb
         / max(textureLod(rockMap, vec2(0.5), 16.0).rgb, vec3(1e-3));
+    }
+    if (oylCragShare > 0.0) {
+      oylCragTexel = textureGrad(cragMap, cragUv, cragDx, cragDy).rgb
+        / max(textureLod(cragMap, vec2(0.5), 16.0).rgb, vec3(1e-3));
     }
   }
 `;
@@ -9396,7 +9464,9 @@ const GROUND_BLEND_MIX = /* glsl */ `
 {
   float oylOther = oylVergeShare + oylRockShare;
   vec3 oylSurfaces = oylGroundWorld * vColor.rgb
-    * (oylVergeTexel * oylVergeShare + oylRockTexel * oylRockShare);
+    * (oylVergeTexel * oylVergeShare
+      + oylRockTexel * (oylRockShare - oylCragShare)
+      + oylCragTexel * oylCragShare);
   diffuseColor.rgb = diffuseColor.rgb * (1.0 - oylOther) + oylSurfaces;
 }
 `;
@@ -9432,9 +9502,10 @@ export function photographicGroundMaterial(
     }),
   );
   // #627: the switches the browser gate's control turns — verge, rock, scree.
-  const shares = new Vector3(1, 1, 1);
+  // #1274: and the crag's share of a steep bank's stone, 1 in the product.
+  const shares = new Vector4(1, 1, 1, 1);
   GROUND_BLEND_SHARES.set(material, shares);
-  const blended = blend.verge !== undefined && blend.rock !== undefined;
+  const blended = blend.verge !== undefined && blend.rock !== undefined && blend.crag !== undefined;
   material.onBeforeCompile = (shader) => {
     shader.uniforms['tileMetres'] = { value: REALISTIC_SURFACES.ground.tileMetres };
     shader.vertexShader = shader.vertexShader
@@ -9451,6 +9522,8 @@ export function photographicGroundMaterial(
       shader.uniforms['vergeNormalMap'] = { value: blend.verge?.normal };
       shader.uniforms['rockMap'] = { value: blend.rock?.colour };
       shader.uniforms['rockNormalMap'] = { value: blend.rock?.normal };
+      shader.uniforms['cragMap'] = { value: blend.crag?.colour };
+      shader.uniforms['cragNormalMap'] = { value: blend.crag?.normal };
       shader.uniforms['treeLine'] = blend.treeLine;
       shader.uniforms['groundShares'] = { value: shares };
       shader.fragmentShader = shader.fragmentShader
@@ -10198,6 +10271,20 @@ diffuseColor.rgb = mix(
   };
   material.customProgramCacheKey = () => 'oyl-rider-kit';
   return withAtmosphere(material);
+}
+
+/**
+ * The realistic vegetation belt, built from the loaded world as a view builds
+ * it — #1283. `undefined` when no world is loaded.
+ *
+ * @test-facing `realistic-textures.test.ts` builds it from a real load of the
+ * committed files — the generated trees, and the scans — and reads its
+ * levels, materials, tints and ground blobs; a view builds its own in
+ * `RealisticDrawing`
+ */
+export function realisticVegetationOfLoadedWorld(): RealisticVegetationBelt | undefined {
+  const world = realisticWorld;
+  return world === undefined ? undefined : new RealisticVegetationBelt(world.vegetation);
 }
 
 /**
@@ -11166,18 +11253,7 @@ class RealisticDrawing {
     riderKit: RiderKit,
   ) {
     const anisotropy = Math.min(REALISTIC_ANISOTROPY, renderer.capabilities.getMaxAnisotropy());
-    for (const texture of [
-      world.road.colour,
-      world.road.normal,
-      world.ground.colour,
-      world.ground.normal,
-      world.verge.colour,
-      world.verge.normal,
-      world.rock.colour,
-      world.rock.normal,
-    ]) {
-      texture.anisotropy = anisotropy;
-    }
+    for (const texture of surfaceMapsOf(world)) texture.anisotropy = anisotropy;
     this.vegetation = new RealisticVegetationBelt(world.vegetation, treeLevels);
     this.structures = new RealisticStructureBelts(world.structures);
     this.primitives = new ScatterBelt(new Map(), {
@@ -11198,8 +11274,9 @@ class RealisticDrawing {
       world.ground.normal,
       fields.span,
       fields.count,
-      // #627: the verge, the rock and scree, and where the tree line is.
-      { verge: world.verge, rock: world.rock, treeLine: fields.treeLine },
+      // #627: the verge, the rock and scree, and where the tree line is —
+      // and since #1274 the bare rock a steep bank wears.
+      { verge: world.verge, rock: world.rock, crag: world.crag, treeLine: fields.treeLine },
     );
     const generator = new PMREMGenerator(renderer);
     this.environment = generator.fromEquirectangular(world.sky.texture).texture;
@@ -11355,18 +11432,7 @@ export function evictRealisticWorldFromGpu(): void {
   world.sky.texture.dispose();
   world.banners?.texture.dispose();
   world.wordmark.dispose();
-  for (const texture of [
-    world.road.colour,
-    world.road.normal,
-    world.ground.colour,
-    world.ground.normal,
-    world.verge.colour,
-    world.verge.normal,
-    world.rock.colour,
-    world.rock.normal,
-  ]) {
-    texture.dispose();
-  }
+  for (const texture of surfaceMapsOf(world)) texture.dispose();
   for (const shapes of world.vegetation.values()) {
     for (const shape of shapes) {
       for (const part of shape.parts) {
@@ -11822,11 +11888,21 @@ export function impostorsLitOf(on: boolean): void {
  * takes the rock to 0, and a steep bank must then read as the level grass
  * beside it does.
  *
+ * `crag` — #1274 — is how much of a steep bank's rock wears the crag's
+ * photograph: 1 in the product, and 0 for the control that draws the bank in
+ * the scree's photograph, as it was drawn before.
+ *
  * @test-facing the browser gate's control switch, read by `game-harness.ts`;
- * the product always draws all three.
+ * the product always draws all four.
  */
-export function groundBlendOf(view: GameView, verge: number, rock: number, scree: number): void {
-  if (view instanceof ThreeGameView) view.groundBlend(verge, rock, scree);
+export function groundBlendOf(
+  view: GameView,
+  verge: number,
+  rock: number,
+  scree: number,
+  crag = 1,
+): void {
+  if (view instanceof ThreeGameView) view.groundBlend(verge, rock, scree, crag);
 }
 
 /**
@@ -12641,10 +12717,10 @@ class ThreeGameView implements GameView {
   }
 
   /** @see groundBlendOf */
-  groundBlend(verge: number, rock: number, scree: number): void {
+  groundBlend(verge: number, rock: number, scree: number, crag: number): void {
     const shares =
       this.#realistic === undefined ? undefined : GROUND_BLEND_SHARES.get(this.#realistic.ground);
-    shares?.set(verge, rock, scree);
+    shares?.set(verge, rock, scree, crag);
   }
 
   /** @see gantriesShownOf */

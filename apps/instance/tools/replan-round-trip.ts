@@ -11,7 +11,8 @@
  *     node tools/replan-round-trip.ts --url https://rides.example.org \
  *       [--transport sealed|plaintext] [--runs 30] [--cold-runs 5] \
  *       [--unload 'ollama stop <model>'] [--origin https://…] \
- *       [--starts-per-account 12] [--run-timeout-seconds 660]
+ *       [--starts-per-account 12] [--run-timeout-seconds 660] \
+ *       [--hosted-url https://… --hosted-model <name>]
  *
  * - **`--transport sealed`** (the default) is what a device sends (ADR 0047):
  *   the instance must hold keys (`OYL_INSTANCE_SECRET_KEY`).
@@ -27,6 +28,34 @@
  * - **`--origin`** is what the instance states as `OYL_INSTANCE_ORIGIN`, when
  *   it is reached at another address (the control, over loopback).
  *
+ * - **`--hosted-url` and `--hosted-model`**, together, measure a hosted model
+ *   on a key of your own instead of the instance's local one. ⚠️ **The key is
+ *   read from the environment variable `OYL_MEASURE_HOSTED_KEY` and from
+ *   nowhere else** — it is not an argument, and there is no option for it
+ *   (`--hosted-key` is refused) — and it is printed nowhere. Set it for the
+ *   one command from a file, `OYL_MEASURE_HOSTED_KEY="$(cat key-file)" node …`:
+ *   a key typed at a prompt is in the shell's history, and a process's
+ *   environment can be read by the same user. Each throwaway account
+ *   stores it (sealed), consents to the URL's origin and pushes an empty
+ *   masking item; when the run ends, or throws, the key and the consent are
+ *   cleared and read back, and the report's `hosted.cleared` says whether
+ *   every account read back empty. When one did not, the command exits 3 and
+ *   its last line on stderr says to revoke the key. When the run throws there
+ *   is no report: each account's line on stderr is then the only record.
+ *   Sealed only, and refused with `--unload`: a hosted model has nothing to
+ *   unload, so it has no cold runs. ⚠️ A run that is KILLED (Ctrl-C), or
+ *   whose stderr is closed under it, clears nothing: revoke the key at its
+ *   provider.
+ *   ⚠️ **"Sealed" here is less than the app's.** The app seals to a key it
+ *   judged against an identity pinned from the instance's card (ADR 0047
+ *   D-5, D-6). This tool pins nothing and checks no statement: it seals to
+ *   whatever encryption key `--url` serves. So a hosted run is refused unless
+ *   `--url` is `https:` or loopback, and over `https:` the key is sealed to
+ *   whoever terminates TLS for that name — through a tunnel, the tunnel's
+ *   operator. Use a key you can revoke.
+ * - **An option this command does not have is refused**, by name and never
+ *   with its value.
+ *
  * The job is the ride write-up that exists, over a synthetic ride — see
  * `replan-round-trip-run.ts` for why and what that does and does not say
  * about a re-plan.
@@ -35,30 +64,58 @@
  * and no coordinate.
  */
 
-import { execFileSync } from 'node:child_process';
+import { execSync } from 'node:child_process';
 import { registerHooks } from 'node:module';
 
 import { resolveExtensionless } from '../src/node-imports.ts';
 
 registerHooks({ resolve: resolveExtensionless });
 
-const { measure } = await import('./replan-round-trip-run.ts');
+const { hostedFromCommand, KEY_NOT_CLEARED, measure, refusedArguments } =
+  await import('./replan-round-trip-run.ts');
+
+const OPTIONS = [
+  '--url',
+  '--transport',
+  '--runs',
+  '--cold-runs',
+  '--unload',
+  '--origin',
+  '--starts-per-account',
+  '--run-timeout-seconds',
+  '--hosted-url',
+  '--hosted-model',
+];
 
 function arg(name: string): string | undefined {
   const index = process.argv.indexOf(name);
   return index < 0 ? undefined : process.argv[index + 1];
 }
 
+const refused = refusedArguments(process.argv.slice(2), OPTIONS);
+if (refused !== undefined) {
+  process.stderr.write(`${refused}\n`);
+  process.exit(2);
+}
 const url = arg('--url');
 const transport = arg('--transport') ?? 'sealed';
 if (url === undefined || (transport !== 'sealed' && transport !== 'plaintext')) {
   process.stderr.write(
-    "usage: node tools/replan-round-trip.ts --url https://… [--transport sealed|plaintext] [--runs 30] [--cold-runs 5] [--unload '<command>'] [--origin https://…] [--starts-per-account 12] [--run-timeout-seconds 660]\n",
+    "usage: node tools/replan-round-trip.ts --url https://… [--transport sealed|plaintext] [--runs 30] [--cold-runs 5] [--unload '<command>'] [--origin https://…] [--starts-per-account 12] [--run-timeout-seconds 660] [--hosted-url https://… --hosted-model <name>, with the key in OYL_MEASURE_HOSTED_KEY]\n",
   );
   process.exit(2);
 }
 const unload = arg('--unload');
 const origin = arg('--origin');
+let hosted: ReturnType<typeof hostedFromCommand>;
+try {
+  hosted = hostedFromCommand(arg('--hosted-url'), arg('--hosted-model'), process.env);
+} catch (error) {
+  process.stderr.write(
+    `${error instanceof Error ? error.message : 'the hosted options are not usable'}\n`,
+  );
+  process.exit(2);
+}
 const report = await measure({
   url,
   transport,
@@ -68,6 +125,7 @@ const report = await measure({
   runTimeoutMs: Number(arg('--run-timeout-seconds') ?? 660) * 1000,
   log: (line) => process.stderr.write(`${line}\n`),
   ...(origin === undefined ? {} : { origin }),
+  ...(hosted === undefined ? {} : { hosted }),
   ...(unload === undefined
     ? {}
     : {
@@ -75,7 +133,7 @@ const report = await measure({
           // A model the last run never loaded is already unloaded, and the
           // command says so by failing: that is no reason to lose the run.
           try {
-            execFileSync('/bin/sh', ['-c', unload], { stdio: 'ignore' });
+            execSync(unload, { stdio: 'ignore' });
           } catch {
             process.stderr.write('the unload command failed; carrying on\n');
           }
@@ -84,3 +142,8 @@ const report = await measure({
       }),
 });
 process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+if (report.hosted?.cleared === false) {
+  // A key left behind is not a run that ended well, whatever it measured.
+  process.stderr.write(`${KEY_NOT_CLEARED}\n`);
+  process.exitCode = 3;
+}

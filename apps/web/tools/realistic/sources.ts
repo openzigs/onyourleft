@@ -30,9 +30,34 @@
  *
  * ⚠️ **No Mixamo, refused by host rather than by omission** — Adobe's terms bar
  * redistributing the raw character, and a public repository and an APK both
- * do. ADR 0026 D-4's other exclusions (Megascans/Fab, `-NC`, `-SA`, Sketchfab's
- * "Free Standard", anything AI-generated) are not reachable from the two hosts
- * named here, and a new host is a change to that ADR, not to this table.
+ * do.
+ *
+ * ## The list of sources is the boundary, and it is written here
+ *
+ * [ADR 0049](../../../../docs/adr/0049-open-asset-sources-for-the-realistic-world.md)
+ * D-10 is the whole list since #1275, and it supersedes ADR 0026 D-4's:
+ * {@link ADMITTED_SOURCES} and {@link BARRED_SOURCES} are that table, row for
+ * row, and `admitted-sources.test.ts` reads the ADR and holds the two to each
+ * other. {@link admission} is what the lists decide about one URL, and
+ * `realistic:fetch` asks it of every URL it requests — a licence page and each
+ * file, including the ones Poly Haven's API resolves — before the request is
+ * made, so a source from anywhere else is refused by the pipeline, not only by
+ * a reviewer. {@link licenceVerdict} asks it of the addresses a source declares.
+ * (A redirect is followed by `fetch`; only the address requested is checked.)
+ * ⚠️ **A new source is a superseding ADR, not a row added here** (ADR 0026 D-4,
+ * which ADR 0049 keeps).
+ *
+ * ⚠️ **ambientCG is one of them since #1274, and it is no new host**: D-10's
+ * table admits it, as ADR 0026 D-4's did, for PBR materials, and until #1274
+ * nothing here read it. Its origin is {@link ambientCg}; what its asset's own page has to say,
+ * and which of its assets are refused however their page reads, is
+ * {@link ambientCgVerdict}.
+ *
+ * ⚠️ **And since #1283 some trees are GENERATED** (ADR 0049 D-1): made by the
+ * pinned {@link PINNED_EZ_TREE} from the seed and parameters in
+ * `generated-trees.ts`, wearing ambientCG's bark and leaves. Their recipe is
+ * `generated`; their recorded input is those numbers' digest with the
+ * ambientCG files' ({@link generatedInputDigest}).
  *
  * Pure: no file, no network. The two scripts beside it do the I/O.
  */
@@ -59,17 +84,265 @@ import {
 } from '../brand/game-wordmark';
 
 import {
+  GENERATED_SPECIES,
+  GENERATED_TREES,
+  runNumbersDigest,
+  speciesOf,
+  type GeneratedLevel,
+  type GeneratedSpecies,
+  type GeneratedTree,
+  type RunPaths,
+} from './generated-trees';
+
+import {
   BICYCLE_MAP_KINDS,
   BICYCLE_MAP_WORDS,
   drawBicycleMap,
   pixelDigest,
 } from './draw-bicycle-maps';
 
-/** Hosts whose terms forbid shipping the file in a bundle or a repository. */
-export const BARRED_HOSTS: readonly string[] = ['mixamo.com', 'www.mixamo.com'];
-
 /** The licences a realistic asset may carry: the two ADR 0026 D-4 admits under `apps/`. */
 export type KeptLicence = 'CC0-1.0' | 'CC-BY-4.0';
+
+/** One row of ADR 0049 D-10's **In** table. */
+export interface AdmittedSource {
+  /** The source, as the ADR's table names it. */
+  readonly name: string;
+  /**
+   * The licence its row states. `MIT` is a GENERATOR's own licence, never an
+   * asset's: what a generator writes is this repository's (ADR 0049 D-1).
+   */
+  readonly licence: KeptLicence | 'MIT';
+  /** The decision that admits it. */
+  readonly decidedBy: string;
+  /**
+   * `files`: its files are downloaded, pinned and derived from (ADR 0026 D-5).
+   * `generator`: a deterministic tool run from committed parameters — its
+   * version, seed and parameters are the recorded input (ADR 0049 D-1, D-2).
+   */
+  readonly kind: 'files' | 'generator';
+  /**
+   * Where its licence pages and files are read from: a URL is this source's
+   * when it starts with one of these. Each ends at a path boundary, so a
+   * look-alike host cannot match. Empty where this pipeline reads nothing from
+   * it yet — the pull request that adopts an asset adds the page it read, and
+   * that is a fact about an admitted source, not a new one (ADR 0049 D-11).
+   */
+  readonly prefixes: readonly string[];
+}
+
+/**
+ * Every source a realistic asset may come from — ADR 0049 D-10's **In** table,
+ * which supersedes ADR 0026 D-4's. ⚠️ **Admitted is not adopted**: #1275 added
+ * no asset, and each adoption is its own issue, measured on the tablet.
+ */
+export const ADMITTED_SOURCES: readonly AdmittedSource[] = [
+  {
+    name: 'Poly Haven',
+    licence: 'CC0-1.0',
+    decidedBy: 'ADR 0026 D-4',
+    kind: 'files',
+    prefixes: [
+      'https://polyhaven.com/',
+      'https://api.polyhaven.com/',
+      // Where api.polyhaven.com's /files answer points: the files themselves.
+      'https://dl.polyhaven.org/',
+    ],
+  },
+  {
+    name: 'ambientCG',
+    licence: 'CC0-1.0',
+    decidedBy: 'ADR 0026 D-4',
+    kind: 'files',
+    prefixes: ['https://ambientcg.com/', 'https://docs.ambientcg.com/'],
+  },
+  {
+    // ADR 0026's 2026-09-28 amendment: MakeHuman's own CC0 system assets pack,
+    // by the author `makehuman_system`, is under this row.
+    name: 'MakeHuman’s own files',
+    licence: 'CC0-1.0',
+    decidedBy: 'ADR 0026 D-4',
+    kind: 'files',
+    prefixes: [
+      'https://raw.githubusercontent.com/makehumancommunity/makehuman/',
+      'https://static.makehumancommunity.org/assets/assetpacks/makehuman_system_assets.html',
+      'https://files.makehumancommunity.org/asset_packs/makehuman_system_assets/',
+    ],
+  },
+  {
+    // The stylised world's models: committed verbatim, never through this pipeline.
+    name: 'Kenney',
+    licence: 'CC0-1.0',
+    decidedBy: 'ADR 0026 D-4',
+    kind: 'files',
+    prefixes: [],
+  },
+  {
+    // Verified per asset under ADR 0023, wherever it is hosted: none is taken.
+    name: 'An individual model under CC-BY-4.0',
+    licence: 'CC-BY-4.0',
+    decidedBy: 'ADR 0026 D-4',
+    kind: 'files',
+    prefixes: [],
+  },
+  {
+    name: 'EZ-Tree’s output',
+    licence: 'MIT',
+    decidedBy: 'ADR 0049 D-1',
+    kind: 'generator',
+    prefixes: ['https://github.com/dgreenheck/ez-tree/'],
+  },
+  {
+    name: 'The Base Mesh',
+    licence: 'CC0-1.0',
+    decidedBy: 'ADR 0049 D-3',
+    kind: 'files',
+    prefixes: ['https://www.thebasemesh.com/'],
+  },
+  {
+    name: 'Blender Studio Human Base Meshes',
+    licence: 'CC0-1.0',
+    decidedBy: 'ADR 0049 D-4',
+    kind: 'files',
+    prefixes: [
+      'https://www.blender.org/download/demo-files/',
+      'https://www.blender.org/download/demo/asset-bundles/human-base-meshes/',
+    ],
+  },
+  {
+    // Per asset: the pose's OWN row on the pack's page has to read CC0.
+    name: 'MakeHuman community cyclist poses',
+    licence: 'CC0-1.0',
+    decidedBy: 'ADR 0049 D-6',
+    kind: 'files',
+    prefixes: [
+      'https://static.makehumancommunity.org/assets/assetpacks/poses02.html',
+      'https://files.makehumancommunity.org/asset_packs/poses02/',
+    ],
+  },
+];
+
+/** One row of ADR 0049 D-10's **Out** table. */
+export interface BarredSource {
+  /** What is out, as the ADR's table names it. */
+  readonly name: string;
+  /** The decision that bars it. */
+  readonly decidedBy: string;
+  /** Why, in the words a refusal prints. */
+  readonly why: string;
+  /**
+   * The hosts it is refused by, each with its subdomains. Empty where what is
+   * barred is a licence term or a way of making, which no host identifies:
+   * those are refused by {@link licenceVerdict}'s reading of the page, or by
+   * review of the asset's own page (ADR 0049 D-2).
+   */
+  readonly hosts: readonly string[];
+}
+
+/** Everything that stays out, whatever the convenience — ADR 0049 D-10's **Out** table. */
+export const BARRED_SOURCES: readonly BarredSource[] = [
+  {
+    name: 'Mixamo',
+    decidedBy: 'ADR 0026 D-4',
+    why: 'its terms forbid redistributing the raw files, and a public repository is redistribution',
+    hosts: ['mixamo.com'],
+  },
+  {
+    name: 'Quixel Megascans and the Fab Standard licence',
+    decidedBy: 'ADR 0026 D-4',
+    why: 'not an open licence',
+    hosts: [],
+  },
+  {
+    name: 'Sketchfab’s Standard licence',
+    decidedBy: 'ADR 0026 D-4',
+    why: 'not an open licence',
+    hosts: [],
+  },
+  {
+    name: 'Anything non-commercial, no-derivatives or share-alike',
+    decidedBy: 'ADR 0026 D-4',
+    why: 'an asset is CC0-1.0 or CC-BY-4.0 and nothing else',
+    hosts: [],
+  },
+  {
+    name: 'Non-commercial motion capture sets',
+    decidedBy: 'ADR 0049 D-9',
+    why: 'a non-commercial grant, whatever the data',
+    hosts: [],
+  },
+  {
+    name: 'MB-Lab characters',
+    decidedBy: 'ADR 0049 D-9',
+    why: 'its characters carry neither CC0-1.0 nor CC-BY-4.0',
+    hosts: [],
+  },
+  {
+    name: 'Anything AI-generated',
+    decidedBy: 'ADR 0049 D-2',
+    why: 'the output of a trained generative model, however it is labelled',
+    hosts: [],
+  },
+  {
+    name: 'The cyclist motion capture set’s data',
+    decidedBy: 'ADR 0049 D-5',
+    why: 'it is a reference to read, and none of its data is fetched or committed',
+    hosts: ['zenodo.org'],
+  },
+  {
+    name: 'A downloaded bicycle',
+    decidedBy: 'ADR 0049 D-8',
+    why: 'the bicycle is built from numbers (#369)',
+    hosts: [],
+  },
+];
+
+/** What the two lists decide about one URL. */
+export type Admission =
+  | { readonly admitted: true; readonly source: AdmittedSource }
+  | { readonly admitted: false; readonly reason: string };
+
+/**
+ * Whether a URL may be read by the pipeline: barred hosts first, then the
+ * admitted prefixes, and anything else refused — the list is the boundary, so
+ * "not named" is a refusal and never a judgement (ADR 0026 D-4, ADR 0049 D-11).
+ *
+ * `as` says what the URL is for. A **generator** row (EZ-Tree) admits its
+ * licence page and nothing it hosts: its bundled images are not taken (ADR
+ * 0049 D-1), so no file is read from it. A URL that is not in the form `fetch`
+ * would request (`..`, `%2e%2e`, a default port) is refused, because the prefix
+ * test reads the string and the server reads the normalised address; a prefix
+ * that names a page (`.html`) matches that page alone.
+ */
+export function admission(url: string, as: 'licence' | 'file' = 'file'): Admission {
+  const { hostname, href } = new URL(url);
+  const barred = BARRED_SOURCES.find((source) =>
+    source.hosts.some((host) => hostname === host || hostname.endsWith(`.${host}`)),
+  );
+  if (barred !== undefined) {
+    return {
+      admitted: false,
+      reason: `${hostname} is barred — ${barred.name}: ${barred.why} (${barred.decidedBy})`,
+    };
+  }
+  const source =
+    href !== url || /%2e/i.test(url)
+      ? undefined
+      : ADMITTED_SOURCES.find(
+          (candidate) =>
+            (as === 'licence' || candidate.kind === 'files') &&
+            candidate.prefixes.some((prefix) =>
+              prefix.endsWith('.html') ? url === prefix : url.startsWith(prefix),
+            ),
+        );
+  if (source === undefined) {
+    return {
+      admitted: false,
+      reason: `${url} is not from a source ADR 0049 D-10 admits — a new source is a superseding ADR, not a new row`,
+    };
+  }
+  return { admitted: true, source };
+}
 
 /** Which of a Poly Haven asset's files to take. */
 export type PolyHavenSelection =
@@ -79,7 +352,14 @@ export type PolyHavenSelection =
       readonly resolution: string;
       readonly maps: readonly string[];
     }
-  | { readonly type: 'model'; readonly resolution: string };
+  | { readonly type: 'model'; readonly resolution: string }
+  /**
+   * Named maps of an asset of any kind and none of its geometry — #1294: a
+   * model's twig atlas and bark, for a generated tree to wear. `maps` are the
+   * keys of Poly Haven's `/files/{id}` answer (`twig_alpha`), which for a
+   * model are not among the files its glTF includes.
+   */
+  | { readonly type: 'maps'; readonly resolution: string; readonly maps: readonly string[] };
 
 /** A file named by URL rather than by an API. */
 export interface FixedFile {
@@ -128,6 +408,18 @@ export interface AssetSource {
         readonly from: 'archive';
         readonly url: string;
         readonly members: readonly ArchiveMember[];
+      }
+    | {
+        /**
+         * An ambientCG asset — #1274: the one archive ambientCG publishes for
+         * it at `attribute`, downloaded whole and pinned by its digest, and
+         * only `maps` taken out. {@link ambientCgArchive} says which files.
+         */
+        readonly from: 'ambientcg';
+        /** The size and format ambientCG names the archive by: `1K-JPG`. */
+        readonly attribute: string;
+        /** The maps taken, as ambientCG names them: `Color`, `NormalGL`. */
+        readonly maps: readonly string[];
       };
 }
 
@@ -241,6 +533,165 @@ function polyHaven(id: string, select: PolyHavenSelection): AssetSource {
 }
 
 /**
+ * What every ambientCG asset's own page says of its licence, verbatim — read
+ * on 2026-10-12 at `ambientcg.com/view?id=Rock026`.
+ */
+export const AMBIENTCG_PHRASE = 'All assets are released under the Creative Commons CC0 license';
+
+/**
+ * How an ambientCG asset may have been made, as its own page's "Technique"
+ * names it, for the pipeline to take it — #1274.
+ *
+ * ADR 0026 D-4 bars anything **marked or known to be AI-generated**, and
+ * ambientCG says of each asset how its maps were made. Read on 2026-10-12, its
+ * pages name five techniques:
+ *
+ * | The page's "Technique" | What the page says of it | |
+ * |---|---|---|
+ * | `Surface Photogrammetry` | "Photogrammetry is used to create a highly accurate height map for the surface." | **kept** |
+ * | `Photometric Stereo` | "Light from multiple angles is used to create a more accurate approximation of the height map for the surface." | **kept** |
+ * | `Approximation` | "The height profile of the surface is approximated from the color." | refused |
+ * | `Prodedural` (the site's spelling) | "Procedural/algorithmic techniques are used to create a surface." | refused |
+ * | `Other/Unknown` | "(no description)" | refused |
+ *
+ * The two kept are MEASURED from a real surface. `Approximation` is refused
+ * because the page does not say what approximates the height from the colour,
+ * and until that is known it cannot be shown not to be a trained model — #1274
+ * item 4. `Other/Unknown` is refused for the same reason, in the page's own
+ * words. Both follow ADR 0049 D-2: a page that says "approximated" is read
+ * until it is known which kind it is, and an asset whose making cannot be
+ * established is treated as barred. `Prodedural` stays refused, and no longer
+ * as a class: ADR 0049 D-2 rules that a deterministic tool run from committed
+ * parameters is NOT AI-generated, and also that the test is how the asset was
+ * made, not what its page calls it — the pull request that takes one shows
+ * the making. The page's one sentence does not show it, and #1274 takes no
+ * such asset, so adding the technique here is the work of the issue that does.
+ *
+ * ⚠️ **A list of what is kept, not of what is refused**, so a technique
+ * ambientCG adds later is refused until somebody reads what it means.
+ */
+export const AMBIENTCG_TECHNIQUES_KEPT: readonly string[] = [
+  'Surface Photogrammetry',
+  'Photometric Stereo',
+];
+
+/**
+ * One ambientCG asset — #1274: its id, the archive it is published in at
+ * `attribute`, and the maps taken out of that archive.
+ *
+ * - **Its page** is `ambientcg.com/view?id=<id>`, the asset's own, which
+ *   states the licence ({@link AMBIENTCG_PHRASE}), how the asset was made and
+ *   which archives it is published in. {@link ambientCgVerdict} reads all three.
+ * - **Its author** is recorded as ambientCG: the site publishes its own work,
+ *   and an asset's page names no other author.
+ */
+function ambientCg(id: string, attribute: string, maps: readonly string[]): AssetSource {
+  return {
+    id,
+    licencePage: `https://ambientcg.com/view?id=${id}`,
+    licencePhrase: AMBIENTCG_PHRASE,
+    licence: 'CC0-1.0',
+    author: 'ambientCG',
+    origin: { from: 'ambientcg', attribute, maps },
+  };
+}
+
+/** An archive downloaded whole, and the files taken out of it. */
+export interface ArchiveToRead {
+  /** The archive's own file name: under `build/raw/<id>/`, and its path in the lock. */
+  readonly name: string;
+  readonly url: string;
+  readonly members: readonly Pick<ArchiveMember, 'path' | 'mustContain'>[];
+}
+
+/**
+ * The archive an ambientCG asset is published in, and the files taken out of
+ * it — #1274. ambientCG names both by the asset's id and the attribute:
+ * `Rock026_1K-JPG.zip` holds `Rock026_1K-JPG_Color.jpg`.
+ *
+ * ⚠️ **The archive is what the lock pins**, as it is for MakeHuman's pack
+ * (#623): ambientCG publishes no digest of its own and serves the file through
+ * a redirect, so the SHA-256 of the bytes that arrived is the only statement
+ * of what they were. Measured on 2026-10-12: two downloads of
+ * `Rock026_1K-JPG.zip`, minutes apart, were the same bytes.
+ */
+export function ambientCgArchive(source: AssetSource): ArchiveToRead {
+  if (source.origin.from !== 'ambientcg') {
+    throw new Error(`${source.id}: not an ambientCG asset`);
+  }
+  const { attribute, maps } = source.origin;
+  const stem = `${source.id}_${attribute}`;
+  const extension = (attribute.split('-')[1] ?? '').toLowerCase();
+  return {
+    name: `${stem}.zip`,
+    url: `https://ambientcg.com/get?file=${stem}.zip`,
+    members: maps.map((map) => ({ path: `${stem}_${map}.${extension}` })),
+  };
+}
+
+/** The archive a source is read out of, where it is one: MakeHuman's pack, or an ambientCG asset. */
+export function archiveOf(source: AssetSource): ArchiveToRead | undefined {
+  if (source.origin.from === 'ambientcg') return ambientCgArchive(source);
+  if (source.origin.from !== 'archive') return undefined;
+  const { url, members } = source.origin;
+  const path = new URL(url).pathname;
+  return { name: path.slice(path.lastIndexOf('/') + 1), url, members };
+}
+
+/**
+ * The techniques an ambientCG asset's page names: the text of each entry of
+ * its "Technique" block (`<div id="techniques">`), in the page's order.
+ */
+export function ambientCgTechniques(pageHtml: string): readonly string[] {
+  const block = /\bid="techniques"[^>]*>([\s\S]*?)(?=<div\b[^>]*\bid="|$)/i.exec(pageHtml);
+  if (block === null) return [];
+  return [...(block[1] ?? '').matchAll(/<span\b[^>]*>([\s\S]*?)<\/span>/gi)]
+    .map((match) => (match[1] ?? '').replace(/\s+/g, ' ').trim())
+    .filter((technique) => technique !== '');
+}
+
+/**
+ * Whether an ambientCG asset may be kept, given the text of its OWN page —
+ * #1274. Three things, none of which a marketplace label gives:
+ *
+ * 1. **The page is this asset's**: it offers the very archive the pipeline is
+ *    about to download. A page that does not — the site's front page, another
+ *    asset's, this asset at a size it is not published in — is refused, so
+ *    another page's CC0 sentence cannot vouch for this file.
+ * 2. **The page states the licence** — {@link licenceVerdict}'s own checks:
+ *    the phrase, no NC, ND or SA term, no barred host.
+ * 3. **The page says how the asset was made, and every technique it names is
+ *    one {@link AMBIENTCG_TECHNIQUES_KEPT} lists.** A page that names none is
+ *    refused too: not known is not the same as measured.
+ */
+export function ambientCgVerdict(source: AssetSource, pageHtml: string): LicenceVerdict {
+  const archive = ambientCgArchive(source);
+  if (!pageHtml.includes(`href="${archive.url}"`)) {
+    return {
+      kept: false,
+      reason: `${source.id}: ${source.licencePage} does not offer ${archive.name} — it is not this asset's own page, or the asset is not published at that size`,
+    };
+  }
+  const stated = statedLicence(source, pageHtml);
+  if (!stated.kept) return stated;
+  const techniques = ambientCgTechniques(pageHtml);
+  if (techniques.length === 0) {
+    return {
+      kept: false,
+      reason: `${source.id}: ${source.licencePage} does not say how the asset was made`,
+    };
+  }
+  const refused = techniques.find((technique) => !AMBIENTCG_TECHNIQUES_KEPT.includes(technique));
+  if (refused !== undefined) {
+    return {
+      kept: false,
+      reason: `${source.id}: its page says it was made by "${refused}", which is not one of ${AMBIENTCG_TECHNIQUES_KEPT.join(', ')} — ADR 0026 D-4 bars AI-generated material, and only an asset measured from a real surface is taken (#1274)`,
+    };
+  }
+  return { ...stated, technique: techniques.join(', ') };
+}
+
+/**
  * The photographic surfaces the realistic structures wear — #475, ADR 0026
  * D-12 layer 3 — each a Poly Haven CC0 texture: its id, and the file name Poly
  * Haven gives its 1K colour map (one of them spells it `diffuse`). How many
@@ -292,6 +743,223 @@ export const GROUND_BLEND_TEXTURES: readonly {
   { id: 'gravelly_sand', colourFile: 'gravelly_sand_diff_1k.jpg' },
   { id: 'rocks_ground_05', colourFile: 'rocks_ground_05_diff_1k.jpg' },
 ];
+
+/**
+ * The ground surfaces taken from ambientCG — #1274, each one of its CC0
+ * materials at 1K: its id, which is also the name its files carry.
+ *
+ * - `Rock026` — bare ROCK where the landform is steep: a fractured rock face,
+ *   made by surface photogrammetry and published on 2019-10-24 (its own page,
+ *   read 2026-10-12). Until #1274 a steep bank wore `rocks_ground_05`, which is
+ *   loose stones on earth — scree, which a bank past the angle of repose is
+ *   exactly not. That photograph keeps the scree above the tree line; this
+ *   one takes the banks.
+ *
+ * ## ⚠️ Measured before it stayed, and the first one tried did not
+ *
+ * #1274 asks that each asset be measured before it stays. `Rock045`, a
+ * weathered face with lichen on it, was fetched, locked, made and drawn first,
+ * and read back **flatter than the grass beside it** in the browser gate's own
+ * frame (`game-harness.ts` §`groundBlendProbe`, #627's measure): a contrast of
+ * 0.0021 on the bank against 0.0017 to 0.0058 for level grass, where the
+ * photograph it replaced read 0.0944 — so #627's own gate went red, rightly.
+ * The ground's shader keeps a photograph's STRUCTURE and gives it the world's
+ * colour, and a rider sees a bank from tens of metres away, where one pixel
+ * covers 5 to 20 cm: a scan whose detail is all finer than that is a flat
+ * slope. `Rock026`'s is fractured rock a metre across, and reads 0.0408 in the
+ * same frame. A candidate for this table is screened the same way: its detail
+ * has to survive a 20 cm footprint.
+ *
+ * Downsized to {@link STRUCTURE_TEXTURE_PIXELS} and encoded as KTX2 by the
+ * same script and recipe as {@link GROUND_BLEND_TEXTURES}.
+ */
+export const AMBIENTCG_GROUND_TEXTURES: readonly { readonly id: string }[] = [{ id: 'Rock026' }];
+
+/** The archive every {@link AMBIENTCG_GROUND_TEXTURES} entry is taken from, and the two maps taken. */
+const AMBIENTCG_GROUND_ATTRIBUTE = '1K-JPG';
+const AMBIENTCG_GROUND_MAPS = { colour: 'Color', normal: 'NormalGL' } as const;
+
+/**
+ * The bark and leaves the generated trees wear — #1283, ADR 0049 D-1: each an
+ * ambientCG CC0 asset at 1K, taken through #1274's origin (its own page's
+ * licence, its technique against {@link AMBIENTCG_TECHNIQUES_KEPT}, its
+ * archive pinned by digest) — or, since #1294, a Poly Haven one
+ * ({@link POLY_HAVEN_TREE_MAPS}). Which species wears which is
+ * `generated-trees.ts` §`GENERATED_SPECIES`; this is the list of what to fetch,
+ * derived from it so the two cannot disagree.
+ *
+ * - a **bark** gives its colour and normal maps;
+ * - a **leaf atlas** gives its colour map, its opacity map — the cut-out each
+ *   leaf is taken by — and its normal map.
+ *
+ * ⚠️ **ambientCG has no needles the pipeline may take**: read on 2026-10-12,
+ * its two needle atlases (`LeafSet019`, `PineNeedles001`) are both made by
+ * "Approximation", which {@link AMBIENTCG_TECHNIQUES_KEPT} refuses. A reviewer
+ * who remembers this note ending "so the conifers stay the Poly Haven scans"
+ * is reading #1283's file: the fir's needles are Poly Haven's since #1294.
+ */
+export const GENERATED_TREE_ATTRIBUTE = '1K-JPG';
+export const GENERATED_BARK_MAPS = { colour: 'Color', normal: 'NormalGL' } as const;
+export const GENERATED_LEAF_MAPS = {
+  colour: 'Color',
+  opacity: 'Opacity',
+  normal: 'NormalGL',
+} as const;
+
+/**
+ * The admitted sources a generated tree's bark and leaves may come from, as
+ * ADR 0049 D-10 names them. D-1's body says "Bark and leaves come from
+ * ambientCG", written to keep EZ-Tree's own bundled images out; its amendment
+ * of 2026-10-12 records the owner's ruling that "needles and bark come from
+ * Poly Haven" as well (#1294). Poly Haven was already on D-10's list for
+ * photoscanned vegetation, so this is no new source. `admitted-sources.test.ts`
+ * holds this list to the ADR and every worn asset's page to this list.
+ */
+export const GENERATED_TREE_WEARS: readonly string[] = ['ambientCG', 'Poly Haven'];
+
+/** The size a Poly Haven map is taken at, as its API names it. */
+export const POLY_HAVEN_TREE_RESOLUTION = '1k';
+
+/**
+ * The Poly Haven assets a generated tree wears, and which of each one's maps
+ * are its bark and its leaf atlas, as `api.polyhaven.com/files/{id}` names
+ * them — #1294. An asset named here is fetched from Poly Haven, through
+ * {@link polyHavenFiles}; every other is ambientCG's.
+ *
+ * ## `fir_tree_01`, and why not `fir_sapling_medium`
+ *
+ * Both are Poly Haven CC0 models by Rob Tuytel (photography) and Rico Cilliers
+ * (modeling), of the same collection, and both carry a twig atlas of the same
+ * **seven photographed fir sprigs**. Read on 2026-10-12, byte for byte:
+ *
+ * | Map, 1K JPEG | `fir_sapling_medium` (`twigs_…`) | `fir_tree_01` (`twig_…`) |
+ * |---|---|---|
+ * | alpha | `1f0607dd…` | the same file |
+ * | normal (`nor_gl`) | `d470dc39…` | the same file |
+ * | colour (`diff`) | `db1113d3…`: black wherever the alpha is | `8c0833a1…`: the same sprigs, with green carried out from each needle's edge |
+ *
+ * `fir_tree_01` is taken for its colour map. A card is drawn several times
+ * smaller than the atlas, so a card texel at a needle's edge averages needle
+ * with background; over black that edge is a dark outline round every needle,
+ * and over the needles' own green it is not. And taking it adds a source where
+ * `fir_sapling_medium`'s alpha map would have changed an existing one: the
+ * model's glTF does not include its alpha, so the scans' locked file list —
+ * and with it the recorded input of eight committed files that do not read
+ * it — would have moved.
+ *
+ * Its **bark** is the same asset's `bark_diff` and `bark_nor_gl`, which are
+ * byte for byte `fir_sapling_medium`'s `branches_…` maps: the photographed
+ * bark the scanned firs already wear.
+ *
+ * ## Four of the seven sprigs
+ *
+ * `generated-trees.ts` names each sprig by the rectangle it lies in. Measured
+ * off the alpha map at half coverage on 2026-10-12: five sprigs stand upright,
+ * two lean (at about 400, 300 and 510, 265 from the top left), and the
+ * rectangle of the large upright one at the lower right (650 to 980 across,
+ * 463 to 850 down) also holds 1 854 texels of the bare twig that crosses the
+ * atlas's corner, so it is left out. The four named are the other upright
+ * ones. What each one's rectangle holds beside its sprig: flecks of 1 to 22
+ * texels that touch nothing, 105 texels in all, and in the third 23 texels of
+ * the leaning sprig beside it — which a rectangle cannot leave out without
+ * cutting the sprig it is for. The first is drawn 11 texels short on its right
+ * so that its neighbour's tip is not in it, and loses 41 of its 25 109 texels.
+ */
+export const POLY_HAVEN_TREE_MAPS: Readonly<
+  Record<
+    string,
+    {
+      readonly bark: { readonly colour: string; readonly normal: string };
+      readonly leaf: {
+        readonly colour: string;
+        readonly opacity: string;
+        readonly normal: string;
+      };
+    }
+  >
+> = {
+  fir_tree_01: {
+    bark: { colour: 'bark_diff', normal: 'bark_nor_gl' },
+    leaf: { colour: 'twig_diff', opacity: 'twig_alpha', normal: 'twig_nor_gl' },
+  },
+};
+
+const wornAs = (part: 'bark' | 'sprig'): readonly string[] => [
+  ...new Set(GENERATED_SPECIES.map((species) => species[part].source)),
+];
+
+/**
+ * Every asset a generated tree wears, once each: ambientCG's barks, then its
+ * leaf atlases, then Poly Haven's — one entry an asset, with its bark's maps
+ * and its atlas's where one asset is both (#1294).
+ */
+export const GENERATED_TREE_TEXTURES: readonly {
+  readonly id: string;
+  readonly from: 'ambientcg' | 'polyhaven';
+  readonly maps: readonly string[];
+}[] = [
+  ...wornAs('bark')
+    .filter((id) => !(id in POLY_HAVEN_TREE_MAPS))
+    .map((id) => ({
+      id,
+      from: 'ambientcg' as const,
+      maps: Object.values(GENERATED_BARK_MAPS),
+    })),
+  ...wornAs('sprig')
+    .filter((id) => !(id in POLY_HAVEN_TREE_MAPS))
+    .map((id) => ({
+      id,
+      from: 'ambientcg' as const,
+      maps: Object.values(GENERATED_LEAF_MAPS),
+    })),
+  ...Object.entries(POLY_HAVEN_TREE_MAPS)
+    .map(([id, maps]) => ({
+      id,
+      from: 'polyhaven' as const,
+      maps: [
+        ...(wornAs('bark').includes(id) ? Object.values(maps.bark) : []),
+        ...(wornAs('sprig').includes(id) ? Object.values(maps.leaf) : []),
+      ],
+    }))
+    .filter((texture) => texture.maps.length > 0),
+];
+
+/**
+ * Where the maps one species wears are, relative to the downloads' directory:
+ * `<id>/<id>_1K-JPG_<map>.jpg`, the names ambientCG's archive gives them
+ * ({@link ambientCgArchive}), or for a Poly Haven asset `<id>/<id>_<map>_1k.jpg`,
+ * the name its API gives each file ({@link polyHavenFiles}).
+ */
+export function generatedTreeMaps(species: GeneratedSpecies): RunPaths {
+  const ambient = (id: string, map: string): string =>
+    `${id}/${id}_${GENERATED_TREE_ATTRIBUTE}_${map}.jpg`;
+  const haven = (id: string, map: string): string =>
+    `${id}/${id}_${map}_${POLY_HAVEN_TREE_RESOLUTION}.jpg`;
+  const bark = POLY_HAVEN_TREE_MAPS[species.bark.source]?.bark;
+  const leaf = POLY_HAVEN_TREE_MAPS[species.sprig.source]?.leaf;
+  return {
+    barkColour:
+      bark === undefined
+        ? ambient(species.bark.source, GENERATED_BARK_MAPS.colour)
+        : haven(species.bark.source, bark.colour),
+    barkNormal:
+      bark === undefined
+        ? ambient(species.bark.source, GENERATED_BARK_MAPS.normal)
+        : haven(species.bark.source, bark.normal),
+    leafColour:
+      leaf === undefined
+        ? ambient(species.sprig.source, GENERATED_LEAF_MAPS.colour)
+        : haven(species.sprig.source, leaf.colour),
+    leafOpacity:
+      leaf === undefined
+        ? ambient(species.sprig.source, GENERATED_LEAF_MAPS.opacity)
+        : haven(species.sprig.source, leaf.opacity),
+    leafNormal:
+      leaf === undefined
+        ? ambient(species.sprig.source, GENERATED_LEAF_MAPS.normal)
+        : haven(species.sprig.source, leaf.normal),
+  };
+}
 
 /** The side, in pixels, the pipeline downsizes a structure's maps to. */
 export const STRUCTURE_TEXTURE_PIXELS = 512;
@@ -369,6 +1037,24 @@ export const SOURCES: readonly AssetSource[] = [
   ...GROUND_BLEND_TEXTURES.map((texture) =>
     polyHaven(texture.id, { type: 'texture', resolution: '1k', maps: ['Diffuse', 'nor_gl'] }),
   ),
+  // #1274: the ground's bare rock, from ambientCG.
+  ...AMBIENTCG_GROUND_TEXTURES.map((texture) =>
+    ambientCg(texture.id, AMBIENTCG_GROUND_ATTRIBUTE, [
+      AMBIENTCG_GROUND_MAPS.colour,
+      AMBIENTCG_GROUND_MAPS.normal,
+    ]),
+  ),
+  // #1283: the generated trees' bark and leaves, from ambientCG — and since
+  // #1294 the fir's, from Poly Haven.
+  ...GENERATED_TREE_TEXTURES.map((texture) =>
+    texture.from === 'polyhaven'
+      ? polyHaven(texture.id, {
+          type: 'maps',
+          resolution: POLY_HAVEN_TREE_RESOLUTION,
+          maps: texture.maps,
+        })
+      : ambientCg(texture.id, GENERATED_TREE_ATTRIBUTE, texture.maps),
+  ),
   {
     id: 'makehuman',
     licencePage: `${MAKEHUMAN_RAW}/LICENSE.md`,
@@ -443,6 +1129,36 @@ export const SOURCES: readonly AssetSource[] = [
 
 /** The Blender version every derived asset was made with, and the one a re-run must use. */
 export const PINNED_BLENDER = 'Blender 4.4.3';
+
+/**
+ * The tree generator every generated tree was made with, and the one a re-run
+ * must use — #1283, ADR 0049 D-1: **EZ-Tree 1.1.0**, MIT, by Daniel Greenheck,
+ * the release ADR 0049 read (published 2026-01-15).
+ *
+ * ⚠️ **A tool, never a dependency of the product**, as Blender and
+ * KTX-Software are (ADR 0026 D-5): it is a `devDependency` of this app at
+ * exactly this version, `ez-tree.ts` is the one module that loads it and
+ * refuses any other, and nothing under `src/` imports it. What it writes is
+ * this repository's own work, dedicated `CC0-1.0` (ADR 0049 D-1); the MIT
+ * licence is the tool's.
+ *
+ * ⚠️ **three.js is part of the pin.** EZ-Tree places every limb with three's
+ * own vectors, Euler angles and quaternions (its `peerDependency`), so the
+ * numbers it makes are those of the `three` this app pins too —
+ * {@link EZ_TREE_THREE}. A bump of either moves `generated-trees.ts`
+ * §`GENERATED_TREES`' digests or does not, and `generated-trees.test.ts` says
+ * which before anything is committed.
+ */
+export const EZ_TREE_VERSION = '1.1.0';
+
+/** The generator as a record names it: its name and {@link EZ_TREE_VERSION}. */
+export const PINNED_EZ_TREE = `EZ-Tree ${EZ_TREE_VERSION}`;
+
+/** The npm package {@link PINNED_EZ_TREE} is installed as. */
+export const EZ_TREE_PACKAGE = '@dgreenheck/ez-tree';
+
+/** The `three` release {@link PINNED_EZ_TREE} computed the committed trees with. */
+export const EZ_TREE_THREE = '0.185.1';
 
 /**
  * The KTX-Software release every KTX2 file was encoded with, and the one a
@@ -664,7 +1380,29 @@ export type OutputRecipe =
        * §`drawMark` at this many pixels and handed to the run as a PNG, last.
        */
       readonly mark?: number;
+    }
+  /**
+   * One level of a GENERATED tree — #1283, ADR 0049 D-1: `generated-trees.ts`
+   * makes its geometry with the pinned {@link PINNED_EZ_TREE} from the tree's
+   * committed seed and parameters, and {@link GENERATED_TREE_SCRIPT} dresses
+   * it in its species' bark and leaves, bakes its occlusion and, for a full
+   * level, renders its impostor. Its input is {@link generatedInputDigest}.
+   */
+  | {
+      readonly how: 'generated';
+      /** Which of `generated-trees.ts` §`GENERATED_TREES`. */
+      readonly tree: string;
+      readonly level: GeneratedLevel;
+      /** Whether the GLB's embedded maps are encoded as KTX2 before it ships. */
+      readonly images?: 'ktx2';
+      /** The impostor strips a full level's run writes. */
+      readonly alsoWrites?: readonly AlsoWritten[];
     };
+
+/** The other files a recipe's run writes beside its own: a tree's strips, the rider's maps. */
+export function alsoWritten(recipe: OutputRecipe): readonly AlsoWritten[] {
+  return recipe.how === 'blender' || recipe.how === 'generated' ? (recipe.alsoWrites ?? []) : [];
+}
 
 /**
  * A second file a Blender run writes — a tree's impostor strip — and, since
@@ -691,6 +1429,25 @@ export interface OutputSpec {
 }
 
 const TREE_SCRIPT = 'blender/process_tree.py';
+
+/** The script that dresses and exports a generated tree — #1283. */
+export const GENERATED_TREE_SCRIPT = 'blender/process_generated_tree.py';
+
+/** Where the generated trees' numbers are, repository-relative. */
+export const GENERATED_TREES_PATH = `${PIPELINE_DIRECTORY}generated-trees.ts`;
+
+/**
+ * What a generated output's {@link OutputSpec.from} names: no single
+ * {@link SOURCES} entry, because the tree is this repository's own work and
+ * the assets it wears are named by its species.
+ */
+export const GENERATED_FROM = 'this repository, generated';
+
+/**
+ * The tools a generated tree is made with, in order: the generator on the
+ * `three` it computes with, under the repository's own Node, then Blender.
+ */
+export const GENERATED_TOOL = `${PINNED_EZ_TREE} on three ${EZ_TREE_THREE} under Node.js 24 (.nvmrc), then ${PINNED_BLENDER}`;
 
 /**
  * How an impostor strip is encoded — #618: ETC1S with its alpha, because the
@@ -822,6 +1579,8 @@ export const OUTPUTS: readonly OutputSpec[] = [
   middle('tree_small_02', 'tree_small_02', 'tree_small_02', '6000'),
   middle('fir_sapling_medium_a', 'fir_sapling_medium', 'fir_sapling_medium_a', '6000'),
   middle('fir_sapling_medium_b', 'fir_sapling_medium', 'fir_sapling_medium_b', '6000'),
+  // #1283: the generated trees, each a full level with its strips and a middle level.
+  ...GENERATED_TREES.flatMap((tree) => [generatedFull(tree), generatedMiddle(tree)]),
   plant('shrub_02_a', 'shrub_02', 'shrub_02_a', '6000'),
   plant('shrub_02_c', 'shrub_02', 'shrub_02_c', '6000'),
   {
@@ -841,6 +1600,16 @@ export const OUTPUTS: readonly OutputSpec[] = [
     return [
       structureMap(made.colour, texture.id, texture.colourFile, 'colour'),
       structureMap(made.normal, texture.id, `${texture.id}_nor_gl_1k.jpg`, 'data'),
+    ];
+  }),
+  // #1274: ambientCG's, by the same recipe — its files carry its own names.
+  ...AMBIENTCG_GROUND_TEXTURES.flatMap((texture) => {
+    const made = structureMapFiles(texture.id);
+    const upstream = (map: string): string =>
+      `${texture.id}_${AMBIENTCG_GROUND_ATTRIBUTE}_${map}.jpg`;
+    return [
+      structureMap(made.colour, texture.id, upstream(AMBIENTCG_GROUND_MAPS.colour), 'colour'),
+      structureMap(made.normal, texture.id, upstream(AMBIENTCG_GROUND_MAPS.normal), 'data'),
     ];
   }),
   {
@@ -993,6 +1762,90 @@ function middle(name: string, from: string, object: string, triangles: string): 
   };
 }
 
+/** A generated tree's full level, with the impostor strips its run renders — #1283. */
+function generatedFull(tree: GeneratedTree): OutputSpec {
+  const species = speciesOf(tree);
+  const [frameW, frameH] = species.impostor.frame;
+  const [normalW, normalH] = species.impostor.normalFrame;
+  return {
+    file: `${tree.name}.glb`,
+    from: GENERATED_FROM,
+    recipe: {
+      how: 'generated',
+      tree: tree.name,
+      level: 'full',
+      images: 'ktx2',
+      alsoWrites: [
+        {
+          file: `${tree.name}-impostor.ktx2`,
+          made: `${tree.name}-impostor.png`,
+          ktx2: IMPOSTOR_KTX2,
+          modified: `an eight-view impostor strip of the generated tree's full level, each view ${String(frameW)} by ${String(frameH)} px, rendered by Cycles on one thread before its maps are downsized`,
+        },
+        {
+          file: `${tree.name}-impostor-normals.ktx2`,
+          made: `${tree.name}-impostor-normals.png`,
+          ktx2: IMPOSTOR_NORMALS_KTX2,
+          modified: `the eight views of the generated tree's full level the impostor strip is rendered from, as NORMALS, each view ${String(normalW)} by ${String(normalH)} px: Cycles' normal pass on one thread, in the tree's own frame in three's axes (x across, y up, z the model's front), encoded n * 0.5 + 0.5 with the background the zero vector`,
+        },
+      ],
+    },
+    modified: `${species.words}, generated at the size wanted and neither decimated nor thinned: its wood and leaf cards are what ${PINNED_EZ_TREE} made from the seed ${String(tree.seed)} and the ${species.id} parameters in ${GENERATED_TREES_PATH}, scaled to metres; each leaf card ${'rects' in species.sprig ? `drawn from ${String(new Set(species.sprig.leaves.map((leaf) => leaf.cell)).size)} of ${species.sprig.source}'s photographed sprigs, each taken from its own rectangle of the twig atlas` : `a sprig drawn from ${species.sprig.source}'s scanned leaves`}, cut out by that atlas's own opacity map and toned by ${species.sprig.tone.join(', ')}, at ${String(species.sprig.pixels)} px with its normals at ${String(species.sprig.normalPixels)} px; ${species.bark.source}'s colour and normal maps downsized to ${String(species.bark.pixels)} px and its other maps dropped; ambient occlusion baked into a vertex colour; then ${GLB_IMAGES_WORDS}`,
+  };
+}
+
+/** A generated tree's middle level: the same tree made again at a lower budget — #1283, #617. */
+function generatedMiddle(tree: GeneratedTree): OutputSpec {
+  const species = speciesOf(tree);
+  return {
+    file: `${tree.name}-middle.glb`,
+    from: GENERATED_FROM,
+    recipe: { how: 'generated', tree: tree.name, level: 'middle' },
+    modified: `the same tree generated again as its middle level of detail, by ${PINNED_EZ_TREE} from the same seed ${String(tree.seed)} and ${species.id} parameters in ${GENERATED_TREES_PATH}: fewer sides round each branch, the wood deeper than level ${String(species.middle.deepestWood)} left out, and one leaf card in ${String(species.middle.leafEvery)} kept and enlarged ${String(species.middle.leafGrowth)} times about the point it grows from; ambient occlusion baked into a vertex colour, and no image — it wears the full level's maps`,
+  };
+}
+
+/**
+ * One digest for everything a generated tree was made from — #1283, ADR 0049
+ * D-1: {@link inputDigest} over the geometry its seed and parameters make at
+ * each level (`generated-trees.ts` §`geometryDigest`, named
+ * `generated-trees.ts#<tree>.<level>`), the numbers of each level's run that
+ * only Blender reads (§`runNumbersDigest`, named `…#<tree>.<level>.run`), and
+ * every locked file of the assets it wears, each under its source's id. So a row moves when a parameter, the seed, the generator, or
+ * either download does.
+ *
+ * ⚠️ **The `.run` lines are what make "a parameter" true.** The geometry
+ * moves only for a number the GENERATOR reads. The sprig's shoots, its
+ * atlas's grid and turn, its tone and every map's size are read by Blender
+ * alone, and until #1289's review one of them could be edited with every
+ * test green and stale files committed — CI has no Blender to run `--check`.
+ * `species` is the tree's own unless a test hands it another.
+ */
+export function generatedInputDigest(
+  tree: GeneratedTree,
+  lock: InputLock,
+  species: GeneratedSpecies = speciesOf(tree),
+): string {
+  const locked = (id: string): LockedSource => {
+    const source = lock.sources.find((each) => each.id === id);
+    if (source === undefined) throw new Error(`${tree.name}: ${id} is not in the lock`);
+    return source;
+  };
+  return inputDigest([
+    ...(['full', 'middle'] as const).flatMap((level) => [
+      { path: `generated-trees.ts#${tree.name}.${level}`, sha256: tree.geometry[level] },
+      {
+        path: `generated-trees.ts#${tree.name}.${level}.run`,
+        sha256: runNumbersDigest(tree, level, species),
+      },
+    ]),
+    // Once each: the fir's bark and sprigs are one Poly Haven asset (#1294).
+    ...[...new Set([species.bark.source, species.sprig.source])].flatMap((id) =>
+      locked(id).files.map((file) => ({ path: `${id}/${file.path}`, sha256: file.sha256 })),
+    ),
+  ]);
+}
+
 /** A plant with no impostor: a shrub stands in the near field or not at all. */
 function plant(name: string, from: string, object: string, triangles: string): OutputSpec {
   return {
@@ -1010,34 +1863,52 @@ function plant(name: string, from: string, object: string, triangles: string): O
 
 /** Every file the pipeline writes into {@link OUTPUT_DIRECTORY}, impostors included. */
 export function shippedFiles(): readonly string[] {
-  return OUTPUTS.flatMap((output) =>
-    output.recipe.how === 'blender'
-      ? [output.file, ...(output.recipe.alsoWrites ?? []).map((also) => also.file)]
-      : [output.file],
-  );
+  return OUTPUTS.flatMap((output) => [
+    output.file,
+    ...alsoWritten(output.recipe).map((also) => also.file),
+  ]);
 }
 
 /** Why a source was refused, or the evidence that it was not. */
 export type LicenceVerdict =
-  | { readonly kept: true; readonly licence: KeptLicence; readonly evidence: string }
+  | {
+      readonly kept: true;
+      readonly licence: KeptLicence;
+      readonly evidence: string;
+      /** How the page says the asset was made, where the source says — #1274, ambientCG's. */
+      readonly technique?: string;
+    }
   | { readonly kept: false; readonly reason: string };
 
 /**
  * Whether a source may be kept, given the text of its licence page.
  *
- * Refuses a barred host, a page that does not carry the phrase, and — however
+ * Refuses a barred host, a URL no admitted source owns ({@link admission}), a
+ * page that does not carry the phrase, and — however
  * the phrase reads — a page that also names a non-commercial, no-derivatives or
  * share-alike term, because a page can carry the CC0 phrase for one file and a
  * stricter licence for the one being fetched. ADR 0026 D-4 excludes all three.
+ *
+ * ⚠️ **The one door, whatever the origin** — #1274: an ambientCG asset is held
+ * to {@link ambientCgVerdict}, which asks all of this and more, from HERE, so
+ * `fetch-assets.ts` cannot keep one on the general checks alone by calling the
+ * wrong function.
  */
 export function licenceVerdict(source: AssetSource, pageText: string): LicenceVerdict {
-  const hosts = [source.licencePage, ...fixedUrls(source)].map((url) => new URL(url).hostname);
-  const barred = hosts.find((host) => BARRED_HOSTS.includes(host));
-  if (barred !== undefined) {
-    return {
-      kept: false,
-      reason: `${source.id}: ${barred} is barred — its terms forbid redistribution`,
-    };
+  return source.origin.from === 'ambientcg'
+    ? ambientCgVerdict(source, pageText)
+    : statedLicence(source, pageText);
+}
+
+/** {@link licenceVerdict}'s checks of the page's own words, which every origin shares. */
+function statedLicence(source: AssetSource, pageText: string): LicenceVerdict {
+  const asked: [string, 'licence' | 'file'][] = [
+    [source.licencePage, 'licence'],
+    ...fixedUrls(source).map((url): [string, 'file'] => [url, 'file']),
+  ];
+  for (const [url, as] of asked) {
+    const verdict = admission(url, as);
+    if (!verdict.admitted) return { kept: false, reason: `${source.id}: ${verdict.reason}` };
   }
   if (!pageText.includes(source.licencePhrase)) {
     return {
@@ -1057,6 +1928,7 @@ export function licenceVerdict(source: AssetSource, pageText: string): LicenceVe
 function fixedUrls(source: AssetSource): readonly string[] {
   if (source.origin.from === 'urls') return source.origin.files.map((file) => file.url);
   if (source.origin.from === 'archive') return [source.origin.url];
+  if (source.origin.from === 'ambientcg') return [ambientCgArchive(source).url];
   return [];
 }
 
@@ -1116,6 +1988,7 @@ export function polyHavenFiles(
     case 'hdri':
       return [one(pick(['hdri', select.resolution, 'hdr']))];
     case 'texture':
+    case 'maps':
       return select.maps.map((map) => one(pick([map, select.resolution, 'jpg'])));
     case 'model': {
       const gltf = pick(['gltf', select.resolution, 'gltf']);
@@ -1157,7 +2030,31 @@ export interface LockedSource {
   readonly read: string;
   /** Who made it, as the source names them — recorded even where CC0 asks for nothing. */
   readonly authors: string;
+  /**
+   * How the source's own page said the asset was made, read with its licence —
+   * #1274, for an ambientCG asset: {@link AMBIENTCG_TECHNIQUES_KEPT}.
+   */
+  readonly technique?: string;
   readonly files: readonly LockedFile[];
+}
+
+/**
+ * Why a file that was just downloaded is not the one the lock records, or
+ * nothing — the digest lock, ADR 0026 D-5, as one sentence `fetch-assets.ts`
+ * throws: a file the lock does not name at all, or one whose SHA-256 is not
+ * the one recorded. `--lock` is the only way past it, and that is a decision
+ * to re-base the realistic world on new inputs.
+ */
+export function lockFault(
+  id: string,
+  path: string,
+  sha256: string,
+  locked: Pick<LockedSource, 'files'> | undefined,
+): string | undefined {
+  const was = locked?.files.find((each) => each.path === path);
+  return was !== undefined && was.sha256 === sha256
+    ? undefined
+    : `${id}/${path}: not the input the lock records (${was?.sha256 ?? 'absent'}, got ${sha256}); run with --lock only if re-basing on new inputs is intended`;
 }
 
 /** `inputs.lock.json`. */
@@ -1230,12 +2127,10 @@ export type AssetRecord = readonly (readonly [string, string])[];
  */
 export function assetRecord(file: string, lock: InputLock, sha256: string): AssetRecord {
   const output = OUTPUTS.find(
-    (each) =>
-      each.file === file ||
-      (each.recipe.how === 'blender' &&
-        (each.recipe.alsoWrites ?? []).some((also) => also.file === file)),
+    (each) => each.file === file || alsoWritten(each.recipe).some((also) => also.file === file),
   );
   if (output === undefined) throw new Error(`${file}: no pipeline output makes it`);
+  if (output.recipe.how === 'generated') return generatedRecord(file, output, lock, sha256);
   if (output.recipe.how === 'drawn') {
     return [
       ['path', `${OUTPUT_DIRECTORY}/${file}`],
@@ -1272,7 +2167,17 @@ export function assetRecord(file: string, lock: InputLock, sha256: string): Asse
   const source = lock.sources.find((each) => each.id === output.from);
   if (source === undefined) throw new Error(`${file}: ${output.from} is not in the lock`);
   const path = `${OUTPUT_DIRECTORY}/${file}`;
-  const origin = source.id === 'makehuman' ? 'MakeHuman' : 'Poly Haven';
+  // #1274: an ambientCG asset says so, and says how its page said it was made.
+  const origin =
+    source.id === 'makehuman'
+      ? 'MakeHuman'
+      : SOURCES.find((each) => each.id === source.id)?.origin.from === 'ambientcg'
+        ? 'ambientCG'
+        : 'Poly Haven';
+  const by =
+    source.technique === undefined
+      ? source.authors
+      : `${source.authors} (its own page: made by ${source.technique})`;
   // #623: a run that reads a second source names it, and digests it too.
   const also =
     output.recipe.how === 'blender'
@@ -1288,10 +2193,7 @@ export function assetRecord(file: string, lock: InputLock, sha256: string): Asse
     if (upstream === undefined) throw new Error(`${file}: the lock records no ${recipe.file}`);
     return [
       ['path', path],
-      [
-        'source',
-        `${origin}, ${source.id} by ${source.authors}; upstream bytes, unmodified — ${upstream.url}`,
-      ],
+      ['source', `${origin}, ${source.id} by ${by}; upstream bytes, unmodified — ${upstream.url}`],
       ['licence', source.licence],
       ['read', source.read],
       ['sha256', sha256],
@@ -1336,7 +2238,7 @@ export function assetRecord(file: string, lock: InputLock, sha256: string): Asse
     ['path', path],
     [
       'source',
-      `${origin}, ${source.id} by ${source.authors}${alsoFrom}; made by this repository's asset pipeline (#430) from the files inputs.lock.json records`,
+      `${origin}, ${source.id} by ${by}${alsoFrom}; made by this repository's asset pipeline (#430) from the files inputs.lock.json records`,
     ],
     ['licence', source.licence],
     ['read', source.read],
@@ -1349,6 +2251,71 @@ export function assetRecord(file: string, lock: InputLock, sha256: string): Asse
     ],
     ['script', `${PIPELINE_DIRECTORY}${recipe.how === 'ktx2' ? KTX2_SCRIPT : recipe.script}`],
     ['tool', tool],
+  ];
+}
+
+/**
+ * The `ASSETS.toml` entry for one file of a generated tree — #1283, ADR 0049
+ * D-1: **this repository's own work, dedicated `CC0-1.0`, naming the generator
+ * and its version**, as the bicycle's drawn maps are recorded, and naming the
+ * ambientCG or Poly Haven assets it wears with what each one's own page said.
+ */
+function generatedRecord(
+  file: string,
+  output: OutputSpec,
+  lock: InputLock,
+  sha256: string,
+): AssetRecord {
+  if (output.recipe.how !== 'generated') throw new Error(`${file}: not a generated tree`);
+  const recipe = output.recipe;
+  const tree = GENERATED_TREES.find((each) => each.name === recipe.tree);
+  if (tree === undefined) throw new Error(`${file}: no generated tree ${recipe.tree}`);
+  const species = speciesOf(tree);
+  const worn = [...new Set([species.bark.source, species.sprig.source])].map((id) => {
+    const source = lock.sources.find((each) => each.id === id);
+    if (source === undefined) throw new Error(`${file}: ${id} is not in the lock`);
+    return source;
+  });
+  const strip = alsoWritten(recipe).find((also) => also.file === file);
+  const encoded = strip !== undefined || recipe.images === 'ktx2';
+  const described =
+    strip === undefined
+      ? (output.modified ?? '')
+      : `${strip.modified ?? ''}; then ${encodingWords(strip.ktx2)}`;
+  // An ambientCG page says how the asset was made; a Poly Haven asset's API
+  // names who photographed and modelled it (#1294).
+  const wears = worn
+    .map((each) =>
+      each.id in POLY_HAVEN_TREE_MAPS
+        ? `Poly Haven's ${each.id} (${each.licence}; its own page, read on ${each.read}: by ${each.authors})`
+        : `ambientCG's ${each.id} (${each.licence}; its own page, read on ${each.read}: made by ${each.technique ?? 'nothing it names'})`,
+    )
+    .join(' and ');
+  return [
+    ['path', `${OUTPUT_DIRECTORY}/${file}`],
+    [
+      'source',
+      `This repository, ${species.adoptedBy} — a tree generated by ${PINNED_EZ_TREE} (MIT, https://github.com/dgreenheck/ez-tree), a deterministic generator run from the seed and parameters committed in ${GENERATED_TREES_PATH}, wearing ${wears}. None of the generator's own images is taken, and nothing is the output of a trained model (ADR 0049 D-1, D-2)`,
+    ],
+    ['licence', 'CC0-1.0'],
+    [
+      'read',
+      worn
+        .map((each) => each.read)
+        .sort()
+        .at(-1) ?? '',
+    ],
+    ['sha256', sha256],
+    ['modified', `${described}${encoded ? `${KTX2_STEP_WORDS}${KTX2_SCRIPT_PATH}` : ''}`],
+    [
+      'input',
+      [`${GENERATED_TREES_PATH}#${tree.name}`, ...worn.map((each) => each.licencePage)].join(
+        ' and ',
+      ),
+    ],
+    ['inputsha256', generatedInputDigest(tree, lock)],
+    ['script', `${PIPELINE_DIRECTORY}${GENERATED_TREE_SCRIPT}`],
+    ['tool', encoded ? `${GENERATED_TOOL}, then ${PINNED_KTX}` : GENERATED_TOOL],
   ];
 }
 

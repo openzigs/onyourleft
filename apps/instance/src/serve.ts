@@ -38,6 +38,8 @@ const http = readConfig({
   embeddingQueryPrefix: process.env.OYL_INSTANCE_EMBEDDING_QUERY_PREFIX,
   analysisModelUrl: process.env.OYL_INSTANCE_ANALYSIS_MODEL_URL,
   analysisModel: process.env.OYL_INSTANCE_ANALYSIS_MODEL,
+  analysisModelReasoningTokens: process.env.OYL_INSTANCE_ANALYSIS_MODEL_REASONING_TOKENS,
+  pictureModel: process.env.OYL_INSTANCE_PICTURE_MODEL,
   name: process.env.OYL_INSTANCE_NAME,
 });
 const server = readServerConfig(
@@ -72,6 +74,12 @@ if (http.config.history.kind === 'off' && http.config.history.code !== 'not-set'
 // address with no model named, is said here and analysis stays off.
 if (http.config.analysis.kind === 'off' && http.config.analysis.code !== 'not-set') {
   process.stderr.write(`instance: analysis is off: ${http.config.analysis.reason}\n`);
+}
+
+// Nor is the picture model (#1106): named and unusable is said here, and no
+// local model takes pictures.
+if (http.config.pictures.kind === 'off' && http.config.pictures.code !== 'not-set') {
+  process.stderr.write(`instance: pictures are off: ${http.config.pictures.reason}\n`);
 }
 
 const notices = readFileSync(new URL('../third-party.txt', import.meta.url), 'utf8');

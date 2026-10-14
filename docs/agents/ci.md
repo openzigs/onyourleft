@@ -12,12 +12,20 @@ It has the same authority as the root file. Where the text below says "this file
 
 ### 4c. What CI runs, and what it deliberately does not
 
+⚠️ **Since [#1285](https://github.com/openzigs/onyourleft/issues/1285) `Repository rules` is three
+jobs side by side — the shards `checks`, `tests` and `browser` — and a fourth that carries the
+required name and fails unless all three succeeded.** A reviewer who remembers one job of
+twenty-odd minutes is reading the old file, and so is every "in this same job", "the job's stop"
+and "a second job could not block a merge" in the dated sections below: each was true when it was
+written and is kept as the record. §"Shards — #1285" is what is true now — which step runs where,
+every stop and its arithmetic, and what was measured.
+
 [`.github/workflows/rules.yml`](../../.github/workflows/rules.yml) runs on every pull request and on every
 push to `main`. It runs **exactly** the §4a commands and nothing else: `bash
 scripts/run-concurrently.test.sh`, the eight bare-clone script
 checks (`check-repo-rules`, `check-licence-hashes`, `check-env-example` and `check-doc-links`, each
 with its own fixture suite), `shellcheck scripts/*.sh`, then `pnpm install --frozen-lockfile`, `format:check`, `lint`,
-`typecheck`, `test:coverage`, `check:test-split` and its suite
+`typecheck`, `test:required` (since [#1280](https://github.com/openzigs/onyourleft/issues/1280); `test:coverage` until then — §"Coverage out of the required job — #1280" below), `check:test-split` and its suite
 `bash scripts/check-test-split.test.sh` (both since [#852](https://github.com/openzigs/onyourleft/issues/852); #852's
 `test:uninstrumented` runs nightly since [#866](https://github.com/openzigs/onyourleft/issues/866) — below), `check:a11y-suite`,
 `test:a11y`, `bash scripts/check-a11y-suite.test.sh`, `check:wiring`,
@@ -27,11 +35,14 @@ with its own fixture suite), `shellcheck scripts/*.sh`, then `pnpm install --fro
 `playwright install --with-deps chromium`, `test:browser`, `bash scripts/check-dependency-licences.test.sh`, `check:licences`,
 `bash scripts/check-third-party-notices.test.sh`, `check:notices` and — since
 [#771](https://github.com/openzigs/onyourleft/issues/771) — `bash scripts/check-instance-image.sh`, with its
-suite `bash scripts/check-instance-image.test.sh` since [#841](https://github.com/openzigs/onyourleft/issues/841) — then
-publishes the coverage table to the run summary and uploads the HTML report as an artefact.
-Those last two carry `if: always()` and cannot fail the job: the run where coverage moved
-unexpectedly is exactly the one whose table you want, and a reporting step that can fail a
-build is a percentage floor arriving by the back door, which §5 forbids.
+suite `bash scripts/check-instance-image.test.sh` since [#841](https://github.com/openzigs/onyourleft/issues/841),
+and — since #1285 — `bash scripts/check-shard-results.test.sh` in a shard and
+`bash scripts/check-shard-results.sh` as the whole of the job named `Repository rules`.
+⚠️ **Since #1280 it takes no coverage and publishes none**: the coverage table and the HTML
+artefact are the NIGHTLY workflow's (§"The nightly job — #866"), where the two reporting steps
+still cannot fail the job: the run where coverage moved unexpectedly is exactly the one whose
+table you want, and a reporting step that can fail a build is a percentage floor arriving by the
+back door, which §5 forbids.
 
 ⚠️ **Since [#651](https://github.com/openzigs/onyourleft/issues/651) one step, `Checks,
 concurrently`, runs twenty-six of those commands AT ONCE (twenty-two until #771 added the
@@ -39,7 +50,7 @@ instance image, twenty-three until #841 added its suite, twenty-four until #852 
 `check:test-split` and its suite), and a reviewer who remembers one step per
 command is reading the old file.** It runs the eight bare-clone script checks, `shellcheck`,
 `format:check`, `lint`, `typecheck`, `check:wiring`, `check:cost-model`, `check:licences`, `build`,
-the browser install, the instance image, `check:test-split` and seven checker suites, after the install — the bare-clone checks need none
+the browser install, the instance image, `check:test-split` and seven checker suites (⚠️ since #1285 the browser install is a step of the `browser` shard instead, and the eighth suite, `check-shard-results.test.sh`, took its place: still twenty-six), after the install — the bare-clone checks need none
 of it, but on their own before it they took 48 s with the runner otherwise idle. It goes through
 `scripts/run-concurrently.sh` (§4a), which labels every line with its command, waits on each
 process by itself and fails the step if **any** command failed — its own suite runs first, because
@@ -49,10 +60,10 @@ green, and #651's pull request proved it red on the runner with one formatting d
 ⚠️ **Anything that runs Vitest stays out of it**, and so do `check:capacitor` and `check:notices`,
 which each run their own install under the tree the linter is walking: Vitest's 5 s case
 timeout is already within a second of several cases on the slower runner, and beside other work
-three of them passed it (run 36324592730) — `test:a11y` and `test:coverage` each run alone
+three of them passed it (run 36324592730) — `test:a11y` and `test:required` (`test:coverage` until #1280) each run alone
 (and `test:uninstrumented` did too, from #852 until #866 moved it to the nightly job). (`check:test-split` is in it: it runs `vitest list`, which
 runs no case and so has no timeout to miss.) And
-`test:coverage` and `test:browser` are **not** run together, though they are the two longest steps:
+`test:required` and `test:browser` are **not** run together (measured as `test:coverage`, which it was then), though they are the two longest steps:
 run 36323764725 did it and both went red, because each is CPU-bound on its own.
 
 ⚠️ **The instance ([#771](https://github.com/openzigs/onyourleft/issues/771)) is tested inside this
@@ -182,6 +193,10 @@ from 738 s to 1230 s. **Any before/after comparison of this job is n-per-CPU or 
 
 #### Where the time comes from next — owed before B9 and B12
 
+⚠️ **The stop is 30 minutes since #651 and the job on the 7763 is about 1 460–1 520 s; a reviewer
+who reads "25-minute" and "1 500 s" in the sections below as today's is reading history.** Each
+section here is the measurement of its day; today's is §"Thirty minutes — #651".
+
 ⚠️ **The job is now 1206–1231 s of its 25-minute `timeout-minutes` on the slower runners — about
 20.5 minutes, 82 % of the stop** — and every bundle still to come adds to it: rooms and their
 conformance suite on Node and on `workerd` (#779–#781), and the two-browser room spec. A stop has to
@@ -279,6 +294,15 @@ exactly one run by construction, and the tagged describes must equal the reviewe
 a red `nightly-split.test.ts`, not a quiet move. `check:test-split`, still required, fails a Vitest
 file in neither run.
 
+⚠️ **Since [#1280](https://github.com/openzigs/onyourleft/issues/1280) it also takes the coverage
+report**, which is a report and not a check: its last three steps run `test:coverage` — the
+required job's own Vitest files, under V8's instrumentation — publish the table to the run's
+summary and upload the HTML as the `coverage-report` artefact. Nothing left the required job but
+the table (§"Coverage out of the required job — #1280"). The steps are last and carry
+`if: ${{ !cancelled() }}`, so a red check above them does not cost the night its report. A test
+that fails under coverage there turns the nightly job red and opens its issue, deliberately: the
+same test passed in the required job, so it is one that passes only without instrumentation.
+
 **What it bought, on the runner, with the CPU each run printed** — n = 1 after, so read it as one
 sample and not a figure:
 
@@ -296,7 +320,11 @@ and 201 s of browser checks.
 
 **A red nightly run opens an issue titled `Nightly heavy checks failed`**, or comments on it while
 it is open, from a second job whose token holds `issues: write` and nothing else and which checks
-nothing out. Close the issue once a nightly run is green. The job that runs the checks is
+nothing out. Since #1285 (from #1286's review) the body lists each step that ended `failure` or
+`cancelled`, read from the run's own jobs — one issue serves a browser check, a fuzz case and a
+test that fails only under coverage, so it has to say which; the read needs no permission beyond
+`issues: write` on a public repository (measured, run 38262275064), and a read that fails says so
+in the body rather than costing the issue. Close the issue once a nightly run is green. The job that runs the checks is
 read-only, pins its actions to the same SHAs as `rules.yml`, and runs on `ubuntu-latest`.
 
 #### 23m39s of 25 — #1051
@@ -565,6 +593,8 @@ took 4 s.
 | **inside the job's 1 500** | **1 486** |
 
 `timeout-minutes: 13` (780 s) ends it by 1 487 s plus the runner's own few seconds of cancelling.
+⚠️ **Since #651 the wrapper is 825 s, the step's stop 14 minutes and the job's 30, and this table
+is the old arithmetic**: §"Thirty minutes — #651" has today's.
 ⚠️ **765 s is only 1.09 times the slowest green step** (699 s, 37274106339 attempt 2) — short of the
 1.15 every other stop here keeps, and nothing widens it inside 25 minutes, because the job leaves no
 more: the room is the owner's cuts (PR #1131's questions), not a longer stop. Inside it,
@@ -618,6 +648,346 @@ largest files (`list-detail`, `controls-first`, `links`) decide the tail; the re
 touch. The margin is therefore about 180–200 s and no more, as #1076's was: a spec or step added to
 the job spends it from there.
 
+#### Thirty minutes — #651
+
+⚠️ **By 2026-10-12 a correct pull request could not be relied on to pass the required check.** Five
+jobs on the EPYC 7763 were cancelled by `timeout-minutes: 25` with no test red — two on `main`
+(38055121023, 38077296663) and PR #1277's run three times (38196648879) — and the green ones there ended
+2 to 41 s inside the stop. (⚠️ **Corrected by #1280, from #1279's review**: this section said four
+jobs and "twice", and its table had no attempt 3, which had finished before #1279's own run began
+and whose gate started latest of all, at 841 s.) Sixteen runs on `main` from 2026-10-10 13:16 to 2026-10-12 02:30 UTC, and
+#1277's three, with the CPU each printed (step seconds; the job is `started_at` to `completed_at`;
+"gate starts" is how far into the job the `Browser gate` step began):
+
+| Run | CPU | Job | `Checks, concurrently` | Accessibility | Vitest with coverage | Gate starts | Browser gate |
+|---|---|--:|--:|--:|--:|--:|--:|
+| [38196080162](https://github.com/openzigs/onyourleft/actions/runs/38196080162) | EPYC 7763 | 1474 | 214 | 59 | 497 | 809 | 658 |
+| [38183688472](https://github.com/openzigs/onyourleft/actions/runs/38183688472) | EPYC 7763 | 1498 | 218 | 60 | 497 | 815 | 679 |
+| [38175301433](https://github.com/openzigs/onyourleft/actions/runs/38175301433) | EPYC 7763 | 1464 | 214 | 58 | 490 | 803 | 655 |
+| [38082178257](https://github.com/openzigs/onyourleft/actions/runs/38082178257) | EPYC 7763 | 1459 | 211 | 59 | 486 | 795 | 658 |
+| [38072816087](https://github.com/openzigs/onyourleft/actions/runs/38072816087) | EPYC 7763 | 1487 | 219 | 59 | 489 | 807 | 673 |
+| [38071667023](https://github.com/openzigs/onyourleft/actions/runs/38071667023) | EPYC 7763 | 1467 | 210 | 58 | 482 | 789 | 674 |
+| [38077296663](https://github.com/openzigs/onyourleft/actions/runs/38077296663) | EPYC 7763 | 1507, **cancelled** | 223 | 61 | 497 | 824 | 679, cut short |
+| [38055121023](https://github.com/openzigs/onyourleft/actions/runs/38055121023) | EPYC 7763 | 1520, **cancelled** | 222 | 59 | 497 | 819 | 694, cut short |
+| [38196648879](https://github.com/openzigs/onyourleft/actions/runs/38196648879) attempt 1 (#1277) | EPYC 7763 | 1522, **cancelled** | 226 | 60 | 508 | 835 | 679, cut short |
+| attempt 2 | EPYC 7763 | 1506, **cancelled** | 223 | 61 | 510 | 833 | 670, cut short |
+| attempt 3 (added by #1280) | EPYC 7763 | 1519, **cancelled** | 226 | 61 | 512 | 841 | 672, cut short |
+| [38080586706](https://github.com/openzigs/onyourleft/actions/runs/38080586706) | EPYC 9V74 | 1408 | 200 | 55 | 462 | 759 | 644 |
+| [38171323444](https://github.com/openzigs/onyourleft/actions/runs/38171323444) | Xeon 8573C | 1386 | 196 | 53 | 448 | 740 | 640 |
+| [38187800463](https://github.com/openzigs/onyourleft/actions/runs/38187800463) | Xeon 8573C | 1204 | 174 | 48 | 396 | 653 | 547 |
+| [38075501743](https://github.com/openzigs/onyourleft/actions/runs/38075501743) | Xeon 6973P-C | 1011 | 144 | 38 | 321 | 536 | 470 |
+| [38172521840](https://github.com/openzigs/onyourleft/actions/runs/38172521840) | EPYC 9V45 | 999 | 148 | 38 | 318 | 535 | 459 |
+| [38078919277](https://github.com/openzigs/onyourleft/actions/runs/38078919277) | EPYC 9V45 | 957 | 149 | 36 | 306 | 523 | 429 |
+| [38057483381](https://github.com/openzigs/onyourleft/actions/runs/38057483381) | EPYC 9V45 | 923 | 138 | 35 | 294 | 497 | 422 |
+| [38059256139](https://github.com/openzigs/onyourleft/actions/runs/38059256139) | EPYC 9V45 | 918 | 132 | 33 | 286 | 477 | 437 |
+
+**Two clusters still: 918–1 011 s (EPYC 9V45, Xeon 6973P-C) and 1 386–1 522 s (EPYC 7763, 9V74, one
+Xeon 8573C), with the other 8573C run between them at 1 204 s.** Eleven of the nineteen landed on the
+7763. The steps not in the table are about 45 s together on the 7763 (38196080162: 39 s before the
+gate — set-up, the install, `check:capacitor`, the notices checker, their suites — and 7 s after).
+
+**What grew in the seven days since #1137, on the same CPU** (37288932952 attempt 2 against
+38196080162, both logs read): the job 1 329 → 1 474 s.
+
+| Step | #1137 | now | Growth | Where it went |
+|---|--:|--:|--:|---|
+| Vitest with coverage | 391 s | 497 s | +106 s | 618 → 695 files; summed test time 736 → 1 004 s. 83 new files are 152 s of it and the files both runs share grew 117 s. `instance` 169 → 348 s (65 → 90 files: `operator/model-key` 24.6 s, `auth/recovery-addresses` 19.6 s, `tools/replan-round-trip` 17.8 s, all new; `instance.test.ts` 30 → 41 s), `web` 472 → 550 s (`instance/sync` 14 → 26 s) |
+| `Checks, concurrently` | 196 s | 214 s | +18 s | `lint` is still the long pole and is the step's whole length (214 s); `format:check` and the browser install 161 s, `typecheck` 150 s, `build` 135 s, `check-repo-rules`' suite 132 s |
+| Browser gate | 646 s | 658 s | +12 s | 1 172 → 1 216 `chromium` tests, 9.5 → 9.7 min on three workers; `game` 61 tests, 1.2 → 1.1 min |
+| Accessibility | 54 s | 59 s | +5 s | 51 → 58 files |
+
+**The browser gate by spec, on the 7763** (38196080162; summed case seconds, three workers, so the
+`chromium` run's 579 s is about a third of their 1 518 s): `ride` 320 (383 cases, and Playwright
+names it the slow file at 5.4 min), `shell` 140, `rideview` 113, `list-detail` 109,
+`controls-first` 102, `links` 87, `ride-targets` 72, `button-hierarchy` 61, `reflow` 52, and
+twenty-six more under 40 s each. The `game` run after it took 66 s for its 61 cases.
+
+**The candidates, in the order §"Where the time comes from next" lists them, and what is left of
+each.** 1 (heavy Vitest files outside coverage, #852) and 2 (the nightly job, #866, #1076, #1137)
+are done, and each further move under 2 is the owner's ruling, one describe at a time; 3 (a larger
+runner) is §8's. Four more were looked at for this:
+
+| Candidate | Measured | Why it is not what this pull request does |
+|---|---|---|
+| Vitest with no coverage in the required job, the report nightly — ⚠️ **done by #1280, on the owner's ruling of 2026-10-12, and measured on the runner there: 106–133 s** | Locally, Node 24, two workers, `test:coverage`'s own file list: **210 s with coverage, 162 s without** (n = 1 each), 23 % less. Not measured on the runner when this was written; 23 % of the 7763's 482–510 s is about 115 s, and #651's comment of 2026-10-05 had estimated 150–250 s, so the saving was bounded by two estimates and not known | It would leave the 7763 at about 1 350–1 410 s, 90–150 s clear of 25 minutes and not the 180 asked for, so the stop moves either way. And it takes the coverage table out of every pull request's run summary, which ADR 0005 decision C keeps so a reviewer sees an untested branch: the owner's to rule on, as #651's comment of 2026-10-05 put it |
+| Vitest's `threads` pool in place of `forks` | The same run: **205 s against 210 s** | no gain |
+| A faster fixture for the `instance` files | 170 s of case time locally over 90 files; the 60 slowest cases are 74 s of it, led by two race cases of about 7 s that run real ticks | no one fixture holds the time: it is ninety files each a little slow, and what they wait on is what they assert |
+| Shard the work over several jobs and have a job named `Repository rules` fail unless every shard passed — ⚠️ **approved by the same ruling and done by [#1285](https://github.com/openzigs/onyourleft/issues/1285): §"Shards — #1285"** | not measured then; 723–772 s to the required check on the 7763 since | it would roughly halve the wall time on standard, free runners and nothing would be removed, but §4 says to extend the one job and add no second, so it is a change to that rule and the owner's to make |
+
+**So the stop is what moved, to 30 minutes, with every stop inside it.**
+`nightly-split.test.ts` holds each line of this to the workflow and `playwright.config.ts`:
+
+| | seconds |
+|---|--:|
+| the latest the gate's step has started on the 7763 (38196648879 attempt 3; ⚠️ 835 and attempt 1 until #1280 corrected it) | 841 |
+| the wrapper, `GATE_STEP_MS` 825 s (765 s until now), and its kill, 10 s | 835 |
+| so the step's own `timeout-minutes: 14` (13 until now), 840 s, ends it by | 1 681 |
+| the coverage steps after it | 4 |
+| **inside the job's 1 800** | **1 685** |
+
+⚠️ **That is 115 s, not the 121 s first written, and it was the margin that ran out first** — the
+one #1279's review priced and this section had not. Everything that grew sits BEFORE the gate, so
+its start moves at about the rate the job does: 707 s at #1128's reading, 841 s here, about 18 s a
+day, under a week of 115 s. Past it a hung gate on the 7763 is cut by the job's stop and names
+nothing, which is #651's original defect. **Since #1280 these figures are history**: the start is
+674–699 s and the table that binds is §"Coverage out of the required job — #1280"'s.
+
+- **The job's stop is 278 s clear of the slowest job with nothing red** (1 522 s), and 302–341 s
+  clear of the six green 7763 runs. The test fails under 180 s.
+- **`GATE_STEP_MS` 825 s is 1.19 times the longest the step has run** (694 s, a step the job's stop
+  cut short, so a floor; the slowest that finished took 679 s) — it was 1.09 times at 765 s.
+- **The wrapper now holds both Playwright stops and the builds**: `CHROMIUM_PART_MS` 720 s,
+  `GAME_PART_MS` 85 s and about 10 s of `vite build` are 815 s (⚠️ about 14 s outside the two runs, so 819 s and 6 s to spare — #1279's review, corrected by #1280: the builds about 5 s, Playwright's web servers until 11 s in, and 3 s between the runs). At 765 s a `chromium` run that used
+  all of its 720 s left the game run 35 s. Neither Playwright stop moved: the `chromium` run took
+  579 s and the game run 66 s on 38196080162, against 625 s and 71 s when they were set.
+- **`GATE_BUDGET_MS` (840 s) and the per-load budgets did not move.** `GATE_BUDGET_MS` bounds the
+  nightly run inside `nightly.yml`'s own 30 minutes, and `game.browser.spec.ts`
+  §`paysForTheRealisticLoad` is that run's arithmetic.
+
+⚠️ **Thirty is a stop, and the job will reach it too**: it grew 145 s in a week with no step
+added, about 21 s a day, so 278 s is about two weeks at that rate. The next answer is one of the
+last two rows of the candidates table, and both are rulings.
+
+#### Coverage out of the required job — #1280
+
+⚠️ **The required job takes no coverage since #1280, and a reviewer who looks for the coverage
+table in a pull request's run summary is reading the old file.** The owner's ruling of 2026-10-12
+([the comment on #1280](https://github.com/openzigs/onyourleft/issues/1280#issuecomment-6124801110)): the
+`Tests` step runs `test:required` — `test:coverage`'s files with no `--coverage` — and the nightly
+workflow runs `test:coverage` and publishes the table and the HTML artefact. **No test left the
+required job**; `check:test-split` fails if the two scripts' excludes differ, so the nightly report
+is of exactly the files every pull request runs. What a pull request lost: the table in its run
+summary, the `coverage-report` artefact, and the text table in the step's log. A contributor who
+wants the figure for a branch runs `pnpm run test:coverage` locally, or dispatches the nightly
+workflow on it (`gh workflow run nightly.yml --ref <branch>`).
+
+**Measured first, on a throwaway pull request** (#1282, closed unmerged; branch
+`spike/issue-1280-no-coverage-measure`): run
+[38243281606](https://github.com/openzigs/onyourleft/actions/runs/38243281606), three attempts on one head, the step running
+`pnpm run test:coverage --coverage.enabled=false` (695 files passed). Step seconds from the
+Actions API, re-read for this pull request; the CPU as each attempt's `Record the runner's CPU`
+step printed it. **This was the table `nightly-split.test.ts` read until #1285**: its `Job` and `Gate starts`
+columns were the two bounds' measurements.
+
+| Run | CPU | Job | `Checks, concurrently` | Accessibility | Vitest, no coverage | Gate starts | Browser gate |
+|---|---|--:|--:|--:|--:|--:|--:|
+| 38243281606 attempt 1 | EPYC 7763 | 1374 | 220 | 60 | 376 | 699 | 671 |
+| 38243281606 attempt 2 | EPYC 7763 | 1337 | 212 | 58 | 364 | 674 | 658 |
+| 38243281606 attempt 3 | EPYC 9V45 | 945 | 159 | 36 | 235 | 463 | 478 |
+| 38254309376 (#1286, this change itself) | EPYC 7763 | 1341 | 217 | 58 | 364 | 679 | 659 |
+| 38257018344 (#1286's final head; added by #1285) | EPYC 7763 | 1391 | 221 | 61 | 374 | 697 | 690 |
+
+The last two rows are the change as built — `pnpm run test:required`, not the spike's flag — on
+its own pull request: 459 s clear of the stop on the first run and 409 s on the final head, whose
+gate's stop ended 259 s inside it. ⚠️ **`nightly-split.test.ts` no longer reads this table**
+(#1285): the job it measured is three shards now, and the table it reads is §"Shards — #1285"'s.
+
+- **On the EPYC 7763, n = 2: the Vitest step took 364 s and 376 s against 482–497 s with coverage
+  on the six green `main` runs above — 106 to 133 s saved.** The job took 1 337 s and 1 374 s
+  against 1 459–1 498 s, 85 to 161 s less, which includes the runner's variance in the other
+  steps. That is close to #1279's estimate of about 115 s and under #651's of 150–250 s.
+- **On the EPYC 9V45, n = 1**, the job (945 s) is inside that cluster's with-coverage range
+  (918–1 011 s), so nothing can be said of it from the job total.
+- ⚠️ **The baseline is `main` from 2026-10-10 to 2026-10-12, not the measured head's own commit.**
+
+**The margins #1280 asked for, which `nightly-split.test.ts` held from that table until #1285**
+(⚠️ corrected by #1285 from #1286's review: the slowest job was the final head's 1 391 s, not
+1 374 s, so 409 s clear and not 426):
+
+| | seconds |
+|---|--:|
+| the slowest job measured | 1 391 |
+| **clear of the job's 1 800 (the test failed under 300)** | **409** |
+| the latest the gate's step has started | 699 |
+| its own `timeout-minutes: 14`, 840 s, ends it by | 1 539 |
+| what runs after it (the Docker logout and the post steps; it was the coverage steps too) | 4 |
+| **inside the job's 1 800 (the test failed under 180)** | **257** |
+
+⚠️ **This bought about a week, and #1285 is what followed.** At the 21 s a day the job grew in the
+week to 2026-10-12, 409 s reaches 300 in about five days, and at 18 s a day the gate's 257 s reaches
+180 in about four. Neither bound can see that happen: a Vitest case cannot ask the Actions API how
+long the job took, so both compare the workflow against the rows above, and they are exactly as old
+as the newest row. **When a new row turns either red, the answer is shards under one job still
+named `Repository rules` ([#1285](https://github.com/openzigs/onyourleft/issues/1285), approved by
+the same ruling)** — not a longer stop, and not a smaller number in the test. ⚠️ `ubuntu-latest`
+moves to Ubuntu 26 from 2026-10-19, which can move every figure here with no change in this
+repository: re-read a run after it and add the row.
+
+**What the nightly job costs with the report in it.** `Nightly heavy checks` took 322 to 521 s on
+its four scheduled runs from 2026-10-09 to 2026-10-12, and the coverage run was 482–510 s as a step
+of the required job on the 7763, so about 1 030 s of its own 1 800 at worst. **Measured, n = 1**:
+run [38254309339](https://github.com/openzigs/onyourleft/actions/runs/38254309339) (#1286's, an
+EPYC 7763) took **1 018 s** — `Tests outside coverage` 57 s, `Nightly browser checks` 426 s,
+`Tests under coverage` 497 s (695 files passed), the summary 0 s and the upload 3 s — so 782 s
+inside its stop. Its `coverage-report` artefact held `coverage-summary.json`, which the renderer
+turns into the table (all files: 90.62 % of statements, 85.31 % of branches).
+
+#### Shards — #1285
+
+⚠️ **`Repository rules` is four jobs since #1285, and a reviewer who remembers "extend the one job;
+a second job could not block a merge" is reading the old file.** The owner's ruling of 2026-10-12
+([the comment on #1280](https://github.com/openzigs/onyourleft/issues/1280#issuecomment-6124801110),
+and [#1285](https://github.com/openzigs/onyourleft/issues/1285)) is an exception to that rule on one
+condition, which is the whole design: three jobs do the work side by side, each on a standard
+runner of its own, and a fourth — the only one named `Repository rules` — `needs` all three and
+fails unless every one of them succeeded. A shard reports under its own context (`Checks`, `Tests`,
+`Browser gate`), which `main` does not require; **a red shard blocks a merge only through the
+fourth job.**
+
+**What makes the fourth job a gate**, each held by `nightly-split.test.ts` §"the required check is
+one job over every shard":
+
+- **Its `needs:` names every other job in the workflow.** A job left out still runs and still goes
+  red, under a context nothing requires. So a new gate goes **inside** a shard; a new job is a new
+  shard and must be added to `needs:`, and the test fails on one that is not.
+- **`if: always()`.** Without it the job is skipped when a shard fails, and **GitHub counts a
+  skipped required check as passing.**
+- **Its verdict is `scripts/check-shard-results.sh` over `toJSON(needs)`** (§4a): anything but
+  `success` fails — `failure`, `cancelled` (a shard past its own stop, or a cancelled run) and
+  `skipped` (a shard given an `if:` that was false) — and so does no shard at all. Its suite runs
+  in the `checks` shard. No `continue-on-error` anywhere in the file: on a job it reports a failure
+  to `needs` as `success`.
+- **The name.** Exactly one job is named `Repository rules`, and the workflow is.
+- **No other condition can switch a gate off.** The verdict step has no `if:`, `shell:` or
+  `continue-on-error`, the only `if:` lines in `rules.yml` are the two `always()` ones, and
+  `pull_request:` has no path filter; the test fails on each. A superseded pull-request run
+  (`cancel-in-progress`) is expected to report `Repository rules` as failure on the old commit
+  rather than cancelled, since the job runs `always()`; reasoned, not observed.
+
+**Shown red on the runner, not only in the suite** (throwaway pull request #1291, closed unmerged;
+branch `spike/issue-1285-shards-red`):
+
+| Run | What the shards did | `Repository rules` |
+|---|---|---|
+| [38261820992](https://github.com/openzigs/onyourleft/actions/runs/38261820992) | all three `if: false`, so all **skipped** | **failure**, `SHARD001` three times; the pull request `BLOCKED` |
+| [38262275064](https://github.com/openzigs/onyourleft/actions/runs/38262275064) | `checks` a step that exits 1 (**failure**); `tests` a `sleep 200` under `timeout-minutes: 1` (**cancelled** — that is what a job past its stop reports); `browser` **skipped** | **failure**, naming each of the three with its result |
+
+**Where each step of the one job runs now.** Nothing left the required check, moved to nightly, is
+retried or became optional; `nightly-split.test.ts` holds the list of commands, each in exactly one
+shard.
+
+| Step of the one job, in its order | Now |
+|---|---|
+| Check out the repository; Set up Node; Enable pnpm through corepack; Install dependencies | every shard (the fourth job checks out and nothing more) |
+| Concurrency runner tests | `checks` |
+| Record the runner's CPU | every shard — each is its own runner |
+| Drop the unrelated Chrome apt source | `browser`, before the install it is for |
+| Log in to Docker Hub; Log out of Docker Hub | `checks`, around the `instance image` pull (still skipped on a fork's pull request) |
+| Checks, concurrently — 25 of its 26 commands | `checks`, the same step |
+| …its 26th, `playwright install --with-deps chromium` | `browser`, a step of its own, `Install the pinned Chromium` |
+| Accessibility (`check:a11y-suite`, `test:a11y`) | `tests` |
+| Capacitor generated files; Capacitor gate checker tests | `checks` |
+| Third-party notices checker tests; Third-party notices | `checks` |
+| Tests (`test:required`) | `tests` |
+| Browser gate (`timeout … 825s pnpm run test:browser`) | `browser` |
+| *(new)* `check-shard-results.test.sh` | `checks`, the 26th command of the concurrent step |
+| *(new)* `check-shard-results.sh` | the job named `Repository rules` |
+
+- ⚠️ **No shard waits for `pnpm run build`**, which the one job ran before Vitest and the browser
+  gate. Neither needs it: `test:browser` runs its own two `vite build`s, and the nightly workflow
+  has run `test:coverage` and its half of the browser gate with no build since #866 and #1280.
+- **`check:test-split` is unchanged and still holds that every test file runs exactly once**: it
+  asks Vitest what `test:a11y`, `test:required` and `test:uninstrumented` select. The first two are
+  the `tests` shard's two steps, in one job, and the third is nightly. **The Vitest suite itself is
+  not divided between jobs** — it is not the long pole, and a second selection to keep disjoint is
+  a second way to drop a file.
+- **Vitest still has a runner to itself**, which #651 measured it needs (run 36323764725, red on
+  both halves beside the browser gate): that is now the shape rather than an ordering.
+
+**Measured** on throwaway pull request #1290 (closed unmerged; branch
+`spike/issue-1285-shards-measure`, the change as built with a seeded table) and on this change's
+own pull request. Seconds from the Actions API. `Wall` is the run's `run_started_at` to the
+`Repository rules` job's `completed_at`, so it includes queueing; each shard's figure is its job's
+`started_at` to `completed_at`; the CPU is what each shard's `Record the runner's CPU` printed.
+**This is the table `nightly-split.test.ts` reads**: `Wall`, `Gate starts` and one column per shard,
+named for the job, so a row added here moves every bound, a cell that is not a whole number fails
+the test, and a shard with no column fails it too.
+
+<!-- shard-measurements:start -->
+| Run | Wall | `checks` on | checks | `tests` on | tests | `browser` on | browser | Gate starts | Gate step |
+|---|--:|---|--:|---|--:|---|--:|--:|--:|
+| [38262894650](https://github.com/openzigs/onyourleft/actions/runs/38262894650) attempt 1 (#1290) | 567 | Xeon 6973P-C | 168 | EPYC 9V45 | 299 | EPYC 9V74 | 551 | 37 | 510 |
+| attempt 2 | 772 | EPYC 7763 | 279 | EPYC 9V74 | 438 | **EPYC 7763** | 757 | 39 | 714 |
+| attempt 3 | 669 | EPYC 9V74 | 240 | EPYC 7763 | 461 | Xeon 8573C | 652 | 39 | 610 |
+| attempt 4 | 721 | EPYC 7763 | 250 | EPYC 7763 | 455 | EPYC 9V74 | 703 | 35 | 666 |
+| attempt 5 | 723 | EPYC 7763 | 256 | EPYC 7763 | 458 | **EPYC 7763** | 705 | 38 | 663 |
+| [38270763442](https://github.com/openzigs/onyourleft/actions/runs/38270763442) (#1292, this change itself) | 751 | EPYC 9V74 | 252 | EPYC 7763 | 448 | **EPYC 7763** | 736 | 48 | 685 |
+<!-- shard-measurements:end -->
+
+- **From the run starting to `Repository rules` reporting: 567 to 772 s on the six runs, against
+  the one job's 1 341–1 391 s on the 7763.** The check takes as long as its slowest shard plus about
+  12 s for the fourth job, and the slowest shard is always `browser`.
+- **With the `browser` shard on the EPYC 7763: 772 s, 723 s and 751 s** (attempts 2 and 5 and
+  this change's own first run; 12m52s, 12m03s and 12m31s). n = 3, each inside the 900 s #1285
+  asked for, by 128 s at worst.
+- **Each shard on the EPYC 7763**: `checks` 250, 256 and 279 s; `tests` 448, 455, 458 and 461 s
+  (the accessibility gate 59–61 s and the suite 372–381 s, as in the one job); `browser` 705, 736
+  and 757 s (the gate's step 663, 685 and 714 s, starting 38–48 s in).
+- ⚠️ **Three shards are three draws of a runner**, so "a run on the 7763" no longer means one
+  thing: attempt 5 is the only one with all three there. What matters for the wall is where
+  `browser` landed, and that column is marked.
+
+**Every stop, restated for this shape.** A stop has to be clear of what it stops; `nightly-split.test.ts`
+holds the first three rows at five minutes or more from the table above, and the gate's rows from
+the workflow and `playwright.config.ts`.
+
+| Stop | Is | Slowest green measured | Clear |
+|---|--:|--:|--:|
+| `checks`, the job's `timeout-minutes: 12` | 720 s | 279 s (EPYC 7763) | 441 s |
+| `tests`, `timeout-minutes: 15` | 900 s | 461 s (EPYC 7763) | 439 s |
+| `browser`, `timeout-minutes: 25` | 1 500 s | 757 s (EPYC 7763) | 743 s |
+| `rules`, `timeout-minutes: 5` | 300 s | 9 s | |
+| the step `Install the pinned Chromium`, `timeout-minutes: 10` (new) | 600 s | 24 s | |
+| the step `Browser gate`: `timeout` for `GATE_STEP_MS` 825 s, its kill 10 s, and `timeout-minutes: 14` behind them | 840 s | 714 s | 1.16 times, by the wrapper |
+| `CHROMIUM_PART_MS`, the `chromium` run's `--global-timeout` | 720 s | 632 s | 1.14 times |
+| `GAME_PART_MS`, the `game` run's | 85 s | 68 s | 1.25 times |
+| `GATE_BUDGET_MS`, the config's backstop and the nightly run's stop | 840 s | | not below 720 + 85 |
+
+- **The gate's stop ends inside its job with nothing measured at all.** Before it the shard spends
+  about 14 s (the checkout, Node, pnpm, the install) and then the browser install, which has a stop
+  of its own: 20 + 600 + 840 + 4 s is **1 464 s, inside 1 500**. That is why the shard's stop is 25
+  minutes and not 20. From the latest start measured (48 s) it is 48 + 840 + 4 = 892 s, **608 s
+  inside** (the test fails under 180). A hang in the install or the gate therefore ends as a red,
+  named step, never as a cancelled job — which `rules` would report red but could not name.
+- **None of `GATE_STEP_MS`, `CHROMIUM_PART_MS`, `GAME_PART_MS`, `GATE_BUDGET_MS` or `GATE_STEP_MS`'s
+  14 minutes moved.** The wrapper still holds both Playwright stops and what the step spends
+  outside them (720 + 85 + 14 = 819 s of 825).
+- ⚠️ **The `chromium` stop is 88 s above the slowest green run in a shard (632 s, 38262894650
+  attempt 2), 1.14 times and not the 1.15 it was set at** (625 s then). Nothing in this change made
+  the run slower that can be shown: the same step took 655–690 s in the one job on the same CPU and
+  663, 685 and 714 s here, n = 3. It is the stop that will be reached first; raising it also means
+  raising the wrapper, the step's 14 minutes and `GATE_BUDGET_MS`, which is the nightly run's stop
+  too, so it is left for its own change and stated here.
+- ⚠️ **`Install the pinned Chromium` is ten minutes because five went red on its first run.** Run
+  [38261783717](https://github.com/openzigs/onyourleft/actions/runs/38261783717): the runner's
+  Ubuntu mirror served 22 MB of font packages at about 40 kB/s, the step was cut at 313 s, and the
+  required check went red on a pull request with nothing wrong. In the one job the same slowness
+  would have been absorbed by the job's margin; ten minutes gives it back. Alone the step takes
+  22–24 s (it took 161 s beside the concurrent checks).
+- **Vitest's 5 s case timeout, the game loads' budgets and every per-case stop are untouched**: each
+  shard has a whole runner, as each step had before.
+
+**What it costs, and what is next.**
+
+- **A run holds four runners instead of one**, and standard runners on a public repository are
+  free (§8) but not unlimited at once. ⚠️ **Queueing is inside `Wall`, and it is the part this
+  repository does not control**: on run 38261783717 the three shards waited 61 s, 82 s and 92 s for
+  a runner while two of this change's own runs and CodeQL were in flight; on the five attempts in
+  the table each waited 2–4 s, and on this change's own first run `checks` waited 50 s.
+- ⚠️ **The required check now takes as long as the `browser` shard**, about 12 to 13 minutes on
+  the 7763, and that shard is one step. It grew about 12 s in the week to 2026-10-12 (§"Thirty
+  minutes — #651"). **When a new row brings `Wall` near 900 s, the answer is to divide the gate**:
+  the `game` project into a shard of its own (66–68 s on the 7763, and it already runs alone), or
+  Playwright's `--shard` over the `chromium` project — each a new job in `needs:`, and each a
+  change to `test:browser`, which §4a documents as one command. Not a longer stop, and not a check
+  moved to nightly without the owner's ruling.
+- **The bounds are as old as the newest row**, as #1280's were: a Vitest case cannot ask the Actions
+  API. ⚠️ `ubuntu-latest` moves to Ubuntu 26 from 2026-10-19; re-read a run after it and add the row.
+- **If the required check ever fails to report** — a pull request that shows `Repository rules` as
+  *Expected — waiting for status to be reported* with every shard finished — the workflow is at
+  fault, not the pull request: revert #1285's commit to `.github/workflows/rules.yml` (`git revert`,
+  one pull request, which the reverted one-job workflow then gates itself).
+
 ⚠️ **The runner is two cores, not four, and that is what bounds all of this.** `ubuntu-latest`
 reports four vCPUs, and `lscpu` on it reads `Thread(s) per core: 2`, `Core(s) per socket: 2` (run
 36333257690, an AMD EPYC 7763). So a fourth Vitest worker made the suite no faster — 336 s to
@@ -636,9 +1006,9 @@ If CI ever needs a step this file does not list, **this
 file is wrong and gets fixed in the same PR**; CI must not accumulate private knowledge, because
 that is how a contributor's local green becomes CI's red with no explanation.
 
-⚠️ **There are exactly three steps that are not §4a commands** (two until #1231), and since #1128's review one §4a
-command is run under a wrapper: `Browser gate` is `timeout --verbose --kill-after=10s 765s pnpm run
-test:browser`, for the reason §"What bounds the browser gate's step" gives — locally the command is
+⚠️ **There are exactly three steps that are not §4a commands** (two until #1231; since #1285 `Record the runner's CPU` is in every shard, the apt-source step in `browser` and the Docker login in `checks`), and since #1128's review one §4a
+command is run under a wrapper: `Browser gate` is `timeout --verbose --kill-after=10s 825s pnpm run
+test:browser` (765 s until #651), for the reason §"What bounds the browser gate's step" gives — locally the command is
 the same without it. The first, since #866, is `Record
 the runner's CPU` — `lscpu`, filtered to the model and the core count — because two CPU models at
 different speeds serve `ubuntu-latest` and a duration means nothing without it (#864); it gates
@@ -671,11 +1041,16 @@ pull request or `main` the credential sits in the runner's Docker config while l
 branch's code; it can pull public images and nothing else. Deleting both steps is the revert once
 the GHCR mirror lands.
 
-> ⚠️ **The workflow's `name:` and its job's `name:` are both `Repository rules`, and `main` requires
-> a status check whose context is exactly that string.** Rename either and the required check never
-> reports, which makes every subsequent pull request unmergeable — including the one doing the
-> renaming. Extend the existing job; do not add a second job for a new gate, because a second job
-> reports under a different context and its failure would not block a merge.
+> ⚠️ **The workflow's `name:` and its last job's `name:` are both `Repository rules`, and `main`
+> requires a status check whose context is exactly that string.** Rename either and the required
+> check never reports, which makes every subsequent pull request unmergeable — including the one
+> doing the renaming. Since #1285 that job only fails unless every shard (`checks`, `tests`,
+> `browser`) succeeded. Put a new gate inside a shard; a job it does not `needs` reports under a
+> different context and its failure would not block a merge (§"Shards — #1285").
+
+⚠️ **The paragraphs from here to the end of this section are the one job's history, to #1285.**
+"That same job", its `timeout-minutes` of 10, 15, 20, 25 and 30, and "a second job could not block
+a merge" describe the workflow as it was; §"Shards — #1285" has what replaced them.
 
 **The browser gate (#63) is in that same job, and it is the step that most looks like it wants its
 own.** It installs a ~170 MB Chromium and then runs for about three seconds, which is exactly the
@@ -697,6 +1072,10 @@ step on #682's own pull request, for a 1 113 s job (run 36412215912). The slowes
 waiting for the concurrency group before its job was created and a 16m45s job. Twenty-five leaves a
 green job 372 s clear and pays for the browser gate's own stop to grow with it (below); it is still
 a stop and not a budget.
+⚠️ **It is 30 since [#651](https://github.com/openzigs/onyourleft/issues/651), and a reviewer who
+remembers 25 is reading the old file.** Four jobs were cancelled at 25 minutes with no test red —
+§"Thirty minutes — #651" has the runs, the arithmetic for every stop inside it, and why it was the
+last resort.
 ⚠️ **Since [#456](https://github.com/openzigs/onyourleft/issues/456) the cases in
 `game.browser.spec.ts` share ONE load of their harness, and a reviewer who remembers "every case
 reloads a harness that takes ten seconds" is reading the old file.** They did reload it, and that was
@@ -805,7 +1184,7 @@ on is not something this repository can choose without paying for a larger one, 
 [#682](https://github.com/openzigs/onyourleft/issues/682) no case runs above half of it.** The
 measurement needs nothing added: Vitest's default reporter prints, beneath its file, every case
 slower than 300 ms, so every job log already holds per-case times for the `Tests and coverage
-report` step. Read over thirteen green `main` runs on 2026-09-28 (36370135206 to 36405580515),
+report` step (⚠️ since #1280 that step is `Tests`, with no coverage, and the times under coverage are in the NIGHTLY job's `Tests under coverage` step: a timeout is still judged against the slower of the two, which is the nightly one). Read over thirteen green `main` runs on 2026-09-28 (36370135206 to 36405580515),
 eighteen cases ran at 45 % or more of their timeout (#682 asks for 50 %; the five points are
 margin on one day's sample), fifteen of them on Vitest's default 5 s — the slowest,
 `no-network.test.ts`' MediaPipe scan, at **4.8 s, 96 %** — and #682's own cull sweep, given 15 s by

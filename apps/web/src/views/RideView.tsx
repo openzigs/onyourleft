@@ -70,6 +70,7 @@ import {
   type RideSnapshot,
 } from '../ride/controller';
 import { ConnectedSensors } from '../ride/SensorPairing';
+import { WorkoutGraph } from '../workout/WorkoutGraph';
 import { RideResultCard } from '../ride/RideResultCard';
 import { rideResultOf } from '../ride/ride-result';
 import { useRideSnapshot } from '../ride/useRideController';
@@ -302,7 +303,23 @@ function LiveRide({
           keepAliveFailed={snapshot.keepAliveFailed}
           // #740: the choice read above, so the region and the ERG form agree.
           announcementPreference={announcements}
-          onStart={(record) => {
+          // #1244: re-plans are offered only where one could happen — an
+          // instance signed in to, and the rider's OWN two thresholds (H1).
+          replansAvailable={
+            controller.replansAvailable() &&
+            thresholdPower !== undefined &&
+            own.heartRate !== undefined
+          }
+          onKeepPlan={() => {
+            controller.keepThePlan();
+          }}
+          // #1244's review: the mid-workout off control, and the switch going
+          // back to off whenever a ride starts or ends.
+          onReplansOff={() => {
+            controller.switchReplansOff();
+          }}
+          rideInProgress={rideInProgress(snapshot.phase)}
+          onStart={(record, choices) => {
             // ⚠️ Guarded rather than defaulted. The panel does not render a Start
             // control without a threshold, so this is unreachable through the UI
             // — and a `?? watts(0)` here would make every target in the workout
@@ -323,6 +340,8 @@ function LiveRide({
                     thresholdHeartRate: own.heartRate,
                     assumed: { power: false, heartRate: false },
                   },
+              // #1244: the per-ride switch, off unless the rider turned it on.
+              choices,
             );
           }}
           onEnd={() => {
@@ -330,6 +349,27 @@ function LiveRide({
           }}
         />
       </div>
+
+      {/*
+        #1307: the running workout as a picture — the plan, where the rider is
+        in it, and the last few minutes. A group of its own, AFTER the trainer
+        group in the document: every control and every sentence of the workout
+        comes first (#605's order: press, wrong, read), and the picture is
+        read after the sentences it repeats. It holds no control, so it adds
+        nothing to the tab order.
+
+        ⚠️ Where it is DRAWN is `theme.css` §"THE WORKOUT'S GRAPH ON THE RIDE
+        SCREEN": on a landscape tablet under the readings on the left, where
+        it is on screen without scrolling (the owner's ruling on #1307 — at
+        the foot of the trainer column a notice pushed it under the fold);
+        upright, under the trainer group in its column. Shown exactly while
+        `WorkoutPanel` shows a workout as running: loaded and not finished.
+      */}
+      {snapshot.workout !== undefined && snapshot.workout.status !== 'finished' ? (
+        <div className="oyl-ride__group oyl-ride__group--graph">
+          <WorkoutGraph workout={snapshot.workout} />
+        </div>
+      ) : null}
 
       <div className="oyl-ride__group oyl-ride__group--sensors">
         <h2>Sensors</h2>

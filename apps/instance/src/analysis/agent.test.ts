@@ -9,6 +9,7 @@
  */
 
 import {
+  ANALYSIS_AGENT_TEMPLATE_V1,
   HISTORY_FENCE_BEGIN,
   HISTORY_FENCE_END,
   MAXIMUM_WRITE_UP_CHARACTERS,
@@ -31,6 +32,8 @@ import {
   AGENT_MODEL_CALLS,
   AGENT_TOKEN_BUDGET,
   AGENT_TOOL_CALLS,
+  AGENT_TURN_OUTPUT_TOKENS,
+  AGENT_TURN_REASONING_TOKENS,
   runAnalysisAgent,
   type AgentEvent,
   type AgentOptions,
@@ -48,7 +51,8 @@ import {
 } from './agent-testing.ts';
 import { startFakeModelServer, WITHOUT_TOOLS_REPLY } from './fake-model-server-testing.ts';
 import { createLocalModel } from './model.ts';
-import type { ModelTurnRequest } from './model-turn.ts';
+import type { ModelTurn, ModelTurnRequest } from './model-turn.ts';
+import { AGENT_TOOLS } from './tools/tools.ts';
 
 const ATHLETES = ['athlete-a', 'athlete-b', 'athlete-c'] as const;
 const [A] = ATHLETES;
@@ -383,6 +387,234 @@ describe('a model that cannot take tools: say so and stop (#1092 Q5)', () => {
   });
 });
 
+describe('a model that reasons before it answers (#1268)', () => {
+  const WITH_REASONING = AGENT_TURN_OUTPUT_TOKENS + AGENT_TURN_REASONING_TOKENS;
+  const allowances = (model: ScriptedModel) =>
+    model.requests.map((request) => request.maxOutputTokens);
+  /** A turn whose server counted `reasoned` reasoning tokens inside `output`. */
+  const reasoning = (
+    reply: string,
+    finish: 'stop' | 'length',
+    output: number,
+    reasoned: number,
+  ): ModelTurn => ({
+    ok: true,
+    text: reply,
+    calls: [],
+    finish,
+    usage: { inputTokens: 500, outputTokens: output },
+    reasoning: { tokens: reasoned },
+  });
+  /** The issue's measured turn: all 1 024 tokens spent reasoning, and no answer. */
+  const ALL_THOUGHT = reasoning('', 'length', 1_024, 1_024);
+
+  it('states the allowances', () => {
+    expect(AGENT_TURN_OUTPUT_TOKENS).toBe(1_024);
+    expect(AGENT_TURN_REASONING_TOKENS).toBe(3_072);
+  });
+
+  it('asks again with room to reason when reasoning used the whole turn, and keeps the write-up', async () => {
+    const model = scriptedModel(ALL_THOUGHT, reasoning(PASSING_WRITE_UP, 'stop', 1_300, 1_000));
+    const { outcome, events } = await run(model);
+    expect(outcome.kind).toBe('written');
+    expect(allowances(model)).toStrictEqual([AGENT_TURN_OUTPUT_TOKENS, WITH_REASONING]);
+    // The spent turn left nothing behind: the second request is the first, asked again.
+    expect(model.requests[1]?.messages).toStrictEqual(model.requests[0]?.messages);
+    expectNoUnscreenedText(events, outcome);
+  });
+
+  it('asks again when an answer was begun and the reasoning cut it short', async () => {
+    const model = scriptedModel(
+      reasoning('A steady', 'length', 1_024, 847),
+      reasoning(PASSING_WRITE_UP, 'stop', 1_150, 850),
+    );
+    const { outcome, events } = await run(model);
+    expect(outcome.kind).toBe('written');
+    expect(allowances(model)).toStrictEqual([AGENT_TURN_OUTPUT_TOKENS, WITH_REASONING]);
+    expect(events.filter((event) => event.type === 'section')).toHaveLength(3);
+  });
+
+  it('gives every turn after one that reasoned the room, with no turn spent finding out', async () => {
+    const model = scriptedModel(
+      { ...calls(['goals', {}]), reasoning: { tokens: 600 } },
+      reasoning(PASSING_WRITE_UP, 'stop', 1_900, 1_600),
+    );
+    const { outcome } = await run(model);
+    expect(outcome.kind).toBe('written');
+    expect(allowances(model)).toStrictEqual([AGENT_TURN_OUTPUT_TOKENS, WITH_REASONING]);
+  });
+
+  it('takes reasoning the server sent but did not count as reasoning (a local model)', async () => {
+    const model = scriptedModel(
+      { ...calls(['goals', {}]), reasoning: {} },
+      // 1 900 tokens of which the server says nothing: not held against the answer.
+      {
+        ...text(PASSING_WRITE_UP),
+        usage: { inputTokens: 500, outputTokens: 1_900 },
+        reasoning: {},
+      },
+    );
+    const { outcome } = await run(model);
+    expect(outcome.kind).toBe('written');
+    expect(allowances(model)).toStrictEqual([AGENT_TURN_OUTPUT_TOKENS, WITH_REASONING]);
+  });
+
+  it('asks again when a turn ends on its limit with no answer and no reasoning reported', async () => {
+    const model = scriptedModel(text('  \n', 'length'), text(PASSING_WRITE_UP));
+    const { outcome } = await run(model);
+    expect(outcome.kind).toBe('written');
+    expect(allowances(model)).toStrictEqual([AGENT_TURN_OUTPUT_TOKENS, WITH_REASONING]);
+  });
+
+  it('never asks a model that has not reasoned for more than the answer’s bound', async () => {
+    const model = scriptedModel(
+      calls(['goals', {}]),
+      calls(['recent_rides', {}]),
+      text(PASSING_WRITE_UP),
+    );
+    const { outcome } = await run(model);
+    expect(outcome.kind).toBe('written');
+    expect(allowances(model)).toStrictEqual([
+      AGENT_TURN_OUTPUT_TOKENS,
+      AGENT_TURN_OUTPUT_TOKENS,
+      AGENT_TURN_OUTPUT_TOKENS,
+    ]);
+  });
+
+  it('fails model-no-answer when the room to reason is used up too, after one retry only', async () => {
+    const model = scriptedModel(ALL_THOUGHT, reasoning('', 'length', 4_096, 4_096));
+    const { outcome, events } = await run(model);
+    expect(outcome).toStrictEqual({ kind: 'failed', why: 'model-no-answer' });
+    expect(model.requests).toHaveLength(2);
+    expect(events.some((event) => event.type === 'section')).toBe(false);
+  });
+
+  it('fails model-cut-off, not model-no-answer, when the answer itself was cut short', async () => {
+    const model = scriptedModel(ALL_THOUGHT, reasoning('A steady', 'length', 4_096, 2_000));
+    const { outcome, events } = await run(model);
+    expect(outcome).toStrictEqual({ kind: 'failed', why: 'model-cut-off' });
+    expect(model.requests).toHaveLength(2);
+    expect(events.some((event) => event.type === 'section')).toBe(false);
+  });
+
+  it('does not ask again for an answer cut short by a model that did not reason', async () => {
+    const model = scriptedModel(text(PASSING_WRITE_UP, 'length'));
+    const { outcome } = await run(model);
+    expect(outcome).toStrictEqual({ kind: 'failed', why: 'model-cut-off' });
+    expect(model.requests).toHaveLength(1);
+  });
+
+  it('keeps the answer’s own bound: a longer answer in the larger allowance is not kept', async () => {
+    const over = scriptedModel(ALL_THOUGHT, reasoning(PASSING_WRITE_UP, 'stop', 2_025, 1_000));
+    const ran = await run(over);
+    expect(ran.outcome).toStrictEqual({ kind: 'failed', why: 'model-cut-off' });
+    expect(ran.events.some((event) => event.type === 'section')).toBe(false);
+    // Exactly the bound is kept.
+    const at = scriptedModel(ALL_THOUGHT, reasoning(PASSING_WRITE_UP, 'stop', 2_024, 1_000));
+    expect((await run(at)).outcome.kind).toBe('written');
+    // A turn of a reasoning run that did not itself reason is held to it too.
+    const plain = scriptedModel(ALL_THOUGHT, {
+      ...text(PASSING_WRITE_UP),
+      usage: { inputTokens: 500, outputTokens: 1_025 },
+    });
+    expect((await run(plain)).outcome).toStrictEqual({ kind: 'failed', why: 'model-cut-off' });
+  });
+
+  it('does not hold a run that never showed reasoning to the answer’s bound by its token count', async () => {
+    // A server that over-reports its output (1 025, finish stop): the bound is for runs
+    // that were given room to reason, and this one was not.
+    const model = scriptedModel({
+      ...text(PASSING_WRITE_UP),
+      usage: { inputTokens: 500, outputTokens: 1_025 },
+    });
+    expect((await run(model)).outcome.kind).toBe('written');
+    expect(allowances(model)).toStrictEqual([AGENT_TURN_OUTPUT_TOKENS]);
+  });
+
+  it('gives every turn the room the rider or operator said, from the first (#1268, option 3)', async () => {
+    const said = {
+      ...scriptedModel(calls(['goals', {}]), text(PASSING_WRITE_UP)),
+      reasoningTokens: 2_000,
+    };
+    const { outcome } = await run(said);
+    expect(outcome.kind).toBe('written');
+    expect(allowances(said)).toStrictEqual([
+      AGENT_TURN_OUTPUT_TOKENS + 2_000,
+      AGENT_TURN_OUTPUT_TOKENS + 2_000,
+    ]);
+  });
+
+  it('does not ask again at the limit when the room was given up front', async () => {
+    const said = { ...scriptedModel(text('', 'length')), reasoningTokens: 2_000 };
+    const { outcome } = await run(said);
+    expect(outcome).toStrictEqual({ kind: 'failed', why: 'model-no-answer' });
+    expect(said.requests).toHaveLength(1);
+  });
+
+  it('holds the run’s token budget against the figure said', async () => {
+    const said = { ...scriptedModel(text(PASSING_WRITE_UP)), reasoningTokens: 16_384 };
+    const { outcome } = await run(said, { budgets: { tokens: 17_000 } });
+    expect(outcome).toStrictEqual({ kind: 'failed', why: 'out-of-tokens' });
+    expect(said.requests).toHaveLength(0);
+  });
+
+  it('holds the run’s token budget against the larger allowance', async () => {
+    // The first turn costs 500 + 1 024. The retry is estimated at what is
+    // sent, and must fit with all 4 096 it may answer.
+    const sent = Math.ceil(
+      (ANALYSIS_AGENT_TEMPLATE_V1.system.length +
+        JSON.stringify(AGENT_TOOLS.map((tool) => tool.spec)).length +
+        ANALYSIS_AGENT_TEMPLATE_V1.firstMessage(RIDE_INPUT).length) /
+        3,
+    );
+    const fits = 500 + 1_024 + sent + WITH_REASONING;
+    const short = scriptedModel(ALL_THOUGHT, reasoning(PASSING_WRITE_UP, 'stop', 1_300, 1_000));
+    const stopped = await run(short, { budgets: { tokens: fits - 1 } });
+    expect(stopped.outcome).toStrictEqual({ kind: 'failed', why: 'out-of-tokens' });
+    expect(short.requests).toHaveLength(1);
+    const enough = scriptedModel(ALL_THOUGHT, reasoning(PASSING_WRITE_UP, 'stop', 1_300, 1_000));
+    expect((await run(enough, { budgets: { tokens: fits } })).outcome.kind).toBe('written');
+  });
+
+  it('counts a turn whose server reports nothing at the whole of the larger allowance', async () => {
+    // Three turns: the first reports nothing and ends on its limit (counted
+    // at the estimate and 1 024); the second, in the larger allowance, calls
+    // a tool and reports nothing (the estimate and 4 096).
+    const silent = { ...calls(['goals', {}]), usage: {} };
+    const script = () => scriptedModel(text('', 'length'), silent, text(PASSING_WRITE_UP));
+    const probe = script();
+    await run(probe);
+    const characters = (request: ModelTurnRequest | undefined) =>
+      ANALYSIS_AGENT_TEMPLATE_V1.system.length +
+      JSON.stringify(AGENT_TOOLS.map((tool) => tool.spec)).length +
+      JSON.stringify(request?.messages ?? []).length;
+    // An upper bound on what the third turn is estimated to send.
+    const third = Math.ceil(characters(probe.requests[2]) / 3);
+    const first = Math.ceil(characters(probe.requests[0]) / 3);
+    const spentIfCountedSmall = 2 * first + 2 * AGENT_TURN_OUTPUT_TOKENS;
+    // A budget the third turn fits only if the second was counted at 1 024.
+    const model = script();
+    const { outcome } = await run(model, {
+      budgets: { tokens: spentIfCountedSmall + third + WITH_REASONING + 1_000 },
+    });
+    expect(outcome).toStrictEqual({ kind: 'failed', why: 'out-of-tokens' });
+    expect(model.requests).toHaveLength(2);
+  });
+
+  it('counts the turn asked again against the step budget', async () => {
+    const model = scriptedModel(ALL_THOUGHT, reasoning(PASSING_WRITE_UP, 'stop', 1_300, 1_000));
+    const { outcome } = await run(model, { budgets: { modelCalls: 1 } });
+    expect(outcome).toStrictEqual({ kind: 'failed', why: 'out-of-steps' });
+    expect(model.requests).toHaveLength(1);
+  });
+
+  it('has its own sentence for no answer, which names reasoning and quotes no model', () => {
+    expect(AGENT_FAILURE_TEXT['model-no-answer']).not.toBe(AGENT_FAILURE_TEXT['model-cut-off']);
+    expect(AGENT_FAILURE_TEXT['model-no-answer']).toContain('reasons');
+    expect(AGENT_FAILURE_TEXT['model-no-answer']).toContain('nothing was kept');
+  });
+});
+
 describe('screened before anything is kept or streamed, with one rewrite (ADR 0035 D-4)', () => {
   const ANGLE = 'The knee reached 142° at the bottom of the stroke.';
 
@@ -550,6 +782,51 @@ describe('end to end through the fake model server and the real connection (no n
       expect(second).toContain('Goal of rider A');
       expect(second).toContain('"role":"tool"');
       expect(second).not.toContain('rider B');
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('a local model that reasons past its turn is asked again, and writes (#1268)', async () => {
+    // Ollama's shape for a reasoning tag: the reasoning in `reasoning`, and
+    // no count of it apart from `completion_tokens`.
+    const server = await startFakeModelServer([
+      {
+        kind: 'text',
+        text: '',
+        finish: 'length',
+        usage: { prompt: 120, completion: 1_024 },
+        reasoning: { field: 'reasoning', text: 'The rider asks about the climb.' },
+      },
+      {
+        kind: 'text',
+        text: PASSING_WRITE_UP,
+        usage: { prompt: 120, completion: 1_330 },
+        reasoning: { field: 'reasoning', text: 'The rider asks about the climb.' },
+      },
+    ]);
+    try {
+      const model = createLocalModel({
+        settings: { baseUrl: server.baseUrl, model: 'scripted' },
+        resolve: () => Promise.resolve(['127.0.0.1']),
+      });
+      const events: AgentEvent[] = [];
+      const outcome = await runAnalysisAgent({
+        job: { athleteId: A, input: RIDE_INPUT },
+        model,
+        reads: store,
+        clock: movableClock(),
+        signal: new AbortController().signal,
+        emit: (event) => events.push(event),
+      });
+      expect(outcome.kind).toBe('written');
+      expect(server.requests.map((request) => request.max_tokens)).toStrictEqual([
+        AGENT_TURN_OUTPUT_TOKENS,
+        AGENT_TURN_OUTPUT_TOKENS + AGENT_TURN_REASONING_TOKENS,
+      ]);
+      // No reasoning is sent back to the model, streamed or kept.
+      expect(JSON.stringify(server.requests)).not.toContain('asks about the climb');
+      expect(JSON.stringify([events, outcome])).not.toContain('asks about the climb');
     } finally {
       await server.close();
     }

@@ -96,15 +96,20 @@ export const NIGHTLY_CHECKS: readonly NightlyCheck[] = [
       'moved pending the owner’s explicit acknowledgement (#878’s review). The stylised ' +
       'road’s gradient contrast stays required (#242). Since #870 (R2) (3) also holds #628’s ' +
       'floor, 3.5 : 1 with the road’s wear on; the rest of R2 here (#627’s ground, #629’s ' +
-      'water, #679’s gantries) is appearance and cost.',
+      'water, #679’s gantries) is appearance and cost, and so is #1274’s crag on a steep ' +
+      'bank, read on #627’s own frame.',
   },
   {
     spec: 'game.browser.spec.ts',
     describe: 'the trees’ levels of detail in the realistic world — #617',
-    seconds: '82 s: the `?realistic&trees` load',
+    seconds:
+      '82 s to 105 s: the `?realistic&trees` load, and since #1283 about 8 s to 13 s more for the scans’ frame',
     why:
       'triangle and draw-call budgets and a hand-over with no pop, in the realistic world; ' +
-      'since #870, #630’s far-band light and foliage breeze, which are appearance.',
+      'since #870, #630’s far-band light and foliage breeze, which are appearance. Since #1283 ' +
+      'the trees it measures are the GENERATED ones a ride draws — since #1294 the firs with ' +
+      'the broadleaves — and the same wooded frame is counted again with every tree a scan ' +
+      'as the control.',
   },
   {
     spec: 'realistic.browser.spec.ts',
@@ -113,6 +118,18 @@ export const NIGHTLY_CHECKS: readonly NightlyCheck[] = [
     why:
       'the owner’s measuring instruments (a triangle counter and a layer switch) for the ' +
       'realistic world; `realistic.html` is not a gate and ships in no build.',
+  },
+  {
+    spec: 'realistic.browser.spec.ts',
+    describe: 'the realistic page’s tree levers — #1283, #1294',
+    seconds: 'about 54 s: three more loads of the owner’s page',
+    why:
+      'the owner’s page’s levers for the generated trees (#1283, #1294): that ' +
+      '`-generated-trees` fetches every tree’s scan instead, `-generated-conifers` the ' +
+      'scanned firs alone, and never both makings of a tree, with each frame’s triangles ' +
+      'and draw calls. An instrument of a page that ships in no build; which files the ' +
+      'PRODUCT asks for is held in the required suite by `realistic-renderer.test.ts` ' +
+      '§"asks for the generated broadleaves".',
   },
   {
     spec: 'reflow.browser.spec.ts',

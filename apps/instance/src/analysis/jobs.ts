@@ -38,6 +38,28 @@
  *    and is never run again: a write-up the rider is no longer waiting for is
  *    not one to spend a model on, and a half-run agent cannot be resumed.
  *
+ * ## The second job type: a re-plan during the ride (#1243, ADR 0048)
+ *
+ * `startReplan` queues a job in the same table, read, streamed, cancelled and
+ * acknowledged through the same routes. What differs:
+ *
+ * - **It is told apart by its template**: the row's `template_version` is the
+ *   re-plan template's (`replan-template.ts`), and the worker reads its input
+ *   with `readReplanInput` and hands it to the {@link ReplanEngine}.
+ * - **Its `result` carries a proposal and no text**: `{ status: 'succeeded',
+ *   proposal }`, where `proposal` is one `Proposal` of `@onyourleft/domain`
+ *   or `null` when the model answered that the workout should stay as it is.
+ *   Any other ending is `failed` with its cause, and carries no proposal. Its
+ *   stream holds `progress` and `result` only, and it keeps no write-up, so
+ *   the row goes with its events at the end of the retention.
+ * - **Its own start limit** ({@link DEFAULT_REPLAN_STARTS}), so a ride's
+ *   re-plans never spend the write-up's twelve an hour.
+ * - **Its budget counts from when it was queued**: the engine is told how long
+ *   the job waited (`replan-agent.ts`).
+ *
+ * ⚠️ `job_running` is shared: an athlete has ONE job open of either type.
+ * Nothing on the instance starts a re-plan; only a device's request does.
+ *
  * ## What is never in it
  *
  * - **No event carries a tool's arguments or its results**: progress names a
@@ -56,6 +78,7 @@ import {
   type ScreenedWriteUp,
   type ScreenReason,
 } from '@onyourleft/analysis';
+import type { Proposal } from '@onyourleft/domain';
 
 import type { Caller, Outcome } from '../auth/identity.ts';
 import { RIDE_ID, rideStarts } from '../history/history.ts';
@@ -71,6 +94,9 @@ import type {
 } from '../store/sql-store.ts';
 import type { AgentEvent, AgentFailure } from './agent.ts';
 import { pictureFaults, readRideInput } from './job-input.ts';
+import type { ReplanFailure } from './replan-agent.ts';
+import { readReplanInput, type ReplanInput } from './replan-input.ts';
+import { REPLAN_TEMPLATE } from './replan-template.ts';
 import type { AnalysisSource, SourceFailure } from './source.ts';
 
 /** How often a quiet stream writes a heartbeat: the room socket's 25 s ping (ADR 0046 D-11). */
@@ -97,6 +123,14 @@ export const DEFAULT_ANALYSIS_STARTS: RateLimit = { limit: 12, windowMs: 60 * 60
  */
 export const ANALYSIS_SWEEP_PERIOD_MS = DEFAULT_ANALYSIS_STARTS.windowMs;
 
+/**
+ * How many re-plans one athlete may START an hour: twenty-four (#1243). A
+ * device asks at a block boundary, or at most every 3 minutes (ADR 0048
+ * D-10), which is twenty an hour; a client in a loop is stopped after
+ * twenty-four. Counted apart from {@link DEFAULT_ANALYSIS_STARTS}.
+ */
+export const DEFAULT_REPLAN_STARTS: RateLimit = { limit: 24, windowMs: 60 * 60 * 1000 };
+
 /** How many events a stream reads from the store at once. */
 const EVENT_PAGE = 100;
 
@@ -104,7 +138,8 @@ const EVENT_PAGE = 100;
 export const TOOL_NAME = /^[a-z][a-z0-9_]{0,63}$/;
 
 /** Why a job failed. Closed: the sentences live with the client (#1102). */
-export type JobFailure = AgentFailure | SourceFailure | 'interrupted' | 'engine-error';
+export type JobFailure =
+  AgentFailure | ReplanFailure | SourceFailure | 'interrupted' | 'engine-error';
 
 /** Every {@link JobFailure}, for the specification and the client. */
 export const JOB_FAILURES: readonly JobFailure[] = [
@@ -118,7 +153,9 @@ export const JOB_FAILURES: readonly JobFailure[] = [
   'model-refused',
   'model-error',
   'model-cut-off',
+  'model-no-answer',
   'model-malformed',
+  'not-a-proposal',
   'local_unavailable',
   'hosted_unavailable',
   'interrupted',
@@ -138,12 +175,26 @@ export interface EngineJob {
   readonly rideId?: string;
 }
 
+/** A re-plan job, as its engine runs it (#1243): the session's athlete and the checked input. */
+export interface ReplanEngineJob {
+  readonly athleteId: string;
+  readonly input: ReplanInput;
+  readonly source: AnalysisSource;
+  /** How long the job was queued before a worker took it, which its budget includes. */
+  readonly waitedMilliseconds: number;
+}
+
 /** How an engine's run ended. `AgentOutcome` (`agent.ts`) is one. */
 export type EngineEnding =
   | { readonly kind: 'written'; readonly writeUp: ScreenedWriteUp }
+  /** A re-plan's: one proposal, or `null` when the model kept the workout as it is. */
+  | { readonly kind: 'proposed'; readonly proposal: Proposal | null }
   | { readonly kind: 'withheld'; readonly reasons: readonly ScreenReason[] }
   | { readonly kind: 'failed'; readonly why: JobFailure }
   | { readonly kind: 'cancelled' };
+
+/** How a write-up's run ended: never a proposal. */
+export type WriteUpEnding = Exclude<EngineEnding, { readonly kind: 'proposed' }>;
 
 /** What runs a job: the agent in production (`engine.ts`), a script in a test. */
 export interface AnalysisEngine {
@@ -151,7 +202,22 @@ export interface AnalysisEngine {
     job: EngineJob,
     signal: AbortSignal,
     emit: (event: AgentEvent) => void,
-  ): Promise<EngineEnding>;
+  ): Promise<WriteUpEnding>;
+}
+
+/** How a re-plan's run ended: a proposal or none. Never text. */
+export type ReplanEnding = Extract<
+  EngineEnding,
+  { readonly kind: 'proposed' | 'failed' | 'cancelled' }
+>;
+
+/** What runs a re-plan job (#1243): the re-plan agent in production (`engine.ts`). */
+export interface ReplanEngine {
+  run(
+    job: ReplanEngineJob,
+    signal: AbortSignal,
+    emit: (event: Extract<AgentEvent, { readonly type: 'progress' }>) => void,
+  ): Promise<ReplanEnding>;
 }
 
 /** Timers the heartbeat runs on: the platform's unless a test's fake clock. */
@@ -189,6 +255,10 @@ export type JobStore = Pick<
 export interface AnalysisJobsOptions {
   readonly store: JobStore;
   readonly engine: AnalysisEngine;
+  /** What runs a re-plan (#1243). Absent, `startReplan` answers `analysis_off`. */
+  readonly replan?: ReplanEngine;
+  /** {@link DEFAULT_REPLAN_STARTS} unless a test says otherwise. */
+  readonly replanStarts?: RateLimit;
   /**
    * Whether this instance has a model source at all (#1096, #1097): `false`,
    * every start is `analysis_off` and nothing is queued.
@@ -215,6 +285,11 @@ export interface JobView {
 export interface AnalysisJobs {
   /** Queue a job for the caller; `{ jobId }`, or why not. */
   start(
+    caller: Caller,
+    body: Readonly<Record<string, unknown>>,
+  ): Promise<Outcome<{ jobId: string }>>;
+  /** Queue a re-plan for the caller (#1243); `{ jobId }`, or why not. */
+  startReplan(
     caller: Caller,
     body: Readonly<Record<string, unknown>>,
   ): Promise<Outcome<{ jobId: string }>>;
@@ -278,6 +353,14 @@ function ending(outcome: EngineEnding, at: number): AnalysisJobEnding {
         data: JSON.stringify({ status: 'succeeded', writeUp: outcome.writeUp }),
         at,
       };
+    case 'proposed':
+      return {
+        status: 'succeeded',
+        failure: null,
+        candidate: null,
+        data: JSON.stringify({ status: 'succeeded', proposal: outcome.proposal }),
+        at,
+      };
     case 'withheld':
       return {
         status: 'withheld',
@@ -319,6 +402,7 @@ const NOT_A_SYNCED_RIDE: FieldProblem = {
   problem: 'must be the synced id of one of your rides',
 };
 const SOURCES: readonly AnalysisSource[] = ['instance-local', 'instance-hosted'];
+const REPLAN_BODY_KEYS = ['input', 'templateVersion', 'source'] as const;
 
 export function createAnalysisJobs(options: AnalysisJobsOptions): AnalysisJobs {
   const { store, engine, now } = options;
@@ -327,6 +411,7 @@ export function createAnalysisJobs(options: AnalysisJobsOptions): AnalysisJobs {
   const timers = options.timers ?? PLATFORM_TIMERS;
   const retentionMs = options.retentionMs ?? DEFAULT_RETENTION_MS;
   const starts = createRateLimiter(options.starts ?? DEFAULT_ANALYSIS_STARTS, now);
+  const replanStarts = createRateLimiter(options.replanStarts ?? DEFAULT_REPLAN_STARTS, now);
 
   /** Who is waiting on each job's stream. */
   const listeners = new Map<string, Set<() => void>>();
@@ -378,19 +463,37 @@ export function createAnalysisJobs(options: AnalysisJobsOptions): AnalysisJobs {
     let outcome: EngineEnding;
     try {
       // Read again on the way out of the table: what is stored is what was checked.
-      const input = readRideInput(JSON.parse(job.inputJson) as unknown);
-      outcome = input.ok
-        ? await engine.run(
-            {
-              athleteId: job.athleteId,
-              input: input.value,
-              source: job.source,
-              ...(job.rideId === null ? {} : { rideId: job.rideId }),
-            },
-            controller.signal,
-            emit,
-          )
-        : { kind: 'failed', why: 'engine-error' };
+      const stored = JSON.parse(job.inputJson) as unknown;
+      if (job.templateVersion === REPLAN_TEMPLATE.version) {
+        const input = readReplanInput(stored);
+        outcome =
+          input.ok && options.replan !== undefined
+            ? await options.replan.run(
+                {
+                  athleteId: job.athleteId,
+                  input: input.value,
+                  source: job.source,
+                  waitedMilliseconds: Math.max(0, now() - job.createdAt),
+                },
+                controller.signal,
+                emit,
+              )
+            : { kind: 'failed', why: 'engine-error' };
+      } else {
+        const input = readRideInput(stored);
+        outcome = input.ok
+          ? await engine.run(
+              {
+                athleteId: job.athleteId,
+                input: input.value,
+                source: job.source,
+                ...(job.rideId === null ? {} : { rideId: job.rideId }),
+              },
+              controller.signal,
+              emit,
+            )
+          : { kind: 'failed', why: 'engine-error' };
+      }
     } catch {
       outcome = { kind: 'failed', why: 'engine-error' };
     }
@@ -590,6 +693,51 @@ export function createAnalysisJobs(options: AnalysisJobsOptions): AnalysisJobs {
       return { ok: true, value: { jobId: id } };
     },
 
+    async startReplan(caller, body) {
+      if (options.replan === undefined || !(await options.available())) {
+        return { ok: false, code: 'analysis_off' };
+      }
+      if (!replanStarts.allow(caller.athleteId)) return { ok: false, code: 'rate_limited' };
+      if (pictureFaults(body).length > 0) {
+        return refused([{ field: 'body', problem: 'must not carry a picture' }]);
+      }
+      for (const key of Object.keys(body)) {
+        if (!(REPLAN_BODY_KEYS as readonly string[]).includes(key)) {
+          return refused([{ field: key, problem: 'is not a field of a re-plan' }]);
+        }
+      }
+      if (body.templateVersion !== REPLAN_TEMPLATE.version) {
+        return refused([
+          {
+            field: 'templateVersion',
+            problem: 'must be a re-plan template version this instance runs',
+          },
+        ]);
+      }
+      if (
+        typeof body.source !== 'string' ||
+        !(SOURCES as readonly string[]).includes(body.source)
+      ) {
+        return refused([{ field: 'source', problem: 'must be instance-local or instance-hosted' }]);
+      }
+      const input = readReplanInput(body.input);
+      if (!input.ok) return refused(input.fields);
+      await recovering.catch(() => undefined);
+      const id = jobId();
+      const created = await store.createAnalysisJob({
+        id,
+        athleteId: caller.athleteId,
+        source: body.source as AnalysisSource,
+        templateVersion: REPLAN_TEMPLATE.version,
+        inputJson: JSON.stringify(input.value),
+        createdAt: now(),
+      });
+      if (created === 'busy') return { ok: false, code: 'job_running' };
+      logged('queued');
+      schedule();
+      return { ok: true, value: { jobId: id } };
+    },
+
     async read(caller, id) {
       const job = await store.getAnalysisJob(caller.athleteId, id);
       return job === undefined
@@ -640,6 +788,7 @@ export function createAnalysisJobs(options: AnalysisJobsOptions): AnalysisJobs {
 
     async sweep() {
       starts.sweep();
+      replanStarts.sweep();
       return store.pruneAnalysisJobs(now() - retentionMs);
     },
 

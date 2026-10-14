@@ -140,6 +140,7 @@ import {
   setBuildingOpenings,
   setRealisticTints,
   setRealisticMaterialsMerged,
+  setRealisticTrees,
   setTreeLevels,
   threeGameRenderer,
   waterSkyOf,
@@ -185,6 +186,7 @@ import { CONTACT_SHADOW_DARKNESS } from '../src/game/contact-shadow';
 import { clearOfTheCamera, nearPyramid, sceneryReach } from '../src/game/near-field';
 import {
   REALISTIC_SURFACES,
+  REALISTIC_TREES_DEFAULT,
   realisticUrl,
   realisticWorldNotice,
 } from '../src/game/realistic-assets';
@@ -4758,6 +4760,24 @@ export interface TreeLevelMeasurement {
    * heaviest of R2's probes. @see foliageProbe
    */
   readonly foliage: FoliageMeasurement;
+  /**
+   * #1283: the same wooded frame from a world loaded with the SCANNED
+   * trees — since #1294 the firs' scans as well as the broadleaves'
+   * (`three-renderer.ts` §`setRealisticTrees`) — the trees every
+   * measurement above was first taken on — at the same route position, with
+   * the same camera: its triangles and draw calls as the product's levels draw
+   * it. Everything above is the GENERATED trees', which is what a ride draws.
+   *
+   * ⚠️ **One frame, on one view, and not the hard swap as well.** The first
+   * version counted the scans' hard swap too, to keep #617's 60 000 in the
+   * browser; the two views took 25.5 s of a 128 s load on the slower runner
+   * (run 38259197999), 80 % of the load's budget. #617's figure is still held
+   * off the committed files by `realistic-budget.test.ts`, on the scans.
+   */
+  readonly scanned: {
+    readonly triangles: number;
+    readonly calls: number;
+  };
 }
 
 /**
@@ -5171,6 +5191,17 @@ export interface GroundBlendMeasurement {
   /** The same squares with the rock blend off: the control. */
   readonly bankControl: number;
   readonly levelsControl: readonly number[];
+  /**
+   * #1274 — the same frame with the crag off, so the bank's rock is the
+   * scree's photograph as it was before: the bank square's contrast so drawn,
+   * and how many of the rock's pixels the crag changed. And the control: how
+   * many pixels of the WHOLE frame the crag's switch moves, by so much as a
+   * bit, when the slope's rock is off — which must be none, because the crag
+   * is that rock's share and nothing of its own.
+   */
+  readonly bankScree: number;
+  readonly cragPixels: number;
+  readonly cragWithoutRock: number;
 }
 
 const NO_GROUND_BLEND: GroundBlendMeasurement = {
@@ -5181,6 +5212,9 @@ const NO_GROUND_BLEND: GroundBlendMeasurement = {
   levels: [],
   bankControl: 0,
   levelsControl: [],
+  bankScree: 0,
+  cragPixels: 0,
+  cragWithoutRock: 0,
 };
 
 /**
@@ -5269,6 +5303,14 @@ function groundBlendProbe(
   const rockless = whole(frame);
   groundBlendOf(view, 0, 0, 1);
   const bareGrass = whole(frame);
+  // #1274: every blend on, and the crag alone off — the bank in the scree's
+  // photograph, as it was drawn before.
+  groundBlendOf(view, 1, 1, 1, 0);
+  const cragless = whole(frame);
+  // And the control: the rock off, with the crag off as well. `rockless` is
+  // the same frame with the crag ON, and the two must be one picture.
+  groundBlendOf(view, 1, 0, 1, 0);
+  const rocklessCragless = whole(frame);
   groundBlendOf(view, 1, 1, 1);
   const width = canvas.width;
   const differs = (a: Uint8Array, b: Uint8Array, at: number): boolean =>
@@ -5277,6 +5319,8 @@ function groundBlendProbe(
       Math.abs((a[at + 2] ?? 0) - (b[at + 2] ?? 0)) >
     3;
   let rockPixels = 0;
+  let cragPixels = 0;
+  let cragWithoutRock = 0;
   const rock = new Uint8Array(width * canvas.height);
   const grass = new Uint8Array(width * canvas.height);
   for (let pixel = 0; pixel < rock.length; pixel += 1) {
@@ -5285,8 +5329,17 @@ function groundBlendProbe(
     if (ground && differs(drawn, rockless, at)) {
       rock[pixel] = 1;
       rockPixels += 1;
+      if (differs(drawn, cragless, at)) cragPixels += 1;
     }
     if (ground && !differs(drawn, rockless, at) && !differs(drawn, bareGrass, at)) grass[pixel] = 1;
+    // Exactly, with no allowance: no share of the slope's rock is no crag.
+    if (
+      rockless[at] !== rocklessCragless[at] ||
+      rockless[at + 1] !== rocklessCragless[at + 1] ||
+      rockless[at + 2] !== rocklessCragless[at + 2]
+    ) {
+      cragWithoutRock += 1;
+    }
   }
   const whollyIn = (mask: Uint8Array, x: number, y: number): boolean => {
     for (let dy = 0; dy < BLEND_WINDOW; dy += 1) {
@@ -5320,7 +5373,14 @@ function groundBlendProbe(
   // largest on screen); two level squares nearest the same row.
   const bank = [...banks].sort((a, b) => a[1] - b[1])[0];
   if (bank === undefined || levels.length < 2) {
-    return { ...NO_GROUND_BLEND, measured: true, rockPixels, bankSquares: banks.length };
+    return {
+      ...NO_GROUND_BLEND,
+      measured: true,
+      rockPixels,
+      bankSquares: banks.length,
+      cragPixels,
+      cragWithoutRock,
+    };
   }
   const byRow = [...levels].sort(
     (a, b) => Math.abs(a[1] - bank[1]) - Math.abs(b[1] - bank[1]) || a[0] - b[0],
@@ -5346,6 +5406,9 @@ function groundBlendProbe(
     levels: chosen.map((square) => contrast(drawn, square)),
     bankControl: contrast(rockless, bank),
     levelsControl: chosen.map((square) => contrast(rockless, square)),
+    bankScree: contrast(cragless, bank),
+    cragPixels,
+    cragWithoutRock,
   };
 }
 
@@ -6385,6 +6448,7 @@ const NO_TREES: TreeLevelMeasurement = {
   nearestVisibleTriangles: 0,
   nearestVisibleTrianglesControl: 0,
   foliage: NO_FOLIAGE,
+  scanned: { triangles: 0, calls: 0 },
 };
 
 /** Relative luminance of an sRGB pixel, WCAG 2.2's own formula. */
@@ -8452,10 +8516,37 @@ async function treeLevelRun(): Promise<TreeLevelMeasurement> {
     setRealisticMaterialsMerged(true);
   }
   phaseEnds('trees: unmerged control');
+  // #1283, #1294: the scans the generated trees replaced, on the same frame.
+  // LAST, because it replaces the loaded world and nothing after it reads one;
+  // counted at a sixteenth of the pixels, as `treeLevelProbe` counts (#644),
+  // and on ONE view: a view is the dearest thing on this load.
+  setRealisticTrees('scanned');
+  let scanned: TreeLevelMeasurement['scanned'];
+  try {
+    const outcome = await loadRealisticWorld();
+    if (!outcome.loaded) {
+      throw new Error(`#1283: the scanned trees' world did not load: ${outcome.detail}`);
+    }
+    const canvas = document.createElement('canvas');
+    const view = threeGameRenderer.create(canvas, top);
+    try {
+      const gl = canvas.getContext('webgl2');
+      if (gl === null) throw new Error('#1283: no WebGL 2 context for the scanned trees');
+      view.resize(160, 90);
+      const levelled = woodedFrameOf(view, gl, wooded);
+      scanned = { triangles: levelled.triangles, calls: levelled.calls };
+    } finally {
+      view.destroy();
+    }
+  } finally {
+    setRealisticTrees(REALISTIC_TREES_DEFAULT);
+  }
+  phaseEnds('trees: scanned — #1283');
   const pixels = unmerged.pixels ?? new Uint8Array(0);
   return {
     measured: true,
     ...probed,
+    scanned,
     drawCallsUnmerged: unmerged.calls,
     trianglesUnmerged: unmerged.triangles,
     unmergedPixelsChanged:

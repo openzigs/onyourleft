@@ -30,8 +30,11 @@ import {
   beatsPerMinute,
   degreesLatitude,
   degreesLongitude,
+  expandWorkout,
   geographicPosition,
   routeProfile,
+  seconds,
+  thresholdShare,
   watts,
   type RoutePoint,
 } from '@onyourleft/domain';
@@ -40,7 +43,9 @@ import { AppShell } from '../../shell/AppShell';
 import type { CapabilityProbe } from '../../support/bluetooth-support';
 import { mount, queryAll, settle, type Mounted } from '../../testing/mount';
 import type { GamePort, RidableRoute } from '../GameView';
+import { auditAccessibility, formatViolations } from '../../a11y/audit';
 import type { WorkoutHold } from '../../workout/hold-text';
+import { workoutGraphText, type WorkoutGraphInput } from '../../workout/workout-graph';
 import type { GameRenderer } from '../port';
 import { gameTrainerFrom, type GameTrainerPort, type GradientTrainer } from '../trainer-port';
 
@@ -446,6 +451,37 @@ describe('the heart-rate hold, through the game — #1240', () => {
     expect(document.body.textContent).not.toContain('Hold 130–140 bpm');
   });
 
+  it('draws the running workout on the HUD where the route plan is, from the port — #1307', async () => {
+    const workout: WorkoutGraphInput = {
+      elapsedSeconds: 450,
+      timeline: expandWorkout({
+        name: 'Hold',
+        blocks: [{ kind: 'steady', seconds: seconds(1800), target: thresholdShare(0.4) }],
+      }),
+      holdingWatts: 100,
+      thresholdWatts: 250,
+      trace: [{ at: 450, target: 100, power: 104, heartRate: 128, range: { low: 130, high: 140 } }],
+    };
+    let running: WorkoutGraphInput | undefined = workout;
+    await startRide({ ...holdingPort(), runningWorkout: () => running });
+    await pump(2);
+    const strip = document.querySelector('.oyl-hud__route [data-oyl-workout-graph="hud"]');
+    expect(strip?.getAttribute('aria-label')).toBe(workoutGraphText(workout));
+    expect(strip?.getAttribute('aria-label')).toContain(
+      'Heart rate: 128 bpm, with a chosen range of 130–140 bpm.',
+    );
+    expect(strip?.querySelector('.oyl-workout-strip__range')).not.toBeNull();
+    expect(strip?.querySelector('p')?.textContent).toBe('128 bpm, range 130–140 · Target 100 W');
+    expect(document.querySelector('[data-testid="oyl-hud-plan-here"]')).toBeNull();
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+
+    // The workout ends: the route plan has its place back.
+    running = undefined;
+    await pump(2);
+    expect(document.querySelector('[data-oyl-workout-graph]')).toBeNull();
+    expect(document.querySelector('[data-testid="oyl-hud-plan-here"]')).not.toBeNull();
+  });
+
   it('says a CHANGED sentence through the one region with announcements on, and never the first one', async () => {
     chooseAnnouncements({
       powerEverySeconds: 'never',
@@ -471,5 +507,164 @@ describe('the heart-rate hold, through the game — #1240', () => {
     hold = { reason: 'raised', range, target: 115 };
     await pump(10);
     expect(region()?.textContent).not.toContain('Heart-rate hold');
+  });
+});
+
+describe('a re-plan during the ride, through the game — #1244', () => {
+  const SENTENCE = 'Next block shortened by 2 minutes, to fit the duration you chose.';
+  let change: { waiting: { revision: number; sentence: string }; quiet: boolean } | undefined;
+  let discarded: number | undefined;
+  let kept: number;
+
+  /** A trainer a running workout owns, whose waiting re-plan the test changes between frames. */
+  function replanPort(): GameTrainerPort {
+    return {
+      ...trainerPort(true),
+      readTrainer: () =>
+        gameTrainerFrom(
+          { paired: true, controllable: true, canSimulate: true, hasControl: true },
+          {
+            setSimulationParameters: () => Promise.resolve(),
+            letGo: () => Promise.resolve({ kind: 'stopped' as const }),
+          } satisfies GradientTrainer,
+          true,
+        ),
+      workoutPlanChange: () => change,
+      workoutPlanDiscarded: () => discarded,
+      keepThePlan: () => {
+        kept += 1;
+        // As the controller does: the move is dropped, and nothing waits.
+        change = undefined;
+      },
+    };
+  }
+
+  const keepButton = (): HTMLButtonElement | undefined =>
+    queryAll<HTMLButtonElement>(document, '.oyl-hud__actions button').find(
+      (each) => each.textContent === 'Keep the plan',
+    );
+
+  const quietRide = (): void => {
+    chooseAnnouncements({
+      powerEverySeconds: 'never',
+      distanceEvery: 'never',
+      climbLeadMetres: 'never',
+    });
+  };
+
+  beforeEach(() => {
+    change = undefined;
+    discarded = undefined;
+    kept = 0;
+  });
+
+  it('puts Keep the plan on the HUD only while a move waits, and the press reaches the port', async () => {
+    quietRide();
+    await startRide(replanPort());
+    await pump(4);
+    expect(keepButton()).toBeUndefined();
+
+    change = { waiting: { revision: 1, sentence: SENTENCE }, quiet: false };
+    await pumpUntil(/Plan change/, 10);
+    await settle();
+    const button = keepButton();
+    expect(button).toBeDefined();
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+
+    await act(async () => {
+      button?.click();
+      await Promise.resolve();
+    });
+    expect(kept).toBe(1);
+    await pump(4);
+    await settle();
+    // Nothing waits any more, so there is nothing to keep the plan from.
+    expect(keepButton()).toBeUndefined();
+  });
+
+  it('offers it while the sentence is being held above threshold power: the control does not wait to be said', async () => {
+    quietRide();
+    await startRide(replanPort());
+    change = { waiting: { revision: 1, sentence: SENTENCE }, quiet: true };
+    await pump(6);
+    await settle();
+    expect(offered).not.toContain('plan-changed');
+    expect(keepButton()).toBeDefined();
+  });
+
+  it('says once that a pause or a lost trainer discarded the waiting move', async () => {
+    quietRide();
+    await startRide(replanPort());
+    change = { waiting: { revision: 1, sentence: SENTENCE }, quiet: false };
+    await pumpUntil(/Plan change/, 10);
+    change = undefined;
+    discarded = 1;
+    expect(await pumpUntil(/dropped/, 20)).toBe(
+      'Plan change: That change was dropped because the ride paused or lost the trainer, so the plan stays as it was.',
+    );
+    await pump(20);
+    expect(offered.filter((kind) => kind === 'plan-changed')).toHaveLength(2);
+  });
+
+  it('takes away in silence a move that was held above threshold power and never said', async () => {
+    quietRide();
+    await startRide(replanPort());
+    change = { waiting: { revision: 1, sentence: SENTENCE }, quiet: true };
+    await pump(6);
+    change = undefined;
+    discarded = 1;
+    await pump(20);
+    // Nothing was announced, so nothing is said to have been dropped.
+    expect(offered).not.toContain('plan-changed');
+    expect(region()?.textContent).not.toContain('dropped');
+  });
+
+  it('does not say a discard that already stood when the ride began', async () => {
+    quietRide();
+    discarded = 4;
+    await startRide(replanPort());
+    await pump(10);
+    expect(offered).not.toContain('plan-changed');
+  });
+
+  it('says an accepted move through the one region, once, with announcements on', async () => {
+    quietRide();
+    await startRide(replanPort());
+    await pump(4);
+    expect(offered).not.toContain('plan-changed');
+
+    change = { waiting: { revision: 1, sentence: SENTENCE }, quiet: false };
+    expect(await pumpUntil(/Plan change/, 10)).toBe(`Plan change: ${SENTENCE}`);
+    await pump(10);
+    expect(offered.filter((kind) => kind === 'plan-changed')).toHaveLength(1);
+  });
+
+  it('holds it while the workout is above threshold power, and says it after', async () => {
+    quietRide();
+    await startRide(replanPort());
+    change = { waiting: { revision: 1, sentence: SENTENCE }, quiet: true };
+    await pump(10);
+    expect(offered).not.toContain('plan-changed');
+    change = { waiting: { revision: 1, sentence: SENTENCE }, quiet: false };
+    expect(await pumpUntil(/Plan change/, 10)).toBe(`Plan change: ${SENTENCE}`);
+  });
+
+  it('does not say a move that was already waiting when the ride began', async () => {
+    quietRide();
+    change = { waiting: { revision: 1, sentence: SENTENCE }, quiet: false };
+    await startRide(replanPort());
+    await pump(10);
+    expect(offered).not.toContain('plan-changed');
+    // A second move is said.
+    change = { waiting: { revision: 2, sentence: SENTENCE }, quiet: false };
+    expect(await pumpUntil(/Plan change/, 10)).toBe(`Plan change: ${SENTENCE}`);
+  });
+
+  it('says nothing about it with announcements off', async () => {
+    await startRide(replanPort());
+    await pump(4);
+    change = { waiting: { revision: 1, sentence: SENTENCE }, quiet: false };
+    await pump(10);
+    expect(region()?.textContent).not.toContain('Plan change');
   });
 });

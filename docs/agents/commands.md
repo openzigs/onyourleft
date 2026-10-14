@@ -67,7 +67,7 @@ bash scripts/check-doc-links.sh
 bash scripts/check-doc-links.test.sh
 
 # Run several commands at once and fail if ANY of them fails (#651). Not a
-# check: it is how CI runs the checks, in one of its steps — see §4c. Every
+# check: it is how CI runs the checks, in one step of its `checks` shard — see §4c. Every
 # line is labelled with its command as it arrives, each process is waited on by
 # itself, and a failing command's whole output is printed again at the end.
 # No commands at all is exit 2, not a pass. Bash only, so it runs on a bare
@@ -78,6 +78,18 @@ bash scripts/run-concurrently.sh 'lint' 'pnpm run lint' 'typecheck' 'pnpm run ty
 # must NOT swallow — in every position, ending before and after a success —
 # plus a rendezvous that fails if the commands were quietly run one at a time.
 bash scripts/run-concurrently.test.sh
+
+# The required check's verdict (#1285, §4c §"Shards"). CI's work is three jobs
+# side by side and a fourth, named `Repository rules`, that runs this over
+# their results: anything but `success` fails (SHARD001) — `failure`,
+# `cancelled` and, the one that matters, `skipped`, which GitHub would
+# otherwise count as a pass — and so does no result at all (SHARD002). It
+# reads the workflow's `toJSON(needs)` from NEEDS. Bash only. Not a check to
+# run before pushing: there is nothing for it to read outside a workflow run.
+NEEDS='{"checks":{"result":"success","outputs":{}}}' bash scripts/check-shard-results.sh
+
+# Its own suite. 17 cases, most of them a pass it must not give.
+bash scripts/check-shard-results.test.sh
 
 # The same two digests, printed for reading by eye.
 shasum -a 256 LICENSE LICENSES/Apache-2.0.txt
@@ -126,7 +138,15 @@ pnpm run test
 # #1076 — every `.a11y.test.` file, which `test:a11y` runs (so CI runs them
 # once, not twice). The a11y exclude is a glob in SINGLE quotes, because the
 # script goes through `sh`; `check:test-split` reads a whole single-quoted word.
+# ⚠️ Since #1280 CI runs this NIGHTLY (`.github/workflows/nightly.yml`), which
+# publishes the table and the HTML artefact; the required job runs the next
+# command instead. No pull request's run summary has a coverage table.
 pnpm run test:coverage
+
+# The required job's Vitest run since #1280 (the owner's ruling, 2026-10-12):
+# `test:coverage` with no `--coverage`, the same files, 106–133 s less on the
+# slower runner. `check:test-split` fails the two if their excludes differ.
+pnpm run test:required
 
 # The files `test:coverage` excludes, with NO coverage (#852): the #545
 # near-field rides and the FIT decode fuzz, which V8's instrumentation slowed
@@ -141,15 +161,17 @@ pnpm run test:uninstrumented
 # What stops those lists coming apart (#852). Reads the scripts out of
 # package.json, asks `vitest list` what the whole suite and each run selects,
 # and fails on a file in NO run (CI would never run it) or in two. ⚠️ Since
-# #1076 there are THREE runs — `test:coverage`, `test:uninstrumented` and
-# `test:a11y` — and a reviewer who remembers "both halves" is reading the old
-# file. ⚠️ An
+# #1076 there are THREE runs — `test:required` (`test:coverage` until #1280),
+# `test:uninstrumented` and `test:a11y` — and a reviewer who remembers "both
+# halves" is reading the old file. ⚠️ Since #1280 it also fails a
+# `test:coverage` that is not `test:required` with `--coverage` after `run`:
+# the nightly report is of the files the required job runs. ⚠️ An
 # `--exclude` glob is matched against each Vitest PROJECT's root, not the
 # repository's, which is why it compares selections rather than globs. Lists,
 # runs no test: under a second.
 pnpm run check:test-split
 
-# Its own suite. Fixture-driven; 51 cases on 2026-10-03 (33 before #1076, 25 before #864, 32 before its review) — the count is what the
+# Its own suite. Fixture-driven; 60 cases on 2026-10-12 (51 before #1280, 33 before #1076, 25 before #864, 32 before its review) — the count is what the
 # run prints. Needs Node, so not in `check:repo`.
 bash scripts/check-test-split.test.sh
 
@@ -158,7 +180,8 @@ bash scripts/check-test-split.test.sh
 # is a SUBSET of `pnpm run test` — the same files, run under a name that says
 # what broke. Unlike coverage it DOES gate: criterion 4 of #48 is that a
 # violation fails the build. See §4e. ⚠️ Since #1076 it is the ONLY CI run of
-# these files: `test:coverage` excludes them, so they are not in the report.
+# these files: `test:required` and `test:coverage` exclude them, so they are
+# not in the report.
 pnpm run test:a11y
 
 # What proves that gate selects every accessibility test there is (#142). Runs
@@ -244,14 +267,14 @@ pnpm run build
 # them in a real headless Chromium through Playwright. ⚠️ **Two builds and two
 # preview servers since #408**: an offline claim about the PRODUCT cannot be
 # measured against the harness, so `playwright.config.ts` serves `dist` on 4320
-# beside `browser/dist` on 4319. One CI job, because a second job reports under
-# a different context and could not block a merge. ⚠️ Two Playwright PROJECTS
+# beside `browser/dist` on 4319. One CI job — since #1285 the `browser` shard,
+# which the job named `Repository rules` waits for (§4c). ⚠️ Two Playwright PROJECTS
 # since #651 — `chromium`, and `game` LAST — in one run and one browser; §4c
 # says why the game spec is last and why it is not split further. ⚠️ Since
 # #1128 they are TWO runs in this one command: `chromium` on three workers,
 # then `game` alone, each with its own stop (§4c §"23m50s of 25 — #1128").
 # A failed build ends it before either run. CI runs it under
-# `timeout --verbose --kill-after=10s 765s` (§4c, `GATE_STEP_MS`).
+# `timeout --verbose --kill-after=10s 825s` (§4c, `GATE_STEP_MS`).
 # This is the ONLY place in the
 # repository where a browser runs: jsdom implements no WebGL, so MapLibre
 # cannot be constructed in the Vitest suite at all, and three things are
@@ -365,8 +388,15 @@ pnpm --filter @onyourleft/web run test
 # names it; the default is `ktx` on the PATH), a second pinned TOOL that makes
 # every KTX2 texture, byte-stable, so `--check` still compares byte for byte.
 # `apps/web/tools/realistic/sources.ts` §`PINNED_KTX` says how it was installed.
+# ⚠️ Since #1283 a third pinned TOOL makes the generated trees: EZ-Tree 1.1.0, a
+# devDependency `pnpm install` brings (§`PINNED_EZ_TREE`), refused at any other
+# version, and run under the repository's Node (`.nvmrc`). A tree whose numbers are
+# not the digests `generated-trees.ts` records is refused before Blender runs;
+# `--geometry` prints what the committed seeds and parameters make today, to
+# record after one is changed on purpose, and needs neither Blender nor `ktx`.
 pnpm --filter @onyourleft/web run realistic:fetch
 pnpm --filter @onyourleft/web run realistic:process --check
+pnpm --filter @onyourleft/web run realistic:process --geometry
 pnpm --filter @onyourleft/web run realistic:stage
 
 # Regenerate the map's label glyphs (#578) from the committed Roboto v2.138.
@@ -506,6 +536,23 @@ pnpm --filter @onyourleft/instance run tunnel-soak --url https://… --room … 
 # model that admits a new device. Run over loopback on 2026-10-11; ⚠️ never
 # yet through the tunnel.
 pnpm --filter @onyourleft/instance run replan-round-trip --url https://… --runs 30 --cold-runs 5 --unload 'ollama stop <model>'
+# The same, on a HOSTED model and a key of your own (spike 0023 §11):
+# `--hosted-url` and `--hosted-model` together. ⚠️ The key is read from
+# OYL_MEASURE_HOSTED_KEY and from nowhere else: it is not an argument, an
+# option the command does not have (`--hosted-key` too) is refused by name and
+# never with its value, and the key is printed nowhere. Set it from a file for
+# the one command, as below. Each throwaway account stores it, consents to the
+# URL's origin and pushes an empty masking item; when the run ends or throws,
+# the key and consent are cleared and read back (`hosted.cleared` in the
+# report; exit 3, and a last stderr line saying to revoke the key, when one was
+# not). Sealed only; refused with `--unload` (a hosted model has no cold runs).
+# ⚠️ "Sealed" is less than the app's: the tool pins no instance and checks no
+# key statement (ADR 0047 D-5, D-6), it seals to whatever key `--url` serves.
+# So hosted needs an `https:` or loopback `--url`, and over `https:` the key is
+# sealed to whoever terminates TLS for that name. Use a key you can revoke. A
+# run that is KILLED clears nothing: revoke the key. Run once against a real
+# hosted service, through the tunnel, on 2026-10-11 (spike 0023 §11).
+OYL_MEASURE_HOSTED_KEY="$(cat key-file)" pnpm --filter @onyourleft/instance run replan-round-trip --url https://… --runs 30 --hosted-url https://… --hosted-model <name>
 
 # Migrate an instance database file by hand (#769): `status`, `latest`, `up`
 # (one) or `down` (one), each printing the applied migrations and every table's

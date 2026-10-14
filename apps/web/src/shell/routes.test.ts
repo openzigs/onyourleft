@@ -234,6 +234,24 @@ describe('the table itself', () => {
     }
   });
 
+  it('promises of no route that everything stays on this device — #1244’s review', () => {
+    // The Ride screen's note said exactly that, and stopped being true of it
+    // when a rider could switch on re-plans a few lines above. A note is a
+    // privacy statement kept on the screen: none may say more than holds in
+    // every state of its screen.
+    const ride = ALL_ROUTES.find((route) => route.id === 'ride');
+    expect(ride?.notes).toStrictEqual([
+      'Recorded on this device. Nothing is sent unless you switched that on.',
+    ]);
+    for (const route of ALL_ROUTES) {
+      for (const note of route.notes ?? []) {
+        expect(note, `${route.id}: “${note}”`).not.toMatch(
+          /everything (here )?stays on this device/i,
+        );
+      }
+    }
+  });
+
   it('gives a route’s help and notes something to say, and never the same sentence twice — #993', () => {
     for (const route of ALL_ROUTES) {
       for (const list of [route.help, route.notes]) {

@@ -126,6 +126,116 @@ export const REALISTIC_TEXTURE_PIXELS = {
  * is visible up close at that budget, which is why these are a little higher
  * and the near band is capped by count instead (below).
  *
+ * ## The generated trees, measured — #1283
+ *
+ * Since #1283 a ride's broadleaf trees are GENERATED to their size (ADR 0049
+ * D-1) rather than scans cut down to these ceilings: 6 692 and 5 800
+ * triangles at full detail against 28 000, and 2 208 and 2 004 at the middle
+ * level against 6 000. **No ceiling here moved**: what is spent fell, and the
+ * scans — still committed, still loadable on the owner's page — are held to
+ * the same figures. Same route position, same camera, pinned Chromium on
+ * 2026-10-12, the scans first:
+ *
+ * | | Scanned broadleaves | Generated broadleaves |
+ * |---|--:|--:|
+ * | The gate's wooded view (`game-harness.ts` §`treeLevelRun`, 900 m of the valley route), triangles a frame | 181 232 | **169 482** |
+ * | The same view, draw calls | 27 | **29** |
+ * | The owner's page held at `at=2550`, triangles a frame | 199 676 | **195 692** |
+ * | The same page, draw calls | 31, and 32 in one run of seven | **33** in seven runs of seven |
+ * | The same page, bytes of texture the load holds | 31 393 488 | **26 173 344** |
+ * | Texture memory estimated on the tablet's formats, the whole set | 70.56 MiB | **65.58 MiB** |
+ * | The worst vegetation the caps allow, triangles | 168 692 | **160 684** |
+ * | A broadleaf wood's tree slots, every one filled | 91 940 | **26 632** |
+ *
+ * ⚠️ **The draw calls ROSE by two, and that is why there are two seeds a
+ * species and not three.** A tree is a call a level a shape, and there are
+ * four generated shapes where there were two scans. Both views are inside
+ * {@link REALISTIC_WOODED_DRAW_CALLS} — which was not raised — with 6 and 2
+ * to spare. As first written #1283 made SIX shapes, three seeds a species:
+ * the gate's view then made 32 calls and the owner's page 35 in every run on
+ * a Mac and 34 on the CI runner (38256459141) — the ceiling itself, on a
+ * frame whose count is known to move by one between runs — so a seed of each
+ * species was taken out again (#1289's review;
+ * `tools/realistic/generated-trees.ts` §`GENERATED_TREES` says which, and
+ * how they were chosen). The triangles did not move with the seeds: every
+ * tree of a species is the same count. What the calls cost the tablet is
+ * validation 0002's #1283 row, which is the owner's.
+ *
+ * ⚠️ **The ceiling is held at the two views the gate names, not by
+ * construction, and it was not before #1283 either.** Elsewhere on the
+ * owner's route a frame is over it with both sets: held at `at=700` the page
+ * made 37 to 39 calls with the scans and 40 to 42 with the generated trees,
+ * four runs each on 2026-10-12, and the count moved between runs of the one
+ * held frame while its triangles did not. Why it moves was not looked for.
+ *
+ * ⚠️ **The build GREW, because both sets ship**: the realistic set is
+ * 39 252 137 bytes where it was 36 440 765 — 2 811 372 for four trees at three
+ * levels — and with the transcoder 39 836 999 of {@link REALISTIC_BUILD_BYTES}'
+ * 41 943 040, 2 106 041 under it. The scanned broadleaves are
+ * 10 616 301 of those bytes and go when the owner has judged the generated
+ * ones on the tablet (ADR 0049 D-1, #1293), at which point the set is smaller
+ * than it was before #1283.
+ *
+ * ## The generated firs, measured — #1294
+ *
+ * Since #1294 a ride's conifers are generated too: two firs, the pinned
+ * generator's evergreen, each bough carrying cards of Poly Haven's
+ * photographed fir sprigs — **4 792** triangles at full detail against the
+ * scanned fir's 23 996, and **878** at the middle level against 5 998. **No
+ * ceiling here moved.** Same route positions, same camera, pinned Chromium
+ * on a Mac on 2026-10-12; the middle column is the world #1283 left:
+ *
+ * | | Every tree a scan | Generated broadleaves, scanned firs | Every tree generated |
+ * |---|--:|--:|--:|
+ * | The gate's wooded view, triangles a frame | 181 232 | 169 482 | **115 718** |
+ * | The same view, draw calls | 27 | 29 | **29** |
+ * | The owner's page held at `at=2550`, triangles a frame | 199 676 | 195 692 | **131 684** |
+ * | The same frame, draw calls | 29 | 31 | **31** |
+ * | The owner's page held at `at=700`, triangles a frame | 207 587 | 161 227 | **135 627** |
+ * | The same frame, draw calls | 35 | 38 | **38** |
+ * | The page, bytes of texture the load holds | 31 393 488 | 26 173 344 | **19 838 224** |
+ * | Texture memory estimated on the tablet's formats, the whole set | 70.56 MiB | 65.58 MiB | **59.54 MiB** |
+ * | The worst vegetation the caps allow, triangles | 168 692 | 160 684 | **103 336** |
+ * | A conifer wood's tree slots, every one filled | 83 980 | 83 980 | **14 852** |
+ *
+ * ⚠️ **The draw calls in this table are one frame's, and the 33 and the 31
+ * of the table above are the same frame.** The owner's page reports a mean
+ * over its window, and until #1294 that window also held the warm-up and the
+ * page's very first render, which makes about twice the calls of every later
+ * frame — 60 and then 31 at `at=2550`, read frame by frame — so the page said
+ * 33 where the frame made 31, and 32 to 35 as a busier machine fit fewer
+ * frames into its four seconds
+ * (`browser/realistic-harness.ts` §`RealisticSample.drawCalls`). The page now
+ * counts from the end of the warm-up and reports each of this table's figures
+ * as its own: 29, 31 and 31 at `at=2550`, 35, 38 and 38 at `at=700`. That is why
+ * #1283's count "moved between runs of the one held frame while its triangles
+ * did not". The frame's own count did not move in any run, and it is the same
+ * with the generated firs as with the scanned ones at each of the seven
+ * positions looked at: two shapes stand where two stood. Held at `at=700` the
+ * frame is over {@link REALISTIC_WOODED_DRAW_CALLS} with every set, by three
+ * with both of the last two, as it was before #1294.
+ *
+ * ⚠️ **What this does not measure is the cut-out.** A fir is drawn as 1 100
+ * sprig cards of about 0.42 m, under a quarter of each covered by needles:
+ * 196 m² of card to a tree, where a generated oak's leaf cards are 104 m²,
+ * and every fragment of a card is run as far as the cut before it is
+ * discarded. The middle level keeps one card in three, enlarged, for 129 m²
+ * against the oak's 99. The triangles fell by a third on the owner's page;
+ * whether the frame got cheaper on a tablet's GPU is not something a
+ * triangle count says. In the software rasteriser the held frame at
+ * `at=2550` was drawn 54 to 62 times in four seconds with the scanned firs
+ * and 54 to 57 with the generated ones, on a machine busy with other work:
+ * runs of one set differed by as much as the two sets did, so nothing was
+ * learnt there either. Validation 0002's #1294 rows are the measurement, and
+ * they are the owner's.
+ *
+ * ⚠️ **The build grew again, because every set ships**: the generated firs
+ * are 1 307 982 bytes, and the realistic set with the transcoder is
+ * 41 144 981 of {@link REALISTIC_BUILD_BYTES}' 41 943 040 — **798 059 under
+ * it**, where it was 2 106 041 under. The scanned firs are 8 681 763 of those
+ * bytes and the scanned broadleaves 10 616 301; which go is the owner's to
+ * say after the tablet rows (ADR 0049 D-1, #1293).
+ *
  * @test-facing held by `realistic-budget.test.ts`, which reads every committed
  * realistic file back off disk against it; the renderer spends it only on the
  * realistic path, which a ride takes only for a rider who chose it (#475)
@@ -292,6 +402,25 @@ export const REALISTIC_TREE_LEVELS: TreeLevels = {
  *
  * So the wooded view is 6 under #617's 33 + 2, and 2 under the 33 it made
  * before #617 at all.
+ *
+ * ⚠️ **Since #1283 some of that room is spent**, and a reviewer who remembers
+ * 27 and 31 is reading the scans' figures: with the four generated
+ * broadleaves the gate's wooded view makes **29** calls and the owner's page
+ * at `at=2550` **33** — 6 and 2 under this ceiling — because a tree is a call
+ * a level a SHAPE and there are four shapes where there were two.
+ * {@link REALISTIC_TRIANGLES} has the table, and says why it is four shapes
+ * and not the six #1283 first made, which put the page AT 35. The scans,
+ * loaded on the same views, still make 27 and 31 (32 in one run of seven:
+ * the page's count moves by one between runs of the same held frame).
+ *
+ * ⚠️ **#1294 found what moves, and the page's 33 and 31 were a mean, not a
+ * frame's count**: the page counted its very first render, which makes about
+ * twice the calls of every later frame, so the held frame at `at=2550` makes
+ * 31 with the generated broadleaves and 29 with the scans, and the page
+ * added one to three to each by how few frames it drew before its sample.
+ * It now counts from the end of its warm-up and says 31 and 29 itself. The
+ * generated firs add no call to either view. {@link REALISTIC_TRIANGLES},
+ * "The generated firs, measured".
  *
  * ⚠️ **A browser-gate figure, not a device measurement.** The call count does
  * not depend on the GPU, so SwiftShader counts what the tablet would; what the

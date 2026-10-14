@@ -81,10 +81,13 @@
 import type { WorkoutRescue } from '@onyourleft/domain';
 import type { TrainerControl } from '@onyourleft/sensors/protocol';
 
+import type { CourseLineEvent, LapFigures } from '../recording/laps';
 import { rideInProgress, type RidePhase } from '../ride/controller';
 
 import type { GhostOutcome } from './ghost-outcome-kind';
 import type { WorkoutHold } from '../workout/hold-text';
+import { planChangeMayBeSpoken, type WaitingReplan } from '../workout/replan-text';
+import type { WorkoutGraphInput } from '../workout/workout-graph';
 
 /**
  * The trainer, narrowed to the two commands a ride in the game may give it.
@@ -268,6 +271,44 @@ export interface GameTrainerPort {
    */
   workoutHold?(): WorkoutHold | undefined;
   /**
+   * An accepted re-plan waiting for the running workout's next block, or
+   * `undefined` when none is — #1244, `RideWorkoutSnapshot.replan`. Read on
+   * every frame, like {@link workoutHold}, and for its reason: it decides no
+   * write. The HUD's one region says its sentence once, and `quiet` is
+   * `workout/replan-text.ts` §`planChangeMayBeSpoken` answering "not now" for
+   * where the workout is. Optional for {@link workoutHold}'s reason.
+   *
+   * While it answers, the HUD's actions show *Keep the plan*
+   * ({@link keepThePlan}), so a rider does not leave the game to refuse a
+   * change.
+   */
+  workoutPlanChange?(): { readonly waiting: WaitingReplan; readonly quiet: boolean } | undefined;
+  /**
+   * The revision of a waiting re-plan that a pause or a lost trainer
+   * discarded in the block being ridden, or `undefined` — #1244,
+   * `RideReplanSnapshot.discarded`. The HUD's one region says its one
+   * sentence once (`workout/replan-text.ts` §`planDiscardedAnnouncement`).
+   * Optional for {@link workoutHold}'s reason.
+   */
+  workoutPlanDiscarded?(): number | undefined;
+  /**
+   * *Keep the plan* — #1244, ADR 0048 D-7: drop the re-plan waiting for the
+   * next block. The ride controller's own `keepThePlan`, which is what the
+   * Ride screen's control calls: one path, and it writes nothing to the
+   * trainer. A no-op when none is waiting. Optional for {@link workoutHold}'s
+   * reason.
+   */
+  keepThePlan?(): void;
+  /**
+   * The workout in progress as its graph reads it, or `undefined` when there
+   * is none or it has finished — #1307. The Ride screen's own snapshot object
+   * (`RideWorkoutSnapshot`), so the HUD's strip and the panel's graph are one
+   * picture of one record. Read on every render, like {@link workoutHold},
+   * and for its reason: it decides no write. Optional for that method's
+   * reason too.
+   */
+  runningWorkout?(): WorkoutGraphInput | undefined;
+  /**
    * Whether the ride being RECORDED may stop if the screen goes off — #647,
    * `RideSnapshot.keepAliveFailed`: the platform refused the recording
    * service. `false` with no ride controller, and with no recording.
@@ -338,6 +379,40 @@ export interface GameTrainerPort {
    * `subscribe` — so `WIRE003` goes red if `GameView` stops calling it.
    */
   watchRide(listener: () => void): () => void;
+  /**
+   * The rider left the line of a course, crossed it, or ended the game ride
+   * part-way round — #1312. `GameView` calls it with `course-laps.ts`'s
+   * events; the answer is every lap of the RECORDING so far, the one that
+   * just ended last, or `undefined` when this call ended none or nothing is
+   * being recorded.
+   *
+   * ⚠️ **The lap's figures come back from the recording, never from the
+   * game**: its time is the recorder's moving time and its averages are over
+   * the recorder's samples (`recording/laps.ts`). Its times, distance and
+   * climb are the row the ride's page lists afterwards; its averages are
+   * worked out again when the ride is saved, from the samples the save
+   * writes, so they are that row's unless a reading landed in the lap's last
+   * slots after the line was crossed (`laps.ts`, "Worked out twice"). The
+   * game supplies only what the course knows — how long the lap is and how
+   * much it climbs.
+   *
+   * Not about the trainer, and on this port for {@link recordingMayStop}'s
+   * reason. Named so nothing else in production calls a method of that name —
+   * the controller's is `noteCourseLine` — so `WIRE003` goes red if
+   * `GameView` stops calling it. Optional, like {@link workoutHold}, so a
+   * double with no recording need not say so; `gameTrainerPortOver` always
+   * supplies it.
+   */
+  courseLine?(event: CourseLineEvent): readonly LapFigures[] | undefined;
+  /**
+   * The moving time of the course lap in progress, in seconds — #1312:
+   * `RideSnapshot.courseLapSeconds`, the recorder's clock again
+   * ({@link rideMovingSeconds}), so the lap time on the HUD stops when the
+   * ride's does. `undefined` with no lap open or nothing recording. Read
+   * through {@link watchRide} like the moving time, and optional for
+   * {@link courseLine}'s reason.
+   */
+  rideLapSeconds?(): number | undefined;
 }
 
 /** What {@link gameTrainerFrom} reads of the ride screen's `TrainerSnapshot`. */
@@ -359,11 +434,20 @@ interface GameTrainerSource {
   getSnapshot(): {
     readonly trainer: TrainerFacts;
     readonly workout:
-      | {
+      | ({
           readonly status: string;
           readonly rescue: WorkoutRescue | undefined;
           readonly hold?: WorkoutHold | undefined;
-        }
+          /** #1244: an accepted re-plan waiting for the next block, or one discarded. */
+          readonly replan?:
+            | {
+                readonly waiting: WaitingReplan | undefined;
+                readonly discarded?: number | undefined;
+              }
+            | undefined;
+          // #1307: the rest of what the graph reads. Partial only so a source
+          // with no graph in it need not say; the ride controller says all of it.
+        } & Partial<WorkoutGraphInput>)
       | undefined;
     /** #647. Optional here only so a source with no recording need not say. */
     readonly keepAliveFailed?: boolean;
@@ -374,6 +458,8 @@ interface GameTrainerSource {
      */
     readonly phase?: RidePhase;
     readonly movingSeconds?: number;
+    /** #1312. @see GameTrainerPort.rideLapSeconds */
+    readonly courseLapSeconds?: number | undefined;
   };
   simulationControl(): GradientTrainer | undefined;
   requestTrainerControl(): Promise<void>;
@@ -381,6 +467,22 @@ interface GameTrainerSource {
   subscribe(listener: () => void): () => void;
   /** #1042. @see GameTrainerPort.gameRideEnded */
   noteGameRideEnded(outcome: GhostOutcome | undefined): void;
+  /**
+   * #1312. @see GameTrainerPort.courseLine. Optional for
+   * {@link GameTrainerSource.getSnapshot}'s `keepAliveFailed` reason: a source
+   * with no recording has no laps. The ride controller always has it.
+   */
+  noteCourseLine?(event: CourseLineEvent): readonly LapFigures[] | undefined;
+  /**
+   * #1244. @see GameTrainerPort.keepThePlan. Optional only so a double with
+   * no workout need not say; the ride controller `main.tsx` hands over has it.
+   */
+  keepThePlan?(): void;
+}
+
+/** Whether a source's workout says enough to draw — the ride controller's always does. */
+function isDrawable(workout: Partial<WorkoutGraphInput>): workout is WorkoutGraphInput {
+  return workout.timeline !== undefined && workout.elapsedSeconds !== undefined;
 }
 
 /** What {@link GameTrainerPort.watchRide} returns with no ride controller: nothing to stop. */
@@ -423,11 +525,47 @@ export function gameTrainerPortOver(controller: GameTrainerSource | undefined): 
     },
     workoutRescue: () => controller?.getSnapshot().workout?.rescue,
     workoutHold: () => controller?.getSnapshot().workout?.hold,
+    workoutPlanChange: () => {
+      const workout = controller?.getSnapshot().workout;
+      const waiting = workout?.replan?.waiting;
+      if (workout === undefined || waiting === undefined) {
+        return undefined;
+      }
+      // A source that says where the workout is has the silence rule applied;
+      // the ride controller always does.
+      return {
+        waiting,
+        quiet: isDrawable(workout)
+          ? !planChangeMayBeSpoken(workout.timeline, workout.elapsedSeconds)
+          : false,
+      };
+    },
+    workoutPlanDiscarded: () => controller?.getSnapshot().workout?.replan?.discarded,
+    keepThePlan: () => {
+      controller?.keepThePlan?.();
+    },
+    runningWorkout: () => {
+      const workout = controller?.getSnapshot().workout;
+      if (workout === undefined || workout.status === 'finished') {
+        return undefined;
+      }
+      // ⚠️ The snapshot's own object, never a copy: the graph memoises its
+      // geometry on it, and the HUD renders on every frame.
+      return isDrawable(workout) ? workout : undefined;
+    },
     recordingMayStop: () => controller?.getSnapshot().keepAliveFailed ?? false,
     gameRideEnded: (outcome) => {
       controller?.noteGameRideEnded(outcome);
     },
     watchRide: (listener) => controller?.subscribe(listener) ?? NOT_WATCHING,
+    courseLine: (event) => controller?.noteCourseLine?.(event),
+    rideLapSeconds: () => {
+      // The phase and the time from one snapshot, as the moving time's are.
+      const snapshot = controller?.getSnapshot();
+      return snapshot?.phase !== undefined && rideInProgress(snapshot.phase)
+        ? snapshot.courseLapSeconds
+        : undefined;
+    },
     rideMovingSeconds: () => {
       // One snapshot read for both, so the phase and the time are one moment.
       const snapshot = controller?.getSnapshot();

@@ -3136,6 +3136,153 @@ a.oyl-button {
 }
 
 /*
+ * THE WORKOUT'S GRAPH ON THE RIDE SCREEN — #1307, the owner's ruling of
+ * 2026-10-12.
+ *
+ * The graph is a group of its own, after the trainer group in the document
+ * (`RideView.tsx`). Where it is drawn is decided here, and only while it is
+ * there (`:has`), so a ride with no workout has the grid it always had.
+ *
+ * - **One column** (a phone): in document order, under the trainer group.
+ * - **Two columns, upright** (a tablet on its end): under the trainer group
+ *   in ITS column — the Live group spans both rows beside them. There is
+ *   height to spare upright.
+ * - **Three columns** (76rem and up — 1280×800): under the readings, across
+ *   the Live group's two columns. ⚠️ Not under the trainer group: that
+ *   column's height changes with a notice (*Eased*, a heart-rate hold), and
+ *   at 1280×800 the notice put most of the graph under the fold. The Live
+ *   group's height does not change with the workout, so the whole graph is
+ *   on screen there in every state — `rideview.browser.spec.ts` §"#1307".
+ * - **Two columns, landscape** (60rem to 76rem — 1024×768): under BOTH
+ *   groups, across the whole width. The Live group is one column there, its
+ *   four readings are two rows, and what is left under the clock is about
+ *   110 px by 430: not room for three lanes a rider can read. ⚠️ So at
+ *   1024×768 the graph MAY be under the fold, and the page scrolls to it.
+ *
+ * In landscape the lanes stand SIDE BY SIDE, because what there is to spare
+ * is width.
+ *
+ * ⚠️ **In the page's own flow, at every size — never pinned.** A third pass
+ * pinned it to the bottom of the screen (`position: sticky`) so that it was
+ * always on screen at 1024×768, and with the *Eased* notice standing it lay
+ * over "Holding 0 W.". A picture must never cover a sentence that says what
+ * the trainer holds. The spec holds that it lies over no text at all there.
+ */
+.oyl-ride__group--graph .oyl-workout-graph__frame {
+  margin-top: 0;
+}
+
+@media (min-width: 48rem) and (min-height: 60rem) and (max-width: 59.99rem) {
+  /* Upright: the Live group spans both rows, beside the trainer group and
+     the graph under it.
+     ⚠️ That is the ONLY rule this layout needs. With the Live group placed,
+     auto-placement puts the trainer group at column 2 row 1 and the graph at
+     column 2 row 2, and the rows size to them. Rules saying each of those
+     were written, and deleting them changed nothing the gate could measure. */
+  .oyl-ride:has(> .oyl-ride__group--graph) > .oyl-ride__group--live {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+  }
+}
+
+@media (min-width: 60rem) {
+  .oyl-ride__group--graph {
+    grid-column: 1 / -1;
+  }
+
+  /* The lanes side by side, their drawings on one line whatever a caption
+     wraps to. */
+  .oyl-ride__group--graph .oyl-workout-graph__lanes {
+    align-items: flex-end;
+    display: flex;
+    gap: var(--oyl-space-md);
+  }
+
+  /* ⚠️ `auto`, not `0`: a lane starts as wide as its caption on ONE line and
+     the lanes share what is left. With equal thirds the last lane's caption
+     — the longest — wrapped in a hold while the other two did not.
+     ⚠️ No floor under a lane's width. 12rem was written first, and on the CI
+     runner's fonts (about 5 % wider than a Mac's) it left too little for the
+     three captions of a PAUSED hold — "Paused · Target 50 W · You 0 W" is
+     the longest there is — and the plan lane's wrapped.
+     `rideview.browser.spec.ts` §"on wider fonts" holds that. */
+  .oyl-ride__group--graph .oyl-workout-graph__lane {
+    flex: 1 1 auto;
+    margin-top: 0;
+  }
+
+  /* The heart-rate lane has the shortest caption, so it starts the narrowest
+     and its drawing was 98 px on the CI runner's fonts beside a paused hold's
+     long caption. 10rem leaves it 112 px of drawing after its gutter. ⚠️ On
+     this lane ONLY: the same floor on all three is what wrapped the captions. */
+  .oyl-ride__group--graph [data-oyl-lane='heart-rate'] {
+    min-width: 10rem;
+  }
+
+  /* ⚠️ `width: 0` with `min-width: 100%`: drawn as wide as its lane, and
+     counted as nothing when the lane's own width is worked out — or every
+     lane would start from an SVG's default 300 px, not from its caption. */
+  .oyl-ride__group--graph .oyl-workout-graph__svg {
+    height: 5rem;
+    min-width: 100%;
+    width: 0;
+  }
+
+  /* The plan lane has no scale, and side by side it shares no axis with the
+     others: its drawing takes the gutter. */
+  .oyl-ride__group--graph [data-oyl-lane='plan'] .oyl-workout-graph__well {
+    padding-left: 0;
+  }
+}
+
+@media (min-width: 76rem) {
+  .oyl-ride:has(> .oyl-ride__group--graph) {
+    grid-template-areas:
+      'live live trainer'
+      'graph graph trainer'
+      'sensors sensors trainer'
+      'other other other';
+    grid-template-rows: auto auto 1fr auto;
+  }
+
+  .oyl-ride__group--graph {
+    grid-area: graph;
+  }
+
+  /*
+   * ⚠️ The owner's tablet is 1280×800 with the system bars over the page:
+   * the fold is at 768, not 800 (`rideview.browser.spec.ts`'s header, #439).
+   * Under the readings there are 142 px to it. With 80 px drawings and the
+   * sentence UNDER the frame, the eased state ended 8 px under that fold and
+   * the raised one 28 px, and what went under the system bar was the
+   * sentence. So here, and only here where there is width for it:
+   *
+   * - the drawings are 4rem, not 5;
+   * - the sentence stands BESIDE the frame, in a column of its own, so that
+   *   it adds nothing to the group's height however many lines it takes.
+   */
+  .oyl-ride__group--graph .oyl-workout-graph {
+    align-items: flex-start;
+    display: flex;
+    gap: var(--oyl-space-md);
+  }
+
+  .oyl-ride__group--graph .oyl-workout-graph__frame {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .oyl-ride__group--graph .oyl-workout-graph__key {
+    flex: 0 0 13rem;
+    margin: 0;
+  }
+
+  .oyl-ride__group--graph .oyl-workout-graph__svg {
+    height: 4rem;
+  }
+}
+
+/*
  * #647's "Keep the screen on", beside the Live group's heading — #693's
  * review.
  *
@@ -3251,6 +3398,68 @@ a.oyl-button {
 .oyl-ride__group--trainer form.oyl-trainer__form > p {
   flex-basis: 100%;
   margin: 0;
+}
+
+/*
+ * #1244: the re-plan switch under the workout chooser's list, with #1245's
+ * disclosure under it. The switch has to be on the screen where a rider
+ * chooses a workout, and the column is short: at 1280×800 inside the Android
+ * shell the fold is at 768, and with a list's 1rem either side the switch
+ * ended 47.3 px above it on a Mac, under §4f's 50 px floor. So where the
+ * switch follows the list, the list gives up its two margins and the switch's
+ * row sits 8 px under the control that starts a workout (#669's spacing
+ * between two controls). `rideview.browser.spec.ts` §"#1244" publishes the
+ * margin and holds the floor, and its control puts the nine sentences first.
+ *
+ * Scoped by `:has()` to a list the switch follows: a rider with no instance
+ * has no switch, and their chooser is laid out as it always was.
+ */
+.oyl-ride__group--trainer ul:has(+ .oyl-workout-replans) {
+  margin-block: 0;
+}
+
+.oyl-workout-replans {
+  margin-block-start: var(--oyl-space-sm);
+}
+
+/* #1244: "Re-plans on", beside the chooser's heading while the switch under
+   the list is on: a paragraph AFTER the `h3`, not inside it, on the
+   heading's own line and at its end, so it takes no line of its own and the
+   first *Ride* is where it was. The row takes the heading's place in the
+   flow: it has the heading's margin and the heading inside it has none, and
+   the paragraph keeps the heading's line height so the row is no taller
+   with it than without. `rideview.browser.spec.ts` §"#1244 — many saved
+   workouts" holds that nothing moved. */
+.oyl-workout-heading {
+  align-items: baseline;
+  display: flex;
+  gap: var(--oyl-space-sm);
+  justify-content: space-between;
+  margin: 0 0 var(--oyl-space-sm);
+}
+
+.oyl-workout-heading > h3 {
+  margin: 0;
+}
+
+.oyl-workout-replans-on {
+  font-size: var(--oyl-font-size-md);
+  line-height: 1.2;
+  margin: 0;
+  white-space: nowrap;
+}
+
+/* #1244: *End workout* and, while re-plans are on, *Switch re-plans off*, on
+   one row, 8 px apart (#669's spacing between two ride-time controls), and
+   wrapping to two rows where the column is too narrow for both. */
+.oyl-workout-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oyl-space-sm);
+}
+
+.oyl-workout-replans > [data-oyl-replan-disclosure] > p:first-child {
+  margin-block-start: var(--oyl-space-xs);
 }
 
 /*
@@ -4026,6 +4235,42 @@ select.oyl-input {
   padding: var(--oyl-space-sm);
   text-align: left;
   vertical-align: top;
+}
+
+/*
+ * The lap table's first column stays where it is while the rest scrolls —
+ * #1312. A ride with every figure has eleven columns, which is wider than the
+ * ride page's column at any width this app is laid out at, so the table is
+ * read scrolled; and scrolled, the Lap column was gone, and with it which lap
+ * a figure is and which lap is the best. A screen reader always had the row's
+ * header (`th scope="row"`); this is the same for the eye.
+ *
+ * Both cells of the column already have an opaque surface of their own (the
+ * header rule above), so the figures pass under it and not through it.
+ */
+.oyl-table--laps th:first-child {
+  /*
+   * An edge of its own, so a figure cut off as it passes under the column
+   * reads as cut off: `04` against `4` with nothing between them looked like
+   * one number. A shadow and not a border, because `border-collapse` leaves a
+   * sticky cell's border behind with the row it was drawn on.
+   */
+  box-shadow: inset -1px 0 0 var(--oyl-color-border);
+  left: 0;
+  position: sticky;
+  z-index: 1;
+}
+
+/*
+ * And its marks on one line where there is room for that: `3 · Best lap`
+ * broken over three lines made the best lap's row three times the height of
+ * the others. Below 40rem the column stays as narrow as its longest word,
+ * because there a third of the screen is too much to keep still.
+ */
+@media (min-width: 40rem) {
+  .oyl-table--laps tbody th {
+    white-space: nowrap;
+  }
 }
 
 /* Sort controls, and the ride detail view's series toggles. */
@@ -5163,6 +5408,214 @@ select.oyl-input {
 }
 
 /*
+ * THE RUNNING WORKOUT'S GRAPH (#1307), on the Ride screen.
+ *
+ * Three lanes, one above another (`workout/workout-graph.ts`): the plan, heart
+ * rate while a hold runs, and the last five minutes. Each lane is a caption —
+ * what it is, and its numbers now — over its own drawing. The frame is
+ * `surface`, which the graph paints for itself, so every mark is a pair
+ * `tokens.ts` §CONTRAST_REQUIREMENTS already holds against `surface` or, over
+ * a shaded step, against `surfaceRaised`; the captions and the numbers on the
+ * lanes are `ink` and `inkMuted` on `surface`. The bands and a free ride are
+ * the block chart's own rules above. `workout/WorkoutGraph.tsx`
+ * §WORKOUT_GRAPH_PAINTS is the same table, held to these rules by its test.
+ *
+ * Nothing is told by colour alone (SC 1.4.1): ridden is an outline and to come
+ * is filled; the target is a shaded step and power a line; the range is a
+ * band with dashed edges and heart rate a line; what the plan asks where the
+ * trainer holds something else is a dashed outline around a shaded step.
+ *
+ * ⚠️ The numbers are HTML, not SVG text: each drawing is stretched to its box
+ * and would stretch its text. A scale's numbers stand in a gutter left of the
+ * drawing — on the frame's own `surface`, never over a mark — and the gutter
+ * is the same on every lane, so the two five-minute lanes share a time axis.
+ */
+.oyl-workout-graph__frame {
+  background: var(--oyl-color-surface);
+  border: 1px solid var(--oyl-color-border);
+  border-radius: var(--oyl-radius);
+  margin-top: var(--oyl-space-sm);
+  padding: var(--oyl-space-xs) var(--oyl-space-sm) var(--oyl-space-sm);
+}
+
+.oyl-workout-graph__lane + .oyl-workout-graph__lane {
+  margin-top: var(--oyl-space-sm);
+}
+
+.oyl-workout-graph__caption {
+  color: var(--oyl-color-ink-muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: var(--oyl-font-size-sm);
+  gap: 0 var(--oyl-space-sm);
+  justify-content: space-between;
+  margin: 0 0 var(--oyl-space-xs);
+}
+
+.oyl-workout-graph__reading {
+  color: var(--oyl-color-ink);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+/* The lane's own bottom line. Nothing in the third lane is drawn ON it: its
+   scale ends are inset (`workout-graph.ts` §TRACE_LANE_INSET), so a 0 W
+   target is a step above this line and not a second line on top of it.
+   The left padding is the gutter the scale's numbers stand in. */
+.oyl-workout-graph__well {
+  border-bottom: 1px solid var(--oyl-color-border);
+  padding-left: 3rem;
+  position: relative;
+}
+
+.oyl-workout-graph__svg {
+  display: block;
+  width: 100%;
+}
+
+.oyl-workout-graph__svg--plan {
+  height: 3.5rem;
+}
+
+.oyl-workout-graph__svg--heart-rate {
+  height: 4rem;
+}
+
+.oyl-workout-graph__svg--trace {
+  height: 5.5rem;
+}
+
+/* A number in a lane's gutter: the ends of the third lane's scale, and the
+   range's two edges in the heart-rate lane. */
+.oyl-workout-graph__scale {
+  color: var(--oyl-color-ink-muted);
+  font-size: var(--oyl-font-size-sm);
+  font-variant-numeric: tabular-nums;
+  left: 0;
+  line-height: 1;
+  position: absolute;
+}
+
+/* 10 % in from each edge: where the scale's ends are drawn (TRACE_LANE_INSET
+   of the lane's 100 units). */
+.oyl-workout-graph__scale--top {
+  top: 10%;
+  transform: translateY(-50%);
+}
+
+.oyl-workout-graph__scale--bottom {
+  bottom: 10%;
+  transform: translateY(50%);
+}
+
+/* `top` is set inline, from where that edge of the range is drawn. */
+.oyl-workout-graph__scale--edge {
+  transform: translateY(-50%);
+}
+
+/* `balance`: where the sentence takes two lines they are two of a length, not
+   one line and a last "W." on its own. */
+.oyl-workout-graph__key {
+  font-size: var(--oyl-font-size-sm);
+  margin: var(--oyl-space-xs) 0 0;
+  text-wrap: balance;
+}
+
+.oyl-workout-graph__done {
+  fill: none;
+  stroke: var(--oyl-color-ink-muted);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+/* Dotted, where what the plan asks NOW is dashed: two outlines a rider must
+   not take for each other. */
+.oyl-workout-graph__replaced {
+  fill: none;
+  stroke: var(--oyl-color-ink-muted);
+  stroke-dasharray: 1 3;
+  stroke-linecap: round;
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+/* The rest of the block being ridden, at the height the plan asks, while the
+   trainer holds something else — and what it holds, shaded like the target
+   steps in the third lane because it is the same thing. */
+.oyl-workout-graph__asked {
+  fill: none;
+  stroke: var(--oyl-color-ink-muted);
+  stroke-dasharray: 5 3;
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.oyl-workout-graph__held {
+  fill: var(--oyl-color-surface-raised);
+}
+
+.oyl-workout-graph__held-edge {
+  fill: none;
+  stroke: var(--oyl-color-ink);
+  stroke-linecap: round;
+  stroke-width: 2.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.oyl-workout-graph__now {
+  fill: none;
+  stroke: var(--oyl-color-ink);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.oyl-workout-graph__now-cap {
+  fill: var(--oyl-color-ink);
+}
+
+.oyl-workout-graph__range {
+  fill: var(--oyl-color-surface-raised);
+}
+
+.oyl-workout-graph__range-edge {
+  fill: none;
+  stroke: var(--oyl-color-ink-muted);
+  stroke-dasharray: 4 3;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.oyl-workout-graph__heart-rate {
+  fill: none;
+  stroke: var(--oyl-color-ink);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.oyl-workout-graph__target {
+  fill: var(--oyl-color-surface-raised);
+}
+
+.oyl-workout-graph__target-edge {
+  fill: none;
+  stroke: var(--oyl-color-ink);
+  stroke-linecap: round;
+  stroke-width: 2.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.oyl-workout-graph__power {
+  fill: none;
+  stroke: var(--oyl-color-accent);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+/*
  * The ride HUD (#94).
  *
  * Sized for a phone clamped to a handlebar and read at about 60 cm, by a rider
@@ -5480,6 +5933,107 @@ select.oyl-input {
   margin: 0;
   font-size: var(--oyl-font-size-sm);
   color: var(--oyl-color-hud-ink-muted);
+}
+
+/*
+ * THE RUNNING WORKOUT'S STRIP ON THE HUD (#1307).
+ *
+ * Where the route plan is on an ordinary ride, and its size: the element
+ * carries `.oyl-hud__plan-svg` too, whose height (and the short-landscape
+ * 4.5 rem below) is the only height here, so the route panel is the height it
+ * was (#1169) — `browser/ride.browser.spec.ts` §"#1307" measures the two
+ * against each other. ⚠️ So this rule comes AFTER that one: it restates
+ * `display`.
+ *
+ * ONE lane, a thin bar of the workout, and one line of text
+ * (`workout/WorkoutGraph.tsx` §WORKOUT_STRIP_PAINTS says why, and holds these
+ * rules to its table). ⚠️ No well: it draws on the HUD panel's own
+ * `hudSurface` with the HUD's own tokens, each a pair `tokens.ts` holds
+ * against that surface.
+ */
+.oyl-workout-strip {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oyl-space-xs);
+}
+
+.oyl-workout-strip__lane {
+  display: block;
+  flex: 1 1 0;
+  min-height: 0;
+  width: 100%;
+}
+
+/* `visible`: the now mark stands out above and below the bar. */
+.oyl-workout-strip__progress {
+  display: block;
+  flex: none;
+  height: 0.5rem;
+  overflow: visible;
+  width: 100%;
+}
+
+.oyl-workout-strip__text {
+  color: var(--oyl-color-hud-ink);
+  flex: none;
+  font-size: var(--oyl-font-size-sm);
+  font-variant-numeric: tabular-nums;
+  line-height: 1rem;
+  margin: 0;
+  white-space: nowrap;
+}
+
+/* What is asked is dashed; what the rider is doing is solid. */
+.oyl-workout-strip__target {
+  fill: none;
+  stroke: var(--oyl-color-hud-ink-muted);
+  stroke-dasharray: 5 3;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.oyl-workout-strip__power {
+  fill: none;
+  stroke: var(--oyl-color-hud-ink);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.oyl-workout-strip__range {
+  fill: none;
+  stroke: var(--oyl-color-hud-ink-muted);
+  stroke-dasharray: 5 3;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.oyl-workout-strip__heart-rate {
+  fill: none;
+  stroke: var(--oyl-color-hud-ink);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.oyl-workout-strip__track {
+  fill: none;
+  stroke: var(--oyl-color-hud-border);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.oyl-workout-strip__done {
+  fill: var(--oyl-color-hud-ink-muted);
+}
+
+.oyl-workout-strip__now {
+  fill: none;
+  stroke: var(--oyl-color-hud-ink);
+  stroke-width: 3;
+  vector-effect: non-scaling-stroke;
 }
 
 /*

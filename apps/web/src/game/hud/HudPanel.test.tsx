@@ -41,15 +41,19 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { HudPanel } from './HudPanel';
 import { atStartLine } from '../simulation';
 import { mount, queryAll, type Mounted } from '../../testing/mount';
+import { workoutGraphText, type WorkoutGraphInput } from '../../workout/workout-graph';
 import {
   altitudeMetres,
   degreesLatitude,
   degreesLongitude,
+  expandWorkout,
   geographicPosition,
   metres,
   metresPerSecond,
   pacerGap,
   routeProfile,
+  seconds,
+  thresholdShare,
   type RoutePoint,
 } from '@onyourleft/domain';
 
@@ -304,5 +308,124 @@ describe('the HUD is four panels (#423)', () => {
 
     expect(mounted.container.querySelector('.oyl-hud__notices')).toBeNull();
     expect(mounted.container.querySelector('.oyl-hud')).not.toBeNull();
+  });
+
+  describe('the lap that has just ended — #1312', () => {
+    const lap = <p id="lap">Lap 2: 9:52 · 201 W.</p>;
+    const standing = (expanded: boolean) => ({
+      content: <p id="road">The road is not reaching your trainer</p>,
+      expanded,
+      onToggle: () => undefined,
+    });
+
+    it('takes the notice cell when nothing else has it', async () => {
+      mounted = await mount(<HudPanel {...base} lapNotice={lap} />);
+
+      const slot = mounted.container.querySelector('.oyl-hud > .oyl-hud__notices');
+      expect(slot?.querySelector('#lap')?.textContent).toBe('Lap 2: 9:52 · 201 W.');
+      expect(slot?.classList.contains('oyl-hud__notices--collapsed')).toBe(false);
+    });
+
+    it('gives way to a fault or a safety notice: the cell holds one notice well and two badly', async () => {
+      mounted = await mount(
+        <HudPanel
+          {...base}
+          notices={[
+            <p key="fault" id="said">
+              Trainer lost
+            </p>,
+          ]}
+          lapNotice={lap}
+        />,
+      );
+
+      expect(mounted.container.querySelector('#said')).not.toBeNull();
+      expect(mounted.container.querySelector('#lap')).toBeNull();
+    });
+
+    it('gives way to a standing notice that is open, and not to one put away', async () => {
+      mounted = await mount(<HudPanel {...base} standingNotice={standing(true)} lapNotice={lap} />);
+      expect(mounted.container.querySelector('#lap')).toBeNull();
+      mounted.unmount();
+
+      mounted = await mount(
+        <HudPanel {...base} standingNotice={standing(false)} lapNotice={lap} />,
+      );
+      expect(mounted.container.querySelector('#lap')).not.toBeNull();
+      // The cell is open for the lap, and the road notice is still clipped in it.
+      const slot = mounted.container.querySelector('.oyl-hud__notices');
+      expect(slot?.classList.contains('oyl-hud__notices--collapsed')).toBe(false);
+      expect(mounted.container.querySelector('#road')?.parentElement?.className).toBe(
+        'oyl-visually-hidden',
+      );
+    });
+
+    it('renders no slot when there is no lap to show', async () => {
+      mounted = await mount(<HudPanel {...base} lapNotice={undefined} />);
+
+      expect(mounted.container.querySelector('.oyl-hud__notices')).toBeNull();
+    });
+  });
+});
+
+/**
+ * #1307: the running workout's graph on the HUD. ⚠️ jsdom does no layout:
+ * that the strip covers no more of the rider than the route plan did is
+ * measured in `browser/ride.browser.spec.ts`. What this pins is which of the
+ * two is drawn, where, and from what.
+ */
+describe('the running workout’s graph on the HUD — #1307', () => {
+  const profile = route();
+  const base = {
+    profile,
+    state: atStartLine(profile),
+    cadence: { value: 88, live: true },
+    heartRate: { value: 150, live: true },
+    onPause: () => undefined,
+    onEnd: () => undefined,
+    paused: false,
+    announcement: '',
+  };
+  const workout: WorkoutGraphInput = {
+    elapsedSeconds: 150,
+    timeline: expandWorkout({
+      name: 'test',
+      blocks: [{ kind: 'steady', seconds: seconds(600), target: thresholdShare(0.6) }],
+    }),
+    holdingWatts: 150,
+    thresholdWatts: 250,
+    trace: [{ at: 150, target: 150, power: 152, heartRate: undefined, range: undefined }],
+  };
+
+  it('draws the route plan, and no graph, on a ride with no workout', async () => {
+    mounted = await mount(<HudPanel {...base} />);
+    expect(
+      queryAll(mounted.container, '.oyl-hud__route [data-testid="oyl-hud-plan-here"]'),
+    ).toHaveLength(1);
+    expect(queryAll(mounted.container, '[data-oyl-workout-graph]')).toHaveLength(0);
+  });
+
+  it('draws the workout in the route plan’s place, at its size, inside the route panel', async () => {
+    mounted = await mount(<HudPanel {...base} workout={workout} />);
+    const graphs = queryAll(mounted.container, '.oyl-hud__route > [data-oyl-workout-graph="hud"]');
+    expect(graphs).toHaveLength(1);
+    const strip = graphs[0];
+    // The route plan's own sizing rule, so the panel is the height it was.
+    expect(strip?.classList.contains('oyl-hud__plan-svg')).toBe(true);
+    expect(strip?.getAttribute('role')).toBe('img');
+    expect(strip?.getAttribute('aria-label')).toBe(workoutGraphText(workout));
+    expect(strip?.querySelector('.oyl-workout-strip__now')?.getAttribute('data-fraction')).toBe(
+      '0.2500',
+    );
+    // One lane — power against the target, outside a hold — and one line of text.
+    expect(strip?.getAttribute('data-oyl-lane')).toBe('power');
+    expect(strip?.querySelector('p')?.textContent).toBe('Target 150 W · 7:30 left in block');
+    // In its place, not beside it: one thing that size in the panel.
+    expect(queryAll(mounted.container, '[data-testid="oyl-hud-plan-here"]')).toHaveLength(0);
+    expect(queryAll(mounted.container, '.oyl-hud__plan-svg')).toHaveLength(1);
+    // The strip has no key: the HUD has no room for a paragraph.
+    expect(queryAll(mounted.container, '.oyl-workout-graph__key')).toHaveLength(0);
+    // The elevation strip above it stays.
+    expect(queryAll(mounted.container, '.oyl-hud__route .oyl-hud__profile-svg')).toHaveLength(1);
   });
 });

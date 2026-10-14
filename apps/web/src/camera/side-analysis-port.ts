@@ -92,13 +92,38 @@ export interface SidePose {
  * - `unreadable` — the picture could not be decoded, or the model failed on
  *   it. The next one is tried.
  * - `unavailable` — the model could not be loaded at all. Nothing more is
- *   tried for the rest of the pairing, and the screen says so.
+ *   tried for the rest of the pairing, and the screen says so — and, for the
+ *   rider's instance (#1106), says WHY ({@link SideUnavailableReason}).
  */
 export type SidePoseOutcome =
   | { readonly kind: 'pose'; readonly pose: SidePose }
   | { readonly kind: 'no-rider'; readonly cause: NoRiderCause }
   | { readonly kind: 'unreadable' }
-  | { readonly kind: 'unavailable' };
+  | { readonly kind: 'unavailable'; readonly why?: SideUnavailableReason };
+
+/**
+ * Why the rider's instance is not looking at pictures — #1106. The owner's
+ * ruling: *"a model that does not accept pictures is refused cleanly, with a
+ * message that says why"*, and so is every other stop.
+ *
+ * - `instance-without-pictures` — the instance has no such route: it runs a
+ *   version from before it.
+ * - `pictures-off` — the instance's operator named no model for pictures.
+ * - `no-hosted-service` — the instance holds no key of the rider's for the
+ *   service their consent names.
+ * - `model-without-pictures` — the model said it takes no picture.
+ * - `not-sealed` — there is no sealed session to send through, so none is sent.
+ * - `switched-off` — the rider switched it off on the Camera page.
+ * - `not-answering` — several pictures in a row got no usable answer.
+ */
+export type SideUnavailableReason =
+  | 'instance-without-pictures'
+  | 'pictures-off'
+  | 'no-hosted-service'
+  | 'model-without-pictures'
+  | 'not-sealed'
+  | 'switched-off'
+  | 'not-answering';
 
 /**
  * Why a picture came to `no-rider` — [#761](https://github.com/openzigs/onyourleft/issues/761).
@@ -150,12 +175,15 @@ export type SideFramingState = 'no-reference' | 'checking' | FramingVerdict | 'n
 /** Everything the tablet's screen may show about the analysis. Counts and words, never a picture. */
 export interface SideAnalysisState {
   /**
-   * Where the pictures are looked at — this tablet's own model, or the rider's
+   * Where the pictures are looked at — this tablet's own model, the rider's
    * computer when they switched the side camera over to it (#553, ADR 0033
-   * D-11). The screen says which, because the two are different promises about
-   * where a picture goes.
+   * D-11), or their instance when they switched it over to that (#1106). The
+   * screen says which, because each is a different promise about where a
+   * picture goes.
    */
-  readonly place: 'tablet' | 'computer';
+  readonly place: 'tablet' | 'computer' | 'instance';
+  /** Why {@link model} is `unavailable`, when the model said — the instance does (#1106). */
+  readonly unavailableBecause?: SideUnavailableReason | undefined;
   /** Whether the model is loaded. */
   readonly model: 'waiting' | 'loading' | 'ready' | 'unavailable';
   /** Pictures that came to a pose. */

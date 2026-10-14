@@ -57,11 +57,13 @@ import {
   createRideController,
   MANUAL_ERG_DURING_WORKOUT,
   RIDE_NOTIFICATION_REFUSED,
+  type RideWorkoutSnapshot,
 } from '../ride/controller';
 import type { RecordingCheckpointStore } from '../recording/recorder';
 import { accessibleName } from '../a11y/audit';
 import { formatDuration } from '../format';
 import { UnitsProvider } from '../units/context';
+import { workoutGraphText } from '../workout/workout-graph';
 import { RideView } from './RideView';
 
 let mounted: Mounted | undefined;
@@ -1152,6 +1154,8 @@ describe('#1240 — the Ride screen builds the heart-rate hold context from the 
           thresholdHeartRate: 170,
           assumed: { power: false, heartRate: false },
         },
+        // #1244: no switch was offered, so re-plans are off.
+        choices: {},
       },
     ]);
   });
@@ -1159,7 +1163,232 @@ describe('#1240 — the Ride screen builds the heart-rate hold context from the 
   it('own power without a heart rate: no context, so every hold block rides steady and says why', async () => {
     const stub = await startFor({ thresholdPower: 250 });
     expect(stub.calls.startWorkoutWith).toStrictEqual([
-      { thresholdPower: 250, heartRateHold: undefined },
+      { thresholdPower: 250, heartRateHold: undefined, choices: {} },
     ]);
+  });
+});
+
+describe('#1244 — re-plans on the Ride screen: the switch, and Keep the plan', () => {
+  const OWNER = toAthleteId('athlete-replan');
+  const record = {
+    id: workoutId('replan-w'),
+    createdBy: OWNER,
+    name: 'Tempo',
+    workout: {
+      name: 'Tempo',
+      blocks: [{ kind: 'steady' as const, seconds: seconds(600), target: thresholdShare(0.6) }],
+    },
+    createdAt: unixSeconds(1),
+    updatedAt: unixSeconds(1),
+  };
+  const theSwitch = (): HTMLInputElement | null =>
+    document.querySelector<HTMLInputElement>('input[role="switch"]');
+
+  async function showFor(
+    stub: ReturnType<typeof stubRideController>,
+    thresholds: { thresholdHeartRate?: number } = { thresholdHeartRate: 170 },
+  ): Promise<void> {
+    mounted = await mount(
+      <RideView
+        controller={stub.controller}
+        workouts={workoutStub(OWNER, [record])}
+        analysis={stubAnalysis(OWNER, [], {
+          id: OWNER,
+          displayName: 'A',
+          createdAt: unixSeconds(1),
+          thresholdPower: watts(250),
+          ...(thresholds.thresholdHeartRate === undefined
+            ? {}
+            : { thresholdHeartRate: beatsPerMinute(thresholds.thresholdHeartRate) }),
+        })}
+      />,
+    );
+    await settle();
+  }
+
+  it('offers no switch when the controller says no re-plan could happen', async () => {
+    await showFor(stubRideController(ridingSnapshot()));
+    expect(theSwitch()).toBeNull();
+  });
+
+  it('offers no switch without the rider’s own threshold heart rate — H1', async () => {
+    await showFor(stubRideController(ridingSnapshot(), true), {});
+    expect(theSwitch()).toBeNull();
+  });
+
+  it('starts a workout with re-plans off unless the rider turned the switch on', async () => {
+    const stub = stubRideController(ridingSnapshot(), true);
+    await showFor(stub);
+    expect(theSwitch()?.checked).toBe(false);
+    await activateWithKeyboard(buttonNamed('Ride Tempo'));
+    await settle();
+    expect(stub.calls.startWorkoutWith.map((each) => each.choices)).toStrictEqual([{}]);
+
+    await activateWithKeyboard(theSwitch() as HTMLElement);
+    await activateWithKeyboard(buttonNamed('Ride Tempo'));
+    await settle();
+    expect(stub.calls.startWorkoutWith.map((each) => each.choices)).toStrictEqual([
+      {},
+      { replans: true },
+    ]);
+  });
+
+  it('hands Keep the plan to the controller', async () => {
+    const stub = stubRideController({
+      ...ridingSnapshot(),
+      workout: {
+        name: 'Tempo',
+        status: 'running',
+        elapsedSeconds: 60,
+        totalSeconds: 600,
+        holdingWatts: 150,
+        nowRiding: '10 min at 60%',
+        fault: undefined,
+        rescue: undefined,
+        timeline: expandWorkout(record.workout),
+        replan: {
+          waiting: { revision: 1, sentence: 'Main set ended early, so the cool-down is next.' },
+          kept: false,
+          notice: undefined,
+        },
+      },
+    });
+    await showFor(stub);
+    await activateWithKeyboard(buttonNamed('Keep the plan'));
+    expect(stub.calls.keepThePlan).toBe(1);
+  });
+
+  it('hands Switch re-plans off to the controller, and offers it only while re-plans are on', async () => {
+    const running = (replan: NonNullable<RideWorkoutSnapshot['replan']> | undefined) => ({
+      ...ridingSnapshot(),
+      workout: {
+        name: 'Tempo',
+        status: 'running' as const,
+        elapsedSeconds: 60,
+        totalSeconds: 600,
+        holdingWatts: 150,
+        nowRiding: '10 min at 60%',
+        fault: undefined,
+        rescue: undefined,
+        timeline: expandWorkout(record.workout),
+        ...(replan === undefined ? {} : { replan }),
+      },
+    });
+    const on = stubRideController(
+      running({ waiting: undefined, kept: false, notice: undefined, off: false }),
+    );
+    await showFor(on);
+    await activateWithKeyboard(buttonNamed('Switch re-plans off'));
+    expect(on.calls.switchReplansOff).toBe(1);
+    expect(on.calls.endWorkout).toBe(0);
+    mounted?.unmount();
+
+    // A workout started with the switch off has no re-plans to switch off.
+    await showFor(stubRideController(running(undefined)));
+    expect([...document.querySelectorAll('button')].map((each) => each.textContent)).not.toContain(
+      'Switch re-plans off',
+    );
+  });
+});
+
+/**
+ * #1307: the running workout's graph is the Ride screen's own group, after
+ * the trainer group — `theme.css` §"THE WORKOUT'S GRAPH ON THE RIDE SCREEN"
+ * decides where it is drawn, and `browser/rideview.browser.spec.ts` measures
+ * that. ⚠️ jsdom does no layout: what is held here is the document.
+ */
+describe('#1307 — the running workout’s graph, in a group of its own', () => {
+  const workout = (
+    overrides: Partial<NonNullable<ReturnType<typeof ridingSnapshot>['workout']>> = {},
+  ): NonNullable<ReturnType<typeof ridingSnapshot>['workout']> => ({
+    name: 'Sweet spot',
+    status: 'running',
+    elapsedSeconds: 150,
+    totalSeconds: 600,
+    holdingWatts: 150,
+    nowRiding: '10 min at 60%',
+    fault: undefined,
+    rescue: undefined,
+    thresholdWatts: 250,
+    trace: [{ at: 150, target: 150, power: 152, heartRate: undefined, range: undefined }],
+    timeline: expandWorkout({
+      name: 'Sweet spot',
+      blocks: [{ kind: 'steady', seconds: seconds(600), target: thresholdShare(0.6) }],
+    }),
+    ...overrides,
+  });
+
+  const riding = (running: ReturnType<typeof workout> | undefined) => {
+    const stub = stubRideController(ridingSnapshot());
+    stub.set({ workout: running });
+    return stub;
+  };
+
+  const FOLLOWING = Node.DOCUMENT_POSITION_FOLLOWING;
+  const after = (earlier: Element | null | undefined, later: Element | null | undefined): boolean =>
+    earlier !== null &&
+    earlier !== undefined &&
+    later !== null &&
+    later !== undefined &&
+    (earlier.compareDocumentPosition(later) & FOLLOWING) === FOLLOWING;
+
+  it('draws the graph from the snapshot the sentences are written from', async () => {
+    const running = workout();
+    await show(riding(running));
+    const graph = document.querySelector(
+      '.oyl-ride__group--graph [data-oyl-workout-graph="panel"] [role="img"]',
+    );
+    expect(graph?.getAttribute('aria-label')).toBe(workoutGraphText(running));
+    expect(graph?.getAttribute('aria-label')).toContain(
+      'Target the trainer last confirmed: 150 W.',
+    );
+    expect(graph?.querySelector('.oyl-workout-graph__now')?.getAttribute('data-fraction')).toBe(
+      '0.2500',
+    );
+    expect(graph?.querySelector('.oyl-workout-graph__power')).not.toBeNull();
+    expect(queryAll(document, '[data-oyl-workout-graph]')).toHaveLength(1);
+  });
+
+  it('puts it after the trainer group and before Sensors: every control and sentence first', async () => {
+    await show(riding(workout()));
+    const group = document.querySelector('.oyl-ride__group--graph');
+    const trainer = document.querySelector('.oyl-ride__group--trainer');
+    // A direct child of the grid: `theme.css` places it by that.
+    expect(group?.parentElement?.classList.contains('oyl-ride')).toBe(true);
+    expect(trainer?.contains(group ?? null)).toBe(false);
+    expect(after(document.querySelector('.oyl-ride__group--live'), group)).toBe(true);
+    expect(after(trainer, group)).toBe(true);
+    expect(after(group, document.querySelector('.oyl-ride__group--sensors'))).toBe(true);
+    // The workout's own control and sentences are before it, where they were.
+    expect(after(buttonNamed('End workout'), group)).toBe(true);
+    const sentences = queryAll(document, '.oyl-ride__group--trainer p').map(
+      (each) => each.textContent ?? '',
+    );
+    expect(sentences).toContain('Now: 10 min at 60%');
+    expect(sentences).toContain('Holding 150 W.');
+    // And it adds nothing to the tab order.
+    expect(queryAll(group ?? document, 'button, a, input, select, [tabindex]')).toEqual([]);
+  });
+
+  it('draws what the trainer holds when that is not what the plan asks — #1297', async () => {
+    // 60 % of 250 W is 150 W; the trainer confirmed 180 W.
+    await show(riding(workout({ holdingWatts: 180 })));
+    expect(
+      document.querySelector('.oyl-ride__group--graph [role="img"]')?.getAttribute('aria-label'),
+    ).toContain('Target the trainer last confirmed: 180 W, where the plan asks for 150 W.');
+  });
+
+  it('draws no graph, and no empty group, with no workout or a finished one', async () => {
+    await show(riding(undefined));
+    expect(document.querySelector('.oyl-ride__group--graph')).toBeNull();
+    mounted?.unmount();
+    await show(riding(workout({ status: 'finished' })));
+    expect(document.querySelector('.oyl-ride__group--graph')).toBeNull();
+    expect(document.querySelector('[data-oyl-workout-graph]')).toBeNull();
+  });
+
+  it('keeps drawing it while the workout is paused', async () => {
+    await show(riding(workout({ status: 'paused' })));
+    expect(document.querySelector('.oyl-ride__group--graph [role="img"]')).not.toBeNull();
   });
 });

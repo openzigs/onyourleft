@@ -47,6 +47,7 @@
  * accept. Failing at start-up is the only place that is cheap.
  */
 
+import { isReasoningTokens, MAXIMUM_REASONING_TOKENS } from './analysis/model-turn.ts';
 import { isAddress, normalisedAddress } from './client-address.ts';
 import { configuredHostProblem, isAddressLiteral } from './history/address.ts';
 import {
@@ -106,6 +107,8 @@ export interface RawConfig {
   readonly embeddingQueryPrefix?: string | undefined;
   readonly analysisModelUrl?: string | undefined;
   readonly analysisModel?: string | undefined;
+  readonly analysisModelReasoningTokens?: string | undefined;
+  readonly pictureModel?: string | undefined;
   readonly name?: string | undefined;
 }
 
@@ -141,6 +144,12 @@ export type AnalysisModelSettings =
       readonly baseUrl: URL;
       /** The model the operator pulled. There is no default (ADR 0031 D-4). */
       readonly model: string;
+      /**
+       * What a turn may spend reasoning, when the operator says this model
+       * reasons (`OYL_INSTANCE_ANALYSIS_MODEL_REASONING_TOKENS`, #1268).
+       * Absent: the agent finds out from the model's replies.
+       */
+      readonly reasoningTokens?: number;
     }
   | {
       readonly kind: 'off';
@@ -150,7 +159,37 @@ export type AnalysisModelSettings =
 
 /** Why the analysis model is off. */
 export type AnalysisModelOffCode =
-  'not-set' | 'not-a-url' | 'not-base-url' | 'not-local' | 'tls-by-name' | 'no-model' | 'bad-model';
+  | 'not-set'
+  | 'not-a-url'
+  | 'not-base-url'
+  | 'not-local'
+  | 'tls-by-name'
+  | 'no-model'
+  | 'bad-model'
+  | 'bad-reasoning';
+
+/**
+ * The model the side camera's pictures are shown to (#1106): the local server
+ * the analysis model is on, and a model the operator named FOR PICTURES — or
+ * off, and why. Off is never a refusal to start, and it is the default: an
+ * instance takes no picture until its operator names a model that reads them.
+ */
+export type PictureModelSettings =
+  | {
+      readonly kind: 'on';
+      /** `OYL_INSTANCE_ANALYSIS_MODEL_URL`'s base URL: one local server, both models. */
+      readonly baseUrl: URL;
+      /** The model the operator pulled for pictures. There is no default (ADR 0031 D-4). */
+      readonly model: string;
+    }
+  | {
+      readonly kind: 'off';
+      readonly code: PictureModelOffCode;
+      readonly reason: string;
+    };
+
+/** Why no local model takes pictures. `no-server` carries the server's own refusal. */
+export type PictureModelOffCode = 'not-set' | 'no-server' | 'bad-model';
 
 /** A configuration the instance can start with. */
 export interface Config {
@@ -176,6 +215,8 @@ export interface Config {
   readonly history: HistorySettings;
   /** The analysis agent's model, or why there is none (#1096). */
   readonly analysis: AnalysisModelSettings;
+  /** The local model for the side camera's pictures, or why there is none (#1106). */
+  readonly pictures: PictureModelSettings;
   /**
    * What the operator calls this instance, which a rider's app shows once it
    * is connected (#777) — or `null`, and the app then names the instance by
@@ -338,6 +379,7 @@ export function readConfig(raw: RawConfig): ConfigResult {
   }
   const history = readHistorySettings(raw);
   const analysis = readAnalysisModelSettings(raw);
+  const pictures = readPictureModelSettings(raw);
   return {
     ok: true,
     config: {
@@ -353,6 +395,7 @@ export function readConfig(raw: RawConfig): ConfigResult {
       trustedProxies,
       history,
       analysis,
+      pictures,
       name: instanceName,
     },
   };
@@ -484,6 +527,75 @@ export function readAnalysisModelSettings(raw: RawConfig): AnalysisModelSettings
     code,
     reason,
   });
+  const server = localModelServer(raw);
+  if (!('baseUrl' in server)) return server;
+  const { baseUrl } = server;
+  if (!present(raw.analysisModel)) {
+    return off(
+      'no-model',
+      'OYL_INSTANCE_ANALYSIS_MODEL is not set: name the model you pulled. There is no default.',
+    );
+  }
+  const model = raw.analysisModel.trim();
+  if (!MODEL_NAME.test(model)) {
+    return off(
+      'bad-model',
+      'OYL_INSTANCE_ANALYSIS_MODEL must be a model name, such as name or name:tag.',
+    );
+  }
+  if (!present(raw.analysisModelReasoningTokens)) return { kind: 'on', baseUrl, model };
+  const reasoningTokens = Number(raw.analysisModelReasoningTokens.trim());
+  if (!isReasoningTokens(reasoningTokens)) {
+    return off(
+      'bad-reasoning',
+      `OYL_INSTANCE_ANALYSIS_MODEL_REASONING_TOKENS must be a whole number from 1 to ${MAXIMUM_REASONING_TOKENS}, or not set.`,
+    );
+  }
+  return { kind: 'on', baseUrl, model, reasoningTokens };
+}
+
+/**
+ * The side camera's picture model (#1106), read from
+ * `OYL_INSTANCE_PICTURE_MODEL` and the server at
+ * `OYL_INSTANCE_ANALYSIS_MODEL_URL`, by {@link readAnalysisModelSettings}'s
+ * rules for that address. ⚠️ **Not set is off**: the analysis model is not
+ * used for pictures, because a model that writes may not read a picture and
+ * some servers answer about a picture they dropped. The operator names the
+ * one that does.
+ */
+export function readPictureModelSettings(raw: RawConfig): PictureModelSettings {
+  if (!present(raw.pictureModel)) {
+    return {
+      kind: 'off',
+      code: 'not-set',
+      reason: 'OYL_INSTANCE_PICTURE_MODEL is not set, so no local model takes pictures.',
+    };
+  }
+  const server = localModelServer(raw);
+  if (!('baseUrl' in server)) {
+    return {
+      kind: 'off',
+      code: 'no-server',
+      reason: `OYL_INSTANCE_PICTURE_MODEL is set, and the server it is on is not usable. ${server.reason}`,
+    };
+  }
+  const model = raw.pictureModel.trim();
+  if (!MODEL_NAME.test(model)) {
+    return {
+      kind: 'off',
+      code: 'bad-model',
+      reason: 'OYL_INSTANCE_PICTURE_MODEL must be a model name, such as name or name:tag.',
+    };
+  }
+  return { kind: 'on', baseUrl: server.baseUrl, model };
+}
+
+/** The local model server's base URL, or why `OYL_INSTANCE_ANALYSIS_MODEL_URL` gives none. */
+function localModelServer(
+  raw: RawConfig,
+): { readonly baseUrl: URL } | Extract<AnalysisModelSettings, { readonly kind: 'off' }> {
+  const off = (code: AnalysisModelOffCode, reason: string) =>
+    ({ kind: 'off', code, reason }) as const;
   if (!present(raw.analysisModelUrl)) {
     return off(
       'not-set',
@@ -518,21 +630,7 @@ export function readAnalysisModelSettings(raw: RawConfig): AnalysisModelSettings
       'OYL_INSTANCE_ANALYSIS_MODEL_URL was refused because it is https: by a name: each request goes to the address the name was checked at, so a certificate issued to the name cannot verify. Use http: on the private network, or https: at the address itself.',
     );
   }
-  if (!present(raw.analysisModel)) {
-    return off(
-      'no-model',
-      'OYL_INSTANCE_ANALYSIS_MODEL is not set: name the model you pulled. There is no default.',
-    );
-  }
-  const model = raw.analysisModel.trim();
-  if (!MODEL_NAME.test(model)) {
-    return off(
-      'bad-model',
-      'OYL_INSTANCE_ANALYSIS_MODEL must be a model name, such as name or name:tag.',
-    );
-  }
-  const baseUrl = new URL(url.href.replace(/\/+$/, ''));
-  return { kind: 'on', baseUrl, model };
+  return { baseUrl: new URL(url.href.replace(/\/+$/, '')) };
 }
 
 /**

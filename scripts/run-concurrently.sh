@@ -4,11 +4,12 @@
 # run-concurrently.sh — run several commands at once, and fail if ANY of them
 # fails. #651.
 #
-# The `Repository rules` job is one job on purpose: `main` requires a status
-# check whose context is exactly that string, and a second job reports under a
-# different context and cannot block a merge (docs/agents/ci.md §4c). So the only way to
-# use more than one of the runner's four CPUs is to run commands concurrently
-# INSIDE a step, and this is the one place that is done.
+# Most of CI's checks are single-threaded, and one after another they leave
+# most of a runner idle. So one step of the `checks` shard (docs/agents/ci.md
+# §4c) runs them concurrently, and this is the one place that is done. ⚠️ Until
+# #1285 `Repository rules` was ONE job and this was the only way it used more
+# than one CPU; since then the long halves are shards on runners of their own,
+# and this is still how the short ones share theirs.
 #
 # ⚠️ A concurrent step is a gate removed if its failure can be swallowed, and
 # the two ordinary ways of writing one both swallow it: `a & b & wait` exits 0

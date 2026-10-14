@@ -135,6 +135,14 @@ OYL_INSTANCE_ANALYSIS_MODEL_URL=http://ollama:11434/v1
 OYL_INSTANCE_ANALYSIS_MODEL=<the model you pulled>
 ```
 
+**A model that reasons before it answers** (a `deepseek-r1` tag, for example) spends part of each
+turn thinking. By default the instance finds this out from the model's replies and gives it more
+room on the turns after (ADR 0046, Amendments, #1268). To say so up front, set
+`OYL_INSTANCE_ANALYSIS_MODEL_REASONING_TOKENS` to the tokens a turn may spend reasoning, 1 to
+16384; every turn then gets that room beside the answer's own 1 024. Anything else turns analysis
+off with `"code":"bad-reasoning"`. A rider sets the same for their own hosted key with the
+`reasoningTokens` field of `POST /v1/analysis/hosted/key`.
+
 **No model is recommended, and none is named in this repository** (ADR 0031 D-4): there is no
 default, and an address with no model name leaves analysis off and says so. Two things to check of
 the model you choose. **It must support tool calling**: the agent lets the model choose its tools,
@@ -159,10 +167,62 @@ it**: its API has no authentication.
 | `…"code":"not-local"` | the address was refused; standard error has the sentence (`instance: analysis is off: …`) |
 | `…"code":"tls-by-name"` | an `https:` address by a name was refused: each request goes to the checked address, so a certificate issued to the name cannot verify. Use `http:` on the private network, or `https:` at the address itself |
 | `…"code":"no-model"` | an address is set and no model is named: name the model you pulled |
-| `…"code":"not-a-url"`, `"not-base-url"`, `"bad-model"` | the setting is malformed; standard error says which |
+| `…"code":"not-a-url"`, `"not-base-url"`, `"bad-model"`, `"bad-reasoning"` | the setting is malformed; standard error says which |
 
 What the agent sends the model and what it may read is in
 [`docs/architecture.md`](architecture.md) §"The analysis agent on the instance".
+
+## A model for the side camera's pictures
+
+A rider signed in to your instance can switch on, in their app, sending their side camera's
+pictures here instead of having their tablet look at them (#1106;
+[ADR 0050](adr/0050-side-camera-pictures-to-the-riders-instance-sealed.md)). Your instance then shows each picture to a model and answers where the model found
+the rider's joints. **It takes no picture unless you name a model for them**:
+
+```
+OYL_INSTANCE_PICTURE_MODEL=<a model you pulled that reads images>
+```
+
+on the same server as the analysis model (`OYL_INSTANCE_ANALYSIS_MODEL_URL`, by the same address
+rule). No model is recommended and none is named in this repository (ADR 0031 D-4), and the
+analysis model is never used in its place: name one that reads images, and whose licence ADR 0031
+D-2 admits. ⚠️ **Your model server's list is not a reliable "no"**: on 2026-10-12 an Ollama listed
+one model with no `vision` capability, and that model read a picture (spike 0025 §8). To find out,
+ask it. From a checkout of this repository, in `apps/instance`, `node
+tools/side-picture-round-trip.ts --loopback --picture drawn --model-url http://localhost:11434/v1
+--picture-model <name> --pictures 1` starts a throwaway instance on your machine, shows the model a
+drawing of three shapes, and prints what it said under `answers`. **Nothing under `answers` means
+the model did not take the picture**, whichever code is under `refused`: `model_without_pictures`
+when its server's refusal is worded in a way this software recognises (one such sentence has been
+seen from a real server), and `picture_model_failed` otherwise, which is also what a model that is
+merely slow or broken gives.
+
+**What your instance does with a picture, and what you must not make it do.** A picture arrives
+sealed to your instance's key and signed by the rider's device; it is checked (a JPEG of at most
+64 KiB, carrying no location or device metadata), shown to the model, and dropped when the answer
+is sent. It is **not written anywhere**: not to the database, not to a file, not to the log, and
+`operator backup` therefore holds none. The riders who switch this on were told so in those words,
+with one more sentence: that whoever runs their instance controls that machine. ⚠️ **Do not turn on
+request or prompt logging in your model server, or in anything in front of it**: a prompt here is
+a photograph of a rider, and what your model server writes is outside what this software controls.
+
+**It is sealed, or refused.** `POST /v1/camera/side-pose` is reached only inside `POST /v1/sealed`
+— on an instance with no `OYL_INSTANCE_SECRET_KEY` too, which answers its other sealed routes in
+plaintext and answers this one `sealed_required`. So an instance without the secret takes no
+picture.
+
+**A hosted model, on a rider's own key.** A rider who stored their own key (`POST
+/v1/analysis/hosted/key`) may have your instance send their pictures on to that service instead,
+after agreeing in their app to a sentence that names it. Your instance uses that rider's own key
+and no other — never yours — and sends the service the picture and one fixed question.
+
+| You see | It means |
+|---|---|
+| `"event":"picture-model","state":"on"` at start | a local model is named for pictures. Its name is not logged |
+| `"event":"picture-model","state":"off","code":"not-set"` | none is named: a rider who asks for the local model is answered `pictures_off` |
+| `…"code":"no-server"`, `"bad-model"` | `OYL_INSTANCE_PICTURE_MODEL` is set and unusable; standard error says why (`instance: pictures are off: …`) |
+| a rider reports *"The model answered that it does not take pictures"* | the model's server refused the picture (`model_without_pictures`): name a model that reads images |
+| a rider's pictures are refused `rate_limited` | one of theirs was still with the model, or their session passed 120 sealed requests a minute; the app sends at most one a second |
 
 ## Analysis jobs
 
@@ -228,7 +288,15 @@ nothing sent, otherwise:
 rider, erased with their account and named in their export only as `"a hosted model key is held"`,
 beside `hostedConsent` (the origin and when). An instance with no secret refuses to store one. ⚠️
 **You could technically read a key a rider stores here** — the secret is yours — and the app is to
-tell the rider so (ruling 5, in #1104's wording; no app screen stores a key yet).
+tell the rider so (ruling 5, in #1104's wording). Since #1251 the app does: a rider stores, removes
+and agrees on the Instance screen, under *A hosted model service, on your own key*, and the sentence
+is beside the key box.
+
+**The test question.** A rider who has stored a key and agreed can press *Send a test question*
+(`POST /v1/analysis/hosted/test`, sealed only). Your instance sends the service two fixed sentences
+on the rider's key — no ride, nothing the rider wrote — and tells the app only whether it answered.
+It passes the same checks as a job, so it sends nothing where a job would be refused. It is an
+outbound request from your machine to an address a rider chose, as every hosted job is.
 
 **Yours is held for you, the operator, and for nobody else.** The instance also hosts group rides
 and races, so it has other riders, and holding a key changes nothing about them: they register and
@@ -433,7 +501,8 @@ ONLY sealed**, and a plaintext request to one is refused `sealed_required` befor
 read or anything is run: minting a link code, linking, recovering and asking for a recovery mail,
 giving, confirming and clearing a recovery address, the full reset, the device list and revoking a device, the account
 export and deleting the account, **every** moderator route (the queues and the log included),
-**every** sync route, and history search. Registering a new rider is sealed too: a key the
+**every** sync route, history search, and a side-camera picture (#1106, which is refused
+unsealed on an instance without the secret too). Registering a new rider is sealed too: a key the
 instance has never seen is refused `sealed_required` in plaintext, while a key it already holds
 still signs in in plaintext until phase 2. `apps/instance/src/sealed/phase-one.ts` is the list, and
 `GET /openapi.json` marks each route `x-oyl-sealed`. The rider's app offers these features only

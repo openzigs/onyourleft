@@ -108,6 +108,8 @@ import { RideView } from '../views/RideView';
 import { ROUTES_KEPT_VISIBLE } from '../views/RoutesView';
 import { SETTINGS_KEPT_VISIBLE } from '../views/SettingsView';
 import { INSTANCE_CONNECTED_KEPT_VISIBLE, INSTANCE_KEPT_VISIBLE } from '../views/InstanceView';
+import { hostedKeptVisible } from '../ride-analysis/hosted-consent';
+import { SCRIPTED_HOSTED_KEY } from '../ride-analysis/hosted-settings-testing';
 import { MODERATION_KEPT_VISIBLE } from '../views/ModerationView';
 import { SIDE_CAMERA_KEPT_VISIBLE } from '../views/SideCameraView';
 import { browserSecureWindow } from '../camera/secure-window-testing';
@@ -137,7 +139,9 @@ const NOTHING_TUCKED = 'nothing on this route is tucked by #666';
  * wiring gate watches (§4j), and a list only this test reads is not product
  * code. Fragments where a sentence carries a number.
  */
-const RIDE_KEPT_VISIBLE: readonly string[] = ['Everything stays on this device.'];
+const RIDE_KEPT_VISIBLE: readonly string[] = [
+  'Recorded on this device. Nothing is sent unless you switched that on.',
+];
 
 /** What the populated walk's Ride screen renders: a trainer under this app's control, in ERG. */
 const RIDE_POPULATED_KEPT_VISIBLE: readonly string[] = [
@@ -283,7 +287,15 @@ const KEPT: Record<RouteId, Kept> = {
   credits: { sentences: [], reason: `${NOTHING_TUCKED}: it is the page of prose` },
   // #778: what an instance receives, before sign-in and after; and, once
   // connected (the populated walk), what disconnecting does and does not do.
-  instance: { sentences: INSTANCE_KEPT_VISIBLE, populated: INSTANCE_CONNECTED_KEPT_VISIBLE },
+  // #1251: and, signed in with a key held, the hosted service's section —
+  // who could read the key, and the whole consent beside its switch.
+  instance: {
+    sentences: INSTANCE_KEPT_VISIBLE,
+    populated: [
+      ...INSTANCE_CONNECTED_KEPT_VISIBLE,
+      ...hostedKeptVisible(SCRIPTED_HOSTED_KEY.origin),
+    ],
+  },
   // #955: that every action is logged, and the log outlives an erased account
   // — on the page a moderator acts from (the populated walk; the empty one is
   // an account that moderates nothing, which acts on nothing).
@@ -337,7 +349,7 @@ const KEPT: Record<RouteId, Kept> = {
  * each is checked drawn and reachable on its route.
  */
 const NOTES: Partial<Record<RouteId, readonly string[]>> = {
-  ride: ['Everything stays on this device.'],
+  ride: ['Recorded on this device. Nothing is sent unless you switched that on.'],
   routes: [
     'A route is private until you say otherwise, and one that starts inside a privacy zone ' +
       'cannot be shared at all.',
@@ -716,7 +728,7 @@ describe('#666 — safety and privacy sentences are never in a closed disclosure
     expect(allFaults(main, DEVICES_SHELL_KEPT_VISIBLE, everyListed(KEPT.devices))).toEqual([]);
   });
 
-  it('Camera, agreed to: what is sent to the rider’s own computer stays out of any disclosure', async () => {
+  it('Camera, agreed to: what is sent to the rider’s own computer, and to their instance, stays out of any disclosure', async () => {
     const controller = new CameraController({
       secureWindow: browserSecureWindow(),
       port: scriptedCamera().port,
@@ -725,7 +737,14 @@ describe('#666 — safety and privacy sentences are never in a closed disclosure
     controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
     mounted = await mount(
       <main>
-        <CameraView controller={controller} />
+        <CameraView
+          controller={controller}
+          // #1106: signed in to an instance, so its section and what it says is sent are there.
+          sidePictures={{
+            sideInstanceOrigin: () => 'https://rides.example',
+            askHostedPictureService: () => Promise.resolve({ kind: 'none' }),
+          }}
+        />
       </main>,
     );
     await settle();

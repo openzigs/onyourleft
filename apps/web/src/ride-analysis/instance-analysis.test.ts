@@ -346,6 +346,8 @@ describe('failures are sentences', () => {
     'out-of-time',
     'out-of-tokens',
     'model-without-tools',
+    'model-cut-off',
+    'model-no-answer',
     'hosted_unavailable',
     'interrupted',
   ] as const)('says %s in its own sentence, and saves nothing', async (failure) => {
@@ -734,5 +736,83 @@ describe('a ride deleted takes its pending job with it (#1102)', () => {
     );
     await expect(refusing.deleteActivity(ATHLETE_A, id)).rejects.toThrow('refused');
     expect(controller(scripted, { pending: storage }).pendingJob(id)).toBe(true);
+  });
+});
+
+describe('the hosted source (#1251)', () => {
+  const ENDPOINT = 'https://models.example';
+
+  it('is offered only while there is a service to name, and never with no instance', () => {
+    const scripted = scriptedJobs();
+    const offered = controller(scripted, {
+      hosted: { endpoint: () => ENDPOINT, sendGuard: async () => Promise.resolve(true) },
+    });
+    expect(offered.availableSources()).toStrictEqual(['instance-local', 'instance-hosted']);
+    expect(offered.hostedEndpoint()).toBe(ENDPOINT);
+    const none = controller(scripted, {
+      hosted: { endpoint: () => undefined, sendGuard: async () => Promise.resolve(true) },
+    });
+    expect(none.availableSources()).toStrictEqual(['instance-local']);
+    expect(none.hostedEndpoint()).toBeUndefined();
+    const signedOut = controller(scripted, {
+      connected: () => false,
+      hosted: { endpoint: () => ENDPOINT, sendGuard: async () => Promise.resolve(true) },
+    });
+    expect(signedOut.availableSources()).toStrictEqual([]);
+    expect(signedOut.hostedEndpoint()).toBeUndefined();
+  });
+
+  it('gives the instance the masking list BEFORE it starts a hosted job, through that job’s session', async () => {
+    const id = await seededRide();
+    const scripted = scriptedJobs([succeeded(WRITE_UP)]);
+    const order: string[] = [];
+    const outcome = await controller(scripted, {
+      hosted: {
+        endpoint: () => ENDPOINT,
+        sendGuard: async (session) => {
+          expect(session).toBe(scripted.session);
+          order.push(`guard, after ${String(scripted.requests.length)} requests`);
+          return Promise.resolve(true);
+        },
+      },
+    }).ask(id, 'instance-hosted', () => undefined, live());
+    expect(outcome).toStrictEqual({ kind: 'written' });
+    expect(order).toStrictEqual(['guard, after 0 requests']);
+    expect(startedWith(scripted)?.source).toBe('instance-hosted');
+    expect((await saved(id))?.source).toBe('instance-hosted');
+  });
+
+  it.each([
+    ['the list could not be given to the instance', async () => Promise.resolve(false)],
+    ['no hosted source was built', undefined],
+  ] as const)('starts no job when %s, and says so', async (_name, sendGuard) => {
+    const id = await seededRide();
+    const scripted = scriptedJobs([succeeded(WRITE_UP)]);
+    const outcome = await controller(
+      scripted,
+      sendGuard === undefined ? {} : { hosted: { endpoint: () => ENDPOINT, sendGuard } },
+    ).ask(id, 'instance-hosted', () => undefined, live());
+    expect(outcome).toStrictEqual({
+      kind: 'failed',
+      text: INSTANCE_ASK_TEXT['masking-not-sent'],
+    });
+    expect(scripted.requests).toStrictEqual([]);
+    expect(await saved(id)).toBeUndefined();
+  });
+
+  it('does not send the list for a job on the instance’s own model', async () => {
+    const id = await seededRide();
+    const scripted = scriptedJobs([succeeded(WRITE_UP)]);
+    let sent = 0;
+    await controller(scripted, {
+      hosted: {
+        endpoint: () => ENDPOINT,
+        sendGuard: async () => {
+          sent += 1;
+          return Promise.resolve(true);
+        },
+      },
+    }).ask(id, 'instance-local', () => undefined, live());
+    expect(sent).toBe(0);
   });
 });

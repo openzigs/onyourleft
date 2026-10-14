@@ -28,6 +28,7 @@ import {
   degreesBearing,
   gradePercent,
   metres,
+  revolutionsPerMinute,
   seconds,
   unixSeconds,
   watts,
@@ -36,13 +37,20 @@ import {
   geographicPosition,
   altitudeMetres,
   UnitError,
+  readReplanRecord,
   readWorkoutGoals,
   validateWorkout,
   WorkoutError,
 } from '@onyourleft/domain';
 
 import { MAXIMUM_WRITE_UP_CHARACTERS, parseMaskedWords } from '@onyourleft/analysis';
-import type { GeographicPosition, RouteProfile, Workout, WorkoutBlock } from '@onyourleft/domain';
+import type {
+  GeographicPosition,
+  ReplanRecord,
+  RouteProfile,
+  Workout,
+  WorkoutBlock,
+} from '@onyourleft/domain';
 
 import { StoreDecodeError } from './errors';
 import {
@@ -144,6 +152,10 @@ export interface PersistedRideFacts {
   bestPower?: { duration: number; power: number }[];
   workoutFinished?: boolean;
   ghostRaced?: boolean;
+  /** @see RideFacts.replans — plain JSON, read back by `readReplanRecord`. */
+  replans?: unknown[];
+  /** @see RideFacts.replansDropped */
+  replansDropped?: number;
 }
 
 /**
@@ -163,6 +175,14 @@ export interface PersistedLap {
   movingTime: number;
   distance: number;
   averagePower?: number;
+  // #1312. Optional and unindexed, so no schema version: a row written before
+  // them is already a valid row.
+  maxPower?: number;
+  averageHeartRate?: number;
+  maxHeartRate?: number;
+  averageCadence?: number;
+  ascent?: number;
+  partial?: true;
 }
 
 /**
@@ -560,7 +580,49 @@ function toPersistedRideFacts(facts: RideFacts): PersistedRideFacts {
   }
   if (facts.workoutFinished !== undefined) row.workoutFinished = facts.workoutFinished;
   if (facts.ghostRaced !== undefined) row.ghostRaced = facts.ghostRaced;
+  // Through the reader on the way IN as well: what is written is a copy
+  // holding only the keys a record has.
+  //
+  // ⚠️ **A record that does not read is DROPPED and COUNTED; it never stops
+  // the ride being saved** (#1244's review). This is an audit trail beside a
+  // ride, and the ride is worth more than its audit trail: refusing the write
+  // would lose an hour's recording to one entry nothing can show anyway.
+  const kept = replanRecordsOf(facts.replans, facts.replansDropped);
+  if (kept.replans !== undefined) row.replans = [...kept.replans];
+  if (kept.replansDropped !== undefined) row.replansDropped = kept.replansDropped;
   return row;
+}
+
+/**
+ * A ride's re-plan records as they are kept: each one that reads, in order,
+ * and a count of those that did not. Used on the way in and on the way out,
+ * so a record no build can read is skipped at both and stops neither.
+ * Whatever is not a list holds no record, and is counted as one.
+ *
+ * It names nothing of an unreadable record: not its text, not its place.
+ */
+function replanRecordsOf(
+  replans: unknown,
+  droppedBefore: unknown,
+): { readonly replans?: readonly ReplanRecord[]; readonly replansDropped?: number } {
+  const before =
+    typeof droppedBefore === 'number' && Number.isSafeInteger(droppedBefore) && droppedBefore > 0
+      ? droppedBefore
+      : 0;
+  if (replans === undefined) {
+    return before === 0 ? {} : { replansDropped: before };
+  }
+  const listed: readonly unknown[] = Array.isArray(replans) ? replans : [replans];
+  const read = listed.flatMap((each) => {
+    const record = readReplanRecord(each);
+    return record === undefined ? [] : [record];
+  });
+  const dropped = before + (listed.length - read.length);
+  return {
+    // The key stays for a ride that had records, even when none could be read.
+    replans: read,
+    ...(dropped === 0 ? {} : { replansDropped: dropped }),
+  };
 }
 
 /** @throws {StoreDecodeError} */
@@ -573,6 +635,9 @@ function fromPersistedRideFacts(row: unknown): RideFacts {
   if (best !== undefined && !Array.isArray(best)) {
     throw new StoreDecodeError('activity.rideFacts.bestPower: expected a list');
   }
+  // ⚠️ Never a throw: an unreadable re-plan record must not make the ride
+  // unreadable. @see replanRecordsOf
+  const replans = replanRecordsOf(facts.replans, facts.replansDropped);
   return {
     ...(facts.ascent === undefined
       ? {}
@@ -616,6 +681,7 @@ function fromPersistedRideFacts(row: unknown): RideFacts {
     ...(facts.ghostRaced === undefined
       ? {}
       : { ghostRaced: decodedBoolean('activity.rideFacts.ghostRaced', facts.ghostRaced) }),
+    ...replans,
   };
 }
 
@@ -727,7 +793,44 @@ export function toPersistedLap(record: LapRecord): PersistedLap {
   if (record.averagePower !== undefined) {
     row.averagePower = record.averagePower;
   }
+  if (record.maxPower !== undefined) {
+    row.maxPower = record.maxPower;
+  }
+  if (record.averageHeartRate !== undefined) {
+    row.averageHeartRate = record.averageHeartRate;
+  }
+  if (record.maxHeartRate !== undefined) {
+    row.maxHeartRate = record.maxHeartRate;
+  }
+  if (record.averageCadence !== undefined) {
+    row.averageCadence = record.averageCadence;
+  }
+  if (record.ascent !== undefined) {
+    row.ascent = record.ascent;
+  }
+  if (record.partial === true) {
+    row.partial = true;
+  }
   return row;
+}
+
+/**
+ * One of a lap's optional figures, decoded through its unit — #1312. Absent
+ * stays absent; a present value that its unit refuses is a decode error that
+ * names the field.
+ */
+function optionalLapFigure<Key extends string, Value>(
+  key: Key,
+  value: unknown,
+  construct: (value: number) => Value,
+): Partial<Record<Key, Value>> {
+  if (value === undefined) {
+    return {};
+  }
+  const field = `lap.${key}`;
+  return { [key]: decoded(field, decodedNumber(field, value), construct) } as Partial<
+    Record<Key, Value>
+  >;
 }
 
 /** @throws {StoreDecodeError} */
@@ -749,6 +852,13 @@ export function fromPersistedLap(row: PersistedLap): LapRecord {
     ...(averagePower === undefined
       ? {}
       : { averagePower: decoded('lap.averagePower', averagePower, watts) }),
+    ...optionalLapFigure('maxPower', row.maxPower, watts),
+    ...optionalLapFigure('averageHeartRate', row.averageHeartRate, beatsPerMinute),
+    ...optionalLapFigure('maxHeartRate', row.maxHeartRate, beatsPerMinute),
+    ...optionalLapFigure('averageCadence', row.averageCadence, revolutionsPerMinute),
+    ...optionalLapFigure('ascent', row.ascent, metres),
+    // Only `true` is a part lap; anything else stored there is a whole one.
+    ...(row.partial === true ? { partial: true as const } : {}),
   };
 }
 

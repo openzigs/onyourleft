@@ -52,16 +52,20 @@ import {
 import type { PrivacyZoneRecord } from '@onyourleft/store';
 import { ensureDeviceSigningKey, privacyZoneId } from '@onyourleft/store';
 import {
+  beatsPerMinute,
   degreesLatitude,
   degreesLongitude,
   distanceBetween,
   geographicPosition,
   metres,
+  seconds,
+  thresholdShare,
   unixSeconds,
 } from '@onyourleft/domain';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { analysisRequestBody } from '../camera/analysis-transport';
+import { sidePoseRequest } from '../camera/instance-pose';
 import { capturedFrame } from '../camera/frame';
 import { hostedRequestBody } from '../camera/hosted-transport';
 import { controlMessageText, phoneMessageFrom } from '../camera/side-link-messages';
@@ -75,6 +79,7 @@ import type { InstanceSend } from '../instance/instance-transport';
 import { ensureLocalAthlete, LOCAL_ATHLETE } from '../local-athlete';
 import { createInstanceAnalysis } from '../ride-analysis/instance-analysis';
 import { scriptedJobs, startedWith, succeeded } from '../ride-analysis/instance-job-testing';
+import { replanInput, replanRequest } from '../workout/replan-job';
 
 import { coordinatesIn, insideZone } from './boundaries';
 import { PATTERNS_ONLY } from '@onyourleft/analysis';
@@ -182,6 +187,32 @@ const BOUNDARIES: readonly Boundary[] = [
     direction: 'departing',
   },
   {
+    module: 'workout/replan-job.ts',
+    what: 'one summary of each block of a workout being ridden, sent to the rider’s instance while they have switched re-plans on for that ride (#1244)',
+    // ⚠️ Departing: the rider's own instance is still somebody's server (ADR
+    // 0036 D-3 (d)). What the builder writes is a block's duration, its mean
+    // and highest heart rate, seconds in range, mean power as a share, cadence
+    // and a count of rescues, with the plan's blocks and the rider's typed
+    // goals (ADR 0048 D-10): there is no key a position could travel under,
+    // and nothing that reaches the builder holds one — the session that fills
+    // it is handed power, heart rate and cadence and nothing else. The case
+    // below reads the body that is sent.
+    direction: 'departing',
+  },
+  {
+    module: 'camera/instance-pose.ts',
+    what: 'one side-camera picture, sealed, sent to the rider’s instance while they have switched that on (#1106)',
+    // ⚠️ Departing, and the first PICTURE that leaves the room for a server.
+    // ADR 0029 D-9's table again: a frame for analysis is `departing`. The
+    // rider's instance is somebody's server (ADR 0036 D-3 (d)), and with the
+    // rider's second consent it sends the picture on to a hosted service by
+    // name. The walk below finds no coordinate in any field around the
+    // picture — the body has three keys and none can hold one — and cannot
+    // look inside it, which is why `instance-pose.ts` refuses to send a
+    // picture that still carries metadata (`instance-pose.test.ts`).
+    direction: 'departing',
+  },
+  {
     module: 'rooms/share.ts',
     what: 'the route a room is made on, relayed to the riders its maker shares its code with (#784)',
     // ⚠️ Departing: the maker's own route, leaving their device for an
@@ -229,8 +260,14 @@ function boundaryModulesOnDisk(): readonly string[] {
       // makes that module declare which way it faces.
       // ⚠️ And `instance-job.ts` since #1102: the one builder of a write-up
       // job's request to the rider's instance, named for what it builds.
+      // ⚠️ And `instance-pose.ts` since #1106: the one builder of a picture's
+      // request to the rider's instance.
+      // ⚠️ And `replan-job.ts` since #1244: the one builder of a re-plan's
+      // request to the rider's instance, sent while a ride is in progress.
       if (
+        entry === 'instance-pose.ts' ||
         entry === 'instance-job.ts' ||
+        entry === 'replan-job.ts' ||
         entry === 'share.ts' ||
         entry === 'privacy.ts' ||
         entry === 'export.ts' ||
@@ -432,6 +469,27 @@ describe('the picture sent to the rider’s own computer carries no coordinate b
   });
 });
 
+describe('the picture sent to the rider’s instance carries no coordinate beside it — #1106', () => {
+  const picture = cleanFrameBytes(2048);
+
+  it('has none in any field, for either model', () => {
+    for (const choice of [
+      { source: 'instance-local' } as const,
+      { source: 'instance-hosted', endpoint: 'https://models.example' } as const,
+    ]) {
+      expect(coordinatesIn(sidePoseRequest(picture, choice))).toStrictEqual([]);
+    }
+  });
+
+  it('would find one if a field carried it — the walk is not blind to this payload', () => {
+    const body = {
+      ...sidePoseRequest(picture, { source: 'instance-local' }),
+      where: { latitude: 51.5, longitude: -0.12 },
+    };
+    expect(coordinatesIn(body)).toHaveLength(1);
+  });
+});
+
 describe('the hosted question carries no coordinate at all — #518', () => {
   it('has none in any field of the body', () => {
     expect(
@@ -500,6 +558,98 @@ describe('an instance is sent no coordinate at all — #777', () => {
     expect(
       coordinatesIn({ publicKey: 'ab', where: { latitude: 51.5, longitude: -0.12 } }),
     ).toHaveLength(1);
+  });
+});
+
+describe('a re-plan request is sent no coordinate at all — #1244', () => {
+  /** Every key in a value, at any depth. */
+  const keysIn = (value: unknown, found = new Set<string>()): Set<string> => {
+    if (Array.isArray(value)) {
+      for (const each of value) keysIn(each, found);
+    } else if (typeof value === 'object' && value !== null) {
+      for (const [key, inner] of Object.entries(value)) {
+        found.add(key);
+        keysIn(inner, found);
+      }
+    }
+    return found;
+  };
+
+  const body = () =>
+    replanRequest(
+      replanInput({
+        revision: 0,
+        summarySeq: 1,
+        currentBlock: 1,
+        goals: { sessionType: 'endurance', durationMinutes: 60, timeInRangeMinutes: 30 },
+        blocks: [
+          { kind: 'steady', seconds: seconds(300), target: thresholdShare(0.5), label: 'Home' },
+          {
+            kind: 'heart-rate-hold',
+            seconds: seconds(1200),
+            range: { low: beatsPerMinute(130), high: beatsPerMinute(140) },
+            startShare: thresholdShare(0.5),
+            ceilingShare: thresholdShare(0.8),
+          },
+          { kind: 'steady', seconds: seconds(300), target: thresholdShare(0.4) },
+        ],
+        summaries: [
+          {
+            block: 0,
+            seconds: 300,
+            meanHeartRate: 121,
+            highestHeartRate: 133,
+            secondsInRange: 0,
+            meanPowerShare: 0.5,
+            meanCadence: 88,
+            rescues: 0,
+          },
+        ],
+      }),
+    );
+
+  it('has none in the request, and no key one could travel under', () => {
+    const sent = body();
+    // Something is sent, or "no coordinate" is true of nothing.
+    expect(sent.input.summaries).toHaveLength(1);
+    expect(coordinatesIn(sent)).toStrictEqual([]);
+    // The whole vocabulary of the body: a new key is a change to this list.
+    expect([...keysIn(sent)].sort()).toStrictEqual(
+      [
+        'block',
+        'blocks',
+        'ceilingShare',
+        'currentBlock',
+        'durationMinutes',
+        'goals',
+        'high',
+        'highestHeartRate',
+        'input',
+        'kind',
+        'low',
+        'meanCadence',
+        'meanHeartRate',
+        'meanPowerShare',
+        'range',
+        'rescues',
+        'revision',
+        'seconds',
+        'secondsInRange',
+        'sessionType',
+        'source',
+        'startShare',
+        'summaries',
+        'summarySeq',
+        'target',
+        'templateVersion',
+      ].sort(),
+    );
+  });
+
+  it('carries no date, and no text the rider typed', () => {
+    const sent = JSON.stringify(body());
+    expect(sent).not.toContain('Home');
+    expect(sent).not.toMatch(/\d{4}-\d{2}-\d{2}/);
   });
 });
 

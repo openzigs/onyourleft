@@ -65,6 +65,7 @@ import {
   createRecordingSession,
   restoreRecordingSession,
   seconds,
+  unixSeconds,
   type AutoPausePolicy,
   type RecordingOutcome,
   type RecordingSession,
@@ -77,6 +78,7 @@ import type {
   AthleteId,
   NewRecordingChunk,
   NewRecordingSession,
+  RecordedCourseLap,
   RecordingSessionId,
   RecordingSessionRecord,
   RecordingStoredState,
@@ -212,6 +214,24 @@ export interface Recorder {
   readonly flushedThrough: number;
   /** How many chunks this recorder has written. Also the next `seq`. */
   readonly checkpoints: number;
+  /** The grid spacing of the session's samples. */
+  readonly sampleInterval: Seconds;
+  /**
+   * The laps of a course completed during this recording, in order — #1312,
+   * `laps.ts`. A recorder rebuilt by {@link recoverRecorder} starts with the
+   * ones its checkpoint held.
+   */
+  readonly courseLaps: readonly RecordedCourseLap[];
+  /**
+   * Keep a lap of a course that has just ended — #1312.
+   *
+   * ⚠️ **Writes nothing itself.** The laps go out in the header, which every
+   * {@link Recorder.flush} rewrites, and `stop` flushes: so a lap is on disk
+   * within one flush interval of its line, the same bound a sample has
+   * ({@link MAX_DATA_LOSS_SECONDS}), and a crash sooner than that loses the
+   * lap with the seconds either side of it.
+   */
+  noteCourseLap(lap: RecordedCourseLap): void;
 
   /** Starts recording and writes the header, so a crash one second in is recoverable. */
   start(at: UnixSeconds): Promise<void>;
@@ -273,11 +293,13 @@ export function createRecorder(options: RecorderOptions): Recorder {
     lateToleranceSeconds: options.lateToleranceSeconds ?? DEFAULT_LATE_TOLERANCE_SECONDS,
     ...autoPauseOption(options),
   });
-  return recorderOver(options, session, {
-    flushedThrough: 0,
-    checkpoints: 0,
-    headerWritten: false,
-  });
+  return recorderOver(
+    options,
+    session,
+    { flushedThrough: 0, checkpoints: 0, headerWritten: false },
+    interval,
+    [],
+  );
 }
 
 /** What {@link recoverRecorder} found, and the recorder that continues it. */
@@ -331,11 +353,14 @@ export async function recoverRecorder(
       pauses: recovered.pauses,
     },
   );
-  const recorder = recorderOver(options, session, {
-    flushedThrough: recovered.sampleCount,
-    checkpoints: recovered.chunks,
-    headerWritten: true,
-  });
+  const recorder = recorderOver(
+    options,
+    session,
+    { flushedThrough: recovered.sampleCount, checkpoints: recovered.chunks, headerWritten: true },
+    recovered.sampleInterval,
+    // #1312: or the next header this recorder writes would take them off disk.
+    recovered.courseLaps,
+  );
   return { recorder, recovered };
 }
 
@@ -368,8 +393,12 @@ function recorderOver(
   options: Pick<RecorderOptions, 'store' | 'athleteId' | 'sessionId' | 'flushIntervalSeconds'>,
   session: RecordingSession<StreamChannelValue>,
   cursor: RecorderCursor,
+  sampleInterval: Seconds,
+  lapsSoFar: readonly RecordedCourseLap[],
 ): Recorder {
   const { store, athleteId, sessionId } = options;
+  /** @see Recorder.courseLaps */
+  let courseLaps = lapsSoFar;
   const flushInterval = options.flushIntervalSeconds ?? DEFAULT_FLUSH_INTERVAL_SECONDS;
 
   let storageState: RecorderStorageState = 'ok';
@@ -387,9 +416,16 @@ function recorderOver(
       startedAt,
       sampleInterval: series.sampleInterval,
       state: storedState(),
-      updatedAt: at,
+      // ⚠️ Never earlier than the last lap's end (#1312). The store reads a
+      // lap that ends after its header was written as a lap outside its
+      // recording, and drops the list. A recorder rebuilt from a checkpoint
+      // restarts its clock at its last RECOVERED slot, which is a second or
+      // two before a lap that ended inside the late tolerance — so until its
+      // clock moves on, `at` is earlier than a lap it already holds.
+      updatedAt: unixSeconds(Math.max(at, courseLaps.at(-1)?.to.at ?? at)),
       pauses: series.pauses,
       ...(savedAs === undefined ? {} : { savedAs }),
+      ...(courseLaps.length === 0 ? {} : { courseLaps }),
     };
   }
 
@@ -464,6 +500,13 @@ function recorderOver(
     },
     get checkpoints() {
       return cursor.checkpoints;
+    },
+    sampleInterval,
+    get courseLaps() {
+      return courseLaps;
+    },
+    noteCourseLap(lap: RecordedCourseLap): void {
+      courseLaps = [...courseLaps, lap];
     },
 
     async start(at: UnixSeconds): Promise<void> {

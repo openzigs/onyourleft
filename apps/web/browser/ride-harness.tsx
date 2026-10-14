@@ -74,12 +74,18 @@ import { flushSync } from 'react-dom';
 
 import {
   altitudeMetres,
+  beatsPerMinute,
   buildGhostTrack,
   degreesLatitude,
   degreesLongitude,
+  expandWorkout,
   geographicPosition,
   kilograms,
+  metres,
   routeProfile,
+  seconds,
+  thresholdShare,
+  unixSeconds,
   watts,
   type RoutePoint,
   type RouteProfile,
@@ -91,12 +97,15 @@ import { roomPortOver } from '../src/net/room-port';
 import { ScriptedRoom } from '../src/net/testing';
 import type { GamePort } from '../src/game/GameView';
 import type { GameTrainerPort } from '../src/game/trainer-port';
+import type { LapFigures } from '../src/recording/laps';
 import { CUES_STORAGE_KEY, DEFAULT_CUES, writeCuePreference } from '../src/game/cue-preference';
 import {
   REALISTIC_WORLD_STORAGE_KEY,
   writeRealisticWorldChoice,
 } from '../src/game/world-preference';
+import { replanSentence } from '../src/workout/replan-text';
 import { RELEASE_INCOMPLETE } from '../src/workout/session';
+import type { WorkoutGraphInput } from '../src/workout/workout-graph';
 import { MAXIMUM_ROUTE_NAME_LENGTH } from '../src/routes/save';
 import { AppShell } from '../src/shell/AppShell';
 import { viewGroupsLoaded } from './views-loaded';
@@ -382,7 +391,14 @@ const GAME: GamePort = {
   // `attempts: 1`, so the picker offers the ghost — see this file's header.
   listRoutes: () =>
     Promise.resolve([
-      { id: 'harness', name: 'Harness hills', profile: route(), attempts: 1 },
+      {
+        id: 'harness',
+        name: 'Harness hills',
+        // #1312: `?lap=riding` and `?lap=ended` ride a loop. @see LAP
+        profile:
+          new URLSearchParams(window.location.search).get('lap') === null ? route() : lapCircuit(),
+        attempts: 1,
+      },
       ...(AT_THE_PICKER ? chooserRoutes() : []),
     ]),
   loadGhost: () =>
@@ -526,8 +542,161 @@ const RACE_PORTS =
         },
       };
 
+/**
+ * `?graph=hold` and `?graph=plain`: the running workout as the HUD's strip
+ * reads it (#1307). Fixed numbers, so two loads measure the same picture.
+ * Paired with `?trainer=workout`, whose route panel it is drawn in.
+ *
+ * - `hold`: in a heart-rate hold, so the strip's one lane is heart rate
+ *   against its range. `hold-silent` is the same hold with a strap gone
+ *   quiet, so the strip writes "— bpm" and draws no heart-rate line.
+ * - `plain`: the same plan with no hold and a target that STEPS inside the
+ *   window, so the lane is power against the confirmed target. `paused` is
+ *   that workout paused: the trainer holds its 50 W minimum, and the newest
+ *   sample (175 W) is from before the ease.
+ * - `replan` (#1244): the plain workout with an accepted re-plan waiting for
+ *   its next block — the ramp shortened by two minutes — so the strip draws
+ *   what the move replaced as a dotted outline and the HUD's actions show
+ *   *Keep the plan*, which no other state of this page does.
+ */
+const GRAPH_KIND = new URLSearchParams(window.location.search).get('graph');
+const GRAPH_HOLD = GRAPH_KIND === 'hold' || GRAPH_KIND === 'hold-silent';
+/** `paused`: the plain workout paused — the trainer eased to its 50 W minimum. */
+const GRAPH_PAUSED = GRAPH_KIND === 'paused';
+/** `replan`: an accepted re-plan waiting for the next block — #1244. */
+const GRAPH_REPLAN = GRAPH_KIND === 'replan';
+const graphPlan = (rampSeconds: number) =>
+  expandWorkout({
+    name: 'Hold',
+    blocks: [
+      { kind: 'steady', seconds: seconds(600), target: thresholdShare(0.5) },
+      { kind: 'steady', seconds: seconds(1200), target: thresholdShare(0.7) },
+      {
+        kind: 'ramp',
+        seconds: seconds(rampSeconds),
+        from: thresholdShare(0.7),
+        to: thresholdShare(0.4),
+      },
+    ],
+  });
+/** The sentence the HUD's region is offered while {@link GRAPH_REPLAN}'s move waits. */
+const REPLAN_WAITING = {
+  revision: 1,
+  sentence: replanSentence({ kind: 'shorten-block', block: 2, minutes: 2 }, 'goal-duration', 2),
+};
+const GRAPH: WorkoutGraphInput | undefined =
+  GRAPH_HOLD || GRAPH_KIND === 'plain' || GRAPH_PAUSED || GRAPH_REPLAN
+    ? {
+        ...(GRAPH_PAUSED ? { status: 'paused', live: { power: 0, heartRate: undefined } } : {}),
+        elapsedSeconds: 900,
+        // As the controller hands it over while a move waits: the REVISED
+        // plan, and what it replaced from the next block on.
+        timeline: graphPlan(GRAPH_REPLAN ? 480 : 600),
+        ...(GRAPH_REPLAN
+          ? { replaced: graphPlan(600).segments.filter((segment) => segment.block >= 2) }
+          : {}),
+        // In a hold the trainer holds what the hold last asked: 167 W.
+        holdingWatts: GRAPH_PAUSED ? 50 : GRAPH_HOLD ? 167 : 175,
+        hold: GRAPH_HOLD ? { reason: 'lowered', target: 167 } : undefined,
+        thresholdWatts: 250,
+        trace: Array.from({ length: 300 }, (_, index) =>
+          GRAPH_HOLD
+            ? {
+                at: 601 + index,
+                target: 175 - Math.floor(index / 60) * 2,
+                asked: 175 - Math.floor(index / 60) * 2,
+                power: 170 + Math.round(8 * Math.sin(index / 9)),
+                // `hold-silent`: a strap gone quiet.
+                heartRate: GRAPH_KIND === 'hold' ? 128 + Math.round(index / 25) : undefined,
+                range: { low: 130, high: 140 },
+              }
+            : {
+                at: 601 + index,
+                // The write for the 70 % block lands a second after it starts,
+                // then an ease to 140 W for a minute and back: three steps.
+                target: index >= 120 && index < 180 ? 140 : 175,
+                power:
+                  (index >= 126 && index < 186 ? 142 : 173) + Math.round(8 * Math.sin(index / 9)),
+                heartRate: undefined,
+                range: undefined,
+              },
+        ),
+      }
+    : undefined;
+
+/**
+ * `ride.html?lap=riding` and `?lap=ended` — #1312: the ride is on a LOOP.
+ *
+ * - `riding`: the recording has a lap open, so the elevation strip's sentence
+ *   carries the lap's time beside the lap's number (`fields.ts`
+ *   §`profileReading`) — `59:59`, the widest a lap short of an hour reads.
+ *   No lap ends: the port answers no laps, as it does with nothing recorded.
+ * - `ended`: the same, and the rider has just completed a lap, so the notice
+ *   cell carries the finished lap. The loop is FOUR metres round, so the
+ *   harness's rider is over its line within two seconds of the start and
+ *   again every second after: the notice is up for ten seconds of ride after
+ *   each crossing, so once the first lap is done it is always on the stage.
+ *   ⚠️ That short on purpose. A forty-metre loop took eight seconds to its
+ *   first line at every viewport, which is over a minute of a gate whose
+ *   `chromium` run has 88 s to spare (docs/agents/ci.md §4c).
+ *
+ * The laps are the port's — the recording's, in the product — and the third
+ * is the WIDEST notice a ride short of an hour-long lap produces: every
+ * figure, a three-digit difference from the lap before, and the longest of
+ * the four ways the comparison with the best lap ends — the one a recording
+ * of two courses gives (`lap-text.ts` §"of this course").
+ */
+const LAP = new URLSearchParams(window.location.search).get('lap');
+const LAP_ENDED = LAP === 'ended';
+
+/** A level loop, two metres out and back, so its two ends meet. */
+function lapCircuit(): RouteProfile {
+  const points: RoutePoint[] = [];
+  for (let index = 0; index <= 8; index += 1) {
+    const out = index <= 4 ? index : 8 - index;
+    points.push({
+      position: geographicPosition(
+        degreesLatitude(51.5 + (out * 0.5) / 111_320),
+        degreesLongitude(-0.12),
+      ),
+      elevation: altitudeMetres(60),
+    });
+  }
+  return routeProfile(points, { loop: true });
+}
+
+/** One whole 35.99 km lap, in `moving` seconds. @see LAP_ENDED */
+function harnessLap(moving: number): LapFigures {
+  return {
+    startedAt: unixSeconds(1_800_000_000),
+    elapsedTime: seconds(moving),
+    movingTime: seconds(moving),
+    distance: metres(35_990),
+    averagePower: watts(342),
+    averageHeartRate: beatsPerMinute(168),
+  };
+}
+
+/**
+ * Lap 3 is the one just ended: 59:59, 124 s slower than lap 2, which is the
+ * best lap of this course — and lap 1 was another course, so the notice ends
+ * the longest way it can: `Best on this course: lap 2, 57:55.`
+ */
+const HARNESS_LAPS: readonly LapFigures[] = [
+  { ...harnessLap(3_800), distance: metres(12_000) },
+  harnessLap(3_475),
+  harnessLap(3_599),
+];
+
 /** A trainer that accepts every gradient, so the trainer line is on the screen. */
 const TRAINER: GameTrainerPort = {
+  // #1312. @see LAP_ENDED
+  courseLine: (event) => (LAP_ENDED && event.kind === 'lap' ? HARNESS_LAPS : undefined),
+  rideLapSeconds: () => (LAP === 'ended' || LAP === 'riding' ? 59 * 60 + 59 : undefined),
+  runningWorkout: () => GRAPH,
+  // #1244: a re-plan waiting, which is what puts *Keep the plan* on the HUD.
+  workoutPlanChange: () => (GRAPH_REPLAN ? { waiting: REPLAN_WAITING, quiet: false } : undefined),
+  keepThePlan: () => undefined,
   // #503: the Ride press's request for control — this double changes nothing.
   askForControlOnRide: () => Promise.resolve(),
   workoutRescue: () => RESCUE,

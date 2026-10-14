@@ -332,6 +332,8 @@ describe('priority is an ORDER, not a politeness', () => {
       'room-lost',
       'room-race',
     ]);
+    // #1312, third pass: a lap's summary is NOT one of them.
+    expect(ALWAYS_SPOKEN).not.toContain('lap-ended');
     expect(PRIORITY.indexOf('distance-tick')).toBeLessThan(PRIORITY.indexOf('power'));
   });
 
@@ -395,6 +397,47 @@ describe('a room’s race and its riders — #784, #785', () => {
     expect(run([{ now: 0, events: [joined] }], { ...ON, powerEverySeconds: 'never' }).said).toEqual(
       ['A rider joined the room.'],
     );
+  });
+});
+
+describe('a lap of the course, as it ends — #1312', () => {
+  const lap = { kind: 'lap-ended', text: 'Lap 2: 9 minutes 52 seconds.' } as const;
+
+  it('is the last event, and above every reading', () => {
+    const rank = PRIORITY.indexOf('lap-ended');
+    // Below the heart-rate hold and below an accepted re-plan (#1244): each
+    // is about the workout the trainer is being driven through.
+    expect(rank).toBeGreaterThan(PRIORITY.indexOf('hold-changed'));
+    expect(rank).toBe(PRIORITY.indexOf('plan-changed') + 1);
+    for (const reading of ['power-off-target', 'distance-tick', 'power'] as const) {
+      expect(rank).toBeLessThan(PRIORITY.indexOf(reading));
+    }
+  });
+
+  it('respects the announcements setting: said with them on, not with them off', () => {
+    expect(run([{ now: 0, events: [lap] }], { ...DEFAULT_ANNOUNCEMENTS }).said).toEqual([
+      undefined,
+    ]);
+    expect(run([{ now: 0, events: [lap] }], { ...ON, powerEverySeconds: 'never' }).said).toEqual([
+      'Lap 2: 9 minutes 52 seconds.',
+    ]);
+  });
+
+  it('gives way to a climb in the same window, and is not said in place of it', () => {
+    const climb = { kind: 'climb-ahead', text: 'Climb in 200 metres.' } as const;
+    const { said } = run([{ now: 0, events: [lap, climb] }], {
+      ...ON,
+      powerEverySeconds: 'never',
+    });
+    expect(said).toEqual(['Climb in 200 metres.']);
+  });
+
+  it('is said before a power reading due on the same call', () => {
+    const { said } = run([{ now: 0 }, { now: 20, events: [lap] }], {
+      ...ON,
+      powerEverySeconds: 15,
+    });
+    expect(said.at(-1)).toBe('Lap 2: 9 minutes 52 seconds.');
   });
 });
 

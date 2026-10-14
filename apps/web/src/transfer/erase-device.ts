@@ -76,6 +76,13 @@ export const ERASE_REMOVES: readonly string[] = [
   // because they are separately recoverable: the export now carries the laps
   // inside each activity file and the signed record in a `.record.json` beside
   // it (ADR 0019), so a rider who reads this line has somewhere to go.
+  //
+  // ⚠️ **True of where each lap began and how long it lasted, and since #1312
+  // not of everything a lap holds.** A course lap's climb and its part-lap
+  // mark are in no file (#1321), its averages are not stated in one (they can
+  // be worked out again from the lap's samples), and an import writes no lap
+  // row at all (#1320) — so export everything, erase, import gives the rides
+  // back with no lap table. This line is the rider's warning of exactly that.
   'the laps and splits of every ride',
   // ⚠️ And this one is the irreversible half. ADR 0014 D-7: the signing key
   // cannot be backed up, so a record destroyed here can never be minted again,
@@ -179,12 +186,12 @@ export const ERASE_CANNOT_REACH: readonly string[] = [
   //   > a photograph you sent to your own machine to be analysed, which is a
   //   > copy that machine holds
   //
-  // D-4's SECOND line — *"a photograph you sent to a hosted model"* — is still
-  // not here, and now for a different reason: #518 built the hosted path, and
-  // the owner ruled it is sent NUMBERS ONLY and never a picture (ADR 0029's
-  // 2026-09-28 amendment). So the line that ships is the one after this, about
-  // what does leave; a line about a photograph would be false in the direction
-  // that frightens.
+  // D-4's SECOND line — *"a photograph you sent to a hosted model"* — was not
+  // here until #1106: #518 built the app's own hosted path, and the owner
+  // ruled it is sent NUMBERS ONLY and never a picture (ADR 0029's 2026-09-28
+  // amendment), which is still so. #1106's line, further down, is about the
+  // one path a photograph does have to a hosted service: through the rider's
+  // instance, by name.
   'a photograph you sent to your own machine to be analysed, which is a copy that machine holds',
   // #518, ADR 0029's 2026-09-28 amendment. The hosted service is a third party
   // and keeps what it keeps; this project cannot compel a deletion. #803
@@ -198,6 +205,15 @@ export const ERASE_CANNOT_REACH: readonly string[] = [
   // paragraph already says an erase cannot reach that copy;
   // `erase-device.test.ts` holds the two texts together.
   'a ride’s numbers you sent to your own computer for a write-up, which is a copy that computer holds',
+  // #1106: **ADR 0029 D-4's SECOND line, which the comment above said was not
+  // here** — *"a photograph you sent to a hosted model, which is a copy that
+  // service holds"*. It is true now, by one path: with the rider's own consent
+  // naming the service, their instance sends the side camera's pictures on to
+  // a hosted model on the rider's own key (`camera/instance-pose.ts`). The
+  // line says who sent it and that it was agreed to, because the app itself
+  // still sends a hosted service no picture. The instance keeps none, so the
+  // instance line below needs no change for it.
+  'a photograph your instance sent on to a hosted service you agreed to, which is a copy that service holds',
   'a photograph you copied off this device yourself, which is wherever you copied it to',
   // #777, #778. An erase forgets this device's sign-in to an instance
   // (`instance/instance-port.ts` §`instanceEraser`) and sends nothing; the

@@ -37,6 +37,10 @@
 import type { Caller } from '../auth/identity.ts';
 import type { ErrorCode, FieldProblem } from '../errors.ts';
 import type { SqlStore } from '../store/sql-store.ts';
+import { isReasoningTokens, MAXIMUM_REASONING_TOKENS } from './model-turn.ts';
+import { createRateLimiter, type RateLimit } from '../auth/rate-limit.ts';
+import { askHostedTestQuestion, type HostedTestOutcome } from './hosted-test.ts';
+import type { SourceOptions } from './source.ts';
 import {
   hostedKeyFrom,
   hostedModelFrom,
@@ -60,6 +64,8 @@ export interface HostedStatus {
     readonly model: string;
     /** Unix seconds. */
     readonly setAt: number;
+    /** What you said a turn may spend reasoning (#1268), or null: the agent finds out. */
+    readonly reasoningTokens: number | null;
     /**
      * `app` for a key the rider stored themselves; `operator-command` for the
      * operator's one key (`operator model-key set`), which serves only the
@@ -86,7 +92,7 @@ export type HostedOutcome =
 
 export interface HostedSettings {
   status(caller: Caller): Promise<HostedStatus>;
-  /** Store the caller's own key: `{ url, model, key }`. */
+  /** Store the caller's own key: `{ url, model, key }`, and optionally `reasoningTokens` (#1268). */
   setKey(caller: Caller, body: Readonly<Record<string, unknown>>): Promise<HostedOutcome>;
   /** Clear the key the caller stored, scrubbed. Never the operator's one key. */
   clearKey(caller: Caller): Promise<HostedStatus>;
@@ -94,9 +100,30 @@ export interface HostedSettings {
   recordConsent(caller: Caller, body: Readonly<Record<string, unknown>>): Promise<HostedOutcome>;
   /** Withdraw the caller's consent. */
   withdrawConsent(caller: Caller): Promise<HostedStatus>;
+  /**
+   * Send the caller's hosted service one test question carrying none of their
+   * data (#1251, `hosted-test.ts`), through the gate a hosted job goes
+   * through. `not-ready`, with nothing sent, wherever a job would be refused.
+   * `undefined`, with nothing sent, when the caller is over
+   * {@link DEFAULT_HOSTED_TESTS} or already has a test in flight: the address
+   * is the rider's to choose, so the test carries a job's kind of limit.
+   * `signal` ends the request to the service when the caller goes away.
+   */
+  testQuestion(caller: Caller, signal?: AbortSignal): Promise<HostedTestOutcome | undefined>;
 }
 
+/**
+ * How often one rider may send the test question: 6 in 10 minutes, one at a
+ * time. A rider-chosen address is called from the operator's network, so the
+ * test is bounded as a job is (`DEFAULT_ANALYSIS_STARTS`).
+ *
+ * ## Provenance — the author's choice, not a measurement
+ */
+export const DEFAULT_HOSTED_TESTS: RateLimit = { limit: 6, windowMs: 10 * 60 * 1000 };
+
 export interface HostedSettingsOptions {
+  /** The test question's per-rider limit; {@link DEFAULT_HOSTED_TESTS} when absent. */
+  readonly tests?: RateLimit;
   readonly store: Pick<
     SqlStore,
     | 'putAthleteHostedKey'
@@ -111,19 +138,28 @@ export interface HostedSettingsOptions {
   readonly secret: () => Promise<SecretKey | undefined>;
   /** Unix milliseconds. */
   readonly now: () => number;
+  /**
+   * What a hosted job's model is chosen from (`source.ts`): the SAME object the
+   * job engine is handed, so the test question passes the gate a job does.
+   * Absent, every test question is `not-ready` and nothing is sent.
+   */
+  readonly sources?: SourceOptions;
 }
 
 const KEY_FIELDS = ['url', 'model', 'key'] as const;
+/** The key request's one optional field: a whole number of tokens, or null for none (#1268). */
+const REASONING_FIELD = 'reasoningTokens';
 const CONSENT_FIELDS = ['endpoint'] as const;
 
 /** A problem for every field not in `allowed`, or not a string among `allowed`. */
 function shapeProblems(
   body: Readonly<Record<string, unknown>>,
   allowed: readonly string[],
+  optional: readonly string[] = [],
 ): FieldProblem[] {
   const problems: FieldProblem[] = [];
   for (const field of Object.keys(body)) {
-    if (!allowed.includes(field))
+    if (!allowed.includes(field) && !optional.includes(field))
       problems.push({ field, problem: 'is not a field of this request' });
   }
   for (const field of allowed) {
@@ -134,6 +170,9 @@ function shapeProblems(
 
 export function createHostedSettings(options: HostedSettingsOptions): HostedSettings {
   const { store } = options;
+  const testLimit = createRateLimiter(options.tests ?? DEFAULT_HOSTED_TESTS, options.now);
+  /** Riders whose test question is out now: one at a time. */
+  const testing = new Set<string>();
 
   async function status(athleteId: string): Promise<HostedStatus> {
     const own = await store.getAthleteHostedKey(athleteId);
@@ -141,12 +180,19 @@ export function createHostedSettings(options: HostedSettingsOptions): HostedSett
     const consent = await store.getHostedConsent(athleteId);
     const key =
       own !== undefined
-        ? { url: own.url, model: own.model, setAt: own.setAt, setBy: 'app' as const }
+        ? {
+            url: own.url,
+            model: own.model,
+            setAt: own.setAt,
+            reasoningTokens: own.reasoningTokens ?? null,
+            setBy: 'app' as const,
+          }
         : operators?.athleteId === athleteId
           ? {
               url: operators.url,
               model: operators.model,
               setAt: operators.setAt,
+              reasoningTokens: null,
               setBy: 'operator-command' as const,
             }
           : null;
@@ -166,8 +212,16 @@ export function createHostedSettings(options: HostedSettingsOptions): HostedSett
       if (secret === undefined) {
         return { ok: false, code: 'unavailable', message: HOSTED_KEY_NEEDS_SECRET };
       }
-      const problems = shapeProblems(body, KEY_FIELDS);
+      const problems = shapeProblems(body, KEY_FIELDS, [REASONING_FIELD]);
       if (problems.length > 0) return { ok: false, code: 'validation_failed', fields: problems };
+      const said = body[REASONING_FIELD];
+      const reasoningTokens = said === undefined || said === null ? undefined : said;
+      if (reasoningTokens !== undefined && !isReasoningTokens(reasoningTokens)) {
+        problems.push({
+          field: REASONING_FIELD,
+          problem: `must be a whole number from 1 to ${MAXIMUM_REASONING_TOKENS}, or null`,
+        });
+      }
       const url = hostedUrlFrom(body.url as string);
       const model = hostedModelFrom(body.model as string);
       const key = hostedKeyFrom(body.key as string);
@@ -179,7 +233,7 @@ export function createHostedSettings(options: HostedSettingsOptions): HostedSett
       if (key === undefined) {
         problems.push({ field: 'key', problem: 'must be one line of printable characters' });
       }
-      if (!url.ok || model === undefined || key === undefined) {
+      if (!url.ok || model === undefined || key === undefined || problems.length > 0) {
         return { ok: false, code: 'validation_failed', fields: problems };
       }
       const sealed = await sealHostedKey(secret, {
@@ -192,6 +246,7 @@ export function createHostedSettings(options: HostedSettingsOptions): HostedSett
         url: url.url.href,
         model,
         ...sealed,
+        ...(reasoningTokens === undefined ? {} : { reasoningTokens: reasoningTokens as number }),
         setAt: Math.floor(options.now() / 1000),
       });
       if (put.outcome === 'no-athlete') return { ok: false, code: 'not_found' };
@@ -226,6 +281,19 @@ export function createHostedSettings(options: HostedSettingsOptions): HostedSett
     async withdrawConsent(caller) {
       await store.clearHostedConsent(caller.athleteId);
       return status(caller.athleteId);
+    },
+
+    async testQuestion(caller, signal) {
+      if (options.sources === undefined) return { result: 'not-ready', reasoned: false };
+      if (testing.has(caller.athleteId)) return undefined;
+      testLimit.sweep();
+      if (!testLimit.allow(caller.athleteId)) return undefined;
+      testing.add(caller.athleteId);
+      try {
+        return await askHostedTestQuestion(caller.athleteId, options.sources, signal);
+      } finally {
+        testing.delete(caller.athleteId);
+      }
     },
   };
 }

@@ -19,20 +19,23 @@ import {
   type SecretKey,
 } from './analysis/hosted-key.ts';
 import { createHostedSettings, type HostedSettings } from './analysis/hosted-settings.ts';
-import { agentEngine } from './analysis/engine.ts';
+import { agentEngine, replanEngine } from './analysis/engine.ts';
+import type { SourceOptions } from './analysis/source.ts';
 import { hostedBehindMasking, readMaskingGuard } from './analysis/hosted.ts';
 import {
   ANALYSIS_SWEEP_PERIOD_MS,
   createAnalysisJobs,
   type AnalysisJobs,
 } from './analysis/jobs.ts';
-import { createLocalModel } from './analysis/model.ts';
+import { createLocalModel, createLocalPictureModel } from './analysis/model.ts';
 import {
   createInstanceKeys,
   InstanceKeysUnavailable,
   type InstanceKeys,
 } from './keys/instance-keys.ts';
 import type { ModelConnection } from './analysis/model-turn.ts';
+import { hostedForPictures, SIDE_POSE_PICTURE_QUESTION } from './camera/hosted-pictures.ts';
+import { createSidePose } from './camera/side-pose.ts';
 import type { Resolver } from './history/address.ts';
 import { createOllamaEmbedder } from './history/embedder.ts';
 import { createHistory, RETRY_PERIOD_MS, type History } from './history/history.ts';
@@ -40,7 +43,7 @@ import { logEvent, logUnhandled, type LogSink } from './log.ts';
 import { HttpCounters, renderMetrics } from './metrics.ts';
 import { listen, sweepOnBoundaries, type Listening, type SweepTimers } from './node-listener.ts';
 import { assessReadiness, type MigrationState } from './readiness.ts';
-import type { InstanceProbes } from './route-kit.ts';
+import type { InstanceProbes, SidePose } from './route-kit.ts';
 import { planFor } from './room/room-plan.ts';
 import { RoomRouter, type RoomLookup } from './room/node/router.ts';
 import { createRooms, ROOM_SWEEP_PERIOD_MS, type Rooms } from './rooms/rooms.ts';
@@ -153,6 +156,13 @@ export interface StartedInstance {
   /** Resolves once the jobs a stopped instance left unended have been failed `interrupted`. */
   readonly jobsRecovered: Promise<void>;
   /**
+   * A rider's own hosted key and consent (#1199), and the test question
+   * (#1251) — built over the SAME sources the job engine is handed, which is
+   * what `instance.test.ts` reads this for. `undefined` until the store is
+   * open on an instance with accounts.
+   */
+  hostedSettings(): HostedSettings | undefined;
+  /**
    * The hosted model key (#1097), opened with `OYL_INSTANCE_SECRET_KEY` if it
    * can be — what `analysis/source.ts` §`modelForSource` is handed by the
    * job engine (#1095). `none` until the store is open.
@@ -211,6 +221,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
   let analysisModel: ModelConnection | undefined;
   let analysisJobs: AnalysisJobs | undefined;
   let hostedSettings: HostedSettings | undefined;
+  let sidePose: SidePose | undefined;
   let jobsRecovered: Promise<void> = Promise.resolve();
   let hostedKeyReported: Promise<void> = Promise.resolve();
   let instanceKeys: InstanceKeys | undefined;
@@ -371,6 +382,14 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       'analysis-model',
       analysis.kind === 'on' ? { state: 'on' } : { state: 'off', code: analysis.code },
     );
+    // The picture model (#1106): off unless the operator named one. No model name is logged.
+    logEvent(
+      log,
+      'picture-model',
+      options.config.pictures.kind === 'on'
+        ? { state: 'on' }
+        : { state: 'off', code: options.config.pictures.code },
+    );
     // The hosted model key (#1097): whether one is held, and whether this
     // secret opens it. A key that will not open — a restore onto a box with
     // another secret — is SAID, never a crash: the hosted source is then
@@ -526,24 +545,44 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       const local = analysisModel;
       // #1229: the agent's history tool searches the index this instance keeps.
       const indexed = history;
-      hostedSettings = createHostedSettings({ store, secret: () => secretKey, now });
+      // What a hosted job's model is chosen from, and (#1251) what the test
+      // question's is: one object, so the two pass the same gate.
+      const sources: SourceOptions = {
+        local,
+        hostedKey,
+        // Q10 (#1199): the athlete's own recorded consent, naming an origin.
+        recordedConsent: async (athleteId) => (await reading.getHostedConsent(athleteId))?.origin,
+        // #1223: every hosted request masked by the athlete's own guard (#1101).
+        guard: (athleteId) => readMaskingGuard(reading, athleteId),
+        behindMasking: (key, guard) => hostedBehindMasking(key, guard, options.hostedFetch),
+      };
+      hostedSettings = createHostedSettings({ store, secret: () => secretKey, now, sources });
+      // #1106: a side-camera picture, shown to the local model the operator
+      // named for pictures or to the hosted service the rider's OWN key is
+      // for. Handed no store and no log: a picture is kept nowhere.
+      const pictures = options.config.pictures;
+      sidePose = createSidePose({
+        local:
+          pictures.kind === 'on'
+            ? createLocalPictureModel({
+                settings: pictures,
+                resolve: options.resolve ?? systemResolver,
+                question: SIDE_POSE_PICTURE_QUESTION,
+              })
+            : undefined,
+        hostedKey,
+        hosted: (key) => hostedForPictures(key, options.hostedFetch),
+      });
       const jobs = createAnalysisJobs({
         store,
         engine: agentEngine({
           reads: store,
           history: indexed,
-          sources: {
-            local,
-            hostedKey,
-            // Q10 (#1199): the athlete's own recorded consent, naming an origin.
-            recordedConsent: async (athleteId) =>
-              (await reading.getHostedConsent(athleteId))?.origin,
-            // #1223: every hosted request masked by the athlete's own guard (#1101).
-            guard: (athleteId) => readMaskingGuard(reading, athleteId),
-            behindMasking: (key, guard) => hostedBehindMasking(key, guard, options.hostedFetch),
-          },
+          sources,
           clock: { now },
         }),
+        // #1243: a re-plan during the ride, on the same sources and the same reads.
+        replan: replanEngine({ reads: store, sources, clock: { now } }),
         // A hosted model needs only a secret to hold a rider's own key under
         // (#1199): a rider who has none is refused `hosted_unavailable`.
         available: async () => local !== undefined || (await secretKey) !== undefined,
@@ -592,6 +631,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
             ...(sync === undefined ? {} : { sync }),
             ...(analysisJobs === undefined ? {} : { analysis: analysisJobs }),
             ...(hostedSettings === undefined ? {} : { hostedSettings }),
+            ...(sidePose === undefined ? {} : { sidePose }),
           }),
     });
     // Whatever was synced while the model was off, or under another model, is indexed now (D-7).
@@ -659,6 +699,7 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       (identity?.heldRateLimitKeys() ?? 0) + (rooms?.heldRateLimitKeys() ?? 0),
     analysisModel: () => analysisModel,
     analysisJobs: () => analysisJobs,
+    hostedSettings: () => hostedSettings,
     jobsRecovered: opened.then(() => jobsRecovered),
     hostedModelKey: async () =>
       store === undefined ? { kind: 'none' } : hostedKeyState(store, await secretKey),

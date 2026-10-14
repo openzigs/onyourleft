@@ -72,6 +72,7 @@ import type { ShellSupportPort } from '../support/shell-support-port';
 import type { AnalysisPort } from '../analysis/store-port';
 import type { DetailPort } from '../detail/store-port';
 import type { RideAnalysisPort } from '../ride-analysis/ride-analysis-port';
+import type { HostedSettingsPort } from '../ride-analysis/hosted-settings-port';
 import type { InstanceAnalysisPort } from '../ride-analysis/instance-analysis-port';
 import type { BasemapConfig } from '../map/basemap';
 import type { MapPort } from '../map/port';
@@ -88,6 +89,7 @@ import type { CameraController } from '../camera/session';
 import type { SideCameraLinkPort } from '../camera/side-camera-link-port';
 import type { RoomPort } from '../net/room-port';
 import type { RoomsPort } from '../net/rooms-port';
+import type { SideInstancePicturesPort } from '../camera/side-instance-port';
 import type { SidePairingPort } from '../camera/side-pairing-port';
 import type { ThermalPort } from '../game/thermal-port';
 
@@ -235,6 +237,12 @@ export interface AppShellProps {
    */
   readonly sidePairing?: SidePairingPort | undefined;
   /**
+   * The rider's instance, as the Camera page asks about it to offer it the
+   * side camera's pictures (#1106). `undefined` where `main.tsx` built none,
+   * and the page then has no such section.
+   */
+  readonly sidePictures?: SideInstancePicturesPort | undefined;
+  /**
    * Other real riders — #782, #783: the room port `main.tsx` builds over the
    * instance this device is connected to. Handed to the game, which joins a
    * room only when it is given one to join (#784 is the room code).
@@ -366,6 +374,11 @@ export interface AppShellProps {
    * is what goes red for that.
    */
   readonly instanceAnalysis?: InstanceAnalysisPort | undefined;
+  /**
+   * A hosted model service on the rider's own key, held by their instance
+   * (#1251): the Instance screen's section. Absent, the section is not drawn.
+   */
+  readonly hostedSettings?: HostedSettingsPort | undefined;
   /**
    * The analysis screen's store (#78).
    *
@@ -631,6 +644,8 @@ function viewFor(
         <CameraView
           {...(props.camera === undefined ? {} : { controller: props.camera })}
           {...(props.sidePairing === undefined ? {} : { sidePairing: props.sidePairing })}
+          // #1106: the rider's instance, for the side camera's pictures.
+          {...(props.sidePictures === undefined ? {} : { sidePictures: props.sidePictures })}
         />
       );
     case 'side-camera':
@@ -705,7 +720,14 @@ function viewFor(
     case 'about':
       return <AboutView />;
     case 'instance':
-      return <InstanceView port={props.instance} moderation={props.moderation} sync={props.sync} />;
+      return (
+        <InstanceView
+          port={props.instance}
+          moderation={props.moderation}
+          sync={props.sync}
+          hostedSettings={props.hostedSettings}
+        />
+      );
     case 'moderation':
       return <ModerationView port={props.moderation} />;
     case 'credits':
@@ -979,10 +1001,7 @@ export function AppShell(props: AppShellProps): JSX.Element {
 
         {immersive ? null : (
           <footer className="oyl-footer">
-            <p>
-              On Your Left — free and open source. No account, no server: everything here stays on
-              this device.
-            </p>
+            <p>On Your Left — free and open source. Your rides are kept on this device.</p>
           </footer>
         )}
       </div>

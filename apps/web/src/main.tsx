@@ -16,6 +16,7 @@ import {
   activityId,
   cameraFrameId,
   ensureDeviceSigningKey,
+  lapId,
   openActivityStore,
   recordingSessionId,
   routeId,
@@ -73,7 +74,14 @@ import {
   pendingJobForgetter,
 } from './ride-analysis/instance-analysis';
 import type { InstanceAnalysisPort } from './ride-analysis/instance-analysis-port';
+import {
+  createHostedSettingsPort,
+  readHostedOffer,
+  sendMaskingGuard,
+} from './ride-analysis/hosted-settings';
+import type { HostedSettingsPort } from './ride-analysis/hosted-settings-port';
 import { jobSessionOf } from './ride-analysis/instance-job';
+import { createReplanPort, type ReplanPort } from './workout/replan-port';
 import type { RideAnalysisPort } from './ride-analysis/ride-analysis-port';
 import { hostedStepPort } from './ride-analysis/hosted-step';
 import { hostedModelEraser, readHostedModel } from './camera/hosted-model';
@@ -86,6 +94,14 @@ import { documentForeground, SecureWindow } from './camera/secure-window';
 import { NO_SECURE_WINDOW } from './camera/secure-window-port';
 import { workerPoseEstimator } from './camera/pose-estimator';
 import { chooseSideAnalyser, readSideAnalyserOnComputer } from './camera/side-analyser';
+import {
+  instancePoseEstimator,
+  readSideInstanceChoice,
+  sidePictureSessionOf,
+} from './camera/instance-pose';
+import type { SideInstancePicturesPort } from './camera/side-instance-port';
+import type { SidePoseEstimator } from './camera/side-analysis-port';
+import { hostedKeyServiceReader } from './instance/hosted-service';
 import { SideAnalysis } from './camera/side-analysis';
 import { sideReportKeeper } from './camera/side-report-keeper';
 import { sidePairingPort } from './camera/side-link';
@@ -126,6 +142,7 @@ import {
   type InstancePort,
 } from './instance/instance-port';
 import type { LoadedFrom } from './instance/instance-pin';
+import { readInstanceAccount } from './instance/sign-in';
 import { createModerationPort, type ModerationPort } from './instance/moderation-port';
 import { createSyncPort, type SyncPort } from './instance/sync-port';
 import { rideSummaryOf } from './ride-analysis/ride-summary';
@@ -270,6 +287,7 @@ async function buildPlatform(
   probe: CapabilityProbe,
   camera: CameraController | undefined,
 ): Promise<ClientPlatform> {
+  const replan = buildReplanPort();
   const shared = {
     // #390. The camera answers "is anybody on the bike" for every recorder the
     // ride controller builds — advisory to its auto-pause and nothing else,
@@ -279,6 +297,12 @@ async function buildPlatform(
     // is GREEN in `check:wiring` (§Limits, "an optional parameter nobody
     // supplies") and in every test — `ride/presence-port.ts` records the gap.
     ...(camera === undefined ? {} : { presence: camera }),
+    // #1244. Re-plans during the ride: the rider's instance, goals and saved
+    // workouts behind one port. ⚠️ An optional option, as `presence` above
+    // is, so dropping this line is green in `check:wiring`; what holds the
+    // port's four methods is `WIRE003`, and `ride/controller.test.ts` §"#1244"
+    // drives the controller with one. Absent, no workout is ever re-planned.
+    ...(replan === undefined ? {} : { replan }),
     store: localStore(),
     athleteId: LOCAL_ATHLETE,
     // `crypto.randomUUID()` rather than a counter: two tabs recording at once
@@ -292,6 +316,8 @@ async function buildPlatform(
     rideSave: {
       store: localStore(),
       newActivityId: () => activityId(globalThis.crypto.randomUUID()),
+      // #1312: one for each lap of a course a game ride completed.
+      newLapId: () => lapId(globalThis.crypto.randomUUID()),
       // #232: a file the rider decides was a course after all. A separate
       // generator rather than a cast, for the reason `store-port.ts` gives.
       newRouteId: () => routeId(globalThis.crypto.randomUUID()),
@@ -767,6 +793,34 @@ function buildRiderTextPort(): RiderTextPort {
   };
 }
 
+/**
+ * Re-plans during the ride (#1244, ADR 0048 D-10): the ONE production place
+ * the port is built, so `check:wiring` reports `createReplanPort` if this
+ * goes. Over the sealed session the Connect screen keeps (#1192) and the one
+ * instance module (ADR 0036 D-3 (a)): the re-plan routes are sealed-only, so
+ * a device with no sealed session sends nothing.
+ *
+ * `undefined` where there is no `localStorage` or no WebCrypto, as the
+ * Connect screen's port. A rider there rides the workout they loaded.
+ */
+function buildReplanPort(): ReplanPort | undefined {
+  if (typeof localStorage === 'undefined' || globalThis.crypto?.subtle === undefined) {
+    return undefined;
+  }
+  const storage = localStorage;
+  const sealed = heldSealedSession({
+    storage,
+    loadedFrom: loadedFrom(),
+    signingKey: () => ensureDeviceSigningKey(localStore(), LOCAL_ATHLETE),
+  });
+  return createReplanPort({
+    store: localStore(),
+    athleteId: LOCAL_ATHLETE,
+    connected: () => heldInstanceSession(storage) !== undefined,
+    session: async () => jobSessionOf(await sealed()),
+  });
+}
+
 /** The workout goals panel's port (#1237): the local store, scoped to the local athlete. */
 function buildWorkoutGoalsPort(): WorkoutGoalsPort {
   return {
@@ -1027,6 +1081,16 @@ function buildInstanceAnalysis(
     now: () => unixSeconds(Math.floor(Date.now() / 1000)),
     pending: storage,
     syncBase: localStore(),
+    // #1251: hosted is offered only where the instance last said it holds the
+    // rider's own key and their consent naming it, and its masking list is
+    // made current before every hosted job.
+    hosted: {
+      endpoint: () => readHostedOffer(storage, readInstanceAccount(storage)?.origin),
+      sendGuard: (session) =>
+        sendMaskingGuard(session.channel, session.token, () =>
+          readMaskingGuard(localStore(), LOCAL_ATHLETE),
+        ),
+    },
     ...(rideController === undefined
       ? {}
       : {
@@ -1036,6 +1100,85 @@ function buildInstanceAnalysis(
           },
         }),
   });
+}
+
+/**
+ * A hosted model service on the rider's own key, held by their instance
+ * (#1251): the ONE production place its port is built, so `check:wiring`
+ * reports `createHostedSettingsPort` if this goes. Over the sealed session the
+ * Connect screen keeps (#1192) and the one instance module (ADR 0036 D-3 (a)):
+ * every route it calls is sealed-only, so a device with no sealed session
+ * sends nothing and the section says why.
+ *
+ * `undefined` where there is no `localStorage` or no WebCrypto, as the
+ * Connect screen's port.
+ */
+function buildHostedSettings(): HostedSettingsPort | undefined {
+  if (typeof localStorage === 'undefined' || globalThis.crypto?.subtle === undefined) {
+    return undefined;
+  }
+  const storage = localStorage;
+  return createHostedSettingsPort({
+    session: heldSealedSession({
+      storage,
+      loadedFrom: loadedFrom(),
+      signingKey: () => ensureDeviceSigningKey(localStore(), LOCAL_ATHLETE),
+    }),
+    storage,
+    guard: () => readMaskingGuard(localStore(), LOCAL_ATHLETE),
+  });
+}
+
+/**
+ * The rider's instance, for the side camera's pictures (#1106): what the
+ * Camera page asks about it, and the estimator that sends it a picture. The
+ * ONE production place either is built.
+ *
+ * ⚠️ **What holds each hand-off, and the one nothing does.** The port's two
+ * methods are watched by `check:wiring` (`side-instance-port.ts`), so a view
+ * that stops calling one is a red run. The estimator reaches a pairing through
+ * `chooseSideAnalyser`'s REQUIRED `instance` key, so leaving it out does not
+ * compile. `shell/AppShell.test.tsx` holds the shell handing the port on to
+ * the Camera page. **This file handing the port to the shell is held by
+ * nothing but a reader**: `sidePictures` is an optional prop, as
+ * `sidePairing` beside it is.
+ *
+ * ⚠️ **Sealed, or nothing.** Both go through the sealed session the Connect
+ * screen keeps (`heldSealedSession`, #1192) and the one instance module (ADR
+ * 0036 D-3 (a)): there is no plaintext call here to fall back to, so a device
+ * with no sealed session sends no picture and the screen says so.
+ *
+ * `undefined` where there is no `localStorage` or no WebCrypto, as the
+ * Connect screen's port.
+ */
+function buildSidePictures():
+  | { readonly port: SideInstancePicturesPort; readonly estimator: () => SidePoseEstimator }
+  | undefined {
+  if (typeof localStorage === 'undefined' || globalThis.crypto?.subtle === undefined) {
+    return undefined;
+  }
+  const storage = localStorage;
+  const sealed = heldSealedSession({
+    storage,
+    loadedFrom: loadedFrom(),
+    signingKey: () => ensureDeviceSigningKey(localStore(), LOCAL_ATHLETE),
+  });
+  // The instance signed in to NOW: what the rider agreed to is stored against
+  // its address, so it does not carry over to another instance.
+  const origin = (): string | undefined =>
+    heldInstanceSession(storage) === undefined ? undefined : readInstanceAccount(storage)?.origin;
+  return {
+    port: {
+      sideInstanceOrigin: origin,
+      askHostedPictureService: hostedKeyServiceReader(sealed),
+    },
+    estimator: () =>
+      instancePoseEstimator({
+        // Read for every picture: switching it off stops the next one.
+        choice: () => readSideInstanceChoice(origin()),
+        session: async () => sidePictureSessionOf(await sealed()),
+      }),
+  };
 }
 
 /**
@@ -1185,6 +1328,8 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
     rideController === undefined
       ? undefined
       : sideReportKeeper({ rides: rideController, store: localStore(), athleteId: LOCAL_ATHLETE });
+  // #1106: built once, so every pairing asks the same sealed session.
+  const sidePictures = buildSidePictures();
   const sidePairing = sideLinkAvailable()
     ? sidePairingPort({
         // #557: the tablet stays awake while it pairs and while it is paired.
@@ -1194,10 +1339,15 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           // model, only when the rider switched the side camera over to it AND
           // their computer is saved and switched on. Chosen once per pairing,
           // and re-read for every picture so switching off stops the next one.
+          // #1106: or the rider's instance, sealed, when they switched the
+          // side camera over to it and this device is signed in to one.
           const analyser = chooseSideAnalyser({
             onComputer: () => readSideAnalyserOnComputer(),
             computer: riderAnalysis,
             tablet: () => workerPoseEstimator(),
+            onInstance: () =>
+              readSideInstanceChoice(sidePictures?.port.sideInstanceOrigin()) !== undefined,
+            instance: sidePictures?.estimator,
           });
           return new SideAnalysis({
             control,
@@ -1217,6 +1367,8 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
   const moderation = buildModerationPort();
   // #1195: built once, so a second press joins the sync already running.
   const sync = buildSyncPort();
+  // #1251: built once, for the Connect screen's reason above.
+  const hostedSettings = buildHostedSettings();
   // #782: built once, for the Connect screen's reason above.
   const room = buildRoomPort(rideController);
   // #784, #785: built once, for the same reason.
@@ -1238,6 +1390,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           {...(platform.shell === undefined ? {} : { shell: platform.shell })}
           {...(camera === undefined ? {} : { camera })}
           {...(sidePairing === undefined ? {} : { sidePairing })}
+          {...(sidePictures === undefined ? {} : { sidePictures: sidePictures.port })}
           {...(platform.thermal === undefined ? {} : { thermal: platform.thermal })}
           settings={buildUnitsPort()}
           athleteMass={buildAthleteMassPort()}
@@ -1252,6 +1405,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           {...(instance === undefined ? {} : { instance })}
           {...(moderation === undefined ? {} : { moderation })}
           {...(sync === undefined ? {} : { sync })}
+          {...(hostedSettings === undefined ? {} : { hostedSettings })}
           {...(room === undefined ? {} : { room })}
           {...(rooms === undefined ? {} : { rooms })}
           // #623: the stored kit colour, undefaulted — `game/bicycle.ts`

@@ -3,6 +3,7 @@
 import Dexie from 'dexie';
 import {
   beatsPerMinute,
+  revolutionsPerMinute,
   metres,
   seconds,
   unixSeconds,
@@ -569,6 +570,42 @@ describe('persistence — the write must be visible to a reader that was not the
 
       expect(laps.map((each) => each.ordinal)).toEqual([0, 1, 2]);
       expect(laps[0]?.athleteId).toBe(ATHLETE_A);
+    } finally {
+      await harness.destroy();
+    }
+  });
+
+  // #1312: the figures a course lap states, read back by a connection that
+  // did not write them — and a part lap is still a part lap after a reload.
+  it("a lap's power, heart rate, cadence, climb and part-lap mark survive a close and reopen", async () => {
+    const harness = createStoreHarness();
+    try {
+      const ride = indoorRide();
+      await harness.write(async (fresh) => {
+        await fresh.putAthlete(athlete());
+        await fresh.putActivity(ride);
+      });
+      const figures = {
+        averagePower: watts(203),
+        maxPower: watts(618),
+        averageHeartRate: beatsPerMinute(151),
+        maxHeartRate: beatsPerMinute(173),
+        averageCadence: revolutionsPerMinute(91),
+        ascent: metres(48),
+      };
+
+      const laps = await harness.roundTrip(
+        async (fresh) => {
+          await fresh.putLap(lap(ride, 0, figures));
+          await fresh.putLap(lap(ride, 1, { partial: true }));
+        },
+        async (fresh) => fresh.listLaps(ATHLETE_A, ride.id),
+      );
+
+      expect(laps[0]).toMatchObject(figures);
+      expect(laps[0]).not.toHaveProperty('partial');
+      expect(laps[1]?.partial).toBe(true);
+      expect(laps[1]).not.toHaveProperty('maxPower');
     } finally {
       await harness.destroy();
     }

@@ -122,7 +122,7 @@ function natural(across: number, top: number): Reach {
  *
  * | kind | stylised across / top | set by | realistic across / top | set by |
  * |---|--:|---|--:|---|
- * | `tree-broadleaf` | 2.2 / 4.4 | the fallback sphere; `tree_oak`, 1.75 m | 3.0 / 4.5 | `island_tree_02`, 2.97 m; `tree_small_02`, 4.42 m |
+ * | `tree-broadleaf` | 2.2 / 4.4 | the fallback sphere; `tree_oak`, 1.75 m | 3.0 / 4.5 | `island_tree_02` and `generated_oak_a`, 2.97 m; `tree_small_02`, 4.42 m |
  * | `tree-conifer` | 2.45 / 7 | `tree_pineRoundD`, 2.40 m | 3.65 / 7.1 | `fir_sapling_medium_a`, 3.55 m and 7.03 m |
  * | `shrub` | 1.15 / 1.6 | `plant_bush`, 1.13 m; the sphere, 1.4 m | 1.1 / 1.6 | `shrub_02_c`, 1.03 m; `shrub_02_a`, 1.54 m |
  * | `rock` | 1.3 / 1.8 | `stone_largeC`, 1.25 m; the octahedron | 1.15 / 1.0 | `boulder_01`, 1.10 m and 0.98 m |
@@ -133,6 +133,21 @@ function natural(across: number, top: number): Reach {
  * realistic scan keeps its own pivot, and its thinned cards grow past the scan
  * (`tools/realistic/blender/process_tree.py`), so a fir's branches reach half
  * its height.
+ *
+ * ⚠️ **A generated broadleaf (#1283) is inside the scans' 3.0 m, and not by
+ * construction.** It stands with its trunk on its pivot and is fitted so that
+ * nothing of it is further than 2.2 m from the trunk in plan
+ * (`tools/realistic/generated-trees.ts` §`treeSize`); the BOX this bound is
+ * held against is square to the axes, and a box round a 2.2 m circle can have
+ * its corner at 2.2 · √2 = 3.111 m. The four committed are 2.97, 2.96, 2.86
+ * and 2.65 m. A third oak seed made for #1283 and not kept was 3.03 m: a seed
+ * added later may need this bound moved, and `near-field.test.ts` is what
+ * will say so.
+ *
+ * ⚠️ **A generated fir (#1294) is well inside the scanned firs' 3.65 m and
+ * 7.1 m**, which are still the conifer's bound because the scans still ship:
+ * the two committed are 4.03 m and 3.84 m across about the trunk and 6.91 m
+ * and 6.75 m tall, and the world fits either to 7 m.
  */
 const NATURAL_REACH: Readonly<Record<DrawnWorld, Readonly<Record<NaturalKind, Reach>>>> = {
   stylised: {

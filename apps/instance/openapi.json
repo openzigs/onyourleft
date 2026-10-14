@@ -906,6 +906,12 @@
                         "setAt": {
                           "type": "integer"
                         },
+                        "reasoningTokens": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
+                        },
                         "setBy": {
                           "type": "string",
                           "enum": [
@@ -918,6 +924,7 @@
                         "url",
                         "model",
                         "setAt",
+                        "reasoningTokens",
                         "setBy"
                       ],
                       "additionalProperties": false
@@ -1032,6 +1039,12 @@
                         "setAt": {
                           "type": "integer"
                         },
+                        "reasoningTokens": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
+                        },
                         "setBy": {
                           "type": "string",
                           "enum": [
@@ -1044,6 +1057,7 @@
                         "url",
                         "model",
                         "setAt",
+                        "reasoningTokens",
                         "setBy"
                       ],
                       "additionalProperties": false
@@ -1140,6 +1154,12 @@
                         "setAt": {
                           "type": "integer"
                         },
+                        "reasoningTokens": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
+                        },
                         "setBy": {
                           "type": "string",
                           "enum": [
@@ -1152,6 +1172,7 @@
                         "url",
                         "model",
                         "setAt",
+                        "reasoningTokens",
                         "setBy"
                       ],
                       "additionalProperties": false
@@ -1216,7 +1237,7 @@
     "/v1/analysis/hosted/key": {
       "post": {
         "operationId": "setHostedModelKey",
-        "summary": "Store your own hosted model key, encrypted under the instance’s secret, replacing any you stored. `url` is the service’s `https:` base URL. A key at another origin than your consent names withdraws that consent; one at the same origin keeps it. The operator of this instance could technically read a key you store here. `unavailable` on an instance with no secret to encrypt it under, before the key is read.",
+        "summary": "Store your own hosted model key, encrypted under the instance’s secret, replacing any you stored. `url` is the service’s `https:` base URL. A key at another origin than your consent names withdraws that consent; one at the same origin keeps it. `reasoningTokens` (DRAFT wording) is optional: say your model reasons before it answers, and the tokens one turn may spend on that, 1 to 16384, beside the answer’s own 1 024; absent or null, the instance finds out from the model’s replies. It replaces the figure of any earlier key. The operator of this instance could technically read a key you store here. `unavailable` on an instance with no secret to encrypt it under, before the key is read.",
         "security": [
           {
             "session": []
@@ -1238,6 +1259,12 @@
                   },
                   "key": {
                     "type": "string"
+                  },
+                  "reasoningTokens": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
                   }
                 },
                 "required": [
@@ -1274,6 +1301,12 @@
                         "setAt": {
                           "type": "integer"
                         },
+                        "reasoningTokens": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
+                        },
                         "setBy": {
                           "type": "string",
                           "enum": [
@@ -1286,6 +1319,7 @@
                         "url",
                         "model",
                         "setAt",
+                        "reasoningTokens",
                         "setBy"
                       ],
                       "additionalProperties": false
@@ -1382,6 +1416,12 @@
                         "setAt": {
                           "type": "integer"
                         },
+                        "reasoningTokens": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
+                        },
                         "setBy": {
                           "type": "string",
                           "enum": [
@@ -1394,6 +1434,7 @@
                         "url",
                         "model",
                         "setAt",
+                        "reasoningTokens",
                         "setBy"
                       ],
                       "additionalProperties": false
@@ -1422,6 +1463,76 @@
                   "required": [
                     "key",
                     "consent"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/analysis/hosted/test": {
+      "post": {
+        "operationId": "sendHostedTestQuestion",
+        "summary": "Send your hosted service one test question that carries none of your data (#1251): two fixed sentences, on your own key, to the origin your consent names. It passes the same checks as a hosted job, and is limited to a few every ten minutes, one at a time (`rate_limited`, with nothing sent), so `not-ready` — with nothing sent — means a job would be refused `hosted_unavailable`: no key of your own, no consent naming its origin, or no masking list on this instance. The answer is `result` and whether the model reasoned first; nothing the service said is returned.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "result": {
+                      "type": "string",
+                      "enum": [
+                        "answered",
+                        "no-answer",
+                        "not-ready",
+                        "refused",
+                        "unreachable",
+                        "timed-out",
+                        "failed"
+                      ]
+                    },
+                    "reasoned": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "result",
+                    "reasoned"
                   ],
                   "additionalProperties": false
                 }
@@ -1563,7 +1674,7 @@
     "/v1/analysis/jobs/{jobId}": {
       "get": {
         "operationId": "getAnalysisJob",
-        "summary": "Your job's status, when it was made and ended (Unix milliseconds), and — when it failed — why, one of `out-of-steps`, `out-of-tool-calls`, `out-of-time`, `out-of-tokens`, `model-without-tools`, `model-not-local`, `model-unreachable`, `model-refused`, `model-error`, `model-cut-off`, `model-malformed`, `local_unavailable`, `hosted_unavailable`, `interrupted`, `engine-error`.",
+        "summary": "Your job's status, when it was made and ended (Unix milliseconds), and — when it failed — why, one of `out-of-steps`, `out-of-tool-calls`, `out-of-time`, `out-of-tokens`, `model-without-tools`, `model-not-local`, `model-unreachable`, `model-refused`, `model-error`, `model-cut-off`, `model-no-answer`, `model-malformed`, `not-a-proposal`, `local_unavailable`, `hosted_unavailable`, `interrupted`, `engine-error`.",
         "parameters": [
           {
             "name": "jobId",
@@ -1813,7 +1924,7 @@
               "text/event-stream": {
                 "schema": {
                   "type": "string",
-                  "description": "Each event: `id:` (1, 2, … per job), `event:` (`progress` `{ step, tool? }` — a tool by name only; `section` `{ index, text }` — screened text; `withdrawn` `{}` — every section so far is retracted; `result` `{ status, failure?, writeUp?, reasons? }`) and one `data:` line of JSON. No event carries a tool’s arguments or results."
+                  "description": "Each event: `id:` (1, 2, … per job), `event:` (`progress` `{ step, tool? }` — a tool by name only; `section` `{ index, text }` — screened text; `withdrawn` `{}` — every section so far is retracted; `result` `{ status, failure?, writeUp?, reasons?, proposal? }`) and one `data:` line of JSON. No event carries a tool’s arguments or results. A re-plan’s stream holds `progress` and `result` only, and its `result` carries `proposal` and never text."
                 }
               }
             }
@@ -1841,6 +1952,108 @@
           },
           "503": {
             "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/analysis/replans": {
+      "post": {
+        "operationId": "startReplanJob",
+        "summary": "Queue a re-plan of the workout you are riding (ADR 0048), on a model this instance reaches (`source`: `instance-local`, or `instance-hosted` on your own key only). `input` is `{ revision, summarySeq, currentBlock, goals, blocks, summaries }`: the plan's revision and the summary's number, the block being ridden, your typed workout goals, the plan's blocks as shares of threshold power with no label, and one summary for each block ridden (seconds, heart rate, seconds in range, mean power as a share, cadence, rescues, an effort check-in). Its exact shape and nothing else, no picture, at most 8 KiB. `templateVersion` is `re-plan-1`. Answers 202 at once with a job's id; read, follow, cancel and acknowledge it through the job routes. Its `result` event is `{ status: \"succeeded\", proposal }`, where `proposal` is one `{ revision, summarySeq, move, reason }` from the closed lists of moves and reasons, or `null` when the workout should stay as it is; or `{ status: \"failed\", failure }` with no proposal. It carries no text, and the instance changes nothing: your device decides whether to apply a proposal. `job_running` while you have a job of either kind queued or running, `rate_limited` past 24 re-plans an hour on an instance with the default limits, and `analysis_off` when this instance has no model at all.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "input": {
+                    "type": "object",
+                    "description": "A re-plan input (#1243)."
+                  },
+                  "templateVersion": {
+                    "type": "string"
+                  },
+                  "source": {
+                    "type": "string",
+                    "enum": [
+                      "instance-local",
+                      "instance-hosted"
+                    ]
+                  }
+                },
+                "required": [
+                  "input",
+                  "templateVersion",
+                  "source"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "jobId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "jobId"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "409": {
+            "$ref": "#/components/responses/job_running"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "description": "One of `unavailable`, `analysis_off`, in the one error shape.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           }
         }
       }
@@ -3913,6 +4126,112 @@
           },
           "503": {
             "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/camera/side-pose": {
+      "post": {
+        "operationId": "lookAtSidePicture",
+        "summary": "Show ONE side-camera picture to a model and answer what it said (#1106). `picture` is a JPEG of at most 64 KiB, base64, carrying no location or device metadata. `source` is `instance-local` (the model this instance’s operator named for pictures, on the box) or `instance-hosted` (the hosted service YOUR OWN key is for, never anybody else’s), and with `instance-hosted` `endpoint` is the `https:` origin your own consent to send pictures there names: a key at another origin is refused `picture_source_unavailable`. The model is asked one fixed question and sent the picture and nothing else. **The picture is not stored**: not in a table, a file or a log; it is dropped with the request. `answer` is the model’s own text, unread, for your device to read as numbers or nothing. Reached only sealed, on every instance: one that holds no keys answers `sealed_required`. `rate_limited` while another picture of yours is with the model; `pictures_off` when no local model is named for pictures; `model_without_pictures` when the model said it takes none; `picture_model_failed` when it gave no usable answer.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "picture": {
+                    "type": "string"
+                  },
+                  "source": {
+                    "type": "string",
+                    "enum": [
+                      "instance-local",
+                      "instance-hosted"
+                    ]
+                  },
+                  "endpoint": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "picture",
+                  "source"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "answer": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "answer"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "409": {
+            "$ref": "#/components/responses/picture_source_unavailable"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "422": {
+            "$ref": "#/components/responses/model_without_pictures"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "502": {
+            "$ref": "#/components/responses/picture_model_failed"
+          },
+          "503": {
+            "description": "One of `unavailable`, `pictures_off`, in the one error shape.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           }
         }
       }
@@ -6697,6 +7016,7 @@
                   "confirmation_superseded",
                   "not_suspended",
                   "job_running",
+                  "picture_source_unavailable",
                   "payload_too_large",
                   "file_type_unsupported",
                   "file_undecodable",
@@ -6706,10 +7026,13 @@
                   "record_content_mismatch",
                   "record_not_your_key",
                   "record_key_revoked",
+                  "model_without_pictures",
                   "rate_limited",
                   "internal",
+                  "picture_model_failed",
                   "unavailable",
-                  "analysis_off"
+                  "analysis_off",
+                  "pictures_off"
                 ]
               },
               "message": {
@@ -7089,6 +7412,16 @@
           }
         }
       },
+      "picture_source_unavailable": {
+        "description": "`picture_source_unavailable` (409), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
       "payload_too_large": {
         "description": "`payload_too_large` (413), in the one error shape.",
         "content": {
@@ -7179,6 +7512,16 @@
           }
         }
       },
+      "model_without_pictures": {
+        "description": "`model_without_pictures` (422), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
       "rate_limited": {
         "description": "`rate_limited` (429), in the one error shape.",
         "content": {
@@ -7199,6 +7542,16 @@
           }
         }
       },
+      "picture_model_failed": {
+        "description": "`picture_model_failed` (502), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
       "unavailable": {
         "description": "`unavailable` (503), in the one error shape.",
         "content": {
@@ -7211,6 +7564,16 @@
       },
       "analysis_off": {
         "description": "`analysis_off` (503), in the one error shape.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "pictures_off": {
+        "description": "`pictures_off` (503), in the one error shape.",
         "content": {
           "application/json": {
             "schema": {

@@ -15,7 +15,7 @@ import {
   swayAt,
   WOOD_SWAY_SHARE,
 } from './foliage-light';
-import { REALISTIC_VEGETATION, realisticFiles } from './realistic-assets';
+import { REALISTIC_TREE_SETS, realisticFiles, realisticVegetation } from './realistic-assets';
 
 describe('the far band’s light and the breeze — #630', () => {
   it('knows where the script’s sun was: high in the south-east of the plant’s own frame', () => {
@@ -48,14 +48,22 @@ describe('the far band’s light and the breeze — #630', () => {
   });
 
   it('bakes a normal strip for every tree that has an impostor, and ships it', () => {
-    for (const models of Object.values(REALISTIC_VEGETATION)) {
-      for (const model of models) {
-        expect(model.impostorNormals === undefined).toBe(model.impostor === undefined);
-        if (model.impostorNormals !== undefined) {
-          expect(realisticFiles()).toContain(model.impostorNormals);
+    // #1283, #1294: of every set — a generated tree's strip is lit as a scan's is.
+    let strips = 0;
+    for (const trees of REALISTIC_TREE_SETS) {
+      for (const models of Object.values(realisticVegetation(trees))) {
+        for (const model of models) {
+          expect(model.impostorNormals === undefined).toBe(model.impostor === undefined);
+          if (model.impostorNormals !== undefined) {
+            expect(realisticFiles()).toContain(model.impostorNormals);
+            strips += 1;
+          }
         }
       }
     }
+    // Non-vacuity: three sets — six generated trees, four generated
+    // broadleaves beside two scanned firs, and four scans.
+    expect(strips).toBe(6 + 6 + 4);
   });
 
   it('sways with the ride’s clock, is still when the clock is, and no two phases move alike', () => {

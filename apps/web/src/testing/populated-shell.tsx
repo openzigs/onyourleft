@@ -80,6 +80,10 @@ import { DRAFT_STORAGE_KEY, serialiseDraft } from '../routing/draft-storage';
 import { stubMatchPort } from '../segments/match-testing';
 import { stubSegments } from '../segments/testing';
 import { scriptedInstance, scriptedModeration } from '../instance/testing';
+import {
+  SCRIPTED_HOSTED_KEY,
+  scriptedHostedSettings,
+} from '../ride-analysis/hosted-settings-testing';
 import { AppShell, type AppShellProps } from '../shell/AppShell';
 import type { RouteId } from '../shell/routes';
 import type { CapabilityProbe } from '../support/bluetooth-support';
@@ -101,6 +105,24 @@ const ORIGIN = { latitude: 51.5, longitude: -0.12 };
 
 /** The ride and the segment the populated fixtures hold. */
 const RIDE_ID = 'ride-0';
+
+/** Moving s, elapsed s, metres, average W, best W, average bpm, highest bpm, metres climbed. */
+const POPULATED_LAPS: readonly (readonly [
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+])[] = [
+  [612, 640, 7_000, 201, 412, 148, 166, 96],
+  [590, 598, 7_000, 214, 455, 153, 171, 96],
+  [571, 571, 7_000, 226, 498, 158, 176, 96],
+  [604, 604, 7_000, 208, 430, 156, 172, 96],
+  [187, 187, 2_150, 195, 388, 154, 165, 31],
+];
 const SEGMENT_ID = 'the-drag';
 
 /**
@@ -446,6 +468,7 @@ function instanceAnalysisPort(populated: boolean): InstanceAnalysisPort {
   return {
     connected: () => populated,
     availableSources: () => (populated ? ['instance-local'] : []),
+    hostedEndpoint: () => undefined,
     pendingJob: () => false,
     ask: async () => new Promise<InstanceAskOutcome>(() => undefined),
     followAgain: async () => Promise.resolve({ kind: 'detached' }),
@@ -473,8 +496,25 @@ function detailPort(populated: boolean): ReturnType<typeof stubDetail> {
       latitude: track.map((position) => position.latitude),
       longitude: track.map((position) => position.longitude),
     },
-    laps: Array.from({ length: 12 }, (_unused, index) =>
-      stubLap(index, { activityId: activityId(RIDE_ID), athleteId: ATHLETE }),
+    // #1312: laps of a course with every figure a lap can state, the third
+    // the best and the last a part lap — the widest lap table there is, so
+    // the reflow walk and `list-detail.browser.spec.ts` §"#1312" lay it out.
+    laps: POPULATED_LAPS.map(
+      ([moving, elapsed, distance, power, best, heart, highest, climb], index) =>
+        stubLap(index, {
+          activityId: activityId(RIDE_ID),
+          athleteId: ATHLETE,
+          movingTime: seconds(moving),
+          elapsedTime: seconds(elapsed),
+          distance: metres(distance),
+          averagePower: watts(power),
+          maxPower: watts(best),
+          averageHeartRate: beatsPerMinute(heart),
+          maxHeartRate: beatsPerMinute(highest),
+          averageCadence: revolutionsPerMinute(88 + (index % 4)),
+          ascent: metres(climb),
+          ...(index === POPULATED_LAPS.length - 1 ? { partial: true as const } : {}),
+        }),
     ),
     // #805: a long write-up, with paragraphs and one unbreakable string, so
     // the reflow walk lays it out at 320 px — and a pose summary and two
@@ -780,6 +820,9 @@ export function PopulatedShell({
       riderText={riderTextPort(populated)}
       workoutGoals={workoutGoalsPort(populated)}
       instance={scriptedInstance({ connected: populated }).port}
+      // #1251: a key held and not yet agreed to, so the key form, who could
+      // read the key and the whole consent beside its switch are laid out.
+      hostedSettings={scriptedHostedSettings({ key: SCRIPTED_HOSTED_KEY, consent: null }).port}
       moderation={
         scriptedModeration({
           standing: populated ? 'moderator' : 'not-moderator',

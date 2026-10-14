@@ -58,6 +58,7 @@
 import type { JSX, ReactNode } from 'react';
 
 import { RIDE_SIZE_CLASS } from '../../design/Button';
+import { REPLAN_KEEP_BUTTON } from '../../workout/replan-disclosure';
 import { useUnits } from '../../units/context';
 
 import {
@@ -74,6 +75,8 @@ import {
   type TrainerLine,
 } from './fields';
 import { PlanTrace } from './PlanTrace';
+import { WorkoutStrip } from '../../workout/WorkoutGraph';
+import type { WorkoutGraphInput } from '../../workout/workout-graph';
 
 /**
  * The smallest a mid-ride control may be, in CSS pixels.
@@ -116,6 +119,11 @@ export interface HudPanelProps extends Omit<HudInput, 'units'> {
    * rather than a tenth grid field.
    */
   readonly trainer?: TrainerLine | undefined;
+  /**
+   * The workout in progress, for its graph — #1307. `undefined` on an
+   * ordinary game ride, which draws the route plan as it always has.
+   */
+  readonly workout?: WorkoutGraphInput | undefined;
   /**
    * Anything the ride has to *say* — a fault, a road that is not reaching the
    * trainer — laid out by the HUD so that it cannot land on a panel (#423).
@@ -183,6 +191,18 @@ export interface HudPanelProps extends Omit<HudInput, 'units'> {
    * ride with no room, and when nobody else is near.
    */
   readonly onFollowNext?: (() => void) | undefined;
+  /**
+   * *Keep the plan* — #1244, ADR 0048 D-7: set only while an accepted re-plan
+   * waits for the workout's next block, so the control is on the HUD exactly
+   * when there is a change to refuse, and a rider does not leave the game to
+   * refuse it. `undefined` at every other time, and on a ride with no workout.
+   *
+   * ⚠️ **On a row of its own under *Pause* and *End ride***, which keep their
+   * places. It is a ride-time control (`design/ride-time-controls.ts`) at
+   * #669's 48 px. `browser/ride.browser.spec.ts` §"#1244" measures it inside
+   * the viewport, and no panel over the rider at the tablet viewports.
+   */
+  readonly onKeepPlan?: (() => void) | undefined;
   readonly standingNotice?:
     | {
         readonly content: ReactNode;
@@ -190,6 +210,24 @@ export interface HudPanelProps extends Omit<HudInput, 'units'> {
         readonly onToggle: () => void;
       }
     | undefined;
+  /**
+   * The lap of the course that has just ended — #1312: `GameView` hands it in
+   * for a few seconds of ride after each lap, and `undefined` otherwise.
+   *
+   * ⚠️ **Shown only when the notice cell is otherwise EMPTY** — no fault, no
+   * safety notice ({@link notices}), and no standing notice open. On a phone
+   * the cell is the route panel's (#437) and it holds one notice well and two
+   * badly: #585 and #647 each measured a pair of notices running over the
+   * rider or pushing *End ride* off the stage. A lap is the one notice that
+   * is nothing to act on, so it is the one that gives way; its sentence is
+   * still said by the HUD's one region to a rider with announcements on
+   * (`announce.ts`, rank 5e — with them off a lap that gives way is neither
+   * shown nor said), and its figures are on the ride's page afterwards. Decided here rather than in `GameView` so that the rule
+   * reads the notices that ARE rendered, not a second list of their
+   * conditions. `browser/ride.browser.spec.ts` §"#1312" measures it alone at
+   * every overlay viewport.
+   */
+  readonly lapNotice?: ReactNode;
 }
 
 /** The id the notice toggle's `aria-controls` names. One HUD per page. */
@@ -198,7 +236,13 @@ export const STANDING_NOTICE_ID = 'oyl-hud-standing-notice';
 export function HudPanel(props: HudPanelProps): JSX.Element {
   const units = useUnits();
   const readings = hudReadings({ ...props, units });
-  const elevation = profileReading(props.state, props.profile);
+  // #1312: the lap's time joins the lap's number in the strip's sentence.
+  const elevation = profileReading(props.state, props.profile, props.lapSeconds);
+  // #1312: a lap gives way to every other notice. @see HudPanelProps.lapNotice
+  const lap =
+    hasContent(props.notices) || props.standingNotice?.expanded === true
+      ? undefined
+      : props.lapNotice;
 
   return (
     <section className="oyl-hud" aria-label="Ride metrics">
@@ -235,7 +279,18 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
           through `plan.ts` §`planProgress`; before it, the strip clamped and
           this comment recorded why the plan view could not read its number.
         */}
-        <PlanTrace profile={props.profile} distance={props.state.ride.distance} />
+        {props.workout === undefined ? (
+          <PlanTrace profile={props.profile} distance={props.state.ride.distance} />
+        ) : (
+          // #1307: while a workout runs, its strip takes the route plan's
+          // place and its size — `oyl-hud__plan-svg` sizes both — so this
+          // panel is the height it was and covers no more of the rider
+          // (#1169). The workout owns the trainer then, so the road's shape
+          // is not what sets the resistance; the elevation strip above stays.
+          // ⚠️ No `oyl-hud__plan` wrapper: no rule in `theme.css` names that
+          // class, and one was here with nothing to measure what it did.
+          <WorkoutStrip workout={props.workout} />
+        )}
       </div>
 
       <div className="oyl-hud__panel oyl-hud__actions">
@@ -300,6 +355,29 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
             </button>
           )}
         </div>
+        {/*
+          #1244: *Keep the plan*, on a row of its own under Pause and End ride
+          and only while a re-plan waits. ⚠️ **Not a third control in the row
+          above**, and that was measured: three controls share that row's
+          width equally, 72 px each on a phone, where "Keep the plan" wraps to
+          three lines and is 75 px tall — and a row stretches every control
+          in it, so *Pause* was 75 px tall with its own floor stripped and
+          `ride-targets.browser.spec.ts` could no longer tell whether the
+          declared size was what held it. On its own row it is one line, the
+          panel's width, and #669's 48 px (`RIDE_SIZE_CLASS`) rather than the
+          72 of the two a rider presses every ride. It needs no rule of its
+          own in `theme.css`: the actions panel is a column that stretches
+          its children and spaces them 8 px apart.
+        */}
+        {props.onKeepPlan === undefined ? null : (
+          <button
+            type="button"
+            className={`oyl-hud__control ${RIDE_SIZE_CLASS}`}
+            onClick={props.onKeepPlan}
+          >
+            {REPLAN_KEEP_BUTTON}
+          </button>
+        )}
         {/*
           #551: the side camera's line and its stop, as ONE row under Pause and
           End ride, so the two a rider presses every ride keep their places.
@@ -387,10 +465,10 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
         {props.announcement}
       </p>
 
-      {hasContent(props.notices) || props.standingNotice !== undefined ? (
+      {hasContent(props.notices) || props.standingNotice !== undefined || hasContent(lap) ? (
         <div
           className={
-            hasContent(props.notices) || props.standingNotice?.expanded === true
+            hasContent(props.notices) || props.standingNotice?.expanded === true || hasContent(lap)
               ? 'oyl-hud__notices'
               : 'oyl-hud__notices oyl-hud__notices--collapsed'
           }
@@ -404,6 +482,7 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
             </div>
           )}
           {props.notices}
+          {lap}
         </div>
       ) : null}
     </section>

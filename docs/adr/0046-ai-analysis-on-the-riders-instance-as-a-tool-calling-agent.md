@@ -1089,3 +1089,73 @@ Until 2026-10-07 this section was §"Owner questions left open".
   source 1 (the instance's local model) and every rule D-9 states for a key (held on the instance,
   encrypted at rest, never logged, erased with its athlete) are unchanged.
   [ADR 0048](0048-workouts-that-change-during-the-ride.md) D-11 records it. (#1233)
+- **2026-10-11** — **D-7's four figures stand; a turn's allowance, which the table does not list,
+  grows for a model that reasons.** A server counts a model's reasoning and its answer against one
+  `max_tokens`, and the agent asked for 1 024 a turn, so a reasoning model failed jobs
+  `model-cut-off` by how long it thought: 7 of 31 through the owner's instance, and all three
+  direct calls of [#1268](https://github.com/openzigs/onyourleft/issues/1268) (847, 1 024 and
+  1 024 of the 1 024 tokens spent reasoning). Now, once a turn of a run shows the model reasons —
+  the server reports reasoning tokens or sends reasoning beside the answer, or a turn ends on its
+  limit with no answer and no tool call — every later turn of that run is asked for **1 024 +
+  3 072** tokens, and a turn that showed it at its limit is asked again once, counted as a model
+  call like any other. **24 turns, 16 tool calls, ten minutes and 40 000 tokens are unchanged**,
+  and the token budget is checked against whichever allowance a turn is given, so a reasoning
+  model reaches `out-of-tokens` sooner and never spends past 40 000. A run that never shows
+  reasoning is asked for 1 024 a turn, as before. The answer keeps its own 1 024: a turn in the
+  larger allowance whose server reports more answer tokens than that keeps nothing, and where the
+  server does not count reasoning apart (Ollama), the screen's 16 000 characters bound it. A turn
+  that ends on its limit with no answer text now fails `model-no-answer`, apart from
+  `model-cut-off`. No request option that turns reasoning off is sent (the spellings are each
+  service's own, and a server may refuse a field it does not know). Per the owner's ruling on the
+  issue, a rider or an operator can also say the model reasons, in one field: `reasoningTokens`
+  (1 to 16 384, the tokens a turn may spend reasoning beside the answer's own 1 024), stored with
+  the rider's hosted key (`POST /v1/analysis/hosted/key`) or read from
+  `OYL_INSTANCE_ANALYSIS_MODEL_REASONING_TOKENS` for the local model; every turn of such a model is
+  given that room from the first, and the budget check above applies to it unchanged. Detection
+  covers a server that reports reasoning apart from the answer (a token count,
+  `reasoning_content`, `reasoning`) and the empty-at-limit case; a server that leaves reasoning
+  inline in the answer shows neither sign, and its rider or operator sets the field. **3 072 is the
+  author's draft, not a measurement** — the three calls were capped at 1 024 — and it and the
+  `model-no-answer` sentence are the owner's to rule on. (#1268)
+- **2026-10-12** — **D-1's *"pictures do not leave the room"* and D-14(d)'s closing paragraph (Q3,
+  *"never through the Cloudflare tunnel"*) are superseded for ONE path: the side camera's pictures,
+  sealed, to the rider's instance, when the rider has switched it on.**
+  [ADR 0050](0050-side-camera-pictures-to-the-riders-instance-sealed.md), accepted on the owner's
+  decisions of 2026-10-12 on [#1106](https://github.com/openzigs/onyourleft/issues/1106), is the
+  decision, and its D-10 says what stays: D-1's rule for analysis, the tablet's own pose model as
+  the default, and D-8, D-9 and D-14(d) otherwise. The body above is not edited. (#1106)
+- **2026-10-12** — **D-9's hosted source is reachable from the app, on the rider's own key only, and
+  three things about it are decided here that D-9 left open.**
+  [#1251](https://github.com/openzigs/onyourleft/issues/1251) built the app half of #1199: the
+  Instance screen's section where a rider stores their own key (sealed, padded to D-9's 1 KiB),
+  records and withdraws the consent that names the endpoint (Q10), and has the instance send a test
+  question. The owner withdrew D-9's Share mode on 2026-10-09, so **there is no shared key and no
+  operator's switch**: a hosted job runs on the athlete's own key or not at all. The wording a
+  rider reads is #1104's B1 and B2, quoted in that pull request for the owner's approval and held
+  word for word by `apps/web/src/ride-analysis/hosted-consent.test.ts`; it is not quoted here, so
+  that this record does not fix a wording the owner has yet to approve. What is decided:
+  1. **The masking list reaches the instance with the consent, not with a sync.** D-10 has the
+     instance mask with its own copy, one sync item of kind `masking`, and until #1251 nothing in
+     the app sent one, so every hosted job would have ended `hosted_unavailable`. The device now
+     writes that item, sealed, before a consent is recorded and again before every hosted job, so
+     the instance never masks with a list older than the press. A list that cannot be sent means no
+     job is started. ⚠️ This is the author's choice, not a ruling: #1104's B6 row, as the owner
+     approved it on 2026-10-09, says the list is copied *"when it syncs"*.
+  2. **A test question (Q2 of #1104's B1, ruled 2026-10-09: *"sent by the instance with none of the
+     rider's data"*)** is `POST /v1/analysis/hosted/test`, sealed-only: two fixed sentences, on the
+     rider's own key, through `source.ts` §`modelForSource` exactly as a job goes. So it is refused,
+     with nothing sent, wherever a job would be — no key, no consent naming the key's origin, no
+     masking list — and it returns a closed word for how it went and never a word of the
+     service's. Its bounds (64 answer tokens, 30 seconds) are the author's, not measurements.
+  3. **The app offers the hosted press from a note on the device, not from a request.** Opening a
+     ride's page sends nothing (ADR 0035 D-8), so whether `instance-hosted` is offered is read from
+     what the instance last answered on the Instance screen — a key AND a consent naming that key's
+     origin — and the instance still checks all of it for every job.
+
+  Two sentences of B1 as drafted on #1104 are not in what ships, because they are not true of this
+  build: *"Your instance keeps a record of what was actually sent, and you can read it on the
+  ride's page afterwards"* (nothing keeps or shows one), and the unqualified *"It is never sent a
+  picture"* (since ADR 0050 the same service can be sent the side camera's pictures, under that
+  feature's own consent; the consent says *"A ride analysis never sends it a picture"*). The
+  device-held hosted path of ADR 0035 D-9 C still ships beside this one until #1103 removes it, so
+  ADR 0029's entry quoting that consent still governs it. The body above is not edited. (#1251)

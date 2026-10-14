@@ -14,8 +14,19 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { testDevice, type IdentityInstance } from '../auth/identity-testing.ts';
 import { authorised, syncWorld } from '../sync/sync-testing.ts';
+import {
+  startFakeModelServer,
+  type FakeModelServer,
+  type ScriptedReply,
+} from './fake-model-server-testing.ts';
 import { MARKER, MARKER_KEY } from './hosted-key-testing.ts';
 import { HOSTED_KEY_NEEDS_SECRET, type HostedStatus } from './hosted-settings.ts';
+import {
+  HOSTED_TEST_ANSWER_TOKENS,
+  HOSTED_TEST_QUESTION,
+  HOSTED_TEST_SYSTEM,
+} from './hosted-test.ts';
+import { MASKING_ITEM_KEY } from './hosted.ts';
 
 let world: IdentityInstance | undefined;
 afterEach(async () => {
@@ -45,7 +56,13 @@ describe('a rider’s own hosted key (#1199)', () => {
     const set = await world.call('POST', '/v1/analysis/hosted/key', { token, body: KEY_BODY });
     expect(set.status, JSON.stringify(set.body)).toBe(200);
     const expected: HostedStatus = {
-      key: { url: KEY_BODY.url, model: 'a-model', setAt: 1_790_000_123, setBy: 'app' },
+      key: {
+        url: KEY_BODY.url,
+        model: 'a-model',
+        setAt: 1_790_000_123,
+        reasoningTokens: null,
+        setBy: 'app',
+      },
       consent: null,
     };
     expect(set.body).toEqual(expected);
@@ -58,6 +75,52 @@ describe('a rider’s own hosted key (#1199)', () => {
     expect(row?.ciphertext.byteLength).toBeGreaterThan(0);
     expect(await world.databaseBytes()).not.toContain(MARKER);
   });
+
+  it('keeps what the rider says their model needs to reason, replaces it with the next key, and reads it back from a fresh store (#1268)', async () => {
+    const synced = await syncWorld(1);
+    world = synced.world;
+    const { token, athleteId } = synced.riders[0]!;
+    const set = await world.call('POST', '/v1/analysis/hosted/key', {
+      token,
+      body: { ...KEY_BODY, reasoningTokens: 2_048 },
+    });
+    expect(set.status, JSON.stringify(set.body)).toBe(200);
+    expect((set.body as HostedStatus).key?.reasoningTokens).toBe(2_048);
+    expect(
+      ((await world.call('GET', '/v1/analysis/hosted', { token })).body as HostedStatus).key
+        ?.reasoningTokens,
+    ).toBe(2_048);
+    const row = await world.freshRead((store) => store.getAthleteHostedKey(athleteId));
+    expect(row?.reasoningTokens).toBe(2_048);
+    // The next key says nothing: the figure is not carried over.
+    await world.call('POST', '/v1/analysis/hosted/key', { token, body: KEY_BODY });
+    const again = await world.freshRead((store) => store.getAthleteHostedKey(athleteId));
+    expect(again?.reasoningTokens).toBeUndefined();
+    const nulled = await world.call('POST', '/v1/analysis/hosted/key', {
+      token,
+      body: { ...KEY_BODY, reasoningTokens: null },
+    });
+    expect((nulled.body as HostedStatus).key?.reasoningTokens).toBeNull();
+  });
+
+  it.each([0, -1, 1.5, 16_385, '2048', true])(
+    'refuses reasoningTokens %j, naming the field, and stores nothing (#1268)',
+    async (bad) => {
+      const synced = await syncWorld(1);
+      world = synced.world;
+      const { token, athleteId } = synced.riders[0]!;
+      const refused = await world.call('POST', '/v1/analysis/hosted/key', {
+        token,
+        body: { ...KEY_BODY, reasoningTokens: bad },
+      });
+      expect(refused.status).toBe(400);
+      expect(JSON.stringify(refused.body)).toContain('reasoningTokens');
+      expect(JSON.stringify(refused.body)).not.toContain(MARKER);
+      expect(
+        await world.freshRead((store) => store.getAthleteHostedKey(athleteId)),
+      ).toBeUndefined();
+    },
+  );
 
   it('is the caller’s alone: another rider reads nothing, and clearing theirs leaves it', async () => {
     const synced = await syncWorld(2);
@@ -96,6 +159,7 @@ describe('a rider’s own hosted key (#1199)', () => {
       url: 'https://operator.example/v1',
       model: 'operators',
       setAt: 5,
+      reasoningTokens: null,
       setBy: 'operator-command',
     });
     await world.call('POST', '/v1/analysis/hosted/key', { token, body: KEY_BODY });
@@ -202,6 +266,7 @@ describe('sealed only (ADR 0047 D-7, D-13)', () => {
     ['DELETE', '/v1/analysis/hosted/key', undefined],
     ['POST', '/v1/analysis/hosted/consent', { endpoint: 'https://models.example' }],
     ['DELETE', '/v1/analysis/hosted/consent', undefined],
+    ['POST', '/v1/analysis/hosted/test', undefined],
   ] as const)('refuses %s %s in plaintext, and stores nothing', async (method, path, body) => {
     const synced = await syncWorld(1);
     world = synced.world;
@@ -250,5 +315,195 @@ describe('exported and erased with the account (#1199, #35)', () => {
     world = synced.world;
     const exported = await authorised(world, synced.riders[0]!.token, 'GET', '/v1/account/export');
     expect(((await exported.json()) as { hostedConsent: unknown }).hostedConsent).toBeNull();
+  });
+});
+
+describe('the test question (#1251, #1104 B1 question 2)', () => {
+  const ENDPOINT = 'https://models.example';
+  /** A word the rider asked to have masked: it must be in nothing the service is sent. */
+  const RIDER_WORD = 'Zennor';
+  let model: FakeModelServer | undefined;
+  afterEach(async () => {
+    await model?.close();
+    model = undefined;
+  });
+
+  /**
+   * One rider on an instance whose hosted requests reach a scripted model
+   * server in place of the internet, with whichever of the key, the consent
+   * and the masking item the case names — each stored through its own sealed
+   * route, as the app stores it.
+   */
+  async function ready(
+    script: ScriptedReply[],
+    has: {
+      readonly key?: Readonly<Record<string, unknown>> | false;
+      readonly consent?: string | false;
+      readonly masking?: boolean;
+    } = {},
+  ) {
+    const started = await startFakeModelServer(script);
+    model = started;
+    const sent: { url: string; authorization: string | null; body: string }[] = [];
+    const base = KEY_BODY.url.replace(/\/+$/, '');
+    const hostedFetch = ((input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      sent.push({
+        url,
+        authorization: new Headers(init?.headers).get('authorization'),
+        body: typeof init?.body === 'string' ? init.body : '',
+      });
+      if (!url.startsWith(`${base}/`)) return Promise.reject(new Error('another host'));
+      return globalThis.fetch(`${started.baseUrl.href}${url.slice(base.length)}`, init);
+    }) as typeof globalThis.fetch;
+    const synced = await syncWorld(2, { hostedFetch });
+    world = synced.world;
+    const [rider, other] = synced.riders;
+    const token = rider!.token;
+    if (has.key !== false) {
+      const set = await world.call('POST', '/v1/analysis/hosted/key', {
+        token,
+        body: has.key ?? KEY_BODY,
+      });
+      expect(set.status, JSON.stringify(set.body)).toBe(200);
+    }
+    if (has.consent !== false) {
+      await world.call('POST', '/v1/analysis/hosted/consent', {
+        token,
+        body: { endpoint: has.consent ?? ENDPOINT },
+      });
+    }
+    if (has.masking !== false) {
+      const put = await world.call('POST', `/v1/sync/items/masking/${MASKING_ITEM_KEY}`, {
+        token,
+        body: { body: JSON.stringify({ words: [RIDER_WORD], zones: [] }) },
+      });
+      expect(put.status, JSON.stringify(put.body)).toBe(200);
+    }
+    const ask = (as = token) => world!.call('POST', '/v1/analysis/hosted/test', { token: as });
+    return { ask, sent, rider: rider!, other: other!, requests: started.requests };
+  }
+
+  it('sends the two fixed sentences on the rider’s own key, and nothing of the rider’s', async () => {
+    const { ask, sent, rider, requests } = await ready([{ kind: 'text', text: 'ready' }]);
+    expect(await ask()).toEqual({ status: 200, body: { result: 'answered', reasoned: false } });
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.url).toBe(`${KEY_BODY.url}/chat/completions`);
+    expect(sent[0]?.authorization).toBe(`Bearer ${MARKER_KEY}`);
+    expect(requests).toHaveLength(1);
+    const request = requests[0] as {
+      model: string;
+      max_tokens: number;
+      messages: { role: string; content: unknown }[];
+      tools?: unknown;
+    };
+    expect(request.model).toBe('a-model');
+    expect(request.max_tokens).toBe(HOSTED_TEST_ANSWER_TOKENS);
+    expect(request.tools).toBeUndefined();
+    expect(request.messages).toEqual([
+      { role: 'system', content: HOSTED_TEST_SYSTEM },
+      { role: 'user', content: HOSTED_TEST_QUESTION },
+    ]);
+    expect(sent[0]?.body).not.toContain(rider.athleteId);
+    expect(sent[0]?.body).not.toContain(RIDER_WORD);
+  });
+
+  it('returns nothing the service said', async () => {
+    const said = 'the-service-said-this';
+    const { ask } = await ready([{ kind: 'text', text: said }]);
+    const answer = await ask();
+    expect(answer.body).toEqual({ result: 'answered', reasoned: false });
+    expect(JSON.stringify(answer)).not.toContain(said);
+  });
+
+  it.each([
+    ['no key of the rider’s own', { key: false }],
+    ['no recorded consent', { consent: false }],
+    ['a consent naming another origin', { consent: 'https://other.example' }],
+    ['no masking item', { masking: false }],
+  ] as const)('is not-ready with %s, and sends nothing', async (_name, has) => {
+    const { ask, sent } = await ready([{ kind: 'text', text: 'ready' }], has);
+    expect(await ask()).toEqual({ status: 200, body: { result: 'not-ready', reasoned: false } });
+    expect(sent).toEqual([]);
+  });
+
+  it('never uses another rider’s key: a rider with only a consent is not-ready', async () => {
+    const { ask, sent, other } = await ready([{ kind: 'text', text: 'ready' }]);
+    await world!.call('POST', '/v1/analysis/hosted/consent', {
+      token: other.token,
+      body: { endpoint: ENDPOINT },
+    });
+    await world!.call('POST', `/v1/sync/items/masking/${MASKING_ITEM_KEY}`, {
+      token: other.token,
+      body: { body: JSON.stringify({ words: [], zones: [] }) },
+    });
+    expect((await ask(other.token)).body).toEqual({ result: 'not-ready', reasoned: false });
+    expect(sent).toEqual([]);
+    // The control: the rider whose key it is gets an answer.
+    expect((await ask()).body).toEqual({ result: 'answered', reasoned: false });
+  });
+
+  it('gives a model the rider said reasons its allowance, and says that it reasoned (#1268)', async () => {
+    const { ask, requests } = await ready(
+      [
+        {
+          kind: 'text',
+          text: 'ready',
+          reasoning: { field: 'reasoning_content', text: 'thinking', tokens: 40 },
+        },
+      ],
+      { key: { ...KEY_BODY, reasoningTokens: 2_048 } },
+    );
+    expect((await ask()).body).toEqual({ result: 'answered', reasoned: true });
+    expect((requests[0] as { max_tokens: number }).max_tokens).toBe(
+      HOSTED_TEST_ANSWER_TOKENS + 2_048,
+    );
+  });
+
+  it('says no-answer for a reply cut off before any answer', async () => {
+    const { ask } = await ready([{ kind: 'text', text: '', finish: 'length' }]);
+    expect((await ask()).body).toMatchObject({ result: 'no-answer' });
+  });
+
+  it.each([
+    [401, 'refused'],
+    [404, 'refused'],
+    [500, 'failed'],
+  ] as const)('says only %i → %s, never the service’s own words', async (status, result) => {
+    const words = 'your-key-sk-123-is-wrong';
+    const { ask } = await ready([
+      { kind: 'status', status, body: JSON.stringify({ error: { message: words } }) },
+    ]);
+    const answer = await ask();
+    expect(answer).toEqual({ status: 200, body: { result, reasoned: false } });
+    expect(JSON.stringify(answer)).not.toContain(words);
+  });
+
+  it('refuses a rider’s seventh test in ten minutes with nothing sent, and only that rider', async () => {
+    const { ask, sent, other } = await ready(
+      Array.from({ length: 8 }, () => ({ kind: 'text', text: 'ready' })),
+    );
+    for (let n = 0; n < 6; n += 1) expect((await ask()).status).toBe(200);
+    expect(sent).toHaveLength(6);
+    const refused = await ask();
+    expect(refused.status).toBe(429);
+    expect(JSON.stringify(refused.body)).toContain('rate_limited');
+    expect(sent).toHaveLength(6);
+    // Per rider: another rider is not refused by this one's count (not-ready, and not 429).
+    expect((await ask(other.token)).status).toBe(200);
+  });
+
+  it('allows one test in flight per rider: a second while the first waits is refused, nothing sent', async () => {
+    const { ask, sent } = await ready([
+      { kind: 'slow', milliseconds: 300, then: { kind: 'text', text: 'ready' } },
+    ]);
+    const first = ask();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const second = await ask();
+    expect(second.status).toBe(429);
+    expect((await first).body).toEqual({ result: 'answered', reasoned: false });
+    expect(sent).toHaveLength(1);
+    // Once it has finished, the next is let through.
+    expect((await ask()).status).toBe(200);
   });
 });

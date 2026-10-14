@@ -26,7 +26,12 @@
 import { unixSeconds, type HeartRateHoldContext } from '@onyourleft/domain';
 import { deviceId } from '@onyourleft/sensors';
 
-import { RIDE_METRIC_IDS, type RideController, type RideSnapshot } from './controller';
+import {
+  RIDE_METRIC_IDS,
+  type RideController,
+  type RideSnapshot,
+  type WorkoutChoices,
+} from './controller';
 
 /** Every call the screen made, in order, for a test to assert on. */
 export interface RecordedCalls {
@@ -39,6 +44,8 @@ export interface RecordedCalls {
   readonly startWorkoutWith: {
     readonly thresholdPower: number;
     readonly heartRateHold: HeartRateHoldContext | undefined;
+    /** #1244: what the rider chose for that workout — re-plans on or off. */
+    readonly choices: WorkoutChoices | undefined;
   }[];
   /** #212's three, each recorded with the recording it was asked about. */
   readonly continueRecovered: string[];
@@ -62,6 +69,10 @@ export interface RecordedCalls {
   requestControl: number;
   clearTarget: number;
   endWorkout: number;
+  /** #1244 — *Keep the plan*. */
+  keepThePlan: number;
+  /** #1244 — *Switch re-plans off*. */
+  switchReplansOff: number;
   tick: number;
 }
 
@@ -79,6 +90,7 @@ export function idleSnapshot(): RideSnapshot {
     stopArmed: false,
     elapsedSeconds: 0,
     movingSeconds: 0,
+    courseLapSeconds: undefined,
     sampleCount: 0,
     metrics: RIDE_METRIC_IDS.map((id) => ({ id, state: { kind: 'unpaired' } })),
     sensors: [],
@@ -162,7 +174,11 @@ export function ridingSnapshot(): RideSnapshot {
   };
 }
 
-export function stubRideController(initial: RideSnapshot = idleSnapshot()): StubRideController {
+export function stubRideController(
+  initial: RideSnapshot = idleSnapshot(),
+  /** #1244: whether the stub says re-plans can be offered. Off, as with no instance. */
+  replansAvailable = false,
+): StubRideController {
   let snapshot = initial;
   const listeners = new Set<() => void>();
   const calls: RecordedCalls = {
@@ -188,6 +204,8 @@ export function stubRideController(initial: RideSnapshot = idleSnapshot()): Stub
     requestControl: 0,
     clearTarget: 0,
     endWorkout: 0,
+    keepThePlan: 0,
+    switchReplansOff: 0,
     tick: 0,
   };
 
@@ -250,6 +268,8 @@ export function stubRideController(initial: RideSnapshot = idleSnapshot()): Stub
     noteGameRideEnded: (outcome) => {
       calls.noteGameRideEnded.push(outcome);
     },
+    // #1312: the stub records nothing, so a line crossed over it ends no lap.
+    noteCourseLine: () => undefined,
     // #1042: these two DO move the stub's snapshot, because what a test reads
     // is whether a screen mounted again sees what the first one recorded —
     // which is the whole of #1049's review finding. The rules around them
@@ -297,9 +317,9 @@ export function stubRideController(initial: RideSnapshot = idleSnapshot()): Stub
      * control, so nothing on the screen this stub is for reads it.
      */
     simulationControl: () => undefined,
-    startWorkout: (record, thresholdPower, heartRateHold) => {
+    startWorkout: (record, thresholdPower, heartRateHold, choices) => {
       calls.startWorkout.push(record.name);
-      calls.startWorkoutWith.push({ thresholdPower, heartRateHold });
+      calls.startWorkoutWith.push({ thresholdPower, heartRateHold, choices });
       // ⚠️ Answers `true` unconditionally, and a test that needs the refusal
       // path drives the real controller instead. A stub that guessed at the
       // control state would be a second implementation of the rule
@@ -308,6 +328,15 @@ export function stubRideController(initial: RideSnapshot = idleSnapshot()): Stub
     },
     endWorkout: () => {
       calls.endWorkout += 1;
+    },
+    // #1244: what the stub was told a screen may offer; `controller.test.ts`
+    // §"#1244" drives the real controller's.
+    replansAvailable: () => replansAvailable,
+    keepThePlan: () => {
+      calls.keepThePlan += 1;
+    },
+    switchReplansOff: () => {
+      calls.switchReplansOff += 1;
     },
     // #782: the Ride screen holds no room; `controller.test.ts` §"#782" drives the real one.
     keepAliveForRoom: () => () => undefined,

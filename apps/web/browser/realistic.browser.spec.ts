@@ -20,6 +20,13 @@
  * the two frames are the same frame bar the one layer: the rung, the camera
  * and the scenery's placement do not move between them.
  *
+ * And since #1283, a fourth: **the tree levers**. `?levers=-generated-trees`
+ * loads every tree's scan INSTEAD of the generated ones, and since #1294
+ * `?levers=-generated-conifers` the scanned firs alone — read off the files
+ * the page fetches, so a lever that changed a label and loaded the same trees
+ * is seen — with each frame's triangles and draw calls printed, which are the
+ * figures validation 0002's #1283 and #1294 rows start from.
+ *
  * ⚠️ **What it does not prove**: anything about the tablet's GPU clock, which
  * is what the switch is FOR — that is validation 0002's Part for #616, run by
  * the owner. And it holds only the vegetation to a number; the other six
@@ -28,6 +35,11 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
+import {
+  REALISTIC_BROADLEAVES,
+  REALISTIC_CONIFERS,
+  type RealisticModel,
+} from '../src/game/realistic-assets';
 import { REALISTIC_WOODED_DRAW_CALLS } from '../src/game/realistic-budget';
 
 import { NIGHTLY } from './nightly';
@@ -43,8 +55,43 @@ const HELD = '?ladder=0&panel=0&seconds=1&at=2550';
 /** How far the draw-call count and three's may differ on one frame (#616). */
 const AGREEMENT = 0.01;
 
-/** The least #616's control must remove: a counter that reports a constant removes none. */
-const VEGETATION_AT_LEAST = 100_000;
+/**
+ * The least #616's control must remove: a counter that reports a constant
+ * removes none.
+ *
+ * ⚠️ **It was 100 000 until #1294, and a reviewer who remembers that is
+ * reading the scanned firs' figure.** The vegetation on this frame was about
+ * 156 700 triangles while its firs were scans of 24 000 each; with the
+ * generated firs it is 92 666 (131 684 against 39 018, 2026-10-12), which is
+ * the point of generating them. 60 000 is still two thirds of the layer.
+ */
+const VEGETATION_AT_LEAST = 60_000;
+
+/**
+ * The most draw calls the owner's page may REPORT held at `at=2550` with the
+ * trees a ride draws: **33**, the figure #1289 left it at with two seeds a
+ * species, two under `REALISTIC_WOODED_DRAW_CALLS`.
+ *
+ * **This is the figure #1294's criterion names**: "at or under 33 at
+ * `at=2550`" is the page's own `drawCalls`, a mean over its window. It is
+ * asserted, and so is the frame's own count below.
+ */
+const PAGE_DRAW_CALLS_AT_2550 = 33;
+
+/**
+ * What one held frame at `at=2550` makes, counted at the WebGL draw calls:
+ * **31**, with the generated firs and with the scanned ones alike (two shapes
+ * stand where two stood, and they add no call), on a Mac and on the CI runner,
+ * 2026-10-12. Held at the measured figure, so one added call is a red test
+ * and not two calls of room under {@link PAGE_DRAW_CALLS_AT_2550}.
+ *
+ * ⚠️ **The page's mean read 32 to 35 for this frame until #1294**, because
+ * its window also held the warm-up and the page's first render, which makes
+ * 60 calls (`realistic-harness.ts` §`RealisticSample.drawCalls`). The window
+ * now starts where the warm-up ends, so a held frame's mean IS its count, and
+ * the test below holds the two equal.
+ */
+const FRAME_DRAW_CALLS_AT_2550 = 31;
 
 type Published = NonNullable<Window['__oylRealistic']>;
 
@@ -122,6 +169,112 @@ test.describe('the realistic page’s instruments — #616', { tag: NIGHTLY }, (
     expect(without.result.rung).toBe(all.result.rung);
     expect(triangles - without.result.lastFrame.triangles).toBeGreaterThanOrEqual(
       VEGETATION_AT_LEAST,
+    );
+  });
+});
+
+test.describe('the realistic page’s tree levers — #1283, #1294', { tag: NIGHTLY }, () => {
+  test('loads the generated trees, or with a lever off the scans it names, and never both', async ({
+    page,
+  }) => {
+    test.setTimeout(3 * REALISTIC_LOAD_BUDGET_MS);
+
+    const fetched: string[] = [];
+    page.on('request', (request) => {
+      const file = /\/realistic\/([^/?]+)$/.exec(new URL(request.url()).pathname)?.[1];
+      if (file !== undefined) fetched.push(file);
+    });
+    const filesOf = (models: readonly RealisticModel[]): readonly string[] =>
+      models.flatMap((model) =>
+        [model.file, model.middle, model.impostor, model.impostorNormals].filter(
+          (file): file is string => file !== undefined,
+        ),
+      );
+    const treesOf = (set: 'generated' | 'scanned'): readonly string[] =>
+      filesOf(REALISTIC_BROADLEAVES[set]);
+    const firsOf = (set: 'generated' | 'scanned'): readonly string[] =>
+      filesOf(REALISTIC_CONIFERS[set]);
+
+    const generated = await ride(page, HELD);
+    const withGenerated = [...fetched];
+    // The product's trees: every generated file, and not one of the scans'.
+    for (const file of treesOf('generated')) expect(withGenerated, file).toContain(file);
+    for (const file of treesOf('scanned')) expect(withGenerated, file).not.toContain(file);
+    for (const file of firsOf('generated')) expect(withGenerated, file).toContain(file);
+    for (const file of firsOf('scanned')) expect(withGenerated, file).not.toContain(file);
+    expect(generated.result.leversOff).toEqual([]);
+
+    // #1294's lever: the scanned firs, beside the generated broadleaves.
+    fetched.length = 0;
+    const scannedFirs = await ride(page, `${HELD}&levers=-generated-conifers`);
+    const withScannedFirs = [...fetched];
+    for (const file of firsOf('scanned')) expect(withScannedFirs, file).toContain(file);
+    for (const file of firsOf('generated')) expect(withScannedFirs, file).not.toContain(file);
+    for (const file of treesOf('generated')) expect(withScannedFirs, file).toContain(file);
+    for (const file of treesOf('scanned')) expect(withScannedFirs, file).not.toContain(file);
+    expect(scannedFirs.result.leversOff).toEqual(['generated-conifers']);
+    expect(scannedFirs.result.rung).toBe(generated.result.rung);
+
+    // #1283's lever: every tree's scan, and no generated tree.
+    fetched.length = 0;
+    const scanned = await ride(page, `${HELD}&levers=-generated-trees`);
+    const withScanned = [...fetched];
+    for (const file of treesOf('scanned')) expect(withScanned, file).toContain(file);
+    for (const file of treesOf('generated')) expect(withScanned, file).not.toContain(file);
+    for (const file of firsOf('scanned')) expect(withScanned, file).toContain(file);
+    for (const file of firsOf('generated')) expect(withScanned, file).not.toContain(file);
+    expect(scanned.result.leversOff).toEqual(['generated-trees']);
+    // The lever chooses trees and nothing else: the rung does not move.
+    expect(scanned.result.rung).toBe(generated.result.rung);
+
+    const calls = (run: typeof generated): string =>
+      `${String(run.result.lastFrame.calls)} draw calls a frame (the page's mean ${String(run.result.drawCalls)})`;
+    console.log(
+      `#1294 at=2550, held: ${String(generated.result.lastFrame.triangles)} triangles in ` +
+        `${calls(generated)} with every tree generated; ` +
+        `${String(scannedFirs.result.lastFrame.triangles)} in ${calls(scannedFirs)} ` +
+        `with the scanned firs; ${String(scanned.result.lastFrame.triangles)} in ` +
+        `${calls(scanned)} with every tree a scan. Textures held: ` +
+        `${String(generated.page.textures?.bytes)} bytes, ${String(scannedFirs.page.textures?.bytes)} ` +
+        `and ${String(scanned.page.textures?.bytes)}`,
+    );
+    // Different trees are different frames — and each step toward generated
+    // is lighter, here where most of the trees in view are conifers.
+    expect(generated.result.lastFrame.triangles).toBeLessThan(
+      scannedFirs.result.lastFrame.triangles,
+    );
+    expect(scannedFirs.result.lastFrame.triangles).toBeLessThanOrEqual(
+      scanned.result.lastFrame.triangles,
+    );
+    // All inside #639's ceiling, which did not move; and less texture memory
+    // held at each step. ⚠️ With THREE seeds a species, as #1283 was first
+    // written, the page's mean was 35 of 35 on a Mac and 34 on the CI runner —
+    // which is why there are two (#1289's review).
+    //
+    // #1294: the generated firs are two shapes where the scanned firs were
+    // two, so the FRAME makes the calls it made: {@link FRAME_DRAW_CALLS_AT_2550},
+    // and at or under the scanned firs' own frame, call for call.
+    expect(generated.result.lastFrame.calls).toBeGreaterThan(0);
+    expect(generated.result.lastFrame.calls).toBeLessThanOrEqual(FRAME_DRAW_CALLS_AT_2550);
+    expect(generated.result.lastFrame.calls).toBeLessThanOrEqual(
+      scannedFirs.result.lastFrame.calls,
+    );
+    // The issue's own criterion, on the figure it names: the page's mean. The
+    // rider and the ladder are held, so every frame of the window is this
+    // frame, and a mean that is not the frame's count has counted something
+    // that is not the window: the warm-up, and the first render in it.
+    expect(generated.result.drawCalls).toBeLessThanOrEqual(PAGE_DRAW_CALLS_AT_2550);
+    for (const run of [generated, scannedFirs, scanned]) {
+      expect(run.result.drawCalls).toBe(run.result.lastFrame.calls);
+    }
+    expect(scannedFirs.result.lastFrame.calls).toBeLessThanOrEqual(REALISTIC_WOODED_DRAW_CALLS);
+    expect(scanned.result.lastFrame.calls).toBeLessThanOrEqual(REALISTIC_WOODED_DRAW_CALLS);
+    expect(PAGE_DRAW_CALLS_AT_2550).toBeLessThan(REALISTIC_WOODED_DRAW_CALLS);
+    expect(generated.page.textures?.bytes ?? Infinity).toBeLessThan(
+      scannedFirs.page.textures?.bytes ?? 0,
+    );
+    expect(scannedFirs.page.textures?.bytes ?? Infinity).toBeLessThan(
+      scanned.page.textures?.bytes ?? 0,
     );
   });
 });

@@ -8,11 +8,17 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { shippedFiles } from '../../tools/realistic/sources';
 import {
   isRealisticVegetation,
+  REALISTIC_BROADLEAVES,
+  REALISTIC_CONIFERS,
+  REALISTIC_TREE_MAKING,
   REALISTIC_DIRECTORY,
+  REALISTIC_TREE_SETS,
+  REALISTIC_TREES_DEFAULT,
   REALISTIC_VEGETATION,
   REALISTIC_VEGETATION_KINDS,
   realisticFiles,
   realisticUrl,
+  realisticVegetation,
   realisticWorldChosenText,
   realisticWorldNotice,
 } from './realistic-assets';
@@ -59,20 +65,112 @@ describe('the kinds layer 2 replaces — ADR 0026 D-12, #474', () => {
   });
 
   it('gives every tree an impostor and nothing else one', () => {
-    for (const kind of REALISTIC_VEGETATION_KINDS) {
-      for (const model of REALISTIC_VEGETATION[kind]) {
-        expect(model.impostor !== undefined, model.name).toBe(kind.startsWith('tree-'));
+    for (const trees of REALISTIC_TREE_SETS) {
+      for (const kind of REALISTIC_VEGETATION_KINDS) {
+        for (const model of realisticVegetation(trees)[kind]) {
+          expect(model.impostor !== undefined, model.name).toBe(kind.startsWith('tree-'));
+          // #630: and its normals, exactly when it has a strip.
+          expect(model.impostorNormals !== undefined, model.name).toBe(
+            model.impostor !== undefined,
+          );
+        }
       }
     }
   });
 
   it('gives every tree a middle level of detail and nothing else one — #617', () => {
-    for (const kind of REALISTIC_VEGETATION_KINDS) {
-      for (const model of REALISTIC_VEGETATION[kind]) {
-        expect(model.middle !== undefined, model.name).toBe(kind.startsWith('tree-'));
-        if (model.middle !== undefined) expect(model.middle).toBe(`${model.name}-middle.glb`);
+    for (const trees of REALISTIC_TREE_SETS) {
+      for (const kind of REALISTIC_VEGETATION_KINDS) {
+        for (const model of realisticVegetation(trees)[kind]) {
+          expect(model.middle !== undefined, model.name).toBe(kind.startsWith('tree-'));
+          if (model.middle !== undefined) expect(model.middle).toBe(`${model.name}-middle.glb`);
+        }
       }
     }
+  });
+});
+
+describe('the sets of trees — #1283, #1294, ADR 0049 D-1', () => {
+  it('draws a ride with the generated trees, and keeps the scans beside them', () => {
+    expect(REALISTIC_TREES_DEFAULT).toBe('generated');
+    expect([...REALISTIC_TREE_SETS].sort()).toEqual(['generated', 'scanned', 'scanned-conifers']);
+    // What a ride draws is the default set's table, the very object.
+    expect(REALISTIC_VEGETATION).toEqual(realisticVegetation(REALISTIC_TREES_DEFAULT));
+    expect(REALISTIC_VEGETATION['tree-broadleaf']).toBe(REALISTIC_BROADLEAVES.generated);
+    // #1294: and its conifers are the generated firs.
+    expect(REALISTIC_VEGETATION['tree-conifer']).toBe(REALISTIC_CONIFERS.generated);
+    expect(REALISTIC_CONIFERS.generated.map((model) => model.name)).toEqual([
+      'generated_fir_a',
+      'generated_fir_b',
+    ]);
+    // The scans are the trees every realistic world drew until #1283 and #1294.
+    expect(REALISTIC_BROADLEAVES.scanned.map((model) => model.name)).toEqual([
+      'island_tree_02',
+      'tree_small_02',
+    ]);
+    expect(REALISTIC_CONIFERS.scanned.map((model) => model.name)).toEqual([
+      'fir_sapling_medium_a',
+      'fir_sapling_medium_b',
+    ]);
+    // Still committed, and still named for the precache rule and the budget —
+    // every tree of either making.
+    for (const model of [
+      ...REALISTIC_BROADLEAVES.scanned,
+      ...REALISTIC_CONIFERS.scanned,
+      ...REALISTIC_BROADLEAVES.generated,
+      ...REALISTIC_CONIFERS.generated,
+    ]) {
+      for (const file of [model.file, model.impostor, model.impostorNormals, model.middle]) {
+        expect(realisticFiles(), model.name).toContain(file);
+        expect(COMMITTED, model.name).toContain(file);
+      }
+    }
+    // Each file once, though three sets name most of them twice.
+    expect(new Set(realisticFiles()).size).toBe(realisticFiles().length);
+  });
+
+  it('differs between the sets in its trees alone, each set the making its name says', () => {
+    expect(REALISTIC_TREE_MAKING).toEqual({
+      generated: { broadleaves: 'generated', conifers: 'generated' },
+      'scanned-conifers': { broadleaves: 'generated', conifers: 'scanned' },
+      scanned: { broadleaves: 'scanned', conifers: 'scanned' },
+    });
+    for (const trees of REALISTIC_TREE_SETS) {
+      const set = realisticVegetation(trees);
+      expect(set['tree-broadleaf'], trees).toBe(
+        REALISTIC_BROADLEAVES[REALISTIC_TREE_MAKING[trees].broadleaves],
+      );
+      expect(set['tree-conifer'], trees).toBe(
+        REALISTIC_CONIFERS[REALISTIC_TREE_MAKING[trees].conifers],
+      );
+      // The shrubs and the rock are the same files in every set.
+      for (const kind of ['shrub', 'rock'] as const) {
+        expect(set[kind], `${trees} ${kind}`).toEqual(realisticVegetation('generated')[kind]);
+      }
+    }
+    // No tree is in both makings of its kind.
+    for (const table of [REALISTIC_BROADLEAVES, REALISTIC_CONIFERS]) {
+      const names = (making: 'generated' | 'scanned'): string[] =>
+        table[making].map((each) => each.name);
+      expect(names('generated').some((name) => names('scanned').includes(name))).toBe(false);
+    }
+    // As many generated firs as scanned ones: a tree is a draw call a level a
+    // SHAPE, and the firs add none (#1289's review, #1294).
+    expect(REALISTIC_CONIFERS.generated).toHaveLength(REALISTIC_CONIFERS.scanned.length);
+  });
+
+  it('gives a rider more shapes than the scans did, two species turn about', () => {
+    const names = REALISTIC_BROADLEAVES.generated.map((model) => model.name);
+    expect(names.length).toBeGreaterThan(REALISTIC_BROADLEAVES.scanned.length);
+    expect(new Set(names).size).toBe(names.length);
+    // An item's variant picks modulo the count, so neighbouring slots are
+    // different SPECIES: no two of one stand side by side in the table.
+    const species = names.map((name) => name.split('_')[1]);
+    expect(new Set(species).size).toBeGreaterThanOrEqual(2);
+    species.forEach((each, at) => {
+      expect(each, names[at]).not.toBe(species[(at + 1) % species.length]);
+    });
+    for (const name of names) expect(name).toMatch(/^generated_[a-z]+_[a-z]$/);
   });
 });
 

@@ -21,6 +21,11 @@
  * gives the offset from the road, `normal` the slope, `position` the height):
  * no new draw call, no new mesh and no new vertex attribute.
  *
+ * ⚠️ **Since #1274 the rock and the scree are two photographs**, where one
+ * (`rocks_ground_05`, loose stones on earth) served both: a steep bank wears a
+ * rock face — `realistic-assets.ts` §`REALISTIC_SURFACES.crag` — and the loose
+ * stones keep the scree. {@link stoneBlend} is how a point's stone divides.
+ *
  * Pure: names no rendering library. `three-renderer.ts`
  * §`photographicGroundMaterial` is the shader that reads these.
  */
@@ -97,4 +102,27 @@ export function groundBlend(
     rock: smooth(ROCK_SLOPE_DEGREES[0], ROCK_SLOPE_DEGREES[1], slopeDegrees),
     scree: smooth(treeLine - SCREE_BAND_METRES, treeLine + SCREE_BAND_METRES, height),
   };
+}
+
+/**
+ * How a point's stone divides between the two photographs — #1274: the
+ * **crag**, a rock face, takes the SLOPE's share, and the **loose** stones the
+ * scree's photograph shows take what is left of the larger of the two.
+ *
+ * So a steep bank is all crag whatever its height — rock that steep holds no
+ * loose stone, above the tree line or below it — level ground above the tree
+ * line is all loose stone, and the two never sum past the stone there is,
+ * because the slope's share is one of the two the stone is the larger of.
+ *
+ * @test-facing the arithmetic `ground-blend.test.ts` holds; the product runs
+ * the same arithmetic in GLSL (`three-renderer.ts` §`GROUND_BLEND_SHARES_GLSL`).
+ *
+ * @param rock {@link groundBlend}'s `rock`, the slope's share
+ * @param scree {@link groundBlend}'s `scree`, the height's share
+ */
+export function stoneBlend(
+  rock: number,
+  scree: number,
+): { readonly crag: number; readonly loose: number } {
+  return { crag: rock, loose: Math.max(rock, scree) - rock };
 }

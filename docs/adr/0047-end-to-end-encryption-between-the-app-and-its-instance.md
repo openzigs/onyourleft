@@ -1532,3 +1532,10 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   the out-of-order replay and makes that bound not depend on how the instance chose `notAfter`. It
   still cannot make a device trust a key the identity key never signed, nor take it below the
   highest serial it has seen.
+- **2026-10-12** — **D-14 Q4 (*"camera pictures stay off the tunnel, even sealed"*) and D-12, which
+  records it, are superseded for the side camera's pictures, and D-7's table gains a row.**
+  [ADR 0050](0050-side-camera-pictures-to-the-riders-instance-sealed.md), accepted on the owner's
+  decisions of 2026-10-12 on [#1106](https://github.com/openzigs/onyourleft/issues/1106), is the
+  decision: its D-2 is the row (`POST /v1/camera/side-pose`, sealed on every instance, a keyless one
+  included), and its D-3 says what D-12's second reason still leaves visible. Every other camera
+  picture stays off the tunnel. The body above is not edited. (#1106)

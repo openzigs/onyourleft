@@ -792,6 +792,66 @@ describe('the narrowed gate itself — #387', () => {
   });
 });
 
+/**
+ * **Pictures reach an instance only through the one instance module — #1106.**
+ *
+ * The side camera's pictures may now go to the rider's instance. They were
+ * given NO permit of their own: `camera/instance-pose.ts` builds the body and
+ * is handed a sealed channel, and the bytes leave through
+ * `instance/instance-transport.ts`'s one `fetch` — the entry that was already
+ * here. So the list above is unchanged by #1106, and this pins that it stays
+ * so: the two modules #1106 added name no network primitive, no entry was
+ * added for them, and a primitive in either is a red run.
+ * `camera/no-picture-reachable.test.ts` §"a picture reaches an instance by one
+ * path" is the other half: which module may put a picture in that request.
+ */
+describe('a side-camera picture goes to an instance through the one instance module — #1106', () => {
+  const PICTURE_PATH = join('camera', 'instance-pose.ts');
+  const SERVICE_READER = join('instance', 'hosted-service.ts');
+  const INSTANCE = join('instance', 'instance-transport.ts');
+  const read = (path: string): ScannedFile => ({
+    path,
+    source: readFileSync(join(SOURCE_ROOT, path), 'utf8'),
+  });
+
+  it('gave the picture path no permit: the list is the six entries it was, one module for instance traffic', () => {
+    expect(PERMITTED_NETWORK_CALLS).toHaveLength(6);
+    const modules = PERMITTED_NETWORK_CALLS.map((entry) => entry.module);
+    expect(modules).not.toContain(PICTURE_PATH);
+    expect(modules).not.toContain(SERVICE_READER);
+    // Everything for an instance is still pinned to the one module.
+    expect(modules.filter((module) => module.startsWith('instance'))).toStrictEqual([
+      INSTANCE,
+      INSTANCE,
+    ]);
+  });
+
+  it('names no network primitive in the module that builds a picture’s request, or the one that reads the service’s name', () => {
+    for (const path of [PICTURE_PATH, SERVICE_READER]) {
+      const file = read(path);
+      expect(file.source.length, path).toBeGreaterThan(500);
+      expect(networkCallsIn(file.source), path).toStrictEqual([]);
+    }
+  });
+
+  it('goes red for a fetch in the picture path, however the rest of the tree stands', () => {
+    const files = scannable().map((file) => read(relative(SOURCE_ROOT, file)));
+    const sending = files.map((file) =>
+      file.path === PICTURE_PATH
+        ? {
+            ...file,
+            source: `${file.source}\nexport const send = (url: string) => fetch(url, { method: 'POST' });\n`,
+          }
+        : file,
+    );
+    // The control: the real tree is clean, so the finding below is the planted one.
+    expect(networkFindingsOutside(files, PERMITTED_NETWORK_CALLS)).toStrictEqual([]);
+    const found = networkFindingsOutside(sending, PERMITTED_NETWORK_CALLS);
+    expect(found).toHaveLength(1);
+    expect(JSON.stringify(found)).toContain('instance-pose.ts');
+  });
+});
+
 describe('the client', () => {
   it('has source to scan', () => {
     // The population, asserted. A walk that returned nothing would make the
@@ -811,8 +871,9 @@ describe('the client', () => {
         'numbers when the rider asks for an analysis (#802), to a computer the ' +
         'rider configured and switched on, a start and a stop to a side-camera phone the rider ' +
         'paired by scanning, a question — never a picture — to a hosted service on the ' +
-        'rider’s own key, a sign-in to an instance the rider chose (#777), and a room’s ' +
-        'power reports to that instance (#782); that is now ' +
+        'rider’s own key, a sign-in to an instance the rider chose (#777), a room’s ' +
+        'power reports to that instance (#782), and the side camera’s pictures, sealed, to ' +
+        'that instance when the rider switched that on (#1106); that is now ' +
         'false, and the policy and the Data Safety form are what ' +
         'must change',
     ).toEqual([]);
@@ -1380,6 +1441,12 @@ const UNBUILT_DELETION_PATHS: readonly string[] = [
  * Every "How to delete it" cell of the instance section's table that names no
  * route this build has: *Disconnect*, the instance's operator, Discord, or a
  * dash (#892's second review). Answers the offending cells, normalised.
+ *
+ * Since #1251 the build has two more, both on the Instance screen: the press
+ * that removes a hosted model key the rider stored, by its label
+ * (`ride-analysis/hosted-consent.ts` §`HOSTED_REMOVE_BUTTON`), and unticking
+ * the hosted consent. `HostedServicePanel.test.tsx` is what holds that they
+ * are built.
  */
 function deletionRouteFaults(section: string): readonly string[] {
   const rows = section
@@ -1397,7 +1464,9 @@ function deletionRouteFaults(section: string): readonly string[] {
       cell !== '—' &&
       !cell.includes('disconnect') &&
       !cell.includes('operator') &&
-      !cell.includes('discord'),
+      !cell.includes('discord') &&
+      !cell.includes('remove my key from my instance') &&
+      !cell.includes('when you untick it'),
   );
 }
 
@@ -1627,4 +1696,139 @@ describe('the instance is disclosed, class by class — #778', () => {
       ),
     ).not.toContain('your internet address');
   });
+});
+
+/**
+ * **Re-plans during a ride, disclosed — #1245** (ADR 0048 D-10 and D-11; the
+ * #558 shape: each place a rider reads is checked on its own, because a search
+ * of the whole file is satisfied by any one of them).
+ *
+ * A re-plan sends per-block summaries to the rider's instance DURING a ride,
+ * through the one instance module this gate admits, so no permit changes. What
+ * changes is what that module carries, and the policy has to say, in each of
+ * the four places a rider would look: **what** is sent, **when**, **to whom**,
+ * and that it is **off unless switched on for the ride**. The section's exact
+ * sentences are pinned against the screen's own constant by
+ * `workout/replan-disclosure.test.ts`; this holds the four places together.
+ *
+ * ⚠️ It checks that the words are there, not that they are true of the build.
+ */
+const REPLAN_SECTION = 'Block summaries sent to your instance during a ride';
+const REPLAN_DISCLOSED_IN: Readonly<Record<string, readonly string[]>> = {
+  'The short version': [
+    // What, and what never.
+    'a summary of each block you have ridden so far',
+    'never a second-by-second recording',
+    'your workout goals, the heart rates you chose included',
+    // When.
+    'as each block begins, and never more often than every 3 minutes',
+    // To whom, and how; and to nobody else.
+    'sealed so that only your instance can open it',
+    "a model on your instance's own machine",
+    'it is not sent on to a hosted service: this app never asks one for a re-plan',
+    // When, and that it is off.
+    'it is off at the start of every ride, and nothing is sent until you switch it on for that ride',
+    // The hold, because riders will ask.
+    'a heart-rate hold on its own sends nothing anywhere',
+    // The sentence that used to say only a sync sends a heart rate.
+    'if you switch on re-plans during a ride, a summary of each block you ride is sent, heart rate included, with the heart rates you chose for the workout and in your workout goals',
+    `described under ${REPLAN_SECTION.toLowerCase()} below`,
+  ],
+  'What leaves the device': [
+    'a summary of each block you ride, sent to your instance during the ride',
+    'if you switch on re-plan during the ride for that ride',
+    'sealed on this device for that instance alone',
+    "a heart-rate hold's range in beats per minute included",
+    'the heart rates you chose included and the time you want in your range left out',
+    'never a second-by-second recording or a position, and never sent on to a hosted service',
+  ],
+  'An instance you connect to': [
+    '| block summaries, for a re-plan during the ride | only if you switch on re-plan during the ride for a ride',
+    'your mean and highest heart rate',
+    'your mean power as a share of your threshold power',
+    'your mean cadence',
+    "with the blocks of the workout as it stands, a heart-rate hold's range in beats per minute included, and your workout goals, the heart rates you chose included and the time you want to spend in your range left out",
+    'this app never asks a hosted service for a re-plan',
+    'never a second-by-second recording, a position, a date or a name',
+    'your instance keeps each request and its answer for 7 days',
+    'during a ride, as a block begins, and never more often than every 3 minutes, while the switch is on',
+    'switch it off and nothing more is sent',
+  ],
+  [REPLAN_SECTION]: [
+    'a heart-rate hold on its own sends nothing anywhere: it runs on this device',
+    'off unless you switch them on for that ride',
+    'it is off at the start of every ride',
+    'what is sent: one request each time, and this is the whole of it',
+    'for a heart-rate hold the lowest and highest heart rate of the range you chose, in beats per minute',
+    'the heart rate you chose not to go above',
+    'and not the time you want to spend in your range, which this app leaves out',
+    'no effort check-in is sent',
+    'when: during the ride, and only while the switch is on for that ride: as a block begins, and never less than 3 minutes after the last time',
+    'to whom: the instance you connected',
+    'it is never sent in plain text',
+    'what your instance keeps: each request',
+    'what this device keeps: each change it accepted or refused',
+    'it is not sent to your instance when you sync',
+    // No hosted source: #1244 asks only the instance's own model.
+    "no hosted service: this app asks only for the model on your instance's own machine",
+    'it never asks a hosted service for a re-plan, and a key you stored on your instance is not used for one',
+  ],
+};
+
+/** Each phrase a place does not carry, as `heading: phrase`; an absent section is one fault. */
+function replanDisclosureFaults(policy: string): readonly string[] {
+  return Object.entries(REPLAN_DISCLOSED_IN).flatMap(([heading, phrases]) => {
+    const section = normalised(policySection(policy, heading));
+    if (section === '') return [`${heading}: no such section`];
+    return phrases
+      .filter((phrase) => !section.includes(phrase))
+      .map((phrase) => `${heading}: ${phrase}`);
+  });
+}
+
+describe('re-plans during a ride are disclosed, in each place a rider reads — #1245', () => {
+  const REPOSITORY_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
+  const policy = readFileSync(join(REPOSITORY_ROOT, 'docs', 'privacy-policy.md'), 'utf8');
+
+  it('goes through the one module admitted for instance traffic, so no permit moved', () => {
+    const instanceTransport = join('instance', 'instance-transport.ts');
+    expect(
+      PERMITTED_NETWORK_CALLS.map((rule) => rule.module).filter(
+        (module) => module.startsWith('instance') || module.startsWith('workout'),
+      ),
+    ).toStrictEqual([instanceTransport, instanceTransport]);
+  });
+
+  it('says what is sent, when, to whom, and that it is off unless switched on per ride', () => {
+    expect(replanDisclosureFaults(policy)).toStrictEqual([]);
+  });
+
+  it('would find the section gone — the rule is not vacuous', () => {
+    const start = policy.indexOf(`\n## ${REPLAN_SECTION}\n`);
+    expect(start).toBeGreaterThan(0);
+    const end = policy.indexOf('\n## ', start + 1);
+    const without = policy.slice(0, start) + policy.slice(end);
+    expect(replanDisclosureFaults(without)).toContain(`${REPLAN_SECTION}: no such section`);
+  });
+
+  it.each(Object.keys(REPLAN_DISCLOSED_IN))(
+    'would find "%s" silent about it, though the other places still say so',
+    (heading) => {
+      // Each place on its own: take every line about a block summary, a
+      // re-plan, the hold or the switch out of ONE section, and only that
+      // section is red.
+      const marker = `\n## ${heading}\n`;
+      const start = policy.indexOf(marker) + marker.length;
+      const next = policy.indexOf('\n## ', start);
+      const end = next === -1 ? policy.length : next;
+      const silenced = policy
+        .slice(start, end)
+        .split('\n')
+        .filter((line) => !/block|re-plan|heart-rate hold|switch|request/i.test(line))
+        .join('\n');
+      const faults = replanDisclosureFaults(policy.slice(0, start) + silenced + policy.slice(end));
+      expect(faults.length).toBeGreaterThan(0);
+      expect(faults.every((fault) => fault.startsWith(`${heading}: `))).toBe(true);
+    },
+  );
 });

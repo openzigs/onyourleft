@@ -2,7 +2,9 @@
 
 /**
  * A rider's own hosted model key and hosted consent (#1199): read them, store
- * or clear the key, record or withdraw the consent. `hosted-settings.ts` says
+ * or clear the key, record or withdraw the consent — and, since #1251, send
+ * the service one test question that carries none of the rider's data
+ * (`hosted-test.ts`). `hosted-settings.ts` says
  * what each holds and the owner's ruling it follows (bring-your-own keys only).
  *
  * Every one is `auth: 'session'` and `reaches: 'own'`: the athlete is the
@@ -31,9 +33,10 @@ const status: Schema = {
         url: { type: 'string' },
         model: { type: 'string' },
         setAt: { type: 'integer' },
+        reasoningTokens: { type: ['integer', 'null'] },
         setBy: { type: 'string', enum: ['app', 'operator-command'] },
       },
-      required: ['url', 'model', 'setAt', 'setBy'],
+      required: ['url', 'model', 'setAt', 'reasoningTokens', 'setBy'],
       additionalProperties: false,
     },
     consent: {
@@ -95,10 +98,15 @@ export const HOSTED_ROUTES: readonly Route[] = [
     path: '/v1/analysis/hosted/key',
     operationId: 'setHostedModelKey',
     summary:
-      'Store your own hosted model key, encrypted under the instance’s secret, replacing any you stored. `url` is the service’s `https:` base URL. A key at another origin than your consent names withdraws that consent; one at the same origin keeps it. The operator of this instance could technically read a key you store here. `unavailable` on an instance with no secret to encrypt it under, before the key is read.',
+      'Store your own hosted model key, encrypted under the instance’s secret, replacing any you stored. `url` is the service’s `https:` base URL. A key at another origin than your consent names withdraws that consent; one at the same origin keeps it. `reasoningTokens` (DRAFT wording) is optional: say your model reasons before it answers, and the tokens one turn may spend on that, 1 to 16384, beside the answer’s own 1 024; absent or null, the instance finds out from the model’s replies. It replaces the figure of any earlier key. The operator of this instance could technically read a key you store here. `unavailable` on an instance with no secret to encrypt it under, before the key is read.',
     request: {
       type: 'object',
-      properties: { url: { type: 'string' }, model: { type: 'string' }, key: { type: 'string' } },
+      properties: {
+        url: { type: 'string' },
+        model: { type: 'string' },
+        key: { type: 'string' },
+        reasoningTokens: { type: ['integer', 'null'] },
+      },
       required: ['url', 'model', 'key'],
       additionalProperties: false,
     },
@@ -155,6 +163,44 @@ export const HOSTED_ROUTES: readonly Route[] = [
       const got = ready(context);
       if (got === undefined) return errorResponse('unavailable');
       return json(await got.hostedSettings.withdrawConsent(got.caller));
+    },
+  },
+  {
+    ...COMMON,
+    method: 'POST',
+    path: '/v1/analysis/hosted/test',
+    operationId: 'sendHostedTestQuestion',
+    summary:
+      'Send your hosted service one test question that carries none of your data (#1251): two fixed sentences, on your own key, to the origin your consent names. It passes the same checks as a hosted job, and is limited to a few every ten minutes, one at a time (`rate_limited`, with nothing sent), so `not-ready` — with nothing sent — means a job would be refused `hosted_unavailable`: no key of your own, no consent naming its origin, or no masking list on this instance. The answer is `result` and whether the model reasoned first; nothing the service said is returned.',
+    errors: ['unauthenticated', 'unavailable', 'rate_limited'],
+    response: {
+      contentType: 'application/json',
+      schema: {
+        type: 'object',
+        properties: {
+          result: {
+            type: 'string',
+            enum: [
+              'answered',
+              'no-answer',
+              'not-ready',
+              'refused',
+              'unreachable',
+              'timed-out',
+              'failed',
+            ],
+          },
+          reasoned: { type: 'boolean' },
+        },
+        required: ['result', 'reasoned'],
+        additionalProperties: false,
+      },
+    },
+    handle: async (context) => {
+      const got = ready(context);
+      if (got === undefined) return errorResponse('unavailable');
+      const tested = await got.hostedSettings.testQuestion(got.caller, context.request.signal);
+      return tested === undefined ? errorResponse('rate_limited') : json(tested);
     },
   },
 ];

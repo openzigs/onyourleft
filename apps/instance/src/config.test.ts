@@ -7,6 +7,7 @@ import {
   DEFAULT_PORT,
   readAnalysisModelSettings,
   readConfig,
+  readPictureModelSettings,
   readHistorySettings,
 } from './config.ts';
 
@@ -37,6 +38,11 @@ describe('readConfig', () => {
           kind: 'off',
           code: 'not-set',
           reason: 'OYL_INSTANCE_ANALYSIS_MODEL_URL is not set, so no analysis model is configured.',
+        },
+        pictures: {
+          kind: 'off',
+          code: 'not-set',
+          reason: 'OYL_INSTANCE_PICTURE_MODEL is not set, so no local model takes pictures.',
         },
         name: null,
       },
@@ -270,6 +276,20 @@ describe('the analysis model’s settings (#1096, ADR 0046 D-9)', () => {
     }
   });
 
+  it('takes an operator’s reasoning allowance, and turns analysis off for one it cannot read (#1268)', () => {
+    const base = { analysisModelUrl: 'http://ollama:11434/v1', analysisModel: 'm' };
+    const said = readAnalysisModelSettings({ ...base, analysisModelReasoningTokens: ' 3072 ' });
+    expect(said.kind === 'on' && said.reasoningTokens).toBe(3_072);
+    const none = readAnalysisModelSettings({ ...base, analysisModelReasoningTokens: ' ' });
+    expect(none.kind === 'on' && none.reasoningTokens).toBeUndefined();
+    for (const bad of ['0', '-4', '1.5', 'many', '16385', '1e3x']) {
+      expect(
+        readAnalysisModelSettings({ ...base, analysisModelReasoningTokens: bad }),
+        bad,
+      ).toMatchObject({ kind: 'off', code: 'bad-reasoning' });
+    }
+  });
+
   it('refuses a public name and a .local name at reading, and says why', () => {
     for (const url of [
       'https://models.example.com/v1',
@@ -294,6 +314,39 @@ describe('the analysis model’s settings (#1096, ADR 0046 D-9)', () => {
         url,
       ).toBe('on');
     }
+  });
+
+  it('names no picture model unless the operator does: the analysis model is never used for pictures (#1106)', () => {
+    const server = { analysisModelUrl: 'http://ollama:11434/v1', analysisModel: 'writes' };
+    expect(readPictureModelSettings(server)).toMatchObject({ kind: 'off', code: 'not-set' });
+    expect(readPictureModelSettings({ ...server, pictureModel: ' ' })).toMatchObject({
+      kind: 'off',
+      code: 'not-set',
+    });
+    const on = readPictureModelSettings({ ...server, pictureModel: ' sees:4b ' });
+    expect(on.kind === 'on' && on.model).toBe('sees:4b');
+    expect(on.kind === 'on' && on.baseUrl.href).toBe('http://ollama:11434/v1');
+    // It needs the server's address and not the analysis model's name.
+    expect(
+      readPictureModelSettings({ analysisModelUrl: server.analysisModelUrl, pictureModel: 'sees' })
+        .kind,
+    ).toBe('on');
+  });
+
+  it('turns pictures off, saying why, for a bad model name or a server it cannot use (#1106)', () => {
+    expect(
+      readPictureModelSettings({ analysisModelUrl: 'http://ollama/v1', pictureModel: 'a b' }),
+    ).toMatchObject({ kind: 'off', code: 'bad-model' });
+    const unset = readPictureModelSettings({ pictureModel: 'sees' });
+    expect(unset).toMatchObject({ kind: 'off', code: 'no-server' });
+    expect(unset.kind === 'off' && unset.reason).toContain('OYL_INSTANCE_ANALYSIS_MODEL_URL');
+    // The local-address rule is the analysis model's own: a public host takes no picture.
+    const remote = readPictureModelSettings({
+      analysisModelUrl: 'http://models.example.com/v1',
+      pictureModel: 'sees',
+    });
+    expect(remote).toMatchObject({ kind: 'off', code: 'no-server' });
+    expect(remote.kind === 'off' && remote.reason).toContain('private network');
   });
 
   it('has NO default model: an address with no model is off, and says so', () => {

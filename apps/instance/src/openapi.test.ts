@@ -18,10 +18,12 @@ import { createInstanceKeys } from './keys/instance-keys.ts';
 import { secretBytes } from './keys/instance-keys-testing.ts';
 import { openSqlStore } from './store/open-sql-store.ts';
 import { createStoreHarness, type StoreHarness } from './store/testing/index.ts';
+import { base64Of, testPicture } from './camera/picture-testing.ts';
 import { SYNC_HAPPY_CALLS } from './sync/sync-testing.ts';
 import { frames, openFrames, sealedCall, sealFor, sendEnvelope } from './sealed/sealed-testing.ts';
 import { madeRoom, riderIn, roomBody } from './rooms/rooms-testing.ts';
 import { jobBody } from './analysis/jobs-testing.ts';
+import { replanBody } from './analysis/replan-testing.ts';
 import type { AnalysisEngine } from './analysis/jobs.ts';
 import type { ScreenedWriteUp } from '@onyourleft/analysis';
 import { openApiDocument, openApiText } from './openapi.ts';
@@ -241,8 +243,15 @@ async function finishedJob(
 }
 
 const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
+  lookAtSidePicture: async (world) =>
+    send(world, 'POST', '/v1/camera/side-pose', (await signedIn(world)).token, {
+      picture: base64Of(testPicture()),
+      source: 'instance-local',
+    }),
   startAnalysisJob: async (world) =>
     send(world, 'POST', '/v1/analysis/jobs', (await signedIn(world)).token, jobBody()),
+  startReplanJob: async (world) =>
+    send(world, 'POST', '/v1/analysis/replans', (await signedIn(world)).token, replanBody()),
   getAnalysisJob: async (world) => {
     const { token, jobId } = await finishedJob(world);
     return send(world, 'GET', `/v1/analysis/jobs/${jobId}`, token);
@@ -574,6 +583,12 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
     await hostedBoth(world, token);
     return send(world, 'DELETE', '/v1/analysis/hosted/consent', token);
   },
+  // #1251: nothing is held, so the answer is `not-ready` and nothing is sent
+  // anywhere — still the route's own 200 and its declared shape.
+  sendHostedTestQuestion: async (world) => {
+    const { token } = await signedIn(world);
+    return send(world, 'POST', '/v1/analysis/hosted/test', token);
+  },
   searchHistory: async (world) => {
     const { token } = await signedIn(world);
     await send(world, 'POST', '/v1/sync/items/note/note-1', token, {
@@ -626,7 +641,14 @@ describe('every route answers with the shape its entry declares', () => {
       emailRecovery: true,
       probes,
       moderators: { owner: moderator.publicKey },
-      analysis: { engine: INSTANT_ENGINE, available: () => true },
+      analysis: {
+        engine: INSTANT_ENGINE,
+        // #1243: a re-plan that keeps the workout at once.
+        replan: { run: () => Promise.resolve({ kind: 'proposed', proposal: null }) },
+        available: () => true,
+      },
+      // #1106: a picture model that answers at once, as the engine above does.
+      pictures: { local: { look: () => Promise.resolve({ ok: true, text: '{"rider":false}' }) } },
     });
   });
   afterAll(async () => {

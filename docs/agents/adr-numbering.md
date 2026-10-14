@@ -12,6 +12,17 @@ It has the same authority as the root file. Where the text below says "this file
 
 ## Which numbers were taken, and by what (from CLAUDE.md §7, "ADRs")
 
+  ⚠️ **0050 is [ADR 0050](../adr/0050-side-camera-pictures-to-the-riders-instance-sealed.md)**, taken by
+  [#1106](https://github.com/openzigs/onyourleft/issues/1106) on 2026-10-12 for the side camera's
+  pictures going to the rider's instance, sealed, and **accepted on the owner's decisions on that
+  issue**. It supersedes ADR 0029 D-6 and D-7, ADR 0047 D-14 Q4 and ADR 0046 D-1 for that one
+  payload. It was drafted as amendments that offered 0049; a reviewer who remembers this sentence
+  offering 0050 is reading the old file.
+  ⚠️ **0049 is [ADR 0049](../adr/0049-open-asset-sources-for-the-realistic-world.md)**, taken by
+  [#1275](https://github.com/openzigs/onyourleft/issues/1275) on 2026-10-11 for more open asset
+  sources for the realistic world and the meaning of "AI-generated", and **accepted on the owner's
+  ruling on that issue**. It supersedes ADR 0026 D-4's source list. A reviewer who remembers this
+  sentence offering 0049 is reading the old file.
   ⚠️ **0048 is [ADR 0048](../adr/0048-workouts-that-change-during-the-ride.md)**, taken by
   [#1233](https://github.com/openzigs/onyourleft/issues/1233) on 2026-10-09 for workouts that change
   during the ride (a heart-rate hold on the device, and re-plans an instance agent may only

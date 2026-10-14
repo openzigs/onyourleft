@@ -39,11 +39,28 @@
  * - **Tools are described, never executed by the SDK**: no tool has an
  *   `execute`, so one turn returns the calls the model made and the agent
  *   (`agent.ts`) validates and runs them, counting each against its budgets.
+ *
+ * ## A picture — #1106
+ *
+ * {@link createLocalPictureModel} and {@link createHostedPictureModel} show a
+ * model ONE side-camera picture and a question fixed when the connection is
+ * built (`camera/picture-model.ts`), through the same provider, the same
+ * one-host fetch, no retries and no tools. The picture is in the one user
+ * message and nowhere else, and nothing here keeps it: it is the argument of
+ * one call. A server that says it takes no picture is `model-without-pictures`
+ * ({@link pictureFailureOf}); its text is matched and dropped.
  */
 
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { APICallError, generateText, jsonSchema, tool, type ModelMessage, type ToolSet } from 'ai';
 
+import type {
+  PictureConnection,
+  PictureFailure,
+  PictureLook,
+  PictureLookRequest,
+  PictureQuestion,
+} from '../camera/picture-model.ts';
 import { localAddressesOnly, type Resolver } from '../history/address.ts';
 import type {
   AgentMessage,
@@ -91,6 +108,8 @@ export interface AnalysisModelSettings {
   /** The OpenAI-compatible base URL: `http://ollama:11434/v1`. */
   readonly baseUrl: URL;
   readonly model: string;
+  /** What the operator says a turn may spend reasoning (#1268), when they did. */
+  readonly reasoningTokens?: number;
 }
 
 export interface LocalModelOptions {
@@ -183,6 +202,75 @@ export function failureOf(error: unknown, timedOut: boolean, aborted: boolean): 
 }
 
 /**
+ * A 4xx body that says the model, or the service, takes no picture: a
+ * statement about what the MODEL can do, never one about the picture.
+ * Matched and dropped, as {@link WITHOUT_TOOLS} is.
+ *
+ * ⚠️ **Until 2026-10-12 this was `/image|vision|multi-?modal/`, and two real
+ * models that DO take pictures showed it wrong** (spike 0025 §8, #1106's
+ * review). Sent bytes they could not decode, Ollama's `gemma3:4b` answered
+ * 400 *"Failed to load image or audio file"* and DeepSeek's `deepseek-flash`
+ * answered 400 *"You have uploaded an unsupported image. Please make sure
+ * your image is valid and has one of the following formats …"*. Both name an
+ * image, so both were read as *"this model takes no pictures"*, and the app
+ * would have stopped for the session and told the rider to choose another
+ * model. Each is one failed picture, and is `refused` now.
+ *
+ * ## Provenance
+ *
+ * - **Observed, 2026-10-12**: one sentence, which the first pattern takes,
+ *   from Ollama 400ing `qwen2.5:3b`, which takes no picture: *"Multimodal
+ *   data provided, but model does not support multimodal requests."*
+ * - ⚠️ **Not observed, the author's reading of what other servers say**:
+ *   every other wording, the first pattern's other forms included. Each
+ *   pattern is written to stop where a statement about the PICTURE would go
+ *   on (a size, a format, a URL scheme): `model.test.ts` lists both kinds. A server whose words for it are none of these is one failed
+ *   picture at a time, and three in a row stop the session with *"gave no
+ *   usable answer"*: the wrong sentence, and no picture sent on regardless.
+ */
+const WITHOUT_PICTURES: readonly RegExp[] = [
+  // "…does not support multimodal requests." / "doesn't support images" — and the clause ends
+  // there, so "does not support images larger than 20 MB" is about the picture and is not this.
+  /(?:does not|doesn['’]?t|do not|don['’]?t) support (?:multi-?modal|images?|vision)(?: inputs?| requests| data)?\s*(?:$|[."'\\!,;)])/i,
+  /is not a (?:multi-?modal|vision) model/i,
+  // "Image inputs are not supported…", opening its clause: "webp images are not supported" is not this.
+  /(?<=^|[.:;,"'\\]\s*|\b(?:but|and) )(?:image inputs?|images?|vision|multi-?modal(?: inputs?)?) (?:is|are) not supported/i,
+  // "…only supported by certain models"; "only supported with https or data URLs" is about the picture.
+  /image_url is only supported by/i,
+  /unknown variant .?image_url/i,
+  /missing data required for image input/i,
+];
+
+/** The statuses a server refuses a request's SHAPE with: the three a picture it cannot take gets. */
+const SHAPE_REFUSALS: ReadonlySet<number> = new Set([400, 415, 422]);
+
+/** Whether a refusal's words say the model takes no picture. Exported for `model.test.ts`. */
+export function saysWithoutPictures(responseBody: string): boolean {
+  return WITHOUT_PICTURES.some((pattern) => pattern.test(responseBody));
+}
+
+/** Which closed failure an error from a look is. Never reads its message into the result. */
+export function pictureFailureOf(
+  error: unknown,
+  timedOut: boolean,
+  aborted: boolean,
+): PictureFailure {
+  if (
+    !aborted &&
+    !timedOut &&
+    APICallError.isInstance(error) &&
+    error.statusCode !== undefined &&
+    SHAPE_REFUSALS.has(error.statusCode) &&
+    saysWithoutPictures(error.responseBody ?? '')
+  ) {
+    return 'model-without-pictures';
+  }
+  const failure = failureOf(error, timedOut, aborted);
+  // No tool is ever sent with a picture, so this cannot be the answer; it is a refusal.
+  return failure === 'model-without-tools' ? 'refused' : failure;
+}
+
+/**
  * A fetch that sends only under `base`, and never follows a redirect. Exported
  * for `model.test.ts` alone, which hands it a foreign URL directly: the SDK
  * only ever calls `baseURL`, so no run through it can show the guard works.
@@ -202,6 +290,9 @@ export function createLocalModel(options: LocalModelOptions): ModelConnection {
   const { settings, resolve } = options;
   const send = options.fetch ?? globalThis.fetch.bind(globalThis);
   return {
+    ...(settings.reasoningTokens === undefined
+      ? {}
+      : { reasoningTokens: settings.reasoningTokens }),
     async turn(request: ModelTurnRequest): Promise<ModelTurn> {
       if (request.signal.aborted) return { ok: false, failure: 'aborted' };
       const checked = await localAddressesOnly(settings.baseUrl.hostname, resolve);
@@ -224,6 +315,8 @@ export interface HostedModelOptions {
   readonly model: string;
   /** The opened key. Sent as a bearer token to `baseUrl` and nowhere else. */
   readonly apiKey: string;
+  /** The rider's standing allowance for reasoning (#1268), when they set one. */
+  readonly reasoningTokens?: number;
   /** The platform's `fetch` unless a test hands its own. */
   readonly fetch?: typeof globalThis.fetch;
 }
@@ -256,6 +349,7 @@ export function createHostedModel(options: HostedModelOptions): ModelConnection 
     fetch: pinnedTo(base, send),
   });
   return {
+    ...(options.reasoningTokens === undefined ? {} : { reasoningTokens: options.reasoningTokens }),
     async turn(request: ModelTurnRequest): Promise<ModelTurn> {
       if (request.signal.aborted) return { ok: false, failure: 'aborted' };
       return oneTurn(provider, options.model, request);
@@ -299,6 +393,12 @@ async function oneTurn(
             input: call.input as unknown,
           },
     );
+    // Whether the model reasoned, and for how many tokens where the server
+    // says (#1268). DeepSeek and OpenAI count them; Ollama sends the reasoning
+    // beside the answer and counts nothing apart. The text is read for being
+    // there and dropped.
+    const reasoningTokens = result.usage.outputTokenDetails.reasoningTokens ?? 0;
+    const reasoned = reasoningTokens > 0 || (result.reasoningText ?? '') !== '';
     return {
       ok: true,
       text: result.text,
@@ -312,11 +412,110 @@ async function oneTurn(
           ? {}
           : { outputTokens: result.usage.outputTokens }),
       },
+      ...(reasoned ? { reasoning: reasoningTokens > 0 ? { tokens: reasoningTokens } : {} } : {}),
     };
   } catch (error) {
     return {
       ok: false,
       failure: failureOf(error, timeout.aborted, request.signal.aborted),
+    };
+  }
+}
+
+/** What a picture connection is built with beyond its model: the fixed question. */
+export interface PictureModelExtras {
+  readonly question: PictureQuestion;
+}
+
+/**
+ * The model on the rider's own box that takes pictures (#1106): the local
+ * server of {@link createLocalModel}, held to the same address rule on every
+ * look, and the model the operator named for pictures.
+ */
+export function createLocalPictureModel(
+  options: LocalModelOptions & PictureModelExtras,
+): PictureConnection {
+  const { settings, resolve, question } = options;
+  const send = options.fetch ?? globalThis.fetch.bind(globalThis);
+  return {
+    async look(request: PictureLookRequest): Promise<PictureLook> {
+      if (request.signal.aborted) return { ok: false, failure: 'aborted' };
+      const checked = await localAddressesOnly(settings.baseUrl.hostname, resolve);
+      if (!checked.ok) return { ok: false, failure: checked.why };
+      const base = atAddress(settings.baseUrl, checked.address);
+      const provider = createOpenAICompatible({
+        name: 'local',
+        baseURL: base,
+        fetch: pinnedTo(base, send),
+      });
+      return oneLook(provider, settings.model, question, settings.reasoningTokens, request);
+    },
+  };
+}
+
+/**
+ * A hosted model on the rider's OWN key, shown a picture (#1106, the owner's
+ * ruling of 2026-10-12): `https:` only, one host, the same closed failures.
+ *
+ * ⚠️ **Built in one place** — `camera/hosted-pictures.ts`, which
+ * `camera/hosted-pictures-seam.test.ts` holds every other shipped module out
+ * of — and only for a rider whose own picture consent names the origin
+ * (`camera/side-pose.ts`). What leaves is the picture and
+ * {@link PictureModelExtras.question}: no athlete id, no session, no ride.
+ */
+export function createHostedPictureModel(
+  options: HostedModelOptions & PictureModelExtras,
+): PictureConnection {
+  if (options.baseUrl.protocol !== 'https:') {
+    throw new TypeError('A hosted model is reached over https: only.');
+  }
+  const send = options.fetch ?? globalThis.fetch.bind(globalThis);
+  const base = options.baseUrl.href.replace(/\/+$/, '');
+  const provider = createOpenAICompatible({
+    name: 'hosted',
+    baseURL: base,
+    apiKey: options.apiKey,
+    fetch: pinnedTo(base, send),
+  });
+  return {
+    async look(request: PictureLookRequest): Promise<PictureLook> {
+      if (request.signal.aborted) return { ok: false, failure: 'aborted' };
+      return oneLook(provider, options.model, options.question, options.reasoningTokens, request);
+    },
+  };
+}
+
+/** One picture through `provider`: the fixed question and the picture, in one user message. */
+async function oneLook(
+  provider: ReturnType<typeof createOpenAICompatible>,
+  model: string,
+  question: PictureQuestion,
+  reasoningTokens: number | undefined,
+  request: PictureLookRequest,
+): Promise<PictureLook> {
+  const timeout = AbortSignal.timeout(Math.max(1, request.timeoutMilliseconds));
+  try {
+    const result = await generateText({
+      model: provider.chatModel(model),
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: question.question },
+            { type: 'image', image: request.picture, mediaType: 'image/jpeg' },
+          ],
+        },
+      ],
+      // A model that reasons spends its allowance before it answers (#1268).
+      maxOutputTokens: question.maxOutputTokens + (reasoningTokens ?? 0),
+      maxRetries: 0,
+      abortSignal: AbortSignal.any([request.signal, timeout]),
+    });
+    return { ok: true, text: result.text };
+  } catch (error) {
+    return {
+      ok: false,
+      failure: pictureFailureOf(error, timeout.aborted, request.signal.aborted),
     };
   }
 }

@@ -13,7 +13,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { beatsPerMinute } from '@onyourleft/domain';
+import { beatsPerMinute, expandWorkout, seconds, thresholdShare } from '@onyourleft/domain';
 
 import type { WorkoutHold } from '../workout/hold-text';
 
@@ -488,6 +488,56 @@ describe('gameTrainerPortOver — the port main.tsx builds (#503)', () => {
     expect(gameTrainerPortOver(undefined).workoutRescue()).toBeUndefined();
   });
 
+  it('hands the game the running workout’s own snapshot object for its graph — #1307', () => {
+    const timeline = { segments: [], totalSeconds: 600 };
+    let workout:
+      | {
+          status: string;
+          rescue: undefined;
+          elapsedSeconds: number;
+          holdingWatts: number | undefined;
+          timeline: typeof timeline;
+        }
+      | undefined = undefined;
+    const port = gameTrainerPortOver({
+      getSnapshot: () => ({ trainer: { ...NO_CONTROL, hasControl: true }, workout }),
+      simulationControl: () => undefined,
+      requestTrainerControl: () => Promise.resolve(),
+      noteGameRideEnded: () => undefined,
+      subscribe: () => () => undefined,
+    });
+    expect(port.runningWorkout?.()).toBeUndefined();
+    workout = {
+      status: 'running',
+      rescue: undefined,
+      elapsedSeconds: 30,
+      holdingWatts: 150,
+      timeline,
+    };
+    // ⚠️ `toBe`: the same object, so the graph's memo holds between ticks.
+    expect(port.runningWorkout?.()).toBe(workout);
+    workout = { ...workout, status: 'paused' };
+    expect(port.runningWorkout?.()).toBe(workout);
+    // A finished workout gives the route plan its place back.
+    workout = { ...workout, status: 'finished' };
+    expect(port.runningWorkout?.()).toBeUndefined();
+    expect(gameTrainerPortOver(undefined).runningWorkout?.()).toBeUndefined();
+  });
+
+  it('draws no graph from a source that does not say what the graph reads — #1307', () => {
+    const port = gameTrainerPortOver({
+      getSnapshot: () => ({
+        trainer: { ...NO_CONTROL, hasControl: true },
+        workout: { status: 'running', rescue: undefined },
+      }),
+      simulationControl: () => undefined,
+      requestTrainerControl: () => Promise.resolve(),
+      noteGameRideEnded: () => undefined,
+      subscribe: () => () => undefined,
+    });
+    expect(port.runningWorkout?.()).toBeUndefined();
+  });
+
   it('reads a running workout’s heart-rate hold off the controller, on every call — #1240', () => {
     let hold: WorkoutHold | undefined = undefined;
     const port = gameTrainerPortOver({
@@ -508,6 +558,75 @@ describe('gameTrainerPortOver — the port main.tsx builds (#503)', () => {
     };
     expect(port.workoutHold?.()).toEqual(hold);
     expect(gameTrainerPortOver(undefined).workoutHold?.()).toBeUndefined();
+  });
+
+  it('reads a waiting re-plan off the controller, and says when it is not the moment — #1244', () => {
+    const steady = (length: number, share: number) => ({
+      kind: 'steady' as const,
+      seconds: seconds(length),
+      target: thresholdShare(share),
+    });
+    const timeline = expandWorkout({
+      name: 'Efforts',
+      blocks: [steady(300, 0.6), steady(300, 1.1), steady(300, 0.5)],
+    });
+    let waiting: { revision: number; sentence: string } | undefined = undefined;
+    let elapsedSeconds = 100;
+    const port = gameTrainerPortOver({
+      getSnapshot: () => ({
+        trainer: { ...NO_CONTROL, hasControl: true },
+        workout: {
+          status: 'running',
+          rescue: undefined,
+          replan: { waiting },
+          timeline,
+          elapsedSeconds,
+          holdingWatts: 150,
+        },
+      }),
+      simulationControl: () => undefined,
+      requestTrainerControl: () => Promise.resolve(),
+      noteGameRideEnded: () => undefined,
+      subscribe: () => () => undefined,
+    });
+    expect(port.workoutPlanChange?.()).toBeUndefined();
+    waiting = { revision: 1, sentence: 'Main set ended early, so the cool-down is next.' };
+    expect(port.workoutPlanChange?.()).toEqual({ waiting, quiet: false });
+    // Inside the block above threshold power: the same move, and not now.
+    elapsedSeconds = 400;
+    expect(port.workoutPlanChange?.()).toEqual({ waiting, quiet: true });
+    expect(gameTrainerPortOver(undefined).workoutPlanChange?.()).toBeUndefined();
+  });
+
+  it('hands *Keep the plan* to the controller’s own keepThePlan, and reads a discarded move off it — #1244', () => {
+    let kept = 0;
+    let discarded: number | undefined = undefined;
+    const port = gameTrainerPortOver({
+      getSnapshot: () => ({
+        trainer: { ...NO_CONTROL, hasControl: true },
+        workout: {
+          status: 'running',
+          rescue: undefined,
+          replan: { waiting: undefined, discarded },
+        },
+      }),
+      simulationControl: () => undefined,
+      requestTrainerControl: () => Promise.resolve(),
+      noteGameRideEnded: () => undefined,
+      subscribe: () => () => undefined,
+      keepThePlan: () => {
+        kept += 1;
+      },
+    });
+    port.keepThePlan?.();
+    expect(kept).toBe(1);
+    expect(port.workoutPlanDiscarded?.()).toBeUndefined();
+    discarded = 3;
+    expect(port.workoutPlanDiscarded?.()).toBe(3);
+    // No controller: nothing to keep a plan from, and no throw.
+    const none = gameTrainerPortOver(undefined);
+    expect(() => none.keepThePlan?.()).not.toThrow();
+    expect(none.workoutPlanDiscarded?.()).toBeUndefined();
   });
 
   it('hands a game ride’s outcome to the ride controller, and to nothing without one — #1042', () => {

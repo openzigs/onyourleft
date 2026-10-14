@@ -21,13 +21,15 @@
  * | `at` | hold the rider still this far along the route, for a screenshot | metres |
  * | `panel` | the on-screen controls | `1` (default), `0` for a clean screenshot |
  * | `layers` | layers switched OFF, for their share of the GPU (#616) | `-sky`, `-surfaces`, `-vegetation`, `-impostors`, `-structures`, `-water`, `-riders`, `-grounding`, comma-separated; default none |
- * | `levers` | #619's levers switched OFF, for a before/after pair at one rung — and since #622 its air, for a by-eye pair | `-foliage-order`, `-texture-bias`, `-air`, comma-separated; default none |
+ * | `levers` | #619's levers switched OFF, for a before/after pair at one rung — since #622 its air and since #1274 its crag, for a by-eye pair, and since #1283 the generated trees and #1294 the generated firs, for both | `-foliage-order`, `-texture-bias`, `-air`, `-crag`, `-generated-trees`, `-generated-conifers`, comma-separated; default none |
  * | `facing` | which way the route is turned, relative to the sun (#702, `route.ts` §"Which way it faces") | `sun`, `away`; default the route unturned, which looks 110° to 160° away from the sun |
  *
  * ⚠️ **Unknown parameters and values are REFUSED**, as #457's page refused
  * them: a typo in a soak URL would otherwise measure the default under another
  * name, and a table of numbers cannot show that it did.
  */
+
+import type { RealisticTrees } from '../../src/game/realistic-assets';
 
 import type { Facing } from './route';
 
@@ -71,8 +73,33 @@ export type Layer = (typeof LAYERS)[number];
  *   haze off, which is the picture before #622 — for the owner's BY-EYE
  *   comparison only. ⚠️ **Not a cost pair**: the shader runs either way, so
  *   #622's cost is two builds (validation 0002 Part AH §"The #622 rows").
+ * - `crag` — #1274: the rock face a steep bank wears, ambientCG's. Off draws
+ *   the bank in the scree's photograph, which is the picture before #1274 —
+ *   for the owner's BY-EYE comparison. ⚠️ **Not a cost pair either**: the
+ *   ground's shader is the same program with it off, and samples one
+ *   photograph on a bank where it sampled the other.
+ * - `generated-conifers` — #1294: the firs generated to their budget (ADR
+ *   0049 D-1), in Poly Haven's photographed sprigs. Off loads the fir
+ *   photoscans they replaced instead and leaves the broadleaves generated,
+ *   which is the world #1283 left — the fir's own BY-EYE pair and the tablet's
+ *   cost pair for it. Read at load, as `generated-trees` is.
+ * - `generated-trees` — #1283: the trees generated to their budget (ADR 0049
+ *   D-1). Off loads the photoscans instead — ⚠️ since #1294 EVERY tree's, the
+ *   firs' too, with or without `generated-conifers` — which is
+ *   the world before #1283 — for the owner's BY-EYE comparison, and for the
+ *   tablet's cost pair: the two sets are different files, so the frame time,
+ *   the draw calls and the triangles of one run against the other are the
+ *   trees' own difference. ⚠️ **Read at load**: it chooses which files are
+ *   fetched, so it is a different URL and not a switch on a running page.
  */
-export const LEVERS = ['air', 'foliage-order', 'texture-bias'] as const;
+export const LEVERS = [
+  'air',
+  'crag',
+  'foliage-order',
+  'generated-conifers',
+  'generated-trees',
+  'texture-bias',
+] as const;
 
 /** One of {@link LEVERS}. */
 export type Lever = (typeof LEVERS)[number];
@@ -176,6 +203,18 @@ export function rungWithLevers<R extends { readonly textureLodBias: number }>(
   leversOff: readonly Lever[],
 ): R {
   return leversOff.includes('texture-bias') ? { ...rung, textureLodBias: 0 } : rung;
+}
+
+/**
+ * Which trees this run loads — #1283, #1294: the generated ones, as the
+ * product does; with `generated-conifers` off the scanned firs beside the
+ * generated broadleaves; or with `generated-trees` off every tree's scan.
+ * `realistic-harness.ts` hands it to `three-renderer.ts` §`setRealisticTrees`
+ * before the world is loaded.
+ */
+export function treesWithLevers(leversOff: readonly Lever[]): RealisticTrees {
+  if (leversOff.includes('generated-trees')) return 'scanned';
+  return leversOff.includes('generated-conifers') ? 'scanned-conifers' : 'generated';
 }
 
 /** A configuration from a query string. @see RealisticPageConfig */

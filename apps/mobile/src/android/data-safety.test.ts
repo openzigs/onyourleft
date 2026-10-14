@@ -295,7 +295,7 @@ describe('the declaration filed on Play', () => {
     expect(fitness?.why).toContain('No position, altitude, date or identifier is sent');
   });
 
-  it('answers the photos row as collected, optional and not shared — #387', () => {
+  it('answers the photos row as collected and optional — #387 — and, since #1106, shared', () => {
     // ⚠️ **Re-filed in the same pull request as the first byte**, which is
     // #377's epic criterion: the declaration is true of the shipped app at
     // every point, not only at the end. `apps/web/src/privacy/no-network.test.ts`
@@ -305,9 +305,11 @@ describe('the declaration filed on Play', () => {
     expect(photos, 'the app has a camera and the form has no Photos row').toBeDefined();
     expect(photos?.collected).toBe(true);
     expect(photos?.optional).toBe(true);
-    // Not a third party: the rider's own machine, on a press. A hosted path
-    // would make this `true`, and is not built.
-    expect(photos?.shared).toBe(false);
+    // #387's own path is not a third party: the rider's own machine, on a
+    // press. *"A hosted path would make this `true`"*, this comment used to
+    // say, *"and is not built"*. #1106 built one — through the rider's
+    // instance, on their own key, by name — so it is `true`.
+    expect(photos?.shared).toBe(true);
     expect(photos?.why).toContain('#387');
   });
 
@@ -328,7 +330,23 @@ describe('the declaration filed on Play', () => {
     expect(photos?.why).toContain('about five a second');
     expect(photos?.why).toContain('off by default');
     expect(photos?.collected).toBe(true);
-    expect(photos?.shared).toBe(false);
+  });
+
+  it('names the side camera’s pictures to the rider’s instance, and on to a hosted service by name — #1106', () => {
+    const photos = DATA_SAFETY_DECLARATION.find((answer) => answer.dataType.startsWith('Photos'));
+    expect(photos).toMatchObject({ collected: true, shared: true, optional: true });
+    const why = photos?.why ?? '';
+    expect(why).toContain('#1106');
+    // To the instance: sealed, and not stored there.
+    expect(why).toContain('sealed on the device for that instance alone');
+    expect(why).toContain('does not store it — not in its database, a file or a log');
+    // On to a third party: its own switch, by name, on the rider's own key.
+    expect(why).toContain('a consent that names the service');
+    expect(why).toContain('a third party, hence shared');
+    expect(why).toContain('the rider holds their own key for');
+    expect(why).toContain('Without the sealed connection no picture is sent at all');
+    // And what #387 said of its own picture is still said of that picture alone.
+    expect(why).toContain('That picture is not sent to this project or to an instance');
   });
 
   it('collects nothing else — the map, the camera, the post-ride ask, an instance and its rooms, and nothing more', () => {
@@ -349,12 +367,21 @@ describe('the declaration filed on Play', () => {
       'Photos and videos',
       'Device or other IDs',
     ]);
-    // Shared: the health rows alone, since #803. Photos and videos, and every
-    // location row, stay `shared: false` — the hosted path is never sent a
-    // picture and nothing it is sent carries a coordinate.
+    // Shared: the health rows since #803, the rider's own text since #1251
+    // (#1104 B8: parts of it can be looked up and sent on to a hosted service
+    // the rider agreed to), and Photos and videos since #1106,
+    // whose instance path can send a side-camera picture on to a hosted
+    // service the rider agreed to by name. Every location row stays
+    // `shared: false`: nothing sent to a hosted service carries a coordinate,
+    // and a picture is stripped of its metadata before it leaves the device.
     expect(
       DATA_SAFETY_DECLARATION.filter((answer) => answer.shared).map((answer) => answer.dataType),
-    ).toStrictEqual(['Health and fitness — health info', 'Health and fitness — fitness info']);
+    ).toStrictEqual([
+      'Health and fitness — health info',
+      'Health and fitness — fitness info',
+      'App activity — Other user-generated content',
+      'Photos and videos',
+    ]);
   });
 
   it('adding the camera permission leaves the location claim untouched', () => {
@@ -443,9 +470,9 @@ describe('the declaration filed on Play', () => {
       expect(instance?.dataTypes, dataType).toContain(dataType);
     }
     // The rider's own copy on an instance they chose is not a third party:
-    // the rows sync alone moves stay unshared.
+    // the row sync alone moves stays unshared. (The rider's own text is shared
+    // since #1251, by the hosted service, not by the sync — the case below.)
     expect(row('Files and docs')?.shared).toBe(false);
-    expect(row('App activity — Other user-generated content')?.shared).toBe(false);
     expect(row('Files and docs')?.why).not.toContain('Nothing is uploaded');
     expect(row('Health and fitness — health info')?.why).not.toContain(
       'sends none of it to an instance',
@@ -755,6 +782,46 @@ describe('the manifest the app actually ships supports the declaration', () => {
   });
 });
 
+describe('a hosted service on the rider’s own key, sent to by their instance (#1251, #1104 B8)', () => {
+  const row = (dataType: string) =>
+    DATA_SAFETY_DECLARATION.find((answer) => answer.dataType === dataType);
+
+  it.each(['Health and fitness — health info', 'Health and fitness — fitness info'])(
+    'the %s row says the instance sends the numbers on, masked, to the address the consent names',
+    (dataType) => {
+      const why = row(dataType)?.why ?? '';
+      expect(why).toContain(
+        'the instance sends those numbers, masked, to that service at the https address the rider’s consent names',
+      );
+      expect(why).toContain('That service is a third party, hence shared.');
+      expect(why).toContain('is withdrawn when the address changes');
+      expect(why).toContain('the key is always the rider’s own, never the operator’s');
+      expect(row(dataType)).toMatchObject({ collected: true, shared: true, optional: true });
+    },
+  );
+
+  it('the rider’s own text is SHARED: parts of it can be sent on, masked, and masking promises nothing', () => {
+    const answer = row('App activity — Other user-generated content');
+    expect(answer).toMatchObject({ collected: true, shared: true, optional: true });
+    expect(answer?.why).toContain('those parts are sent to it, masked first');
+    expect(answer?.why).toContain(
+      'Masking cannot guarantee that nothing personal in free text gets through',
+    );
+    // Analytics is still not collected: the split row is what moved.
+    expect(row('App activity')).toMatchObject({ collected: false, shared: false });
+  });
+
+  it('says the privacy zones go to the instance and not to the service, and no location row is shared', () => {
+    const why = row('Location — precise location')?.why ?? '';
+    expect(why).toContain(
+      'their privacy zones — each one’s name, centre and radius — go to that instance',
+    );
+    expect(why).toContain('the zones are not sent to the service');
+    expect(row('Location — precise location')?.shared).toBe(false);
+    expect(row('Location — approximate location')?.shared).toBe(false);
+  });
+});
+
 describe('a write-up asked of the rider’s instance (#1102, #1104 B8)', () => {
   const row = (dataType: string) =>
     DATA_SAFETY_DECLARATION.find((answer) => answer.dataType === dataType);
@@ -771,4 +838,81 @@ describe('a write-up asked of the rider’s instance (#1102, #1104 B8)', () => {
       expect(row(dataType)).toMatchObject({ collected: true, shared: true, optional: true });
     },
   );
+});
+
+describe('block summaries sent during a ride, for a re-plan (#1245, ADR 0048 D-10)', () => {
+  const row = (dataType: string) =>
+    DATA_SAFETY_DECLARATION.find((answer) => answer.dataType === dataType);
+
+  it.each([
+    [
+      'Health and fitness — health info',
+      'its mean and highest heart rate, and how long the heart rate was inside the range the rider chose',
+    ],
+    [
+      'Health and fitness — fitness info',
+      'its mean power as a share of the rider’s threshold power, its mean cadence and how many times the target was eased',
+    ],
+  ])(
+    'the %s row says what a summary carries, when it is sent, to whom, and that it is off per ride',
+    (dataType, carries) => {
+      const why = row(dataType)?.why ?? '';
+      expect(why).toContain(carries);
+      expect(why).toContain(
+        'With re-plans during the ride switched on for a ride (#1245; off at the start of every ride)',
+      );
+      expect(why).toContain(
+        'is sent during the ride, as a block begins and never more often than every 3 minutes, to the instance the rider connected',
+      );
+      expect(why).toContain('which keeps each request for 7 days');
+      // No hosted source: #1244 asks only the instance's own model, so a re-plan shares nothing.
+      expect(why).toContain(
+        'the app asks for no hosted service for a re-plan, so a re-plan sends nothing to a third party and does not add to shared',
+      );
+      expect(why).not.toContain('the instance sends them on');
+      expect(why).not.toContain('effort check-in');
+      expect(why).toContain(
+        'No position, date, name or identifier is in a summary, and no second-by-second recording is sent',
+      );
+      // Collected and shared before this: the answers filed on Play do not move.
+      expect(row(dataType)).toMatchObject({ collected: true, shared: true, optional: true });
+    },
+  );
+
+  it('the rider’s own text row names the workout goals and what a re-plan’s model may look up', () => {
+    const answer = row('App activity — Other user-generated content');
+    expect(answer).toMatchObject({ collected: true, shared: true, optional: true });
+    expect(answer?.why).toContain(
+      'go to their instance with each block summary, sealed, and the model on the instance’s own machine may look up',
+    );
+    expect(answer?.why).toContain(
+      'what the rider wrote about their goals and the blocks of their saved workouts, if synced',
+    );
+    expect(answer?.why).toContain(
+      'but not the time they want to spend in their range, which the app leaves out',
+    );
+    expect(answer?.why).toContain(
+      'the app asks for no hosted service for a re-plan, so none of it is sent to a third party',
+    );
+    expect(answer?.why).not.toContain('those are sent to it, masked first');
+  });
+
+  it('the health info row names the heart-rate numbers the rider chose, which travel too', () => {
+    const why = row('Health and fitness — health info')?.why ?? '';
+    expect(why).toContain(
+      'the range of each heart-rate-hold block of the workout, in beats per minute',
+    );
+    expect(why).toContain(
+      'from their workout goals the heart-rate range and the heart rate they chose not to go above',
+    );
+  });
+
+  it('moves no other row: location, photos and identifiers say nothing of a re-plan', () => {
+    const others = DATA_SAFETY_DECLARATION.filter((answer) => answer.why.includes('re-plan'));
+    expect(others.map((answer) => answer.dataType)).toStrictEqual([
+      'Health and fitness — health info',
+      'Health and fitness — fitness info',
+      'App activity — Other user-generated content',
+    ]);
+  });
 });

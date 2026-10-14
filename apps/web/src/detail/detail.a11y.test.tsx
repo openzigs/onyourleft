@@ -106,7 +106,21 @@ function busyRide(): StubDetail {
         ),
         longitude: Array.from({ length: count }, () => degreesLongitude(HOME.longitude)),
       },
-      laps: [stubLap(0), stubLap(1), stubLap(2)],
+      // #1312: a best lap, a part lap and every figure's column, so the
+      // audit reads the table as a course ride draws it.
+      laps: [
+        stubLap(0),
+        stubLap(1, {
+          distance: metres(7_400),
+          averagePower: watts(203),
+          maxPower: watts(618),
+          averageHeartRate: beatsPerMinute(151),
+          maxHeartRate: beatsPerMinute(173),
+          averageCadence: revolutionsPerMinute(91),
+          ascent: metres(48),
+        }),
+        stubLap(2, { partial: true }),
+      ],
     },
     [zone],
   );

@@ -33,6 +33,8 @@
  * | 5a‴ | a rider joined or left the room | event (#784) | #784's criterion | no |
  * | 5b | the ride may stop if the screen goes off | event (#647) | #524 | no |
  * | 5c | a *Set* the stall rescue held, answered | event (#655) | #445's press answer | no — the form's own `live` answer says it instead |
+ * | 5d | the heart-rate hold, as its sentence changes | event (#1240) | ADR 0048 D-12 | no |
+ * | 5e | a lap of the course, as it ends | event (#1312) | #1312's criterion | no |
  * | 6 | power off an acknowledged target | ≥ 10 % for ≥ 5 s | attested | no |
  * | 7 | distance to go | a distance tick | attested | no |
  * | 8 | power | a time cadence | attested | no |
@@ -59,6 +61,8 @@
  * | `screen-off-risk` | `GameView` and `ride/RideAnnouncer.tsx` | `RideSnapshot.keepAliveFailed` (#647) |
  * | `erg-held` | `ride/RideAnnouncer.tsx` | `TrainerSnapshot.ergHeld` (#655) |
  * | `hold-changed` | `ride/RideAnnouncer.tsx` and `GameView` | `RideWorkoutSnapshot.hold`, through `workout/hold-text.ts` §`holdAnnouncement` (#1240) |
+ * | `plan-changed` | `ride/RideAnnouncer.tsx` and `GameView` | `RideWorkoutSnapshot.replan`, through `workout/replan-text.ts` §`planChangeAnnouncement` (#1244) |
+ * | `lap-ended` | `GameView` | `hud/lap-text.ts` §`lapSummary`, over the laps `GameTrainerPort.courseLine` answers (#1312) |
  * | readings | `GameView` | `fields.ts` §`hudReadings` |
  *
  * ⚠️ **Rank 1 is broader than its name**, and the name was kept rather than
@@ -147,6 +151,25 @@
  * §`simulationControl`). ⚠️ **Not in {@link ALWAYS_SPOKEN}**: with
  * announcements off the form speaks it, and this region says nothing new.
  *
+ * ⚠️ **Rank 5e is #1312's**: a lap of the course has ended, and this is its
+ * time and averages and how it compares. The LOWEST event — nothing about a
+ * lap is the machine under the rider or a thing to act on, so it never costs
+ * a fault, a block or a climb its place — and above every reading, because it
+ * is true of one moment: a lap said after a routine power sentence has had
+ * its window is a lap the rider is a hundred metres into the next of. A lower
+ * event behind a higher one is dropped, so `GameView` offers it on every call
+ * for as long as its notice is on the HUD, until it comes back as `kind`
+ * (#647's "owed" rule): said ONCE, and never after the notice has gone.
+ * ⚠️ **Not in {@link ALWAYS_SPOKEN}** (#1316's third pass; the first pass had
+ * it there). A lap's summary is a reading about the ride, like #647's and
+ * #1240's sentences beside it, not a fault or a thing to act on — so it
+ * respects the rider's announcements setting, and with announcements off it
+ * is shown and not said. The case for the other answer: the notice is gone
+ * after a few seconds, which makes it a status message (SC 4.1.3), and this
+ * region is the only thing on the stage that speaks. The owner has not ruled;
+ * reversing this is one entry in that array and its line in
+ * `announce.test.ts`.
+ *
  * ## ⚠️ Six kinds are spoken with announcements OFF — {@link ALWAYS_SPOKEN}
  *
  * #395's table says the safety rows are *"on when announcements are on"*, and
@@ -210,7 +233,9 @@ export type AnnouncementEvent =
   | { readonly kind: 'room-rider'; readonly text: string }
   | { readonly kind: 'screen-off-risk'; readonly text: string }
   | { readonly kind: 'erg-held'; readonly text: string }
-  | { readonly kind: 'hold-changed'; readonly text: string };
+  | { readonly kind: 'hold-changed'; readonly text: string }
+  | { readonly kind: 'plan-changed'; readonly text: string }
+  | { readonly kind: 'lap-ended'; readonly text: string };
 
 /** Every kind of sentence, events and readings together. */
 export type AnnouncementKind =
@@ -236,6 +261,15 @@ export const PRIORITY: readonly AnnouncementKind[] = [
   // fault and below a held *Set* (ADR 0048 D-12). Announcements on only, at
   // most once a minute — `workout/hold-text.ts` §`holdAnnouncement`.
   'hold-changed',
+  // #1244: an accepted re-plan's one sentence, below the hold's (ADR 0048
+  // D-12). Announcements on only, once for each accepted move, and never in a
+  // segment above threshold power — `workout/replan-text.ts`
+  // §`planChangeAnnouncement`.
+  'plan-changed',
+  // #1312: a lap of the course, as it ends. The lowest event, BELOW an
+  // accepted re-plan: that sentence is about the workout the trainer is
+  // being driven through, and a lap is a figure about the ride. Rank 5e.
+  'lap-ended',
   'power-off-target',
   'distance-tick',
   'power',

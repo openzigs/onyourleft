@@ -43,6 +43,7 @@ import {
   type ActivityId,
   type WorkoutGoalsRecord,
   type WorkoutRecord,
+  type RideFacts,
 } from '@onyourleft/store';
 import {
   createStoreHarness,
@@ -926,6 +927,67 @@ describe('two-way sync through the real instance (#776)', () => {
     ).toBe(true);
     expect(await raceableOnInstance(world.path)).toHaveLength(1);
   }, 60_000);
+});
+
+describe('a ride’s re-plan record is not synced — #1244, #1315', () => {
+  /**
+   * The disclosure (`workout/replan-disclosure.ts`) and the privacy policy
+   * say of the record of each re-plan decision: *"They are not sent to your
+   * instance when you sync."* This is that sentence, held to the sync itself:
+   * a ride with a record is pushed through the real instance, and neither
+   * the instance nor a second device ends up with a word of it. When #1315
+   * builds the sync of the record this goes red, and the sentence changes
+   * with it.
+   */
+  it('reaches neither the instance nor a second device, and stays on the device that rode it', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, ['indoor-trainer-no-position.fit']);
+    const ride = a.ids[0]!;
+    const replans = [
+      {
+        decision: 'accepted',
+        // A string that can only have come from the record, to look for.
+        move: { kind: 'swap-next-block', workoutId: 'RECORD-MARKER-1315', blockIndex: 0 },
+        reason: 'heart-rate-high',
+        revision: 1,
+        at: 300,
+      },
+      { decision: 'not-applied', why: 'kept', revision: 1, at: 320 },
+    ] as unknown as NonNullable<RideFacts['replans']>;
+    expect(
+      await a.on.harness.write((store) =>
+        store.setActivityRideFacts(LOCAL_ATHLETE, ride, { workoutFinished: true, replans }),
+      ),
+    ).toBe(true);
+
+    expect(await a.sync()).toMatchObject({ pushed: 1, failures: [] });
+
+    // Everything the instance holds for this athlete, item by item.
+    const manifest = await manifestOf(a.on);
+    expect(manifest.length).toBeGreaterThan(0);
+    for (const entry of manifest) {
+      const answer = await a.on.transport.sync.json(
+        'GET',
+        `/v1/sync/items/${entry.kind}/${entry.key}`,
+      );
+      const held = JSON.stringify(answer.body);
+      expect(held, `${entry.kind} carries the record`).not.toContain('RECORD-MARKER-1315');
+      expect(held).not.toContain('replans');
+      expect(held).not.toContain('not-applied');
+    }
+
+    // A second device of the same rider pulls the ride, and no record with it.
+    const b = await linkedDevice(world.url, origin, a.on);
+    expect(await b.sync()).toMatchObject({ pulled: 1, failures: [] });
+    const onB = await b.on.harness.read((store) => store.getActivity(LOCAL_ATHLETE, ride));
+    expect(onB?.id).toBe(ride);
+    expect(onB?.rideFacts?.replans).toBeUndefined();
+
+    // And the device that rode it still has it, after the sync.
+    const onA = await a.on.harness.read((store) => store.getActivity(LOCAL_ATHLETE, ride));
+    expect(onA?.rideFacts?.replans).toHaveLength(2);
+  });
 });
 
 describe('what a device will not take from an instance (#898)', () => {

@@ -36,8 +36,12 @@ import {
   type AnalysisJobs,
   type AnalysisJobsOptions,
 } from '../analysis/jobs.ts';
-import { importSecretKey } from '../analysis/hosted-key.ts';
+import { importSecretKey, ownHostedKeyState } from '../analysis/hosted-key.ts';
 import { createHostedSettings } from '../analysis/hosted-settings.ts';
+import { hostedBehindMasking, readMaskingGuard } from '../analysis/hosted.ts';
+import { hostedForPictures } from '../camera/hosted-pictures.ts';
+import type { PictureConnection } from '../camera/picture-model.ts';
+import { createSidePose } from '../camera/side-pose.ts';
 import { createMemoryBlobStore, type MemoryBlobs } from '../blob/memory-blob-store.ts';
 import type { BlobStore } from '../blob/blob-store.ts';
 import type { Config } from '../config.ts';
@@ -281,6 +285,18 @@ export async function startIdentityInstance(
      * this function — a test hands the engine and whatever else it sets.
      */
     analysis?: Omit<AnalysisJobsOptions, 'store' | 'now'>;
+    /**
+     * The side camera's pictures (#1106): the local picture model, and the
+     * `fetch` a hosted one is reached through. The hosted key is the world's
+     * own store's, opened with the world's secret, as a running instance's is.
+     */
+    pictures?: { local?: PictureConnection; hostedFetch?: typeof globalThis.fetch };
+    /**
+     * The `fetch` a hosted TEXT model is reached through (#1251's test
+     * question), behind the world's own store's consent, key and masking item
+     * as a running instance's is. Absent, a hosted request reaches nothing.
+     */
+    hostedFetch?: typeof globalThis.fetch;
     /** What `/metrics` would count of each response. */
     observe?: (route: string | null, status: number, code: string | undefined) => void;
   } = {},
@@ -307,6 +323,8 @@ export async function startIdentityInstance(
     keyless,
     startsAt,
     analysis,
+    pictures,
+    hostedFetch,
     observe,
     ...rest
   } = options;
@@ -422,13 +440,34 @@ export async function startIdentityInstance(
   // A rider's own hosted key and consent (#1199), under the same secret as the keys.
   const hostedSecret =
     keyless === true ? Promise.resolve(undefined) : importSecretKey(secretBytes(7));
+  const ownKey = async (athleteId: string) =>
+    ownHostedKeyState(store, await hostedSecret, athleteId);
   const hostedSettings = createHostedSettings({
     store,
     secret: () => hostedSecret,
     now: () => clock.ms,
+    // As `instance.ts` builds them: the store's consent, key and masking item.
+    sources: {
+      local: undefined,
+      hostedKey: ownKey,
+      recordedConsent: async (athleteId) => (await store.getHostedConsent(athleteId))?.origin,
+      guard: (athleteId) => readMaskingGuard(store, athleteId),
+      behindMasking: (key, guard) =>
+        hostedBehindMasking(
+          key,
+          guard,
+          hostedFetch ?? (() => Promise.reject(new Error('a test reached for the internet'))),
+        ),
+    },
+  });
+  const sidePose = createSidePose({
+    local: pictures?.local,
+    hostedKey: ownKey,
+    hosted: (key) => hostedForPictures(key, pictures?.hostedFetch),
   });
   const started = (identity: Identity): Promise<TestInstance> =>
     startTestInstance({
+      sidePose,
       ...(analysisJobs === undefined ? {} : { analysis: analysisJobs }),
       hostedSettings,
       ...(observe === undefined ? {} : { observe }),

@@ -25,7 +25,9 @@
  * analysis job route (#1095), and the hosted-model key and hosted-consent
  * routes (#1199 — #1097 built the operator command and no app route, so there
  * was no plaintext key route to remove and no home-network check to lift)
- * were born sealed and are listed below.
+ * were born sealed and are listed below. So was the side camera's picture
+ * route (#1106): its row is not in D-7's table as written but in ADR 0050
+ * D-2, which is where a reviewer reads it.
  *
  * ## The families
  *
@@ -55,6 +57,9 @@ const JOB_ROW = 'Each analysis job’s input, every SSE event’s text, the resu
 /** D-7's rows for the key and consent routes (#1199). No shared key is set from the app: the owner withdrew Share mode on 2026-10-09. */
 const KEY_ROW = 'A pasted API key, a rider’s own or the shared one set from the app';
 const CONSENT_ROW = 'The rider’s recorded hosted consent and the endpoint it names';
+
+/** The row ADR 0050 D-2 adds to ADR 0047 D-7's table (#1106). */
+const PICTURE_ROW = 'A side-camera picture and the model’s answer about it';
 
 const only = (method: PhaseOneRoute['method'], path: string, row: string): PhaseOneRoute => ({
   method,
@@ -119,6 +124,8 @@ export const PHASE_ONE_SEALED_ROUTES: readonly PhaseOneRoute[] = [
   only('POST', '/v1/history/search', 'History search'),
   // Analysis jobs (#1095, ADR 0046 D-11): born sealed.
   only('POST', '/v1/analysis/jobs', JOB_ROW),
+  // #1243: a re-plan's input and its proposal travel as a job's do (ADR 0048 D-10).
+  only('POST', '/v1/analysis/replans', JOB_ROW),
   only('GET', '/v1/analysis/jobs/{jobId}', JOB_ROW),
   only('GET', '/v1/analysis/jobs/{jobId}/events', JOB_ROW),
   only('POST', '/v1/analysis/jobs/{jobId}/cancel', JOB_ROW),
@@ -129,6 +136,11 @@ export const PHASE_ONE_SEALED_ROUTES: readonly PhaseOneRoute[] = [
   only('DELETE', '/v1/analysis/hosted/key', KEY_ROW),
   only('POST', '/v1/analysis/hosted/consent', CONSENT_ROW),
   only('DELETE', '/v1/analysis/hosted/consent', CONSENT_ROW),
+  // #1251: the test question goes out on that key, to the endpoint that consent names.
+  only('POST', '/v1/analysis/hosted/test', `${KEY_ROW}; ${CONSENT_ROW}`),
+  // A side-camera picture (#1106, ADR 0050 D-2): born sealed, and
+  // refused unsealed on an instance with no keys too (`camera/routes.ts`).
+  only('POST', '/v1/camera/side-pose', PICTURE_ROW),
 ];
 
 /**

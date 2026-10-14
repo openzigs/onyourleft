@@ -66,6 +66,15 @@
  * The record's Segments line is that sentence; the "below" one is still in
  * the source, for a device that has a ride to cut from.
  *
+ * ⚠️ **Edited by #1244 (its third review), awaiting the owner's approval with
+ * that pull request's wording.** Two sentences are REWORDED in the record, in
+ * the same commit, because each had become false: the Ride screen's note,
+ * "Everything stays on this device.", is "Recorded on this device. Nothing is
+ * sent unless you switched that on." (a rider can now switch on re-plans a
+ * few lines above it); and the footer under every screen, "… No account, no
+ * server: everything here stays on this device.", is "… Your rides are kept
+ * on this device." (there has been an account and a server since ADR 0036).
+ *
  * ⚠️ **Edited by #1009, the owner's rulings of 2026-10-02.** Camera's note was
  * "Nothing is sent anywhere, and a picture is thrown away once it has been
  * looked at." — false on a screen that offers to send pictures to the rider's
@@ -88,6 +97,13 @@
  * now, above the switch rather than under it, so it names the switch — "Turn
  * on “This route is a loop” for a circuit…".
  *
+ * ⚠️ **Re-recorded by #1106**, for one added line and nothing else: Files →
+ * Erase's list of what an erase cannot reach gains *"a photograph your
+ * instance sent on to a hosted service you agreed to, which is a copy that
+ * service holds"* (ADR 0029 D-4's second line, true since the side camera's
+ * pictures may go on from the rider's instance). No sentence is dropped or
+ * reworded.
+ *
  * ⚠️ **Re-recorded by #1041**, when Activities became a card per ride at every
  * width and its table went. Nothing was added, and six lines of the populated
  * walk went with the table, none of them a lost word: its column headings
@@ -97,6 +113,15 @@
  * and the bare cells "123.5" and "234", which are said as the readings
  * "123.5 km" and "234 W" on the card and in the selected ride's summary, both
  * recorded.
+ *
+ * ⚠️ **Re-recorded by #1312** (its third pass), when the populated ride's
+ * laps became laps of a course: five with every figure a lap can state, the
+ * third the best and the last a part lap, where there were twelve identical
+ * ones. The ride's page gains the six headings a course lap adds, each lap's
+ * figures, "3 · Best lap", "5 · Part lap" and the note under the table. What
+ * went is the old fixture's own figures and nothing a rider is told: the
+ * numbers of laps six to twelve, "1 · Best lap" (the first of twelve equal
+ * laps), and the "—" of a lap with no power.
  *
  * ## What it does not check
  *
