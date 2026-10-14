@@ -11,6 +11,10 @@
  * against the builder of what leaves on that path, and a builder that starts
  * or stops sending a threshold is a red test beside the sentence it falsifies.
  *
+ * The re-plan row holds the request's key names (no threshold, no watt key),
+ * not the summary's values: that `meanPowerShare` is watts divided by the
+ * threshold is `workout/replan-session.test.ts`'s, on `summaryOf` itself.
+ *
  * Not held here: a private room (`net/room-port.ts` sends the declared weight
  * and nothing of the athlete row besides, which `room-port.test.ts` pins), and
  * sync's pushed items (rides as signed files, typed text and saved workouts,
@@ -102,6 +106,8 @@ describe('the thresholds card says where each threshold goes — #1342', () => {
   });
 
   it('a ride analysis carries the threshold power, and not the threshold heart rate', () => {
+    // 'instance-local' stands for every source: the hosted-model and own-computer
+    // paths take the same `RideAnalysisInput`, which has no heart-rate field.
     const request = analysisJobRequest(analysisInput(), 'template-1', 'instance-local');
     const sent = JSON.stringify(request);
     expect(request.input.rider.thresholdPower).toBe(THRESHOLD_POWER);

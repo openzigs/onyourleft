@@ -110,7 +110,9 @@ type LoadState =
  *
  * ⚠️ **It said "Nothing is sent anywhere" until #1342, which was false for
  * threshold power.** Each clause is held to the code that makes it true by
- * `views/thresholds-disclosure.test.ts`:
+ * `views/thresholds-disclosure.test.ts` (key names and presence; that the
+ * re-plan share is never watts is `workout/replan-session.test.ts`'s, on
+ * `summaryOf`):
  *
  * - **A ride analysis**: threshold power is `rider.thresholdPower` in every
  *   ride analysis' input (`@onyourleft/analysis` §`rideAnalysisInput`), read
