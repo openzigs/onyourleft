@@ -240,11 +240,17 @@ describe('a ride in a room — #782, #783', () => {
     expect(drawn.length).toBeGreaterThan(5);
   });
 
-  it('shows the gap to ONE chosen rider, by seat, with no watts beside them, and no standings — #783', async () => {
+  it('shows the gap to ONE chosen rider, by seat, named by the roster, with no watts beside them, and no standings on a group ride — #783, #1347', async () => {
     const room = new ScriptedRoom();
     await rideInRoom(room);
     room.accept();
     room.welcome(0);
+    // #1347: the room names its seats by their public names.
+    room.roster([
+      { riderId: 0, name: 'Me' },
+      { riderId: 1, name: 'Anna' },
+      { riderId: 2, name: 'Bea' },
+    ]);
     for (let tick = 1; tick <= 4; tick += 1) {
       room.frame(tick, [frameRider(1, 30 + tick * 8), frameRider(2, 60 + tick * 8)]);
       await pump(4);
@@ -260,18 +266,49 @@ describe('a ride in a room — #782, #783', () => {
       await Promise.resolve();
     });
     await pump(2);
-    // The lowest seat first — by rider id, never by who is ahead.
+    // The lowest seat first — by rider id, never by who is ahead — and
+    // called by the roster's name, not "Rider 2" (#1347).
     const field = queryAll(mounted?.container ?? document, 'dt').find(
-      (dt) => dt.textContent === 'Rider 2',
+      (dt) => dt.textContent === 'Anna',
     );
     expect(field).toBeDefined();
     const value = field?.nextElementSibling?.textContent ?? '';
     expect(value).toMatch(/ahead of you|behind you|Level/);
     // Ruling Q17: never watts beside another rider's name.
     expect(value).not.toMatch(/\d\s*W(?!\/kg)\b/);
-    // ADR 0021 D-6: nothing on the HUD ranks the room.
+    // ADR 0051 D-6: on a GROUP ride nothing on the HUD ranks the room.
     expect(hudText()).not.toMatch(/\b(1st|2nd|3rd|position \d|place \d|leader|standings?)\b/i);
     expect(queryAll(mounted?.container ?? document, 'ol')).toHaveLength(0);
+  });
+
+  it('shows a running race’s standings from the room’s frame, named by its roster, and never watts — #1347', async () => {
+    const room = new ScriptedRoom();
+    await rideInRoom(room);
+    room.accept();
+    room.welcome(0, 'race');
+    room.roster([
+      { riderId: 0, name: 'Me' },
+      { riderId: 1, name: 'Anna' },
+      { riderId: 2, name: 'Bea' },
+    ]);
+    await pump(2);
+    // On the line, no frame yet: no standings.
+    expect(mounted?.container.querySelector('.oyl-hud__standings')).toBeNull();
+    room.frame(1, [
+      { ...frameRider(0, 20), gapDeciseconds: 0, wattsPerKilogramTenths: 31 },
+      { ...frameRider(1, 40), gapDeciseconds: -52, wattsPerKilogramTenths: 38 },
+      { ...frameRider(2, 10), gapDeciseconds: 17, wattsPerKilogramTenths: 27 },
+    ]);
+    await pump(4);
+    const rows = queryAll(mounted?.container ?? document, '.oyl-hud__standing').map((row) =>
+      (row.textContent ?? '').replace(/\s+/g, ' ').trim(),
+    );
+    expect(rows).toEqual([
+      '1Anna−5 s, 5 seconds ahead of you,3.8 W/kg',
+      '2MeYou, you,3.1 W/kg',
+      '3Bea+2 s, 2 seconds behind you,2.7 W/kg',
+    ]);
+    expect(rows.join(' ')).not.toMatch(/\d\s*W(?!\/kg)\b/);
   });
 
   it('says in words that the room is lost, keeps riding, and rejoins by itself with a fresh ticket — #782', async () => {
