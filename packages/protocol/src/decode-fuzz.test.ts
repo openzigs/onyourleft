@@ -35,7 +35,7 @@ import {
   REFUSAL_REASONS,
   type Decoded,
 } from './codec';
-import type { ProtocolMessage } from './messages';
+import { PROTOCOL_VERSION, type ProtocolMessage } from './messages';
 
 const SEED = 0x0768_2026;
 const CASES = 10_000;
@@ -55,7 +55,7 @@ function random(seed: number): { below(limit: number): number } {
 
 const SEEDS: readonly string[] = (
   [
-    { type: 'hello', protocol: 1, physicsVersion: 1, ticket: 'abc.DEF-123' },
+    { type: 'hello', protocol: PROTOCOL_VERSION, physicsVersion: 1, ticket: 'abc.DEF-123' },
     { type: 'report', sequence: 7, atMs: 1_727_600_000_000, powerWatts: 250.5, cadenceRpm: 88 },
     {
       type: 'welcome',
@@ -79,6 +79,15 @@ const SEEDS: readonly string[] = (
       ],
     },
     { type: 'countdown', startsInMs: 9_000 },
+    { type: 'name', riderId: 2, displayName: 'Bea' },
+    {
+      type: 'standings',
+      tick: 12,
+      riders: [
+        { riderId: 1, gapDeciseconds: -12, wattsPerKilogramTenths: 38, flags: 0 },
+        { riderId: 2, gapDeciseconds: 0, wattsPerKilogramTenths: 40, flags: 2 },
+      ],
+    },
     { type: 'finish', order: [2, 1] },
   ] satisfies ProtocolMessage[]
 )

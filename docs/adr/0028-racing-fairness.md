@@ -571,3 +571,16 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   approval-required registration), D-7 — **D-7.4 included**, so no ghost enters a room, whatever
   [ADR 0039](0039-racing-another-riders-ghost-on-consent.md) permits for a local replay — and the
   publication rule of the 2026-09-22 entry.
+- **2026-10-14** — **D-7.7 is superseded by
+  [ADR 0051](0051-live-race-standings.md), on the owner's ruling of the same day**: *"for racing it
+  should show a list of people that are racing. It should include how far back each person is in time
+  and show real time w/kg"* ([#1347](https://github.com/openzigs/onyourleft/issues/1347)). D-7.7 said
+  *"A dynamically updating ranked list during it is spike 0005 §5 Question B and is not decided"*;
+  **that is decided now**, by the owner, who accepted the risk of the unanswered Question B and put
+  it to counsel by about 2027-01-15 ([#1234](https://github.com/openzigs/onyourleft/issues/1234)). A
+  race lists its riders in the room's order, each with the room's time gap to the reader and their
+  live W/kg. D-7.7's first sentence stands: the **finish order after the race** is still what a race
+  produces, and its stored result is still read only once the race is over. **Unchanged, by name**:
+  D-1 to D-4, D-6, D-7.1 to D-7.6 — D-7.2 included, so a **group ride has no list** (ADR 0051 D-3),
+  and D-7.4, so no ghost enters a room — and the 2026-09-22 publication rule, which ADR 0051 D-1
+  applies: W/kg beside another rider, never watts.

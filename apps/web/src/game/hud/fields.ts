@@ -214,10 +214,11 @@ export interface ChasedGap {
 
 /**
  * The room, on the HUD — #783: how many other riders are near, and the gap to
- * ONE rider the rider chose. **Never a list, and never an order**: ADR 0021
- * D-6 and ADR 0028 D-7.7 forbid a ranked list during a ride, and ruling Q8
- * (2026-09-28) is "only the gap to one chosen rider". A count says nothing
- * about who is ahead of whom.
+ * ONE rider the rider chose. **Never a list, and never an order, in these
+ * fields**: ADR 0021 D-6 and ruling Q8 (2026-09-28) made it "only the gap to
+ * one chosen rider". A race's list is its own panel since #1347
+ * (ADR 0051, superseding ADR 0028 D-7.7: `room-ride.ts` §`raceStandings`), and
+ * a group ride has none.
  */
 export interface RoomHud {
   /** How many other riders are drawn near this one — the interest set's size. */
@@ -230,8 +231,8 @@ export interface RoomHud {
 export interface ChosenRider {
   /**
    * What they are called on the HUD. ⚠️ Only ever the room's public projection
-   * of the athlete (#774, ADR 0028 D-6.5) — and until a room publishes one
-   * (#784, #785), `Rider N`, which names a seat and no person.
+   * of the athlete (#774, ADR 0028 D-6.5) — which a race sends (#1347) — and
+   * where the room sends none, `Rider N`, which names a seat and no person.
    */
   readonly label: string;
   /** Signed as `pacer/gap.ts` signs it: positive when they are ahead. */
