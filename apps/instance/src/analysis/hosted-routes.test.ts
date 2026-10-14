@@ -340,11 +340,18 @@ describe('the test question (#1251, #1104 B1 question 2)', () => {
       readonly key?: Readonly<Record<string, unknown>> | false;
       readonly consent?: string | false;
       readonly masking?: boolean;
+      /** Each request reaches the service only once this resolves (#1311). */
+      readonly hold?: Promise<void>;
     } = {},
   ) {
     const started = await startFakeModelServer(script);
     model = started;
     const sent: { url: string; authorization: string | null; body: string }[] = [];
+    let reached: () => void = () => undefined;
+    /** Resolves once the first request has been handed to the service. */
+    const firstSent = new Promise<void>((resolve) => {
+      reached = resolve;
+    });
     const base = KEY_BODY.url.replace(/\/+$/, '');
     const hostedFetch = ((input: string | URL | Request, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
@@ -353,8 +360,11 @@ describe('the test question (#1251, #1104 B1 question 2)', () => {
         authorization: new Headers(init?.headers).get('authorization'),
         body: typeof init?.body === 'string' ? init.body : '',
       });
+      reached();
       if (!url.startsWith(`${base}/`)) return Promise.reject(new Error('another host'));
-      return globalThis.fetch(`${started.baseUrl.href}${url.slice(base.length)}`, init);
+      const forward = () =>
+        globalThis.fetch(`${started.baseUrl.href}${url.slice(base.length)}`, init);
+      return has.hold === undefined ? forward() : has.hold.then(forward);
     }) as typeof globalThis.fetch;
     const synced = await syncWorld(2, { hostedFetch });
     world = synced.world;
@@ -381,7 +391,7 @@ describe('the test question (#1251, #1104 B1 question 2)', () => {
       expect(put.status, JSON.stringify(put.body)).toBe(200);
     }
     const ask = (as = token) => world!.call('POST', '/v1/analysis/hosted/test', { token: as });
-    return { ask, sent, rider: rider!, other: other!, requests: started.requests };
+    return { ask, sent, firstSent, rider: rider!, other: other!, requests: started.requests };
   }
 
   it('sends the two fixed sentences on the rider’s own key, and nothing of the rider’s', async () => {
@@ -494,13 +504,19 @@ describe('the test question (#1251, #1104 B1 question 2)', () => {
   });
 
   it('allows one test in flight per rider: a second while the first waits is refused, nothing sent', async () => {
-    const { ask, sent } = await ready([
-      { kind: 'slow', milliseconds: 300, then: { kind: 'text', text: 'ready' } },
-    ]);
+    let release: () => void = () => undefined;
+    const hold = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { ask, sent, firstSent } = await ready([{ kind: 'text', text: 'ready' }], { hold });
     const first = ask();
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // In flight, provably: its request has reached the service, which answers
+    // nothing until it is released. Until #1311 this was a 300 ms reply and a
+    // 100 ms sleep, which a slow runner lost (`expected 200 to be 429`, #1308).
+    await firstSent;
     const second = await ask();
     expect(second.status).toBe(429);
+    release();
     expect((await first).body).toEqual({ result: 'answered', reasoned: false });
     expect(sent).toHaveLength(1);
     // Once it has finished, the next is let through.
