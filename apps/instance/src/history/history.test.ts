@@ -623,7 +623,10 @@ describe('how often it may be asked — #918 item 3', () => {
     // The next window has a fresh allowance.
     world.clock.ms += windowMs;
     expect((await search(anna, ask('hills'))).status).toBe(200);
-  });
+    // 1 061 ms on green `main` (38399168021, Xeon 8370C) and 2 510 ms under
+    // coverage (nightly 38279988356, EPYC 9V74), 50 % of Vitest's 5 s default.
+    // About three times the slowest CI figure (docs/agents/ci.md §4c, #1262).
+  }, 8_000);
 
   it('forgets the athlete when their window ends, with no further request (#892’s sweep)', async () => {
     const made = await syncWorld(1);
