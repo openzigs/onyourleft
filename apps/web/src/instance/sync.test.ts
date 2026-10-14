@@ -2094,3 +2094,211 @@ describe('the rider’s typed workout goals, through to the agent’s read port 
     expect(await goalsOnInstance(world.path, a.athleteId)).toStrictEqual([GOALS]);
   }, 60_000);
 });
+
+describe('a pull does not undo a change made here while it waited on the instance (#1263)', () => {
+  /** The store as `harness.write` hands it. */
+  type HeldStore = Parameters<Parameters<StoreHarness['write']>[0]>[0];
+
+  /**
+   * `on`'s sync, with `edit` made on its store just before the FIRST `method`
+   * write — after the sync read the row and waited on the instance, before
+   * the pull's write: the window a rider can type into. `edit` runs as its
+   * own transaction, committed before the pull's begins.
+   */
+  function syncEditingBefore(
+    on: Device,
+    method: 'putRiderText' | 'putWorkout' | 'putWorkoutGoals',
+    edit: (store: HeldStore) => Promise<unknown>,
+  ) {
+    return on.harness.write((store) => {
+      let edited = false;
+      return syncWithInstance(
+        syncDependencies(
+          on,
+          new Proxy(store, {
+            get: (target, property) => {
+              const value = Reflect.get(target, property) as unknown;
+              if (typeof value !== 'function') return value;
+              const bound = (value as (...args: unknown[]) => unknown).bind(target);
+              if (property !== method) return bound;
+              return async (...args: unknown[]) => {
+                if (!edited) {
+                  edited = true;
+                  await edit(target);
+                }
+                return bound(...args);
+              };
+            },
+          }),
+        ),
+      );
+    });
+  }
+
+  /** A on the instance, B linked and holding A's copy, then A changes it: B's next sync pulls. */
+  async function pullPending(
+    save: (store: HeldStore) => Promise<unknown>,
+    change: (store: HeldStore) => Promise<unknown>,
+  ) {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, ['nominal-outdoor-ride.fit']);
+    await a.on.harness.write(save);
+    expect((await a.sync()).failures).toStrictEqual([]);
+    const b = await linkedDevice(world.url, origin, a.on);
+    await b.on.harness.write((store) => ensureLocalAthlete(store, NOW));
+    expect((await b.sync()).failures).toStrictEqual([]);
+    await a.on.harness.write(change);
+    expect((await a.sync()).failures).toStrictEqual([]);
+    return { a, b };
+  }
+
+  const nothing = (): Promise<void> => Promise.resolve();
+
+  describe('a goal, note or document (rule 8)', () => {
+    const goal = riderTextFor(LOCAL_ATHLETE, 'goal');
+    const withText = (text: string) => (store: HeldStore) => store.putRiderText({ ...goal, text });
+    const goalOn = (on: Device) =>
+      on.harness.read((store) => store.getRiderText(LOCAL_ATHLETE, 'goal', goal.key));
+    const pending = () => pullPending(withText('Ride a century.'), withText('Climb Ventoux.'));
+
+    it('keeps a text edited here in the wait, and sends it at the next sync', async () => {
+      const { a, b } = await pending();
+      const report = await syncEditingBefore(b.on, 'putRiderText', withText('Typed on B.'));
+      expect(report).toMatchObject({ textsPulled: 0, textsPushed: 0, failures: [] });
+      expect((await goalOn(b.on))?.text).toBe('Typed on B.');
+
+      // Changed here and there since the base: rule 8 keeps A's as a copy,
+      // and sends B's — and the copy, a new document, as well.
+      expect(await b.sync()).toMatchObject({ textsPushed: 2, textConflicts: 1, failures: [] });
+      expect(await instanceItem(a.on, 'goal', goal.key)).toStrictEqual({ text: 'Typed on B.' });
+      expect((await goalOn(b.on))?.text).toBe('Typed on B.');
+    }, 60_000);
+
+    it('does not bring back a text deleted here in the wait; the next sync is #924’s', async () => {
+      const { b } = await pending();
+      const report = await syncEditingBefore(b.on, 'putRiderText', (store) =>
+        store.deleteRiderText(LOCAL_ATHLETE, 'goal', goal.key),
+      );
+      expect(report).toMatchObject({ textsPulled: 0, textsDeletedOnInstance: 0, failures: [] });
+      expect(await goalOn(b.on)).toBeUndefined();
+
+      // Deleted here over words another device typed since the base, which
+      // the rider never saw: #924's ruling pulls them rather than deleting
+      // them there. Not this issue's to overrule — the PR says so.
+      expect(await b.sync()).toMatchObject({ textsPulled: 1, textsDeletedOnInstance: 0 });
+      expect((await goalOn(b.on))?.text).toBe('Climb Ventoux.');
+    }, 60_000);
+
+    it('still pulls when nothing changed here in the wait', async () => {
+      const { b } = await pending();
+      const report = await syncEditingBefore(b.on, 'putRiderText', nothing);
+      expect(report).toMatchObject({ textsPulled: 1, failures: [] });
+      expect((await goalOn(b.on))?.text).toBe('Climb Ventoux.');
+    }, 60_000);
+  });
+
+  describe('a saved workout (rule 9)', () => {
+    const workout = workoutFor(LOCAL_ATHLETE, { name: 'Read' });
+    const named = (name: string): WorkoutRecord => ({
+      ...workout,
+      name,
+      workout: { ...workout.workout, name },
+      updatedAt: unixSeconds(workout.updatedAt + 1),
+    });
+    const workoutsOn = (on: Device) =>
+      on.harness.read((store) => store.listWorkouts(LOCAL_ATHLETE));
+    const pending = () =>
+      pullPending(
+        (store) => store.putWorkout(workout),
+        (store) => store.putWorkout(named('From A')),
+      );
+
+    it('keeps a workout edited here in the wait, and sends it at the next sync', async () => {
+      const { a, b } = await pending();
+      const report = await syncEditingBefore(b.on, 'putWorkout', (store) =>
+        store.putWorkout(named('Typed on B')),
+      );
+      expect(report).toMatchObject({ workoutsPulled: 0, workoutsPushed: 0, failures: [] });
+      expect((await workoutsOn(b.on)).map((row) => row.name)).toStrictEqual(['Typed on B']);
+
+      expect(await b.sync()).toMatchObject({ workoutsPushed: 1, workoutsPulled: 0, failures: [] });
+      expect(await instanceItem(a.on, 'workout', workout.id)).toMatchObject({ name: 'Typed on B' });
+      expect((await workoutsOn(b.on)).map((row) => row.name)).toStrictEqual(['Typed on B']);
+    }, 60_000);
+
+    it('keeps a workout deleted here in the wait deleted, and deletes it on the instance at the next sync', async () => {
+      const { a, b } = await pending();
+      const report = await syncEditingBefore(b.on, 'putWorkout', (store) =>
+        store.deleteWorkout(LOCAL_ATHLETE, workout.id),
+      );
+      expect(report).toMatchObject({ workoutsPulled: 0, failures: [] });
+      expect(await workoutsOn(b.on)).toStrictEqual([]);
+
+      expect(await b.sync()).toMatchObject({
+        workoutsDeletedOnInstance: 1,
+        workoutsPulled: 0,
+        failures: [],
+      });
+      expect(await instanceItem(a.on, 'workout', workout.id)).toBeUndefined();
+      expect(await b.sync()).toMatchObject({ workoutsPulled: 0, failures: [] });
+      expect(await workoutsOn(b.on)).toStrictEqual([]);
+    }, 60_000);
+
+    it('still pulls when nothing changed here in the wait', async () => {
+      const { b } = await pending();
+      const report = await syncEditingBefore(b.on, 'putWorkout', nothing);
+      expect(report).toMatchObject({ workoutsPulled: 1, failures: [] });
+      expect((await workoutsOn(b.on)).map((row) => row.name)).toStrictEqual(['From A']);
+    }, 60_000);
+  });
+
+  describe('the typed workout goals (rule 10)', () => {
+    const goals = (durationMinutes: number): WorkoutGoalsRecord => ({
+      athleteId: LOCAL_ATHLETE,
+      goals: { sessionType: 'endurance', durationMinutes },
+      savedAt: NOW,
+    });
+    const goalsOn = (on: Device) =>
+      on.harness.read((store) => store.getWorkoutGoals(LOCAL_ATHLETE));
+    const pending = () =>
+      pullPending(
+        (store) => store.putWorkoutGoals(goals(60)),
+        (store) => store.putWorkoutGoals(goals(90)),
+      );
+
+    it('keeps goals edited here in the wait, and sends them at the next sync', async () => {
+      const { a, b } = await pending();
+      const report = await syncEditingBefore(b.on, 'putWorkoutGoals', (store) =>
+        store.putWorkoutGoals(goals(45)),
+      );
+      expect(report).toMatchObject({ workoutGoalsPulled: 0, workoutGoalsPushed: 0, failures: [] });
+      expect(await goalsOn(b.on)).toStrictEqual({ status: 'kept', record: goals(45) });
+
+      expect(await b.sync()).toMatchObject({ workoutGoalsPushed: 1, failures: [] });
+      expect(await instanceItem(a.on, 'workout-goal', 'goals')).toStrictEqual(goals(45).goals);
+      expect(await goalsOn(b.on)).toStrictEqual({ status: 'kept', record: goals(45) });
+    }, 60_000);
+
+    it('keeps goals cleared here in the wait cleared, and deletes them on the instance at the next sync', async () => {
+      const { a, b } = await pending();
+      const report = await syncEditingBefore(b.on, 'putWorkoutGoals', (store) =>
+        store.deleteWorkoutGoals(LOCAL_ATHLETE),
+      );
+      expect(report).toMatchObject({ workoutGoalsPulled: 0, failures: [] });
+      expect(await goalsOn(b.on)).toStrictEqual({ status: 'none' });
+
+      expect(await b.sync()).toMatchObject({ workoutGoalsDeletedOnInstance: 1, failures: [] });
+      expect(await instanceItem(a.on, 'workout-goal', 'goals')).toBeUndefined();
+      expect(await b.sync()).toMatchObject({ workoutGoalsPulled: 0, failures: [] });
+      expect(await goalsOn(b.on)).toStrictEqual({ status: 'none' });
+    }, 60_000);
+
+    it('still pulls when nothing changed here in the wait', async () => {
+      const { b } = await pending();
+      const report = await syncEditingBefore(b.on, 'putWorkoutGoals', nothing);
+      expect(report).toMatchObject({ workoutGoalsPulled: 1, failures: [] });
+      expect(await goalsOn(b.on)).toStrictEqual({ status: 'kept', record: goals(90) });
+    }, 60_000);
+  });
+});
