@@ -128,7 +128,7 @@ jobs:
         # check rather than trust:
         #   gh api repos/actions/setup-node/git/ref/tags/v7.0.0 --jq .object.sha
         #   -> 820762786026740c76f36085b0efc47a31fe5020   (verified 2026-09-03)
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
 
@@ -431,7 +431,7 @@ jobs:
       # `packageManager` field through corepack, and a frozen install with no
       # dependency cache (3 to 5 s, #651).
       - name: Set up Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
 
@@ -577,7 +577,7 @@ jobs:
       # `packageManager` field through corepack, and a frozen install with no
       # dependency cache (3 to 5 s, #651).
       - name: Set up Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
 
