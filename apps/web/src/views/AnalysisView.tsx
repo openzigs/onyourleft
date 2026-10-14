@@ -32,6 +32,7 @@ import type { AnalysisPort } from '../analysis/store-port';
 import { thresholdsToSave } from '../analysis/thresholds';
 import { Button, ButtonLink } from '../design/Button';
 import { EmptyState } from '../design/EmptyState';
+import { KeptVisible } from '../design/KeptVisible';
 import { SectionHeading } from '../design/SectionHelp';
 import { StatusMessage } from '../design/StatusMessage';
 import { VisuallyHidden } from '../design/VisuallyHidden';
@@ -103,6 +104,41 @@ type LoadState =
       readonly bests: LibraryBests;
     }
   | { readonly kind: 'failed'; readonly reason: string };
+
+/**
+ * Where the two thresholds go — kept on the screen beside them (#1342).
+ *
+ * ⚠️ **It said "Nothing is sent anywhere" until #1342, which was false for
+ * threshold power.** Each clause is held to the code that makes it true by
+ * `views/thresholds-disclosure.test.ts`:
+ *
+ * - **A ride analysis**: threshold power is `rider.thresholdPower` in every
+ *   ride analysis' input (`@onyourleft/analysis` §`rideAnalysisInput`), read
+ *   by `ride-analysis/read-input.ts` and sent by `ride-analysis/instance-job.ts`
+ *   and `camera/hosted-model.ts`, whichever model the rider chose.
+ * - **A re-plan during the ride**: the threshold is the divisor of each
+ *   block's `meanPowerShare` (`workout/replan-session.ts` §`summaryOf`); the
+ *   request (`workout/replan-job.ts` §`replanInput`) carries that share and
+ *   the plan's own shares, and no watt and no threshold. It goes to the
+ *   rider's instance only (`REPLAN_SOURCE`).
+ * - **A synced ride** carries neither: the summary sync pushes
+ *   (`ride-analysis/ride-summary.ts`) reads the threshold only as a cache key,
+ *   and sync pushes no athlete row. **A private room** is sent the weight and
+ *   neither threshold (`net/room-port.ts`).
+ * - **Threshold heart rate** is in no analysis input and no re-plan request;
+ *   the device alone checks a hold's range against it.
+ *
+ * A new path for either number is a new clause here, and a new row there.
+ */
+export const THRESHOLDS_WHERE_THEY_GO =
+  'They are stored on this device with your rides. Asking for a ride analysis sends your threshold power to the model you chose, and a re-plan during the ride sends your instance each block’s power as a share of it, never in watts. Your threshold heart rate is not sent.';
+
+/**
+ * The sentences on this screen that are never tucked behind a section's ⓘ —
+ * #666's rule, applied here by #1342: what leaves the device and to whom.
+ * `a11y/kept-visible.a11y.test.tsx` fails this route if one is tucked.
+ */
+export const ANALYSIS_KEPT_VISIBLE: readonly string[] = [THRESHOLDS_WHERE_THEY_GO];
 
 /** The thresholds' hint, which both boxes are described by — #1023. */
 const THRESHOLD_HINT_ID = 'oyl-thresholds-hint';
@@ -396,9 +432,9 @@ export function AnalysisView({ port }: AnalysisViewProps): JSX.Element {
           >
             Your thresholds
           </SectionHeading>
-          <p className="oyl-muted">
-            Nothing is sent anywhere — they are stored on this device with your rides.
-          </p>
+          <KeptVisible>
+            <p className="oyl-muted">{THRESHOLDS_WHERE_THEY_GO}</p>
+          </KeptVisible>
 
           <div className="oyl-trainer__form">
             <p>
