@@ -3034,5 +3034,21 @@ assert_violation "a CLAUDE.md outside apps/ and packages/ is held to 8 KiB too" 
 # miss; the owner dropped it on 2026-10-03 for CI time. Run the checker itself
 # (`pnpm run check:repo` runs both) to know whether the tree is clean.
 
+# --- The roadmap sync's own suite (#1348) --------------------------------------
+#
+# scripts/sync-roadmap.py is the nightly roadmap board sync, and its workflow
+# (roadmap.yml) runs on a schedule only, so nothing on a pull request would run
+# its tests. It runs here because this suite is already a step of the required
+# check, and adding a step would mean touching rules.yml (docs/agents/ci.md
+# section 4c). Standard library only: the runner's python3 is all it needs, and
+# a missing python3 is a failure, not a skip.
+if out="$(python3 -I "${SCRIPT_DIR}/sync-roadmap.test.py" 2>&1)"; then
+  pass=$((pass + 1))
+  printf 'ok   %s\n' "scripts/sync-roadmap.test.py passes"
+else
+  fail=$((fail + 1))
+  printf 'FAIL %s\n%s\n' "scripts/sync-roadmap.test.py passes" "${out}"
+fi
+
 printf '\n%s passed, %s failed\n' "${pass}" "${fail}"
 [ "${fail}" -eq 0 ]
