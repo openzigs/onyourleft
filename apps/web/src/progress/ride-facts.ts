@@ -30,7 +30,7 @@ import {
   type Seconds,
   type Watts,
 } from '@onyourleft/domain';
-import type { ActivityId, ActivitySummary, RideFacts } from '@onyourleft/store';
+import type { ActivityId, ActivitySummary, RideFacts, RoomRaceFact } from '@onyourleft/store';
 
 import type { AnalysisPort } from '../analysis/store-port';
 
@@ -46,6 +46,8 @@ export interface RideFactsInput {
   readonly ghostRaced?: boolean | undefined;
   /** Every re-plan decision made on this ride (#1244, ADR 0048 P9). */
   readonly replans?: readonly ReplanRecord[] | undefined;
+  /** The private races this ride was ridden in, as each room said it (#785). */
+  readonly races?: readonly RoomRaceFact[] | undefined;
 }
 
 /**
@@ -71,6 +73,7 @@ export function rideFactsOf(input: RideFactsInput): RideFacts {
     ...(input.replans === undefined || input.replans.length === 0
       ? {}
       : { replans: input.replans }),
+    ...(input.races === undefined || input.races.length === 0 ? {} : { races: input.races }),
   };
 }
 

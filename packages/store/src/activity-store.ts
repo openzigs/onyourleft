@@ -2923,6 +2923,7 @@ export class ActivityStore {
       pauses: header.pauses,
       state: header.state,
       courseLaps: header.courseLaps ?? [],
+      roomRaces: header.roomRaces ?? [],
       chunks: prefix.rows.length,
       chunksAfterGap: stored.chunks.length - prefix.rows.length,
     };

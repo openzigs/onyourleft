@@ -17,6 +17,7 @@
 
 import { pacerGap } from '@onyourleft/domain';
 import { FLAG_COASTING, FLAG_FINISHED, FLAG_PLAUSIBILITY } from '@onyourleft/protocol';
+import type { RoomRaceFact } from '@onyourleft/store';
 
 import type { AnnouncementEvent } from './hud/announce';
 import type { RoomConnection } from '../net/room-port';
@@ -88,6 +89,32 @@ export function roomNotice(status: RoomSessionStatus | undefined): string | unde
     default:
       return undefined;
   }
+}
+
+/**
+ * Said while the recording under a ride in a room is PAUSED — #785, #1360's
+ * review (N1). A ride in a room always records (the owner's ruling of
+ * 2026-10-14), but a paused recording is left paused: only the rider's own
+ * *Resume* resumes one (#516), and the game has no *Resume* of the recording —
+ * the Ride screen does, and going there leaves the room. The likeliest way
+ * here is a recovered ride, which comes back paused. ⚠️ Draft wording
+ * awaiting the owner's approval.
+ */
+export const ROOM_RECORDING_PAUSED_TEXT =
+  'Recording paused: this ride is not being recorded, and resuming it on the Ride screen leaves ' +
+  'the room.';
+
+/**
+ * The room's notice with the recording's state beside it — #1360's review
+ * (N1): the room's own word first (lost, gone, refused), and else, while the
+ * recording under the ride is paused, {@link ROOM_RECORDING_PAUSED_TEXT}.
+ */
+export function roomRideNotice(
+  status: RoomSessionStatus | undefined,
+  recordingPaused: boolean,
+): string | undefined {
+  if (status === undefined) return undefined;
+  return roomNotice(status) ?? (recordingPaused ? ROOM_RECORDING_PAUSED_TEXT : undefined);
 }
 
 /**
@@ -426,6 +453,54 @@ export function raceEvent(
       return { said: kind, event: { kind: 'room-race', text: RACE_TEXT.finished } };
     default:
       return { said: kind };
+  }
+}
+
+/**
+ * Whether the ROOM has this rider across the line — #1360's re-review (R1):
+ * the room's own last word on their distance (`own().rider.distanceMetres`,
+ * floored to decimetres by the room, so it never overstates), against the
+ * line. ADR 0028 D-2: the room's position wins, so the device's odometer —
+ * corrected toward the room's but able to lead it by a little — is never
+ * asked. `false` with no word from the room on this rider.
+ */
+export function acrossTheRoomsLine(
+  room: Pick<RoomConnection, 'own'> | undefined,
+  lineMetres: number | undefined,
+): boolean {
+  const own = room?.own();
+  if (own === undefined || lineMetres === undefined) return false;
+  return own.rider.distanceMetres >= lineMetres;
+}
+
+/**
+ * What the race this ride was in comes to on this device — #785, the owner's
+ * ruling of 2026-10-14: the result is stored with the ride. The ROOM's word
+ * where it has said it: its finish order and this rider's place in it. For a
+ * race the rider left while it ran, that it was ridden and no order was heard
+ * — and, when `crossedTheLine`, that the rider was across the line on this
+ * room first (#1360's review, N2, and its re-review R1: the room's `finish` waits for every
+ * rider, and a winner who ends their ride straight after the line did not
+ * leave the race). No place then: nothing tells this device one before the
+ * room's `finish`. `undefined` for a group ride, and for a race that never
+ * left its start line: nothing was raced.
+ */
+export function raceFactOf(
+  roomId: string | undefined,
+  race: RoomRace | undefined,
+  crossedTheLine: boolean,
+): RoomRaceFact | undefined {
+  if (roomId === undefined || race === undefined) return undefined;
+  switch (race.kind) {
+    case 'finished':
+      // The room's order is the word on who finished, whatever this device saw.
+      return { roomId, place: race.place, finishers: race.order.length };
+    case 'running':
+      return crossedTheLine
+        ? { roomId, place: null, finishers: null, crossedTheLine: true }
+        : { roomId, place: null, finishers: null };
+    default:
+      return undefined;
   }
 }
 

@@ -66,6 +66,7 @@ import {
 import type {
   ActivityRecord,
   RideFacts,
+  RoomRaceFact,
   AthleteRecord,
   CameraFrameRecord,
   FramingCheckRecord,
@@ -156,6 +157,8 @@ export interface PersistedRideFacts {
   replans?: unknown[];
   /** @see RideFacts.replansDropped */
   replansDropped?: number;
+  /** @see RideFacts.races — #785. Each re-read on the way out: @see racesOf */
+  races?: PersistedRoomRace[];
 }
 
 /**
@@ -590,7 +593,93 @@ function toPersistedRideFacts(facts: RideFacts): PersistedRideFacts {
   const kept = replanRecordsOf(facts.replans, facts.replansDropped);
   if (kept.replans !== undefined) row.replans = [...kept.replans];
   if (kept.replansDropped !== undefined) row.replansDropped = kept.replansDropped;
+  // Through the reader on the way in too, so only a race that reads back is
+  // written — and, as for a re-plan record, one that does not is dropped,
+  // never the ride (#785).
+  const races = racesOf(facts.races);
+  if (races !== undefined) row.races = races.map(toPersistedRoomRace);
   return row;
+}
+
+/**
+ * A room's id as the client takes one (`apps/web` §`instance-transport.ts`
+ * `isRoomId`): an instance's own are 32 hex characters, an operator's may be
+ * any short name of letters, digits, `_` and `-`.
+ */
+const ROOM_ID = /^[A-Za-z0-9_-]{1,128}$/;
+
+/** A place or a count: a whole number of at least `minimum`, `null`, or `undefined` for neither. */
+function placeOrNull(value: unknown, minimum: number): number | null | undefined {
+  if (value === null) return null;
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= minimum
+    ? value
+    : undefined;
+}
+
+/** A race as it is written: @see RoomRaceFact. Shared with a recording's header. */
+export interface PersistedRoomRace {
+  roomId: string;
+  place: number | null;
+  finishers: number | null;
+  crossedTheLine?: true;
+}
+
+/** Field by field, so a key that is not the fact's is never written. */
+export function toPersistedRoomRace(race: RoomRaceFact): PersistedRoomRace {
+  return {
+    roomId: race.roomId,
+    place: race.place,
+    finishers: race.finishers,
+    ...(race.crossedTheLine === true ? { crossedTheLine: true as const } : {}),
+  };
+}
+
+/**
+ * One race as it is kept — #785: the fact whole, or `undefined` when it does
+ * not read. ⚠️ **Never a throw**: like a re-plan record, a race that does not
+ * read (a later build's, or edited by hand) is dropped, and the ride — or the
+ * recording's header — is written and read all the same.
+ */
+function raceOf(value: unknown): RoomRaceFact | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+  const race = value as {
+    roomId?: unknown;
+    place?: unknown;
+    finishers?: unknown;
+    crossedTheLine?: unknown;
+  };
+  if (typeof race.roomId !== 'string' || !ROOM_ID.test(race.roomId)) return undefined;
+  const place = placeOrNull(race.place, 1);
+  const finishers = placeOrNull(race.finishers, 0);
+  if (place === undefined || finishers === undefined) return undefined;
+  // A place is a place in the order: never past its end, never without one.
+  if (place !== null && (finishers === null || place > finishers)) return undefined;
+  // Crossing the line is said only where the room's order was not heard: once
+  // it is, the order is the room's word on who finished (#1360's review, N2).
+  if (race.crossedTheLine !== undefined && (race.crossedTheLine !== true || finishers !== null)) {
+    return undefined;
+  }
+  return {
+    roomId: race.roomId,
+    place,
+    finishers,
+    ...(race.crossedTheLine === true ? { crossedTheLine: true as const } : {}),
+  };
+}
+
+/**
+ * A ride's or a recording's races as they are kept — each that reads, in
+ * order, or `undefined` for none. ⚠️ **Never a throw**, for {@link raceOf}'s
+ * reason: a list that is not a list is no races, and a race in it that does not
+ * read is dropped and the others kept.
+ */
+export function racesOf(value: unknown): readonly RoomRaceFact[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const races = (value as unknown[]).flatMap((each) => {
+    const race = raceOf(each);
+    return race === undefined ? [] : [race];
+  });
+  return races.length === 0 ? undefined : races;
 }
 
 /**
@@ -638,6 +727,8 @@ function fromPersistedRideFacts(row: unknown): RideFacts {
   // ⚠️ Never a throw: an unreadable re-plan record must not make the ride
   // unreadable. @see replanRecordsOf
   const replans = replanRecordsOf(facts.replans, facts.replansDropped);
+  // #785: never a throw either. @see racesOf
+  const races = racesOf(facts.races);
   return {
     ...(facts.ascent === undefined
       ? {}
@@ -682,6 +773,7 @@ function fromPersistedRideFacts(row: unknown): RideFacts {
       ? {}
       : { ghostRaced: decodedBoolean('activity.rideFacts.ghostRaced', facts.ghostRaced) }),
     ...replans,
+    ...(races === undefined ? {} : { races }),
   };
 }
 

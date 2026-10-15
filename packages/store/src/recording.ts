@@ -54,6 +54,7 @@
 import type { Metres, RecordedPause, Seconds, UnixSeconds } from '@onyourleft/domain';
 
 import type { ActivityId, AthleteId, RecordingSessionId } from './ids';
+import type { RoomRaceFact } from './records';
 import type { StreamChannels } from './streams';
 
 /**
@@ -162,6 +163,18 @@ export interface RecordingSessionRecord {
    * with its samples and none of its laps.
    */
   readonly courseLaps?: readonly RecordedCourseLap[] | undefined;
+  /**
+   * The private races this recording has ridden so far, as each room told
+   * this device — #785, #1360's review (B2). On the header for
+   * {@link courseLaps}' reason: a ride recovered after the app closed before
+   * *Stop* is saved with its races, not without them.
+   *
+   * ⚠️ **Untrusted on the way out, and never a reason to refuse a header.** A
+   * race that does not read is left out of what is written and dropped from
+   * what is read — never a throw — so it cannot fail a checkpoint, hide a
+   * recording from recovery, or hide another one. Optional, so not a migration.
+   */
+  readonly roomRaces?: readonly RoomRaceFact[] | undefined;
 }
 
 /** What `putRecordingSession` accepts. Identical; named for symmetry with `NewActivity`. */
@@ -227,6 +240,8 @@ export interface RecoveredRecording {
   readonly state: RecordingStoredState;
   /** The header's laps of a course, none for a recording with none. @see RecordingSessionRecord.courseLaps */
   readonly courseLaps: readonly RecordedCourseLap[];
+  /** The header's races, none for a recording in none. @see RecordingSessionRecord.roomRaces */
+  readonly roomRaces: readonly RoomRaceFact[];
   /**
    * How many chunk rows made up the recovered prefix.
    *

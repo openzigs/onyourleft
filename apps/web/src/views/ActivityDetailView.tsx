@@ -111,6 +111,7 @@ import { readMapTilesChoice } from '../map/tiles-preference';
 import { deviceStorage, type PreferenceStorage } from '../game/hud/announce-preference';
 import type { MapPort } from '../map/port';
 import { trackGeometry, type TrackGeometry } from '../map/track';
+import { raceFactTerm, raceFactText } from '../rooms/race-result';
 import { hrefFor, routeById } from '../shell/routes';
 
 /**
@@ -469,6 +470,17 @@ export function ActivityDetailView({
           */}
           <dd>{activity.hasPosition ? 'Recorded with a GPS track' : 'Indoor — no GPS track'}</dd>
         </div>
+        {/* #785: the races this ride was ridden in, as each room said it —
+            kept with the ride on this device, one line each, in order (#1360's
+            review, N3). No row for a ride in no race. */}
+        {activity.rideFacts?.races === undefined || activity.rideFacts.races.length === 0 ? null : (
+          <div>
+            <dt>{raceFactTerm(activity.rideFacts.races)}</dt>
+            {activity.rideFacts.races.map((race, index) => (
+              <dd key={index}>{raceFactText(race)}</dd>
+            ))}
+          </div>
+        )}
       </dl>
 
       <h3>Traces</h3>

@@ -93,16 +93,18 @@ import { Button } from '../design/Button';
 import { RaceResult } from '../rooms/RaceResult';
 import { RoomPanel } from '../rooms/RoomPanel';
 import {
+  acrossTheRoomsLine,
   heldOnTheLine,
   nextToFollow,
   RACE_NOTICE_LABEL,
   raceEvent,
+  raceFactOf,
   raceNotice,
   riderEvents,
   ROOM_LOST_SPOKEN,
   ROOM_NOTICE_LABEL,
   roomFrame,
-  roomNotice,
+  roomRideNotice,
   roomRideState,
   type RoomFrame,
   type RoomRideState,
@@ -504,6 +506,21 @@ function useRideLapSeconds(trainer: GameTrainerPort | undefined): number | undef
 }
 
 /**
+ * Whether the recording under the ride is paused, kept current — #1360's
+ * review (N1). Subscribed for {@link useRideMovingSeconds}'s reason: the
+ * rider's Pause and Resume are the Ride screen's, and the game must see them
+ * whatever its own loop is doing.
+ */
+function useRecordingPaused(trainer: GameTrainerPort | undefined): boolean {
+  const watch = useCallback(
+    (listener: () => void) => trainer?.watchRide(listener) ?? watchNothing(),
+    [trainer],
+  );
+  const read = useCallback(() => trainer?.recordingPaused?.() ?? false, [trainer]);
+  return useSyncExternalStore(watch, read);
+}
+
+/**
  * {@link oneNoticeOnly}, kept current — #693's re-review.
  *
  * ⚠️ **Subscribed, not read during render.** A running ride re-renders on
@@ -832,6 +849,8 @@ export function GameView(props: GameViewProps): JSX.Element {
   const movingSeconds = useRideMovingSeconds(props.trainer);
   /** @see useRideLapSeconds */
   const lapSeconds = useRideLapSeconds(props.trainer);
+  /** @see useRecordingPaused */
+  const recordingPaused = useRecordingPaused(props.trainer);
   const sidePairingRef = useRef(props.sidePairing);
   sidePairingRef.current = props.sidePairing;
   const sideLostRef = useRef(false);
@@ -984,6 +1003,14 @@ export function GameView(props: GameViewProps): JSX.Element {
   const roomFrameRef = useRef<RoomFrame | undefined>(undefined);
   /** Whether the room's lost connection has been said, so it is said once per loss. */
   const roomLostSaidRef = useRef(false);
+  /**
+   * Whether this ride in a room has asked for its recording yet — #785, the
+   * owner's ruling of 2026-10-14, *"a ride in a room always records"*. Asked
+   * ONCE per ride, on the first frame the room has admitted the rider
+   * (#1360's review, N6): a room that refuses them starts no recording and
+   * puts no saved ride away.
+   */
+  const roomRecordAskedRef = useRef(false);
   /** The id of the room this ride is in, for the race's start and its result (#785). */
   const roomIdRef = useRef<string | undefined>(undefined);
   /**
@@ -1061,6 +1088,19 @@ export function GameView(props: GameViewProps): JSX.Element {
       trainerPortRef.current?.gameRideEnded(
         ghostRiderRef.current === undefined ? outcomeRef.current : undefined,
       );
+      // #785: the race this ride was in, as its room said it, kept with the
+      // recording under the ride so it is saved with it on this device —
+      // read before the room is left, while the session still holds it.
+      // #1360's review (N2): and whether this rider was across the line, for
+      // a race left before the room's order came — by the ROOM's own last
+      // word on their distance, never this device's odometer (re-review R1,
+      // ADR 0028 D-2: the room's position wins).
+      const race = raceFactOf(
+        roomIdRef.current,
+        roomRef.current?.race(),
+        acrossTheRoomsLine(roomRef.current, course?.totalDistance),
+      );
+      if (race !== undefined) trainerPortRef.current?.roomRaceEnded?.(race);
     }
     // #782: leave the room — its socket, its reconnects and its hold on the
     // screen-off service go with the ride.
@@ -1291,6 +1331,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       roomRef.current = undefined;
       roomFrameRef.current = undefined;
       roomLostSaidRef.current = false;
+      roomRecordAskedRef.current = false;
       raceSaidRef.current = undefined;
       ridersSeenRef.current = undefined;
       raceWattsRef.current = { wattSeconds: 0, seconds: 0 };
@@ -1569,6 +1610,15 @@ export function GameView(props: GameViewProps): JSX.Element {
       // riders to draw. Nothing here writes to the trainer: the gradient
       // below is still the rider's own road.
       const room = roomRef.current;
+      // #785: a ride in a room always records — once the room has let the
+      // rider in, and only then (N6). Not awaited: the ride does not wait on
+      // the recorder, and a recording that cannot start leaves the ride
+      // unrecorded, as a ride with no recording is today (the HUD's moving
+      // time a dash).
+      if (room !== undefined && !roomRecordAskedRef.current && room.status().kind === 'joined') {
+        roomRecordAskedRef.current = true;
+        void trainerPortRef.current?.recordRoomRide?.();
+      }
       const roomNow =
         room === undefined ? undefined : roomFrame(room, roomStateRef.current, simulation, at);
       roomFrameRef.current = roomNow;
@@ -2380,9 +2430,11 @@ export function GameView(props: GameViewProps): JSX.Element {
           ) : undefined,
           // #782: the room lost, gone or refused, in words — never a silent
           // freeze. After the side camera, in `announce.ts`'s order.
-          roomNotice(roomRef.current?.status()) === undefined ? undefined : (
+          // #1360's review (N1): and, in the same place, a recording paused
+          // under the ride in the room — said, never resumed for the rider.
+          roomRideNotice(roomRef.current?.status(), recordingPaused) === undefined ? undefined : (
             <StatusMessage key="room" tone="warning" label={ROOM_NOTICE_LABEL}>
-              {roomNotice(roomRef.current?.status())}
+              {roomRideNotice(roomRef.current?.status(), recordingPaused)}
             </StatusMessage>
           ),
           // #785: a race held on its line, counting down, or over — the room's

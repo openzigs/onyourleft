@@ -97,6 +97,7 @@ import type {
   AthleteId,
   LapId,
   RecordingSessionId,
+  RoomRaceFact,
   WorkoutRecord,
 } from '@onyourleft/store';
 
@@ -1004,6 +1005,26 @@ export interface RideController {
    * saved nowhere, so there is nothing to attach it to. Decides no write.
    */
   noteGameRideEnded(outcome: GhostOutcome | undefined): void;
+  /**
+   * A game ride in a room is starting — #785, the owner's ruling of
+   * 2026-10-14: *"a ride in a room always records"*. Makes sure a recording
+   * is under it: a recording or paused ride carries on (a paused one stays
+   * paused until the rider resumes it, #516), an idle controller starts one, and a stopped ride whose save is
+   * done is put away and a new one started. Answers whether a recording is
+   * now running. ⚠️ Writes nothing to the trainer: recording is not
+   * resistance.
+   */
+  recordForRoom(): Promise<boolean>;
+  /**
+   * A game ride in a private race ended, and this is what its room said of
+   * the race — #785. Kept by the RECORDER (`Recorder.noteRoomRace`), beside
+   * any race before it in this recording, so it goes out on the recording's
+   * checkpoint and a ride recovered after the app closed before *Stop* is
+   * saved with it (#1360's review, B2, N3); saved as `RideFacts.races`. With
+   * no ride in progress it is saved with nothing, for
+   * {@link noteGameRideEnded}'s reason.
+   */
+  noteRoomRace(race: RoomRaceFact): void;
   /**
    * A game ride on a course left the line, crossed it, or ended part-way
    * round — #1312. The laps of a course belong to the RECORDING: each is
@@ -2533,6 +2554,10 @@ export function createRideController(options: RideControllerOptions): RideContro
       laps: { ridden: current.courseLaps, newLapId: port.newLapId },
       // #1244, P9: every re-plan decision made on this ride. None is no key.
       ...(replans.length === 0 ? {} : { replans }),
+      // #785: the races this ride was ridden in, as each room said it — the
+      // recorder's own, so a ride recovered after a crash keeps them by the
+      // one path, as it keeps its laps (#1360's review, B2).
+      ...(current.roomRaces.length === 0 ? {} : { races: current.roomRaces }),
     });
     const outcome = await saveFinishedRide(port.store, finished);
 
@@ -3148,6 +3173,23 @@ export function createRideController(options: RideControllerOptions): RideContro
       if (outcome !== undefined) {
         gameOutcome = outcome;
       }
+    },
+
+    async recordForRoom(): Promise<boolean> {
+      // A paused ride is a ride in progress and is LEFT paused: only the
+      // rider's own Resume resumes one (#516, `one-pauser.test.ts`).
+      if (phase === 'recording' || phase === 'paused') return true;
+      if (phase === 'stopped' && !(await controller.startNewRide())) return false;
+      await controller.start();
+      return rideInProgress(phase);
+    },
+
+    noteRoomRace(race: RoomRaceFact): void {
+      // No phase check: the race goes to the recorder, which only a recording
+      // in progress checkpoints and saves. Idle, there is none; stopped, its
+      // save has already read its races (`saveTheRide`), and the next ride
+      // starts a recorder of its own.
+      recorder?.noteRoomRace(race);
     },
 
     noteCourseLine(event: CourseLineEvent): readonly LapFigures[] | undefined {

@@ -534,7 +534,16 @@ const ROOM_QUERY = new URLSearchParams(window.location.search).get('room');
  */
 const WITH_STANDINGS = ROOM_QUERY === 'standings';
 const IN_A_RACE = ROOM_QUERY === 'race' || WITH_STANDINGS;
-const RACE_ROOM = IN_A_RACE ? new ScriptedRoom() : undefined;
+/**
+ * `ride.html?room=paused` and `?room=lost` — #785, #1360's re-review (R3): a
+ * group ride in a room whose notice slot carries a room sentence, measured by
+ * `ride.browser.spec.ts` at every overlay viewport. `paused`: the recording
+ * under the ride is paused (`GameTrainerPort.recordingPaused`), so the slot
+ * says so. `lost`: the room's socket closes and no ticket comes back, so the
+ * slot holds `ROOM_LOST_TEXT`, the longest sentence that slot carries.
+ */
+const ROOM_NOTICE = ROOM_QUERY === 'paused' || ROOM_QUERY === 'lost' ? ROOM_QUERY : undefined;
+const RACE_ROOM = IN_A_RACE || ROOM_NOTICE !== undefined ? new ScriptedRoom() : undefined;
 const RACE_PORTS =
   RACE_ROOM === undefined
     ? {}
@@ -542,7 +551,7 @@ const RACE_PORTS =
         room: roomPortOver(() => RACE_ROOM.link(), {}),
         roomId: 'harness-race',
         // The owner's ruling of 2026-09-30: only its maker is offered *Start the race*.
-        madeTheRoom: true,
+        madeTheRoom: IN_A_RACE,
         riderMass: kilograms(72),
         rooms: {
           create: () => Promise.resolve({ kind: 'unreachable' as const }),
@@ -711,6 +720,8 @@ const TRAINER: GameTrainerPort = {
   askForControlOnRide: () => Promise.resolve(),
   workoutRescue: () => RESCUE,
   recordingMayStop: () => MAY_STOP,
+  // #1360's re-review (R3). @see ROOM_NOTICE
+  recordingPaused: () => ROOM_NOTICE === 'paused',
   gameRideEnded: () => undefined,
   rideMovingSeconds: () => MOVING_SECONDS,
   watchRide: () => () => undefined,
@@ -1130,8 +1141,20 @@ async function run(): Promise<void> {
       RACE_ROOM.sockets.length > 0 ? RACE_ROOM : undefined,
     );
     RACE_ROOM.accept();
-    RACE_ROOM.welcome(0, 'race');
-    if (WITH_STANDINGS) {
+    RACE_ROOM.welcome(0, IN_A_RACE ? 'race' : 'ride');
+    if (ROOM_NOTICE !== undefined) {
+      if (ROOM_NOTICE === 'lost') {
+        // Lost, and kept lost: no ticket comes back for the rejoin.
+        RACE_ROOM.ticketAnswer = () => ({ kind: 'unreachable' });
+        RACE_ROOM.closeFromServer(1006);
+      }
+      const words = ROOM_NOTICE === 'lost' ? 'connection was lost' : 'Recording paused';
+      await until(`the room's notice`, () =>
+        [...document.querySelectorAll('.oyl-hud__notices')].find((each) =>
+          (each.textContent ?? '').includes(words),
+        ),
+      );
+    } else if (WITH_STANDINGS) {
       // #1347: nine riders, this one fifth; 32 scalars is the longest name a
       // room admits (`@onyourleft/domain` §`MAXIMUM_DISPLAY_NAME_SCALARS`).
       const names = [
