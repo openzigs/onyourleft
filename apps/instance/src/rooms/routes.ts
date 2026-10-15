@@ -64,14 +64,20 @@ export const ROOM_ROUTES: readonly Route[] = [
     identity: true,
     rooms: true,
     auth: 'session',
-    request: object({
-      kind,
-      ridingPosition: position,
-      loop: { type: 'boolean' },
-      lengthMetres: number,
-      grades: { type: 'array', items: { type: 'array', items: number } },
-      gpx: string,
-    }),
+    // #787: `drafting` is the one optional field — absent is on, the
+    // owner's ruling of 2026-09-30, and it is fixed for the room's life.
+    request: object(
+      {
+        kind,
+        ridingPosition: position,
+        drafting: { type: 'boolean' },
+        loop: { type: 'boolean' },
+        lengthMetres: number,
+        grades: { type: 'array', items: { type: 'array', items: number } },
+        gpx: string,
+      },
+      ['kind', 'ridingPosition', 'loop', 'lengthMetres', 'grades', 'gpx'],
+    ),
     errors: ['unauthenticated', 'validation_failed', 'rate_limited'],
     response: {
       contentType: 'application/json',
@@ -98,6 +104,7 @@ export const ROOM_ROUTES: readonly Route[] = [
         roomId: string,
         kind,
         ridingPosition: position,
+        drafting: { type: 'boolean' },
         loop: { type: 'boolean' },
         routeSha256: string,
       }),

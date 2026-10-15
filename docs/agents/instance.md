@@ -187,6 +187,10 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         seat, from the admission's public name, and after
                         every frame `standings` with the ROOM's time gap to
                         each recipient and live W/kg; a group ride neither.
+                        ⚠️ **And drafts since #787** (ADR 0038 D-4): every
+                        `k` from the distances the room holds, before the
+                        tick re-simulates; a room's maker may turn it off
+                        (migration 0024), and off is `k = 1` for everybody.
                         ⚠️ **Mounted by two adapters since #780**, and a
                         reviewer who remembers "not by the instance" is
                         reading the old file: the Node adapter

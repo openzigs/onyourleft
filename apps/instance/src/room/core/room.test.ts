@@ -75,6 +75,7 @@ describe('the handshake — ADR 0028 D-2 rule 5', () => {
           ridingPosition: 'hoods',
           reportIntervalMs: 500,
           frameIntervalMs: 1000,
+          drafting: 'on',
         },
       },
       // #1347: a race names its field to a rider as they are welcomed — here, themself.
@@ -518,7 +519,9 @@ describe('a race — lobby, countdown, running, finished', () => {
     // a metre ahead: both cross in one tick, Bob earlier in it. An order by
     // tick alone would fall back to the seat and put Ann first.
     const course = { ...FLAT_COURSE, lengthMetres: 100 };
-    const room = runningRace(['ann', 'bob'], { course });
+    // With no draft, so Bob's 10 W are the whole difference (#787 would let
+    // Ann sit on his wheel and change who crosses where).
+    const room = runningRace(['ann', 'bob'], { course, drafting: false });
     let crossedIn: number[] = [];
     for (let t = 0; t < 60 && room.view().phase !== 'finished'; t += 1) {
       second(room, t, { 1: 300, 2: 310 });
@@ -714,8 +717,12 @@ describe('the finish order’s tie rule — #785', () => {
 
 describe('no keep-together — ruling Q9, #784', () => {
   it('lets the gap between two riders at different powers grow exactly as their own physics says, for 120 ticks', () => {
+    // In a room with drafting off, so "their own physics" is `k = 1` for both:
+    // a draft is the one thing that may close a gap (#787), and
+    // `drafting.test.ts` holds that to its own model.
     const room = runningRace(['ann', 'bob'], {
       course: { ...FLAT_COURSE, lengthMetres: 100_000 },
+      drafting: false,
     });
     const conditions = ridingConditions(kilograms(70), 'hoods');
     let ann = START_OF_RIDE;

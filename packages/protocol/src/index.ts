@@ -22,6 +22,7 @@
 export type {
   ClientMessage,
   Countdown,
+  Drafting,
   Finish,
   Frame,
   FrameRider,

@@ -28,6 +28,7 @@ describe('making a room — #784', () => {
     const answer = await port(instance).create({
       kind: 'race',
       ridingPosition: 'drops',
+      drafting: false,
       route: ROUTE,
     });
     expect(answer.kind).toBe('created');
@@ -38,9 +39,11 @@ describe('making a room — #784', () => {
     expect(request?.authorization).toBe('Bearer session-token');
     const body = request?.body as Record<string, unknown>;
     expect(Object.keys(body).sort()).toEqual(
-      ['grades', 'gpx', 'kind', 'lengthMetres', 'loop', 'ridingPosition'].sort(),
+      ['drafting', 'grades', 'gpx', 'kind', 'lengthMetres', 'loop', 'ridingPosition'].sort(),
     );
     expect(body.kind).toBe('race');
+    // #787: the maker's drafting, sent as chosen and kept with the room entered.
+    expect(body.drafting).toBe(false);
     expect(body.ridingPosition).toBe('drops');
     expect(body.gpx).toMatch(/^<\?xml/);
     expect(body.gpx).not.toMatch(/<name>/);
@@ -48,6 +51,7 @@ describe('making a room — #784', () => {
       expect(answer.room).toMatchObject({
         roomId: 'room-abc',
         kind: 'race',
+        drafting: false,
         code: 'ABCDE-FGHJK-MNPQR',
       });
       // The digest of the bytes THIS device sent — what the room's routeRef must name.
@@ -60,6 +64,7 @@ describe('making a room — #784', () => {
     const answer = await port(instance, [zoneNorth(0)]).create({
       kind: 'group',
       ridingPosition: 'hoods',
+      drafting: true,
       route: ROUTE,
     });
     expect(answer).toEqual({ kind: 'refused', reason: 'start-in-a-zone' });
@@ -75,6 +80,7 @@ describe('making a room — #784', () => {
       const answer = await port(instance, [zoneNorth(centre)]).create({
         kind: 'group',
         ridingPosition: 'hoods',
+        drafting: true,
         route: ROUTE,
       });
       expect(answer).toEqual({ kind: 'refused', reason });
@@ -89,7 +95,9 @@ describe('making a room — #784', () => {
       zones: () => Promise.resolve([]),
       send: instance.send,
     });
-    expect(await empty.create({ kind: 'group', ridingPosition: 'hoods', route: ROUTE })).toEqual({
+    expect(
+      await empty.create({ kind: 'group', ridingPosition: 'hoods', drafting: true, route: ROUTE }),
+    ).toEqual({
       kind: 'refused',
       reason: 'not-signed-in',
     });

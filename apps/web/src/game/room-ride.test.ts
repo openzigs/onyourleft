@@ -30,6 +30,7 @@ const rider = (riderId: number, distanceMetres: number): DrawnRemoteRider => ({
   distanceMetres,
   speedMetresPerSecond: 8,
   flags: 0,
+  draftPercent: 0,
 });
 
 function connection(
@@ -45,12 +46,14 @@ function connection(
         ridingPosition: 'hoods',
         reportIntervalMs: 500,
         frameIntervalMs: 1000,
+        drafting: 'on',
       },
     }),
     others: () => others,
     race: () => ({ kind: 'not-a-race' }),
     own: () => own,
     standings: () => undefined,
+    draftFactor: () => 1,
     leave: () => undefined,
   };
 }

@@ -156,6 +156,7 @@ export const MESSAGE_FIELDS = {
           ridingPosition: { shape: { kind: 'enum', values: ['upright', 'hoods', 'drops'] } },
           reportIntervalMs: { shape: { kind: 'integer', minimum: 100, maximum: 60_000 } },
           frameIntervalMs: { shape: { kind: 'integer', minimum: 100, maximum: 60_000 } },
+          drafting: { shape: { kind: 'enum', values: ['on', 'off'] } },
         },
       },
     },
