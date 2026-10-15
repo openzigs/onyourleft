@@ -180,6 +180,9 @@ export function RaceResult(props: RaceResultProps): JSX.Element {
             <p>{RACE_REFERENCES_TEXT}</p>
             <ul>
               <li>
+                The room: <code>{formatModerationItem({ kind: 'room', roomId })}</code>
+              </li>
+              <li>
                 The route: <code>{formatModerationItem({ kind: 'route', roomId })}</code>
               </li>
               {shown.rows.map((_, index) => (

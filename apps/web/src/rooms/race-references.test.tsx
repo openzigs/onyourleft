@@ -50,7 +50,7 @@ afterEach(() => {
 });
 
 describe('a race result’s references (#907)', () => {
-  it('names the route and every row, in the result’s own order, as identifiers the notice page takes', async () => {
+  it('names the room, the route and every row, in the result’s own order, as identifiers the notice page takes', async () => {
     mounted = await mount(
       <RaceResult rooms={ROOMS} roomId={ROOM} finishers={2} ownWatts={undefined} />,
     );
@@ -59,6 +59,7 @@ describe('a race result’s references (#907)', () => {
     expect(details?.querySelector('summary')?.textContent).toBe(RACE_REFERENCES_SUMMARY);
     const codes = [...(details?.querySelectorAll('code') ?? [])].map((each) => each.textContent);
     expect(codes).toEqual([
+      `room:${ROOM}`,
       `route:${ROOM}`,
       `result:${ROOM}:1`,
       `result:${ROOM}:2`,
