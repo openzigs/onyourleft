@@ -62,9 +62,13 @@ import { hrefFor, routeById } from '../shell/routes';
  *
  * ## A report about you — #905
  *
- * Declared a conflict and left open: no control is drawn on it, because the
- * instance would refuse the moderator deciding it, and with one moderator
- * nobody else can.
+ * Declared a conflict. While the instance names another moderator, no control
+ * is drawn on it, because the instance would refuse this one deciding it.
+ * When it names this moderator alone (the project's instance), the one choice
+ * is to dismiss it, the reason being their declaration of the conflict, as
+ * the owner's procedure says (`docs/moderation/notice-and-action.md`); the
+ * instance logs it as `dismiss_own_report`. Suspending or hiding themselves
+ * is never offered.
  *
  * ⚠️ **Every sentence here is DRAFT wording awaiting the owner's approval**,
  * as the Instance screen's is (#880).
@@ -79,10 +83,16 @@ export const MODERATION_IS_LOGGED =
 /** Every sentence this route must never tuck away — #666. */
 export const MODERATION_KEPT_VISIBLE: readonly string[] = [MODERATION_IS_LOGGED];
 
-/** Said on a report about the moderator reading it — #905. */
+/** Said on a report about the moderator reading it, with another moderator to decide it — #905. */
 export const REPORT_CONFLICT_TEXT =
   'This report is about you, so it is a conflict and you may not decide it. It stays open in ' +
   'this queue.';
+
+/** Said on a report about the only moderator, who decides it themselves — #905. */
+export const REPORT_OWN_CONFLICT_TEXT =
+  'This report is about you, and you are this instance’s only moderator, so nobody else can ' +
+  'decide it. If you dismiss it, say in the reason that it was about you and why you dismissed ' +
+  'it. The log records it as a report about you that you decided yourself.';
 
 export const MODERATION_NO_PORT =
   'This app cannot moderate an instance here, because this browser has no local store to keep ' +
@@ -123,6 +133,7 @@ const ACTION_LABEL: Readonly<Record<string, string>> = {
   unsuspend: 'Lifted a suspension',
   hide_display_name: 'Hid a display name',
   dismiss_report: 'Dismissed a report',
+  dismiss_own_report: 'Dismissed a report about themselves, as the only moderator',
   activate_moderator_key: 'A moderator’s key activated its own account',
   mint_invite: 'Made an invitation',
 };
@@ -327,11 +338,13 @@ function Registrations({
 function Reports({
   port,
   me,
+  soleModerator,
   reports,
   onDone,
 }: {
   readonly port: ModerationPort;
   readonly me: string;
+  readonly soleModerator: boolean;
   readonly reports: readonly OpenReport[];
   readonly onDone: Done;
 }): JSX.Element {
@@ -351,7 +364,23 @@ function Reports({
                 <code>{report.reporterAthleteId}</code>, made {when(report.createdAt)}.
               </p>
               <p className="oyl-moderation__quoted">Their reason: {report.reason}</p>
-              {isConflict(report, me) ? (
+              {isConflict(report, me) && soleModerator ? (
+                <>
+                  <StatusMessage tone="warning" label="A conflict">
+                    {REPORT_OWN_CONFLICT_TEXT}
+                  </StatusMessage>
+                  <Decide
+                    label={`Your declaration, for dismissing report ${String(report.reportId)}`}
+                    onDone={onDone}
+                    choices={[
+                      {
+                        label: 'Dismiss',
+                        run: async (reason) => port.dismissReport(report.reportId, reason),
+                      },
+                    ]}
+                  />
+                </>
+              ) : isConflict(report, me) ? (
                 <StatusMessage tone="warning" label="A conflict">
                   {REPORT_CONFLICT_TEXT}
                 </StatusMessage>
@@ -776,7 +805,13 @@ export function ModerationView({
         <p className="oyl-note">{MODERATION_IS_LOGGED}</p>
       </KeptVisible>
       <Registrations port={port} registrations={state.registrations} onDone={onDone} />
-      <Reports port={port} me={state.me} reports={state.reports} onDone={onDone} />
+      <Reports
+        port={port}
+        me={state.me}
+        soleModerator={state.soleModerator}
+        reports={state.reports}
+        onDone={onDone}
+      />
       <Suspended
         port={port}
         suspended={state.suspended}

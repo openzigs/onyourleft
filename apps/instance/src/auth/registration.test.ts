@@ -24,12 +24,14 @@ import type { SqlStore } from '../store/sql-store.ts';
 import {
   codeOf,
   startModerationWorld,
+  startSoleModeratorWorld,
   type ModerationWorld,
+  type SoleModeratorWorld,
 } from '../moderation/moderation-testing.ts';
 import { createIdentity, DEFAULT_LIMITS, INVITE_LIFETIME_SECONDS } from './identity.ts';
 import { TEST_ORIGIN, testDevice, type TestDevice } from './identity-testing.ts';
 
-let world: ModerationWorld | undefined;
+let world: SoleModeratorWorld | undefined;
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {
   await world?.close();
@@ -41,8 +43,9 @@ async function start(
   registration: 'open' | 'approval' | 'invite' | 'closed',
   options: Parameters<typeof startModerationWorld>[0] = {},
 ): Promise<ModerationWorld> {
-  world = await startModerationWorld({ ...options, registration });
-  return world;
+  const started = await startModerationWorld({ ...options, registration });
+  world = started;
+  return started;
 }
 
 /** Sign in from a stated client address, through the real handler. */
@@ -393,6 +396,32 @@ describe('the approval queue (#775): the owner and the deputy decide, and the lo
       'pending',
     );
     expect(await w.freshRead((store) => store.listModerationLog())).toHaveLength(logged);
+  });
+});
+
+describe('the approval queue with one moderator (#905): the owner alone decides', () => {
+  it('registers the owner active, and the owner approves a rider with no deputy named', async () => {
+    world = await startSoleModeratorWorld({ registration: 'approval' });
+    const w = world;
+    expect((await w.as(w.owner, 'GET', '/v1/auth/account')).body).toMatchObject({
+      registrationState: 'active',
+    });
+    const pending = await w.signIn(await testDevice(), { displayName: 'Anna' });
+    const anna = pending.body.athleteId as string;
+    const approved = await w.as(w.owner, 'POST', `/v1/moderation/registrations/${anna}/approve`, {
+      reason: 'Known to me',
+    });
+    expect(approved.status).toBe(200);
+    expect((await w.freshRead((store) => store.getAthlete(anna)))?.registrationState).toBe(
+      'active',
+    );
+    expect(await w.freshRead((store) => store.listModerationLog())).toEqual([
+      expect.objectContaining({
+        action: 'approve_registration',
+        actorAthleteId: w.owner.athleteId,
+        targetAthleteId: anna,
+      }),
+    ]);
   });
 });
 

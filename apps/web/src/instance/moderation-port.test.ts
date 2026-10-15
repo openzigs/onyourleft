@@ -451,7 +451,7 @@ describe('reports, suspending and hiding — #83, #905, #955', () => {
     expect(asModerator(await moderator.read()).reports).toEqual([]);
   });
 
-  it('declares a report about the moderator a conflict, which the instance will not let them close', async () => {
+  it('declares a report about the only moderator a conflict, which they dismiss as their own (#905)', async () => {
     const { world, moderator, rider, me } = await moderatedWorld();
     const carys = await rider('Carys');
     await moderator.decideRegistration(carys.athleteId, 'approve', 'ok');
@@ -462,12 +462,19 @@ describe('reports, suspending and hiding — #83, #905, #955', () => {
     const read = asModerator(await moderator.read());
     const [report] = read.reports;
     expect(report === undefined ? false : isConflict(report, read.me)).toBe(true);
-    // Refused by the instance, and so still open: the one moderator cannot decide it.
-    expect(await moderator.dismissReport(report?.reportId ?? 0, 'Unfounded.')).toEqual({
-      kind: 'refused',
-      text: NOTHING_CHANGED_TEXT,
+    // The instance names this moderator alone, and says so.
+    expect(read.soleModerator).toBe(true);
+    expect(
+      await moderator.dismissReport(report?.reportId ?? 0, 'About me; I decided it: unfounded.'),
+    ).toEqual({ kind: 'done' });
+    const after = asModerator(await moderator.read());
+    expect(after.reports).toEqual([]);
+    expect(after.log?.items[0]).toMatchObject({
+      action: 'dismiss_own_report',
+      actorAthleteId: me,
+      targetAthleteId: me,
+      reportId: report?.reportId,
     });
-    expect(asModerator(await moderator.read()).reports).toEqual([report]);
   });
 
   it('says the same whether an account does not exist or cannot be acted on', async () => {

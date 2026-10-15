@@ -222,6 +222,8 @@ export interface ScriptedModeration {
   held: {
     standing: ModerationStanding;
     me: string;
+    /** Whether the scripted instance names this moderator alone (#905). */
+    soleModerator: boolean;
     registrations: PendingRegistration[];
     reports: OpenReport[];
     log: ModerationLogEntry[];
@@ -309,6 +311,8 @@ export function scriptedModeration(
      * `sealed-unavailable` with this sentence.
      */
     readonly sealedUnavailable?: string;
+    /** The instance names this moderator alone (#905); `false` unless given. */
+    readonly soleModerator?: boolean;
   } = {},
 ): ScriptedModeration {
   const calls: string[] = [];
@@ -319,6 +323,7 @@ export function scriptedModeration(
   const held: ScriptedModeration['held'] = {
     standing: options.standing ?? 'moderator',
     me: SCRIPTED_MODERATOR,
+    soleModerator: options.soleModerator ?? false,
     registrations: [...queues.registrations],
     reports: [...queues.reports],
     log: [...queues.log],
@@ -400,6 +405,7 @@ export function scriptedModeration(
       return Promise.resolve({
         kind: 'moderator',
         me: held.me,
+        soleModerator: held.soleModerator,
         registrations: [...held.registrations],
         reports: [...held.reports],
         suspended: held.suspendedReadable ? pageFrom(suspendedRows(), undefined) : undefined,
@@ -429,9 +435,15 @@ export function scriptedModeration(
       calls.push(`dismiss ${String(reportId)}`);
       const report = held.reports.find((each) => each.reportId === reportId);
       if (report === undefined) return Promise.resolve(nothing);
-      if (report.targetAthleteId === held.me)
+      const own = report.targetAthleteId === held.me;
+      // As the instance does (#905): refused while another moderator is
+      // named; the only moderator's own dismissal is logged as such.
+      if (own && !held.soleModerator) {
         return refusedAndLogged('dismiss_report', null, reportId, reason);
-      const outcome = logged('dismiss_report', null, reportId, reason);
+      }
+      const outcome = own
+        ? logged('dismiss_own_report', held.me, reportId, reason)
+        : logged('dismiss_report', null, reportId, reason);
       if (outcome.kind === 'done') {
         held.reports = held.reports.filter((each) => each.reportId !== reportId);
       }

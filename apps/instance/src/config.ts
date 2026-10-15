@@ -29,8 +29,9 @@
  *   instance did before the modes existed. The PROJECT's instance registers by
  *   `approval` — the owner's rulings (#16, Q5 and Q13, 2026-09-28) are about
  *   it — and its image sets that (`Dockerfile`).
- * - **`OYL_INSTANCE_OWNER_KEY`** and **`OYL_INSTANCE_DEPUTY_KEY`**: the two
- *   moderators' device keys, 64 lowercase hex characters each (ruling Q13).
+ * - **`OYL_INSTANCE_OWNER_KEY`** and **`OYL_INSTANCE_DEPUTY_KEY`**: the
+ *   moderators' device keys, 64 lowercase hex characters each. The deputy is
+ *   optional, and the project's instance names none (#905).
  * - **`OYL_INSTANCE_PUBLIC_ROOM_MIN_ACCOUNT_DAYS`** and
  *   **`OYL_INSTANCE_PUBLIC_ROOM_MIN_RIDES`**: public-room eligibility's
  *   thresholds (`moderation/eligibility.ts`).

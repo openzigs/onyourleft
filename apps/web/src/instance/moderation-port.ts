@@ -59,10 +59,15 @@
  *
  * ## A report about yourself — #905
  *
- * The instance refuses a moderator deciding a report about themselves, and
- * logs the attempt. With one moderator nobody else can decide it, so the
- * screen does not offer to: {@link isConflict} is the one rule, and a report it
- * is true of is shown as a conflict, open, with no control on it.
+ * {@link isConflict} is the one rule for a report about the moderator reading
+ * it. While the instance names another moderator, it refuses this one
+ * deciding it and logs the attempt, so the screen shows it as a conflict,
+ * open, with no control on it. When the instance names this moderator ALONE
+ * (`soleModerator`, the project's instance), nobody else could ever decide
+ * it: the owner's procedure (`docs/moderation/notice-and-action.md`) has them
+ * dismiss it themselves, declaring the conflict in the reason, and the
+ * instance logs it as `dismiss_own_report`. An instance that does not say
+ * `soleModerator` is read as naming two, which offers no control.
  */
 
 import {
@@ -155,6 +160,11 @@ export type ModerationRead =
       readonly kind: 'moderator';
       /** This account's id on the instance: what {@link isConflict} compares against. */
       readonly me: string;
+      /**
+       * The instance names this moderator alone (#905), so a report about them
+       * is theirs to dismiss, declared as their own.
+       */
+      readonly soleModerator: boolean;
       readonly registrations: readonly PendingRegistration[];
       readonly reports: readonly OpenReport[];
       /**
@@ -271,8 +281,9 @@ export type ModerationPortDependencies = SealingDependencies;
 
 /**
  * THE rule for #905: a report whose subject is the moderator reading it is a
- * conflict, which that moderator may not decide. The instance refuses it
- * anyway; the screen does not offer the control.
+ * conflict. With another moderator named, this one may not decide it, and the
+ * screen offers no control; as the only moderator, they may dismiss it,
+ * declaring the conflict.
  */
 export function isConflict(report: OpenReport, me: string): boolean {
   return report.targetAthleteId === me;
@@ -607,6 +618,7 @@ export function createModerationPort(dependencies: ModerationPortDependencies): 
         return {
           kind: 'moderator',
           me,
+          soleModerator: record(reports.body)?.soleModerator === true,
           registrations: registrationRows,
           reports: reportRows,
           suspended,

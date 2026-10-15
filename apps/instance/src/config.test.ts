@@ -135,6 +135,12 @@ describe('readConfig', () => {
     ]);
   });
 
+  it('names the owner alone when the deputy is empty, as the project’s instance does (#905)', () => {
+    const owner = 'a'.repeat(64);
+    const sole = readConfig({ commit: COMMIT, ownerKey: owner, deputyKey: '' });
+    expect(sole.ok && sole.config.moderators).toEqual({ owner });
+  });
+
   it('reads the public-room thresholds, defaulting to a week and three rides', () => {
     const unset = readConfig({ commit: COMMIT });
     expect(unset.ok && unset.config.publicRooms).toEqual({

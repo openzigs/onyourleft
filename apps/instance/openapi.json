@@ -5360,7 +5360,7 @@
     "/v1/moderation/reports": {
       "get": {
         "operationId": "listOpenReports",
-        "summary": "The moderators’ queue: every report not yet decided, oldest first.",
+        "summary": "The moderators’ queue: every report not yet decided, oldest first, and whether this instance names one moderator only, who then decides a report about themselves, declared as their own (#905).",
         "security": [
           {
             "session": []
@@ -5375,6 +5375,9 @@
                 "schema": {
                   "type": "object",
                   "properties": {
+                    "soleModerator": {
+                      "type": "boolean"
+                    },
                     "reports": {
                       "type": "array",
                       "items": {
@@ -5408,6 +5411,7 @@
                     }
                   },
                   "required": [
+                    "soleModerator",
                     "reports"
                   ],
                   "additionalProperties": false
@@ -5445,7 +5449,7 @@
     "/v1/moderation/reports/{reportId}/dismiss": {
       "post": {
         "operationId": "dismissReport",
-        "summary": "Dismiss a report, with a reason. Written to the moderation log.",
+        "summary": "Dismiss a report, with a reason. Written to the moderation log. A report about the caller is refused while another moderator is named, and otherwise logged as `dismiss_own_report`, the reason being their declaration of the conflict (#905).",
         "parameters": [
           {
             "name": "reportId",

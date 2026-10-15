@@ -10,20 +10,27 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { openDatabase } from '../store/node-sqlite.ts';
 import { DEFAULT_MODERATION_LIMITS, MAXIMUM_BLOCKS } from './moderation.ts';
-import { codeOf, startModerationWorld, type ModerationWorld } from './moderation-testing.ts';
+import {
+  codeOf,
+  startModerationWorld,
+  startSoleModeratorWorld,
+  type ModerationWorld,
+  type SoleModeratorWorld,
+} from './moderation-testing.ts';
 
-let world: ModerationWorld | undefined;
+let world: SoleModeratorWorld | undefined;
 afterEach(async () => {
   await world?.close();
   world = undefined;
 });
 
 async function start(): Promise<ModerationWorld> {
-  world = await startModerationWorld();
-  return world;
+  const started = await startModerationWorld();
+  world = started;
+  return started;
 }
 
-const seconds = (w: ModerationWorld): number => Math.floor(w.clock.ms / 1000);
+const seconds = (w: SoleModeratorWorld): number => Math.floor(w.clock.ms / 1000);
 
 describe('blocking (#83)', () => {
   it('lists the caller’s own blocks, and an unblock gives the other rider back', async () => {
@@ -174,6 +181,7 @@ describe('reports (#83)', () => {
       const queue = await w.as(moderator, 'GET', '/v1/moderation/reports');
       expect(queue.status).toBe(200);
       expect(queue.body).toEqual({
+        soleModerator: false,
         reports: [
           {
             reportId: expect.any(Number) as number,
@@ -245,7 +253,10 @@ describe('moderator actions, each written to the append-only log (#83)', () => {
       displayName: 'Bee',
     });
     // The report the action decided has left the queue.
-    expect((await w.as(w.owner, 'GET', '/v1/moderation/reports')).body).toEqual({ reports: [] });
+    expect((await w.as(w.owner, 'GET', '/v1/moderation/reports')).body).toEqual({
+      soleModerator: false,
+      reports: [],
+    });
   });
 
   it('suspend an account: hidden from others, every session ended, nothing it owns deleted', async () => {
@@ -467,6 +478,108 @@ describe('moderator actions, each written to the append-only log (#83)', () => {
     }
     expect(await w.freshRead((store) => store.listModerationLog())).toEqual([]);
     expect((await w.freshRead((store) => store.getAthlete(bea.athleteId)))?.suspendedAt).toBeNull();
+  });
+});
+
+describe('one moderator (#905): the owner alone is named, as on the project’s instance', () => {
+  async function startSole(): Promise<SoleModeratorWorld> {
+    world = await startSoleModeratorWorld();
+    return world;
+  }
+
+  it('says so in the queue, so the screen can offer the owner a report about themselves', async () => {
+    const w = await startSole();
+    const anna = await w.rider('Anna');
+    await w.as(anna, 'POST', '/v1/reports', { athleteId: w.owner.athleteId, reason: 'Rude' });
+    const queue = await w.as(w.owner, 'GET', '/v1/moderation/reports');
+    expect(queue.status).toBe(200);
+    expect(queue.body).toEqual({
+      soleModerator: true,
+      reports: [expect.objectContaining({ targetAthleteId: w.owner.athleteId, reason: 'Rude' })],
+    });
+  });
+
+  it('lets the only moderator dismiss a report about themselves, logged as their own with the declaration', async () => {
+    const w = await startSole();
+    const anna = await w.rider('Anna');
+    await w.as(anna, 'POST', '/v1/reports', { athleteId: w.owner.athleteId, reason: 'Rude' });
+    const [report] = await w.freshRead((store) => store.listOpenReports());
+    const declaration = 'This report is about me. I decided it myself: nothing in it.';
+
+    const dismissed = await w.as(
+      w.owner,
+      'POST',
+      `/v1/moderation/reports/${String(report!.id)}/dismiss`,
+      { reason: declaration },
+    );
+    expect(dismissed.status).toBe(200);
+    expect(await w.freshRead((store) => store.listOpenReports())).toEqual([]);
+    expect(await w.freshRead((store) => store.listReports(anna.athleteId))).toEqual([
+      expect.objectContaining({
+        id: report!.id,
+        closedAt: seconds(w),
+        closedByAthleteId: w.owner.athleteId,
+        outcome: 'dismiss_own_report',
+      }),
+    ]);
+    expect(await w.freshRead((store) => store.listModerationLog())).toEqual([
+      expect.objectContaining({
+        action: 'dismiss_own_report',
+        actorAthleteId: w.owner.athleteId,
+        targetAthleteId: w.owner.athleteId,
+        reportId: report!.id,
+        reason: declaration,
+      }),
+    ]);
+  });
+
+  it('logs an ordinary report’s dismissal as an ordinary one', async () => {
+    const w = await startSole();
+    const anna = await w.rider('Anna');
+    const bea = await w.rider('Bea');
+    await w.as(anna, 'POST', '/v1/reports', { athleteId: bea.athleteId, reason: 'Spam' });
+    const [report] = await w.freshRead((store) => store.listOpenReports());
+    const path = `/v1/moderation/reports/${String(report!.id)}/dismiss`;
+    expect((await w.as(w.owner, 'POST', path, { reason: 'Not spam' })).status).toBe(200);
+    expect(await w.freshRead((store) => store.listModerationLog())).toEqual([
+      expect.objectContaining({ action: 'dismiss_report', targetAthleteId: null }),
+    ]);
+  });
+
+  it('still refuses the only moderator suspending or hiding themselves, and logs the attempt', async () => {
+    const w = await startSole();
+    for (const action of ['suspend', 'hide-display-name']) {
+      const answer = await w.as(
+        w.owner,
+        'POST',
+        `/v1/moderation/athletes/${w.owner.athleteId}/${action}`,
+        { reason: 'Testing' },
+      );
+      expect(answer.status, action).toBe(409);
+    }
+    expect(
+      (await w.freshRead((store) => store.listModerationLog())).map((entry) => entry.action),
+    ).toEqual(['refused_suspend', 'refused_hide_display_name']);
+    expect(
+      (await w.freshRead((store) => store.getAthlete(w.owner.athleteId)))?.suspendedAt,
+    ).toBeNull();
+  });
+
+  it('refuses every moderator route to anybody but the owner', async () => {
+    const w = await startSole();
+    const anna = await w.rider('Anna');
+    const bea = await w.rider('Bea');
+    await w.as(anna, 'POST', '/v1/reports', { athleteId: w.owner.athleteId, reason: 'Rude' });
+    const [report] = await w.freshRead((store) => store.listOpenReports());
+    expect((await w.as(bea, 'GET', '/v1/moderation/reports')).status).toBe(404);
+    expect(
+      (
+        await w.as(bea, 'POST', `/v1/moderation/reports/${String(report!.id)}/dismiss`, {
+          reason: 'Because',
+        })
+      ).status,
+    ).toBe(404);
+    expect(await w.freshRead((store) => store.listOpenReports())).toHaveLength(1);
   });
 });
 

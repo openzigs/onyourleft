@@ -37,16 +37,26 @@
  *
  * ## The moderators
  *
- * The instance's operator names two DEVICE KEYS, the owner's and a deputy's
- * (ruling Q13, 2026-09-28). The athlete who holds one, unrevoked, has that
- * role. A key rather than an athlete id, so the operator can name a moderator
+ * The instance's operator names up to two DEVICE KEYS, the owner's and an
+ * optional deputy's. The project's instance names the owner alone (#905,
+ * 2026-09-30, reversing ruling Q13's deputy). The athlete who holds one,
+ * unrevoked, has that role. A key rather than an athlete id, so the operator can name a moderator
  * before they have registered — which approval-required registration (#775)
  * needs, or nobody could ever approve anybody. A moderator's every action goes
  * through {@link SqlStore.moderate}, which applies it and appends it to the
  * append-only log in one transaction; a moderator may not act on a moderator,
- * and may not dismiss a report about themselves. Such an attempt changes
- * nothing and IS logged, as `refused_<action>`, so the owner can see a deputy
- * who tried to act on them.
+ * and may not dismiss a report about themselves while another moderator is
+ * named to decide it. Such an attempt changes nothing and IS logged, as
+ * `refused_<action>`, so the owner can see a deputy who tried to act on them.
+ *
+ * ## A report about the only moderator (#905)
+ *
+ * With one moderator named, nobody else could ever decide a report about
+ * them, and it would stay open for ever. So the owner's procedure
+ * (`docs/moderation/notice-and-action.md`, 2026-09-30) applies: they decide
+ * it themselves, the reason they give is their declaration of the conflict,
+ * and it is logged as `dismiss_own_report`, never as an ordinary dismissal.
+ * Only a dismissal: suspending or hiding themselves stays refused.
  *
  * A pending account whose key the operator names later — the owner signed in
  * before `OYL_INSTANCE_OWNER_KEY` was set — is activated at its next sign-in,
@@ -64,7 +74,7 @@ import type {
   SqlStore,
 } from '../store/sql-store.ts';
 
-/** The two moderator roles (ruling Q13). */
+/** The two moderator roles; the deputy is optional (#905). */
 export type ModeratorRole = 'owner' | 'deputy';
 
 /** The device keys the operator named, lowercase hex. */
@@ -108,7 +118,7 @@ export type ModerationResult<T> =
  */
 export type AthleteAction = Exclude<
   ModerationActionKind,
-  'dismiss_report' | 'activate_moderator_key'
+  'dismiss_report' | 'dismiss_own_report' | 'activate_moderator_key'
 >;
 
 /** One page of a moderators' list (#961), in `pagination.ts`'s wire form. */
@@ -127,6 +137,11 @@ export interface Moderation {
   canSee(viewerId: string, subjectId: string): Promise<boolean>;
   /** The role the athlete holds, if any. */
   roleOf(athleteId: string): Promise<ModeratorRole | undefined>;
+  /**
+   * Whether the operator named one moderator only (#905): then a report about
+   * them is theirs to decide, declared and logged as such.
+   */
+  readonly soleModerator: boolean;
 
   block(athleteId: string, target: string): Promise<ModerationResult<null>>;
   unblock(athleteId: string, target: string): Promise<void>;
@@ -191,6 +206,7 @@ export function createModeration(options: ModerationOptions): Moderation {
   const seconds = (): number => Math.floor(now() / 1000);
   const moderators = options.moderators ?? {};
   const limits = options.limits ?? DEFAULT_MODERATION_LIMITS;
+  const soleModerator = (moderators.owner === undefined) !== (moderators.deputy === undefined);
 
   async function roleOf(athleteId: string): Promise<ModeratorRole | undefined> {
     const live = (await store.listDeviceKeys(athleteId))
@@ -238,6 +254,7 @@ export function createModeration(options: ModerationOptions): Moderation {
     },
 
     roleOf,
+    soleModerator,
 
     async block(athleteId, target) {
       // Stored for ANY well-formed id, whether or not anybody holds it, and
@@ -394,10 +411,23 @@ export function createModeration(options: ModerationOptions): Moderation {
         return refuse('validation_failed', [{ field: 'reason', problem: checked.problem }]);
       }
       if (!/^[1-9][0-9]{0,15}$/.test(reportId)) return refuse('not_found');
-      // A moderator does not decide a report about themselves (#891's review):
-      // the other moderator may. Refused, and logged, as `act` refuses.
+      // A moderator does not decide a report about themselves (#891's review)
+      // while another moderator is named to: refused, and logged, as `act`
+      // refuses. The ONLY moderator does, declared as their own (#905).
       const report = (await store.listOpenReports()).find((each) => each.id === Number(reportId));
       if (report?.targetAthleteId === moderatorId) {
+        if (soleModerator) {
+          return logged(
+            await store.moderate({
+              action: 'dismiss_own_report',
+              actorAthleteId: moderatorId,
+              targetAthleteId: moderatorId,
+              reportId: report.id,
+              reason: checked.reason,
+              at: seconds(),
+            }),
+          );
+        }
         return refusedOnModerator(
           'dismiss_report',
           moderatorId,
