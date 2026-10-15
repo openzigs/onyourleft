@@ -176,7 +176,11 @@ describe('what the sync port offers (#1195)', () => {
     expect(on.sync.availability()).toEqual({ kind: 'none' });
     expect((await on.sync.sync()).kind).toBe('refused');
     expect(net.seen).toEqual([]);
-  });
+    // The file's first case, which opens the first instance world. Under
+    // 300 ms on every green `main` run read, and 3 077 ms under coverage
+    // (nightly 38492085167, EPYC 9V74), 62 % of Vitest's 5 s default. About
+    // three times the slowest CI figure (docs/agents/ci.md §4c, #1262).
+  }, 10_000);
 
   it('is closed with the web-build sentence in a copy a website served, and sends nothing', async () => {
     const w = await world();
