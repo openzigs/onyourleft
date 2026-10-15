@@ -140,6 +140,16 @@ const RIDER: AthleteRecord = {
  */
 const MANY_WORKOUTS = new URLSearchParams(window.location.search).get('workouts') === 'many';
 
+/**
+ * `rideview.html?workouts=fault` — #1329: the saved workouts read once, and a
+ * second read that FAILED, so *"Your saved workouts could not be read on this
+ * device…"* stands in the chooser with the list still under it. With the
+ * re-plan switch above the list (`?replans=available`) the warning is between
+ * the two. `WorkoutPanel` reads the library again whenever it is handed a new
+ * port and keeps what it had when that read fails; {@link run} hands it one.
+ */
+const WORKOUTS_FAULT = new URLSearchParams(window.location.search).get('workouts') === 'fault';
+
 const WORKOUT: WorkoutRecord = {
   id: workoutId('sweet-spot'),
   createdBy: ATHLETE,
@@ -828,16 +838,33 @@ export interface RideViewMeasurement {
    * a `<details>` holds any of it, and whether the switch is checked.
    */
   /**
-   * #1244: the line above the list that says the re-plan switch is on, if it
-   * is shown; and the line that says re-plans were switched off mid-workout.
+   * #1329: the trainer card's own text above the chooser, whose gaps and one
+   * small sentence the owner ruled trimmed. @see trainerCardShown
+   */
+  readonly trainerCard: RideViewTrainerCard | undefined;
+  /** #1329: the chooser's warning that the saved workouts could not be read. */
+  readonly loadFaultLine:
+    { readonly box: Box; readonly text: string; readonly onTop: boolean } | undefined;
+  /**
+   * #1244, restored on #1332: *"Re-plans on"* beside the chooser's heading,
+   * shown only while the switch is on.
    */
   readonly replansOnLine: { readonly box: Box; readonly text: string } | undefined;
+  /** The chooser heading's own text, which is its accessible name. */
+  readonly chooserHeadingName: string | undefined;
+  /** #1244: the line that says re-plans were switched off mid-workout. */
   readonly replansOffLine: { readonly box: Box; readonly text: string } | undefined;
   readonly replanDisclosure:
     | {
         readonly box: Box;
+        /** The block under the list: the disclosure's other eight sentences. */
+        readonly rest: Box;
         readonly sentences: readonly string[];
         readonly headline: Box | undefined;
+        /** #1329: the headline's font size, in CSS pixels. */
+        readonly headlineFontPixels: number;
+        /** #1329: the font size of the sentence under the list that follows it. */
+        readonly restFontPixels: number;
         readonly inDisclosure: boolean;
         readonly switchedOn: boolean;
       }
@@ -908,6 +935,44 @@ export interface RideViewReading {
 }
 
 /** One standing notice. @see RideViewMeasurement.notices */
+/**
+ * #1329: the trainer card above the workout chooser — the heading, the control
+ * sentence, the ERG line, the ERG form and its range sentence — as boxes, so
+ * the gaps between them are numbers a case can hold whatever the fonts are.
+ */
+export interface RideViewTrainerCard {
+  /** *Trainer*, the group's `h2`. */
+  readonly heading: Box;
+  /** *"This app has control of the trainer."* and its like. */
+  readonly controlSentence: Box;
+  /** ***ERG, optional:** …*, when the trainer can be asked for a target. */
+  readonly ergLine: Box | undefined;
+  readonly form: Box | undefined;
+  /** *"This trainer accepts … W to … W in steps of … W. …"*, under the form. */
+  readonly rangeHint:
+    | {
+        readonly box: Box;
+        readonly text: string;
+        readonly fontPixels: number;
+        /** The document's own font size: 1rem. */
+        readonly rootFontPixels: number;
+        /** How many lines it is laid out on. */
+        readonly lines: number;
+        /** Its ink, and the first painted background behind it, as computed. */
+        readonly colour: string;
+        readonly background: string;
+      }
+    | undefined;
+  /**
+   * The row of *Ride a workout*, the chooser's `h3`, with *"Re-plans on"*
+   * beside it while the switch is on; and the re-plan switch's whole row.
+   */
+  readonly chooserHeading: Box | undefined;
+  readonly switchRow: Box | undefined;
+  /** The list of saved workouts, where the re-plan switch stands above it. */
+  readonly chooserList: Box | undefined;
+}
+
 export interface RideViewNotice {
   readonly group: 'live' | 'trainer';
   readonly label: string;
@@ -929,8 +994,10 @@ declare global {
       readonly openEasedDetail: () => void;
       /** #1244: press the re-plan switch. @see pressReplanSwitch */
       readonly pressReplanSwitch: () => void;
-      /** #1244's control. @see disclosureBeforeTheSwitch */
-      readonly disclosureBeforeTheSwitch: () => void;
+      /** #1244's control. @see restOfDisclosureAboveTheList */
+      readonly restOfDisclosureAboveTheList: () => void;
+      /** #1329's control. @see trainerCardUntrimmed */
+      readonly trainerCardUntrimmed: (which?: TrainerCardTrim) => void;
       /** #605's control: the running workout as #585 shipped it. @see restoreAsShipped */
       readonly restoreAsShipped: () => void;
       /** #692's control: the screen as it was laid out before #692. @see asBefore692 */
@@ -1028,6 +1095,12 @@ function measure(): RideViewMeasurement {
     eased: easedNotice(),
     keepScreenOn: keepScreenOnNotice(),
     replanDisclosure: replanDisclosureShown(),
+    trainerCard: trainerCardShown(),
+    loadFaultLine: loadFaultShown(),
+    chooserHeadingName: (() => {
+      const heading = document.querySelector('.oyl-ride__group--trainer .oyl-workout-heading > h3');
+      return heading === null ? undefined : textOf(heading);
+    })(),
     replansOnLine: lineOf(
       document.querySelector('.oyl-ride__group--trainer [data-oyl-replans-on]'),
     ),
@@ -1282,20 +1355,39 @@ function lineOf(element: Element | null): { readonly box: Box; readonly text: st
 }
 
 function replanDisclosureShown(): RideViewMeasurement['replanDisclosure'] {
-  const block = document.querySelector('.oyl-ride__group--trainer [data-oyl-replan-disclosure]');
-  if (block === null) {
+  // #1329: two blocks, the headline above the list and the rest under it.
+  const blocks = [
+    ...document.querySelectorAll('.oyl-ride__group--trainer [data-oyl-replan-disclosure]'),
+  ];
+  const first = blocks[0];
+  const last = blocks.at(-1);
+  if (first === undefined || last === undefined) {
     return undefined;
   }
-  const paragraphs = [...block.querySelectorAll('p')];
+  const paragraphs = blocks.flatMap((block) => [...block.querySelectorAll('p')]);
   const headline = paragraphs[0];
   const input = document.querySelector<HTMLInputElement>(
     '.oyl-ride__group--trainer input[role="switch"]',
   );
+  const from = boxOf(first);
+  const to = boxOf(last);
   return {
-    box: boxOf(block),
+    box: {
+      left: Math.min(from.left, to.left),
+      top: from.top,
+      right: Math.max(from.right, to.right),
+      bottom: to.bottom,
+      width: Math.max(from.right, to.right) - Math.min(from.left, to.left),
+      height: to.bottom - from.top,
+    },
+    rest: to,
     sentences: paragraphs.map(textOf),
     headline: headline === undefined ? undefined : boxOf(headline),
-    inDisclosure: block.closest('details') !== null || block.querySelector('details') !== null,
+    headlineFontPixels: fontPixelsOf(headline),
+    restFontPixels: fontPixelsOf(last.querySelector('p') ?? undefined),
+    inDisclosure: blocks.some(
+      (block) => block.closest('details') !== null || block.querySelector('details') !== null,
+    ),
     switchedOn: input?.checked === true,
   };
 }
@@ -1313,20 +1405,131 @@ function pressReplanSwitch(): void {
   });
 }
 
-/**
- * #1244's control: the disclosure as it would be BEFORE the switch, which is
- * the order a reader might expect and the one that pushes the switch down the
- * column by nine sentences. On the live elements, as the other controls are.
- */
-function disclosureBeforeTheSwitch(): void {
-  const block = document.querySelector('.oyl-ride__group--trainer [data-oyl-replan-disclosure]');
-  const label = document
-    .querySelector('.oyl-ride__group--trainer input[role="switch"]')
-    ?.closest('label');
-  if (block === null || label === null || label === undefined) {
-    throw new Error('rideview harness: no re-plan switch and disclosure to reorder');
+function fontPixelsOf(element: Element | undefined): number {
+  return element === undefined ? 0 : Number.parseFloat(window.getComputedStyle(element).fontSize);
+}
+
+/** The first background that paints behind an element, as `getComputedStyle` spells it. */
+function backgroundBehind(element: Element): string {
+  for (let each: Element | null = element; each !== null; each = each.parentElement) {
+    const colour = window.getComputedStyle(each).backgroundColor;
+    if (colour !== 'rgba(0, 0, 0, 0)') return colour;
   }
-  label.before(block);
+  return '';
+}
+
+function trainerCardShown(): RideViewMeasurement['trainerCard'] {
+  const group = document.querySelector('.oyl-ride__group--trainer');
+  const heading = group?.querySelector('h2');
+  const sentence = group?.querySelector('.oyl-trainer__state');
+  if (group === null || group === undefined || !heading || !sentence) {
+    return undefined;
+  }
+  const optional = (selector: string): Box | undefined => {
+    const found = group.querySelector(selector);
+    return found === null ? undefined : boxOf(found);
+  };
+  const hint = group.querySelector('form.oyl-trainer__form > p');
+  const hintStyle = hint === null ? undefined : window.getComputedStyle(hint);
+  const range = document.createRange();
+  if (hint !== null) range.selectNodeContents(hint);
+  return {
+    heading: boxOf(heading),
+    controlSentence: boxOf(sentence),
+    ergLine: optional('.oyl-trainer__erg'),
+    form: optional('form.oyl-trainer__form'),
+    rangeHint:
+      hint === null || hintStyle === undefined
+        ? undefined
+        : {
+            box: boxOf(hint),
+            text: textOf(hint),
+            fontPixels: Number.parseFloat(hintStyle.fontSize),
+            rootFontPixels: fontPixelsOf(document.documentElement),
+            lines: new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size,
+            colour: hintStyle.color,
+            background: backgroundBehind(hint),
+          },
+    chooserHeading: optional('.oyl-workout-heading'),
+    switchRow: optional('.oyl-workout-replans > label'),
+    chooserList: optional('.oyl-workout-replans ~ ul'),
+  };
+}
+
+/** Which of #1329's trims {@link trainerCardUntrimmed} puts back. */
+export type TrainerCardTrim = 'gaps' | 'hint' | 'chooser-heading' | 'headline';
+
+/**
+ * #1329's second control: the trainer card as it was BEFORE the owner's
+ * ruling trimmed it — the control sentence's 1.25rem either side, a
+ * paragraph's 1rem under the ERG line, the range sentence at the body size,
+ * the chooser's heading with its 8 px, and the headline at the body's line
+ * height. On the live elements, with the values the rules had, as the other
+ * controls are. With no argument, all of it; with one, that trim alone.
+ */
+function trainerCardUntrimmed(which?: TrainerCardTrim): void {
+  const group = document.querySelector<HTMLElement>('.oyl-ride__group--trainer');
+  const set = (selector: string, styles: Record<string, string>): void => {
+    const found = group?.querySelector<HTMLElement>(selector);
+    if (found === null || found === undefined) {
+      throw new Error(`rideview harness: nothing matches ${selector} to put back`);
+    }
+    for (const [property, value] of Object.entries(styles)) {
+      found.style.setProperty(property, value);
+    }
+  };
+  const all = which === undefined;
+  if (all || which === 'gaps') {
+    set('.oyl-trainer__state', { 'margin-block': '1em' });
+    set('.oyl-trainer__erg', { 'margin-bottom': '1rem' });
+  }
+  if (all || which === 'hint') {
+    set('form.oyl-trainer__form > p', { 'font-size': '1rem', 'line-height': 'inherit' });
+  }
+  if (all || which === 'chooser-heading') {
+    set('.oyl-workout-heading', { 'margin-block-end': 'var(--oyl-space-sm)' });
+  }
+  if (all || which === 'headline') {
+    set('[data-oyl-replan-disclosure="headline"] > p', { 'line-height': 'inherit' });
+  }
+}
+
+/**
+ * #1329's control: the rest of the disclosure ABOVE the list, straight under
+ * the headline, which is where reading it in one piece would put it, and
+ * which pushes the first *Ride* down the column by eight sentences. On the
+ * live elements, as the other controls are.
+ */
+function restOfDisclosureAboveTheList(): void {
+  const rest = document.querySelector(
+    '.oyl-ride__group--trainer [data-oyl-replan-disclosure="rest"]',
+  );
+  const headline = document.querySelector(
+    '.oyl-ride__group--trainer [data-oyl-replan-disclosure="headline"]',
+  );
+  if (rest === null || headline === null) {
+    throw new Error('rideview harness: no re-plan disclosure to reorder');
+  }
+  headline.after(rest);
+}
+
+/** #1329: the chooser's warning that the saved workouts could not be read. */
+function loadFaultElement(): Element | undefined {
+  return [...document.querySelectorAll('.oyl-ride__group--trainer .oyl-status')].find((each) =>
+    textOf(each).includes('Your saved workouts could not be read on this device.'),
+  );
+}
+
+function loadFaultShown(): RideViewMeasurement['loadFaultLine'] {
+  const warning = loadFaultElement();
+  if (warning === undefined) return undefined;
+  const box = boxOf(warning);
+  const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+  return {
+    box,
+    text: textOf(warning),
+    onTop: hit !== null && (hit === warning || warning.contains(hit)),
+  };
 }
 
 function keepScreenOnElement(): Element | undefined {
@@ -1460,32 +1663,36 @@ async function run(): Promise<void> {
 
   // #674: the view groups first, so every view renders on the render that asks.
   await viewGroupsLoaded();
-  flushSync(() => {
-    createRoot(host).render(
-      <StrictMode>
-        <AppShell
-          capabilities={NO_BLUETOOTH}
-          rideController={stubRideController(snapshot(), REPLANS_AVAILABLE).controller}
-          workouts={workoutStub(
-            ATHLETE,
-            MANY_WORKOUTS
-              ? [
-                  WORKOUT,
-                  ...Array.from({ length: 11 }, (_, index) => ({
-                    ...WORKOUT,
-                    id: workoutId(`saved-${String(index + 2)}`),
-                    name: `Saved workout ${String(index + 2)}`,
-                    workout: { ...WORKOUT.workout, name: `Saved workout ${String(index + 2)}` },
-                  })),
-                ]
-              : [WORKOUT],
-          )}
-          analysis={stubAnalysis(ATHLETE, [], RIDER)}
-          {...(SIDE_PAIRING === undefined ? {} : { sidePairing: SIDE_PAIRING })}
-        />
-      </StrictMode>,
-    );
-  });
+  const library: readonly WorkoutRecord[] = MANY_WORKOUTS
+    ? [
+        WORKOUT,
+        ...Array.from({ length: 11 }, (_, index) => ({
+          ...WORKOUT,
+          id: workoutId(`saved-${String(index + 2)}`),
+          name: `Saved workout ${String(index + 2)}`,
+          workout: { ...WORKOUT.workout, name: `Saved workout ${String(index + 2)}` },
+        })),
+      ]
+    : [WORKOUT];
+  const root = createRoot(host);
+  const { controller } = stubRideController(snapshot(), REPLANS_AVAILABLE);
+  const analysis = stubAnalysis(ATHLETE, [], RIDER);
+  const render = (workouts: ReturnType<typeof workoutStub>): void => {
+    flushSync(() => {
+      root.render(
+        <StrictMode>
+          <AppShell
+            capabilities={NO_BLUETOOTH}
+            rideController={controller}
+            workouts={workouts}
+            analysis={analysis}
+            {...(SIDE_PAIRING === undefined ? {} : { sidePairing: SIDE_PAIRING })}
+          />
+        </StrictMode>,
+      );
+    });
+  };
+  render(workoutStub(ATHLETE, library));
 
   // ⚠️ The control the owner could not see. It appears only once the workout
   // list AND the threshold have both been read, so waiting for it is what
@@ -1544,6 +1751,14 @@ async function run(): Promise<void> {
       ),
     );
   }
+  if (WORKOUTS_FAULT) {
+    // The library has been read and listed. A new port whose read fails: the
+    // panel keeps the list it had and says the read failed, above it.
+    const failing = workoutStub(ATHLETE, library);
+    failing.failNextList();
+    render(failing);
+    await until('the saved-workouts warning', loadFaultElement);
+  }
   if (KEEP_ALIVE_FAILED) {
     await until('the keep-the-screen-on notice', keepScreenOnElement);
   }
@@ -1565,7 +1780,8 @@ async function run(): Promise<void> {
     restoreFullHeightShell,
     openEasedDetail,
     pressReplanSwitch,
-    disclosureBeforeTheSwitch,
+    restOfDisclosureAboveTheList,
+    trainerCardUntrimmed,
     restoreAsShipped,
     asBefore692,
     heldAboveTheForm,
@@ -1585,7 +1801,8 @@ run().catch((error: unknown) => {
     restoreFullHeightShell,
     openEasedDetail,
     pressReplanSwitch,
-    disclosureBeforeTheSwitch,
+    restOfDisclosureAboveTheList,
+    trainerCardUntrimmed,
     restoreAsShipped,
     asBefore692,
     heldAboveTheForm,

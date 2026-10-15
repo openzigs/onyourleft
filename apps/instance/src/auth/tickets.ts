@@ -85,7 +85,11 @@ export function createTicketBook(now: () => number, token: () => string): Ticket
         if (entry === undefined) return undefined;
         held.delete(ticket);
         if (entry.roomId !== roomId || entry.expiresAtMs <= now()) return undefined;
-        return { athleteId: entry.athleteId, declaredMassKilograms: entry.declaredMassKilograms };
+        return {
+          athleteId: entry.athleteId,
+          declaredMassKilograms: entry.declaredMassKilograms,
+          displayName: entry.displayName,
+        };
       };
     },
   };

@@ -782,16 +782,12 @@ describe('the hosted source (#1251)', () => {
     expect((await saved(id))?.source).toBe('instance-hosted');
   });
 
-  it.each([
-    ['the list could not be given to the instance', async () => Promise.resolve(false)],
-    ['no hosted source was built', undefined],
-  ] as const)('starts no job when %s, and says so', async (_name, sendGuard) => {
+  it('starts no job when the list could not be given to the instance, and says so', async () => {
     const id = await seededRide();
     const scripted = scriptedJobs([succeeded(WRITE_UP)]);
-    const outcome = await controller(
-      scripted,
-      sendGuard === undefined ? {} : { hosted: { endpoint: () => ENDPOINT, sendGuard } },
-    ).ask(id, 'instance-hosted', () => undefined, live());
+    const outcome = await controller(scripted, {
+      hosted: { endpoint: () => ENDPOINT, sendGuard: async () => Promise.resolve(false) },
+    }).ask(id, 'instance-hosted', () => undefined, live());
     expect(outcome).toStrictEqual({
       kind: 'failed',
       text: INSTANCE_ASK_TEXT['masking-not-sent'],
@@ -799,6 +795,41 @@ describe('the hosted source (#1251)', () => {
     expect(scripted.requests).toStrictEqual([]);
     expect(await saved(id)).toBeUndefined();
   });
+
+  // #1228: consent off — withdrawn after the page was drawn, or never given —
+  // sends nothing hosted: not the masking list, not the ride.
+  it.each([
+    ['the offer is gone at the press', true],
+    ['no hosted source was built', false],
+  ] as const)(
+    'sends nothing when %s, and says the service is not available',
+    async (_name, built) => {
+      const id = await seededRide();
+      const scripted = scriptedJobs([succeeded(WRITE_UP)]);
+      let guards = 0;
+      const outcome = await controller(
+        scripted,
+        built
+          ? {
+              hosted: {
+                endpoint: () => undefined,
+                sendGuard: async () => {
+                  guards += 1;
+                  return Promise.resolve(true);
+                },
+              },
+            }
+          : {},
+      ).ask(id, 'instance-hosted', () => undefined, live());
+      expect(outcome).toStrictEqual({
+        kind: 'failed',
+        text: INSTANCE_FAILURE_TEXT.hosted_unavailable,
+      });
+      expect(guards).toBe(0);
+      expect(scripted.requests).toStrictEqual([]);
+      expect(await saved(id)).toBeUndefined();
+    },
+  );
 
   it('does not send the list for a job on the instance’s own model', async () => {
     const id = await seededRide();

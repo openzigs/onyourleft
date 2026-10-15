@@ -153,7 +153,9 @@
     "Your thresholds",
     "Help with Your thresholds",
     "Every zone boundary and every load on this page is derived from these two numbers.",
-    "Nothing is sent anywhere — they are stored on this device with your rides.",
+    "They are stored on this device with your rides.",
+    "Asking for a ride analysis sends your threshold power to the model you chose, and a re-plan during the ride sends your instance each block’s power as a share of it, never in watts.",
+    "Your threshold heart rate is not sent.",
     "Threshold power (W)",
     "Threshold heart rate (bpm)",
     "Leave one blank to go back to the assumed default.",
@@ -382,7 +384,9 @@
     "The trainer game works out how fast you are going from how hard you are pedalling, and what you weigh is most of the answer on a climb.",
     "On the flat it is mostly air rather than weight.",
     "How you are riding — sitting up, on the hoods, in the drops — is chosen for each ride on the trainer game screen.",
-    "Nothing is sent anywhere — it is stored on this device with your rides.",
+    "It is stored on this device with your rides.",
+    "Joining a private room sends it to that room’s instance, and asking for a ride analysis sends it to the model you chose.",
+    "A ride you sync with an instance carries your power per kilogram.",
     "Your weight (kg)",
     "Leave it blank to go back to the assumed 71.0 kg.",
     "Save weight",
@@ -536,7 +540,7 @@
     "Storage",
     "iUnknown: This browser does not say whether it will remove your rides automatically when it is short of space.",
     "Clearing this browser’s site data still removes your rides, and there is no copy anywhere else — export them if you want one.",
-    "Nothing here is sent anywhere, and nothing here changes what a ride recorded."
+    "Each setting that sends something says so beside it, and nothing here changes what a ride recorded."
   ],
   "about empty": [
     "About On Your Left",
@@ -1368,7 +1372,9 @@
     "Your thresholds",
     "Help with Your thresholds",
     "Every zone boundary and every load on this page is derived from these two numbers.",
-    "Nothing is sent anywhere — they are stored on this device with your rides.",
+    "They are stored on this device with your rides.",
+    "Asking for a ride analysis sends your threshold power to the model you chose, and a re-plan during the ride sends your instance each block’s power as a share of it, never in watts.",
+    "Your threshold heart rate is not sent.",
     "Threshold power (W)",
     "Threshold heart rate (bpm)",
     "Leave one blank to go back to the assumed default.",
@@ -1626,7 +1632,9 @@
     "The trainer game works out how fast you are going from how hard you are pedalling, and what you weigh is most of the answer on a climb.",
     "On the flat it is mostly air rather than weight.",
     "How you are riding — sitting up, on the hoods, in the drops — is chosen for each ride on the trainer game screen.",
-    "Nothing is sent anywhere — it is stored on this device with your rides.",
+    "It is stored on this device with your rides.",
+    "Joining a private room sends it to that room’s instance, and asking for a ride analysis sends it to the model you chose.",
+    "A ride you sync with an instance carries your power per kilogram.",
     "Your weight (kg)",
     "Leave it blank to go back to the assumed 71.0 kg.",
     "Save weight",
@@ -1790,7 +1798,7 @@
     "Storage",
     "iUnknown: This browser does not say whether it will remove your rides automatically when it is short of space.",
     "Clearing this browser’s site data still removes your rides, and there is no copy anywhere else — export them if you want one.",
-    "Nothing here is sent anywhere, and nothing here changes what a ride recorded."
+    "Each setting that sends something says so beside it, and nothing here changes what a ride recorded."
   ],
   "about populated": [
     "About On Your Left",
