@@ -577,6 +577,17 @@ export function scriptedModeration(
       }
       return Promise.resolve({ kind: 'done' });
     },
+    hideItem: (item, reason, statement) => {
+      calls.push(`hide_item ${item.trim()}`);
+      if (
+        statement.facts.trim() === '' ||
+        (statement.legalGround.trim() === '' && statement.termsGround.trim() === '')
+      ) {
+        return Promise.resolve({ kind: 'refused', text: MODERATION_REFUSAL_TEXT.statement });
+      }
+      held.statements.push({ athleteId: item.trim(), ...statement });
+      return Promise.resolve(logged('hide_item', null, null, reason));
+    },
     exportRecord: () => {
       calls.push('exportRecord');
       return Promise.resolve(

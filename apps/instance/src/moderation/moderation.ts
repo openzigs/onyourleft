@@ -69,6 +69,8 @@ import type {
   NoticeStep,
 } from '../store/sql-store.ts';
 import { exportRecord, type ModerationRecord } from './record.ts';
+import { parseModerationItem } from '@onyourleft/domain';
+import { publishedOrder } from '../rooms/publication.ts';
 import { readAppealGrounds, readStatementFields, RESTRICTIONS } from './statements.ts';
 import { readNoticeForm, type NoticeProblem, type NoticeValues } from './notices.ts';
 
@@ -164,6 +166,19 @@ export interface Moderation {
     statementId: string,
     grounds: unknown,
   ): Promise<ModerationResult<{ appealId: number }>>;
+  /**
+   * Hide one item (#913): a room's listing (`room:`), the route shown in a
+   * room (`route:`) or one row of a race's result (`result:<room>:<row>`),
+   * by the identifier a notice names it by — with a reason and a statement of
+   * reasons its owner is shown, all in one transaction with the log entry.
+   * A display name (`rider:`) is hidden by `hide-display-name`. An item of
+   * a moderator's is refused, and the attempt logged, as `act` refuses.
+   */
+  hideItem(
+    moderatorId: string,
+    item: unknown,
+    fields: { readonly reason?: unknown; readonly statement?: unknown },
+  ): Promise<ModerationResult<{ logId: number }>>;
   /** Every step taken on every notice (#912). */
   noticeSteps(): Promise<readonly NoticeStep[]>;
   /**
@@ -523,6 +538,56 @@ export function createModeration(options: ModerationOptions): Moderation {
     appeals: (athleteId) => store.listAppeals(athleteId),
 
     noticeSteps: () => store.listNoticeSteps(),
+
+    async hideItem(moderatorId, item, fields) {
+      const parsed = typeof item === 'string' ? parseModerationItem(item) : undefined;
+      if (parsed === undefined) {
+        return refuse('validation_failed', [
+          { field: 'item', problem: 'must be an item’s identifier, as the app shows it' },
+        ]);
+      }
+      if (parsed.kind === 'rider') {
+        return refuse('validation_failed', [
+          { field: 'item', problem: 'a display name is hidden with hide-display-name' },
+        ]);
+      }
+      const checked = checkReason(fields.reason);
+      if (!checked.ok) {
+        return refuse('validation_failed', [{ field: 'reason', problem: checked.problem }]);
+      }
+      const statement = readStatementFields(fields.statement, now());
+      if (!statement.ok) return refuse('validation_failed', statement.fields);
+      // Whose the item is: the room's maker for its listing and its route,
+      // the rider in that row for a row of a result. Nobody's is `not_found`.
+      let owner: string | undefined;
+      if (parsed.kind === 'room' || parsed.kind === 'route') {
+        owner = await store.getRoomCreator(parsed.roomId);
+      } else {
+        const course = await store.getRoomCourse(parsed.roomId);
+        if (course?.raceFinishedAt !== undefined) {
+          const order = publishedOrder(
+            await store.listRoomResults(parsed.roomId),
+            course.finishers ?? 0,
+          );
+          owner = order[parsed.row - 1]?.athleteId;
+        }
+      }
+      if (owner === undefined) return refuse('not_found');
+      if ((await roleOf(owner)) !== undefined) {
+        return refusedOnModerator('hide_item', moderatorId, owner, null, checked.reason);
+      }
+      const hidden = await store.hideItem({
+        item: (item as string).trim(),
+        ownerAthleteId: owner,
+        actorAthleteId: moderatorId,
+        reason: checked.reason,
+        statement: statement.fields,
+        at: seconds(),
+      });
+      return hidden.outcome === 'applied'
+        ? { ok: true, value: { logId: hidden.logId } }
+        : refuse('moderation_not_applicable');
+    },
 
     async recordNoticeStep(moderatorId, noticeId, step, decision, logId) {
       if (!/^[1-9][0-9]{0,15}$/.test(noticeId)) return refuse('not_found');

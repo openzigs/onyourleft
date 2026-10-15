@@ -362,6 +362,15 @@ export interface NoticeStepTable {
   readonly at: number;
 }
 
+/** One item a moderator hid (#913, migration 0030). Restored once, never deleted. */
+export interface HiddenItemTable {
+  readonly log_id: number;
+  readonly item: string;
+  readonly owner_athlete_id: string;
+  readonly hidden_at: number;
+  readonly restored_at: number | null;
+}
+
 /** A single-use invitation a moderator minted, as its SHA-256 (#775). */
 export interface InviteCodeTable {
   readonly code_sha256: string;
@@ -640,4 +649,5 @@ export interface InstanceDatabase {
   readonly statement: StatementTable;
   readonly appeal: AppealTable;
   readonly notice_step: NoticeStepTable;
+  readonly hidden_item: HiddenItemTable;
 }

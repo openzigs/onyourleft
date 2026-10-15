@@ -322,6 +322,9 @@ export const MODERATION_REFUSAL_TEXT = {
     'Write the decision, in at most 2,000 characters, with no place or coordinate in it. It is ' +
     'what you tell the notifier, and it is kept in the record.',
   'log-entry': 'That is not a moderation log entry’s number.',
+  item:
+    'That is not an item’s reference. Paste it as the app shows it: room:, route: or result:. A ' +
+    'display name is hidden from its account, above.',
   decision:
     'Write your answer to the rider, in at most 2,000 characters, with no place or coordinate in ' +
     'it. They are shown it, and it is written to the moderation log.',
@@ -352,6 +355,13 @@ export interface ModerationPort {
   ): Promise<ModerationOutcome>;
   /** Dismiss a report. */
   dismissReport(reportId: number, reason: string): Promise<ModerationOutcome>;
+  /**
+   * Hide one item (#913) — a room's listing, the route shown in a room, or a
+   * row of a race's result — by the identifier a notice names it by, with the
+   * statement of reasons its owner is shown. Refused here, sending nothing,
+   * for an identifier that is not one or a statement that is not complete.
+   */
+  hideItem(item: string, reason: string, statement: StatementInput): Promise<ModerationOutcome>;
   /**
    * Record a step taken on a notice (#912): receipt confirmed, the decision
    * (with the log entry of any action it took) or the notifier told — each
@@ -914,6 +924,22 @@ export function createModerationPort(dependencies: ModerationPortDependencies): 
         return { kind: 'refused', text: MODERATION_REFUSAL_TEXT['athlete-id'] };
       }
       return send(`/v1/moderation/registrations/${typed}/${decision}`, reason);
+    },
+
+    hideItem: async (item, reason, statement) => {
+      const typed = item.trim();
+      const parsed = parseModerationItem(typed);
+      if (parsed === undefined || parsed.kind === 'rider') {
+        return { kind: 'refused', text: MODERATION_REFUSAL_TEXT.item };
+      }
+      const sentStatement = acceptedStatement(statement);
+      if (sentStatement === undefined) {
+        return { kind: 'refused', text: MODERATION_REFUSAL_TEXT.statement };
+      }
+      return send('/v1/moderation/items/hide', reason, {
+        item: typed,
+        statement: sentStatement,
+      });
     },
 
     recordNoticeStep: async (noticeId, step, decision, logId) => {

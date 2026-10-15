@@ -73,6 +73,8 @@ interface IdentityTesting {
 
 const INSTANCE_TESTING = new URL('../../../instance/src/auth/identity-testing.ts', import.meta.url)
   .href;
+/** The instance's room fixtures (#913), by a computed path for the same reason. */
+const ROOMS_TESTING = new URL('../../../instance/src/rooms/rooms-testing.ts', import.meta.url).href;
 const NOW = unixSeconds(1_790_000_000);
 
 let testing: IdentityTesting;
@@ -475,6 +477,51 @@ describe('a restriction’s statement of reasons — #910', () => {
         ),
     ).actOnAccount(carys.athleteId, 'suspend', 'Abuse.', undefined, STATEMENT);
     expect(refused).toEqual({ kind: 'refused', text: MODERATION_REFUSAL_TEXT.statement });
+  });
+});
+
+describe('hiding an item — #913', () => {
+  it('hides a room’s route by its reference, with the statement its maker then reads', async () => {
+    const { world, moderator, rider } = await moderatedWorld();
+    const carys = await rider('Carys');
+    await moderator.decideRegistration(carys.athleteId, 'approve', 'ok');
+    const rooms = (await import(/* @vite-ignore */ ROOMS_TESTING)) as {
+      roomBody(): Record<string, unknown>;
+    };
+    const made = await world.call('POST', '/v1/rooms', {
+      token: carys.token,
+      body: rooms.roomBody(),
+    });
+    const { roomId } = made.body as { roomId: string };
+    expect(
+      await moderator.hideItem(` route:${roomId} `, 'From a notice.', {
+        ...STATEMENT,
+        decidedOn: 'notice',
+      }),
+    ).toEqual({ kind: 'done' });
+    expect(logOf(await moderator.read()).at(-1)).toMatchObject({
+      action: 'hide_item',
+      targetAthleteId: carys.athleteId,
+    });
+    const read = await world.call('GET', '/v1/statements', { token: carys.token });
+    expect((read.body as { statements: unknown[] }).statements).toEqual([
+      expect.objectContaining({ restriction: 'hide_item', decidedOn: 'notice' }),
+    ]);
+  });
+
+  it('sends nothing for a reference that is not one, a display name, or no statement', async () => {
+    const { moderator, send } = await moderatedWorld();
+    const sent = send.mock.calls.length;
+    for (const item of ['nonsense', 'rider:abc']) {
+      expect(await moderator.hideItem(item, 'Why.', STATEMENT)).toEqual({
+        kind: 'refused',
+        text: MODERATION_REFUSAL_TEXT.item,
+      });
+    }
+    expect(
+      await moderator.hideItem(`room:${'a'.repeat(32)}`, 'Why.', { ...STATEMENT, facts: '' }),
+    ).toEqual({ kind: 'refused', text: MODERATION_REFUSAL_TEXT.statement });
+    expect(send.mock.calls.length).toBe(sent);
   });
 });
 

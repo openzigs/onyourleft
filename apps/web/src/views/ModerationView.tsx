@@ -11,6 +11,7 @@ import { StatusMessage } from '../design/StatusMessage';
 import {
   INVITE_CARD_CAUTION,
   isConflict,
+  MODERATION_REFUSAL_TEXT,
   MAXIMUM_MODERATION_REASON,
   type InviteOutcome,
   type AccountAction,
@@ -177,6 +178,7 @@ const ACTION_LABEL: Readonly<Record<string, string>> = {
   suspend: 'Suspended an account',
   unsuspend: 'Lifted a suspension',
   hide_display_name: 'Hid a display name',
+  hide_item: 'Hid an item',
   dismiss_report: 'Dismissed a report',
   activate_moderator_key: 'A moderator’s key activated its own account',
   mint_invite: 'Made an invitation',
@@ -1063,6 +1065,72 @@ function AnAccount({
   );
 }
 
+/** The item section's words (#913). */
+export const ITEM_TEXT = {
+  heading: 'An item',
+  lead: 'Hide one room, its route, or a row of a race’s result, by the reference the app shows.',
+  label: 'The item’s reference',
+  hide: 'Hide the item',
+} as const;
+
+/** #962, #913: what hiding `item` is confirmed with. */
+export function hideItemConfirmation(item: string): Confirmation {
+  return {
+    title: item.trim() === '' ? 'Hide this item?' : `Hide ${item.trim()}?`,
+    body:
+      'Other riders will no longer see it; the rider whose item it is still does, and nothing is ' +
+      `deleted. ${LOGGED_SENTENCE}`,
+    confirmLabel: 'Hide it',
+  };
+}
+
+/** Hiding one item by its reference (#913). */
+function AnItem({
+  port,
+  onDone,
+}: {
+  readonly port: ModerationPort;
+  readonly onDone: Done;
+}): JSX.Element {
+  const id = useId();
+  const [item, setItem] = useState('');
+  return (
+    <section className="oyl-panel" aria-labelledby="oyl-moderation-item">
+      <h2 id="oyl-moderation-item">{ITEM_TEXT.heading}</h2>
+      <p>{ITEM_TEXT.lead}</p>
+      <p className="oyl-moderation__reason">
+        <label htmlFor={id}>{ITEM_TEXT.label}</label>{' '}
+        <input
+          className="oyl-input"
+          id={id}
+          autoComplete="off"
+          spellCheck={false}
+          maxLength={160}
+          value={item}
+          onChange={(event) => {
+            setItem(event.target.value);
+          }}
+        />
+      </p>
+      <Decide
+        label="Reason for the log"
+        onDone={onDone}
+        choices={[
+          {
+            label: ITEM_TEXT.hide,
+            confirm: hideItemConfirmation(item),
+            statement: { decidedOn: 'notice' },
+            run: async (reason, statement) =>
+              statement === undefined
+                ? { kind: 'refused', text: MODERATION_REFUSAL_TEXT.statement }
+                : port.hideItem(item, reason, statement),
+          },
+        ]}
+      />
+    </section>
+  );
+}
+
 /** What an invitation's QR code is for: its accessible name (#1190). */
 export const INVITE_PICTURE_LABEL = 'Invitation and the instance’s card, for the new rider';
 
@@ -1310,6 +1378,7 @@ export function ModerationView({
         onDone={onDone}
       />
       <AnAccount port={port} onDone={onDone} />
+      <AnItem port={port} onDone={onDone} />
       <Invite port={port} />
       <Log
         me={state.me}

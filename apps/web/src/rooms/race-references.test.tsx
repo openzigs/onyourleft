@@ -10,9 +10,11 @@
 import { parseModerationItem } from '@onyourleft/domain';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import type { RaceResultRow, RoomsPort } from '../net/rooms-port';
+import type { EnteredRoom, RaceResultRow, RoomsPort } from '../net/rooms-port';
 import { mount, settle, type Mounted } from '../testing/mount';
 import { RACE_REFERENCES_SUMMARY, RaceResult } from './RaceResult';
+import { ROOM_REFERENCES_SUMMARY, RoomPanel } from './RoomPanel';
+import { northProfile } from './rooms-testing';
 
 const ROOM = '0123456789abcdef0123456789abcdef';
 
@@ -64,6 +66,37 @@ describe('a race result’s references (#907)', () => {
       `result:${ROOM}:2`,
       `result:${ROOM}:3`,
     ]);
+    for (const code of codes) expect(parseModerationItem(code ?? '')).toBeDefined();
+  });
+});
+
+describe('a room’s references (#913)', () => {
+  it('names the room and its route, as identifiers the notice page takes', async () => {
+    const entered: EnteredRoom = {
+      roomId: ROOM,
+      kind: 'group',
+      ridingPosition: 'hoods',
+      drafting: true,
+      code: undefined,
+      profile: northProfile(1_000),
+      routeSha256: 'a'.repeat(64),
+    };
+    mounted = await mount(
+      <RoomPanel
+        rooms={ROOMS}
+        routes={[]}
+        weightDeclared
+        position="hoods"
+        entered={entered}
+        onEnter={() => undefined}
+        onRide={() => undefined}
+      />,
+    );
+    await settle();
+    const details = mounted.container.querySelector('details.oyl-rooms__references');
+    expect(details?.querySelector('summary')?.textContent).toBe(ROOM_REFERENCES_SUMMARY);
+    const codes = [...(details?.querySelectorAll('code') ?? [])].map((each) => each.textContent);
+    expect(codes).toEqual([`room:${ROOM}`, `route:${ROOM}`]);
     for (const code of codes) expect(parseModerationItem(code ?? '')).toBeDefined();
   });
 });

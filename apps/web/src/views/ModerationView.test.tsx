@@ -45,6 +45,7 @@ import {
   REPORT_CONFLICT_TEXT,
   APPEAL_CONFLICT_TEXT,
   NOTICE_STEP_TEXT,
+  ITEM_TEXT,
   RECORD_TEXT,
   APPEALS_UNREADABLE_TEXT,
   STATEMENT_TEXT,
@@ -103,6 +104,7 @@ function dialog(): HTMLElement | null {
 
 /** The choices #962 confirms before they act. */
 const CONFIRMED = new Set([
+  'Hide the item',
   'Suspend',
   'Suspend the account',
   'Hide the display name',
@@ -930,5 +932,22 @@ describe('the record of each notice — #912', () => {
     } finally {
       Reflect.set(URL, 'createObjectURL', original);
     }
+  });
+});
+
+describe('an item — #913', () => {
+  it('hides an item by its reference, with the statement its owner is shown', async () => {
+    const scripted = scriptedModeration();
+    await open(scripted);
+    const root = section(ITEM_TEXT.heading);
+    const reference = root.querySelector('input');
+    if (reference === null) throw new Error('no reference box');
+    await typeInto(reference, `route:${'a'.repeat(32)}`);
+    await decide(root, 'From a notice.', ITEM_TEXT.hide);
+    expect(scripted.calls).toContain(`hide_item route:${'a'.repeat(32)}`);
+    expect(scripted.held.statements).toEqual([
+      expect.objectContaining({ facts: FACTS, termsGround: TERMS, decidedOn: 'notice' }),
+    ]);
+    expect(text(section('Moderation log'))).toContain('Hid an item');
   });
 });

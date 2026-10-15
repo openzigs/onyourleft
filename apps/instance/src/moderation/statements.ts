@@ -36,7 +36,11 @@ import type { LegalSettings } from '../legal.ts';
 import type { Appeal, Statement, StatementFields } from '../store/sql-store.ts';
 
 /** The actions that restrict a rider, and so need a statement (Art. 17(1)). */
-export const RESTRICTIONS: ReadonlySet<string> = new Set(['suspend', 'hide_display_name']);
+export const RESTRICTIONS: ReadonlySet<string> = new Set([
+  'suspend',
+  'hide_display_name',
+  'hide_item',
+]);
 
 /** The longest facts a statement may give, in characters. */
 export const MAXIMUM_FACTS_LENGTH = 2000;
