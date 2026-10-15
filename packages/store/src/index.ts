@@ -21,6 +21,7 @@ export type {
   AthleteDeletionCounts,
   ListActivitiesOptions,
   SortDirection,
+  WriteCondition,
 } from './activity-store';
 
 // --- Records ----------------------------------------------------------------
@@ -136,6 +137,7 @@ export { DEFAULT_VISIBILITY, parseVisibility, VISIBILITIES } from './visibility'
 // --- Errors -----------------------------------------------------------------
 
 export {
+  StoreConflictError,
   StoreDecodeError,
   StoreError,
   StoreReferentialError,
