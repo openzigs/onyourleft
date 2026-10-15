@@ -79,8 +79,8 @@ bash scripts/run-concurrently.sh 'lint' 'pnpm run lint' 'typecheck' 'pnpm run ty
 # plus a rendezvous that fails if the commands were quietly run one at a time.
 bash scripts/run-concurrently.test.sh
 
-# The required check's verdict (#1285, §4c §"Shards"). CI's work is three jobs
-# side by side and a fourth, named `Repository rules`, that runs this over
+# The required check's verdict (#1285, §4c §"Shards"). CI's work is four jobs
+# side by side since #1362 and a fifth, named `Repository rules`, that runs this over
 # their results: anything but `success` fails (SHARD001) — `failure`,
 # `cancelled` and, the one that matters, `skipped`, which GitHub would
 # otherwise count as a pass — and so does no result at all (SHARD002). It
@@ -267,8 +267,10 @@ pnpm run build
 # them in a real headless Chromium through Playwright. ⚠️ **Two builds and two
 # preview servers since #408**: an offline claim about the PRODUCT cannot be
 # measured against the harness, so `playwright.config.ts` serves `dist` on 4320
-# beside `browser/dist` on 4319. One CI job — since #1285 the `browser` shard,
-# which the job named `Repository rules` waits for (§4c). ⚠️ Two Playwright PROJECTS
+# beside `browser/dist` on 4319. ⚠️ TWO CI jobs since #1362 — the shards
+# `browser-1` and `browser-2`, which the job named `Repository rules` waits for
+# (§4c §"Two browser shards — #1362") — and each runs half of this command, as
+# `test:browser:shard-1` and `test:browser:shard-2` below; this is the whole. ⚠️ Two Playwright PROJECTS
 # since #651 — `chromium`, and `game` LAST — in one run and one browser; §4c
 # says why the game spec is last and why it is not split further. ⚠️ Since
 # #1128 they are TWO runs in this one command: `chromium` on three workers,
@@ -310,6 +312,14 @@ pnpm run test:browser
 # `nightly-split.test.ts` (in `pnpm run test`) fails a tag the list does not
 # name and a test in both runs or in neither.
 pnpm run test:browser:nightly
+
+# The browser gate as CI runs it, in two halves (#1362, §4c §"Two browser
+# shards"): each builds both pages and runs half the `chromium` project with
+# Playwright's `--shard`, on the whole gate's workers and stop; the second
+# runs the `game` project after its half. Together they are `test:browser`,
+# every case in exactly one, which `nightly-split.test.ts` holds.
+pnpm run test:browser:shard-1
+pnpm run test:browser:shard-2
 
 # The same gate with its HOSTED block turned on (#63). Renders the same harness
 # page against a real PMTiles archive over the internet and prints #63's eighth
