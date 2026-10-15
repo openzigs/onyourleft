@@ -66,16 +66,16 @@ again.
 ## Who can join: the registration modes
 
 `OYL_INSTANCE_REGISTRATION` sets how the instance takes new riders, in any case (`Closed` is
-`closed`). **If it is not set, the mode is `closed`**: an instance someone starts without reading
-this page registers nobody new. The project's own image sets `approval`, the owner's ruling for this
-project's instance (#16, Q5 and Q13).
+`closed`). **If it is not set, the mode is `approval`** (the owner's ruling on #775, 2026-10-15):
+a new rider's account waits for you, and only the keys you name register active. Before that ruling
+an unset mode was `closed`. The project's own image sets `approval` too (#16, Q5 and Q13).
 
 | Mode | A device key the instance has never seen… |
 |---|---|
-| `approval` (the project's image) | registers an account that **waits** for a moderator. While it waits, the rider can see their own account, name themselves and confirm their age, and nothing else. Other riders cannot see them. |
+| `approval` (the default, and the project's image) | registers an account that **waits** for a moderator. While it waits, the rider can see their own account, name themselves and confirm their age, and nothing else. Other riders cannot see them. |
 | `invite` | registers only with a single-use invitation a moderator minted (`POST /v1/moderation/invites`, good for seven days). The invitation is spent in the same transaction that registers the account. |
 | `open` | registers an active account at once. |
-| `closed` (the default) | is refused. |
+| `closed` | is refused. |
 
 The key named in `OYL_INSTANCE_OWNER_KEY`, and in `OYL_INSTANCE_DEPUTY_KEY` if it names one,
 registers active in every mode.
