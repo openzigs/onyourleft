@@ -41,6 +41,12 @@ const http = readConfig({
   analysisModelReasoningTokens: process.env.OYL_INSTANCE_ANALYSIS_MODEL_REASONING_TOKENS,
   pictureModel: process.env.OYL_INSTANCE_PICTURE_MODEL,
   name: process.env.OYL_INSTANCE_NAME,
+  contactEmail: process.env.OYL_INSTANCE_CONTACT_EMAIL,
+  contactLanguages: process.env.OYL_INSTANCE_CONTACT_LANGUAGES,
+  accountablePerson: process.env.OYL_INSTANCE_ACCOUNTABLE_PERSON,
+  legalRepresentative: process.env.OYL_INSTANCE_LEGAL_REPRESENTATIVE,
+  privacyPolicyUrl: process.env.OYL_INSTANCE_PRIVACY_POLICY_URL,
+  publicRooms: process.env.OYL_INSTANCE_PUBLIC_ROOMS,
 });
 const server = readServerConfig(
   {

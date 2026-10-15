@@ -5,8 +5,10 @@ import { useEffect, useState, type JSX } from 'react';
 import type { InstancePort } from '../instance/instance-port';
 
 /**
- * **The instance's own pages, linked from About** (#907): where a rider — or
- * anybody they send there — reports content they think is illegal.
+ * **The instance's own pages, linked from About** (#907, #908): where a
+ * rider — or anybody they send there — reports content they think is
+ * illegal, and the instance's legal and contact page, which names whom to
+ * write to and who is accountable, from its operator's own settings.
  *
  * The page is the instance's, not the app's: it takes a notice from anybody,
  * with or without an account or the app (DSA Art. 16(1)), so only the LINK
@@ -27,8 +29,12 @@ export function instancePageUrl(origin: string, path: string): string {
   return new URL(path, origin).href;
 }
 
-/** The link's own words. */
+/** The legal and contact page's path on every instance (`apps/instance` §`legal.ts` `LEGAL_PAGE_PATH`). */
+export const LEGAL_PAGE_PATH = '/legal';
+
+/** The links' own words. */
 export const REPORT_LINK_TEXT = 'Report content you think is illegal';
+export const LEGAL_LINK_TEXT = 'Who runs it, and how to contact them';
 
 export function InstancePages({
   instance,
@@ -61,6 +67,12 @@ export function InstancePages({
           the privacy policy link above does. */}
         <a href={instancePageUrl(origin, NOTICE_PAGE_PATH)} target="_blank" rel="noreferrer">
           {REPORT_LINK_TEXT}
+        </a>{' '}
+        (opens in a new tab).
+      </p>
+      <p>
+        <a href={instancePageUrl(origin, LEGAL_PAGE_PATH)} target="_blank" rel="noreferrer">
+          {LEGAL_LINK_TEXT}
         </a>{' '}
         (opens in a new tab).
       </p>

@@ -110,6 +110,39 @@
         }
       }
     },
+    "/legal": {
+      "get": {
+        "operationId": "getLegalPage",
+        "summary": "The legal and contact page (#908): the single point of contact and the languages it reads (DSA Arts 11, 12), the notice page, the person accountable (OSA Codes ICU A2), any legal representative (Art. 13), and the documents — all from the operator’s settings. HTML, with no script.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          }
+        }
+      }
+    },
     "/licences/third-party.txt": {
       "get": {
         "operationId": "getThirdPartyNotices",
