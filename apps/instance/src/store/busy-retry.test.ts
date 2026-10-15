@@ -125,11 +125,24 @@ describe('a statement that met the lock (#985)', () => {
  * Another thread takes the write lock, says so, and holds it until it is
  * signalled or `holdMilliseconds` pass. Plain JavaScript, so Node runs it as
  * it is.
+ *
+ * Its connection has a busy timeout, as every connection the store opens does
+ * (`node-sqlite.ts`), and until #1262 it had none. Its BEGIN IMMEDIATE is the
+ * first statement on a file whose last connection has closed, so it can meet
+ * another connection rebuilding the WAL index — the store opening on this
+ * thread at the same moment — and with no busy timeout SQLite answers that at
+ * once with SQLITE_BUSY_RECOVERY (261), "database is locked". That is what
+ * failed run 38072953538 (attempt 1, `[worker eval]:5:10`, the BEGIN
+ * IMMEDIATE below as it then stood): the test's own thread, never the store's
+ * write, which the retry did not see. A two-thread loop of that overlap (a
+ * fresh connection reading as another thread begins) failed 59 times in 500
+ * with no busy timeout and 0 in 500 with one (#1262's pull request).
  */
 const HOLDER = `
 const { workerData, parentPort } = require('node:worker_threads');
 const { DatabaseSync } = require('node:sqlite');
 const database = new DatabaseSync(workerData.path);
+database.exec('PRAGMA busy_timeout = 5000');
 database.exec('BEGIN IMMEDIATE');
 database.exec("INSERT INTO athlete (id, display_name, created_at, registration_state) VALUES ('holder', 'Holder', 1, 'active')");
 parentPort.postMessage('held');
