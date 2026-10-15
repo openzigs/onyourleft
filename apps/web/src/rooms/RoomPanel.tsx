@@ -56,7 +56,6 @@ export interface RoomRouteChoice {
   readonly profile: RouteProfile;
 }
 
-/** What a room's kind is called on this screen. */
 /**
  * What the references under an entered room are for (#913): each is an
  * identifier the instance's notice page takes, so a rider can report the room
@@ -67,6 +66,7 @@ export const ROOM_REFERENCES_TEXT =
   'To tell the instance’s moderator about this room or its route, copy its reference into the ' +
   'instance’s notice page. About links to it.';
 
+/** What a room's kind is called on this screen. */
 export const ROOM_KIND_LABEL = { group: 'Group ride', race: 'Race' } as const;
 
 /**

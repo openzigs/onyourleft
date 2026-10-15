@@ -175,6 +175,54 @@ describe('hiding a room’s route, or its listing (#913)', () => {
     expect(refused.status).toBe(404);
     expect(codeOf(refused.body)).toBe('not_found');
   });
+
+  it('withholds a hidden room’s route from its members too, and shows it to its maker', async () => {
+    const w = await start();
+    const { anna, bea, roomId } = await room(w);
+    expect((await hide(w, `room:${roomId}`)).status).toBe(200);
+    expect((await w.as(bea, 'GET', `/v1/rooms/${roomId}/route`)).status).toBe(404);
+    expect((await w.as(anna, 'GET', `/v1/rooms/${roomId}/route`)).status).toBe(200);
+  });
+});
+
+describe('a hidden result row and an erased rider (#913)', () => {
+  it('stays with its rider when a rider who did not finish erases their account', async () => {
+    const w = await start();
+    const { anna, bea, roomId, code } = await room(w);
+    const cat = await w.rider('Cat');
+    expect((await w.as(cat, 'POST', '/v1/rooms/join', { code })).status).toBe(200);
+    await w.freshRead(async (store) => {
+      await store.putResult({
+        roomId,
+        athleteId: anna.athleteId,
+        finishMs: 600_000,
+        flags: 0,
+        place: 1,
+        wattsPerKilogram: 4,
+        flaggedDurationsSeconds: [],
+      });
+      for (const each of [bea, cat]) {
+        await store.putResult({
+          roomId,
+          athleteId: each.athleteId,
+          finishMs: null,
+          flags: 0,
+          place: null,
+          wattsPerKilogram: 3,
+          flaggedDurationsSeconds: [],
+        });
+      }
+      await store.markRaceFinished(roomId, 1_790_000_100);
+    });
+    const order = [bea, cat].sort((a, b) => (a.athleteId < b.athleteId ? -1 : 1));
+    const [second, third] = order as [Rider, Rider];
+    expect((await hide(w, `result:${roomId}:3`)).status).toBe(200);
+    expect((await rowsFor(w, anna, roomId))[2]?.displayName).toBeNull();
+    await w.freshRead((store) => store.eraseAthlete(second.athleteId));
+    const rows = await rowsFor(w, anna, roomId);
+    expect(rows.map((row) => row.displayName)).toEqual(['Anna', null]);
+    expect((await rowsFor(w, third, roomId))[1]).toMatchObject({ you: true });
+  });
 });
 
 describe('what hiding an item refuses (#913)', () => {

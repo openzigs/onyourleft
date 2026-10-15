@@ -433,11 +433,11 @@ export function createRooms(options: RoomsOptions): Rooms {
         names.set(result.athleteId, await options.nameFor(caller.athleteId, result.athleteId));
       }
       // #913: rows a moderator hid, by the row number a notice names them by.
-      const hiddenRows = new Set(
-        (await store.listHiddenItemsOfRoom(roomId)).flatMap((each) => {
-          const row = /^result:[0-9a-f]{32}:([1-9][0-9]{0,3})$/.exec(each.item)?.[1];
-          return row === undefined ? [] : [Number(row)];
-        }),
+      // Kept by owner, not row number: an erased rider moves later rows up.
+      const hiddenOwners = new Set(
+        (await store.listHiddenItemsOfRoom(roomId))
+          .filter((each) => each.item.startsWith(`result:${roomId}:`))
+          .map((each) => each.ownerAthleteId),
       );
       return {
         ok: true,
@@ -445,7 +445,7 @@ export function createRooms(options: RoomsOptions): Rooms {
           results,
           { viewerAthleteId: caller.athleteId, nameFor: (athleteId) => names.get(athleteId) },
           course?.finishers ?? 0,
-          hiddenRows,
+          hiddenOwners,
         ),
       };
     },

@@ -142,7 +142,9 @@ export function publishedOrder(
  *
  * @param finishers how many riders crossed the line (`room_course.finishers`),
  * so an erased rider who finished LAST is still a place, as "a rider".
- * @param hiddenRows the rows a moderator hid (#913), numbered from 1: shown to
+ * @param hiddenOwners the riders whose row a moderator hid (#913), by athlete
+ * id and not by row number, because an erased rider moves the rows behind
+ * theirs up: shown to
  * everybody else as "a rider" with no figure — the place, and nothing that was
  * theirs — and to their own rider as before. Nothing is deleted.
  */
@@ -150,7 +152,7 @@ export function publishRace(
   results: readonly ResultForPublication[],
   viewing: Viewing,
   finishers = 0,
-  hiddenRows: ReadonlySet<number> = new Set(),
+  hiddenOwners: ReadonlySet<string> = new Set(),
 ): PublishedResult {
   const row = (result: ResultForPublication): PublishedRow => {
     const you = result.athleteId === viewing.viewerAthleteId;
@@ -176,7 +178,7 @@ export function publishRace(
   });
   const rows = publishedOrder(results, finishers).map((entry, index) => {
     if (entry === undefined) return nobody(index + 1);
-    const hidden = hiddenRows.has(index + 1) && entry.athleteId !== viewing.viewerAthleteId;
+    const hidden = hiddenOwners.has(entry.athleteId) && entry.athleteId !== viewing.viewerAthleteId;
     return hidden ? nobody(entry.place) : row(entry);
   });
   return { rows };

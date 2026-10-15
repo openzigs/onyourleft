@@ -19,8 +19,9 @@
  * ⚠️ **A result is named by its ROW, not by the rider in it.** A race's
  * published result carries a name and never an athlete id (`apps/instance`
  * §`publication.ts`), so an identifier the app can show must not either. The
- * order is the room's finish order, final once the race is over, which is
- * the only time a result is shown.
+ * order is the room's finish order when the notice is written. An account
+ * erasure moves later rows up, so the instance keeps the hide against the
+ * rider the row belonged to, not the number.
  *
  * Pure: no platform API, so the instance that reads a notice and the app that
  * shows the identifier parse it with the same function.
