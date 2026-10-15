@@ -122,10 +122,14 @@ export const APPEALS_UNREADABLE_TEXT =
   'The appeals could not be read from the instance, so they are not shown here. The queues ' +
   'above are as the instance gave them.';
 
-/** Behind the Appeals section's ⓘ (#911). */
-export const APPEALS_HELP_TEXT =
-  'A rider asks you to look again at a decision about them. Uphold leaves it; Reverse lifts the ' +
-  'suspension or shows the name again at once. Your answer is shown to the rider and logged.';
+/**
+ * The Appeals section's one short line (#911, #1013). ⚠️ No ⓘ: each appeal
+ * is read before it is decided, so its controls follow its words, and a
+ * section that tucks its explanation is held to 130 px of prose above its
+ * first control (`controls-first.browser.spec.ts`).
+ */
+export const APPEALS_SHORT_TEXT =
+  'Reverse lifts the restriction at once. Your answer is shown to the rider and logged.';
 
 /**
  * Said on an appeal against the moderator's own decision (#911): the owner's
@@ -600,9 +604,8 @@ function Appeals({
 }): JSX.Element {
   return (
     <section className="oyl-panel" aria-labelledby="oyl-moderation-appeals">
-      <SectionHeading level={2} id="oyl-moderation-appeals" help={<p>{APPEALS_HELP_TEXT}</p>}>
-        Appeals
-      </SectionHeading>
+      <h2 id="oyl-moderation-appeals">Appeals</h2>
+      <p>{APPEALS_SHORT_TEXT}</p>
       {appeals === undefined ? (
         <StatusMessage tone="warning" label="Not shown">
           {APPEALS_UNREADABLE_TEXT}
