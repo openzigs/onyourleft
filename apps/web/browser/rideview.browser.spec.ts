@@ -92,6 +92,7 @@ import {
 import type { RideViewControl, RideViewMeasurement, RideViewNotice } from './rideview-harness';
 import { attachSharedPageOnFailure, releaseSharedPage, sharedPage } from './shared-load';
 
+import { AA_TEXT, contrastRatio } from '../src/design/contrast';
 import { RIDE_TIME_TARGET_PIXELS } from '../src/design/ride-time-controls';
 
 /** Sub-pixel layout, not slack. @see ride.browser.spec.ts */
@@ -663,8 +664,16 @@ for (const viewport of EASED_VIEWPORTS) {
     // ⚠️ Landscape only since #692. Upright, the trainer group is its own
     // column now, so *End workout* last is still 300 px clear of the fold
     // there and the control cannot fail; the ORDER it guards is the same
-    // component at every size, and the four landscape tablets hold it.
-    if (viewport.width > viewport.height) {
+    // component at every size, and the landscape tablets hold it.
+    //
+    // ⚠️ In the shell only since #1329, and a reviewer who remembers four
+    // landscape tablets here is reading the old file. The trimmed trainer
+    // card gave the column 24 px in every state, so at the two BARE displays,
+    // which no rider has (this file's header), #585's order would now clear
+    // the floor on a Mac's fonts: 33.5 px became 57.5 at 1280×800 and 26.3 px
+    // became 50.3 at 1024×768. Inside the shell it is still under it (-34.5
+    // px became -10.5, and -21.7 px became 2.3), which is where it is held.
+    if (viewport === TABLET_IN_THE_SHELL || viewport === SMALL_TABLET_IN_THE_SHELL) {
       test('the control — as #585 shipped it, End workout is under the floor', async ({
         page,
       }, testInfo) => {
@@ -1047,46 +1056,71 @@ for (const viewport of IN_THE_SHELL) {
 }
 
 /**
- * #1244, #1245: **the re-plan switch, with its disclosure present.**
+ * #1244, #1245, #1329: **the re-plan switch, ABOVE the list, with its
+ * disclosure present.**
  *
  * The workout chooser of a rider who is signed in to an instance and has both
- * their own thresholds shows *Re-plan during the ride* under the list of
- * workouts, and under THAT the whole of `workout/replan-disclosure.ts`: nine
- * sentences, in a column a third of a tablet wide. It is what leaves the
- * device, so it is on the page before the switch is on and in no disclosure
- * widget. `?replans=available` is the only state that renders it.
+ * their own thresholds shows *Re-plan during the ride* ABOVE the list of
+ * workouts (the owner's ruling of 2026-10-13, #1329), with the disclosure's
+ * headline under it: what switching it on does, in one sentence. The other
+ * eight sentences of `workout/replan-disclosure.ts` are under the list. It is
+ * what leaves the device, so all nine are on the page before the switch is on
+ * and in no disclosure widget. `?replans=available` is the only state that
+ * renders it.
  *
  * ## What is held
  *
  * At every tablet, both ways up, inside the shell with the #439 insets on the
- * engine: the SWITCH and the control that starts a workout are on the screen
- * with no scrolling and clear of {@link FOLD_MARGIN_PIXELS}, with all nine
- * sentences in the document and the headline starting on the screen. The
- * 1280×800 claim is {@link TABLET_IN_THE_SHELL}'s: insets 36/32, a fold at 768.
+ * engine: the SWITCH, its HEADLINE and the control that starts a workout are
+ * on the screen with no scrolling and clear of {@link FOLD_MARGIN_PIXELS},
+ * the same floor as every other ride control, with all nine sentences in the
+ * document, in order. The 1280×800 claim is {@link TABLET_IN_THE_SHELL}'s:
+ * insets 36/32, a fold at 768.
+ *
+ * ⚠️ A reviewer who remembers a lower floor for the first *Ride* (a constant
+ * of its own, 0 and then 15) is reading the old file. The owner ruled the
+ * trainer card trimmed instead (2026-10-13, on #1332), and §"#1329 — the
+ * trainer card, trimmed" below holds what was trimmed.
  *
  * ## What is only published
  *
- * Where the disclosure ENDS. Nine sentences do not fit above a landscape
- * tablet's fold in that column, and this case does not pretend they do: a
- * rider scrolls to read to the end, and the margin (negative in landscape)
- * is in the log. What must not happen is the text pushing the switch, or the
- * *Ride* control, off the screen, and that is what the order is for.
+ * Where the rest of the disclosure ENDS: a rider scrolls to read to the end.
  *
  * ## The control
  *
- * `disclosureBeforeTheSwitch()` moves the nine sentences above the switch on
- * the live elements, and the switch must fall under the floor at
- * {@link TABLET_IN_THE_SHELL}. Without it, "the switch clears the fold" is as
- * true of a page whose disclosure is one line long.
+ * `restOfDisclosureAboveTheList()` moves the eight sentences up under the
+ * headline on the live elements, and the first *Ride* must fall under the
+ * floor at {@link TABLET_IN_THE_SHELL}. Without it, "the first *Ride* clears
+ * the fold" is as true of a page whose disclosure is one line long.
  */
 const REPLANS_AVAILABLE = '?replans=available';
+/**
+ * #1244, restored by the owner's ruling of 2026-10-14 on #1332: *"Re-plans
+ * on"* is on the chooser heading's row — inside its box, at its end, to the
+ * right of the heading's words — and the heading is still named
+ * *Ride a workout*.
+ */
+function expectBadgeOnTheHeadingRow(seen: RideViewMeasurement, viewport: Viewport): void {
+  const badge = seen.replansOnLine;
+  const row = seen.trainerCard?.chooserHeading;
+  if (badge === undefined || row === undefined) {
+    throw new Error('no "Re-plans on" beside the chooser heading');
+  }
+  const note = `"${badge.text}" y ${badge.box.top.toFixed(1)}–${badge.box.bottom.toFixed(1)}, the heading's row y ${row.top.toFixed(1)}–${row.bottom.toFixed(1)} — ${viewport.name}`;
+  expect(badge.text).toBe('Re-plans on');
+  expect(badge.box.top, note).toBeGreaterThanOrEqual(row.top - SUBPIXEL_TOLERANCE);
+  expect(badge.box.bottom, note).toBeLessThanOrEqual(row.bottom + SUBPIXEL_TOLERANCE);
+  expect(badge.box.right, note).toBeLessThanOrEqual(row.right + SUBPIXEL_TOLERANCE);
+  expect(seen.chooserHeadingName, note).toBe('Ride a workout');
+}
+
 const REPLAN_SWITCH = 'Re-plan during the ride';
 const REPLAN_HEADLINE =
   'This sends a summary of each block you ride to your instance, during the ride.';
 
 for (const viewport of EASED_VIEWPORTS) {
   test.describe(`#1244 — the re-plan switch and its disclosure — ${viewport.name}`, () => {
-    test('the switch and the control that starts a workout clear the fold, with the disclosure present', async ({
+    test('the switch, its headline and the control that starts a workout clear the fold, with the disclosure present', async ({
       page,
     }, testInfo) => {
       await open(page, viewport, REPLANS_AVAILABLE);
@@ -1102,7 +1136,7 @@ for (const viewport of EASED_VIEWPORTS) {
       expect(disclosure?.sentences).toHaveLength(9);
       expect(disclosure?.sentences[0]).toBe(REPLAN_HEADLINE);
       expect(disclosure?.sentences.at(-1)).toMatch(/^This is off\./);
-      expect(disclosure?.box.height ?? 0).toBeGreaterThan(200);
+      expect(disclosure?.rest.height ?? 0).toBeGreaterThan(200);
 
       const trainer = seen.controls.filter((each) => each.group === 'trainer');
       const theSwitch = trainer.find((each) => each.name === REPLAN_SWITCH);
@@ -1112,14 +1146,14 @@ for (const viewport of EASED_VIEWPORTS) {
 
       const switchMargin = foldMargin(theSwitch?.box.bottom ?? Infinity, viewport);
       const startsMargin = foldMargin(starts?.box.bottom ?? Infinity, viewport);
-      const headlineMargin = foldMargin(disclosure?.headline?.top ?? Infinity, viewport);
-      const endMargin = foldMargin(disclosure?.box.bottom ?? Infinity, viewport);
+      const headlineMargin = foldMargin(disclosure?.headline?.bottom ?? Infinity, viewport);
+      const endMargin = foldMargin(disclosure?.rest.bottom ?? Infinity, viewport);
       const note =
         `the switch ${switchMargin.toFixed(1)} px above the fold ` +
         `(y ${theSwitch?.box.top.toFixed(0) ?? '?'}–${theSwitch?.box.bottom.toFixed(0) ?? '?'}); ` +
+        `its headline ends ${headlineMargin.toFixed(1)} px above the fold; ` +
         `"${STARTS_A_WORKOUT}" ${startsMargin.toFixed(1)} px; ` +
-        `the disclosure's headline starts ${headlineMargin.toFixed(1)} px above the fold, ` +
-        `and the disclosure (${disclosure?.box.height.toFixed(0) ?? '?'} px tall) ends ` +
+        `the rest of the disclosure (${disclosure?.rest.height.toFixed(0) ?? '?'} px tall) ends ` +
         `${endMargin.toFixed(1)} px above it — at ${String(viewport.width)}×${String(viewport.height)}`;
       testInfo.annotations.push({ type: '#1244 the re-plan switch', description: note });
       console.log(`#1244 — the re-plan switch — ${viewport.name} — ${note}`);
@@ -1129,13 +1163,22 @@ for (const viewport of EASED_VIEWPORTS) {
         expect(onScreen(control, viewport), describeControl(control)).toBe(true);
       }
       expect(switchMargin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+      expect(headlineMargin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
       expect(startsMargin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
-      // The switch comes after the control that starts a workout, and the
-      // disclosure after the switch: what a rider presses first is highest.
-      expect(theSwitch?.box.top ?? 0).toBeGreaterThanOrEqual(starts?.box.bottom ?? Infinity);
-      expect(disclosure?.box.top ?? 0).toBeGreaterThanOrEqual(theSwitch?.box.top ?? Infinity);
-      // The headline — what switching it on does — starts on the screen.
-      expect(headlineMargin, note).toBeGreaterThan(0);
+      // #1329: the switch is ABOVE the control that starts a workout, its
+      // headline under the switch, and the rest of the disclosure under the list.
+      expect(theSwitch?.box.bottom ?? Infinity).toBeLessThanOrEqual(
+        (starts?.box.top ?? -Infinity) + SUBPIXEL_TOLERANCE,
+      );
+      expect(disclosure?.headline?.top ?? 0).toBeGreaterThanOrEqual(
+        (theSwitch?.box.top ?? Infinity) - SUBPIXEL_TOLERANCE,
+      );
+      expect(disclosure?.headline?.bottom ?? Infinity).toBeLessThanOrEqual(
+        (starts?.box.top ?? -Infinity) + SUBPIXEL_TOLERANCE,
+      );
+      expect(disclosure?.rest.top ?? 0).toBeGreaterThanOrEqual(
+        (starts?.box.bottom ?? Infinity) - SUBPIXEL_TOLERANCE,
+      );
       // And every other ride control is where it was: on the screen.
       const during = seen.controls.filter(
         (each) => each.group !== 'sensors' && each.name !== REPLAN_SWITCH,
@@ -1143,9 +1186,9 @@ for (const viewport of EASED_VIEWPORTS) {
       expect(during.filter((each) => !onScreen(each, viewport)).map(describeControl)).toEqual([]);
     });
 
-    test('switched on, it says so and stops saying it is off, and the switch has not moved', async ({
+    test('switched on, it says so and stops saying it is off, and nothing above it has moved', async ({
       page,
-    }) => {
+    }, testInfo) => {
       await open(page, viewport, REPLANS_AVAILABLE);
       const before = await measure(page);
       await page.evaluate(() => {
@@ -1154,13 +1197,29 @@ for (const viewport of EASED_VIEWPORTS) {
       const after = await measure(page);
       expect(after.replanDisclosure?.switchedOn).toBe(true);
       expect(after.replanDisclosure?.sentences).toHaveLength(8);
+      // #1244, restored on #1332: "Re-plans on" beside the heading while it is
+      // on, and not while it is off; on the heading's own row.
+      expect(before.replansOnLine).toBeUndefined();
+      expectBadgeOnTheHeadingRow(after, viewport);
       expect(after.replanDisclosure?.sentences.join(' ')).not.toContain('This is off');
       expect(after.replanDisclosure?.sentences.slice(0, 8)).toEqual(
         before.replanDisclosure?.sentences.slice(0, 8),
       );
-      const find = (seen: RideViewMeasurement) =>
-        seen.controls.find((each) => each.group === 'trainer' && each.name === REPLAN_SWITCH);
-      expect(find(after)?.box.top).toBe(find(before)?.box.top);
+      const find = (seen: RideViewMeasurement, name: string) =>
+        seen.controls.find((each) => each.group === 'trainer' && each.name === name);
+      expect(find(after, REPLAN_SWITCH)?.box.top).toBe(find(before, REPLAN_SWITCH)?.box.top);
+      // ⚠️ The first Ride is exactly where it was: the line that goes is under
+      // it, and the badge that comes is on the heading's row.
+      expect(find(after, STARTS_A_WORKOUT)?.box.top).toBe(find(before, STARTS_A_WORKOUT)?.box.top);
+      expect(after.trainerCard?.chooserHeading).toEqual(before.trainerCard?.chooserHeading);
+      expect(after.replanDisclosure?.headline).toEqual(before.replanDisclosure?.headline);
+      const startsMargin = (seen: RideViewMeasurement): number =>
+        foldMargin(find(seen, STARTS_A_WORKOUT)?.box.bottom ?? Infinity, viewport);
+      const note = `the first Ride ${startsMargin(before).toFixed(1)} px above the fold with the switch off, ${startsMargin(after).toFixed(1)} px with it on and "Re-plans on" shown`;
+      testInfo.annotations.push({ type: '#1329 the badge', description: note });
+      console.log(`#1329 — the badge — ${viewport.name} — ${note}`);
+      expect(startsMargin(after), note).toBe(startsMargin(before));
+      expect(startsMargin(after), note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
     });
   });
 }
@@ -1236,25 +1295,21 @@ for (const viewport of EASED_VIEWPORTS) {
 }
 
 /**
- * #1244's third review: **a rider with many saved workouts.** The switch
- * follows the list, with what it sends, so with twelve workouts it is far
- * below the fold — and a rider who switched it on and scrolled back up
- * pressed *Ride* with the switch out of sight. `?workouts=many` is that
- * library.
+ * #1244's third review, #1329: **a rider with many saved workouts.** The
+ * switch used to follow the list, so with twelve workouts it was about 740 px
+ * below the fold. The owner ruled it ABOVE the list (2026-10-13): with twelve
+ * workouts the switch, its headline and the first *Ride* are all on the
+ * screen. The "Re-plans on" badge beside the heading was removed with the
+ * move and the owner ruled it BACK (2026-10-14, on #1332): it is shown on
+ * the heading's row while the switch is on, and the first *Ride*'s margin is
+ * the same number with it as without it. `?workouts=many` is that library.
  *
- * What was chosen, and is held here: the switch STAYS under the list, beside
- * its disclosure (nine sentences above the list would push every *Ride* off
- * the screen, and the switch without them would be a switch with nothing
- * saying what it sends). While it is ON, two words beside the chooser's
- * heading say so — "Re-plans on" — where *Ride* is pressed, on the heading's
- * own line, so the first *Ride* and the switch do not move when it is
- * pressed. Off — the default, which sends nothing — the chooser is as it is
- * for a rider with no instance.
- *
- * Published, not held: how far below the fold the switch is.
+ * ⚠️ The badge is on the heading's row, which scrolls with the page: a rider
+ * who has scrolled past the top of a long list sees neither it nor the
+ * switch. Nothing here holds otherwise.
  */
 for (const viewport of EASED_VIEWPORTS) {
-  test(`#1244 — many saved workouts — the switch is under the list, and its state is said above it — ${viewport.name}`, async ({
+  test(`#1329 — many saved workouts — the switch, its headline and the first Ride are on the screen — ${viewport.name}`, async ({
     page,
   }, testInfo) => {
     await open(page, viewport, `${REPLANS_AVAILABLE}&workouts=many`);
@@ -1264,81 +1319,350 @@ for (const viewport of EASED_VIEWPORTS) {
     const theSwitch = (seen: RideViewMeasurement) =>
       seen.controls.find((each) => each.group === 'trainer' && each.name === REPLAN_SWITCH);
     expect(rides(off)).toHaveLength(12);
-    expect(theSwitch(off), 'no re-plan switch on the page').toBeDefined();
-    // Off: nothing above the list, and the first Ride where it always is.
-    expect(off.replansOnLine).toBeUndefined();
-    const firstOff = rides(off)[0];
-    expect(firstOff?.name).toBe(STARTS_A_WORKOUT);
+    const first = rides(off)[0];
+    const the = theSwitch(off);
+    const headline = off.replanDisclosure?.headline;
+    if (first === undefined || the === undefined || headline === undefined) {
+      throw new Error('no re-plan switch, headline or Ride control on the page');
+    }
+    expect(first.name).toBe(STARTS_A_WORKOUT);
+    const switchMargin = foldMargin(the.box.bottom, viewport);
+    const headlineMargin = foldMargin(headline.bottom, viewport);
+    const firstMargin = foldMargin(first.box.bottom, viewport);
+    const note =
+      `the switch ${switchMargin.toFixed(1)} px above the fold, its headline ` +
+      `${headlineMargin.toFixed(1)} px, the first Ride ${firstMargin.toFixed(1)} px — at ` +
+      `${String(viewport.width)}×${String(viewport.height)}`;
+    testInfo.annotations.push({ type: '#1329 many workouts', description: note });
+    console.log(`#1329 — many saved workouts — ${viewport.name} — ${note}`);
 
+    expect(onScreen(the, viewport), describeControl(the)).toBe(true);
+    expect(onScreen(first, viewport), describeControl(first)).toBe(true);
+    expect(switchMargin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+    expect(headlineMargin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+    expect(firstMargin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+    // The switch is above every workout, and the headline between.
+    expect(the.box.bottom).toBeLessThanOrEqual(first.box.top + SUBPIXEL_TOLERANCE);
+    expect(headline.bottom).toBeLessThanOrEqual(first.box.top + SUBPIXEL_TOLERANCE);
     await page.evaluate(() => {
       window.__oylRideView?.pressReplanSwitch();
     });
     const on = await measure(page);
     expect(on.replanDisclosure?.switchedOn).toBe(true);
-    const line = on.replansOnLine;
-    const first = rides(on)[0];
-    if (line === undefined || first === undefined || firstOff === undefined) {
-      throw new Error('no line saying the switch is on, or no Ride control');
-    }
-    const switchMargin = foldMargin(theSwitch(on)?.box.bottom ?? Infinity, viewport);
-    const firstMargin = foldMargin(first.box.bottom, viewport);
-    const note =
-      `the switch ${switchMargin.toFixed(1)} px above the fold (negative: below it); ` +
-      `"${line.text}" at y ${line.box.top.toFixed(0)}–${line.box.bottom.toFixed(0)}; ` +
-      `the first Ride ${firstMargin.toFixed(1)} px above the fold with it, ` +
-      `${foldMargin(firstOff.box.bottom, viewport).toFixed(1)} px without — at ` +
-      `${String(viewport.width)}×${String(viewport.height)}`;
-    testInfo.annotations.push({ type: '#1244 many workouts', description: note });
-    console.log(`#1244 — many saved workouts — ${viewport.name} — ${note}`);
-
-    expect(line.text).toBe('Re-plans on');
-    // ⚠️ It moved nothing: the first Ride is exactly where it was with the switch off.
-    expect(first.box.top).toBe(firstOff.box.top);
-    // On the screen, above the first control that starts a workout.
-    expect(line.box.top).toBeGreaterThanOrEqual(insetsOf(viewport).top - SUBPIXEL_TOLERANCE);
-    expect(line.box.bottom).toBeLessThanOrEqual(first.box.top + SUBPIXEL_TOLERANCE);
-    expect(foldMargin(line.box.bottom, viewport), note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
-    // And the first Ride is still clear of the floor with the line above it.
-    expect(onScreen(first, viewport), describeControl(first)).toBe(true);
-    expect(firstMargin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
-    // The switch comes after the last workout, with its disclosure.
-    const last = rides(on).at(-1);
-    expect(theSwitch(on)?.box.top ?? 0).toBeGreaterThanOrEqual(last?.box.bottom ?? Infinity);
     expect(on.replanDisclosure?.sentences).toHaveLength(8);
+    expect(rides(on)[0]?.box.top).toBe(first.box.top);
+    expect(theSwitch(on)?.box.top).toBe(the.box.top);
+    // #1244's badge, restored on #1332: shown once, on the heading's row, and
+    // the first Ride's margin is the same number with it as without it.
+    expect(off.replansOnLine).toBeUndefined();
+    expect(await page.getByText('Re-plans on', { exact: true }).count()).toBe(1);
+    expectBadgeOnTheHeadingRow(on, viewport);
+    const onMargin = foldMargin(rides(on)[0]?.box.bottom ?? Infinity, viewport);
+    expect(onMargin, note).toBe(firstMargin);
+    expect(onMargin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
   });
 }
 
-test(`#1244 — the control — the disclosure before the switch puts the switch under the floor — ${TABLET_IN_THE_SHELL.name}`, async ({
+test(`#1329 — the control — the rest of the disclosure above the list puts the first Ride under the floor — ${TABLET_IN_THE_SHELL.name}`, async ({
   page,
 }, testInfo) => {
   const viewport = TABLET_IN_THE_SHELL;
   await open(page, viewport, REPLANS_AVAILABLE);
   const marginOf = (seen: RideViewMeasurement): number =>
     foldMargin(
-      seen.controls.find((each) => each.group === 'trainer' && each.name === REPLAN_SWITCH)?.box
+      seen.controls.find((each) => each.group === 'trainer' && each.name === STARTS_A_WORKOUT)?.box
         .bottom ?? Infinity,
       viewport,
     );
   const fixed = marginOf(await measure(page));
   await page.evaluate(() => {
-    window.__oylRideView?.disclosureBeforeTheSwitch();
+    window.__oylRideView?.restOfDisclosureAboveTheList();
   });
   const moved = await measure(page);
   const reverted = marginOf(moved);
-  const note = `the switch ${fixed.toFixed(1)} px above the fold → ${reverted.toFixed(1)} px with the disclosure before it`;
-  testInfo.annotations.push({ type: '#1244 control', description: note });
-  console.log(`#1244 — the control — ${viewport.name} — ${note}`);
-  // The apparatus: the control did move the text above the switch.
-  const theSwitch = moved.controls.find(
-    (each) => each.group === 'trainer' && each.name === REPLAN_SWITCH,
+  const note = `the first Ride ${fixed.toFixed(1)} px above the fold → ${reverted.toFixed(1)} px with the rest of the disclosure above the list`;
+  testInfo.annotations.push({ type: '#1329 control', description: note });
+  console.log(`#1329 — the control — ${viewport.name} — ${note}`);
+  // The apparatus: the control did move the text above the list.
+  const starts = moved.controls.find(
+    (each) => each.group === 'trainer' && each.name === STARTS_A_WORKOUT,
   );
-  expect(moved.replanDisclosure?.box.bottom ?? Infinity).toBeLessThanOrEqual(
-    (theSwitch?.box.top ?? -Infinity) + SUBPIXEL_TOLERANCE,
+  expect(moved.replanDisclosure?.rest.bottom ?? Infinity).toBeLessThanOrEqual(
+    (starts?.box.top ?? -Infinity) + SUBPIXEL_TOLERANCE,
   );
   // The fold is at 768 here: 800 less the 32 px bar.
   expect(viewport.height - insetsOf(viewport).bottom).toBe(768);
   expect(fixed, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
   expect(reverted, note).toBeLessThan(FOLD_MARGIN_PIXELS);
+});
+
+/** `rgb(16, 22, 28)` → `#10161c`, for {@link contrastRatio}. */
+function hexOf(rgb: string): string {
+  const channels = /^rgba?\((\d+), (\d+), (\d+)/.exec(rgb);
+  if (channels === null) throw new Error(`not an opaque rgb() colour: ${rgb}`);
+  return `#${channels
+    .slice(1, 4)
+    .map((channel) => Number(channel).toString(16).padStart(2, '0'))
+    .join('')}`;
+}
+
+/** `theme.css` §`--oyl-space-sm`: the gap the trimmed card keeps between its lines. */
+const TRIMMED_GAP_PIXELS = 8;
+/** `design/tokens.ts` §`FONT_SIZE_TOKENS.sm`, in rem. */
+const SMALL_SIZE_REM = 0.8;
+/** `theme.css`: the line height of the range sentence and of the headline. */
+const CLOSE_SET = 1.3;
+
+/**
+ * #1329, the owner's ruling of 2026-10-13 on #1332: **the trainer card,
+ * trimmed**, so that the first *Ride* clears the fold by the full
+ * {@link FOLD_MARGIN_PIXELS} with the switch and its headline above the list
+ * and the headline at the body size.
+ *
+ * ## What is held, and why not by the fold alone
+ *
+ * The floor is one number for five rules, and on a Mac's fonts the first
+ * *Ride* has 34.8 px to spare over it (13.2 px on the CI runner's): put any
+ * ONE trim back and it still clears on a Mac. The first review of #1332 found
+ * exactly that, a listed mutation that left every case green. So each trim is
+ * held by what it IS, which no font changes:
+ *
+ * - the control sentence 8 px under *Trainer*, the ERG line 8 px under it,
+ *   the form 8 px under the ERG line;
+ * - the range sentence at `--oyl-font-size-sm`, close-set, and its ink at
+ *   WCAG AA for text against what is painted behind it, light and dark;
+ * - the chooser's heading straight on top of the switch's row, the headline
+ *   straight under it, and the list 8 px under the headline;
+ * - the headline at the size of the sentences under the list.
+ *
+ * ## The controls
+ *
+ * `trainerCardUntrimmed(which)` puts ONE trim back on the live elements, and
+ * the first *Ride* must come down by what that trim is worth; with no
+ * argument it puts all of them back, and the first *Ride* must fall under the
+ * floor at {@link TABLET_IN_THE_SHELL}. A trim that a later change removes
+ * from `theme.css` fails twice: its own number, and a control that then moves
+ * nothing.
+ */
+test.describe(`#1329 — the trainer card, trimmed — ${TABLET_IN_THE_SHELL.name}`, () => {
+  const viewport = TABLET_IN_THE_SHELL;
+  const firstRide = (seen: RideViewMeasurement): number =>
+    foldMargin(
+      seen.controls.find((each) => each.group === 'trainer' && each.name === STARTS_A_WORKOUT)?.box
+        .bottom ?? Infinity,
+      viewport,
+    );
+
+  test('its three gaps are 8 px, the range sentence is small and close-set, and the headline is the body size', async ({
+    page,
+  }, testInfo) => {
+    await open(page, viewport, REPLANS_AVAILABLE);
+    const seen = await measure(page);
+    const card = seen.trainerCard;
+    const hint = card?.rangeHint;
+    if (card?.ergLine === undefined || card.form === undefined || hint === undefined) {
+      throw new Error('no trainer card with an ERG form and its range sentence on the page');
+    }
+    const headline = seen.replanDisclosure?.headline;
+    if (
+      card.chooserHeading === undefined ||
+      card.switchRow === undefined ||
+      card.chooserList === undefined ||
+      headline === undefined
+    ) {
+      throw new Error('no chooser heading, re-plan switch, headline and list on the page');
+    }
+    const gaps = {
+      underHeading: card.controlSentence.top - card.heading.bottom,
+      underControlSentence: card.ergLine.top - card.controlSentence.bottom,
+      underErgLine: card.form.top - card.ergLine.bottom,
+      headingToSwitch: card.switchRow.top - card.chooserHeading.bottom,
+      switchToHeadline: headline.top - card.switchRow.bottom,
+      headlineToList: card.chooserList.top - headline.bottom,
+    };
+    const lineHeight = hint.box.height / hint.lines;
+    const note =
+      `Trainer → control sentence ${gaps.underHeading.toFixed(1)} px → ERG line ` +
+      `${gaps.underControlSentence.toFixed(1)} px → form ${gaps.underErgLine.toFixed(1)} px; the range ` +
+      `sentence ${hint.fontPixels.toFixed(1)} px on ${String(hint.lines)} lines of ` +
+      `${lineHeight.toFixed(1)} px (${hint.box.height.toFixed(1)} px tall); Ride a workout → the switch's row ` +
+      `${gaps.headingToSwitch.toFixed(1)} px → the headline ${gaps.switchToHeadline.toFixed(1)} px → ` +
+      `the list ${gaps.headlineToList.toFixed(1)} px; the headline ` +
+      `${(seen.replanDisclosure?.headlineFontPixels ?? 0).toFixed(1)} px, ` +
+      `${headline.height.toFixed(1)} px tall; the first Ride ` +
+      `${firstRide(seen).toFixed(1)} px above the fold`;
+    testInfo.annotations.push({ type: '#1329 the trainer card', description: note });
+    console.log(`#1329 — the trainer card — ${viewport.name} — ${note}`);
+
+    expect(hint.text).toMatch(/^This trainer accepts /);
+    expect(Math.abs(gaps.underHeading - TRIMMED_GAP_PIXELS), note).toBeLessThanOrEqual(
+      SUBPIXEL_TOLERANCE,
+    );
+    expect(Math.abs(gaps.underControlSentence - TRIMMED_GAP_PIXELS), note).toBeLessThanOrEqual(
+      SUBPIXEL_TOLERANCE,
+    );
+    expect(Math.abs(gaps.underErgLine - TRIMMED_GAP_PIXELS), note).toBeLessThanOrEqual(
+      SUBPIXEL_TOLERANCE,
+    );
+    expect(Math.abs(gaps.headingToSwitch), note).toBeLessThanOrEqual(SUBPIXEL_TOLERANCE);
+    // The chooser's own spacing (#1329's first pass): the headline straight
+    // under the switch's row, and the list 8 px under the headline.
+    expect(Math.abs(gaps.switchToHeadline), note).toBeLessThanOrEqual(SUBPIXEL_TOLERANCE);
+    expect(Math.abs(gaps.headlineToList - TRIMMED_GAP_PIXELS), note).toBeLessThanOrEqual(
+      SUBPIXEL_TOLERANCE,
+    );
+    // The small size is the token's, a step under the body and no smaller.
+    expect(hint.fontPixels, note).toBeCloseTo(SMALL_SIZE_REM * hint.rootFontPixels, 1);
+    expect(lineHeight, note).toBeCloseTo(CLOSE_SET * hint.fontPixels, 0);
+    // The headline is what the eight sentences under the list are: the body.
+    expect(seen.replanDisclosure?.headlineFontPixels, note).toBe(hint.rootFontPixels);
+    expect(seen.replanDisclosure?.headlineFontPixels, note).toBe(
+      seen.replanDisclosure?.restFontPixels,
+    );
+    // Nothing in the card lies over anything else in it.
+    expect(card.form.bottom).toBeLessThanOrEqual(card.chooserHeading.top + SUBPIXEL_TOLERANCE);
+    expect(hint.box.bottom).toBeLessThanOrEqual(card.form.bottom + SUBPIXEL_TOLERANCE);
+  });
+
+  for (const scheme of ['light', 'dark'] as const) {
+    test(`the small range sentence meets AA for text against its background — ${scheme}`, async ({
+      page,
+    }, testInfo) => {
+      await page.emulateMedia({ colorScheme: scheme });
+      await open(page, viewport, REPLANS_AVAILABLE);
+      const hint = (await measure(page)).trainerCard?.rangeHint;
+      if (hint === undefined) throw new Error('no range sentence on the page');
+      const ratio = contrastRatio(hexOf(hint.colour), hexOf(hint.background));
+      const note = `${hint.colour} on ${hint.background}, ${ratio.toFixed(2)}:1 at ${hint.fontPixels.toFixed(1)} px — ${scheme}`;
+      testInfo.annotations.push({ type: '#1329 the range sentence', description: note });
+      console.log(`#1329 — the range sentence — ${note}`);
+      // The apparatus: the two schemes are two palettes, and what is painted
+      // behind the sentence is the trainer group's own background in each.
+      expect(hint.background).toBe(scheme === 'dark' ? 'rgb(18, 24, 22)' : 'rgb(255, 255, 255)');
+      expect(ratio, note).toBeGreaterThanOrEqual(AA_TEXT);
+    });
+  }
+
+  /** What each trim is worth to the first *Ride*, at least, on any fonts. */
+  const TRIMS = [
+    // 12 px over the control sentence, 4 px under it, 8 px under the ERG line.
+    { which: 'gaps', atLeast: 24 - SUBPIXEL_TOLERANCE },
+    // Three lines of 24.8 px to two of 16.6 px on both measured font sets;
+    // three of 16.6 px, were it ever three, is still 24.5 px.
+    { which: 'hint', atLeast: 24 },
+    { which: 'chooser-heading', atLeast: 8 - SUBPIXEL_TOLERANCE },
+    // 4 px a line: two lines on a Mac's fonts, three on the CI runner's.
+    { which: 'headline', atLeast: 8 - SUBPIXEL_TOLERANCE },
+  ] as const;
+
+  for (const { which, atLeast } of TRIMS) {
+    test(`the control — the ${which} trim put back alone lowers the first Ride`, async ({
+      page,
+    }, testInfo) => {
+      await open(page, viewport, REPLANS_AVAILABLE);
+      const trimmed = firstRide(await measure(page));
+      await page.evaluate((trim) => {
+        window.__oylRideView?.trainerCardUntrimmed(trim);
+      }, which);
+      const untrimmed = firstRide(await measure(page));
+      const note = `the first Ride ${trimmed.toFixed(1)} px above the fold → ${untrimmed.toFixed(1)} px with the ${which} trim put back`;
+      testInfo.annotations.push({ type: '#1329 trim control', description: note });
+      console.log(`#1329 — the control — ${which} — ${note}`);
+      expect(trimmed - untrimmed, note).toBeGreaterThanOrEqual(atLeast);
+    });
+  }
+
+  test('the control — the card untrimmed puts the first Ride under the floor', async ({
+    page,
+  }, testInfo) => {
+    await open(page, viewport, REPLANS_AVAILABLE);
+    const trimmed = firstRide(await measure(page));
+    await page.evaluate(() => {
+      window.__oylRideView?.trainerCardUntrimmed();
+    });
+    const untrimmed = firstRide(await measure(page));
+    const note = `the first Ride ${trimmed.toFixed(1)} px above the fold → ${untrimmed.toFixed(1)} px with the trainer card untrimmed`;
+    testInfo.annotations.push({ type: '#1329 trim control', description: note });
+    console.log(`#1329 — the control — untrimmed — ${note}`);
+    expect(viewport.height - insetsOf(viewport).bottom).toBe(768);
+    expect(trimmed, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+    expect(untrimmed, note).toBeLessThan(FOLD_MARGIN_PIXELS);
+  });
+});
+
+/**
+ * #1329 (the review of #1332): **the saved workouts could not be read, with
+ * the list still on the page.** `WorkoutPanel` then says so in a warning
+ * between the re-plan switch and the list, where on `main` it was between the
+ * heading and the list. `?workouts=fault` is that state.
+ *
+ * Held at {@link TABLET_IN_THE_SHELL}: the switch, its headline and the
+ * warning are on the screen with no scrolling, in that order, none over
+ * another, and the list starts under the warning.
+ *
+ * ⚠️ **The first *Ride* is NOT held to the floor here, and it does not clear
+ * it.** The warning is 106 px tall on a Mac's fonts with a paragraph's margin
+ * under it, and it pushes the first *Ride* below the fold. What is held is
+ * that the page scrolls far enough to reach it, and the margin is published.
+ * A rider in this state has just been told their workouts could not be read;
+ * the control that starts one is a scroll away, and the trainer's own
+ * controls above it are where they were.
+ */
+test(`#1329 — saved workouts could not be read — the switch, its headline and the warning are on the screen — ${TABLET_IN_THE_SHELL.name}`, async ({
+  page,
+}, testInfo) => {
+  const viewport = TABLET_IN_THE_SHELL;
+  await open(page, viewport, `${REPLANS_AVAILABLE}&workouts=fault`);
+  const seen = await measure(page);
+  expect(seen.scrollY).toBe(0);
+  const trainer = seen.controls.filter((each) => each.group === 'trainer');
+  const theSwitch = trainer.find((each) => each.name === REPLAN_SWITCH);
+  const starts = trainer.find((each) => each.name === STARTS_A_WORKOUT);
+  const headline = seen.replanDisclosure?.headline;
+  const warning = seen.loadFaultLine;
+  if (
+    theSwitch === undefined ||
+    starts === undefined ||
+    headline === undefined ||
+    warning === undefined
+  ) {
+    throw new Error('no re-plan switch, headline, warning or Ride control on the page');
+  }
+  expect(warning.text).toContain(
+    'Your saved workouts could not be read on this device. You can still ride without one.',
+  );
+  const switchMargin = foldMargin(theSwitch.box.bottom, viewport);
+  const headlineMargin = foldMargin(headline.bottom, viewport);
+  const warningMargin = foldMargin(warning.box.bottom, viewport);
+  const startsMargin = foldMargin(starts.box.bottom, viewport);
+  const note =
+    `the switch ${switchMargin.toFixed(1)} px above the fold, its headline ` +
+    `${headlineMargin.toFixed(1)} px, the warning (${warning.box.height.toFixed(0)} px tall) ` +
+    `${warningMargin.toFixed(1)} px; the first Ride ${startsMargin.toFixed(1)} px ` +
+    `(${startsMargin >= 0 ? 'on the screen' : 'BELOW the fold, a scroll away'}); the page scrolls ` +
+    `${seen.pageOverflow.toFixed(0)} px`;
+  testInfo.annotations.push({ type: '#1329 the load fault', description: note });
+  console.log(`#1329 — saved workouts could not be read — ${viewport.name} — ${note}`);
+
+  expect(onScreen(theSwitch, viewport), describeControl(theSwitch)).toBe(true);
+  expect(switchMargin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+  expect(headlineMargin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+  // The warning is whole on the screen and nothing is drawn over it.
+  expect(warning.onTop, note).toBe(true);
+  expect(warning.box.top).toBeGreaterThanOrEqual(insetsOf(viewport).top);
+  expect(warningMargin, note).toBeGreaterThanOrEqual(0);
+  // In order, and none over another: switch, headline, warning, list.
+  expect(theSwitch.box.bottom).toBeLessThanOrEqual(headline.top + SUBPIXEL_TOLERANCE);
+  expect(headline.bottom).toBeLessThanOrEqual(warning.box.top + SUBPIXEL_TOLERANCE);
+  expect(warning.box.bottom).toBeLessThanOrEqual(starts.box.top + SUBPIXEL_TOLERANCE);
+  // The first Ride is reachable: the page scrolls at least as far as it lies
+  // under the fold. It is not held to the floor in this state (see above).
+  expect(seen.pageOverflow, note).toBeGreaterThanOrEqual(-startsMargin);
+  // Every other ride control is on the screen: the warning moved none of them.
+  const during = seen.controls.filter(
+    (each) => each.group !== 'sensors' && !each.name.startsWith('Ride '),
+  );
+  expect(during.filter((each) => !onScreen(each, viewport)).map(describeControl)).toEqual([]);
 });
 
 /**

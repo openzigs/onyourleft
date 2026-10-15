@@ -379,16 +379,22 @@ describe('the switch and its disclosure, where a workout is chosen — #1244, #1
   it('shows every sentence as text a screen reader meets in order, none in a live region', async () => {
     mounted = await mount(chooser());
     await settle();
-    const block = document.querySelector('[data-oyl-replan-disclosure]');
+    // #1329: the headline is above the list and the other eight sentences
+    // under it, so the disclosure is two blocks, read in document order.
+    const blocks = [...document.querySelectorAll('[data-oyl-replan-disclosure]')];
+    expect(blocks).toHaveLength(2);
+    const text = blocks.map((each) => each.textContent ?? '').join(' ');
     const sentences = replanDisclosureSentences(replanDisclosure());
     let from = 0;
     for (const sentence of sentences) {
-      const at = (block?.textContent ?? '').indexOf(sentence, from);
+      const at = text.indexOf(sentence, from);
       expect(at, sentence).toBeGreaterThanOrEqual(from);
       from = at + sentence.length;
     }
-    expect(block?.closest('[role="status"], [aria-live]')).toBeNull();
-    expect(block?.querySelector('[role="status"], [aria-live]')).toBeNull();
+    for (const block of blocks) {
+      expect(block.closest('[role="status"], [aria-live]')).toBeNull();
+      expect(block.querySelector('[role="status"], [aria-live]')).toBeNull();
+    }
   });
 });
 

@@ -71,8 +71,31 @@ describe('a room ticket (#772)', () => {
     const anna = await rider(w, 'Anna');
     const ticket = await ticketFor(w, anna.token, 64.5);
     const admit = w.identity.admitterFor(ROOM);
-    expect(admit(ticket)).toEqual({ athleteId: anna.athleteId, declaredMassKilograms: 64.5 });
+    expect(admit(ticket)).toEqual({
+      athleteId: anna.athleteId,
+      declaredMassKilograms: 64.5,
+      displayName: 'Anna',
+    });
     expect(admit(ticket), 'reused').toBeUndefined();
+  });
+
+  it('names its athlete by the public projection, so a hidden name is `Rider` — #1347', async () => {
+    const w = await withRoom();
+    const anna = await rider(w, 'Anna');
+    const bea = await rider(w, 'Bea');
+    await w.freshRead((store) =>
+      store.moderate({
+        action: 'hide_display_name',
+        actorAthleteId: anna.athleteId,
+        targetAthleteId: bea.athleteId,
+        reportId: null,
+        reason: 'test',
+        at: 1,
+      }),
+    );
+    const admit = w.identity.admitterFor(ROOM);
+    expect(admit(await ticketFor(w, bea.token, 70))?.displayName).toBe('Rider');
+    expect(admit(await ticketFor(w, anna.token, 70))?.displayName).toBe('Anna');
   });
 
   it('refuses an expired ticket', async () => {
