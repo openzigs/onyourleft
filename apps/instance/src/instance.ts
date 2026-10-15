@@ -471,6 +471,14 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       // answers `unavailable`, as it did before this. The files go in the
       // blob directory's own `objects/` tree, which `operator backup` copies.
       const syncIndexed = history;
+      const people = identity;
+      // #331: whom a ghost is shown as — the choke point first, then the
+      // public projection, exactly as a room names its riders below.
+      const nameFor = async (viewerId: string, subjectId: string): Promise<string | undefined> => {
+        if (!(await people.moderation.canSee(viewerId, subjectId))) return undefined;
+        const profile = await people.profile(subjectId);
+        return profile.ok ? profile.value.displayName : undefined;
+      };
       sync = keys.configured
         ? createSync({
             store,
@@ -479,20 +487,16 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
             itemStored: () => {
               syncIndexed.schedule();
             },
+            ghostRider: nameFor,
           })
         : undefined;
       // #784, #785: riders' rooms. Their routes are kept apart from the
       // synced files — under the blob directory's `rooms/` — and live only as
       // long as their room (`rooms/rooms.ts`), so a backup does not carry them.
-      const people = identity;
       rooms = createRooms({
         store,
         routes: createDiskBlobStore(join(server.blobsPath, 'rooms')),
-        nameFor: async (viewerId, subjectId) => {
-          if (!(await people.moderation.canSee(viewerId, subjectId))) return undefined;
-          const profile = await people.profile(subjectId);
-          return profile.ok ? profile.value.displayName : undefined;
-        },
+        nameFor,
         now,
       });
       // The identity's rate limits hold internet addresses; the privacy

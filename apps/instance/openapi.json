@@ -4236,6 +4236,100 @@
         }
       }
     },
+    "/v1/ghosts/{route}": {
+      "get": {
+        "operationId": "getRiderGhost",
+        "summary": "ONE other rider’s ghost on a route you hold, by the SHA-256 of its canonical GPX, or null (#331, ADR 0039): the most recently arrived ride whose rider agreed to its being raced and whom you may see. Their display name and their speed on a uniform clock — never a position, a date, a list or an order.",
+        "parameters": [
+          {
+            "name": "route",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          }
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ghost": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "rider": {
+                          "type": "string"
+                        },
+                        "sampleInterval": {
+                          "type": "integer"
+                        },
+                        "speed": {
+                          "type": "array",
+                          "items": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "rider",
+                        "sampleInterval",
+                        "speed"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "ghost"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
     "/v1/history/search": {
       "post": {
         "operationId": "searchHistory",
@@ -6634,6 +6728,12 @@
                               "boolean",
                               "null"
                             ]
+                          },
+                          "raceRouteSha256": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
                           }
                         },
                         "required": [
@@ -6643,7 +6743,8 @@
                           "receivedAt",
                           "deleted",
                           "activityId",
-                          "mayBeRaced"
+                          "mayBeRaced",
+                          "raceRouteSha256"
                         ],
                         "additionalProperties": false
                       }
@@ -6934,6 +7035,102 @@
                   },
                   "required": [
                     "mayBeRaced"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/sync/records/{content}/race-route": {
+      "post": {
+        "operationId": "setRaceRoute",
+        "summary": "Offer one of your consented rides to be raced on a route, by the SHA-256 of the route’s canonical GPX, or withdraw the offer with null (#331). Your device sends it only when none of your privacy zones touches the route; a revoked consent withdraws it here.",
+        "parameters": [
+          {
+            "name": "content",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          }
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "routeSha256": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "routeSha256"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "routeSha256": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "routeSha256"
                   ],
                   "additionalProperties": false
                 }

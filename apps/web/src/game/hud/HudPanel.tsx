@@ -185,6 +185,12 @@ export interface HudPanelProps extends Omit<HudInput, 'units'> {
   readonly sideCamera?:
     { readonly line: string | undefined; readonly onStop: (() => void) | undefined } | undefined;
   /**
+   * Another rider's ghost — #331: whose it is, and *Stop ghost*, which takes
+   * it off the road and the HUD for the rest of the ride. `undefined` for the
+   * rider's own best and for no ghost. Their name also labels the gap field.
+   */
+  readonly ghostStop?: { readonly rider: string; readonly onStop: () => void } | undefined;
+  /**
    * The room's one control — #783: follow the next rider near you, by the
    * room's own rider order (never by who is ahead), so the gap field is to
    * ONE chosen rider and nothing on the HUD ranks the room. `undefined` on a
@@ -417,6 +423,16 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
               </button>
             )}
           </div>
+        )}
+        {props.ghostStop === undefined ? null : (
+          <button
+            type="button"
+            className="oyl-button oyl-button--secondary oyl-hud__follow"
+            onClick={props.ghostStop.onStop}
+          >
+            Stop ghost
+            <span className="oyl-visually-hidden"> of {props.ghostStop.rider}</span>
+          </button>
         )}
         {props.onFollowNext === undefined ? null : (
           <button

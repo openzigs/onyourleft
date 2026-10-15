@@ -172,6 +172,28 @@ import {
 // #940: the chooser's own module now; re-exported so every caller keeps one import.
 export type { RidableRoute } from './StageChooser';
 
+/** What asking for another rider's ghost came to — #331. */
+export type RiderGhostLoad =
+  | { readonly kind: 'ghost'; readonly rider: string; readonly track: GhostTrack }
+  /** Nobody who agreed to be raced has a usable attempt on this route. */
+  | { readonly kind: 'none' }
+  /** The instance could not be asked, or did not answer with a ghost. */
+  | { readonly kind: 'unavailable' };
+
+/**
+ * What the rider is told on the picker when another rider's ghost was asked
+ * for and none came — #331. The ride does not start, so a rider who chose a
+ * race is never quietly given a ride alone.
+ */
+export const RIDER_GHOST_REFUSAL_TEXT: Readonly<Record<'none' | 'unavailable', string>> = {
+  none:
+    'No rider who agreed to be raced has ridden this route yet. Turn off “Race another ' +
+    'rider’s ghost” to ride it without one.',
+  unavailable:
+    'Your instance did not answer with a ghost, so the ride did not start. Try again, or turn ' +
+    'off “Race another rider’s ghost”.',
+};
+
 /** What the game screen needs from the rest of the app. */
 export interface GamePort {
   /** The rider's saved routes (#89, #73). */
@@ -186,6 +208,18 @@ export interface GamePort {
    * not in the replay code.
    */
   loadGhost(routeId: string): Promise<GhostTrack | undefined>;
+  /**
+   * Whether this device can ask its instance for ANOTHER rider's ghost — #331.
+   * Read from this device alone, sending nothing; absent, the choice is never
+   * drawn. A rider with no instance loses this and nothing else.
+   */
+  riderGhostOffered?(): boolean;
+  /**
+   * ONE other rider's consented attempt on a route, as a ghost — #331, ADR
+   * 0039. Fetched from the instance by the route's digest
+   * (`instance/ghost-port.ts`); never more than one, and never stored.
+   */
+  loadRiderGhost?(routeId: string): Promise<RiderGhostLoad>;
   /**
    * The rider's live sensor readings, sampled per frame.
    *
@@ -526,6 +560,19 @@ export function GameView(props: GameViewProps): JSX.Element {
     gameRouteFromHash(globalThis.location.hash),
   );
   const [withGhost, setWithGhost] = useState(false);
+  // #331: another rider's ghost, which REPLACES the rider's own — one ghost at
+  // a time (ADR 0021 D-4.1) — so turning either on turns the other off.
+  const [withRiderGhost, setWithRiderGhost] = useState(false);
+  const [riderGhostProblem, setRiderGhostProblem] = useState<string | undefined>(undefined);
+  const chooseOwnGhost = useCallback((value: boolean) => {
+    setWithGhost(value);
+    if (value) setWithRiderGhost(false);
+  }, []);
+  const chooseRiderGhost = useCallback((value: boolean) => {
+    setWithRiderGhost(value);
+    setRiderGhostProblem(undefined);
+    if (value) setWithGhost(false);
+  }, []);
   const [withPacer, setWithPacer] = useState(false);
   const [intensity, setIntensity] = useState(String(DEFAULT_PACER_INTENSITY));
   /**
@@ -824,6 +871,12 @@ export function GameView(props: GameViewProps): JSX.Element {
   const preparingViewRef = useRef<RendererView | undefined>(undefined);
   const ghostRef = useRef<GhostTrack | undefined>(undefined);
   /**
+   * Whose ghost {@link ghostRef} is, when it is another rider's — #331: their
+   * display name, which the HUD's gap field is labelled with. `undefined` for
+   * the rider's own best and for no ghost. Set and cleared with `ghostRef`.
+   */
+  const ghostRiderRef = useRef<string | undefined>(undefined);
+  /**
    * How much scenery the current rung allows — #245.
    *
    * ⚠️ **A ref rather than the `qualityLevel` state, for the same reason the
@@ -1055,6 +1108,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       pacer: BotPacerPlan | undefined,
       air: Wind | undefined,
       sitting: RidingPosition,
+      riderGhost = false,
     ): Promise<void> => {
       const profile = route.profile;
       // ⚠️ #400: FIRST, before the first `await` — this line runs inside the
@@ -1066,7 +1120,29 @@ export function GameView(props: GameViewProps): JSX.Element {
       cuesRef.current?.end();
       cuesRef.current = new RideCues(soundsOut ?? sharedCueOutput(), soundChoice);
       cuesRef.current.begin();
-      ghostRef.current = ghost && port !== undefined ? await port.loadGhost(route.id) : undefined;
+      ghostRiderRef.current = undefined;
+      if (riderGhost) {
+        // #331: ONE other rider's ghost, in place of the rider's own. Asked
+        // for at the press, and never kept: it lives in this ref for this ride.
+        const asked: RiderGhostLoad = (await port?.loadRiderGhost?.(route.id)) ?? {
+          kind: 'unavailable',
+        };
+        if (unmountedRef.current) {
+          return;
+        }
+        if (asked.kind !== 'ghost') {
+          // The ride does not start: a rider who chose a race is told why on
+          // the picker, rather than being given a ride alone.
+          cuesRef.current?.end();
+          setRiderGhostProblem(RIDER_GHOST_REFUSAL_TEXT[asked.kind]);
+          return;
+        }
+        setRiderGhostProblem(undefined);
+        ghostRef.current = asked.track;
+        ghostRiderRef.current = asked.rider;
+      } else {
+        ghostRef.current = ghost && port !== undefined ? await port.loadGhost(route.id) : undefined;
+      }
       // #509: the rider may have left while the ghost loaded. @see unmountedRef
       if (unmountedRef.current) {
         return;
@@ -1295,6 +1371,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       pacer: BotPacerPlan | undefined,
       air: Wind | undefined,
       sitting: RidingPosition,
+      riderGhost?: boolean,
     ): Promise<void> => {
       // #509: one press is one ride. @see startingRef
       if (startingRef.current) {
@@ -1302,7 +1379,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       }
       startingRef.current = true;
       try {
-        await begin(route, ghost, pacer, air, sitting);
+        await begin(route, ghost, pacer, air, sitting, riderGhost);
       } finally {
         startingRef.current = false;
       }
@@ -1976,7 +2053,11 @@ export function GameView(props: GameViewProps): JSX.Element {
           worldChosen={readRealisticWorldChoice(deviceStorage())}
           releaseNotice={trainerNow?.releaseFault}
           withGhost={withGhost}
-          onGhost={setWithGhost}
+          onGhost={chooseOwnGhost}
+          withRiderGhost={withRiderGhost}
+          onRiderGhost={chooseRiderGhost}
+          riderGhostOffered={port?.riderGhostOffered?.() === true}
+          riderGhostProblem={riderGhostProblem}
           withPacer={withPacer}
           onPacer={setWithPacer}
           intensity={intensity}
@@ -2106,7 +2187,21 @@ export function GameView(props: GameViewProps): JSX.Element {
         movingSeconds={movingSeconds}
         // #1312: and the lap's, the recorder's again. @see useRideLapSeconds
         lapSeconds={lapSeconds}
-        chases={chasedGaps(state, ghostRef.current, outcomeRef.current)}
+        chases={chasedGaps(state, ghostRef.current, outcomeRef.current, ghostRiderRef.current)}
+        // #331: whose ghost this is, and the way to stop racing it — only for
+        // another rider's, which the rider chose and may want gone.
+        ghostStop={
+          ghostRiderRef.current === undefined
+            ? undefined
+            : {
+                rider: ghostRiderRef.current,
+                onStop: () => {
+                  ghostRef.current = undefined;
+                  ghostRiderRef.current = undefined;
+                  outcomeRef.current = undefined;
+                },
+              }
+        }
         // #783: a count and ONE chosen gap on a room ride, never a list.
         {...(roomRef.current === undefined
           ? {}
@@ -2453,6 +2548,7 @@ function chasedGaps(
   state: GameState,
   ghost: GhostTrack | undefined,
   outcome: GhostOutcome | undefined,
+  rider?: string,
 ): readonly ChasedGap[] {
   const found: ChasedGap[] = [];
   const bot = state.bot;
@@ -2463,6 +2559,8 @@ function chasedGaps(
     const at = ghostDistanceAt(ghost, ghostClock(state));
     found.push({
       to: 'ghost',
+      // #331: another rider's ghost is labelled with their name, never "Your best".
+      ...(rider === undefined ? {} : { who: rider }),
       gap: pacerGap(gapAgainst(state, at)),
       // Present only once the race against the attempt is settled, which is
       // what turns the field from a gap into a result — `hud/fields.ts`

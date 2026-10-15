@@ -20,6 +20,7 @@ import {
   openActivityStore,
   recordingSessionId,
   routeId,
+  webCryptoSha256,
   type AthleteRecord,
 } from '@onyourleft/store';
 
@@ -50,7 +51,7 @@ import { sharedCueOutput } from './game/web-audio';
 import { deviceStorage } from './game/hud/announce-preference';
 import { preloadViewGroups } from './shell/lazy-view';
 import { browserScreenLockSource, platformWakeLock } from './game/hud/wake-lock';
-import type { GamePort, RidableRoute } from './game/GameView';
+import type { GamePort, RidableRoute, RiderGhostLoad } from './game/GameView';
 import { gameTrainerPortOver, type GameTrainerPort } from './game/trainer-port';
 import type { GhostTrack } from '@onyourleft/domain';
 import type { GameRenderer } from './game/port';
@@ -124,6 +125,7 @@ import type { MatchPort } from './segments/match-port';
 import type { SegmentPort } from './segments/store-port';
 import type { RoutePort } from './routes/store-port';
 import type { WorkoutPort } from './workouts/store-port';
+import { raceRouteOf } from './detail/race-consent';
 import type { DetailPort } from './detail/store-port';
 import { browserBasemapConfig } from './map/basemap';
 import type { MapPort } from './map/port';
@@ -145,6 +147,7 @@ import type { LoadedFrom } from './instance/instance-pin';
 import { readInstanceAccount } from './instance/sign-in';
 import { createModerationPort, type ModerationPort } from './instance/moderation-port';
 import { createSyncPort, type SyncPort } from './instance/sync-port';
+import { createGhostPort, type GhostPort } from './instance/ghost-port';
 import { rideSummaryOf } from './ride-analysis/ride-summary';
 import { createRoomPort, type RoomPort } from './net/room-port';
 import { createRoomsPort, type RoomsPort } from './net/rooms-port';
@@ -601,9 +604,36 @@ async function loadGameRenderer(): Promise<GameRenderer> {
  * `activity-store.ghost-scope.test.ts` is the test that guards the patent line
  * rather than anything in the replay code.
  */
-function buildGamePort(rideController: RideController | undefined): GamePort {
+function buildGamePort(
+  rideController: RideController | undefined,
+  ghosts: GhostPort | undefined,
+): GamePort {
   const store = localStore();
   return {
+    // #331: another rider's ghost, only through the instance (ADR 0039 D-2.5).
+    // No instance, no choice: `ghosts` is undefined or says it is not offered.
+    riderGhostOffered: () => ghosts?.offered() === true,
+    loadRiderGhost: async (route: string): Promise<RiderGhostLoad> => {
+      if (ghosts === undefined) return { kind: 'unavailable' };
+      const saved = await store.getRoute(LOCAL_ATHLETE, routeId(route));
+      if (saved === undefined) return { kind: 'none' };
+      const answer = await ghosts.riderGhost(saved.profile);
+      if (answer.kind !== 'ghost') return answer;
+      try {
+        // The same integrator, and the same refusal of a holed ride, as the
+        // rider's own ghost below: a replay of what was recorded, never a guess.
+        return {
+          kind: 'ghost',
+          rider: answer.ghost.rider,
+          track: ghostFromSpeed({
+            sampleIntervalSeconds: answer.ghost.sampleIntervalSeconds,
+            speed: answer.ghost.speed,
+          }),
+        };
+      } catch {
+        return { kind: 'none' };
+      }
+    },
     listRoutes: async (): Promise<readonly RidableRoute[]> => {
       const saved = await store.listRoutes(LOCAL_ATHLETE);
       const rows: RidableRoute[] = [];
@@ -884,6 +914,26 @@ function buildSyncPort(): SyncPort | undefined {
     timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     rideSummary: rideSummaryOf(localStore(), LOCAL_ATHLETE),
     newDocumentId: () => globalThis.crypto.randomUUID(),
+    // #331: the race offer is decided here, against this device's zones.
+    raceRoute: raceRouteOf(localStore(), LOCAL_ATHLETE, webCryptoSha256),
+  });
+}
+
+/**
+ * The trainer game's way to another rider's ghost (#331): the ONE production
+ * place a ghost port is built, so `check:wiring` reports `createGhostPort` if
+ * this goes. Over the sealed session the Connect screen keeps, through the one
+ * instance module (ADR 0036 D-3 (a)); a device with no instance is offered no
+ * such ghost and sends nothing.
+ */
+function buildGhostPort(): GhostPort | undefined {
+  if (typeof localStorage === 'undefined' || globalThis.crypto?.subtle === undefined) {
+    return undefined;
+  }
+  return createGhostPort({
+    storage: localStorage,
+    loadedFrom: loadedFrom(),
+    signingKey: () => ensureDeviceSigningKey(localStore(), LOCAL_ATHLETE),
   });
 }
 
@@ -1429,7 +1479,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           routes={buildRoutePort()}
           workouts={buildWorkoutPort()}
           efforts={buildEffortPort()}
-          game={buildGamePort(rideController)}
+          game={buildGamePort(rideController, buildGhostPort())}
           gameTrainer={buildGameTrainerPort(rideController)}
           gameRenderer={loadGameRenderer}
           screenLock={browserScreenLockSource(platformWakeLock())}

@@ -85,6 +85,11 @@ export interface SyncPortDependencies extends SealingDependencies {
   readonly rideSummary: (activityId: ActivityId) => Promise<string | undefined>;
   /** A new document's id, for a conflict copy (#924). */
   readonly newDocumentId: () => string;
+  /**
+   * The route a ride is offered to be raced on, or `null` (#331) —
+   * `detail/race-consent.ts` §`raceRouteOf`, bound in `main.tsx`.
+   */
+  readonly raceRoute: (activityId: ActivityId) => Promise<string | null>;
 }
 
 /** Whether this device may sync now, read from this device alone. */
@@ -186,6 +191,7 @@ export function createSyncPort(dependencies: SyncPortDependencies): SyncPort {
         rideSummary: dependencies.rideSummary,
         athleteKeys: () => athleteKeysFrom(sealed),
         newDocumentId: dependencies.newDocumentId,
+        raceRoute: dependencies.raceRoute,
       });
       return { kind: 'synced', report };
     } catch (error) {

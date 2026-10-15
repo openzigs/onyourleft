@@ -1294,10 +1294,11 @@ export class ActivityStore {
    *    set; one list holding both would blur which consent a ghost stands on.
    *
    * ⚠️ **Nothing in this build calls it.** It is the privacy half ADR 0021
-   * D-5.3 requires to exist and be proved to fail BEFORE the patent half is
-   * relaxed; #331 is its first caller, in a later pull request, and must not
-   * touch `activity-store.ghost-scope.test.ts` in the same one (ADR 0039
-   * D-2.3). And it does not decide whether a ride is OFFERED: a ride whose
+   * D-5.3 required to exist and be proved to fail BEFORE the patent half was
+   * relaxed. #331 relaxed it without calling this: every athlete on a device
+   * is that device's rider, so another rider's ghost is read from the
+   * instance instead (ADR 0039 D-2.5, `apps/instance` §`listRaceableOnRoute`),
+   * which applies the same two conditions and the route. And it does not decide whether a ride is OFFERED: a ride whose
    * rider's privacy-zone trim touches the raced route is refused as well
    * (ADR 0021 D-5.2), which needs that rider's zones and is not this read's.
    *

@@ -192,6 +192,12 @@ export function readingTier(reading: HudReading): ReadingTier {
 export interface ChasedGap {
   /** Which of the two this is. Decides the label, and nothing else. */
   readonly to: 'bot' | 'ghost';
+  /**
+   * Whose ghost, when it is ANOTHER rider's — #331: their display name, which
+   * labels the field in place of "Your best". Still one participant, read as
+   * a distance and a direction word (ADR 0039 D-3, D-4.2): never a place.
+   */
+  readonly who?: string | undefined;
   /** Signed the way `pacer/gap.ts` signs it: positive when they are ahead. */
   readonly gap: PacerGap;
   /**
@@ -541,7 +547,7 @@ function gapReading(chase: ChasedGap): HudReading {
   // Keyed by who it is about, so two of them can sit beside each other and a
   // test can name the one it means. `HudPanel` uses the key as its React key.
   const key = `gap-${chase.to}`;
-  const label = LABELS[chase.to];
+  const label = chase.who ?? LABELS[chase.to];
   // ⚠️ The outcome before every other branch, including the stationary one. A
   // rider who has stopped pedalling still gets a settled result, where the
   // live gap would be a dash — the result does not depend on anybody's current

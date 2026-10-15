@@ -1344,9 +1344,11 @@ describe('sync on the running instance — #1195', () => {
       const target = route.path
         .replace('{content}', content)
         .replace('{kind}', 'note')
-        .replace('{key}', 'n1');
+        .replace('{key}', 'n1')
+        .replace('{route}', 'a'.repeat(64));
       const bodies: Record<string, unknown> = {
         'POST /v1/sync/records': another,
+        'POST /v1/sync/records/{content}/race-route': { routeSha256: 'a'.repeat(64) },
         'POST /v1/sync/items/{kind}/{key}': { body: 'an edge’s note' },
         'POST /v1/sync/records/{content}/race-consent': { mayBeRaced: true },
         'DELETE /v1/account': { recoveryCode: 'not-needed-to-be-refused' },
