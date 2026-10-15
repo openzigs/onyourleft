@@ -58,6 +58,12 @@ export interface EnteredRoom {
   readonly roomId: string;
   readonly kind: 'group' | 'race';
   readonly ridingPosition: RoomRidingPosition;
+  /**
+   * Whether the room drafts its riders — #787, the owner's ruling of
+   * 2026-09-30: its maker's choice, fixed for the room, and said to every
+   * rider before the start.
+   */
+  readonly drafting: boolean;
   /** The code, for the rider who made the room to share. Absent for one who joined. */
   readonly code?: string | undefined;
   /** The road everybody in the room rides — read back from the room's own route. */
@@ -116,6 +122,8 @@ export interface RoomsPort {
   create(request: {
     readonly kind: 'group' | 'race';
     readonly ridingPosition: RoomRidingPosition;
+    /** On unless the rider making the room turns it off (#787). */
+    readonly drafting: boolean;
     readonly route: RoomRouteSource;
   }): Promise<CreateRoomAnswer>;
   /** Join a room by the code a friend shared, and fetch and check its route. */
@@ -209,6 +217,7 @@ export function createRoomsPort(options: RoomsPortOptions): RoomsPort {
           body: {
             kind: request.kind,
             ridingPosition: request.ridingPosition,
+            drafting: request.drafting,
             loop: shared.loop,
             lengthMetres: shared.course.lengthMetres,
             grades: shared.course.grades,
@@ -231,6 +240,7 @@ export function createRoomsPort(options: RoomsPortOptions): RoomsPort {
             roomId: made.roomId,
             kind: request.kind,
             ridingPosition: request.ridingPosition,
+            drafting: request.drafting,
             code: made.code,
             profile: shared.profile,
             // The bytes this device sent, digested here rather than taken from the answer.
@@ -254,6 +264,7 @@ export function createRoomsPort(options: RoomsPortOptions): RoomsPort {
           roomId?: unknown;
           kind?: unknown;
           ridingPosition?: unknown;
+          drafting?: unknown;
           loop?: unknown;
           routeSha256?: unknown;
         } | null;
@@ -266,6 +277,7 @@ export function createRoomsPort(options: RoomsPortOptions): RoomsPort {
           !isRoomId(room.roomId) ||
           (room.kind !== 'group' && room.kind !== 'race') ||
           !POSITIONS.includes(room.ridingPosition as RoomRidingPosition) ||
+          typeof room.drafting !== 'boolean' ||
           typeof room.loop !== 'boolean' ||
           typeof room.routeSha256 !== 'string'
         ) {
@@ -283,6 +295,7 @@ export function createRoomsPort(options: RoomsPortOptions): RoomsPort {
             roomId: room.roomId,
             kind: room.kind,
             ridingPosition: room.ridingPosition as RoomRidingPosition,
+            drafting: room.drafting,
             profile,
             // The route's bytes were just checked against this digest (`routeOf`).
             routeSha256: room.routeSha256,

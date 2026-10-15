@@ -249,6 +249,9 @@ export function roomFrame(
 ): RoomFrame {
   const own = room.own();
   const local = simulation.state.ride.distance as number;
+  // #787, ADR 0038 D-4: ride at the draft the room will give this rider on
+  // its next tick, predicted from its newest frame; the room corrects the rest.
+  simulation.draftWith(room.draftFactor());
   if (own !== undefined && own.atLocalMs !== memory.correctedFrom) {
     // The frame before, or — on the first — when the ride began: how long the
     // two could have been coming apart for (#922).
@@ -302,9 +305,23 @@ export function roomFrame(
         (rider) => Math.abs(rider.distanceMetres - local) <= NEARBY_METRES,
       ).length,
       ...(chosen === undefined ? {} : { chosen }),
+      draft: draftReading(room),
     },
     standings: raceStandings(room),
   };
+}
+
+/**
+ * The HUD's draft — #787, ADR 0038 D-5: the share of this rider's aerodynamic
+ * drag the ROOM's draft removed on its last tick, from the room's own frame
+ * (`FrameRider.draftPercent`) — never this client's prediction, and never
+ * watts. `'off'` in a room made with drafting off; `undefined` before the
+ * room has sent this rider a frame.
+ */
+export function draftReading(room: RoomConnection): RoomHud['draft'] {
+  const status = room.status();
+  if (status.kind === 'joined' && status.config.drafting === 'off') return 'off';
+  return room.own()?.rider.draftPercent;
 }
 
 /**

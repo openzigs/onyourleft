@@ -121,11 +121,17 @@ export class ScriptedInstance {
     body: { ticket: 'the-ticket', expiresAt: 1 },
   };
 
-  /** The room joined by code is `routeSha256`'s, and its route is `gpx`. */
-  offer(roomId: string, kind: 'group' | 'race', gpx: string, sha256: string): void {
+  /** The room joined by code is `routeSha256`'s, and its route is `gpx`; it drafts unless told. */
+  offer(
+    roomId: string,
+    kind: 'group' | 'race',
+    gpx: string,
+    sha256: string,
+    drafting = true,
+  ): void {
     this.joined = {
       status: 200,
-      body: { roomId, kind, ridingPosition: 'hoods', loop: false, routeSha256: sha256 },
+      body: { roomId, kind, ridingPosition: 'hoods', drafting, loop: false, routeSha256: sha256 },
     };
     this.route = { status: 200, body: { sha256, gpx } };
   }

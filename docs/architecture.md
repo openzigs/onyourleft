@@ -1767,6 +1767,20 @@ is never sent, though a racer can solve for it from a rider's speed and W/kg (AD
 `raceStandings`) and computes none. A group ride sends neither. The finish order and the stored
 result above are unchanged.
 
+**Drafting in a room** ([#787](https://github.com/openzigs/onyourleft/issues/787),
+[ADR 0038](adr/0038-drafting-in-the-first-multiplayer-release.md) D-4). Each tick, before anybody is
+re-simulated, the room core takes every rider on the road at the distance it holds for them and runs
+`@onyourleft/physics`' `fieldDraftFactors` — distance along the route alone, single file, no lateral
+offset (D-3.4) — and rides each at `ridingConditions(mass, position, k)`; the frame's `draftPercent`
+is `(1 − k) × 100`. Whether a room drafts is its maker's choice at `POST /v1/rooms` (`drafting`,
+on unless false; migration 0024's `room_course.drafting`), fixed for the room, read into its plan,
+and said to every rider in the welcome's `roomConfig.drafting` and on the room panel before the
+start; off is every `k` set to 1 through the same code. The client predicts its own `k` from the
+room's newest frame with the same function (`net/room-session.ts` §`draftFactor`), rides it in
+`game/simulation.ts` §`draftWith` and is corrected by the room; the HUD shows the room's own figure
+as a share of drag, never watts. No bot pacer or ghost is ever in a frame, so neither gives nor takes
+a draft.
+
 **No build step, and two third-party runtime dependencies.** Node 24 strips the types and runs
 `src/main.ts` as committed, so the tsconfig adds `allowImportingTsExtensions` and
 `erasableSyntaxOnly`; this repository's packages name no extension on their relative imports, and

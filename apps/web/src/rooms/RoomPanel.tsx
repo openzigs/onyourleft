@@ -74,6 +74,18 @@ export const ROOMS_REFUSAL_TEXT: Readonly<Record<RoomsRefusal, string>> = {
   'instance-refused': 'The instance would not do that. Try again later.',
 };
 
+/**
+ * A room's drafting, in words — #787, the owner's ruling of 2026-09-30: said
+ * to every rider in the room before the start, and offered to the rider
+ * making one. ⚠️ Draft wording awaiting the owner's approval.
+ */
+export const ROOM_DRAFTING_TEXT = {
+  choice: 'Drafting',
+  choiceDetail: ' — riding close behind another rider takes less effort, as on the road',
+  on: 'Drafting is on: riding close behind another rider takes less effort.',
+  off: 'Drafting is off: every rider pushes the same air, whoever is in front.',
+} as const;
+
 /** What the rider is told when nothing answered. */
 export const ROOMS_UNREACHABLE_TEXT =
   'The instance did not answer. Check this device’s connection and try again.';
@@ -132,6 +144,8 @@ function refusalText(answer: CreateRoomAnswer | JoinRoomAnswer): string | undefi
 export function RoomPanel(props: RoomPanelProps): JSX.Element {
   const [routeId, setRouteId] = useState<string | undefined>(undefined);
   const [kind, setKind] = useState<'group' | 'race'>('group');
+  // #787: on by default, the maker's to turn off, and fixed for the room.
+  const [drafting, setDrafting] = useState(true);
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState<Busy>(undefined);
   const [problem, setProblem] = useState<string | undefined>(undefined);
@@ -183,7 +197,8 @@ export function RoomPanel(props: RoomPanelProps): JSX.Element {
             ? entered.code === undefined
               ? ' The race starts when the rider who made the room starts it.'
               : ' You start the race, from the ride, when your riders are on the line.'
-            : ' Ride whenever you like; there is no leader and no result.'}
+            : ' Ride whenever you like; there is no leader and no result.'}{' '}
+          {entered.drafting ? ROOM_DRAFTING_TEXT.on : ROOM_DRAFTING_TEXT.off}
         </StatusMessage>
         {entered.kind === 'race' ? (
           <p data-oyl-kept-visible="">{RACE_WEIGHT_DISCLOSURE}</p>
@@ -303,6 +318,17 @@ export function RoomPanel(props: RoomPanelProps): JSX.Element {
                 </label>
               ))}
             </fieldset>
+            <label>
+              <input
+                type="checkbox"
+                checked={drafting}
+                onChange={(event) => {
+                  setDrafting(event.target.checked);
+                }}
+              />
+              {ROOM_DRAFTING_TEXT.choice}
+              {ROOM_DRAFTING_TEXT.choiceDetail}
+            </label>
             {kind === 'race' ? <p data-oyl-kept-visible="">{RACE_WEIGHT_DISCLOSURE}</p> : undefined}
             <Button
               variant="secondary"
@@ -312,7 +338,7 @@ export function RoomPanel(props: RoomPanelProps): JSX.Element {
                 setBusy('making');
                 setProblem(undefined);
                 void rooms
-                  .create({ kind, ridingPosition: props.position, route: chosen })
+                  .create({ kind, ridingPosition: props.position, drafting, route: chosen })
                   .then((answer) => {
                     setBusy(undefined);
                     if (answer.kind === 'created') props.onEnter(answer.room);

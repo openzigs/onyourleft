@@ -54,6 +54,7 @@ const MESSAGES: readonly ProtocolMessage[] = [
       ridingPosition: 'hoods',
       reportIntervalMs: REPORT_INTERVAL_MS,
       frameIntervalMs: FRAME_INTERVAL_MS,
+      drafting: 'on',
     },
   },
   { type: 'refuse', reason: 'physics-mismatch' },
@@ -340,6 +341,21 @@ describe('what the decoder refuses — one check, one reason', () => {
         ),
       ),
     ).toBe('bad-value');
+  });
+
+  it('refuses a welcome that does not say whether the room drafts, or says it otherwise — #787', () => {
+    const welcome = JSON.parse(encodeMessage(MESSAGES[3] as ProtocolMessage)) as {
+      roomConfig: Record<string, unknown>;
+    };
+    expect(refusalOf(decodeRoomMessage(JSON.stringify(welcome)))).toBe('accepted');
+    for (const drafting of [true, 'yes', 1]) {
+      welcome.roomConfig['drafting'] = drafting;
+      expect(refusalOf(decodeRoomMessage(JSON.stringify(welcome))), String(drafting)).toBe(
+        'bad-value',
+      );
+    }
+    delete welcome.roomConfig['drafting'];
+    expect(refusalOf(decodeRoomMessage(JSON.stringify(welcome)))).toBe('missing-key');
   });
 
   it('refuses a name a real instance would never have stored — #1347', () => {

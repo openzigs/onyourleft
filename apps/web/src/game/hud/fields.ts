@@ -225,6 +225,15 @@ export interface RoomHud {
   readonly nearby: number;
   /** The one rider the rider chose to follow, or `undefined` until they choose. */
   readonly chosen?: ChosenRider | undefined;
+  /**
+   * This rider's draft — #787: the share of their aerodynamic drag the room's
+   * draft removed on its last tick, in percent; `'off'` in a room made with
+   * drafting off; `undefined` before the room's first frame. ⚠️ **A share of
+   * drag, never watts** (ADR 0038 D-5): a watt figure moves with speed and
+   * gradient and means nothing on a descent, and there is no field here that
+   * could carry one.
+   */
+  readonly draft?: number | 'off' | undefined;
 }
 
 /** The one rider followed. @see RoomHud */
@@ -481,7 +490,31 @@ function roomReadings(room: RoomHud | undefined): readonly HudReading[] {
       unit: room.nearby === 1 ? 'rider' : 'riders',
       stale: false,
     },
+    draftField(room.draft),
   ];
+}
+
+/** What the draft field is called (#787). */
+export const DRAFT_LABEL = 'Draft';
+
+/**
+ * The room's draft on this rider, as a share of aerodynamic drag — #787,
+ * ADR 0038 D-5. The unit says what it is a share of, so a small number on a
+ * climb, where there is little air to push, reads as a fact and not a fault
+ * (#327's indicator criteria). Only on a ride in a room, like every room
+ * field: absent everywhere else, on the `NO_READING` precedent.
+ */
+function draftField(draft: RoomHud['draft']): HudReading {
+  const base = { key: 'room-draft', label: DRAFT_LABEL, stale: false } as const;
+  if (draft === 'off') return { ...base, value: 'Off', unit: '', word: true };
+  if (draft === undefined || !Number.isFinite(draft)) {
+    return { ...base, value: NO_READING, unit: '' };
+  }
+  return {
+    ...base,
+    value: String(Math.max(0, Math.min(100, Math.round(draft)))),
+    unit: '% of drag',
+  };
 }
 
 /**

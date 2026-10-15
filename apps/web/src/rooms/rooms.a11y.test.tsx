@@ -8,13 +8,14 @@
  * "connect an instance" state; the rest are rendered here, each once.
  */
 
+import { act } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { auditAccessibility, formatViolations } from '../a11y/audit';
 import type { EnteredRoom, RaceResultRow, RoomsPort } from '../net/rooms-port';
 import { mount, settle, type Mounted } from '../testing/mount';
 import { RACE_LEFT_EARLY_TEXT, RaceResult } from './RaceResult';
-import { RoomPanel, type RoomPanelProps } from './RoomPanel';
+import { ROOM_DRAFTING_TEXT, RoomPanel, type RoomPanelProps } from './RoomPanel';
 import { northProfile } from './rooms-testing';
 
 let mounted: Mounted | undefined;
@@ -47,6 +48,7 @@ const ENTERED: EnteredRoom = {
   roomId: 'room-1',
   kind: 'race',
   ridingPosition: 'hoods',
+  drafting: true,
   code: 'ABCDE-FGHJK-MNPQR',
   profile: northProfile(1_000),
   routeSha256: 'a'.repeat(64),
@@ -89,6 +91,7 @@ describe('the room panel and a race’s result pass the accessibility audit — 
       'in a group ride it joined',
       panel({ entered: { ...ENTERED, kind: 'group', code: undefined } }),
     ],
+    ['in a race with drafting off — #787', panel({ entered: { ...ENTERED, drafting: false } })],
   ])('%s', async (_, props) => {
     await audited(<RoomPanel {...props} />);
   });
@@ -106,5 +109,49 @@ describe('the room panel and a race’s result pass the accessibility audit — 
     expect(document.body.textContent).toContain(RACE_LEFT_EARLY_TEXT);
     expect(document.querySelectorAll('button')).toHaveLength(1);
     expect(document.querySelector('ol')).toBeNull();
+  });
+});
+
+describe('a room’s drafting on the panel — #787, the owner’s ruling of 2026-09-30', () => {
+  it('offers its maker drafting, on by default, and sends what they chose', async () => {
+    const asked: unknown[] = [];
+    const rooms: RoomsPort = {
+      ...ROOMS,
+      create: (request) => {
+        asked.push(request.drafting);
+        return Promise.resolve({ kind: 'unreachable' });
+      },
+    };
+    await audited(<RoomPanel {...panel({ rooms })} />);
+    const box = [...document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')].find(
+      (each) => each.closest('label')?.textContent?.startsWith(ROOM_DRAFTING_TEXT.choice),
+    );
+    expect(box?.checked).toBe(true);
+    const make = [...document.querySelectorAll('button')].find(
+      (each) => each.textContent === 'Make a room',
+    );
+    await act(async () => {
+      make?.click();
+      await settle();
+    });
+    await act(async () => {
+      box?.click();
+      await settle();
+    });
+    await act(async () => {
+      make?.click();
+      await settle();
+    });
+    expect(asked).toEqual([true, false]);
+  });
+
+  it('tells every rider in the room which it is, before the start', async () => {
+    await audited(<RoomPanel {...panel({ entered: { ...ENTERED, code: undefined } })} />);
+    expect(document.body.textContent).toContain(ROOM_DRAFTING_TEXT.on);
+    mounted?.unmount();
+    await audited(
+      <RoomPanel {...panel({ entered: { ...ENTERED, code: undefined, drafting: false } })} />,
+    );
+    expect(document.body.textContent).toContain(ROOM_DRAFTING_TEXT.off);
   });
 });

@@ -1034,6 +1034,27 @@ describe('the room on the HUD — #783', () => {
     const text = `${reading?.value ?? ''} ${reading?.unit ?? ''} ${reading?.detail ?? ''}`;
     expect(text).not.toMatch(/\d\s*W(?!\/kg)\b/);
   });
+
+  it('shows this rider’s draft as a share of drag, Off in a room without drafting, and a dash before a frame — #787', () => {
+    const draft = (value: number | 'off' | undefined) =>
+      hudReadings({ ...baseInput(), room: { nearby: 1, draft: value } }).find(
+        (r) => r.key === 'room-draft',
+      );
+    expect(draft(34)).toMatchObject({ label: 'Draft', value: '34', unit: '% of drag' });
+    expect(draft(0)).toMatchObject({ value: '0', unit: '% of drag' });
+    expect(draft('off')).toMatchObject({ label: 'Draft', value: 'Off', unit: '', word: true });
+    expect(draft(undefined)).toMatchObject({ label: 'Draft', value: NO_READING, unit: '' });
+    // Never watts, in any state: a share of drag is the whole reading (ADR 0038 D-5).
+    for (const each of [34, 0, 'off', undefined] as const) {
+      const reading = draft(each);
+      const text = `${reading?.label ?? ''} ${reading?.value ?? ''} ${reading?.unit ?? ''} ${reading?.detail ?? ''}`;
+      expect(text).not.toMatch(/\bW\b|watt/i);
+    }
+  });
+
+  it('has no draft on a ride with no room — absent, not 0 %', () => {
+    expect(hudReadings(baseInput()).map((reading) => reading.key)).not.toContain('room-draft');
+  });
 });
 
 describe('the ride’s moving time — #1111', () => {
