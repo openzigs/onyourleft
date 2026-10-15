@@ -238,6 +238,26 @@ describe('signing in, and what is shown after a reload — #777', () => {
     expect(await port.current()).toEqual({ kind: 'signed-out', origin: testing.TEST_ORIGIN });
   });
 
+  it('says it cannot read the session when a keyless-looking instance demands a seal — #1210', async () => {
+    // A device with no pin, connected to a keyless instance, which then
+    // answers the plaintext session read `sealed_required`.
+    const world = await instance({ keyless: true });
+    const base = wire(world);
+    const { port, storage } = device(base);
+    await port.connect(testing.TEST_ORIGIN, 'Anna');
+    const demanding: InstanceSend = (url, init) =>
+      new URL(url).pathname === '/v1/auth/session'
+        ? Promise.resolve(
+            new Response(JSON.stringify({ error: { code: 'sealed_required' } }), {
+              status: 403,
+              headers: { 'content-type': 'application/json' },
+            }),
+          )
+        : base(url, init);
+    const { port: reading } = device(demanding, storage);
+    expect(await reading.current()).toMatchObject({ kind: 'unreadable' });
+  });
+
   it('names the refusal of an instance that is not taking new riders', async () => {
     const world = await instance({ registration: 'closed' });
     const { port, storage } = device(wire(world));
