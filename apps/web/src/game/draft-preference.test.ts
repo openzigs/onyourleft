@@ -39,22 +39,28 @@ describe('whether this device asked to see its draft — #787', () => {
         throw new DOMException('full', 'QuotaExceededError');
       },
     };
-    expect(writeDraftReadingChoice(refusing, true)).toBe(false);
-    expect(readDraftReadingChoice(refusing)).toBe(false);
+    expect(writeDraftReadingChoice(refusing, false)).toBe(false);
+    expect(readDraftReadingChoice(refusing)).toBe(true);
   });
 
-  it('is off until a rider asks: an empty, unreadable or unrecognised store reads as off — ADR 0038 D-5', () => {
-    expect(readDraftReadingChoice(disk())).toBe(false);
-    expect(readDraftReadingChoice(undefined)).toBe(false);
+  it('is on until a rider turns it off: an empty, unreadable or unrecognised store reads as on — the owner, 2026-10-15', () => {
+    expect(readDraftReadingChoice(disk())).toBe(true);
+    expect(readDraftReadingChoice(undefined)).toBe(true);
     const throwing: PreferenceStorage = {
       getItem: () => {
         throw new DOMException('blocked', 'SecurityError');
       },
       setItem: () => undefined,
     };
-    expect(readDraftReadingChoice(throwing)).toBe(false);
+    expect(readDraftReadingChoice(throwing)).toBe(true);
     const odd = disk();
-    odd.values.set(DRAFT_READING_STORAGE_KEY, 'true');
-    expect(readDraftReadingChoice(odd)).toBe(false);
+    odd.values.set(DRAFT_READING_STORAGE_KEY, 'false');
+    expect(readDraftReadingChoice(odd)).toBe(true);
+  });
+
+  it('keeps a stored explicit "off" off, so a rider who turned it off before the default changed stays off', () => {
+    const store = disk();
+    store.values.set(DRAFT_READING_STORAGE_KEY, 'off');
+    expect(readDraftReadingChoice(store)).toBe(false);
   });
 });

@@ -182,8 +182,8 @@
  * long as the rider holds the wheel, so a window's wait costs nothing. Dropped,
  * not queued, behind anything higher (#327's "same priority rules — dropped
  * rather than queued"). ⚠️ **Not in {@link ALWAYS_SPOKEN}**, and offered by
- * `GameView` only when the rider has turned the draft indicator on
- * (`game/draft-preference.ts`): two switches, both off by default.
+ * `GameView` only when the draft indicator is on (`game/draft-preference.ts`,
+ * on by default) and announcements are on (off by default): two switches.
  *
  * ## ⚠️ Six kinds are spoken with announcements OFF — {@link ALWAYS_SPOKEN}
  *

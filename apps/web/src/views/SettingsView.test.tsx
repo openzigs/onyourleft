@@ -1108,30 +1108,30 @@ describe('the draft indicator — #787, ADR 0038 D-5', () => {
   const toggleIn = (root: ParentNode) =>
     root.querySelector<HTMLInputElement>('.oyl-draft-reading input[role="switch"]');
 
-  it('is off until the rider turns it on, and keeps the choice on this device, read back by the ride’s own reader', async () => {
+  it('is on until the rider turns it off, and keeps the choice on this device, read back by the ride’s own reader', async () => {
     const store = disk();
     const mounted = await settings(store);
     const toggle = toggleIn(mounted.container);
     expect(toggle?.type).toBe('checkbox');
-    expect(toggle?.checked).toBe(false);
-    expect(readDraftReadingChoice(store)).toBe(false);
+    expect(toggle?.checked).toBe(true);
+    expect(readDraftReadingChoice(store)).toBe(true);
     await act(async () => {
       toggle?.click();
       await Promise.resolve();
     });
-    expect(readDraftReadingChoice(store)).toBe(true);
+    expect(readDraftReadingChoice(store)).toBe(false);
     expect(mounted.container.textContent).toContain(ANNOUNCEMENTS_SAVED);
     await act(async () => {
       toggle?.click();
       await Promise.resolve();
     });
-    expect(readDraftReadingChoice(store)).toBe(false);
+    expect(readDraftReadingChoice(store)).toBe(true);
     mounted.unmount();
 
-    const on = disk();
-    on.setItem(DRAFT_READING_STORAGE_KEY, 'on');
-    const again = await settings(on);
-    expect(toggleIn(again.container)?.checked).toBe(true);
+    const off = disk();
+    off.setItem(DRAFT_READING_STORAGE_KEY, 'off');
+    const again = await settings(off);
+    expect(toggleIn(again.container)?.checked).toBe(false);
     again.unmount();
   });
 

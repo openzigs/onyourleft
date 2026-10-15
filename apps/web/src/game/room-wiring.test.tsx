@@ -397,8 +397,7 @@ describe('the draft indicator on a ride in a room — #787, #327', () => {
     return heard;
   }
 
-  it('shows the room’s draft with its gauge, and says going into and out of it, once the rider turned it on', async () => {
-    localStorage.setItem(DRAFT_READING_STORAGE_KEY, 'on');
+  it('shows the room’s draft with its gauge, and says going into and out of it, by default — the owner, 2026-10-15', async () => {
     announcementsOn();
     room = new ScriptedRoom();
     await rideInRoom(room);
@@ -413,7 +412,8 @@ describe('the draft indicator on a ride in a room — #787, #327', () => {
     expect(out.at(-1)).toBe(DRAFT_SPOKEN.outOf);
   });
 
-  it('shows and says nothing about a draft by default, while the room drafts the rider just the same', async () => {
+  it('shows and says nothing about a draft once the rider turned it off, while the room drafts the rider just the same', async () => {
+    localStorage.setItem(DRAFT_READING_STORAGE_KEY, 'off');
     announcementsOn();
     room = new ScriptedRoom();
     await rideInRoom(room);
@@ -427,7 +427,6 @@ describe('the draft indicator on a ride in a room — #787, #327', () => {
   });
 
   it('says nothing about a draft with announcements off, though the field is shown', async () => {
-    localStorage.setItem(DRAFT_READING_STORAGE_KEY, 'on');
     room = new ScriptedRoom();
     await rideInRoom(room);
     room.accept();

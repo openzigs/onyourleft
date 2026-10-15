@@ -1313,8 +1313,9 @@ function GameWorldPanel({
 
 /**
  * Whether a ride in a room shows and says this rider's draft — #787,
- * ADR 0038 D-5 binding #327's indicator criteria: **off by default, one rider
- * setting**. `game/draft-preference.ts` says why it is not the room's switch.
+ * ADR 0038 D-5 binding #327's indicator criteria, as the owner amended them on
+ * 2026-10-15: **on by default, one rider setting**. `game/draft-preference.ts`
+ * says why it is not the room's switch.
  * The `oyl-announce` class for its switch's 24×24 target, as
  * {@link GameWorldPanel} carries it; `oyl-draft-reading` is the tests' hook.
  */
@@ -1383,7 +1384,8 @@ function DraftReadingPanel({
  * Whether a ride's map draws tiles under the line — the owner's decision of
  * 2026-09-25 on #534's review: **on by default, with a switch to turn it off**.
  *
- * ⚠️ **The one Settings switch here that starts ON**, and the only one that
+ * ⚠️ **One of two Settings switches here that start ON** (the draft reading
+ * is the other, which contacts nothing), and the only one that
  * decides whether this app contacts a host. So the sentence beside it says
  * exactly what turning it on sends and to whom — the map area around a ride
  * and the device's IP address, to the host named in the build's own basemap
