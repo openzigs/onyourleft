@@ -49,6 +49,7 @@
  * room would seat a rider who came back later as somebody new at 0 m.
  */
 
+import { fieldDraftFactors } from '@onyourleft/physics';
 import {
   decodeRoomMessage,
   encodeMessage,
@@ -340,6 +341,26 @@ export class RoomSession {
         flags: rider.flags,
       })),
     };
+  }
+
+  /**
+   * The draft multiplier `k` this client predicts for its own rider — #787,
+   * ADR 0038 D-4: from the room's NEWEST frame, every rider where the room
+   * held them on one tick, through the same `fieldDraftFactors` the room
+   * runs, so it is the `k` the room will ride this rider at on its next tick.
+   * The room corrects the rest (`correction.ts`). `1` — riding alone — in a
+   * room with drafting off, before a frame, and while the room is not joined.
+   * Only riders the room holds are counted: a bot pacer or a ghost is never
+   * in a frame, so neither shelters nor is sheltered (#327).
+   */
+  draftFactor(): number {
+    const status = this.#status;
+    const own = this.#riderId;
+    if (status.kind !== 'joined' || status.config.drafting !== 'on' || own === undefined) return 1;
+    const riders = this.#snapshots?.newestRiders() ?? [];
+    const index = riders.findIndex((rider) => rider.riderId === own);
+    if (index === -1) return 1;
+    return fieldDraftFactors(riders.map((rider) => rider.distanceMetres))[index] as number;
   }
 
   /** Every OTHER rider, drawn at `localMs` less the render delay. @see SnapshotBuffer.at */

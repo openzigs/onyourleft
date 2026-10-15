@@ -41,7 +41,9 @@
  *
  * **2** since #1347 ([ADR 0051](../../../docs/adr/0051-live-race-standings.md)):
  * a race's room names its riders ({@link RiderName}) and sends its standings
- * ({@link Standings}) every tick. A version-1 build is refused
+ * ({@link Standings}) every tick — and, from #787 in the same unreleased
+ * version, a welcome says whether the room drafts ({@link RoomConfig.drafting})
+ * and a frame's `draftPercent` is the room's draft, no longer always 0. A version-1 build is refused
  * `protocol-mismatch` at its hello, and told to update
  * (`apps/web` §`room-ride.ts` `ROOM_REFUSED_TEXT`), rather than seated in a
  * race whose list it cannot show.
@@ -85,7 +87,17 @@ export interface RoomConfig {
   readonly reportIntervalMs: number;
   /** How often the room sends a frame — {@link FRAME_INTERVAL_MS} by default. */
   readonly frameIntervalMs: number;
+  /**
+   * Whether this room drafts its riders — #787, the owner's ruling of
+   * 2026-09-30: on by default, chosen by whoever made the room and fixed for
+   * it, and said in the welcome so every rider knows before the start. `off`
+   * is every rider at `k = 1`, through the same code (ADR 0038).
+   */
+  readonly drafting: Drafting;
 }
+
+/** A room's drafting setting (#787). */
+export type Drafting = 'on' | 'off';
 
 /** ADR 0037 D-4: ingest at 2 Hz. */
 export const REPORT_INTERVAL_MS = 500;
@@ -145,7 +157,11 @@ export interface FrameRider {
   /** Distance along the route, in whole decimetres. */
   readonly decimetres: number;
   readonly centimetresPerSecond: number;
-  /** 0 when riding alone; the share of drag a draft removes, when there is drafting (#764). */
+  /**
+   * The share of this rider's aerodynamic drag the room's draft model removed
+   * on this tick, `(1 − k) × 100` rounded (#787, ADR 0038 D-5): 0 riding
+   * alone and in a room with drafting off.
+   */
   readonly draftPercent: number;
   /** {@link FLAG_PLAUSIBILITY} and {@link FLAG_COASTING}, or'd. */
   readonly flags: number;

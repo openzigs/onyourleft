@@ -5,9 +5,9 @@
  * private group ride and #785's private race, on the instance.
  *
  * ```text
- * POST /v1/rooms                 { kind, ridingPosition, loop, lengthMetres, grades, gpx }
+ * POST /v1/rooms                 { kind, ridingPosition, drafting?, loop, lengthMetres, grades, gpx }
  *                                  → { roomId, code, routeSha256 }      the creator is a member
- * POST /v1/rooms/join            { code } → { roomId, kind, ridingPosition, loop, routeSha256 }
+ * POST /v1/rooms/join            { code } → { roomId, kind, ridingPosition, drafting, loop, routeSha256 }
  *                                  rate-limited; the joiner becomes a member
  * GET  /v1/rooms/{roomId}/route  → { sha256, gpx }                     members only, while open
  * POST /v1/rooms/{roomId}/ticket (auth/routes.ts)                      members only, for a rider's room
@@ -150,6 +150,8 @@ export interface JoinedRoom {
   readonly roomId: string;
   readonly kind: 'group' | 'race';
   readonly ridingPosition: RidingPosition;
+  /** Whether the room drafts — #787: a joiner is told before the start. */
+  readonly drafting: boolean;
   readonly loop: boolean;
   readonly routeSha256: string;
 }
@@ -209,7 +211,15 @@ const invalid = (field: string, problem: string): Outcome<never> =>
   refuse('validation_failed', [{ field, problem }]);
 
 /** The fields a new room's body may carry, and no other. */
-const CREATE_FIELDS = new Set(['kind', 'ridingPosition', 'loop', 'lengthMetres', 'grades', 'gpx']);
+const CREATE_FIELDS = new Set([
+  'kind',
+  'ridingPosition',
+  'drafting',
+  'loop',
+  'lengthMetres',
+  'grades',
+  'gpx',
+]);
 
 const POSITIONS: readonly RidingPosition[] = ['upright', 'hoods', 'drops'];
 
@@ -285,6 +295,9 @@ export function createRooms(options: RoomsOptions): Rooms {
         return invalid('ridingPosition', 'must be upright, hoods or drops');
       }
       if (typeof loop !== 'boolean') return invalid('loop', 'must be true or false');
+      // #787, the owner's ruling of 2026-09-30: on unless the maker says off.
+      const drafting = body.drafting ?? true;
+      if (typeof drafting !== 'boolean') return invalid('drafting', 'must be true or false');
       if (
         typeof lengthMetres !== 'number' ||
         !Number.isFinite(lengthMetres) ||
@@ -331,6 +344,7 @@ export function createRooms(options: RoomsOptions): Rooms {
             // default); a group ride starts on its first rider, at once.
             countdownMs: kind === 'race' ? null : 0,
             rejoinWindowMs: null,
+            drafting,
             raceStartedAt: null,
           },
           codeSha256: await roomCodeDigest(drawn),
@@ -368,6 +382,7 @@ export function createRooms(options: RoomsOptions): Rooms {
           roomId: found.roomId,
           kind: room.kind,
           ridingPosition: course.ridingPosition,
+          drafting: course.drafting !== false,
           loop: found.routeLoop,
           routeSha256: room.routeSha256,
         },

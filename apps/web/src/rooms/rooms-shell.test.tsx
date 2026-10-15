@@ -272,6 +272,7 @@ describe('a group ride joined by its code — #784', () => {
         ridingPosition: 'hoods',
         reportIntervalMs: 500,
         frameIntervalMs: 1000,
+        drafting: 'on',
       },
     });
     await frame(2);
@@ -329,6 +330,7 @@ describe('a group ride joined by its code — #784', () => {
         ridingPosition: 'hoods',
         reportIntervalMs: 500,
         frameIntervalMs: 1000,
+        drafting: 'on',
       },
     });
     await sockets.say({ type: 'frame', tick: 1, riders: [rider(0, 10), rider(1, 12)] });
@@ -391,6 +393,7 @@ describe('a private race — #785', () => {
         ridingPosition: 'hoods',
         reportIntervalMs: 500,
         frameIntervalMs: 1000,
+        drafting: 'on',
       },
     });
     return { instance, sockets, sha256 };
@@ -426,6 +429,7 @@ describe('a private race — #785', () => {
         ridingPosition: 'hoods',
         reportIntervalMs: 500,
         frameIntervalMs: 1000,
+        drafting: 'on',
       },
     });
     return { instance, sockets };

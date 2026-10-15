@@ -1786,7 +1786,11 @@ describe('other riders never reach the trainer — #782 review (N8)', () => {
     await clickThrough(buttonStarting('Ride '));
     await flushRoom();
     room.accept();
-    room.welcome(0);
+    // A room with drafting OFF (#787): with it on, a rider level with this one
+    // would rightly change how fast this one rides — and so where they are and
+    // the grade there. What this holds is that other riders' positions never
+    // reach the trainer by any other way.
+    room.welcome(0, 'ride', 'off');
     for (let tick = 1; tick <= 30; tick += 1) {
       // This rider where the room would put them at 5 m/s from the start…
       room.frame(tick, [frameRider(0, tick * 2.5, 5), ...others(tick)]);

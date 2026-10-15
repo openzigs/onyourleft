@@ -147,7 +147,7 @@ export class ScriptedRoom {
     this.socket.events.onText(encodeMessage(message));
   }
 
-  welcome(riderId: number, kind: 'ride' | 'race' = 'ride'): void {
+  welcome(riderId: number, kind: 'ride' | 'race' = 'ride', drafting: 'on' | 'off' = 'on'): void {
     this.send({
       type: 'welcome',
       riderId,
@@ -157,6 +157,7 @@ export class ScriptedRoom {
         ridingPosition: 'hoods',
         reportIntervalMs: REPORT_INTERVAL_MS,
         frameIntervalMs: FRAME_INTERVAL_MS,
+        drafting,
       },
     });
   }
@@ -184,13 +185,18 @@ export class ScriptedRoom {
   }
 }
 
-/** A frame rider at `metres` and `metresPerSecond`. */
-export function frameRider(riderId: number, metres: number, metresPerSecond = 10): FrameRider {
+/** A frame rider at `metres` and `metresPerSecond`, the room's draft on them `draftPercent`. */
+export function frameRider(
+  riderId: number,
+  metres: number,
+  metresPerSecond = 10,
+  draftPercent = 0,
+): FrameRider {
   return {
     riderId,
     decimetres: Math.floor(metres * 10),
     centimetresPerSecond: Math.round(metresPerSecond * 100),
-    draftPercent: 0,
+    draftPercent,
     flags: 0,
   };
 }

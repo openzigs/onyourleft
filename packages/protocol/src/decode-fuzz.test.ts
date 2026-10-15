@@ -66,6 +66,7 @@ const SEEDS: readonly string[] = (
         ridingPosition: 'drops',
         reportIntervalMs: 500,
         frameIntervalMs: 1000,
+        drafting: 'off',
       },
     },
     { type: 'refuse', reason: 'room-full' },

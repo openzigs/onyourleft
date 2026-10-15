@@ -99,6 +99,11 @@ export interface RoomConnection {
    * their live W/kg. `undefined` in a group ride and before the first.
    */
   standings(): RoomStandings | undefined;
+  /**
+   * The draft multiplier this rider is predicted to ride at — #787: from the
+   * room's newest frame, `1` alone or with drafting off. The room corrects it.
+   */
+  draftFactor(): number;
   /** Leave: close the socket, stop reconnecting, let the screen sleep. */
   leave(): void;
 }
@@ -223,6 +228,7 @@ export function roomPortOver(
         race: () => session.race(),
         own: () => session.own(),
         standings: () => session.standings(),
+        draftFactor: () => session.draftFactor(),
         leave: () => {
           session.leave();
         },

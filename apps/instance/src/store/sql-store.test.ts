@@ -158,18 +158,27 @@ describe('SqlStore (#769)', () => {
       capacity: null,
       countdownMs: 2_000,
       rejoinWindowMs: null,
+      drafting: true,
       raceStartedAt: null,
     };
     await opened.write((store) => store.putRoomCourse(course));
     expect(await opened.read((store) => store.getRoomCourse(SHARED_ROOM.id))).toEqual(course);
     await opened.write((store) =>
-      store.putRoomCourse({ ...course, capacity: 80, grades: [[0, 1]], countdownMs: null }),
+      store.putRoomCourse({
+        ...course,
+        capacity: 80,
+        grades: [[0, 1]],
+        countdownMs: null,
+        // #787: a room with drafting off reads back off.
+        drafting: false,
+      }),
     );
     expect(await opened.read((store) => store.getRoomCourse(SHARED_ROOM.id))).toEqual({
       ...course,
       capacity: 80,
       grades: [[0, 1]],
       countdownMs: null,
+      drafting: false,
     });
     expect(await opened.read((store) => store.getRoomCourse('nowhere'))).toBeUndefined();
     // A race that left its lobby stays marked, at the first time it did.

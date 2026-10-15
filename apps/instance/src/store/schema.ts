@@ -119,6 +119,8 @@ export interface RoomCourseTable {
   readonly finishers: Generated<number | null>;
   /** Unix seconds: when this race's room said it was over — everybody off the road (#785, 0013). */
   readonly race_finished_at: Generated<number | null>;
+  /** `1` when the room drafts its riders, `0` when its maker turned drafting off (#787, 0024). */
+  readonly drafting: Generated<number>;
 }
 
 /** One athlete's result in one room. */

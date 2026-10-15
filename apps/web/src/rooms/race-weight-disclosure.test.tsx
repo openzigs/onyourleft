@@ -34,6 +34,7 @@ const RACE: EnteredRoom = {
   roomId: 'room-1',
   kind: 'race',
   ridingPosition: 'hoods',
+  drafting: true,
   code: undefined,
   profile: northProfile(1_000),
   routeSha256: 'a'.repeat(64),
