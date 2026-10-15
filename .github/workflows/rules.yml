@@ -7,9 +7,9 @@
 # review", and CLAUDE.md says rule SCOPE001 "fails the build". This workflow is
 # what makes those statements true. Until it existed they were not.
 #
-# Since #1285 the work is done by three jobs side by side -- the SHARDS -- and a
-# fourth, `rules`, that does nothing but fail unless every one of them
-# succeeded. `main` requires a status check whose context is exactly
+# Since #1285 the work is done by jobs side by side -- the SHARDS, four since
+# #1362 -- and one more, `rules`, that does nothing but fail unless every one
+# of them succeeded. `main` requires a status check whose context is exactly
 # "Repository rules", and that fourth job is the one that carries the name: a
 # shard reports under its own context, which `main` does not require, so a red
 # shard blocks a merge ONLY through the job at the bottom of this file. The
@@ -20,12 +20,13 @@
 #            every checker and its suite, the instance image, the Capacitor
 #            and third-party-notices gates
 #   tests    the accessibility gate and the Vitest suite
-#   browser  the pinned Chromium and the browser gate (#63): jsdom implements
-#            no WebGL, so MapLibre cannot be constructed there at all, and
-#            "which hosts does the map engine actually contact" is a question
-#            only a browser answers
+#   browser-1, browser-2
+#            the pinned Chromium and the browser gate (#63), half each since
+#            #1362: jsdom implements no WebGL, so MapLibre cannot be
+#            constructed there at all, and "which hosts does the map engine
+#            actually contact" is a question only a browser answers
 #
-# ⚠️ A new gate goes INSIDE one of those three. A new job is a new shard, and
+# ⚠️ A new gate goes INSIDE one of those shards. A new job is a new shard, and
 # a shard the `rules` job does not `needs` is a gate that cannot block a merge:
 # apps/web/browser/nightly-split.test.ts fails on one.
 #
@@ -61,7 +62,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # --- Shard 1 of 3: everything that is not Vitest and not a browser ------------
+  # --- Shard 1 of 4: everything that is not Vitest and not a browser ------------
   checks:
     name: Checks
     # Standard label only. Larger runners (`4-core`, `8-core`, any `larger`
@@ -126,9 +127,9 @@ jobs:
       - name: Set up Node
         # Pinned to a full commit SHA, not a tag. Provenance, so a reviewer can
         # check rather than trust:
-        #   gh api repos/actions/setup-node/git/ref/tags/v7.0.0 --jq .object.sha
-        #   -> 820762786026740c76f36085b0efc47a31fe5020   (verified 2026-09-03)
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        #   gh api repos/actions/setup-node/git/ref/tags/v7.1.0 --jq .object.sha
+        #   -> 949feb2413d6458794dcd2491c4babbbce0c15c1   (verified 2026-10-15)
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
 
@@ -299,8 +300,8 @@ jobs:
       # and removes directories under apps/mobile/android, which does not
       # belong under a linter walking the same tree; they follow this step.
       # ⚠️ Nor, since #1285, `playwright install`: it was here because it is
-      # mostly a download, and it is in the `browser` shard now, the one job
-      # that drives a browser.
+      # mostly a download, and it is in each browser shard now (`browser-1` and
+      # `browser-2` since #1362), the jobs that drive a browser.
       - name: Checks, concurrently
         run: >-
           bash scripts/run-concurrently.sh
@@ -391,7 +392,7 @@ jobs:
         if: always()
         run: docker logout || true
 
-  # --- Shard 2 of 3: everything that is Vitest -----------------------------------
+  # --- Shard 2 of 4: everything that is Vitest -----------------------------------
   #
   # The accessibility gate and the suite, one after the other and alone on
   # their runner. Not side by side, and not beside anything else: Vitest keeps
@@ -431,7 +432,7 @@ jobs:
       # `packageManager` field through corepack, and a frozen install with no
       # dependency cache (3 to 5 s, #651).
       - name: Set up Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
 
@@ -528,7 +529,7 @@ jobs:
       # a `Tests outside coverage` step here is reading the old file.
       # `check:test-split` still fails a file in no Vitest run.
 
-  # --- Shard 3 of 3: the browser gate (#63) --------------------------------------
+  # --- Shards 3 and 4 of 4: the browser gate (#63), in two halves (#1362) ---------
   #
   # It buys the only assertions in the repository that a real engine makes:
   # that MapLibre initialises against the style we build, that `addProtocol`
@@ -537,14 +538,25 @@ jobs:
   #
   # ⚠️ A job of its own since #1285, and a reviewer who remembers "a second job
   # reports under a different context and could not block a merge" is reading
-  # the old file. That sentence is still true of this job's OWN context,
-  # `Browser gate`, which `main` does not require. What makes this a gate is the
-  # `rules` job below, which `needs` it and fails unless it succeeded.
+  # the old file. That sentence is still true of each browser shard's OWN
+  # context, `Browser gate (1 of 2)` and `Browser gate (2 of 2)` since #1362,
+  # which `main` does not require. What makes them a gate is the `rules` job
+  # below, which `needs` both and fails unless each succeeded.
   #
-  # This is the long pole: the gate's step is about eleven minutes on the slower
-  # runner, so this shard's length is the required check's.
-  browser:
-    name: Browser gate
+  # ⚠️ TWO jobs since #1362, and a reviewer who remembers one `browser` shard
+  # is reading the old file. One was the long pole: its `chromium` run took 690
+  # to 708 s of its 720 s stop on the EPYC 7763 (main, 2026-10-13 to -15), and
+  # on run 38656925947 it reached the stop with one case not run, which turned
+  # the required check red on a docs-only pull request. So the `chromium`
+  # project is divided with Playwright's `--shard` between `test:browser:shard-1`
+  # here and `test:browser:shard-2` in `browser-2`, which also runs the `game`
+  # project after its half. Every stop is the one the single job had, now over
+  # half the cases. docs/agents/ci.md section 4c "Two browser shards -- #1362"
+  # has the measurements; nightly-split.test.ts holds that each shard script
+  # runs in exactly one job, that together they are `test:browser` with every
+  # case in exactly one shard, and that `rules` needs both.
+  browser-1:
+    name: Browser gate (1 of 2)
     runs-on: ubuntu-latest
     # @see the `checks` shard's stop. The stops nested inside this one, on the
     # slower runner (docs/agents/ci.md section 4c "Shards -- #1285" has the
@@ -577,7 +589,7 @@ jobs:
       # `packageManager` field through corepack, and a frozen install with no
       # dependency cache (3 to 5 s, #651).
       - name: Set up Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
 
@@ -668,10 +680,60 @@ jobs:
       # than as a cancelled job, which the `rules` job would report red but
       # could not name. GNU
       # coreutils `timeout`, on the runner image; locally `pnpm run
-      # test:browser` is the same command without it.
+      # test:browser` is the whole gate in one command, both halves and the
+      # game run, without it. ⚠️ Since #1362 this step is the first half of
+      # the `chromium` run (`--shard 1/2`) and no `game` run: `browser-2` has
+      # the second half and the game run.
       - name: Browser gate
         timeout-minutes: 14
-        run: timeout --verbose --kill-after=10s 825s pnpm run test:browser
+        run: timeout --verbose --kill-after=10s 825s pnpm run test:browser:shard-1
+
+  # The second half (#1362): every step, stop and pin is `browser-1`'s, whose
+  # comments say why; only the gate's command differs. `test:browser:shard-2`
+  # runs the `chromium` project's second half (`--shard 2/2`) and then the
+  # `game` project alone, as the one job did since #1128, so the game's loads
+  # still have the CPU to themselves.
+  browser-2:
+    name: Browser gate (2 of 2)
+    runs-on: ubuntu-latest
+    # @see `browser-1`'s stop, which has this arithmetic too.
+    timeout-minutes: 25
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Record the runner's CPU
+        run: lscpu | grep -E '^(Model name|Thread|Core|Socket|CPU\(s\))'
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Enable pnpm through corepack
+        env:
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+        run: |
+          corepack enable pnpm
+          pnpm --version
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Drop the unrelated Chrome apt source
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/google-chrome.list \
+                     /etc/apt/sources.list.d/google-chrome.sources
+
+      - name: Install the pinned Chromium
+        timeout-minutes: 10
+        run: pnpm --filter @onyourleft/web exec playwright install --with-deps chromium
+
+      - name: Browser gate
+        timeout-minutes: 14
+        run: timeout --verbose --kill-after=10s 825s pnpm run test:browser:shard-2
 
   # --- The required check ---------------------------------------------------------
   #
@@ -703,7 +765,7 @@ jobs:
   # it reports a failure here as `success`.
   rules:
     name: Repository rules
-    needs: [checks, tests, browser]
+    needs: [checks, tests, browser-1, browser-2]
     if: always()
     runs-on: ubuntu-latest
     # A checkout and one bash script: seconds. Five minutes is a stop.
