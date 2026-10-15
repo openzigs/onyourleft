@@ -565,7 +565,10 @@ describe('a suspended rider may take their data out and delete their account, an
     expect(await instance.freshRead((store) => store.findDeviceKey(stranger.publicKey))).toBe(
       undefined,
     );
-  });
+    // 476 ms on green `main` (38337365635, EPYC 7763) and 2 574 ms under
+    // coverage (nightly 38279988356, EPYC 9V74), 51 % of Vitest's 5 s default.
+    // About three times the slowest CI figure (docs/agents/ci.md §4c, #1262).
+  }, 8_000);
 
   it('refuses a way-out session to a revoked key, and opens no session for it (#926’s review, N1)', async () => {
     let lost: TestDevice | undefined;
