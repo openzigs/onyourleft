@@ -83,9 +83,11 @@ export const ROOMS_WHAT_IS_SENT =
   'Making a room sends the route you choose — its roads and heights, not its name — to your ' +
   'instance, for the riders you share its code with. Anyone with the code can join. In the ' +
   'room, your power and cadence go to the instance twice a second while you ride, and your ' +
-  'weight once as you join; the other riders see your name and where you are on the road, ' +
-  'and after a race its result: your name, place, time, watts per kilogram and any flag the ' +
-  'room raised for a figure past its limit. The route is deleted from the instance when the ' +
+  'weight once as you join; the other riders see where you are on the road; in a race they ' +
+  'also see your name and, every second, your watts per kilogram and how many seconds ahead ' +
+  'or behind them you are, and after it its result: your name, place, time, watts per ' +
+  'kilogram and any flag the room raised for a figure past its limit. The route is deleted ' +
+  'from the instance when the ' +
   'room is over — within about a day of being made, unless somebody is riding in it then.';
 
 export interface RoomPanelProps {
