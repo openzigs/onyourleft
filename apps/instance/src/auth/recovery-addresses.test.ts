@@ -226,7 +226,11 @@ describe('the invariant, route by route: a device key alone or a token alone tak
       );
       expect(codeIn(tried)).toBe('code_unknown');
       expect(await waysBack(w, rider.athleteId)).toEqual(before);
-    });
+      // The file's first case. A: 866 ms on green `main` (38598735374, Xeon
+      // 8573C) and 2 790 ms under coverage (nightly 38279988356, EPYC 9V74),
+      // 56 % of Vitest's 5 s default; B at most 617 ms. About three times the
+      // slowest CI figure (docs/agents/ci.md §4c, #1262).
+    }, 9_000);
 
     it(`Ask for a recovery mail, ${column}: the code goes to the rider’s own address, and nothing is removed`, async () => {
       const w = await start();

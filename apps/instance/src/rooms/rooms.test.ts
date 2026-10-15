@@ -470,7 +470,9 @@ async function ridden(
     }),
     (ticket) => {
       const athleteId = byTicket.get(ticket);
-      return athleteId === undefined ? undefined : { athleteId, declaredMassKilograms: 70 };
+      return athleteId === undefined
+        ? undefined
+        : { athleteId, declaredMassKilograms: 70, displayName: athleteId };
     },
   );
   riders.forEach((_, index) => room.receive(index + 1, helloText(`ticket-${String(index)}`), 0));

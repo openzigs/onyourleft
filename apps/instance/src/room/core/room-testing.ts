@@ -26,13 +26,20 @@ export const FLAT_COURSE = {
   gradePercentAt: () => 0,
 } as const;
 
-/** `ticket-<athlete>` is admitted as that athlete at 70 kg; anything else is refused. */
+/**
+ * `ticket-<athlete>` is admitted as that athlete at 70 kg, named for them with
+ * a capital (`ann` is `Ann`, #1347); anything else is refused.
+ */
 export function admitByTable(masses: Readonly<Record<string, number>> = {}) {
   return (ticket: string): Admission | undefined => {
     const match = /^ticket-(.+)$/.exec(ticket);
     if (match === null) return undefined;
     const athleteId = match[1] as string;
-    return { athleteId, declaredMassKilograms: masses[athleteId] ?? 70 };
+    return {
+      athleteId,
+      declaredMassKilograms: masses[athleteId] ?? 70,
+      displayName: athleteId.charAt(0).toUpperCase() + athleteId.slice(1),
+    };
   };
 }
 

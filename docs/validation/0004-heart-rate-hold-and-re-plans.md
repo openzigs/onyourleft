@@ -2,7 +2,8 @@
 
 **Status:** procedure written, **not yet run**. Every result table below is empty on purpose.
 **Written:** 2026-10-11, against `main` at `7b66ce98`, for
-[#1246](https://github.com/openzigs/onyourleft/issues/1246).
+[#1246](https://github.com/openzigs/onyourleft/issues/1246). **Part B re-read** against `main` at
+`49ba5469` on 2026-10-14, for [#1344](https://github.com/openzigs/onyourleft/issues/1344).
 **Discharges, when run:** the hardware half of
 [ADR 0048](../adr/0048-workouts-that-change-during-the-ride.md) for
 [#1240](https://github.com/openzigs/onyourleft/issues/1240) and
@@ -12,10 +13,9 @@
 [#1092](https://github.com/openzigs/onyourleft/issues/1092). The pending checks are listed on
 [#733](https://github.com/openzigs/onyourleft/issues/733), the owner's one device-check list.
 
-⚠️ **Part A can be run today. Part B cannot.** The hold is merged (#1240, #1241). The re-plan job
-(#1243) and its device half (#1244) were both **open** on the day this was written, so Part B is
-written from ADR 0048 D-4 to D-10 and from those two issues' own criteria, **not from code anybody
-has run**. §"Before Part B" lists what has to be re-read against the merged code first.
+Both parts can be run. The hold is merged (#1240, #1241), and so are the re-plan job (#1243) and
+its device half (#1244). Part B was first written from ADR 0048 before either merged, and has since
+been re-read against the merged code: §"Before Part B" says what it now rests on, file by file.
 
 ---
 
@@ -60,8 +60,8 @@ asked a rider to sit on.
    | 6th | **A5** | Ends the ride |
    | last | **A6** | Leaves the trainer in a state nobody chose: its power is cut while it holds a target |
 
-2. **Part B's steps are run B6, B1, B4, B2, B3, B5**, for the same reason: the switch off first
-   (nothing may happen), the step that stops the instance late, and *Stop* last.
+2. **Part B's steps are run B6, B1, B4, B7, B2, B3, B8, B5**, for the same reason: the switch off
+   first (nothing may happen), the step that stops the instance late, and *Stop* last.
 3. **Flat pedals, a low gear, seated, and the trainer's power switch within reach**, for every
    step. Do not clip in for A4 or A6.
 4. **Read the stop condition before each step.** Every step has one, in its own column, and it is
@@ -93,7 +93,7 @@ asked a rider to sit on.
 | The Pixel Tablet | A **debug** APK of current `main` (validation 0002 §"Before the session") |
 | The Mac | `adb`, for the log |
 | A watch or a phone clock | Showing seconds, set against the tablet's. Every row asks for a time |
-| For Part B only | The owner's instance through the tunnel, the tablet signed in to it, and a model source for the re-plan job (ADR 0048 D-11) |
+| For Part B only | The owner's instance through the tunnel, the tablet signed in to it, and the instance's own model: §"Before Part B" lists each |
 
 ### The instruments
 
@@ -323,69 +323,194 @@ it in Notes if you try it; it changes no resistance beyond A7's.
 
 ## Before Part B — what has to be true, and what to re-read
 
-⚠️ **Do not run Part B from this page alone.** #1243 and #1244 were unmerged when it was written.
-Before the session, whoever prepares it re-reads the merged code and corrects this part **in the
-same pull request that fills in its results**:
+#1243 and #1244 are merged (#1309, #1317, #1332), and Part B below was **re-read against `main` at
+`49ba5469` on 2026-10-14** (#1344): every control name, sentence, condition and number in it is
+quoted from the merged code, and the file each comes from is named beside it. This is a reading of
+the code, not a run: nothing below has been ridden. If `main` has moved on by the day of the
+session, re-read the files named in [What the code does](#what-the-code-does-and-where-it-says-so)
+before riding.
 
-- [ ] #1243 and #1244 are merged, and #1245's wording is the owner-approved one.
-- [ ] The **name and place of the per-ride switch**, of *Keep the plan*, and the **sentences** a
-      rider sees for an accepted move. They are quoted below from the issues' examples, not from a
-      wording module.
-- [ ] How a **re-plan job is told apart** in the instance's `analysis_job` table (B6 counts them).
-      On the day this was written that table had no job-type column: `id`, `athlete_id`, `status`,
-      `source`, `template_version`, `input_json`, `ride_id`, `candidate`, `failure`, `created_at`,
-      `ended_at` (`apps/instance/src/store/schema.ts` §`AnalysisJobTable`).
-- [ ] Where **P9's record** of accepted and refused moves is read on the device after the ride.
-- [ ] The job's **budget** (#1243 proposes 45 s) against P2's 30 s and P5's 60 s, so B2's two ways
-      of being late still make a proposal late.
-- [ ] The instance runs the build under test (`bash apps/instance/deploy/home/deploy.sh`), `/ready`
-      answers through the tunnel, and the tablet is signed in to it.
+### What the rider needs before riding
+
+| | How to check it |
+|---|---|
+| **The Mac instance runs the build under test** | `bash apps/instance/deploy/home/deploy.sh` from the deploy checkout. `https://<the instance>/ready` answers `{"status":"ready",…}` through the tunnel. On 2026-10-14 the Mac's containers were on image `onyourleft-instance:49ba5469…` (`docker ps`) |
+| **A model on the Mac instance, its own** | The device asks only the instance's own model (`instance-local`, `replan-disclosure.ts`). A hosted key the rider stored is never used for a re-plan. So `docker compose logs instance` in `apps/instance/deploy/home` must show `"event":"analysis-model","state":"on"`, and the model must answer. On the Mac that model is Ollama on the machine itself, reached at Docker's private address: [`self-hosting/home-machine.md`](../self-hosting/home-machine.md), whose section on a model server on the machine itself is #1272's (PR #1346). Ask for one write-up of any ride first: if it fails with *"Your instance could not reach its model…"*, every re-plan will fail too |
+| **No write-up running during the session** | An athlete has **one** job open of either kind (`jobs.ts`: `job_running` is shared). A write-up still running at a boundary makes that re-plan fail, with the one short line |
+| **The tablet signed in to that instance** | *Settings → Instance*. The switch is not offered without a sign-in (`replan-port.ts` §`replanConnected`) |
+| **Both of the rider's own thresholds set** | Threshold power **and** threshold heart rate on the Analysis screen, each set by the rider and not the default. Without both, the switch is not shown at all (`views/RideView.tsx`, `replansAvailable`) |
+| **Trainer control held, and at least one saved workout** | The switch is drawn only then (`ride/WorkoutPanel.tsx` §`offerReplans`) |
+| **The heart-rate strap paired** | No request leaves without a paired strap, a held control point, or with the stall rescue holding the target (P6, `replan-session.ts` §`tick`) |
+| **Typed goals that leave room for a move** | *Settings → Your workout goals*. *Length (minutes)* **40**, longer than the workout's 34: without a length goal, no move may make the workout longer (the eleven decisions, ruling 8, `@onyourleft/domain` §`replan.ts`). *Most power (% of your threshold)* **85**, which is the most it allows. Leave *Time in your range* empty: it is never sent |
+| **The log** | Part A's three lines on the Mac, before the first step: `adb logcat -G 16M`, `adb logcat -c`, then `adb logcat -v time \| grep --line-buffered -i "BluetoothLe" \| tee replan-$(date +%H%M).log`. It shows every write to the trainer. Nothing about a re-plan itself is logged there: the screen, the job table and the export are the record of those |
+| **A clock with seconds** | Every row asks for times. A boundary is the moment the workout panel's block changes |
+
+### What the code does, and where it says so
+
+- **The switch.** *Re-plan during the ride* (`replan-disclosure.ts` §`REPLAN_SWITCH_LABEL`) is a
+  switch **above the workout list** on the Ride screen, under *Ride a workout*, with the
+  disclosure's headline beside it: *"This sends a summary of each block you ride to your
+  instance, during the ride."* The rest of the disclosure is **under** the list (#1329). While it
+  is on, *Re-plans on* (`replan-text.ts` §`REPLANS_ON_BADGE`) shows at the end of the heading's
+  line. It is **off** every time the list is shown, and goes back to off when a ride starts or
+  ends (`WorkoutPanel.tsx`). It is the only place re-plans are switched on: the Trainer game has
+  no switch.
+- **When a request leaves.** Only **as a block begins**, never at the start of the workout, and
+  never as the **last** block begins. Not with less than **30 s** of the new block left, not
+  within **3 minutes** of the last request **of this ride** (across workouts), and not without a
+  strap paired, a held control point, or with the rescue active (`replan-session.ts` §`tick`). In
+  *Re-plan check* below, that is at **5:00, 11:00, 17:00 and 23:00**, and never at 29:00.
+- **One request at a time, and when it is dropped.** A request still out **60 s** after it left
+  (`REPLAN_FRESHNESS_SECONDS`), or once the block it was asked in has less than **30 s** to run
+  (`REPLAN_BOUNDARY_LEAD_SECONDS`), is dropped: the device stops listening and cancels the job on
+  the instance. **Nothing is shown and nothing is said** for a dropped request. A pause, a lost
+  control point, an unpaired strap or the rescue drops one the same way. If an answer slips past
+  that anyway, the validator refuses it under P5 or P2, and that too shows nothing.
+- **The instance's budget**: 45 s, 4 model turns, 3 tool calls and 6 000 tokens, **counted from
+  when the job was queued** (`apps/instance` §`replan-agent.ts` §`REPLAN_BUDGETS`). So a job runs
+  out on the instance before the device's 60 s does.
+- **An accepted move.** The workout panel shows, labelled **Plan change**, the move's sentence and
+  then *"It starts with the next block."*, and the **Keep the plan** button under it
+  (`WorkoutPanel.tsx`; `replan-text.ts` §`REPLAN_LABEL`, §`REPLAN_STARTS_AT_NEXT_BLOCK`;
+  `replan-disclosure.ts` §`REPLAN_KEEP_BUTTON`). With announcements on, it is also spoken once:
+  *"Plan change: …"*, but not in a block above threshold power or in the last 30 s of one at it
+  (`replan-text.ts` §`planChangeMayBeSpoken`).
+- **The sentence** is built on the device from the move and the reason (`replan-text.ts`
+  §`replanSentence`). The move's part is one of:
+  - *"Next block lengthened by N minutes"* / *"…shortened by N minutes"*. A block further on is
+    *"Block K …"*, counted from 1. N is 1, 2 or 5, and *"1 minute"* is singular.
+  - *"Targets before the cool-down lowered by P%"* / *"…raised by P%"*.
+  - *"Heart-rate range for the next block lowered by B bpm"* / *"…raised by B bpm"*.
+  - *"Next block swapped for one from your saved workouts"*.
+  - *"Main set ended early, so the cool-down is next"*.
+
+  The reason's part follows a comma, and only when the device can see for itself that it is so
+  (`replan-reason.ts`): *"because your heart rate stayed above the range you chose"* or
+  *"…below the range you chose"* (the last block's mean heart rate against that block's hold
+  range, or the goals' range), *"because your cadence was falling"* (5 rpm or more between the
+  last two blocks), or *"to fit the duration you chose"* (a length goal was sent). Otherwise the
+  move is said alone, ending in a full stop, and the ride's record says the reason was not shown.
+  The model's other three reasons are never said. Example: *"Next block shortened by 2 minutes,
+  because your heart rate stayed above the range you chose. It starts with the next block."*
+- ***Keep the plan***, pressed before the boundary, drops the move and shows *"The plan stays as it
+  was."* (`replan-text.ts` §`PLAN_KEPT`). The press writes nothing to the trainer. In the Trainer
+  game, with a workout started on the Ride screen, ***Keep the plan*** is on the HUD on a row of
+  its own under *Pause* and *End ride* while a move waits. **The HUD shows no sentence**
+  ([#1324](https://github.com/openzigs/onyourleft/issues/1324), open): there the move is only
+  spoken, with announcements on.
+- ***Switch re-plans off*** (`replan-text.ts` §`REPLAN_OFF_BUTTON`) is on the Ride screen, on the
+  same row as *End workout*, while a workout runs with re-plans on. Pressed, it drops a waiting
+  move, cancels a job in flight, sends nothing more for that workout, and cannot be undone for
+  it. The panel then says *"Re-plans are off for the rest of this workout. Nothing more is sent,
+  and the plan stays as it is."* (`REPLANS_OFF`). Not on the game HUD.
+- **A waiting move dropped by a pause or a lost trainer** (D-8): the panel says, labelled **Plan
+  change**, *"That change was dropped because the ride paused or lost the trainer, so the plan
+  stays as it was."* (`REPLAN_DISCARDED`). It is spoken only if the move's own sentence was.
+- **Any failure** (no sign-in, the instance down, a refusal, a failed job) leaves the plan as it
+  is and shows one line with no label, never spoken: *"No re-plan could be asked for just now.
+  The workout carries on as planned."* (`REPLAN_UNAVAILABLE`). It stays until an answer arrives.
+  A refusal that will not change during the workout (`unauthenticated`, `validation_failed`,
+  `rate_limited`, `analysis_off`) ends the asking for that workout. A start that fails after a good
+  key read, or a failed job, is asked again at the next allowed boundary (`replan-session.ts`
+  §`PERMANENT_REFUSALS`). ⚠️ **An instance that is down is not in that class.** Every request first
+  opens a session, which reads the instance's keys; an unreachable instance closes the session with
+  `why: 'keys'`, and that ends the asking for the workout, the same as a refusal. This is a defect
+  (an outage treated as permanent), filed from B3.2, not the intended behaviour.
+- **A proposal the validator refuses, or an answer of "keep the workout"**, shows nothing.
+- **The record of every decision (P9)** is kept with the ride on the device. It is **not on any
+  screen** and not synced ([#1315](https://github.com/openzigs/onyourleft/issues/1315), open).
+  Read it in the account export: *Files → Take everything with you → Export everything*, then in
+  `on-your-left-account.json` the ride's entry under `activities`, at `rideFacts.replans`. Each
+  record is `accepted` (the move, the reason, the revision, `at`), `refused` (the `rule`, P1 to
+  P7, and the move and reason if they decoded), or `not-applied` (`why`: `kept`, `paused`,
+  `ended`, `not-taken` or `switched-off`). `at` is seconds on the ride's own clock.
+- **Limits**: the device asks at most once every 3 minutes, so at most 20 times an hour. The
+  instance allows 24 re-plan starts an hour an athlete, apart from the write-ups' 12.
+
+**Making the model propose a move on demand: not possible without changing code.** The model
+chooses, and may answer *keep the workout as it is* every time. No tool sends a re-plan job:
+`apps/instance/tools/replan-round-trip.ts` sends a ride **write-up** job. What can be done is to
+give the model a reason it is told about, and see whether it takes it:
+
+- **Ride the hold above its range.** In block 2, keep your heart rate above 135 bpm (the hold
+  lowers the target as it does, so this is a matter of effort and cadence, not watts). The
+  request at 11:00 then carries a block-2 summary with a mean above the range.
+- **A length goal shorter than the workout.** *Length (minutes)* **30**, against 34. A shorter
+  workout is then something the goals ask for. Put it back to 40 afterwards: no move may make a
+  workout longer than a length goal allows.
+
+Neither makes a proposal certain. Record how many rides it took.
 
 ### The workout for Part B
 
 Six blocks, so there are five boundaries and no block is the last by accident. Save it as
 **Re-plan check**:
 
-| Block | Kind | Length | Target |
-|---|---|---|---|
-| 1 | Steady (warm-up) | 5 min | 50 % of threshold |
-| 2 | Heart-rate hold | 6 min | Start 55 %, ceiling 85 %, 125–135 bpm |
-| 3 | Steady | 6 min | 65 % |
-| 4 | Steady | 6 min | 65 % |
-| 5 | Steady | 6 min | 65 % |
-| 6 | Steady (cool-down) | 5 min | 45 % |
+| Block | Kind | Length | Target | Starts at |
+|---|---|---|---|---|
+| 1 | Steady (warm-up) | 5 min | 50 % of threshold | 0:00 |
+| 2 | Heart-rate hold | 6 min | Start 55 %, ceiling 85 %, 125–135 bpm | 5:00 |
+| 3 | Steady | 6 min | 65 % | 11:00 |
+| 4 | Steady | 6 min | 65 % | 17:00 |
+| 5 | Steady | 6 min | 65 % | 23:00 |
+| 6 | Steady (cool-down) | 5 min | 45 % | 29:00 |
+
+A request leaves at 5:00, 11:00, 17:00 and 23:00 while the plan is as loaded (a length move that
+is applied shifts every later boundary, and requests follow the boundaries), each about the blocks ridden so far. A move it
+brings back changes blocks from the one after the block that has just begun: a request at 5:00
+can change block 3 onwards. Block 6, the last, is never changed (ruling 6).
 
 **The loaded workout's own peak share is 85 %** (the hold's ceiling) **and 65 % for a steady
-block** — P3's bound for a harder move. Write the watts for each block, at the rider's threshold,
-beside the table before riding: every row below is judged against them.
-
-Set typed goals on the device that leave room for a move (ADR 0048 D-10): a total duration **longer**
-than 34 minutes, and a power ceiling at or above 85 %.
+block**: P3's bound for a harder move. Write the watts for each block, at the rider's threshold,
+beside the table before riding: every row below is judged against them. P4: at most one accepted
+move every 3 minutes, at most one **harder** move every 10 minutes, at most +5 % a move and +10 %
+in all (`REPLAN_MOVE_INTERVAL_SECONDS`, `REPLAN_HARDER_INTERVAL_SECONDS`,
+`REPLAN_MAXIMUM_MOVE_PERCENT`, `REPLAN_MAXIMUM_CUMULATIVE_PERCENT`). A lengthened block, a range
+moved up, a swap, and a shortened block that is easier than the one after it all count as harder.
 
 ### Reading the instance
 
-The count of jobs, before and after a step. Take a snapshot and count in it, so nothing reads the
-live database:
+The instance keeps every job in `analysis_job`: `id`, `athlete_id`, `status` (`queued`,
+`running`, `succeeded`, `failed`, `cancelled`, `withheld`), `source`, `template_version`,
+`input_json`, `ride_id`, `candidate`, `failure`, `created_at`, `ended_at`, with times in Unix
+milliseconds (`apps/instance/src/store/schema.ts` §`AnalysisJobTable`). **There is no job-type
+column: a re-plan's `template_version` is `re-plan-1`**, and a write-up's is `1`
+(`replan-template.ts`). A re-plan's answer is its `result` event in `analysis_event`:
+`{"status":"succeeded","proposal":…}`, where `proposal` is the move and reason codes, or `null`
+for *keep the workout as it is*. A failed job's cause is the row's `failure`. Rows and events
+are kept 7 days.
+
+Count from a snapshot, so nothing reads the live database. On the Mac, in the deploy checkout's
+`apps/instance/deploy/home`:
 
 ```bash
-# On the machine that runs the instance. `backup` is the operator's online snapshot.
-# It writes into OYL_BACKUP_DIR on the host, where the `backup` service keeps its own.
-docker compose -f apps/instance/deploy/home/compose.yaml exec -T backup \
-  node src/operator/cli.ts backup /backups
-# Then, with any SQLite client, on the newest snapshot's database file in OYL_BACKUP_DIR:
-#   SELECT id, status, failure, created_at, ended_at FROM analysis_job ORDER BY created_at;
+# An online snapshot, written into OYL_BACKUP_DIR (the folder .env names).
+docker compose exec -T backup node src/operator/cli.ts backup /backups
+# Then the newest snapshot's database, read-only, with macOS's own sqlite3:
+sqlite3 -readonly -header -column "<OYL_BACKUP_DIR>/<newest snapshot-…>/instance.sqlite" \
+  "SELECT time(j.created_at / 1000, 'unixepoch', 'localtime') AS created, j.status, j.failure,
+          round((j.ended_at - j.created_at) / 1000.0, 1) AS seconds,
+          (SELECT e.data FROM analysis_event e WHERE e.job_id = j.id AND e.kind = 'result') AS result
+   FROM analysis_job j WHERE j.template_version = 're-plan-1' ORDER BY j.created_at;"
 ```
 
-⚠️ That command was **not run** for this document; the service name and the `backup` verb are read
-from `apps/instance/deploy/home/compose.yaml` and `docs/operating-an-instance.md`. Correct it under
-"Before Part B" if it does not work as written.
+The `backup` line's own report also prints `rows.analysis_job`, all jobs of both kinds: enough for
+a before-and-after count when nobody else is using the instance. The rows are every athlete's, so
+ride when nobody else is.
+
+⚠️ What was checked, 2026-10-14, and what was not: the `backup` verb and the query were run
+against a **throwaway** database migrated to the same 23 migrations, with test rows. The query
+printed the time, status, failure, seconds and the `result` JSON as above. `docker compose exec
+-T backup` was **not** run against the Mac instance. The `backup` container's working directory
+is `/srv/apps/instance` (where `src/operator/cli.ts` is), and it runs Node 24.
 
 ---
 
 ## Part B — re-plans, on the owner's instance through the tunnel
 
 Start the log as in Part A. Every step also keeps Part A's stop condition: the hold is still
-running in block 2.
+running in block 2. Every step starts a recording and *Re-plan check* from the Ride screen's list,
+and switches re-plans on for it unless the step says otherwise.
 
 ### B6 — the switch off (run first)
 
@@ -393,37 +518,39 @@ running in block 2.
 
 | Step | What to do | What should happen | ⚠️ Stop if |
 |---|---|---|---|
-| B6.1 | Count the instance's jobs (above). Start a recording and *Re-plan check* with the re-plan switch **left as it comes** — do not touch it. Ride blocks 1 to 3, about 17 minutes | The switch is **off** without having been touched. Every boundary's `0x05` is the loaded block's own watts. Nothing about a re-plan is shown or said | the target changes mid-block outside the hold |
-| B6.2 | *End workout*. Count the instance's jobs again | **The same count.** No row was added | |
+| B6.1 | Count the instance's re-plan jobs (above). Start a recording and *Re-plan check* with the switch **left as it comes** — do not touch it. Ride blocks 1 to 3, past 11:00 | The switch is **off** without having been touched, and *Re-plans on* is not beside the heading. While the workout runs there is no *Switch re-plans off* beside *End workout*. Every boundary's `0x05` is the loaded block's own watts. Nothing about a re-plan is shown or said | the target changes mid-block outside the hold |
+| B6.2 | *End workout*. Count the instance's re-plan jobs again | **The same count.** No row was added | |
 
-**Fails P7 if:** the second count is higher than the first, read from the instance's job table; or
-any boundary's `0x05` differs from the loaded plan's watts.
+**Fails P7 if:** the second count is higher than the first, read from the job table; or any
+boundary's `0x05` differs from the loaded plan's watts.
 
 ### B1 — a proposal accepted at a boundary
 
 **Checks P1** (a move from the closed list), **P2** (never the current block; applied from the next
 boundary), **P3** (never above the loaded workout's own peak, the goal's ceiling or the machine's
-maximum), **P4** (one accepted move per 3 min; +5 % per harder move) and **P9** (kept with the
-ride).
+maximum), **P4** (rate and size) and **P9** (kept with the ride).
 
 | Step | What to do | What should happen | ⚠️ Stop if |
 |---|---|---|---|
-| B1.1 | Start a recording and *Re-plan check*. **Switch re-plans on** for this ride. Ride from block 1 | At a boundary a summary goes to the instance. If a move comes back in time and is accepted, **one sentence** names the move and the reason, for example *"Next block shortened by 2 minutes, because your heart rate stayed above your range."*, and *Keep the plan* appears. **The current block's target does not change**: no `0x05` between the sentence and the boundary, other than the hold's own in block 2 | the target changes before the boundary (Part B's stop condition) |
-| B1.2 | Do **not** press *Keep the plan*. Ride through the boundary | At the boundary, the next block is the **changed** one: its `0x05` is the device's own arithmetic for the move the sentence named, and at or under the peak written beside the table. A shortened or extended block ends when the sentence said it would | the new block's target is above the loaded workout's peak for its kind, or above your goal's ceiling |
-| B1.3 | Ride on to the end, and *End workout* | At most one accepted move in any 3 minutes. The cool-down is the loaded one, unshortened | |
-| B1.4 | After the ride, read P9's record on the device | One entry per move accepted or refused: the move, the rule that decided, the time | |
+| B1.1 | Switch ***Re-plan during the ride*** on, check *Re-plans on* beside the heading, and press *Ride Re-plan check*. Ride from block 1 | Nothing is asked before 5:00. At 5:00, 11:00, 17:00 and 23:00 a request leaves (the times move after an applied shorten or lengthen). If a move comes back in time and is accepted, the panel shows **Plan change:** with one sentence and *"It starts with the next block."* (word for word in [What the code does](#what-the-code-does-and-where-it-says-so)), and ***Keep the plan*** under it. With announcements on it is spoken once. **The current block's target does not change**: no `0x05` between the sentence and the boundary, other than the hold's own in block 2 | the target changes before the boundary (Part B's stop condition) |
+| B1.2 | Do **not** press *Keep the plan*. Ride through the boundary | At the boundary the sentence and the button go, and the next block is the **changed** one. Its `0x05` is the device's own arithmetic for the move the sentence named, at or under the peak written beside the table. A shortened or lengthened block ends when the sentence said it would | the new block's target is above the loaded workout's peak for its kind, or above your goal's ceiling |
+| B1.3 | Ride on to the end, and *End workout* | No two accepted moves less than 3 minutes apart, and no two harder ones less than 10. The cool-down is the loaded one, unshortened | |
+| B1.4 | After the ride, export (*Files → Take everything with you → Export everything*) and read this ride's `rideFacts.replans` | One record per decision: each accepted move with its move, reason and `at`; each refused proposal with its `rule`. A move that reached its block has no `not-applied` record after it | |
 
 **Fails if:** any `0x05` in the block that was current when the proposal arrived differs from that
 block's plan (P2), read from the log; a boundary `0x05` above the loaded peak for that block kind,
-the goal's ceiling or the trainer's maximum (P3); two accepted moves less than 3 minutes apart, or a
-harder move of more than 5 % (P4); a move the sentence named that is not in D-4's list, or any text
-on screen that reads like a model's and not like the app's (P1); a move with no entry in the record
-(P9).
+the goal's ceiling or the trainer's maximum (P3); two accepted moves less than 3 minutes apart, two
+harder moves less than 10 minutes apart, or a harder move of more than 5 % (P4); a sentence not in
+the list above, or any text on screen that reads like a model's and not like the app's (P1); an
+accepted move with no record (P9).
 
-⚠️ **No proposal at all is not a failure of this step.** The model may propose nothing, and a
-budget that runs out ends in *no proposal* (#1243). Ride the workout again. Record how many rides it
-took; if three rides produce none, record that as the finding and what the job table's `failure`
-column said.
+⚠️ **No proposal at all is not a failure of this step.** The model may answer *keep the workout* at
+every boundary, and a job that runs out of budget fails with nothing shown but the one short line.
+Read the job table: `succeeded` with `result` `"proposal":null` is the model choosing no move. Ride
+the workout again, with one of the two nudges under [Making the model propose a
+move](#what-the-code-does-and-where-it-says-so). Record how many rides it took; if three rides
+produce none, record that as the finding, with what the job table's `status`, `failure` and
+`result` columns said.
 
 ### B4 — *Keep the plan*
 
@@ -431,27 +558,46 @@ column said.
 
 | Step | What to do | What should happen | ⚠️ Stop if |
 |---|---|---|---|
-| B4.1 | As B1.1, until a move is announced | As B1.1 | as B1.1 |
-| B4.2 | Press ***Keep the plan*** before the boundary. Ride through it | The next block is the **loaded** one: its `0x05` is the plan's own watts and it runs its own length. The control goes away. The press itself writes nothing | the next block is the changed one |
+| B4.1 | As B1.1, until a move is shown | As B1.1 | as B1.1 |
+| B4.2 | Press ***Keep the plan*** before the boundary. Ride through it | The sentence and the button go, and *"The plan stays as it was."* shows with the **Plan change** label. The next block is the **loaded** one: its `0x05` is the plan's own watts, and it runs its own length. The press itself writes nothing | the next block is the changed one |
+| B4.3 | *Optional, in the Trainer game.* With a workout started on the Ride screen and re-plans on, open the Trainer game. When a move waits, press ***Keep the plan*** on the HUD | The button is on a row of its own under *Pause* and *End ride*, with **no sentence beside it** (#1324). The move is spoken only with announcements on. After the press, as B4.2 | as B4.2 |
 
 **Fails D-7 if:** the boundary `0x05`, or the block's length, is the proposed one and not the
-loaded one; or the press produced a write.
+loaded one; or the press produced a write. In the P9 record, a kept move is followed by
+`not-applied` with `why` `kept`.
+
+### B7 — a pause drops a waiting move
+
+**Checks D-8** (a pause or a lost trainer drops a pending re-plan) and its one sentence.
+
+| Step | What to do | What should happen | ⚠️ Stop if |
+|---|---|---|---|
+| B7.1 | As B1.1, until a move is shown. Before its boundary, press ***Pause*** | The move's sentence and *Keep the plan* go at once, and the panel shows **Plan change:** *"That change was dropped because the ride paused or lost the trainer, so the plan stays as it was."* With announcements on, and only if the move's own sentence was spoken, that is spoken once. The pause writes the trainer's **lowest** target, one `0x05` (`workout/session.ts`) | a `0x05` above the trainer's minimum while paused |
+| B7.2 | ***Resume***, and ride through the boundary | The next block is the **loaded** one | the next block is the changed one |
+
+**Fails D-8 if:** the changed block is ridden after the pause, or the sentence is missing. In the
+P9 record, the dropped move is followed by `not-applied` with `why` `paused`.
 
 ### B2 — a proposal arriving late is dropped
 
 **Checks P2** (a move must arrive at least 30 s before the boundary) **and P5** (a proposal older
-than 60 s is refused). Opposite to `camera/useAnalysis.ts`, where a late answer still wins.
+than 60 s is refused). This is the opposite of `camera/useAnalysis.ts`, where a late answer still
+wins.
 
-Two ways to make one late; do at least the first.
+Two ways to make one late. Do at least the first.
 
 | Step | What to do | What should happen | ⚠️ Stop if |
 |---|---|---|---|
-| B2.1 | **Older than 60 s.** Re-plans on. Just after a boundary, have the instance's containers **paused** for 70 s and then resumed (`docker compose -f apps/instance/deploy/home/compose.yaml pause instance`, then `unpause`), so the answer to that boundary's summary comes back late | **Nothing changes and nothing is said**, or one short line at most. The next boundary's `0x05` is the loaded plan's. *Keep the plan* never appears | the target changes mid-block |
-| B2.2 | **Inside 30 s of the boundary.** Ride a copy of the workout whose middle blocks are **45 s** long | Any answer that takes more than 15 s lands inside the last 30 s and is dropped: every boundary's `0x05` is the loaded plan's | as above |
+| B2.1 | **Older than 60 s.** About **15 s before** the 11:00 boundary, have the instance paused (in `apps/instance/deploy/home`: `docker compose pause instance`). Keep it paused until **75 s after** the boundary, then `docker compose unpause instance`. The request that leaves at 11:00 gets no answer while the instance is paused, and the device drops it at 60 s | **Nothing is shown and nothing is said**: not the one short line, not a sentence. *Keep the plan* never appears. The 17:00 boundary's `0x05` is the loaded plan's | the target changes mid-block |
+| B2.2 | **Inside 30 s of the boundary.** Ride a copy, *Re-plan check, short*, in which blocks 2 to 5 are **steady, 45 s, 65 %**. The one request leaves at 5:00, as block 2 begins; block 3 begins at 5:45 | An answer later than 5:15 is dropped, and nothing is shown. **An answer by 5:15 is in time**, and is shown and read as in B1: record which it was, from the job's `seconds` in the job table. Every boundary's `0x05` is the loaded plan's unless a move was shown | as above |
 
-**Fails P2 or P5 if:** any boundary `0x05` differs from the loaded plan's after a late answer, read
-from the log; or a re-plan sentence is shown for a proposal that arrived late. The job table should
-show the job itself **succeeded** — the instance answered; the device refused it.
+**Fails P2 or P5 if:** a re-plan sentence is shown for a request older than 60 s, or for an answer
+that arrived inside the last 30 s of the block it was asked in; or any boundary `0x05` differs from
+the loaded plan's after such an answer, read from the log. **The job table**: in B2.1 the job is
+most likely **no row at all**: the instance is paused before 11:00, so the call that hangs is the key
+read that opens the session, and the device gives up on it before any job is started. A row
+exists only if the start got through, and then it is **`cancelled`** by the device or **`failed`**
+with `out-of-time` if its 45 s ran out first. It is never a `succeeded` job that changed the plan.
 
 ### B3 — the instance stopped mid-ride
 
@@ -460,11 +606,27 @@ most) **and ADR 0036 D-3(a)** (nothing that works with no instance starts to nee
 
 | Step | What to do | What should happen | ⚠️ Stop if |
 |---|---|---|---|
-| B3.1 | Re-plans on, riding block 2 with the hold running. Have the instance **stopped** (`docker compose -f apps/instance/deploy/home/compose.yaml stop instance`). Ride through two boundaries | The ride carries on. **The hold keeps working** in block 2. Each boundary's `0x05` is the loaded plan's. At most one short line says re-plans are not available. **No write is caused by the failure**: no `0x05` at the moment the instance went, no `0x08`, no `0x00` | the target changes at the moment the instance stops, or the workout pauses or ends |
-| B3.2 | Have the instance started again. Ride through one more boundary | Either re-plans carry on at the next boundary or they stay off for the ride; **record which**. No burst of requests: at most one job in flight (the job table shows no cluster of rows at the restart) | |
+| B3.1 | Riding block 2 with the hold running, have the instance **stopped** (`docker compose stop instance`). Ride through the 11:00 and 17:00 boundaries | The ride carries on. **The hold keeps working** in block 2. Each boundary's `0x05` is the loaded plan's. From 11:00 the panel shows, and keeps showing, with no label and not spoken, *"No re-plan could be asked for just now. The workout carries on as planned."*, one line and no more. **No write is caused by the failure**: no `0x05` at the moment the instance went, no `0x08`, no `0x00` | the target changes at the moment the instance stops, or the workout pauses or ends |
+| B3.2 | Have the instance started again (`docker compose up -d instance`; wait for `/ready`). Ride through the 23:00 boundary | **By the code, no request leaves at 23:00.** The 11:00 key read found the instance unreachable, which closed the session (`why: 'keys'`) and ended the asking for this workout, so the job table shows **no row** at 17:00 or 23:00 and no burst at the restart. This is a **known defect, not a pass**: an outage is treated as permanent, against the module header. Record what you saw. If a request did leave at 23:00, record that too, as the code was then not as read | |
 
 **Fails P8 if:** any write in the log coincides with the instance stopping; the workout paused or
-ended; or more than one short line was shown.
+ended; more than one line was shown; or more than one job was made at the restart. B3.2 is
+**filed as a defect** when no request leaves after the restart (fail-safe, so not a P8 failure).
+
+### B8 — *Switch re-plans off* mid-workout
+
+**Checks D-7** (*"A per-ride switch turns re-plans off"*) and the privacy policy's *"nothing more is
+sent"*.
+
+| Step | What to do | What should happen | ⚠️ Stop if |
+|---|---|---|---|
+| B8.1 | Re-plans on. Ride past 5:00. Count the instance's re-plan jobs. If a move is waiting, leave it | ***Switch re-plans off*** is on the row of *End workout* | |
+| B8.2 | Press ***Switch re-plans off*** before 11:00, and ride past 17:00 | The button goes, and the panel says *"Re-plans are off for the rest of this workout. Nothing more is sent, and the plan stays as it is."* A waiting move is dropped with it, and its block is ridden as loaded. The press writes nothing | a block after the press is not the loaded plan's |
+| B8.3 | *End workout*, and count the jobs again | **No row was added after the press**: no request at 11:00 or 17:00 | |
+
+**Fails D-7 if:** a job was made after the press, or a move waiting at the press reached its block.
+In the P9 record, a move dropped by the press is followed by `not-applied` with `why`
+`switched-off`.
 
 ### B5 — *Stop* with a proposal in flight (run last)
 
@@ -472,20 +634,21 @@ ended; or more than one short line was shown.
 
 | Step | What to do | What should happen | ⚠️ Stop if |
 |---|---|---|---|
-| B5.1 | Re-plans on. Ride to a boundary. **Within 10 s after it**, while the summary's job is still running, press *Stop* and confirm | **Exactly one `0x08`**, and **no `0x05` after it** for 60 s. Nothing about a re-plan is shown afterwards | — step off if the load stays (Safety item 7) |
-| B5.2 | Count the instance's jobs and read the newest row | The job in flight is **`cancelled`**, not left `running` | |
+| B5.1 | Re-plans on. Ride to the 5:00 boundary. **Within about 3 s after it**, while the request's job is still running, press ***Stop***, then ***Yes, stop the ride*** | **Exactly one `0x08`**, and **no `0x05` after it** for 60 s. Nothing about a re-plan is shown afterwards | — step off if the load stays (Safety item 7) |
+| B5.2 | Read the job table's newest re-plan row | The job in flight is **`cancelled`**, not left `running`. If *Stop* landed before the start returned, **no new row** is also valid: no job was made | |
 
 **Fails D-8 if:** any `0x05` is timestamped after the `0x08`; or a re-plan sentence appears after
-*Stop*. A job left `running` or ending `succeeded` is a finding against #1244's cancel, and it
-caused no write.
+*Stop*. A job left `running`, or one that was already `succeeded` before the press, is not a
+failure of D-8: in the first case record it against #1244's cancel; in the second, the job was
+faster than the press. Its `seconds` says which. Neither caused a write.
 
 ### B results
 
-**Instance (build, where it runs, model source):** ______________
+**Instance (build, where it runs, model):** ______________
 **Trainer, strap, tablet build:** ______________ **Date:** ______________
-**Job-table count before the session:** ______________
+**Re-plan job count before the session:** ______________
 
-| Step | Rules | Result (pass / fail / not run) | Time by the clock | Boundary `0x05` values: loaded plan → seen | The sentence shown, word for word | Job-table rows added, and their `status` / `failure` | Notes |
+| Step | Rules | Result (pass / fail / not run) | Time by the clock | Boundary `0x05` values: loaded plan → seen | The sentence shown, word for word | Job-table rows added, and their `status` / `failure` / `result` | Notes |
 |---|---|---|---|---|---|---|---|
 | B6.1 | P7 | | | | | | |
 | B6.2 | P7, D-10 | | | | | | |
@@ -495,22 +658,29 @@ caused no write.
 | B1.4 | P9 | | | | | | |
 | B4.1 | D-7 | | | | | | |
 | B4.2 | D-7 | | | | | | |
+| B4.3 | D-7 | | | | | | |
+| B7.1 | D-8 | | | | | | |
+| B7.2 | D-8 | | | | | | |
 | B2.1 | P5 | | | | | | |
 | B2.2 | P2 | | | | | | |
 | B3.1 | P8, D-9 | | | | | | |
 | B3.2 | P8 | | | | | | |
+| B8.1 | D-7 | | | | | | |
+| B8.2 | D-7 | | | | | | |
+| B8.3 | D-7, D-10 | | | | | | |
 | B5.1 | D-8 | | | | | | |
 | B5.2 | D-8 | | | | | | |
 
 | Reading | Value |
 |---|---|
-| B1: rides it took to get one accepted move | |
+| B1: rides it took to get one accepted move, and which nudge, if any | |
 | B1: seconds from a boundary to the sentence appearing (the round trip, as a rider sees it) | |
 | B1: the move, the reason, and the watts the device computed for the changed block | |
 | B1: P9's record, copied out | |
-| B2.1: how late the answer was (s), and what the device showed | |
+| B2.1: what the device showed, and the job's `status` and `failure` | |
+| B2.2: the answer's time after 5:00 (s), and whether it was shown | |
 | B3: the one line shown while the instance was stopped, word for word | |
-| B6: job-table count before and after | |
+| B6 and B8: job count before and after | |
 
 **Did a re-plan ever feel like the app deciding for you mid-effort, in your own words?**
 ______________
@@ -520,8 +690,8 @@ ______________
 ## After the session
 
 1. Save both logs. They name the trainer's Bluetooth address; do not commit them.
-2. Copy the answers into the tables above, in a pull request that changes nothing else but the
-   corrections "Before Part B" asks for.
+2. Copy the answers into the tables above, in a pull request that changes nothing else, except a
+   correction to Part B where the code on the day differed from what it says.
 3. Tick Parts A and B on #733, or say there which step failed.
 4. **A failed step is its own issue**, filed with the row and the log excerpt, labelled as trainer
    control. A target above the ceiling, a rise during silence, a write after *Stop* and a change to
@@ -537,5 +707,6 @@ ______________
   check what was *sent*.
 - **Anything about a model's judgement.** B1 checks that a proposal stayed inside its bounds, not
   that it was a good idea (ADR 0048 D-5 says the same of the validator).
-- **Part B, until it has been re-read against merged code.** Its control names, its sentences and
-  its job-table query describe a design.
+- **That Part B's reading of the code is right.** It was re-read against `main` on 2026-10-14,
+  not run: its control names, sentences and job-table query are quoted from code nobody had yet
+  ridden.

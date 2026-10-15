@@ -21,6 +21,7 @@ import {
   type ClientMessage,
   type FrameRider,
   type RoomMessage,
+  type StandingsRider,
 } from '@onyourleft/protocol';
 import { PHYSICS_VERSION } from '@onyourleft/physics';
 
@@ -164,6 +165,16 @@ export class ScriptedRoom {
     this.send({ type: 'frame', tick, riders });
   }
 
+  /** A race names a rider (#1347). */
+  name(riderId: number, displayName: string): void {
+    this.send({ type: 'name', riderId, displayName });
+  }
+
+  /** A race's standings, in the room's order, gaps to this socket's rider (#1347). */
+  standings(tick: number, riders: readonly StandingsRider[]): void {
+    this.send({ type: 'standings', tick, riders });
+  }
+
   /** The room (or the tunnel in front of it) closes the newest socket. */
   closeFromServer(code = 1006, reason = ''): void {
     const socket = this.socket;
@@ -181,5 +192,20 @@ export function frameRider(riderId: number, metres: number, metresPerSecond = 10
     centimetresPerSecond: Math.round(metresPerSecond * 100),
     draftPercent: 0,
     flags: 0,
+  };
+}
+
+/** A standings row: `gapSeconds` behind the recipient (negative ahead), at `wattsPerKilogram`. */
+export function standingsRider(
+  riderId: number,
+  gapSeconds: number,
+  wattsPerKilogram: number,
+  flags = 0,
+): StandingsRider {
+  return {
+    riderId,
+    gapDeciseconds: Math.round(gapSeconds * 10),
+    wattsPerKilogramTenths: Math.round(wattsPerKilogram * 10),
+    flags,
   };
 }

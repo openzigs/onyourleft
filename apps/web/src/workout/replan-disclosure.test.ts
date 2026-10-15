@@ -530,6 +530,10 @@ describe('what the text says of this device, held to its code (#1244)', () => {
 describe('the re-plan disclosure in the privacy policy (#1245)', () => {
   it('is there word for word, in the order the screen shows it', () => {
     expect(POLICY).toContain(TEXT);
+    // #1329: shown WITH the switch, not beside it — its headline is under the
+    // switch, above the list of workouts, and the other eight sentences are
+    // under the list (`ride/WorkoutPanel.tsx`).
+    expect(POLICY).toContain(`This is what you are shown with it: ${TEXT}`);
   });
 
   it('goes red on a policy that drops something a summary carries — the control', () => {

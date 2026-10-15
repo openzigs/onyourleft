@@ -343,7 +343,11 @@ describe('backups hold ciphertext only (#1097)', () => {
     expect(cli(elsewhere, ['model-key', 'status'], { secret: SECRET }).report).toMatchObject({
       readable: true,
     });
-  });
+    // Five child processes: 3 456 ms on green `main` (38337365635, EPYC 7763)
+    // and 3 355 ms under coverage (nightly 38384633205, EPYC 7763), 69 % of
+    // Vitest's 5 s default. About three times the slowest CI figure
+    // (docs/agents/ci.md §4c, #1262); nothing it does is changed.
+  }, 11_000);
 });
 
 describe('model-key clear (#1097)', () => {

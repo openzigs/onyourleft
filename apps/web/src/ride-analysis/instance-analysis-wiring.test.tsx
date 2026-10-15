@@ -44,13 +44,19 @@ import {
 import { AppShell } from '../shell/AppShell';
 import type { CapabilityProbe } from '../support/bluetooth-support';
 import { activateWithKeyboard, mount, settle, type Mounted } from '../testing/mount';
-import { createInstanceAnalysis, INSTANCE_ASK_TEXT } from './instance-analysis';
+import {
+  createInstanceAnalysis,
+  INSTANCE_ASK_TEXT,
+  INSTANCE_FAILURE_TEXT,
+} from './instance-analysis';
 import type { InstanceAnalysisPort } from './instance-analysis-port';
+import { HOSTED_OFFER_STORAGE_KEY, readHostedOffer } from './hosted-settings';
 import {
   failedWith,
   progress,
   scriptedJobs,
   section,
+  startedWith,
   succeeded,
   withdrawn,
   SCRIPTED_JOB_ID,
@@ -433,5 +439,107 @@ describe('the real detail route, with the port main.tsx builds', () => {
     expect(document.body.textContent).toContain(WRITE_UP_NO_INSTANCE_BEFORE);
     for (let turn = 0; turn < 20; turn += 1) await settle();
     expect(scripted.requests).toStrictEqual([]);
+  });
+});
+
+describe('the hosted source on the real page, offered from the note main.tsx reads (#1228)', () => {
+  const INSTANCE = 'https://instance.example';
+  const ENDPOINT = 'https://models.example';
+
+  function noteStorage(): Storage {
+    const held = new Map<string, string>();
+    return {
+      get length() {
+        return held.size;
+      },
+      clear: () => held.clear(),
+      key: (index) => [...held.keys()][index] ?? null,
+      getItem: (key) => held.get(key) ?? null,
+      setItem: (key, value) => held.set(key, value),
+      removeItem: (key) => held.delete(key),
+    };
+  }
+
+  /** As `main.tsx` builds it: the offer is `readHostedOffer` over the device's storage. */
+  function builtWithHosted(
+    scripted: ScriptedJobs,
+    storage: Storage,
+  ): { port: InstanceAnalysisPort; guards: () => number } {
+    let guards = 0;
+    const port = createInstanceAnalysis({
+      store,
+      athleteId: ATHLETE_A,
+      connected: () => true,
+      session: async () => Promise.resolve(scripted.session),
+      cameraConsented: () => false,
+      now: () => unixSeconds(1_800_000_000),
+      wait: async () => Promise.resolve(),
+      hosted: {
+        endpoint: () => readHostedOffer(storage, INSTANCE),
+        sendGuard: async () => {
+          guards += 1;
+          return Promise.resolve(true);
+        },
+      },
+    });
+    return { port, guards: () => guards };
+  }
+
+  const hostedButton = (): HTMLButtonElement | undefined =>
+    button(INSTANCE_ASK_LABEL['instance-hosted']);
+
+  it('with no consent noted, offers no hosted press and sends nothing hosted', async () => {
+    const id = await seededRide();
+    const scripted = scriptedJobs([succeeded(WRITE_UP)]);
+    const built = builtWithHosted(scripted, noteStorage());
+    await openShell(id, built.port);
+    await until(() => askButton() !== undefined, 'the instance press appears');
+    expect(hostedButton()).toBeUndefined();
+    expect(document.body.textContent).not.toContain(ENDPOINT);
+    for (let turn = 0; turn < 20; turn += 1) await settle();
+    expect(built.guards()).toBe(0);
+    expect(scripted.requests).toStrictEqual([]);
+  });
+
+  it('with consent noted, the hosted press starts a job with source instance-hosted, and saves it', async () => {
+    const id = await seededRide();
+    const scripted = scriptedJobs([succeeded(WRITE_UP)]);
+    const storage = noteStorage();
+    storage.setItem(
+      HOSTED_OFFER_STORAGE_KEY,
+      JSON.stringify({ instance: INSTANCE, endpoint: ENDPOINT }),
+    );
+    const built = builtWithHosted(scripted, storage);
+    await openShell(id, built.port);
+    await until(() => hostedButton() !== undefined, 'the hosted press appears');
+    expect(document.body.textContent).toContain(ENDPOINT);
+    await activateWithKeyboard(hostedButton()!);
+    await until(() => liveRegion() === WRITE_UP_SAVED, 'the write-up is saved');
+    expect(built.guards()).toBe(1);
+    expect(startedWith(scripted)?.source).toBe('instance-hosted');
+    expect((await saved(id))?.source).toBe('instance-hosted');
+  });
+
+  it('withdrawn after the page was drawn, the press still shown sends nothing and says why', async () => {
+    const id = await seededRide();
+    const scripted = scriptedJobs([succeeded(WRITE_UP)]);
+    const storage = noteStorage();
+    storage.setItem(
+      HOSTED_OFFER_STORAGE_KEY,
+      JSON.stringify({ instance: INSTANCE, endpoint: ENDPOINT }),
+    );
+    const built = builtWithHosted(scripted, storage);
+    await openShell(id, built.port);
+    await until(() => hostedButton() !== undefined, 'the hosted press appears');
+    // The Instance screen, in another tab, read a withdrawal and forgot the note.
+    storage.removeItem(HOSTED_OFFER_STORAGE_KEY);
+    await activateWithKeyboard(hostedButton()!);
+    await until(
+      () => document.body.textContent.includes(INSTANCE_FAILURE_TEXT.hosted_unavailable),
+      'the page says the service is not available',
+    );
+    expect(built.guards()).toBe(0);
+    expect(scripted.requests).toStrictEqual([]);
+    expect(await saved(id)).toBeUndefined();
   });
 });
