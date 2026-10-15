@@ -21,7 +21,7 @@ import { ensureLocalAthlete, LOCAL_ATHLETE } from '../local-athlete';
 import { createInstancePort, type InstanceStorage } from './instance-port';
 import type { InstanceSend } from './instance-transport';
 import { readInstanceAccount } from './sign-in';
-import { createStatementsPort, type StatementsPort } from './statements-port';
+import { APPEAL_REFUSAL_TEXT, createStatementsPort, type StatementsPort } from './statements-port';
 import { LOADED_LOCALLY } from './testing';
 
 interface TestDevice {
@@ -203,6 +203,49 @@ describe('the statements of reasons about this rider (#910)', () => {
       '/v1/auth/leave-session',
       '/v1/statements',
     ]);
+  });
+
+  it('appeals while SUSPENDED through the way-out session, and reads the appeal back (#911)', async () => {
+    const { port, restrict, sent } = await connected();
+    await restrict('suspend');
+    const read = await port.read();
+    const statementId = read.kind === 'statements' ? read.statements[0]?.statementId : undefined;
+    if (statementId === undefined) throw new Error('no statement');
+    const before = sent.length;
+    expect(await port.appeal(statementId, 'I was quoting another rider.')).toEqual({
+      kind: 'filed',
+    });
+    expect(sent.slice(before)).toEqual([
+      `/v1/statements/${String(statementId)}/appeal`,
+      '/v1/auth/challenge',
+      '/v1/auth/leave-session',
+      `/v1/statements/${String(statementId)}/appeal`,
+    ]);
+    expect(await port.read()).toEqual({
+      kind: 'statements',
+      statements: [
+        expect.objectContaining({
+          appeal: expect.objectContaining({
+            grounds: 'I was quoting another rider.',
+            outcome: null,
+          }) as unknown,
+        }),
+      ],
+    });
+    expect(await port.appeal(statementId, 'Again.')).toEqual({
+      kind: 'refused',
+      text: APPEAL_REFUSAL_TEXT.already,
+    });
+  });
+
+  it('sends nothing for empty grounds', async () => {
+    const { port, sent } = await connected();
+    const before = sent.length;
+    expect(await port.appeal(1, '   ')).toEqual({
+      kind: 'refused',
+      text: APPEAL_REFUSAL_TEXT.grounds,
+    });
+    expect(sent.length).toBe(before);
   });
 
   it('sends nothing on a device connected to no instance', async () => {

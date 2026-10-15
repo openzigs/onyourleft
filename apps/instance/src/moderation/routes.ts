@@ -121,7 +121,30 @@ const statementView = object({
   notifierNamed: nullableString,
   moderatorConflict: { type: 'boolean' },
   automated: { type: 'boolean' },
+  appeal: {
+    type: ['object', 'null'],
+    properties: {
+      appealId: integer,
+      filedAt: integer,
+      grounds: string,
+      outcome: nullableString,
+      decision: nullableString,
+      moderatorConflict: { type: ['boolean', 'null'] },
+      decidedAt: nullableInteger,
+    },
+    required: [
+      'appealId',
+      'filedAt',
+      'grounds',
+      'outcome',
+      'decision',
+      'moderatorConflict',
+      'decidedAt',
+    ],
+    additionalProperties: false,
+  },
   redress: object({
+    appeal: { type: 'boolean' },
     contactEmail: nullableString,
     outOfCourt: { type: 'boolean' },
     court: { type: 'boolean' },
@@ -178,12 +201,118 @@ export const MODERATION_ROUTES: readonly Route[] = [
       contentType: 'application/json',
       schema: object({ statements: { type: 'array', items: statementView } }),
     },
+    handle: async (context) => {
+      const moderation = moderationOf(context);
+      const caller = callerId(context);
+      const appeals = await moderation.appeals(caller);
+      return json({
+        statements: (await moderation.statements(caller)).map((each) =>
+          toStatementView(
+            each,
+            context.config.legal,
+            appeals.find((appeal) => appeal.statementLogId === each.logId),
+          ),
+        ),
+      });
+    },
+  },
+  {
+    method: 'POST',
+    path: '/v1/statements/{statementId}/appeal',
+    operationId: 'appealStatement',
+    reaches: 'own',
+    // #911: a SUSPENDED rider appeals through the way-out session, and that
+    // grants nothing else.
+    admitsSuspended: true,
+    summary:
+      'Appeal a decision about this athlete (#911): the statement of reasons it explains, with the grounds (at most 2000 characters, no coordinate). One appeal per decision. A suspended rider appeals through the way-out session. A statement that is not about the caller is `not_found`, as one that does not exist is.',
+    identity: true,
+    auth: 'session',
+    request: object({ grounds: string }),
+    errors: ['unauthenticated', 'validation_failed', 'not_found', 'already_appealed'],
+    response: { contentType: 'application/json', schema: object({ appealId: integer }) },
+    handle: async (context) =>
+      answer(
+        await moderationOf(context).appeal(
+          callerId(context),
+          context.params.statementId ?? '',
+          context.json.grounds,
+        ),
+        (value) => json(value),
+      ),
+  },
+  {
+    method: 'GET',
+    path: '/v1/moderation/appeals',
+    sealed: 'only',
+    operationId: 'listOpenAppeals',
+    reaches: 'moderation',
+    summary:
+      'The moderators’ queue of appeals (#911): every appeal not yet decided, oldest first, with the decision it appeals.',
+    identity: true,
+    auth: 'session',
+    errors: ['unauthenticated'],
+    response: {
+      contentType: 'application/json',
+      schema: object({
+        appeals: {
+          type: 'array',
+          items: object({
+            appealId: integer,
+            filedAt: integer,
+            grounds: string,
+            appellantAthleteId: string,
+            statementId: integer,
+            restriction: string,
+            facts: string,
+            decidedBy: string,
+          }),
+        },
+      }),
+    },
     handle: async (context) =>
       json({
-        statements: (await moderationOf(context).statements(callerId(context))).map((each) =>
-          toStatementView(each, context.config.legal),
-        ),
+        appeals: (await moderationOf(context).openAppeals()).map(({ appeal, statement }) => ({
+          appealId: appeal.id,
+          filedAt: appeal.filedAt,
+          grounds: appeal.grounds,
+          appellantAthleteId: appeal.appellantAthleteId,
+          statementId: statement.logId,
+          restriction: statement.restriction,
+          facts: statement.facts,
+          decidedBy: statement.actorAthleteId,
+        })),
       }),
+  },
+  {
+    method: 'POST',
+    path: '/v1/moderation/appeals/{appealId}/decide',
+    sealed: 'only',
+    operationId: 'decideAppeal',
+    reaches: 'moderation',
+    summary:
+      'Decide an appeal (#911): `upheld` leaves the restriction; `reversed` lifts the suspension or restores the display name, in one transaction with the log entry. `decision` is what the rider is told. A moderator who took the decision appealed may decide it; the conflict is declared to the rider and recorded (the owner’s ruling of 2026-09-30).',
+    identity: true,
+    auth: 'session',
+    request: object({
+      outcome: { type: 'string', enum: ['upheld', 'reversed'] },
+      decision: string,
+    }),
+    errors: ['unauthenticated', 'validation_failed', 'moderation_not_applicable'],
+    response: {
+      contentType: 'application/json',
+      schema: object({ logId: integer, moderatorConflict: { type: 'boolean' } }),
+    },
+    handle: async (context) =>
+      answer(
+        await moderationOf(context).decideAppeal(
+          callerId(context),
+          context.params.appealId ?? '',
+          context.json.outcome,
+          context.json.decision,
+        ),
+        (value) => json(value),
+      ),
   },
   {
     method: 'GET',

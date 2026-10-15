@@ -164,6 +164,26 @@ async function anotherAthlete(world: IdentityInstance): Promise<string> {
   return (await world.signIn(await testDevice())).body.athleteId as string;
 }
 
+/** A rider whose display name a moderator hid, with the statement it came with (#911). */
+async function restricted(
+  world: IdentityInstance,
+): Promise<{ token: string; statementId: number }> {
+  const { token } = await signedIn(world);
+  const me = (await (await send(world, 'GET', '/v1/auth/session', token)).json()) as {
+    athleteId: string;
+  };
+  const hidden = (await (
+    await send(
+      world,
+      'POST',
+      `/v1/moderation/athletes/${me.athleteId}/hide-display-name`,
+      await moderatorToken(world),
+      { reason: 'Slur in the name', statement: TEST_STATEMENT },
+    )
+  ).json()) as { logId: number };
+  return { token, statementId: hidden.logId };
+}
+
 async function moderatorAction(world: IdentityInstance, path: string): Promise<Response> {
   const target = await anotherAthlete(world);
   return send(
@@ -396,6 +416,35 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
       { reason: 'Slur in the name', statement: TEST_STATEMENT },
     );
     return send(world, 'GET', '/v1/statements', token);
+  },
+  // #911: a rider appeals the statement about them, and the moderator decides it.
+  appealStatement: async (world) => {
+    const { token, statementId } = await restricted(world);
+    return send(world, 'POST', `/v1/statements/${String(statementId)}/appeal`, token, {
+      grounds: 'The name is a family name, not a slur.',
+    });
+  },
+  listOpenAppeals: async (world) => {
+    const { token, statementId } = await restricted(world);
+    await send(world, 'POST', `/v1/statements/${String(statementId)}/appeal`, token, {
+      grounds: 'The name is a family name, not a slur.',
+    });
+    return send(world, 'GET', '/v1/moderation/appeals', await moderatorToken(world));
+  },
+  decideAppeal: async (world) => {
+    const { token, statementId } = await restricted(world);
+    const filed = (await (
+      await send(world, 'POST', `/v1/statements/${String(statementId)}/appeal`, token, {
+        grounds: 'The name is a family name, not a slur.',
+      })
+    ).json()) as { appealId: number };
+    return send(
+      world,
+      'POST',
+      `/v1/moderation/appeals/${String(filed.appealId)}/decide`,
+      await moderatorToken(world),
+      { outcome: 'reversed', decision: 'It is a family name. Restored.' },
+    );
   },
   getModerationLog: async (world) =>
     send(world, 'GET', '/v1/moderation/log', await moderatorToken(world)),

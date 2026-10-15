@@ -216,6 +216,32 @@ names a court as the other route. **A suspended rider reads theirs too**, throug
 (below), which reaches their statements and nothing more. Nobody else's statements are shown, and a
 report's or a notice's sender never is, unless you named them.
 
+### Appeals
+
+A rider can **appeal** a decision a statement explains (#911): on the Instance screen, beside the
+statement, they say why it is wrong (`POST /v1/statements/{statementId}/appeal`, at most 2,000
+characters). **A suspended rider can appeal too**, through the way-out session, which grants them
+nothing else. Each decision can be appealed once. An appeal is kept with the statement it names.
+
+Appeals wait in the Moderation screen's *Appeals* (`GET /v1/moderation/appeals`), oldest first, with
+what the statement said. Decide each one (`POST /v1/moderation/appeals/{appealId}/decide`):
+
+| Outcome | What happens |
+|---|---|
+| **Uphold** (`upheld`) | The restriction stands. |
+| **Reverse** (`reversed`) | The suspension is lifted, or the display name is shown again, **in the same transaction** as the log entry. A restriction already lifted, or a name the rider has since replaced, stays as it is. |
+
+Either way, your answer is shown to the rider and written to the log, as `uphold_appeal` or
+`reverse_appeal`. An appeal is decided once: the schema refuses to change a decided appeal or to
+delete one, and erasing the account keeps it, as it keeps the log.
+
+**An appeal against your own decision.** With one moderator, every appeal is against a decision you
+took. The owner ruled on 2026-09-30 that the moderator decides it, declares the conflict and logs it.
+So you may decide it, the screen says it is a conflict, and the rider is told that the moderator who
+decided the appeal took the decision appealed. The appeal records the conflict. A complaint that is
+not an appeal against a decision, such as that the instance is not following its own procedure, comes
+by the contact address on the legal page (`/legal`).
+
 To anyone who is not a moderator, every moderation route answers as though it does not exist.
 
 ## What the log is, and what erasure does to it
@@ -248,7 +274,8 @@ refuses to undo 0007 while the log holds a single entry, and changes nothing.
   their device keys). It lasts an hour and reaches exactly two things: the account export
   (`GET /v1/account/export`) and deleting the account (`DELETE /v1/account`, which needs one of their
   recovery codes or a fresh signature from one of their devices, like anyone's), and, since #910,
-  the statements of reasons about their account (`GET /v1/statements`). Everything else
+  the statements of reasons about their account (`GET /v1/statements`), and, since #911, an appeal
+  against one of them. Everything else
   answers `account_suspended`. Lifting the suspension ends the way-out session; they then sign in as
   usual. ⚠️ This used to say lifting the suspension was the only way to give a suspended rider
   their data, and a moderator who remembers that is reading the old file. Deleting the account keeps

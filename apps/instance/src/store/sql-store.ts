@@ -51,6 +51,7 @@ import type {
   ModerationLogTable,
   NoticeTable,
   StatementTable,
+  AppealTable,
   RecoveryCodeTable,
   RecoveryEmailConfirmationTable,
   RecoveryEmailTable,
@@ -564,6 +565,8 @@ export interface StatementFields {
 export interface Statement extends StatementFields {
   readonly logId: number;
   readonly targetAthleteId: string;
+  /** The moderator who took the decision (#911: an appeal's conflict is theirs). Never shown to the rider. */
+  readonly actorAthleteId: string;
   /** The action it explains: `suspend`, `hide_display_name`. */
   readonly restriction: string;
   readonly at: number;
@@ -592,7 +595,43 @@ export interface ModerationAction {
  * included — which was refused and changed nothing (#891's review).
  */
 export type LoggedActionKind =
-  ModerationActionKind | 'mint_invite' | `refused_${ModerationActionKind}`;
+  | ModerationActionKind
+  | 'mint_invite'
+  | `refused_${ModerationActionKind}`
+  /** An appeal decided (#911): the restriction stands, or it is reversed. */
+  | 'uphold_appeal'
+  | 'reverse_appeal';
+
+/** An appeal against a restriction (#911), with its decision once there is one. */
+export interface Appeal {
+  readonly id: number;
+  /** The statement of reasons — and so the log entry — it appeals. */
+  readonly statementLogId: number;
+  readonly appellantAthleteId: string;
+  readonly grounds: string;
+  /** Unix seconds. */
+  readonly filedAt: number;
+  readonly outcome: 'upheld' | 'reversed' | null;
+  /** What the rider is told, once decided. */
+  readonly decision: string | null;
+  /** The deciding moderator took the decision appealed, and declared it. */
+  readonly moderatorConflict: boolean | null;
+  readonly decidedAt: number | null;
+  readonly decidedLogId: number | null;
+}
+
+/** What filing an appeal did (#911). */
+export type AppealFiled =
+  | { readonly outcome: 'filed'; readonly appealId: number }
+  /** No statement of that id about this athlete — the same answer whether or not it is somebody else's. */
+  | { readonly outcome: 'not_found' }
+  | { readonly outcome: 'already_appealed' };
+
+/** What deciding an appeal did (#911). */
+export type AppealDecided =
+  | { readonly outcome: 'applied'; readonly logId: number; readonly moderatorConflict: boolean }
+  | { readonly outcome: 'not_found' }
+  | { readonly outcome: 'not_applicable' };
 
 /** One entry of the append-only moderation log. */
 export interface ModerationLogEntry extends Omit<ModerationAction, 'action'> {
@@ -1421,6 +1460,34 @@ export interface SqlStore {
   listNotices(): Promise<readonly Notice[]>;
   /** The statements of reasons about this athlete, newest first (#910). */
   listStatements(athleteId: string): Promise<readonly Statement[]>;
+  /**
+   * File an appeal against the statement `statementLogId` (#911) — only one
+   * about the appellant, and only once.
+   */
+  putAppeal(appeal: {
+    readonly statementLogId: number;
+    readonly appellantAthleteId: string;
+    readonly grounds: string;
+    readonly filedAt: number;
+  }): Promise<AppealFiled>;
+  /** The appeals this athlete filed, newest first (#911). */
+  listAppeals(athleteId: string): Promise<readonly Appeal[]>;
+  /** The moderators' queue: every appeal not yet decided, oldest first (#911). */
+  listOpenAppeals(): Promise<readonly Appeal[]>;
+  /**
+   * Decide an appeal, in ONE transaction (#911): a reversal lifts the
+   * suspension or restores the display name the statement explains, the
+   * decision is appended to the log, and the appeal records it — or nothing
+   * changes. The conflict is the store's to see: the deciding moderator took
+   * the decision appealed.
+   */
+  decideAppeal(decision: {
+    readonly appealId: number;
+    readonly actorAthleteId: string;
+    readonly outcome: 'upheld' | 'reversed';
+    readonly decision: string;
+    readonly at: number;
+  }): Promise<AppealDecided>;
 
   /**
    * Apply a moderator action and append it to the log, in ONE transaction:
@@ -1702,9 +1769,12 @@ const noticeFrom = (row: Selectable<NoticeTable>): Notice => ({
   bonaFide: row.bona_fide === 1,
 });
 
-const statementFrom = (row: Selectable<StatementTable>): Statement => ({
+const statementFrom = (
+  row: Selectable<StatementTable> & { readonly actor_athlete_id: string },
+): Statement => ({
   logId: row.log_id,
   targetAthleteId: row.target_athlete_id,
+  actorAthleteId: row.actor_athlete_id,
   restriction: row.restriction,
   facts: row.facts,
   decidedOn: row.decided_on,
@@ -1714,6 +1784,19 @@ const statementFrom = (row: Selectable<StatementTable>): Statement => ({
   moderatorConflict: row.moderator_conflict === 1,
   endsAt: row.ends_at,
   at: row.at,
+});
+
+const appealFrom = (row: Selectable<AppealTable>): Appeal => ({
+  id: row.id,
+  statementLogId: row.statement_log_id,
+  appellantAthleteId: row.appellant_athlete_id,
+  grounds: row.grounds,
+  filedAt: row.filed_at,
+  outcome: row.outcome,
+  decision: row.decision,
+  moderatorConflict: row.moderator_conflict === null ? null : row.moderator_conflict === 1,
+  decidedAt: row.decided_at,
+  decidedLogId: row.decided_log_id,
 });
 
 const moderationLogFrom = (row: Selectable<ModerationLogTable>): ModerationLogEntry => ({
@@ -3953,14 +4036,139 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
         return Number(row.n);
       }),
 
+    putAppeal: (appeal) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx): Promise<AppealFiled> => {
+          const statement = await trx
+            .selectFrom('statement')
+            .select('log_id')
+            .where('log_id', '=', appeal.statementLogId)
+            .where('target_athlete_id', '=', appeal.appellantAthleteId)
+            .executeTakeFirst();
+          if (statement === undefined) return { outcome: 'not_found' };
+          const held = await trx
+            .selectFrom('appeal')
+            .select('id')
+            .where('statement_log_id', '=', appeal.statementLogId)
+            .executeTakeFirst();
+          if (held !== undefined) return { outcome: 'already_appealed' };
+          const inserted = await trx
+            .insertInto('appeal')
+            .values({
+              statement_log_id: appeal.statementLogId,
+              appellant_athlete_id: appeal.appellantAthleteId,
+              grounds: appeal.grounds,
+              filed_at: appeal.filedAt,
+              outcome: null,
+              decision: null,
+              moderator_conflict: null,
+              decided_at: null,
+              decided_log_id: null,
+            })
+            .returning('id')
+            .executeTakeFirstOrThrow();
+          return { outcome: 'filed', appealId: inserted.id };
+        }),
+      ),
+
+    listAppeals: (athleteId) =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('appeal')
+            .selectAll()
+            .where('appellant_athlete_id', '=', athleteId)
+            .orderBy('id', 'desc')
+            .execute()
+        ).map(appealFrom),
+      ),
+
+    listOpenAppeals: () =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('appeal')
+            .selectAll()
+            .where('decided_at', 'is', null)
+            .orderBy('id')
+            .execute()
+        ).map(appealFrom),
+      ),
+
+    decideAppeal: (decision) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx): Promise<AppealDecided> => {
+          const appeal = await trx
+            .selectFrom('appeal')
+            .selectAll()
+            .where('id', '=', decision.appealId)
+            .executeTakeFirst();
+          if (appeal === undefined) return { outcome: 'not_found' };
+          if (appeal.decided_at !== null) return { outcome: 'not_applicable' };
+          const appealed = await trx
+            .selectFrom('statement')
+            .innerJoin('moderation_log', 'moderation_log.id', 'statement.log_id')
+            .select([
+              'statement.restriction as restriction',
+              'statement.target_athlete_id as target',
+              'moderation_log.actor_athlete_id as actor',
+            ])
+            .where('statement.log_id', '=', appeal.statement_log_id)
+            .executeTakeFirstOrThrow();
+          if (decision.outcome === 'reversed') {
+            // Restored only if it still stands: a suspension already lifted,
+            // or a hidden name the rider has since replaced, stays as it is.
+            const athlete = trx.updateTable('athlete').where('id', '=', appealed.target);
+            if (appealed.restriction === 'suspend') {
+              await athlete
+                .set({ suspended_at: null })
+                .where('suspended_at', 'is not', null)
+                .execute();
+            } else if (appealed.restriction === 'hide_display_name') {
+              await athlete
+                .set({ display_name_hidden_at: null })
+                .where('display_name_hidden_at', 'is not', null)
+                .execute();
+            }
+          }
+          const logged = await trx
+            .insertInto('moderation_log')
+            .values({
+              actor_athlete_id: decision.actorAthleteId,
+              action: decision.outcome === 'reversed' ? 'reverse_appeal' : 'uphold_appeal',
+              target_athlete_id: appealed.target,
+              report_id: null,
+              reason: decision.decision,
+              at: decision.at,
+            })
+            .returning('id')
+            .executeTakeFirstOrThrow();
+          const moderatorConflict = appealed.actor === decision.actorAthleteId;
+          await trx
+            .updateTable('appeal')
+            .set({
+              outcome: decision.outcome,
+              decision: decision.decision,
+              moderator_conflict: moderatorConflict ? 1 : 0,
+              decided_at: decision.at,
+              decided_log_id: logged.id,
+            })
+            .where('id', '=', decision.appealId)
+            .execute();
+          return { outcome: 'applied', logId: logged.id, moderatorConflict };
+        }),
+      ),
+
     listStatements: (athleteId) =>
       exclusive(async () =>
         (
           await db
             .selectFrom('statement')
-            .selectAll()
-            .where('target_athlete_id', '=', athleteId)
-            .orderBy('log_id', 'desc')
+            .innerJoin('moderation_log', 'moderation_log.id', 'statement.log_id')
+            .selectAll('statement')
+            .select('moderation_log.actor_athlete_id')
+            .where('statement.target_athlete_id', '=', athleteId)
+            .orderBy('statement.log_id', 'desc')
             .execute()
         ).map(statementFrom),
       ),

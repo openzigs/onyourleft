@@ -334,6 +334,23 @@ export interface StatementTable {
   readonly at: number;
 }
 
+/**
+ * An appeal against a restriction (#911, migration 0028), one per statement.
+ * Decided once, never deleted.
+ */
+export interface AppealTable {
+  readonly id: Generated<number>;
+  readonly statement_log_id: number;
+  readonly appellant_athlete_id: string;
+  readonly grounds: string;
+  readonly filed_at: number;
+  readonly outcome: 'upheld' | 'reversed' | null;
+  readonly decision: string | null;
+  readonly moderator_conflict: 0 | 1 | null;
+  readonly decided_at: number | null;
+  readonly decided_log_id: number | null;
+}
+
 /** A single-use invitation a moderator minted, as its SHA-256 (#775). */
 export interface InviteCodeTable {
   readonly code_sha256: string;
@@ -610,4 +627,5 @@ export interface InstanceDatabase {
   readonly athlete_hosted_consent: AthleteHostedConsentTable;
   readonly notice: NoticeTable;
   readonly statement: StatementTable;
+  readonly appeal: AppealTable;
 }

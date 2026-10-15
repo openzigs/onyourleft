@@ -43,6 +43,8 @@ import {
   NOTICES_RECEIPT_TEXT,
   NOTICES_UNREADABLE_TEXT,
   REPORT_CONFLICT_TEXT,
+  APPEAL_CONFLICT_TEXT,
+  APPEALS_UNREADABLE_TEXT,
   STATEMENT_TEXT,
   SUSPENDED_UNREADABLE_TEXT,
   suspendConfirmation,
@@ -794,5 +796,35 @@ describe('a restriction’s statement of reasons — #910', () => {
     await open(scripted);
     await decide(section('An account'), 'Apologised.', 'Lift the suspension');
     expect(dialog()).toBeNull();
+  });
+});
+
+describe('appeals — #911', () => {
+  it('lists each open appeal, and declares a conflict only on the moderator’s own decision', async () => {
+    await open(scriptedModeration());
+    const own = item('Appeal 3');
+    expect(text(own)).toContain('Against a suspension on account rider-dafydd');
+    expect(text(own)).toContain('The statement said: Abuse of other riders in a room.');
+    expect(text(own)).toContain('Their grounds: I was quoting another rider, not abusing them.');
+    expect(text(own)).toContain(APPEAL_CONFLICT_TEXT);
+    expect(text(item('Appeal 4'))).not.toContain(APPEAL_CONFLICT_TEXT);
+  });
+
+  it('reverses an appeal with the answer the rider is shown, which lifts the suspension', async () => {
+    const scripted = scriptedModeration({ suspended: { 'rider-dafydd': 1_790_020_000 } });
+    await open(scripted);
+    await decide(item('Appeal 3'), 'You were quoting. Lifted.', 'Reverse');
+    expect(scripted.calls).toContain('reversed appeal 3');
+    expect(scripted.held.suspended.has('rider-dafydd')).toBe(false);
+    expect(text(section('Appeals'))).not.toContain('Appeal 3');
+    expect(text(section('Moderation log'))).toContain('Reversed a decision on appeal');
+  });
+
+  it('says when the appeals could not be read, and still shows the queues', async () => {
+    const scripted = scriptedModeration();
+    scripted.held.appeals = undefined;
+    await open(scripted);
+    expect(text(section('Appeals'))).toContain(APPEALS_UNREADABLE_TEXT);
+    expect(text(section('Reports'))).toContain('Report 7');
   });
 });

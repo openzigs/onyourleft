@@ -109,6 +109,25 @@ export interface ReceivedNotice {
 /** The longest fields the instance keeps on a notice (`apps/instance` §`notices.ts`). */
 const NOTICE_LIMITS = { explanation: 5000, location: 1000, name: 200, email: 254, items: 20 };
 
+/** One appeal in the moderators' queue (#911), with the decision it appeals. */
+export interface OpenAppeal {
+  readonly appealId: number;
+  /** Unix seconds. */
+  readonly filedAt: number;
+  readonly grounds: string;
+  readonly appellantAthleteId: string;
+  readonly statementId: number;
+  /** What was done: `suspend`, `hide_display_name`, `hide_item`. */
+  readonly restriction: string;
+  /** The facts the statement gave. */
+  readonly facts: string;
+  /** The moderator who took the decision appealed: when it is this one, deciding is a declared conflict. */
+  readonly decidedBy: string;
+}
+
+/** The longest grounds and decision an appeal carries (`apps/instance` §`statements.ts`). */
+export const MAXIMUM_APPEAL_DECISION = 2000;
+
 /** One account awaiting a moderator's decision (#775). */
 export interface PendingRegistration {
   readonly athleteId: string;
@@ -188,6 +207,11 @@ export type ModerationRead =
        * could, read on their own as the log is.
        */
       readonly notices: readonly ReceivedNotice[] | undefined;
+      /**
+       * Every appeal not yet decided (#911), oldest first — or `undefined`
+       * when they could not be read while the queues could.
+       */
+      readonly appeals: readonly OpenAppeal[] | undefined;
       /**
        * The first page of the suspended accounts (#961), or `undefined` when
        * it could not be read while the queues could — read on its own, as the
@@ -281,6 +305,9 @@ export const MODERATION_REFUSAL_TEXT = {
     'The instance no longer accepts this device’s sign-in. Connect again from the instance screen.',
   'no-answer': 'The instance did not answer, so nothing was changed.',
   'too-many': 'The instance is refusing requests for a while. Try again in a few minutes.',
+  decision:
+    'Write your answer to the rider, in at most 2,000 characters, with no place or coordinate in ' +
+    'it. They are shown it, and it is written to the moderation log.',
   statement:
     'Suspending an account or hiding a name needs a statement of reasons, which the rider is ' +
     'shown: the facts, in at most 2,000 characters, and the law or the terms they break, in at ' +
@@ -308,6 +335,15 @@ export interface ModerationPort {
   ): Promise<ModerationOutcome>;
   /** Dismiss a report. */
   dismissReport(reportId: number, reason: string): Promise<ModerationOutcome>;
+  /**
+   * Decide an appeal (#911): `upheld` leaves the restriction, `reversed` lifts
+   * it. `decision` is what the rider is told, and is logged.
+   */
+  decideAppeal(
+    appealId: number,
+    outcome: 'upheld' | 'reversed',
+    decision: string,
+  ): Promise<ModerationOutcome>;
   /**
    * Suspend an account, lift a suspension or hide a display name — for a
    * report when `reportId` is given, which the instance then closes. A
@@ -472,6 +508,36 @@ function noticeFrom(value: unknown): ReceivedNotice | undefined {
     notifierName: name,
     notifierEmail: email,
     bonaFide: row.bonaFide,
+  };
+}
+
+function appealFrom(value: unknown): OpenAppeal | undefined {
+  const row = record(value);
+  const grounds = text(row?.grounds, MAXIMUM_APPEAL_DECISION);
+  const facts = text(row?.facts, MAXIMUM_STATEMENT_FACTS);
+  if (
+    row === undefined ||
+    !isCount(row.appealId) ||
+    !isTime(row.filedAt) ||
+    grounds === undefined ||
+    !isId(row.appellantAthleteId) ||
+    !isCount(row.statementId) ||
+    typeof row.restriction !== 'string' ||
+    !/^[a-z_]{1,64}$/.test(row.restriction) ||
+    facts === undefined ||
+    !isId(row.decidedBy)
+  ) {
+    return undefined;
+  }
+  return {
+    appealId: row.appealId,
+    filedAt: row.filedAt,
+    grounds,
+    appellantAthleteId: row.appellantAthleteId,
+    statementId: row.statementId,
+    restriction: row.restriction,
+    facts,
+    decidedBy: row.decidedBy,
   };
 }
 
@@ -708,6 +774,21 @@ export function createModerationPort(dependencies: ModerationPortDependencies): 
     }
   }
 
+  /** The open appeals (#911), read on their own: `undefined` on any answer but every row of them. */
+  async function appealRows(
+    session: Extract<HeldSealedSession, { kind: 'open' }>,
+  ): Promise<readonly OpenAppeal[] | undefined> {
+    try {
+      return rows(
+        await session.sealed.call('GET', '/v1/moderation/appeals', { token: session.token }),
+        'appeals',
+        appealFrom,
+      );
+    } catch {
+      return undefined;
+    }
+  }
+
   /** The notices (#907), read on their own: `undefined` on any answer but every row of them. */
   async function noticeRows(
     session: Extract<HeldSealedSession, { kind: 'open' }>,
@@ -748,12 +829,13 @@ export function createModerationPort(dependencies: ModerationPortDependencies): 
         // their own (#957's review): one that cannot be read, or holds a row
         // this client does not accept, is `undefined`, and the queues are
         // still shown.
-        const [registrations, reports, suspended, log, notices] = await Promise.all([
+        const [registrations, reports, suspended, log, notices, appeals] = await Promise.all([
           session.sealed.call('GET', '/v1/moderation/registrations', { token: session.token }),
           session.sealed.call('GET', '/v1/moderation/reports', { token: session.token }),
           suspendedPage(),
           logPage(),
           noticeRows(session),
+          appealRows(session),
         ]);
         if (registrations.status === 401 || reports.status === 401) return { kind: 'signed-out' };
         if (registrations.status !== 200 && isNotAModerator(registrations)) {
@@ -770,6 +852,7 @@ export function createModerationPort(dependencies: ModerationPortDependencies): 
           registrations: registrationRows,
           reports: reportRows,
           notices,
+          appeals,
           suspended,
           log,
         };
@@ -787,6 +870,31 @@ export function createModerationPort(dependencies: ModerationPortDependencies): 
         return { kind: 'refused', text: MODERATION_REFUSAL_TEXT['athlete-id'] };
       }
       return send(`/v1/moderation/registrations/${typed}/${decision}`, reason);
+    },
+
+    decideAppeal: async (appealId, outcome, decision) => {
+      if (!Number.isSafeInteger(appealId) || appealId < 1) {
+        return { kind: 'refused', text: NOTHING_CHANGED_TEXT };
+      }
+      const trimmed = decision.trim();
+      if (trimmed === '' || [...trimmed].length > MAXIMUM_APPEAL_DECISION) {
+        return { kind: 'refused', text: MODERATION_REFUSAL_TEXT.decision };
+      }
+      try {
+        const session = await sealedOr(closedRefusal);
+        if (!('sealed' in session)) return session;
+        const answer = await session.sealed.call(
+          'POST',
+          `/v1/moderation/appeals/${String(appealId)}/decide`,
+          { token: session.token, body: { outcome, decision: trimmed } },
+        );
+        const decided = outcomeOf(answer);
+        return decided.kind === 'refused' && errorCode(answer) === 'validation_failed'
+          ? { kind: 'refused', text: MODERATION_REFUSAL_TEXT.decision }
+          : decided;
+      } catch {
+        return { kind: 'refused', text: MODERATION_REFUSAL_TEXT['no-answer'] };
+      }
     },
 
     dismissReport: async (reportId, reason) => {

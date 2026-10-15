@@ -38,6 +38,8 @@ import {
 
 interface TestDevice {
   readonly publicKey: string;
+  /** A signed `oyl-auth-v1` statement over `nonce` (#911: a way-out session). */
+  statement(nonce: string): Promise<Record<string, unknown>>;
 }
 
 interface ModerationInstance {
@@ -56,6 +58,7 @@ interface ModerationInstance {
     device: TestDevice,
     extra?: Record<string, unknown>,
   ): Promise<{ status: number; body: Record<string, unknown> }>;
+  nonceFor(device: TestDevice): Promise<string>;
   close(): Promise<void>;
 }
 
@@ -97,6 +100,7 @@ function deviceStorage(): InstanceStorage {
 
 /** A rider signed in with a key of their own, straight through the instance. */
 interface Rider {
+  readonly device: TestDevice;
   readonly athleteId: string;
   readonly token: string;
   readonly recoveryCodes: readonly string[];
@@ -203,9 +207,11 @@ async function moderatedWorld(): Promise<World> {
     ordinaryId: waitingDevice.athleteId(),
     rider: async (displayName) => {
       opened.clock.ms += 60_000;
-      const signed = await opened.signIn(await testing.testDevice(), { displayName });
+      const device = await testing.testDevice();
+      const signed = await opened.signIn(device, { displayName });
       if (signed.status !== 200) throw new Error(`sign-in: ${JSON.stringify(signed.body)}`);
       return {
+        device,
         athleteId: signed.body.athleteId as string,
         token: signed.body.sessionToken as string,
         recoveryCodes: signed.body.recoveryCodes as string[],
@@ -469,6 +475,57 @@ describe('a restriction’s statement of reasons — #910', () => {
         ),
     ).actOnAccount(carys.athleteId, 'suspend', 'Abuse.', undefined, STATEMENT);
     expect(refused).toEqual({ kind: 'refused', text: MODERATION_REFUSAL_TEXT.statement });
+  });
+});
+
+describe('appeals — #911', () => {
+  it('reads an open appeal, as a conflict of the moderator’s own, and a reversal lifts the suspension', async () => {
+    const { world, moderator, rider, me } = await moderatedWorld();
+    const carys = await rider('Carys');
+    await moderator.decideRegistration(carys.athleteId, 'approve', 'ok');
+    expect(
+      await moderator.actOnAccount(carys.athleteId, 'suspend', 'Abuse.', undefined, STATEMENT),
+    ).toEqual({ kind: 'done' });
+    const [entry] = logOf(await moderator.read()).slice(-1);
+    world.clock.ms += 60_000;
+    const leaving = await world.call('POST', '/v1/auth/leave-session', {
+      body: await carys.device.statement(await world.nonceFor(carys.device)),
+    });
+    const token = (leaving.body as { sessionToken?: string }).sessionToken ?? '';
+    const filed = await world.call('POST', `/v1/statements/${String(entry?.logId)}/appeal`, {
+      token,
+      body: { grounds: 'Quoting another rider.' },
+    });
+    expect(filed.status).toBe(200);
+    const [appeal] = asModerator(await moderator.read()).appeals ?? [];
+    expect(appeal).toMatchObject({
+      appellantAthleteId: carys.athleteId,
+      restriction: 'suspend',
+      facts: STATEMENT.facts,
+      grounds: 'Quoting another rider.',
+      decidedBy: me,
+    });
+    expect(
+      await moderator.decideAppeal(appeal?.appealId ?? 0, 'reversed', 'Quoting. Lifted.'),
+    ).toEqual({ kind: 'done' });
+    const after = asModerator(await moderator.read());
+    expect(after.appeals).toEqual([]);
+    expect(after.suspended?.items).toEqual([]);
+    expect(logOf(after).at(-1)).toMatchObject({
+      action: 'reverse_appeal',
+      targetAthleteId: carys.athleteId,
+      reason: 'Quoting. Lifted.',
+    });
+  });
+
+  it('sends nothing for an empty answer', async () => {
+    const { moderator, send } = await moderatedWorld();
+    const sent = send.mock.calls.length;
+    expect(await moderator.decideAppeal(1, 'upheld', '  ')).toEqual({
+      kind: 'refused',
+      text: MODERATION_REFUSAL_TEXT.decision,
+    });
+    expect(send.mock.calls.length).toBe(sent);
   });
 });
 

@@ -235,11 +235,12 @@ export interface Route {
   /**
    * A SUSPENDED athlete may call this route, through the way-out session
    * `POST /v1/auth/leave-session` opens (#898). Every other session route
-   * answers such a caller `account_suspended`. ⚠️ Declared on exactly three
-   * routes — the account export, the account deletion and, since #910, the
-   * rider's own statements of reasons (a suspended rider must be able to read
-   * why) — and `moderation/choke-point.test.ts` walks the table and fails if
-   * any other route declares it. ⚠️ **Signing out is not one of them, on purpose**: a
+   * answers such a caller `account_suspended`. ⚠️ Declared on exactly four
+   * routes — the account export, the account deletion, since #910 the rider's
+   * own statements of reasons (a suspended rider must be able to read why),
+   * and since #911 appealing one of them — and
+   * `moderation/choke-point.test.ts` walks the table and fails if any other
+   * route declares it. ⚠️ **Signing out is not one of them, on purpose**: a
    * way-out session cannot end itself (`DELETE /v1/auth/session` answers it
    * `account_suspended`). It lasts an hour, and erasing the account removes
    * it; a third route would widen the one flag that lets a suspended rider
