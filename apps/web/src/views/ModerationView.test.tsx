@@ -40,7 +40,7 @@ import {
   ModerationView,
   MORE_UNREADABLE_TEXT,
   INTIMATE_IMAGE_DEADLINE_TEXT,
-  NOTICES_RECEIPT_TEXT,
+  NOTICES_SHORT_TEXT,
   NOTICES_UNREADABLE_TEXT,
   REPORT_CONFLICT_TEXT,
   APPEAL_CONFLICT_TEXT,
@@ -697,7 +697,7 @@ describe('the notices — #907', () => {
   it('lists each notice with the time it arrived, its items and the notifier’s address to reply to by hand', async () => {
     await open(scriptedModeration());
     const notices = section('Notices');
-    expect(text(notices)).toContain(NOTICES_RECEIPT_TEXT);
+    expect(text(notices)).toContain(NOTICES_SHORT_TEXT);
     const first = item('Notice 1');
     expect(text(first)).toContain('Received 2026-09-21 15:03 UTC.');
     expect(text(first)).toContain('route:0123456789abcdef0123456789abcdef');

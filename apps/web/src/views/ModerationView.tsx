@@ -122,10 +122,14 @@ export const APPEALS_UNREADABLE_TEXT =
   'The appeals could not be read from the instance, so they are not shown here. The queues ' +
   'above are as the instance gave them.';
 
-/** Behind the Appeals section's ⓘ (#911). */
-export const APPEALS_HELP_TEXT =
-  'A rider asks you to look again at a decision about them. Uphold leaves it; Reverse lifts the ' +
-  'suspension or shows the name again at once. Your answer is shown to the rider and logged.';
+/**
+ * The Appeals section's one short line (#911, #1013). ⚠️ No ⓘ: each appeal
+ * is read before it is decided, so its controls follow its words, and a
+ * section that tucks its explanation is held to 130 px of prose above its
+ * first control (`controls-first.browser.spec.ts`).
+ */
+export const APPEALS_SHORT_TEXT =
+  'Reverse lifts the restriction at once. Your answer is shown to the rider and logged.';
 
 /**
  * Said on an appeal against the moderator's own decision (#911): the owner's
@@ -148,17 +152,14 @@ export const NOTICES_UNREADABLE_TEXT =
   'above are as the instance gave them.';
 
 /**
- * Said above the notices (#907): the owner's ruling of 2026-10-15 — a receipt
- * is confirmed by hand, by the moderator, to the address the notifier gave.
+ * The Notices section's one short line (#907, #912, #1013): the owner's
+ * ruling of 2026-10-15 — a receipt is confirmed by hand, and recorded here.
+ * ⚠️ No ⓘ since #912: each notice is read before its steps are recorded, and
+ * a section that tucks its explanation is held to 130 px of prose above its
+ * first control (`controls-first.browser.spec.ts`).
  */
-export const NOTICES_RECEIPT_TEXT =
-  'Anybody can send a notice from the instance’s notice page, with or without an account. ' +
-  'The instance sends no email: where a notice gives an email address, write to it to confirm ' +
-  'you received it, and again with what you decided.';
-
-/** The section's one short line (#1013); {@link NOTICES_RECEIPT_TEXT} is behind its ⓘ. */
 export const NOTICES_SHORT_TEXT =
-  'From the instance’s notice page. Reply by hand to any address given.';
+  'The instance sends no email: reply by hand to any address given, then record it here.';
 
 /** Said on an intimate image content report (OSA s.10(3A)). */
 export const INTIMATE_IMAGE_DEADLINE_TEXT =
@@ -600,9 +601,8 @@ function Appeals({
 }): JSX.Element {
   return (
     <section className="oyl-panel" aria-labelledby="oyl-moderation-appeals">
-      <SectionHeading level={2} id="oyl-moderation-appeals" help={<p>{APPEALS_HELP_TEXT}</p>}>
-        Appeals
-      </SectionHeading>
+      <h2 id="oyl-moderation-appeals">Appeals</h2>
+      <p>{APPEALS_SHORT_TEXT}</p>
       {appeals === undefined ? (
         <StatusMessage tone="warning" label="Not shown">
           {APPEALS_UNREADABLE_TEXT}
@@ -847,9 +847,7 @@ function Notices({
 }): JSX.Element {
   return (
     <section className="oyl-panel" aria-labelledby="oyl-moderation-notices">
-      <SectionHeading level={2} id="oyl-moderation-notices" help={<p>{NOTICES_RECEIPT_TEXT}</p>}>
-        Notices
-      </SectionHeading>
+      <h2 id="oyl-moderation-notices">Notices</h2>
       <p>{NOTICES_SHORT_TEXT}</p>
       {notices === undefined ? (
         <StatusMessage tone="warning" label="Not shown">
