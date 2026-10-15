@@ -51,6 +51,7 @@ import { formatDistance, formatSpeed, type Measurement } from '../../units/forma
 import type { GhostOutcome } from '../ghost-outcome';
 import type { GameState } from '../simulation';
 
+import { DRAFT_FULL_SCALE_PERCENT } from './draft-scale';
 import { planLap, planProgress } from './plan';
 
 /** What a HUD shows where it has no trustworthy number. An em dash. */
@@ -132,6 +133,14 @@ export interface HudReading {
    * field renders at is not this issue's to do.
    */
   readonly word?: boolean | undefined;
+  /**
+   * A gauge drawn under the value — #787, the draft's (#327's indicator
+   * criteria): how far toward its full scale the value is, from 0 to 1.
+   * ⚠️ **Never the only carrier**: the value is the number and {@link detail}
+   * says what full scale is, so the gauge is `aria-hidden` and a rider who
+   * cannot see it loses nothing. Absent on every other field.
+   */
+  readonly gauge?: number | undefined;
 }
 
 /**
@@ -240,6 +249,13 @@ export interface RoomHud {
    * could carry one.
    */
   readonly draft?: number | 'off' | undefined;
+  /**
+   * Whether the rider asked to see their draft — `game/draft-preference.ts`,
+   * off by default (ADR 0038 D-5, from #327). ⚠️ Not the ROOM's switch: that
+   * one is {@link draft} reading `'off'`. Without this the field is absent,
+   * and the rider is drafted exactly the same.
+   */
+  readonly draftShown?: boolean | undefined;
 }
 
 /** The one rider followed. @see RoomHud */
@@ -496,7 +512,7 @@ function roomReadings(room: RoomHud | undefined): readonly HudReading[] {
       unit: room.nearby === 1 ? 'rider' : 'riders',
       stale: false,
     },
-    draftField(room.draft),
+    ...(room.draftShown === true ? [draftField(room.draft)] : []),
   ];
 }
 
@@ -508,7 +524,13 @@ export const DRAFT_LABEL = 'Draft';
  * ADR 0038 D-5. The unit says what it is a share of, so a small number on a
  * climb, where there is little air to push, reads as a fact and not a fault
  * (#327's indicator criteria). Only on a ride in a room, like every room
- * field: absent everywhere else, on the `NO_READING` precedent.
+ * field: absent everywhere else, on the `NO_READING` precedent — and only
+ * when the rider asked for it ({@link RoomHud.draftShown}).
+ *
+ * A number carries a gauge toward {@link DRAFT_FULL_SCALE_PERCENT}, and the
+ * phrase under it says what that full scale is (#327: *"the full-scale mark is
+ * drawn … If the scale is instead the theoretical maximum, the gauge says
+ * so"*). `'Off'` and the dash carry none: there is nothing to measure.
  */
 function draftField(draft: RoomHud['draft']): HudReading {
   const base = { key: 'room-draft', label: DRAFT_LABEL, stale: false } as const;
@@ -516,11 +538,19 @@ function draftField(draft: RoomHud['draft']): HudReading {
   if (draft === undefined || !Number.isFinite(draft)) {
     return { ...base, value: NO_READING, unit: '' };
   }
+  const percent = Math.max(0, Math.min(100, Math.round(draft)));
   return {
     ...base,
-    value: String(Math.max(0, Math.min(100, Math.round(draft)))),
+    value: String(percent),
     unit: '% of drag',
+    detail: draftScaleText(DRAFT_FULL_SCALE_PERCENT),
+    gauge: Math.min(1, percent / DRAFT_FULL_SCALE_PERCENT),
   };
+}
+
+/** What the gauge's full scale is, in words under the number (#787). ⚠️ Draft wording for the owner. */
+function draftScaleText(fullScalePercent: number): string {
+  return `at most ${String(fullScalePercent)} %`;
 }
 
 /**

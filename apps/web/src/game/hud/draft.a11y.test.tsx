@@ -45,7 +45,13 @@ function route(): ReturnType<typeof routeProfile> {
 }
 
 async function hud(
-  room: { readonly nearby: number; readonly draft?: number | 'off' } | undefined,
+  room:
+    | {
+        readonly nearby: number;
+        readonly draft?: number | 'off';
+        readonly draftShown?: boolean;
+      }
+    | undefined,
 ): Promise<void> {
   const profile = route();
   mounted = await mount(
@@ -81,14 +87,14 @@ function field(label: string): string | undefined {
 
 describe('the draft on the HUD — #787', () => {
   it('says the room’s draft as a share of drag, never beside a watt figure, and audits clean', async () => {
-    await hud({ nearby: 1, draft: 34 });
-    expect(field('Draft')).toBe('Draft 34 % of drag');
+    await hud({ nearby: 1, draft: 34, draftShown: true });
+    expect(field('Draft')).toBe('Draft 34 % of drag at most 59 %');
     expect(field('Draft')).not.toMatch(/\bW\b|watt/i);
     expect(formatViolations(auditAccessibility(document))).toBe('');
   });
 
   it('says Off in a room made with drafting off', async () => {
-    await hud({ nearby: 1, draft: 'off' });
+    await hud({ nearby: 1, draft: 'off', draftShown: true });
     expect(field('Draft')).toBe('Draft Off');
   });
 
@@ -96,5 +102,32 @@ describe('the draft on the HUD — #787', () => {
     await hud(undefined);
     expect(field('Draft')).toBeUndefined();
     expect(text(document.querySelector('.oyl-hud'))).not.toContain('% of drag');
+  });
+
+  it('is not on the HUD in a room until the rider turns it on — ADR 0038 D-5', async () => {
+    await hud({ nearby: 1, draft: 34 });
+    expect(field('Nearby')).toBeDefined();
+    expect(field('Draft')).toBeUndefined();
+    expect(document.querySelector('.oyl-hud__gauge')).toBeNull();
+  });
+
+  it('draws a gauge filled to the share of the full scale, with the full-scale end drawn, hidden from a screen reader — #327', async () => {
+    await hud({ nearby: 1, draft: 34, draftShown: true });
+    const gauges = document.querySelectorAll('.oyl-hud__gauge');
+    expect(gauges).toHaveLength(1);
+    const gauge = gauges[0];
+    expect(gauge?.closest('.oyl-hud__field')?.querySelector('dt')?.textContent).toBe('Draft');
+    expect(gauge?.getAttribute('aria-hidden')).toBe('true');
+    const fill = Number(gauge?.querySelector('.oyl-hud__gauge-fill')?.getAttribute('width'));
+    expect(fill).toBeCloseTo((34 / 59) * 100, 9);
+    expect(gauge?.querySelector('.oyl-hud__gauge-scale')?.getAttribute('width')).toBe('100');
+    const full = gauge?.querySelector('.oyl-hud__gauge-full');
+    expect([full?.getAttribute('x1'), full?.getAttribute('x2')]).toEqual(['100', '100']);
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+  });
+
+  it('draws no gauge in a room with drafting off', async () => {
+    await hud({ nearby: 1, draft: 'off', draftShown: true });
+    expect(document.querySelector('.oyl-hud__gauge')).toBeNull();
   });
 });

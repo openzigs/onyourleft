@@ -142,6 +142,7 @@ import {
 } from '../shell/menu-sound-preference';
 import type { UnitsPort } from '../units/store-port';
 import { readRealisticWorldChoice, writeRealisticWorldChoice } from '../game/world-preference';
+import { readDraftReadingChoice, writeDraftReadingChoice } from '../game/draft-preference';
 import { KIT_PALETTE } from '../game/bicycle';
 import { PUBLISHED_BASEMAP_URL, type BasemapConfig } from '../map/basemap';
 import { readMapTilesChoice, writeMapTilesChoice } from '../map/tiles-preference';
@@ -626,6 +627,11 @@ export function SettingsView({
         }
       >
         <GameWorldPanel storage={announcements === undefined ? deviceStorage() : announcements} />
+
+        {/* #787: whether a ride in a room shows and says this rider's draft. */}
+        <DraftReadingPanel
+          storage={announcements === undefined ? deviceStorage() : announcements}
+        />
 
         <MapTilesPanel
           storage={announcements === undefined ? deviceStorage() : announcements}
@@ -1294,6 +1300,74 @@ function GameWorldPanel({
             }}
           />{' '}
           Ride in the realistic world
+        </label>
+      </p>
+      {message === undefined ? null : (
+        <StatusMessage tone={message.tone} live>
+          {message.text}
+        </StatusMessage>
+      )}
+    </section>
+  );
+}
+
+/**
+ * Whether a ride in a room shows and says this rider's draft — #787,
+ * ADR 0038 D-5 binding #327's indicator criteria: **off by default, one rider
+ * setting**. `game/draft-preference.ts` says why it is not the room's switch.
+ * The `oyl-announce` class for its switch's 24×24 target, as
+ * {@link GameWorldPanel} carries it; `oyl-draft-reading` is the tests' hook.
+ */
+function DraftReadingPanel({
+  storage,
+}: {
+  readonly storage: PreferenceStorage | undefined;
+}): JSX.Element {
+  const [shown, setShown] = useState(() => readDraftReadingChoice(storage));
+  const [message, setMessage] = useState<PanelMessage | undefined>(undefined);
+  return (
+    <section
+      className="oyl-panel oyl-announce oyl-draft-reading"
+      aria-labelledby="oyl-draft-reading-heading"
+    >
+      <SectionHeading
+        level={3}
+        id="oyl-draft-reading-heading"
+        help={
+          <>
+            <p className="oyl-muted">
+              Riding close behind another rider in a room takes less effort, as on the road. With
+              this on, the ride screen shows how much of your air resistance the draft is taking
+              away, as a percentage, and a bar up to the most any draft can give. On a climb the
+              number is small because there is little air to push; that is not a fault.
+            </p>
+            <p className="oyl-muted">
+              If spoken announcements are on, you also hear when you go into the draft and out of
+              it. Turning this off changes only what you see and hear: whether a room drafts is
+              chosen by whoever made it.
+            </p>
+          </>
+        }
+      >
+        Draft
+      </SectionHeading>
+      <p>
+        <label className="oyl-announce__switch">
+          <input
+            type="checkbox"
+            role="switch"
+            checked={shown}
+            onChange={(event) => {
+              const next = event.currentTarget.checked;
+              setShown(next);
+              setMessage(
+                writeDraftReadingChoice(storage, next)
+                  ? { tone: 'success', text: ANNOUNCEMENTS_SAVED }
+                  : { tone: 'warning', text: ANNOUNCEMENTS_NOT_KEPT },
+              );
+            }}
+          />{' '}
+          Show my draft when riding in a room
         </label>
       </p>
       {message === undefined ? null : (

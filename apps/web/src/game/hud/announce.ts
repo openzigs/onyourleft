@@ -35,6 +35,7 @@
  * | 5c | a *Set* the stall rescue held, answered | event (#655) | #445's press answer | no — the form's own `live` answer says it instead |
  * | 5d | the heart-rate hold, as its sentence changes | event (#1240) | ADR 0048 D-12 | no |
  * | 5e | a lap of the course, as it ends | event (#1312) | #1312's criterion | no |
+ * | 5f | into and out of a room's draft | event (#787) | #327's indicator criteria | no — and only with the draft indicator on |
  * | 6 | power off an acknowledged target | ≥ 10 % for ≥ 5 s | attested | no |
  * | 7 | distance to go | a distance tick | attested | no |
  * | 8 | power | a time cadence | attested | no |
@@ -63,6 +64,7 @@
  * | `hold-changed` | `ride/RideAnnouncer.tsx` and `GameView` | `RideWorkoutSnapshot.hold`, through `workout/hold-text.ts` §`holdAnnouncement` (#1240) |
  * | `plan-changed` | `ride/RideAnnouncer.tsx` and `GameView` | `RideWorkoutSnapshot.replan`, through `workout/replan-text.ts` §`planChangeAnnouncement` (#1244) |
  * | `lap-ended` | `GameView` | `hud/lap-text.ts` §`lapSummary`, over the laps `GameTrainerPort.courseLine` answers (#1312) |
+ * | `room-draft` | `GameView` | `game/room-ride.ts` §`draftEvent`, from the room's own frame for this rider (#787) |
  * | readings | `GameView` | `fields.ts` §`hudReadings` |
  *
  * ⚠️ **Rank 1 is broader than its name**, and the name was kept rather than
@@ -170,6 +172,19 @@
  * reversing this is one entry in that array and its line in
  * `announce.test.ts`.
  *
+ * ⚠️ **Rank 5f is #787's**: the rider has gone into a room's draft, or out
+ * of it — #327's *"spoken 'in the draft' / 'out of the draft' transition, off
+ * by default"*. A transition, never the percentage on a cadence: a share of
+ * drag moves with every metre of gap, and a sentence each time it did would be
+ * the continuous speech #396 exists to prevent. The LOWEST event, below a lap:
+ * nothing about a draft is the machine under the rider (the trainer is sent
+ * the rider's own road whatever the draft, ADR 0038 D-4), and it is true for as
+ * long as the rider holds the wheel, so a window's wait costs nothing. Dropped,
+ * not queued, behind anything higher (#327's "same priority rules — dropped
+ * rather than queued"). ⚠️ **Not in {@link ALWAYS_SPOKEN}**, and offered by
+ * `GameView` only when the rider has turned the draft indicator on
+ * (`game/draft-preference.ts`): two switches, both off by default.
+ *
  * ## ⚠️ Six kinds are spoken with announcements OFF — {@link ALWAYS_SPOKEN}
  *
  * #395's table says the safety rows are *"on when announcements are on"*, and
@@ -235,7 +250,8 @@ export type AnnouncementEvent =
   | { readonly kind: 'erg-held'; readonly text: string }
   | { readonly kind: 'hold-changed'; readonly text: string }
   | { readonly kind: 'plan-changed'; readonly text: string }
-  | { readonly kind: 'lap-ended'; readonly text: string };
+  | { readonly kind: 'lap-ended'; readonly text: string }
+  | { readonly kind: 'room-draft'; readonly text: string };
 
 /** Every kind of sentence, events and readings together. */
 export type AnnouncementKind =
@@ -270,6 +286,8 @@ export const PRIORITY: readonly AnnouncementKind[] = [
   // accepted re-plan: that sentence is about the workout the trainer is
   // being driven through, and a lap is a figure about the ride. Rank 5e.
   'lap-ended',
+  // #787: into or out of a room's draft. The lowest event: rank 5f.
+  'room-draft',
   'power-off-target',
   'distance-tick',
   'power',

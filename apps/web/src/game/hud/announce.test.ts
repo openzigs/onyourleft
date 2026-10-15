@@ -441,6 +441,37 @@ describe('a lap of the course, as it ends — #1312', () => {
   });
 });
 
+describe('into and out of a room’s draft — #787', () => {
+  const drafted = { kind: 'room-draft', text: 'In the draft: 34 percent less drag.' } as const;
+
+  it('is the lowest event, below a lap, and above every reading', () => {
+    const rank = PRIORITY.indexOf('room-draft');
+    expect(rank).toBe(PRIORITY.indexOf('lap-ended') + 1);
+    for (const reading of ['power-off-target', 'distance-tick', 'power'] as const) {
+      expect(rank).toBeLessThan(PRIORITY.indexOf(reading));
+    }
+  });
+
+  it('is never said with announcements off — the default', () => {
+    expect(ALWAYS_SPOKEN).not.toContain('room-draft');
+    expect(run([{ now: 0, events: [drafted] }], { ...DEFAULT_ANNOUNCEMENTS }).said).toEqual([
+      undefined,
+    ]);
+    expect(
+      run([{ now: 0, events: [drafted] }], { ...ON, powerEverySeconds: 'never' }).said,
+    ).toEqual([drafted.text]);
+  });
+
+  it('gives way to a lap in the same window and is dropped, not queued behind it', () => {
+    const lap = { kind: 'lap-ended', text: 'Lap 2: 9 minutes 52 seconds.' } as const;
+    const { said } = run([{ now: 0, events: [drafted, lap] }, { now: ANNOUNCE_WINDOW_SECONDS }], {
+      ...ON,
+      powerEverySeconds: 'never',
+    });
+    expect(said).toEqual([lap.text, undefined]);
+  });
+});
+
 describe('a Set the stall rescue held, answered — #655', () => {
   const held = { kind: 'erg-held', text: 'Held: your new target of 180 W will be set.' } as const;
 
