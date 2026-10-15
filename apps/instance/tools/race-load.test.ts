@@ -38,7 +38,7 @@ afterEach(async () => {
   if (directory !== undefined) await rm(directory, { recursive: true, force: true });
 });
 
-async function instanceWithRace(lengthMetres: number) {
+async function instanceWithRace(lengthMetres: number, registration: 'open' | 'approval' = 'open') {
   directory = await mkdtemp(join(tmpdir(), 'oyl-instance-race-load-'));
   const path = join(directory, 'instance.sqlite');
   await migrateForDeploy(path);
@@ -63,7 +63,7 @@ async function instanceWithRace(lengthMetres: number) {
   const server = readServerConfig({ database: path, origin, roomWorkers: '1' }, 1);
   if (!server.ok) throw new Error(server.problems.join(' '));
   running = await startInstance({
-    config: testConfig({ port, bodyLimitBytes: 16_384, registration: 'open' }),
+    config: testConfig({ port, bodyLimitBytes: 16_384, registration }),
     server: server.config,
     version: '0',
     notices: '',
@@ -106,6 +106,24 @@ describe('the race load run — #464, raced locally', () => {
   }, 60_000);
 });
 
+describe('a misconfigured run stops instead of looping', () => {
+  it('aborts with a reason, and reconnects nowhere, against an instance that holds new riders for approval', async () => {
+    const url = await instanceWithRace(40, 'approval');
+    const report = await raceLoad({
+      url,
+      roomId: 'race',
+      keys: await newRiderKeys(3),
+      namePrefix: 'Load',
+      maximumMs: 20_000,
+    });
+    expect(report.raceOver).toBe(false);
+    expect(report.abortReason).toMatch(/ticket was refused/);
+    expect(report.disconnects.length).toBeLessThanOrEqual(3);
+    // It stopped at the refusal, not at the 20 s limit.
+    expect(report.raceSeconds).toBeLessThan(10);
+  }, 30_000);
+});
+
 describe('the arithmetic the figures rest on', () => {
   it('measures lateness from the soonest frame, needing no clock shared with the room', () => {
     // Ticks 1–4 due a second apart; the room's clock is 10 000 ms off the rider's.
@@ -117,6 +135,17 @@ describe('the arithmetic the figures rest on', () => {
     ];
     expect(latenessOf(arrivals, 1000)).toEqual([30, 0, 280, 0]);
     expect(latenessOf([], 1000)).toEqual([]);
+  });
+
+  it('does not report a permanent schedule slip as lateness', () => {
+    // A server stall at tick 300 delays every later frame by 400 ms for good.
+    const arrivals = Array.from({ length: 600 }, (_, i) => ({
+      tick: i,
+      atMs: i * 1000 + (i >= 300 ? 400 : 0) + (i === 500 ? 50 : 0),
+    }));
+    const lateness = latenessOf(arrivals, 1000);
+    expect(Math.max(...lateness.slice(430))).toBe(50);
+    expect(lateness[500]).toBe(50);
   });
 
   it('counts the ticks that never arrived, between the first and the last', () => {

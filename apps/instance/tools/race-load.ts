@@ -28,7 +28,7 @@
  * and no coordinate.
  */
 
-import { chmod, readFile, writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { registerHooks } from 'node:module';
 
 import { resolveExtensionless } from '../src/node-imports.ts';
@@ -56,7 +56,6 @@ if (command === 'keys') {
   }
   const keys = await newRiderKeys(riders);
   await writeFile(out, `${JSON.stringify(keys)}\n`, { mode: 0o600, flag: 'wx' });
-  await chmod(out, 0o600);
   process.stdout.write(`${keys.map((key) => key.publicKey).join('\n')}\n`);
 } else if (command === 'ride') {
   const url = arg('--url');
@@ -66,15 +65,34 @@ if (command === 'keys') {
     process.stderr.write(USAGE);
     process.exit(2);
   }
+  const minutes = Number(arg('--minutes') ?? 90);
+  if (!Number.isFinite(minutes) || minutes <= 0) {
+    process.stderr.write(`--minutes must be a positive number\n${USAGE}`);
+    process.exit(2);
+  }
+  const keys: unknown = JSON.parse(await readFile(keysFile, 'utf8'));
+  if (
+    !Array.isArray(keys) ||
+    keys.length === 0 ||
+    !keys.every(
+      (key: unknown) =>
+        typeof key === 'object' &&
+        key !== null &&
+        typeof (key as { publicKey?: unknown }).publicKey === 'string' &&
+        typeof (key as { privateKey?: unknown }).privateKey === 'string',
+    )
+  ) {
+    process.stderr.write(
+      'the keys file must hold a non-empty array of { publicKey, privateKey }\n',
+    );
+    process.exit(2);
+  }
   const report = await raceLoad({
     url,
     roomId: room,
-    keys: JSON.parse(await readFile(keysFile, 'utf8')) as {
-      publicKey: string;
-      privateKey: string;
-    }[],
+    keys: keys as { publicKey: string; privateKey: string }[],
     namePrefix: arg('--name') ?? 'Load',
-    maximumMs: Number(arg('--minutes') ?? 90) * 60_000,
+    maximumMs: minutes * 60_000,
   });
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 } else {

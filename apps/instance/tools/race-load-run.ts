@@ -69,22 +69,36 @@ async function pairOf(key: RiderKey): Promise<webcrypto.CryptoKeyPair> {
   };
 }
 
+/** Frames either side of a frame that its lateness baseline is taken over. */
+export const BASELINE_WINDOW_FRAMES = 120;
+
 /**
  * Each frame's lateness, in milliseconds: its arrival against the tick it
- * carries, measured from the EARLIEST frame. A frame for tick `k` is due one
- * interval after tick `k - 1`'s; the baseline is the smallest
- * `arrival - k × interval` the rider saw, so the frame that came soonest is 0
- * and every other is how far behind that schedule it arrived. It needs no
- * clock shared with the room, which is why it is measured this way.
+ * carries, measured from the soonest frame NEAR it. A frame for tick `k` is
+ * due one interval after tick `k - 1`'s; the baseline is the smallest
+ * `arrival - k × interval` within `windowFrames` frames either side, so the
+ * soonest frame of a stretch is 0 and every other is how far behind that
+ * schedule it arrived. The window is rolling, not the whole run's: the room
+ * reschedules from now after a late tick and does not catch up, so one server
+ * stall shifts every later frame for good, and a whole-run baseline would
+ * report that permanent schedule slip as lateness. This figure is therefore
+ * per-stretch network and scheduling lateness, NOT accumulated slip. It needs
+ * no clock shared with the room.
  */
 export function latenessOf(
   arrivals: readonly { readonly tick: number; readonly atMs: number }[],
   intervalMs: number,
+  windowFrames = BASELINE_WINDOW_FRAMES,
 ): number[] {
   if (arrivals.length === 0) return [];
   const offsets = arrivals.map((a) => a.atMs - a.tick * intervalMs);
-  const baseline = Math.min(...offsets);
-  return offsets.map((offset) => offset - baseline);
+  return offsets.map((offset, i) => {
+    let baseline = offset;
+    const from = Math.max(0, i - windowFrames);
+    const to = Math.min(offsets.length - 1, i + windowFrames);
+    for (let j = from; j <= to; j += 1) baseline = Math.min(baseline, offsets[j] ?? offset);
+    return offset - baseline;
+  });
 }
 
 /** Ticks between the first and last a rider saw that never reached it. */
@@ -132,6 +146,9 @@ export interface RaceLoadOptions {
   readonly maximumMs: number;
   /** How long a rider waits after the instance answers `rate_limited` to signing in. */
   readonly rateLimitedWaitMs?: number;
+  /** The first backoff after a socket drops; it doubles to `maximumBackoffMs`, and resets at a welcome. */
+  readonly backoffMs?: number;
+  readonly maximumBackoffMs?: number;
   /** Called with each rider's live socket as it opens: the test closes one to force a rejoin. */
   readonly onSocket?: (rider: number, socket: WebSocket) => void;
 }
@@ -145,10 +162,13 @@ export interface RaceLoadReport {
   readonly raceSeconds: number;
   /** Whether the room said the race is over before the time limit. */
   readonly raceOver: boolean;
+  /** Why the run stopped before the race ended (a refused ticket, a refused start), or `null`. */
+  readonly abortReason: string | null;
   readonly finishers: number;
   readonly frames: { readonly total: number; readonly fewestToOneRider: number };
   /** Ticks no frame arrived for, summed over riders, between each rider's first and last. */
   readonly missingTicks: number;
+  /** Per-stretch lateness over a rolling baseline (`BASELINE_WINDOW_FRAMES`): not accumulated schedule slip. */
   readonly frameLatenessMs: {
     readonly p50: number | null;
     readonly p95: number | null;
@@ -193,6 +213,16 @@ export async function raceLoad(options: RaceLoadOptions): Promise<RaceLoadReport
   let finishers = 0;
   let raceOver = false;
   let stopping = false;
+  let abortReason: string | undefined;
+  let abortRun: () => void = () => undefined;
+  const aborted = new Promise<void>((resolve) => {
+    abortRun = resolve;
+  });
+  const abort = (reason: string): void => {
+    abortReason ??= reason;
+    stopping = true;
+    abortRun();
+  };
   let seatedAt: number | undefined;
   let startRequestedAt: number | undefined;
   const seated = new Set<number>();
@@ -225,6 +255,7 @@ export async function raceLoad(options: RaceLoadOptions): Promise<RaceLoadReport
     let closedAt: number | undefined;
     let sequence = 0;
     let finished = false;
+    let backoff = options.backoffMs ?? 500;
     while (!stopping && !finished) {
       const socket = new WebSocket(socketUrl(instance, options.roomId), {
         perMessageDeflate: false,
@@ -242,7 +273,12 @@ export async function raceLoad(options: RaceLoadOptions): Promise<RaceLoadReport
         options.onSocket?.(rider, socket);
         void ticketFor(instance, token, options.roomId, profile.massKilograms).then(
           (ticket) => send(hello(ticket)),
-          () => socket.close(),
+          (error: unknown) => {
+            // A refused ticket is a misconfiguration (an approval instance, a closed room), not a blip.
+            const text = error instanceof Error ? error.message : '';
+            if (text.startsWith('a ticket was refused')) abort(text);
+            socket.close();
+          },
         );
       });
       socket.on('message', (data) => {
@@ -254,6 +290,7 @@ export async function raceLoad(options: RaceLoadOptions): Promise<RaceLoadReport
         const message = decoded.message;
         if (message.type === 'welcome') {
           intervalMs = message.roomConfig.frameIntervalMs;
+          backoff = options.backoffMs ?? 500;
           if (closedAt !== undefined) {
             rejoinMs.push(now - closedAt);
             closedAt = undefined;
@@ -261,7 +298,9 @@ export async function raceLoad(options: RaceLoadOptions): Promise<RaceLoadReport
           seated.add(rider);
           if (seated.size === count && seatedAt === undefined) {
             seatedAt = now;
-            void startRace(tokens[0] ?? '').catch(() => undefined);
+            void startRace(tokens[0] ?? '').catch((error: unknown) =>
+              abort(error instanceof Error ? error.message : 'the start failed'),
+            );
           }
         }
         if (message.type === 'frame') arrivals[rider]?.push({ tick: message.tick, atMs: now });
@@ -292,9 +331,17 @@ export async function raceLoad(options: RaceLoadOptions): Promise<RaceLoadReport
       open.delete(socket);
       clearInterval(report);
       if (stopping || finished) break;
+      if (code >= 4000 && code < 5000) {
+        // The room refused this rider (ticket-refused, room-closed, …): reopening cannot change the answer.
+        // After the finish that is simply the race being over for a rider whose socket was down.
+        if (!raceOver) abort(`the room refused a rider: close code ${String(code)}`);
+        break;
+      }
       closedAt = Date.now();
       disconnects.push({ rider, atSecond: Math.round((closedAt - started) / 1000), code });
       sequence = 0;
+      await new Promise((resolve) => setTimeout(resolve, backoff));
+      backoff = Math.min(backoff * 2, options.maximumBackoffMs ?? 10_000);
     }
   }
 
@@ -303,6 +350,7 @@ export async function raceLoad(options: RaceLoadOptions): Promise<RaceLoadReport
   let limit: NodeJS.Timeout | undefined;
   await Promise.race([
     Promise.all(riders),
+    aborted,
     new Promise((done) => {
       limit = setTimeout(done, options.maximumMs);
     }),
@@ -320,6 +368,7 @@ export async function raceLoad(options: RaceLoadOptions): Promise<RaceLoadReport
     seatingSeconds: Math.round(((seatedAt ?? ended) - started) / 1000),
     raceSeconds: Math.round((ended - (startRequestedAt ?? ended)) / 1000),
     raceOver,
+    abortReason: abortReason ?? null,
     finishers,
     frames: {
       total: arrivals.reduce((sum, each) => sum + each.length, 0),
