@@ -87,6 +87,10 @@ assert_clean 'three shards that all succeeded pass' \
 assert_clean 'one shard that succeeded passes' \
   "$(needs_json checks success)"
 
+# #1362: the browser gate is two shards whose ids end in a digit after a hyphen.
+assert_clean 'four shards, the browser gate in two, that all succeeded pass' \
+  "$(needs_json checks success tests success browser-1 success browser-2 success)"
+
 assert_clean 'the layout does not matter: compact JSON passes' \
   '{"checks":{"result":"success","outputs":{}},"browser-gate":{"result":"success","outputs":{}}}'
 
@@ -113,6 +117,16 @@ assert_violation 'every shard skipped fails' SHARD001 \
 assert_violation 'the LAST shard failing fails (not only the first is read)' SHARD001 \
   "the shard 'browser' ended as 'failure'" \
   "$(needs_json checks success tests success browser failure)"
+
+# #1362: the second browser half is the last shard, and a half of the gate
+# that never ran must not pass because the other half did.
+assert_violation 'one half of the browser gate failing fails, and is named' SHARD001 \
+  "the shard 'browser-2' ended as 'failure'" \
+  "$(needs_json checks success tests success browser-1 success browser-2 failure)"
+
+assert_violation 'one half of the browser gate skipped fails' SHARD001 \
+  "the shard 'browser-1' ended as 'skipped'" \
+  "$(needs_json checks success tests success browser-1 skipped browser-2 success)"
 
 assert_violation 'the FIRST shard failing fails (not only the last is read)' SHARD001 \
   "the shard 'checks' ended as 'failure'" \

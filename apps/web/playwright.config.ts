@@ -57,9 +57,10 @@ const PORT = 4319;
  * ⚠️ The one above previews `browser/` — the harness — and an offline claim
  * about the product has to be measured against `apps/web/dist`, which that
  * server does not serve. So there are two `webServer` entries, not two
- * Playwright projects and emphatically not two CI jobs: the gate is one job,
- * the `browser` shard since #1285, which the job named `Repository rules`
- * waits for (docs/agents/ci.md §4c).
+ * Playwright projects and emphatically not two CI jobs for them: since #1362
+ * the gate is two jobs, `browser-1` and `browser-2`, which divide the cases
+ * and not the servers — each starts both — and which the job named
+ * `Repository rules` waits for (docs/agents/ci.md §4c).
  *
  * ⚠️ **The product server serves a single-page app**, with Vite's default
  * `appType`. That is deliberate and is the opposite of the harness's `'mpa'`:
@@ -299,6 +300,16 @@ export const GAME_PART_MS = 85_000;
  * `nightly-split.test.ts` holds the two sums above, and each shard's stop at
  * least five minutes clear of its slowest run, from the table in
  * `docs/agents/ci.md` §"Shards — #1285".
+ *
+ * ⚠️ **Since #1362 the gate is TWO shards, and every stop here is now each
+ * shard's.** The `chromium` run took 690 to 708 s of {@link CHROMIUM_PART_MS}
+ * on the EPYC 7763 (five of the last ten green `main` runs before #1362), and
+ * run 38656925947 reached it with one case not run. So `test:browser:shard-1`
+ * and `test:browser:shard-2` each run half the `chromium` project (Playwright's
+ * `--shard`) under the same stop, workers and wrapper, and the second runs
+ * the `game` run after its half. `test:browser` is still the whole gate in one
+ * command, locally; `nightly-split.test.ts` holds that the shards are exactly
+ * it. The figures are `docs/agents/ci.md` §"Two browser shards — #1362".
  */
 export const GATE_STEP_MS = 825_000;
 /** How many workers the `chromium` run has — @see CHROMIUM_PART_MS. */
