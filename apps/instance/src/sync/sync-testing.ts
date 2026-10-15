@@ -162,6 +162,19 @@ export const SYNC_HAPPY_CALLS: Readonly<
       mayBeRaced: true,
     });
   },
+  setRaceRoute: async (world) => {
+    const { token, content } = await riderWithRide(world);
+    await authorised(world, token, 'POST', `/v1/sync/records/${content}/race-consent`, {
+      mayBeRaced: true,
+    });
+    return authorised(world, token, 'POST', `/v1/sync/records/${content}/race-route`, {
+      routeSha256: 'a'.repeat(64),
+    });
+  },
+  getRiderGhost: async (world) => {
+    const { token } = await signedInRider(world);
+    return authorised(world, token, 'GET', `/v1/ghosts/${'a'.repeat(64)}`);
+  },
   putSyncItem: async (world) => {
     const { token } = await signedInRider(world);
     return authorised(world, token, 'POST', '/v1/sync/items/write-up/ride-1', { body: '{}' });

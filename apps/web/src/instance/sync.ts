@@ -407,6 +407,14 @@ export interface SyncDependencies {
    * beside this device's when both changed.
    */
   readonly newDocumentId: () => string;
+  /**
+   * The route one of this device's rides is offered to be raced on, as the
+   * digest of its canonical GPX, or `null` for none (#331) —
+   * `detail/race-consent.ts` §`raceRouteOf`, bound to this store and athlete:
+   * the consent, the route, and this device's privacy zones, which never
+   * leave it. Absent, no offer is sent and none is withdrawn.
+   */
+  readonly raceRoute?: (activityId: ActivityId) => Promise<string | null>;
 }
 
 /**
@@ -481,6 +489,8 @@ interface ManifestEntry {
   readonly activityId: string | null;
   /** A live ride's "may be raced" consent (#793); absent from an instance that predates it. */
   readonly mayBeRaced?: boolean | null;
+  /** The route a live ride is offered to be raced on (#331); absent from an instance that predates it. */
+  readonly raceRouteSha256?: string | null;
 }
 
 /** Why one thing did not sync. */
@@ -509,6 +519,8 @@ export interface SyncReport {
   readonly consentsPushed: number;
   /** Rides whose consent was taken from the instance — set or revoked on another device. */
   readonly consentsPulled: number;
+  /** Rides whose race offer was sent or withdrawn (#331): decided here, by this device's zones. */
+  readonly offersSent: number;
   /** Goals, notes and documents pulled from the instance (#836). */
   readonly textsPulled: number;
   /** Goals, notes and documents pushed to the instance (#836). */
@@ -647,6 +659,9 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
   const keysToConfirm = new Set<string>();
   let consentsPushed = 0;
   let consentsPulled = 0;
+  /** The consent this sync sent, per ride: what the instance holds now, though the manifest predates it. */
+  const consentsSent = new Map<string, boolean>();
+  let offersSent = 0;
   let textsPulled = 0;
   let textsPushed = 0;
   let textsHiddenOnInstance = 0;
@@ -926,6 +941,7 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
     });
     if (answer.status === 200) {
       consentsPushed += 1;
+      consentsSent.set(id, local);
       await remember({
         kind: 'race-consent',
         key: id,
@@ -935,6 +951,45 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
       });
     } else {
       failures.push({ kind: 'race-consent', key: id, reason: codeOf(answer.body) });
+    }
+  }
+
+  // --- A ride's race offer (#331) --------------------------------------------
+  // After the consent, so an offer is decided on the consent this sync agreed.
+  // DERIVED, like a summary, so never pulled and never in the base: the
+  // instance holds what this device last decided. ⚠️ **Only the device that
+  // signed the ride decides**, because the privacy zones it is decided against
+  // are on that device and on no other (ADR 0004): a second device without
+  // them would offer a route the first had refused, and the two would undo
+  // each other at every sync. A revocation needs no request here — the
+  // instance withdraws the offer with the consent (`sql-store.ts`
+  // §`setActivityMayBeRaced`).
+  const offerOf = dependencies.raceRoute;
+  if (offerOf !== undefined) {
+    const own = toHex((await dependencies.signingKey()).publicKey);
+    for (const id of rides) {
+      const content = contentOf.get(id);
+      const entry = content === undefined ? undefined : liveRemote.get(content);
+      // Not on the instance yet, or an instance that predates the offer.
+      if (content === undefined || entry === undefined || entry.raceRouteSha256 === undefined) {
+        continue;
+      }
+      if ((await store.getActivityRecord(athleteId, id))?.record.publicKey !== own) continue;
+      // Both sides as they stand after this sync's consent step. The instance
+      // holds no offer without a consent: a revocation sent above cleared it.
+      const theirs = consentsSent.get(id) ?? entry.mayBeRaced === true;
+      const held = theirs ? entry.raceRouteSha256 : null;
+      // `null` unless this device's own consent stands (`raceRouteOffer`).
+      const wanted = await offerOf(id);
+      if (wanted === held) continue;
+      const answer = await sealed.json('POST', `/v1/sync/records/${content}/race-route`, {
+        routeSha256: wanted,
+      });
+      if (answer.status === 200) {
+        offersSent += 1;
+      } else {
+        failures.push({ kind: 'race-route', key: id, reason: codeOf(answer.body) });
+      }
     }
   }
 
@@ -1055,6 +1110,7 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
     deletedOnInstance,
     consentsPushed,
     consentsPulled,
+    offersSent,
     textsPulled,
     textsPushed,
     textsHiddenOnInstance,

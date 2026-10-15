@@ -150,6 +150,16 @@ interface RoutePickerProps {
   readonly units: UnitSystem;
   readonly withGhost: boolean;
   readonly onGhost: (value: boolean) => void;
+  /**
+   * Whether to race another rider's ghost instead of the rider's own (#331).
+   * Offered only where {@link riderGhostOffered}; absent, never drawn.
+   */
+  readonly withRiderGhost?: boolean | undefined;
+  readonly onRiderGhost?: ((value: boolean) => void) | undefined;
+  /** Whether this device can ask an instance for another rider's ghost (#331). */
+  readonly riderGhostOffered?: boolean | undefined;
+  /** Why the last press found no other rider's ghost, and so did not start (#331). */
+  readonly riderGhostProblem?: string | undefined;
   readonly withPacer: boolean;
   readonly onPacer: (value: boolean) => void;
   readonly intensity: string;
@@ -197,6 +207,8 @@ interface RoutePickerProps {
     pacer: BotPacerPlan | undefined,
     air: Wind | undefined,
     position: RidingPosition,
+    /** #331: race another rider's ghost. Never with `ghost`: one ghost at a time. */
+    riderGhost?: boolean,
   ) => Promise<void>;
 }
 
@@ -398,12 +410,17 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
               if (refused) {
                 return;
               }
+              // #331: another rider's ghost REPLACES the rider's own — one
+              // ghost at a time (ADR 0021 D-4.1) — so the two are never both
+              // sent as true.
+              const riderGhost = props.riderGhostOffered === true && props.withRiderGhost === true;
               void props.onStart(
                 chosen,
-                props.withGhost && chosen.attempts > 0,
+                !riderGhost && props.withGhost && chosen.attempts > 0,
                 props.choice.plan,
                 props.air.wind,
                 props.position,
+                riderGhost,
               );
             }}
           >
@@ -434,6 +451,13 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
         <h3 className="oyl-chooser__loadout-title tw:mt-0">Your ride</h3>
         <LoadoutHelp />
         <GhostControl route={chosen} withGhost={props.withGhost} onGhost={props.onGhost} />
+        {props.riderGhostOffered === true && props.onRiderGhost !== undefined ? (
+          <RiderGhostControl
+            withRiderGhost={props.withRiderGhost === true}
+            onRiderGhost={props.onRiderGhost}
+            problem={props.riderGhostProblem}
+          />
+        ) : null}
         <PacerControls
           withPacer={props.withPacer}
           onPacer={props.onPacer}
@@ -639,6 +663,66 @@ function GhostControl(props: {
           ? 'Race your best — ride it once first'
           : 'Race your own best attempt'}
       </label>
+    </div>
+  );
+}
+
+/**
+ * The rider-facing words of #331's choice, for the owner's approval.
+ *
+ * The label says what is asked for and whose consent it rests on; the hint
+ * says the two things a rider needs before choosing it — that it replaces
+ * their own best (one ghost at a time), and that it is fetched from their
+ * instance, so it needs one.
+ */
+export const RIDER_GHOST_TEXT = {
+  label: 'Race another rider’s ghost',
+  hint:
+    'One rider who agreed to be raced on this route, fetched from your instance when you ' +
+    'press Ride. It replaces your own best: one ghost at a time.',
+} as const;
+
+const RIDER_GHOST_HINT_ID = 'oyl-game-rider-ghost-hint';
+const RIDER_GHOST_PROBLEM_ID = 'oyl-game-rider-ghost-problem';
+
+/**
+ * Whether to race ONE other rider's consented attempt on the chosen route
+ * instead of the rider's own — #331, ADR 0039. Drawn only on a device that
+ * can ask its instance; turning it on turns the rider's own ghost off, which
+ * `GameView` does, so the two switches never both read "on".
+ */
+function RiderGhostControl(props: {
+  readonly withRiderGhost: boolean;
+  readonly onRiderGhost: (value: boolean) => void;
+  readonly problem: string | undefined;
+}): JSX.Element {
+  return (
+    <div className="oyl-game__ghost tw:flex tw:flex-col tw:items-start tw:gap-xs tw:mb-sm">
+      <label>
+        <input
+          type="checkbox"
+          role="switch"
+          checked={props.withRiderGhost}
+          // The refusal travels with the switch that caused it, as #255's do.
+          aria-describedby={
+            props.problem === undefined
+              ? RIDER_GHOST_HINT_ID
+              : `${RIDER_GHOST_HINT_ID} ${RIDER_GHOST_PROBLEM_ID}`
+          }
+          onChange={(event) => {
+            props.onRiderGhost(event.target.checked);
+          }}
+        />
+        {RIDER_GHOST_TEXT.label}
+      </label>
+      <p id={RIDER_GHOST_HINT_ID} className="tw:m-0">
+        {RIDER_GHOST_TEXT.hint}
+      </p>
+      {props.problem === undefined ? null : (
+        <p className="oyl-game__problem tw:m-0" id={RIDER_GHOST_PROBLEM_ID} role="alert">
+          {props.problem}
+        </p>
+      )}
     </div>
   );
 }

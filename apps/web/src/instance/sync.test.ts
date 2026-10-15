@@ -48,6 +48,7 @@ import {
 import {
   createStoreHarness,
   rideWriteUpFor,
+  routeFor,
   riderTextFor,
   sideCameraReportFor,
   workoutFor,
@@ -55,6 +56,7 @@ import {
 } from '@onyourleft/store/testing';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 
+import { raceRouteDigest, raceRouteOf } from '../detail/race-consent';
 import { orderedRows, PAGE_SIZE } from '../library/rows';
 import { rideSummaryOf, type RideSummaryStore } from '../ride-analysis/ride-summary';
 import { ensureLocalAthlete, LOCAL_ATHLETE } from '../local-athlete';
@@ -105,6 +107,12 @@ interface InstanceStoreModule {
       requester: string,
       limit: number,
     ): Promise<readonly { readonly athleteId: string; readonly contentSha256: string }[]>;
+    /** #331: what the instance would offer as a ghost on one route. */
+    listRaceableOnRoute(
+      requester: string,
+      routeSha256: string,
+      limit: number,
+    ): Promise<readonly { readonly athleteId: string; readonly contentSha256: string }[]>;
     /** The agent's read port (`analysis/tools/reads.ts` §`AnalysisReads`), as `SqlStore` serves it. */
     listLiveSyncItems(
       athleteId: string,
@@ -138,6 +146,18 @@ beforeAll(async () => {
   syncTesting = (await import(INSTANCE('sync/sync-testing.ts'))) as SyncTesting;
   instanceStore = (await import(INSTANCE('store/open-sql-store.ts'))) as InstanceStoreModule;
 });
+
+/** What the instance would offer as a ghost on `route` to a stranger, read on a fresh store (#331). */
+async function offeredOnInstance(path: string, route: string): Promise<string[]> {
+  const fresh = await instanceStore.openSqlStore(path);
+  try {
+    return (await fresh.listRaceableOnRoute('a-stranger', route, 100)).map(
+      (record) => record.contentSha256,
+    );
+  } finally {
+    await fresh.close();
+  }
+}
 
 /**
  * What the instance would serve as raceable to a rider who is not A — read on
@@ -291,6 +311,8 @@ function syncDependencies(on: Device, store: SyncDependencies['store']): SyncDep
     // The athlete's keys, from the instance's device list (#898).
     athleteKeys: () => athleteKeysFrom(on.transport.sync),
     newDocumentId: () => crypto.randomUUID(),
+    // #331: the race offer, as `main.tsx` binds it — this device's zones.
+    raceRoute: raceRouteOf(store as never, LOCAL_ATHLETE, webCryptoSha256),
   };
 }
 
@@ -926,6 +948,78 @@ describe('two-way sync through the real instance (#776)', () => {
       (await b.on.harness.read((store) => store.getActivity(LOCAL_ATHLETE, ride)))?.mayBeRaced,
     ).toBe(true);
     expect(await raceableOnInstance(world.path)).toHaveLength(1);
+  }, 60_000);
+});
+
+describe('a ride’s race offer (#331)', () => {
+  it('offers a consented ride on its route, withdraws it when a zone touches the route, and leaves the deciding to the device that signed it', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, ['nominal-outdoor-ride.fit']);
+    const ride = a.ids[0]!;
+    const route = routeFor(LOCAL_ATHLETE);
+    await a.on.harness.write(async (store) => {
+      await store.putRoute(route);
+      const stored = await store.getActivity(LOCAL_ATHLETE, ride);
+      await store.putActivity({ ...stored!, routeId: route.id });
+    });
+    const digest = await raceRouteDigest(route.profile, webCryptoSha256);
+
+    // No consent: the ride goes, and no offer with it.
+    expect(await a.sync()).toMatchObject({ pushed: 1, offersSent: 0, failures: [] });
+    expect(await offeredOnInstance(world.path, digest)).toStrictEqual([]);
+
+    // Consent: the same sync sends the consent and then the offer.
+    await a.on.harness.write((store) => store.setActivityMayBeRaced(LOCAL_ATHLETE, ride, true));
+    expect(await a.sync()).toMatchObject({ consentsPushed: 1, offersSent: 1, failures: [] });
+    expect(await offeredOnInstance(world.path, digest)).toHaveLength(1);
+    // And a sync with nothing changed sends nothing.
+    expect(await a.sync()).toMatchObject({ offersSent: 0, failures: [] });
+
+    // A second device of the rider's, with none of A's zones, never decides it.
+    const b = await linkedDevice(world.url, origin, a.on);
+    expect(await b.sync()).toMatchObject({ pulled: 1, offersSent: 0, failures: [] });
+
+    // A zone on A that touches the route: the next sync withdraws the offer,
+    // though the consent stands.
+    await a.on.harness.write((store) =>
+      store.putPrivacyZone({
+        id: 'zone-home' as never,
+        athleteId: LOCAL_ATHLETE,
+        centre: route.profile.positions[0]!,
+        radius: 150 as never,
+        label: 'Home',
+        createdAt: NOW,
+      }),
+    );
+    expect(await a.sync()).toMatchObject({ offersSent: 1, consentsPushed: 0, failures: [] });
+    expect(await offeredOnInstance(world.path, digest)).toStrictEqual([]);
+    expect(await raceableOnInstance(world.path)).toHaveLength(1);
+  }, 60_000);
+
+  it('takes the offer away with a revocation, and offers again only once consent is given again', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, ['nominal-outdoor-ride.fit']);
+    const ride = a.ids[0]!;
+    const route = routeFor(LOCAL_ATHLETE);
+    await a.on.harness.write(async (store) => {
+      await store.putRoute(route);
+      const stored = await store.getActivity(LOCAL_ATHLETE, ride);
+      await store.putActivity({ ...stored!, routeId: route.id, mayBeRaced: true });
+    });
+    const digest = await raceRouteDigest(route.profile, webCryptoSha256);
+    expect(await a.sync()).toMatchObject({ pushed: 1, failures: [] });
+    expect(await a.sync()).toMatchObject({ consentsPushed: 1, offersSent: 1, failures: [] });
+    expect(await offeredOnInstance(world.path, digest)).toHaveLength(1);
+
+    await a.on.harness.write((store) => store.setActivityMayBeRaced(LOCAL_ATHLETE, ride, false));
+    expect(await a.sync()).toMatchObject({ consentsPushed: 1, offersSent: 0, failures: [] });
+    expect(await offeredOnInstance(world.path, digest)).toStrictEqual([]);
+
+    await a.on.harness.write((store) => store.setActivityMayBeRaced(LOCAL_ATHLETE, ride, true));
+    expect(await a.sync()).toMatchObject({ consentsPushed: 1, offersSent: 1, failures: [] });
+    expect(await offeredOnInstance(world.path, digest)).toHaveLength(1);
   }, 60_000);
 });
 

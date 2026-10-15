@@ -25,6 +25,7 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import { ensureLocalAthlete, LOCAL_ATHLETE } from '../local-athlete';
 import { rideSummaryOf } from '../ride-analysis/ride-summary';
+import { raceRouteOf } from '../detail/race-consent';
 import { importActivityFiles } from '../transfer/import-batch';
 import { WEB_BUILD_TEXT, type LoadedFrom } from './instance-pin';
 import {
@@ -131,6 +132,7 @@ async function device(send: InstanceSend, loadedFrom: LoadedFrom = LOADED_LOCALL
     timeZone: 'Europe/London',
     rideSummary: (id) => rideSummaryOf(store(), LOCAL_ATHLETE)(id),
     newDocumentId: () => crypto.randomUUID(),
+    raceRoute: (id) => raceRouteOf(store(), LOCAL_ATHLETE, webCryptoSha256)(id),
   });
   return { harness, storage, store, instance, sync };
 }

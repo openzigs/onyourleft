@@ -62,6 +62,7 @@ const REPORT: SyncReport = {
   hiddenOnInstance: 0,
   consentsPushed: 0,
   consentsPulled: 0,
+  offersSent: 0,
   textsPulled: 0,
   textsPushed: 0,
   textsHiddenOnInstance: 0,
