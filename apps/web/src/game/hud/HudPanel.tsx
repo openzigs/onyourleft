@@ -75,6 +75,8 @@ import {
   type TrainerLine,
 } from './fields';
 import { PlanTrace } from './PlanTrace';
+import { RaceStandings } from './RaceStandings';
+import type { RaceStandingsView } from '../room-ride';
 import { WorkoutStrip } from '../../workout/WorkoutGraph';
 import type { WorkoutGraphInput } from '../../workout/workout-graph';
 
@@ -234,6 +236,13 @@ export interface HudPanelProps extends Omit<HudInput, 'units'> {
    * every overlay viewport.
    */
   readonly lapNotice?: ReactNode;
+  /**
+   * A race's standings — #1347, ADR 0051 — while the room sends them: the
+   * riders around this one, the room's gap to each and their live W/kg.
+   * `undefined` on every other ride, in a group ride, and while the room's
+   * connection is lost (`room-ride.ts` §`raceStandings`).
+   */
+  readonly standings?: RaceStandingsView | undefined;
 }
 
 /** The id the notice toggle's `aria-controls` names. One HUD per page. */
@@ -445,6 +454,15 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
         )}
         {props.sound}
       </div>
+
+      {/*
+        #1347: a race's standings, a panel of their own — on a tablet at the
+        end edge under the secondary readings, on a phone visually hidden
+        (`theme.css` §"A RACE'S STANDINGS"). After the actions in the
+        document, so a screen reader meets Pause and End ride first, and
+        never a live region (`RaceStandings.tsx` says why).
+      */}
+      {props.standings === undefined ? null : <RaceStandings standings={props.standings} />}
 
       {/*
         Last in the document and placed by the grid, not by this position: a

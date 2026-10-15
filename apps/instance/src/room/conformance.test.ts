@@ -38,15 +38,19 @@ declare module 'vitest' {
 
 const underWorkerd = inject('workerd') === true;
 
-const ADAPTERS: readonly (() => RoomUnderTest)[] = [
-  () => fakeDurableRoom(conformanceSettings(), admitConformance),
-  () => nodeRoom(conformanceSettings(), admitConformance),
+/** Every adapter, for a room drafted or not (#787: the script covers both settings). */
+const ADAPTERS: readonly ((drafting: boolean) => RoomUnderTest)[] = [
+  (drafting) => fakeDurableRoom(conformanceSettings(drafting), admitConformance),
+  (drafting) => nodeRoom(conformanceSettings(drafting), admitConformance),
 ];
 
 let reference: Transcript;
+/** The same script in a room made with drafting off (#787). */
+let undrafted: Transcript;
 
 beforeAll(async () => {
   reference = await rideTheScript(coreRoom(conformanceSettings(), admitConformance));
+  undrafted = await rideTheScript(coreRoom(conformanceSettings(false), admitConformance));
 });
 
 /** The messages of one socket's transcript, decoded, for the assertions that read them. */
@@ -61,7 +65,8 @@ describe('the script itself — what the reference says happens', () => {
     const ann = decoded(reference, 'ann');
     const frames = ann.filter((m) => 'ok' in m && m.ok && m.message.type === 'frame');
     expect(ann[0]).toMatchObject({ ok: true, message: { type: 'welcome', riderId: 0 } });
-    expect(frames.length).toBeGreaterThanOrEqual(60);
+    // A drafted race of two is a little quicker than sixty ticks (#787).
+    expect(frames.length).toBeGreaterThanOrEqual(55);
     expect(ann.at(-1)).toMatchObject({ ok: true, message: { type: 'finish', order: [0, 1] } });
     expect(decoded(reference, 'forger')).toEqual([
       { ok: true, message: { type: 'refuse', reason: 'ticket-refused' } },
@@ -79,15 +84,68 @@ describe('the script itself — what the reference says happens', () => {
   });
 });
 
-function holdsToTheReference(make: () => RoomUnderTest): void {
-  it(`${make().name} sends every socket exactly what the reference does`, async () => {
-    const room = make();
-    try {
-      expect(await rideTheScript(room)).toEqual(reference);
-    } finally {
-      await room.dispose();
+describe('the script’s race standings — #1347, held by every adapter below', () => {
+  it('names both riders to both, and sends each a standings after every frame, gaps to them', () => {
+    for (const label of ['ann', 'bea']) {
+      const messages = decoded(reference, label).flatMap((m) =>
+        'ok' in m && m.ok ? [m.message] : [],
+      );
+      // Ann is named to herself, then told Bea's name as Bea is seated; Bea is told both.
+      expect(messages.filter((m) => m.type === 'name')).toEqual([
+        { type: 'name', riderId: 0, displayName: 'Ann' },
+        { type: 'name', riderId: 1, displayName: 'Bea' },
+      ]);
+      const frames = messages.filter((m) => m.type === 'frame').length;
+      const standings = messages.filter((m) => m.type === 'standings');
+      expect(standings.length).toBe(frames);
+      for (const each of standings) {
+        const own = each.riders.find((r) => r.riderId === (label === 'ann' ? 0 : 1));
+        expect(own?.gapDeciseconds).toBe(0);
+      }
     }
+    // Bea, back on a new socket, is named the field again.
+    expect(
+      decoded(reference, 'bea-again')
+        .flatMap((m) => ('ok' in m && m.ok && m.message.type === 'name' ? [m.message] : []))
+        .map((m) => m.riderId),
+    ).toEqual([0, 1]);
   });
+});
+
+describe('the script’s drafting — #787, both settings', () => {
+  const draftsOf = (transcript: Transcript, label: string): number[] =>
+    decoded(transcript, label).flatMap((m) =>
+      'ok' in m && m.ok && m.message.type === 'frame'
+        ? m.message.riders.map((rider) => rider.draftPercent)
+        : [],
+    );
+  const welcomeOf = (transcript: Transcript) =>
+    decoded(transcript, 'ann').find((m) => 'ok' in m && m.ok && m.message.type === 'welcome');
+
+  it('tells every rider in the welcome which the room is, before the start', () => {
+    expect(welcomeOf(reference)).toMatchObject({ message: { roomConfig: { drafting: 'on' } } });
+    expect(welcomeOf(undrafted)).toMatchObject({ message: { roomConfig: { drafting: 'off' } } });
+  });
+
+  it('carries a draft in the frames of a drafted race, and none, through the same code, with drafting off', () => {
+    expect(Math.max(...draftsOf(reference, 'ann'))).toBeGreaterThan(20);
+    expect(new Set(draftsOf(undrafted, 'ann'))).toEqual(new Set([0]));
+    // The two rooms differ by the draft and by nothing else the script sends first.
+    expect(undrafted.forger).toEqual(reference.forger);
+  });
+});
+
+function holdsToTheReference(make: (drafting: boolean) => RoomUnderTest): void {
+  for (const drafting of [true, false]) {
+    it(`${make(drafting).name} sends every socket exactly what the reference does — drafting ${drafting ? 'on' : 'off'}`, async () => {
+      const room = make(drafting);
+      try {
+        expect(await rideTheScript(room)).toEqual(drafting ? reference : undrafted);
+      } finally {
+        await room.dispose();
+      }
+    });
+  }
 }
 
 describe('every adapter sends byte-identical text for the same inputs and clock', () => {

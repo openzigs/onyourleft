@@ -231,6 +231,21 @@
  *      body writes nothing and is reported `not-workout-goals`.
  *    Goals that cannot be read here (a hand-edited row) send, delete and bring
  *    back nothing that sync, and are reported `not-read`.
+ *
+ * ⚠️ **A pull of rules 8, 9 and 10 writes only over what the sync read**
+ * (#1263). It waits on the instance between its read here and its write, and
+ * the rider can edit or delete the thing in that wait. So the write is
+ * conditional inside the store's own transaction: it lands only if the row is
+ * still the one read — the same body, so the same digest — or still absent.
+ * Otherwise nothing is written, the base row stays as it was, and the next
+ * sync sees the change here and sends it ({@link CHANGED_HERE}). For rule 8
+ * that "next sync" is rule 8's own: a text deleted here over a copy another
+ * device changed is still pulled back then, by #924's ruling, rather than
+ * deleted there. Rides (rule 2) have no such window: a ride is pulled only
+ * when this device holds no copy and no base row, so there is no edit here
+ * for the pull to overwrite or delete to undo; the rider importing the same
+ * file in the wait is found by the import's own duplicate check, which runs
+ * after the wait.
  */
 
 import {
@@ -265,6 +280,7 @@ import type {
 import {
   GOALS_KEY,
   MAXIMUM_DOCUMENT_NAME_CHARACTERS,
+  StoreConflictError,
   tidyRiderText,
   withoutBidiControls,
   workoutId,
@@ -1022,7 +1038,9 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
     else if (outcome === 'kept-both') {
       textsPushed += 1;
       textConflicts += 1;
-    } else if (outcome !== 'same') failures.push({ kind, key, reason: outcome });
+    } else if (outcome !== 'same' && outcome !== CHANGED_HERE) {
+      failures.push({ kind, key, reason: outcome });
+    }
   }
 
   // --- The rider's saved workouts (#1100) -------------------------------------
@@ -1050,7 +1068,9 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
       else if (outcome === 'pulled') workoutsPulled += 1;
       else if (outcome === 'deleted-on-instance') workoutsDeletedOnInstance += 1;
       else if (outcome === 'hidden-on-instance') workoutsHiddenOnInstance += 1;
-      else if (outcome !== 'same') failures.push({ kind: WORKOUT_KIND, key, reason: outcome });
+      else if (outcome !== 'same' && outcome !== CHANGED_HERE) {
+        failures.push({ kind: WORKOUT_KIND, key, reason: outcome });
+      }
     }
   }
 
@@ -1069,7 +1089,7 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
     else if (outcome === 'pulled') workoutGoalsPulled += 1;
     else if (outcome === 'deleted-on-instance') workoutGoalsDeletedOnInstance += 1;
     else if (outcome === 'hidden-on-instance') workoutGoalsHiddenOnInstance += 1;
-    else if (outcome !== 'same') {
+    else if (outcome !== 'same' && outcome !== CHANGED_HERE) {
       failures.push({ kind: WORKOUT_GOAL_KIND, key: WORKOUT_GOALS_KEY, reason: outcome });
     }
   }
@@ -1198,7 +1218,7 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
         return 'same';
       }
       // On the instance, and never held here: another device saved them.
-      if (known === undefined) return pullWorkoutGoals(path, remoteDigest);
+      if (known === undefined) return pullWorkoutGoals(path, remoteDigest, undefined);
       // Synced before, and cleared here since: the device's change wins, so
       // they are deleted there — even if another device changed them since.
       const answer = await sealed.json('DELETE', path);
@@ -1223,7 +1243,7 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
     if (known?.localDigest === localDigest && remoteDigest !== null) {
       // Unchanged here since the last sync: another device changed them there.
       if (remoteDigest === known.remoteDigest) return 'same';
-      return pullWorkoutGoals(path, remoteDigest);
+      return pullWorkoutGoals(path, remoteDigest, body);
     }
     // Saved or changed here, never synced, or gone from the instance: this
     // device's copy is canonical (ADR 0036 D-3). That includes goals this
@@ -1245,9 +1265,15 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
   /**
    * The typed workout goals from the instance — rule 10. Read WHOLE by
    * `readWorkoutGoals` before anything is written: a body it refuses writes
-   * no goals and no base row, and answers `not-workout-goals`.
+   * no goals and no base row, and answers `not-workout-goals`. `held` is
+   * the goals' body as this sync read them here, `undefined` for none: the
+   * write lands only if they are still that ({@link CHANGED_HERE}).
    */
-  async function pullWorkoutGoals(path: string, remoteDigest: string): Promise<string> {
+  async function pullWorkoutGoals(
+    path: string,
+    remoteDigest: string,
+    held: string | undefined,
+  ): Promise<string> {
     const answer = await sealed.json('GET', path);
     if (answer.status !== 200) return codeOf(answer.body);
     const text = (answer.body as { body?: unknown } | null)?.body;
@@ -1262,13 +1288,12 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
     if (!reading.ok) return 'not-workout-goals';
     let written;
     try {
-      written = await store.putWorkoutGoals({
-        athleteId,
-        goals: reading.goals,
-        savedAt: dependencies.now(),
-      });
-    } catch {
-      return 'not-stored';
+      written = await store.putWorkoutGoals(
+        { athleteId, goals: reading.goals, savedAt: dependencies.now() },
+        { onlyIf: (row) => (row === undefined ? undefined : JSON.stringify(row.goals)) === held },
+      );
+    } catch (error) {
+      return error instanceof StoreConflictError ? CHANGED_HERE : 'not-stored';
     }
     const localDigest = await hex(utf8(JSON.stringify(written.goals)), sha256);
     await remember({
@@ -1285,7 +1310,8 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
    * One saved workout from the instance — rule 9. Decoded and validated as a
    * rider's own import is (`workoutFromFile`) BEFORE anything is written: a
    * body it refuses writes no workout and no base row, and answers
-   * `not-a-workout`.
+   * `not-a-workout`. The write lands only if the workout here is still
+   * `local`, the copy this sync read ({@link CHANGED_HERE}).
    */
   async function pullWorkout(
     key: string,
@@ -1311,10 +1337,19 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
       createdAt: local?.createdAt ?? now,
       updatedAt: now,
     };
+    // `read` is also undefined for a workout here that cannot be encoded, and
+    // then the condition accepts it: unreachable, `syncWorkout` answers
+    // `not-a-workout` for such a row before it pulls.
+    const read = local === undefined ? undefined : workoutBody(local);
     try {
-      await store.putWorkout(record);
-    } catch {
-      return 'not-stored';
+      await store.putWorkout(record, {
+        onlyIf: (row) =>
+          row === undefined
+            ? local === undefined
+            : local !== undefined && workoutBody(row) === read,
+      });
+    } catch (error) {
+      return error instanceof StoreConflictError ? CHANGED_HERE : 'not-stored';
     }
     const localDigest = await hex(utf8(encodeWorkoutFile(record.workout)), sha256);
     await remember({ kind: WORKOUT_KIND, key, activityId: null, localDigest, remoteDigest });
@@ -1345,7 +1380,7 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
         // the delete would take words the rider never saw: pull them instead
         // (#924).
         if (remoteDigest !== known.remoteDigest) {
-          return pullText(kind, key, remoteDigest, activityId);
+          return pullText(kind, key, remoteDigest, activityId, local);
         }
         const answer = await sealed.json(
           'DELETE',
@@ -1357,7 +1392,7 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
         await forget();
         return 'deleted-on-instance';
       }
-      return pullText(kind, key, remoteDigest, activityId);
+      return pullText(kind, key, remoteDigest, activityId, local);
     }
     const body = riderTextBody(local);
     const localDigest = await hex(utf8(body), sha256);
@@ -1373,7 +1408,7 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
     }
     if (unchangedHere && remoteDigest !== null) {
       if (remoteDigest === known.remoteDigest) return 'same';
-      return pullText(kind, key, remoteDigest, activityId);
+      return pullText(kind, key, remoteDigest, activityId, local);
     }
     // Changed here and ALSO changed there since the base — or on both sides
     // with no base to tell: keep the other device's version as a conflict
@@ -1453,13 +1488,19 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
     return 'kept';
   }
 
-  /** One goal, note or document from the instance, through the store's own validating write. */
+  /**
+   * One goal, note or document from the instance, through the store's own
+   * validating write — which lands only if the text here is still `local`,
+   * the copy this sync read ({@link CHANGED_HERE}).
+   */
   async function pullText(
     kind: RiderTextKind,
     key: string,
     remoteDigest: string,
     activityId: ActivityId | null,
+    local: RiderTextRecord | undefined,
   ): Promise<string> {
+    const read = local === undefined ? undefined : riderTextBody(local);
     const answer = await sealed.json('GET', `/v1/sync/items/${kind}/${encodeURIComponent(key)}`);
     if (answer.status !== 200) return codeOf(answer.body);
     let kept: RiderTextRecord;
@@ -1470,16 +1511,19 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
       };
       if (typeof body.text !== 'string') return 'not-stored';
       if (kind === 'document' && typeof body.name !== 'string') return 'not-stored';
-      kept = await store.putRiderText({
-        athleteId,
-        kind,
-        key,
-        ...(kind === 'document' ? { name: body.name as string } : {}),
-        text: body.text,
-        savedAt: dependencies.now(),
-      });
-    } catch {
-      return 'not-stored';
+      kept = await store.putRiderText(
+        {
+          athleteId,
+          kind,
+          key,
+          ...(kind === 'document' ? { name: body.name as string } : {}),
+          text: body.text,
+          savedAt: dependencies.now(),
+        },
+        { onlyIf: (row) => (row === undefined ? undefined : riderTextBody(row)) === read },
+      );
+    } catch (error) {
+      return error instanceof StoreConflictError ? CHANGED_HERE : 'not-stored';
     }
     const localDigest = await hex(utf8(riderTextBody(kept)), sha256);
     await remember({ kind, key, activityId, localDigest, remoteDigest });
@@ -1601,6 +1645,29 @@ async function pullItem(
 }
 
 const utf8 = (text: string): Uint8Array => new TextEncoder().encode(text);
+
+/**
+ * What a pull answers when the rider changed or deleted the thing HERE while
+ * the sync waited on the instance (#1263): nothing was written and the base
+ * row was left as it was, so the next sync sees a change here and sends it —
+ * this device's change winning (ADR 0036 D-3). Counted in the report as
+ * neither pulled nor failed: in no count at all.
+ *
+ * The check is the store's write condition (`packages/store`
+ * §`WriteCondition`), made inside the write's own
+ * transaction: the row is still the one the sync read — the same body, so the
+ * same digest — or still absent.
+ */
+const CHANGED_HERE = 'changed-here';
+
+/** A saved workout's body as it is synced, or `undefined` for one its own format refuses. */
+function workoutBody(record: WorkoutRecord): string | undefined {
+  try {
+    return encodeWorkoutFile(record.workout);
+  } catch {
+    return undefined;
+  }
+}
 
 /** The digest a consent is remembered by in the sync base: of the body it is sent as. */
 const consentDigest = (mayBeRaced: boolean, sha256: Sha256): Promise<string> =>

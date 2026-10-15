@@ -4,7 +4,7 @@
  * **Another rider's ghost, as this instance serves it** (#331, ADR 0039).
  *
  * A rider racing a route asks for a ghost by the SHA-256 of that route's
- * canonical GPX (`migrations/0024-race-route.ts` says what the digest is and
+ * canonical GPX (`migrations/0025-race-route.ts` says what the digest is and
  * who sets it). The instance answers with **one** attempt, or none:
  *
  * - **One, never a list** (ADR 0021 D-4.1, ADR 0039 D-3). The route answers a

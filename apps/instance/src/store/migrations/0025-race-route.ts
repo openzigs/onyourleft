@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * Migration 0024 (#331): **which route a consented ride may be raced on** —
+ * Migration 0025 (#331): **which route a consented ride may be raced on** —
  * `activity_record.race_route_sha256`.
  *
  * It is the SHA-256 of the route's canonical GPX (`apps/web/src/detail/

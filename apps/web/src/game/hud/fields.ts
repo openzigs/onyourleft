@@ -220,24 +220,34 @@ export interface ChasedGap {
 
 /**
  * The room, on the HUD — #783: how many other riders are near, and the gap to
- * ONE rider the rider chose. **Never a list, and never an order**: ADR 0021
- * D-6 and ADR 0028 D-7.7 forbid a ranked list during a ride, and ruling Q8
- * (2026-09-28) is "only the gap to one chosen rider". A count says nothing
- * about who is ahead of whom.
+ * ONE rider the rider chose. **Never a list, and never an order, in these
+ * fields**: ADR 0021 D-6 and ruling Q8 (2026-09-28) made it "only the gap to
+ * one chosen rider". A race's list is its own panel since #1347
+ * (ADR 0051, superseding ADR 0028 D-7.7: `room-ride.ts` §`raceStandings`), and
+ * a group ride has none.
  */
 export interface RoomHud {
   /** How many other riders are drawn near this one — the interest set's size. */
   readonly nearby: number;
   /** The one rider the rider chose to follow, or `undefined` until they choose. */
   readonly chosen?: ChosenRider | undefined;
+  /**
+   * This rider's draft — #787: the share of their aerodynamic drag the room's
+   * draft removed on its last tick, in percent; `'off'` in a room made with
+   * drafting off; `undefined` before the room's first frame. ⚠️ **A share of
+   * drag, never watts** (ADR 0038 D-5): a watt figure moves with speed and
+   * gradient and means nothing on a descent, and there is no field here that
+   * could carry one.
+   */
+  readonly draft?: number | 'off' | undefined;
 }
 
 /** The one rider followed. @see RoomHud */
 export interface ChosenRider {
   /**
    * What they are called on the HUD. ⚠️ Only ever the room's public projection
-   * of the athlete (#774, ADR 0028 D-6.5) — and until a room publishes one
-   * (#784, #785), `Rider N`, which names a seat and no person.
+   * of the athlete (#774, ADR 0028 D-6.5) — which a race sends (#1347) — and
+   * where the room sends none, `Rider N`, which names a seat and no person.
    */
   readonly label: string;
   /** Signed as `pacer/gap.ts` signs it: positive when they are ahead. */
@@ -486,7 +496,31 @@ function roomReadings(room: RoomHud | undefined): readonly HudReading[] {
       unit: room.nearby === 1 ? 'rider' : 'riders',
       stale: false,
     },
+    draftField(room.draft),
   ];
+}
+
+/** What the draft field is called (#787). */
+export const DRAFT_LABEL = 'Draft';
+
+/**
+ * The room's draft on this rider, as a share of aerodynamic drag — #787,
+ * ADR 0038 D-5. The unit says what it is a share of, so a small number on a
+ * climb, where there is little air to push, reads as a fact and not a fault
+ * (#327's indicator criteria). Only on a ride in a room, like every room
+ * field: absent everywhere else, on the `NO_READING` precedent.
+ */
+function draftField(draft: RoomHud['draft']): HudReading {
+  const base = { key: 'room-draft', label: DRAFT_LABEL, stale: false } as const;
+  if (draft === 'off') return { ...base, value: 'Off', unit: '', word: true };
+  if (draft === undefined || !Number.isFinite(draft)) {
+    return { ...base, value: NO_READING, unit: '' };
+  }
+  return {
+    ...base,
+    value: String(Math.max(0, Math.min(100, Math.round(draft)))),
+    unit: '% of drag',
+  };
 }
 
 /**

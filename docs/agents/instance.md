@@ -182,6 +182,15 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         timers, `performance`, `Math.random` and `ws`.
                         `clock.ts` maps a client's `atMs` onto the room's
                         clock, because the two are never the same clock.
+                        ⚠️ **A race names its riders and sends standings
+                        since #1347** (ADR 0051, protocol 2): `name` once a
+                        seat, from the admission's public name, and after
+                        every frame `standings` with the ROOM's time gap to
+                        each recipient and live W/kg; a group ride neither.
+                        ⚠️ **And drafts since #787** (ADR 0038 D-4): every
+                        `k` from the distances the room holds, before the
+                        tick re-simulates; a room's maker may turn it off
+                        (migration 0024), and off is `k = 1` for everybody.
                         ⚠️ **Mounted by two adapters since #780**, and a
                         reviewer who remembers "not by the instance" is
                         reading the old file: the Node adapter

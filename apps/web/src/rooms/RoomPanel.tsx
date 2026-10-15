@@ -74,18 +74,44 @@ export const ROOMS_REFUSAL_TEXT: Readonly<Record<RoomsRefusal, string>> = {
   'instance-refused': 'The instance would not do that. Try again later.',
 };
 
+/**
+ * A room's drafting, in words — #787, the owner's ruling of 2026-09-30: said
+ * to every rider in the room before the start, and offered to the rider
+ * making one. ⚠️ Draft wording awaiting the owner's approval.
+ */
+export const ROOM_DRAFTING_TEXT = {
+  choice: 'Drafting',
+  choiceDetail: ' — riding close behind another rider takes less effort, as on the road',
+  on: 'Drafting is on: riding close behind another rider takes less effort.',
+  off: 'Drafting is off: every rider pushes the same air, whoever is in front.',
+} as const;
+
 /** What the rider is told when nothing answered. */
 export const ROOMS_UNREACHABLE_TEXT =
   'The instance did not answer. Check this device’s connection and try again.';
+
+/**
+ * The race's weight disclosure — the owner's ruling of 2026-10-15 on #1354
+ * (ADR 0051 D-1): live W/kg stays, and a rider is told, before they make a
+ * race or ride one they joined, that the others can estimate their weight from
+ * it. Shown for a race only; a group ride sends no W/kg to anybody. ⚠️ Draft
+ * wording awaiting the owner's approval.
+ */
+export const RACE_WEIGHT_DISCLOSURE =
+  'In a race, everyone in it sees your watts per kilogram live, so they can work out roughly ' +
+  'what you weigh.';
 
 /** What leaves the device when a room is made or joined — kept visible, never tucked away. */
 export const ROOMS_WHAT_IS_SENT =
   'Making a room sends the route you choose — its roads and heights, not its name — to your ' +
   'instance, for the riders you share its code with. Anyone with the code can join. In the ' +
   'room, your power and cadence go to the instance twice a second while you ride, and your ' +
-  'weight once as you join; the other riders see your name and where you are on the road, ' +
-  'and after a race its result: your name, place, time, watts per kilogram and any flag the ' +
-  'room raised for a figure past its limit. The route is deleted from the instance when the ' +
+  'weight once as you join; the other riders see where you are on the road; in a race they ' +
+  'also see your name and, every second, your watts per kilogram — which, with your speed, ' +
+  'lets them work out roughly what you weigh — and how many seconds ahead ' +
+  'or behind them you are, and after it its result: your name, place, time, watts per ' +
+  'kilogram and any flag the room raised for a figure past its limit. The route is deleted ' +
+  'from the instance when the ' +
   'room is over — within about a day of being made, unless somebody is riding in it then.';
 
 export interface RoomPanelProps {
@@ -118,6 +144,8 @@ function refusalText(answer: CreateRoomAnswer | JoinRoomAnswer): string | undefi
 export function RoomPanel(props: RoomPanelProps): JSX.Element {
   const [routeId, setRouteId] = useState<string | undefined>(undefined);
   const [kind, setKind] = useState<'group' | 'race'>('group');
+  // #787: on by default, the maker's to turn off, and fixed for the room.
+  const [drafting, setDrafting] = useState(true);
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState<Busy>(undefined);
   const [problem, setProblem] = useState<string | undefined>(undefined);
@@ -169,8 +197,12 @@ export function RoomPanel(props: RoomPanelProps): JSX.Element {
             ? entered.code === undefined
               ? ' The race starts when the rider who made the room starts it.'
               : ' You start the race, from the ride, when your riders are on the line.'
-            : ' Ride whenever you like; there is no leader and no result.'}
+            : ' Ride whenever you like; there is no leader and no result.'}{' '}
+          {entered.drafting ? ROOM_DRAFTING_TEXT.on : ROOM_DRAFTING_TEXT.off}
         </StatusMessage>
+        {entered.kind === 'race' ? (
+          <p data-oyl-kept-visible="">{RACE_WEIGHT_DISCLOSURE}</p>
+        ) : undefined}
         {entered.code === undefined ? undefined : (
           <p>
             Its code is <strong className="oyl-rooms__code">{entered.code}</strong>. Share it with
@@ -286,6 +318,18 @@ export function RoomPanel(props: RoomPanelProps): JSX.Element {
                 </label>
               ))}
             </fieldset>
+            <label>
+              <input
+                type="checkbox"
+                checked={drafting}
+                onChange={(event) => {
+                  setDrafting(event.target.checked);
+                }}
+              />
+              {ROOM_DRAFTING_TEXT.choice}
+              {ROOM_DRAFTING_TEXT.choiceDetail}
+            </label>
+            {kind === 'race' ? <p data-oyl-kept-visible="">{RACE_WEIGHT_DISCLOSURE}</p> : undefined}
             <Button
               variant="secondary"
               unavailable={busy !== undefined}
@@ -294,7 +338,7 @@ export function RoomPanel(props: RoomPanelProps): JSX.Element {
                 setBusy('making');
                 setProblem(undefined);
                 void rooms
-                  .create({ kind, ridingPosition: props.position, route: chosen })
+                  .create({ kind, ridingPosition: props.position, drafting, route: chosen })
                   .then((answer) => {
                     setBusy(undefined);
                     if (answer.kind === 'created') props.onEnter(answer.room);

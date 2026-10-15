@@ -20,14 +20,19 @@ export const CONFORMANCE_COURSE = {
   gradePercentAt: (metres: number) => (metres < 150 ? 0 : 2),
 } as const;
 
-/** The conformance race: a two-second countdown and a ten-second rejoin window. */
-export function conformanceSettings(): RoomSettings {
+/**
+ * The conformance race: a two-second countdown and a ten-second rejoin
+ * window — drafted, as a room is unless its maker turned drafting off, or
+ * with drafting off (#787: the owner's ruling asks the script to cover both).
+ */
+export function conformanceSettings(drafting = true): RoomSettings {
   return roomSettings({
     kind: 'race',
     ridingPosition: 'hoods',
     course: CONFORMANCE_COURSE,
     countdownMs: 2_000,
     rejoinWindowMs: 10_000,
+    drafting,
   });
 }
 

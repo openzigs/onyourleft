@@ -38,11 +38,34 @@
  * ever created there. There is no method that adds a rider, so a room has no
  * way to hold a bot pacer or a ghost.
  *
+ * ## A race's standings — #1347, ADR 0051
+ *
+ * A race names its riders (`name`, from the admission's public projection,
+ * once a seat) and sends, after every frame, its **standings**: everybody
+ * still in it, finishers first by their finish and then by distance along
+ * the route, each with their **time gap to the recipient** and their live
+ * W/kg. The gap is the room's, from its own positions ({@link timeGapTicks});
+ * the W/kg is the power the room simulated on the tick over the mass it
+ * holds. The mass itself is never sent, but a racer who knows the public
+ * physics can work it out to within a few kilograms from a rider's frame speed
+ * and W/kg (ADR 0051 D-1, an owner-requested cost; `standings.test.ts` pins it). A group ride sends neither (ADR 0028
+ * D-7.2: nobody leads one; ADR 0051 D-3).
+ *
+ * ## Drafting — #787, ADR 0038
+ *
+ * Each tick, **before** anybody is re-simulated, the room takes every rider on
+ * the road at the distance it holds for them and asks `@onyourleft/physics`'
+ * `fieldDraftFactors` for each one's `k` — from distance along the route alone
+ * (ADR 0038 D-3.4: no lateral offset is room state, and none is an input),
+ * so a rider drawn behind another on any client is behind them here. Each is
+ * then ridden at `ridingConditions(mass, position, k)`, and the frame carries
+ * `(1 − k) × 100` as their `draftPercent`. A room made with drafting off
+ * (the owner's ruling of 2026-09-30) is the same code with every `k` set to
+ * 1. Nothing else on the road has a drag area: a room holds riders only
+ * (ruling Q18), so no bot pacer or ghost gives or takes a draft (#327).
+ *
  * ## Deferred, by name
  *
- * - **Drafting** is #787's: every rider is simulated at `k = 1` and every
- *   frame carries `draftPercent` 0, though the model is in `@onyourleft/physics`
- *   since #786.
  * - **What a flag does** is #69's, #785's and #789's (ADR 0028 D-2 rule 3).
  */
 
@@ -50,6 +73,7 @@ import { gradePercent, kilograms, seconds, type Kilograms, type Seconds } from '
 import {
   advanceRider,
   declaredMassAdmissible,
+  fieldDraftFactors,
   judgeReport,
   PHYSICS_VERSION,
   ridingConditions,
@@ -61,11 +85,15 @@ import {
 import {
   decodeClientMessage,
   FLAG_COASTING,
+  FLAG_FINISHED,
   FLAG_PLAUSIBILITY,
+  MAXIMUM_GAP_DECISECONDS,
+  MAXIMUM_WATTS_PER_KILOGRAM_TENTHS,
   type FrameRider,
   type RefuseReason,
   type Report,
   type RoomMessage,
+  type StandingsRider,
 } from '@onyourleft/protocol';
 
 import { CeilingWatch } from './ceilings.ts';
@@ -81,6 +109,12 @@ export interface Admission {
   readonly athleteId: string;
   /** The athlete's declared mass (ADR 0028 D-1: the one per-rider input), in kilograms. */
   readonly declaredMassKilograms: number;
+  /**
+   * What other riders call them — #1347: the athlete's PUBLIC projection
+   * (`auth/public-athlete.ts`, #774), and so a name a moderator hid is
+   * already `Rider` here. A race sends it to everybody in the room.
+   */
+  readonly displayName: string;
 }
 
 /**
@@ -155,7 +189,12 @@ const MAXIMUM_FRAME_CENTIMETRES_PER_SECOND = 10_000;
 interface Seat {
   readonly riderId: number;
   readonly athleteId: string;
+  readonly displayName: string;
+  /** Riding alone: `k = 1`, the conditions every undrafted tick is ridden at. */
   readonly conditions: RideConditions;
+  readonly mass: Kilograms;
+  /** The draft multiplier `k` this rider was ridden at on the last tick (#787). 1 alone. */
+  draftFactor: number;
   readonly ceilings: CeilingWatch;
   state: SeatState;
   ride: RideState;
@@ -168,6 +207,15 @@ interface Seat {
   coasting: boolean;
   /** For a finisher: the tick, plus the share of it, at which they crossed the line. */
   finishedAt: number;
+  /** The power the room simulated them at on the last tick they rode, in watts (#1347). */
+  lastPowerWatts: number;
+  /**
+   * A race's rider's distance after every tick they rode, index 0 the start
+   * (#1347): what a time gap is read from. Distance never falls, so it is
+   * searched rather than scanned. 8 bytes a tick: under 60 KiB for a
+   * two-hour race, a rider.
+   */
+  readonly history: number[];
 }
 
 /**
@@ -230,6 +278,7 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
             ridingPosition: settings.ridingPosition,
             reportIntervalMs: settings.reportIntervalMs,
             frameIntervalMs: settings.frameIntervalMs,
+            drafting: settings.drafting ? 'on' : 'off',
           },
         },
       },
@@ -253,7 +302,13 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
     seat.lastAdmittedSequence = undefined;
     seat.latest = undefined;
     byConnection.set(connection, seat);
-    return [...out, ...welcome(connection, seat), ...countdownTo(connection, nowMs)];
+    return [
+      ...out,
+      ...welcome(connection, seat),
+      // #1347: the whole field's names, on a join and on every rejoin.
+      ...seated().flatMap((each) => nameTo(connection, each)),
+      ...countdownTo(connection, nowMs),
+    ];
   }
 
   /**
@@ -302,7 +357,10 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
     const seat: Seat = {
       riderId: nextRiderId,
       athleteId: admission.athleteId,
+      displayName: admission.displayName,
       conditions: ridingConditions(mass, settings.ridingPosition),
+      mass,
+      draftFactor: 1,
       ceilings: new CeilingWatch(mass, settings.limits),
       state: 'connected',
       ride: START_OF_RIDE,
@@ -313,14 +371,32 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
       latest: undefined,
       coasting: false,
       finishedAt: 0,
+      lastPowerWatts: 0,
+      history: [0],
     };
     nextRiderId += 1;
+    // #1347: everybody already in a race is told the new rider's name.
+    const told = seated().flatMap((other) =>
+      other.connection === undefined ? [] : nameTo(other.connection, seat),
+    );
     seats.set(seat.athleteId, seat);
     if (settings.kind === 'ride' && phase === 'lobby') {
       phase = 'countdown';
       startsAtMs = nowMs + settings.countdownMs;
     }
-    return attach(seat, connection, nowMs);
+    return [...told, ...attach(seat, connection, nowMs)];
+  }
+
+  /** A race's rider's name, to one connection (#1347). A group ride names nobody. */
+  function nameTo(connection: ConnectionId, seat: Seat): Outbound[] {
+    if (settings.kind !== 'race') return [];
+    return [
+      {
+        kind: 'send',
+        connection,
+        message: { type: 'name', riderId: seat.riderId, displayName: seat.displayName },
+      },
+    ];
   }
 
   function report(seat: Seat, message: Report, nowMs: number): void {
@@ -352,7 +428,7 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
         centimetres > MAXIMUM_FRAME_CENTIMETRES_PER_SECOND
           ? MAXIMUM_FRAME_CENTIMETRES_PER_SECOND
           : centimetres,
-      draftPercent: 0,
+      draftPercent: Math.round((1 - seat.draftFactor) * 100),
       flags: flagsOf(seat),
     };
   }
@@ -373,16 +449,123 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
         grade: gradePercent(settings.course.gradePercentAt(before)),
         duration: tickDuration,
       },
-      seat.conditions,
+      seat.draftFactor === 1
+        ? seat.conditions
+        : ridingConditions(seat.mass, settings.ridingPosition, seat.draftFactor),
     );
-    seat.ceilings.record(verdict?.admissible === true ? verdict.power : 0);
+    const power = verdict?.admissible === true ? (verdict.power as number) : 0;
+    seat.ceilings.record(power);
+    seat.lastPowerWatts = power;
     const line = settings.course.lengthMetres;
-    if (settings.kind === 'race' && seat.ride.distance >= line) {
-      seat.state = 'finished';
-      // Where in this tick the line was crossed: the share of the tick's distance before it.
-      seat.finishedAt = tickNumber - 1 + (line - before) / (seat.ride.distance - before);
-      finishers.push(seat);
+    if (settings.kind === 'race') {
+      seat.history.push(seat.ride.distance);
+      if (seat.ride.distance >= line) {
+        seat.state = 'finished';
+        // Where in this tick the line was crossed: the share of the tick's distance before it.
+        seat.finishedAt = tickNumber - 1 + (line - before) / (seat.ride.distance - before);
+        finishers.push(seat);
+      }
     }
+  }
+
+  /**
+   * Every rider's `k` for this tick, from where the room holds them now and
+   * before any is moved (#787). Only riders on the road shelter or are
+   * sheltered: a finisher has left it. With drafting off, every `k` is 1.
+   */
+  function draft(): void {
+    const riding = seated().filter(onTheRoad);
+    const factors = settings.drafting
+      ? fieldDraftFactors(riding.map((seat) => seat.ride.distance as number))
+      : riding.map(() => 1);
+    for (const seat of seated()) seat.draftFactor = 1;
+    riding.forEach((seat, index) => {
+      seat.draftFactor = factors[index] as number;
+    });
+  }
+
+  /**
+   * When `seat` was at `metres`, in ticks from the start, from its history —
+   * interpolated inside the tick it passed it. Only ever asked for a distance
+   * the seat has reached.
+   */
+  function passedAt(seat: Seat, metres: number): number {
+    const history = seat.history;
+    if (metres <= (history[0] as number)) return 0;
+    let low = 1;
+    let high = history.length - 1;
+    // The first tick whose distance is at least `metres`.
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      if ((history[middle] as number) >= metres) high = middle;
+      else low = middle + 1;
+    }
+    const after = history[low] as number;
+    const before = history[low - 1] as number;
+    if (after < metres) return history.length - 1;
+    return low - 1 + (metres - before) / (after - before);
+  }
+
+  /**
+   * The time gap from `to` back to `rider`, in ticks — positive when `rider`
+   * is behind: how long ago the one in front was where the one behind is
+   * now. Two finishers are apart by their crossings.
+   */
+  function timeGapTicks(rider: Seat, to: Seat): number {
+    if (rider === to) return 0;
+    if (rider.state === 'finished' && to.state === 'finished') {
+      return rider.finishedAt - to.finishedAt;
+    }
+    const mine = to.ride.distance;
+    const theirs = rider.ride.distance;
+    if (theirs < mine) return tickNumber - passedAt(to, theirs);
+    if (theirs > mine) return -(tickNumber - passedAt(rider, mine));
+    return 0;
+  }
+
+  /** A race's field in the room's order: finishers by their finish, then by distance, furthest first. */
+  function standingsOrder(): Seat[] {
+    const finished = [...finishers].sort(
+      (a, b) => a.finishedAt - b.finishedAt || a.riderId - b.riderId,
+    );
+    const riding = seated()
+      .filter(onTheRoad)
+      .sort((a, b) => b.ride.distance - a.ride.distance || a.riderId - b.riderId);
+    return [...finished, ...riding];
+  }
+
+  function standingsRider(rider: Seat, to: Seat): StandingsRider {
+    const deciseconds = Math.round(timeGapTicks(rider, to) * (tickDuration as number) * 10);
+    const finished = rider.state === 'finished';
+    const tenths = finished ? 0 : Math.round((rider.lastPowerWatts / (rider.mass as number)) * 10);
+    return {
+      riderId: rider.riderId,
+      gapDeciseconds: Math.max(
+        -MAXIMUM_GAP_DECISECONDS,
+        Math.min(MAXIMUM_GAP_DECISECONDS, deciseconds),
+      ),
+      wattsPerKilogramTenths: Math.min(MAXIMUM_WATTS_PER_KILOGRAM_TENTHS, tenths),
+      flags: flagsOf(rider) | (finished ? FLAG_FINISHED : 0),
+    };
+  }
+
+  /** A race's standings, to every connected rider, each with the gaps to them (#1347). */
+  function standings(): Outbound[] {
+    const order = standingsOrder();
+    const out: Outbound[] = [];
+    for (const seat of seated()) {
+      if (seat.connection === undefined || seat.state === 'dnf') continue;
+      out.push({
+        kind: 'send',
+        connection: seat.connection,
+        message: {
+          type: 'standings',
+          tick: tickNumber,
+          riders: order.map((rider) => standingsRider(rider, seat)),
+        },
+      });
+    }
+    return out;
   }
 
   function frames(): Outbound[] {
@@ -512,11 +695,13 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
         return [];
       }
       tickNumber += 1;
+      draft();
       for (const seat of seated()) {
         if (onTheRoad(seat)) ride(seat);
       }
       const out = frames();
       if (settings.kind === 'race') {
+        out.push(...standings());
         if (finishers.length > 0) firstFinishTick ??= tickNumber;
         const cutOff =
           firstFinishTick !== undefined && tickNumber - firstFinishTick >= FINISH_CUT_OFF_TICKS;

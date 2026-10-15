@@ -53,6 +53,7 @@ import {
   type RoomRace,
   type RoomSample,
   type RoomSessionStatus,
+  type RoomStandings,
   type RoomTimers,
   type TicketAnswer,
 } from './room-session';
@@ -92,6 +93,17 @@ export interface RoomConnection {
   race(): RoomRace;
   /** The room's newest word on THIS rider, for `correction.ts`. */
   own(): { readonly rider: DrawnRemoteRider; readonly atLocalMs: number } | undefined;
+  /**
+   * A race's newest standings, as the room sent them — #1347, ADR 0051: the
+   * field in the room's order, each with the room's gap to this rider and
+   * their live W/kg. `undefined` in a group ride and before the first.
+   */
+  standings(): RoomStandings | undefined;
+  /**
+   * The draft multiplier this rider is predicted to ride at — #787: from the
+   * room's newest frame, `1` alone or with drafting off. The room corrects it.
+   */
+  draftFactor(): number;
   /** Leave: close the socket, stop reconnecting, let the screen sleep. */
   leave(): void;
 }
@@ -215,6 +227,8 @@ export function roomPortOver(
         others: (localMs) => session.others(localMs),
         race: () => session.race(),
         own: () => session.own(),
+        standings: () => session.standings(),
+        draftFactor: () => session.draftFactor(),
         leave: () => {
           session.leave();
         },

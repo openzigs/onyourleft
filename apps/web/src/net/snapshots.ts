@@ -63,6 +63,11 @@ export interface DrawnRemoteRider {
   readonly speedMetresPerSecond: number;
   /** `@onyourleft/protocol`'s flags, as the room last sent them. */
   readonly flags: number;
+  /**
+   * The share of their aerodynamic drag the room's draft removed on the tick
+   * this describes, in percent (#787) — the room's word, never this client's.
+   */
+  readonly draftPercent: number;
 }
 
 interface HeldFrame {
@@ -99,6 +104,7 @@ export class SnapshotBuffer {
         distanceMetres: rider.decimetres / 10,
         speedMetresPerSecond: rider.centimetresPerSecond / 100,
         flags: rider.flags,
+        draftPercent: rider.draftPercent,
       });
     }
     this.#frames.push({ roomMs, riders });
@@ -123,6 +129,15 @@ export class SnapshotBuffer {
   localTimeOf(roomMs: number): number | undefined {
     if (this.#offsets.length === 0) return undefined;
     return roomMs + Math.min(...this.#offsets);
+  }
+
+  /**
+   * Every rider in the newest frame, where the room held them on that tick —
+   * one instant for all of them (#787: what a draft is predicted from).
+   */
+  newestRiders(): readonly DrawnRemoteRider[] {
+    const frame = this.#frames.at(-1);
+    return frame === undefined ? [] : [...frame.riders.values()];
   }
 
   /** The newest frame's entry for one rider, and the room's instant it describes. */
@@ -167,6 +182,7 @@ export class SnapshotBuffer {
           start.speedMetresPerSecond +
           (end.speedMetresPerSecond - start.speedMetresPerSecond) * share,
         flags: end.flags,
+        draftPercent: end.draftPercent,
       });
     }
     return drawn;

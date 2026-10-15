@@ -16,6 +16,7 @@ import {
   type IdentityInstance,
 } from '../auth/identity-testing.ts';
 import { createRoom } from '../room/core/room.ts';
+import { planFor, settingsFromPlan } from '../room/room-plan.ts';
 import { roomSettings } from '../room/core/settings.ts';
 import { helloText, reportText } from '../room/core/room-testing.ts';
 import { finalResults } from '../room/node/room-host.ts';
@@ -106,6 +107,51 @@ describe('making a room — #784', () => {
       expect((await store.getRoomCourse(ride.roomId))?.countdownMs).toBe(0);
       expect((await store.getRoom(ride.roomId))?.physicsVersion).toBe(PHYSICS_VERSION);
     });
+  });
+});
+
+describe('a room’s drafting — #787, the owner’s ruling of 2026-09-30', () => {
+  it('drafts unless its maker turned it off, tells a joiner which before the start, and opens the room so', async () => {
+    const w = await open();
+    const anna = await rider(w);
+    const bea = await rider(w);
+    const drafted = await madeRoom(w, anna.token);
+    const undrafted = await madeRoom(w, anna.token, { drafting: false });
+    for (const [room, drafting] of [
+      [drafted, true],
+      [undrafted, false],
+    ] as const) {
+      const joined = await w.call('POST', '/v1/rooms/join', {
+        token: bea.token,
+        body: { code: room.code },
+      });
+      expect(joined.status).toBe(200);
+      expect((joined.body as { drafting: unknown }).drafting).toBe(drafting);
+      // Read back as the room is opened: the store, on a fresh connection,
+      // into the plan and the core's settings.
+      await w.freshRead(async (store) => {
+        const plan = planFor(
+          (await store.getRoom(room.roomId))!,
+          await store.getRoomCourse(room.roomId),
+          'any-seated-rider',
+        );
+        expect(plan?.drafting).toBe(drafting);
+        expect(plan === undefined ? undefined : settingsFromPlan(plan).drafting).toBe(drafting);
+      });
+    }
+  });
+
+  it('refuses a drafting that is not true or false, naming the field', async () => {
+    const w = await open();
+    const anna = await rider(w);
+    const answer = await w.call('POST', '/v1/rooms', {
+      token: anna.token,
+      body: roomBody({ drafting: 'off' }),
+    });
+    expect(answer.status).toBe(400);
+    expect((answer.body as { error: { fields: { field: string }[] } }).error.fields[0]?.field).toBe(
+      'drafting',
+    );
   });
 });
 
@@ -467,10 +513,15 @@ async function ridden(
       ridingPosition: 'hoods',
       course: { sha256: 'a'.repeat(64), lengthMetres: 20_000, gradePercentAt: () => 0 },
       countdownMs: 0,
+      // The order these fixtures read is by power alone (#787's draft would
+      // let a wheel-sucker in): what is under test is the result, not the race.
+      drafting: false,
     }),
     (ticket) => {
       const athleteId = byTicket.get(ticket);
-      return athleteId === undefined ? undefined : { athleteId, declaredMassKilograms: 70 };
+      return athleteId === undefined
+        ? undefined
+        : { athleteId, declaredMassKilograms: 70, displayName: athleteId };
     },
   );
   riders.forEach((_, index) => room.receive(index + 1, helloText(`ticket-${String(index)}`), 0));

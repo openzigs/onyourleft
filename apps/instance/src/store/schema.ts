@@ -94,7 +94,7 @@ export interface ActivityRecordTable {
   readonly may_be_raced: Generated<number>;
   /**
    * The SHA-256 of the route a consented ride may be raced on, or `null` when
-   * it is not offered (#331, migration 0024). Set by the device that signed
+   * it is not offered (#331, migration 0025). Set by the device that signed
    * the ride, after its privacy-zone refusal; cleared by a revocation.
    */
   readonly race_route_sha256: Generated<string | null>;
@@ -125,6 +125,8 @@ export interface RoomCourseTable {
   readonly finishers: Generated<number | null>;
   /** Unix seconds: when this race's room said it was over — everybody off the road (#785, 0013). */
   readonly race_finished_at: Generated<number | null>;
+  /** `1` when the room drafts its riders, `0` when its maker turned drafting off (#787, 0024). */
+  readonly drafting: Generated<number>;
 }
 
 /** One athlete's result in one room. */

@@ -72,6 +72,12 @@ export interface RoomSettingsInput {
   readonly emptyGraceMs?: number;
   readonly reportSlack?: { readonly lateMs: number; readonly earlyMs: number };
   readonly limits?: PlausibilityLimits;
+  /**
+   * Whether the room drafts its riders — #787, the owner's ruling of
+   * 2026-09-30: **on unless whoever made the room turned it off**. Fixed for
+   * the room's life, so it is fixed before any race in it starts.
+   */
+  readonly drafting?: boolean;
 }
 
 /** A room's settings, every default filled and every value checked. */
@@ -87,6 +93,8 @@ export interface RoomSettings {
   readonly limits: PlausibilityLimits;
   readonly reportIntervalMs: number;
   readonly frameIntervalMs: number;
+  /** @see RoomSettingsInput.drafting */
+  readonly drafting: boolean;
 }
 
 /** A setting a room cannot be built with. The message names the setting and the rule, never the value. */
@@ -150,5 +158,6 @@ export function roomSettings(input: RoomSettingsInput): RoomSettings {
     limits,
     reportIntervalMs: REPORT_INTERVAL_MS,
     frameIntervalMs: FRAME_INTERVAL_MS,
+    drafting: input.drafting ?? true,
   };
 }

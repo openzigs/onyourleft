@@ -142,6 +142,12 @@ export interface RoomCourse {
   readonly capacity: number | null;
   readonly countdownMs: number | null;
   readonly rejoinWindowMs: number | null;
+  /**
+   * Whether the room drafts its riders (#787, the owner's ruling of
+   * 2026-09-30): chosen by whoever made the room and fixed for it. Absent on
+   * a write is `true`, the default the ruling chose; always present on a read.
+   */
+  readonly drafting?: boolean;
   /** Unix seconds: when this race left its lobby, or `null`. Set by {@link SqlStore.markRaceStarted}. */
   readonly raceStartedAt: number | null;
   /**
@@ -1196,7 +1202,7 @@ export interface SqlStore {
   listRaceableActivities(requester: string, limit: number): Promise<readonly ActivityRecord[]>;
   /**
    * #331: set or clear the route one of THIS athlete's consented records is
-   * offered to be raced on (migration 0024). `false`, and nothing written,
+   * offered to be raced on (migration 0025). `false`, and nothing written,
    * when the athlete holds no such record. A record whose consent is off
    * holds no route: setting one there writes nothing and answers `false`.
    */
@@ -2055,6 +2061,7 @@ const roomCourseFrom = (row: Selectable<RoomCourseTable>): RoomCourse => ({
   capacity: row.capacity,
   countdownMs: row.countdown_ms,
   rejoinWindowMs: row.rejoin_window_ms,
+  drafting: row.drafting === 1,
   raceStartedAt: row.race_started_at,
   ...(row.finishers === null ? {} : { finishers: row.finishers }),
   ...(row.race_finished_at === null ? {} : { raceFinishedAt: row.race_finished_at }),
@@ -3419,6 +3426,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           capacity: course.capacity,
           countdown_ms: course.countdownMs,
           rejoin_window_ms: course.rejoinWindowMs,
+          drafting: course.drafting === false ? 0 : 1,
         };
         await db
           .insertInto('room_course')
@@ -3487,6 +3495,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
               capacity: course.capacity,
               countdown_ms: course.countdownMs,
               rejoin_window_ms: course.rejoinWindowMs,
+              drafting: course.drafting === false ? 0 : 1,
               race_started_at: null,
             })
             .execute();

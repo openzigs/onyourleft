@@ -5716,6 +5716,9 @@
                       "drops"
                     ]
                   },
+                  "drafting": {
+                    "type": "boolean"
+                  },
                   "loop": {
                     "type": "boolean"
                   },
@@ -5857,6 +5860,9 @@
                         "drops"
                       ]
                     },
+                    "drafting": {
+                      "type": "boolean"
+                    },
                     "loop": {
                       "type": "boolean"
                     },
@@ -5868,6 +5874,7 @@
                     "roomId",
                     "kind",
                     "ridingPosition",
+                    "drafting",
                     "loop",
                     "routeSha256"
                   ],

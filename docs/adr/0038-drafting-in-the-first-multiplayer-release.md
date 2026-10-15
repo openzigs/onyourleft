@@ -327,3 +327,36 @@ acceptance covers drafting"** (quoted in full in Context).
 - **The agreement vectors show a room and a phone disagreeing on `k`.** Then either a transcendental
   crept in (D-2) or interpolation is order-dependent, and `agreement.test.ts`'s argument no longer
   covers drafting.
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-10-14** — **The first bullet of "What would make this ADR wrong" has come true for the time
+  trial, and the owner ruled to keep this ADR's table anyway; drafting is in rooms, and a room may
+  have it off.** Recorded in the pull request that puts drafting into rooms
+  ([#787](https://github.com/openzigs/onyourleft/issues/787)), as the owner asked on 2026-09-29.
+  - **The disagreement.** Blocken et al. 2013, read in full for
+    [#786](https://github.com/openzigs/onyourleft/issues/786), gives a trailing time-trial rider a
+    **13.8 %** drag reduction at 0.01 m; this ADR's 2018 table gives the same rider **35.9 %** at
+    0.05 m. That is the bullet's *"differ … by more than D-3's check tolerates"*, for one position
+    (`packages/physics/README.md` §2 has every position's figures).
+  - **The owner's ruling, 2026-09-29, on #787:** *"Keep ADR 0038's single table (Blocken 2018) for
+    every position. No riding-position input, so no new physics version for this. Races stay fair,
+    because ADR 0028 D-1 fixes every racer's position, so the disagreement between the sources treats
+    nobody unequally."* And: *"Later, only if test rides feel wrong: add a per-room drafting strength
+    (off, half or full) set by the host and shown in the results, rather than per-position physics."*
+    So D-3.5 stands, and the bullet is now a known disagreement the owner accepted rather than a
+    reason to change the model.
+  - **The owner's ruling, 2026-09-30, on #787:** a room can be set to **no drafting**. Drafting is
+    **on by default**; the rider who **makes** the room chooses; the choice is **fixed** for the
+    room (so before any race in it starts); every rider is told it before the start (the welcome's
+    `roomConfig.drafting`, and the room panel); and a room with drafting off computes `k = 1` for
+    every rider through the same code. This is the "off" setting of the later "off, half or full";
+    "half" is not built.
+  - **Unchanged, by name**: D-1 to D-7. D-4 is now code: the room computes `k` from the distances
+    it holds before it re-simulates anybody (`apps/instance/src/room/core/room.ts` §`draft`), and the
+    client predicts the same `k` from the room's newest frame and is corrected
+    (`apps/web/src/net/room-session.ts` §`draftFactor`). D-5's reading is a share of aerodynamic drag
+    on the HUD, never watts. What #787 did and did not build of #327's proposed indicator criteria is
+    in its pull request.

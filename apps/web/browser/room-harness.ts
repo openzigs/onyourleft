@@ -168,7 +168,7 @@ window.__oylRoom = {
     const answer = await createRoomsPort({
       storage: localStorage,
       zones: () => Promise.resolve([]),
-    }).create({ kind: 'group', ridingPosition: 'hoods', route: ownRoute() });
+    }).create({ kind: 'group', ridingPosition: 'hoods', drafting: true, route: ownRoute() });
     if (answer.kind !== 'created') {
       return {
         kind: 'refused',
