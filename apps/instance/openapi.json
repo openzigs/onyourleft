@@ -5649,6 +5649,36 @@
                           },
                           "bonaFide": {
                             "type": "boolean"
+                          },
+                          "acknowledgedAt": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "decidedAt": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "decision": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "logId": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "notifierToldAt": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
                           }
                         },
                         "required": [
@@ -5660,7 +5690,12 @@
                           "location",
                           "notifierName",
                           "notifierEmail",
-                          "bonaFide"
+                          "bonaFide",
+                          "acknowledgedAt",
+                          "decidedAt",
+                          "decision",
+                          "logId",
+                          "notifierToldAt"
                         ],
                         "additionalProperties": false
                       }
@@ -5668,6 +5703,295 @@
                   },
                   "required": [
                     "notices"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/moderation/notices/{noticeId}/steps": {
+      "post": {
+        "operationId": "recordNoticeStep",
+        "summary": "Record a step taken on a notice (#912): `acknowledged` (receipt confirmed to the notifier’s address, by hand), `decided` (with the decision and, if an action was taken, its moderation log entry) or `notifier_told`. Each once; never acknowledged or told for a notifier who gave no address; told only once decided. Append-only.",
+        "parameters": [
+          {
+            "name": "noticeId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          }
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "step": {
+                    "type": "string",
+                    "enum": [
+                      "acknowledged",
+                      "decided",
+                      "notifier_told"
+                    ]
+                  },
+                  "decision": {
+                    "type": "string"
+                  },
+                  "logId": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "step"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "409": {
+            "$ref": "#/components/responses/moderation_not_applicable"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/moderation/record": {
+      "get": {
+        "operationId": "getModerationRecord",
+        "summary": "The record of every notice and appeal (#912): received, acknowledged, decided, notifier told, the decision and the log entry of any action. It carries no personal detail of a notifier — only whether they gave a name and an address — and no appellant’s grounds.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "notices": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "noticeId": {
+                            "type": "integer"
+                          },
+                          "receivedAt": {
+                            "type": "integer"
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "illegal_content",
+                              "intimate_image"
+                            ]
+                          },
+                          "items": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "notifierGaveName": {
+                            "type": "boolean"
+                          },
+                          "notifierGaveEmail": {
+                            "type": "boolean"
+                          },
+                          "acknowledgedAt": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "decidedAt": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "decision": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "logId": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "notifierToldAt": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "noticeId",
+                          "receivedAt",
+                          "kind",
+                          "items",
+                          "notifierGaveName",
+                          "notifierGaveEmail",
+                          "acknowledgedAt",
+                          "decidedAt",
+                          "decision",
+                          "logId",
+                          "notifierToldAt"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "appeals": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "appealId": {
+                            "type": "integer"
+                          },
+                          "appellantAthleteId": {
+                            "type": "string"
+                          },
+                          "statementId": {
+                            "type": "integer"
+                          },
+                          "filedAt": {
+                            "type": "integer"
+                          },
+                          "decidedAt": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "outcome": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "decision": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "logId": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "moderatorConflict": {
+                            "type": [
+                              "boolean",
+                              "null"
+                            ]
+                          },
+                          "appellantToldAt": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "appealId",
+                          "appellantAthleteId",
+                          "statementId",
+                          "filedAt",
+                          "decidedAt",
+                          "outcome",
+                          "decision",
+                          "logId",
+                          "moderatorConflict",
+                          "appellantToldAt"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "notices",
+                    "appeals"
                   ],
                   "additionalProperties": false
                 }

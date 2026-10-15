@@ -756,8 +756,58 @@ describe('the notices — #907', () => {
         notifierName: null,
         notifierEmail: 'notifier@example.com',
         bonaFide: true,
+        acknowledgedAt: null,
+        decidedAt: null,
+        decision: null,
+        logId: null,
+        notifierToldAt: null,
       },
     ]);
+  });
+
+  it('records each step by hand and reads it back, and saves the record with no personal detail (#912)', async () => {
+    const world = await moderatedWorld();
+    await sendNotice(world, {
+      kind: 'illegal_content',
+      explanation: 'explanation-marker',
+      items: `route:${ROOM}`,
+      name: 'name-marker',
+      email: 'email-marker@example.com',
+    });
+    const [notice] = asModerator(await world.moderator.read()).notices ?? [];
+    const id = notice?.noticeId ?? 0;
+    expect(await world.moderator.recordNoticeStep(id, 'acknowledged')).toEqual({ kind: 'done' });
+    expect(await world.moderator.recordNoticeStep(id, 'decided', 'Not illegal.')).toEqual({
+      kind: 'done',
+    });
+    expect(await world.moderator.recordNoticeStep(id, 'notifier_told')).toEqual({ kind: 'done' });
+    const [after] = asModerator(await world.moderator.read()).notices ?? [];
+    expect(after).toMatchObject({ decision: 'Not illegal.', logId: null });
+    expect(after?.acknowledgedAt).not.toBeNull();
+    expect(after?.notifierToldAt).not.toBeNull();
+    // A second decision changes nothing.
+    expect(await world.moderator.recordNoticeStep(id, 'decided', 'Again.')).toEqual({
+      kind: 'refused',
+      text: NOTHING_CHANGED_TEXT,
+    });
+    const saved = await world.moderator.exportRecord();
+    expect(saved).toBeDefined();
+    expect(JSON.parse(saved ?? '{}')).toMatchObject({
+      notices: [{ noticeId: id, notifierGaveName: true, notifierGaveEmail: true }],
+    });
+    for (const marker of ['explanation-marker', 'name-marker', 'email-marker']) {
+      expect(saved).not.toContain(marker);
+    }
+  });
+
+  it('sends nothing for a decision with no words (#912)', async () => {
+    const { moderator, send } = await moderatedWorld();
+    const sent = send.mock.calls.length;
+    expect(await moderator.recordNoticeStep(1, 'decided', '  ')).toEqual({
+      kind: 'refused',
+      text: MODERATION_REFUSAL_TEXT['notice-decision'],
+    });
+    expect(send.mock.calls.length).toBe(sent);
   });
 
   it('still gives the queues when the notices cannot be read, or hold a row this client does not accept', async () => {

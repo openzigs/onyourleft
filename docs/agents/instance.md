@@ -77,7 +77,9 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         /v1/statements` is the THIRD route a way-out
                         session reaches; since #911 an appeal against a
                         statement (migration 0028, decided once) is the
-                        FOURTH. Behind a
+                        FOURTH. Since #912 a notice's steps are recorded
+                        beside it (migration 0029, append-only), and
+                        `moderation/record.ts` is the export. Behind a
                         proxy the sign-in rate limits read the client's
                         address from `OYL_INSTANCE_CLIENT_ADDRESS_HEADER`
                         (`cf-connecting-ip` behind the tunnel), and only

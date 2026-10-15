@@ -44,6 +44,8 @@ import {
   NOTICES_UNREADABLE_TEXT,
   REPORT_CONFLICT_TEXT,
   APPEAL_CONFLICT_TEXT,
+  NOTICE_STEP_TEXT,
+  RECORD_TEXT,
   APPEALS_UNREADABLE_TEXT,
   STATEMENT_TEXT,
   SUSPENDED_UNREADABLE_TEXT,
@@ -723,6 +725,11 @@ describe('the notices — #907', () => {
         notifierName: null,
         notifierEmail: null,
         bonaFide: false,
+        acknowledgedAt: null,
+        decidedAt: null,
+        decision: null,
+        logId: null,
+        notifierToldAt: null,
       },
     ];
     await open(scripted);
@@ -826,5 +833,102 @@ describe('appeals — #911', () => {
     await open(scripted);
     expect(text(section('Appeals'))).toContain(APPEALS_UNREADABLE_TEXT);
     expect(text(section('Reports'))).toContain('Report 7');
+  });
+});
+
+describe('the record of each notice — #912', () => {
+  function control(root: HTMLElement, label: string): HTMLInputElement {
+    const found = [...root.querySelectorAll('label')].find((each) => each.textContent === label);
+    const input = root.querySelector<HTMLInputElement>(
+      `[id="${found?.getAttribute('for') ?? ''}"]`,
+    );
+    if (input === null) throw new Error(`no ${label}`);
+    return input;
+  }
+
+  it('records receipt, the decision with its log entry, and telling the notifier, in turn', async () => {
+    const scripted = scriptedModeration();
+    await open(scripted);
+    expect(text(item('Notice 1'))).toContain('Not decided yet.');
+    await activateWithKeyboard(button(item('Notice 1'), NOTICE_STEP_TEXT.acknowledge));
+    await settle();
+    expect(text(item('Notice 1'))).toContain('Receipt confirmed');
+    // Telling the notifier is offered only once the decision is recorded.
+    expect(
+      [...item('Notice 1').querySelectorAll('button')].some(
+        (each) => each.textContent === NOTICE_STEP_TEXT.told,
+      ),
+    ).toBe(false);
+    await typeInto(control(item('Notice 1'), NOTICE_STEP_TEXT.decisionLabel), 'Hid the route.');
+    await typeInto(control(item('Notice 1'), NOTICE_STEP_TEXT.logLabel), '3');
+    await activateWithKeyboard(button(item('Notice 1'), NOTICE_STEP_TEXT.decide));
+    await settle();
+    expect(text(item('Notice 1'))).toContain('log entry 3.');
+    expect(text(item('Notice 1'))).toContain('The decision: Hid the route.');
+    await activateWithKeyboard(button(item('Notice 1'), NOTICE_STEP_TEXT.told));
+    await settle();
+    expect(text(item('Notice 1'))).toContain('Notifier told');
+    expect(item('Notice 1').querySelectorAll('button')).toHaveLength(0);
+    expect(scripted.calls).toEqual(
+      expect.arrayContaining([
+        'acknowledged notice 1',
+        'decided notice 1',
+        'notifier_told notice 1',
+      ]),
+    );
+  });
+
+  it('offers a notice with no address only the decision', async () => {
+    const scripted = scriptedModeration();
+    scripted.held.notices = [
+      {
+        noticeId: 5,
+        receivedAt: 1_790_005_000,
+        kind: 'illegal_content',
+        explanation: 'Why.',
+        items: [],
+        location: 'Somewhere',
+        notifierName: null,
+        notifierEmail: null,
+        bonaFide: false,
+        acknowledgedAt: null,
+        decidedAt: null,
+        decision: null,
+        logId: null,
+        notifierToldAt: null,
+      },
+    ];
+    await open(scripted);
+    expect(
+      [...item('Notice 5').querySelectorAll('button')].map((each) => each.textContent),
+    ).toEqual([NOTICE_STEP_TEXT.decide]);
+  });
+
+  it('prepares the record as a file to save, or says it could not', async () => {
+    const created: Blob[] = [];
+    const original: unknown = Reflect.get(URL, 'createObjectURL');
+    URL.createObjectURL = (blob: Blob) => {
+      created.push(blob);
+      return 'blob:record';
+    };
+    URL.revokeObjectURL = () => undefined;
+    try {
+      const scripted = scriptedModeration();
+      await open(scripted);
+      await activateWithKeyboard(button(section(RECORD_TEXT.heading), RECORD_TEXT.save));
+      await settle();
+      const link = section(RECORD_TEXT.heading).querySelector('a[download]');
+      expect(link?.getAttribute('download')).toBe(RECORD_TEXT.file);
+      expect(link?.getAttribute('href')).toBe('blob:record');
+      expect(JSON.parse(await created[0]!.text())).toMatchObject({
+        notices: expect.arrayContaining([expect.objectContaining({ noticeId: 1 })]) as unknown,
+      });
+      scripted.held.recordReadable = false;
+      await activateWithKeyboard(button(section(RECORD_TEXT.heading), RECORD_TEXT.save));
+      await settle();
+      expect(text(section(RECORD_TEXT.heading))).toContain(RECORD_TEXT.unreadable);
+    } finally {
+      Reflect.set(URL, 'createObjectURL', original);
+    }
   });
 });

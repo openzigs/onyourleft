@@ -161,6 +161,28 @@ A notice is kept as it was received. Like the moderation log, it is **append-onl
 and erasing an account does not delete a notice about it. `migrate … down` refuses to undo migration
 0026 while a single notice is held.
 
+**Record what you do about each notice** (#912). The instance sends no email, so it cannot know when
+you confirmed receipt or told the notifier what you decided. Under each notice the Moderation screen
+offers the next step, and records it with the time:
+
+| Step | When it is offered |
+|---|---|
+| *I have confirmed receipt* | the notice gave an email address, and you have written to it (DSA Art. 16(4)) |
+| *Record the decision* | always: what you decided, in the words you tell the notifier, and the number of the log entry of any action you took |
+| *I have told them the decision* | the notice gave an address, and the decision is recorded (Art. 16(5)) |
+
+Each step is recorded once and cannot be changed afterwards: like the log, the record is append-only
+in the schema (`POST /v1/moderation/notices/{noticeId}/steps`). An appeal carries its own steps
+(below).
+
+**The record** (`GET /v1/moderation/record`, *Prepare the record* on the Moderation screen, saved as a
+JSON file) lists every notice and appeal with when it was received, acknowledged, decided and told,
+the decision, and the log entry of any action. It is your evidence of what you were told and what you
+did (the UK Online Safety Act's s.23). **It holds no personal detail of a notifier**: not their name,
+not their address, and not the words they typed, which may hold either. It says only whether they gave
+a name and an address. Nor does it hold a rider's grounds for an appeal. A rider is named only by
+account id, which after erasure resolves to nobody, as in the log.
+
 **Limits, with no account and no stored address:** at most **5 notices an hour from one client
 address**, counted in memory as the sign-in limits are, so a restart resets them; and at most **100 an
 hour across the whole instance**, counted from the notices themselves, so a restart does not. A form

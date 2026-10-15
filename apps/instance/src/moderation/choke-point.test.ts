@@ -132,6 +132,7 @@ const NOT_AN_ATHLETE: Readonly<Record<string, string>> = {
   statementId:
     'a statement of reasons; the store files an appeal only against one about the CALLER (#911)',
   appealId: 'an appeal, read and decided only on the moderators’ routes (#911)',
+  noticeId: 'a notice, read and recorded only on the moderators’ routes (#912)',
   content:
     'the SHA-256 of an activity file; the sync store reads only the record the CALLER holds of it (#38, #776)',
   kind: 'a kind of sync item; the item read or written is the CALLER’s own (#776)',

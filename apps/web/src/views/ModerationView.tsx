@@ -648,10 +648,202 @@ function Appeals({
   );
 }
 
-function Notices({
-  notices,
+/** The steps a moderator records on a notice, as the screen names them (#912). */
+export const NOTICE_STEP_TEXT = {
+  acknowledge: 'I have confirmed receipt',
+  decide: 'Record the decision',
+  told: 'I have told them the decision',
+  decisionLabel: 'The decision, as you tell the notifier',
+  logLabel: 'Log entry of the action taken, if any',
+} as const;
+
+/** What has been recorded on a notice so far (#912). */
+function noticeProgress(notice: ReceivedNotice): string {
+  const parts = [
+    notice.acknowledgedAt === null
+      ? undefined
+      : `Receipt confirmed ${when(notice.acknowledgedAt)}.`,
+    notice.decidedAt === null
+      ? 'Not decided yet.'
+      : `Decided ${when(notice.decidedAt)}${
+          notice.logId === null ? '' : `, log entry ${String(notice.logId)}`
+        }.`,
+    notice.notifierToldAt === null ? undefined : `Notifier told ${when(notice.notifierToldAt)}.`,
+  ];
+  return parts.filter((part) => part !== undefined).join(' ');
+}
+
+/** The steps still open on a notice, and the controls that record them (#912). */
+function NoticeSteps({
+  port,
+  notice,
+  onDone,
 }: {
+  readonly port: ModerationPort;
+  readonly notice: ReceivedNotice;
+  readonly onDone: Done;
+}): JSX.Element | null {
+  const id = useId();
+  const [decision, setDecision] = useState('');
+  const [logEntry, setLogEntry] = useState('');
+  const [busy, setBusy] = useState(false);
+  const contact = notice.notifierEmail !== null;
+  async function record(step: Parameters<ModerationPort['recordNoticeStep']>[1]): Promise<void> {
+    if (busy) return;
+    setBusy(true);
+    onDone.starting();
+    const typed = logEntry.trim();
+    const answer =
+      step === 'decided'
+        ? await port.recordNoticeStep(
+            notice.noticeId,
+            step,
+            decision,
+            typed === '' ? undefined : Number(typed),
+          )
+        : await port.recordNoticeStep(notice.noticeId, step);
+    setBusy(false);
+    if (answer.kind === 'done') {
+      setDecision('');
+      setLogEntry('');
+    }
+    await onDone.finished(answer);
+  }
+  const acknowledge = contact && notice.acknowledgedAt === null;
+  const decide = notice.decidedAt === null;
+  const tell = contact && notice.decidedAt !== null && notice.notifierToldAt === null;
+  if (!acknowledge && !decide && !tell) return null;
+  return (
+    <div className="oyl-moderation__decide">
+      {decide ? (
+        <>
+          <p className="oyl-moderation__reason">
+            <label htmlFor={`${id}-decision`}>{NOTICE_STEP_TEXT.decisionLabel}</label>{' '}
+            <input
+              className="oyl-input"
+              id={`${id}-decision`}
+              maxLength={MAXIMUM_MODERATION_REASON * 2}
+              value={decision}
+              onChange={(event) => {
+                setDecision(event.target.value);
+              }}
+            />
+          </p>
+          <p className="oyl-moderation__reason">
+            <label htmlFor={`${id}-log`}>{NOTICE_STEP_TEXT.logLabel}</label>{' '}
+            <input
+              className="oyl-input"
+              id={`${id}-log`}
+              inputMode="numeric"
+              value={logEntry}
+              onChange={(event) => {
+                setLogEntry(event.target.value);
+              }}
+            />
+          </p>
+        </>
+      ) : null}
+      <p className="oyl-ride__actions">
+        {acknowledge ? (
+          <Button
+            variant="secondary"
+            unavailable={busy}
+            onClick={() => void record('acknowledged')}
+          >
+            {NOTICE_STEP_TEXT.acknowledge}
+          </Button>
+        ) : null}
+        {decide ? (
+          <Button variant="secondary" unavailable={busy} onClick={() => void record('decided')}>
+            {NOTICE_STEP_TEXT.decide}
+          </Button>
+        ) : null}
+        {tell ? (
+          <Button
+            variant="secondary"
+            unavailable={busy}
+            onClick={() => void record('notifier_told')}
+          >
+            {NOTICE_STEP_TEXT.told}
+          </Button>
+        ) : null}
+      </p>
+    </div>
+  );
+}
+
+/** What the record's link is called, and what the saved file is called (#912). */
+export const RECORD_TEXT = {
+  heading: 'The record',
+  save: 'Prepare the record',
+  link: 'Save the record (a JSON file)',
+  file: 'moderation-record.json',
+  unreadable: 'The record could not be read from the instance. Nothing was saved.',
+  help:
+    'Every notice and appeal, with when it was received, acknowledged, decided and told, the ' +
+    'decision and the log entry of any action. It holds no name, address or words of a notifier, ' +
+    'and no rider’s grounds.',
+} as const;
+
+/** Saving the record of every notice and appeal (#912). */
+function RecordExport({ port }: { readonly port: ModerationPort }): JSX.Element {
+  const [href, setHref] = useState<string | undefined>(undefined);
+  const [failed, setFailed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  useEffect(
+    () => () => {
+      if (href !== undefined) URL.revokeObjectURL(href);
+    },
+    [href],
+  );
+  return (
+    <section className="oyl-panel" aria-labelledby="oyl-moderation-record">
+      <SectionHeading level={2} id="oyl-moderation-record" help={<p>{RECORD_TEXT.help}</p>}>
+        {RECORD_TEXT.heading}
+      </SectionHeading>
+      <Button
+        variant="secondary"
+        unavailable={busy}
+        onClick={() => {
+          if (busy) return;
+          setBusy(true);
+          void port.exportRecord().then((text) => {
+            setBusy(false);
+            setFailed(text === undefined);
+            setHref(
+              text === undefined
+                ? undefined
+                : URL.createObjectURL(new Blob([text], { type: 'application/json' })),
+            );
+          });
+        }}
+      >
+        {RECORD_TEXT.save}
+      </Button>
+      {href === undefined ? null : (
+        <p>
+          <a href={href} download={RECORD_TEXT.file}>
+            {RECORD_TEXT.link}
+          </a>
+        </p>
+      )}
+      {failed ? (
+        <StatusMessage tone="warning" label="Not saved" live>
+          {RECORD_TEXT.unreadable}
+        </StatusMessage>
+      ) : null}
+    </section>
+  );
+}
+
+function Notices({
+  port,
+  notices,
+  onDone,
+}: {
+  readonly port: ModerationPort;
   readonly notices: readonly ReceivedNotice[] | undefined;
+  readonly onDone: Done;
 }): JSX.Element {
   return (
     <section className="oyl-panel" aria-labelledby="oyl-moderation-notices">
@@ -710,6 +902,11 @@ function Notices({
                   ? 'They stated in good faith that it is accurate and complete.'
                   : 'They did not make the good-faith statement.'}
               </p>
+              <p>{noticeProgress(notice)}</p>
+              {notice.decision === null ? null : (
+                <p className="oyl-moderation__quoted">The decision: {notice.decision}</p>
+              )}
+              <NoticeSteps port={port} notice={notice} onDone={onDone} />
             </li>
           ))}
         </ul>
@@ -1105,7 +1302,8 @@ export function ModerationView({
       <Registrations port={port} registrations={state.registrations} onDone={onDone} />
       <Reports port={port} me={state.me} reports={state.reports} onDone={onDone} />
       <Appeals port={port} me={state.me} appeals={state.appeals} onDone={onDone} />
-      <Notices notices={state.notices} />
+      <Notices port={port} notices={state.notices} onDone={onDone} />
+      <RecordExport port={port} />
       <Suspended
         port={port}
         suspended={state.suspended}

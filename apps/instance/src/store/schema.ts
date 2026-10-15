@@ -351,6 +351,17 @@ export interface AppealTable {
   readonly decided_log_id: number | null;
 }
 
+/** One step taken on a notice (#912, migration 0029). Append-only; once a step a notice. */
+export interface NoticeStepTable {
+  readonly id: Generated<number>;
+  readonly notice_id: number;
+  readonly step: 'acknowledged' | 'decided' | 'notifier_told';
+  readonly actor_athlete_id: string;
+  readonly decision: string | null;
+  readonly log_id: number | null;
+  readonly at: number;
+}
+
 /** A single-use invitation a moderator minted, as its SHA-256 (#775). */
 export interface InviteCodeTable {
   readonly code_sha256: string;
@@ -628,4 +639,5 @@ export interface InstanceDatabase {
   readonly notice: NoticeTable;
   readonly statement: StatementTable;
   readonly appeal: AppealTable;
+  readonly notice_step: NoticeStepTable;
 }

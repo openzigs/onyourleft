@@ -110,6 +110,9 @@ const NAMED_WITHOUT_A_FOREIGN_KEY: Readonly<
   'moderation_log.actor_athlete_id': {
     kept: 'the audit log is append-only: erasing an account does not erase what was done (#83)',
   },
+  'notice_step.actor_athlete_id': {
+    kept: 'the record of how a notice was handled is evidence of what was done and when (#912)',
+  },
   'appeal.appellant_athlete_id': {
     kept: 'an appeal and its decision are part of the audit trail its statement is (#911)',
   },
@@ -260,6 +263,25 @@ describe('erasing an athlete (#769, #35)', () => {
           moderatorConflict: false,
           endsAt: null,
         },
+      });
+      // #912: B, as a moderator, records a step on a notice.
+      const noticeId = await store.putNotice({
+        receivedAt: 1_790_001_050,
+        kind: 'illegal_content',
+        explanation: 'Seen',
+        items: [],
+        location: 'Seen',
+        notifierName: null,
+        notifierEmail: null,
+        bonaFide: false,
+      });
+      await store.putNoticeStep({
+        noticeId,
+        step: 'decided',
+        actorAthleteId: ATHLETE_B,
+        decision: 'Seen',
+        logId: null,
+        at: 1_790_001_060,
       });
       // #911: B appeals the statement about their hidden name.
       const [statement] = await store.listStatements(ATHLETE_B);

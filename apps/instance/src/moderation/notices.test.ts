@@ -45,6 +45,7 @@ const ILLEGAL = {
 };
 
 interface QueuedNotice {
+  readonly [step: string]: unknown;
   readonly noticeId: number;
   readonly receivedAt: number;
   readonly kind: string;
@@ -124,6 +125,12 @@ describe('a notice sent from the page (#907)', () => {
       notifierName: 'A. Notifier',
       notifierEmail: 'notifier@example.com',
       bonaFide: true,
+      // #912: no step taken yet.
+      acknowledgedAt: null,
+      decidedAt: null,
+      decision: null,
+      logId: null,
+      notifierToldAt: null,
     });
   });
 

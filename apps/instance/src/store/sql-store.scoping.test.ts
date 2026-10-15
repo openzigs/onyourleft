@@ -316,8 +316,11 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
     probe: async (store, athleteId) =>
       (await store.listAppeals(athleteId)).map((row) => ({ athleteId: row.appellantAthleteId })),
   },
+  listEveryAppeal: { notAScopedRead: 'the moderators’ record of every appeal (#912)' },
   listOpenAppeals: { notAScopedRead: 'the moderators’ queue: every open appeal (#911)' },
   decideAppeal: { notAScopedRead: 'a moderator’s write; appeals.test.ts' },
+  putNoticeStep: { notAScopedRead: 'a moderator’s write about a notice; notice-steps.test.ts' },
+  listNoticeSteps: { notAScopedRead: 'the moderators’ record of every notice (#912)' },
   listNotices: { notAScopedRead: 'the moderators’ queue of notices, from anybody (#907)' },
   listModerationLog: { notAScopedRead: 'the moderators’ record: every action (#83)' },
   listModerationLogPage: {

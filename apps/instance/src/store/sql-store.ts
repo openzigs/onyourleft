@@ -52,6 +52,7 @@ import type {
   NoticeTable,
   StatementTable,
   AppealTable,
+  NoticeStepTable,
   RecoveryCodeTable,
   RecoveryEmailConfirmationTable,
   RecoveryEmailTable,
@@ -522,6 +523,36 @@ export interface Notice {
 
 /** What a notice is stored with: everything but the id the store gives it. */
 export type NewNotice = Omit<Notice, 'id'>;
+
+/** A step taken on a notice after it was received (#912). */
+export type NoticeStepKind = 'acknowledged' | 'decided' | 'notifier_told';
+
+/** One step taken on a notice, by whom and when (#912). */
+export interface NoticeStep {
+  readonly id: number;
+  readonly noticeId: number;
+  readonly step: NoticeStepKind;
+  readonly actorAthleteId: string;
+  /** For `decided`: the decision, in the moderator's words. */
+  readonly decision: string | null;
+  /** For `decided`: the moderation log entry of the action it took, if any. */
+  readonly logId: number | null;
+  /** Unix seconds. */
+  readonly at: number;
+}
+
+/** What recording a step did (#912). */
+export type NoticeStepRecorded =
+  | 'recorded'
+  | 'not_found'
+  /** This step is already recorded for this notice: each happens once. */
+  | 'already'
+  /** The notifier gave no address, so there is nobody to acknowledge or tell. */
+  | 'no_contact'
+  /** The notifier cannot be told a decision not yet recorded. */
+  | 'not_decided'
+  /** The decision names a log entry that does not exist. */
+  | 'no_such_log_entry';
 
 /** What a moderator may do (#83, #775). */
 export type ModerationActionKind =
@@ -1458,6 +1489,16 @@ export interface SqlStore {
   countNoticesSince(since: number): Promise<number>;
   /** Every notice received, oldest first: the moderators' queue (#907). */
   listNotices(): Promise<readonly Notice[]>;
+  /**
+   * Record one step taken on a notice (#912), in ONE transaction with the
+   * checks it rests on: the notice exists, the step has not been taken, a
+   * notifier with no address is neither acknowledged nor told, the notifier
+   * is told only once a decision is recorded, and a decision's log entry
+   * exists.
+   */
+  putNoticeStep(step: Omit<NoticeStep, 'id'>): Promise<NoticeStepRecorded>;
+  /** Every step taken on every notice, oldest first (#912). */
+  listNoticeSteps(): Promise<readonly NoticeStep[]>;
   /** The statements of reasons about this athlete, newest first (#910). */
   listStatements(athleteId: string): Promise<readonly Statement[]>;
   /**
@@ -1474,6 +1515,8 @@ export interface SqlStore {
   listAppeals(athleteId: string): Promise<readonly Appeal[]>;
   /** The moderators' queue: every appeal not yet decided, oldest first (#911). */
   listOpenAppeals(): Promise<readonly Appeal[]>;
+  /** Every appeal, decided or not, oldest first: the record (#912). */
+  listEveryAppeal(): Promise<readonly Appeal[]>;
   /**
    * Decide an appeal, in ONE transaction (#911): a reversal lifts the
    * suspension or restores the display name the statement explains, the
@@ -1797,6 +1840,16 @@ const appealFrom = (row: Selectable<AppealTable>): Appeal => ({
   moderatorConflict: row.moderator_conflict === null ? null : row.moderator_conflict === 1,
   decidedAt: row.decided_at,
   decidedLogId: row.decided_log_id,
+});
+
+const noticeStepFrom = (row: Selectable<NoticeStepTable>): NoticeStep => ({
+  id: row.id,
+  noticeId: row.notice_id,
+  step: row.step,
+  actorAthleteId: row.actor_athlete_id,
+  decision: row.decision,
+  logId: row.log_id,
+  at: row.at,
 });
 
 const moderationLogFrom = (row: Selectable<ModerationLogTable>): ModerationLogEntry => ({
@@ -4095,6 +4148,11 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
         ).map(appealFrom),
       ),
 
+    listEveryAppeal: () =>
+      exclusive(async () =>
+        (await db.selectFrom('appeal').selectAll().orderBy('id').execute()).map(appealFrom),
+      ),
+
     decideAppeal: (decision) =>
       exclusive(() =>
         db.transaction().execute(async (trx): Promise<AppealDecided> => {
@@ -4171,6 +4229,55 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
             .orderBy('statement.log_id', 'desc')
             .execute()
         ).map(statementFrom),
+      ),
+
+    putNoticeStep: (step) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx): Promise<NoticeStepRecorded> => {
+          const notice = await trx
+            .selectFrom('notice')
+            .select(['id', 'notifier_email'])
+            .where('id', '=', step.noticeId)
+            .executeTakeFirst();
+          if (notice === undefined) return 'not_found';
+          const taken = await trx
+            .selectFrom('notice_step')
+            .select('step')
+            .where('notice_id', '=', step.noticeId)
+            .execute();
+          if (taken.some((each) => each.step === step.step)) return 'already';
+          if (step.step !== 'decided' && notice.notifier_email === null) return 'no_contact';
+          if (step.step === 'notifier_told' && !taken.some((each) => each.step === 'decided')) {
+            return 'not_decided';
+          }
+          if (step.logId !== null) {
+            const entry = await trx
+              .selectFrom('moderation_log')
+              .select('id')
+              .where('id', '=', step.logId)
+              .executeTakeFirst();
+            if (entry === undefined) return 'no_such_log_entry';
+          }
+          await trx
+            .insertInto('notice_step')
+            .values({
+              notice_id: step.noticeId,
+              step: step.step,
+              actor_athlete_id: step.actorAthleteId,
+              decision: step.decision,
+              log_id: step.logId,
+              at: step.at,
+            })
+            .execute();
+          return 'recorded';
+        }),
+      ),
+
+    listNoticeSteps: () =>
+      exclusive(async () =>
+        (await db.selectFrom('notice_step').selectAll().orderBy('id').execute()).map(
+          noticeStepFrom,
+        ),
       ),
 
     listNotices: () =>

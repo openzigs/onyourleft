@@ -66,7 +66,9 @@ import type {
   Statement,
   StatementFields,
   Appeal,
+  NoticeStep,
 } from '../store/sql-store.ts';
+import { exportRecord, type ModerationRecord } from './record.ts';
 import { readAppealGrounds, readStatementFields, RESTRICTIONS } from './statements.ts';
 import { readNoticeForm, type NoticeProblem, type NoticeValues } from './notices.ts';
 
@@ -162,6 +164,23 @@ export interface Moderation {
     statementId: string,
     grounds: unknown,
   ): Promise<ModerationResult<{ appealId: number }>>;
+  /** Every step taken on every notice (#912). */
+  noticeSteps(): Promise<readonly NoticeStep[]>;
+  /**
+   * Record a step taken on a notice (#912): `acknowledged`, `decided` (with
+   * the decision, and the log entry of any action it took) or
+   * `notifier_told`. Each once, in that sense of order, and never for a
+   * notifier who gave no address but the decision.
+   */
+  recordNoticeStep(
+    moderatorId: string,
+    noticeId: string,
+    step: unknown,
+    decision: unknown,
+    logId: unknown,
+  ): Promise<ModerationResult<null>>;
+  /** The record of every notice and appeal, with no personal detail of a notifier (#912). */
+  record(): Promise<ModerationRecord>;
   /** The moderators' queue of appeals, oldest first, each with the statement it appeals (#911). */
   openAppeals(): Promise<readonly OpenAppeal[]>;
   /**
@@ -502,6 +521,71 @@ export function createModeration(options: ModerationOptions): Moderation {
     statements: (athleteId) => store.listStatements(athleteId),
 
     appeals: (athleteId) => store.listAppeals(athleteId),
+
+    noticeSteps: () => store.listNoticeSteps(),
+
+    async recordNoticeStep(moderatorId, noticeId, step, decision, logId) {
+      if (!/^[1-9][0-9]{0,15}$/.test(noticeId)) return refuse('not_found');
+      if (step !== 'acknowledged' && step !== 'decided' && step !== 'notifier_told') {
+        return refuse('validation_failed', [
+          { field: 'step', problem: 'must be acknowledged, decided or notifier_told' },
+        ]);
+      }
+      let decided: string | null = null;
+      let entry: number | null = null;
+      if (step === 'decided') {
+        // The decision is what the notifier is told: held to an appeal's rules.
+        const checked = readAppealGrounds(decision);
+        if (!checked.ok) {
+          return refuse('validation_failed', [{ field: 'decision', problem: checked.problem }]);
+        }
+        decided = checked.grounds;
+        if (logId !== undefined && logId !== null) {
+          if (!Number.isSafeInteger(logId) || (logId as number) < 1) {
+            return refuse('validation_failed', [
+              { field: 'logId', problem: 'must be a moderation log entry’s id' },
+            ]);
+          }
+          entry = logId as number;
+        }
+      } else if (
+        (decision !== undefined && decision !== null) ||
+        (logId !== undefined && logId !== null)
+      ) {
+        return refuse('validation_failed', [
+          { field: 'decision', problem: 'only a decided step carries a decision' },
+        ]);
+      }
+      const recorded = await store.putNoticeStep({
+        noticeId: Number(noticeId),
+        step,
+        actorAthleteId: moderatorId,
+        decision: decided,
+        logId: entry,
+        at: seconds(),
+      });
+      switch (recorded) {
+        case 'recorded':
+          return { ok: true, value: null };
+        case 'not_found':
+          return refuse('not_found');
+        case 'no_such_log_entry':
+          return refuse('validation_failed', [
+            { field: 'logId', problem: 'must be a moderation log entry’s id' },
+          ]);
+        default:
+          return refuse('moderation_not_applicable');
+      }
+    },
+
+    async record() {
+      const [notices, steps, appeals] = await Promise.all([
+        store.listNotices(),
+        store.listNoticeSteps(),
+        store.listEveryAppeal(),
+      ]);
+      return exportRecord(notices, steps, appeals);
+    },
 
     async appeal(athleteId, statementId, grounds) {
       if (!/^[1-9][0-9]{0,15}$/.test(statementId)) return refuse('not_found');

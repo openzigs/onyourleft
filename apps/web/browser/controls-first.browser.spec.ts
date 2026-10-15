@@ -276,8 +276,8 @@ const TUCKING_WHEN_POPULATED: Partial<Record<RouteId, readonly string[]>> = {
   home: ['This week'],
   // #907: that the instance sends no email, and the moderator replies by hand,
   // is behind the ⓘ; the screen is a moderator's only over the populated ports.
-  // #911: what Uphold and Reverse do, likewise.
-  moderation: ['Appeals', 'Notices'],
+  // #911: what Uphold and Reverse do, likewise; #912: what the record holds.
+  moderation: ['Appeals', 'Notices', 'The record'],
 };
 
 async function open(page: Page, viewport: Viewport, query: string): Promise<void> {

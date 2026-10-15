@@ -110,6 +110,8 @@ export const PHASE_ONE_SEALED_ROUTES: readonly PhaseOneRoute[] = [
   only('GET', '/v1/moderation/log', 'Every moderator read'),
   only('GET', '/v1/moderation/notices', 'Every moderator read'),
   only('GET', '/v1/moderation/appeals', 'Every moderator read'),
+  only('GET', '/v1/moderation/record', 'Every moderator read'),
+  only('POST', '/v1/moderation/notices/{noticeId}/steps', 'Every other moderator action'),
   only('POST', '/v1/moderation/appeals/{appealId}/decide', 'Every other moderator action'),
   // The synced history (#37, #38, #776): every route `sync/routes.ts` declares.
   only('GET', '/v1/sync/manifest', 'The synced history'),
