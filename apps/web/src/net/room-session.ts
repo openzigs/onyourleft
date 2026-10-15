@@ -57,6 +57,7 @@ import {
   type Finish,
   type RefuseReason,
   type RoomConfig,
+  type Standings,
 } from '@onyourleft/protocol';
 
 import {
@@ -162,6 +163,30 @@ export type RoomRace =
       readonly place: number | null;
     };
 
+/**
+ * One row of a race's standings, as the room sent it — #1347, ADR 0051. Every
+ * number is the ROOM's: the gap it took from its own positions, to this rider,
+ * and the W/kg it simulated. Nothing here is computed on this device.
+ */
+export interface RoomStandingsRow {
+  readonly riderId: number;
+  /** The rider's public name, once the room has named them; `undefined` until then. */
+  readonly displayName: string | undefined;
+  /** Whether this row is this rider's own. */
+  readonly you: boolean;
+  /** Seconds behind this rider, positive; ahead, negative; 0 on the own row. */
+  readonly gapSeconds: number;
+  readonly wattsPerKilogram: number;
+  /** `@onyourleft/protocol`'s `FLAG_*`, or'd. */
+  readonly flags: number;
+}
+
+/** A race's standings, in the room's order, and the tick they are of. */
+export interface RoomStandings {
+  readonly tick: number;
+  readonly rows: readonly RoomStandingsRow[];
+}
+
 /** Where a session is. */
 export type RoomSessionStatus =
   | { readonly kind: 'connecting' }
@@ -235,6 +260,10 @@ export class RoomSession {
   #lostSince: number | undefined;
   #snapshots: SnapshotBuffer | undefined;
   #finish: Finish | undefined;
+  /** A race's riders' public names, by rider id (#1347). */
+  readonly #names = new Map<number, string>();
+  /** A race's newest standings (#1347). */
+  #standings: Standings | undefined;
   /** The room's countdown, and the local instant it arrived (#785). */
   #countdown: { readonly startsInMs: number; readonly atLocalMs: number } | undefined;
   /** Whether the room has sent a frame: a race is on from its first (#785). */
@@ -290,6 +319,27 @@ export class RoomSession {
       return { kind: 'counting', endsAtLocalMs: countdown.atLocalMs + countdown.startsInMs };
     }
     return { kind: 'waiting' };
+  }
+
+  /**
+   * A race's newest standings, joined with the names the room sent — #1347.
+   * `undefined` before the first, and in a group ride, which has none.
+   */
+  standings(): RoomStandings | undefined {
+    const standings = this.#standings;
+    if (standings === undefined) return undefined;
+    const own = this.#riderId;
+    return {
+      tick: standings.tick,
+      rows: standings.riders.map((rider) => ({
+        riderId: rider.riderId,
+        displayName: this.#names.get(rider.riderId),
+        you: rider.riderId === own,
+        gapSeconds: rider.gapDeciseconds / 10,
+        wattsPerKilogram: rider.wattsPerKilogramTenths / 10,
+        flags: rider.flags,
+      })),
+    };
   }
 
   /** Every OTHER rider, drawn at `localMs` less the render delay. @see SnapshotBuffer.at */
@@ -403,6 +453,9 @@ export class RoomSession {
             this.#snapshots ??= new SnapshotBuffer(message.roomConfig.frameIntervalMs);
             this.#riderId = message.riderId;
             this.#kind = message.roomConfig.kind;
+            // #1347: standings from before a loss are gaps that stopped
+            // moving; the room's next ones replace them within a tick.
+            this.#standings = undefined;
             this.#startReporting(message.roomConfig.reportIntervalMs);
             this.#setStatus({
               kind: 'joined',
@@ -422,6 +475,14 @@ export class RoomSession {
           case 'countdown':
             this.#countdown = { startsInMs: message.startsInMs, atLocalMs: this.#options.now() };
             this.#options.onChange?.();
+            return;
+          case 'name':
+            this.#names.set(message.riderId, message.displayName);
+            return;
+          case 'standings':
+            // The browser gate's control turns these off with the frames.
+            if (this.#options.acceptFrame?.() === false) return;
+            this.#standings = message;
             return;
           case 'finish':
             this.#finish = message;

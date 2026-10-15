@@ -2157,10 +2157,12 @@ export function GameView(props: GameViewProps): JSX.Element {
         // #1312: and the lap's, the recorder's again. @see useRideLapSeconds
         lapSeconds={lapSeconds}
         chases={chasedGaps(state, ghostRef.current, outcomeRef.current)}
-        // #783: a count and ONE chosen gap on a room ride, never a list.
+        // #783: a count and ONE chosen gap on a room ride — and, in a race,
+        // the room's standings (#1347, ADR 0051).
         {...(roomRef.current === undefined
           ? {}
           : { room: roomFrameRef.current?.hud ?? { nearby: 0 } })}
+        standings={roomFrameRef.current?.standings}
         onFollowNext={
           roomRef.current === undefined || (roomFrameRef.current?.remoteRiders.length ?? 0) === 0
             ? undefined
@@ -2337,8 +2339,8 @@ export function GameView(props: GameViewProps): JSX.Element {
             </StatusMessage>
           ),
           // #785: a race held on its line, counting down, or over — the room's
-          // word, never a standing (ADR 0028 D-7.7): nothing here orders
-          // anybody. *Start the race* is offered to the rider who made the
+          // word; the standings are a panel of their own (#1347), and nothing
+          // here orders anybody. *Start the race* is offered to the rider who made the
           // room and to nobody else (the owner's ruling of 2026-09-30; the
           // instance refuses anybody else's start too), whose notice says who
           // will; and it says what came of the press.

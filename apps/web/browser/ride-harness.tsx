@@ -94,7 +94,8 @@ import {
 
 import { scriptedSidePairing } from '../src/camera/testing';
 import { roomPortOver } from '../src/net/room-port';
-import { ScriptedRoom } from '../src/net/testing';
+import { frameRider, ScriptedRoom, standingsRider } from '../src/net/testing';
+import { FLAG_COASTING, FLAG_PLAUSIBILITY } from '@onyourleft/protocol';
 import type { GamePort } from '../src/game/GameView';
 import type { GameTrainerPort } from '../src/game/trainer-port';
 import type { LapFigures } from '../src/recording/laps';
@@ -523,7 +524,16 @@ const PAUSED = new URLSearchParams(window.location.search).get('paused') === 'ye
  * use (`net/testing.ts`): welcomed as a race and sent no frame, so the race
  * waits for as long as the page is open.
  */
-const ROOM_MODE = new URLSearchParams(window.location.search).get('room');
+const ROOM_QUERY = new URLSearchParams(window.location.search).get('room');
+/**
+ * `ride.html?room=standings` — #1347: the same race RUNNING, its room having
+ * named nine riders and sent a frame and its standings, so the HUD carries
+ * the race's standings panel at its widest: seven lines, the longest names a
+ * room admits beside realistic ones, a flag and a coaster among them.
+ * `ride.browser.spec.ts` §"#1347" measures it.
+ */
+const WITH_STANDINGS = ROOM_QUERY === 'standings';
+const IN_A_RACE = ROOM_QUERY === 'race' || WITH_STANDINGS;
 /**
  * `ride.html?room=paused` and `?room=lost` — #785, #1360's re-review (R3): a
  * group ride in a room whose notice slot carries a room sentence, measured by
@@ -532,8 +542,8 @@ const ROOM_MODE = new URLSearchParams(window.location.search).get('room');
  * says so. `lost`: the room's socket closes and no ticket comes back, so the
  * slot holds `ROOM_LOST_TEXT`, the longest sentence that slot carries.
  */
-const IN_A_ROOM = ROOM_MODE === 'race' || ROOM_MODE === 'paused' || ROOM_MODE === 'lost';
-const RACE_ROOM = IN_A_ROOM ? new ScriptedRoom() : undefined;
+const ROOM_NOTICE = ROOM_QUERY === 'paused' || ROOM_QUERY === 'lost' ? ROOM_QUERY : undefined;
+const RACE_ROOM = IN_A_RACE || ROOM_NOTICE !== undefined ? new ScriptedRoom() : undefined;
 const RACE_PORTS =
   RACE_ROOM === undefined
     ? {}
@@ -541,7 +551,7 @@ const RACE_PORTS =
         room: roomPortOver(() => RACE_ROOM.link(), {}),
         roomId: 'harness-race',
         // The owner's ruling of 2026-09-30: only its maker is offered *Start the race*.
-        madeTheRoom: ROOM_MODE === 'race',
+        madeTheRoom: IN_A_RACE,
         riderMass: kilograms(72),
         rooms: {
           create: () => Promise.resolve({ kind: 'unreachable' as const }),
@@ -710,8 +720,8 @@ const TRAINER: GameTrainerPort = {
   askForControlOnRide: () => Promise.resolve(),
   workoutRescue: () => RESCUE,
   recordingMayStop: () => MAY_STOP,
-  // #1360's re-review (R3). @see ROOM_MODE
-  recordingPaused: () => ROOM_MODE === 'paused',
+  // #1360's re-review (R3). @see ROOM_NOTICE
+  recordingPaused: () => ROOM_NOTICE === 'paused',
   gameRideEnded: () => undefined,
   rideMovingSeconds: () => MOVING_SECONDS,
   watchRide: () => () => undefined,
@@ -1131,21 +1141,56 @@ async function run(): Promise<void> {
       RACE_ROOM.sockets.length > 0 ? RACE_ROOM : undefined,
     );
     RACE_ROOM.accept();
-    RACE_ROOM.welcome(0, ROOM_MODE === 'race' ? 'race' : 'ride');
-    if (ROOM_MODE === 'race') {
-      await until('Start the race', () => labelled<HTMLButtonElement>('button', 'Start the race'));
-    } else {
-      if (ROOM_MODE === 'lost') {
+    RACE_ROOM.welcome(0, IN_A_RACE ? 'race' : 'ride');
+    if (ROOM_NOTICE !== undefined) {
+      if (ROOM_NOTICE === 'lost') {
         // Lost, and kept lost: no ticket comes back for the rejoin.
         RACE_ROOM.ticketAnswer = () => ({ kind: 'unreachable' });
         RACE_ROOM.closeFromServer(1006);
       }
-      const words = ROOM_MODE === 'lost' ? 'connection was lost' : 'Recording paused';
+      const words = ROOM_NOTICE === 'lost' ? 'connection was lost' : 'Recording paused';
       await until(`the room's notice`, () =>
         [...document.querySelectorAll('.oyl-hud__notices')].find((each) =>
           (each.textContent ?? '').includes(words),
         ),
       );
+    } else if (WITH_STANDINGS) {
+      // #1347: nine riders, this one fifth; 32 scalars is the longest name a
+      // room admits (`@onyourleft/domain` §`MAXIMUM_DISPLAY_NAME_SCALARS`).
+      const names = [
+        'Me',
+        'Wilhelmina Vandersteen-Oduya Mbe',
+        'Ann',
+        'Bea Ng',
+        'Cai Rhys',
+        'Dafydd ap Gwilym-Llewellyn Jones',
+        'Eve',
+        'Femi Adeyemi',
+        'Gus',
+      ];
+      names.forEach((name, riderId) => {
+        RACE_ROOM.name(riderId, name);
+      });
+      // In the room's order: this rider (0) fifth.
+      const order = [1, 2, 3, 4, 0, 5, 6, 7, 8];
+      RACE_ROOM.frame(
+        1,
+        order.map((riderId, index) => frameRider(riderId, 400 - index * 15)),
+      );
+      RACE_ROOM.standings(
+        1,
+        order.map((riderId, index) =>
+          standingsRider(
+            riderId,
+            (index - 4) * 61.4,
+            riderId === 7 ? 0 : 3 + index / 10,
+            riderId === 2 ? FLAG_PLAUSIBILITY : riderId === 7 ? FLAG_COASTING : 0,
+          ),
+        ),
+      );
+      await until('the race standings', () => document.querySelector('.oyl-hud__standings'));
+    } else {
+      await until('Start the race', () => labelled<HTMLButtonElement>('button', 'Start the race'));
     }
   }
   // The trainer line appears once the gradient session has written once, which
