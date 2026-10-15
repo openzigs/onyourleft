@@ -137,7 +137,7 @@ export const MODERATION_ROUTES: readonly Route[] = [
     operationId: 'submitNotice',
     reaches: NOTICE_PAGE_REACH,
     summary:
-      'Send the notice page’s form (#907). 200 and a page with the notice’s reference when it is received; 400 and the form again, saying what to correct, when it is not; 429 when this client address or the whole instance has sent too many in the last hour. No client address is stored, and nothing typed is logged.',
+      'Send the notice page’s form (#907). 200 and a page with the notice’s reference when it is received; 400 and the form again, saying what to correct, when it is not; 429 when this client address or the whole instance has sent too many in the last hour (an intimate image report is not counted against the whole instance); 403 when a browser says the post came from another site. No client address is stored, and nothing typed is logged.',
     identity: true,
     form: object(
       {
@@ -156,6 +156,11 @@ export const MODERATION_ROUTES: readonly Route[] = [
     ),
     response: { contentType: 'text/html' },
     handle: async (context) => {
+      // A form on another site could post real visitors' notices from their
+      // own addresses; a browser says so, and the page's own form never is.
+      if (context.request.headers.get('sec-fetch-site') === 'cross-site') {
+        return pageResponse(noticePage({ kind: 'form' }, context.config.name), 403);
+      }
       const form = new URLSearchParams(
         new TextDecoder('utf-8').decode(context.body ?? new Uint8Array()),
       );
