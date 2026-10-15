@@ -500,11 +500,19 @@ describe('re-plans during the ride — #1244', () => {
       expect(shownDisclosure(view.container)).toEqual([]);
     });
 
-    it('comes after the workouts, so it does not push the Ride control down — #422', async () => {
+    it('comes BEFORE the workouts, with the headline; the other eight sentences come after them — #1329', async () => {
       const view = await render({ replansAvailable: true });
       const ride = buttonSaying(view.container, 'Ride Sweet spot') as HTMLElement;
       const input = theSwitch(view.container) as HTMLElement;
-      expect(ride.compareDocumentPosition(input) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      const follows = (a: Element, b: Element) =>
+        (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+      expect(follows(input, ride)).toBe(true);
+      const headline = view.container.querySelector('#oyl-replan-disclosure-headline') as Element;
+      expect(follows(input, headline)).toBe(true);
+      expect(follows(headline, ride)).toBe(true);
+      const rest = queryAll(view.container, '[data-oyl-replan-disclosure="rest"] p');
+      expect(rest).toHaveLength(8);
+      expect(follows(ride, rest[0] as Element)).toBe(true);
     });
 
     it('is not shown where no workout can be started', async () => {
@@ -696,11 +704,14 @@ describe('re-plans during the ride — #1244', () => {
       expect(onLine(view.container)).toBeUndefined();
       await activateWithKeyboard(theSwitch(view.container) as HTMLElement);
       expect(onLine(view.container)).toBe(REPLANS_ON_BADGE);
-      // Text, in a paragraph of its own, before the first control that starts a workout.
+      // Text, in a paragraph of its own, before the switch and the first
+      // control that starts a workout (#1329: the switch is above the list).
       const badge = queryAll(view.container, '[data-oyl-replans-on]')[0] as HTMLElement;
       expect(badge.tagName).toBe('P');
       const ride = buttonSaying(view.container, 'Ride Sweet spot') as HTMLElement;
       expect(badge.compareDocumentPosition(ride) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      const input = theSwitch(view.container) as HTMLElement;
+      expect(badge.compareDocumentPosition(input) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       await activateWithKeyboard(theSwitch(view.container) as HTMLElement);
       expect(onLine(view.container)).toBeUndefined();
     });
@@ -717,6 +728,10 @@ describe('re-plans during the ride — #1244', () => {
       // Straight after the heading, on its line: the heading's next sibling.
       expect(heading()?.nextElementSibling?.textContent).toBe(REPLANS_ON_BADGE);
       expect(heading()?.parentElement?.classList.contains('oyl-workout-heading')).toBe(true);
+      // #1329: and the switch straight after the heading's row.
+      expect(
+        heading()?.parentElement?.nextElementSibling?.classList.contains('oyl-workout-replans'),
+      ).toBe(true);
     });
 
     it('never says it where there is no switch', async () => {

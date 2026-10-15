@@ -46,6 +46,16 @@ export class StoreReferentialError extends StoreError {}
 export class StoreDecodeError extends StoreError {}
 
 /**
+ * A conditional write found the row it would replace changed since its caller
+ * read it (#1263), so it wrote nothing.
+ *
+ * Not a fault: the caller read the row, waited on something else (a sync on
+ * its network request), and meanwhile the rider changed or deleted the row
+ * here. The rider's change stands, and the caller decides what that means.
+ */
+export class StoreConflictError extends StoreError {}
+
+/**
  * The database on this device was written by a **newer** build than this one.
  *
  * IndexedDB itself refuses a downgrade — `indexedDB.open(name, olderVersion)`

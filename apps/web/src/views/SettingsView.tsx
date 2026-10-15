@@ -201,9 +201,19 @@ export const MASS_SAVED = 'Saved. The trainer game now rides you at this weight.
 /** Said when the weight has been cleared and the default is back. */
 export const MASS_CLEARED = 'Cleared. The trainer game rides you at the assumed weight again.';
 
-/** Where the rider's weight goes, which is nowhere — kept on the screen (#666). */
-export const WEIGHT_STAYS_HERE =
-  'Nothing is sent anywhere — it is stored on this device with your rides.';
+/**
+ * Where the rider's weight goes — kept on the screen (#666).
+ *
+ * ⚠️ **It said "Nothing is sent anywhere" until #1333, which was false three
+ * ways.** The stored weight is the one a private room's ticket declares
+ * (`game/GameView.tsx` → `net/room-port.ts` §`instanceRoomLink`); it is
+ * `rider.massKilograms` in every ride analysis' input (`@onyourleft/analysis`
+ * §`rideAnalysisInput`), whichever model reads it; and it is the divisor of
+ * the power per kilogram in the ride summary a sync pushes
+ * (`ride-analysis/ride-summary.ts`). A fourth path is a fourth clause here.
+ */
+export const WEIGHT_WHERE_IT_GOES =
+  'It is stored on this device with your rides. Joining a private room sends it to that room’s instance, and asking for a ride analysis sends it to the model you chose. A ride you sync with an instance carries your power per kilogram.';
 
 /** Where the announcement choice is kept — on the screen, beside the switch (#699's review, N9). */
 export const ANNOUNCEMENTS_STAY_HERE = 'Off unless you turn it on, and kept on this device only.';
@@ -212,12 +222,12 @@ export const ANNOUNCEMENTS_STAY_HERE = 'Off unless you turn it on, and kept on t
  * The sentences on this screen that are never tucked behind a section's ⓘ
  * disclosure — #666. They are about what leaves the device and to whom, and
  * what a rider can lose: the map-tile host (#534's review, #558), where a
- * weight is kept, and that clearing site data takes the rides with it.
+ * weight is kept and sent, and that clearing site data takes the rides with it.
  * `a11y/kept-visible.a11y.test.tsx` fails this route if any of them has a
  * closed `<details>` above it. Fragments where the sentence names a host.
  */
 export const SETTINGS_KEPT_VISIBLE: readonly string[] = [
-  WEIGHT_STAYS_HERE,
+  WEIGHT_WHERE_IT_GOES,
   ANNOUNCEMENTS_STAY_HERE,
   'opening a ride that has GPS asks',
   'sends the map area and your device’s IP address to',
@@ -1022,7 +1032,7 @@ function AnnouncementsPanel({
       )}
       {/*
         #699's review (N9): where the choice is kept stays on the screen, as
-        "Your weight" keeps WEIGHT_STAYS_HERE there; how the announcements behave
+        "Your weight" keeps WEIGHT_WHERE_IT_GOES there; how the announcements behave
         is what is tucked.
       */}
       <KeptVisible>
@@ -1572,7 +1582,7 @@ function WeightPanel({
         Your weight
       </SectionHeading>
       <KeptVisible>
-        <p className="oyl-muted">{WEIGHT_STAYS_HERE}</p>
+        <p className="oyl-muted">{WEIGHT_WHERE_IT_GOES}</p>
       </KeptVisible>
 
       {port === undefined ? (

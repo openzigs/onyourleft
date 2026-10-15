@@ -9,6 +9,7 @@ import {
   FLAG_COASTING,
   FLAG_PLAUSIBILITY,
   MAXIMUM_REPORTED_POWER_WATTS,
+  PROTOCOL_VERSION,
 } from '@onyourleft/protocol';
 
 import { FINISH_CUT_OFF_TICKS, type Outbound, type Room } from './room.ts';
@@ -76,6 +77,8 @@ describe('the handshake — ADR 0028 D-2 rule 5', () => {
           frameIntervalMs: 1000,
         },
       },
+      // #1347: a race names its field to a rider as they are welcomed — here, themself.
+      { type: 'name', riderId: 0, displayName: 'Ann' },
     ]);
     expect(closed(out)).toEqual([]);
   });
@@ -90,7 +93,7 @@ describe('the handshake — ADR 0028 D-2 rule 5', () => {
 
   it('refuses a protocol it does not share, and closes', () => {
     const room = testRoom();
-    const out = room.receive(1, helloText('ticket-ann', { protocol: 2 }), 0);
+    const out = room.receive(1, helloText('ticket-ann', { protocol: PROTOCOL_VERSION + 1 }), 0);
     expect(sentTo(out, 1)).toEqual([{ type: 'refuse', reason: 'protocol-mismatch' }]);
     expect(closed(out)).toEqual([1]);
   });
@@ -633,8 +636,8 @@ describe('a race’s countdown — #785', () => {
     expect(sentTo(started, 2)).toEqual([{ type: 'countdown', startsInMs: 10_000 }]);
     // A rider joining 4 s in is welcomed, then told the 6 s that are left.
     const late = sentTo(room.receive(3, helloText('ticket-cat'), 6_000), 3);
-    expect(late.map((m) => m.type)).toEqual(['welcome', 'countdown']);
-    expect(late[1]).toEqual({ type: 'countdown', startsInMs: 6_000 });
+    expect(late.map((m) => m.type)).toEqual(['welcome', 'name', 'name', 'name', 'countdown']);
+    expect(late.at(-1)).toEqual({ type: 'countdown', startsInMs: 6_000 });
     // A second start changes nothing and says nothing.
     expect(room.start(7_000)).toEqual([]);
   });
@@ -643,6 +646,7 @@ describe('a race’s countdown — #785', () => {
     const room = testRoom({ countdownMs: 1_000 });
     expect(sentTo(room.receive(1, helloText('ticket-ann'), 0), 1).map((m) => m.type)).toEqual([
       'welcome',
+      'name',
     ]);
     room.start(0);
     room.tick(1_000);
@@ -650,6 +654,7 @@ describe('a race’s countdown — #785', () => {
     room.disconnect(1, 1_100);
     expect(sentTo(room.receive(2, helloText('ticket-ann'), 1_200), 2).map((m) => m.type)).toEqual([
       'welcome',
+      'name',
     ]);
   });
 

@@ -366,3 +366,18 @@ describe('which routes are read and which are operated (#422)', () => {
     ]);
   });
 });
+
+describe("Settings' note does not claim nothing is sent — #1333", () => {
+  it('says each sending setting says so', () => {
+    expect(routeById('settings').notes ?? []).toEqual([
+      'Each setting that sends something says so beside it, and nothing here changes what a ride recorded.',
+    ]);
+  });
+
+  // Its own test (PR #1334's review): a later rewording of the sentence pinned
+  // above must not take the guard on the old claim with it.
+  it('never says that nothing here is sent anywhere, however it is reworded', () => {
+    const said = [routeById('settings').summary, ...(routeById('settings').notes ?? [])].join(' ');
+    expect(said).not.toMatch(/nothing( here)? is sent/i);
+  });
+});
