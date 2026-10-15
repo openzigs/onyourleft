@@ -86,6 +86,14 @@ const EXEMPT: Readonly<
       body: { athleteId: subject, reason: 'Abusive display name' },
     }),
   },
+  getNoticePage: {
+    heldElsewhere:
+      'the notice page (#907): the same form for anybody, naming nobody and reading nothing (moderation/notices.test.ts)',
+  },
+  submitNotice: {
+    heldElsewhere:
+      'a notice goes to the moderators, not to anybody it names, and answers the same whatever its items name: it never looks them up (moderation/notices.test.ts)',
+  },
   createRoomTicket: {
     heldElsewhere:
       'names a room, not an athlete; blocking inside a room is #789’s (room moderation), and suspension is held by the session, which a suspended account no longer has',

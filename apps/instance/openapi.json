@@ -284,6 +284,127 @@
         }
       }
     },
+    "/report": {
+      "get": {
+        "operationId": "getNoticePage",
+        "summary": "The notice page (#907): a form, for anybody with or without an account, to report content on this instance they think is illegal (DSA Art. 16) or to make an intimate image content report (OSA s.20A). HTML, with no script.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      },
+      "post": {
+        "operationId": "submitNotice",
+        "summary": "Send the notice page’s form (#907). 200 and a page with the notice’s reference when it is received; 400 and the form again, saying what to correct, when it is not; 429 when this client address or the whole instance has sent too many in the last hour. No client address is stored, and nothing typed is logged.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "illegal_content",
+                      "intimate_image"
+                    ]
+                  },
+                  "explanation": {
+                    "type": "string"
+                  },
+                  "items": {
+                    "type": "string"
+                  },
+                  "location": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "email": {
+                    "type": "string"
+                  },
+                  "bona_fide": {
+                    "type": "string"
+                  },
+                  "declare_intimate": {
+                    "type": "string"
+                  },
+                  "declare_subject": {
+                    "type": "string"
+                  },
+                  "declare_true": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "explanation"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
     "/source": {
       "get": {
         "operationId": "getSource",
@@ -5056,6 +5177,123 @@
           },
           "400": {
             "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/moderation/notices": {
+      "get": {
+        "operationId": "listNotices",
+        "summary": "The moderators’ queue of notices (#907): every notice the notice page received, oldest first, with the time it arrived and the notifier’s name and email when they gave them.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "notices": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "noticeId": {
+                            "type": "integer"
+                          },
+                          "receivedAt": {
+                            "type": "integer"
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "illegal_content",
+                              "intimate_image"
+                            ]
+                          },
+                          "explanation": {
+                            "type": "string"
+                          },
+                          "items": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "location": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "notifierName": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "notifierEmail": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "bonaFide": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "noticeId",
+                          "receivedAt",
+                          "kind",
+                          "explanation",
+                          "items",
+                          "location",
+                          "notifierName",
+                          "notifierEmail",
+                          "bonaFide"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "notices"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
           },
           "401": {
             "$ref": "#/components/responses/unauthenticated"

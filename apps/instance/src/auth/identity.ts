@@ -245,6 +245,14 @@ export interface IdentityLimits {
    * adapter did not know at all is the bucket `unknown`.
    */
   readonly sessionlessSealedPerAddress: RateLimit;
+  /**
+   * Notices of illegal content per client address (#907): the notice page
+   * takes them from anybody, with no account, so an address is the only
+   * thing to count. In memory, like every limit here, so no address is
+   * stored; the instance's own cap is counted from the store
+   * (`moderation.ts` §`NOTICES_PER_HOUR`).
+   */
+  readonly noticesPerAddress: RateLimit;
 }
 
 export const DEFAULT_LIMITS: IdentityLimits = {
@@ -265,6 +273,9 @@ export const DEFAULT_LIMITS: IdentityLimits = {
   // Chosen: registering, linking and recovering are a handful of requests a
   // rider makes once; the inner routes' own limits apply after this one.
   sessionlessSealedPerAddress: { limit: 30, windowMs: 60_000 },
+  // Chosen: one person reporting what they saw sends one or two; five an
+  // hour leaves room for a correction and bounds a script.
+  noticesPerAddress: { limit: 5, windowMs: 60 * 60_000 },
 };
 
 /**
@@ -744,12 +755,17 @@ export function createIdentity(options: IdentityOptions): Identity {
   const historySearches = createRateLimiter(limits.historySearchesPerAthlete, now);
   const sealedPerSession = createRateLimiter(limits.sealedPerSession, now);
   const sessionlessSealed = createRateLimiter(limits.sessionlessSealedPerAddress, now);
+  const noticesPerAddress = createRateLimiter(limits.noticesPerAddress, now);
   const tickets = createTicketBook(now, () => randomToken(32));
   const moderation = createModeration({
     store,
     now,
     ...(options.moderators === undefined ? {} : { moderators: options.moderators }),
     ...(options.moderationLimits === undefined ? {} : { limits: options.moderationLimits }),
+    // An address the adapter could not give shares one bucket, as a
+    // registration's does: failing closed.
+    allowNoticeFrom: (address) =>
+      noticesPerAddress.allow(address === null ? 'unknown' : addressKey(address)),
   });
 
   /** Check a statement for `purpose`, spend its nonce, and verify it. Answers the key. */
@@ -1023,6 +1039,7 @@ export function createIdentity(options: IdentityOptions): Identity {
     historySearches,
     sealedPerSession,
     sessionlessSealed,
+    noticesPerAddress,
   ];
 
   return {
@@ -1041,6 +1058,7 @@ export function createIdentity(options: IdentityOptions): Identity {
       limits.historySearchesPerAthlete,
       limits.sealedPerSession,
       limits.sessionlessSealedPerAddress,
+      limits.noticesPerAddress,
     ]),
 
     sweepRateLimits() {

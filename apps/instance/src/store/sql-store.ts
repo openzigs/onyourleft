@@ -49,6 +49,7 @@ import type {
   InviteCodeTable,
   LinkCodeTable,
   ModerationLogTable,
+  NoticeTable,
   RecoveryCodeTable,
   RecoveryEmailConfirmationTable,
   RecoveryEmailTable,
@@ -495,6 +496,30 @@ export interface Report {
   readonly closedByAthleteId: string | null;
   readonly outcome: string | null;
 }
+
+/**
+ * A notice of illegal content (#907), as it was received. Its notifier may be
+ * anybody, and is named only by what they chose to give.
+ */
+export interface Notice {
+  readonly id: number;
+  /** Unix seconds. */
+  readonly receivedAt: number;
+  /** A notice of illegal content, or an intimate image content report (OSA s.20A). */
+  readonly kind: 'illegal_content' | 'intimate_image';
+  readonly explanation: string;
+  /** The item identifiers it names (`@onyourleft/domain` §`moderation-item.ts`). */
+  readonly items: readonly string[];
+  /** Where, in the notifier's words, when an identifier was not enough. */
+  readonly location: string | null;
+  readonly notifierName: string | null;
+  readonly notifierEmail: string | null;
+  /** Whether the notifier made the bona fide statement (DSA Art. 16(2)(d)). */
+  readonly bonaFide: boolean;
+}
+
+/** What a notice is stored with: everything but the id the store gives it. */
+export type NewNotice = Omit<Notice, 'id'>;
 
 /** What a moderator may do (#83, #775). */
 export type ModerationActionKind =
@@ -1349,6 +1374,13 @@ export interface SqlStore {
   /** The moderators' queue: every report not yet decided, oldest first. */
   listOpenReports(): Promise<readonly Report[]>;
 
+  /** A notice of illegal content, as it was received (#907). Answers its id. */
+  putNotice(notice: NewNotice): Promise<number>;
+  /** How many notices arrived at or after `since` (Unix seconds), from anybody: the instance's cap. */
+  countNoticesSince(since: number): Promise<number>;
+  /** Every notice received, oldest first: the moderators' queue (#907). */
+  listNotices(): Promise<readonly Notice[]>;
+
   /**
    * Apply a moderator action and append it to the log, in ONE transaction:
    * an action that is applied is logged, and one that is not changes nothing.
@@ -1609,6 +1641,24 @@ const reportFrom = (row: Selectable<ReportTable>): Report => ({
   closedAt: row.closed_at,
   closedByAthleteId: row.closed_by_athlete_id,
   outcome: row.outcome,
+});
+
+/** A stored notice's items: written by {@link SqlStore.putNotice} alone, as a JSON array of strings. */
+function noticeItems(text: string): readonly string[] {
+  const parsed: unknown = JSON.parse(text);
+  return Array.isArray(parsed) ? parsed.filter((each) => typeof each === 'string') : [];
+}
+
+const noticeFrom = (row: Selectable<NoticeTable>): Notice => ({
+  id: row.id,
+  receivedAt: row.received_at,
+  kind: row.kind,
+  explanation: row.explanation,
+  items: noticeItems(row.items),
+  location: row.location,
+  notifierName: row.notifier_name,
+  notifierEmail: row.notifier_email,
+  bonaFide: row.bona_fide === 1,
 });
 
 const moderationLogFrom = (row: Selectable<ModerationLogTable>): ModerationLogEntry => ({
@@ -3817,6 +3867,40 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
             .orderBy('id')
             .execute()
         ).map(reportFrom),
+      ),
+
+    putNotice: (notice) =>
+      exclusive(async () => {
+        const inserted = await db
+          .insertInto('notice')
+          .values({
+            received_at: notice.receivedAt,
+            kind: notice.kind,
+            explanation: notice.explanation,
+            items: JSON.stringify(notice.items),
+            location: notice.location,
+            notifier_name: notice.notifierName,
+            notifier_email: notice.notifierEmail,
+            bona_fide: notice.bonaFide ? 1 : 0,
+          })
+          .returning('id')
+          .executeTakeFirstOrThrow();
+        return inserted.id;
+      }),
+
+    countNoticesSince: (since) =>
+      exclusive(async () => {
+        const row = await db
+          .selectFrom('notice')
+          .select((eb) => eb.fn.countAll<number>().as('n'))
+          .where('received_at', '>=', since)
+          .executeTakeFirstOrThrow();
+        return Number(row.n);
+      }),
+
+    listNotices: () =>
+      exclusive(async () =>
+        (await db.selectFrom('notice').selectAll().orderBy('id').execute()).map(noticeFrom),
       ),
 
     moderate: (action) =>

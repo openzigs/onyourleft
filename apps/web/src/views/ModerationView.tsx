@@ -6,6 +6,7 @@ import { PairingCode } from '../camera/PairingCode';
 import { Button } from '../design/Button';
 import { ConfirmDialog } from '../design/ConfirmDialog';
 import { KeptVisible } from '../design/KeptVisible';
+import { SectionHeading } from '../design/SectionHelp';
 import { StatusMessage } from '../design/StatusMessage';
 import {
   INVITE_CARD_CAUTION,
@@ -20,6 +21,7 @@ import {
   type ModerationRead,
   type OpenReport,
   type PendingRegistration,
+  type ReceivedNotice,
   type SuspendedAccount,
 } from '../instance/moderation-port';
 import { hrefFor, routeById } from '../shell/routes';
@@ -110,6 +112,29 @@ export const MODERATION_LOG_UNREADABLE_TEXT =
 export const SUSPENDED_UNREADABLE_TEXT =
   'The suspended accounts could not be read from the instance, so they are not shown here. You ' +
   'can still lift a suspension by the account’s id, below.';
+
+/** Said in place of the notices when the instance gave the queues and not them (#907). */
+export const NOTICES_UNREADABLE_TEXT =
+  'The notices could not be read from the instance, so they are not shown here. The queues ' +
+  'above are as the instance gave them.';
+
+/**
+ * Said above the notices (#907): the owner's ruling of 2026-10-15 — a receipt
+ * is confirmed by hand, by the moderator, to the address the notifier gave.
+ */
+export const NOTICES_RECEIPT_TEXT =
+  'Anybody can send a notice from the instance’s notice page, with or without an account. ' +
+  'The instance sends no email: where a notice gives an email address, write to it to confirm ' +
+  'you received it, and again with what you decided.';
+
+/** The section's one short line (#1013); {@link NOTICES_RECEIPT_TEXT} is behind its ⓘ. */
+export const NOTICES_SHORT_TEXT =
+  'From the instance’s notice page. Reply by hand to any address given.';
+
+/** Said on an intimate image content report (OSA s.10(3A)). */
+export const INTIMATE_IMAGE_DEADLINE_TEXT =
+  'An intimate image content report (UK Online Safety Act, section 20A): the content must be ' +
+  'taken down within 48 hours of when it was received.';
 
 /** Said under a list when its next page could not be read (#961). */
 export const MORE_UNREADABLE_TEXT =
@@ -389,6 +414,76 @@ function Reports({
                   ]}
                 />
               )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function Notices({
+  notices,
+}: {
+  readonly notices: readonly ReceivedNotice[] | undefined;
+}): JSX.Element {
+  return (
+    <section className="oyl-panel" aria-labelledby="oyl-moderation-notices">
+      <SectionHeading level={2} id="oyl-moderation-notices" help={<p>{NOTICES_RECEIPT_TEXT}</p>}>
+        Notices
+      </SectionHeading>
+      <p>{NOTICES_SHORT_TEXT}</p>
+      {notices === undefined ? (
+        <StatusMessage tone="warning" label="Not shown">
+          {NOTICES_UNREADABLE_TEXT}
+        </StatusMessage>
+      ) : notices.length === 0 ? (
+        <p className="oyl-muted">No notice has been received.</p>
+      ) : (
+        <ul className="oyl-moderation__list oyl-moderation__notices">
+          {notices.map((notice) => (
+            <li key={notice.noticeId}>
+              <h3>Notice {notice.noticeId}</h3>
+              <p>Received {when(notice.receivedAt)}.</p>
+              {notice.kind === 'intimate_image' ? (
+                <StatusMessage tone="warning" label="48 hours">
+                  {INTIMATE_IMAGE_DEADLINE_TEXT}
+                </StatusMessage>
+              ) : null}
+              {notice.items.length === 0 ? null : (
+                <>
+                  <p>The items it names:</p>
+                  <ul>
+                    {notice.items.map((item) => (
+                      <li key={item}>
+                        <code>{item}</code>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+              {notice.location === null ? null : (
+                <p className="oyl-moderation__quoted">Where, in their words: {notice.location}</p>
+              )}
+              <p className="oyl-moderation__quoted">
+                Why they think it is illegal: {notice.explanation}
+              </p>
+              <p>
+                {notice.notifierName === null
+                  ? 'They gave no name.'
+                  : `From ${notice.notifierName}.`}{' '}
+                {notice.notifierEmail === null ? (
+                  'They gave no email address, so they cannot be told what you decide.'
+                ) : (
+                  <>
+                    Write to them at{' '}
+                    <a href={`mailto:${notice.notifierEmail}`}>{notice.notifierEmail}</a>.
+                  </>
+                )}{' '}
+                {notice.bonaFide
+                  ? 'They stated in good faith that it is accurate and complete.'
+                  : 'They did not make the good-faith statement.'}
+              </p>
             </li>
           ))}
         </ul>
@@ -777,6 +872,7 @@ export function ModerationView({
       </KeptVisible>
       <Registrations port={port} registrations={state.registrations} onDone={onDone} />
       <Reports port={port} me={state.me} reports={state.reports} onDone={onDone} />
+      <Notices notices={state.notices} />
       <Suspended
         port={port}
         suspended={state.suspended}

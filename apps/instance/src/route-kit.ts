@@ -274,6 +274,12 @@ export interface Route {
   readonly bodyLimit?: (config: Config) => number;
   /** The JSON body the route reads, for the specification. */
   readonly request?: Schema;
+  /**
+   * The form the route reads, `application/x-www-form-urlencoded`, for the
+   * specification: a page's form posted by a browser with no script (#907).
+   * The route reads it from {@link RouteContext.body} itself.
+   */
+  readonly form?: Schema;
   /** The error codes this route answers with beyond every route's. */
   readonly errors?: readonly ErrorCode[];
   /**
@@ -284,6 +290,8 @@ export interface Route {
   readonly response:
     | { readonly contentType: 'application/json'; readonly schema: Schema }
     | { readonly contentType: 'text/plain' }
+    /** A page for a person to read in a browser (#907): `html.ts`. */
+    | { readonly contentType: 'text/html' }
     /** Bytes, exactly as they were stored: an original activity file (#35, #776). */
     | { readonly contentType: 'application/octet-stream' }
     /** 204, no body. */

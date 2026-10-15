@@ -64,7 +64,13 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         `/ready` and `/metrics` (operator-enabled, and
                         only for a request carrying
                         `OYL_INSTANCE_METRICS_TOKEN`) since #791, and every
-                        log line through `log.ts` §`redacted`. Behind a
+                        log line through `log.ts` §`redacted`. Since
+                        #907 it also serves `/report`, the notice page —
+                        the instance's first HTML (`src/html.ts`: no
+                        script, a CSP, everything escaped) for anybody
+                        with no account, migration 0026's append-only
+                        `notice` table, and `GET /v1/moderation/notices`;
+                        `moderation/notices.ts` says what it keeps. Behind a
                         proxy the sign-in rate limits read the client's
                         address from `OYL_INSTANCE_CLIENT_ADDRESS_HEADER`
                         (`cf-connecting-ip` behind the tunnel), and only

@@ -35,6 +35,7 @@ import {
   type ModerationStanding,
   type OpenReport,
   type PendingRegistration,
+  type ReceivedNotice,
   type SuspendedAccount,
 } from './moderation-port';
 
@@ -224,6 +225,8 @@ export interface ScriptedModeration {
     me: string;
     registrations: PendingRegistration[];
     reports: OpenReport[];
+    /** The notices the instance's notice page received (#907); `undefined` as when they could not be read. */
+    notices: ReceivedNotice[] | undefined;
     log: ModerationLogEntry[];
     /** `false` to answer a read as the port does when the log alone could not be read. */
     logReadable: boolean;
@@ -239,6 +242,32 @@ export interface ScriptedModeration {
     accounts: Set<string>;
   };
 }
+
+/** Two notices from the instance's notice page (#907): one with a notifier's email, one an intimate image report. */
+export const SCRIPTED_NOTICES: readonly ReceivedNotice[] = [
+  {
+    noticeId: 1,
+    receivedAt: 1_790_003_000,
+    kind: 'illegal_content',
+    explanation: 'The route of this room spells out a threat against a named person.',
+    items: ['route:0123456789abcdef0123456789abcdef'],
+    location: null,
+    notifierName: 'A. Notifier',
+    notifierEmail: 'notifier@example.com',
+    bonaFide: true,
+  },
+  {
+    noticeId: 2,
+    receivedAt: 1_790_004_000,
+    kind: 'intimate_image',
+    explanation: 'A picture of me in a room’s listing.',
+    items: [],
+    location: 'The Sunday group ride',
+    notifierName: null,
+    notifierEmail: 'me@example.com',
+    bonaFide: false,
+  },
+];
 
 /** This moderator's id on the scripted instance. */
 export const SCRIPTED_MODERATOR = 'moderator-1';
@@ -321,6 +350,7 @@ export function scriptedModeration(
     me: SCRIPTED_MODERATOR,
     registrations: [...queues.registrations],
     reports: [...queues.reports],
+    notices: options.empty === true ? [] : [...SCRIPTED_NOTICES],
     log: [...queues.log],
     logReadable: true,
     suspendedReadable: true,
@@ -402,6 +432,7 @@ export function scriptedModeration(
         me: held.me,
         registrations: [...held.registrations],
         reports: [...held.reports],
+        notices: held.notices === undefined ? undefined : [...held.notices],
         suspended: held.suspendedReadable ? pageFrom(suspendedRows(), undefined) : undefined,
         log: held.logReadable ? pageFrom(logRows(), undefined) : undefined,
       });

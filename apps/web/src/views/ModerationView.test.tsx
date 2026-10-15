@@ -32,6 +32,9 @@ import {
   MODERATION_STANDING_TEXT,
   ModerationView,
   MORE_UNREADABLE_TEXT,
+  INTIMATE_IMAGE_DEADLINE_TEXT,
+  NOTICES_RECEIPT_TEXT,
+  NOTICES_UNREADABLE_TEXT,
   REPORT_CONFLICT_TEXT,
   SUSPENDED_UNREADABLE_TEXT,
   suspendConfirmation,
@@ -652,5 +655,50 @@ describe('the log, a page at a time — #961', () => {
     expect(button(section('Suspended accounts'), 'Show more suspended accounts')).toBeDefined();
     const violations = auditAccessibility(document);
     expect(violations, formatViolations(violations)).toEqual([]);
+  });
+});
+
+describe('the notices — #907', () => {
+  it('lists each notice with the time it arrived, its items and the notifier’s address to reply to by hand', async () => {
+    await open(scriptedModeration());
+    const notices = section('Notices');
+    expect(text(notices)).toContain(NOTICES_RECEIPT_TEXT);
+    const first = item('Notice 1');
+    expect(text(first)).toContain('Received 2026-09-21 15:03 UTC.');
+    expect(text(first)).toContain('route:0123456789abcdef0123456789abcdef');
+    expect(text(first)).toContain('From A. Notifier');
+    const reply = first.querySelector<HTMLAnchorElement>('a[href^="mailto:"]');
+    expect(reply?.getAttribute('href')).toBe('mailto:notifier@example.com');
+    expect(text(first)).toContain('They stated in good faith');
+    expect(text(first)).not.toContain(INTIMATE_IMAGE_DEADLINE_TEXT);
+    const second = item('Notice 2');
+    expect(text(second)).toContain(INTIMATE_IMAGE_DEADLINE_TEXT);
+    expect(text(second)).toContain('Where, in their words: The Sunday group ride');
+    expect(text(second)).toContain('They gave no name');
+  });
+
+  it('says a notice with no email cannot be answered, and says so when the notices could not be read', async () => {
+    const scripted = scriptedModeration();
+    scripted.held.notices = [
+      {
+        noticeId: 3,
+        receivedAt: 1_790_005_000,
+        kind: 'illegal_content',
+        explanation: 'Why.',
+        items: [],
+        location: 'Somewhere',
+        notifierName: null,
+        notifierEmail: null,
+        bonaFide: false,
+      },
+    ];
+    await open(scripted);
+    expect(text(item('Notice 3'))).toContain('cannot be told what you decide');
+    expect(item('Notice 3').querySelector('a[href^="mailto:"]')).toBeNull();
+    mounted?.unmount();
+    scripted.held.notices = undefined;
+    await open(scripted);
+    expect(text(section('Notices'))).toContain(NOTICES_UNREADABLE_TEXT);
+    expect(text(section('Reports'))).toContain('Report');
   });
 });
