@@ -12,9 +12,10 @@ It has the same authority as the root file. Where the text below says "this file
 
 ### 4c. What CI runs, and what it deliberately does not
 
-⚠️ **Since [#1285](https://github.com/openzigs/onyourleft/issues/1285) `Repository rules` is three
-jobs side by side — the shards `checks`, `tests` and `browser` — and a fourth that carries the
-required name and fails unless all three succeeded.** A reviewer who remembers one job of
+⚠️ **Since [#1285](https://github.com/openzigs/onyourleft/issues/1285) `Repository rules` is
+shards side by side — `checks`, `tests` and, since [#1362](https://github.com/openzigs/onyourleft/issues/1362),
+the browser gate in two halves, `browser-1` and `browser-2` (§"Two browser shards — #1362") — and one
+more job that carries the required name and fails unless every shard succeeded.** A reviewer who remembers one job of
 twenty-odd minutes is reading the old file, and so is every "in this same job", "the job's stop"
 and "a second job could not block a merge" in the dated sections below: each was true when it was
 written and is kept as the record. §"Shards — #1285" is what is true now — which step runs where,
