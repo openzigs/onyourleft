@@ -1344,3 +1344,19 @@ commit than the one running.
 Repository-level security scanning — CodeQL default setup, secret scanning with push protection, and
 Dependabot alerts and security updates — is **already enabled on the repository** and needs no
 workflow step. Adding one would duplicate it.
+
+[`.github/workflows/roadmap.yml`](../../.github/workflows/roadmap.yml) — **`Roadmap board sync`**
+([#1348](https://github.com/openzigs/onyourleft/issues/1348)) — runs
+[`scripts/sync-roadmap.py`](../../scripts/sync-roadmap.py) at 04:41 UTC nightly and on
+`workflow_dispatch` (with a `dry-run` input), to keep the
+[roadmap board](https://github.com/orgs/openzigs/projects/1) in step with the issues. ⚠️ **It has
+no pull-request trigger of either kind, on purpose**: it mints a GitHub App token that can write
+every project in the org, from a private key held in the Environment `roadmap`, which only `main`
+may deploy to. It is not a required check. **Its tests run in the required check anyway**:
+`scripts/check-repo-rules.test.sh` runs `python3 -I scripts/sync-roadmap.test.py` as one of its
+cases, because that suite is already a step of `Checks, concurrently` and a new step would mean
+editing `rules.yml`. The script is standard-library Python, so the runner's `python3` is all it
+needs. Until `ROADMAP_APP_CLIENT_ID` is set the job skips, green, with a notice. What the script
+writes, the App's setup and the views are in [`docs/roadmap-board.md`](../roadmap-board.md).
+[#1201](https://github.com/openzigs/onyourleft/issues/1201) stays the written plan; the board
+mirrors it.
