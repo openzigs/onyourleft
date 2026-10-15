@@ -74,6 +74,7 @@ import {
   type WorldQualityState,
 } from './quality';
 import { REALISTIC_WORLD_LEFT_NOTICE, realisticWorldNotice } from './realistic-assets';
+import { readDraftReadingChoice } from './draft-preference';
 import { readRealisticWorldChoice } from './world-preference';
 import { createGradientSession, type GradientSession, type GradientSessionState } from './gradient';
 import {
@@ -96,10 +97,12 @@ import {
   acrossTheRoomsLine,
   heldOnTheLine,
   nextToFollow,
+  placeAcrossOf,
   RACE_NOTICE_LABEL,
   raceEvent,
   raceFactOf,
   raceNotice,
+  draftEvent,
   riderEvents,
   ROOM_LOST_SPOKEN,
   ROOM_NOTICE_LABEL,
@@ -1023,6 +1026,14 @@ export function GameView(props: GameViewProps): JSX.Element {
   /** The other riders the room's frames held at the last look (#784). */
   const ridersSeenRef = useRef<ReadonlySet<number> | undefined>(undefined);
   /**
+   * Whether the rider shows and hears their draft (#787,
+   * `draft-preference.ts`, on by default since 2026-10-15): read at the start
+   * of each ride, like the announcements.
+   */
+  const draftShownRef = useRef(false);
+  /** Whether the rider was last told they are in the room's draft (#787, `room-ride.ts` §`draftEvent`). */
+  const inDraftRef = useRef(false);
+  /**
    * The rider's own power over the race, on this device: summed watt-seconds
    * and seconds while it runs — shown beside their own line of the result and
    * nowhere else (ADR 0028's publication rule; #785).
@@ -1095,10 +1106,13 @@ export function GameView(props: GameViewProps): JSX.Element {
       // a race left before the room's order came — by the ROOM's own last
       // word on their distance, never this device's odometer (re-review R1,
       // ADR 0028 D-2: the room's position wins).
+      // #1364: and, for that rider, their place among the riders the room's
+      // newest standings have across the line — the room's word again.
       const race = raceFactOf(
         roomIdRef.current,
         roomRef.current?.race(),
         acrossTheRoomsLine(roomRef.current, course?.totalDistance),
+        placeAcrossOf(roomRef.current?.standings()),
       );
       if (race !== undefined) trainerPortRef.current?.roomRaceEnded?.(race);
     }
@@ -1206,6 +1220,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       announcerRef.current = INITIAL_ANNOUNCER;
       setAnnouncement('');
       announcementsRef.current = readAnnouncementPreference(deviceStorage());
+      draftShownRef.current = readDraftReadingChoice(deviceStorage());
       // #551: a link already lost when the ride starts is on the HUD's line,
       // and is not news — only a link that goes DURING this ride is said.
       sideLostRef.current = sideCameraLost(
@@ -1334,6 +1349,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       roomRecordAskedRef.current = false;
       raceSaidRef.current = undefined;
       ridersSeenRef.current = undefined;
+      inDraftRef.current = false;
       raceWattsRef.current = { wattSeconds: 0, seconds: 0 };
       setRaceOver(undefined);
       setStarting(undefined);
@@ -1755,6 +1771,15 @@ export function GameView(props: GameViewProps): JSX.Element {
         );
         ridersSeenRef.current = seen.seen;
         events.push(...seen.events);
+      }
+      // #787: into and out of the room's draft, from the HUD's own figure —
+      // only with the draft indicator on, and (not in `ALWAYS_SPOKEN`) only
+      // with announcements on. Nothing while the room is lost: its last frame
+      // is not a draft the rider is in now.
+      if (draftShownRef.current && room?.status().kind === 'joined') {
+        const drafted = draftEvent(inDraftRef.current, roomNow?.hud.draft);
+        inDraftRef.current = drafted.inDraft;
+        if (drafted.event !== undefined) events.push(drafted.event);
       }
       const side = sidePairingRef.current?.currentSideCamera()?.control.sideControlState();
       const sideLost = sideCameraLostEvent(sideLostRef.current, side);
@@ -2260,7 +2285,13 @@ export function GameView(props: GameViewProps): JSX.Element {
         // the room's standings (#1347, ADR 0051).
         {...(roomRef.current === undefined
           ? {}
-          : { room: roomFrameRef.current?.hud ?? { nearby: 0 } })}
+          : {
+              room: {
+                ...(roomFrameRef.current?.hud ?? { nearby: 0 }),
+                // #787: the draft field only when the rider's setting shows it.
+                draftShown: draftShownRef.current,
+              },
+            })}
         standings={roomFrameRef.current?.standings}
         onFollowNext={
           roomRef.current === undefined || (roomFrameRef.current?.remoteRiders.length ?? 0) === 0
