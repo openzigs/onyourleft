@@ -97,6 +97,7 @@ import {
   acrossTheRoomsLine,
   heldOnTheLine,
   nextToFollow,
+  placeAcrossOf,
   RACE_NOTICE_LABEL,
   raceEvent,
   raceFactOf,
@@ -1105,10 +1106,13 @@ export function GameView(props: GameViewProps): JSX.Element {
       // a race left before the room's order came — by the ROOM's own last
       // word on their distance, never this device's odometer (re-review R1,
       // ADR 0028 D-2: the room's position wins).
+      // #1364: and, for that rider, their place among the riders the room's
+      // newest standings have across the line — the room's word again.
       const race = raceFactOf(
         roomIdRef.current,
         roomRef.current?.race(),
         acrossTheRoomsLine(roomRef.current, course?.totalDistance),
+        placeAcrossOf(roomRef.current?.standings()),
       );
       if (race !== undefined) trainerPortRef.current?.roomRaceEnded?.(race);
     }
