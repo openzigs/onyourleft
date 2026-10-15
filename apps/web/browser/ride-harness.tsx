@@ -94,7 +94,8 @@ import {
 
 import { scriptedSidePairing } from '../src/camera/testing';
 import { roomPortOver } from '../src/net/room-port';
-import { ScriptedRoom } from '../src/net/testing';
+import { frameRider, ScriptedRoom, standingsRider } from '../src/net/testing';
+import { FLAG_COASTING, FLAG_PLAUSIBILITY } from '@onyourleft/protocol';
 import type { GamePort } from '../src/game/GameView';
 import type { GameTrainerPort } from '../src/game/trainer-port';
 import type { LapFigures } from '../src/recording/laps';
@@ -523,7 +524,16 @@ const PAUSED = new URLSearchParams(window.location.search).get('paused') === 'ye
  * use (`net/testing.ts`): welcomed as a race and sent no frame, so the race
  * waits for as long as the page is open.
  */
-const IN_A_RACE = new URLSearchParams(window.location.search).get('room') === 'race';
+const ROOM_QUERY = new URLSearchParams(window.location.search).get('room');
+/**
+ * `ride.html?room=standings` — #1347: the same race RUNNING, its room having
+ * named nine riders and sent a frame and its standings, so the HUD carries
+ * the race's standings panel at its widest: seven lines, the longest names a
+ * room admits beside realistic ones, a flag and a coaster among them.
+ * `ride.browser.spec.ts` §"#1347" measures it.
+ */
+const WITH_STANDINGS = ROOM_QUERY === 'standings';
+const IN_A_RACE = ROOM_QUERY === 'race' || WITH_STANDINGS;
 const RACE_ROOM = IN_A_RACE ? new ScriptedRoom() : undefined;
 const RACE_PORTS =
   RACE_ROOM === undefined
@@ -1121,7 +1131,44 @@ async function run(): Promise<void> {
     );
     RACE_ROOM.accept();
     RACE_ROOM.welcome(0, 'race');
-    await until('Start the race', () => labelled<HTMLButtonElement>('button', 'Start the race'));
+    if (WITH_STANDINGS) {
+      // #1347: nine riders, this one fifth; 32 scalars is the longest name a
+      // room admits (`@onyourleft/domain` §`MAXIMUM_DISPLAY_NAME_SCALARS`).
+      const names = [
+        'Me',
+        'Wilhelmina Vandersteen-Oduya Mbe',
+        'Ann',
+        'Bea Ng',
+        'Cai Rhys',
+        'Dafydd ap Gwilym-Llewellyn Jones',
+        'Eve',
+        'Femi Adeyemi',
+        'Gus',
+      ];
+      names.forEach((name, riderId) => {
+        RACE_ROOM.name(riderId, name);
+      });
+      // In the room's order: this rider (0) fifth.
+      const order = [1, 2, 3, 4, 0, 5, 6, 7, 8];
+      RACE_ROOM.frame(
+        1,
+        order.map((riderId, index) => frameRider(riderId, 400 - index * 15)),
+      );
+      RACE_ROOM.standings(
+        1,
+        order.map((riderId, index) =>
+          standingsRider(
+            riderId,
+            (index - 4) * 61.4,
+            riderId === 7 ? 0 : 3 + index / 10,
+            riderId === 2 ? FLAG_PLAUSIBILITY : riderId === 7 ? FLAG_COASTING : 0,
+          ),
+        ),
+      );
+      await until('the race standings', () => document.querySelector('.oyl-hud__standings'));
+    } else {
+      await until('Start the race', () => labelled<HTMLButtonElement>('button', 'Start the race'));
+    }
   }
   // The trainer line appears once the gradient session has written once, which
   // is a frame or two in. Waiting for it is what makes it part of every
