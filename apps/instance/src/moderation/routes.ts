@@ -48,10 +48,23 @@ function object(
 
 const reportSchema = object({
   reportId: integer,
-  reporterAthleteId: string,
+  /** `null` for a flag a room filed itself (#789). */
+  reporterAthleteId: nullableString,
   targetAthleteId: string,
   reason: string,
   createdAt: integer,
+  /** The room it came from, and the room's tick then (#789); `null` from outside a room. */
+  roomId: nullableString,
+  roomTick: nullableInteger,
+  flag: {
+    type: ['object', 'null'],
+    properties: {
+      durationSeconds: integer,
+      ceilingWattsPerKilogram: { type: 'number' },
+    },
+    required: ['durationSeconds', 'ceilingWattsPerKilogram'],
+    additionalProperties: false,
+  },
 });
 
 const logEntrySchema = object({
@@ -62,6 +75,8 @@ const logEntrySchema = object({
   reportId: nullableInteger,
   reason: string,
   at: integer,
+  /** The room the action was taken in (#789), or `null`. */
+  roomId: nullableString,
 });
 
 const actionResponse: Route['response'] = {
@@ -207,6 +222,9 @@ export const MODERATION_ROUTES: readonly Route[] = [
           targetAthleteId: report.targetAthleteId,
           reason: report.reason,
           createdAt: report.createdAt,
+          roomId: report.roomId,
+          roomTick: report.roomTick,
+          flag: report.flag,
         })),
       }),
   },
@@ -232,6 +250,33 @@ export const MODERATION_ROUTES: readonly Route[] = [
         ),
         (value) => json(value),
       ),
+  },
+  {
+    method: 'POST',
+    path: '/v1/moderation/rooms/{roomId}/athletes/{athleteId}/remove',
+    sealed: 'only',
+    operationId: 'removeFromRoom',
+    reaches: 'moderation',
+    summary:
+      'Remove an athlete from a room, any room, with a reason, optionally deciding a report (#789): their socket is closed if a worker holds the room, they are refused a ticket for it from then on, and the removal is written to the moderation log with the room.',
+    identity: true,
+    auth: 'session',
+    request: object({ reason: string, reportId: integer }, ['reason']),
+    errors: ['unauthenticated', 'validation_failed', 'not_found', 'moderation_not_applicable'],
+    response: actionResponse,
+    handle: async (context) => {
+      const roomId = context.params.roomId ?? '';
+      const athleteId = context.params.athleteId ?? '';
+      const removed = await moderationOf(context).removeFromRoom(
+        callerId(context),
+        'moderator',
+        roomId,
+        athleteId,
+        { reason: context.json.reason, reportId: context.json.reportId },
+      );
+      if (removed.ok) await context.probes?.removeFromRoom?.(roomId, athleteId);
+      return answer(removed, (value) => json(value));
+    },
   },
   athleteAction(
     'athletes/{athleteId}/suspend',
@@ -386,6 +431,7 @@ export const MODERATION_ROUTES: readonly Route[] = [
             reportId: entry.reportId,
             reason: entry.reason,
             at: entry.at,
+            roomId: entry.roomId,
           })),
           next: page.next,
         }),

@@ -14,6 +14,7 @@
 import { errorResponse } from '../errors.ts';
 import { json, type Route, type RouteContext, type Schema } from '../route-kit.ts';
 import type { Outcome } from '../auth/identity.ts';
+import { ROOM_REPORT_REASONS, type ModerationResult } from '../moderation/moderation.ts';
 import type { Rooms } from './rooms.ts';
 
 function roomsOf(context: RouteContext): Rooms {
@@ -48,6 +49,32 @@ function object(
   required: readonly string[] = Object.keys(properties),
 ): Schema {
   return { type: 'object', properties, required, additionalProperties: false };
+}
+
+function moderationAnswer<T>(result: ModerationResult<T>, ok: (value: T) => Response): Response {
+  if (result.ok) return ok(result.value);
+  return errorResponse(result.code, result.fields === undefined ? {} : { fields: result.fields });
+}
+
+/** A seat number as a room's frames carry it. */
+function riderIdOf(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+}
+
+/**
+ * The room's own answer to who sits in `riderId`'s seat, for a caller who
+ * may be told (#789): `undefined` — `not_found` — for a room they are not in,
+ * one no worker holds, or an empty seat.
+ */
+async function seatFor(context: RouteContext, riderId: unknown) {
+  const roomId = context.params.roomId ?? '';
+  const standing = await roomsOf(context).standing(callerOf(context), roomId);
+  const seat = riderIdOf(riderId);
+  if (standing === undefined || seat === undefined || context.probes?.seatOf === undefined) {
+    return undefined;
+  }
+  const found = await context.probes.seatOf(roomId, seat);
+  return found === undefined ? undefined : { roomId, standing, seat: found };
 }
 
 const EXEMPT_ROOM =
@@ -159,5 +186,81 @@ export const ROOM_ROUTES: readonly Route[] = [
     },
     handle: async (context) =>
       answer(await roomsOf(context).results(callerOf(context), context.params.roomId ?? '')),
+  },
+  {
+    method: 'POST',
+    path: '/v1/rooms/{roomId}/reports',
+    operationId: 'reportInRoom',
+    reaches: {
+      exempt:
+        'names a SEAT in a room the caller is in, never an athlete; the room says who sits there, and the report goes to the moderators, never to the rider (#789)',
+    },
+    summary:
+      'Report another rider from inside a room, by their seat, with one of a short fixed list of reasons (#789). Filed for the moderators with the room and its tick; never a screenshot, never a position. Counted against the same hourly allowance as any report.',
+    identity: true,
+    rooms: true,
+    auth: 'session',
+    request: object({
+      riderId: { type: 'integer' },
+      reason: { type: 'string', enum: Object.keys(ROOM_REPORT_REASONS) },
+    }),
+    errors: ['unauthenticated', 'validation_failed', 'not_found', 'rate_limited'],
+    response: { contentType: 'none' },
+    handle: async (context) => {
+      const found = await seatFor(context, context.json.riderId);
+      if (found === undefined) return errorResponse('not_found');
+      const moderation = context.identity?.moderation;
+      if (moderation === undefined) return errorResponse('unavailable');
+      return moderationAnswer(
+        await moderation.reportInRoom(
+          callerOf(context).athleteId,
+          found.roomId,
+          found.seat,
+          context.json.reason,
+        ),
+        () => new Response(null, { status: 204 }),
+      );
+    },
+  },
+  {
+    method: 'POST',
+    path: '/v1/rooms/{roomId}/remove',
+    operationId: 'removeFromMyRoom',
+    reaches: {
+      exempt:
+        'names a SEAT in the caller’s OWN private room, never an athlete; only the room’s host may, and the room says who sits there (#789)',
+    },
+    summary:
+      'The host of a private room removes a rider from it, by their seat, with a reason (#789): their socket is closed, they are refused a ticket for it from then on, and the removal is written to the moderation log. `not_found` for anybody but the room’s host.',
+    identity: true,
+    rooms: true,
+    auth: 'session',
+    request: object({ riderId: { type: 'integer' }, reason: string }),
+    errors: ['unauthenticated', 'validation_failed', 'not_found', 'moderation_not_applicable'],
+    response: {
+      contentType: 'application/json',
+      schema: object({ logId: { type: 'integer' } }),
+    },
+    handle: async (context) => {
+      const found = await seatFor(context, context.json.riderId);
+      if (found === undefined || found.standing !== 'host') return errorResponse('not_found');
+      const caller = callerOf(context);
+      if (found.seat.athleteId === caller.athleteId) {
+        return errorResponse('validation_failed', {
+          fields: [{ field: 'riderId', problem: 'must be another rider' }],
+        });
+      }
+      const moderation = context.identity?.moderation;
+      if (moderation === undefined) return errorResponse('unavailable');
+      const removed = await moderation.removeFromRoom(
+        caller.athleteId,
+        'host',
+        found.roomId,
+        found.seat.athleteId,
+        { reason: context.json.reason },
+      );
+      if (removed.ok) await context.probes?.removeFromRoom?.(found.roomId, found.seat.athleteId);
+      return moderationAnswer(removed, (value) => json(value));
+    },
   },
 ];

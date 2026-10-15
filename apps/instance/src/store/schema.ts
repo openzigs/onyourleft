@@ -276,16 +276,30 @@ export interface BlockTable {
   readonly created_at: number;
 }
 
-/** A report (#83): the reporter's row. */
+/** A report (#83): the reporter's row, or the room's own for a flag (#789, migration 0026). */
 export interface ReportTable {
   readonly id: Generated<number>;
-  readonly athlete_id: string;
+  /** The reporter; `null` for a flag a room filed (#789). */
+  readonly athlete_id: string | null;
   readonly target_athlete_id: string;
   readonly reason: string;
   readonly created_at: number;
   readonly closed_at: number | null;
   readonly closed_by_athlete_id: string | null;
   readonly outcome: string | null;
+  /** The room it was made from, and the room's tick then (#789). */
+  readonly room_id: string | null;
+  readonly room_tick: number | null;
+  /** A plausibility flag's breached ceiling (#789): its duration and W/kg. */
+  readonly flag_duration_seconds: number | null;
+  readonly flag_ceiling_watts_per_kilogram: number | null;
+}
+
+/** A rider removed from a room by its host or a moderator (#789): the removed rider's row. */
+export interface RoomRemovalTable {
+  readonly room_id: string;
+  readonly athlete_id: string;
+  readonly removed_at: number;
 }
 
 /** One moderator action (#83). Append-only: the schema refuses an UPDATE or a DELETE. */
@@ -297,6 +311,8 @@ export interface ModerationLogTable {
   readonly report_id: number | null;
   readonly reason: string;
   readonly at: number;
+  /** The room the action was taken in (#789). */
+  readonly room_id: Generated<string | null>;
 }
 
 /** A single-use invitation a moderator minted, as its SHA-256 (#775). */
@@ -558,6 +574,7 @@ export interface InstanceDatabase {
   readonly block: BlockTable;
   readonly report: ReportTable;
   readonly moderation_log: ModerationLogTable;
+  readonly room_removal: RoomRemovalTable;
   readonly invite_code: InviteCodeTable;
   readonly sync_item: SyncItemTable;
   readonly history_source: HistorySourceTable;

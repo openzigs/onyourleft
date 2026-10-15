@@ -449,6 +449,19 @@ export function scriptedModeration(
       }
       return Promise.resolve(outcome);
     },
+    removeFromRoom: (roomId, athleteId, reason, reportId) => {
+      calls.push(
+        `remove ${athleteId} from ${roomId}${reportId === undefined ? '' : ` for ${String(reportId)}`}`,
+      );
+      const id = athleteId.trim();
+      if (id === held.me) return refusedAndLogged('remove_from_room', id, reportId ?? null, reason);
+      if (!held.accounts.has(id)) return Promise.resolve(nothing);
+      const outcome = logged('remove_from_room', id, reportId ?? null, reason);
+      if (outcome.kind === 'done' && reportId !== undefined) {
+        held.reports = held.reports.filter((each) => each.reportId !== reportId);
+      }
+      return Promise.resolve(outcome);
+    },
     actOnAccount: (athleteId, action, reason, reportId) => {
       calls.push(
         `${action} ${athleteId}${reportId === undefined ? '' : ` for ${String(reportId)}`}`,

@@ -95,6 +95,13 @@ export interface InstanceProbes {
    * rule #785 decided (`room/node/room-host.ts` §`start`).
    */
   readonly startRoom?: (roomId: string, athleteId: string) => Promise<'started' | 'not_found'>;
+  /** Who sits in a seat of a room a worker holds, and its tick (#789), or `undefined`. */
+  readonly seatOf?: (
+    roomId: string,
+    riderId: number,
+  ) => Promise<{ readonly athleteId: string; readonly tick: number } | undefined>;
+  /** Take a rider out of a room a worker holds, for its life (#789). `false` when none holds it. */
+  readonly removeFromRoom?: (roomId: string, athleteId: string) => Promise<boolean>;
 }
 
 /** What a route is handed. */

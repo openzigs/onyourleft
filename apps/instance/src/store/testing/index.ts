@@ -424,6 +424,16 @@ export async function seedWorld(store: SqlStore): Promise<void> {
       reason: `Report by ${athlete}`,
       createdAt: 1_790_000_500,
     });
+    // Migration 0026's (#789): each removed from a room by the athlete after them.
+    await store.moderate({
+      action: 'remove_from_room',
+      actorAthleteId: next,
+      targetAthleteId: athlete,
+      reportId: null,
+      reason: 'Seeded',
+      at: 1_790_000_550,
+      roomId: `room-of-${athlete}`,
+    });
     // Migration 0020's (#1095): a job that ran, with a progress event and its result.
     await seedAnalysisJob(store, athlete);
     // Migration 0021's (#1199): the rider's own hosted key, and their consent naming its origin.

@@ -111,6 +111,7 @@ const FIXTURE_ROWS: Readonly<Record<string, string>> = {
   // The columns named, so migration 0023's `reasoning_tokens` is NULL (#1268).
   athlete_hosted_key: `INSERT INTO athlete_hosted_key (athlete_id, url, model, iv, ciphertext, set_at) VALUES ('a', 'https://models.example/v1', 'm', x'000102030405060708090a0b', x'ffee', 25)`,
   athlete_hosted_consent: `INSERT INTO athlete_hosted_consent VALUES ('a', 'https://models.example', 26)`,
+  room_removal: `INSERT INTO room_removal VALUES ('room', 'a', 23)`,
   moderation_log: `INSERT INTO moderation_log (id, actor_athlete_id, action, target_athlete_id, reason, at) VALUES (1, 'a', 'suspend', 'b', 'Why', 12)`,
 };
 

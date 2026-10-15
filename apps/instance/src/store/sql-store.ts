@@ -484,16 +484,30 @@ export interface Block {
   readonly createdAt: number;
 }
 
-/** A report (#83): its reporter is `athleteId`. */
+/**
+ * A report (#83): its reporter is `athleteId` — or nobody, for a plausibility
+ * flag a room filed itself (#789, ADR 0028 D-2 rule 3).
+ */
 export interface Report {
   readonly id: number;
-  readonly athleteId: string;
+  readonly athleteId: string | null;
   readonly targetAthleteId: string;
   readonly reason: string;
   readonly createdAt: number;
   readonly closedAt: number | null;
   readonly closedByAthleteId: string | null;
   readonly outcome: string | null;
+  /** The room it came from, and the room's tick then (#789); `null` from outside a room. */
+  readonly roomId: string | null;
+  readonly roomTick: number | null;
+  /** A flag's breached ceiling (#789): never a power trace. `null` for a rider's report. */
+  readonly flag: RoomFlag | null;
+}
+
+/** A plausibility ceiling a rider breached in a room (#789): which, by its duration and W/kg. */
+export interface RoomFlag {
+  readonly durationSeconds: number;
+  readonly ceilingWattsPerKilogram: number;
 }
 
 /** What a moderator may do (#83, #775). */
@@ -510,6 +524,10 @@ export type ModerationActionKind =
   | 'dismiss_own_report'
   | 'approve_registration'
   | 'refuse_registration'
+  /** A moderator removed a rider from a room (#789): `roomId` names it. */
+  | 'remove_from_room'
+  /** A private room's host removed a rider from it (#789): not a moderator's action, logged as one. */
+  | 'host_remove_from_room'
   /**
    * The instance's, not a moderator's: a pending account whose key the
    * operator named as a moderator's signed in, and was activated, because
@@ -526,6 +544,8 @@ export interface ModerationAction {
   readonly reportId: number | null;
   readonly reason: string;
   readonly at: number;
+  /** The room the action is taken in (#789): required by the two removals, `null` otherwise. */
+  readonly roomId?: string | null;
 }
 
 /**
@@ -537,9 +557,11 @@ export type LoggedActionKind =
   ModerationActionKind | 'mint_invite' | `refused_${ModerationActionKind}`;
 
 /** One entry of the append-only moderation log. */
-export interface ModerationLogEntry extends Omit<ModerationAction, 'action'> {
+export interface ModerationLogEntry extends Omit<ModerationAction, 'action' | 'roomId'> {
   readonly id: number;
   readonly action: LoggedActionKind;
+  /** The room the action was taken in (#789), or `null`. */
+  readonly roomId: string | null;
 }
 
 /**
@@ -1348,6 +1370,11 @@ export interface SqlStore {
   putReport(
     report: Pick<Report, 'athleteId' | 'targetAthleteId' | 'reason' | 'createdAt'> & {
       readonly closedAs?: string;
+      /** The room it came from and its tick (#789). */
+      readonly roomId?: string;
+      readonly roomTick?: number;
+      /** A flag the room filed (#789): `athleteId` is then `null`. */
+      readonly flag?: RoomFlag;
     },
   ): Promise<number>;
   /** The reports this athlete made. */
@@ -1356,6 +1383,14 @@ export interface SqlStore {
   listOpenReports(): Promise<readonly Report[]>;
   /** One report by id, open or closed (#899: a dismissal reads the one it decides). */
   getReport(reportId: number): Promise<Report | undefined>;
+  /** Whether this athlete was removed from this room (#789): their ticket for it is refused. */
+  isRemovedFromRoom(roomId: string, athleteId: string): Promise<boolean>;
+  /**
+   * The athletes who block this one (#789): with {@link listBlocks}, everybody
+   * a room must not name to them, nor them to. Other athletes' rows, read
+   * only to hide names in a room the two share — never answered to anybody.
+   */
+  listBlockedBy(athleteId: string): Promise<readonly string[]>;
 
   /**
    * Apply a moderator action and append it to the log, in ONE transaction:
@@ -1617,6 +1652,15 @@ const reportFrom = (row: Selectable<ReportTable>): Report => ({
   closedAt: row.closed_at,
   closedByAthleteId: row.closed_by_athlete_id,
   outcome: row.outcome,
+  roomId: row.room_id,
+  roomTick: row.room_tick,
+  flag:
+    row.flag_duration_seconds === null || row.flag_ceiling_watts_per_kilogram === null
+      ? null
+      : {
+          durationSeconds: row.flag_duration_seconds,
+          ceilingWattsPerKilogram: row.flag_ceiling_watts_per_kilogram,
+        },
 });
 
 const moderationLogFrom = (row: Selectable<ModerationLogTable>): ModerationLogEntry => ({
@@ -1627,6 +1671,7 @@ const moderationLogFrom = (row: Selectable<ModerationLogTable>): ModerationLogEn
   reportId: row.report_id,
   reason: row.reason,
   at: row.at,
+  roomId: row.room_id,
 });
 
 const deviceKeyFrom = (row: Selectable<DeviceKeyTable>): DeviceKey => ({
@@ -2141,6 +2186,17 @@ async function applyToAthlete(
         .where('athlete_id', '=', target.id)
         .execute();
       return true;
+    case 'remove_from_room':
+    case 'host_remove_from_room': {
+      // A removal names its room; one already made changes nothing (#789).
+      if (action.roomId === undefined || action.roomId === null) return false;
+      const removed = await trx
+        .insertInto('room_removal')
+        .values({ room_id: action.roomId, athlete_id: target.id, removed_at: at })
+        .onConflict((conflict) => conflict.columns(['room_id', 'athlete_id']).doNothing())
+        .executeTakeFirst();
+      return (removed.numInsertedOrUpdatedRows ?? 0n) > 0n;
+    }
     case 'dismiss_report':
     case 'dismiss_own_report':
       return true;
@@ -3798,6 +3854,10 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
             closed_at: report.closedAs === undefined ? null : report.createdAt,
             closed_by_athlete_id: null,
             outcome: report.closedAs ?? null,
+            room_id: report.roomId ?? null,
+            room_tick: report.roomTick ?? null,
+            flag_duration_seconds: report.flag?.durationSeconds ?? null,
+            flag_ceiling_watts_per_kilogram: report.flag?.ceilingWattsPerKilogram ?? null,
           })
           .returning('id')
           .executeTakeFirstOrThrow();
@@ -3814,6 +3874,29 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
             .orderBy('id')
             .execute()
         ).map(reportFrom),
+      ),
+
+    isRemovedFromRoom: (roomId, athleteId) =>
+      exclusive(async () => {
+        const row = await db
+          .selectFrom('room_removal')
+          .select('athlete_id')
+          .where('room_id', '=', roomId)
+          .where('athlete_id', '=', athleteId)
+          .executeTakeFirst();
+        return row !== undefined;
+      }),
+
+    listBlockedBy: (athleteId) =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('block')
+            .select('athlete_id')
+            .where('blocked_athlete_id', '=', athleteId)
+            .orderBy('athlete_id')
+            .execute()
+        ).map((row) => row.athlete_id),
       ),
 
     getReport: (reportId) =>
@@ -3889,6 +3972,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
               report_id: action.reportId,
               reason: action.reason,
               at: action.at,
+              room_id: action.roomId ?? null,
             })
             .returning('id')
             .executeTakeFirstOrThrow();
@@ -3907,6 +3991,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
             report_id: action.reportId,
             reason: action.reason,
             at: action.at,
+            room_id: action.roomId ?? null,
           })
           .returning('id')
           .executeTakeFirstOrThrow();

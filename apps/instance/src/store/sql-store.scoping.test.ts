@@ -176,7 +176,9 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   },
   listReports: {
     probe: async (store, athleteId) =>
-      (await store.listReports(athleteId)).map((report) => ({ athleteId: report.athleteId })),
+      (await store.listReports(athleteId)).map((report) => ({
+        athleteId: report.athleteId ?? 'nobody',
+      })),
   },
 
   findSession: {
@@ -303,6 +305,14 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   getReport: {
     notAScopedRead:
       'one report by id, for the moderator deciding it; reached only by `dismiss` (#899)',
+  },
+  isRemovedFromRoom: {
+    notAScopedRead:
+      'a yes or no about the CALLER’s own removal from a room, asked when they ask for a ticket (#789)',
+  },
+  listBlockedBy: {
+    notAScopedRead:
+      'who blocks this athlete, read only to keep names apart in a room the two share; answered to nobody (#789)',
   },
   listModerationLog: { notAScopedRead: 'the moderators’ record: every action (#83)' },
   listModerationLogPage: {

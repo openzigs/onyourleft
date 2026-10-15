@@ -25,9 +25,9 @@ afterEach(async () => {
   harness = undefined;
 });
 
-/** The log, less the invitations `seedWorld` mints (#775). */
+/** The log, less the invitations (#775) and room removals (#789) `seedWorld` makes. */
 const actions = (entries: readonly { action: string }[]) =>
-  entries.filter((entry) => entry.action !== 'mint_invite');
+  entries.filter((entry) => entry.action !== 'mint_invite' && entry.action !== 'remove_from_room');
 
 async function seeded(): Promise<StoreHarness> {
   harness = await createStoreHarness();
@@ -58,7 +58,7 @@ describe('the moderation log (#83)', () => {
       database.close();
     }
     expect(actions(await h.read((store) => store.listModerationLog()))).toEqual([
-      { ...suspendB, id: expect.any(Number) as number },
+      { ...suspendB, id: expect.any(Number) as number, roomId: null },
     ]);
   });
 

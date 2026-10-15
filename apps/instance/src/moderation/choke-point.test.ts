@@ -109,6 +109,14 @@ const EXEMPT: Readonly<
     heldElsewhere:
       'names a route by its digest, never an athlete; every candidate rider is asked of the choke point itself (`canSee`) inside the read, and one the caller may not see is passed over (sync/race-ghost.test.ts)',
   },
+  reportInRoom: {
+    heldElsewhere:
+      'names a seat in a room the caller is a member of; the athlete in it is the room’s answer, and the report reaches the moderators, never that athlete (#789, rooms/room-moderation.test.ts)',
+  },
+  removeFromMyRoom: {
+    heldElsewhere:
+      'only the host of a private room, for a seat in their own room; the athlete in it is the room’s answer, and the removal is logged (#789, rooms/room-moderation.test.ts)',
+  },
   getRoomResults: {
     heldElsewhere:
       'a race’s result for its riders only; every other rider in it is named through the choke point itself (`canSee`), and one the caller may not see is “a rider” with no name (rooms/rooms.test.ts)',
@@ -196,6 +204,8 @@ const NOT_AN_ATHLETE_FIELD: Readonly<Record<string, string>> = {
   grades: 'a room’s route gradients',
   gpx: 'the creator’s own route for a room',
   code: 'a room’s code; its members are whoever holds it (ADR 0028 D-6.3)',
+  riderId:
+    'a SEAT in a room the caller is in (#789); the room itself says who sits there, and the report or removal goes through the moderators’ log',
 };
 
 const bodyFields = (route: Route): string[] =>

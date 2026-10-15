@@ -206,7 +206,8 @@ function requestFor(route: PhaseOneRoute, f: Fixture): { path: string; body?: un
     .replace('{kind}', 'note')
     .replace('{key}', 'n1')
     .replace('{jobId}', 'job-1')
-    .replace('{route}', 'a'.repeat(64));
+    .replace('{route}', 'a'.repeat(64))
+    .replace('{roomId}', 'room-1');
   const reason = { reason: 'Checked against the rules' };
   const bodies: Record<string, unknown> = {
     'POST /v1/auth/link-codes': {},

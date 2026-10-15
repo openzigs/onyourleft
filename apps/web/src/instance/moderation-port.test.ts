@@ -56,6 +56,10 @@ interface ModerationInstance {
     extra?: Record<string, unknown>,
   ): Promise<{ status: number; body: Record<string, unknown> }>;
   close(): Promise<void>;
+  /** A second connection to the instance's file (#789: a room's flag is written straight in). */
+  freshRead<T>(
+    read: (store: { putReport(report: Record<string, unknown>): Promise<number> }) => Promise<T>,
+  ): Promise<T>;
 }
 
 interface IdentityTesting {
@@ -473,6 +477,48 @@ describe('reports, suspending and hiding — #83, #905, #955', () => {
       action: 'dismiss_own_report',
       actorAthleteId: me,
       targetAthleteId: me,
+      reportId: report?.reportId,
+    });
+  });
+
+  it('reads a room’s flag from the queue and removes its rider from the room, which closes it (#789)', async () => {
+    const { world, moderator, rider } = await moderatedWorld();
+    const dafydd = await rider('Dafydd');
+    await moderator.decideRegistration(dafydd.athleteId, 'approve', 'ok');
+    await world.freshRead((store) =>
+      store.putReport({
+        athleteId: null,
+        targetAthleteId: dafydd.athleteId,
+        reason: 'In a room: a plausibility flag, over 18 W/kg for 5 s',
+        createdAt: 1_790_000_000,
+        roomId: 'room-1',
+        roomTick: 12,
+        flag: { durationSeconds: 5, ceilingWattsPerKilogram: 18 },
+      }),
+    );
+    const read = asModerator(await moderator.read());
+    expect(read.reports).toEqual([
+      expect.objectContaining({
+        reporterAthleteId: null,
+        targetAthleteId: dafydd.athleteId,
+        room: { roomId: 'room-1', tick: 12 },
+        flag: { durationSeconds: 5, ceilingWattsPerKilogram: 18 },
+      }),
+    ]);
+    const [report] = read.reports;
+    expect(
+      await moderator.removeFromRoom(
+        'room-1',
+        dafydd.athleteId,
+        'Over the ceiling.',
+        report?.reportId,
+      ),
+    ).toEqual({ kind: 'done' });
+    const after = asModerator(await moderator.read());
+    expect(after.reports).toEqual([]);
+    expect(after.log?.items[0]).toMatchObject({
+      action: 'remove_from_room',
+      targetAthleteId: dafydd.athleteId,
       reportId: report?.reportId,
     });
   });

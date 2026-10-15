@@ -71,6 +71,7 @@ import type {
   ModerationActionKind,
   ModerationLogEntry,
   Report,
+  RoomFlag,
   SqlStore,
 } from '../store/sql-store.ts';
 
@@ -118,8 +119,36 @@ export type ModerationResult<T> =
  */
 export type AthleteAction = Exclude<
   ModerationActionKind,
-  'dismiss_report' | 'dismiss_own_report' | 'activate_moderator_key'
+  | 'dismiss_report'
+  | 'dismiss_own_report'
+  | 'activate_moderator_key'
+  | 'remove_from_room'
+  | 'host_remove_from_room'
 >;
+
+/**
+ * The short fixed list a rider reports another from inside a ride (#789), and
+ * the reason each is stored as. A list, not free text: chosen one-handed,
+ * without stopping, and nothing a stranger typed reaches the queue.
+ */
+export const ROOM_REPORT_REASONS = {
+  'display-name': 'In a room: an offensive display name',
+  cheating: 'In a room: cheating, or riding that cannot be real',
+  other: 'In a room: something else about how they rode',
+} as const;
+
+export type RoomReportReason = keyof typeof ROOM_REPORT_REASONS;
+
+/** Who sits in a room's seat, and the room's tick (#789): the room's own answer. */
+export interface SeatInRoom {
+  readonly athleteId: string;
+  readonly tick: number;
+}
+
+/** The reason a flag a room filed is stored as (#789): the ceiling, never a power trace. */
+export function flagReason(flag: RoomFlag): string {
+  return `In a room: a plausibility flag, over ${String(flag.ceilingWattsPerKilogram)} W/kg for ${String(flag.durationSeconds)} s`;
+}
 
 /** One page of a moderators' list (#961), in `pagination.ts`'s wire form. */
 export interface ModerationPage<T> {
@@ -147,6 +176,31 @@ export interface Moderation {
   unblock(athleteId: string, target: string): Promise<void>;
   blocks(athleteId: string): Promise<readonly string[]>;
   report(athleteId: string, target: unknown, reason: unknown): Promise<ModerationResult<null>>;
+  /**
+   * A report from inside a room (#789): the reporter names a SEAT, the room
+   * answered who sits in it and its tick, and the reason is one of
+   * {@link ROOM_REPORT_REASONS}. Counted against the same hourly allowance.
+   */
+  reportInRoom(
+    athleteId: string,
+    roomId: string,
+    seat: SeatInRoom,
+    reason: unknown,
+  ): Promise<ModerationResult<null>>;
+  /** A plausibility flag a room raised, filed as a report nobody made (#789). */
+  fileFlag(roomId: string, athleteId: string, flag: RoomFlag, tick: number): Promise<void>;
+  /**
+   * Remove `target` from a room for its life, logged (#789): by a moderator,
+   * from any room; by a private room's host, from theirs (the route checks
+   * which). A moderator is not removed, as nobody moderates a moderator.
+   */
+  removeFromRoom(
+    actorId: string,
+    as: 'moderator' | 'host',
+    roomId: string,
+    target: string,
+    fields: { readonly reason?: unknown; readonly reportId?: unknown },
+  ): Promise<ModerationResult<{ logId: number }>>;
 
   openReports(): Promise<readonly Report[]>;
   /** The approval queue (#775): every athlete awaiting a moderator's decision. */
@@ -316,6 +370,88 @@ export function createModeration(options: ModerationOptions): Moderation {
         ...(exists ? {} : { closedAs: NO_SUCH_ATHLETE_OUTCOME }),
       });
       return { ok: true, value: null };
+    },
+
+    async reportInRoom(athleteId, roomId, seat, reason) {
+      if (typeof reason !== 'string' || !Object.hasOwn(ROOM_REPORT_REASONS, reason)) {
+        return refuse('validation_failed', [
+          {
+            field: 'reason',
+            problem: `must be one of ${Object.keys(ROOM_REPORT_REASONS).join(', ')}`,
+          },
+        ]);
+      }
+      if (seat.athleteId === athleteId) {
+        return refuse('validation_failed', [
+          { field: 'riderId', problem: 'must be another rider' },
+        ]);
+      }
+      const at = seconds();
+      const recent = (await store.listReports(athleteId)).filter(
+        (each) => each.createdAt > at - limits.reportWindowSeconds,
+      );
+      if (recent.length >= limits.reportsPerWindow) return refuse('rate_limited');
+      await store.putReport({
+        athleteId,
+        targetAthleteId: seat.athleteId,
+        reason: ROOM_REPORT_REASONS[reason as RoomReportReason],
+        createdAt: at,
+        roomId,
+        roomTick: seat.tick,
+      });
+      return { ok: true, value: null };
+    },
+
+    async fileFlag(roomId, athleteId, flag, tick) {
+      await store.putReport({
+        athleteId: null,
+        targetAthleteId: athleteId,
+        reason: flagReason(flag),
+        createdAt: seconds(),
+        roomId,
+        roomTick: tick,
+        flag,
+      });
+    },
+
+    async removeFromRoom(actorId, as, roomId, target, fields) {
+      const checked = checkReason(fields.reason);
+      if (!checked.ok) {
+        return refuse('validation_failed', [{ field: 'reason', problem: checked.problem }]);
+      }
+      let reportId: number | null = null;
+      if (fields.reportId !== undefined) {
+        if (!Number.isSafeInteger(fields.reportId) || (fields.reportId as number) < 1) {
+          return refuse('validation_failed', [
+            { field: 'reportId', problem: 'must be a report’s id' },
+          ]);
+        }
+        reportId = fields.reportId as number;
+      }
+      const action = as === 'moderator' ? 'remove_from_room' : 'host_remove_from_room';
+      if ((await roleOf(target)) !== undefined) {
+        await store.logRefusedAction({
+          action,
+          actorAthleteId: actorId,
+          targetAthleteId: target,
+          reportId,
+          reason: checked.reason,
+          at: seconds(),
+          roomId,
+        });
+        return refuse('moderation_not_applicable');
+      }
+      return logged(
+        await store.moderate({
+          action,
+          actorAthleteId: actorId,
+          targetAthleteId: target,
+          reportId,
+          reason: checked.reason,
+          at: seconds(),
+          roomId,
+        }),
+      );
     },
 
     openReports: () => store.listOpenReports(),
