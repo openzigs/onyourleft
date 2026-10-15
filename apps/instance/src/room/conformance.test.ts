@@ -79,6 +79,34 @@ describe('the script itself — what the reference says happens', () => {
   });
 });
 
+describe('the script’s race standings — #1347, held by every adapter below', () => {
+  it('names both riders to both, and sends each a standings after every frame, gaps to them', () => {
+    for (const label of ['ann', 'bea']) {
+      const messages = decoded(reference, label).flatMap((m) =>
+        'ok' in m && m.ok ? [m.message] : [],
+      );
+      // Ann is named to herself, then told Bea's name as Bea is seated; Bea is told both.
+      expect(messages.filter((m) => m.type === 'name')).toEqual([
+        { type: 'name', riderId: 0, displayName: 'Ann' },
+        { type: 'name', riderId: 1, displayName: 'Bea' },
+      ]);
+      const frames = messages.filter((m) => m.type === 'frame').length;
+      const standings = messages.filter((m) => m.type === 'standings');
+      expect(standings.length).toBe(frames);
+      for (const each of standings) {
+        const own = each.riders.find((r) => r.riderId === (label === 'ann' ? 0 : 1));
+        expect(own?.gapDeciseconds).toBe(0);
+      }
+    }
+    // Bea, back on a new socket, is named the field again.
+    expect(
+      decoded(reference, 'bea-again')
+        .flatMap((m) => ('ok' in m && m.ok && m.message.type === 'name' ? [m.message] : []))
+        .map((m) => m.riderId),
+    ).toEqual([0, 1]);
+  });
+});
+
 function holdsToTheReference(make: () => RoomUnderTest): void {
   it(`${make().name} sends every socket exactly what the reference does`, async () => {
     const room = make();

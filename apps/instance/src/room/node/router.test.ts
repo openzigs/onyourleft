@@ -235,7 +235,7 @@ describe('what is refused before any room state changes — #780 criterion 1', (
       admit: (_roomId, ticket) => {
         if (ticket !== 'good' || spent.has(ticket)) return undefined;
         spent.add(ticket);
-        return { athleteId: 'ann', declaredMassKilograms: 70 };
+        return { athleteId: 'ann', declaredMassKilograms: 70, displayName: 'Ann' };
       },
     });
     const noTicket = await join('gate', undefined);

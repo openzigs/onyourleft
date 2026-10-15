@@ -80,6 +80,13 @@ afterEach(() => {
  * settle resolves the store reads and the second resolves the dynamic import
  * and the render it unblocks. One settle leaves every `<svg>` assertion reading
  * the pre-chart render, which looks exactly like a chart that does not work.
+ *
+ * ⚠️ **And the chart's module is loaded first** (#1311). The second settle is
+ * one macrotask, and the file's first chart is a module transform away: on a
+ * slow runner the transform outlasted it and #1054's case read no trace (run
+ * 38347793411, attempt 1). Imported here, the view's own `import()` finds it
+ * already evaluated, so what the settles wait for no longer depends on the
+ * runner.
  */
 interface MapOptions {
   /** The engine the view is given, or `undefined` for none. */
@@ -96,6 +103,7 @@ async function open(
   id: string = RIDE,
   options: MapOptions = {},
 ): Promise<Mounted> {
+  await import('../detail/TraceChart');
   const loader: (() => Promise<MapPort>) | undefined =
     options.map === undefined
       ? undefined

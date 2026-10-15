@@ -50,6 +50,7 @@ function connection(
     others: () => others,
     race: () => ({ kind: 'not-a-race' }),
     own: () => own,
+    standings: () => undefined,
     leave: () => undefined,
   };
 }
@@ -156,6 +157,38 @@ describe('one frame of a room ride — #782, #783', () => {
     expect(frame.hud.chosen?.label).toBe('Rider 3');
     roomFrame(connection([rider(1, 20)]), memory, simulation(), 0);
     expect(memory.following).toBeUndefined();
+  });
+
+  it('calls the chosen rider by the name a race’s room sent, and by a seat where it sent none — #1347', () => {
+    const memory = roomRideState();
+    memory.following = 2;
+    const inARace: RoomConnection = {
+      ...connection([rider(1, 20), rider(2, 40)]),
+      standings: () => ({
+        tick: 1,
+        rows: [
+          {
+            riderId: 2,
+            displayName: 'Bea',
+            you: false,
+            gapSeconds: -3,
+            wattsPerKilogram: 3,
+            flags: 0,
+          },
+          {
+            riderId: 1,
+            displayName: undefined,
+            you: false,
+            gapSeconds: 1,
+            wattsPerKilogram: 3,
+            flags: 0,
+          },
+        ],
+      }),
+    };
+    expect(roomFrame(inARace, memory, simulation(), 0).hud.chosen?.label).toBe('Bea');
+    memory.following = 1;
+    expect(roomFrame(inARace, memory, simulation(), 0).hud.chosen?.label).toBe('Rider 2');
   });
 });
 
