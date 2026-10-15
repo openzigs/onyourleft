@@ -8,6 +8,10 @@ import { CORRECTION_THRESHOLD_METRES } from '../net/correction';
 import type { DrawnRemoteRider } from '../net/snapshots';
 import {
   acrossTheRoomsLine,
+  DRAFT_IN_PERCENT,
+  DRAFT_OUT_PERCENT,
+  DRAFT_SPOKEN,
+  draftEvent,
   heldOnTheLine,
   NEARBY_METRES,
   nextToFollow,
@@ -277,6 +281,60 @@ describe('a race on the HUD — #785', () => {
       'Go.',
       'The race is over. End the ride to see its result.',
     ]);
+  });
+});
+
+describe('into and out of the room’s draft — #787, #327’s spoken cue', () => {
+  /** Run a sequence of HUD draft figures through the cue, as `GameView` does frame by frame. */
+  function said(figures: readonly (number | 'off' | undefined)[]): (string | undefined)[] {
+    let inDraft = false;
+    return figures.map((figure) => {
+      const next = draftEvent(inDraft, figure);
+      inDraft = next.inDraft;
+      return next.event?.text;
+    });
+  }
+
+  it('says “in” once on crossing into the draft and “out” once on leaving it, never the figure on every frame', () => {
+    expect(said([0, 4, 12, 30, 34, 20, 3, 0])).toEqual([
+      undefined,
+      undefined,
+      DRAFT_SPOKEN.into(12),
+      undefined,
+      undefined,
+      undefined,
+      DRAFT_SPOKEN.outOf,
+      undefined,
+    ]);
+    expect(DRAFT_SPOKEN.into(34.4)).toBe('In the draft: 34 percent less drag.');
+  });
+
+  it('does not chatter at the edge: between the two thresholds nothing changes either way', () => {
+    const between = (DRAFT_IN_PERCENT + DRAFT_OUT_PERCENT) / 2;
+    expect(DRAFT_OUT_PERCENT).toBeLessThan(DRAFT_IN_PERCENT);
+    expect(
+      said([DRAFT_IN_PERCENT, between, DRAFT_IN_PERCENT - 0.1, between, DRAFT_OUT_PERCENT]),
+    ).toEqual([DRAFT_SPOKEN.into(DRAFT_IN_PERCENT), undefined, undefined, undefined, undefined]);
+    expect(said([DRAFT_IN_PERCENT - 0.1, between, DRAFT_OUT_PERCENT - 0.1])).toEqual([
+      undefined,
+      undefined,
+      undefined,
+    ]);
+  });
+
+  it('never tells the leading rider they are drafting: the front of a line gets 1–2 %', () => {
+    expect(said([1, 2, 2.4, 1])).toEqual([undefined, undefined, undefined, undefined]);
+  });
+
+  it('says nothing in a room with drafting off or before a frame, and is not left “in” by one', () => {
+    expect(said(['off', 'off', undefined])).toEqual([undefined, undefined, undefined]);
+    expect(draftEvent(true, 'off')).toEqual({ inDraft: false });
+    expect(draftEvent(true, undefined)).toEqual({ inDraft: false });
+    // …so going back into a draft afterwards is said again, as news.
+    expect(draftEvent(false, 30).event).toEqual({
+      kind: 'room-draft',
+      text: DRAFT_SPOKEN.into(30),
+    });
   });
 });
 

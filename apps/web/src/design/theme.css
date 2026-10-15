@@ -5899,6 +5899,36 @@ select.oyl-input {
   color: var(--oyl-color-hud-ink-muted);
 }
 
+/* #787: the draft's gauge (#327's indicator criteria), under the phrase that
+   says its full scale. The outline IS the full scale and its right-hand end is
+   drawn heavier, so a full bar is legible as full. Fill and outline are both
+   `--oyl-color-hud-ink`, which `contrast.a11y.test.ts` already pairs against
+   the HUD surface; the gauge is `aria-hidden` and never the only carrier. */
+.oyl-hud__gauge {
+  display: block;
+  width: 100%;
+  height: 0.5rem;
+  margin-top: var(--oyl-space-xs);
+  overflow: visible;
+}
+
+.oyl-hud__gauge-fill {
+  fill: var(--oyl-color-hud-ink);
+}
+
+.oyl-hud__gauge-scale {
+  fill: none;
+  stroke: var(--oyl-color-hud-ink);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.oyl-hud__gauge-full {
+  stroke: var(--oyl-color-hud-ink);
+  stroke-width: 3;
+  vector-effect: non-scaling-stroke;
+}
+
 .oyl-hud__field--stale .oyl-hud__value {
   color: var(--oyl-color-hud-stale-ink);
 }

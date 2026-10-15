@@ -21,6 +21,7 @@ import {
   trainerLine,
   type HudInput,
 } from './fields';
+import { DRAFT_FULL_SCALE_PERCENT } from './draft-scale';
 import { atStartLine } from '../simulation';
 import {
   MAX_SIMULATED_GRADE_PERCENT,
@@ -1037,7 +1038,7 @@ describe('the room on the HUD — #783', () => {
 
   it('shows this rider’s draft as a share of drag, Off in a room without drafting, and a dash before a frame — #787', () => {
     const draft = (value: number | 'off' | undefined) =>
-      hudReadings({ ...baseInput(), room: { nearby: 1, draft: value } }).find(
+      hudReadings({ ...baseInput(), room: { nearby: 1, draft: value, draftShown: true } }).find(
         (r) => r.key === 'room-draft',
       );
     expect(draft(34)).toMatchObject({ label: 'Draft', value: '34', unit: '% of drag' });
@@ -1054,6 +1055,42 @@ describe('the room on the HUD — #783', () => {
 
   it('has no draft on a ride with no room — absent, not 0 %', () => {
     expect(hudReadings(baseInput()).map((reading) => reading.key)).not.toContain('room-draft');
+  });
+
+  it('has no draft field in a room unless the ride says the rider’s setting shows it — ADR 0038 D-5', () => {
+    const keys = (draftShown: boolean | undefined) =>
+      hudReadings({
+        ...baseInput(),
+        room: { nearby: 1, draft: 34, ...(draftShown === undefined ? {} : { draftShown }) },
+      }).map((reading) => reading.key);
+    expect(keys(undefined)).not.toContain('room-draft');
+    expect(keys(false)).not.toContain('room-draft');
+    expect(keys(true)).toContain('room-draft');
+    // The room's other fields are there either way, at the same indexes.
+    expect(keys(false)).toEqual(keys(true).filter((key) => key !== 'room-draft'));
+  });
+
+  it('gauges the draft toward the model’s most, and says that is the full scale — #327', () => {
+    const draft = (value: number | 'off' | undefined) =>
+      hudReadings({ ...baseInput(), room: { nearby: 1, draft: value, draftShown: true } }).find(
+        (r) => r.key === 'room-draft',
+      );
+    expect(DRAFT_FULL_SCALE_PERCENT).toBe(59);
+    expect(draft(34)?.detail).toBe('at most 59 %');
+    expect(draft(34)?.gauge).toBeCloseTo(34 / 59, 12);
+    expect(draft(0)?.gauge).toBe(0);
+    // At the model's most the bar is full, and past it (it cannot be) never overfull.
+    expect(draft(59)?.gauge).toBe(1);
+    expect(draft(80)?.gauge).toBe(1);
+    // No gauge where there is nothing to measure.
+    expect(draft('off')?.gauge).toBeUndefined();
+    expect(draft(undefined)?.gauge).toBeUndefined();
+    // …and no other field carries one.
+    const others = hudReadings({
+      ...baseInput(),
+      room: { nearby: 1, draft: 34, draftShown: true },
+    }).filter((r) => r.key !== 'room-draft');
+    expect(others.every((r) => r.gauge === undefined)).toBe(true);
   });
 });
 
