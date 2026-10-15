@@ -652,8 +652,8 @@ Running an instance for other people is a set of duties as well as a box:
   `OYL_INSTANCE_TRUSTED_PROXIES`. From any other peer the header is ignored
   ([`docs/moderation.md`](moderation.md) §"Behind a proxy or a tunnel").
 - **Registration** (`OYL_INSTANCE_REGISTRATION`) is `approval`, `invite`, `open` or `closed`. Unset,
-  it is `closed`; the project's image sets `approval`, and the home deployment's compose file uses
-  `closed` unless `.env` says otherwise. The moderator is named by device key (`OYL_INSTANCE_OWNER_KEY`);
+  it is `approval` (the owner's ruling on #775, 2026-10-15), and the project's image and the home
+  deployment's compose file use `approval` unless `.env` says otherwise. The moderator is named by device key (`OYL_INSTANCE_OWNER_KEY`);
   `OYL_INSTANCE_DEPUTY_KEY` is optional and usually empty, because an instance has one moderator
   ([#905](https://github.com/openzigs/onyourleft/issues/905)) — [`docs/moderation.md`](moderation.md).
 - **Blocking, reporting and moderation** ([#83](https://github.com/openzigs/onyourleft/issues/83)):

@@ -294,7 +294,7 @@ export interface IdentityOptions {
   readonly origin: string;
   /** Unix milliseconds. */
   readonly now?: () => number;
-  /** How this instance takes new riders (#775). Unset is `closed` (`config.ts` §`DEFAULT_REGISTRATION`). */
+  /** How this instance takes new riders (#775). Unset is `approval` (`config.ts` §`DEFAULT_REGISTRATION`). */
   readonly registration?: RegistrationMode;
   /** Public-room eligibility's thresholds (#775). */
   readonly publicRooms?: PublicRoomThresholds;

@@ -85,10 +85,10 @@ async function signInFrom(
 }
 
 describe('the default registration mode (#775; the project’s image: rulings Q5 and Q13)', () => {
-  it('is closed, on an instance started with nothing configured (#891 merge review, decision 21)', async () => {
+  it('is approval, on an instance started with nothing configured (owner’s ruling, 2026-10-15)', async () => {
     const configured = readConfig({ commit: TEST_COMMIT });
     if (!configured.ok) throw new Error(configured.problems.join(' '));
-    expect(configured.config.registration).toBe('closed');
+    expect(configured.config.registration).toBe('approval');
 
     const directory = await mkdtemp(join(tmpdir(), 'oyl-instance-default-'));
     const store = await openSqlStore(join(directory, 'instance.sqlite'));
@@ -118,8 +118,16 @@ describe('the default registration mode (#775; the project’s image: rulings Q5
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(await device.statement(nonce)),
     });
-    expect(session.status).toBe(403);
-    expect(codeOf((await session.json()) as Record<string, unknown>)).toBe('registration_closed');
+    // Registered, and waiting: read back on a fresh connection to the file.
+    expect(session.status).toBe(200);
+    const answer = (await session.json()) as { athleteId: string; registrationState: string };
+    expect(answer.registrationState).toBe('pending');
+    const fresh = await openSqlStore(join(directory, 'instance.sqlite'));
+    try {
+      expect((await fresh.getAthlete(answer.athleteId))?.registrationState).toBe('pending');
+    } finally {
+      await fresh.close();
+    }
   });
 
   it('is what the project’s image is configured with', () => {
