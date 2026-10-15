@@ -173,6 +173,8 @@ export interface LegalPageContext {
   readonly sourceUrl: string;
   /** The notice page's path (#907). */
   readonly noticePath: string;
+  /** The terms page's path when the instance publishes terms (#909), or `null`. */
+  readonly termsPath?: string | null;
 }
 
 /** The legal and contact page. */
@@ -213,7 +215,11 @@ ${accountable}
 ${representative}
 <h2>Documents</h2>
 <ul>
-<li>This instance has published no terms of service.</li>
+${
+  context.termsPath === undefined || context.termsPath === null
+    ? '<li>This instance has published no terms of service.</li>'
+    : `<li>${link(context.termsPath, 'Terms of service')}</li>`
+}
 ${privacy}
 <li>${link(context.sourceUrl, 'The source code of this instance')}, under the GNU Affero General Public License, version 3 or later.</li>
 </ul>`,

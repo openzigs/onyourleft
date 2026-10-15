@@ -148,6 +148,17 @@ export type InstanceState =
       readonly displayName: string;
       /** Where the running instance's source is (AGPL-3.0 §13), or `null`. */
       readonly sourceUrl: string | null;
+      /**
+       * The date the instance's terms of service in force took effect (#909),
+       * or `null` when it publishes none.
+       */
+      readonly termsVersion: string | null;
+      /**
+       * Those terms are not the ones this device last marked read for this
+       * instance (#909, DSA Art. 14(2)): the Instance screen says they changed
+       * until {@link InstancePort.markTermsRead} is told.
+       */
+      readonly termsUnread: boolean;
     }
   /** The instance no longer accepts this device's session. */
   | { readonly kind: 'signed-out'; readonly origin: string }
@@ -239,6 +250,12 @@ export interface InstancePort {
   linkCode(): Promise<LinkCodeOutcome>;
   /** This athlete's devices on the instance (#773). */
   devices(): Promise<DevicesOutcome>;
+  /**
+   * The rider read the instance's terms of service in force since `version`
+   * (#909): kept on this device for this instance, so the screen stops saying
+   * they changed until the instance names another date.
+   */
+  markTermsRead(version: string): void;
   /**
    * Forget the instance on this device — the session token and the address —
    * and ask the instance to end the session. Touches nothing else.
@@ -445,7 +462,29 @@ export const INSTANCE_AGREEMENT_STORAGE_KEYS = [
   // #1251: which service a hosted write-up may be offered for on this instance
   // (`ride-analysis/hosted-settings.ts` §`HOSTED_OFFER_STORAGE_KEY`, its reader and writer).
   'oyl.instance-hosted-offer.v1',
+  // #909: the terms of service this device last marked read, with the
+  // instance's address ({@link TERMS_READ_STORAGE_KEY}).
+  'oyl.instance-terms-read.v1',
 ] as const;
+
+/** Where the terms this device last marked read are kept (#909): `{ origin, version }`. */
+export const TERMS_READ_STORAGE_KEY = INSTANCE_AGREEMENT_STORAGE_KEYS[3];
+
+/** A terms version as an instance names one: a date. */
+const TERMS_VERSION = /^\d{4}-\d{2}-\d{2}$/;
+
+/** The terms version this device last marked read for `origin`, or `undefined`. */
+function termsReadFor(storage: InstanceStorage, origin: string): string | undefined {
+  try {
+    const held = JSON.parse(storage.getItem(TERMS_READ_STORAGE_KEY) ?? 'null') as {
+      origin?: unknown;
+      version?: unknown;
+    } | null;
+    return held?.origin === origin && typeof held.version === 'string' ? held.version : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 /** The instance this device is signed in to, and the token it holds for it. */
 export interface HeldInstanceSession {
@@ -711,6 +750,18 @@ export function createInstancePort(dependencies: InstancePortDependencies): Inst
       ).post(path, body),
   });
 
+  /** The terms an instance names, and whether this device has marked them read (#909). */
+  const termsOf = (
+    said: unknown,
+    origin: string,
+  ): { readonly termsVersion: string | null; readonly termsUnread: boolean } => {
+    const termsVersion = typeof said === 'string' && TERMS_VERSION.test(said) ? said : null;
+    return {
+      termsVersion,
+      termsUnread: termsVersion !== null && termsReadFor(storage, origin) !== termsVersion,
+    };
+  };
+
   /** What signing in to `origin` needs, over `http`. */
   const signIn = (origin: string, http: InstanceHttp): SignInDependencies => ({
     origin,
@@ -755,6 +806,12 @@ export function createInstancePort(dependencies: InstancePortDependencies): Inst
           displayName: displayName.name,
           sourceUrl:
             source.status === 200 ? httpsUrl((source.body as { url?: unknown } | null)?.url) : null,
+          ...termsOf(
+            instance.status === 200
+              ? (instance.body as { termsVersion?: unknown } | null)?.termsVersion
+              : null,
+            http.origin,
+          ),
         };
       } catch {
         return { kind: 'unreachable', origin: http.origin };
@@ -1006,6 +1063,12 @@ export function createInstancePort(dependencies: InstancePortDependencies): Inst
       } catch {
         return { kind: 'unavailable', text: DEVICES_UNAVAILABLE_TEXT['no-answer'] };
       }
+    },
+
+    markTermsRead: (version) => {
+      const origin = readInstanceAccount(storage)?.origin;
+      if (origin === undefined || !TERMS_VERSION.test(version)) return;
+      storage.setItem(TERMS_READ_STORAGE_KEY, JSON.stringify({ origin, version }));
     },
 
     disconnect: async () => {

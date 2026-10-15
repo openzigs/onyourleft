@@ -71,6 +71,10 @@ services:
       OYL_INSTANCE_ACCOUNTABLE_PERSON: ${OYL_INSTANCE_ACCOUNTABLE_PERSON:-}
       OYL_INSTANCE_LEGAL_REPRESENTATIVE: ${OYL_INSTANCE_LEGAL_REPRESENTATIVE:-}
       OYL_INSTANCE_PRIVACY_POLICY_URL: ${OYL_INSTANCE_PRIVACY_POLICY_URL:-}
+      # The terms of service (#909): a path INSIDE the container, so mount the
+      # file there; empty publishes none.
+      OYL_INSTANCE_TERMS_FILE: ${OYL_INSTANCE_TERMS_FILE:-}
+      OYL_INSTANCE_TERMS_VERSION: ${OYL_INSTANCE_TERMS_VERSION:-}
       OYL_INSTANCE_PUBLIC_ROOMS: ${OYL_INSTANCE_PUBLIC_ROOMS:-off}
       # Every connection's peer is cloudflared, so the rate limits read the
       # rider's own address from the header Cloudflare writes (#895, B3) —

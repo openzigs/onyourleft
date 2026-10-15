@@ -70,7 +70,10 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         script, a CSP, everything escaped) for anybody
                         with no account, migration 0026's append-only
                         `notice` table, and `GET /v1/moderation/notices`;
-                        `moderation/notices.ts` says what it keeps. Behind a
+                        `moderation/notices.ts` says what it keeps. Since
+                        #909 `/terms` serves the operator's own terms file
+                        (`src/terms.ts`, never a default), named by date in
+                        `GET /instance`. Behind a
                         proxy the sign-in rate limits read the client's
                         address from `OYL_INSTANCE_CLIENT_ADDRESS_HEADER`
                         (`cf-connecting-ip` behind the tunnel), and only

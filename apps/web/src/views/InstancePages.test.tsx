@@ -13,7 +13,7 @@ import { scriptedInstance } from '../instance/testing';
 import { mount, queryAll, settle, type Mounted } from '../testing/mount';
 
 import { AboutView } from './AboutView';
-import { LEGAL_LINK_TEXT, REPORT_LINK_TEXT } from './InstancePages';
+import { LEGAL_LINK_TEXT, REPORT_LINK_TEXT, TERMS_LINK_TEXT } from './InstancePages';
 
 let mounted: Mounted | undefined;
 afterEach(() => {
@@ -70,5 +70,15 @@ describe('About’s link to the instance’s notice page (#907)', () => {
     expect(more).toEqual([]);
     expect(link?.getAttribute('href')).toBe('https://club.example:8443/legal');
     expect(link?.getAttribute('target')).toBe('_blank');
+  });
+
+  it('links the terms of service of the same instance (#909)', async () => {
+    const instance = scriptedInstance({ connected: true });
+    instance.held.origin = 'https://club.example:8443';
+    mounted = await mount(<AboutView instance={instance.port} />);
+    await settle();
+    const [link, ...more] = linksNamed(TERMS_LINK_TEXT);
+    expect(more).toEqual([]);
+    expect(link?.getAttribute('href')).toBe('https://club.example:8443/terms');
   });
 });

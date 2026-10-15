@@ -24,6 +24,8 @@ import {
   CONNECT_REFUSAL_TEXT,
   createInstancePort,
   INSTANCE_AGREEMENT_STORAGE_KEYS,
+  instanceEraser,
+  TERMS_READ_STORAGE_KEY,
   INSTANCE_SESSION_STORAGE_KEY,
   type InstancePortDependencies,
   type InstanceStorage,
@@ -49,7 +51,11 @@ interface IdentityInstance {
 interface IdentityTesting {
   readonly TEST_ORIGIN: string;
   startIdentityInstance(options?: {
-    config?: { name?: string | null };
+    config?: {
+      name?: string | null;
+      /** The terms the instance publishes (#909). */
+      terms?: { readonly text: string; readonly version: string } | null;
+    };
     registration?: 'open' | 'closed';
     originIsTheListener?: boolean;
   }): Promise<IdentityInstance>;
@@ -171,6 +177,8 @@ describe('signing in, and what is shown after a reload — #777', () => {
       instanceName: NAME,
       displayName: 'Anna',
       sourceUrl: expect.stringContaining('https://github.com/openzigs/onyourleft/tree/') as unknown,
+      termsVersion: null,
+      termsUnread: false,
     });
 
     // Renamed on the instance, and the screen says so: it reads the instance,
@@ -182,6 +190,33 @@ describe('signing in, and what is shown after a reload — #777', () => {
     });
     expect(renamed.status).toBe(200);
     expect(await reloaded.current()).toMatchObject({ displayName: 'Brigid' });
+  });
+
+  it('says the instance’s terms are unread until this device marks that version read (#909)', async () => {
+    const world = await instance({
+      config: { terms: { text: '# Terms\n\nRide kindly.', version: '2026-11-01' } },
+    });
+    const { port, storage } = device(wire(world));
+    await port.connect(testing.TEST_ORIGIN, 'Anna', await cardOf(world));
+    expect(await port.current()).toMatchObject({
+      termsVersion: '2026-11-01',
+      termsUnread: true,
+    });
+    port.markTermsRead('2026-11-01');
+    expect(await port.current()).toMatchObject({ termsUnread: false });
+    // An older version marked read is not this one: the screen says they changed.
+    port.markTermsRead('2026-01-01');
+    expect(await port.current()).toMatchObject({ termsUnread: true });
+    // Nor is this version read for ANOTHER instance: what was read is read per instance.
+    storage.map.set(
+      TERMS_READ_STORAGE_KEY,
+      JSON.stringify({ origin: 'https://elsewhere.example', version: '2026-11-01' }),
+    );
+    expect(await port.current()).toMatchObject({ termsUnread: true });
+    // Kept with the instance's address, so forgetting the instance forgets it.
+    expect(storage.map.has(TERMS_READ_STORAGE_KEY)).toBe(true);
+    instanceEraser(storage).forget();
+    expect(storage.map.has(TERMS_READ_STORAGE_KEY)).toBe(false);
   });
 
   it('says the instance has no name rather than inventing one', async () => {

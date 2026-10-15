@@ -28,6 +28,7 @@ import {
   InstanceView,
   MODERATE_LINK_TEXT,
   RECOVERY_CODES_LEAD,
+  TERMS_CHANGED_TEXT,
 } from './InstanceView';
 
 let mounted: Mounted | undefined;
@@ -238,5 +239,37 @@ describe('the link to Moderation, for the instance’s moderator only — #955',
     await settle();
     expect(moderateLink()).toBeUndefined();
     expect(moderation.calls).toEqual([]);
+  });
+});
+
+describe('terms of service the rider has not read — #909', () => {
+  it('says so, links the instance’s terms, and stops saying so once they are marked read', async () => {
+    const scripted = scriptedInstance({ connected: true });
+    scripted.held.termsVersion = '2026-11-01';
+    mounted = await mount(<InstanceView port={scripted.port} />);
+    await settle();
+    expect(text()).toContain(TERMS_CHANGED_TEXT.lead('2026-11-01'));
+    const link = [...(mounted.container.querySelectorAll('a') ?? [])].find(
+      (each) => each.textContent === TERMS_CHANGED_TEXT.read,
+    );
+    expect(link?.getAttribute('href')).toBe('https://ride.example/terms');
+    expect(link?.getAttribute('target')).toBe('_blank');
+    await activateWithKeyboard(button(TERMS_CHANGED_TEXT.done));
+    await settle();
+    expect(scripted.calls).toContain('markTermsRead 2026-11-01');
+    expect(text()).not.toContain(TERMS_CHANGED_TEXT.lead('2026-11-01'));
+  });
+
+  it('says nothing for an instance that publishes no terms, or terms already read', async () => {
+    const scripted = scriptedInstance({ connected: true });
+    mounted = await mount(<InstanceView port={scripted.port} />);
+    await settle();
+    expect(text()).not.toContain('terms of service took effect');
+    mounted.unmount();
+    scripted.held.termsVersion = '2026-11-01';
+    scripted.held.termsRead = '2026-11-01';
+    mounted = await mount(<InstanceView port={scripted.port} />);
+    await settle();
+    expect(text()).not.toContain('terms of service took effect');
   });
 });

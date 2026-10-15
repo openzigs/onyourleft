@@ -68,7 +68,7 @@
     "/instance": {
       "get": {
         "operationId": "getInstance",
-        "summary": "What the operator calls this instance, or null — the name a rider’s app shows once connected (#777).",
+        "summary": "What the operator calls this instance, or null — the name a rider’s app shows once connected (#777) — and the date its terms of service in force took effect, or null for none (#909): a rider’s app tells them when it changes.",
         "responses": {
           "200": {
             "description": "OK",
@@ -82,10 +82,17 @@
                         "string",
                         "null"
                       ]
+                    },
+                    "termsVersion": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
                     }
                   },
                   "required": [
-                    "name"
+                    "name",
+                    "termsVersion"
                   ],
                   "additionalProperties": false
                 }
@@ -473,6 +480,39 @@
                     "licence"
                   ],
                   "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          }
+        }
+      }
+    },
+    "/terms": {
+      "get": {
+        "operationId": "getTermsPage",
+        "summary": "The terms of service this instance publishes (#909), from the operator’s own file, with the date the version in force took effect — or a page saying it publishes none. HTML, with no script.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
                 }
               }
             }

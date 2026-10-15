@@ -10,6 +10,7 @@ import { MODERATION_ROUTES } from './moderation/routes.ts';
 import { NOTICE_PAGE_PATH } from './moderation/notices.ts';
 import { pageResponse } from './html.ts';
 import { LEGAL_PAGE_PATH, legalPage } from './legal.ts';
+import { TERMS_PAGE_PATH, termsPage } from './terms.ts';
 import { assessReadiness } from './readiness.ts';
 import { json, type Route, type Schema } from './route-kit.ts';
 import { HISTORY_ROUTES } from './history/routes.ts';
@@ -77,17 +78,21 @@ export const ROUTES: readonly Route[] = [
     operationId: 'getInstance',
     reaches: 'own',
     summary:
-      'What the operator calls this instance, or null — the name a rider’s app shows once connected (#777).',
+      'What the operator calls this instance, or null — the name a rider’s app shows once connected (#777) — and the date its terms of service in force took effect, or null for none (#909): a rider’s app tells them when it changes.',
     response: {
       contentType: 'application/json',
       schema: {
         type: 'object',
-        properties: { name: { type: ['string', 'null'] } },
-        required: ['name'],
+        properties: {
+          name: { type: ['string', 'null'] },
+          termsVersion: { type: ['string', 'null'] },
+        },
+        required: ['name', 'termsVersion'],
         additionalProperties: false,
       },
     },
-    handle: ({ config }) => json({ name: config.name }),
+    handle: ({ config }) =>
+      json({ name: config.name, termsVersion: config.terms?.version ?? null }),
   },
   {
     method: 'GET',
@@ -127,8 +132,19 @@ export const ROUTES: readonly Route[] = [
           instanceName: config.name,
           sourceUrl: config.sourceUrl,
           noticePath: NOTICE_PAGE_PATH,
+          termsPath: config.terms === null ? null : TERMS_PAGE_PATH,
         }),
       ),
+  },
+  {
+    method: 'GET',
+    path: TERMS_PAGE_PATH,
+    operationId: 'getTermsPage',
+    reaches: 'own',
+    summary:
+      'The terms of service this instance publishes (#909), from the operator’s own file, with the date the version in force took effect — or a page saying it publishes none. HTML, with no script.',
+    response: { contentType: 'text/html' },
+    handle: ({ config }) => pageResponse(termsPage(config.terms, config.name)),
   },
   {
     method: 'GET',

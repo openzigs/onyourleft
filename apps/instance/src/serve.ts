@@ -20,6 +20,19 @@ const log: LogSink = (line) => {
   process.stdout.write(`${line}\n`);
 };
 
+// #909: the operator's terms, read once. A file named and not readable is a
+// refusal to start (`terms.ts`), never a page that says there are none.
+const termsFile = process.env.OYL_INSTANCE_TERMS_FILE;
+let termsText: string | undefined;
+let termsFileUnreadable = false;
+if (termsFile !== undefined && termsFile.trim() !== '') {
+  try {
+    termsText = readFileSync(termsFile.trim(), 'utf8');
+  } catch {
+    termsFileUnreadable = true;
+  }
+}
+
 const http = readConfig({
   host: process.env.OYL_INSTANCE_HOST,
   port: process.env.OYL_INSTANCE_PORT,
@@ -47,6 +60,9 @@ const http = readConfig({
   legalRepresentative: process.env.OYL_INSTANCE_LEGAL_REPRESENTATIVE,
   privacyPolicyUrl: process.env.OYL_INSTANCE_PRIVACY_POLICY_URL,
   publicRooms: process.env.OYL_INSTANCE_PUBLIC_ROOMS,
+  termsText,
+  termsVersion: process.env.OYL_INSTANCE_TERMS_VERSION,
+  termsFileUnreadable,
 });
 const server = readServerConfig(
   {

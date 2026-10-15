@@ -67,6 +67,7 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
     pictures: { kind: 'off', code: 'not-set', reason: 'A test instance has no picture model.' },
     name: null,
     legal: NO_LEGAL_SETTINGS,
+    terms: null,
     ...overrides,
   };
 }

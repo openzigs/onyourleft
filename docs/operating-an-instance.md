@@ -670,6 +670,7 @@ Running an instance for other people is a set of duties as well as a box:
   | `OYL_INSTANCE_ACCOUNTABLE_PERSON` | the person accountable for keeping illegal content off the instance (the UK Online Safety Act Codes, ICU A2) |
   | `OYL_INSTANCE_LEGAL_REPRESENTATIVE` | only if you have one: your EU legal representative's name, postal address, email and telephone, on one line (DSA Art. 13(4)) |
   | `OYL_INSTANCE_PRIVACY_POLICY_URL` | your own privacy policy, `https:` |
+  | `OYL_INSTANCE_TERMS_FILE` and `OYL_INSTANCE_TERMS_VERSION` | your terms of service, served at `/terms` (#909): the file they are in, and the date that version took effect (`YYYY-MM-DD`). Set both or neither. If the file has a line `<!-- terms -->`, only what follows it is published. The project's draft (`docs/moderation/terms-of-service.md`) is a starting point, never a default. **Change the date for a change that matters to riders**: their app tells them, on the Instance screen, until they have read the new terms |
   | `OYL_INSTANCE_PUBLIC_ROOMS` | `off` (the default) or `on`. **`on` refuses to start without the contact address and the accountable person.** No room is public yet, so today `on` opens nothing else |
 
   The app's *About* links to the page of the instance a rider connected to. The page says plainly
