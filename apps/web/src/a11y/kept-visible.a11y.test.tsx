@@ -104,6 +104,7 @@ import { WRITE_UP_EXPLANATION } from '../ride-analysis/RideWriteUpControl';
 import { RACE_CONSENT_SENTENCE } from '../detail/RaceConsentSection';
 import { RIDER_TEXT_KEPT_VISIBLE } from '../rider-text/disclosure';
 import { ACTIVITIES_KEPT_VISIBLE } from '../views/ActivitiesView';
+import { ANALYSIS_KEPT_VISIBLE } from '../views/AnalysisView';
 import { RideView } from '../views/RideView';
 import { ROUTES_KEPT_VISIBLE } from '../views/RoutesView';
 import { SETTINGS_KEPT_VISIBLE } from '../views/SettingsView';
@@ -281,7 +282,7 @@ const KEPT: Record<RouteId, Kept> = {
   },
   workouts: { sentences: [], reason: NOTHING_TUCKED },
   activities: { sentences: ACTIVITIES_KEPT_VISIBLE },
-  analysis: { sentences: [], reason: NOTHING_TUCKED },
+  analysis: { sentences: ANALYSIS_KEPT_VISIBLE },
   routes: { sentences: ROUTES_KEPT_VISIBLE },
   about: { sentences: [], reason: `${NOTHING_TUCKED}: it is the page of prose` },
   credits: { sentences: [], reason: `${NOTHING_TUCKED}: it is the page of prose` },
