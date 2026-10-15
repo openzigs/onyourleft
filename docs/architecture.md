@@ -1759,8 +1759,9 @@ its own riders over their own sessions.
 always records, and the race result is stored with that ride on the device"*). `GameView` asks the
 ride controller for a recording once the room has admitted the rider (`recordForRoom`: a paused
 recording is left paused, #516, and the room's notice says so), and on *End ride* notes the race —
-the room's place and finisher count, or that the rider crossed the line before the room's `finish`,
-or that they left it — on the RECORDER (`Recorder.noteRoomRace`). It goes out on the recording's
+the room's place and finisher count, or that the rider crossed the line before the room's `finish`
+(by the room's own last word on their distance, never the device's odometer: ADR 0028 D-2), or that
+they left it — on the RECORDER (`Recorder.noteRoomRace`). It goes out on the recording's
 checkpoint header (`roomRaces`), so a ride recovered after the app closed before *Stop* keeps it, and
 is saved as `RideFacts.races` — a list, one per race in the recording. Nothing of any other rider is
 in it. Untrusted on read like every row: a race that does not read is dropped, and never refuses a

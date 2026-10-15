@@ -1948,6 +1948,59 @@ test.describe('a ride that may stop with the screen off — #647', () => {
 });
 
 /**
+ * #785, #1360's re-review (R3) — the room's notice slot, laid out with its
+ * longest sentences at every overlay viewport, phones and tablets, both ways
+ * (#1120). `?room=lost` is `ROOM_LOST_TEXT`, the longest sentence the slot
+ * carries; `?room=paused` is the paused-recording sentence the re-review
+ * asked to have measured. The rule is the Eased notice's: whole on the
+ * screen, over no panel, clear of the rider, *Pause* and *End ride* on top.
+ *
+ * ⚠️ Not held to `EASED_RIDER_CLEARANCE_PIXELS` upright: a room ride's HUD
+ * comes within it at 360×752 (5 px on a Mac) whatever the notice says, which
+ * is #1356's, as is the reading fields' collision at 736×360 excused below.
+ */
+test.describe('the room’s notice, with its longest sentences — #785', () => {
+  for (const [query, words] of [
+    ['?room=lost', 'connection was lost'],
+    ['?room=paused', 'Recording paused'],
+  ] as const) {
+    for (const viewport of OVERLAY_VIEWPORTS) {
+      test(`${query}: whole and over nothing — ${viewport.name}`, async ({ page }) => {
+        await openRide(page, viewport, query);
+        const text = await page.evaluate(() =>
+          [...document.querySelectorAll('.oyl-hud__notices .oyl-status')]
+            .map((each) => (each.textContent ?? '').replace(/\s+/g, ' '))
+            .join(' | '),
+        );
+        expect(text).toContain(words);
+        for (const [how, seen] of await bothWays(page)) {
+          await test.step(how, () => {
+            const notice = seen.panels.find((each) => each.name.includes('oyl-hud__notices'));
+            const rider = riderBox(viewport);
+            console.log(
+              `room notice ${query} — ${viewport.name}, ${how} — cell ${(notice?.box.height ?? 0).toFixed(0)} px tall` +
+                (viewport.height > viewport.width
+                  ? `; ${(rider.top - (notice?.box.bottom ?? Infinity)).toFixed(0)} px above the rider's box`
+                  : ''),
+            );
+            // ⚠️ #1356: at 736×360 a room ride's own reading fields (#783) are
+            // over the rider with or without any notice, so that one known
+            // collision is left to #1356 and the notice is held to the rest.
+            const known = (each: string): boolean =>
+              viewport.name.includes('736×360') &&
+              each.includes('oyl-hud__fields') &&
+              !each.includes(' × ');
+            const collisions = easedCollisions(seen, viewport);
+            expect(collisions.filter((each) => !known(each))).toEqual([]);
+            expect(collisions.filter((each) => each.includes('oyl-hud__notices'))).toEqual([]);
+          });
+        }
+      });
+    }
+  }
+});
+
+/**
  * #647 — #693's re-review, B2: *"Keep the screen on"* beside EACH other
  * notice the HUD never puts away. The notice cell stacks every one of them —
  * the *Trainer* fault, *Eased* (#585), the side camera's lost link (#551) and

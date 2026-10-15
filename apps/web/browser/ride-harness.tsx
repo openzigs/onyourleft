@@ -523,8 +523,17 @@ const PAUSED = new URLSearchParams(window.location.search).get('paused') === 'ye
  * use (`net/testing.ts`): welcomed as a race and sent no frame, so the race
  * waits for as long as the page is open.
  */
-const IN_A_RACE = new URLSearchParams(window.location.search).get('room') === 'race';
-const RACE_ROOM = IN_A_RACE ? new ScriptedRoom() : undefined;
+const ROOM_MODE = new URLSearchParams(window.location.search).get('room');
+/**
+ * `ride.html?room=paused` and `?room=lost` — #785, #1360's re-review (R3): a
+ * group ride in a room whose notice slot carries a room sentence, measured by
+ * `ride.browser.spec.ts` at every overlay viewport. `paused`: the recording
+ * under the ride is paused (`GameTrainerPort.recordingPaused`), so the slot
+ * says so. `lost`: the room's socket closes and no ticket comes back, so the
+ * slot holds `ROOM_LOST_TEXT`, the longest sentence that slot carries.
+ */
+const IN_A_ROOM = ROOM_MODE === 'race' || ROOM_MODE === 'paused' || ROOM_MODE === 'lost';
+const RACE_ROOM = IN_A_ROOM ? new ScriptedRoom() : undefined;
 const RACE_PORTS =
   RACE_ROOM === undefined
     ? {}
@@ -532,7 +541,7 @@ const RACE_PORTS =
         room: roomPortOver(() => RACE_ROOM.link(), {}),
         roomId: 'harness-race',
         // The owner's ruling of 2026-09-30: only its maker is offered *Start the race*.
-        madeTheRoom: true,
+        madeTheRoom: ROOM_MODE === 'race',
         riderMass: kilograms(72),
         rooms: {
           create: () => Promise.resolve({ kind: 'unreachable' as const }),
@@ -701,6 +710,8 @@ const TRAINER: GameTrainerPort = {
   askForControlOnRide: () => Promise.resolve(),
   workoutRescue: () => RESCUE,
   recordingMayStop: () => MAY_STOP,
+  // #1360's re-review (R3). @see ROOM_MODE
+  recordingPaused: () => ROOM_MODE === 'paused',
   gameRideEnded: () => undefined,
   rideMovingSeconds: () => MOVING_SECONDS,
   watchRide: () => () => undefined,
@@ -1120,8 +1131,22 @@ async function run(): Promise<void> {
       RACE_ROOM.sockets.length > 0 ? RACE_ROOM : undefined,
     );
     RACE_ROOM.accept();
-    RACE_ROOM.welcome(0, 'race');
-    await until('Start the race', () => labelled<HTMLButtonElement>('button', 'Start the race'));
+    RACE_ROOM.welcome(0, ROOM_MODE === 'race' ? 'race' : 'ride');
+    if (ROOM_MODE === 'race') {
+      await until('Start the race', () => labelled<HTMLButtonElement>('button', 'Start the race'));
+    } else {
+      if (ROOM_MODE === 'lost') {
+        // Lost, and kept lost: no ticket comes back for the rejoin.
+        RACE_ROOM.ticketAnswer = () => ({ kind: 'unreachable' });
+        RACE_ROOM.closeFromServer(1006);
+      }
+      const words = ROOM_MODE === 'lost' ? 'connection was lost' : 'Recording paused';
+      await until(`the room's notice`, () =>
+        [...document.querySelectorAll('.oyl-hud__notices')].find((each) =>
+          (each.textContent ?? '').includes(words),
+        ),
+      );
+    }
   }
   // The trainer line appears once the gradient session has written once, which
   // is a frame or two in. Waiting for it is what makes it part of every

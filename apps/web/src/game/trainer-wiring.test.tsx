@@ -1025,11 +1025,12 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
       expect(rig.controller.getSnapshot().phase).toBe('idle');
       room.accept();
       room.welcome(0, 'race');
-      const rideFor = async (frames: number): Promise<void> => {
+      /** `at`: where the ROOM has this rider on each of its frames, or no word of them. */
+      const rideFor = async (frames: number, at?: number): Promise<void> => {
         for (let index = 0; index < frames; index += 1) {
           await clock.advance(FRAME_MS);
           if (index % 2 === 1) {
-            room.frame(index, []);
+            room.frame(index, at === undefined ? [] : [frameRider(0, at)]);
             // In `act`: the HUD's moving time is the controller's, and moves on its tick.
             await act(async () => {
               rig.bench.advance(seconds(1));
@@ -1069,17 +1070,31 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
       await rig.done();
     });
 
-    it('saves a rider who crossed the line and ended the ride before the room’s order as having finished (N2)', async () => {
-      const route = shortRoute();
-      const { rig, rideFor } = await raceOn(route);
-      // 300 W on the flat: well past sixty metres in twenty seconds.
-      await rideFor(40);
-      expect(rig.controller.getSnapshot().phase).toBe('recording');
-      expect(await endAndSave(rig)).toEqual([
-        { roomId: 'room-1', place: null, finishers: null, crossedTheLine: true },
-      ]);
-      await rig.done();
-    });
+    /**
+     * N2, by the ROOM's word on where the rider is (#1360's re-review, R1 and
+     * R2): its frames place this rider exactly on the sixty-metre line, a few
+     * metres short of it, or past it — whatever this device's own odometer
+     * says, which at 300 W is well past the line in twenty seconds.
+     */
+    it.each([
+      ['exactly on the line', 60, true],
+      ['past the line', 64.3, true],
+      ['three metres short of the line', 57, false],
+      ['a decimetre short of the line', 59.9, false],
+    ])(
+      'saves a rider the room has %s, who ended the ride before the room’s order (N2)',
+      async (_where, at, crossed) => {
+        const { rig, rideFor } = await raceOn(shortRoute());
+        await rideFor(40, at);
+        expect(rig.controller.getSnapshot().phase).toBe('recording');
+        expect(await endAndSave(rig)).toEqual([
+          crossed
+            ? { roomId: 'room-1', place: null, finishers: null, crossedTheLine: true }
+            : { roomId: 'room-1', place: null, finishers: null },
+        ]);
+        await rig.done();
+      },
+    );
 
     it('saves a rider who left the race short of the line as having left it', async () => {
       const { rig, rideFor } = await raceOn(hillRoute());

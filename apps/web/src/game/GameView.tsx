@@ -93,6 +93,7 @@ import { Button } from '../design/Button';
 import { RaceResult } from '../rooms/RaceResult';
 import { RoomPanel } from '../rooms/RoomPanel';
 import {
+  acrossTheRoomsLine,
   heldOnTheLine,
   nextToFollow,
   RACE_NOTICE_LABEL,
@@ -1033,12 +1034,14 @@ export function GameView(props: GameViewProps): JSX.Element {
       // #785: the race this ride was in, as its room said it, kept with the
       // recording under the ride so it is saved with it on this device —
       // read before the room is left, while the session still holds it.
-      // #1360's review (N2): and whether this rider was across the line on
-      // this device, for a race left before the room's order came.
+      // #1360's review (N2): and whether this rider was across the line, for
+      // a race left before the room's order came — by the ROOM's own last
+      // word on their distance, never this device's odometer (re-review R1,
+      // ADR 0028 D-2: the room's position wins).
       const race = raceFactOf(
         roomIdRef.current,
         roomRef.current?.race(),
-        course !== undefined && simulationRef.current.state.ride.distance >= course.totalDistance,
+        acrossTheRoomsLine(roomRef.current, course?.totalDistance),
       );
       if (race !== undefined) trainerPortRef.current?.roomRaceEnded?.(race);
     }

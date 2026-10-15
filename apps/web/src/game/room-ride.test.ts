@@ -7,6 +7,7 @@ import type { RoomSessionStatus } from '../net/room-session';
 import { CORRECTION_THRESHOLD_METRES } from '../net/correction';
 import type { DrawnRemoteRider } from '../net/snapshots';
 import {
+  acrossTheRoomsLine,
   heldOnTheLine,
   NEARBY_METRES,
   nextToFollow,
@@ -295,6 +296,26 @@ describe('the race a ride was in, for the device to keep — #785', () => {
       place: 1,
       finishers: 2,
     });
+  });
+});
+
+describe('whether the room has this rider across the line — #1360’s re-review (R1, R2)', () => {
+  const at = (metres: number) => ({
+    own: () => ({
+      rider: { distanceMetres: metres } as DrawnRemoteRider,
+      atLocalMs: 0,
+    }),
+  });
+  it('is the room’s own distance against the line: on it or past it is across, short of it is not', () => {
+    expect(acrossTheRoomsLine(at(60), 60)).toBe(true);
+    expect(acrossTheRoomsLine(at(60.1), 60)).toBe(true);
+    expect(acrossTheRoomsLine(at(59.9), 60)).toBe(false);
+    expect(acrossTheRoomsLine(at(57), 60)).toBe(false);
+  });
+  it('is not, with no word from the room on this rider, or no line', () => {
+    expect(acrossTheRoomsLine({ own: () => undefined }, 60)).toBe(false);
+    expect(acrossTheRoomsLine(undefined, 60)).toBe(false);
+    expect(acrossTheRoomsLine(at(100), undefined)).toBe(false);
   });
 });
 

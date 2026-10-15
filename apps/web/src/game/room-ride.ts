@@ -97,8 +97,8 @@ export function roomNotice(status: RoomSessionStatus | undefined): string | unde
  * awaiting the owner's approval.
  */
 export const ROOM_RECORDING_PAUSED_TEXT =
-  'Your recording is paused, so this ride in the room is not being recorded; resuming it is ' +
-  'on the Ride screen, and going there leaves the room.';
+  'Recording paused: this ride is not being recorded, and resuming it on the Ride screen leaves ' +
+  'the room.';
 
 /**
  * The room's notice with the recording's state beside it — #1360's review
@@ -321,12 +321,29 @@ export function raceEvent(
 }
 
 /**
+ * Whether the ROOM has this rider across the line — #1360's re-review (R1):
+ * the room's own last word on their distance (`own().rider.distanceMetres`,
+ * floored to decimetres by the room, so it never overstates), against the
+ * line. ADR 0028 D-2: the room's position wins, so the device's odometer —
+ * corrected toward the room's but able to lead it by a little — is never
+ * asked. `false` with no word from the room on this rider.
+ */
+export function acrossTheRoomsLine(
+  room: Pick<RoomConnection, 'own'> | undefined,
+  lineMetres: number | undefined,
+): boolean {
+  const own = room?.own();
+  if (own === undefined || lineMetres === undefined) return false;
+  return own.rider.distanceMetres >= lineMetres;
+}
+
+/**
  * What the race this ride was in comes to on this device — #785, the owner's
  * ruling of 2026-10-14: the result is stored with the ride. The ROOM's word
  * where it has said it: its finish order and this rider's place in it. For a
  * race the rider left while it ran, that it was ridden and no order was heard
  * — and, when `crossedTheLine`, that the rider was across the line on this
- * device first (#1360's review, N2: the room's `finish` waits for every
+ * room first (#1360's review, N2, and its re-review R1: the room's `finish` waits for every
  * rider, and a winner who ends their ride straight after the line did not
  * leave the race). No place then: nothing tells this device one before the
  * room's `finish`. `undefined` for a group ride, and for a race that never
