@@ -1958,7 +1958,7 @@ test.describe('a ride that may stop with the screen off — #647', () => {
  * ⚠️ Not held to `EASED_RIDER_CLEARANCE_PIXELS` upright: a room ride's HUD
  * comes within it at 360×752 (5 px on a Mac) whatever the notice says, which
  * is #1356's, as is the reading fields' collision excused below; the bottom
- * row below a 736×360 stage on the CI runner's fonts is #1358's.
+ * row below a phone-in-landscape stage on the CI runner's fonts is #1358's.
  */
 test.describe('the room’s notice, with its longest sentences — #785', () => {
   for (const [query, words] of [
@@ -1988,10 +1988,11 @@ test.describe('the room’s notice, with its longest sentences — #785', () => 
             // without any notice, each filed, are left to their issues:
             // - #1356: #783's reading fields over the rider on a phone (736×360
             //   here, and 844×390 on the CI runner's fonts);
-            // - #1358: at 736×360 the bottom row runs below the stage on the CI
-            //   runner's fonts (the notice's cell is IN that row, so it goes
-            //   with it: its top moves, its bottom is the row's).
-            const short = viewport.name.includes('736×360');
+            // - #1358: on a phone in landscape (736×360, and 844×390 by 3 px)
+            //   the bottom row runs below the stage on the CI runner's fonts,
+            //   its height set by the actions panel, not the notice (the
+            //   notice's cell is IN that row, so it goes with it).
+            const short = viewport.height < viewport.width && viewport.height <= 400;
             const bottomRow = ['oyl-hud__actions', 'oyl-hud__notices', 'oyl-hud__route'];
             const known = (each: string): boolean =>
               !each.includes(' × ') &&
