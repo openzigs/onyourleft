@@ -1298,11 +1298,16 @@ export function createIdentity(options: IdentityOptions): Identity {
         const held = await account(caller.athleteId);
         if (held === undefined || !held.publicRooms.eligible) return refuse('not_eligible');
       }
+      // #1347: a race names its riders to each other, by the ONE public
+      // projection (#774) — a name a moderator hid is `Rider` already.
+      const athlete = await store.getAthlete(caller.athleteId);
+      if (athlete === undefined) return refuse('not_found');
       return {
         ok: true,
         value: tickets.mint(roomId, {
           athleteId: caller.athleteId,
           declaredMassKilograms: declaredMass,
+          displayName: publicAthlete(athlete).displayName,
         }),
       };
     },

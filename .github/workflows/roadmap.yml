@@ -1,0 +1,92 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Keep the GitHub Projects roadmap board in step with the issues, nightly -- #1348.
+# The board is https://github.com/orgs/openzigs/projects/1; docs/roadmap-board.md
+# says what fills each field and how the App behind the token was set up.
+#
+# ⚠️ NOT a required check, and it never runs on a pull request: it holds a token
+# that can write every project in the org, and a pull request -- from a fork
+# above all -- must never reach it. So the triggers are `schedule` and
+# `workflow_dispatch` ONLY; the target-context pull-request trigger is banned
+# (WF001) and the plain `pull_request` trigger is left out on purpose. The
+# script's tests run in the required check instead, from
+# scripts/check-repo-rules.test.sh. The private key lives in the Environment
+# `roadmap`, whose deployments are limited to `main`.
+name: Roadmap board sync
+
+on:
+  schedule:
+    # 04:41 UTC: off the hour, and clear of the nightly job's 03:17.
+    - cron: '41 4 * * *'
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: Print the planned changes and write nothing
+        type: boolean
+        default: false
+
+# The checkout needs no more. The board is written with the App's token, never
+# with GITHUB_TOKEN, which cannot write an organisation's project.
+permissions:
+  contents: read
+
+concurrency:
+  group: roadmap-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sync the roadmap board
+    runs-on: ubuntu-latest
+    environment: roadmap
+    # A first fill is about 400 writes at one a second; the rest is reads.
+    timeout-minutes: 20
+    steps:
+      # Skip, green and saying why, until the App is configured: a nightly run
+      # that went red before the owner made the App would be an alarm for
+      # nothing. Every later step is conditional on this one.
+      - name: Check the App is configured
+        id: configured
+        env:
+          CLIENT_ID: ${{ vars.ROADMAP_APP_CLIENT_ID }}
+        run: |
+          if [ -z "${CLIENT_ID}" ]; then
+            echo "::notice title=Roadmap sync skipped::ROADMAP_APP_CLIENT_ID is not set in the 'roadmap' environment; see docs/roadmap-board.md"
+            echo "ready=false" >> "${GITHUB_OUTPUT}"
+          else
+            echo "ready=true" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Check out the repository
+        if: steps.configured.outputs.ready == 'true'
+        # Pinned to a full commit SHA, as in rules.yml:
+        #   gh api repos/actions/checkout/git/ref/tags/v7.0.1 --jq .object.sha
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Mint the App token
+        if: steps.configured.outputs.ready == 'true'
+        id: app-token
+        # Pinned to a full commit SHA (v3.3.0, released 2026-10-12):
+        #   gh api repos/actions/create-github-app-token/git/ref/tags/v3.3.0 --jq .object.sha
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.ROADMAP_APP_CLIENT_ID }}
+          private-key: ${{ secrets.ROADMAP_APP_PRIVATE_KEY }}
+          owner: openzigs
+          repositories: onyourleft
+          permission-organization-projects: write
+          permission-issues: read
+
+      - name: Sync the board
+        if: steps.configured.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          DRY_RUN: ${{ inputs.dry-run }}
+        run: |
+          args=(--org openzigs --project 1 --status-update)
+          if [ "${DRY_RUN}" = "true" ]; then
+            args+=(--dry-run)
+          fi
+          python3 -I scripts/sync-roadmap.py "${args[@]}"

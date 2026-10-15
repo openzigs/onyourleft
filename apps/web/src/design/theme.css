@@ -6468,6 +6468,98 @@ select.oyl-input {
 }
 
 /*
+ * A RACE'S STANDINGS — #1347, ADR 0051.
+ *
+ * Visually hidden everywhere (by clip, as `.oyl-visually-hidden`, so a screen
+ * reader still reaches the list on request) and shown only on a TABLET: the
+ * corners layout at 47 rem tall or more — 1280×800, 1024×768 and 800×1280.
+ * ⚠️ **What that costs, recorded as #419 asks: on a phone a racer sees no
+ * list**, and keeps *Follow* and its one gap. A phone's corners are taken, and
+ * the middle of its stage is the rider; a list there would be over the rider
+ * or over *End ride*, which is the one thing #423's layout exists to prevent.
+ *
+ * On a tablet it is a panel of its own in the notices row, at the END edge,
+ * top-aligned under the secondary readings — a notice keeps the start edge,
+ * so the two never meet (22 rem + 18 rem is under the narrowest tablet's 50).
+ * `ride.browser.spec.ts` §"#1347" measures it whole, over no panel and clear
+ * of the leaning rider at all three, both with anchor positioning and without.
+ */
+.oyl-hud .oyl-hud__standings {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (min-width: 46rem) and (min-height: 47rem) {
+  .oyl-game--riding .oyl-hud .oyl-hud__standings {
+    position: static;
+    width: min(100%, 18rem);
+    height: auto;
+    margin: 0;
+    padding: var(--oyl-space-sm);
+    overflow: visible;
+    clip-path: none;
+    white-space: normal;
+    border: 1px solid var(--oyl-color-hud-border);
+    grid-area: notices;
+    align-self: start;
+    justify-self: end;
+  }
+}
+
+.oyl-hud__standings-summary {
+  margin: 0 0 var(--oyl-space-xs);
+  font-size: var(--oyl-font-size-sm);
+  color: var(--oyl-color-hud-ink-muted);
+}
+
+.oyl-hud__standings-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.oyl-hud__standings-line {
+  display: grid;
+  grid-template-columns: 1.75rem minmax(0, 1fr) auto auto;
+  column-gap: var(--oyl-space-xs);
+  align-items: baseline;
+  padding: 0.125rem 0;
+}
+
+.oyl-hud__standings-place {
+  color: var(--oyl-color-hud-ink-muted);
+}
+
+.oyl-hud__standings-who {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.oyl-hud__standings-gap,
+.oyl-hud__standings-figure {
+  text-align: end;
+  white-space: nowrap;
+}
+
+/* The rider's own line: said by its word ("You") and its weight, never by a tint alone. */
+.oyl-hud__standings-line--you {
+  font-weight: 700;
+}
+
+.oyl-hud__standings-flag {
+  font-size: var(--oyl-font-size-sm);
+}
+
+/*
  * A SHORT corners layout — a phone on its side, 360 to 480 px tall.
  *
  * ⚠️ #419 asks that whatever is given up be recorded, so: **the plan view and

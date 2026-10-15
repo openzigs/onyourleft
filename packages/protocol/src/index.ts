@@ -30,14 +30,18 @@ export type {
   Refuse,
   RefuseReason,
   Report,
+  RiderName,
   RidingPosition,
   RoomConfig,
   RoomKind,
   RoomMessage,
+  Standings,
+  StandingsRider,
   Welcome,
 } from './messages';
 export {
   FLAG_COASTING,
+  FLAG_FINISHED,
   FLAG_PLAUSIBILITY,
   FRAME_INTERVAL_MS,
   PROTOCOL_VERSION,
@@ -47,11 +51,13 @@ export {
 export type { Field, Shape } from './schema';
 export {
   CLIENT_MESSAGE_TYPES,
+  MAXIMUM_GAP_DECISECONDS,
   MAXIMUM_MESSAGE_BYTES,
   MAXIMUM_NESTING_DEPTH,
   MAXIMUM_REPORTED_POWER_WATTS,
   MAXIMUM_RIDERS,
   MAXIMUM_TICKET_LENGTH,
+  MAXIMUM_WATTS_PER_KILOGRAM_TENTHS,
   MESSAGE_FIELDS,
   ROOM_MESSAGE_TYPES,
 } from './schema';
