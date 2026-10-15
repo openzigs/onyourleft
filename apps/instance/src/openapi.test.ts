@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { TEST_STATEMENT } from './moderation/moderation-testing.ts';
 import { readFileSync } from 'node:fs';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -170,9 +171,7 @@ async function moderatorAction(world: IdentityInstance, path: string): Promise<R
     'POST',
     `/v1/moderation/athletes/${target}/${path}`,
     await moderatorToken(world),
-    {
-      reason: 'Checked against the rules',
-    },
+    { reason: 'Checked against the rules', statement: TEST_STATEMENT },
   );
 }
 
@@ -367,6 +366,7 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
     const token = await moderatorToken(world);
     await send(world, 'POST', `/v1/moderation/athletes/${target}/suspend`, token, {
       reason: 'Cheating',
+      statement: TEST_STATEMENT,
     });
     return send(world, 'POST', `/v1/moderation/athletes/${target}/unsuspend`, token, {
       reason: 'Appeal upheld',
@@ -378,8 +378,24 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
     const token = await moderatorToken(world);
     await send(world, 'POST', `/v1/moderation/athletes/${target}/suspend`, token, {
       reason: 'Cheating',
+      statement: TEST_STATEMENT,
     });
     return send(world, 'GET', '/v1/moderation/suspended', token);
+  },
+  // #910: a rider whose name a moderator hid reads why.
+  listStatements: async (world) => {
+    const { token } = await signedIn(world);
+    const me = (await send(world, 'GET', '/v1/auth/session', token).then((r) => r.json())) as {
+      athleteId: string;
+    };
+    await send(
+      world,
+      'POST',
+      `/v1/moderation/athletes/${me.athleteId}/hide-display-name`,
+      await moderatorToken(world),
+      { reason: 'Slur in the name', statement: TEST_STATEMENT },
+    );
+    return send(world, 'GET', '/v1/statements', token);
   },
   getModerationLog: async (world) =>
     send(world, 'GET', '/v1/moderation/log', await moderatorToken(world)),
@@ -404,7 +420,7 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
       'POST',
       `/v1/moderation/athletes/${athleteId}/suspend`,
       await moderatorToken(world),
-      { reason: 'Checked against the rules' },
+      { reason: 'Checked against the rules', statement: TEST_STATEMENT },
     );
     world.clock.ms += 60_000;
     return send(

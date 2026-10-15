@@ -33,6 +33,7 @@ import {
   HISTORY_FIXTURE_CONVENTION,
   HISTORY_FIXTURE_DIMENSION,
   HISTORY_FIXTURE_MODEL,
+  seedStatements,
   seedWorld,
   type StoreHarness,
 } from './testing/index.ts';
@@ -304,6 +305,10 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   countNoticesSince: {
     notAScopedRead: 'a count across the instance, never a row: the notices’ cap (#907)',
   },
+  listStatements: {
+    probe: async (store, athleteId) =>
+      (await store.listStatements(athleteId)).map((row) => ({ athleteId: row.targetAthleteId })),
+  },
   listNotices: { notAScopedRead: 'the moderators’ queue of notices, from anybody (#907)' },
   listModerationLog: { notAScopedRead: 'the moderators’ record: every action (#83)' },
   listModerationLogPage: {
@@ -419,6 +424,7 @@ let harness: StoreHarness;
 beforeAll(async () => {
   harness = await createStoreHarness();
   await harness.write(seedWorld);
+  await harness.write(seedStatements);
 });
 afterAll(() => harness.destroy());
 

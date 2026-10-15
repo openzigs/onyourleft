@@ -110,6 +110,9 @@ const NAMED_WITHOUT_A_FOREIGN_KEY: Readonly<
   'moderation_log.actor_athlete_id': {
     kept: 'the audit log is append-only: erasing an account does not erase what was done (#83)',
   },
+  'statement.target_athlete_id': {
+    kept: 'a statement of reasons is what the rider was told, kept with the append-only log it explains (#910)',
+  },
   'moderation_log.target_athlete_id': {
     kept: 'the audit log is append-only: a suspended rider cannot erase their record (#83)',
   },
@@ -228,6 +231,15 @@ describe('erasing an athlete (#769, #35)', () => {
         reportId: report!.id,
         reason: 'Seen',
         at: 1_790_001_000,
+        statement: {
+          facts: 'Seen',
+          decidedOn: 'own_initiative',
+          legalGround: null,
+          termsGround: 'Terms',
+          notifierNamed: null,
+          moderatorConflict: false,
+          endsAt: null,
+        },
       });
       await store.moderate({
         action: 'hide_display_name',
@@ -236,6 +248,15 @@ describe('erasing an athlete (#769, #35)', () => {
         reportId: null,
         reason: 'Seen',
         at: 1_790_001_000,
+        statement: {
+          facts: 'Seen',
+          decidedOn: 'own_initiative',
+          legalGround: null,
+          termsGround: 'Terms',
+          notifierNamed: null,
+          moderatorConflict: false,
+          endsAt: null,
+        },
       });
     });
     for (const column of columns) {

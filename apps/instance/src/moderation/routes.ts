@@ -17,6 +17,7 @@ import { pageResponse } from '../html.ts';
 import { json, noContent, type Route, type RouteContext, type Schema } from '../route-kit.ts';
 import type { AthleteAction, Moderation, ModerationResult } from './moderation.ts';
 import { NOTICE_PAGE_PATH, noticePage } from './notices.ts';
+import { statementView as toStatementView } from './statements.ts';
 
 function moderationOf(context: RouteContext): Moderation {
   // The handler answers `unavailable` before calling a route that declares
@@ -88,6 +89,45 @@ const actionResponse: Route['response'] = {
   schema: object({ logId: integer }),
 };
 
+const decidedOn: Schema = { type: 'string', enum: ['notice', 'report', 'own_initiative'] };
+
+/**
+ * A restriction's statement of reasons, as a moderator sends it (#910):
+ * required of a suspension and of hiding a display name.
+ */
+const statementInput = object(
+  {
+    facts: string,
+    decidedOn,
+    legalGround: nullableString,
+    termsGround: nullableString,
+    notifierNamed: nullableString,
+    moderatorConflict: { type: 'boolean' },
+    endsAt: nullableInteger,
+  },
+  ['facts', 'decidedOn'],
+);
+
+/** A statement as the affected rider reads it (#910): every Art. 17(3) part. */
+const statementView = object({
+  statementId: integer,
+  at: integer,
+  restriction: string,
+  endsAt: nullableInteger,
+  facts: string,
+  decidedOn,
+  legalGround: nullableString,
+  termsGround: nullableString,
+  notifierNamed: nullableString,
+  moderatorConflict: { type: 'boolean' },
+  automated: { type: 'boolean' },
+  redress: object({
+    contactEmail: nullableString,
+    outOfCourt: { type: 'boolean' },
+    court: { type: 'boolean' },
+  }),
+});
+
 /** One moderator action on an athlete. */
 function athleteAction(
   path: string,
@@ -105,7 +145,7 @@ function athleteAction(
     summary,
     identity: true,
     auth: 'session',
-    request: object({ reason: string, reportId: integer }, ['reason']),
+    request: object({ reason: string, reportId: integer, statement: statementInput }, ['reason']),
     errors: ['unauthenticated', 'validation_failed', 'moderation_not_applicable'],
     response: actionResponse,
     handle: async (context) =>
@@ -113,6 +153,7 @@ function athleteAction(
         await moderationOf(context).act(callerId(context), action, context.params.athleteId ?? '', {
           reason: context.json.reason,
           reportId: context.json.reportId,
+          statement: context.json.statement,
         }),
         (value) => json(value),
       ),
@@ -120,6 +161,30 @@ function athleteAction(
 }
 
 export const MODERATION_ROUTES: readonly Route[] = [
+  {
+    method: 'GET',
+    path: '/v1/statements',
+    operationId: 'listStatements',
+    reaches: 'own',
+    // #910: a SUSPENDED rider reads why, through the way-out session
+    // (`POST /v1/auth/leave-session`), and nothing more.
+    admitsSuspended: true,
+    summary:
+      'The statements of reasons about this athlete (#910), newest first: for every restriction a moderator imposed on them, what was done and for how long, the facts, what it was decided on, the law or terms relied on, that no automated means were used, and how to ask for it to be looked at again. A suspended rider reads them through the way-out session. Nobody else’s, and never a notifier the moderator did not name.',
+    identity: true,
+    auth: 'session',
+    errors: ['unauthenticated'],
+    response: {
+      contentType: 'application/json',
+      schema: object({ statements: { type: 'array', items: statementView } }),
+    },
+    handle: async (context) =>
+      json({
+        statements: (await moderationOf(context).statements(callerId(context))).map((each) =>
+          toStatementView(each, context.config.legal),
+        ),
+      }),
+  },
   {
     method: 'GET',
     path: NOTICE_PAGE_PATH,

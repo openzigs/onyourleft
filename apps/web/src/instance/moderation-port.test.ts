@@ -33,6 +33,7 @@ import {
   type ModerationPort,
   type ModerationPortDependencies,
   type ModerationRead,
+  type StatementInput,
 } from './moderation-port';
 
 interface TestDevice {
@@ -213,6 +214,15 @@ async function moderatedWorld(): Promise<World> {
   };
 }
 
+/** A restriction's statement of reasons (#910): a suspension or a hidden name needs one. */
+const STATEMENT: StatementInput = {
+  facts: 'Abuse of other riders in a room.',
+  decidedOn: 'report',
+  legalGround: '',
+  termsGround: 'The terms of service, on abuse.',
+  moderatorConflict: false,
+};
+
 function asModerator(read: ModerationRead) {
   if (read.kind !== 'moderator') throw new Error(`not a moderator's read: ${read.kind}`);
   return read;
@@ -309,8 +319,20 @@ describe('who is a moderator — #955', () => {
     const real = await rider('Real');
     for (const approved of [false, true]) {
       if (approved) await moderator.decideRegistration(ordinaryId, 'approve', 'ok');
-      const somebody = await ordinary.actOnAccount(real.athleteId, 'suspend', 'testing');
-      const nobody = await ordinary.actOnAccount('nobody-at-all', 'suspend', 'testing');
+      const somebody = await ordinary.actOnAccount(
+        real.athleteId,
+        'suspend',
+        'testing',
+        undefined,
+        STATEMENT,
+      );
+      const nobody = await ordinary.actOnAccount(
+        'nobody-at-all',
+        'suspend',
+        'testing',
+        undefined,
+        STATEMENT,
+      );
       expect(somebody).toEqual({ kind: 'refused', text: NOTHING_CHANGED_TEXT });
       expect(nobody).toEqual(somebody);
       expect(await ordinary.dismissReport(1, 'testing')).toEqual(somebody);
@@ -382,6 +404,74 @@ describe('the approval queue — #775, #955', () => {
   });
 });
 
+describe('a restriction’s statement of reasons — #910', () => {
+  it('sends nothing for a suspension or a hidden name without one, and says why', async () => {
+    const { moderator, rider, send } = await moderatedWorld();
+    const carys = await rider('Carys');
+    const sent = send.mock.calls.length;
+    for (const statement of [
+      undefined,
+      { ...STATEMENT, facts: '  ' },
+      { ...STATEMENT, legalGround: '', termsGround: ' ' },
+    ]) {
+      expect(
+        await moderator.actOnAccount(carys.athleteId, 'suspend', 'Abuse.', undefined, statement),
+      ).toEqual({ kind: 'refused', text: MODERATION_REFUSAL_TEXT.statement });
+    }
+    expect(send.mock.calls.length).toBe(sent);
+    // Lifting a suspension restricts nobody, and needs none.
+    expect(await moderator.actOnAccount(carys.athleteId, 'unsuspend', 'Lifted.')).toEqual({
+      kind: 'refused',
+      text: NOTHING_CHANGED_TEXT,
+    });
+  });
+
+  it('is what the rider then reads from the instance, with blank grounds sent as none', async () => {
+    const { world, moderator, rider } = await moderatedWorld();
+    const carys = await rider('Carys');
+    await moderator.decideRegistration(carys.athleteId, 'approve', 'ok');
+    expect(
+      await moderator.actOnAccount(carys.athleteId, 'hide_display_name', 'Rude.', undefined, {
+        ...STATEMENT,
+        moderatorConflict: true,
+      }),
+    ).toEqual({ kind: 'done' });
+    const read = await world.call('GET', '/v1/statements', { token: carys.token });
+    expect(read.status).toBe(200);
+    expect((read.body as { statements: unknown[] }).statements).toEqual([
+      expect.objectContaining({
+        restriction: 'hide_display_name',
+        facts: STATEMENT.facts,
+        decidedOn: 'report',
+        legalGround: null,
+        termsGround: STATEMENT.termsGround,
+        moderatorConflict: true,
+      }),
+    ]);
+  });
+
+  it('says a statement the instance refused was the statement, not the reason', async () => {
+    const world = await moderatedWorld();
+    const carys = await world.rider('Carys');
+    const refused = await answeredAt(
+      world,
+      `/v1/moderation/athletes/${carys.athleteId}/suspend`,
+      () =>
+        Response.json(
+          {
+            error: {
+              code: 'validation_failed',
+              message: 'x',
+              fields: [{ field: 'statement.facts', problem: 'must not name a coordinate' }],
+            },
+          },
+          { status: 400 },
+        ),
+    ).actOnAccount(carys.athleteId, 'suspend', 'Abuse.', undefined, STATEMENT);
+    expect(refused).toEqual({ kind: 'refused', text: MODERATION_REFUSAL_TEXT.statement });
+  });
+});
+
 describe('reports, suspending and hiding — #83, #905, #955', () => {
   it('decides a report by acting on its account, which closes it', async () => {
     const { world, moderator, rider } = await moderatedWorld();
@@ -407,6 +497,7 @@ describe('reports, suspending and hiding — #83, #905, #955', () => {
         'suspend',
         'For the report.',
         report?.reportId,
+        STATEMENT,
       ),
     ).toEqual({ kind: 'done' });
 
@@ -425,7 +516,13 @@ describe('reports, suspending and hiding — #83, #905, #955', () => {
       kind: 'done',
     });
     expect(
-      await moderator.actOnAccount(` ${carys.athleteId} `, 'hide_display_name', 'Rude name.'),
+      await moderator.actOnAccount(
+        ` ${carys.athleteId} `,
+        'hide_display_name',
+        'Rude name.',
+        undefined,
+        STATEMENT,
+      ),
     ).toEqual({
       kind: 'done',
     });
@@ -474,10 +571,22 @@ describe('reports, suspending and hiding — #83, #905, #955', () => {
     const { moderator, rider, me } = await moderatedWorld();
     const carys = await rider('Carys');
     await moderator.decideRegistration(carys.athleteId, 'approve', 'ok');
-    await moderator.actOnAccount(carys.athleteId, 'suspend', 'First time.');
-    const nobody = await moderator.actOnAccount('nobody-at-all', 'suspend', 'why');
-    const already = await moderator.actOnAccount(carys.athleteId, 'suspend', 'Again.');
-    const themselves = await moderator.actOnAccount(me, 'suspend', 'Myself.');
+    await moderator.actOnAccount(carys.athleteId, 'suspend', 'First time.', undefined, STATEMENT);
+    const nobody = await moderator.actOnAccount(
+      'nobody-at-all',
+      'suspend',
+      'why',
+      undefined,
+      STATEMENT,
+    );
+    const already = await moderator.actOnAccount(
+      carys.athleteId,
+      'suspend',
+      'Again.',
+      undefined,
+      STATEMENT,
+    );
+    const themselves = await moderator.actOnAccount(me, 'suspend', 'Myself.', undefined, STATEMENT);
     const noReport = await moderator.dismissReport(999, 'why');
     expect(nobody).toEqual({ kind: 'refused', text: NOTHING_CHANGED_TEXT });
     expect(already).toEqual(nobody);
@@ -492,9 +601,9 @@ describe('the suspended accounts — #961', () => {
     const carys = await rider('Carys');
     const dafydd = await rider('Dafydd');
     expect(asModerator(await moderator.read()).suspended).toEqual({ items: [], next: null });
-    await moderator.actOnAccount(carys.athleteId, 'suspend', 'First.');
+    await moderator.actOnAccount(carys.athleteId, 'suspend', 'First.', undefined, STATEMENT);
     world.clock.ms += 1000;
-    await moderator.actOnAccount(dafydd.athleteId, 'suspend', 'Second.');
+    await moderator.actOnAccount(dafydd.athleteId, 'suspend', 'Second.', undefined, STATEMENT);
     const read = asModerator(await moderator.read());
     expect(read.suspended?.items.map((each) => [each.athleteId, each.displayName])).toEqual([
       [dafydd.athleteId, 'Dafydd'],
@@ -516,7 +625,7 @@ describe('the suspended accounts — #961', () => {
     const ids: string[] = [];
     for (let index = 0; index <= SUSPENDED_PAGE; index += 1) {
       const each = await rider(`Rider ${String(index)}`);
-      await moderator.actOnAccount(each.athleteId, 'suspend', 'r');
+      await moderator.actOnAccount(each.athleteId, 'suspend', 'r', undefined, STATEMENT);
       ids.push(each.athleteId);
     }
     expect(world.clock.ms).toBeGreaterThan(0);
@@ -661,7 +770,13 @@ describe('the moderation log — #891, #899, #955', () => {
     await moderator.decideRegistration(ordinaryId, 'approve', 'ok');
     // Enough actions for a second page: a suspension put on and lifted, over and over.
     for (let round = 0; round < MODERATION_LOG_PAGE; round += 1) {
-      await moderator.actOnAccount(carys.athleteId, round % 2 === 0 ? 'suspend' : 'unsuspend', 'r');
+      await moderator.actOnAccount(
+        carys.athleteId,
+        round % 2 === 0 ? 'suspend' : 'unsuspend',
+        'r',
+        undefined,
+        STATEMENT,
+      );
     }
     const first = asModerator(await moderator.read()).log;
     expect(first?.items).toHaveLength(MODERATION_LOG_PAGE);
@@ -698,7 +813,13 @@ describe('the moderation log — #891, #899, #955', () => {
     const { world, moderator, rider } = await moderatedWorld();
     const carys = await rider('Carys');
     await moderator.decideRegistration(carys.athleteId, 'approve', 'Known to the club.');
-    await moderator.actOnAccount(carys.athleteId, 'hide_display_name', 'Rude name.');
+    await moderator.actOnAccount(
+      carys.athleteId,
+      'hide_display_name',
+      'Rude name.',
+      undefined,
+      STATEMENT,
+    );
     const before = logOf(await moderator.read());
 
     const erased = await world.call('DELETE', '/v1/account', {
