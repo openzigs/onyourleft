@@ -141,7 +141,7 @@ export function createGhostPort(dependencies: GhostPortDependencies): GhostPort 
         if (ghost === undefined) return { kind: 'unavailable' };
         return ghost === null ? { kind: 'none' } : { kind: 'ghost', ghost };
       } catch {
-        // No answer: the ride goes ahead with no ghost, and says so.
+        // No answer: the ride does not start, and says so.
         return { kind: 'unavailable' };
       }
     },

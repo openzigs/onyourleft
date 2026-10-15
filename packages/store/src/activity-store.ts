@@ -1298,8 +1298,8 @@ export class ActivityStore {
    * relaxed. #331 relaxed it without calling this: every athlete on a device
    * is that device's rider, so another rider's ghost is read from the
    * instance instead (ADR 0039 D-2.5, `apps/instance` §`listRaceableOnRoute`),
-   * which applies the same two conditions and the route. And it does not decide whether a ride is OFFERED: a ride whose
-   * rider's privacy-zone trim touches the raced route is refused as well
+   * which applies the same two conditions and the route. And it does not
+   * decide whether a ride is OFFERED: a ride whose rider's privacy-zone trim touches the raced route is refused as well
    * (ADR 0021 D-5.2), which needs that rider's zones and is not this read's.
    *
    * ⚠️ **It is not scoped to one athlete, on purpose**, and the first

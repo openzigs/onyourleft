@@ -1056,7 +1056,11 @@ export function GameView(props: GameViewProps): JSX.Element {
           courseEndEvent(course, simulationRef.current.state.ride.distance),
         );
       }
-      trainerPortRef.current?.gameRideEnded(outcomeRef.current);
+      // ⚠️ Another rider's ghost is never a result about the rider's own best
+      // (ride-result.ts, ADR 0039 D-2.4): hand nothing, not what it settled.
+      trainerPortRef.current?.gameRideEnded(
+        ghostRiderRef.current === undefined ? outcomeRef.current : undefined,
+      );
     }
     // #782: leave the room — its socket, its reconnects and its hold on the
     // screen-off service go with the ride.

@@ -479,6 +479,38 @@ describe('racing another rider’s ghost (#331)', () => {
     expect(hudField('Your best')).toBe('');
   });
 
+  it('hands the recording no outcome for another rider’s ghost, even when the rider beats it', async () => {
+    const route = { ...testRoute(), attempts: 1 };
+    const hopeless = buildGhostTrack({ elapsedSeconds: [0, 4], distanceMetres: [0, 3] });
+    const { port } = riderPort(route, { kind: 'ghost', rider: 'Bea', track: hopeless });
+    const handed: (string | undefined)[] = [];
+    const trainer: GameTrainerPort = {
+      readTrainer: () => NO_GAME_TRAINER,
+      askForControlOnRide: () => Promise.resolve(),
+      workoutRescue: () => undefined,
+      recordingMayStop: () => false,
+      gameRideEnded: (outcome) => {
+        handed.push(outcome);
+      },
+      rideMovingSeconds: () => undefined,
+      watchRide: () => () => undefined,
+    };
+    mounted = await mount(<GameView port={port} trainer={trainer} now={() => nowMs} />);
+    await settle();
+    await clickThrough(toggle('Race another rider'));
+    await clickThrough(
+      queryAll<HTMLButtonElement>(mounted.container, 'button').find((button) =>
+        (button.textContent ?? '').startsWith('Ride '),
+      ),
+    );
+    await pump(60);
+    expect(hudField('Bea')).toBe('Beaten by you');
+    await clickThrough(endRideButton());
+    pending = [];
+    // A comparison with another rider is never a result about the rider's own best.
+    expect(handed).toEqual([undefined]);
+  });
+
   it('turns the rider’s own ghost off when another rider’s is turned on', async () => {
     const route = { ...testRoute(), attempts: 1 };
     mounted = await mount(
