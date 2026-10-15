@@ -97,6 +97,7 @@ import {
   nextToFollow,
   RACE_NOTICE_LABEL,
   raceEvent,
+  raceFactOf,
   raceNotice,
   riderEvents,
   ROOM_LOST_SPOKEN,
@@ -1004,6 +1005,11 @@ export function GameView(props: GameViewProps): JSX.Element {
         );
       }
       trainerPortRef.current?.gameRideEnded(outcomeRef.current);
+      // #785: the race this ride was in, as its room said it, kept with the
+      // recording under the ride so it is saved with it on this device —
+      // read before the room is left, while the session still holds it.
+      const race = raceFactOf(roomIdRef.current, roomRef.current?.race());
+      if (race !== undefined) trainerPortRef.current?.roomRaceEnded?.(race);
     }
     // #782: leave the room — its socket, its reconnects and its hold on the
     // screen-off service go with the ride.
@@ -1233,6 +1239,12 @@ export function GameView(props: GameViewProps): JSX.Element {
           ? entered.code !== undefined
           : props.madeTheRoom === true;
       if (props.room !== undefined && roomId !== undefined && port !== undefined) {
+        // #785, the owner's ruling of 2026-10-14: a ride in a room always
+        // records — a recording is started under it when none is running.
+        // Not awaited: joining the room does not wait on the recorder, and
+        // a recording that cannot start leaves the ride unrecorded, as a
+        // ride with no recording is today (the HUD's moving time a dash).
+        void props.trainer?.recordRoomRide?.();
         const sensorsNow = port;
         roomStateRef.current = roomRideState();
         roomRef.current = props.room.join({

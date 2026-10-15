@@ -245,6 +245,30 @@ describe('criterion 1 — a ride with no position renders without a map', () => 
     expect(summary?.textContent).not.toMatch(/\b0\.0\b/);
   });
 
+  it('states the private race the ride was ridden in, as its room said it, and nothing for a ride in none — #785', async () => {
+    const terms = () =>
+      queryAll(document.querySelector('.oyl-ride-summary') as Element, 'dt').map(
+        (term) => term.textContent,
+      );
+    mounted = await open(
+      stubDetail(ATHLETE, {
+        activity: stubActivity({
+          hasPosition: false,
+          rideFacts: { race: { roomId: 'room-race', place: 2, finishers: 5 } },
+        }),
+        channels: { power: powerSeries(600) },
+        laps: [],
+      }),
+    );
+    const row = [...document.querySelectorAll('.oyl-ride-summary > div')].find(
+      (each) => each.querySelector('dt')?.textContent === 'Race',
+    );
+    expect(row?.querySelector('dd')?.textContent).toBe('2nd of 5 in a private race');
+    mounted.unmount();
+    mounted = await open(indoorRide());
+    expect(terms()).not.toContain('Race');
+  });
+
   it('offers no shared view at all, because there is no track to share', async () => {
     mounted = await open(indoorRide());
     expect(document.body.textContent).not.toContain('What a shared copy would contain');

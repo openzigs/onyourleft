@@ -20,6 +20,8 @@
  * the race (ADR 0028 D-7.7), and this only puts it into words.
  */
 
+import type { RoomRaceFact } from '@onyourleft/store';
+
 import type { RaceFlag, RaceResultRow } from '../net/rooms-port';
 
 /** One line of a result, in parts a screen lays out. */
@@ -97,4 +99,16 @@ export function raceResultLines(
       you: row.you,
     };
   });
+}
+
+/**
+ * A ride's race, as this device kept it with the ride — #785, the owner's
+ * ruling of 2026-10-14 — in the words of the ride's page. The room's place
+ * and nothing of any other rider (`packages/store` §`RoomRaceFact`).
+ * ⚠️ Draft wording awaiting the owner's approval.
+ */
+export function raceFactText(race: RoomRaceFact): string {
+  if (race.finishers === null) return 'A private race, left before it was over';
+  if (race.place === null) return 'A private race, not finished';
+  return `${ordinal(race.place)} of ${String(race.finishers)} in a private race`;
 }

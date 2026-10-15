@@ -151,7 +151,16 @@ export type RoomRace =
   | { readonly kind: 'waiting' }
   | { readonly kind: 'counting'; readonly endsAtLocalMs: number }
   | { readonly kind: 'running' }
-  | { readonly kind: 'finished'; readonly order: readonly number[] };
+  | {
+      readonly kind: 'finished';
+      readonly order: readonly number[];
+      /**
+       * This rider's place in the room's order, 1 for the winner, or `null`
+       * when they are not in it (#785) — read off the room's order, never
+       * worked out here.
+       */
+      readonly place: number | null;
+    };
 
 /** Where a session is. */
 export type RoomSessionStatus =
@@ -270,7 +279,11 @@ export class RoomSession {
   /** Where a race is, as the room has said — see {@link RoomRace}. */
   race(): RoomRace {
     if (this.#kind !== 'race') return { kind: 'not-a-race' };
-    if (this.#finish !== undefined) return { kind: 'finished', order: this.#finish.order };
+    if (this.#finish !== undefined) {
+      const order = this.#finish.order;
+      const at = this.#riderId === undefined ? -1 : order.indexOf(this.#riderId);
+      return { kind: 'finished', order, place: at === -1 ? null : at + 1 };
+    }
     if (this.#framed) return { kind: 'running' };
     const countdown = this.#countdown;
     if (countdown !== undefined) {

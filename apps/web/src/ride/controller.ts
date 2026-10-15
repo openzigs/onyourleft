@@ -97,6 +97,7 @@ import type {
   AthleteId,
   LapId,
   RecordingSessionId,
+  RoomRaceFact,
   WorkoutRecord,
 } from '@onyourleft/store';
 
@@ -1005,6 +1006,23 @@ export interface RideController {
    */
   noteGameRideEnded(outcome: GhostOutcome | undefined): void;
   /**
+   * A game ride in a room is starting — #785, the owner's ruling of
+   * 2026-10-14: *"a ride in a room always records"*. Makes sure a recording
+   * is under it: a recording or paused ride carries on (a paused one stays
+   * paused until the rider resumes it, #516), an idle controller starts one, and a stopped ride whose save is
+   * done is put away and a new one started. Answers whether a recording is
+   * now running. ⚠️ Writes nothing to the trainer: recording is not
+   * resistance.
+   */
+  recordForRoom(): Promise<boolean>;
+  /**
+   * A game ride in a private race ended, and this is what its room said of
+   * the race — #785. Kept for the recording in progress and saved with it
+   * (`RideFacts.race`); ignored unless a ride is recording or paused, for
+   * {@link noteGameRideEnded}'s reason. The last race noted is kept.
+   */
+  noteRoomRace(race: RoomRaceFact): void;
+  /**
    * A game ride on a course left the line, crossed it, or ended part-way
    * round — #1312. The laps of a course belong to the RECORDING: each is
    * marked here on the recorder's own clock, kept by the recorder (and so in
@@ -1258,6 +1276,8 @@ export function createRideController(options: RideControllerOptions): RideContro
   let resultAnnounced = false;
   /** The last game ride's latched outcome, for this recording. @see RideController.noteGameRideEnded */
   let gameOutcome: GhostOutcome | undefined;
+  /** The private race this recording rode, as its room said it (#785). @see RideController.noteRoomRace */
+  let roomRace: RoomRaceFact | undefined;
   /**
    * The course laps of this recording as the HUD was told them, in order —
    * each worked out as its line was crossed. What is SAVED is the recorder's
@@ -2505,6 +2525,7 @@ export function createRideController(options: RideControllerOptions): RideContro
     outcomeInGame: GhostOutcome | undefined,
     workoutFinished?: boolean,
     replans: readonly ReplanRecord[] = [],
+    race?: RoomRaceFact,
   ): Promise<void> => {
     const port = options.rideSave;
     if (port === undefined || current === undefined) {
@@ -2533,6 +2554,8 @@ export function createRideController(options: RideControllerOptions): RideContro
       laps: { ridden: current.courseLaps, newLapId: port.newLapId },
       // #1244, P9: every re-plan decision made on this ride. None is no key.
       ...(replans.length === 0 ? {} : { replans }),
+      // #785: the race this ride was ridden in, as its room said it.
+      ...(race === undefined ? {} : { race }),
     });
     const outcome = await saveFinishedRide(port.store, finished);
 
@@ -3150,6 +3173,22 @@ export function createRideController(options: RideControllerOptions): RideContro
       }
     },
 
+    async recordForRoom(): Promise<boolean> {
+      // A paused ride is a ride in progress and is LEFT paused: only the
+      // rider's own Resume resumes one (#516, `one-pauser.test.ts`).
+      if (phase === 'recording' || phase === 'paused') return true;
+      if (phase === 'stopped' && !(await controller.startNewRide())) return false;
+      await controller.start();
+      return rideInProgress(phase);
+    },
+
+    noteRoomRace(race: RoomRaceFact): void {
+      if (phase !== 'recording' && phase !== 'paused') {
+        return;
+      }
+      roomRace = race;
+    },
+
     noteCourseLine(event: CourseLineEvent): readonly LapFigures[] | undefined {
       const session = recorder?.session;
       if (session === undefined || (phase !== 'recording' && phase !== 'paused')) {
@@ -3278,7 +3317,14 @@ export function createRideController(options: RideControllerOptions): RideContro
         await stopTrainer();
         await recording().stop(at);
         changed();
-        await saveTheRide(recorder, ridden, gameOutcome, workoutFinishedInRide, replanRecords);
+        await saveTheRide(
+          recorder,
+          ridden,
+          gameOutcome,
+          workoutFinishedInRide,
+          replanRecords,
+          roomRace,
+        );
       } catch (error: unknown) {
         // Fail closed (#565's second review). Nothing on today's paths throws
         // here, but if something did before `saveTheRide` set the outcome, the
@@ -3323,6 +3369,8 @@ export function createRideController(options: RideControllerOptions): RideContro
       // here (or a fresh controller), so `start` needs no second reset — two
       // would each be invisible to the suite.
       gameOutcome = undefined;
+      // #785: and its race, for the same reason.
+      roomRace = undefined;
       // #1312: and its laps, here and only here, for the same reason.
       courseLaps = [];
       lapFrom = undefined;

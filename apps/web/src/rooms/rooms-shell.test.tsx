@@ -29,6 +29,7 @@ import type { GamePort, RidableRoute } from '../game/GameView';
 import type { GameRenderer } from '../game/port';
 import { ANNOUNCEMENTS_STORAGE_KEY, DEFAULT_ANNOUNCEMENTS } from '../game/hud/announce-preference';
 import { RACE_TEXT, ROOM_REFUSED_TEXT } from '../game/room-ride';
+import { gameTrainerPortOver, type GameTrainerPort } from '../game/trainer-port';
 import type { InstanceSocketEvents, OpenInstanceSocket } from '../instance/instance-transport';
 import { INSTANCE_SESSION_STORAGE_KEY } from '../instance/instance-port';
 import { INSTANCE_ACCOUNT_STORAGE_KEY } from '../instance/sign-in';
@@ -183,11 +184,13 @@ async function shell(
   instance: ScriptedInstance,
   sockets: ReturnType<typeof handPlayedSockets>,
   zones = [zoneNorth(50_000)],
+  gameTrainer?: GameTrainerPort,
 ) {
   mounted = await mount(
     <AppShell
       capabilities={NO_BLUETOOTH}
       game={GAME}
+      {...(gameTrainer === undefined ? {} : { gameTrainer })}
       gameRenderer={() => Promise.resolve(RENDERER)}
       riderMass={kilograms(70)}
       rooms={createRoomsPort({
@@ -366,7 +369,7 @@ describe('making a room — #784', () => {
 });
 
 describe('a private race — #785', () => {
-  async function inARace(): Promise<{
+  async function inARace(gameTrainer?: GameTrainerPort): Promise<{
     instance: ScriptedInstance;
     sockets: ReturnType<typeof handPlayedSockets>;
     sha256: string;
@@ -375,7 +378,7 @@ describe('a private race — #785', () => {
     const { gpx, sha256 } = await roomRoute(2_500);
     instance.offer('room-race', 'race', gpx, sha256);
     const sockets = handPlayedSockets();
-    await shell(instance, sockets);
+    await shell(instance, sockets, undefined, gameTrainer);
     await joinByCode('ABCDE-FGHJK-MNPQR');
     await press('Ride in the room');
     await settle();
@@ -560,5 +563,33 @@ describe('a private race — #785', () => {
     expect(rows[2]).toMatch(/3rd You — 1:05:00, 3\.4 W\/kg, \d+ W/);
     for (const other of rows.slice(0, 2)) expect(other).not.toMatch(/\d W\b(?!\/kg)/);
     expect(instance.seen.at(-1)).toMatchObject({ path: '/v1/rooms/room-race/results' });
+  });
+
+  it('records the ride in the room, and keeps the room’s word on the race with it — #785, the owner’s ruling of 2026-10-14', async () => {
+    const asked: string[] = [];
+    const races: unknown[] = [];
+    const trainer: GameTrainerPort = {
+      ...gameTrainerPortOver(undefined),
+      recordRoomRide: () => {
+        asked.push('record');
+        return Promise.resolve(true);
+      },
+      roomRaceEnded: (race) => {
+        races.push(race);
+      },
+    };
+    const { sockets } = await inARace(trainer);
+    // A recording was asked for as the ride in the room began, and only once.
+    expect(asked).toEqual(['record']);
+    await sockets.say({ type: 'frame', tick: 1, riders: [] });
+    await frame(2);
+    // This rider is seat 1, third in the room's order.
+    await sockets.say({ type: 'finish', order: [0, 2, 1] });
+    await frame(2);
+    expect(races).toEqual([]);
+    await press('End ride');
+    await settle();
+    expect(races).toEqual([{ roomId: 'room-race', place: 3, finishers: 3 }]);
+    expect(asked).toEqual(['record']);
   });
 });

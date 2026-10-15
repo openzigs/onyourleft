@@ -13,6 +13,7 @@
  */
 
 import { pacerGap } from '@onyourleft/domain';
+import type { RoomRaceFact } from '@onyourleft/store';
 
 import type { AnnouncementEvent } from './hud/announce';
 import type { RoomConnection } from '../net/room-port';
@@ -290,6 +291,29 @@ export function raceEvent(
       return { said: kind, event: { kind: 'room-race', text: RACE_TEXT.finished } };
     default:
       return { said: kind };
+  }
+}
+
+/**
+ * What the race this ride was in comes to on this device — #785, the owner's
+ * ruling of 2026-10-14: the result is stored with the ride. The ROOM's word:
+ * its finish order and this rider's place in it, or — for a race the rider
+ * left while it ran — that it was ridden and no order was heard. `undefined`
+ * for a group ride, and for a race that never left its start line: nothing
+ * was raced.
+ */
+export function raceFactOf(
+  roomId: string | undefined,
+  race: RoomRace | undefined,
+): RoomRaceFact | undefined {
+  if (roomId === undefined || race === undefined) return undefined;
+  switch (race.kind) {
+    case 'finished':
+      return { roomId, place: race.place, finishers: race.order.length };
+    case 'running':
+      return { roomId, place: null, finishers: null };
+    default:
+      return undefined;
   }
 }
 

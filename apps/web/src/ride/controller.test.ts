@@ -6831,6 +6831,87 @@ describe('#1111 — the game HUD’s moving time is the recorder’s, and the sa
   });
 });
 
+describe('#785 — a ride in a room always records, and its race is saved with it', () => {
+  const ROOM = 'ab'.repeat(16);
+
+  it('starts a recording for a room ride from idle, and the race noted is saved with the ride', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    const game = gameTrainerPortOver(rig.controller);
+    await rig.controller.pair('trainer');
+    expect(rig.controller.getSnapshot().phase).toBe('idle');
+
+    expect(await game.recordRoomRide?.()).toBe(true);
+    expect(rig.controller.getSnapshot().phase).toBe('recording');
+    await ride(rig, 5);
+    game.roomRaceEnded?.({ roomId: ROOM, place: 2, finishers: 3 });
+
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect(rig.controller.getSnapshot().saveState).toBe('saved');
+    // Read back through the store, as the ride's page reads it.
+    const saved = await harness.read(async (store) =>
+      store.getActivity(ATHLETE_A, activityId('ride-1')),
+    );
+    expect(saved?.rideFacts?.race).toEqual({ roomId: ROOM, place: 2, finishers: 3 });
+    rig.controller.dispose();
+  });
+
+  it('carries on a recording already running, leaves a paused one for the rider to resume, and records nothing of a race with none', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    const game = gameTrainerPortOver(rig.controller);
+    await rig.controller.pair('trainer');
+    // Not recording: a race noted now is attached to nothing.
+    game.roomRaceEnded?.({ roomId: ROOM, place: 1, finishers: 1 });
+    await rig.controller.start();
+    await ride(rig, 3);
+    await rig.controller.pause();
+    expect(await game.recordRoomRide?.()).toBe(true);
+    // #516: only the rider's own Resume resumes a ride.
+    expect(rig.controller.getSnapshot().phase).toBe('paused');
+    await rig.controller.resume();
+    expect(await game.recordRoomRide?.()).toBe(true);
+    expect(rig.controller.getSnapshot().phase).toBe('recording');
+    await ride(rig, 3);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    const saved = await harness.read(async (store) =>
+      store.getActivity(ATHLETE_A, activityId('ride-1')),
+    );
+    expect(saved?.rideFacts?.race).toBeUndefined();
+    rig.controller.dispose();
+  });
+
+  it('puts a saved ride away and records the next one when a room ride starts after it — with no race of the last', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    const game = gameTrainerPortOver(rig.controller);
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    await ride(rig, 3);
+    game.roomRaceEnded?.({ roomId: ROOM, place: 1, finishers: 2 });
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect(rig.controller.getSnapshot().phase).toBe('stopped');
+    expect(await game.recordRoomRide?.()).toBe(true);
+    expect(rig.controller.getSnapshot().phase).toBe('recording');
+    // A group ride this time: no race is noted, and the last one is not kept.
+    await ride(rig, 3);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    const [first, second] = await harness.read(async (store) => [
+      await store.getActivity(ATHLETE_A, activityId('ride-1')),
+      await store.getActivity(ATHLETE_A, activityId('ride-2')),
+    ]);
+    expect(first?.rideFacts?.race).toEqual({ roomId: ROOM, place: 1, finishers: 2 });
+    expect(second?.id).toBe('ride-2');
+    expect(second?.rideFacts?.race).toBeUndefined();
+    rig.controller.dispose();
+  });
+
+  it('answers false with no ride controller at all', async () => {
+    expect(await gameTrainerPortOver(undefined).recordRoomRide?.()).toBe(false);
+  });
+});
+
 describe('#1312 — the laps of a course are the recording’s, and are saved with the ride', () => {
   const WHOLE = {
     kind: 'lap',

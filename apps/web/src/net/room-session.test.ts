@@ -326,7 +326,7 @@ describe('a race, as the room says it — #785', () => {
     room.frame(1, [frameRider(3, 4)]);
     expect(s.race()).toEqual({ kind: 'running' });
     room.send({ type: 'finish', order: [5, 3] });
-    expect(s.race()).toEqual({ kind: 'finished', order: [5, 3] });
+    expect(s.race()).toEqual({ kind: 'finished', order: [5, 3], place: 2 });
     expect(s.finish).toEqual({ type: 'finish', order: [5, 3] });
   });
 

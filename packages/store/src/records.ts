@@ -450,6 +450,40 @@ export interface RideFacts {
    * hand. Absent when none was. A count and nothing of the records.
    */
   readonly replansDropped?: number;
+  /**
+   * The private race this ride was ridden in, as its room told this device —
+   * #785, the owner's ruling of 2026-10-14: *"a ride in a room always
+   * records, and the race result is stored with that ride on the device"*.
+   * Known only while riding, like {@link workoutFinished}. Absent for a ride
+   * in no race. @see RoomRaceFact
+   */
+  readonly race?: RoomRaceFact;
+}
+
+/**
+ * A race, as its room told the device that rode it — #785. The room's own
+ * word (its `finish` message, ADR 0028 D-2: the room's order is the one that
+ * counts), never a place this device worked out.
+ *
+ * ⚠️ **No other rider is in it.** A place and a count, and nothing of anybody
+ * else — not a name, not a time, not a power — so the device copy holds this
+ * rider's result and only theirs; every rider's result, with names and
+ * flags, is the instance's, shown to the race's riders only (#785, Q2).
+ */
+export interface RoomRaceFact {
+  /** The room's id on the instance, as the client takes one (1–128 of `A–Z a–z 0–9 _ -`). */
+  readonly roomId: string;
+  /**
+   * This rider's place in the room's finish order, 1 for the winner — or
+   * `null` when they are not in it: they did not finish, or the device never
+   * heard the order because the rider left before the room said it was over.
+   */
+  readonly place: number | null;
+  /**
+   * How many riders the room's finish order holds — or `null` when the
+   * device never heard it (the rider left the race before it was over).
+   */
+  readonly finishers: number | null;
 }
 
 /** @see {@link ActivityRecord.originalFile} */

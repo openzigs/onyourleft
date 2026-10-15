@@ -80,6 +80,7 @@ import type {
   NewLap,
   NewStreamSet,
   RecordedCourseLap,
+  RoomRaceFact,
   StreamChannelValue,
 } from '@onyourleft/store';
 
@@ -130,6 +131,12 @@ export interface RideToSaveInput {
    * with the ride on this device (`packages/store` §`RideFacts.replans`).
    */
   readonly replans?: readonly ReplanRecord[] | undefined;
+  /**
+   * The private race this ride was ridden in, as its room said it — #785, the
+   * owner's ruling of 2026-10-14: the result is stored with the ride on this
+   * device (`packages/store` §`RideFacts.race`).
+   */
+  readonly race?: RoomRaceFact | undefined;
 }
 
 /**
@@ -193,6 +200,7 @@ export function rideToSave(input: RideToSaveInput): FinishedRide | undefined {
       workoutFinished: input.workoutFinished,
       ghostRaced: input.ghostRaced,
       replans: input.replans,
+      race: input.race,
     }),
     // ⚠️ No `originalFile`. That key names the file an activity was imported
     // from and this one was not imported — a recorded ride has no file behind

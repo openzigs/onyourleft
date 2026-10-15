@@ -29,6 +29,7 @@ export type {
   ActivityRecord,
   ActivitySummary,
   RideFacts,
+  RoomRaceFact,
   AthleteRecord,
   CameraFrameRecord,
   FramingCheckRecord,

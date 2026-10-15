@@ -79,6 +79,7 @@
  */
 
 import type { WorkoutRescue } from '@onyourleft/domain';
+import type { RoomRaceFact } from '@onyourleft/store';
 import type { TrainerControl } from '@onyourleft/sensors/protocol';
 
 import type { CourseLineEvent, LapFigures } from '../recording/laps';
@@ -338,6 +339,23 @@ export interface GameTrainerPort {
    */
   gameRideEnded(outcome: GhostOutcome | undefined): void;
   /**
+   * A ride in a room is starting: make sure it is recorded — #785, the
+   * owner's ruling of 2026-10-14, *"a ride in a room always records"* (the
+   * ride controller's `recordForRoom`). Answers whether a recording is
+   * running under it; `false` where there is no ride controller, or the last
+   * ride could not be put away. ⚠️ Not about the trainer: on this port for
+   * {@link gameRideEnded}'s reason, and named so nothing else in production
+   * calls a method of that name. Optional, as {@link courseLine} is, so a
+   * double with no recording need not say; `gameTrainerPortOver` always does.
+   */
+  recordRoomRide?(): Promise<boolean>;
+  /**
+   * A ride in a private race ended, and this is what its room said of the
+   * race — #785: kept with the recording and saved with the ride
+   * (`RideFacts.race`). For {@link gameRideEnded}'s reason, on this port.
+   */
+  roomRaceEnded?(race: RoomRaceFact): void;
+  /**
    * The moving time of the ride being RECORDED, in seconds — or `undefined`
    * when no ride is in progress (recording or paused) — #1111.
    *
@@ -468,6 +486,13 @@ interface GameTrainerSource {
   /** #1042. @see GameTrainerPort.gameRideEnded */
   noteGameRideEnded(outcome: GhostOutcome | undefined): void;
   /**
+   * #785. @see GameTrainerPort.recordRoomRide, GameTrainerPort.roomRaceEnded.
+   * Optional only so a double with no recording need not say; the ride
+   * controller `main.tsx` hands over has both.
+   */
+  recordForRoom?(): Promise<boolean>;
+  noteRoomRace?(race: RoomRaceFact): void;
+  /**
    * #1312. @see GameTrainerPort.courseLine. Optional for
    * {@link GameTrainerSource.getSnapshot}'s `keepAliveFailed` reason: a source
    * with no recording has no laps. The ride controller always has it.
@@ -556,6 +581,10 @@ export function gameTrainerPortOver(controller: GameTrainerSource | undefined): 
     recordingMayStop: () => controller?.getSnapshot().keepAliveFailed ?? false,
     gameRideEnded: (outcome) => {
       controller?.noteGameRideEnded(outcome);
+    },
+    recordRoomRide: async () => (await controller?.recordForRoom?.()) ?? false,
+    roomRaceEnded: (race) => {
+      controller?.noteRoomRace?.(race);
     },
     watchRide: (listener) => controller?.subscribe(listener) ?? NOT_WATCHING,
     courseLine: (event) => controller?.noteCourseLine?.(event),

@@ -61,6 +61,9 @@ export interface RecordedCalls {
   confirmStop: number;
   /** #1042 — the latched outcomes the game handed over, in order. */
   readonly noteGameRideEnded: (string | undefined)[];
+  /** #785 — a room ride asked for a recording, and the races noted. */
+  recordForRoom: number;
+  readonly noteRoomRace: unknown[];
   /** #1042 — the result card's *Done*, and its one announcement. */
   dismissResult: number;
   noteResultAnnounced: number;
@@ -198,6 +201,8 @@ export function stubRideController(
     cancelStop: 0,
     confirmStop: 0,
     noteGameRideEnded: [],
+    recordForRoom: 0,
+    noteRoomRace: [],
     dismissResult: 0,
     noteResultAnnounced: 0,
     startNewRide: 0,
@@ -267,6 +272,13 @@ export function stubRideController(
     },
     noteGameRideEnded: (outcome) => {
       calls.noteGameRideEnded.push(outcome);
+    },
+    recordForRoom: () => {
+      calls.recordForRoom += 1;
+      return Promise.resolve(false);
+    },
+    noteRoomRace: (race) => {
+      calls.noteRoomRace.push(race);
     },
     // #1312: the stub records nothing, so a line crossed over it ends no lap.
     noteCourseLine: () => undefined,

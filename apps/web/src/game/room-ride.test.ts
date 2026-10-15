@@ -10,6 +10,7 @@ import {
   NEARBY_METRES,
   nextToFollow,
   raceEvent,
+  raceFactOf,
   raceNotice,
   RACE_TEXT,
   riderEvents,
@@ -189,7 +190,7 @@ describe('a race on the HUD — #785', () => {
     expect(heldOnTheLine({ kind: 'waiting' })).toBe(true);
     expect(heldOnTheLine({ kind: 'counting', endsAtLocalMs: 10 })).toBe(true);
     expect(heldOnTheLine({ kind: 'running' })).toBe(false);
-    expect(heldOnTheLine({ kind: 'finished', order: [] })).toBe(false);
+    expect(heldOnTheLine({ kind: 'finished', order: [], place: null })).toBe(false);
     expect(heldOnTheLine({ kind: 'not-a-race' })).toBe(false);
     expect(heldOnTheLine(undefined)).toBe(false);
   });
@@ -223,7 +224,7 @@ describe('a race on the HUD — #785', () => {
       { kind: 'counting', endsAtLocalMs: 10_000 },
       { kind: 'running' },
       { kind: 'running' },
-      { kind: 'finished', order: [1] },
+      { kind: 'finished', order: [1], place: null },
     ] as const) {
       const next = raceEvent(said, race, 0);
       said = next.said;
@@ -246,5 +247,30 @@ describe('riders coming and going — #784', () => {
     const third = riderEvents(second.seen, [2, 3, 4]);
     expect(third.events).toEqual([{ kind: 'room-rider', text: 'A rider left the room.' }]);
     expect(riderEvents(third.seen, [2, 3, 4]).events).toEqual([]);
+  });
+});
+
+describe('the race a ride was in, for the device to keep — #785', () => {
+  it('is the room’s order and this rider’s place in it, or a race left while it ran, and nothing else', () => {
+    expect(raceFactOf('room-1', { kind: 'finished', order: [4, 2, 9], place: 2 })).toEqual({
+      roomId: 'room-1',
+      place: 2,
+      finishers: 3,
+    });
+    expect(raceFactOf('room-1', { kind: 'finished', order: [4], place: null })).toEqual({
+      roomId: 'room-1',
+      place: null,
+      finishers: 1,
+    });
+    expect(raceFactOf('room-1', { kind: 'running' })).toEqual({
+      roomId: 'room-1',
+      place: null,
+      finishers: null,
+    });
+    // Nothing was raced: a group ride, a race never started, no room.
+    expect(raceFactOf('room-1', { kind: 'not-a-race' })).toBeUndefined();
+    expect(raceFactOf('room-1', { kind: 'waiting' })).toBeUndefined();
+    expect(raceFactOf('room-1', { kind: 'counting', endsAtLocalMs: 5 })).toBeUndefined();
+    expect(raceFactOf(undefined, { kind: 'running' })).toBeUndefined();
   });
 });
