@@ -176,6 +176,133 @@ through an NVIDIA GPU only, on the WSL 2 backend: add to the `ollama` service
 and check it with `docker run --rm -it --gpus=all nvcr.io/nvidia/k8s/cuda-sample:nbody nbody -gpu
 -benchmark` ([Docker's GPU guide](https://docs.docker.com/desktop/features/gpu/)).
 
+## A model server on the machine itself, not in Compose
+
+The analysis model can run in the Compose `ollama` service
+([`operating-an-instance.md` → Analysis model](../operating-an-instance.md#analysis-model)), which
+Docker restarts with everything else. Both of the project's own machines run it **installed on the
+machine itself** instead, for the GPU ([#1235](https://github.com/openzigs/onyourleft/issues/1235)):
+Ollama for Windows on the owner's Windows box, and Ollama from Homebrew on the Mac. Then starting
+it is your job, not Docker's, and **after a reboot the instance comes back by itself and the model
+server may not**: every write-up fails until somebody starts it
+([#1272](https://github.com/openzigs/onyourleft/issues/1272)). Four things make it come back.
+
+### It listens on loopback only
+
+⚠️ **Ollama's API has no authentication.** Leave `OLLAMA_HOST` unset, and Ollama listens on
+`127.0.0.1:11434`, which Docker Desktop still reaches from a container (the address, below). Never
+set `OLLAMA_HOST=0.0.0.0`: that is an open model server for every device on every network the
+machine joins, the home Wi-Fi included. If you must listen elsewhere, listen on a private address
+only, and block the port in the firewall for every other machine. Never point the tunnel at it.
+
+### It starts with the machine
+
+- **Windows.** Ollama for Windows registers itself as a login item when it is installed: check
+  that *Task Manager → Startup apps → Ollama* says **Enabled**, and start it from the Start menu,
+  not as `ollama serve` in a terminal, which ends when the terminal does. That terminal is how the
+  owner's box came to have no model after a reboot.
+- **macOS.** `brew services start ollama` registers a LaunchAgent
+  (`~/Library/LaunchAgents/sh.brew.ollama.plist`, with `RunAtLoad` and `KeepAlive`): it starts
+  when you sign in, and again if it stops. `brew services list` says `started`. The Ollama app from
+  ollama.com registers itself as a login item instead, which also starts at sign-in.
+
+Either way it starts at **sign-in**, as Docker Desktop does (step 1), so automatic sign-in covers
+both: `netplwiz` on Windows; *System Settings → Users & Groups → Automatically log in as* on a Mac,
+which FileVault does not allow. A model server that started before sign-in would gain nothing,
+because the instance cannot start before Docker Desktop.
+
+**Check it after a reboot**, before a rider finds out: `curl http://127.0.0.1:11434/api/version`
+on the machine answers `{"version":"…"}`, and so does the instance's address for it (the next
+part) from inside Docker:
+
+```bash
+docker run --rm alpine wget -q -T 3 -O - http://192.168.65.254:11434/api/version
+```
+
+### The address: the private IP that `host.docker.internal` names, not the name
+
+Docker Desktop gives every container a name for the machine it runs on, `host.docker.internal`,
+and forwards it to the machine's own loopback. **The instance refuses that name.** A model address
+must be loopback, `localhost`, a private address, or a name with no dot in it, such as a Compose
+service (`apps/instance/src/history/address.ts`, ADR 0040 D-6), and this name has two. The instance
+still starts, with analysis off: its log says `"event":"analysis-model","state":"off","code":"not-local"`,
+and its standard error
+
+```
+instance: analysis is off: OYL_INSTANCE_ANALYSIS_MODEL_URL was refused because it is a name with a dot in it, which is not a Compose service name, localhost or a private address: the analysis model must be on this machine or its private network (ADR 0046 D-9, ADR 0040 D-6).
+```
+
+Use the address the name stands for. Ask Docker:
+
+```bash
+docker run --rm alpine getent hosts host.docker.internal
+```
+
+On the project's Mac (Docker Engine 29.5.3, 2026-10-14) it printed `192.168.65.254`, and Ollama,
+listening on loopback only, answered there from a container. So in `.env`:
+
+```
+OYL_INSTANCE_ANALYSIS_MODEL_URL=http://192.168.65.254:11434/v1
+OYL_INSTANCE_ANALYSIS_MODEL=<the model you pulled>
+```
+
+and `COMPOSE_PROFILES` without `analysis`, since the Compose `ollama` is not used for it. Then
+`docker compose up -d instance`.
+
+**If the address changes** — after a Docker Desktop update, or a change to its network under
+*Settings → Resources → Network* — every write-up fails as if the model were down (below). Run the
+`getent` line again, put the new address in `.env`, and `docker compose up -d instance`. Do not
+replace it with the machine's address on the home network: Ollama does not listen there, and must
+not.
+
+Changing the instance to accept `host.docker.internal` would change a security rule, and is not
+done here.
+
+### State the context length
+
+Ollama's default context follows the GPU memory it sees: 4 096 tokens under 24 GiB, 32 768 from 24
+to 48 GiB, more above ([Ollama's documentation](https://docs.ollama.com/context-length)). On the
+Windows box the default was 32 768, and at that length a larger model put 37 % of itself on the
+processor (#1235). So state it, and check that the model fits the GPU with it. The project's runs
+used 4 096 (spike 0023); read
+[`operating-an-instance.md` → Analysis model](../operating-an-instance.md#analysis-model) before
+choosing.
+
+- **Windows**: quit Ollama from the tray; in Settings, search for *environment variables* and
+  choose *Edit environment variables for your account*; add `OLLAMA_CONTEXT_LENGTH`; and start
+  Ollama again. A variable of your account lasts across reboots.
+- **macOS, Homebrew**: `brew services` writes `sh.brew.ollama.plist` itself, so a variable added to
+  it does not last. Give the length to the model instead, which works on any platform: a file named
+  `Modelfile` holding
+
+  ```
+  FROM <the model you pulled>
+  PARAMETER num_ctx 4096
+  ```
+
+  then `ollama create <a new name> -f Modelfile`, and that new name in
+  `OYL_INSTANCE_ANALYSIS_MODEL`. It copies no weights. On the Mac (Ollama 0.30.5, 2026-10-14) a
+  model made this way with `num_ctx 8192`, asked through the `/v1` address the instance uses, loaded
+  at 8 192, where its source model loaded at 4 096.
+
+Check it with `ollama ps` while a write-up runs: `CONTEXT` is the length, and `PROCESSOR` should
+say `100% GPU`.
+
+### What a rider sees while it is down
+
+The instance does not ask the model server anything at start, so with it down the instance still
+logs `"event":"analysis-model","state":"on"` and `/ready` says ready. The first sign is a job. Each
+write-up asked for fails with the failure `model-unreachable`; the instance logs
+`"event":"analysis-job","state":"failed","code":"model-unreachable"`, and the rider's app says:
+
+> Your instance could not reach its model, so nothing was kept. Check that the model server is
+> running, then try again.
+
+A re-plan asked for during a workout fails the same way, and the Ride screen says its one line for
+every failure: *"No re-plan could be asked for just now. The workout carries on as planned."* The
+ride itself is not touched. A write-up is not tried again by itself: the rider asks again once the
+model is back.
+
 ## Compression and your upload
 
 A home connection's **upload** is the first thing a room runs out of — before the CPU and before
@@ -204,7 +331,7 @@ What happens when it sleeps, reboots, or loses its connection anyway:
 |---|---|---|
 | **Asleep** | their app cannot reach the instance, and must say *"The instance is not reachable"* in words — the client's half, [#782](https://github.com/openzigs/onyourleft/issues/782), not built yet; **their ride goes on recording on their own device** | everything on the instance, untouched |
 | **A Windows update reboots it mid-ride** | the room closes; on reconnecting, a **race** says `room-closed` — it does not resume — and a **group ride** opens again, empty | every result already final (a rider who had crossed the line); the database and blobs; nothing about the race in progress |
-| **Back on**, after sign-in (step 1) | the instance is back by itself: Docker restarts every container (`restart: unless-stopped`) | — |
+| **Back on**, after sign-in (step 1) | the instance is back by itself: Docker restarts every container (`restart: unless-stopped`). A model server on the machine itself comes back only if it starts at sign-in — see [A model server on the machine itself](#a-model-server-on-the-machine-itself-not-in-compose) | — |
 | **Cloudflare restarts its servers** (it says it may, daily) | a dropped socket; the app rejoins at once, into the same seat and place (ADR 0028 D-2 rule 1) | the room: the rider was coasted at 0 W while they were away |
 
 To keep a Windows update from rebooting during an evening's rides, set **active hours**
