@@ -58,6 +58,7 @@ import Dexie, { type Table } from 'dexie';
 import type { BeatsPerMinute, Kilograms, Seconds, UnixSeconds, Watts } from '@onyourleft/domain';
 
 import {
+  StoreConflictError,
   StoreDecodeError,
   StoreReferentialError,
   StoreValidationError,
@@ -264,6 +265,23 @@ export interface ListActivitiesOptions {
    * read backwards and means nothing at all with no instant to sit at.
    */
   readonly afterActivityId?: ActivityId;
+}
+
+/**
+ * A condition on a replacing write (#1263): the write happens only if the row
+ * it would replace, read INSIDE the write's own transaction, is one `onlyIf`
+ * accepts — `undefined` for no row. Otherwise nothing is written and the
+ * write throws {@link StoreConflictError}.
+ *
+ * It exists for a reader that waits between its read and its write — a sync
+ * pulling a copy over the network — and must not overwrite a change the rider
+ * made here in that wait. Checking in the caller before the write would leave
+ * the same window, smaller. ⚠️ **`onlyIf` is synchronous on purpose**: an
+ * await on anything but the database ends an IndexedDB transaction, and the
+ * write would then land outside the check.
+ */
+export interface WriteCondition<T> {
+  readonly onlyIf: (held: T | undefined) => boolean;
 }
 
 /** What `deleteAthlete` removed, so a caller can report it. */
@@ -1681,10 +1699,16 @@ export class ActivityStore {
    * overwrite one belonging to somebody else — both inside the same transaction
    * as the write, for `putRoute`'s reason.
    *
+   * With a `condition`, only over the row it accepts (#1263).
+   *
    * @throws {StoreReferentialError} if `record.createdBy` names no athlete, or
    * if a workout with this id already belongs to a different athlete.
+   * @throws {StoreConflictError} if `condition` refuses the row held.
    */
-  async putWorkout(record: WorkoutRecord): Promise<WorkoutId> {
+  async putWorkout(
+    record: WorkoutRecord,
+    condition?: WriteCondition<WorkoutRecord>,
+  ): Promise<WorkoutId> {
     await this.#db.transaction('rw', [this.#athletes, this.#workouts], async () => {
       await this.#requireAthlete(record.createdBy);
       const existing = await this.#workouts.get(record.id);
@@ -1692,6 +1716,12 @@ export class ActivityStore {
         throw new StoreReferentialError(
           `cannot overwrite workout ${record.id}: it belongs to a different athlete`,
         );
+      }
+      if (
+        condition !== undefined &&
+        !condition.onlyIf(existing === undefined ? undefined : fromPersistedWorkout(existing))
+      ) {
+        throw new StoreConflictError(`workout ${record.id} changed since it was read`);
       }
       await this.#workouts.put(toPersistedWorkout(record));
     });
@@ -2102,10 +2132,16 @@ export class ActivityStore {
    *
    * @throws {StoreReferentialError} if the athlete does not exist, or a note's
    * ride is not theirs.
+   * With a `condition`, only over the row it accepts (#1263).
+   *
    * @throws {StoreValidationError} naming the field and the constraint — never
    * the value, which is free text that can name anything.
+   * @throws {StoreConflictError} if `condition` refuses the row held.
    */
-  async putRiderText(record: RiderTextRecord): Promise<RiderTextRecord> {
+  async putRiderText(
+    record: RiderTextRecord,
+    condition?: WriteCondition<RiderTextRecord>,
+  ): Promise<RiderTextRecord> {
     const row: RiderTextRecord = {
       athleteId: record.athleteId,
       kind: record.kind,
@@ -2136,6 +2172,12 @@ export class ActivityStore {
             throw new StoreReferentialError(
               `cannot store a ride note: athlete ${row.athleteId} has no activity ${row.key}`,
             );
+          }
+        }
+        if (condition !== undefined) {
+          const held = await this.#riderTexts.get([row.athleteId, row.kind, row.key]);
+          if (!condition.onlyIf(held === undefined ? undefined : checkedRiderText(held))) {
+            throw new StoreConflictError(`rider ${row.kind} ${row.key} changed since it was read`);
           }
         }
         if (
@@ -2272,10 +2314,16 @@ export class ActivityStore {
    * set whole and copies only the keys it knows, and what was written is
    * returned — so a caller shows what landed, not what it asked for.
    *
+   * With a `condition`, only over the row it accepts (#1263).
+   *
    * @throws {StoreReferentialError} if the athlete does not exist.
    * @throws {StoreValidationError} naming the field and the constraint.
+   * @throws {StoreConflictError} if `condition` refuses the row held.
    */
-  async putWorkoutGoals(record: WorkoutGoalsRecord): Promise<WorkoutGoalsRecord> {
+  async putWorkoutGoals(
+    record: WorkoutGoalsRecord,
+    condition?: WriteCondition<WorkoutGoalsRecord>,
+  ): Promise<WorkoutGoalsRecord> {
     const checked = checkedWorkoutGoals(record);
     if ('problem' in checked) {
       throw new StoreValidationError(checked.problem);
@@ -2283,6 +2331,21 @@ export class ActivityStore {
     const row = checked.record;
     await this.#db.transaction('rw', [this.#athletes, this.#workoutGoals], async () => {
       await this.#requireAthlete(row.athleteId);
+      if (condition !== undefined) {
+        const conflict = new StoreConflictError('workout goals changed since they were read');
+        const held: unknown = await this.#workoutGoals.get(row.athleteId);
+        let current: WorkoutGoalsRecord | undefined;
+        if (held !== undefined) {
+          // A row that is not goals is not what any caller read: refused too.
+          const read =
+            typeof held === 'object' && held !== null
+              ? checkedWorkoutGoals(held as Record<'athleteId' | 'goals' | 'savedAt', unknown>)
+              : undefined;
+          if (read === undefined || 'problem' in read) throw conflict;
+          current = read.record;
+        }
+        if (!condition.onlyIf(current)) throw conflict;
+      }
       await this.#workoutGoals.put(row);
     });
     return row;

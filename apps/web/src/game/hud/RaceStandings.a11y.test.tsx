@@ -117,6 +117,16 @@ describe('a race’s standings on the HUD — #1347', () => {
     expect([...(current ?? [])].map(text)).toEqual(['2 You 3.5 W/kg']);
   });
 
+  it('keeps list semantics under list-style none and numbers from the first visible place', async () => {
+    await hud({
+      ...STANDINGS,
+      lines: STANDINGS.lines.map((line) => ({ ...line, place: line.place + 28 })),
+    });
+    const list = document.querySelector('section[aria-label="Race standings"] ol');
+    expect(list?.getAttribute('role')).toBe('list');
+    expect(list?.getAttribute('start')).toBe('29');
+  });
+
   it('is never a live region: the standings are read on request, not announced every second', async () => {
     await hud(STANDINGS);
     const section = document.querySelector('section[aria-label="Race standings"]');

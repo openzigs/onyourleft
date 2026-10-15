@@ -29,7 +29,12 @@ export function RaceStandings(props: { readonly standings: RaceStandingsView }):
   return (
     <section className="oyl-hud__panel oyl-hud__standings" aria-label="Race standings">
       <p className="oyl-hud__standings-summary">{STANDINGS_TEXT.summary(place, of)}</p>
-      <ol className="oyl-hud__standings-list">
+      {/*
+        `role="list"` because list-style none makes WebKit drop the semantics,
+        and `start` because the list is windowed: its own numbering must agree
+        with the place drawn beside the first line.
+      */}
+      <ol className="oyl-hud__standings-list" role="list" start={lines[0]?.place}>
         {lines.map((line) => (
           <li
             key={line.riderId}
