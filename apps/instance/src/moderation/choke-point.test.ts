@@ -102,6 +102,10 @@ const EXEMPT: Readonly<
     heldElsewhere:
       'the creator’s route, relayed to the members of their own room (#784); it names no athlete',
   },
+  getRiderGhost: {
+    heldElsewhere:
+      'names a route by its digest, never an athlete; every candidate rider is asked of the choke point itself (`canSee`) inside the read, and one the caller may not see is passed over (sync/race-ghost.test.ts)',
+  },
   getRoomResults: {
     heldElsewhere:
       'a race’s result for its riders only; every other rider in it is named through the choke point itself (`canSee`), and one the caller may not see is “a rider” with no name (rooms/rooms.test.ts)',
@@ -121,6 +125,8 @@ const NOT_AN_ATHLETE: Readonly<Record<string, string>> = {
   kind: 'a kind of sync item; the item read or written is the CALLER’s own (#776)',
   key: 'the key of one of the CALLER’s own sync items (#776)',
   jobId: 'one of the CALLER’s own analysis jobs; the store reads only the caller’s (#1095)',
+  route:
+    'the SHA-256 of a route’s canonical GPX (#331); the riders behind it are each asked of the choke point',
 };
 
 /** An athlete id nobody holds, shaped like one that somebody might. */

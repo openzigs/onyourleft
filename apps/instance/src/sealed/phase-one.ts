@@ -112,6 +112,10 @@ export const PHASE_ONE_SEALED_ROUTES: readonly PhaseOneRoute[] = [
   only('GET', '/v1/sync/manifest', 'The synced history'),
   only('GET', '/v1/sync/records/{content}', 'The synced history'),
   only('POST', '/v1/sync/records/{content}/race-consent', 'The synced history'),
+  // #331: a ride's race offer, and the one ghost read — both declared in
+  // `sync/routes.ts`, so born sealed with the rest of it.
+  only('POST', '/v1/sync/records/{content}/race-route', 'The synced history'),
+  only('GET', '/v1/ghosts/{route}', 'The synced history'),
   only('GET', '/v1/sync/items/{kind}/{key}', 'The synced history'),
   only('POST', '/v1/sync/items/{kind}/{key}', 'The synced history'),
   only('DELETE', '/v1/sync/items/{kind}/{key}', 'The synced history'),

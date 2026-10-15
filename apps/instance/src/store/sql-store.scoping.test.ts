@@ -250,6 +250,14 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
     notAScopedRead:
       'cross-athlete BY DESIGN (ADR 0039 D-2): other riders’ consented rides, never the requester’s own; sync/race-consent.test.ts holds the consent and the exclusion',
   },
+  setActivityRaceRoute: {
+    notAScopedRead:
+      'a write; its scoping is sync/race-ghost.test.ts’s (another athlete’s record, offered as the caller)',
+  },
+  listRaceableOnRoute: {
+    notAScopedRead:
+      'cross-athlete BY DESIGN (ADR 0039 D-2, #331): other riders’ consented, offered rides on ONE route, never the requester’s own; sync/race-ghost.test.ts holds the consent, the route and the exclusion',
+  },
   isContentHeld: {
     notAScopedRead:
       'blob collection: whether ANY athlete holds a file, answered as a boolean and never as a row (#35)',

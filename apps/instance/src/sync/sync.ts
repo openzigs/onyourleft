@@ -78,6 +78,14 @@ import {
   type StreamChannel,
 } from './activity-file.ts';
 import { createContentLock } from './content-lock.ts';
+import { ghostSpeed, type RiderGhost } from './race-ghost.ts';
+
+/**
+ * How many offered rides a ghost request looks through for one the caller may
+ * see (#331). Bounded so a route offered by many riders the caller blocked
+ * costs a fixed amount; past it, no ghost is the answer.
+ */
+export const GHOST_CANDIDATES = 20;
 
 export interface SyncOptions {
   readonly store: SqlStore;
@@ -92,6 +100,13 @@ export interface SyncOptions {
    * §`replaceSyncRow`).
    */
   readonly itemStored?: () => void;
+  /**
+   * The display name another rider is shown as to `viewerId`, or `undefined`
+   * when the viewer may not see them (#331) — `moderation.ts` §`canSee`, then
+   * the public projection, as a room's `nameFor` is. Absent, no ghost is
+   * served: a ghost whose rider cannot be checked is not sent.
+   */
+  readonly ghostRider?: (viewerId: string, subjectId: string) => Promise<string | undefined>;
 }
 
 /** What ingesting a record answers. */
@@ -150,6 +165,8 @@ export interface ManifestEntry {
   readonly activityId: string | null;
   /** A live activity's "may be raced" consent (#793), or `null` for anything else. */
   readonly mayBeRaced: boolean | null;
+  /** The route a live activity is offered to be raced on (#331), or `null`. */
+  readonly raceRouteSha256: string | null;
 }
 
 /** A signed record, as a pulling device fetches it (#776). */
@@ -253,6 +270,8 @@ export interface AccountExport {
     readonly file: string;
     /** The rider's "may be raced" consent on this ride (#793). Not in the signed record. */
     readonly mayBeRaced: boolean;
+    /** The route this ride is offered to be raced on, or `null` (#331). */
+    readonly raceRouteSha256: string | null;
   }[];
   readonly items: readonly {
     readonly kind: SyncKind;
@@ -366,6 +385,26 @@ export interface Sync {
     contentSha256: string,
     body: Readonly<Record<string, unknown>>,
   ): Promise<Outcome<{ readonly mayBeRaced: boolean }>>;
+  /**
+   * #331: offer one of the caller's consented rides to be raced on a route,
+   * by the SHA-256 of the route's canonical GPX — or withdraw the offer with
+   * `null`. Sent only by the device that signed the ride, after its privacy
+   * zones (`race-ghost.ts`). `not_found` for a ride the caller does not hold
+   * or has not consented to being raced.
+   */
+  setRaceRoute(
+    caller: Caller,
+    contentSha256: string,
+    body: Readonly<Record<string, unknown>>,
+  ): Promise<Outcome<{ readonly routeSha256: string | null }>>;
+  /**
+   * #331: ONE other rider's ghost on a route, or `null` — `race-ghost.ts`
+   * says which, and what it carries.
+   */
+  ghost(
+    caller: Caller,
+    routeSha256: string,
+  ): Promise<Outcome<{ readonly ghost: RiderGhost | null }>>;
   /** #776: store an item — a write-up, a side-camera report, a goal, a note, a document. */
   putItem(
     caller: Caller,
@@ -485,12 +524,14 @@ export function createSync(options: SyncOptions): Sync {
       const items = [];
       // Each live ride's consent, which the manifest carries beside it (#793).
       const consent = new Map<string, boolean>();
+      const offered = new Map<string, string | null>();
       let after: ManifestPosition | undefined;
       for (;;) {
         const page = await store.listSyncManifest(caller.athleteId, after, 500);
         for (const row of page) {
           if (row.kind === 'activity' && row.mayBeRaced !== null) {
             consent.set(row.key, row.mayBeRaced);
+            offered.set(row.key, row.raceRouteSha256);
           }
           if (row.kind === 'activity' || row.body === null || row.digest === null) continue;
           items.push({
@@ -516,6 +557,7 @@ export function createSync(options: SyncOptions): Sync {
           record: storedRecord(record),
           file: `/v1/sync/files/${record.contentSha256}`,
           mayBeRaced: consent.get(record.contentSha256) ?? false,
+          raceRouteSha256: offered.get(record.contentSha256) ?? null,
         });
       }
       return {
@@ -652,6 +694,7 @@ export function createSync(options: SyncOptions): Sync {
                 : storedRecord({ ...row, contentSha256: row.key, signedRecord: row.signedRecord })
                     .claims.activityId,
             mayBeRaced: row.signedRecord === null ? null : row.mayBeRaced,
+            raceRouteSha256: row.signedRecord === null ? null : row.raceRouteSha256,
           })),
           next:
             rows.length > limit && last !== undefined
@@ -680,6 +723,41 @@ export function createSync(options: SyncOptions): Sync {
       if (typeof mayBeRaced !== 'boolean') return invalid('mayBeRaced', 'must be true or false');
       const set = await store.setActivityMayBeRaced(caller.athleteId, contentSha256, mayBeRaced);
       return set ? { ok: true, value: { mayBeRaced } } : refuse('not_found');
+    },
+
+    setRaceRoute: async (caller, contentSha256, body) => {
+      if (!BLOB_KEY.test(contentSha256)) return refuse('not_found');
+      const { routeSha256 } = body;
+      if (!(
+        routeSha256 === null ||
+        (typeof routeSha256 === 'string' && BLOB_KEY.test(routeSha256))
+      )) {
+        return invalid('routeSha256', 'must be a lower-case SHA-256 in hex, or null');
+      }
+      const set = await store.setActivityRaceRoute(caller.athleteId, contentSha256, routeSha256);
+      return set ? { ok: true, value: { routeSha256 } } : refuse('not_found');
+    },
+
+    ghost: async (caller, routeSha256) => {
+      const none = { ok: true, value: { ghost: null } } as const;
+      if (!BLOB_KEY.test(routeSha256) || options.ghostRider === undefined) return none;
+      const candidates = await store.listRaceableOnRoute(
+        caller.athleteId,
+        routeSha256,
+        GHOST_CANDIDATES,
+      );
+      for (const candidate of candidates) {
+        const rider = await options.ghostRider(caller.athleteId, candidate.athleteId);
+        if (rider === undefined) continue;
+        const bytes = await blobs.get(candidate.contentSha256);
+        if (bytes === undefined) continue;
+        const decoded = decodeActivityFile(bytes);
+        if (!decoded.ok) continue;
+        const speed = ghostSpeed(decoded.samples);
+        if (speed === undefined) continue;
+        return { ok: true, value: { ghost: { rider, ...speed } } };
+      }
+      return none;
     },
 
     putItem: async (caller, kind, key, body) => {

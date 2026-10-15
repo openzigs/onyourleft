@@ -92,6 +92,12 @@ export interface ActivityRecordTable {
    * Defaults to `0`; not part of the signed record, because it is revocable.
    */
   readonly may_be_raced: Generated<number>;
+  /**
+   * The SHA-256 of the route a consented ride may be raced on, or `null` when
+   * it is not offered (#331, migration 0025). Set by the device that signed
+   * the ride, after its privacy-zone refusal; cleared by a revocation.
+   */
+  readonly race_route_sha256: Generated<string | null>;
 }
 
 /** A group ride or a race. */

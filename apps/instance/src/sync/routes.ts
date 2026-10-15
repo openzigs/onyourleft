@@ -220,6 +220,7 @@ export const SYNC_ROUTES: readonly Route[] = [
             deleted: { type: 'boolean' },
             activityId: { type: ['string', 'null'] },
             mayBeRaced: { type: ['boolean', 'null'] },
+            raceRouteSha256: { type: ['string', 'null'] },
           }),
         },
         next: { type: ['string', 'null'] },
@@ -268,6 +269,61 @@ export const SYNC_ROUTES: readonly Route[] = [
           context.json,
         ),
       ),
+  },
+  {
+    method: 'POST',
+    path: '/v1/sync/records/{content}/race-route',
+    sealed: 'only',
+    operationId: 'setRaceRoute',
+    reaches: 'own',
+    summary:
+      'Offer one of your consented rides to be raced on a route, by the SHA-256 of the route’s canonical GPX, or withdraw the offer with null (#331). Your device sends it only when none of your privacy zones touches the route; a revoked consent withdraws it here.',
+    ...SESSION,
+    request: object({ routeSha256: { type: ['string', 'null'] } }),
+    errors: ['unauthenticated', 'validation_failed', 'not_found'],
+    response: {
+      contentType: 'application/json',
+      schema: object({ routeSha256: { type: ['string', 'null'] } }),
+    },
+    handle: async (context) =>
+      answer(
+        await syncOf(context).setRaceRoute(
+          callerOf(context),
+          context.params.content ?? '',
+          context.json,
+        ),
+      ),
+  },
+  {
+    method: 'GET',
+    path: '/v1/ghosts/{route}',
+    sealed: 'only',
+    operationId: 'getRiderGhost',
+    reaches: {
+      exempt:
+        'ADR 0039 D-2: another rider’s consented ride, by a route the caller already holds; the choke point is asked for each candidate inside the read (`sync.ts` §`ghost`), so a rider the caller may not see is passed over rather than refused',
+    },
+    summary:
+      'ONE other rider’s ghost on a route you hold, by the SHA-256 of its canonical GPX, or null (#331, ADR 0039): the most recently arrived ride whose rider agreed to its being raced and whom you may see. Their display name and their speed on a uniform clock — never a position, a date, a list or an order.',
+    ...SESSION,
+    errors: ['unauthenticated'],
+    response: {
+      contentType: 'application/json',
+      schema: object({
+        ghost: {
+          type: ['object', 'null'],
+          properties: {
+            rider: string,
+            sampleInterval: integer,
+            speed: series,
+          },
+          required: ['rider', 'sampleInterval', 'speed'],
+          additionalProperties: false,
+        },
+      }),
+    },
+    handle: async (context) =>
+      answer(await syncOf(context).ghost(callerOf(context), context.params.route ?? '')),
   },
   {
     method: 'POST',

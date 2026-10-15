@@ -50,6 +50,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { ensureLocalAthlete, LOCAL_ATHLETE } from '../local-athlete';
 import { rideSummaryOf } from '../ride-analysis/ride-summary';
+import { raceRouteOf } from '../detail/race-consent';
 import { AppShell } from '../shell/AppShell';
 import type { CapabilityProbe } from '../support/bluetooth-support';
 import { mount, settle, type Mounted } from '../testing/mount';
@@ -199,6 +200,7 @@ async function device(send: InstanceSend, storage: InstanceStorage): Promise<Dev
       timeZone: 'Europe/London',
       rideSummary: (id) => rideSummaryOf(store(), LOCAL_ATHLETE)(id),
       newDocumentId: () => crypto.randomUUID(),
+      raceRoute: (id) => raceRouteOf(store(), LOCAL_ATHLETE, webCryptoSha256)(id),
     }),
   };
 }

@@ -38,18 +38,27 @@
  *
  * It needs the SOURCE rider's zones, which never leave that rider's device
  * (ADR 0004), so it runs there: the ride's own page says, beside the consent,
- * that this ride will not be offered. ⚠️ **Nothing in this build offers a
- * cross-rider ghost at all** — #331 is the first caller that decides an
- * offer, and it must ask this, not only the consent flag the store's
- * `listRaceableAttempts` reads.
+ * that this ride will not be offered, and the sync asks it again before every
+ * offer it sends (#331, {@link raceRouteOffer}): an offer reaches the
+ * instance only when the consent is given AND this answers yes.
  */
 
 import {
   distanceBetween,
   EARTH_MEAN_RADIUS_METRES,
+  toHex,
   type GeographicPosition,
+  type RouteProfile,
+  type Sha256,
 } from '@onyourleft/domain';
-import type { PrivacyZoneRecord } from '@onyourleft/store';
+import { encodeGpxRoute } from '@onyourleft/fit';
+import type {
+  ActivityId,
+  ActivityStore,
+  AthleteId,
+  PrivacyZoneRecord,
+  RouteRecord,
+} from '@onyourleft/store';
 
 import { TRIM_JITTER_FRACTION } from './privacy';
 
@@ -132,4 +141,74 @@ export function offeredAsGhost(
   zones: readonly RaceZone[],
 ): boolean {
   return !trimTouchesRoute(route, zones);
+}
+
+/**
+ * **The text a route is raced by** (#331): the route writer's GPX with no name
+ * and no times, as a room's route is written (`rooms/share.ts`). Two riders
+ * who imported the same file hold the same profile — a decode is
+ * deterministic — and so write the same text. Its SHA-256 is the only way a
+ * ghost is asked for (`instance/ghost-port.ts`) and the only way one is
+ * offered ({@link raceRouteOffer}); the route itself is never sent.
+ *
+ * ⚠️ **Exact, or not the same route.** A route written out and read back is
+ * resampled, and lands a digit away in the seventh decimal of a few points,
+ * so a copy made that way is a different text and finds no ghost. That is the
+ * safe failure: a near match would put a ghost on a road its rider did not
+ * ride, and a fuzzy key would answer for routes the asker does not hold.
+ */
+export function raceRouteText(profile: RouteProfile): string {
+  return encodeGpxRoute({ name: undefined, profile }).text;
+}
+
+/** {@link raceRouteText}'s SHA-256, lower-case hex: the route's name on the instance. */
+export async function raceRouteDigest(profile: RouteProfile, sha256: Sha256): Promise<string> {
+  return toHex(await sha256(new TextEncoder().encode(raceRouteText(profile))));
+}
+
+/**
+ * The route a ride is offered to be raced on, as its digest, or `null` for
+ * none (#331) — what the device that signed the ride tells the instance
+ * (`instance/sync.ts` §"A ride's race offer").
+ *
+ * All three conditions, and `null` unless each holds:
+ *
+ * 1. the rider consented (the ride's `mayBeRaced`, ADR 0021 D-5.1);
+ * 2. the ride was on a route this device still holds;
+ * 3. no privacy zone of the rider's, at its widest trim, touches that route
+ *    ({@link offeredAsGhost}, ADR 0021 D-5.2). The zones never leave this
+ *    device, so this is where their answer is given, and a zone added after
+ *    the consent withdraws the offer at the next sync.
+ */
+export async function raceRouteOffer(input: {
+  readonly mayBeRaced: boolean;
+  readonly route: Pick<RouteRecord, 'profile'> | undefined;
+  readonly zones: readonly RaceZone[];
+  readonly sha256: Sha256;
+}): Promise<string | null> {
+  if (!input.mayBeRaced || input.route === undefined) return null;
+  if (!offeredAsGhost(input.route.profile.positions, input.zones)) return null;
+  return raceRouteDigest(input.route.profile, input.sha256);
+}
+
+/**
+ * {@link raceRouteOffer} for one of `athlete`'s rides, read from `store` —
+ * what `main.tsx` hands the sync. `null` for a ride this athlete does not
+ * hold, and for a ride on no route.
+ */
+export function raceRouteOf(
+  store: Pick<ActivityStore, 'getActivity' | 'getRoute' | 'listPrivacyZones'>,
+  athlete: AthleteId,
+  sha256: Sha256,
+): (activity: ActivityId) => Promise<string | null> {
+  return async (activity) => {
+    const ride = await store.getActivity(athlete, activity);
+    if (ride === undefined || ride.routeId === undefined) return null;
+    return raceRouteOffer({
+      mayBeRaced: ride.mayBeRaced,
+      route: await store.getRoute(athlete, ride.routeId),
+      zones: await store.listPrivacyZones(athlete),
+      sha256,
+    });
+  };
 }

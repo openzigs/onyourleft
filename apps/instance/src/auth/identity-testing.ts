@@ -374,6 +374,16 @@ export async function startIdentityInstance(
     embedder: embedder === null ? undefined : (embedder ?? scriptedEmbedder()),
     now: () => clock.ms,
   });
+  // The rooms read and a ghost (#331) name through the identity the listener
+  // is given, which for the browser gate is only made once it has a port.
+  const people: { identity?: Identity } = {};
+  const nameFor = async (viewerId: string, subjectId: string): Promise<string | undefined> => {
+    const identity = people.identity;
+    if (identity === undefined) return undefined;
+    if (!(await identity.moderation.canSee(viewerId, subjectId))) return undefined;
+    const profile = await identity.profile(subjectId);
+    return profile.ok ? profile.value.displayName : undefined;
+  };
   const sync = createSync({
     store: syncStoreSeenBy === undefined ? store : syncStoreSeenBy(store),
     blobs: blobStoreSeenBy === undefined ? memoryBlobs : blobStoreSeenBy(memoryBlobs),
@@ -381,22 +391,14 @@ export async function startIdentityInstance(
     itemStored: () => {
       history.schedule();
     },
+    ghostRider: nameFor,
   });
   const listenerConfig = { bodyLimitBytes: bodyLimitBytes ?? 16_384, ...config };
   const roomRoutes: MemoryBlobs = new Map();
-  // The rooms read names through the identity the listener is given, which
-  // for the browser gate is only made once the listener has a port.
-  const people: { identity?: Identity } = {};
   const rooms = createRooms({
     store,
     routes: createMemoryBlobStore(roomRoutes),
-    nameFor: async (viewerId, subjectId) => {
-      const identity = people.identity;
-      if (identity === undefined) return undefined;
-      if (!(await identity.moderation.canSee(viewerId, subjectId))) return undefined;
-      const profile = await identity.profile(subjectId);
-      return profile.ok ? profile.value.displayName : undefined;
-    },
+    nameFor,
     now: () => clock.ms,
     ...(roomLimits === undefined ? {} : { limits: roomLimits }),
     ...(roomCode === undefined ? {} : { code: roomCode }),

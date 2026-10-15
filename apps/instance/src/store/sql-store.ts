@@ -648,6 +648,12 @@ export interface ManifestRow extends SyncItem {
    * own without a request per ride.
    */
   readonly mayBeRaced: boolean | null;
+  /**
+   * The route a live, consented activity is offered to be raced on (#331),
+   * or `null` — so the device that signed it can tell whether its offer is
+   * the instance's without a request per ride.
+   */
+  readonly raceRouteSha256: string | null;
 }
 
 /** A position in the manifest's order. */
@@ -1190,9 +1196,34 @@ export interface SqlStore {
    * 0039 D-2). ⚠️ **Cross-athlete by design**, and never the requester's own
    * (their own attempts are #93's, not this). The consent is required: a
    * record whose rider revoked it is not returned on the next read. Nothing
-   * serves it over HTTP yet; #331 is its first caller.
+   * serves it over HTTP: a ghost is served by route, through
+   * {@link listRaceableOnRoute} (#331).
    */
   listRaceableActivities(requester: string, limit: number): Promise<readonly ActivityRecord[]>;
+  /**
+   * #331: set or clear the route one of THIS athlete's consented records is
+   * offered to be raced on (migration 0025). `false`, and nothing written,
+   * when the athlete holds no such record. A record whose consent is off
+   * holds no route: setting one there writes nothing and answers `false`.
+   */
+  setActivityRaceRoute(
+    athleteId: string,
+    contentSha256: string,
+    routeSha256: string | null,
+  ): Promise<boolean>;
+  /**
+   * #331: other athletes' records offered to be raced on ONE route, newest
+   * first — the cross-rider ghost candidates (ADR 0039 D-2). ⚠️
+   * **Cross-athlete by design**, like {@link listRaceableActivities}, and with
+   * the same two conditions — the consent, and never the requester's own —
+   * plus the route. Which of them may be SEEN is the choke point's
+   * (`moderation.ts` §`canSee`), asked by the caller one candidate at a time.
+   */
+  listRaceableOnRoute(
+    requester: string,
+    routeSha256: string,
+    limit: number,
+  ): Promise<readonly ActivityRecord[]>;
 
   /**
    * #835: live items of `kinds`, of any athlete, that have no index row for
@@ -1931,7 +1962,7 @@ const sessionFrom = (row: Selectable<SessionTable>): Session => ({
 });
 
 const activityRecordFrom = (
-  row: Omit<Selectable<ActivityRecordTable>, 'may_be_raced'>,
+  row: Omit<Selectable<ActivityRecordTable>, 'may_be_raced' | 'race_route_sha256'>,
 ): ActivityRecord => ({
   athleteId: row.athlete_id,
   contentSha256: row.content_sha256,
@@ -3099,7 +3130,10 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
       exclusive(async () => {
         const updated = await db
           .updateTable('activity_record')
-          .set({ may_be_raced: mayBeRaced ? 1 : 0 })
+          // A revocation takes the offer with it (#331): a consent given again
+          // is offered again only once the signing device has re-checked its
+          // privacy zones against the route.
+          .set(mayBeRaced ? { may_be_raced: 1 } : { may_be_raced: 0, race_route_sha256: null })
           .where('athlete_id', '=', athleteId)
           .where('content_sha256', '=', contentSha256)
           .executeTakeFirst();
@@ -3113,6 +3147,38 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
             .selectFrom('activity_record')
             .select(['athlete_id', 'content_sha256', 'signed_record', 'received_at'])
             .where('may_be_raced', '=', 1)
+            .where('athlete_id', '!=', requester)
+            .orderBy('received_at', 'desc')
+            .orderBy('athlete_id')
+            .orderBy('content_sha256')
+            .limit(limit)
+            .execute()
+        ).map(activityRecordFrom),
+      ),
+
+    setActivityRaceRoute: (athleteId, contentSha256, routeSha256) =>
+      exclusive(async () => {
+        let update = db
+          .updateTable('activity_record')
+          .set({ race_route_sha256: routeSha256 })
+          .where('athlete_id', '=', athleteId)
+          .where('content_sha256', '=', contentSha256);
+        // An offer stands on a consent: none is recorded without one. A
+        // clearing write is always taken, so a device can withdraw an offer
+        // whatever the consent says.
+        if (routeSha256 !== null) update = update.where('may_be_raced', '=', 1);
+        const updated = await update.executeTakeFirst();
+        return updated.numUpdatedRows > 0n;
+      }),
+
+    listRaceableOnRoute: (requester, routeSha256, limit) =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('activity_record')
+            .select(['athlete_id', 'content_sha256', 'signed_record', 'received_at'])
+            .where('may_be_raced', '=', 1)
+            .where('race_route_sha256', '=', routeSha256)
             .where('athlete_id', '!=', requester)
             .orderBy('received_at', 'desc')
             .orderBy('athlete_id')
@@ -3304,6 +3370,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           .selectAll('sync_item')
           .select('activity_record.signed_record as signed_record')
           .select('activity_record.may_be_raced as may_be_raced')
+          .select('activity_record.race_route_sha256 as race_route_sha256')
           .where('sync_item.athlete_id', '=', athleteId);
         if (after !== undefined) {
           query = query.where(
@@ -3319,6 +3386,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           ...syncItemFrom(row),
           signedRecord: row.signed_record,
           mayBeRaced: row.may_be_raced === null ? null : row.may_be_raced === 1,
+          raceRouteSha256: row.race_route_sha256,
         }));
       }),
 

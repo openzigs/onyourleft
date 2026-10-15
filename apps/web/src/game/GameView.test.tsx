@@ -26,7 +26,13 @@
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { GameView, type GamePort, type RidableRoute } from './GameView';
+import {
+  GameView,
+  RIDER_GHOST_REFUSAL_TEXT,
+  type GamePort,
+  type RidableRoute,
+  type RiderGhostLoad,
+} from './GameView';
 import { NO_GAME_TRAINER, type GameTrainerPort } from './trainer-port';
 import type { GameRenderer, SceneFrame } from './port';
 import {
@@ -414,6 +420,166 @@ describe('riding against a pacer', () => {
     // rider under a label naming the bot.
     expect(hudField('Pacer')).toContain('behind you');
     expect(hudField('Pacer')).not.toContain('ahead');
+  });
+});
+
+describe('racing another rider’s ghost (#331)', () => {
+  /** A port offering another rider's ghost, with spies on both ghost reads. */
+  function riderPort(route: RidableRoute, answer: RiderGhostLoad) {
+    const loadGhost = vi.fn(() => Promise.resolve<GhostTrack | undefined>(FAST_GHOST));
+    const loadRiderGhost = vi.fn(() => Promise.resolve(answer));
+    const port: GamePort = {
+      ...pedallingPort(route, FAST_GHOST),
+      loadGhost,
+      riderGhostOffered: () => true,
+      loadRiderGhost,
+    };
+    return { port, loadGhost, loadRiderGhost };
+  }
+
+  const toggle = (text: string): HTMLInputElement | undefined =>
+    queryAll<HTMLInputElement>(mounted?.container ?? document, 'input[type="checkbox"]').find(
+      (input) => (input.closest('label')?.textContent ?? '').includes(text),
+    );
+
+  async function rideWith(port: GamePort, frames: SceneFrame[], ownFirst = false): Promise<void> {
+    mounted = await mount(
+      <GameView
+        port={port}
+        renderer={() => Promise.resolve(capturingRenderer(frames))}
+        now={() => nowMs}
+      />,
+    );
+    await settle();
+    if (ownFirst) await clickThrough(toggle('Race your own'));
+    await clickThrough(toggle('Race another rider'));
+    const ride = queryAll<HTMLButtonElement>(mounted.container, 'button').find((button) =>
+      (button.textContent ?? '').startsWith('Ride '),
+    );
+    await clickThrough(ride);
+    await pump(2, 1000 / 30);
+    await settle();
+  }
+
+  const bea: RiderGhostLoad = { kind: 'ghost', rider: 'Bea', track: FAST_GHOST };
+
+  it('races ONE ghost, labelled with whose it is, in place of the rider’s own', async () => {
+    const route = { ...testRoute(), attempts: 1 };
+    const { port, loadGhost, loadRiderGhost } = riderPort(route, bea);
+    const frames: SceneFrame[] = [];
+    // The rider's own best first, then another rider's: the second replaces it.
+    await rideWith(port, frames, true);
+    await pump(60);
+
+    expect(loadRiderGhost).toHaveBeenCalledTimes(1);
+    expect(loadGhost).not.toHaveBeenCalled();
+    const last = frames[frames.length - 1];
+    expect(last?.markers.map((marker) => marker.kind).sort()).toEqual(['ghost', 'rider']);
+    expect(hudField('Bea')).toContain('ahead of you');
+    expect(hudField('Your best')).toBe('');
+  });
+
+  it('hands the recording no outcome for another rider’s ghost, even when the rider beats it', async () => {
+    const route = { ...testRoute(), attempts: 1 };
+    const hopeless = buildGhostTrack({ elapsedSeconds: [0, 4], distanceMetres: [0, 3] });
+    const { port } = riderPort(route, { kind: 'ghost', rider: 'Bea', track: hopeless });
+    const handed: (string | undefined)[] = [];
+    const trainer: GameTrainerPort = {
+      readTrainer: () => NO_GAME_TRAINER,
+      askForControlOnRide: () => Promise.resolve(),
+      workoutRescue: () => undefined,
+      recordingMayStop: () => false,
+      gameRideEnded: (outcome) => {
+        handed.push(outcome);
+      },
+      rideMovingSeconds: () => undefined,
+      watchRide: () => () => undefined,
+    };
+    mounted = await mount(<GameView port={port} trainer={trainer} now={() => nowMs} />);
+    await settle();
+    await clickThrough(toggle('Race another rider'));
+    await clickThrough(
+      queryAll<HTMLButtonElement>(mounted.container, 'button').find((button) =>
+        (button.textContent ?? '').startsWith('Ride '),
+      ),
+    );
+    await pump(60);
+    expect(hudField('Bea')).toBe('Beaten by you');
+    await clickThrough(endRideButton());
+    pending = [];
+    // A comparison with another rider is never a result about the rider's own best.
+    expect(handed).toEqual([undefined]);
+  });
+
+  it('turns the rider’s own ghost off when another rider’s is turned on', async () => {
+    const route = { ...testRoute(), attempts: 1 };
+    mounted = await mount(
+      <GameView
+        port={riderPort(route, bea).port}
+        renderer={() => Promise.resolve(capturingRenderer([]))}
+      />,
+    );
+    await settle();
+    await clickThrough(toggle('Race your own'));
+    expect(toggle('Race your own')?.checked).toBe(true);
+    await clickThrough(toggle('Race another rider'));
+    expect(toggle('Race another rider')?.checked).toBe(true);
+    expect(toggle('Race your own')?.checked).toBe(false);
+    await clickThrough(toggle('Race your own'));
+    expect(toggle('Race another rider')?.checked).toBe(false);
+  });
+
+  it('stops racing it when the rider says so: off the road and off the HUD', async () => {
+    const { port } = riderPort(testRoute(), bea);
+    const frames: SceneFrame[] = [];
+    await rideWith(port, frames);
+    await pump(10);
+    expect(hudField('Bea')).not.toBe('');
+
+    const stop = queryAll<HTMLButtonElement>(mounted?.container ?? document, 'button').find(
+      (button) => button.textContent === 'Stop ghost of Bea',
+    );
+    expect(stop).toBeDefined();
+    await clickThrough(stop);
+    await pump(10);
+
+    expect(hudField('Bea')).toBe('');
+    const last = frames[frames.length - 1];
+    expect(last?.markers.map((marker) => marker.kind)).toEqual(['rider']);
+  });
+
+  it('does not start the ride, and says why, when nobody who agreed has ridden the route', async () => {
+    const { port } = riderPort(testRoute(), { kind: 'none' });
+    const frames: SceneFrame[] = [];
+    await rideWith(port, frames);
+
+    expect(mounted?.container.textContent).toContain(RIDER_GHOST_REFUSAL_TEXT.none);
+    expect(frames).toEqual([]);
+    expect(
+      queryAll<HTMLButtonElement>(mounted?.container ?? document, 'button').some((button) =>
+        (button.textContent ?? '').startsWith('Ride '),
+      ),
+    ).toBe(true);
+  });
+
+  it('does not start the ride when the instance did not answer with a ghost', async () => {
+    const { port } = riderPort(testRoute(), { kind: 'unavailable' });
+    const frames: SceneFrame[] = [];
+    await rideWith(port, frames);
+
+    expect(mounted?.container.textContent).toContain(RIDER_GHOST_REFUSAL_TEXT.unavailable);
+    expect(frames).toEqual([]);
+  });
+
+  it('offers no such choice on a device with no instance', async () => {
+    mounted = await mount(
+      <GameView
+        port={{ ...pedallingPort(testRoute()), riderGhostOffered: () => false }}
+        renderer={() => Promise.resolve(capturingRenderer([]))}
+      />,
+    );
+    await settle();
+    expect(toggle('Race another rider')).toBeUndefined();
   });
 });
 
