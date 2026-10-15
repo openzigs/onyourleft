@@ -298,7 +298,7 @@ export const MODERATION_ROUTES: readonly Route[] = [
       outcome: { type: 'string', enum: ['upheld', 'reversed'] },
       decision: string,
     }),
-    errors: ['unauthenticated', 'validation_failed', 'moderation_not_applicable'],
+    errors: ['unauthenticated', 'validation_failed', 'not_found', 'moderation_not_applicable'],
     response: {
       contentType: 'application/json',
       schema: object({ logId: integer, moderatorConflict: { type: 'boolean' } }),

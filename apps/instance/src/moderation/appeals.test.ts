@@ -204,6 +204,53 @@ describe('deciding an appeal (#911)', () => {
     expect(after.body).toMatchObject({ displayName: 'Bea' });
   });
 
+  it('lifts only the suspension that was appealed, never a later one imposed after it was lifted', async () => {
+    const w = await start();
+    const { bea, appealId } = await appealed(w, 'suspend');
+    w.clock.ms += 60_000;
+    const lifted = await w.as(
+      w.owner,
+      'POST',
+      `/v1/moderation/athletes/${bea.athleteId}/unsuspend`,
+      {
+        reason: 'Lifted',
+      },
+    );
+    expect(lifted.status, JSON.stringify(lifted.body)).toBe(200);
+    w.clock.ms += 60_000;
+    await restrict(w, bea, 'suspend', w.deputy);
+    const decided = await w.as(
+      w.owner,
+      'POST',
+      `/v1/moderation/appeals/${String(appealId)}/decide`,
+      { outcome: 'reversed', decision: 'The first suspension was wrong.' },
+    );
+    expect(decided.status, JSON.stringify(decided.body)).toBe(200);
+    expect(
+      (await w.freshRead((store) => store.getAthlete(bea.athleteId)))?.suspendedAt,
+    ).not.toBeNull();
+  });
+
+  it('restores only the hidden name that was appealed, never one hidden again after a rename', async () => {
+    const w = await start();
+    const { bea, appealId } = await appealed(w, 'hide-display-name');
+    w.clock.ms += 60_000;
+    const renamed = await w.call('POST', '/v1/auth/display-name', {
+      token: bea.token,
+      body: { displayName: 'Beatrix' },
+    });
+    expect(renamed.status, JSON.stringify(renamed.body)).toBe(200);
+    w.clock.ms += 60_000;
+    await restrict(w, bea, 'hide-display-name', w.deputy);
+    await w.as(w.owner, 'POST', `/v1/moderation/appeals/${String(appealId)}/decide`, {
+      outcome: 'reversed',
+      decision: 'The first hiding was wrong.',
+    });
+    expect(
+      (await w.freshRead((store) => store.getAthlete(bea.athleteId)))?.displayNameHiddenAt,
+    ).not.toBeNull();
+  });
+
   it('leaves the restriction when it is upheld, decides once, and declares no conflict for another moderator', async () => {
     const w = await start();
     const { bea, appealId } = await appealed(w, 'suspend', w.deputy);

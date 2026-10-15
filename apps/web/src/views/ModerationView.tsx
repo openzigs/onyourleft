@@ -143,7 +143,6 @@ export const APPEAL_CONFLICT_TEXT =
 const APPEALED: Readonly<Record<string, string>> = {
   suspend: 'a suspension',
   hide_display_name: 'a hidden display name',
-  hide_item: 'a hidden item',
 };
 
 /** Said in place of the notices when the instance gave the queues and not them (#907). */

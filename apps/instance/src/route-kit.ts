@@ -243,7 +243,7 @@ export interface Route {
    * route declares it. ⚠️ **Signing out is not one of them, on purpose**: a
    * way-out session cannot end itself (`DELETE /v1/auth/session` answers it
    * `account_suspended`). It lasts an hour, and erasing the account removes
-   * it; a third route would widen the one flag that lets a suspended rider
+   * it; a fifth route would widen the one flag that lets a suspended rider
    * past the choke point, for a session that ends on its own (#926's review).
    */
   readonly admitsSuspended?: true;
