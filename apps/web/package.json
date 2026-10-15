@@ -18,7 +18,9 @@
     "typecheck": "tsc --noEmit --project tsconfig.json",
     "test": "vitest run",
     "test:browser": "vite build && vite build --config vite.browser.config.ts || exit 1; playwright test --project chromium --workers 3 --global-timeout 720000; chromium=$?; playwright test --project game --global-timeout 85000 --output browser/dist/test-results/game; game=$?; [ $chromium -eq 0 ] && [ $game -eq 0 ]",
-    "test:browser:nightly": "vite build && vite build --config vite.browser.config.ts && playwright test --project nightly --workers 1"
+    "test:browser:nightly": "vite build && vite build --config vite.browser.config.ts && playwright test --project nightly --workers 1",
+    "test:browser:shard-1": "vite build && vite build --config vite.browser.config.ts || exit 1; playwright test --project chromium --shard 1/2 --workers 3 --global-timeout 720000",
+    "test:browser:shard-2": "vite build && vite build --config vite.browser.config.ts || exit 1; playwright test --project chromium --shard 2/2 --workers 3 --global-timeout 720000; chromium=$?; playwright test --project game --global-timeout 85000 --output browser/dist/test-results/game; game=$?; [ $chromium -eq 0 ] && [ $game -eq 0 ]"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "1.0.1",
