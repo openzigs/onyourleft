@@ -645,3 +645,16 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   participants, which stands in full; D5, which stays the procedure for that ❌ and any other; and
   D1, D2, D3, D6 and D7. A cross-rider ghost is still never placed in a live room
   ([ADR 0028](0028-racing-fairness.md) D-7.4). **Nothing here is a finding that the risk changed.**
+- **2026-10-14** — **D4's second ❌ — *"A ranked leaderboard populated by ghost participants
+  replaying prior sessions"* — is superseded by [ADR 0051](0051-live-race-standings.md), on the
+  owner's ruling of the same day, for a ranked list of LIVE racers during a race and for nothing
+  else** ([#1347](https://github.com/openzigs/onyourleft/issues/1347)). The 2026-09-29 entry above
+  says that ❌ *"stands in full"*; it still does for what its words name — a leaderboard of ghosts
+  replaying prior sessions — and a race's standings contain no ghost
+  ([ADR 0028](0028-racing-fairness.md) D-7.4 still keeps every ghost out of a room). The supersession
+  is recorded so that nobody reads the ❌ as barring a live ranked list, which spike 0005 §5
+  Question B leaves open and the owner has accepted the risk of. ⚠️ **D5 step 1 is not met** and
+  Open Question 1 is still unread; both join the counsel questions due by about 2027-01-15
+  ([#1234](https://github.com/openzigs/onyourleft/issues/1234)). **Unchanged, by name**: D4's two ✅
+  and its first ❌ as ADR 0039 left it, D5, and D1, D2, D3, D6 and D7. **Nothing here is a finding
+  that the risk changed.**

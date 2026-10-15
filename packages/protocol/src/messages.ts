@@ -15,6 +15,8 @@
  * client → room   report  { sequence, atMs, powerWatts, cadenceRpm? }        every 500 ms
  * room → client   frame   { tick, ackSequence?, riders: [[id, dm, cm/s, draft %, flags]] }   every 1 s
  * room → client   countdown { startsInMs }                                  a race only
+ * room → client   name    { riderId, displayName }                           a race only
+ * room → client   standings { tick, riders: [[id, gap ds, W/kg ×10, flags]] }  a race only, every 1 s
  * room → client   finish  { order: [riderId, …] }                            a race only
  * ```
  *
@@ -34,8 +36,17 @@
  *   schema for a coordinate-named field.
  */
 
-/** The version of this wire format. A room refuses a client on any other. */
-export const PROTOCOL_VERSION = 1;
+/**
+ * The version of this wire format. A room refuses a client on any other.
+ *
+ * **2** since #1347 ([ADR 0051](../../../docs/adr/0051-live-race-standings.md)):
+ * a race's room names its riders ({@link RiderName}) and sends its standings
+ * ({@link Standings}) every tick. A version-1 build is refused
+ * `protocol-mismatch` at its hello, and told to update
+ * (`apps/web` §`room-ride.ts` `ROOM_REFUSED_TEXT`), rather than seated in a
+ * race whose list it cannot show.
+ */
+export const PROTOCOL_VERSION = 2;
 
 /** Where a rider's hands are, fixed by the race — `@onyourleft/physics`' `RidingPosition`. */
 export type RidingPosition = 'upright' | 'hoods' | 'drops';
@@ -121,6 +132,13 @@ export const FLAG_PLAUSIBILITY = 1;
 /** The room is coasting this rider: its last report was inadmissible or never came (rule 1). */
 export const FLAG_COASTING = 2;
 
+/**
+ * In a race's {@link Standings} only: this rider has crossed the line (#1347).
+ * A frame's flags never carry it — a frame says where a rider is, and a
+ * finisher stays where they crossed.
+ */
+export const FLAG_FINISHED = 4;
+
 /** One rider in a frame. On the wire, a five-slot array in this order. */
 export interface FrameRider {
   readonly riderId: number;
@@ -163,6 +181,66 @@ export interface Countdown {
   readonly startsInMs: number;
 }
 
+/**
+ * A race's rider, by name — #1347, ADR 0051. The name is the athlete's PUBLIC
+ * projection (`apps/instance` §`auth/public-athlete.ts`, #774) and nothing
+ * else about them: a room has no field for a mass, a power or a place.
+ *
+ * Sent once per seat: to every connected rider when a seat is taken, and the
+ * whole field to a rider as they are welcomed or welcomed back. One message a
+ * rider rather than a roster, so a hundred 32-character names never meet
+ * {@link MAXIMUM_MESSAGE_BYTES} in one message.
+ */
+export interface RiderName {
+  readonly type: 'name';
+  readonly riderId: number;
+  readonly displayName: string;
+}
+
+/**
+ * One rider in a race's standings — #1347, ADR 0051. On the wire, a four-slot
+ * array in this order.
+ *
+ * ⚠️ **Power-to-weight and never power** (ADR 0028's 2026-09-22 rule: power OR
+ * W/kg for a rider, never both; ruling Q17). The room divides by the declared
+ * mass it holds, and the mass never leaves it.
+ */
+export interface StandingsRider {
+  readonly riderId: number;
+  /**
+   * The time gap, computed BY THE ROOM from its own positions, between this
+   * rider and the recipient, in whole tenths of a second: **positive when this
+   * rider is behind the recipient**, negative when ahead, 0 for the
+   * recipient's own row. "Behind by 12 s" means the recipient passed where
+   * this rider is now 12 s ago. A client never computes a gap of its own.
+   */
+  readonly gapDeciseconds: number;
+  /**
+   * The power the room simulated this rider at on this tick, per kilogram, in
+   * tenths. 0 for a rider it coasted, and for a finisher, whom it no longer
+   * simulates.
+   */
+  readonly wattsPerKilogramTenths: number;
+  /** The frame's {@link FLAG_PLAUSIBILITY} and {@link FLAG_COASTING}, and {@link FLAG_FINISHED}, or'd. */
+  readonly flags: number;
+}
+
+/**
+ * A race's standings — #1347, ADR 0051, superseding ADR 0028 D-7.7: every
+ * rider still in the race, **in the room's order** — finishers first, by their
+ * finish, then everybody on the road by distance along the route, furthest
+ * first. Sent after each frame of a running race, to each rider with gaps to
+ * THEM, so two riders are sent different numbers about the same field.
+ *
+ * Never in a group ride: ADR 0028 D-7.2, nobody leads one (ADR 0051 D-3).
+ */
+export interface Standings {
+  readonly type: 'standings';
+  /** The frame's tick these are the standings of. */
+  readonly tick: number;
+  readonly riders: readonly StandingsRider[];
+}
+
 /** The result of a race: rider ids in finishing order. */
 export interface Finish {
   readonly type: 'finish';
@@ -173,7 +251,7 @@ export interface Finish {
 export type ClientMessage = Hello | Report;
 
 /** What a room may send. */
-export type RoomMessage = Welcome | Refuse | Frame | Countdown | Finish;
+export type RoomMessage = Welcome | Refuse | Frame | Countdown | RiderName | Standings | Finish;
 
 /** Every message. */
 export type ProtocolMessage = ClientMessage | RoomMessage;

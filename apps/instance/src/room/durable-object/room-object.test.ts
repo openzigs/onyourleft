@@ -75,7 +75,7 @@ describe('sockets — the Hibernation API and the attachment', () => {
     const harness = new FakeRoomHarness(conformanceSettings(), admitConformance, false);
     const socket = await hello(harness, 'ann');
     await harness.room.webSocketMessage(socket, new ArrayBuffer(8));
-    expect(types(socket)).toEqual(['welcome']);
+    expect(types(socket)).toEqual(['welcome', 'name']);
     const stranger = new FakeSocket();
     await harness.room.webSocketMessage(stranger, helloText('ticket-bea'));
     expect(stranger.closedByObject).toBe(true);
@@ -211,9 +211,10 @@ describe('a lobby survives eviction — #781 criterion 3', () => {
     // The sockets that were open before the eviction are the ones the race is sent to.
     await harness.room.fetch(START);
     while ((await harness.room.view()).tick === 0) await fireAlarm(harness);
-    const frame = decodeRoomMessage(bea.sent.at(-1) ?? '');
+    // A race's last word on a tick is its standings (#1347); the frame is before them.
+    const frame = decodeRoomMessage(bea.sent.at(-2) ?? '');
     expect(frame).toMatchObject({ ok: true, message: { type: 'frame', ackSequence: 1 } });
-    expect(types(cai).at(-1)).toBe('frame');
+    expect(types(cai).slice(-2)).toEqual(['frame', 'standings']);
     expect(frame.ok && frame.message.type === 'frame' && frame.message.riders.length).toBe(3);
   });
 
@@ -370,7 +371,7 @@ describe('what the adapter sends is what the core said, encoded', () => {
     await harness.room.fetch(START);
     ann.closedByClient = true; // gone, and the platform has not said so yet
     await fireAlarm(harness);
-    expect(types(bea).at(-1)).toBe('frame');
+    expect(types(bea).slice(-2)).toEqual(['frame', 'standings']);
   });
 });
 
@@ -400,12 +401,16 @@ describe('tickets from the instance’s own book — #780 wiring #772 into this 
   it('mints a ticket for the Worker in front, admits one hello with it, and refuses it spent — closing 4003', async () => {
     const now = { ms: 1_000 };
     const room = ticketedRoom(now);
-    const reply = await mint(room, { athleteId: 'ann', declaredMassKilograms: 70 });
+    const reply = await mint(room, {
+      athleteId: 'ann',
+      declaredMassKilograms: 70,
+      displayName: 'Ann',
+    });
     expect(reply.status).toBe(200);
     const { ticket } = JSON.parse((reply as { text: string }).text) as { ticket: string };
     const first = await openSocket(room);
     await room.webSocketMessage(first, helloText(ticket));
-    expect(types(first)).toEqual(['welcome']);
+    expect(types(first)).toEqual(['welcome', 'name']);
     const again = await openSocket(room);
     await room.webSocketMessage(again, helloText(ticket));
     expect(types(again)).toEqual(['refuse', 'closed']);
@@ -417,13 +422,19 @@ describe('tickets from the instance’s own book — #780 wiring #772 into this 
   it('refuses a ticket past its thirty seconds, and a mint that names nobody', async () => {
     const now = { ms: 1_000 };
     const room = ticketedRoom(now);
-    const reply = await mint(room, { athleteId: 'ann', declaredMassKilograms: 70 });
+    const reply = await mint(room, {
+      athleteId: 'ann',
+      declaredMassKilograms: 70,
+      displayName: 'Ann',
+    });
     const { ticket } = JSON.parse((reply as { text: string }).text) as { ticket: string };
     now.ms += 30_001;
     const late = await openSocket(room);
     await room.webSocketMessage(late, helloText(ticket));
     expect(late.closeCode).toBe(4003);
     expect((await mint(room, { declaredMassKilograms: 70 })).status).toBe(400);
+    // #1347: a ticket names its athlete, so a race can name them to the others.
+    expect((await mint(room, { athleteId: 'ann', declaredMassKilograms: 70 })).status).toBe(400);
   });
 
   it('has no ticket path at all for a room mounted without a book', async () => {

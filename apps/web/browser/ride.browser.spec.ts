@@ -3679,3 +3679,90 @@ test.describe('a lap ends while a re-plan waits — #1312 with #1244', () => {
     });
   }
 });
+
+/**
+ * #1347 — a race's standings on the HUD, `ride-harness.tsx` §`WITH_STANDINGS`:
+ * a running race whose room has named nine riders and sent its standings, so
+ * the panel is at its widest — seven lines, two of them the longest name a
+ * room admits.
+ *
+ * ## What is held
+ *
+ * At the three tablet viewports, with anchor positioning and without: the
+ * standings panel is on the stage, whole, uncovered, laid over no other panel
+ * and **clear of the leaning rider's box**, and shows seven lines. At every
+ * other overlay viewport — the phones — it is visually hidden (`theme.css`
+ * §"A RACE'S STANDINGS") and still in the document, seven lines, for a screen
+ * reader; and no panel the rider can see is over the rider on a tablet.
+ *
+ * ## The control
+ *
+ * The same page with the panel moved to the middle of the stage — what a
+ * layout that put it under the primary readings' row and centred it would
+ * do — is over the rider at every tablet viewport, so "clear of the rider"
+ * is a measurement that can fail here.
+ */
+const WITH_STANDINGS = '?room=standings';
+
+function standingsPanel(seen: StageMeasurement): StageItem {
+  const panel = seen.panels.find((each) => each.name.includes('oyl-hud__standings'));
+  if (panel === undefined) throw new Error('no standings panel among the HUD panels');
+  return panel;
+}
+
+test.describe('a race’s standings on the HUD — #1347', () => {
+  for (const viewport of OVERLAY_VIEWPORTS) {
+    const tablet = TABLET_VIEWPORTS.includes(viewport);
+    test(`${tablet ? 'whole, over no panel and clear of the rider' : 'visually hidden, and still there to be read'} — ${viewport.name}`, async ({
+      page,
+    }) => {
+      await openRide(page, viewport, WITH_STANDINGS);
+      const lines = await page.locator('.oyl-hud__standings li').count();
+      expect(lines).toBe(7);
+      for (const [how, seen] of await bothWays(page)) {
+        await test.step(how, () => {
+          const panel = standingsPanel(seen);
+          const rider = riderBox(viewport);
+          const over = seen.panels
+            .filter((each) => each.box.height > 1)
+            .filter((each) => overlap(each.box, rider));
+          console.log(
+            `#1347 standings — ${viewport.name} — ${how}: ${panel.box.width.toFixed(0)} × ` +
+              `${panel.box.height.toFixed(0)} px at [${panel.box.left.toFixed(0)},${panel.box.top.toFixed(0)}]` +
+              `, its bottom ${(rider.top - panel.box.bottom).toFixed(0)} px above the rider's box` +
+              `, its left ${(panel.box.left - rider.right).toFixed(0)} px right of it` +
+              `; panels over the rider: ${over.length === 0 ? 'none' : over.map(describeItem).join(', ')}`,
+          );
+          if (!tablet) {
+            expect(panel.box.width, 'hidden by clip on a phone').toBeLessThanOrEqual(1);
+            expect(panel.box.height, 'hidden by clip on a phone').toBeLessThanOrEqual(1);
+            return;
+          }
+          expect(inside(panel.box, viewport), describeItem(panel)).toBe(true);
+          expect(panel.onTop, describeItem(panel)).toBe(true);
+          expect(panel.box.height).toBeGreaterThan(100);
+          const collisions = seen.panels
+            .filter((each) => each !== panel && each.box.height > 1)
+            .filter((each) => overlap(each.box, panel.box))
+            .map(describeItem);
+          expect(collisions).toEqual([]);
+          expect(over.map(describeItem)).toEqual([]);
+        });
+      }
+    });
+  }
+
+  for (const viewport of TABLET_VIEWPORTS) {
+    test(`the control — moved to the middle of the stage, it is over the rider — ${viewport.name}`, async ({
+      page,
+    }) => {
+      await openRide(page, viewport, WITH_STANDINGS);
+      await page.addStyleTag({
+        content:
+          '.oyl-game--riding .oyl-hud .oyl-hud__standings { justify-self: center !important; align-self: end !important; }',
+      });
+      const panel = standingsPanel(await measure(page));
+      expect(overlap(panel.box, riderBox(viewport)), describeItem(panel)).toBe(true);
+    });
+  }
+});

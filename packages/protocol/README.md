@@ -28,7 +28,13 @@ position**.
 | room → client | `refuse` | `reason` |
 | client → room | `report` | `sequence`, `atMs`, `powerWatts`, `cadenceRpm?` |
 | room → client | `frame` | `tick`, `ackSequence?`, `riders: [[riderId, decimetres, centimetresPerSecond, draftPercent, flags]]` |
+| room → client | `countdown` | `startsInMs` — a race only |
+| room → client | `name` | `riderId`, `displayName` — a race only, once a seat ([#1347](https://github.com/openzigs/onyourleft/issues/1347)) |
+| room → client | `standings` | `tick`, `riders: [[riderId, gapDeciseconds, wattsPerKilogramTenths, flags]]` — a race only, after every frame, gaps to the recipient ([ADR 0051](../../docs/adr/0051-live-race-standings.md)) |
 | room → client | `finish` | `order: [riderId, …]` |
+
+`PROTOCOL_VERSION` is **2** since #1347 added `name` and `standings`; a version-1 hello is refused
+`protocol-mismatch`.
 
 - A report carries **no `riderId`**: the room attaches it from the connection, never from the wire.
 - **No field carries a coordinate.** A rider is a distance along the route, and the route is named by

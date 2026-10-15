@@ -1202,6 +1202,32 @@ seconds at all**, and a reviewer who remembers "under 30 s" is reading the old f
 under 25 (linear is 10), so the runner and coverage's counters divide out, and the solve itself is
 about a third cheaper under coverage, to the bit (`racing-line.test.ts` §"its cost").
 
+⚠️ **[#1262](https://github.com/openzigs/onyourleft/issues/1262) read the instance project the
+same way, and since #1280 that is TWO logs per figure.** The required `Tests` shard runs without
+coverage and the nightly `Tests under coverage` step with it, so a case's slowest figure is the
+larger of the two, and on the instance it is usually the nightly one (the three-athlete manifest
+case: 5 834 ms on `main`, 11 139 ms under coverage). Method, repeatable: take the `Tests` job log
+of the last ten green `main` runs of `Repository rules` (38319197297 to 38598735374,
+2026-10-12 to 2026-10-14) and the job log of the last ten nightly runs (38277973590 to
+38537249148; three of them red on `web` only, so their instance and `web/src/instance` figures
+stand), each with the CPU its `Record the runner's CPU` step printed; parse every case line
+Vitest prints beneath its file (every case over 300 ms); join each case to its declared timeout
+— the case's own argument, else its describe's, else the 5 s default — by reading the test
+file's syntax tree rather than by eye, because a templated title (`Recover, ${column}: …`) and
+a timeout held in a constant are both missed by a grep. Thirteen cases in the two projects stood
+at 45 % or more: twelve on the 5 s default (up to 74 %: two `devices.test.ts` loops that had
+timed out on 38051597022 and 38071560352, `side-picture-round-trip.test.ts`' drawn picture),
+and the three-athlete manifest case at 74 % of the 15 s #1253 gave it. Each now carries about
+three times its slowest figure with the figures and run ids beside it; no assertion or input
+changed, and each new timeout was set to 1 ms once to see the case it names time out. Below the
+line and NOT changed: `moderation-port.test.ts`' "pages past 50" at 42 % of its 15 s (6 265 ms,
+nightly 38492085167, EPYC 9V74), and four cases at 40–43 % of 5 s. ⚠️ **What this does not
+read is a hook**: `beforeEach`/`beforeAll` time is printed nowhere, and its 10 s default is
+unmeasured here. `busy-retry.test.ts`' "database is locked" (38072953538, attempt 1) was the
+test's own lock-holding thread, the one connection in the suite with no busy timeout, meeting
+the store's connection rebuilding the WAL index (SQLITE_BUSY_RECOVERY, 261): not the store's
+retry, which every store connection's busy timeout covers. The file says so beside `HOLDER`.
+
 ⚠️ **The browser is pinned by the lockfile, not by the install command.** `@playwright/test`
 **1.63.0** ships Chromium revision **1243**, and `playwright install chromium` fetches whatever the
 installed Playwright names. Bumping Playwright therefore changes the browser under the gate, which
@@ -1318,3 +1344,19 @@ commit than the one running.
 Repository-level security scanning — CodeQL default setup, secret scanning with push protection, and
 Dependabot alerts and security updates — is **already enabled on the repository** and needs no
 workflow step. Adding one would duplicate it.
+
+[`.github/workflows/roadmap.yml`](../../.github/workflows/roadmap.yml) — **`Roadmap board sync`**
+([#1348](https://github.com/openzigs/onyourleft/issues/1348)) — runs
+[`scripts/sync-roadmap.py`](../../scripts/sync-roadmap.py) at 04:41 UTC nightly and on
+`workflow_dispatch` (with a `dry-run` input), to keep the
+[roadmap board](https://github.com/orgs/openzigs/projects/1) in step with the issues. ⚠️ **It has
+no pull-request trigger of either kind, on purpose**: it mints a GitHub App token that can write
+every project in the org, from a private key held in the Environment `roadmap`, which only `main`
+may deploy to. It is not a required check. **Its tests run in the required check anyway**:
+`scripts/check-repo-rules.test.sh` runs `python3 -I scripts/sync-roadmap.test.py` as one of its
+cases, because that suite is already a step of `Checks, concurrently` and a new step would mean
+editing `rules.yml`. The script is standard-library Python, so the runner's `python3` is all it
+needs. Until `ROADMAP_APP_CLIENT_ID` is set the job skips, green, with a notice. What the script
+writes, the App's setup and the views are in [`docs/roadmap-board.md`](../roadmap-board.md).
+[#1201](https://github.com/openzigs/onyourleft/issues/1201) stays the written plan; the board
+mirrors it.

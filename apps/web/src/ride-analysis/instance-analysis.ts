@@ -643,6 +643,12 @@ export function createInstanceAnalysis(options: InstanceAnalysisOptions): Instan
 
     async ask(activityId, source, view, signal) {
       if (!options.connected()) return failed(INSTANCE_ASK_TEXT['no-instance']);
+      // #1228: a page drawn while hosted was offered keeps its press after the
+      // rider withdraws; the offer is read again at the press, and without it
+      // nothing is sent — not the masking list, not the ride.
+      if (source === 'instance-hosted' && options.hosted?.endpoint() === undefined) {
+        return failed(INSTANCE_FAILURE_TEXT.hosted_unavailable);
+      }
       followed.delete(activityId);
       cancelledEarly.delete(activityId);
       starting.add(activityId);
