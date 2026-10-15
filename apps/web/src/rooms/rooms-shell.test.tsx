@@ -630,6 +630,7 @@ describe('a private race — #785', () => {
         ridingPosition: 'hoods',
         reportIntervalMs: 500,
         frameIntervalMs: 1000,
+        drafting: 'on',
       },
     });
     await frame(3);
