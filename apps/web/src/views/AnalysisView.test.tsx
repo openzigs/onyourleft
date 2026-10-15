@@ -39,7 +39,7 @@ import {
   type Mounted,
 } from '../testing/mount';
 
-import { AnalysisView } from './AnalysisView';
+import { AnalysisView, THRESHOLDS_WHERE_THEY_GO } from './AnalysisView';
 
 const OWNER = toAthleteId('athlete-a');
 
@@ -420,6 +420,25 @@ describe('AnalysisView — the threshold editor (#76 criterion 6, and #78\u2019s
       ).toEqual(['Leave one blank to go back to the assumed default.']);
       expect(hints[0]?.closest('details'), label).toBeNull();
     }
+  });
+
+  // #1342: threshold power is in every ride analysis' input and a re-plan's
+  // power is a share of it, so the card says so, on the screen, and nowhere
+  // says that nothing is sent. `thresholds-disclosure.test.ts` holds each
+  // clause of the sentence to the code that makes it true.
+  it('says where the thresholds go, never tucked, and never that nothing is sent — #1342', async () => {
+    const port = stubAnalysis(OWNER, [ride('ride-1', { power: steadyPower(200, 600) })], athlete);
+    mounted = await mount(<AnalysisView port={port} />);
+    await settle();
+    const container = mounted.container;
+    const paragraph = queryAll<HTMLParagraphElement>(container, 'p').find(
+      (candidate) => candidate.textContent === THRESHOLDS_WHERE_THEY_GO,
+    );
+    expect(paragraph).toBeDefined();
+    expect(paragraph?.closest('details')).toBeNull();
+    expect((container.textContent ?? '').replace(/\s+/g, ' ')).not.toMatch(
+      /nothing is sent anywhere/i,
+    );
   });
 
   it('seeds the form from what is stored', async () => {

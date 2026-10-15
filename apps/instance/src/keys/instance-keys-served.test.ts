@@ -370,7 +370,11 @@ describe('the operator’s instance-key command (#1189)', () => {
         expect(printed).not.toContain(spelling);
       }
     }
-  });
+    // Three child processes: 2 337 ms on green `main` (38490502814, EPYC 7763)
+    // and 2 078 ms under coverage (nightly 38384633205, EPYC 7763), 47 % of
+    // Vitest's 5 s default. About three times the slowest CI figure
+    // (docs/agents/ci.md §4c, #1262); nothing it does is changed.
+  }, 8_000);
 
   it('refuses with no secret, naming the variable, and makes nothing', async () => {
     const data = await freshData();
