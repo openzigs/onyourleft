@@ -1385,6 +1385,15 @@ describe('exporting the side camera’s reports (#388)', () => {
       const races = [
         { roomId: 'ab'.repeat(16), place: 2, finishers: 5 },
         { roomId: 'room-2', place: null, finishers: null, crossedTheLine: true as const },
+        // #1364: a place among the riders already across, field by field.
+        {
+          roomId: 'room-3',
+          place: null,
+          finishers: null,
+          crossedTheLine: true as const,
+          placeAcross: 2,
+          across: 4,
+        },
       ];
       // Written through the store's own path and read back by the export
       // through the store, as a rider's export reads it.

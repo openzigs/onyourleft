@@ -360,3 +360,16 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
     (`apps/web/src/net/room-session.ts` §`draftFactor`). D-5's reading is a share of aerodynamic drag
     on the HUD, never watts. What #787 did and did not build of #327's proposed indicator criteria is
     in its pull request.
+- **2026-10-15** — **The draft reading is on by default, superseding #327's "off by default" for this
+  reading only.** The owner's ruling of 2026-10-15 on #787's pull request
+  ([#1369](https://github.com/openzigs/onyourleft/pull/1369)): the rider's setting *"Show my draft
+  when riding in a room"* starts **ticked**.
+  - **What changes.** D-5's second bullet bound #787 to #327's proposed indicator criteria, the first
+    of which is *"off by default"*. For the draft reading that one criterion no longer holds: with
+    nothing stored on the device (`oyl.game.draftReading.v1`), a ride in a room shows the draft
+    field and its gauge. A rider who stored an explicit "off" keeps it off.
+  - **Unchanged, by name**: the rest of #327's criteria as D-5 binds them (the full-scale mark drawn,
+    honest on a climb, sayable, contrast and layout measured); D-5's percentage of aerodynamic drag,
+    never watts; and the spoken cue's second switch, announcements, which is still off by default, so
+    the cue is heard only by a rider who turned announcements on. The owner approved the gauge, its
+    "at most 59 %" scale text and the spoken cue as written.
