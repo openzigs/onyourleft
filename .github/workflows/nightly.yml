@@ -171,7 +171,7 @@ jobs:
       # looks wrong and the question is which line.
       #
       # SHA from:
-      #   gh api repos/actions/upload-artifact/git/ref/tags/v7.0.1 --jq .object.sha
+      #   gh api repos/actions/upload-artifact/git/ref/tags/v7.0.2 --jq .object.sha
       - name: Upload the coverage report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
