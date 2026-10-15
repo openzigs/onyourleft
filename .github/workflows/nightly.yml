@@ -111,7 +111,7 @@ jobs:
         run: lscpu | grep -E '^(Model name|Thread|Core|Socket|CPU\(s\))'
 
       - name: Set up Node
-        #   gh api repos/actions/setup-node/git/ref/tags/v7.0.0 --jq .object.sha
+        #   gh api repos/actions/setup-node/git/ref/tags/v7.1.0 --jq .object.sha
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
