@@ -451,13 +451,20 @@ export interface RideFacts {
    */
   readonly replansDropped?: number;
   /**
-   * The private race this ride was ridden in, as its room told this device —
-   * #785, the owner's ruling of 2026-10-14: *"a ride in a room always
-   * records, and the race result is stored with that ride on the device"*.
-   * Known only while riding, like {@link workoutFinished}. Absent for a ride
-   * in no race. @see RoomRaceFact
+   * The private races this ride was ridden in, in the order they ended, each
+   * as its room told this device — #785, the owner's ruling of 2026-10-14:
+   * *"a ride in a room always records, and the race result is stored with
+   * that ride on the device"*. Known only while riding, like
+   * {@link workoutFinished}. Absent for a ride in no race.
+   *
+   * A LIST because one recording can carry two game rides, each in a race
+   * (#1360's review, N3): the second is kept beside the first, never in its
+   * place.
+   *
+   * ⚠️ **A race that does not read is dropped, never the ride**, on the way in
+   * and on the way out, as for {@link replans}. @see RoomRaceFact
    */
-  readonly race?: RoomRaceFact;
+  readonly races?: readonly RoomRaceFact[];
 }
 
 /**
@@ -469,6 +476,17 @@ export interface RideFacts {
  * else — not a name, not a time, not a power — so the device copy holds this
  * rider's result and only theirs; every rider's result, with names and
  * flags, is the instance's, shown to the race's riders only (#785, Q2).
+ *
+ * What it can say, and nothing else reads:
+ *
+ * - `place` and `finishers`: the room's order was heard, and this rider is in it.
+ * - `finishers` alone (`place: null`): the order was heard, and this rider is
+ *   not in it — they did not finish, in the room's word.
+ * - neither, with `crossedTheLine: true`: the rider crossed the line on this
+ *   device and ended their ride before the room's order came (#1360's review,
+ *   N2). The device does not know their place: no place is sent before the
+ *   room's `finish`.
+ * - neither, and no `crossedTheLine`: the rider left while the race ran.
  */
 export interface RoomRaceFact {
   /** The room's id on the instance, as the client takes one (1–128 of `A–Z a–z 0–9 _ -`). */
@@ -484,6 +502,12 @@ export interface RoomRaceFact {
    * device never heard it (the rider left the race before it was over).
    */
   readonly finishers: number | null;
+  /**
+   * `true` only when the order was NOT heard (`finishers: null`) and the rider
+   * crossed the line on this device before ending their ride. Absent otherwise:
+   * once the order is heard, it is the room's word on who finished.
+   */
+  readonly crossedTheLine?: true;
 }
 
 /** @see {@link ActivityRecord.originalFile} */

@@ -3,7 +3,14 @@
 import { describe, expect, it } from 'vitest';
 
 import type { RaceResultRow } from '../net/rooms-port';
-import { flagText, raceFactText, raceResultLines, raceTime, UNNAMED_RIDER } from './race-result';
+import {
+  flagText,
+  raceFactTerm,
+  raceFactText,
+  raceResultLines,
+  raceTime,
+  UNNAMED_RIDER,
+} from './race-result';
 
 const row = (overrides: Partial<RaceResultRow>): RaceResultRow => ({
   place: 1,
@@ -90,5 +97,17 @@ describe('a ride’s race, as kept on this device — #785', () => {
     expect(raceFactText({ roomId: 'r', place: null, finishers: null })).toBe(
       'A private race, left before it was over',
     );
+  });
+
+  it('says a race finished on this device and left before the room gave places as finished — #1360’s review (N2)', () => {
+    expect(raceFactText({ roomId: 'r', place: null, finishers: null, crossedTheLine: true })).toBe(
+      'A private race, finished: you left before the room gave places',
+    );
+  });
+
+  it('names the row for one race or more than one — N3', () => {
+    const one = { roomId: 'r', place: 1, finishers: 2 };
+    expect(raceFactTerm([one])).toBe('Race');
+    expect(raceFactTerm([one, one])).toBe('Races');
   });
 });

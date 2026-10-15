@@ -86,6 +86,7 @@ import {
   recordingSessionId,
   workoutId,
   type RecordingSessionId,
+  type RoomRaceFact,
   type WorkoutRecord,
 } from '@onyourleft/store';
 import {
@@ -6852,7 +6853,7 @@ describe('#785 — a ride in a room always records, and its race is saved with i
     const saved = await harness.read(async (store) =>
       store.getActivity(ATHLETE_A, activityId('ride-1')),
     );
-    expect(saved?.rideFacts?.race).toEqual({ roomId: ROOM, place: 2, finishers: 3 });
+    expect(saved?.rideFacts?.races).toEqual([{ roomId: ROOM, place: 2, finishers: 3 }]);
     rig.controller.dispose();
   });
 
@@ -6877,7 +6878,7 @@ describe('#785 — a ride in a room always records, and its race is saved with i
     const saved = await harness.read(async (store) =>
       store.getActivity(ATHLETE_A, activityId('ride-1')),
     );
-    expect(saved?.rideFacts?.race).toBeUndefined();
+    expect(saved?.rideFacts?.races).toBeUndefined();
     rig.controller.dispose();
   });
 
@@ -6901,14 +6902,119 @@ describe('#785 — a ride in a room always records, and its race is saved with i
       await store.getActivity(ATHLETE_A, activityId('ride-1')),
       await store.getActivity(ATHLETE_A, activityId('ride-2')),
     ]);
-    expect(first?.rideFacts?.race).toEqual({ roomId: ROOM, place: 1, finishers: 2 });
+    expect(first?.rideFacts?.races).toEqual([{ roomId: ROOM, place: 1, finishers: 2 }]);
     expect(second?.id).toBe('ride-2');
-    expect(second?.rideFacts?.race).toBeUndefined();
+    expect(second?.rideFacts?.races).toBeUndefined();
     rig.controller.dispose();
   });
 
   it('answers false with no ride controller at all', async () => {
     expect(await gameTrainerPortOver(undefined).recordRoomRide?.()).toBe(false);
+  });
+  it('keeps both races of one recording, in the order they ended — #1360’s review (N3)', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    const game = gameTrainerPortOver(rig.controller);
+    await rig.controller.pair('trainer');
+    expect(await game.recordRoomRide?.()).toBe(true);
+    await ride(rig, 3);
+    game.roomRaceEnded?.({ roomId: ROOM, place: 2, finishers: 3 });
+    // The rider rides on, into a second room, under the same recording.
+    expect(await game.recordRoomRide?.()).toBe(true);
+    await ride(rig, 3);
+    game.roomRaceEnded?.({ roomId: 'room-2', place: null, finishers: null, crossedTheLine: true });
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    const saved = await harness.read(async (store) =>
+      store.getActivity(ATHLETE_A, activityId('ride-1')),
+    );
+    expect(saved?.rideFacts?.races).toEqual([
+      { roomId: ROOM, place: 2, finishers: 3 },
+      { roomId: 'room-2', place: null, finishers: null, crossedTheLine: true },
+    ]);
+    rig.controller.dispose();
+  });
+
+  describe('a ride the app closed on before Stop keeps its races — #1360’s review (B2)', () => {
+    /**
+     * Race, *End ride*, then the app is gone before *Stop* — `dispose` leaves
+     * it as a closed tab does (#212): the checkpoint on disk and nothing in
+     * memory. Long enough after the race for one flush to carry it.
+     */
+    const closedBeforeStop = async (races: readonly unknown[]): Promise<RecordingSessionId> => {
+      const rig = benchWith();
+      const game = gameTrainerPortOver(rig.controller);
+      await rig.controller.pair('trainer');
+      expect(await game.recordRoomRide?.()).toBe(true);
+      await ride(rig, 4);
+      for (const race of races) game.roomRaceEnded?.(race as RoomRaceFact);
+      await ride(rig, 6);
+      // Nothing about a race fails a checkpoint.
+      expect(rig.controller.getSnapshot().storage).toBe('ok');
+      rig.controller.dispose();
+      const id = rig.sessionIds[0];
+      if (id === undefined) throw new Error('no recording was started');
+      return id;
+    };
+
+    it('saved as it was recovered, with its race, read back through the store', async () => {
+      const id = await closedBeforeStop([{ roomId: ROOM, place: 1, finishers: 4 }]);
+      const next = benchWith({ rideSave: storeSavePort() });
+      await next.controller.refreshRecoverable();
+      expect(next.controller.getSnapshot().recoverable.map((each) => each.id)).toEqual([id]);
+
+      expect(await next.controller.saveRecovered(id)).toBe('saved');
+
+      const saved = await harness.read(async (store) =>
+        store.getActivity(ATHLETE_A, activityId('ride-1')),
+      );
+      expect(saved?.rideFacts?.races).toEqual([{ roomId: ROOM, place: 1, finishers: 4 }]);
+      next.controller.dispose();
+    });
+
+    it('continued, raced again and stopped: both races are saved', async () => {
+      const id = await closedBeforeStop([{ roomId: ROOM, place: null, finishers: null }]);
+      const next = benchWith({ rideSave: storeSavePort() });
+      const game = gameTrainerPortOver(next.controller);
+      next.bench.advance(seconds(120));
+      await next.controller.pair('trainer');
+      await next.controller.refreshRecoverable();
+      expect(await next.controller.continueRecovered(id)).toBe(true);
+      await next.controller.resume();
+      await ride(next, 3);
+      game.roomRaceEnded?.({ roomId: 'room-2', place: 2, finishers: 2 });
+      next.controller.armStop();
+      await next.controller.confirmStop();
+      const saved = await harness.read(async (store) =>
+        store.getActivity(ATHLETE_A, activityId('ride-1')),
+      );
+      expect(saved?.rideFacts?.races).toEqual([
+        { roomId: ROOM, place: null, finishers: null },
+        { roomId: 'room-2', place: 2, finishers: 2 },
+      ]);
+      next.controller.dispose();
+    });
+
+    it('a race that does not read fails no checkpoint, and the ride and its good race are recovered', async () => {
+      // A place past the order: the store would not read it back. It is left
+      // out of the header, never a refused header (#1316's lesson).
+      const id = await closedBeforeStop([
+        { roomId: ROOM, place: 9, finishers: 2 },
+        { roomId: 'room-2', place: 1, finishers: 2 },
+      ]);
+      const next = benchWith({ rideSave: storeSavePort() });
+      await next.controller.refreshRecoverable();
+      expect(next.controller.getSnapshot().recoverable.map((each) => each.id)).toEqual([id]);
+      expect(await next.controller.saveRecovered(id)).toBe('saved');
+      const saved = await harness.read(async (store) =>
+        store.getActivity(ATHLETE_A, activityId('ride-1')),
+      );
+      expect(saved?.rideFacts?.races).toEqual([{ roomId: 'room-2', place: 1, finishers: 2 }]);
+      const streams = await harness.read(async (store) =>
+        store.getStreamSet(ATHLETE_A, activityId('ride-1')),
+      );
+      expect(streams?.sampleCount).toBeGreaterThanOrEqual(9);
+      next.controller.dispose();
+    });
   });
 });
 

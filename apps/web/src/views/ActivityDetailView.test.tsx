@@ -254,7 +254,7 @@ describe('criterion 1 — a ride with no position renders without a map', () => 
       stubDetail(ATHLETE, {
         activity: stubActivity({
           hasPosition: false,
-          rideFacts: { race: { roomId: 'room-race', place: 2, finishers: 5 } },
+          rideFacts: { races: [{ roomId: 'room-race', place: 2, finishers: 5 }] },
         }),
         channels: { power: powerSeries(600) },
         laps: [],
@@ -264,6 +264,30 @@ describe('criterion 1 — a ride with no position renders without a map', () => 
       (each) => each.querySelector('dt')?.textContent === 'Race',
     );
     expect(row?.querySelector('dd')?.textContent).toBe('2nd of 5 in a private race');
+    mounted.unmount();
+    // #1360's review (N3): two races in one ride are both said, in order.
+    mounted = await open(
+      stubDetail(ATHLETE, {
+        activity: stubActivity({
+          hasPosition: false,
+          rideFacts: {
+            races: [
+              { roomId: 'room-race', place: 2, finishers: 5 },
+              { roomId: 'room-2', place: null, finishers: null, crossedTheLine: true },
+            ],
+          },
+        }),
+        channels: { power: powerSeries(600) },
+        laps: [],
+      }),
+    );
+    const both = [...document.querySelectorAll('.oyl-ride-summary > div')].find(
+      (each) => each.querySelector('dt')?.textContent === 'Races',
+    );
+    expect([...(both?.querySelectorAll('dd') ?? [])].map((each) => each.textContent)).toEqual([
+      '2nd of 5 in a private race',
+      'A private race, finished: you left before the room gave places',
+    ]);
     mounted.unmount();
     mounted = await open(indoorRide());
     expect(terms()).not.toContain('Race');

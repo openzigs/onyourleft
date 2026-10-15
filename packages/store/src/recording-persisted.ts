@@ -23,13 +23,21 @@ import {
 
 import { StoreDecodeError } from './errors';
 import { activityId, athleteId, recordingSessionId } from './ids';
-import { decoded, decodedNumber, decodedString } from './persisted';
+import {
+  decoded,
+  decodedNumber,
+  decodedString,
+  racesOf,
+  toPersistedRoomRace,
+  type PersistedRoomRace,
+} from './persisted';
 import {
   RECORDING_STORED_STATES,
   type RecordedCourseLap,
   type RecordingSessionRecord,
   type RecordingStoredState,
 } from './recording';
+import type { RoomRaceFact } from './records';
 import type { ChannelEncoding } from './stream-codec';
 
 /** The small indexed row: one per recording. @see RecordingSessionRecord */
@@ -58,6 +66,13 @@ export interface PersistedRecordingSession {
    * no schema version moved.
    */
   courseLaps?: PersistedCourseLap[];
+  /**
+   * The races ridden so far — #785, #1360's review (B2). Absent with none, and
+   * on every header written before the field existed. Optional and
+   * unindexed, so no schema version moved. Re-read race by race on the way
+   * out, and never a throw: @see racesOf
+   */
+  roomRaces?: PersistedRoomRace[];
 }
 
 /** One lap of a course. @see RecordedCourseLap */
@@ -149,7 +164,15 @@ export function toPersistedRecordingSession(
             ...(lap.partial === true ? { partial: true as const } : {}),
           })),
         }),
+    // #785: only the races that read back are written, so one that does not
+    // is left out and never refuses the header (#1316's lesson). @see racesOf
+    ...roomRacesRow(record.roomRaces),
   };
+}
+
+function roomRacesRow(value: unknown): { roomRaces?: PersistedRoomRace[] } {
+  const races = racesOf(value);
+  return races === undefined ? {} : { roomRaces: races.map(toPersistedRoomRace) };
 }
 
 /** @throws {StoreDecodeError} */
@@ -187,7 +210,15 @@ export function fromPersistedRecordingSession(
         ? undefined
         : activityId(decodedString('recordingSession.savedAs', row.savedAs)),
     ...(courseLaps === undefined || courseLaps.length === 0 ? {} : { courseLaps }),
+    // #785: never a throw — a race that does not read is dropped, and the
+    // recording is listed and recovered all the same. @see racesOf
+    ...roomRacesOut(row.roomRaces),
   };
+}
+
+function roomRacesOut(value: unknown): { roomRaces?: readonly RoomRaceFact[] } {
+  const races = racesOf(value);
+  return races === undefined ? {} : { roomRaces: races };
 }
 
 /**

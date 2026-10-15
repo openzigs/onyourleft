@@ -88,6 +88,32 @@ export function roomNotice(status: RoomSessionStatus | undefined): string | unde
 }
 
 /**
+ * Said while the recording under a ride in a room is PAUSED — #785, #1360's
+ * review (N1). A ride in a room always records (the owner's ruling of
+ * 2026-10-14), but a paused recording is left paused: only the rider's own
+ * *Resume* resumes one (#516), and the game has no *Resume* of the recording —
+ * the Ride screen does, and going there leaves the room. The likeliest way
+ * here is a recovered ride, which comes back paused. ⚠️ Draft wording
+ * awaiting the owner's approval.
+ */
+export const ROOM_RECORDING_PAUSED_TEXT =
+  'Your recording is paused, so this ride in the room is not being recorded; resuming it is ' +
+  'on the Ride screen, and going there leaves the room.';
+
+/**
+ * The room's notice with the recording's state beside it — #1360's review
+ * (N1): the room's own word first (lost, gone, refused), and else, while the
+ * recording under the ride is paused, {@link ROOM_RECORDING_PAUSED_TEXT}.
+ */
+export function roomRideNotice(
+  status: RoomSessionStatus | undefined,
+  recordingPaused: boolean,
+): string | undefined {
+  if (status === undefined) return undefined;
+  return roomNotice(status) ?? (recordingPaused ? ROOM_RECORDING_PAUSED_TEXT : undefined);
+}
+
+/**
  * What a seat is called on the HUD while no room publishes a name — #783.
  * ⚠️ A seat and not a person: names come from the room's public projection
  * only (#774), and no room message carries one yet (#784, #785).
@@ -296,22 +322,30 @@ export function raceEvent(
 
 /**
  * What the race this ride was in comes to on this device — #785, the owner's
- * ruling of 2026-10-14: the result is stored with the ride. The ROOM's word:
- * its finish order and this rider's place in it, or — for a race the rider
- * left while it ran — that it was ridden and no order was heard. `undefined`
- * for a group ride, and for a race that never left its start line: nothing
- * was raced.
+ * ruling of 2026-10-14: the result is stored with the ride. The ROOM's word
+ * where it has said it: its finish order and this rider's place in it. For a
+ * race the rider left while it ran, that it was ridden and no order was heard
+ * — and, when `crossedTheLine`, that the rider was across the line on this
+ * device first (#1360's review, N2: the room's `finish` waits for every
+ * rider, and a winner who ends their ride straight after the line did not
+ * leave the race). No place then: nothing tells this device one before the
+ * room's `finish`. `undefined` for a group ride, and for a race that never
+ * left its start line: nothing was raced.
  */
 export function raceFactOf(
   roomId: string | undefined,
   race: RoomRace | undefined,
+  crossedTheLine: boolean,
 ): RoomRaceFact | undefined {
   if (roomId === undefined || race === undefined) return undefined;
   switch (race.kind) {
     case 'finished':
+      // The room's order is the word on who finished, whatever this device saw.
       return { roomId, place: race.place, finishers: race.order.length };
     case 'running':
-      return { roomId, place: null, finishers: null };
+      return crossedTheLine
+        ? { roomId, place: null, finishers: null, crossedTheLine: true }
+        : { roomId, place: null, finishers: null };
     default:
       return undefined;
   }

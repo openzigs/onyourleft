@@ -579,7 +579,9 @@ describe('a private race — #785', () => {
       },
     };
     const { sockets } = await inARace(trainer);
-    // A recording was asked for as the ride in the room began, and only once.
+    // #1360's review (N6): asked once the room has let the rider in — on the
+    // first frame after its welcome — and only once.
+    await frame(1);
     expect(asked).toEqual(['record']);
     await sockets.say({ type: 'frame', tick: 1, riders: [] });
     await frame(2);
@@ -591,5 +593,45 @@ describe('a private race — #785', () => {
     await settle();
     expect(races).toEqual([{ roomId: 'room-race', place: 3, finishers: 3 }]);
     expect(asked).toEqual(['record']);
+  });
+
+  it('starts no recording for a ride the room refuses — #1360’s review (N6)', async () => {
+    const asked: string[] = [];
+    const trainer: GameTrainerPort = {
+      ...gameTrainerPortOver(undefined),
+      recordRoomRide: () => {
+        asked.push('record');
+        return Promise.resolve(true);
+      },
+    };
+    const instance = new ScriptedInstance();
+    const { gpx, sha256 } = await roomRoute(2_500);
+    instance.offer('room-race', 'race', gpx, sha256);
+    const sockets = handPlayedSockets();
+    await shell(instance, sockets, undefined, trainer);
+    await joinByCode('ABCDE-FGHJK-MNPQR');
+    await press('Ride in the room');
+    await settle();
+    // Nothing is asked before the room answers…
+    await frame(2);
+    expect(asked).toEqual([]);
+    // …and nothing when it says no: a welcome to another route than the one
+    // fetched and checked is left (#784's review, N1).
+    await sockets.say({
+      type: 'welcome',
+      riderId: 1,
+      routeRef: { sha256: sha256.replace(/^./, sha256.startsWith('0') ? '1' : '0') },
+      roomConfig: {
+        kind: 'race',
+        ridingPosition: 'hoods',
+        reportIntervalMs: 500,
+        frameIntervalMs: 1000,
+      },
+    });
+    await frame(3);
+    expect(document.body.textContent).toContain(ROOM_REFUSED_TEXT['not-the-rooms-route']);
+    // The rider rides on alone, unrecorded as any game ride with no recording
+    // is, and no saved ride is put away.
+    expect(asked).toEqual([]);
   });
 });

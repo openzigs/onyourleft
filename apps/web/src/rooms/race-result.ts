@@ -108,7 +108,18 @@ export function raceResultLines(
  * ⚠️ Draft wording awaiting the owner's approval.
  */
 export function raceFactText(race: RoomRaceFact): string {
-  if (race.finishers === null) return 'A private race, left before it was over';
+  if (race.finishers === null) {
+    // #1360's review (N2): across the line on this device, and the ride ended
+    // before the room's order came — finished, with no place to give.
+    return race.crossedTheLine === true
+      ? 'A private race, finished: you left before the room gave places'
+      : 'A private race, left before it was over';
+  }
   if (race.place === null) return 'A private race, not finished';
   return `${ordinal(race.place)} of ${String(race.finishers)} in a private race`;
+}
+
+/** The ride page's term for a ride's races: one, or more than one (#1360's review, N3). */
+export function raceFactTerm(races: readonly RoomRaceFact[]): string {
+  return races.length === 1 ? 'Race' : 'Races';
 }

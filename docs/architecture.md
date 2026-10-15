@@ -1755,6 +1755,17 @@ ADR 0028 D-6.1 signs results with the device key, which proves the same device p
 and nothing about the order; an instance key would need its own publication, rotation and
 revocation, which no ADR has decided — the result is authoritative only as the instance's answer to
 its own riders over their own sessions.
+**The device keeps its own copy** (#785, the owner's ruling of 2026-10-14: *"a ride in a room
+always records, and the race result is stored with that ride on the device"*). `GameView` asks the
+ride controller for a recording once the room has admitted the rider (`recordForRoom`: a paused
+recording is left paused, #516, and the room's notice says so), and on *End ride* notes the race —
+the room's place and finisher count, or that the rider crossed the line before the room's `finish`,
+or that they left it — on the RECORDER (`Recorder.noteRoomRace`). It goes out on the recording's
+checkpoint header (`roomRaces`), so a ride recovered after the app closed before *Stop* keeps it, and
+is saved as `RideFacts.races` — a list, one per race in the recording. Nothing of any other rider is
+in it. Untrusted on read like every row: a race that does not read is dropped, and never refuses a
+header, fails a checkpoint or hides a recording from recovery. It is in the account export
+(`transfer/export-everything.ts`), goes with its ride, and is not synced.
 
 **No build step, and two third-party runtime dependencies.** Node 24 strips the types and runs
 `src/main.ts` as committed, so the tsconfig adds `allowImportingTsExtensions` and

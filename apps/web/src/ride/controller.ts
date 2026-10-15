@@ -1017,9 +1017,12 @@ export interface RideController {
   recordForRoom(): Promise<boolean>;
   /**
    * A game ride in a private race ended, and this is what its room said of
-   * the race — #785. Kept for the recording in progress and saved with it
-   * (`RideFacts.race`); ignored unless a ride is recording or paused, for
-   * {@link noteGameRideEnded}'s reason. The last race noted is kept.
+   * the race — #785. Kept by the RECORDER (`Recorder.noteRoomRace`), beside
+   * any race before it in this recording, so it goes out on the recording's
+   * checkpoint and a ride recovered after the app closed before *Stop* is
+   * saved with it (#1360's review, B2, N3); saved as `RideFacts.races`. With
+   * no ride in progress it is saved with nothing, for
+   * {@link noteGameRideEnded}'s reason.
    */
   noteRoomRace(race: RoomRaceFact): void;
   /**
@@ -1276,8 +1279,6 @@ export function createRideController(options: RideControllerOptions): RideContro
   let resultAnnounced = false;
   /** The last game ride's latched outcome, for this recording. @see RideController.noteGameRideEnded */
   let gameOutcome: GhostOutcome | undefined;
-  /** The private race this recording rode, as its room said it (#785). @see RideController.noteRoomRace */
-  let roomRace: RoomRaceFact | undefined;
   /**
    * The course laps of this recording as the HUD was told them, in order —
    * each worked out as its line was crossed. What is SAVED is the recorder's
@@ -2525,7 +2526,6 @@ export function createRideController(options: RideControllerOptions): RideContro
     outcomeInGame: GhostOutcome | undefined,
     workoutFinished?: boolean,
     replans: readonly ReplanRecord[] = [],
-    race?: RoomRaceFact,
   ): Promise<void> => {
     const port = options.rideSave;
     if (port === undefined || current === undefined) {
@@ -2554,8 +2554,10 @@ export function createRideController(options: RideControllerOptions): RideContro
       laps: { ridden: current.courseLaps, newLapId: port.newLapId },
       // #1244, P9: every re-plan decision made on this ride. None is no key.
       ...(replans.length === 0 ? {} : { replans }),
-      // #785: the race this ride was ridden in, as its room said it.
-      ...(race === undefined ? {} : { race }),
+      // #785: the races this ride was ridden in, as each room said it — the
+      // recorder's own, so a ride recovered after a crash keeps them by the
+      // one path, as it keeps its laps (#1360's review, B2).
+      ...(current.roomRaces.length === 0 ? {} : { races: current.roomRaces }),
     });
     const outcome = await saveFinishedRide(port.store, finished);
 
@@ -3183,10 +3185,11 @@ export function createRideController(options: RideControllerOptions): RideContro
     },
 
     noteRoomRace(race: RoomRaceFact): void {
-      if (phase !== 'recording' && phase !== 'paused') {
-        return;
-      }
-      roomRace = race;
+      // No phase check: the race goes to the recorder, which only a recording
+      // in progress checkpoints and saves. Idle, there is none; stopped, its
+      // save has already read its races (`saveTheRide`), and the next ride
+      // starts a recorder of its own.
+      recorder?.noteRoomRace(race);
     },
 
     noteCourseLine(event: CourseLineEvent): readonly LapFigures[] | undefined {
@@ -3317,14 +3320,7 @@ export function createRideController(options: RideControllerOptions): RideContro
         await stopTrainer();
         await recording().stop(at);
         changed();
-        await saveTheRide(
-          recorder,
-          ridden,
-          gameOutcome,
-          workoutFinishedInRide,
-          replanRecords,
-          roomRace,
-        );
+        await saveTheRide(recorder, ridden, gameOutcome, workoutFinishedInRide, replanRecords);
       } catch (error: unknown) {
         // Fail closed (#565's second review). Nothing on today's paths throws
         // here, but if something did before `saveTheRide` set the outcome, the
@@ -3369,8 +3365,6 @@ export function createRideController(options: RideControllerOptions): RideContro
       // here (or a fresh controller), so `start` needs no second reset — two
       // would each be invisible to the suite.
       gameOutcome = undefined;
-      // #785: and its race, for the same reason.
-      roomRace = undefined;
       // #1312: and its laps, here and only here, for the same reason.
       courseLaps = [];
       lapFrom = undefined;

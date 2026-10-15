@@ -356,6 +356,14 @@ export interface GameTrainerPort {
    */
   roomRaceEnded?(race: RoomRaceFact): void;
   /**
+   * Whether the recording under this ride is PAUSED by the rider — #1360's
+   * review (N1): the game says so while it rides in a room, and resumes
+   * nothing (#516). `false` with nothing recording. Read through
+   * {@link watchRide}, like the moving time. Optional, as
+   * {@link recordRoomRide} is; `gameTrainerPortOver` always says.
+   */
+  recordingPaused?(): boolean;
+  /**
    * The moving time of the ride being RECORDED, in seconds — or `undefined`
    * when no ride is in progress (recording or paused) — #1111.
    *
@@ -586,6 +594,7 @@ export function gameTrainerPortOver(controller: GameTrainerSource | undefined): 
     roomRaceEnded: (race) => {
       controller?.noteRoomRace?.(race);
     },
+    recordingPaused: () => controller?.getSnapshot().phase === 'paused',
     watchRide: (listener) => controller?.subscribe(listener) ?? NOT_WATCHING,
     courseLine: (event) => controller?.noteCourseLine?.(event),
     rideLapSeconds: () => {

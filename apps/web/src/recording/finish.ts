@@ -132,11 +132,11 @@ export interface RideToSaveInput {
    */
   readonly replans?: readonly ReplanRecord[] | undefined;
   /**
-   * The private race this ride was ridden in, as its room said it — #785, the
-   * owner's ruling of 2026-10-14: the result is stored with the ride on this
-   * device (`packages/store` §`RideFacts.race`).
+   * The private races this ride was ridden in, as each room said it — #785,
+   * the owner's ruling of 2026-10-14: the result is stored with the ride on
+   * this device (`packages/store` §`RideFacts.races`).
    */
-  readonly race?: RoomRaceFact | undefined;
+  readonly races?: readonly RoomRaceFact[] | undefined;
 }
 
 /**
@@ -200,7 +200,7 @@ export function rideToSave(input: RideToSaveInput): FinishedRide | undefined {
       workoutFinished: input.workoutFinished,
       ghostRaced: input.ghostRaced,
       replans: input.replans,
-      race: input.race,
+      races: input.races,
     }),
     // ⚠️ No `originalFile`. That key names the file an activity was imported
     // from and this one was not imported — a recorded ride has no file behind

@@ -213,6 +213,21 @@ export interface ManifestRideFacts {
   readonly replans?: readonly ReplanRecord[];
   /** How many of the ride's re-plan records could not be read (`RideFacts.replansDropped`). */
   readonly replansDropped?: number;
+  /**
+   * The private races the ride was ridden in, each as its room told this
+   * device — #785, `RideFacts.races`: this rider's place and how many finished,
+   * and nothing of any other rider. Known only to the ride that recorded them,
+   * so this is the only copy that leaves the device (#1360's review, B1).
+   */
+  readonly races?: readonly ManifestRoomRace[];
+}
+
+/** A race as the manifest carries it, field by field. @see ManifestRideFacts.races */
+export interface ManifestRoomRace {
+  readonly roomId: string;
+  readonly place: number | null;
+  readonly finishers: number | null;
+  readonly crossedTheLine?: true;
 }
 
 /**
@@ -1138,6 +1153,17 @@ function manifestFactsOf(facts: RideFacts): ManifestRideFacts {
           }),
         }),
     ...(facts.replansDropped === undefined ? {} : { replansDropped: facts.replansDropped }),
+    // #785: field by field, so a key added to a race later is not exported by accident.
+    ...(facts.races === undefined
+      ? {}
+      : {
+          races: facts.races.map((race) => ({
+            roomId: race.roomId,
+            place: race.place,
+            finishers: race.finishers,
+            ...(race.crossedTheLine === true ? { crossedTheLine: true as const } : {}),
+          })),
+        }),
   };
 }
 

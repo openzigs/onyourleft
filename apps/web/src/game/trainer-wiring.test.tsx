@@ -101,6 +101,7 @@ import { activityId, lapId, recordingSessionId } from '@onyourleft/store';
 import { ATHLETE_A, createStoreHarness, seedAthletes } from '@onyourleft/store/testing';
 
 import { LAP_NOTICE_SECONDS } from './hud/lap-text';
+import { ROOM_RECORDING_PAUSED_TEXT } from './room-ride';
 import { createRideController } from '../ride/controller';
 import { CORRECTION_GRADE_STEP_PERCENT_PER_SECOND } from '../net/correction';
 import { roomPortOver } from '../net/room-port';
@@ -978,6 +979,151 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
       expect(everything, trace).not.toContain(trace);
     }
     await rig.done();
+  });
+
+  /**
+   * #785 through every real piece at once (#1360's review, N8): the room
+   * admits the rider, `GameView` asks the REAL controller for a recording,
+   * the race is ridden, *End ride* notes it, the ride is stopped and saved,
+   * and the race is read back from the store on a fresh connection.
+   */
+  describe('a ride in a private race, saved with its race — #785', () => {
+    /** Sixty flat metres, not a loop: a race's line a rider can reach in a test. */
+    const shortRoute = (): RidableRoute => {
+      const points: RoutePoint[] = [];
+      for (let index = 0; index <= 6; index += 1) {
+        points.push({
+          position: geographicPosition(
+            degreesLatitude(51.5 + (index * 10) / 111_320),
+            degreesLongitude(-0.12),
+          ),
+          elevation: altitudeMetres(20),
+        });
+      }
+      return { id: 'route-short', name: 'Test sprint', profile: routeProfile(points), attempts: 0 };
+    };
+
+    async function raceOn(route: RidableRoute) {
+      const rig = await onTheBench(false);
+      const clock = new ManualClock();
+      const room = new ScriptedRoom();
+      mounted = await mount(
+        <GameView
+          port={pedallingPort(route)}
+          trainer={gameTrainerPortOver(rig.controller)}
+          renderer={() => Promise.resolve(capturingRenderer([]))}
+          now={() => nowMs}
+          room={roomPortOver(() => room.link(), { timers: clock, now: () => nowMs })}
+          roomId="room-1"
+          riderMass={kilograms(72)}
+        />,
+      );
+      await settle();
+      await clickThrough(buttonStarting('Ride '));
+      await flush();
+      // Nothing is recorded before the room has let the rider in (N6).
+      expect(rig.controller.getSnapshot().phase).toBe('idle');
+      room.accept();
+      room.welcome(0, 'race');
+      const rideFor = async (frames: number): Promise<void> => {
+        for (let index = 0; index < frames; index += 1) {
+          await clock.advance(FRAME_MS);
+          if (index % 2 === 1) {
+            room.frame(index, []);
+            // In `act`: the HUD's moving time is the controller's, and moves on its tick.
+            await act(async () => {
+              rig.bench.advance(seconds(1));
+              await rig.controller.tick(rig.bench.now);
+            });
+          }
+          await pump(1);
+        }
+      };
+      return { rig, room, rideFor };
+    }
+
+    async function endAndSave(rig: Awaited<ReturnType<typeof onTheBench>>) {
+      await clickThrough(buttonStarting('End ride'));
+      await flush();
+      await act(async () => {
+        rig.controller.armStop();
+        await rig.controller.confirmStop();
+      });
+      await flush();
+      expect(rig.controller.getSnapshot().saveState).toBe('saved');
+      const activity = await rig.harness.read(async (store) =>
+        store.getActivity(ATHLETE_A, activityId('the-ride')),
+      );
+      return activity?.rideFacts?.races;
+    }
+
+    it('records once the room admits the rider, and saves the room’s place with the ride', async () => {
+      const { rig, room, rideFor } = await raceOn(hillRoute());
+      await rideFor(2);
+      // A ride in a room always records — the real controller, started by the game.
+      expect(rig.controller.getSnapshot().phase).toBe('recording');
+      await rideFor(8);
+      room.send({ type: 'finish', order: [3, 0] });
+      await rideFor(2);
+      expect(await endAndSave(rig)).toEqual([{ roomId: 'room-1', place: 2, finishers: 2 }]);
+      await rig.done();
+    });
+
+    it('saves a rider who crossed the line and ended the ride before the room’s order as having finished (N2)', async () => {
+      const route = shortRoute();
+      const { rig, rideFor } = await raceOn(route);
+      // 300 W on the flat: well past sixty metres in twenty seconds.
+      await rideFor(40);
+      expect(rig.controller.getSnapshot().phase).toBe('recording');
+      expect(await endAndSave(rig)).toEqual([
+        { roomId: 'room-1', place: null, finishers: null, crossedTheLine: true },
+      ]);
+      await rig.done();
+    });
+
+    it('saves a rider who left the race short of the line as having left it', async () => {
+      const { rig, rideFor } = await raceOn(hillRoute());
+      await rideFor(6);
+      expect(await endAndSave(rig)).toEqual([{ roomId: 'room-1', place: null, finishers: null }]);
+      await rig.done();
+    });
+
+    it('says, in the room’s notice, that the recording under it is paused — and resumes nothing (N1)', async () => {
+      const rig = await onTheBench(false);
+      await rig.controller.start();
+      await rig.controller.pause();
+      const clock = new ManualClock();
+      const room = new ScriptedRoom();
+      mounted = await mount(
+        <GameView
+          port={pedallingPort(hillRoute())}
+          trainer={gameTrainerPortOver(rig.controller)}
+          renderer={() => Promise.resolve(capturingRenderer([]))}
+          now={() => nowMs}
+          room={roomPortOver(() => room.link(), { timers: clock, now: () => nowMs })}
+          roomId="room-1"
+          riderMass={kilograms(72)}
+        />,
+      );
+      await settle();
+      await clickThrough(buttonStarting('Ride '));
+      await flush();
+      room.accept();
+      room.welcome(0);
+      for (let index = 0; index < 4; index += 1) {
+        await clock.advance(FRAME_MS);
+        await pump(1);
+      }
+      expect(mounted?.container.textContent).toContain(ROOM_RECORDING_PAUSED_TEXT);
+      // #516: only the rider's own Resume resumes a ride.
+      expect(rig.controller.getSnapshot().phase).toBe('paused');
+      await act(async () => {
+        await rig.controller.resume();
+      });
+      await pump(1);
+      expect(mounted?.container.textContent).not.toContain(ROOM_RECORDING_PAUSED_TEXT);
+      await rig.done();
+    });
   });
 
   it('records a lap each time the rider completes a loop, says it on the HUD, and saves a part lap as one (#1312)', async () => {

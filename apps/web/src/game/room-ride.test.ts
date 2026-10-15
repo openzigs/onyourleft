@@ -3,6 +3,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { RoomConnection } from '../net/room-port';
+import type { RoomSessionStatus } from '../net/room-session';
 import { CORRECTION_THRESHOLD_METRES } from '../net/correction';
 import type { DrawnRemoteRider } from '../net/snapshots';
 import {
@@ -11,6 +12,8 @@ import {
   nextToFollow,
   raceEvent,
   raceFactOf,
+  ROOM_RECORDING_PAUSED_TEXT,
+  roomRideNotice,
   raceNotice,
   RACE_TEXT,
   riderEvents,
@@ -252,25 +255,58 @@ describe('riders coming and going — #784', () => {
 
 describe('the race a ride was in, for the device to keep — #785', () => {
   it('is the room’s order and this rider’s place in it, or a race left while it ran, and nothing else', () => {
-    expect(raceFactOf('room-1', { kind: 'finished', order: [4, 2, 9], place: 2 })).toEqual({
+    expect(raceFactOf('room-1', { kind: 'finished', order: [4, 2, 9], place: 2 }, false)).toEqual({
       roomId: 'room-1',
       place: 2,
       finishers: 3,
     });
-    expect(raceFactOf('room-1', { kind: 'finished', order: [4], place: null })).toEqual({
+    expect(raceFactOf('room-1', { kind: 'finished', order: [4], place: null }, false)).toEqual({
       roomId: 'room-1',
       place: null,
       finishers: 1,
     });
-    expect(raceFactOf('room-1', { kind: 'running' })).toEqual({
+    expect(raceFactOf('room-1', { kind: 'running' }, false)).toEqual({
       roomId: 'room-1',
       place: null,
       finishers: null,
     });
     // Nothing was raced: a group ride, a race never started, no room.
-    expect(raceFactOf('room-1', { kind: 'not-a-race' })).toBeUndefined();
-    expect(raceFactOf('room-1', { kind: 'waiting' })).toBeUndefined();
-    expect(raceFactOf('room-1', { kind: 'counting', endsAtLocalMs: 5 })).toBeUndefined();
-    expect(raceFactOf(undefined, { kind: 'running' })).toBeUndefined();
+    expect(raceFactOf('room-1', { kind: 'not-a-race' }, true)).toBeUndefined();
+    expect(raceFactOf('room-1', { kind: 'waiting' }, false)).toBeUndefined();
+    expect(raceFactOf('room-1', { kind: 'counting', endsAtLocalMs: 5 }, false)).toBeUndefined();
+    expect(raceFactOf(undefined, { kind: 'running' }, true)).toBeUndefined();
+  });
+
+  it('keeps that the rider crossed the line when they left before the room’s order — and the room’s order over it once heard (#1360’s review, N2)', () => {
+    expect(raceFactOf('room-1', { kind: 'running' }, true)).toEqual({
+      roomId: 'room-1',
+      place: null,
+      finishers: null,
+      crossedTheLine: true,
+    });
+    // The order heard is the room's word on who finished, whatever the device saw.
+    expect(raceFactOf('room-1', { kind: 'finished', order: [4], place: null }, true)).toEqual({
+      roomId: 'room-1',
+      place: null,
+      finishers: 1,
+    });
+    expect(raceFactOf('room-1', { kind: 'finished', order: [1, 4], place: 1 }, true)).toEqual({
+      roomId: 'room-1',
+      place: 1,
+      finishers: 2,
+    });
+  });
+});
+
+describe('the room’s notice says a paused recording — #1360’s review (N1)', () => {
+  it('says it while in a room with the recording paused, and gives the room’s own word first', () => {
+    const joined = { kind: 'joined', riderId: 0, config: {} } as unknown as RoomSessionStatus;
+    expect(roomRideNotice(joined, true)).toBe(ROOM_RECORDING_PAUSED_TEXT);
+    expect(roomRideNotice({ kind: 'connecting' }, true)).toBe(ROOM_RECORDING_PAUSED_TEXT);
+    expect(roomRideNotice(joined, false)).toBeUndefined();
+    // No room: nothing, paused or not.
+    expect(roomRideNotice(undefined, true)).toBeUndefined();
+    // The room's own trouble is said in the slot instead.
+    expect(roomRideNotice({ kind: 'gone' }, true)).toBe(ROOM_GONE_TEXT);
   });
 });

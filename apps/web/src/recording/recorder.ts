@@ -83,6 +83,7 @@ import type {
   RecordingSessionRecord,
   RecordingStoredState,
   RecoveredRecording,
+  RoomRaceFact,
   StreamChannelValue,
 } from '@onyourleft/store';
 
@@ -232,6 +233,21 @@ export interface Recorder {
    * lap with the seconds either side of it.
    */
   noteCourseLap(lap: RecordedCourseLap): void;
+  /**
+   * The private races ridden during this recording, in the order they ended —
+   * #785. A recorder rebuilt by {@link recoverRecorder} starts with the ones
+   * its checkpoint held (#1360's review, B2).
+   */
+  readonly roomRaces: readonly RoomRaceFact[];
+  /**
+   * Keep a race that has just ended, beside any before it — #785.
+   *
+   * ⚠️ **Writes nothing itself**, for {@link noteCourseLap}'s reason: the
+   * races go out in the header every {@link Recorder.flush} rewrites, so one
+   * is on disk within one flush interval, and a race the store would not read
+   * back is left out of that header rather than refusing it.
+   */
+  noteRoomRace(race: RoomRaceFact): void;
 
   /** Starts recording and writes the header, so a crash one second in is recoverable. */
   start(at: UnixSeconds): Promise<void>;
@@ -299,6 +315,7 @@ export function createRecorder(options: RecorderOptions): Recorder {
     { flushedThrough: 0, checkpoints: 0, headerWritten: false },
     interval,
     [],
+    [],
   );
 }
 
@@ -360,6 +377,8 @@ export async function recoverRecorder(
     recovered.sampleInterval,
     // #1312: or the next header this recorder writes would take them off disk.
     recovered.courseLaps,
+    // #785, for the same reason.
+    recovered.roomRaces,
   );
   return { recorder, recovered };
 }
@@ -395,10 +414,13 @@ function recorderOver(
   cursor: RecorderCursor,
   sampleInterval: Seconds,
   lapsSoFar: readonly RecordedCourseLap[],
+  racesSoFar: readonly RoomRaceFact[],
 ): Recorder {
   const { store, athleteId, sessionId } = options;
   /** @see Recorder.courseLaps */
   let courseLaps = lapsSoFar;
+  /** @see Recorder.roomRaces */
+  let roomRaces = racesSoFar;
   const flushInterval = options.flushIntervalSeconds ?? DEFAULT_FLUSH_INTERVAL_SECONDS;
 
   let storageState: RecorderStorageState = 'ok';
@@ -426,6 +448,7 @@ function recorderOver(
       pauses: series.pauses,
       ...(savedAs === undefined ? {} : { savedAs }),
       ...(courseLaps.length === 0 ? {} : { courseLaps }),
+      ...(roomRaces.length === 0 ? {} : { roomRaces }),
     };
   }
 
@@ -507,6 +530,12 @@ function recorderOver(
     },
     noteCourseLap(lap: RecordedCourseLap): void {
       courseLaps = [...courseLaps, lap];
+    },
+    get roomRaces() {
+      return roomRaces;
+    },
+    noteRoomRace(race: RoomRaceFact): void {
+      roomRaces = [...roomRaces, race];
     },
 
     async start(at: UnixSeconds): Promise<void> {
