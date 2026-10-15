@@ -40,12 +40,22 @@ export interface SoakReport {
   readonly longestSilenceMs: number;
 }
 
-/** A throwaway device that signs a statement the way the app's own device key does. */
-async function signIn(origin: string, instance: string, displayName: string): Promise<string> {
-  const pair = (await webcrypto.subtle.generateKey({ name: 'Ed25519' }, false, [
-    'sign',
-    'verify',
-  ])) as unknown as webcrypto.CryptoKeyPair;
+/**
+ * A throwaway device that signs a statement the way the app's own device key
+ * does — a new key each time, or `given` (#464's load run brings its own).
+ */
+export async function signIn(
+  origin: string,
+  instance: string,
+  displayName: string,
+  given?: webcrypto.CryptoKeyPair,
+): Promise<string> {
+  const pair =
+    given ??
+    ((await webcrypto.subtle.generateKey({ name: 'Ed25519' }, false, [
+      'sign',
+      'verify',
+    ])) as unknown as webcrypto.CryptoKeyPair);
   const publicKey = toHex(new Uint8Array(await webcrypto.subtle.exportKey('raw', pair.publicKey)));
   const post = async (path: string, body: unknown): Promise<Record<string, unknown>> => {
     const response = await fetch(`${instance}${path}`, {
@@ -81,21 +91,26 @@ async function signIn(origin: string, instance: string, displayName: string): Pr
   return session.sessionToken as string;
 }
 
-async function ticketFor(instance: string, token: string, roomId: string): Promise<string> {
+export async function ticketFor(
+  instance: string,
+  token: string,
+  roomId: string,
+  declaredMassKilograms = 75,
+): Promise<string> {
   const response = await fetch(`${instance}/v1/rooms/${roomId}/ticket`, {
     method: 'POST',
     headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ declaredMassKilograms: 75 }),
+    body: JSON.stringify({ declaredMassKilograms }),
   });
   if (!response.ok) throw new Error(`a ticket was refused: ${String(response.status)}`);
   return ((await response.json()) as { ticket: string }).ticket;
 }
 
-function socketUrl(instance: string, roomId: string): string {
+export function socketUrl(instance: string, roomId: string): string {
   return `${instance.replace(/^http/, 'ws')}/v1/rooms/${roomId}/socket`;
 }
 
-function hello(ticket: string): string {
+export function hello(ticket: string): string {
   return JSON.stringify({
     type: 'hello',
     protocol: PROTOCOL_VERSION,
@@ -105,7 +120,7 @@ function hello(ticket: string): string {
 }
 
 /** The origin the instance's devices sign: the URL given, which is its public hostname. */
-function originOf(url: string): string {
+export function originOf(url: string): string {
   return new URL(url).origin;
 }
 
