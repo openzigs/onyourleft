@@ -581,6 +581,9 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   race lists its riders in the room's order, each with the room's time gap to the reader and their
   live W/kg. D-7.7's first sentence stands: the **finish order after the race** is still what a race
   produces, and its stored result is still read only once the race is over. **Unchanged, by name**:
-  D-1 to D-4, D-6, D-7.1 to D-7.6 — D-7.2 included, so a **group ride has no list** (ADR 0051 D-3),
+  D-1, D-2, D-4, D-6, D-7.1 to D-7.6 — D-7.2 included, so a **group ride has no list** (ADR 0051 D-3),
   and D-7.4, so no ghost enters a room — and the 2026-09-22 publication rule, which ADR 0051 D-1
-  applies: W/kg beside another rider, never watts.
+  applies: W/kg beside another rider, never watts. **Qualified, by name**: D-3's *"not shown to other
+  riders"* and Q4 — the mass is still never sent or shown, but a racer's software can solve for it
+  from a rider's speed and live W/kg to within a few kilograms (ADR 0051 D-1), so it is no longer
+  private in substance and watts follow from it. Accepted pending the owner's confirmation.

@@ -46,7 +46,9 @@
  * the route, each with their **time gap to the recipient** and their live
  * W/kg. The gap is the room's, from its own positions ({@link timeGapTicks});
  * the W/kg is the power the room simulated on the tick over the mass it
- * holds, and the mass never leaves it. A group ride sends neither (ADR 0028
+ * holds. The mass itself is never sent, but a racer who knows the public
+ * physics can work it out to within a few kilograms from a rider's frame speed
+ * and W/kg (ADR 0051 D-1, an owner-requested cost; `standings.test.ts` pins it). A group ride sends neither (ADR 0028
  * D-7.2: nobody leads one; ADR 0051 D-3).
  *
  * ## Deferred, by name

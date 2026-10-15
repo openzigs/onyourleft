@@ -66,7 +66,14 @@ rider's own line says *You* and is marked for a screen reader (`aria-current`).
 
 - **W/kg and never watts**, per ADR 0028's 2026-09-22 rule (*power or W/kg for a rider over a window,
   never both*) and ruling Q17. *Live* is the power the room simulated the rider at on the last tick,
-  over the declared mass it holds; the mass never leaves the room (ADR 0028 D-3). A rider the room
+  over the declared mass it holds. The mass itself is never sent or shown (ADR 0028 D-3), **but it is
+  not kept secret either**: every physics input except the mass is public, and every frame carries the
+  rider's speed, so another racer's software can solve for the mass that makes the speed and the
+  W/kg agree, and the room-core test `standings.test.ts` §"what the live W/kg gives away" does so to
+  within a few kilograms. W/kg times that mass is the rider's watts. This is the cost of the owner's
+  ruling (*"show real time w/kg"*), found in review of #1354 and **accepted here pending the
+  owner's confirmation**; rounding the figure does not close it, and closing it means not showing a
+  live W/kg. The privacy policy and the Data safety answer say so rather than *never your weight*. A rider the room
   is coasting (rule 1) reads *Coasting*, never a figure; a finisher reads *Finished*.
 - **A plausibility flag stays visible** as ADR 0028 D-2 rule 3 requires: a flagged rider's line says
   *Flagged*, and the result after the race still carries the flag's window, as it did.

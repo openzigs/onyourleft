@@ -1763,7 +1763,7 @@ ticket's admission), sent once a seat and again on every rejoin — and `standin
 frame of a running race, to each rider with the gaps to THEM. The room core keeps each racer's
 distance after every tick and computes every time gap from it (`room/core/room.ts`
 §`timeGapTicks`); the live W/kg is the power it simulated on the tick over the mass it holds, which
-never leaves it. The client puts the room's numbers into words (`apps/web` §`game/room-ride.ts`
+is never sent, though a racer can solve for it from a rider's speed and W/kg (ADR 0051 D-1). The client puts the room's numbers into words (`apps/web` §`game/room-ride.ts`
 `raceStandings`) and computes none. A group ride sends neither. The finish order and the stored
 result above are unchanged.
 

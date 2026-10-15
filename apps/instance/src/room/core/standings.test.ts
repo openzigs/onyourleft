@@ -10,6 +10,9 @@
 
 import { describe, expect, it } from 'vitest';
 
+import { gradePercent, kilograms, metresPerSecond } from '@onyourleft/domain';
+import { powerRequired, ridingConditions } from '@onyourleft/physics';
+
 import {
   encodeMessage,
   FLAG_COASTING,
@@ -19,7 +22,7 @@ import {
 } from '@onyourleft/protocol';
 
 import type { Outbound, Room } from './room.ts';
-import { FLAT_COURSE, helloText, reportText, sentTo, testRoom } from './room-testing.ts';
+import { FLAT_COURSE, helloText, lastFrame, reportText, sentTo, testRoom } from './room-testing.ts';
 
 const SECOND = 1000;
 
@@ -209,5 +212,36 @@ describe('standings — #1347', () => {
     room.start(0);
     const out = [...room.tick(1_000), ...room.tick(2_000)];
     expect(out.some((o) => o.kind === 'send' && o.message.type === 'standings')).toBe(false);
+  });
+});
+
+describe('what the live W/kg gives away — #1347, the review of PR 1354', () => {
+  it("lets another racer who knows the public physics narrow a rider's declared mass to a few kilograms", () => {
+    // ADR 0051 D-1 records this as an accepted cost: a rider's speed is in every
+    // frame and every physics input but the mass is public, so the W/kg pins the
+    // mass. This pins the property so no text says otherwise while it is true.
+    const { room } = raceOfTwo();
+    let out: readonly Outbound[] = [];
+    for (let t = 0; t < 400; t += 1) out = second(room, t, { 1: 200, 2: 250 });
+    const speed = lastFrame(out, 1).riders.find((r) => r.riderId === 1)?.centimetresPerSecond;
+    const tenths = row(standingsTo(out, 1), 1).wattsPerKilogramTenths;
+    expect(speed).toBeGreaterThan(0);
+
+    const candidates: number[] = [];
+    for (let mass = 40; mass <= 120; mass += 0.1) {
+      const conditions = ridingConditions(kilograms(mass), 'hoods');
+      const watts = powerRequired({
+        groundSpeed: metresPerSecond((speed as number) / 100),
+        totalMass: conditions.totalMass,
+        grade: gradePercent(0),
+        airDensityKilogramsPerCubicMetre: conditions.airDensityKilogramsPerCubicMetre,
+        coefficients: conditions.coefficients,
+      }).totalWatts;
+      if (Math.round((watts / mass) * 10) === tenths) candidates.push(mass);
+    }
+    expect(candidates.length).toBeGreaterThan(0);
+    expect(Math.min(...candidates)).toBeLessThan(62);
+    expect(Math.max(...candidates)).toBeGreaterThan(62);
+    expect(Math.max(...candidates) - Math.min(...candidates)).toBeLessThan(4);
   });
 });
