@@ -17,8 +17,8 @@
  * offline claim about the **product** has to be measured against the product,
  * so `playwright.config.ts` runs a second `webServer` over `dist` and
  * `PRODUCT_ORIGIN` is where it lives. Two servers, one Playwright project, one
- * CI job — the `browser` shard, which the required check waits for
- * (docs/agents/ci.md §4c).
+ * CI job at a time — a browser shard (`browser-1` since #1362), which the
+ * required check waits for (docs/agents/ci.md §4c).
  *
  * ## ⚠️ It launches its own persistent context, and that is load-bearing
  *

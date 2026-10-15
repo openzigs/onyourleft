@@ -11,7 +11,8 @@
  * checks less than it did. `check:test-split` is the Vitest half's own gate;
  * this is the browser half and the workflows.
  *
- * Since #1285 the required check is one job over three shards, and the same
+ * Since #1285 the required check is one job over several shards (four since
+ * #1362, which split the browser gate in two), and the same
  * thing must not happen there by another road: a shard the aggregating job
  * does not wait for, that job renamed, or its verdict weakened. Those are the
  * last describe in this file.
@@ -188,6 +189,28 @@ function measuredShards(): (column: string) => number[] {
  */
 const AFTER_GATE_S = 4;
 
+/** The web package's scripts. */
+const webScripts = (): Record<string, string> =>
+  (JSON.parse(read(BROWSER, '..', 'package.json')) as { scripts: Record<string, string> }).scripts;
+
+/** Every Playwright run a script makes, in order, as its arguments. */
+const playwrightRuns = (script: string | undefined): string[] =>
+  [...(script ?? '').matchAll(/playwright test ([^;&]+)/g)].map((match) => String(match[1]).trim());
+
+/**
+ * The scripts CI runs the required gate as, one per browser shard — #1362.
+ * `test:browser:shard-1`, `test:browser:shard-2`, …, in their order.
+ */
+function shardScripts(): [name: string, script: string][] {
+  return Object.entries(webScripts())
+    .filter(([name]) => /^test:browser:shard-\d+$/.test(name))
+    .sort(([a], [b]) => Number(a.split('-').pop()) - Number(b.split('-').pop()));
+}
+
+/** The command a browser shard's `Browser gate` step runs, wrapper and all. */
+const gateCommand = (script: string): string =>
+  `timeout --verbose --kill-after=10s ${String(GATE_STEP_MS / 1000)}s pnpm run ${script}`;
+
 describe('the browser gate is split into a required run and a nightly one — #866', () => {
   const nightly = PROJECTS.filter((project) => project.name === 'nightly');
   const required = PROJECTS.filter((project) => project.name !== 'nightly');
@@ -281,38 +304,83 @@ describe('the browser gate is split into a required run and a nightly one — #8
     expect(script).toMatch(/\[ \$chromium -eq 0 \] && \[ \$game -eq 0 \]$/);
   });
 
-  it('bounds the required gate’s step from outside, inside what its shard has left — #1128’s review, #1285', () => {
+  it('bounds each browser shard’s gate step from outside, inside what its shard has left — #1128’s review, #1285, #1362', () => {
     const rules = read(ROOT, '.github', 'workflows', 'rules.yml');
-    const step = /^ +- name: Browser gate\n((?: {8}.+\n)+)/m.exec(rules)?.[1] ?? '';
     const seconds = GATE_STEP_MS / 1000;
-    expect(step).toContain(
-      `run: timeout --verbose --kill-after=10s ${String(seconds)}s pnpm run test:browser\n`,
-    );
-    const minutes = Number(/^ +timeout-minutes: (\d+)$/m.exec(step)?.[1]);
-    // The step's own stop is behind the wrapper and its kill, never in front.
-    expect(minutes * 60).toBeGreaterThanOrEqual(seconds + 10);
-    // ...and the step's stop ends at least THREE MINUTES inside its job's
-    // (#1280's criterion; it was 115 s when #1279 merged), from the latest
-    // start measured — read from docs/agents/ci.md, @see measuredShards —
-    // with what runs after the gate. The job is the shard that runs the gate,
-    // found by its command rather than by its name.
-    const shard = [...jobsOf(rules).values()].filter((job) =>
-      job.includes('pnpm run test:browser\n'),
-    );
-    expect(shard).toHaveLength(1);
-    const job = Number(jobField(shard[0] ?? '', 'timeout-minutes'));
     const latestStart = Math.max(...measuredShards()('Gate starts'));
-    expect(job * 60 - (latestStart + minutes * 60 + AFTER_GATE_S)).toBeGreaterThanOrEqual(180);
-    // And with nothing measured at all: the browser install before it has a
-    // stop of its own, so even an install that uses the whole of it leaves
-    // the gate's stop inside the job's. 20 s is what the shard spends before
-    // the install (the checkout, Node, pnpm and the frozen install; 11 s
-    // measured).
-    const install =
-      /^ +- name: Install the pinned Chromium\n((?: {8}.+\n)+)/m.exec(shard[0] ?? '')?.[1] ?? '';
-    const installStop = Number(/^ +timeout-minutes: (\d+)$/m.exec(install)?.[1]) * 60;
-    expect(installStop).toBeGreaterThan(0);
-    expect(20 + installStop + minutes * 60 + AFTER_GATE_S).toBeLessThanOrEqual(job * 60);
+    const scripts = shardScripts();
+    expect(scripts.length).toBeGreaterThanOrEqual(2);
+    for (const [name] of scripts) {
+      // The job is the shard that runs this script, found by its command
+      // rather than by its name, and exactly one does.
+      const shard = [...jobsOf(rules).values()].filter((job) => job.includes(`pnpm run ${name}\n`));
+      expect(shard, name).toHaveLength(1);
+      const jobText = shard[0] ?? '';
+      const step = /^ +- name: Browser gate\n((?: {8}.+\n)+)/m.exec(jobText)?.[1] ?? '';
+      expect(step, name).toContain(`run: ${gateCommand(name)}\n`);
+      const minutes = Number(/^ +timeout-minutes: (\d+)$/m.exec(step)?.[1]);
+      // The step's own stop is behind the wrapper and its kill, never in front.
+      expect(minutes * 60, name).toBeGreaterThanOrEqual(seconds + 10);
+      // ...and the step's stop ends at least THREE MINUTES inside its job's
+      // (#1280's criterion; it was 115 s when #1279 merged), from the latest
+      // start measured — read from docs/agents/ci.md, @see measuredShards —
+      // with what runs after the gate.
+      const job = Number(jobField(jobText, 'timeout-minutes'));
+      expect(job * 60 - (latestStart + minutes * 60 + AFTER_GATE_S), name).toBeGreaterThanOrEqual(
+        180,
+      );
+      // And with nothing measured at all: the browser install before it has a
+      // stop of its own, so even an install that uses the whole of it leaves
+      // the gate's stop inside the job's. 20 s is what the shard spends before
+      // the install (the checkout, Node, pnpm and the frozen install; 11 s
+      // measured).
+      const install =
+        /^ +- name: Install the pinned Chromium\n((?: {8}.+\n)+)/m.exec(jobText)?.[1] ?? '';
+      const installStop = Number(/^ +timeout-minutes: (\d+)$/m.exec(install)?.[1]) * 60;
+      expect(installStop, name).toBeGreaterThan(0);
+      expect(20 + installStop + minutes * 60 + AFTER_GATE_S, name).toBeLessThanOrEqual(job * 60);
+    }
+    // The whole gate as one command is the LOCAL form (§4a); CI runs it only
+    // as its shards, so a job running it as well would run every case twice.
+    expect(rules).not.toContain('pnpm run test:browser\n');
+  });
+
+  it('divides the chromium run between the shard scripts, every case in exactly one, and the game run in one — #1362', () => {
+    const scripts = shardScripts();
+    const total = scripts.length;
+    expect(total).toBeGreaterThanOrEqual(2);
+    const [chromium = '', game = ''] = playwrightRuns(webScripts()['test:browser']);
+    const BUILD =
+      /^vite build && vite build --config vite\.browser\.config\.ts \|\| exit 1; playwright test /;
+    const shardsWithGame: string[] = [];
+    scripts.forEach(([name, script], index) => {
+      const runs = playwrightRuns(script);
+      // The whole gate's chromium run, with this shard's slice of it: the same
+      // project, workers and stop, so a shard is never run under a looser one.
+      expect(runs[0], name).toBe(
+        chromium.replace(
+          '--project chromium ',
+          `--project chromium --shard ${String(index + 1)}/${String(total)} `,
+        ),
+      );
+      // A failed build ends the step before any run starts.
+      expect(script, name).toMatch(BUILD);
+      if (runs.length === 2) {
+        // The game run exactly as in the whole gate, after the chromium run
+        // whatever its result, and the step fails when EITHER did.
+        expect(runs[1], name).toBe(game);
+        expect(script, name).toContain('; chromium=$?; playwright test --project game');
+        expect(script, name).toMatch(/\[ \$chromium -eq 0 \] && \[ \$game -eq 0 \]$/);
+        shardsWithGame.push(name);
+      } else {
+        // One run, and the script's status is that run's.
+        expect(runs, name).toHaveLength(1);
+        expect(script.endsWith(`playwright test ${String(runs[0])}`), name).toBe(true);
+      }
+    });
+    // The game run is in one shard: in none it leaves the gate, in two it
+    // runs twice.
+    expect(shardsWithGame).toHaveLength(1);
   });
 
   it('holds both Playwright stops and the builds inside the step’s wrapper, so each stop names its own run — #651', () => {
@@ -346,7 +414,8 @@ describe('the nightly workflow runs what left the required job, and cannot pass 
     expect(commands).toEqual(
       expect.arrayContaining([
         'pnpm run test:required',
-        'timeout --verbose --kill-after=10s 825s pnpm run test:browser',
+        'timeout --verbose --kill-after=10s 825s pnpm run test:browser:shard-1',
+        'timeout --verbose --kill-after=10s 825s pnpm run test:browser:shard-2',
       ]),
     );
     expect(commands).not.toContain('pnpm run test:browser:nightly');
@@ -558,13 +627,20 @@ describe('the required check is one job over every shard — #1285', () => {
       'pnpm run check:notices',
       'pnpm run test:required',
       'pnpm --filter @onyourleft/web exec playwright install --with-deps chromium',
-      `timeout --verbose --kill-after=10s ${String(GATE_STEP_MS / 1000)}s pnpm run test:browser`,
+      // #1362: the one gate command is a command per browser shard.
+      ...shardScripts().map(([name]) => gateCommand(name)),
     ];
     const ran = new Map([...shards].map(([id, job]) => [id, commandsOf(job)]));
     for (const command of required) {
       const where = [...ran].filter(([, commands]) => commands.includes(command)).map(([id]) => id);
-      // The install is each shard's own; everything else runs once.
-      const expected = command === 'pnpm install --frozen-lockfile' ? shards.size : 1;
+      // The install is each shard's own, and the browser install each browser
+      // shard's (#1362); everything else runs once.
+      const expected =
+        command === 'pnpm install --frozen-lockfile'
+          ? shards.size
+          : command.includes('playwright install')
+            ? shardScripts().length
+            : 1;
       expect(where, command).toHaveLength(expected);
     }
     // The Vitest halves `check:test-split` reasons about share a runner with

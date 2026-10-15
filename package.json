@@ -22,6 +22,8 @@
     "test:a11y": "vitest run --project web .a11y.test.",
     "test:browser": "pnpm --filter @onyourleft/web run test:browser",
     "test:browser:nightly": "pnpm --filter @onyourleft/web run test:browser:nightly",
+    "test:browser:shard-1": "pnpm --filter @onyourleft/web run test:browser:shard-1",
+    "test:browser:shard-2": "pnpm --filter @onyourleft/web run test:browser:shard-2",
     "check:a11y-suite": "node scripts/check-a11y-suite.mjs",
     "check:test-split": "node scripts/check-test-split.mjs",
     "check:wiring": "node scripts/check-wiring.mjs",
@@ -41,9 +43,9 @@
     "eslint-import-resolver-typescript": "4.4.5",
     "eslint-plugin-boundaries": "7.2.0",
     "eslint-plugin-headers": "1.3.4",
-    "prettier": "3.9.9",
+    "prettier": "3.9.10",
     "typescript": "6.0.3",
-    "typescript-eslint": "8.71.0",
+    "typescript-eslint": "8.71.1",
     "vitest": "4.1.11"
   }
 }
