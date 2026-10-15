@@ -587,3 +587,16 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   riders"* and Q4 — the mass is still never sent or shown, but a racer's software can solve for it
   from a rider's speed and live W/kg to within a few kilograms (ADR 0051 D-1), so it is no longer
   private in substance and watts follow from it. Accepted pending the owner's confirmation.
+- **2026-10-15** — **D-3's *"declared mass never shown"* no longer holds for a live race, on the
+  owner's decision of this day** ([comment on #1354](https://github.com/openzigs/onyourleft/pull/1354)):
+  *"keep live W/kg and disclose it."* [ADR 0051](0051-live-race-standings.md) D-1 sends every racer
+  each other racer's live W/kg every second, beside the speed every frame already carries; with this
+  ADR's public physics (D-1) the only unknown is the mass, so another racer can solve for it to within
+  a few kilograms, and W/kg times it gives the watts. The amendment of 2026-10-14 called D-3 and Q4
+  *qualified* pending the owner's confirmation; **this is the confirmation, and in a live race D-3's
+  privacy half is superseded, not qualified.** What is unchanged: the mass is still declared (D-3's
+  honesty half), is still never sent to another rider or shown as a number, and in a **group ride**,
+  which carries no W/kg (D-7.2, ADR 0051 D-3), it stays private as D-3 said. The 2026-09-22
+  publication rule (power or W/kg, never both) still holds for what a room publishes, though it no
+  longer keeps the watts from a racer who does the arithmetic. The rider is told before they make or
+  ride a race (ADR 0051 D-1 names the sentence and its test).

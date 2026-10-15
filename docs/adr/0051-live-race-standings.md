@@ -70,10 +70,25 @@ rider's own line says *You* and is marked for a screen reader (`aria-current`).
   not kept secret either**: every physics input except the mass is public, and every frame carries the
   rider's speed, so another racer's software can solve for the mass that makes the speed and the
   W/kg agree, and the room-core test `standings.test.ts` §"what the live W/kg gives away" does so to
-  within a few kilograms. W/kg times that mass is the rider's watts. This is the cost of the owner's
-  ruling (*"show real time w/kg"*), found in review of #1354 and **accepted here pending the
-  owner's confirmation**; rounding the figure does not close it, and closing it means not showing a
-  live W/kg. The privacy policy and the Data safety answer say so rather than *never your weight*. A rider the room
+  within a few kilograms. W/kg times that mass is the rider's watts. This was found in review of
+  #1354; rounding the figure does not close it, and closing it means not showing a live W/kg.
+- ⚠️ **The owner decided, on 2026-10-15, to keep live W/kg and disclose what it gives away**
+  ([comment on #1354](https://github.com/openzigs/onyourleft/pull/1354)): *"keep live W/kg and
+  disclose it. Before joining a race, riders are told plainly that others in the race can estimate
+  their weight from it."* **The mechanism, stated so it is not rediscovered:** the room's physics is
+  public (ADR 0028 D-1, the game's own model), every input to it but the mass is public or sent —
+  the route's gradient, the riding position's drag and rolling resistance, and each rider's speed in
+  every frame — and live W/kg is power over mass. Speed fixes the power the physics needs at a given
+  mass; W/kg fixes power over mass; only one mass satisfies both, and W/kg times it is the watts.
+  **What this supersedes:** ADR 0028 D-3's *"declared mass never shown"* no longer holds in substance
+  for a **live race** (ADR 0028's amendment of 2026-10-15). The mass is still never sent or shown as a
+  number, and a group ride, which carries no W/kg, is unchanged. **The disclosure:** before a rider
+  makes a race, and in a race they joined before they ride in it, the room panel says *"In a race,
+  everyone in it sees your watts per kilogram live, so they can work out roughly what you weigh."*
+  (`apps/web/src/rooms/RoomPanel.tsx` §`RACE_WEIGHT_DISCLOSURE`, held by
+  `race-weight-disclosure.test.tsx`; a group ride shows no such sentence). The panel's "what is sent"
+  paragraph, the privacy policy's room row and the Data safety answer say the same rather than *never
+  your weight*. All of that wording is a draft for the owner's approval. A rider the room
   is coasting (rule 1) reads *Coasting*, never a figure; a finisher reads *Finished*.
 - **A plausibility flag stays visible** as ADR 0028 D-2 rule 3 requires: a flagged rider's line says
   *Flagged*, and the result after the race still carries the flag's window, as it did.
@@ -177,8 +192,11 @@ putting out now — the owner's ruling — from numbers the room is authoritativ
   beside the physics.
 - **Every client must update**: version 1 is refused (D-4).
 - **The privacy policy's room row and the Data safety answer** say that, in a race, the other riders
-  see your name, your power-to-weight every second and how far ahead or behind them you are. Drafted
-  for the owner in the same pull request.
+  see your name, your power-to-weight every second and how far ahead or behind them you are, and that
+  from it and your speed they can work out roughly what you weigh. Drafted for the owner in the same
+  pull request.
+- **A racer's weight is not private from the other racers** (D-1, the owner's decision of
+  2026-10-15). A rider who does not want that has the group ride, which carries no W/kg.
 
 ### Constraints this places on other work
 
