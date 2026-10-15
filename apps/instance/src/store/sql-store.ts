@@ -1354,6 +1354,8 @@ export interface SqlStore {
   listReports(athleteId: string): Promise<readonly Report[]>;
   /** The moderators' queue: every report not yet decided, oldest first. */
   listOpenReports(): Promise<readonly Report[]>;
+  /** One report by id, open or closed (#899: a dismissal reads the one it decides). */
+  getReport(reportId: number): Promise<Report | undefined>;
 
   /**
    * Apply a moderator action and append it to the log, in ONE transaction:
@@ -3814,6 +3816,16 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
         ).map(reportFrom),
       ),
 
+    getReport: (reportId) =>
+      exclusive(async () => {
+        const row = await db
+          .selectFrom('report')
+          .selectAll()
+          .where('id', '=', reportId)
+          .executeTakeFirst();
+        return row === undefined ? undefined : reportFrom(row);
+      }),
+
     listOpenReports: () =>
       exclusive(async () =>
         (
@@ -4411,8 +4423,10 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
                 .where('athlete_id', '=', athleteId)
                 .execute();
             }
-            // Another athlete's block OF this one names nobody once they are gone (#83).
-            await trx.deleteFrom('block').where('blocked_athlete_id', '=', athleteId).execute();
+            // Another athlete's block OF this one is KEPT (#899): it is the
+            // blocker's row, and deleting it would shrink their list and tell
+            // them the id they blocked was a real account — as a block of an
+            // id nobody ever held is kept (#891's review).
             await trx.deleteFrom('athlete').where('id', '=', athleteId).execute();
             return held.map((row) => row.content_sha256);
           }),
