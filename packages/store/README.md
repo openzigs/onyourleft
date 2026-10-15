@@ -898,6 +898,17 @@ There is no `up`/`down` pair: no record changes shape, so a `down` would be the 
 `workout-goals-store.test.ts` §"version 18 rolls back". `assertWorkoutGoalsRoundTrip` is red against
 `memoryWriteStoreFactory`.
 
+## A write only over what was read — #1263
+
+`putRiderText`, `putWorkout` and `putWorkoutGoals` take an optional second argument, a
+`WriteCondition`: `onlyIf(held)` is called **inside the write's own transaction** with the row the
+write would replace (`undefined` for none), and when it answers `false` nothing is written and the
+write throws `StoreConflictError`. A sync uses it to pull a copy only over the row it read before
+waiting on the instance, so a rider's edit or delete in that wait is not undone
+(`apps/web/src/instance/sync.ts`). `onlyIf` is synchronous on purpose: awaiting anything but the
+database ends an IndexedDB transaction, and the write would land outside the check. No schema
+change. `write-condition.test.ts` reads each answer back on a fresh connection.
+
 ## Not in this package
 
 - **Devices and gear.** Additive object stores in a later schema version.

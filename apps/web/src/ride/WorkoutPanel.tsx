@@ -74,9 +74,12 @@
  *   every sentence are that module's, which the privacy policy is held to
  *   word for word, so the screen and the policy cannot say two things. Its
  *   last sentence, *"This is off. …"*, is shown only while the switch is off.
- *   ⚠️ After the list of workouts, not before it: `rideview.browser.spec.ts`
- *   holds the control that starts a workout above the fold (#422), and the
- *   switch and its nine sentences must not push it down.
+ *   ⚠️ #1329 (owner ruling, 2026-10-13): the switch and the disclosure's
+ *   HEADLINE are ABOVE the list, so a rider sees what the switch sends before
+ *   choosing a workout; the other eight sentences, in their order, are under
+ *   the list, because nine sentences above it would push every *Ride* off the
+ *   screen (#422; `rideview.browser.spec.ts` holds both on screen). No word
+ *   of the approved wording changed by the move.
  * - ***Keep the plan***, while an accepted move waits for the next block: the
  *   sentence first, then the one 48 px control
  *   (`design/ride-time-controls.ts`). It is not offered at any other time,
@@ -523,29 +526,63 @@ export function WorkoutPanel({
   }
 
   function chooser(): JSX.Element {
+    const offerReplans =
+      replansAvailable === true &&
+      trainer.hasControl &&
+      thresholdPower !== undefined &&
+      saved.length > 0;
     return (
       <section>
         {/*
-          #1244's review: the switch is UNDER the list, with what it sends,
-          so a rider with many workouts presses *Ride* with it out of sight.
-          While it is on, two words say so HERE, on the heading's own line,
-          above the first *Ride*, at the line's end, so nothing under it
-          moves when the switch is pressed. Nothing is shown while it is
-          off, which is the default and sends nothing.
+          #1244, restored on #1332 (the owner's ruling of 2026-10-14): while
+          the switch is on, two words say so HERE, on the heading's own line,
+          at its end, so nothing under them moves when the switch is pressed.
+          Nothing is shown while it is off, which is the default and sends
+          nothing.
 
-          ⚠️ BESIDE the heading, not inside it (the fourth review): inside
+          ⚠️ BESIDE the heading, not inside it (#1244's fourth review): inside
           the `h3` the heading's name became "Ride a workout Re-plans on",
           and a heading is what a screen-reader user navigates by. It is a
           paragraph straight after the heading, so it is read next.
         */}
         <div className="oyl-workout-heading">
           <h3>Ride a workout</h3>
-          {replansAvailable === true && replans ? (
+          {offerReplans && replans ? (
             <p className="oyl-workout-replans-on" data-oyl-replans-on="">
               {REPLANS_ON_BADGE}
             </p>
           ) : null}
         </div>
+        {!offerReplans ? null : (
+          // #1244: the per-ride switch, only where a workout can be started
+          // and a re-plan could happen. #1329: ABOVE the list, with the
+          // headline of #1245's disclosure; the rest of it is under the list.
+          <div className="oyl-workout-replans">
+            <label>
+              <input
+                type="checkbox"
+                role="switch"
+                checked={replans}
+                aria-describedby={REPLAN_DISCLOSURE_HEADLINE_ID}
+                onChange={(event) => {
+                  setReplans(event.target.checked);
+                }}
+              />
+              {REPLAN_SWITCH_LABEL}
+            </label>
+            {/*
+              ⚠️ The switch is DESCRIBED by the headline alone, which says
+              what switching it on does in one sentence. The paragraphs are
+              ordinary text in reading order: nine sentences as one accessible
+              description would be read out in one breath on every focus.
+            */}
+            <div data-oyl-replan-disclosure="headline">
+              <p id={REPLAN_DISCLOSURE_HEADLINE_ID}>
+                <strong>{disclosure.headline}</strong>
+              </p>
+            </div>
+          </div>
+        )}
         {loadFault === undefined ? null : (
           <StatusMessage tone="warning" live>
             {loadFault}
@@ -602,44 +639,16 @@ export function WorkoutPanel({
             })}
           </ul>
         )}
-        {replansAvailable !== true ||
-        !trainer.hasControl ||
-        thresholdPower === undefined ||
-        saved.length === 0 ? null : (
-          // #1244: the per-ride switch, only where a workout can be started
-          // and a re-plan could happen. #1245's disclosure is written under
-          // it, whole, whether the switch is off or on.
-          <div className="oyl-workout-replans">
-            <label>
-              <input
-                type="checkbox"
-                role="switch"
-                checked={replans}
-                aria-describedby={REPLAN_DISCLOSURE_HEADLINE_ID}
-                onChange={(event) => {
-                  setReplans(event.target.checked);
-                }}
-              />
-              {REPLAN_SWITCH_LABEL}
-            </label>
-            {/*
-              ⚠️ The switch is DESCRIBED by the headline alone, which says
-              what switching it on does in one sentence. The paragraphs are
-              ordinary text straight after it, in reading order: nine
-              sentences as one accessible description would be read out in
-              one breath on every focus, with no way to move through them.
-            */}
-            <div data-oyl-replan-disclosure="">
-              <p id={REPLAN_DISCLOSURE_HEADLINE_ID}>
-                <strong>{disclosure.headline}</strong>
-              </p>
-              {disclosure.paragraphs.map((paragraph) => (
-                <p key={paragraph}>{paragraph}</p>
-              ))}
-              <p>{disclosure.notNeeded}</p>
-              {/* True only while it is off (`ReplanDisclosure.offUntilOn`). */}
-              {replans ? null : <p>{disclosure.offUntilOn}</p>}
-            </div>
+        {!offerReplans ? null : (
+          // #1244: the disclosure's remaining sentences, in their order, under
+          // the list (#1329): the headline and the switch are above it.
+          <div data-oyl-replan-disclosure="rest">
+            {disclosure.paragraphs.map((paragraph) => (
+              <p key={paragraph}>{paragraph}</p>
+            ))}
+            <p>{disclosure.notNeeded}</p>
+            {/* True only while it is off (`ReplanDisclosure.offUntilOn`). */}
+            {replans ? null : <p>{disclosure.offUntilOn}</p>}
           </div>
         )}
       </section>

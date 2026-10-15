@@ -680,7 +680,11 @@ describe('a recovery address is bound only once it is confirmed (#865)', () => {
     // A registration's account is new, so it never takes the exception.
     expect(mailedTo(w, 'victim@example.org')).toBe(DEFAULT_LIMITS.confirmationsPerAddress.limit);
     expect(mailedTo(w, 'victim@example.org')).toBeLessThanOrEqual(ceiling);
-  });
+    // Forty registrations through the real handler: 1 785 ms on green `main`
+    // (38489351349, EPYC 7763) and 3 510 ms under coverage (nightly
+    // 38492085167, EPYC 9V74), 70 % of Vitest's 5 s default. About three times
+    // the slowest CI figure (docs/agents/ci.md §4c, #1262); nothing it does is changed.
+  }, 11_000);
 
   it('a loop of email-less accounts each giving the address once mails it at most the ceiling, aged or not (#889 B2)', async () => {
     const w = await start({ emailRecovery: true });
@@ -699,7 +703,12 @@ describe('a recovery address is bound only once it is confirmed (#865)', () => {
       expect((await give(w, account.token, 'victim@example.org')).status).toBe(204);
     }
     expect(mailedTo(w, 'victim@example.org') - before).toBe(ceiling);
-  });
+    // Thirty registrations and sixty gives through the real handler: 2 729 ms on
+    // green `main` (38399168021, Xeon 8370C) and 3 698 ms under coverage (nightly
+    // 38279988356, EPYC 9V74), and past Vitest's 5 s default on 38051597022 and
+    // 38071560352 (EPYC 9V74). About three times the slowest green figure
+    // (docs/agents/ci.md §4c, #1262); nothing it does is changed.
+  }, 12_000);
 
   it('an owner whose account is established still gets a link through a flood of fresh accounts (#889 B2)', async () => {
     const w = await start({ emailRecovery: true });

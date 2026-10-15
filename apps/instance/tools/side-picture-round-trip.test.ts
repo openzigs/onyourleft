@@ -246,7 +246,11 @@ describe('the drawn picture, which a real model can open — #1106', () => {
     expect(sent[1] === Buffer.from(drawnPicture(1)).toString('base64')).toBe(true);
     expect(report.picture).toBe('drawn');
     expect(report.pictureBytes).toBe(drawnPicture(0).length);
-  });
+    // Under 300 ms on every green `main` run read, and 3 723 ms under coverage
+    // (nightly 38537249148, EPYC 7763), 74 % of Vitest's 5 s default: drawing
+    // the picture is a hot loop coverage instruments. About three times the
+    // slowest CI figure (docs/agents/ci.md §4c, #1262); nothing it does is changed.
+  }, 12_000);
 
   it('sends filler unless asked, and reports the size asked for', async () => {
     const clock = { ms: 0 };
@@ -305,7 +309,10 @@ describe('a real model on this machine in place of the scripted one — #1106', 
     );
     // The scripted server was started and never asked.
     expect(instance.model.requests).toHaveLength(0);
-  });
+    // 959 ms on green `main` (38490502814, EPYC 7763) and 2 591 ms under
+    // coverage (nightly 38282093800, EPYC 7763), 52 % of Vitest's 5 s default.
+    // About three times the slowest CI figure (docs/agents/ci.md §4c, #1262).
+  }, 8_000);
 
   it.each([
     'https://localhost:11434/v1',
@@ -404,7 +411,11 @@ describe('the command — #1106', () => {
       pictureBytes: drawnPicture(0).length,
       answers: { '{"rider":false}': 1 },
     });
-  });
+    // A child process: 2 302 ms on green `main` (38337365635, EPYC 7763) and
+    // 2 662 ms under coverage (nightly 38492183044, EPYC 7763), 53 % of
+    // Vitest's 5 s default. About three times the slowest CI figure
+    // (docs/agents/ci.md §4c, #1262); nothing it does is changed.
+  }, 8_000);
 
   it.each([
     [['--url', 'http://127.0.0.1:1', '--loopback'], 'give --loopback or --url, and not both'],

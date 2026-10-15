@@ -459,6 +459,28 @@ describe('SettingsView — your weight (#325)', () => {
     mounted.unmount();
   });
 
+  // #1333: the weight is declared to a private room's instance, is in every
+  // ride analysis' input and divides a synced summary's power per kilogram, so
+  // the card says each — and the screen whose note is "each setting that sends
+  // something says so beside it" nowhere says that nothing is sent.
+  it('says where the weight is sent, and never that nothing is — #1333', async () => {
+    const { port } = massPort();
+    const mounted = await mount(
+      <SettingsView
+        units="metric"
+        onUnitsChange={() => undefined}
+        mass={port}
+        onRiderMassChange={() => undefined}
+      />,
+    );
+    const said = (mounted.container.textContent ?? '').replace(/\s+/g, ' ');
+    expect(said).toContain('Joining a private room sends it to that room’s instance');
+    expect(said).toContain('asking for a ride analysis sends it to the model you chose');
+    expect(said).toContain('A ride you sync with an instance carries your power per kilogram.');
+    expect(said).not.toMatch(/nothing is sent anywhere/i);
+    mounted.unmount();
+  });
+
   it('writes what the rider typed, in kilograms, scoped to the athlete', async () => {
     const { port, writes } = massPort();
     const mounted = await mount(
