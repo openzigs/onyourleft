@@ -11,6 +11,7 @@ import {
   heldOnTheLine,
   NEARBY_METRES,
   nextToFollow,
+  placeAcrossOf,
   raceEvent,
   raceFactOf,
   ROOM_RECORDING_PAUSED_TEXT,
@@ -29,6 +30,7 @@ import { GameSimulation } from './simulation';
 import { northRoute } from './route-fixtures-testing';
 import { airDensityKilogramsPerCubicMetre } from '@onyourleft/physics';
 import { altitudeMetres, degreesCelsius, kilograms, watts } from '@onyourleft/domain';
+import { FLAG_FINISHED, FLAG_PLAUSIBILITY } from '@onyourleft/protocol';
 
 const rider = (riderId: number, distanceMetres: number): DrawnRemoteRider => ({
   riderId,
@@ -332,6 +334,60 @@ describe('the race a ride was in, for the device to keep — #785', () => {
       place: 1,
       finishers: 2,
     });
+  });
+});
+
+describe('a place among the riders already across, from the room’s standings — #1364', () => {
+  const row = (riderId: number, flags: number, you = false) => ({
+    riderId,
+    displayName: undefined,
+    you,
+    gapSeconds: 0,
+    wattsPerKilogram: 0,
+    flags,
+  });
+  const ACROSS = FLAG_FINISHED;
+
+  it('is this rider’s place among the rows the room flags across, and how many it flags', () => {
+    // The room's order: finishers first, by their finish, then the road.
+    const standings = {
+      tick: 9,
+      rows: [row(3, ACROSS), row(0, ACROSS | FLAG_PLAUSIBILITY, true), row(5, ACROSS), row(7, 0)],
+    };
+    expect(placeAcrossOf(standings)).toEqual({ place: 2, across: 3 });
+    expect(placeAcrossOf({ tick: 9, rows: [row(0, ACROSS, true), row(7, 0)] })).toEqual({
+      place: 1,
+      across: 1,
+    });
+  });
+
+  it('is nothing with no standings, or where the room does not have this rider across', () => {
+    expect(placeAcrossOf(undefined)).toBeUndefined();
+    expect(placeAcrossOf({ tick: 9, rows: [] })).toBeUndefined();
+    expect(placeAcrossOf({ tick: 9, rows: [row(3, ACROSS), row(0, 0, true)] })).toBeUndefined();
+    expect(placeAcrossOf({ tick: 9, rows: [row(3, ACROSS), row(5, ACROSS)] })).toBeUndefined();
+  });
+
+  it('is kept with the race only for a rider across the line before the room’s order', () => {
+    const placed = { place: 2, across: 5 };
+    expect(raceFactOf('room-1', { kind: 'running' }, true, placed)).toEqual({
+      roomId: 'room-1',
+      place: null,
+      finishers: null,
+      crossedTheLine: true,
+      placeAcross: 2,
+      across: 5,
+    });
+    // Not across by the room's distance: a race left, and no place.
+    expect(raceFactOf('room-1', { kind: 'running' }, false, placed)).toEqual({
+      roomId: 'room-1',
+      place: null,
+      finishers: null,
+    });
+    // The room's order heard: that is the place, and the standings' is not kept.
+    expect(
+      raceFactOf('room-1', { kind: 'finished', order: [4, 0], place: 2 }, true, placed),
+    ).toEqual({ roomId: 'room-1', place: 2, finishers: 2 });
   });
 });
 

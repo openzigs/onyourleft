@@ -21,7 +21,12 @@ import type { RoomRaceFact } from '@onyourleft/store';
 
 import type { AnnouncementEvent } from './hud/announce';
 import type { RoomConnection } from '../net/room-port';
-import type { RoomRace, RoomSessionStatus, RoomStandingsRow } from '../net/room-session';
+import type {
+  RoomRace,
+  RoomSessionStatus,
+  RoomStandings,
+  RoomStandingsRow,
+} from '../net/room-session';
 import { InterestSet } from '../net/interest';
 import { roomErrorMetres } from '../net/correction';
 import type { RemoteRiderInput } from './scene';
@@ -473,6 +478,26 @@ export function acrossTheRoomsLine(
   return own.rider.distanceMetres >= lineMetres;
 }
 
+/** This rider's place among the riders across the line, and how many were — #1364. */
+export interface PlaceAcross {
+  readonly place: number;
+  readonly across: number;
+}
+
+/**
+ * Where the ROOM's newest standings have this rider among the riders already
+ * across the line — #1364, from #1347's standings: the rows the room flags
+ * {@link FLAG_FINISHED}, which it puts first, by their finish (ADR 0051).
+ * The room's word and its order; nothing is worked out here but the count.
+ * `undefined` with no standings, or where they do not have this rider across.
+ */
+export function placeAcrossOf(standings: RoomStandings | undefined): PlaceAcross | undefined {
+  if (standings === undefined) return undefined;
+  const across = standings.rows.filter((row) => (row.flags & FLAG_FINISHED) !== 0);
+  const own = across.findIndex((row) => row.you);
+  return own === -1 ? undefined : { place: own + 1, across: across.length };
+}
+
 /**
  * What the race this ride was in comes to on this device — #785, the owner's
  * ruling of 2026-10-14: the result is stored with the ride. The ROOM's word
@@ -489,6 +514,7 @@ export function raceFactOf(
   roomId: string | undefined,
   race: RoomRace | undefined,
   crossedTheLine: boolean,
+  placeAcross?: PlaceAcross,
 ): RoomRaceFact | undefined {
   if (roomId === undefined || race === undefined) return undefined;
   switch (race.kind) {
@@ -496,9 +522,17 @@ export function raceFactOf(
       // The room's order is the word on who finished, whatever this device saw.
       return { roomId, place: race.place, finishers: race.order.length };
     case 'running':
-      return crossedTheLine
-        ? { roomId, place: null, finishers: null, crossedTheLine: true }
-        : { roomId, place: null, finishers: null };
+      if (!crossedTheLine) return { roomId, place: null, finishers: null };
+      // #1364: and where the room's standings had them among those across.
+      return {
+        roomId,
+        place: null,
+        finishers: null,
+        crossedTheLine: true,
+        ...(placeAcross === undefined
+          ? {}
+          : { placeAcross: placeAcross.place, across: placeAcross.across }),
+      };
     default:
       return undefined;
   }

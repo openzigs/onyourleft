@@ -1760,7 +1760,9 @@ always records, and the race result is stored with that ride on the device"*). `
 ride controller for a recording once the room has admitted the rider (`recordForRoom`: a paused
 recording is left paused, #516, and the room's notice says so), and on *End ride* notes the race —
 the room's place and finisher count, or that the rider crossed the line before the room's `finish`
-(by the room's own last word on their distance, never the device's odometer: ADR 0028 D-2), or that
+(by the room's own last word on their distance, never the device's odometer: ADR 0028 D-2) with,
+where the room's newest standings flag them across, their place among the riders flagged across and
+how many those are (#1364, `placeAcross` and `across`: the room's flags and order, #1347), or that
 they left it — on the RECORDER (`Recorder.noteRoomRace`). It goes out on the recording's
 checkpoint header (`roomRaces`), so a ride recovered after the app closed before *Stop* keeps it, and
 is saved as `RideFacts.races` — a list, one per race in the recording. Nothing of any other rider is
