@@ -513,10 +513,12 @@ export async function startIdentityInstance(
       (candidate) =>
         candidate.method === method && matchPath(candidate.path, pathname) !== undefined,
     );
-    return found?.sealed === 'only' || (found?.sealed === 'new-key' && method === 'POST');
+    return found?.sealed === 'only';
   };
   const sessionless = (route: string): boolean =>
-    ['/v1/auth/session', '/v1/auth/link', '/v1/auth/recover'].includes(route);
+    ['/v1/auth/session', '/v1/auth/leave-session', '/v1/auth/link', '/v1/auth/recover'].includes(
+      route,
+    );
 
   /** A session token an answer carries is the signer's, or the statement key's device's. */
   const remember = (sent: unknown, answered: unknown, signer: TestDevice | undefined): void => {

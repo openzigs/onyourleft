@@ -179,14 +179,17 @@ export class InstanceSignInError extends Error {
 export interface SignInDependencies {
   /** The instance's origin, exactly as the instance states it. */
   readonly origin: string;
-  /** Plaintext: the challenge, and signing a key the instance already holds in. */
+  /**
+   * Plaintext: the challenge; and signing in from a device with no card,
+   * which only an instance with no keys answers (#1210).
+   */
   readonly transport: InstanceTransport;
   /**
-   * SEALED to the instance's key and signed by this device's (#1192, ADR 0047
-   * D-7): registering a key the instance has not seen, and linking, go here and
-   * nowhere else. Absent — no card, or a copy of the app loaded from a
-   * website (D-11) — a new key is refused `sealed_required` and a link is not
-   * attempted.
+   * SEALED to the instance's key and signed by this device's (#1192, #1210,
+   * ADR 0047 D-7): signing in — a key the instance holds as well as a new one
+   * — and linking go here and nowhere else. Absent — no card, or a copy of the
+   * app loaded from a website (D-11) — an instance holding keys refuses the
+   * sign-in `sealed_required`, and a link is not attempted.
    */
   readonly sealed?: InstanceTransport;
   readonly storage: InstanceAccountStorage;
@@ -268,11 +271,12 @@ export async function signInToInstance(
   await dependencies.ensureLocalAthlete();
   const key = await dependencies.signingKey();
   const statement = await signedStatement(dependencies, key, AUTH_PURPOSE);
-  // Sealed whenever this device can seal, so a registration's recovery codes
-  // cross the edge only as ciphertext; in plaintext only a key the instance
-  // already holds signs in (ADR 0047 D-7, until phase 2).
-  const session = dependencies.sealed ?? dependencies.transport;
-  const answer = await session.post('/v1/auth/session', {
+  // Sealed whenever this device can seal, so the session token and a
+  // registration's recovery codes cross the edge only as ciphertext. In
+  // plaintext only an instance with no keys signs anybody in (ADR 0047 D-7
+  // phase 2, #1210): one holding keys refuses it `sealed_required`.
+  const sealedOrKeyless = dependencies.sealed ?? dependencies.transport;
+  const answer = await sealedOrKeyless.post('/v1/auth/session', {
     ...statement,
     ...(registration.displayName === undefined ? {} : { displayName: registration.displayName }),
   });

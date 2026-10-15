@@ -1843,6 +1843,10 @@ sequenceDiagram
     I-->>D: {ticket (one room, one hello, 30 s)}
 ```
 
+On an instance that holds keys, the sign-in and the ticket above travel only inside
+`POST /v1/sealed` (ADR 0047 D-7 phase 2, #1210): the sign-in sessionless and signed by the key its
+statement names, the ticket signed by the session's key. Only the challenge stays plaintext.
+
 | Concern | Decision | Where |
 |---|---|---|
 | What is signed | `@onyourleft/domain`'s `deviceStatementBytes`: five members, RFC 8785, canonicalised once for the browser and the instance (ADR 0014 D-8). `purpose` is one of `oyl-auth-v1`, `oyl-link-v1` and `oyl-recover-v1`, so a sign-in cannot add a key and no activity record (which has no `purpose`) verifies as a statement; `instanceOrigin` binds it to one instance | `packages/domain/src/identity/device-statement.ts` |

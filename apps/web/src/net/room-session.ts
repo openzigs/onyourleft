@@ -106,10 +106,18 @@ const FINAL_CLOSE_CODES: ReadonlySet<number> = new Set([4001, 4002, 4004, 4005, 
  * - `no-such-room` — 404: the instance has no room by that id;
  * - `no-declared-mass` — the rider has declared no weight, so no ticket is
  *   asked for at all (ADR 0028 D-1: a default is not a declaration);
- * - `instance-refused` — any other 4xx but 429.
+ * - `instance-refused` — any other 4xx but 429;
+ * - `cannot-seal` — the ticket route is sealed-only (#1210, ADR 0047 D-7
+ *   phase 2) and this device cannot seal to its instance now: no card, a copy
+ *   a website served, or keys refused. Nothing was asked of the room.
  */
 export type TicketRefusal =
-  'not-signed-in' | 'not-eligible' | 'no-such-room' | 'no-declared-mass' | 'instance-refused';
+  | 'not-signed-in'
+  | 'not-eligible'
+  | 'no-such-room'
+  | 'no-declared-mass'
+  | 'instance-refused'
+  | 'cannot-seal';
 
 /** A ticket, or why there is none. */
 export type TicketAnswer =

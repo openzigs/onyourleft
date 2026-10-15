@@ -120,9 +120,8 @@ function operation(route: Route): Record<string, unknown> {
     summary: route.summary,
     ...(parameters.length > 0 ? { parameters } : {}),
     ...(route.auth === 'session' ? { security: [{ session: [] }] } : {}),
-    // #1191, #1192: `only` — reachable only inside `POST /v1/sealed`, and a
-    // plaintext request is `sealed_required`; `new-key` — a key the instance
-    // has not seen registers only sealed. Both on an instance holding keys.
+    // #1191, #1192, #1210: `only` — reachable only inside `POST /v1/sealed`,
+    // and a plaintext request is `sealed_required`, on an instance holding keys.
     ...(route.sealed === undefined ? {} : { 'x-oyl-sealed': route.sealed }),
     ...(route.request === undefined
       ? {}

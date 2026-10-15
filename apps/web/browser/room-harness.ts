@@ -34,10 +34,12 @@ import {
   geographicPosition,
   routeProfile,
   unixSeconds,
+  type SigningKey,
 } from '@onyourleft/domain';
 import { ensureDeviceSigningKey, openActivityStore } from '@onyourleft/store';
 
 import { planPath, routePlan } from '../src/game/hud/plan';
+import type { LoadedFrom } from '../src/instance/instance-pin';
 import { createInstancePort, type ConnectOutcome } from '../src/instance/instance-port';
 import type { InstanceSend } from '../src/instance/instance-transport';
 import { ensureLocalAthlete, LOCAL_ATHLETE } from '../src/local-athlete';
@@ -132,8 +134,19 @@ const tampering: InstanceSend = async (url, init) => {
   });
 };
 
+/**
+ * What the room ports need to seal (#1210), for the rider signed in last. The
+ * room gate's instance holds no keys and no card is given, so the ports call
+ * in plaintext and never ask for the key — but they are handed the real one.
+ */
+let sealing: { readonly loadedFrom: LoadedFrom; readonly signingKey: () => Promise<SigningKey> };
+
 async function signIn(address: string, name: string): Promise<ConnectOutcome> {
   const store = openActivityStore(`room-gate-${name}`);
+  sealing = {
+    loadedFrom: { native: false, href: location.href },
+    signingKey: () => ensureDeviceSigningKey(store, LOCAL_ATHLETE),
+  };
   const instance = createInstancePort({
     storage: localStorage,
     // Served from loopback (ADR 0047 D-11). The room gate's instance holds no
@@ -147,6 +160,7 @@ async function signIn(address: string, name: string): Promise<ConnectOutcome> {
 
 function joinRoom(roomId: string, watts: number, fanOut: boolean): void {
   connection = createRoomPort({
+    ...sealing,
     storage: localStorage,
     ...(fanOut ? {} : { acceptFrame: () => false }),
   }).join({
@@ -166,6 +180,7 @@ window.__oylRoom = {
   signIn,
   make: async () => {
     const answer = await createRoomsPort({
+      ...sealing,
       storage: localStorage,
       zones: () => Promise.resolve([]),
     }).create({ kind: 'group', ridingPosition: 'hoods', drafting: true, route: ownRoute() });
@@ -181,6 +196,7 @@ window.__oylRoom = {
   },
   enter: async (code, tamper) => {
     const answer = await createRoomsPort({
+      ...sealing,
       storage: localStorage,
       zones: () => Promise.resolve([]),
       ...(tamper ? { send: tampering } : {}),

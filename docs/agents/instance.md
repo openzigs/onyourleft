@@ -128,7 +128,9 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         marked, and a plaintext request to one is
                         `sealed_required` on an instance that holds keys
                         (none: plaintext as before); `sealed/phase-one.ts`
-                        is the committed list the table is held to, and a
+                        and, since #1210, `sealed/phase-two.ts` (sign-in,
+                        account, blocks, reports, room HTTP, session) are
+                        the committed lists the table is held to, and a
                         test world's `call` seals a marked route itself.
                         Since #1095 `src/analysis/jobs.ts` is the job
                         engine (migration 0020, sealed-only routes, an SSE

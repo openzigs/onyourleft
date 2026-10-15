@@ -972,6 +972,9 @@ function buildRoomPort(rideController: RideController | undefined): RoomPort | u
   if (typeof localStorage === 'undefined') return undefined;
   return createRoomPort({
     storage: localStorage,
+    // #1210: the ticket is sealed, signed by this device's key (ADR 0047 D-7 phase 2).
+    loadedFrom: loadedFrom(),
+    signingKey: () => ensureDeviceSigningKey(localStore(), LOCAL_ATHLETE),
     ...(rideController === undefined ? {} : { keepAlive: () => rideController.keepAliveForRoom() }),
   });
 }
@@ -990,6 +993,9 @@ function buildRoomsPort(): RoomsPort | undefined {
   if (typeof localStorage === 'undefined') return undefined;
   return createRoomsPort({
     storage: localStorage,
+    // #1210: every room route is sealed, signed by this device's key (ADR 0047 D-7 phase 2).
+    loadedFrom: loadedFrom(),
+    signingKey: () => ensureDeviceSigningKey(localStore(), LOCAL_ATHLETE),
     zones: () => localStore().listPrivacyZones(LOCAL_ATHLETE),
   });
 }

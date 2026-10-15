@@ -502,15 +502,25 @@ read or anything is run: minting a link code, linking, recovering and asking for
 giving, confirming and clearing a recovery address, the full reset, the device list and revoking a device, the account
 export and deleting the account, **every** moderator route (the queues and the log included),
 **every** sync route, history search, and a side-camera picture (#1106, which is refused
-unsealed on an instance without the secret too). Registering a new rider is sealed too: a key the
-instance has never seen is refused `sealed_required` in plaintext, while a key it already holds
-still signs in in plaintext until phase 2. `apps/instance/src/sealed/phase-one.ts` is the list, and
-`GET /openapi.json` marks each route `x-oyl-sealed`. The rider's app offers these features only
-with the instance's card, and only in the Android app or a copy opened from the rider's own
-device — never in a copy a website served (D-11).
+unsealed on an instance without the secret too).
 
-⚠️ **An instance with no `OYL_INSTANCE_SECRET_KEY` has no sealed routes.** It registers riders and
-serves every one of the routes above in plaintext, as it did before #1191, so whatever sits between
+**Since #1210 (phase 2), every other route that reaches a rider is sealed-only as well**: signing in
+— a key the instance already holds as well as a new one — the account summary, the display name,
+the adult confirmation, a suspended rider's way-out session, a rider's own blocks and reports, the
+room routes' HTTP side (making, joining, a room's route and result, its ticket and starting a race),
+reading and ending a session, and another rider's profile. So a rider's bearer token, which the
+edge sees in every request's header, opens nothing on its own. What is left in plaintext carries
+nothing personal: `/health`, `/ready`, `/source`, `/openapi.json`, `/licences/third-party.txt`,
+`/instance`, `/v1/instance/keys`, `/metrics` and the sign-in challenge. **The room sockets are not
+sealed** (ADR 0047 D-14 Q5); a socket is opened with a single-use ticket, which is now minted only
+sealed. `apps/instance/src/sealed/phase-one.ts` and `phase-two.ts` are the lists, and
+`GET /openapi.json` marks each route `x-oyl-sealed`. **A rider needs the instance's card to sign
+in at all** (D-14 Q1): the app says so on the Connect screen, and offers sealed features only in
+the Android app or a copy opened from the rider's own device — never in a copy a website served
+(D-11).
+
+⚠️ **An instance with no `OYL_INSTANCE_SECRET_KEY` has no sealed routes.** It signs in and registers riders
+and serves every one of the routes above in plaintext, as it did before #1191, so whatever sits between
 the rider and the box — Cloudflare's edge, for the home deployment's tunnel — reads them: new
 riders' recovery codes, link codes, moderators' actions and reads, and every synced ride, write-up
 and note, and it holds the bearer token that would let it call them as the rider. The app cannot

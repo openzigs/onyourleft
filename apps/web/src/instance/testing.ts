@@ -17,6 +17,17 @@ export const LOADED_LOCALLY: LoadedFrom = { native: false, href: 'http://localho
 
 /** A copy of the app a website served: no sealed feature is offered (#1192, ADR 0047 D-11). */
 export const LOADED_FROM_A_WEBSITE: LoadedFrom = { native: false, href: 'https://app.example/' };
+
+/**
+ * What a port that seals needs, for a device that holds NO card (#1210): it
+ * calls in plaintext and seals nothing, so its key is never asked for — and
+ * asking is a failure here, not a silent sealed request.
+ */
+export const NO_CARD_DEVICE = {
+  loadedFrom: LOADED_LOCALLY,
+  signingKey: (): Promise<never> =>
+    Promise.reject(new Error('a device with no card signs no sealed request')),
+} as const;
 import type {
   CardOutcome,
   ConnectOutcome,
@@ -112,8 +123,13 @@ export function scriptedInstance(options: ScriptedInstanceOptions = {}): Scripte
         calls.push('current');
         const { held } = scripted;
         if (!held.connected) return Promise.resolve({ kind: 'not-connected' });
+        // #1210: an `unreadable` sign-in stands until a card is pinned, as a real port's does.
+        const state =
+          options.state?.kind === 'unreadable' && held.pin !== undefined
+            ? undefined
+            : options.state;
         return Promise.resolve(
-          options.state ?? {
+          state ?? {
             kind: 'connected',
             origin: held.origin,
             instanceName: held.instanceName,

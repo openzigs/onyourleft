@@ -14,11 +14,13 @@
  *
  * Not here. This client has ONE module for instance traffic,
  * `instance/instance-transport.ts`, and a room's socket is opened through it
- * ({@link instanceRoomSocket}); the ticket is minted through the same module's
- * HTTP call, with the session token `instance/instance-port.ts` keeps. So a
- * rider with no instance has no session, {@link RoomLink.ticket} answers
- * `refused` without sending a byte, and the game rides exactly as it did
- * before rooms existed.
+ * ({@link instanceRoomSocket}); the ticket is minted through the same module,
+ * with the session `instance/instance-port.ts` keeps — SEALED since #1210
+ * (ADR 0047 D-7 phase 2: the room routes' HTTP side is sealed, the socket is
+ * not, D-14 Q5), or in plaintext from a device with no card, which an
+ * instance holding keys refuses (`cannot-seal`). So a rider with no instance
+ * has no session, {@link RoomLink.ticket} answers `refused` without sending a
+ * byte, and the game rides exactly as it did before rooms existed.
  *
  * ## What leaves the device, and what does not
  *
@@ -40,7 +42,15 @@
 
 import { PHYSICS_VERSION } from '@onyourleft/physics';
 
-import { heldInstanceSession, type InstanceStorage } from '../instance/instance-port';
+import type { SigningKey } from '@onyourleft/domain';
+
+import {
+  heldAccountSession,
+  heldInstanceSession,
+  isSealedRequired,
+  type InstanceStorage,
+} from '../instance/instance-port';
+import type { LoadedFrom } from '../instance/instance-pin';
 import {
   instanceRoomSocket,
   roomPath,
@@ -116,6 +126,10 @@ export interface RoomPort {
 export interface RoomPortOptions {
   /** This device's `localStorage`: where `instance-port.ts` keeps the session. */
   readonly storage: InstanceStorage;
+  /** Where this copy of the app was loaded from: a website's copy seals nothing (ADR 0047 D-11). */
+  readonly loadedFrom: LoadedFrom;
+  /** `ensureDeviceSigningKey`, bound: the session's key, which signs the sealed ticket request. */
+  readonly signingKey: () => Promise<SigningKey>;
   /**
    * Hold the ride controller's foreground service while joined; returns its
    * release (`ride/controller.ts` §`keepAliveForRoom`). Absent in a browser.
@@ -138,18 +152,28 @@ const PLATFORM_TIMERS: RoomTimers = {
 };
 
 /** The production link: tickets and the socket, both through the one instance module. */
-function instanceRoomLink(options: RoomPortOptions, declaredMassKilograms: number): RoomLink {
+function instanceRoomLink(
+  options: RoomPortOptions,
+  accountSession: ReturnType<typeof heldAccountSession>,
+  declaredMassKilograms: number,
+): RoomLink {
   return {
     ticket: async (roomId): Promise<TicketAnswer> => {
-      const session = heldInstanceSession(options.storage, options.send);
-      if (session === undefined) return { kind: 'refused', reason: 'not-signed-in' };
+      const session = await accountSession();
+      if (session.kind === 'closed') {
+        return {
+          kind: 'refused',
+          reason: session.why === 'signed-out' ? 'not-signed-in' : 'cannot-seal',
+        };
+      }
       // `roomPath` refuses an id the router could not route, so the rider's
-      // session token can only ever reach the room's own ticket (#782's
-      // review, B1). `RoomSession` refuses such an id before this is reached.
-      const answer = await session.http.call('POST', roomPath(roomId, 'ticket'), {
+      // session can only ever reach the room's own ticket (#782's review, B1).
+      // `RoomSession` refuses such an id before this is reached.
+      const answer = await session.sealedOrKeyless.call('POST', roomPath(roomId, 'ticket'), {
         token: session.token,
         body: { declaredMassKilograms },
       });
+      if (isSealedRequired(answer)) return { kind: 'refused', reason: 'cannot-seal' };
       const ticket = (answer.body as { ticket?: unknown } | null)?.ticket;
       if (answer.status === 200 && typeof ticket === 'string' && ticket !== '') {
         return { kind: 'ticket', ticket };
@@ -195,7 +219,7 @@ const NO_DECLARED_MASS: RoomLink = {
 /** A port over a {@link RoomLink} — the production one, or a test's scripted room. */
 export function roomPortOver(
   link: (declaredMassKilograms: number) => RoomLink,
-  options: Omit<RoomPortOptions, 'storage' | 'send' | 'openSocket'>,
+  options: Omit<RoomPortOptions, 'storage' | 'send' | 'openSocket' | 'loadedFrom' | 'signingKey'>,
 ): RoomPort {
   return {
     join: (request) => {
@@ -239,5 +263,12 @@ export function roomPortOver(
 
 /** The production {@link RoomPort}: `main.tsx` builds it, and nothing else in the client. */
 export function createRoomPort(options: RoomPortOptions): RoomPort {
-  return roomPortOver((mass) => instanceRoomLink(options, mass), options);
+  // One clock for the port's life (ADR 0047 D-9), whichever room it joins.
+  const accountSession = heldAccountSession({
+    storage: options.storage,
+    loadedFrom: options.loadedFrom,
+    signingKey: options.signingKey,
+    send: options.send,
+  });
+  return roomPortOver((mass) => instanceRoomLink(options, accountSession, mass), options);
 }
