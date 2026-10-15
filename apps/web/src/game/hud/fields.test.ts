@@ -1057,7 +1057,7 @@ describe('the room on the HUD — #783', () => {
     expect(hudReadings(baseInput()).map((reading) => reading.key)).not.toContain('room-draft');
   });
 
-  it('has no draft field in a room until the rider asks for it — ADR 0038 D-5, #327 “off by default”', () => {
+  it('has no draft field in a room unless the ride says the rider’s setting shows it — ADR 0038 D-5', () => {
     const keys = (draftShown: boolean | undefined) =>
       hudReadings({
         ...baseInput(),

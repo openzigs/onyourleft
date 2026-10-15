@@ -250,8 +250,8 @@ export interface RoomHud {
    */
   readonly draft?: number | 'off' | undefined;
   /**
-   * Whether the rider asked to see their draft — `game/draft-preference.ts`,
-   * off by default (ADR 0038 D-5, from #327). ⚠️ Not the ROOM's switch: that
+   * Whether the rider shows their draft — `game/draft-preference.ts`, on by
+   * default since the owner's ruling of 2026-10-15 (ADR 0038's amendment). ⚠️ Not the ROOM's switch: that
    * one is {@link draft} reading `'off'`. Without this the field is absent,
    * and the rider is drafted exactly the same.
    */
@@ -525,7 +525,7 @@ export const DRAFT_LABEL = 'Draft';
  * climb, where there is little air to push, reads as a fact and not a fault
  * (#327's indicator criteria). Only on a ride in a room, like every room
  * field: absent everywhere else, on the `NO_READING` precedent — and only
- * when the rider asked for it ({@link RoomHud.draftShown}).
+ * when the rider's setting shows it ({@link RoomHud.draftShown}).
  *
  * A number carries a gauge toward {@link DRAFT_FULL_SCALE_PERCENT}, and the
  * phrase under it says what that full scale is (#327: *"the full-scale mark is

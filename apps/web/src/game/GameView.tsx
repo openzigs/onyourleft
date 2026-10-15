@@ -1026,9 +1026,9 @@ export function GameView(props: GameViewProps): JSX.Element {
   /** The other riders the room's frames held at the last look (#784). */
   const ridersSeenRef = useRef<ReadonlySet<number> | undefined>(undefined);
   /**
-   * Whether the rider asked to see and hear their draft (#787,
-   * `draft-preference.ts`): read at the start of each ride, like the
-   * announcements, and off until they do (ADR 0038 D-5).
+   * Whether the rider shows and hears their draft (#787,
+   * `draft-preference.ts`, on by default since 2026-10-15): read at the start
+   * of each ride, like the announcements.
    */
   const draftShownRef = useRef(false);
   /** Whether the rider was last told they are in the room's draft (#787, `room-ride.ts` §`draftEvent`). */
@@ -2288,7 +2288,7 @@ export function GameView(props: GameViewProps): JSX.Element {
           : {
               room: {
                 ...(roomFrameRef.current?.hud ?? { nearby: 0 }),
-                // #787: the draft field only when the rider asked for it.
+                // #787: the draft field only when the rider's setting shows it.
                 draftShown: draftShownRef.current,
               },
             })}

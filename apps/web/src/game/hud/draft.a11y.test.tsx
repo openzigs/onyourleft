@@ -104,7 +104,7 @@ describe('the draft on the HUD — #787', () => {
     expect(text(document.querySelector('.oyl-hud'))).not.toContain('% of drag');
   });
 
-  it('is not on the HUD in a room until the rider turns it on — ADR 0038 D-5', async () => {
+  it('is not on the HUD in a room unless the ride says the rider’s setting shows it — ADR 0038 D-5', async () => {
     await hud({ nearby: 1, draft: 34 });
     expect(field('Nearby')).toBeDefined();
     expect(field('Draft')).toBeUndefined();
