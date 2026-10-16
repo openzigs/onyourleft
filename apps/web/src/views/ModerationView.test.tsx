@@ -44,6 +44,7 @@ import {
   NOTICES_UNREADABLE_TEXT,
   REPORT_CONFLICT_TEXT,
   REPORT_OWN_CONFLICT_TEXT,
+  roomReportText,
   APPEAL_CONFLICT_TEXT,
   NOTICE_STEP_TEXT,
   ITEM_TEXT,
@@ -105,6 +106,7 @@ function dialog(): HTMLElement | null {
 
 /** The choices #962 confirms before they act. */
 const CONFIRMED = new Set([
+  'Remove from the room',
   'Hide the item',
   'Suspend',
   'Suspend the account',
@@ -276,6 +278,31 @@ describe('the report queue — #83, #905, #955', () => {
       reportId: 8,
     });
     expect(text()).toContain('Dismissed a report about themselves, as the only moderator');
+  });
+
+  it('says where a room’s report came from, and removes its rider from the room (#789)', async () => {
+    const scripted = scriptedModeration();
+    scripted.held.reports.push({
+      reportId: 9,
+      reporterAthleteId: null,
+      targetAthleteId: 'rider-dafydd',
+      reason: 'In a room: a plausibility flag, over 18 W/kg for 5 s',
+      createdAt: 1_790_003_000,
+      room: { roomId: 'room-1', tick: 12 },
+      flag: { durationSeconds: 5, ceilingWattsPerKilogram: 18 },
+    });
+    await open(scripted);
+    const flag = item('Report 9');
+    expect(text(flag)).toContain('filed by a room');
+    expect(text(flag)).toContain(roomReportText(scripted.held.reports[2]!) ?? 'no text');
+    expect(text(flag)).toContain('went over its 18 W/kg ceiling for 5 seconds');
+    // A report from outside a room has no such choice.
+    expect(
+      [...item('Report 7').querySelectorAll('button')].map((b) => b.textContent),
+    ).not.toContain('Remove from the room');
+    await decide(flag, 'Over the ceiling.', 'Remove from the room');
+    expect(scripted.calls).toContain('remove rider-dafydd from room-1 for 9');
+    expect(text(section('Reports'))).not.toContain('Report 9');
   });
 
   it('suspends a report’s account for the report, which closes it', async () => {

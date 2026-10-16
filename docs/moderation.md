@@ -348,10 +348,36 @@ refuses to undo 0007 while the log holds a single entry, and changes nothing.
   to get past is your registration mode (above): with approval-required registration, a banned
   rider with a new key is back in your queue, not back on your instance.
 
+## Moderation in a room
+
+A room is a group ride or a race (#784, #785). Moderation reaches into rooms in five ways (#789):
+
+| Who | Can | How | Written to the log as |
+|---|---|---|---|
+| A rider in the room | report another rider, by their seat, with one of three fixed reasons: an offensive display name, cheating, or something else about how they rode | `POST /v1/rooms/{roomId}/reports` | not logged: it is a report, and it reaches your queue with the room's id and the second of the ride it was made in. It counts toward the rider's 5 reports an hour. No screenshot and no position are ever sent |
+| The room itself | file a **plausibility flag** as a report, once for each power ceiling a rider breaches (ADR 0028 D-2) | the room's worker, on its own | not logged: a report with **no reporter**, the ceiling's duration and W/kg in it, and never the power trace |
+| The **host** of a private room (the rider who made it) | remove a rider from their own room | `POST /v1/rooms/{roomId}/remove`, by seat, with a reason | `host_remove_from_room`, with the room |
+| **You**, the moderator | remove a rider from **any** room, deciding a report if you name it | `POST /v1/moderation/rooms/{roomId}/athletes/{athleteId}/remove` | `remove_from_room`, with the room |
+| **You** | hide a display name across the instance, or suspend an account: every one of its keys is refused, in rooms as everywhere | the routes above | `hide_display_name`, `suspend` |
+
+A removed rider's socket is closed at once. They cannot come back into that room: the room refuses
+them, and the instance refuses them a ticket for it for as long as the room lasts. A race counts
+them as not finishing. Nobody may remove a moderator, from any room. The attempt changes nothing and
+is logged, as every attempt to act on a moderator is.
+
+**Blocking holds in a room.** In a race, two riders with a block between them, whichever of them made
+it, are never sent each other's name. Each sees the other as a rider with no name, and the race's
+result shows them the same way. A block made during a ride holds from that rider's next join. A group
+ride names nobody to anybody.
+
+What a moderator **cannot** do in a room: watch it, see where anybody is on the road, read anybody's
+power, move, pause or pace a rider, or change a room's route. A room has no leader. Its host can
+start a race and remove a rider, and can do nothing else.
+
 ## What you cannot do, yet
 
-- **Moderate inside a room.** Blocking and reporting a rider in the middle of a ride, room hosts,
-  and room bans are #789.
+- **Report from the ride screen.** The instance takes a report from inside a room (above), but the
+  app's ride screen has no *Report* control yet, so a rider reports another only through the API.
 - **Act on content other than a name, a room, a route shown in a room, or a race's result.** Since
   #913 each of those can be hidden alone, by its reference. Riders' rides are not shown to other
   riders, so there is no other item to act on.

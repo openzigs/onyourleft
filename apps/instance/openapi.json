@@ -5699,6 +5699,12 @@
                           },
                           "at": {
                             "type": "integer"
+                          },
+                          "roomId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
                           }
                         },
                         "required": [
@@ -5708,7 +5714,8 @@
                           "targetAthleteId",
                           "reportId",
                           "reason",
-                          "at"
+                          "at",
+                          "roomId"
                         ],
                         "additionalProperties": false
                       }
@@ -6599,7 +6606,10 @@
                             "type": "integer"
                           },
                           "reporterAthleteId": {
-                            "type": "string"
+                            "type": [
+                              "string",
+                              "null"
+                            ]
                           },
                           "targetAthleteId": {
                             "type": "string"
@@ -6609,6 +6619,37 @@
                           },
                           "createdAt": {
                             "type": "integer"
+                          },
+                          "roomId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "roomTick": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "flag": {
+                            "type": [
+                              "object",
+                              "null"
+                            ],
+                            "properties": {
+                              "durationSeconds": {
+                                "type": "integer"
+                              },
+                              "ceilingWattsPerKilogram": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "durationSeconds",
+                              "ceilingWattsPerKilogram"
+                            ],
+                            "additionalProperties": false
                           }
                         },
                         "required": [
@@ -6616,7 +6657,10 @@
                           "reporterAthleteId",
                           "targetAthleteId",
                           "reason",
-                          "createdAt"
+                          "createdAt",
+                          "roomId",
+                          "roomTick",
+                          "flag"
                         ],
                         "additionalProperties": false
                       }
@@ -6688,6 +6732,111 @@
                 "properties": {
                   "reason": {
                     "type": "string"
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "logId": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "logId"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "409": {
+            "$ref": "#/components/responses/moderation_not_applicable"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/moderation/rooms/{roomId}/athletes/{athleteId}/remove": {
+      "post": {
+        "operationId": "removeFromRoom",
+        "summary": "Remove an athlete from a room, any room, with a reason, optionally deciding a report (#789): their socket is closed if a worker holds the room, they are refused a ticket for it from then on, and the removal is written to the moderation log with the room.",
+        "parameters": [
+          {
+            "name": "roomId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          },
+          {
+            "name": "athleteId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          }
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string"
+                  },
+                  "reportId": {
+                    "type": "integer"
                   }
                 },
                 "required": [
@@ -7113,6 +7262,178 @@
           },
           "403": {
             "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/rooms/{roomId}/remove": {
+      "post": {
+        "operationId": "removeFromMyRoom",
+        "summary": "The host of a private room removes a rider from it, by their seat, with a reason (#789): their socket is closed, they are refused a ticket for it from then on, and the removal is written to the moderation log. `not_found` for anybody but the room’s host.",
+        "parameters": [
+          {
+            "name": "roomId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          }
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "riderId": {
+                    "type": "integer"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "riderId",
+                  "reason"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "logId": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "logId"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "409": {
+            "$ref": "#/components/responses/moderation_not_applicable"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/rooms/{roomId}/reports": {
+      "post": {
+        "operationId": "reportInRoom",
+        "summary": "Report another rider from inside a room, by their seat, with one of a short fixed list of reasons (#789). Filed for the moderators with the room and its tick; never a screenshot, never a position. Counted against the same hourly allowance as any report.",
+        "parameters": [
+          {
+            "name": "roomId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          }
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "riderId": {
+                    "type": "integer"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "enum": [
+                      "display-name",
+                      "cheating",
+                      "other"
+                    ]
+                  }
+                },
+                "required": [
+                  "riderId",
+                  "reason"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
           },
           "404": {
             "$ref": "#/components/responses/not_found"

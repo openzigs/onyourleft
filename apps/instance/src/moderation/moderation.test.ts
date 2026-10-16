@@ -200,6 +200,9 @@ describe('reports (#83)', () => {
             targetAthleteId: bea.athleteId,
             reason: 'Spam',
             createdAt: seconds(w),
+            roomId: null,
+            roomTick: null,
+            flag: null,
           },
         ],
       });
@@ -240,6 +243,7 @@ describe('moderator actions, each written to the append-only log (#83)', () => {
         reportId,
         reason: 'Slur in the name',
         at: seconds(w),
+        roomId: null,
       },
     ]);
     expect((await w.as(anna, 'GET', `/v1/athletes/${bea.athleteId}`)).body).toEqual({
@@ -504,6 +508,48 @@ describe('moderator actions, each written to the append-only log (#83)', () => {
     expect(outcome.ok).toBe(true);
     expect(asked).toEqual(['getReport']);
     expect(await w.freshRead((store) => store.listOpenReports())).toEqual([]);
+  });
+
+  it('removes nobody who moderates from a room — as host or as moderator — and logs each attempt with the room (#789)', async () => {
+    const w = await start();
+    const anna = await w.rider('Anna');
+    const outcomes = await w.freshRead(async (store) => {
+      const moderation = createModeration({
+        store,
+        now: () => w.clock.ms,
+        moderators: { owner: w.owner.device.publicKey, deputy: w.deputy.device.publicKey },
+      });
+      return [
+        await moderation.removeFromRoom(anna.athleteId, 'host', 'room-1', w.owner.athleteId, {
+          reason: 'Rude',
+        }),
+        await moderation.removeFromRoom(
+          w.owner.athleteId,
+          'moderator',
+          'room-1',
+          w.deputy.athleteId,
+          {
+            reason: 'Rude',
+          },
+        ),
+      ];
+    });
+    expect(outcomes).toEqual([
+      { ok: false, code: 'moderation_not_applicable' },
+      { ok: false, code: 'moderation_not_applicable' },
+    ]);
+    expect(await w.freshRead((store) => store.isRemovedFromRoom('room-1', w.owner.athleteId))).toBe(
+      false,
+    );
+    expect(
+      (await w.freshRead((store) => store.listModerationLog())).map((entry) => [
+        entry.action,
+        entry.roomId,
+      ]),
+    ).toEqual([
+      ['refused_host_remove_from_room', 'room-1'],
+      ['refused_remove_from_room', 'room-1'],
+    ]);
   });
 
   it('refuses every moderator action to an ordinary rider, and logs nothing', async () => {

@@ -261,6 +261,9 @@ async function finishedJob(
   return { ...rider, jobId: (answer.body as { jobId: string }).jobId };
 }
 
+/** Who sits in a room's seat, by `roomId:riderId`, for the #789 probes below. */
+const SEATS = new Map<string, string>();
+
 const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
   lookAtSidePicture: async (world) =>
     send(world, 'POST', '/v1/camera/side-pose', (await signedIn(world)).token, {
@@ -591,6 +594,32 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
   },
   startRoom: async (world) =>
     send(world, 'POST', '/v1/rooms/room-1/start', (await signedIn(world)).token),
+  reportInRoom: async (world) => {
+    const { token } = await signedIn(world);
+    const room = await madeRoom(world, token);
+    SEATS.set(`${room.roomId}:1`, await anotherAthlete(world));
+    return send(world, 'POST', `/v1/rooms/${room.roomId}/reports`, token, {
+      riderId: 1,
+      reason: 'cheating',
+    });
+  },
+  removeFromMyRoom: async (world) => {
+    const { token } = await signedIn(world);
+    const room = await madeRoom(world, token);
+    SEATS.set(`${room.roomId}:1`, await anotherAthlete(world));
+    return send(world, 'POST', `/v1/rooms/${room.roomId}/remove`, token, {
+      riderId: 1,
+      reason: 'Abusive in the lobby',
+    });
+  },
+  removeFromRoom: async (world) =>
+    send(
+      world,
+      'POST',
+      `/v1/moderation/rooms/room-1/athletes/${await anotherAthlete(world)}/remove`,
+      await moderatorToken(world),
+      { reason: 'Cheating, from a flag' },
+    ),
   createRoom: async (world) =>
     send(world, 'POST', '/v1/rooms', (await signedIn(world)).token, roomBody()),
   joinRoom: async (world) => {
@@ -735,6 +764,12 @@ describe('every route answers with the shape its entry declares', () => {
       metrics: (authorization: string | null) =>
         Promise.resolve(authorization === null ? 'oyl_rooms{worker="0"} 0\n' : undefined),
       startRoom: () => Promise.resolve('started' as const),
+      // #789: the seats a room holds, as the happy calls above set them.
+      seatOf: (roomId: string, riderId: number) => {
+        const athleteId = SEATS.get(`${roomId}:${String(riderId)}`);
+        return Promise.resolve(athleteId === undefined ? undefined : { athleteId, tick: 42 });
+      },
+      removeFromRoom: () => Promise.resolve(true),
     };
     // The instance's own keys (#1189), over a store of their own, so
     // `/v1/instance/keys` answers its success.

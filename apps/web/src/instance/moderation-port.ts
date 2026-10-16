@@ -160,11 +160,16 @@ export interface PendingRegistration {
 /** One report in the moderators' queue. */
 export interface OpenReport {
   readonly reportId: number;
-  readonly reporterAthleteId: string;
+  /** `null` for a plausibility flag a room filed itself (#789). */
+  readonly reporterAthleteId: string | null;
   readonly targetAthleteId: string;
   readonly reason: string;
   /** Unix seconds. */
   readonly createdAt: number;
+  /** The room it came from, and the room's tick then (#789); absent from outside a room. */
+  readonly room?: { readonly roomId: string; readonly tick: number };
+  /** A flag's breached ceiling (#789). */
+  readonly flag?: { readonly durationSeconds: number; readonly ceilingWattsPerKilogram: number };
 }
 
 /** One line of the moderation log — read-only, oldest first as the instance keeps it. */
@@ -400,6 +405,16 @@ export interface ModerationPort {
     decision: string,
   ): Promise<ModerationOutcome>;
   /**
+   * Remove an athlete from a room, for its life (#789), deciding the report
+   * it came from when `reportId` is given.
+   */
+  removeFromRoom(
+    roomId: string,
+    athleteId: string,
+    reason: string,
+    reportId?: number,
+  ): Promise<ModerationOutcome>;
+  /**
    * Suspend an account, lift a suspension or hide a display name — for a
    * report when `reportId` is given, which the instance then closes. A
    * suspension and a hidden name need `statement` (#910): without one the
@@ -504,25 +519,66 @@ function registrationFrom(value: unknown): PendingRegistration | undefined {
   };
 }
 
+/** A room's id as the instance mints one (`rooms.ts`), or one an operator named. */
+const ROOM_ID = /^[A-Za-z0-9_-]{1,128}$/;
+
+/** A room and its tick, or a flag, as the queue sends them (#789): absent from an older instance. */
+function roomOf(row: Readonly<Record<string, unknown>>) {
+  const { roomId, roomTick } = row;
+  if (roomId === undefined || roomId === null) {
+    return roomTick === undefined || roomTick === null ? null : undefined;
+  }
+  if (typeof roomId !== 'string' || !ROOM_ID.test(roomId)) return undefined;
+  if (!(typeof roomTick === 'number' && Number.isSafeInteger(roomTick) && roomTick >= 0)) {
+    return undefined;
+  }
+  return { roomId, tick: roomTick };
+}
+
+function flagOf(value: unknown) {
+  if (value === undefined || value === null) return null;
+  const flag = record(value);
+  const duration = flag?.durationSeconds;
+  const ceiling = flag?.ceilingWattsPerKilogram;
+  if (
+    typeof duration !== 'number' ||
+    !Number.isSafeInteger(duration) ||
+    duration < 1 ||
+    typeof ceiling !== 'number' ||
+    !Number.isFinite(ceiling) ||
+    ceiling <= 0
+  ) {
+    return undefined;
+  }
+  return { durationSeconds: duration, ceilingWattsPerKilogram: ceiling };
+}
+
 function reportFrom(value: unknown): OpenReport | undefined {
   const row = record(value);
   const reason = text(row?.reason, MAXIMUM_MODERATION_REASON);
   if (
     row === undefined ||
     !isCount(row.reportId) ||
-    !isId(row.reporterAthleteId) ||
+    !(row.reporterAthleteId === null || isId(row.reporterAthleteId)) ||
     !isId(row.targetAthleteId) ||
     reason === undefined ||
     !isTime(row.createdAt)
   ) {
     return undefined;
   }
+  const room = roomOf(row);
+  const flag = flagOf(row.flag);
+  if (room === undefined || flag === undefined) return undefined;
+  // Nobody files a report but a rider or a room's flag.
+  if (row.reporterAthleteId === null && (flag === null || room === null)) return undefined;
   return {
     reportId: row.reportId,
     reporterAthleteId: row.reporterAthleteId,
     targetAthleteId: row.targetAthleteId,
     reason,
     createdAt: row.createdAt,
+    ...(room === null ? {} : { room }),
+    ...(flag === null ? {} : { flag }),
   };
 }
 
@@ -1065,6 +1121,19 @@ export function createModerationPort(dependencies: ModerationPortDependencies): 
         return { kind: 'refused', text: NOTHING_CHANGED_TEXT };
       }
       return send(`/v1/moderation/reports/${String(reportId)}/dismiss`, reason);
+    },
+
+    removeFromRoom: async (roomId, athleteId, reason, reportId) => {
+      const typed = athleteId.trim();
+      if (!ATHLETE_ID.test(typed)) {
+        return { kind: 'refused', text: MODERATION_REFUSAL_TEXT['athlete-id'] };
+      }
+      if (!ROOM_ID.test(roomId)) return { kind: 'refused', text: NOTHING_CHANGED_TEXT };
+      return send(
+        `/v1/moderation/rooms/${roomId}/athletes/${typed}/remove`,
+        reason,
+        reportId === undefined ? {} : { reportId },
+      );
     },
 
     actOnAccount: async (athleteId, action, reason, reportId, statement) => {

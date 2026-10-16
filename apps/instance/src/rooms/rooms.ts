@@ -171,6 +171,12 @@ export interface Rooms {
     client: ClientInfo,
   ): Promise<Outcome<JoinedRoom>>;
   route(caller: Caller, roomId: string): Promise<Outcome<RoomRoute>>;
+  /**
+   * Who the caller is to a room that is not over (#789): its `host` (the
+   * rider who made it), a `member` (who joined it by its code — or anybody,
+   * in a room an operator opened, which has no members list), or `undefined`.
+   */
+  standing(caller: Caller, roomId: string): Promise<'host' | 'member' | undefined>;
   results(caller: Caller, roomId: string): Promise<Outcome<PublishedResult>>;
   /** A room worker let `roomId` go at `phase` (`room/node/router.ts`). */
   roomLetGo(roomId: string, phase: RoomPhase): Promise<void>;
@@ -391,6 +397,15 @@ export function createRooms(options: RoomsOptions): Rooms {
           routeSha256: room.routeSha256,
         },
       };
+    },
+
+    async standing(caller, roomId) {
+      const made = await store.getPrivateRoom(roomId);
+      if (made === undefined) {
+        return (await store.getRoom(roomId)) === undefined ? undefined : 'member';
+      }
+      if ((await openRoomOf(caller, roomId)) === undefined) return undefined;
+      return (await store.getRoomCreator(roomId)) === caller.athleteId ? 'host' : 'member';
     },
 
     async route(caller, roomId) {

@@ -1308,6 +1308,9 @@ export function createIdentity(options: IdentityOptions): Identity {
         const held = await account(caller.athleteId);
         if (held === undefined || !held.publicRooms.eligible) return refuse('not_eligible');
       }
+      // #789: a rider the room's host or a moderator removed is not let back
+      // in — told what a room that does not exist tells them.
+      if (await store.isRemovedFromRoom(roomId, caller.athleteId)) return refuse('not_found');
       // #1347: a race names its riders to each other, by the ONE public
       // projection (#774) — a name a moderator hid is `Rider` already.
       const athlete = await store.getAthlete(caller.athleteId);
@@ -1318,6 +1321,14 @@ export function createIdentity(options: IdentityOptions): Identity {
           athleteId: caller.athleteId,
           declaredMassKilograms: declaredMass,
           displayName: publicAthlete(athlete).displayName,
+          // #789: a race names neither of two riders with a block between
+          // them, either way round, to the other.
+          blocks: [
+            ...new Set([
+              ...(await store.listBlocks(caller.athleteId)).map((each) => each.blockedAthleteId),
+              ...(await store.listBlockedBy(caller.athleteId)),
+            ]),
+          ],
         }),
       };
     },

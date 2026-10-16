@@ -197,6 +197,8 @@ const ACTION_LABEL: Readonly<Record<string, string>> = {
   hide_item: 'Hid an item',
   dismiss_report: 'Dismissed a report',
   dismiss_own_report: 'Dismissed a report about themselves, as the only moderator',
+  remove_from_room: 'Removed a rider from a room',
+  host_remove_from_room: 'A room’s host removed a rider from it',
   activate_moderator_key: 'A moderator’s key activated its own account',
   mint_invite: 'Made an invitation',
   uphold_appeal: 'Upheld a decision on appeal',
@@ -378,6 +380,26 @@ export function suspendConfirmation(athleteId: string): Confirmation {
   };
 }
 
+/** #789: what removing `athleteId` from a room is confirmed with. */
+export function removeFromRoomConfirmation(athleteId: string): Confirmation {
+  return {
+    title: `Remove account ${athleteId} from this room?`,
+    body:
+      'They are taken out of the room at once, and cannot come back into it for as long as it ' +
+      `lasts. ${LOGGED_SENTENCE}`,
+    confirmLabel: 'Remove them',
+  };
+}
+
+/** #789: where a report from a room came from, said beside it. */
+export function roomReportText(report: OpenReport): string | undefined {
+  if (report.room === undefined) return undefined;
+  const at = `In room ${report.room.roomId}, ${String(report.room.tick)} seconds into the ride.`;
+  return report.flag === undefined
+    ? at
+    : `${at} The room filed this itself: the rider went over its ${String(report.flag.ceilingWattsPerKilogram)} W/kg ceiling for ${String(report.flag.durationSeconds)} seconds.`;
+}
+
 /** #962: what hiding `athleteId`'s display name is confirmed with. */
 export function hideNameConfirmation(athleteId: string): Confirmation {
   return {
@@ -555,9 +577,17 @@ function Reports({
               <h3>Report {report.reportId}</h3>
               <p>
                 About account <code>{report.targetAthleteId}</code>
-                {isConflict(report, me) ? ' (you)' : ''}, from account{' '}
-                <code>{report.reporterAthleteId}</code>, made {when(report.createdAt)}.
+                {isConflict(report, me) ? ' (you)' : ''},{' '}
+                {report.reporterAthleteId === null ? (
+                  'filed by a room'
+                ) : (
+                  <>
+                    from account <code>{report.reporterAthleteId}</code>
+                  </>
+                )}
+                , made {when(report.createdAt)}.
               </p>
+              {roomReportText(report) === undefined ? null : <p>{roomReportText(report)}</p>}
               <p className="oyl-moderation__quoted">Their reason: {report.reason}</p>
               {isConflict(report, me) && soleModerator ? (
                 <>
@@ -588,6 +618,21 @@ function Reports({
                       label: 'Dismiss',
                       run: async (reason) => port.dismissReport(report.reportId, reason),
                     },
+                    ...(report.room === undefined
+                      ? []
+                      : [
+                          {
+                            label: 'Remove from the room',
+                            confirm: removeFromRoomConfirmation(report.targetAthleteId),
+                            run: async (reason: string) =>
+                              port.removeFromRoom(
+                                report.room?.roomId ?? '',
+                                report.targetAthleteId,
+                                reason,
+                                report.reportId,
+                              ),
+                          },
+                        ]),
                     {
                       label: 'Suspend the account',
                       confirm: suspendConfirmation(report.targetAthleteId),

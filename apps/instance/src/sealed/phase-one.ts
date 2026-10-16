@@ -105,6 +105,11 @@ export const PHASE_ONE_SEALED_ROUTES: readonly PhaseOneRoute[] = [
   only('POST', '/v1/moderation/registrations/{athleteId}/approve', 'Every other moderator action'),
   only('POST', '/v1/moderation/registrations/{athleteId}/refuse', 'Every other moderator action'),
   only('POST', '/v1/moderation/reports/{reportId}/dismiss', 'Every other moderator action'),
+  only(
+    'POST',
+    '/v1/moderation/rooms/{roomId}/athletes/{athleteId}/remove',
+    'Every other moderator action',
+  ),
   only('GET', '/v1/moderation/reports', 'Every moderator read'),
   only('GET', '/v1/moderation/registrations', 'Every moderator read'),
   only('GET', '/v1/moderation/suspended', 'Every moderator read'),
