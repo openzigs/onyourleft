@@ -230,6 +230,7 @@ not.
 - [scope-and-ip.md](docs/agents/scope-and-ip.md) §6: metric names, prior art, Garmin, `SCOPE001`
 - [workout-format.md](docs/agents/workout-format.md) §6: the workout file format
 - [conventions.md](docs/agents/conventions.md) §7: branches, ADRs and the next free number, spikes, protected paths
+- [filing-issues.md](docs/agents/filing-issues.md) §7: opening an issue: area, tier, epic link, the board
 - [adr-numbering.md](docs/agents/adr-numbering.md) §7: which ADR numbers were taken
 - [toolchain.md](docs/agents/toolchain.md) §8: toolchain pins, pnpm, install scripts, auto-pause
 - [web-bluetooth.md](docs/agents/web-bluetooth.md) §8: what Web Bluetooth cannot do

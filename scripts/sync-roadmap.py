@@ -20,7 +20,8 @@
 #   4. SETS Tier, Kind, Area, Progress % and Sub-issues done, only where the
 #      value differs. NEVER touches Status: GitHub's built-in workflows own it.
 #   5. With --status-update, posts a weekly status update unless one was posted
-#      in the last 6 days.
+#      in the last 6 days. It lists the open issues with no `area:` label and the
+#      Unranked ones (docs/agents/filing-issues.md), and every run prints their count.
 #
 # Writes are throttled to about one a second and capped below 400 a run (GitHub's
 # secondary limit is about 80 content-creating requests a minute and 500 an
@@ -205,6 +206,19 @@ def _issue_lines(issues):
     return lines or ["- none"]
 
 
+def label_gaps(issues):
+    """Open issues the board cannot place: (no `area:` label, Unranked), each by number.
+
+    docs/agents/filing-issues.md is what every issue should carry. An epic needs
+    its own `priority:` label; any other issue may take its Tier from its epic.
+    """
+    lookup = {i["number"]: i for i in issues}
+    open_issues = sorted((i for i in issues if i["state"] == "OPEN"), key=lambda i: i["number"])
+    no_area = [i for i in open_issues if area_of(i["labels"]) is None]
+    unranked = [i for i in open_issues if resolve_tier(i["number"], lookup) == UNRANKED]
+    return no_area, unranked
+
+
 def status_update_body(issues, now):
     """Written from the issues alone: what closed in the last 7 days, what is Now."""
     since = now - dt.timedelta(days=STATUS_UPDATE_WINDOW_DAYS)
@@ -229,7 +243,25 @@ def status_update_body(issues, now):
         + _issue_lines(closed)
         + ["", "**`priority: now` (%d)**" % len(current)]
         + _issue_lines(current)
+        + _gap_lines(issues)
     )
+
+
+def _gap_lines(issues):
+    """The label gaps, as a section only when there are any."""
+    no_area, unranked = label_gaps(issues)
+    lines = []
+    if no_area:
+        lines += ["", "**Needs an `area:` label (%d)**" % len(no_area)] + _issue_lines(no_area)
+    if unranked:
+        lines += ["", "**Unranked: no `priority:` label, own or its epic's (%d)**" % len(unranked)]
+        lines += _issue_lines(unranked)
+    return lines
+
+
+def gaps_line(issues):
+    no_area, unranked = label_gaps(issues)
+    return "labels: %d open without an area, %d unranked" % (len(no_area), len(unranked))
 
 
 def summary_line(counts):
@@ -626,10 +658,11 @@ def sync(client, org, project_number, status_update, now):
     counts["skipped"] += sum(1 for n in items if n not in issues)
 
     if status_update:
-        maybe_post_status_update(client, project_id, project["statusUpdates"]["nodes"], issues, now)
+        maybe_post_status_update(client, project_id, project["statusUpdates"]["nodes"], lookup, now)
 
     if deferred:
         print("write budget of %d reached: %d issues continue on the next run" % (MAX_MUTATIONS, deferred))
+    print(gaps_line(list(lookup.values())))
     print(summary_line(counts) + (" (dry run)" if client.dry_run else ""))
 
 

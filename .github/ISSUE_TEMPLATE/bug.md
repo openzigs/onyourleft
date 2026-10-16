@@ -5,6 +5,12 @@ labels: bug
 ---
 
 <!--
+For the maintainers, after it is opened (docs/agents/filing-issues.md): add one
+`area:` label, make it a sub-issue of its epic, and give it a `priority:` label
+only when it should not take its epic's tier. The roadmap board places it by these.
+-->
+
+<!--
 ⚠️ NOT for a security problem. Location data, cross-athlete exposure, a hostile
 GATT payload, a malformed activity file, or anything that lets somebody set
 resistance on a trainer somebody is pedalling — use GitHub's private
