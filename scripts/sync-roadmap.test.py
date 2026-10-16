@@ -149,14 +149,36 @@ class StatusUpdate(unittest.TestCase):
         issues = [
             issue(5, title="Closed this week", state="CLOSED", closed="2026-10-12T00:00:00Z"),
             issue(6, title="Closed last month", state="CLOSED", closed="2026-09-01T00:00:00Z"),
-            issue(7, ["priority: now"], title="Doing now"),
-            issue(8, ["priority: next"], title="Doing next"),
+            issue(7, ["priority: now", "area: racing"], title="Doing now"),
+            issue(8, ["priority: next", "area: racing"], title="Doing next"),
         ]
         body = sr.status_update_body(issues, NOW)
         self.assertIn("#5 Closed this week", body)
         self.assertNotIn("#6", body)
         self.assertIn("#7 Doing now", body)
         self.assertNotIn("#8", body)
+
+    def test_label_gaps(self):
+        issues = [
+            issue(1, ["epic", "priority: next", "area: racing"]),
+            issue(2, ["area: racing"], parent=1),
+            issue(3, ["priority: later"]),
+            issue(4, ["area: sync"]),
+            issue(5, [], state="CLOSED", closed="2026-10-12T00:00:00Z"),
+        ]
+        no_area, unranked = sr.label_gaps(issues)
+        self.assertEqual([i["number"] for i in no_area], [3])
+        self.assertEqual([i["number"] for i in unranked], [4])
+        body = sr.status_update_body(issues, NOW)
+        self.assertIn("Needs an `area:` label (1)", body)
+        self.assertIn("Unranked: no `priority:` label, own or its epic's (1)", body)
+        self.assertIn("labels: 1 open without an area, 1 unranked", sr.gaps_line(issues))
+
+    def test_no_gaps_no_section(self):
+        issues = [issue(1, ["priority: now", "area: racing"])]
+        self.assertEqual(sr.label_gaps(issues), ([], []))
+        self.assertNotIn("Needs", sr.status_update_body(issues, NOW))
+        self.assertNotIn("Unranked", sr.status_update_body(issues, NOW))
 
     def test_body_caps_the_list(self):
         issues = [issue(n, ["priority: now"]) for n in range(sr.STATUS_LIST_CAP + 3)]
