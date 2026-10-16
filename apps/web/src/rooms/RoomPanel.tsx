@@ -3,7 +3,9 @@
 /**
  * **Ride with others** — #784's private group ride and #785's private race,
  * on the game's route picker: make a room on one of your own routes and share
- * its code, or join one by the code a friend shared.
+ * its code, or join one by the code a friend shared — and #788's public
+ * rooms: list one you make for any adult rider on your instance, or join one
+ * from the listing (`PublicRooms.tsx`).
  *
  * ## What it asks for first
  *
@@ -42,11 +44,13 @@ import type {
   CreateRoomAnswer,
   EnteredRoom,
   JoinRoomAnswer,
+  PublicRoomsAnswer,
   RoomRidingPosition,
   RoomsPort,
   RoomsRefusal,
 } from '../net/rooms-port';
 import { hrefFor, routeById } from '../shell/routes';
+import { PUBLIC_ROOMS_TEXT, PublicRooms, publicRoomStartText } from './PublicRooms';
 import { ROOM_ROUTE_REFUSAL_TEXT, type RoomRouteRefusal } from './share';
 
 /** One of the rider's own routes, as the panel offers it for a room. */
@@ -82,6 +86,12 @@ export const ROOMS_REFUSAL_TEXT: Readonly<Record<RoomsRefusal, string>> = {
   'not-the-rooms-route':
     'The room’s route did not arrive as the room made it, so it was not used. Try joining again.',
   'instance-refused': 'The instance would not do that. Try again later.',
+  // #788.
+  'not-eligible':
+    'Your account cannot use public rooms yet: they are for adults whose account is ready for ' +
+    'them. The Instance screen says what is missing — confirming you are 18 or over, for one.',
+  'no-public-rooms':
+    'Your instance does not offer public rooms. Whether it does is its operator’s choice.',
   // #1210 (ADR 0047 D-14 Q6).
   'cannot-seal':
     'Rooms on your instance are reached only encrypted, and this device cannot do that right ' +
@@ -99,6 +109,32 @@ export const ROOM_DRAFTING_TEXT = {
   on: 'Drafting is on: riding close behind another rider takes less effort.',
   off: 'Drafting is off: every rider pushes the same air, whoever is in front.',
 } as const;
+
+/**
+ * #788: listing a room the rider makes — ⚠️ draft wording awaiting the
+ * owner's approval. A start no further ahead than the instance takes (twelve
+ * hours, `apps/instance` §`PUBLIC_ROOM_START_AHEAD_MS`).
+ */
+export const LIST_ROOM_TEXT = {
+  choice: 'List it as a public room',
+  choiceDetail: ' — for any adult rider on your instance to find and join; it has no code',
+  startsIn: 'Starts in',
+  tooMany:
+    'You have reached a limit on making rooms: three public rooms a day, ten rooms an hour, or five open at once. Wait, or close one, and try again.',
+  listed: (start: string): string =>
+    `It is listed on your instance as a public room, starting at ${start}. Any adult rider ` +
+    'there can join it.',
+} as const;
+
+/** When a listed room starts, from the moment it is made: minutes, and how each is said. */
+export const LIST_ROOM_STARTS: readonly { readonly minutes: number; readonly label: string }[] = [
+  { minutes: 15, label: '15 minutes' },
+  { minutes: 30, label: '30 minutes' },
+  { minutes: 60, label: 'an hour' },
+  { minutes: 120, label: '2 hours' },
+  { minutes: 240, label: '4 hours' },
+  { minutes: 480, label: '8 hours' },
+];
 
 /** What the rider is told when nothing answered. */
 export const ROOMS_UNREACHABLE_TEXT =
@@ -146,7 +182,9 @@ export interface RoomPanelProps {
 
 type Busy = 'making' | 'joining' | undefined;
 
-function refusalText(answer: CreateRoomAnswer | JoinRoomAnswer): string | undefined {
+function refusalText(
+  answer: CreateRoomAnswer | JoinRoomAnswer | PublicRoomsAnswer,
+): string | undefined {
   if (answer.kind === 'unreachable') return ROOMS_UNREACHABLE_TEXT;
   if (answer.kind !== 'refused') return undefined;
   const reason = answer.reason;
@@ -160,6 +198,9 @@ export function RoomPanel(props: RoomPanelProps): JSX.Element {
   const [kind, setKind] = useState<'group' | 'race'>('group');
   // #787: on by default, the maker's to turn off, and fixed for the room.
   const [drafting, setDrafting] = useState(true);
+  // #788: private unless the maker lists it, and then from when it starts.
+  const [listed, setListed] = useState(false);
+  const [startsIn, setStartsIn] = useState(30);
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState<Busy>(undefined);
   const [problem, setProblem] = useState<string | undefined>(undefined);
@@ -208,7 +249,7 @@ export function RoomPanel(props: RoomPanelProps): JSX.Element {
         <StatusMessage tone="info" label={ROOM_KIND_LABEL[entered.kind]} live>
           You are in a {entered.kind === 'race' ? 'race' : 'group ride'} on the room’s route.
           {entered.kind === 'race'
-            ? entered.code === undefined
+            ? entered.code === undefined && entered.listed?.madeHere !== true
               ? ' The race starts when the rider who made the room starts it.'
               : ' You start the race, from the ride, when your riders are on the line.'
             : ' Ride whenever you like; there is no leader and no result.'}{' '}
@@ -217,6 +258,9 @@ export function RoomPanel(props: RoomPanelProps): JSX.Element {
         {entered.kind === 'race' ? (
           <p data-oyl-kept-visible="">{RACE_WEIGHT_DISCLOSURE}</p>
         ) : undefined}
+        {entered.listed === undefined ? undefined : (
+          <p>{LIST_ROOM_TEXT.listed(publicRoomStartText(entered.listed.startsAt))}</p>
+        )}
         {entered.code === undefined ? undefined : (
           <p>
             Its code is <strong className="oyl-rooms__code">{entered.code}</strong>. Share it with
@@ -308,6 +352,7 @@ export function RoomPanel(props: RoomPanelProps): JSX.Element {
           {busy === 'joining' ? 'Joining…' : 'Join the room'}
         </Button>
       </form>
+      <PublicRooms rooms={rooms} onEnter={props.onEnter} refusalText={refusalText} />
       <div className="oyl-rooms__make">
         <h3>Make a room</h3>
         {chosen === undefined ? (
@@ -359,6 +404,35 @@ export function RoomPanel(props: RoomPanelProps): JSX.Element {
               {ROOM_DRAFTING_TEXT.choice}
               {ROOM_DRAFTING_TEXT.choiceDetail}
             </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={listed}
+                onChange={(event) => {
+                  setListed(event.target.checked);
+                }}
+              />
+              {LIST_ROOM_TEXT.choice}
+              {LIST_ROOM_TEXT.choiceDetail}
+            </label>
+            {listed ? <p data-oyl-kept-visible="">{PUBLIC_ROOMS_TEXT.sent}</p> : undefined}
+            {listed ? (
+              <label>
+                {LIST_ROOM_TEXT.startsIn}
+                <select
+                  value={startsIn}
+                  onChange={(event) => {
+                    setStartsIn(Number(event.target.value));
+                  }}
+                >
+                  {LIST_ROOM_STARTS.map((each) => (
+                    <option key={each.minutes} value={each.minutes}>
+                      {each.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : undefined}
             {kind === 'race' ? <p data-oyl-kept-visible="">{RACE_WEIGHT_DISCLOSURE}</p> : undefined}
             <Button
               variant="secondary"
@@ -367,12 +441,27 @@ export function RoomPanel(props: RoomPanelProps): JSX.Element {
                 if (busy !== undefined) return;
                 setBusy('making');
                 setProblem(undefined);
+                const startsAt = listed ? Math.floor(Date.now() / 1000) + startsIn * 60 : undefined;
                 void rooms
-                  .create({ kind, ridingPosition: props.position, drafting, route: chosen })
+                  .create({
+                    kind,
+                    ridingPosition: props.position,
+                    drafting,
+                    route: chosen,
+                    startsAt,
+                  })
                   .then((answer) => {
                     setBusy(undefined);
                     if (answer.kind === 'created') props.onEnter(answer.room);
-                    else setProblem(refusalText(answer));
+                    else if (
+                      startsAt !== undefined &&
+                      answer.kind === 'refused' &&
+                      answer.reason === 'rate-limited'
+                    ) {
+                      // #788: the server's limits on a create are three public a day, ten an hour
+                      // and five open, and it answers all three alike — so say all three.
+                      setProblem(LIST_ROOM_TEXT.tooMany);
+                    } else setProblem(refusalText(answer));
                   });
               }}
             >

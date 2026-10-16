@@ -10,7 +10,9 @@
  *
  * ADR 0047's amendment of 2026-10-16 (#1382) adds four routes merged in
  * plaintext after phase 2: the statements of reasons, their appeal, and the
- * two room routes a rider reports and a host removes by.
+ * two room routes a rider reports and a host removes by. Its second amendment
+ * of 2026-10-16 (#788) adds the public rooms' listing and joining, in the
+ * room routes' row.
  *
  * The COMMITTED list, as `phase-one.ts` is, and held to the route table the
  * same way: `sealed/phase-one.test.ts` compares the table with BOTH lists in
@@ -77,4 +79,8 @@ export const PHASE_TWO_SEALED_ROUTES: readonly PhaseOneRoute[] = [
   only('POST', '/v1/statements/{statementId}/appeal', STATEMENTS),
   only('POST', '/v1/rooms/{roomId}/reports', ROOM_MODERATION),
   only('POST', '/v1/rooms/{roomId}/remove', ROOM_MODERATION),
+  // #788, ADR 0047's second amendment of 2026-10-16: public rooms, sealed
+  // from the first, in the room routes' own row.
+  only('GET', '/v1/rooms/public', ROOMS),
+  only('POST', '/v1/rooms/{roomId}/join', ROOMS),
 ];

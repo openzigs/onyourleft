@@ -38,6 +38,8 @@ import { createRoomPort } from '../net/room-port';
 import { createRoomsPort } from '../net/rooms-port';
 import { routeDigest } from './share';
 import { ASK_FOR_RESULT_LABEL, RACE_LEFT_EARLY_TEXT, RACE_NOT_OVER_TEXT } from './RaceResult';
+import { PUBLIC_ROOMS_TEXT, publicRoomStartText } from './PublicRooms';
+import { LIST_ROOM_TEXT, ROOMS_REFUSAL_TEXT } from './RoomPanel';
 import { AppShell } from '../shell/AppShell';
 import type { CapabilityProbe } from '../support/bluetooth-support';
 import { mount, settle, submitForm, typeInto, type Mounted } from '../testing/mount';
@@ -646,5 +648,212 @@ describe('a private race — #785', () => {
     // The rider rides on alone, unrecorded as any game ride with no recording
     // is, and no saved ride is put away.
     expect(asked).toEqual([]);
+  });
+});
+
+describe('public rooms — #788', () => {
+  const STARTS_AT = 1_790_001_800;
+  const LISTED = {
+    roomId: 'room-pub',
+    kind: 'group',
+    startsAt: STARTS_AT,
+    lengthMetres: 2_500,
+    climbMetres: 24,
+  } as const;
+
+  const startsWithText = (prefix: string): HTMLButtonElement | undefined =>
+    [...document.querySelectorAll<HTMLButtonElement>('button')].find((each) =>
+      (each.textContent ?? '').replace(/\s+/g, ' ').trim().startsWith(prefix),
+    );
+
+  async function pressStartingWith(prefix: string): Promise<void> {
+    const found = startsWithText(prefix);
+    if (found === undefined) throw new Error(`no button starting “${prefix}”`);
+    await act(async () => {
+      found.click();
+      await Promise.resolve();
+    });
+    await settle();
+  }
+
+  async function check(labelStart: string): Promise<void> {
+    const box = [...document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')].find(
+      (each) => each.closest('label')?.textContent?.startsWith(labelStart) === true,
+    );
+    if (box === undefined) throw new Error(`no “${labelStart}” box`);
+    await act(async () => {
+      box.click();
+      await Promise.resolve();
+    });
+  }
+
+  it('says public rooms are for adults, lists them, joins one, rides it, and reports a rider in it in two presses', async () => {
+    const instance = new ScriptedInstance();
+    const { gpx, sha256 } = await roomRoute(2_500);
+    instance.list(LISTED, gpx, sha256);
+    const sockets = handPlayedSockets();
+    await shell(instance, sockets);
+    expect(document.body.textContent).toContain(PUBLIC_ROOMS_TEXT.adults);
+    // Nothing is asked of the instance until the rider asks to see them.
+    expect(instance.seen).toEqual([]);
+    await press(PUBLIC_ROOMS_TEXT.show);
+    const start = publicRoomStartText(STARTS_AT);
+    await untilSaid(`Group ride, starts ${start} — 2.5 km, 24 m of climbing, drafting`);
+    await pressStartingWith(`Join the group ride starting at ${start}`);
+    for (let i = 0; i < 50 && button('Ride in the room') === undefined; i += 1) await settle();
+    expect(document.body.textContent).toContain(LIST_ROOM_TEXT.listed(start));
+    expect(document.body.textContent).not.toContain('Its code is');
+    await press('Ride in the room');
+    await settle();
+    expect(instance.seen.map((each) => `${each.method} ${each.path}`)).toEqual([
+      'GET /v1/rooms/public',
+      'POST /v1/rooms/room-pub/join',
+      'GET /v1/rooms/room-pub/route',
+      'POST /v1/rooms/room-pub/ticket',
+    ]);
+    expect(sockets.urls).toEqual(['wss://ride.example/v1/rooms/room-pub/socket']);
+
+    // #789's Report, in the public room: *Follow*, then two presses.
+    const rider = (riderId: number, decimetres: number) => ({
+      riderId,
+      decimetres,
+      centimetresPerSecond: 900,
+      draftPercent: 0,
+      flags: 0,
+    });
+    await sockets.say({
+      type: 'welcome',
+      riderId: 0,
+      routeRef: { sha256 },
+      roomConfig: {
+        kind: 'ride',
+        ridingPosition: 'hoods',
+        reportIntervalMs: 500,
+        frameIntervalMs: 1000,
+        drafting: 'on',
+      },
+    });
+    for (let tick = 1; tick <= 3; tick += 1) {
+      await sockets.say({
+        type: 'frame',
+        tick,
+        riders: [rider(0, tick * 10), rider(4, 40 + tick * 10)],
+      });
+      await frame(2);
+    }
+    await press('Follow the next rider near you');
+    await frame(2);
+    await pressStartingWith('Report');
+    await pressStartingWith('Cheating');
+    await settle();
+    expect(instance.seen.at(-1)).toMatchObject({
+      method: 'POST',
+      path: '/v1/rooms/room-pub/reports',
+      body: { riderId: 4, reason: 'cheating' },
+    });
+  });
+
+  it('says why the listing is refused: an account not eligible, and an instance offering none', async () => {
+    const instance = new ScriptedInstance();
+    instance.listing = { status: 403, body: { error: { code: 'not_eligible' } } };
+    await shell(instance, handPlayedSockets());
+    await press(PUBLIC_ROOMS_TEXT.show);
+    await untilSaid(ROOMS_REFUSAL_TEXT['not-eligible']);
+    instance.listing = { status: 404, body: { error: { code: 'not_found' } } };
+    await press(PUBLIC_ROOMS_TEXT.again);
+    await untilSaid(ROOMS_REFUSAL_TEXT['no-public-rooms']);
+    instance.listing = { status: 200, body: { rooms: [] } };
+    await press(PUBLIC_ROOMS_TEXT.again);
+    await untilSaid(PUBLIC_ROOMS_TEXT.none);
+
+    // Two rooms, shown in the instance's order and no other — a race that
+    // starts later than a group ride stays after it, whatever its kind.
+    const later = { ...LISTED, roomId: 'room-later', kind: 'race', startsAt: STARTS_AT + 3_600 };
+    instance.listing = {
+      status: 200,
+      body: {
+        rooms: [LISTED, later].map((each) => ({
+          ridingPosition: 'hoods',
+          drafting: true,
+          loop: false,
+          ...each,
+        })),
+      },
+    };
+    await press(PUBLIC_ROOMS_TEXT.again);
+    await untilSaid('Race, starts');
+    expect(
+      [...document.querySelectorAll('.oyl-rooms__listing li')].map(
+        (each) => (each.textContent ?? '').split(',')[0],
+      ),
+    ).toEqual(['Group ride', 'Race']);
+  });
+
+  it('makes a listed room: its start sent, no code shown, and its maker offered the start of its race', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1_790_000_000_000);
+    const instance = new ScriptedInstance();
+    instance.created = { status: 200, body: { roomId: 'room-pub', routeSha256: 'x' } };
+    const sockets = handPlayedSockets();
+    await shell(instance, sockets);
+    const race = [...document.querySelectorAll<HTMLInputElement>('input[type="radio"]')].find(
+      (each) => each.closest('label')?.textContent?.startsWith('Race') === true,
+    );
+    await act(async () => {
+      race?.click();
+      await Promise.resolve();
+    });
+    await check(LIST_ROOM_TEXT.choice);
+    // What listing it sends, said before it is made.
+    expect(document.body.textContent).toContain(PUBLIC_ROOMS_TEXT.sent);
+    const select = [...document.querySelectorAll<HTMLSelectElement>('select')].find(
+      (each) => each.closest('label')?.textContent?.startsWith(LIST_ROOM_TEXT.startsIn) === true,
+    );
+    if (select === undefined) throw new Error('no start choice');
+    await act(async () => {
+      select.value = '60';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      await Promise.resolve();
+    });
+    await press('Make a room');
+    const startsAt = 1_790_000_000 + 60 * 60;
+    await untilSaid(LIST_ROOM_TEXT.listed(publicRoomStartText(startsAt)));
+    expect(document.body.textContent).not.toContain('Its code is');
+    const sent = instance.seen.find((each) => each.path === '/v1/rooms')?.body as {
+      visibility: string;
+      startsAt: number;
+      gpx: string;
+    };
+    expect(sent.visibility).toBe('public');
+    expect(sent.startsAt).toBe(startsAt);
+    await press('Ride in the room');
+    await settle();
+    await sockets.say({
+      type: 'welcome',
+      riderId: 1,
+      routeRef: { sha256: await routeDigest(sent.gpx) },
+      roomConfig: {
+        kind: 'race',
+        ridingPosition: 'hoods',
+        reportIntervalMs: 500,
+        frameIntervalMs: 1000,
+        drafting: 'on',
+      },
+    });
+    await frame(2);
+    // Its maker starts it, as the maker of a room shared by its code does.
+    expect(button('Start the race')).toBeDefined();
+  });
+
+  it('names every limit a create can meet when a listed room is refused for one', async () => {
+    const instance = new ScriptedInstance();
+    instance.created = { status: 429, body: { error: { code: 'rate_limited' } } };
+    await shell(instance, handPlayedSockets());
+    await check(LIST_ROOM_TEXT.choice);
+    await press('Make a room');
+    await untilSaid(LIST_ROOM_TEXT.tooMany);
+    // The server answers three limits alike, so the text may not name only one.
+    expect(LIST_ROOM_TEXT.tooMany).toMatch(
+      /three public rooms a day.*ten rooms an hour.*five open/,
+    );
   });
 });

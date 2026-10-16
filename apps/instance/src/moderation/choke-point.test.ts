@@ -110,6 +110,14 @@ const EXEMPT: Readonly<
     heldElsewhere:
       'names a room by its code, never an athlete; a room’s members are whoever holds its code (ADR 0028 D-6.3), and blocking inside a room is #789’s',
   },
+  listPublicRooms: {
+    heldElsewhere:
+      'names no athlete in its answer; an eligible caller is listed no room holding anybody they block or who blocks them, either way round (#788, rooms/public-rooms.test.ts)',
+  },
+  joinPublicRoom: {
+    heldElsewhere:
+      'names a room, never an athlete; a room holding anybody the caller blocks or who blocks them is `not_found`, and the ticket asks again (#788, rooms/public-rooms.test.ts)',
+  },
   getRoomRoute: {
     heldElsewhere:
       'the creator’s route, relayed to the members of their own room (#784); it names no athlete',
@@ -217,6 +225,8 @@ const NOT_AN_ATHLETE_FIELD: Readonly<Record<string, string>> = {
   lengthMetres: 'a room’s route length',
   grades: 'a room’s route gradients',
   gpx: 'the creator’s own route for a room',
+  visibility: 'whether a room a rider makes is private or public (#788)',
+  startsAt: 'when a public room’s creator says it starts (#788)',
   code: 'a room’s code; its members are whoever holds it (ADR 0028 D-6.3)',
   riderId:
     'a SEAT in a room the caller is in (#789); the room itself says who sits there, and the report or removal goes through the moderators’ log',

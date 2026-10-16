@@ -1307,6 +1307,10 @@ export function createIdentity(options: IdentityOptions): Identity {
       if (room.visibility === 'public') {
         const held = await account(caller.athleteId);
         if (held === undefined || !held.publicRooms.eligible) return refuse('not_eligible');
+        // #788: never two riders with a block between them, either way round,
+        // in one public room — a block made since they joined it included.
+        if (await store.hasBlockWithRoomMember(roomId, caller.athleteId))
+          return refuse('not_found');
       }
       // #789: a rider the room's host or a moderator removed is not let back
       // in — told what a room that does not exist tells them.

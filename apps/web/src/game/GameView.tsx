@@ -1364,10 +1364,11 @@ export function GameView(props: GameViewProps): JSX.Element {
           : props.roomId;
       roomIdRef.current = roomId;
       // The panel's room carries its code for the rider who made it, and only
-      // for them (`net/rooms-port.ts` §`EnteredRoom.code`).
+      // for them (`net/rooms-port.ts` §`EnteredRoom.code`) — or, for a public
+      // room, which has no code, says that this device made it (#788).
       madeTheRoomRef.current =
         entered !== undefined && entered.roomId === roomId
-          ? entered.code !== undefined
+          ? entered.code !== undefined || entered.listed?.madeHere === true
           : props.madeTheRoom === true;
       if (props.room !== undefined && roomId !== undefined && port !== undefined) {
         const sensorsNow = port;

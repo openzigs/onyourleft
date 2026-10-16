@@ -7145,7 +7145,7 @@
     "/v1/rooms": {
       "post": {
         "operationId": "createRoom",
-        "summary": "Make a PRIVATE room — a group ride or a race — on the caller’s own route, and get its code (#784). The route is the creator’s own GPX, relayed to the members for the room’s lifetime and deleted once it is over. No field makes a room public.",
+        "summary": "Make a room — a group ride or a race — on the caller’s own route (#784). PRIVATE unless `visibility` is `public`: a private room answers its code, to share; a public one (#788) has a `startsAt` within the next 12 hours, no code, and is listed for eligible athletes — only where the operator turned public rooms on, by an eligible athlete, at most 3 a day. The route is the creator’s own GPX, relayed to the members for the room’s lifetime and deleted once it is over.",
         "security": [
           {
             "session": []
@@ -7194,6 +7194,16 @@
                   },
                   "gpx": {
                     "type": "string"
+                  },
+                  "visibility": {
+                    "type": "string",
+                    "enum": [
+                      "private",
+                      "public"
+                    ]
+                  },
+                  "startsAt": {
+                    "type": "integer"
                   }
                 },
                 "required": [
@@ -7229,7 +7239,6 @@
                   },
                   "required": [
                     "roomId",
-                    "code",
                     "routeSha256"
                   ],
                   "additionalProperties": false
@@ -7244,7 +7253,14 @@
             "$ref": "#/components/responses/unauthenticated"
           },
           "403": {
-            "$ref": "#/components/responses/sealed_required"
+            "description": "One of `sealed_required`, `not_eligible`, in the one error shape.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           },
           "404": {
             "$ref": "#/components/responses/not_found"
@@ -7350,6 +7366,223 @@
           },
           "403": {
             "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/rooms/public": {
+      "get": {
+        "operationId": "listPublicRooms",
+        "summary": "The open public rooms (#788), for an eligible athlete only — `not_eligible` otherwise, and `not_found` where the operator has not turned public rooms on. Ordered by the start each creator gave, then when it was made, then its id, and by nothing else: nothing is featured, recommended or pinned (ADR 0028 D-7.1). Each says its course’s length and climb, never its route.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "rooms": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "roomId": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "group",
+                              "race"
+                            ]
+                          },
+                          "ridingPosition": {
+                            "type": "string",
+                            "enum": [
+                              "upright",
+                              "hoods",
+                              "drops"
+                            ]
+                          },
+                          "drafting": {
+                            "type": "boolean"
+                          },
+                          "loop": {
+                            "type": "boolean"
+                          },
+                          "startsAt": {
+                            "type": "integer"
+                          },
+                          "lengthMetres": {
+                            "type": "number"
+                          },
+                          "climbMetres": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "roomId",
+                          "kind",
+                          "ridingPosition",
+                          "drafting",
+                          "loop",
+                          "startsAt",
+                          "lengthMetres",
+                          "climbMetres"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "rooms"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "description": "One of `sealed_required`, `not_eligible`, in the one error shape.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/rooms/{roomId}/join": {
+      "post": {
+        "operationId": "joinPublicRoom",
+        "summary": "Join a public room from the listing (#788), for an eligible athlete only — `not_eligible` otherwise, `not_found` where the operator has not turned public rooms on, and `not_found` for a room that is not an open public one, a race that has started, a hidden room, or one holding anybody the caller blocks or who blocks them.",
+        "parameters": [
+          {
+            "name": "roomId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          }
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "roomId": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "group",
+                        "race"
+                      ]
+                    },
+                    "ridingPosition": {
+                      "type": "string",
+                      "enum": [
+                        "upright",
+                        "hoods",
+                        "drops"
+                      ]
+                    },
+                    "drafting": {
+                      "type": "boolean"
+                    },
+                    "loop": {
+                      "type": "boolean"
+                    },
+                    "routeSha256": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "roomId",
+                    "kind",
+                    "ridingPosition",
+                    "drafting",
+                    "loop",
+                    "routeSha256"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "description": "One of `sealed_required`, `not_eligible`, in the one error shape.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           },
           "404": {
             "$ref": "#/components/responses/not_found"

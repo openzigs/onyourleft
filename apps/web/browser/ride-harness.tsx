@@ -565,6 +565,8 @@ const RACE_PORTS =
         rooms: {
           create: () => Promise.resolve({ kind: 'unreachable' as const }),
           join: () => Promise.resolve({ kind: 'unreachable' as const }),
+          listPublic: () => Promise.resolve({ kind: 'unreachable' as const }),
+          joinPublic: () => Promise.resolve({ kind: 'unreachable' as const }),
           start: () => Promise.resolve({ kind: 'started' as const }),
           results: () => Promise.resolve({ kind: 'unreachable' as const }),
         },

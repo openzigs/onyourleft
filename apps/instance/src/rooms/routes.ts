@@ -89,7 +89,7 @@ export const ROOM_ROUTES: readonly Route[] = [
     operationId: 'createRoom',
     reaches: 'own',
     summary:
-      'Make a PRIVATE room — a group ride or a race — on the caller’s own route, and get its code (#784). The route is the creator’s own GPX, relayed to the members for the room’s lifetime and deleted once it is over. No field makes a room public.',
+      'Make a room — a group ride or a race — on the caller’s own route (#784). PRIVATE unless `visibility` is `public`: a private room answers its code, to share; a public one (#788) has a `startsAt` within the next 12 hours, no code, and is listed for eligible athletes — only where the operator turned public rooms on, by an eligible athlete, at most 3 a day. The route is the creator’s own GPX, relayed to the members for the room’s lifetime and deleted once it is over.',
     identity: true,
     rooms: true,
     auth: 'session',
@@ -104,13 +104,18 @@ export const ROOM_ROUTES: readonly Route[] = [
         lengthMetres: number,
         grades: { type: 'array', items: { type: 'array', items: number } },
         gpx: string,
+        visibility: { type: 'string', enum: ['private', 'public'] },
+        startsAt: { type: 'integer' },
       },
       ['kind', 'ridingPosition', 'loop', 'lengthMetres', 'grades', 'gpx'],
     ),
-    errors: ['unauthenticated', 'validation_failed', 'rate_limited'],
+    errors: ['unauthenticated', 'validation_failed', 'not_eligible', 'rate_limited'],
     response: {
       contentType: 'application/json',
-      schema: object({ roomId: string, code: string, routeSha256: string }),
+      schema: object({ roomId: string, code: string, routeSha256: string }, [
+        'roomId',
+        'routeSha256',
+      ]),
     },
     handle: async (context) =>
       answer(await roomsOf(context).create(callerOf(context), context.json)),
@@ -142,6 +147,70 @@ export const ROOM_ROUTES: readonly Route[] = [
     },
     handle: async (context) =>
       answer(await roomsOf(context).join(callerOf(context), context.json, context.client)),
+  },
+  {
+    method: 'GET',
+    path: '/v1/rooms/public',
+    sealed: 'only',
+    operationId: 'listPublicRooms',
+    reaches: {
+      exempt:
+        'lists rooms riders made public, naming no athlete; a room holding anybody the caller blocks, or who blocks them, is left out (#788)',
+    },
+    summary:
+      'The open public rooms (#788), for an eligible athlete only — `not_eligible` otherwise, and `not_found` where the operator has not turned public rooms on. Ordered by the start each creator gave, then when it was made, then its id, and by nothing else: nothing is featured, recommended or pinned (ADR 0028 D-7.1). Each says its course’s length and climb, never its route.',
+    identity: true,
+    rooms: true,
+    auth: 'session',
+    errors: ['unauthenticated', 'not_found', 'not_eligible'],
+    response: {
+      contentType: 'application/json',
+      schema: object({
+        rooms: {
+          type: 'array',
+          items: object({
+            roomId: string,
+            kind,
+            ridingPosition: position,
+            drafting: { type: 'boolean' },
+            loop: { type: 'boolean' },
+            startsAt: { type: 'integer' },
+            lengthMetres: number,
+            climbMetres: number,
+          }),
+        },
+      }),
+    },
+    handle: async (context) => answer(await roomsOf(context).listPublic(callerOf(context))),
+  },
+  {
+    method: 'POST',
+    path: '/v1/rooms/{roomId}/join',
+    sealed: 'only',
+    operationId: 'joinPublicRoom',
+    reaches: {
+      exempt:
+        'joins a public room an eligible athlete was listed, by its id; refused as `not_found` where anybody in it blocks the caller or is blocked by them (#788)',
+    },
+    summary:
+      'Join a public room from the listing (#788), for an eligible athlete only — `not_eligible` otherwise, `not_found` where the operator has not turned public rooms on, and `not_found` for a room that is not an open public one, a race that has started, a hidden room, or one holding anybody the caller blocks or who blocks them.',
+    identity: true,
+    rooms: true,
+    auth: 'session',
+    errors: ['unauthenticated', 'not_found', 'not_eligible'],
+    response: {
+      contentType: 'application/json',
+      schema: object({
+        roomId: string,
+        kind,
+        ridingPosition: position,
+        drafting: { type: 'boolean' },
+        loop: { type: 'boolean' },
+        routeSha256: string,
+      }),
+    },
+    handle: async (context) =>
+      answer(await roomsOf(context).joinPublic(callerOf(context), context.params.roomId ?? '')),
   },
   {
     method: 'GET',

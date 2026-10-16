@@ -26,6 +26,8 @@ afterEach(() => {
 const ROOMS: RoomsPort = {
   create: () => Promise.resolve({ kind: 'unreachable' }),
   join: () => Promise.resolve({ kind: 'refused', reason: 'no-such-room' }),
+  listPublic: () => Promise.resolve({ kind: 'refused', reason: 'no-public-rooms' }),
+  joinPublic: () => Promise.resolve({ kind: 'refused', reason: 'no-such-room' }),
   start: () => Promise.resolve({ kind: 'started' }),
   results: () => Promise.resolve({ kind: 'result', rows: [] }),
 };

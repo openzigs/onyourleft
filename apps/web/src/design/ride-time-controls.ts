@@ -88,6 +88,11 @@ export const RIDE_TIME_CONTROLS: readonly RideTimeControl[] = [
   // #785: a private race waiting on its line — the rider who made it starts it.
   { surface: 'game-hud', name: 'Start the race', match: 'exact' },
   { surface: 'game-hud', name: 'Mute sounds', match: 'exact' },
+  // #788: *Report* on the HUD in a room — #789's control, pressed at the bars
+  // to report the rider followed. A PREFIX: it is named for them ("Report Bea").
+  // Its three reasons are not on the list: on a phone on its side they share
+  // one row at the row's own height (`theme.css` §"#789").
+  { surface: 'game-hud', name: 'Report ', match: 'prefix' },
   // #1244: *Keep the plan* in the game too, while an accepted re-plan waits,
   // so a rider does not leave the game to refuse a change.
   { surface: 'game-hud', name: 'Keep the plan', match: 'exact' },
