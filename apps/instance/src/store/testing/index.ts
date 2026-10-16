@@ -489,6 +489,17 @@ export async function seedStatements(store: SqlStore): Promise<void> {
       },
     });
   }
+  // Migration 0028's (#911): each athlete appeals the statement about them.
+  for (const athlete of ATHLETES) {
+    const [statement] = await store.listStatements(athlete);
+    if (statement === undefined) throw new Error(`no statement about ${athlete}`);
+    await store.putAppeal({
+      statementLogId: statement.logId,
+      appellantAthleteId: athlete,
+      grounds: `Appeal by ${athlete}`,
+      filedAt: 1_790_000_900,
+    });
+  }
 }
 
 /** The SHA-256 of the token confirming a fixture athlete's address (#865). */

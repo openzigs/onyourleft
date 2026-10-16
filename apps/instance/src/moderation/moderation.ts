@@ -65,8 +65,9 @@ import type {
   SqlStore,
   Statement,
   StatementFields,
+  Appeal,
 } from '../store/sql-store.ts';
-import { readStatementFields, RESTRICTIONS } from './statements.ts';
+import { readAppealGrounds, readStatementFields, RESTRICTIONS } from './statements.ts';
 import { readNoticeForm, type NoticeProblem, type NoticeValues } from './notices.ts';
 
 /** The two moderator roles (ruling Q13). */
@@ -149,6 +150,32 @@ export interface Moderation {
   notices(): Promise<readonly Notice[]>;
   /** The statements of reasons about this athlete, newest first (#910): their own, and nobody else's. */
   statements(athleteId: string): Promise<readonly Statement[]>;
+  /** The appeals this athlete filed (#911). */
+  appeals(athleteId: string): Promise<readonly Appeal[]>;
+  /**
+   * Appeal the statement `statementId` (#911): only one about the caller,
+   * once. A statement that is somebody else's is `not_found`, as one that does
+   * not exist is.
+   */
+  appeal(
+    athleteId: string,
+    statementId: string,
+    grounds: unknown,
+  ): Promise<ModerationResult<{ appealId: number }>>;
+  /** The moderators' queue of appeals, oldest first, each with the statement it appeals (#911). */
+  openAppeals(): Promise<readonly OpenAppeal[]>;
+  /**
+   * Decide an appeal (#911): `upheld` leaves the restriction, `reversed` lifts
+   * it, in one transaction with the log entry. A moderator who took the
+   * decision appealed decides it all the same — the owner's ruling of
+   * 2026-09-30 — and the conflict is declared to the rider and recorded.
+   */
+  decideAppeal(
+    moderatorId: string,
+    appealId: string,
+    outcome: unknown,
+    decision: unknown,
+  ): Promise<ModerationResult<{ logId: number; moderatorConflict: boolean }>>;
   /** The approval queue (#775): every athlete awaiting a moderator's decision. */
   pendingRegistrations(): Promise<readonly AthleteRecord[]>;
   /**
@@ -178,6 +205,12 @@ export interface Moderation {
     reportId: string,
     reason: unknown,
   ): Promise<ModerationResult<{ logId: number }>>;
+}
+
+/** An open appeal, with what it appeals (#911). */
+export interface OpenAppeal {
+  readonly appeal: Appeal;
+  readonly statement: Statement;
 }
 
 export interface ModerationOptions {
@@ -474,6 +507,64 @@ export function createModeration(options: ModerationOptions): Moderation {
     },
 
     statements: (athleteId) => store.listStatements(athleteId),
+
+    appeals: (athleteId) => store.listAppeals(athleteId),
+
+    async appeal(athleteId, statementId, grounds) {
+      if (!/^[1-9][0-9]{0,15}$/.test(statementId)) return refuse('not_found');
+      const checked = readAppealGrounds(grounds);
+      if (!checked.ok) {
+        return refuse('validation_failed', [{ field: 'grounds', problem: checked.problem }]);
+      }
+      const filed = await store.putAppeal({
+        statementLogId: Number(statementId),
+        appellantAthleteId: athleteId,
+        grounds: checked.grounds,
+        filedAt: seconds(),
+      });
+      if (filed.outcome === 'filed') return { ok: true, value: { appealId: filed.appealId } };
+      return refuse(filed.outcome === 'not_found' ? 'not_found' : 'already_appealed');
+    },
+
+    async openAppeals() {
+      const open = await store.listOpenAppeals();
+      const result: OpenAppeal[] = [];
+      for (const appeal of open) {
+        const statement = (await store.listStatements(appeal.appellantAthleteId)).find(
+          (each) => each.logId === appeal.statementLogId,
+        );
+        if (statement !== undefined) result.push({ appeal, statement });
+      }
+      return result;
+    },
+
+    async decideAppeal(moderatorId, appealId, outcome, decision) {
+      if (!/^[1-9][0-9]{0,15}$/.test(appealId)) return refuse('not_found');
+      if (outcome !== 'upheld' && outcome !== 'reversed') {
+        return refuse('validation_failed', [
+          { field: 'outcome', problem: 'must be upheld or reversed' },
+        ]);
+      }
+      // The decision is what the rider reads, so it is held to the appeal's rules.
+      const checked = readAppealGrounds(decision);
+      if (!checked.ok) {
+        return refuse('validation_failed', [{ field: 'decision', problem: checked.problem }]);
+      }
+      const decided = await store.decideAppeal({
+        appealId: Number(appealId),
+        actorAthleteId: moderatorId,
+        outcome,
+        decision: checked.grounds,
+        at: seconds(),
+      });
+      if (decided.outcome === 'applied') {
+        return {
+          ok: true,
+          value: { logId: decided.logId, moderatorConflict: decided.moderatorConflict },
+        };
+      }
+      return refuse(decided.outcome === 'not_found' ? 'not_found' : 'moderation_not_applicable');
+    },
 
     async dismiss(moderatorId, reportId, reason) {
       const checked = checkReason(reason);

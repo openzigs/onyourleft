@@ -75,7 +75,9 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         statement of reasons (migration 0027, append-only,
                         `moderation/statements.ts`), and `GET
                         /v1/statements` is the THIRD route a way-out
-                        session reaches. Behind a
+                        session reaches; since #911 an appeal against a
+                        statement (migration 0028, decided once) is the
+                        FOURTH. Behind a
                         proxy the sign-in rate limits read the client's
                         address from `OYL_INSTANCE_CLIENT_ADDRESS_HEADER`
                         (`cf-connecting-ip` behind the tunnel), and only

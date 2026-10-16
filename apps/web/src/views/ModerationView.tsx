@@ -22,6 +22,7 @@ import {
   type OpenReport,
   type PendingRegistration,
   type ReceivedNotice,
+  type OpenAppeal,
   type StatementInput,
   type SuspendedAccount,
   MAXIMUM_STATEMENT_FACTS,
@@ -123,6 +124,34 @@ export const SUSPENDED_UNREADABLE_TEXT =
   'The suspended accounts could not be read from the instance, so they are not shown here. You ' +
   'can still lift a suspension by the account’s id, below.';
 
+/** Said in place of the appeals when the instance gave the queues and not them (#911). */
+export const APPEALS_UNREADABLE_TEXT =
+  'The appeals could not be read from the instance, so they are not shown here. The queues ' +
+  'above are as the instance gave them.';
+
+/**
+ * The Appeals section's one short line (#911, #1013). ⚠️ No ⓘ: each appeal
+ * is read before it is decided, so its controls follow its words, and a
+ * section that tucks its explanation is held to 130 px of prose above its
+ * first control (`controls-first.browser.spec.ts`).
+ */
+export const APPEALS_SHORT_TEXT =
+  'Reverse lifts the restriction at once. Your answer is shown to the rider and logged.';
+
+/**
+ * Said on an appeal against the moderator's own decision (#911): the owner's
+ * ruling of 2026-09-30 — decide it, declare it, log it.
+ */
+export const APPEAL_CONFLICT_TEXT =
+  'You took this decision. You may decide the appeal, and the rider is told that you had a ' +
+  'conflict of interest; it is logged with your decision.';
+
+/** What each restriction is called on an appeal. */
+const APPEALED: Readonly<Record<string, string>> = {
+  suspend: 'a suspension',
+  hide_display_name: 'a hidden display name',
+};
+
 /** Said in place of the notices when the instance gave the queues and not them (#907). */
 export const NOTICES_UNREADABLE_TEXT =
   'The notices could not be read from the instance, so they are not shown here. The queues ' +
@@ -160,6 +189,8 @@ const ACTION_LABEL: Readonly<Record<string, string>> = {
   dismiss_report: 'Dismissed a report',
   activate_moderator_key: 'A moderator’s key activated its own account',
   mint_invite: 'Made an invitation',
+  uphold_appeal: 'Upheld a decision on appeal',
+  reverse_appeal: 'Reversed a decision on appeal',
 };
 
 /** A logged action as a phrase — an unknown one as the instance's own word. */
@@ -558,6 +589,66 @@ function Reports({
                   ]}
                 />
               )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function Appeals({
+  port,
+  me,
+  appeals,
+  onDone,
+}: {
+  readonly port: ModerationPort;
+  readonly me: string;
+  readonly appeals: readonly OpenAppeal[] | undefined;
+  readonly onDone: Done;
+}): JSX.Element {
+  return (
+    <section className="oyl-panel" aria-labelledby="oyl-moderation-appeals">
+      <h2 id="oyl-moderation-appeals">Appeals</h2>
+      <p>{APPEALS_SHORT_TEXT}</p>
+      {appeals === undefined ? (
+        <StatusMessage tone="warning" label="Not shown">
+          {APPEALS_UNREADABLE_TEXT}
+        </StatusMessage>
+      ) : appeals.length === 0 ? (
+        <p className="oyl-muted">No appeal is open.</p>
+      ) : (
+        <ul className="oyl-moderation__list oyl-moderation__appeals">
+          {appeals.map((appeal) => (
+            <li key={appeal.appealId}>
+              <h3>Appeal {appeal.appealId}</h3>
+              <p>
+                Against {APPEALED[appeal.restriction] ?? appeal.restriction} on account{' '}
+                <code>{appeal.appellantAthleteId}</code>, made {when(appeal.filedAt)}.
+              </p>
+              <p className="oyl-moderation__quoted">The statement said: {appeal.facts}</p>
+              <p className="oyl-moderation__quoted">Their grounds: {appeal.grounds}</p>
+              {appeal.decidedBy === me ? (
+                <StatusMessage tone="warning" label="A conflict">
+                  {APPEAL_CONFLICT_TEXT}
+                </StatusMessage>
+              ) : null}
+              <Decide
+                label={`Your answer to the rider, for appeal ${String(appeal.appealId)}`}
+                onDone={onDone}
+                choices={[
+                  {
+                    label: 'Uphold',
+                    run: async (decision) => port.decideAppeal(appeal.appealId, 'upheld', decision),
+                  },
+                  {
+                    label: 'Reverse',
+                    run: async (decision) =>
+                      port.decideAppeal(appeal.appealId, 'reversed', decision),
+                  },
+                ]}
+              />
             </li>
           ))}
         </ul>
@@ -1027,6 +1118,7 @@ export function ModerationView({
       </KeptVisible>
       <Registrations port={port} registrations={state.registrations} onDone={onDone} />
       <Reports port={port} me={state.me} reports={state.reports} onDone={onDone} />
+      <Appeals port={port} me={state.me} appeals={state.appeals} onDone={onDone} />
       <Notices notices={state.notices} />
       <Suspended
         port={port}

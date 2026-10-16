@@ -107,7 +107,13 @@ describe('a restriction carries its statement of reasons (#910)', () => {
         notifierNamed: null,
         moderatorConflict: true,
         automated: false,
-        redress: { contactEmail: 'moderator@club.example', outOfCourt: false, court: true },
+        appeal: null,
+        redress: {
+          appeal: true,
+          contactEmail: 'moderator@club.example',
+          outOfCourt: false,
+          court: true,
+        },
       },
     ]);
   });

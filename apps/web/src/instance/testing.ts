@@ -50,6 +50,7 @@ import {
   type OpenReport,
   type PendingRegistration,
   type ReceivedNotice,
+  type OpenAppeal,
   type SuspendedAccount,
 } from './moderation-port';
 
@@ -246,6 +247,8 @@ export interface ScriptedModeration {
     reports: OpenReport[];
     /** The notices the instance's notice page received (#907); `undefined` as when they could not be read. */
     notices: ReceivedNotice[] | undefined;
+    /** The open appeals (#911); `undefined` as when they could not be read. */
+    appeals: OpenAppeal[] | undefined;
     /** Every statement of reasons a restriction was sent with (#910), and whom it was about. */
     statements: (StatementInput & { readonly athleteId: string })[];
     log: ModerationLogEntry[];
@@ -287,6 +290,30 @@ export const SCRIPTED_NOTICES: readonly ReceivedNotice[] = [
     notifierName: null,
     notifierEmail: 'me@example.com',
     bonaFide: false,
+  },
+];
+
+/** Two open appeals (#911): one against this moderator's own decision, one against another's. */
+export const SCRIPTED_APPEALS: readonly OpenAppeal[] = [
+  {
+    appealId: 3,
+    filedAt: 1_790_005_000,
+    grounds: 'I was quoting another rider, not abusing them.',
+    appellantAthleteId: 'rider-dafydd',
+    statementId: 11,
+    restriction: 'suspend',
+    facts: 'Abuse of other riders in a room.',
+    decidedBy: 'moderator-1',
+  },
+  {
+    appealId: 4,
+    filedAt: 1_790_006_000,
+    grounds: 'It is my family name.',
+    appellantAthleteId: 'rider-carys',
+    statementId: 12,
+    restriction: 'hide_display_name',
+    facts: 'The display name reads as a slur.',
+    decidedBy: 'moderator-2',
   },
 ];
 
@@ -373,6 +400,7 @@ export function scriptedModeration(
     reports: [...queues.reports],
     notices: options.empty === true ? [] : [...SCRIPTED_NOTICES],
     statements: [],
+    appeals: options.empty === true ? [] : [...SCRIPTED_APPEALS],
     log: [...queues.log],
     logReadable: true,
     suspendedReadable: true,
@@ -455,6 +483,7 @@ export function scriptedModeration(
         registrations: [...held.registrations],
         reports: [...held.reports],
         notices: held.notices === undefined ? undefined : [...held.notices],
+        appeals: held.appeals === undefined ? undefined : [...held.appeals],
         suspended: held.suspendedReadable ? pageFrom(suspendedRows(), undefined) : undefined,
         log: held.logReadable ? pageFrom(logRows(), undefined) : undefined,
       });
@@ -521,6 +550,25 @@ export function scriptedModeration(
         held.reports = held.reports.filter((each) => each.reportId !== reportId);
       }
       return Promise.resolve(outcome);
+    },
+    decideAppeal: (appealId, outcome, decision) => {
+      calls.push(`${outcome} appeal ${String(appealId)}`);
+      const appeal = held.appeals?.find((each) => each.appealId === appealId);
+      if (appeal === undefined) return Promise.resolve(nothing);
+      if (decision.trim() === '') {
+        return Promise.resolve({ kind: 'refused', text: MODERATION_REFUSAL_TEXT.decision });
+      }
+      const outcomeOf = logged(
+        outcome === 'reversed' ? 'reverse_appeal' : 'uphold_appeal',
+        appeal.appellantAthleteId,
+        null,
+        decision,
+      );
+      if (outcome === 'reversed' && appeal.restriction === 'suspend') {
+        held.suspended.delete(appeal.appellantAthleteId);
+      }
+      held.appeals = held.appeals?.filter((each) => each.appealId !== appealId);
+      return Promise.resolve(outcomeOf);
     },
     mintInvite: (reason) => {
       calls.push(`mintInvite ${reason}`);

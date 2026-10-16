@@ -110,6 +110,9 @@ const NAMED_WITHOUT_A_FOREIGN_KEY: Readonly<
   'moderation_log.actor_athlete_id': {
     kept: 'the audit log is append-only: erasing an account does not erase what was done (#83)',
   },
+  'appeal.appellant_athlete_id': {
+    kept: 'an appeal and its decision are part of the audit trail its statement is (#911)',
+  },
   'statement.target_athlete_id': {
     kept: 'a statement of reasons is what the rider was told, kept with the append-only log it explains (#910)',
   },
@@ -257,6 +260,14 @@ describe('erasing an athlete (#769, #35)', () => {
           moderatorConflict: false,
           endsAt: null,
         },
+      });
+      // #911: B appeals the statement about their hidden name.
+      const [statement] = await store.listStatements(ATHLETE_B);
+      await store.putAppeal({
+        statementLogId: statement!.logId,
+        appellantAthleteId: ATHLETE_B,
+        grounds: 'Seen',
+        filedAt: 1_790_001_100,
       });
     });
     for (const column of columns) {

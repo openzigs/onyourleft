@@ -309,6 +309,15 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
     probe: async (store, athleteId) =>
       (await store.listStatements(athleteId)).map((row) => ({ athleteId: row.targetAthleteId })),
   },
+  putAppeal: {
+    notAScopedRead: 'a write; statements.test.ts holds another rider’s statement out of it',
+  },
+  listAppeals: {
+    probe: async (store, athleteId) =>
+      (await store.listAppeals(athleteId)).map((row) => ({ athleteId: row.appellantAthleteId })),
+  },
+  listOpenAppeals: { notAScopedRead: 'the moderators’ queue: every open appeal (#911)' },
+  decideAppeal: { notAScopedRead: 'a moderator’s write; appeals.test.ts' },
   listNotices: { notAScopedRead: 'the moderators’ queue of notices, from anybody (#907)' },
   listModerationLog: { notAScopedRead: 'the moderators’ record: every action (#83)' },
   listModerationLogPage: {

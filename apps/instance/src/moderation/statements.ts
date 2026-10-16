@@ -33,7 +33,7 @@
 
 import type { FieldProblem } from '../errors.ts';
 import type { LegalSettings } from '../legal.ts';
-import type { Statement, StatementFields } from '../store/sql-store.ts';
+import type { Appeal, Statement, StatementFields } from '../store/sql-store.ts';
 
 /** The actions that restrict a rider, and so need a statement (Art. 17(1)). */
 export const RESTRICTIONS: ReadonlySet<string> = new Set(['suspend', 'hide_display_name']);
@@ -144,6 +144,59 @@ export function readStatementFields(
   };
 }
 
+/** The longest grounds an appeal may give, in characters (#911). */
+export const MAXIMUM_APPEAL_GROUNDS_LENGTH = 2000;
+
+/**
+ * An appeal's grounds, checked (#911): what the rider says is wrong with the
+ * decision. Bounded, no control character, and — as a statement — no
+ * coordinate, refused by the rule and never by the value.
+ */
+export function readAppealGrounds(
+  value: unknown,
+):
+  | { readonly ok: true; readonly grounds: string }
+  | { readonly ok: false; readonly problem: string } {
+  if (typeof value !== 'string' || value.trim() === '') {
+    return { ok: false, problem: 'must not be empty' };
+  }
+  const grounds = value.trim();
+  if ([...grounds].length > MAXIMUM_APPEAL_GROUNDS_LENGTH) {
+    return {
+      ok: false,
+      problem: `must be at most ${String(MAXIMUM_APPEAL_GROUNDS_LENGTH)} characters`,
+    };
+  }
+  if (CONTROL.test(grounds)) return { ok: false, problem: 'must not contain a control character' };
+  if (namesACoordinate(grounds)) {
+    return { ok: false, problem: 'must not name a coordinate (ADR 0004 decision D)' };
+  }
+  return { ok: true, grounds };
+}
+
+/** An appeal as the rider reads it with the statement it appeals (#911). */
+export interface AppealView {
+  readonly appealId: number;
+  readonly filedAt: number;
+  readonly grounds: string;
+  readonly outcome: 'upheld' | 'reversed' | null;
+  readonly decision: string | null;
+  readonly moderatorConflict: boolean | null;
+  readonly decidedAt: number | null;
+}
+
+export function appealView(appeal: Appeal): AppealView {
+  return {
+    appealId: appeal.id,
+    filedAt: appeal.filedAt,
+    grounds: appeal.grounds,
+    outcome: appeal.outcome,
+    decision: appeal.decision,
+    moderatorConflict: appeal.moderatorConflict,
+    decidedAt: appeal.decidedAt,
+  };
+}
+
 /** A statement as the affected rider reads it: every Art. 17(3) part, redress included. */
 export interface StatementView {
   readonly statementId: number;
@@ -160,8 +213,12 @@ export interface StatementView {
   readonly moderatorConflict: boolean;
   /** (c): always `false` — no automated means are used to find content or to decide. */
   readonly automated: false;
+  /** The rider's appeal against it (#911), or `null` when they have not appealed. */
+  readonly appeal: AppealView | null;
   /** (f): how to ask the instance to look again, and the other routes. */
   readonly redress: {
+    /** The appeal route on this instance (#911): always `true`: every statement offers the route (one appeal each is enforced on filing; `appeal` above shows whether it was used). */
+    readonly appeal: true;
     /** Where to write to ask the instance to look again, or `null` when the operator published none. */
     readonly contactEmail: string | null;
     /** Out-of-court dispute settlement (Art. 21): not offered unless the owner or a lawyer decides it applies. */
@@ -171,7 +228,11 @@ export interface StatementView {
   };
 }
 
-export function statementView(statement: Statement, legal: LegalSettings): StatementView {
+export function statementView(
+  statement: Statement,
+  legal: LegalSettings,
+  appeal: Appeal | undefined,
+): StatementView {
   return {
     statementId: statement.logId,
     at: statement.at,
@@ -184,6 +245,7 @@ export function statementView(statement: Statement, legal: LegalSettings): State
     notifierNamed: statement.notifierNamed,
     moderatorConflict: statement.moderatorConflict,
     automated: false,
-    redress: { contactEmail: legal.contactEmail, outOfCourt: false, court: true },
+    appeal: appeal === undefined ? null : appealView(appeal),
+    redress: { appeal: true, contactEmail: legal.contactEmail, outOfCourt: false, court: true },
   };
 }
