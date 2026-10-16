@@ -50,6 +50,9 @@ With `--status-update` (the workflow always passes it), the script posts a proje
 unless one was posted in the last 6 days, so in practice once a week. It lists what closed in the
 last 7 days and what is `priority: now`, written from the issues alone. Its status is the latest
 update's, so an owner who set At risk keeps it; with no earlier update it is On track.
+It also lists the open issues with no `area:` label and the Unranked ones, when there are any,
+and every run prints how many there are; [`docs/agents/filing-issues.md`](agents/filing-issues.md)
+says what an issue should carry.
 
 ## The views, set in the web UI
 
