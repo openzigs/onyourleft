@@ -539,6 +539,14 @@ pnpm --filter @onyourleft/instance run operator migrate
 # image for one minute on 2026-09-29 (no disconnect, 59 frames each).
 pnpm --filter @onyourleft/instance run tunnel-soak --url https://… --room … --minutes 30
 
+# #464's race-length load run: N riders (keys from `race-load keys`) race one
+# `room-open … --kind race` room through the public hostname to the line, and
+# it reports frame lateness, missing ticks, disconnects, rejoins and bytes.
+# NOT a gate. ⚠️ The riders must be ticketable: on an `approval` instance a new
+# key is a PENDING account and is refused a ticket — approve them first and
+# erase them after. Its local test races 3 riders to a 40 m line (~12 s).
+pnpm --filter @onyourleft/instance run race-load ride --url https://… --room … --keys <file>
+
 # #1235's round-trip measurement (spike 0023): a throwaway device starts an
 # analysis job, follows it to its decrypted result and times every leg it can
 # see, sealed by default, `--transport plaintext` against an instance with no
