@@ -450,6 +450,21 @@ export function hudReadings(input: HudInput): readonly HudReading[] {
 /** The key of the moving-time field — #1111. @see movingTimeReading */
 export const MOVING_TIME_KEY = 'movingTime';
 
+/** Whether a reading is one of the room's — #783, #787. @see roomReadings */
+export function isRoomReading(reading: HudReading): boolean {
+  return reading.key.startsWith('room-');
+}
+
+/**
+ * Whether a reading gives way to the room's on a phone — #1356: the pacer's
+ * gap, the ghost's gap (and the dashed field that stands in for both) and the
+ * wind. `theme.css` §"A ROOM RIDE ON A PHONE" hides them while a room's
+ * readings are on the HUD, and says what that costs.
+ */
+export function givesWayToTheRoom(reading: HudReading): boolean {
+  return reading.key === 'gap' || reading.key.startsWith('gap-') || reading.key === 'wind';
+}
+
 /**
  * The moving-time field — #1111.
  *

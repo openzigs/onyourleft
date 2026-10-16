@@ -64,7 +64,9 @@ import { useUnits } from '../../units/context';
 import {
   MOVING_TIME_KEY,
   NO_READING,
+  givesWayToTheRoom,
   hudReadings,
+  isRoomReading,
   profileReading,
   readingTier,
   trainerLine,
@@ -581,6 +583,9 @@ function fieldClass(reading: HudReading): string {
     'oyl-hud__field',
     ...(reading.stale ? ['oyl-hud__field--stale'] : []),
     ...(reading.key === MOVING_TIME_KEY ? ['oyl-hud__field--moving'] : []),
+    // #1356: on a phone a room's readings take the places of these.
+    ...(isRoomReading(reading) ? ['oyl-hud__field--room'] : []),
+    ...(givesWayToTheRoom(reading) ? ['oyl-hud__field--gives-way'] : []),
   ].join(' ');
 }
 
