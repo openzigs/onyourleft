@@ -5708,7 +5708,7 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "entries": {
+                    "items": {
                       "type": "array",
                       "items": {
                         "type": "object",
@@ -5768,7 +5768,7 @@
                     }
                   },
                   "required": [
-                    "entries",
+                    "items",
                     "next"
                   ],
                   "additionalProperties": false

@@ -18,6 +18,7 @@ import {
   type ModerationWorld,
   type SoleModeratorWorld,
 } from './moderation-testing.ts';
+import { wholeModerationLog } from '../store/testing/index.ts';
 
 let world: SoleModeratorWorld | undefined;
 afterEach(async () => {
@@ -234,7 +235,7 @@ describe('moderator actions, each written to the append-only log (#83)', () => {
       },
     );
     expect(hidden.status).toBe(200);
-    expect(await w.freshRead((store) => store.listModerationLog())).toEqual([
+    expect(await w.freshRead((store) => wholeModerationLog(store))).toEqual([
       {
         id: (hidden.body as { logId: number }).logId,
         action: 'hide_display_name',
@@ -314,7 +315,7 @@ describe('moderator actions, each written to the append-only log (#83)', () => {
       },
     );
     expect(suspended.status).toBe(200);
-    const [entry] = await w.freshRead((store) => store.listModerationLog());
+    const [entry] = await w.freshRead((store) => wholeModerationLog(store));
     expect(entry).toMatchObject({
       action: 'suspend',
       actorAthleteId: w.owner.athleteId,
@@ -347,7 +348,7 @@ describe('moderator actions, each written to the append-only log (#83)', () => {
     expect((await w.signIn(bea.device)).status).toBe(200);
     expect((await w.as(cat, 'GET', `/v1/athletes/${bea.athleteId}`)).status).toBe(200);
     expect(
-      (await w.freshRead((store) => store.listModerationLog())).map((each) => each.action),
+      (await w.freshRead((store) => wholeModerationLog(store))).map((each) => each.action),
     ).toEqual(['suspend', 'unsuspend']);
   });
 
@@ -377,7 +378,7 @@ describe('moderator actions, each written to the append-only log (#83)', () => {
       },
     );
     expect(dismissed.status).toBe(200);
-    expect(await w.freshRead((store) => store.listModerationLog())).toEqual([
+    expect(await w.freshRead((store) => wholeModerationLog(store))).toEqual([
       expect.objectContaining({
         action: 'dismiss_report',
         actorAthleteId: w.owner.athleteId,
@@ -397,7 +398,7 @@ describe('moderator actions, each written to the append-only log (#83)', () => {
       },
     );
     expect(twice.status).toBe(409);
-    expect(await w.freshRead((store) => store.listModerationLog())).toHaveLength(1);
+    expect(await w.freshRead((store) => wholeModerationLog(store))).toHaveLength(1);
   });
 
   it('refuses a moderator acting on a moderator, changes nothing, and logs the attempt (#891)', async () => {
@@ -437,7 +438,7 @@ describe('moderator actions, each written to the append-only log (#83)', () => {
     );
     expect(noReason.status).toBe(400);
     // Each refused attempt is logged as refused; the 404 and the 400 are not.
-    expect(await w.freshRead((store) => store.listModerationLog())).toEqual(
+    expect(await w.freshRead((store) => wholeModerationLog(store))).toEqual(
       [
         [w.deputy, w.owner],
         [w.owner, w.deputy],
@@ -469,7 +470,7 @@ describe('moderator actions, each written to the append-only log (#83)', () => {
     expect(own.status).toBe(409);
     expect(codeOf(own.body)).toBe('moderation_not_applicable');
     expect(await w.freshRead((store) => store.listOpenReports())).toHaveLength(1);
-    expect(await w.freshRead((store) => store.listModerationLog())).toEqual([
+    expect(await w.freshRead((store) => wholeModerationLog(store))).toEqual([
       expect.objectContaining({
         action: 'refused_dismiss_report',
         actorAthleteId: w.deputy.athleteId,
@@ -541,7 +542,7 @@ describe('moderator actions, each written to the append-only log (#83)', () => {
       false,
     );
     expect(
-      (await w.freshRead((store) => store.listModerationLog())).map((entry) => [
+      (await w.freshRead((store) => wholeModerationLog(store))).map((entry) => [
         entry.action,
         entry.roomId,
       ]),
@@ -561,7 +562,7 @@ describe('moderator actions, each written to the append-only log (#83)', () => {
     ]) {
       expect((await w.as(anna, 'POST', path, { reason: 'Because' })).status, path).toBe(404);
     }
-    expect(await w.freshRead((store) => store.listModerationLog())).toEqual([]);
+    expect(await w.freshRead((store) => wholeModerationLog(store))).toEqual([]);
     expect((await w.freshRead((store) => store.getAthlete(bea.athleteId)))?.suspendedAt).toBeNull();
   });
 });
@@ -607,7 +608,7 @@ describe('one moderator (#905): the owner alone is named, as on the project’s 
         outcome: 'dismiss_own_report',
       }),
     ]);
-    expect(await w.freshRead((store) => store.listModerationLog())).toEqual([
+    expect(await w.freshRead((store) => wholeModerationLog(store))).toEqual([
       expect.objectContaining({
         action: 'dismiss_own_report',
         actorAthleteId: w.owner.athleteId,
@@ -626,7 +627,7 @@ describe('one moderator (#905): the owner alone is named, as on the project’s 
     const [report] = await w.freshRead((store) => store.listOpenReports());
     const path = `/v1/moderation/reports/${String(report!.id)}/dismiss`;
     expect((await w.as(w.owner, 'POST', path, { reason: 'Not spam' })).status).toBe(200);
-    expect(await w.freshRead((store) => store.listModerationLog())).toEqual([
+    expect(await w.freshRead((store) => wholeModerationLog(store))).toEqual([
       expect.objectContaining({ action: 'dismiss_report', targetAthleteId: null }),
     ]);
   });
@@ -643,7 +644,7 @@ describe('one moderator (#905): the owner alone is named, as on the project’s 
       expect(answer.status, action).toBe(409);
     }
     expect(
-      (await w.freshRead((store) => store.listModerationLog())).map((entry) => entry.action),
+      (await w.freshRead((store) => wholeModerationLog(store))).map((entry) => entry.action),
     ).toEqual(['refused_suspend', 'refused_hide_display_name']);
     expect(
       (await w.freshRead((store) => store.getAthlete(w.owner.athleteId)))?.suspendedAt,
@@ -674,7 +675,7 @@ describe('the suspended accounts and the log, a page at a time (#961)', () => {
     next: string | null;
   }
   interface LogPage {
-    entries: { logId: number; action: string; targetAthleteId: string | null }[];
+    items: { logId: number; action: string; targetAthleteId: string | null }[];
     next: string | null;
   }
 
@@ -764,14 +765,14 @@ describe('the suspended accounts and the log, a page at a time (#961)', () => {
     const first = await w.as(w.owner, 'GET', '/v1/moderation/log?limit=2');
     expect(first.status).toBe(200);
     const one = first.body as LogPage;
-    expect(one.entries.map((each) => [each.action, each.targetAthleteId])).toEqual([
+    expect(one.items.map((each) => [each.action, each.targetAthleteId])).toEqual([
       ['unsuspend', anna.athleteId],
       ['suspend', bea.athleteId],
     ]);
     expect(one.next).not.toBeNull();
     const two = (await w.as(w.owner, 'GET', `/v1/moderation/log?limit=2&cursor=${one.next!}`))
       .body as LogPage;
-    expect(two.entries.map((each) => [each.action, each.targetAthleteId])).toEqual([
+    expect(two.items.map((each) => [each.action, each.targetAthleteId])).toEqual([
       ['suspend', anna.athleteId],
     ]);
     expect(two.next).toBeNull();
@@ -781,11 +782,9 @@ describe('the suspended accounts and the log, a page at a time (#961)', () => {
       .body as LogPage;
     expect(again).toEqual(two);
     // The whole log, as the store keeps it, is the pages put together, reversed.
-    const stored = await w.freshRead((store) => store.listModerationLog());
+    const stored = await w.freshRead((store) => wholeModerationLog(store));
     const whole = (await w.as(w.owner, 'GET', '/v1/moderation/log')).body as LogPage;
-    expect(whole.entries.map((each) => each.logId)).toEqual(
-      stored.map((each) => each.id).reverse(),
-    );
+    expect(whole.items.map((each) => each.logId)).toEqual(stored.map((each) => each.id).reverse());
   });
 
   it('refuses a bad limit or a cursor it did not write, by name and never by value', async () => {
@@ -801,6 +800,11 @@ describe('the suspended accounts and the log, a page at a time (#961)', () => {
         path.endsWith('log')
           ? `?cursor=${encodeURIComponent(btoa(JSON.stringify(['1', '2'])).replace(/=+$/, ''))}`
           : `?cursor=${encodeURIComponent(btoa(JSON.stringify(['log', '1'])).replace(/=+$/, ''))}`,
+        // A position past MAX_SAFE_INTEGER, which the regex alone admits and
+        // Number() would round to another (#1166). Only a forged cursor carries one.
+        path.endsWith('log')
+          ? `?cursor=${encodeURIComponent(btoa(JSON.stringify(['log', '9007199254740993'])).replace(/=+$/, ''))}`
+          : `?cursor=${encodeURIComponent(btoa(JSON.stringify(['9007199254740993', 'a'])).replace(/=+$/, ''))}`,
       ]) {
         const answer = await w.as(w.owner, 'GET', `${path}${query}`);
         expect(answer.status, `${path}${query}`).toBe(400);

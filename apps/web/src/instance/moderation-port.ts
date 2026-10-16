@@ -898,7 +898,6 @@ export function createModerationPort(dependencies: ModerationPortDependencies): 
     path: string,
     limit: number,
     cursor: string | undefined,
-    field: string,
     each: (value: unknown) => T | undefined,
   ): Promise<ModerationList<T> | undefined> {
     if (cursor !== undefined && !CURSOR.test(cursor)) return undefined;
@@ -910,7 +909,7 @@ export function createModerationPort(dependencies: ModerationPortDependencies): 
           token: session.token,
           query: { limit: String(limit), ...(cursor === undefined ? {} : { cursor }) },
         }),
-        field,
+        'items',
         each,
       );
     } catch {
@@ -949,9 +948,9 @@ export function createModerationPort(dependencies: ModerationPortDependencies): 
   }
 
   const logPage = (cursor?: string) =>
-    readPage('/v1/moderation/log', MODERATION_LOG_PAGE, cursor, 'entries', logEntryFrom);
+    readPage('/v1/moderation/log', MODERATION_LOG_PAGE, cursor, logEntryFrom);
   const suspendedPage = (cursor?: string) =>
-    readPage('/v1/moderation/suspended', SUSPENDED_PAGE, cursor, 'items', suspendedFrom);
+    readPage('/v1/moderation/suspended', SUSPENDED_PAGE, cursor, suspendedFrom);
 
   return {
     standing: async () => {

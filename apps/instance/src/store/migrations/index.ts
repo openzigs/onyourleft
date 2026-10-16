@@ -48,6 +48,7 @@ import * as noticeSteps from './0029-notice-steps.ts';
 import * as hiddenItems from './0030-hidden-items.ts';
 import * as roomModeration from './0031-room-moderation.ts';
 import * as loadAccounts from './0032-load-accounts.ts';
+import * as suspendedIndex from './0034-suspended-index.ts';
 
 /** A migration this repository accepts: both directions. */
 export interface InstanceMigration {
@@ -88,4 +89,5 @@ export const MIGRATIONS: Readonly<Record<string, InstanceMigration>> = {
   '0030-hidden-items': hiddenItems,
   '0031-room-moderation': roomModeration,
   '0032-load-accounts': loadAccounts,
+  '0034-suspended-index': suspendedIndex,
 };
