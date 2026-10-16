@@ -61,6 +61,7 @@ import {
   type PublicRoomThresholds,
 } from './moderation/eligibility.ts';
 import type { Moderators } from './moderation/moderation.ts';
+import { readLegalSettings, type LegalSettings, type RawLegalSettings } from './legal.ts';
 
 /** This repository. The same URL `apps/web/src/privacy/policy.ts` §`REPOSITORY` names. */
 export const REPOSITORY = 'https://github.com/openzigs/onyourleft';
@@ -89,7 +90,7 @@ export const DEFAULT_REGISTRATION: RegistrationMode = 'closed';
 export const MAXIMUM_INSTANCE_NAME_LENGTH = 64;
 
 /** The raw values, as the environment gives them. */
-export interface RawConfig {
+export interface RawConfig extends RawLegalSettings {
   readonly host?: string | undefined;
   readonly port?: string | undefined;
   readonly commit?: string | undefined;
@@ -224,6 +225,12 @@ export interface Config {
    * operator chose.
    */
   readonly name: string | null;
+  /**
+   * What the legal and contact page names, and whether public rooms are on
+   * (#908, `legal.ts`): on with no contact or no accountable person is a
+   * refusal to start.
+   */
+  readonly legal: LegalSettings;
 }
 
 export type ConfigResult =
@@ -374,6 +381,8 @@ export function readConfig(raw: RawConfig): ConfigResult {
     }
   }
 
+  const legal = readLegalSettings(raw, problems);
+
   if (problems.length > 0 || sourceUrl === undefined) {
     return { ok: false, problems };
   }
@@ -397,6 +406,7 @@ export function readConfig(raw: RawConfig): ConfigResult {
       analysis,
       pictures,
       name: instanceName,
+      legal,
     },
   };
 }

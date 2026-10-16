@@ -94,7 +94,7 @@ const CONTROL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\u2028\u2029]/;
  * it can never carry `mailto:` parameters (`?bcc=`, `&body=`) into the link a
  * moderator clicks to reply.
  */
-const EMAIL = /^[A-Za-z0-9.!#$*+/=^_`{|}~-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/;
+export const EMAIL = /^[A-Za-z0-9.!#$*+/=^_`{|}~-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/;
 
 const length = (text: string): number => [...text].length;
 

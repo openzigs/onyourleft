@@ -7,6 +7,9 @@ import { IDENTITY_ROUTES } from './auth/routes.ts';
 import { INSTANCE_KEY_ROUTES } from './keys/routes.ts';
 import { errorResponse } from './errors.ts';
 import { MODERATION_ROUTES } from './moderation/routes.ts';
+import { NOTICE_PAGE_PATH } from './moderation/notices.ts';
+import { pageResponse } from './html.ts';
+import { LEGAL_PAGE_PATH, legalPage } from './legal.ts';
 import { assessReadiness } from './readiness.ts';
 import { json, type Route, type Schema } from './route-kit.ts';
 import { HISTORY_ROUTES } from './history/routes.ts';
@@ -108,6 +111,24 @@ export const ROUTES: readonly Route[] = [
     },
     handle: ({ config }) =>
       json({ url: config.sourceUrl, commit: config.commit, licence: 'AGPL-3.0-or-later' }),
+  },
+  {
+    method: 'GET',
+    path: LEGAL_PAGE_PATH,
+    operationId: 'getLegalPage',
+    reaches: 'own',
+    summary:
+      'The legal and contact page (#908): the single point of contact and the languages it reads (DSA Arts 11, 12), the notice page, the person accountable (OSA Codes ICU A2), any legal representative (Art. 13), and the documents — all from the operator’s settings. HTML, with no script.',
+    response: { contentType: 'text/html' },
+    handle: ({ config }) =>
+      pageResponse(
+        legalPage({
+          legal: config.legal,
+          instanceName: config.name,
+          sourceUrl: config.sourceUrl,
+          noticePath: NOTICE_PAGE_PATH,
+        }),
+      ),
   },
   {
     method: 'GET',

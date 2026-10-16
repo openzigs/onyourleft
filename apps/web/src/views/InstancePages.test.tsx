@@ -13,7 +13,7 @@ import { scriptedInstance } from '../instance/testing';
 import { mount, queryAll, settle, type Mounted } from '../testing/mount';
 
 import { AboutView } from './AboutView';
-import { REPORT_LINK_TEXT } from './InstancePages';
+import { LEGAL_LINK_TEXT, REPORT_LINK_TEXT } from './InstancePages';
 
 let mounted: Mounted | undefined;
 afterEach(() => {
@@ -21,12 +21,14 @@ afterEach(() => {
   mounted = undefined;
 });
 
-function reportLinks(): HTMLAnchorElement[] {
+function linksNamed(text: string): HTMLAnchorElement[] {
   if (mounted === undefined) throw new Error('nothing mounted');
   return queryAll<HTMLAnchorElement>(mounted.container, 'a').filter(
-    (link) => link.textContent === REPORT_LINK_TEXT,
+    (link) => link.textContent === text,
   );
 }
+
+const reportLinks = (): HTMLAnchorElement[] => linksNamed(REPORT_LINK_TEXT);
 
 describe('About’s link to the instance’s notice page (#907)', () => {
   it('goes to the notice page of the instance this device is connected to, in a new tab', async () => {
@@ -57,5 +59,16 @@ describe('About’s link to the instance’s notice page (#907)', () => {
     mounted = await mount(<AboutView />);
     await settle();
     expect(reportLinks()).toEqual([]);
+  });
+
+  it('links the legal and contact page of the same instance (#908)', async () => {
+    const instance = scriptedInstance({ connected: true });
+    instance.held.origin = 'https://club.example:8443';
+    mounted = await mount(<AboutView instance={instance.port} />);
+    await settle();
+    const [link, ...more] = linksNamed(LEGAL_LINK_TEXT);
+    expect(more).toEqual([]);
+    expect(link?.getAttribute('href')).toBe('https://club.example:8443/legal');
+    expect(link?.getAttribute('target')).toBe('_blank');
   });
 });

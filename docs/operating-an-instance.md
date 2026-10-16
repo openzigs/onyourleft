@@ -669,6 +669,21 @@ Running an instance for other people is a set of duties as well as a box:
   riders block and report each other, and the owner and the deputy suspend, hide names and decide
   reports through the moderators' routes, every action in an append-only log —
   [`docs/moderation.md`](moderation.md) is the operator's page for it.
+- **The legal and contact page** ([#908](https://github.com/openzigs/onyourleft/issues/908)):
+  `GET /legal` names whom to write to, who is accountable, where to report content and the documents
+  riders are bound by, from **your** settings — the project's are never a default. Fill in:
+
+  | Setting | What to put |
+  |---|---|
+  | `OYL_INSTANCE_CONTACT_EMAIL` | the address you read, for authorities and riders alike (the EU DSA's single point of contact, Arts 11 and 12). A person must read it |
+  | `OYL_INSTANCE_CONTACT_LANGUAGES` | the languages you can be written to in, separated by commas. Empty means English |
+  | `OYL_INSTANCE_ACCOUNTABLE_PERSON` | the person accountable for keeping illegal content off the instance (the UK Online Safety Act Codes, ICU A2) |
+  | `OYL_INSTANCE_LEGAL_REPRESENTATIVE` | only if you have one: your EU legal representative's name, postal address, email and telephone, on one line (DSA Art. 13(4)) |
+  | `OYL_INSTANCE_PRIVACY_POLICY_URL` | your own privacy policy, `https:` |
+  | `OYL_INSTANCE_PUBLIC_ROOMS` | `off` (the default) or `on`. **`on` refuses to start without the contact address and the accountable person.** No room is public yet, so today `on` opens nothing else |
+
+  The app's *About* links to the page of the instance a rider connected to. The page says plainly
+  what you have not set.
 - **The source offer**: `GET /source` names the exact source of the running build (AGPL-3.0 §13, ADR
   0036 D-6). An operator who modified the instance sets `OYL_INSTANCE_SOURCE_URL` to their own.
 - **Privacy**: Cloudflare terminates TLS on the tunnel's path and can see the instance's traffic in
