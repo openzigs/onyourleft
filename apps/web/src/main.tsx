@@ -974,6 +974,7 @@ function buildStatementsPort(): StatementsPort | undefined {
   }
   return createStatementsPort({
     storage: localStorage,
+    loadedFrom: loadedFrom(),
     ensureLocalAthlete: () =>
       ensureLocalAthlete(localStore(), unixSeconds(Math.floor(Date.now() / 1000))),
     signingKey: () => ensureDeviceSigningKey(localStore(), LOCAL_ATHLETE),

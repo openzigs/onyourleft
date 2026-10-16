@@ -733,6 +733,64 @@ export function heldAccountSession(
 }
 
 /**
+ * How this device reaches the instance it connected to WITHOUT a session
+ * (#910, #1210): for `POST /v1/auth/leave-session`, which ADR 0047 D-7 seals
+ * in phase 2 and which a suspended rider calls precisely because their
+ * session is refused (`apps/instance` §`SESSIONLESS_PATHS`).
+ *
+ * - `sealed`: the device holds a pin and the keys verify under it — the call
+ *   goes sealed and signed by this device's key, as signing in does.
+ * - `keyless`: the device holds no pin (D-14 Q1), so it cannot seal; the call
+ *   goes in plaintext, as a sign-in from it does, and an instance holding
+ *   keys refuses it `sealed_required`.
+ * - `closed`: the device holds a pin but may not seal now — a copy a website
+ *   served (D-11), a new card awaited, keys refused. ⚠️ Nothing is sent: a
+ *   device with a pin never falls back to plaintext.
+ */
+export type SessionlessSealed =
+  | { readonly kind: 'sealed'; readonly sealed: InstanceTransport }
+  | { readonly kind: 'keyless' }
+  | { readonly kind: 'closed'; readonly text: string };
+
+/** {@link SessionlessSealed} for a port that is not the instance port: one clock for its life. */
+export function sessionlessSealed(
+  dependencies: SealingDependencies,
+): () => Promise<SessionlessSealed> {
+  const kit = sealingKit(dependencies);
+  return async () => {
+    const account = readInstanceAccount(dependencies.storage);
+    if (account === undefined) {
+      return { kind: 'closed', text: DEVICES_UNAVAILABLE_TEXT['signed-out'] };
+    }
+    if (account.pin === undefined) return { kind: 'keyless' };
+    const gate = sealedRouteGate(account, dependencies.loadedFrom);
+    if (gate.kind !== 'open') return { kind: 'closed', text: gate.text };
+    const judged = await judgeAccount(dependencies.storage, account, dependencies, kit.crypto);
+    if (judged.instanceKey === undefined) {
+      const text = 'text' in judged.outcome ? judged.outcome.text : INSTANCE_KEY_TEXT.unreachable;
+      return { kind: 'closed', text };
+    }
+    return {
+      kind: 'sealed',
+      sealed: sealedTransport(
+        sealedInstance(
+          account.origin,
+          {
+            instanceKey: judged.instanceKey,
+            signingKey: await dependencies.signingKey(),
+            primitives: dependencies.primitives ?? webCryptoHpkePrimitives,
+            sha256: kit.crypto.sha256,
+            clock: kit.clock,
+            ...(dependencies.now === undefined ? {} : { now: dependencies.now }),
+          },
+          dependencies.send,
+        ),
+      ),
+    };
+  };
+}
+
+/**
  * Whether an answer is an instance's `sealed_required` (#1210): a plaintext
  * call from a device with no pin, to an instance that holds keys.
  */

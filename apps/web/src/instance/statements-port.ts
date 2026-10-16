@@ -10,7 +10,8 @@
  * answers `401`, and signing in again is refused `account_suspended`. So
  * {@link StatementsPort.read} asks with the held session first and, when it is
  * refused, opens the rider's way-out session (`POST /v1/auth/leave-session`,
- * signed with this device's key, #898) and asks with that. That session
+ * signed with this device's key, #898, and sealed since #1210) and asks with
+ * that. That session
  * reaches the export, the deletion and these statements and nothing else
  * (`apps/instance` §`choke-point.test.ts`), and this module never keeps it.
  *
@@ -20,10 +21,9 @@
  * watches {@link StatementsPort} and {@link createStatementsPort}.
  */
 
-import { heldInstanceSession, type InstanceStorage } from './instance-port';
-import { instanceHttp, type InstanceSend } from './instance-transport';
+import { heldInstanceSession, sessionlessSealed, type SealingDependencies } from './instance-port';
+import { instanceHttp } from './instance-transport';
 import { openLeaveSession, readInstanceAccount } from './sign-in';
-import type { SigningKey } from '@onyourleft/domain';
 
 /** One statement of reasons, as the rider reads it. */
 export interface RiderStatement {
@@ -54,15 +54,14 @@ export interface StatementsPort {
   read(): Promise<StatementsRead>;
 }
 
-export interface StatementsPortDependencies {
-  readonly storage: InstanceStorage;
+/**
+ * What the port needs: a sealed call's dependencies (#1210 — the way-out
+ * session is a phase-2 sealed route, signed by this device's key, which
+ * `signingKey` gives), and the local athlete.
+ */
+export interface StatementsPortDependencies extends SealingDependencies {
   /** `ensureLocalAthlete`, bound: asked before the key, as a sign-in asks. */
   readonly ensureLocalAthlete: () => Promise<unknown>;
-  /** `ensureDeviceSigningKey`, bound: signs the way-out session. */
-  readonly signingKey: () => Promise<SigningKey>;
-  readonly send?: InstanceSend | undefined;
-  /** Unix milliseconds. */
-  readonly now?: () => number;
 }
 
 /** The longest fields the instance keeps (`apps/instance` §`statements.ts`). */
@@ -136,6 +135,7 @@ function statementsIn(body: unknown): readonly RiderStatement[] | undefined {
 
 /** The production {@link StatementsPort}: `main.tsx` builds it, and nothing else in the client. */
 export function createStatementsPort(dependencies: StatementsPortDependencies): StatementsPort {
+  const wayOut = sessionlessSealed(dependencies);
   return {
     read: async () => {
       const account = readInstanceAccount(dependencies.storage);
@@ -154,10 +154,15 @@ export function createStatementsPort(dependencies: StatementsPortDependencies): 
           // Anything but the rider's own session being refused is no answer.
           if (answer.status !== 401 && answer.status !== 403) return { kind: 'unreachable' };
         }
-        // The held session is gone or refused: a suspended rider's way out.
+        // The held session is gone or refused: a suspended rider's way out,
+        // sealed when this device can seal (#1210), and not sent at all when
+        // it holds a pin but may not seal now.
+        const way = await wayOut();
+        if (way.kind === 'closed') return { kind: 'unreachable' };
         const token = await openLeaveSession({
           origin: account.origin,
           transport: { post: async (path, body) => http.call('POST', path, { body }) },
+          ...(way.kind === 'sealed' ? { sealed: way.sealed } : {}),
           storage: dependencies.storage,
           ensureLocalAthlete: dependencies.ensureLocalAthlete,
           signingKey: dependencies.signingKey,

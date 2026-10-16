@@ -320,8 +320,9 @@ export async function signInToInstance(
  * A SUSPENDED rider's way-out session (#898, #910): signed with this device's
  * key as a sign-in is, and good for an hour on exactly the routes that admit
  * it — the account export, the deletion and the rider's own statements of
- * reasons. Plaintext, as `POST /v1/auth/leave-session` is (it is not one of
- * ADR 0047 D-7's phase-1 routes). Answers the session token; throws
+ * reasons. Sealed through `dependencies.sealed` when the device can seal, as
+ * signing in is (ADR 0047 D-7 phase 2, #1210); the challenge stays plaintext.
+ * Answers the session token; throws
  * {@link InstanceSignInError} with the instance's code — `not_suspended` for an
  * account that may simply sign in.
  */
@@ -329,7 +330,10 @@ export async function openLeaveSession(dependencies: SignInDependencies): Promis
   await dependencies.ensureLocalAthlete();
   const key = await dependencies.signingKey();
   const statement = await signedStatement(dependencies, key, AUTH_PURPOSE);
-  const answer = await dependencies.transport.post('/v1/auth/leave-session', statement);
+  // Sealed whenever this device can seal (ADR 0047 D-7 phase 2, #1210), as a
+  // sign-in is: in plaintext only an instance with no keys answers it.
+  const sealedOrKeyless = dependencies.sealed ?? dependencies.transport;
+  const answer = await sealedOrKeyless.post('/v1/auth/leave-session', statement);
   const token = (answer.body as { sessionToken?: unknown } | null)?.sessionToken;
   if (answer.status !== 200 || typeof token !== 'string') {
     throw new InstanceSignInError(codeOf(answer.body));
