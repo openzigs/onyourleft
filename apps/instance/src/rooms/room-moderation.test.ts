@@ -35,6 +35,7 @@ import { migrateForDeploy } from '../store/serving.ts';
 import { openSqlStore } from '../store/open-sql-store.ts';
 import type { SqlStore } from '../store/sql-store.ts';
 import { roomBody } from './rooms-testing.ts';
+import { wholeModerationLog } from '../store/testing/index.ts';
 
 let directory: string | undefined;
 let running: StartedInstance | undefined;
@@ -253,7 +254,7 @@ describe('moderation in a room on the running instance — #789', () => {
           })
         ).status,
       ).toBe(404);
-      expect(await w.read((store) => store.listModerationLog())).toEqual([]);
+      expect(await w.read((store) => wholeModerationLog(store))).toEqual([]);
       // Ann, the host, removes Dee.
       const hostRemoved = await w.call('POST', `/v1/rooms/${room.roomId}/remove`, ann.token, {
         riderId: riderIdOf(deeSocket),
@@ -299,7 +300,7 @@ describe('moderation in a room on the running instance — #789', () => {
     );
     expect(suspended.status).toBe(200);
 
-    expect(await w.read((store) => store.listModerationLog())).toEqual([
+    expect(await w.read((store) => wholeModerationLog(store))).toEqual([
       expect.objectContaining({
         action: 'host_remove_from_room',
         actorAthleteId: ann.athleteId,

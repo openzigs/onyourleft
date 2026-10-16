@@ -21,6 +21,7 @@ import {
   type Rider,
 } from './moderation-testing.ts';
 import { createModeration } from './moderation.ts';
+import { wholeModerationLog } from '../store/testing/index.ts';
 
 let world: ModerationWorld | undefined;
 afterEach(async () => {
@@ -54,7 +55,7 @@ describe('a moderator removing a rider from a room (#1384)', () => {
       expect.objectContaining({ field: 'statement' }),
     ]);
     expect(await w.freshRead((store) => store.isRemovedFromRoom(ROOM, bea.athleteId))).toBe(false);
-    expect(await w.freshRead((store) => store.listModerationLog())).toEqual([]);
+    expect(await w.freshRead((store) => wholeModerationLog(store))).toEqual([]);
     expect(await statementsOf(w, bea)).toEqual([]);
   });
 

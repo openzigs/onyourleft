@@ -8,7 +8,8 @@
  * POST /v1/rooms                 { kind, ridingPosition, drafting?, loop, lengthMetres, grades, gpx,
  *                                    visibility?, startsAt? }
  *                                  → { roomId, code?, routeSha256 }     the creator is a member
- * POST /v1/rooms/join            { code } → { roomId, kind, ridingPosition, drafting, loop, routeSha256 }
+ * POST /v1/rooms/join            { code } → { roomId, kind, ridingPosition, drafting, loop, routeSha256,
+ *                                             creator }
  *                                  rate-limited; the joiner becomes a member
  * GET  /v1/rooms/public          → { rooms: [...] }                    #788: eligible athletes only
  * POST /v1/rooms/{roomId}/join   → as /v1/rooms/join                   #788: a public room, eligible only
@@ -96,6 +97,25 @@
  *
  * {@link MAXIMUM_OPEN_ROOMS_PER_ATHLETE} still bounds what one athlete holds
  * at once, whatever the rate of making rooms.
+ *
+ * ### Letting a route go, and the races around it — #948
+ *
+ * - **One route, one step at a time.** Ending a room counts the other open
+ *   rooms on its route and deletes the file; making a room writes the file and
+ *   then its row. Both run under a lock on the route's digest, so a room made
+ *   on the same bytes in the same moment either is counted, or writes the file
+ *   again after the delete — never loses it (N-a). ⚠️ The lock is this
+ *   process's: an operator command run beside a live instance
+ *   (`operator/commands.ts`) is not inside it.
+ * - **The route goes first, and the close commits.** A delete that throws
+ *   leaves the room open, so the next sweep that finds it due ends it again
+ *   and the file is not orphaned behind a closed row (N-b). A race the worker
+ *   let go is due at once; a group ride within its day.
+ * - **The sweep and a socket agree.** The sweep ends a room only once the
+ *   router has said no worker holds it AND that it will place none until the
+ *   sweep is done with it (`RoomRouter.claimForEnding`): a socket whose lookup
+ *   read the room as open before it closed is refused `room-closed`, not
+ *   seated in a room whose route is being deleted.
  */
 
 import { PHYSICS_VERSION, type RidingPosition } from '@onyourleft/physics';
@@ -108,7 +128,7 @@ import {
   sweepPeriodMs,
   type RateLimit,
 } from '../auth/rate-limit.ts';
-import type { BlobStore } from '../blob/blob-store.ts';
+import { sha256Hex, type BlobStore } from '../blob/blob-store.ts';
 import type { ErrorCode, FieldProblem } from '../errors.ts';
 import type { ClientInfo } from '../route-kit.ts';
 import type { RoomPhase } from '../room/core/room.ts';
@@ -220,6 +240,23 @@ export interface JoinedRoom {
   readonly drafting: boolean;
   readonly loop: boolean;
   readonly routeSha256: string;
+  /**
+   * Whether the joiner made the room (#948, #929's N1): the rider who made it
+   * may join it again by its code — after a reload, or on another device —
+   * and is still the one offered *Start the race*.
+   */
+  readonly creator: boolean;
+}
+
+/**
+ * What {@link Rooms.sweep} asks of the room router (`RoomRouter`): `claim`
+ * answers whether no live worker holds the room and, when none does, promises
+ * the router places it on none until `release` — so a socket and the sweep
+ * cannot both win the same room (#948).
+ */
+export interface SweepGuard {
+  claim(roomId: string): boolean;
+  release(roomId: string): void;
 }
 
 /** A room's route, as its members fetch it. */
@@ -253,10 +290,12 @@ export interface Rooms {
   /**
    * Ends every room nobody is riding that should be over — made more than
    * {@link UNRIDDEN_ROOM_LIFETIME_MS} ago, a race that started, or one whose
-   * creator is gone — and deletes their routes. `holds` is whether a live
-   * worker holds a room (`RoomRouter.holds`). Answers how many it ended.
+   * creator is gone — and deletes their routes. A room is ended only once
+   * `guard` has claimed it from the router ({@link SweepGuard}). Answers how
+   * many it ended; a room it could not end is left open for the next sweep,
+   * and the first such failure is thrown once every other room was tried.
    */
-  sweep(holds: (roomId: string) => boolean): Promise<number>;
+  sweep(guard: SweepGuard): Promise<number>;
   /**
    * Ends every room `athleteId` made that is not over, and deletes their
    * routes — for an account being erased (#784), before its rows go.
@@ -381,18 +420,41 @@ export function createRooms(options: RoomsOptions): Rooms {
     );
   }
 
+  /** Whose turn it is on each route digest (#948 N-a): the tail of its queue. */
+  const routeTurns = new Map<string, Promise<void>>();
+
+  /** `work`, once every earlier holder of `routeSha256`'s turn is done. */
+  async function onRoute<T>(routeSha256: string, work: () => Promise<T>): Promise<T> {
+    const before = routeTurns.get(routeSha256) ?? Promise.resolve();
+    let done = (): void => undefined;
+    const tail = before.then(() => new Promise<void>((resolve) => (done = resolve)));
+    routeTurns.set(routeSha256, tail);
+    await before;
+    try {
+      return await work();
+    } finally {
+      done();
+      if (routeTurns.get(routeSha256) === tail) routeTurns.delete(routeSha256);
+    }
+  }
+
   /**
-   * THE one way a room is over (#784): closed, never to open again, and its
-   * route deleted unless another open room rides the same bytes. `true` the
-   * first time, `false` for a room already over or not a rider's room.
+   * THE one way a room is over (#784): its route deleted unless another open
+   * room rides the same bytes, and then closed, never to open again. `true`
+   * the first time, `false` for a room already over or not a rider's room.
+   * The delete comes first (#948 N-b): one that throws leaves the room open,
+   * for the next sweep to end.
    */
   async function over(roomId: string): Promise<boolean> {
     const room = await store.getRoom(roomId);
-    if (room === undefined || !(await store.closePrivateRoom(roomId, seconds()))) return false;
-    if ((await store.countOpenPrivateRoomsWithRoute(room.routeSha256, roomId)) === 0) {
-      await routes.delete(room.routeSha256);
-    }
-    return true;
+    const made = await store.getPrivateRoom(roomId);
+    if (room === undefined || made === undefined || made.closedAt !== null) return false;
+    return onRoute(room.routeSha256, async () => {
+      if ((await store.countOpenPrivateRoomsWithRoute(room.routeSha256, roomId)) === 0) {
+        await routes.delete(room.routeSha256);
+      }
+      return store.closePrivateRoom(roomId, seconds());
+    });
   }
 
   /** `caller` joins `roomId` — by its code, or from the listing — and is told what it is. */
@@ -414,6 +476,7 @@ export function createRooms(options: RoomsOptions): Rooms {
         drafting: course.drafting !== false,
         loop,
         routeSha256: room.routeSha256,
+        creator: (await store.getRoomCreator(roomId)) === caller.athleteId,
       },
     };
   }
@@ -485,62 +548,67 @@ export function createRooms(options: RoomsOptions): Rooms {
         return refuse('rate_limited');
       }
 
-      const routeSha256 = await routes.put(bytes);
-      const roomId = randomHex(16);
-      const createdAt = seconds();
-      for (let attempt = 0; attempt < 3; attempt += 1) {
-        const drawn = code();
-        const written = await store.createPrivateRoom({
-          room: {
-            id: roomId,
-            kind,
-            visibility,
-            routeSha256,
-            physicsVersion: PHYSICS_VERSION,
-          },
-          course: {
-            roomId,
-            lengthMetres,
-            grades,
-            ridingPosition: ridingPosition as RidingPosition,
-            capacity: null,
-            // A race counts down from its start (`room/core/settings.ts`'s
-            // default); a group ride starts on its first rider, at once.
-            countdownMs: kind === 'race' ? null : 0,
-            rejoinWindowMs: null,
-            drafting,
-            raceStartedAt: null,
-          },
-          codeSha256: await roomCodeDigest(drawn),
-          routeLoop: loop,
-          creatorAthleteId: caller.athleteId,
-          createdAt,
-          startsAt,
-          ...(visibility === 'public'
-            ? {
-                publicCap: {
-                  limit: PUBLIC_ROOMS_PER_ATHLETE_PER_DAY,
-                  sinceSeconds: createdAt - 24 * 60 * 60,
-                },
-              }
-            : {}),
-        });
-        if (written === 'rate-limited') {
-          // Nothing was written: the route goes unless another open room rides it.
-          if ((await store.countOpenPrivateRoomsWithRoute(routeSha256, roomId)) === 0) {
-            await routes.delete(routeSha256);
+      const routeSha256 = await sha256Hex(bytes);
+      // #948 N-a: the file and the row are written in the route's turn, so an
+      // ending room on the same bytes cannot delete the file between them.
+      return onRoute(routeSha256, async (): Promise<Outcome<CreatedRoom>> => {
+        await routes.put(bytes, routeSha256);
+        const roomId = randomHex(16);
+        const createdAt = seconds();
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          const drawn = code();
+          const written = await store.createPrivateRoom({
+            room: {
+              id: roomId,
+              kind,
+              visibility,
+              routeSha256,
+              physicsVersion: PHYSICS_VERSION,
+            },
+            course: {
+              roomId,
+              lengthMetres,
+              grades,
+              ridingPosition: ridingPosition as RidingPosition,
+              capacity: null,
+              // A race counts down from its start (`room/core/settings.ts`'s
+              // default); a group ride starts on its first rider, at once.
+              countdownMs: kind === 'race' ? null : 0,
+              rejoinWindowMs: null,
+              drafting,
+              raceStartedAt: null,
+            },
+            codeSha256: await roomCodeDigest(drawn),
+            routeLoop: loop,
+            creatorAthleteId: caller.athleteId,
+            createdAt,
+            startsAt,
+            ...(visibility === 'public'
+              ? {
+                  publicCap: {
+                    limit: PUBLIC_ROOMS_PER_ATHLETE_PER_DAY,
+                    sinceSeconds: createdAt - 24 * 60 * 60,
+                  },
+                }
+              : {}),
+          });
+          if (written === 'rate-limited') {
+            // Nothing was written: the route goes unless another open room rides it.
+            if ((await store.countOpenPrivateRoomsWithRoute(routeSha256, roomId)) === 0) {
+              await routes.delete(routeSha256);
+            }
+            return refuse('rate_limited');
           }
-          return refuse('rate_limited');
+          if (written === 'created') {
+            // A public room's code is never shown: it is joined from the listing.
+            return visibility === 'public'
+              ? { ok: true, value: { roomId, routeSha256 } }
+              : { ok: true, value: { roomId, code: displayRoomCode(drawn), routeSha256 } };
+          }
         }
-        if (written === 'created') {
-          // A public room's code is never shown: it is joined from the listing.
-          return visibility === 'public'
-            ? { ok: true, value: { roomId, routeSha256 } }
-            : { ok: true, value: { roomId, code: displayRoomCode(drawn), routeSha256 } };
-        }
-      }
-      // Three collisions in a 75-bit space is a broken random source, not bad luck.
-      throw new Error('could not draw an unused room code');
+        // Three collisions in a 75-bit space is a broken random source, not bad luck.
+        throw new Error('could not draw an unused room code');
+      });
     },
 
     async join(caller, body, client) {
@@ -653,7 +721,19 @@ export function createRooms(options: RoomsOptions): Rooms {
       // out of it. A race a restart interrupted was never decided, and has no
       // result to publish.
       const course = await store.getRoomCourse(roomId);
-      if (course?.raceFinishedAt === undefined) return refuse('not_found');
+      if (course?.raceFinishedAt === undefined) {
+        // #948 N-d: a room that is over and never said its race was decided
+        // — a restart interrupted it, or it was never ridden to the line —
+        // has no result, and never will; its members are told so apart from
+        // "not over yet". Anybody else learns nothing about it.
+        const made = await store.getPrivateRoom(roomId);
+        return course !== undefined &&
+          made !== undefined &&
+          made.closedAt !== null &&
+          (await store.isRoomMember(roomId, caller.athleteId))
+          ? refuse('race_without_result')
+          : refuse('not_found');
+      }
       const results = await store.listRoomResults(roomId);
       // A race's riders only (ruling Q2): an athlete with a result in it. Not
       // a member who never rode, and not a stranger — both are `not_found`.
@@ -688,15 +768,24 @@ export function createRooms(options: RoomsOptions): Rooms {
       await over(roomId);
     },
 
-    async sweep(holds) {
+    async sweep(guard) {
       const oldest = seconds() - UNRIDDEN_ROOM_LIFETIME_MS / 1000;
       let ended = 0;
+      let failed: { readonly error: unknown } | undefined;
       for (const room of await store.listOpenPrivateRooms()) {
-        if (holds(room.roomId)) continue;
-        if (room.raceStarted || !room.creatorPresent || room.createdAt <= oldest) {
+        if (!(room.raceStarted || !room.creatorPresent || room.createdAt <= oldest)) continue;
+        // Held by a live worker — or placed on one from now until released.
+        if (!guard.claim(room.roomId)) continue;
+        try {
           if (await over(room.roomId)) ended += 1;
+        } catch (error) {
+          // #948 N-b: left open for the next sweep; the others are still tried.
+          failed ??= { error };
+        } finally {
+          guard.release(room.roomId);
         }
       }
+      if (failed !== undefined) throw failed.error;
       return ended;
     },
 

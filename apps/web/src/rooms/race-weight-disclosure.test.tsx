@@ -38,6 +38,7 @@ const RACE: EnteredRoom = {
   ridingPosition: 'hoods',
   drafting: true,
   code: undefined,
+  madeIt: false,
   profile: northProfile(1_000),
   routeSha256: 'a'.repeat(64),
 };

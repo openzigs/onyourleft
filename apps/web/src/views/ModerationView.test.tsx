@@ -755,6 +755,49 @@ describe('the log, a page at a time — #961', () => {
     expect(logLines()[0]).toContain('Approved an account');
   });
 
+  it('drops a page asked for during a read-back that landed first — it would follow the old list, not the new one (#1166)', async () => {
+    const scripted = paged();
+    await open(scripted);
+    // Two pages shown, so the old list's next cursor is not the new first page's.
+    await activateWithKeyboard(button(section('Moderation log'), 'Show older entries'));
+    await settle();
+    expect(logLines()).toHaveLength(2);
+    // Hold the read-back after the action, so *Show more* is pressed on the old list.
+    const realRead = scripted.port.read.bind(scripted.port);
+    let releaseRead: () => void = () => undefined;
+    const readHeld = new Promise<void>((resolve) => {
+      releaseRead = resolve;
+    });
+    scripted.port.read = async () => {
+      const read = await realRead();
+      await readHeld;
+      return read;
+    };
+    const realMore = scripted.port.moreLog.bind(scripted.port);
+    let releaseMore: () => void = () => undefined;
+    const moreHeld = new Promise<void>((resolve) => {
+      releaseMore = resolve;
+    });
+    scripted.port.moreLog = async (cursor) => {
+      const page = await realMore(cursor);
+      await moreHeld;
+      return page;
+    };
+    await decide(item('Anna'), 'Known to the club.', 'Approve');
+    // The old list is still shown: its next page is asked for under the read-back's generation.
+    expect(logLines()[0]).toContain('Suspended an account');
+    await activateWithKeyboard(button(section('Moderation log'), 'Show older entries'));
+    releaseRead();
+    await settle();
+    expect(logLines()).toHaveLength(1);
+    expect(logLines()[0]).toContain('Approved an account');
+    // The old list's second page lands on the new first page: it is not that page's next.
+    releaseMore();
+    await settle();
+    expect(logLines()).toHaveLength(1);
+    expect(logLines()[0]).toContain('Approved an account');
+  });
+
   it('clears a page’s failure once an action reads everything back', async () => {
     const scripted = paged();
     await open(scripted);

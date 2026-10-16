@@ -31,6 +31,7 @@ import {
 } from '../moderation/moderation-testing.ts';
 import { createIdentity, DEFAULT_LIMITS, INVITE_LIFETIME_SECONDS } from './identity.ts';
 import { TEST_ORIGIN, testDevice, type TestDevice } from './identity-testing.ts';
+import { wholeModerationLog } from '../store/testing/index.ts';
 
 let world: SoleModeratorWorld | undefined;
 const cleanups: (() => Promise<void>)[] = [];
@@ -185,7 +186,7 @@ describe('the four registration modes (#775)', () => {
     expect(codeOf(again.body)).toBe('code_used');
     // A refused registration spent nothing: the code was taken in the same
     // transaction that registered, so a failed attempt left no athlete behind.
-    const log = await w.freshRead((store) => store.listModerationLog());
+    const log = await w.freshRead((store) => wholeModerationLog(store));
     expect(log.map((entry) => entry.action)).toEqual(['mint_invite']);
 
     const late = (
@@ -269,7 +270,7 @@ describe('a moderator’s key named AFTER its account registered (#891’s revie
         registrationState: 'active',
         activatedAt: Math.floor(ms / 1000) - 60,
       });
-      expect(await fresh.listModerationLog()).toEqual([
+      expect(await wholeModerationLog(fresh)).toEqual([
         expect.objectContaining({
           action: 'activate_moderator_key',
           actorAthleteId: first.athleteId,
@@ -328,7 +329,7 @@ describe('the approval queue (#775): the owner and the deputy decide, and the lo
     expect(refused.status).toBe(200);
 
     expect(
-      (await w.freshRead((store) => store.listModerationLog())).map(
+      (await w.freshRead((store) => wholeModerationLog(store))).map(
         ({ action, actorAthleteId, targetAthleteId, reason }) => ({
           action,
           actorAthleteId,
@@ -386,7 +387,7 @@ describe('the approval queue (#775): the owner and the deputy decide, and the lo
     await w.as(w.owner, 'POST', `/v1/moderation/registrations/${approvedRider.athleteId}/approve`, {
       reason: 'Known',
     });
-    const logged = (await w.freshRead((store) => store.listModerationLog())).length;
+    const logged = (await w.freshRead((store) => wholeModerationLog(store))).length;
 
     for (const path of [
       `/v1/moderation/registrations/${target}/approve`,
@@ -404,7 +405,7 @@ describe('the approval queue (#775): the owner and the deputy decide, and the lo
     expect((await w.freshRead((store) => store.getAthlete(target)))?.registrationState).toBe(
       'pending',
     );
-    expect(await w.freshRead((store) => store.listModerationLog())).toHaveLength(logged);
+    expect(await w.freshRead((store) => wholeModerationLog(store))).toHaveLength(logged);
   });
 });
 
@@ -424,7 +425,7 @@ describe('the approval queue with one moderator (#905): the owner alone decides'
     expect((await w.freshRead((store) => store.getAthlete(anna)))?.registrationState).toBe(
       'active',
     );
-    expect(await w.freshRead((store) => store.listModerationLog())).toEqual([
+    expect(await w.freshRead((store) => wholeModerationLog(store))).toEqual([
       expect.objectContaining({
         action: 'approve_registration',
         actorAthleteId: w.owner.athleteId,

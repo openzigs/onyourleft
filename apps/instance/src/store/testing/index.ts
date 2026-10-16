@@ -39,6 +39,7 @@ import type {
   SqlStore,
   SyncItemWrite,
   HistoryIndexWrite,
+  ModerationLogEntry,
 } from '../sql-store.ts';
 
 /** Opens a store over a database file. The real one is {@link openSqlStore}. */
@@ -558,5 +559,22 @@ export async function migrateAllBut(path: string, leaveOut: number): Promise<voi
     );
   } finally {
     await db.destroy();
+  }
+}
+
+/**
+ * The whole moderation log, oldest first, read a page at a time through
+ * `listModerationLogPage` — the read the log route makes (#1166). The store
+ * has no unbounded read of the log, so a test that wants all of it pages.
+ */
+export async function wholeModerationLog(store: SqlStore): Promise<ModerationLogEntry[]> {
+  const newestFirst: ModerationLogEntry[] = [];
+  let beforeId: number | undefined;
+  for (;;) {
+    const page = await store.listModerationLogPage(beforeId, 200);
+    newestFirst.push(...page);
+    const last = page.at(-1);
+    if (page.length < 200 || last === undefined) return newestFirst.reverse();
+    beforeId = last.id;
   }
 }

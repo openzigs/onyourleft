@@ -431,7 +431,8 @@ describe('a room whose creator erases their account is over — #784', () => {
 });
 
 describe('a room nobody rides is over within a day — #784', () => {
-  const nobodyIn = (): boolean => false;
+  /** A router that holds no room: every claim is granted (`SweepGuard`). */
+  const nobodyIn = { claim: (): boolean => true, release: (): void => undefined };
 
   it('ends a room nobody is riding a day after it was made, whether or not anybody joined it, and lets its route go', async () => {
     const w = await open();
@@ -466,7 +467,9 @@ describe('a room nobody rides is over within a day — #784', () => {
     const anna = await rider(w);
     const room = await madeRoom(w, anna.token, { kind: 'group' });
     w.clock.ms += 2 * UNRIDDEN_ROOM_LIFETIME_MS;
-    expect(await w.rooms.sweep((roomId) => roomId === room.roomId)).toBe(0);
+    expect(
+      await w.rooms.sweep({ claim: (roomId) => roomId !== room.roomId, release: () => undefined }),
+    ).toBe(0);
     expect(w.roomRoutes.has(room.routeSha256)).toBe(true);
   });
 

@@ -13,6 +13,10 @@
  * website served (D-11), and a device holding a sign-in with no pin (D-14
  * Q1), which reads the instance's public keys and stops there.
  *
+ * And, since it is the real instance (#948): a room's maker who joins it by
+ * its code is told they made it, and a race a restart interrupted answers
+ * "no result" rather than "not over yet".
+ *
  * The instance is `apps/instance`'s own test world, read by a computed
  * `import()` — test code only, as `instance/sealed-routes.test.ts` reads it.
  */
@@ -40,6 +44,16 @@ import { createRoomsPort } from './rooms-port';
 
 interface IdentityInstance {
   readonly instance: { handler(request: Request): Promise<Response> };
+  /** The instance's rooms: its sweep, as a restart runs it (#948). */
+  readonly rooms: {
+    sweep(guard: {
+      claim(roomId: string): boolean;
+      release(roomId: string): void;
+    }): Promise<number>;
+  };
+  freshRead<T>(
+    read: (store: { markRaceStarted(roomId: string, at: number): Promise<void> }) => Promise<T>,
+  ): Promise<T>;
   readonly instanceKeys: { show(): Promise<{ readonly card: string }> };
   call(
     method: string,
@@ -266,5 +280,48 @@ describe('a device that cannot seal sends nothing for phase 2 (#1210, D-11, D-14
     expect(paths(send)).toEqual(['GET /v1/instance/keys']);
     const bodies = (send.mock.calls as [string, RequestInit][]).map(([, init]) => init.body);
     expect(JSON.stringify(bodies)).not.toContain('ABCDE');
+  });
+});
+
+describe('a room as the real instance tells it, after #929’s review — #948', () => {
+  /** Anna's race, made through her port, which Bea joined by its code. */
+  async function aRace() {
+    const w = await world();
+    const send = wire(w);
+    const anna = await rider(w, send, 'Anna');
+    const bea = await rider(w, send, 'Bea');
+    const made = await anna.rooms().create({
+      kind: 'race',
+      ridingPosition: 'hoods',
+      drafting: true,
+      route: ROUTE,
+    });
+    if (made.kind !== 'created') throw new Error(JSON.stringify(made));
+    const code = made.room.code ?? '';
+    expect((await bea.rooms().join(code)).kind).toBe('joined');
+    return { w, anna, bea, made: made.room, code };
+  }
+
+  it('N1: a room’s maker who joins it by its code is told they made it, and nobody else is', async () => {
+    const { anna, bea, made, code } = await aRace();
+    expect(made.madeIt).toBe(true);
+    // After a reload the panel's room is gone; its maker joins by the code.
+    const again = await anna.rooms().join(code);
+    expect(again.kind === 'joined' ? again.room.madeIt : undefined).toBe(true);
+    const joiner = await bea.rooms().join(code);
+    expect(joiner.kind === 'joined' ? joiner.room.madeIt : undefined).toBe(false);
+  });
+
+  it('N-d: a race a restart interrupted answers “no result”, not “not over yet”', async () => {
+    const { w, bea, made } = await aRace();
+    await w.freshRead((store) => store.markRaceStarted(made.roomId, 1_790_000_010));
+    // Still being ridden: not over yet, as before.
+    expect(await bea.rooms().results(made.roomId)).toEqual({
+      kind: 'refused',
+      reason: 'no-such-room',
+    });
+    // The instance restarts in the middle of it, and its first sweep ends it.
+    expect(await w.rooms.sweep({ claim: () => true, release: () => undefined })).toBe(1);
+    expect(await bea.rooms().results(made.roomId)).toEqual({ kind: 'no-result' });
   });
 });
