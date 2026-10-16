@@ -9,7 +9,8 @@
  * them tells anybody that a block is there (`moderation.ts`). And the
  * moderators' — the report queue, the log, and every action — which declare
  * `reaches: 'moderation'`, so the handler answers `not_found` to anybody who
- * is not the owner or the deputy before the route is called.
+ * is not a moderator (the owner, or the deputy if one is named) before the
+ * route is called.
  */
 
 import { errorResponse } from '../errors.ts';
@@ -614,16 +615,21 @@ export const MODERATION_ROUTES: readonly Route[] = [
     sealed: 'only',
     operationId: 'listOpenReports',
     reaches: 'moderation',
-    summary: 'The moderators’ queue: every report not yet decided, oldest first.',
+    summary:
+      'The moderators’ queue: every report not yet decided, oldest first, and whether this instance names one moderator only, who then decides a report about themselves, declared as their own (#905).',
     identity: true,
     auth: 'session',
     errors: ['unauthenticated'],
     response: {
       contentType: 'application/json',
-      schema: object({ reports: { type: 'array', items: reportSchema } }),
+      schema: object({
+        soleModerator: { type: 'boolean' },
+        reports: { type: 'array', items: reportSchema },
+      }),
     },
     handle: async (context) =>
       json({
+        soleModerator: moderationOf(context).soleModerator,
         reports: (await moderationOf(context).openReports()).map((report) => ({
           reportId: report.id,
           reporterAthleteId: report.athleteId,
@@ -639,7 +645,8 @@ export const MODERATION_ROUTES: readonly Route[] = [
     sealed: 'only',
     operationId: 'dismissReport',
     reaches: 'moderation',
-    summary: 'Dismiss a report, with a reason. Written to the moderation log.',
+    summary:
+      'Dismiss a report, with a reason. Written to the moderation log. A report about the caller is refused while another moderator is named, and otherwise logged as `dismiss_own_report`, the reason being their declaration of the conflict (#905).',
     identity: true,
     auth: 'session',
     request: object({ reason: string }),

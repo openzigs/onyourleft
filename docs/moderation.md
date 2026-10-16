@@ -9,28 +9,53 @@ rider's device keeps its own copy of every ride and is not affected by anything 
 
 ## Who moderates
 
-An instance has two moderator roles: the **owner** and one named **deputy**. The owner of this
-project ruled on 2026-09-28 (#16, Q13) that the project's own instance is moderated by those two
-people and no one else.
+An instance has **one moderator**: you, the **owner**. You may also name a **deputy**, but you do
+not have to, and the software does not expect one. The owner of this project ruled on 2026-09-30
+([#905](https://github.com/openzigs/onyourleft/issues/905)) that the project's own instance has one
+moderator, the owner, and no deputy. That reverses the earlier answer to Q13 (#16, 2026-09-28),
+"the owner plus a named deputy".
 
 A moderator is named by a **device key**: the 64-character hex public key of their phone or
 browser, which the app can show. The instance reads two settings:
 
 | Setting | What it names |
 |---|---|
-| `OYL_INSTANCE_OWNER_KEY` | the owner's device key |
-| `OYL_INSTANCE_DEPUTY_KEY` | the deputy's device key |
+| `OYL_INSTANCE_OWNER_KEY` | the moderator's device key: yours |
+| `OYL_INSTANCE_DEPUTY_KEY` | optional, and usually **empty**: a second moderator's device key |
 
 The athlete who holds the named key, and has not revoked it, holds the role. A key is named, not an
 account, so you can name yourself before your account exists. Without that, with approval-required
 registration, nobody could ever approve the first account. If you revoke the named key, you lose
 the role until the setting names another key.
 
-A moderator cannot act on a moderator. The owner and the deputy cannot suspend each other or hide
-each other's names, and neither can act on themselves. Neither can dismiss a report **about
-themselves**: the other moderator decides it. Each such attempt changes nothing, and it **is** written
-to the moderation log, as `refused_suspend`, `refused_dismiss_report` and so on, so you can see who
-tried. If the deputy has to go, change the setting.
+A moderator cannot act on a moderator. You cannot suspend yourself or hide your own name, and with a
+deputy named neither of you can do that to the other. Each such attempt changes nothing, and it
+**is** written to the moderation log, as `refused_suspend`, `refused_hide_display_name` and so on,
+so you can see who tried.
+
+### A report about the moderator
+
+Riders can report you. What happens to that report depends on how many moderators are named:
+
+- **You are the only moderator** (the usual case, and the project's instance). Nobody else could
+  ever decide it, so you do. The Moderation screen marks it as being about you, and offers one
+  choice: **Dismiss**. The reason you give is your **declaration of the conflict**: say that the
+  report was about you, and why you dismissed it. The log records it as `dismiss_own_report`, never
+  as an ordinary dismissal, so anyone reading the log sees that you decided a report about yourself.
+  This is the owner's procedure for the project's instance
+  ([notice-and-action](moderation/notice-and-action.md#a-notice-or-complaint-about-the-moderator)).
+  If the report is about something you wrote, such as your display name, you can change it
+  yourself.
+- **A deputy is named.** You may not decide a report about yourself: the other moderator decides
+  it. An attempt changes nothing and is logged as `refused_dismiss_report`. If the deputy has to go,
+  empty the setting.
+
+### When the only moderator is away
+
+Nobody covers for you, and that is stated publicly: **a report may wait up to 7 days** for a
+decision, the target the owner set for the project's instance (owner's ruling on #905, 2026-10-15;
+[target times](moderation/notice-and-action.md#target-times)). If you will be away for longer than
+that, switch public rooms off until you are back (public rooms are not built yet: #788). Reports wait in the queue and none is lost.
 
 ⚠️ **If you signed in before you set your key**, your account registered like anybody else's: with
 approval-required registration it is waiting for approval, and nobody may approve a moderator. So
@@ -41,19 +66,19 @@ again.
 ## Who can join: the registration modes
 
 `OYL_INSTANCE_REGISTRATION` sets how the instance takes new riders, in any case (`Closed` is
-`closed`). **If it is not set, the mode is `closed`**: an instance someone starts without reading
-this page registers nobody new. The project's own image sets `approval`, the owner's ruling for this
-project's instance (#16, Q5 and Q13).
+`closed`). **If it is not set, the mode is `approval`** (the owner's ruling on #775, 2026-10-15):
+a new rider's account waits for you, and only the keys you name register active. Before that ruling
+an unset mode was `closed`. The project's own image sets `approval` too (#16, Q5 and Q13).
 
 | Mode | A device key the instance has never seen… |
 |---|---|
-| `approval` (the project's image) | registers an account that **waits** for the owner or the deputy. While it waits, the rider can see their own account, name themselves and confirm their age, and nothing else. Other riders cannot see them. |
+| `approval` (the default, and the project's image) | registers an account that **waits** for a moderator. While it waits, the rider can see their own account, name themselves and confirm their age, and nothing else. Other riders cannot see them. |
 | `invite` | registers only with a single-use invitation a moderator minted (`POST /v1/moderation/invites`, good for seven days). The invitation is spent in the same transaction that registers the account. |
 | `open` | registers an active account at once. |
-| `closed` (the default) | is refused. |
+| `closed` | is refused. |
 
-The keys named in `OYL_INSTANCE_OWNER_KEY` and `OYL_INSTANCE_DEPUTY_KEY` register active in every
-mode.
+The key named in `OYL_INSTANCE_OWNER_KEY`, and in `OYL_INSTANCE_DEPUTY_KEY` if it names one,
+registers active in every mode.
 
 | Approval action | Route | Effect |
 |---|---|---|
@@ -198,8 +223,8 @@ does not happen.
 
 | Action | Route | Effect |
 |---|---|---|
-| Read the report queue | `GET /v1/moderation/reports` | Every report not yet decided, oldest first: who reported whom, why, and when. |
-| Dismiss a report | `POST /v1/moderation/reports/{id}/dismiss` | Removes it from the queue. |
+| Read the report queue | `GET /v1/moderation/reports` | Every report not yet decided, oldest first: who reported whom, why, and when, and `soleModerator`: whether this instance names one moderator only. |
+| Dismiss a report | `POST /v1/moderation/reports/{id}/dismiss` | Removes it from the queue. A report about you is logged as `dismiss_own_report` when you are the only moderator, and refused when a deputy is named (see "A report about the moderator"). |
 | Hide a display name | `POST /v1/moderation/athletes/{id}/hide-display-name` | Other riders see "Rider" instead of the name. The rider still sees their own name. The hide ends when the rider chooses a **different** name, because a new name is new content. Choosing the same name again keeps it hidden. |
 | Suspend an account | `POST /v1/moderation/athletes/{id}/suspend` | Every device key the rider holds is refused at sign-in, every session they had ends at once, and other riders stop seeing them. **Nothing they own is deleted.** |
 | Hide one item | `POST /v1/moderation/items/hide` | One room's listing (`room:<room id>`), the route shown in a room (`route:<room id>`), or one row of a race's result (`result:<room id>:<row>`), by the reference a notice names it by (#913). Needs a statement of reasons, which the item's owner is shown. **Nothing is deleted** and the rest is left alone. A hidden row is shown to everybody else as "a rider" with no figure, and to its own rider as before. A hidden route is shown to no member but the room's maker. A room whose listing is hidden takes nobody new by its code. An appeal that reverses it shows the item again. |

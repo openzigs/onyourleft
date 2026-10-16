@@ -47,7 +47,7 @@ services:
       # the source is this build's commit.
       OYL_INSTANCE_NAME: ${OYL_INSTANCE_NAME:-}
       OYL_INSTANCE_SOURCE_URL: ${OYL_INSTANCE_SOURCE_URL:-}
-      OYL_INSTANCE_REGISTRATION: ${OYL_INSTANCE_REGISTRATION:-closed}
+      OYL_INSTANCE_REGISTRATION: ${OYL_INSTANCE_REGISTRATION:-approval}
       OYL_INSTANCE_ROOM_WORKERS: ${OYL_INSTANCE_ROOM_WORKERS:-}
       OYL_INSTANCE_WS_COMPRESSION: ${OYL_INSTANCE_WS_COMPRESSION:-off}
       OYL_INSTANCE_METRICS: ${OYL_INSTANCE_METRICS:-off}
@@ -59,6 +59,8 @@ services:
       # A quiet analysis stream's heartbeat (25 s when empty). `0` is ONLY for
       # #1105's control measurement, never to run with (.env.example).
       OYL_INSTANCE_ANALYSIS_HEARTBEAT_MS: ${OYL_INSTANCE_ANALYSIS_HEARTBEAT_MS:-}
+      # The moderator's device key. The deputy's is optional and usually
+      # empty: an instance has one moderator (#905, docs/moderation.md).
       OYL_INSTANCE_OWNER_KEY: ${OYL_INSTANCE_OWNER_KEY:-}
       OYL_INSTANCE_DEPUTY_KEY: ${OYL_INSTANCE_DEPUTY_KEY:-}
       OYL_INSTANCE_PUBLIC_ROOM_MIN_ACCOUNT_DAYS: ${OYL_INSTANCE_PUBLIC_ROOM_MIN_ACCOUNT_DAYS:-}

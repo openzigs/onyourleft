@@ -560,6 +560,12 @@ export type ModerationActionKind =
   | 'unsuspend'
   | 'hide_display_name'
   | 'dismiss_report'
+  /**
+   * The only moderator dismissing a report about themselves (#905): nobody
+   * else could decide it, so they do, and the log says it was their own. Its
+   * target is the moderator, and its reason is their declaration.
+   */
+  | 'dismiss_own_report'
   | 'approve_registration'
   | 'refuse_registration'
   /**
@@ -2403,6 +2409,7 @@ async function applyToAthlete(
         .execute();
       return true;
     case 'dismiss_report':
+    case 'dismiss_own_report':
       return true;
     case 'hide_item':
       // An item is hidden by `hideItem`, which writes its own row; asked of
@@ -4414,7 +4421,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
             ) {
               return { outcome: 'not_found' };
             }
-          } else if (action.action === 'dismiss_report') {
+          } else if (action.action === 'dismiss_report' || action.action === 'dismiss_own_report') {
             return { outcome: 'not_found' };
           }
           if (action.action !== 'dismiss_report') {

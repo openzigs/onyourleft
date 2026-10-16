@@ -24,13 +24,14 @@
  * ## Registration and moderation — #775, #83
  *
  * - **`OYL_INSTANCE_REGISTRATION`**: `open`, `approval`, `invite` or `closed`.
- *   Case does not matter. ⚠️ **Unset is `closed`** (#891's merge review): an
- *   instance somebody starts without reading this registers nobody, as main's
- *   instance did before the modes existed. The PROJECT's instance registers by
- *   `approval` — the owner's rulings (#16, Q5 and Q13, 2026-09-28) are about
- *   it — and its image sets that (`Dockerfile`).
- * - **`OYL_INSTANCE_OWNER_KEY`** and **`OYL_INSTANCE_DEPUTY_KEY`**: the two
- *   moderators' device keys, 64 lowercase hex characters each (ruling Q13).
+ *   Case does not matter. ⚠️ **Unset is `approval`** (the owner's ruling on
+ *   #775, 2026-10-15): a new rider's account waits for a moderator, and only
+ *   the keys the operator names register active. It was `closed` from #891's
+ *   merge review until that ruling. The project's image also sets `approval`
+ *   explicitly (`Dockerfile`; rulings Q5 and Q13).
+ * - **`OYL_INSTANCE_OWNER_KEY`** and **`OYL_INSTANCE_DEPUTY_KEY`**: the
+ *   moderators' device keys, 64 lowercase hex characters each. The deputy is
+ *   optional, and the project's instance names none (#905).
  * - **`OYL_INSTANCE_PUBLIC_ROOM_MIN_ACCOUNT_DAYS`** and
  *   **`OYL_INSTANCE_PUBLIC_ROOM_MIN_RIDES`**: public-room eligibility's
  *   thresholds (`moderation/eligibility.ts`).
@@ -83,8 +84,12 @@ export const REGISTRATION_MODES: readonly RegistrationMode[] = [
   'closed',
 ];
 
-/** The mode an instance registers in when the operator sets none: nobody new (#891's merge review). */
-export const DEFAULT_REGISTRATION: RegistrationMode = 'closed';
+/**
+ * The mode an instance registers in when the operator sets none: a new account
+ * waits for a moderator (the owner's ruling on #775, 2026-10-15; `closed`
+ * before it).
+ */
+export const DEFAULT_REGISTRATION: RegistrationMode = 'approval';
 
 /** The longest name an operator may give their instance, in characters. */
 export const MAXIMUM_INSTANCE_NAME_LENGTH = 64;

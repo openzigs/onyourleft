@@ -25,12 +25,14 @@ import type { SqlStore } from '../store/sql-store.ts';
 import {
   codeOf,
   startModerationWorld,
+  startSoleModeratorWorld,
   type ModerationWorld,
+  type SoleModeratorWorld,
 } from '../moderation/moderation-testing.ts';
 import { createIdentity, DEFAULT_LIMITS, INVITE_LIFETIME_SECONDS } from './identity.ts';
 import { TEST_ORIGIN, testDevice, type TestDevice } from './identity-testing.ts';
 
-let world: ModerationWorld | undefined;
+let world: SoleModeratorWorld | undefined;
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {
   await world?.close();
@@ -42,8 +44,9 @@ async function start(
   registration: 'open' | 'approval' | 'invite' | 'closed',
   options: Parameters<typeof startModerationWorld>[0] = {},
 ): Promise<ModerationWorld> {
-  world = await startModerationWorld({ ...options, registration });
-  return world;
+  const started = await startModerationWorld({ ...options, registration });
+  world = started;
+  return started;
 }
 
 /** Sign in from a stated client address, through the real handler. */
@@ -83,10 +86,10 @@ async function signInFrom(
 }
 
 describe('the default registration mode (#775; the project’s image: rulings Q5 and Q13)', () => {
-  it('is closed, on an instance started with nothing configured (#891 merge review, decision 21)', async () => {
+  it('is approval, on an instance started with nothing configured (owner’s ruling, 2026-10-15)', async () => {
     const configured = readConfig({ commit: TEST_COMMIT });
     if (!configured.ok) throw new Error(configured.problems.join(' '));
-    expect(configured.config.registration).toBe('closed');
+    expect(configured.config.registration).toBe('approval');
 
     const directory = await mkdtemp(join(tmpdir(), 'oyl-instance-default-'));
     const store = await openSqlStore(join(directory, 'instance.sqlite'));
@@ -116,8 +119,16 @@ describe('the default registration mode (#775; the project’s image: rulings Q5
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(await device.statement(nonce)),
     });
-    expect(session.status).toBe(403);
-    expect(codeOf((await session.json()) as Record<string, unknown>)).toBe('registration_closed');
+    // Registered, and waiting: read back on a fresh connection to the file.
+    expect(session.status).toBe(200);
+    const answer = (await session.json()) as { athleteId: string; registrationState: string };
+    expect(answer.registrationState).toBe('pending');
+    const fresh = await openSqlStore(join(directory, 'instance.sqlite'));
+    try {
+      expect((await fresh.getAthlete(answer.athleteId))?.registrationState).toBe('pending');
+    } finally {
+      await fresh.close();
+    }
   });
 
   it('is what the project’s image is configured with', () => {
@@ -394,6 +405,32 @@ describe('the approval queue (#775): the owner and the deputy decide, and the lo
       'pending',
     );
     expect(await w.freshRead((store) => store.listModerationLog())).toHaveLength(logged);
+  });
+});
+
+describe('the approval queue with one moderator (#905): the owner alone decides', () => {
+  it('registers the owner active, and the owner approves a rider with no deputy named', async () => {
+    world = await startSoleModeratorWorld({ registration: 'approval' });
+    const w = world;
+    expect((await w.as(w.owner, 'GET', '/v1/auth/account')).body).toMatchObject({
+      registrationState: 'active',
+    });
+    const pending = await w.signIn(await testDevice(), { displayName: 'Anna' });
+    const anna = pending.body.athleteId as string;
+    const approved = await w.as(w.owner, 'POST', `/v1/moderation/registrations/${anna}/approve`, {
+      reason: 'Known to me',
+    });
+    expect(approved.status).toBe(200);
+    expect((await w.freshRead((store) => store.getAthlete(anna)))?.registrationState).toBe(
+      'active',
+    );
+    expect(await w.freshRead((store) => store.listModerationLog())).toEqual([
+      expect.objectContaining({
+        action: 'approve_registration',
+        actorAthleteId: w.owner.athleteId,
+        targetAthleteId: anna,
+      }),
+    ]);
   });
 });
 

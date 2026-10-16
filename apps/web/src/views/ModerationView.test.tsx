@@ -43,6 +43,7 @@ import {
   NOTICES_SHORT_TEXT,
   NOTICES_UNREADABLE_TEXT,
   REPORT_CONFLICT_TEXT,
+  REPORT_OWN_CONFLICT_TEXT,
   APPEAL_CONFLICT_TEXT,
   NOTICE_STEP_TEXT,
   ITEM_TEXT,
@@ -255,6 +256,26 @@ describe('the report queue — #83, #905, #955', () => {
     // The other report is decidable.
     expect(text(item('Report 7'))).not.toContain(REPORT_CONFLICT_TEXT);
     expect(button(item('Report 7'), 'Dismiss')).toBeDefined();
+  });
+
+  it('offers the only moderator one choice on a report about them: dismiss it, declaring the conflict (#905)', async () => {
+    const scripted = scriptedModeration({ soleModerator: true });
+    await open(scripted);
+    const conflict = item('Report 8');
+    expect(text(conflict)).toContain(REPORT_OWN_CONFLICT_TEXT);
+    expect(text(conflict)).not.toContain(REPORT_CONFLICT_TEXT);
+    expect([...conflict.querySelectorAll('button')].map((each) => each.textContent)).toEqual([
+      'Dismiss',
+    ]);
+    await decide(conflict, 'About me. Unfounded: I refused a duplicate account.', 'Dismiss');
+    expect(scripted.calls).toContain('dismiss 8');
+    expect(text(section('Reports'))).not.toContain('Report 8');
+    expect(scripted.held.log.at(-1)).toMatchObject({
+      action: 'dismiss_own_report',
+      targetAthleteId: SCRIPTED_MODERATOR,
+      reportId: 8,
+    });
+    expect(text()).toContain('Dismissed a report about themselves, as the only moderator');
   });
 
   it('suspends a report’s account for the report, which closes it', async () => {
