@@ -47,6 +47,7 @@ describe('readConfig', () => {
         },
         name: null,
         legal: NO_LEGAL_SETTINGS,
+        terms: null,
       },
     });
   });

@@ -165,6 +165,38 @@ function DeviceList({ outcome }: { readonly outcome: DevicesOutcome | undefined 
 /** The Instance screen's link to Moderation, drawn for the instance's moderator only (#955). */
 export const MODERATE_LINK_TEXT = 'Moderate this instance';
 
+/** What the Instance screen says of terms the rider has not read (#909). ⚠️ Draft wording awaiting the owner's approval. */
+export const TERMS_CHANGED_TEXT = {
+  lead: (version: string) =>
+    `This instance’s terms of service took effect on ${version}, and you have not read that version on this device.`,
+  read: 'Read the terms',
+  done: 'I have read them',
+} as const;
+
+/** Terms the rider has not read on this device (#909, DSA Art. 14(2)). */
+function TermsChanged({
+  origin,
+  version,
+  onRead,
+}: {
+  readonly origin: string;
+  readonly version: string;
+  readonly onRead: () => void;
+}): JSX.Element {
+  return (
+    <StatusMessage tone="info" label="Terms of service">
+      {TERMS_CHANGED_TEXT.lead(version)}{' '}
+      <a href={new URL('/terms', origin).href} target="_blank" rel="noreferrer">
+        {TERMS_CHANGED_TEXT.read}
+      </a>{' '}
+      (opens in a new tab).{' '}
+      <Button variant="secondary" onClick={onRead}>
+        {TERMS_CHANGED_TEXT.done}
+      </Button>
+    </StatusMessage>
+  );
+}
+
 export function InstanceView({
   port,
   moderation,
@@ -412,6 +444,17 @@ export function InstanceView({
           {/* Controls first (#666): the one action on this state is here, not
               under the device list. */}
           {disconnectControl}
+          {/* #909: terms the rider has not read here — new, or changed since. */}
+          {state.termsUnread && state.termsVersion !== null ? (
+            <TermsChanged
+              origin={state.origin}
+              version={state.termsVersion}
+              onRead={() => {
+                port?.markTermsRead(state.termsVersion ?? '');
+                void read();
+              }}
+            />
+          ) : null}
           {/* #955: only the instance's moderator is offered the link. */}
           {standing === 'moderator' ? (
             <p>

@@ -405,5 +405,7 @@ them off.
   Art. 16, and the Act's ss.20–21)
 - [Statements of reasons](moderation/statement-of-reasons.md) (EU DSA Art. 17)
 - [The DSA's scope, Art. 13 and Art. 19](moderation/dsa-scope.md)
+- [Terms of service](moderation/terms-of-service.md) for the project's instance (#909), served at
+  `/terms` once approved and named in `OYL_INSTANCE_TERMS_FILE`
 - The reading they rest on:
   [spike 0019](spikes/0019-online-safety-act-and-dsa-read-for-the-projects-instance.md)

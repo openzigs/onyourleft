@@ -68,6 +68,10 @@ export interface ScriptedInstance {
     devices: readonly InstanceDevice[];
     /** The pinned fingerprint, 52 base32 characters, or `undefined` for a device with no card (#1190). */
     pin: string | undefined;
+    /** The date the instance's terms took effect (#909), or `null` for none. */
+    termsVersion: string | null;
+    /** The terms version this device marked read, if any (#909). */
+    termsRead: string | undefined;
   };
 }
 
@@ -122,6 +126,8 @@ export function scriptedInstance(options: ScriptedInstanceOptions = {}): Scripte
         'https://github.com/openzigs/onyourleft/tree/0123456789abcdef0123456789abcdef01234567',
       devices: SCRIPTED_DEVICES,
       pin: options.pin,
+      termsVersion: null,
+      termsRead: undefined,
     },
     port: {
       current: () => {
@@ -140,6 +146,8 @@ export function scriptedInstance(options: ScriptedInstanceOptions = {}): Scripte
             instanceName: held.instanceName,
             displayName: held.displayName,
             sourceUrl: held.sourceUrl,
+            termsVersion: held.termsVersion,
+            termsUnread: held.termsVersion !== null && held.termsRead !== held.termsVersion,
           },
         );
       },
@@ -217,6 +225,10 @@ export function scriptedInstance(options: ScriptedInstanceOptions = {}): Scripte
           ? { kind: 'listed', devices: scripted.held.devices }
           : { kind: 'unavailable', text: 'not connected' };
         return Promise.resolve(answer);
+      },
+      markTermsRead: (version) => {
+        calls.push(`markTermsRead ${version}`);
+        scripted.held.termsRead = version;
       },
       disconnect: () => {
         calls.push('disconnect');

@@ -36,6 +36,10 @@ export const LEGAL_PAGE_PATH = '/legal';
 export const REPORT_LINK_TEXT = 'Report content you think is illegal';
 export const LEGAL_LINK_TEXT = 'Who runs it, and how to contact them';
 
+/** The terms page's path on every instance (`apps/instance` §`terms.ts` `TERMS_PAGE_PATH`, #909). */
+export const TERMS_PAGE_PATH = '/terms';
+export const TERMS_LINK_TEXT = 'Its terms of service';
+
 export function InstancePages({
   instance,
 }: {
@@ -73,6 +77,12 @@ export function InstancePages({
       <p>
         <a href={instancePageUrl(origin, LEGAL_PAGE_PATH)} target="_blank" rel="noreferrer">
           {LEGAL_LINK_TEXT}
+        </a>{' '}
+        (opens in a new tab).
+      </p>
+      <p>
+        <a href={instancePageUrl(origin, TERMS_PAGE_PATH)} target="_blank" rel="noreferrer">
+          {TERMS_LINK_TEXT}
         </a>{' '}
         (opens in a new tab).
       </p>

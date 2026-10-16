@@ -83,7 +83,10 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         one item (a room, its route, a row of a result) is
                         hidden alone (migration 0030, `hideItem`), and
                         `rooms/rooms.ts`'s join, route and results reads
-                        each ask `listHiddenItemsOfRoom`. Behind a
+                        each ask `listHiddenItemsOfRoom`. Since
+                        #909 `/terms` serves the operator's own terms file
+                        (`src/terms.ts`, never a default), named by date in
+                        `GET /instance`. Behind a
                         proxy the sign-in rate limits read the client's
                         address from `OYL_INSTANCE_CLIENT_ADDRESS_HEADER`
                         (`cf-connecting-ip` behind the tunnel), and only

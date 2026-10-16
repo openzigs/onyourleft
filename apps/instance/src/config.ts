@@ -63,6 +63,7 @@ import {
 } from './moderation/eligibility.ts';
 import type { Moderators } from './moderation/moderation.ts';
 import { readLegalSettings, type LegalSettings, type RawLegalSettings } from './legal.ts';
+import { readTermsSettings, type RawTermsSettings, type TermsSettings } from './terms.ts';
 
 /** This repository. The same URL `apps/web/src/privacy/policy.ts` §`REPOSITORY` names. */
 export const REPOSITORY = 'https://github.com/openzigs/onyourleft';
@@ -95,7 +96,7 @@ export const DEFAULT_REGISTRATION: RegistrationMode = 'approval';
 export const MAXIMUM_INSTANCE_NAME_LENGTH = 64;
 
 /** The raw values, as the environment gives them. */
-export interface RawConfig extends RawLegalSettings {
+export interface RawConfig extends RawLegalSettings, RawTermsSettings {
   readonly host?: string | undefined;
   readonly port?: string | undefined;
   readonly commit?: string | undefined;
@@ -236,6 +237,11 @@ export interface Config {
    * refusal to start.
    */
   readonly legal: LegalSettings;
+  /**
+   * The terms of service this instance publishes, and the date they took
+   * effect (#909, `terms.ts`), or `null` for none: never a default.
+   */
+  readonly terms: TermsSettings | null;
 }
 
 export type ConfigResult =
@@ -387,6 +393,7 @@ export function readConfig(raw: RawConfig): ConfigResult {
   }
 
   const legal = readLegalSettings(raw, problems);
+  const terms = readTermsSettings(raw, problems);
 
   if (problems.length > 0 || sourceUrl === undefined) {
     return { ok: false, problems };
@@ -412,6 +419,7 @@ export function readConfig(raw: RawConfig): ConfigResult {
       pictures,
       name: instanceName,
       legal,
+      terms,
     },
   };
 }
