@@ -20,7 +20,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { ensureLocalAthlete, LOCAL_ATHLETE } from '../local-athlete';
 import { createInstancePort, type InstanceStorage } from './instance-port';
 import type { InstanceSend } from './instance-transport';
-import { readInstanceAccount } from './sign-in';
+import { INSTANCE_ACCOUNT_STORAGE_KEY, readInstanceAccount } from './sign-in';
 import { APPEAL_REFUSAL_TEXT, createStatementsPort, type StatementsPort } from './statements-port';
 import { LOADED_FROM_A_WEBSITE, LOADED_LOCALLY } from './testing';
 
@@ -84,6 +84,7 @@ async function connected(
   /** Every path this device sent, in order. */
   sent: string[];
   me: string;
+  storage: InstanceStorage;
   restrict: (path: 'suspend' | 'hide-display-name') => Promise<void>;
 }> {
   const started: { world?: World } = {};
@@ -145,6 +146,7 @@ async function connected(
     world,
     sent,
     me,
+    storage,
     port: createStatementsPort({
       storage,
       loadedFrom: options.portLoadedFrom ?? LOADED_LOCALLY,
@@ -187,8 +189,9 @@ describe('the statements of reasons about this rider (#910)', () => {
         }),
       ],
     });
-    // One request: no way-out session for a rider who can sign in.
-    expect(sent.slice(before)).toEqual(['/v1/statements']);
+    // One sealed request (#1382): no way-out session for a rider who can sign
+    // in, and never `/v1/statements` in plaintext from a device with a pin.
+    expect(sent.slice(before)).toEqual(['/v1/instance/keys', '/v1/sealed']);
   });
 
   it('reads why a SUSPENDED rider was suspended, through the way-out session', async () => {
@@ -200,15 +203,18 @@ describe('the statements of reasons about this rider (#910)', () => {
       kind: 'statements',
       statements: [expect.objectContaining({ restriction: 'suspend', facts: STATEMENT.facts })],
     });
-    // The way-out session is a phase-2 sealed route (#1210): the keys are
-    // judged, the challenge is plaintext, and the session is asked for
-    // sealed — never `/v1/auth/leave-session` in plaintext.
+    // The held session is refused sealed; the way-out session is a phase-2
+    // sealed route (#1210): the keys are judged, the challenge is plaintext,
+    // and the session is asked for sealed — and the statements are read with
+    // it sealed too (#1382). Never `/v1/auth/leave-session` nor
+    // `/v1/statements` in plaintext.
     expect(sent.slice(before)).toEqual([
-      '/v1/statements',
+      '/v1/instance/keys',
+      '/v1/sealed',
       '/v1/instance/keys',
       '/v1/auth/challenge',
       '/v1/sealed',
-      '/v1/statements',
+      '/v1/sealed',
     ]);
   });
 
@@ -222,12 +228,14 @@ describe('the statements of reasons about this rider (#910)', () => {
     expect(await port.appeal(statementId, 'I was quoting another rider.')).toEqual({
       kind: 'filed',
     });
+    // Sealed with both sessions (#1382): the appeal never goes in plaintext.
     expect(sent.slice(before)).toEqual([
-      `/v1/statements/${String(statementId)}/appeal`,
+      '/v1/instance/keys',
+      '/v1/sealed',
       '/v1/instance/keys',
       '/v1/auth/challenge',
       '/v1/sealed',
-      `/v1/statements/${String(statementId)}/appeal`,
+      '/v1/sealed',
     ]);
     expect(await port.read()).toEqual({
       kind: 'statements',
@@ -261,8 +269,27 @@ describe('the statements of reasons about this rider (#910)', () => {
     await restrict('suspend');
     const before = sent.length;
     expect(await port.read()).toEqual({ kind: 'unreachable' });
-    // The held session is tried and refused; nothing about a way out is sent.
-    expect(sent.slice(before)).toEqual(['/v1/statements']);
+    // A copy a website served may not seal (D-11), so nothing is sent at all:
+    // not the statements in plaintext (#1382), and nothing about a way out.
+    expect(sent.slice(before)).toEqual([]);
+  });
+
+  it('sends no statement, appeal or way out in plaintext from a device with no card, to an instance holding keys (#1382)', async () => {
+    const { port, restrict, sent, storage } = await connected();
+    await restrict('suspend');
+    // The same device, as one that signed in with only an address: no pin.
+    const account = readInstanceAccount(storage);
+    if (account === undefined) throw new Error('not connected');
+    storage.setItem(INSTANCE_ACCOUNT_STORAGE_KEY, JSON.stringify({ ...account, pin: undefined }));
+    expect(readInstanceAccount(storage)?.pin).toBeUndefined();
+    const before = sent.length;
+    expect(await port.read()).toEqual({ kind: 'unreachable' });
+    expect(await port.appeal(1, 'I was quoting another rider.')).toEqual({
+      kind: 'refused',
+      text: APPEAL_REFUSAL_TEXT['no-answer'],
+    });
+    // Only the public keys are read, which say the card is needed.
+    expect(sent.slice(before)).toEqual(['/v1/instance/keys', '/v1/instance/keys']);
   });
 
   it('sends nothing on a device connected to no instance', async () => {

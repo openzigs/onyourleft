@@ -198,6 +198,7 @@ export const ROOM_ROUTES: readonly Route[] = [
   {
     method: 'POST',
     path: '/v1/rooms/{roomId}/reports',
+    sealed: 'only',
     operationId: 'reportInRoom',
     reaches: {
       exempt:
@@ -233,6 +234,7 @@ export const ROOM_ROUTES: readonly Route[] = [
   {
     method: 'POST',
     path: '/v1/rooms/{roomId}/remove',
+    sealed: 'only',
     operationId: 'removeFromMyRoom',
     reaches: {
       exempt:
