@@ -82,6 +82,13 @@ export type FromWorker =
   | { readonly type: 'race-finished'; readonly roomId: string }
   | { readonly type: 'room-closed'; readonly roomId: string; readonly phase: RoomPhase }
   | { readonly type: 'socket-closed'; readonly socketId: string }
+  /** The room closed a socket for a protocol reason (#1400): counts only. */
+  | {
+      readonly type: 'protocol-close';
+      readonly roomId: string;
+      readonly reason: string;
+      readonly count: number;
+    }
   | {
       readonly type: 'metrics';
       readonly id: number;

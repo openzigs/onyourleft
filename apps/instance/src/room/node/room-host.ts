@@ -112,6 +112,13 @@ export interface HostOptions {
    * socket opens again (#784: only a room that is over lets its route go).
    */
   readonly onRoomClosed?: (roomId: string, phase: RoomPhase) => void;
+  /**
+   * The room closed a socket for a protocol reason (#1400): `reason` is the
+   * close frame's (`close-codes.ts`) — `hello-expected`, a refusal, `replaced`
+   * or `too-slow` — and `count` how many sockets this room has closed for it
+   * so far, this one included. Counts only: no athlete, no name, no ticket.
+   */
+  readonly onProtocolClose?: (roomId: string, reason: string, count: number) => void;
   /** A socket this host held has closed, however it closed. */
   readonly onSocketClosed?: (socketId: string) => void;
   /** Unsent bytes past which a client is terminated. {@link DEFAULT_MAXIMUM_BUFFERED_BYTES}. */
@@ -235,6 +242,8 @@ interface HostedRoom {
   readonly flagged: Set<string>;
   raceStarted: boolean;
   raceFinished: boolean;
+  /** How many sockets this room has closed, by close reason (#1400). */
+  readonly closes: Map<string, number>;
 }
 
 export interface HostMetrics {
@@ -501,6 +510,7 @@ export class RoomHost {
       flagged: new Set(),
       raceStarted: false,
       raceFinished: false,
+      closes: new Map(),
     };
     this.#rooms.set(roomId, hosted);
     return hosted;
@@ -577,6 +587,11 @@ export class RoomHost {
         connection.closedByRoom = true;
         connection.sent += 1;
         connection.socket.close(frame?.code, frame?.reason);
+        if (frame !== undefined) {
+          // A refusal was counted at its `refuse`; the rest are counted here.
+          if (!Object.values(REFUSAL_CLOSE).includes(frame)) this.#count(frame.reason);
+          this.#protocolClose(hosted, frame.reason);
+        }
       }
     }
     for (const connection of dropped) {
@@ -584,9 +599,16 @@ export class RoomHost {
       // Its bytes cannot drain, so a close frame would not reach it: terminate.
       connection.gone = true;
       this.#count(TOO_SLOW.reason);
+      this.#protocolClose(hosted, TOO_SLOW.reason);
       connection.socket.terminate();
       this.#apply(hosted, hosted.room.disconnect(connection.id, this.#options.now()));
     }
+  }
+
+  #protocolClose(hosted: HostedRoom, reason: string): void {
+    const count = (hosted.closes.get(reason) ?? 0) + 1;
+    hosted.closes.set(reason, count);
+    this.#options.onProtocolClose?.(hosted.roomId, reason, count);
   }
 
   #count(reason: string): void {
