@@ -25,9 +25,9 @@
  * ## Where the reasons go
  *
  * Under *Follow* and *Report*, on a tablet and an upright phone. On a phone
- * on its side there is no line to spare — the bottom row already runs off
- * the stage with *Follow* alone (#1358), and one more line pushes *Pause*
- * off it — so there `theme.css` §"#789" lays the reasons, and then the
+ * on its side there is no line to spare — with *Follow* the bottom row fits
+ * a 736×360 stage by under a line (#1356, held by #1358), and one more line
+ * pushes *Pause* off it — so there `theme.css` §"#789" lays the reasons, and then the
  * answer, IN PLACE OF *Follow* and *Report*, at the row's own height. With
  * *Report* hidden there, the reasons have two ways out besides a choice:
  * Escape, and closing by themselves after {@link REPORT_REASONS_MS} — a

@@ -1957,9 +1957,9 @@ test.describe('a ride that may stop with the screen off — #647', () => {
  *
  * Upright, the notice is also held to `EASED_RIDER_CLEARANCE_PIXELS` above
  * the leaning rider's box. Until #1356 it could not be: a room ride's HUD came
- * within 5 px of the rider at 360×752 (on a Mac) whatever the notice said. The
- * bottom row below a phone-in-landscape stage on the CI runner's fonts is
- * #1358's, excused below.
+ * within 5 px of the rider at 360×752 (on a Mac) whatever the notice said.
+ * Until #1358 the bottom row below a phone-in-landscape stage was excused
+ * here too; it is held with everything else now.
  */
 test.describe('the room’s notice, with its longest sentences — #785', () => {
   for (const [query, words] of [
@@ -1985,19 +1985,11 @@ test.describe('the room’s notice, with its longest sentences — #785', () => 
                   ? `; ${(rider.top - (notice?.box.bottom ?? Infinity)).toFixed(0)} px above the rider's box`
                   : ''),
             );
-            // ⚠️ A defect of a room ride's HUD that is there with or without
-            // any notice, filed, is left to its issue — #1358: on a phone in
-            // landscape (736×360, and 844×390 by 3 px) the bottom row runs
-            // below the stage on the CI runner's fonts, its height set by the
-            // actions panel, not the notice (the notice's cell is IN that
-            // row, so it goes with it). #783's reading fields over the rider
-            // on a phone were excused here too until #1356 fixed them.
-            const short = viewport.height < viewport.width && viewport.height <= 400;
-            const bottomRow = ['oyl-hud__actions', 'oyl-hud__notices', 'oyl-hud__route'];
-            const known = (each: string): boolean =>
-              !each.includes(' × ') && short && bottomRow.some((name) => each.includes(name));
-            const collisions = easedCollisions(seen, viewport);
-            expect(collisions.filter((each) => !known(each))).toEqual([]);
+            // Nothing excused. Until #1356 and #1358 a room ride's reading
+            // fields over the rider on a phone, and its bottom row below a
+            // phone-in-landscape stage, were — both there with or without
+            // any notice. §"#1358" says what the cause was.
+            expect(easedCollisions(seen, viewport)).toEqual([]);
             // And the notice itself, held everywhere: over no panel and not
             // over the rider, and whole across the stage.
             expect(notice, 'the room notice was laid out').toBeDefined();
@@ -2014,7 +2006,7 @@ test.describe('the room’s notice, with its longest sentences — #785', () => 
             }
             expect(notice.box.left).toBeGreaterThanOrEqual(0);
             expect(notice.box.right).toBeLessThanOrEqual(viewport.width);
-            if (!short) expect(inside(notice.box, viewport), describeItem(notice)).toBe(true);
+            expect(inside(notice.box, viewport), describeItem(notice)).toBe(true);
           });
         }
       });
@@ -3851,14 +3843,13 @@ test.describe('a race’s standings on the HUD — #1347', () => {
  *
  * ## What is held
  *
- * At the tablet and upright-phone overlay viewports — a rider on a phone has
- * to be able to report too, and the tablet-only standings are not where they
- * can — with anchor positioning and without: each of the five controls is on
- * the stage, inside the viewport, uncovered, and at least `.oyl-button`'s
- * 44 px in both axes; *Pause* and *End ride* are still on the stage and
- * uncovered (at every overlay viewport); and the actions panel is over no
- * other panel. At the three tablet viewports no panel is over the leaning
- * rider's box either.
+ * At every overlay viewport — a rider on a phone has to be able to report
+ * too, and the tablet-only standings are not where they can — with anchor
+ * positioning and without: each room control shown is on the stage, inside
+ * the viewport, uncovered, and at least `.oyl-button`'s 44 px in both axes;
+ * *Pause* and *End ride* are still on the stage and uncovered; and the
+ * actions panel is over no other panel. At the three tablet viewports no
+ * panel is over the leaning rider's box either.
  *
  * ## What is only published
  *
@@ -3866,22 +3857,18 @@ test.describe('a race’s standings on the HUD — #1347', () => {
  * ride's HUD was over the rider on a phone with or without a report until
  * #1356; §"#1356" holds the following state, Report closed, clear of it.)
  *
- * ⚠️ **And where the room's row is on a phone in LANDSCAPE** (844×390,
- * 736×360, 736×480). There the actions panel is capped at 16 rem and the
- * bottom row already runs below the stage with *Follow* alone in a room ride
- * with a rider near — #1358, open, which is where *Follow*, and with it
- * *Report*, gets a place that fits. What IS held there is that reporting
- * makes it no worse: the reasons take the row in place of *Follow* and
- * *Report* (both laid out at no size), the actions panel is no taller open
- * than closed, each reason is 44 px, and *Pause* and *End ride* are exactly
- * where they were before *Report* was pressed — the first version of this
- * row pushed them 53 px further down. ⚠️ Following a rider with the longest
- * name a room admits ALREADY puts *Pause* below a 736×360 stage, Report
- * closed (its bottom at y = 385, measured on a Mac): the gap field's label
- * grows the readings above it. That is published by the case, and reported on
- * #1358. A rider on a phone reports with it upright, where every
- * control is held on the stage: 390×844, 360×800 and 360×752 below. The
- * closed state costs no line anywhere: *Report* shares *Follow*'s row.
+ * **On a phone in LANDSCAPE** (844×390, 736×360, 736×480) the actions panel
+ * is capped at 16 rem, so the reasons take the row in place of *Follow* and
+ * *Report* (both laid out at no size). Held there as well: the actions panel
+ * is no taller open than closed, each reason is 44 px, and *Pause* and *End
+ * ride* are exactly where they were before *Report* was pressed (the first
+ * version of this row pushed them 53 px further down). Until #1358 that was
+ * all that was held there, because following a rider with the longest name a
+ * room admits already put *Pause* below a 736×360 stage with Report closed.
+ * #1356 fixed the cause, the readings above it, so since #1358 the reasons,
+ * *Pause* and *End ride* are held on the stage and uncovered there too, and
+ * the actions panel over no other panel. The closed state costs no line
+ * anywhere: *Report* shares *Follow*'s row.
  *
  * ## The controls
  *
@@ -3949,8 +3936,7 @@ test.describe('Report on the HUD, its reasons open — #789', () => {
             const control = named(seen.items, name);
             if (shortLandscape) {
               // No worse than following: exactly where it was before Report
-              // was pressed. (At 736×360 that is already below the stage —
-              // published above, and #1358's.)
+              // was pressed.
               const was = named(before.items, name);
               for (const edge of ['left', 'top', 'right', 'bottom'] as const) {
                 expect(
@@ -3958,7 +3944,6 @@ test.describe('Report on the HUD, its reasons open — #789', () => {
                   `${name} ${edge}`,
                 ).toBeLessThanOrEqual(SUBPIXEL_TOLERANCE);
               }
-              continue;
             }
             expect(inside(control.box, viewport), describeItem(control)).toBe(true);
             expect(control.onTop, describeItem(control)).toBe(true);
@@ -3990,18 +3975,6 @@ test.describe('Report on the HUD, its reasons open — #789', () => {
               `the actions panel open (${actions.box.height.toFixed(0)} px) against closed ` +
                 `(${closedActions?.box.height.toFixed(0) ?? '?'} px)`,
             ).toBeLessThanOrEqual((closedActions?.box.height ?? 0) + SUBPIXEL_TOLERANCE);
-            // #1358: where the row is, published, not held — see this describe's header.
-            console.log(
-              `#789 Report open — ${viewport.name} — ${how}: room controls off the stage or ` +
-                `covered: ${
-                  room
-                    .filter((each) => !inside(each.box, viewport) || !each.onTop)
-                    .map(describeItem)
-                    .join(', ') || 'none'
-                }` +
-                `; panels the actions panel is over: ${collisions.join(', ') || 'none'}`,
-            );
-            return;
           }
           for (const control of room) {
             expect(inside(control.box, viewport), describeItem(control)).toBe(true);
@@ -4033,10 +4006,9 @@ test.describe('Report on the HUD, its reasons open — #789', () => {
  * (`theme.css` §"A ROOM RIDE ON A PHONE", the trade #419 asks to have
  * recorded); on a tablet they are on the stage like every other reading.
  *
- * ⚠️ **Except the bottom row on a phone on its side**, which is #1358's: on
- * the CI runner's fonts *Follow* and *Report* make the actions panel tall
- * enough to run the bottom row a few pixels below the stage. The case
- * publishes it there and holds every other panel whole.
+ * Until #1358 the bottom row on a phone on its side was excused here: on the
+ * CI runner's fonts *Follow* and *Report* ran it a few pixels below the
+ * stage. It is held whole with the rest now (§"#1358").
  *
  * ## The control
  *
@@ -4075,26 +4047,8 @@ test.describe('a room ride’s HUD — #1356', () => {
         for (const [how, seen] of await bothWays(page)) {
           const panels = seenPanels(seen);
           expect(panels.length, how).toBeGreaterThanOrEqual(4);
-          const notWhole = panels.filter((each) => !inside(each.box, viewport)).map(describeItem);
-          // ⚠️ #1358, open: on a phone on its side, on the CI runner's fonts,
-          // the actions panel with *Follow* and *Report* is 204 px tall (179
-          // on a Mac; the trainer line takes two lines) and the bottom row
-          // runs 4 to 9 px below the stage. Published here, held there.
-          const bottomRowExcused = !tablet && viewport.width > viewport.height;
-          if (bottomRowExcused) {
-            console.log(
-              `#1356 — ${viewport.name} — ${how}: bottom-row panels off the stage (#1358): ` +
-                (notWhole.join(', ') || 'none'),
-            );
-          }
           expect(
-            notWhole.filter(
-              (each) =>
-                !(
-                  bottomRowExcused &&
-                  (each.includes('oyl-hud__actions') || each.includes('oyl-hud__route'))
-                ),
-            ),
+            panels.filter((each) => !inside(each.box, viewport)).map(describeItem),
             how,
           ).toEqual([]);
           const collisions: string[] = [];
@@ -4170,4 +4124,152 @@ test.describe('a room ride’s HUD — #1356', () => {
       expect(over.map(describeItem)).not.toEqual([]);
     });
   }
+});
+
+/**
+ * #1358 — a room ride with a rider near, so the actions panel carries
+ * *Follow*: `?room=standings` (nobody followed yet) and `?room=following`
+ * (*Follow* and *Report*, the longest name a room admits as the gap's label).
+ *
+ * ## What is held
+ *
+ * At every overlay viewport, both ways (#1120): every panel a rider can see
+ * is whole and over no other, and every reading and every control — the
+ * readings, the elevation strip, the plan view, the trainer line, *Pause*,
+ * *End ride*, *Follow* and *Report* — is inside the viewport, uncovered, with
+ * nothing scrolled. Two exceptions, each a recorded trade and each held to
+ * it here: on a phone the pacer's, the ghost's and the wind's readings are
+ * laid out at no size (§"#1356"), and on a phone on its side so is the
+ * trainer line (`theme.css` §"*Follow* ON A PHONE ON ITS SIDE").
+ *
+ * ## The cause, and the controls
+ *
+ * #1358 guessed that *Follow* made the bottom row too tall for a 736×360
+ * stage. On a Mac's fonts it was not: with #1356's rule undone (the HUD as
+ * #783 and #789 left it) and the room's row — *Follow* and *Report* — taken
+ * out, 736×360 still puts the plan view, *Pause* and *End ride* below the
+ * stage. The secondary panel's third row pushed the bottom row down. On
+ * `?room=standings` that holds only while the readings' phrases make that
+ * row 216 px rather than 202 (it moved with the ride's values under load),
+ * so the first control is `?room=following`, whose followed name makes it
+ * 256 px on every run.
+ *
+ * With #1356, *Follow* fitted on a Mac and not on the CI runner, whose fonts
+ * set the trainer line on two lines: the actions panel was 204 px and the
+ * bottom row ran 9 px below a 736×360 stage and 4 px below an 844×390 one
+ * (run 38927851553). So the second control puts the trainer line back, two
+ * lines tall as the runner sets it, and requires the bottom row to leave a
+ * 736×360 stage again, on any machine's fonts.
+ */
+const ROOM_WITH_A_RIDER_NEAR = [WITH_STANDINGS, FOLLOWING] as const;
+const TRAINER_LINE = 'the trainer line';
+
+/** A phone on its side: the short corners layout (`theme.css` §"A SHORT corners layout"). */
+function onItsSide(viewport: Viewport): boolean {
+  return viewport.width >= 736 && viewport.height >= 360 && viewport.height <= 480;
+}
+
+function lostFromTheStage(seen: StageMeasurement, viewport: Viewport): string[] {
+  const phone = !TABLET_VIEWPORTS.includes(viewport);
+  const givesWay = [
+    ...(phone ? ROOM_GIVES_WAY : []),
+    ...(onItsSide(viewport) ? [TRAINER_LINE] : []),
+  ] as readonly string[];
+  return seen.items
+    .filter((each) => !givesWay.includes(each.name))
+    .filter((each) => !inside(each.box, viewport) || !each.onTop)
+    .map(describeItem);
+}
+
+test.describe('a room ride with a rider near, every reading and control on the stage — #1358', () => {
+  for (const viewport of OVERLAY_VIEWPORTS) {
+    for (const query of ROOM_WITH_A_RIDER_NEAR) {
+      test(`${query} — ${viewport.name}`, async ({ browser }) => {
+        const page = await sharedRide(browser, viewport, query);
+        for (const [how, seen] of await bothWays(page)) {
+          expect(seen.scrollY, how).toBe(0);
+          expect(seen.stageScrollTop, how).toBe(0);
+          expect(seen.pageOverflow, how).toBeLessThanOrEqual(0);
+          const names = seen.items.map((each) => each.name);
+          // The state this is about: a rider near, so Follow is on the HUD.
+          expect(names, how).toContain('room: Follow the next rider near you');
+          expect(names, how).toContain('the plan view');
+          expect(lostFromTheStage(seen, viewport), how).toEqual([]);
+          const panels = seenPanels(seen);
+          expect(
+            panels.filter((each) => !inside(each.box, viewport)).map(describeItem),
+            how,
+          ).toEqual([]);
+          const collisions: string[] = [];
+          panels.forEach((a, index) => {
+            for (const b of panels.slice(index + 1)) {
+              if (overlap(a.box, b.box)) collisions.push(`${describeItem(a)} × ${describeItem(b)}`);
+            }
+          });
+          expect(collisions, how).toEqual([]);
+          // The trade, and only where it is made.
+          const line = named(seen.items, TRAINER_LINE);
+          if (onItsSide(viewport)) {
+            expect(
+              line.box.width * line.box.height,
+              `${how}: ${describeItem(line)}`,
+            ).toBeLessThanOrEqual(1);
+          } else {
+            expect(line.box.height, `${how}: ${describeItem(line)}`).toBeGreaterThan(1);
+          }
+        }
+      });
+    }
+  }
+
+  test('the control — Follow and Report taken out, the layout before #1356 still runs off a 736×360 stage', async ({
+    page,
+  }) => {
+    const viewport = OVERLAY_VIEWPORTS.find(
+      (each) => each.width === 736 && each.height === 360,
+    ) as Viewport;
+    await openRide(page, viewport, FOLLOWING);
+    await page.addStyleTag({
+      content: `${ROOM_RULE_UNDONE}
+        .oyl-game--riding .oyl-hud .oyl-hud__room-row { display: none !important; }`,
+    });
+    const seen = await measure(page);
+    for (const name of ROOM_REPORT_CONTROLS.slice(0, 2)) {
+      const taken = named(seen.items, name);
+      expect(taken.box.width * taken.box.height, `${name}: taken out`).toBe(0);
+    }
+    const lost = lostFromTheStage(seen, viewport).filter(
+      (each) => !each.startsWith('room: ') && !each.startsWith('reading: '),
+    );
+    console.log(
+      `#1358 cause — Follow and Report taken out, #1356 undone, 736×360: ${lost.join('; ')}`,
+    );
+    expect(lost.some((each) => each.startsWith('the plan view'))).toBe(true);
+    expect(lost.some((each) => each.startsWith('control: Pause'))).toBe(true);
+  });
+
+  test('the control — the trainer line back, on two lines, runs the bottom row off a 736×360 stage', async ({
+    page,
+  }) => {
+    const viewport = OVERLAY_VIEWPORTS.find(
+      (each) => each.width === 736 && each.height === 360,
+    ) as Viewport;
+    await openRide(page, viewport, FOLLOWING);
+    await page.addStyleTag({
+      content: `
+        .oyl-game--riding .oyl-hud .oyl-hud__actions > .oyl-hud__trainer {
+          position: static !important; width: auto !important; height: auto !important;
+          margin: 0 !important; overflow: visible !important; clip-path: none !important;
+          white-space: normal !important; min-height: 2lh !important;
+        }`,
+    });
+    const seen = await measure(page);
+    const line = named(seen.items, TRAINER_LINE);
+    expect(line.box.height, 'the trainer line put back').toBeGreaterThan(30);
+    const notWhole = seenPanels(seen)
+      .filter((each) => !inside(each.box, viewport))
+      .map(describeItem);
+    console.log(`#1358 — the trainer line back, two lines, 736×360: ${notWhole.join('; ')}`);
+    expect(notWhole.some((each) => each.includes('oyl-hud__actions'))).toBe(true);
+  });
 });

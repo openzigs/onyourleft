@@ -6194,8 +6194,9 @@ select.oyl-input {
    side camera's Stop, its whole name visually hidden past the word shown.
    ⚠️ Measured since #789 (`ride.browser.spec.ts` §"#789"), which a reviewer
    who remembers "no browser harness here rides in a room" is reading the old
-   file for: on the stage at the tablets and upright phones, and below it on a
-   phone on its side, which is #1358's. Beside the sound row on a phone it is
+   file for: on the stage at every overlay viewport since #1356 took the
+   third row of readings off a phone and #1358 the trainer line off a phone
+   on its side. Beside the sound row on a phone it is
    still owed to #733's device check, stated rather than claimed. */
 .oyl-hud__follow {
   align-self: flex-start;
@@ -6246,9 +6247,9 @@ select.oyl-input {
 }
 
 /* #789 on a phone on its side — the short corners layout. There is no line to
-   spare: the bottom row already runs off the stage with *Follow* alone
-   (#1358), and the reasons on a line of their own pushed *Pause* off a
-   736×360 stage, measured. So while the reasons are open, and while the
+   spare: with *Follow* the bottom row fits a 736×360 stage by under a line
+   (since #1356; #1358 holds it), and the reasons on a line of their own
+   pushed *Pause* off it, measured. So while the reasons are open, and while the
    answer stands, they take the row IN PLACE OF *Follow* and *Report*, at the
    row's own height — 48 px, *Report*'s since #788, so opening them moves
    nothing below; `RoomReport.tsx` says what the way out is then. */
@@ -6279,6 +6280,45 @@ select.oyl-input {
     min-width: 0;
     overflow: hidden;
     padding-inline: var(--oyl-space-xs);
+  }
+}
+
+/*
+ * *Follow* ON A PHONE ON ITS SIDE — #1358.
+ *
+ * With *Follow* and *Report* the actions panel is 179 px on a Mac's fonts
+ * and 204 px on the CI runner's, whose wider glyphs set the trainer line on
+ * two lines in the 16 rem panel. On the runner the bottom row ran 9 px below
+ * a 736×360 stage and 4 px below an 844×390 one (run 38927851553), on top of
+ * the two rows of readings #1356 left. The room's row cannot go up the left
+ * column the way #576's side-camera row does: without anchor positioning the
+ * primary panel stretches to the top row's 149 px there, and that leaves
+ * 57 px above the route panel for a 48 px row and its two gaps.
+ *
+ * ⚠️ #419 asks that what gives way be recorded, so: **on a phone on its
+ * side, while the actions panel carries the room's row, the trainer line is
+ * not shown.** It is the status line under the gradient reading: what was
+ * last sent to the trainer, and how many times. The gradient itself is still
+ * the secondary tier's *Gradient*, and a trainer that refuses the road
+ * still puts its notice on the HUD (`trainer-port.ts` §`trainerRoadNotice`).
+ * The line is visually hidden by clip, so a screen reader still reaches it,
+ * and on a tablet and an upright phone it stays where #373 put it. That
+ * gives back 50 px on the runner's fonts and 29 px on a Mac.
+ * `ride.browser.spec.ts` §"#1358" holds every panel whole and every reading
+ * and control on the stage in a room ride with a rider near, and puts a
+ * two-line trainer line back as its control.
+ */
+@media (min-width: 46rem) and (min-height: 22.5rem) and (max-height: 30rem) {
+  .oyl-game--riding .oyl-hud__actions:has(> .oyl-hud__room-row) > .oyl-hud__trainer {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
   }
 }
 
