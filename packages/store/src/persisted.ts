@@ -622,6 +622,8 @@ export interface PersistedRoomRace {
   place: number | null;
   finishers: number | null;
   crossedTheLine?: true;
+  placeAcross?: number;
+  across?: number;
 }
 
 /** Field by field, so a key that is not the fact's is never written. */
@@ -631,7 +633,15 @@ export function toPersistedRoomRace(race: RoomRaceFact): PersistedRoomRace {
     place: race.place,
     finishers: race.finishers,
     ...(race.crossedTheLine === true ? { crossedTheLine: true as const } : {}),
+    ...acrossOf(race),
   };
+}
+
+/** A race's place among the riders across (#1364): both, or nothing. */
+function acrossOf(race: RoomRaceFact): { placeAcross?: number; across?: number } {
+  return race.placeAcross === undefined || race.across === undefined
+    ? {}
+    : { placeAcross: race.placeAcross, across: race.across };
 }
 
 /**
@@ -647,6 +657,8 @@ function raceOf(value: unknown): RoomRaceFact | undefined {
     place?: unknown;
     finishers?: unknown;
     crossedTheLine?: unknown;
+    placeAcross?: unknown;
+    across?: unknown;
   };
   if (typeof race.roomId !== 'string' || !ROOM_ID.test(race.roomId)) return undefined;
   const place = placeOrNull(race.place, 1);
@@ -659,11 +671,29 @@ function raceOf(value: unknown): RoomRaceFact | undefined {
   if (race.crossedTheLine !== undefined && (race.crossedTheLine !== true || finishers !== null)) {
     return undefined;
   }
+  // #1364: a place among the riders across, said only of a rider across the
+  // line before the order came, and only with how many were across — both or
+  // neither, and never a place past that count.
+  if (race.placeAcross !== undefined || race.across !== undefined) {
+    const placeAcross = placeOrNull(race.placeAcross, 1);
+    const across = placeOrNull(race.across, 1);
+    if (
+      race.crossedTheLine !== true ||
+      typeof placeAcross !== 'number' ||
+      typeof across !== 'number' ||
+      placeAcross > across
+    ) {
+      return undefined;
+    }
+  }
   return {
     roomId: race.roomId,
     place,
     finishers,
     ...(race.crossedTheLine === true ? { crossedTheLine: true as const } : {}),
+    ...(typeof race.placeAcross === 'number' && typeof race.across === 'number'
+      ? { placeAcross: race.placeAcross, across: race.across }
+      : {}),
   };
 }
 
