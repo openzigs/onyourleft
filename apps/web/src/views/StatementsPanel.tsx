@@ -34,6 +34,8 @@ export const RESTRICTION_TEXT: Readonly<Record<string, string>> = {
   suspend: 'Your account was suspended',
   hide_display_name: 'Your display name was hidden',
   hide_item: 'Something you shared was hidden',
+  // #1384: ⚠️ a draft label for the owner's approval.
+  remove_from_room: 'You were removed from a room',
 };
 
 /** What it was decided on. */

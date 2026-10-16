@@ -5,6 +5,8 @@ import {
   backup,
   CommandError,
   instanceKey,
+  loadAccountsAdd,
+  loadAccountsErase,
   migrate,
   modelKeyClear,
   modelKeySet,
@@ -25,6 +27,8 @@ const USAGE = `usage: node src/operator/cli.ts <command>
   model-key status
   model-key clear
   instance-key init | show | rotate [--drop-old] [--serial-above <n>] | rotate-identity [--compromised] | reset
+  load-accounts add     (the public keys \`race-load keys\` printed, on standard input)
+  load-accounts erase
 `;
 
 function flag(args: string[], name: string): string | undefined {
@@ -167,6 +171,20 @@ export async function runCommand(
           args.length === 0
         ) {
           report = await instanceKey(paths, { action }, keys);
+        } else {
+          throw new CommandError(USAGE);
+        }
+        break;
+      }
+      case 'load-accounts': {
+        const action = args.shift();
+        if (action === 'add' && args.length === 0) {
+          report = await loadAccountsAdd(
+            paths,
+            await (env.readStandardInput ?? (() => Promise.resolve('')))(),
+          );
+        } else if (action === 'erase' && args.length === 0) {
+          report = await loadAccountsErase(paths);
         } else {
           throw new CommandError(USAGE);
         }

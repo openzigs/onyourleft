@@ -151,7 +151,9 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         `sealed_required` on an instance that holds keys
                         (none: plaintext as before); `sealed/phase-one.ts`
                         and, since #1210, `sealed/phase-two.ts` (sign-in,
-                        account, blocks, reports, room HTTP, session) are
+                        account, blocks, reports, room HTTP, session;
+                        #1382 added statements, appeals and the in-room
+                        report and host removal) are
                         the committed lists the table is held to, and a
                         test world's `call` seals a marked route itself.
                         Since #1095 `src/analysis/jobs.ts` is the job

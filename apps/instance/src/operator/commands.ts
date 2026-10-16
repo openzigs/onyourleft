@@ -24,9 +24,13 @@ import {
   NO_KEYS_SENTENCE,
   type InstanceKeys,
 } from '../keys/instance-keys.ts';
+import { randomHex } from '../auth/crypto.ts';
+import { createDiskBlobStore } from '../blob/disk-blob-store.ts';
+import { createRooms } from '../rooms/rooms.ts';
 import { readServerConfig } from '../server-config.ts';
 import { integrityOk, rowCounts, vacuumInto } from '../store/backup.ts';
 import { migrateForDeploy, openServingStore } from '../store/serving.ts';
+import { createSync } from '../sync/sync.ts';
 
 /**
  * What an operator runs against an instance's data (#791, #807, #52) —
@@ -42,6 +46,8 @@ import { migrateForDeploy, openServingStore } from '../store/serving.ts';
  * | `model-key set --url https://… --model <name>` | the instance's one hosted model key, read from standard input, sealed under `OYL_INSTANCE_SECRET_KEY`, held for the operator: the athlete whose device holds `OYL_INSTANCE_OWNER_KEY` (#1097, ADR 0046 Q9) |
  * | `model-key status` | the hosted key's URL and model, that a key is held, and whether this secret opens it — never the key |
  * | `model-key clear` | the hosted key gone, scrubbed from the database's free pages and its log |
+ * | `load-accounts add` | an APPROVED throwaway account, `Load N`, for each public key on standard input — what `tools/race-load.ts keys` printed — marked as the load run's (#1383) |
+ * | `load-accounts erase` | every account `load-accounts add` made, erased as a rider's own erasure does it, and how many |
  *
  * ⚠️ `restore` ends by ROTATING the encryption key (#1189, ADR 0047 D-5),
  * once the data is checked and in place, so a restored instance never serves
@@ -561,4 +567,112 @@ export async function roomOpen(
     await store.close();
   }
   return { command: 'room-open', kind: options.kind, lengthMetres: options.lengthMetres };
+}
+
+/** A device public key as `tools/race-load.ts keys` prints it: raw Ed25519, lower-case hex. */
+const LOAD_PUBLIC_KEY = /^[0-9a-f]{64}$/;
+
+/**
+ * `load-accounts add` (#1383, the owner's ruling of 2026-10-15 on #464): an
+ * account for each public key on standard input, one per line — what
+ * `tools/race-load.ts keys` printed — ACTIVE, so the load run's riders can
+ * take a ticket on an instance whose registration is `approval`, without
+ * changing that registration. Each is named `Load N` in the order given and
+ * marked `load_run_at`, the mark `load-accounts erase` erases by.
+ *
+ * ⚠️ Operator-only: there is no route to this, and it runs where the
+ * database is. It refuses, writing nothing, a key any account on this
+ * instance already holds — a rider's or an earlier run's: it adds only
+ * accounts it makes. No recovery codes: a throwaway account is erased, never
+ * recovered.
+ */
+export async function loadAccountsAdd(
+  paths: DataPaths,
+  input: string,
+  options: { readonly now?: () => Date } = {},
+) {
+  const keys = input
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '');
+  if (keys.length === 0) {
+    throw new CommandError(
+      'Standard input holds no public keys: give it what `race-load keys` printed, one per line. Nothing was written.',
+    );
+  }
+  const malformed = keys.findIndex((key) => !LOAD_PUBLIC_KEY.test(key));
+  if (malformed >= 0) {
+    throw new CommandError(
+      `Line ${String(malformed + 1)} of standard input is not a public key as \`race-load keys\` prints one (64 lower-case hex characters). Nothing was written.`,
+    );
+  }
+  if (new Set(keys).size !== keys.length) {
+    throw new CommandError('Standard input names a public key twice. Nothing was written.');
+  }
+  if (!existsSync(paths.database)) throw new CommandError('There is no database here.');
+  const store = openServingStore(paths.database);
+  try {
+    let held = 0;
+    for (const key of keys) if ((await store.findDeviceKey(key)) !== undefined) held += 1;
+    if (held > 0) {
+      throw new CommandError(
+        `${String(held)} of these keys already belong to an account on this instance, and this command adds only accounts it makes. Nothing was written.`,
+      );
+    }
+    const at = Math.floor((options.now ?? (() => new Date()))().getTime() / 1000);
+    for (const [index, publicKey] of keys.entries()) {
+      const athleteId = randomHex(16);
+      await store.registerAthlete({
+        athlete: {
+          id: athleteId,
+          displayName: `Load ${String(index + 1)}`,
+          createdAt: at,
+          registrationState: 'active',
+        },
+        key: { publicKey, athleteId, addedAt: at, revokedAt: null },
+        recoveryCodeSha256s: [],
+        loadRunAt: at,
+      });
+    }
+    return {
+      command: 'load-accounts add',
+      added: keys.length,
+      held: (await store.listLoadAthletes()).length,
+    };
+  } finally {
+    await store.close();
+  }
+}
+
+/**
+ * `load-accounts erase` (#1383): every account `load-accounts add` made, and
+ * no other, erased the way a rider's own erasure does it
+ * (`sync/routes.ts` §`eraseAccount`) — any room it made closed first, then
+ * its files and every row it owns. It finds them by their mark alone, so a
+ * rider's account is never in its reach. Prints how many it erased.
+ */
+export async function loadAccountsErase(paths: DataPaths) {
+  if (!existsSync(paths.database)) throw new CommandError('There is no database here.');
+  const store = openServingStore(paths.database);
+  try {
+    const sync = createSync({ store, blobs: createDiskBlobStore(paths.blobs) });
+    const rooms = createRooms({
+      store,
+      routes: createDiskBlobStore(join(paths.blobs, 'rooms')),
+      nameFor: () => Promise.resolve(undefined),
+      now: () => Date.now(),
+    });
+    const athletes = await store.listLoadAthletes();
+    for (const athleteId of athletes) {
+      await rooms.closeRoomsMadeBy(athleteId);
+      await sync.eraseAccount(athleteId);
+    }
+    return {
+      command: 'load-accounts erase',
+      erased: athletes.length,
+      remaining: (await store.listLoadAthletes()).length,
+    };
+  } finally {
+    await store.close();
+  }
 }

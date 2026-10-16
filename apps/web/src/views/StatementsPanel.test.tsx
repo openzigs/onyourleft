@@ -104,6 +104,14 @@ describe('the statements of reasons, shown (#910)', () => {
     expect(mounted?.container.querySelector('a[href^="mailto:"]')).toBeNull();
   });
 
+  it('names a moderator’s removal from a room in words, not the instance’s name for it (#1384)', async () => {
+    const text = await show(
+      portOf([{ ...SUSPENDED, restriction: 'remove_from_room', endsAt: null }]),
+    );
+    expect(text).toContain('You were removed from a room, 2026-09-21 14:13 UTC');
+    expect(text).not.toContain('remove_from_room');
+  });
+
   it('shows nothing when there is no statement, or nothing could be read', async () => {
     expect(await show(portOf([]))).not.toContain(STATEMENTS_HEADING);
     mounted?.unmount();

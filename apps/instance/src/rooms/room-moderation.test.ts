@@ -269,6 +269,8 @@ describe('moderation in a room on the running instance — #789', () => {
       const modRemoved = await w.call('POST', path, moderator.token, {
         reason: 'Over the 5 s ceiling',
         reportId: flagged[0]?.id,
+        // #1384: a moderator's removal carries its statement of reasons.
+        statement: TEST_STATEMENT,
       });
       expect(modRemoved.status).toBe(200);
       expect((await catSocket.closed).code).toBe(4003);

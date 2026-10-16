@@ -1539,3 +1539,13 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   decision: its D-2 is the row (`POST /v1/camera/side-pose`, sealed on every instance, a keyless one
   included), and its D-3 says what D-12's second reason still leaves visible. Every other camera
   picture stays off the tunnel. The body above is not edited. (#1106)
+- **2026-10-16** — **D-7's phase-2 list gains four routes that were merged in plaintext after
+  phase 2 shipped** (#1382; the owner's rulings of 2026-10-15 on #1376 and #1377, and of
+  2026-10-16 on #1375). Each is marked `only`: `GET /v1/statements` and
+  `POST /v1/statements/{statementId}/appeal` (a rider's statements of reasons and their appeal
+  against one, #910, #911), and `POST /v1/rooms/{roomId}/reports` and
+  `POST /v1/rooms/{roomId}/remove` (a report from inside a room and a host removing a rider from
+  their room, #789). They are listed in `apps/instance/src/sealed/phase-two.ts`. A suspended
+  athlete still reaches the first two through the way-out session (#898, #1210), sealed, signed
+  by the device key that session row names. A device holding a pin calls all four sealed only,
+  with no plaintext fallback. The body above is not edited. (#1382)

@@ -303,6 +303,48 @@ describe('the report queue — #83, #905, #955', () => {
     await decide(flag, 'Over the ceiling.', 'Remove from the room');
     expect(scripted.calls).toContain('remove rider-dafydd from room-1 for 9');
     expect(text(section('Reports'))).not.toContain('Report 9');
+    // #1384: the confirmation asked for #910's statement, and sent it.
+    expect(scripted.held.statements).toEqual([
+      {
+        athleteId: 'rider-dafydd',
+        facts: FACTS,
+        decidedOn: 'report',
+        legalGround: '',
+        termsGround: TERMS,
+        moderatorConflict: false,
+      },
+    ]);
+  });
+
+  it('refuses, and says why, a removal from a room confirmed with no statement (#1384)', async () => {
+    const scripted = scriptedModeration();
+    scripted.held.reports.push({
+      reportId: 9,
+      reporterAthleteId: null,
+      targetAthleteId: 'rider-dafydd',
+      reason: 'In a room: a plausibility flag, over 18 W/kg for 5 s',
+      createdAt: 1_790_003_000,
+      room: { roomId: 'room-1', tick: 12 },
+      flag: { durationSeconds: 5, ceilingWattsPerKilogram: 18 },
+    });
+    await open(scripted);
+    const row = item('Report 9');
+    const box = [...row.querySelectorAll('input')].at(-1);
+    if (box === undefined) throw new Error('no reason box');
+    await typeInto(box, 'Over the ceiling.');
+    await activateWithKeyboard(button(row, 'Remove from the room'));
+    await settle();
+    const asked = dialog();
+    expect(asked?.textContent).toContain(STATEMENT_TEXT.legend);
+    const confirm = [...(asked?.querySelectorAll('button') ?? [])].find(
+      (each) => each.textContent !== MODERATION_CANCEL_LABEL,
+    );
+    if (confirm === undefined) throw new Error('no confirm button');
+    await activateWithKeyboard(confirm);
+    await settle();
+    expect(scripted.held.statements).toEqual([]);
+    expect(text(section('Reports'))).toContain('Report 9');
+    expect(text()).toContain('needs a statement of reasons');
   });
 
   it('suspends a report’s account for the report, which closes it', async () => {

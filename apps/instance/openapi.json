@@ -6838,7 +6838,7 @@
     "/v1/moderation/rooms/{roomId}/athletes/{athleteId}/remove": {
       "post": {
         "operationId": "removeFromRoom",
-        "summary": "Remove an athlete from a room, any room, with a reason, optionally deciding a report (#789): their socket is closed if a worker holds the room, they are refused a ticket for it from then on, and the removal is written to the moderation log with the room.",
+        "summary": "Remove an athlete from a room, any room, with a reason and a statement of reasons the athlete is shown (#1384, as for #910’s restrictions), optionally deciding a report (#789): their socket is closed if a worker holds the room, they are refused a ticket for it from then on, and the removal is written to the moderation log with the room. Refused `validation_failed`, changing nothing, without the statement.",
         "parameters": [
           {
             "name": "roomId",
@@ -6877,6 +6877,54 @@
                   },
                   "reportId": {
                     "type": "integer"
+                  },
+                  "statement": {
+                    "type": "object",
+                    "properties": {
+                      "facts": {
+                        "type": "string"
+                      },
+                      "decidedOn": {
+                        "type": "string",
+                        "enum": [
+                          "notice",
+                          "report",
+                          "own_initiative"
+                        ]
+                      },
+                      "legalGround": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "termsGround": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "notifierNamed": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "moderatorConflict": {
+                        "type": "boolean"
+                      },
+                      "endsAt": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "facts",
+                      "decidedOn"
+                    ],
+                    "additionalProperties": false
                   }
                 },
                 "required": [
@@ -7344,6 +7392,7 @@
             "session": []
           }
         ],
+        "x-oyl-sealed": "only",
         "requestBody": {
           "required": true,
           "content": {
@@ -7393,6 +7442,9 @@
           "401": {
             "$ref": "#/components/responses/unauthenticated"
           },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
           "404": {
             "$ref": "#/components/responses/not_found"
           },
@@ -7437,6 +7489,7 @@
             "session": []
           }
         ],
+        "x-oyl-sealed": "only",
         "requestBody": {
           "required": true,
           "content": {
@@ -7474,6 +7527,9 @@
           },
           "401": {
             "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
           },
           "404": {
             "$ref": "#/components/responses/not_found"
@@ -7980,6 +8036,7 @@
             "session": []
           }
         ],
+        "x-oyl-sealed": "only",
         "responses": {
           "200": {
             "description": "OK",
@@ -8152,6 +8209,9 @@
           "401": {
             "$ref": "#/components/responses/unauthenticated"
           },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
           "404": {
             "$ref": "#/components/responses/not_found"
           },
@@ -8193,6 +8253,7 @@
             "session": []
           }
         ],
+        "x-oyl-sealed": "only",
         "requestBody": {
           "required": true,
           "content": {
@@ -8237,6 +8298,9 @@
           },
           "401": {
             "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
           },
           "404": {
             "$ref": "#/components/responses/not_found"

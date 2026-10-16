@@ -214,6 +214,7 @@ export const MODERATION_ROUTES: readonly Route[] = [
   {
     method: 'GET',
     path: '/v1/statements',
+    sealed: 'only',
     operationId: 'listStatements',
     reaches: 'own',
     // #910: a SUSPENDED rider reads why, through the way-out session
@@ -246,6 +247,7 @@ export const MODERATION_ROUTES: readonly Route[] = [
   {
     method: 'POST',
     path: '/v1/statements/{statementId}/appeal',
+    sealed: 'only',
     operationId: 'appealStatement',
     reaches: 'own',
     // #911: a SUSPENDED rider appeals through the way-out session, and that
@@ -687,10 +689,10 @@ export const MODERATION_ROUTES: readonly Route[] = [
     operationId: 'removeFromRoom',
     reaches: 'moderation',
     summary:
-      'Remove an athlete from a room, any room, with a reason, optionally deciding a report (#789): their socket is closed if a worker holds the room, they are refused a ticket for it from then on, and the removal is written to the moderation log with the room.',
+      'Remove an athlete from a room, any room, with a reason and a statement of reasons the athlete is shown (#1384, as for #910’s restrictions), optionally deciding a report (#789): their socket is closed if a worker holds the room, they are refused a ticket for it from then on, and the removal is written to the moderation log with the room. Refused `validation_failed`, changing nothing, without the statement.',
     identity: true,
     auth: 'session',
-    request: object({ reason: string, reportId: integer }, ['reason']),
+    request: object({ reason: string, reportId: integer, statement: statementInput }, ['reason']),
     errors: ['unauthenticated', 'validation_failed', 'not_found', 'moderation_not_applicable'],
     response: actionResponse,
     handle: async (context) => {
@@ -701,7 +703,11 @@ export const MODERATION_ROUTES: readonly Route[] = [
         'moderator',
         roomId,
         athleteId,
-        { reason: context.json.reason, reportId: context.json.reportId },
+        {
+          reason: context.json.reason,
+          reportId: context.json.reportId,
+          statement: context.json.statement,
+        },
       );
       if (removed.ok) await context.probes?.removeFromRoom?.(roomId, athleteId);
       return answer(removed, (value) => json(value));
