@@ -508,7 +508,9 @@ unsealed on an instance without the secret too).
 — a key the instance already holds as well as a new one — the account summary, the display name,
 the adult confirmation, a suspended rider's way-out session, a rider's own blocks and reports, the
 room routes' HTTP side (making, joining, a room's route and result, its ticket and starting a race),
-reading and ending a session, and another rider's profile. So a rider's bearer token, which the
+reading and ending a session, and another rider's profile. Since #1382 so are a rider's statements
+of reasons and their appeal against one (a suspended rider reaches both sealed through the way-out
+session), a report from inside a room, and a host removing a rider from their room. So a rider's bearer token, which the
 edge sees in every request's header, opens nothing on its own. What is left in plaintext carries
 nothing personal: `/health`, `/ready`, `/source`, `/openapi.json`, `/licences/third-party.txt`,
 `/instance`, `/v1/instance/keys`, `/metrics` and the sign-in challenge. **The room sockets are not
