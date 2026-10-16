@@ -139,12 +139,13 @@ export const IDENTITY_ROUTES: readonly Route[] = [
   {
     method: 'POST',
     path: '/v1/auth/session',
-    // #1192: a key this instance has not seen registers only sealed (ADR 0047 D-7).
-    sealed: 'new-key',
+    // #1192 sealed registering a new key; #1210 (phase 2 of ADR 0047 D-7)
+    // seals the answer for a key the instance holds as well, sessionless.
+    sealed: 'only',
     operationId: 'createSession',
     reaches: 'own',
     summary:
-      'Sign in with a signed `oyl-auth-v1` statement. A key the instance has not seen registers a new athlete as the registration mode allows — awaiting approval by default — and only then are the recovery codes in the answer. On an instance that holds keys, an unseen key registers ONLY inside a sealed request: in plaintext it is `sealed_required` and nothing is written; a key the instance holds still signs in in plaintext. New registrations are rate-limited per client address.',
+      'Sign in with a signed `oyl-auth-v1` statement. A key the instance has not seen registers a new athlete as the registration mode allows — awaiting approval by default — and only then are the recovery codes in the answer. On an instance that holds keys, every key signs in and registers ONLY inside a sealed request, with no session (ADR 0047 D-8, D-9): in plaintext it is `sealed_required` and nothing is written. New registrations are rate-limited per client address.',
     identity: true,
     request: object(
       {
@@ -200,13 +201,14 @@ export const IDENTITY_ROUTES: readonly Route[] = [
             confirmsAdult: context.json.confirmsAdult,
           },
           context.client.address,
-          { mayRegister: context.sealedRequest || !context.sealsRoutes },
         ),
       ),
   },
   {
     method: 'POST',
     path: '/v1/auth/leave-session',
+    // #1210: phase 2 of ADR 0047 D-7.
+    sealed: 'only',
     operationId: 'createLeaveSession',
     reaches: 'own',
     summary:
@@ -223,6 +225,8 @@ export const IDENTITY_ROUTES: readonly Route[] = [
   {
     method: 'GET',
     path: '/v1/auth/session',
+    // #1210: phase 2 of ADR 0047 D-7.
+    sealed: 'only',
     operationId: 'getSession',
     reaches: 'own',
     admitsPending: true,
@@ -236,6 +240,8 @@ export const IDENTITY_ROUTES: readonly Route[] = [
   {
     method: 'DELETE',
     path: '/v1/auth/session',
+    // #1210: phase 2 of ADR 0047 D-7.
+    sealed: 'only',
     operationId: 'deleteSession',
     reaches: 'own',
     admitsPending: true,
@@ -252,6 +258,8 @@ export const IDENTITY_ROUTES: readonly Route[] = [
   {
     method: 'POST',
     path: '/v1/auth/display-name',
+    // #1210: phase 2 of ADR 0047 D-7.
+    sealed: 'only',
     operationId: 'setDisplayName',
     reaches: 'own',
     admitsPending: true,
@@ -268,6 +276,8 @@ export const IDENTITY_ROUTES: readonly Route[] = [
   {
     method: 'GET',
     path: '/v1/athletes/{athleteId}',
+    // #1210: phase 2 of ADR 0047 D-7.
+    sealed: 'only',
     operationId: 'getAthlete',
     reaches: { athlete: 'athleteId' },
     summary: 'What another rider may see of an athlete: the display name, and nothing else.',
@@ -281,6 +291,8 @@ export const IDENTITY_ROUTES: readonly Route[] = [
   {
     method: 'POST',
     path: '/v1/rooms/{roomId}/ticket',
+    // #1210: phase 2 of ADR 0047 D-7.
+    sealed: 'only',
     operationId: 'createRoomTicket',
     reaches: {
       exempt:
@@ -511,6 +523,8 @@ export const IDENTITY_ROUTES: readonly Route[] = [
   {
     method: 'GET',
     path: '/v1/auth/account',
+    // #1210: phase 2 of ADR 0047 D-7.
+    sealed: 'only',
     operationId: 'getAccount',
     reaches: 'own',
     admitsPending: true,
@@ -525,6 +539,8 @@ export const IDENTITY_ROUTES: readonly Route[] = [
   {
     method: 'POST',
     path: '/v1/auth/adult',
+    // #1210: phase 2 of ADR 0047 D-7.
+    sealed: 'only',
     operationId: 'confirmAdult',
     reaches: 'own',
     admitsPending: true,

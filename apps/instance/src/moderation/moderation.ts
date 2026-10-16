@@ -391,7 +391,14 @@ export function createModeration(options: ModerationOptions): Moderation {
       // costs nothing; the address first, so it is counted even past the cap.
       if (options.allowNoticeFrom?.(address) === false) return { kind: 'too-many' };
       const receivedAt = seconds();
-      if ((await store.countNoticesSince(receivedAt - 60 * 60)) >= NOTICES_PER_HOUR) {
+      // An intimate image report is never turned away by the instance-wide cap
+      // (OSA s.20A's 48-hour duty): a crowd of addresses could otherwise fill
+      // it and lock the one notifier who cannot wait out an hour. The
+      // per-address limit above still bounds it.
+      if (
+        read.notice.kind !== 'intimate_image' &&
+        (await store.countNoticesSince(receivedAt - 60 * 60)) >= NOTICES_PER_HOUR
+      ) {
         return { kind: 'too-many' };
       }
       const reference = await store.putNotice({ ...read.notice, receivedAt });

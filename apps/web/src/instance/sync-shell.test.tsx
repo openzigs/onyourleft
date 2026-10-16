@@ -65,6 +65,7 @@ import {
 import { INSTANCE_KEY_TEXT } from './instance-pin';
 import { createInstancePort, type InstancePort, type InstanceStorage } from './instance-port';
 import type { InstanceSend } from './instance-transport';
+import { INSTANCE_ACCOUNT_STORAGE_KEY } from './sign-in';
 import { createSyncPort, type SyncPort } from './sync-port';
 import { LOADED_LOCALLY } from './testing';
 
@@ -252,7 +253,12 @@ async function showShell(on: Device): Promise<void> {
   mounted = await mount(
     <AppShell capabilities={NO_BLUETOOTH} instance={on.instance} sync={on.sync} />,
   );
-  await settle();
+  // Since #1210 the screen's own read of the sign-in is sealed, which takes
+  // more than a couple of turns: wait until it has been read.
+  for (let turn = 0; turn < 200; turn += 1) {
+    await settle();
+    if (!(document.body.textContent ?? '').includes('Reading this device’s connection')) break;
+  }
   await settle();
 }
 
@@ -333,14 +339,20 @@ describe('a device with no card does not sync (#1195, ADR 0047 D-14 Q1)', () => 
       const send = wire(w);
       const on = await device(send, localStorage);
       await connectWithCard(on, w, 'Anna');
-      await on.instance.disconnect();
-      // Signed in again with only the address: a key the instance holds, no pin kept.
-      expect(await on.instance.connect(testing.TEST_ORIGIN, 'Anna')).toMatchObject({
-        kind: 'connected',
-      });
+      // A sign-in with no pin, kept from before #1210: since then an instance
+      // holding keys signs in no device without its card.
+      const kept = JSON.parse(localStorage.getItem(INSTANCE_ACCOUNT_STORAGE_KEY) ?? '{}') as {
+        origin: string;
+        instanceAthleteId: string;
+      };
+      localStorage.setItem(
+        INSTANCE_ACCOUNT_STORAGE_KEY,
+        JSON.stringify({ origin: kept.origin, instanceAthleteId: kept.instanceAthleteId }),
+      );
       send.mockClear();
       await showShell(on);
-      expect(document.body.textContent).toContain('Connected');
+      // The sign-in cannot be read without the card, and the screen says so.
+      expect(document.body.textContent).toContain(INSTANCE_KEY_TEXT['needs-card']);
       expect(buttonNamed(SYNC_CONTROL_LABEL)).toBeUndefined();
       expect(syncPanel()?.textContent).toContain(INSTANCE_KEY_TEXT['needs-card']);
       // The port refuses too, with the same sentence, having sent nothing.

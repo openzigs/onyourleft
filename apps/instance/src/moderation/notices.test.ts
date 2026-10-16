@@ -213,6 +213,16 @@ describe('a notice sent from the page (#907)', () => {
   });
 });
 
+describe('the notice page’s hints reach a screen reader (#907)', () => {
+  it('points the name and email fields, and the intimate image group, at their hints', () => {
+    const page = noticePage({ kind: 'form' }, 'Test instance');
+    expect(page).toMatch(/id="notice-name"[^>]*aria-describedby="notice-who-hint"/);
+    expect(page).toMatch(/id="notice-email"[^>]*aria-describedby="notice-who-hint"/);
+    expect(page).toMatch(/<fieldset aria-describedby="notice-intimate-hint">/);
+    expect(page).toContain('id="notice-intimate-hint"');
+  });
+});
+
 describe('the notice page’s limits, with no account and no stored address (#907)', () => {
   it('limits one client address, and leaves another its own allowance', async () => {
     world = await startModerationWorld({
@@ -256,6 +266,48 @@ describe('the notice page’s limits, with no account and no stored address (#90
     expect((await post(world, ILLEGAL, '203.0.113.9')).status).toBe(200);
   });
 
+  it('keeps taking an intimate image report when a crowd of addresses has filled the instance’s cap', async () => {
+    world = await startModerationWorld({ config: { clientAddressHeader: 'x-test-client' } });
+    for (let index = 0; index < NOTICES_PER_HOUR; index += 1) {
+      const sent = await post(
+        world,
+        ILLEGAL,
+        `10.0.${String(Math.floor(index / 250))}.${String(index % 250)}`,
+      );
+      expect(sent.status).toBe(200);
+    }
+    expect((await post(world, ILLEGAL, '203.0.113.9')).status).toBe(429);
+    const intimate = await post(
+      world,
+      {
+        kind: 'intimate_image',
+        explanation: 'An image of me, shared without my consent.',
+        items: `route:${ROOM}`,
+        email: 'me@example.org',
+        declare_intimate: 'on',
+        declare_subject: 'on',
+        declare_true: 'on',
+      },
+      '203.0.113.9',
+    );
+    expect(intimate.status).toBe(200);
+    expect(await queue(world)).toHaveLength(NOTICES_PER_HOUR + 1);
+  });
+
+  it('refuses a post a browser says came from another site, and keeps nothing', async () => {
+    world = await startModerationWorld({ config: { clientAddressHeader: 'x-test-client' } });
+    const response = await fetch(`${world.url}/report`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        'sec-fetch-site': 'cross-site',
+      },
+      body: new URLSearchParams(ILLEGAL).toString(),
+    });
+    expect(response.status).toBe(403);
+    expect(await queue(world)).toHaveLength(0);
+  });
+
   it('never stores a client address: no column of the notice holds one', async () => {
     world = await startModerationWorld({ config: { clientAddressHeader: 'x-test-client' } });
     expect((await post(world, ILLEGAL, '192.0.2.77')).status).toBe(200);
@@ -265,6 +317,27 @@ describe('the notice page’s limits, with no account and no stored address (#90
 
 describe('the form, read (#907)', () => {
   const read = (fields: Record<string, string>) => readNoticeForm(new URLSearchParams(fields));
+
+  it('refuses an email that would carry mailto parameters, or a control character', () => {
+    for (const email of [
+      'me@x.org?bcc=attacker%40evil.com&subject=hi',
+      'me@x.org&body=hi',
+      'me%40x.org@x.org',
+      'me@x.org\u0000',
+      'a<b>@x.org',
+    ]) {
+      const outcome = read({ kind: 'illegal_content', explanation: 'why', location: 'w', email });
+      expect(outcome.ok, email).toBe(false);
+    }
+    expect(
+      read({
+        kind: 'illegal_content',
+        explanation: 'why',
+        location: 'w',
+        email: 'a.b+c@ex-ample.co.uk',
+      }).ok,
+    ).toBe(true);
+  });
 
   it('takes a location in words when there is no identifier', () => {
     const outcome = read({ kind: 'illegal_content', explanation: 'why', location: 'where' });

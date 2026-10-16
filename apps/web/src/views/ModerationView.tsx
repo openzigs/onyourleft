@@ -31,6 +31,13 @@ import {
 import { hrefFor, routeById } from '../shell/routes';
 
 /**
+ * An address safe to put in a `mailto:` link: nothing in it can add a
+ * parameter (`?bcc=`, `&body=`). An address stored before the instance
+ * tightened its grammar that fails this is shown as text, never as a link.
+ */
+const LINKABLE_EMAIL = /^[A-Za-z0-9.!#$*+/=^_`{|}~-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/;
+
+/**
  * The Moderation screen (#955): the instance's moderator approves and refuses
  * accounts awaiting approval, decides reports, suspends and lifts suspensions,
  * hides display names, and reads the moderation log.
@@ -705,7 +712,12 @@ function Notices({
                 ) : (
                   <>
                     Write to them at{' '}
-                    <a href={`mailto:${notice.notifierEmail}`}>{notice.notifierEmail}</a>.
+                    {LINKABLE_EMAIL.test(notice.notifierEmail) ? (
+                      <a href={`mailto:${notice.notifierEmail}`}>{notice.notifierEmail}</a>
+                    ) : (
+                      notice.notifierEmail
+                    )}
+                    .
                   </>
                 )}{' '}
                 {notice.bonaFide

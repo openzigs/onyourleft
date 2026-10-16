@@ -484,8 +484,10 @@ export interface RideFacts {
  *   not in it — they did not finish, in the room's word.
  * - neither, with `crossedTheLine: true`: the rider crossed the line on this
  *   device and ended their ride before the room's order came (#1360's review,
- *   N2). The device does not know their place: no place is sent before the
- *   room's `finish`.
+ *   N2). The room sends no place before its `finish`; but its standings
+ *   (#1347) say who is across, so — #1364 — `placeAcross` and `across` say
+ *   where this rider was among the riders already across, when the room's
+ *   standings had them across. Never a place in the room's order.
  * - neither, and no `crossedTheLine`: the rider left while the race ran.
  */
 export interface RoomRaceFact {
@@ -508,6 +510,16 @@ export interface RoomRaceFact {
    * once the order is heard, it is the room's word on who finished.
    */
   readonly crossedTheLine?: true;
+  /**
+   * This rider's place among the riders the room's standings had across the
+   * line when the ride ended, 1 for the first across — #1364. Only with
+   * `crossedTheLine`, and only with {@link across}; absent where the room's
+   * standings did not have this rider across. The ROOM's word (its
+   * `FLAG_FINISHED` and its order, ADR 0028 D-2), never this device's own.
+   */
+  readonly placeAcross?: number;
+  /** How many riders the room's standings had across the line then, this rider among them (#1364). */
+  readonly across?: number;
 }
 
 /** @see {@link ActivityRecord.originalFile} */
