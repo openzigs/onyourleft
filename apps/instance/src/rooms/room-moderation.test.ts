@@ -27,6 +27,7 @@ import { TEST_ORIGIN, testDevice, type TestDevice } from '../auth/identity-testi
 import { testConfig } from '../instance-testing.ts';
 import { startInstance, type StartedInstance } from '../instance.ts';
 import { flagReason, ROOM_REPORT_REASONS } from '../moderation/moderation.ts';
+import { TEST_STATEMENT } from '../moderation/moderation-testing.ts';
 import { joinRoom, type RoomClient } from '../room/node/router-testing.ts';
 import { until } from '../room/node/node-room-testing.ts';
 import { readServerConfig } from '../server-config.ts';
@@ -285,14 +286,14 @@ describe('moderation in a room on the running instance — #789', () => {
       'POST',
       `/v1/moderation/athletes/${bob.athleteId}/hide-display-name`,
       moderator.token,
-      { reason: 'Name reported in the room' },
+      { reason: 'Name reported in the room', statement: TEST_STATEMENT },
     );
     expect(hidden.status).toBe(200);
     const suspended = await w.call(
       'POST',
       `/v1/moderation/athletes/${cat.athleteId}/suspend`,
       moderator.token,
-      { reason: 'Cheating in a race' },
+      { reason: 'Cheating in a race', statement: TEST_STATEMENT },
     );
     expect(suspended.status).toBe(200);
 
