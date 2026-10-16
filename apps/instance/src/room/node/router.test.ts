@@ -12,6 +12,7 @@ import { WebSocket } from 'ws';
 
 import type { Frame } from '@onyourleft/protocol';
 
+import { logEvent, REDACTED } from '../../log.ts';
 import { helloText } from '../core/room-testing.ts';
 import { until } from './node-room-testing.ts';
 import { closeFrameBytes, roomHash, type RoomLookup } from './router.ts';
@@ -252,38 +253,35 @@ describe('what is refused before any room state changes — #780 criterion 1', (
     expect(first.messages.map((m) => m.type)).toEqual(['welcome']);
   }, 30_000);
 
-  it('logs each socket a room closed for a protocol reason, with the room, the reason and a count — #1400', async () => {
-    const events: { event: string; detail?: Record<string, unknown> }[] = [];
+  it('logs each socket a room closed for a protocol reason, with the room, the reason and a count — #1400, #1402', async () => {
+    // Through the operator's real sink, as `instance.ts` wires it (#1402):
+    // the line is what an operator reads, not the event object.
+    const lines: string[] = [];
     harness = await startRouter({
       workers: 1,
-      event: (event, detail) => events.push({ event, ...(detail === undefined ? {} : { detail }) }),
+      event: (event, detail) => {
+        logEvent((line) => lines.push(line), event, detail);
+      },
     });
+    const room = '0123456789abcdef0123456789abcdef';
     // A seated rider holds the room open, so its counts are one room's.
-    const ann = await join('gate', 'ticket-ann');
+    const ann = await join(room, 'ticket-ann');
     await until(() => ann.messages.length > 0, 'a welcome');
     // A report before any hello: what the race load run's riders did through the tunnel.
-    const early = await join('gate', undefined);
+    const early = await join(room, undefined);
     early.report(1, 200);
     expect(await early.closed).toEqual({ code: 1008, reason: 'hello-expected' });
-    const again = await join('gate', undefined);
+    const again = await join(room, undefined);
     again.report(1, 200);
     expect(await again.closed).toEqual({ code: 1008, reason: 'hello-expected' });
-    const forged = await join('gate', 'forged');
+    const forged = await join(room, 'forged');
     expect(await forged.closed).toEqual({ code: 4003, reason: 'ticket-refused' });
-    await until(() => events.length >= 3, 'three logged closes');
-    expect(events).toEqual([
-      {
-        event: 'room-socket-closed',
-        detail: { worker: 0, room: 'gate', reason: 'hello-expected', count: 1 },
-      },
-      {
-        event: 'room-socket-closed',
-        detail: { worker: 0, room: 'gate', reason: 'hello-expected', count: 2 },
-      },
-      {
-        event: 'room-socket-closed',
-        detail: { worker: 0, room: 'gate', reason: 'ticket-refused', count: 1 },
-      },
+    await until(() => lines.length >= 3, 'three logged closes');
+    expect(lines.join('\n')).not.toContain(REDACTED);
+    expect(lines.map((line) => JSON.parse(line) as unknown)).toEqual([
+      { event: 'room-socket-closed', worker: 0, room, reason: 'hello-expected', count: 1 },
+      { event: 'room-socket-closed', worker: 0, room, reason: 'hello-expected', count: 2 },
+      { event: 'room-socket-closed', worker: 0, room, reason: 'ticket-refused', count: 1 },
     ]);
     // And the operator's metrics count it beside the refusals.
     const [worker] = await harness.router.metrics();

@@ -3,7 +3,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { startTestInstance, type TestInstance } from './instance-testing.ts';
-import { logEvent, loggedMethod, logUnhandled, REDACTED } from './log.ts';
+import { LOGGED_CLOSE_REASONS, logEvent, loggedMethod, logUnhandled, REDACTED } from './log.ts';
+import * as closeCodes from './room/close-codes.ts';
 
 let running: TestInstance | undefined;
 afterEach(async () => {
@@ -106,5 +107,55 @@ describe('what the instance logs about a request (#767)', () => {
       code: REDACTED,
       status: 401,
     });
+  });
+
+  it('keeps a room-socket-closed line’s room, reason and count, and nothing else under those keys — #1402', () => {
+    const lines: string[] = [];
+    const sink = (line: string): void => {
+      lines.push(line);
+    };
+    const room = 'f97eae750123456789abcdef01234567';
+    logEvent(sink, 'room-socket-closed', { worker: 1, room, reason: 'too-slow', count: 27 });
+    // The same keys holding something else: free text, a token, a coordinate.
+    logEvent(sink, 'room-socket-closed', {
+      worker: 1,
+      room: TOKEN,
+      reason: 'Ann Rider was rude',
+      count: Number(LATITUDE),
+    });
+    // And on any other event, those keys are still not loggable.
+    logEvent(sink, 'room-report', { room, reason: 'too-slow', count: 1 });
+    expect(lines.map((line) => JSON.parse(line) as unknown)).toEqual([
+      { event: 'room-socket-closed', worker: 1, room, reason: 'too-slow', count: 27 },
+      {
+        event: 'room-socket-closed',
+        worker: 1,
+        room: REDACTED,
+        reason: REDACTED,
+        count: REDACTED,
+      },
+      { event: 'room-report', room: REDACTED, reason: REDACTED, count: REDACTED },
+    ]);
+    const written = lines.join('');
+    for (const secret of [TOKEN, 'Ann Rider', LATITUDE, '51.50']) {
+      expect(written).not.toContain(secret);
+    }
+  });
+
+  it('keeps every fixed close reason a room closes with, and the log’s list is the rooms’ — #1402', () => {
+    // Every close frame `room/close-codes.ts` exports, read off the module.
+    const frames = Object.values(closeCodes).flatMap((value): unknown[] =>
+      typeof value === 'object' && 'code' in value ? [value] : Object.values(value),
+    ) as { reason: string }[];
+    const reasons = new Set(frames.map((frame) => frame.reason));
+    expect(reasons.size).toBe(10);
+    expect(LOGGED_CLOSE_REASONS).toEqual(reasons);
+    const lines: string[] = [];
+    for (const reason of reasons) {
+      logEvent((line) => lines.push(line), 'room-socket-closed', { reason });
+    }
+    expect(lines.map((line) => (JSON.parse(line) as { reason: unknown }).reason)).toEqual([
+      ...reasons,
+    ]);
   });
 });

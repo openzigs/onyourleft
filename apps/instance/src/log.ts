@@ -33,6 +33,10 @@
  * somebody passes in next week under a name nobody thought to ban: a session
  * token, a signature, a latitude, a display name. `log.test.ts` logs one of
  * each and reads the line.
+ *
+ * A key that would be dangerous on the shared list can still be kept for ONE
+ * event, and then only a value of the one shape that event writes: see
+ * {@link EVENT_KEYS} (#1402).
  */
 
 /** Where lines go. `main.ts` writes them to standard output; a test keeps them. */
@@ -85,6 +89,50 @@ export const LOGGABLE_KEYS: ReadonlySet<string> = new Set([
   'keysProblem',
 ]);
 
+/**
+ * The fixed reasons a room closes a socket with, as `room/close-codes.ts`
+ * spells them. Written out rather than imported so that what this module
+ * reaches stays small (`analysis/agent-safety.test.ts` walks it);
+ * `log.test.ts` fails if the two lists part.
+ */
+export const LOGGED_CLOSE_REASONS: ReadonlySet<string> = new Set([
+  'protocol-mismatch',
+  'physics-mismatch',
+  'ticket-refused',
+  'room-full',
+  'room-closed',
+  'hello-expected',
+  'replaced',
+  'server-stopping',
+  'room-lost',
+  'too-slow',
+]);
+
+/**
+ * Keys one event may carry beyond {@link LOGGABLE_KEYS}, each with the only
+ * value it may hold there. Not on the shared list, because `reason`, `room`
+ * and `count` mean other things elsewhere — a moderator's reason is free
+ * text — and a value that fails its check is {@link REDACTED} like any other.
+ */
+export const EVENT_KEYS: ReadonlyMap<
+  string,
+  Readonly<Record<string, (value: unknown) => boolean>>
+> = new Map([
+  // #1400 / #1402: why a room let a socket go. The room id is the opaque one
+  // `rooms/rooms.ts` mints (16 random bytes, lowercase hex) — it names no
+  // athlete and is not a credential: the route and the socket both still need
+  // a session or a ticket. The reason is one of the fixed close reasons, the
+  // count how many that room has closed for it so far.
+  [
+    'room-socket-closed',
+    {
+      room: (value) => typeof value === 'string' && /^[0-9a-f]{32}$/.test(value),
+      reason: (value) => typeof value === 'string' && LOGGED_CLOSE_REASONS.has(value),
+      count: (value) => Number.isSafeInteger(value) && (value as number) >= 0,
+    },
+  ],
+]);
+
 /** A logged string longer than this is cut: a token or a signature is longer. */
 const MAXIMUM_LOGGED_STRING = 120;
 
@@ -102,13 +150,17 @@ function loggable(value: unknown): unknown {
 
 /**
  * The one function every log line goes through: only {@link LOGGABLE_KEYS},
- * and only plain, short values under them. Anything else — a key not on the
- * list, an object, an array — is {@link REDACTED}, whatever it held.
+ * and only plain, short values under them, plus the record's own event's
+ * {@link EVENT_KEYS} when their values pass. Anything else — a key not on
+ * either list, an object, an array — is {@link REDACTED}, whatever it held.
  */
 export function redacted(record: Readonly<Record<string, unknown>>): Record<string, unknown> {
   const kept: Record<string, unknown> = {};
+  const own = typeof record.event === 'string' ? EVENT_KEYS.get(record.event) : undefined;
   for (const [key, value] of Object.entries(record)) {
-    kept[key] = LOGGABLE_KEYS.has(key) ? loggable(value) : REDACTED;
+    const check = own !== undefined && Object.hasOwn(own, key) ? own[key] : undefined;
+    if (check !== undefined) kept[key] = check(value) ? value : REDACTED;
+    else kept[key] = LOGGABLE_KEYS.has(key) ? loggable(value) : REDACTED;
   }
   return kept;
 }
