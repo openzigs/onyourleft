@@ -60,6 +60,7 @@ import {
 } from '../game/hud/announce-preference';
 import { DEFAULT_CUES, readCuePreference } from '../game/cue-preference';
 import { readRealisticWorldChoice } from '../game/world-preference';
+import { DRAFT_READING_STORAGE_KEY, readDraftReadingChoice } from '../game/draft-preference';
 import { OSM_ATTRIBUTION, readBasemapConfig, type BasemapConfig } from '../map/basemap';
 import { MAP_TILES_STORAGE_KEY, readMapTilesChoice } from '../map/tiles-preference';
 
@@ -1075,6 +1076,86 @@ describe('the game world — #475', () => {
       mounted.container
         .querySelector<HTMLInputElement>('.oyl-world input[type="checkbox"]')
         ?.click();
+      await Promise.resolve();
+    });
+    expect(mounted.container.textContent).toContain(ANNOUNCEMENTS_NOT_KEPT);
+    mounted.unmount();
+  });
+});
+
+describe('the draft indicator — #787, ADR 0038 D-5', () => {
+  function disk(): PreferenceStorage {
+    const values = new Map<string, string>();
+    return {
+      getItem: (key) => values.get(key) ?? null,
+      setItem: (key, value) => {
+        values.set(key, value);
+      },
+    };
+  }
+
+  async function settings(store: PreferenceStorage) {
+    return mount(
+      <SettingsView
+        units="metric"
+        onUnitsChange={() => undefined}
+        onRiderMassChange={() => undefined}
+        announcements={store}
+      />,
+    );
+  }
+
+  const toggleIn = (root: ParentNode) =>
+    root.querySelector<HTMLInputElement>('.oyl-draft-reading input[role="switch"]');
+
+  it('is on until the rider turns it off, and keeps the choice on this device, read back by the ride’s own reader', async () => {
+    const store = disk();
+    const mounted = await settings(store);
+    const toggle = toggleIn(mounted.container);
+    expect(toggle?.type).toBe('checkbox');
+    expect(toggle?.checked).toBe(true);
+    expect(readDraftReadingChoice(store)).toBe(true);
+    await act(async () => {
+      toggle?.click();
+      await Promise.resolve();
+    });
+    expect(readDraftReadingChoice(store)).toBe(false);
+    expect(mounted.container.textContent).toContain(ANNOUNCEMENTS_SAVED);
+    await act(async () => {
+      toggle?.click();
+      await Promise.resolve();
+    });
+    expect(readDraftReadingChoice(store)).toBe(true);
+    mounted.unmount();
+
+    const off = disk();
+    off.setItem(DRAFT_READING_STORAGE_KEY, 'off');
+    const again = await settings(off);
+    expect(toggleIn(again.container)?.checked).toBe(false);
+    again.unmount();
+  });
+
+  it('says it changes what the rider sees and hears, not whether a room drafts, and never in watts', async () => {
+    const mounted = await settings(disk());
+    const copy = (mounted.container.querySelector('.oyl-draft-reading')?.textContent ?? '').replace(
+      /\s+/g,
+      ' ',
+    );
+    expect(copy).toContain('whether a room drafts is chosen by whoever made it');
+    expect(copy).not.toMatch(/\bW\b|watt/i);
+    mounted.unmount();
+  });
+
+  it('says so when the device will not keep it', async () => {
+    const refusing: PreferenceStorage = {
+      getItem: () => null,
+      setItem: () => {
+        throw new DOMException('full', 'QuotaExceededError');
+      },
+    };
+    const mounted = await settings(refusing);
+    await act(async () => {
+      toggleIn(mounted.container)?.click();
       await Promise.resolve();
     });
     expect(mounted.container.textContent).toContain(ANNOUNCEMENTS_NOT_KEPT);

@@ -6971,6 +6971,26 @@ describe('#785 — a ride in a room always records, and its race is saved with i
       next.controller.dispose();
     });
 
+    it('keeps the place among the riders already across through the checkpoint — #1364', async () => {
+      const across = {
+        roomId: ROOM,
+        place: null,
+        finishers: null,
+        crossedTheLine: true as const,
+        placeAcross: 2,
+        across: 5,
+      };
+      const id = await closedBeforeStop([across]);
+      const next = benchWith({ rideSave: storeSavePort() });
+      await next.controller.refreshRecoverable();
+      expect(await next.controller.saveRecovered(id)).toBe('saved');
+      const saved = await harness.read(async (store) =>
+        store.getActivity(ATHLETE_A, activityId('ride-1')),
+      );
+      expect(saved?.rideFacts?.races).toEqual([across]);
+      next.controller.dispose();
+    });
+
     it('continued, raced again and stopped: both races are saved', async () => {
       const id = await closedBeforeStop([{ roomId: ROOM, place: null, finishers: null }]);
       const next = benchWith({ rideSave: storeSavePort() });

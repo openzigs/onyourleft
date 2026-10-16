@@ -256,6 +256,9 @@ const TUCKING_SECTIONS: Partial<Record<RouteId, readonly string[]>> = {
     'Announcements',
     'Sounds',
     'Game world',
+    // #787: what the draft indicator shows and says, and that it is not the
+    // room's own switch.
+    'Draft',
     'Words to mask',
     'Documents for the analysis',
     // #1237: what the typed goals are not, and why thresholds are checked

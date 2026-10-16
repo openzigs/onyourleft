@@ -65,6 +65,7 @@ interface IdentityTesting {
   startIdentityInstance(options: {
     registration: 'approval' | 'open';
     moderators: { owner: string };
+    keyless?: boolean;
   }): Promise<ModerationInstance>;
 }
 
@@ -131,7 +132,7 @@ interface Device {
 async function aDevice(
   send: InstanceSend,
   name: string,
-  card: () => Promise<string>,
+  card: () => Promise<string | undefined>,
 ): Promise<Device> {
   const store = createStoreHarness();
   harnesses.push(store);
@@ -261,6 +262,34 @@ function answeredAt(
 }
 
 describe('who is a moderator — #955', () => {
+  it('says why it cannot tell, when an instance demands a seal of a device with no pin — #1210', async () => {
+    const started: { world?: ModerationInstance } = {};
+    const send: InstanceSend = (url, init) => {
+      if (started.world === undefined) throw new Error('no instance yet');
+      return started.world.instance.handler(new Request(url, init));
+    };
+    const device = await aDevice(send, 'Moderator', () => Promise.resolve(undefined));
+    const world = await testing.startIdentityInstance({
+      registration: 'open',
+      moderators: { owner: device.publicKey },
+      keyless: true,
+    });
+    started.world = world;
+    worlds.push(world);
+    await device.connect();
+    const demanding: InstanceSend = (url, init) =>
+      new URL(url).pathname === '/v1/auth/account'
+        ? Promise.resolve(
+            new Response(JSON.stringify({ error: { code: 'sealed_required' } }), {
+              status: 403,
+              headers: { 'content-type': 'application/json' },
+            }),
+          )
+        : send(url, init);
+    const port = createModerationPort({ ...device.dependencies, send: demanding });
+    expect(await port.read()).toMatchObject({ kind: 'sealed-unavailable' });
+  });
+
   it('sends nothing, and says so, on a device connected to no instance', async () => {
     const send = vi.fn() as unknown as InstanceSend;
     const port = createModerationPort({

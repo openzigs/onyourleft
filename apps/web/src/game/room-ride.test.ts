@@ -8,9 +8,14 @@ import { CORRECTION_THRESHOLD_METRES } from '../net/correction';
 import type { DrawnRemoteRider } from '../net/snapshots';
 import {
   acrossTheRoomsLine,
+  DRAFT_IN_PERCENT,
+  DRAFT_OUT_PERCENT,
+  DRAFT_SPOKEN,
+  draftEvent,
   heldOnTheLine,
   NEARBY_METRES,
   nextToFollow,
+  placeAcrossOf,
   raceEvent,
   raceFactOf,
   ROOM_RECORDING_PAUSED_TEXT,
@@ -29,6 +34,7 @@ import { GameSimulation } from './simulation';
 import { northRoute } from './route-fixtures-testing';
 import { airDensityKilogramsPerCubicMetre } from '@onyourleft/physics';
 import { altitudeMetres, degreesCelsius, kilograms, watts } from '@onyourleft/domain';
+import { FLAG_FINISHED, FLAG_PLAUSIBILITY } from '@onyourleft/protocol';
 
 const rider = (riderId: number, distanceMetres: number): DrawnRemoteRider => ({
   riderId,
@@ -278,6 +284,60 @@ describe('a race on the HUD — #785', () => {
   });
 });
 
+describe('into and out of the room’s draft — #787, #327’s spoken cue', () => {
+  /** Run a sequence of HUD draft figures through the cue, as `GameView` does frame by frame. */
+  function said(figures: readonly (number | 'off' | undefined)[]): (string | undefined)[] {
+    let inDraft = false;
+    return figures.map((figure) => {
+      const next = draftEvent(inDraft, figure);
+      inDraft = next.inDraft;
+      return next.event?.text;
+    });
+  }
+
+  it('says “in” once on crossing into the draft and “out” once on leaving it, never the figure on every frame', () => {
+    expect(said([0, 4, 12, 30, 34, 20, 3, 0])).toEqual([
+      undefined,
+      undefined,
+      DRAFT_SPOKEN.into(12),
+      undefined,
+      undefined,
+      undefined,
+      DRAFT_SPOKEN.outOf,
+      undefined,
+    ]);
+    expect(DRAFT_SPOKEN.into(34.4)).toBe('In the draft: 34 percent less drag.');
+  });
+
+  it('does not chatter at the edge: between the two thresholds nothing changes either way', () => {
+    const between = (DRAFT_IN_PERCENT + DRAFT_OUT_PERCENT) / 2;
+    expect(DRAFT_OUT_PERCENT).toBeLessThan(DRAFT_IN_PERCENT);
+    expect(
+      said([DRAFT_IN_PERCENT, between, DRAFT_IN_PERCENT - 0.1, between, DRAFT_OUT_PERCENT]),
+    ).toEqual([DRAFT_SPOKEN.into(DRAFT_IN_PERCENT), undefined, undefined, undefined, undefined]);
+    expect(said([DRAFT_IN_PERCENT - 0.1, between, DRAFT_OUT_PERCENT - 0.1])).toEqual([
+      undefined,
+      undefined,
+      undefined,
+    ]);
+  });
+
+  it('never tells the leading rider they are drafting: the front of a line gets 1–2 %', () => {
+    expect(said([1, 2, 2.4, 1])).toEqual([undefined, undefined, undefined, undefined]);
+  });
+
+  it('says nothing in a room with drafting off or before a frame, and is not left “in” by one', () => {
+    expect(said(['off', 'off', undefined])).toEqual([undefined, undefined, undefined]);
+    expect(draftEvent(true, 'off')).toEqual({ inDraft: false });
+    expect(draftEvent(true, undefined)).toEqual({ inDraft: false });
+    // …so going back into a draft afterwards is said again, as news.
+    expect(draftEvent(false, 30).event).toEqual({
+      kind: 'room-draft',
+      text: DRAFT_SPOKEN.into(30),
+    });
+  });
+});
+
 describe('riders coming and going — #784', () => {
   it('says nothing of the room as it was found, then who joined and who left, by count', () => {
     const first = riderEvents(undefined, [1, 2]);
@@ -332,6 +392,60 @@ describe('the race a ride was in, for the device to keep — #785', () => {
       place: 1,
       finishers: 2,
     });
+  });
+});
+
+describe('a place among the riders already across, from the room’s standings — #1364', () => {
+  const row = (riderId: number, flags: number, you = false) => ({
+    riderId,
+    displayName: undefined,
+    you,
+    gapSeconds: 0,
+    wattsPerKilogram: 0,
+    flags,
+  });
+  const ACROSS = FLAG_FINISHED;
+
+  it('is this rider’s place among the rows the room flags across, and how many it flags', () => {
+    // The room's order: finishers first, by their finish, then the road.
+    const standings = {
+      tick: 9,
+      rows: [row(3, ACROSS), row(0, ACROSS | FLAG_PLAUSIBILITY, true), row(5, ACROSS), row(7, 0)],
+    };
+    expect(placeAcrossOf(standings)).toEqual({ place: 2, across: 3 });
+    expect(placeAcrossOf({ tick: 9, rows: [row(0, ACROSS, true), row(7, 0)] })).toEqual({
+      place: 1,
+      across: 1,
+    });
+  });
+
+  it('is nothing with no standings, or where the room does not have this rider across', () => {
+    expect(placeAcrossOf(undefined)).toBeUndefined();
+    expect(placeAcrossOf({ tick: 9, rows: [] })).toBeUndefined();
+    expect(placeAcrossOf({ tick: 9, rows: [row(3, ACROSS), row(0, 0, true)] })).toBeUndefined();
+    expect(placeAcrossOf({ tick: 9, rows: [row(3, ACROSS), row(5, ACROSS)] })).toBeUndefined();
+  });
+
+  it('is kept with the race only for a rider across the line before the room’s order', () => {
+    const placed = { place: 2, across: 5 };
+    expect(raceFactOf('room-1', { kind: 'running' }, true, placed)).toEqual({
+      roomId: 'room-1',
+      place: null,
+      finishers: null,
+      crossedTheLine: true,
+      placeAcross: 2,
+      across: 5,
+    });
+    // Not across by the room's distance: a race left, and no place.
+    expect(raceFactOf('room-1', { kind: 'running' }, false, placed)).toEqual({
+      roomId: 'room-1',
+      place: null,
+      finishers: null,
+    });
+    // The room's order heard: that is the place, and the standings' is not kept.
+    expect(
+      raceFactOf('room-1', { kind: 'finished', order: [4, 0], place: 2 }, true, placed),
+    ).toEqual({ roomId: 'room-1', place: 2, finishers: 2 });
   });
 });
 

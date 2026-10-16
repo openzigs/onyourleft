@@ -228,6 +228,9 @@ export interface ManifestRoomRace {
   readonly place: number | null;
   readonly finishers: number | null;
   readonly crossedTheLine?: true;
+  /** #1364: this rider's place among the riders across, and how many were. */
+  readonly placeAcross?: number;
+  readonly across?: number;
 }
 
 /**
@@ -1162,6 +1165,9 @@ function manifestFactsOf(facts: RideFacts): ManifestRideFacts {
             place: race.place,
             finishers: race.finishers,
             ...(race.crossedTheLine === true ? { crossedTheLine: true as const } : {}),
+            ...(race.placeAcross === undefined || race.across === undefined
+              ? {}
+              : { placeAcross: race.placeAcross, across: race.across }),
           })),
         }),
   };

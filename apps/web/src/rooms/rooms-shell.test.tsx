@@ -25,6 +25,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { kilograms, watts } from '@onyourleft/domain';
 import { encodeMessage, type RoomMessage } from '@onyourleft/protocol';
 
+import { NO_CARD_DEVICE } from '../instance/testing';
 import type { GamePort, RidableRoute } from '../game/GameView';
 import type { GameRenderer } from '../game/port';
 import { ANNOUNCEMENTS_STORAGE_KEY, DEFAULT_ANNOUNCEMENTS } from '../game/hud/announce-preference';
@@ -194,11 +195,13 @@ async function shell(
       gameRenderer={() => Promise.resolve(RENDERER)}
       riderMass={kilograms(70)}
       rooms={createRoomsPort({
+        ...NO_CARD_DEVICE,
         storage: localStorage,
         zones: () => Promise.resolve(zones),
         send: instance.send,
       })}
       room={createRoomPort({
+        ...NO_CARD_DEVICE,
         storage: localStorage,
         send: instance.send,
         openSocket: sockets.open,
