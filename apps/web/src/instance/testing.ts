@@ -556,10 +556,19 @@ export function scriptedModeration(
       }
       return Promise.resolve(outcome);
     },
-    removeFromRoom: (roomId, athleteId, reason, reportId) => {
+    removeFromRoom: (roomId, athleteId, reason, reportId, statement) => {
       calls.push(
         `remove ${athleteId} from ${roomId}${reportId === undefined ? '' : ` for ${String(reportId)}`}`,
       );
+      // #1384: as the real port, refused without its statement.
+      if (
+        statement === undefined ||
+        statement.facts.trim() === '' ||
+        (statement.legalGround.trim() === '' && statement.termsGround.trim() === '')
+      ) {
+        return Promise.resolve({ kind: 'refused', text: MODERATION_REFUSAL_TEXT.statement });
+      }
+      held.statements.push({ athleteId: athleteId.trim(), ...statement });
       const id = athleteId.trim();
       if (id === held.me) return refusedAndLogged('remove_from_room', id, reportId ?? null, reason);
       if (!held.accounts.has(id)) return Promise.resolve(nothing);

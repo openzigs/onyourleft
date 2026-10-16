@@ -209,7 +209,15 @@ export interface Moderation {
     as: 'moderator' | 'host',
     roomId: string,
     target: string,
-    fields: { readonly reason?: unknown; readonly reportId?: unknown },
+    fields: {
+      readonly reason?: unknown;
+      readonly reportId?: unknown;
+      /**
+       * The statement of reasons (#1384): required of a MODERATOR's removal,
+       * as of any restriction (#910). A host's removal takes none.
+       */
+      readonly statement?: unknown;
+    },
   ): Promise<ModerationResult<{ logId: number }>>;
 
   openReports(): Promise<readonly Report[]>;
@@ -544,6 +552,14 @@ export function createModeration(options: ModerationOptions): Moderation {
         reportId = fields.reportId as number;
       }
       const action = as === 'moderator' ? 'remove_from_room' : 'host_remove_from_room';
+      // #1384: a moderator's removal is a restriction, refused without the
+      // statement the rider is shown. A host's is not a moderator's decision.
+      let statement: StatementFields | undefined;
+      if (RESTRICTIONS.has(action)) {
+        const read = readStatementFields(fields.statement, now());
+        if (!read.ok) return refuse('validation_failed', read.fields);
+        statement = read.fields;
+      }
       if ((await roleOf(target)) !== undefined) {
         await store.logRefusedAction({
           action,
@@ -565,6 +581,7 @@ export function createModeration(options: ModerationOptions): Moderation {
           reason: checked.reason,
           at: seconds(),
           roomId,
+          ...(statement === undefined ? {} : { statement }),
         }),
       );
     },

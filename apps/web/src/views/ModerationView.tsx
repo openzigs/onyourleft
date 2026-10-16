@@ -624,12 +624,15 @@ function Reports({
                           {
                             label: 'Remove from the room',
                             confirm: removeFromRoomConfirmation(report.targetAthleteId),
-                            run: async (reason: string) =>
+                            // #1384: #910's statement form, as a suspension's.
+                            statement: { decidedOn: 'report' as const },
+                            run: async (reason: string, statement?: StatementInput) =>
                               port.removeFromRoom(
                                 report.room?.roomId ?? '',
                                 report.targetAthleteId,
                                 reason,
                                 report.reportId,
+                                statement,
                               ),
                           },
                         ]),

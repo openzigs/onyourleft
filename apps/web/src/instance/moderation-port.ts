@@ -346,7 +346,8 @@ export const MODERATION_REFUSAL_TEXT = {
     'Write your answer to the rider, in at most 2,000 characters, with no place or coordinate in ' +
     'it. They are shown it, and it is written to the moderation log.',
   statement:
-    'Suspending an account or hiding a name needs a statement of reasons, which the rider is ' +
+    'Suspending an account, hiding a name or removing a rider from a room needs a statement of ' +
+    'reasons, which the rider is ' +
     'shown: the facts, in at most 2,000 characters, and the law or the terms they break, in at ' +
     'most 1,000 — with no place or coordinate in any of them.',
 } as const;
@@ -406,13 +407,15 @@ export interface ModerationPort {
   ): Promise<ModerationOutcome>;
   /**
    * Remove an athlete from a room, for its life (#789), deciding the report
-   * it came from when `reportId` is given.
+   * it came from when `reportId` is given. It needs `statement` (#1384, as a
+   * suspension does, #910): without one it is refused here and nothing is sent.
    */
   removeFromRoom(
     roomId: string,
     athleteId: string,
     reason: string,
     reportId?: number,
+    statement?: StatementInput,
   ): Promise<ModerationOutcome>;
   /**
    * Suspend an account, lift a suspension or hide a display name — for a
@@ -1123,17 +1126,21 @@ export function createModerationPort(dependencies: ModerationPortDependencies): 
       return send(`/v1/moderation/reports/${String(reportId)}/dismiss`, reason);
     },
 
-    removeFromRoom: async (roomId, athleteId, reason, reportId) => {
+    removeFromRoom: async (roomId, athleteId, reason, reportId, statement) => {
       const typed = athleteId.trim();
       if (!ATHLETE_ID.test(typed)) {
         return { kind: 'refused', text: MODERATION_REFUSAL_TEXT['athlete-id'] };
       }
       if (!ROOM_ID.test(roomId)) return { kind: 'refused', text: NOTHING_CHANGED_TEXT };
-      return send(
-        `/v1/moderation/rooms/${roomId}/athletes/${typed}/remove`,
-        reason,
-        reportId === undefined ? {} : { reportId },
-      );
+      // #1384: not sent without the statement the removed rider is shown.
+      const sentStatement = acceptedStatement(statement);
+      if (sentStatement === undefined) {
+        return { kind: 'refused', text: MODERATION_REFUSAL_TEXT.statement };
+      }
+      return send(`/v1/moderation/rooms/${roomId}/athletes/${typed}/remove`, reason, {
+        ...(reportId === undefined ? {} : { reportId }),
+        statement: sentStatement,
+      });
     },
 
     actOnAccount: async (athleteId, action, reason, reportId, statement) => {

@@ -41,7 +41,7 @@ recipient of the service is illegal content or incompatible with their terms and
 |---|---|
 | (a) restricting the visibility of specific items, including removal | Hide a display name. Hide one item: a room listing, a route shown in a room, a race result ([#913](https://github.com/openzigs/onyourleft/issues/913), not built) |
 | (b) suspending or restricting monetary payments | None: the instance takes and makes no payments |
-| (c) suspending or terminating the service in whole or in part | Removing a rider from a room (#789, not built) |
+| (c) suspending or terminating the service in whole or in part | A moderator removing a rider from a room (#789, #1384). A room host's removal is not a moderator's decision and carries none |
 | (d) suspending or terminating the account | Suspend |
 
 Art. 17(2): *"at the latest from the date that the restriction is imposed, regardless of why or how it
