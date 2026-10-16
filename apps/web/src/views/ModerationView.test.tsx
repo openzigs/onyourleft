@@ -725,6 +725,11 @@ describe('the notices — #907', () => {
         notifierName: null,
         notifierEmail: 'me@x.org?bcc=attacker%40evil.com&subject=hi',
         bonaFide: true,
+        acknowledgedAt: null,
+        decidedAt: null,
+        decision: null,
+        logId: null,
+        notifierToldAt: null,
       },
     ];
     await open(scripted);
