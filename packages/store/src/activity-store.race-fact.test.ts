@@ -85,6 +85,8 @@ const PLACED = { roomId: ROOM, place: 2, finishers: 5 };
 const NOT_PLACED = { roomId: ROOM, place: null, finishers: 3 };
 const CROSSED = { roomId: ROOM, place: null, finishers: null, crossedTheLine: true as const };
 const LEFT = { roomId: ROOM, place: null, finishers: null };
+/** #1364: across the line before the order, 1st of the 5 the room's standings had across. */
+const ACROSS = { ...CROSSED, placeAcross: 1, across: 5 };
 
 /** Every shape a race may not have. Each is dropped; none takes the ride with it. */
 const BAD: readonly unknown[] = [
@@ -101,6 +103,18 @@ const BAD: readonly unknown[] = [
   { roomId: ROOM, place: 1, finishers: 3, crossedTheLine: true },
   { roomId: ROOM, place: null, finishers: null, crossedTheLine: false },
   { roomId: ROOM, place: null, finishers: null, crossedTheLine: 'yes' },
+  // #1364: a place among those across only beside a crossing, only with its
+  // count, never past it, and a whole number of at least one.
+  { roomId: ROOM, place: null, finishers: null, placeAcross: 1, across: 2 },
+  { roomId: ROOM, place: 1, finishers: 2, placeAcross: 1, across: 2 },
+  { ...CROSSED, placeAcross: 1 },
+  { ...CROSSED, across: 2 },
+  { ...CROSSED, placeAcross: 3, across: 2 },
+  { ...CROSSED, placeAcross: 0, across: 2 },
+  { ...CROSSED, placeAcross: 1, across: 0 },
+  { ...CROSSED, placeAcross: 1.5, across: 2 },
+  { ...CROSSED, placeAcross: null, across: null },
+  { ...CROSSED, placeAcross: '1', across: 2 },
   'a race',
   null,
 ];
@@ -125,7 +139,7 @@ describe('the races kept with their ride — #785', () => {
     // all kept, and a rider who crossed the line and left before the room's
     // order is kept as having crossed it.
     const open = await opened();
-    const races = [PLACED, NOT_PLACED, CROSSED, LEFT];
+    const races = [PLACED, NOT_PLACED, CROSSED, ACROSS, LEFT];
     const ride = rideFor(ATHLETE_A, { rideFacts: { races } });
     const read = await open.roundTrip(
       async (store) => store.putActivity(ride),
@@ -162,10 +176,16 @@ describe('the races kept with their ride — #785', () => {
     for (const bad of BAD) {
       const ride = await seedRide(open, ATHLETE_A);
       await open.discard();
-      await plant(open.databaseName, ride.id, { ghostRaced: true, races: [CROSSED, bad] });
+      await plant(open.databaseName, ride.id, {
+        ghostRaced: true,
+        races: [CROSSED, bad, ACROSS],
+      });
       const read = await open.read((store) => store.getActivity(ATHLETE_A, ride.id));
       expect(read?.id, JSON.stringify(bad)).toBe(ride.id);
-      expect(read?.rideFacts, JSON.stringify(bad)).toEqual({ ghostRaced: true, races: [CROSSED] });
+      expect(read?.rideFacts, JSON.stringify(bad)).toEqual({
+        ghostRaced: true,
+        races: [CROSSED, ACROSS],
+      });
     }
     // A list that is not a list is no races.
     const ride = await seedRide(open, ATHLETE_A);
@@ -184,7 +204,7 @@ describe('the races on a recording’s checkpoint — #785, #1360’s review (B2
 
   it('come back on a fresh handle on the header and on the recovered recording, and for nobody else', async () => {
     const open = await opened();
-    const record = recordingFor(ATHLETE_A, { ...SPAN, roomRaces: [PLACED, CROSSED] });
+    const record = recordingFor(ATHLETE_A, { ...SPAN, roomRaces: [PLACED, CROSSED, ACROSS] });
     const read = await open.roundTrip(
       async (store) => {
         await store.putRecordingSession(record);
@@ -195,8 +215,8 @@ describe('the races on a recording’s checkpoint — #785, #1360’s review (B2
         theirs: await store.recoverRecording(ATHLETE_B, record.id),
       }),
     );
-    expect(read.header?.roomRaces).toEqual([PLACED, CROSSED]);
-    expect(read.recovered?.roomRaces).toEqual([PLACED, CROSSED]);
+    expect(read.header?.roomRaces).toEqual([PLACED, CROSSED, ACROSS]);
+    expect(read.recovered?.roomRaces).toEqual([PLACED, CROSSED, ACROSS]);
     expect(read.theirs).toBeUndefined();
   });
 

@@ -294,7 +294,7 @@ refuses to undo 0007 while the log holds a single entry, and changes nothing.
   away.
 - **It does not stop a rider leaving.** A suspended rider still cannot sign in (#775), but since
   #898 their app can open a **way-out session** (`POST /v1/auth/leave-session`, signed with one of
-  their device keys). It lasts an hour and reaches exactly two things: the account export
+  their device keys). It lasts an hour and reaches exactly four things: the account export
   (`GET /v1/account/export`) and deleting the account (`DELETE /v1/account`, which needs one of their
   recovery codes or a fresh signature from one of their devices, like anyone's), and, since #910,
   the statements of reasons about their account (`GET /v1/statements`), and, since #911, an appeal

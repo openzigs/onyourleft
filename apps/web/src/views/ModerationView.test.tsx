@@ -714,6 +714,31 @@ describe('the notices — #907', () => {
     expect(text(second)).toContain('They gave no name');
   });
 
+  it('shows an address that could add mailto parameters as text, never as a link', async () => {
+    const scripted = scriptedModeration();
+    scripted.held.notices = [
+      {
+        noticeId: 4,
+        receivedAt: 1_790_005_000,
+        kind: 'intimate_image',
+        explanation: 'Why.',
+        items: [],
+        location: 'Somewhere',
+        notifierName: null,
+        notifierEmail: 'me@x.org?bcc=attacker%40evil.com&subject=hi',
+        bonaFide: true,
+        acknowledgedAt: null,
+        decidedAt: null,
+        decision: null,
+        logId: null,
+        notifierToldAt: null,
+      },
+    ];
+    await open(scripted);
+    expect(item('Notice 4').querySelector('a')).toBeNull();
+    expect(text(item('Notice 4'))).toContain('me@x.org?bcc=attacker%40evil.com');
+  });
+
   it('says a notice with no email cannot be answered, and says so when the notices could not be read', async () => {
     const scripted = scriptedModeration();
     scripted.held.notices = [

@@ -22,7 +22,7 @@ import { createInstancePort, type InstanceStorage } from './instance-port';
 import type { InstanceSend } from './instance-transport';
 import { readInstanceAccount } from './sign-in';
 import { APPEAL_REFUSAL_TEXT, createStatementsPort, type StatementsPort } from './statements-port';
-import { LOADED_LOCALLY } from './testing';
+import { LOADED_FROM_A_WEBSITE, LOADED_LOCALLY } from './testing';
 
 interface TestDevice {
   readonly publicKey: string;
@@ -76,7 +76,9 @@ const STATEMENT = {
 };
 
 /** This device, connected to a fresh instance, and the instance's owner. */
-async function connected(): Promise<{
+async function connected(
+  options: { readonly portLoadedFrom?: typeof LOADED_LOCALLY } = {},
+): Promise<{
   world: World;
   port: StatementsPort;
   /** Every path this device sent, in order. */
@@ -145,6 +147,7 @@ async function connected(): Promise<{
     me,
     port: createStatementsPort({
       storage,
+      loadedFrom: options.portLoadedFrom ?? LOADED_LOCALLY,
       ensureLocalAthlete: ensure,
       signingKey,
       send,
@@ -197,10 +200,14 @@ describe('the statements of reasons about this rider (#910)', () => {
       kind: 'statements',
       statements: [expect.objectContaining({ restriction: 'suspend', facts: STATEMENT.facts })],
     });
+    // The way-out session is a phase-2 sealed route (#1210): the keys are
+    // judged, the challenge is plaintext, and the session is asked for
+    // sealed — never `/v1/auth/leave-session` in plaintext.
     expect(sent.slice(before)).toEqual([
       '/v1/statements',
+      '/v1/instance/keys',
       '/v1/auth/challenge',
-      '/v1/auth/leave-session',
+      '/v1/sealed',
       '/v1/statements',
     ]);
   });
@@ -217,8 +224,9 @@ describe('the statements of reasons about this rider (#910)', () => {
     });
     expect(sent.slice(before)).toEqual([
       `/v1/statements/${String(statementId)}/appeal`,
+      '/v1/instance/keys',
       '/v1/auth/challenge',
-      '/v1/auth/leave-session',
+      '/v1/sealed',
       `/v1/statements/${String(statementId)}/appeal`,
     ]);
     expect(await port.read()).toEqual({
@@ -248,10 +256,20 @@ describe('the statements of reasons about this rider (#910)', () => {
     expect(sent.length).toBe(before);
   });
 
+  it('opens no way-out session from a copy that may not seal, and says nothing was read (#1210)', async () => {
+    const { port, restrict, sent } = await connected({ portLoadedFrom: LOADED_FROM_A_WEBSITE });
+    await restrict('suspend');
+    const before = sent.length;
+    expect(await port.read()).toEqual({ kind: 'unreachable' });
+    // The held session is tried and refused; nothing about a way out is sent.
+    expect(sent.slice(before)).toEqual(['/v1/statements']);
+  });
+
   it('sends nothing on a device connected to no instance', async () => {
     const send = vi.fn() as unknown as InstanceSend;
     const port = createStatementsPort({
       storage: { getItem: () => null, setItem: () => undefined, removeItem: () => undefined },
+      loadedFrom: LOADED_LOCALLY,
       ensureLocalAthlete: () => Promise.resolve(),
       signingKey: () => Promise.reject(new Error('no key is asked for')),
       send,

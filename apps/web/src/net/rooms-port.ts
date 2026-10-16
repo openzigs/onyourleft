@@ -12,9 +12,11 @@
  * ## Through the one instance module — ADR 0036 D-3 (a)
  *
  * Every request goes through `instance/instance-transport.ts`'s one `fetch`,
- * with the session `instance/instance-port.ts` keeps. A rider with no
- * instance has no session, and every method answers `not-signed-in` without
- * sending a byte.
+ * with the session `instance/instance-port.ts` keeps — SEALED since #1210
+ * (ADR 0047 D-7 phase 2), or in plaintext from a device with no card, which
+ * an instance holding keys refuses (`cannot-seal`). A rider with no instance
+ * has no session, and every method answers `not-signed-in` without sending a
+ * byte.
  *
  * ## What leaves the device, and what does not
  *
@@ -32,10 +34,16 @@
  *   (`room-port.ts`), and only when the rider has declared one.
  */
 
-import type { RouteProfile } from '@onyourleft/domain';
+import type { RouteProfile, SigningKey } from '@onyourleft/domain';
 import type { PrivacyZoneRecord } from '@onyourleft/store';
 
-import { heldInstanceSession, type InstanceStorage } from '../instance/instance-port';
+import {
+  heldAccountSession,
+  isSealedRequired,
+  type HeldAccountSession,
+  type InstanceStorage,
+} from '../instance/instance-port';
+import type { LoadedFrom } from '../instance/instance-pin';
 import {
   isRoomId,
   roomPath,
@@ -77,7 +85,17 @@ export interface EnteredRoom {
 
 /** Why a request about a room will not be answered as asked, however often it is asked. */
 export type RoomsRefusal =
-  'not-signed-in' | 'no-such-room' | 'rate-limited' | 'not-the-rooms-route' | 'instance-refused';
+  | 'not-signed-in'
+  | 'no-such-room'
+  | 'rate-limited'
+  | 'not-the-rooms-route'
+  | 'instance-refused'
+  /**
+   * #1210: the room routes are sealed-only (ADR 0047 D-7 phase 2) and this
+   * device cannot seal to its instance now — no card, a copy a website
+   * served, or keys refused. Nothing was sent about the room.
+   */
+  | 'cannot-seal';
 
 export type CreateRoomAnswer =
   | { readonly kind: 'created'; readonly room: EnteredRoom }
@@ -137,14 +155,26 @@ export interface RoomsPort {
 export interface RoomsPortOptions {
   /** This device's `localStorage`: where `instance-port.ts` keeps the session. */
   readonly storage: InstanceStorage;
+  /** Where this copy of the app was loaded from: a website's copy seals nothing (ADR 0047 D-11). */
+  readonly loadedFrom: LoadedFrom;
+  /** `ensureDeviceSigningKey`, bound: the session's key, which signs every sealed request. */
+  readonly signingKey: () => Promise<SigningKey>;
   /** The rider's privacy zones, read from this device's store. */
   readonly zones: () => Promise<readonly PrivacyZoneRecord[]>;
   /** Injected so a test needs no network. */
   readonly send?: InstanceSend | undefined;
 }
 
-/** What a status says, when it says "never". 429 is a refusal here: a limit on tries. */
-function refusalOf(status: number): RoomsRefusal | undefined {
+/** What an answer says, when it says "never". 429 is a refusal here: a limit on tries. */
+function refusalOf(answer: {
+  readonly status: number;
+  readonly body: unknown;
+}): RoomsRefusal | undefined {
+  if (isSealedRequired(answer)) return 'cannot-seal';
+  return refusalOfStatus(answer.status);
+}
+
+function refusalOfStatus(status: number): RoomsRefusal | undefined {
   if (status === 401) return 'not-signed-in';
   if (status === 404) return 'no-such-room';
   if (status === 429) return 'rate-limited';
@@ -184,7 +214,21 @@ function isRow(value: unknown): value is RaceResultRow {
 
 /** The production {@link RoomsPort}: `main.tsx` builds it, and nothing else in the client. */
 export function createRoomsPort(options: RoomsPortOptions): RoomsPort {
-  const held = () => heldInstanceSession(options.storage, options.send);
+  const accountSession = heldAccountSession({
+    storage: options.storage,
+    loadedFrom: options.loadedFrom,
+    signingKey: options.signingKey,
+    send: options.send,
+  });
+
+  /** The session, or the refusal for one this device holds none of, or cannot seal (#1210). */
+  async function held(): Promise<
+    Extract<HeldAccountSession, { kind: 'open' }> | { readonly refused: RoomsRefusal }
+  > {
+    const session = await accountSession();
+    if (session.kind === 'open') return session;
+    return { refused: session.why === 'signed-out' ? 'not-signed-in' : 'cannot-seal' };
+  }
 
   /** A room's route, fetched and checked against the room's own `routeRef`. */
   async function routeOf(
@@ -192,13 +236,13 @@ export function createRoomsPort(options: RoomsPortOptions): RoomsPort {
     routeSha256: string,
     loop: boolean,
   ): Promise<RouteProfile | RoomsRefusal | 'unreachable'> {
-    const session = held();
-    if (session === undefined) return 'not-signed-in';
-    const answer = await session.http.call('GET', roomPath(roomId, 'route'), {
+    const session = await held();
+    if ('refused' in session) return session.refused;
+    const answer = await session.sealedOrKeyless.call('GET', roomPath(roomId, 'route'), {
       token: session.token,
       maximumAnswerBytes: MAXIMUM_ROOM_ROUTE_ANSWER_BYTES,
     });
-    if (answer.status !== 200) return refusalOf(answer.status) ?? 'unreachable';
+    if (answer.status !== 200) return refusalOf(answer) ?? 'unreachable';
     const gpx = (answer.body as { gpx?: unknown } | null)?.gpx;
     if (typeof gpx !== 'string') return 'not-the-rooms-route';
     return (await roomRouteFrom(gpx, routeSha256, loop)) ?? 'not-the-rooms-route';
@@ -209,10 +253,10 @@ export function createRoomsPort(options: RoomsPortOptions): RoomsPort {
       // First, before anything is sent: a route in a privacy zone never leaves.
       const shared = sharedRoomRoute(request.route, await options.zones());
       if (shared.kind === 'refused') return shared;
-      const session = held();
-      if (session === undefined) return { kind: 'refused', reason: 'not-signed-in' };
       try {
-        const answer = await session.http.call('POST', '/v1/rooms', {
+        const session = await held();
+        if ('refused' in session) return { kind: 'refused', reason: session.refused };
+        const answer = await session.sealedOrKeyless.call('POST', '/v1/rooms', {
           token: session.token,
           body: {
             kind: request.kind,
@@ -231,7 +275,7 @@ export function createRoomsPort(options: RoomsPortOptions): RoomsPort {
           !isRoomId(made.roomId) ||
           typeof made.code !== 'string'
         ) {
-          const reason = refusalOf(answer.status);
+          const reason = refusalOf(answer);
           return reason === undefined ? { kind: 'unreachable' } : { kind: 'refused', reason };
         }
         return {
@@ -253,10 +297,10 @@ export function createRoomsPort(options: RoomsPortOptions): RoomsPort {
     },
 
     async join(code) {
-      const session = held();
-      if (session === undefined) return { kind: 'refused', reason: 'not-signed-in' };
       try {
-        const answer = await session.http.call('POST', '/v1/rooms/join', {
+        const session = await held();
+        if ('refused' in session) return { kind: 'refused', reason: session.refused };
+        const answer = await session.sealedOrKeyless.call('POST', '/v1/rooms/join', {
           token: session.token,
           body: { code },
         });
@@ -269,7 +313,7 @@ export function createRoomsPort(options: RoomsPortOptions): RoomsPort {
           routeSha256?: unknown;
         } | null;
         if (answer.status !== 200) {
-          const reason = refusalOf(answer.status);
+          const reason = refusalOf(answer);
           return reason === undefined ? { kind: 'unreachable' } : { kind: 'refused', reason };
         }
         if (
@@ -307,14 +351,14 @@ export function createRoomsPort(options: RoomsPortOptions): RoomsPort {
     },
 
     async start(roomId) {
-      const session = held();
-      if (session === undefined) return { kind: 'refused', reason: 'not-signed-in' };
       try {
-        const answer = await session.http.call('POST', roomPath(roomId, 'start'), {
+        const session = await held();
+        if ('refused' in session) return { kind: 'refused', reason: session.refused };
+        const answer = await session.sealedOrKeyless.call('POST', roomPath(roomId, 'start'), {
           token: session.token,
         });
         if (answer.status === 200) return { kind: 'started' };
-        const reason = refusalOf(answer.status);
+        const reason = refusalOf(answer);
         return reason === undefined ? { kind: 'unreachable' } : { kind: 'refused', reason };
       } catch {
         return { kind: 'unreachable' };
@@ -322,14 +366,14 @@ export function createRoomsPort(options: RoomsPortOptions): RoomsPort {
     },
 
     async results(roomId) {
-      const session = held();
-      if (session === undefined) return { kind: 'refused', reason: 'not-signed-in' };
       try {
-        const answer = await session.http.call('GET', roomPath(roomId, 'results'), {
+        const session = await held();
+        if ('refused' in session) return { kind: 'refused', reason: session.refused };
+        const answer = await session.sealedOrKeyless.call('GET', roomPath(roomId, 'results'), {
           token: session.token,
         });
         if (answer.status !== 200) {
-          const reason = refusalOf(answer.status);
+          const reason = refusalOf(answer);
           return reason === undefined ? { kind: 'unreachable' } : { kind: 'refused', reason };
         }
         const rows = (answer.body as { rows?: unknown } | null)?.rows;

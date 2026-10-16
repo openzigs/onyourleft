@@ -221,7 +221,7 @@ export interface StatementView {
   readonly appeal: AppealView | null;
   /** (f): how to ask the instance to look again, and the other routes. */
   readonly redress: {
-    /** The appeal route on this instance (#911): always open to the rider, until they have used it. */
+    /** The appeal route on this instance (#911): always `true`: every statement offers the route (one appeal each is enforced on filing; `appeal` above shows whether it was used). */
     readonly appeal: true;
     /** Where to write to ask the instance to look again, or `null` when the operator published none. */
     readonly contactEmail: string | null;

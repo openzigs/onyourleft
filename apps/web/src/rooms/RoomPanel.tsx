@@ -82,6 +82,10 @@ export const ROOMS_REFUSAL_TEXT: Readonly<Record<RoomsRefusal, string>> = {
   'not-the-rooms-route':
     'The room’s route did not arrive as the room made it, so it was not used. Try joining again.',
   'instance-refused': 'The instance would not do that. Try again later.',
+  // #1210 (ADR 0047 D-14 Q6).
+  'cannot-seal':
+    'Rooms on your instance are reached only encrypted, and this device cannot do that right ' +
+    'now. The Instance screen says why.',
 };
 
 /**

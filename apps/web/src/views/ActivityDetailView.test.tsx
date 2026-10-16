@@ -274,6 +274,15 @@ describe('criterion 1 — a ride with no position renders without a map', () => 
             races: [
               { roomId: 'room-race', place: 2, finishers: 5 },
               { roomId: 'room-2', place: null, finishers: null, crossedTheLine: true },
+              // #1364: and a place among the riders already across.
+              {
+                roomId: 'room-3',
+                place: null,
+                finishers: null,
+                crossedTheLine: true,
+                placeAcross: 1,
+                across: 5,
+              },
             ],
           },
         }),
@@ -287,6 +296,7 @@ describe('criterion 1 — a ride with no position renders without a map', () => 
     expect([...(both?.querySelectorAll('dd') ?? [])].map((each) => each.textContent)).toEqual([
       '2nd of 5 in a private race',
       'A private race, finished: you left before the room gave places',
+      '1st across of 5 in a private race, before the room gave places',
     ]);
     mounted.unmount();
     mounted = await open(indoorRide());

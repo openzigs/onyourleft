@@ -584,6 +584,7 @@ function FieldList(props: {
               // why the phrase is not folded into the value instead.
               <span className="oyl-hud__detail"> {reading.detail}</span>
             )}
+            {reading.gauge === undefined ? null : <Gauge fraction={reading.gauge} />}
             {reading.stale ? (
               // ⚠️ Words, not only a tint. #94's second criterion is that a
               // dropped sensor be distinguishable from a zero — and a rider
@@ -597,6 +598,33 @@ function FieldList(props: {
         </div>
       ))}
     </dl>
+  );
+}
+
+/**
+ * A field's gauge — #787, the draft's (#327's indicator criteria): a bar
+ * filled to `fraction` inside an outline that IS the full scale, with the
+ * full-scale end drawn heavier, so "I am getting all there is" is legible.
+ *
+ * ⚠️ `aria-hidden`: the value and the phrase under it say the same thing in
+ * words (`fields.ts` §`HudReading.gauge`). An SVG, as the elevation strip is,
+ * so the fill is an attribute and no inline style is needed.
+ */
+function Gauge(props: { readonly fraction: number }): JSX.Element {
+  const filled = Math.max(0, Math.min(1, props.fraction)) * 100;
+  return (
+    <svg
+      className="oyl-hud__gauge"
+      viewBox="0 0 100 10"
+      preserveAspectRatio="none"
+      aria-hidden="true"
+      focusable="false"
+      data-oyl-gauge={filled.toFixed(1)}
+    >
+      <rect className="oyl-hud__gauge-fill" x="0" y="0" width={filled} height="10" />
+      <rect className="oyl-hud__gauge-scale" x="0" y="0" width="100" height="10" />
+      <line className="oyl-hud__gauge-full" x1="100" y1="0" x2="100" y2="10" />
+    </svg>
   );
 }
 
