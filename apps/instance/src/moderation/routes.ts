@@ -18,6 +18,7 @@ import { json, noContent, type Route, type RouteContext, type Schema } from '../
 import type { AthleteAction, Moderation, ModerationResult } from './moderation.ts';
 import { NOTICE_PAGE_PATH, noticePage } from './notices.ts';
 import { statementView as toStatementView } from './statements.ts';
+import { stepsOf } from './record.ts';
 
 function moderationOf(context: RouteContext): Moderation {
   // The handler answers `unavailable` before calling a route that declares
@@ -66,6 +67,15 @@ const logEntrySchema = object({
   at: integer,
 });
 
+/** The steps taken on a notice (#912). */
+const noticeSteps = {
+  acknowledgedAt: nullableInteger,
+  decidedAt: nullableInteger,
+  decision: nullableString,
+  logId: nullableInteger,
+  notifierToldAt: nullableInteger,
+};
+
 const noticeSchema = object({
   noticeId: integer,
   receivedAt: integer,
@@ -76,6 +86,7 @@ const noticeSchema = object({
   notifierName: nullableString,
   notifierEmail: nullableString,
   bonaFide: { type: 'boolean' },
+  ...noticeSteps,
 });
 
 /** Why the notice page reaches nobody through the choke point: it is for anybody, signed in or not. */
@@ -388,9 +399,11 @@ export const MODERATION_ROUTES: readonly Route[] = [
       contentType: 'application/json',
       schema: object({ notices: { type: 'array', items: noticeSchema } }),
     },
-    handle: async (context) =>
-      json({
-        notices: (await moderationOf(context).notices()).map((notice) => ({
+    handle: async (context) => {
+      const moderation = moderationOf(context);
+      const steps = await moderation.noticeSteps();
+      return json({
+        notices: (await moderation.notices()).map((notice) => ({
           noticeId: notice.id,
           receivedAt: notice.receivedAt,
           kind: notice.kind,
@@ -400,8 +413,87 @@ export const MODERATION_ROUTES: readonly Route[] = [
           notifierName: notice.notifierName,
           notifierEmail: notice.notifierEmail,
           bonaFide: notice.bonaFide,
+          ...stepsOf(notice.id, steps),
         })),
+      });
+    },
+  },
+  {
+    method: 'POST',
+    path: '/v1/moderation/notices/{noticeId}/steps',
+    sealed: 'only',
+    operationId: 'recordNoticeStep',
+    reaches: 'moderation',
+    summary:
+      'Record a step taken on a notice (#912): `acknowledged` (receipt confirmed to the notifier’s address, by hand), `decided` (with the decision and, if an action was taken, its moderation log entry) or `notifier_told`. Each once; never acknowledged or told for a notifier who gave no address; told only once decided. Append-only.',
+    identity: true,
+    auth: 'session',
+    request: object(
+      {
+        step: { type: 'string', enum: ['acknowledged', 'decided', 'notifier_told'] },
+        decision: string,
+        logId: integer,
+      },
+      ['step'],
+    ),
+    errors: ['unauthenticated', 'validation_failed', 'moderation_not_applicable'],
+    response: { contentType: 'none' },
+    handle: async (context) =>
+      answer(
+        await moderationOf(context).recordNoticeStep(
+          callerId(context),
+          context.params.noticeId ?? '',
+          context.json.step,
+          context.json.decision,
+          context.json.logId,
+        ),
+        () => noContent(),
+      ),
+  },
+  {
+    method: 'GET',
+    path: '/v1/moderation/record',
+    sealed: 'only',
+    operationId: 'getModerationRecord',
+    reaches: 'moderation',
+    summary:
+      'The record of every notice and appeal (#912): received, acknowledged, decided, notifier told, the decision and the log entry of any action. It carries no personal detail of a notifier — only whether they gave a name and an address — and no appellant’s grounds.',
+    identity: true,
+    auth: 'session',
+    errors: ['unauthenticated'],
+    response: {
+      contentType: 'application/json',
+      schema: object({
+        notices: {
+          type: 'array',
+          items: object({
+            noticeId: integer,
+            receivedAt: integer,
+            kind: { type: 'string', enum: ['illegal_content', 'intimate_image'] },
+            items: { type: 'array', items: string },
+            notifierGaveName: { type: 'boolean' },
+            notifierGaveEmail: { type: 'boolean' },
+            ...noticeSteps,
+          }),
+        },
+        appeals: {
+          type: 'array',
+          items: object({
+            appealId: integer,
+            appellantAthleteId: string,
+            statementId: integer,
+            filedAt: integer,
+            decidedAt: nullableInteger,
+            outcome: nullableString,
+            decision: nullableString,
+            logId: nullableInteger,
+            moderatorConflict: { type: ['boolean', 'null'] },
+            appellantToldAt: nullableInteger,
+          }),
+        },
       }),
+    },
+    handle: async (context) => json(await moderationOf(context).record()),
   },
   {
     method: 'GET',

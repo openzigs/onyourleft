@@ -44,6 +44,7 @@ import * as raceRoute from './0025-race-route.ts';
 import * as notices from './0026-notices.ts';
 import * as statements from './0027-statements.ts';
 import * as appeals from './0028-appeals.ts';
+import * as noticeSteps from './0029-notice-steps.ts';
 
 /** A migration this repository accepts: both directions. */
 export interface InstanceMigration {
@@ -80,4 +81,5 @@ export const MIGRATIONS: Readonly<Record<string, InstanceMigration>> = {
   '0026-notices': notices,
   '0027-statements': statements,
   '0028-appeals': appeals,
+  '0029-notice-steps': noticeSteps,
 };

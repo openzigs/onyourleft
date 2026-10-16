@@ -228,6 +228,7 @@ function requestFor(route: PhaseOneRoute, f: Fixture): { path: string; body?: un
     .replace('{athleteId}', f.carl.athleteId)
     .replace('{reportId}', String(f.reportId))
     .replace('{appealId}', '1')
+    .replace('{noticeId}', '1')
     .replace('{publicKey}', f.second.publicKey)
     .replace('{content}', f.content)
     .replace('{kind}', 'note')

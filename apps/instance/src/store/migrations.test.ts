@@ -115,6 +115,7 @@ const FIXTURE_ROWS: Readonly<Record<string, string>> = {
   statement: `INSERT INTO statement VALUES (1, 'b', 'suspend', 'Facts', 'report', NULL, 'Terms 2', NULL, 0, NULL, 28)`,
   appeal: `INSERT INTO appeal VALUES (1, 1, 'b', 'Grounds', 29, NULL, NULL, NULL, NULL, NULL)`,
   notice: `INSERT INTO notice VALUES (1, 27, 'illegal_content', 'Why', '["room:0123456789abcdef0123456789abcdef"]', NULL, NULL, NULL, 0)`,
+  notice_step: `INSERT INTO notice_step VALUES (1, 1, 'decided', 'a', 'Not illegal', 1, 30)`,
 };
 
 /**
@@ -128,6 +129,7 @@ const EMPTY_FOR_ITS_OWN_DOWN: Readonly<Record<string, string>> = {
   '0026-notices': 'notice',
   '0027-statements': 'statement',
   '0028-appeals': 'appeal',
+  '0029-notice-steps': 'notice_step',
 };
 
 interface Snapshot {

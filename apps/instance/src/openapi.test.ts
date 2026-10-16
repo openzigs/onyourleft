@@ -357,6 +357,29 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
     }),
   listNotices: async (world) =>
     send(world, 'GET', '/v1/moderation/notices', await moderatorToken(world)),
+  // #912: a step recorded on a notice, and the record read back.
+  recordNoticeStep: async (world) => {
+    await fetch(`${world.url}/report`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        kind: 'illegal_content',
+        explanation: 'A threat in a room’s route.',
+        location: 'The Sunday group ride',
+      }).toString(),
+    });
+    const token = await moderatorToken(world);
+    const queue = (await (await send(world, 'GET', '/v1/moderation/notices', token)).json()) as {
+      notices: { noticeId: number }[];
+    };
+    const noticeId = queue.notices.at(-1)?.noticeId ?? 0;
+    return send(world, 'POST', `/v1/moderation/notices/${String(noticeId)}/steps`, token, {
+      step: 'decided',
+      decision: 'Not illegal: the route is an ordinary loop.',
+    });
+  },
+  getModerationRecord: async (world) =>
+    send(world, 'GET', '/v1/moderation/record', await moderatorToken(world)),
   listOpenReports: async (world) =>
     send(world, 'GET', '/v1/moderation/reports', await moderatorToken(world)),
   dismissReport: async (world) => {

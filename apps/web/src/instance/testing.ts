@@ -247,6 +247,8 @@ export interface ScriptedModeration {
     reports: OpenReport[];
     /** The notices the instance's notice page received (#907); `undefined` as when they could not be read. */
     notices: ReceivedNotice[] | undefined;
+    /** `false` to answer the record export as the port does when it could not be read (#912). */
+    recordReadable: boolean;
     /** The open appeals (#911); `undefined` as when they could not be read. */
     appeals: OpenAppeal[] | undefined;
     /** Every statement of reasons a restriction was sent with (#910), and whom it was about. */
@@ -279,6 +281,11 @@ export const SCRIPTED_NOTICES: readonly ReceivedNotice[] = [
     notifierName: 'A. Notifier',
     notifierEmail: 'notifier@example.com',
     bonaFide: true,
+    acknowledgedAt: null,
+    decidedAt: null,
+    decision: null,
+    logId: null,
+    notifierToldAt: null,
   },
   {
     noticeId: 2,
@@ -290,6 +297,11 @@ export const SCRIPTED_NOTICES: readonly ReceivedNotice[] = [
     notifierName: null,
     notifierEmail: 'me@example.com',
     bonaFide: false,
+    acknowledgedAt: 1_790_004_100,
+    decidedAt: 1_790_004_200,
+    decision: 'Taken down: the route of the room is hidden.',
+    logId: 2,
+    notifierToldAt: null,
   },
 ];
 
@@ -400,6 +412,7 @@ export function scriptedModeration(
     reports: [...queues.reports],
     notices: options.empty === true ? [] : [...SCRIPTED_NOTICES],
     statements: [],
+    recordReadable: true,
     appeals: options.empty === true ? [] : [...SCRIPTED_APPEALS],
     log: [...queues.log],
     logReadable: true,
@@ -550,6 +563,43 @@ export function scriptedModeration(
         held.reports = held.reports.filter((each) => each.reportId !== reportId);
       }
       return Promise.resolve(outcome);
+    },
+    recordNoticeStep: (noticeId, step, decision, logId) => {
+      calls.push(`${step} notice ${String(noticeId)}`);
+      const index = held.notices?.findIndex((each) => each.noticeId === noticeId) ?? -1;
+      const notice = held.notices?.[index];
+      if (notice === undefined || held.notices === undefined) return Promise.resolve(nothing);
+      const at = 1_790_030_000 + held.log.length;
+      if (step === 'decided') {
+        if ((decision ?? '').trim() === '') {
+          return Promise.resolve({
+            kind: 'refused',
+            text: MODERATION_REFUSAL_TEXT['notice-decision'],
+          });
+        }
+        held.notices[index] = {
+          ...notice,
+          decidedAt: at,
+          decision: (decision ?? '').trim(),
+          logId: logId ?? null,
+        };
+      } else if (notice.notifierEmail === null) {
+        return Promise.resolve(nothing);
+      } else if (step === 'acknowledged') {
+        held.notices[index] = { ...notice, acknowledgedAt: at };
+      } else {
+        if (notice.decidedAt === null) return Promise.resolve(nothing);
+        held.notices[index] = { ...notice, notifierToldAt: at };
+      }
+      return Promise.resolve({ kind: 'done' });
+    },
+    exportRecord: () => {
+      calls.push('exportRecord');
+      return Promise.resolve(
+        held.recordReadable
+          ? `${JSON.stringify({ notices: held.notices ?? [], appeals: [] }, null, 2)}\n`
+          : undefined,
+      );
     },
     decideAppeal: (appealId, outcome, decision) => {
       calls.push(`${outcome} appeal ${String(appealId)}`);

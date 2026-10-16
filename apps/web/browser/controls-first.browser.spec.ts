@@ -277,9 +277,10 @@ const TUCKING_SECTIONS: Partial<Record<RouteId, readonly string[]>> = {
  */
 const TUCKING_WHEN_POPULATED: Partial<Record<RouteId, readonly string[]>> = {
   home: ['This week'],
-  // #907: that the instance sends no email, and the moderator replies by hand,
-  // is behind the ⓘ; the screen is a moderator's only over the populated ports.
-  moderation: ['Notices'],
+  // #912: what the record holds is behind the ⓘ; the screen is a moderator's
+  // only over the populated ports. Notices and Appeals tuck nothing: each item
+  // is read before it is acted on, so each has one short line and no ⓘ.
+  moderation: ['The record'],
 };
 
 async function open(page: Page, viewport: Viewport, query: string): Promise<void> {

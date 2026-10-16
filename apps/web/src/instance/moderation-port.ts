@@ -106,7 +106,20 @@ export interface ReceivedNotice {
   readonly notifierName: string | null;
   readonly notifierEmail: string | null;
   readonly bonaFide: boolean;
+  /** When the moderator recorded confirming receipt (#912), Unix seconds, or `null`. */
+  readonly acknowledgedAt: number | null;
+  /** When the moderator recorded the decision (#912), or `null`. */
+  readonly decidedAt: number | null;
+  /** The decision, in the moderator's words (#912), or `null`. */
+  readonly decision: string | null;
+  /** The moderation log entry of the action the decision took (#912), or `null`. */
+  readonly logId: number | null;
+  /** When the moderator recorded telling the notifier (#912), or `null`. */
+  readonly notifierToldAt: number | null;
 }
+
+/** A step a moderator records on a notice (#912). */
+export type NoticeStep = 'acknowledged' | 'decided' | 'notifier_told';
 
 /** The longest fields the instance keeps on a notice (`apps/instance` §`notices.ts`). */
 const NOTICE_LIMITS = { explanation: 5000, location: 1000, name: 200, email: 254, items: 20 };
@@ -307,6 +320,10 @@ export const MODERATION_REFUSAL_TEXT = {
     'The instance no longer accepts this device’s sign-in. Connect again from the instance screen.',
   'no-answer': 'The instance did not answer, so nothing was changed.',
   'too-many': 'The instance is refusing requests for a while. Try again in a few minutes.',
+  'notice-decision':
+    'Write the decision, in at most 2,000 characters, with no place or coordinate in it. It is ' +
+    'what you tell the notifier, and it is kept in the record.',
+  'log-entry': 'That is not a moderation log entry’s number.',
   decision:
     'Write your answer to the rider, in at most 2,000 characters, with no place or coordinate in ' +
     'it. They are shown it, and it is written to the moderation log.',
@@ -337,6 +354,22 @@ export interface ModerationPort {
   ): Promise<ModerationOutcome>;
   /** Dismiss a report. */
   dismissReport(reportId: number, reason: string): Promise<ModerationOutcome>;
+  /**
+   * Record a step taken on a notice (#912): receipt confirmed, the decision
+   * (with the log entry of any action it took) or the notifier told — each
+   * done by hand, since the instance sends no email.
+   */
+  recordNoticeStep(
+    noticeId: number,
+    step: NoticeStep,
+    decision?: string,
+    logId?: number,
+  ): Promise<ModerationOutcome>;
+  /**
+   * The record of every notice and appeal (#912), as JSON text to save — or
+   * `undefined` when it could not be read.
+   */
+  exportRecord(): Promise<string | undefined>;
   /**
    * Decide an appeal (#911): `upheld` leaves the restriction, `reversed` lifts
    * it. `decision` is what the rider is told, and is logged.
@@ -483,6 +516,7 @@ function noticeFrom(value: unknown): ReceivedNotice | undefined {
   const location = optionalText(row?.location, NOTICE_LIMITS.location);
   const name = optionalText(row?.notifierName, NOTICE_LIMITS.name);
   const email = optionalText(row?.notifierEmail, NOTICE_LIMITS.email);
+  const decision = optionalText(row?.decision, MAXIMUM_APPEAL_DECISION);
   const items = row?.items;
   if (
     row === undefined ||
@@ -494,6 +528,11 @@ function noticeFrom(value: unknown): ReceivedNotice | undefined {
     name === undefined ||
     email === undefined ||
     typeof row.bonaFide !== 'boolean' ||
+    !(row.acknowledgedAt === null || isTime(row.acknowledgedAt)) ||
+    !(row.decidedAt === null || isTime(row.decidedAt)) ||
+    decision === undefined ||
+    !(row.logId === null || isCount(row.logId)) ||
+    !(row.notifierToldAt === null || isTime(row.notifierToldAt)) ||
     !Array.isArray(items) ||
     items.length > NOTICE_LIMITS.items ||
     !items.every((item) => typeof item === 'string' && parseModerationItem(item) !== undefined)
@@ -510,6 +549,11 @@ function noticeFrom(value: unknown): ReceivedNotice | undefined {
     notifierName: name,
     notifierEmail: email,
     bonaFide: row.bonaFide,
+    acknowledgedAt: row.acknowledgedAt,
+    decidedAt: row.decidedAt,
+    decision,
+    logId: row.logId,
+    notifierToldAt: row.notifierToldAt,
   };
 }
 
@@ -895,6 +939,62 @@ export function createModerationPort(dependencies: ModerationPortDependencies): 
         return { kind: 'refused', text: MODERATION_REFUSAL_TEXT['athlete-id'] };
       }
       return send(`/v1/moderation/registrations/${typed}/${decision}`, reason);
+    },
+
+    recordNoticeStep: async (noticeId, step, decision, logId) => {
+      if (!Number.isSafeInteger(noticeId) || noticeId < 1) {
+        return { kind: 'refused', text: NOTHING_CHANGED_TEXT };
+      }
+      const body: Record<string, unknown> = { step };
+      if (step === 'decided') {
+        const trimmed = (decision ?? '').trim();
+        if (trimmed === '' || [...trimmed].length > MAXIMUM_APPEAL_DECISION) {
+          return { kind: 'refused', text: MODERATION_REFUSAL_TEXT['notice-decision'] };
+        }
+        body.decision = trimmed;
+        if (logId !== undefined) {
+          if (!Number.isSafeInteger(logId) || logId < 1) {
+            return { kind: 'refused', text: MODERATION_REFUSAL_TEXT['log-entry'] };
+          }
+          body.logId = logId;
+        }
+      }
+      try {
+        const session = await sealedOr(closedRefusal);
+        if (!('sealed' in session)) return session;
+        const answer = await session.sealed.call(
+          'POST',
+          `/v1/moderation/notices/${String(noticeId)}/steps`,
+          { token: session.token, body },
+        );
+        const recorded = outcomeOf(answer);
+        return recorded.kind === 'refused' && errorCode(answer) === 'validation_failed'
+          ? { kind: 'refused', text: MODERATION_REFUSAL_TEXT['notice-decision'] }
+          : recorded;
+      } catch {
+        return { kind: 'refused', text: MODERATION_REFUSAL_TEXT['no-answer'] };
+      }
+    },
+
+    exportRecord: async () => {
+      try {
+        const session = await sealedSession();
+        if (session.kind === 'closed') return undefined;
+        const answer = await session.sealed.call('GET', '/v1/moderation/record', {
+          token: session.token,
+        });
+        const body = record(answer.body);
+        if (
+          answer.status !== 200 ||
+          !Array.isArray(body?.notices) ||
+          !Array.isArray(body.appeals)
+        ) {
+          return undefined;
+        }
+        return `${JSON.stringify(body, null, 2)}\n`;
+      } catch {
+        return undefined;
+      }
     },
 
     decideAppeal: async (appealId, outcome, decision) => {
