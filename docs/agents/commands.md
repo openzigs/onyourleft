@@ -527,7 +527,8 @@ OYL_INSTANCE_COMMIT="$(git rev-parse HEAD)" pnpm --filter @onyourleft/instance s
 # server never migrates), `backup <dir> [--keep N] [--copy-to <dir>]` (an
 # online VACUUM INTO and the blobs), `restore <snapshot> [--force]` (checked
 # against the snapshot's manifest), `verify`, and `room-open <id> --kind
-# ride|race --length <m>` (until #784/#785). They act on OYL_INSTANCE_DATABASE
+# ride|race --length <m>` (until #784/#785), and `load-accounts add|erase`
+# (#1383, below). They act on OYL_INSTANCE_DATABASE
 # and OYL_INSTANCE_BLOBS. docs/operating-an-instance.md says what each does.
 pnpm --filter @onyourleft/instance run operator migrate
 
@@ -543,9 +544,18 @@ pnpm --filter @onyourleft/instance run tunnel-soak --url https://… --room … 
 # `room-open … --kind race` room through the public hostname to the line, and
 # it reports frame lateness, missing ticks, disconnects, rejoins and bytes.
 # NOT a gate. ⚠️ The riders must be ticketable: on an `approval` instance a new
-# key is a PENDING account and is refused a ticket — approve them first and
-# erase them after. Its local test races 3 riders to a 40 m line (~12 s).
+# key is a PENDING account and is refused a ticket. Its local test races 3
+# riders to a 40 m line (~12 s). #1383: in the instance
+# container, `load-accounts add` reads the public keys `race-load keys` printed
+# on standard input and makes each an APPROVED throwaway account (`Load N`,
+# marked `load_run_at`); `load-accounts erase` erases every marked account
+# through a rider's own erasure path and prints how many. Registration stays
+# `approval`; no route reaches either; a key any account already holds is
+# refused. Its test races 2 such riders on an `approval` instance (~16 s);
+# the two `docker exec` lines below have NOT yet been run against the image.
 pnpm --filter @onyourleft/instance run race-load ride --url https://… --room … --keys <file>
+docker exec -i <container> node src/operator/cli.ts load-accounts add < public-keys.txt
+docker exec <container> node src/operator/cli.ts load-accounts erase
 
 # #1235's round-trip measurement (spike 0023): a throwaway device starts an
 # analysis job, follows it to its decrypted result and times every leg it can

@@ -48,6 +48,11 @@ export interface AthleteTable {
    * `null` while it never has (#775). Added by migration 0008.
    */
   readonly activated_at: number | null;
+  /**
+   * When the operator's `load-accounts add` made this throwaway account for a
+   * load run, or `null` for every rider's account (#1383). Added by migration 0032.
+   */
+  readonly load_run_at: number | null;
 }
 
 /** An Ed25519 public key an athlete signs with (ADR 0014). */

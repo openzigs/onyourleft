@@ -18,9 +18,10 @@
  *
  * **`ride`** signs each key in through the instance's own sign-in. ⚠️ On an
  * instance whose registration is `approval`, a key it has never seen is a new
- * account AWAITING approval, and is refused a ticket: the riders must be
- * approved (or the instance's registration open) before the run, and erased
- * after. The run ends when the room says the race is over, or at `--minutes`.
+ * account AWAITING approval, and is refused a ticket: before the run, pipe
+ * the public keys `keys` printed into the operator's `load-accounts add`
+ * (`src/operator/commands.ts`, #1383), which makes each an approved
+ * throwaway account, and run `load-accounts erase` after. The run ends when the room says the race is over, or at `--minutes`.
  * The machine's CPU and the tunnel's bandwidth are measured beside it, not by
  * it: what the run costs the host is the host's to read.
  *
