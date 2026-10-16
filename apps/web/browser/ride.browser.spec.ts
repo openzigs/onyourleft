@@ -3838,3 +3838,175 @@ test.describe('a race’s standings on the HUD — #1347', () => {
     });
   }
 });
+
+/**
+ * #789 — *Report* on the HUD, `ride-harness.tsx` §`REPORT_OPEN`: the running
+ * race of §"#1347", the rider following the rider *Follow* reaches first —
+ * the longest name a room admits — and *Report* pressed, so the actions
+ * panel carries *Follow*, *Report* and the three reasons: the room's row at
+ * its tallest.
+ *
+ * ## What is held
+ *
+ * At the tablet and upright-phone overlay viewports — a rider on a phone has
+ * to be able to report too, and the tablet-only standings are not where they
+ * can — with anchor positioning and without: each of the five controls is on
+ * the stage, inside the viewport, uncovered, and at least `.oyl-button`'s
+ * 44 px in both axes; *Pause* and *End ride* are still on the stage and
+ * uncovered (at every overlay viewport); and the actions panel is over no
+ * other panel. At the three tablet viewports no panel is over the leaning
+ * rider's box either.
+ *
+ * ## What is only published
+ *
+ * The rider's clearance from the actions panel at the phone viewports (a room
+ * ride's HUD is over the rider on a phone with or without a report: #1356).
+ *
+ * ⚠️ **And where the room's row is on a phone in LANDSCAPE** (844×390,
+ * 736×360, 736×480). There the actions panel is capped at 16 rem and the
+ * bottom row already runs below the stage with *Follow* alone in a room ride
+ * with a rider near — #1358, open, which is where *Follow*, and with it
+ * *Report*, gets a place that fits. What IS held there is that reporting
+ * makes it no worse: the reasons take the row in place of *Follow* and
+ * *Report* (both laid out at no size), the actions panel is no taller open
+ * than closed, each reason is 44 px, and *Pause* and *End ride* are exactly
+ * where they were before *Report* was pressed — the first version of this
+ * row pushed them 53 px further down. ⚠️ Following a rider with the longest
+ * name a room admits ALREADY puts *Pause* below a 736×360 stage, Report
+ * closed (its bottom at y = 385, measured on a Mac): the gap field's label
+ * grows the readings above it. That is published by the case, and reported on
+ * #1358. A rider on a phone reports with it upright, where every
+ * control is held on the stage: 390×844, 360×800 and 360×752 below. The
+ * closed state costs no line anywhere: *Report* shares *Follow*'s row.
+ *
+ * ## The controls
+ *
+ * The same race with nobody followed (`?room=standings`) has *Follow* and no
+ * *Report* and no reasons, and following with *Report* not pressed
+ * (`?room=following`) has *Follow* and *Report* and no reasons — so a case
+ * that found them everywhere would not be reading this state. The second is
+ * also what "no worse" is measured against.
+ */
+const REPORT_OPEN = '?room=report';
+const FOLLOWING = '?room=following';
+const ROOM_REPORT_CONTROLS = [
+  'room: Follow the next rider near you',
+  'room: Report Wilhelmina Vandersteen-Oduya Mbe',
+  'room: Name: an offensive display name',
+  'room: Cheating, or riding that cannot be real',
+  'room: Other: something else about how they rode',
+] as const;
+
+test.describe('Report on the HUD, its reasons open — #789', () => {
+  for (const viewport of OVERLAY_VIEWPORTS) {
+    const tablet = TABLET_VIEWPORTS.includes(viewport);
+    const shortLandscape = viewport.width > viewport.height && !tablet;
+    test(`every room control on the stage, uncovered, 44 px${tablet ? ', and no panel over the rider' : ''} — ${viewport.name}`, async ({
+      page,
+    }) => {
+      // The control: nobody followed, so no Report and no reasons.
+      await openRide(page, viewport, WITH_STANDINGS);
+      const nobody = (await measure(page)).items.map((each) => each.name);
+      expect(nobody).toContain(ROOM_REPORT_CONTROLS[0]);
+      for (const name of ROOM_REPORT_CONTROLS.slice(1)) expect(nobody).not.toContain(name);
+
+      // The state the reasons open from: following, Report closed.
+      await openRide(page, viewport, FOLLOWING);
+      const before = await measure(page);
+      const closed = before.items.map((each) => each.name);
+      const closedActions = before.panels.find((each) => each.name.includes('oyl-hud__actions'));
+      const closedPause = named(before.items, 'control: Pause');
+      console.log(
+        `#789 following, Report closed — ${viewport.name}: Pause ${describeItem(closedPause)}; the actions panel ` +
+          `${closedActions?.box.width.toFixed(0) ?? '?'} × ${closedActions?.box.height.toFixed(0) ?? '?'} px at ` +
+          `[${closedActions?.box.left.toFixed(0) ?? '?'},${closedActions?.box.top.toFixed(0) ?? '?'}]`,
+      );
+      expect(closed.slice().filter((name) => name.startsWith('room: '))).toEqual(
+        ROOM_REPORT_CONTROLS.slice(0, 2),
+      );
+
+      await openRide(page, viewport, REPORT_OPEN);
+      for (const [how, seen] of await bothWays(page)) {
+        await test.step(how, () => {
+          const actions = seen.panels.find((each) => each.name.includes('oyl-hud__actions'));
+          if (actions === undefined) throw new Error('no actions panel');
+          const rider = riderBox(viewport);
+          const over = seen.panels
+            .filter((each) => each.box.height > 1)
+            .filter((each) => overlap(each.box, rider));
+          console.log(
+            `#789 Report open — ${viewport.name} — ${how}: the actions panel ` +
+              `${actions.box.width.toFixed(0)} × ${actions.box.height.toFixed(0)} px at ` +
+              `[${actions.box.left.toFixed(0)},${actions.box.top.toFixed(0)}], its top ` +
+              `${(actions.box.top - rider.bottom).toFixed(0)} px below the rider's box; ` +
+              `panels over the rider: ${over.length === 0 ? 'none' : over.map(describeItem).join(', ')}`,
+          );
+          for (const name of ['control: Pause', 'control: End ride']) {
+            const control = named(seen.items, name);
+            if (shortLandscape) {
+              // No worse than following: exactly where it was before Report
+              // was pressed. (At 736×360 that is already below the stage —
+              // published above, and #1358's.)
+              const was = named(before.items, name);
+              for (const edge of ['left', 'top', 'right', 'bottom'] as const) {
+                expect(
+                  Math.abs(control.box[edge] - was.box[edge]),
+                  `${name} ${edge}`,
+                ).toBeLessThanOrEqual(SUBPIXEL_TOLERANCE);
+              }
+              continue;
+            }
+            expect(inside(control.box, viewport), describeItem(control)).toBe(true);
+            expect(control.onTop, describeItem(control)).toBe(true);
+          }
+          // On a phone on its side the reasons take the row in place of
+          // Follow and Report (`theme.css` §"#789 on a phone on its side").
+          const shown = shortLandscape ? ROOM_REPORT_CONTROLS.slice(2) : ROOM_REPORT_CONTROLS;
+          if (shortLandscape) {
+            for (const name of ROOM_REPORT_CONTROLS.slice(0, 2)) {
+              const hidden = named(seen.items, name);
+              expect(hidden.box.width * hidden.box.height, describeItem(hidden)).toBe(0);
+            }
+          }
+          const room = shown.map((name) => named(seen.items, name));
+          for (const control of room) {
+            expect(control.box.width, control.name).toBeGreaterThanOrEqual(44 - SUBPIXEL_TOLERANCE);
+            expect(control.box.height, control.name).toBeGreaterThanOrEqual(
+              44 - SUBPIXEL_TOLERANCE,
+            );
+          }
+          const collisions = seen.panels
+            .filter((each) => each !== actions && each.box.height > 1)
+            .filter((each) => overlap(each.box, actions.box))
+            .map(describeItem);
+          if (shortLandscape) {
+            // No taller open than closed: the reasons cost the panel no line.
+            expect(
+              actions.box.height,
+              `the actions panel open (${actions.box.height.toFixed(0)} px) against closed ` +
+                `(${closedActions?.box.height.toFixed(0) ?? '?'} px)`,
+            ).toBeLessThanOrEqual((closedActions?.box.height ?? 0) + SUBPIXEL_TOLERANCE);
+            // #1358: where the row is, published, not held — see this describe's header.
+            console.log(
+              `#789 Report open — ${viewport.name} — ${how}: room controls off the stage or ` +
+                `covered: ${
+                  room
+                    .filter((each) => !inside(each.box, viewport) || !each.onTop)
+                    .map(describeItem)
+                    .join(', ') || 'none'
+                }` +
+                `; panels the actions panel is over: ${collisions.join(', ') || 'none'}`,
+            );
+            return;
+          }
+          for (const control of room) {
+            expect(inside(control.box, viewport), describeItem(control)).toBe(true);
+            expect(control.onTop, describeItem(control)).toBe(true);
+          }
+          expect(collisions).toEqual([]);
+          if (tablet) expect(over.map(describeItem)).toEqual([]);
+        });
+      }
+    });
+  }
+});

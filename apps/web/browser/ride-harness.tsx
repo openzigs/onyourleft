@@ -532,7 +532,16 @@ const ROOM_QUERY = new URLSearchParams(window.location.search).get('room');
  * room admits beside realistic ones, a flag and a coaster among them.
  * `ride.browser.spec.ts` §"#1347" measures it.
  */
-const WITH_STANDINGS = ROOM_QUERY === 'standings';
+/**
+ * `ride.html?room=report` — #789: that running race with the rider following
+ * the first rider *Follow* reaches and *Report* pressed, so the actions panel
+ * carries *Follow*, *Report* and the three reasons — the room row at its
+ * tallest. `?room=following` is the same with *Report* not pressed: the
+ * state the reasons open from, and `ride.browser.spec.ts` §"#789"'s control.
+ */
+const REPORT_OPEN = ROOM_QUERY === 'report';
+const FOLLOWING = ROOM_QUERY === 'following' || REPORT_OPEN;
+const WITH_STANDINGS = ROOM_QUERY === 'standings' || FOLLOWING;
 const IN_A_RACE = ROOM_QUERY === 'race' || WITH_STANDINGS;
 /**
  * `ride.html?room=paused` and `?room=lost` — #785, #1360's re-review (R3): a
@@ -835,6 +844,10 @@ function measure(): StageMeasurement {
   }
   for (const control of document.querySelectorAll('.oyl-hud__control')) {
     items.push(item(`control: ${textOf(control)}`, control));
+  }
+  // #789: a room ride's own row — *Follow*, *Report* and, open, its reasons.
+  for (const control of document.querySelectorAll('.oyl-hud__room-row button')) {
+    items.push(item(`room: ${textOf(control)}`, control));
   }
   // #400: the mute and the volume, when the rider turned sounds on.
   for (const control of document.querySelectorAll('.oyl-sound button, .oyl-sound input')) {
@@ -1189,6 +1202,35 @@ async function run(): Promise<void> {
         ),
       );
       await until('the race standings', () => document.querySelector('.oyl-hud__standings'));
+      if (FOLLOWING) {
+        // #789: Follow, on the first rider it reaches — the longest name the
+        // room admits — and, for `report`, the press that opens the reasons.
+        const follow = await until('Follow', () =>
+          labelled<HTMLButtonElement>('button', 'Follow the next rider near you'),
+        );
+        follow.click();
+        const report = await until('Report', () =>
+          labelled<HTMLButtonElement>('.oyl-hud__report', 'Report'),
+        );
+        if (REPORT_OPEN) {
+          report.click();
+          await until('the reasons', () => document.querySelector('.oyl-hud__report-reasons'));
+        }
+        // ...and the followed rider's gap as a NUMBER. A gap has none while
+        // the rider is still at rest (`fields.ts` §`timeGap`), and the dash
+        // has no "ahead of you" line under it: on the CI runner a load that
+        // was ready on a frame before the rider moved measured the top panel
+        // 14 px shorter, so the actions panel and *Pause* 14 px higher, and
+        // §"#789" compared one load's Pause against another's in two different
+        // states (PR #1388's second run). Both loads measure this one.
+        await until('the followed rider’s gap', () =>
+          [...document.querySelectorAll('.oyl-hud__field')].find(
+            (field) =>
+              field.querySelector('.oyl-hud__label')?.textContent === names[1] &&
+              field.querySelector('.oyl-hud__detail') !== null,
+          ),
+        );
+      }
     } else {
       await until('Start the race', () => labelled<HTMLButtonElement>('button', 'Start the race'));
     }

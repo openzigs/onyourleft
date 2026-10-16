@@ -12,6 +12,7 @@ import type {
   OpenInstanceSocket,
 } from '../instance/instance-transport';
 import { createRoomPort, roomPortOver } from './room-port';
+import { ROOM_REPORT_REASON_KEYS } from './room-session';
 import { flush, ManualClock } from './testing';
 
 const ORIGIN = 'https://ride.example';
@@ -276,11 +277,90 @@ describe('a link that fails at once — #782', () => {
         open: () => {
           throw new Error('never');
         },
+        report: () => {
+          throw new Error('no instance');
+        },
       }),
       { timers: clock, now: clock.now, keepAlive: () => () => undefined },
     ).join({ roomId: 'room-1', declaredMassKilograms: 71, sample: () => ({ powerWatts: 0 }) });
     await flush();
     expect(connection.status().kind).toBe('lost');
+    // #789: a report over a link that throws files nothing, and says so.
+    await expect(connection.report(1, 'cheating')).resolves.toEqual({ kind: 'unreachable' });
     connection.leave();
+  });
+});
+
+describe('an in-ride report — #789', () => {
+  function reporting(status: number, body: string | null = null) {
+    return vi.fn((url: string) =>
+      Promise.resolve(
+        url.endsWith('/ticket')
+          ? new Response(JSON.stringify({ ticket: 'the-ticket', expiresAt: 1 }), { status: 200 })
+          : new Response(body, { status }),
+      ),
+    );
+  }
+
+  function joined(send: InstanceSend, storage = storageWith(SIGNED_IN)) {
+    const clock = new ManualClock();
+    return createRoomPort({
+      ...NO_CARD_DEVICE,
+      storage,
+      send: keylessInstance(send),
+      openSocket: recordingSockets().open,
+      timers: clock,
+      now: clock.now,
+    }).join({ roomId: 'room-1', declaredMassKilograms: 71, sample: () => ({ powerWatts: 0 }) });
+  }
+
+  it('posts the seat and the reason to the room’s own report route, with the session token, and nothing else', async () => {
+    const send = reporting(204);
+    const connection = joined(send);
+    await settle();
+    send.mockClear();
+    await expect(connection.report(3, 'display-name')).resolves.toEqual({ kind: 'reported' });
+    expect(send).toHaveBeenCalledTimes(1);
+    const [url, init] = send.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe(`${ORIGIN}/v1/rooms/room-1/reports`);
+    expect(init.method).toBe('POST');
+    expect((init.headers as Record<string, string>).authorization).toBe('Bearer session-token');
+    // A seat and a reason: no screenshot, no position, no power, no mass.
+    expect(JSON.parse(init.body as string)).toEqual({ riderId: 3, reason: 'display-name' });
+    connection.leave();
+  });
+
+  for (const [status, kind] of [
+    [429, 'rate-limited'],
+    [404, 'gone'],
+    [422, 'refused'],
+    [503, 'unreachable'],
+  ] as const) {
+    it(`reads a ${String(status)} as ${kind}`, async () => {
+      const send = reporting(status, '{}');
+      const connection = joined(send);
+      await settle();
+      await expect(connection.report(1, 'other')).resolves.toEqual({ kind });
+      connection.leave();
+    });
+  }
+
+  it('sends nothing for a rider with no instance session, and says it was refused', async () => {
+    const send = reporting(204);
+    const connection = joined(send, storageWith({}));
+    await settle();
+    await expect(connection.report(1, 'cheating')).resolves.toEqual({ kind: 'refused' });
+    expect(send).not.toHaveBeenCalled();
+    connection.leave();
+  });
+
+  it('offers exactly the reasons the instance accepts', async () => {
+    const instance = (await import(
+      /* @vite-ignore */ new URL('../../../instance/src/moderation/moderation.ts', import.meta.url)
+        .href
+    )) as { ROOM_REPORT_REASONS: Record<string, string> };
+    expect([...ROOM_REPORT_REASON_KEYS].sort()).toEqual(
+      Object.keys(instance.ROOM_REPORT_REASONS).sort(),
+    );
   });
 });

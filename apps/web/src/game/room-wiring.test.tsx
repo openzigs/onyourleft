@@ -28,7 +28,7 @@ import {
 
 import { mount, queryAll, settle, type Mounted } from '../testing/mount';
 import { roomPortOver, type RoomPort } from '../net/room-port';
-import { flush, frameRider, ManualClock, ScriptedRoom } from '../net/testing';
+import { flush, frameRider, ManualClock, ScriptedRoom, standingsRider } from '../net/testing';
 import { REJOIN_GIVE_UP_MS } from '../net/room-session';
 import { GameView, type GamePort, type RidableRoute } from './GameView';
 import type { GameRenderer, SceneFrame } from './port';
@@ -434,5 +434,111 @@ describe('the draft indicator on a ride in a room — #787, #327', () => {
     const heard = await frames(1, 6, 30);
     expect(field('Draft')).toBe('30 % of drag at most 59 %');
     expect(heard.filter((sentence) => /draft/i.test(sentence))).toEqual([]);
+  });
+});
+
+describe('reporting a rider from inside the ride — #789', () => {
+  const buttons = (): HTMLButtonElement[] =>
+    queryAll<HTMLButtonElement>(mounted?.container ?? document, 'button');
+  /** A control by its accessible name as a screen reader reads it: the text, hidden parts too. */
+  const named = (name: string): HTMLButtonElement | undefined =>
+    buttons().find((button) => (button.textContent ?? '').replace(/\s+/g, ' ').trim() === name);
+  let presses = 0;
+  async function press(button: HTMLButtonElement | undefined): Promise<void> {
+    expect(button, 'the control is on the HUD').toBeDefined();
+    presses += 1;
+    await act(async () => {
+      button?.click();
+      await Promise.resolve();
+    });
+    await flush();
+    await pump(1);
+  }
+
+  /** A race whose room has named its riders, and this rider following Bea. */
+  async function followingBea(room: ScriptedRoom): Promise<void> {
+    await rideInRoom(room);
+    room.accept();
+    room.welcome(0, 'race');
+    room.name(1, 'Bea');
+    room.name(2, 'Cai');
+    for (let tick = 1; tick <= 4; tick += 1) {
+      room.frame(tick, [
+        frameRider(0, tick * 8),
+        frameRider(1, 30 + tick * 8),
+        frameRider(2, 60 + tick * 8),
+      ]);
+      // The names reach the HUD with the race's standings (#1347).
+      room.standings(tick, [
+        standingsRider(2, -3, 3),
+        standingsRider(1, -1, 3),
+        standingsRider(0, 0, 3),
+      ]);
+      await pump(4);
+    }
+    // No report with nobody followed: there is no name to report.
+    expect(buttons().some((button) => (button.textContent ?? '').startsWith('Report'))).toBe(false);
+    await press(named('Follow the next rider near you'));
+    // The followed rider's name is on the HUD — the gap field's label.
+    expect(
+      queryAll(mounted?.container ?? document, 'dt').some((dt) => dt.textContent === 'Bea'),
+    ).toBe(true);
+    presses = 0;
+  }
+
+  it('files a report on the followed rider’s name in two presses, by seat and reason, and says so', async () => {
+    const room = new ScriptedRoom();
+    await followingBea(room);
+    await press(named('Report Bea'));
+    const group = mounted?.container.querySelector('[role="group"]');
+    expect(group?.getAttribute('aria-label')).toBe('Report Bea for');
+    await press(named('Cheating, or riding that cannot be real'));
+    await flush();
+    await pump(1);
+    expect(presses).toBe(2);
+    // Filed through the room's link: this room, Bea's seat, the reason — and nothing else.
+    expect(room.reports).toEqual([{ roomId: 'room-1', riderId: 1, reason: 'cheating' }]);
+    expect(hudText()).toContain('Reported. A moderator will look at it.');
+    // The reasons are gone, and focus went to what became of the report.
+    expect(mounted?.container.querySelector('[role="group"]')).toBeNull();
+    expect(document.activeElement?.textContent).toBe('Reported. A moderator will look at it.');
+    // The ride went on: nothing about a report pauses or ends it.
+    expect(named('Pause')).toBeDefined();
+  });
+
+  it('files nothing when the rider follows somebody else before choosing a reason', async () => {
+    const room = new ScriptedRoom();
+    await followingBea(room);
+    await press(named('Report Bea'));
+    expect(mounted?.container.querySelector('[role="group"]')).not.toBeNull();
+    await press(named('Follow the next rider near you'));
+    // Now following Cai: the reasons for Bea are closed, and nothing was filed.
+    expect(mounted?.container.querySelector('[role="group"]')).toBeNull();
+    expect(named('Report Cai')).toBeDefined();
+    expect(room.reports).toEqual([]);
+  });
+
+  it('closes the reasons on a second press of Report, filing nothing', async () => {
+    const room = new ScriptedRoom();
+    await followingBea(room);
+    await press(named('Report Bea'));
+    expect(named('Report Bea')?.getAttribute('aria-expanded')).toBe('true');
+    await press(named('Report Bea'));
+    expect(named('Report Bea')?.getAttribute('aria-expanded')).toBe('false');
+    expect(mounted?.container.querySelector('[role="group"]')).toBeNull();
+    expect(room.reports).toEqual([]);
+  });
+
+  it('says why a report was not sent when the rider’s allowance is spent', async () => {
+    const room = new ScriptedRoom();
+    room.reportAnswer = () => ({ kind: 'rate-limited' });
+    await followingBea(room);
+    await press(named('Report Bea'));
+    await press(named('Name: an offensive display name'));
+    await flush();
+    await pump(1);
+    expect(room.reports).toEqual([{ roomId: 'room-1', riderId: 1, reason: 'display-name' }]);
+    expect(hudText()).toContain('Not sent: you have sent as many reports as an hour allows.');
+    expect(hudText()).not.toContain('Reported.');
   });
 });
