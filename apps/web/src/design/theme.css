@@ -6192,12 +6192,71 @@ select.oyl-input {
 
 /* #783: the room's one control, "Follow" — a 44 px secondary button like the
    side camera's Stop, its whole name visually hidden past the word shown.
-   ⚠️ NOT measured at the ride's nine viewports: no browser harness here rides
-   in a room yet, so where it lands beside the sound row on a phone is owed to
-   #733's device check, stated rather than claimed. */
+   ⚠️ Measured since #789 (`ride.browser.spec.ts` §"#789"), which a reviewer
+   who remembers "no browser harness here rides in a room" is reading the old
+   file for: on the stage at the tablets and upright phones, and below it on a
+   phone on its side, which is #1358's. Beside the sound row on a phone it is
+   still owed to #733's device check, stated rather than claimed. */
 .oyl-hud__follow {
   align-self: flex-start;
   white-space: nowrap;
+}
+
+/* #789: *Follow* and *Report* side by side on one row, so following a rider
+   costs the actions panel no line of its own; while the reasons are open
+   they take the row's next line, and the answer the line after — except on
+   a phone on its side, below. Each control is `.oyl-button`'s 44 px, like
+   *Follow*: none is one of the four ride-time actions #669's ruling names.
+   The reasons keep to ONE line in the 16 rem panel of the short corners
+   layout, which is what their half padding is for. `ride.browser.spec.ts`
+   §"#789" measures the row closed and open at every overlay viewport. */
+.oyl-hud__room-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oyl-space-sm);
+}
+
+.oyl-hud__report {
+  white-space: nowrap;
+}
+
+.oyl-hud__report-reasons {
+  display: flex;
+  flex-basis: 100%;
+  flex-wrap: wrap;
+  gap: var(--oyl-space-sm);
+}
+
+.oyl-hud__report-reasons > .oyl-button {
+  padding-inline: var(--oyl-space-sm);
+  white-space: nowrap;
+}
+
+.oyl-hud__report-said {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--oyl-color-hud-ink);
+  font-size: var(--oyl-font-size-sm);
+}
+
+/* #789 on a phone on its side — the short corners layout. There is no line to
+   spare: the bottom row already runs off the stage with *Follow* alone
+   (#1358), and the reasons on a line of their own pushed *Pause* off a
+   736×360 stage, measured. So while the reasons are open, and while the
+   answer stands, they take the row IN PLACE OF *Follow* and *Report*, at the
+   row's own 44 px; `RoomReport.tsx` says what the way out is then. */
+@media (min-width: 46rem) and (min-height: 22.5rem) and (max-height: 30rem) {
+  .oyl-hud__room-row:has(> .oyl-hud__report-reasons, > .oyl-hud__report-said)
+    > :is(.oyl-hud__follow, .oyl-hud__report) {
+    display: none;
+  }
+
+  .oyl-hud__room-row > .oyl-hud__report-said {
+    display: flex;
+    align-items: center;
+    min-height: 2.75rem;
+  }
 }
 
 .oyl-hud__control {

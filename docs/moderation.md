@@ -374,10 +374,12 @@ What a moderator **cannot** do in a room: watch it, see where anybody is on the 
 power, move, pause or pace a rider, or change a room's route. A room has no leader. Its host can
 start a race and remove a rider, and can do nothing else.
 
+A rider reports from the ride itself (#789): *Follow* reaches another rider and puts their name on
+the screen, *Report* beside it opens the three reasons, and one press of a reason files it. That is
+two presses from the name. The app says whether it was sent; it never says what you did about it.
+
 ## What you cannot do, yet
 
-- **Report from the ride screen.** The instance takes a report from inside a room (above), but the
-  app's ride screen has no *Report* control yet, so a rider reports another only through the API.
 - **Act on content other than a name, a room, a route shown in a room, or a race's result.** Since
   #913 each of those can be hidden alone, by its reference. Riders' rides are not shown to other
   riders, so there is no other item to act on.

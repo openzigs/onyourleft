@@ -324,13 +324,14 @@ export function isRoomId(roomId: string): boolean {
 /**
  * The ONE builder of a room's paths on an instance — the ticket's
  * (`POST /v1/rooms/{roomId}/ticket`), the socket's, and since #784 and #785 the
- * route's, the result's and the start's — so that every one applies
- * {@link isRoomId}. Throws {@link InstanceUnreachableError} `refused-path`,
- * having built nothing, for any other id (#782's review, B1).
+ * route's, the result's and the start's, and since #789 the in-ride report's —
+ * so that every one applies {@link isRoomId}. Throws
+ * {@link InstanceUnreachableError} `refused-path`, having built nothing, for
+ * any other id (#782's review, B1).
  */
 export function roomPath(
   roomId: string,
-  kind: 'ticket' | 'socket' | 'route' | 'results' | 'start',
+  kind: 'ticket' | 'socket' | 'route' | 'results' | 'start' | 'reports',
 ): string {
   if (!isRoomId(roomId)) throw new InstanceUnreachableError('refused-path');
   return `/v1/rooms/${roomId}/${kind}`;

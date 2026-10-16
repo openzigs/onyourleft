@@ -76,6 +76,8 @@ import {
 } from './fields';
 import { PlanTrace } from './PlanTrace';
 import { RaceStandings } from './RaceStandings';
+import { RoomReport, type RoomReportTarget } from './RoomReport';
+import type { RoomReportAnswer, RoomReportReason } from '../../net/room-session';
 import type { RaceStandingsView } from '../room-ride';
 import { WorkoutStrip } from '../../workout/WorkoutGraph';
 import type { WorkoutGraphInput } from '../../workout/workout-graph';
@@ -199,6 +201,17 @@ export interface HudPanelProps extends Omit<HudInput, 'units'> {
    * ride with no room, and when nobody else is near.
    */
   readonly onFollowNext?: (() => void) | undefined;
+  /**
+   * *Report* — #789: the rider *Follow* chose, reported to the instance's
+   * moderators in two presses (`RoomReport.tsx`). `undefined` with nobody
+   * followed, and on a ride with no room.
+   */
+  readonly report?:
+    | {
+        readonly target: RoomReportTarget;
+        readonly onReport: (riderId: number, reason: RoomReportReason) => Promise<RoomReportAnswer>;
+      }
+    | undefined;
   /**
    * *Keep the plan* — #1244, ADR 0048 D-7: set only while an accepted re-plan
    * waits for the workout's next block, so the control is on the HUD exactly
@@ -443,14 +456,32 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
             <span className="oyl-visually-hidden"> of {props.ghostStop.rider}</span>
           </button>
         )}
-        {props.onFollowNext === undefined ? null : (
-          <button
-            type="button"
-            className="oyl-button oyl-button--secondary oyl-hud__follow"
-            onClick={props.onFollowNext}
-          >
-            Follow<span className="oyl-visually-hidden"> the next rider near you</span>
-          </button>
+        {/*
+          #789: *Follow* and *Report* on ONE row, so a followed rider costs
+          the actions panel no extra line; the reasons, while open, wrap onto
+          the row's next. Keyed by the seat, so following somebody else
+          closes a report that was about to be filed about the rider before
+          (`RoomReport.tsx` §"Who it is filed about").
+        */}
+        {props.onFollowNext === undefined && props.report === undefined ? null : (
+          <div className="oyl-hud__room-row">
+            {props.onFollowNext === undefined ? null : (
+              <button
+                type="button"
+                className="oyl-button oyl-button--secondary oyl-hud__follow"
+                onClick={props.onFollowNext}
+              >
+                Follow<span className="oyl-visually-hidden"> the next rider near you</span>
+              </button>
+            )}
+            {props.report === undefined ? null : (
+              <RoomReport
+                key={props.report.target.riderId}
+                target={props.report.target}
+                onReport={props.report.onReport}
+              />
+            )}
+          </div>
         )}
         {props.sound}
       </div>

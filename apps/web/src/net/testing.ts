@@ -26,7 +26,13 @@ import {
 import { PHYSICS_VERSION } from '@onyourleft/physics';
 
 import type { InstanceSocketEvents } from '../instance/instance-transport';
-import type { RoomLink, RoomTimers, TicketAnswer } from './room-session';
+import type {
+  RoomLink,
+  RoomReportAnswer,
+  RoomReportReason,
+  RoomTimers,
+  TicketAnswer,
+} from './room-session';
 
 /** Timers that fire only when the test says time has passed. */
 export class ManualClock implements RoomTimers {
@@ -93,6 +99,14 @@ export class ScriptedRoom {
   });
   /** The masses tickets were asked with. */
   readonly masses: number[] = [];
+  /** Every in-ride report filed through this room's link (#789), in order. */
+  readonly reports: {
+    readonly roomId: string;
+    readonly riderId: number;
+    readonly reason: RoomReportReason;
+  }[] = [];
+  /** What a report answers. */
+  reportAnswer: () => RoomReportAnswer = () => ({ kind: 'reported' });
 
   /** The link a session reaches this room through. */
   link(declaredMassKilograms = 72): RoomLink {
@@ -126,6 +140,10 @@ export class ScriptedRoom {
             events.onClose(1000, 'left');
           },
         };
+      },
+      report: (roomId, riderId, reason) => {
+        this.reports.push({ roomId, riderId, reason });
+        return Promise.resolve(this.reportAnswer());
       },
     };
   }

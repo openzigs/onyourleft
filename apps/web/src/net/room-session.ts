@@ -127,10 +127,41 @@ export type TicketAnswer =
   /** Nothing answered: try again later. */
   | { readonly kind: 'unreachable' };
 
+/**
+ * The short fixed list a rider reports another from inside a ride by — #789.
+ * The instance's own list is `apps/instance` §`ROOM_REPORT_REASONS`, and
+ * `room-port.test.ts` holds the two equal: a key the instance does not know
+ * would be refused as `validation_failed` on every press.
+ */
+export const ROOM_REPORT_REASON_KEYS = ['display-name', 'cheating', 'other'] as const;
+export type RoomReportReason = (typeof ROOM_REPORT_REASON_KEYS)[number];
+
+/**
+ * What became of an in-ride report — #789:
+ *
+ * - `reported` — 204: filed for the moderators;
+ * - `rate-limited` — 429: this rider's hourly allowance of reports is spent;
+ * - `gone` — 404: the rider is no longer in that seat, or this rider is no
+ *   longer in the room, so there was nobody to file it about;
+ * - `refused` — no session, a device that cannot seal, or any other refusal;
+ * - `unreachable` — nothing answered.
+ */
+export type RoomReportAnswer =
+  | { readonly kind: 'reported' }
+  | { readonly kind: 'rate-limited' }
+  | { readonly kind: 'gone' }
+  | { readonly kind: 'refused' }
+  | { readonly kind: 'unreachable' };
+
 /** How a session reaches a room. `room-port.ts` builds the production one. */
 export interface RoomLink {
   ticket(roomId: string): Promise<TicketAnswer>;
   open(roomId: string, events: InstanceSocketEvents): InstanceSocket;
+  /**
+   * Report the rider in seat `riderId` of `roomId` — #789, the instance's
+   * `POST /v1/rooms/{roomId}/reports`. By SEAT: the room says who sits there.
+   */
+  report(roomId: string, riderId: number, reason: RoomReportReason): Promise<RoomReportAnswer>;
 }
 
 /** The timers a session schedules on. The platform's own in production. */

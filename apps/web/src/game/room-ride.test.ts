@@ -65,6 +65,7 @@ function connection(
     own: () => own,
     standings: () => undefined,
     draftFactor: () => 1,
+    report: () => Promise.resolve({ kind: 'reported' }),
     leave: () => undefined,
   };
 }

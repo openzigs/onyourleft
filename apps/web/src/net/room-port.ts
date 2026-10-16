@@ -30,6 +30,9 @@
  *   to nothing the renderer reads: `GameView.test.tsx` §"#783" walks every
  *   frame the renderer was given for it.
  * - On the socket, the hello and the power reports `room-session.ts` lists.
+ * - When the rider reports another from the HUD (#789),
+ *   `POST /v1/rooms/{roomId}/reports` with the other rider's SEAT and one
+ *   reason from a fixed list — never a screenshot, a position or a number.
  *
  * ## The screen off — #782, #524
  *
@@ -61,6 +64,8 @@ import {
   RoomSession,
   type RoomLink,
   type RoomRace,
+  type RoomReportAnswer,
+  type RoomReportReason,
   type RoomSample,
   type RoomSessionStatus,
   type RoomStandings,
@@ -114,6 +119,13 @@ export interface RoomConnection {
    * room's newest frame, `1` alone or with drafting off. The room corrects it.
    */
   draftFactor(): number;
+  /**
+   * Report the rider in seat `riderId` to the instance's moderators, with one
+   * of the short fixed reasons — #789. By seat, never by athlete: the room
+   * says who sits there and stamps its own tick. Nothing else is sent — no
+   * screenshot, no position, no power.
+   */
+  report(riderId: number, reason: RoomReportReason): Promise<RoomReportAnswer>;
   /** Leave: close the socket, stop reconnecting, let the screen sleep. */
   leave(): void;
 }
@@ -180,6 +192,17 @@ function instanceRoomLink(
       }
       return refusalFor(answer.status) ?? { kind: 'unreachable' };
     },
+    report: async (roomId, riderId, reason): Promise<RoomReportAnswer> => {
+      const session = await accountSession();
+      if (session.kind === 'closed') return { kind: 'refused' };
+      // #789: the room's own report route, built by the one room-path builder.
+      const answer = await session.sealedOrKeyless.call('POST', roomPath(roomId, 'reports'), {
+        token: session.token,
+        body: { riderId, reason },
+      });
+      if (isSealedRequired(answer)) return { kind: 'refused' };
+      return reportAnswerFor(answer.status);
+    },
     open: (roomId, events) => {
       const session = heldInstanceSession(options.storage, options.send);
       if (session === undefined) throw new Error('not signed in to an instance');
@@ -204,6 +227,15 @@ function refusalFor(status: number): TicketAnswer | undefined {
   return undefined;
 }
 
+/** What the report route's status means (`apps/instance/src/errors.ts`). */
+function reportAnswerFor(status: number): RoomReportAnswer {
+  if (status === 204) return { kind: 'reported' };
+  if (status === 429) return { kind: 'rate-limited' };
+  if (status === 404) return { kind: 'gone' };
+  if (status >= 400 && status < 500) return { kind: 'refused' };
+  return { kind: 'unreachable' };
+}
+
 /**
  * The link a join with no declared mass gets: it asks for no ticket and opens
  * nothing, so no weight — default or otherwise — reaches any instance, and
@@ -214,6 +246,8 @@ const NO_DECLARED_MASS: RoomLink = {
   open: () => {
     throw new Error('no ticket was asked for');
   },
+  // Never joined, so there is no seat to report from.
+  report: () => Promise.resolve({ kind: 'refused' }),
 };
 
 /** A port over a {@link RoomLink} — the production one, or a test's scripted room. */
@@ -225,12 +259,13 @@ export function roomPortOver(
     join: (request) => {
       const release = options.keepAlive?.();
       let released = false;
+      const joined =
+        request.declaredMassKilograms === undefined
+          ? NO_DECLARED_MASS
+          : link(request.declaredMassKilograms);
       const session = new RoomSession({
         roomId: request.roomId,
-        link:
-          request.declaredMassKilograms === undefined
-            ? NO_DECLARED_MASS
-            : link(request.declaredMassKilograms),
+        link: joined,
         timers: options.timers ?? PLATFORM_TIMERS,
         now: options.now ?? (() => performance.now()),
         physicsVersion: PHYSICS_VERSION,
@@ -253,6 +288,14 @@ export function roomPortOver(
         own: () => session.own(),
         standings: () => session.standings(),
         draftFactor: () => session.draftFactor(),
+        report: async (riderId, reason) => {
+          try {
+            return await joined.report(request.roomId, riderId, reason);
+          } catch {
+            // A refused path or a failed fetch: nothing was filed.
+            return { kind: 'unreachable' };
+          }
+        },
         leave: () => {
           session.leave();
         },

@@ -88,7 +88,7 @@ import { DEFAULT_RIDING_POSITION, rideConditionsFor, type RidingPosition } from 
 import { FramePacer } from './frame-pacer';
 import { sceneFrame } from './scene';
 import type { RoomConnection, RoomPort } from '../net/room-port';
-import type { RoomRace } from '../net/room-session';
+import type { RoomRace, RoomReportReason } from '../net/room-session';
 import type { EnteredRoom, RoomsPort } from '../net/rooms-port';
 import { Button } from '../design/Button';
 import { RaceResult } from '../rooms/RaceResult';
@@ -2304,6 +2304,19 @@ export function GameView(props: GameViewProps): JSX.Element {
                 );
               }
         }
+        // #789: *Report* the followed rider, by their seat, under the name the
+        // gap field shows — the room's own report route (`room-port.ts`).
+        report={(() => {
+          const room = roomRef.current;
+          const riderId = roomStateRef.current.following;
+          const chosen = roomFrameRef.current?.hud.chosen;
+          return room === undefined || riderId === undefined || chosen === undefined
+            ? undefined
+            : {
+                target: { riderId, rider: chosen.label },
+                onReport: (seat: number, reason: RoomReportReason) => room.report(seat, reason),
+              };
+        })()}
         paused={phase === 'paused'}
         // #1244: *Keep the plan*, only while an accepted re-plan waits for
         // the workout's next block. The controller's own `keepThePlan`.
