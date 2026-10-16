@@ -75,6 +75,10 @@ export const ROOM_REFUSED_TEXT: Readonly<
     'Set your weight in Settings to ride in a room: a room rides you at the weight you declare. ' +
     'You are riding on your own.',
   'invalid-room': 'That is not a room this app can join, so you are riding on your own.',
+  // #1210: ⚠️ draft wording for the owner (ADR 0047 D-14 Q6).
+  'cannot-seal':
+    'This device cannot reach the room’s instance encrypted right now, so you are riding on ' +
+    'your own. The Instance screen says why.',
   'not-the-rooms-route':
     'The room is not riding the route this device fetched for it, so you are riding on your own.',
 };
