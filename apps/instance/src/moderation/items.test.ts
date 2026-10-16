@@ -19,6 +19,7 @@ import {
   type ModerationWorld,
   type Rider,
 } from './moderation-testing.ts';
+import { wholeModerationLog } from '../store/testing/index.ts';
 
 let world: ModerationWorld | undefined;
 afterEach(async () => {
@@ -115,7 +116,7 @@ describe('hiding one row of a race’s result (#913)', () => {
     const { anna, bea, roomId } = await room(w);
     await finished(w, roomId, [anna, bea]);
     const { logId } = (await hide(w, `result:${roomId}:2`)).body as { logId: number };
-    const [entry] = (await w.freshRead((store) => store.listModerationLog())).slice(-1);
+    const [entry] = (await w.freshRead((store) => wholeModerationLog(store))).slice(-1);
     expect(entry).toMatchObject({
       id: logId,
       action: 'hide_item',
@@ -241,7 +242,7 @@ describe('what hiding an item refuses (#913)', () => {
     expect((await hide(w, `result:${roomId}:1`)).status).toBe(404);
     expect((await hide(w, `room:${'f'.repeat(32)}`)).status).toBe(404);
     expect(
-      (await w.freshRead((store) => store.listModerationLog())).filter((each) =>
+      (await w.freshRead((store) => wholeModerationLog(store))).filter((each) =>
         each.action.includes('hide_item'),
       ),
     ).toEqual([]);
@@ -256,7 +257,7 @@ describe('what hiding an item refuses (#913)', () => {
     const owners = await madeRoom(w, w.owner.token);
     const own = await hide(w, `room:${owners.roomId}`, w.deputy);
     expect(own.status).toBe(409);
-    expect((await w.freshRead((store) => store.listModerationLog())).at(-1)).toMatchObject({
+    expect((await w.freshRead((store) => wholeModerationLog(store))).at(-1)).toMatchObject({
       action: 'refused_hide_item',
       targetAthleteId: w.owner.athleteId,
     });

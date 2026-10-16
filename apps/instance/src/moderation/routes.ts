@@ -853,12 +853,12 @@ export const MODERATION_ROUTES: readonly Route[] = [
     errors: ['unauthenticated', 'validation_failed'],
     response: {
       contentType: 'application/json',
-      schema: object({ entries: { type: 'array', items: logEntrySchema }, next: nullableString }),
+      schema: object({ items: { type: 'array', items: logEntrySchema }, next: nullableString }),
     },
     handle: async (context) =>
       answer(await moderationOf(context).logPage(context.url.searchParams), (page) =>
         json({
-          entries: page.items.map((entry) => ({
+          items: page.items.map((entry) => ({
             logId: entry.id,
             action: entry.action,
             actorAthleteId: entry.actorAthleteId,

@@ -9,6 +9,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { openDatabase } from './node-sqlite.ts';
+import { openSqlStore } from './open-sql-store.ts';
 import type { ModerationAction } from './sql-store.ts';
 import {
   ATHLETE_A,
@@ -17,6 +18,7 @@ import {
   createStoreHarness,
   seedWorld,
   type StoreHarness,
+  wholeModerationLog,
 } from './testing/index.ts';
 
 let harness: StoreHarness | undefined;
@@ -57,7 +59,7 @@ describe('the moderation log (#83)', () => {
     } finally {
       database.close();
     }
-    expect(actions(await h.read((store) => store.listModerationLog()))).toEqual([
+    expect(actions(await h.read((store) => wholeModerationLog(store)))).toEqual([
       { ...suspendB, id: expect.any(Number) as number, roomId: null },
     ]);
   });
@@ -74,7 +76,7 @@ describe('the moderation log (#83)', () => {
     expect(
       await h.write((store) => store.moderate({ ...suspendB, targetAthleteId: 'nobody' })),
     ).toEqual({ outcome: 'not_found' });
-    expect(actions(await h.read((store) => store.listModerationLog()))).toHaveLength(1);
+    expect(actions(await h.read((store) => wholeModerationLog(store)))).toHaveLength(1);
     expect((await h.read((store) => store.getAthlete(ATHLETE_B)))?.suspendedAt).toBe(suspendB.at);
   });
 
@@ -185,5 +187,48 @@ describe('blocks (#83)', () => {
     expect(await h.read(async (store) => (await store.sight(ATHLETE_A, ATHLETE_B))?.blocked)).toBe(
       false,
     );
+  });
+});
+
+describe('the moderators’ two lists, read a page at a time (#961, #1166)', () => {
+  it('reads every entry of a log longer than one page, oldest first, through the paged read', async () => {
+    const h = await seeded();
+    const before = (await h.read((store) => wholeModerationLog(store))).length;
+    await h.write(async (store) => {
+      for (let index = 0; index < 201; index += 1) {
+        await store.logRefusedAction({ ...suspendB, reason: `Refused ${String(index)}` });
+      }
+    });
+    const ids = (await h.read((store) => wholeModerationLog(store))).map((entry) => entry.id);
+    expect(ids).toHaveLength(before + 201);
+    expect(ids).toEqual([...ids].sort((left, right) => left - right));
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('pages the suspended accounts through an index, never a scan of every athlete', async () => {
+    const h = await seeded();
+    const statements: string[] = [];
+    const store = await openSqlStore(h.path, { onQuery: (sql) => statements.push(sql) });
+    try {
+      await store.listSuspendedAthletes(undefined, 51);
+      await store.listSuspendedAthletes({ suspendedAt: 1_790_000_000, id: ATHLETE_B }, 51);
+    } finally {
+      await store.close();
+    }
+    const reads = statements.filter((each) => each.includes('suspended_at'));
+    expect(reads).toHaveLength(2);
+    const database = openDatabase(h.path);
+    try {
+      for (const read of reads) {
+        // Unbound parameters are NULL to EXPLAIN: the plan, not the rows, is the point.
+        const plan = (database.prepare(`EXPLAIN QUERY PLAN ${read}`).all() as { detail: string }[])
+          .map((row) => row.detail)
+          .join('\n');
+        expect(plan, read).toMatch(/INDEX athlete_suspended\b/);
+        expect(plan, read).not.toMatch(/TEMP B-TREE/);
+      }
+    } finally {
+      database.close();
+    }
   });
 });

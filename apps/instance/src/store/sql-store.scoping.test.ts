@@ -349,7 +349,6 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
     notAScopedRead:
       'who blocks this athlete, read only to keep names apart in a room the two share; answered to nobody (#789)',
   },
-  listModerationLog: { notAScopedRead: 'the moderators’ record: every action (#83)' },
   listModerationLogPage: {
     notAScopedRead: 'the moderators’ record, a page at a time, newest first (#961)',
   },

@@ -20,6 +20,7 @@ import type { BlobStore } from '../blob/blob-store.ts';
 import { openDatabase } from '../store/node-sqlite.ts';
 import { ITEM_KINDS, sha256Bytes, type AccountExport } from './sync.ts';
 import { authorised, corpusFile, signedRecordOf, syncWorld, uploadBody } from './sync-testing.ts';
+import { wholeModerationLog } from '../store/testing/index.ts';
 
 let world: IdentityInstance | undefined;
 afterEach(async () => {
@@ -551,13 +552,13 @@ describe('a suspended rider may take their data out and delete their account, an
     const manifest = await authorised(instance, token, 'GET', '/v1/sync/manifest');
     expect(manifest.status).toBe(403);
 
-    const logBefore = await instance.freshRead((store) => store.listModerationLog());
+    const logBefore = await instance.freshRead((store) => wholeModerationLog(store));
     expect(logBefore.map((entry) => entry.targetAthleteId)).toContain(bea.athleteId);
     const erased = await authorised(instance, token, 'DELETE', '/v1/account', stepUp(bea));
     expect(erased.status, await erased.clone().text()).toBe(204);
     expect(await instance.freshRead((store) => store.getAthlete(bea.athleteId))).toBeUndefined();
     // The moderation log is the instance's audit trail and outlives the account.
-    expect(await instance.freshRead((store) => store.listModerationLog())).toEqual(logBefore);
+    expect(await instance.freshRead((store) => wholeModerationLog(store))).toEqual(logBefore);
   });
 
   it('refuses a way-out session to a key nobody holds: it is a way out, not in', async () => {
