@@ -63,6 +63,20 @@ the next time a device holding a named key signs in to an account that is waitin
 activates it and writes `activate_moderator_key` to the log. Set the setting, restart, and sign in
 again.
 
+⚠️ **That rescue covers an account that is waiting, and only that.** An account that was **refused**
+or **suspended** before its key was named stays locked out after you name the key (#899). Only a
+waiting account is activated at sign-in, and nobody may act on a moderator, so nobody can lift that
+suspension once the key is named. To recover:
+
+1. **Suspended, and some moderator can still act on it.** Empty the setting that names the key and
+   restart. A moderator lifts the suspension, which is written to the log. Then name the key again
+   and restart.
+2. **Refused, or nobody else can act on it.** A refusal cannot be undone, so name a **different**
+   device key instead: one from a device the instance has never seen. A key the instance has never
+   seen registers active in every mode, so that device's new account holds the role. The old account
+   stays as it was. A suspended rider can still export or delete it through the way-out session (see
+   "What a suspension does not do").
+
 ## Who can join: the registration modes
 
 `OYL_INSTANCE_REGISTRATION` sets how the instance takes new riders, in any case (`Closed` is
@@ -304,7 +318,9 @@ rider's account id, which no longer resolves to anyone. The reasons you wrote st
 This is deliberate: an audit trail that a suspended rider could delete would not be an audit trail.
 It also means **do not write a rider's personal details into a reason**. Write what they did.
 
-Erasure deletes a rider's own reports and blocks, and every block that other riders made of them.
+Erasure deletes a rider's own reports and blocks. **Blocks other riders made of them are kept**
+(#899): a block is the blocker's row, and deleting it would shrink their list and tell them the id
+they blocked had been a real account. A block of an id nobody ever held is kept for the same reason.
 Reports other riders made **about** them stay in your queue, so you can still decide them.
 
 ⚠️ **Migrating the database back past migration 0007 would delete the log**, so `migrate … down`

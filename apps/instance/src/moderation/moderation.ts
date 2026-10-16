@@ -741,8 +741,10 @@ export function createModeration(options: ModerationOptions): Moderation {
       // A moderator does not decide a report about themselves (#891's review)
       // while another moderator is named to: refused, and logged, as `act`
       // refuses. The ONLY moderator does, declared as their own (#905).
-      const report = (await store.listOpenReports()).find((each) => each.id === Number(reportId));
-      if (report?.targetAthleteId === moderatorId) {
+      // The one report it decides, not the whole queue (#899). A closed one
+      // goes on to `moderate`, which answers it is not applicable.
+      const report = await store.getReport(Number(reportId));
+      if (report?.closedAt === null && report.targetAthleteId === moderatorId) {
         if (soleModerator) {
           return logged(
             await store.moderate({

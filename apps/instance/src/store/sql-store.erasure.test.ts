@@ -102,7 +102,9 @@ const NAMED_WITHOUT_A_FOREIGN_KEY: Readonly<
   // Neither of the next two can carry a foreign key even in principle: since
   // #891's review each may name an id NOBODY ever held, stored so that a
   // rider's own block list and report allowance say nothing about who exists.
-  'block.blocked_athlete_id': { erased: true },
+  'block.blocked_athlete_id': {
+    kept: 'the block is the BLOCKER’s row: deleting it would tell them the id was a real account (#899)',
+  },
   'report.target_athlete_id': {
     kept: 'the report is the REPORTER’s row, and a moderator still decides it',
   },

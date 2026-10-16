@@ -9,7 +9,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { openDatabase } from '../store/node-sqlite.ts';
-import { DEFAULT_MODERATION_LIMITS, MAXIMUM_BLOCKS } from './moderation.ts';
+import { createModeration, DEFAULT_MODERATION_LIMITS, MAXIMUM_BLOCKS } from './moderation.ts';
 import {
   codeOf,
   startModerationWorld,
@@ -54,6 +54,16 @@ describe('blocking (#83)', () => {
       displayName: 'Anna',
     });
     expect(await w.freshRead((store) => store.listBlocks(anna.athleteId))).toEqual([]);
+  });
+
+  it('keeps another rider’s block of an erased athlete, as a block of nobody is kept (#899)', async () => {
+    const w = await start();
+    const anna = await w.rider();
+    const bea = await w.rider();
+    await w.as(anna, 'POST', `/v1/blocks/${bea.athleteId}`);
+    await w.freshRead((store) => store.eraseAthlete(bea.athleteId));
+    expect(await w.freshRead((store) => store.getAthlete(bea.athleteId))).toBeUndefined();
+    expect((await w.as(anna, 'GET', '/v1/blocks')).body).toEqual({ athleteIds: [bea.athleteId] });
   });
 
   it('is stored on the instance, read back through a fresh connection', async () => {
@@ -468,6 +478,31 @@ describe('moderator actions, each written to the append-only log (#83)', () => {
     expect((await w.as(w.owner, 'POST', path, { reason: 'Not against the rules' })).status).toBe(
       200,
     );
+    expect(await w.freshRead((store) => store.listOpenReports())).toEqual([]);
+  });
+
+  it('dismisses by reading the one report it decides, not the whole open queue (#899)', async () => {
+    const w = await start();
+    const { reportId } = await reported(w);
+    const asked: string[] = [];
+    const outcome = await w.freshRead(async (store) => {
+      const counted = new Proxy(store, {
+        get(target, property, receiver) {
+          if (property === 'listOpenReports' || property === 'getReport') {
+            asked.push(property);
+          }
+          return Reflect.get(target, property, receiver) as unknown;
+        },
+      });
+      const moderation = createModeration({
+        store: counted,
+        now: () => w.clock.ms,
+        moderators: { owner: w.owner.device.publicKey },
+      });
+      return moderation.dismiss(w.owner.athleteId, String(reportId), 'Not against the rules');
+    });
+    expect(outcome.ok).toBe(true);
+    expect(asked).toEqual(['getReport']);
     expect(await w.freshRead((store) => store.listOpenReports())).toEqual([]);
   });
 
