@@ -119,7 +119,8 @@ export const LIST_ROOM_TEXT = {
   choice: 'List it as a public room',
   choiceDetail: ' — for any adult rider on your instance to find and join; it has no code',
   startsIn: 'Starts in',
-  tooMany: 'You have made as many public rooms as a day allows: three. Try again tomorrow.',
+  tooMany:
+    'You have reached a limit on making rooms: three public rooms a day, ten rooms an hour, or five open at once. Wait, or close one, and try again.',
   listed: (start: string): string =>
     `It is listed on your instance as a public room, starting at ${start}. Any adult rider ` +
     'there can join it.',
@@ -457,7 +458,8 @@ export function RoomPanel(props: RoomPanelProps): JSX.Element {
                       answer.kind === 'refused' &&
                       answer.reason === 'rate-limited'
                     ) {
-                      // #788: for a listed room, a limit is the three a day.
+                      // #788: the server's limits on a create are three public a day, ten an hour
+                      // and five open, and it answers all three alike — so say all three.
                       setProblem(LIST_ROOM_TEXT.tooMany);
                     } else setProblem(refusalText(answer));
                   });

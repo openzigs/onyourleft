@@ -844,12 +844,16 @@ describe('public rooms — #788', () => {
     expect(button('Start the race')).toBeDefined();
   });
 
-  it('says the three-a-day limit when a listed room is refused for it', async () => {
+  it('names every limit a create can meet when a listed room is refused for one', async () => {
     const instance = new ScriptedInstance();
     instance.created = { status: 429, body: { error: { code: 'rate_limited' } } };
     await shell(instance, handPlayedSockets());
     await check(LIST_ROOM_TEXT.choice);
     await press('Make a room');
     await untilSaid(LIST_ROOM_TEXT.tooMany);
+    // The server answers three limits alike, so the text may not name only one.
+    expect(LIST_ROOM_TEXT.tooMany).toMatch(
+      /three public rooms a day.*ten rooms an hour.*five open/,
+    );
   });
 });

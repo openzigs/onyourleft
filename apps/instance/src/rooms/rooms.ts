@@ -206,8 +206,6 @@ export interface ListedRoom {
   readonly loop: boolean;
   /** Unix seconds: the start its creator gave it. */
   readonly startsAt: number;
-  /** Unix seconds: when it was made. */
-  readonly createdAt: number;
   readonly lengthMetres: number;
   /** Metres climbed over the course once, from its grade steps. */
   readonly climbMetres: number;
@@ -577,6 +575,9 @@ export function createRooms(options: RoomsOptions): Rooms {
         // A race that left its lobby takes nobody new; a hidden room is
         // listed for nobody; a block either way keeps the two apart.
         if (room.raceStarted || (await hiddenRoom(room.roomId))) continue;
+        // #789: a rider the host or a moderator removed is not shown a room
+        // they cannot enter.
+        if (await store.isRemovedFromRoom(room.roomId, caller.athleteId)) continue;
         if (await store.hasBlockWithRoomMember(room.roomId, caller.athleteId)) continue;
         listed.push({
           roomId: room.roomId,
@@ -585,7 +586,6 @@ export function createRooms(options: RoomsOptions): Rooms {
           drafting: room.drafting,
           loop: room.loop,
           startsAt: room.startsAt,
-          createdAt: room.createdAt,
           lengthMetres: room.lengthMetres,
           climbMetres: climbOf(room.lengthMetres, room.grades),
         });
@@ -608,6 +608,7 @@ export function createRooms(options: RoomsOptions): Rooms {
         course === undefined ||
         course.raceStartedAt !== null ||
         (await hiddenRoom(roomId)) ||
+        (await store.isRemovedFromRoom(roomId, caller.athleteId)) ||
         (await store.hasBlockWithRoomMember(roomId, caller.athleteId))
       ) {
         return refuse('not_found');

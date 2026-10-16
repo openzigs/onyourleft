@@ -7438,9 +7438,6 @@
                           "startsAt": {
                             "type": "integer"
                           },
-                          "createdAt": {
-                            "type": "integer"
-                          },
                           "lengthMetres": {
                             "type": "number"
                           },
@@ -7455,7 +7452,6 @@
                           "drafting",
                           "loop",
                           "startsAt",
-                          "createdAt",
                           "lengthMetres",
                           "climbMetres"
                         ],

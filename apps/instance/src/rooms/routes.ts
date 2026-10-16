@@ -175,7 +175,6 @@ export const ROOM_ROUTES: readonly Route[] = [
             drafting: { type: 'boolean' },
             loop: { type: 'boolean' },
             startsAt: { type: 'integer' },
-            createdAt: { type: 'integer' },
             lengthMetres: number,
             climbMetres: number,
           }),

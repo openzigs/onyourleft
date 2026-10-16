@@ -202,6 +202,41 @@ describe('making a public room — #788', () => {
   });
 });
 
+describe('the daily cap counts rooms a rider made, not rooms a rider joined — #788', () => {
+  it('lets a rider who joined three public rooms in a day make their own', async () => {
+    const w = await open();
+    const bea = await adultIn(w);
+    for (let n = 0; n < PUBLIC_ROOMS_PER_ATHLETE_PER_DAY; n += 1) {
+      const theirs = await madePublicRoom(w, (await adultIn(w)).token);
+      expect((await joinFromListing(w, bea.token, theirs.roomId)).status).toBe(200);
+    }
+    const own = await w.call('POST', '/v1/rooms', { token: bea.token, body: publicRoomBody(w) });
+    expect(own.status).toBe(200);
+  });
+});
+
+describe('a rider removed from a public room — #788, #789', () => {
+  it('is not shown it in the listing and is refused a join from it', async () => {
+    const w = await open();
+    const room = await madePublicRoom(w, (await adultIn(w)).token);
+    const bea = await adultIn(w);
+    expect((await joinFromListing(w, bea.token, room.roomId)).status).toBe(200);
+    const removed = await w.as(
+      w.owner,
+      'POST',
+      `/v1/moderation/rooms/${room.roomId}/athletes/${bea.athleteId}/remove`,
+      { reason: 'Abusive', statement: TEST_STATEMENT },
+    );
+    expect(removed.status).toBe(200);
+    expect((await listed(w, bea.token)).map((each) => each.roomId)).not.toContain(room.roomId);
+    expect((await joinFromListing(w, bea.token, room.roomId)).status).toBe(404);
+    // Another rider still sees it.
+    expect((await listed(w, (await adultIn(w)).token)).map((each) => each.roomId)).toContain(
+      room.roomId,
+    );
+  });
+});
+
 describe('the listing — #788, ADR 0028 D-7.1', () => {
   it('is ordered by start, then by when each was made — and by nothing else', async () => {
     const w = await open();
@@ -237,7 +272,6 @@ describe('the listing — #788, ADR 0028 D-7.1', () => {
     for (const room of rooms) {
       expect(Object.keys(room).sort()).toEqual([
         'climbMetres',
-        'createdAt',
         'drafting',
         'kind',
         'lengthMetres',
