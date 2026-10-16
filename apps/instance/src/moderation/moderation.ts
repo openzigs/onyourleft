@@ -622,10 +622,13 @@ export function createModeration(options: ModerationOptions): Moderation {
       const { limit, after } = request.request;
       let beforeId: number | undefined;
       if (after !== undefined) {
-        beforeId = Number(after.id);
+        // Only a forged cursor carries an id the log could not have written:
+        // past MAX_SAFE_INTEGER, Number() would round it to some other id.
         if (after.key !== 'log' || !/^[1-9][0-9]{0,15}$/.test(after.id)) {
           return refuse('validation_failed', NOT_OUR_CURSOR);
         }
+        beforeId = Number(after.id);
+        if (!Number.isSafeInteger(beforeId)) return refuse('validation_failed', NOT_OUR_CURSOR);
       }
       // One row more than the page says whether there is a next one.
       const rows = await store.listModerationLogPage(beforeId, limit + 1);
@@ -649,10 +652,15 @@ export function createModeration(options: ModerationOptions): Moderation {
       const { limit, after } = request.request;
       let position: { suspendedAt: number; id: string } | undefined;
       if (after !== undefined) {
-        if (!/^(0|[1-9][0-9]{0,15})$/.test(after.key) || !ATHLETE_ID.test(after.id)) {
+        const suspendedAt = Number(after.key);
+        if (
+          !/^(0|[1-9][0-9]{0,15})$/.test(after.key) ||
+          !Number.isSafeInteger(suspendedAt) ||
+          !ATHLETE_ID.test(after.id)
+        ) {
           return refuse('validation_failed', NOT_OUR_CURSOR);
         }
-        position = { suspendedAt: Number(after.key), id: after.id };
+        position = { suspendedAt, id: after.id };
       }
       const rows = await store.listSuspendedAthletes(position, limit + 1);
       const items = rows.slice(0, limit);

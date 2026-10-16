@@ -19,6 +19,7 @@ import {
   type ModerationWorld,
   type Rider,
 } from './moderation-testing.ts';
+import { wholeModerationLog } from '../store/testing/index.ts';
 
 let world: ModerationWorld | undefined;
 afterEach(async () => {
@@ -169,7 +170,7 @@ describe('deciding an appeal (#911)', () => {
     expect((await w.freshRead((store) => store.getAthlete(bea.athleteId)))?.suspendedAt).toBeNull();
     w.clock.ms += 60_000;
     expect((await w.signIn(bea.device)).status).toBe(200);
-    const [entry] = (await w.freshRead((store) => store.listModerationLog())).slice(-1);
+    const [entry] = (await w.freshRead((store) => wholeModerationLog(store))).slice(-1);
     expect(entry).toMatchObject({
       action: 'reverse_appeal',
       actorAthleteId: w.owner.athleteId,
@@ -270,7 +271,7 @@ describe('deciding an appeal (#911)', () => {
     });
     expect(twice.status).toBe(409);
     expect(
-      (await w.freshRead((store) => store.listModerationLog())).filter((each) =>
+      (await w.freshRead((store) => wholeModerationLog(store))).filter((each) =>
         each.action.endsWith('_appeal'),
       ),
     ).toHaveLength(1);

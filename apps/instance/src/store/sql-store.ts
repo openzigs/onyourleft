@@ -1663,8 +1663,6 @@ export interface SqlStore {
    * `refused_<action>`, changing nothing else. Answers the log entry's id.
    */
   logRefusedAction(action: ModerationAction): Promise<number>;
-  /** The moderation log, oldest first. */
-  listModerationLog(): Promise<readonly ModerationLogEntry[]>;
   /**
    * One page of the moderation log, NEWEST first (#961): at most `limit`
    * entries whose id is below `beforeId`, or the newest when it is `undefined`.
@@ -4740,13 +4738,6 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
         return logged.id;
       }),
 
-    listModerationLog: () =>
-      exclusive(async () =>
-        (await db.selectFrom('moderation_log').selectAll().orderBy('id').execute()).map(
-          moderationLogFrom,
-        ),
-      ),
-
     listModerationLogPage: (beforeId, limit) =>
       exclusive(async () => {
         let query = db.selectFrom('moderation_log').selectAll();
@@ -4758,11 +4749,10 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
       exclusive(async () => {
         let query = db.selectFrom('athlete').selectAll().where('suspended_at', 'is not', null);
         if (after !== undefined) {
+          // A row-value comparison, not the OR it means: SQLite walks the
+          // `athlete_suspended` index (#1166) for this, and sorts for the OR.
           query = query.where((row) =>
-            row.or([
-              row('suspended_at', '<', after.suspendedAt),
-              row.and([row('suspended_at', '=', after.suspendedAt), row('id', '<', after.id)]),
-            ]),
+            row(row.refTuple('suspended_at', 'id'), '<', row.tuple(after.suspendedAt, after.id)),
           );
         }
         return (
