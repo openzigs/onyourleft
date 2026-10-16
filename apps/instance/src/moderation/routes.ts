@@ -212,6 +212,8 @@ export const MODERATION_ROUTES: readonly Route[] = [
   {
     method: 'GET',
     path: '/v1/blocks',
+    // #1210: phase 2 of ADR 0047 D-7.
+    sealed: 'only',
     operationId: 'listBlocks',
     reaches: 'own',
     summary: 'The athletes this athlete has blocked.',
@@ -228,6 +230,8 @@ export const MODERATION_ROUTES: readonly Route[] = [
   {
     method: 'POST',
     path: '/v1/blocks/{athleteId}',
+    // #1210: phase 2 of ADR 0047 D-7.
+    sealed: 'only',
     operationId: 'blockAthlete',
     reaches: {
       exempt:
@@ -248,6 +252,8 @@ export const MODERATION_ROUTES: readonly Route[] = [
   {
     method: 'DELETE',
     path: '/v1/blocks/{athleteId}',
+    // #1210: phase 2 of ADR 0047 D-7.
+    sealed: 'only',
     operationId: 'unblockAthlete',
     reaches: {
       exempt:
@@ -266,6 +272,8 @@ export const MODERATION_ROUTES: readonly Route[] = [
   {
     method: 'POST',
     path: '/v1/reports',
+    // #1210: phase 2 of ADR 0047 D-7.
+    sealed: 'only',
     operationId: 'reportAthlete',
     reaches: {
       exempt:

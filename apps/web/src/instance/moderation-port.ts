@@ -68,8 +68,10 @@
 import { parseModerationItem } from '@onyourleft/domain';
 
 import {
+  heldAccountSession,
   heldInstanceSession,
   heldSealedSession,
+  isSealedRequired,
   type HeldSealedSession,
   type SealingDependencies,
 } from './instance-port';
@@ -543,6 +545,7 @@ const INVITE_CODE = /^[a-z2-9]{4}(?:-[a-z2-9]{4}){3}$/;
 export function createModerationPort(dependencies: ModerationPortDependencies): ModerationPort {
   const held = () => heldInstanceSession(dependencies.storage, dependencies.send);
   const sealedSession = heldSealedSession(dependencies);
+  const accountSession = heldAccountSession(dependencies);
 
   /** The session sealed, or the refusal the screen says instead (#1192). */
   async function sealedOr(
@@ -566,18 +569,35 @@ export function createModerationPort(dependencies: ModerationPortDependencies): 
 
   /**
    * Whether this account moderates its instance, from `GET /v1/auth/account`
-   * (#775's `moderatorRole`) — a phase-2 route, so it is read in plaintext
-   * and a moderator on a device that cannot seal is still told why the
-   * screen is empty (#1192).
+   * (#775's `moderatorRole`) — sealed since #1210 (ADR 0047 D-7 phase 2), or
+   * in plaintext from a device with no pin. A device that cannot read it is
+   * told why, as for every moderator read: `sealed-unavailable`.
    */
-  async function standingOf(): Promise<ModerationStanding> {
-    const connection = held();
-    if (connection === undefined) return 'not-connected';
+  async function standingOf(): Promise<
+    ModerationStanding | Extract<ModerationRead, { kind: 'sealed-unavailable' }>
+  > {
+    if (held() === undefined) return 'not-connected';
     try {
-      const answer = await connection.http.call('GET', '/v1/auth/account', {
-        token: connection.token,
+      const session = await accountSession();
+      if (session.kind === 'closed') {
+        return session.why === 'signed-out'
+          ? 'not-connected'
+          : { kind: 'sealed-unavailable', text: session.text };
+      }
+      const answer = await session.sealedOrKeyless.call('GET', '/v1/auth/account', {
+        token: session.token,
       });
       if (answer.status === 401) return 'signed-out';
+      if (isSealedRequired(answer)) {
+        const gate = sealedRouteGate(
+          readInstanceAccount(dependencies.storage),
+          dependencies.loadedFrom,
+        );
+        return {
+          kind: 'sealed-unavailable',
+          text: gate.kind === 'open' ? INSTANCE_KEY_TEXT['needs-card'] : gate.text,
+        };
+      }
       if (answer.status === 200) {
         const role = record(answer.body)?.moderatorRole;
         return typeof role === 'string' && role !== '' ? 'moderator' : 'not-moderator';
@@ -657,10 +677,15 @@ export function createModerationPort(dependencies: ModerationPortDependencies): 
     readPage('/v1/moderation/suspended', SUSPENDED_PAGE, cursor, 'items', suspendedFrom);
 
   return {
-    standing: async () => standingOf(),
+    standing: async () => {
+      const standing = await standingOf();
+      // Not known to moderate: the Instance screen offers no link.
+      return typeof standing === 'string' ? standing : 'unreachable';
+    },
 
     read: async () => {
       const standing = await standingOf();
+      if (typeof standing !== 'string') return standing;
       if (standing !== 'moderator') return { kind: standing };
       const me = readInstanceAccount(dependencies.storage)?.instanceAthleteId;
       if (me === undefined) return { kind: 'not-connected' };

@@ -103,6 +103,22 @@ export interface SeenRequest {
 }
 
 /**
+ * An instance with no keys in front of `send` (#1210): `/v1/instance/keys`
+ * answers `unavailable`, as one with no operator secret does, and every other
+ * request reaches `send` — so a test that counts what a no-card device sends
+ * about a room counts only that. A device with no card reads the keys before
+ * a phase-2 call, and sends nothing more to an instance that serves them.
+ */
+export function keylessInstance<T extends InstanceSend>(send: T): InstanceSend {
+  return (url, init) =>
+    new URL(url).pathname === '/v1/instance/keys'
+      ? Promise.resolve(
+          Response.json({ error: { code: 'unavailable', message: 'No keys.' } }, { status: 503 }),
+        )
+      : send(url, init);
+}
+
+/**
  * An instance that answers the rooms routes — scripted, with the answers a
  * test may change — and keeps every request it saw.
  */
@@ -141,8 +157,17 @@ export class ScriptedInstance {
     this.results = { status: 200, body: { rows } };
   }
 
+  /** How often `/v1/instance/keys` was read: answered `unavailable`, as an instance with no keys does (#1210). */
+  keysReads = 0;
+
   send: InstanceSend = (url, init) => {
     const path = url.slice(ROOMS_ORIGIN.length);
+    if (path === '/v1/instance/keys') {
+      this.keysReads += 1;
+      return Promise.resolve(
+        Response.json({ error: { code: 'unavailable', message: 'No keys.' } }, { status: 503 }),
+      );
+    }
     const headers = new Headers(init.headers);
     const body: unknown = typeof init.body === 'string' ? (JSON.parse(init.body) as unknown) : null;
     this.seen.push({

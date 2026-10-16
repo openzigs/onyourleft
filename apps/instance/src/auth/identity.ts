@@ -469,17 +469,14 @@ export interface Identity {
     address: string | null,
   ): Promise<Outcome<{ nonce: string; expiresAt: number }>>;
   /**
-   * Sign in, or register a key this instance has not seen. `mayRegister:
-   * false` — a plaintext request on an instance that holds keys (#1192,
-   * ADR 0047 D-7) — refuses an unseen key `sealed_required`, AFTER its
-   * statement is proven (so only the key's holder learns it) and before
-   * anything is written: no athlete, no codes, no session.
+   * Sign in, or register a key this instance has not seen. On an instance
+   * that holds keys the route is reached only sealed (#1192, #1210, ADR 0047
+   * D-7): the handler refuses a plaintext request before this is called.
    */
   signIn(
     statement: unknown,
     registration: RegistrationFields,
     address?: string | null,
-    options?: { readonly mayRegister?: boolean },
   ): Promise<Outcome<SessionGranted>>;
   /** The caller behind an `Authorization` header, or `undefined`. */
   authenticate(authorization: string | null): Promise<Caller | undefined>;
@@ -1100,16 +1097,11 @@ export function createIdentity(options: IdentityOptions): Identity {
       return { ok: true, value: { nonce, expiresAt } };
     },
 
-    async signIn(statement, fields, address = null, options = {}) {
+    async signIn(statement, fields, address = null) {
       const proof = await proven(statement, AUTH_PURPOSE);
       if (!proof.ok) return proof;
       const key = await store.findDeviceKey(proof.value);
-      if (key === undefined) {
-        // #1192: a new key registers only sealed, so its recovery codes cross
-        // the edge only as ciphertext (ADR 0047 D-7).
-        if (options.mayRegister === false) return refuse('sealed_required');
-        return register(proof.value, fields, address);
-      }
+      if (key === undefined) return register(proof.value, fields, address);
       if (key.revokedAt !== null) return refuse('key_revoked');
       const athlete = await store.getAthlete(key.athleteId);
       if (athlete === undefined) return refuse('unauthenticated');
