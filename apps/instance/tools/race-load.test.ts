@@ -38,7 +38,11 @@ afterEach(async () => {
   if (directory !== undefined) await rm(directory, { recursive: true, force: true });
 });
 
-async function instanceWithRace(lengthMetres: number, registration: 'open' | 'approval' = 'open') {
+async function instanceWithRace(
+  lengthMetres: number,
+  registration: 'open' | 'approval' = 'open',
+  keyed = false,
+) {
   directory = await mkdtemp(join(tmpdir(), 'oyl-instance-race-load-'));
   const path = join(directory, 'instance.sqlite');
   await migrateForDeploy(path);
@@ -64,11 +68,14 @@ async function instanceWithRace(lengthMetres: number, registration: 'open' | 'ap
   if (!server.ok) throw new Error(server.problems.join(' '));
   running = await startInstance({
     config: testConfig({ port, bodyLimitBytes: 16_384, registration }),
-    server: server.config,
+    // Keyed, it serves an encryption key, so signing in, the ticket and the
+    // start are sealed-only (#1210): the run must seal them or be refused.
+    server: { ...server.config, ...(keyed ? { secretKey: new Uint8Array(32).fill(7) } : {}) },
     version: '0',
     notices: '',
     log: () => undefined,
   });
+  if (keyed) await running.keysMaintained;
   return origin;
 }
 
@@ -103,6 +110,24 @@ describe('the race load run — #464, raced locally', () => {
     expect(report.frameLatenessMs.p50).not.toBeNull();
     expect(report.applicationBytes.received).toBeGreaterThan(0);
     expect(report.applicationBytes.sent).toBeGreaterThan(0);
+  }, 60_000);
+
+  it('seals signing in, the tickets and the start on an instance that holds keys (#1210)', async () => {
+    const url = await instanceWithRace(20, 'open', true);
+    const served = (await (await fetch(`${url}/v1/instance/keys`)).json()) as {
+      statements?: unknown[];
+    };
+    expect(served.statements?.length ?? 0).toBeGreaterThan(0);
+    const report = await raceLoad({
+      url,
+      roomId: 'race',
+      keys: await newRiderKeys(2),
+      namePrefix: 'Sealed',
+      maximumMs: 45_000,
+    });
+    expect(report.abortReason).toBeNull();
+    expect(report.raceOver).toBe(true);
+    expect(report.finishers).toBe(2);
   }, 60_000);
 });
 
