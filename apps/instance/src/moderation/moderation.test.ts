@@ -558,7 +558,7 @@ describe('one moderator (#905): the owner alone is named, as on the project’s 
         w.owner,
         'POST',
         `/v1/moderation/athletes/${w.owner.athleteId}/${action}`,
-        { reason: 'Testing' },
+        { reason: 'Testing', statement: TEST_STATEMENT },
       );
       expect(answer.status, action).toBe(409);
     }
