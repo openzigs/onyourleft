@@ -6695,9 +6695,11 @@ select.oyl-input {
  * still in the document, where a screen reader reads it.
  *
  * Measured the same way after: the secondary panel ends at y = 149 at
- * 736×360 and 844×390 (40 and 56 px above the rider), every control is on
- * the stage, and at 360×752 the route panel ends at y = 360, 29 px above the
- * rider. `ride.browser.spec.ts` §"#1356" holds a room ride at every overlay
+ * 736×360 (40 px above the rider), and at 360×752 the route panel ends at
+ * y = 360, 29 px above it. On the CI runner's fonts the secondary panel ends
+ * at y = 175 at 844×390, 30 px above the rider, and *Follow* and *Report*
+ * still run the bottom row of a phone on its side a few pixels below the
+ * stage — that is #1358's. `ride.browser.spec.ts` §"#1356" holds a room ride at every overlay
  * viewport, both ways, and undoes this block as its control.
  */
 @media (min-width: 46rem) and (min-height: 22.5rem) and (max-height: 30rem),
