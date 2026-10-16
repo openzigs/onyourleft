@@ -1216,6 +1216,20 @@ async function run(): Promise<void> {
           report.click();
           await until('the reasons', () => document.querySelector('.oyl-hud__report-reasons'));
         }
+        // ...and the followed rider's gap as a NUMBER. A gap has none while
+        // the rider is still at rest (`fields.ts` §`timeGap`), and the dash
+        // has no "ahead of you" line under it: on the CI runner a load that
+        // was ready on a frame before the rider moved measured the top panel
+        // 14 px shorter, so the actions panel and *Pause* 14 px higher, and
+        // §"#789" compared one load's Pause against another's in two different
+        // states (PR #1388's second run). Both loads measure this one.
+        await until('the followed rider’s gap', () =>
+          [...document.querySelectorAll('.oyl-hud__field')].find(
+            (field) =>
+              field.querySelector('.oyl-hud__label')?.textContent === names[1] &&
+              field.querySelector('.oyl-hud__detail') !== null,
+          ),
+        );
       }
     } else {
       await until('Start the race', () => labelled<HTMLButtonElement>('button', 'Start the race'));

@@ -232,8 +232,13 @@ async function joinByCode(code: string): Promise<void> {
   const form = input.closest('form');
   if (form === null) throw new Error('the code box is in no form');
   await submitForm(form);
-  await settle();
-  await settle();
+  // Joining fetches the room's route and digests it with WebCrypto, which is
+  // not a microtask: settle until the room is entered, as `untilSaid` does,
+  // rather than a fixed count a loaded machine can outrun (#1388's CI).
+  for (let i = 0; i < 50 && button('Ride in the room') === undefined; i += 1) {
+    await settle();
+  }
+  if (button('Ride in the room') === undefined) throw new Error('the room was never entered');
 }
 
 describe('a group ride joined by its code — #784', () => {
