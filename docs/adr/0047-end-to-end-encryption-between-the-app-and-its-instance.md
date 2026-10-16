@@ -1549,3 +1549,9 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   athlete still reaches the first two through the way-out session (#898, #1210), sealed, signed
   by the device key that session row names. A device holding a pin calls all four sealed only,
   with no plaintext fallback. The body above is not edited. (#1382)
+- **2026-10-16** — **D-7's phase-2 list gains the two public-room routes, in the room routes'
+  row** (#788). `GET /v1/rooms/public` (the listing) and `POST /v1/rooms/{roomId}/join` (joining
+  a public room from it) are marked `only` from the first, as every other room route's HTTP side
+  is: they never existed in plaintext. They are listed in
+  `apps/instance/src/sealed/phase-two.ts`. The room sockets stay unsealed (D-14 Q5). The body
+  above is not edited. (#788)

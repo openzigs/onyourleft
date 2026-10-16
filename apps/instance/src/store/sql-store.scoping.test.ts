@@ -299,6 +299,14 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   countOpenPrivateRoomsWithRoute: {
     notAScopedRead: 'blob collection: a count across rooms, never a row (#784)',
   },
+  listOpenPublicRooms: {
+    notAScopedRead:
+      'the public listing: every open PUBLIC room, by its course and start, naming nobody (#788); rooms/public-rooms.test.ts holds a private room out of it',
+  },
+  hasBlockWithRoomMember: {
+    notAScopedRead:
+      'a yes or no for ONE (room, athlete) pair, never a row; rooms/public-rooms.test.ts holds a block either way round',
+  },
   sight: {
     notAScopedRead: 'a pair of athletes, either way round: the choke point asks it (#83)',
   },

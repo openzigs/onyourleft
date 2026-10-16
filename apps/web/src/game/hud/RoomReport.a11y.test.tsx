@@ -22,6 +22,8 @@ import {
 } from '@onyourleft/domain';
 
 import { auditAccessibility, formatViolations } from '../../a11y/audit';
+import { RIDE_SIZE_CLASS } from '../../design/Button';
+import { namesControl, RIDE_TIME_CONTROLS } from '../../design/ride-time-controls';
 import type { RoomReportAnswer } from '../../net/room-session';
 import { flush } from '../../net/testing';
 import { mount, type Mounted } from '../../testing/mount';
@@ -192,4 +194,29 @@ describe('Report on the HUD — #789', () => {
       expect(text(document.activeElement)).toBe(said);
     });
   }
+});
+
+describe('*Report* is a 48 px ride-time target — #788, #669’s list', () => {
+  it('is on the list, and wears the declared size; its reasons are not, and do not', async () => {
+    await hud();
+    const report = [...document.querySelectorAll('button')].find((each) =>
+      text(each).startsWith('Report'),
+    );
+    expect(report, 'Report is on the HUD').toBeDefined();
+    expect(
+      RIDE_TIME_CONTROLS.some(
+        (entry) => entry.surface === 'game-hud' && namesControl(entry, text(report)),
+      ),
+    ).toBe(true);
+    expect(report?.classList.contains(RIDE_SIZE_CLASS), report?.outerHTML).toBe(true);
+    await act(async () => {
+      report?.click();
+      await Promise.resolve();
+    });
+    const reasons = [...document.querySelectorAll('[role="group"] button')];
+    expect(reasons).toHaveLength(3);
+    for (const reason of reasons) {
+      expect(reason.classList.contains(RIDE_SIZE_CLASS), reason.outerHTML).toBe(false);
+    }
+  });
 });

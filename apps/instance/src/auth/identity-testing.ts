@@ -54,6 +54,7 @@ import { openSqlStore } from '../store/open-sql-store.ts';
 import type { SqlStore } from '../store/sql-store.ts';
 import type { InstanceProbes } from '../route-kit.ts';
 import { createRooms, type RoomLimits, type Rooms } from '../rooms/rooms.ts';
+import { NO_LEGAL_SETTINGS } from '../legal.ts';
 import { createInstanceKeys, type InstanceKeys } from '../keys/instance-keys.ts';
 import { secretBytes } from '../keys/instance-keys-testing.ts';
 import type { Route } from '../route-kit.ts';
@@ -402,6 +403,14 @@ export async function startIdentityInstance(
     now: () => clock.ms,
     ...(roomLimits === undefined ? {} : { limits: roomLimits }),
     ...(roomCode === undefined ? {} : { code: roomCode }),
+    // #788: as `instance.ts` wires them — the listener's setting, and the
+    // identity's own account read for eligibility.
+    // Absent, the product's own reading of an environment that sets nothing.
+    publicRooms: (config?.legal ?? NO_LEGAL_SETTINGS).publicRooms,
+    eligible: async (caller) => {
+      const held = await people.identity?.account(caller);
+      return held?.ok === true && held.value.publicRooms.eligible;
+    },
   });
   const keysFor = async (origin: string): Promise<InstanceKeys> => {
     const keys = createInstanceKeys({

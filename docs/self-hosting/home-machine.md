@@ -128,6 +128,35 @@ docker compose run --rm --no-deps --entrypoint node migrate \
   src/operator/cli.ts room-open saturday-ride --kind ride --length 40000
 ```
 
+## Public rooms: the owner's check
+
+Public rooms ([#788](https://github.com/openzigs/onyourleft/issues/788)) are rooms any adult rider on
+the instance can find and join. They are **off** here: `.env` says `OYL_INSTANCE_PUBLIC_ROOMS=off`,
+and an instance that sets nothing has them off too. Turning them on for the project's instance is the
+owner's step, and only after this check (ruling Q5, 2026-09-28):
+
+1. **The UK Online Safety Act and EU DSA issues that #778 filed are closed as done** — closed as
+   completed, not closed as not planned:
+
+   ```bash
+   gh issue view 886 --json state,stateReason   # the OSA illegal-content and children's access assessments
+   gh issue view 887 --json state,stateReason   # the DSA notice-and-action mechanism
+   ```
+
+   Both must answer `"state":"CLOSED"` and `"stateReason":"COMPLETED"`. Anything else, and public
+   rooms stay off.
+2. **The drafts in [`docs/moderation.md`](../moderation.md) → "Before you open your instance to the
+   public" are signed off by the owner.**
+3. **`OYL_INSTANCE_CONTACT_EMAIL` and `OYL_INSTANCE_ACCOUNTABLE_PERSON` are set.** The instance
+   refuses to start with public rooms on without both.
+
+Then set `OYL_INSTANCE_PUBLIC_ROOMS=on` in `.env` and deploy again (step 5). To switch them off —
+while you are away, say — set it back to `off` and deploy.
+
+What a rider then gets: an eligible adult (confirmed 18 or over, and [`docs/moderation.md`](../moderation.md)
+→ "Public rooms: who may join") can list a room they make, at most 3 a day, and see and join the
+others, listed by when each starts and then when it was made, and in no other order.
+
 ## The history index (optional)
 
 The post-ride write-up can look back at a rider's own history — their earlier write-ups, ride

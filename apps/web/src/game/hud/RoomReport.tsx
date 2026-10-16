@@ -40,6 +40,7 @@
 
 import { useEffect, useRef, useState, type JSX } from 'react';
 
+import { RIDE_SIZE_CLASS } from '../../design/Button';
 import {
   ROOM_REPORT_REASON_KEYS,
   type RoomReportAnswer,
@@ -159,7 +160,8 @@ export function RoomReport(props: {
       <button
         ref={opener}
         type="button"
-        className="oyl-button oyl-button--secondary oyl-hud__report"
+        // #788: a 48 px ride-time target, on #669's list (`design/ride-time-controls.ts`).
+        className={`oyl-button oyl-button--secondary oyl-hud__report ${RIDE_SIZE_CLASS}`}
         aria-expanded={choosing}
         aria-controls={choosing ? REPORT_REASONS_ID : undefined}
         onClick={() => {

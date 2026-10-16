@@ -22,7 +22,14 @@ import { createStoreHarness, type StoreHarness } from './store/testing/index.ts'
 import { base64Of, testPicture } from './camera/picture-testing.ts';
 import { SYNC_HAPPY_CALLS } from './sync/sync-testing.ts';
 import { frames, openFrames, sealedCall, sealFor, sendEnvelope } from './sealed/sealed-testing.ts';
-import { madeRoom, riderIn, roomBody } from './rooms/rooms-testing.ts';
+import {
+  adultIn,
+  madePublicRoom,
+  madeRoom,
+  PUBLIC_ROOMS_ON,
+  riderIn,
+  roomBody,
+} from './rooms/rooms-testing.ts';
 import { jobBody } from './analysis/jobs-testing.ts';
 import { replanBody } from './analysis/replan-testing.ts';
 import type { AnalysisEngine } from './analysis/jobs.ts';
@@ -628,6 +635,16 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
       code: room.code,
     });
   },
+  // #788: a public room listed, and joined from the listing, by adults.
+  listPublicRooms: async (world) => {
+    const { token } = await adultIn(world);
+    await madePublicRoom(world, token);
+    return send(world, 'GET', '/v1/rooms/public', token);
+  },
+  joinPublicRoom: async (world) => {
+    const room = await madePublicRoom(world, (await adultIn(world)).token);
+    return send(world, 'POST', `/v1/rooms/${room.roomId}/join`, (await adultIn(world)).token);
+  },
   getRoomRoute: async (world) => {
     const { token } = await signedIn(world);
     const room = await madeRoom(world, token);
@@ -790,6 +807,8 @@ describe('every route answers with the shape its entry declares', () => {
       emailRecovery: true,
       probes,
       moderators: { owner: moderator.publicKey },
+      // #788: public rooms on, so their routes answer their success.
+      ...PUBLIC_ROOMS_ON,
       analysis: {
         engine: INSTANT_ENGINE,
         // #1243: a re-plan that keeps the workout at once.

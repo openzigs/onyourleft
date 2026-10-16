@@ -40,6 +40,8 @@ const ROWS: readonly RaceResultRow[] = [
 const ROOMS: RoomsPort = {
   create: () => Promise.resolve({ kind: 'unreachable' }),
   join: () => Promise.resolve({ kind: 'refused', reason: 'no-such-room' }),
+  listPublic: () => Promise.resolve({ kind: 'refused', reason: 'no-public-rooms' }),
+  joinPublic: () => Promise.resolve({ kind: 'refused', reason: 'no-such-room' }),
   start: () => Promise.resolve({ kind: 'started' }),
   results: () => Promise.resolve({ kind: 'result', rows: ROWS }),
 };
@@ -153,5 +155,83 @@ describe('a room’s drafting on the panel — #787, the owner’s ruling of 202
       <RoomPanel {...panel({ entered: { ...ENTERED, code: undefined, drafting: false } })} />,
     );
     expect(document.body.textContent).toContain(ROOM_DRAFTING_TEXT.off);
+  });
+});
+
+describe('public rooms on the panel pass the accessibility audit — #788', () => {
+  const LISTED = {
+    roomId: 'room-pub',
+    kind: 'race',
+    ridingPosition: 'hoods',
+    drafting: false,
+    loop: false,
+    startsAt: 1_790_001_800,
+    lengthMetres: 12_000,
+    climbMetres: 180,
+  } as const;
+
+  async function pressed(name: string): Promise<void> {
+    const button = [...document.querySelectorAll('button')].find(
+      (each) => (each.textContent ?? '').trim() === name,
+    );
+    expect(button, name).toBeDefined();
+    await act(async () => {
+      button?.click();
+      await Promise.resolve();
+    });
+    await settle();
+    await settle();
+  }
+
+  const audit = (): void => {
+    const violations = auditAccessibility(document);
+    expect(violations, formatViolations(violations)).toEqual([]);
+  };
+
+  it('the listing, each room’s Join named for it, and a refusal', async () => {
+    const rooms: RoomsPort = {
+      ...ROOMS,
+      listPublic: () => Promise.resolve({ kind: 'listed', rooms: [LISTED] }),
+    };
+    await audited(<RoomPanel {...panel({ rooms })} />);
+    await pressed('Show public rooms');
+    audit();
+    const join = [...document.querySelectorAll('.oyl-rooms__listing button')];
+    expect(join).toHaveLength(1);
+    expect((join[0]?.textContent ?? '').replace(/\s+/g, ' ')).toMatch(
+      /^Join the race starting at /,
+    );
+
+    mounted?.unmount();
+    await audited(<RoomPanel {...panel({})} />);
+    await pressed('Show public rooms');
+    audit();
+    expect(document.querySelector('[role="status"], [role="alert"]')).not.toBeNull();
+  });
+
+  it('a room listed, with its start chosen, and the rider in one they listed', async () => {
+    await audited(<RoomPanel {...panel({})} />);
+    const box = [...document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')].find(
+      (each) => each.closest('label')?.textContent?.startsWith('List it as a public room'),
+    );
+    await act(async () => {
+      box?.click();
+      await Promise.resolve();
+    });
+    // The route, and now the start.
+    expect(document.querySelectorAll('select')).toHaveLength(2);
+    audit();
+    mounted?.unmount();
+    await audited(
+      <RoomPanel
+        {...panel({
+          entered: {
+            ...ENTERED,
+            code: undefined,
+            listed: { startsAt: 1_790_001_800, madeHere: true },
+          },
+        })}
+      />,
+    );
   });
 });

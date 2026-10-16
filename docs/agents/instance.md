@@ -266,9 +266,11 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         every adapter, byte-identical text per socket; #780
                         adds itself to that file's `ADAPTERS`
     src/rooms/          a rider's room (#784, #785): `POST /v1/rooms` makes a
-                        PRIVATE group ride or race on the creator's own route
-                        (its GPX, relayed by content hash; no field makes a
-                        room public — public rooms wait for #907, #910, #911),
+                        group ride or race on the creator's own route (its
+                        GPX, relayed by content hash), PRIVATE unless
+                        `visibility: public` (#788: operator's switch, #775's
+                        eligibility, blocks, 3 a day; `GET /v1/rooms/public`
+                        lists by start then made; `POST /v1/rooms/{roomId}/join`),
                         with a 75-bit code (`code.ts`) stored only as its
                         SHA-256; `POST /v1/rooms/join` (the code in a body,
                         rate-limited per athlete and per address, right or

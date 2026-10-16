@@ -55,7 +55,7 @@ Riders can report you. What happens to that report depends on how many moderator
 Nobody covers for you, and that is stated publicly: **a report may wait up to 7 days** for a
 decision, the target the owner set for the project's instance (owner's ruling on #905, 2026-10-15;
 [target times](moderation/notice-and-action.md#target-times)). If you will be away for longer than
-that, switch public rooms off until you are back (public rooms are not built yet: #788). Reports wait in the queue and none is lost.
+that, switch public rooms off (`OYL_INSTANCE_PUBLIC_ROOMS=off`) until you are back. Reports wait in the queue and none is lost.
 
 ⚠️ **If you signed in before you set your key**, your account registered like anybody else's: with
 approval-required registration it is waiting for approval, and nobody may approve a moderator. So
@@ -157,6 +157,18 @@ a rider which ones they meet):
   registered active. Days spent waiting for approval do not count;
 - it has synced at least `OYL_INSTANCE_PUBLIC_ROOM_MIN_RIDES` rides (3 if you set nothing).
 
+The same rules hold for **making** a public room and for **seeing** the listing (#788). And:
+
+- a rider makes **at most 3 public rooms a day** (the owner's ruling of 2026-10-15);
+- **a block keeps two riders out of one public room**, whoever blocked whom: a room with somebody
+  in it who blocks a rider, or whom they block, is not listed to them, they cannot join it, and a
+  block made after both joined refuses the ticket of either. A private room is different: its
+  members are whoever holds its code;
+- the listing is ordered by the start each room's maker gave it, then when it was made. Nothing is
+  featured, recommended or pinned, and the instance never makes a room of its own;
+- a room whose listing you hid (*Hide one item*, `room:<room id>`) is listed to nobody and takes
+  nobody new.
+
 ## What a rider can do
 
 | Action | What happens |
@@ -241,7 +253,7 @@ does not happen.
 | Dismiss a report | `POST /v1/moderation/reports/{id}/dismiss` | Removes it from the queue. A report about you is logged as `dismiss_own_report` when you are the only moderator, and refused when a deputy is named (see "A report about the moderator"). |
 | Hide a display name | `POST /v1/moderation/athletes/{id}/hide-display-name` | Other riders see "Rider" instead of the name. The rider still sees their own name. The hide ends when the rider chooses a **different** name, because a new name is new content. Choosing the same name again keeps it hidden. |
 | Suspend an account | `POST /v1/moderation/athletes/{id}/suspend` | Every device key the rider holds is refused at sign-in, every session they had ends at once, and other riders stop seeing them. **Nothing they own is deleted.** |
-| Hide one item | `POST /v1/moderation/items/hide` | One room's listing (`room:<room id>`), the route shown in a room (`route:<room id>`), or one row of a race's result (`result:<room id>:<row>`), by the reference a notice names it by (#913). Needs a statement of reasons, which the item's owner is shown. **Nothing is deleted** and the rest is left alone. A hidden row is shown to everybody else as "a rider" with no figure, and to its own rider as before. A hidden route is shown to no member but the room's maker. A room whose listing is hidden takes nobody new by its code. An appeal that reverses it shows the item again. |
+| Hide one item | `POST /v1/moderation/items/hide` | One room's listing (`room:<room id>`), the route shown in a room (`route:<room id>`), or one row of a race's result (`result:<room id>:<row>`), by the reference a notice names it by (#913). Needs a statement of reasons, which the item's owner is shown. **Nothing is deleted** and the rest is left alone. A hidden row is shown to everybody else as "a rider" with no figure, and to its own rider as before. A hidden route is shown to no member but the room's maker. A room whose listing is hidden takes nobody new by its code, and a public one is listed to nobody (#788). An appeal that reverses it shows the item again. |
 | Lift a suspension | `POST /v1/moderation/athletes/{id}/unsuspend` | The rider can sign in again and is visible again. |
 | List suspended accounts | `GET /v1/moderation/suspended` | Every suspended account, most recently suspended first, a page at a time (`?limit=`, `?cursor=` from the page before). So you can lift a suspension without finding the id in the log (#961). |
 | Read the log | `GET /v1/moderation/log` | Every action ever taken, **newest first**, a page at a time: `?limit=` (1–200, default 50) and `?cursor=` from the page before, which reaches further back. ⚠️ Until #961 it was every action in one answer, oldest first. |

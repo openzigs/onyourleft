@@ -78,6 +78,7 @@ describe('a rider’s room — #784', () => {
         roomId: 'mine',
         codeSha256: 'a'.repeat(64),
         routeLoop: true,
+        startsAt: null,
         createdAt: 1_790_001_000,
         closedAt: null,
       });

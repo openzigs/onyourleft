@@ -143,6 +143,14 @@ const SCENES: readonly Scene[] = [
     query: '?room=race',
     surfaces: ['game-hud'],
   },
+  // #788: a room's running race with the rider following another, which puts
+  // #789's *Report* on the HUD.
+  {
+    name: 'the game, following a rider in a room',
+    page: 'ride',
+    query: '?room=following',
+    surfaces: ['game-hud'],
+  },
   // #1244: a workout in the game with an accepted re-plan waiting, which is
   // the only state that puts *Keep the plan* on the HUD. ⚠️ Without
   // `trainer=workout`: that adds *Trainer notice* to the row *Pause* is in,
