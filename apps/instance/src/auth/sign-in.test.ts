@@ -140,7 +140,10 @@ describe('the other refusals', () => {
   });
 
   it('names the field of a malformed statement, never its value', async () => {
-    const w = await start();
+    // On an instance with no keys, in plaintext: a statement no key signed has
+    // no device to seal it, and since #1210 an instance with keys refuses every
+    // plaintext sign-in before reading it.
+    const w = await start({ keyless: true });
     const answer = await w.call('POST', '/v1/auth/session', {
       body: {
         purpose: 'oyl-auth-v1',
@@ -150,8 +153,6 @@ describe('the other refusals', () => {
         issuedAt: 1,
         signature: '0'.repeat(128),
       },
-      // In plaintext: a statement no key signed has no device to seal it (#1192),
-      // and the statement is checked before the key is looked up.
       plain: true,
     });
     expect(answer.status).toBe(400);

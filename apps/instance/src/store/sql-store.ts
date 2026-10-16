@@ -4170,22 +4170,24 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
               'statement.restriction as restriction',
               'statement.target_athlete_id as target',
               'moderation_log.actor_athlete_id as actor',
+              'moderation_log.at as at',
             ])
             .where('statement.log_id', '=', appeal.statement_log_id)
             .executeTakeFirstOrThrow();
           if (decision.outcome === 'reversed') {
-            // Restored only if it still stands: a suspension already lifted,
-            // or a hidden name the rider has since replaced, stays as it is.
+            // Restored only if the appealed restriction itself still stands:
+            // the column must still carry this statement's own `at`, so a
+            // later restriction (lift then re-impose) is never lifted here.
             const athlete = trx.updateTable('athlete').where('id', '=', appealed.target);
             if (appealed.restriction === 'suspend') {
               await athlete
                 .set({ suspended_at: null })
-                .where('suspended_at', 'is not', null)
+                .where('suspended_at', '=', appealed.at)
                 .execute();
             } else if (appealed.restriction === 'hide_display_name') {
               await athlete
                 .set({ display_name_hidden_at: null })
-                .where('display_name_hidden_at', 'is not', null)
+                .where('display_name_hidden_at', '=', appealed.at)
                 .execute();
             }
           }

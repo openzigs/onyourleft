@@ -146,12 +146,6 @@ export interface RouteContext {
   /** This request arrived inside `POST /v1/sealed`, opened and its signature checked (#1192). */
   readonly sealedRequest: boolean;
   /**
-   * This instance holds keys, so its sealed routes are sealed (#1192, ADR 0047
-   * D-7): `false` on an instance with no `OYL_INSTANCE_SECRET_KEY`, which
-   * answers them in plaintext as before.
-   */
-  readonly sealsRoutes: boolean;
-  /**
    * Dispatch an opened sealed request's INNER request through the same route
    * table (#1191, ADR 0047 D-9): the path matched, the method checked, the
    * inner body held to `config.bodyLimitBytes`, and then every check the
@@ -243,7 +237,7 @@ export interface Route {
    * route declares it. ⚠️ **Signing out is not one of them, on purpose**: a
    * way-out session cannot end itself (`DELETE /v1/auth/session` answers it
    * `account_suspended`). It lasts an hour, and erasing the account removes
-   * it; a third route would widen the one flag that lets a suspended rider
+   * it; a fifth route would widen the one flag that lets a suspended rider
    * past the choke point, for a session that ends on its own (#926's review).
    */
   readonly admitsSuspended?: true;
@@ -256,17 +250,16 @@ export interface Route {
    *   it, and a plaintext request to its path is refused `sealed_required`
    *   before anything else is looked at: no session is read, no body parsed,
    *   nothing run.
-   * - `'new-key'`: `POST /v1/auth/session` alone. A key the instance already
-   *   holds signs in in plaintext until phase 2; a key it has not seen is
-   *   refused `sealed_required` in plaintext and registers only sealed.
    *
-   * Both hold only on an instance that holds keys
+   * It holds only on an instance that holds keys
    * ({@link RouteContext.sealsRoutes}): one with no `OYL_INSTANCE_SECRET_KEY`
    * has no sealed routes and answers these in plaintext as before (D-7).
    * `openapi.json` documents the mark as `x-oyl-sealed`, and
-   * `sealed/phase-one.ts` is the committed list the table is held to.
+   * `sealed/phase-one.ts` and `sealed/phase-two.ts` are the committed lists
+   * the table is held to. (#1192's `'new-key'` mark — a key the instance held
+   * signing in in plaintext — went with phase 2, #1210.)
    */
-  readonly sealed?: 'only' | 'new-key';
+  readonly sealed?: 'only';
   /**
    * The largest body this route reads, from the instance's configuration —
    * `config.bodyLimitBytes` unless a route declares its own. Only

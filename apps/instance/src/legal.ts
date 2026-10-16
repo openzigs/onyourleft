@@ -34,6 +34,7 @@
  */
 
 import { escapeHtml, htmlPage } from './html.ts';
+import { EMAIL } from './moderation/notices.ts';
 
 /** What the legal page names, from the operator's settings. */
 export interface LegalSettings {
@@ -67,7 +68,6 @@ export const LEGAL_PAGE_PATH = '/legal';
 /** The longest name or line an operator may set here, in characters. */
 export const MAXIMUM_LEGAL_LINE_LENGTH = 500;
 
-const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 /** A character a reader's screen should never be handed. */
 const UNSHOWABLE = /[\p{Cc}\p{Cf}\u2028\u2029]/u;
 
@@ -91,7 +91,7 @@ export function readLegalSettings(raw: RawLegalSettings, problems: string[]): Le
   let contactEmail: string | null = null;
   if (present(raw.contactEmail)) {
     const value = raw.contactEmail.trim();
-    if (value.length <= 254 && EMAIL.test(value) && !UNSHOWABLE.test(value)) {
+    if (value.length <= 254 && EMAIL.test(value)) {
       contactEmail = value;
     } else {
       problems.push('OYL_INSTANCE_CONTACT_EMAIL must be an email address.');

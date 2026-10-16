@@ -89,7 +89,12 @@ export type NoticeForm =
 /** Control characters other than a line break or a tab, which no field may carry. */
 // eslint-disable-next-line no-control-regex -- matching control characters is the point
 const CONTROL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\u2028\u2029]/;
-const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+/**
+ * An address in the plain grammar: no `?`, `&`, `%`, quote or angle bracket, so
+ * it can never carry `mailto:` parameters (`?bcc=`, `&body=`) into the link a
+ * moderator clicks to reply.
+ */
+export const EMAIL = /^[A-Za-z0-9.!#$*+/=^_`{|}~-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/;
 
 const length = (text: string): number => [...text].length;
 
@@ -271,9 +276,9 @@ export function noticePage(page: NoticePage, instanceName: string | null): strin
   const problemOf = (field: NoticeField): string | undefined =>
     problems.find((each) => each.field === field)?.text;
   /** The attributes a field carries: invalid when it has a problem, described by its hint and problem. */
-  const described = (field: NoticeField, hint: boolean): string => {
+  const described = (field: NoticeField, hint: boolean | string): string => {
     const ids = [
-      hint ? `${idOf(field)}-hint` : '',
+      hint === true ? `${idOf(field)}-hint` : hint === false ? '' : hint,
       problemOf(field) === undefined ? '' : `${idOf(field)}-problem`,
     ]
       .filter((id) => id !== '')
@@ -332,10 +337,10 @@ ${problemLine('explanation')}
 <p class="hint" id="notice-who-hint">If you give an email address, we will tell you we received the report and what we decide. You never need to give your name or email to report child sexual abuse material.</p>
 <label for="${idOf('name')}">Your name</label>
 ${problemLine('name')}
-<input type="text" id="${idOf('name')}" name="name" autocomplete="name" maxlength="${String(MAXIMUM_NOTIFIER_NAME_LENGTH)}" value="${text('name')}"${described('name', false)}>
+<input type="text" id="${idOf('name')}" name="name" autocomplete="name" maxlength="${String(MAXIMUM_NOTIFIER_NAME_LENGTH)}" value="${text('name')}"${described('name', 'notice-who-hint')}>
 <label for="${idOf('email')}">Your email address</label>
 ${problemLine('email')}
-<input type="email" id="${idOf('email')}" name="email" autocomplete="email" maxlength="${String(MAXIMUM_EMAIL_LENGTH)}" value="${text('email')}"${described('email', false)}>
+<input type="email" id="${idOf('email')}" name="email" autocomplete="email" maxlength="${String(MAXIMUM_EMAIL_LENGTH)}" value="${text('email')}"${described('email', 'notice-who-hint')}>
 </fieldset>
 
 <fieldset>
@@ -343,9 +348,9 @@ ${problemLine('email')}
 ${box('bona_fide', 'I believe in good faith that what I have written in this report is accurate and complete.')}
 </fieldset>
 
-<fieldset>
+<fieldset aria-describedby="notice-intimate-hint">
 <legend>Only for an intimate image report</legend>
-<p class="hint">An intimate image report needs all three statements and an email address.</p>
+<p class="hint" id="notice-intimate-hint">An intimate image report needs all three statements and an email address.</p>
 ${box('declare_intimate', 'The content is an intimate image.')}
 ${box('declare_subject', 'I am the person shown in it, or I am making this report on their behalf.')}
 ${box('declare_true', 'I am making this report in good faith, and what it says is true.')}

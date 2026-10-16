@@ -32,7 +32,9 @@ import { flush, frameRider, ManualClock, ScriptedRoom } from '../net/testing';
 import { REJOIN_GIVE_UP_MS } from '../net/room-session';
 import { GameView, type GamePort, type RidableRoute } from './GameView';
 import type { GameRenderer, SceneFrame } from './port';
-import { ROOM_LOST_SPOKEN, ROOM_LOST_TEXT, ROOM_REFUSED_TEXT } from './room-ride';
+import { DRAFT_READING_STORAGE_KEY } from './draft-preference';
+import { ANNOUNCEMENTS_STORAGE_KEY } from './hud/announce-preference';
+import { DRAFT_SPOKEN, ROOM_LOST_SPOKEN, ROOM_LOST_TEXT, ROOM_REFUSED_TEXT } from './room-ride';
 
 /** Five level kilometres. */
 function levelRoute(): RidableRoute {
@@ -344,5 +346,93 @@ describe('a ride in a room — #782, #783', () => {
     await clock.advance(REJOIN_GIVE_UP_MS + 10_000);
     await pump(2);
     expect(hudText()).toContain('riding on your own');
+  });
+});
+
+describe('the draft indicator on a ride in a room — #787, #327', () => {
+  /** Announcements on, with every reading and optional row silenced, so only events speak. */
+  function announcementsOn(): void {
+    localStorage.setItem(
+      ANNOUNCEMENTS_STORAGE_KEY,
+      JSON.stringify({
+        enabled: true,
+        powerEverySeconds: 'never',
+        distanceEvery: 'never',
+        intervalLeadSeconds: 'never',
+        climbLeadMetres: 'never',
+      }),
+    );
+  }
+
+  afterEach(() => {
+    localStorage.clear();
+  });
+
+  const field = (label: string): string | undefined => {
+    const term = queryAll(mounted?.container ?? document, 'dt').find(
+      (dt) => dt.textContent === label,
+    );
+    return term === undefined ? undefined : (term.nextElementSibling?.textContent ?? '');
+  };
+  const spoken = (): string =>
+    mounted?.container.querySelector('[data-oyl-announcer="hud"]')?.textContent ?? '';
+
+  let room: ScriptedRoom;
+
+  /**
+   * `count` frames from the room with this rider (seat 0) at the room's
+   * `draftPercent` and one other rider just ahead, pumping a second of game
+   * between each; what the HUD's region held after each.
+   */
+  async function frames(from: number, count: number, draftPercent: number): Promise<string[]> {
+    const heard: string[] = [];
+    for (let tick = from; tick < from + count; tick += 1) {
+      room.frame(tick, [
+        frameRider(0, 100 + tick * 8, 10, draftPercent),
+        frameRider(1, 101 + tick * 8),
+      ]);
+      await pump(4);
+      heard.push(spoken());
+    }
+    return heard;
+  }
+
+  it('shows the room’s draft with its gauge, and says going into and out of it, by default — the owner, 2026-10-15', async () => {
+    announcementsOn();
+    room = new ScriptedRoom();
+    await rideInRoom(room);
+    room.accept();
+    room.welcome(0);
+    const into = await frames(1, 6, 30);
+    expect(field('Draft')).toBe('30 % of drag at most 59 %');
+    expect(mounted?.container.querySelectorAll('.oyl-hud__gauge')).toHaveLength(1);
+    expect(into).toContain(DRAFT_SPOKEN.into(30));
+    const out = await frames(7, 8, 0);
+    expect(field('Draft')).toBe('0 % of drag at most 59 %');
+    expect(out.at(-1)).toBe(DRAFT_SPOKEN.outOf);
+  });
+
+  it('shows and says nothing about a draft once the rider turned it off, while the room drafts the rider just the same', async () => {
+    localStorage.setItem(DRAFT_READING_STORAGE_KEY, 'off');
+    announcementsOn();
+    room = new ScriptedRoom();
+    await rideInRoom(room);
+    room.accept();
+    room.welcome(0);
+    const heard = [...(await frames(1, 6, 30)), ...(await frames(7, 8, 0))];
+    expect(field('Nearby')).toBeDefined();
+    expect(field('Draft')).toBeUndefined();
+    expect(mounted?.container.querySelector('.oyl-hud__gauge')).toBeNull();
+    expect(heard.filter((sentence) => /draft/i.test(sentence))).toEqual([]);
+  });
+
+  it('says nothing about a draft with announcements off, though the field is shown', async () => {
+    room = new ScriptedRoom();
+    await rideInRoom(room);
+    room.accept();
+    room.welcome(0);
+    const heard = await frames(1, 6, 30);
+    expect(field('Draft')).toBe('30 % of drag at most 59 %');
+    expect(heard.filter((sentence) => /draft/i.test(sentence))).toEqual([]);
   });
 });

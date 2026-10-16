@@ -433,7 +433,9 @@ export function InstanceView({
           <StatusMessage tone="warning" label="Not signed in" live>
             {state.kind === 'signed-out'
               ? `The instance at ${state.origin} no longer accepts this device’s sign-in. Disconnect, then connect again.`
-              : `The instance at ${state.origin} did not answer. It may be down, or this device may be offline.`}
+              : state.kind === 'unreadable'
+                ? state.text
+                : `The instance at ${state.origin} did not answer. It may be down, or this device may be offline.`}
           </StatusMessage>
           {disconnectControl}
         </section>
@@ -463,7 +465,10 @@ export function InstanceView({
         </section>
       )}
 
-      {state.kind === 'connected' ? <InstanceKeys port={port} /> : null}
+      {/* #1210: a sign-in this device cannot read is opened again by a card given here. */}
+      {state.kind === 'connected' || state.kind === 'unreadable' ? (
+        <InstanceKeys port={port} onChange={() => void read()} />
+      ) : null}
 
       {sync === undefined ? null : <SyncPanel port={sync} />}
 

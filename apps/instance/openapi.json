@@ -354,7 +354,7 @@
       },
       "post": {
         "operationId": "submitNotice",
-        "summary": "Send the notice page’s form (#907). 200 and a page with the notice’s reference when it is received; 400 and the form again, saying what to correct, when it is not; 429 when this client address or the whole instance has sent too many in the last hour. No client address is stored, and nothing typed is logged.",
+        "summary": "Send the notice page’s form (#907). 200 and a page with the notice’s reference when it is received; 400 and the form again, saying what to correct, when it is not; 429 when this client address or the whole instance has sent too many in the last hour (an intimate image report is not counted against the whole instance); 403 when a browser says the post came from another site. No client address is stored, and nothing typed is logged.",
         "requestBody": {
           "required": true,
           "content": {
@@ -2232,6 +2232,7 @@
             "session": []
           }
         ],
+        "x-oyl-sealed": "only",
         "responses": {
           "200": {
             "description": "OK",
@@ -2258,6 +2259,9 @@
           },
           "401": {
             "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
           },
           "404": {
             "$ref": "#/components/responses/not_found"
@@ -2289,6 +2293,7 @@
             "session": []
           }
         ],
+        "x-oyl-sealed": "only",
         "responses": {
           "200": {
             "description": "OK",
@@ -2357,6 +2362,9 @@
           },
           "401": {
             "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
           },
           "404": {
             "$ref": "#/components/responses/not_found"
@@ -2652,6 +2660,7 @@
             "session": []
           }
         ],
+        "x-oyl-sealed": "only",
         "requestBody": {
           "required": true,
           "content": {
@@ -2742,6 +2751,9 @@
           },
           "401": {
             "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
           },
           "404": {
             "$ref": "#/components/responses/not_found"
@@ -3044,6 +3056,7 @@
             "session": []
           }
         ],
+        "x-oyl-sealed": "only",
         "requestBody": {
           "required": true,
           "content": {
@@ -3093,6 +3106,9 @@
           "401": {
             "$ref": "#/components/responses/unauthenticated"
           },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
           "404": {
             "$ref": "#/components/responses/not_found"
           },
@@ -3118,6 +3134,7 @@
       "post": {
         "operationId": "createLeaveSession",
         "summary": "A suspended rider’s way out (#898): sign with a live device key, as for signing in, and get a session that reaches only `GET /v1/account/export` and `DELETE /v1/account`, for an hour. Every other route answers it `account_suspended`. An account that is not suspended is `not_suspended`, and signs in as usual.",
+        "x-oyl-sealed": "only",
         "requestBody": {
           "required": true,
           "content": {
@@ -3197,6 +3214,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
           },
           "404": {
             "$ref": "#/components/responses/not_found"
@@ -3894,8 +3914,8 @@
     "/v1/auth/session": {
       "post": {
         "operationId": "createSession",
-        "summary": "Sign in with a signed `oyl-auth-v1` statement. A key the instance has not seen registers a new athlete as the registration mode allows — awaiting approval by default — and only then are the recovery codes in the answer. On an instance that holds keys, an unseen key registers ONLY inside a sealed request: in plaintext it is `sealed_required` and nothing is written; a key the instance holds still signs in in plaintext. New registrations are rate-limited per client address.",
-        "x-oyl-sealed": "new-key",
+        "summary": "Sign in with a signed `oyl-auth-v1` statement. A key the instance has not seen registers a new athlete as the registration mode allows — awaiting approval by default — and only then are the recovery codes in the answer. On an instance that holds keys, every key signs in and registers ONLY inside a sealed request, with no session (ADR 0047 D-8, D-9): in plaintext it is `sealed_required` and nothing is written. New registrations are rate-limited per client address.",
+        "x-oyl-sealed": "only",
         "requestBody": {
           "required": true,
           "content": {
@@ -4048,6 +4068,7 @@
             "session": []
           }
         ],
+        "x-oyl-sealed": "only",
         "responses": {
           "200": {
             "description": "OK",
@@ -4074,6 +4095,9 @@
           },
           "401": {
             "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
           },
           "404": {
             "$ref": "#/components/responses/not_found"
@@ -4103,12 +4127,16 @@
             "session": []
           }
         ],
+        "x-oyl-sealed": "only",
         "responses": {
           "204": {
             "description": "No content"
           },
           "401": {
             "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
           },
           "404": {
             "$ref": "#/components/responses/not_found"
@@ -4140,6 +4168,7 @@
             "session": []
           }
         ],
+        "x-oyl-sealed": "only",
         "responses": {
           "200": {
             "description": "OK",
@@ -4165,6 +4194,9 @@
           },
           "401": {
             "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
           },
           "404": {
             "$ref": "#/components/responses/not_found"
@@ -4207,6 +4239,7 @@
             "session": []
           }
         ],
+        "x-oyl-sealed": "only",
         "responses": {
           "204": {
             "description": "No content"
@@ -4216,6 +4249,9 @@
           },
           "401": {
             "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
           },
           "404": {
             "$ref": "#/components/responses/not_found"
@@ -4256,12 +4292,16 @@
             "session": []
           }
         ],
+        "x-oyl-sealed": "only",
         "responses": {
           "204": {
             "description": "No content"
           },
           "401": {
             "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
           },
           "404": {
             "$ref": "#/components/responses/not_found"
@@ -6668,6 +6708,7 @@
             "session": []
           }
         ],
+        "x-oyl-sealed": "only",
         "requestBody": {
           "required": true,
           "content": {
@@ -6701,6 +6742,9 @@
           "401": {
             "$ref": "#/components/responses/unauthenticated"
           },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
           "404": {
             "$ref": "#/components/responses/not_found"
           },
@@ -6731,6 +6775,7 @@
             "session": []
           }
         ],
+        "x-oyl-sealed": "only",
         "requestBody": {
           "required": true,
           "content": {
@@ -6822,6 +6867,9 @@
           "401": {
             "$ref": "#/components/responses/unauthenticated"
           },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
           "404": {
             "$ref": "#/components/responses/not_found"
           },
@@ -6852,6 +6900,7 @@
             "session": []
           }
         ],
+        "x-oyl-sealed": "only",
         "requestBody": {
           "required": true,
           "content": {
@@ -6923,6 +6972,9 @@
           "401": {
             "$ref": "#/components/responses/unauthenticated"
           },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
           "404": {
             "$ref": "#/components/responses/not_found"
           },
@@ -6964,6 +7016,7 @@
             "session": []
           }
         ],
+        "x-oyl-sealed": "only",
         "responses": {
           "200": {
             "description": "OK",
@@ -7047,6 +7100,9 @@
           "401": {
             "$ref": "#/components/responses/unauthenticated"
           },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
           "404": {
             "$ref": "#/components/responses/not_found"
           },
@@ -7088,6 +7144,7 @@
             "session": []
           }
         ],
+        "x-oyl-sealed": "only",
         "responses": {
           "200": {
             "description": "OK",
@@ -7114,6 +7171,9 @@
           },
           "401": {
             "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
           },
           "404": {
             "$ref": "#/components/responses/not_found"
@@ -7156,6 +7216,7 @@
             "session": []
           }
         ],
+        "x-oyl-sealed": "only",
         "responses": {
           "200": {
             "description": "OK",
@@ -7181,6 +7242,9 @@
           },
           "401": {
             "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
           },
           "404": {
             "$ref": "#/components/responses/not_found"
@@ -7223,6 +7287,7 @@
             "session": []
           }
         ],
+        "x-oyl-sealed": "only",
         "requestBody": {
           "required": true,
           "content": {
@@ -7273,7 +7338,14 @@
             "$ref": "#/components/responses/unauthenticated"
           },
           "403": {
-            "$ref": "#/components/responses/not_eligible"
+            "description": "One of `sealed_required`, `not_eligible`, in the one error shape.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           },
           "404": {
             "$ref": "#/components/responses/not_found"

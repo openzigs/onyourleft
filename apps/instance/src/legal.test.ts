@@ -115,6 +115,36 @@ describe('the legal settings (#908)', () => {
     expect(readConfig({ commit: COMMIT, publicRooms: 'off' }).ok).toBe(true);
   });
 
+  it('refuses a contact address that would carry mailto: parameters into the link', () => {
+    for (const email of [
+      'contact@club.example?bcc=x%40evil.example&subject=hi',
+      'contact@club.example&body=hi',
+      'contact@club.example\u202E',
+      'contact@club.example\u200B',
+      `${'a'.repeat(250)}@b.example`,
+    ]) {
+      const problems: string[] = [];
+      expect(readLegalSettings({ contactEmail: email }, problems).contactEmail, email).toBeNull();
+      expect(problems, email).toHaveLength(1);
+    }
+    expect(readLegalSettings({ contactEmail: `${'a'.repeat(241)}@b.example` }, [])).toMatchObject({
+      contactEmail: `${'a'.repeat(241)}@b.example`,
+    });
+  });
+
+  it('refuses a language that is too long or carries an invisible character', () => {
+    for (const languages of ['English, Wel\u202Esh', 'English, Wel\u200Bsh', 'x'.repeat(65)]) {
+      const problems: string[] = [];
+      readLegalSettings({ contactLanguages: languages }, problems);
+      expect(problems, languages).toHaveLength(1);
+    }
+    const problems: string[] = [];
+    expect(
+      readLegalSettings({ contactLanguages: 'x'.repeat(64) }, problems).contactLanguages,
+    ).toEqual(['x'.repeat(64)]);
+    expect(problems).toEqual([]);
+  });
+
   it('refuses a setting that is not what it names, and reports each', () => {
     const problems: string[] = [];
     readLegalSettings(

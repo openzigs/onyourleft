@@ -38,10 +38,10 @@
  * ## What is shown comes from the instance
  *
  * {@link InstancePort.current} reads the athlete's display name
- * (`GET /v1/auth/session`), the instance's name (`GET /instance`) and where its
- * source is (`GET /source`, ADR 0036 D-6) from the instance every time, never
- * from what the form was given — so what the screen says after a reload is
- * what the instance says.
+ * (`GET /v1/auth/session`, sealed since #1210), the instance's name
+ * (`GET /instance`) and where its source is (`GET /source`, ADR 0036 D-6)
+ * from the instance every time, never from what the form was given — so what
+ * the screen says after a reload is what the instance says.
  */
 
 import {
@@ -151,6 +151,14 @@ export type InstanceState =
     }
   /** The instance no longer accepts this device's session. */
   | { readonly kind: 'signed-out'; readonly origin: string }
+  /**
+   * This device holds a sign-in it cannot read now (#1210, ADR 0047 D-7 phase
+   * 2): the session is a sealed-only route on an instance that holds keys, and
+   * this device has no card for it, is a copy a website served (D-11), or its
+   * keys were refused or a new card is awaited. `text` says which; the card
+   * the rider gives on this screen is what opens it again.
+   */
+  | { readonly kind: 'unreadable'; readonly origin: string; readonly text: string }
   /** Nothing answered, or not as an instance does. */
   | { readonly kind: 'unreachable'; readonly origin: string };
 
@@ -304,13 +312,14 @@ export const CONNECT_REFUSAL_TEXT = {
     'characters.',
   other: 'The instance refused to sign this device in.',
   /**
-   * #1192 (ADR 0047 D-7): an instance holding keys registers a new key only
-   * sealed, and this device had no card to seal with. ⚠️ Draft wording for
-   * the owner to approve in #1192's pull request (D-14 Q6).
+   * #1192, #1210 (ADR 0047 D-7, D-14 Q1): an instance holding keys signs in
+   * and registers ONLY sealed, and this device had no card to seal with — so
+   * since phase 2 it cannot sign in there at all. ⚠️ Draft wording for the
+   * owner to approve in #1210's pull request (D-14 Q6).
    */
   sealed_required:
-    'This instance registers a new rider only with its card. Paste the card its operator gave ' +
-    'you below, and connect again.',
+    'This instance signs riders in only with its card. Paste the card its operator gave you ' +
+    'below, and connect again.',
   'bad-offer':
     'That is not a code from another device. It starts oyl-instance: and ends with a code like ' +
     'abcd-efgh-jkmn-pqrs; paste the whole line.',
@@ -653,6 +662,153 @@ export function heldSealedSession(
   return () => sealedSessionOf(dependencies, kit);
 }
 
+/**
+ * The sign-in this device holds, for a route ADR 0047 D-7 seals in phase 2
+ * (#1210): the session, account, profile, block, report and room routes.
+ *
+ * - **A device that holds a pin** calls them SEALED, and only sealed: closed —
+ *   with the sentence to show — for a copy a website served (D-11), a new card
+ *   awaited (D-14 Q8) or keys refused, exactly as {@link heldSealedSession}.
+ *   ⚠️ It never falls back to plaintext: whatever stands between the device
+ *   and the instance could refuse the keys precisely to read the request.
+ * - **A device that holds no pin** cannot seal (D-14 Q1: a device pins only
+ *   from a card). It reads the instance's public keys first: an instance that
+ *   serves them holds keys, so the session is closed — the card is needed —
+ *   and NOTHING about the route is sent, not the room code a join would carry
+ *   nor the token. One that serves none has no sealed routes (D-7), and the
+ *   calls go in plaintext, as before phase 2. ⚠️ With no pin the device has
+ *   nothing to judge the keys' answer by, so whatever stands in between could
+ *   hide them; an instance holding keys still refuses a plaintext call
+ *   `sealed_required` (`isSealedRequired`), and the caller says the card is
+ *   needed.
+ *
+ * `sealedOrKeyless` is named so `sealed-routes.test.ts`'s scan reads it as a
+ * sealed receiver: its one plaintext case is the device with no pin.
+ */
+export type HeldAccountSession =
+  | {
+      readonly kind: 'open';
+      readonly sealedOrKeyless: Pick<InstanceHttp, 'origin' | 'call'>;
+      readonly token: string;
+      /** `true` when the calls are sealed; `false` for the device with no pin. */
+      readonly sealed: boolean;
+    }
+  | {
+      readonly kind: 'closed';
+      readonly why: 'signed-out' | 'gate' | 'keys';
+      readonly text: string;
+    };
+
+async function accountSessionOf(
+  dependencies: SealingDependencies,
+  kit: SealingKit,
+): Promise<HeldAccountSession> {
+  const account = readInstanceAccount(dependencies.storage);
+  const held = heldInstanceSession(dependencies.storage, dependencies.send);
+  if (account === undefined || held === undefined) {
+    return { kind: 'closed', why: 'signed-out', text: DEVICES_UNAVAILABLE_TEXT['signed-out'] };
+  }
+  if (account.pin === undefined) {
+    if (servesKeys(await servedKeysAt(held.http)())) {
+      const gate = sealedRouteGate(account, dependencies.loadedFrom);
+      return {
+        kind: 'closed',
+        why: 'gate',
+        text: gate.kind === 'open' ? INSTANCE_KEY_TEXT['needs-card'] : gate.text,
+      };
+    }
+    return { kind: 'open', sealedOrKeyless: held.http, token: held.token, sealed: false };
+  }
+  const session = await sealedSessionOf(dependencies, kit);
+  if (session.kind === 'closed') return session;
+  return { kind: 'open', sealedOrKeyless: session.sealed, token: session.token, sealed: true };
+}
+
+/** {@link HeldAccountSession} for a port that is not the instance port: one clock for its life. */
+export function heldAccountSession(
+  dependencies: SealingDependencies,
+): () => Promise<HeldAccountSession> {
+  const kit = sealingKit(dependencies);
+  return () => accountSessionOf(dependencies, kit);
+}
+
+/**
+ * How this device reaches the instance it connected to WITHOUT a session
+ * (#910, #1210): for `POST /v1/auth/leave-session`, which ADR 0047 D-7 seals
+ * in phase 2 and which a suspended rider calls precisely because their
+ * session is refused (`apps/instance` §`SESSIONLESS_PATHS`).
+ *
+ * - `sealed`: the device holds a pin and the keys verify under it — the call
+ *   goes sealed and signed by this device's key, as signing in does.
+ * - `keyless`: the device holds no pin (D-14 Q1), so it cannot seal; the call
+ *   goes in plaintext, as a sign-in from it does, and an instance holding
+ *   keys refuses it `sealed_required`.
+ * - `closed`: the device holds a pin but may not seal now — a copy a website
+ *   served (D-11), a new card awaited, keys refused. ⚠️ Nothing is sent: a
+ *   device with a pin never falls back to plaintext.
+ */
+export type SessionlessSealed =
+  | { readonly kind: 'sealed'; readonly sealed: InstanceTransport }
+  | { readonly kind: 'keyless' }
+  | { readonly kind: 'closed'; readonly text: string };
+
+/** {@link SessionlessSealed} for a port that is not the instance port: one clock for its life. */
+export function sessionlessSealed(
+  dependencies: SealingDependencies,
+): () => Promise<SessionlessSealed> {
+  const kit = sealingKit(dependencies);
+  return async () => {
+    const account = readInstanceAccount(dependencies.storage);
+    if (account === undefined) {
+      return { kind: 'closed', text: DEVICES_UNAVAILABLE_TEXT['signed-out'] };
+    }
+    if (account.pin === undefined) return { kind: 'keyless' };
+    const gate = sealedRouteGate(account, dependencies.loadedFrom);
+    if (gate.kind !== 'open') return { kind: 'closed', text: gate.text };
+    const judged = await judgeAccount(dependencies.storage, account, dependencies, kit.crypto);
+    if (judged.instanceKey === undefined) {
+      const text = 'text' in judged.outcome ? judged.outcome.text : INSTANCE_KEY_TEXT.unreachable;
+      return { kind: 'closed', text };
+    }
+    return {
+      kind: 'sealed',
+      sealed: sealedTransport(
+        sealedInstance(
+          account.origin,
+          {
+            instanceKey: judged.instanceKey,
+            signingKey: await dependencies.signingKey(),
+            primitives: dependencies.primitives ?? webCryptoHpkePrimitives,
+            sha256: kit.crypto.sha256,
+            clock: kit.clock,
+            ...(dependencies.now === undefined ? {} : { now: dependencies.now }),
+          },
+          dependencies.send,
+        ),
+      ),
+    };
+  };
+}
+
+/**
+ * Whether an answer is an instance's `sealed_required` (#1210): a plaintext
+ * call from a device with no pin, to an instance that holds keys.
+ */
+export function isSealedRequired(answer: { readonly status: number; readonly body: unknown }) {
+  return (
+    answer.status === 403 &&
+    (answer.body as { error?: { code?: unknown } } | null)?.error?.code === 'sealed_required'
+  );
+}
+
+/**
+ * Whether `/v1/instance/keys` answered as an instance holding keys does: an
+ * identity key. One with no operator secret answers `unavailable` (D-5).
+ */
+function servesKeys(body: unknown): boolean {
+  return typeof (body as { identityKey?: unknown } | undefined)?.identityKey === 'string';
+}
+
 /** `GET /v1/instance/keys` at `http`: its body, or `undefined` when nothing usable answered. */
 function servedKeysAt(http: InstanceHttp): ServedKeysReader {
   return async () => {
@@ -679,6 +835,23 @@ function servedKeysOf(origin: string, send: InstanceSend | undefined): ServedKey
       return undefined;
     }
     return servedKeysAt(http)();
+  };
+}
+
+/**
+ * The account and the token, copied out of `storage` into memory, so a
+ * disconnect can forget them and still sign out with them (#1210).
+ */
+function rememberedSignIn(storage: InstanceStorage): InstanceStorage {
+  const kept = new Map<string, string>();
+  for (const key of [INSTANCE_ACCOUNT_STORAGE_KEY, INSTANCE_SESSION_STORAGE_KEY]) {
+    const value = storage.getItem(key);
+    if (value !== null) kept.set(key, value);
+  }
+  return {
+    getItem: (key) => kept.get(key) ?? null,
+    setItem: (key, value) => void kept.set(key, value),
+    removeItem: (key) => void kept.delete(key),
   };
 }
 
@@ -729,14 +902,33 @@ export function createInstancePort(dependencies: InstancePortDependencies): Inst
     current: async () => {
       const connection = held();
       if (connection === undefined) return { kind: 'not-connected' };
-      const { http, token } = connection;
+      const { http } = connection;
       try {
+        // #1210: who the session is, sealed — or in plaintext for a device
+        // with no pin, which an instance holding keys refuses.
+        const account = await accountSessionOf(dependencies, kit);
+        if (account.kind === 'closed') {
+          if (account.why === 'signed-out') return { kind: 'not-connected' };
+          // The keys could not be read at all: nothing answered.
+          if (account.text === INSTANCE_KEY_TEXT.unreachable) {
+            return { kind: 'unreachable', origin: http.origin };
+          }
+          return { kind: 'unreadable', origin: http.origin, text: account.text };
+        }
         const [session, instance, source] = await Promise.all([
-          http.call('GET', '/v1/auth/session', { token }),
+          account.sealedOrKeyless.call('GET', '/v1/auth/session', { token: account.token }),
           http.call('GET', '/instance'),
           http.call('GET', '/source'),
         ]);
         if (session.status === 401) return { kind: 'signed-out', origin: http.origin };
+        if (isSealedRequired(session)) {
+          const gate = sealedRouteGate(readInstanceAccount(storage), dependencies.loadedFrom);
+          return {
+            kind: 'unreadable',
+            origin: http.origin,
+            text: gate.kind === 'open' ? INSTANCE_KEY_TEXT['needs-card'] : gate.text,
+          };
+        }
         const said = (session.body as { displayName?: unknown } | null)?.displayName;
         const displayName = checkDisplayName(typeof said === 'string' ? said : '');
         if (session.status !== 200 || !displayName.ok) {
@@ -1009,16 +1201,22 @@ export function createInstancePort(dependencies: InstancePortDependencies): Inst
     },
 
     disconnect: async () => {
-      const connection = held();
-      // The device forgets first, so a disconnect is complete here whatever the
-      // instance does — and whether or not it answers at all.
+      // What signing out needs, kept in memory: the device forgets first, so a
+      // disconnect is complete here whatever the instance does — and whether
+      // or not it answers at all.
+      const remembered = rememberedSignIn(storage);
       storage.removeItem(INSTANCE_SESSION_STORAGE_KEY);
       storage.removeItem(INSTANCE_ACCOUNT_STORAGE_KEY);
       // #1106: what was agreed to is the signed-in rider's, not the next account's.
       for (const key of INSTANCE_AGREEMENT_STORAGE_KEYS) storage.removeItem(key);
-      if (connection === undefined) return;
       try {
-        await connection.http.call('DELETE', '/v1/auth/session', { token: connection.token });
+        // #1210: signing out is sealed and device-signed, so the token alone
+        // ends no session; a device with no pin signs out in plaintext.
+        const session = await accountSessionOf({ ...dependencies, storage: remembered }, kit);
+        if (session.kind === 'closed') return;
+        await session.sealedOrKeyless.call('DELETE', '/v1/auth/session', {
+          token: session.token,
+        });
       } catch {
         // Best effort: the session ends on the instance when it expires.
       }
