@@ -83,7 +83,9 @@ function operation(route: Route): Record<string, unknown> {
                     schema: { type: 'string', description: route.response.description },
                   },
                 }
-              : { 'text/plain': { schema: { type: 'string' } } };
+              : route.response.contentType === 'text/html'
+                ? { 'text/html': { schema: { type: 'string' } } }
+                : { 'text/plain': { schema: { type: 'string' } } };
     responses[route.accepted === true ? '202' : '200'] = {
       description: route.accepted === true ? 'Accepted' : 'OK',
       content: success,
@@ -120,9 +122,8 @@ function operation(route: Route): Record<string, unknown> {
     summary: route.summary,
     ...(parameters.length > 0 ? { parameters } : {}),
     ...(route.auth === 'session' ? { security: [{ session: [] }] } : {}),
-    // #1191, #1192: `only` — reachable only inside `POST /v1/sealed`, and a
-    // plaintext request is `sealed_required`; `new-key` — a key the instance
-    // has not seen registers only sealed. Both on an instance holding keys.
+    // #1191, #1192, #1210: `only` — reachable only inside `POST /v1/sealed`,
+    // and a plaintext request is `sealed_required`, on an instance holding keys.
     ...(route.sealed === undefined ? {} : { 'x-oyl-sealed': route.sealed }),
     ...(route.request === undefined
       ? {}
@@ -130,6 +131,14 @@ function operation(route: Route): Record<string, unknown> {
           requestBody: {
             required: true,
             content: { 'application/json': { schema: route.request } },
+          },
+        }),
+    ...(route.form === undefined
+      ? {}
+      : {
+          requestBody: {
+            required: true,
+            content: { 'application/x-www-form-urlencoded': { schema: route.form } },
           },
         }),
     responses,

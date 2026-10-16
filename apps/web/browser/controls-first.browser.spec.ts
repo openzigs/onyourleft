@@ -256,6 +256,9 @@ const TUCKING_SECTIONS: Partial<Record<RouteId, readonly string[]>> = {
     'Announcements',
     'Sounds',
     'Game world',
+    // #787: what the draft indicator shows and says, and that it is not the
+    // room's own switch.
+    'Draft',
     'Words to mask',
     'Documents for the analysis',
     // #1237: what the typed goals are not, and why thresholds are checked
@@ -274,6 +277,10 @@ const TUCKING_SECTIONS: Partial<Record<RouteId, readonly string[]>> = {
  */
 const TUCKING_WHEN_POPULATED: Partial<Record<RouteId, readonly string[]>> = {
   home: ['This week'],
+  // #912: what the record holds is behind the ⓘ; the screen is a moderator's
+  // only over the populated ports. Notices and Appeals tuck nothing: each item
+  // is read before it is acted on, so each has one short line and no ⓘ.
+  moderation: ['The record'],
 };
 
 async function open(page: Page, viewport: Viewport, query: string): Promise<void> {

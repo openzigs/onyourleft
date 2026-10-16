@@ -502,15 +502,25 @@ read or anything is run: minting a link code, linking, recovering and asking for
 giving, confirming and clearing a recovery address, the full reset, the device list and revoking a device, the account
 export and deleting the account, **every** moderator route (the queues and the log included),
 **every** sync route, history search, and a side-camera picture (#1106, which is refused
-unsealed on an instance without the secret too). Registering a new rider is sealed too: a key the
-instance has never seen is refused `sealed_required` in plaintext, while a key it already holds
-still signs in in plaintext until phase 2. `apps/instance/src/sealed/phase-one.ts` is the list, and
-`GET /openapi.json` marks each route `x-oyl-sealed`. The rider's app offers these features only
-with the instance's card, and only in the Android app or a copy opened from the rider's own
-device — never in a copy a website served (D-11).
+unsealed on an instance without the secret too).
 
-⚠️ **An instance with no `OYL_INSTANCE_SECRET_KEY` has no sealed routes.** It registers riders and
-serves every one of the routes above in plaintext, as it did before #1191, so whatever sits between
+**Since #1210 (phase 2), every other route that reaches a rider is sealed-only as well**: signing in
+— a key the instance already holds as well as a new one — the account summary, the display name,
+the adult confirmation, a suspended rider's way-out session, a rider's own blocks and reports, the
+room routes' HTTP side (making, joining, a room's route and result, its ticket and starting a race),
+reading and ending a session, and another rider's profile. So a rider's bearer token, which the
+edge sees in every request's header, opens nothing on its own. What is left in plaintext carries
+nothing personal: `/health`, `/ready`, `/source`, `/openapi.json`, `/licences/third-party.txt`,
+`/instance`, `/v1/instance/keys`, `/metrics` and the sign-in challenge. **The room sockets are not
+sealed** (ADR 0047 D-14 Q5); a socket is opened with a single-use ticket, which is now minted only
+sealed. `apps/instance/src/sealed/phase-one.ts` and `phase-two.ts` are the lists, and
+`GET /openapi.json` marks each route `x-oyl-sealed`. **A rider needs the instance's card to sign
+in at all** (D-14 Q1): the app says so on the Connect screen, and offers sealed features only in
+the Android app or a copy opened from the rider's own device — never in a copy a website served
+(D-11).
+
+⚠️ **An instance with no `OYL_INSTANCE_SECRET_KEY` has no sealed routes.** It signs in and registers riders
+and serves every one of the routes above in plaintext, as it did before #1191, so whatever sits between
 the rider and the box — Cloudflare's edge, for the home deployment's tunnel — reads them: new
 riders' recovery codes, link codes, moderators' actions and reads, and every synced ride, write-up
 and note, and it holds the bearer token that would let it call them as the rider. The app cannot
@@ -652,13 +662,30 @@ Running an instance for other people is a set of duties as well as a box:
   `OYL_INSTANCE_TRUSTED_PROXIES`. From any other peer the header is ignored
   ([`docs/moderation.md`](moderation.md) §"Behind a proxy or a tunnel").
 - **Registration** (`OYL_INSTANCE_REGISTRATION`) is `approval`, `invite`, `open` or `closed`. Unset,
-  it is `closed`; the project's image sets `approval`, and the home deployment's compose file uses
-  `closed` unless `.env` says otherwise. The owner and the deputy are named by device key (`OYL_INSTANCE_OWNER_KEY`,
-  `OYL_INSTANCE_DEPUTY_KEY`) — [`docs/moderation.md`](moderation.md).
+  it is `approval` (the owner's ruling on #775, 2026-10-15), and the project's image and the home
+  deployment's compose file use `approval` unless `.env` says otherwise. The moderator is named by device key (`OYL_INSTANCE_OWNER_KEY`);
+  `OYL_INSTANCE_DEPUTY_KEY` is optional and usually empty, because an instance has one moderator
+  ([#905](https://github.com/openzigs/onyourleft/issues/905)) — [`docs/moderation.md`](moderation.md).
 - **Blocking, reporting and moderation** ([#83](https://github.com/openzigs/onyourleft/issues/83)):
-  riders block and report each other, and the owner and the deputy suspend, hide names and decide
+  riders block and report each other, and the moderator suspends, hides names and decides
   reports through the moderators' routes, every action in an append-only log —
   [`docs/moderation.md`](moderation.md) is the operator's page for it.
+- **The legal and contact page** ([#908](https://github.com/openzigs/onyourleft/issues/908)):
+  `GET /legal` names whom to write to, who is accountable, where to report content and the documents
+  riders are bound by, from **your** settings — the project's are never a default. Fill in:
+
+  | Setting | What to put |
+  |---|---|
+  | `OYL_INSTANCE_CONTACT_EMAIL` | the address you read, for authorities and riders alike (the EU DSA's single point of contact, Arts 11 and 12). A person must read it |
+  | `OYL_INSTANCE_CONTACT_LANGUAGES` | the languages you can be written to in, separated by commas. Empty means English |
+  | `OYL_INSTANCE_ACCOUNTABLE_PERSON` | the person accountable for keeping illegal content off the instance (the UK Online Safety Act Codes, ICU A2) |
+  | `OYL_INSTANCE_LEGAL_REPRESENTATIVE` | only if you have one: your EU legal representative's name, postal address, email and telephone, on one line (DSA Art. 13(4)) |
+  | `OYL_INSTANCE_PRIVACY_POLICY_URL` | your own privacy policy, `https:` |
+  | `OYL_INSTANCE_TERMS_FILE` and `OYL_INSTANCE_TERMS_VERSION` | your terms of service, served at `/terms` (#909): the file they are in, and the date that version took effect (`YYYY-MM-DD`). Set both or neither. If the file has a line `<!-- terms -->`, only what follows it is published. The project's draft (`docs/moderation/terms-of-service.md`) is a starting point, never a default. **Change the date for a change that matters to riders**: their app tells them, on the Instance screen, until they have read the new terms |
+  | `OYL_INSTANCE_PUBLIC_ROOMS` | `off` (the default) or `on`. **`on` refuses to start without the contact address and the accountable person.** No room is public yet, so today `on` opens nothing else |
+
+  The app's *About* links to the page of the instance a rider connected to. The page says plainly
+  what you have not set.
 - **The source offer**: `GET /source` names the exact source of the running build (AGPL-3.0 §13, ADR
   0036 D-6). An operator who modified the instance sets `OYL_INSTANCE_SOURCE_URL` to their own.
 - **Privacy**: Cloudflare terminates TLS on the tunnel's path and can see the instance's traffic in

@@ -22,7 +22,10 @@
  *   reaches, or named in {@link NOT_AN_ATHLETE} with what it names instead —
  *   so a new route that names a rider `{riderId}` or `{followee}` fails here
  *   rather than passing as `own` because its name does not say "athlete"
- *   (#891's review).
+ *   (#891's review);
+ * - and every REQUEST BODY field of every route the same way, named in
+ *   {@link NOT_AN_ATHLETE_FIELD} (#899): until then a body field was caught
+ *   only if its name matched `/athlete/i`.
  *
  * ⚠️ **The "answers alike" routes are called by ONE caller**, about a rider
  * who blocked them and about nobody, and what they leave behind is read back
@@ -50,6 +53,7 @@ import {
   startModerationWorld,
   type ModerationWorld,
   type Rider,
+  TEST_STATEMENT,
 } from './moderation-testing.ts';
 
 const isAthleteReach = (reach: Reach): reach is { readonly athlete: string } =>
@@ -86,6 +90,14 @@ const EXEMPT: Readonly<
       body: { athleteId: subject, reason: 'Abusive display name' },
     }),
   },
+  getNoticePage: {
+    heldElsewhere:
+      'the notice page (#907): the same form for anybody, naming nobody and reading nothing (moderation/notices.test.ts)',
+  },
+  submitNotice: {
+    heldElsewhere:
+      'a notice goes to the moderators, not to anybody it names, and answers the same whatever its items name: it never looks them up (moderation/notices.test.ts)',
+  },
   createRoomTicket: {
     heldElsewhere:
       'names a room, not an athlete; blocking inside a room is #789’s (room moderation), and suspension is held by the session, which a suspended account no longer has',
@@ -106,6 +118,14 @@ const EXEMPT: Readonly<
     heldElsewhere:
       'names a route by its digest, never an athlete; every candidate rider is asked of the choke point itself (`canSee`) inside the read, and one the caller may not see is passed over (sync/race-ghost.test.ts)',
   },
+  reportInRoom: {
+    heldElsewhere:
+      'names a seat in a room the caller is a member of; the athlete in it is the room’s answer, and the report reaches the moderators, never that athlete (#789, rooms/room-moderation.test.ts)',
+  },
+  removeFromMyRoom: {
+    heldElsewhere:
+      'only the host of a private room, for a seat in their own room; the athlete in it is the room’s answer, and the removal is logged (#789, rooms/room-moderation.test.ts)',
+  },
   getRoomResults: {
     heldElsewhere:
       'a race’s result for its riders only; every other rider in it is named through the choke point itself (`canSee`), and one the caller may not see is “a rider” with no name (rooms/rooms.test.ts)',
@@ -120,6 +140,10 @@ const NOT_AN_ATHLETE: Readonly<Record<string, string>> = {
   roomId: 'a room; who may enter it is the ticket’s rule, and blocking inside it is #789’s',
   publicKey: 'one of the CALLER’s own device keys; the store scopes the revocation to them',
   reportId: 'a report, read and decided only on the moderators’ routes',
+  statementId:
+    'a statement of reasons; the store files an appeal only against one about the CALLER (#911)',
+  appealId: 'an appeal, read and decided only on the moderators’ routes (#911)',
+  noticeId: 'a notice, read and recorded only on the moderators’ routes (#912)',
   content:
     'the SHA-256 of an activity file; the sync store reads only the record the CALLER holds of it (#38, #776)',
   kind: 'a kind of sync item; the item read or written is the CALLER’s own (#776)',
@@ -128,6 +152,86 @@ const NOT_AN_ATHLETE: Readonly<Record<string, string>> = {
   route:
     'the SHA-256 of a route’s canonical GPX (#331); the riders behind it are each asked of the choke point',
 };
+
+/**
+ * Every REQUEST BODY field, of any route, that does NOT name an athlete, and
+ * what it names (#899). A field no entry here names fails unless it is the
+ * `athleteId` of a moderators' or exempt route, which reach athletes by
+ * design — so a new route that puts a rider in its body as `riderId` or
+ * `followee` fails here, rather than passing as `own` because its name does
+ * not say "athlete". Until #899 the body was matched by `/athlete/i` alone.
+ */
+const NOT_AN_ATHLETE_FIELD: Readonly<Record<string, string>> = {
+  v: 'the sealed envelope’s version (ADR 0047); the route inside is checked as itself',
+  keyId: 'which of the INSTANCE’s keys a sealed envelope is sealed to (ADR 0047)',
+  enc: 'a sealed envelope’s encapsulated key (HPKE, ADR 0047)',
+  ct: 'a sealed envelope’s ciphertext; the route inside it is checked as itself',
+  publicKey:
+    'the CALLER’s own device key: the key signing in, linking or recovering, or one of their own to revoke',
+  purpose: 'the purpose string a signed statement is bound to (ADR 0014)',
+  instanceOrigin: 'this instance’s origin, which a signed statement is bound to',
+  nonce: 'a challenge this instance issued',
+  issuedAt: 'when the caller signed their statement',
+  signature: 'the caller’s signature over their own statement',
+  displayName: 'the CALLER’s own display name',
+  recoveryEmail: 'the CALLER’s own recovery address',
+  inviteCode: 'a moderator’s invitation the caller spends on registering',
+  confirmsAdult: 'the CALLER’s own 18+ self-declaration (ruling Q5)',
+  declaredMassKilograms: 'the CALLER’s own declared mass, for a room’s physics',
+  recoveryCode: 'one of the CALLER’s own recovery codes',
+  through: 'the last of the CALLER’s own account changes they have read',
+  linkCode: 'a link code the caller’s own account minted',
+  emailToken: 'a token mailed to the CALLER’s own recovery address',
+  reset: 'whether the caller replaces their own recovery codes',
+  revokeOtherKeys: 'whether the caller revokes their own other device keys',
+  address: 'the CALLER’s own recovery address',
+  confirmed: 'the CALLER’s own 18+ self-declaration (ruling Q5)',
+  token: 'a token mailed to the CALLER’s own recovery address',
+  reason: 'free text a reporter or a moderator writes; never an id the route acts on',
+  reportId: 'a report, read and decided only on the moderators’ routes',
+  statement:
+    'the CALLER’s own signed erasure statement, or the statement of reasons a moderator writes with a restriction (#910)',
+  mayBeRaced: 'the CALLER’s consent for their own ride (#331)',
+  routeSha256:
+    'the SHA-256 of a route’s canonical GPX (#331); the riders behind it are each asked of the choke point',
+  body: 'one of the CALLER’s own sync items (#776)',
+  record: 'the CALLER’s own signed activity record (ADR 0014)',
+  file: 'the CALLER’s own activity file',
+  query: 'the text the caller searches their own history for',
+  limit: 'how many results the caller asks for',
+  characters: 'how much of each result the caller asks for',
+  rideId: 'one of the CALLER’s own rides',
+  input: 'the CALLER’s own analysis input',
+  templateVersion: 'which analysis template the caller asks for',
+  source: 'where an analysis or a picture is worked out: the hosted model or the caller’s own',
+  url: 'the endpoint of the CALLER’s own hosted model',
+  model: 'the name of the CALLER’s own hosted model',
+  key: 'the CALLER’s own hosted model key',
+  reasoningTokens: 'a setting of the CALLER’s own hosted model',
+  endpoint: 'the hosted model endpoint the caller consents to',
+  picture: 'the CALLER’s own side-camera picture',
+  kind: 'a room’s kind: a group ride or a race',
+  ridingPosition: 'a room’s riding position setting',
+  drafting: 'whether a room models drafting',
+  loop: 'whether a room’s route loops',
+  lengthMetres: 'a room’s route length',
+  grades: 'a room’s route gradients',
+  gpx: 'the creator’s own route for a room',
+  code: 'a room’s code; its members are whoever holds it (ADR 0028 D-6.3)',
+  riderId:
+    'a SEAT in a room the caller is in (#789); the room itself says who sits there, and the report or removal goes through the moderators’ log',
+  grounds: 'the CALLER’s own grounds for appealing a decision about them (#911)',
+  item: 'which item a moderator hides — a room’s listing, its route or one result row — by its identifier (#913)',
+  outcome: 'a moderator’s outcome for an appeal: upheld or reversed (#911)',
+  decision: 'free text a moderator writes: what the rider or the notifier is told (#911, #912)',
+  step: 'which step a moderator records on a notice (#912)',
+  logId: 'a moderation log entry, read only on the moderators’ routes (#912)',
+};
+
+const bodyFields = (route: Route): string[] =>
+  route.request !== undefined && 'properties' in route.request
+    ? Object.keys(route.request.properties)
+    : [];
 
 /** An athlete id nobody holds, shaped like one that somebody might. */
 const NOBODY = 'f'.repeat(32);
@@ -159,6 +263,29 @@ describe('the route table declares whom every route reaches (#83)', () => {
       for (const name of [...params, ...fields]) {
         expect(namesAnAthlete(name), `${route.operationId}: ${name}`).toBe(false);
       }
+    }
+  });
+
+  it('knows what every request body field of every route names — an athlete it declares, or something else (#899)', () => {
+    const undeclared = ROUTES.flatMap((route) =>
+      bodyFields(route)
+        .filter(
+          (name) =>
+            !(
+              (route.reaches === 'moderation' || isExempt(route.reaches)) &&
+              name === 'athleteId'
+            ) && !(name in NOT_AN_ATHLETE_FIELD),
+        )
+        .map((name) => `${route.operationId}: ${name}`),
+    );
+    expect(undeclared).toEqual([]);
+  });
+
+  it('says what every declared body field names, and declares none no route has (#899)', () => {
+    const used = new Set(ROUTES.flatMap(bodyFields));
+    for (const [name, names] of Object.entries(NOT_AN_ATHLETE_FIELD)) {
+      expect(used.has(name), `${name} is in no route's body`).toBe(true);
+      expect(names.length, name).toBeGreaterThan(10);
     }
   });
 
@@ -232,6 +359,7 @@ describe('every path a blocked athlete could use is refused, as though nobody we
           `/v1/moderation/athletes/${suspended.athleteId}/suspend`,
           {
             reason: 'Cheating',
+            statement: TEST_STATEMENT,
           },
         )
       ).status,
@@ -378,13 +506,16 @@ describe('every path a blocked athlete could use is refused, as though nobody we
 
 /**
  * A suspended rider's way out (#898): the routes that admit their limited
- * session are TWO, declared on the route table, and every other session route
- * refuses it — walked from the table, so a route added later is walked too.
+ * session are FOUR since #911, declared on the route table, and every other
+ * session route refuses it — walked from the table, so a route added later is
+ * walked too. The third is reading the statements of reasons about their own
+ * account: a suspended rider must be able to read why (DSA Art. 17(1)(d),
+ * #910); the fourth is appealing one of them (OSA s.21(4)(d), #911).
  */
-const ADMITS_SUSPENDED = ['eraseAccount', 'exportAccount'];
+const ADMITS_SUSPENDED = ['appealStatement', 'eraseAccount', 'exportAccount', 'listStatements'];
 
-describe('a suspended rider’s way-out session reaches the export and the deletion, and nothing else (#898)', () => {
-  it('is declared by exactly the account export and deletion, and no other route', () => {
+describe('a suspended rider’s way-out session reaches the export, the deletion, their statements and an appeal, and nothing else (#898, #910, #911)', () => {
+  it('is declared by exactly the account export and deletion, the statements and the appeal, and no other route', () => {
     expect(
       ROUTES.filter((route) => route.admitsSuspended === true)
         .map((route) => route.operationId)
@@ -410,7 +541,7 @@ describe('a suspended rider’s way-out session reaches the export and the delet
       world.owner,
       'POST',
       `/v1/moderation/athletes/${leaving.athleteId}/suspend`,
-      { reason: 'Cheating' },
+      { reason: 'Cheating', statement: TEST_STATEMENT },
     );
     expect(suspended.status).toBe(200);
     const opened = await world.call('POST', '/v1/auth/leave-session', {

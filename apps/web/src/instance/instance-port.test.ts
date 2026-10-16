@@ -24,6 +24,8 @@ import {
   CONNECT_REFUSAL_TEXT,
   createInstancePort,
   INSTANCE_AGREEMENT_STORAGE_KEYS,
+  instanceEraser,
+  TERMS_READ_STORAGE_KEY,
   INSTANCE_SESSION_STORAGE_KEY,
   type InstancePortDependencies,
   type InstanceStorage,
@@ -41,7 +43,7 @@ interface IdentityInstance {
   call(
     method: string,
     path: string,
-    options?: { body?: unknown; token?: string },
+    options?: { body?: unknown; token?: string; signer?: { readonly signingKey: unknown } },
   ): Promise<{ status: number; body: unknown }>;
   close(): Promise<void>;
 }
@@ -49,9 +51,14 @@ interface IdentityInstance {
 interface IdentityTesting {
   readonly TEST_ORIGIN: string;
   startIdentityInstance(options?: {
-    config?: { name?: string | null };
+    config?: {
+      name?: string | null;
+      /** The terms the instance publishes (#909). */
+      terms?: { readonly text: string; readonly version: string } | null;
+    };
     registration?: 'open' | 'closed';
     originIsTheListener?: boolean;
+    keyless?: boolean;
   }): Promise<IdentityInstance>;
 }
 
@@ -171,17 +178,48 @@ describe('signing in, and what is shown after a reload — #777', () => {
       instanceName: NAME,
       displayName: 'Anna',
       sourceUrl: expect.stringContaining('https://github.com/openzigs/onyourleft/tree/') as unknown,
+      termsVersion: null,
+      termsUnread: false,
     });
 
     // Renamed on the instance, and the screen says so: it reads the instance,
     // not what the form was given.
+    // Sealed and signed by the device's own key (#1210): the token alone renames nobody.
     const token = heldToken(first.storage);
     const renamed = await world.call('POST', '/v1/auth/display-name', {
       body: { displayName: 'Brigid' },
       token,
+      signer: { signingKey: await first.dependencies.signingKey() },
     });
     expect(renamed.status).toBe(200);
     expect(await reloaded.current()).toMatchObject({ displayName: 'Brigid' });
+  });
+
+  it('says the instance’s terms are unread until this device marks that version read (#909)', async () => {
+    const world = await instance({
+      config: { terms: { text: '# Terms\n\nRide kindly.', version: '2026-11-01' } },
+    });
+    const { port, storage } = device(wire(world));
+    await port.connect(testing.TEST_ORIGIN, 'Anna', await cardOf(world));
+    expect(await port.current()).toMatchObject({
+      termsVersion: '2026-11-01',
+      termsUnread: true,
+    });
+    port.markTermsRead('2026-11-01');
+    expect(await port.current()).toMatchObject({ termsUnread: false });
+    // An older version marked read is not this one: the screen says they changed.
+    port.markTermsRead('2026-01-01');
+    expect(await port.current()).toMatchObject({ termsUnread: true });
+    // Nor is this version read for ANOTHER instance: what was read is read per instance.
+    storage.map.set(
+      TERMS_READ_STORAGE_KEY,
+      JSON.stringify({ origin: 'https://elsewhere.example', version: '2026-11-01' }),
+    );
+    expect(await port.current()).toMatchObject({ termsUnread: true });
+    // Kept with the instance's address, so forgetting the instance forgets it.
+    expect(storage.map.has(TERMS_READ_STORAGE_KEY)).toBe(true);
+    instanceEraser(storage).forget();
+    expect(storage.map.has(TERMS_READ_STORAGE_KEY)).toBe(false);
   });
 
   it('says the instance has no name rather than inventing one', async () => {
@@ -226,11 +264,33 @@ describe('signing in, and what is shown after a reload — #777', () => {
 
   it('says so when the instance no longer accepts the session', async () => {
     const world = await instance();
-    const { port, storage } = device(wire(world));
+    const { port, storage, dependencies } = device(wire(world));
     await port.connect(testing.TEST_ORIGIN, 'Anna', await cardOf(world));
     const token = heldToken(storage);
-    expect((await world.call('DELETE', '/v1/auth/session', { token })).status).toBe(204);
+    // Signed out by the device's own key, sealed (#1210), as another of its screens could.
+    const signer = { signingKey: await dependencies.signingKey() };
+    expect((await world.call('DELETE', '/v1/auth/session', { token, signer })).status).toBe(204);
     expect(await port.current()).toEqual({ kind: 'signed-out', origin: testing.TEST_ORIGIN });
+  });
+
+  it('says it cannot read the session when a keyless-looking instance demands a seal — #1210', async () => {
+    // A device with no pin, connected to a keyless instance, which then
+    // answers the plaintext session read `sealed_required`.
+    const world = await instance({ keyless: true });
+    const base = wire(world);
+    const { port, storage } = device(base);
+    await port.connect(testing.TEST_ORIGIN, 'Anna');
+    const demanding: InstanceSend = (url, init) =>
+      new URL(url).pathname === '/v1/auth/session'
+        ? Promise.resolve(
+            new Response(JSON.stringify({ error: { code: 'sealed_required' } }), {
+              status: 403,
+              headers: { 'content-type': 'application/json' },
+            }),
+          )
+        : base(url, init);
+    const { port: reading } = device(demanding, storage);
+    expect(await reading.current()).toMatchObject({ kind: 'unreadable' });
   });
 
   it('names the refusal of an instance that is not taking new riders', async () => {
@@ -244,7 +304,9 @@ describe('signing in, and what is shown after a reload — #777', () => {
   });
 
   it('names the refusal of an instance that answers to another address', async () => {
-    const world = await instance();
+    // With no keys, so with no card (#1210): an instance holding keys refuses
+    // a plaintext sign-in before it reads the statement's address.
+    const world = await instance({ keyless: true });
     const { port } = device(wire(world));
     expect(await port.connect('https://other.example', 'Anna')).toEqual({
       kind: 'refused',
@@ -289,15 +351,15 @@ describe('what is sent, and what is kept — #892 review', () => {
     // The policy, the Connect screen and the Data Safety Name row say this
     // exactly: sent whenever one is typed, kept only by an instance that has
     // not seen this device before. They used to say it was SENT only then.
-    const world = await instance();
+    // An instance with no keys, so the body it was sent is readable here: on
+    // one holding keys every sign-in is sealed (#1210).
+    const world = await instance({ keyless: true });
     const send = wire(world);
     const { port } = device(send);
-    await port.connect(testing.TEST_ORIGIN, 'Anna', await cardOf(world));
+    await port.connect(testing.TEST_ORIGIN, 'Anna');
     await port.disconnect();
     send.mockClear();
 
-    // No card this time: a key the instance holds signs in in plaintext (#1192),
-    // so the body the instance was sent is readable here.
     await port.connect(testing.TEST_ORIGIN, 'Brigid');
     const sessionBodies = send.mock.calls
       .filter(([url]) => String(url).endsWith('/v1/auth/session'))

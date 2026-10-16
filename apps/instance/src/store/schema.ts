@@ -276,16 +276,30 @@ export interface BlockTable {
   readonly created_at: number;
 }
 
-/** A report (#83): the reporter's row. */
+/** A report (#83): the reporter's row, or the room's own for a flag (#789, migration 0031). */
 export interface ReportTable {
   readonly id: Generated<number>;
-  readonly athlete_id: string;
+  /** The reporter; `null` for a flag a room filed (#789). */
+  readonly athlete_id: string | null;
   readonly target_athlete_id: string;
   readonly reason: string;
   readonly created_at: number;
   readonly closed_at: number | null;
   readonly closed_by_athlete_id: string | null;
   readonly outcome: string | null;
+  /** The room it was made from, and the room's tick then (#789). */
+  readonly room_id: string | null;
+  readonly room_tick: number | null;
+  /** A plausibility flag's breached ceiling (#789): its duration and W/kg. */
+  readonly flag_duration_seconds: number | null;
+  readonly flag_ceiling_watts_per_kilogram: number | null;
+}
+
+/** A rider removed from a room by its host or a moderator (#789): the removed rider's row. */
+export interface RoomRemovalTable {
+  readonly room_id: string;
+  readonly athlete_id: string;
+  readonly removed_at: number;
 }
 
 /** One moderator action (#83). Append-only: the schema refuses an UPDATE or a DELETE. */
@@ -297,6 +311,80 @@ export interface ModerationLogTable {
   readonly report_id: number | null;
   readonly reason: string;
   readonly at: number;
+  /** The room the action was taken in (#789). */
+  readonly room_id: Generated<string | null>;
+}
+
+/**
+ * A notice of illegal content, from anybody (#907, migration 0026). Append-only:
+ * the schema refuses an UPDATE or a DELETE. No column is a client address.
+ */
+export interface NoticeTable {
+  readonly id: Generated<number>;
+  readonly received_at: number;
+  readonly kind: 'illegal_content' | 'intimate_image';
+  readonly explanation: string;
+  /** A JSON array of item identifiers (`@onyourleft/domain` §`moderation-item.ts`). */
+  readonly items: string;
+  readonly location: string | null;
+  readonly notifier_name: string | null;
+  readonly notifier_email: string | null;
+  readonly bona_fide: 0 | 1;
+}
+
+/**
+ * A statement of reasons (#910, migration 0027): the DSA Art. 17(3) fields of
+ * one restricting action, keyed by its log entry. Append-only.
+ */
+export interface StatementTable {
+  readonly log_id: number;
+  readonly target_athlete_id: string;
+  readonly restriction: string;
+  readonly facts: string;
+  readonly decided_on: 'notice' | 'report' | 'own_initiative';
+  readonly legal_ground: string | null;
+  readonly terms_ground: string | null;
+  readonly notifier_named: string | null;
+  readonly moderator_conflict: 0 | 1;
+  readonly ends_at: number | null;
+  readonly at: number;
+}
+
+/**
+ * An appeal against a restriction (#911, migration 0028), one per statement.
+ * Decided once, never deleted.
+ */
+export interface AppealTable {
+  readonly id: Generated<number>;
+  readonly statement_log_id: number;
+  readonly appellant_athlete_id: string;
+  readonly grounds: string;
+  readonly filed_at: number;
+  readonly outcome: 'upheld' | 'reversed' | null;
+  readonly decision: string | null;
+  readonly moderator_conflict: 0 | 1 | null;
+  readonly decided_at: number | null;
+  readonly decided_log_id: number | null;
+}
+
+/** One step taken on a notice (#912, migration 0029). Append-only; once a step a notice. */
+export interface NoticeStepTable {
+  readonly id: Generated<number>;
+  readonly notice_id: number;
+  readonly step: 'acknowledged' | 'decided' | 'notifier_told';
+  readonly actor_athlete_id: string;
+  readonly decision: string | null;
+  readonly log_id: number | null;
+  readonly at: number;
+}
+
+/** One item a moderator hid (#913, migration 0030). Restored once, never deleted. */
+export interface HiddenItemTable {
+  readonly log_id: number;
+  readonly item: string;
+  readonly owner_athlete_id: string;
+  readonly hidden_at: number;
+  readonly restored_at: number | null;
 }
 
 /** A single-use invitation a moderator minted, as its SHA-256 (#775). */
@@ -558,6 +646,7 @@ export interface InstanceDatabase {
   readonly block: BlockTable;
   readonly report: ReportTable;
   readonly moderation_log: ModerationLogTable;
+  readonly room_removal: RoomRemovalTable;
   readonly invite_code: InviteCodeTable;
   readonly sync_item: SyncItemTable;
   readonly history_source: HistorySourceTable;
@@ -573,4 +662,9 @@ export interface InstanceDatabase {
   readonly analysis_event: AnalysisEventTable;
   readonly athlete_hosted_key: AthleteHostedKeyTable;
   readonly athlete_hosted_consent: AthleteHostedConsentTable;
+  readonly notice: NoticeTable;
+  readonly statement: StatementTable;
+  readonly appeal: AppealTable;
+  readonly notice_step: NoticeStepTable;
+  readonly hidden_item: HiddenItemTable;
 }

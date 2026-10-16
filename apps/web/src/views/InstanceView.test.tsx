@@ -11,13 +11,15 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type { InstancePort } from '../instance/instance-port';
-import { scriptedInstance, scriptedModeration } from '../instance/testing';
+import { INSTANCE_KEY_TEXT } from '../instance/instance-pin';
+import { SCRIPTED_FINGERPRINT, scriptedInstance, scriptedModeration } from '../instance/testing';
 import {
   activateWithKeyboard,
   mount,
   settle,
   submitForm,
   typeInto,
+  typeIntoTextArea,
   type Mounted,
 } from '../testing/mount';
 import {
@@ -28,6 +30,7 @@ import {
   InstanceView,
   MODERATE_LINK_TEXT,
   RECOVERY_CODES_LEAD,
+  TERMS_CHANGED_TEXT,
 } from './InstanceView';
 
 let mounted: Mounted | undefined;
@@ -190,6 +193,32 @@ describe('the Connect screen — #777, #778', () => {
     expect(button('Connect')).toBeDefined();
   });
 
+  it('says why a sign-in cannot be read, offers the card box, and reads it again once pinned (#1210)', async () => {
+    const scripted = scriptedInstance({
+      connected: true,
+      state: {
+        kind: 'unreadable',
+        origin: 'https://ride.example',
+        text: INSTANCE_KEY_TEXT['needs-card'],
+      },
+    });
+    mounted = await mount(<InstanceView port={scripted.port} />);
+    await settle();
+    expect(text()).toContain(INSTANCE_KEY_TEXT['needs-card']);
+    expect(text()).not.toContain('did not answer');
+    expect(button('Disconnect')).toBeDefined();
+    expect(scripted.calls).not.toContain('devices');
+    // The card, given here, opens it: the screen reads the sign-in again.
+    const box = mounted.container.querySelector('textarea');
+    if (box === null) throw new Error('no card box');
+    await typeIntoTextArea(box, `oyl-instance:https://ride.example#${SCRIPTED_FINGERPRINT}`);
+    await activateWithKeyboard(button('Use this card'));
+    await settle();
+    expect(scripted.calls.filter((call) => call === 'current')).toHaveLength(2);
+    expect(text()).toContain('Connected');
+    expect(scripted.calls).toContain('devices');
+  });
+
   it('says so when the instance no longer accepts this device, and still offers Disconnect', async () => {
     const scripted = scriptedInstance({
       connected: true,
@@ -238,5 +267,37 @@ describe('the link to Moderation, for the instance’s moderator only — #955',
     await settle();
     expect(moderateLink()).toBeUndefined();
     expect(moderation.calls).toEqual([]);
+  });
+});
+
+describe('terms of service the rider has not read — #909', () => {
+  it('says so, links the instance’s terms, and stops saying so once they are marked read', async () => {
+    const scripted = scriptedInstance({ connected: true });
+    scripted.held.termsVersion = '2026-11-01';
+    mounted = await mount(<InstanceView port={scripted.port} />);
+    await settle();
+    expect(text()).toContain(TERMS_CHANGED_TEXT.lead('2026-11-01'));
+    const link = [...(mounted.container.querySelectorAll('a') ?? [])].find(
+      (each) => each.textContent === TERMS_CHANGED_TEXT.read,
+    );
+    expect(link?.getAttribute('href')).toBe('https://ride.example/terms');
+    expect(link?.getAttribute('target')).toBe('_blank');
+    await activateWithKeyboard(button(TERMS_CHANGED_TEXT.done));
+    await settle();
+    expect(scripted.calls).toContain('markTermsRead 2026-11-01');
+    expect(text()).not.toContain(TERMS_CHANGED_TEXT.lead('2026-11-01'));
+  });
+
+  it('says nothing for an instance that publishes no terms, or terms already read', async () => {
+    const scripted = scriptedInstance({ connected: true });
+    mounted = await mount(<InstanceView port={scripted.port} />);
+    await settle();
+    expect(text()).not.toContain('terms of service took effect');
+    mounted.unmount();
+    scripted.held.termsVersion = '2026-11-01';
+    scripted.held.termsRead = '2026-11-01';
+    mounted = await mount(<InstanceView port={scripted.port} />);
+    await settle();
+    expect(text()).not.toContain('terms of service took effect');
   });
 });

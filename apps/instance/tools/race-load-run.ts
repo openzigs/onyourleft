@@ -24,6 +24,7 @@ import { fromHex, toHex } from '@onyourleft/domain';
 import { decodeRoomMessage, encodeMessage } from '@onyourleft/protocol';
 import { WebSocket } from 'ws';
 
+import type { Device } from './replan-round-trip-run.ts';
 import { hello, originOf, signIn, socketUrl, ticketFor } from './tunnel-soak-run.ts';
 
 /** One rider's device key, as the keys file holds it: hex public key, base64 PKCS #8 private key. */
@@ -183,18 +184,23 @@ export interface RaceLoadReport {
   readonly applicationBytes: { readonly received: number; readonly sent: number };
 }
 
-/** Signs in, waiting out `rate_limited`: one address signing fifty riders in meets the per-address limit. */
+/**
+ * Signs in, waiting out `rate_limited`: one address signing fifty riders in
+ * meets the per-address limit. Sealed on an instance that serves keys, as
+ * `tunnel-soak-run.ts` §`signIn` is: since #1210 signing in, a room's ticket
+ * and its start are sealed-only there.
+ */
 async function signInPatiently(
   instance: string,
   displayName: string,
   pair: webcrypto.CryptoKeyPair,
   waitMs: number,
-): Promise<string> {
+): Promise<Device> {
   for (;;) {
     try {
-      return await signIn(instance, instance, displayName, pair);
+      return await signIn(instance, displayName, pair);
     } catch (error) {
-      if (!(error instanceof Error) || !error.message.endsWith('rate_limited')) throw error;
+      if (!(error instanceof Error) || !/refused: rate_limited\b/.test(error.message)) throw error;
       await new Promise((done) => setTimeout(done, waitMs));
     }
   }
@@ -228,9 +234,9 @@ export async function raceLoad(options: RaceLoadOptions): Promise<RaceLoadReport
   const seated = new Set<number>();
 
   // Signed in one after another: the instance limits challenges per address.
-  const tokens: string[] = [];
+  const devices: Device[] = [];
   for (const [i, key] of options.keys.entries()) {
-    tokens.push(
+    devices.push(
       await signInPatiently(
         instance,
         `${options.namePrefix} ${String(i + 1)}`,
@@ -240,16 +246,14 @@ export async function raceLoad(options: RaceLoadOptions): Promise<RaceLoadReport
     );
   }
 
-  async function startRace(token: string): Promise<void> {
+  async function startRace(device: Device | undefined): Promise<void> {
+    if (device === undefined) throw new Error('there is no rider to start the race');
     startRequestedAt = Date.now();
-    const response = await fetch(`${instance}/v1/rooms/${options.roomId}/start`, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${token}` },
-    });
-    if (!response.ok) throw new Error(`the start was refused: ${String(response.status)}`);
+    const answer = await device.call('POST', `/v1/rooms/${options.roomId}/start`);
+    if (answer.status !== 200) throw new Error(`the start was refused: ${String(answer.status)}`);
   }
 
-  async function ride(rider: number, token: string): Promise<void> {
+  async function ride(rider: number, device: Device): Promise<void> {
     const profile = riderProfile(rider);
     const noise = seeded(rider + 1);
     let closedAt: number | undefined;
@@ -271,7 +275,7 @@ export async function raceLoad(options: RaceLoadOptions): Promise<RaceLoadReport
       };
       socket.on('open', () => {
         options.onSocket?.(rider, socket);
-        void ticketFor(instance, token, options.roomId, profile.massKilograms).then(
+        void ticketFor(device, options.roomId, profile.massKilograms).then(
           (ticket) => send(hello(ticket)),
           (error: unknown) => {
             // A refused ticket is a misconfiguration (an approval instance, a closed room), not a blip.
@@ -298,7 +302,7 @@ export async function raceLoad(options: RaceLoadOptions): Promise<RaceLoadReport
           seated.add(rider);
           if (seated.size === count && seatedAt === undefined) {
             seatedAt = now;
-            void startRace(tokens[0] ?? '').catch((error: unknown) =>
+            void startRace(devices[0]).catch((error: unknown) =>
               abort(error instanceof Error ? error.message : 'the start failed'),
             );
           }
@@ -346,7 +350,7 @@ export async function raceLoad(options: RaceLoadOptions): Promise<RaceLoadReport
   }
 
   // Each rider's loop ends at the room's `finish`; the time limit ends the rest.
-  const riders = tokens.map((token, rider) => ride(rider, token));
+  const riders = devices.map((device, rider) => ride(rider, device));
   let limit: NodeJS.Timeout | undefined;
   await Promise.race([
     Promise.all(riders),

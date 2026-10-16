@@ -622,6 +622,8 @@ describe('who can be in a room — ruling Q18', () => {
     expect(Object.keys(testRoom()).sort()).toEqual([
       'disconnect',
       'receive',
+      // #789: takes a rider OUT; it adds nobody.
+      'remove',
       'start',
       'tick',
       'view',

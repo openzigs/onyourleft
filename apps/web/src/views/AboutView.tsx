@@ -3,9 +3,11 @@
 import type { JSX } from 'react';
 
 import { FullLogo } from '../brand/Brand';
+import type { InstancePort } from '../instance/instance-port';
 import { PRIVACY_POLICY_URL, SOURCE_CODE_URL } from '../privacy/policy';
 import { MAX_DATA_LOSS_SECONDS } from '../recording/recorder';
 import { hrefFor, routeById } from '../shell/routes';
+import { InstancePages } from './InstancePages';
 
 /**
  * What this is and what it is not, in one place a link can point at.
@@ -70,7 +72,12 @@ import { hrefFor, routeById } from '../shell/routes';
  * Since #965 the page opens with the owner's full logo (`brand/Brand.tsx`);
  * its words are text.
  */
-export function AboutView(): JSX.Element {
+export function AboutView({
+  instance,
+}: {
+  /** The rider's instance, for its own pages (#907): none, and the section is not shown. */
+  readonly instance?: InstancePort | undefined;
+}): JSX.Element {
   return (
     <>
       <FullLogo />
@@ -175,6 +182,8 @@ export function AboutView(): JSX.Element {
             (opens in a new tab).
           </p>
         </div>
+
+        {instance === undefined ? null : <InstancePages instance={instance} />}
 
         <div>
           <h2>Licence</h2>

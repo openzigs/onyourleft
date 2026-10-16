@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import type { StatementsPort } from '../instance/statements-port';
+import { StatementsPanel } from './StatementsPanel';
 import { useCallback, useEffect, useId, useState, type JSX } from 'react';
 
 import { Button } from '../design/Button';
@@ -163,12 +165,51 @@ function DeviceList({ outcome }: { readonly outcome: DevicesOutcome | undefined 
 /** The Instance screen's link to Moderation, drawn for the instance's moderator only (#955). */
 export const MODERATE_LINK_TEXT = 'Moderate this instance';
 
+/** What the Instance screen says of terms the rider has not read (#909). ⚠️ Draft wording awaiting the owner's approval. */
+export const TERMS_CHANGED_TEXT = {
+  lead: (version: string) =>
+    `This instance’s terms of service took effect on ${version}, and you have not read that version on this device.`,
+  read: 'Read the terms',
+  done: 'I have read them',
+} as const;
+
+/** Terms the rider has not read on this device (#909, DSA Art. 14(2)). */
+function TermsChanged({
+  origin,
+  version,
+  onRead,
+}: {
+  readonly origin: string;
+  readonly version: string;
+  readonly onRead: () => void;
+}): JSX.Element {
+  return (
+    <StatusMessage tone="info" label="Terms of service">
+      {TERMS_CHANGED_TEXT.lead(version)}{' '}
+      <a href={new URL('/terms', origin).href} target="_blank" rel="noreferrer">
+        {TERMS_CHANGED_TEXT.read}
+      </a>{' '}
+      (opens in a new tab).{' '}
+      <Button variant="secondary" onClick={onRead}>
+        {TERMS_CHANGED_TEXT.done}
+      </Button>
+    </StatusMessage>
+  );
+}
+
 export function InstanceView({
   port,
   moderation,
   sync,
   hostedSettings,
+  statements,
 }: {
+  /**
+   * The statements of reasons about this rider's account (#910): read once
+   * the device has an instance, signed in or not — a suspended rider cannot
+   * sign in, and is the one who most needs to read why.
+   */
+  readonly statements?: StatementsPort | undefined;
   readonly port?: InstancePort | undefined;
   /** Asked, once connected, whether this account moderates the instance (#955). */
   readonly moderation?: ModerationPort | undefined;
@@ -403,6 +444,17 @@ export function InstanceView({
           {/* Controls first (#666): the one action on this state is here, not
               under the device list. */}
           {disconnectControl}
+          {/* #909: terms the rider has not read here — new, or changed since. */}
+          {state.termsUnread && state.termsVersion !== null ? (
+            <TermsChanged
+              origin={state.origin}
+              version={state.termsVersion}
+              onRead={() => {
+                port?.markTermsRead(state.termsVersion ?? '');
+                void read();
+              }}
+            />
+          ) : null}
           {/* #955: only the instance's moderator is offered the link. */}
           {standing === 'moderator' ? (
             <p>
@@ -424,11 +476,15 @@ export function InstanceView({
           <StatusMessage tone="warning" label="Not signed in" live>
             {state.kind === 'signed-out'
               ? `The instance at ${state.origin} no longer accepts this device’s sign-in. Disconnect, then connect again.`
-              : `The instance at ${state.origin} did not answer. It may be down, or this device may be offline.`}
+              : state.kind === 'unreadable'
+                ? state.text
+                : `The instance at ${state.origin} did not answer. It may be down, or this device may be offline.`}
           </StatusMessage>
           {disconnectControl}
         </section>
       )}
+
+      {statements === undefined ? null : <StatementsPanel port={statements} />}
 
       {recoveryCodes === undefined || recoveryCodes.length === 0 ? null : (
         <section className="oyl-panel" aria-labelledby="oyl-instance-recovery">
@@ -452,7 +508,10 @@ export function InstanceView({
         </section>
       )}
 
-      {state.kind === 'connected' ? <InstanceKeys port={port} /> : null}
+      {/* #1210: a sign-in this device cannot read is opened again by a card given here. */}
+      {state.kind === 'connected' || state.kind === 'unreadable' ? (
+        <InstanceKeys port={port} onChange={() => void read()} />
+      ) : null}
 
       {sync === undefined ? null : <SyncPanel port={sync} />}
 

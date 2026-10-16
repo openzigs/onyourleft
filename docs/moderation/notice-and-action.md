@@ -50,8 +50,8 @@
 The owner ruled on 2026-09-30 ([#905](https://github.com/openzigs/onyourleft/issues/905)) that the
 project's instance has **one moderator, the owner, with no deputy**. That reverses ruling Q13 ("the
 owner plus a named deputy"). **#887's acceptance criterion names "a named deputy (ruling Q13)", and
-that criterion is superseded by #905.** This procedure is written for one person.
-`docs/moderation.md` still describes two moderator roles. #905 owns that wording.
+that criterion is superseded by #905.** This procedure is written for one person, and
+[`docs/moderation.md`](../moderation.md) describes one moderator, with a deputy optional.
 
 ## Where a notice comes in
 
@@ -179,9 +179,11 @@ to the complainant.
 
 With one moderator, every decision is the moderator's own, and some notices will be about them: their
 display name, a room they created, a race they rode, or how they handled an earlier notice (OSA
-s.21(4)(b)). The software already refuses to let a moderator decide a report about themselves, and
-with one moderator such a report stays open for ever. [#905](https://github.com/openzigs/onyourleft/issues/905)
-item 1 decides what the software does. This section is the procedure around it.
+s.21(4)(b)). Since [#905](https://github.com/openzigs/onyourleft/issues/905), the software lets the
+**only** moderator dismiss a report about themselves: the Moderation screen marks it as being about
+them, the reason they give is the declaration of the conflict, and the log records it as
+`dismiss_own_report`, never as an ordinary dismissal. With a deputy named it is refused, and the
+other moderator decides it. This section is the procedure around it.
 
 **Always, whichever option is chosen:**
 
@@ -211,7 +213,9 @@ hours under s.10(3A).
 | Notices of illegal content (s.10(3A)) | **48 hours** |
 | Other reports and complaints | **7 days** |
 
-What happens to the queue when the only moderator is away is not decided.
+**When the only moderator is away** (owner's ruling on #905, 2026-10-15): nobody covers. It is stated
+publicly that a report may wait up to **7 days** while the only moderator is away, and the operator
+switches public rooms off for an absence longer than that.
 
 ## What this procedure does not cover
 
