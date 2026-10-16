@@ -4305,6 +4305,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
               'statement.target_athlete_id as target',
               'moderation_log.actor_athlete_id as actor',
               'moderation_log.at as at',
+              'moderation_log.room_id as room',
             ])
             .where('statement.log_id', '=', appeal.statement_log_id)
             .executeTakeFirstOrThrow();
@@ -4330,6 +4331,15 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
                 .set({ restored_at: decision.at })
                 .where('log_id', '=', appeal.statement_log_id)
                 .where('restored_at', 'is', null)
+                .execute();
+            } else if (appealed.restriction === 'remove_from_room' && appealed.room !== null) {
+              // #1384: the rider may come back into the room — only if the
+              // removal this statement explains is the one that still stands.
+              await trx
+                .deleteFrom('room_removal')
+                .where('room_id', '=', appealed.room)
+                .where('athlete_id', '=', appealed.target)
+                .where('removed_at', '=', appealed.at)
                 .execute();
             }
           }

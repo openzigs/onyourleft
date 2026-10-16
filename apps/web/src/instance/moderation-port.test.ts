@@ -712,7 +712,7 @@ describe('reports, suspending and hiding — #83, #905, #955', () => {
   });
 
   it('reads a room’s flag from the queue and removes its rider from the room, which closes it (#789)', async () => {
-    const { world, moderator, rider } = await moderatedWorld();
+    const { world, moderator, rider, send } = await moderatedWorld();
     const dafydd = await rider('Dafydd');
     await moderator.decideRegistration(dafydd.athleteId, 'approve', 'ok');
     await world.freshRead((store) =>
@@ -736,6 +736,8 @@ describe('reports, suspending and hiding — #83, #905, #955', () => {
       }),
     ]);
     const [report] = read.reports;
+    // #1384: refused without a statement of reasons, and nothing is sent.
+    const sentBefore = send.mock.calls.length;
     expect(
       await moderator.removeFromRoom(
         'room-1',
@@ -743,7 +745,23 @@ describe('reports, suspending and hiding — #83, #905, #955', () => {
         'Over the ceiling.',
         report?.reportId,
       ),
+    ).toEqual({ kind: 'refused', text: MODERATION_REFUSAL_TEXT.statement });
+    expect(send.mock.calls.length).toBe(sentBefore);
+    expect(
+      await moderator.removeFromRoom(
+        'room-1',
+        dafydd.athleteId,
+        'Over the ceiling.',
+        report?.reportId,
+        STATEMENT,
+      ),
     ).toEqual({ kind: 'done' });
+    // The removed rider reads it back through the statements route.
+    const statements = await world.call('GET', '/v1/statements', { token: dafydd.token });
+    expect(statements.status).toBe(200);
+    expect((statements.body as { statements: unknown[] }).statements).toEqual([
+      expect.objectContaining({ restriction: 'remove_from_room', facts: STATEMENT.facts }),
+    ]);
     const after = asModerator(await moderator.read());
     expect(after.reports).toEqual([]);
     expect(after.log?.items[0]).toMatchObject({

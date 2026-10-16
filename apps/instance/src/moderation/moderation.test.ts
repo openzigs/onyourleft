@@ -528,9 +528,8 @@ describe('moderator actions, each written to the append-only log (#83)', () => {
           'moderator',
           'room-1',
           w.deputy.athleteId,
-          {
-            reason: 'Rude',
-          },
+          // #1384: a moderator's removal carries its statement of reasons.
+          { reason: 'Rude', statement: TEST_STATEMENT },
         ),
       ];
     });

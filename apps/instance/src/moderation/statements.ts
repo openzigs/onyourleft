@@ -40,6 +40,8 @@ export const RESTRICTIONS: ReadonlySet<string> = new Set([
   'suspend',
   'hide_display_name',
   'hide_item',
+  // #1384: a moderator's removal from a room; a host's is not a restriction here.
+  'remove_from_room',
 ]);
 
 /** The longest facts a statement may give, in characters. */

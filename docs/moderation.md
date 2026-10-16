@@ -251,8 +251,9 @@ action recorded as its outcome.
 
 ### Statements of reasons
 
-**Suspending an account and hiding a display name each need a statement of reasons** (#910), which
-the rider is shown. Without one the instance refuses the action, and nothing changes. It is what the
+**Suspending an account, hiding a display name and removing a rider from a room each need a
+statement of reasons** (#910, #1384), which the rider is shown. A room host's removal from their own
+room does not. Without one the instance refuses the action, and nothing changes. It is what the
 EU Digital Services Act's Art. 17(3) asks for, as `statement` in the action's body, and the Moderation
 screen asks for it in the action's confirmation:
 
@@ -291,7 +292,7 @@ what the statement said. Decide each one (`POST /v1/moderation/appeals/{appealId
 | Outcome | What happens |
 |---|---|
 | **Uphold** (`upheld`) | The restriction stands. |
-| **Reverse** (`reversed`) | The suspension is lifted, or the display name is shown again, **in the same transaction** as the log entry. A restriction already lifted, or a name the rider has since replaced, stays as it is. |
+| **Reverse** (`reversed`) | The suspension is lifted, the display name is shown again, or the rider may come back into the room they were removed from, **in the same transaction** as the log entry. A restriction already lifted, or a name the rider has since replaced, stays as it is. |
 
 Either way, your answer is shown to the rider and written to the log, as `uphold_appeal` or
 `reverse_appeal`. An appeal is decided once: the schema refuses to change a decided appeal or to
@@ -357,7 +358,7 @@ A room is a group ride or a race (#784, #785). Moderation reaches into rooms in 
 | A rider in the room | report another rider, by their seat, with one of three fixed reasons: an offensive display name, cheating, or something else about how they rode | `POST /v1/rooms/{roomId}/reports` | not logged: it is a report, and it reaches your queue with the room's id and the second of the ride it was made in. It counts toward the rider's 5 reports an hour. No screenshot and no position are ever sent |
 | The room itself | file a **plausibility flag** as a report, once for each power ceiling a rider breaches (ADR 0028 D-2) | the room's worker, on its own | not logged: a report with **no reporter**, the ceiling's duration and W/kg in it, and never the power trace |
 | The **host** of a private room (the rider who made it) | remove a rider from their own room | `POST /v1/rooms/{roomId}/remove`, by seat, with a reason | `host_remove_from_room`, with the room |
-| **You**, the moderator | remove a rider from **any** room, deciding a report if you name it | `POST /v1/moderation/rooms/{roomId}/athletes/{athleteId}/remove` | `remove_from_room`, with the room |
+| **You**, the moderator | remove a rider from **any** room, deciding a report if you name it, with a statement of reasons the rider is shown (#1384) | `POST /v1/moderation/rooms/{roomId}/athletes/{athleteId}/remove` | `remove_from_room`, with the room |
 | **You** | hide a display name across the instance, or suspend an account: every one of its keys is refused, in rooms as everywhere | the routes above | `hide_display_name`, `suspend` |
 
 A removed rider's socket is closed at once. They cannot come back into that room: the room refuses

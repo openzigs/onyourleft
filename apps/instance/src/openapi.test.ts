@@ -618,7 +618,7 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
       'POST',
       `/v1/moderation/rooms/room-1/athletes/${await anotherAthlete(world)}/remove`,
       await moderatorToken(world),
-      { reason: 'Cheating, from a flag' },
+      { reason: 'Cheating, from a flag', statement: TEST_STATEMENT },
     ),
   createRoom: async (world) =>
     send(world, 'POST', '/v1/rooms', (await signedIn(world)).token, roomBody()),
