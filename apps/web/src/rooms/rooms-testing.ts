@@ -136,6 +136,45 @@ export class ScriptedInstance {
     status: 200,
     body: { ticket: 'the-ticket', expiresAt: 1 },
   };
+  /** #788: `GET /v1/rooms/public`. */
+  listing: { status: number; body: unknown } = { status: 200, body: { rooms: [] } };
+  /** #788: `POST /v1/rooms/{roomId}/join`. */
+  joinedPublic: { status: number; body: unknown } = { status: 404, body: null };
+  /** #789: `POST /v1/rooms/{roomId}/reports`. */
+  reported: { status: number; body: unknown } = { status: 204, body: null };
+
+  /**
+   * #788: a public room listed as `listed`, joined from the listing, its route
+   * `gpx`. The listing answers it and nothing else.
+   */
+  list(
+    listed: {
+      readonly roomId: string;
+      readonly kind: 'group' | 'race';
+      readonly startsAt: number;
+      readonly lengthMetres: number;
+      readonly climbMetres: number;
+    },
+    gpx: string,
+    sha256: string,
+  ): void {
+    this.listing = {
+      status: 200,
+      body: { rooms: [{ ridingPosition: 'hoods', drafting: true, loop: false, ...listed }] },
+    };
+    this.joinedPublic = {
+      status: 200,
+      body: {
+        roomId: listed.roomId,
+        kind: listed.kind,
+        ridingPosition: 'hoods',
+        drafting: true,
+        loop: false,
+        routeSha256: sha256,
+      },
+    };
+    this.route = { status: 200, body: { sha256, gpx } };
+  }
 
   /** The room joined by code is `routeSha256`'s, and its route is `gpx`; it drafts unless told. */
   offer(
@@ -179,21 +218,29 @@ export class ScriptedInstance {
     const answer =
       path === '/v1/rooms'
         ? this.created
-        : path === '/v1/rooms/join'
-          ? this.joined
-          : path.endsWith('/route')
-            ? this.route
-            : path.endsWith('/start')
-              ? this.started
-              : path.endsWith('/results')
-                ? this.results
-                : path.endsWith('/ticket')
-                  ? this.ticket
-                  : { status: 404, body: null };
+        : path === '/v1/rooms/public'
+          ? this.listing
+          : path === '/v1/rooms/join'
+            ? this.joined
+            : path.endsWith('/join')
+              ? this.joinedPublic
+              : path.endsWith('/reports')
+                ? this.reported
+                : path.endsWith('/route')
+                  ? this.route
+                  : path.endsWith('/start')
+                    ? this.started
+                    : path.endsWith('/results')
+                      ? this.results
+                      : path.endsWith('/ticket')
+                        ? this.ticket
+                        : { status: 404, body: null };
     return Promise.resolve(
-      new Response(answer.body === null ? '' : JSON.stringify(answer.body), {
-        status: answer.status,
-      }),
+      // A 204 carries no body at all: a `Response` refuses even an empty one.
+      new Response(
+        answer.body === null ? (answer.status === 204 ? null : '') : JSON.stringify(answer.body),
+        { status: answer.status },
+      ),
     );
   };
 }

@@ -5,23 +5,56 @@
  * private group ride and #785's private race, on the instance.
  *
  * ```text
- * POST /v1/rooms                 { kind, ridingPosition, drafting?, loop, lengthMetres, grades, gpx }
- *                                  → { roomId, code, routeSha256 }      the creator is a member
+ * POST /v1/rooms                 { kind, ridingPosition, drafting?, loop, lengthMetres, grades, gpx,
+ *                                    visibility?, startsAt? }
+ *                                  → { roomId, code?, routeSha256 }     the creator is a member
  * POST /v1/rooms/join            { code } → { roomId, kind, ridingPosition, drafting, loop, routeSha256 }
  *                                  rate-limited; the joiner becomes a member
+ * GET  /v1/rooms/public          → { rooms: [...] }                    #788: eligible athletes only
+ * POST /v1/rooms/{roomId}/join   → as /v1/rooms/join                   #788: a public room, eligible only
  * GET  /v1/rooms/{roomId}/route  → { sha256, gpx }                     members only, while open
  * POST /v1/rooms/{roomId}/ticket (auth/routes.ts)                      members only, for a rider's room
  * POST /v1/rooms/{roomId}/start  (routes.ts)                           its creator, seated and connected
  * GET  /v1/rooms/{roomId}/results → publication.ts                     the race's riders only, once it is over
  * ```
  *
- * ## Private, and only private
+ * ## Private by default; public only where the operator turned it on — #788
  *
- * Every room made here is `visibility: 'private'`, and nothing a request can
- * say changes that: the body names no visibility, and a body carrying any
- * field this module does not read is refused whole (`rooms.test.ts`). Public
- * rooms wait for #907, #910 and #911 (ADR 0028 D-6.4); a private room needs
- * nothing but a code among people who know each other (D-6.3).
+ * A room is `visibility: 'private'` unless its body says `public`, and a body
+ * carrying any field this module does not read is refused whole
+ * (`rooms.test.ts`). A private room needs nothing but a code among people who
+ * know each other (ADR 0028 D-6.3). A PUBLIC room is listed for anybody
+ * eligible to find, and so owes D-6.4's prerequisites, every one of them
+ * checked here, on making, listing and joining alike:
+ *
+ * - **the operator turned public rooms on** (`OYL_INSTANCE_PUBLIC_ROOMS`,
+ *   `legal.ts`) — OFF unless they did, so a self-hosted instance offers none
+ *   by default. Off, the listing and joining are `not_found`, as though the
+ *   routes were not there, and making one names the field;
+ * - **the athlete is eligible** (#775's ONE predicate, `moderation/eligibility.ts`):
+ *   approved, not suspended, confirmed 18 or over (ruling Q5), old enough and
+ *   with rides synced — `not_eligible` otherwise;
+ * - **no block either way** between the athlete and anybody in the room: a
+ *   room holding a rider who blocks them, or whom they block, is left out of
+ *   their listing, and joining it is `not_found` (the ticket asks again,
+ *   `auth/identity.ts`), so a block is never placed in one public room;
+ * - **at most {@link PUBLIC_ROOMS_PER_ATHLETE_PER_DAY} made a day** — the
+ *   owner's ruling of 2026-10-15 — counted by the store in the transaction
+ *   that writes, from the rooms themselves rather than a counter a restart
+ *   forgets.
+ *
+ * A public room has a code too — the column is one per room — but it is
+ * drawn, digested and thrown away: never shown, and joining by a code is
+ * refused for a public room whatever the code.
+ *
+ * ## The listing is not editorial — ADR 0028 D-7.1
+ *
+ * {@link Rooms.listPublic} is ordered by the start its creator gave a room,
+ * then when it was made, then its id, and by nothing else: no slot is
+ * featured, recommended or pinned, and the instance never makes, picks or
+ * schedules a room of its own. It shows a course's length and climb, never
+ * its route: the GPX, and with it every coordinate, goes only to a rider who
+ * joined (`route`).
  *
  * ## No course content served from an instance — ADR 0028 D-7.1, D-7.2
  *
@@ -113,6 +146,22 @@ export const MAXIMUM_OPEN_ROOMS_PER_ATHLETE = 5;
  */
 export const UNRIDDEN_ROOM_LIFETIME_MS = 24 * 60 * 60_000;
 
+/** At most this many PUBLIC rooms made by one athlete in a day — the owner's ruling of 2026-10-15 (#788). */
+export const PUBLIC_ROOMS_PER_ATHLETE_PER_DAY = 3;
+
+/**
+ * How far ahead a public room's start may be (#788): twelve hours. ⚠️ The
+ * author's number, under {@link UNRIDDEN_ROOM_LIFETIME_MS}, so a room is never
+ * swept away before the start it was listed for.
+ */
+export const PUBLIC_ROOM_START_AHEAD_MS = 12 * 60 * 60_000;
+
+/** How far behind now a public room's start may be: a clock a few minutes slow (#788). */
+export const PUBLIC_ROOM_START_BEHIND_MS = 5 * 60_000;
+
+/** The most public rooms one listing answers (#788): the first in the listing's order. */
+export const MAXIMUM_LISTED_PUBLIC_ROOMS = 100;
+
 /** How often the instance looks for rooms that are over and nobody closed: ten minutes. */
 export const ROOM_SWEEP_PERIOD_MS = 10 * 60_000;
 
@@ -140,9 +189,28 @@ export const DEFAULT_ROOM_LIMITS: RoomLimits = {
 /** A room as its creator is told of it. */
 export interface CreatedRoom {
   readonly roomId: string;
-  /** The code, in three groups of five. Shown once, to its creator; never stored. */
-  readonly code: string;
+  /**
+   * The code, in three groups of five. Shown once, to its creator; never
+   * stored. Absent for a public room, which is joined from the listing.
+   */
+  readonly code?: string;
   readonly routeSha256: string;
+}
+
+/** A public room as the listing tells an eligible athlete of it (#788): never its route. */
+export interface ListedRoom {
+  readonly roomId: string;
+  readonly kind: 'group' | 'race';
+  readonly ridingPosition: RidingPosition;
+  readonly drafting: boolean;
+  readonly loop: boolean;
+  /** Unix seconds: the start its creator gave it. */
+  readonly startsAt: number;
+  /** Unix seconds: when it was made. */
+  readonly createdAt: number;
+  readonly lengthMetres: number;
+  /** Metres climbed over the course once, from its grade steps. */
+  readonly climbMetres: number;
 }
 
 /** A room as a rider who joined by its code is told of it. */
@@ -171,6 +239,10 @@ export interface Rooms {
     client: ClientInfo,
   ): Promise<Outcome<JoinedRoom>>;
   route(caller: Caller, roomId: string): Promise<Outcome<RoomRoute>>;
+  /** #788: the open public rooms an eligible athlete may join, in the listing's one order. */
+  listPublic(caller: Caller): Promise<Outcome<{ rooms: readonly ListedRoom[] }>>;
+  /** #788: join a public room from the listing; the joiner becomes a member. */
+  joinPublic(caller: Caller, roomId: string): Promise<Outcome<JoinedRoom>>;
   /**
    * Who the caller is to a room that is not over (#789): its `host` (the
    * rider who made it), a `member` (who joined it by its code — or anybody,
@@ -208,6 +280,16 @@ export interface RoomsOptions {
   readonly limits?: RoomLimits;
   /** A new code — `code.ts`'s, from the CSPRNG, unless a test's. */
   readonly code?: () => string;
+  /**
+   * Whether the operator turned public rooms on (#788, `legal.ts`'s
+   * `OYL_INSTANCE_PUBLIC_ROOMS`). Absent is OFF: the default an instance starts with.
+   */
+  readonly publicRooms?: boolean;
+  /**
+   * Whether the athlete may enter a public room — #775's predicate, through
+   * the identity's own account read. Absent is nobody.
+   */
+  readonly eligible?: (caller: Caller) => Promise<boolean>;
 }
 
 const refuse = (code: ErrorCode, fields?: readonly FieldProblem[]): Outcome<never> =>
@@ -225,7 +307,22 @@ const CREATE_FIELDS = new Set([
   'lengthMetres',
   'grades',
   'gpx',
+  'visibility',
+  'startsAt',
 ]);
+
+/** Metres climbed over a course once: each rising step's grade over its length. */
+export function climbOf(
+  lengthMetres: number,
+  grades: readonly (readonly [number, number])[],
+): number {
+  let climb = 0;
+  grades.forEach(([from, percent], index) => {
+    const to = Math.min(grades[index + 1]?.[0] ?? lengthMetres, lengthMetres);
+    if (percent > 0 && to > from) climb += ((to - from) * percent) / 100;
+  });
+  return Math.round(climb);
+}
 
 const POSITIONS: readonly RidingPosition[] = ['upright', 'hoods', 'drops'];
 
@@ -266,6 +363,25 @@ export function createRooms(options: RoomsOptions): Rooms {
   const joinsPerAddress = createRateLimiter(limits.joinsPerAddress, now);
   const code = options.code ?? (() => newRoomCode());
   const seconds = (): number => Math.floor(now() / 1000);
+  const publicRooms = options.publicRooms === true;
+  const eligible = options.eligible ?? (() => Promise.resolve(false));
+
+  /**
+   * #788: why `caller` may not reach public rooms, or `undefined` when they
+   * may — off on this instance is `not_found`, as though no route were there.
+   */
+  async function publicRefusal(caller: Caller): Promise<Outcome<never> | undefined> {
+    if (!publicRooms) return refuse('not_found');
+    if (!(await eligible(caller))) return refuse('not_eligible');
+    return undefined;
+  }
+
+  /** #788: whether a moderator hid `roomId`'s listing (#913). */
+  async function hiddenRoom(roomId: string): Promise<boolean> {
+    return (await store.listHiddenItemsOfRoom(roomId)).some(
+      (each) => each.item === `room:${roomId}`,
+    );
+  }
 
   /**
    * THE one way a room is over (#784): closed, never to open again, and its
@@ -279,6 +395,29 @@ export function createRooms(options: RoomsOptions): Rooms {
       await routes.delete(room.routeSha256);
     }
     return true;
+  }
+
+  /** `caller` joins `roomId` — by its code, or from the listing — and is told what it is. */
+  async function joined(
+    caller: Caller,
+    roomId: string,
+    loop: boolean,
+  ): Promise<Outcome<JoinedRoom>> {
+    const room = await store.getRoom(roomId);
+    const course = await store.getRoomCourse(roomId);
+    if (room === undefined || course === undefined) return refuse('not_found');
+    await store.addRoomMember(roomId, caller.athleteId, seconds());
+    return {
+      ok: true,
+      value: {
+        roomId,
+        kind: room.kind,
+        ridingPosition: course.ridingPosition,
+        drafting: course.drafting !== false,
+        loop,
+        routeSha256: room.routeSha256,
+      },
+    };
   }
 
   /** A private room this athlete may see into: a member of it, and the room not over. */
@@ -296,6 +435,10 @@ export function createRooms(options: RoomsOptions): Rooms {
         if (!CREATE_FIELDS.has(key)) return invalid(key, 'is not part of a room');
       }
       const { kind, ridingPosition, loop, lengthMetres, gpx } = body;
+      const visibility = body.visibility ?? 'private';
+      if (visibility !== 'private' && visibility !== 'public') {
+        return invalid('visibility', 'must be private or public');
+      }
       if (kind !== 'group' && kind !== 'race') return invalid('kind', 'must be group or race');
       if (!POSITIONS.includes(ridingPosition as RidingPosition)) {
         return invalid('ridingPosition', 'must be upright, hoods or drops');
@@ -319,6 +462,23 @@ export function createRooms(options: RoomsOptions): Rooms {
       if (bytes.byteLength > MAXIMUM_ROUTE_BYTES) {
         return invalid('gpx', `must be at most ${String(MAXIMUM_ROUTE_BYTES)} bytes`);
       }
+      let startsAt: number | null = null;
+      if (visibility === 'private') {
+        if (body.startsAt !== undefined) return invalid('startsAt', 'is for a public room only');
+      } else {
+        if (!publicRooms) return invalid('visibility', 'this instance offers no public rooms');
+        if (!(await eligible(caller))) return refuse('not_eligible');
+        const at = body.startsAt;
+        if (
+          typeof at !== 'number' ||
+          !Number.isSafeInteger(at) ||
+          at * 1000 < now() - PUBLIC_ROOM_START_BEHIND_MS ||
+          at * 1000 > now() + PUBLIC_ROOM_START_AHEAD_MS
+        ) {
+          return invalid('startsAt', 'must be a time in Unix seconds within the next 12 hours');
+        }
+        startsAt = at;
+      }
       if (!creates.allow(caller.athleteId)) return refuse('rate_limited');
       if (
         (await store.countOpenPrivateRoomsMadeBy(caller.athleteId)) >=
@@ -336,7 +496,7 @@ export function createRooms(options: RoomsOptions): Rooms {
           room: {
             id: roomId,
             kind,
-            visibility: 'private',
+            visibility,
             routeSha256,
             physicsVersion: PHYSICS_VERSION,
           },
@@ -357,9 +517,29 @@ export function createRooms(options: RoomsOptions): Rooms {
           routeLoop: loop,
           creatorAthleteId: caller.athleteId,
           createdAt,
+          startsAt,
+          ...(visibility === 'public'
+            ? {
+                publicCap: {
+                  limit: PUBLIC_ROOMS_PER_ATHLETE_PER_DAY,
+                  sinceSeconds: createdAt - 24 * 60 * 60,
+                },
+              }
+            : {}),
         });
-        if (written === 'created')
-          return { ok: true, value: { roomId, code: displayRoomCode(drawn), routeSha256 } };
+        if (written === 'rate-limited') {
+          // Nothing was written: the route goes unless another open room rides it.
+          if ((await store.countOpenPrivateRoomsWithRoute(routeSha256, roomId)) === 0) {
+            await routes.delete(routeSha256);
+          }
+          return refuse('rate_limited');
+        }
+        if (written === 'created') {
+          // A public room's code is never shown: it is joined from the listing.
+          return visibility === 'public'
+            ? { ok: true, value: { roomId, routeSha256 } }
+            : { ok: true, value: { roomId, code: displayRoomCode(drawn), routeSha256 } };
+        }
       }
       // Three collisions in a 75-bit space is a broken random source, not bad luck.
       throw new Error('could not draw an unused room code');
@@ -380,23 +560,59 @@ export function createRooms(options: RoomsOptions): Rooms {
       if (found === undefined || found.closedAt !== null) return refuse('not_found');
       // #913: a room whose listing a moderator hid takes nobody new — the
       // same answer as a room that is over, so the code tells a guesser nothing.
-      const hidden = await store.listHiddenItemsOfRoom(found.roomId);
-      if (hidden.some((each) => each.item === `room:${found.roomId}`)) return refuse('not_found');
+      if (await hiddenRoom(found.roomId)) return refuse('not_found');
       const room = await store.getRoom(found.roomId);
-      const course = await store.getRoomCourse(found.roomId);
-      if (room === undefined || course === undefined) return refuse('not_found');
-      await store.addRoomMember(found.roomId, caller.athleteId, seconds());
-      return {
-        ok: true,
-        value: {
-          roomId: found.roomId,
+      // #788: a public room is joined from the listing, by an eligible
+      // athlete, and never by a code — its code was never shown to anybody.
+      if (room?.visibility !== 'private') return refuse('not_found');
+      return joined(caller, found.roomId, found.routeLoop);
+    },
+
+    async listPublic(caller) {
+      const refused = await publicRefusal(caller);
+      if (refused !== undefined) return refused;
+      const listed: ListedRoom[] = [];
+      for (const room of await store.listOpenPublicRooms()) {
+        if (listed.length >= MAXIMUM_LISTED_PUBLIC_ROOMS) break;
+        // A race that left its lobby takes nobody new; a hidden room is
+        // listed for nobody; a block either way keeps the two apart.
+        if (room.raceStarted || (await hiddenRoom(room.roomId))) continue;
+        if (await store.hasBlockWithRoomMember(room.roomId, caller.athleteId)) continue;
+        listed.push({
+          roomId: room.roomId,
           kind: room.kind,
-          ridingPosition: course.ridingPosition,
-          drafting: course.drafting !== false,
-          loop: found.routeLoop,
-          routeSha256: room.routeSha256,
-        },
-      };
+          ridingPosition: room.ridingPosition,
+          drafting: room.drafting,
+          loop: room.loop,
+          startsAt: room.startsAt,
+          createdAt: room.createdAt,
+          lengthMetres: room.lengthMetres,
+          climbMetres: climbOf(room.lengthMetres, room.grades),
+        });
+      }
+      return { ok: true, value: { rooms: listed } };
+    },
+
+    async joinPublic(caller, roomId) {
+      const refused = await publicRefusal(caller);
+      if (refused !== undefined) return refused;
+      const made = await store.getPrivateRoom(roomId);
+      const room = await store.getRoom(roomId);
+      const course = await store.getRoomCourse(roomId);
+      // Whatever is not an open public room the listing would show is one
+      // answer: a private room's id tells a guesser nothing either.
+      if (
+        made === undefined ||
+        made.closedAt !== null ||
+        room?.visibility !== 'public' ||
+        course === undefined ||
+        course.raceStartedAt !== null ||
+        (await hiddenRoom(roomId)) ||
+        (await store.hasBlockWithRoomMember(roomId, caller.athleteId))
+      ) {
+        return refuse('not_found');
+      }
+      return joined(caller, roomId, made.routeLoop);
     },
 
     async standing(caller, roomId) {

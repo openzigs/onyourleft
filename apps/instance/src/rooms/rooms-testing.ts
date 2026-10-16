@@ -6,7 +6,8 @@
  * shipped.
  */
 
-import type { IdentityInstance } from '../auth/identity-testing.ts';
+import { testDevice, type IdentityInstance } from '../auth/identity-testing.ts';
+import { NO_LEGAL_SETTINGS } from '../legal.ts';
 
 /**
  * A route's GPX, as a rider's app would send it — three points, no name, no
@@ -70,4 +71,54 @@ export async function madeRoom(
   const answer = await world.call('POST', '/v1/rooms', { token, body: roomBody(overrides) });
   if (answer.status !== 200) throw new Error(`no room: ${JSON.stringify(answer)}`);
   return answer.body as { roomId: string; code: string; routeSha256: string };
+}
+
+/**
+ * #788: the options a world needs for public rooms — on, as the operator
+ * turns them on, with #775's thresholds at nothing, so an athlete is eligible
+ * once approved and confirmed 18 or over: what these tests measure.
+ */
+export const PUBLIC_ROOMS_ON = {
+  config: { legal: { ...NO_LEGAL_SETTINGS, publicRooms: true } },
+  publicRooms: { minimumAccountDays: 0, minimumCompletedRides: 0 },
+} as const;
+
+/** An athlete who confirmed they are 18 or over as they signed in (#775): eligible under {@link PUBLIC_ROOMS_ON}. */
+export async function adultIn(
+  world: IdentityInstance,
+): Promise<{ readonly token: string; readonly athleteId: string; readonly recoveryCode: string }> {
+  const session = await world.signIn(await testDevice(), { confirmsAdult: true });
+  return {
+    token: session.body.sessionToken as string,
+    athleteId: session.body.athleteId as string,
+    recoveryCode: (session.body.recoveryCodes as string[])[0] as string,
+  };
+}
+
+/** A public room's body (#788): starting `inMinutes` after the world's clock. */
+export function publicRoomBody(
+  world: IdentityInstance,
+  inMinutes = 30,
+  overrides: Readonly<Record<string, unknown>> = {},
+): Record<string, unknown> {
+  return roomBody({
+    visibility: 'public',
+    startsAt: Math.floor(world.clock.ms / 1000) + inMinutes * 60,
+    ...overrides,
+  });
+}
+
+/** A public room made through `POST /v1/rooms`, as `token`'s athlete (#788). */
+export async function madePublicRoom(
+  world: IdentityInstance,
+  token: string,
+  inMinutes = 30,
+  overrides: Readonly<Record<string, unknown>> = {},
+): Promise<{ readonly roomId: string; readonly routeSha256: string }> {
+  const answer = await world.call('POST', '/v1/rooms', {
+    token,
+    body: publicRoomBody(world, inMinutes, overrides),
+  });
+  if (answer.status !== 200) throw new Error(`no public room: ${JSON.stringify(answer)}`);
+  return answer.body as { roomId: string; routeSha256: string };
 }

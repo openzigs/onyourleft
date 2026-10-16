@@ -203,6 +203,8 @@ export interface PrivateRoom {
   readonly createdAt: number;
   /** Unix seconds: when the room was over, or `null` while it is not. */
   readonly closedAt: number | null;
+  /** Unix seconds: when a PUBLIC room's creator said it starts (#788), or `null` for one shared by its code. */
+  readonly startsAt: number | null;
 }
 
 /** Everything one rider's new room is, written together (#784). */
@@ -214,6 +216,37 @@ export interface NewPrivateRoom {
   readonly creatorAthleteId: string;
   /** Unix seconds. */
   readonly createdAt: number;
+  /** Unix seconds: a PUBLIC room's start (#788). Absent, or `null`, for a room shared by its code. */
+  readonly startsAt?: number | null;
+  /**
+   * #788: at most `limit` PUBLIC rooms made by the creator since
+   * `sinceSeconds`, this one included — counted in the transaction that
+   * writes, so two at once cannot each see room for one more.
+   */
+  readonly publicCap?: { readonly limit: number; readonly sinceSeconds: number };
+}
+
+/** What writing a rider's new room came to (#784; `rate-limited`, #788's three a day). */
+export type RoomWritten = 'created' | 'code-taken' | 'rate-limited';
+
+/**
+ * A public room that is not over, as the listing reads it (#788): what a rider
+ * choosing one is told, and never where its route is.
+ */
+export interface OpenPublicRoom {
+  readonly roomId: string;
+  readonly kind: 'group' | 'race';
+  /** Unix seconds: the start its creator gave it. */
+  readonly startsAt: number;
+  /** Unix seconds. */
+  readonly createdAt: number;
+  readonly lengthMetres: number;
+  readonly grades: readonly (readonly [number, number])[];
+  readonly ridingPosition: 'upright' | 'hoods' | 'drops';
+  readonly drafting: boolean;
+  readonly loop: boolean;
+  /** A race that left its lobby. */
+  readonly raceStarted: boolean;
 }
 
 /** A nonce issued to a public key (#772). */
@@ -1448,7 +1481,7 @@ export interface SqlStore {
    * nothing, when another room already has that code's digest (a collision
    * the caller answers by drawing another).
    */
-  createPrivateRoom(created: NewPrivateRoom): Promise<'created' | 'code-taken'>;
+  createPrivateRoom(created: NewPrivateRoom): Promise<RoomWritten>;
   getPrivateRoom(roomId: string): Promise<PrivateRoom | undefined>;
   /** The private room whose code has this digest — open or closed — or `undefined`. */
   findPrivateRoomByCode(codeSha256: string): Promise<PrivateRoom | undefined>;
@@ -1480,6 +1513,17 @@ export interface SqlStore {
    * route by this digest — its blob is shared by all of them (#784).
    */
   countOpenPrivateRoomsWithRoute(routeSha256: string, exceptRoomId: string): Promise<number>;
+  /**
+   * #788: every PUBLIC room that is not over, in the listing's one order —
+   * the start its creator gave it, then when it was made, then its id — and
+   * no other. Nothing here features, ranks or pins a room.
+   */
+  listOpenPublicRooms(): Promise<readonly OpenPublicRoom[]>;
+  /**
+   * #788: whether anybody else in `roomId` — its creator, or a rider who
+   * joined it — blocks `athleteId`, or is blocked by them.
+   */
+  hasBlockWithRoomMember(roomId: string, athleteId: string): Promise<boolean>;
 
   putResult(result: Result): Promise<void>;
   listResults(athleteId: string): Promise<readonly Result[]>;
@@ -2413,6 +2457,7 @@ const privateRoomFrom = (row: Selectable<PrivateRoomTable>): PrivateRoom => ({
   routeLoop: row.route_loop === 1,
   createdAt: row.created_at,
   closedAt: row.closed_at,
+  startsAt: row.starts_at,
 });
 
 /**
@@ -3814,14 +3859,27 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
 
     createPrivateRoom: (created) =>
       exclusive(() =>
-        db.transaction().execute(async (trx): Promise<'created' | 'code-taken'> => {
+        db.transaction().execute(async (trx): Promise<RoomWritten> => {
           const taken = await trx
             .selectFrom('private_room')
             .select('room_id')
             .where('code_sha256', '=', created.codeSha256)
             .executeTakeFirst();
           if (taken !== undefined) return 'code-taken';
-          const { room, course } = created;
+          const { room, course, publicCap } = created;
+          if (publicCap !== undefined) {
+            const made = await trx
+              .selectFrom('room_member')
+              .innerJoin('private_room', 'private_room.room_id', 'room_member.room_id')
+              .innerJoin('room', 'room.id', 'room_member.room_id')
+              .select((eb) => eb.fn.countAll<number>().as('n'))
+              .where('room_member.athlete_id', '=', created.creatorAthleteId)
+              .where('room_member.role', '=', 'creator')
+              .where('room.visibility', '=', 'public')
+              .where('private_room.created_at', '>', publicCap.sinceSeconds)
+              .executeTakeFirstOrThrow();
+            if (Number(made.n) >= publicCap.limit) return 'rate-limited';
+          }
           await trx
             .insertInto('room')
             .values({
@@ -3854,6 +3912,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
               route_loop: created.routeLoop ? 1 : 0,
               created_at: created.createdAt,
               closed_at: null,
+              starts_at: created.startsAt ?? null,
             })
             .execute();
           await trx
@@ -3998,6 +4057,72 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           .where('private_room.closed_at', 'is', null)
           .executeTakeFirstOrThrow();
         return Number(row.n);
+      }),
+
+    listOpenPublicRooms: () =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('private_room')
+            .innerJoin('room', 'room.id', 'private_room.room_id')
+            .innerJoin('room_course', 'room_course.room_id', 'private_room.room_id')
+            .select([
+              'private_room.room_id',
+              'private_room.starts_at',
+              'private_room.created_at',
+              'private_room.route_loop',
+              'room.kind',
+              'room_course.length_metres',
+              'room_course.grades',
+              'room_course.riding_position',
+              'room_course.drafting',
+              'room_course.race_started_at',
+            ])
+            .where('room.visibility', '=', 'public')
+            .where('private_room.closed_at', 'is', null)
+            // The listing's one rule (#788): start, then made, then id — never editorial.
+            .orderBy('private_room.starts_at')
+            .orderBy('private_room.created_at')
+            .orderBy('private_room.room_id')
+            .execute()
+        ).map((row) => ({
+          roomId: row.room_id,
+          kind: row.kind,
+          // Every public room is made with a start (`rooms.ts` §`create`).
+          startsAt: row.starts_at ?? row.created_at,
+          createdAt: row.created_at,
+          lengthMetres: row.length_metres,
+          grades: JSON.parse(row.grades) as [number, number][],
+          ridingPosition: row.riding_position,
+          drafting: row.drafting === 1,
+          loop: row.route_loop === 1,
+          raceStarted: row.race_started_at !== null,
+        })),
+      ),
+
+    hasBlockWithRoomMember: (roomId, athleteId) =>
+      exclusive(async () => {
+        const row = await db
+          .selectFrom('room_member')
+          .innerJoin('block', (join) =>
+            join.on((eb) =>
+              eb.or([
+                eb.and([
+                  eb('block.athlete_id', '=', athleteId),
+                  eb('block.blocked_athlete_id', '=', eb.ref('room_member.athlete_id')),
+                ]),
+                eb.and([
+                  eb('block.athlete_id', '=', eb.ref('room_member.athlete_id')),
+                  eb('block.blocked_athlete_id', '=', athleteId),
+                ]),
+              ]),
+            ),
+          )
+          .select('room_member.athlete_id')
+          .where('room_member.room_id', '=', roomId)
+          .where('room_member.athlete_id', '!=', athleteId)
+          .executeTakeFirst();
+        return row !== undefined;
       }),
 
     putResult: (result) =>

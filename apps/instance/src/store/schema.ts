@@ -158,6 +158,8 @@ export interface PrivateRoomTable {
   readonly created_at: number;
   /** Unix seconds: when the room was over. Never opened again after. */
   readonly closed_at: number | null;
+  /** Unix seconds: when its creator said a PUBLIC room starts (#788, migration 0033); `NULL` for one shared by its code. */
+  readonly starts_at: number | null;
 }
 
 /** Who may be ticketed into a private room (#784, migration 0013). */

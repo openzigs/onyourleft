@@ -512,6 +512,13 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
         routes: createDiskBlobStore(join(server.blobsPath, 'rooms')),
         nameFor,
         now,
+        // #788: public rooms only where the operator turned them on — off by
+        // default — and only for an athlete #775's predicate accepts.
+        publicRooms: options.config.legal.publicRooms,
+        eligible: async (caller) => {
+          const held = await people.account(caller);
+          return held.ok && held.value.publicRooms.eligible;
+        },
       });
       // The identity's rate limits hold internet addresses; the privacy
       // policy says for at most an hour. Each window's keys are forgotten on
