@@ -8,6 +8,10 @@
  * token's usefulness, not its visibility: the token still rides in every
  * `POST /v1/sealed`'s `Authorization` header (D-11).
  *
+ * ADR 0047's amendment of 2026-10-16 (#1382) adds four routes merged in
+ * plaintext after phase 2: the statements of reasons, their appeal, and the
+ * two room routes a rider reports and a host removes by.
+ *
  * The COMMITTED list, as `phase-one.ts` is, and held to the route table the
  * same way: `sealed/phase-one.test.ts` compares the table with BOTH lists in
  * both directions, and `apps/web/src/instance/sealed-routes.test.ts` scans the
@@ -35,6 +39,9 @@ const only = (method: PhaseOneRoute['method'], path: string, row: string): Phase
 
 const ROOMS = 'The room routes’ HTTP side (D-14 Q5: the sockets are not sealed)';
 const BLOCKS_AND_REPORTS = 'A rider’s own blocks and reports';
+/** The rows ADR 0047's amendment of 2026-10-16 adds to D-7's table (#1382). */
+const STATEMENTS = 'The statements of reasons about a rider, and their appeal against one';
+const ROOM_MODERATION = 'A report from inside a room, and a host removing a rider from their room';
 
 export const PHASE_TWO_SEALED_ROUTES: readonly PhaseOneRoute[] = [
   // Every sign-in, a key the instance holds included; registering a new key
@@ -61,4 +68,13 @@ export const PHASE_TWO_SEALED_ROUTES: readonly PhaseOneRoute[] = [
   only('GET', '/v1/auth/session', 'Who this session is: its answer names the athlete'),
   only('DELETE', '/v1/auth/session', 'Signing out: the token alone ends no session'),
   only('GET', '/v1/athletes/{athleteId}', 'Another rider’s profile: the request names whom'),
+  // #1382, ADR 0047's amendment of 2026-10-16: #1376's and #1377's statements
+  // and appeal routes, and #1375's two room routes, merged in plaintext by the
+  // owner's ruling of 2026-10-15 and sealed here. A suspended athlete reaches
+  // the first two sealed with the way-out session (#1210): signed by the device
+  // key that session row names, as any sealed request is.
+  only('GET', '/v1/statements', STATEMENTS),
+  only('POST', '/v1/statements/{statementId}/appeal', STATEMENTS),
+  only('POST', '/v1/rooms/{roomId}/reports', ROOM_MODERATION),
+  only('POST', '/v1/rooms/{roomId}/remove', ROOM_MODERATION),
 ];

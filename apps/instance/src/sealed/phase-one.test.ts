@@ -235,7 +235,8 @@ function requestFor(route: PhaseOneRoute, f: Fixture): { path: string; body?: un
     .replace('{key}', 'n1')
     .replace('{jobId}', 'job-1')
     .replace('{route}', 'a'.repeat(64))
-    .replace('{roomId}', 'room-1');
+    .replace('{roomId}', 'room-1')
+    .replace('{statementId}', '1');
   const reason = { reason: 'Checked against the rules' };
   const bodies: Record<string, unknown> = {
     'POST /v1/auth/link-codes': {},
@@ -259,6 +260,10 @@ function requestFor(route: PhaseOneRoute, f: Fixture): { path: string; body?: un
     'POST /v1/reports': { athleteId: f.carl.athleteId, reason: 'An edge’s report' },
     'POST /v1/rooms/join': { code: 'abcd-efgh' },
     'POST /v1/rooms/{roomId}/ticket': { declaredMassKilograms: 70 },
+    // #1382: each a body that would change something.
+    'POST /v1/statements/{statementId}/appeal': { grounds: 'An edge’s appeal' },
+    'POST /v1/rooms/{roomId}/reports': { riderId: 1, reason: 'abuse' },
+    'POST /v1/rooms/{roomId}/remove': { riderId: 1, reason: 'An edge’s removal' },
   };
   const body =
     bodies[key(route)] ?? (route.path.startsWith('/v1/moderation/') ? reason : undefined);
@@ -495,7 +500,7 @@ describe('the edge’s token opens nothing (#1192, ADR 0047 D-8)', () => {
     const f = await fixture();
     const edge = await testDevice();
     const before = everyRow(f.w.path);
-    expect(PHASE_TWO_SEALED_ROUTES.length).toBe(18);
+    expect(PHASE_TWO_SEALED_ROUTES.length).toBe(22);
     for (const route of PHASE_TWO_SEALED_ROUTES) {
       const { path, body } = requestFor(route, f);
       const tried = await asTheEdge(f, edge, f.bea.token, route.method, path, body);
@@ -544,6 +549,66 @@ describe('the edge’s token opens nothing (#1192, ADR 0047 D-8)', () => {
     expect(
       await f.w.freshRead(async (store) => (await store.getAthlete(f.carl.athleteId))?.suspendedAt),
     ).toBeNull();
+  });
+});
+
+describe('a suspended athlete’s statements and appeal, sealed (#1382, ADR 0047 amendment of 2026-10-16)', () => {
+  it('refuses the way-out session’s plaintext read and appeal `sealed_required`, changing nothing, and serves both sealed', async () => {
+    const f = await fixture();
+    const suspended = await f.w.call(
+      'POST',
+      `/v1/moderation/athletes/${f.carl.athleteId}/suspend`,
+      {
+        token: f.w.owner.token,
+        body: { reason: 'Checked against the rules', statement: TEST_STATEMENT },
+      },
+    );
+    expect(suspended.status, JSON.stringify(suspended.body)).toBe(200);
+    // The way out (#898, #1210): sealed and signed by Carl's own key.
+    f.w.clock.ms += 60_000;
+    const opened = await f.w.call('POST', '/v1/auth/leave-session', {
+      body: await f.carl.device.statement(await f.w.nonceFor(f.carl.device)),
+    });
+    expect(opened.status, JSON.stringify(opened.body)).toBe(200);
+    const token = (opened.body as { sessionToken: string }).sessionToken;
+    // The statement the suspension wrote, read sealed: the id the appeal names.
+    const read = await f.w.call('GET', '/v1/statements', { token });
+    expect(read.status, JSON.stringify(read.body)).toBe(200);
+    const statements = (
+      read.body as { statements: { statementId: number; restriction: string; appeal: unknown }[] }
+    ).statements;
+    expect(statements.map((each) => each.restriction)).toEqual(['suspend']);
+    const statementId = statements[0]?.statementId ?? 0;
+    const appealPath = `/v1/statements/${String(statementId)}/appeal`;
+    const grounds = { grounds: 'I was quoting the other rider.' };
+
+    // In plaintext, with the same live way-out session: refused, and nothing moved.
+    const before = everyRow(f.w.path);
+    for (const [method, path, body] of [
+      ['GET', '/v1/statements', undefined],
+      ['POST', appealPath, grounds],
+    ] as const) {
+      const answer = await f.w.call(method, path, {
+        token,
+        plain: true,
+        ...(body === undefined ? {} : { body }),
+      });
+      expect(answer.status, `${method} ${path}`).toBe(403);
+      expect((answer.body as { error: { code: string } }).error.code, `${method} ${path}`).toBe(
+        'sealed_required',
+      );
+    }
+    expect(everyRow(f.w.path) === before).toBe(true);
+
+    // The control: the same appeal, sealed, is filed and read back sealed.
+    const filed = await f.w.call('POST', appealPath, { token, body: grounds });
+    expect(filed.status, JSON.stringify(filed.body)).toBe(200);
+    const after = await f.w.call('GET', '/v1/statements', { token });
+    expect(after.status).toBe(200);
+    expect(
+      (after.body as { statements: { appeal: { grounds: string } | null }[] }).statements[0]?.appeal
+        ?.grounds,
+    ).toBe(grounds.grounds);
   });
 });
 

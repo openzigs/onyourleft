@@ -19,14 +19,21 @@
  * (#911, OSA s.21(4)(d)) by the same two sessions, so a suspended rider can
  * appeal without being able to sign in to anything else.
  *
+ * Both routes are sealed-only on an instance holding keys (#1382, ADR 0047's
+ * amendment of 2026-10-16), so both sessions call them through the sealed
+ * path: the held one through `heldAccountSession` (#1210), the way-out one
+ * through the sealed instance its opening judged. ⚠️ A device that holds a pin
+ * never falls back to plaintext; one with no pin calls them in plaintext only
+ * on an instance that serves no keys.
+ *
  * Every request goes through `instance-transport.ts`, the ONE module this
  * client sends instance traffic through (#777, ADR 0036 D-3 (a)), and only to
  * the instance this device connected to. A `*-port.ts`: `check:wiring`
  * watches {@link StatementsPort} and {@link createStatementsPort}.
  */
 
-import { heldInstanceSession, sessionlessSealed, type SealingDependencies } from './instance-port';
-import { instanceHttp } from './instance-transport';
+import { heldAccountSession, sessionlessSealed, type SealingDependencies } from './instance-port';
+import { instanceHttp, type InstanceHttp } from './instance-transport';
 import { openLeaveSession, readInstanceAccount } from './sign-in';
 
 /** One statement of reasons, as the rider reads it. */
@@ -205,33 +212,39 @@ function codeOf(body: unknown): unknown {
 
 /** The production {@link StatementsPort}: `main.tsx` builds it, and nothing else in the client. */
 export function createStatementsPort(dependencies: StatementsPortDependencies): StatementsPort {
+  const accountSession = heldAccountSession(dependencies);
   const wayOut = sessionlessSealed(dependencies);
   /**
    * One request with the session this device holds, and — when the instance
    * refuses that session — once more with a way-out session it opens. Answers
-   * `undefined` when there is no instance; throws when there is no answer.
+   * `undefined` when there is no instance; throws when there is no answer,
+   * and when the device may not seal now (#1382): nothing goes in plaintext.
    */
   async function withSession(
     request: (
-      http: ReturnType<typeof instanceHttp>,
+      sealedOrKeyless: Pick<InstanceHttp, 'call'>,
       token: string,
     ) => Promise<{ readonly status: number; readonly body: unknown }>,
   ): Promise<{ readonly status: number; readonly body: unknown } | undefined> {
     const account = readInstanceAccount(dependencies.storage);
     if (account === undefined) return undefined;
-    const http = instanceHttp(account.origin, dependencies.send);
-    const held = heldInstanceSession(dependencies.storage, dependencies.send);
-    if (held !== undefined) {
-      const answer = await request(http, held.token);
+    const session = await accountSession();
+    if (session.kind === 'open') {
+      const answer = await request(session.sealedOrKeyless, session.token);
       // Anything but the rider's own session being refused is the answer.
       if (answer.status !== 401 && answer.status !== 403) return answer;
       if (answer.status === 403 && codeOf(answer.body) !== 'account_suspended') return answer;
+    } else if (session.why !== 'signed-out') {
+      // A copy a website served, a card needed or awaited, keys refused:
+      // the way out could not seal either, so nothing more is sent.
+      throw new Error(session.text);
     }
     // The held session is gone or refused: a suspended rider's way out,
     // sealed when this device can seal (#1210), and not sent at all when it
     // holds a pin but may not seal now: that is no answer.
     const way = await wayOut();
     if (way.kind === 'closed') throw new Error(way.text);
+    const http = instanceHttp(account.origin, dependencies.send);
     const token = await openLeaveSession({
       origin: account.origin,
       transport: { post: async (path, body) => http.call('POST', path, { body }) },
@@ -241,14 +254,16 @@ export function createStatementsPort(dependencies: StatementsPortDependencies): 
       signingKey: dependencies.signingKey,
       ...(dependencies.now === undefined ? {} : { now: dependencies.now }),
     });
-    return request(http, token);
+    // The way-out session's own request goes as the session did: sealed from
+    // a device holding a pin, plaintext only from one with none (#1382).
+    return request(way.kind === 'sealed' ? way.instance : http, token);
   }
 
   return {
     read: async () => {
       try {
-        const answer = await withSession((http, token) =>
-          http.call('GET', '/v1/statements', { token }),
+        const answer = await withSession((sealedOrKeyless, token) =>
+          sealedOrKeyless.call('GET', '/v1/statements', { token }),
         );
         if (answer === undefined) return { kind: 'not-connected' };
         const statements = answer.status === 200 ? statementsIn(answer.body) : undefined;
@@ -273,8 +288,8 @@ export function createStatementsPort(dependencies: StatementsPortDependencies): 
         return { kind: 'refused', text: APPEAL_REFUSAL_TEXT.grounds };
       }
       try {
-        const answer = await withSession((http, token) =>
-          http.call('POST', `/v1/statements/${String(statementId)}/appeal`, {
+        const answer = await withSession((sealedOrKeyless, token) =>
+          sealedOrKeyless.call('POST', `/v1/statements/${String(statementId)}/appeal`, {
             token,
             body: { grounds: trimmed },
           }),

@@ -779,6 +779,8 @@ export function heldAccountSession(
  *
  * - `sealed`: the device holds a pin and the keys verify under it — the call
  *   goes sealed and signed by this device's key, as signing in does.
+ *   `instance` makes the calls the way-out session then reaches (#1382: the
+ *   statements and their appeal), sealed with that session's token.
  * - `keyless`: the device holds no pin (D-14 Q1), so it cannot seal; the call
  *   goes in plaintext, as a sign-in from it does, and an instance holding
  *   keys refuses it `sealed_required`.
@@ -787,7 +789,11 @@ export function heldAccountSession(
  *   device with a pin never falls back to plaintext.
  */
 export type SessionlessSealed =
-  | { readonly kind: 'sealed'; readonly sealed: InstanceTransport }
+  | {
+      readonly kind: 'sealed';
+      readonly sealed: InstanceTransport;
+      readonly instance: SealedInstance;
+    }
   | { readonly kind: 'keyless' }
   | { readonly kind: 'closed'; readonly text: string };
 
@@ -809,23 +815,19 @@ export function sessionlessSealed(
       const text = 'text' in judged.outcome ? judged.outcome.text : INSTANCE_KEY_TEXT.unreachable;
       return { kind: 'closed', text };
     }
-    return {
-      kind: 'sealed',
-      sealed: sealedTransport(
-        sealedInstance(
-          account.origin,
-          {
-            instanceKey: judged.instanceKey,
-            signingKey: await dependencies.signingKey(),
-            primitives: dependencies.primitives ?? webCryptoHpkePrimitives,
-            sha256: kit.crypto.sha256,
-            clock: kit.clock,
-            ...(dependencies.now === undefined ? {} : { now: dependencies.now }),
-          },
-          dependencies.send,
-        ),
-      ),
-    };
+    const instance = sealedInstance(
+      account.origin,
+      {
+        instanceKey: judged.instanceKey,
+        signingKey: await dependencies.signingKey(),
+        primitives: dependencies.primitives ?? webCryptoHpkePrimitives,
+        sha256: kit.crypto.sha256,
+        clock: kit.clock,
+        ...(dependencies.now === undefined ? {} : { now: dependencies.now }),
+      },
+      dependencies.send,
+    );
+    return { kind: 'sealed', sealed: sealedTransport(instance), instance };
   };
 }
 
