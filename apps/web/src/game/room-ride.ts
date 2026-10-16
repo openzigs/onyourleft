@@ -21,7 +21,12 @@ import type { RoomRaceFact } from '@onyourleft/store';
 
 import type { AnnouncementEvent } from './hud/announce';
 import type { RoomConnection } from '../net/room-port';
-import type { RoomRace, RoomSessionStatus, RoomStandingsRow } from '../net/room-session';
+import type {
+  RoomRace,
+  RoomSessionStatus,
+  RoomStandings,
+  RoomStandingsRow,
+} from '../net/room-session';
 import { InterestSet } from '../net/interest';
 import { roomErrorMetres } from '../net/correction';
 import type { RemoteRiderInput } from './scene';
@@ -356,6 +361,54 @@ export function draftReading(room: RoomConnection): RoomHud['draft'] {
 }
 
 /**
+ * A rider is "in the draft" from this share of drag on — #787's spoken cue.
+ * ⚠️ **Unsourced — the author's choice**, like ADR 0038's reach: about 21 m
+ * behind one rider in the model, well past where a rider would say they were on
+ * a wheel, and above the leading rider's own 1–2 %, so the front of a line is
+ * never told it is drafting.
+ */
+export const DRAFT_IN_PERCENT = 10;
+
+/**
+ * …and "out of the draft" below this. Lower than {@link DRAFT_IN_PERCENT} on
+ * purpose: a rider holding a gap right at one threshold would otherwise be told
+ * "in" and "out" on alternate frames. Unsourced, the author's choice.
+ */
+export const DRAFT_OUT_PERCENT = 5;
+
+/** What the rider hears — ⚠️ draft wording for the owner. */
+export const DRAFT_SPOKEN = {
+  into: (percent: number): string =>
+    `In the draft: ${String(Math.round(percent))} percent less drag.`,
+  outOf: 'Out of the draft.',
+} as const;
+
+/**
+ * Whether the rider has just gone into or out of the room's draft — #787,
+ * #327's spoken cue (`announce.ts` rank 5f). Pure: the caller keeps `inDraft`
+ * between frames, as `riderEvents` has its caller keep the riders seen.
+ *
+ * From the HUD's own figure ({@link draftReading}: the ROOM's frame, never this
+ * client's prediction), so what is said is what the field shows. A room with
+ * drafting off, and the time before the room's first frame, are never "in":
+ * a rider who was is put out without a sentence, because nothing about their
+ * riding changed.
+ */
+export function draftEvent(
+  inDraft: boolean,
+  draft: RoomHud['draft'],
+): { readonly inDraft: boolean; readonly event?: AnnouncementEvent } {
+  if (typeof draft !== 'number' || !Number.isFinite(draft)) return { inDraft: false };
+  if (!inDraft && draft >= DRAFT_IN_PERCENT) {
+    return { inDraft: true, event: { kind: 'room-draft', text: DRAFT_SPOKEN.into(draft) } };
+  }
+  if (inDraft && draft < DRAFT_OUT_PERCENT) {
+    return { inDraft: false, event: { kind: 'room-draft', text: DRAFT_SPOKEN.outOf } };
+  }
+  return { inDraft };
+}
+
+/**
  * The next rider to follow, by the room's own rider id — never by who is
  * ahead, so pressing *Follow* walks the seats and says nothing about a
  * standing. Wraps; `undefined` with nobody near.
@@ -477,6 +530,26 @@ export function acrossTheRoomsLine(
   return own.rider.distanceMetres >= lineMetres;
 }
 
+/** This rider's place among the riders across the line, and how many were — #1364. */
+export interface PlaceAcross {
+  readonly place: number;
+  readonly across: number;
+}
+
+/**
+ * Where the ROOM's newest standings have this rider among the riders already
+ * across the line — #1364, from #1347's standings: the rows the room flags
+ * {@link FLAG_FINISHED}, which it puts first, by their finish (ADR 0051).
+ * The room's word and its order; nothing is worked out here but the count.
+ * `undefined` with no standings, or where they do not have this rider across.
+ */
+export function placeAcrossOf(standings: RoomStandings | undefined): PlaceAcross | undefined {
+  if (standings === undefined) return undefined;
+  const across = standings.rows.filter((row) => (row.flags & FLAG_FINISHED) !== 0);
+  const own = across.findIndex((row) => row.you);
+  return own === -1 ? undefined : { place: own + 1, across: across.length };
+}
+
 /**
  * What the race this ride was in comes to on this device — #785, the owner's
  * ruling of 2026-10-14: the result is stored with the ride. The ROOM's word
@@ -493,6 +566,7 @@ export function raceFactOf(
   roomId: string | undefined,
   race: RoomRace | undefined,
   crossedTheLine: boolean,
+  placeAcross?: PlaceAcross,
 ): RoomRaceFact | undefined {
   if (roomId === undefined || race === undefined) return undefined;
   switch (race.kind) {
@@ -500,9 +574,17 @@ export function raceFactOf(
       // The room's order is the word on who finished, whatever this device saw.
       return { roomId, place: race.place, finishers: race.order.length };
     case 'running':
-      return crossedTheLine
-        ? { roomId, place: null, finishers: null, crossedTheLine: true }
-        : { roomId, place: null, finishers: null };
+      if (!crossedTheLine) return { roomId, place: null, finishers: null };
+      // #1364: and where the room's standings had them among those across.
+      return {
+        roomId,
+        place: null,
+        finishers: null,
+        crossedTheLine: true,
+        ...(placeAcross === undefined
+          ? {}
+          : { placeAcross: placeAcross.place, across: placeAcross.across }),
+      };
     default:
       return undefined;
   }
