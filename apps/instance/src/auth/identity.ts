@@ -245,6 +245,14 @@ export interface IdentityLimits {
    * adapter did not know at all is the bucket `unknown`.
    */
   readonly sessionlessSealedPerAddress: RateLimit;
+  /**
+   * Notices of illegal content per client address (#907): the notice page
+   * takes them from anybody, with no account, so an address is the only
+   * thing to count. In memory, like every limit here, so no address is
+   * stored; the instance's own cap is counted from the store
+   * (`moderation.ts` §`NOTICES_PER_HOUR`).
+   */
+  readonly noticesPerAddress: RateLimit;
 }
 
 export const DEFAULT_LIMITS: IdentityLimits = {
@@ -265,6 +273,9 @@ export const DEFAULT_LIMITS: IdentityLimits = {
   // Chosen: registering, linking and recovering are a handful of requests a
   // rider makes once; the inner routes' own limits apply after this one.
   sessionlessSealedPerAddress: { limit: 30, windowMs: 60_000 },
+  // Chosen: one person reporting what they saw sends one or two; five an
+  // hour leaves room for a correction and bounds a script.
+  noticesPerAddress: { limit: 5, windowMs: 60 * 60_000 },
 };
 
 /**
@@ -294,7 +305,7 @@ export interface IdentityOptions {
   readonly origin: string;
   /** Unix milliseconds. */
   readonly now?: () => number;
-  /** How this instance takes new riders (#775). Unset is `closed` (`config.ts` §`DEFAULT_REGISTRATION`). */
+  /** How this instance takes new riders (#775). Unset is `approval` (`config.ts` §`DEFAULT_REGISTRATION`). */
   readonly registration?: RegistrationMode;
   /** Public-room eligibility's thresholds (#775). */
   readonly publicRooms?: PublicRoomThresholds;
@@ -458,17 +469,14 @@ export interface Identity {
     address: string | null,
   ): Promise<Outcome<{ nonce: string; expiresAt: number }>>;
   /**
-   * Sign in, or register a key this instance has not seen. `mayRegister:
-   * false` — a plaintext request on an instance that holds keys (#1192,
-   * ADR 0047 D-7) — refuses an unseen key `sealed_required`, AFTER its
-   * statement is proven (so only the key's holder learns it) and before
-   * anything is written: no athlete, no codes, no session.
+   * Sign in, or register a key this instance has not seen. On an instance
+   * that holds keys the route is reached only sealed (#1192, #1210, ADR 0047
+   * D-7): the handler refuses a plaintext request before this is called.
    */
   signIn(
     statement: unknown,
     registration: RegistrationFields,
     address?: string | null,
-    options?: { readonly mayRegister?: boolean },
   ): Promise<Outcome<SessionGranted>>;
   /** The caller behind an `Authorization` header, or `undefined`. */
   authenticate(authorization: string | null): Promise<Caller | undefined>;
@@ -744,12 +752,17 @@ export function createIdentity(options: IdentityOptions): Identity {
   const historySearches = createRateLimiter(limits.historySearchesPerAthlete, now);
   const sealedPerSession = createRateLimiter(limits.sealedPerSession, now);
   const sessionlessSealed = createRateLimiter(limits.sessionlessSealedPerAddress, now);
+  const noticesPerAddress = createRateLimiter(limits.noticesPerAddress, now);
   const tickets = createTicketBook(now, () => randomToken(32));
   const moderation = createModeration({
     store,
     now,
     ...(options.moderators === undefined ? {} : { moderators: options.moderators }),
     ...(options.moderationLimits === undefined ? {} : { limits: options.moderationLimits }),
+    // An address the adapter could not give shares one bucket, as a
+    // registration's does: failing closed.
+    allowNoticeFrom: (address) =>
+      noticesPerAddress.allow(address === null ? 'unknown' : addressKey(address)),
   });
 
   /** Check a statement for `purpose`, spend its nonce, and verify it. Answers the key. */
@@ -1023,6 +1036,7 @@ export function createIdentity(options: IdentityOptions): Identity {
     historySearches,
     sealedPerSession,
     sessionlessSealed,
+    noticesPerAddress,
   ];
 
   return {
@@ -1041,6 +1055,7 @@ export function createIdentity(options: IdentityOptions): Identity {
       limits.historySearchesPerAthlete,
       limits.sealedPerSession,
       limits.sessionlessSealedPerAddress,
+      limits.noticesPerAddress,
     ]),
 
     sweepRateLimits() {
@@ -1082,16 +1097,11 @@ export function createIdentity(options: IdentityOptions): Identity {
       return { ok: true, value: { nonce, expiresAt } };
     },
 
-    async signIn(statement, fields, address = null, options = {}) {
+    async signIn(statement, fields, address = null) {
       const proof = await proven(statement, AUTH_PURPOSE);
       if (!proof.ok) return proof;
       const key = await store.findDeviceKey(proof.value);
-      if (key === undefined) {
-        // #1192: a new key registers only sealed, so its recovery codes cross
-        // the edge only as ciphertext (ADR 0047 D-7).
-        if (options.mayRegister === false) return refuse('sealed_required');
-        return register(proof.value, fields, address);
-      }
+      if (key === undefined) return register(proof.value, fields, address);
       if (key.revokedAt !== null) return refuse('key_revoked');
       const athlete = await store.getAthlete(key.athleteId);
       if (athlete === undefined) return refuse('unauthenticated');

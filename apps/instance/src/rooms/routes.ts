@@ -84,6 +84,8 @@ export const ROOM_ROUTES: readonly Route[] = [
   {
     method: 'POST',
     path: '/v1/rooms',
+    // #1210: phase 2 of ADR 0047 D-7.
+    sealed: 'only',
     operationId: 'createRoom',
     reaches: 'own',
     summary:
@@ -116,6 +118,8 @@ export const ROOM_ROUTES: readonly Route[] = [
   {
     method: 'POST',
     path: '/v1/rooms/join',
+    // #1210: phase 2 of ADR 0047 D-7.
+    sealed: 'only',
     operationId: 'joinRoom',
     reaches: { exempt: EXEMPT_ROOM },
     summary:
@@ -142,6 +146,8 @@ export const ROOM_ROUTES: readonly Route[] = [
   {
     method: 'GET',
     path: '/v1/rooms/{roomId}/route',
+    // #1210: phase 2 of ADR 0047 D-7.
+    sealed: 'only',
     operationId: 'getRoomRoute',
     reaches: { exempt: EXEMPT_ROOM },
     summary:
@@ -157,6 +163,8 @@ export const ROOM_ROUTES: readonly Route[] = [
   {
     method: 'GET',
     path: '/v1/rooms/{roomId}/results',
+    // #1210: phase 2 of ADR 0047 D-7.
+    sealed: 'only',
     operationId: 'getRoomResults',
     reaches: { exempt: EXEMPT_ROOM },
     summary:

@@ -784,3 +784,10 @@ export {
 // rather than a parser to write — see `src/workout/workout.ts`.
 
 export * from './workout';
+
+// --- Moderation items (#907, #913) -------------------------------------------
+//
+// The identifier of one item a notice of illegal content can name, which the
+// app shows and the instance's notice page reads back.
+
+export { formatModerationItem, parseModerationItem, type ModerationItem } from './moderation-item';

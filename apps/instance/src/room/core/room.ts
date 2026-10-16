@@ -74,7 +74,7 @@
  * - **Removal.** {@link Room.remove} takes a rider out — their socket refused
  *   `ticket-refused` and closed, a race's seat `dnf`, a ride's seat given up —
  *   and bars the athlete from this room for its life. The instance also
- *   refuses them a ticket from then on (`room_removal`, migration 0026).
+ *   refuses them a ticket from then on (`room_removal`, migration 0031).
  * - **What a flag does** is the adapter's to hand on: a flagged duration in
  *   the view becomes a report the room files (`node/room-host.ts`).
  */

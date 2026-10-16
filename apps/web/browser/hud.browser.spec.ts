@@ -162,6 +162,28 @@ interface HudMeasurement {
   readonly displacement: readonly Displacement[];
   /** #400/#401 — the mute and the volume, measured three ways. */
   readonly sound: readonly SoundControlMeasurement[];
+  readonly draft: readonly DraftMeasurement[];
+}
+
+interface Box {
+  readonly left: number;
+  readonly top: number;
+  readonly right: number;
+  readonly bottom: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+interface DraftMeasurement {
+  readonly draft: number;
+  readonly field: Box | undefined;
+  readonly gauge: Box | undefined;
+  readonly fill: Box | undefined;
+  readonly full: Box | undefined;
+  readonly panel: Box | undefined;
+  readonly valueOverflows: boolean;
+  readonly others: readonly { readonly label: string; readonly box: Box }[];
+  readonly screen: Box;
 }
 
 /** @see hud-harness.tsx §`SoundControlMeasurement` */
@@ -664,6 +686,81 @@ for (const viewport of REGION_VIEWPORTS) {
         // And where a rider can reach it: on screen, over nothing.
         expect(control.onStage, `${name} is off the screen`).toBe(true);
         expect(control.overlapsAPanel, `${name} lands on another panel`).toBe(false);
+      }
+    });
+  });
+}
+
+/**
+ * The gauge's full scale, in percent — `hud/draft-scale.ts`, mirrored like
+ * every other harness type here. The harness renders one stage at it.
+ */
+const DRAFT_FULL_SCALE = 59;
+
+/** The smallest gauge a rider could read on a bar-mounted phone. */
+const GAUGE_MINIMUM = { width: 40, height: 6 } as const;
+
+function inside(inner: Box, outer: Box): boolean {
+  return (
+    inner.left >= outer.left - SUBPIXEL_SLACK &&
+    inner.right <= outer.right + SUBPIXEL_SLACK &&
+    inner.top >= outer.top - SUBPIXEL_SLACK &&
+    inner.bottom <= outer.bottom + SUBPIXEL_SLACK
+  );
+}
+
+function boxesOverlap(a: Box, b: Box): boolean {
+  return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+}
+
+for (const viewport of VIEWPORTS) {
+  test.describe(`#787 — the draft field and its gauge at ${viewport.name}`, () => {
+    test('is drawn inside its field, on screen, over no other field, with its full scale drawn', async ({
+      page,
+    }) => {
+      const measured = await measure(page, viewport);
+      // Both stages, so a harness that stopped rendering them passes over nothing.
+      expect(measured.draft.map((stage) => stage.draft)).toEqual([DRAFT_FULL_SCALE, 20]);
+      for (const stage of measured.draft) {
+        const name = `${viewport.name}/${String(stage.draft)} %`;
+        const { field, gauge, fill, full, panel } = stage;
+        expect(field, `${name}: no draft field`).toBeDefined();
+        expect(gauge, `${name}: no gauge`).toBeDefined();
+        expect(fill, `${name}: no fill`).toBeDefined();
+        expect(full, `${name}: no full-scale mark`).toBeDefined();
+        expect(panel, `${name}: no panel`).toBeDefined();
+        if (
+          field === undefined ||
+          gauge === undefined ||
+          fill === undefined ||
+          full === undefined ||
+          panel === undefined
+        ) {
+          continue;
+        }
+        // Big enough to read, and inside the field it belongs to.
+        expect(gauge.width, `${name} gauge width`).toBeGreaterThanOrEqual(GAUGE_MINIMUM.width);
+        expect(gauge.height, `${name} gauge height`).toBeGreaterThanOrEqual(GAUGE_MINIMUM.height);
+        expect(inside(gauge, field), `${name}: the gauge spills out of its field`).toBe(true);
+        expect(inside(field, panel), `${name}: the field spills out of its panel`).toBe(true);
+        expect(stage.valueOverflows, `${name}: the value overflows`).toBe(false);
+        // On the screen a rider sees, and on top of no other reading.
+        expect(inside(field, stage.screen), `${name}: the field is off the screen`).toBe(true);
+        for (const other of stage.others) {
+          expect(boxesOverlap(field, other.box), `${name} lands on ${other.label}`).toBe(false);
+        }
+        // The fill is the share of the full scale, measured off the drawn boxes.
+        expect(fill.left).toBeCloseTo(gauge.left, 0);
+        expect(fill.width / gauge.width, `${name} fill share`).toBeCloseTo(
+          Math.min(1, stage.draft / DRAFT_FULL_SCALE),
+          1,
+        );
+        // And the full-scale end is drawn where the scale ends.
+        expect(
+          Math.abs((full.left + full.right) / 2 - gauge.right),
+          `${name} full mark`,
+        ).toBeLessThanOrEqual(2);
+        expect(full.height, `${name} full mark height`).toBeGreaterThan(0);
       }
     });
   });

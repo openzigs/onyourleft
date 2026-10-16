@@ -6,10 +6,12 @@ import { PairingCode } from '../camera/PairingCode';
 import { Button } from '../design/Button';
 import { ConfirmDialog } from '../design/ConfirmDialog';
 import { KeptVisible } from '../design/KeptVisible';
+import { SectionHeading } from '../design/SectionHelp';
 import { StatusMessage } from '../design/StatusMessage';
 import {
   INVITE_CARD_CAUTION,
   isConflict,
+  MODERATION_REFUSAL_TEXT,
   MAXIMUM_MODERATION_REASON,
   type InviteOutcome,
   type AccountAction,
@@ -20,9 +22,21 @@ import {
   type ModerationRead,
   type OpenReport,
   type PendingRegistration,
+  type ReceivedNotice,
+  type OpenAppeal,
+  type StatementInput,
   type SuspendedAccount,
+  MAXIMUM_STATEMENT_FACTS,
+  MAXIMUM_STATEMENT_GROUND,
 } from '../instance/moderation-port';
 import { hrefFor, routeById } from '../shell/routes';
+
+/**
+ * An address safe to put in a `mailto:` link: nothing in it can add a
+ * parameter (`?bcc=`, `&body=`). An address stored before the instance
+ * tightened its grammar that fails this is shown as text, never as a link.
+ */
+const LINKABLE_EMAIL = /^[A-Za-z0-9.!#$*+/=^_`{|}~-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/;
 
 /**
  * The Moderation screen (#955): the instance's moderator approves and refuses
@@ -121,6 +135,54 @@ export const SUSPENDED_UNREADABLE_TEXT =
   'The suspended accounts could not be read from the instance, so they are not shown here. You ' +
   'can still lift a suspension by the account’s id, below.';
 
+/** Said in place of the appeals when the instance gave the queues and not them (#911). */
+export const APPEALS_UNREADABLE_TEXT =
+  'The appeals could not be read from the instance, so they are not shown here. The queues ' +
+  'above are as the instance gave them.';
+
+/**
+ * The Appeals section's one short line (#911, #1013). ⚠️ No ⓘ: each appeal
+ * is read before it is decided, so its controls follow its words, and a
+ * section that tucks its explanation is held to 130 px of prose above its
+ * first control (`controls-first.browser.spec.ts`).
+ */
+export const APPEALS_SHORT_TEXT =
+  'Reverse lifts the restriction at once. Your answer is shown to the rider and logged.';
+
+/**
+ * Said on an appeal against the moderator's own decision (#911): the owner's
+ * ruling of 2026-09-30 — decide it, declare it, log it.
+ */
+export const APPEAL_CONFLICT_TEXT =
+  'You took this decision. You may decide the appeal, and the rider is told that you had a ' +
+  'conflict of interest; it is logged with your decision.';
+
+/** What each restriction is called on an appeal. */
+const APPEALED: Readonly<Record<string, string>> = {
+  suspend: 'a suspension',
+  hide_display_name: 'a hidden display name',
+};
+
+/** Said in place of the notices when the instance gave the queues and not them (#907). */
+export const NOTICES_UNREADABLE_TEXT =
+  'The notices could not be read from the instance, so they are not shown here. The queues ' +
+  'above are as the instance gave them.';
+
+/**
+ * The Notices section's one short line (#907, #912, #1013): the owner's
+ * ruling of 2026-10-15 — a receipt is confirmed by hand, and recorded here.
+ * ⚠️ No ⓘ since #912: each notice is read before its steps are recorded, and
+ * a section that tucks its explanation is held to 130 px of prose above its
+ * first control (`controls-first.browser.spec.ts`).
+ */
+export const NOTICES_SHORT_TEXT =
+  'The instance sends no email: reply by hand to any address given, then record it here.';
+
+/** Said on an intimate image content report (OSA s.10(3A)). */
+export const INTIMATE_IMAGE_DEADLINE_TEXT =
+  'An intimate image content report (UK Online Safety Act, section 20A): the content must be ' +
+  'taken down within 48 hours of when it was received.';
+
 /** Said under a list when its next page could not be read (#961). */
 export const MORE_UNREADABLE_TEXT =
   'The next page could not be read from the instance. What is shown above is unchanged.';
@@ -132,12 +194,15 @@ const ACTION_LABEL: Readonly<Record<string, string>> = {
   suspend: 'Suspended an account',
   unsuspend: 'Lifted a suspension',
   hide_display_name: 'Hid a display name',
+  hide_item: 'Hid an item',
   dismiss_report: 'Dismissed a report',
   dismiss_own_report: 'Dismissed a report about themselves, as the only moderator',
   remove_from_room: 'Removed a rider from a room',
   host_remove_from_room: 'A room’s host removed a rider from it',
   activate_moderator_key: 'A moderator’s key activated its own account',
   mint_invite: 'Made an invitation',
+  uphold_appeal: 'Upheld a decision on appeal',
+  reverse_appeal: 'Reversed a decision on appeal',
 };
 
 /** A logged action as a phrase — an unknown one as the instance's own word. */
@@ -173,9 +238,128 @@ interface Confirmation {
 
 interface Choice {
   readonly label: string;
-  readonly run: (reason: string) => Promise<ModerationOutcome>;
+  readonly run: (reason: string, statement?: StatementInput) => Promise<ModerationOutcome>;
   /** Asked first when present; the action runs only once it is confirmed. */
   readonly confirm?: Confirmation;
+  /**
+   * The choice restricts a rider, so its confirmation asks for the statement
+   * of reasons they are shown (#910) — starting from what it is decided on.
+   */
+  readonly statement?: { readonly decidedOn: StatementInput['decidedOn'] };
+}
+
+/** What the statement's own fields are called on the screen (#910). */
+export const STATEMENT_TEXT = {
+  legend: 'Statement of reasons. The rider is shown this, and not the reason above.',
+  facts: 'What they did: the facts you relied on',
+  decidedOn: 'Decided on',
+  report: 'A report from a rider',
+  notice: 'A notice',
+  ownInitiative: 'Your own finding',
+  legal: 'The law it breaks, and why (if it is illegal)',
+  terms: 'The terms it breaks, and why (if it breaks them)',
+  conflict: 'This involves me: declare a conflict of interest',
+  hint: 'Give the law, the terms or both. Never write a place or a coordinate.',
+} as const;
+
+/** An empty statement, decided on `decidedOn`. */
+const blankStatement = (decidedOn: StatementInput['decidedOn']): StatementInput => ({
+  facts: '',
+  decidedOn,
+  legalGround: '',
+  termsGround: '',
+  moderatorConflict: false,
+});
+
+/** The statement's fields, inside a restriction's confirmation (#910). */
+function StatementFields({
+  value,
+  onChange,
+}: {
+  readonly value: StatementInput;
+  readonly onChange: (next: StatementInput) => void;
+}): JSX.Element {
+  const id = useId();
+  const set = (patch: Partial<StatementInput>): void => {
+    onChange({ ...value, ...patch });
+  };
+  return (
+    <fieldset className="oyl-moderation__statement">
+      <legend>{STATEMENT_TEXT.legend}</legend>
+      <p id={`${id}-hint`}>{STATEMENT_TEXT.hint}</p>
+      <p>
+        <label htmlFor={`${id}-facts`}>{STATEMENT_TEXT.facts}</label>
+        <textarea
+          className="oyl-input"
+          id={`${id}-facts`}
+          maxLength={MAXIMUM_STATEMENT_FACTS}
+          aria-describedby={`${id}-hint`}
+          value={value.facts}
+          onChange={(event) => {
+            set({ facts: event.target.value });
+          }}
+        />
+      </p>
+      <fieldset>
+        <legend>{STATEMENT_TEXT.decidedOn}</legend>
+        {(
+          [
+            ['report', STATEMENT_TEXT.report],
+            ['notice', STATEMENT_TEXT.notice],
+            ['own_initiative', STATEMENT_TEXT.ownInitiative],
+          ] as const
+        ).map(([choice, label]) => (
+          <p key={choice}>
+            <input
+              type="radio"
+              id={`${id}-${choice}`}
+              name={`${id}-decided-on`}
+              checked={value.decidedOn === choice}
+              onChange={() => {
+                set({ decidedOn: choice });
+              }}
+            />{' '}
+            <label htmlFor={`${id}-${choice}`}>{label}</label>
+          </p>
+        ))}
+      </fieldset>
+      <p>
+        <label htmlFor={`${id}-legal`}>{STATEMENT_TEXT.legal}</label>
+        <textarea
+          className="oyl-input"
+          id={`${id}-legal`}
+          maxLength={MAXIMUM_STATEMENT_GROUND}
+          value={value.legalGround}
+          onChange={(event) => {
+            set({ legalGround: event.target.value });
+          }}
+        />
+      </p>
+      <p>
+        <label htmlFor={`${id}-terms`}>{STATEMENT_TEXT.terms}</label>
+        <textarea
+          className="oyl-input"
+          id={`${id}-terms`}
+          maxLength={MAXIMUM_STATEMENT_GROUND}
+          value={value.termsGround}
+          onChange={(event) => {
+            set({ termsGround: event.target.value });
+          }}
+        />
+      </p>
+      <p>
+        <input
+          type="checkbox"
+          id={`${id}-conflict`}
+          checked={value.moderatorConflict}
+          onChange={(event) => {
+            set({ moderatorConflict: event.target.checked });
+          }}
+        />{' '}
+        <label htmlFor={`${id}-conflict`}>{STATEMENT_TEXT.conflict}</label>
+      </p>
+    </fieldset>
+  );
 }
 
 /** The way out of every moderation confirmation. */
@@ -243,11 +427,13 @@ function Decide({
   const [busy, setBusy] = useState(false);
   /** The choice whose confirmation is open — #962. */
   const [confirming, setConfirming] = useState<Choice | undefined>(undefined);
+  /** The statement of reasons a restriction's confirmation is writing — #910. */
+  const [statement, setStatement] = useState<StatementInput>(blankStatement('own_initiative'));
 
   async function run(choice: Choice): Promise<void> {
     setBusy(true);
     onDone.starting();
-    const answer = await choice.run(reason);
+    const answer = await choice.run(reason, choice.statement === undefined ? undefined : statement);
     setBusy(false);
     // What it came to — done OR refused — is said by the page rather than
     // here (#960): the row this was pressed on may leave the screen once the
@@ -282,8 +468,14 @@ function Decide({
             unavailable={busy}
             onClick={() => {
               if (busy) return;
-              if (choice.confirm === undefined) void run(choice);
-              else setConfirming(choice);
+              if (choice.confirm === undefined) {
+                void run(choice);
+                return;
+              }
+              if (choice.statement !== undefined) {
+                setStatement(blankStatement(choice.statement.decidedOn));
+              }
+              setConfirming(choice);
             }}
           >
             {choice.label}
@@ -303,6 +495,9 @@ function Decide({
         }}
       >
         <p>{confirming?.confirm?.body}</p>
+        {confirming?.statement === undefined ? null : (
+          <StatementFields value={statement} onChange={setStatement} />
+        )}
       </ConfirmDialog>
     </div>
   );
@@ -441,28 +636,362 @@ function Reports({
                     {
                       label: 'Suspend the account',
                       confirm: suspendConfirmation(report.targetAthleteId),
-                      run: async (reason) =>
+                      statement: { decidedOn: 'report' },
+                      run: async (reason, statement) =>
                         port.actOnAccount(
                           report.targetAthleteId,
                           'suspend',
                           reason,
                           report.reportId,
+                          statement,
                         ),
                     },
                     {
                       label: 'Hide its display name',
                       confirm: hideNameConfirmation(report.targetAthleteId),
-                      run: async (reason) =>
+                      statement: { decidedOn: 'report' },
+                      run: async (reason, statement) =>
                         port.actOnAccount(
                           report.targetAthleteId,
                           'hide_display_name',
                           reason,
                           report.reportId,
+                          statement,
                         ),
                     },
                   ]}
                 />
               )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function Appeals({
+  port,
+  me,
+  appeals,
+  onDone,
+}: {
+  readonly port: ModerationPort;
+  readonly me: string;
+  readonly appeals: readonly OpenAppeal[] | undefined;
+  readonly onDone: Done;
+}): JSX.Element {
+  return (
+    <section className="oyl-panel" aria-labelledby="oyl-moderation-appeals">
+      <h2 id="oyl-moderation-appeals">Appeals</h2>
+      <p>{APPEALS_SHORT_TEXT}</p>
+      {appeals === undefined ? (
+        <StatusMessage tone="warning" label="Not shown">
+          {APPEALS_UNREADABLE_TEXT}
+        </StatusMessage>
+      ) : appeals.length === 0 ? (
+        <p className="oyl-muted">No appeal is open.</p>
+      ) : (
+        <ul className="oyl-moderation__list oyl-moderation__appeals">
+          {appeals.map((appeal) => (
+            <li key={appeal.appealId}>
+              <h3>Appeal {appeal.appealId}</h3>
+              <p>
+                Against {APPEALED[appeal.restriction] ?? appeal.restriction} on account{' '}
+                <code>{appeal.appellantAthleteId}</code>, made {when(appeal.filedAt)}.
+              </p>
+              <p className="oyl-moderation__quoted">The statement said: {appeal.facts}</p>
+              <p className="oyl-moderation__quoted">Their grounds: {appeal.grounds}</p>
+              {appeal.decidedBy === me ? (
+                <StatusMessage tone="warning" label="A conflict">
+                  {APPEAL_CONFLICT_TEXT}
+                </StatusMessage>
+              ) : null}
+              <Decide
+                label={`Your answer to the rider, for appeal ${String(appeal.appealId)}`}
+                onDone={onDone}
+                choices={[
+                  {
+                    label: 'Uphold',
+                    run: async (decision) => port.decideAppeal(appeal.appealId, 'upheld', decision),
+                  },
+                  {
+                    label: 'Reverse',
+                    run: async (decision) =>
+                      port.decideAppeal(appeal.appealId, 'reversed', decision),
+                  },
+                ]}
+              />
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+/** The steps a moderator records on a notice, as the screen names them (#912). */
+export const NOTICE_STEP_TEXT = {
+  acknowledge: 'I have confirmed receipt',
+  decide: 'Record the decision',
+  told: 'I have told them the decision',
+  decisionLabel: 'The decision, as you tell the notifier',
+  logLabel: 'Log entry of the action taken, if any',
+} as const;
+
+/** What has been recorded on a notice so far (#912). */
+function noticeProgress(notice: ReceivedNotice): string {
+  const parts = [
+    notice.acknowledgedAt === null
+      ? undefined
+      : `Receipt confirmed ${when(notice.acknowledgedAt)}.`,
+    notice.decidedAt === null
+      ? 'Not decided yet.'
+      : `Decided ${when(notice.decidedAt)}${
+          notice.logId === null ? '' : `, log entry ${String(notice.logId)}`
+        }.`,
+    notice.notifierToldAt === null ? undefined : `Notifier told ${when(notice.notifierToldAt)}.`,
+  ];
+  return parts.filter((part) => part !== undefined).join(' ');
+}
+
+/** The steps still open on a notice, and the controls that record them (#912). */
+function NoticeSteps({
+  port,
+  notice,
+  onDone,
+}: {
+  readonly port: ModerationPort;
+  readonly notice: ReceivedNotice;
+  readonly onDone: Done;
+}): JSX.Element | null {
+  const id = useId();
+  const [decision, setDecision] = useState('');
+  const [logEntry, setLogEntry] = useState('');
+  const [busy, setBusy] = useState(false);
+  const contact = notice.notifierEmail !== null;
+  async function record(step: Parameters<ModerationPort['recordNoticeStep']>[1]): Promise<void> {
+    if (busy) return;
+    setBusy(true);
+    onDone.starting();
+    const typed = logEntry.trim();
+    const answer =
+      step === 'decided'
+        ? await port.recordNoticeStep(
+            notice.noticeId,
+            step,
+            decision,
+            typed === '' ? undefined : Number(typed),
+          )
+        : await port.recordNoticeStep(notice.noticeId, step);
+    setBusy(false);
+    if (answer.kind === 'done') {
+      setDecision('');
+      setLogEntry('');
+    }
+    await onDone.finished(answer);
+  }
+  const acknowledge = contact && notice.acknowledgedAt === null;
+  const decide = notice.decidedAt === null;
+  const tell = contact && notice.decidedAt !== null && notice.notifierToldAt === null;
+  if (!acknowledge && !decide && !tell) return null;
+  return (
+    <div className="oyl-moderation__decide">
+      {decide ? (
+        <>
+          <p className="oyl-moderation__reason">
+            <label htmlFor={`${id}-decision`}>{NOTICE_STEP_TEXT.decisionLabel}</label>{' '}
+            <input
+              className="oyl-input"
+              id={`${id}-decision`}
+              maxLength={MAXIMUM_MODERATION_REASON * 2}
+              value={decision}
+              onChange={(event) => {
+                setDecision(event.target.value);
+              }}
+            />
+          </p>
+          <p className="oyl-moderation__reason">
+            <label htmlFor={`${id}-log`}>{NOTICE_STEP_TEXT.logLabel}</label>{' '}
+            <input
+              className="oyl-input"
+              id={`${id}-log`}
+              inputMode="numeric"
+              value={logEntry}
+              onChange={(event) => {
+                setLogEntry(event.target.value);
+              }}
+            />
+          </p>
+        </>
+      ) : null}
+      <p className="oyl-ride__actions">
+        {acknowledge ? (
+          <Button
+            variant="secondary"
+            unavailable={busy}
+            onClick={() => void record('acknowledged')}
+          >
+            {NOTICE_STEP_TEXT.acknowledge}
+          </Button>
+        ) : null}
+        {decide ? (
+          <Button variant="secondary" unavailable={busy} onClick={() => void record('decided')}>
+            {NOTICE_STEP_TEXT.decide}
+          </Button>
+        ) : null}
+        {tell ? (
+          <Button
+            variant="secondary"
+            unavailable={busy}
+            onClick={() => void record('notifier_told')}
+          >
+            {NOTICE_STEP_TEXT.told}
+          </Button>
+        ) : null}
+      </p>
+    </div>
+  );
+}
+
+/** What the record's link is called, and what the saved file is called (#912). */
+export const RECORD_TEXT = {
+  heading: 'The record',
+  save: 'Prepare the record',
+  link: 'Save the record (a JSON file)',
+  file: 'moderation-record.json',
+  unreadable: 'The record could not be read from the instance. Nothing was saved.',
+  help:
+    'Every notice and appeal, with when it was received, acknowledged, decided and told, the ' +
+    'decision and the log entry of any action. It holds no name, address or words of a notifier, ' +
+    'and no rider’s grounds.',
+} as const;
+
+/** Saving the record of every notice and appeal (#912). */
+function RecordExport({ port }: { readonly port: ModerationPort }): JSX.Element {
+  const [href, setHref] = useState<string | undefined>(undefined);
+  const [failed, setFailed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  useEffect(
+    () => () => {
+      if (href !== undefined) URL.revokeObjectURL(href);
+    },
+    [href],
+  );
+  return (
+    <section className="oyl-panel" aria-labelledby="oyl-moderation-record">
+      <SectionHeading level={2} id="oyl-moderation-record" help={<p>{RECORD_TEXT.help}</p>}>
+        {RECORD_TEXT.heading}
+      </SectionHeading>
+      <Button
+        variant="secondary"
+        unavailable={busy}
+        onClick={() => {
+          if (busy) return;
+          setBusy(true);
+          void port.exportRecord().then((text) => {
+            setBusy(false);
+            setFailed(text === undefined);
+            setHref(
+              text === undefined
+                ? undefined
+                : URL.createObjectURL(new Blob([text], { type: 'application/json' })),
+            );
+          });
+        }}
+      >
+        {RECORD_TEXT.save}
+      </Button>
+      {href === undefined ? null : (
+        <p>
+          <a href={href} download={RECORD_TEXT.file}>
+            {RECORD_TEXT.link}
+          </a>
+        </p>
+      )}
+      {failed ? (
+        <StatusMessage tone="warning" label="Not saved" live>
+          {RECORD_TEXT.unreadable}
+        </StatusMessage>
+      ) : null}
+    </section>
+  );
+}
+
+function Notices({
+  port,
+  notices,
+  onDone,
+}: {
+  readonly port: ModerationPort;
+  readonly notices: readonly ReceivedNotice[] | undefined;
+  readonly onDone: Done;
+}): JSX.Element {
+  return (
+    <section className="oyl-panel" aria-labelledby="oyl-moderation-notices">
+      <h2 id="oyl-moderation-notices">Notices</h2>
+      <p>{NOTICES_SHORT_TEXT}</p>
+      {notices === undefined ? (
+        <StatusMessage tone="warning" label="Not shown">
+          {NOTICES_UNREADABLE_TEXT}
+        </StatusMessage>
+      ) : notices.length === 0 ? (
+        <p className="oyl-muted">No notice has been received.</p>
+      ) : (
+        <ul className="oyl-moderation__list oyl-moderation__notices">
+          {notices.map((notice) => (
+            <li key={notice.noticeId}>
+              <h3>Notice {notice.noticeId}</h3>
+              <p>Received {when(notice.receivedAt)}.</p>
+              {notice.kind === 'intimate_image' ? (
+                <StatusMessage tone="warning" label="48 hours">
+                  {INTIMATE_IMAGE_DEADLINE_TEXT}
+                </StatusMessage>
+              ) : null}
+              {notice.items.length === 0 ? null : (
+                <>
+                  <p>The items it names:</p>
+                  <ul>
+                    {notice.items.map((item) => (
+                      <li key={item}>
+                        <code>{item}</code>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+              {notice.location === null ? null : (
+                <p className="oyl-moderation__quoted">Where, in their words: {notice.location}</p>
+              )}
+              <p className="oyl-moderation__quoted">
+                Why they think it is illegal: {notice.explanation}
+              </p>
+              <p>
+                {notice.notifierName === null
+                  ? 'They gave no name.'
+                  : `From ${notice.notifierName}.`}{' '}
+                {notice.notifierEmail === null ? (
+                  'They gave no email address, so they cannot be told what you decide.'
+                ) : (
+                  <>
+                    Write to them at{' '}
+                    {LINKABLE_EMAIL.test(notice.notifierEmail) ? (
+                      <a href={`mailto:${notice.notifierEmail}`}>{notice.notifierEmail}</a>
+                    ) : (
+                      notice.notifierEmail
+                    )}
+                    .
+                  </>
+                )}{' '}
+                {notice.bonaFide
+                  ? 'They stated in good faith that it is accurate and complete.'
+                  : 'They did not make the good-faith statement.'}
+              </p>
+              <p>{noticeProgress(notice)}</p>
+              {notice.decision === null ? null : (
+                <p className="oyl-moderation__quoted">The decision: {notice.decision}</p>
+              )}
+              <NoticeSteps port={port} notice={notice} onDone={onDone} />
             </li>
           ))}
         </ul>
@@ -578,8 +1107,8 @@ function AnAccount({
   const [athleteId, setAthleteId] = useState('');
   const act =
     (action: AccountAction) =>
-    async (reason: string): Promise<ModerationOutcome> =>
-      port.actOnAccount(athleteId, action, reason);
+    async (reason: string, statement?: StatementInput): Promise<ModerationOutcome> =>
+      port.actOnAccount(athleteId, action, reason, undefined, statement);
   return (
     <section className="oyl-panel" aria-labelledby="oyl-moderation-account">
       <h2 id="oyl-moderation-account">An account</h2>
@@ -602,12 +1131,84 @@ function AnAccount({
         label="Reason for the log"
         onDone={onDone}
         choices={[
-          { label: 'Suspend', run: act('suspend'), confirm: suspendConfirmation(athleteId) },
+          {
+            label: 'Suspend',
+            run: act('suspend'),
+            confirm: suspendConfirmation(athleteId),
+            statement: { decidedOn: 'own_initiative' },
+          },
           { label: 'Lift the suspension', run: act('unsuspend') },
           {
             label: 'Hide the display name',
             run: act('hide_display_name'),
             confirm: hideNameConfirmation(athleteId),
+            statement: { decidedOn: 'own_initiative' },
+          },
+        ]}
+      />
+    </section>
+  );
+}
+
+/** The item section's words (#913). */
+export const ITEM_TEXT = {
+  heading: 'An item',
+  lead: 'Hide one room, its route, or a row of a race’s result, by the reference the app shows.',
+  label: 'The item’s reference',
+  hide: 'Hide the item',
+} as const;
+
+/** #962, #913: what hiding `item` is confirmed with. */
+export function hideItemConfirmation(item: string): Confirmation {
+  return {
+    title: item.trim() === '' ? 'Hide this item?' : `Hide ${item.trim()}?`,
+    body:
+      'Other riders will no longer see it; the rider whose item it is still does, and nothing is ' +
+      `deleted. ${LOGGED_SENTENCE}`,
+    confirmLabel: 'Hide it',
+  };
+}
+
+/** Hiding one item by its reference (#913). */
+function AnItem({
+  port,
+  onDone,
+}: {
+  readonly port: ModerationPort;
+  readonly onDone: Done;
+}): JSX.Element {
+  const id = useId();
+  const [item, setItem] = useState('');
+  return (
+    <section className="oyl-panel" aria-labelledby="oyl-moderation-item">
+      <h2 id="oyl-moderation-item">{ITEM_TEXT.heading}</h2>
+      <p>{ITEM_TEXT.lead}</p>
+      <p className="oyl-moderation__reason">
+        <label htmlFor={id}>{ITEM_TEXT.label}</label>{' '}
+        <input
+          className="oyl-input"
+          id={id}
+          autoComplete="off"
+          spellCheck={false}
+          maxLength={160}
+          value={item}
+          onChange={(event) => {
+            setItem(event.target.value);
+          }}
+        />
+      </p>
+      <Decide
+        label="Reason for the log"
+        onDone={onDone}
+        choices={[
+          {
+            label: ITEM_TEXT.hide,
+            confirm: hideItemConfirmation(item),
+            statement: { decidedOn: 'notice' },
+            run: async (reason, statement) =>
+              statement === undefined
+                ? { kind: 'refused', text: MODERATION_REFUSAL_TEXT.statement }
+                : port.hideItem(item, reason, statement),
           },
         ]}
       />
@@ -857,6 +1458,9 @@ export function ModerationView({
         reports={state.reports}
         onDone={onDone}
       />
+      <Appeals port={port} me={state.me} appeals={state.appeals} onDone={onDone} />
+      <Notices port={port} notices={state.notices} onDone={onDone} />
+      <RecordExport port={port} />
       <Suspended
         port={port}
         suspended={state.suspended}
@@ -865,6 +1469,7 @@ export function ModerationView({
         onDone={onDone}
       />
       <AnAccount port={port} onDone={onDone} />
+      <AnItem port={port} onDone={onDone} />
       <Invite port={port} />
       <Log
         me={state.me}

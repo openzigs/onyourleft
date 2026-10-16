@@ -208,6 +208,18 @@ function keptPin(storage: { readonly map: Map<string, string> }): string | undef
   return (JSON.parse(raw) as { pin?: string }).pin;
 }
 
+/**
+ * Leave the account with no pin, as a sign-in kept from before phase 2 has
+ * one (#1210): since then an instance holding keys signs no device in without
+ * its card, so an address-only sign-in can no longer make one.
+ */
+function forgetPin(storage: { readonly map: Map<string, string> }): void {
+  const raw = storage.map.get(INSTANCE_ACCOUNT_STORAGE_KEY);
+  if (raw === undefined) return;
+  const { origin, instanceAthleteId } = JSON.parse(raw) as Record<string, unknown>;
+  storage.map.set(INSTANCE_ACCOUNT_STORAGE_KEY, JSON.stringify({ origin, instanceAthleteId }));
+}
+
 const paths = (send: ReturnType<typeof wire>): string[] =>
   send.mock.calls.map(([url, init]) => `${init.method ?? 'GET'} ${new URL(url).pathname}`);
 
@@ -293,13 +305,10 @@ describe('no card, no sealed route (#1190, D-14 Q1)', () => {
     const keys = { body: await served(by, [await statement(T0)]) };
     const send = wire(await world(), keys);
     const { port, storage, dependencies } = device(send);
-    // Signed in with only an address: this device's key is new, and a new key
-    // registers only sealed (#1192) — so it registers through the instance's
-    // own keys here, as another device of the rider's could have, and the
-    // address-only sign-in is the one that follows.
+    // A sign-in that holds no pin: since #1210 an instance holding keys signs
+    // in no device without its card, so the account is one kept from before.
     expect(await port.connect(ORIGIN, 'Anna', by.card)).toMatchObject({ kind: 'connected' });
-    await port.disconnect();
-    expect(await port.connect(ORIGIN, 'Anna')).toMatchObject({ kind: 'connected' });
+    forgetPin(storage);
     expect(keptPin(storage)).toBeUndefined();
     expect(sealedRouteGate(readInstanceAccount(storage), LOADED_LOCALLY)).toEqual({
       kind: 'needs-card',
@@ -324,11 +333,10 @@ describe('no card, no sealed route (#1190, D-14 Q1)', () => {
     const by = await identity();
     const keys = { body: await served(by, [await statement(T0)]) };
     const { port, storage } = device(wire(await world(), keys));
-    // Registered with the card (a new key registers only sealed, #1192), then
-    // signed in again with only the address, which keeps no pin.
+    // Registered with the card, then left with no pin, as a sign-in kept from
+    // before #1210 is.
     await port.connect(ORIGIN, 'Anna', by.card);
-    await port.disconnect();
-    await port.connect(ORIGIN, 'Anna');
+    forgetPin(storage);
     expect(keptPin(storage)).toBeUndefined();
     expect(await port.offerCard(by.card)).toEqual({ kind: 'pinned' });
     expect(keptPin(storage)).toBe(base32Unpadded(by.fingerprint));

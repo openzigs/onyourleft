@@ -41,7 +41,12 @@ import * as analysisJobRide from './0022-analysis-job-ride.ts';
 import * as hostedKeyReasoning from './0023-hosted-key-reasoning.ts';
 import * as roomDrafting from './0024-room-drafting.ts';
 import * as raceRoute from './0025-race-route.ts';
-import * as roomModeration from './0026-room-moderation.ts';
+import * as notices from './0026-notices.ts';
+import * as statements from './0027-statements.ts';
+import * as appeals from './0028-appeals.ts';
+import * as noticeSteps from './0029-notice-steps.ts';
+import * as hiddenItems from './0030-hidden-items.ts';
+import * as roomModeration from './0031-room-moderation.ts';
 
 /** A migration this repository accepts: both directions. */
 export interface InstanceMigration {
@@ -75,5 +80,10 @@ export const MIGRATIONS: Readonly<Record<string, InstanceMigration>> = {
   '0023-hosted-key-reasoning': hostedKeyReasoning,
   '0024-room-drafting': roomDrafting,
   '0025-race-route': raceRoute,
-  '0026-room-moderation': roomModeration,
+  '0026-notices': notices,
+  '0027-statements': statements,
+  '0028-appeals': appeals,
+  '0029-notice-steps': noticeSteps,
+  '0030-hidden-items': hiddenItems,
+  '0031-room-moderation': roomModeration,
 };

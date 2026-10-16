@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * Migration 0026 (#789): **moderation in a room**.
+ * Migration 0031 (#789): **moderation in a room**.
  *
  * - **`report`** is rebuilt so that a report can come from a room:
  *   - `athlete_id`, the reporter, may be `NULL`: a room's plausibility flag is
@@ -89,7 +89,7 @@ export async function down(db: Kysely<unknown>): Promise<void> {
     + (select count(*) from moderation_log where room_id is not null) as n`.execute(db);
   if (Number(held.rows[0]?.n ?? 0) > 0) {
     throw new RoomModerationNotEmptyError(
-      'Migration 0026 cannot be undone: reports from rooms or log entries naming a room exist, and undoing it would delete them. Nothing was changed.',
+      'Migration 0031 cannot be undone: reports from rooms or log entries naming a room exist, and undoing it would delete them. Nothing was changed.',
     );
   }
   await db.schema.alterTable('moderation_log').dropColumn('room_id').execute();

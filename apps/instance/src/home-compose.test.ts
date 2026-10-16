@@ -22,6 +22,19 @@ function setting(key: string): string | undefined {
   return new RegExp(`^\\s*${key}:\\s*(\\S+)\\s*$`, 'm').exec(COMPOSE)?.[1];
 }
 
+describe('deploy/home/compose.yaml — registration (#775)', () => {
+  it('registers by approval when .env leaves it empty, as the instance itself does', () => {
+    expect(setting('OYL_INSTANCE_REGISTRATION')).toBe('${OYL_INSTANCE_REGISTRATION:-approval}');
+    const example = readFileSync(
+      new URL('../deploy/home/instance.env.example', import.meta.url),
+      'utf8',
+    );
+    expect(example).toMatch(/^OYL_INSTANCE_REGISTRATION=approval$/m);
+    const configured = readConfig({ commit: 'a'.repeat(40), registration: 'approval' });
+    expect(configured.ok && configured.config.registration).toBe('approval');
+  });
+});
+
 describe('deploy/home/compose.yaml — the rider’s address behind the tunnel', () => {
   const header = setting('OYL_INSTANCE_CLIENT_ADDRESS_HEADER');
   const trusted = setting('OYL_INSTANCE_TRUSTED_PROXIES');

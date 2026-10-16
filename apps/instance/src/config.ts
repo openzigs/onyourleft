@@ -24,11 +24,11 @@
  * ## Registration and moderation — #775, #83
  *
  * - **`OYL_INSTANCE_REGISTRATION`**: `open`, `approval`, `invite` or `closed`.
- *   Case does not matter. ⚠️ **Unset is `closed`** (#891's merge review): an
- *   instance somebody starts without reading this registers nobody, as main's
- *   instance did before the modes existed. The PROJECT's instance registers by
- *   `approval` — the owner's rulings (#16, Q5 and Q13, 2026-09-28) are about
- *   it — and its image sets that (`Dockerfile`).
+ *   Case does not matter. ⚠️ **Unset is `approval`** (the owner's ruling on
+ *   #775, 2026-10-15): a new rider's account waits for a moderator, and only
+ *   the keys the operator names register active. It was `closed` from #891's
+ *   merge review until that ruling. The project's image also sets `approval`
+ *   explicitly (`Dockerfile`; rulings Q5 and Q13).
  * - **`OYL_INSTANCE_OWNER_KEY`** and **`OYL_INSTANCE_DEPUTY_KEY`**: the
  *   moderators' device keys, 64 lowercase hex characters each. The deputy is
  *   optional, and the project's instance names none (#905).
@@ -62,6 +62,7 @@ import {
   type PublicRoomThresholds,
 } from './moderation/eligibility.ts';
 import type { Moderators } from './moderation/moderation.ts';
+import { readLegalSettings, type LegalSettings, type RawLegalSettings } from './legal.ts';
 
 /** This repository. The same URL `apps/web/src/privacy/policy.ts` §`REPOSITORY` names. */
 export const REPOSITORY = 'https://github.com/openzigs/onyourleft';
@@ -83,14 +84,18 @@ export const REGISTRATION_MODES: readonly RegistrationMode[] = [
   'closed',
 ];
 
-/** The mode an instance registers in when the operator sets none: nobody new (#891's merge review). */
-export const DEFAULT_REGISTRATION: RegistrationMode = 'closed';
+/**
+ * The mode an instance registers in when the operator sets none: a new account
+ * waits for a moderator (the owner's ruling on #775, 2026-10-15; `closed`
+ * before it).
+ */
+export const DEFAULT_REGISTRATION: RegistrationMode = 'approval';
 
 /** The longest name an operator may give their instance, in characters. */
 export const MAXIMUM_INSTANCE_NAME_LENGTH = 64;
 
 /** The raw values, as the environment gives them. */
-export interface RawConfig {
+export interface RawConfig extends RawLegalSettings {
   readonly host?: string | undefined;
   readonly port?: string | undefined;
   readonly commit?: string | undefined;
@@ -225,6 +230,12 @@ export interface Config {
    * operator chose.
    */
   readonly name: string | null;
+  /**
+   * What the legal and contact page names, and whether public rooms are on
+   * (#908, `legal.ts`): on with no contact or no accountable person is a
+   * refusal to start.
+   */
+  readonly legal: LegalSettings;
 }
 
 export type ConfigResult =
@@ -375,6 +386,8 @@ export function readConfig(raw: RawConfig): ConfigResult {
     }
   }
 
+  const legal = readLegalSettings(raw, problems);
+
   if (problems.length > 0 || sourceUrl === undefined) {
     return { ok: false, problems };
   }
@@ -398,6 +411,7 @@ export function readConfig(raw: RawConfig): ConfigResult {
       analysis,
       pictures,
       name: instanceName,
+      legal,
     },
   };
 }

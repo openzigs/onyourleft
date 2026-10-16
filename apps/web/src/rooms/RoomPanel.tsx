@@ -33,7 +33,7 @@
 
 import { useState, type JSX } from 'react';
 
-import type { RouteProfile } from '@onyourleft/domain';
+import { formatModerationItem, type RouteProfile } from '@onyourleft/domain';
 
 import { Button } from '../design/Button';
 import { SectionHeading } from '../design/SectionHelp';
@@ -56,6 +56,16 @@ export interface RoomRouteChoice {
   readonly profile: RouteProfile;
 }
 
+/**
+ * What the references under an entered room are for (#913): each is an
+ * identifier the instance's notice page takes, so a rider can report the room
+ * or its route alone. ⚠️ Draft wording awaiting the owner's approval.
+ */
+export const ROOM_REFERENCES_SUMMARY = 'References, to report something in this room';
+export const ROOM_REFERENCES_TEXT =
+  'To tell the instance’s moderator about this room or its route, copy its reference into the ' +
+  'instance’s notice page. About links to it.';
+
 /** What a room's kind is called on this screen. */
 export const ROOM_KIND_LABEL = { group: 'Group ride', race: 'Race' } as const;
 
@@ -72,6 +82,10 @@ export const ROOMS_REFUSAL_TEXT: Readonly<Record<RoomsRefusal, string>> = {
   'not-the-rooms-route':
     'The room’s route did not arrive as the room made it, so it was not used. Try joining again.',
   'instance-refused': 'The instance would not do that. Try again later.',
+  // #1210 (ADR 0047 D-14 Q6).
+  'cannot-seal':
+    'Rooms on your instance are reached only encrypted, and this device cannot do that right ' +
+    'now. The Instance screen says why.',
 };
 
 /**
@@ -227,6 +241,22 @@ export function RoomPanel(props: RoomPanelProps): JSX.Element {
             Leave the room
           </Button>
         </div>
+        {/* #913: the room and its route, by the identifiers the instance's
+            notice page takes, so either can be reported alone. */}
+        <details className="oyl-rooms__references">
+          <summary>{ROOM_REFERENCES_SUMMARY}</summary>
+          <p>{ROOM_REFERENCES_TEXT}</p>
+          <ul>
+            <li>
+              This room:{' '}
+              <code>{formatModerationItem({ kind: 'room', roomId: entered.roomId })}</code>
+            </li>
+            <li>
+              Its route:{' '}
+              <code>{formatModerationItem({ kind: 'route', roomId: entered.roomId })}</code>
+            </li>
+          </ul>
+        </details>
       </section>
     );
   }

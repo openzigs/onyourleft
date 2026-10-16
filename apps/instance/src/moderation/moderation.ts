@@ -70,10 +70,20 @@ import type {
   AthleteRecord,
   ModerationActionKind,
   ModerationLogEntry,
+  Notice,
   Report,
   RoomFlag,
   SqlStore,
+  Statement,
+  StatementFields,
+  Appeal,
+  NoticeStep,
 } from '../store/sql-store.ts';
+import { exportRecord, type ModerationRecord } from './record.ts';
+import { parseModerationItem } from '@onyourleft/domain';
+import { publishedOrder } from '../rooms/publication.ts';
+import { readAppealGrounds, readStatementFields, RESTRICTIONS } from './statements.ts';
+import { readNoticeForm, type NoticeProblem, type NoticeValues } from './notices.ts';
 
 /** The two moderator roles; the deputy is optional (#905). */
 export type ModeratorRole = 'owner' | 'deputy';
@@ -203,6 +213,72 @@ export interface Moderation {
   ): Promise<ModerationResult<{ logId: number }>>;
 
   openReports(): Promise<readonly Report[]>;
+  /**
+   * A notice of illegal content from anybody (#907), from the notice page's
+   * form and the client's address — counted against that address in memory,
+   * and against the instance's cap from the store, and never stored.
+   */
+  submitNotice(form: URLSearchParams, address: string | null): Promise<NoticeSubmission>;
+  /** Every notice received, oldest first: the moderators' queue of notices (#907). */
+  notices(): Promise<readonly Notice[]>;
+  /** The statements of reasons about this athlete, newest first (#910): their own, and nobody else's. */
+  statements(athleteId: string): Promise<readonly Statement[]>;
+  /** The appeals this athlete filed (#911). */
+  appeals(athleteId: string): Promise<readonly Appeal[]>;
+  /**
+   * Appeal the statement `statementId` (#911): only one about the caller,
+   * once. A statement that is somebody else's is `not_found`, as one that does
+   * not exist is.
+   */
+  appeal(
+    athleteId: string,
+    statementId: string,
+    grounds: unknown,
+  ): Promise<ModerationResult<{ appealId: number }>>;
+  /**
+   * Hide one item (#913): a room's listing (`room:`), the route shown in a
+   * room (`route:`) or one row of a race's result (`result:<room>:<row>`),
+   * by the identifier a notice names it by — with a reason and a statement of
+   * reasons its owner is shown, all in one transaction with the log entry.
+   * A display name (`rider:`) is hidden by `hide-display-name`. An item of
+   * a moderator's is refused, and the attempt logged, as `act` refuses.
+   */
+  hideItem(
+    moderatorId: string,
+    item: unknown,
+    fields: { readonly reason?: unknown; readonly statement?: unknown },
+  ): Promise<ModerationResult<{ logId: number }>>;
+  /** Every step taken on every notice (#912). */
+  noticeSteps(): Promise<readonly NoticeStep[]>;
+  /**
+   * Record a step taken on a notice (#912): `acknowledged`, `decided` (with
+   * the decision, and the log entry of any action it took) or
+   * `notifier_told`. Each once, in that sense of order, and never for a
+   * notifier who gave no address but the decision.
+   */
+  recordNoticeStep(
+    moderatorId: string,
+    noticeId: string,
+    step: unknown,
+    decision: unknown,
+    logId: unknown,
+  ): Promise<ModerationResult<null>>;
+  /** The record of every notice and appeal, with no personal detail of a notifier (#912). */
+  record(): Promise<ModerationRecord>;
+  /** The moderators' queue of appeals, oldest first, each with the statement it appeals (#911). */
+  openAppeals(): Promise<readonly OpenAppeal[]>;
+  /**
+   * Decide an appeal (#911): `upheld` leaves the restriction, `reversed` lifts
+   * it, in one transaction with the log entry. A moderator who took the
+   * decision appealed decides it all the same — the owner's ruling of
+   * 2026-09-30 — and the conflict is declared to the rider and recorded.
+   */
+  decideAppeal(
+    moderatorId: string,
+    appealId: string,
+    outcome: unknown,
+    decision: unknown,
+  ): Promise<ModerationResult<{ logId: number; moderatorConflict: boolean }>>;
   /** The approval queue (#775): every athlete awaiting a moderator's decision. */
   pendingRegistrations(): Promise<readonly AthleteRecord[]>;
   /**
@@ -220,7 +296,12 @@ export interface Moderation {
     moderatorId: string,
     action: AthleteAction,
     target: string,
-    fields: { readonly reason?: unknown; readonly reportId?: unknown },
+    fields: {
+      readonly reason?: unknown;
+      readonly reportId?: unknown;
+      /** The statement of reasons (#910): required of a restriction ({@link RESTRICTIONS}). */
+      readonly statement?: unknown;
+    },
   ): Promise<ModerationResult<{ logId: number }>>;
   dismiss(
     moderatorId: string,
@@ -229,13 +310,47 @@ export interface Moderation {
   ): Promise<ModerationResult<{ logId: number }>>;
 }
 
+/** An open appeal, with what it appeals (#911). */
+export interface OpenAppeal {
+  readonly appeal: Appeal;
+  readonly statement: Statement;
+}
+
 export interface ModerationOptions {
   readonly store: SqlStore;
   /** Unix milliseconds. */
   readonly now: () => number;
   readonly moderators?: Moderators;
   readonly limits?: ModerationLimits;
+  /**
+   * Count one notice against a client's address and say whether it is within
+   * the limit (#907) — `auth/identity.ts`'s limiter, in memory, so no address
+   * is stored. Absent: no per-address limit, only the instance's cap.
+   */
+  readonly allowNoticeFrom?: (address: string | null) => boolean;
 }
+
+/**
+ * How many notices the whole instance takes in an hour, from everybody
+ * (#907): counted from the notices' own times, so a restart hands nobody a
+ * fresh allowance and a crowd of addresses cannot fill the database.
+ */
+export const NOTICES_PER_HOUR = 100;
+
+/** What sending the notice page's form did. */
+export type NoticeSubmission =
+  | {
+      readonly kind: 'received';
+      readonly reference: number;
+      readonly receivedAt: number;
+      readonly emailGiven: boolean;
+    }
+  | {
+      readonly kind: 'invalid';
+      readonly problems: readonly NoticeProblem[];
+      readonly values: NoticeValues;
+    }
+  | { readonly kind: 'too-many' };
 
 const refuse = (code: ErrorCode, fields?: readonly FieldProblem[]): ModerationResult<never> =>
   fields === undefined ? { ok: false, code } : { ok: false, code, fields };
@@ -455,6 +570,34 @@ export function createModeration(options: ModerationOptions): Moderation {
     },
 
     openReports: () => store.listOpenReports(),
+
+    async submitNotice(form, address) {
+      const read = readNoticeForm(form);
+      if (!read.ok) return { kind: 'invalid', problems: read.problems, values: read.values };
+      // Only a notice that would be kept is counted, so correcting a typo
+      // costs nothing; the address first, so it is counted even past the cap.
+      if (options.allowNoticeFrom?.(address) === false) return { kind: 'too-many' };
+      const receivedAt = seconds();
+      // An intimate image report is never turned away by the instance-wide cap
+      // (OSA s.20A's 48-hour duty): a crowd of addresses could otherwise fill
+      // it and lock the one notifier who cannot wait out an hour. The
+      // per-address limit above still bounds it.
+      if (
+        read.notice.kind !== 'intimate_image' &&
+        (await store.countNoticesSince(receivedAt - 60 * 60)) >= NOTICES_PER_HOUR
+      ) {
+        return { kind: 'too-many' };
+      }
+      const reference = await store.putNotice({ ...read.notice, receivedAt });
+      return {
+        kind: 'received',
+        reference,
+        receivedAt,
+        emailGiven: read.notice.notifierEmail !== null,
+      };
+    },
+
+    notices: () => store.listNotices(),
     pendingRegistrations: () => store.listPendingAthletes(),
     async logPage(query) {
       const request = parsePageRequest(query);
@@ -523,6 +666,14 @@ export function createModeration(options: ModerationOptions): Moderation {
         }
         reportId = fields.reportId as number;
       }
+      // #910: a restriction is refused without its statement of reasons, so
+      // no rider is ever restricted without being able to read why.
+      let statement: StatementFields | undefined;
+      if (RESTRICTIONS.has(action)) {
+        const read = readStatementFields(fields.statement, now());
+        if (!read.ok) return refuse('validation_failed', read.fields);
+        statement = read.fields;
+      }
       // Nobody moderates a moderator, themselves included: the owner and the
       // deputy cannot suspend each other, or hide each other's name. The
       // attempt is logged, and changes nothing.
@@ -537,8 +688,184 @@ export function createModeration(options: ModerationOptions): Moderation {
           reportId,
           reason: checked.reason,
           at: seconds(),
+          ...(statement === undefined ? {} : { statement }),
         }),
       );
+    },
+
+    statements: (athleteId) => store.listStatements(athleteId),
+
+    appeals: (athleteId) => store.listAppeals(athleteId),
+
+    noticeSteps: () => store.listNoticeSteps(),
+
+    async hideItem(moderatorId, item, fields) {
+      const parsed = typeof item === 'string' ? parseModerationItem(item) : undefined;
+      if (parsed === undefined) {
+        return refuse('validation_failed', [
+          { field: 'item', problem: 'must be an item’s identifier, as the app shows it' },
+        ]);
+      }
+      if (parsed.kind === 'rider') {
+        return refuse('validation_failed', [
+          { field: 'item', problem: 'a display name is hidden with hide-display-name' },
+        ]);
+      }
+      const checked = checkReason(fields.reason);
+      if (!checked.ok) {
+        return refuse('validation_failed', [{ field: 'reason', problem: checked.problem }]);
+      }
+      const statement = readStatementFields(fields.statement, now());
+      if (!statement.ok) return refuse('validation_failed', statement.fields);
+      // Whose the item is: the room's maker for its listing and its route,
+      // the rider in that row for a row of a result. Nobody's is `not_found`.
+      let owner: string | undefined;
+      if (parsed.kind === 'room' || parsed.kind === 'route') {
+        owner = await store.getRoomCreator(parsed.roomId);
+      } else {
+        const course = await store.getRoomCourse(parsed.roomId);
+        if (course?.raceFinishedAt !== undefined) {
+          const order = publishedOrder(
+            await store.listRoomResults(parsed.roomId),
+            course.finishers ?? 0,
+          );
+          owner = order[parsed.row - 1]?.athleteId;
+        }
+      }
+      if (owner === undefined) return refuse('not_found');
+      if ((await roleOf(owner)) !== undefined) {
+        return refusedOnModerator('hide_item', moderatorId, owner, null, checked.reason);
+      }
+      const hidden = await store.hideItem({
+        item: (item as string).trim(),
+        ownerAthleteId: owner,
+        actorAthleteId: moderatorId,
+        reason: checked.reason,
+        statement: statement.fields,
+        at: seconds(),
+      });
+      return hidden.outcome === 'applied'
+        ? { ok: true, value: { logId: hidden.logId } }
+        : refuse('moderation_not_applicable');
+    },
+
+    async recordNoticeStep(moderatorId, noticeId, step, decision, logId) {
+      if (!/^[1-9][0-9]{0,15}$/.test(noticeId)) return refuse('not_found');
+      if (step !== 'acknowledged' && step !== 'decided' && step !== 'notifier_told') {
+        return refuse('validation_failed', [
+          { field: 'step', problem: 'must be acknowledged, decided or notifier_told' },
+        ]);
+      }
+      let decided: string | null = null;
+      let entry: number | null = null;
+      if (step === 'decided') {
+        // The decision is what the notifier is told: held to an appeal's rules.
+        const checked = readAppealGrounds(decision);
+        if (!checked.ok) {
+          return refuse('validation_failed', [{ field: 'decision', problem: checked.problem }]);
+        }
+        decided = checked.grounds;
+        if (logId !== undefined && logId !== null) {
+          if (!Number.isSafeInteger(logId) || (logId as number) < 1) {
+            return refuse('validation_failed', [
+              { field: 'logId', problem: 'must be a moderation log entry’s id' },
+            ]);
+          }
+          entry = logId as number;
+        }
+      } else if (
+        (decision !== undefined && decision !== null) ||
+        (logId !== undefined && logId !== null)
+      ) {
+        return refuse('validation_failed', [
+          { field: 'decision', problem: 'only a decided step carries a decision' },
+        ]);
+      }
+      const recorded = await store.putNoticeStep({
+        noticeId: Number(noticeId),
+        step,
+        actorAthleteId: moderatorId,
+        decision: decided,
+        logId: entry,
+        at: seconds(),
+      });
+      switch (recorded) {
+        case 'recorded':
+          return { ok: true, value: null };
+        case 'not_found':
+          return refuse('not_found');
+        case 'no_such_log_entry':
+          return refuse('validation_failed', [
+            { field: 'logId', problem: 'must be a moderation log entry’s id' },
+          ]);
+        default:
+          return refuse('moderation_not_applicable');
+      }
+    },
+
+    async record() {
+      const [notices, steps, appeals] = await Promise.all([
+        store.listNotices(),
+        store.listNoticeSteps(),
+        store.listEveryAppeal(),
+      ]);
+      return exportRecord(notices, steps, appeals);
+    },
+
+    async appeal(athleteId, statementId, grounds) {
+      if (!/^[1-9][0-9]{0,15}$/.test(statementId)) return refuse('not_found');
+      const checked = readAppealGrounds(grounds);
+      if (!checked.ok) {
+        return refuse('validation_failed', [{ field: 'grounds', problem: checked.problem }]);
+      }
+      const filed = await store.putAppeal({
+        statementLogId: Number(statementId),
+        appellantAthleteId: athleteId,
+        grounds: checked.grounds,
+        filedAt: seconds(),
+      });
+      if (filed.outcome === 'filed') return { ok: true, value: { appealId: filed.appealId } };
+      return refuse(filed.outcome === 'not_found' ? 'not_found' : 'already_appealed');
+    },
+
+    async openAppeals() {
+      const open = await store.listOpenAppeals();
+      const result: OpenAppeal[] = [];
+      for (const appeal of open) {
+        const statement = (await store.listStatements(appeal.appellantAthleteId)).find(
+          (each) => each.logId === appeal.statementLogId,
+        );
+        if (statement !== undefined) result.push({ appeal, statement });
+      }
+      return result;
+    },
+
+    async decideAppeal(moderatorId, appealId, outcome, decision) {
+      if (!/^[1-9][0-9]{0,15}$/.test(appealId)) return refuse('not_found');
+      if (outcome !== 'upheld' && outcome !== 'reversed') {
+        return refuse('validation_failed', [
+          { field: 'outcome', problem: 'must be upheld or reversed' },
+        ]);
+      }
+      // The decision is what the rider reads, so it is held to the appeal's rules.
+      const checked = readAppealGrounds(decision);
+      if (!checked.ok) {
+        return refuse('validation_failed', [{ field: 'decision', problem: checked.problem }]);
+      }
+      const decided = await store.decideAppeal({
+        appealId: Number(appealId),
+        actorAthleteId: moderatorId,
+        outcome,
+        decision: checked.grounds,
+        at: seconds(),
+      });
+      if (decided.outcome === 'applied') {
+        return {
+          ok: true,
+          value: { logId: decided.logId, moderatorConflict: decided.moderatorConflict },
+        };
+      }
+      return refuse(decided.outcome === 'not_found' ? 'not_found' : 'moderation_not_applicable');
     },
 
     async dismiss(moderatorId, reportId, reason) {

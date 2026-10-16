@@ -53,6 +53,7 @@ import {
   startModerationWorld,
   type ModerationWorld,
   type Rider,
+  TEST_STATEMENT,
 } from './moderation-testing.ts';
 
 const isAthleteReach = (reach: Reach): reach is { readonly athlete: string } =>
@@ -88,6 +89,14 @@ const EXEMPT: Readonly<
       path: '/v1/reports',
       body: { athleteId: subject, reason: 'Abusive display name' },
     }),
+  },
+  getNoticePage: {
+    heldElsewhere:
+      'the notice page (#907): the same form for anybody, naming nobody and reading nothing (moderation/notices.test.ts)',
+  },
+  submitNotice: {
+    heldElsewhere:
+      'a notice goes to the moderators, not to anybody it names, and answers the same whatever its items name: it never looks them up (moderation/notices.test.ts)',
   },
   createRoomTicket: {
     heldElsewhere:
@@ -131,6 +140,10 @@ const NOT_AN_ATHLETE: Readonly<Record<string, string>> = {
   roomId: 'a room; who may enter it is the ticket’s rule, and blocking inside it is #789’s',
   publicKey: 'one of the CALLER’s own device keys; the store scopes the revocation to them',
   reportId: 'a report, read and decided only on the moderators’ routes',
+  statementId:
+    'a statement of reasons; the store files an appeal only against one about the CALLER (#911)',
+  appealId: 'an appeal, read and decided only on the moderators’ routes (#911)',
+  noticeId: 'a notice, read and recorded only on the moderators’ routes (#912)',
   content:
     'the SHA-256 of an activity file; the sync store reads only the record the CALLER holds of it (#38, #776)',
   kind: 'a kind of sync item; the item read or written is the CALLER’s own (#776)',
@@ -176,7 +189,8 @@ const NOT_AN_ATHLETE_FIELD: Readonly<Record<string, string>> = {
   token: 'a token mailed to the CALLER’s own recovery address',
   reason: 'free text a reporter or a moderator writes; never an id the route acts on',
   reportId: 'a report, read and decided only on the moderators’ routes',
-  statement: 'the CALLER’s own signed erasure statement',
+  statement:
+    'the CALLER’s own signed erasure statement, or the statement of reasons a moderator writes with a restriction (#910)',
   mayBeRaced: 'the CALLER’s consent for their own ride (#331)',
   routeSha256:
     'the SHA-256 of a route’s canonical GPX (#331); the riders behind it are each asked of the choke point',
@@ -206,6 +220,12 @@ const NOT_AN_ATHLETE_FIELD: Readonly<Record<string, string>> = {
   code: 'a room’s code; its members are whoever holds it (ADR 0028 D-6.3)',
   riderId:
     'a SEAT in a room the caller is in (#789); the room itself says who sits there, and the report or removal goes through the moderators’ log',
+  grounds: 'the CALLER’s own grounds for appealing a decision about them (#911)',
+  item: 'which item a moderator hides — a room’s listing, its route or one result row — by its identifier (#913)',
+  outcome: 'a moderator’s outcome for an appeal: upheld or reversed (#911)',
+  decision: 'free text a moderator writes: what the rider or the notifier is told (#911, #912)',
+  step: 'which step a moderator records on a notice (#912)',
+  logId: 'a moderation log entry, read only on the moderators’ routes (#912)',
 };
 
 const bodyFields = (route: Route): string[] =>
@@ -339,6 +359,7 @@ describe('every path a blocked athlete could use is refused, as though nobody we
           `/v1/moderation/athletes/${suspended.athleteId}/suspend`,
           {
             reason: 'Cheating',
+            statement: TEST_STATEMENT,
           },
         )
       ).status,
@@ -485,13 +506,16 @@ describe('every path a blocked athlete could use is refused, as though nobody we
 
 /**
  * A suspended rider's way out (#898): the routes that admit their limited
- * session are TWO, declared on the route table, and every other session route
- * refuses it — walked from the table, so a route added later is walked too.
+ * session are FOUR since #911, declared on the route table, and every other
+ * session route refuses it — walked from the table, so a route added later is
+ * walked too. The third is reading the statements of reasons about their own
+ * account: a suspended rider must be able to read why (DSA Art. 17(1)(d),
+ * #910); the fourth is appealing one of them (OSA s.21(4)(d), #911).
  */
-const ADMITS_SUSPENDED = ['eraseAccount', 'exportAccount'];
+const ADMITS_SUSPENDED = ['appealStatement', 'eraseAccount', 'exportAccount', 'listStatements'];
 
-describe('a suspended rider’s way-out session reaches the export and the deletion, and nothing else (#898)', () => {
-  it('is declared by exactly the account export and deletion, and no other route', () => {
+describe('a suspended rider’s way-out session reaches the export, the deletion, their statements and an appeal, and nothing else (#898, #910, #911)', () => {
+  it('is declared by exactly the account export and deletion, the statements and the appeal, and no other route', () => {
     expect(
       ROUTES.filter((route) => route.admitsSuspended === true)
         .map((route) => route.operationId)
@@ -517,7 +541,7 @@ describe('a suspended rider’s way-out session reaches the export and the delet
       world.owner,
       'POST',
       `/v1/moderation/athletes/${leaving.athleteId}/suspend`,
-      { reason: 'Cheating' },
+      { reason: 'Cheating', statement: TEST_STATEMENT },
     );
     expect(suspended.status).toBe(200);
     const opened = await world.call('POST', '/v1/auth/leave-session', {
