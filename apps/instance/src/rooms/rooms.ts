@@ -171,6 +171,12 @@ export interface Rooms {
     client: ClientInfo,
   ): Promise<Outcome<JoinedRoom>>;
   route(caller: Caller, roomId: string): Promise<Outcome<RoomRoute>>;
+  /**
+   * Who the caller is to a room that is not over (#789): its `host` (the
+   * rider who made it), a `member` (who joined it by its code — or anybody,
+   * in a room an operator opened, which has no members list), or `undefined`.
+   */
+  standing(caller: Caller, roomId: string): Promise<'host' | 'member' | undefined>;
   results(caller: Caller, roomId: string): Promise<Outcome<PublishedResult>>;
   /** A room worker let `roomId` go at `phase` (`room/node/router.ts`). */
   roomLetGo(roomId: string, phase: RoomPhase): Promise<void>;
@@ -372,6 +378,10 @@ export function createRooms(options: RoomsOptions): Rooms {
       if (typed === undefined) return refuse('not_found');
       const found = await store.findPrivateRoomByCode(await roomCodeDigest(typed));
       if (found === undefined || found.closedAt !== null) return refuse('not_found');
+      // #913: a room whose listing a moderator hid takes nobody new — the
+      // same answer as a room that is over, so the code tells a guesser nothing.
+      const hidden = await store.listHiddenItemsOfRoom(found.roomId);
+      if (hidden.some((each) => each.item === `room:${found.roomId}`)) return refuse('not_found');
       const room = await store.getRoom(found.roomId);
       const course = await store.getRoomCourse(found.roomId);
       if (room === undefined || course === undefined) return refuse('not_found');
@@ -389,9 +399,30 @@ export function createRooms(options: RoomsOptions): Rooms {
       };
     },
 
+    async standing(caller, roomId) {
+      const made = await store.getPrivateRoom(roomId);
+      if (made === undefined) {
+        return (await store.getRoom(roomId)) === undefined ? undefined : 'member';
+      }
+      if ((await openRoomOf(caller, roomId)) === undefined) return undefined;
+      return (await store.getRoomCreator(roomId)) === caller.athleteId ? 'host' : 'member';
+    },
+
     async route(caller, roomId) {
       const room = await openRoomOf(caller, roomId);
       if (room === undefined) return refuse('not_found');
+      // #913: a hidden route — or a hidden room — is shown to nobody but the
+      // rider whose it is; nothing is deleted.
+      const hidden = await store.listHiddenItemsOfRoom(roomId);
+      if (
+        hidden.some(
+          (each) =>
+            (each.item === `route:${roomId}` || each.item === `room:${roomId}`) &&
+            each.ownerAthleteId !== caller.athleteId,
+        )
+      ) {
+        return refuse('not_found');
+      }
       const sha256 = (await store.getRoom(roomId))?.routeSha256;
       const bytes = sha256 === undefined ? undefined : await routes.get(sha256);
       if (sha256 === undefined || bytes === undefined) return refuse('not_found');
@@ -416,12 +447,20 @@ export function createRooms(options: RoomsOptions): Rooms {
       for (const result of results) {
         names.set(result.athleteId, await options.nameFor(caller.athleteId, result.athleteId));
       }
+      // #913: rows a moderator hid, by the row number a notice names them by.
+      // Kept by owner, not row number: an erased rider moves later rows up.
+      const hiddenOwners = new Set(
+        (await store.listHiddenItemsOfRoom(roomId))
+          .filter((each) => each.item.startsWith(`result:${roomId}:`))
+          .map((each) => each.ownerAthleteId),
+      );
       return {
         ok: true,
         value: publishRace(
           results,
           { viewerAthleteId: caller.athleteId, nameFor: (athleteId) => names.get(athleteId) },
           course?.finishers ?? 0,
+          hiddenOwners,
         ),
       };
     },

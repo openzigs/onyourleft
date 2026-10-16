@@ -89,6 +89,7 @@ export function createTicketBook(now: () => number, token: () => string): Ticket
           athleteId: entry.athleteId,
           declaredMassKilograms: entry.declaredMassKilograms,
           displayName: entry.displayName,
+          ...(entry.blocks === undefined ? {} : { blocks: entry.blocks }),
         };
       };
     },

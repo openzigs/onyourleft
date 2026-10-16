@@ -248,6 +248,8 @@ export const ROUTES: readonly Route[] = [
   {
     method: 'POST',
     path: '/v1/rooms/{roomId}/start',
+    // #1210: phase 2 of ADR 0047 D-7.
+    sealed: 'only',
     operationId: 'startRoom',
     reaches: {
       exempt:

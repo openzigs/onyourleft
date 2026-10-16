@@ -50,6 +50,9 @@ import type {
   LinkCodeTable,
   ModerationLogTable,
   NoticeTable,
+  StatementTable,
+  AppealTable,
+  NoticeStepTable,
   RecoveryCodeTable,
   RecoveryEmailConfirmationTable,
   RecoveryEmailTable,
@@ -485,16 +488,30 @@ export interface Block {
   readonly createdAt: number;
 }
 
-/** A report (#83): its reporter is `athleteId`. */
+/**
+ * A report (#83): its reporter is `athleteId` — or nobody, for a plausibility
+ * flag a room filed itself (#789, ADR 0028 D-2 rule 3).
+ */
 export interface Report {
   readonly id: number;
-  readonly athleteId: string;
+  readonly athleteId: string | null;
   readonly targetAthleteId: string;
   readonly reason: string;
   readonly createdAt: number;
   readonly closedAt: number | null;
   readonly closedByAthleteId: string | null;
   readonly outcome: string | null;
+  /** The room it came from, and the room's tick then (#789); `null` from outside a room. */
+  readonly roomId: string | null;
+  readonly roomTick: number | null;
+  /** A flag's breached ceiling (#789): never a power trace. `null` for a rider's report. */
+  readonly flag: RoomFlag | null;
+}
+
+/** A plausibility ceiling a rider breached in a room (#789): which, by its duration and W/kg. */
+export interface RoomFlag {
+  readonly durationSeconds: number;
+  readonly ceilingWattsPerKilogram: number;
 }
 
 /**
@@ -521,20 +538,100 @@ export interface Notice {
 /** What a notice is stored with: everything but the id the store gives it. */
 export type NewNotice = Omit<Notice, 'id'>;
 
+/** A step taken on a notice after it was received (#912). */
+export type NoticeStepKind = 'acknowledged' | 'decided' | 'notifier_told';
+
+/** One step taken on a notice, by whom and when (#912). */
+export interface NoticeStep {
+  readonly id: number;
+  readonly noticeId: number;
+  readonly step: NoticeStepKind;
+  readonly actorAthleteId: string;
+  /** For `decided`: the decision, in the moderator's words. */
+  readonly decision: string | null;
+  /** For `decided`: the moderation log entry of the action it took, if any. */
+  readonly logId: number | null;
+  /** Unix seconds. */
+  readonly at: number;
+}
+
+/** What recording a step did (#912). */
+export type NoticeStepRecorded =
+  | 'recorded'
+  | 'not_found'
+  /** This step is already recorded for this notice: each happens once. */
+  | 'already'
+  /** The notifier gave no address, so there is nobody to acknowledge or tell. */
+  | 'no_contact'
+  /** The notifier cannot be told a decision not yet recorded. */
+  | 'not_decided'
+  /** The decision names a log entry that does not exist. */
+  | 'no_such_log_entry';
+
 /** What a moderator may do (#83, #775). */
 export type ModerationActionKind =
   | 'suspend'
   | 'unsuspend'
   | 'hide_display_name'
   | 'dismiss_report'
+  /**
+   * The only moderator dismissing a report about themselves (#905): nobody
+   * else could decide it, so they do, and the log says it was their own. Its
+   * target is the moderator, and its reason is their declaration.
+   */
+  | 'dismiss_own_report'
   | 'approve_registration'
   | 'refuse_registration'
+  /** A moderator removed a rider from a room (#789): `roomId` names it. */
+  | 'remove_from_room'
+  /** A private room's host removed a rider from it (#789): not a moderator's action, logged as one. */
+  | 'host_remove_from_room'
+  /**
+   * One item hidden (#913): a room's listing, the route shown in a room, or
+   * a row of a race's result. Taken through {@link SqlStore.hideItem}, never
+   * {@link SqlStore.moderate}: it names an item, and the athlete is its owner.
+   */
+  | 'hide_item'
   /**
    * The instance's, not a moderator's: a pending account whose key the
    * operator named as a moderator's signed in, and was activated, because
    * nobody may approve a moderator (#891's review). Its actor is the account.
    */
   | 'activate_moderator_key';
+
+/**
+ * What a restriction is decided on, and the DSA Art. 17(3) fields the
+ * affected rider is told (#910). (a), what was restricted, is the action
+ * itself; (c), automated means, are never used; (f), redress, comes from the
+ * instance's settings when the statement is read.
+ */
+export interface StatementFields {
+  /** (b) the facts and circumstances relied on. */
+  readonly facts: string;
+  /** (b) what the decision was taken on. */
+  readonly decidedOn: 'notice' | 'report' | 'own_initiative';
+  /** (d) the law relied on, and why the content is illegal under it; `null` when decided on the terms alone. */
+  readonly legalGround: string | null;
+  /** (e) the terms relied on, and why the content breaks them; `null` when decided on the law alone. */
+  readonly termsGround: string | null;
+  /** The notifier, named only where it is necessary to see why (recital 54); usually `null`. */
+  readonly notifierNamed: string | null;
+  /** The moderator declared a conflict of interest (the owner's ruling of 2026-09-30). */
+  readonly moderatorConflict: boolean;
+  /** When the restriction ends, Unix seconds; `null` for no end date. */
+  readonly endsAt: number | null;
+}
+
+/** A statement of reasons as it was written, with its log entry's id and time (#910). */
+export interface Statement extends StatementFields {
+  readonly logId: number;
+  readonly targetAthleteId: string;
+  /** The moderator who took the decision (#911: an appeal's conflict is theirs). Never shown to the rider. */
+  readonly actorAthleteId: string;
+  /** The action it explains: `suspend`, `hide_display_name`. */
+  readonly restriction: string;
+  readonly at: number;
+}
 
 /** One moderator action, as it is asked for and as it is logged. */
 export interface ModerationAction {
@@ -545,6 +642,14 @@ export interface ModerationAction {
   readonly reportId: number | null;
   readonly reason: string;
   readonly at: number;
+  /** The room the action is taken in (#789): required by the two removals, `null` otherwise. */
+  readonly roomId?: string | null;
+  /**
+   * The statement of reasons the affected rider is told (#910), written in the
+   * same transaction as the log entry. Required of a restriction by
+   * `moderation.ts`; the store writes it whenever it is given.
+   */
+  readonly statement?: StatementFields;
 }
 
 /**
@@ -553,12 +658,50 @@ export interface ModerationAction {
  * included — which was refused and changed nothing (#891's review).
  */
 export type LoggedActionKind =
-  ModerationActionKind | 'mint_invite' | `refused_${ModerationActionKind}`;
+  | ModerationActionKind
+  | 'mint_invite'
+  | `refused_${ModerationActionKind}`
+  /** An appeal decided (#911): the restriction stands, or it is reversed. */
+  | 'uphold_appeal'
+  | 'reverse_appeal';
+
+/** An appeal against a restriction (#911), with its decision once there is one. */
+export interface Appeal {
+  readonly id: number;
+  /** The statement of reasons — and so the log entry — it appeals. */
+  readonly statementLogId: number;
+  readonly appellantAthleteId: string;
+  readonly grounds: string;
+  /** Unix seconds. */
+  readonly filedAt: number;
+  readonly outcome: 'upheld' | 'reversed' | null;
+  /** What the rider is told, once decided. */
+  readonly decision: string | null;
+  /** The deciding moderator took the decision appealed, and declared it. */
+  readonly moderatorConflict: boolean | null;
+  readonly decidedAt: number | null;
+  readonly decidedLogId: number | null;
+}
+
+/** What filing an appeal did (#911). */
+export type AppealFiled =
+  | { readonly outcome: 'filed'; readonly appealId: number }
+  /** No statement of that id about this athlete — the same answer whether or not it is somebody else's. */
+  | { readonly outcome: 'not_found' }
+  | { readonly outcome: 'already_appealed' };
+
+/** What deciding an appeal did (#911). */
+export type AppealDecided =
+  | { readonly outcome: 'applied'; readonly logId: number; readonly moderatorConflict: boolean }
+  | { readonly outcome: 'not_found' }
+  | { readonly outcome: 'not_applicable' };
 
 /** One entry of the append-only moderation log. */
-export interface ModerationLogEntry extends Omit<ModerationAction, 'action'> {
+export interface ModerationLogEntry extends Omit<ModerationAction, 'action' | 'roomId'> {
   readonly id: number;
   readonly action: LoggedActionKind;
+  /** The room the action was taken in (#789), or `null`. */
+  readonly roomId: string | null;
 }
 
 /**
@@ -1367,12 +1510,27 @@ export interface SqlStore {
   putReport(
     report: Pick<Report, 'athleteId' | 'targetAthleteId' | 'reason' | 'createdAt'> & {
       readonly closedAs?: string;
+      /** The room it came from and its tick (#789). */
+      readonly roomId?: string;
+      readonly roomTick?: number;
+      /** A flag the room filed (#789): `athleteId` is then `null`. */
+      readonly flag?: RoomFlag;
     },
   ): Promise<number>;
   /** The reports this athlete made. */
   listReports(athleteId: string): Promise<readonly Report[]>;
   /** The moderators' queue: every report not yet decided, oldest first. */
   listOpenReports(): Promise<readonly Report[]>;
+  /** One report by id, open or closed (#899: a dismissal reads the one it decides). */
+  getReport(reportId: number): Promise<Report | undefined>;
+  /** Whether this athlete was removed from this room (#789): their ticket for it is refused. */
+  isRemovedFromRoom(roomId: string, athleteId: string): Promise<boolean>;
+  /**
+   * The athletes who block this one (#789): with {@link listBlocks}, everybody
+   * a room must not name to them, nor them to. Other athletes' rows, read
+   * only to hide names in a room the two share — never answered to anybody.
+   */
+  listBlockedBy(athleteId: string): Promise<readonly string[]>;
 
   /** A notice of illegal content, as it was received (#907). Answers its id. */
   putNotice(notice: NewNotice): Promise<number>;
@@ -1380,6 +1538,70 @@ export interface SqlStore {
   countNoticesSince(since: number): Promise<number>;
   /** Every notice received, oldest first: the moderators' queue (#907). */
   listNotices(): Promise<readonly Notice[]>;
+  /**
+   * Record one step taken on a notice (#912), in ONE transaction with the
+   * checks it rests on: the notice exists, the step has not been taken, a
+   * notifier with no address is neither acknowledged nor told, the notifier
+   * is told only once a decision is recorded, and a decision's log entry
+   * exists.
+   */
+  putNoticeStep(step: Omit<NoticeStep, 'id'>): Promise<NoticeStepRecorded>;
+  /** Every step taken on every notice, oldest first (#912). */
+  listNoticeSteps(): Promise<readonly NoticeStep[]>;
+  /**
+   * Hide one item (#913), in ONE transaction: the log entry, the statement of
+   * reasons its owner is shown, and the hidden item — or, for an item already
+   * hidden, nothing.
+   */
+  hideItem(hide: {
+    readonly item: string;
+    readonly ownerAthleteId: string;
+    readonly actorAthleteId: string;
+    readonly reason: string;
+    readonly statement: StatementFields;
+    readonly at: number;
+  }): Promise<
+    { readonly outcome: 'applied'; readonly logId: number } | { readonly outcome: 'not_applicable' }
+  >;
+  /**
+   * The items of one room that are hidden now (#913): its listing, its route
+   * and any rows of its result — each with whose it is.
+   */
+  listHiddenItemsOfRoom(
+    roomId: string,
+  ): Promise<readonly { readonly item: string; readonly ownerAthleteId: string }[]>;
+  /** The statements of reasons about this athlete, newest first (#910). */
+  listStatements(athleteId: string): Promise<readonly Statement[]>;
+  /**
+   * File an appeal against the statement `statementLogId` (#911) — only one
+   * about the appellant, and only once.
+   */
+  putAppeal(appeal: {
+    readonly statementLogId: number;
+    readonly appellantAthleteId: string;
+    readonly grounds: string;
+    readonly filedAt: number;
+  }): Promise<AppealFiled>;
+  /** The appeals this athlete filed, newest first (#911). */
+  listAppeals(athleteId: string): Promise<readonly Appeal[]>;
+  /** The moderators' queue: every appeal not yet decided, oldest first (#911). */
+  listOpenAppeals(): Promise<readonly Appeal[]>;
+  /** Every appeal, decided or not, oldest first: the record (#912). */
+  listEveryAppeal(): Promise<readonly Appeal[]>;
+  /**
+   * Decide an appeal, in ONE transaction (#911): a reversal lifts the
+   * suspension or restores the display name the statement explains, the
+   * decision is appended to the log, and the appeal records it — or nothing
+   * changes. The conflict is the store's to see: the deciding moderator took
+   * the decision appealed.
+   */
+  decideAppeal(decision: {
+    readonly appealId: number;
+    readonly actorAthleteId: string;
+    readonly outcome: 'upheld' | 'reversed';
+    readonly decision: string;
+    readonly at: number;
+  }): Promise<AppealDecided>;
 
   /**
    * Apply a moderator action and append it to the log, in ONE transaction:
@@ -1641,6 +1863,15 @@ const reportFrom = (row: Selectable<ReportTable>): Report => ({
   closedAt: row.closed_at,
   closedByAthleteId: row.closed_by_athlete_id,
   outcome: row.outcome,
+  roomId: row.room_id,
+  roomTick: row.room_tick,
+  flag:
+    row.flag_duration_seconds === null || row.flag_ceiling_watts_per_kilogram === null
+      ? null
+      : {
+          durationSeconds: row.flag_duration_seconds,
+          ceilingWattsPerKilogram: row.flag_ceiling_watts_per_kilogram,
+        },
 });
 
 /** A stored notice's items: written by {@link SqlStore.putNotice} alone, as a JSON array of strings. */
@@ -1661,6 +1892,46 @@ const noticeFrom = (row: Selectable<NoticeTable>): Notice => ({
   bonaFide: row.bona_fide === 1,
 });
 
+const statementFrom = (
+  row: Selectable<StatementTable> & { readonly actor_athlete_id: string },
+): Statement => ({
+  logId: row.log_id,
+  targetAthleteId: row.target_athlete_id,
+  actorAthleteId: row.actor_athlete_id,
+  restriction: row.restriction,
+  facts: row.facts,
+  decidedOn: row.decided_on,
+  legalGround: row.legal_ground,
+  termsGround: row.terms_ground,
+  notifierNamed: row.notifier_named,
+  moderatorConflict: row.moderator_conflict === 1,
+  endsAt: row.ends_at,
+  at: row.at,
+});
+
+const appealFrom = (row: Selectable<AppealTable>): Appeal => ({
+  id: row.id,
+  statementLogId: row.statement_log_id,
+  appellantAthleteId: row.appellant_athlete_id,
+  grounds: row.grounds,
+  filedAt: row.filed_at,
+  outcome: row.outcome,
+  decision: row.decision,
+  moderatorConflict: row.moderator_conflict === null ? null : row.moderator_conflict === 1,
+  decidedAt: row.decided_at,
+  decidedLogId: row.decided_log_id,
+});
+
+const noticeStepFrom = (row: Selectable<NoticeStepTable>): NoticeStep => ({
+  id: row.id,
+  noticeId: row.notice_id,
+  step: row.step,
+  actorAthleteId: row.actor_athlete_id,
+  decision: row.decision,
+  logId: row.log_id,
+  at: row.at,
+});
+
 const moderationLogFrom = (row: Selectable<ModerationLogTable>): ModerationLogEntry => ({
   id: row.id,
   action: row.action as LoggedActionKind,
@@ -1669,6 +1940,7 @@ const moderationLogFrom = (row: Selectable<ModerationLogTable>): ModerationLogEn
   reportId: row.report_id,
   reason: row.reason,
   at: row.at,
+  roomId: row.room_id,
 });
 
 const deviceKeyFrom = (row: Selectable<DeviceKeyTable>): DeviceKey => ({
@@ -2183,8 +2455,24 @@ async function applyToAthlete(
         .where('athlete_id', '=', target.id)
         .execute();
       return true;
+    case 'remove_from_room':
+    case 'host_remove_from_room': {
+      // A removal names its room; one already made changes nothing (#789).
+      if (action.roomId === undefined || action.roomId === null) return false;
+      const removed = await trx
+        .insertInto('room_removal')
+        .values({ room_id: action.roomId, athlete_id: target.id, removed_at: at })
+        .onConflict((conflict) => conflict.columns(['room_id', 'athlete_id']).doNothing())
+        .executeTakeFirst();
+      return (removed.numInsertedOrUpdatedRows ?? 0n) > 0n;
+    }
     case 'dismiss_report':
+    case 'dismiss_own_report':
       return true;
+    case 'hide_item':
+      // An item is hidden by `hideItem`, which writes its own row; asked of
+      // `moderate`, it changes nothing.
+      return false;
   }
 }
 
@@ -3839,6 +4127,10 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
             closed_at: report.closedAs === undefined ? null : report.createdAt,
             closed_by_athlete_id: null,
             outcome: report.closedAs ?? null,
+            room_id: report.roomId ?? null,
+            room_tick: report.roomTick ?? null,
+            flag_duration_seconds: report.flag?.durationSeconds ?? null,
+            flag_ceiling_watts_per_kilogram: report.flag?.ceilingWattsPerKilogram ?? null,
           })
           .returning('id')
           .executeTakeFirstOrThrow();
@@ -3856,6 +4148,39 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
             .execute()
         ).map(reportFrom),
       ),
+
+    isRemovedFromRoom: (roomId, athleteId) =>
+      exclusive(async () => {
+        const row = await db
+          .selectFrom('room_removal')
+          .select('athlete_id')
+          .where('room_id', '=', roomId)
+          .where('athlete_id', '=', athleteId)
+          .executeTakeFirst();
+        return row !== undefined;
+      }),
+
+    listBlockedBy: (athleteId) =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('block')
+            .select('athlete_id')
+            .where('blocked_athlete_id', '=', athleteId)
+            .orderBy('athlete_id')
+            .execute()
+        ).map((row) => row.athlete_id),
+      ),
+
+    getReport: (reportId) =>
+      exclusive(async () => {
+        const row = await db
+          .selectFrom('report')
+          .selectAll()
+          .where('id', '=', reportId)
+          .executeTakeFirst();
+        return row === undefined ? undefined : reportFrom(row);
+      }),
 
     listOpenReports: () =>
       exclusive(async () =>
@@ -3898,6 +4223,277 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
         return Number(row.n);
       }),
 
+    putAppeal: (appeal) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx): Promise<AppealFiled> => {
+          const statement = await trx
+            .selectFrom('statement')
+            .select('log_id')
+            .where('log_id', '=', appeal.statementLogId)
+            .where('target_athlete_id', '=', appeal.appellantAthleteId)
+            .executeTakeFirst();
+          if (statement === undefined) return { outcome: 'not_found' };
+          const held = await trx
+            .selectFrom('appeal')
+            .select('id')
+            .where('statement_log_id', '=', appeal.statementLogId)
+            .executeTakeFirst();
+          if (held !== undefined) return { outcome: 'already_appealed' };
+          const inserted = await trx
+            .insertInto('appeal')
+            .values({
+              statement_log_id: appeal.statementLogId,
+              appellant_athlete_id: appeal.appellantAthleteId,
+              grounds: appeal.grounds,
+              filed_at: appeal.filedAt,
+              outcome: null,
+              decision: null,
+              moderator_conflict: null,
+              decided_at: null,
+              decided_log_id: null,
+            })
+            .returning('id')
+            .executeTakeFirstOrThrow();
+          return { outcome: 'filed', appealId: inserted.id };
+        }),
+      ),
+
+    listAppeals: (athleteId) =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('appeal')
+            .selectAll()
+            .where('appellant_athlete_id', '=', athleteId)
+            .orderBy('id', 'desc')
+            .execute()
+        ).map(appealFrom),
+      ),
+
+    listOpenAppeals: () =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('appeal')
+            .selectAll()
+            .where('decided_at', 'is', null)
+            .orderBy('id')
+            .execute()
+        ).map(appealFrom),
+      ),
+
+    listEveryAppeal: () =>
+      exclusive(async () =>
+        (await db.selectFrom('appeal').selectAll().orderBy('id').execute()).map(appealFrom),
+      ),
+
+    decideAppeal: (decision) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx): Promise<AppealDecided> => {
+          const appeal = await trx
+            .selectFrom('appeal')
+            .selectAll()
+            .where('id', '=', decision.appealId)
+            .executeTakeFirst();
+          if (appeal === undefined) return { outcome: 'not_found' };
+          if (appeal.decided_at !== null) return { outcome: 'not_applicable' };
+          const appealed = await trx
+            .selectFrom('statement')
+            .innerJoin('moderation_log', 'moderation_log.id', 'statement.log_id')
+            .select([
+              'statement.restriction as restriction',
+              'statement.target_athlete_id as target',
+              'moderation_log.actor_athlete_id as actor',
+              'moderation_log.at as at',
+            ])
+            .where('statement.log_id', '=', appeal.statement_log_id)
+            .executeTakeFirstOrThrow();
+          if (decision.outcome === 'reversed') {
+            // Restored only if the appealed restriction itself still stands:
+            // the column must still carry this statement's own `at`, so a
+            // later restriction (lift then re-impose) is never lifted here.
+            const athlete = trx.updateTable('athlete').where('id', '=', appealed.target);
+            if (appealed.restriction === 'suspend') {
+              await athlete
+                .set({ suspended_at: null })
+                .where('suspended_at', '=', appealed.at)
+                .execute();
+            } else if (appealed.restriction === 'hide_display_name') {
+              await athlete
+                .set({ display_name_hidden_at: null })
+                .where('display_name_hidden_at', '=', appealed.at)
+                .execute();
+            } else if (appealed.restriction === 'hide_item') {
+              // #913: the item the statement explains is shown again.
+              await trx
+                .updateTable('hidden_item')
+                .set({ restored_at: decision.at })
+                .where('log_id', '=', appeal.statement_log_id)
+                .where('restored_at', 'is', null)
+                .execute();
+            }
+          }
+          const logged = await trx
+            .insertInto('moderation_log')
+            .values({
+              actor_athlete_id: decision.actorAthleteId,
+              action: decision.outcome === 'reversed' ? 'reverse_appeal' : 'uphold_appeal',
+              target_athlete_id: appealed.target,
+              report_id: null,
+              reason: decision.decision,
+              at: decision.at,
+            })
+            .returning('id')
+            .executeTakeFirstOrThrow();
+          const moderatorConflict = appealed.actor === decision.actorAthleteId;
+          await trx
+            .updateTable('appeal')
+            .set({
+              outcome: decision.outcome,
+              decision: decision.decision,
+              moderator_conflict: moderatorConflict ? 1 : 0,
+              decided_at: decision.at,
+              decided_log_id: logged.id,
+            })
+            .where('id', '=', decision.appealId)
+            .execute();
+          return { outcome: 'applied', logId: logged.id, moderatorConflict };
+        }),
+      ),
+
+    listStatements: (athleteId) =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('statement')
+            .innerJoin('moderation_log', 'moderation_log.id', 'statement.log_id')
+            .selectAll('statement')
+            .select('moderation_log.actor_athlete_id')
+            .where('statement.target_athlete_id', '=', athleteId)
+            .orderBy('statement.log_id', 'desc')
+            .execute()
+        ).map(statementFrom),
+      ),
+
+    putNoticeStep: (step) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx): Promise<NoticeStepRecorded> => {
+          const notice = await trx
+            .selectFrom('notice')
+            .select(['id', 'notifier_email'])
+            .where('id', '=', step.noticeId)
+            .executeTakeFirst();
+          if (notice === undefined) return 'not_found';
+          const taken = await trx
+            .selectFrom('notice_step')
+            .select('step')
+            .where('notice_id', '=', step.noticeId)
+            .execute();
+          if (taken.some((each) => each.step === step.step)) return 'already';
+          if (step.step !== 'decided' && notice.notifier_email === null) return 'no_contact';
+          if (step.step === 'notifier_told' && !taken.some((each) => each.step === 'decided')) {
+            return 'not_decided';
+          }
+          if (step.logId !== null) {
+            const entry = await trx
+              .selectFrom('moderation_log')
+              .select('id')
+              .where('id', '=', step.logId)
+              .executeTakeFirst();
+            if (entry === undefined) return 'no_such_log_entry';
+          }
+          await trx
+            .insertInto('notice_step')
+            .values({
+              notice_id: step.noticeId,
+              step: step.step,
+              actor_athlete_id: step.actorAthleteId,
+              decision: step.decision,
+              log_id: step.logId,
+              at: step.at,
+            })
+            .execute();
+          return 'recorded';
+        }),
+      ),
+
+    listNoticeSteps: () =>
+      exclusive(async () =>
+        (await db.selectFrom('notice_step').selectAll().orderBy('id').execute()).map(
+          noticeStepFrom,
+        ),
+      ),
+
+    hideItem: (hide) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          const held = await trx
+            .selectFrom('hidden_item')
+            .select('log_id')
+            .where('item', '=', hide.item)
+            .where('restored_at', 'is', null)
+            .executeTakeFirst();
+          if (held !== undefined) return { outcome: 'not_applicable' } as const;
+          const logged = await trx
+            .insertInto('moderation_log')
+            .values({
+              actor_athlete_id: hide.actorAthleteId,
+              action: 'hide_item',
+              target_athlete_id: hide.ownerAthleteId,
+              report_id: null,
+              reason: hide.reason,
+              at: hide.at,
+            })
+            .returning('id')
+            .executeTakeFirstOrThrow();
+          await trx
+            .insertInto('statement')
+            .values({
+              log_id: logged.id,
+              target_athlete_id: hide.ownerAthleteId,
+              restriction: 'hide_item',
+              facts: hide.statement.facts,
+              decided_on: hide.statement.decidedOn,
+              legal_ground: hide.statement.legalGround,
+              terms_ground: hide.statement.termsGround,
+              notifier_named: hide.statement.notifierNamed,
+              moderator_conflict: hide.statement.moderatorConflict ? 1 : 0,
+              ends_at: hide.statement.endsAt,
+              at: hide.at,
+            })
+            .execute();
+          await trx
+            .insertInto('hidden_item')
+            .values({
+              log_id: logged.id,
+              item: hide.item,
+              owner_athlete_id: hide.ownerAthleteId,
+              hidden_at: hide.at,
+              restored_at: null,
+            })
+            .execute();
+          return { outcome: 'applied', logId: logged.id } as const;
+        }),
+      ),
+
+    listHiddenItemsOfRoom: (roomId) =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('hidden_item')
+            .select(['item', 'owner_athlete_id'])
+            .where('restored_at', 'is', null)
+            .where((row) =>
+              row.or([
+                row('item', '=', `room:${roomId}`),
+                row('item', '=', `route:${roomId}`),
+                row('item', 'like', `result:${roomId}:%`),
+              ]),
+            )
+            .execute()
+        ).map((row) => ({ item: row.item, ownerAthleteId: row.owner_athlete_id })),
+      ),
+
     listNotices: () =>
       exclusive(async () =>
         (await db.selectFrom('notice').selectAll().orderBy('id').execute()).map(noticeFrom),
@@ -3920,7 +4516,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
             ) {
               return { outcome: 'not_found' };
             }
-          } else if (action.action === 'dismiss_report') {
+          } else if (action.action === 'dismiss_report' || action.action === 'dismiss_own_report') {
             return { outcome: 'not_found' };
           }
           if (action.action !== 'dismiss_report') {
@@ -3954,9 +4550,30 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
               report_id: action.reportId,
               reason: action.reason,
               at: action.at,
+              room_id: action.roomId ?? null,
             })
             .returning('id')
             .executeTakeFirstOrThrow();
+          // #910: the statement of reasons, with the entry, or neither.
+          if (action.statement !== undefined && action.targetAthleteId !== null) {
+            const statement = action.statement;
+            await trx
+              .insertInto('statement')
+              .values({
+                log_id: logged.id,
+                target_athlete_id: action.targetAthleteId,
+                restriction: action.action,
+                facts: statement.facts,
+                decided_on: statement.decidedOn,
+                legal_ground: statement.legalGround,
+                terms_ground: statement.termsGround,
+                notifier_named: statement.notifierNamed,
+                moderator_conflict: statement.moderatorConflict ? 1 : 0,
+                ends_at: statement.endsAt,
+                at: action.at,
+              })
+              .execute();
+          }
           return { outcome: 'applied', logId: logged.id };
         }),
       ),
@@ -3972,6 +4589,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
             report_id: action.reportId,
             reason: action.reason,
             at: action.at,
+            room_id: action.roomId ?? null,
           })
           .returning('id')
           .executeTakeFirstOrThrow();
@@ -4488,8 +5106,10 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
                 .where('athlete_id', '=', athleteId)
                 .execute();
             }
-            // Another athlete's block OF this one names nobody once they are gone (#83).
-            await trx.deleteFrom('block').where('blocked_athlete_id', '=', athleteId).execute();
+            // Another athlete's block OF this one is KEPT (#899): it is the
+            // blocker's row, and deleting it would shrink their list and tell
+            // them the id they blocked was a real account — as a block of an
+            // id nobody ever held is kept (#891's review).
             await trx.deleteFrom('athlete').where('id', '=', athleteId).execute();
             return held.map((row) => row.content_sha256);
           }),

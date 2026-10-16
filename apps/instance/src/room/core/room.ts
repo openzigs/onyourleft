@@ -64,9 +64,19 @@
  * 1. Nothing else on the road has a drag area: a room holds riders only
  * (ruling Q18), so no bot pacer or ghost gives or takes a draft (#327).
  *
- * ## Deferred, by name
+ * ## Moderation in a room — #789
  *
- * - **What a flag does** is #69's, #785's and #789's (ADR 0028 D-2 rule 3).
+ * - **Blocking.** An admission carries the athletes its rider has a block
+ *   with, either way round ({@link Admission.blocks}). A race never sends one
+ *   of them the other's `name`: each sees the other as a rider with no name,
+ *   as a result does (`rooms/publication.ts`). Read at admission, so a block
+ *   made during a ride holds from the rider's next hello.
+ * - **Removal.** {@link Room.remove} takes a rider out — their socket refused
+ *   `ticket-refused` and closed, a race's seat `dnf`, a ride's seat given up —
+ *   and bars the athlete from this room for its life. The instance also
+ *   refuses them a ticket from then on (`room_removal`, migration 0031).
+ * - **What a flag does** is the adapter's to hand on: a flagged duration in
+ *   the view becomes a report the room files (`node/room-host.ts`).
  */
 
 import { gradePercent, kilograms, seconds, type Kilograms, type Seconds } from '@onyourleft/domain';
@@ -115,6 +125,11 @@ export interface Admission {
    * already `Rider` here. A race sends it to everybody in the room.
    */
   readonly displayName: string;
+  /**
+   * The athletes this one has a block with, EITHER way round (#789): a race
+   * names neither to the other. Absent is none.
+   */
+  readonly blocks?: readonly string[];
 }
 
 /**
@@ -176,6 +191,13 @@ export interface Room {
    */
   start(nowMs: number): Outbound[];
   tick(nowMs: number): Outbound[];
+  /**
+   * Takes `athleteId` out of the room for its life (#789): their socket is
+   * refused `ticket-refused` and closed, a race's seat is `dnf` and a ride's
+   * given up, and a later hello is refused. Nothing for an athlete with no seat
+   * but the bar.
+   */
+  remove(athleteId: string, nowMs: number): Outbound[];
   view(): RoomView;
 }
 
@@ -190,6 +212,8 @@ interface Seat {
   readonly riderId: number;
   readonly athleteId: string;
   readonly displayName: string;
+  /** Who this rider has a block with, either way (#789). */
+  readonly blocks: ReadonlySet<string>;
   /** Riding alone: `k = 1`, the conditions every undrafted tick is ridden at. */
   readonly conditions: RideConditions;
   readonly mass: Kilograms;
@@ -234,6 +258,8 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
   let emptySinceMs: number | undefined;
   let firstFinishTick: number | undefined;
   const finishers: Seat[] = [];
+  /** Athletes removed from this room (#789): never seated again. */
+  const barred = new Set<string>();
   const tickDuration: Seconds = seconds(settings.frameIntervalMs / 1000);
 
   function refuseAndClose(connection: ConnectionId, reason: RefuseReason): Outbound[] {
@@ -306,7 +332,7 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
       ...out,
       ...welcome(connection, seat),
       // #1347: the whole field's names, on a join and on every rejoin.
-      ...seated().flatMap((each) => nameTo(connection, each)),
+      ...seated().flatMap((each) => nameTo(connection, seat, each)),
       ...countdownTo(connection, nowMs),
     ];
   }
@@ -334,6 +360,7 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
     const admission = admit(ticket);
     if (
       admission === undefined ||
+      barred.has(admission.athleteId) ||
       !declaredMassAdmissible(admission.declaredMassKilograms, settings.limits)
     ) {
       return refuseAndClose(connection, 'ticket-refused');
@@ -358,6 +385,7 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
       riderId: nextRiderId,
       athleteId: admission.athleteId,
       displayName: admission.displayName,
+      blocks: new Set(admission.blocks ?? []),
       conditions: ridingConditions(mass, settings.ridingPosition),
       mass,
       draftFactor: 1,
@@ -377,7 +405,7 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
     nextRiderId += 1;
     // #1347: everybody already in a race is told the new rider's name.
     const told = seated().flatMap((other) =>
-      other.connection === undefined ? [] : nameTo(other.connection, seat),
+      other.connection === undefined ? [] : nameTo(other.connection, other, seat),
     );
     seats.set(seat.athleteId, seat);
     if (settings.kind === 'ride' && phase === 'lobby') {
@@ -387,9 +415,14 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
     return [...told, ...attach(seat, connection, nowMs)];
   }
 
-  /** A race's rider's name, to one connection (#1347). A group ride names nobody. */
-  function nameTo(connection: ConnectionId, seat: Seat): Outbound[] {
+  /**
+   * A race's rider's name, to one connection (#1347). A group ride names
+   * nobody, and two riders with a block between them, either way, are not
+   * named to each other (#789).
+   */
+  function nameTo(connection: ConnectionId, recipient: Seat, seat: Seat): Outbound[] {
     if (settings.kind !== 'race') return [];
+    if (recipient.blocks.has(seat.athleteId) || seat.blocks.has(recipient.athleteId)) return [];
     return [
       {
         kind: 'send',
@@ -711,6 +744,32 @@ export function createRoom(settings: RoomSettings, admit: Admit): Room {
         if (seats.size > 0 && !seated().some(onTheRoad)) {
           out.push(...finishRace());
         }
+      }
+      return out;
+    },
+
+    remove(athleteId, nowMs) {
+      expireHeldSeats(nowMs);
+      barred.add(athleteId);
+      const seat = seats.get(athleteId);
+      if (seat === undefined) return [];
+      const out: Outbound[] = [];
+      if (seat.connection !== undefined) {
+        byConnection.delete(seat.connection);
+        out.push(...refuseAndClose(seat.connection, 'ticket-refused'));
+        seat.connection = undefined;
+      }
+      seat.latest = undefined;
+      if (settings.kind === 'race' && phase !== 'lobby' && seat.state !== 'finished') {
+        seat.state = 'dnf';
+      } else if (seat.state !== 'finished') {
+        seats.delete(athleteId);
+      }
+      if (
+        settings.kind === 'ride' &&
+        ![...seats.values()].some((other) => other.connection !== undefined)
+      ) {
+        emptySinceMs ??= nowMs;
       }
       return out;
     },

@@ -71,6 +71,19 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         with no account, migration 0026's append-only
                         `notice` table, and `GET /v1/moderation/notices`;
                         `moderation/notices.ts` says what it keeps. Since
+                        #910 a suspension or a hidden name needs a
+                        statement of reasons (migration 0027, append-only,
+                        `moderation/statements.ts`), and `GET
+                        /v1/statements` is the THIRD route a way-out
+                        session reaches; since #911 an appeal against a
+                        statement (migration 0028, decided once) is the
+                        FOURTH. Since #912 a notice's steps are recorded
+                        beside it (migration 0029, append-only), and
+                        `moderation/record.ts` is the export. Since #913
+                        one item (a room, its route, a row of a result) is
+                        hidden alone (migration 0030, `hideItem`), and
+                        `rooms/rooms.ts`'s join, route and results reads
+                        each ask `listHiddenItemsOfRoom`. Since
                         #909 `/terms` serves the operator's own terms file
                         (`src/terms.ts`, never a default), named by date in
                         `GET /instance`. Behind a
@@ -137,7 +150,9 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         marked, and a plaintext request to one is
                         `sealed_required` on an instance that holds keys
                         (none: plaintext as before); `sealed/phase-one.ts`
-                        is the committed list the table is held to, and a
+                        and, since #1210, `sealed/phase-two.ts` (sign-in,
+                        account, blocks, reports, room HTTP, session) are
+                        the committed lists the table is held to, and a
                         test world's `call` seals a marked route itself.
                         Since #1095 `src/analysis/jobs.ts` is the job
                         engine (migration 0020, sealed-only routes, an SSE

@@ -280,6 +280,18 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
     onResult: async (roomId, result) => {
       await store?.putResult({ roomId, ...result });
     },
+    // #789: a plausibility flag is a report the room files.
+    onFlag: async (roomId, flag) => {
+      await identity?.moderation.fileFlag(
+        roomId,
+        flag.athleteId,
+        {
+          durationSeconds: flag.durationSeconds,
+          ceilingWattsPerKilogram: flag.ceilingWattsPerKilogram,
+        },
+        flag.tick,
+      );
+    },
     onRaceStarted: async (roomId) => {
       await store?.markRaceStarted(roomId, Math.floor(now() / 1000));
     },
@@ -320,6 +332,8 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       : {}),
     startRoom: async (roomId, athleteId) =>
       (await router.startRoom(roomId, athleteId)) ? 'started' : 'not_found',
+    seatOf: (roomId, riderId) => router.seatOf(roomId, riderId),
+    removeFromRoom: (roomId, athleteId) => router.removeFromRoom(roomId, athleteId),
   };
 
   const handlerOptions = {

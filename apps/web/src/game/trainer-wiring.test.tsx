@@ -97,6 +97,7 @@ import {
 import type { SimulationParameters } from '@onyourleft/sensors/protocol';
 import { deviceId } from '@onyourleft/sensors';
 import { createSimulator, ftmsTrainer } from '@onyourleft/sensors/simulator';
+import { FLAG_FINISHED } from '@onyourleft/protocol';
 import { activityId, lapId, recordingSessionId } from '@onyourleft/store';
 import { ATHLETE_A, createStoreHarness, seedAthletes } from '@onyourleft/store/testing';
 
@@ -1095,6 +1096,41 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
         await rig.done();
       },
     );
+
+    /**
+     * #1364: the room's standings have the rider across the line, second of
+     * the three it has across, before its `finish` — and the rider ends the
+     * ride. Their place among those across is saved with the race, by the
+     * room's word: its flags and its order, read through the real session.
+     */
+    it('saves the place among the riders the room’s standings have across, for a rider who ended before the room’s order (#1364)', async () => {
+      const { rig, room, rideFor } = await raceOn(shortRoute());
+      await rideFor(38, 64.3);
+      const row = (riderId: number, flags: number) => ({
+        riderId,
+        gapDeciseconds: 0,
+        wattsPerKilogramTenths: 0,
+        flags,
+      });
+      room.standings(40, [
+        row(3, FLAG_FINISHED),
+        row(0, FLAG_FINISHED),
+        row(5, FLAG_FINISHED),
+        row(7, 0),
+      ]);
+      await rideFor(2, 64.3);
+      expect(await endAndSave(rig)).toEqual([
+        {
+          roomId: 'room-1',
+          place: null,
+          finishers: null,
+          crossedTheLine: true,
+          placeAcross: 2,
+          across: 3,
+        },
+      ]);
+      await rig.done();
+    });
 
     it('saves a rider who left the race short of the line as having left it', async () => {
       const { rig, rideFor } = await raceOn(hillRoute());

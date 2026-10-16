@@ -4,7 +4,8 @@
  * **Phase 1's sealed routes, transcribed from ADR 0047 D-7's table** (#1192).
  *
  * This is the COMMITTED list, written by hand from the ADR, and
- * `sealed/phase-one.test.ts` holds the route table to it in both directions:
+ * `sealed/phase-one.test.ts` holds the route table to it — and to phase 2's
+ * list beside it, `phase-two.ts` (#1210) — in both directions:
  * a route on this list that the table does not mark, or a route the table
  * marks that is not on this list, is a red build. So unmarking a route (or
  * marking one nobody decided) needs an edit here as well, where a reviewer
@@ -40,8 +41,12 @@
 
 import { SYNC_ROUTES } from '../sync/routes.ts';
 
-/** How a phase-1 route is sealed: `only`, or — `POST /v1/auth/session` alone — for a new key. */
-export type PhaseOneMark = 'only' | 'new-key';
+/**
+ * How a route is sealed: `only`. Phase 1 marked `POST /v1/auth/session`
+ * `new-key` — a key the instance held still signed in in plaintext — and
+ * phase 2 (#1210) made it `only`, so it is on `phase-two.ts`'s list now.
+ */
+export type PhaseOneMark = 'only';
 
 export interface PhaseOneRoute {
   readonly method: 'GET' | 'POST' | 'DELETE';
@@ -76,12 +81,8 @@ export const PHASE_ONE_SEALED_ROUTES: readonly PhaseOneRoute[] = [
   only('POST', '/v1/auth/link', 'Linking a device'),
   only('POST', '/v1/auth/recover', 'Recovering'),
   only('POST', '/v1/auth/recover/email', 'Asking for a mailed token'),
-  {
-    method: 'POST',
-    path: '/v1/auth/session',
-    mark: 'new-key',
-    row: 'Registering a new athlete',
-  },
+  // Registering a new athlete (`POST /v1/auth/session` for a new key) was
+  // phase 1's; phase 2 seals every sign-in, so the route is on its list.
   only('POST', '/v1/auth/recovery-email', 'Giving a recovery address'),
   only('POST', '/v1/auth/recovery-email/confirm', 'Confirming a recovery address'),
   // #1194 (ADR 0047 D-8): born sealed.
@@ -104,11 +105,21 @@ export const PHASE_ONE_SEALED_ROUTES: readonly PhaseOneRoute[] = [
   only('POST', '/v1/moderation/registrations/{athleteId}/approve', 'Every other moderator action'),
   only('POST', '/v1/moderation/registrations/{athleteId}/refuse', 'Every other moderator action'),
   only('POST', '/v1/moderation/reports/{reportId}/dismiss', 'Every other moderator action'),
+  only(
+    'POST',
+    '/v1/moderation/rooms/{roomId}/athletes/{athleteId}/remove',
+    'Every other moderator action',
+  ),
   only('GET', '/v1/moderation/reports', 'Every moderator read'),
   only('GET', '/v1/moderation/registrations', 'Every moderator read'),
   only('GET', '/v1/moderation/suspended', 'Every moderator read'),
   only('GET', '/v1/moderation/log', 'Every moderator read'),
   only('GET', '/v1/moderation/notices', 'Every moderator read'),
+  only('GET', '/v1/moderation/appeals', 'Every moderator read'),
+  only('GET', '/v1/moderation/record', 'Every moderator read'),
+  only('POST', '/v1/moderation/items/hide', 'Every other moderator action'),
+  only('POST', '/v1/moderation/notices/{noticeId}/steps', 'Every other moderator action'),
+  only('POST', '/v1/moderation/appeals/{appealId}/decide', 'Every other moderator action'),
   // The synced history (#37, #38, #776): every route `sync/routes.ts` declares.
   only('GET', '/v1/sync/manifest', 'The synced history'),
   only('GET', '/v1/sync/records/{content}', 'The synced history'),

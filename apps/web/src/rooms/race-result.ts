@@ -111,9 +111,12 @@ export function raceFactText(race: RoomRaceFact): string {
   if (race.finishers === null) {
     // #1360's review (N2): across the line on this device, and the ride ended
     // before the room's order came — finished, with no place to give.
-    return race.crossedTheLine === true
+    if (race.crossedTheLine !== true) return 'A private race, left before it was over';
+    // #1364: where the room's standings had the rider among those across.
+    // ⚠️ Draft wording awaiting the owner's approval.
+    return race.placeAcross === undefined || race.across === undefined
       ? 'A private race, finished: you left before the room gave places'
-      : 'A private race, left before it was over';
+      : `${ordinal(race.placeAcross)} across of ${String(race.across)} in a private race, before the room gave places`;
   }
   if (race.place === null) return 'A private race, not finished';
   return `${ordinal(race.place)} of ${String(race.finishers)} in a private race`;

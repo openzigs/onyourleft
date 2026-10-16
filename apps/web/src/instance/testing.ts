@@ -17,6 +17,17 @@ export const LOADED_LOCALLY: LoadedFrom = { native: false, href: 'http://localho
 
 /** A copy of the app a website served: no sealed feature is offered (#1192, ADR 0047 D-11). */
 export const LOADED_FROM_A_WEBSITE: LoadedFrom = { native: false, href: 'https://app.example/' };
+
+/**
+ * What a port that seals needs, for a device that holds NO card (#1210): it
+ * calls in plaintext and seals nothing, so its key is never asked for — and
+ * asking is a failure here, not a silent sealed request.
+ */
+export const NO_CARD_DEVICE = {
+  loadedFrom: LOADED_LOCALLY,
+  signingKey: (): Promise<never> =>
+    Promise.reject(new Error('a device with no card signs no sealed request')),
+} as const;
 import type {
   CardOutcome,
   ConnectOutcome,
@@ -27,7 +38,10 @@ import type {
   KeysOutcome,
 } from './instance-port';
 import {
+  MODERATION_REFUSAL_TEXT,
   NOTHING_CHANGED_TEXT,
+  RESTRICTING_ACTIONS,
+  type StatementInput,
   type ModerationList,
   type ModerationLogEntry,
   type ModerationOutcome,
@@ -36,6 +50,7 @@ import {
   type OpenReport,
   type PendingRegistration,
   type ReceivedNotice,
+  type OpenAppeal,
   type SuspendedAccount,
 } from './moderation-port';
 
@@ -119,8 +134,13 @@ export function scriptedInstance(options: ScriptedInstanceOptions = {}): Scripte
         calls.push('current');
         const { held } = scripted;
         if (!held.connected) return Promise.resolve({ kind: 'not-connected' });
+        // #1210: an `unreadable` sign-in stands until a card is pinned, as a real port's does.
+        const state =
+          options.state?.kind === 'unreadable' && held.pin !== undefined
+            ? undefined
+            : options.state;
         return Promise.resolve(
-          options.state ?? {
+          state ?? {
             kind: 'connected',
             origin: held.origin,
             instanceName: held.instanceName,
@@ -235,10 +255,18 @@ export interface ScriptedModeration {
   held: {
     standing: ModerationStanding;
     me: string;
+    /** Whether the scripted instance names this moderator alone (#905). */
+    soleModerator: boolean;
     registrations: PendingRegistration[];
     reports: OpenReport[];
     /** The notices the instance's notice page received (#907); `undefined` as when they could not be read. */
     notices: ReceivedNotice[] | undefined;
+    /** `false` to answer the record export as the port does when it could not be read (#912). */
+    recordReadable: boolean;
+    /** The open appeals (#911); `undefined` as when they could not be read. */
+    appeals: OpenAppeal[] | undefined;
+    /** Every statement of reasons a restriction was sent with (#910), and whom it was about. */
+    statements: (StatementInput & { readonly athleteId: string })[];
     log: ModerationLogEntry[];
     /** `false` to answer a read as the port does when the log alone could not be read. */
     logReadable: boolean;
@@ -267,6 +295,11 @@ export const SCRIPTED_NOTICES: readonly ReceivedNotice[] = [
     notifierName: 'A. Notifier',
     notifierEmail: 'notifier@example.com',
     bonaFide: true,
+    acknowledgedAt: null,
+    decidedAt: null,
+    decision: null,
+    logId: null,
+    notifierToldAt: null,
   },
   {
     noticeId: 2,
@@ -278,6 +311,35 @@ export const SCRIPTED_NOTICES: readonly ReceivedNotice[] = [
     notifierName: null,
     notifierEmail: 'me@example.com',
     bonaFide: false,
+    acknowledgedAt: 1_790_004_100,
+    decidedAt: 1_790_004_200,
+    decision: 'Taken down: the route of the room is hidden.',
+    logId: 2,
+    notifierToldAt: null,
+  },
+];
+
+/** Two open appeals (#911): one against this moderator's own decision, one against another's. */
+export const SCRIPTED_APPEALS: readonly OpenAppeal[] = [
+  {
+    appealId: 3,
+    filedAt: 1_790_005_000,
+    grounds: 'I was quoting another rider, not abusing them.',
+    appellantAthleteId: 'rider-dafydd',
+    statementId: 11,
+    restriction: 'suspend',
+    facts: 'Abuse of other riders in a room.',
+    decidedBy: 'moderator-1',
+  },
+  {
+    appealId: 4,
+    filedAt: 1_790_006_000,
+    grounds: 'It is my family name.',
+    appellantAthleteId: 'rider-carys',
+    statementId: 12,
+    restriction: 'hide_display_name',
+    facts: 'The display name reads as a slur.',
+    decidedBy: 'moderator-2',
   },
 ];
 
@@ -350,6 +412,8 @@ export function scriptedModeration(
      * `sealed-unavailable` with this sentence.
      */
     readonly sealedUnavailable?: string;
+    /** The instance names this moderator alone (#905); `false` unless given. */
+    readonly soleModerator?: boolean;
   } = {},
 ): ScriptedModeration {
   const calls: string[] = [];
@@ -360,9 +424,13 @@ export function scriptedModeration(
   const held: ScriptedModeration['held'] = {
     standing: options.standing ?? 'moderator',
     me: SCRIPTED_MODERATOR,
+    soleModerator: options.soleModerator ?? false,
     registrations: [...queues.registrations],
     reports: [...queues.reports],
     notices: options.empty === true ? [] : [...SCRIPTED_NOTICES],
+    statements: [],
+    recordReadable: true,
+    appeals: options.empty === true ? [] : [...SCRIPTED_APPEALS],
     log: [...queues.log],
     logReadable: true,
     suspendedReadable: true,
@@ -442,9 +510,11 @@ export function scriptedModeration(
       return Promise.resolve({
         kind: 'moderator',
         me: held.me,
+        soleModerator: held.soleModerator,
         registrations: [...held.registrations],
         reports: [...held.reports],
         notices: held.notices === undefined ? undefined : [...held.notices],
+        appeals: held.appeals === undefined ? undefined : [...held.appeals],
         suspended: held.suspendedReadable ? pageFrom(suspendedRows(), undefined) : undefined,
         log: held.logReadable ? pageFrom(logRows(), undefined) : undefined,
       });
@@ -472,18 +542,48 @@ export function scriptedModeration(
       calls.push(`dismiss ${String(reportId)}`);
       const report = held.reports.find((each) => each.reportId === reportId);
       if (report === undefined) return Promise.resolve(nothing);
-      if (report.targetAthleteId === held.me)
+      const own = report.targetAthleteId === held.me;
+      // As the instance does (#905): refused while another moderator is
+      // named; the only moderator's own dismissal is logged as such.
+      if (own && !held.soleModerator) {
         return refusedAndLogged('dismiss_report', null, reportId, reason);
-      const outcome = logged('dismiss_report', null, reportId, reason);
+      }
+      const outcome = own
+        ? logged('dismiss_own_report', held.me, reportId, reason)
+        : logged('dismiss_report', null, reportId, reason);
       if (outcome.kind === 'done') {
         held.reports = held.reports.filter((each) => each.reportId !== reportId);
       }
       return Promise.resolve(outcome);
     },
-    actOnAccount: (athleteId, action, reason, reportId) => {
+    removeFromRoom: (roomId, athleteId, reason, reportId) => {
+      calls.push(
+        `remove ${athleteId} from ${roomId}${reportId === undefined ? '' : ` for ${String(reportId)}`}`,
+      );
+      const id = athleteId.trim();
+      if (id === held.me) return refusedAndLogged('remove_from_room', id, reportId ?? null, reason);
+      if (!held.accounts.has(id)) return Promise.resolve(nothing);
+      const outcome = logged('remove_from_room', id, reportId ?? null, reason);
+      if (outcome.kind === 'done' && reportId !== undefined) {
+        held.reports = held.reports.filter((each) => each.reportId !== reportId);
+      }
+      return Promise.resolve(outcome);
+    },
+    actOnAccount: (athleteId, action, reason, reportId, statement) => {
       calls.push(
         `${action} ${athleteId}${reportId === undefined ? '' : ` for ${String(reportId)}`}`,
       );
+      // #910: as the real port, a restriction is refused without its statement.
+      if (
+        RESTRICTING_ACTIONS.has(action) &&
+        (statement === undefined ||
+          statement.facts.trim() === '' ||
+          (statement.legalGround.trim() === '' && statement.termsGround.trim() === ''))
+      ) {
+        return Promise.resolve({ kind: 'refused', text: MODERATION_REFUSAL_TEXT.statement });
+      }
+      if (statement !== undefined)
+        held.statements.push({ athleteId: athleteId.trim(), ...statement });
       const id = athleteId.trim();
       if (id === held.me) return refusedAndLogged(action, id, reportId ?? null, reason);
       if (!held.accounts.has(id)) return Promise.resolve(nothing);
@@ -500,6 +600,73 @@ export function scriptedModeration(
         held.reports = held.reports.filter((each) => each.reportId !== reportId);
       }
       return Promise.resolve(outcome);
+    },
+    recordNoticeStep: (noticeId, step, decision, logId) => {
+      calls.push(`${step} notice ${String(noticeId)}`);
+      const index = held.notices?.findIndex((each) => each.noticeId === noticeId) ?? -1;
+      const notice = held.notices?.[index];
+      if (notice === undefined || held.notices === undefined) return Promise.resolve(nothing);
+      const at = 1_790_030_000 + held.log.length;
+      if (step === 'decided') {
+        if ((decision ?? '').trim() === '') {
+          return Promise.resolve({
+            kind: 'refused',
+            text: MODERATION_REFUSAL_TEXT['notice-decision'],
+          });
+        }
+        held.notices[index] = {
+          ...notice,
+          decidedAt: at,
+          decision: (decision ?? '').trim(),
+          logId: logId ?? null,
+        };
+      } else if (notice.notifierEmail === null) {
+        return Promise.resolve(nothing);
+      } else if (step === 'acknowledged') {
+        held.notices[index] = { ...notice, acknowledgedAt: at };
+      } else {
+        if (notice.decidedAt === null) return Promise.resolve(nothing);
+        held.notices[index] = { ...notice, notifierToldAt: at };
+      }
+      return Promise.resolve({ kind: 'done' });
+    },
+    hideItem: (item, reason, statement) => {
+      calls.push(`hide_item ${item.trim()}`);
+      if (
+        statement.facts.trim() === '' ||
+        (statement.legalGround.trim() === '' && statement.termsGround.trim() === '')
+      ) {
+        return Promise.resolve({ kind: 'refused', text: MODERATION_REFUSAL_TEXT.statement });
+      }
+      held.statements.push({ athleteId: item.trim(), ...statement });
+      return Promise.resolve(logged('hide_item', null, null, reason));
+    },
+    exportRecord: () => {
+      calls.push('exportRecord');
+      return Promise.resolve(
+        held.recordReadable
+          ? `${JSON.stringify({ notices: held.notices ?? [], appeals: [] }, null, 2)}\n`
+          : undefined,
+      );
+    },
+    decideAppeal: (appealId, outcome, decision) => {
+      calls.push(`${outcome} appeal ${String(appealId)}`);
+      const appeal = held.appeals?.find((each) => each.appealId === appealId);
+      if (appeal === undefined) return Promise.resolve(nothing);
+      if (decision.trim() === '') {
+        return Promise.resolve({ kind: 'refused', text: MODERATION_REFUSAL_TEXT.decision });
+      }
+      const outcomeOf = logged(
+        outcome === 'reversed' ? 'reverse_appeal' : 'uphold_appeal',
+        appeal.appellantAthleteId,
+        null,
+        decision,
+      );
+      if (outcome === 'reversed' && appeal.restriction === 'suspend') {
+        held.suspended.delete(appeal.appellantAthleteId);
+      }
+      held.appeals = held.appeals?.filter((each) => each.appealId !== appealId);
+      return Promise.resolve(outcomeOf);
     },
     mintInvite: (reason) => {
       calls.push(`mintInvite ${reason}`);

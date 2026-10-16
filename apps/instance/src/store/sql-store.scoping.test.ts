@@ -33,6 +33,7 @@ import {
   HISTORY_FIXTURE_CONVENTION,
   HISTORY_FIXTURE_DIMENSION,
   HISTORY_FIXTURE_MODEL,
+  seedStatements,
   seedWorld,
   type StoreHarness,
 } from './testing/index.ts';
@@ -176,7 +177,9 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   },
   listReports: {
     probe: async (store, athleteId) =>
-      (await store.listReports(athleteId)).map((report) => ({ athleteId: report.athleteId })),
+      (await store.listReports(athleteId)).map((report) => ({
+        athleteId: report.athleteId ?? 'nobody',
+      })),
   },
 
   findSession: {
@@ -300,11 +303,44 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
     notAScopedRead: 'a pair of athletes, either way round: the choke point asks it (#83)',
   },
   listOpenReports: { notAScopedRead: 'the moderators’ queue: every open report (#83)' },
+  getReport: {
+    notAScopedRead:
+      'one report by id, for the moderator deciding it; reached only by `dismiss` (#899)',
+  },
   putNotice: { notAScopedRead: 'a write, from anybody: a notice names no athlete column (#907)' },
   countNoticesSince: {
     notAScopedRead: 'a count across the instance, never a row: the notices’ cap (#907)',
   },
+  listStatements: {
+    probe: async (store, athleteId) =>
+      (await store.listStatements(athleteId)).map((row) => ({ athleteId: row.targetAthleteId })),
+  },
+  putAppeal: {
+    notAScopedRead: 'a write; statements.test.ts holds another rider’s statement out of it',
+  },
+  listAppeals: {
+    probe: async (store, athleteId) =>
+      (await store.listAppeals(athleteId)).map((row) => ({ athleteId: row.appellantAthleteId })),
+  },
+  listEveryAppeal: { notAScopedRead: 'the moderators’ record of every appeal (#912)' },
+  listOpenAppeals: { notAScopedRead: 'the moderators’ queue: every open appeal (#911)' },
+  decideAppeal: { notAScopedRead: 'a moderator’s write; appeals.test.ts' },
+  putNoticeStep: { notAScopedRead: 'a moderator’s write about a notice; notice-steps.test.ts' },
+  listNoticeSteps: { notAScopedRead: 'the moderators’ record of every notice (#912)' },
+  hideItem: { notAScopedRead: 'a moderator’s write; items.test.ts' },
+  listHiddenItemsOfRoom: {
+    notAScopedRead:
+      'the hidden items of one room, by identifier, which every read of that room asks (#913)',
+  },
   listNotices: { notAScopedRead: 'the moderators’ queue of notices, from anybody (#907)' },
+  isRemovedFromRoom: {
+    notAScopedRead:
+      'a yes or no about the CALLER’s own removal from a room, asked when they ask for a ticket (#789)',
+  },
+  listBlockedBy: {
+    notAScopedRead:
+      'who blocks this athlete, read only to keep names apart in a room the two share; answered to nobody (#789)',
+  },
   listModerationLog: { notAScopedRead: 'the moderators’ record: every action (#83)' },
   listModerationLogPage: {
     notAScopedRead: 'the moderators’ record, a page at a time, newest first (#961)',
@@ -419,6 +455,7 @@ let harness: StoreHarness;
 beforeAll(async () => {
   harness = await createStoreHarness();
   await harness.write(seedWorld);
+  await harness.write(seedStatements);
 });
 afterAll(() => harness.destroy());
 

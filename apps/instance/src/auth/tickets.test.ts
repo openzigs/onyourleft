@@ -75,6 +75,7 @@ describe('a room ticket (#772)', () => {
       athleteId: anna.athleteId,
       declaredMassKilograms: 64.5,
       displayName: 'Anna',
+      blocks: [],
     });
     expect(admit(ticket), 'reused').toBeUndefined();
   });

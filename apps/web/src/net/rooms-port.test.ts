@@ -9,6 +9,7 @@ import {
   signedInStorage,
   zoneNorth,
 } from '../rooms/rooms-testing';
+import { NO_CARD_DEVICE } from '../instance/testing';
 import { routeDigest } from '../rooms/share';
 import { createRoomsPort } from './rooms-port';
 
@@ -17,7 +18,12 @@ function port(
   zones = [zoneNorth(50_000)],
   storage = signedInStorage(),
 ) {
-  return createRoomsPort({ storage, zones: () => Promise.resolve(zones), send: instance.send });
+  return createRoomsPort({
+    ...NO_CARD_DEVICE,
+    storage,
+    zones: () => Promise.resolve(zones),
+    send: instance.send,
+  });
 }
 
 const ROUTE = { id: 'route-1', profile: northProfile(3_000) };
@@ -91,6 +97,7 @@ describe('making a room — #784', () => {
   it('sends nothing for a device signed in nowhere', async () => {
     const instance = new ScriptedInstance();
     const empty = createRoomsPort({
+      ...NO_CARD_DEVICE,
       storage: { ...signedInStorage(), getItem: () => null },
       zones: () => Promise.resolve([]),
       send: instance.send,
@@ -106,6 +113,34 @@ describe('making a room — #784', () => {
       reason: 'not-signed-in',
     });
     expect(instance.seen).toEqual([]);
+  });
+});
+
+describe('a room route an instance holding keys refuses in plaintext — #1210', () => {
+  it('reads `sealed_required` as cannot-seal, not as the instance refusing', async () => {
+    const instance = new ScriptedInstance();
+    instance.created = {
+      status: 403,
+      body: { error: { code: 'sealed_required', message: 'Sealed.' } },
+    };
+    expect(
+      await port(instance).create({
+        kind: 'group',
+        ridingPosition: 'hoods',
+        drafting: true,
+        route: ROUTE,
+      }),
+    ).toEqual({ kind: 'refused', reason: 'cannot-seal' });
+    // A 403 that is not `sealed_required` is still the instance refusing.
+    instance.created = { status: 403, body: { error: { code: 'not_eligible' } } };
+    expect(
+      await port(instance).create({
+        kind: 'group',
+        ridingPosition: 'hoods',
+        drafting: true,
+        route: ROUTE,
+      }),
+    ).toEqual({ kind: 'refused', reason: 'instance-refused' });
   });
 });
 

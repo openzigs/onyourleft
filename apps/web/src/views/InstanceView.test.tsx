@@ -11,13 +11,15 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type { InstancePort } from '../instance/instance-port';
-import { scriptedInstance, scriptedModeration } from '../instance/testing';
+import { INSTANCE_KEY_TEXT } from '../instance/instance-pin';
+import { SCRIPTED_FINGERPRINT, scriptedInstance, scriptedModeration } from '../instance/testing';
 import {
   activateWithKeyboard,
   mount,
   settle,
   submitForm,
   typeInto,
+  typeIntoTextArea,
   type Mounted,
 } from '../testing/mount';
 import {
@@ -189,6 +191,32 @@ describe('the Connect screen — #777, #778', () => {
     await settle();
     expect(scripted.calls).toContain('disconnect');
     expect(button('Connect')).toBeDefined();
+  });
+
+  it('says why a sign-in cannot be read, offers the card box, and reads it again once pinned (#1210)', async () => {
+    const scripted = scriptedInstance({
+      connected: true,
+      state: {
+        kind: 'unreadable',
+        origin: 'https://ride.example',
+        text: INSTANCE_KEY_TEXT['needs-card'],
+      },
+    });
+    mounted = await mount(<InstanceView port={scripted.port} />);
+    await settle();
+    expect(text()).toContain(INSTANCE_KEY_TEXT['needs-card']);
+    expect(text()).not.toContain('did not answer');
+    expect(button('Disconnect')).toBeDefined();
+    expect(scripted.calls).not.toContain('devices');
+    // The card, given here, opens it: the screen reads the sign-in again.
+    const box = mounted.container.querySelector('textarea');
+    if (box === null) throw new Error('no card box');
+    await typeIntoTextArea(box, `oyl-instance:https://ride.example#${SCRIPTED_FINGERPRINT}`);
+    await activateWithKeyboard(button('Use this card'));
+    await settle();
+    expect(scripted.calls.filter((call) => call === 'current')).toHaveLength(2);
+    expect(text()).toContain('Connected');
+    expect(scripted.calls).toContain('devices');
   });
 
   it('says so when the instance no longer accepts this device, and still offers Disconnect', async () => {

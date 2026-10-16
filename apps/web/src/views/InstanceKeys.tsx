@@ -177,7 +177,14 @@ function LinkCode({ outcome }: { readonly outcome: LinkCodeOutcome }): JSX.Eleme
 }
 
 /** The instance's key, for a connected device. */
-export function InstanceKeys({ port }: { readonly port: InstancePort }): JSX.Element {
+export function InstanceKeys({
+  port,
+  onChange,
+}: {
+  readonly port: InstancePort;
+  /** Called once a card is pinned or confirmed (#1210): the screen re-reads the sign-in it opens. */
+  readonly onChange?: () => void;
+}): JSX.Element {
   const [keys, setKeys] = useState<KeysOutcome | undefined>(undefined);
   const [card, setCard] = useState<string | undefined>(undefined);
   const [confirming, setConfirming] = useState<
@@ -206,7 +213,10 @@ export function InstanceKeys({ port }: { readonly port: InstancePort }): JSX.Ele
     else if (outcome.kind === 'confirm') {
       setCard(text);
       setConfirming(outcome);
-    } else await read();
+    } else {
+      await read();
+      onChange?.();
+    }
   }
 
   async function confirm(): Promise<void> {
@@ -218,6 +228,7 @@ export function InstanceKeys({ port }: { readonly port: InstancePort }): JSX.Ele
     setCard(undefined);
     if (outcome.kind === 'refused') setRefusal(outcome.text);
     await read();
+    if (outcome.kind !== 'refused') onChange?.();
   }
 
   async function showLinkCode(): Promise<void> {
