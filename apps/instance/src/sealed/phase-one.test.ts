@@ -14,6 +14,7 @@
  * sync item) are each counted on their own as well.
  */
 
+import { TEST_STATEMENT } from '../moderation/moderation-testing.ts';
 import { LINK_PURPOSE, RECOVER_PURPOSE } from '@onyourleft/domain';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -303,7 +304,7 @@ describe('no plaintext twin (#1192, ADR 0047 D-7)', () => {
       (
         await f.w.call('POST', `/v1/moderation/athletes/${f.carl.athleteId}/suspend`, {
           token: f.w.owner.token,
-          body: { reason: 'Checked against the rules' },
+          body: { reason: 'Checked against the rules', statement: TEST_STATEMENT },
         })
       ).status,
     ).toBe(200);

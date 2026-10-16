@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import type { StatementsPort } from '../instance/statements-port';
+import { StatementsPanel } from './StatementsPanel';
 import { useCallback, useEffect, useId, useState, type JSX } from 'react';
 
 import { Button } from '../design/Button';
@@ -168,7 +170,14 @@ export function InstanceView({
   moderation,
   sync,
   hostedSettings,
+  statements,
 }: {
+  /**
+   * The statements of reasons about this rider's account (#910): read once
+   * the device has an instance, signed in or not — a suspended rider cannot
+   * sign in, and is the one who most needs to read why.
+   */
+  readonly statements?: StatementsPort | undefined;
   readonly port?: InstancePort | undefined;
   /** Asked, once connected, whether this account moderates the instance (#955). */
   readonly moderation?: ModerationPort | undefined;
@@ -431,6 +440,8 @@ export function InstanceView({
           {disconnectControl}
         </section>
       )}
+
+      {statements === undefined ? null : <StatementsPanel port={statements} />}
 
       {recoveryCodes === undefined || recoveryCodes.length === 0 ? null : (
         <section className="oyl-panel" aria-labelledby="oyl-instance-recovery">

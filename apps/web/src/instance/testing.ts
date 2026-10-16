@@ -38,7 +38,10 @@ import type {
   KeysOutcome,
 } from './instance-port';
 import {
+  MODERATION_REFUSAL_TEXT,
   NOTHING_CHANGED_TEXT,
+  RESTRICTING_ACTIONS,
+  type StatementInput,
   type ModerationList,
   type ModerationLogEntry,
   type ModerationOutcome,
@@ -243,6 +246,8 @@ export interface ScriptedModeration {
     reports: OpenReport[];
     /** The notices the instance's notice page received (#907); `undefined` as when they could not be read. */
     notices: ReceivedNotice[] | undefined;
+    /** Every statement of reasons a restriction was sent with (#910), and whom it was about. */
+    statements: (StatementInput & { readonly athleteId: string })[];
     log: ModerationLogEntry[];
     /** `false` to answer a read as the port does when the log alone could not be read. */
     logReadable: boolean;
@@ -367,6 +372,7 @@ export function scriptedModeration(
     registrations: [...queues.registrations],
     reports: [...queues.reports],
     notices: options.empty === true ? [] : [...SCRIPTED_NOTICES],
+    statements: [],
     log: [...queues.log],
     logReadable: true,
     suspendedReadable: true,
@@ -484,10 +490,21 @@ export function scriptedModeration(
       }
       return Promise.resolve(outcome);
     },
-    actOnAccount: (athleteId, action, reason, reportId) => {
+    actOnAccount: (athleteId, action, reason, reportId, statement) => {
       calls.push(
         `${action} ${athleteId}${reportId === undefined ? '' : ` for ${String(reportId)}`}`,
       );
+      // #910: as the real port, a restriction is refused without its statement.
+      if (
+        RESTRICTING_ACTIONS.has(action) &&
+        (statement === undefined ||
+          statement.facts.trim() === '' ||
+          (statement.legalGround.trim() === '' && statement.termsGround.trim() === ''))
+      ) {
+        return Promise.resolve({ kind: 'refused', text: MODERATION_REFUSAL_TEXT.statement });
+      }
+      if (statement !== undefined)
+        held.statements.push({ athleteId: athleteId.trim(), ...statement });
       const id = athleteId.trim();
       if (id === held.me) return refusedAndLogged(action, id, reportId ?? null, reason);
       if (!held.accounts.has(id)) return Promise.resolve(nothing);

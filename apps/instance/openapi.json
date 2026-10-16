@@ -4831,6 +4831,54 @@
                   },
                   "reportId": {
                     "type": "integer"
+                  },
+                  "statement": {
+                    "type": "object",
+                    "properties": {
+                      "facts": {
+                        "type": "string"
+                      },
+                      "decidedOn": {
+                        "type": "string",
+                        "enum": [
+                          "notice",
+                          "report",
+                          "own_initiative"
+                        ]
+                      },
+                      "legalGround": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "termsGround": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "notifierNamed": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "moderatorConflict": {
+                        "type": "boolean"
+                      },
+                      "endsAt": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "facts",
+                      "decidedOn"
+                    ],
+                    "additionalProperties": false
                   }
                 },
                 "required": [
@@ -4927,6 +4975,54 @@
                   },
                   "reportId": {
                     "type": "integer"
+                  },
+                  "statement": {
+                    "type": "object",
+                    "properties": {
+                      "facts": {
+                        "type": "string"
+                      },
+                      "decidedOn": {
+                        "type": "string",
+                        "enum": [
+                          "notice",
+                          "report",
+                          "own_initiative"
+                        ]
+                      },
+                      "legalGround": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "termsGround": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "notifierNamed": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "moderatorConflict": {
+                        "type": "boolean"
+                      },
+                      "endsAt": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "facts",
+                      "decidedOn"
+                    ],
+                    "additionalProperties": false
                   }
                 },
                 "required": [
@@ -5023,6 +5119,54 @@
                   },
                   "reportId": {
                     "type": "integer"
+                  },
+                  "statement": {
+                    "type": "object",
+                    "properties": {
+                      "facts": {
+                        "type": "string"
+                      },
+                      "decidedOn": {
+                        "type": "string",
+                        "enum": [
+                          "notice",
+                          "report",
+                          "own_initiative"
+                        ]
+                      },
+                      "legalGround": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "termsGround": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "notifierNamed": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "moderatorConflict": {
+                        "type": "boolean"
+                      },
+                      "endsAt": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "facts",
+                      "decidedOn"
+                    ],
+                    "additionalProperties": false
                   }
                 },
                 "required": [
@@ -5509,6 +5653,54 @@
                   },
                   "reportId": {
                     "type": "integer"
+                  },
+                  "statement": {
+                    "type": "object",
+                    "properties": {
+                      "facts": {
+                        "type": "string"
+                      },
+                      "decidedOn": {
+                        "type": "string",
+                        "enum": [
+                          "notice",
+                          "report",
+                          "own_initiative"
+                        ]
+                      },
+                      "legalGround": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "termsGround": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "notifierNamed": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "moderatorConflict": {
+                        "type": "boolean"
+                      },
+                      "endsAt": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "facts",
+                      "decidedOn"
+                    ],
+                    "additionalProperties": false
                   }
                 },
                 "required": [
@@ -5605,6 +5797,54 @@
                   },
                   "reportId": {
                     "type": "integer"
+                  },
+                  "statement": {
+                    "type": "object",
+                    "properties": {
+                      "facts": {
+                        "type": "string"
+                      },
+                      "decidedOn": {
+                        "type": "string",
+                        "enum": [
+                          "notice",
+                          "report",
+                          "own_initiative"
+                        ]
+                      },
+                      "legalGround": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "termsGround": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "notifierNamed": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "moderatorConflict": {
+                        "type": "boolean"
+                      },
+                      "endsAt": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "facts",
+                      "decidedOn"
+                    ],
+                    "additionalProperties": false
                   }
                 },
                 "required": [
@@ -6677,6 +6917,152 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
+    "/v1/statements": {
+      "get": {
+        "operationId": "listStatements",
+        "summary": "The statements of reasons about this athlete (#910), newest first: for every restriction a moderator imposed on them, what was done and for how long, the facts, what it was decided on, the law or terms relied on, that no automated means were used, and how to ask for it to be looked at again. A suspended rider reads them through the way-out session. Nobody else’s, and never a notifier the moderator did not name.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "statements": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "statementId": {
+                            "type": "integer"
+                          },
+                          "at": {
+                            "type": "integer"
+                          },
+                          "restriction": {
+                            "type": "string"
+                          },
+                          "endsAt": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "facts": {
+                            "type": "string"
+                          },
+                          "decidedOn": {
+                            "type": "string",
+                            "enum": [
+                              "notice",
+                              "report",
+                              "own_initiative"
+                            ]
+                          },
+                          "legalGround": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "termsGround": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "notifierNamed": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "moderatorConflict": {
+                            "type": "boolean"
+                          },
+                          "automated": {
+                            "type": "boolean"
+                          },
+                          "redress": {
+                            "type": "object",
+                            "properties": {
+                              "contactEmail": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "outOfCourt": {
+                                "type": "boolean"
+                              },
+                              "court": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "contactEmail",
+                              "outOfCourt",
+                              "court"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "statementId",
+                          "at",
+                          "restriction",
+                          "endsAt",
+                          "facts",
+                          "decidedOn",
+                          "legalGround",
+                          "termsGround",
+                          "notifierNamed",
+                          "moderatorConflict",
+                          "automated",
+                          "redress"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "statements"
+                  ],
+                  "additionalProperties": false
                 }
               }
             }

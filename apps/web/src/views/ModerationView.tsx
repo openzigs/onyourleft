@@ -22,7 +22,10 @@ import {
   type OpenReport,
   type PendingRegistration,
   type ReceivedNotice,
+  type StatementInput,
   type SuspendedAccount,
+  MAXIMUM_STATEMENT_FACTS,
+  MAXIMUM_STATEMENT_GROUND,
 } from '../instance/moderation-port';
 import { hrefFor, routeById } from '../shell/routes';
 
@@ -192,9 +195,128 @@ interface Confirmation {
 
 interface Choice {
   readonly label: string;
-  readonly run: (reason: string) => Promise<ModerationOutcome>;
+  readonly run: (reason: string, statement?: StatementInput) => Promise<ModerationOutcome>;
   /** Asked first when present; the action runs only once it is confirmed. */
   readonly confirm?: Confirmation;
+  /**
+   * The choice restricts a rider, so its confirmation asks for the statement
+   * of reasons they are shown (#910) — starting from what it is decided on.
+   */
+  readonly statement?: { readonly decidedOn: StatementInput['decidedOn'] };
+}
+
+/** What the statement's own fields are called on the screen (#910). */
+export const STATEMENT_TEXT = {
+  legend: 'Statement of reasons. The rider is shown this, and not the reason above.',
+  facts: 'What they did: the facts you relied on',
+  decidedOn: 'Decided on',
+  report: 'A report from a rider',
+  notice: 'A notice',
+  ownInitiative: 'Your own finding',
+  legal: 'The law it breaks, and why (if it is illegal)',
+  terms: 'The terms it breaks, and why (if it breaks them)',
+  conflict: 'This involves me: declare a conflict of interest',
+  hint: 'Give the law, the terms or both. Never write a place or a coordinate.',
+} as const;
+
+/** An empty statement, decided on `decidedOn`. */
+const blankStatement = (decidedOn: StatementInput['decidedOn']): StatementInput => ({
+  facts: '',
+  decidedOn,
+  legalGround: '',
+  termsGround: '',
+  moderatorConflict: false,
+});
+
+/** The statement's fields, inside a restriction's confirmation (#910). */
+function StatementFields({
+  value,
+  onChange,
+}: {
+  readonly value: StatementInput;
+  readonly onChange: (next: StatementInput) => void;
+}): JSX.Element {
+  const id = useId();
+  const set = (patch: Partial<StatementInput>): void => {
+    onChange({ ...value, ...patch });
+  };
+  return (
+    <fieldset className="oyl-moderation__statement">
+      <legend>{STATEMENT_TEXT.legend}</legend>
+      <p id={`${id}-hint`}>{STATEMENT_TEXT.hint}</p>
+      <p>
+        <label htmlFor={`${id}-facts`}>{STATEMENT_TEXT.facts}</label>
+        <textarea
+          className="oyl-input"
+          id={`${id}-facts`}
+          maxLength={MAXIMUM_STATEMENT_FACTS}
+          aria-describedby={`${id}-hint`}
+          value={value.facts}
+          onChange={(event) => {
+            set({ facts: event.target.value });
+          }}
+        />
+      </p>
+      <fieldset>
+        <legend>{STATEMENT_TEXT.decidedOn}</legend>
+        {(
+          [
+            ['report', STATEMENT_TEXT.report],
+            ['notice', STATEMENT_TEXT.notice],
+            ['own_initiative', STATEMENT_TEXT.ownInitiative],
+          ] as const
+        ).map(([choice, label]) => (
+          <p key={choice}>
+            <input
+              type="radio"
+              id={`${id}-${choice}`}
+              name={`${id}-decided-on`}
+              checked={value.decidedOn === choice}
+              onChange={() => {
+                set({ decidedOn: choice });
+              }}
+            />{' '}
+            <label htmlFor={`${id}-${choice}`}>{label}</label>
+          </p>
+        ))}
+      </fieldset>
+      <p>
+        <label htmlFor={`${id}-legal`}>{STATEMENT_TEXT.legal}</label>
+        <textarea
+          className="oyl-input"
+          id={`${id}-legal`}
+          maxLength={MAXIMUM_STATEMENT_GROUND}
+          value={value.legalGround}
+          onChange={(event) => {
+            set({ legalGround: event.target.value });
+          }}
+        />
+      </p>
+      <p>
+        <label htmlFor={`${id}-terms`}>{STATEMENT_TEXT.terms}</label>
+        <textarea
+          className="oyl-input"
+          id={`${id}-terms`}
+          maxLength={MAXIMUM_STATEMENT_GROUND}
+          value={value.termsGround}
+          onChange={(event) => {
+            set({ termsGround: event.target.value });
+          }}
+        />
+      </p>
+      <p>
+        <input
+          type="checkbox"
+          id={`${id}-conflict`}
+          checked={value.moderatorConflict}
+          onChange={(event) => {
+            set({ moderatorConflict: event.target.checked });
+          }}
+        />{' '}
+        <label htmlFor={`${id}-conflict`}>{STATEMENT_TEXT.conflict}</label>
+      </p>
+    </fieldset>
+  );
 }
 
 /** The way out of every moderation confirmation. */
@@ -242,11 +364,13 @@ function Decide({
   const [busy, setBusy] = useState(false);
   /** The choice whose confirmation is open — #962. */
   const [confirming, setConfirming] = useState<Choice | undefined>(undefined);
+  /** The statement of reasons a restriction's confirmation is writing — #910. */
+  const [statement, setStatement] = useState<StatementInput>(blankStatement('own_initiative'));
 
   async function run(choice: Choice): Promise<void> {
     setBusy(true);
     onDone.starting();
-    const answer = await choice.run(reason);
+    const answer = await choice.run(reason, choice.statement === undefined ? undefined : statement);
     setBusy(false);
     // What it came to — done OR refused — is said by the page rather than
     // here (#960): the row this was pressed on may leave the screen once the
@@ -281,8 +405,14 @@ function Decide({
             unavailable={busy}
             onClick={() => {
               if (busy) return;
-              if (choice.confirm === undefined) void run(choice);
-              else setConfirming(choice);
+              if (choice.confirm === undefined) {
+                void run(choice);
+                return;
+              }
+              if (choice.statement !== undefined) {
+                setStatement(blankStatement(choice.statement.decidedOn));
+              }
+              setConfirming(choice);
             }}
           >
             {choice.label}
@@ -302,6 +432,9 @@ function Decide({
         }}
       >
         <p>{confirming?.confirm?.body}</p>
+        {confirming?.statement === undefined ? null : (
+          <StatementFields value={statement} onChange={setStatement} />
+        )}
       </ConfirmDialog>
     </div>
   );
@@ -399,23 +532,27 @@ function Reports({
                     {
                       label: 'Suspend the account',
                       confirm: suspendConfirmation(report.targetAthleteId),
-                      run: async (reason) =>
+                      statement: { decidedOn: 'report' },
+                      run: async (reason, statement) =>
                         port.actOnAccount(
                           report.targetAthleteId,
                           'suspend',
                           reason,
                           report.reportId,
+                          statement,
                         ),
                     },
                     {
                       label: 'Hide its display name',
                       confirm: hideNameConfirmation(report.targetAthleteId),
-                      run: async (reason) =>
+                      statement: { decidedOn: 'report' },
+                      run: async (reason, statement) =>
                         port.actOnAccount(
                           report.targetAthleteId,
                           'hide_display_name',
                           reason,
                           report.reportId,
+                          statement,
                         ),
                     },
                   ]}
@@ -611,8 +748,8 @@ function AnAccount({
   const [athleteId, setAthleteId] = useState('');
   const act =
     (action: AccountAction) =>
-    async (reason: string): Promise<ModerationOutcome> =>
-      port.actOnAccount(athleteId, action, reason);
+    async (reason: string, statement?: StatementInput): Promise<ModerationOutcome> =>
+      port.actOnAccount(athleteId, action, reason, undefined, statement);
   return (
     <section className="oyl-panel" aria-labelledby="oyl-moderation-account">
       <h2 id="oyl-moderation-account">An account</h2>
@@ -635,12 +772,18 @@ function AnAccount({
         label="Reason for the log"
         onDone={onDone}
         choices={[
-          { label: 'Suspend', run: act('suspend'), confirm: suspendConfirmation(athleteId) },
+          {
+            label: 'Suspend',
+            run: act('suspend'),
+            confirm: suspendConfirmation(athleteId),
+            statement: { decidedOn: 'own_initiative' },
+          },
           { label: 'Lift the suspension', run: act('unsuspend') },
           {
             label: 'Hide the display name',
             run: act('hide_display_name'),
             confirm: hideNameConfirmation(athleteId),
+            statement: { decidedOn: 'own_initiative' },
           },
         ]}
       />

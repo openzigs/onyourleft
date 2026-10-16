@@ -20,7 +20,14 @@ import {
   SCRIPTED_MODERATOR,
   type ScriptedModeration,
 } from '../instance/testing';
-import { activateWithKeyboard, mount, settle, typeInto, type Mounted } from '../testing/mount';
+import {
+  activateWithKeyboard,
+  mount,
+  settle,
+  typeInto,
+  typeIntoTextArea,
+  type Mounted,
+} from '../testing/mount';
 import {
   ACTION_DONE_TEXT,
   actionLabel,
@@ -36,6 +43,7 @@ import {
   NOTICES_RECEIPT_TEXT,
   NOTICES_UNREADABLE_TEXT,
   REPORT_CONFLICT_TEXT,
+  STATEMENT_TEXT,
   SUSPENDED_UNREADABLE_TEXT,
   suspendConfirmation,
 } from './ModerationView';
@@ -97,6 +105,26 @@ const CONFIRMED = new Set([
   'Hide its display name',
 ]);
 
+/** What a test's statement of reasons says (#910). */
+const FACTS = 'A slur in the display name.';
+const TERMS = 'The terms of service, on abuse.';
+
+/** Fill a restriction's statement of reasons in the open confirmation, when it asks for one. */
+async function writeStatement(asked: HTMLElement): Promise<void> {
+  const field = (label: string): HTMLTextAreaElement | undefined => {
+    const found = [...asked.querySelectorAll('label')].find((each) => each.textContent === label);
+    const id = found?.getAttribute('for');
+    return id === null || id === undefined
+      ? undefined
+      : (asked.querySelector<HTMLTextAreaElement>(`[id="${id}"]`) ?? undefined);
+  };
+  const facts = field(STATEMENT_TEXT.facts);
+  const terms = field(STATEMENT_TEXT.terms);
+  if (facts === undefined || terms === undefined) return;
+  await typeIntoTextArea(facts, FACTS);
+  await typeIntoTextArea(terms, TERMS);
+}
+
 async function decide(root: HTMLElement, reason: string, choice: string): Promise<void> {
   // The reason box is the last box in its row; an account's id comes before it.
   const box = [...root.querySelectorAll('input')].at(-1);
@@ -107,6 +135,8 @@ async function decide(root: HTMLElement, reason: string, choice: string): Promis
   if (CONFIRMED.has(choice)) {
     const asked = dialog();
     if (asked === null) throw new Error(`${choice} acted without asking`);
+    // #910: a restriction's confirmation asks for its statement of reasons.
+    await writeStatement(asked);
     const confirm = [...asked.querySelectorAll('button')].find(
       (each) => each.textContent !== MODERATION_CANCEL_LABEL,
     );
@@ -401,6 +431,7 @@ describe('suspending and hiding a name are confirmed first — #962', () => {
     const { scripted, root } = await account('rider-carys');
     await activateWithKeyboard(button(root, choice));
     await settle();
+    await writeStatement(dialog() as HTMLElement);
     await activateWithKeyboard(button(dialog() as HTMLElement, asked.confirmLabel));
     await settle();
     expect(dialog()).toBeNull();
@@ -720,5 +751,68 @@ describe('the notices — #907', () => {
     await open(scripted);
     expect(text(section('Notices'))).toContain(NOTICES_UNREADABLE_TEXT);
     expect(text(section('Reports'))).toContain('Report');
+  });
+});
+
+describe('a restriction’s statement of reasons — #910', () => {
+  it('asks for it in the confirmation, and sends it with the suspension', async () => {
+    const scripted = scriptedModeration();
+    await open(scripted);
+    await decide(item('Report 7'), 'Reported twice.', 'Suspend the account');
+    expect(scripted.held.statements).toEqual([
+      {
+        athleteId: 'rider-dafydd',
+        facts: FACTS,
+        decidedOn: 'report',
+        legalGround: '',
+        termsGround: TERMS,
+        moderatorConflict: false,
+      },
+    ]);
+    expect(text()).toContain(ACTION_DONE_TEXT);
+  });
+
+  it('refuses, and says why, a suspension confirmed with no statement', async () => {
+    const scripted = scriptedModeration();
+    await open(scripted);
+    const row = item('Report 7');
+    const box = [...row.querySelectorAll('input')].at(-1);
+    if (box === undefined) throw new Error('no reason box');
+    await typeInto(box, 'Reported twice.');
+    await activateWithKeyboard(button(row, 'Suspend the account'));
+    await settle();
+    const asked = dialog();
+    expect(asked?.textContent).toContain(STATEMENT_TEXT.legend);
+    const confirm = [...(asked?.querySelectorAll('button') ?? [])].find(
+      (each) => each.textContent !== MODERATION_CANCEL_LABEL,
+    );
+    if (confirm === undefined) throw new Error('no confirm button');
+    await activateWithKeyboard(confirm);
+    await settle();
+    expect(scripted.held.statements).toEqual([]);
+    expect(text()).toContain('needs a statement of reasons');
+  });
+
+  it('passes the accessibility audit with the statement open', async () => {
+    const scripted = scriptedModeration();
+    mounted = await mount(
+      <main>
+        <h1>Moderation</h1>
+        <ModerationView port={scripted.port} />
+      </main>,
+    );
+    await settle();
+    await activateWithKeyboard(button(item('Report 7'), 'Suspend the account'));
+    await settle();
+    expect(dialog()?.textContent).toContain(STATEMENT_TEXT.legend);
+    const violations = auditAccessibility(document);
+    expect(violations, formatViolations(violations)).toEqual([]);
+  });
+
+  it('asks for none to lift a suspension', async () => {
+    const scripted = scriptedModeration({ suspended: { 'rider-carys': 1_790_020_000 } });
+    await open(scripted);
+    await decide(section('An account'), 'Apologised.', 'Lift the suspension');
+    expect(dialog()).toBeNull();
   });
 });

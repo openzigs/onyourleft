@@ -112,6 +112,7 @@ const FIXTURE_ROWS: Readonly<Record<string, string>> = {
   athlete_hosted_key: `INSERT INTO athlete_hosted_key (athlete_id, url, model, iv, ciphertext, set_at) VALUES ('a', 'https://models.example/v1', 'm', x'000102030405060708090a0b', x'ffee', 25)`,
   athlete_hosted_consent: `INSERT INTO athlete_hosted_consent VALUES ('a', 'https://models.example', 26)`,
   moderation_log: `INSERT INTO moderation_log (id, actor_athlete_id, action, target_athlete_id, reason, at) VALUES (1, 'a', 'suspend', 'b', 'Why', 12)`,
+  statement: `INSERT INTO statement VALUES (1, 'b', 'suspend', 'Facts', 'report', NULL, 'Terms 2', NULL, 0, NULL, 28)`,
   notice: `INSERT INTO notice VALUES (1, 27, 'illegal_content', 'Why', '["room:0123456789abcdef0123456789abcdef"]', NULL, NULL, NULL, 0)`,
 };
 
@@ -124,6 +125,7 @@ const FIXTURE_ROWS: Readonly<Record<string, string>> = {
 const EMPTY_FOR_ITS_OWN_DOWN: Readonly<Record<string, string>> = {
   '0007-moderation': 'moderation_log',
   '0026-notices': 'notice',
+  '0027-statements': 'statement',
 };
 
 interface Snapshot {

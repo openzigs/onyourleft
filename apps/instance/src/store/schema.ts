@@ -316,6 +316,24 @@ export interface NoticeTable {
   readonly bona_fide: 0 | 1;
 }
 
+/**
+ * A statement of reasons (#910, migration 0027): the DSA Art. 17(3) fields of
+ * one restricting action, keyed by its log entry. Append-only.
+ */
+export interface StatementTable {
+  readonly log_id: number;
+  readonly target_athlete_id: string;
+  readonly restriction: string;
+  readonly facts: string;
+  readonly decided_on: 'notice' | 'report' | 'own_initiative';
+  readonly legal_ground: string | null;
+  readonly terms_ground: string | null;
+  readonly notifier_named: string | null;
+  readonly moderator_conflict: 0 | 1;
+  readonly ends_at: number | null;
+  readonly at: number;
+}
+
 /** A single-use invitation a moderator minted, as its SHA-256 (#775). */
 export interface InviteCodeTable {
   readonly code_sha256: string;
@@ -591,4 +609,5 @@ export interface InstanceDatabase {
   readonly athlete_hosted_key: AthleteHostedKeyTable;
   readonly athlete_hosted_consent: AthleteHostedConsentTable;
   readonly notice: NoticeTable;
+  readonly statement: StatementTable;
 }

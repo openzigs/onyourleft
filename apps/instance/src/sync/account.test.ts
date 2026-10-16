@@ -10,6 +10,7 @@
  * anybody already downloaded, and not another instance.
  */
 
+import { TEST_STATEMENT } from '../moderation/moderation-testing.ts';
 import { AUTH_PURPOSE, ERASE_ACCOUNT_PURPOSE, LINK_PURPOSE, toHex } from '@onyourleft/domain';
 import { decodeFitActivity, decodeGpx, decodeTcx, trackPointsOf } from '@onyourleft/fit';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -511,7 +512,10 @@ describe('a suspended rider may take their data out and delete their account, an
     const suspended = await world.call(
       'POST',
       `/v1/moderation/athletes/${bea!.athleteId}/suspend`,
-      { token: ownerSession.body.sessionToken as string, body: { reason: 'Repeated abuse' } },
+      {
+        token: ownerSession.body.sessionToken as string,
+        body: { reason: 'Repeated abuse', statement: TEST_STATEMENT },
+      },
     );
     expect(suspended.status, JSON.stringify(suspended.body)).toBe(200);
     return { bea: bea!, instance: world };
@@ -613,7 +617,7 @@ describe('a suspended rider may take their data out and delete their account, an
     const act = (action: string) =>
       world!.call('POST', `/v1/moderation/athletes/${bea!.athleteId}/${action}`, {
         token: ownerToken,
-        body: { reason: 'Checked' },
+        body: { reason: 'Checked', statement: TEST_STATEMENT },
       });
     expect((await act('suspend')).status).toBe(200);
     const opened = await leaveSession(world, bea!.device);

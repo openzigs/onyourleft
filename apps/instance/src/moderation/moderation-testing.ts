@@ -67,5 +67,16 @@ export async function startModerationWorld(
   };
 }
 
+/**
+ * A statement of reasons a test's restriction carries (#910): a suspension or
+ * a hidden name is refused without one.
+ */
+export const TEST_STATEMENT = {
+  facts: 'Repeated abuse of other riders in a room.',
+  decidedOn: 'report',
+  legalGround: null,
+  termsGround: 'The terms of service, on abuse of other riders.',
+} as const;
+
 export const codeOf = (body: unknown): unknown =>
   (body as { error?: { code?: unknown } } | null)?.error?.code;

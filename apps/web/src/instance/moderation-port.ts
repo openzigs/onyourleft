@@ -208,6 +208,59 @@ export type ModerationRead =
 /** What a moderator may do to an account, by the instance's own names. */
 export type AccountAction = 'suspend' | 'unsuspend' | 'hide_display_name';
 
+/** The actions that restrict a rider, and so need a {@link StatementInput} (#910). */
+export const RESTRICTING_ACTIONS: ReadonlySet<AccountAction> = new Set([
+  'suspend',
+  'hide_display_name',
+]);
+
+/**
+ * A restriction's statement of reasons, as the moderator writes it (#910, DSA
+ * Art. 17(3)): the affected rider reads it. A blank ground is none.
+ */
+export interface StatementInput {
+  /** (b) the facts and circumstances. */
+  readonly facts: string;
+  /** (b) what it was decided on. */
+  readonly decidedOn: 'notice' | 'report' | 'own_initiative';
+  /** (d) the law relied on, and why the content is illegal under it. */
+  readonly legalGround: string;
+  /** (e) the terms relied on, and why the content breaks them. */
+  readonly termsGround: string;
+  /** The moderator declares a conflict of interest (the owner's ruling of 2026-09-30). */
+  readonly moderatorConflict: boolean;
+}
+
+/** The longest facts and grounds the instance takes (`apps/instance` §`statements.ts`). */
+export const MAXIMUM_STATEMENT_FACTS = 2000;
+export const MAXIMUM_STATEMENT_GROUND = 1000;
+
+/** A statement the instance would take, as it is sent — or `undefined`. */
+function acceptedStatement(
+  statement: StatementInput | undefined,
+): Record<string, unknown> | undefined {
+  if (statement === undefined) return undefined;
+  const facts = statement.facts.trim();
+  const legal = statement.legalGround.trim();
+  const terms = statement.termsGround.trim();
+  if (
+    facts === '' ||
+    [...facts].length > MAXIMUM_STATEMENT_FACTS ||
+    (legal === '' && terms === '') ||
+    [...legal].length > MAXIMUM_STATEMENT_GROUND ||
+    [...terms].length > MAXIMUM_STATEMENT_GROUND
+  ) {
+    return undefined;
+  }
+  return {
+    facts,
+    decidedOn: statement.decidedOn,
+    legalGround: legal === '' ? null : legal,
+    termsGround: terms === '' ? null : terms,
+    moderatorConflict: statement.moderatorConflict,
+  };
+}
+
 /** A decision on an account awaiting approval. */
 export type RegistrationDecision = 'approve' | 'refuse';
 
@@ -230,6 +283,10 @@ export const MODERATION_REFUSAL_TEXT = {
     'The instance no longer accepts this device’s sign-in. Connect again from the instance screen.',
   'no-answer': 'The instance did not answer, so nothing was changed.',
   'too-many': 'The instance is refusing requests for a while. Try again in a few minutes.',
+  statement:
+    'Suspending an account or hiding a name needs a statement of reasons, which the rider is ' +
+    'shown: the facts, in at most 2,000 characters, and the law or the terms they break, in at ' +
+    'most 1,000 — with no place or coordinate in any of them.',
 } as const;
 
 /** What the Moderation screen may ask. */
@@ -255,13 +312,16 @@ export interface ModerationPort {
   dismissReport(reportId: number, reason: string): Promise<ModerationOutcome>;
   /**
    * Suspend an account, lift a suspension or hide a display name — for a
-   * report when `reportId` is given, which the instance then closes.
+   * report when `reportId` is given, which the instance then closes. A
+   * suspension and a hidden name need `statement` (#910): without one the
+   * action is refused here and nothing is sent.
    */
   actOnAccount(
     athleteId: string,
     action: AccountAction,
     reason: string,
     reportId?: number,
+    statement?: StatementInput,
   ): Promise<ModerationOutcome>;
   /**
    * Make an invitation for a new rider (#1190, ADR 0047 D-6 source 3), with
@@ -516,8 +576,20 @@ function outcomeOf(answer: InstanceAnswer): ModerationOutcome {
     return { kind: 'refused', text: MODERATION_REFUSAL_TEXT['signed-out'] };
   }
   switch (errorCode(answer)) {
-    case 'validation_failed':
-      return { kind: 'refused', text: MODERATION_REFUSAL_TEXT.reason };
+    case 'validation_failed': {
+      // #910: a refused statement says so, not that the reason was wrong.
+      const fields = record(record(answer.body)?.error)?.fields;
+      const aboutStatement =
+        Array.isArray(fields) &&
+        fields.some((each) => {
+          const field = record(each)?.field;
+          return typeof field === 'string' && field.startsWith('statement');
+        });
+      return {
+        kind: 'refused',
+        text: aboutStatement ? MODERATION_REFUSAL_TEXT.statement : MODERATION_REFUSAL_TEXT.reason,
+      };
+    }
     case 'rate_limited':
       return { kind: 'refused', text: MODERATION_REFUSAL_TEXT['too-many'] };
     // ⚠️ One outcome, one sentence — see the module header. The last two are
@@ -749,21 +821,27 @@ export function createModerationPort(dependencies: ModerationPortDependencies): 
       return send(`/v1/moderation/reports/${String(reportId)}/dismiss`, reason);
     },
 
-    actOnAccount: async (athleteId, action, reason, reportId) => {
+    actOnAccount: async (athleteId, action, reason, reportId, statement) => {
       const typed = athleteId.trim();
       if (!ATHLETE_ID.test(typed)) {
         return { kind: 'refused', text: MODERATION_REFUSAL_TEXT['athlete-id'] };
+      }
+      // #910: a restriction is not sent without the statement the rider is shown.
+      const sentStatement = acceptedStatement(statement);
+      if (RESTRICTING_ACTIONS.has(action) && sentStatement === undefined) {
+        return { kind: 'refused', text: MODERATION_REFUSAL_TEXT.statement };
       }
       const path = {
         suspend: 'suspend',
         unsuspend: 'unsuspend',
         hide_display_name: 'hide-display-name',
       }[action];
-      return send(
-        `/v1/moderation/athletes/${typed}/${path}`,
-        reason,
-        reportId === undefined ? {} : { reportId },
-      );
+      return send(`/v1/moderation/athletes/${typed}/${path}`, reason, {
+        ...(reportId === undefined ? {} : { reportId }),
+        ...(RESTRICTING_ACTIONS.has(action) && sentStatement !== undefined
+          ? { statement: sentStatement }
+          : {}),
+      });
     },
 
     mintInvite: async (reason) => {

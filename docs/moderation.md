@@ -187,6 +187,35 @@ does not happen.
 An action on a person can name the report it decides (`reportId`). That closes the report, with the
 action recorded as its outcome.
 
+### Statements of reasons
+
+**Suspending an account and hiding a display name each need a statement of reasons** (#910), which
+the rider is shown. Without one the instance refuses the action, and nothing changes. It is what the
+EU Digital Services Act's Art. 17(3) asks for, as `statement` in the action's body, and the Moderation
+screen asks for it in the action's confirmation:
+
+| Field | What to write |
+|---|---|
+| `facts` | what they did: the facts you relied on. Required, at most 2,000 characters |
+| `decidedOn` | `report`, `notice` or `own_initiative` |
+| `legalGround` | the law it breaks and why, if you decided it is illegal |
+| `termsGround` | the terms it breaks and why, if you decided it breaks them. Give at least one of the two |
+| `notifierNamed` | only if the rider cannot see why without it (DSA recital 54). Leave it out otherwise |
+| `moderatorConflict` | `true` when the matter involves you: the statement declares the conflict |
+| `endsAt` | when the restriction ends, if it does (Unix seconds). Leave it out for no end date |
+
+**Never write a place or a coordinate into a statement.** A field that looks like one (two decimal
+numbers with four or more places, or a degree sign) is refused. The reason you give for the log is
+not shown to the rider: the statement is.
+
+The statement is kept with the log entry, written in the same transaction, and, like the log, it is
+**append-only in the schema**. The rider reads their own statements on the Instance screen
+(`GET /v1/statements`). The statement says that no automated means were used, gives your contact
+address (`OYL_INSTANCE_CONTACT_EMAIL`) as the way to ask for the decision to be looked at again, and
+names a court as the other route. **A suspended rider reads theirs too**, through the way-out session
+(below), which reaches their statements and nothing more. Nobody else's statements are shown, and a
+report's or a notice's sender never is, unless you named them.
+
 To anyone who is not a moderator, every moderation route answers as though it does not exist.
 
 ## What the log is, and what erasure does to it
@@ -218,7 +247,8 @@ refuses to undo 0007 while the log holds a single entry, and changes nothing.
   #898 their app can open a **way-out session** (`POST /v1/auth/leave-session`, signed with one of
   their device keys). It lasts an hour and reaches exactly two things: the account export
   (`GET /v1/account/export`) and deleting the account (`DELETE /v1/account`, which needs one of their
-  recovery codes or a fresh signature from one of their devices, like anyone's). Everything else
+  recovery codes or a fresh signature from one of their devices, like anyone's), and, since #910,
+  the statements of reasons about their account (`GET /v1/statements`). Everything else
   answers `account_suspended`. Lifting the suspension ends the way-out session; they then sign in as
   usual. ⚠️ This used to say lifting the suspension was the only way to give a suspended rider
   their data, and a moderator who remembers that is reading the old file. Deleting the account keeps

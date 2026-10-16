@@ -50,6 +50,7 @@ import {
   startModerationWorld,
   type ModerationWorld,
   type Rider,
+  TEST_STATEMENT,
 } from './moderation-testing.ts';
 
 const isAthleteReach = (reach: Reach): reach is { readonly athlete: string } =>
@@ -240,6 +241,7 @@ describe('every path a blocked athlete could use is refused, as though nobody we
           `/v1/moderation/athletes/${suspended.athleteId}/suspend`,
           {
             reason: 'Cheating',
+            statement: TEST_STATEMENT,
           },
         )
       ).status,
@@ -386,13 +388,15 @@ describe('every path a blocked athlete could use is refused, as though nobody we
 
 /**
  * A suspended rider's way out (#898): the routes that admit their limited
- * session are TWO, declared on the route table, and every other session route
- * refuses it — walked from the table, so a route added later is walked too.
+ * session are THREE since #910, declared on the route table, and every other
+ * session route refuses it — walked from the table, so a route added later is
+ * walked too. The third is reading the statements of reasons about their own
+ * account: a suspended rider must be able to read why (DSA Art. 17(1)(d)).
  */
-const ADMITS_SUSPENDED = ['eraseAccount', 'exportAccount'];
+const ADMITS_SUSPENDED = ['eraseAccount', 'exportAccount', 'listStatements'];
 
-describe('a suspended rider’s way-out session reaches the export and the deletion, and nothing else (#898)', () => {
-  it('is declared by exactly the account export and deletion, and no other route', () => {
+describe('a suspended rider’s way-out session reaches the export, the deletion and their statements, and nothing else (#898, #910)', () => {
+  it('is declared by exactly the account export and deletion and the statements, and no other route', () => {
     expect(
       ROUTES.filter((route) => route.admitsSuspended === true)
         .map((route) => route.operationId)
@@ -418,7 +422,7 @@ describe('a suspended rider’s way-out session reaches the export and the delet
       world.owner,
       'POST',
       `/v1/moderation/athletes/${leaving.athleteId}/suspend`,
-      { reason: 'Cheating' },
+      { reason: 'Cheating', statement: TEST_STATEMENT },
     );
     expect(suspended.status).toBe(200);
     const opened = await world.call('POST', '/v1/auth/leave-session', {

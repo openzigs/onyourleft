@@ -63,7 +63,10 @@ import type {
   Notice,
   Report,
   SqlStore,
+  Statement,
+  StatementFields,
 } from '../store/sql-store.ts';
+import { readStatementFields, RESTRICTIONS } from './statements.ts';
 import { readNoticeForm, type NoticeProblem, type NoticeValues } from './notices.ts';
 
 /** The two moderator roles (ruling Q13). */
@@ -144,6 +147,8 @@ export interface Moderation {
   submitNotice(form: URLSearchParams, address: string | null): Promise<NoticeSubmission>;
   /** Every notice received, oldest first: the moderators' queue of notices (#907). */
   notices(): Promise<readonly Notice[]>;
+  /** The statements of reasons about this athlete, newest first (#910): their own, and nobody else's. */
+  statements(athleteId: string): Promise<readonly Statement[]>;
   /** The approval queue (#775): every athlete awaiting a moderator's decision. */
   pendingRegistrations(): Promise<readonly AthleteRecord[]>;
   /**
@@ -161,7 +166,12 @@ export interface Moderation {
     moderatorId: string,
     action: AthleteAction,
     target: string,
-    fields: { readonly reason?: unknown; readonly reportId?: unknown },
+    fields: {
+      readonly reason?: unknown;
+      readonly reportId?: unknown;
+      /** The statement of reasons (#910): required of a restriction ({@link RESTRICTIONS}). */
+      readonly statement?: unknown;
+    },
   ): Promise<ModerationResult<{ logId: number }>>;
   dismiss(
     moderatorId: string,
@@ -436,6 +446,14 @@ export function createModeration(options: ModerationOptions): Moderation {
         }
         reportId = fields.reportId as number;
       }
+      // #910: a restriction is refused without its statement of reasons, so
+      // no rider is ever restricted without being able to read why.
+      let statement: StatementFields | undefined;
+      if (RESTRICTIONS.has(action)) {
+        const read = readStatementFields(fields.statement, now());
+        if (!read.ok) return refuse('validation_failed', read.fields);
+        statement = read.fields;
+      }
       // Nobody moderates a moderator, themselves included: the owner and the
       // deputy cannot suspend each other, or hide each other's name. The
       // attempt is logged, and changes nothing.
@@ -450,9 +468,12 @@ export function createModeration(options: ModerationOptions): Moderation {
           reportId,
           reason: checked.reason,
           at: seconds(),
+          ...(statement === undefined ? {} : { statement }),
         }),
       );
     },
+
+    statements: (athleteId) => store.listStatements(athleteId),
 
     async dismiss(moderatorId, reportId, reason) {
       const checked = checkReason(reason);

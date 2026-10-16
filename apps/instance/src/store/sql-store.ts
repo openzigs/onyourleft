@@ -50,6 +50,7 @@ import type {
   LinkCodeTable,
   ModerationLogTable,
   NoticeTable,
+  StatementTable,
   RecoveryCodeTable,
   RecoveryEmailConfirmationTable,
   RecoveryEmailTable,
@@ -536,6 +537,38 @@ export type ModerationActionKind =
    */
   | 'activate_moderator_key';
 
+/**
+ * What a restriction is decided on, and the DSA Art. 17(3) fields the
+ * affected rider is told (#910). (a), what was restricted, is the action
+ * itself; (c), automated means, are never used; (f), redress, comes from the
+ * instance's settings when the statement is read.
+ */
+export interface StatementFields {
+  /** (b) the facts and circumstances relied on. */
+  readonly facts: string;
+  /** (b) what the decision was taken on. */
+  readonly decidedOn: 'notice' | 'report' | 'own_initiative';
+  /** (d) the law relied on, and why the content is illegal under it; `null` when decided on the terms alone. */
+  readonly legalGround: string | null;
+  /** (e) the terms relied on, and why the content breaks them; `null` when decided on the law alone. */
+  readonly termsGround: string | null;
+  /** The notifier, named only where it is necessary to see why (recital 54); usually `null`. */
+  readonly notifierNamed: string | null;
+  /** The moderator declared a conflict of interest (the owner's ruling of 2026-09-30). */
+  readonly moderatorConflict: boolean;
+  /** When the restriction ends, Unix seconds; `null` for no end date. */
+  readonly endsAt: number | null;
+}
+
+/** A statement of reasons as it was written, with its log entry's id and time (#910). */
+export interface Statement extends StatementFields {
+  readonly logId: number;
+  readonly targetAthleteId: string;
+  /** The action it explains: `suspend`, `hide_display_name`. */
+  readonly restriction: string;
+  readonly at: number;
+}
+
 /** One moderator action, as it is asked for and as it is logged. */
 export interface ModerationAction {
   readonly action: ModerationActionKind;
@@ -545,6 +578,12 @@ export interface ModerationAction {
   readonly reportId: number | null;
   readonly reason: string;
   readonly at: number;
+  /**
+   * The statement of reasons the affected rider is told (#910), written in the
+   * same transaction as the log entry. Required of a restriction by
+   * `moderation.ts`; the store writes it whenever it is given.
+   */
+  readonly statement?: StatementFields;
 }
 
 /**
@@ -1380,6 +1419,8 @@ export interface SqlStore {
   countNoticesSince(since: number): Promise<number>;
   /** Every notice received, oldest first: the moderators' queue (#907). */
   listNotices(): Promise<readonly Notice[]>;
+  /** The statements of reasons about this athlete, newest first (#910). */
+  listStatements(athleteId: string): Promise<readonly Statement[]>;
 
   /**
    * Apply a moderator action and append it to the log, in ONE transaction:
@@ -1659,6 +1700,20 @@ const noticeFrom = (row: Selectable<NoticeTable>): Notice => ({
   notifierName: row.notifier_name,
   notifierEmail: row.notifier_email,
   bonaFide: row.bona_fide === 1,
+});
+
+const statementFrom = (row: Selectable<StatementTable>): Statement => ({
+  logId: row.log_id,
+  targetAthleteId: row.target_athlete_id,
+  restriction: row.restriction,
+  facts: row.facts,
+  decidedOn: row.decided_on,
+  legalGround: row.legal_ground,
+  termsGround: row.terms_ground,
+  notifierNamed: row.notifier_named,
+  moderatorConflict: row.moderator_conflict === 1,
+  endsAt: row.ends_at,
+  at: row.at,
 });
 
 const moderationLogFrom = (row: Selectable<ModerationLogTable>): ModerationLogEntry => ({
@@ -3898,6 +3953,18 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
         return Number(row.n);
       }),
 
+    listStatements: (athleteId) =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('statement')
+            .selectAll()
+            .where('target_athlete_id', '=', athleteId)
+            .orderBy('log_id', 'desc')
+            .execute()
+        ).map(statementFrom),
+      ),
+
     listNotices: () =>
       exclusive(async () =>
         (await db.selectFrom('notice').selectAll().orderBy('id').execute()).map(noticeFrom),
@@ -3957,6 +4024,26 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
             })
             .returning('id')
             .executeTakeFirstOrThrow();
+          // #910: the statement of reasons, with the entry, or neither.
+          if (action.statement !== undefined && action.targetAthleteId !== null) {
+            const statement = action.statement;
+            await trx
+              .insertInto('statement')
+              .values({
+                log_id: logged.id,
+                target_athlete_id: action.targetAthleteId,
+                restriction: action.action,
+                facts: statement.facts,
+                decided_on: statement.decidedOn,
+                legal_ground: statement.legalGround,
+                terms_ground: statement.termsGround,
+                notifier_named: statement.notifierNamed,
+                moderator_conflict: statement.moderatorConflict ? 1 : 0,
+                ends_at: statement.endsAt,
+                at: action.at,
+              })
+              .execute();
+          }
           return { outcome: 'applied', logId: logged.id };
         }),
       ),
