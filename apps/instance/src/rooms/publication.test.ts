@@ -148,4 +148,36 @@ describe('publishRace — ADR 0028’s publication rule, #785', () => {
     expect(rows[0]?.displayName).toBeNull();
     expect(rows[0]?.wattsPerKilogram).toBe(3);
   });
+
+  it('a hidden result stays hidden for its rider when a non-finisher erases (#913)', () => {
+    const rider = (athleteId: string, place: number | null): ResultForPublication => ({
+      athleteId,
+      place,
+      finishMs: place === null ? null : 1,
+      wattsPerKilogram: 3,
+      flaggedDurationsSeconds: [],
+    });
+    const viewing = { viewerAthleteId: 'ann', nameFor: (id: string) => id };
+    const hidden = new Set(['c']);
+    const names = (rows: readonly { displayName: string | null }[]) =>
+      rows.map((row) => row.displayName);
+    const before = publishRace(
+      [rider('a', 1), rider('b', null), rider('c', null)],
+      viewing,
+      1,
+      hidden,
+    );
+    expect(names(before.rows)).toEqual(['a', 'b', null]);
+    // b erased: c moves up a row. The hide followed c, not the row number.
+    const after = publishRace([rider('a', 1), rider('c', null)], viewing, 1, hidden);
+    expect(names(after.rows)).toEqual(['a', null]);
+    // A bystander sliding into a hidden rider's row number is not hidden.
+    const other = publishRace(
+      [rider('a', 1), rider('b', null), rider('d', null)],
+      viewing,
+      1,
+      hidden,
+    );
+    expect(names(other.rows)).toEqual(['a', 'b', 'd']);
+  });
 });

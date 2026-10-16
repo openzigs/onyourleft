@@ -378,6 +378,18 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
       decision: 'Not illegal: the route is an ordinary loop.',
     });
   },
+  // #913: the route of a room a rider made, hidden.
+  hideItem: async (world) => {
+    const { token } = await signedIn(world);
+    const made = (await (await send(world, 'POST', '/v1/rooms', token, roomBody())).json()) as {
+      roomId: string;
+    };
+    return send(world, 'POST', '/v1/moderation/items/hide', await moderatorToken(world), {
+      item: `route:${made.roomId}`,
+      reason: 'From a notice',
+      statement: TEST_STATEMENT,
+    });
+  },
   getModerationRecord: async (world) =>
     send(world, 'GET', '/v1/moderation/record', await moderatorToken(world)),
   listOpenReports: async (world) =>

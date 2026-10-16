@@ -253,6 +253,32 @@ export const MODERATION_ROUTES: readonly Route[] = [
       ),
   },
   {
+    method: 'POST',
+    path: '/v1/moderation/items/hide',
+    sealed: 'only',
+    operationId: 'hideItem',
+    reaches: 'moderation',
+    summary:
+      'Hide one item (#913) — a room’s listing (`room:<room id>`), the route shown in a room (`route:<room id>`) or one row of a race’s result (`result:<room id>:<row>`) — by the identifier a notice names it by, with a reason and a statement of reasons its owner is shown, written to the log in one transaction. Nothing is deleted: every read a rider makes of the room leaves the item out, and its owner still sees it.',
+    identity: true,
+    auth: 'session',
+    request: object({ item: string, reason: string, statement: statementInput }, [
+      'item',
+      'reason',
+      'statement',
+    ]),
+    errors: ['unauthenticated', 'validation_failed', 'moderation_not_applicable'],
+    response: actionResponse,
+    handle: async (context) =>
+      answer(
+        await moderationOf(context).hideItem(callerId(context), context.json.item, {
+          reason: context.json.reason,
+          statement: context.json.statement,
+        }),
+        (value) => json(value),
+      ),
+  },
+  {
     method: 'GET',
     path: '/v1/moderation/appeals',
     sealed: 'only',

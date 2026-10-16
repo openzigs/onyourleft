@@ -202,6 +202,7 @@ does not happen.
 | Dismiss a report | `POST /v1/moderation/reports/{id}/dismiss` | Removes it from the queue. |
 | Hide a display name | `POST /v1/moderation/athletes/{id}/hide-display-name` | Other riders see "Rider" instead of the name. The rider still sees their own name. The hide ends when the rider chooses a **different** name, because a new name is new content. Choosing the same name again keeps it hidden. |
 | Suspend an account | `POST /v1/moderation/athletes/{id}/suspend` | Every device key the rider holds is refused at sign-in, every session they had ends at once, and other riders stop seeing them. **Nothing they own is deleted.** |
+| Hide one item | `POST /v1/moderation/items/hide` | One room's listing (`room:<room id>`), the route shown in a room (`route:<room id>`), or one row of a race's result (`result:<room id>:<row>`), by the reference a notice names it by (#913). Needs a statement of reasons, which the item's owner is shown. **Nothing is deleted** and the rest is left alone. A hidden row is shown to everybody else as "a rider" with no figure, and to its own rider as before. A hidden route is shown to no member but the room's maker. A room whose listing is hidden takes nobody new by its code. An appeal that reverses it shows the item again. |
 | Lift a suspension | `POST /v1/moderation/athletes/{id}/unsuspend` | The rider can sign in again and is visible again. |
 | List suspended accounts | `GET /v1/moderation/suspended` | Every suspended account, most recently suspended first, a page at a time (`?limit=`, `?cursor=` from the page before). So you can lift a suspension without finding the id in the log (#961). |
 | Read the log | `GET /v1/moderation/log` | Every action ever taken, **newest first**, a page at a time: `?limit=` (1–200, default 50) and `?cursor=` from the page before, which reaches further back. ⚠️ Until #961 it was every action in one answer, oldest first. |
@@ -310,8 +311,9 @@ refuses to undo 0007 while the log holds a single entry, and changes nothing.
 
 - **Moderate inside a room.** Blocking and reporting a rider in the middle of a ride, room hosts,
   and room bans are #789.
-- **Act on content other than a display name.** Riders' rides are not shown to other riders on the
-  instance yet, so the only content another rider can see is a name.
+- **Act on content other than a name, a room, a route shown in a room, or a race's result.** Since
+  #913 each of those can be hidden alone, by its reference. Riders' rides are not shown to other
+  riders, so there is no other item to act on.
 - **Undo a block for somebody.** A block belongs to the rider who made it.
 - **Take down a copy on another instance.** Instances do not talk to each other yet (#56). When they
   do, a moderator's action will reach only their own instance.

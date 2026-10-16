@@ -79,7 +79,11 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         statement (migration 0028, decided once) is the
                         FOURTH. Since #912 a notice's steps are recorded
                         beside it (migration 0029, append-only), and
-                        `moderation/record.ts` is the export. Behind a
+                        `moderation/record.ts` is the export. Since #913
+                        one item (a room, its route, a row of a result) is
+                        hidden alone (migration 0030, `hideItem`), and
+                        `rooms/rooms.ts`'s join, route and results reads
+                        each ask `listHiddenItemsOfRoom`. Behind a
                         proxy the sign-in rate limits read the client's
                         address from `OYL_INSTANCE_CLIENT_ADDRESS_HEADER`
                         (`cf-connecting-ip` behind the tunnel), and only

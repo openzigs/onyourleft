@@ -33,7 +33,7 @@
 
 import { useState, type JSX } from 'react';
 
-import type { RouteProfile } from '@onyourleft/domain';
+import { formatModerationItem, type RouteProfile } from '@onyourleft/domain';
 
 import { Button } from '../design/Button';
 import { SectionHeading } from '../design/SectionHelp';
@@ -55,6 +55,16 @@ export interface RoomRouteChoice {
   readonly name: string;
   readonly profile: RouteProfile;
 }
+
+/**
+ * What the references under an entered room are for (#913): each is an
+ * identifier the instance's notice page takes, so a rider can report the room
+ * or its route alone. ⚠️ Draft wording awaiting the owner's approval.
+ */
+export const ROOM_REFERENCES_SUMMARY = 'References, to report something in this room';
+export const ROOM_REFERENCES_TEXT =
+  'To tell the instance’s moderator about this room or its route, copy its reference into the ' +
+  'instance’s notice page. About links to it.';
 
 /** What a room's kind is called on this screen. */
 export const ROOM_KIND_LABEL = { group: 'Group ride', race: 'Race' } as const;
@@ -231,6 +241,22 @@ export function RoomPanel(props: RoomPanelProps): JSX.Element {
             Leave the room
           </Button>
         </div>
+        {/* #913: the room and its route, by the identifiers the instance's
+            notice page takes, so either can be reported alone. */}
+        <details className="oyl-rooms__references">
+          <summary>{ROOM_REFERENCES_SUMMARY}</summary>
+          <p>{ROOM_REFERENCES_TEXT}</p>
+          <ul>
+            <li>
+              This room:{' '}
+              <code>{formatModerationItem({ kind: 'room', roomId: entered.roomId })}</code>
+            </li>
+            <li>
+              Its route:{' '}
+              <code>{formatModerationItem({ kind: 'route', roomId: entered.roomId })}</code>
+            </li>
+          </ul>
+        </details>
       </section>
     );
   }

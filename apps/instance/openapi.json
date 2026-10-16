@@ -5515,6 +5515,141 @@
         }
       }
     },
+    "/v1/moderation/items/hide": {
+      "post": {
+        "operationId": "hideItem",
+        "summary": "Hide one item (#913) — a room’s listing (`room:<room id>`), the route shown in a room (`route:<room id>`) or one row of a race’s result (`result:<room id>:<row>`) — by the identifier a notice names it by, with a reason and a statement of reasons its owner is shown, written to the log in one transaction. Nothing is deleted: every read a rider makes of the room leaves the item out, and its owner still sees it.",
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "item": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "statement": {
+                    "type": "object",
+                    "properties": {
+                      "facts": {
+                        "type": "string"
+                      },
+                      "decidedOn": {
+                        "type": "string",
+                        "enum": [
+                          "notice",
+                          "report",
+                          "own_initiative"
+                        ]
+                      },
+                      "legalGround": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "termsGround": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "notifierNamed": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "moderatorConflict": {
+                        "type": "boolean"
+                      },
+                      "endsAt": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "facts",
+                      "decidedOn"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "item",
+                  "reason",
+                  "statement"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "logId": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "logId"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "409": {
+            "$ref": "#/components/responses/moderation_not_applicable"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
     "/v1/moderation/log": {
       "get": {
         "operationId": "getModerationLog",

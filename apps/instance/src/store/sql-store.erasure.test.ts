@@ -110,6 +110,9 @@ const NAMED_WITHOUT_A_FOREIGN_KEY: Readonly<
   'moderation_log.actor_athlete_id': {
     kept: 'the audit log is append-only: erasing an account does not erase what was done (#83)',
   },
+  'hidden_item.owner_athlete_id': {
+    kept: 'a hidden item stays hidden, and its record stays, when its owner erases their account (#913)',
+  },
   'notice_step.actor_athlete_id': {
     kept: 'the record of how a notice was handled is evidence of what was done and when (#912)',
   },
@@ -282,6 +285,23 @@ describe('erasing an athlete (#769, #35)', () => {
         decision: 'Seen',
         logId: null,
         at: 1_790_001_060,
+      });
+      // #913: a moderator hid an item of B's.
+      await store.hideItem({
+        item: 'room:0123456789abcdef0123456789abcdef',
+        ownerAthleteId: ATHLETE_B,
+        actorAthleteId: ATHLETE_A,
+        reason: 'Seen',
+        statement: {
+          facts: 'Seen',
+          decidedOn: 'own_initiative',
+          legalGround: null,
+          termsGround: 'Terms',
+          notifierNamed: null,
+          moderatorConflict: false,
+          endsAt: null,
+        },
+        at: 1_790_001_070,
       });
       // #911: B appeals the statement about their hidden name.
       const [statement] = await store.listStatements(ATHLETE_B);

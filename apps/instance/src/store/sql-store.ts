@@ -563,6 +563,12 @@ export type ModerationActionKind =
   | 'approve_registration'
   | 'refuse_registration'
   /**
+   * One item hidden (#913): a room's listing, the route shown in a room, or
+   * a row of a race's result. Taken through {@link SqlStore.hideItem}, never
+   * {@link SqlStore.moderate}: it names an item, and the athlete is its owner.
+   */
+  | 'hide_item'
+  /**
    * The instance's, not a moderator's: a pending account whose key the
    * operator named as a moderator's signed in, and was activated, because
    * nobody may approve a moderator (#891's review). Its actor is the account.
@@ -1499,6 +1505,28 @@ export interface SqlStore {
   putNoticeStep(step: Omit<NoticeStep, 'id'>): Promise<NoticeStepRecorded>;
   /** Every step taken on every notice, oldest first (#912). */
   listNoticeSteps(): Promise<readonly NoticeStep[]>;
+  /**
+   * Hide one item (#913), in ONE transaction: the log entry, the statement of
+   * reasons its owner is shown, and the hidden item — or, for an item already
+   * hidden, nothing.
+   */
+  hideItem(hide: {
+    readonly item: string;
+    readonly ownerAthleteId: string;
+    readonly actorAthleteId: string;
+    readonly reason: string;
+    readonly statement: StatementFields;
+    readonly at: number;
+  }): Promise<
+    { readonly outcome: 'applied'; readonly logId: number } | { readonly outcome: 'not_applicable' }
+  >;
+  /**
+   * The items of one room that are hidden now (#913): its listing, its route
+   * and any rows of its result — each with whose it is.
+   */
+  listHiddenItemsOfRoom(
+    roomId: string,
+  ): Promise<readonly { readonly item: string; readonly ownerAthleteId: string }[]>;
   /** The statements of reasons about this athlete, newest first (#910). */
   listStatements(athleteId: string): Promise<readonly Statement[]>;
   /**
@@ -2376,6 +2404,10 @@ async function applyToAthlete(
       return true;
     case 'dismiss_report':
       return true;
+    case 'hide_item':
+      // An item is hidden by `hideItem`, which writes its own row; asked of
+      // `moderate`, it changes nothing.
+      return false;
   }
 }
 
@@ -4189,6 +4221,14 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
                 .set({ display_name_hidden_at: null })
                 .where('display_name_hidden_at', '=', appealed.at)
                 .execute();
+            } else if (appealed.restriction === 'hide_item') {
+              // #913: the item the statement explains is shown again.
+              await trx
+                .updateTable('hidden_item')
+                .set({ restored_at: decision.at })
+                .where('log_id', '=', appeal.statement_log_id)
+                .where('restored_at', 'is', null)
+                .execute();
             }
           }
           const logged = await trx
@@ -4280,6 +4320,76 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
         (await db.selectFrom('notice_step').selectAll().orderBy('id').execute()).map(
           noticeStepFrom,
         ),
+      ),
+
+    hideItem: (hide) =>
+      exclusive(() =>
+        db.transaction().execute(async (trx) => {
+          const held = await trx
+            .selectFrom('hidden_item')
+            .select('log_id')
+            .where('item', '=', hide.item)
+            .where('restored_at', 'is', null)
+            .executeTakeFirst();
+          if (held !== undefined) return { outcome: 'not_applicable' } as const;
+          const logged = await trx
+            .insertInto('moderation_log')
+            .values({
+              actor_athlete_id: hide.actorAthleteId,
+              action: 'hide_item',
+              target_athlete_id: hide.ownerAthleteId,
+              report_id: null,
+              reason: hide.reason,
+              at: hide.at,
+            })
+            .returning('id')
+            .executeTakeFirstOrThrow();
+          await trx
+            .insertInto('statement')
+            .values({
+              log_id: logged.id,
+              target_athlete_id: hide.ownerAthleteId,
+              restriction: 'hide_item',
+              facts: hide.statement.facts,
+              decided_on: hide.statement.decidedOn,
+              legal_ground: hide.statement.legalGround,
+              terms_ground: hide.statement.termsGround,
+              notifier_named: hide.statement.notifierNamed,
+              moderator_conflict: hide.statement.moderatorConflict ? 1 : 0,
+              ends_at: hide.statement.endsAt,
+              at: hide.at,
+            })
+            .execute();
+          await trx
+            .insertInto('hidden_item')
+            .values({
+              log_id: logged.id,
+              item: hide.item,
+              owner_athlete_id: hide.ownerAthleteId,
+              hidden_at: hide.at,
+              restored_at: null,
+            })
+            .execute();
+          return { outcome: 'applied', logId: logged.id } as const;
+        }),
+      ),
+
+    listHiddenItemsOfRoom: (roomId) =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('hidden_item')
+            .select(['item', 'owner_athlete_id'])
+            .where('restored_at', 'is', null)
+            .where((row) =>
+              row.or([
+                row('item', '=', `room:${roomId}`),
+                row('item', '=', `route:${roomId}`),
+                row('item', 'like', `result:${roomId}:%`),
+              ]),
+            )
+            .execute()
+        ).map((row) => ({ item: row.item, ownerAthleteId: row.owner_athlete_id })),
       ),
 
     listNotices: () =>

@@ -321,6 +321,11 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   decideAppeal: { notAScopedRead: 'a moderator’s write; appeals.test.ts' },
   putNoticeStep: { notAScopedRead: 'a moderator’s write about a notice; notice-steps.test.ts' },
   listNoticeSteps: { notAScopedRead: 'the moderators’ record of every notice (#912)' },
+  hideItem: { notAScopedRead: 'a moderator’s write; items.test.ts' },
+  listHiddenItemsOfRoom: {
+    notAScopedRead:
+      'the hidden items of one room, by identifier, which every read of that room asks (#913)',
+  },
   listNotices: { notAScopedRead: 'the moderators’ queue of notices, from anybody (#907)' },
   listModerationLog: { notAScopedRead: 'the moderators’ record: every action (#83)' },
   listModerationLogPage: {

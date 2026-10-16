@@ -116,6 +116,7 @@ const FIXTURE_ROWS: Readonly<Record<string, string>> = {
   appeal: `INSERT INTO appeal VALUES (1, 1, 'b', 'Grounds', 29, NULL, NULL, NULL, NULL, NULL)`,
   notice: `INSERT INTO notice VALUES (1, 27, 'illegal_content', 'Why', '["room:0123456789abcdef0123456789abcdef"]', NULL, NULL, NULL, 0)`,
   notice_step: `INSERT INTO notice_step VALUES (1, 1, 'decided', 'a', 'Not illegal', 1, 30)`,
+  hidden_item: `INSERT INTO hidden_item VALUES (1, 'room:0123456789abcdef0123456789abcdef', 'b', 31, NULL)`,
 };
 
 /**
@@ -130,6 +131,7 @@ const EMPTY_FOR_ITS_OWN_DOWN: Readonly<Record<string, string>> = {
   '0027-statements': 'statement',
   '0028-appeals': 'appeal',
   '0029-notice-steps': 'notice_step',
+  '0030-hidden-items': 'hidden_item',
 };
 
 interface Snapshot {
