@@ -390,6 +390,12 @@ export interface Registration {
    * {@link InviteRefusedError}.
    */
   readonly inviteCodeSha256?: string;
+  /**
+   * Only from the operator's `load-accounts add` (#1383): when it made this
+   * throwaway account, so `load-accounts erase` can find it and nothing else.
+   * Registration over HTTP never sets it.
+   */
+  readonly loadRunAt?: number;
 }
 
 /** A moderator's invitation, as its SHA-256 (#775). */
@@ -1637,6 +1643,8 @@ export interface SqlStore {
   confirmAdult(athleteId: string, at: number): Promise<boolean>;
   /** The moderators' approval queue: every athlete awaiting approval, oldest first (#775). */
   listPendingAthletes(): Promise<readonly AthleteRecord[]>;
+  /** The ids of the throwaway accounts `load-accounts add` made (#1383), oldest first. */
+  listLoadAthletes(): Promise<readonly string[]>;
   /** How many rides the athlete has synced: public-room eligibility counts them (#775). */
   countActivityRecords(athleteId: string): Promise<number>;
   /** A moderator's invitation, and its entry in the moderation log, together (#775). */
@@ -2741,6 +2749,7 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
               registration_state: athlete.registrationState,
               adult_confirmed_at: registration.adultConfirmedAt ?? null,
               activated_at: athlete.registrationState === 'active' ? athlete.createdAt : null,
+              load_run_at: registration.loadRunAt ?? null,
             })
             .execute();
           await trx
@@ -4657,6 +4666,19 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
             .orderBy('id')
             .execute()
         ).map(athleteFrom),
+      ),
+
+    listLoadAthletes: () =>
+      exclusive(async () =>
+        (
+          await db
+            .selectFrom('athlete')
+            .select('id')
+            .where('load_run_at', 'is not', null)
+            .orderBy('created_at')
+            .orderBy('id')
+            .execute()
+        ).map((row) => row.id),
       ),
 
     countActivityRecords: (athleteId) =>

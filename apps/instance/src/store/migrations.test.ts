@@ -330,6 +330,33 @@ describe('the migrations (#769)', () => {
     });
   });
 
+  it('refuses to undo 0032 while a load-run account is held, and changes nothing (#1383)', async () => {
+    const path = await freshPath();
+    await withKysely(path, (db) => migrateToLatest(db));
+    await withKysely(path, async (db) => {
+      while ((await appliedMigrations(db)).at(-1) !== '0032-load-accounts') {
+        await migrateDownOne(db);
+      }
+    });
+    seedEveryTable(path);
+    const database = openDatabase(path);
+    try {
+      database.exec(
+        `INSERT INTO athlete (id, display_name, created_at, registration_state, load_run_at) VALUES ('load', 'Load 1', 32, 'active', 32)`,
+      );
+    } finally {
+      database.close();
+    }
+    const before = snapshot(path);
+    await expect(withKysely(path, (db) => migrateDownOne(db))).rejects.toThrow(
+      /throwaway accounts are held/,
+    );
+    expect(snapshot(path)).toEqual(before);
+    await withKysely(path, async (db) => {
+      expect((await appliedMigrations(db)).at(-1)).toBe('0032-load-accounts');
+    });
+  });
+
   it('ends every way-out session when 0012 is undone, so a rolled-back instance gives a suspended rider no more (#898)', async () => {
     const path = await freshPath();
     await withKysely(path, (db) => migrateToLatest(db));

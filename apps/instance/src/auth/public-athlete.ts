@@ -44,6 +44,8 @@ export const ATHLETE_COLUMNS: Readonly<Record<string, ColumnClass>> = {
   adult_confirmed_at: 'private',
   // #891's review: when a moderator approved the account is theirs and the rider's.
   activated_at: 'private',
+  // #1383: the operator's own mark on a load run's throwaway account.
+  load_run_at: 'private',
 };
 
 /** What another rider may see of an athlete. */

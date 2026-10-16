@@ -354,6 +354,9 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   moderate: { notAScopedRead: 'a moderator’s write; sql-store.moderation.test.ts' },
   logRefusedAction: { notAScopedRead: 'a write to the moderators’ log; moderation.test.ts' },
   listPendingAthletes: { notAScopedRead: 'the moderators’ approval queue (#775)' },
+  listLoadAthletes: {
+    notAScopedRead: 'the operator’s own throwaway load-run accounts, for its erase command (#1383)',
+  },
   confirmAdult: { notAScopedRead: 'a write; registration.test.ts' },
   mintInviteCode: { notAScopedRead: 'a moderator’s write, logged with it (#775)' },
   // #1095: a job, and its events, asked for by EVERY athlete's job id as the caller.

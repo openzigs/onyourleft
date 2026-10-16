@@ -214,6 +214,7 @@ export const MODERATION_ROUTES: readonly Route[] = [
   {
     method: 'GET',
     path: '/v1/statements',
+    sealed: 'only',
     operationId: 'listStatements',
     reaches: 'own',
     // #910: a SUSPENDED rider reads why, through the way-out session
@@ -246,6 +247,7 @@ export const MODERATION_ROUTES: readonly Route[] = [
   {
     method: 'POST',
     path: '/v1/statements/{statementId}/appeal',
+    sealed: 'only',
     operationId: 'appealStatement',
     reaches: 'own',
     // #911: a SUSPENDED rider appeals through the way-out session, and that

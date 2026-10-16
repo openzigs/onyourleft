@@ -7392,6 +7392,7 @@
             "session": []
           }
         ],
+        "x-oyl-sealed": "only",
         "requestBody": {
           "required": true,
           "content": {
@@ -7441,6 +7442,9 @@
           "401": {
             "$ref": "#/components/responses/unauthenticated"
           },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
           "404": {
             "$ref": "#/components/responses/not_found"
           },
@@ -7485,6 +7489,7 @@
             "session": []
           }
         ],
+        "x-oyl-sealed": "only",
         "requestBody": {
           "required": true,
           "content": {
@@ -7522,6 +7527,9 @@
           },
           "401": {
             "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
           },
           "404": {
             "$ref": "#/components/responses/not_found"
@@ -8028,6 +8036,7 @@
             "session": []
           }
         ],
+        "x-oyl-sealed": "only",
         "responses": {
           "200": {
             "description": "OK",
@@ -8200,6 +8209,9 @@
           "401": {
             "$ref": "#/components/responses/unauthenticated"
           },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
           "404": {
             "$ref": "#/components/responses/not_found"
           },
@@ -8241,6 +8253,7 @@
             "session": []
           }
         ],
+        "x-oyl-sealed": "only",
         "requestBody": {
           "required": true,
           "content": {
@@ -8285,6 +8298,9 @@
           },
           "401": {
             "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
           },
           "404": {
             "$ref": "#/components/responses/not_found"
