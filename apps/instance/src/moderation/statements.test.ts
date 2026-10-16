@@ -19,6 +19,7 @@ import {
   type Rider,
 } from './moderation-testing.ts';
 import { namesACoordinate, readStatementFields } from './statements.ts';
+import { wholeModerationLog } from '../store/testing/index.ts';
 
 let world: ModerationWorld | undefined;
 afterEach(async () => {
@@ -74,7 +75,7 @@ describe('a restriction carries its statement of reasons (#910)', () => {
       expect(refused.status, path).toBe(400);
       expect(codeOf(refused.body)).toBe('validation_failed');
     }
-    expect(await w.freshRead((store) => store.listModerationLog())).toEqual([]);
+    expect(await w.freshRead((store) => wholeModerationLog(store))).toEqual([]);
     const athlete = await w.freshRead((store) => store.getAthlete(bea.athleteId));
     expect(athlete).toMatchObject({ suspendedAt: null, displayNameHiddenAt: null });
     expect(await statementsOf(w, bea)).toEqual([]);

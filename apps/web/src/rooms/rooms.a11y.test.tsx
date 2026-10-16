@@ -52,6 +52,7 @@ const ENTERED: EnteredRoom = {
   ridingPosition: 'hoods',
   drafting: true,
   code: 'ABCDE-FGHJK-MNPQR',
+  madeIt: true,
   profile: northProfile(1_000),
   routeSha256: 'a'.repeat(64),
 };
@@ -91,7 +92,7 @@ describe('the room panel and a race’s result pass the accessibility audit — 
     ['in a race it made, with the code to share', panel({ entered: ENTERED })],
     [
       'in a group ride it joined',
-      panel({ entered: { ...ENTERED, kind: 'group', code: undefined } }),
+      panel({ entered: { ...ENTERED, kind: 'group', code: undefined, madeIt: false } }),
     ],
     ['in a race with drafting off — #787', panel({ entered: { ...ENTERED, drafting: false } })],
   ])('%s', async (_, props) => {
@@ -148,11 +149,15 @@ describe('a room’s drafting on the panel — #787, the owner’s ruling of 202
   });
 
   it('tells every rider in the room which it is, before the start', async () => {
-    await audited(<RoomPanel {...panel({ entered: { ...ENTERED, code: undefined } })} />);
+    await audited(
+      <RoomPanel {...panel({ entered: { ...ENTERED, code: undefined, madeIt: false } })} />,
+    );
     expect(document.body.textContent).toContain(ROOM_DRAFTING_TEXT.on);
     mounted?.unmount();
     await audited(
-      <RoomPanel {...panel({ entered: { ...ENTERED, code: undefined, drafting: false } })} />,
+      <RoomPanel
+        {...panel({ entered: { ...ENTERED, code: undefined, madeIt: false, drafting: false } })}
+      />,
     );
     expect(document.body.textContent).toContain(ROOM_DRAFTING_TEXT.off);
   });
@@ -228,7 +233,7 @@ describe('public rooms on the panel pass the accessibility audit — #788', () =
           entered: {
             ...ENTERED,
             code: undefined,
-            listed: { startsAt: 1_790_001_800, madeHere: true },
+            listed: { startsAt: 1_790_001_800 },
           },
         })}
       />,

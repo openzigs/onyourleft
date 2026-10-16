@@ -243,6 +243,8 @@ export async function startIdentityInstance(
     syncStoreSeenBy?: (store: SqlStore) => SqlStore;
     /** What sync sees in place of the memory blob store over {@link IdentityInstance.blobs}. */
     blobStoreSeenBy?: (blobs: BlobStore) => BlobStore;
+    /** What the rooms see in place of the memory blob store over {@link IdentityInstance.roomRoutes} (#948). */
+    roomRoutesSeenBy?: (routes: BlobStore) => BlobStore;
     /** The largest request body, in bytes. 16 KiB unless a test needs files. */
     bodyLimitBytes?: number;
     /** What `/ready`, `/metrics` and a room's start answer (#780). */
@@ -313,6 +315,7 @@ export async function startIdentityInstance(
     probes,
     syncStoreSeenBy,
     blobStoreSeenBy,
+    roomRoutesSeenBy,
     bodyLimitBytes,
     embedder,
     config,
@@ -398,7 +401,10 @@ export async function startIdentityInstance(
   const roomRoutes: MemoryBlobs = new Map();
   const rooms = createRooms({
     store,
-    routes: createMemoryBlobStore(roomRoutes),
+    routes:
+      roomRoutesSeenBy === undefined
+        ? createMemoryBlobStore(roomRoutes)
+        : roomRoutesSeenBy(createMemoryBlobStore(roomRoutes)),
     nameFor,
     now: () => clock.ms,
     ...(roomLimits === undefined ? {} : { limits: roomLimits }),

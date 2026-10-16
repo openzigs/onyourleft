@@ -263,7 +263,8 @@ describe('public rooms — #788', () => {
     expect(answer.kind).toBe('created');
     if (answer.kind === 'created') {
       expect(answer.room.code).toBeUndefined();
-      expect(answer.room.listed).toEqual({ startsAt: LISTED.startsAt, madeHere: true });
+      expect(answer.room.listed).toEqual({ startsAt: LISTED.startsAt });
+      expect(answer.room.madeIt).toBe(true);
     }
   });
 
@@ -343,7 +344,8 @@ describe('public rooms — #788', () => {
     expect(answer.kind).toBe('joined');
     if (answer.kind === 'joined') {
       expect(answer.room.code).toBeUndefined();
-      expect(answer.room.listed).toEqual({ startsAt: LISTED.startsAt, madeHere: false });
+      expect(answer.room.listed).toEqual({ startsAt: LISTED.startsAt });
+      expect(answer.room.madeIt).toBe(false);
       expect(answer.room.routeSha256).toBe(sha256);
     }
 

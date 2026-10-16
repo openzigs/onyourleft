@@ -249,7 +249,7 @@ export function RoomPanel(props: RoomPanelProps): JSX.Element {
         <StatusMessage tone="info" label={ROOM_KIND_LABEL[entered.kind]} live>
           You are in a {entered.kind === 'race' ? 'race' : 'group ride'} on the room’s route.
           {entered.kind === 'race'
-            ? entered.code === undefined && entered.listed?.madeHere !== true
+            ? !entered.madeIt
               ? ' The race starts when the rider who made the room starts it.'
               : ' You start the race, from the ride, when your riders are on the line.'
             : ' Ride whenever you like; there is no leader and no result.'}{' '}

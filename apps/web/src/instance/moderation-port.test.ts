@@ -991,16 +991,16 @@ describe('the moderation log — #891, #899, #955', () => {
       'one row it does not accept',
       () =>
         Response.json({
-          entries: [{ logId: 1, action: 'suspend', actorAthleteId: '../x', reason: 'r', at: 1 }],
+          items: [{ logId: 1, action: 'suspend', actorAthleteId: '../x', reason: 'r', at: 1 }],
           next: null,
         }),
     ],
-    ['a next cursor it does not accept', () => Response.json({ entries: [], next: 'not/ours' })],
+    ['a next cursor it does not accept', () => Response.json({ items: [], next: 'not/ours' })],
     [
       // A page is read under the ordinary 256 KiB since #961, not a room route's 2 MiB.
       'an answer past its bound',
       () =>
-        new Response(`{"entries":[],"next":null,"pad":"${'x'.repeat(256 * 1024 + 1)}"}`, {
+        new Response(`{"items":[],"next":null,"pad":"${'x'.repeat(256 * 1024 + 1)}"}`, {
           status: 200,
           headers: { 'content-type': 'application/json' },
         }),

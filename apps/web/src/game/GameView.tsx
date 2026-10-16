@@ -396,7 +396,7 @@ export interface GameViewProps {
    * Whether the rider made the shell's {@link roomId} — a test and the browser
    * gate. Only the room's creator is offered *Start the race* (the owner's
    * ruling of 2026-09-30). The product knows it from the room the panel
-   * entered, which carries its code only for the rider who made it.
+   * entered (`EnteredRoom.madeIt`, #948).
    */
   readonly madeTheRoom?: boolean | undefined;
   /**
@@ -1363,12 +1363,12 @@ export function GameView(props: GameViewProps): JSX.Element {
           ? entered.roomId
           : props.roomId;
       roomIdRef.current = roomId;
-      // The panel's room carries its code for the rider who made it, and only
-      // for them (`net/rooms-port.ts` §`EnteredRoom.code`) — or, for a public
-      // room, which has no code, says that this device made it (#788).
+      // The panel's room says whether this rider made it — made here, or as
+      // the instance answered their join by its code (#948,
+      // `net/rooms-port.ts` §`EnteredRoom.madeIt`).
       madeTheRoomRef.current =
         entered !== undefined && entered.roomId === roomId
-          ? entered.code !== undefined || entered.listed?.madeHere === true
+          ? entered.madeIt
           : props.madeTheRoom === true;
       if (props.room !== undefined && roomId !== undefined && port !== undefined) {
         const sensorsNow = port;

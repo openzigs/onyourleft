@@ -176,17 +176,29 @@ export class ScriptedInstance {
     this.route = { status: 200, body: { sha256, gpx } };
   }
 
-  /** The room joined by code is `routeSha256`'s, and its route is `gpx`; it drafts unless told. */
+  /**
+   * The room joined by code is `routeSha256`'s, and its route is `gpx`; it
+   * drafts unless told, and the joiner did not make it unless told (#948).
+   */
   offer(
     roomId: string,
     kind: 'group' | 'race',
     gpx: string,
     sha256: string,
     drafting = true,
+    creator = false,
   ): void {
     this.joined = {
       status: 200,
-      body: { roomId, kind, ridingPosition: 'hoods', drafting, loop: false, routeSha256: sha256 },
+      body: {
+        roomId,
+        kind,
+        ridingPosition: 'hoods',
+        drafting,
+        loop: false,
+        routeSha256: sha256,
+        creator,
+      },
     };
     this.route = { status: 200, body: { sha256, gpx } };
   }
