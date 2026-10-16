@@ -6257,6 +6257,21 @@ select.oyl-input {
     align-items: center;
     min-height: 2.75rem;
   }
+
+  /* ONE line, whatever the fonts: the CI runner's wider glyphs wrapped the
+     three at half padding onto a second line (253 px open against 200
+     closed, PR #1388's first run), so here they share the row and may
+     shrink, with a quarter's padding. */
+  .oyl-hud__report-reasons {
+    flex-wrap: nowrap;
+  }
+
+  .oyl-hud__report-reasons > .oyl-button {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    padding-inline: var(--oyl-space-xs);
+  }
 }
 
 .oyl-hud__control {
