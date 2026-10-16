@@ -6214,7 +6214,12 @@ select.oyl-input {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--oyl-space-sm);
+  /* A quarter rem between the row and the reasons under it, not a half:
+     *Report*'s 48 px (#788) cost the row 4 px, and at 1024×768 the open
+     panel then reached 4 px into the race's standings above it (PR #1390's
+     CI). The reasons are not ride-time controls, so #669's 8 px between two
+     of those does not bind here. */
+  gap: var(--oyl-space-xs) var(--oyl-space-sm);
 }
 
 .oyl-hud__report {
