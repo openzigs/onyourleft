@@ -110,6 +110,18 @@ const NAMED_WITHOUT_A_FOREIGN_KEY: Readonly<
   'moderation_log.actor_athlete_id': {
     kept: 'the audit log is append-only: erasing an account does not erase what was done (#83)',
   },
+  'hidden_item.owner_athlete_id': {
+    kept: 'a hidden item stays hidden, and its record stays, when its owner erases their account (#913)',
+  },
+  'notice_step.actor_athlete_id': {
+    kept: 'the record of how a notice was handled is evidence of what was done and when (#912)',
+  },
+  'appeal.appellant_athlete_id': {
+    kept: 'an appeal and its decision are part of the audit trail its statement is (#911)',
+  },
+  'statement.target_athlete_id': {
+    kept: 'a statement of reasons is what the rider was told, kept with the append-only log it explains (#910)',
+  },
   'moderation_log.target_athlete_id': {
     kept: 'the audit log is append-only: a suspended rider cannot erase their record (#83)',
   },
@@ -228,6 +240,15 @@ describe('erasing an athlete (#769, #35)', () => {
         reportId: report!.id,
         reason: 'Seen',
         at: 1_790_001_000,
+        statement: {
+          facts: 'Seen',
+          decidedOn: 'own_initiative',
+          legalGround: null,
+          termsGround: 'Terms',
+          notifierNamed: null,
+          moderatorConflict: false,
+          endsAt: null,
+        },
       });
       await store.moderate({
         action: 'hide_display_name',
@@ -236,6 +257,59 @@ describe('erasing an athlete (#769, #35)', () => {
         reportId: null,
         reason: 'Seen',
         at: 1_790_001_000,
+        statement: {
+          facts: 'Seen',
+          decidedOn: 'own_initiative',
+          legalGround: null,
+          termsGround: 'Terms',
+          notifierNamed: null,
+          moderatorConflict: false,
+          endsAt: null,
+        },
+      });
+      // #912: B, as a moderator, records a step on a notice.
+      const noticeId = await store.putNotice({
+        receivedAt: 1_790_001_050,
+        kind: 'illegal_content',
+        explanation: 'Seen',
+        items: [],
+        location: 'Seen',
+        notifierName: null,
+        notifierEmail: null,
+        bonaFide: false,
+      });
+      await store.putNoticeStep({
+        noticeId,
+        step: 'decided',
+        actorAthleteId: ATHLETE_B,
+        decision: 'Seen',
+        logId: null,
+        at: 1_790_001_060,
+      });
+      // #913: a moderator hid an item of B's.
+      await store.hideItem({
+        item: 'room:0123456789abcdef0123456789abcdef',
+        ownerAthleteId: ATHLETE_B,
+        actorAthleteId: ATHLETE_A,
+        reason: 'Seen',
+        statement: {
+          facts: 'Seen',
+          decidedOn: 'own_initiative',
+          legalGround: null,
+          termsGround: 'Terms',
+          notifierNamed: null,
+          moderatorConflict: false,
+          endsAt: null,
+        },
+        at: 1_790_001_070,
+      });
+      // #911: B appeals the statement about their hidden name.
+      const [statement] = await store.listStatements(ATHLETE_B);
+      await store.putAppeal({
+        statementLogId: statement!.logId,
+        appellantAthleteId: ATHLETE_B,
+        grounds: 'Seen',
+        filedAt: 1_790_001_100,
       });
     });
     for (const column of columns) {

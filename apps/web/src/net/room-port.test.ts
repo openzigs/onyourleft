@@ -2,6 +2,8 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
+import { NO_CARD_DEVICE } from '../instance/testing';
+import { keylessInstance } from '../rooms/rooms-testing';
 import { INSTANCE_SESSION_STORAGE_KEY } from '../instance/instance-port';
 import { INSTANCE_ACCOUNT_STORAGE_KEY } from '../instance/sign-in';
 import type {
@@ -13,6 +15,18 @@ import { createRoomPort, roomPortOver } from './room-port';
 import { flush, ManualClock } from './testing';
 
 const ORIGIN = 'https://ride.example';
+
+/**
+ * Let the ticket's request settle: since #1210 a device with no card reads
+ * the instance's keys first, and a `Response`'s body is read across tasks,
+ * not only microtasks.
+ */
+async function settle(): Promise<void> {
+  for (let i = 0; i < 5; i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await flush();
+  }
+}
 
 function storageWith(entries: Record<string, string>): Storage {
   const map = new Map(Object.entries(entries));
@@ -66,14 +80,14 @@ describe('the production room port — #782', () => {
     const sockets = recordingSockets();
     const clock = new ManualClock();
     createRoomPort({
+      ...NO_CARD_DEVICE,
       storage: storageWith(SIGNED_IN),
-      send,
+      send: keylessInstance(send),
       openSocket: sockets.open,
       timers: clock,
       now: clock.now,
     }).join({ roomId: 'room-1', declaredMassKilograms: 71, sample: () => ({ powerWatts: 0 }) });
-    await flush();
-    await flush();
+    await settle();
     expect(send).toHaveBeenCalledTimes(1);
     const [url, init] = send.mock.calls[0] as [string, RequestInit];
     expect(url).toBe(`${ORIGIN}/v1/rooms/room-1/ticket`);
@@ -96,8 +110,9 @@ describe('the production room port — #782', () => {
     const sockets = recordingSockets();
     const clock = new ManualClock();
     const connection = createRoomPort({
+      ...NO_CARD_DEVICE,
       storage: storageWith({}),
-      send,
+      send: keylessInstance(send),
       openSocket: sockets.open,
       timers: clock,
       now: clock.now,
@@ -127,8 +142,9 @@ describe('the production room port — #782', () => {
       const sockets = recordingSockets();
       const clock = new ManualClock();
       const connection = createRoomPort({
+        ...NO_CARD_DEVICE,
         storage: storageWith(SIGNED_IN),
-        send,
+        send: keylessInstance(send),
         openSocket: sockets.open,
         timers: clock,
         now: clock.now,
@@ -147,8 +163,9 @@ describe('the production room port — #782', () => {
     const sockets = recordingSockets();
     const clock = new ManualClock();
     const connection = createRoomPort({
+      ...NO_CARD_DEVICE,
       storage: storageWith(SIGNED_IN),
-      send,
+      send: keylessInstance(send),
       openSocket: sockets.open,
       timers: clock,
       now: clock.now,
@@ -176,33 +193,56 @@ describe('the production room port — #782', () => {
       const send = vi.fn(() => Promise.resolve(new Response('{}', { status })));
       const clock = new ManualClock();
       const connection = createRoomPort({
+        ...NO_CARD_DEVICE,
         storage: storageWith(SIGNED_IN),
-        send,
+        send: keylessInstance(send),
         openSocket: recordingSockets().open,
         timers: clock,
         now: clock.now,
       }).join({ roomId: 'room-1', declaredMassKilograms: 71, sample: () => ({ powerWatts: 0 }) });
-      await flush();
-      await flush();
+      await settle();
       await clock.advance(120_000);
       expect(connection.status()).toEqual({ kind: 'refused', reason });
       expect(send).toHaveBeenCalledTimes(1);
     });
   }
 
+  it('reads `sealed_required` to the ticket as cannot-seal, not as not-eligible (#1210)', async () => {
+    // An instance holding keys whose keys this device could not read: it
+    // refuses the plaintext ticket before reading it, and says why.
+    const send = vi.fn(() =>
+      Promise.resolve(
+        Response.json({ error: { code: 'sealed_required', message: 'Sealed.' } }, { status: 403 }),
+      ),
+    );
+    const clock = new ManualClock();
+    const connection = createRoomPort({
+      ...NO_CARD_DEVICE,
+      storage: storageWith(SIGNED_IN),
+      send: keylessInstance(send),
+      openSocket: recordingSockets().open,
+      timers: clock,
+      now: clock.now,
+    }).join({ roomId: 'room-1', declaredMassKilograms: 71, sample: () => ({ powerWatts: 0 }) });
+    await settle();
+    await clock.advance(120_000);
+    expect(connection.status()).toEqual({ kind: 'refused', reason: 'cannot-seal' });
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
   for (const status of [429, 500, 503]) {
     it(`reads a ${String(status)} to the ticket as unreachable, and tries again`, async () => {
       const send = vi.fn(() => Promise.resolve(new Response('{}', { status })));
       const clock = new ManualClock();
       const connection = createRoomPort({
+        ...NO_CARD_DEVICE,
         storage: storageWith(SIGNED_IN),
-        send,
+        send: keylessInstance(send),
         openSocket: recordingSockets().open,
         timers: clock,
         now: clock.now,
       }).join({ roomId: 'room-1', declaredMassKilograms: 71, sample: () => ({ powerWatts: 0 }) });
-      await flush();
-      await flush();
+      await settle();
       expect(connection.status().kind).toBe('lost');
       await clock.advance(2_000);
       expect(send.mock.calls.length).toBeGreaterThan(1);
@@ -214,6 +254,7 @@ describe('the production room port — #782', () => {
     const release = vi.fn();
     const clock = new ManualClock();
     createRoomPort({
+      ...NO_CARD_DEVICE,
       storage: storageWith({}),
       keepAlive: () => release,
       timers: clock,

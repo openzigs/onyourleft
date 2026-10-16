@@ -463,6 +463,45 @@ export async function seedWorld(store: SqlStore): Promise<void> {
   }
 }
 
+/**
+ * Migration 0027's rows (#910): a statement of reasons about each athlete,
+ * for a display name the athlete after them hid. Not in {@link seedWorld},
+ * whose log and names every other test counts on; the scoping test adds them.
+ */
+export async function seedStatements(store: SqlStore): Promise<void> {
+  for (const athlete of ATHLETES) {
+    const next = ATHLETES[(ATHLETES.indexOf(athlete) + 1) % ATHLETES.length] as string;
+    await store.moderate({
+      action: 'hide_display_name',
+      actorAthleteId: next,
+      targetAthleteId: athlete,
+      reportId: null,
+      reason: `Seeded statement about ${athlete}`,
+      at: 1_790_000_800,
+      statement: {
+        facts: `The display name of ${athlete}`,
+        decidedOn: 'own_initiative',
+        legalGround: null,
+        termsGround: 'Seeded terms',
+        notifierNamed: null,
+        moderatorConflict: false,
+        endsAt: null,
+      },
+    });
+  }
+  // Migration 0028's (#911): each athlete appeals the statement about them.
+  for (const athlete of ATHLETES) {
+    const [statement] = await store.listStatements(athlete);
+    if (statement === undefined) throw new Error(`no statement about ${athlete}`);
+    await store.putAppeal({
+      statementLogId: statement.logId,
+      appellantAthleteId: athlete,
+      grounds: `Appeal by ${athlete}`,
+      filedAt: 1_790_000_900,
+    });
+  }
+}
+
 /** The SHA-256 of the token confirming a fixture athlete's address (#865). */
 export function confirmationTokenFixture(athleteId: string): string {
   return hexOf(`confirm-${athleteId}`);

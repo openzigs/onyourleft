@@ -565,8 +565,8 @@ export async function signedInDevice(
     }
   };
 
-  // The challenge is plaintext on every instance; a new key's session is
-  // sealed on one that holds keys (#1192).
+  // The challenge is plaintext on every instance; every session is sealed on
+  // one that holds keys (#1192, #1210).
   const challenge = (await (
     await fetch(`${url}/v1/auth/challenge`, {
       method: 'POST',

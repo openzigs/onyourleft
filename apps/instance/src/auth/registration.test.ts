@@ -7,6 +7,7 @@
  * what is stored is read back through a SECOND store on the same file.
  */
 
+import { TEST_STATEMENT } from '../moderation/moderation-testing.ts';
 import { readFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -460,6 +461,7 @@ describe('a suspension binds every key the athlete holds (#775, ADR 0028 D-6.2)'
 
     await w.as(w.owner, 'POST', `/v1/moderation/athletes/${athleteId}/suspend`, {
       reason: 'Cheating',
+      statement: TEST_STATEMENT,
     });
 
     for (const device of [first, second]) {
@@ -578,6 +580,7 @@ describe('public rooms need an eligible account (#775)', () => {
 
     await w.as(w.owner, 'POST', `/v1/moderation/athletes/${athleteId}/suspend`, {
       reason: 'Cheating',
+      statement: TEST_STATEMENT,
     });
     expect((await ticket()).status).toBe(401);
   });

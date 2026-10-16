@@ -305,6 +305,16 @@ children's access assessments ([#886](https://github.com/openzigs/onyourleft/iss
 Digital Services Act's notice-and-action mechanism is in place
 ([#887](https://github.com/openzigs/onyourleft/issues/887)).
 
+**A report sent from an instance's notice page.** Every instance has a page, linked from *About*,
+where anybody, with or without an account, can report content on it that they think is illegal
+([#907](https://github.com/openzigs/onyourleft/issues/907)). The page is the instance's, not the
+app's: the app only links to it. What you type there — why you think the content is illegal, which
+items, where, and your name and email address only if you choose to give them — is kept by that
+instance as you sent it, and shown only to the person who moderates it, who may write to the address
+you gave. It is kept as the record of what the instance was told and when. The project's own
+instance does not store your internet address with it: it counts reports from one address in memory
+only, for at most an hour.
+
 **Disconnecting.** *Disconnect* makes this device forget the instance's address and its sign-in to
 it, and asks the instance to end that sign-in. Every ride stays on this device. What the instance
 already holds stays there, rides you synced included.

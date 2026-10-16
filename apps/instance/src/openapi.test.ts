@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { TEST_STATEMENT } from './moderation/moderation-testing.ts';
 import { readFileSync } from 'node:fs';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -163,6 +164,26 @@ async function anotherAthlete(world: IdentityInstance): Promise<string> {
   return (await world.signIn(await testDevice())).body.athleteId as string;
 }
 
+/** A rider whose display name a moderator hid, with the statement it came with (#911). */
+async function restricted(
+  world: IdentityInstance,
+): Promise<{ token: string; statementId: number }> {
+  const { token } = await signedIn(world);
+  const me = (await (await send(world, 'GET', '/v1/auth/session', token)).json()) as {
+    athleteId: string;
+  };
+  const hidden = (await (
+    await send(
+      world,
+      'POST',
+      `/v1/moderation/athletes/${me.athleteId}/hide-display-name`,
+      await moderatorToken(world),
+      { reason: 'Slur in the name', statement: TEST_STATEMENT },
+    )
+  ).json()) as { logId: number };
+  return { token, statementId: hidden.logId };
+}
+
 async function moderatorAction(world: IdentityInstance, path: string): Promise<Response> {
   const target = await anotherAthlete(world);
   return send(
@@ -170,9 +191,7 @@ async function moderatorAction(world: IdentityInstance, path: string): Promise<R
     'POST',
     `/v1/moderation/athletes/${target}/${path}`,
     await moderatorToken(world),
-    {
-      reason: 'Checked against the rules',
-    },
+    { reason: 'Checked against the rules', statement: TEST_STATEMENT },
   );
 }
 
@@ -324,6 +343,55 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
       athleteId: await anotherAthlete(world),
       reason: 'Abusive display name',
     }),
+  // #907: the notice page and its form, for anybody — no session.
+  getNoticePage: async (world) => fetch(`${world.url}/report`),
+  submitNotice: async (world) =>
+    fetch(`${world.url}/report`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        kind: 'illegal_content',
+        explanation: 'A threat in a room’s route.',
+        location: 'The Sunday group ride',
+      }).toString(),
+    }),
+  listNotices: async (world) =>
+    send(world, 'GET', '/v1/moderation/notices', await moderatorToken(world)),
+  // #912: a step recorded on a notice, and the record read back.
+  recordNoticeStep: async (world) => {
+    await fetch(`${world.url}/report`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        kind: 'illegal_content',
+        explanation: 'A threat in a room’s route.',
+        location: 'The Sunday group ride',
+      }).toString(),
+    });
+    const token = await moderatorToken(world);
+    const queue = (await (await send(world, 'GET', '/v1/moderation/notices', token)).json()) as {
+      notices: { noticeId: number }[];
+    };
+    const noticeId = queue.notices.at(-1)?.noticeId ?? 0;
+    return send(world, 'POST', `/v1/moderation/notices/${String(noticeId)}/steps`, token, {
+      step: 'decided',
+      decision: 'Not illegal: the route is an ordinary loop.',
+    });
+  },
+  // #913: the route of a room a rider made, hidden.
+  hideItem: async (world) => {
+    const { token } = await signedIn(world);
+    const made = (await (await send(world, 'POST', '/v1/rooms', token, roomBody())).json()) as {
+      roomId: string;
+    };
+    return send(world, 'POST', '/v1/moderation/items/hide', await moderatorToken(world), {
+      item: `route:${made.roomId}`,
+      reason: 'From a notice',
+      statement: TEST_STATEMENT,
+    });
+  },
+  getModerationRecord: async (world) =>
+    send(world, 'GET', '/v1/moderation/record', await moderatorToken(world)),
   listOpenReports: async (world) =>
     send(world, 'GET', '/v1/moderation/reports', await moderatorToken(world)),
   dismissReport: async (world) => {
@@ -353,6 +421,7 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
     const token = await moderatorToken(world);
     await send(world, 'POST', `/v1/moderation/athletes/${target}/suspend`, token, {
       reason: 'Cheating',
+      statement: TEST_STATEMENT,
     });
     return send(world, 'POST', `/v1/moderation/athletes/${target}/unsuspend`, token, {
       reason: 'Appeal upheld',
@@ -364,8 +433,53 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
     const token = await moderatorToken(world);
     await send(world, 'POST', `/v1/moderation/athletes/${target}/suspend`, token, {
       reason: 'Cheating',
+      statement: TEST_STATEMENT,
     });
     return send(world, 'GET', '/v1/moderation/suspended', token);
+  },
+  // #910: a rider whose name a moderator hid reads why.
+  listStatements: async (world) => {
+    const { token } = await signedIn(world);
+    const me = (await send(world, 'GET', '/v1/auth/session', token).then((r) => r.json())) as {
+      athleteId: string;
+    };
+    await send(
+      world,
+      'POST',
+      `/v1/moderation/athletes/${me.athleteId}/hide-display-name`,
+      await moderatorToken(world),
+      { reason: 'Slur in the name', statement: TEST_STATEMENT },
+    );
+    return send(world, 'GET', '/v1/statements', token);
+  },
+  // #911: a rider appeals the statement about them, and the moderator decides it.
+  appealStatement: async (world) => {
+    const { token, statementId } = await restricted(world);
+    return send(world, 'POST', `/v1/statements/${String(statementId)}/appeal`, token, {
+      grounds: 'The name is a family name, not a slur.',
+    });
+  },
+  listOpenAppeals: async (world) => {
+    const { token, statementId } = await restricted(world);
+    await send(world, 'POST', `/v1/statements/${String(statementId)}/appeal`, token, {
+      grounds: 'The name is a family name, not a slur.',
+    });
+    return send(world, 'GET', '/v1/moderation/appeals', await moderatorToken(world));
+  },
+  decideAppeal: async (world) => {
+    const { token, statementId } = await restricted(world);
+    const filed = (await (
+      await send(world, 'POST', `/v1/statements/${String(statementId)}/appeal`, token, {
+        grounds: 'The name is a family name, not a slur.',
+      })
+    ).json()) as { appealId: number };
+    return send(
+      world,
+      'POST',
+      `/v1/moderation/appeals/${String(filed.appealId)}/decide`,
+      await moderatorToken(world),
+      { outcome: 'reversed', decision: 'It is a family name. Restored.' },
+    );
   },
   getModerationLog: async (world) =>
     send(world, 'GET', '/v1/moderation/log', await moderatorToken(world)),
@@ -390,7 +504,7 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
       'POST',
       `/v1/moderation/athletes/${athleteId}/suspend`,
       await moderatorToken(world),
-      { reason: 'Checked against the rules' },
+      { reason: 'Checked against the rules', statement: TEST_STATEMENT },
     );
     world.clock.ms += 60_000;
     return send(
@@ -706,6 +820,10 @@ describe('every route answers with the shape its entry declares', () => {
         expect(response.status).toBe(200);
         expect(response.headers.get('content-type')).toBe('application/octet-stream');
         expect((await response.arrayBuffer()).byteLength).toBeGreaterThan(0);
+      } else if (route.response.contentType === 'text/html') {
+        expect(response.status).toBe(200);
+        expect(response.headers.get('content-type')).toBe('text/html; charset=utf-8');
+        expect(await response.text()).toMatch(/^<!doctype html>/);
       } else if (route.response.contentType === 'text/event-stream') {
         expect(response.status).toBe(200);
         expect(response.headers.get('content-type')).toBe('text/event-stream');

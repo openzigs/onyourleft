@@ -377,7 +377,6 @@ export function createHandler(options: HandlerOptions): Handler {
       probes: options.probes,
       sealed: options.sealed,
       sealedRequest,
-      sealsRoutes: sealsRoutes(),
       dispatch: dispatchInner,
     });
   }

@@ -50,6 +50,7 @@ import {
   startModerationWorld,
   type ModerationWorld,
   type Rider,
+  TEST_STATEMENT,
 } from './moderation-testing.ts';
 
 const isAthleteReach = (reach: Reach): reach is { readonly athlete: string } =>
@@ -86,6 +87,14 @@ const EXEMPT: Readonly<
       body: { athleteId: subject, reason: 'Abusive display name' },
     }),
   },
+  getNoticePage: {
+    heldElsewhere:
+      'the notice page (#907): the same form for anybody, naming nobody and reading nothing (moderation/notices.test.ts)',
+  },
+  submitNotice: {
+    heldElsewhere:
+      'a notice goes to the moderators, not to anybody it names, and answers the same whatever its items name: it never looks them up (moderation/notices.test.ts)',
+  },
   createRoomTicket: {
     heldElsewhere:
       'names a room, not an athlete; blocking inside a room is #789’s (room moderation), and suspension is held by the session, which a suspended account no longer has',
@@ -120,6 +129,10 @@ const NOT_AN_ATHLETE: Readonly<Record<string, string>> = {
   roomId: 'a room; who may enter it is the ticket’s rule, and blocking inside it is #789’s',
   publicKey: 'one of the CALLER’s own device keys; the store scopes the revocation to them',
   reportId: 'a report, read and decided only on the moderators’ routes',
+  statementId:
+    'a statement of reasons; the store files an appeal only against one about the CALLER (#911)',
+  appealId: 'an appeal, read and decided only on the moderators’ routes (#911)',
+  noticeId: 'a notice, read and recorded only on the moderators’ routes (#912)',
   content:
     'the SHA-256 of an activity file; the sync store reads only the record the CALLER holds of it (#38, #776)',
   kind: 'a kind of sync item; the item read or written is the CALLER’s own (#776)',
@@ -232,6 +245,7 @@ describe('every path a blocked athlete could use is refused, as though nobody we
           `/v1/moderation/athletes/${suspended.athleteId}/suspend`,
           {
             reason: 'Cheating',
+            statement: TEST_STATEMENT,
           },
         )
       ).status,
@@ -378,13 +392,16 @@ describe('every path a blocked athlete could use is refused, as though nobody we
 
 /**
  * A suspended rider's way out (#898): the routes that admit their limited
- * session are TWO, declared on the route table, and every other session route
- * refuses it — walked from the table, so a route added later is walked too.
+ * session are FOUR since #911, declared on the route table, and every other
+ * session route refuses it — walked from the table, so a route added later is
+ * walked too. The third is reading the statements of reasons about their own
+ * account: a suspended rider must be able to read why (DSA Art. 17(1)(d),
+ * #910); the fourth is appealing one of them (OSA s.21(4)(d), #911).
  */
-const ADMITS_SUSPENDED = ['eraseAccount', 'exportAccount'];
+const ADMITS_SUSPENDED = ['appealStatement', 'eraseAccount', 'exportAccount', 'listStatements'];
 
-describe('a suspended rider’s way-out session reaches the export and the deletion, and nothing else (#898)', () => {
-  it('is declared by exactly the account export and deletion, and no other route', () => {
+describe('a suspended rider’s way-out session reaches the export, the deletion, their statements and an appeal, and nothing else (#898, #910, #911)', () => {
+  it('is declared by exactly the account export and deletion, the statements and the appeal, and no other route', () => {
     expect(
       ROUTES.filter((route) => route.admitsSuspended === true)
         .map((route) => route.operationId)
@@ -410,7 +427,7 @@ describe('a suspended rider’s way-out session reaches the export and the delet
       world.owner,
       'POST',
       `/v1/moderation/athletes/${leaving.athleteId}/suspend`,
-      { reason: 'Cheating' },
+      { reason: 'Cheating', statement: TEST_STATEMENT },
     );
     expect(suspended.status).toBe(200);
     const opened = await world.call('POST', '/v1/auth/leave-session', {

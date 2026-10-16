@@ -10,6 +10,7 @@ import {
   readPictureModelSettings,
   readHistorySettings,
 } from './config.ts';
+import { NO_LEGAL_SETTINGS } from './legal.ts';
 
 const COMMIT = 'fedcba9876543210fedcba9876543210fedcba98';
 
@@ -45,6 +46,7 @@ describe('readConfig', () => {
           reason: 'OYL_INSTANCE_PICTURE_MODEL is not set, so no local model takes pictures.',
         },
         name: null,
+        legal: NO_LEGAL_SETTINGS,
       },
     });
   });

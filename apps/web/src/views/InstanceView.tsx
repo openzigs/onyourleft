@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import type { StatementsPort } from '../instance/statements-port';
+import { StatementsPanel } from './StatementsPanel';
 import { useCallback, useEffect, useId, useState, type JSX } from 'react';
 
 import { Button } from '../design/Button';
@@ -168,7 +170,14 @@ export function InstanceView({
   moderation,
   sync,
   hostedSettings,
+  statements,
 }: {
+  /**
+   * The statements of reasons about this rider's account (#910): read once
+   * the device has an instance, signed in or not — a suspended rider cannot
+   * sign in, and is the one who most needs to read why.
+   */
+  readonly statements?: StatementsPort | undefined;
   readonly port?: InstancePort | undefined;
   /** Asked, once connected, whether this account moderates the instance (#955). */
   readonly moderation?: ModerationPort | undefined;
@@ -424,11 +433,15 @@ export function InstanceView({
           <StatusMessage tone="warning" label="Not signed in" live>
             {state.kind === 'signed-out'
               ? `The instance at ${state.origin} no longer accepts this device’s sign-in. Disconnect, then connect again.`
-              : `The instance at ${state.origin} did not answer. It may be down, or this device may be offline.`}
+              : state.kind === 'unreadable'
+                ? state.text
+                : `The instance at ${state.origin} did not answer. It may be down, or this device may be offline.`}
           </StatusMessage>
           {disconnectControl}
         </section>
       )}
+
+      {statements === undefined ? null : <StatementsPanel port={statements} />}
 
       {recoveryCodes === undefined || recoveryCodes.length === 0 ? null : (
         <section className="oyl-panel" aria-labelledby="oyl-instance-recovery">
@@ -452,7 +465,10 @@ export function InstanceView({
         </section>
       )}
 
-      {state.kind === 'connected' ? <InstanceKeys port={port} /> : null}
+      {/* #1210: a sign-in this device cannot read is opened again by a card given here. */}
+      {state.kind === 'connected' || state.kind === 'unreadable' ? (
+        <InstanceKeys port={port} onChange={() => void read()} />
+      ) : null}
 
       {sync === undefined ? null : <SyncPanel port={sync} />}
 
