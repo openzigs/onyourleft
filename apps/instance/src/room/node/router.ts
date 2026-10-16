@@ -532,6 +532,16 @@ export class RoomRouter {
         copy?.destroy();
         return;
       }
+      case 'protocol-close':
+        // So an operator's log shows why a room let sockets go (#1400): the
+        // room, the close reason and how many so far — no athlete, no name.
+        this.#options.event?.('room-socket-closed', {
+          worker: slot.index,
+          room: message.roomId,
+          reason: message.reason,
+          count: message.count,
+        });
+        return;
       case 'metrics': {
         const waiting = this.#metricsWaiting.get(message.id);
         this.#metricsWaiting.delete(message.id);

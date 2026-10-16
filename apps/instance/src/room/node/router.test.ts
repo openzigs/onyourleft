@@ -251,6 +251,44 @@ describe('what is refused before any room state changes — #780 criterion 1', (
     expect(await reused.closed).toEqual({ code: 4003, reason: 'ticket-refused' });
     expect(first.messages.map((m) => m.type)).toEqual(['welcome']);
   }, 30_000);
+
+  it('logs each socket a room closed for a protocol reason, with the room, the reason and a count — #1400', async () => {
+    const events: { event: string; detail?: Record<string, unknown> }[] = [];
+    harness = await startRouter({
+      workers: 1,
+      event: (event, detail) => events.push({ event, ...(detail === undefined ? {} : { detail }) }),
+    });
+    // A seated rider holds the room open, so its counts are one room's.
+    const ann = await join('gate', 'ticket-ann');
+    await until(() => ann.messages.length > 0, 'a welcome');
+    // A report before any hello: what the race load run's riders did through the tunnel.
+    const early = await join('gate', undefined);
+    early.report(1, 200);
+    expect(await early.closed).toEqual({ code: 1008, reason: 'hello-expected' });
+    const again = await join('gate', undefined);
+    again.report(1, 200);
+    expect(await again.closed).toEqual({ code: 1008, reason: 'hello-expected' });
+    const forged = await join('gate', 'forged');
+    expect(await forged.closed).toEqual({ code: 4003, reason: 'ticket-refused' });
+    await until(() => events.length >= 3, 'three logged closes');
+    expect(events).toEqual([
+      {
+        event: 'room-socket-closed',
+        detail: { worker: 0, room: 'gate', reason: 'hello-expected', count: 1 },
+      },
+      {
+        event: 'room-socket-closed',
+        detail: { worker: 0, room: 'gate', reason: 'hello-expected', count: 2 },
+      },
+      {
+        event: 'room-socket-closed',
+        detail: { worker: 0, room: 'gate', reason: 'ticket-refused', count: 1 },
+      },
+    ]);
+    // And the operator's metrics count it beside the refusals.
+    const [worker] = await harness.router.metrics();
+    expect(worker?.refusals).toMatchObject({ 'hello-expected': 2, 'ticket-refused': 1 });
+  }, 30_000);
 });
 
 describe('the rooms’ sweep and a socket agree on a room — #948', () => {

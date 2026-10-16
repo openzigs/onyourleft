@@ -38,7 +38,7 @@ it from the box with the token, and keep the token in the box's `.env` beside th
 | `oyl_room_tick_lateness_ms{worker,quantile="0.99"}` | **the first thing to go when a box is full** — spike 0013 §4 measured tick lateness p99 as what failed at saturation. A room ticks once a second; a p99 heading towards hundreds of milliseconds is a box that needs fewer rooms or more cores |
 | `oyl_room_connected_riders{worker}`, `oyl_rooms{worker}` | how many riders and rooms each room worker holds |
 | `oyl_room_worker_resident_bytes{worker}` | memory per worker — see [Sizing](#sizing) for what it should be |
-| `oyl_room_refusals_total{worker,reason}` | sockets refused or let go: `ticket-refused`, `room-full`, `room-closed`, `too-slow` (a client that stopped reading) … the reasons are [the close codes](#room-close-codes) |
+| `oyl_room_refusals_total{worker,reason}` | sockets refused or let go: `ticket-refused`, `room-full`, `room-closed`, `hello-expected`, `replaced`, `too-slow` (a client that stopped reading) … the reasons are [the close codes](#room-close-codes) |
 | `oyl_http_requests_total{route,status}`, `oyl_http_refusals_total{route,reason}` | requests by route PATTERN and status, and every refusal by its error code. The sync API (#776) is counted here by its routes as it lands |
 
 ⚠️ **No label is ever an athlete id, a display name, a room id or a coordinate.** A label value is
@@ -578,6 +578,11 @@ the same on the Node server and the Durable Object:
 | 4005 | `room-closed` | finished or closed — or a race that was interrupted and cannot resume |
 | 4006 | `replaced` | the same athlete connected again; the newer socket is the rider |
 | 4008 | `too-slow` | the client stopped reading, and its unsent bytes passed the limit (256 KiB) |
+
+On the Node server each such close is also a line in the instance's log (#1400), `room-socket-closed`
+with the worker, the room's id, the reason and how many sockets that room has closed for it so far —
+no athlete, name or ticket. A run of `hello-expected` lines is a client sending before its hello is
+answered.
 
 ## Backup
 

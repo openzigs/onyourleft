@@ -13,7 +13,8 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { WebSocket } from 'ws';
 
 import { startInstance, type StartedInstance } from '../src/instance.ts';
 import { freeLoopbackPort, testConfig } from '../src/instance-testing.ts';
@@ -33,6 +34,7 @@ const CLI = fileURLToPath(new URL('../src/operator/cli.ts', import.meta.url));
 let running: StartedInstance | undefined;
 let directory: string | undefined;
 afterEach(async () => {
+  vi.restoreAllMocks();
   await running?.stop();
   running = undefined;
   if (directory !== undefined) await rm(directory, { recursive: true, force: true });
@@ -42,10 +44,24 @@ async function instanceWithRace(
   lengthMetres: number,
   registration: 'open' | 'approval' = 'open',
   keyed = false,
+  loadAccounts: readonly string[] = [],
 ) {
   directory = await mkdtemp(join(tmpdir(), 'oyl-instance-race-load-'));
   const path = join(directory, 'instance.sqlite');
   await migrateForDeploy(path);
+  if (loadAccounts.length > 0) {
+    // As the owner's run did (#1383): approved throwaway accounts, not open registration.
+    const added = spawnSync(process.execPath, [CLI, 'load-accounts', 'add'], {
+      encoding: 'utf8',
+      input: `${loadAccounts.join('\n')}\n`,
+      env: {
+        ...process.env,
+        OYL_INSTANCE_DATABASE: path,
+        OYL_INSTANCE_BLOBS: join(directory, 'blobs'),
+      },
+    });
+    expect(added.status, added.stderr).toBe(0);
+  }
   const opened = spawnSync(
     process.execPath,
     [
@@ -129,6 +145,116 @@ describe('the race load run — #464, raced locally', () => {
     expect(report.raceOver).toBe(true);
     expect(report.finishers).toBe(2);
   }, 60_000);
+});
+
+/**
+ * What each socket a rider opened sent, in order, and whether the room had
+ * welcomed it yet: `onSocket` hands over the socket, and its `send` is read.
+ */
+function recordSends(): {
+  onSocket: (rider: number, socket: WebSocket) => void;
+  sockets: { rider: number; sent: string[] }[];
+} {
+  const sockets: { rider: number; sent: string[] }[] = [];
+  return {
+    sockets,
+    onSocket: (rider, socket) => {
+      const record = { rider, sent: [] as string[] };
+      sockets.push(record);
+      let welcomed = false;
+      socket.on('message', (data) => {
+        if ((data as Buffer).toString('utf8').includes('"type":"welcome"')) welcomed = true;
+      });
+      const send = socket.send.bind(socket);
+      socket.send = ((text: string) => {
+        const type = (JSON.parse(text) as { type: string }).type;
+        record.sent.push(welcomed ? type : `${type} before welcome`);
+        send(text);
+      }) as typeof socket.send;
+    },
+  };
+}
+
+/**
+ * Every sealed request carrying a session (a ticket, the start) answered
+ * `delayMs` late, as through a loaded tunnel: what the owner's run met (#1400).
+ */
+function slowSessionCalls(delayMs: number): void {
+  const real = globalThis.fetch;
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+    const headers = new Headers(init?.headers);
+    if (headers.has('authorization')) await new Promise((done) => setTimeout(done, delayMs));
+    return real(input, init);
+  });
+}
+
+describe('a rider says hello before anything else, and only then reports — #1400', () => {
+  it('sends nothing but its hello until the room answers it, on a first join and on a rejoin, however slow the ticket and the answer', async () => {
+    const url = await instanceWithRace(40, 'open', true);
+    slowSessionCalls(1_500);
+    const sends = recordSends();
+    let dropped = false;
+    const report = await raceLoad({
+      url,
+      roomId: 'race',
+      keys: await newRiderKeys(2),
+      namePrefix: 'Slow',
+      maximumMs: 50_000,
+      onSocket: (rider, socket) => {
+        sends.onSocket(rider, socket);
+        // The room's answer held back past several report intervals, as a
+        // loaded tunnel holds it: a report sent meanwhile would precede it.
+        socket.pause();
+        setTimeout(() => socket.resume(), 1_500);
+        if (rider === 1 && !dropped) {
+          dropped = true;
+          // A rejoin into the running race: dropped at its third frame.
+          let frames = 0;
+          socket.on('message', (data) => {
+            if (!(data as Buffer).toString('utf8').includes('"type":"frame"')) return;
+            frames += 1;
+            if (frames === 3) socket.terminate();
+          });
+        }
+      },
+    });
+    // The one drop the test made, and no `1008 hello-expected`.
+    expect(report.disconnects).toEqual([
+      { rider: 1, atSecond: expect.any(Number) as number, code: 1006 },
+    ]);
+    expect(report.rejoinMs).toHaveLength(1);
+    expect(report.abortReason).toBeNull();
+    expect(report.raceOver).toBe(true);
+    // Rider 0's socket, and rider 1's first and its rejoin.
+    expect(sends.sockets).toHaveLength(3);
+    for (const socket of sends.sockets) {
+      expect(socket.sent[0]).toBe('hello before welcome');
+      expect(socket.sent.slice(1).filter((each) => each.endsWith('before welcome'))).toEqual([]);
+    }
+  }, 70_000);
+
+  it('seats fifty riders through a slow ticket on an instance that holds keys, with no close at all, inside the sign-in limit', async () => {
+    const keys = await newRiderKeys(50);
+    const url = await instanceWithRace(
+      30,
+      'approval',
+      true,
+      keys.map((key) => key.publicKey),
+    );
+    slowSessionCalls(1_000);
+    const report = await raceLoad({
+      url,
+      roomId: 'race',
+      keys,
+      namePrefix: 'Load',
+      maximumMs: 60_000,
+      rateLimitedWaitMs: 2_000,
+    });
+    expect(report.abortReason).toBeNull();
+    expect(report.disconnects).toEqual([]);
+    expect(report.raceOver).toBe(true);
+    expect(report.finishers).toBe(50);
+  }, 150_000);
 });
 
 describe('a misconfigured run stops instead of looping', () => {

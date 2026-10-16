@@ -7,9 +7,13 @@
  *
  * Each rider is what a client does in a race: it signs in with its own device
  * key, takes a ticket with its declared mass, says hello, and reports power
- * twice a second; the first rider starts the race once every rider is seated
- * (an operator's room has no creator, so any seated rider may). A dropped
- * socket is a rejoin: a new ticket and a new hello at once. The run ends when
+ * twice a second once the room has welcomed it; the first rider starts the
+ * race once every rider is seated (an operator's room has no creator, so any
+ * seated rider may). A dropped socket is a rejoin: a new ticket, then a new
+ * socket and its hello. The ticket is taken BEFORE the socket opens and no
+ * report is sent before the welcome (#1400): through a loaded tunnel a ticket
+ * took longer than a report interval, a report reached the room first, and
+ * the room closed the socket `1008 hello-expected`, over and over. The run ends when
  * the room says the race is over, or at the time limit.
  *
  * What it measures is what reaches a RIDER: every frame's arrival against the
@@ -261,10 +265,31 @@ export async function raceLoad(options: RaceLoadOptions): Promise<RaceLoadReport
     let finished = false;
     let backoff = options.backoffMs ?? 500;
     while (!stopping && !finished) {
+      // The ticket first, then the socket (#1400): a socket opened before its
+      // ticket is answered sits silent for a round trip, and a report sent in
+      // that gap reaches the room before the hello — `1008 hello-expected`.
+      let ticket: string;
+      try {
+        ticket = await ticketFor(device, options.roomId, profile.massKilograms);
+      } catch (error) {
+        // A refused ticket is a misconfiguration (an approval instance, a closed room), not a blip.
+        const text = error instanceof Error ? error.message : '';
+        if (text.startsWith('a ticket was refused')) {
+          abort(text);
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, backoff));
+        backoff = Math.min(backoff * 2, options.maximumBackoffMs ?? 10_000);
+        continue;
+      }
+      if (stopping) break;
       const socket = new WebSocket(socketUrl(instance, options.roomId), {
         perMessageDeflate: false,
       });
       open.add(socket);
+      // Reports wait for the room's answer to the hello: before it, the room
+      // reads anything but a hello as a protocol fault.
+      let welcomed = false;
       const done = new Promise<number>((resolve) => {
         socket.on('close', (code) => resolve(code));
         socket.on('error', () => undefined);
@@ -275,15 +300,7 @@ export async function raceLoad(options: RaceLoadOptions): Promise<RaceLoadReport
       };
       socket.on('open', () => {
         options.onSocket?.(rider, socket);
-        void ticketFor(device, options.roomId, profile.massKilograms).then(
-          (ticket) => send(hello(ticket)),
-          (error: unknown) => {
-            // A refused ticket is a misconfiguration (an approval instance, a closed room), not a blip.
-            const text = error instanceof Error ? error.message : '';
-            if (text.startsWith('a ticket was refused')) abort(text);
-            socket.close();
-          },
-        );
+        send(hello(ticket));
       });
       socket.on('message', (data) => {
         const now = Date.now();
@@ -293,6 +310,7 @@ export async function raceLoad(options: RaceLoadOptions): Promise<RaceLoadReport
         if (!decoded.ok) return;
         const message = decoded.message;
         if (message.type === 'welcome') {
+          welcomed = true;
           intervalMs = message.roomConfig.frameIntervalMs;
           backoff = options.backoffMs ?? 500;
           if (closedAt !== undefined) {
@@ -319,7 +337,7 @@ export async function raceLoad(options: RaceLoadOptions): Promise<RaceLoadReport
         }
       });
       const report = setInterval(() => {
-        if (socket.readyState !== WebSocket.OPEN) return;
+        if (!welcomed || socket.readyState !== WebSocket.OPEN) return;
         sequence += 1;
         const watts = profile.wattsPerKilogram * profile.massKilograms * (0.95 + 0.1 * noise());
         send(
