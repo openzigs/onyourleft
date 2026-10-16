@@ -42,7 +42,32 @@ the changes are made. `--status-update` also posts the weekly status update (bel
 | **Area** | single select | the `area:` label's name (`area: racing` → racing). The script creates the field, and adds an option when a new `area:` label appears, sending the existing options back with their ids so no item loses its value. No label: cleared |
 | **Progress %** | number | the issue's sub-issues, `percentCompleted`; cleared for an issue with none |
 | **Sub-issues done** | text | the same, as "10 of 23"; cleared for an issue with none |
+| **Start** | date | **epics only** ([#1391](https://github.com/openzigs/onyourleft/issues/1391)): the earliest `createdAt` of the epic and its sub-issues. Created by the script when missing |
+| **Target** | date | **epics only**: the projected end, below. Created by the script when missing; cleared when there is no recent progress |
 | Status, Parent issue, Sub-issues progress | built in | GitHub, not the script |
+
+The script never writes Start or Target on an issue that is not an epic, so a date set there by hand
+stays. A field named Start or Target that is not a date field is left alone and not written; the run
+prints that it skipped it.
+
+### Target, the projected end
+
+Recomputed every night from the epic's direct sub-issues, so the bar moves as work closes:
+
+- **Closed epic:** the date it closed.
+- **Open epic with no open sub-issues** (none at all, or all closed): today.
+- **Otherwise:** today + ⌈open sub-issues ÷ weekly pace⌉ weeks, where the weekly pace is the
+  sub-issues closed in the last 28 days ÷ 4. If none closed in 28 days, the last 90 days' closes
+  ÷ (90/7). A reopened sub-issue counts as open, not as a close.
+- **No sub-issue closed in 90 days:** Target is **cleared**, so the epic has no bar, and the weekly
+  status update lists it under **No recent progress**.
+- Never more than 730 days (two years) ahead.
+
+### The one manual step: the Roadmap view's dates
+
+View settings have no API, so the owner sets this once in the web UI: open the **Roadmap** view,
+choose **Date fields**, and pick **Start** for the start and **Target** for the target. Until the
+script has created the two fields (its first run after #1391), they are not in that list.
 
 ## The weekly status update
 
@@ -50,8 +75,9 @@ With `--status-update` (the workflow always passes it), the script posts a proje
 unless one was posted in the last 6 days, so in practice once a week. It lists what closed in the
 last 7 days and what is `priority: now`, written from the issues alone. Its status is the latest
 update's, so an owner who set At risk keeps it; with no earlier update it is On track.
-It also lists the open issues with no `area:` label and the Unranked ones, when there are any,
-and every run prints how many there are; [`docs/agents/filing-issues.md`](agents/filing-issues.md)
+It also lists the open issues with no `area:` label, the Unranked ones and the open epics with no
+recent progress (no Target, above), when there are any, and every run prints how many label gaps
+there are; [`docs/agents/filing-issues.md`](agents/filing-issues.md)
 says what an issue should carry.
 
 ## The views, set in the web UI
@@ -61,7 +87,8 @@ Views are made by hand (or through REST), not by the script:
 - **Board**: board layout, grouped by Status.
 - **Epics**: table filtered `label:epic`, showing Progress % and Sub-issues progress, sorted by Tier.
 - **By tier**: table grouped by Tier, or by Area.
-- **Roadmap**: roadmap layout grouped by Parent issue, with the hierarchy shown.
+- **Roadmap**: roadmap layout grouped by Parent issue, with the hierarchy shown; its bars are the
+  epics' Start and Target, once the date fields are chosen as above.
 - **Now**: table filtered to Tier Now.
 - **Device checks** and **Recently done**, added by the owner on 2026-10-14.
 

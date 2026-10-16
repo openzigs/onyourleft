@@ -18,10 +18,13 @@
 #   3. ADDS every open issue and every closed epic that is not on the board.
 #      Never deletes, never archives, never touches an archived item.
 #   4. SETS Tier, Kind, Area, Progress % and Sub-issues done, only where the
-#      value differs. NEVER touches Status: GitHub's built-in workflows own it.
+#      value differs, and on epics alone the dates Start and Target (#1391), from
+#      each epic's sub-issues, so the Roadmap view draws a bar. NEVER touches
+#      Status: GitHub's built-in workflows own it.
 #   5. With --status-update, posts a weekly status update unless one was posted
-#      in the last 6 days. It lists the open issues with no `area:` label and the
-#      Unranked ones (docs/agents/filing-issues.md), and every run prints their count.
+#      in the last 6 days. It lists the open issues with no `area:` label, the
+#      Unranked ones (docs/agents/filing-issues.md) and the open epics with no
+#      recent progress, and every run prints the label gaps' count.
 #
 # Writes are throttled to about one a second and capped below 400 a run (GitHub's
 # secondary limit is about 80 content-creating requests a minute and 500 an
@@ -51,6 +54,9 @@ MUTATION_INTERVAL_S = 1.0
 STATUS_UPDATE_MIN_AGE_DAYS = 6
 STATUS_UPDATE_WINDOW_DAYS = 7
 STATUS_LIST_CAP = 40
+PACE_WINDOW_DAYS = 28
+PACE_FALLBACK_DAYS = 90
+TARGET_CAP_DAYS = 730
 
 # Precedence is the field's option order: the first of these an issue carries
 # wins. `priority: high` is the owner's device-check list (#733).
@@ -68,10 +74,14 @@ KIND = "Kind"
 AREA = "Area"
 PROGRESS = "Progress %"
 SUBS_DONE = "Sub-issues done"
+START = "Start"
+TARGET = "Target"
 # The order fields are written in, and the only fields this script ever writes.
-MANAGED_FIELDS = (TIER, KIND, AREA, PROGRESS, SUBS_DONE)
+MANAGED_FIELDS = (TIER, KIND, AREA, PROGRESS, SUBS_DONE, START, TARGET)
 NUMBER_FIELDS = (PROGRESS,)
 TEXT_FIELDS = (SUBS_DONE,)
+# Written on epics only, as "YYYY-MM-DD"; created by the script when missing.
+DATE_FIELDS = (START, TARGET)
 
 
 # --- Decisions (pure) ---------------------------------------------------------
@@ -136,15 +146,75 @@ def progress_of(summary):
     )
 
 
-def desired_fields(issue, issues):
+def is_epic(issue):
+    return "epic" in issue["labels"]
+
+
+def _date(value):
+    return parse_time(value).date()
+
+
+def start_of(epic):
+    """The earliest createdAt of the epic and its sub-issues, as "YYYY-MM-DD"."""
+    return min(_date(i["createdAt"]) for i in [epic] + epic.get("subs", [])).isoformat()
+
+
+def _closed_since(subs, now, days):
+    since = now - dt.timedelta(days=days)
+    return sum(
+        1 for s in subs if s["state"] == "CLOSED" and s.get("closedAt") and parse_time(s["closedAt"]) >= since
+    )
+
+
+def target_of(epic, now):
+    """The projected end, as "YYYY-MM-DD"; None (cleared) when nothing has closed in 90 days.
+
+    Closed: the epic's own close. Open: today + ceil(open sub-issues / weekly
+    pace) weeks, the pace being the last 28 days' closes / 4, else the last 90
+    days' / (90/7); capped at TARGET_CAP_DAYS ahead. Integer arithmetic, so a
+    pace like 7/90 a week rounds exactly.
+    """
+    if epic["state"] == "CLOSED":
+        return _date(epic["closedAt"]).isoformat()
+    today = now.date()
+    subs = epic.get("subs", [])
+    open_count = sum(1 for s in subs if s["state"] == "OPEN")
+    if open_count == 0:
+        return today.isoformat()
+    recent = _closed_since(subs, now, PACE_WINDOW_DAYS)
+    if recent:
+        weeks = -(-open_count * (PACE_WINDOW_DAYS // 7) // recent)
+    else:
+        slow = _closed_since(subs, now, PACE_FALLBACK_DAYS)
+        if not slow:
+            return None
+        weeks = -(-open_count * PACE_FALLBACK_DAYS // (7 * slow))
+    days = min(weeks * 7, TARGET_CAP_DAYS)
+    return (today + dt.timedelta(days=days)).isoformat()
+
+
+def no_recent_progress(issues, now):
+    """Open epics whose Target is cleared: open sub-issues, none closed in 90 days."""
+    return sorted(
+        (i for i in issues if is_epic(i) and i["state"] == "OPEN" and target_of(i, now) is None),
+        key=lambda i: i["number"],
+    )
+
+
+def desired_fields(issue, issues, now):
+    """Every managed field for an epic; the date fields are absent, so untouched, on anything else."""
     progress, done = progress_of(issue.get("summary"))
-    return {
+    desired = {
         TIER: resolve_tier(issue["number"], issues),
         KIND: kind_of(issue),
         AREA: area_of(issue["labels"]),
         PROGRESS: progress,
         SUBS_DONE: done,
     }
+    if is_epic(issue):
+        desired[START] = start_of(issue)
+        desired[TARGET] = target_of(issue, now)
+    return desired
 
 
 def _same(field, want, have):
@@ -156,11 +226,11 @@ def _same(field, want, have):
 
 
 def field_changes(desired, current):
-    """[(field, value)] for every managed field whose value differs; None clears."""
+    """[(field, value)] for every desired managed field whose value differs; None clears."""
     return [
         (field, desired[field])
         for field in MANAGED_FIELDS
-        if not _same(field, desired[field], current.get(field))
+        if field in desired and not _same(field, desired[field], current.get(field))
     ]
 
 
@@ -244,6 +314,7 @@ def status_update_body(issues, now):
         + ["", "**`priority: now` (%d)**" % len(current)]
         + _issue_lines(current)
         + _gap_lines(issues)
+        + _stalled_lines(issues, now)
     )
 
 
@@ -257,6 +328,15 @@ def _gap_lines(issues):
         lines += ["", "**Unranked: no `priority:` label, own or its epic's (%d)**" % len(unranked)]
         lines += _issue_lines(unranked)
     return lines
+
+
+def _stalled_lines(issues, now):
+    """The open epics with no Target, as a section only when there are any."""
+    stalled = no_recent_progress(issues, now)
+    if not stalled:
+        return []
+    return ["", "**No recent progress: no sub-issue closed in 90 days, so no Target (%d)**" % len(stalled)] + \
+        _issue_lines(stalled)
 
 
 def gaps_line(issues):
@@ -339,7 +419,7 @@ class Client:
 
 
 ISSUE_FIELDS = """
-  id number title state closedAt
+  id number title state createdAt closedAt
   labels(first: 50) { nodes { name } }
   parent { number }
   subIssuesSummary { total completed percentCompleted }
@@ -358,6 +438,18 @@ query($owner: String!, $name: String!, $after: String, $filter: IssueFilters) {
 }"""
     % ISSUE_FIELDS
 )
+
+SUB_ISSUES_QUERY = """
+query($owner: String!, $name: String!, $number: Int!, $after: String) {
+  repository(owner: $owner, name: $name) {
+    issue(number: $number) {
+      subIssues(first: 100, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes { createdAt closedAt state }
+      }
+    }
+  }
+}"""
 
 ONE_ISSUE_QUERY = (
     """
@@ -400,6 +492,8 @@ query($org: String!, $number: Int!, $after: String) {
                 number field { ... on ProjectV2FieldCommon { name } } }
               ... on ProjectV2ItemFieldTextValue {
                 text field { ... on ProjectV2FieldCommon { name } } }
+              ... on ProjectV2ItemFieldDateValue {
+                date field { ... on ProjectV2FieldCommon { name } } }
             }
           }
         }
@@ -433,6 +527,13 @@ mutation($project: ID!, $name: String!, $options: [ProjectV2SingleSelectFieldOpt
   }
 }"""
 
+CREATE_DATE_FIELD = """
+mutation($project: ID!, $name: String!) {
+  createProjectV2Field(input: {projectId: $project, dataType: DATE, name: $name}) {
+    projectV2Field { ... on ProjectV2Field { id name } }
+  }
+}"""
+
 UPDATE_FIELD = """
 mutation($field: ID!, $options: [ProjectV2SingleSelectFieldOptionInput!]) {
   updateProjectV2Field(input: {fieldId: $field, singleSelectOptions: $options}) {
@@ -453,6 +554,7 @@ def _issue_from_node(node):
         "number": node["number"],
         "title": node["title"],
         "state": node["state"],
+        "createdAt": node.get("createdAt"),
         "closedAt": node.get("closedAt"),
         "labels": [label["name"] for label in node["labels"]["nodes"]],
         "parent": (node.get("parent") or {}).get("number"),
@@ -484,6 +586,27 @@ def read_issues(client, now):
                 break
             after = page["pageInfo"]["endCursor"]
     return issues
+
+
+def read_sub_issues(client, issues):
+    """Puts each epic's sub-issues (createdAt, closedAt, state) on it as "subs".
+
+    One query per epic, paged by 100: the epics are a few dozen, and reading
+    sub-issues for every issue in the main query would cost far more points.
+    """
+    for epic in issues.values():
+        if not is_epic(epic):
+            continue
+        subs = []
+        after = None
+        while True:
+            data = client.query(SUB_ISSUES_QUERY, owner=REPO_OWNER, name=REPO_NAME, number=epic["number"], after=after)
+            page = data["repository"]["issue"]["subIssues"]
+            subs.extend(page["nodes"])
+            if not page["pageInfo"]["hasNextPage"]:
+                break
+            after = page["pageInfo"]["endCursor"]
+        epic["subs"] = subs
 
 
 def read_ancestors(client, issues):
@@ -522,7 +645,7 @@ def read_items(client, org, number):
                 field = (value.get("field") or {}).get("name")
                 if field is None:
                     continue
-                for key in ("name", "number", "text"):
+                for key in ("name", "number", "text", "date"):
                     if key in value:
                         values[field] = value[key]
             items[content["number"]] = {"id": node["id"], "archived": node["isArchived"], "values": values}
@@ -568,6 +691,28 @@ def ensure_area_options(client, project_id, fields, issues):
                         "options": [{"id": None, "name": n} for n in have + missing]}
 
 
+def ensure_date_fields(client, project_id, fields):
+    """Creates Start and Target as DATE fields when the board has none by that name.
+
+    A field of that name with another type is left alone and not written:
+    the script never changes a field's type.
+    """
+    for name in DATE_FIELDS:
+        field = fields.get(name)
+        if field is not None:
+            if field.get("dataType") != "DATE":
+                print("skip %s: the board's field of that name is %s, not DATE" % (name, field.get("dataType")))
+                del fields[name]
+            continue
+        if not client.budget_left():
+            return
+        data = client.mutate("create date field " + name, CREATE_DATE_FIELD, project=project_id, name=name)
+        if data:
+            fields[name] = {"id": data["createProjectV2Field"]["projectV2Field"]["id"], "dataType": "DATE"}
+        elif client.dry_run:
+            fields[name] = {"id": None, "dataType": "DATE"}
+
+
 def write_field(client, project_id, item_id, fields, number, field_name, value):
     field = fields[field_name]
     label = "#%d %s -> %s" % (number, field_name, "(clear)" if value is None else value)
@@ -578,6 +723,8 @@ def write_field(client, project_id, item_id, fields, number, field_name, value):
         encoded = {"number": float(value)}
     elif field_name in TEXT_FIELDS:
         encoded = {"text": value}
+    elif field_name in DATE_FIELDS:
+        encoded = {"date": value}
     else:
         option = next((o for o in field["options"] if o["name"] == value), None)
         if option is None:
@@ -612,10 +759,12 @@ def sync(client, org, project_number, status_update, now):
             raise GraphQLError("the board has no field named %r (docs/roadmap-board.md)" % name)
 
     issues = read_issues(client, now)
+    read_sub_issues(client, issues)
     lookup = dict(read_ancestors(client, issues))
     lookup.update(issues)
     items = read_items(client, org, project_number)
     ensure_area_options(client, project_id, fields, issues.values())
+    ensure_date_fields(client, project_id, fields)
 
     counts = {"added": 0, "changed": 0, "unchanged": 0, "skipped": 0}
     deferred = 0
@@ -638,7 +787,7 @@ def sync(client, org, project_number, status_update, now):
             counts["added"] += 1
         changes = [
             (f, v)
-            for f, v in field_changes(desired_fields(issue, lookup), item["values"])
+            for f, v in field_changes(desired_fields(issue, lookup, now), item["values"])
             if f in fields
         ]
         if not changes:
