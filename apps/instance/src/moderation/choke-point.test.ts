@@ -181,7 +181,8 @@ const NOT_AN_ATHLETE_FIELD: Readonly<Record<string, string>> = {
   token: 'a token mailed to the CALLER’s own recovery address',
   reason: 'free text a reporter or a moderator writes; never an id the route acts on',
   reportId: 'a report, read and decided only on the moderators’ routes',
-  statement: 'the CALLER’s own signed erasure statement',
+  statement:
+    'the CALLER’s own signed erasure statement, or the statement of reasons a moderator writes with a restriction (#910)',
   mayBeRaced: 'the CALLER’s consent for their own ride (#331)',
   routeSha256:
     'the SHA-256 of a route’s canonical GPX (#331); the riders behind it are each asked of the choke point',
@@ -209,6 +210,12 @@ const NOT_AN_ATHLETE_FIELD: Readonly<Record<string, string>> = {
   grades: 'a room’s route gradients',
   gpx: 'the creator’s own route for a room',
   code: 'a room’s code; its members are whoever holds it (ADR 0028 D-6.3)',
+  grounds: 'the CALLER’s own grounds for appealing a decision about them (#911)',
+  item: 'which item a moderator hides — a room’s listing, its route or one result row — by its identifier (#913)',
+  outcome: 'a moderator’s outcome for an appeal: upheld or reversed (#911)',
+  decision: 'free text a moderator writes: what the rider or the notifier is told (#911, #912)',
+  step: 'which step a moderator records on a notice (#912)',
+  logId: 'a moderation log entry, read only on the moderators’ routes (#912)',
 };
 
 const bodyFields = (route: Route): string[] =>
