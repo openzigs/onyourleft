@@ -23,7 +23,9 @@
  * the room gave them up), and the instance publishes it once the race is over
  * and not before (`apps/instance` §`rooms.ts` `results`). This device cannot
  * know when that is, so it asks only when the rider presses for it, once a
- * press, and says plainly when the race is still being ridden.
+ * press, and says plainly when the race is still being ridden — or, for a
+ * race that is over with no result (a restart interrupted it, #948 N-d), that
+ * there is none and never will be, rather than "ask again later" for ever.
  */
 
 import { useEffect, useState, type JSX } from 'react';
@@ -47,6 +49,11 @@ export const RACE_LEFT_EARLY_TEXT =
 /** What they are told when they ask and the race is still being ridden. */
 export const RACE_NOT_OVER_TEXT =
   'The race is still being ridden, so there is no result yet. Ask again later.';
+
+/** What they are told when the race is over and was never decided: there is no result to ask for. */
+export const RACE_NO_RESULT_TEXT =
+  'This race ended without a result: it was interrupted before it was decided, so there is ' +
+  'no finish order to show.';
 
 /**
  * What the references below the result are for (#907): each is an
@@ -94,6 +101,8 @@ export function RaceResult(props: RaceResultProps): JSX.Element {
     setShown({ kind: 'asking' });
     void rooms.results(roomId).then((answer) => {
       if (answer.kind === 'result') setShown({ kind: 'shown', rows: answer.rows });
+      else if (answer.kind === 'no-result')
+        setShown({ kind: 'problem', text: RACE_NO_RESULT_TEXT });
       else if (answer.kind === 'refused' && answer.reason === 'no-such-room') {
         setShown({ kind: 'waiting', notOver: true });
       } else {
@@ -119,6 +128,9 @@ export function RaceResult(props: RaceResultProps): JSX.Element {
             setShown({ kind: 'shown', rows: answer.rows });
             return;
           }
+        } else if (answer.kind === 'no-result') {
+          setShown({ kind: 'problem', text: RACE_NO_RESULT_TEXT });
+          return;
         } else if (answer.kind === 'refused' && answer.reason !== 'no-such-room') {
           setShown({ kind: 'problem', text: ROOMS_REFUSAL_TEXT[answer.reason] });
           return;

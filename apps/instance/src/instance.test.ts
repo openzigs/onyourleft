@@ -19,7 +19,7 @@ import { fileURLToPath } from 'node:url';
 
 import { MASK_PLACEHOLDER } from '@onyourleft/analysis';
 import { PLANTED_DETAILS, PLANTED_GUARD, personalDetailFaults } from '@onyourleft/analysis/testing';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { TEST_ORIGIN, testDevice } from './auth/identity-testing.ts';
 import { readAnalysisModelSettings, readHistorySettings, type Config } from './config.ts';
@@ -1250,7 +1250,12 @@ describe('a rider’s race on the running instance — #784, #785', () => {
     await until(() => !existsSync(fileOf(interrupted.routeSha256)), 'the route deleted', 10_000);
     const fresh = openServingStore(path);
     try {
-      expect((await fresh.getPrivateRoom(interrupted.roomId))?.closedAt).not.toBeNull();
+      // #948 N-b: the route goes first, and the close that commits follows it.
+      await vi.waitFor(
+        async () =>
+          expect((await fresh.getPrivateRoom(interrupted.roomId))?.closedAt).not.toBeNull(),
+        { timeout: 10_000 },
+      );
       expect((await fresh.getPrivateRoom(waiting.roomId))?.closedAt).toBeNull();
     } finally {
       await fresh.close();

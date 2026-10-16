@@ -14,7 +14,7 @@ import type { Frame } from '@onyourleft/protocol';
 
 import { helloText } from '../core/room-testing.ts';
 import { until } from './node-room-testing.ts';
-import { closeFrameBytes, roomHash } from './router.ts';
+import { closeFrameBytes, roomHash, type RoomLookup } from './router.ts';
 import {
   joinRoom,
   ridePlan,
@@ -250,6 +250,41 @@ describe('what is refused before any room state changes — #780 criterion 1', (
     const reused = await join('gate', 'good');
     expect(await reused.closed).toEqual({ code: 4003, reason: 'ticket-refused' });
     expect(first.messages.map((m) => m.type)).toEqual(['welcome']);
+  }, 30_000);
+});
+
+describe('the rooms’ sweep and a socket agree on a room — #948', () => {
+  it('refuses a socket whose lookup read the room open while the sweep was ending it, and seats nobody', async () => {
+    const answers: ((found: RoomLookup) => void)[] = [];
+    harness = await startRouter({
+      workers: 1,
+      lookup: () => new Promise<RoomLookup>((resolve) => answers.push(resolve)),
+    });
+    const joining = join('ending', 'ticket-ann');
+    await until(() => answers.length === 1, 'the lookup to begin');
+    // The sweep claims the room and ends it while the lookup is in flight…
+    expect(harness.router.claimForEnding('ending')).toBe(true);
+    harness.router.releaseEnding('ending');
+    // …and the lookup answers what it read before the room was closed.
+    answers[0]?.({ kind: 'open', plan: ridePlan('ending') });
+    const late = await joining;
+    expect(await late.closed).toEqual({ code: 4005, reason: 'room-closed' });
+    expect(late.messages).toEqual([{ type: 'refuse', reason: 'room-closed' }]);
+    expect(harness.router.holds('ending')).toBe(false);
+  }, 30_000);
+
+  it('forgets a released room once no lookup is in flight, and will not claim a room a worker holds', async () => {
+    harness = await startRouter({ workers: 1 });
+    // Claimed and released with no socket on the way: the room the sweep
+    // did NOT end is placed as usual on the next socket.
+    expect(harness.router.claimForEnding('kept')).toBe(true);
+    harness.router.releaseEnding('kept');
+    const ann = await join('kept', 'ticket-ann');
+    await until(() => ann.messages.length > 0, 'a welcome');
+    expect(ann.messages[0]?.type).toBe('welcome');
+    // Now a worker holds it, and the sweep may not have it.
+    expect(harness.router.holds('kept')).toBe(true);
+    expect(harness.router.claimForEnding('kept')).toBe(false);
   }, 30_000);
 });
 

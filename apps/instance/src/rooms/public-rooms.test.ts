@@ -349,6 +349,7 @@ describe('joining from the listing — #788', () => {
       drafting: true,
       loop: false,
       routeSha256: room.routeSha256,
+      creator: false,
     });
     await w.freshRead(async (store) => {
       expect(await store.isRoomMember(room.roomId, bea.athleteId)).toBe(true);

@@ -81,11 +81,17 @@ export interface EnteredRoom {
   /** The code, for the rider who made the room to share. Absent for one who joined, and for a public room. */
   readonly code?: string | undefined;
   /**
-   * #788: a PUBLIC room — listed on the instance for eligible riders, with no
-   * code — its start, and whether this device made it. Absent for a room
-   * shared by its code.
+   * Whether this rider made the room — on this device, or as the instance
+   * answers a join (#948, #929's N1): a maker who joins their own room by its
+   * code after a reload, or from another device, is still the one offered
+   * *Start the race*. An instance that does not say is read as "not".
    */
-  readonly listed?: { readonly startsAt: number; readonly madeHere: boolean } | undefined;
+  readonly madeIt: boolean;
+  /**
+   * #788: a PUBLIC room — listed on the instance for eligible riders, with no
+   * code — and its start. Absent for a room shared by its code.
+   */
+  readonly listed?: { readonly startsAt: number } | undefined;
   /** The road everybody in the room rides — read back from the room's own route. */
   readonly profile: RouteProfile;
   /**
@@ -172,6 +178,11 @@ export interface RaceResultRow {
 
 export type RaceResultAnswer =
   | { readonly kind: 'result'; readonly rows: readonly RaceResultRow[] }
+  /**
+   * The room is over and its race was never decided — a restart interrupted
+   * it (#948 N-d): there is no result, and asking again will not make one.
+   */
+  | { readonly kind: 'no-result' }
   | { readonly kind: 'refused'; readonly reason: RoomsRefusal }
   | { readonly kind: 'unreachable' };
 
@@ -343,6 +354,7 @@ export function createRoomsPort(options: RoomsPortOptions): RoomsPort {
         drafting?: unknown;
         loop?: unknown;
         routeSha256?: unknown;
+        creator?: unknown;
       } | null;
       if (answer.status !== 200) {
         const reason = refusalOf(answer);
@@ -372,6 +384,7 @@ export function createRoomsPort(options: RoomsPortOptions): RoomsPort {
           kind: room.kind,
           ridingPosition: room.ridingPosition as RoomRidingPosition,
           drafting: room.drafting,
+          madeIt: room.creator === true,
           profile,
           // The route's bytes were just checked against this digest (`routeOf`).
           routeSha256: room.routeSha256,
@@ -425,9 +438,10 @@ export function createRoomsPort(options: RoomsPortOptions): RoomsPort {
             kind: request.kind,
             ridingPosition: request.ridingPosition,
             drafting: request.drafting,
+            madeIt: true,
             ...(request.startsAt === undefined
               ? { code: made.code as string }
-              : { listed: { startsAt: request.startsAt, madeHere: true } }),
+              : { listed: { startsAt: request.startsAt } }),
             profile: shared.profile,
             // The bytes this device sent, digested here rather than taken from the answer.
             routeSha256: await routeDigest(shared.gpx),
@@ -465,10 +479,7 @@ export function createRoomsPort(options: RoomsPortOptions): RoomsPort {
 
     joinPublic: (room) =>
       isRoomId(room.roomId)
-        ? entered(roomPath(room.roomId, 'join'), undefined, {
-            startsAt: room.startsAt,
-            madeHere: false,
-          })
+        ? entered(roomPath(room.roomId, 'join'), undefined, { startsAt: room.startsAt })
         : Promise.resolve({ kind: 'refused', reason: 'instance-refused' }),
 
     async start(roomId) {
@@ -493,6 +504,10 @@ export function createRoomsPort(options: RoomsPortOptions): RoomsPort {
         const answer = await session.sealedOrKeyless.call('GET', roomPath(roomId, 'results'), {
           token: session.token,
         });
+        const error = (answer.body as { error?: { code?: unknown } } | null)?.error;
+        if (answer.status === 409 && error?.code === 'race_without_result') {
+          return { kind: 'no-result' };
+        }
         if (answer.status !== 200) {
           const reason = refusalOf(answer);
           return reason === undefined ? { kind: 'unreachable' } : { kind: 'refused', reason };

@@ -81,6 +81,7 @@ describe('a room’s references (#913)', () => {
       ridingPosition: 'hoods',
       drafting: true,
       code: undefined,
+      madeIt: false,
       profile: northProfile(1_000),
       routeSha256: 'a'.repeat(64),
     };
