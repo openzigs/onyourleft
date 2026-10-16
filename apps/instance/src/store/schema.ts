@@ -299,6 +299,23 @@ export interface ModerationLogTable {
   readonly at: number;
 }
 
+/**
+ * A notice of illegal content, from anybody (#907, migration 0026). Append-only:
+ * the schema refuses an UPDATE or a DELETE. No column is a client address.
+ */
+export interface NoticeTable {
+  readonly id: Generated<number>;
+  readonly received_at: number;
+  readonly kind: 'illegal_content' | 'intimate_image';
+  readonly explanation: string;
+  /** A JSON array of item identifiers (`@onyourleft/domain` §`moderation-item.ts`). */
+  readonly items: string;
+  readonly location: string | null;
+  readonly notifier_name: string | null;
+  readonly notifier_email: string | null;
+  readonly bona_fide: 0 | 1;
+}
+
 /** A single-use invitation a moderator minted, as its SHA-256 (#775). */
 export interface InviteCodeTable {
   readonly code_sha256: string;
@@ -573,4 +590,5 @@ export interface InstanceDatabase {
   readonly analysis_event: AnalysisEventTable;
   readonly athlete_hosted_key: AthleteHostedKeyTable;
   readonly athlete_hosted_consent: AthleteHostedConsentTable;
+  readonly notice: NoticeTable;
 }

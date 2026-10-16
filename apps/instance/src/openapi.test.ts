@@ -324,6 +324,20 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
       athleteId: await anotherAthlete(world),
       reason: 'Abusive display name',
     }),
+  // #907: the notice page and its form, for anybody — no session.
+  getNoticePage: async (world) => fetch(`${world.url}/report`),
+  submitNotice: async (world) =>
+    fetch(`${world.url}/report`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        kind: 'illegal_content',
+        explanation: 'A threat in a room’s route.',
+        location: 'The Sunday group ride',
+      }).toString(),
+    }),
+  listNotices: async (world) =>
+    send(world, 'GET', '/v1/moderation/notices', await moderatorToken(world)),
   listOpenReports: async (world) =>
     send(world, 'GET', '/v1/moderation/reports', await moderatorToken(world)),
   dismissReport: async (world) => {
@@ -706,6 +720,10 @@ describe('every route answers with the shape its entry declares', () => {
         expect(response.status).toBe(200);
         expect(response.headers.get('content-type')).toBe('application/octet-stream');
         expect((await response.arrayBuffer()).byteLength).toBeGreaterThan(0);
+      } else if (route.response.contentType === 'text/html') {
+        expect(response.status).toBe(200);
+        expect(response.headers.get('content-type')).toBe('text/html; charset=utf-8');
+        expect(await response.text()).toMatch(/^<!doctype html>/);
       } else if (route.response.contentType === 'text/event-stream') {
         expect(response.status).toBe(200);
         expect(response.headers.get('content-type')).toBe('text/event-stream');

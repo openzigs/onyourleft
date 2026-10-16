@@ -126,6 +126,48 @@ a rider which ones they meet):
 | **Unblock** | Removes the rider's own block. It cannot remove a block the other rider made. |
 | **Report** a rider | Sends the rider's id and a reason (up to 1,000 characters) to your queue. A rider can make at most **5 reports an hour**, and a report about an id nobody holds counts toward the 5 like any other. It is kept, closed as `no_such_athlete`, and never reaches your queue. A rider can report someone they have blocked. The answer is the same whether or not that rider exists. |
 
+## Notices from anybody: the notice page
+
+Every instance serves a **notice page** at `/report` (#907). Anybody can use it, with or without an
+account and with or without the app, to tell you about content on your instance that they think is
+illegal. The app links to it from *About*, on the instance the rider connected to. It is a plain
+form that runs no script, so it works with a keyboard and a screen reader.
+
+A notice carries what the EU Digital Services Act's Art. 16(2) asks a notice to be able to carry:
+
+| Field | Required |
+|---|---|
+| Why they think it is illegal | yes |
+| Which items: one identifier a line, which the app shows, or where it is in words | one of the two |
+| Their name and email address | **no**, never, for a notice of illegal content |
+| A statement that they believe in good faith it is accurate and complete | no |
+
+An identifier is one line: `rider:<athlete id>` (a display name), `room:<room id>`, `route:<room id>`
+(the route a room is ridden on), or `result:<room id>:<row>` (one row of a race's published result,
+counted from 1). The app shows a race's route and rows under the result, as *References*.
+
+The page also offers the UK Online Safety Act's **intimate image content report** (s.20A) as a
+separate choice. That one needs all three of its statements and an email address, because s.20A(2)
+says that is what such a report is. **Take the content down within 48 hours** of receiving it
+(s.10(3A)). The Moderation screen says so on the notice.
+
+**Read them on the Moderation screen**, under *Notices* (`GET /v1/moderation/notices`): every notice,
+oldest first, with the time it arrived and the notifier's name and email address if they gave them.
+**The instance sends no email.** Where a notice gives an address, write to it yourself to confirm you
+received it, and again with what you decided (the owner's ruling of 2026-10-15 for the project's
+instance). The wording is in [statements of reasons](moderation/statement-of-reasons.md).
+
+A notice is kept as it was received. Like the moderation log, it is **append-only in the schema**,
+and erasing an account does not delete a notice about it. `migrate … down` refuses to undo migration
+0026 while a single notice is held.
+
+**Limits, with no account and no stored address:** at most **5 notices an hour from one client
+address**, counted in memory as the sign-in limits are, so a restart resets them; and at most **100 an
+hour across the whole instance**, counted from the notices themselves, so a restart does not. A form
+that has to be corrected is not counted. Behind a proxy, the per-address limit reads the address the
+way registration does (see *Behind a proxy or a tunnel*, above). Nothing the notifier types is written
+to the instance's log: the log records the route, the status and the time.
+
 ## What a moderator can do
 
 Every action needs a **reason**. Each action is written to the **moderation log** in the same

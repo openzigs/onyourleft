@@ -718,7 +718,7 @@ function viewFor(
         />
       );
     case 'about':
-      return <AboutView />;
+      return <AboutView instance={props.instance} />;
     case 'instance':
       return (
         <InstanceView

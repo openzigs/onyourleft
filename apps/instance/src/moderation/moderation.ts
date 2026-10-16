@@ -60,9 +60,11 @@ import type {
   AthleteRecord,
   ModerationActionKind,
   ModerationLogEntry,
+  Notice,
   Report,
   SqlStore,
 } from '../store/sql-store.ts';
+import { readNoticeForm, type NoticeProblem, type NoticeValues } from './notices.ts';
 
 /** The two moderator roles (ruling Q13). */
 export type ModeratorRole = 'owner' | 'deputy';
@@ -134,6 +136,14 @@ export interface Moderation {
   report(athleteId: string, target: unknown, reason: unknown): Promise<ModerationResult<null>>;
 
   openReports(): Promise<readonly Report[]>;
+  /**
+   * A notice of illegal content from anybody (#907), from the notice page's
+   * form and the client's address — counted against that address in memory,
+   * and against the instance's cap from the store, and never stored.
+   */
+  submitNotice(form: URLSearchParams, address: string | null): Promise<NoticeSubmission>;
+  /** Every notice received, oldest first: the moderators' queue of notices (#907). */
+  notices(): Promise<readonly Notice[]>;
   /** The approval queue (#775): every athlete awaiting a moderator's decision. */
   pendingRegistrations(): Promise<readonly AthleteRecord[]>;
   /**
@@ -166,7 +176,35 @@ export interface ModerationOptions {
   readonly now: () => number;
   readonly moderators?: Moderators;
   readonly limits?: ModerationLimits;
+  /**
+   * Count one notice against a client's address and say whether it is within
+   * the limit (#907) — `auth/identity.ts`'s limiter, in memory, so no address
+   * is stored. Absent: no per-address limit, only the instance's cap.
+   */
+  readonly allowNoticeFrom?: (address: string | null) => boolean;
 }
+
+/**
+ * How many notices the whole instance takes in an hour, from everybody
+ * (#907): counted from the notices' own times, so a restart hands nobody a
+ * fresh allowance and a crowd of addresses cannot fill the database.
+ */
+export const NOTICES_PER_HOUR = 100;
+
+/** What sending the notice page's form did. */
+export type NoticeSubmission =
+  | {
+      readonly kind: 'received';
+      readonly reference: number;
+      readonly receivedAt: number;
+      readonly emailGiven: boolean;
+    }
+  | {
+      readonly kind: 'invalid';
+      readonly problems: readonly NoticeProblem[];
+      readonly values: NoticeValues;
+    }
+  | { readonly kind: 'too-many' };
 
 const refuse = (code: ErrorCode, fields?: readonly FieldProblem[]): ModerationResult<never> =>
   fields === undefined ? { ok: false, code } : { ok: false, code, fields };
@@ -302,6 +340,34 @@ export function createModeration(options: ModerationOptions): Moderation {
     },
 
     openReports: () => store.listOpenReports(),
+
+    async submitNotice(form, address) {
+      const read = readNoticeForm(form);
+      if (!read.ok) return { kind: 'invalid', problems: read.problems, values: read.values };
+      // Only a notice that would be kept is counted, so correcting a typo
+      // costs nothing; the address first, so it is counted even past the cap.
+      if (options.allowNoticeFrom?.(address) === false) return { kind: 'too-many' };
+      const receivedAt = seconds();
+      // An intimate image report is never turned away by the instance-wide cap
+      // (OSA s.20A's 48-hour duty): a crowd of addresses could otherwise fill
+      // it and lock the one notifier who cannot wait out an hour. The
+      // per-address limit above still bounds it.
+      if (
+        read.notice.kind !== 'intimate_image' &&
+        (await store.countNoticesSince(receivedAt - 60 * 60)) >= NOTICES_PER_HOUR
+      ) {
+        return { kind: 'too-many' };
+      }
+      const reference = await store.putNotice({ ...read.notice, receivedAt });
+      return {
+        kind: 'received',
+        reference,
+        receivedAt,
+        emailGiven: read.notice.notifierEmail !== null,
+      };
+    },
+
+    notices: () => store.listNotices(),
     pendingRegistrations: () => store.listPendingAthletes(),
     async logPage(query) {
       const request = parsePageRequest(query);

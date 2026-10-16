@@ -65,6 +65,8 @@
  * is true of is shown as a conflict, open, with no control on it.
  */
 
+import { parseModerationItem } from '@onyourleft/domain';
+
 import {
   heldAccountSession,
   heldInstanceSession,
@@ -85,6 +87,29 @@ export const MAXIMUM_MODERATION_REASON = 1000;
 
 /** The longest display name this screen will show — `@onyourleft/domain`'s bound, with room. */
 const MAXIMUM_SHOWN_NAME = 64;
+
+/**
+ * One notice of illegal content (#907), from the instance's notice page —
+ * sent by anybody, with or without an account, so its notifier is named only
+ * by what they chose to give.
+ */
+export interface ReceivedNotice {
+  readonly noticeId: number;
+  /** Unix seconds. */
+  readonly receivedAt: number;
+  /** A notice of illegal content, or an intimate image content report (OSA s.20A). */
+  readonly kind: 'illegal_content' | 'intimate_image';
+  readonly explanation: string;
+  /** The item identifiers it names (`@onyourleft/domain` §`moderation-item.ts`). */
+  readonly items: readonly string[];
+  readonly location: string | null;
+  readonly notifierName: string | null;
+  readonly notifierEmail: string | null;
+  readonly bonaFide: boolean;
+}
+
+/** The longest fields the instance keeps on a notice (`apps/instance` §`notices.ts`). */
+const NOTICE_LIMITS = { explanation: 5000, location: 1000, name: 200, email: 254, items: 20 };
 
 /** One account awaiting a moderator's decision (#775). */
 export interface PendingRegistration {
@@ -159,6 +184,12 @@ export type ModerationRead =
       readonly me: string;
       readonly registrations: readonly PendingRegistration[];
       readonly reports: readonly OpenReport[];
+      /**
+       * Every notice the instance's notice page received (#907), oldest
+       * first — or `undefined` when they could not be read while the queues
+       * could, read on their own as the log is.
+       */
+      readonly notices: readonly ReceivedNotice[] | undefined;
       /**
        * The first page of the suspended accounts (#961), or `undefined` when
        * it could not be read while the queues could — read on its own, as the
@@ -342,6 +373,47 @@ function reportFrom(value: unknown): OpenReport | undefined {
     targetAthleteId: row.targetAthleteId,
     reason,
     createdAt: row.createdAt,
+  };
+}
+
+/** Text a notifier typed, as the instance keeps it, or `null` — `undefined` when it is neither. */
+function optionalText(value: unknown, maximum: number): string | null | undefined {
+  return value === null ? null : text(value, maximum);
+}
+
+function noticeFrom(value: unknown): ReceivedNotice | undefined {
+  const row = record(value);
+  const explanation = text(row?.explanation, NOTICE_LIMITS.explanation);
+  const location = optionalText(row?.location, NOTICE_LIMITS.location);
+  const name = optionalText(row?.notifierName, NOTICE_LIMITS.name);
+  const email = optionalText(row?.notifierEmail, NOTICE_LIMITS.email);
+  const items = row?.items;
+  if (
+    row === undefined ||
+    !isCount(row.noticeId) ||
+    !isTime(row.receivedAt) ||
+    (row.kind !== 'illegal_content' && row.kind !== 'intimate_image') ||
+    explanation === undefined ||
+    location === undefined ||
+    name === undefined ||
+    email === undefined ||
+    typeof row.bonaFide !== 'boolean' ||
+    !Array.isArray(items) ||
+    items.length > NOTICE_LIMITS.items ||
+    !items.every((item) => typeof item === 'string' && parseModerationItem(item) !== undefined)
+  ) {
+    return undefined;
+  }
+  return {
+    noticeId: row.noticeId,
+    receivedAt: row.receivedAt,
+    kind: row.kind,
+    explanation,
+    items: items as string[],
+    location,
+    notifierName: name,
+    notifierEmail: email,
+    bonaFide: row.bonaFide,
   };
 }
 
@@ -584,6 +656,21 @@ export function createModerationPort(dependencies: ModerationPortDependencies): 
     }
   }
 
+  /** The notices (#907), read on their own: `undefined` on any answer but every row of them. */
+  async function noticeRows(
+    session: Extract<HeldSealedSession, { kind: 'open' }>,
+  ): Promise<readonly ReceivedNotice[] | undefined> {
+    try {
+      return rows(
+        await session.sealed.call('GET', '/v1/moderation/notices', { token: session.token }),
+        'notices',
+        noticeFrom,
+      );
+    } catch {
+      return undefined;
+    }
+  }
+
   const logPage = (cursor?: string) =>
     readPage('/v1/moderation/log', MODERATION_LOG_PAGE, cursor, 'entries', logEntryFrom);
   const suspendedPage = (cursor?: string) =>
@@ -614,11 +701,12 @@ export function createModerationPort(dependencies: ModerationPortDependencies): 
         // their own (#957's review): one that cannot be read, or holds a row
         // this client does not accept, is `undefined`, and the queues are
         // still shown.
-        const [registrations, reports, suspended, log] = await Promise.all([
+        const [registrations, reports, suspended, log, notices] = await Promise.all([
           session.sealed.call('GET', '/v1/moderation/registrations', { token: session.token }),
           session.sealed.call('GET', '/v1/moderation/reports', { token: session.token }),
           suspendedPage(),
           logPage(),
+          noticeRows(session),
         ]);
         if (registrations.status === 401 || reports.status === 401) return { kind: 'signed-out' };
         if (registrations.status !== 200 && isNotAModerator(registrations)) {
@@ -634,6 +722,7 @@ export function createModerationPort(dependencies: ModerationPortDependencies): 
           me,
           registrations: registrationRows,
           reports: reportRows,
+          notices,
           suspended,
           log,
         };

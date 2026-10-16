@@ -581,6 +581,74 @@ describe('the suspended accounts — #961', () => {
   });
 });
 
+describe('the notices — #907', () => {
+  const ROOM = '0123456789abcdef0123456789abcdef';
+
+  /** A notice sent from the instance's notice page, as a browser with no account sends it. */
+  async function sendNotice(world: World, fields: Record<string, string>): Promise<number> {
+    const response = await world.world.instance.handler(
+      new Request(`${testing.TEST_ORIGIN}/report`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams(fields).toString(),
+      }),
+    );
+    return response.status;
+  }
+
+  it('reads back every notice the notice page received, with the notifier’s email for a reply by hand', async () => {
+    const world = await moderatedWorld();
+    expect(asModerator(await world.moderator.read()).notices).toEqual([]);
+    expect(
+      await sendNotice(world, {
+        kind: 'illegal_content',
+        explanation: 'A threat in the route of this room.',
+        items: `route:${ROOM}`,
+        email: 'notifier@example.com',
+        bona_fide: 'on',
+      }),
+    ).toBe(200);
+    expect(asModerator(await world.moderator.read()).notices).toEqual([
+      {
+        noticeId: 1,
+        receivedAt: Math.floor(world.world.clock.ms / 1000),
+        kind: 'illegal_content',
+        explanation: 'A threat in the route of this room.',
+        items: [`route:${ROOM}`],
+        location: null,
+        notifierName: null,
+        notifierEmail: 'notifier@example.com',
+        bonaFide: true,
+      },
+    ]);
+  });
+
+  it('still gives the queues when the notices cannot be read, or hold a row this client does not accept', async () => {
+    const world = await moderatedWorld();
+    const read = asModerator(
+      await answeredAt(world, '/v1/moderation/notices', () =>
+        Response.json({
+          notices: [
+            {
+              noticeId: 1,
+              receivedAt: 1,
+              kind: 'illegal_content',
+              explanation: 'x',
+              items: ['https://elsewhere.example'],
+              location: null,
+              notifierName: null,
+              notifierEmail: null,
+              bonaFide: false,
+            },
+          ],
+        }),
+      ).read(),
+    );
+    expect(read.notices).toBeUndefined();
+    expect(read.registrations).toHaveLength(1);
+  });
+});
+
 describe('the moderation log — #891, #899, #955', () => {
   // #957's review: the log is read on its own, so a log the client cannot
   // take does not take the two queues with it.

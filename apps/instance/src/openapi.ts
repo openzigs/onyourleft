@@ -83,7 +83,9 @@ function operation(route: Route): Record<string, unknown> {
                     schema: { type: 'string', description: route.response.description },
                   },
                 }
-              : { 'text/plain': { schema: { type: 'string' } } };
+              : route.response.contentType === 'text/html'
+                ? { 'text/html': { schema: { type: 'string' } } }
+                : { 'text/plain': { schema: { type: 'string' } } };
     responses[route.accepted === true ? '202' : '200'] = {
       description: route.accepted === true ? 'Accepted' : 'OK',
       content: success,
@@ -129,6 +131,14 @@ function operation(route: Route): Record<string, unknown> {
           requestBody: {
             required: true,
             content: { 'application/json': { schema: route.request } },
+          },
+        }),
+    ...(route.form === undefined
+      ? {}
+      : {
+          requestBody: {
+            required: true,
+            content: { 'application/x-www-form-urlencoded': { schema: route.form } },
           },
         }),
     responses,

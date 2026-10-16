@@ -300,6 +300,11 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
     notAScopedRead: 'a pair of athletes, either way round: the choke point asks it (#83)',
   },
   listOpenReports: { notAScopedRead: 'the moderators’ queue: every open report (#83)' },
+  putNotice: { notAScopedRead: 'a write, from anybody: a notice names no athlete column (#907)' },
+  countNoticesSince: {
+    notAScopedRead: 'a count across the instance, never a row: the notices’ cap (#907)',
+  },
+  listNotices: { notAScopedRead: 'the moderators’ queue of notices, from anybody (#907)' },
   listModerationLog: { notAScopedRead: 'the moderators’ record: every action (#83)' },
   listModerationLogPage: {
     notAScopedRead: 'the moderators’ record, a page at a time, newest first (#961)',

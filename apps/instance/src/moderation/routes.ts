@@ -13,8 +13,10 @@
  */
 
 import { errorResponse } from '../errors.ts';
+import { pageResponse } from '../html.ts';
 import { json, noContent, type Route, type RouteContext, type Schema } from '../route-kit.ts';
 import type { AthleteAction, Moderation, ModerationResult } from './moderation.ts';
+import { NOTICE_PAGE_PATH, noticePage } from './notices.ts';
 
 function moderationOf(context: RouteContext): Moderation {
   // The handler answers `unavailable` before calling a route that declares
@@ -63,6 +65,24 @@ const logEntrySchema = object({
   at: integer,
 });
 
+const noticeSchema = object({
+  noticeId: integer,
+  receivedAt: integer,
+  kind: { type: 'string', enum: ['illegal_content', 'intimate_image'] },
+  explanation: string,
+  items: { type: 'array', items: string },
+  location: nullableString,
+  notifierName: nullableString,
+  notifierEmail: nullableString,
+  bonaFide: { type: 'boolean' },
+});
+
+/** Why the notice page reaches nobody through the choke point: it is for anybody, signed in or not. */
+const NOTICE_PAGE_REACH = {
+  exempt:
+    'the notice page is for anybody, with or without an account (DSA Art. 16(1), #907); it names items by identifier, shows nobody anything and answers the same whatever they name',
+} as const;
+
 const actionResponse: Route['response'] = {
   contentType: 'application/json',
   schema: object({ logId: integer }),
@@ -100,6 +120,95 @@ function athleteAction(
 }
 
 export const MODERATION_ROUTES: readonly Route[] = [
+  {
+    method: 'GET',
+    path: NOTICE_PAGE_PATH,
+    operationId: 'getNoticePage',
+    reaches: NOTICE_PAGE_REACH,
+    summary:
+      'The notice page (#907): a form, for anybody with or without an account, to report content on this instance they think is illegal (DSA Art. 16) or to make an intimate image content report (OSA s.20A). HTML, with no script.',
+    identity: true,
+    response: { contentType: 'text/html' },
+    handle: ({ config }) => pageResponse(noticePage({ kind: 'form' }, config.name)),
+  },
+  {
+    method: 'POST',
+    path: NOTICE_PAGE_PATH,
+    operationId: 'submitNotice',
+    reaches: NOTICE_PAGE_REACH,
+    summary:
+      'Send the notice page’s form (#907). 200 and a page with the notice’s reference when it is received; 400 and the form again, saying what to correct, when it is not; 429 when this client address or the whole instance has sent too many in the last hour (an intimate image report is not counted against the whole instance); 403 when a browser says the post came from another site. No client address is stored, and nothing typed is logged.',
+    identity: true,
+    form: object(
+      {
+        kind: { type: 'string', enum: ['illegal_content', 'intimate_image'] },
+        explanation: string,
+        items: string,
+        location: string,
+        name: string,
+        email: string,
+        bona_fide: string,
+        declare_intimate: string,
+        declare_subject: string,
+        declare_true: string,
+      },
+      ['kind', 'explanation'],
+    ),
+    response: { contentType: 'text/html' },
+    handle: async (context) => {
+      // A form on another site could post real visitors' notices from their
+      // own addresses; a browser says so, and the page's own form never is.
+      if (context.request.headers.get('sec-fetch-site') === 'cross-site') {
+        return pageResponse(noticePage({ kind: 'form' }, context.config.name), 403);
+      }
+      const form = new URLSearchParams(
+        new TextDecoder('utf-8').decode(context.body ?? new Uint8Array()),
+      );
+      const outcome = await moderationOf(context).submitNotice(form, context.client.address);
+      const name = context.config.name;
+      switch (outcome.kind) {
+        case 'received':
+          return pageResponse(noticePage(outcome, name));
+        case 'invalid':
+          return pageResponse(
+            noticePage({ kind: 'form', values: outcome.values, problems: outcome.problems }, name),
+            400,
+          );
+        case 'too-many':
+          return pageResponse(noticePage({ kind: 'too-many' }, name), 429);
+      }
+    },
+  },
+  {
+    method: 'GET',
+    path: '/v1/moderation/notices',
+    sealed: 'only',
+    operationId: 'listNotices',
+    reaches: 'moderation',
+    summary:
+      'The moderators’ queue of notices (#907): every notice the notice page received, oldest first, with the time it arrived and the notifier’s name and email when they gave them.',
+    identity: true,
+    auth: 'session',
+    errors: ['unauthenticated'],
+    response: {
+      contentType: 'application/json',
+      schema: object({ notices: { type: 'array', items: noticeSchema } }),
+    },
+    handle: async (context) =>
+      json({
+        notices: (await moderationOf(context).notices()).map((notice) => ({
+          noticeId: notice.id,
+          receivedAt: notice.receivedAt,
+          kind: notice.kind,
+          explanation: notice.explanation,
+          items: notice.items,
+          location: notice.location,
+          notifierName: notice.notifierName,
+          notifierEmail: notice.notifierEmail,
+          bonaFide: notice.bonaFide,
+        })),
+      }),
+  },
   {
     method: 'GET',
     path: '/v1/blocks',

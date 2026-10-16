@@ -28,6 +28,8 @@
 
 import { useEffect, useState, type JSX } from 'react';
 
+import { formatModerationItem } from '@onyourleft/domain';
+
 import { Button } from '../design/Button';
 import { StatusMessage } from '../design/StatusMessage';
 import type { RaceResultRow, RoomsPort } from '../net/rooms-port';
@@ -45,6 +47,16 @@ export const RACE_LEFT_EARLY_TEXT =
 /** What they are told when they ask and the race is still being ridden. */
 export const RACE_NOT_OVER_TEXT =
   'The race is still being ridden, so there is no result yet. Ask again later.';
+
+/**
+ * What the references below the result are for (#907): each is an
+ * identifier the instance's notice page takes, so a rider can report one row
+ * of a result, or the race's route, and not the whole race.
+ */
+export const RACE_REFERENCES_SUMMARY = 'References, to report something in this race';
+export const RACE_REFERENCES_TEXT =
+  'To tell the instance’s moderator about one row of this result, or about the race’s route, ' +
+  'copy its reference into the instance’s notice page. About links to it.';
 
 /** The one control that asks. */
 export const ASK_FOR_RESULT_LABEL = 'Show the race’s result';
@@ -163,6 +175,24 @@ export function RaceResult(props: RaceResultProps): JSX.Element {
               </li>
             ))}
           </ol>
+          <details className="oyl-race-result__references">
+            <summary>{RACE_REFERENCES_SUMMARY}</summary>
+            <p>{RACE_REFERENCES_TEXT}</p>
+            <ul>
+              <li>
+                The room: <code>{formatModerationItem({ kind: 'room', roomId })}</code>
+              </li>
+              <li>
+                The route: <code>{formatModerationItem({ kind: 'route', roomId })}</code>
+              </li>
+              {shown.rows.map((_, index) => (
+                <li key={index}>
+                  Row {index + 1}:{' '}
+                  <code>{formatModerationItem({ kind: 'result', roomId, row: index + 1 })}</code>
+                </li>
+              ))}
+            </ul>
+          </details>
         </>
       )}
     </section>
