@@ -533,7 +533,10 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
       // restart left, and every ten minutes after.
       const endRooms = (): void => {
         void roomsSwept
-          .sweep((roomId) => router.holds(roomId))
+          .sweep({
+            claim: (roomId) => router.claimForEnding(roomId),
+            release: (roomId) => router.releaseEnding(roomId),
+          })
           .catch((error: unknown) => {
             logEvent(log, 'rooms-sweep-failed', {
               error: error instanceof Error ? error.name : 'unknown',

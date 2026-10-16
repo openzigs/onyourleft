@@ -74,6 +74,7 @@ export const ERROR_STATUS = {
   confirmation_superseded: 409,
   not_suspended: 409,
   already_appealed: 409,
+  race_without_result: 409,
   job_running: 409,
   picture_source_unavailable: 409,
   payload_too_large: 413,
@@ -148,6 +149,8 @@ const MESSAGES: Record<ErrorCode, string> = {
   not_eligible: 'This account cannot join a public room yet. Your account page says why.',
   moderation_not_applicable: 'That action does not apply to that account or report as it stands.',
   already_appealed: 'That decision has already been appealed; one appeal is decided per decision.',
+  race_without_result:
+    'That race is over without a result: it was interrupted, or never ridden to the line.',
   key_in_use: 'That device key is already registered here.',
   last_device: 'This is your last device. Revoking it needs one of your recovery codes.',
   address_in_use: 'That address is already the recovery address of another account here.',

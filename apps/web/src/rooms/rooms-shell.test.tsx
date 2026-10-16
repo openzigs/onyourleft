@@ -37,7 +37,12 @@ import { INSTANCE_ACCOUNT_STORAGE_KEY } from '../instance/sign-in';
 import { createRoomPort } from '../net/room-port';
 import { createRoomsPort } from '../net/rooms-port';
 import { routeDigest } from './share';
-import { ASK_FOR_RESULT_LABEL, RACE_LEFT_EARLY_TEXT, RACE_NOT_OVER_TEXT } from './RaceResult';
+import {
+  ASK_FOR_RESULT_LABEL,
+  RACE_LEFT_EARLY_TEXT,
+  RACE_NO_RESULT_TEXT,
+  RACE_NOT_OVER_TEXT,
+} from './RaceResult';
 import { PUBLIC_ROOMS_TEXT, publicRoomStartText } from './PublicRooms';
 import { LIST_ROOM_TEXT, ROOMS_REFUSAL_TEXT } from './RoomPanel';
 import { AppShell } from '../shell/AppShell';
@@ -381,14 +386,17 @@ describe('making a room — #784', () => {
 });
 
 describe('a private race — #785', () => {
-  async function inARace(gameTrainer?: GameTrainerPort): Promise<{
+  async function inARace(
+    gameTrainer?: GameTrainerPort,
+    joinedAsItsMaker = false,
+  ): Promise<{
     instance: ScriptedInstance;
     sockets: ReturnType<typeof handPlayedSockets>;
     sha256: string;
   }> {
     const instance = new ScriptedInstance();
     const { gpx, sha256 } = await roomRoute(2_500);
-    instance.offer('room-race', 'race', gpx, sha256);
+    instance.offer('room-race', 'race', gpx, sha256, true, joinedAsItsMaker);
     const sockets = handPlayedSockets();
     await shell(instance, sockets, undefined, gameTrainer);
     await joinByCode('ABCDE-FGHJK-MNPQR');
@@ -451,6 +459,18 @@ describe('a private race — #785', () => {
     expect(document.body.textContent).toContain(RACE_TEXT.waitingForItsMaker);
     expect(button('Start the race')).toBeUndefined();
     expect(instance.seen.some((each) => each.path.endsWith('/start'))).toBe(false);
+  });
+
+  it('offers the start to its maker who joined their own race by its code — after a reload, or on another device (#948 N1)', async () => {
+    const { instance } = await inARace(undefined, true);
+    await frame(2);
+    expect(document.body.textContent).toContain(RACE_TEXT.waiting);
+    expect(document.body.textContent).not.toContain(RACE_TEXT.waitingForItsMaker);
+    await press('Start the race');
+    expect(instance.seen.at(-1)).toMatchObject({
+      method: 'POST',
+      path: '/v1/rooms/room-race/start',
+    });
   });
 
   it('holds the rider on the line until the room starts the race, whatever they pedal, and its maker starts it', async () => {
@@ -522,6 +542,24 @@ describe('a private race — #785', () => {
     expect(rows).toHaveLength(2);
     expect(rows[1]).toContain('2nd You');
     expect(instance.seen.filter((each) => each.path.endsWith('/results'))).toHaveLength(2);
+  });
+
+  it('says a race that is over with no result has none, rather than “ask again later” — #948 N-d', async () => {
+    const { instance, sockets } = await inARace();
+    await sockets.say({ type: 'frame', tick: 1, riders: [] });
+    await frame(3);
+    await press('End ride');
+    await settle();
+    // A restart interrupted the race: the instance says it is over, undecided.
+    instance.results = {
+      status: 409,
+      body: { error: { code: 'race_without_result', message: 'No result.' } },
+    };
+    await press(ASK_FOR_RESULT_LABEL);
+    await settle();
+    expect(document.body.textContent).toContain(RACE_NO_RESULT_TEXT);
+    expect(document.body.textContent).not.toContain(RACE_NOT_OVER_TEXT);
+    expect(document.querySelector('ol')).toBeNull();
   });
 
   it('shows no ordered result while the race runs, and the room’s own after it — W/kg beside others, every flag to everyone', async () => {

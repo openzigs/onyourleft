@@ -63,6 +63,10 @@ import type { HostMetrics, RoomFlagRaised, RoomResult, RoomSeat } from './room-h
  *   it is in flight reaches a worker that has let the room go, and that
  *   worker refuses it `room-closed` rather than opening a lobby (#897,
  *   `room-host.ts` §`accept`).
+ * - **A room the rooms' sweep is ending** (#948, `rooms/rooms.ts` §`sweep`):
+ *   refused `room-closed` the same way, even when its lookup read it as open
+ *   just before the sweep closed it — so a rider is never placed in a room
+ *   whose route is being deleted.
  * - A ticket that is missing, wrong or spent is the ROOM's refusal, at hello
  *   (`room-host.ts`, `close-codes.ts`).
  */
@@ -217,6 +221,14 @@ export class RoomRouter {
     number,
     { readonly slot: Slot; readonly resolve: (seat: RoomSeat | undefined) => void }
   >();
+  /**
+   * Rooms the rooms' sweep is ending (#948), each `true` once the sweep is
+   * done with it and kept only until no lookup that began before that is
+   * still in flight: such a lookup may have read the room as open.
+   */
+  readonly #ending = new Map<string, boolean>();
+  /** How many sockets' lookups of each room are in flight. */
+  readonly #lookingUp = new Map<string, number>();
   /** Completes the handshake for a refusal the router gives itself. Never compresses. */
   readonly #refuser = new WebSocketServer({ noServer: true, perMessageDeflate: false });
   #nextSocket = 0;
@@ -259,6 +271,40 @@ export class RoomRouter {
    */
   holds(roomId: string): boolean {
     return this.#placement.get(roomId)?.alive === true;
+  }
+
+  /**
+   * For the rooms' sweep (#948): `false` when a live worker holds `roomId`;
+   * else `true`, and from now until {@link releaseEnding} no socket places it
+   * — one whose lookup read the room as open before the sweep closed it is
+   * refused `room-closed`, as a room that is over is.
+   */
+  claimForEnding(roomId: string): boolean {
+    if (this.holds(roomId)) return false;
+    this.#ending.set(roomId, false);
+    return true;
+  }
+
+  /** The sweep is done with `roomId`: forgotten once no lookup that might have read it open is in flight. */
+  releaseEnding(roomId: string): void {
+    if ((this.#lookingUp.get(roomId) ?? 0) === 0) this.#ending.delete(roomId);
+    else if (this.#ending.has(roomId)) this.#ending.set(roomId, true);
+  }
+
+  /** `lookup`, counted in flight, and whether the sweep was ending the room as it answered. */
+  async #lookUp(roomId: string): Promise<{ found: RoomLookup; ending: boolean }> {
+    this.#lookingUp.set(roomId, (this.#lookingUp.get(roomId) ?? 0) + 1);
+    try {
+      const found = await this.#options.lookup(roomId);
+      return { found, ending: this.#ending.has(roomId) };
+    } finally {
+      const left = (this.#lookingUp.get(roomId) ?? 1) - 1;
+      if (left > 0) this.#lookingUp.set(roomId, left);
+      else {
+        this.#lookingUp.delete(roomId);
+        if (this.#ending.get(roomId) === true) this.#ending.delete(roomId);
+      }
+    }
   }
 
   /** Which worker holds a room, by process id, or `undefined` if it is not placed. */
@@ -359,7 +405,7 @@ export class RoomRouter {
       refuseHttp(socket, 503, 'Service Unavailable');
       return;
     }
-    const found = await this.#options.lookup(roomId);
+    const { found, ending } = await this.#lookUp(roomId);
     if (found.kind === 'unknown') {
       refuseHttp(socket, 404, 'Not Found');
       return;
@@ -368,7 +414,8 @@ export class RoomRouter {
     // started race no live worker holds is never opened again as a lobby.
     const live = this.#placement.get(roomId);
     const running = found.kind === 'started' && live?.alive === true;
-    if (found.kind === 'ended' || (found.kind === 'started' && !running)) {
+    // #948: a room the sweep is ending is over, whatever the lookup read of it.
+    if (ending || found.kind === 'ended' || (found.kind === 'started' && !running)) {
       resumeReading(socket);
       this.#refuser.handleUpgrade(request, socket, head, (ws) => {
         ws.send(encodeMessage({ type: 'refuse', reason: 'room-closed' }));
