@@ -47,7 +47,7 @@ services:
       # the source is this build's commit.
       OYL_INSTANCE_NAME: ${OYL_INSTANCE_NAME:-}
       OYL_INSTANCE_SOURCE_URL: ${OYL_INSTANCE_SOURCE_URL:-}
-      OYL_INSTANCE_REGISTRATION: ${OYL_INSTANCE_REGISTRATION:-closed}
+      OYL_INSTANCE_REGISTRATION: ${OYL_INSTANCE_REGISTRATION:-approval}
       OYL_INSTANCE_ROOM_WORKERS: ${OYL_INSTANCE_ROOM_WORKERS:-}
       OYL_INSTANCE_WS_COMPRESSION: ${OYL_INSTANCE_WS_COMPRESSION:-off}
       OYL_INSTANCE_METRICS: ${OYL_INSTANCE_METRICS:-off}
@@ -65,6 +65,15 @@ services:
       OYL_INSTANCE_DEPUTY_KEY: ${OYL_INSTANCE_DEPUTY_KEY:-}
       OYL_INSTANCE_PUBLIC_ROOM_MIN_ACCOUNT_DAYS: ${OYL_INSTANCE_PUBLIC_ROOM_MIN_ACCOUNT_DAYS:-}
       OYL_INSTANCE_PUBLIC_ROOM_MIN_RIDES: ${OYL_INSTANCE_PUBLIC_ROOM_MIN_RIDES:-}
+      # The legal and contact page, /legal (#908) — .env.example says what each
+      # names. Public rooms stay off unless .env turns them on, and on refuses
+      # to start without a contact address and an accountable person.
+      OYL_INSTANCE_CONTACT_EMAIL: ${OYL_INSTANCE_CONTACT_EMAIL:-}
+      OYL_INSTANCE_CONTACT_LANGUAGES: ${OYL_INSTANCE_CONTACT_LANGUAGES:-}
+      OYL_INSTANCE_ACCOUNTABLE_PERSON: ${OYL_INSTANCE_ACCOUNTABLE_PERSON:-}
+      OYL_INSTANCE_LEGAL_REPRESENTATIVE: ${OYL_INSTANCE_LEGAL_REPRESENTATIVE:-}
+      OYL_INSTANCE_PRIVACY_POLICY_URL: ${OYL_INSTANCE_PRIVACY_POLICY_URL:-}
+      OYL_INSTANCE_PUBLIC_ROOMS: ${OYL_INSTANCE_PUBLIC_ROOMS:-off}
       # Every connection's peer is cloudflared, so the rate limits read the
       # rider's own address from the header Cloudflare writes (#895, B3) —
       # and believe it ONLY from cloudflared's own address below (#891, #903

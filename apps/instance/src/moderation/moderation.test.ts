@@ -14,6 +14,7 @@ import {
   codeOf,
   startModerationWorld,
   startSoleModeratorWorld,
+  TEST_STATEMENT,
   type ModerationWorld,
   type SoleModeratorWorld,
 } from './moderation-testing.ts';
@@ -225,6 +226,7 @@ describe('moderator actions, each written to the append-only log (#83)', () => {
       `/v1/moderation/athletes/${bea.athleteId}/hide-display-name`,
       {
         reason: 'Slur in the name',
+        statement: TEST_STATEMENT,
         reportId,
       },
     );
@@ -304,6 +306,7 @@ describe('moderator actions, each written to the append-only log (#83)', () => {
       `/v1/moderation/athletes/${bea.athleteId}/suspend`,
       {
         reason: 'Repeated abuse',
+        statement: TEST_STATEMENT,
       },
     );
     expect(suspended.status).toBe(200);
@@ -406,6 +409,7 @@ describe('moderator actions, each written to the append-only log (#83)', () => {
         `/v1/moderation/athletes/${target.athleteId}/suspend`,
         {
           reason: 'Because',
+          statement: TEST_STATEMENT,
         },
       );
       expect(answer.status).toBe(409);
@@ -417,6 +421,7 @@ describe('moderator actions, each written to the append-only log (#83)', () => {
       `/v1/moderation/athletes/${'f'.repeat(32)}/suspend`,
       {
         reason: 'Because',
+        statement: TEST_STATEMENT,
       },
     );
     expect(nobody.status).toBe(404);
@@ -588,7 +593,7 @@ describe('one moderator (#905): the owner alone is named, as on the project’s 
         w.owner,
         'POST',
         `/v1/moderation/athletes/${w.owner.athleteId}/${action}`,
-        { reason: 'Testing' },
+        { reason: 'Testing', statement: TEST_STATEMENT },
       );
       expect(answer.status, action).toBe(409);
     }
@@ -632,6 +637,7 @@ describe('the suspended accounts and the log, a page at a time (#961)', () => {
     w.clock.ms += 1000;
     const done = await w.as(w.owner, 'POST', `/v1/moderation/athletes/${athleteId}/suspend`, {
       reason: 'Cheating',
+      statement: TEST_STATEMENT,
     });
     expect(done.status).toBe(200);
   }
@@ -670,6 +676,7 @@ describe('the suspended accounts and the log, a page at a time (#961)', () => {
     await suspend(w, riders[1]!.athleteId);
     await w.as(w.owner, 'POST', `/v1/moderation/athletes/${riders[2]!.athleteId}/suspend`, {
       reason: 'Cheating',
+      statement: TEST_STATEMENT,
     });
     await suspend(w, riders[3]!.athleteId);
     await suspend(w, riders[4]!.athleteId);

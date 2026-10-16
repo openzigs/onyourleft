@@ -146,6 +146,7 @@ import {
 import type { LoadedFrom } from './instance/instance-pin';
 import { readInstanceAccount } from './instance/sign-in';
 import { createModerationPort, type ModerationPort } from './instance/moderation-port';
+import { createStatementsPort, type StatementsPort } from './instance/statements-port';
 import { createSyncPort, type SyncPort } from './instance/sync-port';
 import { createGhostPort, type GhostPort } from './instance/ghost-port';
 import { rideSummaryOf } from './ride-analysis/ride-summary';
@@ -958,6 +959,29 @@ function buildModerationPort(): ModerationPort | undefined {
 }
 
 /**
+ * The statements of reasons about this rider's account (#910): the ONE
+ * production place a statements port is built, so `check:wiring` reports
+ * `createStatementsPort` if this goes. Over the instance this device
+ * connected to, through the one instance module (ADR 0036 D-3 (a)); a device
+ * connected to none sends nothing. It signs a suspended rider's way-out
+ * session with this device's key, as signing in does.
+ *
+ * `undefined` where there is no `localStorage` to read a sign-in from.
+ */
+function buildStatementsPort(): StatementsPort | undefined {
+  if (typeof localStorage === 'undefined' || globalThis.crypto?.subtle === undefined) {
+    return undefined;
+  }
+  return createStatementsPort({
+    storage: localStorage,
+    loadedFrom: loadedFrom(),
+    ensureLocalAthlete: () =>
+      ensureLocalAthlete(localStore(), unixSeconds(Math.floor(Date.now() / 1000))),
+    signingKey: () => ensureDeviceSigningKey(localStore(), LOCAL_ATHLETE),
+  });
+}
+
+/**
  * The game's room port (#782, #783): the ONE production place a room port is
  * built, so `check:wiring` reports `createRoomPort` if this goes. Over the
  * instance this device signed in to (`instance/instance-port.ts`), through the
@@ -972,6 +996,9 @@ function buildRoomPort(rideController: RideController | undefined): RoomPort | u
   if (typeof localStorage === 'undefined') return undefined;
   return createRoomPort({
     storage: localStorage,
+    // #1210: the ticket is sealed, signed by this device's key (ADR 0047 D-7 phase 2).
+    loadedFrom: loadedFrom(),
+    signingKey: () => ensureDeviceSigningKey(localStore(), LOCAL_ATHLETE),
     ...(rideController === undefined ? {} : { keepAlive: () => rideController.keepAliveForRoom() }),
   });
 }
@@ -990,6 +1017,9 @@ function buildRoomsPort(): RoomsPort | undefined {
   if (typeof localStorage === 'undefined') return undefined;
   return createRoomsPort({
     storage: localStorage,
+    // #1210: every room route is sealed, signed by this device's key (ADR 0047 D-7 phase 2).
+    loadedFrom: loadedFrom(),
+    signingKey: () => ensureDeviceSigningKey(localStore(), LOCAL_ATHLETE),
     zones: () => localStore().listPrivacyZones(LOCAL_ATHLETE),
   });
 }
@@ -1415,6 +1445,8 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
   const instance = buildInstancePort();
   // #955: built once, for the Connect screen's reason above.
   const moderation = buildModerationPort();
+  // #910: what a moderator decided about this rider's account, and why.
+  const statements = buildStatementsPort();
   // #1195: built once, so a second press joins the sync already running.
   const sync = buildSyncPort();
   // #1251: built once, for the Connect screen's reason above.
@@ -1454,6 +1486,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           workoutGoals={buildWorkoutGoalsPort()}
           {...(instance === undefined ? {} : { instance })}
           {...(moderation === undefined ? {} : { moderation })}
+          {...(statements === undefined ? {} : { statements })}
           {...(sync === undefined ? {} : { sync })}
           {...(hostedSettings === undefined ? {} : { hostedSettings })}
           {...(room === undefined ? {} : { room })}

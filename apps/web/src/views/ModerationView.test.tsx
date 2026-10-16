@@ -20,7 +20,14 @@ import {
   SCRIPTED_MODERATOR,
   type ScriptedModeration,
 } from '../instance/testing';
-import { activateWithKeyboard, mount, settle, typeInto, type Mounted } from '../testing/mount';
+import {
+  activateWithKeyboard,
+  mount,
+  settle,
+  typeInto,
+  typeIntoTextArea,
+  type Mounted,
+} from '../testing/mount';
 import {
   ACTION_DONE_TEXT,
   actionLabel,
@@ -32,8 +39,17 @@ import {
   MODERATION_STANDING_TEXT,
   ModerationView,
   MORE_UNREADABLE_TEXT,
+  INTIMATE_IMAGE_DEADLINE_TEXT,
+  NOTICES_SHORT_TEXT,
+  NOTICES_UNREADABLE_TEXT,
   REPORT_CONFLICT_TEXT,
   REPORT_OWN_CONFLICT_TEXT,
+  APPEAL_CONFLICT_TEXT,
+  NOTICE_STEP_TEXT,
+  ITEM_TEXT,
+  RECORD_TEXT,
+  APPEALS_UNREADABLE_TEXT,
+  STATEMENT_TEXT,
   SUSPENDED_UNREADABLE_TEXT,
   suspendConfirmation,
 } from './ModerationView';
@@ -89,11 +105,32 @@ function dialog(): HTMLElement | null {
 
 /** The choices #962 confirms before they act. */
 const CONFIRMED = new Set([
+  'Hide the item',
   'Suspend',
   'Suspend the account',
   'Hide the display name',
   'Hide its display name',
 ]);
+
+/** What a test's statement of reasons says (#910). */
+const FACTS = 'A slur in the display name.';
+const TERMS = 'The terms of service, on abuse.';
+
+/** Fill a restriction's statement of reasons in the open confirmation, when it asks for one. */
+async function writeStatement(asked: HTMLElement): Promise<void> {
+  const field = (label: string): HTMLTextAreaElement | undefined => {
+    const found = [...asked.querySelectorAll('label')].find((each) => each.textContent === label);
+    const id = found?.getAttribute('for');
+    return id === null || id === undefined
+      ? undefined
+      : (asked.querySelector<HTMLTextAreaElement>(`[id="${id}"]`) ?? undefined);
+  };
+  const facts = field(STATEMENT_TEXT.facts);
+  const terms = field(STATEMENT_TEXT.terms);
+  if (facts === undefined || terms === undefined) return;
+  await typeIntoTextArea(facts, FACTS);
+  await typeIntoTextArea(terms, TERMS);
+}
 
 async function decide(root: HTMLElement, reason: string, choice: string): Promise<void> {
   // The reason box is the last box in its row; an account's id comes before it.
@@ -105,6 +142,8 @@ async function decide(root: HTMLElement, reason: string, choice: string): Promis
   if (CONFIRMED.has(choice)) {
     const asked = dialog();
     if (asked === null) throw new Error(`${choice} acted without asking`);
+    // #910: a restriction's confirmation asks for its statement of reasons.
+    await writeStatement(asked);
     const confirm = [...asked.querySelectorAll('button')].find(
       (each) => each.textContent !== MODERATION_CANCEL_LABEL,
     );
@@ -419,6 +458,7 @@ describe('suspending and hiding a name are confirmed first — #962', () => {
     const { scripted, root } = await account('rider-carys');
     await activateWithKeyboard(button(root, choice));
     await settle();
+    await writeStatement(dialog() as HTMLElement);
     await activateWithKeyboard(button(dialog() as HTMLElement, asked.confirmLabel));
     await settle();
     expect(dialog()).toBeNull();
@@ -673,5 +713,287 @@ describe('the log, a page at a time — #961', () => {
     expect(button(section('Suspended accounts'), 'Show more suspended accounts')).toBeDefined();
     const violations = auditAccessibility(document);
     expect(violations, formatViolations(violations)).toEqual([]);
+  });
+});
+
+describe('the notices — #907', () => {
+  it('lists each notice with the time it arrived, its items and the notifier’s address to reply to by hand', async () => {
+    await open(scriptedModeration());
+    const notices = section('Notices');
+    expect(text(notices)).toContain(NOTICES_SHORT_TEXT);
+    const first = item('Notice 1');
+    expect(text(first)).toContain('Received 2026-09-21 15:03 UTC.');
+    expect(text(first)).toContain('route:0123456789abcdef0123456789abcdef');
+    expect(text(first)).toContain('From A. Notifier');
+    const reply = first.querySelector<HTMLAnchorElement>('a[href^="mailto:"]');
+    expect(reply?.getAttribute('href')).toBe('mailto:notifier@example.com');
+    expect(text(first)).toContain('They stated in good faith');
+    expect(text(first)).not.toContain(INTIMATE_IMAGE_DEADLINE_TEXT);
+    const second = item('Notice 2');
+    expect(text(second)).toContain(INTIMATE_IMAGE_DEADLINE_TEXT);
+    expect(text(second)).toContain('Where, in their words: The Sunday group ride');
+    expect(text(second)).toContain('They gave no name');
+  });
+
+  it('shows an address that could add mailto parameters as text, never as a link', async () => {
+    const scripted = scriptedModeration();
+    scripted.held.notices = [
+      {
+        noticeId: 4,
+        receivedAt: 1_790_005_000,
+        kind: 'intimate_image',
+        explanation: 'Why.',
+        items: [],
+        location: 'Somewhere',
+        notifierName: null,
+        notifierEmail: 'me@x.org?bcc=attacker%40evil.com&subject=hi',
+        bonaFide: true,
+        acknowledgedAt: null,
+        decidedAt: null,
+        decision: null,
+        logId: null,
+        notifierToldAt: null,
+      },
+    ];
+    await open(scripted);
+    expect(item('Notice 4').querySelector('a')).toBeNull();
+    expect(text(item('Notice 4'))).toContain('me@x.org?bcc=attacker%40evil.com');
+  });
+
+  it('says a notice with no email cannot be answered, and says so when the notices could not be read', async () => {
+    const scripted = scriptedModeration();
+    scripted.held.notices = [
+      {
+        noticeId: 3,
+        receivedAt: 1_790_005_000,
+        kind: 'illegal_content',
+        explanation: 'Why.',
+        items: [],
+        location: 'Somewhere',
+        notifierName: null,
+        notifierEmail: null,
+        bonaFide: false,
+        acknowledgedAt: null,
+        decidedAt: null,
+        decision: null,
+        logId: null,
+        notifierToldAt: null,
+      },
+    ];
+    await open(scripted);
+    expect(text(item('Notice 3'))).toContain('cannot be told what you decide');
+    expect(item('Notice 3').querySelector('a[href^="mailto:"]')).toBeNull();
+    mounted?.unmount();
+    scripted.held.notices = undefined;
+    await open(scripted);
+    expect(text(section('Notices'))).toContain(NOTICES_UNREADABLE_TEXT);
+    expect(text(section('Reports'))).toContain('Report');
+  });
+});
+
+describe('a restriction’s statement of reasons — #910', () => {
+  it('asks for it in the confirmation, and sends it with the suspension', async () => {
+    const scripted = scriptedModeration();
+    await open(scripted);
+    await decide(item('Report 7'), 'Reported twice.', 'Suspend the account');
+    expect(scripted.held.statements).toEqual([
+      {
+        athleteId: 'rider-dafydd',
+        facts: FACTS,
+        decidedOn: 'report',
+        legalGround: '',
+        termsGround: TERMS,
+        moderatorConflict: false,
+      },
+    ]);
+    expect(text()).toContain(ACTION_DONE_TEXT);
+  });
+
+  it('refuses, and says why, a suspension confirmed with no statement', async () => {
+    const scripted = scriptedModeration();
+    await open(scripted);
+    const row = item('Report 7');
+    const box = [...row.querySelectorAll('input')].at(-1);
+    if (box === undefined) throw new Error('no reason box');
+    await typeInto(box, 'Reported twice.');
+    await activateWithKeyboard(button(row, 'Suspend the account'));
+    await settle();
+    const asked = dialog();
+    expect(asked?.textContent).toContain(STATEMENT_TEXT.legend);
+    const confirm = [...(asked?.querySelectorAll('button') ?? [])].find(
+      (each) => each.textContent !== MODERATION_CANCEL_LABEL,
+    );
+    if (confirm === undefined) throw new Error('no confirm button');
+    await activateWithKeyboard(confirm);
+    await settle();
+    expect(scripted.held.statements).toEqual([]);
+    expect(text()).toContain('needs a statement of reasons');
+  });
+
+  it('passes the accessibility audit with the statement open', async () => {
+    const scripted = scriptedModeration();
+    mounted = await mount(
+      <main>
+        <h1>Moderation</h1>
+        <ModerationView port={scripted.port} />
+      </main>,
+    );
+    await settle();
+    await activateWithKeyboard(button(item('Report 7'), 'Suspend the account'));
+    await settle();
+    expect(dialog()?.textContent).toContain(STATEMENT_TEXT.legend);
+    const violations = auditAccessibility(document);
+    expect(violations, formatViolations(violations)).toEqual([]);
+  });
+
+  it('asks for none to lift a suspension', async () => {
+    const scripted = scriptedModeration({ suspended: { 'rider-carys': 1_790_020_000 } });
+    await open(scripted);
+    await decide(section('An account'), 'Apologised.', 'Lift the suspension');
+    expect(dialog()).toBeNull();
+  });
+});
+
+describe('appeals — #911', () => {
+  it('lists each open appeal, and declares a conflict only on the moderator’s own decision', async () => {
+    await open(scriptedModeration());
+    const own = item('Appeal 3');
+    expect(text(own)).toContain('Against a suspension on account rider-dafydd');
+    expect(text(own)).toContain('The statement said: Abuse of other riders in a room.');
+    expect(text(own)).toContain('Their grounds: I was quoting another rider, not abusing them.');
+    expect(text(own)).toContain(APPEAL_CONFLICT_TEXT);
+    expect(text(item('Appeal 4'))).not.toContain(APPEAL_CONFLICT_TEXT);
+  });
+
+  it('reverses an appeal with the answer the rider is shown, which lifts the suspension', async () => {
+    const scripted = scriptedModeration({ suspended: { 'rider-dafydd': 1_790_020_000 } });
+    await open(scripted);
+    await decide(item('Appeal 3'), 'You were quoting. Lifted.', 'Reverse');
+    expect(scripted.calls).toContain('reversed appeal 3');
+    expect(scripted.held.suspended.has('rider-dafydd')).toBe(false);
+    expect(text(section('Appeals'))).not.toContain('Appeal 3');
+    expect(text(section('Moderation log'))).toContain('Reversed a decision on appeal');
+  });
+
+  it('says when the appeals could not be read, and still shows the queues', async () => {
+    const scripted = scriptedModeration();
+    scripted.held.appeals = undefined;
+    await open(scripted);
+    expect(text(section('Appeals'))).toContain(APPEALS_UNREADABLE_TEXT);
+    expect(text(section('Reports'))).toContain('Report 7');
+  });
+});
+
+describe('the record of each notice — #912', () => {
+  function control(root: HTMLElement, label: string): HTMLInputElement {
+    const found = [...root.querySelectorAll('label')].find((each) => each.textContent === label);
+    const input = root.querySelector<HTMLInputElement>(
+      `[id="${found?.getAttribute('for') ?? ''}"]`,
+    );
+    if (input === null) throw new Error(`no ${label}`);
+    return input;
+  }
+
+  it('records receipt, the decision with its log entry, and telling the notifier, in turn', async () => {
+    const scripted = scriptedModeration();
+    await open(scripted);
+    expect(text(item('Notice 1'))).toContain('Not decided yet.');
+    await activateWithKeyboard(button(item('Notice 1'), NOTICE_STEP_TEXT.acknowledge));
+    await settle();
+    expect(text(item('Notice 1'))).toContain('Receipt confirmed');
+    // Telling the notifier is offered only once the decision is recorded.
+    expect(
+      [...item('Notice 1').querySelectorAll('button')].some(
+        (each) => each.textContent === NOTICE_STEP_TEXT.told,
+      ),
+    ).toBe(false);
+    await typeInto(control(item('Notice 1'), NOTICE_STEP_TEXT.decisionLabel), 'Hid the route.');
+    await typeInto(control(item('Notice 1'), NOTICE_STEP_TEXT.logLabel), '3');
+    await activateWithKeyboard(button(item('Notice 1'), NOTICE_STEP_TEXT.decide));
+    await settle();
+    expect(text(item('Notice 1'))).toContain('log entry 3.');
+    expect(text(item('Notice 1'))).toContain('The decision: Hid the route.');
+    await activateWithKeyboard(button(item('Notice 1'), NOTICE_STEP_TEXT.told));
+    await settle();
+    expect(text(item('Notice 1'))).toContain('Notifier told');
+    expect(item('Notice 1').querySelectorAll('button')).toHaveLength(0);
+    expect(scripted.calls).toEqual(
+      expect.arrayContaining([
+        'acknowledged notice 1',
+        'decided notice 1',
+        'notifier_told notice 1',
+      ]),
+    );
+  });
+
+  it('offers a notice with no address only the decision', async () => {
+    const scripted = scriptedModeration();
+    scripted.held.notices = [
+      {
+        noticeId: 5,
+        receivedAt: 1_790_005_000,
+        kind: 'illegal_content',
+        explanation: 'Why.',
+        items: [],
+        location: 'Somewhere',
+        notifierName: null,
+        notifierEmail: null,
+        bonaFide: false,
+        acknowledgedAt: null,
+        decidedAt: null,
+        decision: null,
+        logId: null,
+        notifierToldAt: null,
+      },
+    ];
+    await open(scripted);
+    expect(
+      [...item('Notice 5').querySelectorAll('button')].map((each) => each.textContent),
+    ).toEqual([NOTICE_STEP_TEXT.decide]);
+  });
+
+  it('prepares the record as a file to save, or says it could not', async () => {
+    const created: Blob[] = [];
+    const original: unknown = Reflect.get(URL, 'createObjectURL');
+    URL.createObjectURL = (blob: Blob) => {
+      created.push(blob);
+      return 'blob:record';
+    };
+    URL.revokeObjectURL = () => undefined;
+    try {
+      const scripted = scriptedModeration();
+      await open(scripted);
+      await activateWithKeyboard(button(section(RECORD_TEXT.heading), RECORD_TEXT.save));
+      await settle();
+      const link = section(RECORD_TEXT.heading).querySelector('a[download]');
+      expect(link?.getAttribute('download')).toBe(RECORD_TEXT.file);
+      expect(link?.getAttribute('href')).toBe('blob:record');
+      expect(JSON.parse(await created[0]!.text())).toMatchObject({
+        notices: expect.arrayContaining([expect.objectContaining({ noticeId: 1 })]) as unknown,
+      });
+      scripted.held.recordReadable = false;
+      await activateWithKeyboard(button(section(RECORD_TEXT.heading), RECORD_TEXT.save));
+      await settle();
+      expect(text(section(RECORD_TEXT.heading))).toContain(RECORD_TEXT.unreadable);
+    } finally {
+      Reflect.set(URL, 'createObjectURL', original);
+    }
+  });
+});
+
+describe('an item — #913', () => {
+  it('hides an item by its reference, with the statement its owner is shown', async () => {
+    const scripted = scriptedModeration();
+    await open(scripted);
+    const root = section(ITEM_TEXT.heading);
+    const reference = root.querySelector('input');
+    if (reference === null) throw new Error('no reference box');
+    await typeInto(reference, `route:${'a'.repeat(32)}`);
+    await decide(root, 'From a notice.', ITEM_TEXT.hide);
+    expect(scripted.calls).toContain(`hide_item route:${'a'.repeat(32)}`);
+    expect(scripted.held.statements).toEqual([
+      expect.objectContaining({ facts: FACTS, termsGround: TERMS, decidedOn: 'notice' }),
+    ]);
+    expect(text(section('Moderation log'))).toContain('Hid an item');
   });
 });

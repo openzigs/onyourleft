@@ -200,7 +200,10 @@ describe('the room code is a bearer secret — #784', () => {
       expect(await w.databaseBytes()).not.toContain(secret);
     }
     // The log did see the requests: a check over no lines would pass anything.
-    expect(w.instance.lines.filter((line) => line.includes('/v1/rooms/join')).length).toBe(2);
+    // Since #1210 the room routes are sealed-only, so what the log sees of each
+    // is a `/v1/sealed` line: two sign-ins, the make and the two joins.
+    expect(w.instance.lines.filter((line) => line.includes('/v1/sealed')).length).toBe(5);
+    expect(w.instance.lines.filter((line) => line.includes('/v1/rooms')).length).toBe(0);
   });
 
   it('answers a wrong code, a code nobody made and garbage alike', async () => {

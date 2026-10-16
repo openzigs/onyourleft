@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { NO_LEGAL_SETTINGS } from './legal.ts';
 import type { HostedSettings } from './analysis/hosted-settings.ts';
 import type { AnalysisJobs } from './analysis/jobs.ts';
 import type { Identity } from './auth/identity.ts';
@@ -65,6 +66,7 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
     analysis: { kind: 'off', code: 'not-set', reason: 'A test instance has no analysis model.' },
     pictures: { kind: 'off', code: 'not-set', reason: 'A test instance has no picture model.' },
     name: null,
+    legal: NO_LEGAL_SETTINGS,
     ...overrides,
   };
 }

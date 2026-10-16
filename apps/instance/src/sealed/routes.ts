@@ -59,9 +59,14 @@ import type { Caller } from '../auth/identity.ts';
 import { errorBody, errorResponse, JSON_TYPE, type ErrorCode } from '../errors.ts';
 import { json, type Route, type RouteContext, type Schema } from '../route-kit.ts';
 
-/** The inner paths a request with no session may reach (D-9, phase 1). */
+/**
+ * The inner paths a request with no session may reach (D-9): phase 1's, and
+ * phase 2's way out for a suspended athlete (#1210), whose statement is an
+ * `oyl-auth-v1` signed by a live device key, as signing in is.
+ */
 export const SESSIONLESS_PATHS: ReadonlySet<string> = new Set([
   '/v1/auth/session',
+  '/v1/auth/leave-session',
   '/v1/auth/link',
   '/v1/auth/recover',
   '/v1/auth/recover/email',

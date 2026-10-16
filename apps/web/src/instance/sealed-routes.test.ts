@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * The client's half of phase 1 (#1192, ADR 0047 D-7, D-11):
+ * The client's half of phases 1 and 2 (#1192, #1210, ADR 0047 D-7, D-11):
  *
- * - **No plaintext call to a sealed-only route** in the four modules that
- *   reach an instance's accounts, moderators and history. The list scanned
- *   for is the instance's OWN committed list (`apps/instance/src/sealed/
- *   phase-one.ts`, read by a computed `import()` — test code only, as
- *   `sync.test.ts` reads the instance's test support), so a route marked
- *   there is scanned for here with no edit.
+ * - **No plaintext call to a sealed-only route** anywhere in the client. The
+ *   lists scanned for are the instance's OWN committed lists
+ *   (`apps/instance/src/sealed/phase-one.ts` and `phase-two.ts`, read by a
+ *   computed `import()` — test code only, as `sync.test.ts` reads the
+ *   instance's test support), so a route marked there is scanned for here
+ *   with no edit. Phase 2's receiver is `sealedOrKeyless`
+ *   (`instance-port.ts` §`HeldAccountSession`): sealed, or plaintext only from
+ *   a device with no card, which an instance holding keys refuses.
  * - **The web-build gate**: a copy of the app a website served offers no
  *   sealed feature and sends nothing for one; one opened from loopback or a
  *   file, or the Android shell, does.
@@ -42,12 +44,13 @@ import {
 } from './instance-port';
 import type { InstanceSend } from './instance-transport';
 import { createModerationPort } from './moderation-port';
+import { INSTANCE_ACCOUNT_STORAGE_KEY } from './sign-in';
 import { LOADED_FROM_A_WEBSITE, LOADED_LOCALLY } from './testing';
 
 interface PhaseOneRoute {
   readonly method: string;
   readonly path: string;
-  readonly mark: 'only' | 'new-key';
+  readonly mark: 'only';
 }
 
 interface IdentityInstance {
@@ -67,7 +70,9 @@ const INSTANCE = (path: string): string =>
   new URL(`../../../instance/src/${path}`, import.meta.url).href;
 const NOW = unixSeconds(1_790_000_000);
 
+/** Phase 1's routes and phase 2's (#1210), as the instance commits them. */
 let phaseOne: readonly PhaseOneRoute[];
+let phaseTwo: readonly PhaseOneRoute[];
 /** "The synced history": every route `sync/routes.ts` declares, by the instance's own rule. */
 let syncFamily: readonly PhaseOneRoute[];
 let testing: IdentityTesting;
@@ -83,6 +88,11 @@ beforeAll(async () => {
     }[];
   };
   phaseOne = committed.PHASE_ONE_SEALED_ROUTES;
+  phaseTwo = (
+    (await import(/* @vite-ignore */ INSTANCE('sealed/phase-two.ts'))) as {
+      PHASE_TWO_SEALED_ROUTES: readonly PhaseOneRoute[];
+    }
+  ).PHASE_TWO_SEALED_ROUTES;
   const family = committed.SEALED_FAMILIES.find((each) => each.row === 'The synced history');
   syncFamily = phaseOne.filter((route) => family?.covers({ ...route, reaches: 'own' }) === true);
   testing = (await import(
@@ -102,13 +112,19 @@ afterEach(async () => {
  * template literal starting `/v1/`, a `${…}` in it matching any one segment,
  * compared segment by segment with each route (whose `{name}` matches any one
  * segment, and a query is ignored). A receiver is sealed when its name says so
- * (`sealed`, `session.sealed`, …) — the convention these four modules keep.
+ * (`sealed`, `session.sealed`, `sealedOrKeyless`, …) — the convention these
+ * modules keep. A room's path is built by `roomPath(id, 'kind')` (#782), so
+ * that is read as the path it builds (#1210).
  */
 function plaintextCallsToSealedRoutes(source: string, routes: readonly PhaseOneRoute[]): string[] {
   const only = routes.filter((route) => route.mark === 'only');
   const found: string[] = [];
   const call = /([A-Za-z_$][\w$.?]*)\.(call|post|json|bytes)\(([^;]{0,240})/g;
-  for (const match of source.matchAll(call)) {
+  const built = source.replace(
+    /roomPath\(\s*([^,()]+),\s*'(\w+)'\s*\)/g,
+    (_, id: string, kind: string) => `\`/v1/rooms/\${${id}}/${kind}\``,
+  );
+  for (const match of built.matchAll(call)) {
     const receiver = match[1] ?? '';
     if (/sealed/i.test(receiver)) continue;
     const literal = /[`'](\/v1\/[^`']*)[`']/.exec(match[3] ?? '')?.[1];
@@ -127,12 +143,16 @@ function plaintextCallsToSealedRoutes(source: string, routes: readonly PhaseOneR
   return found;
 }
 
+/** The modules that call an instance's accounts, moderators, history and rooms. */
 const CLIENT_MODULES = [
   'instance-port.ts',
   'sign-in.ts',
   'sync.ts',
   'sync-port.ts',
   'moderation-port.ts',
+  // #1210: the room routes' HTTP side (ADR 0047 D-7 phase 2).
+  '../net/room-port.ts',
+  '../net/rooms-port.ts',
 ];
 
 /** Every non-test source file under `apps/web/src`. */
@@ -179,7 +199,40 @@ describe('every caller of a sealed-only route seals it (#1192, ADR 0047 D-7)', (
 
   it.each(CLIENT_MODULES)('%s makes no plaintext call to one', (module) => {
     const source = readFileSync(fileURLToPath(new URL(`./${module}`, import.meta.url)), 'utf8');
-    expect(plaintextCallsToSealedRoutes(source, phaseOne)).toEqual([]);
+    expect(plaintextCallsToSealedRoutes(source, [...phaseOne, ...phaseTwo])).toEqual([]);
+  });
+
+  it('reads phase 2’s list: the session, the account and every room route (#1210)', () => {
+    expect(phaseTwo.map((route) => `${route.method} ${route.path}`)).toEqual(
+      expect.arrayContaining([
+        'POST /v1/auth/session',
+        'GET /v1/auth/session',
+        'DELETE /v1/auth/session',
+        'GET /v1/auth/account',
+        'POST /v1/rooms',
+        'POST /v1/rooms/join',
+        'POST /v1/rooms/{roomId}/ticket',
+        'GET /v1/rooms/{roomId}/route',
+        'GET /v1/rooms/{roomId}/results',
+        'POST /v1/rooms/{roomId}/start',
+        'GET /v1/blocks',
+        'POST /v1/reports',
+      ]),
+    );
+  });
+
+  it('no module in the client calls a phase-2 route in plaintext (#1210)', () => {
+    // Every module, as for sync: a new caller of the session, account or room
+    // routes anywhere is scanned for with no edit here.
+    const root = fileURLToPath(new URL('../', import.meta.url));
+    const sources = clientSources();
+    expect(sources).toContain(join('net', 'rooms-port.ts'));
+    const found = sources.flatMap((path) =>
+      plaintextCallsToSealedRoutes(readFileSync(join(root, path), 'utf8'), phaseTwo).map(
+        (call) => `${path}: ${call}`,
+      ),
+    );
+    expect(found).toEqual([]);
   });
 
   it('finds one where there is one — the control', () => {
@@ -191,8 +244,12 @@ describe('every caller of a sealed-only route seals it (#1192, ADR 0047 D-7)', (
         "await http.call('GET', '/v1/moderation/log', { query });",
         "await session.sealed.call('GET', '/v1/moderation/log', { query });",
         "await http.call('GET', '/v1/auth/session', { token });",
+        // #1210: phase 2's routes, a room's built path among them.
+        "await session.http.call('POST', roomPath(roomId, 'ticket'), { token });",
+        "await connection.http.call('GET', '/v1/auth/account', { token });",
+        "await session.sealedOrKeyless.call('POST', roomPath(roomId, 'start'), { token });",
       ].join('\n'),
-      phaseOne,
+      [...phaseOne, ...phaseTwo],
     );
     expect(found).toEqual([
       'connection.http.call → GET /v1/auth/devices',
@@ -201,6 +258,11 @@ describe('every caller of a sealed-only route seals it (#1192, ADR 0047 D-7)', (
       'transport.json → DELETE /v1/sync/items/{kind}/{key}',
       'dependencies.transport.post → POST /v1/auth/link',
       'http.call → GET /v1/moderation/log',
+      'http.call → POST /v1/auth/session',
+      'http.call → GET /v1/auth/session',
+      'http.call → DELETE /v1/auth/session',
+      'session.http.call → POST /v1/rooms/{roomId}/ticket',
+      'connection.http.call → GET /v1/auth/account',
     ]);
   });
 });
@@ -332,22 +394,66 @@ describe('no card, no sealed request (#1192, ADR 0047 D-14 Q1)', () => {
     expect(paths(send)).not.toContain('POST /v1/sealed');
   });
 
-  it('attempts no sealed request for a device that signed in without a card', async () => {
+  it('signs in no device without a card, a key the instance holds included (#1210, D-14 Q1)', async () => {
+    const w = await world();
+    const send = wire(w);
+    const card = (await w.instanceKeys.show()).card;
+    const first = device(send, LOADED_LOCALLY);
+    expect(await first.port.connect(testing.TEST_ORIGIN, 'Anna', card)).toMatchObject({
+      kind: 'connected',
+    });
+    await first.port.disconnect();
+    send.mockClear();
+    // Again with only the address: the instance holds this key, and still refuses it.
+    expect(await first.port.connect(testing.TEST_ORIGIN, 'Anna')).toEqual({
+      kind: 'refused',
+      text: CONNECT_REFUSAL_TEXT.sealed_required,
+    });
+    expect(CONNECT_REFUSAL_TEXT.sealed_required).toContain('signs riders in only with its card');
+    expect(paths(send)).toEqual(['POST /v1/auth/challenge', 'POST /v1/auth/session']);
+    expect(first.storage.map.has(INSTANCE_SESSION_STORAGE_KEY)).toBe(false);
+    // The control: with the card, the same device signs in again.
+    expect(await first.port.connect(testing.TEST_ORIGIN, 'Anna', card)).toMatchObject({
+      kind: 'connected',
+    });
+    expect((await first.port.current()).kind).toBe('connected');
+  });
+
+  it('holds a sign-in with no pin as unreadable, sends nothing sealed, and opens it with the card (#1210)', async () => {
     const w = await world();
     const send = wire(w);
     const card = (await w.instanceKeys.show()).card;
     const first = device(send, LOADED_LOCALLY);
     await first.port.connect(testing.TEST_ORIGIN, 'Anna', card);
-    await first.port.disconnect();
-    // Signed in again with only the address: a key the instance holds, no pin kept.
-    expect(await first.port.connect(testing.TEST_ORIGIN, 'Anna')).toMatchObject({
-      kind: 'connected',
-    });
+    // A sign-in kept from before phase 2: the token, and an account with no pin.
+    const kept = JSON.parse(first.storage.map.get(INSTANCE_ACCOUNT_STORAGE_KEY) ?? '{}') as {
+      origin: string;
+      instanceAthleteId: string;
+    };
+    first.storage.map.set(
+      INSTANCE_ACCOUNT_STORAGE_KEY,
+      JSON.stringify({ origin: kept.origin, instanceAthleteId: kept.instanceAthleteId }),
+    );
     send.mockClear();
+    expect(await first.port.current()).toEqual({
+      kind: 'unreadable',
+      origin: testing.TEST_ORIGIN,
+      text: INSTANCE_KEY_TEXT['needs-card'],
+    });
     expect(await first.port.devices()).toEqual({
       kind: 'unavailable',
       text: INSTANCE_KEY_TEXT['needs-card'],
     });
-    expect(paths(send)).toEqual([]);
+    // The instance serves keys, so nothing was sent for the session: not
+    // sealed, and not in plaintext with the token either.
+    expect(paths(send)).toContain('GET /v1/instance/keys');
+    expect(paths(send)).not.toContain('POST /v1/sealed');
+    expect(paths(send)).not.toContain('GET /v1/auth/session');
+    // The card, given on the Instance screen, opens it: read back sealed.
+    expect(await first.port.offerCard(card)).toEqual({ kind: 'pinned' });
+    send.mockClear();
+    expect(await first.port.current()).toMatchObject({ kind: 'connected', displayName: 'Anna' });
+    expect(paths(send)).toContain('POST /v1/sealed');
+    expect(paths(send)).not.toContain('GET /v1/auth/session');
   });
 });

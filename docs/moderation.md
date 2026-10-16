@@ -80,16 +80,16 @@ suspension once the key is named. To recover:
 ## Who can join: the registration modes
 
 `OYL_INSTANCE_REGISTRATION` sets how the instance takes new riders, in any case (`Closed` is
-`closed`). **If it is not set, the mode is `closed`**: an instance someone starts without reading
-this page registers nobody new. The project's own image sets `approval`, the owner's ruling for this
-project's instance (#16, Q5 and Q13).
+`closed`). **If it is not set, the mode is `approval`** (the owner's ruling on #775, 2026-10-15):
+a new rider's account waits for you, and only the keys you name register active. Before that ruling
+an unset mode was `closed`. The project's own image sets `approval` too (#16, Q5 and Q13).
 
 | Mode | A device key the instance has never seen… |
 |---|---|
-| `approval` (the project's image) | registers an account that **waits** for a moderator. While it waits, the rider can see their own account, name themselves and confirm their age, and nothing else. Other riders cannot see them. |
+| `approval` (the default, and the project's image) | registers an account that **waits** for a moderator. While it waits, the rider can see their own account, name themselves and confirm their age, and nothing else. Other riders cannot see them. |
 | `invite` | registers only with a single-use invitation a moderator minted (`POST /v1/moderation/invites`, good for seven days). The invitation is spent in the same transaction that registers the account. |
 | `open` | registers an active account at once. |
-| `closed` (the default) | is refused. |
+| `closed` | is refused. |
 
 The key named in `OYL_INSTANCE_OWNER_KEY`, and in `OYL_INSTANCE_DEPUTY_KEY` if it names one,
 registers active in every mode.
@@ -165,6 +165,70 @@ a rider which ones they meet):
 | **Unblock** | Removes the rider's own block. It cannot remove a block the other rider made. |
 | **Report** a rider | Sends the rider's id and a reason (up to 1,000 characters) to your queue. A rider can make at most **5 reports an hour**, and a report about an id nobody holds counts toward the 5 like any other. It is kept, closed as `no_such_athlete`, and never reaches your queue. A rider can report someone they have blocked. The answer is the same whether or not that rider exists. |
 
+## Notices from anybody: the notice page
+
+Every instance serves a **notice page** at `/report` (#907). Anybody can use it, with or without an
+account and with or without the app, to tell you about content on your instance that they think is
+illegal. The app links to it from *About*, on the instance the rider connected to. It is a plain
+form that runs no script, so it works with a keyboard and a screen reader.
+
+A notice carries what the EU Digital Services Act's Art. 16(2) asks a notice to be able to carry:
+
+| Field | Required |
+|---|---|
+| Why they think it is illegal | yes |
+| Which items: one identifier a line, which the app shows, or where it is in words | one of the two |
+| Their name and email address | **no**, never, for a notice of illegal content |
+| A statement that they believe in good faith it is accurate and complete | no |
+
+An identifier is one line: `rider:<athlete id>` (a display name), `room:<room id>`, `route:<room id>`
+(the route a room is ridden on), or `result:<room id>:<row>` (one row of a race's published result,
+counted from 1). The app shows a race's route and rows under the result, as *References*.
+
+The page also offers the UK Online Safety Act's **intimate image content report** (s.20A) as a
+separate choice. That one needs all three of its statements and an email address, because s.20A(2)
+says that is what such a report is. **Take the content down within 48 hours** of receiving it
+(s.10(3A)). The Moderation screen says so on the notice.
+
+**Read them on the Moderation screen**, under *Notices* (`GET /v1/moderation/notices`): every notice,
+oldest first, with the time it arrived and the notifier's name and email address if they gave them.
+**The instance sends no email.** Where a notice gives an address, write to it yourself to confirm you
+received it, and again with what you decided (the owner's ruling of 2026-10-15 for the project's
+instance). The wording is in [statements of reasons](moderation/statement-of-reasons.md).
+
+A notice is kept as it was received. Like the moderation log, it is **append-only in the schema**,
+and erasing an account does not delete a notice about it. `migrate … down` refuses to undo migration
+0026 while a single notice is held.
+
+**Record what you do about each notice** (#912). The instance sends no email, so it cannot know when
+you confirmed receipt or told the notifier what you decided. Under each notice the Moderation screen
+offers the next step, and records it with the time:
+
+| Step | When it is offered |
+|---|---|
+| *I have confirmed receipt* | the notice gave an email address, and you have written to it (DSA Art. 16(4)) |
+| *Record the decision* | always: what you decided, in the words you tell the notifier, and the number of the log entry of any action you took |
+| *I have told them the decision* | the notice gave an address, and the decision is recorded (Art. 16(5)) |
+
+Each step is recorded once and cannot be changed afterwards: like the log, the record is append-only
+in the schema (`POST /v1/moderation/notices/{noticeId}/steps`). An appeal carries its own steps
+(below).
+
+**The record** (`GET /v1/moderation/record`, *Prepare the record* on the Moderation screen, saved as a
+JSON file) lists every notice and appeal with when it was received, acknowledged, decided and told,
+the decision, and the log entry of any action. It is your evidence of what you were told and what you
+did (the UK Online Safety Act's s.23). **It holds no personal detail of a notifier**: not their name,
+not their address, and not the words they typed, which may hold either. It says only whether they gave
+a name and an address. Nor does it hold a rider's grounds for an appeal. A rider is named only by
+account id, which after erasure resolves to nobody, as in the log.
+
+**Limits, with no account and no stored address:** at most **5 notices an hour from one client
+address**, counted in memory as the sign-in limits are, so a restart resets them; and at most **100 an
+hour across the whole instance**, counted from the notices themselves, so a restart does not. A form
+that has to be corrected is not counted. Behind a proxy, the per-address limit reads the address the
+way registration does (see *Behind a proxy or a tunnel*, above). Nothing the notifier types is written
+to the instance's log: the log records the route, the status and the time.
+
 ## What a moderator can do
 
 Every action needs a **reason**. Each action is written to the **moderation log** in the same
@@ -177,12 +241,68 @@ does not happen.
 | Dismiss a report | `POST /v1/moderation/reports/{id}/dismiss` | Removes it from the queue. A report about you is logged as `dismiss_own_report` when you are the only moderator, and refused when a deputy is named (see "A report about the moderator"). |
 | Hide a display name | `POST /v1/moderation/athletes/{id}/hide-display-name` | Other riders see "Rider" instead of the name. The rider still sees their own name. The hide ends when the rider chooses a **different** name, because a new name is new content. Choosing the same name again keeps it hidden. |
 | Suspend an account | `POST /v1/moderation/athletes/{id}/suspend` | Every device key the rider holds is refused at sign-in, every session they had ends at once, and other riders stop seeing them. **Nothing they own is deleted.** |
+| Hide one item | `POST /v1/moderation/items/hide` | One room's listing (`room:<room id>`), the route shown in a room (`route:<room id>`), or one row of a race's result (`result:<room id>:<row>`), by the reference a notice names it by (#913). Needs a statement of reasons, which the item's owner is shown. **Nothing is deleted** and the rest is left alone. A hidden row is shown to everybody else as "a rider" with no figure, and to its own rider as before. A hidden route is shown to no member but the room's maker. A room whose listing is hidden takes nobody new by its code. An appeal that reverses it shows the item again. |
 | Lift a suspension | `POST /v1/moderation/athletes/{id}/unsuspend` | The rider can sign in again and is visible again. |
 | List suspended accounts | `GET /v1/moderation/suspended` | Every suspended account, most recently suspended first, a page at a time (`?limit=`, `?cursor=` from the page before). So you can lift a suspension without finding the id in the log (#961). |
 | Read the log | `GET /v1/moderation/log` | Every action ever taken, **newest first**, a page at a time: `?limit=` (1–200, default 50) and `?cursor=` from the page before, which reaches further back. ⚠️ Until #961 it was every action in one answer, oldest first. |
 
 An action on a person can name the report it decides (`reportId`). That closes the report, with the
 action recorded as its outcome.
+
+### Statements of reasons
+
+**Suspending an account and hiding a display name each need a statement of reasons** (#910), which
+the rider is shown. Without one the instance refuses the action, and nothing changes. It is what the
+EU Digital Services Act's Art. 17(3) asks for, as `statement` in the action's body, and the Moderation
+screen asks for it in the action's confirmation:
+
+| Field | What to write |
+|---|---|
+| `facts` | what they did: the facts you relied on. Required, at most 2,000 characters |
+| `decidedOn` | `report`, `notice` or `own_initiative` |
+| `legalGround` | the law it breaks and why, if you decided it is illegal |
+| `termsGround` | the terms it breaks and why, if you decided it breaks them. Give at least one of the two |
+| `notifierNamed` | only if the rider cannot see why without it (DSA recital 54). Leave it out otherwise |
+| `moderatorConflict` | `true` when the matter involves you: the statement declares the conflict |
+| `endsAt` | when the restriction ends, if it does (Unix seconds). Leave it out for no end date |
+
+**Never write a place or a coordinate into a statement.** A field that looks like one (two decimal
+numbers with four or more places, or a degree sign) is refused. The reason you give for the log is
+not shown to the rider: the statement is.
+
+The statement is kept with the log entry, written in the same transaction, and, like the log, it is
+**append-only in the schema**. The rider reads their own statements on the Instance screen
+(`GET /v1/statements`). The statement says that no automated means were used, gives your contact
+address (`OYL_INSTANCE_CONTACT_EMAIL`) as the way to ask for the decision to be looked at again, and
+names a court as the other route. **A suspended rider reads theirs too**, through the way-out session
+(below), which reaches their statements and nothing more. Nobody else's statements are shown, and a
+report's or a notice's sender never is, unless you named them.
+
+### Appeals
+
+A rider can **appeal** a decision a statement explains (#911): on the Instance screen, beside the
+statement, they say why it is wrong (`POST /v1/statements/{statementId}/appeal`, at most 2,000
+characters). **A suspended rider can appeal too**, through the way-out session, which grants them
+nothing else. Each decision can be appealed once. An appeal is kept with the statement it names.
+
+Appeals wait in the Moderation screen's *Appeals* (`GET /v1/moderation/appeals`), oldest first, with
+what the statement said. Decide each one (`POST /v1/moderation/appeals/{appealId}/decide`):
+
+| Outcome | What happens |
+|---|---|
+| **Uphold** (`upheld`) | The restriction stands. |
+| **Reverse** (`reversed`) | The suspension is lifted, or the display name is shown again, **in the same transaction** as the log entry. A restriction already lifted, or a name the rider has since replaced, stays as it is. |
+
+Either way, your answer is shown to the rider and written to the log, as `uphold_appeal` or
+`reverse_appeal`. An appeal is decided once: the schema refuses to change a decided appeal or to
+delete one, and erasing the account keeps it, as it keeps the log.
+
+**An appeal against your own decision.** With one moderator, every appeal is against a decision you
+took. The owner ruled on 2026-09-30 that the moderator decides it, declares the conflict and logs it.
+So you may decide it, the screen says it is a conflict, and the rider is told that the moderator who
+decided the appeal took the decision appealed. The appeal records the conflict. A complaint that is
+not an appeal against a decision, such as that the instance is not following its own procedure, comes
+by the contact address on the legal page (`/legal`).
 
 To anyone who is not a moderator, every moderation route answers as though it does not exist.
 
@@ -215,9 +335,11 @@ refuses to undo 0007 while the log holds a single entry, and changes nothing.
   away.
 - **It does not stop a rider leaving.** A suspended rider still cannot sign in (#775), but since
   #898 their app can open a **way-out session** (`POST /v1/auth/leave-session`, signed with one of
-  their device keys). It lasts an hour and reaches exactly two things: the account export
+  their device keys). It lasts an hour and reaches exactly four things: the account export
   (`GET /v1/account/export`) and deleting the account (`DELETE /v1/account`, which needs one of their
-  recovery codes or a fresh signature from one of their devices, like anyone's). Everything else
+  recovery codes or a fresh signature from one of their devices, like anyone's), and, since #910,
+  the statements of reasons about their account (`GET /v1/statements`), and, since #911, an appeal
+  against one of them. Everything else
   answers `account_suspended`. Lifting the suspension ends the way-out session; they then sign in as
   usual. ⚠️ This used to say lifting the suspension was the only way to give a suspended rider
   their data, and a moderator who remembers that is reading the old file. Deleting the account keeps
@@ -230,8 +352,9 @@ refuses to undo 0007 while the log holds a single entry, and changes nothing.
 
 - **Moderate inside a room.** Blocking and reporting a rider in the middle of a ride, room hosts,
   and room bans are #789.
-- **Act on content other than a display name.** Riders' rides are not shown to other riders on the
-  instance yet, so the only content another rider can see is a name.
+- **Act on content other than a name, a room, a route shown in a room, or a race's result.** Since
+  #913 each of those can be hidden alone, by its reference. Riders' rides are not shown to other
+  riders, so there is no other item to act on.
 - **Undo a block for somebody.** A block belongs to the rider who made it.
 - **Take down a copy on another instance.** Instances do not talk to each other yet (#56). When they
   do, a moderator's action will reach only their own instance.

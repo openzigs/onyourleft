@@ -64,7 +64,26 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         `/ready` and `/metrics` (operator-enabled, and
                         only for a request carrying
                         `OYL_INSTANCE_METRICS_TOKEN`) since #791, and every
-                        log line through `log.ts` §`redacted`. Behind a
+                        log line through `log.ts` §`redacted`. Since
+                        #907 it also serves `/report`, the notice page —
+                        the instance's first HTML (`src/html.ts`: no
+                        script, a CSP, everything escaped) for anybody
+                        with no account, migration 0026's append-only
+                        `notice` table, and `GET /v1/moderation/notices`;
+                        `moderation/notices.ts` says what it keeps. Since
+                        #910 a suspension or a hidden name needs a
+                        statement of reasons (migration 0027, append-only,
+                        `moderation/statements.ts`), and `GET
+                        /v1/statements` is the THIRD route a way-out
+                        session reaches; since #911 an appeal against a
+                        statement (migration 0028, decided once) is the
+                        FOURTH. Since #912 a notice's steps are recorded
+                        beside it (migration 0029, append-only), and
+                        `moderation/record.ts` is the export. Since #913
+                        one item (a room, its route, a row of a result) is
+                        hidden alone (migration 0030, `hideItem`), and
+                        `rooms/rooms.ts`'s join, route and results reads
+                        each ask `listHiddenItemsOfRoom`. Behind a
                         proxy the sign-in rate limits read the client's
                         address from `OYL_INSTANCE_CLIENT_ADDRESS_HEADER`
                         (`cf-connecting-ip` behind the tunnel), and only
@@ -128,7 +147,9 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         marked, and a plaintext request to one is
                         `sealed_required` on an instance that holds keys
                         (none: plaintext as before); `sealed/phase-one.ts`
-                        is the committed list the table is held to, and a
+                        and, since #1210, `sealed/phase-two.ts` (sign-in,
+                        account, blocks, reports, room HTTP, session) are
+                        the committed lists the table is held to, and a
                         test world's `call` seals a marked route itself.
                         Since #1095 `src/analysis/jobs.ts` is the job
                         engine (migration 0020, sealed-only routes, an SSE
