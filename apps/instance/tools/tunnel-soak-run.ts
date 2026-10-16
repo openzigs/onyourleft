@@ -7,6 +7,8 @@
  * middle.
  */
 
+import type { webcrypto } from 'node:crypto';
+
 import { PHYSICS_VERSION } from '@onyourleft/physics';
 import { decodeRoomMessage, encodeMessage, PROTOCOL_VERSION } from '@onyourleft/protocol';
 import { WebSocket } from 'ws';
@@ -45,19 +47,28 @@ export interface SoakReport {
  * sealed-only there, so a plaintext soak would be refused `sealed_required`.
  * In plaintext on one that serves none, which has no sealed routes. The
  * sealed device is `replan-round-trip-run.ts`'s, and what its header says
- * sealing is worth from a tool that pins no card holds here too.
+ * sealing is worth from a tool that pins no card holds here too. A new key
+ * each time, or `given` (#464's load run brings its own).
  */
-async function signIn(instance: string, displayName: string): Promise<Device> {
+export async function signIn(
+  instance: string,
+  displayName: string,
+  given?: webcrypto.CryptoKeyPair,
+): Promise<Device> {
   const served = (await (await fetch(`${instance}/v1/instance/keys`)).json().catch(() => ({}))) as {
     statements?: unknown[];
   };
   const transport = (served.statements?.length ?? 0) > 0 ? 'sealed' : 'plaintext';
-  return signedInDevice(instance, instance, transport, displayName);
+  return signedInDevice(instance, instance, transport, displayName, given);
 }
 
-async function ticketFor(device: Device, roomId: string): Promise<string> {
+export async function ticketFor(
+  device: Device,
+  roomId: string,
+  declaredMassKilograms = 75,
+): Promise<string> {
   const answer = await device.call('POST', `/v1/rooms/${roomId}/ticket`, {
-    declaredMassKilograms: 75,
+    declaredMassKilograms,
   });
   const ticket = (answer.body as { ticket?: unknown } | null)?.ticket;
   if (answer.status !== 200 || typeof ticket !== 'string') {
@@ -66,11 +77,11 @@ async function ticketFor(device: Device, roomId: string): Promise<string> {
   return ticket;
 }
 
-function socketUrl(instance: string, roomId: string): string {
+export function socketUrl(instance: string, roomId: string): string {
   return `${instance.replace(/^http/, 'ws')}/v1/rooms/${roomId}/socket`;
 }
 
-function hello(ticket: string): string {
+export function hello(ticket: string): string {
   return JSON.stringify({
     type: 'hello',
     protocol: PROTOCOL_VERSION,
@@ -80,7 +91,7 @@ function hello(ticket: string): string {
 }
 
 /** The origin the instance's devices sign: the URL given, which is its public hostname. */
-function originOf(url: string): string {
+export function originOf(url: string): string {
   return new URL(url).origin;
 }
 

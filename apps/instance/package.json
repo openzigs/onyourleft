@@ -15,6 +15,7 @@
     "migrate": "node tools/migrate.ts",
     "operator": "node src/operator/cli.ts",
     "tunnel-soak": "node tools/tunnel-soak.ts",
+    "race-load": "node tools/race-load.ts",
     "replan-round-trip": "node tools/replan-round-trip.ts"
   },
   "dependencies": {

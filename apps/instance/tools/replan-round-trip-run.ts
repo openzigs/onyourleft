@@ -428,16 +428,23 @@ function field(block: string, name: string): string | undefined {
   return line?.slice(name.length + 2);
 }
 
+/**
+ * A device signed in to `url`, over `transport`: a new key each time, or
+ * `given` (#464's race load run brings one per rider).
+ */
 export async function signedInDevice(
   url: string,
   origin: string,
   transport: Transport,
   displayName: string,
+  given?: webcrypto.CryptoKeyPair,
 ): Promise<Device> {
-  const pair = (await webcrypto.subtle.generateKey({ name: 'Ed25519' }, false, [
-    'sign',
-    'verify',
-  ])) as unknown as webcrypto.CryptoKeyPair;
+  const pair =
+    given ??
+    ((await webcrypto.subtle.generateKey({ name: 'Ed25519' }, false, [
+      'sign',
+      'verify',
+    ])) as unknown as webcrypto.CryptoKeyPair);
   const publicKey = toHex(new Uint8Array(await webcrypto.subtle.exportKey('raw', pair.publicKey)));
   const sign = async (bytes: Uint8Array): Promise<Uint8Array> =>
     new Uint8Array(
@@ -573,8 +580,14 @@ export async function signedInDevice(
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ publicKey }),
     })
-  ).json()) as { nonce?: string };
-  if (typeof challenge.nonce !== 'string') throw new Error('the instance gave no challenge');
+  ).json()) as { nonce?: string; error?: { code?: unknown } };
+  if (typeof challenge.nonce !== 'string') {
+    // The code, when there is one, so a caller can wait out `rate_limited` (#464).
+    const code = codeOf(challenge);
+    throw new Error(
+      code === undefined ? 'the instance gave no challenge' : `the challenge was refused: ${code}`,
+    );
+  }
   const statement = {
     purpose: AUTH_PURPOSE as DevicePurpose,
     instanceOrigin: origin,
