@@ -250,6 +250,24 @@ describe('the HUD is four panels (#423)', () => {
     ]);
   });
 
+  it('marks the room’s readings, and the ones that give way to them on a phone — #1356', async () => {
+    mounted = await mount(<HudPanel {...base} room={{ nearby: 2, draft: 20, draftShown: true }} />);
+
+    expect(labelsIn('.oyl-hud__field--room')).toEqual(['Following', 'Nearby', 'Draft']);
+    expect(labelsIn('.oyl-hud__field--gives-way')).toEqual(['Pacer']);
+    // Still in the secondary list, in #94's order, where a screen reader meets them.
+    expect(labelsIn('.oyl-hud__fields--secondary')).toEqual([
+      'Speed',
+      'Gradient',
+      'To go',
+      'Moving',
+      'Pacer',
+      'Following',
+      'Nearby',
+      'Draft',
+    ]);
+  });
+
   it('paints every group as a panel, and not the container that spans the world', async () => {
     mounted = await mount(<HudPanel {...base} trainer={{ gradePercent: 1, writes: 1 }} />);
 

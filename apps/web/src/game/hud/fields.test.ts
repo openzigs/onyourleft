@@ -15,7 +15,9 @@ import {
   MOVING_TIME_KEY,
   NO_READING,
   gapAgainst,
+  givesWayToTheRoom,
   hudReadings,
+  isRoomReading,
   profileReading,
   readingTier,
   trainerLine,
@@ -1191,5 +1193,64 @@ describe('the lap in progress — #1312', () => {
   it('adds no field: a ride on a loop has the readings every other ride has, in their places', () => {
     const looped = hudReadings({ ...onLap(2), lapSeconds: 65 }).map((reading) => reading.key);
     expect(looped).toEqual(hudReadings(baseInput()).map((reading) => reading.key));
+  });
+});
+
+describe('what gives way to a room’s readings on a phone — #1356', () => {
+  const gap = pacerGap({
+    botDistance: metres(200),
+    riderDistance: metres(100),
+    referenceSpeed: metresPerSecond(10),
+  });
+  const base = baseInput();
+  const widestRoomRide: HudInput = {
+    ...base,
+    state: { ...base.state, headwindMetresPerSecond: metresPerSecond(4) },
+    chases: [
+      { to: 'bot', gap },
+      { to: 'ghost', gap },
+    ],
+    room: { nearby: 3, draft: 34, draftShown: true },
+  };
+
+  it('names the room’s three readings, and the pacer’s, the ghost’s and the wind as what gives way', () => {
+    const readings = hudReadings(widestRoomRide);
+    expect(readings.filter(isRoomReading).map((each) => each.key)).toEqual([
+      'room-rider',
+      'room-nearby',
+      'room-draft',
+    ]);
+    expect(readings.filter(givesWayToTheRoom).map((each) => each.key)).toEqual([
+      'gap-bot',
+      'gap-ghost',
+      'wind',
+    ]);
+  });
+
+  it('leaves a phone six secondary readings beside the moving time, the room’s among them', () => {
+    // A phone's secondary tier is three tracks wide, and two rows of it are
+    // all the height there is (`theme.css` §"A ROOM RIDE ON A PHONE").
+    const shown = hudReadings(widestRoomRide)
+      .filter((each) => readingTier(each) === 'secondary')
+      .filter((each) => !givesWayToTheRoom(each) && each.key !== MOVING_TIME_KEY)
+      .map((each) => each.key);
+    expect(shown).toEqual([
+      'speed',
+      'gradient',
+      'remaining',
+      'room-rider',
+      'room-nearby',
+      'room-draft',
+    ]);
+  });
+
+  it('gives way with the dashed field that stands in for a pacer, on a room ride with nobody chased', () => {
+    const readings = hudReadings({ ...base, room: { nearby: 0 } });
+    expect(readings.filter(givesWayToTheRoom).map((each) => each.key)).toEqual(['gap']);
+  });
+
+  it('names nothing on a ride with no room as the room’s', () => {
+    const solo: HudInput = { ...widestRoomRide, room: undefined };
+    expect(hudReadings(solo).filter(isRoomReading)).toEqual([]);
   });
 });

@@ -1955,10 +1955,11 @@ test.describe('a ride that may stop with the screen off — #647', () => {
  * asked to have measured. The rule is the Eased notice's: whole on the
  * screen, over no panel, clear of the rider, *Pause* and *End ride* on top.
  *
- * ⚠️ Not held to `EASED_RIDER_CLEARANCE_PIXELS` upright: a room ride's HUD
- * comes within it at 360×752 (5 px on a Mac) whatever the notice says, which
- * is #1356's, as is the reading fields' collision excused below; the bottom
- * row below a phone-in-landscape stage on the CI runner's fonts is #1358's.
+ * Upright, the notice is also held to `EASED_RIDER_CLEARANCE_PIXELS` above
+ * the leaning rider's box. Until #1356 it could not be: a room ride's HUD came
+ * within 5 px of the rider at 360×752 (on a Mac) whatever the notice said. The
+ * bottom row below a phone-in-landscape stage on the CI runner's fonts is
+ * #1358's, excused below.
  */
 test.describe('the room’s notice, with its longest sentences — #785', () => {
   for (const [query, words] of [
@@ -1984,20 +1985,17 @@ test.describe('the room’s notice, with its longest sentences — #785', () => 
                   ? `; ${(rider.top - (notice?.box.bottom ?? Infinity)).toFixed(0)} px above the rider's box`
                   : ''),
             );
-            // ⚠️ Two defects of a room ride's HUD that are there with or
-            // without any notice, each filed, are left to their issues:
-            // - #1356: #783's reading fields over the rider on a phone (736×360
-            //   here, and 844×390 on the CI runner's fonts);
-            // - #1358: on a phone in landscape (736×360, and 844×390 by 3 px)
-            //   the bottom row runs below the stage on the CI runner's fonts,
-            //   its height set by the actions panel, not the notice (the
-            //   notice's cell is IN that row, so it goes with it).
+            // ⚠️ A defect of a room ride's HUD that is there with or without
+            // any notice, filed, is left to its issue — #1358: on a phone in
+            // landscape (736×360, and 844×390 by 3 px) the bottom row runs
+            // below the stage on the CI runner's fonts, its height set by the
+            // actions panel, not the notice (the notice's cell is IN that
+            // row, so it goes with it). #783's reading fields over the rider
+            // on a phone were excused here too until #1356 fixed them.
             const short = viewport.height < viewport.width && viewport.height <= 400;
             const bottomRow = ['oyl-hud__actions', 'oyl-hud__notices', 'oyl-hud__route'];
             const known = (each: string): boolean =>
-              !each.includes(' × ') &&
-              (each.includes('oyl-hud__fields') ||
-                (short && bottomRow.some((name) => each.includes(name))));
+              !each.includes(' × ') && short && bottomRow.some((name) => each.includes(name));
             const collisions = easedCollisions(seen, viewport);
             expect(collisions.filter((each) => !known(each))).toEqual([]);
             // And the notice itself, held everywhere: over no panel and not
@@ -2009,6 +2007,11 @@ test.describe('the room’s notice, with its longest sentences — #785', () => 
             );
             expect(others.map(describeItem)).toEqual([]);
             expect(overlap(notice.box, rider), describeItem(notice)).toBe(false);
+            if (viewport.height > viewport.width) {
+              expect(rider.top - notice.box.bottom, describeItem(notice)).toBeGreaterThanOrEqual(
+                EASED_RIDER_CLEARANCE_PIXELS,
+              );
+            }
             expect(notice.box.left).toBeGreaterThanOrEqual(0);
             expect(notice.box.right).toBeLessThanOrEqual(viewport.width);
             if (!short) expect(inside(notice.box, viewport), describeItem(notice)).toBe(true);
@@ -3859,8 +3862,9 @@ test.describe('a race’s standings on the HUD — #1347', () => {
  *
  * ## What is only published
  *
- * The rider's clearance from the actions panel at the phone viewports (a room
- * ride's HUD is over the rider on a phone with or without a report: #1356).
+ * The rider's clearance from the actions panel at the phone viewports. (A room
+ * ride's HUD was over the rider on a phone with or without a report until
+ * #1356; §"#1356" holds the following state, Report closed, clear of it.)
  *
  * ⚠️ **And where the room's row is on a phone in LANDSCAPE** (844×390,
  * 736×360, 736×480). There the actions panel is capped at 16 rem and the
@@ -4007,6 +4011,140 @@ test.describe('Report on the HUD, its reasons open — #789', () => {
           if (tablet) expect(over.map(describeItem)).toEqual([]);
         });
       }
+    });
+  }
+});
+
+/**
+ * #1356 — a room ride's HUD at every overlay viewport: the race of §"#1347",
+ * the rider following the rider with the longest name a room admits
+ * (`?room=following`), so the secondary tier carries the room's three
+ * readings — *Following* under that name, *Nearby* and *Draft* — beside a
+ * pacer, a ghost and a wind, and the actions panel carries *Follow* and
+ * *Report*. It is the widest room ride the harness can start.
+ *
+ * ## What is held
+ *
+ * Both ways (with anchor positioning and without): every panel a rider can
+ * see is whole and over no other panel, and none is over the leaning rider —
+ * the two cases every ride above is held to. The room's three readings are
+ * on the stage and uncovered. On a phone the pacer's, the ghost's and the
+ * wind's readings are laid out at no size and still in the secondary list
+ * (`theme.css` §"A ROOM RIDE ON A PHONE", the trade #419 asks to have
+ * recorded); on a tablet they are on the stage like every other reading.
+ *
+ * ## The control
+ *
+ * The same page with that rule undone — the three readings back in the grid
+ * and the followed rider's name free to wrap, the HUD as #783 and #789 left
+ * it — is over the rider at 736×360 and at 360×752, the two viewports #1347's
+ * run printed. So "no panel over the rider" can fail for a room ride.
+ */
+const ROOM_GIVES_WAY = ['reading: Pacer', 'reading: Your best', 'reading: Wind'] as const;
+const ROOM_READINGS = [
+  'reading: Wilhelmina Vandersteen-Oduya Mbe',
+  'reading: Nearby',
+  'reading: Draft',
+] as const;
+const ROOM_RULE_UNDONE = `
+  .oyl-game--riding .oyl-hud .oyl-hud__fields--secondary > .oyl-hud__field--gives-way {
+    position: static !important; width: auto !important; height: auto !important;
+    margin: 0 !important; overflow: visible !important; clip-path: none !important;
+    white-space: normal !important;
+  }
+  .oyl-game--riding .oyl-hud .oyl-hud__field--room .oyl-hud__label {
+    overflow: visible !important; white-space: normal !important;
+  }`;
+
+/** The panels a rider can see: on a phone the race's standings are a 1 px clipped box. */
+function seenPanels(seen: StageMeasurement): readonly StageItem[] {
+  return seen.panels.filter((each) => each.box.height > 1);
+}
+
+test.describe('a room ride’s HUD — #1356', () => {
+  for (const viewport of OVERLAY_VIEWPORTS) {
+    const tablet = TABLET_VIEWPORTS.includes(viewport);
+    test.describe(viewport.name, () => {
+      test('every panel is whole, and no panel is laid over another', async ({ browser }) => {
+        const page = await sharedRide(browser, viewport, FOLLOWING);
+        for (const [how, seen] of await bothWays(page)) {
+          const panels = seenPanels(seen);
+          expect(panels.length, how).toBeGreaterThanOrEqual(4);
+          expect(
+            panels.filter((each) => !inside(each.box, viewport)).map(describeItem),
+            how,
+          ).toEqual([]);
+          const collisions: string[] = [];
+          panels.forEach((a, index) => {
+            for (const b of panels.slice(index + 1)) {
+              if (overlap(a.box, b.box)) collisions.push(`${describeItem(a)} × ${describeItem(b)}`);
+            }
+          });
+          expect(collisions, how).toEqual([]);
+        }
+      });
+
+      test('no panel is laid over the rider', async ({ browser }) => {
+        const page = await sharedRide(browser, viewport, FOLLOWING);
+        const rider = riderBox(viewport);
+        for (const [how, seen] of await bothWays(page)) {
+          const over = seenPanels(seen).filter((each) => overlap(each.box, rider));
+          expect(over.map(describeItem), how).toEqual([]);
+        }
+      });
+
+      test(`the room’s readings are on the stage${tablet ? ', and so is every other' : ', and the pacer, the ghost and the wind give way'}`, async ({
+        browser,
+      }) => {
+        const page = await sharedRide(browser, viewport, FOLLOWING);
+        for (const [how, seen] of await bothWays(page)) {
+          for (const name of ROOM_READINGS) {
+            const reading = named(seen.items, name);
+            expect(inside(reading.box, viewport), `${how}: ${describeItem(reading)}`).toBe(true);
+            expect(reading.onTop, `${how}: ${describeItem(reading)}`).toBe(true);
+          }
+          for (const name of ROOM_GIVES_WAY) {
+            const reading = named(seen.items, name);
+            if (tablet) {
+              expect(inside(reading.box, viewport), `${how}: ${describeItem(reading)}`).toBe(true);
+              expect(reading.onTop, `${how}: ${describeItem(reading)}`).toBe(true);
+            } else {
+              expect(reading.box.width * reading.box.height, `${how}: ${name}`).toBeLessThanOrEqual(
+                1,
+              );
+            }
+          }
+          // Laid out at no size, and still in the list a screen reader reads.
+          expect(seen.secondary, how).toEqual([
+            'Speed',
+            'Gradient',
+            'To go',
+            'Moving',
+            'Pacer',
+            'Your best',
+            'Wilhelmina Vandersteen-Oduya Mbe',
+            'Nearby',
+            'Draft',
+            'Wind',
+          ]);
+        }
+      });
+    });
+  }
+
+  for (const viewport of OVERLAY_VIEWPORTS.filter(
+    (each) => (each.width === 736 && each.height === 360) || each.height === 752,
+  )) {
+    test(`the control — with the rule undone, a panel is over the rider — ${viewport.name}`, async ({
+      page,
+    }) => {
+      await openRide(page, viewport, FOLLOWING);
+      await page.addStyleTag({ content: ROOM_RULE_UNDONE });
+      const seen = await measure(page);
+      const pacer = named(seen.items, 'reading: Pacer');
+      expect(pacer.box.width * pacer.box.height, 'the rule undone').toBeGreaterThan(1);
+      const over = seenPanels(seen).filter((each) => overlap(each.box, riderBox(viewport)));
+      expect(over.map(describeItem)).not.toEqual([]);
     });
   }
 });
