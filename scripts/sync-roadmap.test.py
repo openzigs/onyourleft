@@ -105,8 +105,8 @@ class Progress(unittest.TestCase):
         self.assertEqual(sr.progress_of(None), (None, None))
 
 
-def sub(state="OPEN", created="2026-09-01T12:00:00Z", closed=None):
-    return {"createdAt": created, "closedAt": closed, "state": state}
+def sub(state="OPEN", created="2026-09-01T12:00:00Z", closed=None, number=None):
+    return {"number": number, "createdAt": created, "closedAt": closed, "state": state}
 
 
 def epic(state="OPEN", created="2026-09-01T12:00:00Z", closed=None, subs=()):
@@ -189,6 +189,84 @@ class Target(unittest.TestCase):
         e = epic(subs=[sub()])
         desired = sr.desired_fields(e, {1: e}, NOW)
         self.assertEqual((desired["Start"], desired["Target"]), ("2026-09-01", None))
+
+
+class SubDates(unittest.TestCase):
+    def lookup(self, *issues):
+        return {i["number"]: i for i in issues}
+
+    def test_closed_sub_issue_is_created_to_closed(self):
+        e = epic(subs=[sub("CLOSED", created="2026-09-02T23:00:00Z", closed="2026-10-01T05:00:00Z", number=2)])
+        self.assertEqual(sr.sub_dates(e, {}, NOW), {2: {"Start": "2026-09-02", "Target": "2026-10-01"}})
+
+    def test_open_sub_issues_in_tier_then_number_order(self):
+        # 2 closes in 28 days: pace 0.5 a week, so the k-th is 2k weeks out.
+        subs = [sub("CLOSED", closed=RECENT, number=90)] * 2 + [
+            sub(number=13), sub(number=12), sub(number=11), sub(number=10)]
+        e = epic(subs=subs)
+        lookup = self.lookup(e, issue(10, [], parent=1), issue(11, ["priority: later"], parent=1),
+                             issue(12, ["priority: now"], parent=1), issue(13, [], parent=1))
+        lookup[1]["labels"].append("priority: next")  # 10 and 13 inherit Next
+        got = sr.sub_dates(e, lookup, NOW)
+        # own Now (12), own Later (11), then inherited Next by number (10, 13)
+        order = sorted((n for n in got if n != 90), key=lambda n: got[n]["Target"])
+        self.assertEqual(order, [12, 11, 10, 13])
+        self.assertEqual([got[n]["Target"] for n in order],
+                         ["2026-10-28", "2026-11-11", "2026-11-25", "2026-12-09"])
+
+    def test_own_tier_beats_a_better_inherited_one(self):
+        subs = [sub("CLOSED", closed=RECENT, number=90)] + [sub(number=5), sub(number=6)]
+        e = epic(subs=subs)
+        e["labels"].append("priority: now")
+        lookup = self.lookup(e, issue(5, [], parent=1), issue(6, ["priority: later"], parent=1))
+        got = sr.sub_dates(e, lookup, NOW)
+        self.assertLess(got[6]["Target"], got[5]["Target"])
+
+    def test_start_is_a_week_before_target_or_created_if_later(self):
+        subs = [sub("CLOSED", closed=RECENT, number=90)] * 2 + [
+            sub(number=3, created="2026-09-01T00:00:00Z"), sub(number=4, created="2026-10-20T00:00:00Z")]
+        e = epic(subs=subs)
+        got = sr.sub_dates(e, self.lookup(e, issue(3, [], parent=1), issue(4, [], parent=1)), NOW)
+        self.assertEqual(got[3], {"Start": "2026-10-21", "Target": "2026-10-28"})
+        self.assertEqual(got[4], {"Start": "2026-11-04", "Target": "2026-11-11"})
+        subs[2]["createdAt"] = "2026-10-26T00:00:00Z"
+        got = sr.sub_dates(e, self.lookup(e, issue(3, [], parent=1), issue(4, [], parent=1)), NOW)
+        self.assertEqual(got[3]["Start"], "2026-10-26")
+
+    def test_epic_target_is_the_last_sub_issues(self):
+        for closed_recent, opens in ((2, 3), (1, 7), (3, 1)):
+            subs = [sub("CLOSED", closed=RECENT, number=90 + n) for n in range(closed_recent)]
+            subs += [sub(number=n) for n in range(1, opens + 1)]
+            e = epic(subs=subs)
+            lookup = self.lookup(e, *[issue(n, [], parent=1) for n in range(1, opens + 1)])
+            got = sr.sub_dates(e, lookup, NOW)
+            self.assertEqual(max(got[n]["Target"] for n in range(1, opens + 1)), sr.target_of(e, NOW))
+        # and with the cap
+        e = epic(subs=[sub("CLOSED", closed=OLDER, number=90)] + [sub(number=n) for n in range(1, 201)])
+        got = sr.sub_dates(e, self.lookup(e, *[issue(n, [], parent=1) for n in range(1, 201)]), NOW)
+        self.assertEqual(got[200]["Target"], sr.target_of(e, NOW))
+        self.assertEqual(got[200]["Target"], "2028-10-13")
+
+    def test_no_pace_clears_sub_issue_targets(self):
+        e = epic(subs=[sub("CLOSED", closed=ANCIENT, number=90), sub(number=3, created="2026-09-05T00:00:00Z")])
+        got = sr.sub_dates(e, self.lookup(e, issue(3, [], parent=1)), NOW)
+        self.assertEqual(got[3], {"Start": "2026-09-05", "Target": None})
+
+    def test_desired_fields_dates_only_epics_and_their_sub_issues(self):
+        dates = {3: {"Start": "2026-10-21", "Target": "2026-10-28"}}
+        lone = issue(9, [])
+        self.assertNotIn("Target", sr.desired_fields(lone, {9: lone}, NOW, dates))
+        child = issue(3, [], parent=1)
+        self.assertEqual(sr.desired_fields(child, {3: child}, NOW, dates)["Target"], "2026-10-28")
+
+    def test_fallback_pace_is_exactly_90_over_7(self):
+        # 1 closed in 90 days, 2 open: 2 * 90/7 = 25.7 -> 26 weeks, not 24.
+        e = epic(subs=[sub("CLOSED", closed=OLDER)] + [sub()] * 2)
+        self.assertEqual(sr.target_of(e, NOW), "2027-04-14")
+
+    def test_window_boundary_is_inclusive(self):
+        edge = "2026-09-16T04:00:00Z"  # exactly 28 days before NOW
+        self.assertEqual(sr._closed_since([sub("CLOSED", closed=edge)], NOW, 28), 1)
 
 
 class Changes(unittest.TestCase):
@@ -317,7 +395,7 @@ class FakeClient(sr.Client):
             return {"repository": {"issues": {"pageInfo": {"hasNextPage": False, "endCursor": None},
                                               "nodes": [self._node(i) for i in nodes]}}}
         if query is sr.SUB_ISSUES_QUERY:
-            subs = [{"createdAt": i["createdAt"], "closedAt": i["closedAt"], "state": i["state"]}
+            subs = [{"number": i["number"], "createdAt": i["createdAt"], "closedAt": i["closedAt"], "state": i["state"]}
                     for i in self.issues.values() if i["parent"] == variables["number"]]
             # Two to a page, so the paging is exercised.
             start = int(variables["after"] or 0)
@@ -417,7 +495,10 @@ class Sync(unittest.TestCase):
         self.assertEqual(items[16]["values"], {"Tier": "Now", "Kind": "Epic", "Area": "racing",
                                                "Progress %": 43.0, "Sub-issues done": "10 of 23",
                                                "Start": "2026-08-30", "Target": "2026-10-28"})
-        self.assertEqual(items[785]["values"], {"Tier": "Now", "Kind": "Issue", "Area": "racing"})
+        # #785 is open and the epic's only open sub-issue: 2 weeks out, Start a week before.
+        self.assertEqual(items[785]["values"], {"Tier": "Now", "Kind": "Issue", "Area": "racing",
+                                                "Start": "2026-10-21", "Target": "2026-10-28"})
+        self.assertEqual(items[16]["values"]["Target"], items[785]["values"]["Target"])
         self.assertEqual(items[901]["values"], {"Tier": "Unranked", "Kind": "Epic",
                                                 "Start": "2025-11-01", "Target": "2026-01-01"})
         self.assertEqual(client.area_options, ["racing"])
@@ -445,6 +526,27 @@ class Sync(unittest.TestCase):
         run(client)
         self.assertNotIn("Target", client.board[16]["values"])
         self.assertEqual(client.board[16]["values"]["Start"], "2026-08-30")
+
+    def test_sub_issue_targets_are_cleared_with_no_pace(self):
+        issues = corpus()
+        issues[786]["closedAt"] = issues[787]["closedAt"] = "2026-06-01T00:00:00Z"
+        board = {785: {"id": "PVTI_785", "values": {"Target": "2026-12-01", "Start": "2026-11-24"}}}
+        client = FakeClient(issues, items=board, area_options=["racing"], date_fields={"Start": "DATE", "Target": "DATE"})
+        run(client)
+        self.assertNotIn("Target", client.board[785]["values"])
+        self.assertEqual(client.board[785]["values"]["Start"], "2026-09-20")
+
+    def test_an_issue_with_no_epic_is_left_undated(self):
+        client = FakeClient(corpus(), items={900: {"id": "PVTI_900", "values": {"Target": "2026-12-01"}}},
+                            area_options=["racing"], date_fields={"Start": "DATE", "Target": "DATE"})
+        run(client)
+        self.assertEqual(client.board[900]["values"]["Target"], "2026-12-01")
+
+    def test_no_date_field_is_created_once_the_budget_is_spent(self):
+        client = FakeClient(corpus(), area_options=["racing"])
+        client.mutations = sr.MAX_MUTATIONS
+        sr.ensure_date_fields(client, "P", {})
+        self.assertEqual(client.writes, [])
 
     def test_dry_run_writes_nothing(self):
         client = FakeClient(corpus(), dry_run=True)

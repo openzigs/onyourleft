@@ -18,8 +18,8 @@
 #   3. ADDS every open issue and every closed epic that is not on the board.
 #      Never deletes, never archives, never touches an archived item.
 #   4. SETS Tier, Kind, Area, Progress % and Sub-issues done, only where the
-#      value differs, and on epics alone the dates Start and Target (#1391), from
-#      each epic's sub-issues, so the Roadmap view draws a bar. NEVER touches
+#      value differs, and on epics and their direct sub-issues the dates Start and Target (#1391),
+#      from the sub-issues' closes, so the Roadmap view draws bars. NEVER touches
 #      Status: GitHub's built-in workflows own it.
 #   5. With --status-update, posts a weekly status update unless one was posted
 #      in the last 6 days. It lists the open issues with no `area:` label, the
@@ -80,7 +80,7 @@ TARGET = "Target"
 MANAGED_FIELDS = (TIER, KIND, AREA, PROGRESS, SUBS_DONE, START, TARGET)
 NUMBER_FIELDS = (PROGRESS,)
 TEXT_FIELDS = (SUBS_DONE,)
-# Written on epics only, as "YYYY-MM-DD"; created by the script when missing.
+# Written on epics and their direct sub-issues only, as "YYYY-MM-DD"; created by the script when missing.
 DATE_FIELDS = (START, TARGET)
 
 
@@ -166,31 +166,77 @@ def _closed_since(subs, now, days):
     )
 
 
+def _weeks_for(k, subs, now):
+    """Weeks until the k-th open sub-issue is done at the epic's pace; None with no pace.
+
+    The pace is the closes in the last 28 days / 4 a week, else the last 90
+    days' / (90/7). Integer arithmetic, so a pace like 7/90 a week rounds exactly.
+    """
+    recent = _closed_since(subs, now, PACE_WINDOW_DAYS)
+    if recent:
+        return -(-k * (PACE_WINDOW_DAYS // 7) // recent)
+    slow = _closed_since(subs, now, PACE_FALLBACK_DAYS)
+    if not slow:
+        return None
+    return -(-k * PACE_FALLBACK_DAYS // (7 * slow))
+
+
+def _ahead(now, weeks):
+    return now.date() + dt.timedelta(days=min(weeks * 7, TARGET_CAP_DAYS))
+
+
 def target_of(epic, now):
     """The projected end, as "YYYY-MM-DD"; None (cleared) when nothing has closed in 90 days.
 
     Closed: the epic's own close. Open: today + ceil(open sub-issues / weekly
-    pace) weeks, the pace being the last 28 days' closes / 4, else the last 90
-    days' / (90/7); capped at TARGET_CAP_DAYS ahead. Integer arithmetic, so a
-    pace like 7/90 a week rounds exactly.
+    pace) weeks, capped at TARGET_CAP_DAYS ahead: the same as its last open
+    sub-issue's Target, see sub_dates.
     """
     if epic["state"] == "CLOSED":
         return _date(epic["closedAt"]).isoformat()
-    today = now.date()
     subs = epic.get("subs", [])
     open_count = sum(1 for s in subs if s["state"] == "OPEN")
     if open_count == 0:
-        return today.isoformat()
-    recent = _closed_since(subs, now, PACE_WINDOW_DAYS)
-    if recent:
-        weeks = -(-open_count * (PACE_WINDOW_DAYS // 7) // recent)
-    else:
-        slow = _closed_since(subs, now, PACE_FALLBACK_DAYS)
-        if not slow:
-            return None
-        weeks = -(-open_count * PACE_FALLBACK_DAYS // (7 * slow))
-    days = min(weeks * 7, TARGET_CAP_DAYS)
-    return (today + dt.timedelta(days=days)).isoformat()
+        return now.date().isoformat()
+    weeks = _weeks_for(open_count, subs, now)
+    return None if weeks is None else _ahead(now, weeks).isoformat()
+
+
+TIER_ORDER = ("Now", "Next", "Later", "Device check", UNRANKED)
+
+
+def sub_dates(epic, lookup, now):
+    """{sub-issue number: {Start, Target}} for an epic's direct sub-issues (#1391).
+
+    Closed: createdAt to closedAt. Open, in order of own tier (Now, Next, Later)
+    before an inherited one, then the resolved tier, then number: the k-th gets
+    Target today + ceil(k / pace) weeks (capped), Start = Target - 7 days or its
+    createdAt if later. With no pace the Target is None (cleared) and Start is
+    createdAt. A sub-issue that is itself an epic counts in the order but is
+    written by desired_fields as an epic, so its own dates win.
+    """
+    subs = epic.get("subs", [])
+    dates = {}
+    for s in subs:
+        if s["state"] == "CLOSED" and s.get("closedAt"):
+            dates[s["number"]] = {START: _date(s["createdAt"]).isoformat(), TARGET: _date(s["closedAt"]).isoformat()}
+
+    def order(s):
+        known = lookup.get(s["number"])
+        own = own_tier(known["labels"]) if known else None
+        return (own is None, TIER_ORDER.index(resolve_tier(s["number"], lookup)), s["number"])
+
+    pace_subs = epic.get("subs", [])
+    for k, s in enumerate(sorted((s for s in subs if s["state"] == "OPEN"), key=order), start=1):
+        created = _date(s["createdAt"])
+        weeks = _weeks_for(k, pace_subs, now)
+        if weeks is None:
+            dates[s["number"]] = {START: created.isoformat(), TARGET: None}
+            continue
+        target = _ahead(now, weeks)
+        dates[s["number"]] = {START: max(target - dt.timedelta(days=7), created).isoformat(),
+                              TARGET: target.isoformat()}
+    return dates
 
 
 def no_recent_progress(issues, now):
@@ -201,8 +247,9 @@ def no_recent_progress(issues, now):
     )
 
 
-def desired_fields(issue, issues, now):
-    """Every managed field for an epic; the date fields are absent, so untouched, on anything else."""
+def desired_fields(issue, issues, now, dates=None):
+    """Every managed field. Start and Target come only for an epic and for a sub-issue
+    of one (`dates`, from sub_dates); on anything else they are absent, so untouched."""
     progress, done = progress_of(issue.get("summary"))
     desired = {
         TIER: resolve_tier(issue["number"], issues),
@@ -214,6 +261,8 @@ def desired_fields(issue, issues, now):
     if is_epic(issue):
         desired[START] = start_of(issue)
         desired[TARGET] = target_of(issue, now)
+    elif dates and issue["number"] in dates:
+        desired.update(dates[issue["number"]])
     return desired
 
 
@@ -445,7 +494,7 @@ query($owner: String!, $name: String!, $number: Int!, $after: String) {
     issue(number: $number) {
       subIssues(first: 100, after: $after) {
         pageInfo { hasNextPage endCursor }
-        nodes { createdAt closedAt state }
+        nodes { number createdAt closedAt state }
       }
     }
   }
@@ -762,6 +811,10 @@ def sync(client, org, project_number, status_update, now):
     read_sub_issues(client, issues)
     lookup = dict(read_ancestors(client, issues))
     lookup.update(issues)
+    sub_date_map = {}
+    for epic in issues.values():
+        if is_epic(epic):
+            sub_date_map.update(sub_dates(epic, lookup, now))
     items = read_items(client, org, project_number)
     ensure_area_options(client, project_id, fields, issues.values())
     ensure_date_fields(client, project_id, fields)
@@ -787,7 +840,7 @@ def sync(client, org, project_number, status_update, now):
             counts["added"] += 1
         changes = [
             (f, v)
-            for f, v in field_changes(desired_fields(issue, lookup, now), item["values"])
+            for f, v in field_changes(desired_fields(issue, lookup, now, sub_date_map), item["values"])
             if f in fields
         ]
         if not changes:

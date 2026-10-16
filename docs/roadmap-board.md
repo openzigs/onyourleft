@@ -42,12 +42,12 @@ the changes are made. `--status-update` also posts the weekly status update (bel
 | **Area** | single select | the `area:` label's name (`area: racing` → racing). The script creates the field, and adds an option when a new `area:` label appears, sending the existing options back with their ids so no item loses its value. No label: cleared |
 | **Progress %** | number | the issue's sub-issues, `percentCompleted`; cleared for an issue with none |
 | **Sub-issues done** | text | the same, as "10 of 23"; cleared for an issue with none |
-| **Start** | date | **epics only** ([#1391](https://github.com/openzigs/onyourleft/issues/1391)): the earliest `createdAt` of the epic and its sub-issues. Created by the script when missing |
-| **Target** | date | **epics only**: the projected end, below. Created by the script when missing; cleared when there is no recent progress |
+| **Start** | date | **epics and their direct sub-issues** ([#1391](https://github.com/openzigs/onyourleft/issues/1391)). An epic: the earliest `createdAt` of it and its sub-issues. A sub-issue: below. Created by the script when missing |
+| **Target** | date | **epics and their direct sub-issues**: the projected end, below. Created by the script when missing; cleared when there is no recent progress |
 | Status, Parent issue, Sub-issues progress | built in | GitHub, not the script |
 
-The script never writes Start or Target on an issue that is not an epic, so a date set there by hand
-stays. A field named Start or Target that is not a date field is left alone and not written; the run
+The script never writes Start or Target on an issue that is neither an epic nor a direct sub-issue of
+one, so a date set there by hand stays. A field named Start or Target that is not a date field is left alone and not written; the run
 prints that it skipped it.
 
 ### Target, the projected end
@@ -62,12 +62,32 @@ Recomputed every night from the epic's direct sub-issues, so the bar moves as wo
 - **No sub-issue closed in 90 days:** Target is **cleared**, so the epic has no bar, and the weekly
   status update lists it under **No recent progress**.
 - Never more than 730 days (two years) ahead.
+- An open epic's Target is today + N weeks, so it moves each night even when nothing closed: "the
+  second run changes nothing" holds within a day, not across days.
+
+### The issues inside an epic
+
+Each direct sub-issue of an epic is dated too, so the timeline shows when each will be done. An issue
+with no epic is left undated.
+
+- **Closed sub-issue:** Start = the day it was created, Target = the day it closed.
+- **Open sub-issues**, ordered by own tier (Now, Next, Later) before an inherited one, then the tier
+  it resolves to, then issue number: the k-th gets Target = today + ⌈k ÷ the epic's weekly pace⌉
+  weeks (same pace and 730-day cap as above), and Start = Target − 7 days, or its creation day if
+  that is later. The epic's Target is its last open sub-issue's, so the two always agree.
+- **No pace:** the open sub-issues' Targets are cleared (Start is the creation day).
+- A sub-issue that is itself an epic is dated as an epic.
 
 ### The one manual step: the Roadmap view's dates
 
 View settings have no API, so the owner sets this once in the web UI: open the **Roadmap** view,
 choose **Date fields**, and pick **Start** for the start and **Target** for the target. Until the
 script has created the two fields (its first run after #1391), they are not in that list.
+
+Then make the second timeline, **Roadmap — issues**: a Roadmap layout with **no `label:epic`
+filter**, **grouped by Parent issue**, filtered `is:open` plus the issues closed in the last 14 days,
+and with the same date fields (**Date fields → Start / Target**). Its bars are the issues inside each
+epic.
 
 ## The weekly status update
 
@@ -89,6 +109,8 @@ Views are made by hand (or through REST), not by the script:
 - **By tier**: table grouped by Tier, or by Area.
 - **Roadmap**: roadmap layout grouped by Parent issue, with the hierarchy shown; its bars are the
   epics' Start and Target, once the date fields are chosen as above.
+- **Roadmap — issues**: roadmap layout, no `label:epic` filter, grouped by Parent issue, `is:open`
+  plus closed in the last 14 days, the same date fields; its bars are each epic's issues.
 - **Now**: table filtered to Tier Now.
 - **Device checks** and **Recently done**, added by the owner on 2026-10-14.
 
