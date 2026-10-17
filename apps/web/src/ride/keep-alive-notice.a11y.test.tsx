@@ -628,7 +628,7 @@ describe('the game’s HUD — #647', () => {
 
   it('takes the road notice and its control off the HUD on the narrowest upright phones only — #693’s review', async () => {
     // jsdom lays nothing out, so which window this is comes from `matchMedia`:
-    // `ride.browser.spec.ts` §"#647" measures why, and where the line is.
+    // `ride-notices.browser.spec.ts` §"#647" measures why, and where the line is.
     const narrow = narrowWindow(true);
     const refused = { current: true };
     const port: GameTrainerPort = {

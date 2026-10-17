@@ -1066,7 +1066,45 @@ column fails it too.
 - ⚠️ **What is next, when a row brings `browser-1` near its stop**: the `ride.browser.spec.ts` file
   is the floor of any `--shard` split, since one file is one worker; dividing it into files, or a
   third shard (`--shard N/3`, a third script and job, each in `needs:`), is the move. Not a longer
-  stop, and not a check moved to nightly without the owner's ruling.
+  stop, and not a check moved to nightly without the owner's ruling. **Done by #1414: the file is
+  five files** (§"Five ride files — #1414" below).
+
+#### Five ride files — #1414
+
+⚠️ **`ride.browser.spec.ts` is five files since
+[#1414](https://github.com/openzigs/onyourleft/issues/1414)**, and a reviewer who remembers one is
+reading the old tree. Run [39044020832](https://github.com/openzigs/onyourleft/actions/runs/39044020832)
+(#1412) stopped `browser-1`'s `chromium` run at its 720 s, and with that run's slow case fixed
+`browser-1` still took most of its stop while `browser-2` took a quarter of its own:
+
+| Run | `browser-1` on | its cases | its `chromium` run | `browser-2` on | its `chromium` run | game run |
+|---|---|--:|--:|---|--:|--:|
+| [39045053119](https://github.com/openzigs/onyourleft/actions/runs/39045053119) | EPYC 7763 | 1 013 | 10.1 m | EPYC 7763 | 3.1 m | 1.1 m |
+| [39045325469](https://github.com/openzigs/onyourleft/actions/runs/39045325469) | Xeon 8573C | 1 051 | 10.8 m | EPYC 7763 | 3.1 m | 1.1 m |
+| [39052886735](https://github.com/openzigs/onyourleft/actions/runs/39052886735) | EPYC 9V74 | 1 051 | 8.4 m | EPYC 7763 | 3.0 m | 1.1 m |
+| [39057149617](https://github.com/openzigs/onyourleft/actions/runs/39057149617) | Xeon 8370C | 1 099 | **11.3 m** | EPYC 9V45 | 2.1 m | 41 s |
+
+**Why the halves were that uneven.** `--shard` divides the `chromium` project by case COUNT, whole
+test groups at a time, and puts a group in the shard where its first case falls; with
+`fullyParallel` off, a file is one group and runs in one worker. `ride.browser.spec.ts` was 609
+cases on this change's base, starting at case 490 of 1 560: so all of it went to `browser-1`, and in
+one worker it ran six minutes (6.2 m of 10.8 in run 39045325469, "Slow test file"), queued behind
+the slower-per-case files before it. Count is a poor proxy for time here: the cases before it
+summed about 880 s of case time, `browser-2`'s 461 about 440 s. A third shard would not have helped:
+`--shard 1/3` ends at case 520, after the file starts, so it goes whole to the first third.
+
+**What changed.** The file is divided by section, with no case changed, into
+`ride.browser.spec.ts` (the stage, 238 cases), `ride-notices` (66), `pre-ride` (101),
+`ride-workout` (36) and `ride-room` (168), and what more than one reads is the module
+`ride-stage.ts`; `ride.browser.spec.ts`'s header says which section went where. The case list is
+the same 609 titles before and after (`playwright test --list`, compared as sorted titles). The
+shards then hold 825 cases in 28 files (`bend` to `ride-targets`) and 735 in 10 (`ride-workout` to
+`theme`), so the stage and `ride-workout` move to `browser-2` and no single file is more than about
+two minutes of one worker. Nothing else moved: no stop, no worker count, no script, no job, nothing
+to nightly; `shared-load.ts` still loads once per key within each file, which is why
+`fullyParallel` (one group per CASE, so one load per case) was not the move.
+
+**Measured** on this change's pull request: see the pull request for #1414.
 
 ⚠️ **The runner is two cores, not four, and that is what bounds all of this.** `ubuntu-latest`
 reports four vCPUs, and `lscpu` on it reads `Thread(s) per core: 2`, `Core(s) per socket: 2` (run

@@ -5,7 +5,7 @@
  * A race's standings on the HUD — #1347: audited, in the HUD the game mounts,
  * and held to "on request, never announced every second": a labelled section
  * with no live region in it, beside the HUD's one region (`announce.ts`).
- * Where it is drawn is the browser gate's (`ride.browser.spec.ts` §"#1347").
+ * Where it is drawn is the browser gate's (`ride-room.browser.spec.ts` §"#1347").
  */
 
 import { afterEach, describe, expect, it } from 'vitest';

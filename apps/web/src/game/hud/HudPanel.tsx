@@ -222,7 +222,7 @@ export interface HudPanelProps extends Omit<HudInput, 'units'> {
    *
    * ⚠️ **On a row of its own under *Pause* and *End ride***, which keep their
    * places. It is a ride-time control (`design/ride-time-controls.ts`) at
-   * #669's 48 px. `browser/ride.browser.spec.ts` §"#1244" measures it inside
+   * #669's 48 px. `browser/ride-workout.browser.spec.ts` §"#1244" measures it inside
    * the viewport, and no panel over the rider at the tablet viewports.
    */
   readonly onKeepPlan?: (() => void) | undefined;
@@ -247,7 +247,7 @@ export interface HudPanelProps extends Omit<HudInput, 'units'> {
    * (`announce.ts`, rank 5e — with them off a lap that gives way is neither
    * shown nor said), and its figures are on the ride's page afterwards. Decided here rather than in `GameView` so that the rule
    * reads the notices that ARE rendered, not a second list of their
-   * conditions. `browser/ride.browser.spec.ts` §"#1312" measures it alone at
+   * conditions. `browser/ride-workout.browser.spec.ts` §"#1312" measures it alone at
    * every overlay viewport.
    */
   readonly lapNotice?: ReactNode;
