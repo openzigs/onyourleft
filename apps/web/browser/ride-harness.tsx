@@ -879,9 +879,11 @@ function measure(): StageMeasurement {
     // measurement would find it "over" the panel it is inside.
     panels: [
       ...document.querySelectorAll('.oyl-hud > :not([data-oyl-announcer])'),
-      ...[...document.querySelectorAll('.oyl-hud__side-camera-row')].filter(
-        (each) => window.getComputedStyle(each).position === 'absolute',
-      ),
+      // #1398: so is the sound row, in a room ride on a phone on its side
+      // (`theme.css` §"A ROOM RIDE WITH SOUNDS ON, ON A PHONE").
+      ...[
+        ...document.querySelectorAll('.oyl-hud__side-camera-row, .oyl-hud__actions > .oyl-sound'),
+      ].filter((each) => window.getComputedStyle(each).position === 'absolute'),
     ].map((each) => item(each.className, each)),
     items,
     primary: labels('.oyl-hud__fields--primary'),

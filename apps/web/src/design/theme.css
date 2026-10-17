@@ -6196,8 +6196,9 @@ select.oyl-input {
    who remembers "no browser harness here rides in a room" is reading the old
    file for: on the stage at every overlay viewport since #1356 took the
    third row of readings off a phone and #1358 the trainer line off a phone
-   on its side. Beside the sound row on a phone it is
-   still owed to #733's device check, stated rather than claimed. */
+   on its side, and with sounds on since #1398 (§"A ROOM RIDE WITH SOUNDS
+   ON, ON A PHONE"). On a device it is still owed to #733's check, stated
+   rather than claimed. */
 .oyl-hud__follow {
   align-self: flex-start;
   white-space: nowrap;
@@ -7141,6 +7142,109 @@ select.oyl-input {
   }
 
   .oyl-game--riding .oyl-hud__actions:has(> .oyl-hud__side-camera-row) .oyl-sound__mute-more {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+}
+
+/*
+ * A ROOM RIDE WITH SOUNDS ON, ON A PHONE — #1398.
+ *
+ * The room's row (*Follow* and *Report*, #789) and #400's sound row each fit
+ * the actions panel with the other's row absent, and together they did not:
+ * measured on the CI runner's fonts on `ride.html?room=following&sounds=on`,
+ * the panel ran 7 px below a 736×360 stage and 3 px below an 844×390 one,
+ * reached 7 px into the race's standings at 1024×768, and upright it started
+ * 24 px into the leaning rider at 360×752 and 10 px into him at 360×800. This
+ * is #576's shape with the room's row in the side camera's place, and it gets
+ * #576's two answers with the rows swapped:
+ *
+ * - **On a phone on its side and on a tablet the SOUND row leaves the actions
+ *   panel** and is drawn as a small panel of its own in the LEFT column,
+ *   directly above the bottom-start cell (the route panel, or the notice that
+ *   stands in its cell, #437). By grid placement, not anchor positioning, so
+ *   it is one rule with and without anchors (#1120): an absolutely positioned
+ *   descendant of the HUD's grid is placed against the area it names, and
+ *   `bottom: 100%` of that area is the top of the bottom row. The row is
+ *   50 px: no vertical padding, because at 736×360 the strip between the
+ *   primary panel and the route panel is 57 px (the room #1358 measured for
+ *   its own row) and the xs step each way ran the row 5 px into the primary
+ *   panel without anchors. Measured on the runner's fonts it is 3 px under
+ *   the primary panel and 4 px above the route panel there, and 52 px and
+ *   4 px at 844×390. Not the room's row: *Report*'s reasons open in it.
+ * - **On an upright phone the room's row and the sound row SHARE one row**,
+ *   as #576's side-camera row and the sound row do: *Mute sounds* shows
+ *   "Mute" (the rest is clipped, never removed, so the name begins with what
+ *   is seen, SC 2.5.3) and the volume keeps its 2.75 rem floor. Not on a
+ *   tablet: its 20 rem panel has room for "Mute", the volume and *Follow*,
+ *   and *Report* wrapped to a line of its own, which saved 7 px.
+ *
+ * ⚠️ #419 asks that what gives way be recorded: **nothing is dropped**, and
+ * on an upright phone the mute's visible word is "Mute". Neither rule applies
+ * with a side camera paired as well, whose row #576 already puts in each of
+ * those places; that three-way combination is not measured here.
+ * `ride.browser.spec.ts` §"#1398" holds the room ride with sounds on at every
+ * overlay viewport, both ways, and undoes this block as its control.
+ */
+@media (min-width: 46rem) and (min-height: 22.5rem) and (max-height: 30rem),
+  (min-width: 46rem) and (min-height: 47rem) {
+  .oyl-game--riding
+    .oyl-hud__actions:has(> .oyl-hud__room-row):not(:has(> .oyl-hud__side-camera-row))
+    > .oyl-sound {
+    position: absolute;
+    grid-area: route;
+    bottom: calc(100% + var(--oyl-space-xs));
+    left: 0;
+    width: min(100%, 16rem);
+    box-sizing: border-box;
+    background: var(--oyl-color-hud-surface);
+    border: 1px solid var(--oyl-color-hud-border);
+    border-radius: var(--oyl-radius);
+    color: var(--oyl-color-hud-ink);
+    padding: 0 var(--oyl-space-sm);
+  }
+}
+
+@media (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) {
+  .oyl-game--riding
+    .oyl-hud__actions:has(> .oyl-sound):has(> .oyl-hud__room-row):not(
+      :has(> .oyl-hud__side-camera-row)
+    ) {
+    flex-flow: row wrap;
+  }
+
+  .oyl-game--riding
+    .oyl-hud__actions:has(> .oyl-sound):has(> .oyl-hud__room-row):not(
+      :has(> .oyl-hud__side-camera-row)
+    )
+    > :not(.oyl-sound, .oyl-hud__room-row) {
+    flex-basis: 100%;
+  }
+
+  .oyl-game--riding
+    .oyl-hud__actions:has(> .oyl-sound):not(:has(> .oyl-hud__side-camera-row))
+    > .oyl-hud__room-row {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .oyl-game--riding
+    .oyl-hud__actions:has(> .oyl-hud__room-row):not(:has(> .oyl-hud__side-camera-row))
+    > .oyl-sound {
+    flex: 0 0 8rem;
+    min-width: 0;
+  }
+
+  .oyl-game--riding
+    .oyl-hud__actions:has(> .oyl-hud__room-row):not(:has(> .oyl-hud__side-camera-row))
+    .oyl-sound__mute-more {
     position: absolute;
     width: 1px;
     height: 1px;
