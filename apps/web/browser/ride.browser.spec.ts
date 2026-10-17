@@ -4354,6 +4354,12 @@ test.describe('a room ride with sounds on — #1398', () => {
     });
   }
 
+  // ⚠️ #1409: the 1024×768 control depends on the CI runner's fonts. What it
+  // finds there is the actions panel 7 px into the race's standings, a
+  // margin narrower glyphs may close, so on another machine's fonts that
+  // control may find nothing and fail. Measured only on the runner's fonts,
+  // as are the other two: 7 px off the stage at 736×360 and 24 px into the
+  // rider at 360×752.
   for (const viewport of OVERLAY_VIEWPORTS.filter((each) =>
     ['736×360', '1024×768', '360×752'].includes(`${String(each.width)}×${String(each.height)}`),
   )) {
@@ -4435,17 +4441,32 @@ function givesWayIn1407(query: string, viewport: Viewport): readonly string[] {
 
 /**
  * §"#1398"'s findings less the recorded trades, each of which must be laid
- * out at no size: a trade that stopped being one is a finding too.
+ * out at no size (or clipped to 1 px): a trade that stopped being one is a
+ * finding too.
+ *
+ * A finding is dropped by the NAME it starts with, and only for an item that
+ * did give way (a box of at most 1 px²): such an item is off the stage or
+ * covered by construction, and nobody sees it. An item recorded as giving way
+ * that is still laid out keeps every finding about it, and adds "not given
+ * way".
  */
-function failuresIn1407(seen: StageMeasurement, viewport: Viewport, query: string): string[] {
-  const givesWay = givesWayIn1407(query, viewport);
-  const found = roomWithSoundsFailures(seen, viewport).filter(
-    (each) => !givesWay.some((name) => each.startsWith(`${name} [0,0 → 0,0]`)),
-  );
+function failuresGivingWay(
+  seen: StageMeasurement,
+  viewport: Viewport,
+  givesWay: readonly string[],
+): string[] {
+  const gone: string[] = [];
+  const found: string[] = [];
   for (const name of givesWay) {
     const item = named(seen.items, name);
-    if (item.box.width * item.box.height > 0) found.push(`${describeItem(item)} not given way`);
+    if (item.box.width * item.box.height > 1) found.push(`${describeItem(item)} not given way`);
+    else gone.push(name);
   }
+  found.unshift(
+    ...roomWithSoundsFailures(seen, viewport).filter(
+      (each) => !gone.some((name) => each.startsWith(`${name} [`)),
+    ),
+  );
   return found;
 }
 
@@ -4507,7 +4528,9 @@ test.describe('Report’s reasons open, and a race on its start line, with sound
             panels.some((each) => each.name === SOUND_ROW),
             `${how}: the sound row a panel of its own`,
           ).toBe(soundRowLifted(viewport));
-          expect(failuresIn1407(seen, viewport, query), how).toEqual([]);
+          expect(failuresGivingWay(seen, viewport, givesWayIn1407(query, viewport)), how).toEqual(
+            [],
+          );
         }
       });
     }
@@ -4566,6 +4589,191 @@ test.describe('Report’s reasons open, and a race on its start line, with sound
         (each) => !givesWayIn1407(query, viewport).some((name) => each.startsWith(`${name} [`)),
       );
       console.log(`#1407 control — ${query} — ${viewport.name}: ${failures.join('; ')}`);
+      expect(failures).not.toEqual([]);
+    });
+  }
+});
+
+/**
+ * #1409 — a room ride with sounds on and a side camera paired, and a room ride
+ * with sounds on whose notice slot carries the room's sentence.
+ *
+ * ## What is held
+ *
+ * At every overlay viewport, both ways (#1120), what §"#1407" holds:
+ * nothing scrolled, every reading and control inside the viewport and
+ * uncovered, every panel whole, over no other and not over the leaning rider,
+ * and each thing that gives way laid out at no size exactly where `theme.css`
+ * records it and nowhere else:
+ *
+ * - `?room=following&sounds=on&side=filming` — *Follow*, *Report*, the mute,
+ *   the volume, the side camera's line and *Stop side camera*. On a phone
+ *   the side camera's line gives way, and on an upright phone the volume as
+ *   well (`theme.css` §"#1409"). ⚠️ The owner's ruling of 2026-10-17: on an
+ *   upright phone (and on a tablet) **the trainer line stays on the
+ *   screen**, because it can carry a running workout's hold, the power the
+ *   trainer is holding; until that ruling it gave way upright, and each
+ *   side-camera case now requires it laid out, on the stage and uncovered.
+ *   On a phone on its side #1358 gives it up in every room ride. On a phone
+ *   on its side and on a tablet, the sound row and the side camera's row
+ *   are each a panel of their own.
+ * - `?room=following&sounds=on&side=lost` — the same with the side camera's
+ *   link lost: its sentence is a notice in the bottom-start cell (#437, so on
+ *   a phone the route panel's two readings give way to it), and the stop
+ *   stays.
+ * - `?room=report&sounds=on&side=filming` — *Report*'s reasons open as well:
+ *   on a phone they take the row in place of *Follow* and *Report*
+ *   (§"#789 on a phone on its side", §"#1407"), whole, beside *Stop* upright,
+ *   where the volume has given way already.
+ * - `?room=lost&sounds=on` and `?room=paused&sounds=on` — #1360's two room
+ *   sentences in the notice slot with the lifted sound row (#1398). At
+ *   1024×768 the sentence and the sound row share the left column.
+ *
+ * ## The cause, and the control
+ *
+ * On `main` after #1398, on the CI runner's fonts, with a side camera as well
+ * the actions panel was over the race's standings at 1280×800 and 1024×768
+ * (`[696,472 → 1016,760]` against `[728,289 → 1016,532]`, covering the
+ * trainer line), ran 7 px below a 736×360 stage and 3 px below an 844×390
+ * one, began 50 px into the leaning rider at 360×752 and 36 px at 360×800,
+ * and covered *Stop side camera* at 390×844. The control takes §"#1409"'s
+ * rules out of the live stylesheet, puts back #1398's exception for a side
+ * camera, and requires the same measurement to fail at 1024×768, 736×360 and
+ * 360×752.
+ */
+const ROOM_SOUNDS_SIDE = `${FOLLOWING_WITH_SOUNDS}&side=filming`;
+const ROOM_SOUNDS_SIDE_LOST = `${FOLLOWING_WITH_SOUNDS}&side=lost`;
+const REPORT_SOUNDS_SIDE = `${REPORT_WITH_SOUNDS}&side=filming`;
+const ROOM_LOST_WITH_SOUNDS = '?room=lost&sounds=on';
+const ROOM_PAUSED_WITH_SOUNDS = '?room=paused&sounds=on';
+const SIDE_CAMERA_LINE = 'the side camera line';
+const SIDE_CAMERA_STOP = 'the side camera stop';
+const SIDE_CAMERA_ROW = 'oyl-hud__side-camera-row';
+const WITH_A_SIDE_CAMERA = [ROOM_SOUNDS_SIDE, ROOM_SOUNDS_SIDE_LOST, REPORT_SOUNDS_SIDE] as const;
+
+/** What `theme.css` records as giving way in this state at this viewport. */
+function givesWayIn1409(query: string, viewport: Viewport): readonly string[] {
+  if (TABLET_VIEWPORTS.includes(viewport)) return [];
+  const upright = !onItsSide(viewport);
+  return [
+    // #437: on a phone a notice stands in the route panel's cell.
+    ...(query === ROOM_SOUNDS_SIDE || query === REPORT_SOUNDS_SIDE ? [] : ROUTE_READINGS),
+    ...(query === ROOM_SOUNDS_SIDE || query === REPORT_SOUNDS_SIDE ? [SIDE_CAMERA_LINE] : []),
+    ...(upright && (WITH_A_SIDE_CAMERA as readonly string[]).includes(query) ? [VOLUME] : []),
+    ...(query === REPORT_SOUNDS_SIDE ? ROOM_REPORT_CONTROLS.slice(0, 2) : []),
+  ];
+}
+
+test.describe('a room ride with sounds on, a side camera paired or a notice standing — #1409', () => {
+  for (const query of [...WITH_A_SIDE_CAMERA, ROOM_LOST_WITH_SOUNDS, ROOM_PAUSED_WITH_SOUNDS]) {
+    const sideCamera = (WITH_A_SIDE_CAMERA as readonly string[]).includes(query);
+    for (const viewport of OVERLAY_VIEWPORTS) {
+      test(`${query}: every panel whole and clear of the rider, every reading and control on the stage — ${viewport.name}`, async ({
+        browser,
+      }) => {
+        const page = await sharedRide(browser, viewport, query);
+        if (query === REPORT_SOUNDS_SIDE) expect(await reasonsClipped(page)).toEqual([]);
+        for (const [how, seen] of await bothWays(page)) {
+          // The state this is about.
+          const names = seen.items.map((each) => each.name);
+          expect(names, how).toContain('sound: Mute sounds');
+          expect(names, how).toContain(VOLUME);
+          if (sideCamera) {
+            expect(names, how).toContain(SIDE_CAMERA_STOP);
+            expect(names, how).toContain(ROOM_REPORT_CONTROLS[1]);
+          }
+          if (query === REPORT_SOUNDS_SIDE) {
+            for (const name of ROOM_REPORT_CONTROLS) expect(names, how).toContain(name);
+          }
+          if (sideCamera && !onItsSide(viewport)) {
+            // The owner's ruling of 2026-10-17: the trainer line, which can
+            // carry a workout's hold, is laid out, on the stage and uncovered.
+            const line = named(seen.items, TRAINER_LINE);
+            const shown = `${how}: ${describeItem(line)} shown (the owner's ruling, 2026-10-17)`;
+            expect(line.box.width, shown).toBeGreaterThan(1);
+            expect(line.box.height, shown).toBeGreaterThan(1);
+            expect(line.onTop, shown).toBe(true);
+            expect(inside(line.box, viewport), shown).toBe(true);
+          }
+          if (!sideCamera) {
+            // #1360's sentence, in the notice slot.
+            expect(
+              seenPanels(seen).some((each) => each.name.includes('oyl-hud__notices')),
+              how,
+            ).toBe(true);
+          }
+          expect(seen.scrollY, how).toBe(0);
+          expect(seen.stageScrollTop, how).toBe(0);
+          expect(seen.pageOverflow, how).toBeLessThanOrEqual(0);
+          const panels = seenPanels(seen);
+          console.log(
+            `#1409 — ${query} — ${viewport.name} — ${how}: ${panels.map(describeItem).join('; ')}`,
+          );
+          if (sideCamera) {
+            const lifted = soundRowLifted(viewport);
+            expect(
+              panels.some((each) => each.name === SOUND_ROW),
+              `${how}: the sound row a panel of its own`,
+            ).toBe(lifted);
+            expect(
+              panels.some((each) => each.name.includes(SIDE_CAMERA_ROW)),
+              `${how}: the side camera's row a panel of its own`,
+            ).toBe(lifted);
+          }
+          expect(failuresGivingWay(seen, viewport, givesWayIn1409(query, viewport)), how).toEqual(
+            [],
+          );
+        }
+      });
+    }
+  }
+
+  for (const viewport of OVERLAY_VIEWPORTS.filter((each) =>
+    ['1024×768', '736×360', '360×752'].includes(`${String(each.width)}×${String(each.height)}`),
+  )) {
+    test(`the control — with §"#1409" taken out, the same measurement fails — ${viewport.name}`, async ({
+      page,
+    }) => {
+      await openRide(page, viewport, ROOM_SOUNDS_SIDE);
+      const taken = await page.evaluate(() => {
+        // Every rule of §"#1409", and only those: each names the room's row
+        // together with the sound row or the side camera's row.
+        const ours = /oyl-hud__room-row\):has\(> \.oyl-(sound|hud__side-camera-row)\)/;
+        let count = 0;
+        const walk = (list: CSSRuleList, parent: CSSStyleSheet | CSSGroupingRule): void => {
+          for (let index = list.length - 1; index >= 0; index -= 1) {
+            const rule = list[index];
+            if (rule instanceof CSSStyleRule && ours.test(rule.selectorText)) {
+              parent.deleteRule(index);
+              count += 1;
+            } else if (rule instanceof CSSGroupingRule) {
+              walk(rule.cssRules, rule);
+            }
+          }
+        };
+        for (const sheet of document.styleSheets) walk(sheet.cssRules, sheet);
+        return count;
+      });
+      // Ten in `theme.css`: three on a phone on its side, one on a tablet and
+      // six upright. Eleven in the built sheet, which splits the one
+      // two-selector list into a rule per selector.
+      expect(taken, 'the rules of §"#1409" taken out').toBe(11);
+      // #1398's exception for a side camera, put back: the sound row stays in
+      // the actions panel.
+      await page.addStyleTag({
+        content: `
+          .oyl-game--riding .oyl-hud .oyl-hud__actions:has(> .oyl-hud__side-camera-row) > .oyl-sound {
+            position: static !important; padding: 0 !important; border: 0 !important;
+            width: auto !important; background: none !important;
+          }`,
+      });
+      const seen = await measure(page);
+      expect(
+        seenPanels(seen).some((each) => each.name === SOUND_ROW),
+        'the sound row back in the actions panel',
+      ).toBe(false);
+      const failures = roomWithSoundsFailures(seen, viewport);
+      console.log(`#1409 control — ${viewport.name}: ${failures.join('; ')}`);
       expect(failures).not.toEqual([]);
     });
   }
