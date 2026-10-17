@@ -12,6 +12,11 @@ It has the same authority as the root file. Where the text below says "this file
 
 ## Which numbers were taken, and by what (from CLAUDE.md §7, "ADRs")
 
+  ⚠️ **0052 is [ADR 0052](../adr/0052-the-phones-tilt-on-the-side-camera-link-and-adr-0044-accepted.md)**,
+  taken by [#1122](https://github.com/openzigs/onyourleft/issues/1122) on 2026-10-16 for the side-camera
+  phone's tilt message and ADR 0044's acceptance, and **accepted on the owner's rulings of 2026-10-03
+  and 2026-10-04**. It widens ADR 0033 D-3 by one message. A reviewer who remembers this sentence
+  offering 0052 is reading the old file.
   ⚠️ **0051 is [ADR 0051](../adr/0051-live-race-standings.md)**, taken by
   [#1347](https://github.com/openzigs/onyourleft/issues/1347) on 2026-10-14 for live race standings,
   and **accepted on the owner's ruling on that issue**. It supersedes ADR 0028 D-7.7 and, for live
