@@ -7197,7 +7197,10 @@ select.oyl-input {
 @media (min-width: 46rem) and (min-height: 22.5rem) and (max-height: 30rem),
   (min-width: 46rem) and (min-height: 47rem) {
   .oyl-game--riding .oyl-hud__actions:has(> .oyl-hud__room-row) > .oyl-sound,
-  /* #1407: and in a race's notice, which has no room row (§"#1407"). */
+  /* #1407: and in a race's notice, which has no room row (§"#1407"). The
+     selector is `.oyl-hud__race`, which GameView also renders while the race
+     counts down and once it is over: the lift applies there too, and only the
+     waiting state is measured (ride.browser.spec.ts §"#1407"). */
   .oyl-game--riding
     .oyl-hud:has(> .oyl-hud__notices > .oyl-hud__race)
     > .oyl-hud__actions:not(:has(> .oyl-hud__side-camera-row))
@@ -7270,12 +7273,13 @@ select.oyl-input {
  *   onto two lines of the room's row, which shares its line with the sound
  *   row, and with anchor positioning the actions panel started 69 px into
  *   the leaning rider at 360×752 (from y = 464; the rider ends at 533),
- *   55 px at 360×800 and 42 px at 390×844, and 25 px more without it. So the reasons take the row IN PLACE OF *Follow* and
- *   *Report*, the rule §"#789 on a phone on its side" already makes (with
- *   a side camera paired too, §"#1409"), and the panel is no taller open
- *   than closed. ⚠️ #419: **the volume gives way while the reasons are
- *   open**, and only then, and not with a side camera paired, where the
- *   sound row has a line of its own. Beside the sound row's
+ *   55 px at 360×800 and 42 px at 390×844, and 25 px more without it. So
+ *   the reasons take the row IN PLACE OF *Follow* and *Report*, the rule
+ *   §"#789 on a phone on its side" already makes (with a side camera paired
+ *   too, §"#1409"), and the panel is no taller open than closed. ⚠️ #419:
+ *   **the volume gives way while the reasons are open**, and only then, and
+ *   not with a side camera paired, where the sound row has a line of its
+ *   own. Beside the sound row's
  *   8 rem, even at a quarter's padding and gap, the three reasons were 18 px
  *   wider than a 360 px phone's row, and shrinking them clipped every one of
  *   their words ("Cheating" by 8 px); without the volume the row has room for
