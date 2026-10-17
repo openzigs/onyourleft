@@ -4419,6 +4419,8 @@ test.describe('a room ride with sounds on — #1398', () => {
 const REPORT_WITH_SOUNDS = `${REPORT_OPEN}&sounds=on`;
 const RACE_WITH_SOUNDS = '?room=race&sounds=on';
 const VOLUME = 'sound: Sound volume';
+/** `REPORT_REASONS_MS` in `RoomReport.tsx`: the reasons close by themselves. */
+const REPORT_REASONS_TIMEOUT_MS = 15_000;
 const ROUTE_READINGS = ['the elevation strip', 'the plan view'] as const;
 
 /** What `theme.css` records as giving way in this state at this viewport. */
@@ -4466,8 +4468,13 @@ test.describe('Report’s reasons open, and a race on its start line, with sound
         browser,
       }) => {
         const page = await sharedRide(browser, viewport, query);
-        if (query === REPORT_WITH_SOUNDS) expect(await reasonsClipped(page)).toEqual([]);
-        for (const [how, seen] of await bothWays(page)) {
+        const clippedAnchored = query === REPORT_WITH_SOUNDS ? await reasonsClipped(page) : [];
+        const ways = await bothWays(page);
+        // After `bothWays` the page is laid out without anchor positioning.
+        const clippedUnanchored = query === REPORT_WITH_SOUNDS ? await reasonsClipped(page) : [];
+        expect(clippedAnchored, ANCHORED).toEqual([]);
+        expect(clippedUnanchored, UNANCHORED).toEqual([]);
+        for (const [how, seen] of ways) {
           // The state this is about.
           const names = seen.items.map((each) => each.name);
           expect(names, how).toContain('sound: Mute sounds');
@@ -4502,6 +4509,24 @@ test.describe('Report’s reasons open, and a race on its start line, with sound
           ).toBe(soundRowLifted(viewport));
           expect(failuresIn1407(seen, viewport, query), how).toEqual([]);
         }
+      });
+    }
+  }
+
+  for (const viewport of OVERLAY_VIEWPORTS) {
+    for (const way of ['Escape', 'timeout'] as const) {
+      test(`closing the reasons by ${way} returns focus to Report (WCAG 2.4.3) — ${viewport.name}`, async ({
+        page,
+      }) => {
+        await openRide(page, viewport, REPORT_WITH_SOUNDS);
+        await page.locator('.oyl-hud__report-reasons > button').first().focus();
+        if (way === 'Escape') await page.keyboard.press('Escape');
+        else await page.waitForTimeout(REPORT_REASONS_TIMEOUT_MS + 1_000);
+        await expect(page.locator('.oyl-hud__report-reasons')).toHaveCount(0);
+        const active = await page.evaluate(
+          () => document.activeElement?.className ?? document.activeElement?.tagName,
+        );
+        expect(active).toContain('oyl-hud__report');
       });
     }
   }
