@@ -828,3 +828,13 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   decisions of 2026-10-12 on [#1106](https://github.com/openzigs/onyourleft/issues/1106), is the
   decision; no decision of this ADR is reversed, and its D-10 says what holds of D-3, D-6 and D-11.
   The body above is not edited. (#1106)
+- **2026-10-16** — **D-3's phone-to-tablet list has a fourth row, the phone's tilt, and the
+  2026-10-04 entry's ADR 0044 is accepted.**
+  [ADR 0052](0052-the-phones-tilt-on-the-side-camera-link-and-adr-0044-accepted.md), accepted on
+  the owner's rulings of 2026-10-03 and 2026-10-04, is the decision: it supersedes D-3's closing
+  *"and nothing else"* to admit one tilt message (the gravity direction in the picture's axes, keyed
+  by the picture's sequence number, on `control`, only while filming) and says what the tablet
+  refuses. Every other row of D-3, its never-sent list and its join rule stand, and so does D-4.
+  ADR 0052 D-5 records ADR 0044's acceptance, so the 2026-10-04 entry's *"until the owner accepts
+  it, this entry is a pointer and D-6 governs"* no longer holds: ADR 0044 D-1 governs what of D-6
+  stands. The body above is not edited. (#1122)
