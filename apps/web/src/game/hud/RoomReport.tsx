@@ -24,14 +24,18 @@
  *
  * ## Where the reasons go
  *
- * Under *Follow* and *Report*, on a tablet and an upright phone. On a phone
- * on its side there is no line to spare — with *Follow* the bottom row fits
- * a 736×360 stage by under a line (#1356, held by #1358), and one more line
- * pushes *Pause* off it — so there `theme.css` §"#789" lays the reasons, and then the
- * answer, IN PLACE OF *Follow* and *Report*, at the row's own height. With
- * *Report* hidden there, the reasons have two ways out besides a choice:
- * Escape, and closing by themselves after {@link REPORT_REASONS_MS} — a
- * press of *Report* by mistake costs nothing but one press to open it again.
+ * Under *Follow* and *Report*, on a tablet and an upright phone — except on
+ * an upright phone with sounds on, where they take the row in place of the
+ * two as below and the volume gives way while they are open (`theme.css`
+ * §"#1407"). On a phone on its side there is no line to spare — with
+ * *Follow* the bottom row fits a 736×360 stage by under a line (#1356, held
+ * by #1358), and one more line pushes *Pause* off it — so there `theme.css`
+ * §"#789" lays the reasons, and then the answer, IN PLACE OF *Follow* and
+ * *Report*, at the row's own height. With *Report* hidden there, the reasons
+ * have two ways out besides a choice: Escape, and closing by themselves
+ * after {@link REPORT_REASONS_MS} — a press of *Report* by mistake costs
+ * nothing but one press to open it again. Either way focus returns to
+ * *Report* once the reasons are gone, not before.
  *
  * ⚠️ **Not a live region.** The HUD has one (`announce.ts`); the answer is
  * said by moving focus to it, from the reason button the press took away.
@@ -114,12 +118,23 @@ export function RoomReport(props: {
   const answered = phase.kind === 'answered' ? phase.text : undefined;
   const choosing = phase.kind === 'choosing';
 
+  const restoreFocus = useRef(false);
+
   const close = (): void => {
+    // Back to the control that opened them, if focus was among them. Done in
+    // the effect below, after the commit: where `theme.css` hides *Report*
+    // while the reasons are open (#789, #1407) a focus call made here lands on
+    // a `display: none` button, does nothing, and focus falls to the body.
+    if (reasons.current?.contains(document.activeElement) === true) restoreFocus.current = true;
     setPhase({ kind: 'closed' });
-    // Back to the control that opened them, if focus was among them.
-    if (reasons.current?.contains(document.activeElement) === true)
-      opener.current?.focus(NO_SCROLL);
   };
+
+  const closed = phase.kind === 'closed';
+  useEffect(() => {
+    if (!closed || !restoreFocus.current) return;
+    restoreFocus.current = false;
+    opener.current?.focus(NO_SCROLL);
+  }, [closed]);
 
   useEffect(() => {
     if (!choosing) return undefined;

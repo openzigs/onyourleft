@@ -7197,6 +7197,14 @@ select.oyl-input {
   (min-width: 46rem) and (min-height: 47rem) {
   .oyl-game--riding
     .oyl-hud__actions:has(> .oyl-hud__room-row):not(:has(> .oyl-hud__side-camera-row))
+    > .oyl-sound,
+  /* #1407: and in a race's notice, which has no room row (§"#1407"). The
+     selector is `.oyl-hud__race`, which GameView also renders while the race
+     counts down and once it is over: the lift applies there too, and only the
+     waiting state is measured (ride.browser.spec.ts §"#1407"). */
+  .oyl-game--riding
+    .oyl-hud:has(> .oyl-hud__notices > .oyl-hud__race)
+    > .oyl-hud__actions:not(:has(> .oyl-hud__side-camera-row))
     > .oyl-sound {
     position: absolute;
     grid-area: route;
@@ -7254,6 +7262,74 @@ select.oyl-input {
     clip-path: inset(50%);
     white-space: nowrap;
     border: 0;
+  }
+}
+
+/*
+ * *Report*'s REASONS OPEN, AND A RACE ON ITS START LINE, WITH SOUNDS ON — #1407.
+ *
+ * Two states §"#1398" left over, measured on the CI runner's fonts:
+ *
+ * - **An upright phone with *Report*'s reasons open.** The reasons wrapped
+ *   onto two lines of the room's row, which shares its line with the sound
+ *   row, and with anchor positioning the actions panel started 69 px into
+ *   the leaning rider at 360×752 (from y = 464; the rider ends at 533),
+ *   55 px at 360×800 and 42 px at 390×844, and 25 px more without it. So
+ *   the reasons take the row IN PLACE OF *Follow* and *Report*, the rule
+ *   §"#789 on a phone on its side" already makes, and the
+ *   panel is no taller open than closed. ⚠️ #419: **the volume gives way
+ *   while the reasons are open**, and only then. Beside the sound row's
+ *   8 rem, even at a quarter's padding and gap, the three reasons were 18 px
+ *   wider than a 360 px phone's row, and shrinking them clipped every one of
+ *   their words ("Cheating" by 8 px); without the volume the row has room for
+ *   all three whole at their own padding. The mute stays, showing "Mute".
+ *   The reasons close by themselves after 15 s
+ *   (`RoomReport.tsx` §`REPORT_REASONS_MS`), on Escape, or on a choice, and
+ *   the volume comes back with them closing. The answer that follows a
+ *   choice is not laid out here: no browser fixture holds it.
+ * - **A race waiting on its start line, on a phone on its side.** No room
+ *   row, so §"#1398" did not lift the sound row, and with the race's notice
+ *   in the bottom-start cell and the primary panel at its tallest (a power
+ *   sensor not yet live, "— W Sensor lost") the actions panel ran 7 px below
+ *   a 736×360 stage, and the notice with it. That rule's selector now names
+ *   a race's notice too, so on a phone on its side and on a tablet the sound
+ *   row is drawn above the bottom-start cell in a race as it is in a room's
+ *   ride; nothing gives way that a race did not already give (#437's route
+ *   panel, while the notice stands in its cell).
+ *
+ * `ride.browser.spec.ts` §"#1407" holds both at every overlay viewport, both
+ * ways, and undoes this block as its control.
+ */
+@media (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) {
+  .oyl-game--riding
+    .oyl-hud__actions:has(> .oyl-sound):not(:has(> .oyl-hud__side-camera-row))
+    > .oyl-hud__room-row:has(> .oyl-hud__report-reasons)
+    > :is(.oyl-hud__follow, .oyl-hud__report) {
+    display: none;
+  }
+
+  .oyl-game--riding
+    .oyl-hud__actions:has(> .oyl-sound):not(:has(> .oyl-hud__side-camera-row))
+    .oyl-hud__report-reasons {
+    flex-wrap: nowrap;
+    align-items: center;
+    min-height: 3rem;
+  }
+
+  .oyl-game--riding
+    .oyl-hud__actions:has(> .oyl-hud__room-row > .oyl-hud__report-reasons):not(
+      :has(> .oyl-hud__side-camera-row)
+    )
+    > .oyl-sound {
+    flex-basis: auto;
+  }
+
+  .oyl-game--riding
+    .oyl-hud__actions:has(> .oyl-hud__room-row > .oyl-hud__report-reasons):not(
+      :has(> .oyl-hud__side-camera-row)
+    )
+    .oyl-sound__volume {
+    display: none;
   }
 }
 
