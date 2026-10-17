@@ -1104,7 +1104,21 @@ two minutes of one worker. Nothing else moved: no stop, no worker count, no scri
 to nightly; `shared-load.ts` still loads once per key within each file, which is why
 `fullyParallel` (one group per CASE, so one load per case) was not the move.
 
-**Measured** on this change's pull request: see the pull request for #1414.
+**Measured** on this change's own pull request, two attempts of run
+[39070960361](https://github.com/openzigs/onyourleft/actions/runs/39070960361), the same columns as
+the table above:
+
+| Attempt | `browser-1` on | its cases | its `chromium` run | `browser-2` on | its cases | its `chromium` run | game run |
+|---|---|--:|--:|---|--:|--:|--:|
+| 1 | EPYC 9V45 | 825 | 5.1 m | Xeon 8370C | 735 | 4.7 m | 1.3 m |
+| 2 | **EPYC 7763** | 825 | **7.8 m** | **EPYC 7763** | 735 | 4.6 m | 1.2 m |
+
+- **`browser-1` on the EPYC 7763: 7.8 m (468 s) of its 720 s, 4.2 minutes clear**, against 10.1 m on
+  the same CPU before (run 39045053119). `browser-2` on the 7763: 4.6 m of 720 s, then the game run.
+- ⚠️ **Still uneven, and for the same reason**: by count `browser-1` ends at `ride-targets`, and its
+  files are slower per case than `browser-2`'s. When a row brings `browser-1` within about three
+  minutes of its stop, the next move is a third shard (`--shard N/3`, a script and a job, each in
+  `needs:`), which with no file over about two minutes now divides the time as well as the count.
 
 ⚠️ **The runner is two cores, not four, and that is what bounds all of this.** `ubuntu-latest`
 reports four vCPUs, and `lscpu` on it reads `Thread(s) per core: 2`, `Core(s) per socket: 2` (run
