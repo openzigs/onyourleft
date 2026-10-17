@@ -5,7 +5,7 @@
  * *Report* on the HUD — #789: audited closed, open and answered, in the HUD
  * the game mounts; named for the rider it reports and opening a group named
  * for them; and adding no live region beside the HUD's one (`announce.ts`).
- * Where it is drawn is the browser gate's (`ride.browser.spec.ts` §"#789");
+ * Where it is drawn is the browser gate's (`ride-room.browser.spec.ts` §"#789");
  * that it files through the room is `room-wiring.test.tsx` §"#789".
  */
 

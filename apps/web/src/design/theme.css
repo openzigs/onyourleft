@@ -4678,7 +4678,7 @@ select.oyl-input {
  * name of `routes/save.ts` §`MAXIMUM_ROUTE_NAME_LENGTH` wrapped *Ride* past
  * the padding. Both came from pinning a box whose height and whose neighbours'
  * visibility vary; in the flow neither can happen, by construction, and
- * `browser/ride.browser.spec.ts` §"#940" hit-tests it.
+ * `browser/pre-ride.browser.spec.ts` §"#940" hit-tests it.
  *
  * The `scroll-padding` rule left here is not this chooser's pin — it has none
  * — but the SHELL's: the navigation bar (fixed, 4.5 rem, on a compact window)
@@ -6012,7 +6012,7 @@ select.oyl-input {
  * Where the route plan is on an ordinary ride, and its size: the element
  * carries `.oyl-hud__plan-svg` too, whose height (and the short-landscape
  * 4.5 rem below) is the only height here, so the route panel is the height it
- * was (#1169) — `browser/ride.browser.spec.ts` §"#1307" measures the two
+ * was (#1169) — `browser/ride-workout.browser.spec.ts` §"#1307" measures the two
  * against each other. ⚠️ So this rule comes AFTER that one: it restates
  * `display`.
  *
@@ -6192,7 +6192,7 @@ select.oyl-input {
 
 /* #783: the room's one control, "Follow" — a 44 px secondary button like the
    side camera's Stop, its whole name visually hidden past the word shown.
-   ⚠️ Measured since #789 (`ride.browser.spec.ts` §"#789"), which a reviewer
+   ⚠️ Measured since #789 (`ride-room.browser.spec.ts` §"#789"), which a reviewer
    who remembers "no browser harness here rides in a room" is reading the old
    file for: on the stage at every overlay viewport since #1356 took the
    third row of readings off a phone and #1358 the trainer line off a phone
@@ -6305,7 +6305,7 @@ select.oyl-input {
  * The line is visually hidden by clip, so a screen reader still reaches it,
  * and on a tablet and an upright phone it stays where #373 put it. That
  * gives back 50 px on the runner's fonts and 29 px on a Mac.
- * `ride.browser.spec.ts` §"#1358" holds every panel whole and every reading
+ * `ride-room.browser.spec.ts` §"#1358" holds every panel whole and every reading
  * and control on the stage in a room ride with a rider near, and puts a
  * two-line trainer line back as its control.
  */
@@ -6640,7 +6640,7 @@ select.oyl-input {
  * On a tablet it is a panel of its own in the notices row, at the END edge,
  * top-aligned under the secondary readings — a notice keeps the start edge,
  * so the two never meet (22 rem + 18 rem is under the narrowest tablet's 50).
- * `ride.browser.spec.ts` §"#1347" measures it whole, over no panel and clear
+ * `ride-room.browser.spec.ts` §"#1347" measures it whole, over no panel and clear
  * of the leaning rider at all three, both with anchor positioning and without.
  */
 .oyl-hud .oyl-hud__standings {
@@ -6746,7 +6746,7 @@ select.oyl-input {
  * y = 360, 29 px above it. On the CI runner's fonts the secondary panel ends
  * at y = 175 at 844×390, 30 px above the rider, and *Follow* and *Report*
  * still run the bottom row of a phone on its side a few pixels below the
- * stage — that is #1358's. `ride.browser.spec.ts` §"#1356" holds a room ride at every overlay
+ * stage — that is #1358's. `ride-room.browser.spec.ts` §"#1356" holds a room ride at every overlay
  * viewport, both ways, and undoes this block as its control.
  */
 @media (min-width: 46rem) and (min-height: 22.5rem) and (max-height: 30rem),
@@ -6898,7 +6898,7 @@ select.oyl-input {
  * the pair ran over an upright rider on the narrowest phones (27 px into the
  * rider's box at 360×752), so there, and only there, `GameView`
  * §`ONE_NOTICE_ONLY_QUERY` takes the road notice and its control off the HUD
- * while this one stands — #693's review. `ride.browser.spec.ts` §"#647"
+ * while this one stands — #693's review. `ride-notices.browser.spec.ts` §"#647"
  * measures both at every overlay viewport.
  */
 @media (min-width: 46rem) and (min-height: 22.5rem) and (max-height: 30rem),
@@ -7197,7 +7197,7 @@ select.oyl-input {
  * paired as well, whose row #576 already puts in each of those places, the
  * upright rule does not apply and the lift does: §"#1409" says where the two
  * lifted rows go together.
- * `ride.browser.spec.ts` §"#1398" holds the room ride with sounds on at every
+ * `ride-room.browser.spec.ts` §"#1398" holds the room ride with sounds on at every
  * overlay viewport, both ways, and undoes this block as its control.
  */
 @media (min-width: 46rem) and (min-height: 22.5rem) and (max-height: 30rem),
@@ -7206,7 +7206,7 @@ select.oyl-input {
   /* #1407: and in a race's notice, which has no room row (§"#1407"). The
      selector is `.oyl-hud__race`, which GameView also renders while the race
      counts down and once it is over: the lift applies there too, and only the
-     waiting state is measured (ride.browser.spec.ts §"#1407"). */
+     waiting state is measured (ride-room.browser.spec.ts §"#1407"). */
   .oyl-game--riding
     .oyl-hud:has(> .oyl-hud__notices > .oyl-hud__race)
     > .oyl-hud__actions:not(:has(> .oyl-hud__side-camera-row))
@@ -7303,7 +7303,7 @@ select.oyl-input {
  *   ride; nothing gives way that a race did not already give (#437's route
  *   panel, while the notice stands in its cell).
  *
- * `ride.browser.spec.ts` §"#1407" holds both at every overlay viewport, both
+ * `ride-room.browser.spec.ts` §"#1407" holds both at every overlay viewport, both
  * ways, and undoes this block as its control.
  */
 @media (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) {
@@ -7390,7 +7390,7 @@ select.oyl-input {
  * *Report*'s reasons open as well take the row in place of *Follow* and
  * *Report* upright, by §"#1407"'s first two rules, beside *Stop*, and the
  * panel is the same height open as closed.
- * `ride.browser.spec.ts` §"#1409" holds all of it at every overlay viewport,
+ * `ride-room.browser.spec.ts` §"#1409" holds all of it at every overlay viewport,
  * both ways, and takes this block out as its control.
  */
 @media (min-width: 46rem) and (min-height: 22.5rem) and (max-height: 30rem) {
