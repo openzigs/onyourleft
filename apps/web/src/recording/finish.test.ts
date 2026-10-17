@@ -31,6 +31,7 @@ import {
   ATHLETE_A,
   ATHLETE_B,
   createStoreHarness,
+  recordingFor,
   seedAthletes,
   type StoreHarness,
 } from '@onyourleft/store/testing';
@@ -99,7 +100,12 @@ describe('a ride nobody rode produces no activity', () => {
   it('and the save reports that rather than failing', async () => {
     // "Empty" is not "failed". A rider who pressed Start and Stop has not lost
     // anything, and telling them a save failed would send them looking.
-    expect(await saveFinishedRide(storeOf(), undefined)).toStrictEqual({ status: 'empty' });
+    expect(
+      await saveFinishedRide(
+        { putFinishedRide: () => Promise.reject(new Error('unreached')) },
+        undefined,
+      ),
+    ).toStrictEqual({ status: 'empty' });
   });
 });
 
@@ -261,56 +267,60 @@ describe('what the activity says about the ride', () => {
 });
 
 describe('a save that fails leaves nothing half-written', () => {
-  it('takes the activity back out when the samples will not go down', async () => {
-    // ⚠️ A row with no samples behind it shows in the library and opens to
-    // nothing — the importer's own reason for the same rollback.
-    const deleted: string[] = [];
+  it('reports the store’s own reason, and never throws', async () => {
     const store: RideSaveStore = {
-      putActivity: () => Promise.resolve(ACTIVITY),
-      putStreamSet: () => Promise.reject(new Error('the device is full')),
-      putLap: (lap) => Promise.resolve(lap.id),
-      deleteActivity: (_athlete, id) => {
-        deleted.push(id);
-        return Promise.resolve(true);
-      },
+      putFinishedRide: () => Promise.reject(new Error('the device is full')),
     };
     const outcome = await saveFinishedRide(store, rideToSave(input()));
-    expect(outcome.status).toBe('failed');
-    if (outcome.status === 'failed') expect(outcome.error.message).toBe('the device is full');
-    expect(deleted).toStrictEqual([ACTIVITY]);
+    expect(outcome).toStrictEqual({ status: 'failed', error: new Error('the device is full') });
   });
 
-  it('reports the original cause even when the tidy-up also fails', async () => {
-    // The rider needs to know the device is full, not whatever the cleanup hit
-    // on the way out.
+  it('turns a rejection that is not an Error into one', async () => {
     const store: RideSaveStore = {
-      putActivity: () => Promise.resolve(ACTIVITY),
-      putStreamSet: () => Promise.reject(new Error('the device is full')),
-      putLap: (lap) => Promise.resolve(lap.id),
-      deleteActivity: () => Promise.reject(new Error('and the delete failed too')),
+      // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- the case under test
+      putFinishedRide: () => Promise.reject('quota'),
     };
     const outcome = await saveFinishedRide(store, rideToSave(input()));
-    expect(outcome.status).toBe('failed');
-    if (outcome.status === 'failed') expect(outcome.error.message).toBe('the device is full');
+    expect(outcome.status === 'failed' ? outcome.error.message : undefined).toBe('quota');
   });
 
-  it('writes no streams when the activity itself will not go down', async () => {
-    const attempted: string[] = [];
+  it('writes the ride in ONE store write — #1326', async () => {
+    const writes: string[] = [];
     const store: RideSaveStore = {
-      putActivity: () => Promise.reject(new Error('no room')),
-      putStreamSet: () => {
-        attempted.push('streams');
-        return Promise.resolve(ACTIVITY);
+      putFinishedRide: (ride) => {
+        writes.push(ride.activity.id);
+        return Promise.resolve(ride.activity.id);
       },
-      putLap: (lap) => Promise.resolve(lap.id),
-      deleteActivity: () => Promise.resolve(true),
     };
-    expect((await saveFinishedRide(store, rideToSave(input()))).status).toBe('failed');
-    // Streams behind no activity is the state `putStreamSet` refuses anyway;
-    // this asserts the caller never asks it to.
-    expect(attempted).toStrictEqual([]);
+    expect(await saveFinishedRide(store, rideToSave(input()))).toStrictEqual({
+      status: 'saved',
+      id: ACTIVITY,
+    });
+    expect(writes).toStrictEqual([ACTIVITY]);
   });
 });
+
+/**
+ * A lap id that is already athlete B's, so the real store refuses the lap
+ * that carries it: a real refusal through the real check, not a stub.
+ */
+async function takeLapId(id: LapId): Promise<void> {
+  const theirs: NewActivity = {
+    ...rideToSave(input({ id: toActivityId('theirs'), athleteId: ATHLETE_B }))!.activity,
+  };
+  await harness.write(async (store) => store.putActivity(theirs));
+  await harness.write(async (store) =>
+    store.putLap({
+      id,
+      activityId: theirs.id,
+      ordinal: 0,
+      startedAt: STARTED,
+      elapsedTime: seconds(1),
+      movingTime: seconds(1),
+      distance: metres(1),
+    }),
+  );
+}
 
 // #1312: the laps of a course ridden during the recording.
 function riddenLaps(): {
@@ -359,81 +369,27 @@ describe("#1312 — a ride's laps are saved with it", () => {
     expect(await harness.read(async (store) => store.listLaps(ATHLETE_A, ACTIVITY))).toEqual([]);
   });
 
-  it('takes the whole ride back out when a lap will not go down', async () => {
-    const deleted: string[] = [];
-    let written = 0;
-    const store: RideSaveStore = {
-      ...storeOf(),
-      putLap: (lap) => {
-        written += 1;
-        return written === 2
-          ? Promise.reject(new Error('the device is full'))
-          : Promise.resolve(lap.id);
-      },
-      deleteActivity: (_athlete, id) => {
-        deleted.push(id);
-        return Promise.resolve(true);
-      },
-    };
+  it('a lap the store refuses leaves no ride, no samples and no lap behind — #1326', async () => {
+    await seedAthletes(harness);
+    await takeLapId(toLapId('lap-2'));
+    const finished = rideToSave(input({ laps: riddenLaps() }));
 
-    const outcome = await saveFinishedRide(store, rideToSave(input({ laps: riddenLaps() })));
+    const outcome = await harness.write(async (store) => saveFinishedRide(store, finished));
 
     expect(outcome.status).toBe('failed');
-    if (outcome.status === 'failed') expect(outcome.error.message).toBe('the device is full');
-    expect(deleted).toStrictEqual([ACTIVITY]);
-    // Taken back, so nothing is said to be left behind.
-    expect(outcome).not.toHaveProperty('leftBehind');
-    // It stopped at the lap that failed.
-    expect(written).toBe(2);
-  });
-
-  it('says so when the ride cannot be taken back out because the delete fails', async () => {
-    const store: RideSaveStore = {
-      ...storeOf(),
-      putLap: () => Promise.reject(new Error('the device is full')),
-      deleteActivity: () => Promise.reject(new Error('the tidy-up failed too')),
-    };
-
-    const outcome = await saveFinishedRide(store, rideToSave(input({ laps: riddenLaps() })));
-
-    // The original cause, and the fact that part of the ride is still there.
-    expect(outcome).toMatchObject({ status: 'failed', leftBehind: true });
-    if (outcome.status === 'failed') expect(outcome.error.message).toBe('the device is full');
-  });
-
-  it('says nothing is left behind when the delete finds no ride to remove', async () => {
-    // `false` is "there was no such ride" — another tab deleted it first — and
-    // then "part of the ride was written and could not be removed" is untrue.
-    const store: RideSaveStore = {
-      ...storeOf(),
-      putLap: () => Promise.reject(new Error('the device is full')),
-      deleteActivity: () => Promise.resolve(false),
-    };
-
-    const outcome = await saveFinishedRide(store, rideToSave(input({ laps: riddenLaps() })));
-
-    expect(outcome.status).toBe('failed');
-    expect(outcome).not.toHaveProperty('leftBehind');
-  });
-
-  it('says the same when the samples will not go down and the activity cannot be taken back', async () => {
-    const store: RideSaveStore = {
-      ...storeOf(),
-      putStreamSet: () => Promise.reject(new Error('the device is full')),
-      deleteActivity: () => Promise.reject(new Error('the tidy-up failed too')),
-    };
-
-    expect(await saveFinishedRide(store, rideToSave(input()))).toMatchObject({
-      status: 'failed',
-      leftBehind: true,
-    });
+    const left = await harness.read(async (store) => ({
+      activity: await store.getActivity(ATHLETE_A, ACTIVITY),
+      samples: await store.getStreamSetSummary(ATHLETE_A, ACTIVITY),
+      laps: await store.listLaps(ATHLETE_A, ACTIVITY),
+      library: await store.listActivitySummaries(ATHLETE_A),
+    }));
+    expect(left).toStrictEqual({ activity: undefined, samples: undefined, laps: [], library: [] });
   });
 
   /**
    * #1312 beside #1244, after the two met on `main`: one ride can carry
-   * re-plan decisions (in the activity's own `rideFacts`) AND laps (rows of
-   * their own, written after it). Both go down, and when a lap will not, both
-   * come back out with the ride.
+   * re-plan decisions (in the activity's own `rideFacts`) AND laps. Both go
+   * down, and when a lap will not, neither does.
    */
   describe('a ride with re-plan decisions and laps', () => {
     const DECISION = {
@@ -461,58 +417,53 @@ describe("#1312 — a ride's laps are saved with it", () => {
 
     it('goes back out whole when a lap will not go down: no ride, no decision, no lap', async () => {
       await seedAthletes(harness);
+      await takeLapId(toLapId('lap-3'));
       const finished = rideToSave(input({ laps: riddenLaps(), replans: [DECISION] }));
-      const outcome = await harness.write(async (store) =>
-        saveFinishedRide(
-          {
-            putActivity: (record) => store.putActivity(record),
-            putStreamSet: (set) => store.putStreamSet(set),
-            deleteActivity: (athlete, id) => store.deleteActivity(athlete, id),
-            putLap: (lap) =>
-              lap.ordinal === 1 ? Promise.reject(new Error('refused')) : store.putLap(lap),
-          },
-          finished,
-        ),
-      );
+
+      const outcome = await harness.write(async (store) => saveFinishedRide(store, finished));
 
       expect(outcome).toMatchObject({ status: 'failed' });
-      expect(outcome).not.toHaveProperty('leftBehind');
       expect(await harness.read(async (store) => store.getActivity(ATHLETE_A, ACTIVITY))).toBe(
         undefined,
       );
       expect(await harness.read(async (store) => store.listLaps(ATHLETE_A, ACTIVITY))).toEqual([]);
     });
   });
-
-  it('and through the real store that leaves no ride and no lap behind', async () => {
-    await seedAthletes(harness);
-    const finished = rideToSave(input({ laps: riddenLaps() }));
-    await harness.write(async (store) => {
-      const refusing: RideSaveStore = {
-        putActivity: (record) => store.putActivity(record),
-        putStreamSet: (set) => store.putStreamSet(set),
-        deleteActivity: (athlete, id) => store.deleteActivity(athlete, id),
-        putLap: (lap) =>
-          lap.ordinal === 1 ? Promise.reject(new Error('refused')) : store.putLap(lap),
-      };
-      expect((await saveFinishedRide(refusing, finished)).status).toBe('failed');
-    });
-
-    expect(await harness.read(async (store) => store.getActivity(ATHLETE_A, ACTIVITY))).toBe(
-      undefined,
-    );
-    expect(await harness.read(async (store) => store.listLaps(ATHLETE_A, ACTIVITY))).toEqual([]);
-  });
 });
 
-function storeOf(): RideSaveStore {
-  return {
-    putActivity: () => Promise.resolve(ACTIVITY),
-    putStreamSet: () => Promise.resolve(ACTIVITY),
-    putLap: (lap) => Promise.resolve(lap.id),
-    deleteActivity: () => Promise.resolve(true),
-  };
-}
+describe('#1326 — the checkpoint is marked saved in the same write as the ride', () => {
+  it('reads back on a fresh handle as already saved, as this ride', async () => {
+    await seedAthletes(harness);
+    const recording = recordingFor(ATHLETE_A, { state: 'stopped' });
+    await harness.write(async (store) => store.putRecordingSession(recording));
+
+    const finished = rideToSave(input({ recordingSession: recording.id }));
+    await harness.write(async (store) => saveFinishedRide(store, finished));
+
+    const header = await harness.read(async (store) =>
+      store.getRecordingSession(ATHLETE_A, recording.id),
+    );
+    expect(header?.savedAs).toBe(ACTIVITY);
+  });
+
+  it('is left unmarked when the save fails, so the ride is offered back', async () => {
+    await seedAthletes(harness);
+    await takeLapId(toLapId('lap-1'));
+    const recording = recordingFor(ATHLETE_A, { state: 'stopped' });
+    await harness.write(async (store) => store.putRecordingSession(recording));
+
+    const finished = rideToSave(input({ laps: riddenLaps(), recordingSession: recording.id }));
+    expect((await harness.write(async (store) => saveFinishedRide(store, finished))).status).toBe(
+      'failed',
+    );
+
+    const header = await harness.read(async (store) =>
+      store.getRecordingSession(ATHLETE_A, recording.id),
+    );
+    expect(header).toBeDefined();
+    expect(header?.savedAs).toBeUndefined();
+  });
+});
 
 describe('#1084 — a ride with nothing to work a load out from is saved as such', () => {
   it('reads back, through a fresh handle, as a ride with no load rather than one to work out', async () => {

@@ -811,16 +811,12 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
         newLapId: () => lapId(`lap-${String((mintedLaps += 1))}`),
         timeZone: 'Europe/London',
         store: {
-          putActivity: (record) =>
+          putFinishedRide: (ride) =>
             harness.write(async (store) => {
-              const id = await store.putActivity(record);
+              const id = await store.putFinishedRide(ride);
               savedIds.push(id);
               return id;
             }),
-          putStreamSet: (set) => harness.write(async (store) => store.putStreamSet(set)),
-          putLap: (lap) => harness.write(async (store) => store.putLap(lap)),
-          deleteActivity: (owner, id) =>
-            harness.write(async (store) => store.deleteActivity(owner, id)),
         },
       },
     });

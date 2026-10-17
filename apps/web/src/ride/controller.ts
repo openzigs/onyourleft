@@ -110,12 +110,7 @@ import {
   recoverRecorder,
 } from '../recording/recorder';
 import { recoverableRides, type RecoverableRide } from '../recording/recovery';
-import {
-  RIDE_LEFT_BEHIND,
-  rideToSave,
-  saveFinishedRide,
-  type RideSaveStore,
-} from '../recording/finish';
+import { rideToSave, saveFinishedRide, type RideSaveStore } from '../recording/finish';
 import {
   lapFiguresOf,
   lapSlots,
@@ -2558,16 +2553,14 @@ export function createRideController(options: RideControllerOptions): RideContro
       // recorder's own, so a ride recovered after a crash keeps them by the
       // one path, as it keeps its laps (#1360's review, B2).
       ...(current.roomRaces.length === 0 ? {} : { races: current.roomRaces }),
+      // #1326: the store marks this checkpoint saved in the ride's own
+      // transaction, so a crash after the save cannot offer the ride again.
+      recordingSession: current.sessionId,
     });
     const outcome = await saveFinishedRide(port.store, finished);
 
     saveState = outcome.status;
-    saveError =
-      outcome.status !== 'failed'
-        ? undefined
-        : outcome.leftBehind === true
-          ? `${outcome.error.message}; ${RIDE_LEFT_BEHIND}`
-          : outcome.error.message;
+    saveError = outcome.status === 'failed' ? outcome.error.message : undefined;
     savedActivityId = outcome.status === 'saved' ? outcome.id : undefined;
     // #1042: the card's facts are the activity the save WROTE, read off the
     // record rather than recomputed — so the card and the library agree.
@@ -2591,7 +2584,10 @@ export function createRideController(options: RideControllerOptions): RideContro
       // disk as a `stopped` row — which `recovery.ts` reads as "the save
       // failed", offers "Save this ride", and thereby writes a second copy of
       // the same ride under a fresh activity id with nothing deduplicating it.
-      // The link is what tells the two apart afterwards.
+      // The link is what tells the two apart afterwards. Since #1326 the store
+      // has already written it, in the ride's own transaction; `markSaved`
+      // keeps the recorder's copy of the header in step, so no later header
+      // write can take the link back out.
       if (outcome.status === 'saved') {
         await current.markSaved(outcome.id);
       }
