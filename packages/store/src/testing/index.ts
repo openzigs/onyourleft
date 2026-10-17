@@ -114,4 +114,5 @@ export {
   truncatedWorkoutStoreFactory,
   unscopedAttemptStoreFactory,
   consentIgnoredStoreFactory,
+  piecewiseRideStoreFactory,
 } from './fakes';

@@ -144,6 +144,7 @@ import type {
   WorkoutGoalsRecord,
   LapRecord,
   NewActivity,
+  NewFinishedRide,
   NewLap,
   MatchCheckpointRecord,
   PrivacyZoneRecord,
@@ -1113,26 +1114,101 @@ export class ActivityStore {
    * @throws {StoreReferentialError} if `record.athleteId` names no athlete.
    */
   async putActivity(record: NewActivity): Promise<ActivityId> {
-    const row = toPersistedActivity({
-      ...record,
-      visibility: record.visibility ?? DEFAULT_VISIBILITY,
-      // Off unless the caller says otherwise (#793, ADR 0021 D-5.1), and
-      // written explicitly for `visibility`'s reason: "off by default" must be
-      // true of the stored row, not only of this code path.
-      mayBeRaced: record.mayBeRaced ?? false,
-    });
+    const row = activityRowOf(record);
     await this.#db.transaction('rw', [this.#athletes, this.#activities], async () => {
-      await this.#requireAthlete(record.athleteId);
-      // Inside the transaction, like the athlete check and for the same reason:
-      // read-then-write outside one lets a concurrent write land in between.
-      this.#requireNotOwnedByAnother(
-        await this.#activities.get(record.id),
-        record.athleteId,
-        `activity ${record.id}`,
-      );
-      await this.#activities.put(row);
+      await this.#writeActivity(record, row);
     });
     return record.id;
+  }
+
+  /**
+   * Writes a finished ride whole — its activity, its samples and its laps —
+   * in **one** transaction, and marks the checkpoint it was recorded into as
+   * saved in that same transaction (#1326).
+   *
+   * ## Why one write and not three
+   *
+   * Written as `putActivity`, then `putStreamSet`, then a `putLap` per lap, a
+   * crash between any two left an activity in the library whose checkpoint
+   * did not yet say it was saved: on next open the ride was offered for saving
+   * again, under a fresh id, and saving it listed the ride twice. And a failed
+   * lap left a ride with some of its laps unless a tidy-up delete ran, which
+   * could itself fail. Here every part, and the `savedAs` link, commits
+   * together or not at all: there is no state in between for a crash to
+   * leave behind, and nothing to tidy up.
+   *
+   * Each part is checked exactly as its own write checks it — the athlete
+   * exists, nothing here belongs to another athlete, a lap has its activity
+   * behind it — by the same code (`#writeActivity`, `#writeStreamSet`,
+   * `#writeLap`), so the two ways to write a ride cannot drift apart.
+   *
+   * The samples are encoded before the transaction opens, for
+   * `putStreamSet`'s reason: compression is asynchronous, and awaiting it
+   * inside a Dexie transaction lets the transaction commit underneath.
+   *
+   * @throws {StoreValidationError} if the streams or a lap name another
+   * activity, or a part fails its own write's validation.
+   * @throws {StoreReferentialError} if the athlete does not exist, or an id
+   * here is already another athlete's.
+   */
+  async putFinishedRide(ride: NewFinishedRide): Promise<ActivityId> {
+    const { activity, streams, laps } = ride;
+    if (streams.activityId !== activity.id || streams.athleteId !== activity.athleteId) {
+      throw new StoreValidationError(
+        `cannot store ride ${activity.id}: its samples are for activity ${streams.activityId}`,
+      );
+    }
+    const stray = laps.find((lap) => lap.activityId !== activity.id);
+    if (stray !== undefined) {
+      throw new StoreValidationError(
+        `cannot store ride ${activity.id}: lap ${stray.id} is for activity ${stray.activityId}`,
+      );
+    }
+    const row = activityRowOf(activity);
+    const { summary, blobs } = await this.#encodeStreamSet(streams);
+    await this.#db.transaction(
+      'rw',
+      [
+        this.#athletes,
+        this.#activities,
+        this.#streamSets,
+        this.#streamBlobs,
+        this.#laps,
+        this.#recordingSessions,
+      ],
+      async () => {
+        await this.#writeActivity(activity, row);
+        await this.#writeStreamSet(streams, summary, blobs);
+        for (const lap of laps) {
+          await this.#writeLap(lap);
+        }
+        if (ride.recordingSession !== undefined) {
+          // Scoped, as every read here is: a session id of another athlete's
+          // is a checkpoint this athlete does not have, and is left alone.
+          const session = await this.#recordingSessions
+            .where(INDEX.recordingSessionByAthleteAndId)
+            .equals([activity.athleteId, ride.recordingSession])
+            .first();
+          if (session !== undefined) {
+            await this.#recordingSessions.put({ ...session, savedAs: activity.id });
+          }
+        }
+      },
+    );
+    return activity.id;
+  }
+
+  /** `putActivity`'s write, inside a transaction the caller holds. */
+  async #writeActivity(record: NewActivity, row: PersistedActivity): Promise<void> {
+    await this.#requireAthlete(record.athleteId);
+    // Inside the transaction, like the athlete check and for the same reason:
+    // read-then-write outside one lets a concurrent write land in between.
+    this.#requireNotOwnedByAnother(
+      await this.#activities.get(record.id),
+      record.athleteId,
+      `activity ${record.id}`,
+    );
+    await this.#activities.put(row);
   }
 
   /** The athlete-scoped point lookup. There is deliberately no unscoped one. */
@@ -1463,21 +1539,26 @@ export class ActivityStore {
    */
   async putLap(record: NewLap): Promise<LapId> {
     return this.#db.transaction('rw', [this.#activities, this.#laps], async () => {
-      const parent = await this.#activities.get(record.activityId);
-      if (parent === undefined) {
-        throw new StoreReferentialError(
-          `cannot store lap ${record.id}: no activity ${record.activityId} exists`,
-        );
-      }
-      this.#requireNotOwnedByAnother(
-        await this.#laps.get(record.id),
-        parent.athleteId as AthleteId,
-        `lap ${record.id}`,
-      );
-      const lap: LapRecord = { ...record, athleteId: parent.athleteId as AthleteId };
-      await this.#laps.put(toPersistedLap(lap));
+      await this.#writeLap(record);
       return record.id;
     });
+  }
+
+  /** `putLap`'s write, inside a transaction the caller holds. */
+  async #writeLap(record: NewLap): Promise<void> {
+    const parent = await this.#activities.get(record.activityId);
+    if (parent === undefined) {
+      throw new StoreReferentialError(
+        `cannot store lap ${record.id}: no activity ${record.activityId} exists`,
+      );
+    }
+    this.#requireNotOwnedByAnother(
+      await this.#laps.get(record.id),
+      parent.athleteId as AthleteId,
+      `lap ${record.id}`,
+    );
+    const lap: LapRecord = { ...record, athleteId: parent.athleteId as AthleteId };
+    await this.#laps.put(toPersistedLap(lap));
   }
 
   /** This athlete's laps for this activity, in `ordinal` order. */
@@ -2586,39 +2667,48 @@ export class ActivityStore {
       'rw',
       [this.#activities, this.#streamSets, this.#streamBlobs],
       async () => {
-        // Scoped, and inside the transaction: this is both the foreign key the
-        // engine does not have and the write-path ownership check. There is no
-        // way to attach streams to an activity by id alone, so streams cannot
-        // be filed against another athlete's ride.
-        const activity = await this.#activities
-          .where(INDEX.activityByAthleteAndId)
-          .equals([set.athleteId, set.activityId])
-          .first();
-        if (activity === undefined) {
-          throw new StoreReferentialError(
-            `cannot store streams for activity ${set.activityId}: this athlete has no such activity`,
-          );
-        }
-        // The second guard, for the reason `putActivity` has one: `put` is
-        // keyed on the primary key alone, and `activityId` is that key. A
-        // stream set already on disk under another athlete must not be
-        // overwritten and thereby taken over. Found on the activity write path
-        // in review of PR #109; the same hole is reachable here the moment an
-        // id arrives from an imported file (#51).
-        this.#requireNotOwnedByAnother(
-          await this.#streamSets.get(set.activityId),
-          set.athleteId,
-          `the stream set for activity ${set.activityId}`,
-        );
-        // Replace rather than merge: the new set's channel list may be shorter
-        // than the old one's, and a stale blob left behind would be decoded as
-        // part of the next read and disagree with the summary.
-        await this.#streamBlobs.where(INDEX.streamBlobByActivity).equals(set.activityId).delete();
-        await this.#streamSets.put(summary);
-        await this.#streamBlobs.bulkPut(blobs);
+        await this.#writeStreamSet(set, summary, blobs);
       },
     );
     return set.activityId;
+  }
+
+  /** `putStreamSet`'s write, inside a transaction the caller holds. */
+  async #writeStreamSet(
+    set: NewStreamSet,
+    summary: PersistedStreamSet,
+    blobs: PersistedStreamBlob[],
+  ): Promise<void> {
+    // Scoped, and inside the transaction: this is both the foreign key the
+    // engine does not have and the write-path ownership check. There is no
+    // way to attach streams to an activity by id alone, so streams cannot
+    // be filed against another athlete's ride.
+    const activity = await this.#activities
+      .where(INDEX.activityByAthleteAndId)
+      .equals([set.athleteId, set.activityId])
+      .first();
+    if (activity === undefined) {
+      throw new StoreReferentialError(
+        `cannot store streams for activity ${set.activityId}: this athlete has no such activity`,
+      );
+    }
+    // The second guard, for the reason `putActivity` has one: `put` is
+    // keyed on the primary key alone, and `activityId` is that key. A
+    // stream set already on disk under another athlete must not be
+    // overwritten and thereby taken over. Found on the activity write path
+    // in review of PR #109; the same hole is reachable here the moment an
+    // id arrives from an imported file (#51).
+    this.#requireNotOwnedByAnother(
+      await this.#streamSets.get(set.activityId),
+      set.athleteId,
+      `the stream set for activity ${set.activityId}`,
+    );
+    // Replace rather than merge: the new set's channel list may be shorter
+    // than the old one's, and a stale blob left behind would be decoded as
+    // part of the next read and disagree with the summary.
+    await this.#streamBlobs.where(INDEX.streamBlobByActivity).equals(set.activityId).delete();
+    await this.#streamSets.put(summary);
+    await this.#streamBlobs.bulkPut(blobs);
   }
 
   /**
@@ -3531,6 +3621,18 @@ function summaryOf(record: ActivityRecord): ActivitySummary {
 }
 
 /** Stands in for a blob's bytes while only its declared sample count is being read. */
+/** The row `putActivity` and `putFinishedRide` both write, defaults applied. */
+function activityRowOf(record: NewActivity): PersistedActivity {
+  return toPersistedActivity({
+    ...record,
+    visibility: record.visibility ?? DEFAULT_VISIBILITY,
+    // Off unless the caller says otherwise (#793, ADR 0021 D-5.1), and
+    // written explicitly for `visibility`'s reason: "off by default" must be
+    // true of the stored row, not only of this code path.
+    mayBeRaced: record.mayBeRaced ?? false,
+  });
+}
+
 const EMPTY_BYTES = new Uint8Array(0);
 
 /** A `StreamChannels` under construction. The public type is deeply readonly. */

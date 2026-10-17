@@ -51,6 +51,7 @@ export type {
   RideWriteUpSourceRecord,
   LapRecord,
   NewActivity,
+  NewFinishedRide,
   NewLap,
   OriginalFileReference,
   PrivacyZoneRecord,

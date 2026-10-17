@@ -53,6 +53,7 @@
  * | `firstReferenceStoreFactory` | *wrong time* — a put that kept the row already there instead of replacing it | every put succeeds and the reference comes back well-formed — **from the first session**, not the last |
  * | `lastSentenceDroppedReportStoreFactory` | *wrong layer* — a layer above dropped the last sentence of the side camera's report on its way in | the report comes back for the right ride, with the right summary and a plausible list — **one observation short**, and nothing on the page says so |
  * | `verdictlessReferenceStoreFactory` | *wrong layer* — a layer above copied the reference's numbers and dropped whether the framing check passed | every landmark comes back exact, and the session's verdict is **gone**, so no later report may compare it with anything |
+ * | `piecewiseRideStoreFactory` | *wrong time* — a finished ride written as three writes rather than one transaction (#1326) | a lap that fails leaves the activity and its samples in the library, and the checkpoint still reads as unsaved |
  *
  * The second and third are the ones a naive harness misses. Both write to the
  * **real** IndexedDB, inside a **real** transaction that **really commits**, and
@@ -139,6 +140,7 @@ function bindStore(real: ActivityStore): PersistentStore {
     getAthlete: async (id) => real.getAthlete(id),
     deleteAthlete: async (id) => real.deleteAthlete(id),
     putActivity: async (record) => real.putActivity(record),
+    putFinishedRide: async (ride) => real.putFinishedRide(ride),
     getActivity: async (owner, id) => real.getActivity(owner, id),
     listActivitySummaries: async (owner, options) => real.listActivitySummaries(owner, options),
     findActivityByOriginalFileHash: async (owner, sha256) =>
@@ -275,6 +277,10 @@ export function memoryWriteStoreFactory(): StoreFactory {
         putLap: (record) => {
           memory.set(`lap:${record.id}`, record);
           return Promise.resolve(record.id);
+        },
+        putFinishedRide: (ride) => {
+          memory.set(`ride:${ride.activity.id}`, ride);
+          return Promise.resolve(ride.activity.id);
         },
         putPrivacyZone: (record) => {
           memory.set(`zone:${record.id}`, record);
@@ -1303,6 +1309,49 @@ export function cascadingSyncBaseStoreFactory(): StoreFactory {
             if (row.activityId === id) await real.deleteSyncBase(owner, row.kind, row.key);
           }
           return real.deleteActivity(owner, id);
+        },
+      };
+    },
+    destroy: async (name) => {
+      await deleteActivityStore(name);
+    },
+  };
+}
+
+/**
+ * A repository that writes a finished ride **as separate writes** — the
+ * activity, then its samples, then each lap, then the checkpoint's link —
+ * rather than in one transaction.
+ *
+ * The fake for #1326's write path, and the shape that path replaced: every
+ * part goes through the real store and really commits, and when every part
+ * succeeds the ride reads back perfectly. Only a failure part-way tells the
+ * two apart — a lap the store refuses leaves the activity and its samples in
+ * the library, and the checkpoint unmarked, so the ride is offered for saving
+ * a second time. `activity-store.finished-ride.test.ts` is the red/green pair.
+ */
+export function piecewiseRideStoreFactory(): StoreFactory {
+  return {
+    open(name: string): PersistentStore {
+      const real = openActivityStore(name);
+      return {
+        ...bindStore(real),
+        putFinishedRide: async (ride) => {
+          await real.putActivity(ride.activity);
+          await real.putStreamSet(ride.streams);
+          for (const lap of ride.laps) {
+            await real.putLap(lap);
+          }
+          if (ride.recordingSession !== undefined) {
+            const session = await real.getRecordingSession(
+              ride.activity.athleteId,
+              ride.recordingSession,
+            );
+            if (session !== undefined) {
+              await real.putRecordingSession({ ...session, savedAs: ride.activity.id });
+            }
+          }
+          return ride.activity.id;
         },
       };
     },
