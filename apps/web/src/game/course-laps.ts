@@ -69,6 +69,25 @@ export function courseLineEvent(
 }
 
 /**
+ * How far round the lap in progress the rider has got — #1322 — or
+ * `undefined` on the line, where no lap has any distance yet, and after a
+ * point-to-point course was finished, where none is open.
+ *
+ * The part lap {@link courseEndEvent} would close if the ride ended here, said
+ * as progress: the recording keeps the latest one, so a recording that dies
+ * before the line has its part lap to save.
+ */
+export function courseProgressEvent(
+  profile: RouteProfile,
+  distance: number,
+): CourseLineEvent | undefined {
+  const end = courseEndEvent(profile, distance);
+  return end.kind === 'lap'
+    ? { kind: 'progress', distance: end.distance, ascent: end.ascent }
+    : undefined;
+}
+
+/**
  * The event for a game ride that has ended: a part lap when the rider stopped
  * part-way round, and otherwise only that no lap is open any more.
  *

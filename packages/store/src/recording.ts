@@ -164,6 +164,22 @@ export interface RecordingSessionRecord {
    */
   readonly courseLaps?: readonly RecordedCourseLap[] | undefined;
   /**
+   * The lap of a course in progress, as far as the rider had got by the last
+   * time it was told — #1322. A PART lap: from where the open lap began to
+   * the last mark the game gave of how far round the rider was.
+   *
+   * ⚠️ **Only for a recording that dies.** A ride ended normally part-way round
+   * a lap has its part lap in {@link courseLaps} already, from the game; a
+   * recording that is recovered after the tab died has no game to say how far
+   * round the rider was, so this is what it saves instead. Rewritten with every
+   * header, so it is as old as the last flush and no older.
+   *
+   * Optional, so not a migration, by {@link savedAs}'s rule. Lenient on the
+   * way out, as {@link courseLaps} is: one that does not read, or lies outside
+   * the recording or before the last completed lap's end, is dropped alone.
+   */
+  readonly openCourseLap?: RecordedCourseLap | undefined;
+  /**
    * The private races this recording has ridden so far, as each room told
    * this device — #785, #1360's review (B2). On the header for
    * {@link courseLaps}' reason: a ride recovered after the app closed before
@@ -240,6 +256,11 @@ export interface RecoveredRecording {
   readonly state: RecordingStoredState;
   /** The header's laps of a course, none for a recording with none. @see RecordingSessionRecord.courseLaps */
   readonly courseLaps: readonly RecordedCourseLap[];
+  /**
+   * The lap in progress at the last flush, as a part lap — #1322. Absent with
+   * none open. @see RecordingSessionRecord.openCourseLap
+   */
+  readonly openCourseLap?: RecordedCourseLap | undefined;
   /** The header's races, none for a recording in none. @see RecordingSessionRecord.roomRaces */
   readonly roomRaces: readonly RoomRaceFact[];
   /**

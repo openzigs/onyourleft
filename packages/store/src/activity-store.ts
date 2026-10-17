@@ -2856,6 +2856,10 @@ export class ActivityStore {
     // lap whose moving time ran backwards.
     const laps = record.courseLaps ?? [];
     const writable = laps.every((lap) => courseLapFault(lap) === undefined);
+    // #1322: the lap in progress needs no such rule here. It is read back
+    // alone and dropped alone (`recording-persisted.ts`
+    // §`fromPersistedOpenCourseLap`), so one that does not read costs the
+    // header nothing — and refusing the write over it would cost the ride.
     const row = toPersistedRecordingSession(writable ? record : { ...record, courseLaps: [] });
     await this.#db.transaction('rw', [this.#athletes, this.#recordingSessions], async () => {
       await this.#requireAthlete(record.athleteId);
@@ -3013,6 +3017,7 @@ export class ActivityStore {
       pauses: header.pauses,
       state: header.state,
       courseLaps: header.courseLaps ?? [],
+      ...(header.openCourseLap === undefined ? {} : { openCourseLap: header.openCourseLap }),
       roomRaces: header.roomRaces ?? [],
       chunks: prefix.rows.length,
       chunksAfterGap: stored.chunks.length - prefix.rows.length,

@@ -104,6 +104,7 @@ erDiagram
         number  updatedAt                "UnixSeconds — what the recovery list orders by"
         string  pauses                   "the intervals that keep a pause apart from a dropout"
         string  courseLaps               "optional (#1312): the laps of a course completed so far, two marks and the course's distance and climb each"
+        string  openCourseLap            "optional (#1322): the lap in progress at the last flush, as a part lap"
     }
     RECORDING_CHUNK {
         string  sessionId    PK "with seq: the compound primary key"

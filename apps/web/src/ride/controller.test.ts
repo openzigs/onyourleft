@@ -7562,9 +7562,9 @@ describe('#1312 — the laps of a course are the recording’s, and are saved wi
         [0, 10, 1_000, 14, undefined],
         [1, 7, 1_000, 14, undefined],
       ]);
-      // ⚠️ No third row. The lap in progress when the tab died is not saved
-      // as a part lap: how far round the rider was is the game's odometer,
-      // and that went with the tab.
+      // ⚠️ No third row. The game never said how far round the third lap the
+      // rider was, so there is no part lap to save: #1322's cases below say
+      // it, as `GameView` does once a second.
       const streams = await harness.read(async (store) =>
         store.getStreamSet(ATHLETE_A, activityId('ride-1')),
       );
@@ -7797,6 +7797,142 @@ describe('#1312 — the laps of a course are the recording’s, and are saved wi
         [2, 6],
       ]);
       last.controller.dispose();
+    });
+  });
+
+  describe('#1322 — a recovered ride keeps the lap in progress, and a lap crossed just before the crash', () => {
+    const PROGRESS = { kind: 'progress', distance: metres(400), ascent: metres(5) } as const;
+
+    /**
+     * Four seconds, one whole lap of ten, five seconds into the second with
+     * the game saying how far round (as `GameView` does once a second), six
+     * more — a flush carries it — and then the tab is gone.
+     */
+    const crashedPartWayRound = async (): Promise<RecordingSessionId> => {
+      const rig = benchWith();
+      const hud = gameTrainerPortOver(rig.controller);
+      await rig.controller.pair('trainer');
+      await rig.controller.start();
+      await ride(rig, 4);
+      hud.courseLine?.({ kind: 'started' });
+      await ride(rig, 10);
+      hud.courseLine?.({ ...WHOLE, again: true });
+      await ride(rig, 5);
+      expect(hud.courseLine?.(PROGRESS)).toBeUndefined();
+      await ride(rig, 6);
+      rig.controller.dispose();
+      const id = rig.sessionIds[0];
+      if (id === undefined) {
+        throw new Error('no recording was started');
+      }
+      return id;
+    };
+
+    it('saved as it was recovered: the lap in progress is a part lap, as far as the last flush', async () => {
+      const id = await crashedPartWayRound();
+      const next = benchWith({ rideSave: storeSavePort() });
+      await next.controller.refreshRecoverable();
+
+      expect(await next.controller.saveRecovered(id)).toBe('saved');
+
+      expect(
+        (await lapsOf('ride-1')).map((lap) => [
+          lap.ordinal,
+          lap.movingTime,
+          lap.distance,
+          lap.ascent,
+          lap.partial,
+        ]),
+      ).toEqual([
+        [0, 10, 1_000, 14, undefined],
+        [1, 5, 400, 5, true],
+      ]);
+      next.controller.dispose();
+    });
+
+    it('continued: the part lap is the second, and the next lap is the third', async () => {
+      const id = await crashedPartWayRound();
+      const next = benchWith({ rideSave: storeSavePort() });
+      const hud = gameTrainerPortOver(next.controller);
+      next.bench.advance(seconds(120));
+      await next.controller.pair('trainer');
+      await next.controller.refreshRecoverable();
+      expect(await next.controller.continueRecovered(id)).toBe(true);
+      await next.controller.resume();
+
+      hud.courseLine?.({ kind: 'started' });
+      await ride(next, 6);
+      const laps = hud.courseLine?.({ ...WHOLE, again: false });
+      expect(laps?.map((lap) => [lap.movingTime, lap.partial])).toEqual([
+        [10, undefined],
+        [5, true],
+        [6, undefined],
+      ]);
+
+      next.controller.armStop();
+      await next.controller.confirmStop();
+      expect(next.controller.getSnapshot().saveState).toBe('saved');
+      expect(
+        (await lapsOf('ride-1')).map((lap) => [lap.ordinal, lap.movingTime, lap.partial]),
+      ).toEqual([
+        [0, 10, undefined],
+        [1, 5, true],
+        [2, 6, undefined],
+      ]);
+      next.controller.dispose();
+    });
+
+    it('a lap that has ended takes the progress said of it with it: no part lap after it', async () => {
+      const rig = benchWith();
+      const hud = gameTrainerPortOver(rig.controller);
+      await rig.controller.pair('trainer');
+      await rig.controller.start();
+      hud.courseLine?.({ kind: 'started' });
+      await ride(rig, 5);
+      hud.courseLine?.(PROGRESS);
+      await ride(rig, 5);
+      hud.courseLine?.({ ...WHOLE, again: true });
+      // Six seconds into the next lap with nothing said of it, and a flush.
+      await ride(rig, 6);
+      rig.controller.dispose();
+      const id = rig.sessionIds[0] as RecordingSessionId;
+
+      const next = benchWith({ rideSave: storeSavePort() });
+      await next.controller.refreshRecoverable();
+      expect(await next.controller.saveRecovered(id)).toBe('saved');
+      expect((await lapsOf('ride-1')).map((lap) => [lap.movingTime, lap.partial])).toEqual([
+        [10, undefined],
+      ]);
+      next.controller.dispose();
+    });
+
+    it('a lap crossed and the tab gone before the next flush is still saved', async () => {
+      // The flush interval is five seconds and the tenth second's tick has
+      // just flushed: the line is crossed after it, and the tab dies before
+      // the next. Until #1322 the lap waited for that flush and went with it.
+      const rig = benchWith();
+      const hud = gameTrainerPortOver(rig.controller);
+      await rig.controller.pair('trainer');
+      await rig.controller.start();
+      hud.courseLine?.({ kind: 'started' });
+      await ride(rig, 10);
+      hud.courseLine?.({ ...WHOLE, again: false });
+      // The header write is the recorder's own, started at the line; give
+      // IndexedDB the turns it answers on before the tab goes.
+      for (let turn = 0; turn < 20; turn += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      rig.controller.dispose();
+      const id = rig.sessionIds[0] as RecordingSessionId;
+
+      const header = await harness.read(async (store) => store.recoverRecording(ATHLETE_A, id));
+      expect(header?.courseLaps.map((lap) => lap.distance)).toEqual([1_000]);
+
+      const next = benchWith({ rideSave: storeSavePort() });
+      await next.controller.refreshRecoverable();
+      expect(await next.controller.saveRecovered(id)).toBe('saved');
+      expect((await lapsOf('ride-1')).map((lap) => lap.movingTime)).toEqual([10]);
+      next.controller.dispose();
     });
   });
 
