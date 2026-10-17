@@ -15,7 +15,7 @@
  *
  * ⚠️ **Shown on a tablet and visually hidden on a phone** (`theme.css`
  * §"A RACE'S STANDINGS"): the corners of a phone's stage are taken, and
- * `browser/ride.browser.spec.ts` §"#1347" measures it clear of the rider and
+ * `browser/ride-room.browser.spec.ts` §"#1347" measures it clear of the rider and
  * of every panel at the three tablet viewports. On a phone it stays in the
  * document for a screen reader, and the rider has *Follow* and its one gap.
  */

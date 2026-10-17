@@ -619,7 +619,7 @@ export const RIDE_NOTIFICATION_REFUSED =
  * just named. It is ONE line there on a Mac and still TWO on the CI runner,
  * whose fonts are wider — so on the runner the clearance comes from the cell's
  * tighter padding (`theme.css` §"Two notices in the one cell") rather than
- * from the sentence. `ride.browser.spec.ts` §"keep the screen on, beside every
+ * from the sentence. `ride-notices.browser.spec.ts` §"keep the screen on, beside every
  * notice that stays" publishes the clearance.
  */
 export const KEEP_SCREEN_ON_LABEL = 'Keep the screen on';

@@ -450,7 +450,7 @@ export const STANDING_NOTICE_SECONDS = 15;
  * Mac's at the 360s, so it is inside the line rather than argued over. At the
  * tablet upright and on every landscape layout the pair clears everything,
  * so there the road notice behaves exactly as it does without the refusal.
- * `ride.browser.spec.ts` §"#647" measures both sides of this line, with the
+ * `ride-notices.browser.spec.ts` §"#647" measures both sides of this line, with the
  * rule taken away as the control.
  *
  * ⚠️ Those figures are for the sentence as it was. Since #693's re-review it
@@ -2549,7 +2549,7 @@ export function GameView(props: GameViewProps): JSX.Element {
           // their reason: it stops being true the moment the service comes up
           // (`ride/controller.ts` §`askAgainIfRefused`), and a rider who lost
           // the elevation strip for that has not lost a ride.
-          // `ride.browser.spec.ts` §"#647" measures it at every overlay
+          // `ride-notices.browser.spec.ts` §"#647" measures it at every overlay
           // viewport, with and without the road notice beside it. Kept
           // (#1086), by an attribute on the notice and no wrapper.
           mayStop ? (
