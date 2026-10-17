@@ -61,6 +61,7 @@ function offered(kind: RecoverableRide['kind'], id = 'left-behind'): Recoverable
     spanned: formatDuration(SPANNED_SECONDS),
     canContinue: kind === 'interrupted',
     alreadySaved: kind === 'already-saved',
+    damaged: [],
   };
 }
 
@@ -76,12 +77,26 @@ function offered(kind: RecoverableRide['kind'], id = 'left-behind'): Recoverable
  * loosening the audit. `HudPanel.a11y.test.tsx` makes the same argument for the
  * same reason.
  */
-async function show(rides: readonly RecoverableRide[]): Promise<Mounted> {
-  const stub = stubRideController({ ...idleSnapshot(), recoverable: rides });
+async function show(
+  rides: readonly RecoverableRide[],
+  unreadable: readonly string[] = [],
+): Promise<Mounted> {
+  return (await showWith(rides, unreadable)).view;
+}
+
+async function showWith(
+  rides: readonly RecoverableRide[],
+  unreadable: readonly string[] = [],
+): Promise<{ view: Mounted; stub: ReturnType<typeof stubRideController> }> {
+  const stub = stubRideController({
+    ...idleSnapshot(),
+    recoverable: rides,
+    unreadableRecordings: unreadable.map((id) => recordingSessionId(id)),
+  });
   globalThis.location.hash = `#${routeById('ride').path}`;
   mounted = await mount(<AppShell capabilities={CAPABLE} rideController={stub.controller} />);
   await settle();
-  return mounted;
+  return { view: mounted, stub };
 }
 
 describe('the offer is inside the accessibility gate', () => {
@@ -151,5 +166,53 @@ describe('what the offer says, and what it does not', () => {
     // the wording that keeps that honest.
     const view = await show([offered('interrupted')]);
     expect(view.container.textContent ?? '').toContain(`up to ${formatDuration(SPANNED_SECONDS)}`);
+  });
+});
+
+describe('a recording that will not read (#1325)', () => {
+  it('is said, and discarded on its id, beside a ride that reads', async () => {
+    const { view, stub } = await showWith([offered('interrupted')], ['damaged-one']);
+    const text = view.container.textContent ?? '';
+    expect(text).toContain('A recording that cannot be read, so it cannot be continued or saved.');
+    // The ride beside it is offered all the same.
+    expect(text).toContain('Continue this ride');
+    const discard = [...view.container.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Discard this recording',
+    );
+    if (discard === undefined) {
+      throw new Error('no discard for the unreadable recording');
+    }
+    discard.click();
+    expect(stub.calls.discardRecovered).toEqual([recordingSessionId('damaged-one')]);
+  });
+
+  it('shows the offer for an unreadable recording alone', async () => {
+    const view = await show([], ['damaged-one']);
+    expect(view.container.textContent ?? '').toContain('Rides still on this device');
+  });
+
+  it('audits clean with an unreadable recording on offer', async () => {
+    await show([offered('interrupted')], ['damaged-one']);
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+  });
+
+  it('says a ride whose pauses did not read saves with its moving time as its elapsed time', async () => {
+    const view = await show([
+      { ...offered('interrupted'), canContinue: false, damaged: ['pauses'] },
+    ]);
+    const text = view.container.textContent ?? '';
+    expect(text).toContain(
+      'Its pauses could not be read, so saving it counts them as riding: its moving time will be its elapsed time.',
+    );
+    expect(text).toContain('Save this ride');
+    expect(text).not.toContain('Continue this ride');
+  });
+
+  it('does not call a ride whose state did not read a finished one', async () => {
+    const view = await show([{ ...offered('unsaved'), damaged: ['state'] }]);
+    const text = view.container.textContent ?? '';
+    expect(text).toContain('whether it was finished could not be read');
+    expect(text).not.toContain('A finished ride');
+    expect(text).toContain('Save this ride');
   });
 });

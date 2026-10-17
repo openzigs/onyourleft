@@ -162,6 +162,7 @@ describe('#668 — the ride screen, in the states where its panels meet', () => 
     spanned: '10:00',
     canContinue: true,
     alreadySaved: false,
+    damaged: [],
   };
   const states: readonly (readonly [string, RideSnapshot])[] = [
     [

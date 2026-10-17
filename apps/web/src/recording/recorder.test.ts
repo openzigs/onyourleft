@@ -96,8 +96,8 @@ function harnessStore(): RecordingCheckpointStore {
       harness.write(async (store) => store.putRecordingSession(record)),
     appendRecordingChunk: async (chunk) =>
       harness.write(async (store) => store.appendRecordingChunk(chunk)),
-    listRecordingSessions: async (owner) =>
-      harness.write(async (store) => store.listRecordingSessions(owner)),
+    readRecordingSessions: async (owner) =>
+      harness.write(async (store) => store.readRecordingSessions(owner)),
     recoverRecording: async (owner, id) =>
       harness.write(async (store) => store.recoverRecording(owner, id)),
     deleteRecordingSession: async (owner, id) =>
@@ -216,8 +216,9 @@ describe('a whole ride survives the tab being killed', () => {
 
     await harness.discard();
     const listed = await listRecoverableRecordings(harnessStore(), ATHLETE_A);
-    expect(listed.map((row) => row.id)).toEqual([recorder.sessionId]);
-    expect(listed[0]?.state).toBe('recording');
+    expect(listed.sessions.map((row) => row.id)).toEqual([recorder.sessionId]);
+    expect(listed.sessions[0]?.state).toBe('recording');
+    expect(listed.unreadable).toEqual([]);
   });
 });
 
@@ -588,7 +589,10 @@ describe('two tabs recording at once', () => {
         sessionId: mine.sessionId,
       }),
     ).resolves.toBeUndefined();
-    await expect(listRecoverableRecordings(harnessStore(), ATHLETE_B)).resolves.toEqual([]);
+    await expect(listRecoverableRecordings(harnessStore(), ATHLETE_B)).resolves.toEqual({
+      sessions: [],
+      unreadable: [],
+    });
   });
 });
 

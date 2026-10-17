@@ -450,6 +450,22 @@ function useOwnThresholds(analysis: AnalysisPort | undefined): OwnThresholds {
  * safe so a rider is not talked into rescuing something that needs no rescue.
  */
 function offerText(ride: RecoverableRide): string {
+  const pauses = ride.damaged.includes('pauses') ? ` ${PAUSES_LOST}` : '';
+  return `${kindText(ride)}${pauses}`;
+}
+
+/**
+ * #1325: said before the rider saves a ride whose pause list did not read,
+ * because the save counts every pause it had as riding.
+ */
+const PAUSES_LOST =
+  'Its pauses could not be read, so saving it counts them as riding: its moving time will be its elapsed time.';
+
+function kindText(ride: RecoverableRide): string {
+  if (ride.damaged.includes('state') && !ride.alreadySaved) {
+    // #1325: read as stopped, so not "finished" — nothing says it was.
+    return `A ride, up to ${ride.spanned} long, that cannot be continued: whether it was finished could not be read.`;
+  }
   if (ride.kind === 'interrupted') {
     return `An interrupted ride, up to ${ride.spanned} long.`;
   }
@@ -466,7 +482,7 @@ function RecoveryOffer({
   readonly controller: RideController;
   readonly snapshot: RideSnapshot;
 }): JSX.Element | null {
-  if (snapshot.recoverable.length === 0) {
+  if (snapshot.recoverable.length === 0 && snapshot.unreadableRecordings.length === 0) {
     return null;
   }
   return (
@@ -507,6 +523,20 @@ function RecoveryOffer({
               }}
             >
               Discard this ride
+            </Button>
+          </li>
+        ))}
+        {/* #1325: on the device and in no other list, so said, and discardable. */}
+        {snapshot.unreadableRecordings.map((id) => (
+          <li key={`unreadable-${String(id)}`}>
+            <p>A recording that cannot be read, so it cannot be continued or saved.</p>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                void controller.discardRecovered(id);
+              }}
+            >
+              Discard this recording
             </Button>
           </li>
         ))}

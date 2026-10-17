@@ -305,6 +305,7 @@ describe('the home screen — #428', () => {
           spanned: '50:00',
           canContinue: true,
           alreadySaved: false,
+          damaged: [],
         },
       ],
     });

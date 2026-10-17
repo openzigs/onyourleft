@@ -175,10 +175,56 @@ export interface RecordingSessionRecord {
    * recording from recovery, or hide another one. Optional, so not a migration.
    */
   readonly roomRaces?: readonly RoomRaceFact[] | undefined;
+  /**
+   * The fields of the stored header that did not read — #1325. Absent when
+   * every field read. Set by the read path only; the write path ignores it.
+   *
+   * - `'pauses'`: the pause list did not read, so {@link pauses} is EMPTY and
+   *   this recording's moving time is its elapsed time. A pause list decides
+   *   moving time, so one damaged pause drops the whole list rather than
+   *   leaving the others to describe a ride that never had only those.
+   * - `'state'`: the state did not read, so {@link state} is `stopped` — the
+   *   one state that offers no *Continue*, because nothing on disk says the
+   *   ride was still going.
+   *
+   * ⚠️ **Read rather than refused**, which is the decision #1325 asked for. A
+   * header that threw here hid every recoverable ride of the athlete, and its
+   * own samples could then be neither saved nor exported. A ride saved with
+   * its pauses counted as riding has a wrong moving time that the rider is
+   * told about; a ride that cannot be read has no moving time at all.
+   */
+  readonly damaged?: readonly RecordingHeaderDamage[] | undefined;
 }
+
+/** A field of a checkpoint header that did not read and was read as a stand-in. @see RecordingSessionRecord.damaged */
+export type RecordingHeaderDamage = 'pauses' | 'state';
 
 /** What `putRecordingSession` accepts. Identical; named for symmetry with `NewActivity`. */
 export type NewRecordingSession = RecordingSessionRecord;
+
+/**
+ * A checkpoint header that will not read at all — #1325.
+ *
+ * Its start, last write, sample interval, id, owner or `savedAs` did not
+ * decode, so nothing about it can be offered but its removal. **It is
+ * reported rather than thrown**, so it never hides another recording.
+ */
+export interface UnreadableRecordingSession {
+  /**
+   * The row's key **exactly as stored**, so `deleteRecordingSession` finds it
+   * even when that key is not a usable id — the one damage that would
+   * otherwise leave a row nothing could remove.
+   */
+  readonly id: RecordingSessionId;
+}
+
+/** What `readRecordingSessions` answers: every header of the athlete, each read on its own. */
+export interface RecordingSessionListing {
+  /** The headers that read, most recently checkpointed first. */
+  readonly sessions: RecordingSessionRecord[];
+  /** The headers that did not, in the same order. */
+  readonly unreadable: UnreadableRecordingSession[];
+}
 
 /** One flush: a contiguous window of the merged series. */
 export interface RecordingChunkRecord {

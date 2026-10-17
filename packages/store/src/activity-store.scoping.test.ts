@@ -608,6 +608,16 @@ const PROBES: readonly ScopingProbe[] = [
     },
   },
   {
+    member: 'readRecordingSessions',
+    leaks: "every unfinished recording on the device, the unreadable ones too — #1325's report",
+    async run(store, mine, theirs) {
+      const { sessions, unreadable } = await store.readRecordingSessions(mine.owner);
+      everyRowBelongsTo(sessions, mine.owner);
+      expect(sessions.map((row) => row.id)).not.toContain(theirs.recording.id);
+      expect(unreadable.map((row) => row.id)).not.toContain(theirs.recording.id);
+    },
+  },
+  {
     member: 'recoverRecording',
     leaks: "the samples inside another athlete's interrupted ride",
     async run(store, mine, theirs) {

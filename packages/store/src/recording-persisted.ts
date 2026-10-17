@@ -34,6 +34,7 @@ import {
 import {
   RECORDING_STORED_STATES,
   type RecordedCourseLap,
+  type RecordingHeaderDamage,
   type RecordingSessionRecord,
   type RecordingStoredState,
 } from './recording';
@@ -193,6 +194,13 @@ export function fromPersistedRecordingSession(
     row.courseLaps === undefined
       ? undefined
       : fromPersistedCourseLaps(row.courseLaps, startedAt, updatedAt);
+  // #1325: read, never refused — @see RecordingSessionRecord.damaged
+  const pauses = readOrUndefined(() => fromPersistedPauses(row.pauses));
+  const state = readOrUndefined(() => parseRecordingState(row.state));
+  const damaged: RecordingHeaderDamage[] = [
+    ...(pauses === undefined ? (['pauses'] as const) : []),
+    ...(state === undefined ? (['state'] as const) : []),
+  ];
   return {
     id: recordingSessionId(decodedString('recordingSession.id', row.id)),
     athleteId: athleteId(decodedString('recordingSession.athleteId', row.athleteId)),
@@ -202,9 +210,9 @@ export function fromPersistedRecordingSession(
       decodedNumber('recordingSession.sampleInterval', row.sampleIntervalSeconds),
       seconds,
     ),
-    state: parseRecordingState(row.state),
+    state: state ?? 'stopped',
     updatedAt,
-    pauses: fromPersistedPauses(row.pauses),
+    pauses: pauses ?? [],
     savedAs:
       row.savedAs === undefined
         ? undefined
@@ -213,7 +221,21 @@ export function fromPersistedRecordingSession(
     // #785: never a throw — a race that does not read is dropped, and the
     // recording is listed and recovered all the same. @see racesOf
     ...roomRacesOut(row.roomRaces),
+    ...(damaged.length === 0 ? {} : { damaged }),
   };
+}
+
+/**
+ * One field's read, or `undefined` when it throws. Any throw: the read is pure
+ * over the row, so whatever it throws — a `StoreDecodeError`, or the
+ * `TypeError` of a pause that is `null` — is that field's damage.
+ */
+function readOrUndefined<T>(read: () => T): T | undefined {
+  try {
+    return read();
+  } catch {
+    return undefined;
+  }
 }
 
 function roomRacesOut(value: unknown): { roomRaces?: readonly RoomRaceFact[] } {
@@ -253,7 +275,8 @@ export function courseLapFault(lap: RecordedCourseLap): string | undefined {
  * The header's laps of a course — or NONE, when the list or any lap in it
  * does not read.
  *
- * ⚠️ **Lenient, where every other field of this row is refused.** A lap is
+ * ⚠️ **Lenient, as the pauses and the state are since #1325 and the other
+ * fields are not** (@see RecordingSessionRecord.damaged). A lap is
  * something worked out ABOUT a recording's samples, and this row is read on
  * the recovery path: `listRecordingSessions` decodes every header of the
  * athlete, so a throw here over one damaged figure in one lap hid every

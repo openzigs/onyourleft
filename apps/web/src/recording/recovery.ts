@@ -51,7 +51,12 @@
  */
 
 import type { UnixSeconds } from '@onyourleft/domain';
-import type { RecordingSessionId, RecordingSessionRecord } from '@onyourleft/store';
+import type {
+  RecordingHeaderDamage,
+  RecordingSessionId,
+  RecordingSessionRecord,
+  UnreadableRecordingSession,
+} from '@onyourleft/store';
 
 import { formatDuration } from '../format';
 
@@ -86,6 +91,19 @@ export interface RecoverableRide {
    * column cannot tell a failed save from a failed tidy-up.
    */
   readonly alreadySaved: boolean;
+  /**
+   * The fields of its header that did not read and were read as a stand-in —
+   * #1325, `RecordingSessionRecord.damaged`. Empty when it all read.
+   *
+   * - `'pauses'`: it has no pauses now, so saving it makes its moving time its
+   *   elapsed time. The screen says so before the rider saves it.
+   * - `'state'`: it is read as stopped, so it is offered no *Continue*.
+   *
+   * Either one takes *Continue* away: a ride continued from a header that
+   * did not read would be rewritten from the stand-in, and the damage would
+   * stop being visible on the next read.
+   */
+  readonly damaged: readonly RecordingHeaderDamage[];
 }
 
 /**
@@ -112,6 +130,25 @@ export interface RecoverableOptions {
   readonly excluding?: RecordingSessionId | undefined;
 }
 
+/**
+ * The recordings whose header will not read at all — #1325. Each can only be
+ * discarded, which needs nothing but its id; the screen says it cannot be
+ * read rather than leaving the rider a ride that is on the device and in no
+ * list.
+ *
+ * Bounded by {@link RECOVERABLE_LIMIT} and never the ride in progress, for
+ * {@link recoverableRides}' reasons.
+ */
+export function unreadableRecordings(
+  rows: readonly UnreadableRecordingSession[],
+  options: RecoverableOptions = {},
+): readonly RecordingSessionId[] {
+  return rows
+    .map((row) => row.id)
+    .filter((id) => id !== options.excluding)
+    .slice(0, RECOVERABLE_LIMIT);
+}
+
 export function recoverableRides(
   rows: readonly RecordingSessionRecord[],
   options: RecoverableOptions = {},
@@ -133,6 +170,7 @@ function rideOf(row: RecordingSessionRecord): RecoverableRide {
   // rather than passes over. A negative span would format as a duration nobody
   // can read.
   const spannedSeconds = Math.max(0, row.updatedAt - row.startedAt);
+  const damaged = row.damaged ?? [];
   return {
     id: row.id,
     kind,
@@ -140,7 +178,8 @@ function rideOf(row: RecordingSessionRecord): RecoverableRide {
     lastWrittenAt: row.updatedAt,
     spannedSeconds,
     spanned: formatDuration(spannedSeconds),
-    canContinue: kind === 'interrupted',
+    canContinue: kind === 'interrupted' && damaged.length === 0,
     alreadySaved,
+    damaged,
   };
 }

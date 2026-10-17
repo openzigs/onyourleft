@@ -60,6 +60,7 @@ function snapshotWith(states: Partial<Record<string, MetricState>>): RideSnapsho
     resultAnnounced: false,
     leftover: false,
     recoverable: [],
+    unreadableRecordings: [],
     connectionsRemaining: 3,
     notificationNotice: undefined,
     keepAliveFailed: false,
