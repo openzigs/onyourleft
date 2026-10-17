@@ -116,6 +116,8 @@ describe('what the instance logs about a request (#767)', () => {
     };
     const room = 'f97eae750123456789abcdef01234567';
     logEvent(sink, 'room-socket-closed', { worker: 1, room, reason: 'too-slow', count: 27 });
+    // The boundary: a room that has closed none for that socket yet still logs its count.
+    logEvent(sink, 'room-socket-closed', { worker: 1, count: 0 });
     // The same keys holding something else: free text, a token, a coordinate.
     logEvent(sink, 'room-socket-closed', {
       worker: 1,
@@ -132,6 +134,7 @@ describe('what the instance logs about a request (#767)', () => {
     logEvent(sink, 'room-report', { room, reason: 'too-slow', count: 1 });
     expect(lines.map((line) => JSON.parse(line) as unknown)).toEqual<Record<string, unknown>[]>([
       { event: 'room-socket-closed', worker: 1, room, reason: 'too-slow', count: 27 },
+      { event: 'room-socket-closed', worker: 1, count: 0 },
       {
         event: 'room-socket-closed',
         worker: 1,
