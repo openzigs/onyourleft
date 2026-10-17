@@ -26,8 +26,8 @@
  *
  * Under *Follow* and *Report*, on a tablet and an upright phone — except on
  * an upright phone with sounds on, where they take the row in place of the
- * two as below and the volume gives way while they are open (`theme.css`
- * §"#1407"). On a phone on its side there is no line to spare — with *Follow* the bottom row fits
+ * two as below and, with no side camera paired, the volume gives way while
+ * they are open (`theme.css` §"#1407", §"#1409"). On a phone on its side there is no line to spare — with *Follow* the bottom row fits
  * a 736×360 stage by under a line (#1356, held by #1358), and one more line
  * pushes *Pause* off it — so there `theme.css` §"#789" lays the reasons, and then the
  * answer, IN PLACE OF *Follow* and *Report*, at the row's own height. With

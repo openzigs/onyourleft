@@ -7187,17 +7187,16 @@ select.oyl-input {
  *   and *Report* wrapped to a line of its own, which saved 7 px.
  *
  * ⚠️ #419 asks that what gives way be recorded: **nothing is dropped**, and
- * on an upright phone the mute's visible word is "Mute". Neither rule applies
- * with a side camera paired as well, whose row #576 already puts in each of
- * those places; that three-way combination is not measured here.
+ * on an upright phone the mute's visible word is "Mute". With a side camera
+ * paired as well, whose row #576 already puts in each of those places, the
+ * upright rule does not apply and the lift does: §"#1409" says where the two
+ * lifted rows go together.
  * `ride.browser.spec.ts` §"#1398" holds the room ride with sounds on at every
  * overlay viewport, both ways, and undoes this block as its control.
  */
 @media (min-width: 46rem) and (min-height: 22.5rem) and (max-height: 30rem),
   (min-width: 46rem) and (min-height: 47rem) {
-  .oyl-game--riding
-    .oyl-hud__actions:has(> .oyl-hud__room-row):not(:has(> .oyl-hud__side-camera-row))
-    > .oyl-sound,
+  .oyl-game--riding .oyl-hud__actions:has(> .oyl-hud__room-row) > .oyl-sound,
   /* #1407: and in a race's notice, which has no room row (§"#1407"). */
   .oyl-game--riding
     .oyl-hud:has(> .oyl-hud__notices > .oyl-hud__race)
@@ -7272,9 +7271,11 @@ select.oyl-input {
  *   row, and with anchor positioning the actions panel started 69 px into
  *   the leaning rider at 360×752 (from y = 464; the rider ends at 533),
  *   55 px at 360×800 and 42 px at 390×844, and 25 px more without it. So the reasons take the row IN PLACE OF *Follow* and
- *   *Report*, the rule §"#789 on a phone on its side" already makes, and the
- *   panel is no taller open than closed. ⚠️ #419: **the volume gives way
- *   while the reasons are open**, and only then. Beside the sound row's
+ *   *Report*, the rule §"#789 on a phone on its side" already makes (with
+ *   a side camera paired too, §"#1409"), and the panel is no taller open
+ *   than closed. ⚠️ #419: **the volume gives way while the reasons are
+ *   open**, and only then, and not with a side camera paired, where the
+ *   sound row has a line of its own. Beside the sound row's
  *   8 rem, even at a quarter's padding and gap, the three reasons were 18 px
  *   wider than a 360 px phone's row, and shrinking them clipped every one of
  *   their words ("Cheating" by 8 px); without the volume the row has room for
@@ -7298,15 +7299,13 @@ select.oyl-input {
  */
 @media (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) {
   .oyl-game--riding
-    .oyl-hud__actions:has(> .oyl-sound):not(:has(> .oyl-hud__side-camera-row))
+    .oyl-hud__actions:has(> .oyl-sound)
     > .oyl-hud__room-row:has(> .oyl-hud__report-reasons)
     > :is(.oyl-hud__follow, .oyl-hud__report) {
     display: none;
   }
 
-  .oyl-game--riding
-    .oyl-hud__actions:has(> .oyl-sound):not(:has(> .oyl-hud__side-camera-row))
-    .oyl-hud__report-reasons {
+  .oyl-game--riding .oyl-hud__actions:has(> .oyl-sound) .oyl-hud__report-reasons {
     flex-wrap: nowrap;
     align-items: center;
     min-height: 3rem;
@@ -7326,6 +7325,148 @@ select.oyl-input {
     )
     .oyl-sound__volume {
     display: none;
+  }
+}
+
+/*
+ * A ROOM RIDE WITH SOUNDS ON AND A SIDE CAMERA PAIRED — #1409.
+ *
+ * Three rows that each fit the actions panel without the other two: the
+ * room's (#789), the sound row (#400) and the side camera's (#551). §"#1398"
+ * stepped aside for a side camera and #576 alone moved its row, and on the CI
+ * runner's fonts the panel was over the race's standings at 1280×800 and
+ * 1024×768 (covering the trainer line there), ran 7 px below a 736×360 stage
+ * and 3 px below an 844×390 one, began 50 px into the leaning rider at
+ * 360×752 and 36 px at 360×800, and covered *Stop side camera* at 390×844.
+ *
+ * - **On a tablet nothing gives way.** §"#1398"'s lift now applies with a
+ *   side camera too, and the side camera's row leaves the panel as well,
+ *   stacked directly above the sound row (3.125 rem: the mute's 3 rem and
+ *   the row's two borders) in the left column. Measured at 1024×768: the
+ *   side camera's row from y = 464 to 523, the sound row to 577, the route
+ *   panel from 590, and the actions panel from 581, under the standings'
+ *   532.
+ * - **On a phone on its side the two lifted rows share the strip above the
+ *   bottom-start cell**, which #1358 measured at 57 px without anchors and
+ *   which holds one row: *Stop side camera* in a 6 rem panel at the start,
+ *   the sound row in the rest of the 16 rem. Both are placed by grid
+ *   placement, as §"#1398" places the sound row, so it is one rule with and
+ *   without anchors (#1120), and both have no vertical padding for
+ *   §"#1398"'s reason. ⚠️ #419: **the side camera's line gives way** (it is
+ *   clipped, so a screen reader still reaches it, and *Stop side camera*
+ *   still names what it stops), and the mute shows "Mute". 3 px under the
+ *   primary panel and 4 px above the route panel at 736×360, as §"#1398".
+ * - **On an upright phone** the side camera's row is *Stop* alone and shares
+ *   a line with the room's row, and the sound row has a line of its own.
+ *   ⚠️ #419: **the side camera's line and the trainer line give way**, both
+ *   clipped. With only the side camera's line hidden the panel began 24 px
+ *   into the rider at 360×752 and 10 px at 360×800 (it cleared him at
+ *   390×844, and gives the line up there too, for one rule). The trainer
+ *   line is the one #1358 already gives up on a phone on its side: what was
+ *   last sent to the trainer. The gradient itself is still the *Gradient*
+ *   reading, and a trainer that refuses the road still puts its notice on
+ *   the HUD. The actions panel then starts at
+ *   y = 542 at 360×752, both ways, 9 px under the rider.
+ *
+ * *Report*'s reasons open as well take the row in place of *Follow* and
+ * *Report* upright, by §"#1407"'s first two rules, and there the volume does
+ * not give way, because the sound row has a line of its own.
+ * `ride.browser.spec.ts` §"#1409" holds all of it at every overlay viewport,
+ * both ways, and takes this block out as its control.
+ */
+@media (min-width: 46rem) and (min-height: 22.5rem) and (max-height: 30rem) {
+  .oyl-game--riding
+    .oyl-hud__actions:has(> .oyl-hud__room-row):has(> .oyl-sound)
+    > .oyl-hud__side-camera-row {
+    grid-area: route;
+    top: auto;
+    bottom: calc(100% + var(--oyl-space-xs));
+    left: 0;
+    width: 6rem;
+    margin-bottom: 0;
+    padding: 0 var(--oyl-space-sm);
+  }
+
+  .oyl-game--riding
+    .oyl-hud__actions:has(> .oyl-hud__room-row):has(> .oyl-hud__side-camera-row)
+    > .oyl-sound {
+    left: calc(6rem + var(--oyl-space-sm));
+    width: calc(min(100%, 16rem) - 6rem - var(--oyl-space-sm));
+  }
+
+  .oyl-game--riding
+    .oyl-hud__actions:has(> .oyl-hud__room-row):has(> .oyl-sound)
+    > .oyl-hud__side-camera-row
+    > .oyl-hud__side-camera,
+  .oyl-game--riding
+    .oyl-hud__actions:has(> .oyl-hud__room-row):has(> .oyl-hud__side-camera-row)
+    .oyl-sound__mute-more {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+}
+
+@media (min-width: 46rem) and (min-height: 47rem) {
+  .oyl-game--riding
+    .oyl-hud__actions:has(> .oyl-hud__room-row):has(> .oyl-sound)
+    > .oyl-hud__side-camera-row {
+    position: absolute;
+    grid-area: route;
+    bottom: calc(100% + 3.125rem + 2 * var(--oyl-space-xs));
+    left: 0;
+    width: min(100%, 16rem);
+    box-sizing: border-box;
+    background: var(--oyl-color-hud-surface);
+    border: 1px solid var(--oyl-color-hud-border);
+    border-radius: var(--oyl-radius);
+    color: var(--oyl-color-hud-ink);
+    padding: var(--oyl-space-xs) var(--oyl-space-sm);
+  }
+}
+
+@media (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) {
+  .oyl-game--riding
+    .oyl-hud__actions:has(> .oyl-hud__room-row):has(> .oyl-sound)
+    > .oyl-hud__side-camera-row {
+    flex: 0 0 auto;
+  }
+
+  .oyl-game--riding
+    .oyl-hud__actions:has(> .oyl-hud__room-row):has(> .oyl-sound):has(> .oyl-hud__side-camera-row)
+    > .oyl-hud__room-row {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .oyl-game--riding
+    .oyl-hud__actions:has(> .oyl-hud__room-row):has(> .oyl-hud__side-camera-row)
+    > .oyl-sound {
+    flex-basis: 100%;
+  }
+
+  .oyl-game--riding
+    .oyl-hud__actions:has(> .oyl-hud__room-row):has(> .oyl-sound):has(> .oyl-hud__side-camera-row)
+    > .oyl-hud__trainer,
+  .oyl-game--riding
+    .oyl-hud__actions:has(> .oyl-hud__room-row):has(> .oyl-sound)
+    > .oyl-hud__side-camera-row
+    > .oyl-hud__side-camera {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
   }
 }
 
