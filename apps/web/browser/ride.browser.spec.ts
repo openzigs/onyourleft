@@ -4273,3 +4273,116 @@ test.describe('a room ride with a rider near, every reading and control on the s
     expect(notWhole.some((each) => each.includes('oyl-hud__actions'))).toBe(true);
   });
 });
+
+/**
+ * #1398 — a room ride with sounds on: `?room=following&sounds=on`, so the
+ * actions panel carries the room's row (*Follow* and *Report*, #789) and
+ * #400's mute and volume together.
+ *
+ * ## What is held
+ *
+ * At every overlay viewport, both ways (#1120), what §"#1358" holds of a room
+ * ride — nothing scrolled, every reading and control inside the viewport and
+ * uncovered with that section's two recorded trades, every panel whole and
+ * over no other — and, as §"#1356" does, no panel over the leaning rider. The
+ * mute and the volume are among the controls held. Where `theme.css`
+ * §"A ROOM RIDE WITH SOUNDS ON, ON A PHONE" lifts the sound row out of the
+ * actions panel (a phone on its side, a tablet) it is held as a panel of its
+ * own, and everywhere else it is held inside the actions panel.
+ *
+ * ## The cause, and the control
+ *
+ * Before #1398, on the CI runner's fonts, the actions panel ran 7 px below a
+ * 736×360 stage and 3 px below an 844×390 one, reached 7 px into the race's
+ * standings at 1024×768, and started 24 px into the leaning rider at 360×752
+ * and 10 px into him at 360×800. The control undoes the block and requires
+ * the same measurement to fail at 736×360, 1024×768 and 360×752.
+ *
+ * Not held here, and measured as failing on `main` too: the same ride with
+ * *Report*'s reasons open on an upright phone, and a race waiting on its
+ * start line with sounds on at 736×360. They are filed as their own issue.
+ */
+const FOLLOWING_WITH_SOUNDS = `${FOLLOWING}&sounds=on`;
+const SOUND_ROW = 'oyl-sound';
+
+/** Where `theme.css` §"#1398" lifts the sound row out of the actions panel. */
+function soundRowLifted(viewport: Viewport): boolean {
+  return onItsSide(viewport) || TABLET_VIEWPORTS.includes(viewport);
+}
+
+function roomWithSoundsFailures(seen: StageMeasurement, viewport: Viewport): string[] {
+  const panels = seenPanels(seen);
+  const found = lostFromTheStage(seen, viewport);
+  found.push(...panels.filter((each) => !inside(each.box, viewport)).map(describeItem));
+  panels.forEach((a, index) => {
+    for (const b of panels.slice(index + 1)) {
+      if (overlap(a.box, b.box)) found.push(`${describeItem(a)} × ${describeItem(b)}`);
+    }
+  });
+  const rider = riderBox(viewport);
+  found.push(
+    ...panels
+      .filter((each) => overlap(each.box, rider))
+      .map((each) => `${describeItem(each)} over the rider`),
+  );
+  return found;
+}
+
+test.describe('a room ride with sounds on — #1398', () => {
+  for (const viewport of OVERLAY_VIEWPORTS) {
+    test(`every panel whole and clear of the rider, every reading and control on the stage — ${viewport.name}`, async ({
+      browser,
+    }) => {
+      const page = await sharedRide(browser, viewport, FOLLOWING_WITH_SOUNDS);
+      for (const [how, seen] of await bothWays(page)) {
+        // The state this is about: the room's row and the sound row, both.
+        const names = seen.items.map((each) => each.name);
+        expect(names, how).toContain('room: Follow the next rider near you');
+        expect(names, how).toContain('room: Report Wilhelmina Vandersteen-Oduya Mbe');
+        expect(names, how).toContain('sound: Mute sounds');
+        expect(names, how).toContain('sound: Sound volume');
+        expect(seen.scrollY, how).toBe(0);
+        expect(seen.stageScrollTop, how).toBe(0);
+        expect(seen.pageOverflow, how).toBeLessThanOrEqual(0);
+        const panels = seenPanels(seen);
+        console.log(`#1398 — ${viewport.name} — ${how}: ${panels.map(describeItem).join('; ')}`);
+        expect(
+          panels.some((each) => each.name === SOUND_ROW),
+          `${how}: the sound row a panel of its own`,
+        ).toBe(soundRowLifted(viewport));
+        expect(roomWithSoundsFailures(seen, viewport), how).toEqual([]);
+      }
+    });
+  }
+
+  for (const viewport of OVERLAY_VIEWPORTS.filter((each) =>
+    ['736×360', '1024×768', '360×752'].includes(`${String(each.width)}×${String(each.height)}`),
+  )) {
+    test(`the control — with the block undone, the same measurement fails — ${viewport.name}`, async ({
+      page,
+    }) => {
+      await openRide(page, viewport, FOLLOWING_WITH_SOUNDS);
+      await page.addStyleTag({
+        content: `
+          .oyl-game--riding .oyl-hud .oyl-hud__actions { flex-flow: column nowrap !important; }
+          .oyl-game--riding .oyl-hud .oyl-hud__actions > * { flex: initial !important; }
+          .oyl-game--riding .oyl-hud .oyl-hud__actions > .oyl-sound {
+            position: static !important; padding: 0 !important; border: 0 !important;
+            width: auto !important; background: none !important;
+          }
+          .oyl-game--riding .oyl-hud .oyl-sound__mute-more {
+            position: static !important; width: auto !important; height: auto !important;
+            margin: 0 !important; overflow: visible !important; clip-path: none !important;
+          }`,
+      });
+      const seen = await measure(page);
+      expect(
+        seenPanels(seen).some((each) => each.name === SOUND_ROW),
+        'the block undone',
+      ).toBe(false);
+      const failures = roomWithSoundsFailures(seen, viewport);
+      console.log(`#1398 control — ${viewport.name}: ${failures.join('; ')}`);
+      expect(failures).not.toEqual([]);
+    });
+  }
+});
