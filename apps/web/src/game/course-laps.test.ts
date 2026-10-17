@@ -11,7 +11,12 @@ import {
 } from '@onyourleft/domain';
 import { describe, expect, it } from 'vitest';
 
-import { courseEndEvent, courseLapsDone, courseLineEvent } from './course-laps';
+import {
+  courseEndEvent,
+  courseLapsDone,
+  courseLineEvent,
+  courseProgressEvent,
+} from './course-laps';
 import { planLap } from './hud/plan';
 
 /**
@@ -108,5 +113,24 @@ describe('courseEndEvent — #1312', () => {
 
   it('is no lap after a point-to-point course was finished: the road ended there', () => {
     expect(courseEndEvent(ONE_WAY, LENGTH + 300)).toEqual({ kind: 'ended' });
+  });
+});
+
+describe('courseProgressEvent — #1322', () => {
+  it('is how far round the lap in progress, and what that stretch climbs: the part lap an end would close', () => {
+    const end = courseEndEvent(LOOP, LENGTH * 2 + 250);
+    if (end.kind !== 'lap') throw new Error('expected a part lap');
+    expect(courseProgressEvent(LOOP, LENGTH * 2 + 250)).toEqual({
+      kind: 'progress',
+      distance: end.distance,
+      ascent: end.ascent,
+    });
+    expect(courseProgressEvent(ONE_WAY, 600)).toMatchObject({ kind: 'progress', distance: 600 });
+  });
+
+  it('says nothing on the line, or after a point-to-point course was finished', () => {
+    expect(courseProgressEvent(LOOP, 0)).toBeUndefined();
+    expect(courseProgressEvent(LOOP, LENGTH)).toBeUndefined();
+    expect(courseProgressEvent(ONE_WAY, LENGTH + 300)).toBeUndefined();
   });
 });

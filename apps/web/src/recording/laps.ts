@@ -101,11 +101,15 @@ export interface CourseStretch {
  * - `ended`: the game ride is over with nothing more to state — it ended on
  *   the line, or after a point-to-point course was finished. No lap is open
  *   afterwards.
+ * - `progress`: how far round the lap in progress the rider has got, and what
+ *   that stretch climbs — #1322. Says nothing ended; it is what a recording
+ *   that dies before the line saves its part lap from.
  */
 export type CourseLineEvent =
   | { readonly kind: 'started' }
   | ({ readonly kind: 'lap'; readonly again: boolean } & CourseStretch)
-  | { readonly kind: 'ended' };
+  | { readonly kind: 'ended' }
+  | ({ readonly kind: 'progress' } & Omit<CourseStretch, 'partial'>);
 
 /** The part of a recorded series a lap is worked out from. */
 export interface LapSeries {

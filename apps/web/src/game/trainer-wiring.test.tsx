@@ -1956,6 +1956,27 @@ describe('a second game ride in one mount begins with no lap of the first — #1
   });
 });
 
+describe('the recording is told how far round the lap the rider is — #1322', () => {
+  it('once a second of the ride, not every frame, and only after the lap began', async () => {
+    held.on = false;
+    const events: string[] = [];
+    await mountCircuit(events);
+    await clickThrough(buttonStarting('Ride '));
+
+    const frames = await pumpUntilLaps(events, 1);
+
+    const said = events.filter((kind) => kind === 'progress').length;
+    expect(events[0]).toBe('started');
+    // Before the line, and after it again: the new lap's progress, not the old one's.
+    expect(events.indexOf('progress')).toBeLessThan(events.indexOf('lap'));
+    await pump(6);
+    expect(events.lastIndexOf('progress')).toBeGreaterThan(events.indexOf('lap'));
+    // Frames are half a second apart here, so once a second is about half of them.
+    expect(said).toBeGreaterThan(0);
+    expect(said).toBeLessThanOrEqual(Math.ceil(frames / 2) + 1);
+  });
+});
+
 describe('a lap’s summary respects the announcements setting — #1312', () => {
   it('is shown and not said with announcements off, which is the default', async () => {
     held.on = false;

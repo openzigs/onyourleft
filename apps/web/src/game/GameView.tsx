@@ -142,7 +142,12 @@ import {
 } from './hud/announce';
 import { slopeEvent, slopesOf, type Slope, type SlopeAnnounced } from './hud/climb-ahead';
 import { LAP_NOTICE_SECONDS, lapSummary, type LapSummary } from './hud/lap-text';
-import { courseEndEvent, courseLapsDone, courseLineEvent } from './course-laps';
+import {
+  courseEndEvent,
+  courseLapsDone,
+  courseLineEvent,
+  courseProgressEvent,
+} from './course-laps';
 import type { CueOutput } from './audio-port';
 import { RideCues } from './audio-cues';
 import {
@@ -717,6 +722,8 @@ export function GameView(props: GameViewProps): JSX.Element {
   >(undefined);
   /** How many times this ride has completed its course. @see course-laps.ts */
   const lapsDoneRef = useRef(0);
+  /** The ride second the recording was last told how far round its lap is — #1322. */
+  const lapProgressSecondRef = useRef<number | undefined>(undefined);
   /** The course this ride is on, for `teardown`, which closes over nothing of the ride. */
   const courseRef = useRef<RouteProfile | undefined>(undefined);
   /**
@@ -1282,6 +1289,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       // ends exactly the laps this began.
       courseRef.current = profile;
       lapsDoneRef.current = 0;
+      lapProgressSecondRef.current = undefined;
       lapOwedRef.current = undefined;
       setLapNotice(undefined);
       props.trainer?.courseLine?.({ kind: 'started' });
@@ -1853,6 +1861,18 @@ export function GameView(props: GameViewProps): JSX.Element {
             text: summary.sentence,
             until: simulation.state.elapsed + LAP_NOTICE_SECONDS,
           };
+        }
+      }
+      // #1322: how far round the lap the rider is, once a second of the ride
+      // rather than every frame — the recording keeps only the latest, for
+      // its next checkpoint, and a flush is seconds apart. After the line's
+      // event, so the stretch said is the new lap's and not the old one's end.
+      const second = Math.floor(simulation.state.elapsed);
+      if (second !== lapProgressSecondRef.current) {
+        lapProgressSecondRef.current = second;
+        const progress = courseProgressEvent(chosen.profile, simulation.state.ride.distance);
+        if (progress !== undefined) {
+          trainerPortRef.current?.courseLine?.(progress);
         }
       }
       // Said ONCE, and only while its notice is on the HUD: offered on every

@@ -220,19 +220,35 @@ export interface Recorder {
   /**
    * The laps of a course completed during this recording, in order — #1312,
    * `laps.ts`. A recorder rebuilt by {@link recoverRecorder} starts with the
-   * ones its checkpoint held.
+   * ones its checkpoint held, and with the lap that was in progress when the
+   * tab died as a part lap after them (#1322).
    */
   readonly courseLaps: readonly RecordedCourseLap[];
   /**
-   * Keep a lap of a course that has just ended — #1312.
+   * Keep a lap of a course that has just ended — #1312. It closes the lap in
+   * progress ({@link noteOpenCourseLap}).
    *
-   * ⚠️ **Writes nothing itself.** The laps go out in the header, which every
-   * {@link Recorder.flush} rewrites, and `stop` flushes: so a lap is on disk
-   * within one flush interval of its line, the same bound a sample has
-   * ({@link MAX_DATA_LOSS_SECONDS}), and a crash sooner than that loses the
-   * lap with the seconds either side of it.
+   * ⚠️ **The header is written at once** (#1322), as a pause is, rather than
+   * with the next flush: until #1322 a crash within one flush interval of the
+   * line lost the lap. Only the HEADER — never a chunk — because this is
+   * called from the game's frame and a second flush running beside a tick's
+   * would append two chunks under one sequence number. The lap's own samples
+   * still reach the disk with the next flush, as every sample does; a lap
+   * that ends past the last recovered sample is one `laps.ts` already
+   * handles. **Never throws**: a failure is a {@link storageState}, as for
+   * every write here.
    */
   noteCourseLap(lap: RecordedCourseLap): void;
+  /**
+   * How far round the lap in progress the rider has got, as a part lap from
+   * where it began to now — or `undefined` with no lap open — #1322.
+   *
+   * ⚠️ **Writes nothing itself**, and that is the bound it keeps: it goes out
+   * in the header every {@link flush} rewrites, so a recording recovered after
+   * the tab died saves the lap in progress as far as the last flush. A ride
+   * ended normally never needs it: the game says how far round it got then.
+   */
+  noteOpenCourseLap(lap: RecordedCourseLap | undefined): void;
   /**
    * The private races ridden during this recording, in the order they ended —
    * #785. A recorder rebuilt by {@link recoverRecorder} starts with the ones
@@ -376,7 +392,13 @@ export async function recoverRecorder(
     { flushedThrough: recovered.sampleCount, checkpoints: recovered.chunks, headerWritten: true },
     recovered.sampleInterval,
     // #1312: or the next header this recorder writes would take them off disk.
-    recovered.courseLaps,
+    // #1322: and the lap in progress when the tab died, CLOSED here as a part
+    // lap — the game ride that was riding it went with the tab, as a game ride
+    // that ends part-way round closes one. A continued ride starts a new game
+    // ride from the line, so its next lap is numbered after this one.
+    recovered.openCourseLap === undefined
+      ? recovered.courseLaps
+      : [...recovered.courseLaps, { ...recovered.openCourseLap, partial: true }],
     // #785, for the same reason.
     recovered.roomRaces,
   );
@@ -419,6 +441,8 @@ function recorderOver(
   const { store, athleteId, sessionId } = options;
   /** @see Recorder.courseLaps */
   let courseLaps = lapsSoFar;
+  /** @see Recorder.noteOpenCourseLap */
+  let openCourseLap: RecordedCourseLap | undefined;
   /** @see Recorder.roomRaces */
   let roomRaces = racesSoFar;
   const flushInterval = options.flushIntervalSeconds ?? DEFAULT_FLUSH_INTERVAL_SECONDS;
@@ -448,6 +472,7 @@ function recorderOver(
       pauses: series.pauses,
       ...(savedAs === undefined ? {} : { savedAs }),
       ...(courseLaps.length === 0 ? {} : { courseLaps }),
+      ...(openCourseLap === undefined ? {} : { openCourseLap }),
       ...(roomRaces.length === 0 ? {} : { roomRaces }),
     };
   }
@@ -530,6 +555,16 @@ function recorderOver(
     },
     noteCourseLap(lap: RecordedCourseLap): void {
       courseLaps = [...courseLaps, lap];
+      openCourseLap = undefined;
+      const startedAt = session.startedAt;
+      if (startedAt === undefined || !cursor.headerWritten) {
+        // No header on disk yet: the next flush writes one, laps and all.
+        return;
+      }
+      void attempt(async () => store.putRecordingSession(header(startedAt, session.timeline)));
+    },
+    noteOpenCourseLap(lap: RecordedCourseLap | undefined): void {
+      openCourseLap = lap;
     },
     get roomRaces() {
       return roomRaces;

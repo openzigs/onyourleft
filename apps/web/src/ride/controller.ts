@@ -3203,6 +3203,15 @@ export function createRideController(options: RideControllerOptions): RideContro
       // half from each would give a lap a moving time longer than its elapsed
       // time.
       const mark: LapMark = { at: session.timeline, movingTime: session.movingTime };
+      if (event.kind === 'progress') {
+        // #1322: kept by the recorder for its next header, so a recording that
+        // dies before the line saves this lap as a part lap. Nothing on the
+        // screen moves, so nothing is said to have changed.
+        if (lapFrom !== undefined) {
+          recorder?.noteOpenCourseLap(riddenLap(lapFrom, mark, { ...event, partial: true }));
+        }
+        return undefined;
+      }
       if (event.kind !== 'lap') {
         lapFrom = event.kind === 'started' ? mark : undefined;
         changed();
