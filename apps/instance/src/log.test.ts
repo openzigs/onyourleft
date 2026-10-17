@@ -122,10 +122,15 @@ describe('what the instance logs about a request (#767)', () => {
       room: TOKEN,
       reason: 'Ann Rider was rude',
       count: Number(LATITUDE),
+      // Named like an Object.prototype member: not one of the event's own keys.
+      toString: TOKEN,
+      constructor: TOKEN,
     });
+    // A count that is an integer but not one a room could have closed.
+    logEvent(sink, 'room-socket-closed', { worker: 1, count: -1 });
     // And on any other event, those keys are still not loggable.
     logEvent(sink, 'room-report', { room, reason: 'too-slow', count: 1 });
-    expect(lines.map((line) => JSON.parse(line) as unknown)).toEqual([
+    expect(lines.map((line) => JSON.parse(line) as unknown)).toEqual<Record<string, unknown>[]>([
       { event: 'room-socket-closed', worker: 1, room, reason: 'too-slow', count: 27 },
       {
         event: 'room-socket-closed',
@@ -133,7 +138,10 @@ describe('what the instance logs about a request (#767)', () => {
         room: REDACTED,
         reason: REDACTED,
         count: REDACTED,
+        toString: REDACTED,
+        constructor: REDACTED,
       },
+      { event: 'room-socket-closed', worker: 1, count: REDACTED },
       { event: 'room-report', room: REDACTED, reason: REDACTED, count: REDACTED },
     ]);
     const written = lines.join('');
@@ -148,7 +156,6 @@ describe('what the instance logs about a request (#767)', () => {
       typeof value === 'object' && 'code' in value ? [value] : Object.values(value),
     ) as { reason: string }[];
     const reasons = new Set(frames.map((frame) => frame.reason));
-    expect(reasons.size).toBe(10);
     expect(LOGGED_CLOSE_REASONS).toEqual(reasons);
     const lines: string[] = [];
     for (const reason of reasons) {
