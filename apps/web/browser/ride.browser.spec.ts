@@ -4518,10 +4518,14 @@ test.describe('Report’s reasons open, and a race on its start line, with sound
       test(`closing the reasons by ${way} returns focus to Report (WCAG 2.4.3) — ${viewport.name}`, async ({
         page,
       }) => {
+        // The timeout is `RoomReport.tsx`'s `setTimeout`: a clock installed
+        // before the load lets the case jump past it rather than wait 16 s at
+        // every viewport, which pushed the shard past its global timeout.
+        if (way === 'timeout') await page.clock.install();
         await openRide(page, viewport, REPORT_WITH_SOUNDS);
         await page.locator('.oyl-hud__report-reasons > button').first().focus();
         if (way === 'Escape') await page.keyboard.press('Escape');
-        else await page.waitForTimeout(REPORT_REASONS_TIMEOUT_MS + 1_000);
+        else await page.clock.fastForward(REPORT_REASONS_TIMEOUT_MS + 1_000);
         await expect(page.locator('.oyl-hud__report-reasons')).toHaveCount(0);
         const active = await page.evaluate(
           () => document.activeElement?.className ?? document.activeElement?.tagName,
