@@ -492,7 +492,7 @@ describe('the paint tables and theme.css say the same thing — #1307', () => {
   });
 
   it('gives the strip no height of its own, so the HUD’s route-plan rule sizes it — #1169', () => {
-    // Measured, not read off this: `browser/ride.browser.spec.ts` §"#1307".
+    // Measured, not read off this: `browser/ride-workout.browser.spec.ts` §"#1307".
     expect(bodies('oyl-workout-strip')).toHaveLength(1);
     expect(bodies('oyl-workout-strip')[0]).not.toMatch(/height:/);
   });

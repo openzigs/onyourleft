@@ -281,7 +281,7 @@ function route(): RouteProfile {
 /**
  * `ride.html?picker=chooser` — #940: the pre-ride chooser itself, with SEVEN
  * routes, and NOT ridden: the page stops once the chooser offers *Ride*, so
- * `ride.browser.spec.ts` §"#940" can choose the last card and measure where
+ * `pre-ride.browser.spec.ts` §"#940" can choose the last card and measure where
  * *Ride* is. The first route is the ridden fixture's own, so everything the
  * chooser shows above *Ride* is what the ridden page's rider saw.
  *
@@ -530,14 +530,14 @@ const ROOM_QUERY = new URLSearchParams(window.location.search).get('room');
  * named nine riders and sent a frame and its standings, so the HUD carries
  * the race's standings panel at its widest: seven lines, the longest names a
  * room admits beside realistic ones, a flag and a coaster among them.
- * `ride.browser.spec.ts` §"#1347" measures it.
+ * `ride-room.browser.spec.ts` §"#1347" measures it.
  */
 /**
  * `ride.html?room=report` — #789: that running race with the rider following
  * the first rider *Follow* reaches and *Report* pressed, so the actions panel
  * carries *Follow*, *Report* and the three reasons — the room row at its
  * tallest. `?room=following` is the same with *Report* not pressed: the
- * state the reasons open from, and `ride.browser.spec.ts` §"#789"'s control.
+ * state the reasons open from, and `ride-room.browser.spec.ts` §"#789"'s control.
  */
 const REPORT_OPEN = ROOM_QUERY === 'report';
 const FOLLOWING = ROOM_QUERY === 'following' || REPORT_OPEN;
