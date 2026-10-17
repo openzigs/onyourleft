@@ -4298,9 +4298,8 @@ test.describe('a room ride with a rider near, every reading and control on the s
  * and 10 px into him at 360×800. The control undoes the block and requires
  * the same measurement to fail at 736×360, 1024×768 and 360×752.
  *
- * Not held here, and measured as failing on `main` too: the same ride with
- * *Report*'s reasons open on an upright phone, and a race waiting on its
- * start line with sounds on at 736×360. They are filed as their own issue.
+ * Not held here: the same ride with *Report*'s reasons open, and a race
+ * waiting on its start line with sounds on. §"#1407" holds both.
  */
 const FOLLOWING_WITH_SOUNDS = `${FOLLOWING}&sounds=on`;
 const SOUND_ROW = 'oyl-sound';
@@ -4382,6 +4381,162 @@ test.describe('a room ride with sounds on — #1398', () => {
       ).toBe(false);
       const failures = roomWithSoundsFailures(seen, viewport);
       console.log(`#1398 control — ${viewport.name}: ${failures.join('; ')}`);
+      expect(failures).not.toEqual([]);
+    });
+  }
+});
+
+/**
+ * #1407 — the two room rides with sounds on that §"#1398" left over:
+ * *Report*'s reasons open (`?room=report&sounds=on`) and a race waiting on
+ * its start line (`?room=race&sounds=on`: the room's maker's notice, with
+ * *Start the race*, and no room row).
+ *
+ * ## What is held
+ *
+ * What §"#1398" holds, at every overlay viewport and both ways (#1120):
+ * nothing scrolled, every reading and control inside the viewport and
+ * uncovered, every panel whole, over no other and not over the leaning rider.
+ * Each thing that gives way is held to giving way exactly where `theme.css`
+ * records it, and nowhere else:
+ *
+ * - *Follow* and *Report* while the reasons are open, on a phone on its side
+ *   (§"#789 on a phone on its side") and, since #1407, on an upright phone;
+ * - the volume while the reasons are open, on an upright phone (§"#1407");
+ * - the route panel's elevation strip and plan view while the race's notice
+ *   stands in its cell on a phone (#437).
+ *
+ * The three reasons are held whole (no visible word clipped) and 44 px.
+ *
+ * ## The cause, and the control
+ *
+ * On `main` after #1398, on the CI runner's fonts, the open reasons put the
+ * actions panel 69 px into the leaning rider at 360×752, 55 px at 360×800 and
+ * 42 px at 390×844, and the race ran its actions panel and its notice 7 px
+ * below a 736×360 stage. The control undoes §"#1407" and requires the same
+ * measurement to fail at 360×752 and at 736×360.
+ */
+const REPORT_WITH_SOUNDS = `${REPORT_OPEN}&sounds=on`;
+const RACE_WITH_SOUNDS = '?room=race&sounds=on';
+const VOLUME = 'sound: Sound volume';
+const ROUTE_READINGS = ['the elevation strip', 'the plan view'] as const;
+
+/** What `theme.css` records as giving way in this state at this viewport. */
+function givesWayIn1407(query: string, viewport: Viewport): readonly string[] {
+  const phone = !TABLET_VIEWPORTS.includes(viewport);
+  if (query === RACE_WITH_SOUNDS) return phone ? ROUTE_READINGS : [];
+  if (!phone) return [];
+  return onItsSide(viewport)
+    ? ROOM_REPORT_CONTROLS.slice(0, 2)
+    : [...ROOM_REPORT_CONTROLS.slice(0, 2), VOLUME];
+}
+
+/**
+ * §"#1398"'s findings less the recorded trades, each of which must be laid
+ * out at no size: a trade that stopped being one is a finding too.
+ */
+function failuresIn1407(seen: StageMeasurement, viewport: Viewport, query: string): string[] {
+  const givesWay = givesWayIn1407(query, viewport);
+  const found = roomWithSoundsFailures(seen, viewport).filter(
+    (each) => !givesWay.some((name) => each.startsWith(`${name} [0,0 → 0,0]`)),
+  );
+  for (const name of givesWay) {
+    const item = named(seen.items, name);
+    if (item.box.width * item.box.height > 0) found.push(`${describeItem(item)} not given way`);
+  }
+  return found;
+}
+
+/** Each open reason whose visible word is clipped, and by how much. */
+async function reasonsClipped(page: Page): Promise<string[]> {
+  return page.evaluate(() =>
+    [...document.querySelectorAll('.oyl-hud__report-reasons > button')]
+      .filter((each) => each.scrollWidth > each.clientWidth)
+      .map(
+        (each) =>
+          `${each.textContent ?? ''}: ${String(each.scrollWidth)} px in ${String(each.clientWidth)}`,
+      ),
+  );
+}
+
+test.describe('Report’s reasons open, and a race on its start line, with sounds on — #1407', () => {
+  for (const query of [REPORT_WITH_SOUNDS, RACE_WITH_SOUNDS]) {
+    for (const viewport of OVERLAY_VIEWPORTS) {
+      test(`${query}: every panel whole and clear of the rider, every reading and control on the stage — ${viewport.name}`, async ({
+        browser,
+      }) => {
+        const page = await sharedRide(browser, viewport, query);
+        if (query === REPORT_WITH_SOUNDS) expect(await reasonsClipped(page)).toEqual([]);
+        for (const [how, seen] of await bothWays(page)) {
+          // The state this is about.
+          const names = seen.items.map((each) => each.name);
+          expect(names, how).toContain('sound: Mute sounds');
+          expect(names, how).toContain(VOLUME);
+          if (query === REPORT_WITH_SOUNDS) {
+            for (const name of ROOM_REPORT_CONTROLS) expect(names, how).toContain(name);
+            for (const name of ROOM_REPORT_CONTROLS.slice(2)) {
+              const reason = named(seen.items, name);
+              expect(reason.box.width, `${how}: ${describeItem(reason)}`).toBeGreaterThanOrEqual(
+                44 - SUBPIXEL_TOLERANCE,
+              );
+              expect(reason.box.height, `${how}: ${describeItem(reason)}`).toBeGreaterThanOrEqual(
+                44 - SUBPIXEL_TOLERANCE,
+              );
+            }
+          } else {
+            expect(
+              names.filter((name) => name.startsWith('room: ')),
+              how,
+            ).toEqual([]);
+          }
+          expect(seen.scrollY, how).toBe(0);
+          expect(seen.stageScrollTop, how).toBe(0);
+          expect(seen.pageOverflow, how).toBeLessThanOrEqual(0);
+          const panels = seenPanels(seen);
+          console.log(
+            `#1407 — ${query} — ${viewport.name} — ${how}: ${panels.map(describeItem).join('; ')}`,
+          );
+          expect(
+            panels.some((each) => each.name === SOUND_ROW),
+            `${how}: the sound row a panel of its own`,
+          ).toBe(soundRowLifted(viewport));
+          expect(failuresIn1407(seen, viewport, query), how).toEqual([]);
+        }
+      });
+    }
+  }
+
+  for (const [query, size] of [
+    [REPORT_WITH_SOUNDS, '360×752'],
+    [RACE_WITH_SOUNDS, '736×360'],
+  ] as const) {
+    const viewport = OVERLAY_VIEWPORTS.find(
+      (each) => `${String(each.width)}×${String(each.height)}` === size,
+    ) as Viewport;
+    test(`the control — with §"#1407" undone, the same measurement fails — ${query} — ${viewport.name}`, async ({
+      page,
+    }) => {
+      await openRide(page, viewport, query);
+      await page.addStyleTag({
+        content: `
+          .oyl-game--riding .oyl-hud .oyl-hud__room-row > :is(.oyl-hud__follow, .oyl-hud__report) {
+            display: inline-flex !important;
+          }
+          .oyl-game--riding .oyl-hud .oyl-hud__report-reasons { flex-wrap: wrap !important; }
+          .oyl-game--riding .oyl-hud .oyl-sound > .oyl-sound__volume { display: flex !important; }
+          .oyl-game--riding .oyl-hud:has(.oyl-hud__race) .oyl-hud__actions > .oyl-sound {
+            position: static !important; padding: 0 !important; border: 0 !important;
+            width: auto !important; background: none !important;
+          }
+          .oyl-game--riding .oyl-hud .oyl-hud__actions:has(.oyl-hud__report-reasons) > .oyl-sound {
+            flex-basis: 8rem !important;
+          }`,
+      });
+      const seen = await measure(page);
+      const failures = roomWithSoundsFailures(seen, viewport).filter(
+        (each) => !givesWayIn1407(query, viewport).some((name) => each.startsWith(`${name} [`)),
+      );
+      console.log(`#1407 control — ${query} — ${viewport.name}: ${failures.join('; ')}`);
       expect(failures).not.toEqual([]);
     });
   }
