@@ -4443,19 +4443,30 @@ function givesWayIn1407(query: string, viewport: Viewport): readonly string[] {
  * §"#1398"'s findings less the recorded trades, each of which must be laid
  * out at no size (or clipped to 1 px): a trade that stopped being one is a
  * finding too.
+ *
+ * A finding is dropped by the NAME it starts with, and only for an item that
+ * did give way (a box of at most 1 px²): such an item is off the stage or
+ * covered by construction, and nobody sees it. An item recorded as giving way
+ * that is still laid out keeps every finding about it, and adds "not given
+ * way".
  */
 function failuresGivingWay(
   seen: StageMeasurement,
   viewport: Viewport,
   givesWay: readonly string[],
 ): string[] {
-  const found = roomWithSoundsFailures(seen, viewport).filter(
-    (each) => !givesWay.some((name) => each.startsWith(`${name} [`)),
-  );
+  const gone: string[] = [];
+  const found: string[] = [];
   for (const name of givesWay) {
     const item = named(seen.items, name);
     if (item.box.width * item.box.height > 1) found.push(`${describeItem(item)} not given way`);
+    else gone.push(name);
   }
+  found.unshift(
+    ...roomWithSoundsFailures(seen, viewport).filter(
+      (each) => !gone.some((name) => each.startsWith(`${name} [`)),
+    ),
+  );
   return found;
 }
 
@@ -4597,18 +4608,23 @@ test.describe('Report’s reasons open, and a race on its start line, with sound
  *
  * - `?room=following&sounds=on&side=filming` — *Follow*, *Report*, the mute,
  *   the volume, the side camera's line and *Stop side camera*. On a phone
- *   the side camera's line gives way, and on an upright phone the trainer
- *   line as well (`theme.css` §"#1409"). On a phone on its side and on a
- *   tablet, the sound row and the side camera's row are each a panel of
- *   their own.
+ *   the side camera's line gives way, and on an upright phone the volume as
+ *   well (`theme.css` §"#1409"). ⚠️ The owner's ruling of 2026-10-17: on an
+ *   upright phone (and on a tablet) **the trainer line stays on the
+ *   screen**, because it can carry a running workout's hold, the power the
+ *   trainer is holding; until that ruling it gave way upright, and each
+ *   side-camera case now requires it laid out, on the stage and uncovered.
+ *   On a phone on its side #1358 gives it up in every room ride. On a phone
+ *   on its side and on a tablet, the sound row and the side camera's row
+ *   are each a panel of their own.
  * - `?room=following&sounds=on&side=lost` — the same with the side camera's
  *   link lost: its sentence is a notice in the bottom-start cell (#437, so on
  *   a phone the route panel's two readings give way to it), and the stop
  *   stays.
  * - `?room=report&sounds=on&side=filming` — *Report*'s reasons open as well:
  *   on a phone they take the row in place of *Follow* and *Report*
- *   (§"#789 on a phone on its side", §"#1407"), whole, and the volume does
- *   not give way, because the sound row has a line of its own there.
+ *   (§"#789 on a phone on its side", §"#1407"), whole, beside *Stop* upright,
+ *   where the volume has given way already.
  * - `?room=lost&sounds=on` and `?room=paused&sounds=on` — #1360's two room
  *   sentences in the notice slot with the lifted sound row (#1398). At
  *   1024×768 the sentence and the sound row share the left column.
@@ -4643,7 +4659,7 @@ function givesWayIn1409(query: string, viewport: Viewport): readonly string[] {
     // #437: on a phone a notice stands in the route panel's cell.
     ...(query === ROOM_SOUNDS_SIDE || query === REPORT_SOUNDS_SIDE ? [] : ROUTE_READINGS),
     ...(query === ROOM_SOUNDS_SIDE || query === REPORT_SOUNDS_SIDE ? [SIDE_CAMERA_LINE] : []),
-    ...(upright && (WITH_A_SIDE_CAMERA as readonly string[]).includes(query) ? [TRAINER_LINE] : []),
+    ...(upright && (WITH_A_SIDE_CAMERA as readonly string[]).includes(query) ? [VOLUME] : []),
     ...(query === REPORT_SOUNDS_SIDE ? ROOM_REPORT_CONTROLS.slice(0, 2) : []),
   ];
 }
@@ -4668,6 +4684,16 @@ test.describe('a room ride with sounds on, a side camera paired or a notice stan
           }
           if (query === REPORT_SOUNDS_SIDE) {
             for (const name of ROOM_REPORT_CONTROLS) expect(names, how).toContain(name);
+          }
+          if (sideCamera && !onItsSide(viewport)) {
+            // The owner's ruling of 2026-10-17: the trainer line, which can
+            // carry a workout's hold, is laid out, on the stage and uncovered.
+            const line = named(seen.items, TRAINER_LINE);
+            const shown = `${how}: ${describeItem(line)} shown (the owner's ruling, 2026-10-17)`;
+            expect(line.box.width, shown).toBeGreaterThan(1);
+            expect(line.box.height, shown).toBeGreaterThan(1);
+            expect(line.onTop, shown).toBe(true);
+            expect(inside(line.box, viewport), shown).toBe(true);
           }
           if (!sideCamera) {
             // #1360's sentence, in the notice slot.
@@ -4728,10 +4754,10 @@ test.describe('a room ride with sounds on, a side camera paired or a notice stan
         for (const sheet of document.styleSheets) walk(sheet.cssRules, sheet);
         return count;
       });
-      // Eight in `theme.css`: three on a phone on its side, one on a tablet and
-      // four upright. Ten in the built sheet, which splits each of the two
-      // two-selector lists into a rule per selector.
-      expect(taken, 'the rules of §"#1409" taken out').toBe(10);
+      // Ten in `theme.css`: three on a phone on its side, one on a tablet and
+      // six upright. Eleven in the built sheet, which splits the one
+      // two-selector list into a rule per selector.
+      expect(taken, 'the rules of §"#1409" taken out').toBe(11);
       // #1398's exception for a side camera, put back: the sound row stays in
       // the actions panel.
       await page.addStyleTag({
