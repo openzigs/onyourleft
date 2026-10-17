@@ -208,6 +208,13 @@ describe('a recording that will not read (#1325)', () => {
     expect(text).not.toContain('Continue this ride');
   });
 
+  it('does not warn about lost pauses on a ride already in the library', async () => {
+    const view = await show([{ ...offered('already-saved'), damaged: ['pauses'] }]);
+    const text = view.container.textContent ?? '';
+    expect(text).not.toContain('Its pauses could not be read');
+    expect(text).not.toContain('Save this ride');
+  });
+
   it('does not call a ride whose state did not read a finished one', async () => {
     const view = await show([{ ...offered('unsaved'), damaged: ['state'] }]);
     const text = view.container.textContent ?? '';

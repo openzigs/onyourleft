@@ -450,7 +450,7 @@ function useOwnThresholds(analysis: AnalysisPort | undefined): OwnThresholds {
  * safe so a rider is not talked into rescuing something that needs no rescue.
  */
 function offerText(ride: RecoverableRide): string {
-  const pauses = ride.damaged.includes('pauses') ? ` ${PAUSES_LOST}` : '';
+  const pauses = ride.damaged.includes('pauses') && !ride.alreadySaved ? ` ${PAUSES_LOST}` : '';
   return `${kindText(ride)}${pauses}`;
 }
 
@@ -528,7 +528,7 @@ function RecoveryOffer({
         ))}
         {/* #1325: on the device and in no other list, so said, and discardable. */}
         {snapshot.unreadableRecordings.map((id) => (
-          <li key={`unreadable-${String(id)}`}>
+          <li key={`unreadable-${typeof id}-${String(id)}`}>
             <p>A recording that cannot be read, so it cannot be continued or saved.</p>
             <Button
               variant="secondary"
