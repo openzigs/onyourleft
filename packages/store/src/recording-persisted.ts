@@ -207,11 +207,20 @@ export function fromPersistedRecordingSession(
     row.courseLaps === undefined
       ? undefined
       : fromPersistedCourseLaps(row.courseLaps, startedAt, updatedAt);
-  const openCourseLap = fromPersistedOpenCourseLap(
-    row.openCourseLap,
-    courseLaps?.at(-1)?.to.at ?? startedAt,
-    updatedAt,
-  );
+  // #1419: a stored lap list that did not read takes the lap in progress with
+  // it. That lap is numbered after the completed ones, and kept alone it would
+  // be saved as the first lap when it was lap N + 1.
+  const lapsDropped =
+    row.courseLaps !== undefined &&
+    (!Array.isArray(row.courseLaps) || row.courseLaps.length > 0) &&
+    courseLaps?.length === 0;
+  const openCourseLap = lapsDropped
+    ? undefined
+    : fromPersistedOpenCourseLap(
+        row.openCourseLap,
+        courseLaps?.at(-1)?.to.at ?? startedAt,
+        updatedAt,
+      );
   // #1325: read, never refused — @see RecordingSessionRecord.damaged
   const pauses = readOrUndefined(() => fromPersistedPauses(row.pauses));
   const state = readOrUndefined(() => parseRecordingState(row.state));
@@ -356,7 +365,9 @@ function courseLapOf(row: PersistedCourseLap): RecordedCourseLap {
  * The header's lap in progress — #1322 — or none, when it does not read.
  *
  * Lenient, for {@link fromPersistedCourseLaps}' reason, and dropped ALONE: it
- * is numbered after every completed lap, so losing it renumbers nothing. Also
+ * is numbered after every completed lap, so losing it renumbers nothing. The
+ * reverse does not hold, so a completed-lap list that does not read takes this
+ * lap with it (#1419). Also
  * dropped when it began before the last completed lap ended (`after`, or the
  * recording's start with none) or ends after the header was written. Always a
  * part lap on the way out: the rider had not reached the line.

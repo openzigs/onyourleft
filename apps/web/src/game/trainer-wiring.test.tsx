@@ -43,6 +43,7 @@ import {
   type GameTrainerPort,
   type GradientTrainer,
 } from './trainer-port';
+import { courseProgressEvent } from './course-laps';
 import type { GameRenderer, SceneFrame } from './port';
 import { browserScreenLockSource, type ScreenLockSource } from './hud/wake-lock';
 import { hideablePage, type HideablePage } from './hud/wake-lock-testing';
@@ -102,6 +103,7 @@ import { activityId, lapId, recordingSessionId } from '@onyourleft/store';
 import { ATHLETE_A, createStoreHarness, seedAthletes } from '@onyourleft/store/testing';
 
 import { LAP_NOTICE_SECONDS } from './hud/lap-text';
+import type { CourseLineEvent } from '../recording/laps';
 import { ROOM_RECORDING_PAUSED_TEXT } from './room-ride';
 import { createRideController } from '../ride/controller';
 import { CORRECTION_GRADE_STEP_PERCENT_PER_SECOND } from '../net/correction';
@@ -1859,7 +1861,8 @@ async function pumpWith(clock: ManualClock, count: number): Promise<void> {
 }
 
 /** 300 flat metres out and back: a loop (#1312's review tests). */
-function lapCircuit(): RidableRoute {
+/** `climbPerPoint` metres up each point of the way out, and down again (#1419). */
+function lapCircuit(climbPerPoint = 0): RidableRoute {
   const points: RoutePoint[] = [];
   for (let index = 0; index <= 30; index += 1) {
     const out = index <= 15 ? index : 30 - index;
@@ -1868,7 +1871,7 @@ function lapCircuit(): RidableRoute {
         degreesLatitude(51.5 + (out * 10) / 111_320),
         degreesLongitude(-0.12),
       ),
-      elevation: altitudeMetres(20),
+      elevation: altitudeMetres(20 + out * climbPerPoint),
     });
   }
   return {
@@ -1888,21 +1891,26 @@ const LAP_FIGURES = {
 };
 
 /** A port that records every line event and answers each lap with one lap. */
-function linePort(events: string[]): GameTrainerPort {
+function linePort(events: string[], said: CourseLineEvent[] = []): GameTrainerPort {
   return {
     ...gameTrainerPortOver(undefined),
     courseLine: (event) => {
       events.push(event.kind);
+      said.push(event);
       return event.kind === 'lap' ? [LAP_FIGURES] : undefined;
     },
   };
 }
 
-async function mountCircuit(events: string[]): Promise<void> {
+async function mountCircuit(
+  events: string[],
+  said: CourseLineEvent[] = [],
+  route: RidableRoute = lapCircuit(),
+): Promise<void> {
   mounted = await mount(
     <GameView
-      port={pedallingPort(lapCircuit())}
-      trainer={linePort(events)}
+      port={pedallingPort(route)}
+      trainer={linePort(events, said)}
       renderer={() => Promise.resolve(capturingRenderer([]))}
       now={() => nowMs}
     />,
@@ -1974,6 +1982,39 @@ describe('the recording is told how far round the lap the rider is — #1322', (
     // Frames are half a second apart here, so once a second is about half of them.
     expect(said).toBeGreaterThan(0);
     expect(said).toBeLessThanOrEqual(Math.ceil(frames / 2) + 1);
+  });
+
+  it('says the distance and the climb of the stretch ridden since the line — #1419', async () => {
+    held.on = false;
+    const events: string[] = [];
+    const said: CourseLineEvent[] = [];
+    // Two metres up for every ten of the way out: the climb said is not nought.
+    const route = lapCircuit(2);
+    const total = route.profile.totalDistance as number;
+    await mountCircuit(events, said, route);
+    await clickThrough(buttonStarting('Ride '));
+
+    await pumpUntilLaps(events, 1);
+    await pump(4);
+    const line = said.findIndex((event) => event.kind === 'lap');
+    const before = said.slice(0, line).filter((event) => event.kind === 'progress');
+    const after = said.slice(line).filter((event) => event.kind === 'progress');
+    const last = before.at(-1);
+    const next = after[0];
+    if (last?.kind !== 'progress' || next?.kind !== 'progress') {
+      throw new Error('progress was not said on both sides of the line');
+    }
+    // The last said before the line: nearly the whole lap — said within the
+    // last second of riding it, which is under 25 m here…
+    expect(last.distance).toBeLessThan(total);
+    expect(last.distance).toBeGreaterThan(total - 25);
+    // …and the climb of THAT stretch, the profile's own figure for it: out to
+    // the turn is 30 m up, less what the run rule leaves out.
+    expect(last.ascent).toBeGreaterThan(20);
+    expect(courseProgressEvent(route.profile, last.distance)).toStrictEqual(last);
+    // The first said after it is of the new lap, measured from the line.
+    expect(next.distance).toBeGreaterThan(0);
+    expect(next.distance).toBeLessThan(25);
   });
 });
 

@@ -3229,6 +3229,9 @@ export function createRideController(options: RideControllerOptions): RideContro
       }
       if (event.kind !== 'lap') {
         lapFrom = event.kind === 'started' ? mark : undefined;
+        // #1419: a game ride that starts again or ends has no lap in progress
+        // from before it — or the next header would still carry one.
+        recorder?.noteOpenCourseLap(undefined);
         changed();
         return undefined;
       }
@@ -3237,6 +3240,8 @@ export function createRideController(options: RideControllerOptions): RideContro
       if (from === undefined) {
         // The recording began after the rider left the line: what was ridden
         // of that lap before it is not on the record, so it is not a lap.
+        // (No lap is open here to clear: progress is noted only with a lap
+        // begun, and every way `lapFrom` is emptied clears it — #1419.)
         changed();
         return undefined;
       }

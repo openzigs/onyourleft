@@ -1155,9 +1155,15 @@ export class ActivityStore {
    */
   async putFinishedRide(ride: NewFinishedRide): Promise<ActivityId> {
     const { activity, streams, laps } = ride;
-    if (streams.activityId !== activity.id || streams.athleteId !== activity.athleteId) {
+    if (streams.activityId !== activity.id) {
       throw new StoreValidationError(
         `cannot store ride ${activity.id}: its samples are for activity ${streams.activityId}`,
+      );
+    }
+    if (streams.athleteId !== activity.athleteId) {
+      // #1419: named as the athlete it is, not as the same activity id twice.
+      throw new StoreValidationError(
+        `cannot store ride ${activity.id}: its samples are for another athlete`,
       );
     }
     const stray = laps.find((lap) => lap.activityId !== activity.id);
@@ -2862,7 +2868,12 @@ export class ActivityStore {
     // alone and dropped alone (`recording-persisted.ts`
     // §`fromPersistedOpenCourseLap`), so one that does not read costs the
     // header nothing — and refusing the write over it would cost the ride.
-    const row = toPersistedRecordingSession(writable ? record : { ...record, courseLaps: [] });
+    // #1419: but it is numbered after the completed laps, so it goes WITH a
+    // list left out here, or it would be saved as the first lap when it was
+    // lap N + 1.
+    const row = toPersistedRecordingSession(
+      writable ? record : { ...record, courseLaps: [], openCourseLap: undefined },
+    );
     await this.#db.transaction('rw', [this.#athletes, this.#recordingSessions], async () => {
       await this.#requireAthlete(record.athleteId);
       this.#requireNotOwnedByAnother(
@@ -3657,7 +3668,6 @@ function summaryOf(record: ActivityRecord): ActivitySummary {
   };
 }
 
-/** Stands in for a blob's bytes while only its declared sample count is being read. */
 /** The row `putActivity` and `putFinishedRide` both write, defaults applied. */
 function activityRowOf(record: NewActivity): PersistedActivity {
   return toPersistedActivity({
@@ -3670,6 +3680,7 @@ function activityRowOf(record: NewActivity): PersistedActivity {
   });
 }
 
+/** Stands in for a blob's bytes while only its declared sample count is being read. */
 const EMPTY_BYTES = new Uint8Array(0);
 
 /** A `StreamChannels` under construction. The public type is deeply readonly. */

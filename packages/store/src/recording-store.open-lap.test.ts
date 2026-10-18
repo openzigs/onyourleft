@@ -12,9 +12,11 @@
  */
 
 import { metres, seconds, unixSeconds } from '@onyourleft/domain';
+import Dexie from 'dexie';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { NewRecordingSession, RecordedCourseLap } from './recording';
+import { SCHEMA_VERSIONS, TABLE } from './schema';
 import {
   ATHLETE_A,
   createStoreHarness,
@@ -127,5 +129,65 @@ describe('a lap in progress that does not read costs nothing else', () => {
       }),
     );
     expect(recovered).not.toHaveProperty('openCourseLap');
+  });
+});
+
+describe('#1419 — a completed-lap list that does not read takes the lap in progress with it', () => {
+  // The lap in progress is numbered after the completed ones: kept alone, it
+  // would be saved as "Lap 1, part" when it was lap N + 1.
+
+  it('one left out at write, over a faulty completed lap, leaves no lap in progress', async () => {
+    const { header, recovered } = await written(
+      recording({
+        courseLaps: [
+          lap(0, 20, 1_000),
+          // Its moving time ran backwards, so the whole list is left out.
+          { ...lap(20, 30, 500), to: { at: unixSeconds(START + 30), movingTime: seconds(19) } },
+        ],
+        openCourseLap: lap(30, 40, 200),
+      }),
+    );
+
+    expect(header).not.toHaveProperty('courseLaps');
+    expect(header).not.toHaveProperty('openCourseLap');
+    expect(recovered?.courseLaps).toStrictEqual([]);
+    expect(recovered).not.toHaveProperty('openCourseLap');
+  });
+
+  it.each([
+    [
+      'a damaged lap in the list',
+      [{ fromAt: START, toAt: START + 20, distanceMetres: Number.NaN }],
+    ],
+    ['a list that is not a list', 'laps'],
+  ])('one dropped on the way out, for %s, leaves no lap in progress', async (_name, planted) => {
+    const record = recording({ courseLaps: [lap(0, 20, 1_000)], openCourseLap: lap(20, 35, 400) });
+    await harness.write(async (store) => store.putRecordingSession(record));
+    await harness.discard();
+    const raw = new Dexie(harness.databaseName);
+    SCHEMA_VERSIONS.forEach((stores, index) => {
+      raw.version(index + 1).stores(stores);
+    });
+    try {
+      await raw.table(TABLE.recordingSessions).update(record.id, { courseLaps: planted });
+    } finally {
+      raw.close();
+    }
+
+    const { header, recovered } = await harness.read(async (store) => ({
+      header: await store.getRecordingSession(ATHLETE_A, record.id),
+      recovered: await store.recoverRecording(ATHLETE_A, record.id),
+    }));
+
+    // The recording itself is still offered and still recovers.
+    expect(header?.id).toBe(record.id);
+    expect(recovered?.courseLaps).toStrictEqual([]);
+    expect(header).not.toHaveProperty('openCourseLap');
+    expect(recovered).not.toHaveProperty('openCourseLap');
+  });
+
+  it('a header that never had completed laps keeps its lap in progress', async () => {
+    const { recovered } = await written(recording({ openCourseLap: lap(0, 15, 300) }));
+    expect(recovered?.openCourseLap).toStrictEqual({ ...lap(0, 15, 300), partial: true });
   });
 });

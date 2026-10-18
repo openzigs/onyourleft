@@ -8083,6 +8083,41 @@ describe('#1312 — the laps of a course are the recording’s, and are saved wi
       next.controller.dispose();
     });
 
+    it.each([
+      ['ends', { kind: 'ended' }],
+      ['starts again', { kind: 'started' }],
+    ] as const)(
+      '#1419: a game ride that %s takes the progress said of its lap with it',
+      async (_name, event) => {
+        // The progress is said of the lap AFTER the completed one, so the
+        // store's read rule (a lap in progress that began before the last
+        // completed lap ended is dropped) is no guard: only the controller
+        // clearing it keeps a stale part lap off the disk.
+        const rig = benchWith();
+        const hud = gameTrainerPortOver(rig.controller);
+        await rig.controller.pair('trainer');
+        await rig.controller.start();
+        hud.courseLine?.({ kind: 'started' });
+        await ride(rig, 10);
+        hud.courseLine?.({ ...WHOLE, again: true });
+        await ride(rig, 5);
+        hud.courseLine?.(PROGRESS);
+        hud.courseLine?.(event);
+        // Six seconds more with nothing said of a lap, and a flush.
+        await ride(rig, 6);
+        rig.controller.dispose();
+        const id = rig.sessionIds[0] as RecordingSessionId;
+
+        const next = benchWith({ rideSave: storeSavePort() });
+        await next.controller.refreshRecoverable();
+        expect(await next.controller.saveRecovered(id)).toBe('saved');
+        expect((await lapsOf('ride-1')).map((lap) => [lap.movingTime, lap.partial])).toEqual([
+          [10, undefined],
+        ]);
+        next.controller.dispose();
+      },
+    );
+
     it('a lap crossed and the tab gone before the next flush is still saved', async () => {
       // The flush interval is five seconds and the tenth second's tick has
       // just flushed: the line is crossed after it, and the tab dies before
