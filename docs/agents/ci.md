@@ -410,7 +410,7 @@ seconds are the 7763's, from 37131982824):
 | Candidate | Saves | Why it is not a safety gate — or why it stays |
 |---|--:|---|
 | Run the 50 `.a11y.test.` files ONCE: `test:coverage` stops running them and `test:a11y` stays the named gate (a dedup, not a move; needs `check:test-split` to know a third run, and the coverage report loses what only they execute, as #852 did) | ~43 s (86 s of case time under coverage, two workers) | accessibility stays required and blocking |
-| `ride.browser.spec.ts` §"#940 — the notices are never hidden…" to nightly | ~42 s (84 s of case time) | a layout sweep of the pre-ride chooser; #940's own "Ride is on the screen" cases stay. ⚠️ It is the notices-never-obscured check, so it may count as a safety sentence — the owner's call |
+| `pre-ride.browser.spec.ts` §"#940 — the notices are never hidden…" to nightly | ~42 s (84 s of case time) | a layout sweep of the pre-ride chooser; #940's own "Ride is on the screen" cases stay. ⚠️ It is the notices-never-obscured check, so it may count as a safety sentence — the owner's call |
 | `realistic-textures.test.ts` to nightly (#866's realistic rule) | ~30 s (59 s summed) | the opt-in realistic world's KTX2 pipeline, the same class #866 moved for the browser |
 | `reflow.browser.spec.ts`' dark-palette walks to nightly | ~22 s (45 s of its 89 s) | #672 put them back on purpose; the light walk stays |
 | The `instance` subprocess files (`instance.test.ts`, `operator/commands.test.ts`, `tunnel-soak.test.ts`) to nightly, or a faster spawn | ~35 s (69 s summed) | `/source`, migrate-refusal and SIGTERM are AGPL §13 and data-safety claims — probably stays; a faster fixture is the better cut |

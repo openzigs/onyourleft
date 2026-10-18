@@ -99,7 +99,7 @@
  *
  * What more than one of them reads — the viewports, `openRide`, the
  * measuring and both-ways helpers — is `ride-stage.ts`, unchanged but for
- * its `export`s. docs/agents/ci.md §4c "Two browser shards — #1362" has
+ * its `export`s. docs/agents/ci.md §4c "Five ride files — #1414" has
  * the measurements before and after.
  */
 

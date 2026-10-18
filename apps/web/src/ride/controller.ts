@@ -619,7 +619,7 @@ export const RIDE_NOTIFICATION_REFUSED =
  * ⚠️ **A safety sentence, so it is never behind a disclosure** — the owner's
  * ruling on #654's re-review of #647. It is short so that it fits where it is
  * shown: beside the Live heading on the Ride screen and in the HUD's notice cell
- * (`ride.browser.spec.ts` and `rideview.browser.spec.ts` §"#647" measure both).
+ * (`ride-notices.browser.spec.ts` and `rideview.browser.spec.ts` §"#647" measure both).
  *
  * ⚠️ **Shortened for the HUD's notice cell at 360 px** — #693's re-review,
  * B2. It used to be *"your ride may stop if the screen goes off."*, and beside
