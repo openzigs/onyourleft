@@ -34,8 +34,10 @@ import {
   createStoreHarness,
   DROPPED_STRAP,
   FOUR_HOUR_SAMPLE_COUNT,
+  lapFor,
   recordingFor,
   resetFixtureIds,
+  rideFor,
   RoundTripFailure,
   seedAthletes,
   seedRecording,
@@ -1158,6 +1160,98 @@ describe('a header that will not read hides no other recording (#1325)', () => {
     await expect(
       harness.write(async (store) => store.deleteRecordingSession(ATHLETE_B, damaged.id)),
     ).resolves.toBe(false);
+  });
+
+  // #1322 merged beside this: the header's lap in progress is one more
+  // optional field, so it must read the way the others do — dropped alone,
+  // never a refusal of the header and never a damage the rider is told of.
+  it.each([
+    ['a lap in progress that is not a lap', 'halfway'],
+    ['a lap in progress whose start is not a number', { fromAt: 'then', toAt: 1_700_000_600 }],
+    [
+      'a lap in progress that ran backwards',
+      {
+        fromAt: 1_700_000_600,
+        fromMovingSeconds: 500,
+        toAt: 1_700_000_500,
+        toMovingSeconds: 400,
+        distanceMetres: 100,
+      },
+    ],
+  ])('reads %s as none, and lists and recovers the ride undamaged', async (_name, lap) => {
+    const { healthy, damaged } = await twoRecordings();
+    await plant(damaged.id, { openCourseLap: lap });
+
+    const read = await harness.read(async (store) => ({
+      listing: await store.readRecordingSessions(ATHLETE_A),
+      recovered: await store.recoverRecording(ATHLETE_A, damaged.id),
+    }));
+
+    expect(read.listing.sessions.map((row) => row.id)).toEqual([healthy.id, damaged.id]);
+    expect(read.listing.unreadable).toEqual([]);
+    const header = read.listing.sessions[1];
+    expect(header).not.toHaveProperty('openCourseLap');
+    expect(header).not.toHaveProperty('damaged');
+    expect(header?.pauses).toEqual(PAUSES);
+    expect(read.recovered).not.toHaveProperty('openCourseLap');
+    expect(read.recovered?.channels.power).toEqual([1, 2, 3, 4]);
+  });
+
+  it('keeps the lap in progress (#1322) of a header whose pauses did not read', async () => {
+    const { damaged } = await twoRecordings();
+    const lap = {
+      fromAt: 1_700_000_000,
+      fromMovingSeconds: 0,
+      toAt: 1_700_000_300,
+      toMovingSeconds: 240,
+      distanceMetres: 2_000,
+      partial: true,
+    };
+    await plant(damaged.id, { pauses: 'none', openCourseLap: lap });
+
+    const recovered = await harness.read(async (store) =>
+      store.recoverRecording(ATHLETE_A, damaged.id),
+    );
+    expect(recovered?.pauses).toEqual([]);
+    expect(recovered?.openCourseLap).toEqual({
+      from: { at: 1_700_000_000, movingTime: 0 },
+      to: { at: 1_700_000_300, movingTime: 240 },
+      distance: 2_000,
+      partial: true,
+    });
+  });
+
+  // #1326 merged beside this: `putFinishedRide` links the checkpoint in the
+  // ride's own transaction. Saving a ride whose pauses did not read must link
+  // it and leave the damage as it is on disk, so the next read still says the
+  // pauses were lost — and, now `alreadySaved`, the screen stops saying the
+  // save is yet to count them.
+  it('saves a ride whose pauses did not read in one transaction, and the damage still reads', async () => {
+    const { healthy, damaged } = await twoRecordings();
+    await plant(damaged.id, { pauses: 'none' });
+    const activity = rideFor(ATHLETE_A);
+
+    await harness.write(async (store) =>
+      store.putFinishedRide({
+        activity,
+        streams: streamSetFor(activity, { sampleCount: 4 }),
+        laps: [lapFor(activity, 0)],
+        recordingSession: damaged.id,
+      }),
+    );
+
+    const read = await harness.read(async (store) => ({
+      listing: await store.readRecordingSessions(ATHLETE_A),
+      saved: await store.getActivity(ATHLETE_A, activity.id),
+    }));
+    expect(read.saved?.id).toBe(activity.id);
+    expect(read.listing.unreadable).toEqual([]);
+    const [other, header] = read.listing.sessions;
+    expect(header?.id).toBe(damaged.id);
+    expect(header?.savedAs).toBe(activity.id);
+    expect(header?.damaged).toEqual(['pauses']);
+    expect(other?.id).toBe(healthy.id);
+    expect(other?.savedAs).toBeUndefined();
   });
 });
 
