@@ -85,7 +85,7 @@ const SHOWN = `!${KEEP_SCREEN_ON_LABEL}: ${RIDE_MAY_STOP_WITH_SCREEN_OFF}`;
 const CHECKPOINTS: RecordingCheckpointStore = {
   putRecordingSession: (record) => Promise.resolve(record.id),
   appendRecordingChunk: () => Promise.resolve(1),
-  listRecordingSessions: () => Promise.resolve([]),
+  readRecordingSessions: () => Promise.resolve({ sessions: [], unreadable: [] }),
   recoverRecording: () => Promise.resolve(undefined),
   deleteRecordingSession: () => Promise.resolve(true),
 };

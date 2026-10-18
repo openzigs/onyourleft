@@ -189,9 +189,12 @@ export type {
   RecordedLapMark,
   RecordingChunkRecord,
   RecordingFootprint,
+  RecordingHeaderDamage,
+  RecordingSessionListing,
   RecordingSessionRecord,
   RecordingStoredState,
   RecoveredRecording,
+  UnreadableRecordingSession,
 } from './recording';
 export { RECORDING_STORED_STATES } from './recording';
 

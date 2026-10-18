@@ -17,7 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { StoreDecodeError, StoreReferentialError, StoreValidationError } from './errors';
 import { activityId, recordingSessionId } from './ids';
-import type { PersistedRecordingChunk } from './recording-persisted';
+import { parseRecordingState, type PersistedRecordingChunk } from './recording-persisted';
 import { SCHEMA_VERSIONS, TABLE } from './schema';
 import {
   STREAM_CHANNELS,
@@ -34,8 +34,10 @@ import {
   createStoreHarness,
   DROPPED_STRAP,
   FOUR_HOUR_SAMPLE_COUNT,
+  lapFor,
   recordingFor,
   resetFixtureIds,
+  rideFor,
   RoundTripFailure,
   seedAthletes,
   seedRecording,
@@ -375,19 +377,6 @@ describe('a crash mid-write', () => {
     ).rejects.toThrow(StoreDecodeError);
   });
 
-  it('refuses a header row whose state is not one this build writes', async () => {
-    const recording = await seedRecording(harness, ATHLETE_A);
-    await readRaw(async (raw) => {
-      const table = raw.table<{ id: string; state: string }, string>(TABLE.recordingSessions);
-      const row = await table.get(recording.id);
-      await table.put({ ...(row as { id: string; state: string }), state: 'uploading' });
-    });
-
-    await expect(
-      harness.read(async (store) => store.getRecordingSession(ATHLETE_A, recording.id)),
-    ).rejects.toThrow(StoreDecodeError);
-  });
-
   it('refuses a chunk row whose channel list is not an array, on both read paths', async () => {
     const recording = await seedRecording(harness, ATHLETE_A);
     await harness.write(async (store) =>
@@ -418,41 +407,12 @@ describe('a crash mid-write', () => {
     ).rejects.toThrow(StoreDecodeError);
   });
 
-  it('names the type rather than the value when a corrupt field is not a string', async () => {
+  it('names the type rather than the value when a stored state is not a string', () => {
     // ADR 0004 decision D's habit, applied to a decode message: a row that has
     // been corrupted into a number should not have that number echoed into a
-    // console and a bug tracker.
-    const recording = await seedRecording(harness, ATHLETE_A);
-    await readRaw(async (raw) => {
-      const table = raw.table<Record<string, unknown>, string>(TABLE.recordingSessions);
-      const row = (await table.get(recording.id)) as Record<string, unknown>;
-      await table.put({ ...row, state: 42 });
-    });
-
-    await expect(
-      harness.read(async (store) => store.getRecordingSession(ATHLETE_A, recording.id)),
-    ).rejects.toThrow(/found number$/);
-  });
-
-  it('refuses a header row whose pause list is not one this build wrote', async () => {
-    const recording = await seedRecording(harness, ATHLETE_A);
-    await readRaw(async (raw) => {
-      const table = raw.table<Record<string, unknown>, string>(TABLE.recordingSessions);
-      const row = (await table.get(recording.id)) as Record<string, unknown>;
-      await table.put({ ...row, pauses: [{ from: 1, reason: 7 }] });
-    });
-    await expect(
-      harness.read(async (store) => store.getRecordingSession(ATHLETE_A, recording.id)),
-    ).rejects.toThrow(StoreDecodeError);
-
-    await readRaw(async (raw) => {
-      const table = raw.table<Record<string, unknown>, string>(TABLE.recordingSessions);
-      const row = (await table.get(recording.id)) as Record<string, unknown>;
-      await table.put({ ...row, pauses: 'none' });
-    });
-    await expect(
-      harness.read(async (store) => store.getRecordingSession(ATHLETE_A, recording.id)),
-    ).rejects.toThrow(StoreDecodeError);
+    // console and a bug tracker. (Since #1325 a header read takes a state that
+    // will not parse as damage rather than throwing; the parser still throws.)
+    expect(() => parseRecordingState(42)).toThrow(/found number$/);
   });
 });
 
@@ -1028,6 +988,272 @@ function rawLap(ordinal: 1 | 2 = 1): Record<string, unknown> {
         distanceMetres: 5_000,
       };
 }
+
+describe('a header that will not read hides no other recording (#1325)', () => {
+  const SPAN = {
+    startedAt: unixSeconds(1_700_000_000),
+    updatedAt: unixSeconds(1_700_000_700),
+  };
+  const PAUSES = [
+    { from: unixSeconds(1_700_000_100), to: unixSeconds(1_700_000_160), reason: 'manual' as const },
+  ];
+
+  /** Two crashed recordings of A's, each with samples; the second is the one damaged. */
+  const twoRecordings = async () => {
+    const healthy = recordingFor(ATHLETE_A, { ...SPAN, pauses: PAUSES });
+    const damaged = recordingFor(ATHLETE_A, {
+      ...SPAN,
+      updatedAt: unixSeconds(1_700_000_650),
+      pauses: PAUSES,
+    });
+    await harness.write(async (store) => {
+      for (const record of [healthy, damaged]) {
+        await store.putRecordingSession(record);
+        await store.appendRecordingChunk({
+          sessionId: record.id,
+          athleteId: ATHLETE_A,
+          seq: 0,
+          fromIndex: 0,
+          sampleCount: 4,
+          channels: { power: [watts(1), watts(2), watts(3), watts(4)] },
+        });
+      }
+    });
+    return { healthy, damaged };
+  };
+
+  const plant = async (id: string, fields: Record<string, unknown>): Promise<void> => {
+    await readRaw(async (raw) => {
+      await raw.table(TABLE.recordingSessions).update(id, fields);
+    });
+  };
+
+  it.each([
+    ['a pause list that is not a list', 'none'],
+    ['a pause whose reason is neither', [{ from: 1_700_000_100, reason: 'coffee' }]],
+    ['a pause whose reason is not a string', [{ from: 1_700_000_100, reason: 7 }]],
+    ['a pause that is nothing', [null]],
+    ['a pause whose start is not a number', [{ from: '1700000100', reason: 'manual' }]],
+    ['a pause whose end is not a number', [{ from: 1_700_000_100, to: 'later', reason: 'manual' }]],
+    [
+      'one damaged pause beside a good one',
+      [
+        { from: 1_700_000_100, to: 1_700_000_160, reason: 'manual' },
+        { from: 1_700_000_200, to: Number.NaN, reason: 'automatic' },
+      ],
+    ],
+  ])('reads %s as NO pauses, says so, and lists and recovers the ride', async (_name, pauses) => {
+    const { healthy, damaged } = await twoRecordings();
+    await plant(damaged.id, { pauses });
+
+    const read = await harness.read(async (store) => ({
+      listing: await store.readRecordingSessions(ATHLETE_A),
+      header: await store.getRecordingSession(ATHLETE_A, damaged.id),
+      recovered: await store.recoverRecording(ATHLETE_A, damaged.id),
+    }));
+
+    expect(read.listing.sessions.map((row) => row.id)).toEqual([healthy.id, damaged.id]);
+    expect(read.listing.unreadable).toEqual([]);
+    // ALL of the list: one pause left out would describe a ride with only
+    // the other pause, which is a moving time it never had either.
+    expect(read.header?.pauses).toEqual([]);
+    expect(read.header?.damaged).toEqual(['pauses']);
+    expect(read.header?.state).toBe('recording');
+    expect(read.recovered?.pauses).toEqual([]);
+    expect(read.recovered?.channels.power).toEqual([1, 2, 3, 4]);
+    // And the healthy one is untouched by its neighbour.
+    const other = read.listing.sessions[0];
+    expect(other?.pauses).toEqual(PAUSES);
+    expect(other).not.toHaveProperty('damaged');
+  });
+
+  it.each([
+    ['a state this build never writes', 'uploading'],
+    ['a state that is not a string', 42],
+    ['no state at all', undefined],
+  ])('reads %s as stopped, says so, and lists and recovers the ride', async (_name, state) => {
+    const { healthy, damaged } = await twoRecordings();
+    await plant(damaged.id, { state });
+
+    const read = await harness.read(async (store) => ({
+      listing: await store.readRecordingSessions(ATHLETE_A),
+      recovered: await store.recoverRecording(ATHLETE_A, damaged.id),
+    }));
+
+    expect(read.listing.sessions.map((row) => row.id)).toEqual([healthy.id, damaged.id]);
+    const header = read.listing.sessions[1];
+    expect(header?.state).toBe('stopped');
+    expect(header?.damaged).toEqual(['state']);
+    // Its pauses read, so they are kept.
+    expect(header?.pauses).toEqual(PAUSES);
+    expect(read.recovered?.state).toBe('stopped');
+    expect(read.recovered?.channels.power).toEqual([1, 2, 3, 4]);
+  });
+
+  it.each([
+    ['a start that is not a number', { startedAt: '1700000000' }],
+    ['a start at no instant', { startedAt: Number.NaN }],
+    ['a last write that is nothing', { updatedAt: null }],
+    ['a sample interval below nought', { sampleIntervalSeconds: -1 }],
+    ['a saved-as link that is not a string', { savedAs: 7 }],
+  ])(
+    'reports a header with %s as unreadable, lists the other, and discards it on its id',
+    async (_name, fields) => {
+      const { healthy, damaged } = await twoRecordings();
+      await plant(damaged.id, fields);
+
+      const listing = await harness.read(async (store) => store.readRecordingSessions(ATHLETE_A));
+      expect(listing.sessions.map((row) => row.id)).toEqual([healthy.id]);
+      expect(listing.unreadable).toEqual([{ id: damaged.id }]);
+      // The list a client reads never throws over it either.
+      await expect(
+        harness.read(async (store) => store.listRecordingSessions(ATHLETE_A)),
+      ).resolves.toHaveLength(1);
+
+      // The two ids are all a discard needs, and a fresh read sees it gone.
+      await expect(
+        harness.write(async (store) => store.deleteRecordingSession(ATHLETE_A, damaged.id)),
+      ).resolves.toBe(true);
+      const after = await harness.read(async (store) => ({
+        listing: await store.readRecordingSessions(ATHLETE_A),
+        healthy: await store.recoverRecording(ATHLETE_A, healthy.id),
+      }));
+      expect(after.listing.unreadable).toEqual([]);
+      expect(after.listing.sessions.map((row) => row.id)).toEqual([healthy.id]);
+      expect(after.healthy?.pauses).toEqual(PAUSES);
+      const chunks = await readRaw(async (raw) =>
+        raw.table<PersistedRecordingChunk, [string, number]>(TABLE.recordingChunks).toArray(),
+      );
+      expect(chunks.map((row) => row.sessionId)).toEqual([healthy.id]);
+    },
+  );
+
+  it('reports a header whose key is not an id under that key, so the discard still finds it', async () => {
+    const { healthy, damaged } = await twoRecordings();
+    await readRaw(async (raw) => {
+      const table = raw.table<Record<string, unknown>, unknown>(TABLE.recordingSessions);
+      const row = (await table.get(damaged.id)) as Record<string, unknown>;
+      await table.delete(damaged.id);
+      await table.put({ ...row, id: 42 });
+    });
+
+    const listing = await harness.read(async (store) => store.readRecordingSessions(ATHLETE_A));
+    expect(listing.sessions.map((row) => row.id)).toEqual([healthy.id]);
+    expect(listing.unreadable).toEqual([{ id: 42 }]);
+
+    const [planted] = listing.unreadable;
+    if (planted === undefined) {
+      throw new Error('nothing was reported');
+    }
+    await expect(
+      harness.write(async (store) => store.deleteRecordingSession(ATHLETE_A, planted.id)),
+    ).resolves.toBe(true);
+    const after = await harness.read(async (store) => store.readRecordingSessions(ATHLETE_A));
+    expect(after.unreadable).toEqual([]);
+  });
+
+  it('reports nothing of another athlete', async () => {
+    const { damaged } = await twoRecordings();
+    await plant(damaged.id, { startedAt: null });
+    const theirs = await harness.read(async (store) => store.readRecordingSessions(ATHLETE_B));
+    expect(theirs).toEqual({ sessions: [], unreadable: [] });
+    await expect(
+      harness.write(async (store) => store.deleteRecordingSession(ATHLETE_B, damaged.id)),
+    ).resolves.toBe(false);
+  });
+
+  // #1322 merged beside this: the header's lap in progress is one more
+  // optional field, so it must read the way the others do — dropped alone,
+  // never a refusal of the header and never a damage the rider is told of.
+  it.each([
+    ['a lap in progress that is not a lap', 'halfway'],
+    ['a lap in progress whose start is not a number', { fromAt: 'then', toAt: 1_700_000_600 }],
+    [
+      'a lap in progress that ran backwards',
+      {
+        fromAt: 1_700_000_600,
+        fromMovingSeconds: 500,
+        toAt: 1_700_000_500,
+        toMovingSeconds: 400,
+        distanceMetres: 100,
+      },
+    ],
+  ])('reads %s as none, and lists and recovers the ride undamaged', async (_name, lap) => {
+    const { healthy, damaged } = await twoRecordings();
+    await plant(damaged.id, { openCourseLap: lap });
+
+    const read = await harness.read(async (store) => ({
+      listing: await store.readRecordingSessions(ATHLETE_A),
+      recovered: await store.recoverRecording(ATHLETE_A, damaged.id),
+    }));
+
+    expect(read.listing.sessions.map((row) => row.id)).toEqual([healthy.id, damaged.id]);
+    expect(read.listing.unreadable).toEqual([]);
+    const header = read.listing.sessions[1];
+    expect(header).not.toHaveProperty('openCourseLap');
+    expect(header).not.toHaveProperty('damaged');
+    expect(header?.pauses).toEqual(PAUSES);
+    expect(read.recovered).not.toHaveProperty('openCourseLap');
+    expect(read.recovered?.channels.power).toEqual([1, 2, 3, 4]);
+  });
+
+  it('keeps the lap in progress (#1322) of a header whose pauses did not read', async () => {
+    const { damaged } = await twoRecordings();
+    const lap = {
+      fromAt: 1_700_000_000,
+      fromMovingSeconds: 0,
+      toAt: 1_700_000_300,
+      toMovingSeconds: 240,
+      distanceMetres: 2_000,
+      partial: true,
+    };
+    await plant(damaged.id, { pauses: 'none', openCourseLap: lap });
+
+    const recovered = await harness.read(async (store) =>
+      store.recoverRecording(ATHLETE_A, damaged.id),
+    );
+    expect(recovered?.pauses).toEqual([]);
+    expect(recovered?.openCourseLap).toEqual({
+      from: { at: 1_700_000_000, movingTime: 0 },
+      to: { at: 1_700_000_300, movingTime: 240 },
+      distance: 2_000,
+      partial: true,
+    });
+  });
+
+  // #1326 merged beside this: `putFinishedRide` links the checkpoint in the
+  // ride's own transaction. Saving a ride whose pauses did not read must link
+  // it and leave the damage as it is on disk, so the next read still says the
+  // pauses were lost — and, now `alreadySaved`, the screen stops saying the
+  // save is yet to count them.
+  it('saves a ride whose pauses did not read in one transaction, and the damage still reads', async () => {
+    const { healthy, damaged } = await twoRecordings();
+    await plant(damaged.id, { pauses: 'none' });
+    const activity = rideFor(ATHLETE_A);
+
+    await harness.write(async (store) =>
+      store.putFinishedRide({
+        activity,
+        streams: streamSetFor(activity, { sampleCount: 4 }),
+        laps: [lapFor(activity, 0)],
+        recordingSession: damaged.id,
+      }),
+    );
+
+    const read = await harness.read(async (store) => ({
+      listing: await store.readRecordingSessions(ATHLETE_A),
+      saved: await store.getActivity(ATHLETE_A, activity.id),
+    }));
+    expect(read.saved?.id).toBe(activity.id);
+    expect(read.listing.unreadable).toEqual([]);
+    const [other, header] = read.listing.sessions;
+    expect(header?.id).toBe(damaged.id);
+    expect(header?.savedAs).toBe(activity.id);
+    expect(header?.damaged).toEqual(['pauses']);
+    expect(other?.id).toBe(healthy.id);
+    expect(other?.savedAs).toBeUndefined();
+  });
+});
 
 describe('what the checkpoints cost', () => {
   // ⚠️ The 30 s below is a **contention allowance, not a performance bound**,

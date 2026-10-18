@@ -279,9 +279,13 @@ export const INDEX = {
   streamBlobByAthlete: 'athleteId',
   /** `getRecordingSession` — the athlete-scoped point lookup. */
   recordingSessionByAthleteAndId: '[athleteId+id]',
-  /** `listRecordingSessions`, newest checkpoint first — what #46's recovery prompt reads. */
+  /**
+   * Newest checkpoint first. Read by nothing since #1325: a header with a
+   * damaged `updatedAt` is not in it. Kept, because dropping an index is a
+   * schema version. @see ActivityStore.readRecordingSessions
+   */
   recordingSessionByAthleteAndUpdatedAt: '[athleteId+updatedAt]',
-  /** `deleteAthlete`'s cascade over recordings. */
+  /** `deleteAthlete`'s cascade over recordings, and `readRecordingSessions`. */
   recordingSessionByAthlete: 'athleteId',
   /**
    * `readRecordingChunks` and `getRecordingFootprint` — the athlete-scoped

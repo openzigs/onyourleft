@@ -382,7 +382,7 @@ describe('Forget when an unsubscribe throws — #706', () => {
       store: {
         putRecordingSession: (record) => Promise.resolve(record.id),
         appendRecordingChunk: () => Promise.resolve(0),
-        listRecordingSessions: () => Promise.resolve([]),
+        readRecordingSessions: () => Promise.resolve({ sessions: [], unreadable: [] }),
         recoverRecording: () => Promise.resolve(undefined),
         deleteRecordingSession: () => Promise.resolve(false),
       },

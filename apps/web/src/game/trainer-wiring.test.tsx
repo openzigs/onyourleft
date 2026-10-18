@@ -793,8 +793,8 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
           harness.write(async (store) => store.putRecordingSession(record)),
         appendRecordingChunk: async (chunk) =>
           harness.write(async (store) => store.appendRecordingChunk(chunk)),
-        listRecordingSessions: async (owner) =>
-          harness.write(async (store) => store.listRecordingSessions(owner)),
+        readRecordingSessions: async (owner) =>
+          harness.write(async (store) => store.readRecordingSessions(owner)),
         recoverRecording: async (owner, id) =>
           harness.write(async (store) => store.recoverRecording(owner, id)),
         deleteRecordingSession: async (owner, id) =>

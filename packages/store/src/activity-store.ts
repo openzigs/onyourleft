@@ -161,8 +161,10 @@ import type {
   NewRecordingChunk,
   NewRecordingSession,
   RecordingFootprint,
+  RecordingSessionListing,
   RecordingSessionRecord,
   RecoveredRecording,
+  UnreadableRecordingSession,
 } from './recording';
 import {
   chunkChannelEncoding,
@@ -2895,12 +2897,42 @@ export class ActivityStore {
    * the price of performing one.
    */
   async listRecordingSessions(owner: AthleteId): Promise<RecordingSessionRecord[]> {
+    return (await this.readRecordingSessions(owner)).sessions;
+  }
+
+  /**
+   * {@link listRecordingSessions}, with the headers that did not read
+   * reported beside the ones that did — #1325.
+   *
+   * ⚠️ **Header by header.** One header that will not decode is reported in
+   * `unreadable` and never thrown through the list: a throw here hid every
+   * recoverable ride of the athlete, and left the damaged one on disk with
+   * nothing listing it, so it could not even be discarded.
+   *
+   * ⚠️ **Read on the owner alone and ordered here**, not through
+   * `[athleteId+updatedAt]`: IndexedDB leaves a row out of an index whose key
+   * it cannot make, so a header whose `updatedAt` is damaged into `null` or
+   * `NaN` was in no list at all — not even this one's `unreadable`. Ties keep
+   * that index's order, the later key first.
+   */
+  async readRecordingSessions(owner: AthleteId): Promise<RecordingSessionListing> {
     const rows = await this.#recordingSessions
-      .where(INDEX.recordingSessionByAthleteAndUpdatedAt)
-      .between([owner, Dexie.minKey], [owner, Dexie.maxKey], true, true)
+      .where(INDEX.recordingSessionByAthlete)
+      .equals(owner)
       .reverse()
       .toArray();
-    return rows.map(fromPersistedRecordingSession);
+    const sessions: RecordingSessionRecord[] = [];
+    const unreadable: UnreadableRecordingSession[] = [];
+    for (const row of rows) {
+      try {
+        sessions.push(fromPersistedRecordingSession(row));
+      } catch {
+        // The key as stored, unconverted: @see UnreadableRecordingSession.id
+        unreadable.push({ id: row.id as RecordingSessionId });
+      }
+    }
+    sessions.sort((left, right) => right.updatedAt - left.updatedAt);
+    return { sessions, unreadable };
   }
 
   /**

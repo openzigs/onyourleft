@@ -163,6 +163,7 @@ function bindStore(real: ActivityStore): PersistentStore {
     putRecordingSession: async (record) => real.putRecordingSession(record),
     getRecordingSession: async (owner, id) => real.getRecordingSession(owner, id),
     listRecordingSessions: async (owner) => real.listRecordingSessions(owner),
+    readRecordingSessions: async (owner) => real.readRecordingSessions(owner),
     appendRecordingChunk: async (chunk) => real.appendRecordingChunk(chunk),
     recoverRecording: async (owner, id) => real.recoverRecording(owner, id),
     getRecordingFootprint: async (owner, id) => real.getRecordingFootprint(owner, id),

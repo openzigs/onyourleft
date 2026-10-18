@@ -181,8 +181,8 @@ function harnessStore(): RecordingCheckpointStore {
       harness.write(async (store) => store.putRecordingSession(record)),
     appendRecordingChunk: async (chunk) =>
       harness.write(async (store) => store.appendRecordingChunk(chunk)),
-    listRecordingSessions: async (owner) =>
-      harness.write(async (store) => store.listRecordingSessions(owner)),
+    readRecordingSessions: async (owner) =>
+      harness.write(async (store) => store.readRecordingSessions(owner)),
     recoverRecording: async (owner, id) =>
       harness.write(async (store) => store.recoverRecording(owner, id)),
     deleteRecordingSession: async (owner, id) =>
@@ -7522,6 +7522,183 @@ describe('#1312 — the laps of a course are the recording’s, and are saved wi
     rig.controller.dispose();
   });
 
+  /**
+   * #1325. `listRecordingSessions` decoded every header of the athlete and the
+   * controller answered a throw with an empty offer, so one header that would
+   * not read hid EVERY recoverable ride, and the damaged one could be neither
+   * saved nor discarded. Through the real controller and the real store, the
+   * header damaged behind the store's back, each outcome read back on a
+   * connection that did not write it.
+   */
+  describe('one checkpoint header that will not read hides no other ride', () => {
+    /** Ten seconds riding, ten paused, ten riding — then the tab is gone. */
+    const crashedWithAPause = async (): Promise<RecordingSessionId> => {
+      const rig = benchWith();
+      await rig.controller.pair('trainer');
+      await rig.controller.start();
+      await ride(rig, 10);
+      await rig.controller.pause();
+      await ride(rig, 10);
+      await rig.controller.resume();
+      await ride(rig, 10);
+      rig.controller.dispose();
+      const id = rig.sessionIds[0];
+      if (id === undefined) {
+        throw new Error('no recording was started');
+      }
+      return id;
+    };
+
+    /** Overwrite fields of one stored header behind the store's back, as a damaged disk would. */
+    const plantHeader = async (id: RecordingSessionId, fields: object): Promise<void> => {
+      await harness.discard();
+      const database = await new Promise<IDBDatabase>((resolve, reject) => {
+        const request = indexedDB.open(harness.databaseName);
+        request.onsuccess = () => {
+          resolve(request.result);
+        };
+        request.onerror = () => {
+          reject(request.error ?? new Error('the database did not open'));
+        };
+      });
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const transaction = database.transaction('recordingSessions', 'readwrite');
+          const rows = transaction.objectStore('recordingSessions');
+          const read = rows.get(id);
+          read.onsuccess = () => {
+            const row = read.result as Record<string, unknown> | undefined;
+            if (row === undefined) {
+              reject(new Error(`no header for ${id}`));
+              return;
+            }
+            rows.put({ ...row, ...fields });
+          };
+          transaction.oncomplete = () => {
+            resolve();
+          };
+          transaction.onerror = () => {
+            reject(transaction.error ?? new Error('the header was not rewritten'));
+          };
+        });
+      } finally {
+        database.close();
+      }
+    };
+
+    const savedActivity = async (id: string) =>
+      harness.read(async (store) => store.getActivity(ATHLETE_A, activityId(id)));
+
+    it('a header whose start will not read is reported, the other ride is offered and saved, and the damaged one is discarded', async () => {
+      const healthy = await crashedWithAPause();
+      const damaged = await crashedWithAPause();
+      await plantHeader(damaged, { startedAt: 'yesterday' });
+
+      const next = benchWith({ rideSave: storeSavePort() });
+      await next.controller.refreshRecoverable();
+      const offered = next.controller.getSnapshot();
+      expect(offered.recoverable.map((each) => each.id)).toEqual([healthy]);
+      expect(offered.unreadableRecordings).toEqual([damaged]);
+
+      // The healthy one saves, pauses and all.
+      expect(await next.controller.saveRecovered(healthy)).toBe('saved');
+      const saved = await savedActivity('ride-1');
+      expect(saved).toBeDefined();
+      expect(saved?.movingTime).toBeLessThan(saved?.elapsedTime ?? 0);
+
+      // The damaged one is still offered — as unreadable — and goes on its id.
+      expect(next.controller.getSnapshot().unreadableRecordings).toEqual([damaged]);
+      expect(await next.controller.discardRecovered(damaged)).toBe(true);
+      expect(next.controller.getSnapshot().unreadableRecordings).toEqual([]);
+      next.controller.dispose();
+
+      const left = await harness.read(async (store) => store.readRecordingSessions(ATHLETE_A));
+      expect(left).toEqual({ sessions: [], unreadable: [] });
+    });
+
+    it('continuing the ride that reads takes the unreadable one off a screen that is now riding', async () => {
+      const healthy = await crashedWithAPause();
+      const damaged = await crashedWithAPause();
+      await plantHeader(damaged, { sampleIntervalSeconds: 'one' });
+
+      const next = benchWith();
+      await next.controller.refreshRecoverable();
+      expect(next.controller.getSnapshot().unreadableRecordings).toEqual([damaged]);
+      expect(await next.controller.continueRecovered(healthy)).toBe(true);
+      // A Discard beside a ride in progress is the control `recoverable`
+      // empties for: one press away from the wrong recording.
+      expect(next.controller.getSnapshot().phase).toBe('paused');
+      expect(next.controller.getSnapshot().unreadableRecordings).toEqual([]);
+      next.controller.dispose();
+      // Taken off the screen, not off the device.
+      const left = await harness.read(async (store) => store.readRecordingSessions(ATHLETE_A));
+      expect(left.unreadable).toEqual([{ id: damaged }]);
+    });
+
+    it('a header whose pauses will not read is offered without Continue and saved with its moving time its elapsed time', async () => {
+      const healthy = await crashedWithAPause();
+      const damaged = await crashedWithAPause();
+      await plantHeader(damaged, { pauses: [{ from: 'then', reason: 'manual' }] });
+
+      const next = benchWith({ rideSave: storeSavePort() });
+      await next.controller.refreshRecoverable();
+      const offered = next.controller.getSnapshot();
+      expect(offered.unreadableRecordings).toEqual([]);
+      expect(
+        offered.recoverable.map((each) => [each.id, each.canContinue, each.damaged]).sort(),
+      ).toEqual(
+        [
+          [healthy, true, []],
+          [damaged, false, ['pauses']],
+        ].sort(),
+      );
+
+      expect(await next.controller.saveRecovered(healthy)).toBe('saved');
+      expect(await next.controller.saveRecovered(damaged)).toBe('saved');
+      next.controller.dispose();
+
+      const kept = await savedActivity('ride-1');
+      const dropped = await savedActivity('ride-2');
+      if (kept === undefined || dropped === undefined) {
+        throw new Error('a ride did not save');
+      }
+      // The same ride twice: the one whose pauses read has them taken off its
+      // moving time, the one whose pauses did not has none to take off.
+      expect(kept.movingTime).toBeLessThan(kept.elapsedTime);
+      expect(dropped.elapsedTime).toBe(kept.elapsedTime);
+      expect(dropped.movingTime).toBe(dropped.elapsedTime);
+      // And its samples are all there.
+      const streams = await harness.read(async (store) => ({
+        kept: await store.getStreamSet(ATHLETE_A, activityId('ride-1')),
+        dropped: await store.getStreamSet(ATHLETE_A, activityId('ride-2')),
+      }));
+      expect(streams.dropped?.sampleCount).toBe(streams.kept?.sampleCount);
+    });
+
+    it('a header whose state will not read is offered as stopped, without Continue, and saves', async () => {
+      const healthy = await crashedWithAPause();
+      const damaged = await crashedWithAPause();
+      await plantHeader(damaged, { state: 'uploading' });
+
+      const next = benchWith({ rideSave: storeSavePort() });
+      await next.controller.refreshRecoverable();
+      const offer = next.controller.getSnapshot().recoverable;
+      expect(offer.map((each) => each.id).sort()).toEqual([healthy, damaged].sort());
+      const ride = offer.find((each) => each.id === damaged);
+      expect(ride?.canContinue).toBe(false);
+      expect(ride?.damaged).toEqual(['state']);
+      expect(await next.controller.continueRecovered(healthy)).toBe(true);
+      next.controller.dispose();
+
+      const after = benchWith({ rideSave: storeSavePort() });
+      await after.controller.refreshRecoverable();
+      expect(await after.controller.saveRecovered(damaged)).toBe('saved');
+      after.controller.dispose();
+      const saved = await savedActivity('ride-1');
+      expect(saved?.movingTime).toBeLessThan(saved?.elapsedTime ?? 0);
+    });
+  });
+
   describe('a ride the tab died in the middle of keeps the laps it had completed', () => {
     /**
      * Four seconds, two whole laps, and nine seconds into a third — then the
@@ -8265,13 +8442,13 @@ describe('#548 — after a ride is stopped and saved, another can be started', (
     const store = harnessStore();
     const rig = benchWith({
       checkpointStore: {
-        listRecordingSessions: async (owner) => {
+        readRecordingSessions: async (owner) => {
           if (held) {
             await new Promise<void>((resolve) => {
               hold = resolve;
             });
           }
-          return store.listRecordingSessions(owner);
+          return store.readRecordingSessions(owner);
         },
       },
     });

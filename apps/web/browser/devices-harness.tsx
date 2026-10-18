@@ -131,7 +131,7 @@ const fake = createFakeBluetooth({
 const checkpoints: RecordingCheckpointStore = {
   putRecordingSession: (record) => Promise.resolve(record.id),
   appendRecordingChunk: () => Promise.resolve(0),
-  listRecordingSessions: () => Promise.resolve([]),
+  readRecordingSessions: () => Promise.resolve({ sessions: [], unreadable: [] }),
   recoverRecording: () => Promise.resolve(undefined),
   deleteRecordingSession: () => Promise.resolve(false),
 };

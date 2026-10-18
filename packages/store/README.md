@@ -162,9 +162,9 @@ quantity, and a UTC offset cannot be `Seconds`, which is non-negative by constru
 | `[athleteId+activityId+channel]` on `streamBlobs` | `getStreamSet`'s blob fetch and `getStreamChannel`'s single-channel one |
 | `athleteId` on `streamSets`, `activityId`/`athleteId` on `streamBlobs` | the cascades |
 | `[athleteId+id]` on `recordingSessions` | `getRecordingSession` — the athlete-scoped point lookup |
-| `[athleteId+updatedAt]` on `recordingSessions` | `listRecordingSessions`, newest checkpoint first |
+| `[athleteId+updatedAt]` on `recordingSessions` | nothing since #1325: a header with a damaged `updatedAt` is not in it, so `readRecordingSessions` reads on `athleteId` and orders itself |
 | `[athleteId+sessionId+seq]` on `recordingChunks` | `recoverRecording` and `getRecordingFootprint`, walking the append order |
-| `athleteId` on `recordingSessions`, `sessionId`/`athleteId` on `recordingChunks` | the cascades |
+| `athleteId` on `recordingSessions`, `sessionId`/`athleteId` on `recordingChunks` | the cascades; `readRecordingSessions` and `listRecordingSessions` (#1325) |
 
 Every activity and lap index leads with `athleteId`. That is not for speed: it means there is no
 index that answers "the record with this id" without also being told whose it is, so the

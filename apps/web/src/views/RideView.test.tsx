@@ -764,8 +764,8 @@ describe('#565 review — the stop window, driven through the real controller', 
         await gate();
         return harness.write(async (inner) => inner.appendRecordingChunk(chunk));
       },
-      listRecordingSessions: async (owner) =>
-        harness.write(async (inner) => inner.listRecordingSessions(owner)),
+      readRecordingSessions: async (owner) =>
+        harness.write(async (inner) => inner.readRecordingSessions(owner)),
       recoverRecording: async (owner, id) =>
         harness.write(async (inner) => inner.recoverRecording(owner, id)),
       deleteRecordingSession: async (owner, id) =>

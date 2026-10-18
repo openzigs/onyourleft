@@ -109,7 +109,11 @@ import {
   listRecoverableRecordings,
   recoverRecorder,
 } from '../recording/recorder';
-import { recoverableRides, type RecoverableRide } from '../recording/recovery';
+import {
+  recoverableRides,
+  unreadableRecordings,
+  type RecoverableRide,
+} from '../recording/recovery';
 import { rideToSave, saveFinishedRide, type RideSaveStore } from '../recording/finish';
 import {
   lapFiguresOf,
@@ -530,6 +534,12 @@ export interface RideSnapshot {
    * controls from an interrupted one.
    */
   readonly recoverable: readonly RecoverableRide[];
+  /**
+   * Recordings this device holds whose header will not read — #1325. Each can
+   * only be discarded, through `discardRecovered`. Empty while riding, for
+   * {@link recoverable}'s reason.
+   */
+  readonly unreadableRecordings: readonly RecordingSessionId[];
   /** The last pairing attempt's failure, in words a rider can act on. */
   readonly pairingError: string | undefined;
   /** How many more devices this transport will connect. */
@@ -1305,6 +1315,7 @@ export function createRideController(options: RideControllerOptions): RideContro
   /** Set when a ride saved but its checkpoint could not be removed. @see RideSnapshot.leftover */
   let leftover = false;
   let recoverable: readonly RecoverableRide[] = [];
+  let unreadable: readonly RecordingSessionId[] = [];
   let phase: RidePhase = 'idle';
   let stopArmed = false;
   /**
@@ -2152,6 +2163,7 @@ export function createRideController(options: RideControllerOptions): RideContro
       resultAnnounced,
       leftover,
       recoverable,
+      unreadableRecordings: unreadable,
       pairingError,
       connectionsRemaining: Math.max(
         0,
@@ -2615,7 +2627,7 @@ export function createRideController(options: RideControllerOptions): RideContro
       return;
     }
     try {
-      const rows = await listRecoverableRecordings(store, athleteId);
+      const listing = await listRecoverableRecordings(store, athleteId);
       // Checked again after the read: *Start a new ride* re-renders the idle
       // screen before this settles, and a rider who presses Start in that gap
       // must not have the offer appear mid-ride (#565's review, item 4). Read
@@ -2624,12 +2636,15 @@ export function createRideController(options: RideControllerOptions): RideContro
       if (rideInProgress(phase)) {
         return;
       }
-      recoverable = recoverableRides(rows, { excluding: recorder?.sessionId });
+      recoverable = recoverableRides(listing.sessions, { excluding: recorder?.sessionId });
+      unreadable = unreadableRecordings(listing.unreadable, { excluding: recorder?.sessionId });
     } catch {
       // A store that cannot be read is what "offline" looks like on this
       // device. Offering nothing is honest; throwing out of a refresh the
-      // screen calls on mount is not.
+      // screen calls on mount is not. (One header that will not read is no
+      // longer a throw here — #1325: it is in `listing.unreadable`.)
       recoverable = [];
+      unreadable = [];
     }
     changed();
   };
@@ -3423,6 +3438,7 @@ export function createRideController(options: RideControllerOptions): RideContro
       savedActivityId = undefined;
       savedRide = undefined;
       recoverable = [];
+      unreadable = [];
       changed();
       return true;
     },

@@ -80,7 +80,7 @@ import type {
   NewRecordingSession,
   RecordedCourseLap,
   RecordingSessionId,
-  RecordingSessionRecord,
+  RecordingSessionListing,
   RecordingStoredState,
   RecoveredRecording,
   RoomRaceFact,
@@ -143,7 +143,7 @@ export const MAX_DATA_LOSS_SECONDS = maxDataLossSeconds();
 export interface RecordingCheckpointStore {
   putRecordingSession(record: NewRecordingSession): Promise<RecordingSessionId>;
   appendRecordingChunk(chunk: NewRecordingChunk): Promise<number>;
-  listRecordingSessions(owner: AthleteId): Promise<RecordingSessionRecord[]>;
+  readRecordingSessions(owner: AthleteId): Promise<RecordingSessionListing>;
   recoverRecording(
     owner: AthleteId,
     id: RecordingSessionId,
@@ -342,12 +342,16 @@ export interface RecoveredRecorder {
   readonly recovered: RecoveredRecording;
 }
 
-/** Every recording on this device that could be continued or discarded. */
+/**
+ * Every recording on this device that could be continued or discarded, and
+ * every one whose header will not read (#1325) — which can only be discarded,
+ * and is reported rather than hiding the others.
+ */
 export async function listRecoverableRecordings(
   store: RecordingCheckpointStore,
   athleteId: AthleteId,
-): Promise<RecordingSessionRecord[]> {
-  return store.listRecordingSessions(athleteId);
+): Promise<RecordingSessionListing> {
+  return store.readRecordingSessions(athleteId);
 }
 
 /**
