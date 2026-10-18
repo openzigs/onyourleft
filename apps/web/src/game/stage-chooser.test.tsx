@@ -8,7 +8,7 @@
  * words through `units/format.ts`, the drawing hidden from assistive
  * technology, the radio group, the ghost for the chosen route, a refused *Ride*
  * that starts nothing — and the module graph, which must reach no renderer and
- * no map (`stage-chooser-imports.test.ts`). Where *Ride* lands on a screen is `browser/ride.browser.spec.ts`
+ * no map (`stage-chooser-imports.test.ts`). Where *Ride* lands on a screen is `browser/pre-ride.browser.spec.ts`
  * §"#940"; the refusals' own wiring through `GameView` is `picker.a11y.test.tsx`.
  */
 
