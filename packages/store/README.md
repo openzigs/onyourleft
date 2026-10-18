@@ -104,6 +104,7 @@ erDiagram
         number  updatedAt                "UnixSeconds — what the recovery list orders by"
         string  pauses                   "the intervals that keep a pause apart from a dropout"
         string  courseLaps               "optional (#1312): the laps of a course completed so far, two marks and the course's distance and climb each"
+        string  openCourseLap            "optional (#1322): the lap in progress at the last flush, as a part lap"
     }
     RECORDING_CHUNK {
         string  sessionId    PK "with seq: the compound primary key"
@@ -364,6 +365,16 @@ const set     = await store.getStreamSet(owner, activityId);        // every cha
 const power   = await store.getStreamChannel(owner, activityId, 'power');  // one channel
 const summary = await store.getStreamSetSummary(owner, activityId); // no samples decoded
 ```
+
+### A finished ride in one write — #1326
+
+`putFinishedRide({ activity, streams, laps, recordingSession })` writes a recorded ride whole: the
+activity, its stream set and its laps, and `savedAs` on the checkpoint it was recorded into, in **one**
+transaction. A ride is then in the library whole or not at all, and no crash can leave it there while
+its checkpoint still reads as unsaved (which offered the same ride for saving twice). Each part is
+checked by the same code as `putActivity`, `putStreamSet` and `putLap`. A `recordingSession` this
+athlete does not have is left alone, not an error: the ride is still saved. The importer still writes
+its parts separately; `piecewiseRideStoreFactory` is this path's broken-store fake.
 
 ## Recording checkpoints — #46
 

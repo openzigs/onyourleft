@@ -811,16 +811,12 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
         newLapId: () => lapId(`lap-${String((mintedLaps += 1))}`),
         timeZone: 'Europe/London',
         store: {
-          putActivity: (record) =>
+          putFinishedRide: (ride) =>
             harness.write(async (store) => {
-              const id = await store.putActivity(record);
+              const id = await store.putFinishedRide(ride);
               savedIds.push(id);
               return id;
             }),
-          putStreamSet: (set) => harness.write(async (store) => store.putStreamSet(set)),
-          putLap: (lap) => harness.write(async (store) => store.putLap(lap)),
-          deleteActivity: (owner, id) =>
-            harness.write(async (store) => store.deleteActivity(owner, id)),
         },
       },
     });
@@ -1957,6 +1953,27 @@ describe('a second game ride in one mount begins with no lap of the first — #1
     // first's, and not once the odometer passes the first ride's two laps.
     const second = await pumpUntilLaps(events, 1);
     expect(second).toBeLessThanOrEqual(first + 4);
+  });
+});
+
+describe('the recording is told how far round the lap the rider is — #1322', () => {
+  it('once a second of the ride, not every frame, and only after the lap began', async () => {
+    held.on = false;
+    const events: string[] = [];
+    await mountCircuit(events);
+    await clickThrough(buttonStarting('Ride '));
+
+    const frames = await pumpUntilLaps(events, 1);
+
+    const said = events.filter((kind) => kind === 'progress').length;
+    expect(events[0]).toBe('started');
+    // Before the line, and after it again: the new lap's progress, not the old one's.
+    expect(events.indexOf('progress')).toBeLessThan(events.indexOf('lap'));
+    await pump(6);
+    expect(events.lastIndexOf('progress')).toBeGreaterThan(events.indexOf('lap'));
+    // Frames are half a second apart here, so once a second is about half of them.
+    expect(said).toBeGreaterThan(0);
+    expect(said).toBeLessThanOrEqual(Math.ceil(frames / 2) + 1);
   });
 });
 

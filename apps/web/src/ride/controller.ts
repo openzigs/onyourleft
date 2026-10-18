@@ -114,12 +114,7 @@ import {
   unreadableRecordings,
   type RecoverableRide,
 } from '../recording/recovery';
-import {
-  RIDE_LEFT_BEHIND,
-  rideToSave,
-  saveFinishedRide,
-  type RideSaveStore,
-} from '../recording/finish';
+import { rideToSave, saveFinishedRide, type RideSaveStore } from '../recording/finish';
 import {
   lapFiguresOf,
   lapSlots,
@@ -634,7 +629,7 @@ export const RIDE_NOTIFICATION_REFUSED =
  * just named. It is ONE line there on a Mac and still TWO on the CI runner,
  * whose fonts are wider — so on the runner the clearance comes from the cell's
  * tighter padding (`theme.css` §"Two notices in the one cell") rather than
- * from the sentence. `ride.browser.spec.ts` §"keep the screen on, beside every
+ * from the sentence. `ride-notices.browser.spec.ts` §"keep the screen on, beside every
  * notice that stays" publishes the clearance.
  */
 export const KEEP_SCREEN_ON_LABEL = 'Keep the screen on';
@@ -2570,16 +2565,14 @@ export function createRideController(options: RideControllerOptions): RideContro
       // recorder's own, so a ride recovered after a crash keeps them by the
       // one path, as it keeps its laps (#1360's review, B2).
       ...(current.roomRaces.length === 0 ? {} : { races: current.roomRaces }),
+      // #1326: the store marks this checkpoint saved in the ride's own
+      // transaction, so a crash after the save cannot offer the ride again.
+      recordingSession: current.sessionId,
     });
     const outcome = await saveFinishedRide(port.store, finished);
 
     saveState = outcome.status;
-    saveError =
-      outcome.status !== 'failed'
-        ? undefined
-        : outcome.leftBehind === true
-          ? `${outcome.error.message}; ${RIDE_LEFT_BEHIND}`
-          : outcome.error.message;
+    saveError = outcome.status === 'failed' ? outcome.error.message : undefined;
     savedActivityId = outcome.status === 'saved' ? outcome.id : undefined;
     // #1042: the card's facts are the activity the save WROTE, read off the
     // record rather than recomputed — so the card and the library agree.
@@ -2603,7 +2596,10 @@ export function createRideController(options: RideControllerOptions): RideContro
       // disk as a `stopped` row — which `recovery.ts` reads as "the save
       // failed", offers "Save this ride", and thereby writes a second copy of
       // the same ride under a fresh activity id with nothing deduplicating it.
-      // The link is what tells the two apart afterwards.
+      // The link is what tells the two apart afterwards. Since #1326 the store
+      // has already written it, in the ride's own transaction; `markSaved`
+      // keeps the recorder's copy of the header in step, so no later header
+      // write can take the link back out.
       if (outcome.status === 'saved') {
         await current.markSaved(outcome.id);
       }
@@ -3222,6 +3218,15 @@ export function createRideController(options: RideControllerOptions): RideContro
       // half from each would give a lap a moving time longer than its elapsed
       // time.
       const mark: LapMark = { at: session.timeline, movingTime: session.movingTime };
+      if (event.kind === 'progress') {
+        // #1322: kept by the recorder for its next header, so a recording that
+        // dies before the line saves this lap as a part lap. Nothing on the
+        // screen moves, so nothing is said to have changed.
+        if (lapFrom !== undefined) {
+          recorder?.noteOpenCourseLap(riddenLap(lapFrom, mark, { ...event, partial: true }));
+        }
+        return undefined;
+      }
       if (event.kind !== 'lap') {
         lapFrom = event.kind === 'started' ? mark : undefined;
         changed();

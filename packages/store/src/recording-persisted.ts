@@ -68,6 +68,12 @@ export interface PersistedRecordingSession {
    */
   courseLaps?: PersistedCourseLap[];
   /**
+   * The lap in progress at the last flush — #1322. Absent with none open, and
+   * on every header written before the field existed. Optional and unindexed,
+   * so no schema version moved. @see RecordingSessionRecord.openCourseLap
+   */
+  openCourseLap?: PersistedCourseLap;
+  /**
    * The races ridden so far — #785, #1360's review (B2). Absent with none, and
    * on every header written before the field existed. Optional and
    * unindexed, so no schema version moved. Re-read race by race on the way
@@ -154,20 +160,27 @@ export function toPersistedRecordingSession(
     ...(record.savedAs === undefined ? {} : { savedAs: record.savedAs }),
     ...(record.courseLaps === undefined || record.courseLaps.length === 0
       ? {}
-      : {
-          courseLaps: record.courseLaps.map((lap) => ({
-            fromAt: lap.from.at,
-            fromMovingSeconds: lap.from.movingTime,
-            toAt: lap.to.at,
-            toMovingSeconds: lap.to.movingTime,
-            distanceMetres: lap.distance,
-            ...(lap.ascent === undefined ? {} : { ascentMetres: lap.ascent }),
-            ...(lap.partial === true ? { partial: true as const } : {}),
-          })),
-        }),
+      : { courseLaps: record.courseLaps.map(toPersistedCourseLap) }),
+    // #1322: a part lap by definition, so it is written as one whatever the
+    // caller said.
+    ...(record.openCourseLap === undefined
+      ? {}
+      : { openCourseLap: toPersistedCourseLap({ ...record.openCourseLap, partial: true }) }),
     // #785: only the races that read back are written, so one that does not
     // is left out and never refuses the header (#1316's lesson). @see racesOf
     ...roomRacesRow(record.roomRaces),
+  };
+}
+
+function toPersistedCourseLap(lap: RecordedCourseLap): PersistedCourseLap {
+  return {
+    fromAt: lap.from.at,
+    fromMovingSeconds: lap.from.movingTime,
+    toAt: lap.to.at,
+    toMovingSeconds: lap.to.movingTime,
+    distanceMetres: lap.distance,
+    ...(lap.ascent === undefined ? {} : { ascentMetres: lap.ascent }),
+    ...(lap.partial === true ? { partial: true as const } : {}),
   };
 }
 
@@ -194,6 +207,11 @@ export function fromPersistedRecordingSession(
     row.courseLaps === undefined
       ? undefined
       : fromPersistedCourseLaps(row.courseLaps, startedAt, updatedAt);
+  const openCourseLap = fromPersistedOpenCourseLap(
+    row.openCourseLap,
+    courseLaps?.at(-1)?.to.at ?? startedAt,
+    updatedAt,
+  );
   // #1325: read, never refused — @see RecordingSessionRecord.damaged
   const pauses = readOrUndefined(() => fromPersistedPauses(row.pauses));
   const state = readOrUndefined(() => parseRecordingState(row.state));
@@ -218,6 +236,7 @@ export function fromPersistedRecordingSession(
         ? undefined
         : activityId(decodedString('recordingSession.savedAs', row.savedAs)),
     ...(courseLaps === undefined || courseLaps.length === 0 ? {} : { courseLaps }),
+    ...(openCourseLap === undefined ? {} : { openCourseLap }),
     // #785: never a throw — a race that does not read is dropped, and the
     // recording is listed and recovered all the same. @see racesOf
     ...roomRacesOut(row.roomRaces),
@@ -312,14 +331,7 @@ function fromPersistedCourseLaps(
     if (row === null || typeof row !== 'object') {
       return [];
     }
-    const lap: RecordedCourseLap = {
-      from: { at: row.fromAt as UnixSeconds, movingTime: row.fromMovingSeconds as Seconds },
-      to: { at: row.toAt as UnixSeconds, movingTime: row.toMovingSeconds as Seconds },
-      distance: row.distanceMetres as Metres,
-      ...(row.ascentMetres === undefined ? {} : { ascent: row.ascentMetres as Metres }),
-      // Only `true` is a part lap; anything else stored there is a whole one.
-      ...(row.partial === true ? { partial: true as const } : {}),
-    };
+    const lap = courseLapOf(row);
     if (courseLapFault(lap) !== undefined || lap.from.at < cursor || lap.to.at > updatedAt) {
       return [];
     }
@@ -327,6 +339,40 @@ function fromPersistedCourseLaps(
     cursor = lap.to.at;
   }
   return laps;
+}
+
+function courseLapOf(row: PersistedCourseLap): RecordedCourseLap {
+  return {
+    from: { at: row.fromAt as UnixSeconds, movingTime: row.fromMovingSeconds as Seconds },
+    to: { at: row.toAt as UnixSeconds, movingTime: row.toMovingSeconds as Seconds },
+    distance: row.distanceMetres as Metres,
+    ...(row.ascentMetres === undefined ? {} : { ascent: row.ascentMetres as Metres }),
+    // Only `true` is a part lap; anything else stored there is a whole one.
+    ...(row.partial === true ? { partial: true as const } : {}),
+  };
+}
+
+/**
+ * The header's lap in progress — #1322 — or none, when it does not read.
+ *
+ * Lenient, for {@link fromPersistedCourseLaps}' reason, and dropped ALONE: it
+ * is numbered after every completed lap, so losing it renumbers nothing. Also
+ * dropped when it began before the last completed lap ended (`after`, or the
+ * recording's start with none) or ends after the header was written. Always a
+ * part lap on the way out: the rider had not reached the line.
+ */
+function fromPersistedOpenCourseLap(
+  row: unknown,
+  after: number,
+  updatedAt: number,
+): RecordedCourseLap | undefined {
+  if (row === undefined || row === null || typeof row !== 'object') {
+    return undefined;
+  }
+  const lap: RecordedCourseLap = { ...courseLapOf(row as PersistedCourseLap), partial: true };
+  return courseLapFault(lap) !== undefined || lap.from.at < after || lap.to.at > updatedAt
+    ? undefined
+    : lap;
 }
 
 /** @throws {StoreDecodeError} */

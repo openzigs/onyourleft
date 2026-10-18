@@ -5368,13 +5368,10 @@ function savePort(overrides: Partial<RideSavePort['store']> = {}): {
       newLapId: () => lapId('saved-lap'),
       timeZone: 'Europe/London',
       store: {
-        putActivity: (record) => {
-          saved.push(record.id);
-          return Promise.resolve(record.id);
+        putFinishedRide: (ride) => {
+          saved.push(ride.activity.id);
+          return Promise.resolve(ride.activity.id);
         },
-        putStreamSet: (set) => Promise.resolve(set.activityId),
-        putLap: (lap) => Promise.resolve(lap.id),
-        deleteActivity: () => Promise.resolve(true),
         ...overrides,
       },
     },
@@ -5442,6 +5439,40 @@ describe('a ride that saved but could not be tidied up is not offered back to be
     // And the part they would otherwise misread on the next visit.
     expect(snapshot.leftover).toBe(true);
     rig.controller.dispose();
+  });
+
+  it('#1326: is marked saved by the save itself, though the recorder could not stamp it', async () => {
+    // The tab dying between the save and `markSaved` is this case exactly:
+    // the recorder's own header write never lands and nor does the discard.
+    // The link is still on disk, because the store wrote it in the ride's own
+    // transaction — so the reopened tab offers discard, never a second save.
+    const port = storeSavePort();
+    const rig = benchWith({
+      rideSave: port,
+      checkpointStore: {
+        putRecordingSession: async (record) =>
+          record.savedAs === undefined
+            ? harness.write(async (store) => store.putRecordingSession(record))
+            : Promise.reject(new Error('the tab went')),
+        deleteRecordingSession: () => Promise.reject(new Error('the tab went')),
+      },
+    });
+    await rig.controller.pair('trainer');
+    await rig.controller.start();
+    await ride(rig, 3);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect(rig.controller.getSnapshot().saveState).toBe('saved');
+    rig.controller.dispose();
+
+    const after = reopened({}, port);
+    await after.refreshRecoverable();
+    const [offered] = after.getSnapshot().recoverable;
+    expect(offered?.alreadySaved).toBe(true);
+    await after.saveRecovered(offered!.id);
+    const library = await harness.read(async (store) => store.listActivitySummaries(ATHLETE_A));
+    expect(library.map((summary) => summary.id)).toEqual(['ride-1']);
+    after.dispose();
   });
 
   it('offers the leftover discard only, never save', async () => {
@@ -5565,31 +5596,9 @@ describe('a finished ride becomes an activity, and only then lets the checkpoint
     rig.controller.dispose();
   });
 
-  it('says so when a failed save could not take back what it had written', async () => {
-    // #1316's third review: the tidy-up's own failure used to be swallowed,
-    // so the rider was told only "the device is full" about a ride that was
-    // still in the library, and the retry wrote a second one.
-    const { port } = savePort({
-      putStreamSet: () => Promise.reject(new Error('the device is full')),
-      deleteActivity: () => Promise.reject(new Error('and the delete failed')),
-    });
-    const rig = benchWith({ rideSave: port });
-    await rig.controller.pair('trainer');
-    await rig.controller.start();
-    await ride(rig, 3);
-    rig.controller.armStop();
-    await rig.controller.confirmStop();
-
-    expect(rig.controller.getSnapshot().saveState).toBe('failed');
-    expect(rig.controller.getSnapshot().saveError).toBe(
-      'the device is full; part of the ride was written and could not be removed, so saving it again may list it twice',
-    );
-    rig.controller.dispose();
-  });
-
   it('KEEPS the checkpoint when the save fails, and says why', async () => {
     const { port } = savePort({
-      putStreamSet: () => Promise.reject(new Error('the device is full')),
+      putFinishedRide: () => Promise.reject(new Error('the device is full')),
     });
     const rig = benchWith({ rideSave: port });
     await rig.controller.pair('trainer');
@@ -6707,11 +6716,7 @@ function storeSavePort(): RideSavePort {
     },
     timeZone: 'Europe/London',
     store: {
-      putActivity: async (record) => harness.write(async (store) => store.putActivity(record)),
-      putStreamSet: async (set) => harness.write(async (store) => store.putStreamSet(set)),
-      putLap: async (lap) => harness.write(async (store) => store.putLap(lap)),
-      deleteActivity: async (owner, id) =>
-        harness.write(async (store) => store.deleteActivity(owner, id)),
+      putFinishedRide: async (ride) => harness.write(async (store) => store.putFinishedRide(ride)),
     },
   };
 }
@@ -7734,9 +7739,9 @@ describe('#1312 — the laps of a course are the recording’s, and are saved wi
         [0, 10, 1_000, 14, undefined],
         [1, 7, 1_000, 14, undefined],
       ]);
-      // ⚠️ No third row. The lap in progress when the tab died is not saved
-      // as a part lap: how far round the rider was is the game's odometer,
-      // and that went with the tab.
+      // ⚠️ No third row. The game never said how far round the third lap the
+      // rider was, so there is no part lap to save: #1322's cases below say
+      // it, as `GameView` does once a second.
       const streams = await harness.read(async (store) =>
         store.getStreamSet(ATHLETE_A, activityId('ride-1')),
       );
@@ -7914,7 +7919,7 @@ describe('#1312 — the laps of a course are the recording’s, and are saved wi
       // Continued and stopped without a second ridden, on a clock no later
       // than the ride's own, and the save refused.
       const { port } = savePort({
-        putActivity: () => Promise.reject(new Error('the device is full')),
+        putFinishedRide: () => Promise.reject(new Error('the device is full')),
       });
       const next = benchWith({ rideSave: port });
       await next.controller.refreshRecoverable();
@@ -7969,6 +7974,142 @@ describe('#1312 — the laps of a course are the recording’s, and are saved wi
         [2, 6],
       ]);
       last.controller.dispose();
+    });
+  });
+
+  describe('#1322 — a recovered ride keeps the lap in progress, and a lap crossed just before the crash', () => {
+    const PROGRESS = { kind: 'progress', distance: metres(400), ascent: metres(5) } as const;
+
+    /**
+     * Four seconds, one whole lap of ten, five seconds into the second with
+     * the game saying how far round (as `GameView` does once a second), six
+     * more — a flush carries it — and then the tab is gone.
+     */
+    const crashedPartWayRound = async (): Promise<RecordingSessionId> => {
+      const rig = benchWith();
+      const hud = gameTrainerPortOver(rig.controller);
+      await rig.controller.pair('trainer');
+      await rig.controller.start();
+      await ride(rig, 4);
+      hud.courseLine?.({ kind: 'started' });
+      await ride(rig, 10);
+      hud.courseLine?.({ ...WHOLE, again: true });
+      await ride(rig, 5);
+      expect(hud.courseLine?.(PROGRESS)).toBeUndefined();
+      await ride(rig, 6);
+      rig.controller.dispose();
+      const id = rig.sessionIds[0];
+      if (id === undefined) {
+        throw new Error('no recording was started');
+      }
+      return id;
+    };
+
+    it('saved as it was recovered: the lap in progress is a part lap, as far as the last flush', async () => {
+      const id = await crashedPartWayRound();
+      const next = benchWith({ rideSave: storeSavePort() });
+      await next.controller.refreshRecoverable();
+
+      expect(await next.controller.saveRecovered(id)).toBe('saved');
+
+      expect(
+        (await lapsOf('ride-1')).map((lap) => [
+          lap.ordinal,
+          lap.movingTime,
+          lap.distance,
+          lap.ascent,
+          lap.partial,
+        ]),
+      ).toEqual([
+        [0, 10, 1_000, 14, undefined],
+        [1, 5, 400, 5, true],
+      ]);
+      next.controller.dispose();
+    });
+
+    it('continued: the part lap is the second, and the next lap is the third', async () => {
+      const id = await crashedPartWayRound();
+      const next = benchWith({ rideSave: storeSavePort() });
+      const hud = gameTrainerPortOver(next.controller);
+      next.bench.advance(seconds(120));
+      await next.controller.pair('trainer');
+      await next.controller.refreshRecoverable();
+      expect(await next.controller.continueRecovered(id)).toBe(true);
+      await next.controller.resume();
+
+      hud.courseLine?.({ kind: 'started' });
+      await ride(next, 6);
+      const laps = hud.courseLine?.({ ...WHOLE, again: false });
+      expect(laps?.map((lap) => [lap.movingTime, lap.partial])).toEqual([
+        [10, undefined],
+        [5, true],
+        [6, undefined],
+      ]);
+
+      next.controller.armStop();
+      await next.controller.confirmStop();
+      expect(next.controller.getSnapshot().saveState).toBe('saved');
+      expect(
+        (await lapsOf('ride-1')).map((lap) => [lap.ordinal, lap.movingTime, lap.partial]),
+      ).toEqual([
+        [0, 10, undefined],
+        [1, 5, true],
+        [2, 6, undefined],
+      ]);
+      next.controller.dispose();
+    });
+
+    it('a lap that has ended takes the progress said of it with it: no part lap after it', async () => {
+      const rig = benchWith();
+      const hud = gameTrainerPortOver(rig.controller);
+      await rig.controller.pair('trainer');
+      await rig.controller.start();
+      hud.courseLine?.({ kind: 'started' });
+      await ride(rig, 5);
+      hud.courseLine?.(PROGRESS);
+      await ride(rig, 5);
+      hud.courseLine?.({ ...WHOLE, again: true });
+      // Six seconds into the next lap with nothing said of it, and a flush.
+      await ride(rig, 6);
+      rig.controller.dispose();
+      const id = rig.sessionIds[0] as RecordingSessionId;
+
+      const next = benchWith({ rideSave: storeSavePort() });
+      await next.controller.refreshRecoverable();
+      expect(await next.controller.saveRecovered(id)).toBe('saved');
+      expect((await lapsOf('ride-1')).map((lap) => [lap.movingTime, lap.partial])).toEqual([
+        [10, undefined],
+      ]);
+      next.controller.dispose();
+    });
+
+    it('a lap crossed and the tab gone before the next flush is still saved', async () => {
+      // The flush interval is five seconds and the tenth second's tick has
+      // just flushed: the line is crossed after it, and the tab dies before
+      // the next. Until #1322 the lap waited for that flush and went with it.
+      const rig = benchWith();
+      const hud = gameTrainerPortOver(rig.controller);
+      await rig.controller.pair('trainer');
+      await rig.controller.start();
+      hud.courseLine?.({ kind: 'started' });
+      await ride(rig, 10);
+      hud.courseLine?.({ ...WHOLE, again: false });
+      // The header write is the recorder's own, started at the line; give
+      // IndexedDB the turns it answers on before the tab goes.
+      for (let turn = 0; turn < 20; turn += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      rig.controller.dispose();
+      const id = rig.sessionIds[0] as RecordingSessionId;
+
+      const header = await harness.read(async (store) => store.recoverRecording(ATHLETE_A, id));
+      expect(header?.courseLaps.map((lap) => lap.distance)).toEqual([1_000]);
+
+      const next = benchWith({ rideSave: storeSavePort() });
+      await next.controller.refreshRecoverable();
+      expect(await next.controller.saveRecovered(id)).toBe('saved');
+      expect((await lapsOf('ride-1')).map((lap) => lap.movingTime)).toEqual([10]);
+      next.controller.dispose();
     });
   });
 
@@ -8183,11 +8324,11 @@ describe('#548 — after a ride is stopped and saved, another can be started', (
       ...port,
       store: {
         ...port.store,
-        putActivity: async (record) => {
+        putFinishedRide: async (ride) => {
           await new Promise<void>((resolve) => {
             finish = resolve;
           });
-          return port.store.putActivity(record);
+          return port.store.putFinishedRide(ride);
         },
       },
     };
@@ -8249,7 +8390,7 @@ describe('#548 — after a ride is stopped and saved, another can be started', (
         ...port,
         store: {
           ...port.store,
-          putStreamSet: () => Promise.reject(new Error('the device is full')),
+          putFinishedRide: () => Promise.reject(new Error('the device is full')),
         },
       },
     });
@@ -8796,9 +8937,9 @@ describe('#1042 — the saved ride the result card states, and the game’s outc
   it('states the activity the save WROTE, and nothing for a save that failed', async () => {
     const written: NewActivity[] = [];
     const { port } = savePort({
-      putActivity: (record) => {
-        written.push(record);
-        return Promise.resolve(record.id);
+      putFinishedRide: (ride) => {
+        written.push(ride.activity);
+        return Promise.resolve(ride.activity.id);
       },
     });
     const rig = benchWith({ rideSave: port });
@@ -8822,7 +8963,7 @@ describe('#1042 — the saved ride the result card states, and the game’s outc
     rig.controller.dispose();
 
     const { port: refusing } = savePort({
-      putStreamSet: () => Promise.reject(new Error('the device is full')),
+      putFinishedRide: () => Promise.reject(new Error('the device is full')),
     });
     const failing = benchWith({ rideSave: refusing });
     await failing.controller.pair('trainer');
@@ -8838,9 +8979,9 @@ describe('#1042 — the saved ride the result card states, and the game’s outc
   it('states the mean of the heart rate the ride actually recorded', async () => {
     const streams: NewStreamSet[] = [];
     const { port } = savePort({
-      putStreamSet: (set) => {
-        streams.push(set);
-        return Promise.resolve(set.activityId);
+      putFinishedRide: (ride) => {
+        streams.push(ride.streams);
+        return Promise.resolve(ride.activity.id);
       },
     });
     const rig = benchWith({ rideSave: port, devices: 'trainer+strap' });
@@ -8864,9 +9005,9 @@ describe('#1042 — the saved ride the result card states, and the game’s outc
   it('#947: saves whether a workout was finished and a ghost raced, and forgets both for the next ride', async () => {
     const written: NewActivity[] = [];
     const { port } = savePort({
-      putActivity: (record) => {
-        written.push(record);
-        return Promise.resolve(record.id);
+      putFinishedRide: (ride) => {
+        written.push(ride.activity);
+        return Promise.resolve(ride.activity.id);
       },
     });
     const short: WorkoutRecord = {
@@ -10470,7 +10611,7 @@ describe('#1244 — re-plans during the ride, read from the simulated trainer', 
   describe('kept with the ride — P9, read back through the real store', () => {
     /**
      * ⚠️ Through `storeSavePort()` and a FRESH read of IndexedDB, not the
-     * argument `putActivity` was handed (#1244's review, docs/agents/quality-gate.md §5):
+     * argument `putFinishedRide` was handed (#1244's review, docs/agents/quality-gate.md §5):
      * what is asserted is what the ride's page and the account export will
      * read, after the store's own reader has been over every record.
      */

@@ -51,12 +51,14 @@ import type {
   CameraFrameId,
   LapId,
   PrivacyZoneId,
+  RecordingSessionId,
   SegmentEffortId,
   SegmentId,
   RouteId,
   WorkoutId,
 } from './ids';
 import type { KitColour } from './kit-colour';
+import type { NewStreamSet } from './streams';
 import type { UnitSystem } from './unit-system';
 import type { Visibility } from './visibility';
 
@@ -719,6 +721,34 @@ export type NewActivity = Omit<ActivityRecord, 'visibility' | 'mayBeRaced'> & {
  * a lap under an athlete who does not own the activity.
  */
 export type NewLap = Omit<LapRecord, 'athleteId'>;
+
+/**
+ * What `putFinishedRide` accepts (#1326): a ride the rider has just finished,
+ * whole — the activity, the samples behind it and its laps, written in **one**
+ * transaction so that a ride is in the library whole or not at all.
+ *
+ * The stream set and every lap must name `activity` — its id, and for the
+ * streams its athlete too. The store refuses a ride whose parts disagree
+ * rather than filing a part under some other ride.
+ */
+export interface NewFinishedRide {
+  readonly activity: NewActivity;
+  readonly streams: NewStreamSet;
+  /** In the order they were ridden. Usually none. */
+  readonly laps: readonly NewLap[];
+  /**
+   * The checkpoint this ride was recorded into, when there is one. Its
+   * `savedAs` is set to `activity.id` **in the same transaction**, so there is
+   * no moment at which the ride is in the library and its checkpoint still
+   * reads as a finished ride nobody saved — the moment a crash used to turn
+   * into the same ride offered for saving a second time.
+   *
+   * A checkpoint this athlete does not have is not an error: a ride whose
+   * checkpoint never reached the disk is still a ride, and refusing it would
+   * lose the only copy left, the one in memory.
+   */
+  readonly recordingSession?: RecordingSessionId | undefined;
+}
 
 /**
  * The projection `listActivitySummaries` returns — #26's revision block and
