@@ -812,9 +812,11 @@ function fitInputOf(
  * a part lap (`TCX_CREATOR`). Climb has no element at all; the lap's own
  * distance has one, `DistanceMeters`, and it holds the lap's share of the
  * ride's ({@link trackActivityOf}), so the lap's own is not in the file either.
+ *
+ * Not called for the one split of a ride with no laps, which
+ * {@link trackActivityOf} writes as it always has, with no mark.
  */
 function tcxLapFiguresOf(lap: ExportLap): Partial<TrackLap> {
-  if (lap.wholeRide === true) return {};
   const stored = lap.lap;
   if (stored === undefined) return { intensity: 'Resting', triggerMethod: 'Manual' };
   return {
