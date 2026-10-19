@@ -644,7 +644,13 @@ describe('two-way sync through the real instance (#776)', () => {
       'paused-laps.fit',
     ]);
     const [gone, kept] = a.ids;
+    await a.on.harness.write(async (store) => {
+      await store.putRideWriteUp(rideWriteUpFor(LOCAL_ATHLETE, gone!));
+      await store.putRiderText(riderTextFor(LOCAL_ATHLETE, 'note', gone));
+    });
     expect(await a.sync()).toMatchObject({ pushed: 2, failures: [] });
+    expect(await instanceItem(a.on, 'write-up', gone!)).toBeDefined();
+    expect(await instanceItem(a.on, 'note', gone!)).toBeDefined();
 
     const at = unixSeconds(1_800_000_000);
     await a.on.harness.write((store) =>
@@ -652,22 +658,38 @@ describe('two-way sync through the real instance (#776)', () => {
     );
     expect(await a.sync()).toMatchObject({ pulled: 0, deletedOnInstance: 1, failures: [] });
     expect((await libraryRows(a.on.harness)).map((row) => row.id)).toEqual([kept]);
+    // A second sync while it is held: the instance's tombstone is seen, and the
+    // ride's base row must survive it (the rider may restore it any day).
+    expect(await a.sync()).toMatchObject({ pushed: 0, failures: [] });
 
     await a.on.harness.write((store) => store.restoreRecentlyDeleted(LOCAL_ATHLETE, gone!, at));
-    expect(await a.sync()).toMatchObject({
-      pushed: 0,
-      pulled: 0,
-      deletedOnInstance: 0,
-      failures: [],
-    });
+    for (const round of [1, 2]) {
+      expect(await a.sync(), `sync ${round} after restore`).toMatchObject({
+        pushed: 0,
+        pulled: 0,
+        deletedOnInstance: 0,
+        itemsPushed: 0,
+        summariesPushed: 0,
+        textsPushed: 0,
+        failures: [],
+      });
+    }
     expect((await libraryRows(a.on.harness)).map((row) => row.id).sort()).toEqual(
       [gone, kept].sort(),
     );
+    // Every kind in the manifest, read back through the instance: nothing of
+    // the restored ride is live there.
     const manifest = await manifestOf(a.on);
+    const live = manifest.filter((entry) => !entry.deleted);
     expect(
-      manifest
-        .filter((entry) => entry.kind === 'activity' && !entry.deleted)
-        .map((e) => e.activityId),
+      live.filter((entry) => entry.key === gone || entry.activityId === gone),
+      'live entries of the restored ride',
+    ).toEqual([]);
+    expect(await instanceItem(a.on, 'write-up', gone!)).toBeUndefined();
+    expect(await instanceItem(a.on, 'ride-summary', gone!)).toBeUndefined();
+    expect(await instanceItem(a.on, 'note', gone!)).toBeUndefined();
+    expect(
+      live.filter((entry) => entry.kind === 'activity').map((entry) => entry.activityId),
     ).toEqual([kept]);
   }, 60_000);
 
