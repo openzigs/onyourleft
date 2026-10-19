@@ -281,8 +281,14 @@ function readXml(format: 'gpx' | 'tcx', fileName: string, bytes: Uint8Array): Im
     fileName,
     name: result.activity.name,
     points: result.activity.laps.flatMap((lap) => lap.points),
-    statedElapsedTime: statedElapsedTimeOf(result.activity),
-    statedMovingTime: undefined,
+    // ⚠️ **No stated elapsed time: the span of the samples is it** (#1453).
+    // The one time a TCX lap states, `TotalTimeSeconds`, is timer time in
+    // Garmin's files and most others' (`statedMovingTimeOf`), so the laps'
+    // sum leaves every pause out. Taken as the ride's elapsed time it made a
+    // paused ride as long as its moving time, and shorter than its own laps,
+    // which run from one `StartTime` to the next. GPX states no time at all.
+    statedElapsedTime: undefined,
+    statedMovingTime: statedMovingTimeOf(result.activity),
     statedDistance: statedDistanceOf(result.activity),
     statedLaps: result.activity.laps.map((lap) => ({
       startedAt: lap.startTime ?? lap.points[0]?.timestamp,
@@ -377,7 +383,18 @@ function summed(parts: readonly (number | undefined)[]): number {
   return Math.round(total * 1000) / 1000;
 }
 
-function statedElapsedTimeOf(activity: TrackActivity): Seconds | undefined {
+/**
+ * The ride's moving time, as a TCX file states it: its laps' `TotalTimeSeconds`
+ * (the codec's `totalElapsedTime`) added up — #1453.
+ *
+ * Timer time, in a file a head unit wrote. This client's own TCX writes each
+ * split's share of the ride's ELAPSED time there instead (`export-activity.ts`
+ * §`trackActivityOf`), back to back, so for its own file this sum is the span
+ * of its samples and the ride comes back with no pause in it, as
+ * `LOSSY_CHANNELS` tells the rider before they export (#1323). Held to the
+ * elapsed time by {@link rideOf}, as every stated moving time is.
+ */
+function statedMovingTimeOf(activity: TrackActivity): Seconds | undefined {
   const total = summed(activity.laps.map((lap) => lap.totalElapsedTime));
   return total === 0 ? undefined : seconds(total);
 }
