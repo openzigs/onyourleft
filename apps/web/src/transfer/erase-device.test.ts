@@ -15,6 +15,10 @@ import {
   PENDING_JOBS_STORAGE_KEY,
 } from '../ride-analysis/instance-analysis';
 import { instanceEraser, INSTANCE_SESSION_STORAGE_KEY } from '../instance/instance-port';
+import {
+  createTrainerTargetMemory,
+  TRAINER_TARGETS_STORAGE_KEY,
+} from '../ride/trainer-target-memory';
 import { INSTANCE_ACCOUNT_STORAGE_KEY } from '../instance/sign-in';
 import {
   ATHLETE_A,
@@ -35,7 +39,8 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import type { ActivityId } from '@onyourleft/store';
-import { unixSeconds } from '@onyourleft/domain';
+import { unixSeconds, watts } from '@onyourleft/domain';
+import { deviceId } from '@onyourleft/sensors';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
@@ -476,6 +481,32 @@ describe('erasing, against the real store', () => {
       }),
     );
     expect([...kept.keys()]).toStrictEqual(['oyl.units.other']);
+  });
+
+  it('forgets every trainer’s acknowledged target, on the device and in the page, and only that key (#1305)', async () => {
+    await seedAthletes(harness);
+    await seed(ATHLETE_A, 1);
+    const rows = new Map<string, string>([['oyl.units.other', 'kept']]);
+    const storage = {
+      getItem: (key: string) => rows.get(key) ?? null,
+      setItem: (key: string, value: string) => void rows.set(key, value),
+      removeItem: (key: string) => void rows.delete(key),
+    };
+    // The trainer's device id: on Android, its Bluetooth address.
+    const address = deviceId('C4:7C:8D:6A:00:01');
+    const memory = createTrainerTargetMemory(storage);
+    memory.remember(address, watts(250), unixSeconds(1000));
+    expect(rows.has(TRAINER_TARGETS_STORAGE_KEY)).toBe(true);
+
+    await harness.write(async (store) => eraseDevice(store, ATHLETE_A, { trainerTargets: memory }));
+
+    expect([...rows.keys()]).toStrictEqual(['oyl.units.other']);
+    expect(createTrainerTargetMemory(storage).recall(address, unixSeconds(1000))).toBeUndefined();
+    // The page's copy went too: the next acknowledgement, from another
+    // trainer, rewrites the key without the erased one in it.
+    memory.remember(deviceId('neo'), watts(150), unixSeconds(1001));
+    expect(rows.get(TRAINER_TARGETS_STORAGE_KEY)).not.toContain('C4:7C');
+    expect(createTrainerTargetMemory(storage).recall(address, unixSeconds(1001))).toBeUndefined();
   });
 
   it('does not forget the pending-job note when the cascade threw (#1102)', async () => {

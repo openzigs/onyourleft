@@ -65,6 +65,8 @@ export const RIDE_TIME_CONTROLS: readonly RideTimeControl[] = [
   { surface: 'ride-screen', name: 'Start recording', match: 'exact' },
   { surface: 'ride-screen', name: 'Pause', match: 'exact' },
   { surface: 'ride-screen', name: 'Resume', match: 'exact' },
+  // #1318: a lap taken by hand, pressed at the bars on a ride with no course.
+  { surface: 'ride-screen', name: 'Lap', match: 'exact' },
   { surface: 'ride-screen', name: 'Stop', match: 'exact' },
   { surface: 'ride-screen', name: 'Yes, stop the ride', match: 'exact' },
   { surface: 'ride-screen', name: 'Keep riding', match: 'exact' },

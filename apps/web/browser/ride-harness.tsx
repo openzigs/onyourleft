@@ -583,16 +583,21 @@ const RACE_PORTS =
  * - `plain`: the same plan with no hold and a target that STEPS inside the
  *   window, so the lane is power against the confirmed target. `paused` is
  *   that workout paused: the trainer holds its 50 W minimum, and the newest
- *   sample (175 W) is from before the ease.
+ *   sample (175 W) is from before the ease. `paused-hold` is the hold
+ *   paused (#1313): the trainer at its 50 W minimum, no hold on the snapshot
+ *   (the controller hands over none while paused), and a trace whose newest
+ *   sample still carries the range and a heart rate, so the strip's lane is
+ *   the heart-rate one and must draw nothing.
  * - `replan` (#1244): the plain workout with an accepted re-plan waiting for
  *   its next block — the ramp shortened by two minutes — so the strip draws
  *   what the move replaced as a dotted outline and the HUD's actions show
  *   *Keep the plan*, which no other state of this page does.
  */
 const GRAPH_KIND = new URLSearchParams(window.location.search).get('graph');
-const GRAPH_HOLD = GRAPH_KIND === 'hold' || GRAPH_KIND === 'hold-silent';
-/** `paused`: the plain workout paused — the trainer eased to its 50 W minimum. */
-const GRAPH_PAUSED = GRAPH_KIND === 'paused';
+const GRAPH_HOLD =
+  GRAPH_KIND === 'hold' || GRAPH_KIND === 'hold-silent' || GRAPH_KIND === 'paused-hold';
+/** `paused` and `paused-hold`: the workout paused — the trainer eased to its 50 W minimum. */
+const GRAPH_PAUSED = GRAPH_KIND === 'paused' || GRAPH_KIND === 'paused-hold';
 /** `replan`: an accepted re-plan waiting for the next block — #1244. */
 const GRAPH_REPLAN = GRAPH_KIND === 'replan';
 const graphPlan = (rampSeconds: number) =>
@@ -627,7 +632,7 @@ const GRAPH: WorkoutGraphInput | undefined =
           : {}),
         // In a hold the trainer holds what the hold last asked: 167 W.
         holdingWatts: GRAPH_PAUSED ? 50 : GRAPH_HOLD ? 167 : 175,
-        hold: GRAPH_HOLD ? { reason: 'lowered', target: 167 } : undefined,
+        hold: GRAPH_HOLD && !GRAPH_PAUSED ? { reason: 'lowered', target: 167 } : undefined,
         thresholdWatts: 250,
         trace: Array.from({ length: 300 }, (_, index) =>
           GRAPH_HOLD
@@ -637,7 +642,7 @@ const GRAPH: WorkoutGraphInput | undefined =
                 asked: 175 - Math.floor(index / 60) * 2,
                 power: 170 + Math.round(8 * Math.sin(index / 9)),
                 // `hold-silent`: a strap gone quiet.
-                heartRate: GRAPH_KIND === 'hold' ? 128 + Math.round(index / 25) : undefined,
+                heartRate: GRAPH_KIND === 'hold-silent' ? undefined : 128 + Math.round(index / 25),
                 range: { low: 130, high: 140 },
               }
             : {

@@ -71,9 +71,9 @@ import { formatSpeed, measurementText } from '../../units/format';
 export const LAP_NOTICE_SECONDS = 10;
 
 /** What the HUD shows for a whole lap the recording counted no moving time in. */
-const LAP_WHILE_PAUSED = 'Ridden while the recording was paused.';
+export const LAP_WHILE_PAUSED = 'Ridden while the recording was paused.';
 /** The same, as it follows `Lap 3: ` in the sentence that is said. */
-const LAP_WHILE_PAUSED_SAID = 'ridden while the recording was paused.';
+export const LAP_WHILE_PAUSED_SAID = 'ridden while the recording was paused.';
 
 /** A finished lap, as the HUD shows it and as its one region says it. */
 export interface LapSummary {
@@ -86,7 +86,7 @@ export interface LapSummary {
 }
 
 /** `5 minutes 12 seconds`, `48 seconds`, `1 hour 2 minutes 3 seconds` — a time as it is heard. */
-function spokenDuration(totalSeconds: number): string {
+export function spokenDuration(totalSeconds: number): string {
   // Floored, as `format.ts` §`formatDuration` floors: the two say one time.
   const whole = Math.max(0, Math.floor(totalSeconds));
   const parts: (readonly [number, string])[] = [

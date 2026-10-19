@@ -36,6 +36,7 @@ import {
   workoutGraphLabels,
   workoutGraphPaths,
   workoutGraphText,
+  workoutStripLines,
   workoutStripPaths,
   workoutStripText,
   type WorkoutGraphInput,
@@ -979,6 +980,8 @@ describe('one source for what the trainer holds, read live — #1307’s third r
     });
     expect(workoutGraphLabels(paused).trace.reading).toBe('Paused · Target 50 W · You 48 W');
     expect(workoutStripText(paused)).toBe('Paused · Target 50 W');
+    // Its two parts, as a phone writes them one under the other (#1313).
+    expect(workoutStripLines(paused)).toEqual(['Paused', 'Target 50 W']);
     expect(workoutGraphText(paused)).toBe(
       'Workout graph. Paused. 5 min of 30 min ridden. 5:00 left in this block. Target the ' +
         'trainer last confirmed: 50 W. Your power: 48 W.',
@@ -1001,15 +1004,16 @@ describe('one source for what the trainer holds, read live — #1307’s third r
       trace: [sample(300, { target: 115, heartRate: 128, range })],
     });
     expect(workoutStripText(paused)).toBe('Paused · Target 0 W');
+    expect(workoutStripLines(paused)).toEqual(['Paused', 'Target 0 W']);
     expect(workoutGraphLabels(paused).trace.reading).toBe('Paused · Target 0 W · You 0 W');
     expect(workoutGraphLabels(paused).heartRate?.reading).toBe('121 bpm');
     expect(workoutGraphText(paused)).not.toContain('asks for');
   });
 
   it('with no target confirmed at all, a pause says so', () => {
-    expect(
-      workoutStripText(input({ status: 'paused', holdingWatts: undefined, trace: before })),
-    ).toBe('Paused · No target');
+    const paused = input({ status: 'paused', holdingWatts: undefined, trace: before });
+    expect(workoutStripText(paused)).toBe('Paused · No target');
+    expect(workoutStripLines(paused)).toEqual(['Paused', 'No target']);
   });
 
   it('after control is lost nothing is "confirmed instead": the last write is not a held target', () => {

@@ -76,6 +76,8 @@ import { rideResultOf } from '../ride/ride-result';
 import { useRideSnapshot } from '../ride/useRideController';
 import { SideCameraOnRide } from '../ride/SideCameraOnRide';
 import { useSideCamera } from '../ride/useSideCamera';
+import { manualLapSummary } from '../ride/manual-lap-text';
+import { useUnits } from '../units/context';
 import type { SidePairingPort } from '../camera/side-pairing-port';
 import { RIDE_CHOICES, RideChoiceCard } from '../home/ride-choices';
 import { hrefFor, routeById } from '../shell/routes';
@@ -174,6 +176,12 @@ function LiveRide({
   // both (#740): until then `RideAnnouncer` read it again for itself, and the
   // two agreed only because both read this device's storage in one mount pass.
   const [announcements] = useState(() => readAnnouncementPreference(deviceStorage()));
+  const units = useUnits();
+  // #1318: the lap taken by hand that ended last, while the ride it was taken
+  // on is in progress — shown below, and said once by the ride's one region.
+  const lastLap = rideInProgress(snapshot.phase) ? snapshot.manualLap.last : undefined;
+  const lapSummary =
+    lastLap === undefined ? undefined : manualLapSummary(lastLap.number, lastLap.lap, units);
 
   // ⚠️ On mount, because #212's whole point is that a rider who lost a tab is
   // *told* — the recording was always on the device and nothing looked for it.
@@ -260,6 +268,22 @@ function LiveRide({
           </StatusMessage>
         ) : null}
         <StorageNotice snapshot={snapshot} />
+        {lapSummary === undefined || lastLap === undefined ? null : (
+          // #1318: the lap just taken, until the next — AFTER every ride
+          // control, for #692's rule (nothing whose height changes during a
+          // ride sits above one). Said by the ride's one region with
+          // announcements on; with them off this notice is itself the status
+          // message, so the lap is said once either way (#1312's rule for the
+          // HUD). Keyed on the lap, so each is a new message.
+          <StatusMessage
+            key={lastLap.number}
+            tone="info"
+            label={lapSummary.label}
+            live={!announcements.enabled}
+          >
+            {lapSummary.text}
+          </StatusMessage>
+        )}
         {snapshot.sensors.length === 0 ? (
           <NoSensorsBanner />
         ) : (
@@ -313,6 +337,12 @@ function LiveRide({
           onKeepPlan={() => {
             controller.keepThePlan();
           }}
+          // #1318: the lap taken by hand that ended last, for the ride's one region.
+          lap={
+            lastLap === undefined || lapSummary === undefined
+              ? undefined
+              : { number: lastLap.number, sentence: lapSummary.sentence }
+          }
           // #1244's review: the mid-workout off control, and the switch going
           // back to off whenever a ride starts or ends.
           onReplansOff={() => {
@@ -729,6 +759,24 @@ function RideControls({
             Resume
           </Button>
         )}
+        {/*
+          #1318: *Lap*, on a ride with no course under it (with one, the laps
+          are the course's: the owner's ruling). Between Pause and Stop, in
+          the same row and at the same size, so it is a 48 px target 8 px from
+          each (#669). Not while a stop is armed: the row is then the
+          confirmation's.
+        */}
+        {snapshot.manualLap.available && !snapshot.stopArmed ? (
+          <Button
+            variant="secondary"
+            size="ride"
+            onClick={() => {
+              controller.markLap();
+            }}
+          >
+            Lap
+          </Button>
+        ) : null}
         {snapshot.stopArmed ? null : (
           <Button
             variant="secondary"

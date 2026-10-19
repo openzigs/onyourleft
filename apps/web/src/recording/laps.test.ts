@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import {
+  altitudeMetres,
   beatsPerMinute,
   metres,
+  metresPerSecond,
   revolutionsPerMinute,
   seconds,
   unixSeconds,
@@ -18,6 +20,7 @@ import {
   lapFiguresOf,
   lapSlots,
   lapsToSave,
+  recordedStretch,
   riddenLap,
   type LapFigures,
   type LapSeries,
@@ -178,9 +181,11 @@ describe('lapsToSave — #1312', () => {
     riddenLap(mark(4, 4), mark(8, 7), WHOLE),
     riddenLap(mark(8, 7), mark(10, 9), { distance: metres(300), ascent: undefined, partial: true }),
   ];
+  /** What the ride moved: the last mark's, nothing taken back after it. */
+  const MOVED = seconds(9);
 
   it('numbers the laps in the order they were ridden, under the ride', () => {
-    const rows = lapsToSave(RIDDEN, SERIES, ride, ids());
+    const rows = lapsToSave(RIDDEN, SERIES, ride, ids(), MOVED);
 
     expect(rows.map((row) => [row.id, row.ordinal, row.activityId, row.partial])).toEqual([
       ['lap-1', 0, ride, undefined],
@@ -203,8 +208,8 @@ describe('lapsToSave — #1312', () => {
       },
     };
 
-    const asCrossed = lapsToSave(RIDDEN, SERIES, ride, ids());
-    const asSaved = lapsToSave(RIDDEN, landed, ride, ids());
+    const asCrossed = lapsToSave(RIDDEN, SERIES, ride, ids(), MOVED);
+    const asSaved = lapsToSave(RIDDEN, landed, ride, ids(), MOVED);
 
     expect([asCrossed[1]?.averagePower, asCrossed[1]?.maxPower]).toEqual([155, 170]);
     expect([asSaved[1]?.averagePower, asSaved[1]?.maxPower]).toEqual([175, 250]);
@@ -217,9 +222,42 @@ describe('lapsToSave — #1312', () => {
     });
   });
 
+  it('holds the laps to the ride: their moving times never add up to more than it moved', () => {
+    // #1312's third review note. A back-dated pause took two seconds back
+    // after the second line was crossed (it read 7 s; the ride's moving time
+    // after it never passed 5 s), and one more after the last mark.
+    const taken = [
+      riddenLap(mark(0, 0), mark(4, 4), WHOLE),
+      riddenLap(mark(4, 4), mark(8, 7), WHOLE),
+      riddenLap(mark(8, 5), mark(10, 7), {
+        distance: metres(300),
+        ascent: undefined,
+        partial: true,
+      }),
+    ];
+
+    const rows = lapsToSave(taken, SERIES, ride, ids(), seconds(6));
+
+    expect(rows.map((row) => row.movingTime)).toEqual([4, 1, 1]);
+    expect(rows.reduce((sum, row) => sum + row.movingTime, 0)).toBeLessThanOrEqual(6);
+    // Only the moving times: the instants, and what the samples say, are the marks'.
+    expect(rows.map((row) => [row.startedAt, row.elapsedTime])).toEqual([
+      [START, 4],
+      [START + 4, 4],
+      [START + 8, 2],
+    ]);
+    expect(rows[1]?.averagePower).toBe(155);
+    // A ride with nothing taken back keeps every lap's own.
+    expect(lapsToSave(RIDDEN, SERIES, ride, ids(), MOVED).map((row) => row.movingTime)).toEqual([
+      4, 3, 2,
+    ]);
+  });
+
   it('writes nothing for a ride that never completed the course', () => {
-    expect(lapsToSave([RIDDEN[2] as (typeof RIDDEN)[number]], SERIES, ride, ids())).toEqual([]);
-    expect(lapsToSave([], SERIES, ride, ids())).toEqual([]);
+    expect(lapsToSave([RIDDEN[2] as (typeof RIDDEN)[number]], SERIES, ride, ids(), MOVED)).toEqual(
+      [],
+    );
+    expect(lapsToSave([], SERIES, ride, ids(), MOVED)).toEqual([]);
   });
 });
 
@@ -284,5 +322,40 @@ describe('a lap worked out from its own stretch of the recording — #1312', () 
     expect(lapFiguresOf(SERIES, riddenLap(mark(0, 0), mark(4, 4), WHOLE))).not.toHaveProperty(
       'partial',
     );
+  });
+});
+
+describe('recordedStretch — a lap with no course under it, #1318', () => {
+  it('is the speed channel summed over the slots, a dropout counting as no road', () => {
+    const stretch = recordedStretch(
+      {
+        sampleInterval: seconds(2),
+        channels: {
+          speed: [5, undefined, 7].map((value) =>
+            value === undefined ? undefined : metresPerSecond(value),
+          ),
+        },
+      },
+      false,
+    );
+    expect(stretch).toEqual({ distance: 24, ascent: undefined, partial: false });
+  });
+
+  it('climbs by the recorded-ascent rule where there is altitude, and says nothing where there is none', () => {
+    const rising = [100, 104, 108, 106, 112].map(altitudeMetres);
+    expect(
+      recordedStretch({ sampleInterval: seconds(1), channels: { altitude: rising } }, true),
+    ).toEqual({
+      distance: 0,
+      ascent: 12,
+      partial: true,
+    });
+    // One reading is no climb measured, not a climb of nought.
+    expect(
+      recordedStretch(
+        { sampleInterval: seconds(1), channels: { altitude: [altitudeMetres(100)] } },
+        false,
+      ).ascent,
+    ).toBeUndefined();
   });
 });

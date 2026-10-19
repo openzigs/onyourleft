@@ -562,14 +562,23 @@ function splitsOf(
   // start with nothing in it needs nothing: the first split written counts
   // from the ride's start whatever it is.
   //
-  // ⚠️ **So a file's lap and its stored row agree on the lap's samples in
-  // every case but one, and that one is a single sample.** A lap owns the
-  // slots up to and not including the one it ended in. When the ride ends in
-  // that same slot — or within a sample of it — the slot's one sample is the
-  // ride's and not the lap's, and has no split of its own to go in: the file
-  // puts it in the last lap's split, and the row's averages leave it out. The
-  // third pass gave it a split of nought seconds instead; a lap of nought
-  // seconds in every such ride's file was the worse answer.
+  // ⚠️ **So a file's lap holds every sample its stored row counted, first and
+  // in order, and then the samples of whatever stretch was folded into it —
+  // which its row's averages leave out** (#1312's second review note,
+  // `export-activity.test.ts` §"a stretch folded into the lap before it"). A
+  // lap owns the slots up to and not including the one it ended in, so a
+  // folded stretch begins in that slot; it lasts less than one sample, so it
+  // reaches into one slot more at the most. Between two laps that is one
+  // sample (the next lap's first slot is its own); after the last lap, two.
+  // They are not made to agree because the only other place those samples
+  // could go is a split of their own lasting less than a sample, and the
+  // third pass's lap of nought seconds in every such ride's file was the
+  // worse answer. A ride that ends before its last lap does has no stretch
+  // after it, and the sweep puts any sample from that lap's end slot on into
+  // that lap the same way.
+  //
+  // ⚠️ **The folded samples go AFTER the split's own**: they were recorded
+  // after them, and FIT's records are these points end to end.
   const folded: ExportLap[] = [];
   splits.forEach((split, ordinal) => {
     const before = folded[folded.length - 1];

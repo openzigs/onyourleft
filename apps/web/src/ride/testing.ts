@@ -64,6 +64,8 @@ export interface RecordedCalls {
   /** #785 — a room ride asked for a recording, and the races noted. */
   recordForRoom: number;
   readonly noteRoomRace: unknown[];
+  /** #1318 — the ride screen's *Lap*. */
+  markLap: number;
   /** #1042 — the result card's *Done*, and its one announcement. */
   dismissResult: number;
   noteResultAnnounced: number;
@@ -94,6 +96,7 @@ export function idleSnapshot(): RideSnapshot {
     elapsedSeconds: 0,
     movingSeconds: 0,
     courseLapSeconds: undefined,
+    manualLap: { available: false, last: undefined },
     sampleCount: 0,
     metrics: RIDE_METRIC_IDS.map((id) => ({ id, state: { kind: 'unpaired' } })),
     sensors: [],
@@ -137,6 +140,9 @@ export function ridingSnapshot(): RideSnapshot {
   return {
     ...base,
     phase: 'recording',
+    // #1318: a recording with no course under it offers *Lap*, as the real
+    // controller's does.
+    manualLap: { available: true, last: undefined },
     elapsedSeconds: 3_725,
     movingSeconds: 3_600,
     sampleCount: 3_725,
@@ -204,6 +210,7 @@ export function stubRideController(
     noteGameRideEnded: [],
     recordForRoom: 0,
     noteRoomRace: [],
+    markLap: 0,
     dismissResult: 0,
     noteResultAnnounced: 0,
     startNewRide: 0,
@@ -288,6 +295,10 @@ export function stubRideController(
     // which is the whole of #1049's review finding. The rules around them
     // (cleared on a new ride, refused with no saved ride) are the real
     // controller's, and `controller.test.ts` §"#1042" drives those.
+    markLap: () => {
+      calls.markLap += 1;
+      return snapshot.manualLap.available;
+    },
     dismissResult: () => {
       calls.dismissResult += 1;
       snapshot = { ...snapshot, savedRide: undefined };

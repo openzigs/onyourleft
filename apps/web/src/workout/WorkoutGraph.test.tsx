@@ -388,6 +388,17 @@ describe('the HUD’s strip as markup — #1307', () => {
     );
   });
 
+  it('writes its line as two parts, the separator in the second, so a phone can stack them — #1313', () => {
+    const root = rendered(<WorkoutStrip workout={input()} />);
+    expect(textOf(root, '.oyl-workout-strip__part')).toEqual([
+      'Target 150 W',
+      ' · 5:00 left in block',
+    ]);
+    expect(textOf(root, '.oyl-workout-strip__separator')).toEqual([' · ']);
+    const paused = rendered(<WorkoutStrip workout={input({ status: 'paused' })} />);
+    expect(textOf(paused, '.oyl-workout-strip__part')).toEqual(['Paused', ' · Target 150 W']);
+  });
+
   it('draws heart rate against its range, and no power, while a hold runs', () => {
     const root = rendered(<WorkoutStrip workout={held()} />);
     expect(root.querySelector('[role="img"]')?.getAttribute('data-oyl-lane')).toBe('heart-rate');
