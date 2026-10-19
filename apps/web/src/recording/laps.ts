@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * A lap of a course, as the RECORDING states it — #1312.
+ * A lap of a course, as the RECORDING states it — #1312; and since #1318 a
+ * lap the rider marks with the ride screen's *Lap* on a ride with no course
+ * under it (`ride/controller.ts` §`markLap`). The two are one shape, kept in
+ * one list in the order they were ridden: a marked lap is a course lap whose
+ * distance and climb are the recording's own ({@link recordedStretch}) rather
+ * than the course's.
  *
  * ## Whose numbers these are
  *
@@ -56,7 +61,9 @@
 
 import {
   beatsPerMinute,
+  metres,
   metresPerSecond,
+  recordedAscent,
   revolutionsPerMinute,
   seconds,
   watts,
@@ -234,6 +241,49 @@ export function riddenLap(from: LapMark, to: LapMark, course: CourseStretch): Re
     distance: course.distance,
     ...(course.ascent === undefined ? {} : { ascent: course.ascent }),
     ...(course.partial ? { partial: true as const } : {}),
+  };
+}
+
+/** The part of a recorded stretch a lap with no course under it is measured from. */
+export interface RecordedStretchSamples {
+  readonly sampleInterval: Seconds;
+  readonly channels: {
+    readonly speed?: readonly (StreamChannelValue['speed'] | undefined)[] | undefined;
+    readonly altitude?: readonly (StreamChannelValue['altitude'] | undefined)[] | undefined;
+  };
+}
+
+/**
+ * What a lap with NO course under it states about the road — #1318: the
+ * recording's own, from the samples of the lap's slots, because there is no
+ * course to say it.
+ *
+ * - **Its distance is the ride's rule** (`finish.ts` §`distanceOf`): the speed
+ *   channel summed over the slots, a dropout counted as no distance. So the
+ *   laps of a ride with no course add up to the ride's distance, and a ride
+ *   with no speed channel has laps of no distance, as the ride has.
+ * - **Its climb is `route/profile.ts` §`recordedAscent`** over the lap's
+ *   altitude readings — the rule the ride's own climbing badges count by —
+ *   and `undefined` with fewer than two of them: an indoor ride did not climb
+ *   nought metres, it climbed nothing anybody measured.
+ *
+ * ⚠️ **Worked out once, when the lap ends**, and kept with the lap
+ * (`RecordedCourseLap.distance`): a reading still on its way for the lap's
+ * last slot is in the lap's averages when the ride is saved ("Worked out
+ * twice", above) and not in its distance. A slot's worth of road at most.
+ */
+export function recordedStretch(samples: RecordedStretchSamples, partial: boolean): CourseStretch {
+  let distance = 0;
+  for (const speed of samples.channels.speed ?? []) {
+    if (speed !== undefined) {
+      distance += speed * samples.sampleInterval;
+    }
+  }
+  const altitude = samples.channels.altitude;
+  return {
+    distance: metres(distance),
+    ascent: altitude === undefined ? undefined : recordedAscent(altitude),
+    partial,
   };
 }
 

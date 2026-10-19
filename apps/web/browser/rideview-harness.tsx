@@ -552,6 +552,8 @@ const RIDE_STATE = new URLSearchParams(window.location.search).get('ride');
  *   `?side=lost`             #551's lost side-camera link, with its own
  *                            control, *Stop side camera*, through the
  *                            scripted pairing the unit tests use
+ *   `?lap=ended`             #1318's notice for a lap taken by hand, with
+ *                            the widest figures one can state
  *
  * Through the stub's snapshot for the reason {@link WORKOUT_STATE} is: this
  * page measures where the sentences land, not who raises them.
@@ -559,6 +561,24 @@ const RIDE_STATE = new URLSearchParams(window.location.search).get('ride');
 const QUERY = new URLSearchParams(window.location.search);
 const NOTIFICATION_REFUSED = QUERY.get('notification') === 'refused';
 const STORAGE_FULL = QUERY.get('storage') === 'full';
+const LAP_ENDED = QUERY.get('lap') === 'ended';
+/**
+ * #1318: the widest lap notice — a two-digit lap, an hour's time, a three-digit
+ * distance, a four-digit power and a three-digit heart rate.
+ */
+const WIDEST_LAP = {
+  number: 12,
+  lap: {
+    startedAt: unixSeconds(1_800_000_000),
+    elapsedTime: seconds(37_425),
+    movingTime: seconds(37_425),
+    distance: metres(123_456),
+    averagePower: watts(1_234),
+    maxPower: watts(1_888),
+    averageHeartRate: beatsPerMinute(188),
+    maxHeartRate: beatsPerMinute(199),
+  },
+};
 const SIDE = QUERY.get('side');
 const SIDE_PAIRING =
   SIDE === 'filming' || SIDE === 'lost' ? scriptedSidePairing({ phone: SIDE }) : undefined;
@@ -617,6 +637,7 @@ function snapshot(): RideSnapshot {
     keepAliveFailed: KEEP_ALIVE_FAILED,
     notificationNotice: NOTIFICATION_REFUSED ? RIDE_NOTIFICATION_REFUSED : undefined,
     storage: STORAGE_FULL ? ('quota-exceeded' as const) : ('ok' as const),
+    manualLap: { available: true, last: LAP_ENDED ? WIDEST_LAP : undefined },
   };
   if (WIDEST_READINGS) {
     const at = unixSeconds(1_800_000_000);

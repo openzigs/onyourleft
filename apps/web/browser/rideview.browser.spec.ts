@@ -862,6 +862,8 @@ const STANDING_NOTICES: readonly {
   { name: 'no notification', query: '?notification=refused', labels: ['No notification:'] },
   { name: 'device full', query: '?storage=full', labels: ['Device full:'] },
   { name: 'side camera lost', query: '?side=lost', labels: ['Side camera:'] },
+  // #1318: the lap taken by hand that ended last, at its widest.
+  { name: 'a lap just taken', query: '?lap=ended', labels: ['Lap 12:'] },
   { name: 'a workout eased', query: '?workout=eased', labels: ['Eased:'] },
   // #1240: a workout's heart-rate hold — its notice, with the longest sentence
   // `workout/hold-text.ts` can produce, in the running workout's section.
@@ -887,11 +889,21 @@ const STANDING_NOTICES: readonly {
 
 const EVERY_NOTICE = {
   name: 'every standing notice at once',
-  query: '?workout=eased&keepalive=failed&notification=refused&storage=full&side=lost',
+  query: '?workout=eased&keepalive=failed&notification=refused&storage=full&side=lost&lap=ended',
   // One workout on the stub: eased, not also holding (#1240's hold has its own case).
   labels: STANDING_NOTICES.filter(
     // #1244's re-plan has its own case too, for the same reason.
-    (each) => each.query !== '?workout=hold' && !each.query.startsWith('?workout=replan'),
+    (each) =>
+      each.query !== '?workout=hold' &&
+      !each.query.startsWith('?workout=replan') &&
+      // #1318: the lap's notice is ON this page, so every control below is
+      // held with it standing; it is not held to start on the screen. It is
+      // the last notice in the column, and with all six at once it is the
+      // sentence that goes past the fold — "the last sentence, never a
+      // control" (the note above). Measured 64.7 px under the fold at
+      // 1024×720 in the shell, on a Mac; alone, it clears the floor at every
+      // tablet (its own case).
+      each.query !== '?lap=ended',
   ).flatMap((each) => each.labels),
 };
 
@@ -922,6 +934,11 @@ for (const viewport of EASED_VIEWPORTS) {
         expect(seen.notices.map((each) => each.label)).toEqual(
           expect.arrayContaining([...state.labels]),
         );
+        // #1318: and the lap's, which every notice at once stands but does not
+        // hold to the screen (`EVERY_NOTICE`).
+        if (state.query.includes('lap=ended')) {
+          expect(seen.notices.map((each) => each.label)).toContain('Lap 12:');
+        }
 
         const during = seen.controls.filter((each) => each.group !== 'sensors');
         expect(during.map((each) => each.name)).toEqual(expect.arrayContaining(['Pause', 'Stop']));
