@@ -199,18 +199,17 @@ export type InstanceKnown = 'none' | 'connected' | 'unknown';
  * browser's site data" everywhere: false inside the Android app, which has no
  * browser, and false with an instance (ADR 0036), which keeps a synced ride.
  *
- * "Nowhere else" is said only in a browser with no instance. The app's
- * manifest leaves Android's own backup on (`android:allowBackup`), which may
- * copy an app's storage to the rider's Google account, so the app does not
- * promise that no copy exists — only what deletes the one here.
+ * "Nowhere else" is never said. A rider who synced and then disconnected (or
+ * whose session is gone) reads as `none`, yet the instance still holds what it
+ * was sent; and the app's manifest leaves Android's own backup on
+ * (`android:allowBackup`), which may copy storage to the rider's Google
+ * account. So the sentence says only what is here and what deletes it.
  */
 export function whereRidesAreText(nativeShell: boolean, instance: InstanceKnown): string {
   const lead =
     instance === 'connected'
       ? 'Rides are stored on this device, and a ride you sync is also kept on your instance.'
-      : instance === 'none' && !nativeShell
-        ? 'Rides are stored on this device and nowhere else.'
-        : 'Rides are stored on this device.';
+      : 'Rides are stored on this device.';
   const deletes = nativeShell
     ? 'Uninstalling the app, or clearing its storage in Android’s settings, deletes them from this device'
     : 'Clearing this browser’s site data deletes them from this device';
@@ -233,6 +232,7 @@ function useInstanceKnown(port: InstancePort | undefined): InstanceKnown {
         const known = state.kind === 'not-connected' ? 'none' : 'connected';
         if (!cancelled) setAnswer({ port, known });
       })
+      // Deliberate: a failed read leaves the footer on its hedged wording.
       .catch(() => undefined);
     return () => {
       cancelled = true;

@@ -947,7 +947,7 @@ describe('#1438 — the footer says where the rides are, per platform and per in
   }
 
   const BROWSER_ALONE =
-    'Rides are stored on this device and nowhere else. Clearing this browser’s site data ' +
+    'Rides are stored on this device. Clearing this browser’s site data ' +
     'deletes them from this device — export anything you want to keep.';
   const BROWSER_WITH_INSTANCE =
     'Rides are stored on this device, and a ride you sync is also kept on your instance. ' +
@@ -961,7 +961,7 @@ describe('#1438 — the footer says where the rides are, per platform and per in
     'Uninstalling the app, or clearing its storage in Android’s settings, deletes them from ' +
     'this device — export anything you want to keep.';
 
-  it('in a browser with no instance: here and nowhere else, and the browser’s site data', async () => {
+  it('in a browser with no instance: here, and the browser’s site data', async () => {
     mounted = await mount(<ActivitiesView library={stubLibrary(OWNER, [])} />);
     await settle();
     expect(footer()).toBe(BROWSER_ALONE);
@@ -1011,6 +1011,20 @@ describe('#1438 — the footer says where the rides are, per platform and per in
     );
     await settle();
     expect(footer()).toBe(BROWSER_WITH_INSTANCE);
+  });
+
+  it('never says "nowhere else": a rider who synced then disconnected still has a copy on the instance', async () => {
+    const instance = scriptedInstance({ connected: false });
+    mounted = await mount(
+      <ActivitiesView library={stubLibrary(OWNER, [])} instance={instance.port} />,
+    );
+    await settle();
+    expect(footer()).not.toContain('nowhere else');
+    for (const native of [false, true]) {
+      for (const known of ['none', 'connected', 'unknown'] as const) {
+        expect(whereRidesAreText(native, known)).not.toContain('nowhere else');
+      }
+    }
   });
 
   it('claims neither way until the instance has answered', () => {

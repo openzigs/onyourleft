@@ -152,7 +152,7 @@ describe('the router', () => {
 
   it('hands History the platform and the rider’s instance, for its footer — #1438', async () => {
     // Two optional props passed through the shell: left out, History says
-    // "this browser" in the app and "nowhere else" with an instance.
+    // the browser's wording in the app and no instance clause with one.
     globalThis.location.hash = '#/activities';
     mounted = await mount(
       <AppShell
