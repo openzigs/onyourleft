@@ -694,10 +694,20 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
     await store.putSyncBase(record);
     base.set(keyOf(row.kind, row.key), record);
   };
-  /** Forget a ride's base row and its items' — the ride is gone on both sides. */
-  const forgetRide = async (content: string, activity: string): Promise<void> => {
+  /**
+   * Forget a ride's base row and its items' — the ride is gone on both sides.
+   * `keepActivity` keeps the ride's own row while the instance holds its
+   * tombstone: a ride brought back from Recently deleted (#1431) is then known
+   * as deleted there, so it is hidden and nothing of it is sent back. The row
+   * goes when the tombstone does (the last loop below).
+   */
+  const forgetRide = async (
+    content: string,
+    activity: string,
+    keepActivity = false,
+  ): Promise<void> => {
     for (const [kind, key] of [
-      ['activity', content],
+      ...(keepActivity ? [] : [['activity', content] as const]),
       ...[...ITEM_KINDS, 'note' as const].map((each) => [each, activity] as const),
       ['race-consent', activity],
     ] as const) {
@@ -733,7 +743,7 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
       const outcome = await deleteRideOnInstance(sealed, entry.key, rideOf(known));
       if (outcome === 'deleted') {
         deletedOnInstance += 1;
-        await forgetRide(entry.key, rideOf(known));
+        await forgetRide(entry.key, rideOf(known), true);
       } else {
         failures.push({ kind: 'activity', key: entry.key, reason: outcome });
       }
@@ -778,7 +788,7 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
       hidden.add(ride.id);
       hiddenOnInstance += 1;
     } else if (known !== undefined) {
-      await forgetRide(entry.key, rideOf(known));
+      await forgetRide(entry.key, rideOf(known), true);
     }
   }
 

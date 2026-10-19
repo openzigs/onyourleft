@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useId, useRef, useState, type JSX } from 'react';
 
+import { unixSeconds } from '@onyourleft/domain';
 import type { ActivityId, ActivityOrder, ActivitySummary, SortDirection } from '@onyourleft/store';
 
 import { Button, ButtonLink } from '../design/Button';
@@ -14,11 +15,13 @@ import { VisuallyHidden } from '../design/VisuallyHidden';
 import { ELAPSED_TIME_LABEL, MOVING_TIME_LABEL, POWER_UNIT } from '../format';
 import { useUnits } from '../units/context';
 import { distanceUnit } from '../units/format';
+import { RecentlyDeleted } from '../library/RecentlyDeleted';
 import { orderedRows, PAGE_SIZE, rowFor, type LibraryRow } from '../library/rows';
 import type { LibraryPort } from '../library/store-port';
 import { ListDetail, SELECTED_HEADING_ID } from '../shell/ListDetail';
 import { hrefFor, hrefForActivity, hrefForSelection, routeById } from '../shell/routes';
 import type { InstancePort } from '../instance/instance-port';
+import { useInstanceKnown, whereRidesAreText, type InstanceKnown } from './where-rides-are';
 
 /**
  * The ride history: every activity stored on this device (#62).
@@ -187,59 +190,36 @@ export const ACTIVITIES_KEPT_VISIBLE: readonly string[] = [
 ];
 
 /**
- * Whether this device has an instance — #1438. `unknown` until the port has
- * answered, and while it is, the footer claims neither way.
+ * What a delete does — #1431: said inside the confirmation. Until #1431 it
+ * said "Deleting a ride cannot be undone", which is no longer true.
  */
-export type InstanceKnown = 'none' | 'connected' | 'unknown';
+export const DELETE_EXPLAINED_TEXT =
+  'It moves to Recently deleted, at the foot of this list, where you can bring it back for 30 days. After that it is removed from this device for good.';
 
 /**
- * The footer's sentence about where the rides are — #1013, #1438.
- *
- * Until #1438 it said "There is no account and no server" and named "this
- * browser's site data" everywhere: false inside the Android app, which has no
- * browser, and false with an instance (ADR 0036), which keeps a synced ride.
- *
- * "Nowhere else" is never said. A rider who synced and then disconnected (or
- * whose session is gone) reads as `none`, yet the instance still holds what it
- * was sent; and the app's manifest leaves Android's own backup on
- * (`android:allowBackup`), which may copy storage to the rider's Google
- * account. So the sentence says only what is here and what deletes it.
+ * Said after {@link DELETE_EXPLAINED_TEXT} when this device has an instance —
+ * #1450. A synced ride deleted here is deleted on the instance at the next sync
+ * (`instance/sync.ts` rule 2), and restoring it from Recently deleted brings it
+ * back on this device only.
  */
-export function whereRidesAreText(nativeShell: boolean, instance: InstanceKnown): string {
-  const lead =
-    instance === 'connected'
-      ? 'Rides are stored on this device, and a ride you sync is also kept on your instance.'
-      : 'Rides are stored on this device.';
-  const deletes = nativeShell
-    ? 'Uninstalling the app, or clearing its storage in Android’s settings, deletes them from this device'
-    : 'Clearing this browser’s site data deletes them from this device';
-  return `${lead} ${deletes} — export anything you want to keep.`;
-}
+export const DELETE_ON_INSTANCE_TEXT =
+  'A ride you synced is deleted from your instance at the next sync, and bringing it back restores it on this device only.';
 
-/** {@link InstanceKnown} for `port`, read once — #1438. */
-function useInstanceKnown(port: InstancePort | undefined): InstanceKnown {
-  // Kept with the port it answered for, so a new port reads as unknown until it answers.
-  const [answer, setAnswer] = useState<
-    { readonly port: InstancePort; readonly known: InstanceKnown } | undefined
-  >(undefined);
-  useEffect(() => {
-    if (port === undefined) return undefined;
-    let cancelled = false;
-    port
-      .current()
-      .then((state) => {
-        // Signed out, unreadable or unreachable: rides synced before are still there.
-        const known = state.kind === 'not-connected' ? 'none' : 'connected';
-        if (!cancelled) setAnswer({ port, known });
-      })
-      // Deliberate: a failed read leaves the footer on its hedged wording.
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [port]);
-  if (port === undefined) return 'none';
-  return answer?.port === port ? answer.known : 'unknown';
+/**
+ * What the delete confirmation says — #1431, #1450.
+ *
+ * Until #1450 it said "There is no server and no backup" everywhere, which an
+ * instance (ADR 0036) made false. The instance sentence is said only when one
+ * is known to be connected: without one, or before the port has answered, the
+ * dialog says nothing about a server either way — a rider who synced and then
+ * disconnected still has a copy there, so it never says "no server", "no
+ * backup" or "nowhere else". The platform changes nothing here since #1451
+ * turned Android's own backup off, so it is not a parameter.
+ */
+export function deleteRideText(instance: InstanceKnown): string {
+  return instance === 'connected'
+    ? `${DELETE_EXPLAINED_TEXT} ${DELETE_ON_INSTANCE_TEXT}`
+    : DELETE_EXPLAINED_TEXT;
 }
 
 /** Said inside the confirmation when the store refused the delete — #959. */
@@ -353,7 +333,9 @@ export function ActivitiesView({
       if (library === undefined) {
         return;
       }
-      await library.store.deleteActivity(library.athleteId, id as never);
+      // #1431: to Recently deleted, where it can be brought back for 30 days.
+      const now = library.now?.() ?? unixSeconds(Math.floor(Date.now() / 1000));
+      await library.store.moveActivityToRecentlyDeleted(library.athleteId, id as ActivityId, now);
       setReloads((count) => count + 1);
     },
     [library],
@@ -403,9 +385,12 @@ export function ActivitiesView({
       <p>{nothingYet}</p>
     </EmptyState>
   );
+  // #1431: tertiary — a delete can be undone from Recently deleted now, so
+  // it no longer weighs what the ride's own link weighs. Still the 44 px
+  // target every `.oyl-button` keeps (`browser/library.browser.spec.ts`).
   const deleteButton = (row: LibraryRow): JSX.Element => (
     <Button
-      variant="secondary"
+      variant="tertiary"
       onClick={() => {
         setConfirming(row);
       }}
@@ -551,11 +536,17 @@ export function ActivitiesView({
           return true;
         }}
       >
-        <p>
-          Deleting a ride cannot be undone. There is no server and no backup, so the copy on this
-          device may be the only one that exists — export it first if you want to keep it.
-        </p>
+        <p>{deleteRideText(instanceKnown)}</p>
       </ConfirmDialog>
+
+      {/* #1431: where a deleted ride goes, and how it comes back. */}
+      <RecentlyDeleted
+        library={library}
+        reloads={reloads}
+        onRestored={() => {
+          setReloads((count) => count + 1);
+        }}
+      />
 
       {/* #1013: where the rides are, and what deletes them, is kept on the
         screen whole. #1438: per platform, and per instance. */}

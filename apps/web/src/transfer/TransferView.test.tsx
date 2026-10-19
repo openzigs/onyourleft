@@ -648,16 +648,42 @@ describe('TransferView — exporting', () => {
     if (select === null) {
       throw new Error('the format chooser is not on the page');
     }
-    expect(document.body.textContent).toContain('FIT carries every channel');
+    // FIT carries no lap row's figures or kind until #1471, so the screen says
+    // so rather than that FIT carries everything.
+    expect(document.body.textContent).toContain(
+      'This format cannot carry: each lap’s average heart rate, each lap’s highest heart rate, ' +
+        'each lap’s average cadence, each lap’s average power, each lap’s best power, ' +
+        'each lap’s climb, which splits are laps and which are part laps. ' +
+        'The stored ride keeps them.',
+    );
+    expect(document.body.textContent).not.toMatch(/lap\.[a-z]/);
+    expect(document.body.textContent).not.toContain('FIT carries every channel');
 
     select.value = 'tcx';
     select.dispatchEvent(new Event('change', { bubbles: true }));
     await settle();
 
-    // Read out of `TCX_LOSSY_CHANNELS` rather than written here, so a codec
-    // that starts carrying temperature changes this sentence without anyone
-    // remembering to.
-    expect(document.body.textContent).toContain('point.temperature');
+    // #1452: in plain words, never the codec's code paths. The list is still
+    // the codec's (`TCX_LOSSY_CHANNELS`), named through `LOSSY_CHANNEL_NAMES`.
+    expect(document.body.textContent).toContain(
+      'This format cannot carry: temperature, the ride’s name, each lap’s climb, ' +
+        'each lap’s distance, moving time. The stored ride keeps them.',
+    );
+    expect(document.body.textContent).not.toMatch(
+      /point\.temperature|activity\.name|activity\.movingTime/,
+    );
+
+    select.value = 'gpx';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    expect(document.body.textContent).toContain(
+      'This format cannot carry: the distance at each point, each lap’s elapsed time, ' +
+        'each lap’s distance, each lap’s average heart rate, each lap’s highest heart rate, ' +
+        'each lap’s average cadence, each lap’s average power, each lap’s best power, ' +
+        'which splits are laps and which are part laps, each lap’s climb, moving time. ' +
+        'The stored ride keeps them.',
+    );
+    expect(document.body.textContent).not.toMatch(/point\.distance|lap\.total/);
   });
 
   it('reports a failed export without taking the page down', async () => {

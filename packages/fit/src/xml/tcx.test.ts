@@ -240,6 +240,93 @@ describe('writing', () => {
  * the first point when the activity or the lap has no start of its own.
  * `sampleActivity()` sets all three, so none of it was visible.
  */
+/** #1321: a lap's figures and its kind, from a file somebody else wrote. */
+describe('a lap’s figures and its kind', () => {
+  const lapDocument = (children: string): string =>
+    [
+      `<TrainingCenterDatabase xmlns="${TCX_NAMESPACE}" xmlns:ns3="${TCX_ACTIVITY_EXTENSION_V2}">`,
+      '  <Activities><Activity Sport="Biking">',
+      '    <Lap StartTime="2024-06-15T09:00:00Z">',
+      `      ${children}`,
+      '      <Track><Trackpoint><Time>2024-06-15T09:00:00Z</Time>',
+      '        <HeartRateBpm><Value>101</Value></HeartRateBpm><Cadence>61</Cadence>',
+      '      </Trackpoint></Track>',
+      '    </Lap>',
+      '  </Activity></Activities>',
+      '</TrainingCenterDatabase>',
+    ].join('\n');
+
+  it('drops a kind TCX does not admit, with a fault, rather than guessing one', () => {
+    const { activity, faults } = decodeTcx(
+      lapDocument('<Intensity>Sprinting</Intensity><TriggerMethod>Auto</TriggerMethod>'),
+    );
+    expect(faults.map((fault) => fault.code)).toEqual(['invalid-value', 'invalid-value']);
+    expect(activity.laps[0]?.intensity).toBeUndefined();
+    expect(activity.laps[0]?.triggerMethod).toBeUndefined();
+  });
+
+  it('drops a figure @onyourleft/domain rejects, with a fault and without the value', () => {
+    const { activity, faults } = decodeTcx(
+      lapDocument(
+        '<AverageHeartRateBpm><Value>-4</Value></AverageHeartRateBpm>' +
+          '<Extensions><ns3:LX><ns3:AvgWatts>-9</ns3:AvgWatts></ns3:LX></Extensions>',
+      ),
+    );
+    expect(faults.map((fault) => fault.code)).toEqual(['invalid-value', 'invalid-value']);
+    expect(faults.map((fault) => fault.message).join(' ')).not.toMatch(/-4|-9/);
+    expect(activity.laps[0]?.averageHeartRate).toBeUndefined();
+    expect(activity.laps[0]?.averagePower).toBeUndefined();
+    // A point's own heart rate and cadence are not a lap's.
+    expect(activity.laps[0]?.maxHeartRate).toBeUndefined();
+    expect(activity.laps[0]?.averageCadence).toBeUndefined();
+    expect(trackPointsOf(activity)[0]?.heartRate).toBe(101);
+  });
+
+  it('reads a Cadence or an Intensity as the lap’s only when the lap is its parent', () => {
+    const { activity, faults } = decodeTcx(
+      lapDocument(
+        '<Extensions><Elsewhere><Cadence>77</Cadence><Intensity>Resting</Intensity>' +
+          '</Elsewhere></Extensions>',
+      ),
+    );
+    expect(faults).toEqual([]);
+    expect(activity.laps[0]?.averageCadence).toBeUndefined();
+    expect(activity.laps[0]?.intensity).toBeUndefined();
+  });
+
+  it('writes Active and Manual for a lap that states no kind, as the schema requires', () => {
+    const activity = sampleActivity();
+    const plain = {
+      ...activity,
+      laps: activity.laps.map((lap) => ({
+        ...lap,
+        intensity: undefined,
+        triggerMethod: undefined,
+      })),
+    };
+    const reread = decodeTcx(encodeTcx(plain)).activity;
+    expect(reread.laps.map((lap) => [lap.intensity, lap.triggerMethod])).toEqual([
+      ['Active', 'Manual'],
+      ['Active', 'Manual'],
+    ]);
+  });
+
+  it('writes no figure element for a figure the lap does not state', () => {
+    const activity = sampleActivity();
+    const written = encodeTcx({
+      ...activity,
+      laps: activity.laps.map((lap) => ({
+        startTime: lap.startTime,
+        totalElapsedTime: lap.totalElapsedTime,
+        totalDistance: lap.totalDistance,
+        points: lap.points,
+      })),
+    });
+    expect(written).not.toContain('AverageHeartRateBpm');
+    expect(written).not.toContain('ns3:LX');
+  });
+});
+
 describe('what TCX supplies when the activity does not', () => {
   function withoutSportOrStart(): TrackActivity {
     const activity = sampleActivity();

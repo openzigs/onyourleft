@@ -177,6 +177,80 @@ describe('the home screen — #428', () => {
     expectClean('home, empty');
   });
 
+  it('a first open: ONE first step, and each other way to start once, by words that say where — #1429', async () => {
+    await openHome([]);
+    const main = document.querySelector('main');
+    // One primary, and it is the first step, under one heading.
+    const primaries = [...(main?.querySelectorAll('.oyl-button') ?? [])].filter(
+      (button) => !/oyl-button--(secondary|tertiary|danger)/.test(button.className),
+    );
+    expect(primaries.map((button) => button.textContent)).toEqual(['Start a ride']);
+    const card = document.querySelector('.oyl-next-up');
+    expect(card?.querySelectorAll('h2')).toHaveLength(1);
+    expect(card?.querySelector('h2')?.textContent).toBe('Your first ride');
+    // Every link once: no second way to Ride, no second way to Devices.
+    const links = [...(main?.querySelectorAll('a') ?? [])].map((link) => [
+      link.textContent,
+      link.getAttribute('href'),
+    ]);
+    expect(links).toEqual([
+      ['Start a ride', hrefFor(routeById('ride'))],
+      ['Ride a route', hrefFor(routeById('game'))],
+      ['Follow a workout', hrefFor(routeById('workouts'))],
+      ['Bring rides in', hrefFor(routeById('transfer'))],
+      ['Pair one on Devices', hrefFor(routeById('devices'))],
+    ]);
+    // The words beside each link say where it goes.
+    const line = (href: string): string =>
+      main?.querySelector(`a[href="${href}"]`)?.closest('li')?.textContent ?? '';
+    expect(line(hrefFor(routeById('game')))).toBe('Ride a route in the trainer game.');
+    expect(line(hrefFor(routeById('workouts')))).toBe('Follow a workout on a smart trainer.');
+    expect(line(hrefFor(routeById('transfer')))).toBe(
+      'Bring rides in from a FIT, GPX or TCX file.',
+    );
+    // No picture cards on a first open: they are what pushed the rest down.
+    expect(main?.querySelectorAll('.oyl-home__rides')).toHaveLength(0);
+    expectClean('home, a first open');
+  });
+
+  it('while the store read is out, no ride cards are drawn, so a first open never draws then takes them away — #1429', async () => {
+    const stub = stubAnalysis(OWNER, []);
+    const hanging = {
+      ...stub,
+      store: { ...stub.store, listActivitySummaries: () => new Promise<never>(() => undefined) },
+    } as typeof stub;
+    globalThis.location.hash = '#/';
+    mounted = await mount(
+      <AppShell
+        capabilities={NO_BLUETOOTH}
+        analysis={hanging}
+        rideController={stubRideController(idleSnapshot()).controller}
+      />,
+    );
+    await settle();
+    const main = document.querySelector('main');
+    expect(main?.textContent).toContain('Reading your rides');
+    expect(main?.querySelectorAll('.oyl-home__rides')).toHaveLength(0);
+  });
+
+  it('a first open with no ride controller keeps one way to Devices, in the empty state — #1429', async () => {
+    globalThis.location.hash = '#/';
+    mounted = await mount(
+      <AppShell capabilities={NO_BLUETOOTH} analysis={stubAnalysis(OWNER, [])} />,
+    );
+    await settle();
+    await settle();
+    // No Trainer card to carry it, so the empty state does — once.
+    expect(document.querySelector('[aria-labelledby="oyl-home-trainer"]')).toBeNull();
+    const devices = [
+      ...document.querySelectorAll(`main a[href="${hrefFor(routeById('devices'))}"]`),
+    ];
+    expect(devices.map((link) => link.closest('li')?.textContent)).toEqual([
+      'Pair a sensor or a smart trainer on Devices.',
+    ]);
+    expectClean('home, a first open with no ride controller');
+  });
+
   it('one ride: describes it, in the rider’s units', async () => {
     await openHome([ride('only', 2)]);
     expect(text()).toContain('Last ride');
@@ -344,7 +418,8 @@ describe('the illustrated home — #939', () => {
   ];
 
   it('offers three ride cards, each a heading, a line and ONE link, to the three places a ride starts', async () => {
-    await openHome([]);
+    // #1429: once there is a ride — a first open draws none of them.
+    await openHome([ride('only', 2)]);
     const found = cards().map((card) => ({
       heading: card.querySelector('h3')?.textContent,
       links: [...card.querySelectorAll('a, button, input, select, textarea')].map((control) => [

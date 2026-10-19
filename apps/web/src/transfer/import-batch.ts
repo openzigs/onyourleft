@@ -384,8 +384,8 @@ async function storeRide(
  * file, and the rows' moving times are held to the ride's own. A file lap is
  * a lap with no course under it, as a lap the rider marks is (#1318): its
  * distance and climb are the ones `read-activity-file.ts` §`lapsWithin` gave
- * it, and it is never a part lap, because a file cannot say a lap stopped
- * short.
+ * it. It is a part lap only where this client's own file marks one (#1321):
+ * no other file can say a lap stopped short.
  *
  * The marks' moving times are the laps' own, run together: a lap's moving
  * time is the difference of its two marks, which is all `lapsToSave` reads.
@@ -407,6 +407,7 @@ function lapRowsOf(ride: ImportedRide, activityId: ActivityId): readonly NewLap[
       },
       distance: lap.distance,
       ...(lap.ascent === undefined ? {} : { ascent: lap.ascent }),
+      ...(lap.partial ? { partial: true as const } : {}),
     };
   });
   let ordinal = 0;

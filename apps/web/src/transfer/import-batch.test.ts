@@ -628,6 +628,16 @@ describe('importActivityFiles — a file’s laps (#1320)', () => {
     // lap's averages are taken over its whole span, the stretch after a pause
     // included — and not cut off StartTime + TotalTimeSeconds in.
     expect(laps.map((lap) => lap.maxPower)).toEqual([149, 239, 298]);
+    // #1453: and the ride is as long as its laps. Its elapsed time is the span
+    // of its samples and its moving time the laps' 150 s of timer time, read
+    // back through the store as the ride's page reads them.
+    const ride = await open.read(async (store) =>
+      store.getActivity(ATHLETE_A, outcome.activityId ?? activityId('missing')),
+    );
+    expect([ride?.elapsedTime, ride?.movingTime]).toEqual([299, 150]);
+    expect(laps.reduce((sum, lap) => sum + lap.elapsedTime, 0)).toBeLessThanOrEqual(
+      ride?.elapsedTime ?? 0,
+    );
   });
 
   it('holds a TCX lap’s moving time to the span it runs to the next lap', async () => {
@@ -715,6 +725,39 @@ describe('importActivityFiles — a file’s laps (#1320)', () => {
     // The ride imported; only the laps are left out.
     expect(outcome.kind).toBe('imported');
     expect(await lapsOf(open, outcome.activityId)).toEqual([]);
+  });
+
+  it('writes this client’s own marked laps as rows, the part lap a part lap, and no split either side', async () => {
+    const open = await openSeeded();
+    const outcome = await importOne(
+      open,
+      'own.tcx',
+      lappedFile({
+        format: 'tcx',
+        samples: 120,
+        writer: undefined,
+        laps: [
+          { start: 0, elapsed: 20, distance: 100, kind: 'outside' },
+          { start: 20, elapsed: 40, distance: 200, kind: 'lap' },
+          { start: 60, elapsed: 30, distance: 150, kind: 'part' },
+          { start: 90, elapsed: 29, distance: 145, kind: 'outside' },
+        ],
+      }),
+    );
+    const laps = await lapsOf(open, outcome.activityId);
+    expect(
+      laps.map((lap) => [
+        lap.ordinal,
+        lap.startedAt - LAPPED_FILE_START,
+        lap.distance,
+        lap.partial,
+      ]),
+    ).toEqual([
+      [0, 20, 200, undefined],
+      [1, 60, 150, true],
+    ]);
+    // Worked out from the samples in each lap's slots: power i in slot i.
+    expect(laps.map((lap) => lap.maxPower)).toEqual([59, 89]);
   });
 
   it('writes no lap row for a file with one lap spanning the ride', async () => {

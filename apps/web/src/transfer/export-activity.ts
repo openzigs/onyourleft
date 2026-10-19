@@ -24,7 +24,8 @@
  *
  * ## What each format can carry
  *
- * FIT carries everything the store holds. GPX and TCX each drop something, and
+ * FIT carries every sample channel and total the store holds, but not a lap
+ * row's figures or its kind (#1471). GPX and TCX each drop something, and
  * the codec states what — {@link GPX_LOSSY_CHANNELS}, {@link TCX_LOSSY_CHANNELS}
  * — rather than this file guessing. The view shows those lists beside the
  * format chooser, so the rider picks knowing the cost.
@@ -53,6 +54,7 @@ import {
   type FitEncodeInput,
   type FitRecord,
   type TrackActivity,
+  type TrackLap,
   type TrackPoint,
 } from '@onyourleft/fit';
 import type {
@@ -70,24 +72,110 @@ import type { DownloadableFile, TransferStore } from './store-port';
 /** @see LOSSY_CHANNELS */
 const MOVING_TIME = 'activity.movingTime';
 
+/** @see LOSSY_CHANNELS — #1321. */
+const LAP_ASCENT = 'lap.ascent';
+
+/** @see LOSSY_CHANNELS — #1321. */
+const LAP_DISTANCE = 'lap.distance';
+
 /**
- * What a format costs, in the codec's own words. Empty for FIT.
+ * What a FIT lap does not carry of a lap row: its figures, its climb and its
+ * kind (which splits are laps, and the part-lap mark). `packages/fit`'s profile
+ * subset names no lap field for any of them: a field number goes in only with
+ * a provenance ADR 0006 R2 admits, and finding one is #1471's.
+ * Named as TCX's lap names them, which is how GPX's codec list names them too.
+ *
+ * @see LOSSY_CHANNELS
+ */
+const FIT_LAP_LOSSY_CHANNELS = [
+  'lap.averageHeartRate',
+  'lap.maxHeartRate',
+  'lap.averageCadence',
+  'lap.averagePower',
+  'lap.maxPower',
+  LAP_ASCENT,
+  'lap.intensity',
+  'lap.triggerMethod',
+];
+
+/**
+ * What a format costs, in the codec's own words.
  *
  * Plus the ride's **moving time**, which is a loss of this exporter's rather
  * than of the codec's — #1323. The codec's track has no moving time to drop: a
  * GPX file states no totals at all, and a TCX `<Lap>` states one time,
- * `TotalTimeSeconds`, which this client writes and reads as the elapsed time so
- * that its laps add up to the ride. So a paused ride exported as either comes
- * back with no pause in it (`read-activity-file.ts` reads no moving time from
- * either format, and bounds it by the elapsed time), and the rider is told
+ * `TotalTimeSeconds`, which this client writes as the elapsed time so that its
+ * laps add up to the ride. So a paused ride exported as either comes back with
+ * no pause in it (`read-activity-file.ts` takes a GPX ride's moving time as the
+ * span of its samples, and a TCX ride's as its laps' times added up, which in
+ * this client's file are that span too — §`statedMovingTimeOf`), and the rider is told
  * before choosing the format rather than after importing it. FIT's session
  * carries it.
+ *
+ * And, since #1321, two figures of a lap row: its **climb**, which neither has
+ * an element for, and in TCX its **own distance**, because a TCX lap states its
+ * share of the ride's (`trackActivityOf`). GPX's codec list already names the
+ * lap's distance.
+ *
+ * FIT carries every sample channel, the moving time and a lap's own distance,
+ * but none of a lap row's figures or its kind: {@link FIT_LAP_LOSSY_CHANNELS}.
+ * Until #1321 it was empty, and the screen said FIT carries every channel —
+ * which was not true of a lap row's figures, and the owner's ruling of
+ * 2026-10-19 on #1458 leaves FIT's lap as it was until #1471.
  */
 export const LOSSY_CHANNELS: Readonly<Record<ActivityFileFormat, readonly string[]>> = {
-  fit: [],
-  gpx: [...GPX_LOSSY_CHANNELS, MOVING_TIME],
-  tcx: [...TCX_LOSSY_CHANNELS, MOVING_TIME],
+  fit: FIT_LAP_LOSSY_CHANNELS,
+  gpx: [...GPX_LOSSY_CHANNELS, LAP_ASCENT, MOVING_TIME],
+  tcx: [...TCX_LOSSY_CHANNELS, LAP_ASCENT, LAP_DISTANCE, MOVING_TIME],
 };
+
+/** A lap's kind: `lap.intensity` and `lap.triggerMethod` said as one — #1452. */
+const LAP_KIND = 'which splits are laps and which are part laps';
+
+/**
+ * Each entry of {@link LOSSY_CHANNELS} in plain words, as the export screen
+ * says it — #1452. The codes stay the codec's (tests and the README table read
+ * them); a rider reads these. `export-activity.test.ts` fails for an entry
+ * with no name here, so a codec that starts dropping something new cannot
+ * reach the screen as a code path.
+ */
+const LOSSY_CHANNEL_NAMES: Readonly<Record<string, string>> = {
+  'point.distance': 'the distance at each point',
+  'point.temperature': 'temperature',
+  'lap.totalElapsedTime': 'each lap’s elapsed time',
+  'lap.totalDistance': 'each lap’s distance',
+  'lap.averageHeartRate': 'each lap’s average heart rate',
+  'lap.maxHeartRate': 'each lap’s highest heart rate',
+  'lap.averageCadence': 'each lap’s average cadence',
+  'lap.averagePower': 'each lap’s average power',
+  'lap.maxPower': 'each lap’s best power',
+  [LAP_ASCENT]: 'each lap’s climb',
+  [LAP_DISTANCE]: 'each lap’s distance',
+  // One phrase for the pair: a lap's kind is both of them together, and
+  // `lossyChannelNames` says a shared name once.
+  'lap.intensity': LAP_KIND,
+  'lap.triggerMethod': LAP_KIND,
+  'activity.name': 'the ride’s name',
+  [MOVING_TIME]: 'moving time',
+};
+
+/** The plain name of a {@link LOSSY_CHANNELS} entry, or `undefined` for one the table lacks. */
+export function lossyChannelName(channel: string): string | undefined {
+  return Object.hasOwn(LOSSY_CHANNEL_NAMES, channel) ? LOSSY_CHANNEL_NAMES[channel] : undefined;
+}
+
+/**
+ * What `format` cannot carry, in plain words — #1452. Each name once: two
+ * entries that share a name (a lap's intensity and trigger, which together
+ * are its kind) are said as one.
+ */
+export function lossyChannelNames(format: ActivityFileFormat): readonly string[] {
+  // An entry the table lacks is shown as its code rather than hidden: a loss
+  // left unsaid is worse than one said badly, and the test above keeps it rare.
+  return [
+    ...new Set(LOSSY_CHANNELS[format].map((channel) => lossyChannelName(channel) ?? channel)),
+  ];
+}
 
 /**
  * The media types, chosen so a browser saves rather than renders.
@@ -357,6 +445,12 @@ interface ExportLap {
    * exported as, to the byte (`trackActivityOf`).
    */
   readonly wholeRide?: true;
+  /**
+   * #1321: the stored lap this split is, when it is one — whose figures and
+   * whose part-lap mark go into the file — or `undefined` for a stretch of the
+   * ride outside every lap. A split another was folded into keeps its own.
+   */
+  readonly lap?: LapRecord | undefined;
   readonly points: readonly TrackPoint[];
 }
 
@@ -426,7 +520,7 @@ function stretchesOf(stored: readonly LapRecord[], activity: ActivityRecord): re
  *    own elapsed time and distance through its end ({@link ExportLap.rideThrough}).
  *    ⚠️ **Before this a TCX file of a ride with course laps stated the laps'
  *    totals as the ride's**: TCX has no session total, a reader sums its laps
- *    (`read-activity-file.ts` §`statedElapsedTimeOf`), and the laps of a game
+ *    (`read-activity-file.ts` §`statedMovingTimeOf`), and the laps of a game
  *    ride cover neither the whole recording nor the recording's own distance —
  *    a course lap's distance is the game's road, the ride's is the speed
  *    channel summed. Export, erase, import again gave back a different ride.
@@ -561,6 +655,7 @@ function splitsOf(
         seconds(outsideSeconds > 0 ? (movedOutside * duration) / outsideSeconds : 0),
       distance: stretch.lap?.distance ?? metres(through.distance - before.distance),
       rideThrough: through,
+      lap: stretch.lap,
       points: buckets[ordinal] ?? [],
     };
   });
@@ -750,6 +845,40 @@ function fitInputOf(
   };
 }
 
+/**
+ * What a TCX lap states beyond its times and distance — its `Intensity` and
+ * `TriggerMethod`, and the figures TCX has an element for — #1321.
+ *
+ * | split | `Intensity` | `TriggerMethod` |
+ * |---|---|---|
+ * | a whole lap | `Active` | `Location`: it ended at the line |
+ * | a part lap | `Active` | `Manual`: the rider ended it |
+ * | a stretch outside every lap | `Resting` | `Manual` |
+ *
+ * ⚠️ **No session-end value in TCX**, so the part lap is told from the whole by
+ * `Location` against `Manual`, which a TCX from elsewhere uses for every lap
+ * its rider pressed. A reader has to know whose file it is to read `Manual` as
+ * a part lap (`TCX_CREATOR`). Climb has no element at all; the lap's own
+ * distance has one, `DistanceMeters`, and it holds the lap's share of the
+ * ride's ({@link trackActivityOf}), so the lap's own is not in the file either.
+ *
+ * Not called for the one split of a ride with no laps, which
+ * {@link trackActivityOf} writes as it always has, with no mark.
+ */
+function tcxLapFiguresOf(lap: ExportLap): Partial<TrackLap> {
+  const stored = lap.lap;
+  if (stored === undefined) return { intensity: 'Resting', triggerMethod: 'Manual' };
+  return {
+    intensity: 'Active',
+    triggerMethod: stored.partial === true ? 'Manual' : 'Location',
+    averageHeartRate: stored.averageHeartRate,
+    maxHeartRate: stored.maxHeartRate,
+    averageCadence: stored.averageCadence,
+    averagePower: stored.averagePower,
+    maxPower: stored.maxPower,
+  };
+}
+
 function fitRecordOf(point: TrackPoint): FitRecord {
   return {
     timestamp: point.timestamp === undefined ? undefined : instant(point.timestamp),
@@ -814,6 +943,7 @@ function trackActivityOf(activity: ActivityRecord, laps: readonly ExportLap[]): 
         ),
         totalDistance: metres(tenths(tenths(lap.rideThrough.distance) - tenths(before.distance))),
         points: lap.points,
+        ...tcxLapFiguresOf(lap),
       };
     }),
   };

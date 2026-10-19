@@ -37,6 +37,20 @@
  * solid band (`theme.css` §"#1010"). `home/home.ts` §`HomeNextUp` says which
  * ride is offered and why "the last workout used" is not one of them yet.
  *
+ * ## A first open — #1429
+ *
+ * With nothing recorded, Home used to offer three ways to the Ride screen —
+ * *Next up*'s **Ride**, the Free ride card and a step in the list — two links
+ * to Devices, and three tall picture cards that pushed a route, a workout and
+ * an import under a phone's fold. Now a first open has ONE first step, the
+ * *Your first ride* card, under one heading and a button that says what it
+ * does; then {@link GettingStarted}, the other three ways to start as one
+ * line each; then the Trainer card, whose link is the one way to Devices. The
+ * ride cards are drawn once there is a ride, and not while the read is still
+ * out, so a first open does not draw them and then take them away.
+ * `home.browser.spec.ts` §"#1429" measures it at a phone, a tablet and a
+ * desktop.
+ *
  * ## What it reads
  *
  * `home/home.ts` — one bounded store read and no stream decode, on every
@@ -132,16 +146,21 @@ export function HomeView(props: HomeViewProps): JSX.Element {
     // this screen exists to bound. `reads` is a rider's press (#947), not a render.
   }, [analysis, routes, reads]);
 
+  // #1429: the read came back and there is no ride on this device at all.
+  const firstOpen =
+    analysis !== undefined && !failed && data !== undefined && data.lastRide === undefined;
+  const reading = analysis !== undefined && !failed && data === undefined;
   return (
     <div className="oyl-home-frame tw:@container">
       <div className="oyl-home">
         {props.controller === undefined ? null : <LeftUnfinished controller={props.controller} />}
         <NextUp next={nextUp ?? { kind: 'free' }} />
+        {firstOpen ? <GettingStarted pair={props.controller === undefined} /> : null}
         {data?.lastRide === undefined ? null : (
           <ThisWeek week={data.week} previous={data.previousWeek} />
         )}
         {props.controller === undefined ? null : <TrainerCard controller={props.controller} />}
-        <RideChoices />
+        {firstOpen || reading ? null : <RideChoices />}
 
         {analysis === undefined ? (
           <StatusMessage tone="danger">
@@ -152,9 +171,7 @@ export function HomeView(props: HomeViewProps): JSX.Element {
           <StatusMessage tone="danger">Your rides could not be read on this device.</StatusMessage>
         ) : data === undefined ? (
           <p className="oyl-muted">Reading your rides…</p>
-        ) : data.lastRide === undefined ? (
-          <GettingStarted />
-        ) : (
+        ) : data.lastRide === undefined ? null : (
           <Rides
             data={data}
             analysis={analysis}
@@ -168,26 +185,39 @@ export function HomeView(props: HomeViewProps): JSX.Element {
   );
 }
 
-/** The empty state — the first thing a new rider sees. */
-function GettingStarted(): JSX.Element {
+/**
+ * The empty state's other ways to start — #1429. One line each, so all three
+ * stand above a phone's fold under the first step; the first step itself, and
+ * the way to Devices, are the cards either side of it and are not repeated —
+ * unless there is no ride controller, and so no Trainer card, when the way to
+ * Devices is here instead.
+ */
+function GettingStarted({
+  pair,
+}: {
+  /** Whether to link Devices here: only when there is no Trainer card to. */
+  readonly pair: boolean;
+}): JSX.Element {
   return (
     <section className="oyl-panel oyl-home__empty" aria-labelledby="oyl-home-empty">
       <h2 id="oyl-home-empty">Nothing recorded yet</h2>
-      <p>Rides you record are kept on this device. To get going:</p>
-      <ol>
+      <p>Rides you record are kept on this device. Other ways to start:</p>
+      <ul>
+        {pair ? (
+          <li>
+            <a href={hrefFor(routeById('devices'))}>Pair a sensor or a smart trainer</a> on Devices.
+          </li>
+        ) : null}
         <li>
-          <a href={hrefFor(routeById('devices'))}>Pair a sensor or a smart trainer</a> over
-          Bluetooth.
+          <a href={hrefFor(routeById('game'))}>Ride a route</a> in the trainer game.
         </li>
         <li>
-          <a href={hrefFor(routeById('ride'))}>Record a ride</a>, or ride a saved route in the{' '}
-          <a href={hrefFor(routeById('game'))}>trainer game</a>.
+          <a href={hrefFor(routeById('workouts'))}>Follow a workout</a> on a smart trainer.
         </li>
         <li>
-          Or <a href={hrefFor(routeById('transfer'))}>bring rides in</a> from a FIT, GPX or TCX
-          file.
+          <a href={hrefFor(routeById('transfer'))}>Bring rides in</a> from a FIT, GPX or TCX file.
         </li>
-      </ol>
+      </ul>
     </section>
   );
 }
@@ -373,7 +403,13 @@ function RideChoices(): JSX.Element {
 function nextUpWords(
   next: HomeNextUp,
   units: ReturnType<typeof useUnits>,
-): { readonly name: string; readonly line: string; readonly href: string } {
+): {
+  readonly name: string;
+  readonly line: string;
+  readonly href: string;
+  /** The button's words: a bare *Ride* under a name, or what a first ride does. */
+  readonly action: string;
+} {
   switch (next.kind) {
     case 'route':
       return {
@@ -384,18 +420,21 @@ function nextUpWords(
           `The route you rode last: ${measurementText(formatDistance(next.profile.totalDistance, units))}, ` +
           `climb ${measurementText(formatSmallDistance(next.profile.totalAscent, units))}.`,
         href: hrefForGameRoute(next.id),
+        action: 'Ride',
       };
     case 'free':
       return {
         name: 'A free ride',
         line: 'Record a ride from your paired sensors.',
         href: hrefFor(routeById('ride')),
+        action: 'Ride',
       };
     case 'first':
       return {
         name: 'Your first ride',
         line: 'Pair a sensor on Devices, then record a ride from it.',
         href: hrefFor(routeById('ride')),
+        action: 'Start a ride',
       };
   }
 }
@@ -430,19 +469,28 @@ function NextUp({ next }: { readonly next: HomeNextUp }): JSX.Element {
         )}
       </div>
       <div className="oyl-next-up__band tw:flex tw:flex-col tw:gap-sm tw:bg-surface-raised">
-        <h2 id="oyl-next-up-heading" className="tw:m-0">
-          Next up
-        </h2>
-        <p id="oyl-next-up-name" className="oyl-next-up__name tw:m-0">
-          {words.name}
-        </p>
+        {/* #1429: a first ride is not "next" after anything — one heading, its name. */}
+        {next.kind === 'first' ? null : (
+          <h2 id="oyl-next-up-heading" className="tw:m-0">
+            Next up
+          </h2>
+        )}
+        {next.kind === 'first' ? (
+          <h2 id="oyl-next-up-heading" className="oyl-next-up__name tw:m-0">
+            <span id="oyl-next-up-name">{words.name}</span>
+          </h2>
+        ) : (
+          <p id="oyl-next-up-name" className="oyl-next-up__name tw:m-0">
+            {words.name}
+          </p>
+        )}
         <p className="oyl-muted tw:m-0">{words.line}</p>
         <a
           className="oyl-button oyl-next-up__ride"
           href={words.href}
           aria-describedby="oyl-next-up-name"
         >
-          Ride
+          {words.action}
         </a>
       </div>
     </section>

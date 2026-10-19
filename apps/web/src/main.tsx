@@ -1573,6 +1573,15 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
   afterFirstPaint(() => {
     preloadViewGroups(VIEW_GROUPS);
   });
+  // #1431: what has been in Recently deleted for 30 days is removed for good
+  // each time the app opens. Nothing runs while it is closed; the list leaves
+  // an expired ride out on its own until this has run. A failure is not the
+  // rider's problem — the next open tries again.
+  afterFirstPaint(() => {
+    void localStore()
+      .purgeRecentlyDeleted(LOCAL_ATHLETE, unixSeconds(Math.floor(Date.now() / 1000)))
+      .catch(() => 0);
+  });
   const registered = await workerRegistration;
   const update = buildUpdateWatcher(registered, rideController);
   if (registered.kind === 'registered') {

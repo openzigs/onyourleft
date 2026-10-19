@@ -115,7 +115,12 @@ import {
   unreadableRecordings,
   type RecoverableRide,
 } from '../recording/recovery';
-import { rideToSave, saveFinishedRide, type RideSaveStore } from '../recording/finish';
+import {
+  rideToSave,
+  saveFinishedRide,
+  type FinishedRide,
+  type RideSaveStore,
+} from '../recording/finish';
 import {
   lapFiguresOf,
   lapSlots,
@@ -2670,6 +2675,48 @@ export function createRideController(options: RideControllerOptions): RideContro
   };
 
   /**
+   * The ride a recorder holds, as the store writes it — one place for a ride
+   * finished now, one recovered after a crash, and one a rider discards from
+   * the recovery offer (#1431), so the three cannot drift apart.
+   */
+  const finishedRideOf = (
+    port: RideSavePort,
+    current: Recorder,
+    workoutName: string | undefined,
+    outcomeInGame: GhostOutcome | undefined,
+    workoutFinished: boolean | undefined,
+    replans: readonly ReplanRecord[],
+  ): FinishedRide | undefined => {
+    const series = current.session.series();
+    return rideToSave({
+      id: port.newActivityId(),
+      athleteId: options.athleteId,
+      series,
+      elapsedTime: current.session.elapsedTime,
+      movingTime: current.session.movingTime,
+      timeZone: port.timeZone,
+      now: now(),
+      ...(workoutName === undefined ? {} : { workoutName }),
+      // #947: what only this ride knew. A recovered ride passes neither.
+      workoutFinished: workoutFinished === true,
+      ghostRaced: outcomeInGame !== undefined,
+      // #1312. The recorder's own, so a ride finished now and one recovered
+      // after a crash are saved with their laps by the one path — and worked
+      // out from `series`, the samples this save writes (`recording/laps.ts`).
+      laps: { ridden: current.courseLaps, newLapId: port.newLapId },
+      // #1244, P9: every re-plan decision made on this ride. None is no key.
+      ...(replans.length === 0 ? {} : { replans }),
+      // #785: the races this ride was ridden in, as each room said it — the
+      // recorder's own, so a ride recovered after a crash keeps them by the
+      // one path, as it keeps its laps (#1360's review, B2).
+      ...(current.roomRaces.length === 0 ? {} : { races: current.roomRaces }),
+      // #1326: the store marks this checkpoint saved in the ride's own
+      // transaction, so a crash after the save cannot offer the ride again.
+      recordingSession: current.sessionId,
+    });
+  };
+
+  /**
    * Turn the finished recording into an activity, then let the checkpoint go.
    *
    * ⚠️ **The discard is last and is conditional, and that ordering is the whole
@@ -2697,33 +2744,14 @@ export function createRideController(options: RideControllerOptions): RideContro
     saveError = undefined;
     changed();
 
-    const series = current.session.series();
-    const finished = rideToSave({
-      id: port.newActivityId(),
-      athleteId: options.athleteId,
-      series,
-      elapsedTime: current.session.elapsedTime,
-      movingTime: current.session.movingTime,
-      timeZone: port.timeZone,
-      now: now(),
-      ...(workoutName === undefined ? {} : { workoutName }),
-      // #947: what only this ride knew. A recovered ride passes neither.
-      workoutFinished: workoutFinished === true,
-      ghostRaced: outcomeInGame !== undefined,
-      // #1312. The recorder's own, so a ride finished now and one recovered
-      // after a crash are saved with their laps by the one path — and worked
-      // out from `series`, the samples this save writes (`recording/laps.ts`).
-      laps: { ridden: current.courseLaps, newLapId: port.newLapId },
-      // #1244, P9: every re-plan decision made on this ride. None is no key.
-      ...(replans.length === 0 ? {} : { replans }),
-      // #785: the races this ride was ridden in, as each room said it — the
-      // recorder's own, so a ride recovered after a crash keeps them by the
-      // one path, as it keeps its laps (#1360's review, B2).
-      ...(current.roomRaces.length === 0 ? {} : { races: current.roomRaces }),
-      // #1326: the store marks this checkpoint saved in the ride's own
-      // transaction, so a crash after the save cannot offer the ride again.
-      recordingSession: current.sessionId,
-    });
+    const finished = finishedRideOf(
+      port,
+      current,
+      workoutName,
+      outcomeInGame,
+      workoutFinished,
+      replans,
+    );
     const outcome = await saveFinishedRide(port.store, finished);
 
     saveState = outcome.status;
@@ -2822,6 +2850,44 @@ export function createRideController(options: RideControllerOptions): RideContro
     } catch {
       return undefined;
     }
+  };
+
+  /**
+   * Write a ride the rider is discarding from the recovery offer as an
+   * activity, then move it straight to Recently deleted — #1431.
+   *
+   * - `kept`: it is in Recently deleted, and its recording can go.
+   * - `nothing`: there is nothing to keep — no samples, a recording that will
+   *   not rebuild (which could never be saved either, so it is discarded as
+   *   before), or a build with no store to keep it in.
+   * - `failed`: the save, or the move, did not go through. The recording must
+   *   stay. A save that worked and a move that did not leaves the ride in the
+   *   library, and its recording marked saved, so nothing is lost.
+   */
+  const keepInRecentlyDeleted = async (
+    id: RecordingSessionId,
+  ): Promise<'kept' | 'nothing' | 'failed'> => {
+    const port = options.rideSave;
+    const move = port?.store.moveActivityToRecentlyDeleted?.bind(port.store);
+    if (port === undefined || move === undefined) {
+      return 'nothing';
+    }
+    const found = await recoverOne(id);
+    if (found === undefined) {
+      return 'nothing';
+    }
+    const outcome = await saveFinishedRide(
+      port.store,
+      finishedRideOf(port, found, undefined, undefined, undefined, []),
+    );
+    if (outcome.status === 'empty') {
+      return 'nothing';
+    }
+    if (outcome.status === 'failed') {
+      return 'failed';
+    }
+    const moved = await move(athleteId, outcome.id, now()).catch(() => false);
+    return moved ? 'kept' : 'failed';
   };
 
   // --- The recorder ---------------------------------------------------------
@@ -3725,6 +3791,21 @@ export function createRideController(options: RideControllerOptions): RideContro
     async discardRecovered(id: RecordingSessionId): Promise<boolean> {
       if (phase !== 'idle') {
         return false;
+      }
+      // #1431: a ride the rider throws away goes to Recently deleted, where it
+      // can be brought back for 30 days, rather than being destroyed. Only a
+      // ride that is not already an activity: an `already-saved` row is the
+      // working copy of a ride the library holds, and discarding it changes
+      // nothing about the ride.
+      const offered = recoverable.find((ride) => ride.id === id);
+      if (offered !== undefined && !offered.alreadySaved) {
+        const kept = await keepInRecentlyDeleted(id);
+        if (kept === 'failed') {
+          // Nothing is thrown away while the ride is not safely kept: the row
+          // stays on screen and the recording stays on disk.
+          await refreshRecoverable();
+          return false;
+        }
       }
       // ⚠️ **Deletes the row directly rather than rebuilding a recorder for
       // it.** Rebuilding decodes every chunk, so a recording corrupt enough to

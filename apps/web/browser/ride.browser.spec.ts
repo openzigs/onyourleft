@@ -135,7 +135,7 @@ import { attachSharedPageOnFailure, releaseSharedPage } from './shared-load';
 
 import { workoutRescueText } from '../src/workout/rescue-text';
 
-import type { Box, StageMeasurement } from './ride-harness';
+import type { Box, StageItem, StageMeasurement } from './ride-harness';
 
 // The page the cases below share goes when this file's cases do (`shared-load.ts`).
 test.afterAll(releaseSharedPage);
@@ -1487,4 +1487,153 @@ test.describe('#439 — a ride with edge-to-edge insets does not scroll', () => 
       );
     });
   }
+});
+
+/**
+ * #1441 — the ride's controls are never under the gesture bar, with the
+ * tablet's insets applied to the ENGINE (`insets.ts`) and read back, at every
+ * viewport the ride is laid out at: phone and tablet, upright and on its side.
+ *
+ * `.oyl-hud`'s padding is what holds them clear (`theme.css` §"Safe areas"),
+ * and §"safe areas" above proves it moves the panels at one tablet through the
+ * custom property. This is the gesture bar's half, through `env()`, at all of
+ * them: the bottom of every control is at or above the inset's top edge.
+ *
+ * ⚠️ The control puts the padding back to the stage's own 8 px, and the
+ * actions' sticky edge with it, and a control must then sit inside the inset
+ * — or "clear of it" was a layout that never reached the bottom. Measured,
+ * the controls end 9 px above the inset at every viewport with the padding and
+ * 15 px inside it without.
+ *
+ * ⚠️ **320×256 too**, the stacked layout at its shortest. Its actions panel
+ * is pinned by `position: sticky`, which cannot lift it above the top of
+ * `.oyl-hud`, so with the tablet's 68 px of insets and the world at its old
+ * 40vh the panel ran out of room: *Pause* and *End ride* ended at 252 of 224.
+ * `theme.css` §"The STACKED layout's world gives up what the insets take" is
+ * the fix, and the panel that holds the controls is asserted as well as the
+ * controls: with the world short of only the bottom inset the controls
+ * scraped clear by 4 px while their panel ended 5 px inside the inset.
+ * Measured, the controls end 9 px above the inset at every viewport with the
+ * fix, and the actions panel exactly at it.
+ */
+const WITHOUT_BOTTOM_INSET = `
+  .oyl-game--riding .oyl-hud { padding-bottom: var(--oyl-space-sm) !important; }
+  .oyl-game--riding .oyl-hud__actions { bottom: var(--oyl-space-sm) !important; }
+`;
+
+test.describe('#1441 — the ride’s controls are clear of the gesture bar', () => {
+  for (const viewport of [...OVERLAY_VIEWPORTS, ...STACKED_VIEWPORTS]) {
+    test(`every control ends above the bottom inset — ${viewport.name}`, async ({ page }) => {
+      await applyInsets(page, PIXEL_TABLET_LANDSCAPE_INSETS);
+      await openRide(page, viewport);
+      expect(await resolvedInsets(page)).toEqual(PIXEL_TABLET_LANDSCAPE_INSETS);
+      const fold = viewport.height - PIXEL_TABLET_LANDSCAPE_INSETS.bottom;
+      const lowestOf = (items: readonly StageItem[]): number =>
+        Math.max(...items.map((each) => each.box.bottom));
+
+      const seen = await measure(page);
+      const controls = seen.items.filter((each) => each.name.startsWith('control: '));
+      expect(controls.length, 'the apparatus: the ride rendered its controls').toBeGreaterThan(1);
+      const lowest = lowestOf(controls);
+      expect(
+        controls.filter((each) => each.box.bottom > fold + 0.5).map(describeItem),
+        'a ride control is under the gesture bar',
+      ).toEqual([]);
+      const actions = seen.panels.filter((each) =>
+        each.name.split(' ').includes('oyl-hud__actions'),
+      );
+      expect(actions, 'the apparatus: the ride rendered its actions panel').toHaveLength(1);
+      expect(
+        actions.filter((each) => each.box.bottom > fold + 0.5).map(describeItem),
+        'the panel holding the ride controls is under the gesture bar',
+      ).toEqual([]);
+
+      await page.addStyleTag({ content: WITHOUT_BOTTOM_INSET });
+      const reverted = (await measure(page)).items.filter((each) =>
+        each.name.startsWith('control: '),
+      );
+      const revertedLowest = lowestOf(reverted);
+      console.log(
+        `#1441 ${viewport.name}: lowest control ends at ${lowest.toFixed(1)} of ` +
+          `${String(fold)}; without the padding ${revertedLowest.toFixed(1)}`,
+      );
+      expect(
+        revertedLowest,
+        'without the padding the controls stay clear, so the assertion above cannot fail here',
+      ).toBeGreaterThan(fold + 0.5);
+    });
+  }
+
+  /*
+   * The trainer line on TWO lines, whatever the fonts. On the CI runner's
+   * wider glyphs it takes two in the short corners layout's 16 rem actions
+   * panel, and on a Mac one, so the case above passed on a Mac while run
+   * 39323488405 found the panel at [472,181 → 728,329] against a gesture bar
+   * from 328 at 736×360. `min-height: 2lh` is the runner's wrap, set here so a
+   * Mac measures what the runner does: it reproduced that box exactly.
+   *
+   * ⚠️ The control puts back the body's 1.55 leading `theme.css` §"#1441 — the
+   * trainer line at the short corners layout" takes away, and the panel must
+   * then be under the gesture bar again — so the rule is what holds it clear.
+   * Measured on a Mac: the panel ends at 328.0 of 328 with the rule — on the
+   * gesture bar's edge, where `align-self: end` puts it when the column fits —
+   * and at 329.0 without. A pixel is the whole of the fault CI found, so the
+   * control's margin is that pixel and no more; Chromium lays it out the same
+   * on both, which is why the forced wrap reproduced CI's box to the pixel.
+   */
+  const SHORT_CORNERS = OVERLAY_VIEWPORTS.find(
+    (each) => each.width === 736 && each.height === 360,
+  ) as Viewport;
+  const TRAINER_ON_TWO_LINES = `
+    .oyl-game--riding .oyl-hud .oyl-hud__actions > .oyl-hud__trainer { min-height: 2lh !important; }
+  `;
+  const BODY_LEADING = `
+    .oyl-game--riding .oyl-hud .oyl-hud__actions > .oyl-hud__trainer { line-height: 1.55 !important; }
+  `;
+
+  test(`the actions panel stays clear with the trainer line on two lines — ${SHORT_CORNERS.name}`, async ({
+    page,
+  }) => {
+    await applyInsets(page, PIXEL_TABLET_LANDSCAPE_INSETS);
+    await openRide(page, SHORT_CORNERS);
+    expect(await resolvedInsets(page)).toEqual(PIXEL_TABLET_LANDSCAPE_INSETS);
+    await page.addStyleTag({ content: TRAINER_ON_TWO_LINES });
+    const fold = SHORT_CORNERS.height - PIXEL_TABLET_LANDSCAPE_INSETS.bottom;
+    const actionsOf = (seen: StageMeasurement): StageItem => {
+      const actions = seen.panels.filter((each) =>
+        each.name.split(' ').includes('oyl-hud__actions'),
+      );
+      expect(actions, 'the apparatus: the ride rendered its actions panel').toHaveLength(1);
+      return actions[0] as StageItem;
+    };
+
+    const seen = await measure(page);
+    const line = named(seen.items, 'the trainer line');
+    // The apparatus: two lines of the leading this case is about, so a
+    // trainer line that went away cannot pass it.
+    expect(line.box.height, 'the trainer line, on two lines').toBeGreaterThan(40);
+    const controls = seen.items.filter((each) => each.name.startsWith('control: '));
+    expect(controls.length, 'the apparatus: the ride rendered its controls').toBeGreaterThan(1);
+    expect(
+      controls.filter((each) => each.box.bottom > fold + 0.5).map(describeItem),
+      'a ride control is under the gesture bar',
+    ).toEqual([]);
+    const panel = actionsOf(seen);
+    expect(
+      panel.box.bottom,
+      `the panel holding the ride controls is under the gesture bar: ${describeItem(panel)}`,
+    ).toBeLessThanOrEqual(fold + 0.5);
+
+    await page.addStyleTag({ content: BODY_LEADING });
+    const reverted = actionsOf(await measure(page));
+    console.log(
+      `#1441 ${SHORT_CORNERS.name}, the trainer line on two lines: the actions panel ends at ` +
+        `${panel.box.bottom.toFixed(1)} of ${String(fold)}; at the body's leading ` +
+        `${reverted.box.bottom.toFixed(1)}`,
+    );
+    expect(
+      reverted.box.bottom,
+      'at the body’s leading the panel stays clear, so the assertion above cannot fail here',
+    ).toBeGreaterThan(fold + 0.5);
+  });
 });

@@ -53,6 +53,7 @@ export type RouteId =
   | 'credits'
   | 'instance'
   | 'moderation'
+  | 'more'
   | 'not-found';
 
 /**
@@ -455,6 +456,31 @@ export const ROUTE_BUILDER_ROUTE: RouteDefinition = {
 };
 
 /**
+ * The More tab's own page — #1429: a menu of every page under it.
+ *
+ * Before #1429 the tab labelled "More" opened Devices, the first page of its
+ * group, and the section row under the title was the only list of the rest —
+ * which left Instance, reached from Settings, out of it. The tab now opens a
+ * page whose title is the tab's label, listing each page with its one line:
+ * `views/MoreView.tsx`.
+ *
+ * **Not in {@link ROUTES}**, so the section row's pages are unchanged and it is
+ * not a sixth segment in a row that only just fits five on a phone
+ * (`theme.css` §`.oyl-subnav-link`); {@link groupDestination} names it for
+ * the More group instead. It is in {@link ALL_ROUTES}, so the accessibility
+ * gate and the reflow walk audit it unasked.
+ */
+export const MORE_ROUTE: RouteDefinition = {
+  id: 'more',
+  group: 'more',
+  layout: 'prose',
+  path: '/more',
+  navLabel: 'More',
+  title: 'More',
+  summary: 'Devices, files, the camera, settings, an instance and this app.',
+};
+
+/**
  * Who made the artwork this app ships (#358).
  *
  * **Not in {@link ROUTES}**, for {@link ROUTE_BUILDER_ROUTE}'s reason: it is
@@ -635,6 +661,7 @@ export const ALL_ROUTES: readonly RouteDefinition[] = [
   CREDITS_ROUTE,
   INSTANCE_ROUTE,
   MODERATION_ROUTE,
+  MORE_ROUTE,
   SIDE_CAMERA_ROUTE,
   ROUTE_BUILDER_ROUTE,
   ACTIVITY_DETAIL_ROUTE,
@@ -887,9 +914,24 @@ export function routesInGroup(group: NavGroupId): readonly RouteDefinition[] {
 }
 
 /**
- * Where a group's link goes: its first route. Total, for the reason
- * {@link routeById} is — a group nothing belongs to lands on not-found.
+ * Where a group's link goes: its first route, except More's, which opens its
+ * own menu page (#1429, {@link MORE_ROUTE}) so that the tab goes where its
+ * label says. Total, for the reason {@link routeById} is — a group nothing
+ * belongs to lands on not-found.
  */
 export function groupDestination(group: NavGroupId): RouteDefinition {
+  if (group === 'more') {
+    return MORE_ROUTE;
+  }
   return routesInGroup(group)[0] ?? NOT_FOUND_ROUTE;
+}
+
+/**
+ * What the More menu lists — #1429: every page in the group's section row,
+ * with Instance after Settings, where it is otherwise reached from.
+ */
+export function moreMenuRoutes(): readonly RouteDefinition[] {
+  const pages = routesInGroup('more');
+  const settings = pages.findIndex((route) => route.id === 'settings');
+  return [...pages.slice(0, settings + 1), INSTANCE_ROUTE, ...pages.slice(settings + 1)];
 }

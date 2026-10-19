@@ -95,7 +95,7 @@ import {
   seedAthletes,
   type StoreHarness,
 } from '@onyourleft/store/testing';
-import type { NewActivity, NewStreamSet } from '@onyourleft/store';
+import type { LapRecord, NewActivity, NewStreamSet } from '@onyourleft/store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
@@ -7751,6 +7751,96 @@ describe('#1312 — the laps of a course are the recording’s, and are saved wi
   });
 
   /**
+   * #1431. Discarding a ride from the recovery offer keeps it in Recently
+   * deleted for 30 days rather than destroying it — through the real
+   * controller and the real store, read back on a connection that did not
+   * write it.
+   */
+  describe('a ride discarded from the recovery offer can be brought back', () => {
+    const crashed = async (): Promise<RecordingSessionId> => {
+      const rig = benchWith();
+      await rig.controller.pair('trainer');
+      await rig.controller.start();
+      await ride(rig, 10);
+      rig.controller.dispose();
+      const id = rig.sessionIds[0];
+      if (id === undefined) {
+        throw new Error('no recording was started');
+      }
+      return id;
+    };
+
+    const keepingPort = (
+      move: RideSavePort['store']['moveActivityToRecentlyDeleted'],
+    ): RideSavePort => {
+      const port = storeSavePort();
+      return { ...port, store: { ...port.store, moveActivityToRecentlyDeleted: move } };
+    };
+
+    /** Every ride in Recently deleted, whenever it was deleted. */
+    const held = async () =>
+      harness.read(async (store) => store.listRecentlyDeleted(ATHLETE_A, unixSeconds(0)));
+
+    it('saves it straight into Recently deleted, samples and all, and lets the recording go', async () => {
+      const id = await crashed();
+      const next = benchWith({
+        rideSave: keepingPort(async (owner, ride, at) =>
+          harness.write(async (store) => store.moveActivityToRecentlyDeleted(owner, ride, at)),
+        ),
+      });
+      await next.controller.refreshRecoverable();
+      expect(await next.controller.discardRecovered(id)).toBe(true);
+      expect(next.controller.getSnapshot().recoverable).toEqual([]);
+      next.controller.dispose();
+
+      expect(await harness.read(async (store) => store.listActivitySummaries(ATHLETE_A))).toEqual(
+        [],
+      );
+      const [kept] = await held();
+      expect(kept?.id).toBe(activityId('ride-1'));
+      expect(
+        await harness.read(async (store) => store.getStreamSet(ATHLETE_A, activityId('ride-1'))),
+      ).toBeDefined();
+      expect(await harness.read(async (store) => store.readRecordingSessions(ATHLETE_A))).toEqual({
+        sessions: [],
+        unreadable: [],
+      });
+      // And it comes back whole.
+      expect(
+        await harness.write(async (store) =>
+          store.restoreRecentlyDeleted(ATHLETE_A, activityId('ride-1'), unixSeconds(0)),
+        ),
+      ).toBe('restored');
+      expect(
+        (await harness.read(async (store) => store.listActivitySummaries(ATHLETE_A))).map(
+          (each) => each.id,
+        ),
+      ).toEqual([activityId('ride-1')]);
+    });
+
+    it('throws nothing away when the ride cannot be kept', async () => {
+      const id = await crashed();
+      const next = benchWith({
+        rideSave: keepingPort(() => Promise.reject(new Error('the device is full'))),
+      });
+      await next.controller.refreshRecoverable();
+      expect(await next.controller.discardRecovered(id)).toBe(false);
+      // The ride was saved and could not be moved: it is in the library, and
+      // its recording is still on disk, marked as that ride's.
+      expect(next.controller.getSnapshot().recoverable.map((each) => each.alreadySaved)).toEqual([
+        true,
+      ]);
+      next.controller.dispose();
+      expect(
+        (await harness.read(async (store) => store.listActivitySummaries(ATHLETE_A))).map(
+          (each) => each.id,
+        ),
+      ).toEqual([activityId('ride-1')]);
+      expect(await held()).toEqual([]);
+    });
+  });
+
+  /**
    * #1325. `listRecordingSessions` decoded every header of the athlete and the
    * controller answered a throw with an empty offer, so one header that would
    * not read hid EVERY recoverable ride, and the damaged one could be neither
@@ -8560,11 +8650,42 @@ describe('#1312 — the laps of a course are the recording’s, and are saved wi
           format === 'fit' ? lapped.stored.movingTime : lapped.back.elapsedTime,
         );
         expect(LOSSY_CHANNELS[format].includes('activity.movingTime')).toBe(format === 'tcx');
-        // #1320: a file this client wrote comes back with no lap rows. Its
-        // splits include the lead-in and the tail, and nothing in it yet says
-        // which are laps of the course (#1321), so it is read as a file with
-        // no laps rather than one whose lead-in is a lap.
-        expect(lapped.backLaps).toEqual([]);
+        if (format === 'fit') {
+          // #1320: this client's own FIT comes back with no lap rows. Its
+          // splits include the lead-in and the tail, and nothing in it says
+          // which are laps of the course until #1471 (#1321's FIT half), so
+          // it is read as a file with no laps rather than one whose lead-in
+          // is a lap. `LOSSY_CHANNELS` tells the rider FIT drops the laps'
+          // figures and kind.
+          expect(lapped.backLaps).toEqual([]);
+          expect(LOSSY_CHANNELS.fit).toEqual(
+            expect.arrayContaining(['lap.intensity', 'lap.triggerMethod']),
+          );
+        } else {
+          // #1320, with #1321's mark: the laps come back as rows — the two
+          // whole laps and the part lap, and not the lead-in or the tail.
+          // TCX states each lap's start to the second, its share of the
+          // ride's distance and no climb, so what comes back is the laps, in
+          // order, the part lap marked, and the figures worked out from the
+          // samples — which are the same samples, so the same figures.
+          const kept = (rows: readonly LapRecord[]) =>
+            rows.map((row) => ({
+              ordinal: row.ordinal,
+              startedAt: Math.floor(row.startedAt),
+              partial: row.partial,
+              averagePower: row.averagePower,
+              maxPower: row.maxPower,
+              averageHeartRate: row.averageHeartRate,
+              maxHeartRate: row.maxHeartRate,
+              averageCadence: row.averageCadence,
+            }));
+          expect(kept(lapped.backLaps)).toEqual(kept(lapped.laps));
+          // Lost, and listed in `LOSSY_CHANNELS`: the lap's own road and its climb.
+          expect(LOSSY_CHANNELS.tcx).toEqual(
+            expect.arrayContaining(['lap.distance', 'lap.ascent']),
+          );
+          expect(lapped.backLaps.map((lap) => lap.partial === true)).toEqual([false, false, true]);
+        }
       },
     );
 
