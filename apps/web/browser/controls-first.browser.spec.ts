@@ -255,6 +255,8 @@ const TUCKING_SECTIONS: Partial<Record<RouteId, readonly string[]>> = {
     'Appearance',
     'Announcements',
     'Sounds',
+    // #1433: what the order is for — the zoom keeps the top two.
+    'Ride screen readings',
     'Game world',
     // #787: what the draft indicator shows and says, and that it is not the
     // room's own switch.

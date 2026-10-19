@@ -1961,8 +1961,21 @@ html {
   gap: var(--oyl-space-sm);
 }
 
+/* The label is the row's 44 px target, its box 24 px (WCAG 2.2 SC 2.5.8)
+   and never squeezed by a name that wraps (#667's failure). */
 .oyl-ride-readings__row > label {
   flex: 1 1 8rem;
+  display: flex;
+  align-items: center;
+  gap: var(--oyl-space-sm);
+  min-height: 2.75rem;
+}
+
+.oyl-ride-readings input[type='checkbox'] {
+  flex: none;
+  width: 1.5rem;
+  height: 1.5rem;
+  margin: 0;
 }
 
 /*

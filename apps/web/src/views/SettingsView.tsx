@@ -1453,10 +1453,7 @@ function RideReadingsPanel({
 
   const shown = chosenReadings(choice);
   return (
-    <section
-      className="oyl-panel oyl-announce oyl-ride-readings"
-      aria-labelledby="oyl-ride-readings-heading"
-    >
+    <section className="oyl-panel oyl-ride-readings" aria-labelledby="oyl-ride-readings-heading">
       <SectionHeading
         level={3}
         id="oyl-ride-readings-heading"
@@ -1475,7 +1472,7 @@ function RideReadingsPanel({
           const on = shown.includes(id);
           return (
             <li key={id} className="oyl-ride-readings__row">
-              <label className="oyl-announce__switch">
+              <label>
                 <input
                   type="checkbox"
                   checked={on}
