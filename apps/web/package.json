@@ -23,7 +23,7 @@
     "test:browser:shard-2": "vite build && vite build --config vite.browser.config.ts || exit 1; playwright test --project chromium --shard 2/2 --workers 3 --global-timeout 720000; chromium=$?; playwright test --project game --global-timeout 85000 --output browser/dist/test-results/game; game=$?; [ $chromium -eq 0 ] && [ $game -eq 0 ]"
   },
   "dependencies": {
-    "@mediapipe/tasks-vision": "1.0.1",
+    "@mediapipe/tasks-vision": "1.1.1",
     "@onyourleft/analysis": "workspace:*",
     "@onyourleft/domain": "workspace:*",
     "@onyourleft/fit": "workspace:*",
