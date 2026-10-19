@@ -9392,6 +9392,39 @@ describe('#1240 — the heart-rate hold, through the real controller, session an
     rig.controller.dispose();
   });
 
+  it('a heart rate gone stale is no heart rate on the snapshot, in the trace and in every text — #1313', async () => {
+    const rig = await holding();
+    for (let second = 0; second < 60; second += 1) {
+      await ride(rig, 1);
+      await flushMicrotasks(20);
+    }
+    const live = rig.controller.getSnapshot().workout;
+    if (live === undefined) throw new Error('no workout');
+    const beats = heartRateNow(rig);
+    expect(beats).toBeDefined();
+    expect(live.live?.heartRate).toBe(beats);
+    expect(live.trace?.at(-1)?.heartRate).toBeDefined();
+    expect(workoutStripText(live).startsWith(`${String(beats)} bpm, `)).toBe(true);
+
+    // The strap goes quiet with its link still up, past the grid's own rule.
+    rig.bench.device(STRAP).script({ kind: 'notification-dropout', duration: seconds(60) });
+    for (let second = 0; second <= METRIC_STALE_AFTER_SECONDS + 1; second += 1) {
+      await ride(rig, 1);
+      await flushMicrotasks(20);
+    }
+    const stale = rig.controller.getSnapshot().workout;
+    if (stale === undefined) throw new Error('no workout');
+    // The apparatus: the grid calls it stale, and the workout still runs.
+    expect(metric(rig, 'heartRate').kind).toBe('stale');
+    expect(stale.status).toBe('running');
+    // No number from before the silence, anywhere the graph reads one.
+    expect(stale.live?.heartRate).toBeUndefined();
+    expect(stale.trace?.at(-1)?.heartRate).toBeUndefined();
+    expect(workoutStripText(stale).startsWith('— bpm, ')).toBe(true);
+    expect(workoutGraphLabels(stale).heartRate?.reading).toBe('No reading');
+    rig.controller.dispose();
+  });
+
   it('paused inside a hold: every text says what the trainer holds now, not the hold’s last line — #1307’s third review', async () => {
     const rig = await holding();
     for (let second = 0; second < 90; second += 1) {
@@ -9871,6 +9904,64 @@ describe('#1307 — what the workout’s graph is drawn from, through the real c
     expect(lost.strip.startsWith('No target · ')).toBe(true);
     expect(lost.name).toContain('Target the trainer last confirmed: 150 W.');
     expect(lost.name).not.toContain('asks for');
+    rig.controller.dispose();
+  });
+
+  it('once control is taken back, vouches for no target until the trainer acknowledges one again — #1313', async () => {
+    // 150 W for 6 s, then 250 W. The machine takes control away in the
+    // second block, and the rider takes it back.
+    const rig = await riding();
+    rig.controller.startWorkout(
+      savedWorkout([
+        { kind: 'steady', seconds: seconds(6), target: thresholdShare(0.6) },
+        { kind: 'steady', seconds: seconds(600), target: thresholdShare(1) },
+      ]),
+      watts(250),
+    );
+    for (let second = 0; second < 9; second += 1) {
+      await ride(rig, 1);
+      await flushMicrotasks(20);
+    }
+    expect(said(rig).strip.startsWith('Target 250 W · ')).toBe(true);
+    rig.bench.device(TRAINER).script({ kind: 'control-permission-lost' });
+    rig.bench.advance(seconds(1));
+    await flushMicrotasks(20);
+    // The loss pauses the workout; riding on resumes it, with no control.
+    for (let second = 0; second < 2; second += 1) {
+      await ride(rig, 1);
+      await flushMicrotasks(20);
+    }
+    expect(said(rig).workout.status).toBe('running');
+    expect(said(rig).strip.startsWith('No target · ')).toBe(true);
+
+    await rig.controller.requestTrainerControl();
+    await flushMicrotasks(20);
+    const retaken = said(rig);
+    // The apparatus: control is back, the session still has the 250 W it
+    // wrote before the loss, and the control client knows of no target.
+    expect(retaken.workout.hasControl).toBe(true);
+    expect(retaken.workout.holdingWatts).toBe(250);
+    expect(rig.controller.getSnapshot().trainer.target).toEqual({ kind: 'none' });
+    // Nothing vouches for the 250 W: it was acknowledged before the loss.
+    expect(retaken.caption).toBe(`No target · You ${String(retaken.livePower)} W`);
+    expect(retaken.strip.startsWith('No target · ')).toBe(true);
+    expect(retaken.marked).toBeUndefined();
+
+    // The next tick writes the block's target and the trainer acknowledges it.
+    const writes = rig.written.length;
+    await ride(rig, 1);
+    await flushMicrotasks(20);
+    expect(rig.written.slice(writes).filter((bytes) => bytes[0] === 0x05)).toEqual([
+      [0x05, 250, 0],
+    ]);
+    const confirmed = said(rig);
+    expect(confirmed.strip.startsWith('Target 250 W · ')).toBe(true);
+    // That tick's sample was taken while the write was on its way; the next
+    // one draws the 250 W, and none drew the 250 W from before the loss.
+    expect(confirmed.workout.trace?.at(-1)?.target).toBeUndefined();
+    await ride(rig, 1);
+    await flushMicrotasks(20);
+    expect(said(rig).workout.trace?.at(-1)?.target).toBe(250);
     rig.controller.dispose();
   });
 

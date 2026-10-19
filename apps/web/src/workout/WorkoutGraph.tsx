@@ -13,11 +13,13 @@ import {
   TRACE_LANE_HEIGHT,
   workoutGraphKey,
   workoutGraphLabels,
+  workoutGraphMemoKey,
   workoutGraphPaths,
   workoutGraphText,
   workoutStripPaths,
+  workoutStripLines,
   workoutStripName,
-  workoutStripText,
+  STRIP_SEPARATOR,
   type LaneLabel,
   type WorkoutGraphInput,
 } from './workout-graph';
@@ -154,7 +156,22 @@ function laneSvg(
   };
 }
 
-function Drawn({ workout }: WorkoutGraphProps): JSX.Element {
+/**
+ * The input to draw from, the SAME object for as long as nothing the graph
+ * reads has changed — #1313, `workout-graph.ts` §`workoutGraphMemoKey`. The
+ * snapshot is a new object several times a second; this is new about once.
+ */
+function useDrawnInput(workout: WorkoutGraphInput): WorkoutGraphInput {
+  const key = workoutGraphMemoKey(workout);
+  const { timeline, trace, replaced } = workout;
+  // ⚠️ `workout` is deliberately not a dependency: the four that are cover
+  // everything the graph reads from it, so a newer object with the same key
+  // and arrays draws exactly what this one does.
+  return useMemo(() => workout, [key, timeline, trace, replaced]);
+}
+
+function Drawn(props: WorkoutGraphProps): JSX.Element {
+  const workout = useDrawnInput(props.workout);
   const paths = useMemo(() => workoutGraphPaths(workout), [workout]);
   const text = useMemo(() => workoutGraphText(workout), [workout]);
   const labels = useMemo(() => workoutGraphLabels(workout), [workout]);
@@ -241,7 +258,8 @@ function Drawn({ workout }: WorkoutGraphProps): JSX.Element {
   );
 }
 
-function Strip({ workout }: WorkoutGraphProps): JSX.Element {
+function Strip(props: WorkoutGraphProps): JSX.Element {
+  const workout = useDrawnInput(props.workout);
   const paths = useMemo(() => workoutStripPaths(workout), [workout]);
   // ⚠️ Named WITHOUT what a re-plan replaced (#1244's review). The strip is
   // the last five minutes and a progress bar and draws no outline, and
@@ -249,7 +267,7 @@ function Strip({ workout }: WorkoutGraphProps): JSX.Element {
   // changed." whenever it is handed one: a name describing a picture that
   // is not there, from the first accepted move to the end of the workout.
   const name = useMemo(() => workoutStripName(workout), [workout]);
-  const text = useMemo(() => workoutStripText(workout), [workout]);
+  const lines = useMemo(() => workoutStripLines(workout), [workout]);
   const { lane, progress } = paths;
   return (
     <div
@@ -298,8 +316,18 @@ function Strip({ workout }: WorkoutGraphProps): JSX.Element {
           data-fraction={progress.nowFraction.toFixed(4)}
         />
       </svg>
+      {/* One line where the strip is wide enough, two on a phone (#1313):
+          `theme.css` hides the separator and stacks the parts there. Its text
+          is `workoutStripText` either way. */}
       <p aria-hidden="true" className="oyl-workout-strip__text">
-        {text}
+        {lines.map((line, index) => (
+          <span key={index} className="oyl-workout-strip__part">
+            {index === 0 ? null : (
+              <span className="oyl-workout-strip__separator">{STRIP_SEPARATOR}</span>
+            )}
+            {line}
+          </span>
+        ))}
       </p>
     </div>
   );

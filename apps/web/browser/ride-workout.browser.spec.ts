@@ -158,6 +158,29 @@ async function planBox(page: Page): Promise<Box | undefined> {
   });
 }
 
+/**
+ * Wait until the ride's two gap readings, *Pacer* and *Your best*, each carry
+ * their second line ("1 s / behind you") — #1313.
+ *
+ * The harness rides for real, and the secondary fields panel is a line taller
+ * once they do: both read "—" at first, the pacer "Level" for a few seconds
+ * after that, and then a gap with its line. The notices sit under that panel
+ * and move down with it. A comparison of two loads measured on different sides
+ * of that moment is a race (18 of 120 runs failed on exactly those two
+ * numbers, `--repeat-each 30`, before this), so each load is measured once the
+ * readings have settled. Measured locally: about 3 s into the ride.
+ */
+async function untilTheGapsSettle(page: Page): Promise<void> {
+  await page.waitForFunction(() => {
+    const gaps = [
+      ...document.querySelectorAll('.oyl-hud__fields--secondary > .oyl-hud__field'),
+    ].filter((field) => /^(Pacer|Your best)$/.test(field.querySelector('dt')?.textContent ?? ''));
+    return (
+      gaps.length === 2 && gaps.every((field) => field.querySelector('.oyl-hud__detail') !== null)
+    );
+  });
+}
+
 const GRAPH_VIEWPORTS: readonly (Viewport & { readonly riderClear: boolean })[] = [
   ...OVERLAY_VIEWPORTS.filter((each) => Math.min(each.width, each.height) > 480).map((each) => ({
     ...each,
@@ -178,6 +201,7 @@ const PAINTS_NOTHING = 'rgba(0, 0, 0, 0)';
 const STRIP_FIXTURES = [
   {
     graph: 'hold',
+    paused: false,
     lane: 'heart-rate',
     // The owner's ruling: in a hold the line gives the target the hold set too.
     text: '140 bpm, range 130–140 · Target 167 W',
@@ -192,6 +216,7 @@ const STRIP_FIXTURES = [
     // that form measured 271.5 px in this 270 px strip, which is why it is
     // not what the strip writes.
     graph: 'hold-silent',
+    paused: false,
     lane: 'heart-rate',
     text: '— bpm, range 130–140 · Target 167 W',
     named: 'No heart rate, with a chosen range of 130–140 bpm',
@@ -201,6 +226,7 @@ const STRIP_FIXTURES = [
   },
   {
     graph: 'plain',
+    paused: false,
     lane: 'power',
     text: 'Target 175 W · 15:00 left in block',
     named: 'Target the trainer last confirmed: 175 W.',
@@ -213,7 +239,21 @@ const STRIP_FIXTURES = [
     // #1313 (the owner's ruling): no target or trace line is drawn through a
     // pause, so the lane is empty, and the name says nothing a line would.
     graph: 'paused',
+    paused: true,
     lane: 'power',
+    text: 'Paused · Target 50 W',
+    named: 'Workout graph. Paused.',
+    asked: undefined,
+    doing: undefined,
+    absent: /target|power|range|heart-rate/,
+  },
+  {
+    // #1313: the same in a heart-rate hold. The lane is the heart-rate one
+    // (the newest sample still carries the range and a heart rate) and draws
+    // neither; the name gives neither.
+    graph: 'paused-hold',
+    paused: true,
+    lane: 'heart-rate',
     text: 'Paused · Target 50 W',
     named: 'Workout graph. Paused.',
     asked: undefined,
@@ -254,7 +294,8 @@ function expectStripReadable(graph: GraphSight, fixture: (typeof STRIP_FIXTURES)
   if (fixture.doing !== undefined) {
     expect(mark(fixture.doing).paint).toBe(HUD_INK);
   }
-  if (fixture.graph === 'paused') {
+  // By what the fixture IS, not by its name (#1331's review).
+  if (fixture.paused) {
     expect(graph.name).not.toMatch(/Your power|Heart rate|chosen range/);
   }
   for (const name of [
@@ -308,6 +349,7 @@ test.describe('a running workout drawn on the HUD — #1307', () => {
     }) => {
       // The control: the same ride with the route plan, and no strip.
       await openRide(page, viewport, '?trainer=workout');
+      await untilTheGapsSettle(page);
       expect(await graphOnTheHud(page)).toBeUndefined();
       const plan = await planBox(page);
       const before = await bothWays(page);
@@ -315,6 +357,7 @@ test.describe('a running workout drawn on the HUD — #1307', () => {
 
       for (const fixture of STRIP_FIXTURES) {
         await openRide(page, viewport, `?trainer=workout&graph=${fixture.graph}`);
+        await untilTheGapsSettle(page);
         const graph = await graphOnTheHud(page);
         if (graph === undefined || plan === undefined) {
           throw new Error('no workout strip on the HUD');
@@ -332,36 +375,17 @@ test.describe('a running workout drawn on the HUD — #1307', () => {
         for (const [index, [how, seen]] of after.entries()) {
           await test.step(`${fixture.graph} — ${how}`, () => {
             const was = before[index]?.[1];
-            // ⚠️ Two boxes are compared WITHOUT the one number the ride itself
-            // moves. The harness rides for real, and the secondary fields
-            // panel is a line taller (182.5 px against 195.9) at some moments
-            // of the ride than at others — its pacer and best-effort readings
-            // are "—" at first and gain a second line ("3 s / ahead of you")
-            // once they have something to report; the notices sit under that
-            // panel and move down with it. The two
-            // loads compared here are seconds apart, so which side of that
-            // moment each was measured on is a race: 18 of 120 runs of this
-            // case failed on exactly those two numbers and on nothing else
-            // (`--repeat-each 30`). Neither holds the strip: the route panel,
-            // the actions and the primary fields are compared in full.
-            const RIDE_MOVES: readonly { readonly panel: string; readonly skip: number }[] = [
-              { panel: 'oyl-hud__fields--secondary', skip: 3 }, // its height
-              { panel: 'oyl-hud__notices', skip: 1 }, // its top
-            ];
+            // Every box, every number: both loads were measured once the
+            // ride's gap readings had settled (#1313, `untilTheGapsSettle`).
             const boxes = (measurement: StageMeasurement | undefined) =>
               (measurement?.panels ?? [])
                 .filter((each) => each.box.height > 0)
-                .map((each) => {
-                  const skip = RIDE_MOVES.find((moved) => each.name.includes(moved.panel))?.skip;
-                  return `${each.name}: ${[
-                    each.box.left,
-                    each.box.top,
-                    each.box.width,
-                    each.box.height,
-                  ]
-                    .map((n, index) => (index === skip ? '(the ride’s)' : n.toFixed(1)))
-                    .join(' ')}`;
-                });
+                .map(
+                  (each) =>
+                    `${each.name}: ${[each.box.left, each.box.top, each.box.width, each.box.height]
+                      .map((n) => n.toFixed(1))
+                      .join(' ')}`,
+                );
             expect(boxes(seen).length).toBeGreaterThanOrEqual(4);
             expect(boxes(seen)).toEqual(boxes(was));
             if (viewport.riderClear) {
@@ -405,6 +429,133 @@ test.describe('a running workout drawn on the HUD — #1307', () => {
       expectStripReadable(graph, fixture);
     }
   });
+});
+
+/**
+ * #1313 — the strip on a phone, which #1307 never measured.
+ *
+ * Measured before this: upright, the strip had the route panel's narrow
+ * column, 127 px at 360 wide, and its line overflowed it by 74 px (120 px in a
+ * hold); on its side a hold's line overflowed its 238 px by 9. And the
+ * route's own "0% complete" stood directly beside or above the workout's bar,
+ * where it read as the bar's caption. `theme.css` §"THE WORKOUT'S STRIP ON A
+ * PHONE" is the fix: two lines, a strip one line taller, the wide column
+ * upright, and a hairline between the route's lines and the strip.
+ *
+ * The standing trainer notice takes the route panel's cell on a phone for its
+ * first 15 s; each load puts it away with its own control first, as a rider
+ * would to see the strip sooner.
+ */
+const PHONE_VIEWPORTS = OVERLAY_VIEWPORTS.filter(
+  (each) => Math.min(each.width, each.height) <= 480,
+);
+
+interface StripOnAPhone {
+  readonly strip: Box;
+  readonly lane: Box;
+  readonly profileText: Box;
+  readonly route: Box;
+  /** Each part of the line: how wide its text is, and the box it has. */
+  readonly parts: readonly { readonly ink: number; readonly room: number; readonly text: string }[];
+  readonly text: string;
+  readonly border: {
+    readonly top: { readonly width: number; readonly colour: string };
+    readonly left: { readonly width: number; readonly colour: string };
+  };
+}
+
+async function stripOnAPhone(page: Page): Promise<StripOnAPhone> {
+  const notice = page.getByRole('button', { name: 'Trainer notice', expanded: true });
+  if ((await notice.count()) > 0) {
+    await notice.click();
+  }
+  await page.locator('.oyl-hud__route .oyl-workout-strip').waitFor({ state: 'visible' });
+  return page.evaluate(() => {
+    const boxOf = (selector: string): Box => {
+      const element = document.querySelector(selector);
+      if (element === null) throw new Error(`no ${selector}`);
+      const rect = element.getBoundingClientRect();
+      return {
+        left: rect.left,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
+        width: rect.width,
+        height: rect.height,
+      };
+    };
+    const strip = document.querySelector('.oyl-hud__route .oyl-workout-strip');
+    if (strip === null) throw new Error('no strip');
+    const style = getComputedStyle(strip);
+    return {
+      strip: boxOf('.oyl-hud__route .oyl-workout-strip'),
+      lane: boxOf('.oyl-workout-strip__lane'),
+      profileText: boxOf('.oyl-hud__profile-text'),
+      route: boxOf('.oyl-hud__route'),
+      parts: [...strip.querySelectorAll('.oyl-workout-strip__part')].map((part) => {
+        const range = document.createRange();
+        range.selectNodeContents(part);
+        // Only what is shown: a hidden separator has no box.
+        const ink = [...range.getClientRects()].reduce(
+          (widest, rect) => Math.max(widest, rect.right),
+          0,
+        );
+        const room = part.parentElement?.getBoundingClientRect().right ?? 0;
+        return { ink, room, text: part.textContent ?? '' };
+      }),
+      text: strip.querySelector('.oyl-workout-strip__text')?.textContent ?? '',
+      border: {
+        top: { width: Number.parseFloat(style.borderTopWidth), colour: style.borderTopColor },
+        left: { width: Number.parseFloat(style.borderLeftWidth), colour: style.borderLeftColor },
+      },
+    };
+  });
+}
+
+const PHONE_STRIPS = [
+  { graph: 'plain', text: 'Target 175 W · 15:00 left in block' },
+  { graph: 'hold', text: '140 bpm, range 130–140 · Target 167 W' },
+  { graph: 'paused-hold', text: 'Paused · Target 50 W' },
+] as const;
+
+test.describe('the workout strip on a phone — #1313', () => {
+  for (const viewport of PHONE_VIEWPORTS) {
+    test(`writes its line whole, keeps its lane, is set apart from the route’s line and lies over no rider — ${viewport.name}`, async ({
+      page,
+    }) => {
+      for (const fixture of PHONE_STRIPS) {
+        await openRide(page, viewport, `?trainer=workout&graph=${fixture.graph}`);
+        const seen = await stripOnAPhone(page);
+        console.log(
+          `#1313 the strip on a phone (${fixture.graph}) — ${viewport.name}: ${seen.strip.width.toFixed(1)} × ${seen.strip.height.toFixed(1)} px, its lane ${seen.lane.height.toFixed(1)} px tall; ${seen.parts.map((part) => `“${part.text}” ends at ${part.ink.toFixed(1)} of ${part.room.toFixed(1)}`).join(', ')}${viewport.height > viewport.width ? `; the route panel ends ${(riderBox(viewport).top - seen.route.bottom).toFixed(1)} px above the rider's box` : ''}`,
+        );
+        // The same words as on a tablet, every one on screen: the line is
+        // two parts, and each ends inside the strip.
+        expect(seen.text.replace(/\s+/g, ' ')).toBe(fixture.text);
+        expect(seen.parts.length).toBe(2);
+        for (const part of seen.parts) {
+          expect(part.ink, part.text).toBeLessThanOrEqual(part.room + SUBPIXEL_TOLERANCE);
+        }
+        // The lane as tall as on a tablet, or near it.
+        expect(seen.lane.height).toBeGreaterThanOrEqual(40);
+        // A hairline in the HUD's border token between the route's own line
+        // ("0% complete") and the strip, on the side the line is.
+        const above = seen.profileText.bottom <= seen.strip.top + SUBPIXEL_TOLERANCE;
+        const beside = seen.profileText.right <= seen.strip.left + SUBPIXEL_TOLERANCE;
+        expect(above || beside).toBe(true);
+        const edge = above ? seen.border.top : seen.border.left;
+        expect(edge.width).toBeGreaterThanOrEqual(1);
+        expect(edge.colour).toBe(HUD_BORDER);
+        // And nothing it moved lies over the rider or leaves the screen.
+        const measured = await measure(page);
+        const laidOut = measured.panels.filter((each) => each.box.height > 0);
+        expect(
+          laidOut.filter((each) => overlap(each.box, riderBox(viewport))).map(describeItem),
+        ).toEqual([]);
+        expect(laidOut.filter((each) => !inside(each.box, viewport)).map(describeItem)).toEqual([]);
+      }
+    });
+  }
 });
 
 /**

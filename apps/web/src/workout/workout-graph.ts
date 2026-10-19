@@ -90,7 +90,10 @@
  *
  * The workout's clock stops, so the last two lanes stop with it: nothing is
  * sampled, and after the pause the lines carry on from where they stopped —
- * the pause itself is not a stretch of the picture. What the trainer holds
+ * the pause itself is not a stretch of the picture. ⚠️ The HUD's strip goes
+ * further (#1313, the owner's ruling): its lane draws NO line at all while
+ * paused, in either kind, and keeps only its bar and text
+ * ({@link WorkoutStripPaths.lane}). What the trainer holds
  * through it (it is eased to its floor) is WRITTEN: the caption and the
  * strip say "Paused" and the target the trainer confirmed, with the power
  * the rider is making now. Nothing is marked as held instead: the plan asks
@@ -235,6 +238,13 @@ export interface WorkoutGraphInput {
    */
   readonly hasControl?: boolean | undefined;
   /**
+   * Whether the trainer's control client vouches for {@link holdingWatts}
+   * now — #1313. `false`, as for no control: {@link heldNow} is `undefined`.
+   * It is `false` for the tick after control is taken back, before the next
+   * write lands. Absent is read as vouched.
+   */
+  readonly targetConfirmed?: boolean | undefined;
+  /**
    * The rider's power and heart rate now, each `undefined` when not live.
    * Absent — a drawing with no controller behind it — the newest sample's.
    */
@@ -361,12 +371,18 @@ function shareAt(segment: { from: number; to: number } & BlockChartSegment, at: 
 
 /**
  * What the trainer is KNOWN to hold now, in watts: the target it last
- * acknowledged, while this app has control. `undefined` before any target is
- * confirmed and once control is lost — the last write is not a held target.
+ * acknowledged, while this app has control and the control client vouches
+ * for it. `undefined` before any target is confirmed, once control is lost,
+ * and until a write lands after control is taken back (#1313) — the last
+ * write is not a held target.
  * @see the module note: this is the graph's one source for it
  */
 export function heldNow(input: WorkoutGraphInput): number | undefined {
-  return input.hasControl === false || !finite(input.holdingWatts) ? undefined : input.holdingWatts;
+  return input.hasControl === false ||
+    input.targetConfirmed === false ||
+    !finite(input.holdingWatts)
+    ? undefined
+    : input.holdingWatts;
 }
 
 /** Whether the workout is paused: its clock, and so its lanes, are stopped. */
@@ -916,6 +932,12 @@ export interface WorkoutStripPaths {
    * `heart-rate` while a heart-rate hold is running NOW (the newest sample
    * carries a range): the range's outline and heart rate. `power` otherwise:
    * the confirmed target's stepped edge and the rider's power.
+   *
+   * ⚠️ **While the workout is paused BOTH paths of either kind are empty
+   * strings** (#1313, the owner's ruling of 2026-10-13): no target, range,
+   * power or heart-rate line is drawn. The kind and {@link laneHeight} are
+   * kept, so the lane holds its place, and the bar and the text are drawn as
+   * ever. {@link workoutStripName} says no more than is drawn.
    */
   readonly lane:
     | { readonly kind: 'power'; readonly target: string; readonly power: string }
@@ -930,7 +952,10 @@ export interface WorkoutStripPaths {
   };
 }
 
-/** What the HUD's strip draws. */
+/**
+ * What the HUD's strip draws: one lane, and the bar. Paused, the lane's two
+ * paths are both empty and only the bar is drawn (@see WorkoutStripPaths.lane).
+ */
 export function workoutStripPaths(input: WorkoutGraphInput): WorkoutStripPaths {
   const samples = windowed(input);
   const total = input.timeline.totalSeconds;
@@ -1017,6 +1042,41 @@ export function workoutGraphKey(input: WorkoutGraphInput): string {
     ...(held === undefined ? [] : [graphKeyHeld(held)]),
     ...((input.replaced ?? []).length > 0 ? [GRAPH_KEY_REPLACED] : []),
   ].join(' ');
+}
+
+/**
+ * Every value the graph reads from an input apart from its three arrays
+ * (`timeline`, `trace`, `replaced`), as one string — #1313. Two inputs with
+ * the same key and the same three arrays draw the same graph and say the same
+ * words, so `WorkoutGraph.tsx` recomputes only when one of the four changes.
+ *
+ * ⚠️ Why: the controller's snapshot is a new object on every change of the
+ * ride — a power or heart-rate notification, several a second — while what
+ * the graph draws changes about once a second. Keyed on the object, every
+ * path and sentence was worked out again about six times a second.
+ *
+ * ⚠️ A field added to {@link WorkoutGraphInput} must be added here, or the
+ * graph goes on drawing the value from before it changed. `WorkoutGraph.test.tsx`
+ * §"the memo key" changes every field of a full input in turn and requires a
+ * new key for each.
+ */
+export function workoutGraphMemoKey(input: WorkoutGraphInput): string {
+  return JSON.stringify([
+    input.elapsedSeconds,
+    input.holdingWatts,
+    input.thresholdWatts,
+    input.hold === undefined ? 'no hold' : [input.hold.reason, input.hold.target],
+    // Only its presence is read.
+    input.rescue !== undefined,
+    input.status,
+    input.hasControl,
+    input.targetConfirmed,
+    // Absent is not the same as two readings that are not live: absent, the
+    // newest sample's are read (`readingsNow`).
+    input.live === undefined ? 'no live' : [input.live.power, input.live.heartRate],
+    input.raisedFromWatts,
+    input.refused,
+  ]);
 }
 
 /** The newest sample the graph may read: inside the window and no later than now. */
@@ -1130,9 +1190,23 @@ export function workoutGraphLabels(input: WorkoutGraphInput): {
  * Paused, that and what the trainer holds — the strip has 270 px.
  */
 export function workoutStripText(input: WorkoutGraphInput): string {
+  return workoutStripLines(input).join(STRIP_SEPARATOR);
+}
+
+/** Between the strip's two parts, where they are on one line. */
+export const STRIP_SEPARATOR = ' · ';
+
+/**
+ * {@link workoutStripText} in its parts, which the strip writes on one line
+ * where it is wide enough and as two where it is not (a phone, #1313) — the
+ * same words, divided only where the one line has its separator. One part or
+ * two.
+ */
+export function workoutStripLines(input: WorkoutGraphInput): readonly [string, ...string[]] {
   const target = targetWords(input, false);
   if (isPaused(input)) {
-    return target;
+    const [paused, said] = target.split(STRIP_SEPARATOR);
+    return said === undefined ? [target] : [paused ?? target, said];
   }
   const last = newest(input);
   if (last?.range !== undefined) {
@@ -1142,10 +1216,10 @@ export function workoutStripText(input: WorkoutGraphInput): string {
     // Chromium, "No heart rate, range 130–140 · Target 167 W" is 271.5 px in a
     // 270 px strip. The image's name still says it in words.
     const heartRate = readingsNow(input).heartRate;
-    return `${finite(heartRate) ? String(Math.round(heartRate)) : '—'} bpm, ${range} · ${target}`;
+    return [`${finite(heartRate) ? String(Math.round(heartRate)) : '—'} bpm, ${range}`, target];
   }
   const left = leftInBlock(input);
-  return left === undefined ? target : `${target} · ${left} left in block`;
+  return left === undefined ? [target] : [target, `${left} left in block`];
 }
 
 /**
