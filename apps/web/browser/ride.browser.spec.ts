@@ -1505,11 +1505,16 @@ test.describe('#439 — a ride with edge-to-edge insets does not scroll', () => 
  * the controls end 9 px above the inset at every viewport with the padding and
  * 15 px inside it without.
  *
- * ⚠️ **Not at 320×256.** That is SC 1.4.10's viewport — a desktop window at
- * 400 % — and a desktop reports no insets. With the tablet's 68 px laid on it
- * 188 px are left, less than the actions panel is tall, so its sticky edge
- * cannot hold it clear; measured, its controls ended at 252 of 224. No phone
- * the app runs on is that short (the shortest here, on its side, is 360).
+ * ⚠️ **320×256 too**, the stacked layout at its shortest. Its actions panel
+ * is pinned by `position: sticky`, which cannot lift it above the top of
+ * `.oyl-hud`, so with the tablet's 68 px of insets and the world at its old
+ * 40vh the panel ran out of room: *Pause* and *End ride* ended at 252 of 224.
+ * `theme.css` §"The STACKED layout's world gives up what the insets take" is
+ * the fix, and the panel that holds the controls is asserted as well as the
+ * controls: with the world short of only the bottom inset the controls
+ * scraped clear by 4 px while their panel ended 5 px inside the inset.
+ * Measured, the controls end 9 px above the inset at every viewport with the
+ * fix, and the actions panel exactly at it.
  */
 const WITHOUT_BOTTOM_INSET = `
   .oyl-game--riding .oyl-hud { padding-bottom: var(--oyl-space-sm) !important; }
@@ -1517,10 +1522,7 @@ const WITHOUT_BOTTOM_INSET = `
 `;
 
 test.describe('#1441 — the ride’s controls are clear of the gesture bar', () => {
-  const withInsets = [...OVERLAY_VIEWPORTS, ...STACKED_VIEWPORTS].filter(
-    (each) => !(each.width === 320 && each.height === 256),
-  );
-  for (const viewport of withInsets) {
+  for (const viewport of [...OVERLAY_VIEWPORTS, ...STACKED_VIEWPORTS]) {
     test(`every control ends above the bottom inset — ${viewport.name}`, async ({ page }) => {
       await applyInsets(page, PIXEL_TABLET_LANDSCAPE_INSETS);
       await openRide(page, viewport);
@@ -1529,14 +1531,21 @@ test.describe('#1441 — the ride’s controls are clear of the gesture bar', ()
       const lowestOf = (items: readonly StageItem[]): number =>
         Math.max(...items.map((each) => each.box.bottom));
 
-      const controls = (await measure(page)).items.filter((each) =>
-        each.name.startsWith('control: '),
-      );
+      const seen = await measure(page);
+      const controls = seen.items.filter((each) => each.name.startsWith('control: '));
       expect(controls.length, 'the apparatus: the ride rendered its controls').toBeGreaterThan(1);
       const lowest = lowestOf(controls);
       expect(
         controls.filter((each) => each.box.bottom > fold + 0.5).map(describeItem),
         'a ride control is under the gesture bar',
+      ).toEqual([]);
+      const actions = seen.panels.filter((each) =>
+        each.name.split(' ').includes('oyl-hud__actions'),
+      );
+      expect(actions, 'the apparatus: the ride rendered its actions panel').toHaveLength(1);
+      expect(
+        actions.filter((each) => each.box.bottom > fold + 0.5).map(describeItem),
+        'the panel holding the ride controls is under the gesture bar',
       ).toEqual([]);
 
       await page.addStyleTag({ content: WITHOUT_BOTTOM_INSET });
