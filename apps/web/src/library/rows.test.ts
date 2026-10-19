@@ -82,10 +82,12 @@ describe('rowFor', () => {
     ).toBeUndefined();
   });
 
-  it('formats duration and distance the way the rest of the shell does', () => {
+  it('formats moving time, elapsed time and distance the way the rest of the shell does', () => {
     const row = rowFor(summary('a'), 'metric');
 
-    expect(row.duration).toBe('1:02:05');
+    // #1437: moving time is the ride's, elapsed time the recording's.
+    expect(row.movingTime).toBe('1:00:00');
+    expect(row.elapsedTime).toBe('1:02:05');
     expect(row.distance).toBe('42.2');
   });
 
@@ -104,7 +106,8 @@ describe('rowFor', () => {
 
     expect(metric.distance).toBe('42.2');
     expect(imperial.distance).toBe('26.2');
-    expect(imperial.duration).toBe(metric.duration);
+    expect(imperial.movingTime).toBe(metric.movingTime);
+    expect(imperial.elapsedTime).toBe(metric.elapsedTime);
     expect(imperial.startedAt).toBe(metric.startedAt);
   });
 });

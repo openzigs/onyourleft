@@ -11,13 +11,14 @@ import { EmptyState } from '../design/EmptyState';
 import { KeptVisible } from '../design/KeptVisible';
 import { StatusMessage } from '../design/StatusMessage';
 import { VisuallyHidden } from '../design/VisuallyHidden';
-import { POWER_UNIT } from '../format';
+import { ELAPSED_TIME_LABEL, MOVING_TIME_LABEL, POWER_UNIT } from '../format';
 import { useUnits } from '../units/context';
 import { distanceUnit } from '../units/format';
 import { orderedRows, PAGE_SIZE, rowFor, type LibraryRow } from '../library/rows';
 import type { LibraryPort } from '../library/store-port';
 import { ListDetail, SELECTED_HEADING_ID } from '../shell/ListDetail';
 import { hrefFor, hrefForActivity, hrefForSelection, routeById } from '../shell/routes';
+import type { InstancePort } from '../instance/instance-port';
 
 /**
  * The ride history: every activity stored on this device (#62).
@@ -96,6 +97,17 @@ export interface ActivitiesViewProps {
   readonly library?: LibraryPort | undefined;
   /** The selected ride's id, from `#/activities/selected/<id>` — #670. */
   readonly selected?: string | undefined;
+  /**
+   * Running inside the Android app rather than a browser — #1438: the footer
+   * says what deletes the rides there, which is not "this browser's site data".
+   * `support/capacitor.ts` §`isNativeShell`, read by `main.tsx`.
+   */
+  readonly nativeShell?: boolean | undefined;
+  /**
+   * The rider's instance (#777), asked only whether this device has connected
+   * to one — #1438: with one, a synced ride is not on this device alone.
+   */
+  readonly instance?: InstancePort | undefined;
 }
 
 /** The sort control's `id`, for its `<label>`. One library per page. */
@@ -166,19 +178,81 @@ type LoadState =
 
 /**
  * What the Activities screen keeps on the screen whatever its length — #1013:
- * that the rides are here and nowhere else, and that clearing this browser's
- * site data deletes them.
+ * where the rides are, and what deletes them. The words common to every
+ * {@link whereRidesAreText}, so the check holds on each platform.
  */
 export const ACTIVITIES_KEPT_VISIBLE: readonly string[] = [
-  'Rides are stored on this device and nowhere else.',
-  'clearing this browser’s site data deletes them',
+  'Rides are stored on this device',
+  'deletes them from this device',
 ];
+
+/**
+ * Whether this device has an instance — #1438. `unknown` until the port has
+ * answered, and while it is, the footer claims neither way.
+ */
+export type InstanceKnown = 'none' | 'connected' | 'unknown';
+
+/**
+ * The footer's sentence about where the rides are — #1013, #1438.
+ *
+ * Until #1438 it said "There is no account and no server" and named "this
+ * browser's site data" everywhere: false inside the Android app, which has no
+ * browser, and false with an instance (ADR 0036), which keeps a synced ride.
+ *
+ * "Nowhere else" is never said. A rider who synced and then disconnected (or
+ * whose session is gone) reads as `none`, yet the instance still holds what it
+ * was sent; and the app's manifest leaves Android's own backup on
+ * (`android:allowBackup`), which may copy storage to the rider's Google
+ * account. So the sentence says only what is here and what deletes it.
+ */
+export function whereRidesAreText(nativeShell: boolean, instance: InstanceKnown): string {
+  const lead =
+    instance === 'connected'
+      ? 'Rides are stored on this device, and a ride you sync is also kept on your instance.'
+      : 'Rides are stored on this device.';
+  const deletes = nativeShell
+    ? 'Uninstalling the app, or clearing its storage in Android’s settings, deletes them from this device'
+    : 'Clearing this browser’s site data deletes them from this device';
+  return `${lead} ${deletes} — export anything you want to keep.`;
+}
+
+/** {@link InstanceKnown} for `port`, read once — #1438. */
+function useInstanceKnown(port: InstancePort | undefined): InstanceKnown {
+  // Kept with the port it answered for, so a new port reads as unknown until it answers.
+  const [answer, setAnswer] = useState<
+    { readonly port: InstancePort; readonly known: InstanceKnown } | undefined
+  >(undefined);
+  useEffect(() => {
+    if (port === undefined) return undefined;
+    let cancelled = false;
+    port
+      .current()
+      .then((state) => {
+        // Signed out, unreadable or unreachable: rides synced before are still there.
+        const known = state.kind === 'not-connected' ? 'none' : 'connected';
+        if (!cancelled) setAnswer({ port, known });
+      })
+      // Deliberate: a failed read leaves the footer on its hedged wording.
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [port]);
+  if (port === undefined) return 'none';
+  return answer?.port === port ? answer.known : 'unknown';
+}
 
 /** Said inside the confirmation when the store refused the delete — #959. */
 export const DELETE_FAILED_TEXT =
   'The ride could not be deleted, and it is still on this device. Try again, or keep the ride.';
 
-export function ActivitiesView({ library, selected }: ActivitiesViewProps): JSX.Element {
+export function ActivitiesView({
+  library,
+  selected,
+  nativeShell = false,
+  instance,
+}: ActivitiesViewProps): JSX.Element {
+  const instanceKnown = useInstanceKnown(instance);
   const [orderBy, setOrderBy] = useState<ActivityOrder>('startedAt');
   const [direction, setDirection] = useState<SortDirection>('descending');
   const [state, setState] = useState<LoadState>({ kind: 'idle' });
@@ -483,13 +557,10 @@ export function ActivitiesView({ library, selected }: ActivitiesViewProps): JSX.
         </p>
       </ConfirmDialog>
 
-      {/* #1013: where the rides are, and what clearing site data does to them,
-        is kept on the screen whole. */}
+      {/* #1013: where the rides are, and what deletes them, is kept on the
+        screen whole. #1438: per platform, and per instance. */}
       <KeptVisible>
-        <p className="oyl-muted">
-          Rides are stored on this device and nowhere else. There is no account and no server, so
-          clearing this browser&rsquo;s site data deletes them — export anything you want to keep.
-        </p>
+        <p className="oyl-muted">{whereRidesAreText(nativeShell, instanceKnown)}</p>
       </KeptVisible>
     </div>
   );
@@ -595,9 +666,14 @@ function RideCard({
       <p className="oyl-muted oyl-activity-card__date">{row.startedAt}</p>
       <dl className="oyl-activity-card__facts">
         <div>
-          <dt>Duration</dt>
+          <dt>{MOVING_TIME_LABEL}</dt>
           <dd>
-            <Reading value={row.duration} />
+            <Reading value={row.movingTime} />
+            {/* #1437: a ride whose elapsed time is far above its moving time
+              reads "0:10 of 10:31:26 elapsed" at a glance. */}
+            {row.elapsedBeside === undefined ? null : (
+              <span className="oyl-muted"> {row.elapsedBeside}</span>
+            )}
           </dd>
         </div>
         {row.distance === undefined ? null : (
@@ -636,8 +712,12 @@ function RideSummary({ row }: { readonly row: LibraryRow }): JSX.Element {
           <dd>{row.startedAt}</dd>
         </div>
         <div>
-          <dt>Duration</dt>
-          <dd>{row.duration}</dd>
+          <dt>{MOVING_TIME_LABEL}</dt>
+          <dd>{row.movingTime}</dd>
+        </div>
+        <div>
+          <dt>{ELAPSED_TIME_LABEL}</dt>
+          <dd>{row.elapsedTime}</dd>
         </div>
         <div>
           <dt>Distance</dt>

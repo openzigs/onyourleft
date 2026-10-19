@@ -445,8 +445,12 @@ export function remainingFrom(
   return Number.isFinite(value) ? { value, unit } : undefined;
 }
 
-/** A distance mark, as a rider hears it: `12`, or `0.5` — never `12.0`. */
-function spokenNumber(value: number): string {
+/**
+ * A distance mark, as a rider hears it: `12`, or `0.5` — never `12.0`. Also
+ * how `climb-ahead.ts` says a climb a quarter of a mile or more away (#1440's
+ * review), so the two sentences say miles alike.
+ */
+export function spokenNumber(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 

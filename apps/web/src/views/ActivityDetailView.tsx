@@ -67,8 +67,10 @@ import { ChartSlot } from '../design/ChartSlot';
 import { Reading } from '../design/Reading';
 import { StatusMessage } from '../design/StatusMessage';
 import {
+  ELAPSED_TIME_LABEL,
   formatDuration,
   formatPowerValue,
+  MOVING_TIME_LABEL,
   formatStartedAt,
   POWER_UNIT,
   noPowerText,
@@ -428,16 +430,17 @@ export function ActivityDetailView({
           <dt>Started</dt>
           <dd>{formatStartedAt(activity.startedAt, activity.startedAtTimeZone)}</dd>
         </div>
+        {/* #1437: the same two names as Home and History, moving first. */}
         <div>
-          <dt>Elapsed</dt>
+          <dt>{MOVING_TIME_LABEL}</dt>
           <dd>
-            <Reading value={formatDuration(activity.elapsedTime)} />
+            <Reading value={formatDuration(activity.movingTime)} />
           </dd>
         </div>
         <div>
-          <dt>Moving</dt>
+          <dt>{ELAPSED_TIME_LABEL}</dt>
           <dd>
-            <Reading value={formatDuration(activity.movingTime)} />
+            <Reading value={formatDuration(activity.elapsedTime)} />
           </dd>
         </div>
         {/* #1070: a ride recorded with no speed channel stored 0 m, which is no

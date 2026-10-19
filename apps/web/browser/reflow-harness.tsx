@@ -76,7 +76,7 @@ import { flushSync } from 'react-dom';
 import { viewGroupsLoaded } from './views-loaded';
 
 import { unixSeconds } from '@onyourleft/domain';
-import { activityId, openActivityStore, routeId } from '@onyourleft/store';
+import { activityId, openActivityStore, routeId, type ActivityStore } from '@onyourleft/store';
 
 import { tabbableElements } from '../src/a11y/audit';
 import { Button } from '../src/design/Button';
@@ -387,10 +387,10 @@ async function realMap(): Promise<MapPort> {
  */
 const TRANSFER_RIDES = 3;
 
-function transferPort(populated: boolean): TransferPort {
+function transferPort(store: ActivityStore): TransferPort {
   const now = unixSeconds(Math.floor(Date.now() / 1000));
   return {
-    store: openActivityStore(`oyl-reflow-harness-${populated ? 'populated' : 'empty'}`),
+    store,
     athleteId: LOCAL_ATHLETE,
     newActivityId: () => activityId(crypto.randomUUID()),
     newRouteId: () => routeId(crypto.randomUUID()),
@@ -408,11 +408,15 @@ function transferPort(populated: boolean): TransferPort {
   };
 }
 
-async function fillTransferStore(port: TransferPort): Promise<void> {
-  await port.store.ensureAthlete(port.athleteRow);
+/**
+ * Through the store itself rather than the port: the port is what the Files
+ * screen does to the store, and writing a ride with no samples is not that.
+ */
+async function fillTransferStore(store: ActivityStore, port: TransferPort): Promise<void> {
+  await store.ensureAthlete(port.athleteRow);
   for (let index = 0; index < TRANSFER_RIDES; index += 1) {
-    if ((await port.store.getActivity(port.athleteId, fixtureRide(index).id)) === undefined) {
-      await port.store.putActivity({ ...fixtureRide(index), athleteId: port.athleteId });
+    if ((await store.getActivity(port.athleteId, fixtureRide(index).id)) === undefined) {
+      await store.putActivity({ ...fixtureRide(index), athleteId: port.athleteId });
     }
   }
 }
@@ -1678,9 +1682,12 @@ async function main(): Promise<void> {
   if (window.location.hash === '') {
     window.location.hash = '#/';
   }
-  const transfer = transferPort(data === 'populated');
+  const transferStore = openActivityStore(
+    `oyl-reflow-harness-${data === 'populated' ? 'populated' : 'empty'}`,
+  );
+  const transfer = transferPort(transferStore);
   if (data === 'populated') {
-    await fillTransferStore(transfer);
+    await fillTransferStore(transferStore, transfer);
   }
   flushSync(() => {
     createRoot(host).render(<StrictMode>{shell(data === 'populated', transfer)}</StrictMode>);

@@ -16,6 +16,7 @@ import {
 
 const RIDE: SavedRide = {
   activityId: activityId('a'),
+  movingTime: seconds(60),
   elapsedTime: seconds(60),
   distance: metres(500),
   averagePower: watts(150),

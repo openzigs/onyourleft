@@ -25,7 +25,7 @@ import { kilograms, KILOGRAMS_PER_POUND } from '@onyourleft/domain';
 
 import { DEFAULT_RIDER_MASS_KILOGRAMS, MASS_REFUSAL } from '../athlete/mass';
 import type { AthleteMassPort } from '../athlete/store-port';
-import { mount, queryAll, settle, typeInto } from '../testing/mount';
+import { activateWithKeyboard, mount, queryAll, settle, typeInto } from '../testing/mount';
 import type { UnitsPort } from '../units/store-port';
 
 import {
@@ -46,6 +46,7 @@ import {
   KIT_SAVED,
   APPEARANCE_STAYS_HERE,
   SETTINGS_CARD_TITLES,
+  assumedWeightStart,
 } from './SettingsView';
 import type { AthleteKitColourPort } from '../athlete/kit-colour-port';
 import { KIT_PALETTE } from '../game/bicycle';
@@ -55,7 +56,9 @@ import {
   type ThemeStorage,
 } from '../design/theme-selection';
 import {
+  DEFAULT_ANNOUNCEMENTS,
   readAnnouncementPreference,
+  writeAnnouncementPreference,
   type PreferenceStorage,
 } from '../game/hud/announce-preference';
 import { DEFAULT_CUES, readCuePreference } from '../game/cue-preference';
@@ -865,11 +868,12 @@ describe('announcements — #397', () => {
     // The distance row is in the rider's own unit.
     expect(mounted.container.textContent).toContain('every 1 mi');
     // #399: the climb row is STORED in metres and LABELLED in the rider's
-    // unit — 250 m is 820 ft, and the value submitted is still the metres.
+    // unit. #1440: in the unit's own steps, so the stored 250 m is shown as
+    // the nearest imperial step, 1000 ft, rather than as 820 ft.
     const climb = mounted.container.querySelector<HTMLFieldSetElement>('#oyl-announce-climb');
     const chosen = climb?.querySelector<HTMLInputElement>('input:checked');
-    expect(chosen?.value).toBe('250');
-    expect(chosen?.closest('label')?.textContent).toContain('820 ft before it starts');
+    expect(Number(chosen?.value)).toBeCloseTo(304.8, 6);
+    expect(chosen?.closest('label')?.textContent).toContain('1000 ft before it starts');
     mounted.unmount();
   });
 
@@ -915,9 +919,10 @@ describe('announcements — #397', () => {
     await press(chip('oyl-announce-interval', '30 seconds before it starts'));
     expect(readAnnouncementPreference(store).intervalLeadSeconds).toBe(30);
 
-    // Labelled in feet, stored in metres (#399).
-    await press(chip('oyl-announce-climb', '1640 ft before it starts'));
-    expect(readAnnouncementPreference(store).climbLeadMetres).toBe(500);
+    // Labelled in the rider's unit, stored in metres (#399), in imperial steps (#1440).
+    await press(chip('oyl-announce-climb', '0.25 mi before it starts'));
+    expect(readAnnouncementPreference(store).climbLeadMetres).toBeCloseTo(402.336, 6);
+    expect(chip('oyl-announce-climb', '0.25 mi before it starts').checked).toBe(true);
     mounted.unmount();
   });
 
@@ -1658,5 +1663,147 @@ describe('the cards — #1026', () => {
     expect(sectionsOf(SETTINGS_CARD_TITLES.documents)).toEqual(['Documents for the analysis']);
     expect(sectionsOf(SETTINGS_CARD_TITLES.workoutGoals)).toEqual(['Workout goals']);
     mounted.unmount();
+  });
+});
+
+describe('#1440 — each unit system reads in its own round numbers', () => {
+  function disk(): { readonly store: PreferenceStorage } {
+    const values = new Map<string, string>();
+    return {
+      store: {
+        getItem: (key) => values.get(key) ?? null,
+        setItem: (key, value) => {
+          values.set(key, value);
+        },
+      },
+    };
+  }
+
+  function climbLabels(container: HTMLElement): string[] {
+    return [...container.querySelectorAll<HTMLLabelElement>('#oyl-announce-climb label')].map(
+      (label) => label.textContent?.trim() ?? '',
+    );
+  }
+
+  it('offers an imperial rider 500 ft, 1000 ft, 0.25 mi and 0.5 mi ahead of a climb', async () => {
+    const mounted = await mount(
+      <SettingsView
+        units="imperial"
+        onUnitsChange={() => undefined}
+        onRiderMassChange={() => undefined}
+        announcements={disk().store}
+      />,
+    );
+    expect(climbLabels(mounted.container)).toStrictEqual([
+      'never',
+      '500 ft before it starts',
+      '1000 ft before it starts',
+      '0.25 mi before it starts',
+      '0.5 mi before it starts',
+    ]);
+    mounted.unmount();
+  });
+
+  it('offers a metric rider 100, 250, 500 and 1000 m, as before', async () => {
+    const mounted = await mount(
+      <SettingsView
+        units="metric"
+        onUnitsChange={() => undefined}
+        onRiderMassChange={() => undefined}
+        announcements={disk().store}
+      />,
+    );
+    expect(climbLabels(mounted.container)).toStrictEqual([
+      'never',
+      '100 m before it starts',
+      '250 m before it starts',
+      '500 m before it starts',
+      '1000 m before it starts',
+    ]);
+    mounted.unmount();
+  });
+
+  it('shows a step saved in imperial as the nearest metric one', async () => {
+    const { store } = disk();
+    writeAnnouncementPreference(store, {
+      ...DEFAULT_ANNOUNCEMENTS,
+      climbLeadMetres: 0.5 * 1609.344,
+    });
+    const mounted = await mount(
+      <SettingsView
+        units="metric"
+        onUnitsChange={() => undefined}
+        onRiderMassChange={() => undefined}
+        announcements={store}
+      />,
+    );
+    const chosen = mounted.container.querySelector<HTMLInputElement>(
+      '#oyl-announce-climb input:checked',
+    );
+    expect(chosen?.closest('label')?.textContent?.trim()).toBe('1000 m before it starts');
+    mounted.unmount();
+  });
+
+  it('names no converted assumed weight to an imperial rider', async () => {
+    const { port } = massPort();
+    const mounted = await mount(
+      <SettingsView
+        units="imperial"
+        onUnitsChange={() => undefined}
+        mass={port}
+        onRiderMassChange={() => undefined}
+      />,
+    );
+    await settle();
+    const ids = (massBox(mounted.container).getAttribute('aria-describedby') ?? '').split(' ');
+    expect(ids.map((id) => document.getElementById(id)?.textContent)).toStrictEqual([
+      'Leave it blank to go back to the assumed weight.',
+    ]);
+    expect(mounted.container.textContent).toContain(
+      'You have not entered one, so rides use an assumed weight.',
+    );
+    expect(mounted.container.textContent).not.toContain('156.5');
+    mounted.unmount();
+  });
+
+  it('still names 71.0 kg to a metric rider, in both sentences', async () => {
+    const { port } = massPort();
+    const mounted = await mount(
+      <SettingsView
+        units="metric"
+        onUnitsChange={() => undefined}
+        mass={port}
+        onRiderMassChange={() => undefined}
+      />,
+    );
+    await settle();
+    expect(mounted.container.textContent).toContain(
+      'Leave it blank to go back to the assumed 71.0 kg.',
+    );
+    expect(mounted.container.textContent).toContain(
+      'You have not entered one, so rides use an assumed 71.0 kg.',
+    );
+    mounted.unmount();
+  });
+
+  it('starts the blank weight box’s steps from a round 155 lb, not 156.5', async () => {
+    const { port } = massPort();
+    const mounted = await mount(
+      <SettingsView
+        units="imperial"
+        onUnitsChange={() => undefined}
+        mass={port}
+        onRiderMassChange={() => undefined}
+      />,
+    );
+    await settle();
+    const increase = queryAll<HTMLButtonElement>(mounted.container, 'button').find(
+      (button) => button.getAttribute('aria-label') === 'Increase weight',
+    );
+    if (increase === undefined) throw new Error('no Increase weight button');
+    await activateWithKeyboard(increase);
+    expect(massBox(mounted.container).value).toBe('155.0');
+    mounted.unmount();
+    expect(assumedWeightStart('metric')).toBe(71);
   });
 });

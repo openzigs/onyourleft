@@ -157,9 +157,10 @@ import {
   type CuePreference,
 } from './cue-preference';
 import { SoundControls } from './SoundControls';
-import { RoutePicker, type RidableRoute } from './StageChooser';
+import { RoutePicker, type RecordingOffer, type RidableRoute } from './StageChooser';
 import { sharedCueOutput } from './web-audio';
 import {
+  climbLeadIn,
   DEFAULT_ANNOUNCEMENTS,
   deviceStorage,
   readAnnouncementPreference,
@@ -1686,7 +1687,10 @@ export function GameView(props: GameViewProps): JSX.Element {
         slopes: slopesRef.current,
         profile: chosen.profile,
         distance: simulation.state.ride.distance,
-        lead: announcementsRef.current.enabled ? announcementsRef.current.climbLeadMetres : 'never',
+        // #1440: the step of the rider's own units nearest the one stored.
+        lead: announcementsRef.current.enabled
+          ? climbLeadIn(announcementsRef.current.climbLeadMetres, unitsRef.current)
+          : 'never',
         units: unitsRef.current,
       });
       slopeAnnouncedRef.current = slope.announced;
@@ -2174,6 +2178,10 @@ export function GameView(props: GameViewProps): JSX.Element {
           position={position}
           onPosition={setPosition}
           onStart={start}
+          // #1221: whether this ride will be saved, said under Ride. The
+          // recorder's moving time is subscribed (`useRideMovingSeconds`), so
+          // a recording started here or on the Ride screen is seen at once.
+          recording={recordingOfferOf(props.trainer, movingSeconds)}
         />
         {/*
           #784, #785: a room on one of the rider's own routes, or one a friend
@@ -2596,6 +2604,33 @@ export function GameView(props: GameViewProps): JSX.Element {
  * then; a pairing the lost link ENDED is a line here again), and *Stop
  * side camera* while there is something to stop. `undefined` with no pairing.
  */
+/**
+ * What the chooser says about the ride being saved — #1221. @see RecordingOffer
+ *
+ * `undefined` with no trainer port, which only a test or harness renders:
+ * production always hands one over (`main.tsx` §`buildGameTrainerPort`), even
+ * with no ride controller. A ride is recorded exactly when the recorder has a
+ * moving time to give (`GameTrainerPort.rideMovingSeconds`: recording or
+ * paused), which is the figure the HUD's *Moving* shows.
+ */
+function recordingOfferOf(
+  trainer: GameTrainerPort | undefined,
+  movingSeconds: number | undefined,
+): RecordingOffer | undefined {
+  if (trainer === undefined) {
+    return undefined;
+  }
+  return {
+    recorded: movingSeconds !== undefined,
+    // ⚠️ A call, not a bound reference, so `WIRE003` sees the port's method
+    // called by production.
+    onRecord:
+      trainer.recordGameRide === undefined
+        ? undefined
+        : async () => (await trainer.recordGameRide?.()) ?? false,
+  };
+}
+
 function sideCameraOnHud(
   sideCamera: SideCameraOnRideState,
 ): { readonly line: string | undefined; readonly onStop: (() => void) | undefined } | undefined {

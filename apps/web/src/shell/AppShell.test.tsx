@@ -28,6 +28,8 @@ import type { AthleteMassPort } from '../athlete/store-port';
 import { SIDE_INSTANCE_WHAT_IS_SENT } from '../camera/instance-pose';
 import { browserSecureWindow } from '../camera/secure-window-testing';
 import { CameraController } from '../camera/session';
+import { scriptedInstance } from '../instance/testing';
+import { stubLibrary } from '../library/testing';
 import { manualSchedule, scriptedCamera } from '../camera/testing';
 import type { GamePort, RidableRoute } from '../game/GameView';
 import type { GameRenderer } from '../game/port';
@@ -146,6 +148,24 @@ describe('the router', () => {
     await settle();
     expect(document.querySelector('main')?.textContent ?? '').toContain(SIDE_INSTANCE_WHAT_IS_SENT);
     expect(document.querySelector('[aria-labelledby="oyl-camera-instance"]')).not.toBeNull();
+  });
+
+  it('hands History the platform and the rider’s instance, for its footer — #1438', async () => {
+    // Two optional props passed through the shell: left out, History says
+    // the browser's wording in the app and no instance clause with one.
+    globalThis.location.hash = '#/activities';
+    mounted = await mount(
+      <AppShell
+        capabilities={NO_BLUETOOTH}
+        library={stubLibrary(athleteId('local'), [])}
+        nativeShell
+        instance={scriptedInstance({ connected: true }).port}
+      />,
+    );
+    await settle();
+    const text = document.querySelector('main')?.textContent ?? '';
+    expect(text).toContain('a ride you sync is also kept on your instance');
+    expect(text).toContain('clearing its storage in Android’s settings');
   });
 
   it('stops listening for navigation once it is unmounted', async () => {

@@ -122,7 +122,7 @@ const AVAILABLE = { manualLap: { available: true, last: undefined } };
 const ENDED = { manualLap: { available: true, last: { number: 2, lap: LAP } } };
 
 describe('Lap on the Ride screen — #1318', () => {
-  it('is a button a keyboard and a screen reader reach, between Pause and Stop, and a press takes a lap', async () => {
+  it('is a button a keyboard and a screen reader reach, first in the row with Pause between it and Stop (#1430), and a press takes a lap', async () => {
     const opened = await open(AVAILABLE, true);
 
     const button = lapButton();
@@ -133,7 +133,7 @@ describe('Lap on the Ride screen — #1318', () => {
     const row = [...(button?.parentElement?.querySelectorAll('button') ?? [])].map(
       (each) => each.textContent,
     );
-    expect(row).toEqual(['Pause', 'Lap', 'Stop']);
+    expect(row).toEqual(['Lap', 'Pause', 'Stop']);
     button?.focus();
     expect(document.activeElement).toBe(button);
 

@@ -103,6 +103,12 @@ import { activityId, lapId, recordingSessionId } from '@onyourleft/store';
 import { ATHLETE_A, createStoreHarness, seedAthletes } from '@onyourleft/store/testing';
 
 import { LAP_NOTICE_SECONDS } from './hud/lap-text';
+import {
+  CANNOT_RECORD_TEXT,
+  NOT_RECORDING_TEXT,
+  RECORDING_REFUSED_TEXT,
+  RECORDING_STARTED_TEXT,
+} from './StageChooser';
 import type { CourseLineEvent } from '../recording/laps';
 import { ROOM_RECORDING_PAUSED_TEXT } from './room-ride';
 import { createRideController } from '../ride/controller';
@@ -1171,6 +1177,107 @@ describe('pair, open the game, press Ride — the whole path, against the #44 si
       });
       await pump(1);
       expect(mounted?.container.textContent).not.toContain(ROOM_RECORDING_PAUSED_TEXT);
+      await rig.done();
+    });
+  });
+
+  /**
+   * #1221: a game ride with no recording running was ridden and lost, with
+   * only the HUD's dashed *Moving* to say so. The chooser now says it in
+   * words under *Ride*, before the press, and *Record this ride* starts the
+   * REAL controller's recording — which, stopped and saved, is an activity in
+   * the library, read back through the store's own list on the device.
+   */
+  describe('a game ride with nothing recording says so, and can be recorded — #1221', () => {
+    /** The line under Ride, as a rider reads it. */
+    const recordingLine = (): string =>
+      mounted?.container.querySelector('.oyl-chooser__recording')?.textContent ?? '';
+
+    it('says before the press that the ride will not be saved, and records it once asked — saved to the library on the device', async () => {
+      const rig = await onTheBench(false);
+      await openTheGame(gameTrainerPortOver(rig.controller));
+      expect(rig.controller.getSnapshot().phase).toBe('idle');
+      expect(recordingLine()).toContain(NOT_RECORDING_TEXT);
+      expect(recordingLine()).not.toContain(CANNOT_RECORD_TEXT);
+
+      await clickThrough(buttonStarting('Record this ride'));
+      await flush();
+      expect(rig.controller.getSnapshot().phase).toBe('recording');
+      // The offer is gone, the line says where the ride is saved, and focus is
+      // on Ride rather than lost with the pressed control (SC 2.4.3).
+      expect(buttonStarting('Record this ride')).toBeUndefined();
+      expect(mounted?.container.textContent).not.toContain(NOT_RECORDING_TEXT);
+      expect(mounted?.container.textContent).toContain(RECORDING_STARTED_TEXT);
+      expect(document.activeElement).toBe(buttonStarting('Ride '));
+
+      await clickThrough(buttonStarting('Ride '));
+      await flush();
+      for (let index = 0; index < 10; index += 1) {
+        await pump(2);
+        await act(async () => {
+          rig.bench.advance(seconds(1));
+          await rig.controller.tick(rig.bench.now);
+        });
+      }
+      await clickThrough(buttonStarting('End ride'));
+      await flush();
+      await act(async () => {
+        rig.controller.armStop();
+        await rig.controller.confirmStop();
+      });
+      await flush();
+      expect(rig.controller.getSnapshot().saveState).toBe('saved');
+      // ⚠️ Read back through the library's own list, on a fresh read of the
+      // device's store — no instance anywhere in this rig (ADR 0036 D-3).
+      const library = await rig.harness.read(async (store) =>
+        store.listActivitySummaries(ATHLETE_A),
+      );
+      expect(library.map((summary) => summary.id)).toEqual([activityId('the-ride')]);
+      await rig.done();
+    });
+
+    it('says nothing under Ride while a recording started on the Ride screen is running', async () => {
+      const rig = await onTheBench(false);
+      await rig.controller.start();
+      await openTheGame(gameTrainerPortOver(rig.controller));
+      expect(mounted?.container.querySelector('.oyl-chooser__recording')).toBeNull();
+      expect(buttonStarting('Record this ride')).toBeUndefined();
+      expect(mounted?.container.textContent).not.toContain(RECORDING_STARTED_TEXT);
+      await rig.done();
+    });
+
+    it('says the ride will not be saved again once the recording under it has stopped', async () => {
+      const rig = await onTheBench(false);
+      await rig.controller.start();
+      await openTheGame(gameTrainerPortOver(rig.controller));
+      expect(recordingLine()).toBe('');
+      await act(async () => {
+        rig.controller.armStop();
+        await rig.controller.confirmStop();
+      });
+      await flush();
+      expect(recordingLine()).toContain(NOT_RECORDING_TEXT);
+      await rig.done();
+    });
+
+    it('says this browser cannot record, and offers nothing, where there is no ride controller', async () => {
+      await openTheGame(gameTrainerPortOver(undefined));
+      expect(recordingLine()).toContain(NOT_RECORDING_TEXT);
+      expect(recordingLine()).toContain(CANNOT_RECORD_TEXT);
+      expect(buttonStarting('Record this ride')).toBeUndefined();
+    });
+
+    it('says so when the recording could not be started, and keeps the offer', async () => {
+      const rig = await onTheBench(false);
+      await openTheGame({
+        ...gameTrainerPortOver(rig.controller),
+        recordGameRide: () => Promise.resolve(false),
+      });
+      await clickThrough(buttonStarting('Record this ride'));
+      await flush();
+      expect(recordingLine()).toContain(RECORDING_REFUSED_TEXT);
+      expect(buttonStarting('Record this ride')).toBeDefined();
+      expect(rig.controller.getSnapshot().phase).toBe('idle');
       await rig.done();
     });
   });

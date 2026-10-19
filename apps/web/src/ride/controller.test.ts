@@ -117,7 +117,7 @@ vi.mock('../recording/laps', async (importOriginal) => {
 });
 
 import { DEFAULT_AUTO_PAUSE_AFTER_SECONDS } from '../recording/channels';
-import { exportActivity } from '../transfer/export-activity';
+import { exportActivity, LOSSY_CHANNELS } from '../transfer/export-activity';
 import type { ActivityFileFormat } from '../transfer/file-format';
 import { importActivityFiles } from '../transfer/import-batch';
 import { webCryptoDigest } from '../transfer/browser';
@@ -8483,19 +8483,35 @@ describe('#1312 — the laps of a course are the recording’s, and are saved wi
         throw new Error('the ride was not saved');
       }
       const laps = await lapsOf('ride-1');
+      const storedStreams = await harness.read(async (store) =>
+        store.getStreamSet(ATHLETE_A, activityId('ride-1')),
+      );
       const bytes = await exported(format);
       // The erase: the ride, its samples and its laps.
       expect(
         await harness.write(async (store) => store.deleteActivity(ATHLETE_A, activityId('ride-1'))),
       ).toBe(true);
       const back = await importedBack(format, bytes, withLaps ? 'laps' : 'plain');
+      const backStreams = await harness.read(async (store) =>
+        store.getStreamSet(ATHLETE_A, activityId(`back-${withLaps ? 'laps' : 'plain'}`)),
+      );
       const totals = (ride: typeof stored) => ({
         startedAt: ride.startedAt,
         elapsedTime: ride.elapsedTime,
         movingTime: ride.movingTime,
         distance: ride.distance,
       });
-      return { stored: totals(stored), back: totals(back), laps };
+      return {
+        stored: totals(stored),
+        back: totals(back),
+        laps,
+        storedSamples: storedStreams?.sampleCount,
+        backSamples: backStreams?.sampleCount,
+        firstSlotEmpty: Object.values(storedStreams?.channels ?? {}).every(
+          (channel) => channel?.[0] === undefined,
+        ),
+        backLaps: await lapsOf(`back-${withLaps ? 'laps' : 'plain'}`),
+      };
     };
 
     it.each<ActivityFileFormat>(['fit', 'tcx'])(
@@ -8525,19 +8541,71 @@ describe('#1312 — the laps of a course are the recording’s, and are saved wi
         // And against what was stored. The distance is the ride's own, to the
         // tenth of a metre TCX is written to.
         expect(Math.abs(lapped.back.distance - lapped.stored.distance)).toBeLessThanOrEqual(0.05);
-        // An import has always bounded a stated elapsed time by the span of
-        // the file's samples (`read-activity-file.ts` §`observedSpan`), and
-        // this ride's first second has no reading in it: one second, in both
-        // formats, with laps and without.
-        expect(lapped.back.elapsedTime).toBe(lapped.stored.elapsedTime - 1);
+        // #1323. An import starts a ride at its first timed sample and bounds
+        // a stated elapsed time by the span of the file's samples
+        // (`read-activity-file.ts` §`observedSpan`), and this ride's first
+        // second has no reading in it — the premise, read off the stored
+        // grid. The file states the first slot with a bare time, so the ride
+        // comes back when it started and as long as it was, in both formats.
+        expect(lapped.firstSlotEmpty).toBe(true);
+        expect(lapped.back.startedAt).toBe(lapped.stored.startedAt);
+        expect(lapped.back.elapsedTime).toBe(lapped.stored.elapsedTime);
+        // And on a grid of the same length as the one it was saved on.
+        expect(lapped.backSamples).toBe(lapped.storedSamples);
         // FIT's session states the moving time. TCX has nowhere to state one,
-        // so an imported TCX has always read its moving time as its elapsed
-        // time — with or without laps, before #1312 and after.
+        // so an imported TCX reads its moving time as its elapsed time — with
+        // or without laps — and `LOSSY_CHANNELS` says so before the rider
+        // chooses the format (#1323).
         expect(lapped.back.movingTime).toBe(
           format === 'fit' ? lapped.stored.movingTime : lapped.back.elapsedTime,
         );
+        expect(LOSSY_CHANNELS[format].includes('activity.movingTime')).toBe(format === 'tcx');
+        // #1320: a file this client wrote comes back with no lap rows. Its
+        // splits include the lead-in and the tail, and nothing in it yet says
+        // which are laps of the course (#1321), so it is read as a file with
+        // no laps rather than one whose lead-in is a lap.
+        expect(lapped.backLaps).toEqual([]);
       },
     );
+
+    /**
+     * #1320's review: a third-party TCX lap ends where the next one starts and
+     * its `TotalTimeSeconds` is its moving time. This client's own TCX writes
+     * each split's wall-clock span there instead. The two readings must not
+     * disagree about this client's file, or the day #1321 lets it list laps,
+     * a ride exported and imported again would come back with other lap times.
+     *
+     * The file is this client's own export with only its `<Creator>` renamed,
+     * so it is read by the third-party rule; each split comes back as a row,
+     * and each row's elapsed time is the time the file wrote for it.
+     */
+    it('reads this client’s own TCX splits back with the times it wrote, by the third-party lap rule', async () => {
+      await recorded(true);
+      const text = new TextDecoder().decode(await exported('tcx'));
+      const written = [...text.matchAll(/<TotalTimeSeconds>([^<]+)<\/TotalTimeSeconds>/gu)].map(
+        (match) => Number(match[1]),
+      );
+      const renamed = text.replace(
+        /(<Creator\b[^>]*>\s*<Name>)On Your Left(<\/Name>)/u,
+        '$1Another app$2',
+      );
+      // The premise: a lead-in, three laps (one a part lap) and a tail; and
+      // the rename took.
+      expect(written).toHaveLength(5);
+      expect(renamed).not.toBe(text);
+
+      await harness.write(async (store) => store.deleteActivity(ATHLETE_A, activityId('ride-1')));
+      await importedBack('tcx', new TextEncoder().encode(renamed), 'renamed');
+      const back = await lapsOf('back-renamed');
+
+      // The ride's first second has no reading in it, but since #1323 the
+      // export states it with a bare point, so the lead-in starts at the
+      // ride's start too: every split's time is the one written.
+      expect(back.map((lap) => lap.elapsedTime)).toEqual(written);
+      // And that one time is also each row's moving time, as it was when a
+      // TCX lap's time was read as its elapsed time.
+      expect(back.map((lap) => lap.movingTime)).toEqual(back.map((lap) => lap.elapsedTime));
+    });
   });
 });
 
@@ -9224,13 +9292,21 @@ describe('#1042 — the saved ride the result card states, and the game’s outc
     await rig.controller.pair('trainer');
     await rig.controller.start();
     await ride(rig, 3);
+    // #1437's review: a pause, so the record's moving time is not its elapsed
+    // time and the card's moving time is seen to come from the right field.
+    await rig.controller.pause();
+    await ride(rig, 5);
+    await rig.controller.resume();
+    await ride(rig, 2);
     rig.controller.armStop();
     await rig.controller.confirmStop();
 
     const saved = rig.controller.getSnapshot().savedRide;
     const record = written[0]!;
+    expect(record.movingTime).toBeLessThan(record.elapsedTime);
     expect(saved).toEqual({
       activityId: 'saved-ride',
+      movingTime: record.movingTime,
       elapsedTime: record.elapsedTime,
       distance: record.distance,
       averagePower: record.averagePower,

@@ -30,8 +30,7 @@ import type {
   RiderTextRecord,
   LapRecord,
   ListActivitiesOptions,
-  NewActivity,
-  NewStreamSet,
+  NewFinishedRide,
   PrivacyZoneRecord,
   RouteId,
   RouteRecord,
@@ -196,8 +195,11 @@ export interface TransferStore {
     owner: AthleteId,
     sha256: string,
   ): Promise<ActivityRecord | undefined>;
-  putActivity(record: NewActivity): Promise<ActivityId>;
-  putStreamSet(set: NewStreamSet): Promise<ActivityId>;
+  /**
+   * An imported ride — its activity, samples and laps — in one transaction
+   * (#1320, `import-batch.ts` §`storeRide`): all of it lands or none of it.
+   */
+  putFinishedRide(ride: NewFinishedRide): Promise<ActivityId>;
   deleteActivity(owner: AthleteId, id: ActivityId): Promise<boolean>;
   getActivity(owner: AthleteId, id: ActivityId): Promise<ActivityRecord | undefined>;
   getStreamSet(owner: AthleteId, activity: ActivityId): Promise<StreamSet | undefined>;
