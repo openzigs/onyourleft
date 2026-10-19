@@ -11,7 +11,7 @@ import { EmptyState } from '../design/EmptyState';
 import { KeptVisible } from '../design/KeptVisible';
 import { StatusMessage } from '../design/StatusMessage';
 import { VisuallyHidden } from '../design/VisuallyHidden';
-import { ELAPSED_TIME_LABEL, MOVING_TIME_LABEL, ofElapsed, POWER_UNIT } from '../format';
+import { ELAPSED_TIME_LABEL, MOVING_TIME_LABEL, POWER_UNIT } from '../format';
 import { useUnits } from '../units/context';
 import { distanceUnit } from '../units/format';
 import { orderedRows, PAGE_SIZE, rowFor, type LibraryRow } from '../library/rows';
@@ -600,8 +600,8 @@ function RideCard({
             <Reading value={row.movingTime} />
             {/* #1437: a ride whose elapsed time is far above its moving time
               reads "0:10 of 10:31:26 elapsed" at a glance. */}
-            {row.elapsedTime === row.movingTime ? null : (
-              <span className="oyl-muted"> {ofElapsed(row.elapsedTime)}</span>
+            {row.elapsedBeside === undefined ? null : (
+              <span className="oyl-muted"> {row.elapsedBeside}</span>
             )}
           </dd>
         </div>

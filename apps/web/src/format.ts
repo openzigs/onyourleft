@@ -40,6 +40,24 @@ export function ofElapsed(elapsed: string): string {
 }
 
 /**
+ * What follows a moving time of `movingTime` seconds, or `undefined` when
+ * nothing should: {@link ofElapsed} of the elapsed time where the two differ.
+ *
+ * ⚠️ **Nothing when the moving time is the longer** (#1437's review). A
+ * moving time over the elapsed one is a record no clock can produce, but an
+ * import or an old save can hold one, and "1:00 of 0:50 elapsed" says
+ * something false about the ride. The moving time is then shown alone. And
+ * nothing when the two READ the same, as a ride that never paused does, so
+ * its time is said once.
+ */
+export function elapsedBeside(movingTime: number, elapsedTime: number): string | undefined {
+  const elapsed = formatDuration(elapsedTime);
+  return movingTime > elapsedTime || elapsed === formatDuration(movingTime)
+    ? undefined
+    : ofElapsed(elapsed);
+}
+
+/**
  * `3725` → `1:02:05`. Hours only when there are some.
  *
  * Moved here from `views/RideView.tsx` by #62, which needed the same format for

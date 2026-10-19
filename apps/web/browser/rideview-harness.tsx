@@ -620,10 +620,12 @@ const WIDEST_READINGS = QUERY.get('readings') === 'widest';
  *
  * ⚠️ The elapsed time is `10:23:45` since #1083, the widest duration a fact
  * shows short of a day: it was `3:25:45` (12 345 s), and the card's facts
- * were sized from a Mac's `10:23:45` that nothing here had ever drawn.
+ * were sized from a Mac's `10:23:45` that nothing here had ever drawn. Since
+ * #1437's review the card states the MOVING time, so that is the `10:23:45`.
  */
 const SAVED_RIDE = {
   activityId: activityId('harness-ride'),
+  movingTime: seconds(37_425),
   elapsedTime: seconds(37_425),
   distance: metres(123_456),
   averagePower: watts(1_234),

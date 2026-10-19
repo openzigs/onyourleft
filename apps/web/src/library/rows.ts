@@ -11,7 +11,13 @@
 
 import type { ActivityOrder, ActivitySummary, SortDirection, UnitSystem } from '@onyourleft/store';
 
-import { formatDuration, formatPowerValue, formatStartedAt, shownAveragePower } from '../format';
+import {
+  elapsedBeside,
+  formatDuration,
+  formatPowerValue,
+  formatStartedAt,
+  shownAveragePower,
+} from '../format';
 import { formatDistance, shownDistance } from '../units/format';
 
 /**
@@ -41,8 +47,13 @@ export interface LibraryRow {
    * ride that moved 0:10) is not the ride.
    */
   readonly movingTime: string;
-  /** Elapsed time, which follows the moving time where it differs from it. */
+  /** Elapsed time, as the selected ride's summary states it. */
   readonly elapsedTime: string;
+  /**
+   * What the card says after the moving time — "of 10:31:26 elapsed" — or
+   * `undefined` for nothing. `format.ts` §`elapsedBeside`'s rule.
+   */
+  readonly elapsedBeside: string | undefined;
   /**
    * The ride's distance, one decimal, **no unit** — the unit is the column
    * heading, which `ActivitiesView` takes from `units/format.ts` so the
@@ -87,6 +98,7 @@ export function rowFor(summary: ActivitySummary, units: UnitSystem): LibraryRow 
     startedAt: formatStartedAt(summary.startedAt, summary.startedAtTimeZone),
     movingTime: formatDuration(summary.movingTime),
     elapsedTime: formatDuration(summary.elapsedTime),
+    elapsedBeside: elapsedBeside(summary.movingTime, summary.elapsedTime),
     distance: distance === undefined ? undefined : formatDistance(distance, units).value,
     averagePower: averagePower === undefined ? undefined : formatPowerValue(averagePower),
     hasPosition: summary.hasPosition,

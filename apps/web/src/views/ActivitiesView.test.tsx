@@ -966,6 +966,18 @@ describe('#1437 — History leads with moving time, and says which', () => {
     expect(cardFacts()[0]).toBe('Moving time: 1:02:05');
   });
 
+  it('shows the moving time alone when it is longer than the elapsed time — never “of … elapsed”', async () => {
+    // No clock records this, but an import or an old save can hold it, and
+    // "1:00 of 0:50 elapsed" would say something false about the ride.
+    const library = stubLibrary(OWNER, [
+      summary('moving-over-elapsed', { movingTime: seconds(60), elapsedTime: seconds(50) }),
+    ]);
+    mounted = await mount(<ActivitiesView library={library} />);
+    await settle();
+
+    expect(cardFacts()[0]).toBe('Moving time: 1:00');
+  });
+
   it('names both in the selected ride’s summary, moving first', async () => {
     const library = stubLibrary(OWNER, [
       summary('left-running', { movingTime: seconds(10), elapsedTime: seconds(37_886) }),

@@ -9224,13 +9224,21 @@ describe('#1042 — the saved ride the result card states, and the game’s outc
     await rig.controller.pair('trainer');
     await rig.controller.start();
     await ride(rig, 3);
+    // #1437's review: a pause, so the record's moving time is not its elapsed
+    // time and the card's moving time is seen to come from the right field.
+    await rig.controller.pause();
+    await ride(rig, 5);
+    await rig.controller.resume();
+    await ride(rig, 2);
     rig.controller.armStop();
     await rig.controller.confirmStop();
 
     const saved = rig.controller.getSnapshot().savedRide;
     const record = written[0]!;
+    expect(record.movingTime).toBeLessThan(record.elapsedTime);
     expect(saved).toEqual({
       activityId: 'saved-ride',
+      movingTime: record.movingTime,
       elapsedTime: record.elapsedTime,
       distance: record.distance,
       averagePower: record.averagePower,

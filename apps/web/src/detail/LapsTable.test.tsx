@@ -81,8 +81,8 @@ describe('the lap table — #1312', () => {
 
     expect(headings).toEqual([
       'Lap',
-      'Elapsed',
-      'Moving',
+      'Moving time',
+      'Elapsed time',
       'Distance (km)',
       'Avg power (W)',
       'Best power (W)',
@@ -94,7 +94,7 @@ describe('the lap table — #1312', () => {
     ]);
     // 7 km in 700 s of MOVING time is 36.0 km/h; the 30 s paused are not in it.
     expect(rows).toEqual([
-      ['1', '12:10', '11:40', '7.0', '203', '618', '36.0', '151', '173', '91', '48'],
+      ['1', '11:40', '12:10', '7.0', '203', '618', '36.0', '151', '173', '91', '48'],
     ]);
   });
 
@@ -124,8 +124,8 @@ describe('the lap table — #1312', () => {
 
     expect(headings).toEqual([
       'Lap',
-      'Elapsed',
-      'Moving',
+      'Moving time',
+      'Elapsed time',
       'Distance (km)',
       'Avg power (W)',
       'Best power (W)',
@@ -155,6 +155,9 @@ describe('the lap table — #1312', () => {
 
     expect(text).toContain(LAP_TIMES_NOTE);
     expect(LAP_TIMES_NOTE).toContain('moving time');
+    // #1437's review: the note names the columns as the table and the rest of
+    // the ride's page do.
+    expect(LAP_TIMES_NOTE).toContain('Paused time is in Elapsed time, not in Moving time.');
   });
 
   it('says a ride has no laps, and draws no table and no note', async () => {

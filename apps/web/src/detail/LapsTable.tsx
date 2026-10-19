@@ -34,7 +34,13 @@ import type { JSX, ReactNode } from 'react';
 import type { LapRecord, UnitSystem } from '@onyourleft/store';
 
 import { ScrollTable } from '../design/ScrollTable';
-import { formatDuration, formatPowerValue, POWER_UNIT } from '../format';
+import {
+  ELAPSED_TIME_LABEL,
+  formatDuration,
+  formatPowerValue,
+  MOVING_TIME_LABEL,
+  POWER_UNIT,
+} from '../format';
 import { bestLapIndex, lapAverageSpeed } from '../recording/laps';
 import {
   distanceUnit,
@@ -53,8 +59,7 @@ const NO_FIGURE = '—';
  * `a11y/section-lines.ts` §`SECTION_LINE_CHARACTERS`: it is the section's one
  * line of explanation.
  */
-export const LAP_TIMES_NOTE =
-  'Averages and average speed are over a lap’s moving time. Paused time is in Elapsed, not in Moving.';
+export const LAP_TIMES_NOTE = `Averages and average speed are over a lap’s moving time. Paused time is in ${ELAPSED_TIME_LABEL}, not in ${MOVING_TIME_LABEL}.`;
 
 /** One optional column: its heading, and what a lap shows in it. */
 interface FigureColumn {
@@ -146,8 +151,9 @@ export function LapsTable({ laps, units }: LapsTableProps): JSX.Element {
         <thead>
           <tr>
             <th scope="col">Lap</th>
-            <th scope="col">Elapsed</th>
-            <th scope="col">Moving</th>
+            {/* #1437's review: the ride page's own names, moving first. */}
+            <th scope="col">{MOVING_TIME_LABEL}</th>
+            <th scope="col">{ELAPSED_TIME_LABEL}</th>
             <th scope="col">Distance ({distanceUnit(units)})</th>
             {columns.map((column) => (
               <th key={column.key} scope="col">
@@ -160,8 +166,8 @@ export function LapsTable({ laps, units }: LapsTableProps): JSX.Element {
           {laps.map((lap, index) => (
             <tr key={lap.id}>
               <th scope="row">{lapName(lap, index === best)}</th>
-              <td>{formatDuration(lap.elapsedTime)}</td>
               <td>{formatDuration(lap.movingTime)}</td>
+              <td>{formatDuration(lap.elapsedTime)}</td>
               <td>{formatDistance(lap.distance, units).value}</td>
               {columns.map((column) => (
                 <td key={column.key}>{column.cell(lap) ?? NO_FIGURE}</td>
