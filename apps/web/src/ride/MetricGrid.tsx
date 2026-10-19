@@ -57,6 +57,30 @@ import type { MetricState, RideMetricId } from './metrics';
  */
 export const MINIMUM_PRIMARY_METRIC_REM = 3.5;
 
+/**
+ * How tall a digit of a ZOOMED reading must be drawn, in CSS px — #1433.
+ *
+ * The target is ISO 15008's recommended character height for a display read
+ * in a glance — 20 minutes of arc, cited through NHTSA's human-factors design
+ * guidance (report 812 360), which also bounds a glance at two seconds — at
+ * #49's two metres: 11.6 mm. A CSS pixel is turned into millimetres at 160 to
+ * the inch, Android's baseline density and the largest count per inch of the
+ * devices this screen is read on, so the physical digit is that size or
+ * larger. At arm's length (about 0.75 m) the same digit subtends 2.7 times the
+ * target.
+ *
+ * @test-facing the floor `rideview.browser.spec.ts` §"#1433" measures the
+ * rendered digit against; the size is `--oyl-font-size-zoom` and does not read it.
+ */
+export const ZOOMED_DIGIT_FLOOR_PIXELS = digitPixels(20, 2000, 160);
+
+/** A character `arcMinutes` tall at `distanceMm`, in CSS px at `pixelsPerInch`. */
+function digitPixels(arcMinutes: number, distanceMm: number, pixelsPerInch: number): number {
+  const radians = (arcMinutes / 60) * (Math.PI / 180);
+  const millimetres = 2 * distanceMm * Math.tan(radians / 2);
+  return (millimetres / 25.4) * pixelsPerInch;
+}
+
 interface MetricPresentation {
   readonly label: string;
   readonly unit: string;
@@ -140,12 +164,21 @@ export function metricText(
 
 export interface MetricGridProps {
   readonly metrics: readonly RideMetric[];
+  /**
+   * #1433: the Ride screen's zoom is on — `metrics` is already the rider's top
+   * two (`reading-choice.ts` §`shownReadings`), and they are drawn at
+   * `--oyl-font-size-zoom` rather than the metric size.
+   */
+  readonly zoomed?: boolean;
 }
 
-export function MetricGrid({ metrics }: MetricGridProps): JSX.Element {
+export function MetricGrid({ metrics, zoomed = false }: MetricGridProps): JSX.Element {
   const presentations = presentationFor(useUnits());
   return (
-    <ul className="oyl-metric-grid oyl-metric-grid--live" aria-label="Live metrics">
+    <ul
+      className={`oyl-metric-grid oyl-metric-grid--live${zoomed ? ' oyl-metric-grid--zoomed' : ''}`}
+      aria-label="Live metrics"
+    >
       {metrics.map((metric) => {
         const presentation = presentations[metric.id];
         const text = metricText(metric.state, presentation);

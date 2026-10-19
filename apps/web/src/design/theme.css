@@ -142,6 +142,8 @@
   --oyl-font-size-display: 2.44140625rem;
   /* A live ride metric. See tokens.ts — this one has an acceptance criterion. */
   --oyl-font-size-metric: 3.814697265625rem;
+  /* A ride metric with the Ride screen's zoom on (#1433). See tokens.ts. */
+  --oyl-font-size-zoom: 7.450580596923828rem;
 
   /* The display face (#991, ADR 0043), and the page's own stack behind it:
      a weight the face does not carry, or a character outside its range, is
@@ -1940,6 +1942,30 @@ html {
 }
 
 /*
+ * #1433: Settings' Ride screen readings — one row a reading, its checkbox and
+ * name first and its Up and Down after, 8 px apart, in the order the Ride
+ * screen shows them.
+ */
+.oyl-ride-readings__list {
+  display: grid;
+  gap: var(--oyl-space-sm);
+  list-style: none;
+  margin: 0 0 var(--oyl-space-md);
+  padding: 0;
+}
+
+.oyl-ride-readings__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oyl-space-sm);
+}
+
+.oyl-ride-readings__row > label {
+  flex: 1 1 8rem;
+}
+
+/*
  * A route that is operated rather than read (#422).
  *
  * `--oyl-measure` is a READING measure and it is right for every route that is
@@ -2801,6 +2827,31 @@ a.oyl-button {
 }
 
 /*
+ * THE ZOOM — #1433. The rider's top two readings at the zoom size and no
+ * others (`ride/reading-choice.ts`): one to a row wherever two at that size
+ * would not fit side by side, which is every phone, and two to a row once the
+ * Live group is wide enough, which on a landscape tablet it is. Four digits
+ * of the zoom size in the display face are about 254 px, so the two-to-a-row
+ * step is where two cards of that and their padding fit.
+ * `rideview.browser.spec.ts` §"#1433" measures the digit, the fit and the
+ * fold at phones and tablets.
+ */
+.oyl-metric-grid--live.oyl-metric-grid--zoomed {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@container oyl-live (min-width: 36rem) {
+  .oyl-metric-grid--live.oyl-metric-grid--zoomed {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.oyl-metric-grid--zoomed .oyl-reading--metric .oyl-reading__value {
+  font-size: var(--oyl-font-size-zoom);
+  line-height: 1;
+}
+
+/*
  * #1012: with nothing paired, ONE banner where the readings go
  * (`RideView.tsx` §`NoSensorsBanner`) — a filled tile, the sensor drawing at
  * the medium size (the owner's ruling of 2026-10-01), the sentence, and one
@@ -3417,6 +3468,24 @@ a.oyl-button {
   flex-wrap: wrap;
   align-items: center;
   gap: var(--oyl-space-sm);
+}
+
+/*
+ * #1433: the ride's own controls and the zoom as one row — the zoom at its
+ * end, as far from Stop as the row allows, and on a line of its own under
+ * them where the row has no room for it (a phone). One row rather than a
+ * second, so on a landscape tablet the zoom costs the screen no height:
+ * `rideview.browser.spec.ts` holds every ride control to the fold there.
+ */
+.oyl-ride__action-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oyl-space-sm);
+}
+
+.oyl-ride__action-row > .oyl-ride__zoom {
+  margin-inline-start: auto;
 }
 
 .oyl-trainer__state {

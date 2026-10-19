@@ -94,7 +94,7 @@
   --spacing-lg: var(--oyl-space-lg);
   --spacing-xl: var(--oyl-space-xl);
 
-  /* The type scale — `text-sm` to `text-metric`. Size only: the line height
+  /* The type scale — `text-sm` to `text-zoom`. Size only: the line height
      stays the one `body` sets. */
   --text-sm: var(--oyl-font-size-sm);
   --text-md: var(--oyl-font-size-md);
@@ -103,6 +103,7 @@
   --text-xxl: var(--oyl-font-size-xxl);
   --text-display: var(--oyl-font-size-display);
   --text-metric: var(--oyl-font-size-metric);
+  --text-zoom: var(--oyl-font-size-zoom);
 
   /* The font families (#992, #991 and ADR 0043) — `font-body` is the page's
      own stack and `font-display` the bundled face. */
