@@ -631,6 +631,65 @@ describe('two-way sync through the real instance (#776)', () => {
     expect(await libraryRows(b.harness)).toHaveLength(1);
   }, 60_000);
 
+  // #1431: what the Activities screen's Delete does since #1431 — the ride goes
+  // to Recently deleted. To a sync that is a ride deleted here (rule 2): it is
+  // deleted on the instance. Brought back afterwards, the ride is on this
+  // device again and the instance keeps its tombstone (rule 3): nothing of it
+  // is sent back. The instance's behaviour is unchanged by #1431 (ADR 0036 D-3).
+  it('deletes a ride moved to Recently deleted on the instance, and sends none of it back once restored — #1431', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, [
+      'nominal-outdoor-ride.fit',
+      'paused-laps.fit',
+    ]);
+    const [gone, kept] = a.ids;
+    expect(await a.sync()).toMatchObject({ pushed: 2, failures: [] });
+
+    const at = unixSeconds(1_800_000_000);
+    await a.on.harness.write((store) =>
+      store.moveActivityToRecentlyDeleted(LOCAL_ATHLETE, gone!, at),
+    );
+    expect(await a.sync()).toMatchObject({ pulled: 0, deletedOnInstance: 1, failures: [] });
+    expect((await libraryRows(a.on.harness)).map((row) => row.id)).toEqual([kept]);
+
+    await a.on.harness.write((store) => store.restoreRecentlyDeleted(LOCAL_ATHLETE, gone!, at));
+    expect(await a.sync()).toMatchObject({
+      pushed: 0,
+      pulled: 0,
+      deletedOnInstance: 0,
+      failures: [],
+    });
+    expect((await libraryRows(a.on.harness)).map((row) => row.id).sort()).toEqual(
+      [gone, kept].sort(),
+    );
+    const manifest = await manifestOf(a.on);
+    expect(
+      manifest
+        .filter((entry) => entry.kind === 'activity' && !entry.deleted)
+        .map((e) => e.activityId),
+    ).toEqual([kept]);
+  }, 60_000);
+
+  // A ride never synced, moved to Recently deleted, is not pushed.
+  it('does not push a ride that is in Recently deleted — #1431', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, [
+      'nominal-outdoor-ride.fit',
+      'paused-laps.fit',
+    ]);
+    const [held, kept] = a.ids;
+    await a.on.harness.write((store) =>
+      store.moveActivityToRecentlyDeleted(LOCAL_ATHLETE, held!, unixSeconds(1_800_000_000)),
+    );
+    expect(await a.sync()).toMatchObject({ pushed: 1, failures: [] });
+    const manifest = await manifestOf(a.on);
+    expect(manifest.filter((entry) => entry.kind === 'activity').map((e) => e.activityId)).toEqual([
+      kept,
+    ]);
+  }, 60_000);
+
   // #893's review, B1: the device is canonical (ADR 0036 D-3), so a ride the
   // rider deleted HERE is deleted there — and never pulled back.
   it('does not pull back a ride deleted on this device, and deletes it on the instance with its write-up', async () => {
@@ -644,7 +703,7 @@ describe('two-way sync through the real instance (#776)', () => {
     await a.on.harness.write((store) => store.putRideWriteUp(rideWriteUpFor(LOCAL_ATHLETE, gone!)));
     expect(await a.sync()).toMatchObject({ pushed: 2, itemsPushed: 1, failures: [] });
 
-    // The Activities screen's delete (`ActivitiesView.tsx`), and a re-sync of
+    // A delete for good (since #1431, Recently deleted's own), and a re-sync of
     // the SAME device.
     await a.on.harness.write((store) => store.deleteActivity(LOCAL_ATHLETE, gone!));
     const report = await a.sync();

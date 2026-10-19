@@ -123,6 +123,10 @@
  * numbers of laps six to twelve, "1 · Best lap" (the first of twelve equal
  * laps), and the "—" of a lap with no power.
  *
+ * ⚠️ **Re-recorded by #1431**, for one added line and nothing else: Files →
+ * Erase's list of what goes gains *"every ride in Recently deleted, which
+ * cannot be brought back afterwards"*, since a deleted ride is held for 30
+ * days. No sentence is dropped or reworded.
  * ## What it does not check
  *
  * That a sentence is in the same ORDER, or visible — `kept-visible.a11y.test`

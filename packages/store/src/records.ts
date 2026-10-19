@@ -765,6 +765,39 @@ export interface NewFinishedRide {
  */
 export type ActivitySummary = Omit<ActivityRecord, 'originalFile' | 'mayBeRaced'>;
 
+/**
+ * A ride in Recently deleted — #1431.
+ *
+ * Deleting a ride moves it here rather than destroying it, and it is held for
+ * thirty days (`schema.ts` §`RECENTLY_DELETED_SECONDS`) so a ride deleted by
+ * mistake can be brought back with its samples, laps and note. While it is
+ * here it is in no other read: not the library, not a total, not the export,
+ * not a sync, not a race and not a segment board.
+ */
+export interface RecentlyDeletedRide {
+  readonly id: ActivityId;
+  readonly athleteId: AthleteId;
+  /** When the rider deleted it. */
+  readonly deletedAt: UnixSeconds;
+  /** When it is removed for good, unless it is brought back first. */
+  readonly removedAt: UnixSeconds;
+  /** The ride as the library showed it — a summary, never its streams. */
+  readonly summary: ActivitySummary;
+}
+
+/**
+ * What bringing a ride back did — #1431.
+ *
+ * - `restored`: it is in the library again.
+ * - `missing`: there is no such ride in this athlete's Recently deleted — it
+ *   was removed for good, its thirty days ran out, or it is not theirs (the
+ *   three are deliberately one answer).
+ * - `already-there`: the library already holds this ride — the same id, or
+ *   the same original file imported again since — so bringing it back would
+ *   make a second copy. Nothing changed.
+ */
+export type RestoreOutcome = 'restored' | 'missing' | 'already-there';
+
 // --- #66: efforts, and the sweep that finds them ----------------------------
 
 /**

@@ -307,7 +307,8 @@ describe('the production registry', () => {
     // Version 16 (#836) adds `riderTexts`: a new store, so nothing again.
     // Version 17 (#898) adds `trustedDeviceKeys`: a new store, nothing again.
     // Version 18 (#1236) adds `workoutGoals`: a new store, nothing again.
-    expect(SCHEMA_VERSION).toBe(18);
+    // Version 19 (#1431) adds `recentlyDeleted`: a new store, nothing again.
+    expect(SCHEMA_VERSION).toBe(19);
     expect(SCHEMA_MIGRATIONS).toStrictEqual([SIDE_REPORT_POSE_SUMMARY, ACTIVITY_MAY_BE_RACED]);
   });
 
@@ -1209,9 +1210,66 @@ describe('version 17 to version 18 — #1236’s typed workout goals', () => {
     reopened.close();
 
     expect(beforeVersion).toBe(17 * 10);
-    expect(afterVersion).toBe(18 * 10);
+    expect(afterVersion).toBe(SCHEMA_VERSION * 10);
     expect(onDisk).toStrictEqual(rides);
     expect(empty).toStrictEqual({ status: 'none' });
     expect(read).toStrictEqual({ status: 'kept', record: goals });
+  });
+});
+
+describe('version 18 to version 19 — #1431’s Recently deleted', () => {
+  /**
+   * Additive: a ride written at version 18 reads back unchanged at 19, and can
+   * be moved to Recently deleted and brought back on a database that predates
+   * the store. The rollback is export → downgrade → re-import (`schema.ts`
+   * §`STORES_V19`): a downgrade loses only the rides in Recently deleted.
+   */
+  it('reads a version-18 ride unchanged, and moves it to Recently deleted and back', async () => {
+    const v18 = new Dexie(databaseName);
+    SCHEMA_VERSIONS.slice(0, 18).forEach((stores, index) => {
+      v18.version(index + 1).stores(stores);
+    });
+    const ride: PersistedActivity = {
+      id: 'ride-1',
+      athleteId: 'athlete-a',
+      name: 'Written at eighteen',
+      startedAt: 1_760_000_000,
+      startedAtTimeZone: 'Europe/London',
+      elapsedTime: 600,
+      movingTime: 590,
+      distance: 5000,
+      visibility: 'public',
+      hasPosition: true,
+      createdAt: 1_760_000_600,
+      mayBeRaced: false,
+    };
+    await v18.table(TABLE.athletes).put({ id: 'athlete-a', displayName: 'A', createdAt: 1 });
+    await v18.table(TABLE.activities).put(ride);
+    const beforeVersion = v18.backendDB().version;
+    v18.close();
+
+    const owner = athleteId('athlete-a');
+    const at = unixSeconds(1_760_100_000);
+    const store = openActivityStore(databaseName);
+    const moved = await store.moveActivityToRecentlyDeleted(owner, activityId('ride-1'), at);
+    store.close();
+
+    const reopened = openActivityStore(databaseName);
+    const listed = await reopened.listRecentlyDeleted(owner, at);
+    const restored = await reopened.restoreRecentlyDeleted(owner, activityId('ride-1'), at);
+    reopened.close();
+
+    const raw = new Dexie(databaseName);
+    SCHEMA_VERSIONS.forEach((stores, index) => {
+      raw.version(index + 1).stores(stores);
+    });
+    const onDisk = await raw.table(TABLE.activities).toArray();
+    raw.close();
+
+    expect(beforeVersion).toBe(18 * 10);
+    expect(moved).toBe(true);
+    expect(listed.map((each) => each.summary.name)).toStrictEqual(['Written at eighteen']);
+    expect(restored).toBe('restored');
+    expect(onDisk).toStrictEqual([ride]);
   });
 });

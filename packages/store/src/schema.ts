@@ -33,7 +33,7 @@
 /**
  * The current schema version.
  *
- * **18** since #1236; 17 since #898; 16 since #836; 15 since #793; 14 since #776 (#893's review); 13 since #800, 12 since #388. Version 2 added `streamSets` and `streamBlobs`; version 3
+ * **19** since #1431; 18 since #1236; 17 since #898; 16 since #836; 15 since #793; 14 since #776 (#893's review); 13 since #800, 12 since #388. Version 2 added `streamSets` and `streamBlobs`; version 3
  * added `recordingSessions` and `recordingChunks`; version 4 added `deviceKeys`
  * and `activityRecords`; version 5 added `segments`; version 6 added
  * `segmentEfforts` and `matchCheckpoints`; version 7 added `routes`; version 8
@@ -123,7 +123,7 @@
  * Bumping this for a change that *does* alter a record's shape means adding a
  * migration pair.
  */
-export const SCHEMA_VERSION = 18;
+export const SCHEMA_VERSION = 19;
 
 /**
  * Dexie stores its schema version in IndexedDB multiplied by ten, leaving room
@@ -222,7 +222,20 @@ export const TABLE = {
    * row can be named without naming whose it is.
    */
   workoutGoals: 'workoutGoals',
+  /**
+   * #1431: rides the rider deleted, held for {@link RECENTLY_DELETED_SECONDS}
+   * so one deleted by mistake can be brought back (`records.ts`
+   * §`RecentlyDeletedRide`). Keyed on the ride's id; every read leads with the
+   * athlete.
+   */
+  recentlyDeleted: 'recentlyDeleted',
 } as const;
+
+/**
+ * How long a deleted ride is held in Recently deleted before it is removed for
+ * good — #1431, the owner's ruling of 2026-10-19: thirty days.
+ */
+export const RECENTLY_DELETED_SECONDS = 30 * 24 * 60 * 60;
 
 /**
  * The index names, spelled once.
@@ -399,6 +412,10 @@ export const INDEX = {
   riderTextByAthleteAndKind: '[athleteId+kind]',
   /** #898: `listTrustedDeviceKeys` and `deleteAthlete`'s cascade. */
   trustedDeviceKeyByAthlete: 'athleteId',
+  /** #1431: `deleteAthlete`'s cascade. */
+  recentlyDeletedByAthlete: 'athleteId',
+  /** #1431: one athlete's Recently deleted, newest first, as one index range. */
+  recentlyDeletedByAthleteAndDeletedAt: '[athleteId+deletedAt]',
 } as const;
 
 /**
@@ -888,6 +905,30 @@ export const STORES_V18: Readonly<Record<string, string>> = {
   [TABLE.workoutGoals]: 'athleteId',
 };
 
+/**
+ * Version 19 — #1431's Recently deleted, added beside the twenty-two stores
+ * that exist. Additive: a new store, no existing shape touched, so
+ * `SCHEMA_MIGRATIONS` gains nothing. Its rollback is export → downgrade →
+ * re-import like every additive version's; what a downgrade loses is the
+ * rides held in Recently deleted, which the account export does not carry
+ * either (they are rides the rider deleted).
+ *
+ * A row holds the ride's activity row, its signed record, its segment efforts
+ * and its note — the parts of a ride that a list read, a sync or the export
+ * reaches by the athlete — so moving a ride here takes it out of every one of
+ * those reads at once. Its laps, streams, write-up and side-camera report stay
+ * in their own stores, where every read is by the ride's id and the ride's id
+ * no longer names a live activity.
+ */
+export const STORES_V19: Readonly<Record<string, string>> = {
+  // The twenty-two stores of versions 1 to 18 are inherited unchanged.
+  [TABLE.recentlyDeleted]: [
+    'activityId',
+    INDEX.recentlyDeletedByAthlete,
+    INDEX.recentlyDeletedByAthleteAndDeletedAt,
+  ].join(', '),
+};
+
 export const SCHEMA_VERSIONS: readonly Readonly<Record<string, string>>[] = [
   STORES_V1,
   STORES_V2,
@@ -907,4 +948,5 @@ export const SCHEMA_VERSIONS: readonly Readonly<Record<string, string>>[] = [
   STORES_V16,
   STORES_V17,
   STORES_V18,
+  STORES_V19,
 ];

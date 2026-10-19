@@ -314,6 +314,11 @@ test.describe('the activity library is cards at every width', () => {
       // link is 44 px wide by its own floor, and its duration fits its fact on
       // one line — the facts' tracks are 10rem since #1052 (9rem from #992).
       expect(library?.narrowestLink ?? 0).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
+      // #1431: each card's Delete is tertiary — lighter than the ride's link
+      // now a delete can be undone — and still a 44 px target both ways.
+      expect(library?.shortestDelete ?? 0).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
+      expect(library?.narrowestDelete ?? 0).toBeGreaterThanOrEqual(TOUCH_TARGET_PIXELS);
+      expect(library?.deletesNotTertiary).toBe(0);
       expect(library?.mostReadingLines, 'a reading wrapped').toBe(1);
       expect(library?.readingSpill ?? 1, 'a reading spilled out of its fact').toBeLessThanOrEqual(
         0.5,

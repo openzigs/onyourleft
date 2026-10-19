@@ -282,6 +282,16 @@ function averagePowerOf(power: readonly (Watts | undefined)[] | undefined): Watt
 /** What this module needs from the store, and nothing more. */
 export interface RideSaveStore {
   putFinishedRide(ride: NewFinishedRide): Promise<ActivityId>;
+  /**
+   * #1431: where a ride the rider discards from the recovery offer goes, so it
+   * can be brought back for 30 days. Left out (a test's port), a discard
+   * removes the recording as it did before.
+   */
+  moveActivityToRecentlyDeleted?(
+    owner: AthleteId,
+    id: ActivityId,
+    deletedAt: UnixSeconds,
+  ): Promise<boolean>;
 }
 
 export type RideSaveOutcome =

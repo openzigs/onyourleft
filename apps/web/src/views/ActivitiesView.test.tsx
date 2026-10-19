@@ -27,13 +27,15 @@ import {
   createStoreHarness,
   seedAthletes,
   seedRide,
+  streamSetFor,
   type StoreHarness,
 } from '@onyourleft/store/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { PAGE_SIZE } from '../library/rows';
 import { SELECTED_HEADING_ID } from '../shell/ListDetail';
-import { stubLibrary } from '../library/testing';
+import { emptyLibraryStore, stubLibrary } from '../library/testing';
+import type { LibraryPort } from '../library/store-port';
 import {
   activateWithKeyboard,
   chooseOption,
@@ -48,11 +50,60 @@ import { scriptedInstance } from '../instance/testing';
 import {
   ActivitiesView,
   ACTIVITIES_KEPT_VISIBLE,
+  DELETE_EXPLAINED_TEXT,
   DELETE_FAILED_TEXT,
   whereRidesAreText,
 } from './ActivitiesView';
 
 const OWNER = athleteId('athlete-a');
+
+/**
+ * Settles until `check` holds — for the real-store tests, whose writes and
+ * re-reads take as many turns as IndexedDB needs on a loaded machine.
+ */
+async function until(check: () => boolean, what: string): Promise<void> {
+  for (let turn = 0; turn < 100; turn += 1) {
+    if (check()) return;
+    await settle();
+  }
+  throw new Error(`never: ${what}`);
+}
+
+/** The library's clock in the real-store tests — #1431. */
+const NOW = unixSeconds(1_800_000_000);
+
+/**
+ * The library over the real store. Every call through `write`, which reuses
+ * the open handle: `harness.read` discards every handle and opens a fresh one —
+ * that is the whole point of it — so a live component calling it on each
+ * render closes the database under its own next call. The fresh connection
+ * belongs at the end, where the assertion is, not in the middle of the view's
+ * own reads.
+ */
+function realLibrary(open: StoreHarness): LibraryPort {
+  return {
+    athleteId: ATHLETE_A,
+    now: () => NOW,
+    store: {
+      listActivitySummaries: (owner: AthleteId) =>
+        open.write(async (store) => store.listActivitySummaries(owner)),
+      getActivity: (owner: AthleteId, id: ActivityId) =>
+        open.write(async (store) => store.getActivity(owner, id)),
+      moveActivityToRecentlyDeleted: (owner, id, at) =>
+        open.write(async (store) => store.moveActivityToRecentlyDeleted(owner, id, at)),
+      listRecentlyDeleted: (owner, now) =>
+        open.write(async (store) => store.listRecentlyDeleted(owner, now)),
+      restoreRecentlyDeleted: (owner, id, now) =>
+        open.write(async (store) => store.restoreRecentlyDeleted(owner, id, now)),
+      deleteRecentlyDeletedForGood: (owner, id) =>
+        open.write(async (store) => store.deleteRecentlyDeletedForGood(owner, id)),
+      emptyRecentlyDeleted: (owner) =>
+        open.write(async (store) => store.emptyRecentlyDeleted(owner)),
+      purgeRecentlyDeleted: (owner, now) =>
+        open.write(async (store) => store.purgeRecentlyDeleted(owner, now)),
+    },
+  };
+}
 
 let mounted: Mounted | undefined;
 let harness: StoreHarness | undefined;
@@ -211,7 +262,7 @@ describe('#62 — the local activity library', () => {
     expect(rowText()).toHaveLength(PAGE_SIZE);
   });
 
-  it('asks before deleting, and says the copy may be the only one', async () => {
+  it('asks before deleting, and says where the ride goes and for how long — #1431', async () => {
     const library = stubLibrary(OWNER, [summary('a', { name: 'Tuesday hills' })]);
     mounted = await mount(<ActivitiesView library={library} />);
     await settle();
@@ -225,8 +276,8 @@ describe('#62 — the local activity library', () => {
     expect(library.deleted).toStrictEqual([]);
     const asked = document.querySelector('[role="alertdialog"]');
     expect(asked?.textContent).toContain('Delete “Tuesday hills”?');
-    expect(asked?.textContent).toContain('cannot be undone');
-    expect(asked?.textContent).toContain('only one that exists');
+    expect(asked?.textContent).toContain(DELETE_EXPLAINED_TEXT);
+    expect(asked?.textContent).not.toContain('cannot be undone');
     expect(buttonNamed('Delete the ride')).toBeDefined();
     // Its first focus is the way out, so a second Enter deletes nothing.
     expect(document.activeElement?.textContent).toBe('Keep the ride');
@@ -271,13 +322,13 @@ describe('#62 — the local activity library', () => {
       summary('b', { name: 'Sunday long' }),
     ]);
     let refuse: (error: Error) => void = () => undefined;
-    const deleteActivity = vi.fn(
+    const moveActivityToRecentlyDeleted = vi.fn(
       async (): Promise<boolean> =>
         new Promise<boolean>((_resolve, reject) => {
           refuse = reject;
         }),
     );
-    const library = { ...stub, store: { ...stub.store, deleteActivity } };
+    const library = { ...stub, store: { ...stub.store, moveActivityToRecentlyDeleted } };
     mounted = await mount(<ActivitiesView library={library} />);
     await settle();
 
@@ -298,7 +349,7 @@ describe('#62 — the local activity library', () => {
     await activateWithKeyboard(buttonNamed('Keep the ride') as HTMLElement);
     await settle();
     expect(dialog()).not.toBeNull();
-    expect(deleteActivity).toHaveBeenCalledTimes(1);
+    expect(moveActivityToRecentlyDeleted).toHaveBeenCalledTimes(1);
 
     refuse(new Error('QuotaExceededError'));
     await settle();
@@ -327,13 +378,13 @@ describe('#62 — the local activity library', () => {
       summary('b', { name: 'Sunday long' }),
     ]);
     let done: (deleted: boolean) => void = () => undefined;
-    const deleteActivity = vi.fn(
+    const moveActivityToRecentlyDeleted = vi.fn(
       async (): Promise<boolean> =>
         new Promise<boolean>((resolve) => {
           done = resolve;
         }),
     );
-    const library = { ...stub, store: { ...stub.store, deleteActivity } };
+    const library = { ...stub, store: { ...stub.store, moveActivityToRecentlyDeleted } };
     mounted = await mount(<ActivitiesView library={library} />);
     await settle();
 
@@ -350,7 +401,7 @@ describe('#62 — the local activity library', () => {
     expect(document.activeElement).toBe(sortControl());
   });
 
-  it('deletes only on the second press, and the ride is gone from a fresh connection', async () => {
+  it('deletes only on the second press, and the ride is in Recently deleted on a fresh connection — #1431', async () => {
     // The real store, read back through a connection that did not write it —
     // the #28 primitive. A stub could not tell "removed" from "removed from the
     // copy in memory".
@@ -359,22 +410,8 @@ describe('#62 — the local activity library', () => {
     const ride = await seedRide(harness, ATHLETE_A);
     const open = harness;
 
-    // Both through `write`, which reuses the open handle. `harness.read`
-    // discards every handle and opens a fresh one — that is the whole point of
-    // it — so a live component calling it on each render closes the database
-    // under its own next call. The fresh connection belongs at the end, where
-    // the assertion is, not in the middle of the view's own reads.
-    const library = {
-      athleteId: ATHLETE_A,
-      store: {
-        listActivitySummaries: (owner: AthleteId) =>
-          open.write(async (store) => store.listActivitySummaries(owner)),
-        deleteActivity: (owner: AthleteId, id: ActivityId) =>
-          open.write(async (store) => store.deleteActivity(owner, id)),
-        getActivity: (owner: AthleteId, id: ActivityId) =>
-          open.write(async (store) => store.getActivity(owner, id)),
-      },
-    };
+    // Through `write` — `realLibrary` says why.
+    const library = realLibrary(open);
 
     mounted = await mount(<ActivitiesView library={library} />);
     await settle();
@@ -393,12 +430,113 @@ describe('#62 — the local activity library', () => {
     const left = await open.read(async (store) => store.listActivitySummaries(ATHLETE_A));
     expect(left).toHaveLength(0);
     expect(await open.read(async (store) => store.getActivity(ATHLETE_A, ride.id))).toBeUndefined();
-    // The streams behind it went too: a summary removed while its stream set
-    // survived would leave the ride's data on the device after the rider
-    // deleted it.
+    // #1431: not destroyed — held, stamped with the library's clock, until it
+    // is brought back, deleted for good, or its thirty days run out.
+    const held = await open.read(async (store) => store.listRecentlyDeleted(ATHLETE_A, NOW));
+    expect(held.map((each) => [each.id, each.deletedAt])).toStrictEqual([[ride.id, NOW]]);
+  });
+
+  it('brings a deleted ride back from Recently deleted, read on a fresh connection — #1431', async () => {
+    harness = createStoreHarness();
+    await seedAthletes(harness);
+    const ride = await seedRide(harness, ATHLETE_A, { name: 'Tuesday hills' });
+    await harness.write(async (store) =>
+      store.putStreamSet(streamSetFor(ride, { sampleCount: 30 })),
+    );
+    const open = harness;
+    mounted = await mount(<ActivitiesView library={realLibrary(open)} />);
+    await settle();
+
+    await activateWithKeyboard(buttonNamed('Delete') as HTMLElement);
+    await settle();
+    await activateWithKeyboard(buttonNamed('Delete the ride') as HTMLElement);
+    await until(
+      () => document.querySelector('.oyl-recently-deleted') !== null,
+      'Recently deleted is drawn',
+    );
+    expect(rowText()).toHaveLength(0);
+    const section = document.querySelector('.oyl-recently-deleted');
+    expect(section?.textContent).toContain('Tuesday hills');
+    expect(section?.textContent).toContain('Removed for good in 30 days');
+
+    await activateWithKeyboard(buttonNamed('Restore') as HTMLElement);
+    await until(() => rowText().length === 1, 'the ride is back in the list');
+    expect(rowText().some((text) => text.includes('Tuesday hills'))).toBe(true);
+    expect(document.body.textContent).toContain('“Tuesday hills” is back in your activities.');
+    expect(document.activeElement?.textContent).toBe('Recently deleted');
+    mounted.unmount();
+    mounted = undefined;
+
+    expect(
+      (await open.read(async (store) => store.listActivitySummaries(ATHLETE_A))).map((r) => r.id),
+    ).toStrictEqual([ride.id]);
+    expect(await open.read(async (store) => store.getStreamSet(ATHLETE_A, ride.id))).toBeDefined();
+    expect(
+      await open.read(async (store) => store.listRecentlyDeleted(ATHLETE_A, NOW)),
+    ).toStrictEqual([]);
+  });
+
+  it('deletes for good only after asking, and then nothing of the ride is left — #1431', async () => {
+    harness = createStoreHarness();
+    await seedAthletes(harness);
+    const ride = await seedRide(harness, ATHLETE_A, { name: 'Tuesday hills' });
+    await harness.write(async (store) =>
+      store.putStreamSet(streamSetFor(ride, { sampleCount: 30 })),
+    );
+    await harness.write(async (store) =>
+      store.moveActivityToRecentlyDeleted(ATHLETE_A, ride.id, NOW),
+    );
+    const open = harness;
+    mounted = await mount(<ActivitiesView library={realLibrary(open)} />);
+    await until(() => buttonNamed('Delete for good') !== undefined, 'Recently deleted is drawn');
+
+    await activateWithKeyboard(buttonNamed('Delete for good') as HTMLElement);
+    await settle();
+    const asked = document.querySelector('[role="alertdialog"]');
+    expect(asked?.textContent).toContain('Delete “Tuesday hills” for good?');
+    expect(asked?.textContent).toContain('cannot be brought back');
+    // Asked, not done: first focus is the way out.
+    expect(document.activeElement?.textContent).toBe('Keep it in Recently deleted');
+    expect(
+      await open.write(async (store) => store.listRecentlyDeleted(ATHLETE_A, NOW)),
+    ).toHaveLength(1);
+
+    const confirm = queryAll<HTMLButtonElement>(asked ?? document.body, 'button').find(
+      (button) => button.textContent === 'Delete for good',
+    );
+    await activateWithKeyboard(confirm as HTMLElement);
+    await until(
+      () => (document.body.textContent ?? '').includes('“Tuesday hills” was deleted for good.'),
+      'the delete is said',
+    );
+    mounted.unmount();
+    mounted = undefined;
+
+    expect(
+      await open.read(async (store) => store.listRecentlyDeleted(ATHLETE_A, NOW)),
+    ).toStrictEqual([]);
     expect(
       await open.read(async (store) => store.getStreamSet(ATHLETE_A, ride.id)),
     ).toBeUndefined();
+    expect(
+      await open.read(async (store) => store.restoreRecentlyDeleted(ATHLETE_A, ride.id, NOW)),
+    ).toBe('missing');
+  });
+
+  it('removes for good what has been in Recently deleted 30 days, each time it is shown — #1431', async () => {
+    const library = {
+      ...stubLibrary(OWNER, [summary('old', { name: 'Old ride' })]),
+      now: () => NOW,
+    };
+    await library.store.moveActivityToRecentlyDeleted(
+      OWNER,
+      activityId('old'),
+      unixSeconds(NOW - 30 * 24 * 60 * 60),
+    );
+    expect(library.bin).toHaveLength(1);
+    mounted = await mount(<ActivitiesView library={library} />);
+    await until(() => library.bin.length === 0, 'the expired ride is purged');
+    expect(document.querySelector('.oyl-recently-deleted')).toBeNull();
   });
 
   it('lets the same file be imported again once its ride is deleted', async () => {
@@ -425,17 +563,7 @@ describe('#62 — the local activity library', () => {
       await open.read(async (store) => store.findActivityByOriginalFileHash(ATHLETE_A, sha256)),
     ).toBeDefined();
 
-    const library = {
-      athleteId: ATHLETE_A,
-      store: {
-        listActivitySummaries: (owner: AthleteId) =>
-          open.write(async (store) => store.listActivitySummaries(owner)),
-        deleteActivity: (owner: AthleteId, id: ActivityId) =>
-          open.write(async (store) => store.deleteActivity(owner, id)),
-        getActivity: (owner: AthleteId, id: ActivityId) =>
-          open.write(async (store) => store.getActivity(owner, id)),
-      },
-    };
+    const library = realLibrary(open);
     mounted = await mount(<ActivitiesView library={library} />);
     await settle();
     await activateWithKeyboard(buttonNamed('Delete') as HTMLElement);
@@ -476,11 +604,9 @@ describe('#62 — the local activity library', () => {
   it('says a read failed rather than rendering it as an empty library', async () => {
     const library = {
       athleteId: OWNER,
-      store: {
+      store: emptyLibraryStore({
         listActivitySummaries: () => Promise.reject(new Error('QuotaExceededError')),
-        deleteActivity: () => Promise.resolve(true),
-        getActivity: () => Promise.resolve(undefined),
-      },
+      }),
     };
 
     mounted = await mount(<ActivitiesView library={library} />);
@@ -912,7 +1038,7 @@ describe('each message is said once, in one live region', () => {
     // #950: once on the screen, and said as the alert dialog's DESCRIPTION
     // rather than by a live region — focus moving into an `alertdialog` is
     // what announces it, and a live region too would say it twice.
-    const text = 'Deleting a ride cannot be undone.';
+    const text = DELETE_EXPLAINED_TEXT;
     expect(timesSaid(document.body, text), `“${text}” is on the screen`).toBe(1);
     expect(liveRegionsSaying(document.body, text)).toBe(0);
     const dialog = document.querySelector('[role="alertdialog"]');
@@ -923,11 +1049,9 @@ describe('each message is said once, in one live region', () => {
   it('when the rides cannot be read', async () => {
     const library = {
       athleteId: OWNER,
-      store: {
+      store: emptyLibraryStore({
         listActivitySummaries: () => Promise.reject(new Error('QuotaExceededError')),
-        deleteActivity: () => Promise.resolve(true),
-        getActivity: () => Promise.resolve(undefined),
-      },
+      }),
     };
     mounted = await mount(<ActivitiesView library={library} selected="one" />);
     await settle();

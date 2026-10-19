@@ -208,6 +208,23 @@ describe('exporting everything', () => {
     expect(files.at(-1)?.fileName).toBe(MANIFEST_FILE_NAME);
   });
 
+  it('leaves out a ride in Recently deleted, and its note — #1431', async () => {
+    const { written } = await seedLibrary(2);
+    const kept = written[0]!.ride;
+    const deleted = written[1]!.ride;
+    await harness.write(async (store) => {
+      await store.putRiderText(riderTextFor(ATHLETE_A, 'note', deleted.id));
+      await store.moveActivityToRecentlyDeleted(ATHLETE_A, deleted.id, unixSeconds(1_800_000_000));
+    });
+    const { files, report } = await runExport();
+
+    expect(report.exported).toBe(1);
+    expect(report.outcomes.map((outcome) => outcome.activityId)).toStrictEqual([kept.id]);
+    const manifest = manifestOf(files);
+    expect((manifest['riderTexts'] as { rideNotes: unknown[] }).rideNotes).toStrictEqual([]);
+    expect(JSON.stringify(manifest)).not.toContain(deleted.id);
+  });
+
   it('exports this athlete and nobody else', async () => {
     await seedLibrary(3);
     const { report } = await runExport();

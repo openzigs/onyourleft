@@ -29,7 +29,8 @@ import { idleSnapshot, stubRideController } from '../ride/testing';
 import { AppShell } from '../shell/AppShell';
 import { routeById } from '../shell/routes';
 import type { CapabilityProbe } from '../support/bluetooth-support';
-import { mount, settle, type Mounted } from '../testing/mount';
+import { activateWithKeyboard, mount, settle, type Mounted } from '../testing/mount';
+import { DISCARD_EXPLAINED } from './RideView';
 
 const SPANNED_SECONDS = 4_320;
 
@@ -182,7 +183,13 @@ describe('a recording that will not read (#1325)', () => {
     if (discard === undefined) {
       throw new Error('no discard for the unreadable recording');
     }
-    discard.click();
+    await activateWithKeyboard(discard);
+    await settle();
+    // #1431: confirmed first — and said to be for good, since it cannot be kept.
+    expect(stub.calls.discardRecovered).toEqual([]);
+    expect(dialogText()).toContain(DISCARD_EXPLAINED.unreadable);
+    await activateWithKeyboard(buttonsNamed('Discard the recording')[0] as HTMLElement);
+    await settle();
     expect(stub.calls.discardRecovered).toEqual([recordingSessionId('damaged-one')]);
   });
 
@@ -275,5 +282,53 @@ describe('controls that share a name are told apart — #1419', () => {
       );
       expect(span?.hidden).toBe(true);
     }
+  });
+});
+
+/** The open confirmation's text, or undefined. */
+function dialogText(): string | undefined {
+  return document.querySelector('[role="alertdialog"]')?.textContent ?? undefined;
+}
+
+describe('Save is the easy target, and Discard is small and confirmed — #1431', () => {
+  it('draws Save as a full button and Discard as a tertiary one', async () => {
+    await show([offered('unsaved')]);
+    const [save] = buttonsNamed('Save this ride');
+    const [discard] = buttonsNamed('Discard this ride');
+    expect(save?.className).toBe('oyl-button oyl-button--secondary');
+    expect(discard?.className).toBe('oyl-button oyl-button--tertiary');
+  });
+
+  it('asks before discarding, says the ride goes to Recently deleted, and keeps it on Keep', async () => {
+    const { stub } = await showWith([offered('unsaved')]);
+    await activateWithKeyboard(buttonsNamed('Discard this ride')[0] as HTMLElement);
+    await settle();
+    expect(stub.calls.discardRecovered).toEqual([]);
+    expect(dialogText()).toContain('Discard this ride?');
+    expect(dialogText()).toContain(DISCARD_EXPLAINED.ride);
+    // First focus is the way out, so a second Enter discards nothing.
+    expect(document.activeElement?.textContent).toBe('Keep the ride');
+    await activateWithKeyboard(buttonsNamed('Keep the ride')[0] as HTMLElement);
+    await settle();
+    expect(dialogText()).toBeUndefined();
+    expect(stub.calls.discardRecovered).toEqual([]);
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+  });
+
+  it('discards on the confirmation, and says a saved ride’s copy is only a copy', async () => {
+    const { stub } = await showWith([offered('already-saved')]);
+    await activateWithKeyboard(buttonsNamed('Discard this ride')[0] as HTMLElement);
+    await settle();
+    expect(dialogText()).toContain(DISCARD_EXPLAINED.copy);
+    await activateWithKeyboard(buttonsNamed('Discard the ride')[0] as HTMLElement);
+    await settle();
+    expect(stub.calls.discardRecovered).toEqual([recordingSessionId('left-behind')]);
+  });
+
+  it('audits clean with the confirmation open', async () => {
+    await show([offered('interrupted')]);
+    await activateWithKeyboard(buttonsNamed('Discard this ride')[0] as HTMLElement);
+    await settle();
+    expect(formatViolations(auditAccessibility(document))).toBe('');
   });
 });

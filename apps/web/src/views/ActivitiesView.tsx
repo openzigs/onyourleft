@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useId, useRef, useState, type JSX } from 'react';
 
+import { unixSeconds } from '@onyourleft/domain';
 import type { ActivityId, ActivityOrder, ActivitySummary, SortDirection } from '@onyourleft/store';
 
 import { Button, ButtonLink } from '../design/Button';
@@ -14,6 +15,7 @@ import { VisuallyHidden } from '../design/VisuallyHidden';
 import { ELAPSED_TIME_LABEL, MOVING_TIME_LABEL, POWER_UNIT } from '../format';
 import { useUnits } from '../units/context';
 import { distanceUnit } from '../units/format';
+import { RecentlyDeleted } from '../library/RecentlyDeleted';
 import { orderedRows, PAGE_SIZE, rowFor, type LibraryRow } from '../library/rows';
 import type { LibraryPort } from '../library/store-port';
 import { ListDetail, SELECTED_HEADING_ID } from '../shell/ListDetail';
@@ -242,6 +244,13 @@ function useInstanceKnown(port: InstancePort | undefined): InstanceKnown {
   return answer?.port === port ? answer.known : 'unknown';
 }
 
+/**
+ * What a delete does — #1431: said inside the confirmation. Until #1431 it
+ * said "Deleting a ride cannot be undone", which is no longer true.
+ */
+export const DELETE_EXPLAINED_TEXT =
+  'It moves to Recently deleted, at the foot of this list, where you can bring it back for 30 days. After that it is removed from this device for good.';
+
 /** Said inside the confirmation when the store refused the delete — #959. */
 export const DELETE_FAILED_TEXT =
   'The ride could not be deleted, and it is still on this device. Try again, or keep the ride.';
@@ -353,7 +362,9 @@ export function ActivitiesView({
       if (library === undefined) {
         return;
       }
-      await library.store.deleteActivity(library.athleteId, id as never);
+      // #1431: to Recently deleted, where it can be brought back for 30 days.
+      const now = library.now?.() ?? unixSeconds(Math.floor(Date.now() / 1000));
+      await library.store.moveActivityToRecentlyDeleted(library.athleteId, id as ActivityId, now);
       setReloads((count) => count + 1);
     },
     [library],
@@ -403,9 +414,12 @@ export function ActivitiesView({
       <p>{nothingYet}</p>
     </EmptyState>
   );
+  // #1431: tertiary — a delete can be undone from Recently deleted now, so
+  // it no longer weighs what the ride's own link weighs. Still the 44 px
+  // target every `.oyl-button` keeps (`browser/library.browser.spec.ts`).
   const deleteButton = (row: LibraryRow): JSX.Element => (
     <Button
-      variant="secondary"
+      variant="tertiary"
       onClick={() => {
         setConfirming(row);
       }}
@@ -551,11 +565,17 @@ export function ActivitiesView({
           return true;
         }}
       >
-        <p>
-          Deleting a ride cannot be undone. There is no server and no backup, so the copy on this
-          device may be the only one that exists — export it first if you want to keep it.
-        </p>
+        <p>{DELETE_EXPLAINED_TEXT}</p>
       </ConfirmDialog>
+
+      {/* #1431: where a deleted ride goes, and how it comes back. */}
+      <RecentlyDeleted
+        library={library}
+        reloads={reloads}
+        onRestored={() => {
+          setReloads((count) => count + 1);
+        }}
+      />
 
       {/* #1013: where the rides are, and what deletes them, is kept on the
         screen whole. #1438: per platform, and per instance. */}

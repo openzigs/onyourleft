@@ -316,6 +316,10 @@ describe('erasing, against the real store', () => {
       await store.putCameraFrame(cameraFrameFor(owner));
       // #528. Numbers read off a picture of the rider, named in ERASE_REMOVES.
       await store.putFramingReference(framingReferenceFor(owner));
+      // #1431. A ride the rider deleted, held in Recently deleted.
+      const deleted = rideFor(owner, { name: 'Deleted' });
+      await store.putActivity(deleted);
+      await store.moveActivityToRecentlyDeleted(owner, deleted.id, unixSeconds(0));
     });
     return ids;
   }
@@ -330,6 +334,11 @@ describe('erasing, against the real store', () => {
     expect(outcome.routes).toBe(1);
     expect(outcome.workouts).toBe(1);
     expect(outcome.cameraFrames).toBe(1);
+    expect(outcome.recentlyDeleted).toBe(1);
+    // #1431: no restore copy outlives an erase.
+    expect(
+      await harness.read(async (store) => store.listRecentlyDeleted(ATHLETE_A, unixSeconds(0))),
+    ).toStrictEqual([]);
     // Read back through a fresh connection: the erase has to have reached disk,
     // not just the handle that ran it.
     const left = await harness.read(async (store) => store.listActivitySummaries(ATHLETE_A));
@@ -595,15 +604,37 @@ describe('erasing, against the real store', () => {
 });
 
 describe('the sentence afterwards', () => {
+  it('counts the rides that were in Recently deleted, and only when there were some — #1431', () => {
+    const counts = { activities: 2, routes: 0, workouts: 0, segments: 0, cameraFrames: 0 };
+    expect(eraseSentence({ ...counts, recentlyDeleted: 3 })).toBe(
+      'Removed 2 rides, 3 deleted rides held for restore. This device now holds nothing about you.',
+    );
+    expect(eraseSentence({ ...counts, recentlyDeleted: 0 })).not.toContain('deleted');
+  });
+
   it('counts what went', () => {
     expect(
-      eraseSentence({ activities: 4, routes: 2, workouts: 0, segments: 1, cameraFrames: 0 }),
+      eraseSentence({
+        activities: 4,
+        routes: 2,
+        workouts: 0,
+        segments: 1,
+        cameraFrames: 0,
+        recentlyDeleted: 0,
+      }),
     ).toBe('Removed 4 rides, 2 routes, 1 segment. This device now holds nothing about you.');
   });
 
   it('says one ride rather than 1 rides', () => {
     expect(
-      eraseSentence({ activities: 1, routes: 0, workouts: 0, segments: 0, cameraFrames: 0 }),
+      eraseSentence({
+        activities: 1,
+        routes: 0,
+        workouts: 0,
+        segments: 0,
+        cameraFrames: 0,
+        recentlyDeleted: 0,
+      }),
     ).toContain('1 ride.');
   });
 
@@ -617,6 +648,7 @@ describe('the sentence afterwards', () => {
       workouts: 1,
       segments: 1,
       cameraFrames: 2,
+      recentlyDeleted: 1,
     });
     expect(sentence).toMatch(/^Removed [\d\s,a-z]+\. This device now holds nothing about you\.$/);
   });

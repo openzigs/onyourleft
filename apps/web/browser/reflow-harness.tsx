@@ -196,6 +196,14 @@ export interface ReflowMeasurement {
     /** The narrowest card link's width — a 44 px target both ways (#1041's review). */
     readonly narrowestLink: number | null;
     /**
+     * Each card's *Delete* (#1431): drawn tertiary since a delete can be undone
+     * from Recently deleted, and still a 44 px target both ways — its smallest
+     * height and width, and how many are not tertiary.
+     */
+    readonly shortestDelete: number | null;
+    readonly narrowestDelete: number | null;
+    readonly deletesNotTertiary: number;
+    /**
      * The most lines any card's facts reading's numerals are laid out on — 1
      * unless one wraps — and how far the furthest spills past its own fact's
      * box, in CSS px (positive is a spill). A `10:23:45` in a track narrower
@@ -749,12 +757,23 @@ function libraryCards(): ReflowMeasurement['library'] {
     link.getBoundingClientRect(),
   );
   const values = [...library.querySelectorAll('.oyl-activity-card__facts .oyl-reading__value')];
+  const deletes = [
+    ...library.querySelectorAll<HTMLElement>('.oyl-activity-cards > li button'),
+  ].filter((button) => (button.textContent ?? '').startsWith('Delete'));
+  const deleteBoxes = deletes.map((button) => button.getBoundingClientRect());
   return {
     cards: library.querySelectorAll('.oyl-activity-cards > li').length,
     columns,
     tables: library.querySelectorAll('table').length,
     shortestLink: links.length === 0 ? null : Math.min(...links.map((box) => box.height)),
     narrowestLink: links.length === 0 ? null : Math.min(...links.map((box) => box.width)),
+    shortestDelete:
+      deleteBoxes.length === 0 ? null : Math.min(...deleteBoxes.map((box) => box.height)),
+    narrowestDelete:
+      deleteBoxes.length === 0 ? null : Math.min(...deleteBoxes.map((box) => box.width)),
+    deletesNotTertiary: deletes.filter(
+      (button) => !button.classList.contains('oyl-button--tertiary'),
+    ).length,
     ...readingFit(values),
   };
 }
