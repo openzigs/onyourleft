@@ -1994,7 +1994,7 @@ for (const viewport of [
   TABLET_IN_THE_SHELL,
   TABLET_UPRIGHT_IN_THE_SHELL,
 ] as const) {
-  test(`#1012 — nothing paired: ONE banner and one Pair a sensor, on the screen — ${viewport.name}`, async ({
+  test(`#1012 — nothing paired: ONE banner and one Pair a trainer or a sensor, on the screen — ${viewport.name}`, async ({
     page,
   }, testInfo) => {
     await open(page, viewport, '?sensors=none');
@@ -2004,7 +2004,8 @@ for (const viewport of [
     expect(seen.readings, 'the four tiles are still there').toEqual([]);
     expect(banner?.links).toBe(1);
     // #1021: named for what it pairs (WCAG 2.4.4).
-    expect(banner?.link.name).toBe('Pair a sensor');
+    // #1442: and the screen's one way to Devices, so it names the trainer too.
+    expect(banner?.link.name).toBe('Pair a trainer or a sensor');
     expect(banner?.link.onTop, 'Pair is covered').toBe(true);
     expect(banner?.link.box.height ?? 0).toBeGreaterThanOrEqual(44 - SUBPIXEL_TOLERANCE);
     // After every ride control in its column (#692): it stands where the

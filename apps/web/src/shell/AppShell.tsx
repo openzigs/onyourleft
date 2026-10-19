@@ -1024,8 +1024,13 @@ export function AppShell(props: AppShellProps): JSX.Element {
         </main>
 
         {immersive ? null : (
+          // #1442: "Your rides are kept on this device." was said here under
+          // every screen, and several screens said their own version just
+          // above it. Where rides are is said once, where it matters: the
+          // Ride screen's note, History's line under its list and About
+          // (`views/where-rides-are.ts`), and Instance's note.
           <footer className="oyl-footer">
-            <p>On Your Left — free and open source. Your rides are kept on this device.</p>
+            <p>On Your Left — free and open source.</p>
           </footer>
         )}
       </div>

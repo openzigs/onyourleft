@@ -466,7 +466,9 @@ export function RoutesView({ port, now, save, selected }: RoutesViewProps): JSX.
       detail={
         // #1014: two groups — the route or the import with what was said about
         // it, and the sharing warning — which sit side by side where the pane
-        // is wide enough (`theme.css` §"A screen of sections").
+        // is wide enough (`theme.css` §"A screen of sections"). Since #1442
+        // the warning is there only with a route chosen, so the import is the
+        // detail pane's one group.
         <div className="oyl-sections">
           <div>
             {chosen ?? (
@@ -561,16 +563,22 @@ export function RoutesView({ port, now, save, selected }: RoutesViewProps): JSX.
               </StatusMessage>
             )}
           </div>
-          <div>
-            {/* #1030: the warning stays on the screen; what a privacy zone does
-                to a shared route is the explanation, behind the ⓘ. */}
-            <SectionHeading level={2} help={<p>{PUBLIC_ROUTE_ZONE_NOTE}</p>}>
-              Before you share a route
-            </SectionHeading>
-            <KeptVisible>
-              <p>{PUBLIC_ROUTE_WARNING}</p>
-            </KeptVisible>
-          </div>
+          {/* #1442: only beside a chosen route, whose *Who can see it* is the
+              one control that shares it. With nothing chosen it warned with
+              no share action in view; the route's note under the list still
+              says a route is private until the rider says otherwise. */}
+          {shown?.kind === 'found' ? (
+            <div>
+              {/* #1030: the warning stays on the screen; what a privacy zone
+                  does to a shared route is the explanation, behind the ⓘ. */}
+              <SectionHeading level={2} help={<p>{PUBLIC_ROUTE_ZONE_NOTE}</p>}>
+                Before you share a route
+              </SectionHeading>
+              <KeptVisible>
+                <p>{PUBLIC_ROUTE_WARNING}</p>
+              </KeptVisible>
+            </div>
+          ) : null}
         </div>
       }
     />
@@ -580,7 +588,8 @@ export function RoutesView({ port, now, save, selected }: RoutesViewProps): JSX.
 /**
  * What the Routes screen keeps on the screen whatever its length — #1013: who
  * can see a shared route, and that most routes start at home. Since #1030
- * what a privacy zone does to one is behind the section's ⓘ.
+ * what a privacy zone does to one is behind the section's ⓘ. Since #1442 it is
+ * said with a route chosen, beside the route, and not with none.
  */
 export const ROUTES_KEPT_VISIBLE: readonly string[] = [PUBLIC_ROUTE_WARNING];
 

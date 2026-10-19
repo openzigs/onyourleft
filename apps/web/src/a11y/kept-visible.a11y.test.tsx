@@ -76,7 +76,7 @@ import { workoutRescueHeadline } from '../workout/rescue-text';
 import { HOLD_LABEL, holdReading, holdSentence, type WorkoutHold } from '../workout/hold-text';
 import { RELEASE_INCOMPLETE } from '../workout/session';
 import { ALL_ROUTES, routeById, type RouteDefinition, type RouteId } from '../shell/routes';
-import { openRoute } from '../testing/hierarchy-walk';
+import { openRoute, selectFixtureItem } from '../testing/hierarchy-walk';
 import { mount, queryAll, settle, type Mounted } from '../testing/mount';
 import { sentencesIn } from '../testing/route-sentences';
 import { capacitorShellSupport } from '../support/shell-support';
@@ -283,7 +283,14 @@ const KEPT: Record<RouteId, Kept> = {
   workouts: { sentences: [], reason: NOTHING_TUCKED },
   activities: { sentences: ACTIVITIES_KEPT_VISIBLE },
   analysis: { sentences: ANALYSIS_KEPT_VISIBLE },
-  routes: { sentences: ROUTES_KEPT_VISIBLE },
+  // #1442: who can see a shared route is said beside a CHOSEN route, where
+  // *Who can see it* is; the walk chooses none, so it is mounted below.
+  routes: {
+    sentences: [],
+    elsewhere: ROUTES_KEPT_VISIBLE,
+    reason:
+      'the sharing warning renders only beside a chosen route; a mounted case below chooses one',
+  },
   about: { sentences: [], reason: `${NOTHING_TUCKED}: it is the page of prose` },
   credits: { sentences: [], reason: `${NOTHING_TUCKED}: it is the page of prose` },
   more: { sentences: [], reason: `${NOTHING_TUCKED}: it is a list of links (#1429)` },
@@ -687,6 +694,17 @@ describe('#666 — safety and privacy sentences are never in a closed disclosure
       });
     }
   }
+
+  it('Routes, with a route chosen: who can see a shared route stays out of its ⓘ (#1442)', async () => {
+    const route = routeById('routes');
+    const main = await open(route, true);
+    expect(await selectFixtureItem(route)).toBe(true);
+    expect(main.querySelector('select[name="visibility"]')).not.toBeNull();
+    const kept = withNotes(route);
+    expect(allFaults(main, [...kept.sentences, ...ROUTES_KEPT_VISIBLE], everyListed(kept))).toEqual(
+      [],
+    );
+  });
 
   it('Devices, where a browser can pair: the one-gesture sentence and the limits stay out of its disclosure', async () => {
     const working: BluetoothPort = {

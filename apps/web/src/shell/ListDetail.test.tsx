@@ -385,9 +385,29 @@ describe('the create link', () => {
     },
   );
 
+  it('is not there at two panes with nothing chosen, where the form is beside it — #1442', async () => {
+    restore = answerTwoPanes(true, THEME);
+    mounted = await mount(withForm(undefined));
+    // The form's own heading is on the screen; a link to it would be the
+    // same action twice.
+    expect(document.getElementById(CREATE_HEADING_ID)).not.toBeNull();
+    expect(document.querySelector('[data-oyl-create]')).toBeNull();
+    // And it comes back the moment an item takes the detail pane.
+    await mounted.rerender(withForm('a'));
+    await settle();
+    expect(pane('list').querySelector('[data-oyl-create]')).not.toBeNull();
+  });
+
+  it('is there on one pane with nothing chosen, where the form is under the whole list', async () => {
+    restore = answerTwoPanes(false, THEME);
+    mounted = await mount(withForm(undefined));
+    expect(pane('list').querySelector('[data-oyl-create]')).not.toBeNull();
+  });
+
   it('does not steer a later back to the list away from the item', async () => {
     // The note a create link leaves is spent by the next change of selection.
-    restore = answerTwoPanes(true, THEME);
+    // One pane: at two, with nothing chosen, there is no create link (#1442).
+    restore = answerTwoPanes(false, THEME);
     mounted = await mount(withForm(undefined));
     pane('list').querySelector<HTMLAnchorElement>('[data-oyl-create]')?.click();
     await mounted.rerender(withForm('a'));

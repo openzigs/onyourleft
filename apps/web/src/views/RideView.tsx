@@ -1075,9 +1075,11 @@ function NoSensorsBanner(): JSX.Element {
       </p>
       {/* #1021: named for what it pairs. "Pair" alone, beside the sentence
           rather than inside it, was announced as "Pair, link" in a link list
-          or on Tab (WCAG 2.4.4). */}
+          or on Tab (WCAG 2.4.4). #1442: and the screen's ONE way to Devices
+          while nothing is paired — the Trainer card and the Sensors group no
+          longer carry their own — so it names the trainer too. */}
       <ButtonLink href={hrefFor(routeById('devices'))} variant="secondary">
-        Pair a sensor
+        Pair a trainer or a sensor
       </ButtonLink>
     </div>
   );

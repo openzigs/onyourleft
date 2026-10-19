@@ -520,17 +520,28 @@ export interface CreateLinkProps {
  * secondary and moves focus to the form without changing the route — on a
  * phone's one pane the form is under the whole list.
  *
- * Rendered in both states, so choosing an item does not move the list under
- * the pointer that chose it: only the emphasis changes.
+ * Rendered in both states on ONE pane, so choosing an item does not move the
+ * list under the pointer that chose it: only the emphasis changes.
+ *
+ * ⚠️ **Not rendered at two panes with nothing chosen — #1442.** There the form
+ * it leads to is already on the screen beside it, under its own heading, so
+ * the screen offered one action twice (Routes' *Import a route* at the head
+ * of the list and as the section beside it). Choosing an item there moves
+ * focus to the item's heading in the OTHER pane, so the list's row moving
+ * down by this link is not under the next thing the rider reaches for.
  */
-export function CreateLink({ route, selection, children }: CreateLinkProps): JSX.Element {
+export function CreateLink({ route, selection, children }: CreateLinkProps): JSX.Element | null {
   const chosen = selection !== undefined;
+  const two = useTwoPanes();
   function jumpToForm(event: MouseEvent<HTMLAnchorElement>): void {
     const heading = document.getElementById(CREATE_HEADING_ID);
     if (heading !== null) {
       event.preventDefault();
       heading.focus();
     }
+  }
+  if (two && !chosen) {
+    return null;
   }
   return (
     <ButtonLink

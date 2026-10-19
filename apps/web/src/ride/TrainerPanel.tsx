@@ -62,11 +62,10 @@ import { useState, type FormEvent, type JSX } from 'react';
 
 import { TREND_WINDOW, watts, type Watts } from '@onyourleft/domain';
 
-import { Button, ButtonLink } from '../design/Button';
+import { Button } from '../design/Button';
 import { SensorGlyph } from '../design/illustration';
 import { StatusMessage } from '../design/StatusMessage';
 
-import { hrefFor, routeById } from '../shell/routes';
 import { MANUAL_ERG_DURING_WORKOUT, type TrainerSnapshot } from './controller';
 import type { ManualErgRescue } from './manual-erg';
 
@@ -546,15 +545,19 @@ export function heldSentence(target: Watts): string {
  * the "No trainer" status line here is reading the old file. On the owner's
  * tablet in landscape that line sat alone at the top of the third column
  * beside a Live group four times its height. The card is a tile like
- * `RideView.tsx` §`NoSensorsBanner`'s — the trainer drawing, the same
- * sentence, and ONE control, *Devices*, where pairing is (#659) — and
- * `theme.css` §`.oyl-trainer-card` stretches it down the column on the
- * layouts where the Trainer group stands beside the Live group, so the two
- * columns are one height.
+ * `RideView.tsx` §`NoSensorsBanner`'s — the trainer drawing and the same
+ * sentence — and `theme.css` §`.oyl-trainer-card` stretches it down the
+ * column on the layouts where the Trainer group stands beside the Live group,
+ * so the two columns are one height.
  *
- * Secondary, at the 44 px floor rather than the ride-time 48: it is pressed
- * before a ride, not to move one on (#668, #669). The drawing is decoration
- * (`aria-hidden`, epic #935 principle 1); the words say everything.
+ * ⚠️ **No control since #1442**, and a reviewer who remembers a *Devices*
+ * button here is reading the old file. The Ride screen had three ways to
+ * Devices at once; it has one in each state now: with nothing paired the
+ * sensor banner's *Pair a trainer or a sensor*, and with something paired
+ * the Sensors group's *Pair or forget devices on Devices* (`SensorPairing.tsx`
+ * §`ConnectedSensors`). This card names where pairing is and leaves the way
+ * there to them. The drawing is decoration (`aria-hidden`, epic #935
+ * principle 1); the words say everything.
  */
 function NoTrainerCard(): JSX.Element {
   return (
@@ -563,13 +566,8 @@ function NoTrainerCard(): JSX.Element {
         <SensorGlyph className="oyl-trainer-card__glyph" kind="trainer" />
       </span>
       <p className="oyl-trainer-card__sentence">
-        <strong>No trainer:</strong> Pair a smart trainer to control it from here. Pairing is on
-        Devices.
+        <strong>No trainer:</strong> Pair a smart trainer on Devices to control it from here.
       </p>
-      {/* #659: the Pair buttons moved to Devices; this is the way there. */}
-      <ButtonLink href={hrefFor(routeById('devices'))} variant="secondary">
-        Devices
-      </ButtonLink>
     </div>
   );
 }
