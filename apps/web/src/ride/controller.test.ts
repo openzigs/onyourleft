@@ -11585,6 +11585,57 @@ describe('#1318 — a lap taken by hand on a ride with no course under it', () =
     next.controller.dispose();
   });
 
+  const crashedAfterLap = async (): Promise<RecordingSessionId> => {
+    const rig = benchWith();
+    await rig.controller.pair('trainer');
+    steady(rig);
+    await rig.controller.start();
+    await ride(rig, 5);
+    expect(rig.controller.markLap()).toBe(true);
+    await ride(rig, 11);
+    rig.controller.dispose();
+    return rig.sessionIds[0] as RecordingSessionId;
+  };
+
+  it("offers Lap again on a recovered ride that is continued; the lap pressed after it and Stop's last are kept", async () => {
+    const id = await crashedAfterLap();
+    const next = benchWith({ rideSave: storeSavePort() });
+    next.bench.advance(seconds(120));
+    await next.controller.pair('trainer');
+    steady(next);
+    await next.controller.refreshRecoverable();
+    expect(await next.controller.continueRecovered(id)).toBe(true);
+    // Offered at once, with no memory of the lap before the crash.
+    expect(next.controller.getSnapshot().manualLap).toEqual({ available: true, last: undefined });
+    await next.controller.resume();
+    await ride(next, 4);
+    expect(next.controller.markLap()).toBe(true);
+    await ride(next, 3);
+    next.controller.armStop();
+    await next.controller.confirmStop();
+    const saved = await lapsOf('ride-1');
+    // The crash's part lap, the one pressed after, and Stop's last.
+    expect(saved.map((lap) => lap.ordinal)).toEqual([0, 1, 2, 3]);
+    expect(saved[2]?.partial).toBeUndefined();
+    next.controller.dispose();
+  });
+
+  it('on a recovered ride that is continued, Stop adds a last lap only once Lap is pressed again', async () => {
+    const again = await crashedAfterLap();
+    const quiet = benchWith({ rideSave: storeSavePort() });
+    quiet.bench.advance(seconds(120));
+    await quiet.controller.pair('trainer');
+    steady(quiet);
+    await quiet.controller.refreshRecoverable();
+    expect(await quiet.controller.continueRecovered(again)).toBe(true);
+    await quiet.controller.resume();
+    await ride(quiet, 4);
+    quiet.controller.armStop();
+    await quiet.controller.confirmStop();
+    expect((await lapsOf('ride-1')).map((lap) => lap.ordinal)).toEqual([0, 1]);
+    quiet.controller.dispose();
+  });
+
   it('forgets the last lap for a new ride', async () => {
     const rig = benchWith({ rideSave: storeSavePort() });
     await rig.controller.pair('trainer');
