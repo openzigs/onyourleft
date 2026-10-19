@@ -55,7 +55,14 @@
  */
 
 import Dexie, { type Table } from 'dexie';
-import type { BeatsPerMinute, Kilograms, Seconds, UnixSeconds, Watts } from '@onyourleft/domain';
+import {
+  unixSeconds,
+  type BeatsPerMinute,
+  type Kilograms,
+  type Seconds,
+  type UnixSeconds,
+  type Watts,
+} from '@onyourleft/domain';
 
 import {
   StoreConflictError,
@@ -148,6 +155,8 @@ import type {
   NewLap,
   MatchCheckpointRecord,
   PrivacyZoneRecord,
+  RecentlyDeletedRide,
+  RestoreOutcome,
   SegmentEffortRecord,
   SegmentRecord,
   RouteRecord,
@@ -181,6 +190,7 @@ import { SCHEMA_MIGRATIONS, upgradeWith } from './migrations';
 import {
   DEXIE_IDB_VERSION_MULTIPLIER,
   INDEX,
+  RECENTLY_DELETED_SECONDS,
   SCHEMA_VERSION,
   SCHEMA_VERSIONS,
   TABLE,
@@ -395,6 +405,35 @@ export interface AthleteDeletionCounts {
    * goals are kept per athlete.
    */
   readonly workoutGoals: number;
+  /**
+   * Rides in Recently deleted removed — #1431. An erase takes them too: a ride
+   * the rider deleted and could still bring back is still their ride, and no
+   * restore copy may outlive an erase.
+   */
+  readonly recentlyDeleted: number;
+}
+
+/**
+ * A ride in Recently deleted, on disk — #1431.
+ *
+ * It holds the parts of the ride that a read reaches **by the athlete**
+ * rather than by the ride's id: the activity row (the library, totals, races,
+ * the sync's ride list, the export), the signed record (the export), the
+ * segment efforts (the boards) and the note (the sync and the export). Moving
+ * them here is what takes the ride out of every one of those reads at once;
+ * no reader has to remember to filter. The laps, streams, write-up and
+ * side-camera report stay where they are: every read of them is by the ride's
+ * id, scoped to the athlete, and nothing can write to them while the ride is
+ * not a live activity.
+ */
+interface PersistedRecentlyDeleted {
+  activityId: string;
+  athleteId: string;
+  deletedAt: number;
+  activity: PersistedActivity;
+  record: PersistedActivityRecord | undefined;
+  efforts: SegmentEffortRecord[];
+  note: RiderTextRecord | undefined;
 }
 
 /**
@@ -592,6 +631,10 @@ export class ActivityStore {
 
   get #syncBases(): Table<SyncBaseRecord, [string, string, string]> {
     return this.#db.table<SyncBaseRecord, [string, string, string]>(TABLE.syncBases);
+  }
+
+  get #recentlyDeleted(): Table<PersistedRecentlyDeleted, string> {
+    return this.#db.table<PersistedRecentlyDeleted, string>(TABLE.recentlyDeleted);
   }
 
   get #riderTexts(): Table<RiderTextRecord, [string, string, string]> {
@@ -979,6 +1022,7 @@ export class ActivityStore {
         this.#riderTexts,
         this.#trustedDeviceKeys,
         this.#workoutGoals,
+        this.#recentlyDeleted,
       ],
       async () => {
         // The signed records and the device key go with the athlete. The key is
@@ -1072,6 +1116,13 @@ export class ActivityStore {
         // this deletes their one row and can reach nobody else's.
         const workoutGoals = (await this.#workoutGoals.get(id)) === undefined ? 0 : 1;
         await this.#workoutGoals.delete(id);
+        // #1431. The rides in Recently deleted, with the record, efforts and
+        // note each row holds; their laps and streams went with the athlete's
+        // above, by the athlete's index. No restore copy outlives an erase.
+        const recentlyDeleted = await this.#recentlyDeleted
+          .where(INDEX.recentlyDeletedByAthlete)
+          .equals(id)
+          .delete();
         await this.#athletes.delete(id);
         return {
           activities,
@@ -1091,6 +1142,7 @@ export class ActivityStore {
           riderTexts,
           trustedDeviceKeys,
           workoutGoals,
+          recentlyDeleted,
         };
       },
     );
@@ -1466,70 +1518,289 @@ export class ActivityStore {
   }
 
   /**
-   * Deletes one of this athlete's activities and its laps.
+   * Deletes one of this athlete's activities and its laps, **for good**.
    *
    * Scoped: passing another athlete's activity id deletes nothing and returns
    * `false`, rather than deleting it.
+   *
+   * ⚠️ Not what a rider's *Delete* does since #1431: that is
+   * {@link ActivityStore.moveActivityToRecentlyDeleted}, which can be undone.
+   * This is for a ride replaced by a re-import, and for the store's own tests.
    */
   async deleteActivity(owner: AthleteId, id: ActivityId): Promise<boolean> {
+    return this.#db.transaction('rw', this.#rideTables(), async () => {
+      const existing = await this.#activities
+        .where(INDEX.activityByAthleteAndId)
+        .equals([owner, id])
+        .first();
+      if (existing === undefined) {
+        return false;
+      }
+      await this.#deleteRideParts(owner, id);
+      return true;
+    });
+  }
+
+  // --- Recently deleted (#1431) ---------------------------------------------
+
+  /**
+   * Moves one of this athlete's rides to Recently deleted — what a rider's
+   * *Delete* does (#1431). It can be brought back for
+   * {@link RECENTLY_DELETED_SECONDS} with
+   * {@link ActivityStore.restoreRecentlyDeleted}.
+   *
+   * One transaction: the activity row, its signed record, its efforts and its
+   * note leave their stores and land in one Recently deleted row together, so
+   * no reader can see the ride half gone. `PersistedRecentlyDeleted` says why
+   * those four and not the laps and streams.
+   *
+   * Scoped: another athlete's ride is not moved, and the answer is `false`.
+   */
+  async moveActivityToRecentlyDeleted(
+    owner: AthleteId,
+    id: ActivityId,
+    deletedAt: UnixSeconds,
+  ): Promise<boolean> {
+    if (!Number.isFinite(deletedAt)) {
+      throw new StoreValidationError('recentlyDeleted.deletedAt: must be an instant');
+    }
     return this.#db.transaction(
       'rw',
       [
         this.#activities,
-        this.#laps,
-        this.#streamSets,
-        this.#streamBlobs,
         this.#activityRecords,
         this.#segmentEfforts,
-        this.#sideCameraReports,
-        this.#rideWriteUps,
         this.#riderTexts,
+        this.#recentlyDeleted,
       ],
       async () => {
-        const existing = await this.#activities
+        const activity = await this.#activities
           .where(INDEX.activityByAthleteAndId)
           .equals([owner, id])
           .first();
-        if (existing === undefined) {
+        if (activity === undefined) {
           return false;
         }
-        await this.#laps.where(INDEX.lapByActivity).equals(id).delete();
-        // The signed record goes with the ride it vouches for. Left behind it
-        // would be a row no scoped read can reach — every read of it is scoped
-        // to an activity that no longer exists — and it carries the ride's
-        // distance, duration and start time, which is a summary of a deleted
-        // activity sitting on the device after the athlete deleted it.
+        const record = await this.#activityRecords
+          .where(INDEX.activityRecordByAthleteAndActivity)
+          .equals([owner, id])
+          .first();
+        const efforts = await this.#segmentEfforts
+          .where(INDEX.effortByAthleteAndActivity)
+          .equals([owner, id])
+          .toArray();
+        const note = await this.#riderTexts.get([owner, 'note', id]);
+        await this.#recentlyDeleted.put({
+          activityId: id,
+          athleteId: owner,
+          deletedAt,
+          activity,
+          record,
+          efforts,
+          note,
+        });
         await this.#activityRecords.delete(id);
-        // The streams go with the activity, for the reason the laps do: every
-        // read of them is scoped to an activity that no longer exists, so
-        // leaving them behind holds a GPS trace on the device that nothing can
-        // reach and nothing can remove. On a per-second stream set that is also
-        // the largest thing this store ever orphans.
-        await this.#streamBlobs.where(INDEX.streamBlobByActivity).equals(id).delete();
-        await this.#streamSets.delete(id);
-        // The efforts go with the ride they were found in. An effort is two
-        // indices' worth of information *about* an activity, so one whose
-        // activity is gone can no longer be explained, re-derived or shown a
-        // trace for — and it would still be ranking on a board.
-        //
-        // ⚠️ This is deliberately unlike #64's segments, which survive their
-        // source activity by design (`records.ts` says why). A segment is a
-        // copy that stands alone; an effort is a claim about a specific ride.
-        await this.#segmentEfforts.where(INDEX.effortByActivity).equals(id).delete();
-        // #388. The side camera's report is about this ride and nothing else,
-        // and it was read off pictures of the rider: left behind it would be
-        // sentences about somebody's body under a ride that no longer exists.
-        await this.#sideCameraReports.delete(id);
-        // #800. The write-up is about this ride and nothing else, for the
-        // report's reason.
-        await this.#rideWriteUps.delete(id);
-        // #836. The rider's note on this ride is about this ride and nothing
-        // else; left behind it would be words under a ride that is gone.
+        await this.#segmentEfforts
+          .where(INDEX.effortByAthleteAndActivity)
+          .equals([owner, id])
+          .delete();
         await this.#riderTexts.delete([owner, 'note', id]);
         await this.#activities.delete(id);
         return true;
       },
     );
+  }
+
+  /**
+   * This athlete's Recently deleted, the most recently deleted first. A ride
+   * whose thirty days ran out at `now` is not listed, whether or not
+   * {@link ActivityStore.purgeRecentlyDeleted} has removed it yet — so a
+   * device that was off when a ride's time ran out never shows it again.
+   *
+   * @throws {StoreDecodeError} if a row on disk is not a deleted ride.
+   */
+  async listRecentlyDeleted(owner: AthleteId, now: UnixSeconds): Promise<RecentlyDeletedRide[]> {
+    const rows = await this.#recentlyDeleted
+      .where(INDEX.recentlyDeletedByAthleteAndDeletedAt)
+      .between([owner, now - RECENTLY_DELETED_SECONDS], [owner, Dexie.maxKey], false, true)
+      .reverse()
+      .toArray();
+    return rows.map(recentlyDeletedRideOf);
+  }
+
+  /**
+   * Brings a ride back from Recently deleted, whole: the activity row, its
+   * signed record, its efforts and its note return in one transaction, and
+   * its laps and streams, which never moved, are its own again.
+   *
+   * ⚠️ **A ride whose thirty days ran out is `missing`**, though its row may
+   * still be on disk until the next purge: the list stopped showing it, so it
+   * cannot be brought back from a stale screen either.
+   */
+  async restoreRecentlyDeleted(
+    owner: AthleteId,
+    id: ActivityId,
+    now: UnixSeconds,
+  ): Promise<RestoreOutcome> {
+    return this.#db.transaction(
+      'rw',
+      [
+        this.#activities,
+        this.#activityRecords,
+        this.#segmentEfforts,
+        this.#riderTexts,
+        this.#recentlyDeleted,
+      ],
+      async () => {
+        const held = await this.#recentlyDeleted.get(id);
+        if (
+          held === undefined ||
+          held.athleteId !== owner ||
+          held.deletedAt <= now - RECENTLY_DELETED_SECONDS
+        ) {
+          return 'missing';
+        }
+        const ride = recentlyDeletedRideOf(held);
+        if ((await this.#activities.get(id)) !== undefined) {
+          return 'already-there';
+        }
+        const hash = held.activity.originalFileSha256;
+        if (
+          typeof hash === 'string' &&
+          (await this.#activities
+            .where(INDEX.activityByAthleteAndFileHash)
+            .equals([owner, hash])
+            .first()) !== undefined
+        ) {
+          return 'already-there';
+        }
+        await this.#activities.put(held.activity);
+        if (held.record !== undefined) {
+          await this.#activityRecords.put(held.record);
+        }
+        if (held.efforts.length > 0) {
+          await this.#segmentEfforts.bulkPut(held.efforts);
+        }
+        if (held.note !== undefined) {
+          await this.#riderTexts.put(held.note);
+        }
+        await this.#recentlyDeleted.delete(ride.id);
+        return 'restored';
+      },
+    );
+  }
+
+  /**
+   * Removes one ride from Recently deleted for good, with everything of it
+   * that is still on the device. `false` when this athlete has no such ride.
+   */
+  async deleteRecentlyDeletedForGood(owner: AthleteId, id: ActivityId): Promise<boolean> {
+    return this.#db.transaction('rw', this.#rideTables(), async () => {
+      const held = await this.#recentlyDeleted.get(id);
+      if (held === undefined || held.athleteId !== owner) {
+        return false;
+      }
+      await this.#deleteRideParts(owner, id);
+      return true;
+    });
+  }
+
+  /** Empties this athlete's Recently deleted, for good. @returns how many rides. */
+  async emptyRecentlyDeleted(owner: AthleteId): Promise<number> {
+    return this.#db.transaction('rw', this.#rideTables(), async () => {
+      const ids = await this.#recentlyDeleted
+        .where(INDEX.recentlyDeletedByAthlete)
+        .equals(owner)
+        .primaryKeys();
+      for (const id of ids) {
+        await this.#deleteRideParts(owner, id as ActivityId);
+      }
+      return ids.length;
+    });
+  }
+
+  /**
+   * Removes for good every ride of this athlete's whose thirty days have run
+   * out at `now`. The client runs it once each time the app opens and again
+   * whenever Recently deleted is shown — there is no clock in the store and
+   * nothing runs while the app is closed, which is why
+   * {@link ActivityStore.listRecentlyDeleted} also hides an expired ride on
+   * its own.
+   *
+   * @returns how many rides were removed.
+   */
+  async purgeRecentlyDeleted(owner: AthleteId, now: UnixSeconds): Promise<number> {
+    return this.#db.transaction('rw', this.#rideTables(), async () => {
+      const ids = await this.#recentlyDeleted
+        .where(INDEX.recentlyDeletedByAthleteAndDeletedAt)
+        .between([owner, Dexie.minKey], [owner, now - RECENTLY_DELETED_SECONDS], true, true)
+        .primaryKeys();
+      for (const id of ids) {
+        await this.#deleteRideParts(owner, id as ActivityId);
+      }
+      return ids.length;
+    });
+  }
+
+  /** Every store one ride has a part in — {@link ActivityStore.#deleteRideParts}'s transaction. */
+  #rideTables(): Table[] {
+    return [
+      this.#activities,
+      this.#laps,
+      this.#streamSets,
+      this.#streamBlobs,
+      this.#activityRecords,
+      this.#segmentEfforts,
+      this.#sideCameraReports,
+      this.#rideWriteUps,
+      this.#riderTexts,
+      this.#recentlyDeleted,
+    ];
+  }
+
+  /**
+   * Deletes every part of one ride, wherever it is — a live activity or one in
+   * Recently deleted. The caller has already checked whose the ride is, inside
+   * the same transaction.
+   */
+  async #deleteRideParts(owner: AthleteId, id: ActivityId): Promise<void> {
+    await this.#laps.where(INDEX.lapByActivity).equals(id).delete();
+    // The signed record goes with the ride it vouches for. Left behind it
+    // would be a row no scoped read can reach — every read of it is scoped
+    // to an activity that no longer exists — and it carries the ride's
+    // distance, duration and start time, which is a summary of a deleted
+    // activity sitting on the device after the athlete deleted it.
+    await this.#activityRecords.delete(id);
+    // The streams go with the activity, for the reason the laps do: every
+    // read of them is scoped to an activity that no longer exists, so
+    // leaving them behind holds a GPS trace on the device that nothing can
+    // reach and nothing can remove. On a per-second stream set that is also
+    // the largest thing this store ever orphans.
+    await this.#streamBlobs.where(INDEX.streamBlobByActivity).equals(id).delete();
+    await this.#streamSets.delete(id);
+    // The efforts go with the ride they were found in. An effort is two
+    // indices' worth of information *about* an activity, so one whose
+    // activity is gone can no longer be explained, re-derived or shown a
+    // trace for — and it would still be ranking on a board.
+    //
+    // ⚠️ This is deliberately unlike #64's segments, which survive their
+    // source activity by design (`records.ts` says why). A segment is a
+    // copy that stands alone; an effort is a claim about a specific ride.
+    await this.#segmentEfforts.where(INDEX.effortByActivity).equals(id).delete();
+    // #388. The side camera's report is about this ride and nothing else,
+    // and it was read off pictures of the rider: left behind it would be
+    // sentences about somebody's body under a ride that no longer exists.
+    await this.#sideCameraReports.delete(id);
+    // #800. The write-up is about this ride and nothing else, for the
+    // report's reason.
+    await this.#rideWriteUps.delete(id);
+    // #836. The rider's note on this ride is about this ride and nothing
+    // else; left behind it would be words under a ride that is gone.
+    await this.#riderTexts.delete([owner, 'note', id]);
+    // #1431. The ride's Recently deleted row, with the record, efforts and
+    // note it holds, when that is where the ride was.
+    await this.#recentlyDeleted.delete(id);
+    await this.#activities.delete(id);
   }
 
   // --- Laps -----------------------------------------------------------------
@@ -3622,6 +3893,29 @@ function requireCount(what: string, value: number): void {
  * optional field does not compile until it is set, and the list row must then
  * carry it unless `SUMMARY_EXCLUSIONS` names it with a reason.
  */
+/**
+ * A Recently deleted row as the screen reads it — #1431.
+ *
+ * @throws {StoreDecodeError} if the row is not a deleted ride, or its ride is
+ * not the ride the row is filed under.
+ */
+function recentlyDeletedRideOf(row: PersistedRecentlyDeleted): RecentlyDeletedRide {
+  if (typeof row.deletedAt !== 'number' || !Number.isFinite(row.deletedAt)) {
+    throw new StoreDecodeError('recentlyDeleted.deletedAt: must be an instant');
+  }
+  const activity = fromPersistedActivity(row.activity);
+  if (activity.id !== row.activityId || activity.athleteId !== row.athleteId) {
+    throw new StoreDecodeError('recentlyDeleted.activity: is not the ride this row is filed under');
+  }
+  return {
+    id: activity.id,
+    athleteId: activity.athleteId,
+    deletedAt: unixSeconds(row.deletedAt),
+    removedAt: unixSeconds(row.deletedAt + RECENTLY_DELETED_SECONDS),
+    summary: summaryOf(activity),
+  };
+}
+
 function summaryOf(record: ActivityRecord): ActivitySummary {
   const {
     id,

@@ -70,6 +70,10 @@ export const ERASE_CONFIRMATION = 'erase everything';
  */
 export const ERASE_REMOVES: readonly string[] = [
   'every ride, with all of its per-second samples',
+  // #1431. Rides the rider deleted are held for 30 days so one deleted by
+  // mistake can come back; an erase takes them too, and named so a rider who
+  // was counting on bringing one back reads that they cannot afterwards.
+  'every ride in Recently deleted, which cannot be brought back afterwards',
   // #221. Both of these went in the cascade and, until that issue, came out in
   // no export — so a rider who did the responsible thing lost them silently and
   // this list did not warn them. They are named separately from the ride
@@ -267,6 +271,8 @@ export interface EraseStore {
     readonly segments: number;
     /** #384. Usually zero — ADR 0029 D-2 keeps nothing unless the rider asked. */
     readonly cameraFrames: number;
+    /** #1431. Rides held in Recently deleted. */
+    readonly recentlyDeleted: number;
   }>;
   /**
    * Puts the athlete row back.
@@ -307,6 +313,12 @@ export interface EraseOutcome {
    * should not be told about a feature it never used.
    */
   readonly cameraFrames: number;
+  /**
+   * Rides in Recently deleted removed — #1431. Named only when non-zero, like
+   * the pictures: no restore copy outlives an erase, and a rider who had some
+   * is told they went.
+   */
+  readonly recentlyDeleted: number;
 }
 
 /**
@@ -369,6 +381,7 @@ export async function eraseDevice(
     workouts: counts.workouts,
     segments: counts.segments,
     cameraFrames: counts.cameraFrames,
+    recentlyDeleted: counts.recentlyDeleted,
   };
 }
 
@@ -388,6 +401,12 @@ export function eraseSentence(outcome: EraseOutcome): string {
     // ⚠️ "picture", not "camera frame". The list a rider reads before pressing
     // is in their words, and so is the sentence afterwards.
     parts.push(`${String(outcome.cameraFrames)} picture${outcome.cameraFrames === 1 ? '' : 's'}`);
+  }
+  if (outcome.recentlyDeleted > 0) {
+    parts.push(
+      // Lower case, as every other part: nothing in this sentence is a name.
+      `${String(outcome.recentlyDeleted)} deleted ride${outcome.recentlyDeleted === 1 ? '' : 's'} held for restore`,
+    );
   }
   // ⚠️ No ride name, no route name, no date. ADR 0004 decision D binds every
   // layer that formats location data into a string, and a route's name is

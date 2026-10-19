@@ -214,6 +214,12 @@ async function seedEverything(harness: StoreHarness, owner: AthleteId): Promise<
     await store.putTrustedDeviceKey(trustedDeviceKeyFor(owner));
     // #1236. The rider's typed workout goals.
     await store.putWorkoutGoals(workoutGoalsFor(owner));
+    // #1431. A deleted ride, held in Recently deleted, with its lap and note.
+    const deleted = rideFor(owner, { name: 'Deleted' });
+    await store.putActivity(deleted);
+    await store.putLap(lapFor(deleted, 1));
+    await store.putRiderText(riderTextFor(owner, 'note', deleted.id));
+    await store.moveActivityToRecentlyDeleted(owner, deleted.id, unixSeconds(FIXTURE_EPOCH));
   });
 }
 

@@ -55,6 +55,8 @@ export type {
   NewLap,
   OriginalFileReference,
   PrivacyZoneRecord,
+  RecentlyDeletedRide,
+  RestoreOutcome,
   SegmentEndpointRecord,
   FrozenEffortAttributes,
   MatchCheckpointRecord,
@@ -151,6 +153,7 @@ export {
 export {
   DEXIE_IDB_VERSION_MULTIPLIER,
   INDEX,
+  RECENTLY_DELETED_SECONDS,
   SCHEMA_VERSION,
   SCHEMA_VERSIONS,
   STORES_V1,

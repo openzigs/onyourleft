@@ -49,6 +49,7 @@ import { useEffect, useId, useRef, useState, type JSX } from 'react';
 import type { BeatsPerMinute, Watts } from '@onyourleft/domain';
 
 import { Button, ButtonLink } from '../design/Button';
+import { ConfirmDialog } from '../design/ConfirmDialog';
 import { SensorGlyph } from '../design/illustration';
 import { Reading } from '../design/Reading';
 import { formatDuration } from '../format';
@@ -61,6 +62,7 @@ import { WorkoutPanel } from '../ride/WorkoutPanel';
 import type { WorkoutPort } from '../workouts/store-port';
 import type { AnalysisPort } from '../analysis/store-port';
 import type { RecoverableRide } from '../recording/recovery';
+import type { RecordingSessionId } from '@onyourleft/store';
 import {
   canStartNewRide,
   KEEP_SCREEN_ON_LABEL,
@@ -510,6 +512,25 @@ function rideDescription(describedBy: string, index: number): string {
   return `${describedBy}-ride-${String(index)} ${describedBy}-ride-${String(index)}-of`;
 }
 
+/** What a Discard press is about to throw away — #1431. */
+interface Discarding {
+  readonly id: RecordingSessionId;
+  /** `ride`: kept in Recently deleted. `copy`: the ride is in the library. `unreadable`: gone for good. */
+  readonly kind: 'ride' | 'copy' | 'unreadable';
+}
+
+/** What each discard does, said inside its confirmation — #1431. */
+export const DISCARD_EXPLAINED: Readonly<Record<Discarding['kind'], string>> = {
+  ride: 'It moves to Recently deleted, at the foot of your Activities, where you can bring it back for 30 days. After that it is removed from this device for good.',
+  copy: 'The ride is already in your activities and stays there. Only this working copy is removed.',
+  unreadable:
+    'It cannot be read, so it cannot be kept anywhere: discarding it removes it from this device for good.',
+};
+
+/** Said inside the confirmation when a discard did not go through — #1431. */
+export const DISCARD_FAILED_TEXT =
+  'It could not be discarded, and it is still on this device. Try again, or keep it.';
+
 function RecoveryOffer({
   controller,
   snapshot,
@@ -522,14 +543,54 @@ function RecoveryOffer({
   // stands in its list — and a screen reader can tell them apart. The visible
   // text is unchanged; the position is the hidden half.
   const describedBy = useId();
+  const headingId = useId();
+  /**
+   * The discard a press asked about, while its confirmation is open — #1431:
+   * Discard is small and confirmed, and Save is the easy target.
+   */
+  const [discarding, setDiscarding] = useState<Discarding | undefined>(undefined);
+  /** Set when a discard went through, so focus does not go back to a row that is gone. */
+  const discarded = useRef(false);
+  const confirmation = (
+    <ConfirmDialog
+      open={discarding !== undefined}
+      onOpenChange={(open) => {
+        if (!open) setDiscarding(undefined);
+      }}
+      title={discarding?.kind === 'unreadable' ? 'Discard this recording?' : 'Discard this ride?'}
+      confirmLabel={
+        discarding?.kind === 'unreadable' ? 'Discard the recording' : 'Discard the ride'
+      }
+      cancelLabel={discarding?.kind === 'unreadable' ? 'Keep the recording' : 'Keep the ride'}
+      onConfirm={async () => {
+        if (discarding === undefined) return;
+        const gone = await controller.discardRecovered(discarding.id);
+        if (!gone) throw new Error('not discarded');
+        discarded.current = true;
+      }}
+      failureText={DISCARD_FAILED_TEXT}
+      onClosed={() => {
+        if (!discarded.current) return false;
+        discarded.current = false;
+        const heading = document.getElementById(headingId);
+        heading?.focus();
+        return heading !== null;
+      }}
+    >
+      <p>{discarding === undefined ? '' : DISCARD_EXPLAINED[discarding.kind]}</p>
+    </ConfirmDialog>
+  );
   if (snapshot.recoverable.length === 0 && snapshot.unreadableRecordings.length === 0) {
-    return null;
+    // The dialog outlives the last row, so a discard that emptied the list can close.
+    return confirmation;
   }
   const rides = snapshot.recoverable.length;
   const unreadable = snapshot.unreadableRecordings.length;
   return (
     <section>
-      <h3>Rides still on this device</h3>
+      <h3 id={headingId} tabIndex={-1}>
+        Rides still on this device
+      </h3>
       <p>
         A ride is written to this device as it happens, so a closed tab does not lose it. These are
         the ones that were never added to your activities.
@@ -563,11 +624,12 @@ function RecoveryOffer({
                 Save this ride
               </Button>
             )}
+            {/* #1431: tertiary and confirmed — the easy target is Save. */}
             <Button
-              variant="secondary"
+              variant="tertiary"
               describedBy={rideDescription(describedBy, index)}
               onClick={() => {
-                void controller.discardRecovered(ride.id);
+                setDiscarding({ id: ride.id, kind: ride.alreadySaved ? 'copy' : 'ride' });
               }}
             >
               Discard this ride
@@ -584,10 +646,10 @@ function RecoveryOffer({
               {`Recording ${String(index + 1)} of ${String(unreadable)}.`}
             </span>
             <Button
-              variant="secondary"
+              variant="tertiary"
               describedBy={`${describedBy}-unreadable-${String(index)} ${describedBy}-unreadable-${String(index)}-of`}
               onClick={() => {
-                void controller.discardRecovered(id);
+                setDiscarding({ id, kind: 'unreadable' });
               }}
             >
               Discard this recording
@@ -595,6 +657,7 @@ function RecoveryOffer({
           </li>
         ))}
       </ul>
+      {confirmation}
     </section>
   );
 }

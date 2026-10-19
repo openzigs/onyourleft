@@ -7751,6 +7751,96 @@ describe('#1312 — the laps of a course are the recording’s, and are saved wi
   });
 
   /**
+   * #1431. Discarding a ride from the recovery offer keeps it in Recently
+   * deleted for 30 days rather than destroying it — through the real
+   * controller and the real store, read back on a connection that did not
+   * write it.
+   */
+  describe('a ride discarded from the recovery offer can be brought back', () => {
+    const crashed = async (): Promise<RecordingSessionId> => {
+      const rig = benchWith();
+      await rig.controller.pair('trainer');
+      await rig.controller.start();
+      await ride(rig, 10);
+      rig.controller.dispose();
+      const id = rig.sessionIds[0];
+      if (id === undefined) {
+        throw new Error('no recording was started');
+      }
+      return id;
+    };
+
+    const keepingPort = (
+      move: RideSavePort['store']['moveActivityToRecentlyDeleted'],
+    ): RideSavePort => {
+      const port = storeSavePort();
+      return { ...port, store: { ...port.store, moveActivityToRecentlyDeleted: move } };
+    };
+
+    /** Every ride in Recently deleted, whenever it was deleted. */
+    const held = async () =>
+      harness.read(async (store) => store.listRecentlyDeleted(ATHLETE_A, unixSeconds(0)));
+
+    it('saves it straight into Recently deleted, samples and all, and lets the recording go', async () => {
+      const id = await crashed();
+      const next = benchWith({
+        rideSave: keepingPort(async (owner, ride, at) =>
+          harness.write(async (store) => store.moveActivityToRecentlyDeleted(owner, ride, at)),
+        ),
+      });
+      await next.controller.refreshRecoverable();
+      expect(await next.controller.discardRecovered(id)).toBe(true);
+      expect(next.controller.getSnapshot().recoverable).toEqual([]);
+      next.controller.dispose();
+
+      expect(await harness.read(async (store) => store.listActivitySummaries(ATHLETE_A))).toEqual(
+        [],
+      );
+      const [kept] = await held();
+      expect(kept?.id).toBe(activityId('ride-1'));
+      expect(
+        await harness.read(async (store) => store.getStreamSet(ATHLETE_A, activityId('ride-1'))),
+      ).toBeDefined();
+      expect(await harness.read(async (store) => store.readRecordingSessions(ATHLETE_A))).toEqual({
+        sessions: [],
+        unreadable: [],
+      });
+      // And it comes back whole.
+      expect(
+        await harness.write(async (store) =>
+          store.restoreRecentlyDeleted(ATHLETE_A, activityId('ride-1'), unixSeconds(0)),
+        ),
+      ).toBe('restored');
+      expect(
+        (await harness.read(async (store) => store.listActivitySummaries(ATHLETE_A))).map(
+          (each) => each.id,
+        ),
+      ).toEqual([activityId('ride-1')]);
+    });
+
+    it('throws nothing away when the ride cannot be kept', async () => {
+      const id = await crashed();
+      const next = benchWith({
+        rideSave: keepingPort(() => Promise.reject(new Error('the device is full'))),
+      });
+      await next.controller.refreshRecoverable();
+      expect(await next.controller.discardRecovered(id)).toBe(false);
+      // The ride was saved and could not be moved: it is in the library, and
+      // its recording is still on disk, marked as that ride's.
+      expect(next.controller.getSnapshot().recoverable.map((each) => each.alreadySaved)).toEqual([
+        true,
+      ]);
+      next.controller.dispose();
+      expect(
+        (await harness.read(async (store) => store.listActivitySummaries(ATHLETE_A))).map(
+          (each) => each.id,
+        ),
+      ).toEqual([activityId('ride-1')]);
+      expect(await held()).toEqual([]);
+    });
+  });
+
+  /**
    * #1325. `listRecordingSessions` decoded every header of the athlete and the
    * controller answered a throw with an empty offer, so one header that would
    * not read hid EVERY recoverable ride, and the damaged one could be neither

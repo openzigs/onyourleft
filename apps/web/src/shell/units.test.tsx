@@ -60,7 +60,9 @@ function library(): LibraryPort {
             updatedAt: 1_700_000_000,
           },
         ]),
-      deleteActivity: () => Promise.resolve(true),
+      moveActivityToRecentlyDeleted: () => Promise.resolve(true),
+      listRecentlyDeleted: () => Promise.resolve([]),
+      purgeRecentlyDeleted: () => Promise.resolve(0),
     } as unknown as LibraryPort['store'],
   };
 }

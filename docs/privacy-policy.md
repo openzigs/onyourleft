@@ -800,6 +800,16 @@ Uninstalling the app removes everything it holds. Inside the app, **Files → Er
 deletes every ride, route, segment, effort, workout and setting, and the signing key with them, and
 makes this device forget any instance it was connected to, after you type a confirmation phrase.
 
+**Deleting one ride.** *Delete* on a ride, and *Discard this ride* on a ride the app was still
+holding after it closed, move the ride to **Recently deleted**, at the foot of the Activities screen.
+It stays there, on this device only, for 30 days, so a ride deleted by mistake can be brought back
+whole; after that it is removed for good the next time the app is opened. *Delete for good* and
+*Empty Recently deleted* remove it at once. While it is there it is not in your activities or totals,
+not in the account export, and not synced; if it was synced before, the next sync deletes it on the
+instance as it would any ride you delete. *Erase this device* removes it with everything else. Where
+this policy says something goes with a ride when you delete it, it goes when the ride leaves Recently
+deleted.
+
 Some things an erase cannot reach, and the app says so before you press it: files you have already
 exported, a copy of a ride you have already given to somebody, a picture or a ride's numbers you
 sent to your own computer, which is a copy that computer holds, a question or a ride's numbers you

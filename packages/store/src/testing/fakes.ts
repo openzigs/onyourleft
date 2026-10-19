@@ -150,6 +150,13 @@ function bindStore(real: ActivityStore): PersistentStore {
     setActivityMayBeRaced: async (owner, activity, mayBeRaced) =>
       real.setActivityMayBeRaced(owner, activity, mayBeRaced),
     deleteActivity: async (owner, id) => real.deleteActivity(owner, id),
+    moveActivityToRecentlyDeleted: async (owner, id, deletedAt) =>
+      real.moveActivityToRecentlyDeleted(owner, id, deletedAt),
+    listRecentlyDeleted: async (owner, now) => real.listRecentlyDeleted(owner, now),
+    restoreRecentlyDeleted: async (owner, id, now) => real.restoreRecentlyDeleted(owner, id, now),
+    deleteRecentlyDeletedForGood: async (owner, id) => real.deleteRecentlyDeletedForGood(owner, id),
+    emptyRecentlyDeleted: async (owner) => real.emptyRecentlyDeleted(owner),
+    purgeRecentlyDeleted: async (owner, now) => real.purgeRecentlyDeleted(owner, now),
     putLap: async (record) => real.putLap(record),
     listLaps: async (owner, activity) => real.listLaps(owner, activity),
     putPrivacyZone: async (record) => real.putPrivacyZone(record),

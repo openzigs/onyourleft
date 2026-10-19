@@ -37,6 +37,7 @@ import {
 } from './instance-analysis';
 import type { InstanceJobView } from './instance-analysis-port';
 import { forgettingOnDelete } from '../library/store-port';
+import { emptyLibraryStore } from '../library/testing';
 import {
   failedWith,
   progress,
@@ -684,7 +685,8 @@ describe('a ride deleted takes its pending job with it (#1102)', () => {
     expect(controller(scripted, { pending: storage }).pendingJob(id)).toBe(true);
 
     const library = forgettingOnDelete(writer, [pendingJobForgetter(storage)]);
-    expect(await library.deleteActivity(ATHLETE_A, id)).toBe(true);
+    // #1431: a rider's Delete moves the ride to Recently deleted; the job goes then.
+    expect(await library.moveActivityToRecentlyDeleted(ATHLETE_A, id, unixSeconds(1))).toBe(true);
     expect(await harness.read(async (reader) => reader.getActivity(ATHLETE_A, id))).toBeUndefined();
 
     const reopened = controller(scripted, { pending: storage });
@@ -727,14 +729,14 @@ describe('a ride deleted takes its pending job with it (#1102)', () => {
     const scripted = scriptedJobs([section(1, 'First part.')]);
     await leftPending(scripted, storage, id);
     const refusing = forgettingOnDelete(
-      {
-        listActivitySummaries: async () => Promise.resolve([]),
-        getActivity: async () => Promise.resolve(undefined),
-        deleteActivity: async () => Promise.reject(new Error('refused')),
-      },
+      emptyLibraryStore({
+        moveActivityToRecentlyDeleted: async () => Promise.reject(new Error('refused')),
+      }),
       [pendingJobForgetter(storage)],
     );
-    await expect(refusing.deleteActivity(ATHLETE_A, id)).rejects.toThrow('refused');
+    await expect(
+      refusing.moveActivityToRecentlyDeleted(ATHLETE_A, id, unixSeconds(1)),
+    ).rejects.toThrow('refused');
     expect(controller(scripted, { pending: storage }).pendingJob(id)).toBe(true);
   });
 });

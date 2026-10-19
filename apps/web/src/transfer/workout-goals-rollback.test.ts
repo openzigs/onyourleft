@@ -52,7 +52,8 @@ afterEach(async () => {
 
 describe('version 18 rolls back through the account export — export → downgrade → re-import', () => {
   it('brings the rides and the workout goals back on a database the version-17 build made', async () => {
-    expect(SCHEMA_VERSION).toBe(18);
+    // 19 since #1431, which adds a store beside the goals and changes neither.
+    expect(SCHEMA_VERSION).toBeGreaterThanOrEqual(18);
     await seedAthletes(harness);
     const rides = [0, 1].map((index) =>
       rideFor(ATHLETE_A, { startedAt: unixSeconds(1_700_000_000 + index * 86_400) }),
