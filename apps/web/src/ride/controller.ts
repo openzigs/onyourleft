@@ -412,6 +412,15 @@ export interface RideWorkoutSnapshot {
    */
   readonly hasControl?: boolean | undefined;
   /**
+   * Whether the control client says the trainer acknowledged
+   * {@link holdingWatts} and nothing since puts it in doubt (`confirmed`,
+   * that very number) — #1313. `false` for the tick or so after control is
+   * taken back, when the session's last write is from before the loss and the
+   * client knows of no target: the graph states none until the next write
+   * lands. @see vouchedHolding
+   */
+  readonly targetConfirmed?: boolean | undefined;
+  /**
    * The rider's power and heart rate NOW, each `undefined` when its reading
    * is not live — #1307. The numbers the graph writes beside its lanes; the
    * trace is what it draws, and is not sampled while the ride is paused.
@@ -2896,6 +2905,7 @@ export function createRideController(options: RideControllerOptions): RideContro
       // #1307: the graph's one source for what the trainer holds, and the
       // readings it writes, all live — see each field.
       hasControl: control()?.hasControl() === true,
+      targetConfirmed: vouchedHolding(state.holding) !== undefined,
       live: { power: liveReading('power', clock), heartRate: liveReading('heart-rate', clock) },
       refused: state.raiseRefused,
       // The block a rider is in, phrased by the module that phrases them
@@ -2955,6 +2965,24 @@ export function createRideController(options: RideControllerOptions): RideContro
     sampleForGraph(workout, at);
   };
 
+  /**
+   * `holding` if the trainer is known to hold it NOW: this app has control,
+   * and the control client says that very target is `confirmed` — #1313.
+   *
+   * ⚠️ Control alone is not enough. A workout's `holding` is the session's
+   * last acknowledged write, and it outlives a `0xFF`: once control is taken
+   * back the client says `none` until the session's next write lands, and
+   * for that tick the graph vouched for a target from before the loss.
+   */
+  const vouchedHolding = (holding: Watts | undefined): Watts | undefined => {
+    const client = control();
+    if (client?.hasControl() !== true) {
+      return undefined;
+    }
+    const said = client.targetPower();
+    return said.kind === 'confirmed' && said.target === holding ? holding : undefined;
+  };
+
   /** A channel's reading if it is live at `at`, by the rule the metric grid shows it under. */
   const liveReading = (capability: MeasurementCapability, at: UnixSeconds): number | undefined => {
     const state = metricStateFor(latest.get(capability), true, at, staleAfterSeconds);
@@ -2983,7 +3011,8 @@ export function createRideController(options: RideControllerOptions): RideContro
       at: state.player.elapsed,
       // No control, no confirmed target: `holding` outlives a lost link (the
       // panel says "last set to"), and the graph's lane is the confirmed one.
-      target: control()?.hasControl() === true ? state.holding : undefined,
+      // #1313: nor for the tick after control is taken back.
+      target: vouchedHolding(state.holding),
       power: liveReading('power', at),
       heartRate: liveReading('heart-rate', at),
       range:

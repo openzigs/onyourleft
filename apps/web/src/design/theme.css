@@ -6023,9 +6023,15 @@ select.oyl-input {
  * against that surface.
  */
 .oyl-workout-strip {
+  /* #1313: a hairline between the route's own lines above ("0% complete")
+     and the workout's strip, so the route's progress does not read as the
+     caption of the workout's bar. Inside the box (`border-box`), so the strip
+     is still exactly the route plan's size. */
+  border-top: 1px solid var(--oyl-color-hud-border);
   display: flex;
   flex-direction: column;
   gap: var(--oyl-space-xs);
+  padding-top: var(--oyl-space-xs);
 }
 
 .oyl-workout-strip__lane {
@@ -7004,6 +7010,60 @@ select.oyl-input {
     display: grid;
     gap: var(--oyl-space-sm);
     grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  }
+}
+
+/*
+ * THE WORKOUT'S STRIP ON A PHONE — #1313.
+ *
+ * Measured in the pinned Chromium before this: upright (the column layout
+ * above) the strip had the narrow 2fr of the route panel, 127 px at 360 wide,
+ * and its line overflowed it by 74 px ("Target 175 W · 15:00 l…") and by 120
+ * px in a heart-rate hold; on its side (the short corners layout) a hold's
+ * line overflowed the 238 px strip by 9 px. Beside the bar, upright, the
+ * route's "0% complete" read as the bar's caption.
+ *
+ * So on a phone the line is written as its two parts, one under the other,
+ * and the strip is one line taller to keep its lane as tall as it was
+ * (48 px upright; 43 px on its side, as on a tablet). Upright it also takes the wide column
+ * and stands behind a hairline of its own; on its side the hairline above it
+ * (`.oyl-workout-strip`) is the one every stacked layout has. The words do not
+ * change: the separator is hidden where the parts are stacked.
+ *
+ * The height is set through `.oyl-hud__plan-svg`, the route plan's own sizing
+ * class, and only while the route panel holds a strip, so a ride with no
+ * workout is sized as it was. `ride-workout.browser.spec.ts` §"the workout
+ * strip on a phone" measures the line, the lane, the hairline and the panels
+ * against the rider; its tablet case holds the strip to the route plan's size.
+ */
+@media (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) {
+  .oyl-game--riding .oyl-hud__route:has(> .oyl-workout-strip) {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  }
+
+  .oyl-game--riding .oyl-hud__route > .oyl-workout-strip.oyl-hud__plan-svg {
+    border-left: 1px solid var(--oyl-color-hud-border);
+    border-top: 0;
+    height: 6rem;
+    padding-left: var(--oyl-space-sm);
+    padding-top: 0;
+  }
+}
+
+@media (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem),
+  (min-width: 46rem) and (min-height: 22.5rem) and (max-height: 30rem) {
+  .oyl-game--riding .oyl-hud__route > .oyl-workout-strip .oyl-workout-strip__part {
+    display: block;
+  }
+
+  .oyl-game--riding .oyl-hud__route > .oyl-workout-strip .oyl-workout-strip__separator {
+    display: none;
+  }
+}
+
+@media (min-width: 46rem) and (min-height: 22.5rem) and (max-height: 30rem) {
+  .oyl-game--riding .oyl-hud__route > .oyl-workout-strip.oyl-hud__plan-svg {
+    height: 6rem;
   }
 }
 
