@@ -12266,6 +12266,32 @@ describe('#1434 — what the target band is drawn from, through the real control
     rig.controller.dispose();
   });
 
+  it('a power that goes stale mid-block leaves the average of the live seconds, not a gap — a dropped meter is not a zero', async () => {
+    const rig = await riding();
+    await ride(rig, 12);
+    await flushMicrotasks(20);
+    const before = rig.controller.getSnapshot().workout;
+    if (before === undefined) throw new Error('no workout');
+    expect(before.elapsedSeconds).toBeGreaterThanOrEqual(10);
+    expect(before.blockAverageWatts).toBeDefined();
+
+    rig.bench.device(TRAINER).script({ kind: 'notification-dropout', duration: seconds(60) });
+    for (let second = 0; second <= METRIC_STALE_AFTER_SECONDS + 2; second += 1) {
+      await ride(rig, 1);
+      await flushMicrotasks(20);
+    }
+    // The apparatus: the grid calls power stale while the workout runs on.
+    expect(metric(rig, 'power').kind).toBe('stale');
+    const after = rig.controller.getSnapshot().workout;
+    if (after === undefined) throw new Error('no workout');
+    expect(after.status).toBe('running');
+    expect(after.trace?.at(-1)?.power).toBeUndefined();
+    // The average is still a number, and still the mean of the live seconds.
+    expect(after.blockAverageWatts).toBeDefined();
+    expect(after.blockAverageWatts).toBe(meanFrom(after.trace ?? [], 10));
+    rig.controller.dispose();
+  });
+
   it('a second tick at the same instant of the workout’s clock adds no second reading', async () => {
     const rig = await riding();
     await ride(rig, 5);

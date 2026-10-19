@@ -87,6 +87,18 @@ describe('the band — #1434', () => {
     expect(targetBandWords(band()).left).toBe('8:20 left in this block');
   });
 
+  it('draws a low target on a scale at least 50 W either side of it', () => {
+    // 40 W: half of it would be 20 W, and the band would fill the gauge.
+    const low = band({
+      holdingWatts: 40,
+      trace: [],
+      live: undefined,
+      blockAverageWatts: undefined,
+    });
+    expect(low.at.low).toBeCloseTo((35 / 90) * 100, 5);
+    expect(low.at.high).toBeCloseTo((45 / 90) * 100, 5);
+  });
+
   it('places each mark along its scale, with the band in the middle', () => {
     const { at } = band();
     // The scale is 100–300 W around a 200 W target.
