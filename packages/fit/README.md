@@ -534,6 +534,9 @@ line rather than only describing it.
 | temperature | `gpxtpx:atemp` | **lost** — no element in TCX v2 or `ActivityExtension` |
 | per-point distance | **lost** — no element in GPX 1.1 or any extension written here | native |
 | lap `totalElapsedTime`, `totalDistance` | **lost** — GPX has no lap | native |
+| lap average and highest heart rate, average cadence (#1321) | **lost** — GPX has no lap | native |
+| lap average and highest power (#1321) | **lost** | `ns3:LX/AvgWatts`, `MaxWatts` |
+| lap `intensity`, `triggerMethod` (#1321) | **lost** | native; **an absent one is written `Active` / `Manual`**, because both elements are required |
 | activity name | `<trk><name>` | **lost** — `<Notes>` is a rider's note, not a title |
 | lap boundaries | one `<trkseg>` per lap; the count survives | native |
 | sport | `<type>`, free text, passed through | `Sport`, mapped onto `Biking` / `Running` / `Other`; **an absent sport becomes `Other`, not absent** |

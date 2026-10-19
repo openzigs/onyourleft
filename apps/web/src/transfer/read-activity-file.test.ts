@@ -572,3 +572,105 @@ describe('readActivityFile — a file’s laps (#1320)', () => {
     ]);
   });
 });
+
+/**
+ * #1320's remaining boxes, on #1321's mark: this client's own TCX lists the
+ * laps it marks, and no split either side of them. Its own FIT carries no mark
+ * until #1471, and lists no laps.
+ */
+describe('readActivityFile — this client’s own laps (#1320, #1321)', () => {
+  /**
+   * A lead-in, two whole laps, a part lap and a tail, as this client exports
+   * one: each split's distance is its share of the ride's 595 m.
+   */
+  const OWN_LAPS = [
+    { start: 0, elapsed: 20, distance: 100, kind: 'outside' },
+    { start: 20, elapsed: 30, distance: 150, kind: 'lap' },
+    { start: 50, elapsed: 30, distance: 150, kind: 'lap' },
+    { start: 80, elapsed: 25, distance: 125, kind: 'part' },
+    { start: 105, elapsed: 14, distance: 70, kind: 'outside' },
+  ] as const;
+
+  it('lists the laps of a marked TCX, the part lap marked, and not the splits either side', () => {
+    const ride = readActivityFile(
+      'own.tcx',
+      lappedFile({ format: 'tcx', samples: 120, writer: undefined, laps: OWN_LAPS }),
+    );
+    expect(
+      ride.laps.map((lap) => [
+        lap.startedAt - LAPPED_FILE_START,
+        lap.elapsedTime,
+        lap.distance,
+        lap.partial,
+      ]),
+    ).toEqual([
+      [20, 30, 150, false],
+      [50, 30, 150, false],
+      [80, 25, 125, true],
+    ]);
+  });
+
+  it('lists no laps from its own FIT, which carries no mark until #1471', () => {
+    // The same splits, as this client's FIT export writes them: no maker in
+    // the file_id and no mark on any lap, so a lead-in cannot be told from a
+    // lap and none is listed.
+    const ride = readActivityFile(
+      'own.fit',
+      lappedFile({ format: 'fit', samples: 120, writer: undefined, laps: OWN_LAPS }),
+    );
+    expect(ride.laps).toEqual([]);
+    // The ride itself is still read, every sample of it.
+    expect(ride.elapsedTime).toBe(119);
+  });
+
+  it('lists the one lap of a marked TCX, which its mark says is a lap', () => {
+    const ride = readActivityFile(
+      'one.tcx',
+      lappedFile({
+        format: 'tcx',
+        samples: 120,
+        writer: undefined,
+        laps: [
+          { start: 0, elapsed: 40, distance: 200, kind: 'outside' },
+          { start: 40, elapsed: 79, distance: 395, kind: 'lap' },
+        ],
+      }),
+    );
+    expect(ride.laps.map((lap) => lap.startedAt - LAPPED_FILE_START)).toEqual([40]);
+  });
+
+  it.each(['fit', 'tcx'] as const)(
+    'lists none from an unmarked %s of its own, as this client wrote before #1321',
+    (format) => {
+      const ride = readActivityFile(
+        `old.${format}`,
+        lappedFile({
+          format,
+          samples: 120,
+          writer: undefined,
+          laps: OWN_LAPS.map((lap) => ({ ...lap, kind: undefined })),
+        }),
+      );
+      expect(ride.laps).toEqual([]);
+    },
+  );
+
+  it('reads a TCX Manual lap from elsewhere as a whole lap, not a part lap', () => {
+    const ride = readActivityFile(
+      'garmin.tcx',
+      lappedFile({
+        format: 'tcx',
+        samples: 120,
+        writer: 'Garmin Edge 530',
+        // An auto-lap ended at a distance (`Location`) and one the rider
+        // pressed (`Manual`): this client's mark has both, but only in a file
+        // that names this client.
+        laps: [
+          { start: 0, elapsed: 60, kind: 'lap' },
+          { start: 60, elapsed: 59, kind: 'part' },
+        ],
+      }),
+    );
+    expect(ride.laps.map((lap) => lap.partial)).toEqual([false, false]);
+  });
+});

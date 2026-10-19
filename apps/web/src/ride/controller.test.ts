@@ -95,7 +95,7 @@ import {
   seedAthletes,
   type StoreHarness,
 } from '@onyourleft/store/testing';
-import type { NewActivity, NewStreamSet } from '@onyourleft/store';
+import type { LapRecord, NewActivity, NewStreamSet } from '@onyourleft/store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
@@ -8560,11 +8560,42 @@ describe('#1312 — the laps of a course are the recording’s, and are saved wi
           format === 'fit' ? lapped.stored.movingTime : lapped.back.elapsedTime,
         );
         expect(LOSSY_CHANNELS[format].includes('activity.movingTime')).toBe(format === 'tcx');
-        // #1320: a file this client wrote comes back with no lap rows. Its
-        // splits include the lead-in and the tail, and nothing in it yet says
-        // which are laps of the course (#1321), so it is read as a file with
-        // no laps rather than one whose lead-in is a lap.
-        expect(lapped.backLaps).toEqual([]);
+        if (format === 'fit') {
+          // #1320: this client's own FIT comes back with no lap rows. Its
+          // splits include the lead-in and the tail, and nothing in it says
+          // which are laps of the course until #1471 (#1321's FIT half), so
+          // it is read as a file with no laps rather than one whose lead-in
+          // is a lap. `LOSSY_CHANNELS` tells the rider FIT drops the laps'
+          // figures and kind.
+          expect(lapped.backLaps).toEqual([]);
+          expect(LOSSY_CHANNELS.fit).toEqual(
+            expect.arrayContaining(['lap.intensity', 'lap.triggerMethod']),
+          );
+        } else {
+          // #1320, with #1321's mark: the laps come back as rows — the two
+          // whole laps and the part lap, and not the lead-in or the tail.
+          // TCX states each lap's start to the second, its share of the
+          // ride's distance and no climb, so what comes back is the laps, in
+          // order, the part lap marked, and the figures worked out from the
+          // samples — which are the same samples, so the same figures.
+          const kept = (rows: readonly LapRecord[]) =>
+            rows.map((row) => ({
+              ordinal: row.ordinal,
+              startedAt: Math.floor(row.startedAt),
+              partial: row.partial,
+              averagePower: row.averagePower,
+              maxPower: row.maxPower,
+              averageHeartRate: row.averageHeartRate,
+              maxHeartRate: row.maxHeartRate,
+              averageCadence: row.averageCadence,
+            }));
+          expect(kept(lapped.backLaps)).toEqual(kept(lapped.laps));
+          // Lost, and listed in `LOSSY_CHANNELS`: the lap's own road and its climb.
+          expect(LOSSY_CHANNELS.tcx).toEqual(
+            expect.arrayContaining(['lap.distance', 'lap.ascent']),
+          );
+          expect(lapped.backLaps.map((lap) => lap.partial === true)).toEqual([false, false, true]);
+        }
       },
     );
 

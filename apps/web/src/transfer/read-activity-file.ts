@@ -55,6 +55,7 @@ import {
   type FitLap,
   type FitRecord,
   type TrackActivity,
+  type TrackLap,
   type TrackPoint,
 } from '@onyourleft/fit';
 import type { StreamChannel, StreamChannels, StreamChannelValue } from '@onyourleft/store';
@@ -155,8 +156,9 @@ export class ActivityImportError extends Error {
  * has one, the samples' otherwise — and differ only because no file this
  * client reads states a lap's climb: TCX's `<Lap>` has no element for it, GPX
  * lists no laps, and `packages/fit` decodes a FIT lap's `total_distance` but
- * not its `total_ascent`. A lap distance is stated by both formats that list
- * laps, so it is the file's, as the ride's own distance is ({@link rideOf}).
+ * not its `total_ascent` (that field is #1471's). A lap distance is stated by
+ * both formats that list laps, so it is the file's, as the ride's own distance
+ * is ({@link rideOf}).
  *
  * Its averages are NOT here: they are
  * worked out from the imported samples by `recording/laps.ts` when the row is
@@ -168,6 +170,11 @@ export interface ImportedLap {
   readonly movingTime: Seconds;
   readonly distance: Metres;
   readonly ascent: Metres | undefined;
+  /**
+   * The rider stopped part-way round — #1320, from #1321's mark in this
+   * client's own file. Never set for a lap of a file from anywhere else.
+   */
+  readonly partial: boolean;
 }
 
 /** A ride read out of a file, ready to be written to the store. */
@@ -195,7 +202,8 @@ export interface ImportedRide {
   /**
    * The file's laps, in order — #1320. **Empty unless the file has two or
    * more, and was written by something that names itself and is not this
-   * client** ({@link lapsWithin} says why). One lap is the ride said again.
+   * client; or is this client's own and marks which of its splits are laps**
+   * (#1321; {@link lapsWithin} says why). One lap is the ride said again.
    */
   readonly laps: readonly ImportedLap[];
   /**
@@ -245,7 +253,13 @@ function readFit(fileName: string, bytes: Uint8Array): ImportedRide {
     statedLaps: result.activity.laps.map(statedLapOfFit),
     // FIT's `file_id` names the maker of the device or app that wrote it. This
     // client's own export names none (`export-activity.ts` §`fitInputOf`).
+    //
+    // ⚠️ **This client's own FIT file lists no laps** (#1471). It does not
+    // mark which of its splits are laps: #1321's FIT half, the lap's intensity
+    // and trigger, waits on field numbers ADR 0006 R2 admits. Unmarked, a
+    // lead-in would read as a lap, so the file is read with none.
     listsLaps: result.activity.fileId?.manufacturer !== undefined,
+    marked: false,
     faults: result.faults.map((fault) => fault.message),
   });
 }
@@ -258,7 +272,37 @@ function statedLapOfFit(lap: FitLap): StatedLap {
     elapsedTime: lap.totalElapsedTime,
     movingTime: lap.totalTimerTime,
     distance: lap.totalDistance,
+    // `packages/fit` decodes no mark for a FIT lap (#1471).
+    kind: 'lap',
   };
+}
+
+/**
+ * Whether a TCX file is this client's own and marks which splits are laps —
+ * #1321's mark, `export-activity.ts` §`tcxLapFiguresOf`.
+ *
+ * Its own name in `<Creator>`, and a split that only a marked file has: one
+ * `Resting`, outside every lap, or one ended at the line, `Location`. A file
+ * this client wrote before #1321 says `Active` and `Manual` of every split, so
+ * it is not marked, and is read with no laps as it always was.
+ */
+function marksItsLaps(activity: TrackActivity): boolean {
+  return (
+    activity.creator === TCX_CREATOR &&
+    activity.laps.some((lap) => lap.intensity === 'Resting' || lap.triggerMethod === 'Location')
+  );
+}
+
+/**
+ * A split of this client's marked TCX: `Resting` is outside every lap; a lap
+ * ended at the line is whole; one the rider ended (`Manual`) is a part lap.
+ * ⚠️ `Manual` means a part lap ONLY here: a TCX from elsewhere writes it for
+ * every lap its rider pressed, and those are whole laps.
+ */
+function kindOfTcxLap(lap: TrackLap, marked: boolean): LapKind {
+  if (!marked) return 'lap';
+  if (lap.intensity === 'Resting') return 'outside';
+  return lap.triggerMethod === 'Location' ? 'lap' : 'part';
 }
 
 function readXml(format: 'gpx' | 'tcx', fileName: string, bytes: Uint8Array): ImportedRide {
@@ -276,6 +320,7 @@ function readXml(format: 'gpx' | 'tcx', fileName: string, bytes: Uint8Array): Im
     );
   }
   const result = decode(() => (format === 'gpx' ? decodeGpx(text) : decodeTcx(text)));
+  const marked = format === 'tcx' && marksItsLaps(result.activity);
   return rideOf({
     format,
     fileName,
@@ -306,15 +351,18 @@ function readXml(format: 'gpx' | 'tcx', fileName: string, bytes: Uint8Array): Im
       elapsedTime: undefined,
       movingTime: lap.totalElapsedTime,
       distance: lap.totalDistance,
+      kind: kindOfTcxLap(lap, marked),
     })),
     // ⚠️ GPX lists no laps: a `<trkseg>` is as often a new segment after a lost
     // signal or a pause as it is a lap, and it states no totals of its own.
     // TCX's `<Creator>` names what wrote the file; this client writes its own
     // name there (`TCX_CREATOR`).
     listsLaps:
-      format === 'tcx' &&
-      result.activity.creator !== undefined &&
-      result.activity.creator !== TCX_CREATOR,
+      marked ||
+      (format === 'tcx' &&
+        result.activity.creator !== undefined &&
+        result.activity.creator !== TCX_CREATOR),
+    marked,
     faults: result.faults.map((fault) => fault.message),
   });
 }
@@ -404,12 +452,19 @@ function statedDistanceOf(activity: TrackActivity): Metres | undefined {
   return total === 0 ? undefined : metres(total);
 }
 
+/**
+ * What a split of a file is — #1320, from #1321's mark. Every lap of a file
+ * that carries no mark is a `lap`.
+ */
+type LapKind = 'lap' | 'part' | 'outside';
+
 /** A lap as a file states it, before it is bounded to the ride. */
 interface StatedLap {
   readonly startedAt: UnixSeconds | undefined;
   readonly elapsedTime: Seconds | undefined;
   readonly movingTime: Seconds | undefined;
   readonly distance: Metres | undefined;
+  readonly kind: LapKind;
 }
 
 interface RideInput {
@@ -423,6 +478,8 @@ interface RideInput {
   readonly statedLaps: readonly StatedLap[];
   /** Whether this file's laps are listed at all. @see lapsWithin */
   readonly listsLaps: boolean;
+  /** Whether it is this client's own file, marking which splits are laps. @see lapsWithin */
+  readonly marked: boolean;
   readonly faults: readonly string[];
 }
 
@@ -566,6 +623,7 @@ function rideOf(input: RideInput): ImportedRide {
         sampleCount,
         built,
         distance,
+        marked: input.marked,
       })
     : { laps: [], fault: undefined };
   return {
@@ -598,6 +656,8 @@ interface LapGrid {
   readonly sampleCount: number;
   readonly built: BuiltChannels;
   readonly distance: Metres;
+  /** This client's own file, marking its laps: @see lapsWithin */
+  readonly marked: boolean;
 }
 
 /**
@@ -611,13 +671,24 @@ interface LapGrid {
  * device's own — the rider's lap button, or an auto-lap every so far — and
  * every one of them is a lap. GPX never lists any.
  *
- * ⚠️ **This client's own files list none, yet.** Since #1316 a file this
- * client writes has a split for the time before a course's first lap, between
- * two that do not meet and after the last (`export-activity.ts` §`splitsOf`),
- * and nothing in the file says which splits are laps of the course. Listing
- * them all would show a lead-in as a lap and could make it the best one. The
- * mark is #1321's; until a file carries it, a file that names no writer, or
- * names this client, is read with no laps — as every file was before #1320.
+ * ⚠️ **This client's own files list the laps they mark, and no other split.**
+ * Since #1316 a file this client writes has a split for the time before a
+ * course's first lap, between two that do not meet and after the last
+ * (`export-activity.ts` §`splitsOf`), and since #1321 its TCX marks which is
+ * which (`Intensity` and `TriggerMethod`). Such a file lists its laps and its
+ * part laps, and none of the splits either side, which keep their time — a
+ * lap after one still starts where the file says. A file this client wrote
+ * before #1321, or one with no splits, carries no mark and is read with no
+ * laps, as every such file was before #1320.
+ *
+ * ⚠️ **This client's own FIT file carries no mark, and lists no laps**: the
+ * FIT half of #1321 waits on #1471, which has to find lap field numbers
+ * ADR 0006 R2 admits.
+ *
+ * A marked file's laps differ from a listed file's in two ways: one lap is
+ * listed (its mark says it is a lap, not the ride said again), and a part lap
+ * is one. A TCX lap states its share of the ride's distance, so it is held to
+ * what the ride covered as a listed lap's is.
  *
  * ## A lap's times
  *
@@ -681,6 +752,9 @@ function lapsWithin(
     if (elapsed <= 0) {
       return;
     }
+    if (lap.kind === 'outside') {
+      return;
+    }
     const recorded = recordedStretch(
       {
         sampleInterval: IMPORT_SAMPLE_INTERVAL,
@@ -699,9 +773,12 @@ function lapsWithin(
       movingTime: seconds(Math.min(lap.movingTime ?? elapsed, elapsed)),
       distance: metres(lapDistance),
       ascent: recorded.ascent,
+      partial: lap.kind === 'part',
     });
   });
-  return { laps: laps.length < 2 ? [] : laps, fault: undefined };
+  // A marked file's one lap is a lap: its mark says so.
+  const enough = laps.length > (grid.marked ? 0 : 1);
+  return { laps: enough ? laps : [], fault: undefined };
 }
 
 /**

@@ -146,6 +146,13 @@ export interface FixtureLap {
   readonly elapsed: number | undefined;
   readonly moving?: number | undefined;
   readonly distance?: number | undefined;
+  /**
+   * #1321's mark, as this client's export writes it (`export-activity.ts`
+   * §`tcxLapFiguresOf`): a whole lap, a part lap, or a split outside every
+   * lap. No mark when absent. **TCX only**: a FIT lap carries no mark until
+   * #1471, so a FIT file is written without one whatever this says.
+   */
+  readonly kind?: 'lap' | 'part' | 'outside' | undefined;
 }
 
 /** @see lappedFile */
@@ -204,6 +211,12 @@ export function lappedFile(options: LappedFileOptions): Uint8Array {
             totalElapsedTime: lap.elapsed === undefined ? undefined : seconds(lap.elapsed),
             totalDistance: lap.distance === undefined ? undefined : metres(lap.distance),
             points: points.slice(lap.start, next),
+            ...(lap.kind === undefined
+              ? {}
+              : {
+                  intensity: lap.kind === 'outside' ? ('Resting' as const) : ('Active' as const),
+                  triggerMethod: lap.kind === 'lap' ? ('Location' as const) : ('Manual' as const),
+                }),
           };
         }),
       }),

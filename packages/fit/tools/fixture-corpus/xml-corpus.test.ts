@@ -269,6 +269,50 @@ describe('nominal-ride.tcx', () => {
   });
 });
 
+describe('lap-figures.tcx — #1321', () => {
+  const { activity, faults } = decodeTcx(fixture('lap-figures.tcx'));
+  const mean = (values: readonly (number | undefined)[]) =>
+    Math.round(values.reduce<number>((sum, value) => sum + (value ?? 0), 0) / values.length);
+  const highest = (values: readonly (number | undefined)[]) =>
+    Math.max(...values.map((value) => value ?? 0));
+
+  it('imports cleanly, stepping over the lap elements this package does not read', () => {
+    expect(faults).toEqual([]);
+    expect(activity.laps).toHaveLength(2);
+    expect(trackPointsOf(activity)).toHaveLength(30);
+  });
+
+  it('reads each lap’s figures, which are its own points’ and not its last point’s', () => {
+    activity.laps.forEach((lap) => {
+      const heartRates = lap.points.map((point) => point.heartRate);
+      const cadences = lap.points.map((point) => point.cadence);
+      expect(lap.averageHeartRate).toBe(mean(heartRates));
+      expect(lap.maxHeartRate).toBe(highest(heartRates));
+      expect(lap.averageCadence).toBe(mean(cadences));
+      // The lap's Cadence is not the cadence of the point before it closed.
+      expect(lap.averageCadence).not.toBe(lap.points.at(-1)?.cadence);
+    });
+    const powers = activity.laps[0]?.points.map((point) => point.power) ?? [];
+    expect(activity.laps[0]?.averagePower).toBe(mean(powers));
+    expect(activity.laps[0]?.maxPower).toBe(highest(powers));
+  });
+
+  it('reads no power for the lap with none, and each lap’s kind', () => {
+    expect(activity.laps[1]?.averagePower).toBeUndefined();
+    expect(activity.laps[1]?.maxPower).toBeUndefined();
+    expect(activity.laps.map((lap) => [lap.intensity, lap.triggerMethod])).toEqual([
+      ['Active', 'Distance'],
+      ['Resting', 'Manual'],
+    ]);
+  });
+
+  it('round-trips through this package’s own writer', () => {
+    const again = decodeTcx(encodeTcx(activity));
+    expect(again.faults).toEqual([]);
+    expect(again.activity).toEqual(activity);
+  });
+});
+
 describe('indoor-no-position.tcx', () => {
   it('has no position on any point, and every other channel on all of them', () => {
     const { activity, faults } = decodeTcx(fixture('indoor-no-position.tcx'));
