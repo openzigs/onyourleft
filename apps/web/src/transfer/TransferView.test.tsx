@@ -654,10 +654,24 @@ describe('TransferView — exporting', () => {
     select.dispatchEvent(new Event('change', { bubbles: true }));
     await settle();
 
-    // Read out of `TCX_LOSSY_CHANNELS` rather than written here, so a codec
-    // that starts carrying temperature changes this sentence without anyone
-    // remembering to.
-    expect(document.body.textContent).toContain('point.temperature');
+    // #1452: in plain words, never the codec's code paths. The list is still
+    // the codec's (`TCX_LOSSY_CHANNELS`), named through `LOSSY_CHANNEL_NAMES`.
+    expect(document.body.textContent).toContain(
+      'This format cannot carry: temperature, the ride’s name, moving time. ' +
+        'The stored ride keeps them.',
+    );
+    expect(document.body.textContent).not.toMatch(
+      /point\.temperature|activity\.name|activity\.movingTime/,
+    );
+
+    select.value = 'gpx';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    expect(document.body.textContent).toContain(
+      'This format cannot carry: the distance at each point, each lap’s elapsed time, ' +
+        'each lap’s distance, moving time. The stored ride keeps them.',
+    );
+    expect(document.body.textContent).not.toMatch(/point\.distance|lap\.total/);
   });
 
   it('reports a failed export without taking the page down', async () => {

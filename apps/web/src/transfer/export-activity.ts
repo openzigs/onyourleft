@@ -90,6 +90,34 @@ export const LOSSY_CHANNELS: Readonly<Record<ActivityFileFormat, readonly string
 };
 
 /**
+ * Each entry of {@link LOSSY_CHANNELS} in plain words, as the export screen
+ * says it — #1452. The codes stay the codec's (tests and the README table read
+ * them); a rider reads these. `export-activity.test.ts` fails for an entry
+ * with no name here, so a codec that starts dropping something new cannot
+ * reach the screen as a code path.
+ */
+const LOSSY_CHANNEL_NAMES: Readonly<Record<string, string>> = {
+  'point.distance': 'the distance at each point',
+  'point.temperature': 'temperature',
+  'lap.totalElapsedTime': 'each lap’s elapsed time',
+  'lap.totalDistance': 'each lap’s distance',
+  'activity.name': 'the ride’s name',
+  [MOVING_TIME]: 'moving time',
+};
+
+/** The plain name of a {@link LOSSY_CHANNELS} entry, or `undefined` for one the table lacks. */
+export function lossyChannelName(channel: string): string | undefined {
+  return Object.hasOwn(LOSSY_CHANNEL_NAMES, channel) ? LOSSY_CHANNEL_NAMES[channel] : undefined;
+}
+
+/** What `format` cannot carry, in plain words — #1452. Empty for FIT. */
+export function lossyChannelNames(format: ActivityFileFormat): readonly string[] {
+  // An entry the table lacks is shown as its code rather than hidden: a loss
+  // left unsaid is worse than one said badly, and the test above keeps it rare.
+  return LOSSY_CHANNELS[format].map((channel) => lossyChannelName(channel) ?? channel);
+}
+
+/**
  * The media types, chosen so a browser saves rather than renders.
  *
  * GPX and TCX are XML and `text/xml` would open them in a tab on some

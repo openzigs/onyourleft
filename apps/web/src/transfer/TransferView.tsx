@@ -44,7 +44,7 @@ import { StatusMessage, statusSurfaceClass, type StatusTone } from '../design/St
 import { useUnits } from '../units/context';
 import { formatDistance, measurementText, shownDistance } from '../units/format';
 
-import { ActivityExportError, exportActivity, LOSSY_CHANNELS } from './export-activity';
+import { ActivityExportError, exportActivity, lossyChannelNames } from './export-activity';
 import type { ActivityFileFormat } from './file-format';
 import {
   importActivityFiles,
@@ -720,7 +720,7 @@ function ExportPanel({
     );
   }
 
-  const lossy = LOSSY_CHANNELS[format];
+  const lossy = lossyChannelNames(format);
   return (
     <>
       <p className="oyl-muted" data-oyl-kept-visible="">
