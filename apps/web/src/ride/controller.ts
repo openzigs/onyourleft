@@ -2169,12 +2169,17 @@ export function createRideController(options: RideControllerOptions): RideContro
    * recorder keeps a course lap, and its figures worked out over the lap's
    * OWN slots (`noteCourseLine`'s reason: never a copy of the whole ride).
    * `undefined` with no lap in progress, or none of any length.
+   *
+   * ⚠️ **`figures` is worked out only when asked for** (#1318's review): the
+   * tick reads `kept` alone, every second, for the recorder's next header,
+   * and the lap's averages over every channel each second would be work the
+   * size of the lap, thrown away. Only a lap that ends asks for them.
    */
   const handLap = (
     current: Recorder,
     to: LapMark,
     partial: boolean,
-  ): { readonly kept: RecordedCourseLap; readonly figures: LapFigures } | undefined => {
+  ): { readonly kept: RecordedCourseLap; readonly figures: () => LapFigures } | undefined => {
     const from = manualFrom;
     const startedAt = current.session.startedAt;
     if (from === undefined || startedAt === undefined || !(to.at > from.at)) {
@@ -2194,11 +2199,12 @@ export function createRideController(options: RideControllerOptions): RideContro
     );
     return {
       kept,
-      figures: lapFiguresOf(
-        { ...grid, sampleCount: own.sampleCount, channels: own.channels },
-        kept,
-        own.fromIndex,
-      ),
+      figures: () =>
+        lapFiguresOf(
+          { ...grid, sampleCount: own.sampleCount, channels: own.channels },
+          kept,
+          own.fromIndex,
+        ),
     };
   };
 
@@ -2209,8 +2215,9 @@ export function createRideController(options: RideControllerOptions): RideContro
       return false;
     }
     current.noteCourseLap(lap.kept);
-    courseLaps = [...courseLaps, lap.figures];
-    lastManualLap = { number: current.courseLaps.length, lap: lap.figures };
+    const figures = lap.figures();
+    courseLaps = [...courseLaps, figures];
+    lastManualLap = { number: current.courseLaps.length, lap: figures };
     manualFrom = to;
     manualLapsTaken = true;
     return true;

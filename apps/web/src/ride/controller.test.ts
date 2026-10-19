@@ -98,6 +98,24 @@ import {
 import type { NewActivity, NewStreamSet } from '@onyourleft/store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+/**
+ * How often a lap's figures were worked out — #1318's review: the tick keeps
+ * the lap taken by hand in progress for the recorder's header and must not
+ * work out its averages, which only a lap that ends needs. Counted through
+ * the real `lapFiguresOf`, so every other test reads what it read before.
+ */
+const lapFigures = vi.hoisted(() => ({ calls: 0 }));
+vi.mock('../recording/laps', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../recording/laps')>();
+  return {
+    ...actual,
+    lapFiguresOf: (...args: Parameters<typeof actual.lapFiguresOf>) => {
+      lapFigures.calls += 1;
+      return actual.lapFiguresOf(...args);
+    },
+  };
+});
+
 import { DEFAULT_AUTO_PAUSE_AFTER_SECONDS } from '../recording/channels';
 import { exportActivity } from '../transfer/export-activity';
 import type { ActivityFileFormat } from '../transfer/file-format';
@@ -11469,6 +11487,23 @@ describe('#1318 — a lap taken by hand on a ride with no course under it', () =
     await fresh.controller.refreshRecoverable();
     expect(fresh.controller.getSnapshot().recoverable).toEqual([]);
     fresh.controller.dispose();
+    rig.controller.dispose();
+  });
+
+  it('keeps the lap in progress for the header each second without working out its figures; a press works them out once', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    await rig.controller.pair('trainer');
+    steady(rig);
+    await rig.controller.start();
+    await ride(rig, 3);
+    expect(rig.controller.markLap()).toBe(true);
+    lapFigures.calls = 0;
+    // Twenty ticks with a lap in progress, each keeping it for the header.
+    await ride(rig, 20);
+    expect(lapFigures.calls).toBe(0);
+    expect(rig.controller.markLap()).toBe(true);
+    expect(lapFigures.calls).toBe(1);
+    expect(rig.controller.getSnapshot().manualLap.last?.lap.elapsedTime).toBe(20);
     rig.controller.dispose();
   });
 
