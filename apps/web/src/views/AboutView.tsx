@@ -8,13 +8,14 @@ import { PRIVACY_POLICY_URL, SOURCE_CODE_URL } from '../privacy/policy';
 import { MAX_DATA_LOSS_SECONDS } from '../recording/recorder';
 import { hrefFor, routeById } from '../shell/routes';
 import { InstancePages } from './InstancePages';
+import { useInstanceKnown, whereRidesAreText } from './where-rides-are';
 
 /**
  * What this is and what it is not, in one place a link can point at.
  *
  * The browser limitation is explained on the Devices page, where an athlete
- * meets it. This page carries the two things that are true everywhere: there is
- * no account and no server, and the data is on this device only.
+ * meets it. This page carries where the data is — on this device, and on an
+ * instance only if the rider connects one and syncs (#1450).
  *
  * ⚠️ **This page has now said three different things about the network, and a
  * reviewer who remembers either of the first two is reading an old file.**
@@ -74,10 +75,18 @@ import { InstancePages } from './InstancePages';
  */
 export function AboutView({
   instance,
+  nativeShell = false,
 }: {
-  /** The rider's instance, for its own pages (#907): none, and the section is not shown. */
+  /**
+   * The rider's instance, for its own pages (#907): none, and the section is
+   * not shown. Since #1450 also asked whether there is one, for where the
+   * rides are.
+   */
   readonly instance?: InstancePort | undefined;
+  /** Running inside the Android app rather than a browser — #1450, as History's #1438. */
+  readonly nativeShell?: boolean | undefined;
 }): JSX.Element {
+  const instanceKnown = useInstanceKnown(instance);
   return (
     <>
       <FullLogo />
@@ -104,10 +113,10 @@ export function AboutView({
             reading your history all do. The exception is the map&rsquo;s background imagery, which
             is fetched from the web when you look at it.
           </p>
-          <p>
-            The consequence is the honest one: clearing this browser&rsquo;s site data removes your
-            rides, and there is no copy anywhere else to restore from.
-          </p>
+          {/* #1450: it said "clearing this browser's site data removes your rides,
+            and there is no copy anywhere else", in the Android app too and with an
+            instance too. Now History's own sentence, per platform and per instance. */}
+          <p>{whereRidesAreText(nativeShell, instanceKnown)}</p>
         </div>
 
         <div>

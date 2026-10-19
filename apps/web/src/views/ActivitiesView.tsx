@@ -19,6 +19,7 @@ import type { LibraryPort } from '../library/store-port';
 import { ListDetail, SELECTED_HEADING_ID } from '../shell/ListDetail';
 import { hrefFor, hrefForActivity, hrefForSelection, routeById } from '../shell/routes';
 import type { InstancePort } from '../instance/instance-port';
+import { useInstanceKnown, whereRidesAreText, type InstanceKnown } from './where-rides-are';
 
 /**
  * The ride history: every activity stored on this device (#62).
@@ -187,59 +188,22 @@ export const ACTIVITIES_KEPT_VISIBLE: readonly string[] = [
 ];
 
 /**
- * Whether this device has an instance — #1438. `unknown` until the port has
- * answered, and while it is, the footer claims neither way.
- */
-export type InstanceKnown = 'none' | 'connected' | 'unknown';
-
-/**
- * The footer's sentence about where the rides are — #1013, #1438.
+ * What the delete confirmation says about the copy being deleted — #1450.
  *
- * Until #1438 it said "There is no account and no server" and named "this
- * browser's site data" everywhere: false inside the Android app, which has no
- * browser, and false with an instance (ADR 0036), which keeps a synced ride.
- *
- * "Nowhere else" is never said. A rider who synced and then disconnected (or
- * whose session is gone) reads as `none`, yet the instance still holds what it
- * was sent; and the app's manifest leaves Android's own backup on
- * (`android:allowBackup`), which may copy storage to the rider's Google
- * account. So the sentence says only what is here and what deletes it.
+ * It said "There is no server and no backup" everywhere, which an instance
+ * (ADR 0036) made false. With one, a synced ride deleted here is deleted on the
+ * instance at the next sync (`instance/sync.ts` rule 2), so the dialog says so.
+ * Without one it says only that this copy may be the only one: a rider who
+ * synced and then disconnected still has a copy there, so it never says "no
+ * server", "no backup" or "nowhere else". The platform changes nothing here
+ * since #1451 turned Android's own backup off, so it is not a parameter.
  */
-export function whereRidesAreText(nativeShell: boolean, instance: InstanceKnown): string {
-  const lead =
-    instance === 'connected'
-      ? 'Rides are stored on this device, and a ride you sync is also kept on your instance.'
-      : 'Rides are stored on this device.';
-  const deletes = nativeShell
-    ? 'Uninstalling the app, or clearing its storage in Android’s settings, deletes them from this device'
-    : 'Clearing this browser’s site data deletes them from this device';
-  return `${lead} ${deletes} — export anything you want to keep.`;
-}
-
-/** {@link InstanceKnown} for `port`, read once — #1438. */
-function useInstanceKnown(port: InstancePort | undefined): InstanceKnown {
-  // Kept with the port it answered for, so a new port reads as unknown until it answers.
-  const [answer, setAnswer] = useState<
-    { readonly port: InstancePort; readonly known: InstanceKnown } | undefined
-  >(undefined);
-  useEffect(() => {
-    if (port === undefined) return undefined;
-    let cancelled = false;
-    port
-      .current()
-      .then((state) => {
-        // Signed out, unreadable or unreachable: rides synced before are still there.
-        const known = state.kind === 'not-connected' ? 'none' : 'connected';
-        if (!cancelled) setAnswer({ port, known });
-      })
-      // Deliberate: a failed read leaves the footer on its hedged wording.
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [port]);
-  if (port === undefined) return 'none';
-  return answer?.port === port ? answer.known : 'unknown';
+export function deleteRideText(instance: InstanceKnown): string {
+  return instance === 'connected'
+    ? 'Deleting a ride cannot be undone. A ride you synced is deleted from your instance too, at ' +
+        'the next sync — export it first if you want to keep it.'
+    : 'Deleting a ride cannot be undone. The copy on this device may be the only one that ' +
+        'exists — export it first if you want to keep it.';
 }
 
 /** Said inside the confirmation when the store refused the delete — #959. */
@@ -551,10 +515,7 @@ export function ActivitiesView({
           return true;
         }}
       >
-        <p>
-          Deleting a ride cannot be undone. There is no server and no backup, so the copy on this
-          device may be the only one that exists — export it first if you want to keep it.
-        </p>
+        <p>{deleteRideText(instanceKnown)}</p>
       </ConfirmDialog>
 
       {/* #1013: where the rides are, and what deletes them, is kept on the

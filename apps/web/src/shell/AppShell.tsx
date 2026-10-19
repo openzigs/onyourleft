@@ -738,7 +738,7 @@ function viewFor(
         />
       );
     case 'about':
-      return <AboutView instance={props.instance} />;
+      return <AboutView instance={props.instance} nativeShell={props.nativeShell} />;
     case 'instance':
       return (
         <InstanceView
