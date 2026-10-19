@@ -1,6 +1,6 @@
 # On Your Left — privacy policy
 
-**Last updated: 2026-10-13.** This is the policy for the On Your Left Android app
+**Last updated: 2026-10-19.** This is the policy for the On Your Left Android app
 (`dev.openzigs.onyourleft`) and for the web client it is built from. It is the policy linked from the
 app's About page and from the Google Play listing, and those two links point at this file
 ([#95](https://github.com/openzigs/onyourleft/issues/95)).
@@ -129,6 +129,13 @@ your own action:
 The private half of the signing key is a non-extractable key held by the browser or WebView: the app
 itself cannot read it, cannot copy it, and cannot send it anywhere. Its public half travels only
 inside a file you export.
+
+**Android's own backup does not include any of it.** The Android app turns off Android's backup to
+your Google account and its transfer of an app's data to a new phone, so Android copies nothing in
+this table to Google and carries none of it across when you set up another device
+([#1451](https://github.com/openzigs/onyourleft/issues/1451)). To move your rides to a new device,
+use **Files → Take everything with you** on this one, and import the ride files it gives you with
+**Files → Import** on the new one.
 
 **Nothing here is linked to an identity unless you connect to an instance.** The app never asks for
 an email address, a phone number or a date of birth, and it has no field to put one in. The one name

@@ -33,7 +33,14 @@ import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 import type { TestContext } from 'vitest';
 
-import { components, definedPermissions, queries, usesFeatures, usesPermissions } from './manifest';
+import {
+  components,
+  definedPermissions,
+  queries,
+  startTags,
+  usesFeatures,
+  usesPermissions,
+} from './manifest';
 import {
   ANDROID_ROOT,
   APPLICATION_ID,
@@ -256,6 +263,18 @@ describe('the manifest the app actually ships', () => {
   it('is stamped with the application id the reviewed list assumes', (ctx) => {
     for (const merged of shipped(ctx)) {
       expect(merged.xml, merged.path).toContain(`package="${APPLICATION_ID}"`);
+    }
+  });
+
+  it('ships with Android backup off and the data extraction rules named — #1451', (ctx) => {
+    // `backup.test.ts` holds the input; this is the output, where a library
+    // that declared its own application attributes would show.
+    for (const merged of shipped(ctx)) {
+      const application = startTags(merged.xml).find((tag) => tag.name === 'application');
+      expect(application?.attributes.get('android:allowBackup'), merged.path).toBe('false');
+      expect(application?.attributes.get('android:dataExtractionRules'), merged.path).toBe(
+        '@xml/data_extraction_rules',
+      );
     }
   });
 
