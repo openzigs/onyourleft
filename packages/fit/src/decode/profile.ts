@@ -99,14 +99,6 @@ export const FIELD = {
     totalElapsedTime: 7,
     totalTimerTime: 8,
     totalDistance: 9,
-    averageHeartRate: 15,
-    maxHeartRate: 16,
-    averageCadence: 17,
-    averagePower: 19,
-    maxPower: 20,
-    totalAscent: 21,
-    intensity: 23,
-    lapTrigger: 24,
   },
 
   session: {
@@ -186,29 +178,3 @@ export const EVENT_TYPE_START = 0;
 
 /** `event.event_type`: the timer stopped. */
 export const EVENT_TYPE_STOP = 1;
-
-/**
- * `lap.intensity`: the rider was working. A lap of a course, whole or part — #1321.
- *
- * The enumeration is the one `intensity` takes wherever it appears, and Garmin's
- * public workout-file article states it; `packages/fit/README.md` §3 records
- * where, and the head-unit files the value was also observed in.
- */
-export const INTENSITY_ACTIVE = 0;
-
-/**
- * `lap.intensity`: the rider was not working. What this client writes for a
- * split of a ride that is not a lap — the time before the first lap, between two
- * that do not meet, and after the last (#1321).
- */
-export const INTENSITY_REST = 1;
-
-/** `lap.lap_trigger`: the rider ended the lap by hand. */
-export const LAP_TRIGGER_MANUAL = 0;
-
-/**
- * `lap.lap_trigger`: the lap ended because the session did. What this client
- * writes for a part lap — the rider stopped part-way round (#1321) — and what a
- * head unit writes on the remnant after its last whole lap.
- */
-export const LAP_TRIGGER_SESSION_END = 7;

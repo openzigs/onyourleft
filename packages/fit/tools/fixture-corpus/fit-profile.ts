@@ -132,14 +132,6 @@ export const FIELD = {
     totalElapsedTime: 7,
     totalTimerTime: 8,
     totalDistance: 9,
-    averageHeartRate: 15,
-    maxHeartRate: 16,
-    averageCadence: 17,
-    averagePower: 19,
-    maxPower: 20,
-    totalAscent: 21,
-    intensity: 23,
-    lapTrigger: 24,
   },
 
   session: {
@@ -202,14 +194,6 @@ export const ENUM_VALUE = {
   eventTypeStop: 1,
   /** `activity.type`: recorded on a device rather than entered by hand. */
   activityTypeManual: 0,
-  /** `lap.intensity`: the rider was working. */
-  intensityActive: 0,
-  /** `lap.intensity`: the rider was resting. */
-  intensityRest: 1,
-  /** `lap.lap_trigger`: the rider pressed the lap button. */
-  lapTriggerManual: 0,
-  /** `lap.lap_trigger`: the lap ended because the session did. */
-  lapTriggerSessionEnd: 7,
 } as const;
 
 /**

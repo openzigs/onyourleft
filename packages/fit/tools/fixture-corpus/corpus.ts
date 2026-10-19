@@ -23,7 +23,6 @@ import {
   headerOnlyFile,
   heartRate16BitRide,
   indoorTrainerRide,
-  lapFiguresRide,
   nominalOutdoorRide,
   NULL_ISLAND_TRACK,
   pausedLapsRide,
@@ -135,16 +134,6 @@ export function buildCorpus(): readonly CorpusEntry[] {
         'reports one as the other is wrong by five minutes in a way nothing else in the file ' +
         'contradicts.',
       pausedLapsRide(),
-    ),
-    fit(
-      'lap-figures.fit',
-      'Three laps that state their figures and their kind as a head unit does (#1321): average ' +
-        'and highest heart rate, average cadence, average and highest power, metres climbed, ' +
-        'intensity and lap trigger — a lead-in marked rest, a whole lap ended by hand, and a last ' +
-        'lap that ended with the session and holds the invalid marker in both power fields. The ' +
-        'figures sit in field-number order with a field this profile does not name among them, ' +
-        'so a decoder that reads by position, or stops at the first unknown field, gets them wrong.',
-      lapFiguresRide(),
     ),
     fit(
       'sensor-dropout-30s.fit',

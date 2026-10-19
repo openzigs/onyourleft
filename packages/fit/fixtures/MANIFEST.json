@@ -1,8 +1,8 @@
 {
   "generatedBy": "pnpm --filter @onyourleft/fit run fixtures:generate",
   "budgetBytes": 262144,
-  "totalBytes": 136108,
-  "totalPositionCount": 1088,
+  "totalBytes": 133435,
+  "totalPositionCount": 1003,
   "fixtures": [
     {
       "name": "nominal-outdoor-ride.fit",
@@ -27,14 +27,6 @@
       "sha256": "d819bd15ebad8be535f042bc45ceaecbf2e14374e114909ae4c5224c2dbdd605",
       "positionCount": 120,
       "purpose": "Two laps separated by a 300 s pause with no records in it, each bracketed by timer start and stop events. Elapsed time and moving time differ by the pause, and a decoder that reports one as the other is wrong by five minutes in a way nothing else in the file contradicts."
-    },
-    {
-      "name": "lap-figures.fit",
-      "format": "fit",
-      "bytes": 2673,
-      "sha256": "5566b511f467dfda6cd040140ffe2686d6bb42f9f573b4a2e875713b6182270b",
-      "positionCount": 85,
-      "purpose": "Three laps that state their figures and their kind as a head unit does (#1321): average and highest heart rate, average cadence, average and highest power, metres climbed, intensity and lap trigger — a lead-in marked rest, a whole lap ended by hand, and a last lap that ended with the session and holds the invalid marker in both power fields. The figures sit in field-number order with a field this profile does not name among them, so a decoder that reads by position, or stops at the first unknown field, gets them wrong."
     },
     {
       "name": "sensor-dropout-30s.fit",

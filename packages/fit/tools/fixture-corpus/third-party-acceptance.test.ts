@@ -159,59 +159,6 @@ describe('fit-file-parser 6.1.2 cannot tell a re-encode from the file it came fr
   });
 });
 
-/**
- * #1321: the lap figures and the lap's kind, read by a reader that is not this
- * one. `lap-figures.fit` is not in {@link DIFFERENTIAL_FIXTURES} because the
- * original carries a lap field this profile does not name, which a re-encode
- * does not write — so the two cannot be equal message for message. What they
- * can be is equal on every field this package does name, under the names an
- * independent reader gives the same field numbers.
- */
-describe('fit-file-parser 6.1.2 reading the lap figures', () => {
-  const NAMED = [
-    'avg_heart_rate',
-    'max_heart_rate',
-    'avg_cadence',
-    'avg_power',
-    'max_power',
-    'total_ascent',
-    'intensity',
-    'lap_trigger',
-  ] as const;
-  const named = (lap: Record<string, unknown> | undefined) =>
-    Object.fromEntries(NAMED.map((name) => [name, lap?.[name]]));
-
-  it('names each field as this package does, in the original and in a re-encode', () => {
-    const before = readWithThirdParty(fixture('lap-figures.fit'));
-    const after = readWithThirdParty(reencoded('lap-figures.fit'));
-    const ours = decodeFitActivity(fixture('lap-figures.fit')).activity;
-
-    expect(before.error).toBeUndefined();
-    expect(after.error).toBeUndefined();
-    expect(after.laps.map(named)).toEqual(before.laps.map(named));
-    expect(after.laps).toHaveLength(3);
-    ours.laps.forEach((mine, index) => {
-      expect(after.laps[index]).toMatchObject({
-        avg_heart_rate: mine.averageHeartRate,
-        max_heart_rate: mine.maxHeartRate,
-        avg_cadence: mine.averageCadence,
-        total_ascent: mine.totalAscent,
-      });
-    });
-    // The kind, as the independent reader spells the two enumerations.
-    expect(after.laps.map((lap) => [lap['intensity'], lap['lap_trigger']])).toEqual([
-      ['rest', 'manual'],
-      ['active', 'manual'],
-      ['active', 'session_end'],
-    ]);
-    // Power where the lap has it, and nothing — not nought — where it has none.
-    expect(after.laps[1]?.['avg_power']).toBe(ours.laps[1]?.averagePower);
-    expect(after.laps[1]?.['max_power']).toBe(ours.laps[1]?.maxPower);
-    expect(after.laps[2]?.['avg_power']).toBeUndefined();
-    expect(after.laps[2]?.['max_power']).toBeUndefined();
-  });
-});
-
 describe('fit-file-parser 6.1.2 reading this encoder’s output', () => {
   it('reads an outdoor ride, channel for channel', () => {
     const bytes = reencoded('nominal-outdoor-ride.fit');
