@@ -108,17 +108,12 @@ import { Stepper } from '../design/Stepper';
 import { CLEARING_STILL_REMOVES, PersistenceNotice } from '../support/PersistenceNotice';
 import type { StorageManagerLike } from '../support/persistent-storage';
 import { hrefFor, routeById } from '../shell/routes';
-import {
-  distanceUnit,
-  formatMass,
-  formatSmallDistance,
-  massIn,
-  massUnit,
-  measurementText,
-} from '../units/format';
+import { distanceUnit, formatMass, massIn, massUnit, measurementText } from '../units/format';
 import {
   DISTANCE_EVERY_CHOICES,
-  CLIMB_LEAD_CHOICES,
+  climbLeadChoices,
+  climbLeadIn,
+  climbLeadText,
   INTERVAL_LEAD_CHOICES,
   POWER_EVERY_CHOICES,
   deviceStorage,
@@ -201,6 +196,26 @@ export const MASS_SAVED = 'Saved. The trainer game now rides you at this weight.
 
 /** Said when the weight has been cleared and the default is back. */
 export const MASS_CLEARED = 'Cleared. The trainer game rides you at the assumed weight again.';
+
+/**
+ * The assumed weight as a sentence names it — #1440: `assumed 71.0 kg` in
+ * metric, and `assumed weight` in imperial, where the 71 kg it is would read
+ * as 156.5 lb: a converted number, not a round one.
+ */
+export function assumedWeightText(units: UnitSystem): string {
+  return units === 'imperial'
+    ? 'assumed weight'
+    : `assumed ${measurementText(formatMass(kilograms(DEFAULT_RIDER_MASS_KILOGRAMS), units))}`;
+}
+
+/**
+ * Where the weight box's − and + start from when it is blank (#994) — #1440:
+ * the assumed weight in kilograms, or to the nearest 5 lb (155 lb, not 156.5).
+ */
+export function assumedWeightStart(units: UnitSystem): number {
+  const shown = massIn(kilograms(DEFAULT_RIDER_MASS_KILOGRAMS), units);
+  return units === 'imperial' ? Math.round(shown / 5) * 5 : shown;
+}
 
 /**
  * Where the rider's weight goes — kept on the screen (#666).
@@ -1021,12 +1036,11 @@ function AnnouncementsPanel({
       <EveryChoice
         id="oyl-announce-climb"
         label="Say a climb ahead"
-        value={preference.climbLeadMetres}
-        choices={CLIMB_LEAD_CHOICES}
-        // #399: stored in metres, labelled in the rider's own unit.
-        describe={(metres) =>
-          `${measurementText(formatSmallDistance(metres, units))} before it starts`
-        }
+        // #399: stored in metres, labelled in the rider's own unit. #1440: and
+        // offered in its own round steps, a stored step shown as the nearest.
+        value={climbLeadIn(preference.climbLeadMetres, units)}
+        choices={climbLeadChoices(units)}
+        describe={(metres) => `${climbLeadText(metres, units)} before it starts`}
         onChange={(climbLeadMetres) => {
           save({ ...preference, climbLeadMetres });
         }}
@@ -1681,8 +1695,9 @@ function WeightPanel({
       )}
 
       <p className="oyl-muted">
-        {current.assumed ? 'You have not entered one, so rides use an assumed ' : 'Rides use '}
-        {measurementText(formatMass(current.mass, units))}.
+        {current.assumed
+          ? `You have not entered one, so rides use an ${assumedWeightText(units)}.`
+          : `Rides use ${measurementText(formatMass(current.mass, units))}.`}
       </p>
     </section>
   );
@@ -1906,16 +1921,12 @@ function WeightField({
         <label htmlFor="oyl-rider-mass">Your weight ({massUnit(units)})</label>{' '}
         {/*
           #994: − and + beside the box, which still takes typing. A box left
-          blank starts from the assumed weight the sentence below names, in
-          the rider's own units, so the first press is not a step from nothing.
+          blank starts from the assumed weight, in the rider's own units and
+          rounded to 5 lb in imperial (#1440), so the first press is not a step
+          from nothing.
           Nothing is saved until *Save weight*, exactly as with typing.
         */}
-        <Stepper
-          name="weight"
-          step={0.5}
-          min={0}
-          start={Number(formatMass(kilograms(DEFAULT_RIDER_MASS_KILOGRAMS), units).value)}
-        >
+        <Stepper name="weight" step={0.5} min={0} start={assumedWeightStart(units)}>
           <input
             className="oyl-input"
             id="oyl-rider-mass"
@@ -1933,8 +1944,7 @@ function WeightField({
       {/* #1023: an instruction for this field is under it and is its
         description (WCAG 2.2 SC 3.3.2), not in a disclosure away from it. */}
       <p id={WEIGHT_HINT_ID} className="oyl-muted oyl-field-hint">
-        Leave it blank to go back to the assumed{' '}
-        {measurementText(formatMass(kilograms(DEFAULT_RIDER_MASS_KILOGRAMS), units))}.
+        Leave it blank to go back to the {assumedWeightText(units)}.
       </p>
       <Button
         onClick={() => {

@@ -39,6 +39,8 @@ import {
   type RoutePoint,
 } from '@onyourleft/domain';
 
+import type { UnitSystem } from '@onyourleft/store';
+
 import { AppShell } from '../../shell/AppShell';
 import type { CapabilityProbe } from '../../support/bluetooth-support';
 import { mount, queryAll, settle, type Mounted } from '../../testing/mount';
@@ -191,11 +193,12 @@ async function press(element: HTMLElement | undefined): Promise<void> {
   await settle();
 }
 
-async function startRide(trainer?: GameTrainerPort): Promise<void> {
+async function startRide(trainer?: GameTrainerPort, units?: UnitSystem): Promise<void> {
   globalThis.location.hash = '#/game';
   mounted = await mount(
     <AppShell
       capabilities={NO_BLUETOOTH}
+      {...(units === undefined ? {} : { units })}
       game={PORT}
       gameRenderer={() => Promise.resolve(RENDERER)}
       {...(trainer === undefined ? {} : { gameTrainer: trainer })}
@@ -315,6 +318,19 @@ describe('the road ahead, through the same region — #399', () => {
     // #739's control for the case below: a chosen lead is OFFERED, so a
     // recording that saw nothing there would not be evidence of anything.
     expect(offered).toContain('climb-ahead');
+  });
+
+  it('says it at the nearest imperial step to an imperial rider — #1440', async () => {
+    routes = [hillyRoute()];
+    chooseAnnouncements({
+      powerEverySeconds: 'never',
+      distanceEvery: 'never',
+      climbLeadMetres: 250,
+    });
+    await startRide(undefined, 'imperial');
+    const said = await pumpUntil(/^Climb/, 400);
+    // 250 m stored is 1000 ft for an imperial rider, not 820.
+    expect(said).toMatch(/^Climb in 1000 feet, [5-7] percent$/);
   });
 
   // ⚠️ **14 s, a ceiling rather than a budget — #682.** Vitest's default 5 s was nobody's choice
