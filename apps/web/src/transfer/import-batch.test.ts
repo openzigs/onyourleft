@@ -721,16 +721,16 @@ describe('importActivityFiles — a file’s laps (#1320)', () => {
     const open = await openSeeded();
     const outcome = await importOne(
       open,
-      'own.fit',
+      'own.tcx',
       lappedFile({
-        format: 'fit',
+        format: 'tcx',
         samples: 120,
         writer: undefined,
         laps: [
-          { start: 0, elapsed: 20, kind: 'outside' },
-          { start: 20, elapsed: 40, distance: 2_000, kind: 'lap' },
-          { start: 60, elapsed: 30, distance: 1_000, kind: 'part' },
-          { start: 90, elapsed: 29, kind: 'outside' },
+          { start: 0, elapsed: 20, distance: 100, kind: 'outside' },
+          { start: 20, elapsed: 40, distance: 200, kind: 'lap' },
+          { start: 60, elapsed: 30, distance: 150, kind: 'part' },
+          { start: 90, elapsed: 29, distance: 145, kind: 'outside' },
         ],
       }),
     );
@@ -743,8 +743,8 @@ describe('importActivityFiles — a file’s laps (#1320)', () => {
         lap.partial,
       ]),
     ).toEqual([
-      [0, 20, 2_000, undefined],
-      [1, 60, 1_000, true],
+      [0, 20, 200, undefined],
+      [1, 60, 150, true],
     ]);
     // Worked out from the samples in each lap's slots: power i in slot i.
     expect(laps.map((lap) => lap.maxPower)).toEqual([59, 89]);

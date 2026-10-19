@@ -23,9 +23,6 @@ import {
   encodeGpx,
   encodeTcx,
   FILE_TYPE_ACTIVITY,
-  INTENSITY_ACTIVE,
-  INTENSITY_REST,
-  LAP_TRIGGER_SESSION_END,
   SPORT_CYCLING,
   type FitDateTime,
   type FitRecord,
@@ -149,12 +146,11 @@ export interface FixtureLap {
   readonly elapsed: number | undefined;
   readonly moving?: number | undefined;
   readonly distance?: number | undefined;
-  /** The lap's climb, FIT only: TCX has no element for it. */
-  readonly ascent?: number | undefined;
   /**
    * #1321's mark, as this client's export writes it (`export-activity.ts`
-   * §`fitLapFiguresOf`, §`tcxLapFiguresOf`): a whole lap, a part lap, or a
-   * split outside every lap. No mark when absent.
+   * §`tcxLapFiguresOf`): a whole lap, a part lap, or a split outside every
+   * lap. No mark when absent. **TCX only**: a FIT lap carries no mark until
+   * #1471, so a FIT file is written without one whatever this says.
    */
   readonly kind?: 'lap' | 'part' | 'outside' | undefined;
 }
@@ -247,13 +243,6 @@ export function lappedFile(options: LappedFileOptions): Uint8Array {
       totalElapsedTime: lap.elapsed === undefined ? undefined : seconds(lap.elapsed),
       totalTimerTime: seconds(lap.moving ?? lap.elapsed ?? 0),
       totalDistance: lap.distance === undefined ? undefined : metres(lap.distance),
-      totalAscent: lap.ascent === undefined ? undefined : metres(lap.ascent),
-      ...(lap.kind === undefined
-        ? {}
-        : {
-            intensity: lap.kind === 'outside' ? INTENSITY_REST : INTENSITY_ACTIVE,
-            ...(lap.kind === 'part' ? { lapTrigger: LAP_TRIGGER_SESSION_END } : {}),
-          }),
     })),
     sessions: [
       {

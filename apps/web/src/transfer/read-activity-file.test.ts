@@ -527,76 +527,65 @@ describe('readActivityFile — a file’s laps (#1320)', () => {
 });
 
 /**
- * #1320's remaining boxes, on #1321's mark: this client's own file lists the
- * laps it marks, and no split either side of them.
+ * #1320's remaining boxes, on #1321's mark: this client's own TCX lists the
+ * laps it marks, and no split either side of them. Its own FIT carries no mark
+ * until #1471, and lists no laps.
  */
 describe('readActivityFile — this client’s own laps (#1320, #1321)', () => {
-  /** A lead-in, two whole laps, a part lap and a tail, as this client exports one. */
+  /**
+   * A lead-in, two whole laps, a part lap and a tail, as this client exports
+   * one: each split's distance is its share of the ride's 595 m.
+   */
   const OWN_LAPS = [
-    { start: 0, elapsed: 20, kind: 'outside' },
-    { start: 20, elapsed: 30, distance: 2_000, ascent: 12, kind: 'lap' },
-    { start: 50, elapsed: 30, distance: 2_000, ascent: 13, kind: 'lap' },
-    { start: 80, elapsed: 25, distance: 1_100, ascent: 4, kind: 'part' },
-    { start: 105, elapsed: 14, kind: 'outside' },
+    { start: 0, elapsed: 20, distance: 100, kind: 'outside' },
+    { start: 20, elapsed: 30, distance: 150, kind: 'lap' },
+    { start: 50, elapsed: 30, distance: 150, kind: 'lap' },
+    { start: 80, elapsed: 25, distance: 125, kind: 'part' },
+    { start: 105, elapsed: 14, distance: 70, kind: 'outside' },
   ] as const;
 
-  it.each(['fit', 'tcx'] as const)(
-    'lists the laps of a marked %s, the part lap marked, and not the splits either side',
-    (format) => {
-      const ride = readActivityFile(
-        `own.${format}`,
-        lappedFile({ format, samples: 120, writer: undefined, laps: OWN_LAPS }),
-      );
-      expect(
-        ride.laps.map((lap) => [lap.startedAt - LAPPED_FILE_START, lap.elapsedTime, lap.partial]),
-      ).toEqual([
-        [20, 30, false],
-        [50, 30, false],
-        [80, 25, true],
-      ]);
-    },
-  );
+  it('lists the laps of a marked TCX, the part lap marked, and not the splits either side', () => {
+    const ride = readActivityFile(
+      'own.tcx',
+      lappedFile({ format: 'tcx', samples: 120, writer: undefined, laps: OWN_LAPS }),
+    );
+    expect(
+      ride.laps.map((lap) => [
+        lap.startedAt - LAPPED_FILE_START,
+        lap.elapsedTime,
+        lap.distance,
+        lap.partial,
+      ]),
+    ).toEqual([
+      [20, 30, 150, false],
+      [50, 30, 150, false],
+      [80, 25, 125, true],
+    ]);
+  });
 
-  it('keeps a FIT lap’s own road and climb, which are the course’s and not the ride’s', () => {
+  it('lists no laps from its own FIT, which carries no mark until #1471', () => {
+    // The same splits, as this client's FIT export writes them: no maker in
+    // the file_id and no mark on any lap, so a lead-in cannot be told from a
+    // lap and none is listed.
     const ride = readActivityFile(
       'own.fit',
       lappedFile({ format: 'fit', samples: 120, writer: undefined, laps: OWN_LAPS }),
     );
-    // The ride covered 595 m; its laps state 5.1 km of road between them.
-    expect(ride.distance).toBe(595);
-    expect(ride.laps.map((lap) => [lap.distance, lap.ascent])).toEqual([
-      [2_000, 12],
-      [2_000, 13],
-      [1_100, 4],
-    ]);
+    expect(ride.laps).toEqual([]);
+    // The ride itself is still read, every sample of it.
+    expect(ride.elapsedTime).toBe(119);
   });
 
-  it('holds a marked lap’s road to 100 m/s over its time, and its climb to its road', () => {
+  it('lists the one lap of a marked TCX, which its mark says is a lap', () => {
     const ride = readActivityFile(
-      'hostile.fit',
+      'one.tcx',
       lappedFile({
-        format: 'fit',
+        format: 'tcx',
         samples: 120,
         writer: undefined,
         laps: [
-          { start: 0, elapsed: 30, distance: 1_000_000, ascent: 50_000, kind: 'lap' },
-          { start: 30, elapsed: 89, kind: 'outside' },
-        ],
-      }),
-    );
-    expect(ride.laps.map((lap) => [lap.distance, lap.ascent])).toEqual([[3_000, 3_000]]);
-  });
-
-  it('lists the one lap of a marked file, which its mark says is a lap', () => {
-    const ride = readActivityFile(
-      'one.fit',
-      lappedFile({
-        format: 'fit',
-        samples: 120,
-        writer: undefined,
-        laps: [
-          { start: 0, elapsed: 40, kind: 'outside' },
-          { start: 40, elapsed: 79, distance: 2_000, kind: 'lap' },
+          { start: 0, elapsed: 40, distance: 200, kind: 'outside' },
+          { start: 40, elapsed: 79, distance: 395, kind: 'lap' },
         ],
       }),
     );
@@ -626,49 +615,15 @@ describe('readActivityFile — this client’s own laps (#1320, #1321)', () => {
         format: 'tcx',
         samples: 120,
         writer: 'Garmin Edge 530',
+        // An auto-lap ended at a distance (`Location`) and one the rider
+        // pressed (`Manual`): this client's mark has both, but only in a file
+        // that names this client.
         laps: [
-          { start: 0, elapsed: 60, kind: 'part' },
+          { start: 0, elapsed: 60, kind: 'lap' },
           { start: 60, elapsed: 59, kind: 'part' },
         ],
       }),
     );
     expect(ride.laps.map((lap) => lap.partial)).toEqual([false, false]);
-  });
-
-  it('lists every lap of a FIT file from elsewhere, whatever its intensity and trigger say', () => {
-    // A head unit's rest interval is still a lap it recorded, and its last
-    // lap ends with the session: neither is this client's mark.
-    const ride = readActivityFile(
-      'garmin.fit',
-      lappedFile({
-        format: 'fit',
-        samples: 120,
-        writer: 1,
-        laps: [
-          { start: 0, elapsed: 60, kind: 'outside' },
-          { start: 60, elapsed: 59, kind: 'part' },
-        ],
-      }),
-    );
-    expect(ride.laps.map((lap) => [lap.startedAt - LAPPED_FILE_START, lap.partial])).toEqual([
-      [0, false],
-      [60, false],
-    ]);
-  });
-
-  it('reads a FIT lap’s climb from the file where it states one, from anywhere', () => {
-    const ride = readActivityFile(
-      'garmin.fit',
-      lappedFile({
-        format: 'fit',
-        samples: 120,
-        writer: 1,
-        laps: [
-          { start: 0, elapsed: 60, distance: 300, ascent: 9 },
-          { start: 60, elapsed: 59, distance: 295 },
-        ],
-      }),
-    );
-    expect(ride.laps.map((lap) => lap.ascent)).toEqual([9, undefined]);
   });
 });

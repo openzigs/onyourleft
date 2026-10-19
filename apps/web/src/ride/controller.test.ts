@@ -8560,14 +8560,20 @@ describe('#1312 — the laps of a course are the recording’s, and are saved wi
           format === 'fit' ? lapped.stored.movingTime : lapped.back.elapsedTime,
         );
         expect(LOSSY_CHANNELS[format].includes('activity.movingTime')).toBe(format === 'tcx');
-        // #1320, with #1321's mark: the laps come back as rows — the two
-        // whole laps and the part lap, and not the lead-in or the tail.
-        const table = (rows: readonly LapRecord[]) =>
-          rows.map((row) => ({ ...row, id: undefined, activityId: undefined }));
         if (format === 'fit') {
-          // FIT carries every figure of the table, so it comes back whole.
-          expect(table(lapped.backLaps)).toEqual(table(lapped.laps));
+          // #1320: this client's own FIT comes back with no lap rows. Its
+          // splits include the lead-in and the tail, and nothing in it says
+          // which are laps of the course until #1471 (#1321's FIT half), so
+          // it is read as a file with no laps rather than one whose lead-in
+          // is a lap. `LOSSY_CHANNELS` tells the rider FIT drops the laps'
+          // figures and kind.
+          expect(lapped.backLaps).toEqual([]);
+          expect(LOSSY_CHANNELS.fit).toEqual(
+            expect.arrayContaining(['lap.intensity', 'lap.triggerMethod']),
+          );
         } else {
+          // #1320, with #1321's mark: the laps come back as rows — the two
+          // whole laps and the part lap, and not the lead-in or the tail.
           // TCX states each lap's start to the second, its share of the
           // ride's distance and no climb, so what comes back is the laps, in
           // order, the part lap marked, and the figures worked out from the
@@ -8588,8 +8594,8 @@ describe('#1312 — the laps of a course are the recording’s, and are saved wi
           expect(LOSSY_CHANNELS.tcx).toEqual(
             expect.arrayContaining(['lap.distance', 'lap.ascent']),
           );
+          expect(lapped.backLaps.map((lap) => lap.partial === true)).toEqual([false, false, true]);
         }
-        expect(lapped.backLaps.map((lap) => lap.partial === true)).toEqual([false, false, true]);
       },
     );
 

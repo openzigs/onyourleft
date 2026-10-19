@@ -51,8 +51,6 @@ import {
   decodeGpx,
   decodeTcx,
   FitDecodeError,
-  INTENSITY_ACTIVE,
-  LAP_TRIGGER_SESSION_END,
   TCX_CREATOR,
   type FitLap,
   type FitRecord,
@@ -97,17 +95,6 @@ export const IMPORT_SAMPLE_INTERVAL: Seconds = seconds(1);
  * laps, and says so in its faults.
  */
 export const MAXIMUM_IMPORTED_LAPS = 10_000;
-
-/**
- * The fastest a lap of this client's own file may be said to have gone — #1320.
- *
- * A course lap's distance is the game's road, not the ride's (`recording/laps.ts`
- * §"Whose numbers these are"), so it is not held to what the ride covered as a
- * listed lap's is. It is held to this instead, because the file is still
- * untrusted input: 100 m/s is 360 km/h, past anything ridden or simulated, so
- * it bounds a hostile figure and moves no real one.
- */
-export const MAXIMUM_OWN_LAP_SPEED_METRES_PER_SECOND = 100;
 
 /** Why one file could not become a ride. */
 export type ImportFaultCode =
@@ -166,10 +153,12 @@ export class ActivityImportError extends Error {
  * rule for a lap with no course under it).
  *
  * The two follow ONE preference order — the file's figure where the import
- * has one, the samples' otherwise. A FIT lap states both (`total_ascent` since
- * #1321); TCX's `<Lap>` has no element for a climb, and GPX lists no laps. A
- * lap distance is stated by both formats that list laps, so it is the file's,
- * as the ride's own distance is ({@link rideOf}).
+ * has one, the samples' otherwise — and differ only because no file this
+ * client reads states a lap's climb: TCX's `<Lap>` has no element for it, GPX
+ * lists no laps, and `packages/fit` decodes a FIT lap's `total_distance` but
+ * not its `total_ascent` (that field is #1471's). A lap distance is stated by
+ * both formats that list laps, so it is the file's, as the ride's own distance
+ * is ({@link rideOf}).
  *
  * Its averages are NOT here: they are
  * worked out from the imported samples by `recording/laps.ts` when the row is
@@ -249,10 +238,6 @@ export function readActivityFile(fileName: string, bytes: Uint8Array): ImportedR
 function readFit(fileName: string, bytes: Uint8Array): ImportedRide {
   const result = decode(() => decodeFitActivity(bytes));
   const session = result.activity.sessions[0];
-  const own = result.activity.fileId?.manufacturer === undefined;
-  // #1321's mark: this client writes an intensity on every split of a ride
-  // with laps, and on none of a ride without.
-  const marked = own && result.activity.laps.some((lap) => lap.intensity !== undefined);
   return rideOf({
     format: 'fit',
     fileName,
@@ -265,16 +250,21 @@ function readFit(fileName: string, bytes: Uint8Array): ImportedRide {
     statedElapsedTime: session?.totalElapsedTime,
     statedMovingTime: session?.totalTimerTime,
     statedDistance: session?.totalDistance,
-    statedLaps: result.activity.laps.map((lap) => statedLapOfFit(lap, marked)),
+    statedLaps: result.activity.laps.map(statedLapOfFit),
     // FIT's `file_id` names the maker of the device or app that wrote it. This
     // client's own export names none (`export-activity.ts` §`fitInputOf`).
-    listsLaps: !own || marked,
-    marked,
+    //
+    // ⚠️ **This client's own FIT file lists no laps** (#1471). It does not
+    // mark which of its splits are laps: #1321's FIT half, the lap's intensity
+    // and trigger, waits on field numbers ADR 0006 R2 admits. Unmarked, a
+    // lead-in would read as a lap, so the file is read with none.
+    listsLaps: result.activity.fileId?.manufacturer !== undefined,
+    marked: false,
     faults: result.faults.map((fault) => fault.message),
   });
 }
 
-function statedLapOfFit(lap: FitLap, marked: boolean): StatedLap {
+function statedLapOfFit(lap: FitLap): StatedLap {
   return {
     // A system time cannot be placed on the ride's clock: the lap then starts
     // where the one before it ended (`lapsWithin`).
@@ -282,16 +272,8 @@ function statedLapOfFit(lap: FitLap, marked: boolean): StatedLap {
     elapsedTime: lap.totalElapsedTime,
     movingTime: lap.totalTimerTime,
     distance: lap.totalDistance,
-    ascent: lap.totalAscent,
-    // `export-activity.ts` §`fitLapFiguresOf`: active is a lap, and one that
-    // ended with the session a part lap; anything else is not a lap.
-    kind: !marked
-      ? 'lap'
-      : lap.intensity !== INTENSITY_ACTIVE
-        ? 'outside'
-        : lap.lapTrigger === LAP_TRIGGER_SESSION_END
-          ? 'part'
-          : 'lap',
+    // `packages/fit` decodes no mark for a FIT lap (#1471).
+    kind: 'lap',
   };
 }
 
@@ -363,8 +345,6 @@ function readXml(format: 'gpx' | 'tcx', fileName: string, bytes: Uint8Array): Im
       elapsedTime: undefined,
       movingTime: lap.totalElapsedTime,
       distance: lap.totalDistance,
-      // TCX has no element for a lap's climb.
-      ascent: undefined,
       kind: kindOfTcxLap(lap, marked),
     })),
     // ⚠️ GPX lists no laps: a `<trkseg>` is as often a new segment after a lost
@@ -467,7 +447,6 @@ interface StatedLap {
   readonly elapsedTime: Seconds | undefined;
   readonly movingTime: Seconds | undefined;
   readonly distance: Metres | undefined;
-  readonly ascent: Metres | undefined;
   readonly kind: LapKind;
 }
 
@@ -678,18 +657,21 @@ interface LapGrid {
  * ⚠️ **This client's own files list the laps they mark, and no other split.**
  * Since #1316 a file this client writes has a split for the time before a
  * course's first lap, between two that do not meet and after the last
- * (`export-activity.ts` §`splitsOf`), and since #1321 it marks which is which
- * (FIT's intensity and lap trigger; TCX's `Intensity` and `TriggerMethod`).
- * Such a file lists its laps and its part laps, and none of the splits either
- * side, which keep their time — a lap after one still starts where the file
- * says. A file this client wrote before #1321, or one with no splits, carries
- * no mark and is read with no laps, as every such file was before #1320.
+ * (`export-activity.ts` §`splitsOf`), and since #1321 its TCX marks which is
+ * which (`Intensity` and `TriggerMethod`). Such a file lists its laps and its
+ * part laps, and none of the splits either side, which keep their time — a
+ * lap after one still starts where the file says. A file this client wrote
+ * before #1321, or one with no splits, carries no mark and is read with no
+ * laps, as every such file was before #1320.
  *
- * Its laps differ from a listed file's in three ways, each because a lap of a
- * course is not a stretch of the recording: one lap is listed (its mark says
- * it is a lap, not the ride said again); its distance is the
- * course's road and is held to {@link MAXIMUM_OWN_LAP_SPEED_METRES_PER_SECOND}
- * over its time rather than to what the ride covered; and a part lap is one.
+ * ⚠️ **This client's own FIT file carries no mark, and lists no laps**: the
+ * FIT half of #1321 waits on #1471, which has to find lap field numbers
+ * ADR 0006 R2 admits.
+ *
+ * A marked file's laps differ from a listed file's in two ways: one lap is
+ * listed (its mark says it is a lap, not the ride said again), and a part lap
+ * is one. A TCX lap states its share of the ride's distance, so it is held to
+ * what the ride covered as a listed lap's is.
  *
  * ## A lap's times
  *
@@ -766,19 +748,14 @@ function lapsWithin(
       },
       false,
     );
-    const lapDistance = Math.min(
-      lap.distance ?? recorded.distance,
-      grid.marked ? elapsed * MAXIMUM_OWN_LAP_SPEED_METRES_PER_SECOND : distanceLeft,
-    );
+    const lapDistance = Math.min(lap.distance ?? recorded.distance, distanceLeft);
     distanceLeft -= lapDistance;
-    // A file's climb where it states one: no more than the lap's own road.
-    const ascent = lap.ascent === undefined ? recorded.ascent : Math.min(lap.ascent, lapDistance);
     laps.push({
       startedAt: unixSeconds(startedAt),
       elapsedTime: seconds(elapsed),
       movingTime: seconds(Math.min(lap.movingTime ?? elapsed, elapsed)),
       distance: metres(lapDistance),
-      ascent: ascent === undefined ? undefined : metres(ascent),
+      ascent: recorded.ascent,
       partial: lap.kind === 'part',
     });
   });
