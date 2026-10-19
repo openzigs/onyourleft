@@ -60,7 +60,7 @@ import { Hills, ProfileShape, RoadRibbon, SensorGlyph, Sky } from '../design/ill
 import { SectionHeading } from '../design/SectionHelp';
 import { Reading } from '../design/Reading';
 import { StatusMessage } from '../design/StatusMessage';
-import { formatDuration, formatStartedAt } from '../format';
+import { formatDuration, formatStartedAt, MOVING_TIME_LABEL } from '../format';
 import {
   loadHome,
   loadNextUp,
@@ -219,7 +219,7 @@ function Rides({
               <dd>{formatStartedAt(last.startedAt, last.timeZone)}</dd>
             </div>
             <div>
-              <dt>Moving time</dt>
+              <dt>{MOVING_TIME_LABEL}</dt>
               <dd>
                 <Reading value={formatDuration(last.movingTime)} />
               </dd>
@@ -498,7 +498,7 @@ function ThisWeek({
           <dd className="oyl-home__before">{weekBefore(String(previous.rides))}</dd>
         </div>
         <div>
-          <dt>Moving time</dt>
+          <dt>{MOVING_TIME_LABEL}</dt>
           <dd>
             <Reading value={formatDuration(week.movingTime)} />
           </dd>

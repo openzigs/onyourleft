@@ -21,6 +21,25 @@ import type { UnixSeconds, Watts } from '@onyourleft/domain';
 export const POWER_UNIT = 'W';
 
 /**
+ * The one name for a stored ride's moving time on Home, History and the ride's
+ * page — #1437. Until then History said "Duration" and meant elapsed time, and
+ * the ride's page said "Moving" and "Elapsed".
+ */
+export const MOVING_TIME_LABEL = 'Moving time';
+
+/** The one name for a stored ride's elapsed time, wherever it is shown — #1437. */
+export const ELAPSED_TIME_LABEL = 'Elapsed time';
+
+/**
+ * What follows a moving time that differs from the elapsed one — #1437:
+ * "0:10 of 10:31:26 elapsed", so a recording left running is readable at a
+ * glance rather than taken for the ride.
+ */
+export function ofElapsed(elapsed: string): string {
+  return `of ${elapsed} elapsed`;
+}
+
+/**
  * `3725` → `1:02:05`. Hours only when there are some.
  *
  * Moved here from `views/RideView.tsx` by #62, which needed the same format for

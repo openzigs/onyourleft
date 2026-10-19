@@ -11,7 +11,7 @@ import { EmptyState } from '../design/EmptyState';
 import { KeptVisible } from '../design/KeptVisible';
 import { StatusMessage } from '../design/StatusMessage';
 import { VisuallyHidden } from '../design/VisuallyHidden';
-import { POWER_UNIT } from '../format';
+import { ELAPSED_TIME_LABEL, MOVING_TIME_LABEL, ofElapsed, POWER_UNIT } from '../format';
 import { useUnits } from '../units/context';
 import { distanceUnit } from '../units/format';
 import { orderedRows, PAGE_SIZE, rowFor, type LibraryRow } from '../library/rows';
@@ -595,9 +595,14 @@ function RideCard({
       <p className="oyl-muted oyl-activity-card__date">{row.startedAt}</p>
       <dl className="oyl-activity-card__facts">
         <div>
-          <dt>Duration</dt>
+          <dt>{MOVING_TIME_LABEL}</dt>
           <dd>
-            <Reading value={row.duration} />
+            <Reading value={row.movingTime} />
+            {/* #1437: a ride whose elapsed time is far above its moving time
+              reads "0:10 of 10:31:26 elapsed" at a glance. */}
+            {row.elapsedTime === row.movingTime ? null : (
+              <span className="oyl-muted"> {ofElapsed(row.elapsedTime)}</span>
+            )}
           </dd>
         </div>
         {row.distance === undefined ? null : (
@@ -636,8 +641,12 @@ function RideSummary({ row }: { readonly row: LibraryRow }): JSX.Element {
           <dd>{row.startedAt}</dd>
         </div>
         <div>
-          <dt>Duration</dt>
-          <dd>{row.duration}</dd>
+          <dt>{MOVING_TIME_LABEL}</dt>
+          <dd>{row.movingTime}</dd>
+        </div>
+        <div>
+          <dt>{ELAPSED_TIME_LABEL}</dt>
+          <dd>{row.elapsedTime}</dd>
         </div>
         <div>
           <dt>Distance</dt>

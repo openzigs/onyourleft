@@ -582,7 +582,7 @@ describe('#1041 — every ride a card, at every width', () => {
     // Each fact is a `Reading`: its digits and its unit, at the reading size.
     expect(
       queryAll(first as Element, '.oyl-reading').map((reading) => reading.textContent),
-    ).toStrictEqual(['1:02:05', '42.2 km', '212 W']);
+    ).toStrictEqual(['1:00:00', '42.2 km', '212 W']);
     expect(cards[1]?.textContent).toContain('indoor');
     expect(first?.querySelector('a')?.getAttribute('href')).toBe('#/activities/selected/outdoor');
     expect(listCaption()).toBe('Rides on this device, newest first');
@@ -600,7 +600,7 @@ describe('#1041 — every ride a card, at every width', () => {
     expect(text).not.toMatch(/\b0 W\b/);
     expect(
       queryAll(indoor as Element, '.oyl-reading').map((reading) => reading.textContent),
-    ).toStrictEqual(['1:02:05', '42.2 km']);
+    ).toStrictEqual(['1:00:00', '42.2 km']);
     // No card draws a shape: an `ActivitySummary` carries no track, no power
     // and no altitude, and a stand-in would be a picture of another ride.
     expect(
@@ -668,7 +668,7 @@ describe('#1041 — every ride a card, at every width', () => {
     expect(text).not.toMatch(/\b0 W\b/);
     expect(
       queryAll(card as Element, '.oyl-reading').map((reading) => reading.textContent),
-    ).toStrictEqual(['1:02:05', '42.2 km']);
+    ).toStrictEqual(['1:00:00', '42.2 km']);
 
     const summaryFacts = document.getElementById(SELECTED_HEADING_ID)?.nextElementSibling;
     const facts = new Map(
@@ -927,5 +927,56 @@ describe('each message is said once, in one live region', () => {
     await settle();
     await settle();
     saidOnce('Could not read the rides on this device.');
+  });
+});
+
+describe('#1437 — History leads with moving time, and says which', () => {
+  /** The facts of the first card: each term with what it says. */
+  function cardFacts(): string[] {
+    const card = document.querySelector('.oyl-activity-cards > li');
+    return queryAll(card as Element, '.oyl-activity-card__facts > div').map(
+      (fact) =>
+        `${fact.querySelector('dt')?.textContent ?? ''}: ${fact.querySelector('dd')?.textContent ?? ''}`,
+    );
+  }
+
+  it('leads a card with the moving time, named so, and the elapsed time after it', async () => {
+    // The ride the issue saw: it moved for 0:10 of a recording left running for 10:31:26.
+    const library = stubLibrary(OWNER, [
+      summary('left-running', { movingTime: seconds(10), elapsedTime: seconds(37_886) }),
+    ]);
+    mounted = await mount(<ActivitiesView library={library} />);
+    await settle();
+
+    expect(cardFacts()[0]).toBe('Moving time: 0:10 of 10:31:26 elapsed');
+    const card = document.querySelector('.oyl-activity-cards > li');
+    expect(queryAll(card as Element, '.oyl-reading').map((reading) => reading.textContent)[0]).toBe(
+      '0:10',
+    );
+    expect(card?.textContent).not.toContain('Duration');
+  });
+
+  it('says the time once when the ride never paused', async () => {
+    const library = stubLibrary(OWNER, [
+      summary('never-paused', { movingTime: seconds(3_725), elapsedTime: seconds(3_725) }),
+    ]);
+    mounted = await mount(<ActivitiesView library={library} />);
+    await settle();
+
+    expect(cardFacts()[0]).toBe('Moving time: 1:02:05');
+  });
+
+  it('names both in the selected ride’s summary, moving first', async () => {
+    const library = stubLibrary(OWNER, [
+      summary('left-running', { movingTime: seconds(10), elapsedTime: seconds(37_886) }),
+    ]);
+    mounted = await mount(<ActivitiesView library={library} selected="left-running" />);
+    await settle();
+
+    const pane = document.getElementById(SELECTED_HEADING_ID)?.parentElement;
+    const terms = queryAll(pane as Element, 'dt').map((term) => term.textContent);
+    const values = queryAll(pane as Element, 'dd').map((value) => value.textContent);
+    expect(terms.slice(1, 3)).toStrictEqual(['Moving time', 'Elapsed time']);
+    expect(values.slice(1, 3)).toStrictEqual(['0:10', '10:31:26']);
   });
 });
