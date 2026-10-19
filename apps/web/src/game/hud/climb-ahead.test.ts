@@ -191,6 +191,25 @@ describe('a climb and a descent are different words — criterion 3', () => {
     // ADR 0004 D: nothing that could be a latitude or a longitude.
     expect(sentence).toMatch(/^(Climb|Descent) in \d+ (metres|feet), \d+ percent$/);
   });
+
+  it('says a quarter of a mile or more in miles to an imperial rider — #1440’s review', () => {
+    const profile = graded(ROLLING);
+    const [climb] = slopesOf(profile);
+    if (climb === undefined) throw new Error('fixture has a climb');
+    const said = (metresAhead: number, units: 'metric' | 'imperial'): string =>
+      slopeSentence({ slope: climb, metresAhead, approach: '0:0' }, units);
+
+    // First seen just inside the 0.25 mi and 0.5 mi steps (402.336 m, 804.672 m).
+    expect(said(402, 'imperial')).toBe('Climb in 0.3 miles, 6 percent');
+    expect(said(804, 'imperial')).toBe('Climb in 0.5 miles, 6 percent');
+    // Under a quarter of a mile it is still feet, in tens.
+    expect(said(400, 'imperial')).toBe('Climb in 1310 feet, 6 percent');
+    // Metric is unchanged at the same distances.
+    expect(said(804, 'metric')).toBe('Climb in 800 metres, 6 percent');
+    expect(said(1500, 'metric')).toBe('Climb in 1500 metres, 6 percent');
+    // ADR 0004 D still holds: a distance and a percent, no coordinate.
+    expect(said(804, 'imperial')).toMatch(/^(Climb|Descent) in [\d.]+ miles, \d+ percent$/);
+  });
 });
 
 describe('the wrapped position — criteria 4 and 5', () => {

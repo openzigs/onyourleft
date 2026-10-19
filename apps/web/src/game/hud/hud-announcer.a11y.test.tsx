@@ -333,6 +333,20 @@ describe('the road ahead, through the same region — #399', () => {
     expect(said).toMatch(/^Climb in 1000 feet, [5-7] percent$/);
   });
 
+  it('says a climb at the 0.5 mi step in miles, not 2640 feet — #1440’s review', async () => {
+    routes = [hillyRoute()];
+    chooseAnnouncements({
+      powerEverySeconds: 'never',
+      distanceEvery: 'never',
+      climbLeadMetres: 1000,
+    });
+    await startRide(undefined, 'imperial');
+    const said = await pumpUntil(/^Climb/, 400);
+    // 1000 m stored is the 0.5 mi step for an imperial rider; the climb is
+    // 1 km into the route, so it is first seen 0.5 mi ahead.
+    expect(said).toMatch(/^Climb in 0\.5 miles, [5-7] percent$/);
+  });
+
   // ⚠️ **14 s, a ceiling rather than a budget — #682.** Vitest's default 5 s was nobody's choice
   // for this case: under coverage on CI it took 2.1 s to 4.4 s over thirteen green `main` runs on
   // 2026-09-28 (36370135206 to 36405580515), the slowest on 36371441351 (the slower of the two
