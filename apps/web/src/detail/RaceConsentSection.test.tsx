@@ -127,6 +127,12 @@ describe('the consent is off by default, and says what it allows', () => {
     expect(box.getAttribute('role')).toBeNull();
   });
 
+  it('does not say ghost racing is not built: it is, since #331 — #1439', async () => {
+    await open(stub(), 'ride-1');
+    expect(text()).not.toMatch(/does not race another rider.s ghost yet/);
+    expect(text()).not.toContain('kept for when one does');
+  });
+
   it('shows a consent already given as given', async () => {
     const box = await open(stub({ activity: stubActivity({ mayBeRaced: true }) }), 'ride-1');
     expect(box.checked).toBe(true);

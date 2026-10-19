@@ -21,8 +21,10 @@
  *
  * A `main` laid out as a list beside its detail (`.oyl-main--list-detail`,
  * `shell/ListDetail.tsx`) is two views side by side, and each pane may hold
- * one primary: the Activities list's *Start a ride* and the selected ride's
- * *Open ride details* are on one screen at a landscape tablet. So on such a
+ * one primary: the Workouts list's *Build a workout* and the chosen workout's
+ * *Save workout* are on one screen at a landscape tablet (until #1439 the example was
+ * the Activities list's *Start a ride* beside *Open ride details*, which the
+ * ride's own page replaced). So on such a
  * `main` the rule counts each `[data-oyl-pane]` apart, and everything in the
  * `main` outside the panes as one more unit. **Only there**: a pane marker in
  * any other `main` is ignored and that `main` is still one view, so the rule

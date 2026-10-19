@@ -150,16 +150,18 @@ const PRIMARY_ON_ARRIVAL: Readonly<Record<string, readonly string[]>> = {
  * (`shell/ListDetail.tsx` §`CreateLink`).
  *
  * Held at the two-pane tablet, where the insets are the shell's, for all
- * three; and for Activities on one pane too, where *Open ride details* ends
- * 665 px above the upright tablet's fold and 180 px above a phone's (measured
- * on #670's review branch, on a Mac). On one pane the list is hidden with an
- * item chosen, so Routes and Workouts have NO primary on screen: the item's
- * own actions — download, change, export, delete — are all secondary (#668),
- * and the way back to the form is the one-pane back link to the list. That is
- * published as "no primary on screen", not held.
+ * three. On one pane the list is hidden with an item chosen, so Routes and
+ * Workouts have NO primary on screen: the item's own actions — download,
+ * change, export, delete — are all secondary (#668), and the way back to the
+ * form is the one-pane back link to the list. That is published as "no
+ * primary on screen", not held. ⚠️ **So is Activities on one pane since
+ * #1439**, and a reviewer who remembers it held upright and on a phone is
+ * reading the old file: the chosen ride's pane was a summary whose primary was
+ * *Open ride details*, and it is the ride's page now, whose controls are
+ * toggles and secondaries.
  */
 const PRIMARY_WHEN_SELECTED: Readonly<Record<string, readonly string[]>> = {
-  activities: [TABLET_IN_THE_SHELL.name, TABLET_UPRIGHT.name, PHONE.name],
+  activities: [TABLET_IN_THE_SHELL.name],
   routes: [TABLET_IN_THE_SHELL.name],
   workouts: [TABLET_IN_THE_SHELL.name],
 };

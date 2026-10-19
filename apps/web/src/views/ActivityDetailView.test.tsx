@@ -602,6 +602,33 @@ describe('criterion 6 — every chart has a non-visual equivalent', () => {
     expect(tables[0]?.querySelector('caption')?.textContent).toBe('Power (W)');
   });
 
+  it('puts each table behind a closed disclosure under its chart, named for its readings — #1439', async () => {
+    mounted = await open(indoorRide());
+    const disclosures = queryAll<HTMLDetailsElement>(document, 'details.oyl-chart-table');
+    expect(disclosures).toHaveLength(2);
+    for (const disclosure of disclosures) {
+      expect(disclosure.open).toBe(false);
+      expect(disclosure.querySelector('table.oyl-data-table')).not.toBeNull();
+      // Right after its own chart.
+      expect(disclosure.previousElementSibling?.classList.contains('oyl-trace-chart')).toBe(true);
+    }
+    expect(disclosures[0]?.querySelector('summary')?.textContent).toBe(
+      'Power (W): the readings as a table',
+    );
+  });
+
+  it('labels each chart’s value axis and time axis — #1439', async () => {
+    mounted = await open(indoorRide());
+    const chart = document.querySelector('.oyl-trace-chart');
+    expect(chart?.querySelector('.oyl-trace-chart__value-title')?.textContent).toBe('Power (W)');
+    expect(queryAll(chart as Element, '.oyl-trace-chart__values > div')).toHaveLength(3);
+    expect(
+      queryAll(chart as Element, '.oyl-trace-chart__times > div').map(
+        (each) => each.textContent,
+      )[0],
+    ).toBe('0:00');
+  });
+
   it('describes the shape of the trace in words, for a reader who cannot see it', async () => {
     mounted = await open(indoorRide(powerSeries(1200, 400, 300)));
     const svg = document.querySelector('svg.oyl-trace');

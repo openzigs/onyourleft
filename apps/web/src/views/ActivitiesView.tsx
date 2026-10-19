@@ -12,15 +12,16 @@ import { EmptyState } from '../design/EmptyState';
 import { KeptVisible } from '../design/KeptVisible';
 import { StatusMessage } from '../design/StatusMessage';
 import { VisuallyHidden } from '../design/VisuallyHidden';
-import { ELAPSED_TIME_LABEL, MOVING_TIME_LABEL, POWER_UNIT } from '../format';
+import { MOVING_TIME_LABEL, POWER_UNIT } from '../format';
 import { useUnits } from '../units/context';
 import { distanceUnit } from '../units/format';
 import { RecentlyDeleted } from '../library/RecentlyDeleted';
 import { orderedRows, PAGE_SIZE, rowFor, type LibraryRow } from '../library/rows';
 import type { LibraryPort } from '../library/store-port';
 import { ListDetail, SELECTED_HEADING_ID } from '../shell/ListDetail';
-import { hrefFor, hrefForActivity, hrefForSelection, routeById } from '../shell/routes';
+import { hrefFor, hrefForSelection, routeById } from '../shell/routes';
 import type { InstancePort } from '../instance/instance-port';
+import { ActivityDetailView, type ActivityDetailViewProps } from './ActivityDetailView';
 import { useInstanceKnown, whereRidesAreText, type InstanceKnown } from './where-rides-are';
 
 /**
@@ -111,6 +112,16 @@ export interface ActivitiesViewProps {
    * to one — #1438: with one, a synced ride is not on this device alone.
    */
   readonly instance?: InstancePort | undefined;
+  /**
+   * #1439: what the ride's page reads, for the chosen ride in the detail pane
+   * — the same props `ActivityDetailView` takes at `#/activities/<id>`.
+   */
+  readonly detail?: ActivityDetailViewProps['port'];
+  readonly map?: ActivityDetailViewProps['map'];
+  readonly basemap?: ActivityDetailViewProps['basemap'];
+  readonly writeUp?: ActivityDetailViewProps['writeUp'];
+  readonly instanceWriteUp?: ActivityDetailViewProps['instanceWriteUp'];
+  readonly riderText?: ActivityDetailViewProps['riderText'];
 }
 
 /** The sort control's `id`, for its `<label>`. One library per page. */
@@ -231,6 +242,12 @@ export function ActivitiesView({
   selected,
   nativeShell = false,
   instance,
+  detail,
+  map,
+  basemap,
+  writeUp,
+  instanceWriteUp,
+  riderText,
 }: ActivitiesViewProps): JSX.Element {
   const instanceKnown = useInstanceKnown(instance);
   const [orderBy, setOrderBy] = useState<ActivityOrder>('startedAt');
@@ -573,7 +590,7 @@ export function ActivitiesView({
       route={routeById('activities')}
       selection={selected}
       listLabel="Your rides"
-      detailLabel="Ride summary"
+      detailLabel="Ride"
       backLabel="All rides"
       detailWithoutSelection={false}
       list={list}
@@ -583,7 +600,26 @@ export function ActivitiesView({
         ) : shown === undefined ? (
           <p>Reading this ride…</p>
         ) : shown.kind === 'found' ? (
-          <RideSummary row={shown.row} />
+          // #1439: the ride's ONE page. Until then this pane was a summary of
+          // the row whose one action was *Open ride details*, and the details
+          // were a second page: two taps to see a ride. The heading is the
+          // list's own row, here before the page's read is back, so the focus
+          // `ListDetail` moves on a choice has somewhere to land.
+          <>
+            <h2 id={SELECTED_HEADING_ID} tabIndex={-1}>
+              {shown.row.name}
+            </h2>
+            <ActivityDetailView
+              port={detail}
+              activityId={shown.row.id}
+              map={map}
+              basemap={basemap}
+              writeUp={writeUp}
+              instanceWriteUp={instanceWriteUp}
+              riderText={riderText}
+              embedded
+            />
+          </>
         ) : shown.kind === 'missing' ? (
           <>
             <h2 id={SELECTED_HEADING_ID} tabIndex={-1}>
@@ -686,49 +722,5 @@ function RideCard({
       </dl>
       {remove}
     </li>
-  );
-}
-
-/** The selected ride, in the detail pane — #670. Its full page is one link away. */
-function RideSummary({ row }: { readonly row: LibraryRow }): JSX.Element {
-  const units = useUnits();
-  return (
-    <>
-      <h2 id={SELECTED_HEADING_ID} tabIndex={-1}>
-        {row.name}
-      </h2>
-      <dl className="oyl-activity-card__facts">
-        <div>
-          <dt>Started</dt>
-          <dd>{row.startedAt}</dd>
-        </div>
-        <div>
-          <dt>{MOVING_TIME_LABEL}</dt>
-          <dd>{row.movingTime}</dd>
-        </div>
-        <div>
-          <dt>{ELAPSED_TIME_LABEL}</dt>
-          <dd>{row.elapsedTime}</dd>
-        </div>
-        <div>
-          <dt>Distance</dt>
-          <dd>{row.distance === undefined ? '—' : `${row.distance} ${distanceUnit(units)}`}</dd>
-        </div>
-        <div>
-          <dt>Avg power</dt>
-          <dd>{row.averagePower === undefined ? '—' : `${row.averagePower} ${POWER_UNIT}`}</dd>
-        </div>
-        <div>
-          <dt>Where</dt>
-          <dd>{row.hasPosition ? 'Outdoors, with a track' : 'Indoor, no track'}</dd>
-        </div>
-      </dl>
-      {/* The detail pane's one primary (#670: one primary per pane). */}
-      <p>
-        <a className="oyl-button" href={hrefForActivity(row.id)}>
-          Open ride details
-        </a>
-      </p>
-    </>
   );
 }

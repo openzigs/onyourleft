@@ -32,6 +32,7 @@ import {
 } from '@onyourleft/store/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { stubActivity, stubDetail, stubLap } from '../detail/testing';
 import { PAGE_SIZE } from '../library/rows';
 import { SELECTED_HEADING_ID } from '../shell/ListDetail';
 import { emptyLibraryStore, stubLibrary } from '../library/testing';
@@ -765,17 +766,11 @@ describe('#1041 — every ride a card, at every width', () => {
       queryAll(card as Element, '.oyl-reading').map((reading) => reading.textContent),
     ).toStrictEqual(['1:00:00']);
 
-    // The selected ride's summary says so with an em dash, never
-    // "undefined km" or "0.0 km" (#1053).
-    const summaryFacts = document.getElementById(SELECTED_HEADING_ID)?.nextElementSibling;
-    const facts = new Map(
-      queryAll(summaryFacts as Element, ':scope > div').map((fact): [string, string] => [
-        fact.querySelector('dt')?.textContent ?? '',
-        fact.querySelector('dd')?.textContent ?? '',
-      ]),
+    // #1439: the chosen ride's facts are its page's own, in the pane — no
+    // Distance row for 0 m there (`ActivityDetailView.test.tsx` §"#1070").
+    expect(document.getElementById(SELECTED_HEADING_ID)?.textContent).toBe(
+      'Trainer, power meter off',
     );
-    expect(facts.get('Distance')).toBe('—');
-    expect(summaryFacts?.textContent ?? '').not.toMatch(/undefined|\b0(\.0)? (km|mi)\b/);
   });
 
   it('invents no 0 W for a ride whose power readings were all 0 — #1054', async () => {
@@ -803,15 +798,9 @@ describe('#1041 — every ride a card, at every width', () => {
       queryAll(card as Element, '.oyl-reading').map((reading) => reading.textContent),
     ).toStrictEqual(['1:00:00', '42.2 km']);
 
-    const summaryFacts = document.getElementById(SELECTED_HEADING_ID)?.nextElementSibling;
-    const facts = new Map(
-      queryAll(summaryFacts as Element, ':scope > div').map((fact): [string, string] => [
-        fact.querySelector('dt')?.textContent ?? '',
-        fact.querySelector('dd')?.textContent ?? '',
-      ]),
-    );
-    expect(facts.get('Avg power')).toBe('—');
-    expect(facts.get('Distance')).toBe('42.2 km');
+    // #1439: the chosen ride's facts are its page's own, in the pane
+    // (`ActivityDetailView.test.tsx` §"#1054").
+    expect(document.getElementById(SELECTED_HEADING_ID)?.textContent).toBe('Ride 2026-09-25');
   });
 
   it('issues no read per card: one list read for fifty cards, and no ride read alone', async () => {
@@ -882,16 +871,42 @@ describe('#670 — a selected ride', () => {
     );
   }
 
-  it('is summarised from the page the list read, with no second read', async () => {
+  it('is headed from the page the list read, with no second read of the list', async () => {
     const library = stubLibrary(OWNER, many(3));
     mounted = await mount(<ActivitiesView library={library} selected="ride-1" />);
     await settle();
     expect(document.getElementById('oyl-selected-heading')?.textContent).toBe('Ride number 1');
     expect(library.gets).toEqual([]);
-    const open = queryAll<HTMLAnchorElement>(document.body, 'a').find(
-      (anchor) => anchor.textContent === 'Open ride details',
+  });
+
+  it('IS the ride’s page, read from the store, not a summary one tap from it — #1439', async () => {
+    // It was a summary of the row whose one action was *Open ride details*:
+    // two pages, two taps, to see a ride.
+    const ride = stubActivity({ id: activityId('ride-1'), name: 'Ride number 1' });
+    const detail = stubDetail(OWNER, {
+      activity: ride,
+      channels: { power: Array.from({ length: 120 }, () => watts(200)) },
+      laps: [stubLap(1)],
+    });
+    mounted = await mount(
+      <ActivitiesView library={stubLibrary(OWNER, many(3))} selected="ride-1" detail={detail} />,
     );
-    expect(open?.getAttribute('href')).toBe('#/activities/ride-1');
+    await settle();
+    await settle();
+    const pane = document.querySelector('[data-oyl-pane="detail"]') as Element;
+    expect(
+      queryAll<HTMLAnchorElement>(document.body, 'a').map((anchor) => anchor.textContent),
+    ).not.toContain('Open ride details');
+    // The page's own read, its headline numbers, its chart and its laps.
+    expect(detail.summaryReads.length).toBeGreaterThan(0);
+    expect(queryAll(pane, 'h3').map((heading) => heading.textContent)).toEqual(
+      expect.arrayContaining(['Traces', 'Laps']),
+    );
+    expect(pane.querySelector('.oyl-ride-summary')).not.toBeNull();
+    // Named once: the pane's heading, not the page's own as well.
+    expect(queryAll(pane, 'h2').map((heading) => heading.textContent)).toEqual(['Ride number 1']);
+    // And no second way back beside the pane's own.
+    expect(pane.textContent).not.toContain('All rides on this device');
   });
 
   it('is read on its own when it is outside the page, rather than called "not found"', async () => {
@@ -1292,7 +1307,20 @@ describe('#1437 — History leads with moving time, and says which', () => {
     const library = stubLibrary(OWNER, [
       summary('left-running', { movingTime: seconds(10), elapsedTime: seconds(37_886) }),
     ]);
-    mounted = await mount(<ActivitiesView library={library} selected="left-running" />);
+    // #1439: the pane is the ride's page, which reads the ride itself.
+    const detail = stubDetail(OWNER, {
+      activity: stubActivity({
+        id: activityId('left-running'),
+        movingTime: seconds(10),
+        elapsedTime: seconds(37_886),
+      }),
+      channels: {},
+      laps: [],
+    });
+    mounted = await mount(
+      <ActivitiesView library={library} selected="left-running" detail={detail} />,
+    );
+    await settle();
     await settle();
 
     const pane = document.getElementById(SELECTED_HEADING_ID)?.parentElement;
