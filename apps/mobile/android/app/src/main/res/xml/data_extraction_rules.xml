@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!--
+  No Android backup and no device-to-device transfer of anything this app
+  holds (#1451, owner ruling 2026-10-19).
+
+  The app's storage is the rider's rides and their GPS tracks, kept in the
+  WebView's storage under the app's data directory. A ride leaves the device by
+  the rider's own export or by sync to an instance they connected, and by
+  nothing else; Android's backup to a Google account and its transfer to a new
+  phone are both a third way, so both are closed here.
+
+  android:allowBackup="false" in AndroidManifest.xml turns cloud backup off,
+  but on Android 12 and later it does not stop a device-to-device transfer on
+  every manufacturer's build, which is what this file is for. Every domain is
+  excluded at its root (path "." is the domain's directory and everything
+  under it), and there is no include element, because one include would make
+  Android back up exactly what it names.
+
+  There is deliberately no cross-platform-transfer section. A transfer to an
+  iPhone needs one, naming the receiving iOS app's bundle id and team, and
+  there is no iOS app to name; adding the section is the way to opt in, so the
+  test below refuses it rather than this file excluding everything inside one.
+
+  apps/mobile/src/android/backup.test.ts fails if any of this is undone.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="database" path="." />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="external" path="." />
+        <exclude domain="device_root" path="." />
+        <exclude domain="device_file" path="." />
+        <exclude domain="device_database" path="." />
+        <exclude domain="device_sharedpref" path="." />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="database" path="." />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="external" path="." />
+        <exclude domain="device_root" path="." />
+        <exclude domain="device_file" path="." />
+        <exclude domain="device_database" path="." />
+        <exclude domain="device_sharedpref" path="." />
+    </device-transfer>
+</data-extraction-rules>
