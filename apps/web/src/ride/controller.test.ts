@@ -7325,6 +7325,49 @@ describe('#1312 — the laps of a course are the recording’s, and are saved wi
     });
 
     /**
+     * #1312's third review note. A line crossed in that same gap ENDS a lap
+     * at a moving time the tick then takes back, and the ride is stopped
+     * while the pause is on: the lap was saved moving for longer than the
+     * whole ride did. The saved rows are read back next to the saved ride.
+     */
+    it('saves laps whose moving times add up to no more than the ride’s, after a pause back-dated past the line', async () => {
+      const rig = benchWith({ rideSave: storeSavePort() });
+      const hud = gameTrainerPortOver(rig.controller);
+      await rig.controller.pair('trainer');
+      await rig.controller.start();
+      hud.courseLine?.({ kind: 'started' });
+      await ride(rig, 6);
+      rig.bench.rider.set({
+        power: watts(0),
+        cadence: revolutionsPerMinute(0),
+        speed: metresPerSecond(0),
+      });
+      await ride(rig, 9);
+      rig.bench.advance(seconds(1));
+      rig.bench.advance(seconds(1));
+      // The line is crossed in that gap, and the game ride ends there.
+      hud.courseLine?.({ ...WHOLE, again: false });
+      const before = rig.controller.getSnapshot().movingSeconds;
+      await rig.controller.tick(rig.bench.now);
+      // The premise: the tick took moving time back from behind the line.
+      expect(rig.controller.getSnapshot().movingSeconds).toBeLessThan(before);
+
+      rig.controller.armStop();
+      await rig.controller.confirmStop();
+      expect(rig.controller.getSnapshot().saveState).toBe('saved');
+      const activity = await harness.read(async (store) =>
+        store.getActivity(ATHLETE_A, activityId('ride-1')),
+      );
+      const saved = await lapsOf('ride-1');
+      expect(saved).toHaveLength(1);
+      expect(activity?.movingTime).toBeGreaterThan(0);
+      expect(saved.reduce((sum, lap) => sum + lap.movingTime, 0)).toBeLessThanOrEqual(
+        activity?.movingTime ?? Number.NaN,
+      );
+      rig.controller.dispose();
+    });
+
+    /**
      * The second route the review read and did not run. Built here, and it
      * does not exist: `session.pause(at)` ratchets the session's clock to
      * `at` FIRST and begins the pause at the clock, so a Pause pressed on a
@@ -7933,7 +7976,16 @@ describe('#1312 — the laps of a course are the recording’s, and are saved wi
       const last = benchWith({ rideSave: storeSavePort() });
       await last.controller.refreshRecoverable();
       expect(await last.controller.saveRecovered(id)).toBe('saved');
-      expect((await lapsOf('ride-1')).map((lap) => lap.movingTime)).toEqual([9]);
+      // ⚠️ Its moving time is held to the recovered ride's (#1312's third
+      // review note): the lap was marked at 9 s, and the ride recovered from
+      // the samples on disk moved for less — the last second or two had not
+      // reached a chunk (#1322). A row may not say the lap moved for longer
+      // than the ride it is a lap of.
+      const moved = (
+        await harness.read(async (store) => store.getActivity(ATHLETE_A, activityId('ride-1')))
+      )?.movingTime;
+      expect(moved).toBeLessThan(9);
+      expect((await lapsOf('ride-1')).map((lap) => lap.movingTime)).toEqual([moved]);
       last.controller.dispose();
     });
 
@@ -8143,7 +8195,13 @@ describe('#1312 — the laps of a course are the recording’s, and are saved wi
       const next = benchWith({ rideSave: storeSavePort() });
       await next.controller.refreshRecoverable();
       expect(await next.controller.saveRecovered(id)).toBe('saved');
-      expect((await lapsOf('ride-1')).map((lap) => lap.movingTime)).toEqual([10]);
+      // Held to the recovered ride's moving time, which the samples still
+      // in flight at the crash are not in (#1312's third review note, #1322).
+      const moved = (
+        await harness.read(async (store) => store.getActivity(ATHLETE_A, activityId('ride-1')))
+      )?.movingTime;
+      expect(moved).toBeLessThan(10);
+      expect((await lapsOf('ride-1')).map((lap) => lap.movingTime)).toEqual([moved]);
       next.controller.dispose();
     });
   });

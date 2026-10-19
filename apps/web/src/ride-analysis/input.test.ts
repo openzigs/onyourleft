@@ -685,6 +685,7 @@ describe('a game ride’s course laps (#1312): the first rides whose laps are st
       streams,
       ride.id,
       () => lapId(`course-lap-${String((minted += 1))}`),
+      ride.movingTime,
     );
     return saved(ride, streams, { laps });
   }
