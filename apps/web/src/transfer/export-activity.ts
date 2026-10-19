@@ -67,11 +67,26 @@ import type {
 import type { ActivityFileFormat } from './file-format';
 import type { DownloadableFile, TransferStore } from './store-port';
 
-/** What a format costs, in the codec's own words. Empty for FIT. */
+/** @see LOSSY_CHANNELS */
+const MOVING_TIME = 'activity.movingTime';
+
+/**
+ * What a format costs, in the codec's own words. Empty for FIT.
+ *
+ * Plus the ride's **moving time**, which is a loss of this exporter's rather
+ * than of the codec's — #1323. The codec's track has no moving time to drop: a
+ * GPX file states no totals at all, and a TCX `<Lap>` states one time,
+ * `TotalTimeSeconds`, which this client writes and reads as the elapsed time so
+ * that its laps add up to the ride. So a paused ride exported as either comes
+ * back with no pause in it (`read-activity-file.ts` reads no moving time from
+ * either format, and bounds it by the elapsed time), and the rider is told
+ * before choosing the format rather than after importing it. FIT's session
+ * carries it.
+ */
 export const LOSSY_CHANNELS: Readonly<Record<ActivityFileFormat, readonly string[]>> = {
   fit: [],
-  gpx: GPX_LOSSY_CHANNELS,
-  tcx: TCX_LOSSY_CHANNELS,
+  gpx: [...GPX_LOSSY_CHANNELS, MOVING_TIME],
+  tcx: [...TCX_LOSSY_CHANNELS, MOVING_TIME],
 };
 
 /**
@@ -204,14 +219,15 @@ export async function exportActivity(options: ExportOptions): Promise<ExportedAc
   let bytes: Uint8Array;
   let faults: readonly FitEncodeError[] = [];
   if (format === 'fit') {
-    const encoded = encodeFitActivity(fitInputOf(activity, streams, laps));
+    const encoded = encodeFitActivity(fitInputOf(activity, streams, framed(laps, streams)));
     bytes = encoded.bytes;
     faults = encoded.faults;
   } else {
+    const written = framed(withASampleEach(laps), streams);
     bytes = new TextEncoder().encode(
       format === 'gpx'
-        ? encodeGpx(trackActivityOf(activity, withASampleEach(laps)))
-        : encodeTcx(trackActivityOf(activity, withASampleEach(laps))),
+        ? encodeGpx(trackActivityOf(activity, written))
+        : encodeTcx(trackActivityOf(activity, written)),
     );
   }
 
@@ -620,6 +636,61 @@ function withASampleEach(laps: readonly ExportLap[]): readonly ExportLap[] {
   }
   // A ride with no reading in any slot keeps the one shape it always had.
   return kept.length === 0 ? laps : kept;
+}
+
+/**
+ * The splits with the ride's first and last slots stated, where no reading
+ * does — #1323.
+ *
+ * {@link pointsOf} writes no point for a slot with no reading in it, and an
+ * import starts a ride at its first timed sample and bounds its elapsed time by
+ * the span of its samples (`read-activity-file.ts` §`observedSpan`, which is
+ * deliberate: it stops a file inflating a ride). So a recording whose first
+ * second held no reading came back a second late and a second short, in every
+ * format. A point with a time and nothing else — what a head unit writes when a
+ * recording starts before a sensor answers — says where the ride starts and
+ * ends and invents no reading: every format here writes one (a FIT record, a
+ * TCX `<Trackpoint>` with only a `<Time>`, a GPX `<trkpt>` with only a
+ * `<time>`), and the import places it on the grid and writes nothing into it.
+ *
+ * The first and last SLOTS, not `activity.startedAt + elapsedTime`: the stored
+ * grid is the extent of the ride on disk, and stating it is what makes the
+ * import build a grid of the same length.
+ *
+ * ⚠️ **Added after the splits are cut**, into the first split and the last, so
+ * that a lead-in or a tail with no reading in it is still folded exactly as
+ * {@link splitsOf} and {@link withASampleEach} decided — a bare time is not a
+ * sample those rules should count.
+ */
+function framed(laps: readonly ExportLap[], streams: StreamSet): readonly ExportLap[] {
+  const first = laps[0];
+  const lastIndex = laps.length - 1;
+  if (first === undefined) {
+    return laps;
+  }
+  const points = laps.flatMap((lap) => lap.points);
+  const start = at(streams, 0);
+  const end = endOf(streams);
+  const bare = (timestamp: UnixSeconds): TrackPoint => ({
+    timestamp,
+    position: undefined,
+    altitude: undefined,
+    distance: undefined,
+    speed: undefined,
+    heartRate: undefined,
+    cadence: undefined,
+    power: undefined,
+    temperature: undefined,
+  });
+  const opens = points[0]?.timestamp === start;
+  const closes = points[points.length - 1]?.timestamp === end;
+  return laps.map((lap, ordinal) => {
+    const before = ordinal === 0 && !opens ? [bare(start)] : [];
+    const after = ordinal === lastIndex && !closes ? [bare(end)] : [];
+    return before.length === 0 && after.length === 0
+      ? lap
+      : { ...lap, points: [...before, ...lap.points, ...after] };
+  });
 }
 
 function fitInputOf(

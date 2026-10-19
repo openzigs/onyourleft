@@ -48,8 +48,9 @@ import FitParser from 'fit-file-parser';
 
 import { lapSlots } from '../recording/laps';
 
-import { ActivityExportError, exportActivity, fileStemOf } from './export-activity';
+import { ActivityExportError, exportActivity, fileStemOf, LOSSY_CHANNELS } from './export-activity';
 import type { ActivityFileFormat } from './file-format';
+import { readActivityFile } from './read-activity-file';
 
 /** Small enough to assert sample by sample, long enough to have a shape. */
 const SAMPLE_COUNT = 120;
@@ -265,6 +266,108 @@ describe('exportActivity — an indoor ride, which is half this product', () => 
         (before?.kind === 'instant' ? before.instant : 0),
     ).toBe(11);
   });
+});
+
+/** Thirty slots, the first and last with nothing in any channel. */
+async function seedEmptyEnds(): Promise<{ open: StoreHarness; ride: NewActivity }> {
+  const open = createStoreHarness();
+  harness = open;
+  await seedAthletes(open);
+  const ride = rideFor(ATHLETE_A, { name: 'Late sensor', elapsedTime: seconds(29) });
+  await open.write(async (store) => {
+    await store.putActivity(ride);
+    await store.putStreamSet(
+      streamSetFor(ride, {
+        sampleCount: 30,
+        channels: ['power'],
+        gaps: [
+          { channel: 'power', from: 0, count: 1 },
+          { channel: 'power', from: 29, count: 1 },
+        ],
+      }),
+    );
+  });
+  return { open, ride };
+}
+
+/**
+ * #1323: an import starts a ride at its first timed sample and bounds its
+ * elapsed time by the span of its samples, so a ride whose first or last slot
+ * had no reading came back late and short. The file states both slots with a
+ * bare time. Read back through `readActivityFile`, the import's own reader.
+ */
+describe('exportActivity — the ride’s first and last slots, where no reading is (#1323)', () => {
+  it.each<ActivityFileFormat>(['fit', 'gpx', 'tcx'])(
+    'comes back from %s starting when the ride did, on a grid as long as the stored one',
+    async (format) => {
+      const { open, ride } = await seedEmptyEnds();
+      const file = await exportFrom(open, ride.id, format);
+      const back = readActivityFile(file.fileName, file.bytes);
+
+      expect(back.startedAt).toBe(ride.startedAt);
+      expect(back.sampleCount).toBe(30);
+      // GPX states no total, so its elapsed time is the span; FIT and TCX state
+      // the ride's, which the span now admits.
+      expect(back.elapsedTime).toBe(29);
+      // The bare times carry no reading: the first and last slots come back
+      // as empty as they were stored.
+      expect(back.channels.power?.[0]).toBeUndefined();
+      expect(back.channels.power?.[29]).toBeUndefined();
+      expect(back.channels.power?.[1]).toBeDefined();
+      expect(back.channels.power?.[28]).toBeDefined();
+      expect(back.faults).toEqual([]);
+    },
+  );
+
+  it('writes one bare record at each end and none between', async () => {
+    const { open, ride } = await seedEmptyEnds();
+    const records = decodeFitActivity((await exportFrom(open, ride.id, 'fit')).bytes).activity
+      .records;
+
+    // Twenty-eight readings and the two ends.
+    expect(records).toHaveLength(30);
+    const bareAt = records
+      .map((record, index) => ({ record, index }))
+      .filter(({ record }) => record.power === undefined)
+      .map(({ record, index }) => [
+        index,
+        record.timestamp?.kind === 'instant' ? record.timestamp.instant - ride.startedAt : NaN,
+      ]);
+    expect(bareAt).toEqual([
+      [0, 0],
+      [29, 29],
+    ]);
+  });
+});
+
+describe('LOSSY_CHANNELS — the moving time (#1323)', () => {
+  it('tells the rider GPX and TCX do not carry a moving time, and FIT loses nothing', () => {
+    expect(LOSSY_CHANNELS.fit).toEqual([]);
+    expect(LOSSY_CHANNELS.tcx).toContain('activity.movingTime');
+    expect(LOSSY_CHANNELS.gpx).toContain('activity.movingTime');
+  });
+
+  it.each<ActivityFileFormat>(['gpx', 'tcx'])(
+    'is right about %s: a paused ride comes back with no pause',
+    async (format) => {
+      const { open, ride } = await seedEmptyEnds();
+      await open.write(async (store) =>
+        store.putActivity({ ...ride, id: activityId('paused'), movingTime: seconds(20) }),
+      );
+      await open.write(async (store) =>
+        store.putStreamSet(
+          streamSetFor(
+            { ...ride, id: activityId('paused') },
+            { sampleCount: 30, channels: ['power'] },
+          ),
+        ),
+      );
+      const file = await exportFrom(open, activityId('paused'), format);
+      const back = readActivityFile(file.fileName, file.bytes);
+      expect(back.movingTime).toBe(back.elapsedTime);
+      expect(back.movingTime).not.toBe(20);
+    },
+  );
 });
 
 describe('exportActivity — the athlete’s own track, unobfuscated', () => {
