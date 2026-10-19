@@ -101,6 +101,7 @@ async function openPort(): Promise<TransferPort> {
     hostedModel: { forget: () => forgotten.push('hosted-model') },
     instance: { forget: () => forgotten.push('instance') },
     instanceAnalysis: { forget: () => forgotten.push('instance-analysis') },
+    trainerTargets: { forget: () => forgotten.push('trainer-targets') },
     athleteRow: { id: ATHLETE_A, displayName: 'You', createdAt: unixSeconds(1_760_000_000) },
   };
 }
@@ -999,6 +1000,7 @@ describe('TransferView — what it may say about another platform', () => {
       'instance',
       'instance-analysis',
       'theme',
+      'trainer-targets',
     ]);
 
     // Now, and only now, read back through a connection nothing on the page

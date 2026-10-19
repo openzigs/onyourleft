@@ -949,6 +949,9 @@ describe('a raise of more than 50 W to the trainer’s minimum is refused only w
 
   const REFUSED_AT_150 =
     "This trainer's lowest target is 150 W, more than 50 W above what this block asks for, so no target was sent for it.";
+  /** #1305's second pass: a stall relief that lowers nothing, as the rider is told it. */
+  const RELIEF_AT_150 =
+    'The trainer is holding its lowest target, 150 W, so it cannot be eased any further.';
 
   it('is 50 W, one named constant', () => {
     expect(LARGEST_RAISE_WATTS).toBe(50);
@@ -1354,6 +1357,89 @@ describe('a raise of more than 50 W to the trainer’s minimum is refused only w
     expect(trainer.targetPowerOnTheTrainer()).toBe(150);
     expect(session.state().lastFault).toBeUndefined();
     expect(session.state().raisedFrom).toBeUndefined();
+    // #1305's second pass: the rider is told what the trainer holds, not that
+    // it "has been eased".
+    expect(session.state().rescue).toStrictEqual({
+      ...session.state().player.rescue,
+      reason: RELIEF_AT_150,
+    });
+  });
+
+  it('does not say the trainer holds its lowest until the trainer has acknowledged it — #1305', () => {
+    // A refused 75 W block, then a stall: the relief offers 150 W, which this
+    // control never answers. Nothing is known to be held, so the rescue's own
+    // reason stands.
+    const session = sessionOver(EASY(), neverAnswers);
+    session.start(seconds(0));
+    for (let second = 0; second <= 10; second += 1) {
+      session.observeCadence({
+        at: seconds(second),
+        cadence: revolutionsPerMinute(Math.max(20, 80 - second * 8)),
+      });
+      session.tick(seconds(second));
+    }
+
+    expect(session.state().holding).toBeUndefined();
+    expect(session.state().player.rescue?.kind).toBe('relief');
+    expect(session.state().rescue).toStrictEqual(session.state().player.rescue);
+  });
+
+  it('a stall relief on a block already raised to the minimum says the trainer holds its lowest, not that the target was eased — #1305', async () => {
+    // 125 W asked on a 150 W minimum: raised to 150 W. Two thirds of 125 W is
+    // 83 W, raised to the same 150 W: nothing lower can be written.
+    const { trainer, session } = await loop(
+      () => expandWorkout(workout([steady(60, 0.5)])),
+      machine(150),
+    );
+    session.start(seconds(0));
+    await ride(session, 0, 1);
+    expect(targetWrites(trainer)).toStrictEqual([targetWrite(150)]);
+    expect(session.state().rescue).toBeUndefined();
+
+    await ride(session, 2, 10, (second) => ({
+      at: seconds(second),
+      cadence: revolutionsPerMinute(Math.max(20, 80 - second * 8)),
+    }));
+
+    expect(targetWrites(trainer)).toStrictEqual([targetWrite(150)]);
+    expect(trainer.targetPowerOnTheTrainer()).toBe(150);
+    const player = session.state().player.rescue;
+    expect(player?.kind).toBe('relief');
+    expect(player?.reason).toContain('eased');
+    expect(session.state().rescue).toStrictEqual({ ...player, reason: RELIEF_AT_150 });
+
+    // A rider who then stops is told the stall's own sentence: "dropped to
+    // the trainer's lowest" says where it is, so it is left as it is.
+    await ride(session, 11, 13, (second) => ({
+      at: seconds(second),
+      cadence: revolutionsPerMinute(5),
+    }));
+    expect(session.state().player.rescue?.kind).toBe('floor');
+    expect(session.state().rescue).toStrictEqual(session.state().player.rescue);
+  });
+
+  it('a stall relief on a block exactly AT the minimum says the trainer holds its lowest — #1305, #1424 review', async () => {
+    // 150 W asked on a 150 W minimum: written as asked, no raise. Two thirds
+    // of 150 W is 100 W, raised to the same 150 W: the relief lowers nothing,
+    // and the boundary is "at or under", not "under".
+    const { trainer, session } = await loop(
+      () => expandWorkout(workout([steady(60, 0.6)])),
+      machine(150),
+    );
+    session.start(seconds(0));
+    await ride(session, 0, 1);
+    expect(targetWrites(trainer)).toStrictEqual([targetWrite(150)]);
+    expect(session.state().raisedFrom).toBeUndefined();
+
+    await ride(session, 2, 10, (second) => ({
+      at: seconds(second),
+      cadence: revolutionsPerMinute(Math.max(20, 80 - second * 8)),
+    }));
+
+    expect(trainer.targetPowerOnTheTrainer()).toBe(150);
+    const player = session.state().player.rescue;
+    expect(player?.kind).toBe('relief');
+    expect(session.state().rescue).toStrictEqual({ ...player, reason: RELIEF_AT_150 });
   });
 
   it('still raises the stall relief to the minimum, however far under it the relief falls', async () => {
@@ -1376,6 +1462,10 @@ describe('a raise of more than 50 W to the trainer’s minimum is refused only w
     expect(trainer.targetPowerOnTheTrainer()).toBe(300);
     expect(session.state().lastFault).toBeUndefined();
     expect(session.state().raisedFrom).toBeUndefined();
+    // #1305's second pass: this relief DID lower the target (350 W to 300 W),
+    // so the rescue's own "it has been eased" stands.
+    expect(session.state().rescue?.kind).toBe('relief');
+    expect(session.state().rescue).toStrictEqual(session.state().player.rescue);
   });
 });
 

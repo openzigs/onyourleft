@@ -138,6 +138,7 @@ import {
 import type { RiderPresence, RiderPresencePort } from './presence-port';
 import type { RideKeepAlivePort } from './keep-alive-port';
 import type { RideNotificationPermissionPort } from './notification-permission-port';
+import type { TrainerTargetMemory } from './trainer-target-memory';
 import { NO_TRAINER_CONTROL, type OpenTrainer, type TrainerConnection } from './trainer';
 import { createWorkoutSession, RELEASE_INCOMPLETE, type WorkoutSession } from '../workout/session';
 import { TargetHeldBack } from './held-back';
@@ -343,7 +344,9 @@ export interface RideWorkoutSnapshot {
   /**
    * The stall rescue holding the workout's target down, with its reason — or
    * `undefined` while the workout's own target stands (#585). The player's
-   * `PlayerState.rescue`, unchanged; `workout/rescue-text.ts` is the sentence.
+   * `PlayerState.rescue`, except that a relief that lowers nothing carries
+   * `reliefAtFloorReason` in place of its own (#1305, `WorkoutSessionState.rescue`);
+   * `workout/rescue-text.ts` is the sentence.
    */
   readonly rescue: WorkoutRescue | undefined;
   /**
@@ -967,6 +970,16 @@ export interface RideControllerOptions {
    * `shell-ride-controller.ts` for the same reason.
    */
   readonly notificationPermission?: RideNotificationPermissionPort | undefined;
+  /**
+   * The last ERG target each trainer acknowledged, kept on the device with
+   * its time so a page reload does not forget it — #1305. @see
+   * trainer-target-memory.ts and §`workoutsViewOfTheTarget`.
+   *
+   * ⚠️ An optional option, as {@link presence} is: dropping it from
+   * `main.tsx` is green in `check:wiring`. Absent, the controller remembers
+   * only while the page lives, which is what it did before.
+   */
+  readonly trainerTargets?: TrainerTargetMemory | undefined;
 }
 
 export interface RideController {
@@ -1620,6 +1633,7 @@ export function createRideController(options: RideControllerOptions): RideContro
               ?.device.identity.id;
             if (id !== undefined) {
               lastAcknowledgedTarget.set(id, acknowledged);
+              options.trainerTargets?.remember(id, acknowledged, options.now());
             }
             return acknowledged;
           }),
@@ -1646,7 +1660,9 @@ export function createRideController(options: RideControllerOptions): RideContro
    * machine's minimum, which is what `main` wrote before #1305, so a stale
    * entry cannot raise a target above that. A different trainer has a
    * different id and starts with nothing. A page reload starts with nothing
-   * too: what the machine kept across it is not something this app can know.
+   * too, here; since #1305's second pass the device's own copy
+   * ({@link RideControllerOptions.trainerTargets}) answers for a trainer this
+   * map has not heard from, while that copy is young enough to trust.
    *
    * ⚠️ **"The same trainer has the same id" is true of the simulator and
    * not measured on a browser.** A dropped link keeps the grant, so the id
@@ -1665,12 +1681,17 @@ export function createRideController(options: RideControllerOptions): RideContro
    * target acknowledged by that trainer: then `unknown`, which is what it is.
    * The machine may hold it still, or may not.
    *
+   * Failing this page's own memory, the device's (#1305's second pass): a
+   * target that trainer acknowledged before a page reload, if it was at most
+   * `REMEMBERED_TARGET_MAX_AGE_SECONDS` ago (`trainer-target-memory.ts`).
+   *
    * ⚠️ The workout's view only. The ride screen reads the client's answer
    * unchanged, so it goes on saying no target is set after a `0xFF`.
    */
   const workoutsViewOfTheTarget = (client: TrainerControl, id: DeviceId): TargetPower => {
     const target = client.targetPower();
-    const last = lastAcknowledgedTarget.get(id);
+    const last =
+      lastAcknowledgedTarget.get(id) ?? options.trainerTargets?.recall(id, options.now());
     return target.kind === 'none' && last !== undefined
       ? { kind: 'unknown', attempted: last }
       : target;
@@ -2885,7 +2906,9 @@ export function createRideController(options: RideControllerOptions): RideContro
           ? undefined
           : blockText(shown.workout.blocks[segment.block] ?? EMPTY_BLOCK),
       fault: state.lastFault,
-      rescue: state.player.rescue,
+      // #1305's second pass: the session's, which words a relief that lowers
+      // nothing as such.
+      rescue: state.rescue,
       hold: holdOf(workout, segment),
       thresholdWatts: workout.thresholdWatts,
       trace: workout.trace,

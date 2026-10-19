@@ -85,10 +85,12 @@ import {
   type Seconds,
   type Watts,
   type WorkoutPlayer,
+  type WorkoutRescue,
   type WorkoutTimeline,
 } from '@onyourleft/domain';
 import { createErgWriter, type ErgWriter, type TrainerControl } from '@onyourleft/sensors/protocol';
 import { TargetHeldBack } from '../ride/held-back';
+import { reliefAtFloorReason } from './rescue-text';
 
 /** How long a cadence history is kept for the ERG rule. */
 export const CADENCE_HISTORY_SECONDS = 30;
@@ -198,6 +200,16 @@ export interface WorkoutSessionState {
    * (#1307's graph: no target the trainer was not sent is drawn as confirmed).
    */
   readonly raiseRefused: boolean;
+  /**
+   * The stall rescue in force, as the rider is told it — #585, and #1305's
+   * second pass. The player's own (`player.rescue`), except for a relief that
+   * cannot lower anything: the block was itself at or under the trainer's
+   * minimum, the relief asks for less, and the trainer has acknowledged the
+   * minimum. Then the rescue's "it has been eased" would be untrue (the
+   * trainer holds the same number it held before), and the reason is
+   * {@link reliefAtFloorReason} instead. Screens read this, not the player's.
+   */
+  readonly rescue: WorkoutRescue | undefined;
   /**
    * How many cadence readings are being kept for the ERG rule.
    *
@@ -313,9 +325,25 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
   let raiseRefused = false;
   /** @see WorkoutSessionState.raisedFrom */
   let raisedFrom: Watts | undefined;
+  /**
+   * Whether the block's own target, before any stall relief, is at or under
+   * the floor (#1305's second pass). A relief asks for less than the block,
+   * so on such a block it is raised to the same floor and lowers nothing.
+   * Decided on every write the player asks for, and read only while a relief
+   * is in force, which always begins with such a write.
+   * @see WorkoutSessionState.rescue
+   */
+  let blockAtFloor = false;
+
+  /** @see WorkoutSessionState.rescue */
+  const rescueAsTold = (rescue: WorkoutRescue | undefined): WorkoutRescue | undefined =>
+    rescue?.kind === 'relief' && blockAtFloor && writer.lastWritten() === powerFloor
+      ? { ...rescue, reason: reliefAtFloorReason(powerFloor) }
+      : rescue;
 
   const snapshot = (): WorkoutSessionState => ({
     player: player.state(),
+    rescue: rescueAsTold(player.state().rescue),
     holding: writer.lastWritten(),
     writing: writer.busy(),
     // #1305's review: only once the raise is what the trainer acknowledged.
@@ -597,6 +625,9 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
           }
           raiseRefused = false;
           raisedFrom = raised && !state.intent.eased ? asked : undefined;
+          // #1305's second pass. `share` is the block's own ask, before
+          // any relief (`player.ts` §`write-target`).
+          blockAtFloor = Math.round(thresholdPower * state.intent.share) <= powerFloor;
           offer(raised ? powerFloor : asked);
           break;
         }
@@ -690,11 +721,12 @@ export const RELEASE_INCOMPLETE =
  * ⚠️ Says nothing about what the trainer holds. On the ride screen it is
  * shown only when neither the control client nor the ride controller knows
  * of a target this app had acknowledged by this trainer since the page
- * loaded: any such target is at or above the floor (the client sends nothing
- * under the machine's minimum), and then the floor is written, not refused.
- * ⚠️ That is not "the trainer holds nothing". A target from before a page
- * reload, from another app or from the machine's own buttons is not known
- * here, and the trainer keeps it.
+ * loaded, or in the last 30 minutes across a reload (#1305's second pass,
+ * `ride/trainer-target-memory.ts`): any such target is at or above the floor
+ * (the client sends nothing under the machine's minimum), and then the floor
+ * is written, not refused. ⚠️ That is not "the trainer holds nothing". An
+ * older target, one from another app or from the machine's own buttons is
+ * not known here, and the trainer keeps it.
  */
 export function raiseRefusedText(minimum: Watts): string {
   return `This trainer's lowest target is ${String(minimum)} W, more than ${String(LARGEST_RAISE_WATTS)} W above what this block asks for, so no target was sent for it.`;

@@ -301,6 +301,13 @@ export interface TransferPort {
    */
   readonly instanceAnalysis: DraftStore;
   /**
+   * The last target each trainer acknowledged (#1305), keyed by the trainer's
+   * device id, which on Android is its Bluetooth address —
+   * `ride/trainer-target-memory.ts`. Required for `theme`'s reason. The same
+   * memory the ride controller writes, so an erase clears the page's copy too.
+   */
+  readonly trainerTargets: DraftStore;
+  /**
    * The row to recreate after an erase.
    *
    * Erasing removes the athlete row every write path checks, and

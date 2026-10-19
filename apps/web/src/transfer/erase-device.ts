@@ -348,6 +348,8 @@ export async function eraseDevice(
     readonly instance?: EraseSideStores | undefined;
     /** The note of jobs asked of the instance and not yet seen to end (#1102) — `ride-analysis/instance-analysis.ts` §`instanceAnalysisEraser`. */
     readonly instanceAnalysis?: EraseSideStores | undefined;
+    /** The last target each trainer acknowledged, keyed by its device id (#1305) — `ride/trainer-target-memory.ts`. */
+    readonly trainerTargets?: EraseSideStores | undefined;
     readonly athlete?: AthleteRecord | undefined;
   } = {},
 ): Promise<EraseOutcome> {
@@ -357,6 +359,7 @@ export async function eraseDevice(
   options.hostedModel?.forget();
   options.instance?.forget();
   options.instanceAnalysis?.forget();
+  options.trainerTargets?.forget();
   if (options.athlete !== undefined) {
     await store.ensureAthlete(options.athlete);
   }
