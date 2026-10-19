@@ -27,9 +27,9 @@ import {
   decodeFitActivity,
   decodeGpx,
   decodeTcx,
-  INTENSITY_ACTIVE,
-  INTENSITY_REST,
-  LAP_TRIGGER_SESSION_END,
+  FIELD,
+  GLOBAL_MESSAGE,
+  readFitContainer,
   trackPointsOf,
   type FitDateTime,
 } from '@onyourleft/fit';
@@ -347,8 +347,8 @@ describe('exportActivity — the ride’s first and last slots, where no reading
 });
 
 describe('LOSSY_CHANNELS — the moving time (#1323)', () => {
-  it('tells the rider GPX and TCX do not carry a moving time, and FIT loses nothing', () => {
-    expect(LOSSY_CHANNELS.fit).toEqual([]);
+  it('tells the rider GPX and TCX do not carry a moving time, and FIT does', () => {
+    expect(LOSSY_CHANNELS.fit).not.toContain('activity.movingTime');
     expect(LOSSY_CHANNELS.tcx).toContain('activity.movingTime');
     expect(LOSSY_CHANNELS.gpx).toContain('activity.movingTime');
   });
@@ -760,11 +760,15 @@ describe('exportActivity — the ride’s own splits (#221)', () => {
  *
  * | figure | FIT | TCX | GPX |
  * |---|---|---|---|
- * | average and highest power and heart rate, average cadence | yes | yes | no |
- * | climb | yes | **no**: no element | no |
- * | the part-lap mark | yes, by what ended the lap | yes, by `Manual` against `Location`, in this client's own file | no |
- * | which splits are laps | yes, by intensity | yes, by intensity | no |
+ * | average and highest power and heart rate, average cadence | **no**: #1471 | yes | no |
+ * | climb | **no**: #1471 | **no**: no element | no |
+ * | the part-lap mark | **no**: #1471 | yes, by `Manual` against `Location`, in this client's own file | no |
+ * | which splits are laps | **no**: #1471 | yes, by intensity | no |
  * | the lap's own distance | yes | **no**: a lap states its share of the ride's | no |
+ *
+ * FIT's lap is as it was before #1321: the owner ruled on 2026-10-19 (#1458)
+ * that the TCX half ships now and the FIT half waits on #1471, which has to
+ * find lap field numbers ADR 0006 R2 admits.
  */
 describe('exportActivity — a lap’s figures and its kind (#1321)', () => {
   /**
@@ -811,38 +815,33 @@ describe('exportActivity — a lap’s figures and its kind (#1321)', () => {
     return { open, ride };
   }
 
-  it('carries every figure, the climb and the part-lap mark in FIT, and tells the laps from the time either side', async () => {
+  it('writes FIT laps as before #1321: the lap’s own distance, and none of its figures or its kind', async () => {
     const { open, ride } = await seedLappedRide();
 
-    const { activity, faults } = decodeFitActivity((await exportFrom(open, ride.id, 'fit')).bytes);
+    const bytes = (await exportFrom(open, ride.id, 'fit')).bytes;
+    const { activity, faults } = decodeFitActivity(bytes);
 
     expect(faults).toEqual([]);
-    expect(activity.laps.map((lap) => [lap.intensity, lap.lapTrigger])).toEqual([
-      [INTENSITY_REST, undefined],
-      [INTENSITY_ACTIVE, undefined],
-      [INTENSITY_ACTIVE, undefined],
-      [INTENSITY_ACTIVE, LAP_TRIGGER_SESSION_END],
-      [INTENSITY_REST, undefined],
-    ]);
-    // Each to the whole unit the field holds.
-    [0, 1, 2].forEach((base) => {
-      expect(activity.laps[base + 1]).toMatchObject({
-        averagePower: 200 + base,
-        maxPower: 400 + base,
-        averageHeartRate: 141 + base,
-        maxHeartRate: 170 + base,
-        averageCadence: 88 + base,
-        totalAscent: 12 + base,
-        totalDistance: 2_000,
-      });
+    expect(activity.laps).toHaveLength(5);
+    // The lap's own road, which TCX cannot state, still goes into FIT.
+    [1, 2, 3].forEach((index) => {
+      expect(activity.laps[index]?.totalDistance).toBe(2_000);
     });
-    // A stretch no lap covers has none of a lap's figures on record.
-    for (const outside of [activity.laps[0], activity.laps[4]]) {
-      expect(outside).toMatchObject({
-        averagePower: undefined,
-        averageHeartRate: undefined,
-        totalAscent: undefined,
-      });
+    // Every lap message declares the six fields it always has, and nothing
+    // else: no figure, no climb and no mark until #1471 sources their numbers.
+    const lapFields = readFitContainer(bytes)
+      .messages.filter((message) => message.globalMessageNumber === GLOBAL_MESSAGE.lap)
+      .map((message) => message.fields.map((field) => field.number));
+    expect(lapFields).toHaveLength(5);
+    for (const fields of lapFields) {
+      expect(fields).toEqual([
+        FIELD.timestamp,
+        FIELD.messageIndex,
+        FIELD.lap.startTime,
+        FIELD.lap.totalElapsedTime,
+        FIELD.lap.totalTimerTime,
+        FIELD.lap.totalDistance,
+      ]);
     }
   });
 
@@ -875,7 +874,20 @@ describe('exportActivity — a lap’s figures and its kind (#1321)', () => {
   });
 
   it('tells the rider, before they choose, which of a lap’s figures each format drops', () => {
-    expect(LOSSY_CHANNELS.fit).toEqual([]);
+    expect(LOSSY_CHANNELS.fit).toEqual(
+      expect.arrayContaining([
+        'lap.averageHeartRate',
+        'lap.maxHeartRate',
+        'lap.averageCadence',
+        'lap.averagePower',
+        'lap.maxPower',
+        'lap.ascent',
+        'lap.intensity',
+        'lap.triggerMethod',
+      ]),
+    );
+    expect(LOSSY_CHANNELS.fit).not.toContain('lap.distance');
+    expect(LOSSY_CHANNELS.fit).not.toContain('activity.movingTime');
     expect(LOSSY_CHANNELS.tcx).toEqual(expect.arrayContaining(['lap.ascent', 'lap.distance']));
     expect(LOSSY_CHANNELS.tcx).not.toContain('lap.averagePower');
     expect(LOSSY_CHANNELS.gpx).toEqual(

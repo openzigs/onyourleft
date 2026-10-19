@@ -17,31 +17,20 @@
 import type { AltitudeMetres, GeographicPosition, UnixSeconds } from '@onyourleft/domain';
 import {
   altitudeMetres,
-  beatsPerMinute,
   DEGREES_PER_SEMICIRCLE,
   degreesLatitude,
   degreesLongitude,
   geographicPosition,
-  metres,
-  revolutionsPerMinute,
-  seconds,
   SEMICIRCLES_MAX,
   unixSeconds,
   watts,
 } from '@onyourleft/domain';
 import { describe, expect, it } from 'vitest';
 
-import type { FitFileId, FitLap, FitRecord } from '../decode/activity';
+import type { FitFileId, FitRecord } from '../decode/activity';
 import { decodeActivity } from '../decode/activity';
 import { readFitContainer } from '../decode/container';
-import {
-  FIELD,
-  FILE_TYPE_ACTIVITY,
-  GLOBAL_MESSAGE,
-  INTENSITY_ACTIVE,
-  INTENSITY_REST,
-  LAP_TRIGGER_SESSION_END,
-} from '../decode/profile';
+import { FIELD, FILE_TYPE_ACTIVITY, GLOBAL_MESSAGE } from '../decode/profile';
 import type { FitEncodeInput } from './activity';
 import { encodeActivity } from './activity';
 
@@ -342,90 +331,6 @@ describe('a message that omits a field wider than one element', () => {
       );
     },
   );
-});
-
-/**
- * #1321: a lap's figures and its kind. The corpus has `lap-figures.fit` for
- * whole numbers a head unit wrote; these are the cases it cannot hold — a
- * figure this project stores as a fraction, and a lap that states none of it.
- */
-describe('a lap’s figures and its kind', () => {
-  const LAP: FitLap = {
-    timestamp: instant(60),
-    messageIndex: 0,
-    startTime: instant(0),
-    totalElapsedTime: seconds(60),
-    totalTimerTime: seconds(60),
-    totalDistance: metres(500),
-  };
-
-  /** The field numbers the lap definition declared. */
-  function lapFieldsOf(bytes: Uint8Array): readonly number[] {
-    const lap = readFitContainer(bytes).messages.find(
-      (message) => message.globalMessageNumber === GLOBAL_MESSAGE.lap,
-    );
-    return lap?.fields.map((field) => field.number) ?? [];
-  }
-
-  it('reads back, each rounded to the whole unit its field holds', () => {
-    const { faults, decoded } = roundTrip({
-      fileId: FILE_ID,
-      laps: [
-        {
-          ...LAP,
-          averagePower: watts(187.4),
-          maxPower: watts(402),
-          averageHeartRate: beatsPerMinute(141.6),
-          maxHeartRate: beatsPerMinute(163),
-          averageCadence: revolutionsPerMinute(88.5),
-          totalAscent: metres(12.4),
-          intensity: INTENSITY_ACTIVE,
-          lapTrigger: LAP_TRIGGER_SESSION_END,
-        },
-      ],
-    });
-
-    expect(faults).toEqual([]);
-    expect(decoded.faults).toEqual([]);
-    expect(decoded.activity.laps[0]).toMatchObject({
-      averagePower: 187,
-      maxPower: 402,
-      averageHeartRate: 142,
-      maxHeartRate: 163,
-      averageCadence: 89,
-      totalAscent: 12,
-      intensity: INTENSITY_ACTIVE,
-      lapTrigger: LAP_TRIGGER_SESSION_END,
-    });
-  });
-
-  it('declares none of it for laps that state none of it', () => {
-    const { bytes } = encodeActivity({ fileId: FILE_ID, laps: [LAP] });
-    expect(lapFieldsOf(bytes)).toEqual([
-      FIELD.timestamp,
-      FIELD.messageIndex,
-      FIELD.lap.startTime,
-      FIELD.lap.totalElapsedTime,
-      FIELD.lap.totalTimerTime,
-      FIELD.lap.totalDistance,
-    ]);
-  });
-
-  it('writes a gap, not a nought, on the lap without a figure its neighbour has', () => {
-    const { faults, decoded } = roundTrip({
-      fileId: FILE_ID,
-      laps: [
-        { ...LAP, intensity: INTENSITY_REST },
-        { ...LAP, messageIndex: 1, averagePower: watts(210), intensity: INTENSITY_ACTIVE },
-      ],
-    });
-
-    expect(faults).toEqual([]);
-    expect(decoded.activity.laps.map((lap) => [lap.averagePower, lap.intensity])).toEqual([
-      [undefined, INTENSITY_REST],
-      [210, INTENSITY_ACTIVE],
-    ]);
-  });
 });
 
 function instant(offsetSeconds: number): { kind: 'instant'; instant: UnixSeconds } {

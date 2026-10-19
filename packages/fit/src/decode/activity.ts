@@ -185,31 +185,6 @@ export interface FitLap {
   /** Duration excluding pauses. Different from `totalElapsedTime`, and both are read. */
   readonly totalTimerTime: Seconds | undefined;
   readonly totalDistance: Metres | undefined;
-  /**
-   * #1321: what else a lap states, each absent where the file does not say it.
-   * Optional, so a lap built before #1321 is still one; the decoder always
-   * fills them in, as `undefined` for a field the file does not carry.
-   */
-  readonly averagePower?: Watts | undefined;
-  /** The highest power reading of the lap. */
-  readonly maxPower?: Watts | undefined;
-  readonly averageHeartRate?: BeatsPerMinute | undefined;
-  /** The highest heart-rate reading of the lap. */
-  readonly maxHeartRate?: BeatsPerMinute | undefined;
-  readonly averageCadence?: RevolutionsPerMinute | undefined;
-  /** Metres climbed in the lap. */
-  readonly totalAscent?: Metres | undefined;
-  /**
-   * `lap.intensity`, raw: `INTENSITY_ACTIVE` or `INTENSITY_REST` (`profile.ts`),
-   * or a value this profile does not name, which is kept rather than dropped.
-   */
-  readonly intensity?: number | undefined;
-  /**
-   * `lap.lap_trigger`, raw: what ended the lap — `LAP_TRIGGER_MANUAL` or
-   * `LAP_TRIGGER_SESSION_END` (`profile.ts`), or a value this profile does not
-   * name.
-   */
-  readonly lapTrigger?: number | undefined;
 }
 
 /** A `session` message. */
@@ -676,32 +651,6 @@ function createActivityAssembler(
             (raw) => metres(raw / SCALE.distance),
             faults,
           ),
-          averagePower: quantity(message, FIELD.lap.averagePower, 'lap.avg_power', watts, faults),
-          maxPower: quantity(message, FIELD.lap.maxPower, 'lap.max_power', watts, faults),
-          averageHeartRate: quantity(
-            message,
-            FIELD.lap.averageHeartRate,
-            'lap.avg_heart_rate',
-            beatsPerMinute,
-            faults,
-          ),
-          maxHeartRate: quantity(
-            message,
-            FIELD.lap.maxHeartRate,
-            'lap.max_heart_rate',
-            beatsPerMinute,
-            faults,
-          ),
-          averageCadence: quantity(
-            message,
-            FIELD.lap.averageCadence,
-            'lap.avg_cadence',
-            revolutionsPerMinute,
-            faults,
-          ),
-          totalAscent: quantity(message, FIELD.lap.totalAscent, 'lap.total_ascent', metres, faults),
-          intensity: numeric(message, FIELD.lap.intensity),
-          lapTrigger: numeric(message, FIELD.lap.lapTrigger),
         });
         break;
 

@@ -389,28 +389,6 @@ const LAP_SPECS: readonly FieldSpec<FitLap>[] = [
   numeric(FIELD.lap.totalDistance, 'lap.total_distance', UINT32_CANDIDATES, (item) =>
     scaled(item.totalDistance, SCALE.distance),
   ),
-  // #1321. Whole units, as a head unit writes them: an average of 187.4 W is
-  // written 187, which is the field's own resolution.
-  numeric(FIELD.lap.averageHeartRate, 'lap.avg_heart_rate', UINT8_CANDIDATES, (item) =>
-    scaled(item.averageHeartRate, 1),
-  ),
-  numeric(FIELD.lap.maxHeartRate, 'lap.max_heart_rate', UINT8_CANDIDATES, (item) =>
-    scaled(item.maxHeartRate, 1),
-  ),
-  numeric(FIELD.lap.averageCadence, 'lap.avg_cadence', UINT8_CANDIDATES, (item) =>
-    scaled(item.averageCadence, 1),
-  ),
-  numeric(FIELD.lap.averagePower, 'lap.avg_power', UINT16_CANDIDATES, (item) =>
-    scaled(item.averagePower, 1),
-  ),
-  numeric(FIELD.lap.maxPower, 'lap.max_power', UINT16_CANDIDATES, (item) =>
-    scaled(item.maxPower, 1),
-  ),
-  numeric(FIELD.lap.totalAscent, 'lap.total_ascent', UINT16_CANDIDATES, (item) =>
-    scaled(item.totalAscent, 1),
-  ),
-  numeric(FIELD.lap.intensity, 'lap.intensity', ENUM_CANDIDATES, (item) => item.intensity),
-  numeric(FIELD.lap.lapTrigger, 'lap.lap_trigger', ENUM_CANDIDATES, (item) => item.lapTrigger),
 ];
 
 const SESSION_SPECS: readonly FieldSpec<FitSession>[] = [

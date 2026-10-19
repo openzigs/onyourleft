@@ -648,7 +648,10 @@ describe('TransferView — exporting', () => {
     if (select === null) {
       throw new Error('the format chooser is not on the page');
     }
-    expect(document.body.textContent).toContain('FIT carries every channel');
+    // FIT carries no lap row's figures or kind until #1471, so the screen says
+    // so rather than that FIT carries everything.
+    expect(document.body.textContent).toContain('This format cannot carry: lap.averageHeartRate');
+    expect(document.body.textContent).not.toContain('FIT carries every channel');
 
     select.value = 'tcx';
     select.dispatchEvent(new Event('change', { bubbles: true }));
