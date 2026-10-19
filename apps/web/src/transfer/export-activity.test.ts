@@ -54,7 +54,14 @@ import FitParser from 'fit-file-parser';
 
 import { lapSlots } from '../recording/laps';
 
-import { ActivityExportError, exportActivity, fileStemOf, LOSSY_CHANNELS } from './export-activity';
+import {
+  ActivityExportError,
+  exportActivity,
+  fileStemOf,
+  LOSSY_CHANNELS,
+  lossyChannelName,
+  lossyChannelNames,
+} from './export-activity';
 import type { ActivityFileFormat } from './file-format';
 import { readActivityFile } from './read-activity-file';
 
@@ -343,6 +350,35 @@ describe('exportActivity — the ride’s first and last slots, where no reading
       [0, 0],
       [29, 29],
     ]);
+  });
+});
+
+describe('LOSSY_CHANNELS in plain words — #1452', () => {
+  it('has a plain name for every entry of every format', () => {
+    for (const format of ['fit', 'gpx', 'tcx'] as const) {
+      for (const channel of LOSSY_CHANNELS[format]) {
+        const name = lossyChannelName(channel);
+        expect(name, `${format}: ${channel} has no plain name`).toBeDefined();
+        // Not a code path in disguise: no dot, no camel case.
+        expect(name).not.toMatch(/\.|[a-z][A-Z]/);
+      }
+    }
+  });
+
+  it('says each entry in the words the rider reads', () => {
+    expect(lossyChannelNames('fit')).toEqual([]);
+    expect(lossyChannelNames('tcx')).toEqual(['temperature', 'the ride’s name', 'moving time']);
+    expect(lossyChannelNames('gpx')).toEqual([
+      'the distance at each point',
+      'each lap’s elapsed time',
+      'each lap’s distance',
+      'moving time',
+    ]);
+  });
+
+  it('knows no name for a channel the table lacks, and reads no inherited key', () => {
+    expect(lossyChannelName('point.altitude')).toBeUndefined();
+    expect(lossyChannelName('toString')).toBeUndefined();
   });
 });
 
