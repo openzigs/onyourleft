@@ -897,3 +897,76 @@ test.describe('#1011 — route tiles, one full-width Ride, the realistic world i
     });
   }
 });
+
+/*
+ * #1221 — the line under *Ride* saying the ride will not be saved, and *Record
+ * this ride*. `?notices=all` has nothing recording under it
+ * (`ride-harness.tsx` §`rideMovingSeconds`), so the line stands with the
+ * tallest stack of notices. Held: it is BELOW *Ride* — so nothing #940
+ * measures above it moved — within the screen's width, its words not covered
+ * once scrolled to, and *Record this ride* an ordinary 44 px target (it is not
+ * pressed during a ride, so it is not on `design/ride-time-controls.ts`' list).
+ */
+/** `.oyl-button`'s 44 px (#316, WCAG 2.2 SC 2.5.5). */
+const RECORD_TARGET_PIXELS = 44;
+
+test.describe('#1221 — the chooser says, under Ride, that nothing is recording', () => {
+  for (const viewport of CHOOSER_VIEWPORTS) {
+    test(`the line is under Ride, within the screen, and its control a 44 px target — ${viewport.name}`, async ({
+      page,
+    }) => {
+      await openChooser(page, viewport, 'chooser', 'all');
+      const read = await page.evaluate(() => {
+        const box = (element: Element | null | undefined) => {
+          if (element === null || element === undefined) return undefined;
+          const rect = element.getBoundingClientRect();
+          return {
+            top: rect.top,
+            bottom: rect.bottom,
+            left: rect.left,
+            right: rect.right,
+            width: rect.width,
+            height: rect.height,
+          };
+        };
+        const line = document.querySelector('.oyl-chooser__recording');
+        line?.scrollIntoView({ block: 'center' });
+        const ride = [
+          ...document.querySelectorAll<HTMLButtonElement>('.oyl-chooser__go button'),
+        ].find((each) => (each.textContent ?? '').startsWith('Ride '));
+        const words = line?.querySelector('p') ?? undefined;
+        const record = [...(line?.querySelectorAll('button') ?? [])].find(
+          (each) => (each.textContent ?? '').trim() === 'Record this ride',
+        );
+        const wordsBox = box(words);
+        const hit =
+          wordsBox === undefined
+            ? null
+            : document.elementFromPoint(
+                wordsBox.left + Math.min(8, wordsBox.width / 2),
+                wordsBox.top + wordsBox.height / 2,
+              );
+        return {
+          ride: box(ride),
+          line: box(line),
+          record: box(record),
+          text: words?.textContent ?? '',
+          onTop: hit !== null && words !== undefined && words.contains(hit),
+        };
+      });
+      console.log(
+        `#1221 — ${viewport.name}: Ride ends at ${String(read.ride?.bottom.toFixed(1))} px, the line at ${String(read.line?.top.toFixed(1))}–${String(read.line?.bottom.toFixed(1))} px, Record this ride ${String(read.record?.width.toFixed(0))}×${String(read.record?.height.toFixed(0))}`,
+      );
+      expect(read.text).toContain('This ride will not be saved as an activity');
+      if (read.ride === undefined || read.line === undefined || read.record === undefined) {
+        throw new Error('the chooser has no Ride, no line under it, or no Record this ride');
+      }
+      expect(read.line.top).toBeGreaterThanOrEqual(read.ride.bottom - SUBPIXEL_TOLERANCE);
+      expect(read.line.left).toBeGreaterThanOrEqual(-SUBPIXEL_TOLERANCE);
+      expect(read.line.right).toBeLessThanOrEqual(viewport.width + SUBPIXEL_TOLERANCE);
+      expect(read.record.height).toBeGreaterThanOrEqual(RECORD_TARGET_PIXELS - SUBPIXEL_TOLERANCE);
+      expect(read.record.width).toBeGreaterThanOrEqual(RECORD_TARGET_PIXELS - SUBPIXEL_TOLERANCE);
+      expect(read.onTop, 'something covers the line’s words').toBe(true);
+    });
+  }
+});

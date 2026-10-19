@@ -4785,6 +4785,29 @@ select.oyl-input {
   white-space: nowrap;
 }
 
+/*
+ * #1221: the line under *Ride* saying the ride will not be saved, and the
+ * control that records it. Words in `ink` on `canvas` and an ordinary
+ * secondary button, so nothing here is a new colour pair. Under *Ride*, so it
+ * moves nothing #940 measures above it.
+ */
+.oyl-chooser__recording {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oyl-space-xs) var(--oyl-space-md);
+  margin-top: var(--oyl-space-sm);
+}
+
+.oyl-chooser__recording > p {
+  flex: 1 1 16rem;
+  font-size: var(--oyl-font-size-sm);
+}
+
+.oyl-chooser__recording-label {
+  font-weight: 700;
+}
+
 /* Two notices to a row where there is the width, so *Ride* stays near the top. */
 .oyl-chooser__notices {
   display: grid;
