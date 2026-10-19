@@ -85,10 +85,12 @@ import {
   type Seconds,
   type Watts,
   type WorkoutPlayer,
+  type WorkoutRescue,
   type WorkoutTimeline,
 } from '@onyourleft/domain';
 import { createErgWriter, type ErgWriter, type TrainerControl } from '@onyourleft/sensors/protocol';
 import { TargetHeldBack } from '../ride/held-back';
+import { reliefAtFloorReason } from './rescue-text';
 
 /** How long a cadence history is kept for the ERG rule. */
 export const CADENCE_HISTORY_SECONDS = 30;
@@ -198,6 +200,16 @@ export interface WorkoutSessionState {
    * (#1307's graph: no target the trainer was not sent is drawn as confirmed).
    */
   readonly raiseRefused: boolean;
+  /**
+   * The stall rescue in force, as the rider is told it — #585, and #1305's
+   * second pass. The player's own (`player.rescue`), except for a relief that
+   * cannot lower anything: the block was itself at or under the trainer's
+   * minimum, the relief asks for less, and the trainer has acknowledged the
+   * minimum. Then the rescue's "it has been eased" would be untrue (the
+   * trainer holds the same number it held before), and the reason is
+   * {@link reliefAtFloorReason} instead. Screens read this, not the player's.
+   */
+  readonly rescue: WorkoutRescue | undefined;
   /**
    * How many cadence readings are being kept for the ERG rule.
    *
@@ -313,9 +325,22 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
   let raiseRefused = false;
   /** @see WorkoutSessionState.raisedFrom */
   let raisedFrom: Watts | undefined;
+  /**
+   * Whether the stall relief last written asked for less than the floor on a
+   * block that was itself at or under it, so it wrote the floor the block had
+   * already (#1305's second pass). @see WorkoutSessionState.rescue
+   */
+  let reliefAtFloor = false;
+
+  /** @see WorkoutSessionState.rescue */
+  const rescueAsTold = (rescue: WorkoutRescue | undefined): WorkoutRescue | undefined =>
+    rescue?.kind === 'relief' && reliefAtFloor && writer.lastWritten() === powerFloor
+      ? { ...rescue, reason: reliefAtFloorReason(powerFloor) }
+      : rescue;
 
   const snapshot = (): WorkoutSessionState => ({
     player: player.state(),
+    rescue: rescueAsTold(player.state().rescue),
     holding: writer.lastWritten(),
     writing: writer.busy(),
     // #1305's review: only once the raise is what the trainer acknowledged.
@@ -386,6 +411,7 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
     // sentence (and "raised from") must not outlive it (#1305).
     raiseRefused = false;
     raisedFrom = undefined;
+    reliefAtFloor = false;
     if (released) {
       return;
     }
@@ -421,6 +447,7 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
     raiseRefused = false;
     // The workout is over: no block is asking for anything (#1305's review).
     raisedFrom = undefined;
+    reliefAtFloor = false;
     void control.letGo().then(
       (outcome) => {
         if (outcome.kind === 'incomplete') {
@@ -597,6 +624,13 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
           }
           raiseRefused = false;
           raisedFrom = raised && !state.intent.eased ? asked : undefined;
+          // #1305's second pass: a relief under the floor on a block that
+          // was at or under it too lowers nothing. `share` is the block's own
+          // ask, before the relief (`player.ts` §`write-target`).
+          reliefAtFloor =
+            state.intent.eased &&
+            raised &&
+            Math.round(thresholdPower * state.intent.share) <= powerFloor;
           offer(raised ? powerFloor : asked);
           break;
         }
@@ -637,6 +671,7 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
       raiseRefused = false;
       // What the machine holds is no longer known to be this block's raise.
       raisedFrom = undefined;
+      reliefAtFloor = false;
       // ⚠️ No `stop()`, no release, and — the one that was wrong first — **no
       // `writer.close()`**. The link is down, so a write would only queue
       // against a machine that is not there; but closing the writer is

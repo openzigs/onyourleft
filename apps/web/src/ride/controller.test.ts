@@ -148,6 +148,11 @@ import type { ReplanPort } from '../workout/replan-port';
 import { scriptedReplanPort, scriptedReplans } from '../workout/replan-testing';
 import { REPLAN_UNAVAILABLE } from '../workout/replan-text';
 import type { RideKeepAlivePort } from './keep-alive-port';
+import {
+  createTrainerTargetMemory,
+  REMEMBERED_TARGET_MAX_AGE_SECONDS,
+  type TrainerTargetMemory,
+} from './trainer-target-memory';
 import { roomPortOver } from '../net/room-port';
 import { flush, ManualClock, ScriptedRoom } from '../net/testing';
 import type {
@@ -232,7 +237,9 @@ interface BenchOptions {
   /** `two-trainers` adds a second FTMS machine, `NEO 2T`, after the KICKR (#718). */
   readonly devices?: 'trainer' | 'trainer+strap' | 'strap' | 'two-trainers';
   /** #1240: the simulated rider, and a heart rate that answers to load. */
-  readonly simulator?: Pick<SimulatorOptions, 'rider' | 'heartRate'>;
+  readonly simulator?: Pick<SimulatorOptions, 'rider' | 'heartRate' | 'startAt'>;
+  /** #1305: the device's memory of acknowledged targets, as `main.tsx` hands it over. */
+  readonly trainerTargets?: TrainerTargetMemory | undefined;
   /** #1244: the rider's instance, goals and saved workouts, as `main.tsx` hands them over. */
   readonly replan?: ReplanPort | undefined;
   readonly withTrainerControl?: boolean;
@@ -496,6 +503,7 @@ function benchWith(options: BenchOptions = {}): Bench {
     ...(options.notificationPermission === undefined
       ? {}
       : { notificationPermission: options.notificationPermission }),
+    ...(options.trainerTargets === undefined ? {} : { trainerTargets: options.trainerTargets }),
   });
 
   return {
@@ -1183,6 +1191,41 @@ describe('#14 — riding a saved workout on this screen', () => {
     }
     expect(rig.targetOnTheTrainer()).toBe(250);
     expect(rig.controller.getSnapshot().workout?.rescue).toBeUndefined();
+    rig.controller.dispose();
+  });
+
+  it('a stall relief on a block already at the trainer’s minimum is told as the minimum held, not as eased — #1305', async () => {
+    // 125 W on a 150 W minimum is written as 150 W; the relief's 83 W is
+    // raised to the same 150 W, so nothing more is written and the snapshot
+    // the screens read must not say the target "has been eased".
+    const rig = benchWith({
+      machine: { retainsTargetsThroughStop: true, minTargetPower: watts(150) },
+    });
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await rig.controller.start();
+    rig.controller.startWorkout(
+      savedWorkout([{ kind: 'steady', seconds: seconds(600), target: thresholdShare(0.5) }]),
+      THRESHOLD,
+    );
+    await ride(rig, 2);
+    await flushMicrotasks();
+    expect(rig.targetOnTheTrainer()).toBe(150);
+    const before = rig.written.length;
+
+    for (const rpm of [88, 80, 72, 64, 56, 50, 46]) {
+      rig.bench.rider.set({ cadence: revolutionsPerMinute(rpm) });
+      await ride(rig, 1);
+      await flushMicrotasks();
+    }
+
+    expect(rig.written.slice(before).filter((bytes) => bytes[0] === 0x05)).toStrictEqual([]);
+    expect(rig.targetOnTheTrainer()).toBe(150);
+    const rescue = rig.controller.getSnapshot().workout?.rescue;
+    expect(rescue?.kind).toBe('relief');
+    expect(rescue?.reason).toBe(
+      'The trainer is holding its lowest target, 150 W, so it cannot be eased any further.',
+    );
     rig.controller.dispose();
   });
 
@@ -5303,6 +5346,126 @@ describe('a workout target under the trainer’s minimum — #1297', () => {
     await rig.controller.requestTrainerControl();
     await rig.controller.setTargetPower(watts(200));
     await loseAndRetakeControl(rig);
+    const before = rig.written.length;
+    await startOn(rig, [[600, 0.3]]);
+
+    await expectTheMinimumWritten(rig, before);
+    rig.controller.dispose();
+  });
+  // --- #1305's second pass: the device remembers across a page reload. ---
+
+  /** A `localStorage` the two controllers of a "reload" share. */
+  const deviceStore = (): {
+    getItem(key: string): string | null;
+    setItem(key: string, value: string): void;
+  } => {
+    const rows = new Map<string, string>();
+    return {
+      getItem: (key) => rows.get(key) ?? null,
+      setItem: (key, value) => {
+        rows.set(key, value);
+      },
+    };
+  };
+  /**
+   * A hand-set 200 W on one controller, which is then disposed: the page as
+   * it was before the reload. Answers when the 200 W was acknowledged.
+   */
+  const handSet200BeforeAReload = async (
+    storage: ReturnType<typeof deviceStore>,
+  ): Promise<number> => {
+    const before = benchWith({
+      ...HIGH_MINIMUM_150,
+      trainerTargets: createTrainerTargetMemory(storage),
+    });
+    await before.controller.pair('trainer');
+    await before.controller.requestTrainerControl();
+    await before.controller.setTargetPower(watts(200));
+    expect(before.targetOnTheTrainer()).toBe(200);
+    const at = before.bench.now;
+    before.controller.dispose();
+    return at;
+  };
+  /**
+   * The page after the reload: a NEW controller with a new memory read from
+   * the same storage, on a simulated trainer that is new too (so it holds
+   * nothing: what is asserted is what this app writes), starting `later`
+   * seconds after the 200 W was acknowledged.
+   */
+  const afterTheReload = (
+    storage: ReturnType<typeof deviceStore>,
+    acknowledgedAt: number,
+    later: number,
+  ): Bench =>
+    benchWith({
+      ...HIGH_MINIMUM_150,
+      simulator: { startAt: unixSeconds(acknowledgedAt + later) },
+      trainerTargets: createTrainerTargetMemory(storage),
+    });
+
+  it('a hand-set 200 W, the page reloaded, then a workout: the minimum is written, as without the reload — #1305', async () => {
+    const storage = deviceStore();
+    const at = await handSet200BeforeAReload(storage);
+    const rig = afterTheReload(storage, at, 60);
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    expect(rig.controller.getSnapshot().trainer.target).toEqual({ kind: 'none' });
+    const before = rig.written.length;
+    await startOn(rig, [[600, 0.3]]);
+
+    await expectTheMinimumWritten(rig, before);
+    rig.controller.dispose();
+  });
+
+  it('a target remembered just inside its age is still trusted after a reload — #1305', async () => {
+    // The workout's first block asks a few seconds after `startAt`.
+    const storage = deviceStore();
+    const at = await handSet200BeforeAReload(storage);
+    const rig = afterTheReload(storage, at, REMEMBERED_TARGET_MAX_AGE_SECONDS - 30);
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    const before = rig.written.length;
+    await startOn(rig, [[600, 0.3]]);
+
+    await expectTheMinimumWritten(rig, before);
+    rig.controller.dispose();
+  });
+
+  it('a target remembered longer ago than its age is ignored after a reload: the block is refused as before — #1305', async () => {
+    const storage = deviceStore();
+    const at = await handSet200BeforeAReload(storage);
+    const rig = afterTheReload(storage, at, REMEMBERED_TARGET_MAX_AGE_SECONDS + 1);
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    const before = rig.written.length;
+    await startOn(rig, [[600, 0.3]]);
+    await ride(rig, 5);
+    await flushMicrotasks(20);
+
+    expect(targetWritesSince(rig, before)).toStrictEqual([]);
+    expect(rig.targetOnTheTrainer()).toBeUndefined();
+    expect(rig.controller.getSnapshot().workout?.fault).toBe(REFUSED_AT_150);
+    rig.controller.dispose();
+  });
+
+  it('a workout’s own acknowledged target is remembered across a reload too — #1305', async () => {
+    const storage = deviceStore();
+    const first = benchWith({
+      ...HIGH_MINIMUM_150,
+      trainerTargets: createTrainerTargetMemory(storage),
+    });
+    await first.controller.pair('trainer');
+    await first.controller.requestTrainerControl();
+    await startOn(first, [[600, 1.0]]);
+    await ride(first, 3);
+    await flushMicrotasks(20);
+    expect(first.targetOnTheTrainer()).toBe(250);
+    const at = first.bench.now;
+    first.controller.dispose();
+
+    const rig = afterTheReload(storage, at, 60);
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
     const before = rig.written.length;
     await startOn(rig, [[600, 0.3]]);
 
