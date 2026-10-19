@@ -129,6 +129,9 @@ export const LOSSY_CHANNELS: Readonly<Record<ActivityFileFormat, readonly string
   tcx: [...TCX_LOSSY_CHANNELS, LAP_ASCENT, LAP_DISTANCE, MOVING_TIME],
 };
 
+/** A lap's kind: `lap.intensity` and `lap.triggerMethod` said as one — #1452. */
+const LAP_KIND = 'which splits are laps and which are part laps';
+
 /**
  * Each entry of {@link LOSSY_CHANNELS} in plain words, as the export screen
  * says it — #1452. The codes stay the codec's (tests and the README table read
@@ -141,6 +144,17 @@ const LOSSY_CHANNEL_NAMES: Readonly<Record<string, string>> = {
   'point.temperature': 'temperature',
   'lap.totalElapsedTime': 'each lap’s elapsed time',
   'lap.totalDistance': 'each lap’s distance',
+  'lap.averageHeartRate': 'each lap’s average heart rate',
+  'lap.maxHeartRate': 'each lap’s highest heart rate',
+  'lap.averageCadence': 'each lap’s average cadence',
+  'lap.averagePower': 'each lap’s average power',
+  'lap.maxPower': 'each lap’s best power',
+  [LAP_ASCENT]: 'each lap’s climb',
+  [LAP_DISTANCE]: 'each lap’s distance',
+  // One phrase for the pair: a lap's kind is both of them together, and
+  // `lossyChannelNames` says a shared name once.
+  'lap.intensity': LAP_KIND,
+  'lap.triggerMethod': LAP_KIND,
   'activity.name': 'the ride’s name',
   [MOVING_TIME]: 'moving time',
 };
@@ -150,11 +164,17 @@ export function lossyChannelName(channel: string): string | undefined {
   return Object.hasOwn(LOSSY_CHANNEL_NAMES, channel) ? LOSSY_CHANNEL_NAMES[channel] : undefined;
 }
 
-/** What `format` cannot carry, in plain words — #1452. Empty for FIT. */
+/**
+ * What `format` cannot carry, in plain words — #1452. Each name once: two
+ * entries that share a name (a lap's intensity and trigger, which together
+ * are its kind) are said as one.
+ */
 export function lossyChannelNames(format: ActivityFileFormat): readonly string[] {
   // An entry the table lacks is shown as its code rather than hidden: a loss
   // left unsaid is worse than one said badly, and the test above keeps it rare.
-  return LOSSY_CHANNELS[format].map((channel) => lossyChannelName(channel) ?? channel);
+  return [
+    ...new Set(LOSSY_CHANNELS[format].map((channel) => lossyChannelName(channel) ?? channel)),
+  ];
 }
 
 /**

@@ -366,14 +366,45 @@ describe('LOSSY_CHANNELS in plain words — #1452', () => {
   });
 
   it('says each entry in the words the rider reads', () => {
-    expect(lossyChannelNames('fit')).toEqual([]);
-    expect(lossyChannelNames('tcx')).toEqual(['temperature', 'the ride’s name', 'moving time']);
+    expect(lossyChannelNames('fit')).toEqual([
+      'each lap’s average heart rate',
+      'each lap’s highest heart rate',
+      'each lap’s average cadence',
+      'each lap’s average power',
+      'each lap’s best power',
+      'each lap’s climb',
+      'which splits are laps and which are part laps',
+    ]);
+    expect(lossyChannelNames('tcx')).toEqual([
+      'temperature',
+      'the ride’s name',
+      'each lap’s climb',
+      'each lap’s distance',
+      'moving time',
+    ]);
     expect(lossyChannelNames('gpx')).toEqual([
       'the distance at each point',
       'each lap’s elapsed time',
       'each lap’s distance',
+      'each lap’s average heart rate',
+      'each lap’s highest heart rate',
+      'each lap’s average cadence',
+      'each lap’s average power',
+      'each lap’s best power',
+      'which splits are laps and which are part laps',
+      'each lap’s climb',
       'moving time',
     ]);
+  });
+
+  it('says a lap’s kind once, though two entries carry it', () => {
+    expect(LOSSY_CHANNELS.fit).toContain('lap.intensity');
+    expect(LOSSY_CHANNELS.fit).toContain('lap.triggerMethod');
+    expect(lossyChannelName('lap.intensity')).toBe(lossyChannelName('lap.triggerMethod'));
+    for (const format of ['fit', 'gpx', 'tcx'] as const) {
+      const names = lossyChannelNames(format);
+      expect(new Set(names).size, `${format} says a name twice`).toBe(names.length);
+    }
   });
 
   it('knows no name for a channel the table lacks, and reads no inherited key', () => {
