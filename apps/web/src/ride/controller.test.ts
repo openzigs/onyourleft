@@ -8495,7 +8495,12 @@ describe('#1312 — the laps of a course are the recording’s, and are saved wi
         movingTime: ride.movingTime,
         distance: ride.distance,
       });
-      return { stored: totals(stored), back: totals(back), laps };
+      return {
+        stored: totals(stored),
+        back: totals(back),
+        laps,
+        backLaps: await lapsOf(`back-${withLaps ? 'laps' : 'plain'}`),
+      };
     };
 
     it.each<ActivityFileFormat>(['fit', 'tcx'])(
@@ -8536,6 +8541,11 @@ describe('#1312 — the laps of a course are the recording’s, and are saved wi
         expect(lapped.back.movingTime).toBe(
           format === 'fit' ? lapped.stored.movingTime : lapped.back.elapsedTime,
         );
+        // #1320: a file this client wrote comes back with no lap rows. Its
+        // splits include the lead-in and the tail, and nothing in it yet says
+        // which are laps of the course (#1321), so it is read as a file with
+        // no laps rather than one whose lead-in is a lap.
+        expect(lapped.backLaps).toEqual([]);
       },
     );
   });

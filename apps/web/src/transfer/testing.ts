@@ -9,7 +9,25 @@
  * note at the top of that file for why the two are separate.
  */
 
-import { unixSeconds, type UnixSeconds } from '@onyourleft/domain';
+import {
+  beatsPerMinute,
+  metres,
+  metresPerSecond,
+  seconds,
+  unixSeconds,
+  watts,
+  type UnixSeconds,
+} from '@onyourleft/domain';
+import {
+  encodeFitActivity,
+  encodeGpx,
+  encodeTcx,
+  FILE_TYPE_ACTIVITY,
+  SPORT_CYCLING,
+  type FitDateTime,
+  type FitRecord,
+  type TrackPoint,
+} from '@onyourleft/fit';
 import { activityId, type ActivityId } from '@onyourleft/store';
 
 import type { ImportSource } from './import-batch';
@@ -120,3 +138,110 @@ export function sequentialActivityIds(prefix = 'imported'): () => ActivityId {
 
 /** A fixed clock, so `createdAt` is not the reason two runs differ. */
 export const IMPORT_CLOCK: UnixSeconds = unixSeconds(1_760_000_000);
+
+/** One lap as a fixture file states it. @see lappedFile */
+export interface FixtureLap {
+  /** Seconds after the ride's first sample. */
+  readonly start: number;
+  readonly elapsed: number | undefined;
+  readonly moving?: number | undefined;
+  readonly distance?: number | undefined;
+}
+
+/** @see lappedFile */
+export interface LappedFileOptions {
+  readonly format: 'fit' | 'tcx' | 'gpx';
+  /** How many 1 Hz samples, from {@link LAPPED_FILE_START}. */
+  readonly samples: number;
+  readonly laps: readonly FixtureLap[];
+  /**
+   * What the file says wrote it: a FIT `file_id` manufacturer, a TCX
+   * `<Creator>` name. `undefined` names nothing, as a FIT file from this
+   * client's export does; a TCX `<Creator>` cannot be absent from what
+   * `encodeTcx` writes, so `undefined` there writes this client's own name.
+   */
+  readonly writer: number | string | undefined;
+  /** The session's moving time, FIT only. The samples' span when absent. */
+  readonly moving?: number | undefined;
+  /** The ride's distance. Speed is 5 m/s throughout, so `5 × (samples − 1)` when absent. */
+  readonly distance?: number | undefined;
+}
+
+/** Where {@link lappedFile}'s ride starts. */
+export const LAPPED_FILE_START: UnixSeconds = unixSeconds(1_718_442_000);
+
+/**
+ * A FIT, TCX or GPX file with laps (one `<trkseg>` each in GPX), from a device that names itself or does not —
+ * #1320. Sample `i` has power `i` watts, heart rate `100 + i % 50` and speed
+ * 5 m/s, so a lap's averages can be worked out by hand from its slots.
+ */
+export function lappedFile(options: LappedFileOptions): Uint8Array {
+  const span = options.samples - 1;
+  const points: TrackPoint[] = Array.from({ length: options.samples }, (_unused, index) => ({
+    timestamp: unixSeconds(LAPPED_FILE_START + index),
+    position: undefined,
+    altitude: undefined,
+    distance: undefined,
+    speed: metresPerSecond(5),
+    heartRate: beatsPerMinute(100 + (index % 50)),
+    cadence: undefined,
+    power: watts(index),
+    temperature: undefined,
+  }));
+  const distance = options.distance ?? 5 * span;
+  if (options.format !== 'fit') {
+    const encode = options.format === 'tcx' ? encodeTcx : encodeGpx;
+    return new TextEncoder().encode(
+      encode({
+        startTime: LAPPED_FILE_START,
+        name: 'Lapped',
+        sport: 'Biking',
+        creator: typeof options.writer === 'string' ? options.writer : undefined,
+        laps: options.laps.map((lap, ordinal) => {
+          const next = options.laps[ordinal + 1]?.start ?? options.samples;
+          return {
+            startTime: unixSeconds(LAPPED_FILE_START + lap.start),
+            totalElapsedTime: lap.elapsed === undefined ? undefined : seconds(lap.elapsed),
+            totalDistance: lap.distance === undefined ? undefined : metres(lap.distance),
+            points: points.slice(lap.start, next),
+          };
+        }),
+      }),
+    );
+  }
+  const instant = (at: number): FitDateTime => ({ kind: 'instant', instant: unixSeconds(at) });
+  return encodeFitActivity({
+    fileId: {
+      type: FILE_TYPE_ACTIVITY,
+      manufacturer: typeof options.writer === 'number' ? options.writer : undefined,
+      product: undefined,
+      serialNumber: undefined,
+      timeCreated: instant(LAPPED_FILE_START),
+    },
+    records: points.map((point): FitRecord => ({
+      ...point,
+      timestamp: point.timestamp === undefined ? undefined : instant(point.timestamp),
+      developerFields: [],
+    })),
+    laps: options.laps.map((lap, ordinal) => ({
+      timestamp: instant(LAPPED_FILE_START + lap.start + (lap.elapsed ?? 0)),
+      messageIndex: ordinal,
+      startTime: instant(LAPPED_FILE_START + lap.start),
+      totalElapsedTime: lap.elapsed === undefined ? undefined : seconds(lap.elapsed),
+      totalTimerTime: seconds(lap.moving ?? lap.elapsed ?? 0),
+      totalDistance: lap.distance === undefined ? undefined : metres(lap.distance),
+    })),
+    sessions: [
+      {
+        timestamp: instant(LAPPED_FILE_START + span),
+        messageIndex: 0,
+        startTime: instant(LAPPED_FILE_START),
+        sport: SPORT_CYCLING,
+        totalElapsedTime: seconds(span),
+        totalTimerTime: seconds(options.moving ?? span),
+        totalDistance: metres(distance),
+        numLaps: options.laps.length,
+      },
+    ],
+  }).bytes;
+}

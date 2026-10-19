@@ -19,15 +19,19 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { activityId, lapId, type ActivityId } from '@onyourleft/store';
 import {
   ATHLETE_A,
   ATHLETE_B,
   createStoreHarness,
+  lapFor,
+  rideFor,
   seedAthletes,
   type StoreHarness,
 } from '@onyourleft/store/testing';
 
 import { needsLoadSummary } from '../analysis/summary';
+import { bestLapIndex } from '../recording/laps';
 
 import { webCryptoDigest } from './browser';
 import { corpusSource } from './corpus';
@@ -41,6 +45,8 @@ import type { TransferStore } from './store-port';
 import {
   bytesSource,
   IMPORT_CLOCK,
+  LAPPED_FILE_START,
+  lappedFile,
   sequentialActivityIds,
   syntheticCourseGpx,
   syntheticGpx,
@@ -424,26 +430,25 @@ describe('importActivityFiles — progress and cancelling', () => {
 });
 
 describe('importActivityFiles — a store that refuses the write', () => {
-  it('reports the file as failed and leaves no half-written ride behind', async () => {
+  it('reports the file as failed with the store’s own reason, and leaves no ride behind', async () => {
     const open = await openSeeded();
     const bytes = syntheticRide(41);
 
     const failing = await open.write((store) => {
       const spy = vi
-        .spyOn(store, 'putStreamSet')
+        .spyOn(store, 'putFinishedRide')
         .mockRejectedValueOnce(new Error('QuotaExceededError: the device is full'));
       return Promise.resolve({ store, spy });
     });
 
     const report = await run(open, [bytesSource('ride.gpx', bytes)], { store: failing.store });
-    expect(named(report.outcomes, 'ride.gpx').code).toBe('not-stored');
+    const outcome = named(report.outcomes, 'ride.gpx');
+    expect(outcome.kind).toBe('failed');
+    expect(outcome.code).toBe('not-stored');
+    expect(outcome.reason).toContain('QuotaExceededError');
+    expect(report.imported).toBe(0);
     failing.spy.mockRestore();
 
-    // ⚠️ The defect this asserts against: the activity row goes down first,
-    // because `putStreamSet` refuses a set whose activity does not exist. If it
-    // survived a failed stream write it would carry the file's hash, so the
-    // rider's retry would be reported as a duplicate — of a ride with no data
-    // in it, which they could then never import.
     expect(await open.read(async (store) => store.listActivitySummaries(ATHLETE_A))).toHaveLength(
       0,
     );
@@ -454,64 +459,25 @@ describe('importActivityFiles — a store that refuses the write', () => {
     expect(retry.imported).toBe(1);
   });
 
-  // --- #166: the arm where the compensating delete fails too ---------------
+  // --- #166: a half-written row an import before #1320 may have left -------
 
-  it('reports the original failure, not the cleanup’s, when the cleanup also fails', async () => {
+  it('lets the rider retry a file whose half-written row is still on the device', async () => {
     const open = await openSeeded();
-    const bytes = syntheticRide(42);
+    const bytes = new TextEncoder().encode(syntheticRide(43));
 
-    const failing = await open.write((store) => {
-      const streams = vi
-        .spyOn(store, 'putStreamSet')
-        .mockRejectedValueOnce(new Error('QuotaExceededError: the device is full'));
-      // The compensation cannot run either, which is the case #166 is about.
-      const cleanup = vi
-        .spyOn(store, 'deleteActivity')
-        .mockRejectedValueOnce(new Error('InvalidStateError: the connection is closing'));
-      return Promise.resolve({ store, streams, cleanup });
-    });
-
-    const report = await run(open, [bytesSource('ride.gpx', bytes)], { store: failing.store });
-
-    // The rider is told what actually went wrong. Reporting the cleanup's
-    // error instead would name the connection when the cause was the disk, and
-    // reporting success would be worse than either.
-    const outcome = named(report.outcomes, 'ride.gpx');
-    expect(outcome.kind).toBe('failed');
-    expect(outcome.code).toBe('not-stored');
-    expect(outcome.reason).toContain('QuotaExceededError');
-    expect(report.imported).toBe(0);
-    failing.streams.mockRestore();
-    failing.cleanup.mockRestore();
-
-    // And the residue is real: the row is still there, carrying the hash.
-    expect(await open.read(async (store) => store.listActivitySummaries(ATHLETE_A))).toHaveLength(
-      1,
+    // ⚠️ The residue #166 is about, as an import before #1320 could leave it:
+    // the activity row carrying the file's hash, and no samples behind it.
+    // The write is one transaction now and cannot leave one, so it is put
+    // here by hand — the device that already holds one still needs the
+    // read-side check.
+    const sha256 = await webCryptoDigest(bytes);
+    await open.write(async (store) =>
+      store.putActivity({
+        ...rideFor(ATHLETE_A, { name: 'Half written' }),
+        originalFile: { key: 'ride.gpx', sha256 },
+      }),
     );
-  });
 
-  it('lets the rider retry a file whose half-written row could not be cleaned up', async () => {
-    const open = await openSeeded();
-    const bytes = syntheticRide(43);
-
-    const failing = await open.write((store) => {
-      const streams = vi
-        .spyOn(store, 'putStreamSet')
-        .mockRejectedValueOnce(new Error('QuotaExceededError: the device is full'));
-      const cleanup = vi
-        .spyOn(store, 'deleteActivity')
-        .mockRejectedValueOnce(new Error('InvalidStateError: the connection is closing'));
-      return Promise.resolve({ store, streams, cleanup });
-    });
-    await run(open, [bytesSource('ride.gpx', bytes)], { store: failing.store });
-    failing.streams.mockRestore();
-    failing.cleanup.mockRestore();
-
-    // ⚠️ The defect (#166). The orphan row carries the file's SHA-256, so
-    // before this fix the retry below was reported as a duplicate — of a ride
-    // with no data — and stayed that way however many times the rider tried,
-    // because the row being matched is the broken one. There is no way back
-    // from that short of clearing site data.
     const retry = await run(open, [bytesSource('ride.gpx', bytes)], {
       newActivityId: sequentialActivityIds('retry'),
     });
@@ -528,6 +494,263 @@ describe('importActivityFiles — a store that refuses the write', () => {
       store.getStreamSet(ATHLETE_A, summaries[0]!.id),
     );
     expect(streams?.sampleCount).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * #1320: a file's laps become lap rows, written with the ride, read back on a
+ * fresh connection through the scoped `listLaps` the ride's page reads.
+ */
+describe('importActivityFiles — a file’s laps (#1320)', () => {
+  /** Garmin's FIT manufacturer number: a file that names its writer. */
+  const GARMIN = 1;
+
+  async function importOne(
+    open: StoreHarness,
+    fileName: string,
+    bytes: Uint8Array,
+  ): Promise<ImportOutcome> {
+    const report = await run(open, [bytesSource(fileName, bytes)]);
+    return named(report.outcomes, fileName);
+  }
+
+  async function lapsOf(open: StoreHarness, id: ActivityId | undefined, owner = ATHLETE_A) {
+    if (id === undefined) {
+      throw new Error('the file was not imported');
+    }
+    return open.read(async (store) => store.listLaps(owner, id));
+  }
+
+  it('writes a FIT file’s laps as rows, in order, with averages worked out from its samples', async () => {
+    const open = await openSeeded();
+    const outcome = await importOne(
+      open,
+      'laps.fit',
+      lappedFile({
+        format: 'fit',
+        samples: 120,
+        writer: GARMIN,
+        laps: [
+          { start: 0, elapsed: 40, distance: 200 },
+          { start: 40, elapsed: 40, moving: 30, distance: 200 },
+          { start: 80, elapsed: 39, distance: 195 },
+        ],
+      }),
+    );
+    expect(outcome.kind).toBe('imported');
+    const laps = await lapsOf(open, outcome.activityId);
+
+    expect(
+      laps.map((lap) => [
+        lap.ordinal,
+        lap.startedAt - LAPPED_FILE_START,
+        lap.elapsedTime,
+        lap.movingTime,
+        lap.distance,
+      ]),
+    ).toEqual([
+      [0, 0, 40, 40, 200],
+      [1, 40, 40, 30, 200],
+      [2, 80, 39, 39, 195],
+    ]);
+    // Sample i has power i and heart rate 100 + i % 50: worked out by hand
+    // over each lap's slots, from the slot it began in up to the one it
+    // ended in. The file states no average at all, so these can only have
+    // come from the samples.
+    expect(laps.map((lap) => [lap.averagePower, lap.maxPower])).toEqual([
+      [20, 39],
+      [60, 79],
+      [99, 118],
+    ]);
+    expect(laps.map((lap) => [lap.averageHeartRate, lap.maxHeartRate])).toEqual([
+      [120, 139],
+      [122, 149],
+      [125, 149],
+    ]);
+    // A file cannot say a lap stopped short, and has no altitude here.
+    expect(laps.some((lap) => lap.partial === true || lap.ascent !== undefined)).toBe(false);
+    // Every lap read filters on the owning athlete.
+    expect(await lapsOf(open, outcome.activityId, ATHLETE_B)).toEqual([]);
+  });
+
+  it('writes a TCX file’s laps, its one time read as both elapsed and moving', async () => {
+    const open = await openSeeded();
+    const outcome = await importOne(
+      open,
+      'laps.tcx',
+      lappedFile({
+        format: 'tcx',
+        samples: 120,
+        writer: 'Garmin Edge 530',
+        laps: [
+          { start: 0, elapsed: 60, distance: 300 },
+          { start: 60, elapsed: 59, distance: 295 },
+        ],
+      }),
+    );
+    const laps = await lapsOf(open, outcome.activityId);
+    expect(
+      laps.map((lap) => [lap.startedAt - LAPPED_FILE_START, lap.elapsedTime, lap.movingTime]),
+    ).toEqual([
+      [0, 60, 60],
+      [60, 59, 59],
+    ]);
+  });
+
+  it.each([
+    ['a FIT file that names no writer, as this client’s own does', 'fit', undefined],
+    ['a TCX file this client wrote', 'tcx', undefined],
+    [
+      'a GPX file, whose segments are not laps, from a device that names itself',
+      'gpx',
+      'Garmin Edge 530',
+    ],
+  ] as const)('lists no laps from %s', async (_name, format, writer) => {
+    const open = await openSeeded();
+    const outcome = await importOne(
+      open,
+      `laps.${format}`,
+      lappedFile({
+        format,
+        samples: 120,
+        writer,
+        laps: [
+          { start: 0, elapsed: 60, distance: 300 },
+          { start: 60, elapsed: 59, distance: 295 },
+        ],
+      }),
+    );
+    // The ride imported; only the laps are left out.
+    expect(outcome.kind).toBe('imported');
+    expect(await lapsOf(open, outcome.activityId)).toEqual([]);
+  });
+
+  it('writes no lap row for a file with one lap spanning the ride', async () => {
+    const open = await openSeeded();
+    const outcome = await importOne(
+      open,
+      'one.fit',
+      lappedFile({
+        format: 'fit',
+        samples: 120,
+        writer: GARMIN,
+        laps: [{ start: 0, elapsed: 119, distance: 595 }],
+      }),
+    );
+    expect(outcome.kind).toBe('imported');
+    expect(await lapsOf(open, outcome.activityId)).toEqual([]);
+  });
+
+  it('takes the whole file back out when a lap will not go down', async () => {
+    const open = await openSeeded();
+    // Another athlete already holds a lap under the id this import's second
+    // lap is given, so the store refuses that one lap — inside the write.
+    const theirs = rideFor(ATHLETE_B, { name: 'Theirs' });
+    await open.write(async (store) => {
+      await store.putActivity(theirs);
+      await store.putLap(lapFor(theirs, 0, { id: lapId('imported-1:lap:1') }));
+    });
+
+    const outcome = await importOne(
+      open,
+      'laps.fit',
+      lappedFile({
+        format: 'fit',
+        samples: 120,
+        writer: GARMIN,
+        laps: [
+          { start: 0, elapsed: 60, distance: 300 },
+          { start: 60, elapsed: 59, distance: 295 },
+        ],
+      }),
+    );
+    expect(outcome.kind).toBe('failed');
+    expect(outcome.code).toBe('not-stored');
+    // Nothing of the file is left: no ride, no samples, no first lap.
+    const id = activityId('imported-1');
+    expect(await open.read(async (store) => store.getActivity(ATHLETE_A, id))).toBeUndefined();
+    expect(await open.read(async (store) => store.getStreamSet(ATHLETE_A, id))).toBeUndefined();
+    expect(await lapsOf(open, id)).toEqual([]);
+  });
+
+  it('holds a hostile file’s laps to the ride: inside it, one after another, no longer than it', async () => {
+    const open = await openSeeded();
+    const outcome = await importOne(
+      open,
+      'hostile.fit',
+      lappedFile({
+        format: 'fit',
+        samples: 120,
+        writer: GARMIN,
+        moving: 100,
+        laps: [
+          // Starts long before the ride and claims far more moving time than it lasts.
+          { start: -1000, elapsed: 1060, moving: 4000, distance: 300 },
+          // Starts inside the lap before, runs a million seconds, and claims
+          // more road than the ride has.
+          { start: 30, elapsed: 1_000_000, moving: 2_000_000, distance: 10_000_000 },
+          // After the ride: no time left, so no lap.
+          { start: 5000, elapsed: 10, distance: 50 },
+        ],
+      }),
+    );
+    expect(outcome.kind).toBe('imported');
+    const ride = await open.read(async (store) =>
+      store.getActivity(ATHLETE_A, outcome.activityId ?? activityId('none')),
+    );
+    const laps = await lapsOf(open, outcome.activityId);
+
+    expect(laps.map((lap) => [lap.startedAt - LAPPED_FILE_START, lap.elapsedTime])).toEqual([
+      [0, 60],
+      [60, 59],
+    ]);
+    // Moving times held to the ride's own, which is 100 seconds.
+    expect(ride?.movingTime).toBe(100);
+    expect(laps.map((lap) => lap.movingTime)).toEqual([60, 40]);
+    // And no lap goes further than the ride did.
+    expect(laps[1]?.distance).toBe(ride?.distance);
+  });
+
+  it('works a lap’s distance out from its speed samples where the file states none', async () => {
+    const open = await openSeeded();
+    const outcome = await importOne(
+      open,
+      'no-distance.fit',
+      lappedFile({
+        format: 'fit',
+        samples: 120,
+        writer: GARMIN,
+        laps: [
+          { start: 0, elapsed: 60 },
+          { start: 60, elapsed: 59 },
+        ],
+      }),
+    );
+    // 5 m/s in every slot: 60 slots, then 59.
+    expect((await lapsOf(open, outcome.activityId)).map((lap) => lap.distance)).toEqual([300, 295]);
+  });
+
+  it('decides the best of laps of different lengths by average speed', async () => {
+    const open = await openSeeded();
+    const outcome = await importOne(
+      open,
+      'auto-lap.fit',
+      lappedFile({
+        format: 'fit',
+        samples: 120,
+        writer: GARMIN,
+        distance: 800,
+        laps: [
+          // A long lap at 5 m/s, then a short one at a little over 6.
+          { start: 0, elapsed: 80, distance: 400 },
+          { start: 80, elapsed: 39, distance: 240 },
+        ],
+      }),
+    );
+    const laps = await lapsOf(open, outcome.activityId);
+    // The shorter lap is the quicker one: a lap's time alone would pick it
+    // for the wrong reason, and its distance alone would pick the other.
+    expect(bestLapIndex(laps)).toBe(1);
   });
 });
 
