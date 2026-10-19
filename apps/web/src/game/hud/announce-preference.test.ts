@@ -16,6 +16,9 @@ import { describe, expect, it } from 'vitest';
 
 import {
   ANNOUNCEMENTS_STORAGE_KEY,
+  climbLeadChoices,
+  climbLeadIn,
+  climbLeadText,
   DEFAULT_ANNOUNCEMENTS,
   readAnnouncementPreference,
   writeAnnouncementPreference,
@@ -94,5 +97,44 @@ describe('the announcement preference — #397', () => {
     });
     disk.set(ANNOUNCEMENTS_STORAGE_KEY, '{not json');
     expect(readAnnouncementPreference(handleOver(disk))).toEqual(DEFAULT_ANNOUNCEMENTS);
+  });
+});
+
+describe('#1440 — climb-ahead steps in each unit system', () => {
+  const FOOT = 0.3048;
+  const MILE = 1609.344;
+
+  it('offers round steps in each system', () => {
+    expect(climbLeadChoices('metric')).toStrictEqual([100, 250, 500, 1000]);
+    expect(
+      climbLeadChoices('imperial').map((metres) => climbLeadText(metres, 'imperial')),
+    ).toStrictEqual(['500 ft', '1000 ft', '0.25 mi', '0.5 mi']);
+    expect(
+      climbLeadChoices('metric').map((metres) => climbLeadText(metres, 'metric')),
+    ).toStrictEqual(['100 m', '250 m', '500 m', '1000 m']);
+  });
+
+  it('maps a step saved in one system to the nearest step of the other, both ways', () => {
+    expect([100, 250, 500, 1000].map((m) => climbLeadIn(m, 'imperial'))).toStrictEqual([
+      500 * FOOT,
+      1000 * FOOT,
+      0.25 * MILE,
+      0.5 * MILE,
+    ]);
+    expect(
+      [500 * FOOT, 1000 * FOOT, 0.25 * MILE, 0.5 * MILE].map((m) => climbLeadIn(m, 'metric')),
+    ).toStrictEqual([100, 250, 500, 1000]);
+    // A step of the rider's own system is itself.
+    expect(climbLeadIn(250, 'metric')).toBe(250);
+    expect(climbLeadIn('never', 'imperial')).toBe('never');
+  });
+
+  it('keeps a stored imperial step across a reload, rather than falling back to the default', () => {
+    const disk: Disk = new Map();
+    writeAnnouncementPreference(handleOver(disk), {
+      ...DEFAULT_ANNOUNCEMENTS,
+      climbLeadMetres: climbLeadChoices('imperial')[2]!,
+    });
+    expect(readAnnouncementPreference(handleOver(disk)).climbLeadMetres).toBe(0.25 * MILE);
   });
 });

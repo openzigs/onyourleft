@@ -160,6 +160,7 @@ import { SoundControls } from './SoundControls';
 import { RoutePicker, type RecordingOffer, type RidableRoute } from './StageChooser';
 import { sharedCueOutput } from './web-audio';
 import {
+  climbLeadIn,
   DEFAULT_ANNOUNCEMENTS,
   deviceStorage,
   readAnnouncementPreference,
@@ -1686,7 +1687,10 @@ export function GameView(props: GameViewProps): JSX.Element {
         slopes: slopesRef.current,
         profile: chosen.profile,
         distance: simulation.state.ride.distance,
-        lead: announcementsRef.current.enabled ? announcementsRef.current.climbLeadMetres : 'never',
+        // #1440: the step of the rider's own units nearest the one stored.
+        lead: announcementsRef.current.enabled
+          ? climbLeadIn(announcementsRef.current.climbLeadMetres, unitsRef.current)
+          : 'never',
         units: unitsRef.current,
       });
       slopeAnnouncedRef.current = slope.announced;
