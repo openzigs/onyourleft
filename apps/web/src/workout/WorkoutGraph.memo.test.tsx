@@ -33,6 +33,12 @@ const TIMELINE = expandWorkout({
   blocks: [{ kind: 'steady', seconds: seconds(600), target: thresholdShare(0.6) }],
 });
 
+/** The same length, harder: what an accepted re-plan hands over. */
+const REPLANNED = expandWorkout({
+  name: 'test',
+  blocks: [{ kind: 'steady', seconds: seconds(600), target: thresholdShare(0.7) }],
+});
+
 const SAMPLE = { at: 299, target: 150, power: 146, heartRate: 134, range: undefined };
 
 /** Every field of the input, set — so a field the key leaves out is a field this misses. */
@@ -131,6 +137,26 @@ describe('the graph and the strip are worked out again only when what they read 
           }}
         />,
       );
+      expect(spy.mock.calls.length).toBe(once + 2);
+      mounted.unmount();
+    });
+
+    it(`${name}: again for a new plan, and again for a new outline of what a re-plan replaced, with every other value the same`, async () => {
+      const spy = vi.mocked(worked);
+      const Component = render;
+      const mounted = await mount(<Component workout={{ ...FULL }} />);
+      const once = spy.mock.calls.length;
+
+      // An accepted re-plan: the player's plan is a new object, and nothing in
+      // the key has moved (the clock is the same within the second).
+      const replanned = { ...FULL, timeline: REPLANNED };
+      await mounted.rerender(<Component workout={replanned} />);
+      expect(spy.mock.calls.length).toBe(once + 1);
+      await mounted.rerender(<Component workout={{ ...replanned }} />);
+      expect(spy.mock.calls.length).toBe(once + 1);
+
+      // What it replaced arrives as its own new array.
+      await mounted.rerender(<Component workout={{ ...replanned, replaced: TIMELINE.segments }} />);
       expect(spy.mock.calls.length).toBe(once + 2);
       mounted.unmount();
     });

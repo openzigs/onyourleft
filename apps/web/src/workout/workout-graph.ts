@@ -1125,27 +1125,42 @@ export const GRAPH_TITLE_HEART_RATE = 'Heart rate';
 export const GRAPH_TITLE_TRACE = 'Last 5 min';
 
 /**
- * What the trainer holds, in the few words a caption and the HUD strip have.
+ * What the trainer holds, in the few words a caption and the HUD strip have,
+ * in its parts: two in a pause ("Paused" and the target), one otherwise.
+ * {@link targetWords} is their join; the strip writes them one under the other
+ * on a phone (#1313).
  * ⚠️ From {@link heldNow} and {@link heldInstead} and nothing else.
  */
-function targetWords(input: WorkoutGraphInput, withAsk: boolean): string {
+function targetParts(
+  input: WorkoutGraphInput,
+  withAsk: boolean,
+): readonly [string] | readonly [string, string] {
   const held = heldNow(input);
   const said = held === undefined ? 'No target' : `Target ${String(held)} W`;
   if (isPaused(input)) {
-    return `Paused · ${said}`;
+    return ['Paused', said];
   }
   const mark = heldInstead(input);
   if (mark?.why === 'not-sent') {
-    return withAsk && mark.plannedWatts !== undefined
-      ? `No target sent (plan asks ${String(mark.plannedWatts)} W)`
-      : 'No target sent';
+    return [
+      withAsk && mark.plannedWatts !== undefined
+        ? `No target sent (plan asks ${String(mark.plannedWatts)} W)`
+        : 'No target sent',
+    ];
   }
   if (!withAsk || mark === undefined) {
-    return said;
+    return [said];
   }
-  return mark.plannedWatts === undefined
-    ? `${said} (hold eased)`
-    : `${said} (${mark.by} asks ${String(mark.plannedWatts)} W)`;
+  return [
+    mark.plannedWatts === undefined
+      ? `${said} (hold eased)`
+      : `${said} (${mark.by} asks ${String(mark.plannedWatts)} W)`,
+  ];
+}
+
+/** {@link targetParts} as one line. */
+function targetWords(input: WorkoutGraphInput, withAsk: boolean): string {
+  return targetParts(input, withAsk).join(' · ');
 }
 
 /**
@@ -1203,11 +1218,10 @@ export const STRIP_SEPARATOR = ' · ';
  * two.
  */
 export function workoutStripLines(input: WorkoutGraphInput): readonly [string, ...string[]] {
-  const target = targetWords(input, false);
   if (isPaused(input)) {
-    const [paused, said] = target.split(STRIP_SEPARATOR);
-    return said === undefined ? [target] : [paused ?? target, said];
+    return targetParts(input, false);
   }
+  const target = targetWords(input, false);
   const last = newest(input);
   if (last?.range !== undefined) {
     const range = `range ${String(last.range.low)}–${String(last.range.high)}`;

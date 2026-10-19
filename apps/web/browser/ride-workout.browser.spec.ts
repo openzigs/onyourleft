@@ -169,17 +169,40 @@ async function planBox(page: Page): Promise<Box | undefined> {
  * of that moment is a race (18 of 120 runs failed on exactly those two
  * numbers, `--repeat-each 30`, before this), so each load is measured once the
  * readings have settled. Measured locally: about 3 s into the ride.
+ *
+ * ⚠️ Those 3 s are not waited out: the case installs Playwright's clock before
+ * its first load, and this moves the page's clock {@link GAPS_SETTLE_AFTER_MS}
+ * on at once (`fastForward`: each timer that falls due fires once, and the
+ * ride's tick reads the clock, so the ride is that far on). Waiting them out
+ * cost about 20 s a viewport, six loads; `runFor`, which fires every frame on
+ * the way, about 10 s; this, about 2 s, the loads themselves. The poll after it
+ * is short and says what it waited for, so a fixture with no pacer fails here,
+ * by name, and not at the test's timeout.
  */
 async function untilTheGapsSettle(page: Page): Promise<void> {
-  await page.waitForFunction(() => {
-    const gaps = [
-      ...document.querySelectorAll('.oyl-hud__fields--secondary > .oyl-hud__field'),
-    ].filter((field) => /^(Pacer|Your best)$/.test(field.querySelector('dt')?.textContent ?? ''));
-    return (
-      gaps.length === 2 && gaps.every((field) => field.querySelector('.oyl-hud__detail') !== null)
-    );
-  });
+  await page.clock.fastForward(GAPS_SETTLE_AFTER_MS);
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const gaps = [
+            ...document.querySelectorAll('.oyl-hud__fields--secondary > .oyl-hud__field'),
+          ].filter((field) =>
+            /^(Pacer|Your best)$/.test(field.querySelector('dt')?.textContent ?? ''),
+          );
+          return gaps.map((field) => field.querySelector('.oyl-hud__detail') !== null);
+        }),
+      {
+        message:
+          'the ride’s gap readings, Pacer and Your best, never both showed their second line',
+        timeout: 5_000,
+      },
+    )
+    .toEqual([true, true]);
 }
+
+/** Past the "about 3 s" {@link untilTheGapsSettle} measured, with a second to spare. */
+const GAPS_SETTLE_AFTER_MS = 4_000;
 
 const GRAPH_VIEWPORTS: readonly (Viewport & { readonly riderClear: boolean })[] = [
   ...OVERLAY_VIEWPORTS.filter((each) => Math.min(each.width, each.height) > 480).map((each) => ({
@@ -347,6 +370,9 @@ test.describe('a running workout drawn on the HUD — #1307', () => {
     test(`takes the route plan’s place and its size, and can be read — ${viewport.name}`, async ({
       page,
     }) => {
+      // The page's timers are Playwright's from here on, for every load in
+      // this case, so `untilTheGapsSettle` can run them ahead.
+      await page.clock.install();
       // The control: the same ride with the route plan, and no strip.
       await openRide(page, viewport, '?trainer=workout');
       await untilTheGapsSettle(page);
