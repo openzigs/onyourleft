@@ -130,8 +130,14 @@ describe('#939, #1010 — Home has exactly one primary, Next up’s Ride', () =>
     it(data, async () => {
       await open(routeById('home'), data === 'populated');
       const primaries = buttonsByView(document)[0]?.primaries ?? [];
-      expect(primaries.map((element) => (element.textContent ?? '').trim())).toEqual(['Ride']);
-      for (const label of ['Start a ride', 'Choose a route', 'Choose a workout']) {
+      // #1429: on a first open the one primary is the first ride's, and the
+      // ride cards are not drawn, so there is no secondary to check.
+      expect(primaries.map((element) => (element.textContent ?? '').trim())).toEqual([
+        data === 'empty' ? 'Start a ride' : 'Ride',
+      ]);
+      for (const label of data === 'empty'
+        ? []
+        : ['Start a ride', 'Choose a route', 'Choose a workout']) {
         const link = [...document.querySelectorAll('main a.oyl-button')].find(
           (element) => (element.textContent ?? '').trim() === label,
         );

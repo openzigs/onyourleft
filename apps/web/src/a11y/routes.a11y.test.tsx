@@ -666,8 +666,9 @@ describe('#307 — a chooser on a route is a native select, not a listbox', () =
 describe('criterion 5 — focus is managed on navigation', () => {
   it('moves focus to the new view rather than leaving it on the link', async () => {
     await open('/');
+    // #1429: the More tab, which opens its own menu page.
     const link = document.querySelector<HTMLAnchorElement>(
-      `nav a[href="${hrefFor(routeById('devices'))}"]`,
+      `nav a[href="${hrefFor(routeById('more'))}"]`,
     );
     await activateWithKeyboard(link as HTMLAnchorElement);
 
@@ -675,7 +676,7 @@ describe('criterion 5 — focus is managed on navigation', () => {
     expect(document.activeElement).toBe(main);
     // Not just "something is focused": the thing focused has to announce the
     // page arrived at, which is what `aria-labelledby` on `main` supplies.
-    expect(accessibleName(main as Element)).toBe(routeById('devices').title);
+    expect(accessibleName(main as Element)).toBe(routeById('more').title);
   });
 
   it('keeps focus on main once a view in a lazy chunk replaces its fallback — #674', async () => {
@@ -870,7 +871,10 @@ async function navigateTo(destination: RouteDefinition): Promise<number> {
   );
   expect(group, `no primary link to ${destination.id}'s group`).not.toBeNull();
   await activateWithKeyboard(group as HTMLAnchorElement);
-  const page = document.querySelector<HTMLAnchorElement>(`nav a[href="${hrefFor(destination)}"]`);
+  // #1429: More's group page is its menu, whose links are the page's own list.
+  const page = document.querySelector<HTMLAnchorElement>(
+    `nav a[href="${hrefFor(destination)}"], .oyl-more a[href="${hrefFor(destination)}"]`,
+  );
   expect(page, `no link to ${destination.id} on its group's page`).not.toBeNull();
   await activateWithKeyboard(page as HTMLAnchorElement);
   return 2;

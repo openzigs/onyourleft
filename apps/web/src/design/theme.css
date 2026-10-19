@@ -871,6 +871,33 @@ h3:first-child {
   text-underline-offset: 4px;
 }
 
+/*
+ * The More tab's menu page — #1429 (`views/MoreView.tsx`): one page per row,
+ * its name as a link a thumb can hit and its one line under it. Plain list
+ * rows rather than buttons: each is a way to a page, not an action.
+ */
+.oyl-more {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.oyl-more > li {
+  border-bottom: 1px solid var(--oyl-color-border);
+  padding-block: var(--oyl-space-xs);
+}
+
+.oyl-more a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+  font-weight: 600;
+}
+
+.oyl-more p {
+  margin: 0;
+}
+
 /* BAR — a compact window with the height to spare for it. */
 @media (max-width: 37.49rem) and (min-height: 30rem) {
   .oyl-nav {

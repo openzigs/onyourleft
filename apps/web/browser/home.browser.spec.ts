@@ -496,3 +496,163 @@ test.describe('the ride cards — each one `.oyl-button` link at 44×44', () => 
     });
   }
 });
+
+/**
+ * #1429 — a first open, and the More tab, at a phone, a tablet and a desktop.
+ *
+ * A first open (`home.html?rides=none`): ONE primary, the first step, and the
+ * other three ways to start — a route, a workout, an import — each a link
+ * whose bottom is above the fold, with no link on Home twice. Before #1429
+ * the walkthrough's 412×915 had all three under the fold, behind three picture
+ * cards, and three links to the Ride screen.
+ *
+ * ⚠️ **The control** is #1010's: Next up's picture at 90 vh (`?hero=tall`),
+ * which must push the three links under a phone's fold — or "above the fold"
+ * was a page too short to have one.
+ *
+ * The More tab: its link opens a page titled More, whose list holds every page
+ * under the tab and Instance, each link a 44 px target above the fold, going
+ * to the page it names.
+ */
+const FIRST_OPEN_VIEWPORTS = [
+  { name: 'phone 412×915, the walkthrough’s', width: 412, height: 915, insets: undefined },
+  { name: 'phone 390×844', width: 390, height: 844, insets: undefined },
+  {
+    name: 'tablet in the shell, upright 800×1280',
+    width: 800,
+    height: 1280,
+    insets: PIXEL_TABLET_PORTRAIT_INSETS_ASSUMED,
+  },
+  {
+    name: 'tablet in the shell, landscape 1280×800',
+    width: 1280,
+    height: 800,
+    insets: PIXEL_TABLET_LANDSCAPE_INSETS,
+  },
+  { name: 'desktop 1440×900', width: 1440, height: 900, insets: undefined },
+] as const;
+
+const OTHER_WAYS = ['#/game', '#/workouts', '#/transfer'] as const;
+
+interface FirstOpenReading {
+  readonly fold: number;
+  readonly primaries: readonly string[];
+  /** Every link in main, by its `href`, in document order. */
+  readonly hrefs: readonly string[];
+  /** Each of {@link OTHER_WAYS}'s bottom edge, in the same order. */
+  readonly otherWays: readonly number[];
+}
+
+async function readFirstOpen(
+  page: Page,
+  viewport: (typeof FIRST_OPEN_VIEWPORTS)[number],
+  query = '',
+): Promise<FirstOpenReading> {
+  const seen = await open(page, viewport.width, viewport.height, {
+    query: `?rides=none${query}`,
+    ...(viewport.insets === undefined ? {} : { insets: viewport.insets }),
+  });
+  if (viewport.insets !== undefined) {
+    expect(await resolvedInsets(page)).toEqual(viewport.insets);
+  }
+  const read = await page.evaluate((wanted) => {
+    window.scrollTo(0, 0);
+    return {
+      hrefs: [...document.querySelectorAll('main a')].map(
+        (link) => link.getAttribute('href') ?? '',
+      ),
+      otherWays: wanted.map(
+        (href) =>
+          document.querySelector(`main a[href="${href}"]`)?.getBoundingClientRect().bottom ??
+          Number.POSITIVE_INFINITY,
+      ),
+    };
+  }, OTHER_WAYS);
+  return { fold: seen.fold, primaries: seen.primaries, ...read };
+}
+
+test.describe('#1429 — a first open has one first step, and the rest above the fold', () => {
+  for (const viewport of FIRST_OPEN_VIEWPORTS) {
+    test(viewport.name, async ({ page }) => {
+      const read = await readFirstOpen(page, viewport);
+      console.log(
+        `#1429 ${viewport.name}: fold ${read.fold.toFixed(1)}; route / workout / import end at ` +
+          read.otherWays.map((bottom) => bottom.toFixed(1)).join(' / '),
+      );
+      expect(read.primaries, 'one primary, the first step').toEqual(['Start a ride']);
+      expect(
+        read.hrefs.filter((href, index) => read.hrefs.indexOf(href) !== index),
+        `a link on Home twice: ${read.hrefs.join(', ')}`,
+      ).toEqual([]);
+      for (const [index, bottom] of read.otherWays.entries()) {
+        expect(bottom, `${OTHER_WAYS[index] ?? ''} is under the fold`).toBeLessThanOrEqual(
+          read.fold + SUBPIXEL_TOLERANCE,
+        );
+      }
+    });
+  }
+
+  test('the control — Next up’s picture at 90 vh puts the other ways under a phone’s fold', async ({
+    page,
+  }) => {
+    const read = await readFirstOpen(page, FIRST_OPEN_VIEWPORTS[0], '&hero=tall');
+    console.log(
+      `#1429 control: fold ${read.fold.toFixed(1)}; route / workout / import end at ` +
+        read.otherWays.map((bottom) => bottom.toFixed(1)).join(' / '),
+    );
+    expect(Math.min(...read.otherWays)).toBeGreaterThan(read.fold);
+  });
+});
+
+test.describe('#1429 — the More tab opens a page that is what its label says', () => {
+  for (const viewport of FIRST_OPEN_VIEWPORTS) {
+    test(viewport.name, async ({ page }) => {
+      const seen = await open(page, viewport.width, viewport.height, {
+        ...(viewport.insets === undefined ? {} : { insets: viewport.insets }),
+      });
+      await page
+        .getByRole('navigation', { name: 'Primary' })
+        .getByRole('link', { name: 'More' })
+        .click();
+      await page.waitForSelector('main .oyl-more a');
+      const read = await page.evaluate(() => {
+        window.scrollTo(0, 0);
+        return {
+          title: document.querySelector('h1')?.textContent ?? '',
+          current:
+            document
+              .querySelector('nav[aria-label="Primary"] a[aria-current="page"]')
+              ?.textContent?.trim() ?? '',
+          menu: [...document.querySelectorAll('main .oyl-more a')].map((link) => ({
+            text: (link.textContent ?? '').trim(),
+            href: link.getAttribute('href') ?? '',
+            bottom: link.getBoundingClientRect().bottom,
+            height: link.getBoundingClientRect().height,
+          })),
+        };
+      });
+      console.log(
+        `#1429 More ${viewport.name}: fold ${seen.fold.toFixed(1)}; ` +
+          read.menu.map((each) => `${each.text} ${each.bottom.toFixed(0)}`).join(', '),
+      );
+      expect(read.title).toBe('More');
+      expect(read.current).toBe('More');
+      expect(read.menu.map((each) => [each.text, each.href])).toEqual([
+        ['Devices', '#/devices'],
+        ['Files', '#/transfer'],
+        ['Camera', '#/camera'],
+        ['Settings', '#/settings'],
+        ['Instance', '#/settings/instance'],
+        ['About', '#/about'],
+      ]);
+      for (const each of read.menu) {
+        expect(each.bottom, `${each.text} is under the fold`).toBeLessThanOrEqual(
+          seen.fold + SUBPIXEL_TOLERANCE,
+        );
+        expect(each.height, `${each.text} is not a 44 px target`).toBeGreaterThanOrEqual(
+          TOUCH_TARGET_PIXELS,
+        );
+      }
+    });
+  }
+});

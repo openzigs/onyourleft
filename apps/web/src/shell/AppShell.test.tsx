@@ -41,7 +41,14 @@ import type { ShellSupport } from '../support/shell-support-port';
 import { KIT_SAVED, MASS_CLEARED, MASS_SAVED } from '../views/SettingsView';
 
 import { AppShell } from './AppShell';
-import { hrefFor, routeById } from './routes';
+import {
+  groupDestination,
+  hrefFor,
+  moreMenuRoutes,
+  ROUTES,
+  routeById,
+  type RouteId,
+} from './routes';
 
 const NO_BLUETOOTH: CapabilityProbe = { bluetooth: undefined, secureContext: true };
 /** A browser that can pair: the chooser is never reached in these tests. */
@@ -74,6 +81,60 @@ async function open(path: string): Promise<void> {
   mounted = await mount(<AppShell capabilities={NO_BLUETOOTH} />);
   await settle();
 }
+
+describe('the More tab — #1429', () => {
+  const MENU: readonly RouteId[] = [
+    'devices',
+    'transfer',
+    'camera',
+    'settings',
+    'instance',
+    'about',
+  ];
+
+  it('opens a page titled More, which lists every page under the tab with Instance', async () => {
+    await open('/');
+    const more = [
+      ...document.querySelectorAll<HTMLAnchorElement>('nav[aria-label="Primary"] a'),
+    ].find((link) => link.textContent === 'More');
+    await activateWithKeyboard(more as HTMLAnchorElement);
+    // The tab goes where its label says.
+    expect(document.querySelector('h1')?.textContent).toBe('More');
+    expect(more?.getAttribute('aria-current')).toBe('page');
+    // The page lists the pages itself, so no section row repeats them above it.
+    expect(document.querySelector('nav[aria-label="More pages"]')).toBeNull();
+    const listed = [...document.querySelectorAll('main .oyl-more a')].map((link) => [
+      link.textContent,
+      link.getAttribute('href'),
+    ]);
+    expect(listed).toEqual(MENU.map((id) => [routeById(id).navLabel, hrefFor(routeById(id))]));
+  });
+
+  it('every page under the tab is on the menu, and each link opens the page it names', async () => {
+    const underMore = ROUTES.filter((route) => route.group === 'more').map((route) => route.id);
+    expect(moreMenuRoutes().map((route) => route.id)).toEqual(
+      expect.arrayContaining([...underMore, 'instance']),
+    );
+    expect(groupDestination('more')).toBe(routeById('more'));
+    for (const page of moreMenuRoutes()) {
+      mounted?.unmount();
+      await open('/more');
+      const link = document.querySelector<HTMLAnchorElement>(
+        `main .oyl-more a[href="${hrefFor(page)}"]`,
+      );
+      expect(link?.textContent, page.id).toBe(page.navLabel);
+      await activateWithKeyboard(link as HTMLAnchorElement);
+      expect(document.querySelector('h1')?.textContent, page.id).toBe(page.title);
+      // And the More tab still says where the rider is.
+      expect(
+        document
+          .querySelector('nav[aria-label="Primary"] a[href="#/more"]')
+          ?.getAttribute('aria-current'),
+        page.id,
+      ).toBe('true');
+    }
+  });
+});
 
 describe('the router', () => {
   it('renders the view the fragment selects, including on first load', async () => {
@@ -195,7 +256,8 @@ describe('the header', () => {
       '#/ride',
       '#/activities',
       '#/routes',
-      '#/devices',
+      // #1429: More opens its own menu page, not the first page under it.
+      '#/more',
     ]);
     expect(primary.map((a) => a.textContent)).toEqual([
       'Home',

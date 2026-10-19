@@ -25,7 +25,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { ChartSlot } from '../design/ChartSlot';
 import { stubLibrary } from '../library/testing';
 import { AppShell } from '../shell/AppShell';
-import { hrefFor, ROUTES, routeById } from '../shell/routes';
+import { groupDestination, hrefFor, ROUTES, routeById } from '../shell/routes';
 import type { CapabilityProbe } from '../support/bluetooth-support';
 import { activateWithKeyboard, mount, settle, type Mounted } from '../testing/mount';
 
@@ -64,9 +64,19 @@ describe('with no charts at all — the shell as it ships', () => {
     await settle();
 
     for (const destination of ROUTES) {
-      const link = document.querySelector<HTMLAnchorElement>(
-        `nav a[href="${hrefFor(destination)}"]`,
-      );
+      const find = (): HTMLAnchorElement | null =>
+        document.querySelector<HTMLAnchorElement>(
+          `nav a[href="${hrefFor(destination)}"], .oyl-more a[href="${hrefFor(destination)}"]`,
+        );
+      if (find() === null) {
+        // #1429: the More tab opens its menu, which links to the page.
+        const group = document.querySelector<HTMLAnchorElement>(
+          `nav[aria-label="Primary"] a[href="${hrefFor(groupDestination(destination.group ?? 'more'))}"]`,
+        );
+        expect(group).not.toBeNull();
+        await activateWithKeyboard(group as HTMLAnchorElement);
+      }
+      const link = find();
       expect(link).not.toBeNull();
       await activateWithKeyboard(link as HTMLAnchorElement);
       expect(document.querySelector('h1')?.textContent).toBe(destination.title);

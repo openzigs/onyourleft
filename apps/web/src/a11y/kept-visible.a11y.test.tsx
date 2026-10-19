@@ -286,6 +286,7 @@ const KEPT: Record<RouteId, Kept> = {
   routes: { sentences: ROUTES_KEPT_VISIBLE },
   about: { sentences: [], reason: `${NOTHING_TUCKED}: it is the page of prose` },
   credits: { sentences: [], reason: `${NOTHING_TUCKED}: it is the page of prose` },
+  more: { sentences: [], reason: `${NOTHING_TUCKED}: it is a list of links (#1429)` },
   // #778: what an instance receives, before sign-in and after; and, once
   // connected (the populated walk), what disconnecting does and does not do.
   // #1251: and, signed in with a key held, the hosted service's section —
