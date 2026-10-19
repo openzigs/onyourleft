@@ -528,6 +528,51 @@ h3:first-child {
 }
 
 /*
+ * The bottom safe-area inset, painted in the canvas — #1441, the bottom
+ * twin of #671's band under the status bar.
+ *
+ * `body`'s padding keeps the END of the page clear of a gesture bar, but only
+ * once it is scrolled to the end: on the owner's Pixel Tablet, edge-to-edge,
+ * everything between passed under the gesture handle, which was drawn over a
+ * sentence on Home and over table rows on a ride's page. Android draws the
+ * handle over the WebView rather than taking it off the viewport (`insets.ts`),
+ * so the page paints the strip itself and content passes beneath it.
+ *
+ * ⚠️ `z-index: 3`, and both neighbours are load-bearing: above every
+ * positioned thing in the page (the sticky table column's 1), and BELOW the
+ * navigation's 4, so the bar on a phone and the rail on a tablet paint their
+ * own surface into the inset as they did before. Of `.oyl-shell` and not the
+ * header, because the sticky header's `z-index` makes it a stacking context
+ * that would lift this over the bar. The ride's stage (20) covers it: the
+ * world runs under the gesture bar on purpose and `.oyl-hud`'s padding holds
+ * every panel clear. `0px` tall on every desktop browser.
+ * `shell.browser.spec.ts` §"#1441" reads the pixel with the insets applied to
+ * the engine, and this rule taken off as its control.
+ */
+.oyl-shell::after {
+  content: '';
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 3;
+  height: var(--oyl-safe-bottom);
+  background: var(--oyl-color-canvas);
+}
+
+/*
+ * And a control reached by Tab stops ABOVE that strip — #1441's "the last
+ * focusable control keeps clear". Chromium scrolls a focused control just far
+ * enough to reach the viewport's edge, and the bottom edge is now the strip,
+ * so the scroll area ends above it (WCAG 2.2 SC 2.4.11). The game chooser's
+ * rule further down adds the navigation bar's height to this on a phone.
+ * `html` and not `:root`, which `theme.a11y.test.ts` keeps for the tokens.
+ */
+html {
+  scroll-padding-bottom: var(--oyl-safe-bottom);
+}
+
+/*
  * Elevation 3, the top of the ramp: the chrome that frames every view, and the
  * only surface that other content ever passes beneath — see the sticky block
  * below `.oyl-main`, which is where that happens and where it is bounded.
@@ -4625,6 +4670,25 @@ select.oyl-input {
   overflow-y: auto;
   position: fixed;
   z-index: 20;
+}
+
+/*
+ * The STACKED layout's world gives up what the insets take — #1441.
+ *
+ * `.oyl-hud__actions` is pinned to the stage's bottom edge, above the gesture
+ * bar, by `position: sticky` — and a sticky box cannot rise above the top of
+ * its own containing block, which here is `.oyl-hud`, below the world and
+ * padded by the status bar's inset. At 320×256 with the tablet's 36 + 32 px
+ * that left the panel 37 px short of room: *Pause* and *End ride* ended at 252,
+ * under a gesture bar that starts at 224. So the world, which is the half a
+ * rider can lose, is the half that pays: its 40vh cap loses both insets, and
+ * with no insets (every desktop browser) it is the 40vh it always was. The
+ * overlay layouts set their own `max-height` further down and do not read it.
+ * `ride.browser.spec.ts` §"#1441" measures every control, and the panel that
+ * holds them, above the inset at every ride viewport, 320×256 among them.
+ */
+.oyl-game--riding .oyl-game__world {
+  max-height: calc(40vh - var(--oyl-safe-top) - var(--oyl-safe-bottom));
 }
 
 /*

@@ -782,6 +782,191 @@ for (const viewport of HEADER_VIEWPORTS) {
   });
 }
 
+/**
+ * The band over the gesture bar, and focus that stops above it — #1441.
+ *
+ * ## What was wrong
+ *
+ * On the owner's Pixel Tablet, edge-to-edge, the gesture handle was drawn over
+ * the page at the bottom of every screen: over a sentence on Home, over table
+ * rows on a ride's page. `body`'s padding (#439) keeps the END of a page clear
+ * of the inset, but everything that scrolled past the bottom edge before the
+ * end passed under the handle.
+ *
+ * ## What is measured, and the control that makes it mean something
+ *
+ * At #671's viewports, with the insets applied to the ENGINE and read back:
+ *
+ * - the pixel in the middle of the 32 px bottom inset, below the middle of
+ *   `main`, with the page scrolled into its long spacer and everything in
+ *   `main` positioned and painted {@link CONTENT_PAINT} — it must be the
+ *   canvas (or, where the phone's navigation bar already sat there, the bar's
+ *   surface), never the content;
+ * - two screens of buttons walked with Tab from the top — the lowest bottom
+ *   edge any of them is focused at must be above the inset, not inside it.
+ *
+ * ⚠️ **The control takes the two rules off** (`theme.css` §`.oyl-shell::after`
+ * and the root's `scroll-padding-bottom`) and the same page must then FAIL
+ * both: the content's paint in the inset wherever no bar covers it, and a
+ * focused button's bottom inside the inset. Without it a page that never applied its
+ * insets would pass as readily as a correct one.
+ *
+ * ## What this does NOT prove
+ *
+ * Anything on the owner's tablet or phone: that is #1441's device check, done
+ * on the devices before merge. The upright tablet's insets are assumed
+ * (`insets.ts`), and the phones here borrow the tablet's.
+ */
+const CONTENT_PAINT = '#ff00ff';
+
+const WITHOUT_1441 = `
+  .oyl-shell::after { content: none !important; }
+  :root { scroll-padding-bottom: 0 !important; }
+`;
+
+interface GestureBandReading {
+  readonly inset: string;
+  readonly barCovers: boolean;
+  readonly focusedBottom: number;
+  readonly fold: number;
+}
+
+async function readGestureBand(
+  page: Page,
+  viewport: (typeof HEADER_VIEWPORTS)[number],
+  path: (name: string) => string,
+  control: boolean,
+): Promise<GestureBandReading> {
+  await page.setViewportSize({ width: viewport.width, height: viewport.height });
+  await applyInsets(page, viewport.insets);
+  await openShell(page);
+  // The insets must be the ones the page resolved, or this measured nothing.
+  expect(await resolvedInsets(page)).toEqual(viewport.insets);
+  if (control) await page.addStyleTag({ content: WITHOUT_1441 });
+
+  // A column of buttons at the top of `main`, two screens of them, walked
+  // with Tab from the first. Close together, because Chromium scrolls a
+  // control that is NEAR the viewport just far enough to reach its edge —
+  // the edge this is about — and centres one that is far from it.
+  await page.evaluate((viewportHeight) => {
+    const main = document.querySelector('.oyl-main');
+    if (main === null) throw new Error('no .oyl-main');
+    const probe = document.createElement('div');
+    probe.dataset['oylProbe'] = 'column';
+    const count = Math.ceil((viewportHeight * 2) / 60);
+    for (let index = 0; index < count; index += 1) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = `Probe ${String(index)}`;
+      button.style.display = 'block';
+      button.style.marginBlock = '16px';
+      probe.append(button);
+    }
+    main.prepend(probe);
+    window.scrollTo(0, 0);
+    probe.querySelector('button')?.focus({ preventScroll: true });
+  }, viewport.height);
+  const presses = await page.evaluate(
+    () => document.querySelectorAll('[data-oyl-probe="column"] button').length - 1,
+  );
+  let focusedBottom = Number.NEGATIVE_INFINITY;
+  for (let press = 0; press < presses; press += 1) {
+    await page.keyboard.press('Tab');
+    const bottom = await page.evaluate(() => {
+      const focused = document.activeElement;
+      if (focused?.closest('[data-oyl-probe="column"]') == null) {
+        throw new Error('Tab left the probe column');
+      }
+      return focused.getBoundingClientRect().bottom;
+    });
+    focusedBottom = Math.max(focusedBottom, bottom);
+  }
+
+  // Content scrolled under the inset, painted, and positioned with the
+  // largest `z-index` the page's own content uses (the lap table's sticky
+  // column, 1), so that a band without one of its own would lose to it.
+  await page.addStyleTag({
+    content: `.oyl-main * { position: relative; z-index: 1; background: ${CONTENT_PAINT} !important; }`,
+  });
+  // Into the spacer, so that what is under the inset is the painted spacer
+  // and not an illustration that keeps its own colours.
+  await page.evaluate(() => {
+    const spacer = document.querySelector('[data-oyl-spacer]');
+    if (spacer === null) throw new Error('no spacer');
+    window.scrollTo(0, spacer.getBoundingClientRect().top + window.scrollY + 200);
+  });
+  await settled(page);
+  expect(await page.evaluate(() => window.scrollY), 'the page did not scroll').toBeGreaterThan(0);
+  const point = await page.evaluate((bottomInset) => {
+    const main = document.querySelector('.oyl-main');
+    if (main === null) throw new Error('no .oyl-main');
+    const box = main.getBoundingClientRect();
+    const x = Math.floor(box.left + box.width / 2);
+    const y = Math.floor(window.innerHeight - bottomInset / 2);
+    // From the bar's BOX, not a hit test: a band painted over the bar would
+    // be what a hit test found, and would then be expected to be the canvas.
+    const bar = document.querySelector('.oyl-nav')?.getBoundingClientRect();
+    const barCovers =
+      bar !== undefined && bar.left <= x && x < bar.right && bar.top <= y && y < bar.bottom;
+    return { x, y, barCovers };
+  }, viewport.insets.bottom);
+  const file = path('inset.png');
+  await page.screenshot({ path: file, clip: { x: point.x, y: point.y, width: 1, height: 1 } });
+  const png = decodePng(file);
+  const inset = `#${[0, 1, 2]
+    .map((channel) => (png.data[channel] ?? 0).toString(16).padStart(2, '0'))
+    .join('')}`;
+  return {
+    inset,
+    barCovers: point.barCovers,
+    focusedBottom,
+    fold: viewport.height - viewport.insets.bottom,
+  };
+}
+
+for (const viewport of HEADER_VIEWPORTS) {
+  test.describe(`#1441 — the gesture bar at ${viewport.name}`, () => {
+    test('content passes beneath a band in the inset, and Tab stops above it', async ({
+      page,
+    }, info) => {
+      const read = await readGestureBand(page, viewport, (name) => info.outputPath(name), false);
+      const published =
+        `inset pixel ${read.inset}${read.barCovers ? ' (the bar)' : ''}; ` +
+        `lowest focused bottom ${read.focusedBottom.toFixed(1)} of fold ${String(read.fold)}`;
+      console.log(`#1441 ${viewport.name}: ${published}`);
+      info.annotations.push({ type: 'gesture bar', description: published });
+      expect(
+        read.inset,
+        'content scrolled into the gesture bar’s inset instead of passing beneath a band ' +
+          '(theme.css §`.oyl-shell::after`)',
+      ).toBe(read.barCovers ? COLOUR_TOKENS.surfaceOverlay : COLOUR_TOKENS.canvas);
+      expect(
+        read.focusedBottom,
+        'a control reached by Tab stopped inside the gesture bar’s inset (theme.css §`html` ' +
+          '`scroll-padding-bottom`)',
+      ).toBeLessThanOrEqual(read.fold + 0.5);
+    });
+
+    test('the control — without the band and the padding it fails both', async ({ page }, info) => {
+      const read = await readGestureBand(page, viewport, (name) => info.outputPath(name), true);
+      console.log(
+        `#1441 control ${viewport.name}: inset ${read.inset}, lowest focused bottom ` +
+          `${read.focusedBottom.toFixed(1)} of fold ${String(read.fold)}`,
+      );
+      if (!read.barCovers) {
+        expect(
+          read.inset,
+          'the inset shows no content without the band, so the pixel assertion cannot fail',
+        ).toBe(CONTENT_PAINT);
+      }
+      expect(
+        read.focusedBottom,
+        'Tab stops above the inset without the padding, so the focus assertion cannot fail',
+      ).toBeGreaterThan(read.fold + 0.5);
+    });
+  });
+}
+
 test.describe('#671 — the app’s name on a phone', () => {
   test.use({ viewport: { width: 390, height: 844 } });
 

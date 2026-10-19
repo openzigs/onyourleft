@@ -135,7 +135,7 @@ import { attachSharedPageOnFailure, releaseSharedPage } from './shared-load';
 
 import { workoutRescueText } from '../src/workout/rescue-text';
 
-import type { Box, StageMeasurement } from './ride-harness';
+import type { Box, StageItem, StageMeasurement } from './ride-harness';
 
 // The page the cases below share goes when this file's cases do (`shared-load.ts`).
 test.afterAll(releaseSharedPage);
@@ -1485,6 +1485,82 @@ test.describe('#439 — a ride with edge-to-edge insets does not scroll', () => 
       expect(reverted.pageOverflow).toBe(
         PIXEL_TABLET_LANDSCAPE_INSETS.top + PIXEL_TABLET_LANDSCAPE_INSETS.bottom,
       );
+    });
+  }
+});
+
+/**
+ * #1441 — the ride's controls are never under the gesture bar, with the
+ * tablet's insets applied to the ENGINE (`insets.ts`) and read back, at every
+ * viewport the ride is laid out at: phone and tablet, upright and on its side.
+ *
+ * `.oyl-hud`'s padding is what holds them clear (`theme.css` §"Safe areas"),
+ * and §"safe areas" above proves it moves the panels at one tablet through the
+ * custom property. This is the gesture bar's half, through `env()`, at all of
+ * them: the bottom of every control is at or above the inset's top edge.
+ *
+ * ⚠️ The control puts the padding back to the stage's own 8 px, and the
+ * actions' sticky edge with it, and a control must then sit inside the inset
+ * — or "clear of it" was a layout that never reached the bottom. Measured,
+ * the controls end 9 px above the inset at every viewport with the padding and
+ * 15 px inside it without.
+ *
+ * ⚠️ **320×256 too**, the stacked layout at its shortest. Its actions panel
+ * is pinned by `position: sticky`, which cannot lift it above the top of
+ * `.oyl-hud`, so with the tablet's 68 px of insets and the world at its old
+ * 40vh the panel ran out of room: *Pause* and *End ride* ended at 252 of 224.
+ * `theme.css` §"The STACKED layout's world gives up what the insets take" is
+ * the fix, and the panel that holds the controls is asserted as well as the
+ * controls: with the world short of only the bottom inset the controls
+ * scraped clear by 4 px while their panel ended 5 px inside the inset.
+ * Measured, the controls end 9 px above the inset at every viewport with the
+ * fix, and the actions panel exactly at it.
+ */
+const WITHOUT_BOTTOM_INSET = `
+  .oyl-game--riding .oyl-hud { padding-bottom: var(--oyl-space-sm) !important; }
+  .oyl-game--riding .oyl-hud__actions { bottom: var(--oyl-space-sm) !important; }
+`;
+
+test.describe('#1441 — the ride’s controls are clear of the gesture bar', () => {
+  for (const viewport of [...OVERLAY_VIEWPORTS, ...STACKED_VIEWPORTS]) {
+    test(`every control ends above the bottom inset — ${viewport.name}`, async ({ page }) => {
+      await applyInsets(page, PIXEL_TABLET_LANDSCAPE_INSETS);
+      await openRide(page, viewport);
+      expect(await resolvedInsets(page)).toEqual(PIXEL_TABLET_LANDSCAPE_INSETS);
+      const fold = viewport.height - PIXEL_TABLET_LANDSCAPE_INSETS.bottom;
+      const lowestOf = (items: readonly StageItem[]): number =>
+        Math.max(...items.map((each) => each.box.bottom));
+
+      const seen = await measure(page);
+      const controls = seen.items.filter((each) => each.name.startsWith('control: '));
+      expect(controls.length, 'the apparatus: the ride rendered its controls').toBeGreaterThan(1);
+      const lowest = lowestOf(controls);
+      expect(
+        controls.filter((each) => each.box.bottom > fold + 0.5).map(describeItem),
+        'a ride control is under the gesture bar',
+      ).toEqual([]);
+      const actions = seen.panels.filter((each) =>
+        each.name.split(' ').includes('oyl-hud__actions'),
+      );
+      expect(actions, 'the apparatus: the ride rendered its actions panel').toHaveLength(1);
+      expect(
+        actions.filter((each) => each.box.bottom > fold + 0.5).map(describeItem),
+        'the panel holding the ride controls is under the gesture bar',
+      ).toEqual([]);
+
+      await page.addStyleTag({ content: WITHOUT_BOTTOM_INSET });
+      const reverted = (await measure(page)).items.filter((each) =>
+        each.name.startsWith('control: '),
+      );
+      const revertedLowest = lowestOf(reverted);
+      console.log(
+        `#1441 ${viewport.name}: lowest control ends at ${lowest.toFixed(1)} of ` +
+          `${String(fold)}; without the padding ${revertedLowest.toFixed(1)}`,
+      );
+      expect(
+        revertedLowest,
+        'without the padding the controls stay clear, so the assertion above cannot fail here',
+      ).toBeGreaterThan(fold + 0.5);
     });
   }
 });
