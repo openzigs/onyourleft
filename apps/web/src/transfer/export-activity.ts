@@ -76,10 +76,11 @@ const MOVING_TIME = 'activity.movingTime';
  * Plus the ride's **moving time**, which is a loss of this exporter's rather
  * than of the codec's — #1323. The codec's track has no moving time to drop: a
  * GPX file states no totals at all, and a TCX `<Lap>` states one time,
- * `TotalTimeSeconds`, which this client writes and reads as the elapsed time so
- * that its laps add up to the ride. So a paused ride exported as either comes
- * back with no pause in it (`read-activity-file.ts` reads no moving time from
- * either format, and bounds it by the elapsed time), and the rider is told
+ * `TotalTimeSeconds`, which this client writes as the elapsed time so that its
+ * laps add up to the ride. So a paused ride exported as either comes back with
+ * no pause in it (`read-activity-file.ts` takes a GPX ride's moving time as the
+ * span of its samples, and a TCX ride's as its laps' times added up, which in
+ * this client's file are that span too — §`statedMovingTimeOf`), and the rider is told
  * before choosing the format rather than after importing it. FIT's session
  * carries it.
  */
@@ -426,7 +427,7 @@ function stretchesOf(stored: readonly LapRecord[], activity: ActivityRecord): re
  *    own elapsed time and distance through its end ({@link ExportLap.rideThrough}).
  *    ⚠️ **Before this a TCX file of a ride with course laps stated the laps'
  *    totals as the ride's**: TCX has no session total, a reader sums its laps
- *    (`read-activity-file.ts` §`statedElapsedTimeOf`), and the laps of a game
+ *    (`read-activity-file.ts` §`statedMovingTimeOf`), and the laps of a game
  *    ride cover neither the whole recording nor the recording's own distance —
  *    a course lap's distance is the game's road, the ride's is the speed
  *    channel summed. Export, erase, import again gave back a different ride.

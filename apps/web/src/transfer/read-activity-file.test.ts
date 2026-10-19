@@ -442,7 +442,10 @@ describe('readActivityFile — totals a file states lap by lap (#1312)', () => {
 
     const ride = readActivityFile('laps.tcx', new TextEncoder().encode(file));
 
-    expect(ride.elapsedTime).toBe(60.6);
+    // Since #1453 the laps' times are the ride's moving time, and its elapsed
+    // time is the span of its samples: the first at 0 s, the last at 80 s.
+    expect(ride.movingTime).toBe(60.6);
+    expect(ride.elapsedTime).toBe(80);
     expect(ride.distance).toBe(0.7);
   });
 });
@@ -504,6 +507,50 @@ describe('readActivityFile — a file’s laps (#1320)', () => {
       [150, 90, 60],
       [240, 59, 30],
     ]);
+  });
+
+  /**
+   * #1453. The same paused file, read for the RIDE's times: its elapsed time is
+   * the span of its samples and its moving time the laps' timer times added up.
+   * Before, the sum was taken as the elapsed time, 150 s for a ride whose own
+   * laps run 299 s between them.
+   */
+  it('times a paused TCX ride by the span of its samples, and moves it for the time its laps state', () => {
+    const ride = readActivityFile(
+      'paused.tcx',
+      lappedFile({
+        format: 'tcx',
+        samples: 300,
+        writer: 'a head unit that is not ours',
+        laps: [
+          { start: 0, elapsed: 60 },
+          { start: 150, elapsed: 60 },
+          { start: 240, elapsed: 30 },
+        ],
+      }),
+    );
+    expect(ride.elapsedTime).toBe(299);
+    expect(ride.movingTime).toBe(150);
+    expect(ride.laps.reduce((sum, lap) => sum + lap.elapsedTime, 0)).toBeLessThanOrEqual(
+      ride.elapsedTime,
+    );
+  });
+
+  it('holds a TCX ride’s moving time to its elapsed time when its laps state more', () => {
+    const ride = readActivityFile(
+      'overlong.tcx',
+      lappedFile({
+        format: 'tcx',
+        samples: 120,
+        writer: 'a head unit that is not ours',
+        laps: [
+          { start: 0, elapsed: 100 },
+          { start: 60, elapsed: 100 },
+        ],
+      }),
+    );
+    expect(ride.elapsedTime).toBe(119);
+    expect(ride.movingTime).toBe(119);
   });
 
   it('runs a lap that states no time of its own to where the next one starts', () => {

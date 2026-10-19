@@ -628,6 +628,16 @@ describe('importActivityFiles — a file’s laps (#1320)', () => {
     // lap's averages are taken over its whole span, the stretch after a pause
     // included — and not cut off StartTime + TotalTimeSeconds in.
     expect(laps.map((lap) => lap.maxPower)).toEqual([149, 239, 298]);
+    // #1453: and the ride is as long as its laps. Its elapsed time is the span
+    // of its samples and its moving time the laps' 150 s of timer time, read
+    // back through the store as the ride's page reads them.
+    const ride = await open.read(async (store) =>
+      store.getActivity(ATHLETE_A, outcome.activityId ?? activityId('missing')),
+    );
+    expect([ride?.elapsedTime, ride?.movingTime]).toEqual([299, 150]);
+    expect(laps.reduce((sum, lap) => sum + lap.elapsedTime, 0)).toBeLessThanOrEqual(
+      ride?.elapsedTime ?? 0,
+    );
   });
 
   it('holds a TCX lap’s moving time to the span it runs to the next lap', async () => {
