@@ -114,6 +114,12 @@ export interface RecoverableRide {
  * failure nobody has seen yet should produce a usable screen rather than a list
  * of two hundred — the same argument `WORKOUT_LIST_LIMIT` makes for a library
  * that grows.
+ *
+ * ⚠️ **A bound on each list, not on the offer** (#1419): {@link recoverableRides}
+ * and {@link unreadableRecordings} are each held to it, so the screen can list
+ * twice this many rows. That is intended. One budget shared between them would
+ * let one list crowd the other out, and either way a recording on the device
+ * that the rider can act on would drop off the screen to make room.
  */
 export const RECOVERABLE_LIMIT = 20;
 
@@ -136,8 +142,9 @@ export interface RecoverableOptions {
  * read rather than leaving the rider a ride that is on the device and in no
  * list.
  *
- * Bounded by {@link RECOVERABLE_LIMIT} and never the ride in progress, for
- * {@link recoverableRides}' reasons.
+ * Bounded by {@link RECOVERABLE_LIMIT} on its own (not sharing
+ * {@link recoverableRides}' budget, as that constant says) and never the ride
+ * in progress, for {@link recoverableRides}' reasons.
  */
 export function unreadableRecordings(
   rows: readonly UnreadableRecordingSession[],

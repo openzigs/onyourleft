@@ -24,6 +24,7 @@
 
 import {
   beatsPerMinute,
+  metres,
   metresPerSecond,
   revolutionsPerMinute,
   seconds,
@@ -41,7 +42,12 @@ import {
   type FitRecord,
 } from '@onyourleft/fit';
 import { deviceId, WEB_BLUETOOTH, type SensorMeasurement } from '@onyourleft/sensors';
-import { athleteId, recordingSessionId, type RecordingSessionId } from '@onyourleft/store';
+import {
+  athleteId,
+  recordingSessionId,
+  type RecordedCourseLap,
+  type RecordingSessionId,
+} from '@onyourleft/store';
 import {
   assertRecordingRecovers,
   ATHLETE_A,
@@ -541,6 +547,53 @@ describe('a recovered ride can be continued, not merely read', () => {
     await expect(
       harness.read(async (store) => store.listRecordingSessions(ATHLETE_A)),
     ).resolves.toEqual([]);
+  });
+});
+
+describe('#1419 — a lap that ends closes the lap in progress', () => {
+  function courseLap(from: number, to: number): RecordedCourseLap {
+    return {
+      from: { at: at(from), movingTime: seconds(from) },
+      to: { at: at(to), movingTime: seconds(to) },
+      distance: metres(100 * (to - from)),
+    };
+  }
+
+  /**
+   * Thirty seconds ridden, then the lap in progress noted, `then` run, and the
+   * recording stopped: what the header on disk holds.
+   *
+   * ⚠️ The lap in progress is placed AFTER the completed lap noted below, so
+   * the store's own read rule (a lap in progress that began before the last
+   * completed lap ended is dropped) cannot hide a recorder that forgot to
+   * clear it.
+   */
+  async function headerAfter(then: (recorder: Recorder) => void) {
+    const recorder = newRecorder();
+    await recorder.start(at(0));
+    for (let t = 0; t < 30; t += 1) {
+      recorder.observeReading(powerReading(t, 200));
+      recorder.observeReading(speedReading(t, 9));
+      await recorder.tick(at(t));
+    }
+    recorder.noteOpenCourseLap({ ...courseLap(20, 25), partial: true });
+    then(recorder);
+    await recorder.stop(at(30));
+    await harness.discard();
+    return harness.read(async (store) => store.recoverRecording(ATHLETE_A, recorder.sessionId));
+  }
+
+  it('keeps the lap in progress on the header while no lap has ended', async () => {
+    const recovered = await headerAfter(() => undefined);
+    expect(recovered?.openCourseLap).toStrictEqual({ ...courseLap(20, 25), partial: true });
+  });
+
+  it('writes no lap in progress once a lap has ended', async () => {
+    const recovered = await headerAfter((recorder) => {
+      recorder.noteCourseLap(courseLap(0, 10));
+    });
+    expect(recovered?.courseLaps).toStrictEqual([courseLap(0, 10)]);
+    expect(recovered).not.toHaveProperty('openCourseLap');
   });
 });
 

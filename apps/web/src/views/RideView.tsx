@@ -44,7 +44,7 @@
  * component rendering the two buttons in the right order.
  */
 
-import { useEffect, useRef, useState, type JSX } from 'react';
+import { useEffect, useId, useRef, useState, type JSX } from 'react';
 
 import type { BeatsPerMinute, Watts } from '@onyourleft/domain';
 
@@ -475,6 +475,11 @@ function kindText(ride: RecoverableRide): string {
   return `A finished ride, up to ${ride.spanned} long, that could not be saved.`;
 }
 
+/** The ids a recovered ride's controls are described by — #1419. */
+function rideDescription(describedBy: string, index: number): string {
+  return `${describedBy}-ride-${String(index)} ${describedBy}-ride-${String(index)}-of`;
+}
+
 function RecoveryOffer({
   controller,
   snapshot,
@@ -482,9 +487,16 @@ function RecoveryOffer({
   readonly controller: RideController;
   readonly snapshot: RideSnapshot;
 }): JSX.Element | null {
+  // #1419: every row's controls share one accessible name ("Discard this
+  // ride"), so each is DESCRIBED by its own row — its sentence, and where it
+  // stands in its list — and a screen reader can tell them apart. The visible
+  // text is unchanged; the position is the hidden half.
+  const describedBy = useId();
   if (snapshot.recoverable.length === 0 && snapshot.unreadableRecordings.length === 0) {
     return null;
   }
+  const rides = snapshot.recoverable.length;
+  const unreadable = snapshot.unreadableRecordings.length;
   return (
     <section>
       <h3>Rides still on this device</h3>
@@ -493,12 +505,16 @@ function RecoveryOffer({
         the ones that were never added to your activities.
       </p>
       <ul>
-        {snapshot.recoverable.map((ride) => (
+        {snapshot.recoverable.map((ride, index) => (
           <li key={ride.id}>
-            <p>{offerText(ride)}</p>
+            <p id={`${describedBy}-ride-${String(index)}`}>{offerText(ride)}</p>
+            <span id={`${describedBy}-ride-${String(index)}-of`} hidden>
+              {`Ride ${String(index + 1)} of ${String(rides)}.`}
+            </span>
             {ride.canContinue ? (
               <Button
                 variant="secondary"
+                describedBy={rideDescription(describedBy, index)}
                 onClick={() => {
                   void controller.continueRecovered(ride.id);
                 }}
@@ -509,6 +525,7 @@ function RecoveryOffer({
             {ride.alreadySaved ? null : (
               <Button
                 variant="secondary"
+                describedBy={rideDescription(describedBy, index)}
                 onClick={() => {
                   void controller.saveRecovered(ride.id);
                 }}
@@ -518,6 +535,7 @@ function RecoveryOffer({
             )}
             <Button
               variant="secondary"
+              describedBy={rideDescription(describedBy, index)}
               onClick={() => {
                 void controller.discardRecovered(ride.id);
               }}
@@ -527,11 +545,17 @@ function RecoveryOffer({
           </li>
         ))}
         {/* #1325: on the device and in no other list, so said, and discardable. */}
-        {snapshot.unreadableRecordings.map((id) => (
+        {snapshot.unreadableRecordings.map((id, index) => (
           <li key={`unreadable-${typeof id}-${String(id)}`}>
-            <p>A recording that cannot be read, so it cannot be continued or saved.</p>
+            <p id={`${describedBy}-unreadable-${String(index)}`}>
+              A recording that cannot be read, so it cannot be continued or saved.
+            </p>
+            <span id={`${describedBy}-unreadable-${String(index)}-of`} hidden>
+              {`Recording ${String(index + 1)} of ${String(unreadable)}.`}
+            </span>
             <Button
               variant="secondary"
+              describedBy={`${describedBy}-unreadable-${String(index)} ${describedBy}-unreadable-${String(index)}-of`}
               onClick={() => {
                 void controller.discardRecovered(id);
               }}

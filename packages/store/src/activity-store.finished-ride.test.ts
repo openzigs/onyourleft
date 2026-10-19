@@ -225,9 +225,15 @@ describe('the parts of a ride must be the same ride', () => {
     const ride = finishedRide();
     const mismatched = { ...ride, streams: { ...ride.streams, athleteId: ATHLETE_B } };
 
-    await expect(
-      harness.write(async (store) => store.putFinishedRide(mismatched)),
-    ).rejects.toBeInstanceOf(StoreValidationError);
+    const refused = harness.write(async (store) => store.putFinishedRide(mismatched));
+    await expect(refused).rejects.toBeInstanceOf(StoreValidationError);
+    // #1419: says it is the athlete that differs — not the activity id twice.
+    await expect(refused).rejects.toThrow(
+      `cannot store ride ${ride.activity.id}: its samples are for another athlete`,
+    );
+    expect(
+      await harness.read(async (store) => store.getActivity(ATHLETE_A, ride.activity.id)),
+    ).toBe(undefined);
   });
 
   it('refuses a lap for another activity', async () => {

@@ -282,7 +282,8 @@ export const INDEX = {
   /**
    * Newest checkpoint first. Read by nothing since #1325: a header with a
    * damaged `updatedAt` is not in it. Kept, because dropping an index is a
-   * schema version. @see ActivityStore.readRecordingSessions
+   * schema version: drop it at the next one (#1419).
+   * @see ActivityStore.readRecordingSessions
    */
   recordingSessionByAthleteAndUpdatedAt: '[athleteId+updatedAt]',
   /** `deleteAthlete`'s cascade over recordings, and `readRecordingSessions`. */

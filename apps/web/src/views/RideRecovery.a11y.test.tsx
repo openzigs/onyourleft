@@ -223,3 +223,57 @@ describe('a recording that will not read (#1325)', () => {
     expect(text).toContain('Save this ride');
   });
 });
+
+/**
+ * What a control's `aria-describedby` reads out: the text of every element it
+ * names, in order, hidden or not — as the accessible-description computation
+ * reads it.
+ */
+function describedAs(control: Element): string {
+  return (control.getAttribute('aria-describedby') ?? '')
+    .split(/\s+/)
+    .filter((id) => id !== '')
+    .map((id) => document.getElementById(id)?.textContent?.trim() ?? '')
+    .join(' ');
+}
+
+function buttonsNamed(name: string): HTMLElement[] {
+  return [...document.querySelectorAll('button')].filter((button) => button.textContent === name);
+}
+
+describe('controls that share a name are told apart — #1419', () => {
+  it('describes each Discard this ride by its own row', async () => {
+    // Two rides with the same sentence: only where each stands tells them apart.
+    await show([offered('interrupted', 'one'), offered('interrupted', 'two')]);
+    const discards = buttonsNamed('Discard this ride');
+    expect(discards).toHaveLength(2);
+    const descriptions = discards.map(describedAs);
+    expect(descriptions).toEqual([
+      `An interrupted ride, up to ${formatDuration(SPANNED_SECONDS)} long. Ride 1 of 2.`,
+      `An interrupted ride, up to ${formatDuration(SPANNED_SECONDS)} long. Ride 2 of 2.`,
+    ]);
+    // Continue and Save on the same row are described by the same row.
+    expect(buttonsNamed('Continue this ride').map(describedAs)).toEqual(descriptions);
+    expect(buttonsNamed('Save this ride').map(describedAs)).toEqual(descriptions);
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+  });
+
+  it('describes each Discard this recording by its own row', async () => {
+    await show([], ['broken-one', 'broken-two']);
+    expect(buttonsNamed('Discard this recording').map(describedAs)).toEqual([
+      'A recording that cannot be read, so it cannot be continued or saved. Recording 1 of 2.',
+      'A recording that cannot be read, so it cannot be continued or saved. Recording 2 of 2.',
+    ]);
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+  });
+
+  it('shows no new text: the position is the hidden half of the description', async () => {
+    const view = await show([offered('interrupted', 'one')], ['broken-one']);
+    for (const position of ['Ride 1 of 1.', 'Recording 1 of 1.']) {
+      const span = [...view.container.querySelectorAll('span')].find(
+        (element) => element.textContent === position,
+      );
+      expect(span?.hidden).toBe(true);
+    }
+  });
+});
