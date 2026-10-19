@@ -526,7 +526,7 @@ function rideOf(input: RideInput): ImportedRide {
     input.statedDistance ??
     (furthest === undefined ? distanceAlongTrack(input.points) : metres(furthest));
   const laps = input.listsLaps
-    ? lapsWithin(input.statedLaps, unixSeconds(first), unixSeconds(first + elapsedTime), {
+    ? lapsWithin(input.statedLaps, unixSeconds(first), unixSeconds(first + observedSpan), {
         startedAt: first,
         sampleCount,
         built,
@@ -619,6 +619,7 @@ function lapsWithin(
     Math.min(high, Math.max(low, value));
   const laps: ImportedLap[] = [];
   let cursor: number = rideStart;
+  let distanceLeft: number = grid.distance;
   stated.forEach((lap, index) => {
     const statedStart = lap.startedAt ?? cursor;
     const startedAt = within(statedStart, cursor, rideEnd);
@@ -644,11 +645,13 @@ function lapsWithin(
       },
       false,
     );
+    const lapDistance = Math.min(lap.distance ?? recorded.distance, distanceLeft);
+    distanceLeft -= lapDistance;
     laps.push({
       startedAt: unixSeconds(startedAt),
       elapsedTime: seconds(elapsed),
       movingTime: seconds(Math.min(lap.movingTime ?? elapsed, elapsed)),
-      distance: metres(Math.min(lap.distance ?? recorded.distance, grid.distance)),
+      distance: metres(lapDistance),
       ascent: recorded.ascent,
     });
   });
@@ -671,7 +674,7 @@ function slotsOf<C extends 'speed' | 'altitude'>(
     return undefined;
   }
   const slot = (at: number): number =>
-    Math.min(grid.sampleCount, Math.max(0, Math.floor(at - grid.startedAt)));
+    Math.min(grid.sampleCount, Math.max(0, Math.round(at - grid.startedAt)));
   // The one cast, and `put`'s reason: every entry under this key was written
   // by `put` under this channel.
   return samples.slice(slot(from), slot(to)) as (StreamChannelValue[C] | undefined)[];

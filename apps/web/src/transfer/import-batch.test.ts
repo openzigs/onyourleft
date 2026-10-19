@@ -707,8 +707,8 @@ describe('importActivityFiles — a file’s laps (#1320)', () => {
     // Moving times held to the ride's own, which is 100 seconds.
     expect(ride?.movingTime).toBe(100);
     expect(laps.map((lap) => lap.movingTime)).toEqual([60, 40]);
-    // And no lap goes further than the ride did.
-    expect(laps[1]?.distance).toBe(ride?.distance);
+    // And the laps together go no further than the ride did.
+    expect(laps.map((lap) => lap.distance)).toEqual([300, (ride?.distance ?? 0) - 300]);
   });
 
   it('works a lap’s distance out from its speed samples where the file states none', async () => {
