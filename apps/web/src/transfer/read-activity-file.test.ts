@@ -26,9 +26,10 @@ import {
 } from '@onyourleft/fit';
 
 import { corpusBytes, IMPORTABLE_CORPUS_FILES, REFUSED_CORPUS_FILES } from './corpus';
-import { syntheticCourseGpx } from './testing';
+import { LAPPED_FILE_START, lappedFile, syntheticCourseGpx } from './testing';
 import {
   ActivityImportError,
+  MAXIMUM_IMPORTED_LAPS,
   MAXIMUM_IMPORTED_SAMPLES,
   readActivityFile,
 } from './read-activity-file';
@@ -443,5 +444,84 @@ describe('readActivityFile — totals a file states lap by lap (#1312)', () => {
 
     expect(ride.elapsedTime).toBe(60.6);
     expect(ride.distance).toBe(0.7);
+  });
+});
+
+/**
+ * #1320: a file's laps as the import lists them. The rows they become, and the
+ * rule for which files list any, are `import-batch.test.ts`'s.
+ */
+describe('readActivityFile — a file’s laps (#1320)', () => {
+  /** Garmin's FIT manufacturer number: a file that names its writer. */
+  const GARMIN = 1;
+
+  it('lists none past the limit, keeps the ride, and says so; and refuses none at it', () => {
+    const lapsOf = (count: number) =>
+      readActivityFile(
+        'many.fit',
+        lappedFile({
+          format: 'fit',
+          samples: 120,
+          writer: GARMIN,
+          // Every one of them a lap of no time, which lists nothing either way:
+          // the limit is on what the file states, before any lap is bounded.
+          laps: Array.from({ length: count }, () => ({ start: 0, elapsed: 0 })),
+        }),
+      );
+
+    const past = lapsOf(MAXIMUM_IMPORTED_LAPS + 1);
+    expect(past.laps).toEqual([]);
+    expect(past.sampleCount).toBe(120);
+    expect(past.faults).toEqual([
+      `the file states ${String(MAXIMUM_IMPORTED_LAPS + 1)} laps, past the ` +
+        `${String(MAXIMUM_IMPORTED_LAPS)} this client will list, so the ride was imported ` +
+        'without its laps',
+    ]);
+    expect(lapsOf(MAXIMUM_IMPORTED_LAPS).faults).toEqual([]);
+  });
+
+  it('ends a paused TCX lap where the next starts, the last at the last sample, its time its moving time', () => {
+    // TCX's TotalTimeSeconds is timer time: these three sum to 150 s while the
+    // 300 samples span 299 s, so a bound of first + elapsedTime dropped lap 3,
+    // and StartTime + TotalTimeSeconds ended every lap at its first pause.
+    const ride = readActivityFile(
+      'paused.tcx',
+      lappedFile({
+        format: 'tcx',
+        samples: 300,
+        writer: 'a head unit that is not ours',
+        laps: [
+          { start: 0, elapsed: 60 },
+          { start: 150, elapsed: 60 },
+          { start: 240, elapsed: 30 },
+        ],
+      }),
+    );
+    expect(
+      ride.laps.map((lap) => [lap.startedAt - LAPPED_FILE_START, lap.elapsedTime, lap.movingTime]),
+    ).toEqual([
+      [0, 150, 60],
+      [150, 90, 60],
+      [240, 59, 30],
+    ]);
+  });
+
+  it('runs a lap that states no time of its own to where the next one starts', () => {
+    const ride = readActivityFile(
+      'untimed.fit',
+      lappedFile({
+        format: 'fit',
+        samples: 120,
+        writer: GARMIN,
+        laps: [
+          { start: 0, elapsed: undefined, distance: 250 },
+          { start: 50, elapsed: 69, distance: 345 },
+        ],
+      }),
+    );
+    expect(ride.laps.map((lap) => [lap.startedAt - LAPPED_FILE_START, lap.elapsedTime])).toEqual([
+      [0, 50],
+      [50, 69],
+    ]);
   });
 });

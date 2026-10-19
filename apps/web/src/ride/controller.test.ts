@@ -8510,6 +8510,7 @@ describe('#1312 — the laps of a course are the recording’s, and are saved wi
         firstSlotEmpty: Object.values(storedStreams?.channels ?? {}).every(
           (channel) => channel?.[0] === undefined,
         ),
+        backLaps: await lapsOf(`back-${withLaps ? 'laps' : 'plain'}`),
       };
     };
 
@@ -8559,8 +8560,52 @@ describe('#1312 — the laps of a course are the recording’s, and are saved wi
           format === 'fit' ? lapped.stored.movingTime : lapped.back.elapsedTime,
         );
         expect(LOSSY_CHANNELS[format].includes('activity.movingTime')).toBe(format === 'tcx');
+        // #1320: a file this client wrote comes back with no lap rows. Its
+        // splits include the lead-in and the tail, and nothing in it yet says
+        // which are laps of the course (#1321), so it is read as a file with
+        // no laps rather than one whose lead-in is a lap.
+        expect(lapped.backLaps).toEqual([]);
       },
     );
+
+    /**
+     * #1320's review: a third-party TCX lap ends where the next one starts and
+     * its `TotalTimeSeconds` is its moving time. This client's own TCX writes
+     * each split's wall-clock span there instead. The two readings must not
+     * disagree about this client's file, or the day #1321 lets it list laps,
+     * a ride exported and imported again would come back with other lap times.
+     *
+     * The file is this client's own export with only its `<Creator>` renamed,
+     * so it is read by the third-party rule; each split comes back as a row,
+     * and each row's elapsed time is the time the file wrote for it.
+     */
+    it('reads this client’s own TCX splits back with the times it wrote, by the third-party lap rule', async () => {
+      await recorded(true);
+      const text = new TextDecoder().decode(await exported('tcx'));
+      const written = [...text.matchAll(/<TotalTimeSeconds>([^<]+)<\/TotalTimeSeconds>/gu)].map(
+        (match) => Number(match[1]),
+      );
+      const renamed = text.replace(
+        /(<Creator\b[^>]*>\s*<Name>)On Your Left(<\/Name>)/u,
+        '$1Another app$2',
+      );
+      // The premise: a lead-in, three laps (one a part lap) and a tail; and
+      // the rename took.
+      expect(written).toHaveLength(5);
+      expect(renamed).not.toBe(text);
+
+      await harness.write(async (store) => store.deleteActivity(ATHLETE_A, activityId('ride-1')));
+      await importedBack('tcx', new TextEncoder().encode(renamed), 'renamed');
+      const back = await lapsOf('back-renamed');
+
+      // The ride's first second has no reading in it, but since #1323 the
+      // export states it with a bare point, so the lead-in starts at the
+      // ride's start too: every split's time is the one written.
+      expect(back.map((lap) => lap.elapsedTime)).toEqual(written);
+      // And that one time is also each row's moving time, as it was when a
+      // TCX lap's time was read as its elapsed time.
+      expect(back.map((lap) => lap.movingTime)).toEqual(back.map((lap) => lap.elapsedTime));
+    });
   });
 });
 

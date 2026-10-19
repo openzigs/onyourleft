@@ -41,8 +41,15 @@
  * test in `import-batch.test.ts` a test.
  */
 
-import type { UnixSeconds } from '@onyourleft/domain';
-import type { ActivityId, AthleteId, NewActivity } from '@onyourleft/store';
+import { seconds, unixSeconds, type UnixSeconds } from '@onyourleft/domain';
+import {
+  lapId,
+  type ActivityId,
+  type AthleteId,
+  type NewActivity,
+  type NewLap,
+  type RecordedCourseLap,
+} from '@onyourleft/store';
 
 import type { CourseVerdict } from './course-shaped';
 import {
@@ -53,6 +60,7 @@ import {
 } from './read-activity-file';
 import { loadSummaryToStore } from '../analysis/summary';
 import { rideFactsOf } from '../progress/ride-facts';
+import { lapsToSave } from '../recording/laps';
 import type { TransferStore } from './store-port';
 
 /**
@@ -247,18 +255,19 @@ async function importOne(
     const existing = await options.store.findActivityByOriginalFileHash(options.athleteId, sha256);
     if (existing !== undefined) {
       // A row carrying this hash is a duplicate only if the ride behind it is
-      // actually there. `storeRide` writes the activity first and compensates
-      // by deleting it if the streams do not land — but that compensating
-      // delete can itself fail, and #166 is what happens then: the row
-      // survives carrying the file's hash, every later retry of that file is
+      // actually there. Until #1320 `storeRide` wrote the activity first and
+      // compensated by deleting it if the streams did not land — and that
+      // compensating delete could itself fail, which is #166: the row
+      // survived carrying the file's hash, every later retry of that file was
       // reported as a duplicate of a ride with no data, and no amount of
-      // retrying fixes it because the thing being matched *is* the broken row.
+      // retrying fixed it because the thing being matched *was* the broken
+      // row. The write is one transaction now and leaves no such row, but a
+      // device that imported before it may still hold one.
       //
-      // Checking for the streams closes that at the read side, so a retry
-      // works whether or not the compensation succeeded. The inference is
-      // sound rather than a guess: `originalFile` is written by this importer
-      // and nothing else, so a row with this hash and no stream set can only
-      // be a half-written import from this path.
+      // Checking for the streams closes that at the read side. The inference
+      // is sound rather than a guess: `originalFile` is written by this
+      // importer and nothing else, so a row with this hash and no stream set
+      // can only be a half-written import from this path.
       const stored = await options.store.getStreamSet(options.athleteId, existing.id);
       if (stored !== undefined) {
         return {
@@ -271,11 +280,9 @@ async function importOne(
           faults: [],
         };
       }
-      // Not swallowed here, unlike the compensating delete in `storeRide`.
-      // There the original failure is the one the rider needs and a cleanup
-      // error would mask it; here there is no earlier error to protect, and a
-      // delete that fails means the import below would leave a second row with
-      // the same hash — so it is reported as `not-stored` by the catch beneath.
+      // Not swallowed: a delete that fails means the import below would leave
+      // a second row with the same hash — so it is reported as `not-stored` by
+      // the catch beneath.
       await options.store.deleteActivity(options.athleteId, existing.id);
     }
     const activityId = await storeRide(options, source, ride, sha256);
@@ -294,23 +301,14 @@ async function importOne(
 }
 
 /**
- * Write the ride, then its streams — and undo the ride if the streams do not
- * land.
+ * Write the ride — its activity, its samples and its laps — in one store write
+ * (`putFinishedRide`), as a recorded ride is written (`recording/finish.ts`).
  *
- * The activity has to go down first: `putStreamSet` refuses a set whose
- * activity this athlete does not own, which is the store's write-path scoping
- * check and not something to work around. But that ordering has a trap, and it
- * is this module's version of "a write that reports success while the read
- * cannot see it": if the stream write fails, the activity row survives
- * **carrying the file's hash**, so re-importing the same file afterwards is
- * reported as a duplicate — of a ride with no data in it, which the rider can
- * now never import. Deleting the half-written activity is what makes a retry
- * work.
- *
- * That delete is best-effort, and #166 is the arm where it fails too. The
- * durable half of the fix is not here but in the duplicate check, which
- * requires a stream set behind a matching row before it calls a file already
- * imported — so a retry works even when this compensation did not.
+ * ⚠️ **All of it or none of it** (#1320). Written as an activity, then its
+ * samples, then a lap at a time, a part that failed left the parts before it
+ * behind: a ride with no samples carrying the file's hash (#166), or a ride
+ * with some of its laps. One transaction leaves nothing behind for a failure,
+ * so the rider's retry imports the file once, whole.
  */
 async function storeRide(
   options: ImportBatchOptions,
@@ -360,31 +358,70 @@ async function storeRide(
     }),
     createdAt: options.now(),
   };
-  // `visibility` is left unset deliberately: `putActivity` applies ADR 0004's
+  // `visibility` is left unset deliberately: the store applies ADR 0004's
   // `private` default. An importer that chose a visibility would be choosing
   // one for somebody else's ten-year history.
-  await options.store.putActivity(record);
-  try {
-    await options.store.putStreamSet({
+  return options.store.putFinishedRide({
+    activity: record,
+    streams: {
       activityId: id,
       athleteId: options.athleteId,
       startedAt: ride.startedAt,
       sampleInterval: ride.sampleInterval,
       sampleCount: ride.sampleCount,
       channels: ride.channels,
-    });
-  } catch (error: unknown) {
-    // Swallowed deliberately, and safe to swallow since #166. The rider needs
-    // the original failure — a full disk, an aborted transaction — and letting
-    // a cleanup error replace it would report the wrong cause. What used to
-    // make the swallow dangerous was the residue: a delete that failed left a
-    // hash-bearing row that made every later retry a "duplicate" of an empty
-    // ride. The duplicate check now requires a stream set behind the row, so
-    // that residue no longer blocks anything and this can stay quiet.
-    await options.store.deleteActivity(options.athleteId, id).catch(() => false);
-    throw error;
-  }
-  return id;
+    },
+    laps: lapRowsOf(ride, id),
+  });
+}
+
+/**
+ * The lap rows of an imported ride — #1320.
+ *
+ * Through `recording/laps.ts` §`lapsToSave`, the rule a recorded ride's rows
+ * are made by, so the two cannot differ: each row's averages and highs are
+ * worked out from the imported samples in its slots and never taken from the
+ * file, and the rows' moving times are held to the ride's own. A file lap is
+ * a lap with no course under it, as a lap the rider marks is (#1318): its
+ * distance and climb are the ones `read-activity-file.ts` §`lapsWithin` gave
+ * it, and it is never a part lap, because a file cannot say a lap stopped
+ * short.
+ *
+ * The marks' moving times are the laps' own, run together: a lap's moving
+ * time is the difference of its two marks, which is all `lapsToSave` reads.
+ *
+ * ⚠️ **Each lap's id is derived from the ride's and its place in it**, so an
+ * import needs no second id source. The ride's id is fresh per file, so a
+ * lap id is too.
+ */
+function lapRowsOf(ride: ImportedRide, activityId: ActivityId): readonly NewLap[] {
+  let movedBefore = 0;
+  const ridden = ride.laps.map((lap): RecordedCourseLap => {
+    const from = { at: lap.startedAt, movingTime: seconds(movedBefore) };
+    movedBefore += lap.movingTime;
+    return {
+      from,
+      to: {
+        at: unixSeconds(lap.startedAt + lap.elapsedTime),
+        movingTime: seconds(movedBefore),
+      },
+      distance: lap.distance,
+      ...(lap.ascent === undefined ? {} : { ascent: lap.ascent }),
+    };
+  });
+  let ordinal = 0;
+  return lapsToSave(
+    ridden,
+    {
+      startedAt: ride.startedAt,
+      sampleInterval: ride.sampleInterval,
+      sampleCount: ride.sampleCount,
+      channels: ride.channels,
+    },
+    activityId,
+    () => lapId(`${activityId}:lap:${String(ordinal++)}`),
+    ride.movingTime,
+  );
 }
 
 function failure(
