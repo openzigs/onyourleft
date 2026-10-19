@@ -1365,6 +1365,25 @@ describe('a raise of more than 50 W to the trainer’s minimum is refused only w
     });
   });
 
+  it('does not say the trainer holds its lowest until the trainer has acknowledged it — #1305', () => {
+    // A refused 75 W block, then a stall: the relief offers 150 W, which this
+    // control never answers. Nothing is known to be held, so the rescue's own
+    // reason stands.
+    const session = sessionOver(EASY(), neverAnswers);
+    session.start(seconds(0));
+    for (let second = 0; second <= 10; second += 1) {
+      session.observeCadence({
+        at: seconds(second),
+        cadence: revolutionsPerMinute(Math.max(20, 80 - second * 8)),
+      });
+      session.tick(seconds(second));
+    }
+
+    expect(session.state().holding).toBeUndefined();
+    expect(session.state().player.rescue?.kind).toBe('relief');
+    expect(session.state().rescue).toStrictEqual(session.state().player.rescue);
+  });
+
   it('a stall relief on a block already raised to the minimum says the trainer holds its lowest, not that the target was eased — #1305', async () => {
     // 125 W asked on a 150 W minimum: raised to 150 W. Two thirds of 125 W is
     // 83 W, raised to the same 150 W: nothing lower can be written.
@@ -1388,6 +1407,15 @@ describe('a raise of more than 50 W to the trainer’s minimum is refused only w
     expect(player?.kind).toBe('relief');
     expect(player?.reason).toContain('eased');
     expect(session.state().rescue).toStrictEqual({ ...player, reason: RELIEF_AT_150 });
+
+    // A rider who then stops is told the stall's own sentence: "dropped to
+    // the trainer's lowest" says where it is, so it is left as it is.
+    await ride(session, 11, 13, (second) => ({
+      at: seconds(second),
+      cadence: revolutionsPerMinute(5),
+    }));
+    expect(session.state().player.rescue?.kind).toBe('floor');
+    expect(session.state().rescue).toStrictEqual(session.state().player.rescue);
   });
 
   it('still raises the stall relief to the minimum, however far under it the relief falls', async () => {

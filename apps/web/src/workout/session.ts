@@ -326,15 +326,18 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
   /** @see WorkoutSessionState.raisedFrom */
   let raisedFrom: Watts | undefined;
   /**
-   * Whether the stall relief last written asked for less than the floor on a
-   * block that was itself at or under it, so it wrote the floor the block had
-   * already (#1305's second pass). @see WorkoutSessionState.rescue
+   * Whether the block's own target, before any stall relief, is at or under
+   * the floor (#1305's second pass). A relief asks for less than the block,
+   * so on such a block it is raised to the same floor and lowers nothing.
+   * Decided on every write the player asks for, and read only while a relief
+   * is in force, which always begins with such a write.
+   * @see WorkoutSessionState.rescue
    */
-  let reliefAtFloor = false;
+  let blockAtFloor = false;
 
   /** @see WorkoutSessionState.rescue */
   const rescueAsTold = (rescue: WorkoutRescue | undefined): WorkoutRescue | undefined =>
-    rescue?.kind === 'relief' && reliefAtFloor && writer.lastWritten() === powerFloor
+    rescue?.kind === 'relief' && blockAtFloor && writer.lastWritten() === powerFloor
       ? { ...rescue, reason: reliefAtFloorReason(powerFloor) }
       : rescue;
 
@@ -411,7 +414,6 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
     // sentence (and "raised from") must not outlive it (#1305).
     raiseRefused = false;
     raisedFrom = undefined;
-    reliefAtFloor = false;
     if (released) {
       return;
     }
@@ -447,7 +449,6 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
     raiseRefused = false;
     // The workout is over: no block is asking for anything (#1305's review).
     raisedFrom = undefined;
-    reliefAtFloor = false;
     void control.letGo().then(
       (outcome) => {
         if (outcome.kind === 'incomplete') {
@@ -624,13 +625,9 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
           }
           raiseRefused = false;
           raisedFrom = raised && !state.intent.eased ? asked : undefined;
-          // #1305's second pass: a relief under the floor on a block that
-          // was at or under it too lowers nothing. `share` is the block's own
-          // ask, before the relief (`player.ts` §`write-target`).
-          reliefAtFloor =
-            state.intent.eased &&
-            raised &&
-            Math.round(thresholdPower * state.intent.share) <= powerFloor;
+          // #1305's second pass. `share` is the block's own ask, before
+          // any relief (`player.ts` §`write-target`).
+          blockAtFloor = Math.round(thresholdPower * state.intent.share) <= powerFloor;
           offer(raised ? powerFloor : asked);
           break;
         }
@@ -671,7 +668,6 @@ export function createWorkoutSession(options: WorkoutSessionOptions): WorkoutSes
       raiseRefused = false;
       // What the machine holds is no longer known to be this block's raise.
       raisedFrom = undefined;
-      reliefAtFloor = false;
       // ⚠️ No `stop()`, no release, and — the one that was wrong first — **no
       // `writer.close()`**. The link is down, so a write would only queue
       // against a machine that is not there; but closing the writer is
@@ -725,11 +721,12 @@ export const RELEASE_INCOMPLETE =
  * ⚠️ Says nothing about what the trainer holds. On the ride screen it is
  * shown only when neither the control client nor the ride controller knows
  * of a target this app had acknowledged by this trainer since the page
- * loaded: any such target is at or above the floor (the client sends nothing
- * under the machine's minimum), and then the floor is written, not refused.
- * ⚠️ That is not "the trainer holds nothing". A target from before a page
- * reload, from another app or from the machine's own buttons is not known
- * here, and the trainer keeps it.
+ * loaded, or in the last 30 minutes across a reload (#1305's second pass,
+ * `ride/trainer-target-memory.ts`): any such target is at or above the floor
+ * (the client sends nothing under the machine's minimum), and then the floor
+ * is written, not refused. ⚠️ That is not "the trainer holds nothing". An
+ * older target, one from another app or from the machine's own buttons is
+ * not known here, and the trainer keeps it.
  */
 export function raiseRefusedText(minimum: Watts): string {
   return `This trainer's lowest target is ${String(minimum)} W, more than ${String(LARGEST_RAISE_WATTS)} W above what this block asks for, so no target was sent for it.`;

@@ -48,8 +48,6 @@ import type { PreferenceStorage } from '../game/hud/announce-preference';
 /**
  * How long a remembered target is trusted after it was acknowledged, in
  * seconds. A pick, not a measurement: see the module note.
- *
- * @test-facing
  */
 export const REMEMBERED_TARGET_MAX_AGE_SECONDS = 30 * 60;
 
