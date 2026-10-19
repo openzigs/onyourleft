@@ -229,6 +229,7 @@ export const POPULATED: Record<RouteId, PopulatedExpectation> = {
   instance: { kind: 'fixture', marker: '.oyl-main .oyl-instance__devices li' },
   // #955: a moderator's queues; empty, an account that moderates nothing.
   moderation: { kind: 'fixture', marker: '.oyl-main .oyl-moderation__pending li' },
+  more: { kind: 'none', reason: 'static: a list of the More pages (#1429)' },
   'not-found': { kind: 'none', reason: 'static: a heading and the route list' },
 };
 
@@ -289,6 +290,7 @@ export const EMPTY_STATES: Record<RouteId, EmptyStateExpectation> = {
   'side-camera': { kind: 'none', reason: 'a pairing flow, not a list' },
   'activity-detail': { kind: 'none', reason: 'one ride, opened by its id' },
   'segment-detail': { kind: 'none', reason: 'one segment, opened by its id' },
+  more: { kind: 'none', reason: 'a list of pages, never empty (#1429)' },
   'not-found': { kind: 'none', reason: 'a heading and the route list' },
 };
 

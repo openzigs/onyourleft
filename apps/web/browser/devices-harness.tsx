@@ -166,8 +166,9 @@ function run(): void {
         <AppShell
           capabilities={capabilities}
           rideController={rideController}
-          // No rides, so Home opens on its getting-started card and its own
-          // "Pair a sensor or a smart trainer" link — in the control too.
+          // No rides, so Home opens on its first-open state and its one link
+          // to Devices — the Trainer card's, or in the control, which has no
+          // ride controller, the empty state's (#1429).
           analysis={stubAnalysis(ATHLETE, [])}
         />
       </StrictMode>,

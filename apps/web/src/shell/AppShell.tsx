@@ -154,6 +154,7 @@ const AboutView = lazyView(MORE_GROUP, (group) => group.AboutView);
 const CreditsView = lazyView(MORE_GROUP, (group) => group.CreditsView);
 const InstanceView = lazyView(MORE_GROUP, (group) => group.InstanceView);
 const ModerationView = lazyView(MORE_GROUP, (group) => group.ModerationView);
+const MoreView = lazyView(MORE_GROUP, (group) => group.MoreView);
 
 /** The id `main` carries, and the only place it is written. */
 const MAIN_ID = 'oyl-main';
@@ -751,6 +752,8 @@ function viewFor(
       );
     case 'moderation':
       return <ModerationView port={props.moderation} />;
+    case 'more':
+      return <MoreView />;
     case 'credits':
       // No props: the manifest is built into the bundle, so this is the one
       // view in the shell that needs nothing passed down. `CreditsView.tsx`
@@ -1062,9 +1065,11 @@ function PrimaryNav({ route }: { readonly route: RouteDefinition }): JSX.Element
           const destination = groupDestination(group.id);
           const pages = routesInGroup(group.id);
           const here = route.group === group.id;
+          // `page` where no section row will say which page this is: a group
+          // of one, or the group's own menu page (#1429), which has none.
           const current = !here
             ? undefined
-            : pages.length === 1 && route.id === destination.id
+            : route.id === destination.id && (pages.length === 1 || !pages.includes(destination))
               ? 'page'
               : 'true';
           return (
@@ -1096,7 +1101,10 @@ function SectionNav({ route }: { readonly route: RouteDefinition }): JSX.Element
   }
   const group = NAV_GROUPS.find((each) => each.id === route.group);
   const pages = routesInGroup(route.group);
-  if (group === undefined || pages.length < 2) {
+  // #1429: the group's menu page lists the same pages itself, with a line
+  // each, so a row of them above it would be the list twice.
+  const menu = route.id === groupDestination(route.group).id && !pages.includes(route);
+  if (group === undefined || pages.length < 2 || menu) {
     return null;
   }
   return (
