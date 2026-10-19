@@ -2735,6 +2735,7 @@ export function createRideController(options: RideControllerOptions): RideContro
       outcome.status === 'saved' && finished !== undefined
         ? {
             activityId: outcome.id,
+            movingTime: finished.activity.movingTime,
             elapsedTime: finished.activity.elapsedTime,
             distance: finished.activity.distance,
             averagePower: finished.activity.averagePower,

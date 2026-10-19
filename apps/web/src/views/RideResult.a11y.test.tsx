@@ -37,6 +37,7 @@ afterEach(() => {
 
 const SAVED: SavedRide = {
   activityId: activityId('ride-1042'),
+  movingTime: seconds(3_725),
   elapsedTime: seconds(3_725),
   distance: metres(32_400),
   averagePower: watts(212),
@@ -80,6 +81,33 @@ function buttonNamed(label: string): HTMLButtonElement {
   return found;
 }
 
+describe('#1437’s review — the card leads with moving time, as Home and History do', () => {
+  /** The card's first fact: its term, and what it says. */
+  function firstFact(): string {
+    const fact = queryAll<HTMLElement>(card()!, '.oyl-result__facts > div')[0];
+    return `${fact?.querySelector('dt')?.textContent ?? ''}: ${fact?.querySelector('dd')?.textContent ?? ''}`;
+  }
+
+  it('shows and says the moving time, not the elapsed time, of a recording left running', async () => {
+    // The issue's ride: it moved for 0:10 of a recording left running for
+    // 10:31:26. The card is Home's "Last ride" pattern, the moving time alone
+    // (History's "of … elapsed" line does not fit above the fold: see the card).
+    await show(savedSnapshot({ ...SAVED, movingTime: seconds(10), elapsedTime: seconds(37_886) }));
+
+    expect(firstFact()).toBe('Moving time: 0:10');
+    expect(card()!.textContent).not.toContain('10:31:26');
+    expect(region()!.textContent).toBe('Ride saved: moving time 0:10, 32.4 kilometres.');
+  });
+
+  it('shows the moving time alone when it is longer than the elapsed time — never “of … elapsed”', async () => {
+    await show(savedSnapshot({ ...SAVED, movingTime: seconds(60), elapsedTime: seconds(50) }));
+
+    expect(firstFact()).toBe('Moving time: 1:00');
+    expect(card()!.textContent).not.toContain('elapsed');
+    expect(region()!.textContent).toBe('Ride saved: moving time 1:00, 32.4 kilometres.');
+  });
+});
+
 describe('#1042 — the card is shown for a saved ride and only for one', () => {
   it('shows the saved facts as readings, a link to the ride and one Done', async () => {
     await show(savedSnapshot());
@@ -93,7 +121,7 @@ describe('#1042 — the card is shown for a saved ride and only for one', () => 
     const readings = queryAll<HTMLElement>(shown!, '.oyl-reading').map((node) => node.textContent);
     expect(readings).toEqual(['1:02:05', '32.4 km', '212 W', '141 bpm']);
     const terms = queryAll<HTMLElement>(shown!, 'dt').map((node) => node.textContent);
-    expect(terms).toEqual(['Elapsed', 'Distance', 'Average power', 'Average heart rate']);
+    expect(terms).toEqual(['Moving time', 'Distance', 'Average power', 'Average heart rate']);
     const link = queryAll<HTMLAnchorElement>(shown!, 'a')[0];
     expect(link?.textContent).toBe('Open this ride');
     expect(link?.getAttribute('href')).toBe('#/activities/ride-1042');
@@ -106,7 +134,7 @@ describe('#1042 — the card is shown for a saved ride and only for one', () => 
     await show(savedSnapshot({ ...SAVED, averagePower: undefined, averageHeartRate: undefined }));
     const shown = card()!;
     expect(queryAll<HTMLElement>(shown, 'dt').map((node) => node.textContent)).toEqual([
-      'Elapsed',
+      'Moving time',
       'Distance',
       'Average power',
     ]);
@@ -132,12 +160,12 @@ describe('#1042 — the card is shown for a saved ride and only for one', () => 
     await show(savedSnapshot({ ...SAVED, distance: metres(0) }));
     const shown = card()!;
     expect(queryAll<HTMLElement>(shown, 'dt').map((node) => node.textContent)).toEqual([
-      'Elapsed',
+      'Moving time',
       'Average power',
       'Average heart rate',
     ]);
     expect(shown.textContent).not.toMatch(/0\.0/);
-    expect(region()!.textContent).toBe('Ride saved: 1:02:05 elapsed.');
+    expect(region()!.textContent).toBe('Ride saved: moving time 1:02:05.');
   });
 
   it('states distance in the rider’s units, through the units module', async () => {
@@ -207,14 +235,14 @@ describe('#1042 — announced politely, once', () => {
     const stub = await show(savedSnapshot());
     const spoken = region();
     expect(spoken).toBeDefined();
-    expect(spoken!.textContent).toBe('Ride saved: 1:02:05 elapsed, 32.4 kilometres.');
+    expect(spoken!.textContent).toBe('Ride saved: moving time 1:02:05, 32.4 kilometres.');
 
     // The 1 Hz tick and a sensor notification both re-render the screen.
     const node = spoken;
     stub.set({ elapsedSeconds: 3_726, tick: 1 } as Partial<RideSnapshot>);
     await settle();
     expect(region()).toBe(node);
-    expect(region()!.textContent).toBe('Ride saved: 1:02:05 elapsed, 32.4 kilometres.');
+    expect(region()!.textContent).toBe('Ride saved: moving time 1:02:05, 32.4 kilometres.');
   });
 
   it('renders its region EMPTY first, so the sentence arriving is a change a reader hears', () => {
@@ -250,7 +278,7 @@ describe('#1042 — announced politely, once', () => {
   it('says the game’s outcome after the facts, once', async () => {
     await show(savedSnapshot({ ...SAVED, gameOutcome: 'beaten' }));
     expect(region()!.textContent).toBe(
-      'Ride saved: 1:02:05 elapsed, 32.4 kilometres. In your last trainer game ride, you beat ' +
+      'Ride saved: moving time 1:02:05, 32.4 kilometres. In your last trainer game ride, you beat ' +
         'your best on that route.',
     );
   });
@@ -346,7 +374,7 @@ describe('#1042 — the card outlives the screen, not the ride (#1049’s review
 
   it('is shown again without Done, and does NOT announce the ride a second time', async () => {
     const stub = await show(savedSnapshot());
-    expect(region()!.textContent).toBe('Ride saved: 1:02:05 elapsed, 32.4 kilometres.');
+    expect(region()!.textContent).toBe('Ride saved: moving time 1:02:05, 32.4 kilometres.');
     expect(stub.calls.noteResultAnnounced).toBe(1);
 
     await remount(stub);
@@ -367,7 +395,7 @@ describe('#1042 — the card outlives the screen, not the ride (#1049’s review
     expect(stub.calls.noteResultAnnounced).toBe(1);
     stub.set({ elapsedSeconds: 3_728 });
     await settle();
-    expect(region()!.textContent).toBe('Ride saved: 1:02:05 elapsed, 32.4 kilometres.');
+    expect(region()!.textContent).toBe('Ride saved: moving time 1:02:05, 32.4 kilometres.');
   });
 });
 

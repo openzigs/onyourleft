@@ -53,6 +53,8 @@ import type { GhostOutcome } from '../game/ghost-outcome-kind';
 export interface SavedRide {
   /** The activity the ride became — the card links to its page. */
   readonly activityId: ActivityId;
+  /** What the card leads with — #1437's review: as Home and History do. */
+  readonly movingTime: Seconds;
   readonly elapsedTime: Seconds;
   readonly distance: Metres;
   /** `undefined` for a ride with no power reading at all. */

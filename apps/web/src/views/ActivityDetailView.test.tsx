@@ -241,7 +241,7 @@ describe('criterion 1 — a ride with no position renders without a map', () => 
     const terms = queryAll(summary as Element, 'dt').map((term) => term.textContent);
     expect(terms).not.toContain('Distance');
     // The rest of the summary is still there.
-    expect(terms).toContain('Moving');
+    expect(terms).toContain('Moving time');
     expect(summary?.textContent).not.toMatch(/\b0\.0\b/);
   });
 
