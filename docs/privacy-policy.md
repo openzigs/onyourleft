@@ -130,10 +130,10 @@ The private half of the signing key is a non-extractable key held by the browser
 itself cannot read it, cannot copy it, and cannot send it anywhere. Its public half travels only
 inside a file you export.
 
-**Android's own backup does not include any of it.** The Android app turns off Android's backup to
-your Google account and its transfer of an app's data to a new phone, so Android copies nothing in
-this table to Google and carries none of it across when you set up another device
-([#1451](https://github.com/openzigs/onyourleft/issues/1451)). To move your rides to a new device,
+**The app asks Android not to back any of it up.** The Android app tells Android not to back up
+its data to your Google account and not to copy it to a new phone when you set one up
+([#1451](https://github.com/openzigs/onyourleft/issues/1451)). A phone maker's own transfer tool
+works outside the app, and the app cannot control what it copies. To move your rides to a new device,
 use **Files → Take everything with you** on this one, and import the ride files it gives you with
 **Files → Import** on the new one.
 
