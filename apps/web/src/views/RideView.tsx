@@ -192,12 +192,13 @@ function LiveRide({
   const lapSummary =
     lastLap === undefined ? undefined : manualLapSummary(lastLap.number, lastLap.lap, units);
   // #1433: the zoom — the rider's top two readings, larger, or every reading
-  // they chose. Only where there are readings to zoom, and not on a stopped
-  // ride, whose screen is its result rather than live numbers. Kept on the
-  // device for the next ride, like the choice it zooms; a device that will
-  // not keep it still zooms this screen.
+  // they chose. Only where there are readings to zoom; `RideControls` places
+  // it beside *Start recording* and beside Pause and Stop, and not on a
+  // stopped ride, whose screen is its result rather than live numbers. Kept
+  // on the device for the next ride, like the choice it zooms; a device that
+  // will not keep it still zooms this screen.
   const zoom =
-    snapshot.sensors.length === 0 || snapshot.phase === 'stopped' ? undefined : (
+    snapshot.sensors.length === 0 ? undefined : (
       <Button
         variant="toggle"
         pressed={readings.zoomed}

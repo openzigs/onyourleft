@@ -30,6 +30,14 @@
  * §`.oyl-metric-grid--live`: one column on the narrowest screens, two on a
  * phone, all four in a row once the Live group is wide enough, which on a
  * landscape tablet it is.
+ *
+ * ## Which readings, and the zoom (#1433)
+ *
+ * Which of the four are drawn, and in which order, is the rider's
+ * (`reading-choice.ts`, ranked on Settings); this component draws what it is
+ * handed, in that order. With the Ride screen's *Zoom* on it is handed the top
+ * two and draws them at `--oyl-font-size-zoom`, held to
+ * {@link ZOOMED_DIGIT_FLOOR_PIXELS} in the browser gate.
  */
 
 import type { JSX } from 'react';

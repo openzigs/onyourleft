@@ -58,7 +58,7 @@
  * guess.
  */
 
-import { useEffect, useRef, useState, type JSX, type ReactNode } from 'react';
+import { useState, type JSX, type ReactNode } from 'react';
 
 import { kilograms, type Kilograms } from '@onyourleft/domain';
 import {
@@ -1420,8 +1420,9 @@ function DraftReadingPanel({
  * Each row is a checkbox and two buttons, *Up* and *Down*, rather than a drag:
  * a drag is not operable from a keyboard or a switch, and WCAG 2.2 SC 2.5.7
  * asks for a single-pointer way that is not one. The buttons at the ends stay
- * in the tab order and say they cannot move (`aria-disabled`), and focus stays
- * on the button that was pressed as its row moves. The last reading shown
+ * in the tab order and say they cannot move (`aria-disabled`). Each row is
+ * keyed by its reading, so the button pressed moves with its row and keeps
+ * the focus (React puts it back after the move). The last reading shown
  * cannot be turned off; the panel says so rather than leaving an empty screen.
  */
 function RideReadingsPanel({
@@ -1433,16 +1434,7 @@ function RideReadingsPanel({
 }): JSX.Element {
   const [choice, setChoice] = useState(() => readRideReadings(storage));
   const [message, setMessage] = useState<PanelMessage | undefined>(undefined);
-  // The button just pressed, to be focused again once its row has moved: a
-  // row React moves in the document can lose the focus it held.
-  const refocus = useRef<string | undefined>(undefined);
-  const buttons = useRef(new Map<string, HTMLButtonElement>());
   const labels = presentationFor(units);
-  useEffect(() => {
-    if (refocus.current === undefined) return;
-    buttons.current.get(refocus.current)?.focus();
-    refocus.current = undefined;
-  }, [choice]);
 
   function keep(next: RideReadingsChoice, said: string): void {
     setChoice(next);
@@ -1456,7 +1448,6 @@ function RideReadingsPanel({
   function move(id: RideMetricId, by: -1 | 1): void {
     const next = moveReading(choice, id, by);
     if (next === choice) return;
-    refocus.current = `${id}:${String(by)}`;
     keep(next, rideReadingMoved(labels[id].label, next.order.indexOf(id) + 1, next.order.length));
   }
 
@@ -1509,10 +1500,6 @@ function RideReadingsPanel({
                   key={word}
                   variant="secondary"
                   unavailable={atEnd}
-                  ref={(element: HTMLButtonElement | null) => {
-                    if (element === null) buttons.current.delete(`${id}:${String(by)}`);
-                    else buttons.current.set(`${id}:${String(by)}`, element);
-                  }}
                   onClick={() => {
                     move(id, by);
                   }}

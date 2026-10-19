@@ -79,13 +79,35 @@ describe('Ride screen readings, on Settings', () => {
   });
 
   it('moves a reading, keeps focus on the button pressed, and the Ride screen draws the new order', async () => {
-    await settings();
-    const down = button('Move Power Down');
-    await activateWithKeyboard(down);
-    expect(rows()).toEqual(['[x] Cadence', '[x] Power', '[x] Heart rate', '[x] Speed']);
-    expect(document.activeElement?.textContent?.replace(/\s+/g, ' ').trim()).toBe(
-      'Move Power Down',
-    );
+    // A browser runs the focus fixup when a focused element is taken out of
+    // the document, and `insertBefore` of a node already in it takes it out
+    // first — which is how React moves a keyed row. jsdom does not, so the
+    // case would pass over a panel that dropped focus to <body> on every
+    // press; this restores what a browser does, for this case only.
+    const original = Object.getOwnPropertyDescriptor(Node.prototype, 'insertBefore');
+    const insertBefore = original?.value as (this: Node, node: Node, child: Node | null) => Node;
+    Node.prototype.insertBefore = function <T extends Node>(
+      this: Node,
+      node: T,
+      child: Node | null,
+    ): T {
+      const active = document.activeElement;
+      if (node.isConnected && active instanceof HTMLElement && node.contains(active)) {
+        active.blur();
+      }
+      return insertBefore.call(this, node, child) as T;
+    };
+    try {
+      await settings();
+      const down = button('Move Power Down');
+      await activateWithKeyboard(down);
+      expect(rows()).toEqual(['[x] Cadence', '[x] Power', '[x] Heart rate', '[x] Speed']);
+      expect(document.activeElement?.textContent?.replace(/\s+/g, ' ').trim()).toBe(
+        'Move Power Down',
+      );
+    } finally {
+      if (original !== undefined) Object.defineProperty(Node.prototype, 'insertBefore', original);
+    }
     expect(document.body.textContent).toContain('Power is now 2 of 4.');
 
     await activateWithKeyboard(button('Move Speed Up'));
