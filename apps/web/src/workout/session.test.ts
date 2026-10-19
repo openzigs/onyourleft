@@ -1418,6 +1418,30 @@ describe('a raise of more than 50 W to the trainer’s minimum is refused only w
     expect(session.state().rescue).toStrictEqual(session.state().player.rescue);
   });
 
+  it('a stall relief on a block exactly AT the minimum says the trainer holds its lowest — #1305, #1424 review', async () => {
+    // 150 W asked on a 150 W minimum: written as asked, no raise. Two thirds
+    // of 150 W is 100 W, raised to the same 150 W: the relief lowers nothing,
+    // and the boundary is "at or under", not "under".
+    const { trainer, session } = await loop(
+      () => expandWorkout(workout([steady(60, 0.6)])),
+      machine(150),
+    );
+    session.start(seconds(0));
+    await ride(session, 0, 1);
+    expect(targetWrites(trainer)).toStrictEqual([targetWrite(150)]);
+    expect(session.state().raisedFrom).toBeUndefined();
+
+    await ride(session, 2, 10, (second) => ({
+      at: seconds(second),
+      cadence: revolutionsPerMinute(Math.max(20, 80 - second * 8)),
+    }));
+
+    expect(trainer.targetPowerOnTheTrainer()).toBe(150);
+    const player = session.state().player.rescue;
+    expect(player?.kind).toBe('relief');
+    expect(session.state().rescue).toStrictEqual({ ...player, reason: RELIEF_AT_150 });
+  });
+
   it('still raises the stall relief to the minimum, however far under it the relief falls', async () => {
     // ⚠️ Not covered by the ruling either. 350 W asked on a machine whose
     // minimum is 300 W; two thirds of 350 W is 233 W, 67 W under the minimum.

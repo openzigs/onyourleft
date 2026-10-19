@@ -35,7 +35,11 @@ import {
 } from './ride/controller';
 import { openCapacitorTrainer, openWebBluetoothTrainer } from './ride/trainer';
 import { createShellRideController } from './ride/shell-ride-controller';
-import { createTrainerTargetMemory } from './ride/trainer-target-memory';
+import {
+  createTrainerTargetMemory,
+  trainerTargetStorage,
+  type TrainerTargetMemory,
+} from './ride/trainer-target-memory';
 import { gameSensors } from './game/sensors';
 import { fastestAttempt, ghostFromSpeed } from './game/ghost-source';
 import { isNativeShell, platformCapacitor } from './support/capacitor';
@@ -312,7 +316,7 @@ async function buildPlatform(
     // with its time, so a reload does not refuse a workout's first block over
     // a hard target the trainer may still hold. ⚠️ An optional option, as
     // `presence` is: dropping this line is green in `check:wiring`.
-    trainerTargets: createTrainerTargetMemory(deviceStorage()),
+    trainerTargets: deviceTrainerTargets(),
     store: localStore(),
     athleteId: LOCAL_ATHLETE,
     // `crypto.randomUUID()` rather than a counter: two tabs recording at once
@@ -743,6 +747,18 @@ function buildGameTrainerPort(controller: RideController | undefined): GameTrain
   return gameTrainerPortOver(controller);
 }
 
+let trainerTargetMemory: TrainerTargetMemory | undefined;
+
+/**
+ * #1305. ONE memory for the page: the ride controller writes it and *Erase
+ * everything* forgets it, and a second copy would put the erased trainers back
+ * on the device at the next acknowledgement.
+ */
+function deviceTrainerTargets(): TrainerTargetMemory {
+  trainerTargetMemory ??= createTrainerTargetMemory(trainerTargetStorage());
+  return trainerTargetMemory;
+}
+
 function buildTransferPort(): TransferPort | undefined {
   if (globalThis.crypto?.subtle === undefined) {
     return undefined;
@@ -765,6 +781,7 @@ function buildTransferPort(): TransferPort | undefined {
     instanceAnalysis: instanceAnalysisEraser(
       typeof localStorage === 'undefined' ? undefined : localStorage,
     ),
+    trainerTargets: deviceTrainerTargets(),
     athleteRow: localAthleteRecord(unixSeconds(Math.floor(Date.now() / 1000))),
   };
 }

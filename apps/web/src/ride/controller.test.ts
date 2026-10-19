@@ -5358,12 +5358,16 @@ describe('a workout target under the trainer’s minimum — #1297', () => {
   const deviceStore = (): {
     getItem(key: string): string | null;
     setItem(key: string, value: string): void;
+    removeItem(key: string): void;
   } => {
     const rows = new Map<string, string>();
     return {
       getItem: (key) => rows.get(key) ?? null,
       setItem: (key, value) => {
         rows.set(key, value);
+      },
+      removeItem: (key) => {
+        rows.delete(key);
       },
     };
   };
