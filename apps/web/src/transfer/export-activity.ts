@@ -791,6 +791,11 @@ function fitInputOf(
  * the stored lap's, and absent for a stretch no lap covers: it has none on
  * record, and working some out here would put a number in the file nobody
  * measured as a lap.
+ *
+ * ⚠️ As for TCX ({@link tcxLapFiguresOf}), `lapTrigger` 7 is only a part lap
+ * in a file this client wrote: head units write 7 on the last lap of every
+ * file. #1320's import needs a creator or manufacturer check before it reads
+ * 7 as a part lap in a foreign FIT file.
  */
 function fitLapFiguresOf(lap: ExportLap): Partial<FitLap> {
   if (lap.wholeRide === true) return {};

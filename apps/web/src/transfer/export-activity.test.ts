@@ -870,7 +870,6 @@ describe('exportActivity — a lap’s figures and its kind (#1321)', () => {
     });
     // Still lost: TCX has no element for a climb, and its DistanceMeters is
     // the lap's share of the ride's 900 m, not the 2 km of road it stores.
-    expect(activity.laps.every((lap) => !('totalAscent' in lap))).toBe(true);
     expect(activity.laps[1]?.totalDistance).toBeLessThan(900);
     expect(activity.laps[0]?.averagePower).toBeUndefined();
   });

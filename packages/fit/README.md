@@ -257,8 +257,9 @@ two tables agree. If they ever disagree, that test says so.
 | Third-party head-unit files in GoldenCheetah's public test corpus (`test/rides/`), **read in a scratch directory and never committed** — they are GPL-2.0 data and this package is Apache-2.0 | Observed values (#1321): a Garmin Edge 1000 lap whose fields 19 and 20 equal the mean and the highest of its records' power to the watt, 15 and 16 their heart rate, 21 a climb in metres; a Hammerhead Karoo lap whose field 20 equals its records' highest power; field 23 = 0 on the ordinary riding laps of four devices; field 24 = 0 on laps a rider pressed and 7 on every file's last lap | 2026-10-19 |
 | Garmin's public FIT article *Workout File*, `developer.garmin.com/fit/articles/file-types/workout.html` — public documentation, not an SDK artefact | The `intensity` enumeration: 0 active, 1 rest (#1321) | 2026-10-19 |
 
-**No number was taken from a Garmin SDK artefact, from `Profile.xlsx`, or from GPL/AGPL prior-art
-source.** Reading prior art to check a protocol detail is permitted by `docs/agents/scope-and-ip.md` §6; copying from
+**No number was taken from a Garmin SDK artefact or from `Profile.xlsx`, and apart from the #1321 `lap`
+fields 15, 16, 17, 21 and 24 and `lap_trigger` 7, which the GoldenCheetah row above records and which
+await the owner's ruling, none was taken from GPL/AGPL prior-art source.** Reading prior art to check a protocol detail is permitted by `docs/agents/scope-and-ip.md` §6; copying from
 it is not, and nothing was copied. That includes the sixteen-entry CRC nibble table the public
 documentation presents inside a C routine: the routine is expression, so `src/decode/crc.ts` derives
 the loop from the polynomial instead, and `crc.test.ts` regenerates the nibble table from the same
@@ -371,12 +372,17 @@ across the profile rather than assigned per message.
 > head units, each field held exactly the mean or the highest of the records between the lap's start
 > and end. **Those files are GoldenCheetah's test corpus, not files this project holds**, so whether
 > R2 admits them is a question for the owner, raised in #1321's pull request rather than settled
-> here. The enumerations rest on a public Garmin article and on the same files. A reader who finds
+> here. **The same ruling is needed for all eight #1321 field numbers (15, 16, 17, 19, 20, 21, 23, 24)
+> and for `lap_trigger` 7**, not only 19, 20 and 23: GoldenCheetah's GPL comments are not an R2
+> source either, since §6 permits reading prior art to check a detail, not to source a number. The
+> enumerations rest on a public Garmin article and on the same files. A reader who finds
 > a non-SDK-derived table disagreeing should treat it as the better evidence. `fit-file-parser`, the
 > test-time reader this package exists to disagree with, names all eight fields and both
 > enumerations as this package does
 > (`tools/fixture-corpus/third-party-acceptance.test.ts`, *"reading the lap figures"*); it was read
-> after the numbers were chosen, as a check, and is not their source.
+> after the numbers were chosen, as a check, and is not their source. **Its field tables are
+> themselves generated from the SDK profile, so agreement with it gives no R2 provenance: do not cite
+> it as a source for these numbers.**
 
 `hr.event_timestamp` is deliberately **not** scaled by its 1/1024 s tick rate. It is a free-running
 counter, `event-timestamp-1024-wrap.fit` walks it across its rollover twice, and dividing a wrapped
