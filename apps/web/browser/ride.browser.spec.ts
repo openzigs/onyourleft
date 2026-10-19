@@ -1563,4 +1563,77 @@ test.describe('#1441 — the ride’s controls are clear of the gesture bar', ()
       ).toBeGreaterThan(fold + 0.5);
     });
   }
+
+  /*
+   * The trainer line on TWO lines, whatever the fonts. On the CI runner's
+   * wider glyphs it takes two in the short corners layout's 16 rem actions
+   * panel, and on a Mac one, so the case above passed on a Mac while run
+   * 39323488405 found the panel at [472,181 → 728,329] against a gesture bar
+   * from 328 at 736×360. `min-height: 2lh` is the runner's wrap, set here so a
+   * Mac measures what the runner does: it reproduced that box exactly.
+   *
+   * ⚠️ The control puts back the body's 1.55 leading `theme.css` §"#1441 — the
+   * trainer line at the short corners layout" takes away, and the panel must
+   * then be under the gesture bar again — so the rule is what holds it clear.
+   * Measured on a Mac: the panel ends at 328.0 of 328 with the rule — on the
+   * gesture bar's edge, where `align-self: end` puts it when the column fits —
+   * and at 329.0 without. A pixel is the whole of the fault CI found, so the
+   * control's margin is that pixel and no more; Chromium lays it out the same
+   * on both, which is why the forced wrap reproduced CI's box to the pixel.
+   */
+  const SHORT_CORNERS = OVERLAY_VIEWPORTS.find(
+    (each) => each.width === 736 && each.height === 360,
+  ) as Viewport;
+  const TRAINER_ON_TWO_LINES = `
+    .oyl-game--riding .oyl-hud .oyl-hud__actions > .oyl-hud__trainer { min-height: 2lh !important; }
+  `;
+  const BODY_LEADING = `
+    .oyl-game--riding .oyl-hud .oyl-hud__actions > .oyl-hud__trainer { line-height: 1.55 !important; }
+  `;
+
+  test(`the actions panel stays clear with the trainer line on two lines — ${SHORT_CORNERS.name}`, async ({
+    page,
+  }) => {
+    await applyInsets(page, PIXEL_TABLET_LANDSCAPE_INSETS);
+    await openRide(page, SHORT_CORNERS);
+    expect(await resolvedInsets(page)).toEqual(PIXEL_TABLET_LANDSCAPE_INSETS);
+    await page.addStyleTag({ content: TRAINER_ON_TWO_LINES });
+    const fold = SHORT_CORNERS.height - PIXEL_TABLET_LANDSCAPE_INSETS.bottom;
+    const actionsOf = (seen: StageMeasurement): StageItem => {
+      const actions = seen.panels.filter((each) =>
+        each.name.split(' ').includes('oyl-hud__actions'),
+      );
+      expect(actions, 'the apparatus: the ride rendered its actions panel').toHaveLength(1);
+      return actions[0] as StageItem;
+    };
+
+    const seen = await measure(page);
+    const line = named(seen.items, 'the trainer line');
+    // The apparatus: two lines of the leading this case is about, so a
+    // trainer line that went away cannot pass it.
+    expect(line.box.height, 'the trainer line, on two lines').toBeGreaterThan(40);
+    const controls = seen.items.filter((each) => each.name.startsWith('control: '));
+    expect(controls.length, 'the apparatus: the ride rendered its controls').toBeGreaterThan(1);
+    expect(
+      controls.filter((each) => each.box.bottom > fold + 0.5).map(describeItem),
+      'a ride control is under the gesture bar',
+    ).toEqual([]);
+    const panel = actionsOf(seen);
+    expect(
+      panel.box.bottom,
+      `the panel holding the ride controls is under the gesture bar: ${describeItem(panel)}`,
+    ).toBeLessThanOrEqual(fold + 0.5);
+
+    await page.addStyleTag({ content: BODY_LEADING });
+    const reverted = actionsOf(await measure(page));
+    console.log(
+      `#1441 ${SHORT_CORNERS.name}, the trainer line on two lines: the actions panel ends at ` +
+        `${panel.box.bottom.toFixed(1)} of ${String(fold)}; at the body's leading ` +
+        `${reverted.box.bottom.toFixed(1)}`,
+    );
+    expect(
+      reverted.box.bottom,
+      'at the body’s leading the panel stays clear, so the assertion above cannot fail here',
+    ).toBeGreaterThan(fold + 0.5);
+  });
 });

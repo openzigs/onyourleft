@@ -6942,6 +6942,32 @@ select.oyl-input {
 }
 
 /*
+ * #1441 — the trainer line at the short corners layout, set as a notice is.
+ *
+ * With a gesture bar the right-hand column of a 736×360 stage has 292 px
+ * (36 + 32 px of the tablet's insets off 360), and it holds the secondary
+ * panel (129 px), the actions panel and the grid's two 8 px gaps around the
+ * empty notices row. On the CI runner's wider fonts the trainer line takes two
+ * lines in the 16 rem panel (#1358 measured it), so the actions panel is 148 px,
+ * the column 293, and the grid overflowed its bottom padding: the panel ended at
+ * 329 against a gesture bar from 328 (run 39323488405). *Pause* and *End ride*
+ * stayed clear by the panel's own padding, which is a font away from not.
+ *
+ * The line keeps its size and its place, because the owner's ruling of
+ * 2026-10-17 keeps it on the stage (it carries a workout's hold); only its
+ * leading drops to the 1.35 a notice is set at (§".oyl-hud__notices
+ * .oyl-status"), the HUD's own figure for a sentence read once. That gives back
+ * 6.4 px on two lines and 3.2 on one. `ride.browser.spec.ts` §"#1441" holds the
+ * panel clear with the line on two lines whatever the fonts, and puts the
+ * body's 1.55 back as its control.
+ */
+@media (min-width: 46rem) and (min-height: 22.5rem) and (max-height: 30rem) {
+  .oyl-game--riding .oyl-hud__actions > .oyl-hud__trainer {
+    line-height: 1.35;
+  }
+}
+
+/*
  * WHERE THERE IS NO FREE CELL, a notice takes the route panel's.
  *
  * The two layouts a phone gets — corners on its side, column upright — have
