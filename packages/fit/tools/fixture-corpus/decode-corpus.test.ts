@@ -53,6 +53,10 @@ import {
   FILE_TYPE_ACTIVITY,
   fitCrc16,
   GLOBAL_MESSAGE,
+  INTENSITY_ACTIVE,
+  INTENSITY_REST,
+  LAP_TRIGGER_MANUAL,
+  LAP_TRIGGER_SESSION_END,
   readFitContainer,
   SPORT_CYCLING,
 } from '../../src/decode';
@@ -606,6 +610,71 @@ describe('CRC validation', () => {
   });
 });
 
+describe('lap-figures.fit — #1321', () => {
+  const { activity, faults } = decodeFitActivity(fixture('lap-figures.fit'));
+
+  /** The records a lap message summarises: those from its start to its end, inclusive. */
+  function recordsOf(index: number): readonly FitRecord[] {
+    const lap = activity.laps[index];
+    const at = (time: FitDateTime | undefined) =>
+      time?.kind === 'instant' ? time.instant : Number.NaN;
+    return activity.records.filter(
+      (record) =>
+        at(record.timestamp) >= at(lap?.startTime) && at(record.timestamp) <= at(lap?.timestamp),
+    );
+  }
+  const mean = (values: readonly (number | undefined)[]) =>
+    Math.round(values.reduce<number>((sum, value) => sum + (value ?? 0), 0) / values.length);
+  const highest = (values: readonly (number | undefined)[]) =>
+    Math.max(...values.map((value) => value ?? 0));
+
+  it('decodes cleanly, stepping over the lap field this profile does not name', () => {
+    expect(faults).toEqual([]);
+    expect(activity.laps).toHaveLength(3);
+    expect(activity.records).toHaveLength(85);
+  });
+
+  it('reads each lap’s averages and bests, which are its own records’', () => {
+    activity.laps.forEach((lap, index) => {
+      const records = recordsOf(index);
+      expect(records.length).toBeGreaterThan(0);
+      expect(lap.averageHeartRate).toBe(mean(records.map((record) => record.heartRate)));
+      expect(lap.maxHeartRate).toBe(highest(records.map((record) => record.heartRate)));
+      expect(lap.averageCadence).toBe(mean(records.map((record) => record.cadence)));
+      expect(lap.totalAscent).toBeGreaterThan(0);
+    });
+    expect(activity.laps[1]?.averagePower).toBe(mean(recordsOf(1).map((record) => record.power)));
+    expect(activity.laps[1]?.maxPower).toBe(highest(recordsOf(1).map((record) => record.power)));
+  });
+
+  it('reads the invalid marker in a power field as no power, not as a number', () => {
+    expect(activity.laps[2]?.averagePower).toBeUndefined();
+    expect(activity.laps[2]?.maxPower).toBeUndefined();
+  });
+
+  it('reads each lap’s kind through the exported constants', () => {
+    expect(activity.laps.map((lap) => [lap.intensity, lap.lapTrigger])).toEqual([
+      [INTENSITY_REST, LAP_TRIGGER_MANUAL],
+      [INTENSITY_ACTIVE, LAP_TRIGGER_MANUAL],
+      [INTENSITY_ACTIVE, LAP_TRIGGER_SESSION_END],
+    ]);
+  });
+
+  it('reads none of it from a lap that does not carry it', () => {
+    const plain = decodeFitActivity(fixture('paused-laps.fit')).activity.laps[0];
+    expect(plain).toMatchObject({
+      averagePower: undefined,
+      maxPower: undefined,
+      averageHeartRate: undefined,
+      maxHeartRate: undefined,
+      averageCadence: undefined,
+      totalAscent: undefined,
+      intensity: undefined,
+      lapTrigger: undefined,
+    });
+  });
+});
+
 describe('the decoder profile and the generator profile were derived independently', () => {
   /**
    * `fixtures/README.md` §5: *"#30 must re-verify each of these against the
@@ -649,6 +718,10 @@ describe('the decoder profile and the generator profile were derived independent
     expect(EVENT_TIMER).toBe(GENERATOR_ENUM_VALUE.eventTimer);
     expect(EVENT_TYPE_START).toBe(GENERATOR_ENUM_VALUE.eventTypeStart);
     expect(EVENT_TYPE_STOP).toBe(GENERATOR_ENUM_VALUE.eventTypeStop);
+    expect(INTENSITY_ACTIVE).toBe(GENERATOR_ENUM_VALUE.intensityActive);
+    expect(INTENSITY_REST).toBe(GENERATOR_ENUM_VALUE.intensityRest);
+    expect(LAP_TRIGGER_MANUAL).toBe(GENERATOR_ENUM_VALUE.lapTriggerManual);
+    expect(LAP_TRIGGER_SESSION_END).toBe(GENERATOR_ENUM_VALUE.lapTriggerSessionEnd);
   });
 });
 

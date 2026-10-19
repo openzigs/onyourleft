@@ -163,6 +163,20 @@ const INDOOR_CHANNELS: readonly RecordChannel[] = [
 /** A run of samples that share one timer segment, and become one lap. */
 export interface RideSegment {
   readonly samples: readonly RideSample[];
+  /**
+   * #1321: what this segment's lap states beyond its times and distance. A
+   * file whose segments carry none writes the four-field lap every other
+   * fixture has; one that carries any writes the figures on every lap.
+   */
+  readonly lap?: SegmentLap;
+}
+
+/** A lap's figures and its kind, as a head unit states them — #1321. */
+export interface SegmentLap {
+  readonly intensity: number;
+  readonly lapTrigger: number;
+  /** False for a lap ridden with no power meter: its two power fields hold the invalid marker. */
+  readonly power: boolean;
 }
 
 export interface ActivityFileSpecification {
@@ -279,6 +293,7 @@ export function buildActivityFile(specification: ActivityFileSpecification) {
     developerField ? [developerField.definition] : [],
   );
 
+  const withFigures = segments.some((segment) => segment.lap !== undefined);
   builder.definition(LOCAL.lap, GLOBAL_MESSAGE.lap, [
     { number: FIELD.timestamp, size: 4, baseType: BASE_TYPE.uint32 },
     { number: FIELD.messageIndex, size: 2, baseType: BASE_TYPE.uint16 },
@@ -286,6 +301,7 @@ export function buildActivityFile(specification: ActivityFileSpecification) {
     { number: FIELD.lap.totalElapsedTime, size: 4, baseType: BASE_TYPE.uint32 },
     { number: FIELD.lap.totalTimerTime, size: 4, baseType: BASE_TYPE.uint32 },
     { number: FIELD.lap.totalDistance, size: 4, baseType: BASE_TYPE.uint32 },
+    ...(withFigures ? LAP_FIGURE_FIELDS : []),
   ]);
 
   let lastTimestamp = FIT_START_TIMESTAMP;
@@ -332,6 +348,7 @@ export function buildActivityFile(specification: ActivityFileSpecification) {
       { kind: 'u32', value: (last.fitTimestamp - lastTimestamp) * SCALE.time },
       { kind: 'u32', value: (last.fitTimestamp - first.fitTimestamp) * SCALE.time },
       { kind: 'u32', value: last.distanceCentimetres - lastDistanceCentimetres },
+      ...(withFigures ? lapFigureValues(segment) : []),
     ]);
 
     lastTimestamp = last.fitTimestamp;
@@ -390,6 +407,64 @@ export function buildActivityFile(specification: ActivityFileSpecification) {
       ? {}
       : { truncateDataToBytes: specification.truncateDataToBytes },
   );
+}
+
+/** A lap field this profile subset does not name. See {@link LAP_FIGURE_FIELDS}. */
+export const UNNAMED_LAP_FIELD = 22;
+
+/**
+ * The lap figures a head unit writes after the four every lap carries — #1321.
+ *
+ * In field-number order, which is how the head-unit files #1321 was checked
+ * against lay them out, and **not** the order this package's encoder writes
+ * them in, so a decoder that matched fields by position rather than by number
+ * reads garbage here. Field 22 is one this profile subset does not name — it
+ * sits between two that it does, as it does in a head unit's lap — so the
+ * decoder has to step over a field it does not know mid-message.
+ */
+const LAP_FIGURE_FIELDS: readonly FieldDefinition[] = [
+  { number: FIELD.lap.averageHeartRate, size: 1, baseType: BASE_TYPE.uint8 },
+  { number: FIELD.lap.maxHeartRate, size: 1, baseType: BASE_TYPE.uint8 },
+  { number: FIELD.lap.averageCadence, size: 1, baseType: BASE_TYPE.uint8 },
+  { number: FIELD.lap.averagePower, size: 2, baseType: BASE_TYPE.uint16 },
+  { number: FIELD.lap.maxPower, size: 2, baseType: BASE_TYPE.uint16 },
+  { number: FIELD.lap.totalAscent, size: 2, baseType: BASE_TYPE.uint16 },
+  { number: UNNAMED_LAP_FIELD, size: 2, baseType: BASE_TYPE.uint16 },
+  { number: FIELD.lap.intensity, size: 1, baseType: BASE_TYPE.enum },
+  { number: FIELD.lap.lapTrigger, size: 1, baseType: BASE_TYPE.enum },
+];
+
+/**
+ * A segment's lap figures, worked out from its own samples: the mean and the
+ * highest, each rounded to the whole unit the field holds, and the metres
+ * climbed between consecutive samples.
+ */
+function lapFigureValues(segment: RideSegment): readonly FieldValue[] {
+  const { samples, lap } = segment;
+  const mean = (values: readonly number[]): number =>
+    Math.round(values.reduce((sum, value) => sum + value, 0) / values.length);
+  const heartRates = samples.map((sample) => sample.heartRate);
+  const powers = samples.map((sample) => sample.power);
+  let climbedFifths = 0;
+  samples.forEach((sample, index) => {
+    const before = samples[index - 1];
+    if (before !== undefined && sample.fitAltitude > before.fitAltitude) {
+      climbedFifths += sample.fitAltitude - before.fitAltitude;
+    }
+  });
+  const withPower = lap?.power ?? true;
+  return [
+    { kind: 'u8', value: mean(heartRates) },
+    { kind: 'u8', value: Math.max(...heartRates) },
+    { kind: 'u8', value: mean(samples.map((sample) => sample.cadence)) },
+    { kind: 'u16', value: withPower ? mean(powers) : INVALID_VALUE.uint16 },
+    { kind: 'u16', value: withPower ? Math.max(...powers) : INVALID_VALUE.uint16 },
+    // `record.altitude` is in fifths of a metre (scale 5); the lap's is metres.
+    { kind: 'u16', value: Math.round(climbedFifths / 5) },
+    { kind: 'u16', value: 0 },
+    { kind: 'u8', value: lap?.intensity ?? ENUM_VALUE.intensityActive },
+    { kind: 'u8', value: lap?.lapTrigger ?? ENUM_VALUE.lapTriggerManual },
+  ];
 }
 
 /**
@@ -491,6 +566,57 @@ export function pausedLapsRide() {
   return buildActivityFile({
     channels: OUTDOOR_CHANNELS,
     segments: [{ samples: first }, { samples: second }],
+  });
+}
+
+/**
+ * Three laps that state their figures and their kind, the way a head unit's
+ * do — #1321. A lead-in marked as rest, a whole lap ended by hand, and a last
+ * lap that ended with the session and was ridden with no power meter, so its
+ * two power fields hold the invalid marker rather than a number.
+ */
+export function lapFiguresRide() {
+  const track = NULL_ISLAND_TRACK;
+  return buildActivityFile({
+    channels: OUTDOOR_CHANNELS,
+    segments: [
+      {
+        samples: rideSamples({ sampleCount: 20, track }),
+        lap: {
+          intensity: ENUM_VALUE.intensityRest,
+          lapTrigger: ENUM_VALUE.lapTriggerManual,
+          power: true,
+        },
+      },
+      {
+        samples: rideSamples({
+          sampleCount: 40,
+          track,
+          startOffsetSeconds: 20,
+          channelOffset: 20,
+          startDistanceMetres: 0,
+        }),
+        lap: {
+          intensity: ENUM_VALUE.intensityActive,
+          lapTrigger: ENUM_VALUE.lapTriggerManual,
+          power: true,
+        },
+      },
+      {
+        samples: rideSamples({
+          sampleCount: 25,
+          track,
+          startOffsetSeconds: 60,
+          channelOffset: 60,
+          startDistanceMetres: 0,
+        }),
+        lap: {
+          intensity: ENUM_VALUE.intensityActive,
+          lapTrigger: ENUM_VALUE.lapTriggerSessionEnd,
+          power: false,
+        },
+      },
+    ],
   });
 }
 

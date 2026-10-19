@@ -418,9 +418,21 @@ function writeTrackPoint(writer: XmlWriter, point: TrackPoint): void {
  * `distance` has no element in GPX 1.1 or in any extension schema this package
  * writes, and `lap.totalElapsedTime` / `lap.totalDistance` have nowhere to go
  * because GPX has no lap. `seconds` and `metres` are named to make it obvious
- * which quantities are meant.
+ * which quantities are meant. Nor, for the same reason, do a lap's figures and
+ * its kind (#1321), which TCX carries.
  */
-export const GPX_LOSSY_CHANNELS = ['point.distance', 'lap.totalElapsedTime', 'lap.totalDistance'];
+export const GPX_LOSSY_CHANNELS = [
+  'point.distance',
+  'lap.totalElapsedTime',
+  'lap.totalDistance',
+  'lap.averageHeartRate',
+  'lap.maxHeartRate',
+  'lap.averageCadence',
+  'lap.averagePower',
+  'lap.maxPower',
+  'lap.intensity',
+  'lap.triggerMethod',
+];
 
 /**
  * A lap with the channels GPX cannot carry removed, for a round-trip comparison.

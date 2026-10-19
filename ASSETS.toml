@@ -350,6 +350,13 @@ read = "2026-09-16"
 sha256 = "2ee0b2aaaaa9d8cc5b596fbd5d4dec04a33243e7bb85bfb96fe485c408a6918f"
 
 [[asset]]
+path = "packages/fit/fixtures/corpus/lap-figures.fit"
+source = "This repository, #1321 — written by `pnpm --filter @onyourleft/fit run fixtures:generate` from packages/fit/tools/fixture-corpus, deterministically"
+licence = "Apache-2.0"
+read = "2026-10-19"
+sha256 = "5566b511f467dfda6cd040140ffe2686d6bb42f9f573b4a2e875713b6182270b"
+
+[[asset]]
 path = "packages/fit/fixtures/corpus/nominal-outdoor-ride.fit"
 source = "This repository, #107 — written by `pnpm --filter @onyourleft/fit run fixtures:generate` from packages/fit/tools/fixture-corpus, deterministically"
 licence = "Apache-2.0"

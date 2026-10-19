@@ -23,6 +23,7 @@ import {
   headerOnlyFile,
   heartRate16BitRide,
   indoorTrainerRide,
+  lapFiguresRide,
   nominalOutdoorRide,
   NULL_ISLAND_TRACK,
   pausedLapsRide,
@@ -38,6 +39,7 @@ import {
   billionLaughsGpx,
   deepNestingGpx,
   deepNestingTcx,
+  lapFiguresTcx,
   nominalGpx,
   nominalTcx,
   truncatedGpx,
@@ -133,6 +135,16 @@ export function buildCorpus(): readonly CorpusEntry[] {
         'reports one as the other is wrong by five minutes in a way nothing else in the file ' +
         'contradicts.',
       pausedLapsRide(),
+    ),
+    fit(
+      'lap-figures.fit',
+      'Three laps that state their figures and their kind as a head unit does (#1321): average ' +
+        'and highest heart rate, average cadence, average and highest power, metres climbed, ' +
+        'intensity and lap trigger — a lead-in marked rest, a whole lap ended by hand, and a last ' +
+        'lap that ended with the session and holds the invalid marker in both power fields. The ' +
+        'figures sit in field-number order with a field this profile does not name among them, ' +
+        'so a decoder that reads by position, or stops at the first unknown field, gets them wrong.',
+      lapFiguresRide(),
     ),
     fit(
       'sensor-dropout-30s.fit',
@@ -292,6 +304,17 @@ export function buildCorpus(): readonly CorpusEntry[] {
         'format where "no position" is an absent child rather than an undeclared field — a ' +
         'reader that dereferences Position unconditionally throws on the first point.',
       nominalTcx(undefined, 30),
+    ),
+    xml(
+      'lap-figures.tcx',
+      'tcx',
+      'Two laps carrying the figures and the kind TCX has elements for (#1321): average and ' +
+        'highest heart rate, the lap cadence, the LX extension’s average and highest watts, ' +
+        'Intensity and TriggerMethod — a whole lap ended by distance and a resting one ended by ' +
+        'hand with no power. Among them sit elements a head unit also writes and this package does ' +
+        'not read, and a lap Cadence beside every point’s, so a reader keyed on position or on the ' +
+        'last Value it saw reads the wrong figure.',
+      lapFiguresTcx(NULL_ISLAND_TRACK, 30),
     ),
     xml(
       'xxe-external-entity.tcx',

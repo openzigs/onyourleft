@@ -30,7 +30,14 @@ export { ActivityXmlError } from './errors';
 export type { XmlAttribute, XmlHandler, XmlName, XmlStartElement } from './parse';
 export { MAXIMUM_DEPTH, parseXml, XML_NAMESPACE } from './parse';
 
-export type { TrackActivity, TrackDecodeResult, TrackLap, TrackPoint } from './track';
+export type {
+  TcxIntensity,
+  TcxTriggerMethod,
+  TrackActivity,
+  TrackDecodeResult,
+  TrackLap,
+  TrackPoint,
+} from './track';
 export { trackPointsOf } from './track';
 
 export type { ExtensionChannel } from './extensions';

@@ -253,6 +253,9 @@ two tables agree. If they ever disagree, that test says so.
 | The `blog.studioblueplanet.net` write-up of an independent FIT reader | Corroboration of the header, the definition/data record split and the local message type range | 2026-09-04 |
 | The #29 fixture corpus in [`fixtures/`](fixtures) — files this project generated and lawfully holds, which ADR 0006 R2 names as a permitted source | The field definition numbers of `lap`, `session`, `activity`, `device_info`, `developer_data_id`, `field_description` and `hr`, and the global message numbers 206 and 207 | 2026-09-04 |
 | The CRC catalogue's published parameters for CRC-16/ARC | The polynomial, and the check value `0xBB3D` over `123456789` that pins this implementation | 2026-09-04 |
+| GoldenCheetah's `src/FileIO/FitRideFile.cpp` (GPL-2.0), **read, never copied** — `docs/agents/scope-and-ip.md` §6 permits reading prior art to check a protocol detail | The `lap` field numbers 15, 16, 17, 21 and 24 (#1321), named in the comments of its lap reader; and `lap_trigger` 7 as the session's end, named in the comment of its lap writer | 2026-10-19 |
+| Third-party head-unit files in GoldenCheetah's public test corpus (`test/rides/`), **read in a scratch directory and never committed** — they are GPL-2.0 data and this package is Apache-2.0 | Observed values (#1321): a Garmin Edge 1000 lap whose fields 19 and 20 equal the mean and the highest of its records' power to the watt, 15 and 16 their heart rate, 21 a climb in metres; a Hammerhead Karoo lap whose field 20 equals its records' highest power; field 23 = 0 on the ordinary riding laps of four devices; field 24 = 0 on laps a rider pressed and 7 on every file's last lap | 2026-10-19 |
+| Garmin's public FIT article *Workout File*, `developer.garmin.com/fit/articles/file-types/workout.html` — public documentation, not an SDK artefact | The `intensity` enumeration: 0 active, 1 rest (#1321) | 2026-10-19 |
 
 **No number was taken from a Garmin SDK artefact, from `Profile.xlsx`, or from GPL/AGPL prior-art
 source.** Reading prior art to check a protocol detail is permitted by `docs/agents/scope-and-ip.md` §6; copying from
@@ -334,6 +337,8 @@ across the profile rather than assigned per message.
 | `record` | `position_lat` 0, `position_long` 1, `altitude` 2, `heart_rate` 3, `cadence` 4, `distance` 5, `speed` 6, `power` 7, `temperature` 13 | hex-dump write-up, corroborated by the independent format reference |
 | `event` | `event` 0, `event_type` 1, `data` 3 | the #29 corpus |
 | `lap` | `start_time` 2, `total_elapsed_time` 7, `total_timer_time` 8, `total_distance` 9 | independent format reference (names), the #29 corpus (numbers) |
+| `lap` (#1321) | `avg_heart_rate` 15, `max_heart_rate` 16, `avg_cadence` 17, `total_ascent` 21, `lap_trigger` 24 | GoldenCheetah's reader, corroborated by the head-unit files |
+| `lap` (#1321) | `avg_power` 19, `max_power` 20, `intensity` 23 | the head-unit files **only**, by matching each field against the records it summarises — see the warning below |
 | `session` | `start_time` 2, `sport` 5, `total_elapsed_time` 7, `total_timer_time` 8, `total_distance` 9, `num_laps` 26 | independent format reference (names), the #29 corpus (numbers) |
 | `activity` | `total_timer_time` 0, `num_sessions` 1, `type` 2, `event` 3, `event_type` 4, `local_timestamp` 5 | independent format reference (names), the #29 corpus (numbers) |
 | `device_info` | `device_index` 0, `manufacturer` 2, `serial_number` 3, `product` 4, `software_version` 5 | the #29 corpus |
@@ -355,6 +360,23 @@ across the profile rather than assigned per message.
 | `session.sport` = 2 | cycling | `SPORT_CYCLING` |
 | `event.event` = 0 | the recording timer | `EVENT_TIMER` |
 | `event.event_type` = 0 / 1 | timer started / stopped | `EVENT_TYPE_START` / `EVENT_TYPE_STOP` |
+| `lap.intensity` = 0 / 1 | active / rest (#1321) | `INTENSITY_ACTIVE` / `INTENSITY_REST` |
+| `lap.lap_trigger` = 0 / 7 | ended by hand / ended with the session (#1321) | `LAP_TRIGGER_MANUAL` / `LAP_TRIGGER_SESSION_END` |
+| `lap` averages, bests and climb | whole watts, beats, revolutions and metres; no scale | the encoder rounds to the whole unit |
+
+> ⚠️ **#1321's numbers rest on thinner ground than #30's, and that is stated rather than hidden.**
+> No independent published table giving `avg_power` 19, `max_power` 20 or `intensity` 23 could be
+> found that was not itself generated from the SDK's profile, which R2 does not admit. They were
+> established by observation, R2's own method for the #29 corpus: in real files from two makers'
+> head units, each field held exactly the mean or the highest of the records between the lap's start
+> and end. **Those files are GoldenCheetah's test corpus, not files this project holds**, so whether
+> R2 admits them is a question for the owner, raised in #1321's pull request rather than settled
+> here. The enumerations rest on a public Garmin article and on the same files. A reader who finds
+> a non-SDK-derived table disagreeing should treat it as the better evidence. `fit-file-parser`, the
+> test-time reader this package exists to disagree with, names all eight fields and both
+> enumerations as this package does
+> (`tools/fixture-corpus/third-party-acceptance.test.ts`, *"reading the lap figures"*); it was read
+> after the numbers were chosen, as a check, and is not their source.
 
 `hr.event_timestamp` is deliberately **not** scaled by its 1/1024 s tick rate. It is a free-running
 counter, `event-timestamp-1024-wrap.fit` walks it across its rollover twice, and dividing a wrapped
@@ -534,6 +556,9 @@ line rather than only describing it.
 | temperature | `gpxtpx:atemp` | **lost** — no element in TCX v2 or `ActivityExtension` |
 | per-point distance | **lost** — no element in GPX 1.1 or any extension written here | native |
 | lap `totalElapsedTime`, `totalDistance` | **lost** — GPX has no lap | native |
+| lap average and highest heart rate, average cadence (#1321) | **lost** — GPX has no lap | native |
+| lap average and highest power (#1321) | **lost** | `ns3:LX/AvgWatts`, `MaxWatts` |
+| lap `intensity`, `triggerMethod` (#1321) | **lost** | native; **an absent one is written `Active` / `Manual`**, because both elements are required |
 | activity name | `<trk><name>` | **lost** — `<Notes>` is a rider's note, not a title |
 | lap boundaries | one `<trkseg>` per lap; the count survives | native |
 | sport | `<type>`, free text, passed through | `Sport`, mapped onto `Biking` / `Running` / `Other`; **an absent sport becomes `Other`, not absent** |

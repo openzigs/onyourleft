@@ -71,6 +71,7 @@ const ROUND_TRIP_FIXTURES = [
   'nominal-outdoor-ride.fit',
   'indoor-trainer-no-position.fit',
   'paused-laps.fit',
+  'lap-figures.fit',
   'sensor-dropout-30s.fit',
   'antimeridian-crossing.fit',
   'point-nemo-southern-western.fit',

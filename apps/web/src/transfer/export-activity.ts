@@ -45,14 +45,19 @@ import {
   encodeTcx,
   FILE_TYPE_ACTIVITY,
   GPX_LOSSY_CHANNELS,
+  INTENSITY_ACTIVE,
+  INTENSITY_REST,
+  LAP_TRIGGER_SESSION_END,
   SPORT_CYCLING,
   TCX_LOSSY_CHANNELS,
   type FitDateTime,
   type FitEncodeError,
   type FitEncodeFaultCode,
   type FitEncodeInput,
+  type FitLap,
   type FitRecord,
   type TrackActivity,
+  type TrackLap,
   type TrackPoint,
 } from '@onyourleft/fit';
 import type {
@@ -70,6 +75,12 @@ import type { DownloadableFile, TransferStore } from './store-port';
 /** @see LOSSY_CHANNELS */
 const MOVING_TIME = 'activity.movingTime';
 
+/** @see LOSSY_CHANNELS — #1321. */
+const LAP_ASCENT = 'lap.ascent';
+
+/** @see LOSSY_CHANNELS — #1321. */
+const LAP_DISTANCE = 'lap.distance';
+
 /**
  * What a format costs, in the codec's own words. Empty for FIT.
  *
@@ -82,11 +93,16 @@ const MOVING_TIME = 'activity.movingTime';
  * either format, and bounds it by the elapsed time), and the rider is told
  * before choosing the format rather than after importing it. FIT's session
  * carries it.
+ *
+ * And, since #1321, two figures of a lap row: its **climb**, which neither has
+ * an element for, and in TCX its **own distance**, because a TCX lap states its
+ * share of the ride's (`trackActivityOf`). GPX's codec list already names the
+ * lap's distance. FIT's lap carries both.
  */
 export const LOSSY_CHANNELS: Readonly<Record<ActivityFileFormat, readonly string[]>> = {
   fit: [],
-  gpx: [...GPX_LOSSY_CHANNELS, MOVING_TIME],
-  tcx: [...TCX_LOSSY_CHANNELS, MOVING_TIME],
+  gpx: [...GPX_LOSSY_CHANNELS, LAP_ASCENT, MOVING_TIME],
+  tcx: [...TCX_LOSSY_CHANNELS, LAP_ASCENT, LAP_DISTANCE, MOVING_TIME],
 };
 
 /**
@@ -357,6 +373,12 @@ interface ExportLap {
    * exported as, to the byte (`trackActivityOf`).
    */
   readonly wholeRide?: true;
+  /**
+   * #1321: the stored lap this split is, when it is one — whose figures and
+   * whose part-lap mark go into the file — or `undefined` for a stretch of the
+   * ride outside every lap. A split another was folded into keeps its own.
+   */
+  readonly lap?: LapRecord | undefined;
   readonly points: readonly TrackPoint[];
 }
 
@@ -561,6 +583,7 @@ function splitsOf(
         seconds(outsideSeconds > 0 ? (movedOutside * duration) / outsideSeconds : 0),
       distance: stretch.lap?.distance ?? metres(through.distance - before.distance),
       rideThrough: through,
+      lap: stretch.lap,
       points: buckets[ordinal] ?? [],
     };
   });
@@ -711,13 +734,14 @@ function fitInputOf(
     // records written and the records counted by the laps are the same list.
     // The split preserves order, so this is the stored order sample for sample.
     records: laps.flatMap((lap) => lap.points.map(fitRecordOf)),
-    laps: laps.map((lap, ordinal) => ({
+    laps: laps.map((lap, ordinal): FitLap => ({
       timestamp: instant(lap.endsAt),
       messageIndex: ordinal,
       startTime: instant(lap.startedAt),
       totalElapsedTime: lap.elapsedTime,
       totalTimerTime: lap.movingTime,
       totalDistance: lap.distance,
+      ...fitLapFiguresOf(lap),
     })),
     sessions: [
       {
@@ -747,6 +771,72 @@ function fitInputOf(
       eventType: undefined,
       localTimestamp: undefined,
     },
+  };
+}
+
+/**
+ * What a FIT lap states beyond its times and distance, and what kind of split
+ * it is — #1321.
+ *
+ * | split | `intensity` | `lap_trigger` |
+ * |---|---|---|
+ * | a whole lap | active | — |
+ * | a part lap (the rider stopped part-way round) | active | session end |
+ * | a stretch outside every lap | rest | — |
+ * | the one split of a ride with no laps | — | — |
+ *
+ * So a reader tells a lap from the time either side of it by its intensity, and
+ * a part lap from a whole one by what ended it. The last row writes nothing,
+ * so a ride with no laps exports as it always has, to the byte. The figures are
+ * the stored lap's, and absent for a stretch no lap covers: it has none on
+ * record, and working some out here would put a number in the file nobody
+ * measured as a lap.
+ */
+function fitLapFiguresOf(lap: ExportLap): Partial<FitLap> {
+  if (lap.wholeRide === true) return {};
+  const stored = lap.lap;
+  if (stored === undefined) return { intensity: INTENSITY_REST };
+  return {
+    intensity: INTENSITY_ACTIVE,
+    ...(stored.partial === true ? { lapTrigger: LAP_TRIGGER_SESSION_END } : {}),
+    averagePower: stored.averagePower,
+    maxPower: stored.maxPower,
+    averageHeartRate: stored.averageHeartRate,
+    maxHeartRate: stored.maxHeartRate,
+    averageCadence: stored.averageCadence,
+    totalAscent: stored.ascent,
+  };
+}
+
+/**
+ * The TCX half of {@link fitLapFiguresOf}: TCX's `Intensity` and
+ * `TriggerMethod`, and the figures it has an element for — #1321.
+ *
+ * | split | `Intensity` | `TriggerMethod` |
+ * |---|---|---|
+ * | a whole lap | `Active` | `Location`: it ended at the line |
+ * | a part lap | `Active` | `Manual`: the rider ended it |
+ * | a stretch outside every lap | `Resting` | `Manual` |
+ *
+ * ⚠️ **No session-end value in TCX**, so the part lap is told from the whole by
+ * `Location` against `Manual`, which a TCX from elsewhere uses for every lap
+ * its rider pressed. A reader has to know whose file it is to read `Manual` as
+ * a part lap (`TCX_CREATOR`). Climb has no element at all; the lap's own
+ * distance has one, `DistanceMeters`, and it holds the lap's share of the
+ * ride's ({@link trackActivityOf}), so the lap's own is not in the file either.
+ */
+function tcxLapFiguresOf(lap: ExportLap): Partial<TrackLap> {
+  if (lap.wholeRide === true) return {};
+  const stored = lap.lap;
+  if (stored === undefined) return { intensity: 'Resting', triggerMethod: 'Manual' };
+  return {
+    intensity: 'Active',
+    triggerMethod: stored.partial === true ? 'Manual' : 'Location',
+    averageHeartRate: stored.averageHeartRate,
+    maxHeartRate: stored.maxHeartRate,
+    averageCadence: stored.averageCadence,
+    averagePower: stored.averagePower,
+    maxPower: stored.maxPower,
   };
 }
 
@@ -814,6 +904,7 @@ function trackActivityOf(activity: ActivityRecord, laps: readonly ExportLap[]): 
         ),
         totalDistance: metres(tenths(tenths(lap.rideThrough.distance) - tenths(before.distance))),
         points: lap.points,
+        ...tcxLapFiguresOf(lap),
       };
     }),
   };

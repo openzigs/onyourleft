@@ -1,8 +1,8 @@
 {
   "generatedBy": "pnpm --filter @onyourleft/fit run fixtures:generate",
   "budgetBytes": 262144,
-  "totalBytes": 116181,
-  "totalPositionCount": 973,
+  "totalBytes": 136108,
+  "totalPositionCount": 1088,
   "fixtures": [
     {
       "name": "nominal-outdoor-ride.fit",
@@ -27,6 +27,14 @@
       "sha256": "d819bd15ebad8be535f042bc45ceaecbf2e14374e114909ae4c5224c2dbdd605",
       "positionCount": 120,
       "purpose": "Two laps separated by a 300 s pause with no records in it, each bracketed by timer start and stop events. Elapsed time and moving time differ by the pause, and a decoder that reports one as the other is wrong by five minutes in a way nothing else in the file contradicts."
+    },
+    {
+      "name": "lap-figures.fit",
+      "format": "fit",
+      "bytes": 2673,
+      "sha256": "5566b511f467dfda6cd040140ffe2686d6bb42f9f573b4a2e875713b6182270b",
+      "positionCount": 85,
+      "purpose": "Three laps that state their figures and their kind as a head unit does (#1321): average and highest heart rate, average cadence, average and highest power, metres climbed, intensity and lap trigger — a lead-in marked rest, a whole lap ended by hand, and a last lap that ended with the session and holds the invalid marker in both power fields. The figures sit in field-number order with a field this profile does not name among them, so a decoder that reads by position, or stops at the first unknown field, gets them wrong."
     },
     {
       "name": "sensor-dropout-30s.fit",
@@ -179,6 +187,14 @@
       "sha256": "3ae15bc793dc7dcd2cde8714ff31a8446e6f9eb86fa767e399082d6a57c2411b",
       "positionCount": 0,
       "purpose": "A TCX whose trackpoints carry no Position element at all. The indoor case again, in the format where \"no position\" is an absent child rather than an undeclared field — a reader that dereferences Position unconditionally throws on the first point."
+    },
+    {
+      "name": "lap-figures.tcx",
+      "format": "tcx",
+      "bytes": 17254,
+      "sha256": "093e376b7e329d33c80a166bae6cf5e2a480b66985bbb9e6ccbe9e07c596b419",
+      "positionCount": 30,
+      "purpose": "Two laps carrying the figures and the kind TCX has elements for (#1321): average and highest heart rate, the lap cadence, the LX extension’s average and highest watts, Intensity and TriggerMethod — a whole lap ended by distance and a resting one ended by hand with no power. Among them sit elements a head unit also writes and this package does not read, and a lap Cadence beside every point’s, so a reader keyed on position or on the last Value it saw reads the wrong figure."
     },
     {
       "name": "xxe-external-entity.tcx",
