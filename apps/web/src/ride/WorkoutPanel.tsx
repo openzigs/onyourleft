@@ -233,6 +233,11 @@ export interface WorkoutPanelProps {
    * reason {@link sideCamera} passes through this panel.
    */
   readonly keepAliveFailed?: boolean | undefined;
+  /**
+   * #1318: the lap taken by hand that ended last, for the ride's one region —
+   * the same reason {@link sideCamera} passes through this panel.
+   */
+  readonly lap?: { readonly number: number; readonly sentence: string } | undefined;
 }
 
 /** The id the re-plan switch's `aria-describedby` names: the disclosure's headline. */
@@ -256,6 +261,7 @@ export function WorkoutPanel({
   announcerClock,
   sideCamera,
   keepAliveFailed,
+  lap,
 }: WorkoutPanelProps): JSX.Element {
   const [saved, setSaved] = useState<readonly WorkoutRecord[]>([]);
   const [loadFault, setLoadFault] = useState<string | undefined>(undefined);
@@ -359,6 +365,7 @@ export function WorkoutPanel({
       workout={workout}
       sideCamera={sideCamera}
       keepAliveFailed={keepAliveFailed}
+      lap={lap}
       storage={announcements}
       preference={announcementPreference}
       clock={announcerClock}

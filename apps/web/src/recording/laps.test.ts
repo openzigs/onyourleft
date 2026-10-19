@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import {
+  altitudeMetres,
   beatsPerMinute,
   metres,
+  metresPerSecond,
   revolutionsPerMinute,
   seconds,
   unixSeconds,
@@ -18,6 +20,7 @@ import {
   lapFiguresOf,
   lapSlots,
   lapsToSave,
+  recordedStretch,
   riddenLap,
   type LapFigures,
   type LapSeries,
@@ -319,5 +322,40 @@ describe('a lap worked out from its own stretch of the recording — #1312', () 
     expect(lapFiguresOf(SERIES, riddenLap(mark(0, 0), mark(4, 4), WHOLE))).not.toHaveProperty(
       'partial',
     );
+  });
+});
+
+describe('recordedStretch — a lap with no course under it, #1318', () => {
+  it('is the speed channel summed over the slots, a dropout counting as no road', () => {
+    const stretch = recordedStretch(
+      {
+        sampleInterval: seconds(2),
+        channels: {
+          speed: [5, undefined, 7].map((value) =>
+            value === undefined ? undefined : metresPerSecond(value),
+          ),
+        },
+      },
+      false,
+    );
+    expect(stretch).toEqual({ distance: 24, ascent: undefined, partial: false });
+  });
+
+  it('climbs by the recorded-ascent rule where there is altitude, and says nothing where there is none', () => {
+    const rising = [100, 104, 108, 106, 112].map(altitudeMetres);
+    expect(
+      recordedStretch({ sampleInterval: seconds(1), channels: { altitude: rising } }, true),
+    ).toEqual({
+      distance: 0,
+      ascent: 12,
+      partial: true,
+    });
+    // One reading is no climb measured, not a climb of nought.
+    expect(
+      recordedStretch(
+        { sampleInterval: seconds(1), channels: { altitude: [altitudeMetres(100)] } },
+        false,
+      ).ascent,
+    ).toBeUndefined();
   });
 });

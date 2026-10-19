@@ -944,7 +944,8 @@ describe('the screen is three groups, in the order it always was (#422)', () => 
     expect(headingsIn('.oyl-ride__group--live')).toEqual(['Live']);
     expect(
       queryAll(document, '.oyl-ride__group--live button').map((each) => each.textContent),
-    ).toEqual(['Pause', 'Stop']);
+      // #1318: *Lap* between them, on a ride with no course under it.
+    ).toEqual(['Pause', 'Lap', 'Stop']);
   });
 
   it('puts the workout in the TRAINER group, beside the control it depends on', async () => {
