@@ -717,6 +717,39 @@ describe('importActivityFiles — a file’s laps (#1320)', () => {
     expect(await lapsOf(open, outcome.activityId)).toEqual([]);
   });
 
+  it('writes this client’s own marked laps as rows, the part lap a part lap, and no split either side', async () => {
+    const open = await openSeeded();
+    const outcome = await importOne(
+      open,
+      'own.fit',
+      lappedFile({
+        format: 'fit',
+        samples: 120,
+        writer: undefined,
+        laps: [
+          { start: 0, elapsed: 20, kind: 'outside' },
+          { start: 20, elapsed: 40, distance: 2_000, kind: 'lap' },
+          { start: 60, elapsed: 30, distance: 1_000, kind: 'part' },
+          { start: 90, elapsed: 29, kind: 'outside' },
+        ],
+      }),
+    );
+    const laps = await lapsOf(open, outcome.activityId);
+    expect(
+      laps.map((lap) => [
+        lap.ordinal,
+        lap.startedAt - LAPPED_FILE_START,
+        lap.distance,
+        lap.partial,
+      ]),
+    ).toEqual([
+      [0, 20, 2_000, undefined],
+      [1, 60, 1_000, true],
+    ]);
+    // Worked out from the samples in each lap's slots: power i in slot i.
+    expect(laps.map((lap) => lap.maxPower)).toEqual([59, 89]);
+  });
+
   it('writes no lap row for a file with one lap spanning the ride', async () => {
     const open = await openSeeded();
     const outcome = await importOne(
