@@ -155,7 +155,7 @@ const SCENES: readonly Scene[] = [
   // the only state that puts *Keep the plan* on the HUD. ⚠️ Without
   // `trainer=workout`: that adds *Trainer notice* to the row *Pause* is in,
   // a 72 px control that is not on the list and so keeps its floor when the
-  // listed ones are stripped, holding the whole row at 72. `ride.browser.spec.ts`
+  // listed ones are stripped, holding the whole row at 72. `ride-workout.browser.spec.ts`
   // §"#1244" measures the state WITH it, which is the one a rider is in.
   {
     name: 'the game, a re-plan waiting',

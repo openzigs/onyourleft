@@ -6210,7 +6210,7 @@ select.oyl-input {
    a phone on its side, below. *Follow* and the reasons are `.oyl-button`'s
    44 px; *Report* is a 48 px ride-time target on #669's list since #788, so
    the row is 48 tall. The reasons keep to ONE line in the 16 rem panel of the short corners
-   layout, which is what their half padding is for. `ride.browser.spec.ts`
+   layout, which is what their half padding is for. `ride-room.browser.spec.ts`
    §"#789" measures the row closed and open at every overlay viewport. */
 .oyl-hud__room-row {
   display: flex;
@@ -6471,7 +6471,7 @@ select.oyl-input {
  * On the CI runner, whose fonts are wider, the sentence takes two lines at
  * 360 px after all, and the pair clears the rider by 54 px, which is this rule
  * alone. Either half alone clears #605's 50 px by a few pixels, which is a
- * font away from not clearing it, so both are kept. `ride.browser.spec.ts` §"keep the
+ * font away from not clearing it, so both are kept. `ride-notices.browser.spec.ts` §"keep the
  * screen on, beside every notice that stays" holds every pair to 50 and puts
  * round one back as its control.
  *
@@ -7697,7 +7697,7 @@ select.oyl-input {
  * column layout has no height for one: the top stack ended 41 px above the
  * leaning rider's helmet at 360×752, and a standing Eased notice beside *Keep
  * the screen on* ended 69 px above it against a 50 px floor
- * (`ride.browser.spec.ts` §"#585", §"#647"). A row is 53 px.
+ * (`ride.browser.spec.ts` §"#585", `ride-notices.browser.spec.ts` §"#647"). A row is 53 px.
  *
  * So upright, the moving time is lifted out of the grid and set beside *Pause*
  * and *End ride*, which are stretched across the actions panel and give up
