@@ -739,7 +739,11 @@ const TRAINER: GameTrainerPort = {
   // #1360's re-review (R3). @see ROOM_NOTICE
   recordingPaused: () => ROOM_NOTICE === 'paused',
   gameRideEnded: () => undefined,
-  rideMovingSeconds: () => MOVING_SECONDS,
+  // #1221: the tallest chooser has nothing recording under it, so the line
+  // under *Ride* and its *Record this ride* are laid out and measured with the
+  // rest. This double records nothing.
+  rideMovingSeconds: () => (ALL_NOTICES ? undefined : MOVING_SECONDS),
+  recordGameRide: () => Promise.resolve(false),
   watchRide: () => () => undefined,
   readTrainer: () =>
     WITH_A_NOTICE
