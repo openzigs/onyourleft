@@ -3077,3 +3077,99 @@ test('the running workout’s graph in the dark theme: the frame, the numbers an
     expect(chip.colour, chip.text).toBe(INK_MUTED);
   }
 });
+
+/*
+ * #1430 — Lap and Stop are never neighbours, and the confirmation is not
+ * where Stop was.
+ *
+ * Lap is pressed most often mid-ride, and until #1430 it stood between Pause
+ * and Stop. Measured here, at every width this screen is laid out at: the
+ * running row is Lap, then Pause (or Resume, paused), then Stop, on ONE line,
+ * with the middle control's box between the other two — so a row that wrapped
+ * Stop under Lap would fail rather than pass on document order alone. And the
+ * second step is not under the first: the centre of *Stop* is not inside *Yes,
+ * stop the ride* once the stop is armed, so a double tap on Stop does not
+ * confirm it.
+ */
+interface RowBox {
+  readonly name: string;
+  readonly left: number;
+  readonly right: number;
+  readonly top: number;
+  readonly bottom: number;
+}
+
+async function liveRow(page: Page): Promise<readonly RowBox[]> {
+  return page.evaluate(() =>
+    [
+      ...document.querySelectorAll<HTMLButtonElement>(
+        '.oyl-ride__group--live .oyl-ride__actions button',
+      ),
+    ].map((each) => {
+      const box = each.getBoundingClientRect();
+      return {
+        name: (each.textContent ?? '').trim(),
+        left: box.left,
+        right: box.right,
+        top: box.top + window.scrollY,
+        bottom: box.bottom + window.scrollY,
+      };
+    }),
+  );
+}
+
+for (const viewport of READING_VIEWPORTS) {
+  for (const paused of [false, true]) {
+    test(`#1430 — Lap and Stop are never neighbours, ${paused ? 'paused' : 'recording'} — ${viewport.name}`, async ({
+      page,
+    }) => {
+      await open(page, viewport, paused ? '?ride=paused' : '');
+      const row = await liveRow(page);
+      console.log(
+        `#1430 ${paused ? 'paused' : 'recording'} — ${viewport.name}: ${row
+          .map(
+            (each) =>
+              `${each.name} ${each.left.toFixed(0)}–${each.right.toFixed(0)} @${each.top.toFixed(0)}`,
+          )
+          .join(', ')}`,
+      );
+      expect(row.map((each) => each.name)).toEqual(['Lap', paused ? 'Resume' : 'Pause', 'Stop']);
+      const [lap, middle, stop] = row;
+      if (lap === undefined || middle === undefined || stop === undefined) {
+        throw new Error('the row is not three controls');
+      }
+      // One line: a wrapped row could put Stop straight under Lap.
+      expect(Math.abs(stop.top - lap.top)).toBeLessThanOrEqual(1);
+      expect(Math.abs(middle.top - lap.top)).toBeLessThanOrEqual(1);
+      // The middle control's box stands between them.
+      expect(middle.left).toBeGreaterThanOrEqual(lap.right);
+      expect(stop.left).toBeGreaterThanOrEqual(middle.right);
+    });
+  }
+
+  test(`#1430 — the confirmation is not where Stop was — ${viewport.name}`, async ({ page }) => {
+    await open(page, viewport, '?ride=paused');
+    const stop = (await liveRow(page)).find((each) => each.name === 'Stop');
+    await open(page, viewport, '?ride=armed');
+    const yes = await page.evaluate(() => {
+      const button = [...document.querySelectorAll<HTMLButtonElement>('button')].find(
+        (each) => (each.textContent ?? '').trim() === 'Yes, stop the ride',
+      );
+      if (button === undefined) return undefined;
+      const box = button.getBoundingClientRect();
+      return {
+        left: box.left,
+        right: box.right,
+        top: box.top + window.scrollY,
+        bottom: box.bottom + window.scrollY,
+      };
+    });
+    if (stop === undefined || yes === undefined) {
+      throw new Error('no Stop on the paused ride, or no Yes, stop the ride once armed');
+    }
+    const x = (stop.left + stop.right) / 2;
+    const y = (stop.top + stop.bottom) / 2;
+    const under = x >= yes.left && x <= yes.right && y >= yes.top && y <= yes.bottom;
+    expect(under, 'a second tap on Stop would land on Yes, stop the ride').toBe(false);
+  });
+}

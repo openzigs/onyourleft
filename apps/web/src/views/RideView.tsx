@@ -634,6 +634,23 @@ function RideControls({
       startRecording.current?.focus();
     }
   }, [snapshot.phase]);
+  // #1430, WCAG 2.2 SC 2.4.3: *Stop* and the confirmation replace each other,
+  // so each press unmounts the control it was made on. Focus goes to the
+  // control that replaced it: *Keep riding* after *Stop* — the step that does
+  // NOT end the ride, so a key held down or pressed twice cannot carry a
+  // keyboard rider through the confirmation — and *Stop* again after *Keep
+  // riding*. Only after a press on this screen: a screen mounted with a stop
+  // already armed leaves focus where it is.
+  const keepRiding = useRef<HTMLButtonElement>(null);
+  const stopButton = useRef<HTMLButtonElement>(null);
+  const focusAfterStopChange = useRef(false);
+  useEffect(() => {
+    if (!focusAfterStopChange.current) {
+      return;
+    }
+    focusAfterStopChange.current = false;
+    (snapshot.stopArmed ? keepRiding : stopButton).current?.focus();
+  }, [snapshot.stopArmed]);
 
   if (snapshot.phase === 'idle') {
     return (
@@ -734,6 +751,32 @@ function RideControls({
         its lines too. The document order is unchanged.
       */}
       <div className="oyl-ride__actions">
+        {/*
+          #1318: *Lap*, on a ride with no course under it (with one, the laps
+          are the course's: the owner's ruling). In the same row as Pause and
+          Stop and at the same size, so it is a 48 px target 8 px from its
+          neighbour (#669). Not while a stop is armed: the row is then the
+          confirmation's.
+
+          ⚠️ FIRST in the row, with Pause / Resume between it and Stop —
+          #1430. Lap is the control pressed most often mid-ride, and until
+          #1430 it stood between Pause and Stop, so a lap tap that landed a
+          few millimetres right was on Stop. A tap that misses Lap now lands
+          on Pause, which a press of Resume undoes; and Stop itself only asks.
+          `browser/rideview.browser.spec.ts` §"#1430" measures that the two
+          are never neighbours at any width this screen is laid out at.
+        */}
+        {snapshot.manualLap.available && !snapshot.stopArmed ? (
+          <Button
+            variant="secondary"
+            size="ride"
+            onClick={() => {
+              controller.markLap();
+            }}
+          >
+            Lap
+          </Button>
+        ) : null}
         {snapshot.phase === 'recording' ? (
           <Button
             variant="secondary"
@@ -759,29 +802,13 @@ function RideControls({
             Resume
           </Button>
         )}
-        {/*
-          #1318: *Lap*, on a ride with no course under it (with one, the laps
-          are the course's: the owner's ruling). Between Pause and Stop, in
-          the same row and at the same size, so it is a 48 px target 8 px from
-          each (#669). Not while a stop is armed: the row is then the
-          confirmation's.
-        */}
-        {snapshot.manualLap.available && !snapshot.stopArmed ? (
-          <Button
-            variant="secondary"
-            size="ride"
-            onClick={() => {
-              controller.markLap();
-            }}
-          >
-            Lap
-          </Button>
-        ) : null}
         {snapshot.stopArmed ? null : (
           <Button
             variant="secondary"
             size="ride"
+            ref={stopButton}
             onClick={() => {
+              focusAfterStopChange.current = true;
               controller.armStop();
             }}
           >
@@ -807,7 +834,9 @@ function RideControls({
             <Button
               variant="secondary"
               size="ride"
+              ref={keepRiding}
               onClick={() => {
+                focusAfterStopChange.current = true;
                 controller.cancelStop();
               }}
             >
