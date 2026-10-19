@@ -34,8 +34,16 @@
  *
  * ⚠️ **The moving time is the recorder's, and there is no second clock**
  * (`game/hud/fields.ts` §`HudInput.movingSeconds` says why). So a lap's moving
- * time leaves out exactly what the ride's does — a pause and an auto-pause —
- * and the laps of a ride can never add up to more than the ride.
+ * time leaves out exactly what the ride's does — a pause and an auto-pause.
+ *
+ * ⚠️ **But a mark can hold moving time the ride later gives back**, and the
+ * saved rows are held to the ride ({@link heldToTheRide}, #1312's third
+ * review note). An automatic pause is back-dated to when the rider stopped
+ * (`packages/domain` §`advanceTo`), so a line crossed between the readings
+ * that ran the clock on and the tick that begins the pause is marked at a
+ * moving time the ride no longer has. Left alone, the laps of such a ride
+ * add up to more than the ride moved. The HUD's figure, worked out as the
+ * line is crossed, is the mark's; the saved row is the held one.
  *
  * ⚠️ **The averages are over the readings that EXIST**, `finish.ts`
  * §`averagePowerOf`'s rule: a dropout is missing data, not a stretch at
@@ -288,12 +296,55 @@ export function bestLapIndex(laps: readonly TimedLap[]): number | undefined {
 }
 
 /**
+ * The laps of a ride with every mark's moving time held to no more than any
+ * LATER mark's, nor the ride's own — so the laps' moving times add up to no
+ * more than the ride's.
+ *
+ * ⚠️ **Moving time only ever runs forwards; a mark that reads more than a
+ * later one is a mark a back-dated pause took time back from** (the header,
+ * "But a mark can hold…"). Walking back from the end of the ride, each mark
+ * is lowered to the lowest moving time at or after it, which is the most the
+ * ride can have moved by then. Then lap by lap the moving times are the
+ * differences of a sequence that never falls, from at least nought to at most
+ * the ride's — and add up to no more than the ride's.
+ *
+ * Only the moving times change: the instants, and so the elapsed times and
+ * the samples a lap's averages are worked out from, are the marks'.
+ */
+function heldToTheRide(
+  ridden: readonly RecordedCourseLap[],
+  rideMovingTime: Seconds,
+): readonly RecordedCourseLap[] {
+  let ceiling: number = rideMovingTime;
+  const held: RecordedCourseLap[] = [];
+  for (let index = ridden.length - 1; index >= 0; index -= 1) {
+    const lap = ridden[index];
+    if (lap === undefined) {
+      continue;
+    }
+    const to = Math.min(lap.to.movingTime, ceiling);
+    const from = Math.min(lap.from.movingTime, to);
+    ceiling = from;
+    held.unshift({
+      ...lap,
+      from: { at: lap.from.at, movingTime: seconds(from) },
+      to: { at: lap.to.at, movingTime: seconds(to) },
+    });
+  }
+  return held;
+}
+
+/**
  * The lap rows to write for a saved ride, in the order they were ridden,
  * worked out from `series` — the samples the save writes.
  *
  * ⚠️ **From the saved series and not from what the HUD was told** (the header,
  * "Worked out twice"): by now every slot is final, so a row's averages are
  * what anything reading the ride's samples between its two marks works out.
+ *
+ * ⚠️ **Their moving times are held to `rideMovingTime`**, the ride's own
+ * ({@link heldToTheRide}): a row never says a lap moved for longer than the
+ * ride it is a lap of.
  *
  * ⚠️ **None at all unless the rider completed the course at least once.** A
  * ride abandoned part-way round its first lap has no laps: one row reading
@@ -304,11 +355,12 @@ export function lapsToSave(
   series: LapSeries,
   activityId: ActivityId,
   newLapId: () => LapId,
+  rideMovingTime: Seconds,
 ): readonly NewLap[] {
   if (!ridden.some((lap) => lap.partial !== true)) {
     return [];
   }
-  return ridden.map((lap, ordinal) => ({
+  return heldToTheRide(ridden, rideMovingTime).map((lap, ordinal) => ({
     ...lapFiguresOf(series, lap),
     id: newLapId(),
     activityId,

@@ -217,7 +217,7 @@ export function rideToSave(input: RideToSaveInput): FinishedRide | undefined {
     laps:
       input.laps === undefined
         ? []
-        : lapsToSave(input.laps.ridden, series, input.id, input.laps.newLapId),
+        : lapsToSave(input.laps.ridden, series, input.id, input.laps.newLapId, input.movingTime),
     streams: {
       activityId: input.id,
       athleteId: input.athleteId,

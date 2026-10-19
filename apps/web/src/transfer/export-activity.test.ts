@@ -20,7 +20,13 @@ import {
   unixSeconds,
   type DegreesLatitude,
 } from '@onyourleft/domain';
-import { decodeFitActivity, decodeGpx, decodeTcx, trackPointsOf } from '@onyourleft/fit';
+import {
+  decodeFitActivity,
+  decodeGpx,
+  decodeTcx,
+  trackPointsOf,
+  type FitDateTime,
+} from '@onyourleft/fit';
 import {
   activityId,
   privacyZoneId,
@@ -39,6 +45,8 @@ import {
   type StoreHarness,
 } from '@onyourleft/store/testing';
 import FitParser from 'fit-file-parser';
+
+import { lapSlots } from '../recording/laps';
 
 import { ActivityExportError, exportActivity, fileStemOf } from './export-activity';
 import type { ActivityFileFormat } from './file-format';
@@ -1015,6 +1023,84 @@ describe('exportActivity — splits that add up to the whole ride (#1312)', () =
     const fit = decodeFitActivity((await exportFrom(open, ride.id, 'fit')).bytes).activity;
     expect(fit.laps).toHaveLength(1);
     expect(fit.records).toHaveLength(SAMPLE_COUNT);
+  });
+
+  /**
+   * #1312's first and second review notes. Two stretches too short to write
+   * are folded into the lap before them, each holding samples: a quarter of a
+   * second between the laps (slot 59) and 0.6 s after the last (slots 118 and
+   * 119, since the last lap ends at 118.9, inside slot 118).
+   */
+  describe('a stretch folded into the lap before it', () => {
+    const seedFolded = async () =>
+      seedWithLaps(SAMPLE_COUNT - 0.5, [
+        [0, 59.5],
+        [60.25, 58.65],
+      ]);
+    const slotsFrom = (start: number, first: number, end: number): readonly number[] =>
+      Array.from({ length: end - first }, (_, index) => start + first + index);
+    const instantOf = (record: { readonly timestamp: FitDateTime | undefined }) =>
+      record.timestamp?.kind === 'instant' ? record.timestamp.instant : undefined;
+
+    it('puts its samples AFTER the lap’s own, in the order they were recorded, in every format', async () => {
+      const { open, ride } = await seedFolded();
+      const lapOne = slotsFrom(ride.startedAt, 0, 60);
+      const lapTwo = slotsFrom(ride.startedAt, 60, SAMPLE_COUNT);
+
+      const tcx = decodeTcx(textOf((await exportFrom(open, ride.id, 'tcx')).bytes)).activity;
+      expect(tcx.laps.map((lap) => lap.points.map((point) => point.timestamp))).toEqual([
+        lapOne,
+        lapTwo,
+      ]);
+      const gpx = decodeGpx(textOf((await exportFrom(open, ride.id, 'gpx')).bytes)).activity;
+      expect(gpx.laps.map((lap) => lap.points.map((point) => point.timestamp))).toEqual([
+        lapOne,
+        lapTwo,
+      ]);
+      // FIT's records are the splits' points end to end: the stored order.
+      const fit = decodeFitActivity((await exportFrom(open, ride.id, 'fit')).bytes).activity;
+      expect(fit.records.map(instantOf)).toEqual([...lapOne, ...lapTwo]);
+    });
+
+    it('holds the samples its row counted, then those of the folded stretch and no others: here one and two', async () => {
+      const { open, ride } = await seedFolded();
+      const rows = await open.read(async (store) => store.listLaps(ATHLETE_A, ride.id));
+      const grid = {
+        startedAt: ride.startedAt,
+        sampleInterval: seconds(1),
+        sampleCount: SAMPLE_COUNT,
+      };
+
+      const tcx = decodeTcx(textOf((await exportFrom(open, ride.id, 'tcx')).bytes)).activity;
+
+      // `recording/laps.ts` §`lapSlots`, over each stored row: what its
+      // averages were worked out from.
+      const counted = rows.map((row) => {
+        const slots = lapSlots(
+          grid,
+          { at: row.startedAt, movingTime: row.movingTime },
+          { at: unixSeconds(row.startedAt + row.elapsedTime), movingTime: row.movingTime },
+        );
+        return slotsFrom(ride.startedAt, slots.first, slots.end);
+      });
+      expect(counted.map((slots) => slots.length)).toEqual([59, 58]);
+      tcx.laps.forEach((lap, index) => {
+        const own = counted[index] ?? [];
+        const held = lap.points.map((point) => point.timestamp);
+        // The row's samples, every one of them and first…
+        expect(held.slice(0, own.length)).toEqual(own);
+        // …then only the slots of the stretch folded in, which lasts less
+        // than one sample and so reaches into two slots at the most.
+        const extra = held.slice(own.length);
+        expect(extra.length).toBeLessThanOrEqual(2);
+        for (const instant of extra) {
+          expect(instant).toBeGreaterThanOrEqual((own.at(-1) ?? 0) + 1);
+        }
+      });
+      expect(tcx.laps.map((lap) => lap.points.length - (counted.shift()?.length ?? 0))).toEqual([
+        1, 2,
+      ]);
+    });
   });
 
   it.each<ActivityFileFormat>(['fit', 'gpx', 'tcx'])(
