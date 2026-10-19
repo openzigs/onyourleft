@@ -359,7 +359,7 @@ export function RoutesView({ port, now, save, selected }: RoutesViewProps): JSX.
           heading="Your first route"
           level={3}
           action={
-            <CreateLink route={routeById('routes')} selection={selected}>
+            <CreateLink route={routeById('routes')} selection={selected} emptyState>
               Import a route
             </CreateLink>
           }

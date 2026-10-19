@@ -398,6 +398,18 @@ describe('the create link', () => {
     expect(pane('list').querySelector('[data-oyl-create]')).not.toBeNull();
   });
 
+  it('is kept at two panes as an empty list’s one action (#943)', async () => {
+    restore = answerTwoPanes(true, THEME);
+    mounted = await mount(
+      <main>
+        <CreateLink route={routeById('routes')} selection={undefined} emptyState>
+          Import a route
+        </CreateLink>
+      </main>,
+    );
+    expect(document.querySelector('[data-oyl-create]')?.textContent).toBe('Import a route');
+  });
+
   it('is there on one pane with nothing chosen, where the form is under the whole list', async () => {
     restore = answerTwoPanes(false, THEME);
     mounted = await mount(withForm(undefined));
