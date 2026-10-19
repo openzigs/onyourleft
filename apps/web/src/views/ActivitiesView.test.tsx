@@ -49,8 +49,9 @@ import {
   ActivitiesView,
   ACTIVITIES_KEPT_VISIBLE,
   DELETE_FAILED_TEXT,
-  whereRidesAreText,
+  deleteRideText,
 } from './ActivitiesView';
+import { whereRidesAreText } from './where-rides-are';
 
 const OWNER = athleteId('athlete-a');
 
@@ -1041,6 +1042,73 @@ describe('#1438 — the footer says where the rides are, per platform and per in
         expect(text).not.toMatch(/no account|no server/);
         for (const kept of ACTIVITIES_KEPT_VISIBLE) expect(text).toContain(kept);
       }
+    }
+  });
+});
+
+describe('#1450 — the delete dialog says where else the ride is, per platform and per instance', () => {
+  const ALONE =
+    'Deleting a ride cannot be undone. The copy on this device may be the only one that ' +
+    'exists — export it first if you want to keep it.';
+  const WITH_INSTANCE =
+    'Deleting a ride cannot be undone. A ride you synced is deleted from your instance too, at ' +
+    'the next sync — export it first if you want to keep it.';
+
+  /** Opens the confirmation for the one ride, and reads its sentence. */
+  async function dialogSays(props: {
+    readonly nativeShell?: boolean;
+    readonly instance?: ReturnType<typeof scriptedInstance>;
+  }): Promise<string> {
+    mounted = await mount(
+      <ActivitiesView
+        library={stubLibrary(OWNER, [summary('a', { name: 'Tuesday hills' })])}
+        nativeShell={props.nativeShell}
+        instance={props.instance?.port}
+      />,
+    );
+    await settle();
+    await activateWithKeyboard(buttonNamed('Delete') as HTMLElement);
+    await settle();
+    const said = queryAll(document.body, '[role="alertdialog"] p')
+      .map((p) => p.textContent ?? '')
+      .filter((text) => text.startsWith('Deleting a ride'));
+    expect(said).toHaveLength(1);
+    return said[0]!;
+  }
+
+  for (const nativeShell of [false, true]) {
+    const where = nativeShell ? 'in the app' : 'in a browser';
+
+    it(`${where} with no instance: this copy may be the only one`, async () => {
+      expect(await dialogSays({ nativeShell })).toBe(ALONE);
+    });
+
+    it(`${where} with an instance port but no connection: as with none`, async () => {
+      const instance = scriptedInstance({ connected: false });
+      expect(await dialogSays({ nativeShell, instance })).toBe(ALONE);
+    });
+
+    it(`${where} connected to an instance: a synced ride goes from there too`, async () => {
+      const instance = scriptedInstance({ connected: true });
+      expect(await dialogSays({ nativeShell, instance })).toBe(WITH_INSTANCE);
+    });
+
+    it(`${where} signed out of an instance: counted as one`, async () => {
+      const instance = scriptedInstance({
+        connected: true,
+        state: { kind: 'signed-out', origin: 'https://ride.example' },
+      });
+      expect(await dialogSays({ nativeShell, instance })).toBe(WITH_INSTANCE);
+    });
+  }
+
+  it('claims nothing about an instance until the port has answered', () => {
+    expect(deleteRideText('unknown')).toBe(ALONE);
+  });
+
+  it('never says there is no server, no backup, or no copy anywhere else', () => {
+    for (const known of ['none', 'connected', 'unknown'] as const) {
+      expect(deleteRideText(known)).not.toMatch(/no server|no backup|nowhere else|anywhere else/);
     }
   });
 });

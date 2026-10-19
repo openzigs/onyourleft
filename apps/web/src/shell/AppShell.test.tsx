@@ -168,6 +168,22 @@ describe('the router', () => {
     expect(text).toContain('clearing its storage in Android’s settings');
   });
 
+  it('hands About the platform and the rider’s instance, for where the rides are — #1450', async () => {
+    globalThis.location.hash = '#/about';
+    mounted = await mount(
+      <AppShell
+        capabilities={NO_BLUETOOTH}
+        nativeShell
+        instance={scriptedInstance({ connected: true }).port}
+      />,
+    );
+    await settle();
+    const text = (document.querySelector('main')?.textContent ?? '').replace(/\s+/g, ' ');
+    expect(text).toContain('a ride you sync is also kept on your instance');
+    expect(text).toContain('clearing its storage in Android’s settings');
+    expect(text).not.toContain('anywhere else');
+  });
+
   it('stops listening for navigation once it is unmounted', async () => {
     await open('/');
     mounted?.unmount();

@@ -38,7 +38,8 @@ import { fileURLToPath } from 'node:url';
 import { PRIVACY_POLICY_URL, SOURCE_CODE_URL } from '../privacy/policy';
 import { MAX_DATA_LOSS_SECONDS } from '../recording/recorder';
 import { hrefFor, routeById } from '../shell/routes';
-import { mount, queryAll } from '../testing/mount';
+import { scriptedInstance } from '../instance/testing';
+import { mount, queryAll, settle } from '../testing/mount';
 
 import { AboutView } from './AboutView';
 
@@ -291,5 +292,77 @@ describe('what the About page says about a ride the app closed on — #411', () 
     expect(text).not.toContain('cannot be lost');
     expect(text).not.toContain('backup');
     expect(text).not.toContain('cloud');
+  });
+});
+
+describe('where the rides are, per platform and per instance — #1450', () => {
+  /**
+   * It said "clearing this browser's site data removes your rides, and there
+   * is no copy anywhere else to restore from" in the Android app too, and with
+   * an instance that keeps a synced ride. It is now History's sentence
+   * (`where-rides-are.ts`), pinned here as literals by the same discipline as
+   * the blocks above.
+   */
+  const BROWSER_ALONE =
+    'Rides are stored on this device. Clearing this browser’s site data ' +
+    'deletes them from this device — export anything you want to keep.';
+  const BROWSER_WITH_INSTANCE =
+    'Rides are stored on this device, and a ride you sync is also kept on your instance. ' +
+    'Clearing this browser’s site data deletes them from this device — export anything you ' +
+    'want to keep.';
+  const APP_ALONE =
+    'Rides are stored on this device. Uninstalling the app, or clearing its storage in ' +
+    'Android’s settings, deletes them from this device — export anything you want to keep.';
+  const APP_WITH_INSTANCE =
+    'Rides are stored on this device, and a ride you sync is also kept on your instance. ' +
+    'Uninstalling the app, or clearing its storage in Android’s settings, deletes them from ' +
+    'this device — export anything you want to keep.';
+
+  async function said(
+    nativeShell: boolean,
+    instance?: ReturnType<typeof scriptedInstance>,
+  ): Promise<{ readonly sentence: string; readonly page: string }> {
+    const mounted = await mount(<AboutView nativeShell={nativeShell} instance={instance?.port} />);
+    await settle();
+    const sentences = queryAll(mounted.container, 'p')
+      .map((p) => p.textContent ?? '')
+      .filter((text) => text.startsWith('Rides are stored on this device'));
+    const page = (mounted.container.textContent ?? '').replace(/\s+/g, ' ');
+    mounted.unmount();
+    expect(sentences).toHaveLength(1);
+    return { sentence: sentences[0]!, page };
+  }
+
+  const CASES = [
+    {
+      name: 'a browser with no instance',
+      native: false,
+      connected: undefined,
+      want: BROWSER_ALONE,
+    },
+    { name: 'a browser, not connected', native: false, connected: false, want: BROWSER_ALONE },
+    { name: 'a browser, connected', native: false, connected: true, want: BROWSER_WITH_INSTANCE },
+    { name: 'the app with no instance', native: true, connected: undefined, want: APP_ALONE },
+    { name: 'the app, not connected', native: true, connected: false, want: APP_ALONE },
+    { name: 'the app, connected', native: true, connected: true, want: APP_WITH_INSTANCE },
+  ] as const;
+
+  for (const { name, native, connected, want } of CASES) {
+    it(`in ${name}`, async () => {
+      const instance = connected === undefined ? undefined : scriptedInstance({ connected });
+      const { sentence, page } = await said(native, instance);
+      expect(sentence).toBe(want);
+      expect(page).not.toContain('anywhere else');
+      expect(page).not.toContain('nowhere else');
+      if (native) expect(sentence).not.toContain('browser');
+    });
+  }
+
+  it('counts a signed-out instance as one: the rides synced before are still there', async () => {
+    const instance = scriptedInstance({
+      connected: true,
+      state: { kind: 'signed-out', origin: 'https://ride.example' },
+    });
+    expect((await said(false, instance)).sentence).toBe(BROWSER_WITH_INSTANCE);
   });
 });
