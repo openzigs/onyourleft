@@ -564,8 +564,8 @@ h3:first-child {
  * And a control reached by Tab stops ABOVE that strip — #1441's "the last
  * focusable control keeps clear". Chromium scrolls a focused control just far
  * enough to reach the viewport's edge, and the bottom edge is now the strip,
- * so the scroll area ends above it (WCAG 2.2 SC 2.4.11). The game chooser's
- * rule further down adds the navigation bar's height to this on a phone.
+ * so the scroll area ends above it (WCAG 2.2 SC 2.4.11). The navigation bar's
+ * query further down adds the bar's height to this on a phone (#1472).
  * `html` and not `:root`, which `theme.a11y.test.ts` keeps for the tokens.
  */
 html {
@@ -964,6 +964,18 @@ html {
   /* Room under the last of the content, so the bar never covers it. */
   .oyl-shell:has(.oyl-nav) {
     padding-bottom: 4.5rem;
+  }
+
+  /*
+   * #1472: and a control reached by Tab stops above the BAR, not only above
+   * the inset under it (WCAG 2.2 SC 2.4.11). The bar is fixed over the bottom
+   * of every route that has it, so the root's scroll area ends at the bar's
+   * top: its height, and the inset its own padding sits on. This was the game
+   * chooser's rule alone until #1472 made it every route's.
+   * `shell.browser.spec.ts` §"#1472" measures focus against the bar's top.
+   */
+  html:has(.oyl-nav) {
+    scroll-padding-bottom: calc(4.5rem + var(--oyl-safe-bottom));
   }
 }
 
@@ -4771,12 +4783,12 @@ select.oyl-input {
  * visibility vary; in the flow neither can happen, by construction, and
  * `browser/pre-ride.browser.spec.ts` §"#940" hit-tests it.
  *
- * The `scroll-padding` rule left here is not this chooser's pin — it has none
- * — but the SHELL's: the navigation bar (fixed, 4.5 rem, on a compact window)
- * would otherwise sit over a control Tab scrolls to the bottom edge. It is
- * scoped to the chooser. The header's (sticky, `--oyl-header-height`, on a
- * large window) was too until #990, which made it the whole document's —
- * see the shell's sticky query.
+ * The `scroll-padding` rule that was left here was not this chooser's pin — it
+ * has none — but the SHELL's: the navigation bar (fixed, 4.5 rem, on a compact
+ * window) would otherwise sit over a control Tab scrolls to the bottom edge.
+ * #1472 moved it to the bar's own query for every route that has the bar, as
+ * #990 had done for the header's (sticky, `--oyl-header-height`, on a large
+ * window) — see the shell's sticky query.
  */
 /*
  * #1011: the routes as TILES — one column on a phone, two on a tablet. "A
@@ -5022,13 +5034,6 @@ select.oyl-input {
   .oyl-chooser__notices > .oyl-status {
     padding-block: var(--oyl-space-sm);
     margin-bottom: var(--oyl-space-sm);
-  }
-}
-
-/* The navigation BAR — the shell's own query and height, restated. */
-@media (max-width: 37.49rem) and (min-height: 30rem) {
-  :root:has(.oyl-chooser) {
-    scroll-padding-bottom: calc(4.5rem + var(--oyl-safe-bottom));
   }
 }
 
