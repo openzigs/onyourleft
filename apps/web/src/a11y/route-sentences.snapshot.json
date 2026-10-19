@@ -126,7 +126,7 @@
     "A ride appears here the moment you finish one.",
     "Start a ride",
     "Rides are stored on this device and nowhere else.",
-    "There is no account and no server, so clearing this browser’s site data deletes them — export anything you want to keep.",
+    "Clearing this browser’s site data deletes them from this device — export anything you want to keep.",
     "Choose a ride from the list to see its summary here."
   ],
   "analysis empty": [
@@ -1252,8 +1252,8 @@
     "An extraordinarily long Sunday morning club ride out to the reservoir and back again 39 · indoor",
     "31 Aug 2025, 09:53",
     "Delete An extraordinarily long Sunday morning club ride out to the reservoir and back again 39",
-    "Rides are stored on this device and nowhere else.",
-    "There is no account and no server, so clearing this browser’s site data deletes them — export anything you want to keep.",
+    "Rides are stored on this device, and a ride you sync is also kept on your instance.",
+    "Clearing this browser’s site data deletes them from this device — export anything you want to keep.",
     "Choose a ride from the list to see its summary here.",
     "All rides",
     "Started",

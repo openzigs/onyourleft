@@ -44,7 +44,13 @@ import {
 } from '../testing/mount';
 import { liveRegionsSaying, timesSaid } from '../testing/said-once';
 
-import { ActivitiesView, DELETE_FAILED_TEXT } from './ActivitiesView';
+import { scriptedInstance } from '../instance/testing';
+import {
+  ActivitiesView,
+  ACTIVITIES_KEPT_VISIBLE,
+  DELETE_FAILED_TEXT,
+  whereRidesAreText,
+} from './ActivitiesView';
 
 const OWNER = athleteId('athlete-a');
 
@@ -927,5 +933,100 @@ describe('each message is said once, in one live region', () => {
     await settle();
     await settle();
     saidOnce('Could not read the rides on this device.');
+  });
+});
+
+describe('#1438 — the footer says where the rides are, per platform and per instance', () => {
+  /** The footer's sentence, as the screen draws it. */
+  function footer(): string {
+    const said = queryAll(document.body, 'p.oyl-muted')
+      .map((p) => p.textContent ?? '')
+      .filter((text) => text.startsWith('Rides are stored on this device'));
+    expect(said).toHaveLength(1);
+    return said[0]!;
+  }
+
+  const BROWSER_ALONE =
+    'Rides are stored on this device and nowhere else. Clearing this browser’s site data ' +
+    'deletes them from this device — export anything you want to keep.';
+  const BROWSER_WITH_INSTANCE =
+    'Rides are stored on this device, and a ride you sync is also kept on your instance. ' +
+    'Clearing this browser’s site data deletes them from this device — export anything you ' +
+    'want to keep.';
+  const APP_ALONE =
+    'Rides are stored on this device. Uninstalling the app, or clearing its storage in ' +
+    'Android’s settings, deletes them from this device — export anything you want to keep.';
+  const APP_WITH_INSTANCE =
+    'Rides are stored on this device, and a ride you sync is also kept on your instance. ' +
+    'Uninstalling the app, or clearing its storage in Android’s settings, deletes them from ' +
+    'this device — export anything you want to keep.';
+
+  it('in a browser with no instance: here and nowhere else, and the browser’s site data', async () => {
+    mounted = await mount(<ActivitiesView library={stubLibrary(OWNER, [])} />);
+    await settle();
+    expect(footer()).toBe(BROWSER_ALONE);
+  });
+
+  it('in a browser connected to an instance: a synced ride is kept there too', async () => {
+    const instance = scriptedInstance({ connected: true });
+    mounted = await mount(
+      <ActivitiesView library={stubLibrary(OWNER, [])} instance={instance.port} />,
+    );
+    await settle();
+    expect(footer()).toBe(BROWSER_WITH_INSTANCE);
+  });
+
+  it('in a browser with an instance port but no connection: as with none', async () => {
+    const instance = scriptedInstance({ connected: false });
+    mounted = await mount(
+      <ActivitiesView library={stubLibrary(OWNER, [])} instance={instance.port} />,
+    );
+    await settle();
+    expect(footer()).toBe(BROWSER_ALONE);
+  });
+
+  it('in the app with no instance: no browser, and what deletes them in Android', async () => {
+    mounted = await mount(<ActivitiesView library={stubLibrary(OWNER, [])} nativeShell />);
+    await settle();
+    expect(footer()).toBe(APP_ALONE);
+    expect(footer()).not.toContain('browser');
+  });
+
+  it('in the app connected to an instance', async () => {
+    const instance = scriptedInstance({ connected: true });
+    mounted = await mount(
+      <ActivitiesView library={stubLibrary(OWNER, [])} nativeShell instance={instance.port} />,
+    );
+    await settle();
+    expect(footer()).toBe(APP_WITH_INSTANCE);
+  });
+
+  it('counts a signed-out instance as one: the rides synced before are still there', async () => {
+    const instance = scriptedInstance({
+      connected: true,
+      state: { kind: 'signed-out', origin: 'https://ride.example' },
+    });
+    mounted = await mount(
+      <ActivitiesView library={stubLibrary(OWNER, [])} instance={instance.port} />,
+    );
+    await settle();
+    expect(footer()).toBe(BROWSER_WITH_INSTANCE);
+  });
+
+  it('claims neither way until the instance has answered', () => {
+    expect(whereRidesAreText(false, 'unknown')).toBe(
+      'Rides are stored on this device. Clearing this browser’s site data deletes them from ' +
+        'this device — export anything you want to keep.',
+    );
+  });
+
+  it('never says there is no account or no server, and keeps the kept-visible words in each', () => {
+    for (const native of [false, true]) {
+      for (const known of ['none', 'connected', 'unknown'] as const) {
+        const text = whereRidesAreText(native, known);
+        expect(text).not.toMatch(/no account|no server/);
+        for (const kept of ACTIVITIES_KEPT_VISIBLE) expect(text).toContain(kept);
+      }
+    }
   });
 });

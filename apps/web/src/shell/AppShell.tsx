@@ -203,6 +203,12 @@ export interface AppShellProps {
    */
   readonly shell?: ShellSupportPort | undefined;
   /**
+   * Running inside the Android shell — `support/capacitor.ts` §`isNativeShell`,
+   * read by `main.tsx`. #1438: History's footer says what deletes the rides on
+   * this platform. `undefined` reads as a browser.
+   */
+  readonly nativeShell?: boolean | undefined;
+  /**
    * The camera, its consent and whether it is running (#382).
    *
    * Optional like every other port here, and `undefined` is an ordinary state:
@@ -582,7 +588,14 @@ function viewFor(
         />
       );
     case 'activities':
-      return <ActivitiesView library={props.library} selected={match.parameter} />;
+      return (
+        <ActivitiesView
+          library={props.library}
+          selected={match.parameter}
+          nativeShell={props.nativeShell}
+          instance={props.instance}
+        />
+      );
     case 'activity-detail':
       return (
         <ActivityDetailView

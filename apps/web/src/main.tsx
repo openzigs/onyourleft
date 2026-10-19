@@ -1493,6 +1493,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           {...(update === undefined ? {} : { update })}
           {...(storage === undefined ? {} : { storage })}
           {...(platform.shell === undefined ? {} : { shell: platform.shell })}
+          nativeShell={isNativeShell(platformCapacitor())}
           {...(camera === undefined ? {} : { camera })}
           {...(sidePairing === undefined ? {} : { sidePairing })}
           {...(sidePictures === undefined ? {} : { sidePictures: sidePictures.port })}
