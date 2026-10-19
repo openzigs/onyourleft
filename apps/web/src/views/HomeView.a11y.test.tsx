@@ -213,6 +213,26 @@ describe('the home screen — #428', () => {
     expectClean('home, a first open');
   });
 
+  it('while the store read is out, no ride cards are drawn, so a first open never draws then takes them away — #1429', async () => {
+    const stub = stubAnalysis(OWNER, []);
+    const hanging = {
+      ...stub,
+      store: { ...stub.store, listActivitySummaries: () => new Promise<never>(() => undefined) },
+    } as typeof stub;
+    globalThis.location.hash = '#/';
+    mounted = await mount(
+      <AppShell
+        capabilities={NO_BLUETOOTH}
+        analysis={hanging}
+        rideController={stubRideController(idleSnapshot()).controller}
+      />,
+    );
+    await settle();
+    const main = document.querySelector('main');
+    expect(main?.textContent).toContain('Reading your rides');
+    expect(main?.querySelectorAll('.oyl-home__rides')).toHaveLength(0);
+  });
+
   it('a first open with no ride controller keeps one way to Devices, in the empty state — #1429', async () => {
     globalThis.location.hash = '#/';
     mounted = await mount(
