@@ -532,7 +532,8 @@ const FLOOR: WorkoutRescue = {
 const KEEP_ALIVE_FAILED = new URLSearchParams(window.location.search).get('keepalive') === 'failed';
 
 /**
- * `rideview.html?ride=idle` and `?ride=armed` — #669. The ride-time controls
+ * `rideview.html?ride=idle` and `?ride=armed` — #669 (and `?ride=paused`,
+ * #1430: a paused ride with no stop armed, for the row Lap, Resume, Stop). The ride-time controls
  * that the fullest state does not render: *Start recording* and *Ask the
  * trainer for control* before a ride (a trainer paired, control not yet
  * granted), and *Resume*, *Yes, stop the ride* and *Keep riding* on a paused
@@ -695,6 +696,10 @@ function snapshot(): RideSnapshot {
   }
   if (RIDE_STATE === 'armed') {
     return { ...riding, phase: 'paused', stopArmed: true };
+  }
+  // #1430: a paused ride, its stop not armed — Lap, Resume, Stop.
+  if (RIDE_STATE === 'paused') {
+    return { ...riding, phase: 'paused' };
   }
   if (WORKOUT_STATE === 'hold') {
     return {

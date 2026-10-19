@@ -387,6 +387,153 @@ describe('criterion 6 — one click cannot end a ride', () => {
   });
 });
 
+/**
+ * #1430 — ending a ride takes two steps, and no one press of the running
+ * screen ends it. Driven through the REAL controller, over a store harness:
+ * the guarantee is the controller's (`confirmStop` refuses without an arm),
+ * and what is asserted is what the controller says of the ride after each
+ * single press, not which stub method was counted.
+ */
+describe('#1430 — one press of the running screen cannot end a ride', () => {
+  let harness: StoreHarness | undefined;
+
+  afterEach(async () => {
+    await harness?.destroy();
+    harness = undefined;
+  });
+
+  async function riding(paused: boolean) {
+    harness = createStoreHarness();
+    await seedAthletes(harness);
+    const store = harness;
+    const { transport, bench } = createSimulator({ devices: [] });
+    const controller = createRideController({
+      transport,
+      store: {
+        putRecordingSession: async (record) =>
+          store.write(async (inner) => inner.putRecordingSession(record)),
+        appendRecordingChunk: async (chunk) =>
+          store.write(async (inner) => inner.appendRecordingChunk(chunk)),
+        readRecordingSessions: async (owner) =>
+          store.write(async (inner) => inner.readRecordingSessions(owner)),
+        recoverRecording: async (owner, id) =>
+          store.write(async (inner) => inner.recoverRecording(owner, id)),
+        deleteRecordingSession: async (owner, id) =>
+          store.write(async (inner) => inner.deleteRecordingSession(owner, id)),
+      },
+      athleteId: ATHLETE_A,
+      newSessionId: () => recordingSessionId('ride-1430'),
+      now: () => bench.now,
+    });
+    mounted = await mount(<RideView controller={controller} />);
+    await settle();
+    await activateWithKeyboard(buttonNamed('Start recording'));
+    for (let second = 0; second < 3; second += 1) {
+      bench.advance(seconds(1));
+      await controller.tick(bench.now);
+    }
+    if (paused) {
+      await activateWithKeyboard(buttonNamed('Pause'));
+      // The pause is written to the recorder before the screen hears of it.
+      for (let turn = 0; turn < 5 && controller.getSnapshot().phase !== 'paused'; turn += 1) {
+        await settle();
+      }
+    }
+    await settle();
+    return { controller, bench };
+  }
+
+  async function putAway(controller: { dispose(): void }): Promise<void> {
+    controller.dispose();
+    mounted?.unmount();
+    mounted = undefined;
+    await harness?.destroy();
+    harness = undefined;
+  }
+
+  const names = (): string[] =>
+    queryAll<HTMLButtonElement>(document, 'button').map((each) => (each.textContent ?? '').trim());
+
+  it.each([
+    ['recording', false],
+    ['paused', true],
+  ] as const)(
+    'leaves a %s ride in progress after one press of any control on the screen',
+    async (phase, paused) => {
+      let { controller } = await riding(paused);
+      const pressed = names();
+      // The row the issue is about is all there: Lap, Pause or Resume, Stop.
+      expect(pressed).toEqual(expect.arrayContaining(['Lap', paused ? 'Resume' : 'Pause', 'Stop']));
+      for (const [index, name] of pressed.entries()) {
+        if (index > 0) {
+          // Each control is pressed once, on a ride of its own.
+          await putAway(controller);
+          ({ controller } = await riding(paused));
+        }
+        await activateWithKeyboard(buttonNamed(name));
+        await settle();
+        const after = controller.getSnapshot();
+        expect(after.phase, `one press of ${name} ended the ${phase} ride`).not.toBe('stopped');
+        expect(['recording', 'paused']).toContain(after.phase);
+      }
+      await putAway(controller);
+    },
+  );
+
+  it('puts Pause or Resume between Lap and Stop, recording and paused alike', async () => {
+    for (const paused of [false, true]) {
+      const { controller } = await riding(paused);
+      const row = queryAll<HTMLButtonElement>(
+        document,
+        '.oyl-ride__group--live .oyl-ride__actions button',
+      ).map((each) => (each.textContent ?? '').trim());
+      expect(row).toEqual(['Lap', paused ? 'Resume' : 'Pause', 'Stop']);
+      await putAway(controller);
+    }
+  });
+
+  it('hands focus to Keep riding after Stop, and back to Stop after Keep riding — by keyboard', async () => {
+    const { controller } = await riding(false);
+    await activateWithKeyboard(buttonNamed('Stop'));
+    await settle();
+    expect(controller.getSnapshot().stopArmed).toBe(true);
+    expect(document.activeElement).toBe(buttonNamed('Keep riding'));
+    // The confirmation is reached from there by keyboard too.
+    expect(buttonNamed('Yes, stop the ride').tabIndex).toBe(0);
+
+    await activateWithKeyboard(buttonNamed('Keep riding'));
+    await settle();
+    expect(controller.getSnapshot().stopArmed).toBe(false);
+    expect(document.activeElement).toBe(buttonNamed('Stop'));
+    expect(controller.getSnapshot().phase).toBe('recording');
+    controller.dispose();
+  });
+
+  it('announces the confirmation once: one live region, kept across the ride’s ticks', async () => {
+    const { controller, bench } = await riding(false);
+    await activateWithKeyboard(buttonNamed('Stop'));
+    await settle();
+    const live = (): Element[] =>
+      queryAll(document, '[role="status"], [role="alert"], [aria-live]').filter((each) =>
+        (each.textContent ?? '').includes('Stopping ends this ride'),
+      );
+    expect(live()).toHaveLength(1);
+    const region = live()[0];
+    // Focus lands on Keep riding, which is not described by the sentence: a
+    // description would have it read a second time.
+    expect(buttonNamed('Keep riding').getAttribute('aria-describedby')).toBeNull();
+    for (let second = 0; second < 3; second += 1) {
+      bench.advance(seconds(1));
+      await controller.tick(bench.now);
+    }
+    await settle();
+    // The same node: a region re-mounted on a tick is announced again.
+    expect(live()).toHaveLength(1);
+    expect(live()[0]).toBe(region);
+    controller.dispose();
+  });
+});
+
 // Criterion 5 — closing the tab mid-ride — is asserted in
 // `../ride/RideSession.test.tsx`, through `AppShell` and across a route change.
 // The guard is no longer this component's, and a copy of the assertion mounted
@@ -944,8 +1091,9 @@ describe('the screen is three groups, in the order it always was (#422)', () => 
     expect(headingsIn('.oyl-ride__group--live')).toEqual(['Live']);
     expect(
       queryAll(document, '.oyl-ride__group--live button').map((each) => each.textContent),
-      // #1318: *Lap* between them, on a ride with no course under it.
-    ).toEqual(['Pause', 'Lap', 'Stop']);
+      // #1318: *Lap*, on a ride with no course under it — first since #1430,
+      // so Pause stands between it and Stop.
+    ).toEqual(['Lap', 'Pause', 'Stop']);
   });
 
   it('puts the workout in the TRAINER group, beside the control it depends on', async () => {
