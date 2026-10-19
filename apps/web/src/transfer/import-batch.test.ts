@@ -597,6 +597,98 @@ describe('importActivityFiles — a file’s laps (#1320)', () => {
     ]);
   });
 
+  it('ends a paused TCX lap at the next one’s start and reads its TotalTimeSeconds as moving time', async () => {
+    const open = await openSeeded();
+    // A Garmin TCX with auto-pause: each lap's TotalTimeSeconds (60, 60, 30)
+    // is timer time, far short of the wall-clock gap to the next StartTime.
+    const outcome = await importOne(
+      open,
+      'paused.tcx',
+      lappedFile({
+        format: 'tcx',
+        samples: 300,
+        writer: 'Garmin Edge 530',
+        laps: [
+          { start: 0, elapsed: 60, distance: 300 },
+          { start: 150, elapsed: 60, distance: 450 },
+          { start: 240, elapsed: 30, distance: 295 },
+        ],
+      }),
+    );
+    expect(outcome.kind).toBe('imported');
+    const laps = await lapsOf(open, outcome.activityId);
+    expect(
+      laps.map((lap) => [lap.startedAt - LAPPED_FILE_START, lap.elapsedTime, lap.movingTime]),
+    ).toEqual([
+      [0, 150, 60],
+      [150, 90, 60],
+      [240, 59, 30],
+    ]);
+    // Sample i has power i: each lap's highest is its last slot's, so every
+    // lap's averages are taken over its whole span, the stretch after a pause
+    // included — and not cut off StartTime + TotalTimeSeconds in.
+    expect(laps.map((lap) => lap.maxPower)).toEqual([149, 239, 298]);
+  });
+
+  it('holds a TCX lap’s moving time to the span it runs to the next lap', async () => {
+    const open = await openSeeded();
+    const outcome = await importOne(
+      open,
+      'overlong.tcx',
+      lappedFile({
+        format: 'tcx',
+        samples: 120,
+        writer: 'Garmin Edge 530',
+        laps: [
+          // States 100 s for a lap the next one starts 60 s into.
+          { start: 0, elapsed: 100, distance: 300 },
+          { start: 60, elapsed: 59, distance: 295 },
+        ],
+      }),
+    );
+    const laps = await lapsOf(open, outcome.activityId);
+    expect(laps.map((lap) => [lap.elapsedTime, lap.movingTime])).toEqual([
+      [60, 60],
+      [59, 59],
+    ]);
+  });
+
+  it('takes a lap’s distance and its averages over the same slots when it ends between two samples', async () => {
+    const open = await openSeeded();
+    // FIT states a lap's time to the millisecond, so a lap can end between
+    // two samples: this one 60.6 s in. The file states no lap distance, so
+    // each is the speed (5 m/s) summed over the lap's slots; power i in slot
+    // i makes the slots its averages were taken over readable off them.
+    const outcome = await importOne(
+      open,
+      'part-second.fit',
+      lappedFile({
+        format: 'fit',
+        samples: 120,
+        writer: GARMIN,
+        laps: [
+          { start: 0, elapsed: 60.6 },
+          { start: 61, elapsed: 58 },
+        ],
+      }),
+    );
+    const laps = await lapsOf(open, outcome.activityId);
+    // The file's own times, to the millisecond: nothing is moved onto the grid.
+    const millis = (value: number): number => Math.round(value * 1000) / 1000;
+    expect(laps.map((lap) => [lap.startedAt - LAPPED_FILE_START, millis(lap.elapsedTime)])).toEqual(
+      [
+        [0, 60.6],
+        [61, 58],
+      ],
+    );
+    // Lap 1 is slots 0–59, the slot 60.6 s is in left out (`recording/laps.ts`
+    // §`lapSlots`): 60 slots, so 300 m, and power 0–59.
+    expect(laps.map((lap) => [lap.distance, lap.maxPower])).toEqual([
+      [300, 59],
+      [290, 118],
+    ]);
+  });
+
   it.each([
     ['a FIT file that names no writer, as this client’s own does', 'fit', undefined],
     ['a TCX file this client wrote', 'tcx', undefined],

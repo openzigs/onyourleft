@@ -149,7 +149,16 @@ export class ActivityImportError extends Error {
  * distance is the file's where it states one, and otherwise the recording's
  * own rule over the lap's slots; its climb is the recording's own rule over
  * the lap's altitude readings (`recording/laps.ts` §`recordedStretch`, the
- * rule for a lap with no course under it). Its averages are NOT here: they are
+ * rule for a lap with no course under it).
+ *
+ * The two follow ONE preference order — the file's figure where the import
+ * has one, the samples' otherwise — and differ only because no file this
+ * client reads states a lap's climb: TCX's `<Lap>` has no element for it, GPX
+ * lists no laps, and `packages/fit` decodes a FIT lap's `total_distance` but
+ * not its `total_ascent`. A lap distance is stated by both formats that list
+ * laps, so it is the file's, as the ride's own distance is ({@link rideOf}).
+ *
+ * Its averages are NOT here: they are
  * worked out from the imported samples by `recording/laps.ts` when the row is
  * written (`import-batch.ts`), never taken on trust from the file.
  */
@@ -277,10 +286,19 @@ function readXml(format: 'gpx' | 'tcx', fileName: string, bytes: Uint8Array): Im
     statedDistance: statedDistanceOf(result.activity),
     statedLaps: result.activity.laps.map((lap) => ({
       startedAt: lap.startTime ?? lap.points[0]?.timestamp,
-      elapsedTime: lap.totalElapsedTime,
-      // TCX states one time per lap, read as the elapsed time — the ride's own
-      // rule above, `statedMovingTime: undefined`.
-      movingTime: undefined,
+      // ⚠️ **A TCX lap's one time is its MOVING time, and its end is where
+      // the next lap starts** (#1320). `TotalTimeSeconds` (the codec's
+      // `totalElapsedTime`) is timer time in Garmin's files and most others':
+      // it leaves auto-pause out. Read as elapsed time it ended a lap that
+      // held a pause early, and cut the slots its averages are taken over.
+      // Every `<Lap>` carries a `StartTime`, so a lap runs to the next one's
+      // and the last to the ride's last sample — an untimed lap, in
+      // `lapsWithin`'s terms — and the stated time is held to that span.
+      // This client's own export writes each split's wall-clock span there,
+      // which is the same number by either reading (`controller.test.ts`,
+      // "reads this client's own TCX splits back with the times it wrote").
+      elapsedTime: undefined,
+      movingTime: lap.totalElapsedTime,
       distance: lap.totalDistance,
     })),
     // ⚠️ GPX lists no laps: a `<trkseg>` is as often a new segment after a lost
@@ -584,6 +602,15 @@ interface LapGrid {
  * mark is #1321's; until a file carries it, a file that names no writer, or
  * names this client, is read with no laps — as every file was before #1320.
  *
+ * ## A lap's times
+ *
+ * - **FIT** states both: a lap ends at `start_time + total_elapsed_time`, and
+ *   `total_timer_time` is its moving time.
+ * - **TCX** states one, `TotalTimeSeconds`, which is timer time: a lap ends
+ *   where the next one starts, the last where the ride's samples do, and the
+ *   stated time is its moving time (`readXml` says why).
+ * - A FIT lap that states no time runs to the next lap's start, the same way.
+ *
  * ## The bounds, because a file is untrusted input
  *
  * - **A lap starts no earlier than the one before it ended, and inside the
@@ -595,7 +622,8 @@ interface LapGrid {
  * - A lap's moving time is no more than its elapsed time. Their sum is held
  *   to the ride's own when the rows are written (`recording/laps.ts`
  *   §`lapsToSave`).
- * - A lap's distance is no more than the ride's.
+ * - A lap's distance is no more than what the ride has left after the laps
+ *   before it: together they go no further than the ride did.
  * - Past {@link MAXIMUM_IMPORTED_LAPS}, none are listed, and a fault says so.
  * - Fewer than two left, and none are listed: a single lap is the ride said
  *   again — every file with no splits in it.
@@ -624,7 +652,8 @@ function lapsWithin(
     const statedStart = lap.startedAt ?? cursor;
     const startedAt = within(statedStart, cursor, rideEnd);
     // Where the file says the lap ended, before either end is bounded; and a
-    // lap that states no time of its own runs to where the next one starts.
+    // lap that states no time of its own runs to where the next one starts —
+    // every TCX lap, whose one time is its moving time (`readXml`).
     const statedEnd =
       lap.elapsedTime === undefined
         ? (stated[index + 1]?.startedAt ?? rideEnd)
@@ -662,6 +691,16 @@ function lapsWithin(
  * The samples of one channel in the slots from the one `from` is in up to and
  * not including the one `to` is in — `recording/laps.ts` §`lapSlots`'s rule,
  * on the import's 1 Hz grid. `undefined` for a channel the file did not carry.
+ *
+ * ⚠️ **A floor, as `lapSlots` is, and not `rideOf`'s `Math.round`.** The
+ * row's averages are worked out by `lapSlots` itself when it is written
+ * (`import-batch.ts` §`lapRowsOf`), so a lap's distance and climb must be
+ * taken over the same slots or a lap ending between two samples — FIT states
+ * a lap's time to the millisecond — would count one slot's road that its
+ * averages leave out. The two rules for a SAMPLE cannot disagree: every
+ * sample time a FIT, GPX or TCX file carries is read as a whole second
+ * (FIT's `date_time`; `packages/fit` §`parseIsoInstant` drops a fraction), so
+ * `rideOf`'s round moves none of them.
  */
 function slotsOf<C extends 'speed' | 'altitude'>(
   grid: LapGrid,
@@ -674,7 +713,7 @@ function slotsOf<C extends 'speed' | 'altitude'>(
     return undefined;
   }
   const slot = (at: number): number =>
-    Math.min(grid.sampleCount, Math.max(0, Math.round(at - grid.startedAt)));
+    Math.min(grid.sampleCount, Math.max(0, Math.floor(at - grid.startedAt)));
   // The one cast, and `put`'s reason: every entry under this key was written
   // by `put` under this channel.
   return samples.slice(slot(from), slot(to)) as (StreamChannelValue[C] | undefined)[];

@@ -480,9 +480,10 @@ describe('readActivityFile — a file’s laps (#1320)', () => {
     expect(lapsOf(MAXIMUM_IMPORTED_LAPS).faults).toEqual([]);
   });
 
-  it('bounds laps by the last sample, not by a timer-time total that excludes pauses', () => {
+  it('ends a paused TCX lap where the next starts, the last at the last sample, its time its moving time', () => {
     // TCX's TotalTimeSeconds is timer time: these three sum to 150 s while the
-    // 300 samples span 299 s, so a bound of first + elapsedTime dropped lap 3.
+    // 300 samples span 299 s, so a bound of first + elapsedTime dropped lap 3,
+    // and StartTime + TotalTimeSeconds ended every lap at its first pause.
     const ride = readActivityFile(
       'paused.tcx',
       lappedFile({
@@ -496,10 +497,12 @@ describe('readActivityFile — a file’s laps (#1320)', () => {
         ],
       }),
     );
-    expect(ride.laps.map((lap) => [lap.startedAt - LAPPED_FILE_START, lap.elapsedTime])).toEqual([
-      [0, 60],
-      [150, 60],
-      [240, 30],
+    expect(
+      ride.laps.map((lap) => [lap.startedAt - LAPPED_FILE_START, lap.elapsedTime, lap.movingTime]),
+    ).toEqual([
+      [0, 150, 60],
+      [150, 90, 60],
+      [240, 59, 30],
     ]);
   });
 
