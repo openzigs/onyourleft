@@ -5771,6 +5771,90 @@ select.oyl-input {
 }
 
 /*
+ * THE BLOCK'S TARGET BAND (#1434) — `workout/TargetBand.tsx`
+ * §TARGET_BAND_PAINTS is the same table.
+ *
+ * A gauge on the frame's own `surface`: the band a shaded box with an edge on
+ * each side, the rider's 3 s power a tall bar with a cap above the gauge, and
+ * the block's average a ring. Three shapes, so in, under and over are read
+ * without the colour (SC 1.4.1); the line under the gauge says it in words.
+ * `left` (and the band's `width`) are set inline, from `target-band.ts`.
+ */
+.oyl-target-band {
+  background: var(--oyl-color-surface);
+  border: 1px solid var(--oyl-color-border);
+  border-radius: var(--oyl-radius);
+  margin-top: var(--oyl-space-sm);
+  padding: var(--oyl-space-xs) var(--oyl-space-sm) var(--oyl-space-sm);
+}
+
+.oyl-target-band__heading,
+.oyl-target-band__standing {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--oyl-space-sm);
+  justify-content: space-between;
+  margin: 0;
+}
+
+.oyl-target-band__reading {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.oyl-target-band__gauge {
+  border-bottom: 1px solid var(--oyl-color-border);
+  height: 2rem;
+  margin: var(--oyl-space-sm) 0 var(--oyl-space-xs);
+  position: relative;
+}
+
+.oyl-target-band__band {
+  background-color: var(--oyl-color-surface-raised);
+  border-color: var(--oyl-color-ink);
+  border-style: solid;
+  border-width: 0 2px;
+  bottom: 0;
+  position: absolute;
+  top: 0.5rem;
+}
+
+.oyl-target-band__power {
+  background-color: var(--oyl-color-accent);
+  bottom: 0;
+  margin-left: -2px;
+  position: absolute;
+  top: 0;
+  width: 4px;
+}
+
+/* The bar's cap: a wider block at its top, so the bar is not a band edge. */
+.oyl-target-band__power::before {
+  background-color: inherit;
+  content: '';
+  height: 6px;
+  left: -4px;
+  position: absolute;
+  top: 0;
+  width: 12px;
+}
+
+.oyl-target-band__average {
+  border: 3px solid var(--oyl-color-ink);
+  border-radius: 50%;
+  bottom: 0.25rem;
+  height: 1rem;
+  margin-left: -0.5rem;
+  position: absolute;
+  width: 1rem;
+}
+
+.oyl-target-band__cue {
+  font-size: var(--oyl-font-size-sm);
+  margin: var(--oyl-space-xs) 0 0;
+}
+
+/*
  * The ride HUD (#94).
  *
  * Sized for a phone clamped to a handlebar and read at about 60 cm, by a rider

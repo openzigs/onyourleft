@@ -821,7 +821,14 @@ apps/                 AGPL-3.0-or-later, without exception
                         "Eased" notice takes the notice cell from the road
                         notice while the rescue holds (`GameView.tsx`
                         §`roadNotice`); `ride.html?rescue=floor` is the
-                        browser gate that measures it
+                        browser gate that measures it; and since #1434
+                        `target-band.ts`, the block being ridden against the
+                        target the trainer CONFIRMED (`workout-graph.ts`
+                        §`heldNow`) — a ±5 % band, 3 s power, the block's
+                        average (`controller.ts` §`blockPower`, summed beside
+                        the trace because a block outlasts its five minutes),
+                        time left and the ERG cadence cue — drawn at the foot
+                        of `WorkoutPanel`'s running section
     src/workouts/       the workout library and builder (#14) — the read
                         budget, the row model that quotes no watts, the one
                         place a typed percentage becomes a share, and since
