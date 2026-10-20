@@ -418,7 +418,14 @@ export function WorkoutPanel({
           `rideview.browser.spec.ts` §"#1244" measures both.
         */}
         <div className="oyl-workout-controls">
-          <Button variant="secondary" size="ride" type="button" onClick={onEnd}>
+          <Button
+            variant="secondary"
+            size="ride"
+            type="button"
+            onClick={onEnd}
+            // #1432: ends the workout's ERG; never stopped by the touch lock.
+            touchLockExempt
+          >
             End workout
           </Button>
           {workout.replan === undefined ||

@@ -2445,6 +2445,17 @@ a.oyl-button {
   box-shadow: inset 0 0 0 2px var(--oyl-color-border);
 }
 
+/* #1432: the touch lock's control is released by a press HELD for a second
+   (`design/TouchLockButton.tsx`). Without these a long press on Android
+   selects the word or opens the callout, and a finger that drifts starts a
+   pan, which cancels the pointer and so the hold. */
+.oyl-touch-lock {
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
 /*
  * A SEGMENTED CONTROL — #668. An exclusive choice of two or three that changes
  * how something is shown: a `fieldset` of NATIVE radios (#667's), each inside

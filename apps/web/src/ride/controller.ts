@@ -501,6 +501,15 @@ export interface RideSnapshot {
   readonly phase: RidePhase;
   /** Whether the rider has pressed Stop once. A second press is what stops. */
   readonly stopArmed: boolean;
+  /**
+   * Whether the ride screen's touch lock is on — #1432. Held HERE, above the
+   * router, rather than in the screen, so a rider who taps away from the Ride
+   * screen and back (a raindrop on the tab bar) comes back to it still locked.
+   * Only ever `true` while a ride is in progress: `lockTouch` refuses
+   * otherwise, and stopping or starting a new ride turns it off.
+   * `design/touch-lock.ts` is what it means on the screen.
+   */
+  readonly touchLocked: boolean;
   readonly elapsedSeconds: number;
   readonly movingSeconds: number;
   /**
@@ -1056,6 +1065,13 @@ export interface RideController {
   /** First press of Stop. Arms the confirmation; changes nothing else. */
   armStop(): void;
   cancelStop(): void;
+  /** #1432: turn the touch lock on. Refused unless a ride is in progress. */
+  lockTouch(): void;
+  /**
+   * #1432: turn it off. The deliberate release is the screen's
+   * (`design/TouchLockButton.tsx`).
+   */
+  unlockTouch(): void;
   /** Second press. Stops the recording and checkpoints it. */
   confirmStop(): Promise<void>;
   /**
@@ -1427,6 +1443,8 @@ export function createRideController(options: RideControllerOptions): RideContro
   let unreadable: readonly RecordingSessionId[] = [];
   let phase: RidePhase = 'idle';
   let stopArmed = false;
+  /** @see RideSnapshot.touchLocked */
+  let touchLocked = false;
   /**
    * `confirmStop` is between setting `stopped` and its save settling — #548.
    * The phase says `stopped` and `saveState` still holds the LAST ride's value
@@ -2292,6 +2310,7 @@ export function createRideController(options: RideControllerOptions): RideContro
     return {
       phase,
       stopArmed,
+      touchLocked,
       elapsedSeconds: session?.elapsedTime ?? 0,
       movingSeconds: session?.movingTime ?? 0,
       courseLapSeconds:
@@ -3726,6 +3745,22 @@ export function createRideController(options: RideControllerOptions): RideContro
       changed();
     },
 
+    lockTouch(): void {
+      if (phase !== 'recording' && phase !== 'paused') {
+        return;
+      }
+      touchLocked = true;
+      changed();
+    },
+
+    unlockTouch(): void {
+      if (!touchLocked) {
+        return;
+      }
+      touchLocked = false;
+      changed();
+    },
+
     async confirmStop(): Promise<void> {
       if (!stopArmed || (phase !== 'recording' && phase !== 'paused')) {
         // ⚠️ The guard, not a nicety. Without the `stopArmed` check a single
@@ -3735,6 +3770,9 @@ export function createRideController(options: RideControllerOptions): RideContro
         return;
       }
       stopArmed = false;
+      // #1432: the lock is for riding. A stopped ride's screen is the result
+      // card and *Start a new ride*, which a rider presses off the bike.
+      touchLocked = false;
       phase = 'stopped';
       const at = now();
       // The workout first, then the trainer, then the recording.
