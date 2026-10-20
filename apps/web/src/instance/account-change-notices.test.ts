@@ -11,9 +11,11 @@ import { describe, expect, it } from 'vitest';
 import {
   AFTER_REVOKE_TEXT,
   formatDay,
+  formatTime,
   keyName,
   noticeText,
   REVOKE_MARK_TEXT,
+  revokeKeyName,
   revokeMarks,
   type AccountChangeEntry,
   type ListedKey,
@@ -144,6 +146,58 @@ describe('a notice (#1193 draft wording)', () => {
   it('writes a day as the day and the month', () => {
     // Noon UTC, so the day is the same in every time zone a test runs in.
     expect(formatDay(Date.UTC(2026, 9, 3, 12) / 1000)).toBe('3 October');
+  });
+
+  it("writes a time on the device's own 24-hour clock", () => {
+    // Local times, so the clock read is the one the rider's device keeps.
+    expect(formatTime(new Date(2026, 8, 22, 14, 5).getTime() / 1000)).toBe('14:05');
+    expect(formatTime(new Date(2026, 8, 22, 0, 5).getTime() / 1000)).toBe('00:05');
+  });
+});
+
+describe('a key to revoke, named (#1208, owner ruling 2026-10-20)', () => {
+  const time = (unixSeconds: number): string => `time ${String(unixSeconds)}`;
+  // `day` here writes the hundreds, so 200 and 250 fall on one day.
+  const byHundred = (unixSeconds: number): string => `day ${String(Math.floor(unixSeconds / 100))}`;
+
+  it('names a key added on a day no other key was by that day alone', () => {
+    const keys: readonly ListedKey[] = [
+      { publicKey: 'a', addedAt: 100 },
+      { publicKey: 'b', addedAt: 200 },
+    ];
+    expect(revokeKeyName({ publicKey: 'b', addedAt: 200 }, keys, byHundred, time)).toBe(
+      'the key added on day 2',
+    );
+  });
+
+  it('names two keys added the same day by their day and time, so they differ', () => {
+    const keys: readonly ListedKey[] = [
+      { publicKey: 'a', addedAt: 100 },
+      { publicKey: 'b', addedAt: 200 },
+      { publicKey: 'c', addedAt: 250 },
+    ];
+    const [, b, c] = keys as [ListedKey, ListedKey, ListedKey];
+    expect(revokeKeyName(b, keys, byHundred, time)).toBe('the key added on day 2 at time 200');
+    expect(revokeKeyName(c, keys, byHundred, time)).toBe('the key added on day 2 at time 250');
+    // The key alone on its day is still named by the day.
+    expect(revokeKeyName(keys[0] as ListedKey, keys, byHundred, time)).toBe(
+      'the key added on day 1',
+    );
+  });
+
+  it("uses the device's calendar and clock by default", () => {
+    const at = (hour: number, minute: number): number =>
+      new Date(2026, 8, 22, hour, minute).getTime() / 1000;
+    const keys: readonly ListedKey[] = [
+      { publicKey: 'a', addedAt: at(9, 30) },
+      { publicKey: 'b', addedAt: at(14, 5) },
+    ];
+    expect(revokeKeyName(keys[1] as ListedKey, keys)).toBe(
+      'the key added on 22 September at 14:05',
+    );
+    expect(revokeKeyName(keys[0] as ListedKey, keys)).toBe(
+      'the key added on 22 September at 09:30',
+    );
   });
 });
 

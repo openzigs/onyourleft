@@ -15,6 +15,7 @@ import {
   formatDay,
   noticeText,
   REVOKE_MARK_TEXT,
+  revokeKeyName,
 } from '../instance/account-change-notices';
 import { ACCOUNT_CHANGES_UNAVAILABLE_TEXT, type InstancePort } from '../instance/instance-port';
 import { INSTANCE_KEY_TEXT } from '../instance/instance-pin';
@@ -43,7 +44,6 @@ import {
   RECOVERY_CODES_LEAD,
   TERMS_CHANGED_TEXT,
 } from './InstanceView';
-import { keyFingerprint } from '../instance/sync-port';
 import { ACCOUNT_NOTICES_TEXT } from './InstanceDevices';
 
 let mounted: Mounted | undefined;
@@ -359,7 +359,12 @@ describe('the account-change notices and a revoke, on the device list — #1208'
   }
 
   const day = formatDay;
-  const REVOKED_NAME = `the key added on ${day(1_790_100_000)} (${keyFingerprint(REVOKED)})`;
+  // Named against the five keys, so it carries a time only where the zone the
+  // test runs in puts another of them on the same day.
+  const REVOKED_NAME = revokeKeyName(
+    { publicKey: REVOKED, addedAt: 1_790_100_000 },
+    fiveKeys().held.devices,
+  );
 
   /** The device list's line for a key, in {@link ORDER}. */
   function item(publicKey: string): string {
@@ -479,8 +484,7 @@ describe('the account-change notices and a revoke, on the device list — #1208'
         .map((each) => each.textContent)
         .filter((name) => (name ?? '').startsWith('Revoke the key'));
     // Two live keys: only the other one is offered.
-    const otherDevice = scripted.held.devices[1];
-    const other = `the key added on ${day(otherDevice?.addedAt ?? 0)} (${keyFingerprint(otherDevice?.publicKey ?? '')})`;
+    const other = `the key added on ${day(scripted.held.devices[1]?.addedAt ?? 0)}`;
     expect(revokes()).toEqual([ACCOUNT_NOTICES_TEXT.revoke(other)]);
     mounted.unmount();
     // The other one revoked: this device is the last live key, and nothing is offered.
@@ -490,18 +494,39 @@ describe('the account-change notices and a revoke, on the device list — #1208'
     expect(revokes()).toEqual([]);
   });
 
-  it('tells two keys added the same day apart on their revoke buttons', async () => {
+  it('tells two keys added the same day apart by their time, on the button and when asked', async () => {
     const scripted = fiveKeys();
+    // Local times, so the two share a day in whatever zone the test runs in.
+    const at = (hour: number, minute: number): number =>
+      new Date(2026, 8, 22, hour, minute).getTime() / 1000;
     scripted.held.devices = scripted.held.devices.map((device) =>
-      device.thisDevice ? device : { ...device, addedAt: 1_790_100_000 },
+      device.publicKey === REVOKED
+        ? { ...device, addedAt: at(9, 30) }
+        : device.publicKey === SINCE
+          ? { ...device, addedAt: at(14, 5) }
+          : device,
     );
     mounted = await mount(<InstanceView port={scripted.port} />);
     await settle();
+    const later = 'the key added on 22 September at 14:05';
+    const earlier = 'the key added on 22 September at 09:30';
+    // Each is found by its accessible name, and no two revoke buttons share one.
     const names = [...mounted.container.querySelectorAll('button')]
       .map((each) => each.textContent ?? '')
       .filter((name) => name.startsWith('Revoke the key'));
-    expect(names).toHaveLength(4);
-    expect(new Set(names).size).toBe(4);
+    expect(names).toContain(ACCOUNT_NOTICES_TEXT.revoke(later));
+    expect(names).toContain(ACCOUNT_NOTICES_TEXT.revoke(earlier));
+    expect(new Set(names).size).toBe(names.length);
+    // A key alone on its day keeps the day alone.
+    expect(
+      button(ACCOUNT_NOTICES_TEXT.revoke(`the key added on ${day(1_780_000_000)}`)),
+    ).toBeDefined();
+    await activateWithKeyboard(button(ACCOUNT_NOTICES_TEXT.revoke(later)));
+    await settle();
+    expect(text()).toContain(ACCOUNT_NOTICES_TEXT.confirm(later));
+    await activateWithKeyboard(button(ACCOUNT_NOTICES_TEXT.confirmRevoke));
+    await settle();
+    expect(scripted.calls).toContain(`revokeDevice ${SINCE}`);
   });
 
   it('says why a key was not revoked, and marks nothing', async () => {

@@ -6,9 +6,9 @@ import { Button } from '../design/Button';
 import { StatusMessage } from '../design/StatusMessage';
 import {
   AFTER_REVOKE_TEXT,
-  formatDay,
   noticeText,
   REVOKE_MARK_TEXT,
+  revokeKeyName,
   revokeMarks,
   type ListedKey,
 } from '../instance/account-change-notices';
@@ -53,14 +53,6 @@ export const ACCOUNT_NOTICES_TEXT = {
 /** A day, in UTC, so the screen says the same thing wherever it is read. */
 function day(unixSeconds: number): string {
   return new Date(unixSeconds * 1000).toISOString().slice(0, 10);
-}
-
-/**
- * How a key the rider may revoke is named on its button: as the notices name
- * it, plus its fingerprint, so two keys added the same day stay apart.
- */
-function revokeName(device: InstanceDevice): string {
-  return `the key added on ${formatDay(device.addedAt)} (${keyFingerprint(device.publicKey)})`;
 }
 
 export function InstanceDevices({
@@ -175,7 +167,7 @@ export function InstanceDevices({
               {!offered ? null : confirming === device.publicKey ? (
                 <span className="oyl-instance__revoke">
                   {' '}
-                  {ACCOUNT_NOTICES_TEXT.confirm(revokeName(device))}{' '}
+                  {ACCOUNT_NOTICES_TEXT.confirm(revokeKeyName(device, keys))}{' '}
                   <Button
                     variant="danger"
                     disabled={busy}
@@ -203,7 +195,7 @@ export function InstanceDevices({
                       setConfirming(device.publicKey);
                     }}
                   >
-                    {ACCOUNT_NOTICES_TEXT.revoke(revokeName(device))}
+                    {ACCOUNT_NOTICES_TEXT.revoke(revokeKeyName(device, keys))}
                   </Button>
                 </>
               )}
