@@ -7306,6 +7306,19 @@ select.oyl-input {
       calc(50vw - 19.05vh - max(var(--oyl-space-sm), var(--oyl-safe-right)) - var(--oyl-space-sm))
     );
   }
+
+  /* A notice, under the primary panel at the start edge, stops short of the
+     box by the same sum as the route panel: its 22 rem ended at x = 360 at
+     802×600 on DejaVu Sans and a workout's trainer notice ran down to y = 331,
+     16 px into the box. Narrower, it wraps and grows down the left of the box,
+     not into it. */
+  .oyl-game--riding .oyl-hud__notices {
+    max-width: min(
+      100%,
+      22rem,
+      calc(50vw - 19.05vh - max(var(--oyl-space-sm), var(--oyl-safe-left)) - var(--oyl-space-sm))
+    );
+  }
 }
 
 /*
