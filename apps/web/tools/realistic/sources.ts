@@ -154,7 +154,14 @@ export const ADMITTED_SOURCES: readonly AdmittedSource[] = [
     licence: 'CC0-1.0',
     decidedBy: 'ADR 0026 D-4',
     kind: 'files',
-    prefixes: ['https://ambientcg.com/', 'https://docs.ambientcg.com/'],
+    prefixes: [
+      'https://ambientcg.com/',
+      'https://docs.ambientcg.com/',
+      // #1278: where an asset page's own download link, `ambientcg.com/get?file=`,
+      // redirects — measured 2026-10-20 as a 302 to this path. The page itself
+      // serves its images from the same operator's `acg-media.` host.
+      'https://acg-download.struffelproductions.com/file/ambientCG-Web/download/',
+    ],
   },
   {
     // ADR 0026's 2026-09-28 amendment: MakeHuman's own CC0 system assets pack,

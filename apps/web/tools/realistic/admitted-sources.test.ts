@@ -149,7 +149,11 @@ describe('what the lists decide about a URL — ADR 0049 D-11', () => {
         'https://api.polyhaven.com/',
         'https://dl.polyhaven.org/',
       ],
-      ambientCG: ['https://ambientcg.com/', 'https://docs.ambientcg.com/'],
+      ambientCG: [
+        'https://ambientcg.com/',
+        'https://docs.ambientcg.com/',
+        'https://acg-download.struffelproductions.com/file/ambientCG-Web/download/',
+      ],
       'MakeHuman’s own files': [
         'https://raw.githubusercontent.com/makehumancommunity/makehuman/',
         'https://static.makehumancommunity.org/assets/assetpacks/makehuman_system_assets.html',

@@ -61,44 +61,85 @@ export const RAW = join(HERE, 'build', 'raw');
 /** The committed record of what the inputs are. */
 export const LOCK = join(HERE, 'inputs.lock.json');
 
+/**
+ * How a request is made: `fetch`, or a fake under test — #1278. Asked with
+ * `redirect: 'manual'`, so a redirect comes back as itself and its target is
+ * asked of {@link admission} before it is requested.
+ */
+export type Fetch = (url: string, init: { readonly redirect: 'manual' }) => Promise<Response>;
+
+/** What {@link readSource} reads with and writes to, so a test can hand it a fake. */
+export interface FetchRun {
+  readonly fetch: Fetch;
+  /** Where the downloads go: {@link RAW}, or a directory a test made. */
+  readonly raw: string;
+  /** `--lock`: rewrite the lock from what was read, rather than hold the reads to it. */
+  readonly relock: boolean;
+  /** The date a re-locked source records as `read`, `YYYY-MM-DD`. */
+  readonly today: string;
+  readonly log: (line: string) => void;
+}
+
+/** More than this many redirects for one request is refused. */
+export const MAXIMUM_REDIRECTS = 5;
+
 /** Every request this script makes is for an address the list admits (ADR 0049 D-11). */
 function admitted(url: string, as: 'licence' | 'file'): void {
   const verdict = admission(url, as);
   if (!verdict.admitted) throw new Error(verdict.reason);
 }
 
-async function text(url: string, as: 'licence' | 'file' = 'file'): Promise<string> {
-  admitted(url, as);
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`${url}: HTTP ${String(response.status)}`);
-  return response.text();
+/**
+ * The answer at `url`, after asking {@link admission} of it — and, since
+ * #1278, of every address a redirect sends the request on to, before that one
+ * is requested. Measured on 2026-10-20: ambientCG's `get?file=` answers 302 to
+ * its own download host, which its row admits; `dl.polyhaven.org`,
+ * `api.polyhaven.com`, MakeHuman's hosts and the licence pages answer without
+ * one.
+ */
+async function get(run: FetchRun, url: string, as: 'licence' | 'file'): Promise<Response> {
+  let address = url;
+  for (let hops = 0; ; hops += 1) {
+    admitted(address, as);
+    const response = await run.fetch(address, { redirect: 'manual' });
+    const location = response.headers.get('location');
+    if (response.status >= 300 && response.status < 400 && location !== null) {
+      if (hops === MAXIMUM_REDIRECTS) {
+        throw new Error(`${url}: more than ${String(MAXIMUM_REDIRECTS)} redirects`);
+      }
+      address = new URL(location, address).href;
+      continue;
+    }
+    if (!response.ok) throw new Error(`${address}: HTTP ${String(response.status)}`);
+    return response;
+  }
 }
 
-async function bytes(url: string): Promise<Buffer> {
-  admitted(url, 'file');
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`${url}: HTTP ${String(response.status)}`);
-  return Buffer.from(await response.arrayBuffer());
+async function text(run: FetchRun, url: string, as: 'licence' | 'file' = 'file'): Promise<string> {
+  return (await get(run, url, as)).text();
 }
 
-async function resolve(source: AssetSource): Promise<readonly ResolvedFile[]> {
+async function bytes(run: FetchRun, url: string): Promise<Buffer> {
+  return Buffer.from(await (await get(run, url, 'file')).arrayBuffer());
+}
+
+async function resolve(run: FetchRun, source: AssetSource): Promise<readonly ResolvedFile[]> {
   if (source.origin.from === 'urls') return source.origin.files;
   if (source.origin.from !== 'polyhaven') {
     throw new Error(`${source.id}: an archive is not resolved`);
   }
-  const answer = JSON.parse(await text(`https://api.polyhaven.com/files/${source.id}`)) as Record<
-    string,
-    unknown
-  >;
+  const answer = JSON.parse(
+    await text(run, `https://api.polyhaven.com/files/${source.id}`),
+  ) as Record<string, unknown>;
   return polyHavenFiles(source.id, source.origin.select, answer);
 }
 
-async function authorsOf(source: AssetSource): Promise<string> {
+async function authorsOf(run: FetchRun, source: AssetSource): Promise<string> {
   if (source.origin.from !== 'polyhaven') {
     if (source.author === undefined) throw new Error(`${source.id}: no author recorded`);
     return source.author;
   }
-  const info = JSON.parse(await text(`https://api.polyhaven.com/info/${source.id}`)) as Record<
+  const info = JSON.parse(await text(run, `https://api.polyhaven.com/info/${source.id}`)) as Record<
     string,
     unknown
   >;
@@ -121,6 +162,141 @@ export function sameFiles(
 const md5 = (data: Buffer): string => createHash('md5').update(data).digest('hex');
 const sha256 = (data: Buffer): string => createHash('sha256').update(data).digest('hex');
 
+/**
+ * One source, read: its licence page held to {@link licenceVerdict}, its files
+ * downloaded into `run.raw` and, unless `run.relock`, each held to `expected`,
+ * the lock's entry for it. Returns what the lock records for it.
+ *
+ * `main()`'s loop body until #1278, which made it take its fetch and its lock
+ * so that every guard runs under test where it is called, not only as a pure
+ * function in `sources.ts` (`fetch-assets.test.ts`).
+ */
+export async function readSource(
+  source: AssetSource,
+  expected: LockedSource | undefined,
+  run: FetchRun,
+): Promise<LockedSource> {
+  const { relock } = run;
+  const page = await text(run, source.licencePage, 'licence');
+  const verdict = licenceVerdict(source, page);
+  if (!verdict.kept) throw new Error(verdict.reason);
+  // #1278: how the page says the asset was made is part of what the lock
+  // pins, so a page that now says something else stops the run even where
+  // every byte is the same.
+  if (!relock && expected !== undefined && expected.technique !== verdict.technique) {
+    throw new Error(
+      `${source.id}: its page now says it was made by "${verdict.technique ?? 'nothing'}", not "${expected.technique ?? 'nothing'}" as the lock records; run with --lock only if re-basing on new inputs is intended`,
+    );
+  }
+  const files = [];
+  const origin = source.origin;
+  // An archive downloaded whole and pinned by its digest: MakeHuman's pack
+  // (#623), or an ambientCG asset (#1274), whose own page `licenceVerdict`
+  // has just held to `sources.ts` §`ambientCgVerdict`.
+  const archived = archiveOf(source);
+  if (archived !== undefined) {
+    if (origin.from === 'archive') {
+      // #623: every member's OWN entry on the pack's page must read CC0 by
+      // MakeHuman's own author before a byte of the archive is written.
+      for (const member of origin.members) {
+        const own = systemAssetVerdict(page, member.asset);
+        if (!own.kept) throw new Error(`${source.id}/${member.path}: ${own.reason}`);
+      }
+    }
+    for (const member of archived.members) {
+      if (!safeRelativePath(member.path))
+        throw new Error(`${source.id}: refused path ${member.path}`);
+    }
+    const name = archived.name;
+    if (!safeRelativePath(name)) throw new Error(`${source.id}: refused path ${name}`);
+    const target = join(run.raw, source.id, name);
+    const was = expected?.files.find((each) => each.path === name);
+    const archive =
+      existsSync(target) && was !== undefined && sha256(readFileSync(target)) === was.sha256
+        ? readFileSync(target)
+        : await bytes(run, archived.url);
+    const archiveDigest = sha256(archive);
+    if (!relock) {
+      const fault = lockFault(source.id, name, archiveDigest, expected);
+      if (fault !== undefined) throw new Error(fault);
+    }
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, archive);
+    files.push({ path: name, url: archived.url, bytes: archive.length, sha256: archiveDigest });
+    for (const member of archived.members) {
+      const body = Buffer.from(zipMember(archive, member.path));
+      if (member.mustContain !== undefined && !body.toString('utf8').includes(member.mustContain)) {
+        throw new Error(
+          `${source.id}/${member.path}: its header does not state "${member.mustContain}"`,
+        );
+      }
+      const memberTarget = join(run.raw, source.id, member.path);
+      mkdirSync(dirname(memberTarget), { recursive: true });
+      writeFileSync(memberTarget, body);
+      const digest = sha256(body);
+      if (!relock) {
+        const fault = lockFault(source.id, member.path, digest, expected);
+        if (fault !== undefined) throw new Error(fault);
+      }
+      files.push({
+        path: member.path,
+        url: `${archived.url}#${member.path}`,
+        bytes: body.length,
+        sha256: digest,
+      });
+      run.log(`${source.id}/${member.path} ${String(body.length)} bytes`);
+    }
+  }
+  for (const file of archived !== undefined ? [] : await resolve(run, source)) {
+    if (!safeRelativePath(file.path)) throw new Error(`${source.id}: refused path ${file.path}`);
+    const target = join(run.raw, source.id, file.path);
+    let body: Buffer;
+    if (existsSync(target) && file.md5 !== undefined && md5(readFileSync(target)) === file.md5) {
+      body = readFileSync(target);
+    } else {
+      body = await bytes(run, file.url);
+      if (file.md5 !== undefined && md5(body) !== file.md5) {
+        throw new Error(`${source.id}/${file.path}: MD5 does not match the one published`);
+      }
+      if (file.mustContain !== undefined && !body.toString('utf8').includes(file.mustContain)) {
+        throw new Error(
+          `${source.id}/${file.path}: its header does not state "${file.mustContain}"`,
+        );
+      }
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, body);
+    }
+    const digest = sha256(body);
+    if (!relock) {
+      const fault = lockFault(source.id, file.path, digest, expected);
+      if (fault !== undefined) throw new Error(fault);
+    }
+    files.push({ path: file.path, url: file.url, bytes: body.length, sha256: digest });
+    run.log(`${source.id}/${file.path} ${String(body.length)} bytes`);
+  }
+  if (!relock && expected !== undefined && expected.files.length !== files.length) {
+    throw new Error(`${source.id}: the source now lists a different set of files than the lock`);
+  }
+  return {
+    id: source.id,
+    licence: verdict.licence,
+    licencePage: source.licencePage,
+    evidence: verdict.evidence,
+    // ⚠️ **Re-locking re-dates only what moved** (#475). A source whose
+    // files are exactly the ones the lock already records keeps the date its
+    // licence was read; before, adding one source re-dated every other and
+    // moved the `read` of every committed asset's record with it.
+    read:
+      relock && (expected === undefined || !sameFiles(expected.files, files))
+        ? run.today
+        : (expected?.read ?? run.today),
+    authors: await authorsOf(run, source),
+    // #1274: how the asset's own page said it was made, read with its licence.
+    ...(verdict.technique === undefined ? {} : { technique: verdict.technique }),
+    files,
+  };
+}
+
 async function main(): Promise<void> {
   const relock = process.argv.includes('--lock');
   const locked: InputLock | undefined = existsSync(LOCK)
@@ -129,123 +305,19 @@ async function main(): Promise<void> {
   if (!relock && locked === undefined) {
     throw new Error(`${LOCK} does not exist; run with --lock to write it`);
   }
-  const read = new Date().toISOString().slice(0, 10);
+  const run: FetchRun = {
+    fetch: (url, init) => fetch(url, init),
+    raw: RAW,
+    relock,
+    today: new Date().toISOString().slice(0, 10),
+    log: (line) => {
+      console.log(line);
+    },
+  };
   const sources: LockedSource[] = [];
   for (const source of SOURCES) {
-    const page = await text(source.licencePage, 'licence');
-    const verdict = licenceVerdict(source, page);
-    if (!verdict.kept) throw new Error(verdict.reason);
     const expected = locked?.sources.find((each) => each.id === source.id);
-    const files = [];
-    const origin = source.origin;
-    // An archive downloaded whole and pinned by its digest: MakeHuman's pack
-    // (#623), or an ambientCG asset (#1274), whose own page `licenceVerdict`
-    // has just held to `sources.ts` §`ambientCgVerdict`.
-    const archived = archiveOf(source);
-    if (archived !== undefined) {
-      if (origin.from === 'archive') {
-        // #623: every member's OWN entry on the pack's page must read CC0 by
-        // MakeHuman's own author before a byte of the archive is written.
-        for (const member of origin.members) {
-          const own = systemAssetVerdict(page, member.asset);
-          if (!own.kept) throw new Error(`${source.id}/${member.path}: ${own.reason}`);
-        }
-      }
-      for (const member of archived.members) {
-        if (!safeRelativePath(member.path))
-          throw new Error(`${source.id}: refused path ${member.path}`);
-      }
-      const name = archived.name;
-      if (!safeRelativePath(name)) throw new Error(`${source.id}: refused path ${name}`);
-      const target = join(RAW, source.id, name);
-      const was = expected?.files.find((each) => each.path === name);
-      const archive =
-        existsSync(target) && was !== undefined && sha256(readFileSync(target)) === was.sha256
-          ? readFileSync(target)
-          : await bytes(archived.url);
-      const archiveDigest = sha256(archive);
-      if (!relock) {
-        const fault = lockFault(source.id, name, archiveDigest, expected);
-        if (fault !== undefined) throw new Error(fault);
-      }
-      mkdirSync(dirname(target), { recursive: true });
-      writeFileSync(target, archive);
-      files.push({ path: name, url: archived.url, bytes: archive.length, sha256: archiveDigest });
-      for (const member of archived.members) {
-        const body = Buffer.from(zipMember(archive, member.path));
-        if (
-          member.mustContain !== undefined &&
-          !body.toString('utf8').includes(member.mustContain)
-        ) {
-          throw new Error(
-            `${source.id}/${member.path}: its header does not state "${member.mustContain}"`,
-          );
-        }
-        const memberTarget = join(RAW, source.id, member.path);
-        mkdirSync(dirname(memberTarget), { recursive: true });
-        writeFileSync(memberTarget, body);
-        const digest = sha256(body);
-        if (!relock) {
-          const fault = lockFault(source.id, member.path, digest, expected);
-          if (fault !== undefined) throw new Error(fault);
-        }
-        files.push({
-          path: member.path,
-          url: `${archived.url}#${member.path}`,
-          bytes: body.length,
-          sha256: digest,
-        });
-        console.log(`${source.id}/${member.path} ${String(body.length)} bytes`);
-      }
-    }
-    for (const file of archived !== undefined ? [] : await resolve(source)) {
-      if (!safeRelativePath(file.path)) throw new Error(`${source.id}: refused path ${file.path}`);
-      const target = join(RAW, source.id, file.path);
-      let body: Buffer;
-      if (existsSync(target) && file.md5 !== undefined && md5(readFileSync(target)) === file.md5) {
-        body = readFileSync(target);
-      } else {
-        body = await bytes(file.url);
-        if (file.md5 !== undefined && md5(body) !== file.md5) {
-          throw new Error(`${source.id}/${file.path}: MD5 does not match the one published`);
-        }
-        if (file.mustContain !== undefined && !body.toString('utf8').includes(file.mustContain)) {
-          throw new Error(
-            `${source.id}/${file.path}: its header does not state "${file.mustContain}"`,
-          );
-        }
-        mkdirSync(dirname(target), { recursive: true });
-        writeFileSync(target, body);
-      }
-      const digest = sha256(body);
-      if (!relock) {
-        const fault = lockFault(source.id, file.path, digest, expected);
-        if (fault !== undefined) throw new Error(fault);
-      }
-      files.push({ path: file.path, url: file.url, bytes: body.length, sha256: digest });
-      console.log(`${source.id}/${file.path} ${String(body.length)} bytes`);
-    }
-    if (!relock && expected !== undefined && expected.files.length !== files.length) {
-      throw new Error(`${source.id}: the source now lists a different set of files than the lock`);
-    }
-    sources.push({
-      id: source.id,
-      licence: verdict.licence,
-      licencePage: source.licencePage,
-      evidence: verdict.evidence,
-      // ⚠️ **Re-locking re-dates only what moved** (#475). A source whose
-      // files are exactly the ones the lock already records keeps the date its
-      // licence was read; before, adding one source re-dated every other and
-      // moved the `read` of every committed asset's record with it.
-      read:
-        relock && (expected === undefined || !sameFiles(expected.files, files))
-          ? read
-          : (expected?.read ?? read),
-      authors: await authorsOf(source),
-      // #1274: how the asset's own page said it was made, read with its licence.
-      ...(verdict.technique === undefined ? {} : { technique: verdict.technique }),
-      files,
-    });
+    sources.push(await readSource(source, expected, run));
   }
   if (relock) {
     writeFileSync(LOCK, `${JSON.stringify({ sources }, null, 2)}\n`);

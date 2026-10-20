@@ -378,3 +378,15 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   generated tree may wear are `apps/web/tools/realistic/sources.ts` §`GENERATED_TREE_WEARS`, and
   `admitted-sources.test.ts` holds that list to this entry and every worn asset's page to that
   list. ([#1294](https://github.com/openzigs/onyourleft/issues/1294))
+- **2026-10-20** — **A redirect is followed only to an address the list admits.** D-11 says *"Only
+  the address requested is checked: a redirect is followed."* That is no longer so:
+  `realistic:fetch` now asks every request with `redirect: 'manual'` and asks `admission` of
+  each address a redirect names before requesting it, refusing one no admitted source owns, and
+  more than five redirects for one request. Measured on 2026-10-20, ambientCG's own download link
+  (`ambientcg.com/get?file=`) answers 302 to `acg-download.struffelproductions.com`, the host its
+  operator serves files from (the asset's page serves its images from the same operator's
+  `acg-media.` host); that path is added to ambientCG's row in `sources.ts` as an address of an
+  admitted source, under D-11's third bullet, and admits no new source. `dl.polyhaven.org`,
+  `api.polyhaven.com`, MakeHuman's hosts and every licence page `SOURCES` reads answered without a
+  redirect. D-10's two tables stand as written.
+  ([#1278](https://github.com/openzigs/onyourleft/issues/1278))
