@@ -8171,19 +8171,45 @@ select.oyl-input {
  * On its side from 51 rem the time is the fourth secondary track's reading on
  * the first row (its index is fixed, `fields.ts` §`hudReadings`), and that
  * track is `minmax(max-content, 1fr)`: never narrower than the field's floor,
- * an equal share when there is room. ⚠️ **Where the HUD stacks rather than
+ * an equal share when there is room. Where the HUD stacks rather than
  * standing in corners (`STACKED_VIEWPORTS`, and a phone such as 320×568 or
- * 412×700) the time is still an `auto-fit` track's reading**, as narrow as
- * 88 px, and measured for #1124 it runs 2.5 to 4.2 px past its field there on
- * the runner's fonts; no gate measures those layouts' fit yet (#1124's
- * follow-up). Below 51 rem a corners layout has three
- * tracks, written out rather than `auto-fit`, because from 802 px `auto-fit`
+ * 412×700) the time is an `auto-fit` track's reading, and since #1158 every
+ * such track's floor is this width (the block after this one). Below 51 rem
+ * a corners layout has three tracks, written out rather than `auto-fit`, because from 802 px `auto-fit`
  * made a fourth that could not hold the time: 51 rem is where three 5.5 rem
  * tracks and the time's 99.3 px fit (3 × 88 + 99.3 + 3 × 8 + 18 = 405.3 px of
  * panel, at 813 px), with 3 px left for a face a little wider than DejaVu.
  */
 .oyl-game--riding .oyl-hud {
   --oyl-hud-moving-width: calc(6.5ch * 1.5);
+}
+
+/*
+ * #1158 — where the HUD STACKS (no corners layout and no upright one: the
+ * rules below and §"THE MOVING TIME ON AN UPRIGHT PHONE" own those), every
+ * secondary track's floor is the moving time's own width when that is wider
+ * than 5.5 rem. The tier stays `auto-fit`, because its count varies between
+ * rides, and `auto-fit` cannot give one track a different floor; so all of
+ * them take the time's. Until #1158 a stacked track was as narrow as 88 px
+ * for a 92.5 px time on the CI runner's DejaVu Sans, and the time, `nowrap`,
+ * ran up to 4.2 px past its field (320×568, 412×700, 700×500). The cost is a
+ * track fewer in some rows, and so a row more where the readings scroll:
+ * `ride.browser.spec.ts` §"#1158" publishes both and holds the time to
+ * `MOVING_TIME_SPARE_PIXELS`. `--oyl-hud-moving-width` is in `ch`, resolved
+ * here in the grid's own font, which is the HUD's, as the controls' is.
+ */
+.oyl-game--riding .oyl-hud__fields--secondary {
+  grid-template-columns: repeat(auto-fit, minmax(max(5.5rem, var(--oyl-hud-moving-width)), 1fr));
+}
+
+/* Upright the time is lifted out of the grid (below), so the tier keeps the
+   5.5 rem floor it was measured at; the stacked floor would cost a row where
+   height is scarce, from 602 px wide on DejaVu Sans.
+   `ride.browser.spec.ts` §"#1158 — upright" holds it at 640×960. */
+@media (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) {
+  .oyl-game--riding .oyl-hud__fields--secondary {
+    grid-template-columns: repeat(auto-fit, minmax(5.5rem, 1fr));
+  }
 }
 
 @media (min-width: 46rem) and (width < 51rem) and (min-height: 22.5rem) {
