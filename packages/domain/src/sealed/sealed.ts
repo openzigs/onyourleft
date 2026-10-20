@@ -114,47 +114,93 @@ export class SealedError extends Error {
 
 // --- base64url, unpadded (RFC 4648 §5) ---------------------------------------
 
+// Both directions go through tables of character codes, never a string per
+// character: a four-hour ride's envelope is about 4.4 million characters, and
+// a `+=` or a `slice` and a `Map` lookup per character made this codec the
+// largest part of sealing and opening one (#1212).
 const BASE64URL = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
-const BASE64URL_INDEX = new Map([...BASE64URL].map((character, index) => [character, index]));
+const BASE64URL_CODES = Uint8Array.from(BASE64URL, (character) => character.charCodeAt(0));
+/** A character code's six bits, or `INVALID` for one outside the alphabet. */
+const INVALID = 0xff;
+const BASE64URL_VALUES = (() => {
+  const values = new Uint8Array(128).fill(INVALID);
+  BASE64URL_CODES.forEach((code, value) => {
+    values[code] = value;
+  });
+  return values;
+})();
+/** Character codes turned into a string this many at a time: under every engine's argument limit. */
+const FROM_CHAR_CODE_CHUNK = 0x8000;
 
 /** Unpadded base64url. */
 export function toBase64url(bytes: Uint8Array): string {
-  let out = '';
-  for (let at = 0; at < bytes.length; at += 3) {
-    const a = bytes[at] ?? 0;
-    const b = bytes[at + 1] ?? 0;
-    const c = bytes[at + 2] ?? 0;
-    const triple = (a << 16) | (b << 8) | c;
-    const left = bytes.length - at;
-    out += BASE64URL[(triple >> 18) & 63];
-    out += BASE64URL[(triple >> 12) & 63];
-    if (left > 1) out += BASE64URL[(triple >> 6) & 63];
-    if (left > 2) out += BASE64URL[triple & 63];
+  const codes = new Uint8Array(Math.ceil((bytes.length * 4) / 3));
+  let out = 0;
+  let at = 0;
+  for (; at + 2 < bytes.length; at += 3) {
+    const triple =
+      ((bytes[at] as number) << 16) | ((bytes[at + 1] as number) << 8) | (bytes[at + 2] as number);
+    codes[out++] = BASE64URL_CODES[(triple >> 18) & 63] as number;
+    codes[out++] = BASE64URL_CODES[(triple >> 12) & 63] as number;
+    codes[out++] = BASE64URL_CODES[(triple >> 6) & 63] as number;
+    codes[out++] = BASE64URL_CODES[triple & 63] as number;
   }
-  return out;
+  const left = bytes.length - at;
+  if (left > 0) {
+    const triple =
+      ((bytes[at] as number) << 16) | ((left > 1 ? (bytes[at + 1] as number) : 0) << 8);
+    codes[out++] = BASE64URL_CODES[(triple >> 18) & 63] as number;
+    codes[out++] = BASE64URL_CODES[(triple >> 12) & 63] as number;
+    if (left > 1) codes[out] = BASE64URL_CODES[(triple >> 6) & 63] as number;
+  }
+  const parts: string[] = [];
+  for (let start = 0; start < codes.length; start += FROM_CHAR_CODE_CHUNK) {
+    // `apply` takes a typed array as its argument list as it is; a spread copies it first.
+    parts.push(
+      String.fromCharCode.apply(
+        null,
+        codes.subarray(start, start + FROM_CHAR_CODE_CHUNK) as unknown as number[],
+      ),
+    );
+  }
+  return parts.join('');
+}
+
+/** The six bits of `text`'s character at `index`, or `INVALID`. */
+function base64urlValue(text: string, index: number): number {
+  const code = text.charCodeAt(index);
+  return code < 128 ? (BASE64URL_VALUES[code] as number) : INVALID;
 }
 
 /** Unpadded base64url to bytes, or `undefined` for anything that is not exactly that. */
 export function fromBase64url(text: string): Uint8Array | undefined {
-  if (text.length % 4 === 1) return undefined;
+  const tail = text.length % 4;
+  if (tail === 1) return undefined;
   const out = new Uint8Array(Math.floor((text.length * 3) / 4));
+  const whole = text.length - tail;
   let at = 0;
-  for (let index = 0; index < text.length; index += 4) {
-    const chunk = text.slice(index, index + 4);
-    let triple = 0;
-    for (let position = 0; position < 4; position += 1) {
-      const character = chunk[position];
-      const value = character === undefined ? 0 : BASE64URL_INDEX.get(character);
-      if (value === undefined) return undefined;
-      triple = (triple << 6) | value;
-    }
-    const bytes = chunk.length - 1;
-    if (bytes >= 1) out[at++] = (triple >> 16) & 0xff;
-    if (bytes >= 2) out[at++] = (triple >> 8) & 0xff;
-    if (bytes >= 3) out[at++] = triple & 0xff;
+  for (let index = 0; index < whole; index += 4) {
+    const a = base64urlValue(text, index);
+    const b = base64urlValue(text, index + 1);
+    const c = base64urlValue(text, index + 2);
+    const d = base64urlValue(text, index + 3);
+    // A valid value is six bits, so any INVALID among the four sets a bit above them.
+    if ((a | b | c | d) > 63) return undefined;
+    const triple = (a << 18) | (b << 12) | (c << 6) | d;
+    out[at++] = (triple >> 16) & 0xff;
+    out[at++] = (triple >> 8) & 0xff;
+    out[at++] = triple & 0xff;
+  }
+  if (tail > 0) {
+    const a = base64urlValue(text, whole);
+    const b = base64urlValue(text, whole + 1);
+    const c = tail === 3 ? base64urlValue(text, whole + 2) : 0;
+    if ((a | b | c) > 63) return undefined;
+    const triple = (a << 18) | (b << 12) | (c << 6);
     // The bits past the last byte must be zero: one spelling per byte string.
-    const spare = chunk.length === 2 ? triple & 0xffff : chunk.length === 3 ? triple & 0xff : 0;
-    if (spare !== 0) return undefined;
+    if ((tail === 2 ? triple & 0xffff : triple & 0xff) !== 0) return undefined;
+    out[at++] = (triple >> 16) & 0xff;
+    if (tail === 3) out[at] = (triple >> 8) & 0xff;
   }
   return out;
 }

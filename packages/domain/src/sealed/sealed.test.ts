@@ -51,6 +51,59 @@ describe('base64url', () => {
     // 'Zm8' is "fo"; 'Zm9' is the same two bytes with a spare bit set, and is refused.
     expect(fromBase64url('Zm8')).toEqual(utf8Encode('fo'));
     expect(fromBase64url('Zm9')).toBeUndefined();
+    // 'Zg' is "f"; 'Zh' sets a spare bit of a one-byte tail.
+    expect(fromBase64url('Zg')).toEqual(utf8Encode('f'));
+    expect(fromBase64url('Zh')).toBeUndefined();
+  });
+
+  /**
+   * Six bits at a time off a running accumulator: a different way to the same
+   * answer from the codec's, which goes three bytes at a time through tables
+   * (#1212).
+   */
+  function referenceBase64url(bytes: Uint8Array): string {
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+    let out = '';
+    let bits = 0;
+    let held = 0;
+    for (const byte of bytes) {
+      held = ((held << 8) | byte) & 0xffff;
+      bits += 8;
+      while (bits >= 6) {
+        bits -= 6;
+        out += alphabet[(held >> bits) & 63];
+      }
+    }
+    if (bits > 0) out += alphabet[(held << (6 - bits)) & 63];
+    return out;
+  }
+
+  it('agrees with a reference across several of its string chunks, at every tail length (#1212)', () => {
+    // 0x8000 characters is 24 576 bytes: three chunks and a part, then each tail.
+    for (const length of [
+      24_575,
+      24_576,
+      24_577,
+      3 * 24_576 + 1000,
+      3 * 24_576 + 1001,
+      3 * 24_576 + 1002,
+    ]) {
+      const bytes = Uint8Array.from({ length }, (_, index) => (index * 131 + (index >> 8)) & 0xff);
+      const expected = referenceBase64url(bytes);
+      expect(toBase64url(bytes)).toBe(expected);
+      expect(fromBase64url(expected)).toEqual(bytes);
+    }
+  });
+
+  it('refuses a character outside the alphabet in every position, a non-ASCII one included (#1212)', () => {
+    const good = 'Zm9vYmFyZm8';
+    // 'Ł' is U+0141: its code is 'A' + 256, so a table read without the range check finds 'A'.
+    for (const stray of ['=', '+', '/', ' ', '.', 'Ł', 'é', '\u0000']) {
+      for (let at = 0; at < good.length; at += 1) {
+        expect(fromBase64url(`${good.slice(0, at)}${stray}${good.slice(at + 1)}`)).toBeUndefined();
+      }
+    }
+    expect(fromBase64url(good)).toEqual(utf8Encode('foobarfo'));
   });
 });
 
