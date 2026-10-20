@@ -1786,7 +1786,16 @@ test.describe('#1312 — the lap table keeps its Lap column when it is scrolled'
         });
         const table = page.locator('table.oyl-table--laps');
         await expect(table).toBeVisible();
-        await table.scrollIntoViewIfNeeded();
+        // The WHOLE table in view, its middle at the viewport's. #1439's
+        // shorter page above the laps (the trace tables tucked under their
+        // charts) leaves the table's top already on the screen on the CI
+        // runner's fonts, where `scrollIntoViewIfNeeded` then scrolls nothing
+        // and its last two rows are under the fold — and "every lap's name
+        // is on screen" would be a reading of the fold, not of the sticky
+        // column. Five rows are far shorter than the 800 px viewport.
+        await table.evaluate((element) => {
+          element.scrollIntoView({ block: 'center' });
+        });
 
         const measure = async () =>
           table.evaluate((element) => {
