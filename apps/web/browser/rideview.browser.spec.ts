@@ -94,6 +94,7 @@ import { attachSharedPageOnFailure, releaseSharedPage, sharedPage } from './shar
 
 import { AA_TEXT, contrastRatio } from '../src/design/contrast';
 import { RIDE_TIME_TARGET_PIXELS } from '../src/design/ride-time-controls';
+import { ZOOMED_DIGIT_FLOOR_PIXELS } from '../src/ride/MetricGrid';
 
 /** Sub-pixel layout, not slack. @see ride.browser.spec.ts */
 const SUBPIXEL_TOLERANCE = 1;
@@ -1994,7 +1995,7 @@ for (const viewport of [
   TABLET_IN_THE_SHELL,
   TABLET_UPRIGHT_IN_THE_SHELL,
 ] as const) {
-  test(`#1012 — nothing paired: ONE banner and one Pair a sensor, on the screen — ${viewport.name}`, async ({
+  test(`#1012 — nothing paired: ONE banner and one Pair a trainer or a sensor, on the screen — ${viewport.name}`, async ({
     page,
   }, testInfo) => {
     await open(page, viewport, '?sensors=none');
@@ -2004,7 +2005,8 @@ for (const viewport of [
     expect(seen.readings, 'the four tiles are still there').toEqual([]);
     expect(banner?.links).toBe(1);
     // #1021: named for what it pairs (WCAG 2.4.4).
-    expect(banner?.link.name).toBe('Pair a sensor');
+    // #1442: and the screen's one way to Devices, so it names the trainer too.
+    expect(banner?.link.name).toBe('Pair a trainer or a sensor');
     expect(banner?.link.onTop, 'Pair is covered').toBe(true);
     expect(banner?.link.box.height ?? 0).toBeGreaterThanOrEqual(44 - SUBPIXEL_TOLERANCE);
     // After every ride control in its column (#692): it stands where the
@@ -3173,3 +3175,81 @@ for (const viewport of READING_VIEWPORTS) {
     expect(under, 'a second tap on Stop would land on Yes, stop the ride').toBe(false);
   });
 }
+
+/**
+ * #1433 — the zoom: the rider's top two readings at `--oyl-font-size-zoom`.
+ *
+ * The acceptance criterion is a size a rider can read in a glance of under
+ * two seconds, measured at a phone and a tablet. What is measured is the ink
+ * of a digit in the font the page loaded — `rideview-harness.tsx`
+ * §`digitHeightOf` — against `MetricGrid.tsx` §`ZOOMED_DIGIT_FLOOR_PIXELS`,
+ * ISO 15008's 20 arcmin at two metres. Each reading is at the widest it can
+ * be (`?readings=widest`, 1888 W) and must still fit its card, and the
+ * top-ranked one — the reading the zoom exists for — must be on the first
+ * screen, clear of the bars. The second is published, and on the shortest
+ * phone it is below the fold, where a rider scrolls to it.
+ *
+ * ⚠️ **Not the first at 320×568, where it is published and not held.** There
+ * the zoom has a line of its own under Lap, Pause and Stop, and the first card
+ * ended 2.6 px above the fold in the pinned Chromium on a Mac — a margin the
+ * CI runner's wider system fonts in the controls above it can take away.
+ */
+const ZOOM_VIEWPORTS: readonly Viewport[] = [
+  { name: 'the narrowest phone — 320×568', width: 320, height: 568 },
+  { name: 'a phone — 360×800', width: 360, height: 800 },
+  { name: 'a phone — 412×915', width: 412, height: 915 },
+  TABLET_UPRIGHT_IN_THE_SHELL,
+  SMALL_TABLET_IN_THE_SHELL,
+  TABLET_IN_THE_SHELL,
+];
+
+for (const viewport of ZOOM_VIEWPORTS) {
+  test(`#1433 — zoomed, the top two readings are drawn to the glance floor and fit their cards${viewport.height <= 568 ? '' : ', and the first is on the screen'} — ${viewport.name}`, async ({
+    page,
+  }, testInfo) => {
+    await open(page, viewport, '?readings=widest&zoom=on');
+    const seen = await measure(page);
+    const fold = viewport.height - insetsOf(viewport).bottom;
+    const note = seen.readings
+      .map(
+        (each) =>
+          `${each.label}: digit ${each.digitHeight.toFixed(1)} px (floor ${ZOOMED_DIGIT_FLOOR_PIXELS.toFixed(1)}), ` +
+          `${each.reading.width.toFixed(0)} px in ${each.card.width.toFixed(0)} px, ` +
+          `${(fold - each.card.bottom).toFixed(1)} px above the fold`,
+      )
+      .join('; ');
+    testInfo.annotations.push({ type: '#1433 zoomed readings', description: note });
+    console.log(`#1433 — zoomed — ${viewport.name} — ${note}`);
+
+    expect(
+      seen.readings.map((each) => each.label),
+      note,
+    ).toEqual(['Power', 'Cadence']);
+    for (const each of seen.readings) {
+      expect(each.digitHeight, note).toBeGreaterThanOrEqual(ZOOMED_DIGIT_FLOOR_PIXELS);
+      expect(each.spill, `${each.label} spills out of its card — ${note}`).toBeLessThanOrEqual(0);
+      expect(each.reading.right, `${each.label} — ${note}`).toBeLessThanOrEqual(
+        each.contentRight + SUBPIXEL_TOLERANCE,
+      );
+    }
+    if (viewport.height <= 568) return;
+    const first = seen.readings[0];
+    expect(first?.card.top ?? -1, note).toBeGreaterThanOrEqual(insetsOf(viewport).top);
+    expect(first?.card.bottom ?? Infinity, note).toBeLessThanOrEqual(fold + SUBPIXEL_TOLERANCE);
+  });
+}
+
+test('#1433 — the control — unzoomed, a reading’s digit is under the glance floor', async ({
+  page,
+}) => {
+  // The apparatus: the same measurement over the ordinary metric size must
+  // fail the floor, or "every zoomed digit clears it" would be as true of a
+  // measurement that returned anything large.
+  await open(page, { name: 'a phone — 412×915', width: 412, height: 915 }, '?readings=widest');
+  const seen = await measure(page);
+  expect(seen.readings).toHaveLength(4);
+  for (const each of seen.readings) {
+    expect(each.digitHeight).toBeGreaterThan(0);
+    expect(each.digitHeight).toBeLessThan(ZOOMED_DIGIT_FLOOR_PIXELS);
+  }
+});

@@ -183,7 +183,7 @@ describe('the type scale follows its stated ratio', () => {
     // its neighbour above.
     expect(TYPE_SCALE_RATIO).toBeGreaterThanOrEqual(1.125);
     const reading = Object.entries(TYPE_SCALE_STEPS)
-      .filter(([name]) => name !== 'metric')
+      .filter(([name]) => name !== 'metric' && name !== 'zoom')
       .map(([, step]) => step)
       .sort((a, b) => a - b);
     expect(reading).toEqual(reading.map((_, index) => (reading[0] as number) + index));

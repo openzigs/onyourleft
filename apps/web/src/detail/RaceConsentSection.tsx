@@ -33,9 +33,13 @@
  * (ADR 0021 D-5.2), the page says the ride will never be offered, whatever
  * the box says. A free ride has no route to race and reads no zone.
  *
- * ⚠️ **Nothing in this build races another rider's ghost** — #331 does, later
- * — so {@link RACE_CONSENT_NOT_YET} says the answer is kept for when it does,
- * rather than letting the box read as a feature that exists.
+ * ⚠️ **Another rider's ghost IS raced, since #331** (PR #1361: the game's
+ * picker offers one consented attempt on the same route, through the
+ * rider's instance). Until #1439 this section still said "This version of
+ * the app does not race another rider's ghost yet", which had become false,
+ * and the owner's walkthrough read the box as a setting for a feature that
+ * did not exist. The sentence is gone and the box is shown: it is the
+ * consent the feature reads.
  */
 
 import { useEffect, useId, useState, type JSX } from 'react';
@@ -57,10 +61,6 @@ export const RACE_CONSENT_SENTENCE =
   'on, you can turn it off at any time, and sharing a ride does not turn it on.';
 
 export const RACE_CONSENT_LABEL = 'Allow other riders to race a ghost of this ride';
-
-/** Said beside the box, because the feature it consents to is not built yet. */
-export const RACE_CONSENT_NOT_YET =
-  'This version of the app does not race another rider’s ghost yet. Your answer is kept for when one does.';
 
 /** ADR 0021 D-5.2: the route touches one of the rider's zones. */
 export const RACE_CONSENT_ZONE_REFUSAL =
@@ -152,7 +152,6 @@ export function RaceConsentSection({
           {RACE_CONSENT_LABEL}
         </label>
       </p>
-      <p className="oyl-muted">{RACE_CONSENT_NOT_YET}</p>
       {zones === 'touches' ? (
         <StatusMessage tone="warning">{RACE_CONSENT_ZONE_REFUSAL}</StatusMessage>
       ) : null}

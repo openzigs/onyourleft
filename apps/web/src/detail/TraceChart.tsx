@@ -127,51 +127,118 @@ function pathFor(
     .join(' ');
 }
 
+/** What the chart's two axes say: the value at the top, middle and bottom, and the time at the start, middle and end. */
+export interface TraceAxes {
+  /** "Power (W)" — the value axis' title. */
+  readonly valueTitle: string;
+  /** Top to bottom, each with its unit; empty with no reading. */
+  readonly values: readonly string[];
+  /** The time axis' title. */
+  readonly timeTitle: string;
+  /** Left to right: the start, the middle and the end of the ride. */
+  readonly times: readonly string[];
+}
+
+/** The time axis' title. Ride time, as the table's "From" column counts it. */
+export const TIME_AXIS_TITLE = 'Time into the ride';
+
 /**
- * A trace.
+ * The axes' labels — #1439: the chart had no scale at all, so a rider could
+ * not read a watt or a minute off it. The value labels are the ends of the
+ * drawing's own scale (`pathFor` maps `low` to the bottom edge and `high` to
+ * the top) and their middle, so a label sits where its value is drawn; a flat
+ * trace, drawn down the middle, has its one value there.
+ */
+export function traceAxes(props: TraceChartProps): TraceAxes {
+  const { label, unit, points, secondsPerPoint, format } = props;
+  const extent = traceExtent(points);
+  const total = points.length * secondsPerPoint;
+  const withUnit = (value: number): string => `${format(value)} ${unit}`;
+  const values =
+    extent === undefined
+      ? []
+      : extent.high === extent.low
+        ? ['', withUnit(extent.low), '']
+        : [withUnit(extent.high), withUnit((extent.high + extent.low) / 2), withUnit(extent.low)];
+  return {
+    valueTitle: `${label} (${unit})`,
+    values,
+    timeTitle: TIME_AXIS_TITLE,
+    times: [formatDuration(0), formatDuration(total / 2), formatDuration(total)],
+  };
+}
+
+/**
+ * A trace, with a value axis and a time axis — #1439.
  *
  * `role="img"` with a description rather than a bare `<svg>`: without a role an
  * SVG is announced as a group full of unlabelled paths, and #48's audit would
  * be satisfied by that while a reader got nothing. The paths themselves are
  * `aria-hidden` for the same reason — they carry no information a reader can
  * use, and announcing sixteen of them is worse than announcing none.
+ *
+ * ⚠️ **The axes are HTML beside the drawing, not SVG text inside it.** The SVG
+ * stretches horizontally (`preserveAspectRatio="none"`, `theme.css`
+ * §`.oyl-trace`), which would stretch its text too. They are `aria-hidden`:
+ * the drawing's description already says the range and the duration, and the
+ * table under the chart says every reading, so a screen reader is not read
+ * nine bare numbers between them.
  */
 export default function TraceChart(props: TraceChartProps): JSX.Element {
   const { points } = props;
   const extent = traceExtent(points);
   const segments = traceSegments(points);
   const description = describeTrace(props);
+  const axes = traceAxes(props);
 
   return (
-    <svg
-      className="oyl-trace"
-      viewBox={`0 0 ${String(CHART_WIDTH)} ${String(CHART_HEIGHT)}`}
-      role="img"
-      aria-label={description}
-      preserveAspectRatio="none"
-    >
-      <g aria-hidden="true">
-        {segments.map((segment) => (
-          <path
-            key={segment.from}
-            className="oyl-trace__line"
-            // `round` on both, so an isolated reading between two gaps renders
-            // as a dot rather than as nothing at all. A zero-length path with a
-            // butt cap draws no pixels, which would silently delete a real
-            // sample from the picture.
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            fill="none"
-            d={pathFor(
-              segment.values,
-              segment.from,
-              points.length,
-              extent?.low ?? 0,
-              extent?.high ?? 0,
-            )}
-          />
+    <div className="oyl-trace-chart">
+      <div className="oyl-trace-chart__value-title" aria-hidden="true">
+        {axes.valueTitle}
+      </div>
+      <div className="oyl-trace-chart__values" aria-hidden="true">
+        {axes.values.map((value, index) => (
+          <div key={index}>{value}</div>
         ))}
-      </g>
-    </svg>
+      </div>
+      <svg
+        className="oyl-trace"
+        viewBox={`0 0 ${String(CHART_WIDTH)} ${String(CHART_HEIGHT)}`}
+        role="img"
+        aria-label={description}
+        preserveAspectRatio="none"
+      >
+        <g aria-hidden="true">
+          {segments.map((segment) => (
+            <path
+              key={segment.from}
+              className="oyl-trace__line"
+              // `round` on both, so an isolated reading between two gaps renders
+              // as a dot rather than as nothing at all. A zero-length path with a
+              // butt cap draws no pixels, which would silently delete a real
+              // sample from the picture.
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              fill="none"
+              d={pathFor(
+                segment.values,
+                segment.from,
+                points.length,
+                extent?.low ?? 0,
+                extent?.high ?? 0,
+              )}
+            />
+          ))}
+        </g>
+      </svg>
+      <div className="oyl-trace-chart__times" aria-hidden="true">
+        {axes.times.map((time, index) => (
+          <div key={index}>{time}</div>
+        ))}
+      </div>
+      <div className="oyl-trace-chart__time-title" aria-hidden="true">
+        {axes.timeTitle}
+      </div>
+    </div>
   );
 }
