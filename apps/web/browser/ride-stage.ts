@@ -336,7 +336,8 @@ export async function bothWays(page: Page): Promise<(readonly [string, StageMeas
  * with nothing wrong in the product. The field is sized from its value's
  * own digits now (`theme.css` §"THE MOVING TIME'S OWN WIDTH — #1124"), and
  * the spare width is published at every viewport and held to this, as the
- * fold checks hold 50 px.
+ * fold checks hold 50 px. Since #1158 it holds where the HUD stacks, too
+ * (`ride.browser.spec.ts` §"#1158").
  */
 export const MOVING_TIME_SPARE_PIXELS = 4;
 
