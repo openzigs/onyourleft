@@ -174,8 +174,9 @@ for (const viewport of OVERLAY_VIEWPORTS) {
         'Wind',
       ]);
       expect(seen.panels).toHaveLength(4);
-      // Ten readings, the strip, the plan view, the trainer line, two controls.
-      expect(seen.items).toHaveLength(15);
+      // Ten readings, the strip, the plan view, the trainer line, two controls
+      // and, since #1482, the touch lock.
+      expect(seen.items).toHaveLength(16);
     });
 
     test('the world fills the viewport', async ({ browser }) => {
@@ -577,7 +578,7 @@ for (const viewport of STACKED_VIEWPORTS) {
 
       expect(seen.panelBackground).toBe(HUD_SURFACE);
       // Ten readings since #1111's moving time, and the rest as above.
-      expect(seen.items).toHaveLength(15);
+      expect(seen.items).toHaveLength(16);
       expect(seen.stage?.width).toBe(viewport.width);
       expect(seen.stage?.height).toBe(viewport.height);
       // Stacked: the world is a letterbox at the top, not the whole stage.
@@ -596,7 +597,12 @@ for (const viewport of STACKED_VIEWPORTS) {
       // ⚠️ The PAGE cannot scroll even here. One scroller — the stage — and not
       // the scroll region inside a scrolling page that #419 rules out.
       expect(seen.pageOverflow).toBeLessThanOrEqual(0);
-      for (const name of ['the trainer line', 'control: Pause', 'control: End ride']) {
+      for (const name of [
+        'the trainer line',
+        'control: Pause',
+        'control: End ride',
+        'control: Lock',
+      ]) {
         const item = named(seen.items, name);
         expect(inside(item.box, viewport), describeItem(item)).toBe(true);
         expect(item.onTop, describeItem(item)).toBe(true);
@@ -675,7 +681,7 @@ test.describe('a ride with a standing notice', () => {
             laidOut.filter((each) => overlap(each.box, riderBox(viewport))).map(describeItem),
           ).toEqual([]);
           // And the controls are still where a rider can press them.
-          for (const name of ['control: Pause', 'control: End ride']) {
+          for (const name of ['control: Pause', 'control: End ride', 'control: Lock']) {
             const item = named(seen.items, name);
             expect(inside(item.box, viewport) && item.onTop, describeItem(item)).toBe(true);
           }
@@ -689,7 +695,8 @@ test.describe('a ride with a standing notice', () => {
           const leaning = riderBox(viewport);
           expect(overlap(moving.box, leaning), describeItem(moving)).toBe(false);
           const controls = seen.items.filter((each) => each.name.startsWith('control: '));
-          expect(controls).toHaveLength(3);
+          // Pause, End ride, Trainer notice and, since #1482, the lock.
+          expect(controls).toHaveLength(4);
           expect(
             controls.filter((each) => overlap(each.box, moving.box)).map(describeItem),
           ).toEqual([]);
@@ -769,7 +776,7 @@ function standingNoticeFindings(seen: StageMeasurement, viewport: Viewport): str
     }
   });
   found.push(...laidOut.filter((each) => overlap(each.box, leaning)).map(describeItem));
-  for (const name of ['control: Pause', 'control: End ride']) {
+  for (const name of ['control: Pause', 'control: End ride', 'control: Lock']) {
     const item = named(seen.items, name);
     if (!inside(item.box, viewport) || !item.onTop) found.push(describeItem(item));
   }
@@ -1029,7 +1036,7 @@ function sideCameraCollisions(seen: StageMeasurement, viewport: Viewport): strin
     }
   });
   found.push(...laidOut.filter((each) => overlap(each.box, riderBox(viewport))).map(describeItem));
-  const pressed = ['control: Pause', 'control: End ride', 'the side camera stop'];
+  const pressed = ['control: Pause', 'control: End ride', 'control: Lock', 'the side camera stop'];
   found.push(
     ...pressed
       .map((name) => named(seen.items, name))

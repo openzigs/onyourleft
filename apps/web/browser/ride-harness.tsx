@@ -869,7 +869,9 @@ function measure(): StageMeasurement {
       items.push(item(name, element));
     }
   }
-  for (const control of document.querySelectorAll('.oyl-hud__control')) {
+  // #1482: and the touch lock, which is the design system's toggle rather
+  // than an `.oyl-hud__control`, so the stage holds it as it holds Pause.
+  for (const control of document.querySelectorAll('.oyl-hud__control, .oyl-hud__lock')) {
     items.push(item(`control: ${textOf(control)}`, control));
   }
   // #789: a room ride's own row — *Follow*, *Report* and, open, its reasons.

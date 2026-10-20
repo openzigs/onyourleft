@@ -40,7 +40,7 @@
  * | `primary` | power, cadence, heart rate — `fields.ts` §`ReadingTier` | top, start |
  * | `secondary` | every other reading | top, end |
  * | `route` | the elevation strip and the plan view | bottom, start |
- * | `actions` | the trainer line, then Pause and End ride | bottom, end |
+ * | `actions` | the trainer line, then Pause, End ride and the touch lock (#1482) | bottom, end |
  *
  * ⚠️ **Every panel is OPAQUE and the container paints nothing.** `.oyl-hud`
  * used to carry the surface; it now spans the whole world and must not, so the
@@ -55,9 +55,11 @@
  * is the prerequisite for that and would not need to change for it.
  */
 
-import type { JSX, ReactNode } from 'react';
+import { useRef, useState, type JSX, type ReactNode } from 'react';
 
 import { RIDE_SIZE_CLASS } from '../../design/Button';
+import { TOUCH_LOCK_EXEMPT, useTouchLock } from '../../design/touch-lock';
+import { TouchLockButton } from '../../design/TouchLockButton';
 import { REPLAN_KEEP_BUTTON } from '../../workout/replan-disclosure';
 import { REPLAN_OFF_BUTTON } from '../../workout/replan-text';
 import { useUnits } from '../../units/context';
@@ -297,9 +299,16 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
     hasContent(props.notices) || props.standingNotice?.expanded === true
       ? undefined
       : props.lapNotice;
+  // #1482: the touch lock, over the whole HUD. The HUD's own state rather than
+  // the ride controller's: a game ride need not be recording, and the
+  // controller refuses the lock with no recording in progress. This component
+  // is mounted for exactly one game ride, so a lock never outlives the ride.
+  const hud = useRef<HTMLElement>(null);
+  const [touchLocked, setTouchLocked] = useState(false);
+  useTouchLock(hud, touchLocked);
 
   return (
-    <section className="oyl-hud" aria-label="Ride metrics">
+    <section ref={hud} className="oyl-hud" aria-label="Ride metrics">
       {/*
         A description list, because that is what these are: a label and its
         value, seven times. It was an `ol` of `span`s first, which needed
@@ -387,9 +396,25 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
             className={`oyl-hud__control ${RIDE_SIZE_CLASS}`}
             onClick={props.onEnd}
             style={{ minWidth: CONTROL_MINIMUM_PIXELS, minHeight: CONTROL_MINIMUM_PIXELS }}
+            // #1482: never stopped by the touch lock. It ends the game's
+            // gradient session — what the app asks of the trainer — and a
+            // rider who wants that gone must not first have to unlock, the
+            // rule `End ERG` and `End workout` follow on the Ride screen. It
+            // does not end the recording (`GameView.tsx` §`teardown`).
+            {...{ [TOUCH_LOCK_EXEMPT]: '' }}
           >
             End ride
           </button>
+          <TouchLockButton
+            locked={touchLocked}
+            onLock={() => {
+              setTouchLocked(true);
+            }}
+            onUnlock={() => {
+              setTouchLocked(false);
+            }}
+            className="oyl-hud__lock"
+          />
           {/*
             #437. A constant name and `aria-expanded`, rather than a label that
             flips between "Show" and "Hide": a screen reader then says what the
@@ -399,7 +424,7 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
           {props.standingNotice === undefined ? null : (
             <button
               type="button"
-              className="oyl-hud__control"
+              className="oyl-hud__control oyl-hud__notice-toggle"
               aria-expanded={props.standingNotice.expanded}
               aria-controls={STANDING_NOTICE_ID}
               onClick={props.standingNotice.onToggle}
@@ -429,7 +454,7 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
             <p className="oyl-hud__plan-change">{props.keepPlan.sentence}</p>
             <button
               type="button"
-              className={`oyl-hud__control ${RIDE_SIZE_CLASS}`}
+              className={`oyl-hud__control oyl-hud__replan ${RIDE_SIZE_CLASS}`}
               onClick={props.keepPlan.onKeep}
             >
               {REPLAN_KEEP_BUTTON}
@@ -439,7 +464,7 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
         {props.onReplansOff === undefined ? null : (
           <button
             type="button"
-            className={`oyl-hud__control ${RIDE_SIZE_CLASS}`}
+            className={`oyl-hud__control oyl-hud__replan ${RIDE_SIZE_CLASS}`}
             onClick={props.onReplansOff}
           >
             {REPLAN_OFF_BUTTON}

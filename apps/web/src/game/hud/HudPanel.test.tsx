@@ -294,6 +294,8 @@ describe('the HUD is four panels (#423)', () => {
     expect(queryAll(actions ?? document, 'button').map((each) => each.textContent)).toEqual([
       'Pause',
       'End ride',
+      // #1482: the touch lock, in the same row.
+      'Lock',
     ]);
   });
 
