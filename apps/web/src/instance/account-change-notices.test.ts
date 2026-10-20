@@ -109,6 +109,24 @@ describe('a notice (#1193 draft wording)', () => {
     );
   });
 
+  it('says a key revoked itself, and asks nobody to revoke it again (#1208)', () => {
+    // #1209's final review: a key that revoked itself is gone, so "revoke
+    // that key" would ask the rider for something that cannot be done.
+    expect(
+      noticeText(
+        entry({
+          kind: 'key_revoked',
+          actorKey: 'september',
+          subjectKey: 'september',
+          subjectAddedAt: 200,
+        }),
+        KEYS,
+        'mine',
+        day,
+      ),
+    ).toBe('On day 900 the key added on day 200 revoked itself.');
+  });
+
   it('says a new key was added, and how', () => {
     const text = (via: AccountChangeEntry['via']): string =>
       noticeText(entry({ kind: 'key_added', subjectKey: 'october', via }), KEYS, 'mine', day);

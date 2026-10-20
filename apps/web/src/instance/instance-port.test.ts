@@ -21,6 +21,8 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { ensureLocalAthlete, LOCAL_ATHLETE } from '../local-athlete';
 import { ADDRESS_REFUSAL_TEXT } from './address';
 import {
+  ACCOUNT_CHANGES_UNAVAILABLE_TEXT,
+  accountChangesFrom,
   CONNECT_REFUSAL_TEXT,
   createInstancePort,
   INSTANCE_AGREEMENT_STORAGE_KEYS,
@@ -457,5 +459,176 @@ describe('disconnecting — #777', () => {
     up = false;
     await port.disconnect();
     expect(storage.map.size).toBe(0);
+  });
+});
+
+describe('the account-change notices and a revoke, sealed — #1208', () => {
+  /** A rider with two devices: `first` signed in with the card and linked `second`. */
+  async function twoDevices() {
+    const world = await instance();
+    const send = wire(world);
+    const first = device(send);
+    await first.port.connect(testing.TEST_ORIGIN, 'Anna', await cardOf(world));
+    const shown = await first.port.linkCode();
+    if (shown.kind !== 'shown') throw new Error('no link code');
+    const second = device(send);
+    expect(await second.port.link(shown.offer)).toEqual({ kind: 'connected' });
+    const listed = await first.port.devices();
+    if (listed.kind !== 'listed') throw new Error('no devices');
+    const other = listed.devices.find((each) => !each.thisDevice)?.publicKey ?? '';
+    return { world, send, first, second, other };
+  }
+
+  it('shows a device the changes another key made, and not its own', async () => {
+    const { first, second } = await twoDevices();
+    // The first device minted the code that added the second: on the SECOND
+    // those are another key's changes, so notices; on the first, its own.
+    const seen = await second.port.accountChanges();
+    expect(seen.kind).toBe('read');
+    if (seen.kind !== 'read') return;
+    expect(seen.notices.map((entry) => entry.kind)).toEqual(['link_code_minted', 'key_added']);
+    expect(seen.acknowledgedThrough).toBe(0);
+    const own = await first.port.accountChanges();
+    expect(own).toMatchObject({ kind: 'read', notices: [] });
+    expect(own.kind === 'read' ? own.changes.length : 0).toBe(2);
+  });
+
+  it('moves only this device’s mark when it acknowledges, read back on both devices', async () => {
+    const { first, second } = await twoDevices();
+    // A change by the second key, so the FIRST device has a notice too.
+    expect((await second.port.linkCode()).kind).toBe('shown');
+    const before = await first.port.accountChanges();
+    expect(before.kind === 'read' ? before.notices.map((entry) => entry.kind) : []).toEqual([
+      'link_code_minted',
+    ]);
+    const seen = await second.port.accountChanges();
+    const newest = seen.kind === 'read' ? Math.max(...seen.notices.map((entry) => entry.id)) : 0;
+    expect(await second.port.acknowledgeAccountChanges(newest)).toEqual({
+      kind: 'acknowledged',
+      acknowledgedThrough: newest,
+    });
+    // Read back through the same call the screen makes: gone on the second…
+    expect(await second.port.accountChanges()).toMatchObject({
+      kind: 'read',
+      notices: [],
+      acknowledgedThrough: newest,
+    });
+    // …and still there, unmoved, on the first.
+    expect(await first.port.accountChanges()).toMatchObject({
+      kind: 'read',
+      acknowledgedThrough: 0,
+      notices: [expect.objectContaining({ kind: 'link_code_minted' })],
+    });
+  });
+
+  it('revokes another key, which the list and the log then say', async () => {
+    const { first, second, other } = await twoDevices();
+    expect(await first.port.revokeDevice(other)).toEqual({ kind: 'revoked' });
+    const listed = await first.port.devices();
+    expect(
+      listed.kind === 'listed'
+        ? listed.devices.find((each) => each.publicKey === other)?.revokedAt
+        : null,
+    ).toEqual(expect.any(Number));
+    const log = await first.port.accountChanges();
+    const last = log.kind === 'read' ? log.changes.at(-1) : undefined;
+    expect(last).toMatchObject({ kind: 'key_revoked', subjectKey: other });
+    expect(typeof last?.subjectAddedAt).toBe('number');
+    // The revoked key's own session ended with it.
+    expect(await second.port.accountChanges()).toMatchObject({ kind: 'unavailable' });
+  });
+
+  it('refuses to revoke the last key without a recovery code, and says why', async () => {
+    const world = await instance();
+    const { port } = device(wire(world));
+    await port.connect(testing.TEST_ORIGIN, 'Anna', await cardOf(world));
+    const listed = await port.devices();
+    const mine = listed.kind === 'listed' ? (listed.devices[0]?.publicKey ?? '') : '';
+    expect(await port.revokeDevice(mine)).toEqual({
+      kind: 'unavailable',
+      text: ACCOUNT_CHANGES_UNAVAILABLE_TEXT['last-device'],
+    });
+    expect((await port.devices()).kind).toBe('listed');
+  });
+
+  it('sends no revoke for anything but a device key, so no path can be steered', async () => {
+    const { send, first } = await twoDevices();
+    send.mockClear();
+    for (const bad of ['../session', 'a1'.repeat(31), `${'a1'.repeat(32)}?x`, 'A1'.repeat(32)]) {
+      expect(await first.port.revokeDevice(bad)).toEqual({
+        kind: 'unavailable',
+        text: ACCOUNT_CHANGES_UNAVAILABLE_TEXT['not-revoked'],
+      });
+    }
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('reads no log it cannot trust: one entry of the wrong shape is no answer', () => {
+    const good = {
+      id: 3,
+      at: 1_790_000_000,
+      kind: 'address_added',
+      actorKey: 'b2'.repeat(32),
+      subjectKey: null,
+      subjectAddedAt: null,
+      via: null,
+      address: 'rider@example.org',
+    };
+    expect(accountChangesFrom([good])).toEqual([good]);
+    for (const bad of [
+      { kind: 'key_stolen' },
+      { id: -1 },
+      { id: 1.5 },
+      { at: '1790000000' },
+      { actorKey: 'not a key' },
+      { subjectKey: '../session' },
+      { subjectAddedAt: Number.NaN },
+      { via: 'carrier_pigeon' },
+      { address: 7 },
+    ]) {
+      expect(accountChangesFrom([good, { ...good, ...bad }])).toBeUndefined();
+    }
+    expect(accountChangesFrom({ 0: good })).toBeUndefined();
+    // An address no screen may be handed is read as none, not shown.
+    expect(accountChangesFrom([{ ...good, address: 'a\u202Eb@example.org' }])).toEqual([
+      { ...good, address: null },
+    ]);
+  });
+
+  it('marks no notice read through a mark the instance would refuse, and sends nothing', async () => {
+    const { send, first } = await twoDevices();
+    send.mockClear();
+    for (const bad of [-1, 1.5, Number.NaN]) {
+      expect(await first.port.acknowledgeAccountChanges(bad)).toEqual({
+        kind: 'unavailable',
+        text: ACCOUNT_CHANGES_UNAVAILABLE_TEXT['not-acknowledged'],
+      });
+    }
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('says the log cannot be shown when the instance does not answer', async () => {
+    const { world, first } = await twoDevices();
+    const real = wire(world);
+    let up = true;
+    // The same device — its storage and its key — over a line that drops
+    // the sealed call itself, after the instance's keys were read.
+    const port = createInstancePort({
+      ...first.dependencies,
+      send: (url, init) =>
+        up || new URL(url).pathname !== '/v1/sealed'
+          ? real(url, init)
+          : Promise.reject(new TypeError('offline')),
+    });
+    expect((await port.accountChanges()).kind).toBe('read');
+    up = false;
+    expect(await port.accountChanges()).toEqual({
+      kind: 'unavailable',
+      text: ACCOUNT_CHANGES_UNAVAILABLE_TEXT['no-answer'],
+    });
+    expect(await port.acknowledgeAccountChanges(1)).toEqual({
+      kind: 'unavailable',
+      text: ACCOUNT_CHANGES_UNAVAILABLE_TEXT['not-acknowledged'],
+    });
   });
 });
