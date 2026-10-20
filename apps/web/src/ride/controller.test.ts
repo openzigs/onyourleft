@@ -11430,6 +11430,31 @@ describe('#1244 — re-plans during the ride, read from the simulated trainer', 
         ]);
       });
 
+      it('a workout ended by hand hands the recording the waiting move, not ridden, before any tick', async () => {
+        const { rig, scripted } = await riding({ replans: true });
+        await rideTo(rig, 62);
+        scripted.answer(proposal(EASE));
+        await flushMicrotasks(20);
+        // The move waits for the next block; ending the workout drops it, and
+        // `ReplanSession.stop()` records that. The pause checkpoints the header
+        // at once — no tick runs between, so only the hand-over at the end of
+        // the workout can have put that record in it.
+        rig.controller.endWorkout();
+        await rig.controller.pause();
+        rig.controller.dispose();
+        const id = rig.sessionIds[0];
+        if (id === undefined) throw new Error('no recording was started');
+
+        const next = benchWith({ rideSave: storeSavePort() });
+        await next.controller.refreshRecoverable();
+        expect(await next.controller.saveRecovered(id)).toBe('saved');
+        expect((await savedRide('ride-1'))?.rideFacts?.replans).toMatchObject([
+          { decision: 'accepted', move: EASE, revision: 1 },
+          { decision: 'not-applied', why: 'ended', revision: 1 },
+        ]);
+        next.controller.dispose();
+      });
+
       it('holds the ride’s bound and the checkpoint’s to one number', () => {
         expect(RIDE_REPLAN_RECORDS_LIMIT).toBe(RECORDING_REPLAN_RECORDS_LIMIT);
       });
