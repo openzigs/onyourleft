@@ -3,7 +3,7 @@
 /**
  * The touch lock's one control — #1432. `touch-lock.ts` is what the lock does.
  *
- * A toggle (`aria-pressed`) with one constant name, *Touch lock*, on #437's
+ * A toggle (`aria-pressed`) with one constant name, *Lock*, on #437's
  * precedent: a screen reader says what the control is and which way it stands,
  * and the state is announced as the press changes it. Drawn as the design
  * system's toggle at the ride-time size (#669), so a sighted rider sees which
@@ -24,8 +24,15 @@ import { useEffect, useRef, type JSX } from 'react';
 import { RIDE_SIZE_CLASS } from './Button';
 import { TOUCH_LOCK_CONTROL, TOUCH_LOCK_HOLD_MILLISECONDS } from './touch-lock';
 
-/** The control's accessible name, which is also every word it shows. */
-export const TOUCH_LOCK_NAME = 'Touch lock';
+/**
+ * The control's accessible name, which is also every word it shows.
+ *
+ * ⚠️ One short word, and that was measured: *Touch lock* made the Ride
+ * screen's row of Lap, Pause, Stop and Zoom wrap at 1024×720, 432 px wide,
+ * and the line it wrapped onto pushed *Device full* under the fold with every
+ * notice standing (`rideview.browser.spec.ts` §"#692", on the CI runner).
+ */
+export const TOUCH_LOCK_NAME = 'Lock';
 
 export interface TouchLockButtonProps {
   readonly locked: boolean;

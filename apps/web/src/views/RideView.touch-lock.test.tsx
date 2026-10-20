@@ -24,6 +24,7 @@ import {
 } from '@onyourleft/store/testing';
 
 import { hold, tap } from '../design/touch-lock-testing';
+import { TOUCH_LOCK_NAME } from '../design/TouchLockButton';
 import type { RecordingCheckpointStore } from '../recording/recorder';
 import { createRideController, type RideController } from '../ride/controller';
 import { ridingSnapshot, stubRideController } from '../ride/testing';
@@ -58,7 +59,7 @@ function buttonNamed(label: string): HTMLButtonElement {
   return found;
 }
 
-const lock = (): HTMLButtonElement => buttonNamed('Touch lock');
+const lock = (): HTMLButtonElement => buttonNamed(TOUCH_LOCK_NAME);
 
 /** The recorder's store, over the harness, as `RideView.test.tsx` §"#1430" builds it. */
 function checkpoints(store: StoreHarness): RecordingCheckpointStore {
@@ -121,7 +122,7 @@ describe('the Ride screen’s touch lock — #1432', () => {
     mounted = await mount(<RideView controller={idle} />);
     await settle();
     expect(queryAll(document, 'button').map((each) => each.textContent)).not.toContain(
-      'Touch lock',
+      TOUCH_LOCK_NAME,
     );
     idle.lockTouch();
     expect(idle.getSnapshot().touchLocked).toBe(false);

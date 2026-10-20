@@ -1128,7 +1128,7 @@ describe('the screen is three groups, in the order it always was (#422)', () => 
       // so Pause stands between it and Stop. #1433: *Zoom* after them, at the
       // end of their row and outside the row of three.
       // #1432: and the touch lock, last.
-    ).toEqual(['Lap', 'Pause', 'Stop', 'Zoom', 'Touch lock']);
+    ).toEqual(['Lap', 'Pause', 'Stop', 'Zoom', 'Lock']);
   });
 
   it('puts the workout in the TRAINER group, beside the control it depends on', async () => {

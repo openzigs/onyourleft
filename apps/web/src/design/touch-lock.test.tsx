@@ -15,7 +15,7 @@ import { activateWithKeyboard, mount, type Mounted } from '../testing/mount';
 import { Button } from './Button';
 import { TOUCH_LOCK_HOLD_MILLISECONDS, useTouchLock } from './touch-lock';
 import { fingerDown, fingerUp, hold, tap } from './touch-lock-testing';
-import { TouchLockButton } from './TouchLockButton';
+import { TOUCH_LOCK_NAME, TouchLockButton } from './TouchLockButton';
 
 let mounted: Mounted | undefined;
 
@@ -82,7 +82,7 @@ function button(name: string): HTMLButtonElement {
   return found;
 }
 
-const lock = (): HTMLButtonElement => button('Touch lock');
+const lock = (): HTMLButtonElement => button(TOUCH_LOCK_NAME);
 const field = (): HTMLInputElement => {
   const found = document.querySelector('input');
   if (found === null) throw new Error('no field');

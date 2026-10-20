@@ -719,9 +719,9 @@ function RecoveryOffer({
 }
 
 /** #1432: what the ride screen says while its touch lock is on. ⚠️ Draft wording for the owner. */
-export const TOUCH_LOCK_ON_LABEL = 'Touch lock on';
+export const TOUCH_LOCK_ON_LABEL = 'Locked';
 export const TOUCH_LOCK_ON_TEXT =
-  'Taps on this screen do nothing. Hold Touch lock for a second to turn it off. End ERG and End workout still work.';
+  'Taps on this screen do nothing. Hold Lock for a second to unlock. End ERG and End workout still work.';
 
 function RideControls({
   controller,
