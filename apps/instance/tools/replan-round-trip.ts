@@ -18,8 +18,11 @@
  *   the instance must hold keys (`OYL_INSTANCE_SECRET_KEY`).
  *   **`plaintext`** is the control, and works only against an instance that
  *   holds none — one with keys answers `sealed_required`.
- * - **`--unload`** is a shell command that unloads the model. It runs before
- *   each cold run; without it no cold run is made.
+ * - **`--unload`** is a shell command that unloads the model, run by this
+ *   machine's own shell (`cmd.exe` on Windows, `/bin/sh` elsewhere). It runs
+ *   before each cold run; without it no cold run is made. A cold run after an
+ *   unload command that failed is kept in the report as `unloaded: false`
+ *   and counted in no cold figure: it may have run on a loaded model.
  * - **A new account every `--starts-per-account` starts**: the instance allows
  *   each athlete 12 starts an hour. On an instance whose registration is
  *   `approval` a new account is pending and its job is refused, so there the
@@ -130,14 +133,15 @@ const report = await measure({
     ? {}
     : {
         unload: () => {
-          // A model the last run never loaded is already unloaded, and the
-          // command says so by failing: that is no reason to lose the run.
+          // A failed unload does not stop the measurement, but the run after
+          // it is not a cold one: the model may still be loaded (#1271).
           try {
             execSync(unload, { stdio: 'ignore' });
+            return Promise.resolve(true);
           } catch {
-            process.stderr.write('the unload command failed; carrying on\n');
+            process.stderr.write('the unload command failed\n');
+            return Promise.resolve(false);
           }
-          return Promise.resolve();
         },
       }),
 });
