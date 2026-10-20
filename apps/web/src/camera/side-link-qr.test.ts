@@ -28,6 +28,7 @@ const OFFER = (() => {
       ],
     },
     Uint8Array.from({ length: 32 }, (_, index) => 255 - index),
+    1_792_512_345_678,
   );
   if (!('text' in made)) {
     throw new Error('no offer');

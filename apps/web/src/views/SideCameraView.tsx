@@ -525,7 +525,7 @@ function PhonePairing({
           link.endSideLink();
         }
       } else if (condition === 'ended') {
-        setStep({ kind: 'failed', timedOut: answer.secondsForTabletToRead() === 0 });
+        setStep({ kind: 'failed', timedOut: answer.tabletReadTimedOut() });
       }
     };
     const unsubscribe = link.onSideLinkEvent((event) => {

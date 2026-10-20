@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
   candidateAccepted,
   MAXIMUM_PAIRING_CANDIDATES,
+  MAXIMUM_OFFER_EXPIRY_SECONDS,
   MAXIMUM_PAIRING_CODE_LENGTH,
   PAIRING_CODE_PREFIX,
   PAIRING_REFUSAL_TEXT,
@@ -23,6 +24,9 @@ const host = (address: string, port = 50_000): SideCandidate => ({
 
 const SECRET = Uint8Array.from({ length: 32 }, (_, index) => 200 - index);
 
+/** When the offer runs out, as `side-link.ts` makes one: 2026-10-20, to the millisecond. */
+const EXPIRES_AT = 1_792_512_345_678;
+
 const OFFER_PARAMETERS: SidePeerParameters = {
   ufrag: 'Zq8h',
   password: 'Qm3v0f8y1Jc9dZ2kL5nH7tRp',
@@ -34,7 +38,7 @@ const OFFER_PARAMETERS: SidePeerParameters = {
 const ANSWER_PARAMETERS: SidePeerParameters = { ...OFFER_PARAMETERS, setup: 'active' };
 
 function offerText(parameters: SidePeerParameters = OFFER_PARAMETERS): string {
-  const made = pairingCodeText('offer', parameters, SECRET);
+  const made = pairingCodeText('offer', parameters, SECRET, EXPIRES_AT);
   if (!('text' in made)) {
     throw new Error(`no offer: ${made.refusal}`);
   }
@@ -152,7 +156,12 @@ describe('making a code', () => {
 
   it('refuses to make a code with nothing left to connect to', () => {
     expect(
-      pairingCodeText('offer', { ...OFFER_PARAMETERS, candidates: [host('203.0.113.9')] }, SECRET),
+      pairingCodeText(
+        'offer',
+        { ...OFFER_PARAMETERS, candidates: [host('203.0.113.9')] },
+        SECRET,
+        EXPIRES_AT,
+      ),
     ).toEqual({ refusal: 'no-candidate' });
   });
 
@@ -161,6 +170,26 @@ describe('making a code', () => {
     expect(() => pairingCodeText('offer', OFFER_PARAMETERS, new Uint8Array(16))).toThrow(
       RangeError,
     );
+  });
+
+  it('carries when the offer runs out, rounded down to the second — #1110', () => {
+    const text = offerText();
+    expect(text).toContain('"e":1792512345');
+    const read = readPairingCode(text, 'offer');
+    expect('code' in read && read.code.expiresAt).toBe(1_792_512_345_000);
+    // Rounded DOWN: the phone is never told the offer lasts longer than it does.
+    expect(1_792_512_345_000).toBeLessThanOrEqual(EXPIRES_AT);
+  });
+
+  it('refuses to make an offer that does not say when it runs out — #1110', () => {
+    expect(() => pairingCodeText('offer', OFFER_PARAMETERS, SECRET)).toThrow(RangeError);
+    expect(() => pairingCodeText('offer', OFFER_PARAMETERS, SECRET, Number.NaN)).toThrow(
+      RangeError,
+    );
+    expect(() => pairingCodeText('offer', OFFER_PARAMETERS, SECRET, 0)).toThrow(RangeError);
+    // An answer says nothing about it.
+    const answer = pairingCodeText('answer', ANSWER_PARAMETERS);
+    expect('text' in answer && answer.text).not.toContain('"e"');
   });
 
   it('is small enough for a QR code a phone reads across a metre', () => {
@@ -193,6 +222,11 @@ describe('reading a code — every other thing is refused', () => {
 
   it('refuses an unknown field rather than ignoring it — ADR 0017 D-4', () => {
     expect(refusalOf(withField('turn', 'turn:relay.example.com'))).toBe('malformed');
+    // An answer carrying an offer's expiry is a field an answer does not have.
+    const answer = pairingCodeText('answer', ANSWER_PARAMETERS);
+    const text = 'text' in answer ? answer.text : '';
+    expect(refusalOf(text.replace(/\}$/, ',"e":1792512345}'), 'answer')).toBe('malformed');
+    expect(refusalOf(text, 'answer')).toBeUndefined();
   });
 
   it('refuses a field out of its bounds', () => {
@@ -204,6 +238,14 @@ describe('reading a code — every other thing is refused', () => {
     expect(refusalOf(withField('s', 'active'))).toBe('malformed');
     expect(refusalOf(withField('k', 'AAAA'))).toBe('malformed');
     expect(refusalOf(withField('k', undefined))).toBe('malformed');
+    // #1110: an offer's expiry is a whole number of seconds since 1970, and required.
+    expect(refusalOf(withField('e', undefined))).toBe('malformed');
+    expect(refusalOf(withField('e', '1792512345'))).toBe('malformed');
+    expect(refusalOf(withField('e', 1_792_512_345.5))).toBe('malformed');
+    expect(refusalOf(withField('e', 0))).toBe('malformed');
+    expect(refusalOf(withField('e', -1))).toBe('malformed');
+    expect(refusalOf(withField('e', MAXIMUM_OFFER_EXPIRY_SECONDS + 1))).toBe('malformed');
+    expect(refusalOf(withField('e', MAXIMUM_OFFER_EXPIRY_SECONDS))).toBeUndefined();
     expect(refusalOf(withField('r', 'x'))).toBe('malformed');
     expect(refusalOf(withField('c', 'not-a-list'))).toBe('malformed');
     expect(refusalOf(withField('c', [42]))).toBe('malformed');
