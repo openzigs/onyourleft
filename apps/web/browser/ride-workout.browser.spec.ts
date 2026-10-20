@@ -731,6 +731,87 @@ test.describe('Keep the plan on the HUD while a re-plan waits — #1244', () => 
 });
 
 /**
+ * #1329 — *Switch re-plans off* on the game's HUD, `ride-harness.tsx`
+ * §`GRAPH_REPLANS_ON`, so a rider in the game can stop what is being sent
+ * without leaving it. A row of its own, last in the actions panel, for as
+ * long as the workout has re-plans on: alone (`graph=replan-on`, most of
+ * such a workout) and under *Keep the plan* and its sentence while a move
+ * waits (`graph=replan`, the tallest the panel gets).
+ *
+ * Held at every overlay viewport, both ways: the control on the stage,
+ * inside the viewport and uncovered, at least #669's 48 px, 8 px or more
+ * from *Pause* and *End ride*, which stay on the stage. At the tablets no
+ * panel is over the rider's box; at the phones the actions panel's
+ * clearance is printed, for #1244's reason. The plain workout
+ * (`graph=plain`, re-plans off) has no such control.
+ */
+const SWITCH_REPLANS_OFF = 'control: Switch re-plans off';
+
+test.describe('Switch re-plans off on the HUD while re-plans are on — #1329', () => {
+  for (const viewport of OVERLAY_VIEWPORTS) {
+    const tablet = TABLET_VIEWPORTS.includes(viewport);
+    test(`is on the stage, a ride-time control${tablet ? ', and no panel covers the rider' : ''} — ${viewport.name}`, async ({
+      page,
+    }) => {
+      await openRide(page, viewport, '?trainer=workout&graph=plain');
+      expect((await measure(page)).items.map((each) => each.name)).not.toContain(
+        SWITCH_REPLANS_OFF,
+      );
+
+      for (const query of ['?trainer=workout&graph=replan-on', REPLAN_ON_THE_HUD]) {
+        await openRide(page, viewport, query);
+        for (const [how, seen] of await bothWays(page)) {
+          await test.step(`${query} — ${how}`, () => {
+            const off = seen.items.find((each) => each.name === SWITCH_REPLANS_OFF);
+            const pause = seen.items.find((each) => each.name === 'control: Pause');
+            const end = seen.items.find((each) => each.name === 'control: End ride');
+            if (off === undefined || pause === undefined || end === undefined) {
+              throw new Error(`no ${SWITCH_REPLANS_OFF}, Pause or End ride among the HUD's items`);
+            }
+            const actions = seen.panels.find((each) => each.name.includes('oyl-hud__actions'));
+            const rider = riderBox(viewport);
+            const over = seen.panels
+              .filter((each) => each.box.height > 0)
+              .filter((each) => overlap(each.box, rider));
+            console.log(
+              `#1329 Switch re-plans off — ${viewport.name} — ${query} — ${how}: ` +
+                `${off.box.width.toFixed(1)} × ${off.box.height.toFixed(1)} px at ` +
+                `[${off.box.left.toFixed(0)},${off.box.top.toFixed(0)}]; the actions panel ` +
+                `${actions?.box.width.toFixed(0) ?? '?'} × ${actions?.box.height.toFixed(0) ?? '?'} px, ` +
+                `its top ${((actions?.box.top ?? 0) - rider.bottom).toFixed(0)} px below the rider's box` +
+                `; panels over the rider: ${over.length === 0 ? 'none' : over.map(describeItem).join(', ')}`,
+            );
+            expect(inside(off.box, viewport), describeItem(off)).toBe(true);
+            expect(off.onTop, describeItem(off)).toBe(true);
+            expect(off.box.width).toBeGreaterThanOrEqual(48 - SUBPIXEL_TOLERANCE);
+            expect(off.box.height).toBeGreaterThanOrEqual(48 - SUBPIXEL_TOLERANCE);
+            for (const other of [pause, end]) {
+              expect(inside(other.box, viewport), describeItem(other)).toBe(true);
+              expect(other.onTop, describeItem(other)).toBe(true);
+              const apartX = Math.max(
+                off.box.left - other.box.right,
+                other.box.left - off.box.right,
+              );
+              const apartY = Math.max(
+                off.box.top - other.box.bottom,
+                other.box.top - off.box.bottom,
+              );
+              expect(
+                Math.max(apartX, apartY),
+                `${SWITCH_REPLANS_OFF} and ${other.name} are closer than 8 px`,
+              ).toBeGreaterThanOrEqual(8 - SUBPIXEL_TOLERANCE);
+            }
+            if (tablet) {
+              expect(over.map(describeItem)).toEqual([]);
+            }
+          });
+        }
+      }
+    });
+  }
+});
+
+/**
  * #1312 — a ride on a LOOP. `?lap=riding` has a lap open, so the elevation
  * strip's sentence carries the lap's time beside its number (`fields.ts`
  * §`profileReading`): `NN% of lap N · 59:59`. `?lap=ended` adds the finished

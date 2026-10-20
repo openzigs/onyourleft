@@ -251,7 +251,11 @@ describe('what is sent, and when', () => {
     r.facts.heartRate = undefined;
     r.facts.power = undefined;
     r.facts.cadence = undefined;
-    await r.ride(300);
+    await r.ride(299);
+    // #1329: no request leaves without a live strap, so it reads again at the
+    // boundary; that reading is the new block's, not the ended one's.
+    r.facts.heartRate = 140;
+    await r.ride(1);
     expect(inputOf(r.scripted).summaries).toEqual([{ block: 0, seconds: 300, rescues: 0 }]);
   });
 
@@ -1375,6 +1379,35 @@ describe('a job in flight when control or the strap is lost — P6, D-8', () => 
       expect(r.player.plan().riding.totalSeconds).toBe(2400);
     },
   );
+
+  it('is cancelled when a strap that stays paired goes quiet, and its answer is not accepted once it is back — #1329', async () => {
+    const r = rig();
+    await r.ride(300);
+    expect(r.scripted.openStreams()).toBe(1);
+    // Still paired; no live reading, as the controller reads a stale strap.
+    r.facts.heartRate = undefined;
+    await r.ride(1);
+    expect(r.scripted.cancelled).toEqual(['job-1']);
+    await r.ride(4);
+    r.facts.heartRate = 140;
+    await r.ride(5);
+    r.scripted.answer(proposal(SHORTEN_NEXT));
+    await r.ride(1);
+    expect(r.session.state().waiting).toBeUndefined();
+    expect(r.session.records()).toEqual([]);
+    expect(r.player.plan().waiting).toBeUndefined();
+  });
+
+  it('does not ask at a boundary while a paired strap is quiet, and asks at the next once it reads — #1329', async () => {
+    const r = rig();
+    r.facts.heartRate = undefined;
+    await r.ride(310);
+    expect(r.scripted.requests).toEqual([]);
+    r.facts.heartRate = 140;
+    // The next boundary is 900 s in.
+    await r.ride(600);
+    expect(r.scripted.starts()).toHaveLength(1);
+  });
 });
 
 describe('the three minutes are the RIDE’s, across its workouts', () => {

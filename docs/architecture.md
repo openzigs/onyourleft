@@ -1463,9 +1463,10 @@ time-in-range target is withheld** (`goalsToSend`): spike 0022's rule R1, until 
 it. Only the instance's own model is asked (`REPLAN_SOURCE`); a hosted re-plan is not built.
 
 **When.** As a block begins, for the blocks ridden so far, and no sooner than three minutes after
-the RIDE's last request (the controller keeps that time across the workouts of one ride). A job
-out when control or the strap is lost, or the rider presses Pause, is cancelled. Never as the cool-down begins, in a block of under thirty seconds, while paused,
-during a stall rescue, without trainer control or without a strap. **Nothing is sent twice, and a
+the last request (the controller keeps that time across the workouts of one ride and, since #1329,
+across rides). A job out when control or the strap is lost (unpaired, or since #1329 paired but
+with no live reading), or the rider presses Pause, is cancelled. Never as the cool-down begins, in a block of under thirty seconds, while paused,
+during a stall rescue, without trainer control or without a live strap. **Nothing is sent twice, and a
 failure is never followed at once**: the next request is the next block boundary, at least three
 minutes on, whatever became of the last. A refusal on the list of PERMANENT ones
 (`replan-session.ts` §`PERMANENT_REFUSALS`: `unauthenticated`, `validation_failed`, `rate_limited`,
@@ -1496,8 +1497,15 @@ the same proposal under P5 or P2 if it arrives between two ticks. Nothing is sho
 - **P9's record does not survive a recovery.** It is in memory until the ride saves; a ride
   recovered after a crash is saved without it:
   [#1328](https://github.com/openzigs/onyourleft/issues/1328).
-- **A rider in the game cannot switch re-plans off** without ending the workout or leaving the
-  game: *Switch re-plans off* is on the Ride screen.
+- **A press of *Switch re-plans off* in the game is answered only by the control going**, with
+  announcements off. Since [#1329](https://github.com/openzigs/onyourleft/issues/1329) the control
+  is on the HUD (`GameTrainerPort.switchReplansOff`, the controller's own `switchReplansOff`) for as
+  long as the workout has re-plans on. With announcements on, the HUD's one region says the Ride
+  screen's answer once (`replan-text.ts` §`REPLANS_OFF`). With them off, nothing on the HUD says
+  so, which is also true of *Keep the plan*.
+- **The three minutes between requests outlive a ride but not the page.** Since #1329 stopping and
+  starting a new ride does not reset them (`ride/controller.ts` §`replanLastAskedAt`). A reload
+  does, and then the instance's own 24 an hour is the bound.
 - **A rider in the game on a PHONE is not shown the move.** Since
   [#1324](https://github.com/openzigs/onyourleft/issues/1324) the HUD's actions show the move's
   sentence above *Keep the plan* on a tablet; on a phone (on its side or upright) the sentence gives

@@ -59,6 +59,7 @@ import type { JSX, ReactNode } from 'react';
 
 import { RIDE_SIZE_CLASS } from '../../design/Button';
 import { REPLAN_KEEP_BUTTON } from '../../workout/replan-disclosure';
+import { REPLAN_OFF_BUTTON } from '../../workout/replan-text';
 import { useUnits } from '../../units/context';
 
 import {
@@ -236,6 +237,19 @@ export interface HudPanelProps extends Omit<HudInput, 'units'> {
    * panel ran off the stage or over the rider; the tablets show it.
    */
   readonly keepPlan?: { readonly sentence: string; readonly onKeep: () => void } | undefined;
+  /**
+   * *Switch re-plans off* — #1329, ADR 0048 D-7: set for as long as the
+   * running workout has re-plans on, so a rider in the game can stop what is
+   * being sent without leaving it. The Ride screen's control and the same
+   * controller call (`GameTrainerPort.switchReplansOff`); once pressed it is
+   * gone for the rest of the workout, as there. `undefined` otherwise.
+   *
+   * ⚠️ **On a row of its own, LAST**, under *Keep the plan* when a move
+   * waits, for that control's reason (a third control in the Pause row
+   * wraps and stretches the row). #669's 48 px, like *Keep the plan*.
+   * `browser/ride-workout.browser.spec.ts` §"#1329" measures it.
+   */
+  readonly onReplansOff?: (() => void) | undefined;
   readonly standingNotice?:
     | {
         readonly content: ReactNode;
@@ -421,6 +435,15 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
               {REPLAN_KEEP_BUTTON}
             </button>
           </>
+        )}
+        {props.onReplansOff === undefined ? null : (
+          <button
+            type="button"
+            className={`oyl-hud__control ${RIDE_SIZE_CLASS}`}
+            onClick={props.onReplansOff}
+          >
+            {REPLAN_OFF_BUTTON}
+          </button>
         )}
         {/*
           #551: the side camera's line and its stop, as ONE row under Pause and

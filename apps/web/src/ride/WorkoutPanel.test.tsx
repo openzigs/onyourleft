@@ -685,6 +685,8 @@ describe('re-plans during the ride — #1244', () => {
         (each.textContent ?? '').includes(REPLANS_OFF),
       );
       expect(said).toBeDefined();
+      // #1329: the re-plan lines' own label, not the default "Note:".
+      expect(said?.querySelector('.oyl-status__label')?.textContent).toBe('Plan change: ');
       expect(buttonSaying(view.container, 'End workout')).toBeDefined();
       expect(buttonSaying(view.container, 'Keep the plan')).toBeUndefined();
     });

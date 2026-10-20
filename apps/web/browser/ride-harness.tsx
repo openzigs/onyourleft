@@ -591,7 +591,10 @@ const RACE_PORTS =
  * - `replan` (#1244): the plain workout with an accepted re-plan waiting for
  *   its next block — the ramp shortened by two minutes — so the strip draws
  *   what the move replaced as a dotted outline and the HUD's actions show
- *   *Keep the plan*, which no other state of this page does.
+ *   *Keep the plan*, which no other state of this page does — and, since
+ *   #1329, *Switch re-plans off*, as a ride with a move waiting has re-plans on.
+ * - `replan-on` (#1329): the plain workout with re-plans on and nothing
+ *   waiting, which is most of such a workout: *Switch re-plans off* alone.
  */
 const GRAPH_KIND = new URLSearchParams(window.location.search).get('graph');
 const GRAPH_HOLD =
@@ -600,6 +603,8 @@ const GRAPH_HOLD =
 const GRAPH_PAUSED = GRAPH_KIND === 'paused' || GRAPH_KIND === 'paused-hold';
 /** `replan`: an accepted re-plan waiting for the next block — #1244. */
 const GRAPH_REPLAN = GRAPH_KIND === 'replan';
+/** `replan` and `replan-on`: the workout has re-plans on — #1329. */
+const GRAPH_REPLANS_ON = GRAPH_REPLAN || GRAPH_KIND === 'replan-on';
 const graphPlan = (rampSeconds: number) =>
   expandWorkout({
     name: 'Hold',
@@ -626,7 +631,7 @@ const REPLAN_WAITING = {
   sentence: longestReplanSentence(),
 };
 const GRAPH: WorkoutGraphInput | undefined =
-  GRAPH_HOLD || GRAPH_KIND === 'plain' || GRAPH_PAUSED || GRAPH_REPLAN
+  GRAPH_HOLD || GRAPH_KIND === 'plain' || GRAPH_PAUSED || GRAPH_REPLANS_ON
     ? {
         ...(GRAPH_PAUSED ? { status: 'paused', live: { power: 0, heartRate: undefined } } : {}),
         elapsedSeconds: 900,
@@ -738,6 +743,9 @@ const TRAINER: GameTrainerPort = {
   // #1244: a re-plan waiting, which is what puts *Keep the plan* on the HUD.
   workoutPlanChange: () => (GRAPH_REPLAN ? { waiting: REPLAN_WAITING, quiet: false } : undefined),
   keepThePlan: () => undefined,
+  // #1329: re-plans on, which is what puts *Switch re-plans off* on the HUD.
+  workoutReplansOn: () => GRAPH_REPLANS_ON,
+  switchReplansOff: () => undefined,
   // #503: the Ride press's request for control — this double changes nothing.
   askForControlOnRide: () => Promise.resolve(),
   workoutRescue: () => RESCUE,

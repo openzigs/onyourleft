@@ -444,6 +444,30 @@ describe('Keep the plan, in the game — #1244', () => {
     expect(formatViolations(auditAccessibility(document))).toBe('');
   });
 
+  it('puts Switch re-plans off on a row of its own, last, as a ride-time control — #1329', async () => {
+    let pressed = 0;
+    mounted = await mount(
+      inRideScreen(
+        <HudPanel
+          {...props()}
+          keepPlan={{ sentence: 'Next block shortened by 2 minutes.', onKeep: () => undefined }}
+          onReplansOff={() => {
+            pressed += 1;
+          }}
+        />,
+      ),
+    );
+    expect(controlNames()).toEqual(['Pause', 'End ride', 'Keep the plan', 'Switch re-plans off']);
+    const off = [...document.querySelectorAll<HTMLElement>('.oyl-hud__control')].at(-1);
+    expect(off?.tagName).toBe('BUTTON');
+    expect(off?.classList.contains(RIDE_SIZE_CLASS), off?.outerHTML).toBe(true);
+    expect(off?.closest('.oyl-hud__controls')).toBeNull();
+    expect(off?.closest('.oyl-hud__actions')).not.toBeNull();
+    off?.click();
+    expect(pressed).toBe(1);
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+  });
+
   it('shows no sentence while nothing waits — #1324', async () => {
     mounted = await mount(inRideScreen(<HudPanel {...props()} />));
     expect(document.querySelector('.oyl-hud__plan-change')).toBeNull();
