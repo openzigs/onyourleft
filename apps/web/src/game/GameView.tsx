@@ -617,9 +617,6 @@ export function GameView(props: GameViewProps): JSX.Element {
   const [windSpeed, setWindSpeed] = useState('');
   const [windFrom, setWindFrom] = useState(String(DEFAULT_WIND_FROM_BEARING));
   const [phase, setPhase] = useState<Phase>('choosing');
-  // #1432: the HUD's touch lock, for the ride on the stage. Off when a ride
-  // ends, so the next one starts unlocked. @see HudPanelProps.touchLock
-  const [touchLocked, setTouchLocked] = useState(false);
   /**
    * The room this device is in — made or joined on the picker's room panel
    * (#784). A ref beside it for {@link begin}, which reads it at the press.
@@ -2410,15 +2407,6 @@ export function GameView(props: GameViewProps): JSX.Element {
         onPause={() => {
           setPhase((current) => (current === 'paused' ? 'riding' : 'paused'));
         }}
-        touchLock={{
-          locked: touchLocked,
-          onLock: () => {
-            setTouchLocked(true);
-          },
-          onUnlock: () => {
-            setTouchLocked(false);
-          },
-        }}
         onEnd={() => {
           // #785: a race the room said is over has a result, shown on the
           // picker once the ride has ended — and only then. A race the rider
@@ -2436,7 +2424,6 @@ export function GameView(props: GameViewProps): JSX.Element {
             });
           }
           teardown();
-          setTouchLocked(false);
           setPhase('choosing');
           setChosen(undefined);
         }}

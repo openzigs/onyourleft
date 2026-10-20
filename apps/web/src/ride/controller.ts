@@ -487,7 +487,7 @@ export interface RideSnapshot {
    * screen and back (a raindrop on the tab bar) comes back to it still locked.
    * Only ever `true` while a ride is in progress: `lockTouch` refuses
    * otherwise, and stopping or starting a new ride turns it off.
-   * `design/TouchLock.tsx` is what it means on the screen.
+   * `design/touch-lock.ts` is what it means on the screen.
    */
   readonly touchLocked: boolean;
   readonly elapsedSeconds: number;
@@ -1047,7 +1047,10 @@ export interface RideController {
   cancelStop(): void;
   /** #1432: turn the touch lock on. Refused unless a ride is in progress. */
   lockTouch(): void;
-  /** #1432: turn it off. The deliberate release is the screen's (`design/TouchLock.tsx`). */
+  /**
+   * #1432: turn it off. The deliberate release is the screen's
+   * (`design/TouchLockButton.tsx`).
+   */
   unlockTouch(): void;
   /** Second press. Stops the recording and checkpoints it. */
   confirmStop(): Promise<void>;

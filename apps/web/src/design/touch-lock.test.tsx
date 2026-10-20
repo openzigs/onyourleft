@@ -5,7 +5,7 @@
  * The touch lock's two halves — #1432: the filter a locked region runs
  * (`touch-lock.ts`) and the control whose release is a held press
  * (`TouchLockButton.tsx`). The screens that use them are held by
- * `views/RideView.touch-lock.test.tsx` and `game/touch-lock-hud.test.tsx`.
+ * `views/RideView.touch-lock.test.tsx`.
  */
 
 import { act, useRef, useState, type JSX } from 'react';

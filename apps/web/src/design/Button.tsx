@@ -126,7 +126,7 @@ interface ButtonCommonProps {
   /**
    * A control the touch lock must never stop — #1432: a release of the
    * trainer's resistance (*End ERG*, *End workout*). Renders
-   * `TouchLock.tsx` §`TOUCH_LOCK_EXEMPT`, which that file's filter reads.
+   * `touch-lock.ts` §`TOUCH_LOCK_EXEMPT`, which that file's filter reads.
    */
   readonly touchLockExempt?: boolean;
 }

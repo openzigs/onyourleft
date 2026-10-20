@@ -18,8 +18,7 @@
  *
  * It also stops a pointer's `mousedown`, so a raindrop does not move focus or
  * open the keyboard over the ride; and a `touchstart` on a form field (the ERG
- * target, the HUD's volume), which is how a field is changed with no click at
- * all. A `touchstart` anywhere else is let through, so the ride screen still
+ * target), which is how a field is changed with no click at all. A `touchstart` anywhere else is let through, so the ride screen still
  * scrolls while it is locked.
  *
  * ## What it never stops
@@ -28,9 +27,13 @@
  *   long press.
  * - **A control marked {@link TOUCH_LOCK_EXEMPT}**: the ones that stop what
  *   the app asks of the trainer — *End ERG* and *End workout* on the Ride
- *   screen, each of which releases an ERG target, and *End ride* on the game's HUD, which stops the game asking the trainer
- *   for a gradient (`GameView.tsx` §`teardown`). A rider who wants what the
- *   app asks of the trainer stopped must not first have to unlock the screen.
+ *   screen, each of which releases an ERG target. A rider who wants the
+ *   resistance the app set gone must not first have to unlock the screen.
+ *
+ * ⚠️ **The trainer game's HUD has no touch lock yet.** A fourth control in its
+ * row did not fit a phone on its side (#1432's pull request measured *Trainer
+ * notice* pushed to x 829–901 px of an 844 px viewport); that is its own
+ * issue. This module is written for any region, so the HUD can use it.
  */
 
 import { useEffect, type RefObject } from 'react';

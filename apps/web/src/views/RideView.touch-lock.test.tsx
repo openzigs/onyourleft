@@ -24,6 +24,7 @@ import {
 } from '@onyourleft/store/testing';
 
 import { hold, tap } from '../design/touch-lock-testing';
+import type { RecordingCheckpointStore } from '../recording/recorder';
 import { createRideController, type RideController } from '../ride/controller';
 import { ridingSnapshot, stubRideController } from '../ride/testing';
 import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../testing/mount';
@@ -59,26 +60,30 @@ function buttonNamed(label: string): HTMLButtonElement {
 
 const lock = (): HTMLButtonElement => buttonNamed('Touch lock');
 
+/** The recorder's store, over the harness, as `RideView.test.tsx` §"#1430" builds it. */
+function checkpoints(store: StoreHarness): RecordingCheckpointStore {
+  return {
+    putRecordingSession: async (record) =>
+      store.write(async (inner) => inner.putRecordingSession(record)),
+    appendRecordingChunk: async (chunk) =>
+      store.write(async (inner) => inner.appendRecordingChunk(chunk)),
+    readRecordingSessions: async (owner) =>
+      store.write(async (inner) => inner.readRecordingSessions(owner)),
+    recoverRecording: async (owner, id) =>
+      store.write(async (inner) => inner.recoverRecording(owner, id)),
+    deleteRecordingSession: async (owner, id) =>
+      store.write(async (inner) => inner.deleteRecordingSession(owner, id)),
+  };
+}
+
 /** A recording ride on the real controller, its screen mounted. */
 async function riding(): Promise<RideController> {
   harness = createStoreHarness();
   await seedAthletes(harness);
-  const store = harness;
   const { transport, bench } = createSimulator({ devices: [] });
   const built = createRideController({
     transport,
-    store: {
-      putRecordingSession: async (record) =>
-        store.write(async (inner) => inner.putRecordingSession(record)),
-      appendRecordingChunk: async (chunk) =>
-        store.write(async (inner) => inner.appendRecordingChunk(chunk)),
-      readRecordingSessions: async (owner) =>
-        store.write(async (inner) => inner.readRecordingSessions(owner)),
-      recoverRecording: async (owner, id) =>
-        store.write(async (inner) => inner.recoverRecording(owner, id)),
-      deleteRecordingSession: async (owner, id) =>
-        store.write(async (inner) => inner.deleteRecordingSession(owner, id)),
-    },
+    store: checkpoints(harness),
     athleteId: ATHLETE_A,
     newSessionId: () => recordingSessionId('ride-1432'),
     now: () => bench.now,
@@ -107,7 +112,7 @@ describe('the Ride screen’s touch lock — #1432', () => {
     const { transport, bench } = createSimulator({ devices: [] });
     const idle = createRideController({
       transport,
-      store: harness,
+      store: checkpoints(harness),
       athleteId: ATHLETE_A,
       newSessionId: () => recordingSessionId('idle-1432'),
       now: () => bench.now,
