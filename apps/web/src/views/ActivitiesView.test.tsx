@@ -909,6 +909,45 @@ describe('#670 — a selected ride', () => {
     expect(pane.textContent).not.toContain('All rides on this device');
   });
 
+  it('reads the next ride’s own traces when the choice changes, not the first one’s — #1439', async () => {
+    // The pane's page held the traces it had read by channel and only loaded
+    // channels it lacked, so ride B opened over ride A's chart.
+    const rideA = stubActivity({ id: activityId('ride-0'), name: 'Ride number 0' });
+    const rideB = stubActivity({ id: activityId('ride-1'), name: 'Ride number 1' });
+    const stubA = stubDetail(OWNER, {
+      activity: rideA,
+      channels: { power: Array.from({ length: 120 }, () => watts(100)) },
+      laps: [],
+    });
+    const stubB = stubDetail(OWNER, {
+      activity: rideB,
+      channels: { power: Array.from({ length: 120 }, () => watts(300)) },
+      laps: [],
+    });
+    const which = (id: string): typeof stubA => (id === 'ride-1' ? stubB : stubA);
+    const both: typeof stubA = {
+      ...stubA,
+      store: {
+        ...stubA.store,
+        getStreamSetSummary: (owner, id) => which(id).store.getStreamSetSummary(owner, id),
+        getStreamChannel: (owner, id, channel) =>
+          which(id).store.getStreamChannel(owner, id, channel),
+        getActivity: (owner, id) => which(id).store.getActivity(owner, id),
+        listLaps: (owner, id) => which(id).store.listLaps(owner, id),
+      },
+    };
+    const library = stubLibrary(OWNER, many(3));
+    mounted = await mount(<ActivitiesView library={library} selected="ride-0" detail={both} />);
+    await settle();
+    await settle();
+    expect(stubB.channelReads).toEqual([]);
+    await mounted.rerender(<ActivitiesView library={library} selected="ride-1" detail={both} />);
+    await settle();
+    await settle();
+    expect(document.getElementById('oyl-selected-heading')?.textContent).toBe('Ride number 1');
+    expect(stubB.channelReads).toContain('power');
+  });
+
   it('is read on its own when it is outside the page, rather than called "not found"', async () => {
     // Ride fifty-five of sixty: past PAGE_SIZE, so the list never held it.
     const library = stubLibrary(OWNER, many(PAGE_SIZE + 10));

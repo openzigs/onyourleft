@@ -142,6 +142,7 @@
  * numbers, never a picture, and only when you press the button." (the
  * approved paragraph beside the press says it in full). "A finished write-up
  * replaces …" moves behind the section's ⓘ, and is still recorded.
+ *
  * ## What it does not check
  *
  * That a sentence is in the same ORDER, or visible — `kept-visible.a11y.test`

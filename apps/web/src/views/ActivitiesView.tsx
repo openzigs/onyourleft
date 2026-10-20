@@ -610,6 +610,10 @@ export function ActivitiesView({
               {shown.row.name}
             </h2>
             <ActivityDetailView
+              // Keyed on the ride: the page holds what it read (its traces by
+              // channel, the shared-copy preview), and a new choice is a new
+              // ride, not an update to the old one.
+              key={shown.row.id}
               port={detail}
               activityId={shown.row.id}
               map={map}
