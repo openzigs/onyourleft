@@ -699,6 +699,22 @@ test.describe('Keep the plan on the HUD while a re-plan waits — #1244', () => 
               `; panels over the rider: ${over.length === 0 ? 'none' : over.map(describeItem).join(', ')}`,
           );
 
+          // #1482: the touch lock is on the stage, uncovered, in the state
+          // that fills the actions panel most; and on a phone on its side
+          // *Trainer notice* gives way to it there (`theme.css` §"#1482"),
+          // which the tablets have the room not to do.
+          const lock = seen.items.find((each) => each.name === 'control: Lock');
+          const notice = seen.items.find((each) => each.name === 'control: Trainer notice');
+          if (lock === undefined || notice === undefined) {
+            throw new Error("no Lock or Trainer notice among the HUD's items");
+          }
+          expect(inside(lock.box, viewport) && lock.onTop, describeItem(lock)).toBe(true);
+          if (tablet) {
+            expect(inside(notice.box, viewport) && notice.onTop, describeItem(notice)).toBe(true);
+          } else if (viewport.width >= 736 && viewport.height <= 480) {
+            expect(notice.box.height, describeItem(notice)).toBe(0);
+          }
+
           expect(inside(keep.box, viewport), describeItem(keep)).toBe(true);
           expect(keep.onTop, describeItem(keep)).toBe(true);
           expect(keep.box.width).toBeGreaterThanOrEqual(48 - SUBPIXEL_TOLERANCE);
@@ -1013,7 +1029,7 @@ test.describe('a lap ends while a re-plan waits — #1312 with #1244', () => {
           }
           expect(inside(keep.box, viewport), describeItem(keep)).toBe(true);
           expect(keep.onTop, describeItem(keep)).toBe(true);
-          for (const name of ['control: Pause', 'control: End ride']) {
+          for (const name of ['control: Pause', 'control: End ride', 'control: Lock']) {
             const control = seen.items.find((each) => each.name === name);
             expect(control?.onTop, name).toBe(true);
           }

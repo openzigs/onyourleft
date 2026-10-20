@@ -6538,9 +6538,57 @@ select.oyl-input {
   }
 }
 
+/* #1482: Pause, End ride and the touch lock share this row, and nothing on
+   it grows the actions panel. Measured, not chosen (Chromium on Linux fonts,
+   the 16 rem panel of a phone on its side, 238 px inside): *Pause* 73 px,
+   *End ride* 91 px on one line, the lock 68 px at the ride size's padding.
+   With the 1 rem gap the lock went to a line of its own and the panel grew
+   by 64 px, onto the secondary readings at 736×360; with Pause and End ride
+   free to wrap, *End ride* took two lines and was 52 px tall with its floor
+   stripped, which #669's gate refuses. So: an 8 px gap (#669's spacing), the
+   two controls kept to one line, the lock trimmed to its 48 px floor, 228 px
+   in all. A row of controls a line taller than its own floor never stretches
+   the others (`align-items`), for the same gate.
+
+   It WRAPS, and only *Trainer notice* is ever wrapped: a fourth control did
+   not fit before #1482 either, and on a line of its own it is the panel's
+   width (#437's toggle; `ride-notices.browser.spec.ts` §"#647"). */
 .oyl-hud__controls {
   display: flex;
-  gap: var(--oyl-space-md);
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--oyl-space-sm);
+}
+
+.oyl-hud__controls > .oyl-hud__control {
+  white-space: nowrap;
+}
+
+.oyl-hud__lock {
+  flex: none;
+  align-self: center;
+  padding-inline: var(--oyl-space-xs);
+}
+
+/* #1482: ON A PHONE ON ITS SIDE, WHILE A RE-PLAN CONTROL IS ON THE HUD,
+   *Trainer notice* GIVES WAY to the lock. Measured, not chosen: in the 16 rem
+   panel three controls at #94's 72 px floor and the lock cannot share one
+   row (72 + 72 + 72 + 48 and three gaps is 288 px against 238), so with the
+   lock *Trainer notice* goes to a line of its own, 80 px. With *Keep the
+   plan* and *Switch re-plans off* under it the panel was 282 px and put
+   them under a 736×360 stage and *Switch re-plans off* under another panel
+   at 844×390 (`ride-workout.browser.spec.ts` §"#1244", §"#1329"); the panel
+   had about 13 px to spare before #1482. The road notice's control is what
+   gives way, on #647's precedent (`GameView.tsx` §`roadNotice`): in a
+   workout its notice says that the workout is driving the trainer, it is
+   open for the ride's first seconds, the HUD's one region says it, and the
+   Ride screen shows it. The notice itself stays in the document. The lock
+   never gives way: a lock that vanished while on would leave a rider no
+   tap that releases it. */
+@media (min-width: 46rem) and (min-height: 22.5rem) and (max-height: 30rem) {
+  .oyl-game--riding .oyl-hud__actions:has(> .oyl-hud__replan) .oyl-hud__controls > [aria-controls] {
+    display: none;
+  }
 }
 
 /* #551: the side camera's line and *Stop side camera*, side by side in one

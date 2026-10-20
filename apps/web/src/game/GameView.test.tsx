@@ -47,7 +47,9 @@ import { SCATTER_KINDS, STRUCTURE_KINDS } from './scatter';
 import { NO_READING, type SensorReading } from './hud/fields';
 import { NO_SENSORS } from './sensors';
 import { NO_ROUTES_YET } from '../routes/two-importers';
-import { mount, queryAll, settle, type Mounted } from '../testing/mount';
+import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../testing/mount';
+import { tap } from '../design/touch-lock-testing';
+import { TOUCH_LOCK_NAME } from '../design/TouchLockButton';
 import type { CameraThrottle } from '../camera/session';
 import type { ThermalPort } from './thermal-port';
 import {
@@ -1880,5 +1882,85 @@ describe('GameView — a hot forecast steps the world down (#247)', () => {
     // The renderer is told a rung only when it changes, so "no rung at all" is
     // "never left the top one" — the same reading the threshold test above makes.
     expect(rungs).toEqual([]);
+  });
+});
+
+/**
+ * #1482 — the HUD's touch lock, through the real game: what a tap on the
+ * HUD's *Pause* or *End ride* does to the ride while it is on, read off the
+ * HUD and the trainer port as a rider and the Ride screen would see them.
+ * `hud/HudPanel.touch-lock.test.tsx` holds the rest of the HUD's controls and
+ * the held release.
+ */
+describe('the touch lock on the HUD — #1482', () => {
+  function hudButton(name: string): HTMLButtonElement | undefined {
+    return queryAll<HTMLButtonElement>(mounted?.container ?? document, 'button').find(
+      (button) => button.textContent === name,
+    );
+  }
+
+  async function tapThrough(element: HTMLElement | undefined): Promise<void> {
+    if (element === undefined) {
+      throw new Error('no such control on the HUD');
+    }
+    tap(element);
+    await settle();
+  }
+
+  function countingTrainer(ended: { count: number }): GameTrainerPort {
+    return {
+      readTrainer: () => NO_GAME_TRAINER,
+      askForControlOnRide: () => Promise.resolve(),
+      workoutRescue: () => undefined,
+      recordingMayStop: () => false,
+      gameRideEnded: () => {
+        ended.count += 1;
+      },
+      rideMovingSeconds: () => undefined,
+      watchRide: () => () => undefined,
+    };
+  }
+
+  it('ignores a tap on Pause while it is on, and a key still pauses', async () => {
+    mounted = await mount(<GameView port={pedallingPort(testRoute())} now={() => nowMs} />);
+    await settle();
+    await clickThrough(rideButton());
+    await pump(4);
+
+    await tapThrough(hudButton(TOUCH_LOCK_NAME));
+    expect(hudButton(TOUCH_LOCK_NAME)?.getAttribute('aria-pressed')).toBe('true');
+    await tapThrough(hudButton('Pause'));
+    expect(hudButton('Resume')).toBeUndefined();
+
+    const pause = hudButton('Pause');
+    if (pause === undefined) throw new Error('no Pause on the HUD');
+    await activateWithKeyboard(pause);
+    await settle();
+    expect(hudButton('Resume')).toBeDefined();
+  });
+
+  it('lets a tap on End ride end the game ride while it is on, and the next ride starts unlocked', async () => {
+    const ended = { count: 0 };
+    mounted = await mount(
+      <GameView
+        port={pedallingPort(testRoute())}
+        trainer={countingTrainer(ended)}
+        now={() => nowMs}
+      />,
+    );
+    await settle();
+    await clickThrough(rideButton());
+    await pump(4);
+    await tapThrough(hudButton(TOUCH_LOCK_NAME));
+
+    await tapThrough(endRideButton());
+    pending = [];
+
+    expect(ended.count).toBe(1);
+    expect(endRideButton()).toBeUndefined();
+    expect(rideButton()).toBeDefined();
+
+    await clickThrough(rideButton());
+    expect(hudButton(TOUCH_LOCK_NAME)?.getAttribute('aria-pressed')).toBe('false');
   });
 });
