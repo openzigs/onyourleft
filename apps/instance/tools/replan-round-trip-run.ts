@@ -263,13 +263,18 @@ function isLoopback(hostname: string): boolean {
 export const KEY_NOT_CLEARED =
   '⚠️ the hosted key could NOT be confirmed cleared from every account: revoke the key at its provider';
 
+/** What an interrupted measurement rejects with when every account it took was cleared. */
+export const INTERRUPTED = 'the measurement was interrupted; every account it took was cleared';
+
 /**
  * Why `given` — a command line's arguments — cannot be run, or `undefined`:
  * an option that is not one of `known`, or a word that is no option's value.
  * Every option takes one value.
  *
  * ⚠️ **It names an option and never a value**: a mistaken `--hosted-key sk-…`
- * is refused without the key being written again.
+ * is refused without the key being written again, `--hosted-key-sk-…` is
+ * named `--hosted-key` alone, and a name longer than every option's is not
+ * repeated at all (#1270).
  */
 export function refusedArguments(
   given: readonly string[],
@@ -283,8 +288,13 @@ export function refusedArguments(
     }
     if (!word.startsWith('--')) return 'an argument that is no option’s value was given';
     const name = /^--[A-Za-z0-9-]*/.exec(word)?.[0] ?? '--';
-    return name === '--hosted-key'
-      ? `${name} is not an option: the hosted key is read from ${HOSTED_KEY_VARIABLE} and never from the command line`
+    if (name.startsWith('--hosted-key')) {
+      return `--hosted-key is not an option: the hosted key is read from ${HOSTED_KEY_VARIABLE} and never from the command line`;
+    }
+    // A name longer than every option's may be a value glued on with a hyphen.
+    const longest = Math.max(0, ...known.map((option) => option.length));
+    return name.length > longest
+      ? 'an option this command does not have was given (its name is too long to repeat)'
       : `${name} is not an option of this command`;
   }
   return undefined;
@@ -314,6 +324,13 @@ export interface MeasureOptions {
    * unload, so a hosted measurement has no cold runs.
    */
   readonly hosted?: HostedOptions;
+  /**
+   * Stops the measurement (#1270): no run or account is begun after it, a key
+   * being sent is waited for, every account that may hold one is cleared, and
+   * the measurement rejects with {@link INTERRUPTED} — or with
+   * {@link KEY_NOT_CLEARED} when an account could not be read back as cleared.
+   */
+  readonly signal?: AbortSignal;
   readonly log?: (line: string) => void;
 }
 
@@ -431,6 +448,11 @@ function field(block: string, name: string): string | undefined {
 /**
  * A device signed in to `url`, over `transport`: a new key each time, or
  * `given` (#464's race load run brings one per rider).
+ *
+ * `refuseRedirects` makes every request fail on a redirect instead of
+ * following it (#1270): a hosted run's key is in its sealed requests, and an
+ * `https:` address that answered 307 to an `http:` one would carry them there
+ * — and a redirected `/v1/instance/keys` would choose the key they are sealed to.
  */
 export async function signedInDevice(
   url: string,
@@ -438,7 +460,9 @@ export async function signedInDevice(
   transport: Transport,
   displayName: string,
   given?: webcrypto.CryptoKeyPair,
+  refuseRedirects = false,
 ): Promise<Device> {
+  const redirect: RequestInit['redirect'] = refuseRedirects ? 'error' : 'follow';
   const pair =
     given ??
     ((await webcrypto.subtle.generateKey({ name: 'Ed25519' }, false, [
@@ -470,7 +494,7 @@ export async function signedInDevice(
     body: unknown,
   ): Promise<{ sealed: SealedRequest; response: Response }> => {
     if (instanceKey === undefined) {
-      const served = (await (await fetch(`${url}/v1/instance/keys`)).json()) as {
+      const served = (await (await fetch(`${url}/v1/instance/keys`, { redirect })).json()) as {
         statements?: { statement: { keyId: string; encryptionKey: string } }[];
       };
       const newest = served.statements?.at(-1)?.statement;
@@ -503,6 +527,7 @@ export async function signedInDevice(
     sentBytes += utf8Encode(envelope).length;
     const response = await fetch(`${url}${SEALED_PATH}`, {
       method: 'POST',
+      redirect,
       headers: {
         'content-type': 'application/json',
         ...(session.token === undefined ? {} : { authorization: `Bearer ${session.token}` }),
@@ -515,6 +540,7 @@ export async function signedInDevice(
   const plain = (method: string, path: string, body: unknown): Promise<Response> =>
     fetch(`${url}${path}`, {
       method,
+      redirect,
       headers: {
         ...(body === undefined ? {} : { 'content-type': 'application/json' }),
         ...(session.token === undefined ? {} : { authorization: `Bearer ${session.token}` }),
@@ -545,6 +571,7 @@ export async function signedInDevice(
     if (transport === 'plaintext') {
       const response = await fetch(`${url}${path}`, {
         headers: { authorization: `Bearer ${session.token ?? ''}` },
+        redirect,
         signal,
       });
       if (response.status !== 200) throw new Error(`the stream was refused: ${response.status}`);
@@ -577,6 +604,7 @@ export async function signedInDevice(
   const challenge = (await (
     await fetch(`${url}/v1/auth/challenge`, {
       method: 'POST',
+      redirect,
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ publicKey }),
     })
@@ -763,10 +791,16 @@ async function prepareHosted(device: Device, hosted: HostedOptions): Promise<voi
   }
 }
 
+/** How many times an account's clean-up is tried before it is reported as not confirmed. */
+const CLEAR_ATTEMPTS = 3;
+/** The wait before the second clean-up attempt; each later one waits twice as long. */
+const CLEAR_RETRY_MS = 500;
+
 /**
  * Clear the key and withdraw the consent of every account that may hold one,
- * then read each back the way a device does. Best effort: a call that fails
- * is not retried, and the account is then reported as not confirmed.
+ * then read each back the way a device does. An account that does not read
+ * back empty is tried again, {@link CLEAR_ATTEMPTS} times in all (#1270), and
+ * is then reported as not confirmed.
  */
 async function clearHosted(
   holding: readonly { readonly account: number; readonly device: Device }[],
@@ -774,12 +808,18 @@ async function clearHosted(
 ): Promise<boolean> {
   let cleared = true;
   for (const { account, device } of holding) {
-    await device.call('DELETE', '/v1/analysis/hosted/key').catch(() => undefined);
-    await device.call('DELETE', '/v1/analysis/hosted/consent').catch(() => undefined);
-    const read = await device.call('GET', '/v1/analysis/hosted').catch(() => undefined);
-    const settings =
-      read?.status === 200 ? (read.body as { key?: unknown; consent?: unknown } | null) : null;
-    const gone = settings?.key === null && settings.consent === null;
+    let gone = false;
+    for (let attempt = 1; attempt <= CLEAR_ATTEMPTS && !gone; attempt += 1) {
+      if (attempt > 1) {
+        await new Promise((resolve) => setTimeout(resolve, CLEAR_RETRY_MS * 2 ** (attempt - 2)));
+      }
+      await device.call('DELETE', '/v1/analysis/hosted/key').catch(() => undefined);
+      await device.call('DELETE', '/v1/analysis/hosted/consent').catch(() => undefined);
+      const read = await device.call('GET', '/v1/analysis/hosted').catch(() => undefined);
+      const settings =
+        read?.status === 200 ? (read.body as { key?: unknown; consent?: unknown } | null) : null;
+      gone = settings?.key === null && settings.consent === null;
+    }
     if (!gone) cleared = false;
     log(
       gone
@@ -794,8 +834,20 @@ function known(values: readonly (number | null)[]): number[] {
   return values.filter((value): value is number => value !== null);
 }
 
+/**
+ * `value` as a URL, or a refusal naming `option` (#1270). `URL`'s own error
+ * quotes its input, and a key pasted after the wrong option would be written
+ * out again with it.
+ */
+function parsedUrl(value: string, option: string): URL {
+  const parsed = URL.parse(value);
+  if (parsed === null) throw new Error(`${option} is not a URL`);
+  return parsed;
+}
+
 export async function measure(options: MeasureOptions): Promise<MeasureReport> {
-  const url = new URL(options.url).origin;
+  const reached = parsedUrl(options.url, '--url');
+  const url = reached.origin;
   const origin = options.origin ?? url;
   const log = options.log ?? (() => undefined);
   const startedAt = new Date().toISOString();
@@ -811,30 +863,60 @@ export async function measure(options: MeasureOptions): Promise<MeasureReport> {
       'a hosted model has nothing to unload, so it has no cold runs: drop --unload (and --cold-runs)',
     );
   }
-  const reached = new URL(options.url);
   if (hosted !== undefined && reached.protocol !== 'https:' && !isLoopback(reached.hostname)) {
     throw new Error(
       'a hosted model is measured through an https: or a loopback --url only: this tool seals the key to whatever encryption key that address serves, and over plain http: to another machine anything on the path can serve its own',
     );
   }
-  const hostedOrigin = hosted === undefined ? undefined : new URL(hosted.url).origin;
+  const hostedOrigin =
+    hosted === undefined ? undefined : parsedUrl(hosted.url, '--hosted-url').origin;
   const source: MeasuredSource = hosted === undefined ? 'instance-local' : 'instance-hosted';
-  /** Every account that was, or was about to be, sent the key. */
+  /** Every account that was, or was about to be, sent the key, and is not yet cleared. */
   const holding: { account: number; device: Device }[] = [];
+  /** Whether every account cleared so far read back empty. */
+  let cleared = true;
+  /** The key being sent to an account, while it is: an interruption waits for it. */
+  let preparing: Promise<void> | undefined;
+  /** The clearing of an account done with, while it runs: an interruption waits for it too. */
+  let clearing: Promise<void> | undefined;
+  const signal = options.signal;
+  // A call, not a field read: an await can change it, which narrowing would not see.
+  const stopped = (): boolean => signal?.aborted === true;
 
   let device: Device | undefined;
   let starts = 0;
   let accounts = 0;
   let jobs = 0;
   const next = async (run: number, cold: boolean): Promise<RunRecord> => {
+    // Nothing is begun once interrupted: no run, and no account sent the key.
+    if (stopped()) throw new Error(INTERRUPTED);
     if (device === undefined || starts >= options.startsPerAccount) {
+      // An account done with is cleared now, not when the whole run ends (#1270).
+      clearing = clearHosted(holding.splice(0), log).then((ok) => {
+        cleared = ok && cleared;
+      });
+      await clearing;
+      clearing = undefined;
       accounts += 1;
-      device = await signedInDevice(url, origin, options.transport, `Measure ${String(accounts)}`);
+      device = await signedInDevice(
+        url,
+        origin,
+        options.transport,
+        `Measure ${String(accounts)}`,
+        undefined,
+        hosted !== undefined,
+      );
       starts = 0;
       if (hosted !== undefined) {
+        if (stopped()) throw new Error(INTERRUPTED);
         // Listed before the key is sent: a set-up that fails half way is cleared too.
         holding.push({ account: accounts, device });
-        await prepareHosted(device, hosted);
+        preparing = prepareHosted(device, hosted);
+        try {
+          await preparing;
+        } finally {
+          preparing = undefined;
+        }
       }
     }
     starts += 1;
@@ -849,8 +931,7 @@ export async function measure(options: MeasureOptions): Promise<MeasureReport> {
   let warmUp: RunRecord | null = null;
   const warm: RunRecord[] = [];
   const cold: RunRecord[] = [];
-  let cleared: boolean;
-  try {
+  const runAll = async (): Promise<void> => {
     // One run nobody counts: it loads the model, so the first warm run is warm.
     if (options.runs > 0) warmUp = await next(0, false);
     for (let run = 1; run <= options.runs; run += 1) warm.push(await next(run, false));
@@ -860,9 +941,30 @@ export async function measure(options: MeasureOptions): Promise<MeasureReport> {
         cold.push(await next(run, true));
       }
     }
-  } finally {
-    // However the run ended, the key does not outlive it on the instance.
-    cleared = await clearHosted(holding, log);
+  };
+  let onAbort: (() => void) | undefined;
+  const interrupted = new Promise<never>((_, reject) => {
+    onAbort = () => reject(new Error(INTERRUPTED));
+    if (stopped()) onAbort();
+    else signal?.addEventListener('abort', onAbort, { once: true });
+  });
+  let failed: { readonly error: unknown } | undefined;
+  try {
+    // An interruption does not wait for the run in flight: that run may take minutes.
+    await Promise.race([runAll(), interrupted]);
+  } catch (error) {
+    failed = { error };
+  }
+  if (onAbort !== undefined) signal?.removeEventListener('abort', onAbort);
+  // A key on its way to an account is let arrive, so that it is cleared too.
+  await preparing?.catch(() => undefined);
+  // So is an account being cleared: it left `holding` when its clearing began.
+  await clearing?.catch(() => undefined);
+  // However the run ended, the key does not outlive it on the instance.
+  cleared = (await clearHosted(holding.splice(0), log)) && cleared;
+  if (failed !== undefined) {
+    if (stopped() && !cleared) throw new Error(KEY_NOT_CLEARED);
+    throw failed.error;
   }
 
   const good = warm.filter((record) => record.status === 'succeeded');
