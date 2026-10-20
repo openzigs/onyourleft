@@ -7248,6 +7248,53 @@ select.oyl-input {
 }
 
 /*
+ * THE MIDDLE corners layout's bottom row, clear of the leaning rider — #1169.
+ *
+ * Between the short corners layout (30 rem tall and under) and a tablet's
+ * (47 rem and over), the bottom row kept the tablet's widths, 18 rem and
+ * 20 rem, and "a tablet's bottom row sits below the rider's box" (above) is
+ * false there: the box is 52.5 % to 79.9 % of the height down and grows with
+ * it while the panels, in rem, do not. Measured at the lean cap in the pinned
+ * Chromium: at 802×600 the box is x = 287 to 515, y = 315 to 479, and the
+ * route panel (to x = 296) and the actions panel (from x = 474) both lay over
+ * it; one or both did at some height of the band at every width from 736 to
+ * 880 px on DejaVu. No case measured this layout's rider clearance until
+ * #1169.
+ *
+ * So each panel stops short of the box: its half of the stage, less the
+ * box's half-width (`camera.ts` §`riderFrameBox`: 0.1905 × the height for any
+ * frame wider than tall, so `19.05vh`), the HUD's padding on its own side
+ * (an inset where there is one) and 8 px of clear road. Where there is room,
+ * `min()` keeps 18 rem and 20 rem, so a wide window is unchanged.
+ *
+ * At the band's narrowest and tallest, 736×751, the actions panel is 209 px:
+ * *Pause* and *End ride* give up width (91 px each on DejaVu Sans, against
+ * their 72 px floor) and the trainer line wraps, so the panel grows upward,
+ * and it still starts right of the box. Measured on DejaVu Sans (the CI runner's
+ * face) across 736 to 1100 px wide and 481 to 751 px tall, no panel lies
+ * over the leaning rider and no control leaves its panel; on `main` 56 of
+ * those 88 had a panel over the rider.
+ * `ride.browser.spec.ts` §"#1124" (802×600) and §"#1169" hold it, both ways.
+ */
+@media (min-width: 46rem) and (height > 30rem) and (height < 47rem) {
+  .oyl-game--riding .oyl-hud__route {
+    width: min(
+      100%,
+      18rem,
+      calc(50vw - 19.05vh - max(var(--oyl-space-sm), var(--oyl-safe-left)) - var(--oyl-space-sm))
+    );
+  }
+
+  .oyl-game--riding .oyl-hud__actions {
+    width: min(
+      100%,
+      20rem,
+      calc(50vw - 19.05vh - max(var(--oyl-space-sm), var(--oyl-safe-right)) - var(--oyl-space-sm))
+    );
+  }
+}
+
+/*
  * #1441 — the trainer line at the short corners layout, set as a notice is.
  *
  * With a gesture bar the right-hand column of a 736×360 stage has 292 px
