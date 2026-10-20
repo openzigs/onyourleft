@@ -1786,19 +1786,24 @@ test.describe('#1312 — the lap table keeps its Lap column when it is scrolled'
         });
         const table = page.locator('table.oyl-table--laps');
         await expect(table).toBeVisible();
-        // The WHOLE table in view, its middle at the viewport's. #1439's
-        // shorter page above the laps (the trace tables tucked under their
-        // charts) leaves the table's top already on the screen on the CI
-        // runner's fonts, where `scrollIntoViewIfNeeded` then scrolls nothing
-        // and its last two rows are under the fold — and "every lap's name
-        // is on screen" would be a reading of the fold, not of the sticky
-        // column. Five rows are far shorter than the 800 px viewport.
-        await table.evaluate((element) => {
-          element.scrollIntoView({ block: 'center' });
-        });
+        // ⚠️ #1439: the traces above the laps are a `React.lazy` chunk, and
+        // since their axes they are taller. On the CI runner the chunk
+        // arrived AFTER the table was scrolled to, pushed it down, and laps
+        // 4 and 5 were read off the bottom of the screen — a reading of a
+        // layout shift, not of the sticky column. So: every chart drawn
+        // first, and the table scrolled to inside the same task that reads
+        // it (`measure`), where nothing can move it in between.
+        const shown = await page
+          .locator('button[aria-pressed="true"]', { hasText: /^Show / })
+          .count();
+        expect(shown, 'the ride’s page shows no trace').toBeGreaterThan(0);
+        await expect(page.locator('.oyl-trace-chart')).toHaveCount(shown);
 
         const measure = async () =>
           table.evaluate((element) => {
+            // The whole table in view, its middle at the viewport's: five
+            // rows are far shorter than the 800 px viewport.
+            element.scrollIntoView({ block: 'center' });
             const region = element.closest<HTMLElement>('.oyl-scroll-region');
             if (region === null) {
               throw new Error('the lap table is in no scroll region');
