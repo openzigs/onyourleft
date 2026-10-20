@@ -8,7 +8,7 @@
  * the tunnel, the owner's instance.
  */
 
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer, request as httpRequest, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -33,6 +33,7 @@ import { migrateForDeploy } from '../src/store/serving.ts';
 import {
   HOSTED_KEY_VARIABLE,
   hostedFromCommand,
+  INTERRUPTED,
   KEY_NOT_CLEARED,
   measure,
   refusedArguments,
@@ -49,13 +50,16 @@ let directory: string | undefined;
 let hostedModel: FakeModelServer | undefined;
 /** A proxy in front of the instance, when a test has one. */
 let proxy: Server | undefined;
+/** Where a redirecting proxy sends a request, when a test has one (#1270). */
+let catcher: Server | undefined;
 afterEach(async () => {
-  if (proxy !== undefined) {
-    const closing = proxy;
+  for (const closing of [proxy, catcher]) {
+    if (closing === undefined) continue;
     closing.closeAllConnections();
     await new Promise<void>((resolve) => closing.close(() => resolve()));
   }
   proxy = undefined;
+  catcher = undefined;
   await hostedModel?.close();
   hostedModel = undefined;
   await running?.stop();
@@ -370,6 +374,67 @@ async function hostedService(script: readonly ScriptedReply[]) {
 
 const HOSTED = { url: HOSTED_URL, model: 'hosted-model', key: MARKER_KEY };
 
+/** What {@link interposed} does with one request: pass it on, destroy its socket, or redirect it. */
+type Interposition = 'pass' | 'cut' | { readonly redirect: string };
+
+/**
+ * A loopback proxy in front of the instance that decides, request by request,
+ * what becomes of each. `sealed` counts the sealed requests from one, this
+ * one included, and is 0 for a request that is not sealed.
+ */
+async function interposed(
+  target: string,
+  decide: (path: string, sealed: number) => Interposition,
+): Promise<string> {
+  let sealed = 0;
+  const server = createServer((incoming, outgoing) => {
+    if (incoming.url === '/v1/sealed') sealed += 1;
+    const decision = decide(incoming.url ?? '', incoming.url === '/v1/sealed' ? sealed : 0);
+    if (decision === 'cut') {
+      incoming.socket.destroy();
+      return;
+    }
+    if (decision !== 'pass') {
+      outgoing.writeHead(307, { location: decision.redirect }).end();
+      return;
+    }
+    const upstream = httpRequest(
+      `${target}${incoming.url ?? ''}`,
+      { method: incoming.method, headers: incoming.headers },
+      (answer) => {
+        outgoing.writeHead(answer.statusCode ?? 502, answer.headers);
+        answer.pipe(outgoing);
+      },
+    );
+    upstream.on('error', () => outgoing.destroy());
+    incoming.pipe(upstream);
+  });
+  proxy = server;
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  return `http://127.0.0.1:${String((server.address() as AddressInfo).port)}`;
+}
+
+/** A server that only writes down what reaches it: where a redirect would carry a request. */
+async function catching(): Promise<{ url: string; requests: string[] }> {
+  const requests: string[] = [];
+  const server = createServer((incoming, outgoing) => {
+    requests.push(`${incoming.method ?? ''} ${incoming.url ?? ''}`);
+    incoming.resume();
+    outgoing.writeHead(404).end();
+  });
+  catcher = server;
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  return { url: `http://127.0.0.1:${String((server.address() as AddressInfo).port)}`, requests };
+}
+
+/**
+ * The sealed requests of a one-run hosted measurement, in order: the
+ * session, the key, the consent and the masking item (4), then a start, a
+ * stream and a read for the warm-up and again for the counted run (6). The
+ * eleventh is the clean-up's first.
+ */
+const FIRST_OF_THE_CLEAN_UP = 11;
+
 describe('the round-trip measurement of a hosted model, on a key of the measurer’s own — #1235', () => {
   it('measures a hosted job to its decrypted result, on the hosted server with the key, and says the key nowhere', async () => {
     const service = await hostedService([...TWO_STEPS, ...TWO_STEPS]);
@@ -444,10 +509,121 @@ describe('the round-trip measurement of a hosted model, on a key of the measurer
     );
     expect(report.statuses).toEqual({ succeeded: 2 });
     expect(report.hosted?.cleared).toBe(true);
-    expect(lines.slice(-2)).toEqual([
+    // Each account is cleared when the run is done with it, not when the whole run ends (#1270).
+    expect(lines.map((line) => line.replace(/: succeeded .*/, ''))).toEqual([
+      'warm 0',
+      'warm 1',
       'account 1: the hosted key and consent are cleared',
+      'warm 2',
       'account 2: the hosted key and consent are cleared',
     ]);
+  }, 60_000);
+
+  it('tries an account’s clean-up again when its first attempt is lost, and reads it back cleared — #1270', async () => {
+    const service = await hostedService([TEXT, TEXT]);
+    const url = await interposed(await instance([], true, service.fetch), (_, sealed) =>
+      sealed === FIRST_OF_THE_CLEAN_UP ? 'cut' : 'pass',
+    );
+    const lines: string[] = [];
+    const report = await measure(
+      options(url, 'sealed', { hosted: HOSTED, log: (line) => lines.push(line) }),
+    );
+    expect(report.statuses).toEqual({ succeeded: 1 });
+    expect(report.hosted?.cleared).toBe(true);
+    expect(lines.at(-1)).toBe('account 1: the hosted key and consent are cleared');
+  }, 60_000);
+
+  it('stops when interrupted, without waiting for the run in flight, and clears the key first — #1270', async () => {
+    const service = await hostedService([{ kind: 'slow', milliseconds: 20_000, then: TEXT }]);
+    const url = await instance([], true, service.fetch);
+    const lines: string[] = [];
+    const stop = new AbortController();
+    const began = performance.now();
+    const measuring = measure(
+      options(url, 'sealed', {
+        hosted: HOSTED,
+        signal: stop.signal,
+        log: (line) => lines.push(line),
+      }),
+    ).catch((error: unknown) => error);
+    // Interrupted once the hosted service has the warm-up's request.
+    await vi.waitFor(() => expect(service.authorizations).toHaveLength(1), { timeout: 15_000 });
+    stop.abort();
+    const failure = await measuring;
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toBe(INTERRUPTED);
+    expect(performance.now() - began).toBeLessThan(15_000);
+    expect(lines).toEqual(['account 1: the hosted key and consent are cleared']);
+  }, 60_000);
+
+  it('says to revoke the key when interrupted and an account cannot be read back as cleared — #1270', async () => {
+    const service = await hostedService([{ kind: 'slow', milliseconds: 20_000, then: TEXT }]);
+    let down = false;
+    const url = await interposed(await instance([], true, service.fetch), () =>
+      down ? 'cut' : 'pass',
+    );
+    const stop = new AbortController();
+    const measuring = measure(
+      options(url, 'sealed', { hosted: HOSTED, signal: stop.signal }),
+    ).catch((error: unknown) => error);
+    await vi.waitFor(() => expect(service.authorizations).toHaveLength(1), { timeout: 15_000 });
+    // The instance cannot be reached from the interruption on.
+    down = true;
+    stop.abort();
+    const failure = await measuring;
+    expect((failure as Error).message).toBe(KEY_NOT_CLEARED);
+  }, 60_000);
+
+  it('takes no account and sends no key when interrupted before it begins — #1270', async () => {
+    const service = await hostedService([]);
+    const url = await instance([], true, service.fetch);
+    const lines: string[] = [];
+    const stop = new AbortController();
+    stop.abort();
+    const sent = vi.spyOn(globalThis, 'fetch');
+    try {
+      await expect(
+        measure(
+          options(url, 'sealed', {
+            hosted: HOSTED,
+            signal: stop.signal,
+            log: (line) => lines.push(line),
+          }),
+        ),
+      ).rejects.toThrow(INTERRUPTED);
+      // Nor afterwards: nothing it began carries on once it has answered.
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      expect(sent).not.toHaveBeenCalled();
+    } finally {
+      vi.restoreAllMocks();
+    }
+    expect(lines).toEqual([]);
+    expect(service.authorizations).toEqual([]);
+  }, 60_000);
+
+  it('follows no redirect while a hosted key is in play: of the key, nor of the key it is sealed to — #1270', async () => {
+    const service = await hostedService([]);
+    const target = await instance([], true, service.fetch);
+    const elsewhere = await catching();
+    const redirects: readonly ((path: string, sealed: number) => boolean)[] = [
+      (path) => path === '/v1/instance/keys',
+      // The second sealed request is the one that carries the key.
+      (_, sealed) => sealed === 2,
+    ];
+    for (const redirected of redirects) {
+      const url = await interposed(target, (path, sealed) =>
+        redirected(path, sealed) ? { redirect: `${elsewhere.url}${path}` } : 'pass',
+      );
+      const failure: unknown = await measure(options(url, 'sealed', { hosted: HOSTED })).catch(
+        (error: unknown) => error,
+      );
+      expect(failure).toBeInstanceOf(Error);
+      expect(JSON.stringify(failure)).not.toContain(MARKER);
+      proxy?.closeAllConnections();
+      proxy?.close();
+    }
+    expect(elsewhere.requests).toEqual([]);
+    expect(service.authorizations).toEqual([]);
   }, 60_000);
 
   it('stops on a set-up the instance refuses, naming the step, the code and the field — and clears what it may have left', async () => {
@@ -542,6 +718,15 @@ describe('the round-trip measurement of a hosted model, on a key of the measurer
         'http://127.0.0.1.example.org',
         'http://localhost.example.org',
         'http://128.0.0.1',
+        // A loopback name as userinfo, before the host really reached (#1270).
+        'http://127.0.0.1@evil.example',
+        'http://localhost:8787@evil.example',
+        'http://[::1]@evil.example',
+        'http://evil.example\\@127.0.0.1',
+        // Numeric forms of an address that is not loopback.
+        'http://0x80.0.0.1',
+        'http://2147483649',
+        'http://0200.0.0.1',
       ]) {
         await expect(measure(options(url, 'sealed', { hosted: HOSTED }))).rejects.toThrow(
           'an https: or a loopback --url only',
@@ -568,12 +753,22 @@ describe('the round-trip measurement of a hosted model, on a key of the measurer
         'http://127.0.0.1:9',
         'http://127.8.9.10:9',
         'http://[::1]:9',
+        // Numeric forms of loopback, and loopback behind userinfo (#1270).
+        'http://2130706433:9',
+        'http://0x7f.0.0.1:9',
+        'http://0177.0.0.1:9',
+        'http://127.1:9',
+        'http://evil.example@127.0.0.1:9',
       ]) {
         await expect(measure(options(url, 'sealed', { hosted: HOSTED }))).rejects.toThrow(
           'nothing listens here',
         );
       }
-      expect(reached).toHaveLength(5);
+      expect(reached).toHaveLength(10);
+      // Each went to the loopback address, and never to a name before an `@`.
+      expect(reached.slice(5).map((each) => new URL(each).host)).toEqual(
+        Array.from({ length: 5 }, () => '127.0.0.1:9'),
+      );
     } finally {
       vi.restoreAllMocks();
     }
@@ -604,6 +799,28 @@ describe('the round-trip measurement of a hosted model, on a key of the measurer
           }),
         ),
       ).rejects.toThrow('nothing to unload');
+      expect(sent).not.toHaveBeenCalled();
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('refuses a --url or --hosted-url that is not a URL by the option’s name, never with the value — #1270', async () => {
+    const sent = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(() => Promise.reject(new Error('a request was sent')));
+    try {
+      const local: unknown = await measure(options(MARKER_KEY, 'sealed')).catch(
+        (error: unknown) => error,
+      );
+      expect((local as Error).message).toBe('--url is not a URL');
+      const hosted: unknown = await measure(
+        options('http://127.0.0.1:9', 'sealed', { hosted: { ...HOSTED, url: MARKER_KEY } }),
+      ).catch((error: unknown) => error);
+      expect((hosted as Error).message).toBe('--hosted-url is not a URL');
+      // Nothing of the value rides along on the error, as `URL`'s own `input` does.
+      expect(JSON.stringify(local)).not.toContain(MARKER);
+      expect(JSON.stringify(hosted)).not.toContain(MARKER);
       expect(sent).not.toHaveBeenCalled();
     } finally {
       vi.restoreAllMocks();
@@ -673,40 +890,18 @@ describe('the hosted options of the command — #1235', () => {
 
 describe('the command, run hosted against an instance — #1235', () => {
   /**
-   * A loopback proxy in front of the instance, so a test can take the
-   * instance away from the command at a chosen request. Sealed requests are
-   * counted as they arrive; from `cutFrom` on (counted from one) each has its
-   * socket destroyed, unanswered.
+   * {@link interposed}, taking the instance away from the command at a chosen
+   * request: from the `cutFrom`th sealed request on, each has its socket
+   * destroyed, unanswered.
    */
-  async function proxied(target: string, cutFrom: number): Promise<string> {
-    let sealed = 0;
-    const server = createServer((incoming, outgoing) => {
-      if (incoming.url === '/v1/sealed') {
-        sealed += 1;
-        if (sealed >= cutFrom) {
-          incoming.socket.destroy();
-          return;
-        }
-      }
-      const upstream = httpRequest(
-        `${target}${incoming.url ?? ''}`,
-        { method: incoming.method, headers: incoming.headers },
-        (answer) => {
-          outgoing.writeHead(answer.statusCode ?? 502, answer.headers);
-          answer.pipe(outgoing);
-        },
-      );
-      upstream.on('error', () => outgoing.destroy());
-      incoming.pipe(upstream);
-    });
-    proxy = server;
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-    return `http://127.0.0.1:${String((server.address() as AddressInfo).port)}`;
+  function proxied(target: string, cutFrom: number): Promise<string> {
+    return interposed(target, (_, sealed) => (sealed >= cutFrom ? 'cut' : 'pass'));
   }
 
   /** The command, without blocking this process: the instance it talks to runs here. */
   function hostedCommand(
     url: string,
+    started?: (child: ChildProcess) => void,
   ): Promise<{ status: number | null; out: string; err: string }> {
     return new Promise((resolve, reject) => {
       const child = spawn(
@@ -718,6 +913,7 @@ describe('the command, run hosted against an instance — #1235', () => {
         ],
         { env: { ...process.env, [HOSTED_KEY_VARIABLE]: MARKER_KEY } },
       );
+      started?.(child);
       let out = '';
       let err = '';
       child.stdout.on('data', (chunk: Buffer) => (out += chunk.toString('utf8')));
@@ -726,14 +922,6 @@ describe('the command, run hosted against an instance — #1235', () => {
       child.on('close', (status) => resolve({ status, out, err }));
     });
   }
-
-  /**
-   * The sealed requests of a one-run hosted measurement, in order: the
-   * session, the key, the consent and the masking item (4), then a start, a
-   * stream and a read for the warm-up and again for the counted run (6). The
-   * eleventh is the clean-up's first.
-   */
-  const FIRST_OF_THE_CLEAN_UP = 11;
 
   it('prints a report and progress lines with no key in them, and exits 0 with every account cleared', async () => {
     const service = await hostedService([TEXT, TEXT]);
@@ -765,6 +953,51 @@ describe('the command, run hosted against an instance — #1235', () => {
     expect(ran.err.trimEnd().split('\n').at(-1)).toBe(KEY_NOT_CLEARED);
     expect(ran.status).toBe(3);
     expect(`${ran.out}${ran.err}`).not.toContain(MARKER);
+  }, 60_000);
+
+  it('clears every account on Ctrl-C and exits 130, without waiting for the run in flight — #1270', async () => {
+    const service = await hostedService([{ kind: 'slow', milliseconds: 30_000, then: TEXT }]);
+    const url = await proxied(await instance([], true, service.fetch), Number.POSITIVE_INFINITY);
+    const ran = await hostedCommand(url, (child) => {
+      // Interrupted once the hosted service has the warm-up's request.
+      const waiting = setInterval(() => {
+        if (service.authorizations.length === 0) return;
+        clearInterval(waiting);
+        child.kill('SIGINT');
+      }, 50);
+      child.on('close', () => clearInterval(waiting));
+    });
+    expect(ran.err.trimEnd().split('\n').slice(-2)).toEqual([
+      'account 1: the hosted key and consent are cleared',
+      INTERRUPTED,
+    ]);
+    expect(ran.status).toBe(130);
+    expect(ran.out).toBe('');
+    expect(`${ran.out}${ran.err}`).not.toContain(MARKER);
+  }, 60_000);
+
+  it('refuses a --url or --hosted-url that is not a URL, by name and without the value — #1270', () => {
+    const pasted = 'sk-PASTEDVALUE5R8W';
+    for (const [option, given] of [
+      ['--url', ['--url', pasted]],
+      [
+        '--hosted-url',
+        ['--url', 'http://127.0.0.1:9', '--hosted-url', pasted, '--hosted-model', 'hosted-model'],
+      ],
+    ] as const) {
+      const ran = spawnSync(
+        process.execPath,
+        [join(dirname(fileURLToPath(import.meta.url)), 'replan-round-trip.ts'), ...given],
+        {
+          encoding: 'utf8',
+          env: { ...process.env, [HOSTED_KEY_VARIABLE]: MARKER_KEY },
+          timeout: 30_000,
+        },
+      );
+      expect(ran.status).not.toBe(0);
+      expect(ran.stderr).toContain(`${option} is not a URL`);
+      expect(`${ran.stdout}${ran.stderr}`).not.toContain('PASTEDVALUE');
+    }
   }, 60_000);
 });
 
@@ -833,6 +1066,22 @@ describe('the options the command does not have — #1235', () => {
     const glued = refusedArguments([`--hosted-key=${MARKER_KEY}`], KNOWN);
     expect(glued).toMatch(/^--hosted-key is not an option/);
     expect(glued).not.toContain(MARKER);
+  });
+
+  it('never echoes more of a name than an option could be — #1270', () => {
+    // A key glued on with a hyphen is named as the option it follows, and no more.
+    const hyphened = refusedArguments([`--hosted-key-${MARKER_KEY}`], KNOWN);
+    expect(hyphened).toMatch(/^--hosted-key is not an option: /);
+    expect(hyphened).not.toContain(MARKER);
+    // Any other name longer than every option's is not repeated at all.
+    expect(refusedArguments([`--${MARKER_KEY}`], KNOWN)).toBe(
+      'an option this command does not have was given (its name is too long to repeat)',
+    );
+    expect(refusedArguments(['--rnuss'], KNOWN)).toBe(
+      'an option this command does not have was given (its name is too long to repeat)',
+    );
+    // A name as long as the longest option's is still named.
+    expect(refusedArguments(['--rnus'], KNOWN)).toBe('--rnus is not an option of this command');
   });
 
   it('refuses a word that is no option’s value, without writing it', () => {
