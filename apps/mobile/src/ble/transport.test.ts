@@ -363,11 +363,16 @@ describe('the scripted plugin enforces the ordering the real one has (#230)', ()
     // outside the constraint the way `requestDevice` did until #230.
     const port = scriptedPort();
     const testOnly = new Set(['notify', 'dropLink']);
+    // #1436: the plugin answers these two before `initialize()` — they open a
+    // settings page and touch no Bluetooth — so they are deliberately NOT in
+    // the guarded table; `permission/settings.test.ts` holds that they work
+    // on a stack that never started.
+    const unguarded = ['openAppSettings', 'openBluetoothSettings'];
     const methods = Object.entries(port)
       .filter(([name, value]) => typeof value === 'function' && !testOnly.has(name))
       .map(([name]) => name)
       .sort();
-    expect(methods).toEqual(['initialize', ...guarded.map(([name]) => name)].sort());
+    expect(methods).toEqual(['initialize', ...unguarded, ...guarded.map(([name]) => name)].sort());
   });
 
   it('records the refused call, because the real plugin received it', async () => {

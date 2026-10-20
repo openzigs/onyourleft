@@ -36,11 +36,17 @@ import { Button } from '../design/Button';
 import { StatusMessage } from '../design/StatusMessage';
 import { VisuallyHidden } from '../design/VisuallyHidden';
 import type { ShellSupport } from './shell-support-port';
+import type { SettingsPage } from './system-settings-port';
 
 export interface ShellSupportNoticeProps {
   /** `undefined` while the read is in flight. */
   readonly support: ShellSupport | undefined;
   readonly onRecheck: () => void;
+  /**
+   * Open the settings page a notice names — #1436. Absent in a build with no
+   * way to open one, and the notice then keeps its written instruction alone.
+   */
+  readonly onOpenSettings?: ((page: SettingsPage) => void) | undefined;
 }
 
 /**
@@ -105,7 +111,11 @@ function RecheckButton({ onRecheck }: { readonly onRecheck: () => void }): JSX.E
  * the end — an attribute on a freshly mounted node is the false pass this
  * paragraph is about, and only the identity assertion can tell the two apart.
  */
-export function ShellSupportNotice({ support, onRecheck }: ShellSupportNoticeProps): JSX.Element {
+export function ShellSupportNotice({
+  support,
+  onRecheck,
+  onOpenSettings,
+}: ShellSupportNoticeProps): JSX.Element {
   if (support === undefined) {
     return (
       <StatusMessage tone="info" label="Checking" live>
@@ -125,7 +135,7 @@ export function ShellSupportNotice({ support, onRecheck }: ShellSupportNoticePro
     );
   }
 
-  const { title, explanation, instruction, recoverable } = support.notice;
+  const { title, explanation, instruction, recoverable, settings } = support.notice;
   return (
     <>
       {/* `danger` only where nothing can be done. A radio that is switched off
@@ -150,6 +160,19 @@ export function ShellSupportNotice({ support, onRecheck }: ShellSupportNoticePro
         {explanation}
       </StatusMessage>
       {instruction === null ? null : <p>{instruction}</p>}
+      {/* #1436: after a permanent denial Android shows no dialog again, so the
+          page in Settings is the only way back — a button to it, beside the
+          instruction that says what to do there. */}
+      {settings === undefined || settings === null || onOpenSettings === undefined ? null : (
+        <Button
+          variant="secondary"
+          onClick={() => {
+            onOpenSettings(settings.page);
+          }}
+        >
+          {settings.label}
+        </Button>
+      )}
       {recoverable ? <RecheckButton onRecheck={onRecheck} /> : null}
     </>
   );

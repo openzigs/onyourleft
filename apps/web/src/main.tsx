@@ -114,6 +114,9 @@ import { sidePairingPort } from './camera/side-link';
 import { sideLinkAvailable } from './camera/side-link-transport';
 import type { ThermalPort } from './game/thermal-port';
 import type { SignalStrengthPort } from './ride/signal-port';
+import { deviceBluetoothAsk } from './support/bluetooth-ask';
+import type { BluetoothAskPort } from './support/bluetooth-ask-port';
+import type { SystemSettingsPort } from './support/system-settings-port';
 import { THERMAL_FORECAST_SECONDS } from './game/thermal';
 import { platformStorage, requestPersistenceOnce } from './support/persistent-storage';
 import type { ShellSupportPort } from './support/shell-support-port';
@@ -272,6 +275,12 @@ interface ClientPlatform {
    * `undefined` in a browser: Web Bluetooth gives none for a connected device.
    */
   readonly signal: SignalStrengthPort | undefined;
+  /**
+   * #1436, inside the shell only: whether the rider has been told why Android
+   * asks for Bluetooth, and the way to Android's settings after a denial.
+   */
+  readonly bluetoothAsk: BluetoothAskPort | undefined;
+  readonly systemSettings: SystemSettingsPort | undefined;
 }
 
 /**
@@ -403,11 +412,30 @@ async function buildPlatform(
     const signal: SignalStrengthPort = {
       readSignal: async (id) => mobile.readCapacitorSignal(plugin, id),
     };
-    return { rideController, shell, thermal, signal };
+    // #1436. The same `plugin`: opening a settings page is the plugin's own
+    // Intent, and it needs no initialised stack.
+    const systemSettings: SystemSettingsPort = {
+      openSystemSettings: async (page) => mobile.openCapacitorSettings(plugin, page),
+    };
+    return {
+      rideController,
+      shell,
+      thermal,
+      signal,
+      bluetoothAsk: deviceBluetoothAsk(deviceStorage()),
+      systemSettings,
+    };
   }
 
   if (probe.bluetooth === undefined || !probe.secureContext) {
-    return { rideController: undefined, shell: undefined, thermal: undefined, signal: undefined };
+    return {
+      rideController: undefined,
+      shell: undefined,
+      thermal: undefined,
+      signal: undefined,
+      bluetoothAsk: undefined,
+      systemSettings: undefined,
+    };
   }
   const browserTransport = createWebBluetoothTransport({
     profiles: rideProfiles(),
@@ -425,6 +453,8 @@ async function buildPlatform(
     shell: undefined,
     thermal: undefined,
     signal: undefined,
+    bluetoothAsk: undefined,
+    systemSettings: undefined,
   };
 }
 
@@ -1506,6 +1536,10 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           {...(storage === undefined ? {} : { storage })}
           {...(platform.shell === undefined ? {} : { shell: platform.shell })}
           {...(platform.signal === undefined ? {} : { signal: platform.signal })}
+          {...(platform.bluetoothAsk === undefined ? {} : { bluetoothAsk: platform.bluetoothAsk })}
+          {...(platform.systemSettings === undefined
+            ? {}
+            : { systemSettings: platform.systemSettings })}
           nativeShell={isNativeShell(platformCapacitor())}
           {...(camera === undefined ? {} : { camera })}
           {...(sidePairing === undefined ? {} : { sidePairing })}
