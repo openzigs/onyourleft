@@ -424,7 +424,7 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
           {props.standingNotice === undefined ? null : (
             <button
               type="button"
-              className="oyl-hud__control"
+              className="oyl-hud__control oyl-hud__notice-toggle"
               aria-expanded={props.standingNotice.expanded}
               aria-controls={STANDING_NOTICE_ID}
               onClick={props.standingNotice.onToggle}

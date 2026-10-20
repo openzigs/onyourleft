@@ -6586,7 +6586,10 @@ select.oyl-input {
    never gives way: a lock that vanished while on would leave a rider no
    tap that releases it. */
 @media (min-width: 46rem) and (min-height: 22.5rem) and (max-height: 30rem) {
-  .oyl-game--riding .oyl-hud__actions:has(> .oyl-hud__replan) .oyl-hud__controls > [aria-controls] {
+  .oyl-game--riding
+    .oyl-hud__actions:has(> .oyl-hud__replan)
+    .oyl-hud__controls
+    > .oyl-hud__notice-toggle {
     display: none;
   }
 }
@@ -8264,12 +8267,14 @@ select.oyl-input {
       justify-content: center;
     }
 
-    .oyl-game--riding .oyl-hud:has(.oyl-hud__controls > :nth-child(3)) .oyl-hud__controls {
+    .oyl-game--riding
+      .oyl-hud:has(.oyl-hud__controls > .oyl-hud__notice-toggle)
+      .oyl-hud__controls {
       padding-inline-end: 0;
     }
 
     .oyl-game--riding
-      .oyl-hud:has(.oyl-hud__controls > :nth-child(3))
+      .oyl-hud:has(.oyl-hud__controls > .oyl-hud__notice-toggle)
       .oyl-hud__fields--secondary
       > .oyl-hud__field--moving {
       position-anchor: --oyl-hud-actions;
@@ -8355,19 +8360,21 @@ select.oyl-input {
       width: var(--oyl-hud-moving-width);
     }
 
-    .oyl-game--riding .oyl-hud:has(.oyl-hud__controls > :nth-child(3)) .oyl-hud__controls {
+    .oyl-game--riding
+      .oyl-hud:has(.oyl-hud__controls > .oyl-hud__notice-toggle)
+      .oyl-hud__controls {
       padding-inline-end: 0;
     }
 
     .oyl-game--riding
-      .oyl-hud:has(.oyl-hud__controls > :nth-child(3))
+      .oyl-hud:has(.oyl-hud__controls > .oyl-hud__notice-toggle)
       .oyl-hud__actions
       > .oyl-hud__trainer {
       margin-inline-end: 0;
     }
 
     .oyl-game--riding
-      .oyl-hud:has(.oyl-hud__controls > :nth-child(3))
+      .oyl-hud:has(.oyl-hud__controls > .oyl-hud__notice-toggle)
       .oyl-hud__fields--secondary
       > .oyl-hud__field--moving {
       grid-area: 4 / 1 / 5 / 2;

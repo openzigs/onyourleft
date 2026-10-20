@@ -14,6 +14,10 @@
  * `ride-workout.browser.spec.ts` §"#1244"); jsdom lays nothing out.
  */
 
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -163,6 +167,43 @@ describe('the touch lock on the HUD — #1482', () => {
     expect(pressed.end).toBe(1);
     expect(button('End ride').hasAttribute(TOUCH_LOCK_EXEMPT)).toBe(true);
     expect(button('Pause').hasAttribute(TOUCH_LOCK_EXEMPT)).toBe(false);
+  });
+
+  it('names the Trainer notice toggle, and only it, so layout rules never key on position', async () => {
+    let toggled = 0;
+    await hud(none());
+    const controls = (): Element =>
+      mounted?.container.querySelector('.oyl-hud__controls') as Element;
+    expect(controls().querySelector('.oyl-hud__notice-toggle')).toBeNull();
+    // The lock is the third control with no notice standing (#1482).
+    expect(controls().children.length).toBe(3);
+
+    mounted?.unmount();
+    await hud(none(), {
+      standingNotice: {
+        content: <p>The road is not reaching your trainer</p>,
+        expanded: false,
+        onToggle: () => {
+          toggled += 1;
+        },
+      },
+    });
+    const named = controls().querySelectorAll('.oyl-hud__notice-toggle');
+    expect(named.length).toBe(1);
+    expect(named[0]?.textContent).toContain('Trainer notice');
+
+    tap(lock());
+    tap(named[0] as HTMLElement);
+    expect(toggled).toBe(0);
+  });
+
+  it('keeps theme.css from reading the lock as a standing notice by position (#1482)', () => {
+    const css = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), '../../design/theme.css'),
+      'utf8',
+    );
+    expect(css).not.toMatch(/oyl-hud__controls\s*>\s*:nth-child\(3\)/);
+    expect(css).not.toMatch(/oyl-hud__controls\s*>\s*\[aria-controls\]/);
   });
 
   it('lets a keyboard or screen reader press Pause while it is on', async () => {
