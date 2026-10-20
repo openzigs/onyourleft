@@ -338,6 +338,8 @@ describe('the scripted plugin enforces the ordering the real one has (#230)', ()
     // #370. It reads a table rather than the device, and it is guarded all the
     // same: the plugin's own `assertBluetoothAdapter` fronts every call.
     ['getServices', (port) => port.getServices('AA:BB')],
+    // #1435. A read of the phone's own radio, and the plugin guards it too.
+    ['readRssi', (port) => port.readRssi('AA:BB')],
     ['read', (port) => port.read('AA:BB', 'service', 'characteristic')],
     [
       'startNotifications',

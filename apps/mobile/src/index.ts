@@ -31,6 +31,7 @@ export { createCapacitorFitnessMachineChannel } from './ble/fitness-machine-chan
 export { readCapacitorFitnessMachine } from './ble/fitness-machine';
 export type { CapacitorFitnessMachine } from './ble/fitness-machine';
 export { readCapacitorResolvedUuids } from './ble/resolved-uuids';
+export { readCapacitorSignal } from './ble/signal';
 export type {
   CapacitorBlePort,
   PluginDevice,

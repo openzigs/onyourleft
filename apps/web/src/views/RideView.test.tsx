@@ -612,7 +612,7 @@ describe('pairing is on Devices; this screen says what is connected (#659)', () 
     const rows = queryAll(document, '.oyl-ride__group--sensors li').map((row) => row.textContent);
     expect(rows).toEqual([
       'KICKR 1F2A: Connected',
-      'HRM 04B1: Disconnected — forget it and pair it again to reconnect',
+      'HRM 04B1: Link lost — wake it or bring it closer, then forget it and pair it again',
     ]);
   });
 

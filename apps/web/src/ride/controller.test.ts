@@ -155,6 +155,13 @@ import {
 import { METRIC_STALE_AFTER_SECONDS } from './metrics';
 import { targetSentence } from './TrainerPanel';
 import {
+  linkNotMade,
+  NOT_FOUND,
+  NOT_PERMITTED,
+  ONE_CONTROLLER_AT_A_TIME,
+  POWER_BUT_NO_CONTROL,
+} from './pairing-words';
+import {
   int16,
   requestFromOctets,
   responseToOctets,
@@ -343,6 +350,12 @@ interface BenchOptions {
   readonly holdControlAnswer?: boolean;
   /** Refuse the FIRST `0x00` Request Control at the ATT layer — #721. */
   readonly refuseRequestControlOnce?: boolean;
+  /**
+   * Answer every Request Control `0x05` Control Not Permitted, as a trainer
+   * another app holds does — #1435. The simulator always grants, so the
+   * answer is made here, as octets, through the real control client.
+   */
+  readonly controlHeldByAnotherApp?: boolean;
 }
 
 function benchWith(options: BenchOptions = {}): Bench {
@@ -371,6 +384,7 @@ function benchWith(options: BenchOptions = {}): Bench {
   const heldTargetAnswers: Array<() => void> = [];
   const heldControlAnswers: Array<() => void> = [];
   let requestControlRefused = false;
+  const indicationListeners: Array<(value: DataView) => void> = [];
 
   let heldOpenTrainer: (() => void) | undefined;
   let openTrainerHeld = options.holdOpenTrainer === true;
@@ -414,8 +428,9 @@ function benchWith(options: BenchOptions = {}): Bench {
             controlPoint.enableIndications();
             return Promise.resolve();
           },
-          onControlPointIndication: (listener) =>
-            controlPoint.onResponse((response) => {
+          onControlPointIndication: (listener) => {
+            indicationListeners.push(listener);
+            return controlPoint.onResponse((response) => {
               const octets = responseToOctets(response);
               if (options.holdStopAnswer === true && octets.getUint8(1) === STOP_OR_PAUSE) {
                 heldStopAnswers.push(() => {
@@ -436,7 +451,8 @@ function benchWith(options: BenchOptions = {}): Bench {
                 return;
               }
               listener(octets);
-            }),
+            });
+          },
           onStatus: (listener) => {
             statusListeners.push(listener);
             return controlPoint.onStatus((status) => listener(statusToOctets(status)));
@@ -453,6 +469,13 @@ function benchWith(options: BenchOptions = {}): Bench {
             ) {
               requestControlRefused = true;
               return Promise.reject(new Error('control not permitted'));
+            }
+            if (options.controlHeldByAnotherApp === true && value[0] === 0x00) {
+              // Response Code, the op code answered, Control Not Permitted.
+              for (const listener of [...indicationListeners]) {
+                listener(viewOf([0x80, 0x00, 0x05]));
+              }
+              return Promise.resolve();
             }
             if (
               options.refuseTargetsBelow !== undefined &&
@@ -12520,5 +12543,105 @@ describe('#1319 — a workout’s blocks are the recording’s, and are saved wi
       ['cut-short', steady(60, 1.0)],
     ]);
     next.controller.dispose();
+  });
+});
+
+// --- #1435: pairing and control failures a rider can act on ---------------
+
+describe('#1435 — a failed pairing says which state it is and what to do', () => {
+  function over(transport: SensorTransport): RideController {
+    return createRideController({
+      transport,
+      store: harnessStore(),
+      athleteId: ATHLETE_A,
+      newSessionId: () => recordingSessionId('pairing-words'),
+      now: () => unixSeconds(1),
+    });
+  }
+
+  it('says "not found", with the one-controller cause, for a chooser closed empty in a browser', async () => {
+    const fake = createFakeBluetooth({
+      devices: [
+        {
+          id: 'strap',
+          name: 'HRM 04B1',
+          services: [{ uuid: HEART_RATE_SERVICE, characteristics: [HEART_RATE_MEASUREMENT] }],
+        },
+      ],
+      chooser: { kind: 'cancel' },
+    });
+    const controller = over(
+      createWebBluetoothTransport({
+        profiles: [heartRateProfile],
+        bluetooth: fake.bluetooth,
+        hasUserActivation: () => true,
+      }),
+    );
+
+    await controller.pair('heart-rate');
+
+    expect(controller.getSnapshot().pairingError).toBe(NOT_FOUND);
+    expect(controller.getSnapshot().pairingError).toContain(ONE_CONTROLLER_AT_A_TIME);
+    controller.dispose();
+  });
+
+  it('says a found device whose link did not come up may be held elsewhere — inside the shell', async () => {
+    const plugin = scriptedPort({
+      chooses: { deviceId: 'AA:BB:CC:DD:EE:01', name: 'HRM 04B1' },
+      connectRejectsWith: new Error('Connection timeout.'),
+    });
+    const controller = over(
+      createCapacitorTransport({ plugin, profiles: [heartRateProfile], now: () => unixSeconds(1) }),
+    );
+
+    await controller.pair('heart-rate');
+
+    // `adapter-unavailable` from the Android connect, read as the LINK: the
+    // radio found the device a moment before.
+    expect(controller.getSnapshot().pairingError).toBe(linkNotMade('HRM 04B1'));
+    expect(controller.getSnapshot().pairingError).not.toContain('Connection timeout');
+    expect(controller.getSnapshot().sensors).toEqual([]);
+    controller.dispose();
+  });
+
+  it('says Bluetooth is not allowed, never that nothing was found, when permission is refused', async () => {
+    const { transport } = createSimulator({
+      devices: [hrsStrap({ id: 'strap' })],
+      availability: { kind: 'not-permitted' },
+    });
+    const controller = over(transport);
+
+    await controller.pair('heart-rate');
+
+    expect(controller.getSnapshot().pairingError).toBe(NOT_PERMITTED);
+    controller.dispose();
+  });
+});
+
+describe('#1435 — a trainer that sends power and will not hand over control', () => {
+  it('says another app probably has it, from the trainer’s own 0x05, and shows control lost', async () => {
+    const rig = benchWith({ controlHeldByAnotherApp: true });
+    await rig.controller.pair('trainer');
+
+    await rig.controller.requestTrainerControl();
+
+    const trainer = rig.controller.getSnapshot().trainer;
+    expect(trainer.refusal).toBe(POWER_BUT_NO_CONTROL);
+    expect(trainer.hasControl).toBe(false);
+    expect(trainer.lost).toBe('permission-lost');
+    // Still paired, still connected: the power keeps coming.
+    expect(rig.controller.getSnapshot().sensors.map((sensor) => sensor.state)).toEqual([
+      'connected',
+    ]);
+    rig.controller.dispose();
+  });
+
+  it('sends the trainer nothing to find out — pairing alone writes no control point byte', async () => {
+    const rig = benchWith({ controlHeldByAnotherApp: true });
+    await rig.controller.pair('trainer');
+
+    expect(rig.written).toEqual([]);
+    expect(rig.controller.getSnapshot().trainer.refusal).toBeUndefined();
+    rig.controller.dispose();
   });
 });
