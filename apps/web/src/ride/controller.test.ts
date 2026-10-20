@@ -1501,6 +1501,22 @@ describe('criterion 2 — losing control is said out loud', () => {
     rig.controller.dispose();
   });
 
+  it('starts a freshly paired trainer with no loss left over from the last one (#1435)', async () => {
+    const rig = benchWith();
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    rig.bench.device(TRAINER).script({ kind: 'control-permission-lost' });
+    rig.bench.advance(seconds(1));
+    expect(rig.controller.getSnapshot().trainer.lost).toBe('permission-lost');
+
+    const id = rig.controller.getSnapshot().sensors[0]!.id;
+    await rig.controller.unpair(id);
+    await rig.controller.pair('trainer');
+
+    expect(rig.controller.getSnapshot().trainer.lost).toBeUndefined();
+    rig.controller.dispose();
+  });
+
   it('marks the target unknown rather than confirmed when the link drops', async () => {
     const rig = benchWith();
     await rig.controller.pair('trainer');

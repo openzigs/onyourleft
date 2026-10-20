@@ -2597,6 +2597,9 @@ export function createRideController(options: RideControllerOptions): RideContro
       const connection = attachment.connection;
       if (connection !== undefined) {
         entry.trainer = connection;
+        // A loss belongs to the connection it was reported on; a trainer paired
+        // afresh starts with none (#1435).
+        controlLost = undefined;
         entry.release.push(
           connection.control.onControlLost((reason) => {
             controlLost = reason;
@@ -3386,7 +3389,7 @@ export function createRideController(options: RideControllerOptions): RideContro
           capabilities: [...PAIRING_ROLE_CAPABILITIES[role]],
         });
         step = 'linking';
-        chosen = device.name ?? chosen;
+        chosen = device.name || chosen;
         const id = device.identity.id;
         // ⚠️ #712: REFUSED, not waited for. `unpair` takes the row away
         // before `transport.forget` has finished (#659's order), so the check

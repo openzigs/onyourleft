@@ -90,6 +90,11 @@ export function useSignalStrengths(
       busy = true;
       const next = new Map<DeviceId, number>();
       for (const id of ids) {
+        // Closed while a read was out: ask for nothing more, so a stuck radio
+        // is not queued ahead of a control-point write.
+        if (!live) {
+          break;
+        }
         const dbm = await port.readSignal(id);
         if (dbm !== undefined) {
           next.set(id, dbm);

@@ -429,6 +429,56 @@ describe('#1435 — signal strength is read only while nothing drives a trainer'
     expect(readSignal).not.toHaveBeenCalled();
   });
 
+  it('stops asking the remaining devices once the screen is closed mid-round', async () => {
+    const { port } = shellPort({ kind: 'available' });
+    let release: (dbm: number) => void = () => undefined;
+    const readSignal = vi.fn<SignalStrengthPort['readSignal']>(
+      async () => new Promise<number>((resolve) => (release = resolve)),
+    );
+    const second = {
+      ...TRAINER,
+      id: deviceId('strap'),
+      name: 'Strap',
+      role: 'heart-rate',
+    } as const;
+    const stub = stubRideController({ ...idleSnapshot(), sensors: [TRAINER, second] });
+    mounted = await mount(
+      <DevicesView
+        capabilities={WEBVIEW}
+        shell={port}
+        controller={stub.controller}
+        signal={{ readSignal }}
+      />,
+    );
+    await settle();
+    expect(readSignal).toHaveBeenCalledTimes(1);
+
+    mounted.unmount();
+    mounted = undefined;
+    release(-60);
+    await settle();
+    await settle();
+
+    expect(readSignal).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not say another app has control while this app holds it', async () => {
+    const idle = idleSnapshot();
+    await openWith({
+      ...idle,
+      sensors: [TRAINER],
+      trainer: {
+        ...idle.trainer,
+        paired: true,
+        controllable: true,
+        hasControl: true,
+        lost: 'permission-lost',
+      },
+    });
+
+    expect(document.body.textContent).not.toContain('another app');
+  });
+
   it('asks nothing about a device that is not connected', async () => {
     const readSignal = await openWith({
       ...idleSnapshot(),

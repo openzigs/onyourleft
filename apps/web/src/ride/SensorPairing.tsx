@@ -238,7 +238,9 @@ export function PairingPanel({
             controller={controller}
             signals={signals}
             controlHeldElsewhere={
-              step.role === 'trainer' && snapshot.trainer.lost === 'permission-lost'
+              step.role === 'trainer' &&
+              snapshot.trainer.lost === 'permission-lost' &&
+              !snapshot.trainer.hasControl
             }
           />
         ))}
@@ -295,7 +297,7 @@ function PairingRow({
                 <p className="oyl-pairing__state">
                   {sensor.name}: {connectionWords(sensor.state)}
                 </p>
-                {signalLine(signals.get(sensor.id))}
+                {sensor.state === 'connected' ? signalLine(signals.get(sensor.id)) : null}
                 {controlHeldElsewhere && sensor.state === 'connected' ? (
                   <p className="tw:m-0">{POWER_BUT_ANOTHER_APP_HAS_CONTROL}</p>
                 ) : null}
