@@ -54,6 +54,7 @@
  * | `lastSentenceDroppedReportStoreFactory` | *wrong layer* — a layer above dropped the last sentence of the side camera's report on its way in | the report comes back for the right ride, with the right summary and a plausible list — **one observation short**, and nothing on the page says so |
  * | `verdictlessReferenceStoreFactory` | *wrong layer* — a layer above copied the reference's numbers and dropped whether the framing check passed | every landmark comes back exact, and the session's verdict is **gone**, so no later report may compare it with anything |
  * | `piecewiseRideStoreFactory` | *wrong time* — a finished ride written as three writes rather than one transaction (#1326) | a lap that fails leaves the activity and its samples in the library, and the checkpoint still reads as unsaved |
+ * | `replanlessCheckpointStoreFactory` | *wrong layer* — a layer above copied a checkpoint's header and dropped its re-plan record (#1328) | the recording is listed, recovers and saves with every sample — **and no record of the moves ridden in it** |
  *
  * The second and third are the ones a naive harness misses. Both write to the
  * **real** IndexedDB, inside a **real** transaction that **really commits**, and
@@ -1360,6 +1361,39 @@ export function piecewiseRideStoreFactory(): StoreFactory {
             }
           }
           return ride.activity.id;
+        },
+      };
+    },
+    destroy: async (name) => {
+      await deleteActivityStore(name);
+    },
+  };
+}
+
+/**
+ * A repository whose checkpoint write **drops the header's re-plan record**.
+ *
+ * The fake for #1328's field: the header is rewritten on every flush, and a
+ * layer that copies it field by field and forgets the newest one loses
+ * nothing anything else checks. The recording is listed, recovers whole and
+ * saves; only a round trip that reads the recovered recording's `replans`
+ * notices that the moves ridden in it are gone.
+ * `activity-store.recording-replans.test.ts` is the red/green pair.
+ */
+export function replanlessCheckpointStoreFactory(): StoreFactory {
+  return {
+    open(name: string): PersistentStore {
+      const real = openActivityStore(name);
+      return {
+        ...bindStore(real),
+        putRecordingSession: async (record) => {
+          // Copied field by field, as a layer that predates the field would.
+          const copy: NewRecordingSession = {
+            ...record,
+            replans: undefined,
+            replansDropped: undefined,
+          };
+          return real.putRecordingSession(copy);
         },
       };
     },

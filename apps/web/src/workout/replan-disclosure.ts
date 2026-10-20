@@ -31,9 +31,10 @@
  * - **The device sends no effort check-in**: the instance has a key for one
  *   (`BLOCK_SUMMARY_KEYS` §`effort`) and the device does not write it, so the
  *   text does not claim it. `replan-disclosure.test.ts` §`NOT_SENT` names it.
- * - **The record of each decision (P9) stays on the device**, with the ride
- *   and in the export. It is not synced
- *   ([#1315](https://github.com/openzigs/onyourleft/issues/1315)).
+ * - **The record of each decision (P9) is kept with the ride**, in the
+ *   export, and synced with the ride
+ *   ([#1315](https://github.com/openzigs/onyourleft/issues/1315), ADR 0048
+ *   D-10) — that sentence is for the owner's approval.
  * - **A long workout's request holds only the most recent summaries that
  *   fit** the instance's 8 KB input budget, and the text says so.
  *
@@ -150,8 +151,8 @@ const WHO_DECIDES =
 
 const WHAT_IS_KEPT =
   'Your instance keeps each request and its answer for 7 days. This device keeps each change it ' +
-  'accepted or refused with the ride, and puts them in your account export. They are not sent ' +
-  'to your instance when you sync.';
+  'accepted or refused with the ride, and puts them in your account export. When you sync, ' +
+  'they go with the ride to your instance, sealed, and to your other devices that sync with it.';
 
 const NOT_NEEDED =
   'You do not need this. The workout and a heart-rate hold work without it, and without an ' +

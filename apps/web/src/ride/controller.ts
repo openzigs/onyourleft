@@ -494,7 +494,11 @@ export interface WorkoutChoices {
   readonly replans?: boolean | undefined;
 }
 
-/** The most re-plan decisions one ride keeps (P9): one move in three minutes makes far fewer. */
+/**
+ * The most re-plan decisions one ride keeps (P9): one move in three minutes
+ * makes far fewer. The store's `RECORDING_REPLAN_RECORDS_LIMIT` is the same
+ * number, so a checkpoint keeps all of them (#1328; a test holds the two equal).
+ */
 export const RIDE_REPLAN_RECORDS_LIMIT = 200;
 
 /** Everything the view renders, and nothing it has to derive. */
@@ -2755,6 +2759,8 @@ export function createRideController(options: RideControllerOptions): RideContro
       laps: { ridden: current.courseLaps, newLapId: port.newLapId },
       // #1244, P9: every re-plan decision made on this ride. None is no key.
       ...(replans.length === 0 ? {} : { replans }),
+      // #1328: and how many its checkpoint lost, for a ride recovered from one.
+      ...(current.replansDropped === undefined ? {} : { replansDropped: current.replansDropped }),
       // #785: the races this ride was ridden in, as each room said it — the
       // recorder's own, so a ride recovered after a crash keeps them by the
       // one path, as it keeps its laps (#1360's review, B2).
@@ -2929,7 +2935,8 @@ export function createRideController(options: RideControllerOptions): RideContro
     }
     const outcome = await saveFinishedRide(
       port.store,
-      finishedRideOf(port, found, undefined, undefined, undefined, []),
+      // #1328: with the re-plan record its checkpoint carried.
+      finishedRideOf(port, found, undefined, undefined, undefined, found.replans),
     );
     if (outcome.status === 'empty') {
       return 'nothing';
@@ -3006,6 +3013,27 @@ export function createRideController(options: RideControllerOptions): RideContro
       ...recorder.workoutBlocks.slice(0, current.blocksAfter),
       ...log.blocks,
     ]);
+  };
+
+  /**
+   * Hand the recording every re-plan decision made on it so far — #1328: the
+   * earlier workouts', then this one's — so a ride recovered after a crash is
+   * saved with them. Only when they have changed, and with no recording,
+   * nothing: the next call after one starts hands them over.
+   */
+  const noteReplans = (): void => {
+    if (recorder === undefined) {
+      return;
+    }
+    const live = workout?.replan?.records() ?? [];
+    const all =
+      live.length === 0
+        ? replanRecords
+        : [...replanRecords, ...live].slice(-RIDE_REPLAN_RECORDS_LIMIT);
+    const held = recorder.replans;
+    if (all.length !== held.length || all.at(-1) !== held.at(-1) || all[0] !== held[0]) {
+      recorder.noteReplans(all);
+    }
   };
 
   /** Whether a heart-rate strap is paired — in any state: a quiet strap is silence, not "none". */
@@ -3358,6 +3386,7 @@ export function createRideController(options: RideControllerOptions): RideContro
       );
     }
     workout = undefined;
+    noteReplans();
   };
 
   const controller: RideController = {
@@ -3912,6 +3941,9 @@ export function createRideController(options: RideControllerOptions): RideContro
         return false;
       }
       recorder = found;
+      // #1328: the re-plan decisions made before the crash are this ride's
+      // still, so they are saved with it and the next ones follow them.
+      replanRecords = found.replans;
       // #1312: the laps ridden before the crash are this recording's still, so
       // the next one is numbered after them and compared with them. No lap is
       // open: the game ride that was riding one went with the tab.
@@ -3963,7 +3995,9 @@ export function createRideController(options: RideControllerOptions): RideContro
         await refreshRecoverable();
         return 'failed';
       }
-      await saveTheRide(found, undefined, undefined);
+      // #1328: the re-plan decisions its checkpoint carried, which are all
+      // this ride has — the controller that made them went with the tab.
+      await saveTheRide(found, undefined, undefined, undefined, found.replans);
       await refreshRecoverable();
       return saveState;
     },
@@ -4327,6 +4361,8 @@ export function createRideController(options: RideControllerOptions): RideContro
       // ride is when a job in flight is dropped and a waiting move is seen to
       // have been discarded (ADR 0048 D-8). It sends the trainer nothing.
       workout?.replan?.tick(rideSeconds(at));
+      // #1328: and what it decided, for the recorder's next header.
+      noteReplans();
       // #567: a hand-set target is judged whatever the ride is doing — a rider
       // can hold ERG without recording, and a paused ride is exactly when
       // somebody stops pedalling. No control check here: losing control, a

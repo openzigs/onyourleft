@@ -56,6 +56,7 @@ import {
 } from '@onyourleft/domain';
 import { webCryptoHpkePrimitives, webCryptoSha256, webCryptoVerifier } from '@onyourleft/store';
 
+import type { AccountChangeEntry } from './account-change-notices';
 import { ADDRESS_REFUSAL_TEXT, instanceAddress } from './address';
 import {
   createInstanceClock,
@@ -228,6 +229,29 @@ export type DevicesOutcome =
   | { readonly kind: 'listed'; readonly devices: readonly InstanceDevice[] }
   | { readonly kind: 'unavailable'; readonly text: string };
 
+/**
+ * This athlete's account-change log, as this device reads it (#1208, ADR 0047
+ * D-8): every entry, and the notices — the entries another key made since
+ * THIS device last acknowledged.
+ */
+export type AccountChangesOutcome =
+  | {
+      readonly kind: 'read';
+      readonly changes: readonly AccountChangeEntry[];
+      readonly notices: readonly AccountChangeEntry[];
+      readonly acknowledgedThrough: number;
+    }
+  | { readonly kind: 'unavailable'; readonly text: string };
+
+/** This device's mark, moved (#1208) — or why it was not. */
+export type AcknowledgeOutcome =
+  | { readonly kind: 'acknowledged'; readonly acknowledgedThrough: number }
+  | { readonly kind: 'unavailable'; readonly text: string };
+
+/** A key revoked (#1208) — or why it was not. */
+export type RevokeOutcome =
+  { readonly kind: 'revoked' } | { readonly kind: 'unavailable'; readonly text: string };
+
 /** What the Connect screen may ask of an instance. */
 export interface InstancePort {
   /** The connection this device holds, read back from the instance. */
@@ -258,6 +282,23 @@ export interface InstancePort {
   linkCode(): Promise<LinkCodeOutcome>;
   /** This athlete's devices on the instance (#773). */
   devices(): Promise<DevicesOutcome>;
+  /**
+   * This athlete's account-change log and this device's notices (#1208),
+   * sealed only: a copy of the app a website served sends nothing (D-11).
+   */
+  accountChanges(): Promise<AccountChangesOutcome>;
+  /**
+   * Mark the log seen through entry `through` — for THIS device only: the
+   * instance moves the mark of the session's key and of no other (#1193).
+   * Sealed only.
+   */
+  acknowledgeAccountChanges(through: number): Promise<AcknowledgeOutcome>;
+  /**
+   * Revoke one of this athlete's device keys (#773, #1208): its sessions end
+   * and the link codes it made are void. Sealed only; never the last key,
+   * which needs a recovery code this screen does not ask for.
+   */
+  revokeDevice(publicKey: string): Promise<RevokeOutcome>;
   /**
    * The rider read the instance's terms of service in force since `version`
    * (#909): kept on this device for this instance, so the screen stops saying
@@ -365,6 +406,23 @@ export const DEVICES_UNAVAILABLE_TEXT = {
   'no-answer': 'The instance did not answer, so its list of your devices cannot be shown.',
 } as const;
 
+/**
+ * What the rider is told when the account-change log cannot be read or
+ * marked, or a key cannot be revoked (#1208). ⚠️ Draft wording for the
+ * owner's approval (ADR 0047 D-14 Q6).
+ */
+export const ACCOUNT_CHANGES_UNAVAILABLE_TEXT = {
+  'signed-out': DEVICES_UNAVAILABLE_TEXT['signed-out'],
+  'no-answer': 'The instance did not answer, so the changes made to your account cannot be shown.',
+  'not-acknowledged': 'The instance did not answer, so these notices are still shown. Try again.',
+  'last-device':
+    'That is the last key on your account, so this screen cannot revoke it: it needs one of your recovery codes.',
+  'not-revoked': 'The instance did not answer, so that key is not revoked. Try again.',
+} as const;
+
+/** The longest recovery address this app will show: RFC 5321's 254. */
+const MAXIMUM_SHOWN_ADDRESS = 254;
+
 /** The longest instance name this app will show. `apps/instance` enforces the same. */
 export const MAXIMUM_SHOWN_INSTANCE_NAME = 64;
 
@@ -434,6 +492,68 @@ function deviceFrom(value: unknown): InstanceDevice | undefined {
     return undefined;
   }
   return { publicKey: row.publicKey, addedAt, lastUsedAt, revokedAt, thisDevice: row.thisDevice };
+}
+
+const ACCOUNT_CHANGE_KINDS: readonly AccountChangeEntry['kind'][] = [
+  'codes_replaced',
+  'address_added',
+  'address_cleared',
+  'link_code_minted',
+  'key_added',
+  'key_revoked',
+];
+const ACCOUNT_CHANGE_VIA: readonly NonNullable<AccountChangeEntry['via']>[] = [
+  'link_code',
+  'recovery_code',
+  'email_token',
+];
+const DEVICE_KEY = /^[0-9a-f]{64}$/;
+
+/**
+ * One entry of the log as the instance answered it, or `undefined` for one
+ * this app will not read. An address that is not one a screen may be handed
+ * is read as none: the notice then says the app was not told it.
+ */
+function accountChangeFrom(value: unknown): AccountChangeEntry | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const row = value as Record<string, unknown>;
+  const whole = (field: unknown): field is number =>
+    typeof field === 'number' && Number.isSafeInteger(field) && field >= 0;
+  const key = (field: unknown): field is string =>
+    typeof field === 'string' && DEVICE_KEY.test(field);
+  const kind = ACCOUNT_CHANGE_KINDS.find((each) => each === row.kind);
+  const via = row.via === null ? null : ACCOUNT_CHANGE_VIA.find((each) => each === row.via);
+  if (
+    !whole(row.id) ||
+    !whole(row.at) ||
+    kind === undefined ||
+    via === undefined ||
+    !key(row.actorKey) ||
+    !(row.subjectKey === null || key(row.subjectKey)) ||
+    !(row.subjectAddedAt === null || whole(row.subjectAddedAt)) ||
+    !(row.address === null || typeof row.address === 'string')
+  ) {
+    return undefined;
+  }
+  return {
+    id: row.id,
+    at: row.at,
+    kind,
+    actorKey: row.actorKey,
+    subjectKey: row.subjectKey,
+    subjectAddedAt: row.subjectAddedAt,
+    via,
+    address: showable(row.address, MAXIMUM_SHOWN_ADDRESS),
+  };
+}
+
+/** Every entry of a list the instance answered, or `undefined` if any is not one. */
+export function accountChangesFrom(value: unknown): AccountChangeEntry[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const entries = value.map(accountChangeFrom);
+  return entries.some((entry) => entry === undefined)
+    ? undefined
+    : (entries as AccountChangeEntry[]);
 }
 
 /**
@@ -1256,6 +1376,85 @@ export function createInstancePort(dependencies: InstancePortDependencies): Inst
         return { kind: 'listed', devices: devices as InstanceDevice[] };
       } catch {
         return { kind: 'unavailable', text: DEVICES_UNAVAILABLE_TEXT['no-answer'] };
+      }
+    },
+
+    accountChanges: async () => {
+      const unavailable = ACCOUNT_CHANGES_UNAVAILABLE_TEXT;
+      try {
+        // Sealed-only (#1193, #1208): a copy that may not seal sends nothing.
+        const session = await sealedSessionOf(dependencies, kit);
+        if (session.kind === 'closed') return { kind: 'unavailable', text: session.text };
+        const answer = await session.sealed.call('GET', '/v1/auth/account-changes', {
+          token: session.token,
+        });
+        if (answer.status === 401) return { kind: 'unavailable', text: unavailable['signed-out'] };
+        const body = answer.body as Record<string, unknown> | null;
+        const changes = accountChangesFrom(body?.changes);
+        const notices = accountChangesFrom(body?.notices);
+        const through = body?.acknowledgedThrough;
+        if (
+          answer.status !== 200 ||
+          changes === undefined ||
+          notices === undefined ||
+          typeof through !== 'number' ||
+          !Number.isSafeInteger(through)
+        ) {
+          return { kind: 'unavailable', text: unavailable['no-answer'] };
+        }
+        return { kind: 'read', changes, notices, acknowledgedThrough: through };
+      } catch {
+        return { kind: 'unavailable', text: unavailable['no-answer'] };
+      }
+    },
+
+    acknowledgeAccountChanges: async (through) => {
+      const unavailable = ACCOUNT_CHANGES_UNAVAILABLE_TEXT;
+      if (!Number.isSafeInteger(through) || through < 0) {
+        return { kind: 'unavailable', text: unavailable['not-acknowledged'] };
+      }
+      try {
+        const session = await sealedSessionOf(dependencies, kit);
+        if (session.kind === 'closed') return { kind: 'unavailable', text: session.text };
+        // The instance moves the mark of the session's key, never one named here.
+        const answer = await session.sealed.call('POST', '/v1/auth/account-changes/acknowledge', {
+          token: session.token,
+          body: { through },
+        });
+        if (answer.status === 401) return { kind: 'unavailable', text: unavailable['signed-out'] };
+        const moved = (answer.body as { acknowledgedThrough?: unknown } | null)
+          ?.acknowledgedThrough;
+        if (answer.status !== 200 || typeof moved !== 'number' || !Number.isSafeInteger(moved)) {
+          return { kind: 'unavailable', text: unavailable['not-acknowledged'] };
+        }
+        return { kind: 'acknowledged', acknowledgedThrough: moved };
+      } catch {
+        return { kind: 'unavailable', text: unavailable['not-acknowledged'] };
+      }
+    },
+
+    revokeDevice: async (publicKey) => {
+      const unavailable = ACCOUNT_CHANGES_UNAVAILABLE_TEXT;
+      // ⚠️ The key is a path segment: anything but 64 hex characters is sent
+      // nowhere, so no `..` or `?` can steer the call at another route.
+      if (!DEVICE_KEY.test(publicKey))
+        return { kind: 'unavailable', text: unavailable['not-revoked'] };
+      try {
+        const session = await sealedSessionOf(dependencies, kit);
+        if (session.kind === 'closed') return { kind: 'unavailable', text: session.text };
+        const answer = await session.sealed.call('POST', `/v1/auth/devices/${publicKey}/revoke`, {
+          token: session.token,
+          body: {},
+        });
+        if (answer.status === 204) return { kind: 'revoked' };
+        if (answer.status === 401) return { kind: 'unavailable', text: unavailable['signed-out'] };
+        const code = (answer.body as { error?: { code?: unknown } } | null)?.error?.code;
+        return {
+          kind: 'unavailable',
+          text: code === 'last_device' ? unavailable['last-device'] : unavailable['not-revoked'],
+        };
+      } catch {
+        return { kind: 'unavailable', text: unavailable['not-revoked'] };
       }
     },
 

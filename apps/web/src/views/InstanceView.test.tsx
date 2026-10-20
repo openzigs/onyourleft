@@ -10,9 +10,21 @@
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import type { InstancePort } from '../instance/instance-port';
+import {
+  AFTER_REVOKE_TEXT,
+  formatDay,
+  noticeText,
+  REVOKE_MARK_TEXT,
+  revokeKeyName,
+} from '../instance/account-change-notices';
+import { ACCOUNT_CHANGES_UNAVAILABLE_TEXT, type InstancePort } from '../instance/instance-port';
 import { INSTANCE_KEY_TEXT } from '../instance/instance-pin';
-import { SCRIPTED_FINGERPRINT, scriptedInstance, scriptedModeration } from '../instance/testing';
+import {
+  SCRIPTED_ACCOUNT_CHANGES,
+  SCRIPTED_FINGERPRINT,
+  scriptedInstance,
+  scriptedModeration,
+} from '../instance/testing';
 import {
   activateWithKeyboard,
   mount,
@@ -32,6 +44,7 @@ import {
   RECOVERY_CODES_LEAD,
   TERMS_CHANGED_TEXT,
 } from './InstanceView';
+import { ACCOUNT_NOTICES_TEXT } from './InstanceDevices';
 
 let mounted: Mounted | undefined;
 
@@ -299,5 +312,241 @@ describe('terms of service the rider has not read — #909', () => {
     mounted = await mount(<InstanceView port={scripted.port} />);
     await settle();
     expect(text()).not.toContain('terms of service took effect');
+  });
+});
+
+describe('the account-change notices and a revoke, on the device list — #1208', () => {
+  const key = (pair: string): string => pair.repeat(32);
+  const THIS = key('a1');
+  const REVOKED = key('b2');
+  const SINCE = key('c3');
+  const LINKED = key('d4');
+  const OLDER = key('e5');
+  const ORDER = [OLDER, THIS, REVOKED, SINCE, LINKED];
+
+  /** This device, the key to revoke, one added after it, one it linked, and one older. */
+  function fiveKeys(): ReturnType<typeof scriptedInstance> {
+    const scripted = scriptedInstance({ connected: true });
+    const device = (publicKey: string, addedAt: number, thisDevice = false) => ({
+      publicKey,
+      addedAt,
+      lastUsedAt: null,
+      revokedAt: null,
+      thisDevice,
+    });
+    scripted.held.devices = [
+      device(OLDER, 1_780_000_000),
+      // Added after the key it revokes, so `revokeMarks` alone would mark it.
+      device(THIS, 1_790_120_000, true),
+      device(REVOKED, 1_790_100_000),
+      device(SINCE, 1_790_150_000),
+      device(LINKED, 1_789_000_000),
+    ];
+    scripted.held.changes = [
+      ...SCRIPTED_ACCOUNT_CHANGES,
+      {
+        id: 5,
+        at: 1_790_400_000,
+        kind: 'key_added',
+        actorKey: REVOKED,
+        subjectKey: LINKED,
+        subjectAddedAt: 1_789_000_000,
+        via: 'link_code',
+        address: null,
+      },
+    ];
+    return scripted;
+  }
+
+  const day = formatDay;
+  // Named against the five keys, so it carries a time only where the zone the
+  // test runs in puts another of them on the same day.
+  const REVOKED_NAME = revokeKeyName(
+    { publicKey: REVOKED, addedAt: 1_790_100_000 },
+    fiveKeys().held.devices,
+  );
+
+  /** The device list's line for a key, in {@link ORDER}. */
+  function item(publicKey: string): string {
+    const found = [...(mounted?.container.querySelectorAll('.oyl-instance__devices li') ?? [])][
+      ORDER.indexOf(publicKey)
+    ];
+    return (found?.textContent ?? '').replace(/\s+/g, ' ');
+  }
+
+  it('shows every notice in its sentence, and keeps it until the rider acknowledges', async () => {
+    const scripted = scriptedInstance({ connected: true });
+    mounted = await mount(<InstanceView port={scripted.port} />);
+    await settle();
+    const keys = scripted.held.devices;
+    const notices = SCRIPTED_ACCOUNT_CHANGES.filter((entry) => entry.actorKey !== THIS);
+    expect(notices).toHaveLength(2);
+    for (const notice of notices) expect(text()).toContain(noticeText(notice, keys, THIS));
+    // Not this device's own changes, and nothing tucked in a disclosure.
+    expect(text()).not.toContain('this device made a link code');
+    const list = mounted.container.querySelector('.oyl-instance__notices');
+    expect(list?.closest('details')).toBeNull();
+    scripted.calls.length = 0;
+    await activateWithKeyboard(button(ACCOUNT_NOTICES_TEXT.acknowledge));
+    await settle();
+    // Through the newest notice, and the log read again through the port.
+    expect(scripted.calls).toEqual(['acknowledgeAccountChanges 4', 'accountChanges']);
+    expect(scripted.held.acknowledgedThrough).toBe(4);
+    expect(mounted.container.querySelector('.oyl-instance__notices')).toBeNull();
+    for (const notice of notices) expect(text()).not.toContain(noticeText(notice, keys, THIS));
+  });
+
+  it('keeps the notices, and says why, when the mark could not be moved', async () => {
+    const scripted = scriptedInstance({ connected: true });
+    const port: InstancePort = {
+      ...scripted.port,
+      acknowledgeAccountChanges: () =>
+        Promise.resolve({
+          kind: 'unavailable',
+          text: ACCOUNT_CHANGES_UNAVAILABLE_TEXT['not-acknowledged'],
+        }),
+    };
+    mounted = await mount(<InstanceView port={port} />);
+    await settle();
+    await activateWithKeyboard(button(ACCOUNT_NOTICES_TEXT.acknowledge));
+    await settle();
+    expect(text()).toContain(ACCOUNT_CHANGES_UNAVAILABLE_TEXT['not-acknowledged']);
+    expect(mounted.container.querySelector('.oyl-instance__notices')).not.toBeNull();
+  });
+
+  it('says the log cannot be shown, and still lists the devices', async () => {
+    const scripted = scriptedInstance({ connected: true });
+    const port: InstancePort = {
+      ...scripted.port,
+      accountChanges: () =>
+        Promise.resolve({
+          kind: 'unavailable',
+          text: ACCOUNT_CHANGES_UNAVAILABLE_TEXT['no-answer'],
+        }),
+    };
+    mounted = await mount(<InstanceView port={port} />);
+    await settle();
+    expect(text()).toContain(ACCOUNT_CHANGES_UNAVAILABLE_TEXT['no-answer']);
+    expect(text()).toContain('Another device');
+  });
+
+  it('revokes a key only once asked twice, then marks the list and says what a revoke did', async () => {
+    const scripted = fiveKeys();
+    mounted = await mount(<InstanceView port={scripted.port} />);
+    await settle();
+    expect(text()).not.toContain(AFTER_REVOKE_TEXT);
+    await activateWithKeyboard(button(ACCOUNT_NOTICES_TEXT.revoke(REVOKED_NAME)));
+    await settle();
+    expect(scripted.calls.some((call) => call.startsWith('revokeDevice'))).toBe(false);
+    expect(text()).toContain(ACCOUNT_NOTICES_TEXT.confirm(REVOKED_NAME));
+    await activateWithKeyboard(button(ACCOUNT_NOTICES_TEXT.confirmRevoke));
+    await settle();
+    expect(scripted.calls).toContain(`revokeDevice ${REVOKED}`);
+    // Read back: the list again, from the port, with the revoke in it.
+    expect(scripted.calls.filter((call) => call === 'devices')).toHaveLength(2);
+    expect(item(REVOKED)).toContain('removed');
+    const above = [...mounted.container.querySelectorAll('p')].find(
+      (each) => each.textContent === AFTER_REVOKE_TEXT,
+    );
+    const list = mounted.container.querySelector('.oyl-instance__devices');
+    expect(above).toBeDefined();
+    expect(
+      (above as Element).compareDocumentPosition(list as Element) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(item(SINCE)).toContain(REVOKE_MARK_TEXT['added-since']);
+    expect(item(LINKED)).toContain(REVOKE_MARK_TEXT['linked-by-revoked']);
+    // Neither mark on this device, the revoked key itself, or a key older than it.
+    for (const unmarked of [THIS, REVOKED, OLDER]) {
+      expect(item(unmarked)).not.toContain(REVOKE_MARK_TEXT['added-since']);
+      expect(item(unmarked)).not.toContain(REVOKE_MARK_TEXT['linked-by-revoked']);
+    }
+  });
+
+  it('keeps a key the rider thought better of, and sends nothing', async () => {
+    const scripted = fiveKeys();
+    mounted = await mount(<InstanceView port={scripted.port} />);
+    await settle();
+    await activateWithKeyboard(button(ACCOUNT_NOTICES_TEXT.revoke(REVOKED_NAME)));
+    await settle();
+    await activateWithKeyboard(button(ACCOUNT_NOTICES_TEXT.keep));
+    await settle();
+    expect(scripted.calls.some((call) => call.startsWith('revokeDevice'))).toBe(false);
+    expect(text()).not.toContain(ACCOUNT_NOTICES_TEXT.confirm(REVOKED_NAME));
+  });
+
+  it('offers no revoke of this device, of a key already revoked, or of the last key', async () => {
+    const scripted = scriptedInstance({ connected: true });
+    mounted = await mount(<InstanceView port={scripted.port} />);
+    await settle();
+    const revokes = (): (string | null)[] =>
+      [...(mounted?.container.querySelectorAll('button') ?? [])]
+        .map((each) => each.textContent)
+        .filter((name) => (name ?? '').startsWith('Revoke the key'));
+    // Two live keys: only the other one is offered.
+    const other = `the key added on ${day(scripted.held.devices[1]?.addedAt ?? 0)}`;
+    expect(revokes()).toEqual([ACCOUNT_NOTICES_TEXT.revoke(other)]);
+    mounted.unmount();
+    // The other one revoked: this device is the last live key, and nothing is offered.
+    await scripted.port.revokeDevice(REVOKED);
+    mounted = await mount(<InstanceView port={scripted.port} />);
+    await settle();
+    expect(revokes()).toEqual([]);
+  });
+
+  it('tells two keys added the same day apart by their time, on the button and when asked', async () => {
+    const scripted = fiveKeys();
+    // Local times, so the two share a day in whatever zone the test runs in.
+    const at = (hour: number, minute: number): number =>
+      new Date(2026, 8, 22, hour, minute).getTime() / 1000;
+    scripted.held.devices = scripted.held.devices.map((device) =>
+      device.publicKey === REVOKED
+        ? { ...device, addedAt: at(9, 30) }
+        : device.publicKey === SINCE
+          ? { ...device, addedAt: at(14, 5) }
+          : device,
+    );
+    mounted = await mount(<InstanceView port={scripted.port} />);
+    await settle();
+    const later = 'the key added on 22 September at 14:05';
+    const earlier = 'the key added on 22 September at 09:30';
+    // Each is found by its accessible name, and no two revoke buttons share one.
+    const names = [...mounted.container.querySelectorAll('button')]
+      .map((each) => each.textContent ?? '')
+      .filter((name) => name.startsWith('Revoke the key'));
+    expect(names).toContain(ACCOUNT_NOTICES_TEXT.revoke(later));
+    expect(names).toContain(ACCOUNT_NOTICES_TEXT.revoke(earlier));
+    expect(new Set(names).size).toBe(names.length);
+    // A key alone on its day keeps the day alone.
+    expect(
+      button(ACCOUNT_NOTICES_TEXT.revoke(`the key added on ${day(1_780_000_000)}`)),
+    ).toBeDefined();
+    await activateWithKeyboard(button(ACCOUNT_NOTICES_TEXT.revoke(later)));
+    await settle();
+    expect(text()).toContain(ACCOUNT_NOTICES_TEXT.confirm(later));
+    await activateWithKeyboard(button(ACCOUNT_NOTICES_TEXT.confirmRevoke));
+    await settle();
+    expect(scripted.calls).toContain(`revokeDevice ${SINCE}`);
+  });
+
+  it('says why a key was not revoked, and marks nothing', async () => {
+    const scripted = fiveKeys();
+    const port: InstancePort = {
+      ...scripted.port,
+      revokeDevice: () =>
+        Promise.resolve({
+          kind: 'unavailable',
+          text: ACCOUNT_CHANGES_UNAVAILABLE_TEXT['not-revoked'],
+        }),
+    };
+    mounted = await mount(<InstanceView port={port} />);
+    await settle();
+    await activateWithKeyboard(button(ACCOUNT_NOTICES_TEXT.revoke(REVOKED_NAME)));
+    await settle();
+    await activateWithKeyboard(button(ACCOUNT_NOTICES_TEXT.confirmRevoke));
+    await settle();
+    expect(text()).toContain(ACCOUNT_CHANGES_UNAVAILABLE_TEXT['not-revoked']);
+    expect(text()).not.toContain(AFTER_REVOKE_TEXT);
+    expect(text()).not.toContain(REVOKE_MARK_TEXT['added-since']);
   });
 });

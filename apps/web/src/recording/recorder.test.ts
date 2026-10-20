@@ -32,6 +32,7 @@ import {
   watts,
   type BeatsPerMinute,
   type MetresPerSecond,
+  type ReplanRecord,
   type UnixSeconds,
   type Watts,
 } from '@onyourleft/domain';
@@ -632,6 +633,55 @@ describe('#1319 — the workout blocks go out on the header', () => {
       ridden(5, 13),
     ]);
     expect(rebuilt?.recorder.workoutBlocks).toStrictEqual(rebuilt?.recovered.workoutBlocks);
+  });
+});
+
+describe('#1328 — a re-plan record the checkpoint could not keep stays counted', () => {
+  const REFUSED: ReplanRecord = { decision: 'refused', rule: 'P4', at: seconds(T0 + 5) };
+  /** A record from a build that knew a move this one does not: the store drops it, and counts it. */
+  const FROM_A_LATER_BUILD = {
+    decision: 'accepted',
+    move: { kind: 'set-watts', watts: 400 },
+    reason: 'heart-rate-high',
+    revision: 2,
+    at: T0 + 6,
+  } as unknown as ReplanRecord;
+
+  it('through a ride continued after one crash, and recovered after a second', async () => {
+    const first = newRecorder();
+    await first.start(at(0));
+    for (let t = 0; t < 10; t += 1) {
+      first.observeReading(powerReading(t, 200));
+      first.observeReading(speedReading(t, 9));
+      await first.tick(at(t));
+    }
+    first.noteReplans([REFUSED, FROM_A_LATER_BUILD]);
+    await first.flush();
+    const sessionId = first.sessionId;
+    await harness.discard();
+
+    const once = await recoverRecorder({ store: harnessStore(), athleteId: ATHLETE_A, sessionId });
+    const continued = once?.recorder;
+    if (continued === undefined) throw new Error('the recovered recorder is the subject');
+    expect(continued.replans).toStrictEqual([REFUSED]);
+    expect(continued.replansDropped).toBe(1);
+
+    // Continued, written again — the record it still holds reads, so only the
+    // count it carried can say there was a second — and the tab dies again.
+    await continued.resume(at(60));
+    for (let t = 60; t < 70; t += 1) {
+      continued.observeReading(powerReading(t, 200));
+      continued.observeReading(speedReading(t, 9));
+      await continued.tick(at(t));
+    }
+    await continued.flush();
+    await harness.discard();
+
+    const twice = await recoverRecorder({ store: harnessStore(), athleteId: ATHLETE_A, sessionId });
+    expect(twice?.recovered.sampleCount).toBeGreaterThan(60);
+    expect(twice?.recovered.replans).toStrictEqual([REFUSED]);
+    expect(twice?.recovered.replansDropped).toBe(1);
+    expect(twice?.recorder.replansDropped).toBe(1);
   });
 });
 

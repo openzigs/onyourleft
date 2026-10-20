@@ -1490,13 +1490,17 @@ seconds before the block ends, is cancelled and no longer listened to, and the v
 the same proposal under P5 or P2 if it arrives between two ticks. Nothing is shown for either.
 
 ⚠️ **What this does not give.**
-- **P9's record is not synced.** It is on the device and in the export. A ride's facts
-  (`RideFacts`) are synced by nothing today: a ride goes to an instance as its activity file, which
-  carries none of them. Syncing the record needs an item kind of its own on the instance:
-  [#1315](https://github.com/openzigs/onyourleft/issues/1315).
-- **P9's record does not survive a recovery.** It is in memory until the ride saves; a ride
-  recovered after a crash is saved without it:
-  [#1328](https://github.com/openzigs/onyourleft/issues/1328).
+- **P9's record is synced as an item of its own, and the ride's other facts are not.** A ride goes
+  to an instance as its activity file, which carries none of `RideFacts`. Since
+  [#1315](https://github.com/openzigs/onyourleft/issues/1315) the record goes as an item of kind
+  `replan-record` keyed by the ride's id (`instance/sync.ts` rule 11), and a pulled body is read
+  whole by `readReplanRecord` before it is written. `workoutFinished`, `ghostRaced`, races and
+  workout blocks are still synced by nothing.
+- **P9's record survives a recovery only as far as the last checkpoint flush**
+  ([#1328](https://github.com/openzigs/onyourleft/issues/1328)): the recording's header carries the
+  decisions made so far, read entry by entry through `readReplanRecord` (one that does not read is
+  dropped and counted, never the recording), so a decision in the last few seconds before a crash
+  may be lost with the samples of those seconds.
 - **A press of *Switch re-plans off* in the game is answered only by the control going**, with
   announcements off. Since [#1329](https://github.com/openzigs/onyourleft/issues/1329) the control
   is on the HUD (`GameTrainerPort.switchReplansOff`, the controller's own `switchReplansOff`) for as
@@ -2164,7 +2168,7 @@ on every device** (D-3). Where each part lives:
 | Part | Where | What holds it |
 |---|---|---|
 | The pipeline (#430) | `apps/web/tools/realistic/` — the sources and their licence pages, the input lock, headless-Blender scripts, `realistic:fetch` / `realistic:process [--check]` / `realistic:stage` | `ASSET007` (a derived asset records its input, input digest, script and pinned tool), `provenance.test.ts` (every committed file is the pipeline's, with the manifest entry its recipe produces), and `--check`, run by hand: every file reproduced **byte for byte** by Blender 4.4.3 twice running — which took one thread for Cycles and an ordered sum in the thinning to get to |
-| The source list ([ADR 0049](adr/0049-open-asset-sources-for-the-realistic-world.md) D-10, [#1275](https://github.com/openzigs/onyourleft/issues/1275)) | `apps/web/tools/realistic/sources.ts` §`ADMITTED_SOURCES`, §`BARRED_SOURCES` — the ADR's two tables, which supersede ADR 0026 D-4's list — and §`admission`, which `realistic:fetch` asks about every URL it requests (licence pages, and the files Poly Haven's API resolves at run time) before the request is made, and `licenceVerdict` asks about the declared ones; a redirect is followed, so only the requested address is checked. ⚠️ **Admitted is not adopted**: only Poly Haven and MakeHuman's own files are read today | `admitted-sources.test.ts` reads the ADR and fails when a row, a licence or a deciding ADR differs, and when a URL in `SOURCES` or in `inputs.lock.json` is not an admitted source's, or when a row's prefixes change (they are pinned). A new **source** is a superseding ADR, never a row added there |
+| The source list ([ADR 0049](adr/0049-open-asset-sources-for-the-realistic-world.md) D-10, [#1275](https://github.com/openzigs/onyourleft/issues/1275)) | `apps/web/tools/realistic/sources.ts` §`ADMITTED_SOURCES`, §`BARRED_SOURCES` — the ADR's two tables, which supersede ADR 0026 D-4's list — and §`admission`, which `realistic:fetch` asks about every URL it requests (licence pages, and the files Poly Haven's API resolves at run time) before the request is made, and `licenceVerdict` asks about the declared ones; since [#1278](https://github.com/openzigs/onyourleft/issues/1278) a redirect is followed only to an address it admits, asked before that request is made, and `fetch-assets.test.ts` runs the script's loop body (`readSource`) against a fake web to hold every guard where it is called. ⚠️ **Admitted is not adopted**: only Poly Haven and MakeHuman's own files are read today | `admitted-sources.test.ts` reads the ADR and fails when a row, a licence or a deciding ADR differs, and when a URL in `SOURCES` or in `inputs.lock.json` is not an admitted source's, or when a row's prefixes change (they are pinned). A new **source** is a superseding ADR, never a row added there |
 | The assets | `apps/web/public/realistic/` → `dist/realistic/` — 17 files, 30.8 MiB when layers 1, 2 and 4 landed; 31 files, 33 264 450 bytes (31.7 MiB) with layer 3's structure surfaces, measured for #475. ⚠️ **Since [#618](https://github.com/openzigs/onyourleft/issues/618) every texture but the sky is KTX2** (35 files, 33 723 127 bytes, where #617's middle trees had taken it to 35 529 214; since [#624](https://github.com/openzigs/onyourleft/issues/624) 39 files, 33 758 239 bytes, with the bicycle's four drawn maps; since [#623](https://github.com/openzigs/onyourleft/issues/623) 42 files, 33 530 322 bytes, with the rider's three maps and a `rider.glb` 1 372 208 bytes smaller, the whole set 227 917 bytes smaller) and the Basis transcoder, 584 862 bytes, is copied beside them into `dist/realistic/basis/` — see below | `ASSETS.toml` rows, `ASSET001`–`ASSET007`; `realistic-assets.test.ts` in both directions |
 | The budget (D-6) | `apps/web/src/game/realistic-budget.ts`, set from #457's 30-second device windows and **re-set from validation 0002 Part Z's twenty-minute soak by #475 — every figure stood**, and the driver's 310 MiB against a 136 MiB estimate is recorded there as the open finding | `realistic-budget.test.ts`, reading the committed bytes through `realistic-bytes-testing.ts` |
 | The ladder (D-3) | `quality.ts` §`REALISTIC_LADDER`, §`nextWorldQuality` — above the stylised ladder, left for the stylised ladder's top and never re-entered | `quality.test.ts` |

@@ -18,8 +18,11 @@
  *   the instance must hold keys (`OYL_INSTANCE_SECRET_KEY`).
  *   **`plaintext`** is the control, and works only against an instance that
  *   holds none — one with keys answers `sealed_required`.
- * - **`--unload`** is a shell command that unloads the model. It runs before
- *   each cold run; without it no cold run is made.
+ * - **`--unload`** is a shell command that unloads the model, run by this
+ *   machine's own shell (`cmd.exe` on Windows, `/bin/sh` elsewhere). It runs
+ *   before each cold run; without it no cold run is made. A cold run after an
+ *   unload command that failed is kept in the report as `unloaded: false`
+ *   and counted in no cold figure: it may have run on a loaded model.
  * - **A new account every `--starts-per-account` starts**: the instance allows
  *   each athlete 12 starts an hour. On an instance whose registration is
  *   `approval` a new account is pending and its job is refused, so there the
@@ -42,10 +45,14 @@
  *   every account read back empty. When one did not, the command exits 3 and
  *   its last line on stderr says to revoke the key. When the run throws there
  *   is no report: each account's line on stderr is then the only record.
+ *   An account is cleared as soon as the run is done with it, and each
+ *   clean-up is tried three times before it is reported as not confirmed.
  *   Sealed only, and refused with `--unload`: a hosted model has nothing to
- *   unload, so it has no cold runs. ⚠️ A run that is KILLED (Ctrl-C), or
- *   whose stderr is closed under it, clears nothing: revoke the key at its
- *   provider.
+ *   unload, so it has no cold runs. The first Ctrl-C (or SIGTERM) stops the
+ *   run, clears every account and exits 130 — or 3, saying to revoke the key.
+ *   Every request the tool sends refuses a redirect. ⚠️ A run that is KILLED
+ *   (a second Ctrl-C, SIGKILL), or whose stderr is closed under it, clears
+ *   nothing: revoke the key at its provider.
  *   ⚠️ **"Sealed" here is less than the app's.** The app seals to a key it
  *   judged against an identity pinned from the instance's card (ADR 0047
  *   D-5, D-6). This tool pins nothing and checks no statement: it seals to
@@ -54,7 +61,8 @@
  *   whoever terminates TLS for that name — through a tunnel, the tunnel's
  *   operator. Use a key you can revoke.
  * - **An option this command does not have is refused**, by name and never
- *   with its value.
+ *   with its value; a name too long to be an option's is not repeated, and
+ *   neither is a value that is not a URL.
  *
  * The job is the ride write-up that exists, over a synthetic ride — see
  * `replan-round-trip-run.ts` for why and what that does and does not say
@@ -71,7 +79,7 @@ import { resolveExtensionless } from '../src/node-imports.ts';
 
 registerHooks({ resolve: resolveExtensionless });
 
-const { hostedFromCommand, KEY_NOT_CLEARED, measure, refusedArguments } =
+const { hostedFromCommand, INTERRUPTED, KEY_NOT_CLEARED, measure, refusedArguments } =
   await import('./replan-round-trip-run.ts');
 
 const OPTIONS = [
@@ -116,8 +124,20 @@ try {
   );
   process.exit(2);
 }
-const report = await measure({
+// Hosted, the first Ctrl-C (or SIGTERM) clears the key before the command
+// ends; a second one, with the handlers gone, ends it at once.
+const stop = new AbortController();
+if (hosted !== undefined) {
+  for (const name of ['SIGINT', 'SIGTERM'] as const) {
+    process.once(name, () => {
+      process.stderr.write('interrupted: clearing the hosted key from every account\n');
+      stop.abort();
+    });
+  }
+}
+const measuring = measure({
   url,
+  signal: stop.signal,
   transport,
   runs: Number(arg('--runs') ?? 30),
   coldRuns: Number(arg('--cold-runs') ?? 5),
@@ -130,17 +150,30 @@ const report = await measure({
     ? {}
     : {
         unload: () => {
-          // A model the last run never loaded is already unloaded, and the
-          // command says so by failing: that is no reason to lose the run.
+          // A failed unload does not stop the measurement, but the run after
+          // it is not a cold one: the model may still be loaded (#1271). A
+          // model never loaded makes the command fail too, so that run is
+          // kept as `unloaded: false` rather than lost.
           try {
             execSync(unload, { stdio: 'ignore' });
+            return Promise.resolve(true);
           } catch {
-            process.stderr.write('the unload command failed; carrying on\n');
+            process.stderr.write('the unload command failed\n');
+            return Promise.resolve(false);
           }
-          return Promise.resolve();
         },
       }),
 });
+let report: Awaited<typeof measuring>;
+try {
+  report = await measuring;
+} catch (error) {
+  if (!stop.signal.aborted) throw error;
+  // The run in flight is abandoned, not awaited: it may take minutes.
+  const cleared = error instanceof Error && error.message === INTERRUPTED;
+  process.stderr.write(`${cleared ? INTERRUPTED : KEY_NOT_CLEARED}\n`);
+  process.exit(cleared ? 130 : 3);
+}
 process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 if (report.hosted?.cleared === false) {
   // A key left behind is not a run that ended well, whatever it measured.

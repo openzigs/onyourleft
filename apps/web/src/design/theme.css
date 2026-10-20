@@ -5382,10 +5382,12 @@ select.oyl-input {
  * The Connect screen (#777). An instance's name, its address and a rider's
  * display name all come from the instance, and any of them may be one long
  * word: each breaks where it must rather than widen a 320 px page
- * (`reflow.browser.spec.ts`).
+ * (`reflow.browser.spec.ts`). So may a recovery address an account-change
+ * notice names (#1208).
  */
 .oyl-instance__facts dd,
-.oyl-instance__devices li {
+.oyl-instance__devices li,
+.oyl-instance__notices li {
   overflow-wrap: anywhere;
 }
 
@@ -8985,8 +8987,14 @@ select.oyl-input {
 }
 
 /* #1108: the PHONE's code, which the tablet's front camera reads at arm's
-   length. As wide as its column, and no taller than most of the screen so the
-   instruction above it stays in view. */
+   length, no taller than most of the screen so the instruction above it stays
+   in view. #1110: out over `.oyl-main`'s side padding too, which its own white
+   quiet zone stands in for — measured at 390×844, its column alone made it
+   358 px, 6 px over the 352 px cap #1108 lifted; this makes it the screen's
+   390. Centred on its column, so it reaches no further than that padding on
+   either side; `sidecamera.browser.spec.ts` §"#1110" measures it. */
 .oyl-pairing-code--full {
-  inline-size: min(100%, 75vh);
+  --oyl-pairing-code-span: min(100% + 2 * var(--oyl-space-md), 75vh);
+  inline-size: var(--oyl-pairing-code-span);
+  margin-inline: calc((100% - var(--oyl-pairing-code-span)) / 2);
 }

@@ -897,6 +897,12 @@ describe('block summaries sent during a ride, for a re-plan (#1245, ADR 0048 D-1
     expect(answer?.why).not.toContain('those are sent to it, masked first');
   });
 
+  it('the rider’s own text row names each ride’s re-plan record, which a sync sends (#1315)', () => {
+    expect(row('App activity — Other user-generated content')?.why).toContain(
+      'each ride’s write-up, side-camera report and record of the re-plans accepted or refused during it (#1315), stay on the device until the rider syncs',
+    );
+  });
+
   it('the health info row names the heart-rate numbers the rider chose, which travel too', () => {
     const why = row('Health and fitness — health info')?.why ?? '';
     expect(why).toContain(

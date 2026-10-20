@@ -1540,7 +1540,9 @@ export type SyncBaseKind =
   /** A saved workout (#1100), keyed by its own id. */
   | 'workout'
   /** The rider's typed workout goals (#1237), keyed `goals`: one per athlete. */
-  | 'workout-goal';
+  | 'workout-goal'
+  /** A ride's re-plan record (#1315), keyed by the ride's own id, like a write-up. */
+  | 'replan-record';
 
 /** Every {@link SyncBaseKind}, in the order a sync visits them. */
 export const SYNC_BASE_KINDS: readonly SyncBaseKind[] = [
@@ -1553,6 +1555,7 @@ export const SYNC_BASE_KINDS: readonly SyncBaseKind[] = [
   'document',
   'workout',
   'workout-goal',
+  'replan-record',
 ];
 
 /**

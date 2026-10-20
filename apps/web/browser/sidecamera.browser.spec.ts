@@ -295,6 +295,42 @@ test.describe('#1108 — the phone’s pairing instruction, above its camera pic
     );
     expect(status.bottom).toBeGreaterThan(measured.fold - FOLD_MARGIN_PIXELS);
   });
+
+  /**
+   * #1110: how wide the phone's own code is drawn at 390×844, where the
+   * tablet's front camera has to resolve every module of it. #1108 made it
+   * "as wide as its column"; the cap before was 22rem, 352 px. Measured here,
+   * the column was 358 px, which barely beat it, so the code now spans the
+   * screen: its own white quiet zone is the margin.
+   */
+  test('draws the phone’s own code across the whole screen (#1110)', async ({ page }) => {
+    await page.setViewportSize({ width: UPRIGHT.width, height: UPRIGHT.height });
+    const response = await page.goto('/sidecamera.html?pairing=answer');
+    expect(response?.status()).toBe(200);
+    await page.waitForFunction(() => window.__oylSideCamera !== undefined);
+    expect(await page.evaluate(() => window.__oylSideCamera?.errors)).toEqual([]);
+    const measured = await page.evaluate(() => window.__oylSideCamera?.answerCode?.());
+    expect(measured, 'the harness published no measurement of the phone’s code').toBeDefined();
+    if (measured === undefined) {
+      return;
+    }
+    const { code, column, modules } = measured;
+    console.log(
+      `#1110 at 390×844: the phone's code is ${code.width.toFixed(1)} px wide in a ` +
+        `${column.width.toFixed(1)} px column, ${modules} modules across with its quiet zone: ` +
+        `${(code.width / modules).toFixed(2)} px a module`,
+    );
+    expect(code.width).toBeCloseTo(code.height, 0);
+    // Wider than the column it sits in, by the page's side padding.
+    expect(code.width).toBeGreaterThan(column.width + SUBPIXEL_TOLERANCE);
+    expect(code.width).toBeGreaterThanOrEqual(measured.viewport.width - SUBPIXEL_TOLERANCE);
+    // And on the screen, whole: nothing off either edge, and nothing to scroll sideways to.
+    expect(code.left).toBeGreaterThanOrEqual(-SUBPIXEL_TOLERANCE);
+    expect(code.right).toBeLessThanOrEqual(measured.viewport.width + SUBPIXEL_TOLERANCE);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+  });
 });
 
 /**

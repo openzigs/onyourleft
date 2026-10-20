@@ -43,7 +43,10 @@
  * file, including the ones Poly Haven's API resolves — before the request is
  * made, so a source from anywhere else is refused by the pipeline, not only by
  * a reviewer. {@link licenceVerdict} asks it of the addresses a source declares.
- * (A redirect is followed by `fetch`; only the address requested is checked.)
+ * (Since #1278 a redirect is not followed by `fetch` on its own: each request
+ * is made with `redirect: 'manual'`, and every address a redirect points to is
+ * asked of {@link admission} too, before it is requested — at most
+ * `MAXIMUM_REDIRECTS` of them; see `fetch-assets.ts`.)
  * ⚠️ **A new source is a superseding ADR, not a row added here** (ADR 0026 D-4,
  * which ADR 0049 keeps).
  *
@@ -154,7 +157,14 @@ export const ADMITTED_SOURCES: readonly AdmittedSource[] = [
     licence: 'CC0-1.0',
     decidedBy: 'ADR 0026 D-4',
     kind: 'files',
-    prefixes: ['https://ambientcg.com/', 'https://docs.ambientcg.com/'],
+    prefixes: [
+      'https://ambientcg.com/',
+      'https://docs.ambientcg.com/',
+      // #1278: where an asset page's own download link, `ambientcg.com/get?file=`,
+      // redirects — measured 2026-10-20 as a 302 to this path. The page itself
+      // serves its images from the same operator's `acg-media.` host.
+      'https://acg-download.struffelproductions.com/file/ambientCG-Web/download/',
+    ],
   },
   {
     // ADR 0026's 2026-09-28 amendment: MakeHuman's own CC0 system assets pack,

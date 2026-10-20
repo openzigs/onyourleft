@@ -6,11 +6,11 @@
  * revoke. Pure, and every sentence is here.
  *
  * ⚠️ **The wording is a DRAFT for the owner's approval** (ADR 0047 D-14 Q6),
- * proposed in #1193's pull request. Nothing renders it yet: the call that
- * reads `GET /v1/auth/account-changes` goes through the sealed client that
- * #1192 switches the app to, and the Devices screen that shows these notices
- * is built on that, in #1208. Change a sentence here and in the pull
- * request that approves it, never only in one.
+ * proposed in #1193's pull request; #1208's adds the self-revoke sentence.
+ * The Instance screen's device list renders it (`views/InstanceDevices.tsx`),
+ * from `InstancePort.accountChanges`, which reads
+ * `GET /v1/auth/account-changes` sealed. Change a sentence here and in the
+ * pull request that approves it, never only in one.
  *
  * A key is named the way a rider can recognise it — by the day it was added
  * ("the key added on 12 September"), or as "this device" — and never by its
@@ -61,6 +61,38 @@ const dayMonth = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'long
 /** The device's own calendar, "3 October". */
 export const formatDay: DayFormat = (unixSeconds) => dayMonth.format(new Date(unixSeconds * 1000));
 
+const hourMinute = new Intl.DateTimeFormat('en-GB', {
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+});
+
+/** The device's own clock, 24-hour, "14:05": the same calendar as {@link formatDay}. */
+export const formatTime: DayFormat = (unixSeconds) =>
+  hourMinute.format(new Date(unixSeconds * 1000));
+
+/**
+ * How a key the rider may revoke is named on its revoke button and in the
+ * sentence that confirms it (#1208): by its day, as the notices name it —
+ * and, when another key on the account was added the same day, by its time
+ * too (the owner's ruling of 2026-10-20), so two such keys never share a
+ * name: "the key added on 22 September at 14:05". "The same day" is the day
+ * as written, so two keys a year apart, which would read alike, are told
+ * apart the same way.
+ */
+export function revokeKeyName(
+  key: ListedKey,
+  keys: readonly ListedKey[],
+  day: DayFormat = formatDay,
+  time: DayFormat = formatTime,
+): string {
+  const added = day(key.addedAt);
+  const shared = keys.some(
+    (other) => other.publicKey !== key.publicKey && day(other.addedAt) === added,
+  );
+  return shared ? `the key added on ${added} at ${time(key.addedAt)}` : `the key added on ${added}`;
+}
+
 /** The sentence that follows every change another key made, but a key added. */
 export const IF_NOT_YOU_TEXT = 'If that was not you, revoke that key.';
 
@@ -109,6 +141,11 @@ export function noticeText(
     case 'link_code_minted':
       return by('made a link code');
     case 'key_revoked':
+      // A key that revoked itself (#1208): there is nothing left to revoke, so
+      // the rider is not asked to revoke it.
+      if (entry.subjectKey !== null && entry.subjectKey === entry.actorKey) {
+        return `On ${when} ${revokedKeyName(entry, day)} revoked itself.`;
+      }
       return by(`revoked ${revokedKeyName(entry, day)}`);
     case 'key_added':
       switch (entry.via) {
