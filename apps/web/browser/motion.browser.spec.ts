@@ -231,6 +231,8 @@ interface FocusFrame {
   /** The `data-oyl-select` of the focused element, or null. */
   focusedItem: string | null;
   fading: boolean;
+  /** Animations still RUNNING on a `::view-transition` pseudo-element: a fade being painted. */
+  pseudoAnimations: number;
 }
 
 declare global {
@@ -258,6 +260,15 @@ function watchFocus(): void {
         listShown: list !== null && !list.hidden,
         focusedItem: document.activeElement?.getAttribute('data-oyl-select') ?? null,
         fading: document.activeViewTransition !== null,
+        pseudoAnimations: document
+          .getAnimations()
+          .filter(
+            (animation) =>
+              animation.playState === 'running' &&
+              (animation.effect as KeyframeEffect | null)?.pseudoElement?.startsWith(
+                '::view-transition',
+              ) === true,
+          ).length,
       });
       if (performance.now() - started > 1500) {
         resolve(frames);
@@ -270,11 +281,20 @@ function watchFocus(): void {
 }
 
 /**
- * Focus reached what #670 puts it on, and within the fade's own duration of
- * the frame the change first showed: not held back behind a fade. ⚠️ Not in
- * that same frame — `ListDetail`'s focus moves are passive effects, as they
- * were before #945, and on the CI runner a frame can fall between the commit
- * and them (run 37161938329).
+ * Focus reached what #670 puts it on, and no fade stood between the change
+ * showing and focus arriving: every frame from the one the change first
+ * showed in up to the one focus landed in had no view transition live and no
+ * `::view-transition` animation running. ⚠️ Not in that same frame —
+ * `ListDetail`'s focus moves are passive effects, as they were before #945,
+ * and on the CI runner a frame can fall between the commit and them (run
+ * 37161938329).
+ *
+ * #1487: this used to say "within a fade's length" as elapsed milliseconds,
+ * and a loaded runner took 422 ms with no fade at all (run 39360199249). What
+ * holds focus back is a fade — React runs passive effects only once it has
+ * finished — so the frames are what is asserted, not the clock. A fade a
+ * starved runner painted in no sampled frame is still caught by the caller's
+ * count of view transitions started.
  */
 function expectFocusSoonAfter(
   frames: FocusFrame[],
@@ -282,12 +302,14 @@ function expectFocusSoonAfter(
   focused: (frame: FocusFrame) => boolean,
   what: string,
 ): void {
-  const landed = frames.find((frame) => frame.ms >= (shown?.ms ?? Infinity) && focused(frame));
-  expect(landed, `focus never reached ${what}`).toBeDefined();
+  const from = shown === undefined ? -1 : frames.indexOf(shown);
+  const landed = from < 0 ? -1 : frames.findIndex((frame, at) => at >= from && focused(frame));
+  expect(landed, `focus never reached ${what}`).toBeGreaterThanOrEqual(0);
+  const waited = frames.slice(from, landed + 1);
   expect(
-    (landed?.ms ?? Infinity) - (shown?.ms ?? 0),
-    `focus reached ${what} only after a fade's length`,
-  ).toBeLessThan(MOTION_DURATION_MS.medium);
+    waited.filter((frame) => frame.fading || frame.pseudoAnimations > 0),
+    `focus reached ${what} only after a fade`,
+  ).toStrictEqual([]);
 }
 
 async function focusFrames(page: Page): Promise<FocusFrame[]> {
@@ -579,8 +601,9 @@ test.describe('the route cross-fade — #945', () => {
     // `<ViewTransition>` is keyed by route with `update="none"`: so neither
     // fades, and `ListDetail`'s focus moves (passive effects) are not held
     // back behind one. Measured, not assumed — the count below is zero, and
-    // focus is where #670 puts it within a fade's length of each change
-    // showing. A change that made a selection cross-fade fails the count.
+    // focus is where #670 puts it with no fade painted between each change
+    // showing and focus arriving (#1487: frames, not elapsed ms). A change
+    // that made a selection cross-fade fails both.
     await page.addInitScript(recordViewTransitions);
     await page.setViewportSize({ width: 390, height: 844 });
     const activities = routeById('activities');
