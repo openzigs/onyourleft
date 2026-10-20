@@ -168,6 +168,12 @@ export const ERASE_REMOVES: readonly string[] = [
   // somebody else's service is the last thing an erase should leave behind.
   // {@link eraseDevice} is what makes the line true.
   'the address, model name and key you entered for a hosted model',
+  // #1428. Not a store row: since #1305 the last target each trainer
+  // acknowledged, and when, is kept in `localStorage`
+  // (`ride/trainer-target-memory.ts`), keyed by the trainer's device id — on
+  // Android its Bluetooth address. `deleteAthlete` cannot see it, and
+  // {@link eraseDevice}'s `trainerTargets` is what makes the line true.
+  'the last power target each trainer you rode on confirmed, when it confirmed it, and which trainer that was',
 ];
 
 /**

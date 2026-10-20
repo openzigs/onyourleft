@@ -17,6 +17,7 @@ import {
 import { instanceEraser, INSTANCE_SESSION_STORAGE_KEY } from '../instance/instance-port';
 import {
   createTrainerTargetMemory,
+  REMEMBERED_TARGET_MAX_AGE_SECONDS,
   TRAINER_TARGETS_STORAGE_KEY,
 } from '../ride/trainer-target-memory';
 import { INSTANCE_ACCOUNT_STORAGE_KEY } from '../instance/sign-in';
@@ -214,6 +215,32 @@ describe('what the rider is told before they press it', () => {
 
   it('names the hosted service’s key among what an erase removes — #518', () => {
     expect(ERASE_REMOVES.join(' ')).toContain('key you entered for a hosted model');
+  });
+
+  it('names the remembered trainer target, here and in the policy’s device-storage table — #1428', () => {
+    // Not a store row (#1305 keeps it in `localStorage`), and keyed on Android
+    // by the trainer's Bluetooth address, so a rider reading the list before an
+    // irreversible action is told it goes, and the policy says it is there.
+    const line = ERASE_REMOVES.find((entry) => entry.includes('trainer'));
+    expect(line).toContain('last power target each trainer');
+    expect(line).toContain('which trainer that was');
+
+    const policy = readFileSync(
+      fileURLToPath(new URL('../../../../docs/privacy-policy.md', import.meta.url)),
+      'utf8',
+    );
+    const table = policy.slice(
+      policy.indexOf('## What the app holds, and where'),
+      policy.indexOf('## Location'),
+    );
+    const row = table.split('\n').find((entry) => entry.includes('last power target')) ?? '';
+    // What it holds, why, how long, and that it never leaves the device.
+    expect(row).toMatch(/^\| The last power target each trainer .* which trainer that was/);
+    expect(row).toContain('Bluetooth address');
+    expect(row).toContain('far under the trainer');
+    expect(row).toContain(`Trusted for ${REMEMBERED_TARGET_MAX_AGE_SECONDS / 60} minutes`);
+    expect(row).toContain('*Erase everything* removes it');
+    expect(row).toContain('never leaves the device');
   });
 
   it('says an exported file is out of reach, and that a shared ride is a copy', () => {
