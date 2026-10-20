@@ -1101,7 +1101,7 @@ function readingsNow(input: WorkoutGraphInput): {
 }
 
 /** How long is left of the block being ridden, as a clock, or `undefined` outside one. */
-function leftInBlock(input: WorkoutGraphInput): string | undefined {
+export function leftInBlock(input: WorkoutGraphInput): string | undefined {
   const segment = segmentNow(input.timeline.segments, input.elapsedSeconds);
   return segment === undefined
     ? undefined

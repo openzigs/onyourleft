@@ -149,6 +149,7 @@ import {
   workoutStripName,
   workoutStripPaths,
   workoutStripText,
+  type WorkoutTraceSample,
 } from '../workout/workout-graph';
 
 import { METRIC_STALE_AFTER_SECONDS } from './metrics';
@@ -12202,6 +12203,121 @@ describe('#1318 — a lap taken by hand on a ride with no course under it', () =
     await rig.controller.confirmStop();
     // The second ride never pressed Lap, so Stop ends no lap of it.
     expect(await lapsOf('ride-2')).toEqual([]);
+    rig.controller.dispose();
+  });
+});
+
+// --- The block's target band (#1434) -----------------------------------------
+
+describe('#1434 — what the target band is drawn from, through the real controller', () => {
+  const twoBlocks = (): WorkoutRecord => ({
+    id: workoutId('w1434'),
+    createdBy: ATHLETE_A,
+    name: 'Two blocks',
+    workout: {
+      name: 'Two blocks',
+      blocks: [
+        { kind: 'steady', seconds: seconds(10), target: thresholdShare(0.5) },
+        { kind: 'steady', seconds: seconds(600), target: thresholdShare(0.8) },
+      ],
+    },
+    createdAt: unixSeconds(1),
+    updatedAt: unixSeconds(1),
+  });
+
+  async function riding(): Promise<Bench> {
+    const rig = benchWith();
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await rig.controller.start();
+    rig.controller.startWorkout(twoBlocks(), watts(250));
+    return rig;
+  }
+
+  /** The mean of the trace's live power from `from` on — the one-a-second record. */
+  const meanFrom = (trace: readonly WorkoutTraceSample[], from: number): number => {
+    const readings = trace
+      .filter((each) => each.at >= from)
+      .map((each) => each.power)
+      .filter((each): each is number => each !== undefined);
+    return Math.round(readings.reduce((sum, each) => sum + each, 0) / readings.length);
+  };
+
+  it('the block’s average is its own live power, sampled once a second, and begins again with the next block', async () => {
+    const rig = await riding();
+    expect(rig.controller.getSnapshot().workout?.blockAverageWatts).toBeUndefined();
+    await ride(rig, 5);
+    await flushMicrotasks(20);
+    await ride(rig, 2);
+    const first = rig.controller.getSnapshot().workout;
+    if (first === undefined) throw new Error('no workout');
+    expect(first.elapsedSeconds).toBeLessThan(10);
+    expect(first.blockAverageWatts).toBe(meanFrom(first.trace ?? [], 0));
+
+    await ride(rig, 8);
+    await flushMicrotasks(20);
+    await ride(rig, 3);
+    const second = rig.controller.getSnapshot().workout;
+    if (second === undefined) throw new Error('no workout');
+    expect(second.elapsedSeconds).toBeGreaterThanOrEqual(10);
+    // Only the second block's readings: the first block's do not carry over.
+    expect(second.blockAverageWatts).toBe(meanFrom(second.trace ?? [], 10));
+    expect(second.blockAverageWatts).not.toBe(meanFrom(second.trace ?? [], 0));
+    rig.controller.dispose();
+  });
+
+  it('a power that goes stale mid-block leaves the average of the live seconds, not a gap — a dropped meter is not a zero', async () => {
+    const rig = await riding();
+    await ride(rig, 12);
+    await flushMicrotasks(20);
+    const before = rig.controller.getSnapshot().workout;
+    if (before === undefined) throw new Error('no workout');
+    expect(before.elapsedSeconds).toBeGreaterThanOrEqual(10);
+    expect(before.blockAverageWatts).toBeDefined();
+
+    rig.bench.device(TRAINER).script({ kind: 'notification-dropout', duration: seconds(60) });
+    for (let second = 0; second <= METRIC_STALE_AFTER_SECONDS + 2; second += 1) {
+      await ride(rig, 1);
+      await flushMicrotasks(20);
+    }
+    // The apparatus: the grid calls power stale while the workout runs on.
+    expect(metric(rig, 'power').kind).toBe('stale');
+    const after = rig.controller.getSnapshot().workout;
+    if (after === undefined) throw new Error('no workout');
+    expect(after.status).toBe('running');
+    expect(after.trace?.at(-1)?.power).toBeUndefined();
+    // The average is still a number, and still the mean of the live seconds.
+    expect(after.blockAverageWatts).toBeDefined();
+    expect(after.blockAverageWatts).toBe(meanFrom(after.trace ?? [], 10));
+    rig.controller.dispose();
+  });
+
+  it('a second tick at the same instant of the workout’s clock adds no second reading', async () => {
+    const rig = await riding();
+    await ride(rig, 5);
+    await flushMicrotasks(20);
+    for (let index = 0; index < 3; index += 1) {
+      await ride(rig, 1);
+      // The same instant again: the trace keeps one sample, and so must the mean.
+      await rig.controller.tick(rig.bench.now);
+      await rig.controller.tick(rig.bench.now);
+    }
+    const workout = rig.controller.getSnapshot().workout;
+    if (workout === undefined) throw new Error('no workout');
+    expect(workout.blockAverageWatts).toBe(meanFrom(workout.trace ?? [], 0));
+    rig.controller.dispose();
+  });
+
+  it('carries the live cadence, as the metric grid shows it', async () => {
+    const rig = await riding();
+    await ride(rig, 3);
+    await flushMicrotasks(20);
+    await ride(rig, 1);
+    const cadence = metric(rig, 'cadence');
+    expect(cadence.kind).toBe('live');
+    expect(rig.controller.getSnapshot().workout?.live?.cadence).toBe(
+      cadence.kind === 'live' ? cadence.value : undefined,
+    );
     rig.controller.dispose();
   });
 });
