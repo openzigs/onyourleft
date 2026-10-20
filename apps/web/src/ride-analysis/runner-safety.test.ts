@@ -82,6 +82,13 @@ describe('the ride analysis reaches no trainer (#811, CLAUDE.md §6)', () => {
     expect(trainerModulesReachedFrom(importWalk(), ANALYSIS_MODULES)).toStrictEqual([]);
   });
 
+  // #1487: it walks the whole tree once per planted target, five walks, so it
+  // grows with the tree. Under coverage in the Nightly heavy checks this FILE
+  // took 3 580, 3 664 and 4 742 ms green (runs 39357862473, 39360199189,
+  // 39330750143) and this case passed Vitest's 5 s default, the file at 6 621,
+  // 6 686 and 6 896 ms (39323488275, 39327178765, 39398792602); 383 ms locally
+  // without coverage. So about three times the slowest of all of those, as
+  // docs/agents/ci.md §4c asks. It is a timeout, not a performance claim.
   it('goes red on a planted import of the ride controller, however far down', () => {
     // The runner's own source with one line added, and — separately — the same
     // line two modules away, in the screen it imports.
@@ -110,5 +117,5 @@ describe('the ride analysis reaches no trainer (#811, CLAUDE.md §6)', () => {
         target,
       ).toContain('ride/controller.ts');
     }
-  });
+  }, 20_000);
 });
