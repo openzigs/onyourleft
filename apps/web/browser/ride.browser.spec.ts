@@ -544,6 +544,10 @@ for (const viewport of MOVING_TIME_BAND_VIEWPORTS) {
     page,
   }, testInfo) => {
     await openRide(page, viewport);
+    const leaning = riderBox(viewport);
+    const rider =
+      `the leaning rider [${leaning.left.toFixed(0)},${leaning.top.toFixed(0)} → ` +
+      `${leaning.right.toFixed(0)},${leaning.bottom.toFixed(0)}]`;
     for (const [how, seen] of await bothWays(page)) {
       const shown = seen.moving;
       const spare = shown.field - shown.width;
@@ -566,6 +570,65 @@ for (const viewport of MOVING_TIME_BAND_VIEWPORTS) {
           .map(describeItem),
         note,
       ).toEqual([]);
+      // #1169: and these widths hold the overlay viewports' "no panel over
+      // the rider" too. At 802×600 the route and actions panels lay over the
+      // leaning rider's box, on `main`, and these cases did not look.
+      expect(
+        seen.panels.filter((each) => overlap(each.box, leaning)).map(describeItem),
+        `${how}: a panel over ${rider}`,
+      ).toEqual([]);
+    }
+  });
+}
+
+/**
+ * #1169 — the MIDDLE corners layout, more than 30 rem and under 47 rem tall,
+ * which no overlay viewport above is (802×600 is in §"#1124"). Its bottom row
+ * kept a tablet's 18 rem and 20 rem, and the leaning rider's box, which grows
+ * with the height, lay under one or both panels from 736 to 880 px wide on
+ * `main`. `theme.css` §"THE MIDDLE corners layout's bottom row" narrows the
+ * panels to stop short of the box. The band's narrowest width at a short and
+ * a tall height, where the panels are narrowest, and one wider, where on
+ * `main` only the actions panel was over the rider. Each also holds the
+ * controls inside the narrowed actions panel.
+ */
+const MIDDLE_CORNERS_VIEWPORTS: readonly Viewport[] = [
+  { name: 'a short window, narrow — 736×560', width: 736, height: 560, unstagedFails: true },
+  {
+    name: 'the tallest middle corners layout — 736×751',
+    width: 736,
+    height: 751,
+    unstagedFails: true,
+  },
+  { name: 'a short window — 840×600', width: 840, height: 600, unstagedFails: true },
+];
+
+for (const viewport of MIDDLE_CORNERS_VIEWPORTS) {
+  test(`#1169 — no panel is laid over the leaning rider — ${viewport.name}`, async ({
+    browser,
+  }) => {
+    const page = await sharedRide(browser, viewport);
+    const leaning = riderBox(viewport);
+    const rider =
+      `the leaning rider [${leaning.left.toFixed(0)},${leaning.top.toFixed(0)} → ` +
+      `${leaning.right.toFixed(0)},${leaning.bottom.toFixed(0)}]`;
+    for (const [how, seen] of await bothWays(page)) {
+      expect(
+        seen.panels.filter((each) => overlap(each.box, leaning)).map(describeItem),
+        `${how}: a panel over ${rider}`,
+      ).toEqual([]);
+      // The narrowing is not paid for with a control off its panel.
+      const actions = seen.panels.find((each) => each.name.includes('oyl-hud__actions'));
+      for (const name of ['control: Pause', 'control: End ride', 'control: Lock']) {
+        const item = named(seen.items, name);
+        expect(inside(item.box, viewport), `${how}: ${describeItem(item)}`).toBe(true);
+        expect(
+          actions !== undefined &&
+            item.box.left >= actions.box.left - SUBPIXEL_TOLERANCE &&
+            item.box.right <= actions.box.right + SUBPIXEL_TOLERANCE,
+          `${how}: ${describeItem(item)} inside its panel`,
+        ).toBe(true);
+      }
     }
   });
 }

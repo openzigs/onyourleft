@@ -7229,7 +7229,8 @@ select.oyl-input {
  * bottom row of panels — so it is WIDTH that has to clear it. 16 rem puts the
  * actions panel at x = 472 and the route panel at x = 264: 12 px clear at 480
  * tall and 35 px at 360, either side. The taller corners layout is untouched,
- * because a tablet's bottom row sits below the rider's box. The owner chose
+ * below this layout's 30 rem, because a tablet's bottom row sits below the
+ * rider's box (from 30 rem to 47 rem that is false: see #1169 below). The owner chose
  * this over moving #499's camera and over accepting the overlap.
  */
 @media (min-width: 46rem) and (min-height: 22.5rem) and (max-height: 30rem) {
@@ -7244,6 +7245,79 @@ select.oyl-input {
   .oyl-game--riding .oyl-hud__actions,
   .oyl-game--riding .oyl-hud__route {
     width: min(100%, 16rem);
+  }
+}
+
+/*
+ * THE MIDDLE corners layout's bottom row, clear of the leaning rider — #1169.
+ *
+ * Between the short corners layout (30 rem tall and under) and a tablet's
+ * (47 rem and over), the bottom row kept the tablet's widths, 18 rem and
+ * 20 rem, and "a tablet's bottom row sits below the rider's box" (above) is
+ * false there: the box is 52.5 % to 79.9 % of the height down and grows with
+ * it while the panels, in rem, do not. Measured at the lean cap in the pinned
+ * Chromium: at 802×600 the box is x = 287 to 515, y = 315 to 479, and the
+ * route panel (to x = 296) and the actions panel (from x = 474) both lay over
+ * it; one or both did at some height of the band at every width from 736 to
+ * 880 px on DejaVu. No case measured this layout's rider clearance until
+ * #1169.
+ *
+ * So each panel stops short of the box: its half of the stage, less the
+ * box's half-width (`camera.ts` §`riderFrameBox`: 0.1905 × the height for any
+ * frame wider than tall, so `19.05vh`), the HUD's padding on its own side
+ * (an inset where there is one) and 8 px of clear road. Where there is room,
+ * `min()` keeps 18 rem and 20 rem, so a wide window is unchanged.
+ *
+ * At the band's narrowest and tallest, 736×751, the actions panel is 209 px:
+ * *Pause* and *End ride* give up width (91 px each on DejaVu Sans, against
+ * their 72 px floor) and the trainer line wraps, so the panel grows upward,
+ * and it still starts right of the box. Measured on DejaVu Sans (the CI runner's
+ * face) across 736 to 1100 px wide and 481 to 751 px tall, no panel lies
+ * over the leaning rider and no control leaves its panel; on `main` 56 of
+ * those 88 had a panel over the rider.
+ * `ride.browser.spec.ts` §"#1124" (802×600) and §"#1169" hold it, both ways.
+ *
+ * ⚠️ **The narrowed route panel is too narrow for #1307's one-line strip text**
+ * (271 px at 802×600; the line overflowed it by 6 px on DejaVu Sans), so in
+ * this band the strip's two parts are stacked as on a phone, by the shared
+ * rule under "THE WORKOUT'S STRIP ON A PHONE". The route plan and the strip are both 6 rem
+ * here (5 rem before), one line taller for the second line, so #1307's size
+ * parity holds and the lane keeps its 36 px.
+ */
+@media (min-width: 46rem) and (height > 30rem) and (height < 47rem) {
+  /* One line taller, route plan and strip alike, so that the strip, whose line
+     is now two (below), keeps its 36 px lane and is still the plan's size. */
+  .oyl-game--riding .oyl-hud__plan-svg {
+    height: 6rem;
+  }
+
+  .oyl-game--riding .oyl-hud__route {
+    width: min(
+      100%,
+      18rem,
+      calc(50vw - 19.05vh - max(var(--oyl-space-sm), var(--oyl-safe-left)) - var(--oyl-space-sm))
+    );
+  }
+
+  .oyl-game--riding .oyl-hud__actions {
+    width: min(
+      100%,
+      20rem,
+      calc(50vw - 19.05vh - max(var(--oyl-space-sm), var(--oyl-safe-right)) - var(--oyl-space-sm))
+    );
+  }
+
+  /* A notice, under the primary panel at the start edge, stops short of the
+     box by the same sum as the route panel: its 22 rem ended at x = 360 at
+     802×600 on DejaVu Sans and a workout's trainer notice ran down to y = 331,
+     16 px into the box. Narrower, it wraps and grows down the left of the box,
+     not into it. */
+  .oyl-game--riding .oyl-hud__notices {
+    max-width: min(
+      100%,
+      22rem,
+      calc(50vw - 19.05vh - max(var(--oyl-space-sm), var(--oyl-safe-left)) - var(--oyl-space-sm))
+    );
   }
 }
 
@@ -7506,7 +7580,8 @@ select.oyl-input {
 }
 
 @media (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem),
-  (min-width: 46rem) and (min-height: 22.5rem) and (max-height: 30rem) {
+  (min-width: 46rem) and (min-height: 22.5rem) and (max-height: 30rem),
+  (min-width: 46rem) and (height > 30rem) and (height < 47rem) {
   .oyl-game--riding .oyl-hud__route > .oyl-workout-strip .oyl-workout-strip__part {
     display: block;
   }
