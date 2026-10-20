@@ -43,7 +43,10 @@
  * file, including the ones Poly Haven's API resolves — before the request is
  * made, so a source from anywhere else is refused by the pipeline, not only by
  * a reviewer. {@link licenceVerdict} asks it of the addresses a source declares.
- * (A redirect is followed by `fetch`; only the address requested is checked.)
+ * (Since #1278 a redirect is not followed by `fetch` on its own: each request
+ * is made with `redirect: 'manual'`, and every address a redirect points to is
+ * asked of {@link admission} too, before it is requested — at most
+ * `MAXIMUM_REDIRECTS` of them; see `fetch-assets.ts`.)
  * ⚠️ **A new source is a superseding ADR, not a row added here** (ADR 0026 D-4,
  * which ADR 0049 keeps).
  *
