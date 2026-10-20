@@ -112,6 +112,7 @@ const kindSchema: Schema = {
     'masking',
     'workout',
     'workout-goal',
+    'replan-record',
   ],
 };
 

@@ -281,6 +281,8 @@ export function syncItemFixtures(athleteId: string): readonly SyncItemWrite[] {
     'workout',
     // #1237: the typed workout goals, for the same reason.
     'workout-goal',
+    // #1315: a ride's re-plan record, for the same reason.
+    'replan-record',
   ] as const;
   return kinds.map((kind) => ({
     athleteId,

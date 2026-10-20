@@ -72,6 +72,7 @@ import { linkThisDevice, signInToInstance, type InstanceTransport } from './sign
 import {
   admitDeviceKey,
   athleteKeysFrom,
+  MAXIMUM_PULLED_REPLANS,
   sealedSyncTransport,
   syncWithInstance,
   type SyncDependencies,
@@ -1104,65 +1105,215 @@ describe('a ride’s race offer (#331)', () => {
   }, 60_000);
 });
 
-describe('a ride’s re-plan record is not synced — #1244, #1315', () => {
+describe('a ride’s re-plan record is synced with the ride — #1315, ADR 0048 D-10', () => {
   /**
-   * The disclosure (`workout/replan-disclosure.ts`) and the privacy policy
-   * say of the record of each re-plan decision: *"They are not sent to your
-   * instance when you sync."* This is that sentence, held to the sync itself:
-   * a ride with a record is pushed through the real instance, and neither
-   * the instance nor a second device ends up with a word of it. When #1315
-   * builds the sync of the record this goes red, and the sentence changes
-   * with it.
+   * ADR 0048 D-10: *"P9's record of each acceptance and refusal is kept with
+   * the ride on the device and synced with it."* Rule 11: an item of its
+   * ride, keyed by the ride's id, pushed sealed and pulled on another device,
+   * where every entry is read by `readReplanRecord` before anything is
+   * written. Read back on the instance through a fresh store, and on each
+   * device through the ride's own read (`getActivity`).
    */
-  it('reaches neither the instance nor a second device, and stays on the device that rode it', async () => {
+  const REPLANS = [
+    {
+      decision: 'accepted',
+      // A string that can only have come from the record, to look for.
+      move: { kind: 'swap-next-block', workoutId: 'RECORD-MARKER-1315', blockIndex: 0 },
+      reason: 'heart-rate-high',
+      revision: 1,
+      at: 300,
+    },
+    { decision: 'not-applied', why: 'kept', revision: 1, at: 320 },
+    { decision: 'refused', rule: 'P4', at: 400 },
+  ] as unknown as NonNullable<RideFacts['replans']>;
+
+  /** A record from a build that knew a move this one does not. */
+  const FROM_A_LATER_BUILD = {
+    decision: 'accepted',
+    move: { kind: 'set-watts', watts: 400 },
+    reason: 'heart-rate-high',
+    revision: 2,
+    at: 900,
+  };
+
+  /** Every live re-plan item the instance holds for `athleteId`, on a store opened for this read. */
+  async function replansOnInstance(path: string, athleteId: string) {
+    const fresh = await instanceStore.openSqlStore(path);
+    try {
+      const items = await fresh.listLiveSyncItems(athleteId, 'replan-record', 10);
+      return items.map((item) => ({
+        key: item.key,
+        body: JSON.parse(new TextDecoder().decode(item.body ?? new Uint8Array())) as unknown,
+      }));
+    } finally {
+      await fresh.close();
+    }
+  }
+
+  const replansOn = async (on: Device, ride: ActivityId) =>
+    (await on.harness.read((store) => store.getActivity(LOCAL_ATHLETE, ride)))?.rideFacts?.replans;
+
+  /** A signed-in device with one ride that carries {@link REPLANS}. */
+  async function rodeWithReplans() {
     world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
     const origin = instanceTesting.TEST_ORIGIN;
     const a = await signedInDevice(world.url, origin, ['indoor-trainer-no-position.fit']);
     const ride = a.ids[0]!;
-    const replans = [
-      {
-        decision: 'accepted',
-        // A string that can only have come from the record, to look for.
-        move: { kind: 'swap-next-block', workoutId: 'RECORD-MARKER-1315', blockIndex: 0 },
-        reason: 'heart-rate-high',
-        revision: 1,
-        at: 300,
-      },
-      { decision: 'not-applied', why: 'kept', revision: 1, at: 320 },
-    ] as unknown as NonNullable<RideFacts['replans']>;
+    const facts = await a.on.harness.read((store) => store.getActivity(LOCAL_ATHLETE, ride));
     expect(
       await a.on.harness.write((store) =>
-        store.setActivityRideFacts(LOCAL_ATHLETE, ride, { workoutFinished: true, replans }),
+        store.setActivityRideFacts(LOCAL_ATHLETE, ride, {
+          ...facts?.rideFacts,
+          replans: REPLANS,
+        }),
       ),
     ).toBe(true);
+    return { a, ride, origin, path: world.path };
+  }
 
-    expect(await a.sync()).toMatchObject({ pushed: 1, failures: [] });
+  it('is pushed as an item of its ride, and a linked device pulls it into that ride', async () => {
+    const { a, ride, origin, path } = await rodeWithReplans();
+    expect(await a.sync()).toMatchObject({ pushed: 1, replansPushed: 1, failures: [] });
 
-    // Everything the instance holds for this athlete, item by item.
-    const manifest = await manifestOf(a.on);
-    expect(manifest.length).toBeGreaterThan(0);
-    for (const entry of manifest) {
+    // On the instance, under its own kind and the ride's key, and nowhere else.
+    expect(await replansOnInstance(path, a.athleteId)).toStrictEqual([
+      { key: ride, body: REPLANS },
+    ]);
+    for (const entry of await manifestOf(a.on)) {
+      if (entry.kind === 'replan-record') continue;
       const answer = await a.on.transport.sync.json(
         'GET',
         `/v1/sync/items/${entry.kind}/${entry.key}`,
       );
-      const held = JSON.stringify(answer.body);
-      expect(held, `${entry.kind} carries the record`).not.toContain('RECORD-MARKER-1315');
-      expect(held).not.toContain('replans');
-      expect(held).not.toContain('not-applied');
+      expect(JSON.stringify(answer.body), entry.kind).not.toContain('RECORD-MARKER-1315');
     }
+    // Nothing moves the second time.
+    expect(await a.sync()).toMatchObject({ replansPushed: 0, replansPulled: 0, failures: [] });
 
-    // A second device of the same rider pulls the ride, and no record with it.
+    // A second device of the same rider pulls the ride, and its record with it.
+    const b = await linkedDevice(world!.url, origin, a.on);
+    expect(await b.sync()).toMatchObject({ pulled: 1, replansPulled: 1, failures: [] });
+    expect(await replansOn(b.on, ride)).toStrictEqual(REPLANS);
+    expect(await b.sync()).toMatchObject({ replansPulled: 0, replansPushed: 0, failures: [] });
+
+    // Another athlete on the same instance holds none of it.
+    const stranger = await signedInDevice(world!.url, origin, ['paused-laps.fit']);
+    expect(await replansOnInstance(path, stranger.athleteId)).toStrictEqual([]);
+
+    // ADR 0036 D-3 (b): the device that rode it keeps its copy after the instance confirmed.
+    expect(await replansOn(a.on, ride)).toStrictEqual(REPLANS);
+  }, 60_000);
+
+  it('writes nothing, and remembers nothing, for a body that is not a list of records', async () => {
+    world = await instanceTesting.startIdentityInstance({ bodyLimitBytes: 1024 * 1024 });
+    const origin = instanceTesting.TEST_ORIGIN;
+    const a = await signedInDevice(world.url, origin, ['indoor-trainer-no-position.fit']);
+    const ride = a.ids[0]!;
+    expect(await a.sync()).toMatchObject({ pushed: 1, replansPushed: 0, failures: [] });
     const b = await linkedDevice(world.url, origin, a.on);
     expect(await b.sync()).toMatchObject({ pulled: 1, failures: [] });
-    const onB = await b.on.harness.read((store) => store.getActivity(LOCAL_ATHLETE, ride));
-    expect(onB?.id).toBe(ride);
-    expect(onB?.rideFacts?.replans).toBeUndefined();
 
-    // And the device that rode it still has it, after the sync.
-    const onA = await a.on.harness.read((store) => store.getActivity(LOCAL_ATHLETE, ride));
-    expect(onA?.rideFacts?.replans).toHaveLength(2);
-  });
+    const one = REPLANS[0];
+    for (const body of [
+      'not json',
+      JSON.stringify(one),
+      JSON.stringify({ replans: REPLANS }),
+      '[]',
+      JSON.stringify([one, FROM_A_LATER_BUILD]),
+      JSON.stringify([one, null]),
+      JSON.stringify(Array.from({ length: MAXIMUM_PULLED_REPLANS + 1 }, () => one)),
+    ]) {
+      const put = await a.on.transport.sync.json('POST', `/v1/sync/items/replan-record/${ride}`, {
+        body,
+      });
+      expect(put.status).toBe(200);
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const report = await b.sync();
+        expect(report.replansPulled, body.slice(0, 40)).toBe(0);
+        expect(report.failures, body.slice(0, 40)).toContainEqual({
+          kind: 'replan-record',
+          key: ride,
+          reason: 'not-replan-records',
+        });
+      }
+      expect(await replansOn(b.on, ride), body.slice(0, 40)).toBeUndefined();
+      const bases = await b.on.harness.read((store) => store.listSyncBase(LOCAL_ATHLETE));
+      expect(bases.filter((row) => row.kind === 'replan-record')).toStrictEqual([]);
+    }
+
+    // The control: a list of records that read is taken.
+    await a.on.transport.sync.json('POST', `/v1/sync/items/replan-record/${ride}`, {
+      body: JSON.stringify(REPLANS),
+    });
+    expect(await b.sync()).toMatchObject({ replansPulled: 1, failures: [] });
+    expect(await replansOn(b.on, ride)).toStrictEqual(REPLANS);
+  }, 60_000);
+
+  it('is deleted on the instance with its ride', async () => {
+    const { a, ride } = await rodeWithReplans();
+    expect(await a.sync()).toMatchObject({ replansPushed: 1, failures: [] });
+    await a.on.harness.write((store) => store.deleteActivity(LOCAL_ATHLETE, ride));
+    expect(await a.sync()).toMatchObject({ deletedOnInstance: 1, failures: [] });
+    const entry = (await manifestOf(a.on)).find(
+      (item) => item.kind === 'replan-record' && item.key === ride,
+    );
+    expect(entry?.deleted).toBe(true);
+    expect(await replansOnInstance(world!.path, a.athleteId)).toStrictEqual([]);
+    const bases = await a.on.harness.read((store) => store.listSyncBase(LOCAL_ATHLETE));
+    expect(bases.filter((row) => row.kind === 'replan-record')).toStrictEqual([]);
+  }, 60_000);
+
+  it('is never deleted here by another device’s delete, nor sent back for a ride it hides', async () => {
+    const { a, ride, origin } = await rodeWithReplans();
+    expect(await a.sync()).toMatchObject({ replansPushed: 1, failures: [] });
+    const b = await linkedDevice(world!.url, origin, a.on);
+    expect(await b.sync()).toMatchObject({ pulled: 1, replansPulled: 1, failures: [] });
+    await b.on.harness.write((store) => store.deleteActivity(LOCAL_ATHLETE, ride));
+    expect(await b.sync()).toMatchObject({ deletedOnInstance: 1, failures: [] });
+
+    expect(await a.sync()).toMatchObject({ hiddenOnInstance: 1, replansPushed: 0, failures: [] });
+    expect(await replansOn(a.on, ride)).toStrictEqual(REPLANS);
+    expect(await replansOnInstance(world!.path, a.athleteId)).toStrictEqual([]);
+  }, 60_000);
+
+  it('is not written over a record this device came to hold while the pull waited', async () => {
+    const { a, ride, origin } = await rodeWithReplans();
+    expect(await a.sync()).toMatchObject({ replansPushed: 1, failures: [] });
+    const b = await linkedDevice(world!.url, origin, a.on);
+    // B pulls the ride, and before its record is written B's own lands.
+    const own = [{ decision: 'refused', rule: 'P2', at: 10 }] as unknown as typeof REPLANS;
+    const report = await b.on.harness.write((store) => {
+      let edited = false;
+      return syncWithInstance(
+        syncDependencies(
+          b.on,
+          new Proxy(store, {
+            get: (target, property) => {
+              const value = Reflect.get(target, property) as unknown;
+              if (typeof value !== 'function') return value;
+              const bound = (value as (...args: unknown[]) => unknown).bind(target);
+              if (property !== 'setActivityRideFacts') return bound;
+              return async (...args: unknown[]) => {
+                if (!edited) {
+                  edited = true;
+                  const held = await target.getActivity(LOCAL_ATHLETE, ride);
+                  await target.setActivityRideFacts(LOCAL_ATHLETE, ride, {
+                    ...held?.rideFacts,
+                    replans: own,
+                  });
+                }
+                return bound(...args);
+              };
+            },
+          }),
+        ),
+      );
+    });
+    expect(report).toMatchObject({ pulled: 1, replansPulled: 0, failures: [] });
+    expect(await replansOn(b.on, ride)).toStrictEqual(own);
+    // The next sync sends B's, which is the device's change winning.
+    expect(await b.sync()).toMatchObject({ replansPushed: 1, failures: [] });
+  }, 60_000);
 });
 
 describe('what a device will not take from an instance (#898)', () => {

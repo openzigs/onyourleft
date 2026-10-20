@@ -110,6 +110,17 @@ export function syncReportLines(report: SyncReport): readonly string[] {
       ),
     );
   }
+  // #1315: the record of a ride's re-plan decisions, either way.
+  const replans = report.replansPushed + report.replansPulled;
+  if (replans > 0) {
+    lines.push(
+      count(
+        replans,
+        'Synced the re-plan record of 1 ride.',
+        'Synced the re-plan records of {n} rides.',
+      ),
+    );
+  }
   // #1237. One set of goals a rider, so one line whichever way it went.
   if (report.workoutGoalsPushed + report.workoutGoalsPulled > 0) {
     lines.push(WORKOUT_GOALS_SYNCED_TEXT);

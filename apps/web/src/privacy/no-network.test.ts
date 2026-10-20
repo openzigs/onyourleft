@@ -1768,7 +1768,9 @@ const REPLAN_DISCLOSED_IN: Readonly<Record<string, readonly string[]>> = {
     'it is never sent in plain text',
     'what your instance keeps: each request',
     'what this device keeps: each change it accepted or refused',
-    'it is not sent to your instance when you sync',
+    // #1315: synced with its ride, sealed, and deleted there with it.
+    'when you sync, it goes with the ride to your instance, sealed for that instance alone',
+    'delete the ride here and sync, and the instance deletes it too',
     // No hosted source: #1244 asks only the instance's own model.
     "no hosted service: this app asks only for the model on your instance's own machine",
     'it never asks a hosted service for a re-plan, and a key you stored on your instance is not used for one',

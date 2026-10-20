@@ -24,8 +24,8 @@
  *    model, the 3 minutes, and a long workout's most recent summaries. Three
  *    more are held where the behaviour is: nothing before the switch is on,
  *    while paused or after the ride (`ride/controller.test.ts` §"what the
- *    disclosure says of this device"), and the record not synced
- *    (`instance/sync.test.ts` §"a ride's re-plan record is not synced").
+ *    disclosure says of this device"), and the record synced with its ride
+ *    (`instance/sync.test.ts` §"a ride's re-plan record is synced with the ride").
  */
 
 import { readFileSync } from 'node:fs';
@@ -159,9 +159,9 @@ describe('what the disclosure says: what, when, to whom, and off per ride', () =
     expect(TEXT).toContain('works out every target itself');
     expect(TEXT).toContain('starts at the next block, never in the one you are riding');
     expect(TEXT).toContain('Your instance keeps each request and its answer for 7 days.');
-    // P9's record: with the ride and in the export, and not synced (#1315).
+    // P9's record: with the ride, in the export, and synced with the ride (#1315).
     expect(TEXT).toContain(
-      'This device keeps each change it accepted or refused with the ride, and puts them in your account export. They are not sent to your instance when you sync.',
+      'This device keeps each change it accepted or refused with the ride, and puts them in your account export. When you sync, they go with the ride to your instance, sealed, and to your other devices that sync with it.',
     );
   });
 });

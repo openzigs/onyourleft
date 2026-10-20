@@ -34,6 +34,8 @@ const NOTHING: SyncReport = {
   workoutGoalsPulled: 0,
   workoutGoalsDeletedOnInstance: 0,
   workoutGoalsHiddenOnInstance: 0,
+  replansPushed: 0,
+  replansPulled: 0,
   keysToConfirm: [],
   failures: [],
 };
@@ -93,6 +95,15 @@ describe('the sync report’s lines for saved workouts (#1100)', () => {
     ).toStrictEqual(['Deleted 2 things on the instance that you deleted here.']);
     expect(syncReportLines({ ...NOTHING, workoutGoalsHiddenOnInstance: 1 })).toStrictEqual([
       'Another device deleted 1 thing you still have here. It stays on this device.',
+    ]);
+  });
+
+  it('says how many rides’ re-plan records were synced, either way (#1315)', () => {
+    expect(syncReportLines({ ...NOTHING, replansPushed: 1 })).toStrictEqual([
+      'Synced the re-plan record of 1 ride.',
+    ]);
+    expect(syncReportLines({ ...NOTHING, replansPushed: 1, replansPulled: 2 })).toStrictEqual([
+      'Synced the re-plan records of 3 rides.',
     ]);
   });
 });

@@ -880,3 +880,12 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   `readReplanRecord`, one that does not read is dropped and counted in `replansDropped`, a field
   that is not a list holds no record, and the latest 200 are kept. Nothing about it can stop a ride
   being recovered. `workoutFinished` and `ghostRaced` are still not carried. (#1328)
+- **2026-10-20** — **P9's record is synced with its ride.** D-10's *"kept with the ride on the device
+  and synced with it"* is built: a ride's re-plan decisions go to the rider's instance as one sealed
+  item of kind `replan-record`, an item of that ride keyed by its id, pushed and pulled by the
+  write-up's rules (the record is written once and never edited). A pulled body is read whole by
+  `readReplanRecord`, at most 200 entries, before anything is written; one that does not read writes
+  nothing and is reported. It is deleted on the instance with its ride, never sent for a ride
+  another device deleted there, and never indexed for history or read by an analysis tool. The
+  disclosure's sentence *"They are not sent to your instance when you sync"* is replaced, with the
+  privacy policy and the Data Safety answer, subject to the owner's approval of the wording. (#1315)

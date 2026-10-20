@@ -25,7 +25,7 @@ import {
   type PrivacyZoneRecord,
 } from './index';
 import { activityId, athleteId, lapId, privacyZoneId } from './ids';
-import { StoreReferentialError } from './errors';
+import { StoreConflictError, StoreReferentialError } from './errors';
 import { createStoreHarness } from './testing';
 import { DEFAULT_PRIVACY_ZONE_RADIUS_METRES } from './records';
 import type { PersistedActivity } from './persisted';
@@ -490,6 +490,52 @@ describe('persistence — the write must be visible to a reader that was not the
       });
       expect(read?.name).toBe('Hill reps');
       expect(read?.movingTime).toBe(ride.movingTime);
+    } finally {
+      await harness.destroy();
+    }
+  });
+
+  it('setActivityRideFacts with a condition writes only over facts it accepts (#1315)', async () => {
+    const harness = createStoreHarness();
+    try {
+      await harness.write(async (fresh) => fresh.putAthlete(athlete()));
+      const ride = indoorRide({ rideFacts: { workoutFinished: true } });
+      await harness.write(async (fresh) => fresh.putActivity(ride));
+      const seen: unknown[] = [];
+
+      await expect(
+        harness.write(async (fresh) =>
+          fresh.setActivityRideFacts(
+            ATHLETE_A,
+            ride.id,
+            { ascent: metres(1) },
+            {
+              onlyIf: (held) => {
+                seen.push(held);
+                return false;
+              },
+            },
+          ),
+        ),
+      ).rejects.toBeInstanceOf(StoreConflictError);
+      // Asked about the facts held, and nothing was written.
+      expect(seen).toEqual([{ workoutFinished: true }]);
+      expect(
+        (await harness.read(async (fresh) => fresh.getActivity(ATHLETE_A, ride.id)))?.rideFacts,
+      ).toEqual({ workoutFinished: true });
+
+      // Accepted, it writes.
+      const read = await harness.roundTrip(
+        async (fresh) =>
+          fresh.setActivityRideFacts(
+            ATHLETE_A,
+            ride.id,
+            { ascent: metres(1) },
+            { onlyIf: () => true },
+          ),
+        async (fresh) => fresh.getActivity(ATHLETE_A, ride.id),
+      );
+      expect(read?.rideFacts).toEqual({ ascent: 1 });
     } finally {
       await harness.destroy();
     }

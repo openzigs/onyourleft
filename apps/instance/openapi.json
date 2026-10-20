@@ -8914,7 +8914,8 @@
                               "document",
                               "masking",
                               "workout",
-                              "workout-goal"
+                              "workout-goal",
+                              "replan-record"
                             ]
                           },
                           "key": {
