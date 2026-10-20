@@ -250,7 +250,7 @@ describe('the round-trip measurement, run against a scripted model — #1235', (
         coldRuns: 2,
         unload: () => {
           unloads += 1;
-          return Promise.resolve();
+          return Promise.resolve(true);
         },
       }),
     );
@@ -259,9 +259,45 @@ describe('the round-trip measurement, run against a scripted model — #1235', (
       [true, 'succeeded'],
       [true, 'succeeded'],
     ]);
+    expect(cold.cold.map((run) => run.unloaded)).toEqual([true, true]);
     expect(cold.coldTotalMs?.n).toBe(2);
     const none = await measure(options(url, 'plaintext', { runs: 0, coldRuns: 2 }));
     expect([none.warmUp, none.cold, none.coldTotalMs]).toEqual([null, [], null]);
+  }, 60_000);
+
+  it('reports no cold figure for a run whose unload failed, and marks that run not unloaded — #1271', async () => {
+    const url = await instance(
+      Array.from({ length: 4 }, () => TEXT),
+      false,
+    );
+    const lines: string[] = [];
+    // The first unload fails, the second works.
+    let unloads = 0;
+    const report = await measure(
+      options(url, 'plaintext', {
+        coldRuns: 2,
+        unload: () => {
+          unloads += 1;
+          return Promise.resolve(unloads > 1);
+        },
+        log: (line) => lines.push(line),
+      }),
+    );
+    expect(report.cold.map((run) => [run.run, run.status, run.unloaded])).toEqual([
+      [1, 'succeeded', false],
+      [2, 'succeeded', true],
+    ]);
+    // The cold figures are the second run's alone: the first may have run on a loaded model.
+    expect(report.coldTotalMs?.n).toBe(1);
+    expect(report.coldTotalMs?.p50).toBeCloseTo(report.cold[1]?.totalMs ?? -1, 0);
+    expect(report.coldFirstStepMs?.n).toBe(1);
+    expect(lines).toContain('cold 1: the model was not unloaded, so this run is not counted cold');
+    // Every unload failing leaves no cold figure at all, never a warm one under the name.
+    const failing = await measure(
+      options(url, 'plaintext', { runs: 0, coldRuns: 1, unload: () => Promise.resolve(false) }),
+    );
+    expect(failing.cold.map((run) => run.unloaded)).toEqual([false]);
+    expect([failing.coldTotalMs, failing.coldFirstStepMs]).toEqual([null, null]);
   }, 60_000);
 
   it('records a run that outlived its time as timed-out, cancels it, and leaves it out of the figures', async () => {
@@ -270,7 +306,7 @@ describe('the round-trip measurement, run against a scripted model — #1235', (
       options(url, 'plaintext', {
         runs: 0,
         coldRuns: 1,
-        unload: () => Promise.resolve(),
+        unload: () => Promise.resolve(true),
         runTimeoutMs: 300,
       }),
     );
@@ -838,7 +874,7 @@ describe('the round-trip measurement of a hosted model, on a key of the measurer
           options('http://127.0.0.1:9', 'sealed', {
             hosted: HOSTED,
             coldRuns: 1,
-            unload: () => Promise.resolve(),
+            unload: () => Promise.resolve(true),
           }),
         ),
       ).rejects.toThrow('nothing to unload');
@@ -1086,6 +1122,28 @@ describe('the command’s --unload, run by this machine’s own shell — #1287'
     const report = JSON.parse(done.out) as { statuses: unknown; cold: readonly unknown[] };
     expect(report.statuses).toEqual({ succeeded: 3 });
     expect(report.cold).toHaveLength(2);
+  }, 60_000);
+
+  it('reports no cold figure when the unload command fails, and says so — #1271', async () => {
+    const url = await instance(
+      Array.from({ length: 4 }, () => TEXT),
+      false,
+    );
+    const script = join(directory ?? '', 'fails.mjs');
+    await writeFile(script, 'process.exit(1);\n');
+    const done = await localCommand(url, `"${process.execPath}" "${script}"`);
+    expect(done.status).toBe(0);
+    expect(done.err).toContain('the unload command failed');
+    expect(done.err).toContain(
+      'cold 1: the model was not unloaded, so this run is not counted cold',
+    );
+    const report = JSON.parse(done.out) as {
+      cold: readonly { unloaded?: unknown }[];
+      coldTotalMs: unknown;
+      coldFirstStepMs: unknown;
+    };
+    expect(report.cold.map((run) => run.unloaded)).toEqual([false, false]);
+    expect([report.coldTotalMs, report.coldFirstStepMs]).toEqual([null, null]);
   }, 60_000);
 });
 

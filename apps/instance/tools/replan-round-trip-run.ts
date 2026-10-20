@@ -129,6 +129,12 @@ export interface RunRecord {
   readonly run: number;
   readonly cold: boolean;
   /**
+   * A cold run's: whether the unload before it said it worked (#1271). A
+   * cold run that is `false` here ran on a model that may still have been
+   * loaded, so it is in no cold figure.
+   */
+  readonly unloaded?: boolean;
+  /**
    * How the job ended: `succeeded`, `failed`, `withheld`, `cancelled`, or here
    * `timed-out` or `connection-lost` (the stream broke before its result;
    * `failure` is then the socket's own code).
@@ -310,8 +316,12 @@ export interface MeasureOptions {
   readonly runs: number;
   /** Runs that each follow {@link MeasureOptions.unload}. */
   readonly coldRuns: number;
-  /** Unloads the model, before each cold run. Without it no cold run is made. */
-  readonly unload?: () => Promise<void>;
+  /**
+   * Unloads the model, before each cold run, and says whether it did. Without
+   * it no cold run is made; a run after an unload that answered `false` is
+   * kept, marked `unloaded: false`, and left out of every cold figure (#1271).
+   */
+  readonly unload?: () => Promise<boolean>;
   /** A new account after this many starts: the instance allows 12 an hour to each. */
   readonly startsPerAccount: number;
   /** How long one run may take before it is recorded `timed-out` and cancelled. */
@@ -371,7 +381,7 @@ export interface MeasureReport {
     readonly upMs: Summary | null;
     readonly downMs: Summary | null;
   };
-  /** Over the cold runs that ended `succeeded`. */
+  /** Over the cold runs that ended `succeeded` after an unload that worked. */
   readonly coldTotalMs: Summary | null;
   readonly coldFirstStepMs: Summary | null;
   /** How every run ended, warm and cold. */
@@ -937,8 +947,10 @@ export async function measure(options: MeasureOptions): Promise<MeasureReport> {
     for (let run = 1; run <= options.runs; run += 1) warm.push(await next(run, false));
     if (options.unload !== undefined) {
       for (let run = 1; run <= options.coldRuns; run += 1) {
-        await options.unload();
-        cold.push(await next(run, true));
+        const unloaded = await options.unload();
+        if (!unloaded)
+          log(`cold ${String(run)}: the model was not unloaded, so this run is not counted cold`);
+        cold.push({ ...(await next(run, true)), unloaded });
       }
     }
   };
@@ -968,7 +980,9 @@ export async function measure(options: MeasureOptions): Promise<MeasureReport> {
   }
 
   const good = warm.filter((record) => record.status === 'succeeded');
-  const goodCold = cold.filter((record) => record.status === 'succeeded');
+  const goodCold = cold.filter(
+    (record) => record.status === 'succeeded' && record.unloaded === true,
+  );
   const statuses: Record<string, number> = {};
   for (const record of [...warm, ...cold]) {
     const key = record.failure === undefined ? record.status : `${record.status}:${record.failure}`;
