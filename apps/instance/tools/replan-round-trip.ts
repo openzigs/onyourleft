@@ -151,7 +151,9 @@ const measuring = measure({
     : {
         unload: () => {
           // A failed unload does not stop the measurement, but the run after
-          // it is not a cold one: the model may still be loaded (#1271).
+          // it is not a cold one: the model may still be loaded (#1271). A
+          // model never loaded makes the command fail too, so that run is
+          // kept as `unloaded: false` rather than lost.
           try {
             execSync(unload, { stdio: 'ignore' });
             return Promise.resolve(true);

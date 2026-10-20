@@ -1119,9 +1119,18 @@ describe('the command’s --unload, run by this machine’s own shell — #1287'
     expect(done.err).not.toContain('the unload command failed');
     expect(done.status).toBe(0);
     expect(await readFile(ran, 'utf8')).toBe('unloaded\nunloaded\n');
-    const report = JSON.parse(done.out) as { statuses: unknown; cold: readonly unknown[] };
+    const report = JSON.parse(done.out) as {
+      statuses: unknown;
+      cold: readonly { unloaded?: unknown }[];
+      coldTotalMs: unknown;
+    };
     expect(report.statuses).toEqual({ succeeded: 3 });
     expect(report.cold).toHaveLength(2);
+    // The command's own unload answered true each time it succeeded: both runs
+    // are counted cold, and none is reported as left loaded (#1271).
+    expect(report.cold.map((run) => run.unloaded)).toEqual([true, true]);
+    expect(report.coldTotalMs).not.toBeNull();
+    expect(done.err).not.toContain('so this run is not counted cold');
   }, 60_000);
 
   it('reports no cold figure when the unload command fails, and says so — #1271', async () => {
