@@ -71,7 +71,11 @@ import { KeptVisible } from '../design/KeptVisible';
 import { SensorGlyph, type SensorGlyphKind } from '../design/illustration/SensorGlyph';
 import { StatusMessage } from '../design/StatusMessage';
 import { hrefFor, routeById } from '../shell/routes';
+import type { DeviceId } from '@onyourleft/sensors';
+
 import type { PairedSensor, PairingRole, RideController, RideSnapshot } from './controller';
+import type { SignalStrengthPort } from './signal-port';
+import { maySignalBeRead, signalWords, useSignalStrengths } from './signal-strength';
 import { useRideSnapshot } from './useRideController';
 
 /** One row per kind of device, in the order #49's revision block asks for. */
@@ -112,6 +116,21 @@ const START_WITH_THE_TRAINER =
 export const NOT_PAIRED = 'Not paired';
 
 /**
+ * A trainer that is connected and sending power while another app or device
+ * has its control — #1435's *receiving power but not taking control*, on the
+ * trainer's own row.
+ *
+ * Shown from `trainer.lost === 'permission-lost'`, which the control client
+ * sets on the machine's own word: a Request Control answered `0x05` Control
+ * Not Permitted, or a Fitness Machine Status `0xFF` taking control back. ⚠️
+ * **Nothing is sent to find this out** (CLAUDE.md §6): the row says it only
+ * after the trainer itself said so, in answer to something the rider pressed.
+ */
+export const POWER_BUT_ANOTHER_APP_HAS_CONTROL =
+  'Sending power, but another app or bike computer has control of it. Close that app or ' +
+  'disconnect the trainer there, then ask for control again on the Ride screen.';
+
+/**
  * Web Bluetooth's one-gesture-per-device rule, as the pairing list says it —
  * docs/agents/web-bluetooth.md §8, ADR 0003 D-7 rule 5. Never inside the disclosure beneath the
  * list (#659), and held there by `a11y/kept-visible.a11y.test.tsx` (#666).
@@ -125,6 +144,9 @@ export const ONE_GESTURE_PER_DEVICE =
  *
  * `disconnected` says what to do, because on Web Bluetooth there is no silent
  * reconnect (docs/agents/web-bluetooth.md §8): the rider forgets it and pairs it again.
+ * Since #1435 it is called *link lost* and names the two usual causes first —
+ * a device that slept, or one too far away — because pairing it again into the
+ * same conditions loses it again.
  */
 export function connectionWords(state: ConnectionState): string {
   switch (state) {
@@ -137,7 +159,7 @@ export function connectionWords(state: ConnectionState): string {
     case 'unavailable':
       return 'Unavailable — Bluetooth is off or blocked';
     case 'disconnected':
-      return 'Disconnected — forget it and pair it again to reconnect';
+      return 'Link lost — wake it or bring it closer, then forget it and pair it again';
   }
 }
 
@@ -153,6 +175,12 @@ export interface PairingPanelProps {
    */
   readonly limits: readonly string[];
   /**
+   * Where the platform gives one, each connected device's signal strength —
+   * #1435. `undefined` in a browser, which has none to give.
+   * @see ./signal-port.ts
+   */
+  readonly signal?: SignalStrengthPort | undefined;
+  /**
    * What goes inside the disclosure ahead of the connection count. ⚠️ Must
    * render nothing focusable — see this file's header.
    */
@@ -164,9 +192,11 @@ export function PairingPanel({
   controller,
   summary,
   limits,
+  signal,
   children,
 }: PairingPanelProps): JSX.Element {
   const snapshot = useRideSnapshot(controller);
+  const signals = useSignalStrengths(signal, snapshot.sensors, maySignalBeRead(snapshot));
   return (
     <>
       {snapshot.pairingError === undefined ? null : (
@@ -206,6 +236,12 @@ export function PairingPanel({
             step={step}
             sensors={snapshot.sensors.filter((sensor) => sensor.role === step.role)}
             controller={controller}
+            signals={signals}
+            controlHeldElsewhere={
+              step.role === 'trainer' &&
+              snapshot.trainer.lost === 'permission-lost' &&
+              !snapshot.trainer.hasControl
+            }
           />
         ))}
       </ul>
@@ -237,10 +273,15 @@ function PairingRow({
   step,
   sensors,
   controller,
+  signals,
+  controlHeldElsewhere,
 }: {
   readonly step: (typeof PAIRING_STEPS)[number];
   readonly sensors: readonly PairedSensor[];
   readonly controller: RideController;
+  readonly signals: ReadonlyMap<DeviceId, number>;
+  /** The trainer row only: the machine said another app has its control. */
+  readonly controlHeldElsewhere: boolean;
 }): JSX.Element {
   return (
     <li className="oyl-pairing__row tw:bg-surface-raised tw:rounded-card">
@@ -256,6 +297,10 @@ function PairingRow({
                 <p className="oyl-pairing__state">
                   {sensor.name}: {connectionWords(sensor.state)}
                 </p>
+                {sensor.state === 'connected' ? signalLine(signals.get(sensor.id)) : null}
+                {controlHeldElsewhere && sensor.state === 'connected' ? (
+                  <p className="tw:m-0">{POWER_BUT_ANOTHER_APP_HAS_CONTROL}</p>
+                ) : null}
                 <Button
                   variant="secondary"
                   onClick={() => {
@@ -279,6 +324,11 @@ function PairingRow({
       </div>
     </li>
   );
+}
+
+/** A device's signal strength, where there is a reading. */
+function signalLine(dbm: number | undefined): JSX.Element | null {
+  return dbm === undefined ? null : <p className="tw:m-0">{signalWords(dbm)}</p>;
 }
 
 /**

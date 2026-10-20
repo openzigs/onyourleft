@@ -154,6 +154,20 @@ export interface CapacitorBlePort {
    */
   getServices(deviceId: string): Promise<readonly PluginService[]>;
 
+  /**
+   * How strongly the connected device is heard, in dBm — #1435's signal
+   * strength on the Devices screen.
+   *
+   * ⚠️ **Sends nothing to the device.** Android's
+   * `BluetoothGatt.readRemoteRssi()` asks the phone's OWN controller what it
+   * measured on the link (HCI Read RSSI); no attribute is read or written on
+   * the trainer, which is why it may be asked of one at all (CLAUDE.md §6).
+   * ⚠️ It does take a place in the plugin's one queue, which is why
+   * `apps/web/src/ride/signal-strength.ts` asks only while nothing is driving
+   * a trainer.
+   */
+  readRssi(deviceId: string): Promise<number>;
+
   disconnect(deviceId: string): Promise<void>;
 
   /** One characteristic read. Used for the profiles' `describe` characteristic. */

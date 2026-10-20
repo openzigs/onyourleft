@@ -5,6 +5,7 @@ import type { JSX } from 'react';
 import { StatusMessage } from '../design/StatusMessage';
 import type { RideController } from '../ride/controller';
 import { ONE_GESTURE_PER_DEVICE, PairingPanel } from '../ride/SensorPairing';
+import type { SignalStrengthPort } from '../ride/signal-port';
 import {
   BLUETOOTH_ABSENT_STILL_WORKS,
   BLUETOOTH_ABSENT_WHERE,
@@ -43,6 +44,12 @@ export interface DevicesViewProps {
    * today's dead end — the browser gate's control renders exactly that.
    */
   readonly controller?: RideController | undefined;
+  /**
+   * Each connected device's signal strength, where the platform gives one —
+   * #1435. Only the Android shell does (`ride/signal-port.ts`), so only the
+   * shell's branch reads it.
+   */
+  readonly signal?: SignalStrengthPort | undefined;
 }
 
 /**
@@ -87,11 +94,16 @@ export interface DevicesViewProps {
  * same element at the same index in both, and only the can-pair branch moves
  * it.
  */
-export function DevicesView({ capabilities, shell, controller }: DevicesViewProps): JSX.Element {
+export function DevicesView({
+  capabilities,
+  shell,
+  controller,
+  signal,
+}: DevicesViewProps): JSX.Element {
   return shell === undefined ? (
     <BrowserDevices capabilities={capabilities} controller={controller} />
   ) : (
-    <ShellDevices port={shell} controller={controller} />
+    <ShellDevices port={shell} controller={controller} signal={signal} />
   );
 }
 
@@ -224,9 +236,11 @@ function BrowserDevices({
 function ShellDevices({
   port,
   controller,
+  signal,
 }: {
   readonly port: ShellSupportPort;
   readonly controller: RideController | undefined;
+  readonly signal: SignalStrengthPort | undefined;
 }): JSX.Element {
   const { support, recheck } = useShellSupport(port);
   const notice = <ShellSupportNotice support={support} onRecheck={recheck} />;
@@ -242,6 +256,7 @@ function ShellDevices({
           controller={controller}
           summary="What this phone can and cannot do"
           limits={PHONE_LIMITS}
+          signal={signal}
         >
           {notice}
         </PairingPanel>

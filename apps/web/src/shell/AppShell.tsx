@@ -93,6 +93,7 @@ import type { RoomsPort } from '../net/rooms-port';
 import type { SideInstancePicturesPort } from '../camera/side-instance-port';
 import type { SidePairingPort } from '../camera/side-pairing-port';
 import type { ThermalPort } from '../game/thermal-port';
+import type { SignalStrengthPort } from '../ride/signal-port';
 
 import { UpdateOffer } from '../offline/UpdateOffer';
 import type { UpdateWatcher } from '../offline/update';
@@ -203,6 +204,11 @@ export interface AppShellProps {
    * rendered by the accessibility suite on a machine that is not a phone.
    */
   readonly shell?: ShellSupportPort | undefined;
+  /**
+   * Each connected device's signal strength on the Devices screen — #1435.
+   * Present only inside the Android shell, built beside {@link shell}.
+   */
+  readonly signal?: SignalStrengthPort | undefined;
   /**
    * Running inside the Android shell — `support/capacitor.ts` §`isNativeShell`,
    * read by `main.tsx`. #1438: History's footer says what deletes the rides on
@@ -694,6 +700,7 @@ function viewFor(
         <DevicesView
           capabilities={props.capabilities}
           {...(props.shell === undefined ? {} : { shell: props.shell })}
+          {...(props.signal === undefined ? {} : { signal: props.signal })}
           // #659: pairing lives on Devices, through the controller the Ride
           // screen reads — mounted above this router, so what is paired here is
           // what Ride shows.

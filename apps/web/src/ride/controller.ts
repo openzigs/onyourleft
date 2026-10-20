@@ -155,6 +155,7 @@ import { NO_TRAINER_CONTROL, type OpenTrainer, type TrainerConnection } from './
 import { createWorkoutSession, RELEASE_INCOMPLETE, type WorkoutSession } from '../workout/session';
 import { TargetHeldBack } from './held-back';
 import { answersHeld, createManualErg, type ManualErg, type ManualErgRescue } from './manual-erg';
+import { controlRefusalWords, pairingFailureWords, type PairingStep } from './pairing-words';
 import { blockText } from '../workouts/library';
 import type { HoldOff, WorkoutHold } from '../workout/hold-text';
 import type { ReplanPort } from '../workout/replan-port';
@@ -2596,6 +2597,9 @@ export function createRideController(options: RideControllerOptions): RideContro
       const connection = attachment.connection;
       if (connection !== undefined) {
         entry.trainer = connection;
+        // A loss belongs to the connection it was reported on; a trainer paired
+        // afresh starts with none (#1435).
+        controlLost = undefined;
         entry.release.push(
           connection.control.onControlLost((reason) => {
             controlLost = reason;
@@ -3376,10 +3380,16 @@ export function createRideController(options: RideControllerOptions): RideContro
       // chooser answers — #712. Read below, where the device is refused.
       const overlapped = new Set(forgetting.keys());
       choosing.add(overlapped);
+      // #1435: which half failed decides the sentence — a chooser that closed
+      // empty and a link that would not come up are different things to do.
+      let step: PairingStep = 'choosing';
+      let chosen = 'That device';
       try {
         const device = await transport.discover({
           capabilities: [...PAIRING_ROLE_CAPABILITIES[role]],
         });
+        step = 'linking';
+        chosen = device.name || chosen;
         const id = device.identity.id;
         // ⚠️ #712: REFUSED, not waited for. `unpair` takes the row away
         // before `transport.forget` has finished (#659's order), so the check
@@ -3443,7 +3453,7 @@ export function createRideController(options: RideControllerOptions): RideContro
           askAgainIfRefused();
         }
       } catch (error) {
-        tell(describe(error));
+        tell(pairingFailureWords(error, step, chosen));
       } finally {
         choosing.delete(overlapped);
       }
@@ -4161,7 +4171,8 @@ export function createRideController(options: RideControllerOptions): RideContro
         // now be describing a machine this client is driving.
         releaseFault = undefined;
       } catch (error) {
-        refusal = describe(error);
+        // #1435: a refusal a rider can act on, chosen by its code.
+        refusal = controlRefusalWords(error);
       }
       changed();
     },

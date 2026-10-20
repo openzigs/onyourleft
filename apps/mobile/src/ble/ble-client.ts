@@ -99,6 +99,8 @@ export function capacitorBlePort(): CapacitorBlePort {
       }));
     },
 
+    readRssi: async (deviceId: string): Promise<number> => BleClient.readRssi(deviceId),
+
     read: async (deviceId: string, service: string, characteristic: string): Promise<DataView> =>
       BleClient.read(deviceId, service, characteristic),
 

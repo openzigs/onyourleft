@@ -113,6 +113,7 @@ import { sideReportKeeper } from './camera/side-report-keeper';
 import { sidePairingPort } from './camera/side-link';
 import { sideLinkAvailable } from './camera/side-link-transport';
 import type { ThermalPort } from './game/thermal-port';
+import type { SignalStrengthPort } from './ride/signal-port';
 import { THERMAL_FORECAST_SECONDS } from './game/thermal';
 import { platformStorage, requestPersistenceOnce } from './support/persistent-storage';
 import type { ShellSupportPort } from './support/shell-support-port';
@@ -266,6 +267,11 @@ interface ClientPlatform {
    * `undefined`.
    */
   readonly thermal: ThermalPort | undefined;
+  /**
+   * Each connected device's signal strength, for the Devices screen (#1435).
+   * `undefined` in a browser: Web Bluetooth gives none for a connected device.
+   */
+  readonly signal: SignalStrengthPort | undefined;
 }
 
 /**
@@ -392,11 +398,16 @@ async function buildPlatform(
       readThermalHeadroom: async () =>
         mobile.readCapacitorThermalHeadroom(thermalPlugin, THERMAL_FORECAST_SECONDS),
     };
-    return { rideController, shell, thermal };
+    // #1435. The same `plugin`, for the reason `openTrainer` above gives: the
+    // link whose signal is read is the one this object holds.
+    const signal: SignalStrengthPort = {
+      readSignal: async (id) => mobile.readCapacitorSignal(plugin, id),
+    };
+    return { rideController, shell, thermal, signal };
   }
 
   if (probe.bluetooth === undefined || !probe.secureContext) {
-    return { rideController: undefined, shell: undefined, thermal: undefined };
+    return { rideController: undefined, shell: undefined, thermal: undefined, signal: undefined };
   }
   const browserTransport = createWebBluetoothTransport({
     profiles: rideProfiles(),
@@ -413,6 +424,7 @@ async function buildPlatform(
     // global.
     shell: undefined,
     thermal: undefined,
+    signal: undefined,
   };
 }
 
@@ -1493,6 +1505,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           {...(update === undefined ? {} : { update })}
           {...(storage === undefined ? {} : { storage })}
           {...(platform.shell === undefined ? {} : { shell: platform.shell })}
+          {...(platform.signal === undefined ? {} : { signal: platform.signal })}
           nativeShell={isNativeShell(platformCapacitor())}
           {...(camera === undefined ? {} : { camera })}
           {...(sidePairing === undefined ? {} : { sidePairing })}
