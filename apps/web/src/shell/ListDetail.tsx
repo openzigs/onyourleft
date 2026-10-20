@@ -530,20 +530,22 @@ export interface CreateLinkProps {
  * Rendered in both states on ONE pane, so choosing an item does not move the
  * list under the pointer that chose it: only the emphasis changes.
  *
- * ⚠️ **Not rendered at two panes with nothing chosen — #1442.** There the form
- * it leads to is already on the screen beside it, under its own heading, so
- * the screen offered one action twice (Routes' *Import a route* at the head
- * of the list and as the section beside it). Choosing an item there moves
- * focus to the item's heading in the OTHER pane, so the list's row moving
- * down by this link is not under the next thing the rider reaches for. An
- * empty list's own action keeps it ({@link CreateLinkProps.emptyState}).
+ * ⚠️ **Not shown at two panes with nothing chosen — #1442 — but its place is
+ * kept.** There the form it leads to is already on the screen beside it,
+ * under its own heading, so showing it offered one action twice (Routes'
+ * *Import a route* at the head of the list and as the section beside it). It
+ * is still laid out, `visibility: hidden` and `inert` — out of sight, out of
+ * the accessibility tree and out of the tab order — so the first tap on a row
+ * does not insert it above the list and move every row down under the finger
+ * that tapped (PR #1477's review; `list-detail.browser.spec.ts` measures the
+ * rows). An empty list's own action is shown ({@link CreateLinkProps.emptyState}).
  */
 export function CreateLink({
   route,
   selection,
   children,
   emptyState = false,
-}: CreateLinkProps): JSX.Element | null {
+}: CreateLinkProps): JSX.Element {
   const chosen = selection !== undefined;
   const two = useTwoPanes();
   function jumpToForm(event: MouseEvent<HTMLAnchorElement>): void {
@@ -553,10 +555,7 @@ export function CreateLink({
       heading.focus();
     }
   }
-  if (two && !chosen && !emptyState) {
-    return null;
-  }
-  return (
+  const link = (
     <ButtonLink
       href={hrefFor(route)}
       variant={chosen ? 'primary' : 'secondary'}
@@ -566,4 +565,12 @@ export function CreateLink({
       {children}
     </ButtonLink>
   );
+  if (two && !chosen && !emptyState) {
+    return (
+      <span data-oyl-create-reserved="" style={{ visibility: 'hidden' }} inert>
+        {link}
+      </span>
+    );
+  }
+  return link;
 }

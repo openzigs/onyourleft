@@ -385,16 +385,21 @@ describe('the create link', () => {
     },
   );
 
-  it('is not there at two panes with nothing chosen, where the form is beside it — #1442', async () => {
+  it('is not shown at two panes with nothing chosen, where the form is beside it — #1442', async () => {
     restore = answerTwoPanes(true, THEME);
     mounted = await mount(withForm(undefined));
     // The form's own heading is on the screen; a link to it would be the
-    // same action twice.
+    // same action twice. Its place is kept (PR #1477's review), hidden and
+    // inert, so it is neither seen, nor read, nor reached by Tab.
     expect(document.getElementById(CREATE_HEADING_ID)).not.toBeNull();
-    expect(document.querySelector('[data-oyl-create]')).toBeNull();
-    // And it comes back the moment an item takes the detail pane.
+    const reserved = pane('list').querySelector<HTMLElement>('[data-oyl-create-reserved]');
+    expect(reserved?.style.visibility).toBe('hidden');
+    expect(reserved?.hasAttribute('inert')).toBe(true);
+    expect(reserved?.querySelector('[data-oyl-create]')).not.toBeNull();
+    // And it is shown the moment an item takes the detail pane.
     await mounted.rerender(withForm('a'));
     await settle();
+    expect(pane('list').querySelector('[data-oyl-create-reserved]')).toBeNull();
     expect(pane('list').querySelector('[data-oyl-create]')).not.toBeNull();
   });
 
@@ -408,6 +413,7 @@ describe('the create link', () => {
       </main>,
     );
     expect(document.querySelector('[data-oyl-create]')?.textContent).toBe('Import a route');
+    expect(document.querySelector('[data-oyl-create-reserved]')).toBeNull();
   });
 
   it('is there on one pane with nothing chosen, where the form is under the whole list', async () => {
