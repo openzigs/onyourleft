@@ -91,6 +91,45 @@ describe('every state of the Android shell’s Devices screen passes the audit',
     });
   }
 
+  it('passes before Android asks, with the reason and the one press — #1436', async () => {
+    mounted = await mount(
+      <main>
+        <h1>Devices</h1>
+        <DevicesView
+          capabilities={WEBVIEW}
+          shell={{ readShellSupport: () => new Promise(() => undefined) }}
+          bluetoothAsk={{ askedBefore: () => false, noteAsked: () => undefined }}
+        />
+      </main>,
+    );
+    await settle();
+    expect(document.body.textContent).toContain('Android will ask');
+    expectClean('devices in the shell, before Android asks');
+  });
+
+  for (const kind of ['not-permitted', 'adapter-unavailable'] as const) {
+    it(`passes with the settings button a ${kind} notice offers — #1436`, async () => {
+      const port = capacitorShellSupport({
+        availability: async () => Promise.resolve({ kind }),
+        notice: permissionNotice,
+        mayShowDeviceList,
+      });
+      mounted = await mount(
+        <main>
+          <h1>Devices</h1>
+          <DevicesView
+            capabilities={WEBVIEW}
+            shell={port}
+            settings={{ openSystemSettings: async () => Promise.resolve(true) }}
+          />
+        </main>,
+      );
+      await settle();
+      expect(document.body.textContent).toMatch(/Open (app|Bluetooth) settings/);
+      expectClean(`devices in the shell, ${kind}, with a settings button`);
+    });
+  }
+
   it('passes while the plugin has not answered yet', async () => {
     // A real state, and the one that carries a live region: on Android this
     // read is the permission dialog, so it lasts as long as a rider takes to

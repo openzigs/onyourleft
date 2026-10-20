@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import type { JSX } from 'react';
+import { useState, type JSX } from 'react';
 
+import { Button } from '../design/Button';
 import { StatusMessage } from '../design/StatusMessage';
 import type { RideController } from '../ride/controller';
 import { ONE_GESTURE_PER_DEVICE, PairingPanel } from '../ride/SensorPairing';
@@ -11,8 +12,11 @@ import {
   BluetoothSupportNotice,
 } from '../support/BluetoothSupportNotice';
 import { ShellSupportNotice } from '../support/ShellSupportNotice';
+import { BLUETOOTH_WHY, LOOK_FOR_DEVICES } from '../support/bluetooth-ask';
+import type { BluetoothAskPort } from '../support/bluetooth-ask-port';
 import type { CapabilityProbe } from '../support/bluetooth-support';
 import type { ShellSupportPort } from '../support/shell-support-port';
+import type { SystemSettingsPort } from '../support/system-settings-port';
 import { useBluetoothSupport } from '../support/useBluetoothSupport';
 import { useShellSupport } from '../support/useShellSupport';
 
@@ -43,6 +47,18 @@ export interface DevicesViewProps {
    * today's dead end — the browser gate's control renders exactly that.
    */
   readonly controller?: RideController | undefined;
+  /**
+   * Inside the shell: whether the rider has been told why Android asks for
+   * Bluetooth — #1436. Absent, the screen reads on open, as before.
+   * @see ../support/bluetooth-ask-port.ts
+   */
+  readonly bluetoothAsk?: BluetoothAskPort | undefined;
+  /**
+   * Inside the shell: the way to the Android settings page a notice names —
+   * #1436. Absent, a notice keeps its written instruction and no button.
+   * @see ../support/system-settings-port.ts
+   */
+  readonly settings?: SystemSettingsPort | undefined;
 }
 
 /**
@@ -87,11 +103,17 @@ export interface DevicesViewProps {
  * same element at the same index in both, and only the can-pair branch moves
  * it.
  */
-export function DevicesView({ capabilities, shell, controller }: DevicesViewProps): JSX.Element {
+export function DevicesView({
+  capabilities,
+  shell,
+  controller,
+  bluetoothAsk,
+  settings,
+}: DevicesViewProps): JSX.Element {
   return shell === undefined ? (
     <BrowserDevices capabilities={capabilities} controller={controller} />
   ) : (
-    <ShellDevices port={shell} controller={controller} />
+    <ShellDevices port={shell} controller={controller} ask={bluetoothAsk} settings={settings} />
   );
 }
 
@@ -224,12 +246,74 @@ function BrowserDevices({
 function ShellDevices({
   port,
   controller,
+  ask,
+  settings,
 }: {
   readonly port: ShellSupportPort;
   readonly controller: RideController | undefined;
+  readonly ask: BluetoothAskPort | undefined;
+  readonly settings: SystemSettingsPort | undefined;
+}): JSX.Element {
+  // #1436: the first read is the one that raises Android's dialog, so a rider
+  // who has not been told why yet is told first, and the read waits for
+  // their press. Its own component below, because the read is a hook.
+  const [explaining, setExplaining] = useState(() => ask !== undefined && !ask.askedBefore());
+  if (explaining) {
+    return (
+      <BeforeAndroidAsks
+        onLook={() => {
+          ask?.noteAsked();
+          setExplaining(false);
+        }}
+      />
+    );
+  }
+  return <ShellDevicesAsked port={port} controller={controller} settings={settings} />;
+}
+
+/**
+ * Said before Android's permission dialog — #1436. Same headings as every
+ * other state, so the screen does not change shape under the rider; the one
+ * control is the press that lets Android ask.
+ */
+function BeforeAndroidAsks({ onLook }: { readonly onLook: () => void }): JSX.Element {
+  return (
+    <>
+      <h2>This phone</h2>
+      <StatusMessage tone="info" label="Before Android asks">
+        {BLUETOOTH_WHY}
+      </StatusMessage>
+      <Button onClick={onLook}>{LOOK_FOR_DEVICES}</Button>
+      <h2>Paired sensors</h2>
+      <p className="oyl-muted">Nothing has been looked for yet, so there is nothing to list.</p>
+    </>
+  );
+}
+
+/** The shell's Devices screen once Android may ask — the screen before #1436. */
+function ShellDevicesAsked({
+  port,
+  controller,
+  settings,
+}: {
+  readonly port: ShellSupportPort;
+  readonly controller: RideController | undefined;
+  readonly settings: SystemSettingsPort | undefined;
 }): JSX.Element {
   const { support, recheck } = useShellSupport(port);
-  const notice = <ShellSupportNotice support={support} onRecheck={recheck} />;
+  const notice = (
+    <ShellSupportNotice
+      support={support}
+      onRecheck={recheck}
+      onOpenSettings={
+        settings === undefined
+          ? undefined
+          : (page) => {
+              void settings.openSystemSettings(page);
+            }
+      }
+    />
+  );
 
   if (support?.canPair === true && controller !== undefined) {
     return (

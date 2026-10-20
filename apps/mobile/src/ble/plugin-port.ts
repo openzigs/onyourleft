@@ -109,6 +109,21 @@ export interface CapacitorBlePort {
   isEnabled(): Promise<boolean>;
 
   /**
+   * Open this app's page in Android's Settings — #1436: the way back after a
+   * permanent denial, where Android no longer shows its own dialog and only
+   * that page can grant Nearby devices again.
+   *
+   * ⚠️ **Not guarded by initialisation**, unlike every other call here: the
+   * plugin starts an Intent and touches no Bluetooth (`BluetoothLe.kt`
+   * §`openAppSettings`), which is the point — it is offered exactly when the
+   * stack could not be brought up.
+   */
+  openAppSettings(): Promise<void>;
+
+  /** Open Android's Bluetooth settings — #1436. Not guarded, as above. */
+  openBluetoothSettings(): Promise<void>;
+
+  /**
    * Show the system chooser.
    *
    * Rejects when the rider cancels, which the transport translates into

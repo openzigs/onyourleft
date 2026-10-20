@@ -44,6 +44,8 @@ export {
 } from './camera/camera';
 export type { CameraPermissionNotice } from './camera/camera';
 export { mayShowDeviceList, permissionNotice } from './permission/notice';
+export { openCapacitorSettings } from './permission/settings';
+export type { SettingsPage } from './permission/settings';
 export { ANALYSIS_READ_TIMEOUT_MILLISECONDS, capacitorAnalysisPost } from './http/analysis-http';
 export type { AnalysisPostReply, AnalysisPostRequest } from './http/analysis-http';
 export { capacitorThermalPlugin, readCapacitorThermalHeadroom } from './thermal/thermal';

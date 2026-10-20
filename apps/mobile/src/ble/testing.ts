@@ -167,6 +167,17 @@ export function scriptedPort(stack: ScriptedStack = {}): ScriptedPort {
       started = true;
     },
 
+    /** #1436. Recorded, and answered before `initialize()` as the plugin does. */
+    openAppSettings() {
+      calls.push('openAppSettings');
+      return Promise.resolve();
+    },
+
+    openBluetoothSettings() {
+      calls.push('openBluetoothSettings');
+      return Promise.resolve();
+    },
+
     async isEnabled() {
       calls.push('isEnabled');
       if (!started) {

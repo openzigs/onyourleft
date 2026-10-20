@@ -18,7 +18,12 @@
 
 import { act } from 'react';
 import type { TransportAvailability } from '@onyourleft/sensors';
-import { createCapacitorTransport, mayShowDeviceList, permissionNotice } from '@onyourleft/mobile';
+import {
+  createCapacitorTransport,
+  mayShowDeviceList,
+  openCapacitorSettings,
+  permissionNotice,
+} from '@onyourleft/mobile';
 import { scriptedPort, type ScriptedPort, type ScriptedStack } from '@onyourleft/mobile/testing';
 import { unixSeconds } from '@onyourleft/domain';
 import { createIndoorBikeDataProfile } from '@onyourleft/sensors/protocol';
@@ -32,6 +37,10 @@ import type { ShellSupportPort } from '../support/shell-support-port';
 import { activateWithKeyboard, mount, settle, type Mounted } from '../testing/mount';
 import { createRideController, type RideController } from '../ride/controller';
 import { idleSnapshot, stubRideController } from '../ride/testing';
+
+import { BLUETOOTH_WHY, LOOK_FOR_DEVICES } from '../support/bluetooth-ask';
+import type { BluetoothAskPort } from '../support/bluetooth-ask-port';
+import type { SystemSettingsPort } from '../support/system-settings-port';
 
 import { DevicesView } from './DevicesView';
 
@@ -482,5 +491,143 @@ describe('the plugin is asked and never answers (#322)', () => {
     });
 
     expect(result.container.textContent).toContain('This phone can pair sensors');
+  });
+});
+
+/**
+ * #1436 — Bluetooth is asked for in context, after one sentence saying why,
+ * and a denial offers the way to Android's settings.
+ *
+ * The chain is the production one: `createCapacitorTransport` over the scripted
+ * plugin, the real `capacitorShellSupport`, the real `permissionNotice`, and
+ * the settings port built as `main.tsx` builds it — so "Android asked" is read
+ * as the plugin's own `initialize` call, which is where its dialog comes from.
+ */
+describe('#1436 — Bluetooth is asked for in context, and a denial has a way out', () => {
+  function overPlugin(stack: ScriptedStack = {}): {
+    readonly port: ShellSupportPort;
+    readonly plugin: ScriptedPort;
+    readonly settings: SystemSettingsPort;
+  } {
+    const plugin = scriptedPort(stack);
+    const transport = createCapacitorTransport({ plugin, profiles: [], now: () => unixSeconds(0) });
+    return {
+      plugin,
+      port: capacitorShellSupport({
+        availability: async () => transport.availability(),
+        notice: permissionNotice,
+        mayShowDeviceList,
+      }),
+      settings: { openSystemSettings: async (page) => openCapacitorSettings(plugin, page) },
+    };
+  }
+
+  function memoryAsk(asked = false): BluetoothAskPort & { readonly noted: () => number } {
+    let noted = 0;
+    let remembered = asked;
+    return {
+      askedBefore: () => remembered,
+      noteAsked: () => {
+        noted += 1;
+        remembered = true;
+      },
+      noted: () => noted,
+    };
+  }
+
+  function button(label: string): HTMLButtonElement {
+    const found = [...document.querySelectorAll('button')].find(
+      (each) => each.textContent?.trim() === label,
+    );
+    if (found === undefined) throw new Error(`no button labelled "${label}"`);
+    return found;
+  }
+
+  it('says why before Android asks, and asks nothing until the rider presses', async () => {
+    const { port, plugin } = overPlugin();
+    const ask = memoryAsk();
+    mounted = await mount(<DevicesView capabilities={WEBVIEW} shell={port} bluetoothAsk={ask} />);
+    await settle();
+
+    expect(document.body.textContent).toContain(BLUETOOTH_WHY);
+    // Android's dialog is raised by `initialize()`. Not called: not asked.
+    expect(plugin.calls).not.toContain('initialize');
+
+    await activateWithKeyboard(button(LOOK_FOR_DEVICES));
+    await settle();
+
+    expect(plugin.calls).toContain('initialize');
+    expect(ask.noted()).toBe(1);
+    expect(document.body.textContent).not.toContain(BLUETOOTH_WHY);
+    expect(document.body.textContent).toContain('This phone can pair sensors');
+  });
+
+  it('reads on open for a rider who has pressed through before', async () => {
+    const { port, plugin } = overPlugin();
+    mounted = await mount(
+      <DevicesView capabilities={WEBVIEW} shell={port} bluetoothAsk={memoryAsk(true)} />,
+    );
+    await settle();
+
+    expect(plugin.calls).toContain('initialize');
+    expect(document.body.textContent).not.toContain(BLUETOOTH_WHY);
+  });
+
+  it('after a denial says what no longer works and opens the app’s page in Settings', async () => {
+    const { port, plugin, settings } = overPlugin({
+      initializeRejectsWith: new Error('Permission denied.'),
+    });
+    mounted = await mount(
+      <DevicesView
+        capabilities={WEBVIEW}
+        shell={port}
+        bluetoothAsk={memoryAsk(true)}
+        settings={settings}
+      />,
+    );
+    await settle();
+
+    const text = document.body.textContent ?? '';
+    expect(text).toContain('On Your Left needs Bluetooth permission');
+    expect(text).toContain('cannot be found');
+
+    await activateWithKeyboard(button('Open app settings'));
+    await settle();
+
+    expect(plugin.calls).toContain('openAppSettings');
+    expect(plugin.calls).not.toContain('openBluetoothSettings');
+    // And "Check again" stays beside it, for the rider who comes back.
+    expect(button('Check again for Bluetooth on this phone')).toBeDefined();
+  });
+
+  it('sends a rider whose radio is off to Bluetooth settings', async () => {
+    const { port, plugin, settings } = overPlugin({ enabled: false });
+    mounted = await mount(
+      <DevicesView
+        capabilities={WEBVIEW}
+        shell={port}
+        bluetoothAsk={memoryAsk(true)}
+        settings={settings}
+      />,
+    );
+    await settle();
+
+    await activateWithKeyboard(button('Open Bluetooth settings'));
+    await settle();
+
+    expect(plugin.calls).toContain('openBluetoothSettings');
+  });
+
+  it('offers no settings button where none can be opened', async () => {
+    const { port } = overPlugin({ initializeRejectsWith: new Error('Permission denied.') });
+    mounted = await mount(
+      <DevicesView capabilities={WEBVIEW} shell={port} bluetoothAsk={memoryAsk(true)} />,
+    );
+    await settle();
+
+    expect(document.body.textContent).toContain('On Your Left needs Bluetooth permission');
+    expect([...document.querySelectorAll('button')].map((each) => each.textContent)).not.toContain(
+      'Open app settings',
+    );
   });
 });

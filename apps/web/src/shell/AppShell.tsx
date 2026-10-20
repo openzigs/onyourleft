@@ -93,6 +93,8 @@ import type { RoomsPort } from '../net/rooms-port';
 import type { SideInstancePicturesPort } from '../camera/side-instance-port';
 import type { SidePairingPort } from '../camera/side-pairing-port';
 import type { ThermalPort } from '../game/thermal-port';
+import type { BluetoothAskPort } from '../support/bluetooth-ask-port';
+import type { SystemSettingsPort } from '../support/system-settings-port';
 
 import { UpdateOffer } from '../offline/UpdateOffer';
 import type { UpdateWatcher } from '../offline/update';
@@ -203,6 +205,13 @@ export interface AppShellProps {
    * rendered by the accessibility suite on a machine that is not a phone.
    */
   readonly shell?: ShellSupportPort | undefined;
+  /**
+   * Inside the shell: whether the rider has been told why Android asks for
+   * Bluetooth, and the way to Android's settings — #1436. Built beside
+   * {@link shell}; absent in every browser.
+   */
+  readonly bluetoothAsk?: BluetoothAskPort | undefined;
+  readonly systemSettings?: SystemSettingsPort | undefined;
   /**
    * Running inside the Android shell — `support/capacitor.ts` §`isNativeShell`,
    * read by `main.tsx`. #1438: History's footer says what deletes the rides on
@@ -694,6 +703,8 @@ function viewFor(
         <DevicesView
           capabilities={props.capabilities}
           {...(props.shell === undefined ? {} : { shell: props.shell })}
+          {...(props.bluetoothAsk === undefined ? {} : { bluetoothAsk: props.bluetoothAsk })}
+          {...(props.systemSettings === undefined ? {} : { settings: props.systemSettings })}
           // #659: pairing lives on Devices, through the controller the Ride
           // screen reads — mounted above this router, so what is paired here is
           // what Ride shows.

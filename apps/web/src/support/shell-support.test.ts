@@ -124,6 +124,29 @@ describe('every unusable state is told apart, and says what to do', () => {
   });
 });
 
+describe('#1436 — each notice names the settings page that fixes it', () => {
+  it('opens the app’s page for a refused permission, with the notice’s own words', async () => {
+    const { port } = portFor({ kind: 'not-permitted' });
+    expect((await port.readShellSupport()).notice?.settings).toEqual({
+      page: 'app',
+      label: 'Open app settings',
+    });
+  });
+
+  it('opens Bluetooth settings for a radio that is off', async () => {
+    const { port } = portFor({ kind: 'adapter-unavailable' });
+    expect((await port.readShellSupport()).notice?.settings).toEqual({
+      page: 'bluetooth',
+      label: 'Open Bluetooth settings',
+    });
+  });
+
+  it('opens nothing on a stack with no Bluetooth, where nothing helps', async () => {
+    const { port } = portFor({ kind: 'unsupported' });
+    expect((await port.readShellSupport()).notice?.settings).toBeNull();
+  });
+});
+
 describe('the instruction maps every action the notice can carry', () => {
   it('says nothing extra when the only action is to ask again', async () => {
     // `permissionNotice` cannot currently produce `retry` — no branch returns
@@ -145,6 +168,8 @@ describe('the instruction maps every action the notice can carry', () => {
     // a re-check could fix, so the button stays.
     expect(notice?.instruction).toBeNull();
     expect(notice?.recoverable).toBe(true);
+    // #1436: and no settings page to open for it.
+    expect(notice?.settings).toBeNull();
   });
 });
 
