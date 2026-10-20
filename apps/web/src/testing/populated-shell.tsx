@@ -785,13 +785,16 @@ function gamePort(populated: boolean): GamePort {
  * review (N4) that includes `capabilities`: the fixture's browser has no
  * Bluetooth, which leaves the Devices screen's pairing rows — the state where
  * its controls are — out of every walk, so the controls-first gate hands it a
- * Bluetooth that answers "available" to measure that state's fold too.
+ * Bluetooth that answers "available" to measure that state's fold too. And
+ * since #1133 `gameTrainer`: the fixture hands the game no trainer, so the
+ * chooser's *Not released* notice is in no walk unless a caller supplies one
+ * whose last release was refused.
  */
 export type PopulatedShellExtras = Pick<
   AppShellProps,
   'map' | 'basemap' | 'rideController' | 'transfer'
 > &
-  Partial<Pick<AppShellProps, 'capabilities' | 'routeUpdates'>>;
+  Partial<Pick<AppShellProps, 'capabilities' | 'routeUpdates' | 'gameTrainer'>>;
 
 /** The real `AppShell` over the empty or the populated fixture. */
 export function PopulatedShell({
