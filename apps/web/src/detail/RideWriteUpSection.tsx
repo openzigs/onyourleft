@@ -58,7 +58,12 @@ import type {
   RideAnalysisPort,
   RideWriteUpSource,
 } from '../ride-analysis/ride-analysis-port';
-import { RideWriteUpControl, WRITE_UP_HEADING } from '../ride-analysis/RideWriteUpControl';
+import { SectionHeading } from '../design/SectionHelp';
+import {
+  RideWriteUpControl,
+  WRITE_UP_HEADING,
+  WRITE_UP_REPLACES,
+} from '../ride-analysis/RideWriteUpControl';
 import type { InstanceAnalysisPort } from '../ride-analysis/instance-analysis-port';
 import { InstanceWriteUpControl } from '../ride-analysis/InstanceWriteUpControl';
 import { hrefFor, INSTANCE_ROUTE, routeById } from '../shell/routes';
@@ -229,7 +234,11 @@ export function RideWriteUpSection({
 
   return (
     <section aria-labelledby={HEADING_ID} className="oyl-write-up-section">
-      <h3 id={HEADING_ID}>{WRITE_UP_HEADING}</h3>
+      {/* #1439: what a new write-up does to this ride's is the explanation,
+          behind the ⓘ; what is sent stays beside the press. */}
+      <SectionHeading level={3} id={HEADING_ID} help={<p>{WRITE_UP_REPLACES}</p>}>
+        {WRITE_UP_HEADING}
+      </SectionHeading>
       {instance === undefined ? (
         (legacy ?? <SetUp />)
       ) : (

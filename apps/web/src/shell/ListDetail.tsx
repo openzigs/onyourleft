@@ -507,6 +507,13 @@ export interface CreateLinkProps {
   readonly selection: string | undefined;
   /** What the link says, e.g. "Import a route". */
   readonly children: ReactNode;
+  /**
+   * An empty state's one action (#943): drawn at two panes with nothing chosen
+   * as well, because an empty state with no action is a dead end that
+   * `controls-first.browser.spec.ts` fails, and there the link is the empty
+   * list's whole content rather than a second way above a list.
+   */
+  readonly emptyState?: boolean;
 }
 
 /**
@@ -520,11 +527,27 @@ export interface CreateLinkProps {
  * secondary and moves focus to the form without changing the route — on a
  * phone's one pane the form is under the whole list.
  *
- * Rendered in both states, so choosing an item does not move the list under
- * the pointer that chose it: only the emphasis changes.
+ * Rendered in both states on ONE pane, so choosing an item does not move the
+ * list under the pointer that chose it: only the emphasis changes.
+ *
+ * ⚠️ **Not shown at two panes with nothing chosen — #1442 — but its place is
+ * kept.** There the form it leads to is already on the screen beside it,
+ * under its own heading, so showing it offered one action twice (Routes'
+ * *Import a route* at the head of the list and as the section beside it). It
+ * is still laid out, `visibility: hidden` and `inert` — out of sight, out of
+ * the accessibility tree and out of the tab order — so the first tap on a row
+ * does not insert it above the list and move every row down under the finger
+ * that tapped (PR #1477's review; `list-detail.browser.spec.ts` measures the
+ * rows). An empty list's own action is shown ({@link CreateLinkProps.emptyState}).
  */
-export function CreateLink({ route, selection, children }: CreateLinkProps): JSX.Element {
+export function CreateLink({
+  route,
+  selection,
+  children,
+  emptyState = false,
+}: CreateLinkProps): JSX.Element {
   const chosen = selection !== undefined;
+  const two = useTwoPanes();
   function jumpToForm(event: MouseEvent<HTMLAnchorElement>): void {
     const heading = document.getElementById(CREATE_HEADING_ID);
     if (heading !== null) {
@@ -532,7 +555,7 @@ export function CreateLink({ route, selection, children }: CreateLinkProps): JSX
       heading.focus();
     }
   }
-  return (
+  const link = (
     <ButtonLink
       href={hrefFor(route)}
       variant={chosen ? 'primary' : 'secondary'}
@@ -542,4 +565,12 @@ export function CreateLink({ route, selection, children }: CreateLinkProps): JSX
       {children}
     </ButtonLink>
   );
+  if (two && !chosen && !emptyState) {
+    return (
+      <span data-oyl-create-reserved="" style={{ visibility: 'hidden' }} inert>
+        {link}
+      </span>
+    );
+  }
+  return link;
 }

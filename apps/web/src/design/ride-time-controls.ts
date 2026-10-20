@@ -70,6 +70,8 @@ export const RIDE_TIME_CONTROLS: readonly RideTimeControl[] = [
   { surface: 'ride-screen', name: 'Stop', match: 'exact' },
   { surface: 'ride-screen', name: 'Yes, stop the ride', match: 'exact' },
   { surface: 'ride-screen', name: 'Keep riding', match: 'exact' },
+  // #1433: the zoom between the top two readings, larger, and every one chosen.
+  { surface: 'ride-screen', name: 'Zoom', match: 'exact' },
   // #1432: the touch lock, pressed at the bars before the rain.
   { surface: 'ride-screen', name: 'Touch lock', match: 'exact' },
   // `ride/TrainerPanel.tsx`: the take-control step is pressed at the bars.

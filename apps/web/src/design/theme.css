@@ -142,6 +142,8 @@
   --oyl-font-size-display: 2.44140625rem;
   /* A live ride metric. See tokens.ts — this one has an acceptance criterion. */
   --oyl-font-size-metric: 3.814697265625rem;
+  /* A ride metric with the Ride screen's zoom on (#1433). See tokens.ts. */
+  --oyl-font-size-zoom: 7.450580596923828rem;
 
   /* The display face (#991, ADR 0043), and the page's own stack behind it:
      a weight the face does not carry, or a character outside its range, is
@@ -564,8 +566,8 @@ h3:first-child {
  * And a control reached by Tab stops ABOVE that strip — #1441's "the last
  * focusable control keeps clear". Chromium scrolls a focused control just far
  * enough to reach the viewport's edge, and the bottom edge is now the strip,
- * so the scroll area ends above it (WCAG 2.2 SC 2.4.11). The game chooser's
- * rule further down adds the navigation bar's height to this on a phone.
+ * so the scroll area ends above it (WCAG 2.2 SC 2.4.11). The navigation bar's
+ * query further down adds the bar's height to this on a phone (#1472).
  * `html` and not `:root`, which `theme.a11y.test.ts` keeps for the tokens.
  */
 html {
@@ -964,6 +966,18 @@ html {
   /* Room under the last of the content, so the bar never covers it. */
   .oyl-shell:has(.oyl-nav) {
     padding-bottom: 4.5rem;
+  }
+
+  /*
+   * #1472: and a control reached by Tab stops above the BAR, not only above
+   * the inset under it (WCAG 2.2 SC 2.4.11). The bar is fixed over the bottom
+   * of every route that has it, so the root's scroll area ends at the bar's
+   * top: its height, and the inset its own padding sits on. This was the game
+   * chooser's rule alone until #1472 made it every route's.
+   * `shell.browser.spec.ts` §"#1472" measures focus against the bar's top.
+   */
+  html:has(.oyl-nav) {
+    scroll-padding-bottom: calc(4.5rem + var(--oyl-safe-bottom));
   }
 }
 
@@ -1940,6 +1954,43 @@ html {
 }
 
 /*
+ * #1433: Settings' Ride screen readings — one row a reading, its checkbox and
+ * name first and its Up and Down after, 8 px apart, in the order the Ride
+ * screen shows them.
+ */
+.oyl-ride-readings__list {
+  display: grid;
+  gap: var(--oyl-space-sm);
+  list-style: none;
+  margin: 0 0 var(--oyl-space-md);
+  padding: 0;
+}
+
+.oyl-ride-readings__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oyl-space-sm);
+}
+
+/* The label is the row's 44 px target, its box 24 px (WCAG 2.2 SC 2.5.8)
+   and never squeezed by a name that wraps (#667's failure). */
+.oyl-ride-readings__row > label {
+  flex: 1 1 8rem;
+  display: flex;
+  align-items: center;
+  gap: var(--oyl-space-sm);
+  min-height: 2.75rem;
+}
+
+.oyl-ride-readings input[type='checkbox'] {
+  flex: none;
+  width: 1.5rem;
+  height: 1.5rem;
+  margin: 0;
+}
+
+/*
  * A route that is operated rather than read (#422).
  *
  * `--oyl-measure` is a READING measure and it is right for every route that is
@@ -2724,11 +2775,13 @@ a.oyl-button {
   padding: var(--oyl-space-md);
 }
 
+/* #1442: in sentence case, as every other label in the app is — it was
+   drawn in capitals here and on the ride's clock alone (ELAPSED, MOVING,
+   RECORDED). `design/label-case.test.ts` holds the menus to none. */
 .oyl-metric__label {
   color: var(--oyl-color-ink-muted);
   display: block;
   font-size: var(--oyl-font-size-sm);
-  text-transform: uppercase;
 }
 
 .oyl-metric__value {
@@ -2809,6 +2862,31 @@ a.oyl-button {
   .oyl-metric-grid--live {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
+}
+
+/*
+ * THE ZOOM — #1433. The rider's top two readings at the zoom size and no
+ * others (`ride/reading-choice.ts`): one to a row wherever two at that size
+ * would not fit side by side, which is every phone, and two to a row once the
+ * Live group is wide enough, which on a landscape tablet it is. Four digits
+ * of the zoom size in the display face are about 254 px, so the two-to-a-row
+ * step is where two cards of that and their padding fit.
+ * `rideview.browser.spec.ts` §"#1433" measures the digit, the fit and the
+ * fold at phones and tablets.
+ */
+.oyl-metric-grid--live.oyl-metric-grid--zoomed {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@container oyl-live (min-width: 36rem) {
+  .oyl-metric-grid--live.oyl-metric-grid--zoomed {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.oyl-metric-grid--zoomed .oyl-reading--metric .oyl-reading__value {
+  font-size: var(--oyl-font-size-zoom);
+  line-height: 1;
 }
 
 /*
@@ -2962,10 +3040,10 @@ a.oyl-button {
   margin: var(--oyl-space-md) 0 0;
 }
 
+/* #1442: sentence case, as `.oyl-metric__label` above. */
 .oyl-ride__time > dt {
   color: var(--oyl-color-ink-muted);
   font-size: var(--oyl-font-size-sm);
-  text-transform: uppercase;
 }
 
 .oyl-ride__time > dd {
@@ -3428,6 +3506,24 @@ a.oyl-button {
   flex-wrap: wrap;
   align-items: center;
   gap: var(--oyl-space-sm);
+}
+
+/*
+ * #1433: the ride's own controls and the zoom as one row — the zoom at its
+ * end, as far from Stop as the row allows, and on a line of its own under
+ * them where the row has no room for it (a phone). One row rather than a
+ * second, so on a landscape tablet the zoom costs the screen no height:
+ * `rideview.browser.spec.ts` holds every ride control to the fold there.
+ */
+.oyl-ride__action-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oyl-space-sm);
+}
+
+.oyl-ride__action-row > .oyl-ride__zoom {
+  margin-inline-start: auto;
 }
 
 .oyl-trainer__state {
@@ -4559,6 +4655,56 @@ select.oyl-input {
 }
 
 /*
+ * The trace's axes — #1439: the value axis' title above the drawing, its top,
+ * middle and bottom values down its left edge (the drawing's own scale, so a
+ * label sits where its value is drawn), and the time at the start, middle and
+ * end under it, titled. HTML beside the SVG rather than text in it, which the
+ * horizontal stretch above would stretch too (`detail/TraceChart.tsx`).
+ */
+.oyl-trace-chart {
+  color: var(--oyl-color-ink-muted);
+  column-gap: var(--oyl-space-sm);
+  display: grid;
+  font-size: var(--oyl-font-size-sm);
+  font-variant-numeric: tabular-nums;
+  grid-template-areas:
+    'value-title value-title'
+    'values trace'
+    '. times'
+    '. time-title';
+  grid-template-columns: auto minmax(0, 1fr);
+  margin-top: var(--oyl-space-sm);
+}
+
+.oyl-trace-chart > .oyl-trace {
+  grid-area: trace;
+  margin-top: 0;
+}
+
+.oyl-trace-chart__value-title {
+  grid-area: value-title;
+}
+
+.oyl-trace-chart__values {
+  display: flex;
+  flex-direction: column;
+  grid-area: values;
+  justify-content: space-between;
+  text-align: end;
+}
+
+.oyl-trace-chart__times {
+  display: flex;
+  grid-area: times;
+  justify-content: space-between;
+}
+
+.oyl-trace-chart__time-title {
+  grid-area: time-title;
+  text-align: center;
+}
+
+/*
  * `vector-effect` so the line keeps its width under the horizontal stretch
  * above. Without it a 2-unit stroke is drawn several pixels thick sideways and
  * hairline vertically, which reads as a smeared chart rather than a line.
@@ -4782,12 +4928,12 @@ select.oyl-input {
  * visibility vary; in the flow neither can happen, by construction, and
  * `browser/pre-ride.browser.spec.ts` §"#940" hit-tests it.
  *
- * The `scroll-padding` rule left here is not this chooser's pin — it has none
- * — but the SHELL's: the navigation bar (fixed, 4.5 rem, on a compact window)
- * would otherwise sit over a control Tab scrolls to the bottom edge. It is
- * scoped to the chooser. The header's (sticky, `--oyl-header-height`, on a
- * large window) was too until #990, which made it the whole document's —
- * see the shell's sticky query.
+ * The `scroll-padding` rule that was left here was not this chooser's pin — it
+ * has none — but the SHELL's: the navigation bar (fixed, 4.5 rem, on a compact
+ * window) would otherwise sit over a control Tab scrolls to the bottom edge.
+ * #1472 moved it to the bar's own query for every route that has the bar, as
+ * #990 had done for the header's (sticky, `--oyl-header-height`, on a large
+ * window) — see the shell's sticky query.
  */
 /*
  * #1011: the routes as TILES — one column on a phone, two on a tablet. "A
@@ -5033,13 +5179,6 @@ select.oyl-input {
   .oyl-chooser__notices > .oyl-status {
     padding-block: var(--oyl-space-sm);
     margin-bottom: var(--oyl-space-sm);
-  }
-}
-
-/* The navigation BAR — the shell's own query and height, restated. */
-@media (max-width: 37.49rem) and (min-height: 30rem) {
-  :root:has(.oyl-chooser) {
-    scroll-padding-bottom: calc(4.5rem + var(--oyl-safe-bottom));
   }
 }
 
@@ -5779,6 +5918,90 @@ select.oyl-input {
   stroke-linejoin: round;
   stroke-width: 1.5;
   vector-effect: non-scaling-stroke;
+}
+
+/*
+ * THE BLOCK'S TARGET BAND (#1434) — `workout/TargetBand.tsx`
+ * §TARGET_BAND_PAINTS is the same table.
+ *
+ * A gauge on the frame's own `surface`: the band a shaded box with an edge on
+ * each side, the rider's 3 s power a tall bar with a cap above the gauge, and
+ * the block's average a ring. Three shapes, so in, under and over are read
+ * without the colour (SC 1.4.1); the line under the gauge says it in words.
+ * `left` (and the band's `width`) are set inline, from `target-band.ts`.
+ */
+.oyl-target-band {
+  background: var(--oyl-color-surface);
+  border: 1px solid var(--oyl-color-border);
+  border-radius: var(--oyl-radius);
+  margin-top: var(--oyl-space-sm);
+  padding: var(--oyl-space-xs) var(--oyl-space-sm) var(--oyl-space-sm);
+}
+
+.oyl-target-band__heading,
+.oyl-target-band__standing {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--oyl-space-sm);
+  justify-content: space-between;
+  margin: 0;
+}
+
+.oyl-target-band__reading {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.oyl-target-band__gauge {
+  border-bottom: 1px solid var(--oyl-color-border);
+  height: 2rem;
+  margin: var(--oyl-space-sm) 0 var(--oyl-space-xs);
+  position: relative;
+}
+
+.oyl-target-band__band {
+  background-color: var(--oyl-color-surface-raised);
+  border-color: var(--oyl-color-ink);
+  border-style: solid;
+  border-width: 0 2px;
+  bottom: 0;
+  position: absolute;
+  top: 0.5rem;
+}
+
+.oyl-target-band__power {
+  background-color: var(--oyl-color-accent);
+  bottom: 0;
+  margin-left: -2px;
+  position: absolute;
+  top: 0;
+  width: 4px;
+}
+
+/* The bar's cap: a wider block at its top, so the bar is not a band edge. */
+.oyl-target-band__power::before {
+  background-color: inherit;
+  content: '';
+  height: 6px;
+  left: -4px;
+  position: absolute;
+  top: 0;
+  width: 12px;
+}
+
+.oyl-target-band__average {
+  border: 3px solid var(--oyl-color-ink);
+  border-radius: 50%;
+  bottom: 0.25rem;
+  height: 1rem;
+  margin-left: -0.5rem;
+  position: absolute;
+  width: 1rem;
+}
+
+.oyl-target-band__cue {
+  font-size: var(--oyl-font-size-sm);
+  margin: var(--oyl-space-xs) 0 0;
 }
 
 /*

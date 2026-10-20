@@ -230,6 +230,47 @@ describe('with a chart that renders', () => {
   });
 });
 
+describe('with the table disclosed under the chart — #1439', () => {
+  it('draws the chart, and the table behind a closed disclosure named for its readings', async () => {
+    mounted = await mount(
+      <ChartSlot
+        caption="Power (W)"
+        columns={['From', 'Power (W)']}
+        rows={ROWS.map((row) => [...row])}
+        emptyMessage="No readings."
+        tablePosition="disclosed"
+        chart={<svg role="img" aria-label="Power over time" />}
+      />,
+    );
+    expect(mounted.container.querySelector('svg')).not.toBeNull();
+    const disclosure = mounted.container.querySelector('details');
+    // Closed by default: the table is the alternative, not open under the chart.
+    expect(disclosure?.open).toBe(false);
+    expect(disclosure?.querySelector('summary')?.textContent).toBe(
+      'Power (W): the readings as a table',
+    );
+    // Still in the page — one press away, and reached by Tab through its summary.
+    expect(disclosure?.querySelector('table')?.textContent).toContain('218');
+    expect(mounted.container.querySelectorAll('table')).toHaveLength(1);
+  });
+
+  it('falls back to the table itself, open, when the chart throws', async () => {
+    mounted = await mount(
+      <ChartSlot
+        caption="Power (W)"
+        columns={['From', 'Power (W)']}
+        rows={ROWS.map((row) => [...row])}
+        emptyMessage="No readings."
+        tablePosition="disclosed"
+        chart={<Boom />}
+      />,
+    );
+    await settle();
+    expect(mounted.container.querySelector('details')).toBeNull();
+    expect(mounted.container.querySelectorAll('table')).toHaveLength(1);
+  });
+});
+
 describe('with a chart that throws — criterion 7', () => {
   it('falls back to the table carrying the same values', async () => {
     mounted = await mount(

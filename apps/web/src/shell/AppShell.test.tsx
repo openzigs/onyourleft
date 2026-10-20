@@ -42,11 +42,13 @@ import { KIT_SAVED, MASS_CLEARED, MASS_SAVED } from '../views/SettingsView';
 
 import { AppShell } from './AppShell';
 import {
+  ALL_ROUTES,
   groupDestination,
   hrefFor,
   moreMenuRoutes,
   ROUTES,
   routeById,
+  routesInGroup,
   type RouteId,
 } from './routes';
 
@@ -134,6 +136,36 @@ describe('the More tab — #1429', () => {
       ).toBe('true');
     }
   });
+});
+
+describe('the More area’s pages each show its section row — #1442', () => {
+  // Every page the More tab holds, the ones in ROUTES and the ones reached
+  // from them (Instance from Settings, Moderation from Instance, Credits from
+  // About, the side camera from Camera), but not the menu page itself, which
+  // lists the pages in its own body (#1429).
+  const UNDER_MORE = ALL_ROUTES.filter((route) => route.group === 'more' && route.id !== 'more');
+  const ROW = routesInGroup('more').map((route) => [route.navLabel, hrefFor(route)]);
+
+  it('covers every page under the tab, Settings among them', () => {
+    expect(UNDER_MORE.map((route) => route.id)).toEqual(
+      expect.arrayContaining(['devices', 'transfer', 'camera', 'settings', 'about', 'instance']),
+    );
+  });
+
+  for (const route of UNDER_MORE) {
+    it(`${route.id}: the row of More’s pages, with this one marked when it is in the row`, async () => {
+      await open(route.path);
+      expect(document.querySelector('h1')?.textContent).toBe(route.title);
+      const row = document.querySelector('nav[aria-label="More pages"]');
+      expect(row, `${route.id} shows no section row`).not.toBeNull();
+      const links = [...(row?.querySelectorAll<HTMLAnchorElement>('a') ?? [])];
+      expect(links.map((link) => [link.textContent, link.getAttribute('href')])).toEqual(ROW);
+      const current = links.filter((link) => link.getAttribute('aria-current') === 'page');
+      expect(current.map((link) => link.textContent)).toEqual(
+        routesInGroup('more').includes(route) ? [route.navLabel] : [],
+      );
+    });
+  }
 });
 
 describe('the router', () => {

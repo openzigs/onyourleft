@@ -133,8 +133,7 @@ describe('Lap on the Ride screen — #1318', () => {
     const row = [...(button?.parentElement?.querySelectorAll('button') ?? [])].map(
       (each) => each.textContent,
     );
-    // #1432: the touch lock is last in the row, after Stop.
-    expect(row).toEqual(['Lap', 'Pause', 'Stop', 'Touch lock']);
+    expect(row).toEqual(['Lap', 'Pause', 'Stop']);
     button?.focus();
     expect(document.activeElement).toBe(button);
 

@@ -121,6 +121,7 @@ import {
   workoutRescueHeadline,
 } from '../workout/rescue-text';
 import { HOLD_LABEL, holdReading, holdSentence } from '../workout/hold-text';
+import { TargetBand } from '../workout/TargetBand';
 import {
   REPLAN_KEEP_BUTTON,
   REPLAN_SWITCH_LABEL,
@@ -529,6 +530,14 @@ export function WorkoutPanel({
               ? `Holding ${String(workout.holdingWatts)} W.${raisedText(workout)}`
               : `The trainer was last set to ${String(workout.holdingWatts)} W.`}
         </p>
+        {/*
+          #1434: the block being ridden against the target the trainer
+          confirmed — the band, the rider's 3 s power and the block's average,
+          the time left, and in ERG who holds what. Read, so after every
+          sentence above (#605's order). Draws nothing paused, in a free ride,
+          a running heart-rate hold or with no confirmed target.
+        */}
+        <TargetBand workout={workout} />
         {/*
           #1307: the same workout as a picture is NOT drawn here. It is the
           Ride screen's own group, after this one (`views/RideView.tsx`), so a

@@ -56,7 +56,9 @@ function remOf(value: string): number {
  * token were deleted — which is the failure this guards.
  */
 function largestHeadingRem(): number {
-  const headings = Object.keys(TYPE_SCALE_STEPS).filter((name) => name !== 'metric');
+  const headings = Object.keys(TYPE_SCALE_STEPS).filter(
+    (name) => name !== 'metric' && name !== 'zoom',
+  );
   if (headings.length === 0) {
     throw new Error('the type scale has no reading sizes, so there is nothing to compare against');
   }

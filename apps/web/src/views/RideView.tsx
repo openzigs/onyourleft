@@ -59,6 +59,7 @@ import { useTouchLock } from '../design/touch-lock';
 import { TouchLockButton } from '../design/TouchLockButton';
 import { MetricGrid } from '../ride/MetricGrid';
 import { isReadable } from '../ride/metrics';
+import { readRideReadings, shownReadings, writeRideReadings } from '../ride/reading-choice';
 import { TrainerPanel } from '../ride/TrainerPanel';
 import { WorkoutPanel } from '../ride/WorkoutPanel';
 import type { WorkoutPort } from '../workouts/store-port';
@@ -160,6 +161,9 @@ export function RideView({
   );
 }
 
+/** #1433: the Ride screen's zoom. ⚠️ Draft wording for the owner. */
+export const RIDE_ZOOM_LABEL = 'Zoom';
+
 function LiveRide({
   controller,
   workouts,
@@ -180,6 +184,9 @@ function LiveRide({
   // both (#740): until then `RideAnnouncer` read it again for itself, and the
   // two agreed only because both read this device's storage in one mount pass.
   const [announcements] = useState(() => readAnnouncementPreference(deviceStorage()));
+  // #1433: which readings, in which order, and whether the zoom is on — the
+  // rider's choice on Settings, read once here; the zoom is pressed here.
+  const [readings, setReadings] = useState(() => readRideReadings(deviceStorage()));
   const units = useUnits();
   // #1318: the lap taken by hand that ended last, while the ride it was taken
   // on is in progress — shown below, and said once by the ride's one region.
@@ -194,6 +201,28 @@ function LiveRide({
   const touchLocked = snapshot.touchLocked && rideInProgress(snapshot.phase);
   useTouchLock(screen, touchLocked);
   const touchLockHelp = useId();
+  // #1433: the zoom — the rider's top two readings, larger, or every reading
+  // they chose. Only where there are readings to zoom; `RideControls` places
+  // it beside *Start recording* and beside Pause and Stop, and not on a
+  // stopped ride, whose screen is its result rather than live numbers. Kept
+  // on the device for the next ride, like the choice it zooms; a device that
+  // will not keep it still zooms this screen.
+  const zoom =
+    snapshot.sensors.length === 0 ? undefined : (
+      <Button
+        variant="toggle"
+        pressed={readings.zoomed}
+        size="ride"
+        className="oyl-ride__zoom"
+        onClick={() => {
+          const next = { ...readings, zoomed: !readings.zoomed };
+          setReadings(next);
+          writeRideReadings(deviceStorage(), next);
+        }}
+      >
+        {RIDE_ZOOM_LABEL}
+      </Button>
+    );
 
   // ⚠️ On mount, because #212's whole point is that a rider who lost a tab is
   // *told* — the recording was always on the device and nothing looked for it.
@@ -266,6 +295,7 @@ function LiveRide({
         <RideControls
           controller={controller}
           snapshot={snapshot}
+          zoom={zoom}
           touchLockHelp={touchLocked ? touchLockHelp : undefined}
         />
         <SideCameraOnRide state={sideCamera.state} onStop={sideCamera.stop} />
@@ -312,7 +342,10 @@ function LiveRide({
         {snapshot.sensors.length === 0 ? (
           <NoSensorsBanner />
         ) : (
-          <MetricGrid metrics={snapshot.metrics} />
+          <MetricGrid
+            metrics={shownReadings(snapshot.metrics, readings)}
+            zoomed={readings.zoomed}
+          />
         )}
         <RideClock snapshot={snapshot} />
         <RecoveryOffer controller={controller} snapshot={snapshot} />
@@ -685,7 +718,7 @@ function RecoveryOffer({
   );
 }
 
-/** #1432: what the ride screen says while its touch lock is on. */
+/** #1432: what the ride screen says while its touch lock is on. ⚠️ Draft wording for the owner. */
 export const TOUCH_LOCK_ON_LABEL = 'Touch lock on';
 export const TOUCH_LOCK_ON_TEXT =
   'Taps on this screen do nothing. Hold Touch lock for a second to turn it off. End ERG and End workout still work.';
@@ -693,11 +726,20 @@ export const TOUCH_LOCK_ON_TEXT =
 function RideControls({
   controller,
   snapshot,
+  zoom,
   touchLockHelp,
 }: {
   readonly controller: RideController;
   readonly snapshot: RideSnapshot;
-  /** The id of the sentence that describes the touch lock while it is on. */
+  /**
+   * #1433: the zoom, set at the END of the row the ride's own controls stand
+   * in — beside them where the row has room, which on a landscape tablet it
+   * has, so it costs the screen no height there, and on a line of its own
+   * under them on a phone. ⚠️ A SIBLING of `.oyl-ride__actions`, not in it:
+   * that row is Lap, Pause and Stop and nothing else (#1430).
+   */
+  readonly zoom: JSX.Element | undefined;
+  /** #1432: the id of the sentence that describes the touch lock while it is on. */
   readonly touchLockHelp: string | undefined;
 }): JSX.Element {
   // #548, WCAG 2.2 SC 2.4.3: pressing *Start a new ride* unmounts it, and
@@ -749,15 +791,18 @@ function RideControls({
   if (snapshot.phase === 'idle') {
     return (
       <>
-        <Button
-          ref={startRecording}
-          size="ride"
-          onClick={() => {
-            void controller.start();
-          }}
-        >
-          Start recording
-        </Button>
+        <div className="oyl-ride__action-row">
+          <Button
+            ref={startRecording}
+            size="ride"
+            onClick={() => {
+              void controller.start();
+            }}
+          >
+            Start recording
+          </Button>
+          {zoom}
+        </div>
         {/* #1012: with nothing paired, the "No sensors" sentence that stood
             here is the banner where the readings go — one banner rather than
             this notice and four tiles each saying "no sensor paired". */}
@@ -844,8 +889,9 @@ function RideControls({
         margin, so a row that wraps on a narrow phone keeps the gap between
         its lines too. The document order is unchanged.
       */}
-      <div className="oyl-ride__actions">
-        {/*
+      <div className="oyl-ride__action-row">
+        <div className="oyl-ride__actions">
+          {/*
           #1318: *Lap*, on a ride with no course under it (with one, the laps
           are the course's: the owner's ruling). In the same row as Pause and
           Stop and at the same size, so it is a 48 px target 8 px from its
@@ -860,60 +906,64 @@ function RideControls({
           `browser/rideview.browser.spec.ts` §"#1430" measures that the two
           are never neighbours at any width this screen is laid out at.
         */}
-        {snapshot.manualLap.available && !snapshot.stopArmed ? (
-          <Button
-            variant="secondary"
-            size="ride"
-            onClick={() => {
-              controller.markLap();
-            }}
-          >
-            Lap
-          </Button>
-        ) : null}
-        {snapshot.phase === 'recording' ? (
-          <Button
-            variant="secondary"
-            size="ride"
-            onClick={() => {
-              void controller.pause();
-            }}
-          >
-            Pause
-          </Button>
-        ) : (
-          // #668: the ride screen's one primary is the step that moves the
-          // ride on. While a stop is armed that is the confirmation, so a
-          // paused rider's Resume steps down beside it rather than being a
-          // second heaviest control.
-          <Button
-            variant={snapshot.stopArmed ? 'secondary' : 'primary'}
-            size="ride"
-            onClick={() => {
-              void controller.resume();
-            }}
-          >
-            Resume
-          </Button>
-        )}
-        {snapshot.stopArmed ? null : (
-          <Button
-            variant="secondary"
-            size="ride"
-            ref={stopButton}
-            onClick={() => {
-              focusAfterStopChange.current = true;
-              controller.armStop();
-            }}
-          >
-            Stop
-          </Button>
-        )}
+          {snapshot.manualLap.available && !snapshot.stopArmed ? (
+            <Button
+              variant="secondary"
+              size="ride"
+              onClick={() => {
+                controller.markLap();
+              }}
+            >
+              Lap
+            </Button>
+          ) : null}
+          {snapshot.phase === 'recording' ? (
+            <Button
+              variant="secondary"
+              size="ride"
+              onClick={() => {
+                void controller.pause();
+              }}
+            >
+              Pause
+            </Button>
+          ) : (
+            // #668: the ride screen's one primary is the step that moves the
+            // ride on. While a stop is armed that is the confirmation, so a
+            // paused rider's Resume steps down beside it rather than being a
+            // second heaviest control.
+            <Button
+              variant={snapshot.stopArmed ? 'secondary' : 'primary'}
+              size="ride"
+              onClick={() => {
+                void controller.resume();
+              }}
+            >
+              Resume
+            </Button>
+          )}
+          {snapshot.stopArmed ? null : (
+            <Button
+              variant="secondary"
+              size="ride"
+              ref={stopButton}
+              onClick={() => {
+                focusAfterStopChange.current = true;
+                controller.armStop();
+              }}
+            >
+              Stop
+            </Button>
+          )}
+        </div>
+        {zoom}
         {/*
-          #1432: LAST in the row, so a tap that misses it lands on Stop,
-          which only asks. Always here while a ride is in progress, the
-          confirmation included: a rider in the rain may want the lock on
-          before answering it with a key.
+          #1432: the touch lock, LAST in the row and, like the zoom, a sibling
+          of `.oyl-ride__actions` rather than in it (that row is Lap, Pause and
+          Stop, #1430). Its neighbour is the zoom, so a tap that misses it
+          changes how the readings are shown and nothing else. Here while a
+          ride is in progress, the confirmation included: a rider in the rain
+          may want it on before answering that with a key.
         */}
         <TouchLockButton
           locked={snapshot.touchLocked}
@@ -1122,9 +1172,11 @@ function NoSensorsBanner(): JSX.Element {
       </p>
       {/* #1021: named for what it pairs. "Pair" alone, beside the sentence
           rather than inside it, was announced as "Pair, link" in a link list
-          or on Tab (WCAG 2.4.4). */}
+          or on Tab (WCAG 2.4.4). #1442: and the screen's ONE way to Devices
+          while nothing is paired — the Trainer card and the Sensors group no
+          longer carry their own — so it names the trainer too. */}
       <ButtonLink href={hrefFor(routeById('devices'))} variant="secondary">
-        Pair a sensor
+        Pair a trainer or a sensor
       </ButtonLink>
     </div>
   );

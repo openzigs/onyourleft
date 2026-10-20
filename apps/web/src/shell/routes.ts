@@ -322,7 +322,10 @@ export const ROUTES: readonly RouteDefinition[] = [
     path: '/activities',
     navLabel: 'Activities',
     title: 'Activities',
-    summary: 'Rides recorded on this device, newest first.',
+    // #1442: was "Rides recorded on this device, newest first." — and the
+    // line under the list says where the rides are (`where-rides-are.ts`),
+    // so the screen said it twice.
+    summary: 'Your rides, newest first.',
   },
   {
     id: 'analysis',
