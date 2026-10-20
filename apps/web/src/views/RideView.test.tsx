@@ -551,8 +551,46 @@ describe('pairing is on Devices; this screen says what is connected (#659)', () 
       (button.textContent ?? '').trim(),
     );
     expect(buttons.filter((label) => /^(pair|forget)/i.test(label))).toEqual([]);
+    // #1442: with nothing paired the Sensors group says so and leaves the way
+    // to Devices to the banner; once something is paired it is its link.
+    expect(queryAll(document, '.oyl-ride__group--sensors a')).toEqual([]);
+    const stub = stubRideController(ridingSnapshot());
+    mounted?.unmount();
+    await show(stub);
     const links = queryAll<HTMLAnchorElement>(document, '.oyl-ride__group--sensors a');
-    expect(links.map((link) => link.getAttribute('href'))).toContain('#/devices');
+    expect(links.map((link) => link.getAttribute('href'))).toEqual(['#/devices']);
+  });
+
+  /** Every link to Devices on the screen, by its text. */
+  function waysToDevices(): string[] {
+    return queryAll<HTMLAnchorElement>(document, 'a[href="#/devices"]').map((link) =>
+      (link.textContent ?? '').trim(),
+    );
+  }
+
+  it('has ONE way to Devices with nothing paired — #1442', async () => {
+    // It had three at once: the banner's *Pair a sensor*, the Trainer card's
+    // *Devices* and the Sensors group's *Pair a trainer or a sensor on Devices*.
+    await show(stubRideController(idleSnapshot()));
+    expect(waysToDevices()).toEqual(['Pair a trainer or a sensor']);
+  });
+
+  it('has ONE way to Devices with a sensor paired and no trainer — #1442', async () => {
+    const stub = stubRideController(idleSnapshot());
+    stub.set({
+      sensors: [
+        {
+          id: deviceId('strap'),
+          name: 'HRM 04B1',
+          role: 'heart-rate',
+          capabilities: ['heart-rate'],
+          state: 'connected',
+        },
+      ],
+    });
+    await show(stub);
+    expect(document.querySelector('.oyl-trainer-card')).not.toBeNull();
+    expect(waysToDevices()).toEqual(['Pair or forget devices on Devices']);
   });
 
   it('says each connected device and its state in words', async () => {
@@ -592,7 +630,7 @@ describe('#1012 — one sensor banner, and the readings as Readings', () => {
     ['before a ride', idleSnapshot()],
     ['while recording', { ...idleSnapshot(), phase: 'recording' as const, elapsedSeconds: 30 }],
   ] as const) {
-    it(`with nothing paired ${name}, says so ONCE, with one Pair a sensor link to Devices and no tiles`, async () => {
+    it(`with nothing paired ${name}, says so ONCE, with one Pair a trainer or a sensor link to Devices and no tiles`, async () => {
       await show(stubRideController(snapshot));
 
       expect(banners()).toHaveLength(1);
@@ -602,7 +640,7 @@ describe('#1012 — one sensor banner, and the readings as Readings', () => {
       );
       const links = queryAll<HTMLAnchorElement>(banner ?? document, 'a');
       expect(links.map((link) => [link.textContent, link.getAttribute('href')])).toEqual([
-        ['Pair a sensor', '#/devices'],
+        ['Pair a trainer or a sensor', '#/devices'],
       ]);
       // #1021: the link's NAME says what it pairs, so a link list or a Tab
       // does not announce a bare "Pair, link" (WCAG 2.4.4).
@@ -610,7 +648,7 @@ describe('#1012 — one sensor banner, and the readings as Readings', () => {
       if (pair === undefined) {
         throw new Error('no Pair link');
       }
-      expect(accessibleName(pair)).toBe('Pair a sensor');
+      expect(accessibleName(pair)).toBe('Pair a trainer or a sensor');
       // Drawn as a button, and a secondary one: the screen's primary is the
       // ride's own next step (#668).
       expect(links[0]?.className).toContain('oyl-button--secondary');
@@ -1004,7 +1042,7 @@ describe('the ride clock', () => {
 });
 
 describe('#1029 — the screen with nothing paired fills its width', () => {
-  it('draws the Trainer group as one card with a Devices button, not a status line', async () => {
+  it('draws the Trainer group as one card with no control of its own, not a status line', async () => {
     await show(stubRideController(idleSnapshot()));
 
     const trainer = document.querySelector('.oyl-ride__group--trainer');
@@ -1014,14 +1052,9 @@ describe('#1029 — the screen with nothing paired fills its width', () => {
     }
     expect(card.textContent).toContain('No trainer:');
     expect(card.querySelector('[aria-hidden="true"] svg')).not.toBeNull();
-    const links = queryAll<HTMLAnchorElement>(card, 'a');
-    expect(
-      links.map((link) => ({
-        name: link.textContent,
-        href: link.getAttribute('href'),
-        button: link.classList.contains('oyl-button--secondary'),
-      })),
-    ).toEqual([{ name: 'Devices', href: '#/devices', button: true }]);
+    // #1442: the banner is the way to Devices; this card only says where.
+    expect(card.textContent).toContain('Pair a smart trainer on Devices');
+    expect(queryAll(card, 'a, button')).toEqual([]);
     expect(trainer?.querySelector('.oyl-status')).toBeNull();
   });
 

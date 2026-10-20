@@ -288,15 +288,15 @@ function PairingRow({
  * mounted above the router, so pairing on Devices and coming back is one tap
  * and the connection is still there; a second set of buttons would be a
  * second pairing surface to keep in step with the first.
+ *
+ * ⚠️ **No link while nothing is paired — #1442.** The sensor banner higher up
+ * the screen (`RideView.tsx` §`NoSensorsBanner`) is the way to Devices then,
+ * and a link here as well was the third on one screen.
  */
 export function ConnectedSensors({ snapshot }: { readonly snapshot: RideSnapshot }): JSX.Element {
   const devices = hrefFor(routeById('devices'));
   if (snapshot.sensors.length === 0) {
-    return (
-      <p>
-        Nothing is paired yet. <a href={devices}>Pair a trainer or a sensor on Devices</a>.
-      </p>
-    );
+    return <p>Nothing is paired yet.</p>;
   }
   return (
     <>

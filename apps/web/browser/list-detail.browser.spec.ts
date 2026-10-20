@@ -1878,3 +1878,55 @@ test.describe('#1312 — the lap table keeps its Lap column when it is scrolled'
     });
   }
 });
+
+/**
+ * PR #1477's review (#1442): at two panes, choosing a row must not move the
+ * list's rows under the pointer that chose it. #1442 stopped SHOWING the
+ * list's create link (*Import a route*, *Build a workout*) with nothing
+ * chosen, where the form it leads to is beside it; returning `null` there made
+ * the first tap on a row insert the ~44 px button above the list and push
+ * every row down. Neither `scrollY` nor the list's `scrollTop` sees that —
+ * content inserted above the rows moves them without scrolling anything — so
+ * this measures each row's own top, before and after a click on the first.
+ */
+test.describe('#1442 — choosing a row does not move the list', () => {
+  for (const viewport of TWO_PANES) {
+    test(`every row stays where it was at ${viewport.name}`, async ({ page }) => {
+      await open(page, viewport);
+      const faults: string[] = [];
+      const lines: string[] = [];
+      const rows = page.locator('[data-oyl-pane="list"] a[data-oyl-select]');
+      const rowTops = (): Promise<number[]> =>
+        rows.evaluateAll((links) => links.map((link) => link.getBoundingClientRect().top));
+      for (const route of LIST_DETAIL) {
+        await visit(page, route, hrefFor(route));
+        await page.evaluate(() => {
+          window.scrollTo(0, 0);
+        });
+        await settleScroll(page);
+        const before = await rowTops();
+        expect(before.length, `${route.id}: no row to choose`).toBeGreaterThan(0);
+        // A pointer's choice — the tablet rider's tap — not Enter.
+        await rows.first().click();
+        await expect(
+          page.locator('[data-oyl-pane="detail"] #oyl-selected-heading'),
+          `${route.id}: the chosen row's detail did not open`,
+        ).toBeVisible();
+        await settleScroll(page);
+        const after = await rowTops();
+        const moved = before.map((top, index) => (after[index] ?? Number.NaN) - top);
+        const most = Math.max(...moved.map((delta) => Math.abs(delta)));
+        const said = `${moved[0]?.toFixed(1) ?? '—'} (the most: ${most.toFixed(1)})`;
+        lines.push(
+          `${route.id}: ${String(before.length)} rows, the first at ` +
+            `${before[0]?.toFixed(1) ?? '—'}; moved by ${said} px`,
+        );
+        if (after.length !== before.length || !(most <= 0.5)) {
+          faults.push(`${route.id}: choosing the first row moved the list's rows by ${said} px`);
+        }
+      }
+      console.log(`[#1442] rows on choosing @ ${viewport.name}\n  ${lines.join('\n  ')}`);
+      expect(faults).toEqual([]);
+    });
+  }
+});

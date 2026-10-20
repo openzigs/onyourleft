@@ -493,7 +493,7 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
             heading="Your first workout"
             level={3}
             action={
-              <CreateLink route={routeById('workouts')} selection={selected}>
+              <CreateLink route={routeById('workouts')} selection={selected} emptyState>
                 Build a workout
               </CreateLink>
             }

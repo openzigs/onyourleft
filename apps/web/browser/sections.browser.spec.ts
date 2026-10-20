@@ -110,9 +110,13 @@ const ONE_COLUMN_UPRIGHT: readonly string[] = ['settings', 'devices'];
 /** Within this of the viewport's right edge counts as reaching it: `main`'s own padding. */
 const EDGE_SLACK_PIXELS = 32;
 
-/** The detail panes #1014 columns, as `#/<route>` or `#/<route>/selected/<id>`. */
+/**
+ * The detail panes #1014 columns, as `#/<route>` or `#/<route>/selected/<id>`.
+ * Routes with nothing chosen is not one since #1442: its second group, the
+ * sharing warning, is said beside a chosen route only, so the import is that
+ * pane's one group.
+ */
 const DETAIL_PANES = [
-  { route: 'routes', selected: false },
   { route: 'routes', selected: true },
   { route: 'workouts', selected: false },
 ] as const;

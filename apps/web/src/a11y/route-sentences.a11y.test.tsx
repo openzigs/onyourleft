@@ -127,6 +127,20 @@
  * Erase's list of what goes gains *"every ride in Recently deleted, which
  * cannot be brought back afterwards"*, since a deleted ride is held for 30
  * days. No sentence is dropped or reworded.
+ *
+ * ⚠️ **Edited by #1442, awaiting the owner's approval with that pull
+ * request's wording** (repetition trimmed). The Ride screen had three ways to
+ * Devices with nothing paired: the banner's "Pair a sensor" is "Pair a trainer
+ * or a sensor", the Trainer card's "No trainer: Pair a smart trainer to
+ * control it from here. Pairing is on Devices." and its "Devices" button are
+ * one sentence, "No trainer: Pair a smart trainer on Devices to control it
+ * from here.", and the Sensors group's "Pair a trainer or a sensor on
+ * Devices." link is gone (its "Nothing is paired yet." stays). Activities'
+ * line under its title, "Rides recorded on this device, newest first.", is
+ * "Your rides, newest first.", because the line under its list says where the
+ * rides are. And Routes' "Before you share a route" section, with its ⓘ and
+ * its warning, is said beside a CHOSEN route only, where *Who can see it* is:
+ * it leaves the empty walk, and moves after "Delete" on the populated one.
  * ## What it does not check
  *
  * That a sentence is in the same ORDER, or visible — `kept-visible.a11y.test`
