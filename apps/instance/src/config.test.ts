@@ -249,6 +249,28 @@ describe('the history index’s settings (#835, ADR 0040 D-5, D-6)', () => {
     expect(settings.kind === 'off' ? settings.reason : '').toContain(why);
   });
 
+  it('refuses https: by a name, whose certificate could never verify at the checked address (#1248)', () => {
+    for (const embeddingUrl of ['https://ollama:11434', 'https://localhost:11434']) {
+      const settings = readHistorySettings({ embeddingUrl });
+      expect(settings, embeddingUrl).toMatchObject({ kind: 'off', code: 'tls-by-name' });
+      expect(settings.kind === 'off' && settings.reason).toContain('cannot verify');
+    }
+    for (const embeddingUrl of [
+      'https://192.168.1.20:11434',
+      'https://[fd00::7]',
+      'http://ollama',
+    ]) {
+      const settings = readHistorySettings({ embeddingUrl });
+      expect(settings.kind, embeddingUrl).toBe('on');
+      expect(settings.kind === 'on' && settings.embedding.endpoint.href).toBe(
+        new URL(embeddingUrl).origin + '/',
+      );
+    }
+    const whole = readConfig({ commit: COMMIT, embeddingUrl: 'https://ollama:11434' });
+    expect(whole.ok).toBe(true);
+    expect(whole.ok && whole.config.history).toMatchObject({ kind: 'off', code: 'tls-by-name' });
+  });
+
   it('refuses a model name that is not one, and starts the instance anyway', () => {
     const settings = readHistorySettings({
       embeddingUrl: 'http://ollama:11434',
