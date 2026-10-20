@@ -7229,7 +7229,8 @@ select.oyl-input {
  * bottom row of panels — so it is WIDTH that has to clear it. 16 rem puts the
  * actions panel at x = 472 and the route panel at x = 264: 12 px clear at 480
  * tall and 35 px at 360, either side. The taller corners layout is untouched,
- * because a tablet's bottom row sits below the rider's box. The owner chose
+ * below this layout's 30 rem, because a tablet's bottom row sits below the
+ * rider's box (from 30 rem to 47 rem that is false: see #1169 below). The owner chose
  * this over moving #499's camera and over accepting the overlap.
  */
 @media (min-width: 46rem) and (min-height: 22.5rem) and (max-height: 30rem) {
@@ -7275,8 +7276,21 @@ select.oyl-input {
  * over the leaning rider and no control leaves its panel; on `main` 56 of
  * those 88 had a panel over the rider.
  * `ride.browser.spec.ts` §"#1124" (802×600) and §"#1169" hold it, both ways.
+ *
+ * ⚠️ **The narrowed route panel is too narrow for #1307's one-line strip text**
+ * (271 px at 802×600; the line overflowed it by 6 px on DejaVu Sans), so in
+ * this band the strip's two parts are stacked as on a phone, by the shared
+ * rule under "THE WORKOUT'S STRIP ON A PHONE". The route plan and the strip are both 6 rem
+ * here (5 rem before), one line taller for the second line, so #1307's size
+ * parity holds and the lane keeps its 36 px.
  */
 @media (min-width: 46rem) and (height > 30rem) and (height < 47rem) {
+  /* One line taller, route plan and strip alike, so that the strip, whose line
+     is now two (below), keeps its 36 px lane and is still the plan's size. */
+  .oyl-game--riding .oyl-hud__plan-svg {
+    height: 6rem;
+  }
+
   .oyl-game--riding .oyl-hud__route {
     width: min(
       100%,
@@ -7553,7 +7567,8 @@ select.oyl-input {
 }
 
 @media (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem),
-  (min-width: 46rem) and (min-height: 22.5rem) and (max-height: 30rem) {
+  (min-width: 46rem) and (min-height: 22.5rem) and (max-height: 30rem),
+  (min-width: 46rem) and (height > 30rem) and (height < 47rem) {
   .oyl-game--riding .oyl-hud__route > .oyl-workout-strip .oyl-workout-strip__part {
     display: block;
   }

@@ -52,16 +52,20 @@ import { longestReplanSentence } from './replan-longest';
  * least 36 px of it; a bar; one line of text that fits; and no surface of its
  * own — the HUD panel's dark one, with the HUD's own inks.
  *
- * ⚠️ **802×600 is here for the size comparison ONLY.** #1169 records that the
- * route and actions panels lie over the rider there on `main`; this change
- * does not fix that and must not be read as measuring it. What it shows is
- * that the strip makes it no worse.
+ * 802×600 is #1169's: the route and actions panels lay over the rider there on
+ * `main`, and `theme.css` §"THE MIDDLE corners layout's bottom row" moved
+ * them. The route panel is 271 px wide there, narrower than the strip's line
+ * on DejaVu Sans, so the line is written as its two parts, one under the other
+ * (`stacked`), as it is on a phone, in the strip's own height; the rider
+ * clearance is asserted here too.
  */
 interface GraphSight {
   readonly role: string | null;
   readonly name: string;
   readonly lane: string | null;
   readonly strip: Box;
+  /** Whether the line's two parts are one under the other (`display: block`). */
+  readonly stacked: boolean;
   readonly route: Box | undefined;
   readonly laneBox: Box | undefined;
   readonly progressBox: Box | undefined;
@@ -109,6 +113,9 @@ async function graphOnTheHud(page: Page): Promise<GraphSight | undefined> {
       name: strip.getAttribute('aria-label') ?? '',
       lane: strip.getAttribute('data-oyl-lane'),
       strip: boxOf(strip),
+      stacked: [...strip.querySelectorAll('.oyl-workout-strip__part')].some(
+        (part) => getComputedStyle(part).display === 'block',
+      ),
       route: route === null ? undefined : boxOf(route),
       laneBox: lane === null ? undefined : boxOf(lane),
       progressBox: progress === null ? undefined : boxOf(progress),
@@ -205,12 +212,23 @@ async function untilTheGapsSettle(page: Page): Promise<void> {
 /** Past the "about 3 s" {@link untilTheGapsSettle} measured, with a second to spare. */
 const GAPS_SETTLE_AFTER_MS = 4_000;
 
-const GRAPH_VIEWPORTS: readonly (Viewport & { readonly riderClear: boolean })[] = [
+const GRAPH_VIEWPORTS: readonly (Viewport & {
+  readonly riderClear: boolean;
+  readonly stacked: boolean;
+})[] = [
   ...OVERLAY_VIEWPORTS.filter((each) => Math.min(each.width, each.height) > 480).map((each) => ({
     ...each,
     riderClear: true,
+    stacked: false,
   })),
-  { name: '#1169’s — 802×600', width: 802, height: 600, unstagedFails: true, riderClear: false },
+  {
+    name: '#1169’s — 802×600',
+    width: 802,
+    height: 600,
+    unstagedFails: true,
+    riderClear: true,
+    stacked: true,
+  },
 ];
 
 /** `tokens.ts`: `hudInk`, `hudInkMuted`, `hudBorder` — in BOTH page themes, like `HUD_SURFACE`. */
@@ -358,7 +376,8 @@ function expectStripReadable(graph: GraphSight, fixture: (typeof STRIP_FIXTURES)
   // Measured, not assumed: the text itself against the box it is in.
   expect(graph.text.inkWidth).toBeLessThanOrEqual(graph.text.boxWidth);
   expect(graph.text.fontSize).toBeGreaterThanOrEqual(12);
-  expect(graph.text.box.height).toBeLessThanOrEqual(20);
+  // One line of text, or two where the parts are stacked (a line is 16 px).
+  expect(graph.text.box.height).toBeLessThanOrEqual(graph.stacked ? 36 : 20);
   // In order, and none over another: the lane, the bar, the line.
   expect(laneBox.top).toBeGreaterThanOrEqual(graph.strip.top - SUBPIXEL_TOLERANCE);
   expect(progressBox.top).toBeGreaterThanOrEqual(laneBox.bottom);
@@ -426,6 +445,7 @@ test.describe('a running workout drawn on the HUD — #1307', () => {
           });
         }
 
+        expect(graph.stacked, `${fixture.graph} stacked`).toBe(viewport.stacked);
         expectStripReadable(graph, fixture);
         // The strip is inside the route panel.
         expect(graph.route).toBeDefined();
