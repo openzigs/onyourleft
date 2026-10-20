@@ -877,6 +877,8 @@ export async function measure(options: MeasureOptions): Promise<MeasureReport> {
   let cleared = true;
   /** The key being sent to an account, while it is: an interruption waits for it. */
   let preparing: Promise<void> | undefined;
+  /** The clearing of an account done with, while it runs: an interruption waits for it too. */
+  let clearing: Promise<void> | undefined;
   const signal = options.signal;
   // A call, not a field read: an await can change it, which narrowing would not see.
   const stopped = (): boolean => signal?.aborted === true;
@@ -890,7 +892,11 @@ export async function measure(options: MeasureOptions): Promise<MeasureReport> {
     if (stopped()) throw new Error(INTERRUPTED);
     if (device === undefined || starts >= options.startsPerAccount) {
       // An account done with is cleared now, not when the whole run ends (#1270).
-      cleared = (await clearHosted(holding.splice(0), log)) && cleared;
+      clearing = clearHosted(holding.splice(0), log).then((ok) => {
+        cleared = ok && cleared;
+      });
+      await clearing;
+      clearing = undefined;
       accounts += 1;
       device = await signedInDevice(
         url,
@@ -952,6 +958,8 @@ export async function measure(options: MeasureOptions): Promise<MeasureReport> {
   if (onAbort !== undefined) signal?.removeEventListener('abort', onAbort);
   // A key on its way to an account is let arrive, so that it is cleared too.
   await preparing?.catch(() => undefined);
+  // So is an account being cleared: it left `holding` when its clearing began.
+  await clearing?.catch(() => undefined);
   // However the run ended, the key does not outlive it on the instance.
   cleared = (await clearHosted(holding.splice(0), log)) && cleared;
   if (failed !== undefined) {

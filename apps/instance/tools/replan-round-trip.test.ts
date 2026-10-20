@@ -10,7 +10,13 @@
 
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { createServer, request as httpRequest, type Server } from 'node:http';
+import {
+  createServer,
+  request as httpRequest,
+  type IncomingMessage,
+  type Server,
+  type ServerResponse,
+} from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -375,7 +381,7 @@ async function hostedService(script: readonly ScriptedReply[]) {
 const HOSTED = { url: HOSTED_URL, model: 'hosted-model', key: MARKER_KEY };
 
 /** What {@link interposed} does with one request: pass it on, destroy its socket, or redirect it. */
-type Interposition = 'pass' | 'cut' | { readonly redirect: string };
+type Interposition = 'pass' | 'cut' | { readonly redirect: string } | { readonly holdMs: number };
 
 /**
  * A loopback proxy in front of the instance that decides, request by request,
@@ -394,10 +400,19 @@ async function interposed(
       incoming.socket.destroy();
       return;
     }
-    if (decision !== 'pass') {
-      outgoing.writeHead(307, { location: decision.redirect }).end();
+    const held = typeof decision === 'object' && 'holdMs' in decision ? decision.holdMs : 0;
+    if (held > 0) {
+      // Let the request through late: the work it belongs to is still in flight meanwhile.
+      setTimeout(() => forward(incoming, outgoing), held);
       return;
     }
+    if (decision !== 'pass') {
+      outgoing.writeHead(307, { location: (decision as { redirect: string }).redirect }).end();
+      return;
+    }
+    forward(incoming, outgoing);
+  });
+  const forward = (incoming: IncomingMessage, outgoing: ServerResponse): void => {
     const upstream = httpRequest(
       `${target}${incoming.url ?? ''}`,
       { method: incoming.method, headers: incoming.headers },
@@ -408,7 +423,7 @@ async function interposed(
     );
     upstream.on('error', () => outgoing.destroy());
     incoming.pipe(upstream);
-  });
+  };
   proxy = server;
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   return `http://127.0.0.1:${String((server.address() as AddressInfo).port)}`;
@@ -554,6 +569,34 @@ describe('the round-trip measurement of a hosted model, on a key of the measurer
     expect((failure as Error).message).toBe(INTERRUPTED);
     expect(performance.now() - began).toBeLessThan(15_000);
     expect(lines).toEqual(['account 1: the hosted key and consent are cleared']);
+  }, 60_000);
+
+  it('waits for an account being cleared when interrupted, and does not report it cleared early — #1270', async () => {
+    const service = await hostedService([...TWO_STEPS, ...TWO_STEPS]);
+    // One start per account: the second run's account change clears the first account.
+    // The clear's first sealed request is the 8th, and it is held at the proxy.
+    let held = false;
+    const url = await interposed(await instance([], true, service.fetch), (_, sealed) => {
+      if (sealed !== 8) return 'pass';
+      held = true;
+      return { holdMs: 1_500 };
+    });
+    const lines: string[] = [];
+    const stop = new AbortController();
+    const measuring = measure(
+      options(url, 'sealed', {
+        hosted: HOSTED,
+        signal: stop.signal,
+        startsPerAccount: 1,
+        log: (line) => lines.push(line),
+      }),
+    ).catch((error: unknown) => error);
+    await vi.waitFor(() => expect(held).toBe(true), { timeout: 30_000 });
+    stop.abort();
+    const failure = await measuring;
+    expect((failure as Error).message).toBe(INTERRUPTED);
+    // The clear that was in flight finished, and said so, before the tool answered.
+    expect(lines).toContain('account 1: the hosted key and consent are cleared');
   }, 60_000);
 
   it('says to revoke the key when interrupted and an account cannot be read back as cleared — #1270', async () => {
