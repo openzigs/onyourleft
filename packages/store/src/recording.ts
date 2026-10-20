@@ -51,7 +51,14 @@
  * possible outcome for a recovery path.
  */
 
-import type { Metres, RecordedPause, Seconds, UnixSeconds, WorkoutBlock } from '@onyourleft/domain';
+import type {
+  Metres,
+  RecordedPause,
+  ReplanRecord,
+  Seconds,
+  UnixSeconds,
+  WorkoutBlock,
+} from '@onyourleft/domain';
 
 import type { ActivityId, AthleteId, RecordingSessionId } from './ids';
 import type { RoomRaceFact, WorkoutBlockOutcome } from './records';
@@ -81,6 +88,14 @@ export const RECORDING_STORED_STATES: readonly RecordingStoredState[] = [
 ];
 
 /** One end of a lap: the instant, and the recording's own moving time at it. */
+/**
+ * The most re-plan records a recording's header keeps — #1328: the ride
+ * controller's own bound (`RIDE_REPLAN_RECORDS_LIMIT`), which keeps the
+ * latest. One move in three minutes makes far fewer in any real ride, so a
+ * longer list is a damaged or a planted row, and is not read past this.
+ */
+export const RECORDING_REPLAN_RECORDS_LIMIT = 200;
+
 export interface RecordedLapMark {
   readonly at: UnixSeconds;
   readonly movingTime: Seconds;
@@ -224,6 +239,26 @@ export interface RecordingSessionRecord {
    */
   readonly workoutBlocks?: readonly RecordedWorkoutBlock[] | undefined;
   /**
+   * The re-plan decisions made so far, oldest first — #1328, ADR 0048 D-6
+   * P9. On the header for {@link courseLaps}' reason: a ride recovered after
+   * the app closed is saved with the moves accepted and refused in it, as
+   * `RideFacts.replans`.
+   *
+   * ⚠️ **Untrusted on the way out, and never a reason to refuse a header.**
+   * Each entry is read through `readReplanRecord`, as the ride's own are: one
+   * that does not read is dropped and counted in {@link replansDropped}, and
+   * whatever is not a list holds no record and is counted as one. At most
+   * {@link RECORDING_REPLAN_RECORDS_LIMIT} are kept, the latest; the rest
+   * are counted. Optional, so not a migration.
+   */
+  readonly replans?: readonly ReplanRecord[] | undefined;
+  /**
+   * How many of this recording's re-plan records could not be kept or read
+   * back. Absent when none was. A count and nothing of the records.
+   * @see replans
+   */
+  readonly replansDropped?: number | undefined;
+  /**
    * The fields of the stored header that did not read — #1325. Absent when
    * every field read. Set by the read path only; the write path ignores it.
    *
@@ -343,6 +378,10 @@ export interface RecoveredRecording {
   readonly roomRaces: readonly RoomRaceFact[];
   /** The header's workout blocks; absent with none. @see RecordingSessionRecord.workoutBlocks */
   readonly workoutBlocks?: readonly RecordedWorkoutBlock[] | undefined;
+  /** The header's re-plan records; absent with none. @see RecordingSessionRecord.replans */
+  readonly replans?: readonly ReplanRecord[] | undefined;
+  /** @see RecordingSessionRecord.replansDropped */
+  readonly replansDropped?: number | undefined;
   /**
    * How many chunk rows made up the recovered prefix.
    *

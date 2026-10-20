@@ -130,6 +130,12 @@ export interface RideToSaveInput {
    */
   readonly replans?: readonly ReplanRecord[] | undefined;
   /**
+   * How many of this ride's re-plan records its checkpoint could not keep or
+   * read back — #1328 (`packages/store` §`RideFacts.replansDropped`). Absent
+   * when none was, and for a ride saved without a recovery.
+   */
+  readonly replansDropped?: number | undefined;
+  /**
    * The private races this ride was ridden in, as each room said it — #785,
    * the owner's ruling of 2026-10-14: the result is stored with the ride on
    * this device (`packages/store` §`RideFacts.races`).
@@ -214,6 +220,11 @@ export function rideToSave(input: RideToSaveInput): FinishedRide | undefined {
         replans: input.replans,
         races: input.races,
       }),
+      // #1328: a count of the records a recovered ride's checkpoint lost, so
+      // the ride says it has a gap in its record rather than none.
+      ...(input.replansDropped === undefined || input.replansDropped <= 0
+        ? {}
+        : { replansDropped: input.replansDropped }),
       // #1319: known only to the ride that rode them, like the two above, and
       // worked out from the samples this save writes, by the rule its laps are.
       ...(input.workoutBlocks === undefined || input.workoutBlocks.length === 0

@@ -871,3 +871,12 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   85 px on a Mac's, the same with the badge as without it. The badge and the switch are both on the
   heading's row and above the list, so a rider who has scrolled down a long library sees neither.
   (#1329)
+
+- **2026-10-20** — **P9's record survives a recovery.** The 2026-10-12 entry's *"Not built: P9's
+  record on a recovered ride"* is built: the recording's checkpoint header carries the decisions
+  made so far (`packages/store` §`RecordingSessionRecord.replans`), rewritten on every flush, and a
+  ride recovered after a crash, saved, continued or kept in Recently deleted, is saved with them.
+  The field is untrusted on read as the ride's own is: each record goes through
+  `readReplanRecord`, one that does not read is dropped and counted in `replansDropped`, a field
+  that is not a list holds no record, and the latest 200 are kept. Nothing about it can stop a ride
+  being recovered. `workoutFinished` and `ghostRaced` are still not carried. (#1328)

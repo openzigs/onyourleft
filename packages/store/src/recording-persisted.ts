@@ -17,6 +17,7 @@ import {
   unixSeconds,
   type Metres,
   type RecordedPause,
+  type ReplanRecord,
   type Seconds,
   type UnixSeconds,
 } from '@onyourleft/domain';
@@ -28,10 +29,12 @@ import {
   decodedNumber,
   decodedString,
   racesOf,
+  replanRecordsOf,
   toPersistedRoomRace,
   type PersistedRoomRace,
 } from './persisted';
 import {
+  RECORDING_REPLAN_RECORDS_LIMIT,
   RECORDING_STORED_STATES,
   type RecordedCourseLap,
   type RecordedWorkoutBlock,
@@ -89,6 +92,15 @@ export interface PersistedRecordingSession {
    * way in and out: @see recordedWorkoutBlocksOf
    */
   workoutBlocks?: unknown[];
+  /**
+   * The re-plan decisions so far — #1328. Absent with none, and on every
+   * header written before the field existed. Optional and unindexed, so no
+   * schema version moved. Plain JSON, re-read entry by entry on the way in
+   * and out, and never a throw: @see replansOf
+   */
+  replans?: unknown[];
+  /** @see RecordingSessionRecord.replansDropped */
+  replansDropped?: number;
 }
 
 /** One lap of a course. @see RecordedCourseLap */
@@ -181,6 +193,52 @@ export function toPersistedRecordingSession(
     // #1319: only a list that reads back is written, so one that does not is
     // left out and never refuses the header. @see recordedWorkoutBlocksOf
     ...workoutBlocksRow(record.workoutBlocks, record.startedAt, record.updatedAt),
+    // #1328: only the records that read back are written, so one that does
+    // not is left out and counted, and never refuses the header. @see replansOf
+    ...replansRow(record.replans, record.replansDropped),
+  };
+}
+
+function replansRow(
+  replans: unknown,
+  dropped: unknown,
+): { replans?: unknown[]; replansDropped?: number } {
+  const kept = replansOf(replans, dropped);
+  return {
+    ...(kept.replans === undefined ? {} : { replans: [...kept.replans] }),
+    ...(kept.replansDropped === undefined ? {} : { replansDropped: kept.replansDropped }),
+  };
+}
+
+/**
+ * A header's re-plan records as they are kept — #1328: each one that reads,
+ * the latest {@link RECORDING_REPLAN_RECORDS_LIMIT}, and a count of the rest.
+ * The ride's own rule (`persisted.ts` §`replanRecordsOf`), used on the way in
+ * and on the way out, with one more: a list longer than the bound is not read
+ * past it, and what it held before is counted, never read.
+ *
+ * ⚠️ **Never a throw, and never a reason to refuse or hide a header.** These
+ * rows are read on the recovery path, and a recording that cannot be
+ * recovered has lost the ride, which is worth more than its audit trail.
+ * An empty list is no record.
+ */
+function replansOf(
+  replans: unknown,
+  dropped: unknown,
+): { readonly replans?: readonly ReplanRecord[]; readonly replansDropped?: number } {
+  const over =
+    Array.isArray(replans) && replans.length > RECORDING_REPLAN_RECORDS_LIMIT
+      ? replans.length - RECORDING_REPLAN_RECORDS_LIMIT
+      : 0;
+  const before =
+    typeof dropped === 'number' && Number.isSafeInteger(dropped) && dropped > 0 ? dropped : 0;
+  const kept = replanRecordsOf(
+    over === 0 ? replans : (replans as unknown[]).slice(-RECORDING_REPLAN_RECORDS_LIMIT),
+    before + over,
+  );
+  return {
+    ...(kept.replans === undefined || kept.replans.length === 0 ? {} : { replans: kept.replans }),
+    ...(kept.replansDropped === undefined ? {} : { replansDropped: kept.replansDropped }),
   };
 }
 
@@ -272,6 +330,8 @@ export function fromPersistedRecordingSession(
     ...roomRacesOut(row.roomRaces),
     // #1319: never a throw — @see recordedWorkoutBlocksOf
     ...workoutBlocksOut(row.workoutBlocks, startedAt, updatedAt),
+    // #1328: never a throw — @see replansOf
+    ...replansOf(row.replans, row.replansDropped),
     ...(damaged.length === 0 ? {} : { damaged }),
   };
 }
