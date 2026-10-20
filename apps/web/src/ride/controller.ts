@@ -122,6 +122,13 @@ import {
   type RideSaveStore,
 } from '../recording/finish';
 import {
+  blockLogFrom,
+  logEnd,
+  logTick,
+  NO_BLOCKS,
+  type BlockLog,
+} from '../recording/workout-blocks';
+import {
   lapFiguresOf,
   lapSlots,
   recordedStretch,
@@ -2710,6 +2717,8 @@ export function createRideController(options: RideControllerOptions): RideContro
       // recorder's own, so a ride recovered after a crash keeps them by the
       // one path, as it keeps its laps (#1360's review, B2).
       ...(current.roomRaces.length === 0 ? {} : { races: current.roomRaces }),
+      // #1319: the recorder's own, so a recovered ride keeps them by this path.
+      ...(current.workoutBlocks.length === 0 ? {} : { workoutBlocks: current.workoutBlocks }),
       // #1326: the store marks this checkpoint saved in the ride's own
       // transaction, so a crash after the save cannot offer the ride again.
       recordingSession: current.sessionId,
@@ -2915,7 +2924,32 @@ export function createRideController(options: RideControllerOptions): RideContro
     readonly thresholdWatts: number;
     /** The graph's last few minutes (#1307). @see RideWorkoutSnapshot.trace */
     trace: readonly WorkoutTraceSample[];
+    /** This workout's blocks so far, for the ride's page (#1319). @see noteWorkoutBlocks */
+    blocks: BlockLog;
+    /**
+     * How many of the recorder's blocks are earlier workouts', counted when
+     * this one first hands its own over. @see noteWorkoutBlocks
+     */
+    blocksAfter: number | undefined;
   }
+
+  /**
+   * Keep `log` as `current`'s blocks and hand the recording its blocks: the
+   * earlier workouts' as they were, then this one's — #1319. Nothing is
+   * handed over while the log has not changed, or with no recording.
+   */
+  const noteWorkoutBlocks = (current: WorkoutInProgress, log: BlockLog): void => {
+    const changedBlocks = log.blocks !== current.blocks.blocks;
+    current.blocks = log;
+    if (!changedBlocks || recorder === undefined) {
+      return;
+    }
+    current.blocksAfter ??= recorder.workoutBlocks.length;
+    recorder.noteWorkoutBlocks([
+      ...recorder.workoutBlocks.slice(0, current.blocksAfter),
+      ...log.blocks,
+    ]);
+  };
 
   /** Whether a heart-rate strap is paired — in any state: a quiet strap is silence, not "none". */
   const heartRateStrapPaired = (): boolean =>
@@ -3030,6 +3064,30 @@ export function createRideController(options: RideControllerOptions): RideContro
     }
     workout.session.tick(rideSeconds(at));
     sampleForGraph(workout, at);
+    logWorkoutBlock(workout);
+  };
+
+  /**
+   * Where the workout is, block by block, after its tick — #1319: on the
+   * recording's own clock and moving time ({@link markOf}), as a lap is.
+   * Only while recording: the tick is not run otherwise.
+   */
+  const logWorkoutBlock = (current: WorkoutInProgress): void => {
+    if (recorder === undefined) {
+      return;
+    }
+    const player = current.session.state().player;
+    noteWorkoutBlocks(
+      current,
+      logTick(current.blocks, {
+        status: player.status,
+        block: player.segment?.block,
+        elapsed: player.elapsed,
+        timeline: current.session.plan().riding,
+        eased: player.rescue !== undefined,
+        mark: markOf(recorder),
+      }),
+    );
   };
 
   /**
@@ -3179,6 +3237,16 @@ export function createRideController(options: RideControllerOptions): RideContro
     // #947: read before the session ends, which forgets the player's state.
     if (workout.session.state().player.status === 'finished') {
       workoutFinishedInRide = true;
+    }
+    // #1319: before the session ends too. The block being ridden is cut short
+    // and the rest of the plan skipped — as the screen showed it, a revision
+    // waiting for the next boundary included.
+    if (recorder !== undefined) {
+      const plan = workout.session.plan();
+      noteWorkoutBlocks(
+        workout,
+        logEnd(workout.blocks, plan.waiting ?? plan.riding, markOf(recorder)),
+      );
     }
     if (handover === 'replace') {
       workout.session.supersede();
@@ -3884,6 +3952,13 @@ export function createRideController(options: RideControllerOptions): RideContro
         heartRateHold,
         thresholdWatts: thresholdPower,
         trace: [],
+        // #1319: begun while recording, its first block is from now; begun
+        // before, from wherever the recording first finds it.
+        blocks:
+          recorder !== undefined && rideInProgress(phase)
+            ? blockLogFrom(markOf(recorder))
+            : NO_BLOCKS,
+        blocksAfter: undefined,
       };
       workout = started;
       // #1244, P7: only when the rider switched re-plans on for THIS workout,

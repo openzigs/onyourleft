@@ -125,7 +125,9 @@ import {
   type SideSessionKind,
   type SideSessionSourceRecord,
   type SideSessionSummaryRecord,
+  type WorkoutBlockFact,
   type WorkoutGoalsRead,
+  workoutBlockFactsOf,
 } from '@onyourleft/store';
 
 import { ActivityExportError, exportActivity, fileStemOf } from './export-activity';
@@ -220,6 +222,13 @@ export interface ManifestRideFacts {
    * so this is the only copy that leaves the device (#1360's review, B1).
    */
   readonly races?: readonly ManifestRoomRace[];
+  /**
+   * The blocks of each workout ridden on the ride, and what was ridden in
+   * each — #1319, `RideFacts.workoutBlocks`. Where each block began and ended
+   * is known only to the ride that recorded it, so this is the only copy that
+   * leaves the device.
+   */
+  readonly workoutBlocks?: readonly WorkoutBlockFact[];
 }
 
 /** A race as the manifest carries it, field by field. @see ManifestRideFacts.races */
@@ -1170,7 +1179,15 @@ function manifestFactsOf(facts: RideFacts): ManifestRideFacts {
               : { placeAcross: race.placeAcross, across: race.across }),
           })),
         }),
+    // #1319: through the store's reader, which copies each block's own keys
+    // and no other, so a key added to one later is not exported by accident.
+    ...workoutBlocksOf(facts.workoutBlocks),
   };
+}
+
+function workoutBlocksOf(value: unknown): { workoutBlocks?: readonly WorkoutBlockFact[] } {
+  const blocks = workoutBlockFactsOf(value);
+  return blocks === undefined ? {} : { workoutBlocks: blocks };
 }
 
 function manifestWriteUpOf(writeUp: RideWriteUpRecord): ManifestRideWriteUp {

@@ -31,6 +31,8 @@ export type {
   ActivitySummary,
   RideFacts,
   RoomRaceFact,
+  WorkoutBlockFact,
+  WorkoutBlockOutcome,
   AthleteRecord,
   CameraFrameRecord,
   FramingCheckRecord,
@@ -134,6 +136,7 @@ export {
 
 export type { UnitSystem } from './unit-system';
 export { DEFAULT_UNIT_SYSTEM, isUnitSystem, parseUnitSystem, UNIT_SYSTEMS } from './unit-system';
+export { workoutBlockFactsOf } from './workout-block-persisted';
 export type { Visibility } from './visibility';
 export { DEFAULT_VISIBILITY, parseVisibility, VISIBILITIES } from './visibility';
 
@@ -190,6 +193,7 @@ export type {
   NewRecordingSession,
   RecordedCourseLap,
   RecordedLapMark,
+  RecordedWorkoutBlock,
   RecordingChunkRecord,
   RecordingFootprint,
   RecordingHeaderDamage,
