@@ -1314,6 +1314,81 @@ describe('a ride’s re-plan record is synced with the ride — #1315, ADR 0048 
     // The next sync sends B's, which is the device's change winning.
     expect(await b.sync()).toMatchObject({ replansPushed: 1, failures: [] });
   }, 60_000);
+
+  // The two halves of the pull's `onlyIf`, each on its own (#1315's review):
+  // a record that lands during the wait on the instance is in the facts read
+  // after it, so only the record check refuses it; a change to another fact
+  // after that read leaves the records as they were, so only the facts check
+  // refuses it.
+
+  it('is not written over a record that landed here during the wait on the instance itself', async () => {
+    const { a, ride, origin } = await rodeWithReplans();
+    expect(await a.sync()).toMatchObject({ replansPushed: 1, failures: [] });
+    const b = await linkedDevice(world!.url, origin, a.on);
+    const own = [{ decision: 'refused', rule: 'P2', at: 10 }] as unknown as typeof REPLANS;
+    const report = await b.on.harness.write((store) => {
+      const dependencies = syncDependencies(b.on, store);
+      const sealed: SyncTransport = {
+        bytes: (path) => dependencies.sealed.bytes(path),
+        json: async (method, path, body) => {
+          const answer = await dependencies.sealed.json(method, path, body);
+          // While B waits on the record, B's own lands — before the facts
+          // the write is checked against are read.
+          if (method === 'GET' && path.startsWith('/v1/sync/items/replan-record/')) {
+            const held = await store.getActivity(LOCAL_ATHLETE, ride);
+            await store.setActivityRideFacts(LOCAL_ATHLETE, ride, {
+              ...held?.rideFacts,
+              replans: own,
+            });
+          }
+          return answer;
+        },
+      };
+      return syncWithInstance({ ...dependencies, sealed });
+    });
+    expect(report).toMatchObject({ pulled: 1, replansPulled: 0, failures: [] });
+    expect(await replansOn(b.on, ride)).toStrictEqual(own);
+  }, 60_000);
+
+  it('is not written over another fact of the ride that changed after the facts were read', async () => {
+    const { a, ride, origin } = await rodeWithReplans();
+    expect(await a.sync()).toMatchObject({ replansPushed: 1, failures: [] });
+    const b = await linkedDevice(world!.url, origin, a.on);
+    const report = await b.on.harness.write((store) => {
+      let edited = false;
+      return syncWithInstance(
+        syncDependencies(
+          b.on,
+          new Proxy(store, {
+            get: (target, property) => {
+              const value = Reflect.get(target, property) as unknown;
+              if (typeof value !== 'function') return value;
+              const bound = (value as (...args: unknown[]) => unknown).bind(target);
+              if (property !== 'setActivityRideFacts') return bound;
+              return async (...args: unknown[]) => {
+                // Only the pull's write carries an `onlyIf`; the ride's records
+                // stay as the sync read them, and another fact moves.
+                if (!edited && args[3] !== undefined) {
+                  edited = true;
+                  const held = await target.getActivity(LOCAL_ATHLETE, ride);
+                  expect(held?.rideFacts?.ghostRaced).not.toBe(true);
+                  await target.setActivityRideFacts(LOCAL_ATHLETE, ride, {
+                    ...held?.rideFacts,
+                    ghostRaced: true,
+                  });
+                }
+                return bound(...args);
+              };
+            },
+          }),
+        ),
+      );
+    });
+    expect(report).toMatchObject({ pulled: 1, replansPulled: 0, failures: [] });
+    const kept = await b.on.harness.read((store) => store.getActivity(LOCAL_ATHLETE, ride));
+    expect(kept?.rideFacts?.ghostRaced).toBe(true);
+    expect(kept?.rideFacts?.replans).toBeUndefined();
+  }, 60_000);
 });
 
 describe('what a device will not take from an instance (#898)', () => {
