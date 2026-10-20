@@ -262,6 +262,38 @@ describe('building a workout', () => {
     expect(warnings()).toEqual([]);
   });
 
+  it('a refused Add block followed by a valid one leaves no warning — #1165', async () => {
+    const view = await render(workoutStub(ATHLETE));
+    const warnings = (): string[] =>
+      queryAll(view.container, '.oyl-status').map((each) => each.textContent ?? '');
+
+    await typeInto(field(view.container, 'block-minutes'), '10');
+    await typeInto(field(view.container, 'block-percent'), '900');
+    await activateWithKeyboard(buttonSaying(view.container, 'Add block') as HTMLElement);
+    expect(warnings()).toHaveLength(1);
+
+    await typeInto(field(view.container, 'block-percent'), '65');
+    await activateWithKeyboard(buttonSaying(view.container, 'Add block') as HTMLElement);
+    expect(warnings()).toEqual([]);
+  });
+
+  it('a refused Add block replaces a refused save, so one warning shows, inside the form — #1165', async () => {
+    const view = await render(workoutStub(ATHLETE));
+    const warnings = (): Element[] => queryAll(view.container, '.oyl-status');
+
+    await typeInto(field(view.container, 'workout-name'), 'Empty');
+    await activateWithKeyboard(buttonSaying(view.container, 'Save workout') as HTMLElement);
+    await settle();
+    expect(warnings()).toHaveLength(1);
+    expect(warnings()[0]?.closest('form')).toBeNull();
+
+    await typeInto(field(view.container, 'block-minutes'), '10');
+    await typeInto(field(view.container, 'block-percent'), '900');
+    await activateWithKeyboard(buttonSaying(view.container, 'Add block') as HTMLElement);
+    expect(warnings()).toHaveLength(1);
+    expect(warnings()[0]?.closest('form')?.getAttribute('aria-label')).toBe('Add a block');
+  });
+
   it('refuses a heart-rate hold whose range is under 6 bpm, and keeps what was typed — #1241', async () => {
     const stub = workoutStub(ATHLETE);
     const view = await render(stub);
