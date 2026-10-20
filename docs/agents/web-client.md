@@ -574,7 +574,12 @@ apps/                 AGPL-3.0-or-later, without exception
                         unsubscribes `onControlLost` before it closes the
                         client and `close()` writes nothing, so any path that
                         detaches a controlling trainer without releasing it
-                        first skips the release in silence
+                        first skips the release in silence. Since #1433
+                        `reading-choice.ts` is which readings the Ride screen
+                        shows and in which order (ranked on Settings) and its
+                        *Zoom* to the top two at `--oyl-font-size-zoom`, kept
+                        on the device; `rideview.browser.spec.ts` §"#1433"
+                        measures the zoomed digit against a stated floor
     src/offline/        the service worker, whether it is registered at all, and
                         when a new one may take over
                         (#406, #407) — the one cache strategy, the four handlers

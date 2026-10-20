@@ -1125,8 +1125,9 @@ describe('the screen is three groups, in the order it always was (#422)', () => 
     expect(
       queryAll(document, '.oyl-ride__group--live button').map((each) => each.textContent),
       // #1318: *Lap*, on a ride with no course under it — first since #1430,
-      // so Pause stands between it and Stop.
-    ).toEqual(['Lap', 'Pause', 'Stop']);
+      // so Pause stands between it and Stop. #1433: *Zoom* after them, at the
+      // end of their row and outside the row of three.
+    ).toEqual(['Lap', 'Pause', 'Stop', 'Zoom']);
   });
 
   it('puts the workout in the TRAINER group, beside the control it depends on', async () => {
