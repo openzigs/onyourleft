@@ -595,6 +595,14 @@ function viewFor(
           selected={match.parameter}
           nativeShell={props.nativeShell}
           instance={props.instance}
+          // #1439: the chosen ride's page is drawn in the detail pane, so it
+          // reads what `#/activities/<id>` reads.
+          detail={props.detail}
+          map={props.map}
+          basemap={props.basemap}
+          writeUp={props.rideAnalysis}
+          instanceWriteUp={props.instanceAnalysis}
+          riderText={props.riderText}
         />
       );
     case 'activity-detail':

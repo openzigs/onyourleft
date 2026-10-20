@@ -150,16 +150,18 @@ const PRIMARY_ON_ARRIVAL: Readonly<Record<string, readonly string[]>> = {
  * (`shell/ListDetail.tsx` §`CreateLink`).
  *
  * Held at the two-pane tablet, where the insets are the shell's, for all
- * three; and for Activities on one pane too, where *Open ride details* ends
- * 665 px above the upright tablet's fold and 180 px above a phone's (measured
- * on #670's review branch, on a Mac). On one pane the list is hidden with an
- * item chosen, so Routes and Workouts have NO primary on screen: the item's
- * own actions — download, change, export, delete — are all secondary (#668),
- * and the way back to the form is the one-pane back link to the list. That is
- * published as "no primary on screen", not held.
+ * three. On one pane the list is hidden with an item chosen, so Routes and
+ * Workouts have NO primary on screen: the item's own actions — download,
+ * change, export, delete — are all secondary (#668), and the way back to the
+ * form is the one-pane back link to the list. That is published as "no
+ * primary on screen", not held. ⚠️ **So is Activities on one pane since
+ * #1439**, and a reviewer who remembers it held upright and on a phone is
+ * reading the old file: the chosen ride's pane was a summary whose primary was
+ * *Open ride details*, and it is the ride's page now, whose controls are
+ * toggles and secondaries.
  */
 const PRIMARY_WHEN_SELECTED: Readonly<Record<string, readonly string[]>> = {
-  activities: [TABLET_IN_THE_SHELL.name, TABLET_UPRIGHT.name, PHONE.name],
+  activities: [TABLET_IN_THE_SHELL.name],
   routes: [TABLET_IN_THE_SHELL.name],
   workouts: [TABLET_IN_THE_SHELL.name],
 };
@@ -1784,10 +1786,24 @@ test.describe('#1312 — the lap table keeps its Lap column when it is scrolled'
         });
         const table = page.locator('table.oyl-table--laps');
         await expect(table).toBeVisible();
-        await table.scrollIntoViewIfNeeded();
+        // ⚠️ #1439: the traces above the laps are a `React.lazy` chunk, and
+        // since their axes they are taller. On the CI runner the chunk
+        // arrived AFTER the table was scrolled to, pushed it down, and laps
+        // 4 and 5 were read off the bottom of the screen — a reading of a
+        // layout shift, not of the sticky column. So: every chart drawn
+        // first, and the table scrolled to inside the same task that reads
+        // it (`measure`), where nothing can move it in between.
+        const shown = await page
+          .locator('button[aria-pressed="true"]', { hasText: /^Show / })
+          .count();
+        expect(shown, 'the ride’s page shows no trace').toBeGreaterThan(0);
+        await expect(page.locator('.oyl-trace-chart')).toHaveCount(shown);
 
         const measure = async () =>
           table.evaluate((element) => {
+            // The whole table in view, its middle at the viewport's: five
+            // rows are far shorter than the 800 px viewport.
+            element.scrollIntoView({ block: 'center' });
             const region = element.closest<HTMLElement>('.oyl-scroll-region');
             if (region === null) {
               throw new Error('the lap table is in no scroll region');

@@ -4562,6 +4562,56 @@ select.oyl-input {
 }
 
 /*
+ * The trace's axes — #1439: the value axis' title above the drawing, its top,
+ * middle and bottom values down its left edge (the drawing's own scale, so a
+ * label sits where its value is drawn), and the time at the start, middle and
+ * end under it, titled. HTML beside the SVG rather than text in it, which the
+ * horizontal stretch above would stretch too (`detail/TraceChart.tsx`).
+ */
+.oyl-trace-chart {
+  color: var(--oyl-color-ink-muted);
+  column-gap: var(--oyl-space-sm);
+  display: grid;
+  font-size: var(--oyl-font-size-sm);
+  font-variant-numeric: tabular-nums;
+  grid-template-areas:
+    'value-title value-title'
+    'values trace'
+    '. times'
+    '. time-title';
+  grid-template-columns: auto minmax(0, 1fr);
+  margin-top: var(--oyl-space-sm);
+}
+
+.oyl-trace-chart > .oyl-trace {
+  grid-area: trace;
+  margin-top: 0;
+}
+
+.oyl-trace-chart__value-title {
+  grid-area: value-title;
+}
+
+.oyl-trace-chart__values {
+  display: flex;
+  flex-direction: column;
+  grid-area: values;
+  justify-content: space-between;
+  text-align: end;
+}
+
+.oyl-trace-chart__times {
+  display: flex;
+  grid-area: times;
+  justify-content: space-between;
+}
+
+.oyl-trace-chart__time-title {
+  grid-area: time-title;
+  text-align: center;
+}
+
+/*
  * `vector-effect` so the line keeps its width under the horizontal stretch
  * above. Without it a 2-unit stroke is drawn several pixels thick sideways and
  * hairline vertically, which reads as a smeared chart rather than a line.

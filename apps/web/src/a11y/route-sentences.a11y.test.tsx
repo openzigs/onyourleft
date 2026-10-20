@@ -141,6 +141,22 @@
  * rides are. And Routes' "Before you share a route" section, with its ⓘ and
  * its warning, is said beside a CHOSEN route only, where *Who can see it* is:
  * it leaves the empty walk, and moves after "Delete" on the populated one.
+ *
+ * ⚠️ **Re-recorded by #1439, awaiting the owner's approval with that pull
+ * request's wording.** History's chosen ride IS the ride's page now, so the
+ * Activities populated walk gains every sentence `activity-detail` has, and
+ * loses the summary's own: its "Where" term and "Outdoors, with a track" (the
+ * page says "Position" and "Recorded with a GPS track"), and "Open ride
+ * details". Both routes gain the chart's axes ("Power (W)", its top, middle
+ * and bottom values, "Time into the ride" and three times), each table's
+ * "… : the readings as a table" and "Help with A write-up by your model".
+ * Two sentences are DROPPED as false or said twice: "This version of the app
+ * does not race another rider’s ghost yet. Your answer is kept for when one
+ * does." (#331 races one), and the write-up's "It is sent this ride’s
+ * numbers, never a picture, and only when you press the button." (the
+ * approved paragraph beside the press says it in full). "A finished write-up
+ * replaces …" moves behind the section's ⓘ, and is still recorded.
+ *
  * ## What it does not check
  *
  * That a sentence is in the same ORDER, or visible — `kept-visible.a11y.test`

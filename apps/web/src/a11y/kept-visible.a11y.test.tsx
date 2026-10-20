@@ -706,6 +706,26 @@ describe('#666 — safety and privacy sentences are never in a closed disclosure
     );
   });
 
+  it('Activities, with a ride chosen: its page in the detail pane keeps what the ride’s own page keeps (#1439)', async () => {
+    // The walk chooses no ride, and the chosen ride's pane IS the ride's page
+    // since #1439 — with every sentence `activity-detail` holds visible.
+    const route = routeById('activities');
+    const main = await open(route, true);
+    expect(await selectFixtureItem(route)).toBe(true);
+    for (let turn = 0; turn < 10 && main.querySelector('.oyl-race-consent') === null; turn += 1) {
+      await settle();
+    }
+    const ride = KEPT['activity-detail'];
+    const kept = [...withNotes(route).sentences, ...(ride.populated ?? [])];
+    expect(
+      main.querySelector('.oyl-race-consent'),
+      'the ride’s page did not render',
+    ).not.toBeNull();
+    expect(allFaults(main, kept, [...everyListed(withNotes(route)), ...everyListed(ride)])).toEqual(
+      [],
+    );
+  });
+
   it('Devices, where a browser can pair: the one-gesture sentence and the limits stay out of its disclosure', async () => {
     const working: BluetoothPort = {
       getAvailability: async () => Promise.resolve(true),

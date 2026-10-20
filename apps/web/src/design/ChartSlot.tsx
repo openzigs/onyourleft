@@ -105,8 +105,19 @@ export interface ChartSlotProps {
    * Under `'beside'` a failing chart still leaves exactly one table — the
    * boundary wraps both, so the fallback replaces the pair rather than joining
    * a second copy to it.
+   *
+   * `'disclosed'` — #1439 — renders both too, with the table behind a closed
+   * `<details>` under the chart ({@link tableSummary}), so a long table is not
+   * open under every chart by default. It is still in the page and one press
+   * from open, the summary a control a screen reader and Tab reach, and a
+   * failing chart leaves the table itself, open, as `'fallback'` does.
    */
-  readonly tablePosition?: 'fallback' | 'beside';
+  readonly tablePosition?: 'fallback' | 'beside' | 'disclosed';
+}
+
+/** The disclosure's summary under `'disclosed'`: which readings, as a table. */
+export function tableSummary(caption: string): string {
+  return `${caption}: the readings as a table`;
 }
 
 /** The table half, which is also the fallback half. */
@@ -211,6 +222,14 @@ export function ChartSlot({
         <>
           {chart}
           {table}
+        </>
+      ) : tablePosition === 'disclosed' ? (
+        <>
+          {chart}
+          <details className="oyl-details oyl-chart-table">
+            <summary>{tableSummary(caption)}</summary>
+            {table}
+          </details>
         </>
       ) : (
         chart

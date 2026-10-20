@@ -21,7 +21,13 @@ import type {
   RideAnalysisPort,
   RideWriteUpSource,
 } from '../ride-analysis/ride-analysis-port';
-import { ASK_LABEL, WRITE_UP_HEADING, WRITE_UP_SAVED } from '../ride-analysis/RideWriteUpControl';
+import {
+  ASK_LABEL,
+  WRITE_UP_EXPLANATION,
+  WRITE_UP_HEADING,
+  WRITE_UP_REPLACES,
+  WRITE_UP_SAVED,
+} from '../ride-analysis/RideWriteUpControl';
 import { RideWriteUpSection } from './RideWriteUpSection';
 import { SIDE_CAMERA_HEADING } from './SideCameraSection';
 import { activateWithKeyboard, mount, settle, type Mounted } from '../testing/mount';
@@ -140,6 +146,24 @@ function button(label: string): HTMLButtonElement {
 function before(first: Node, second: Node): boolean {
   return (first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
 }
+
+describe('what the section says before a press, layered — #1439', () => {
+  it('is one plain sentence in view, what a new write-up does behind the ⓘ, and what is sent once', async () => {
+    await open({}, scriptedPort(['computer']));
+    const lead = [...(section()?.querySelectorAll('p') ?? [])].find(
+      (paragraph) => paragraph.textContent === WRITE_UP_EXPLANATION,
+    );
+    expect(lead, 'the plain sentence is not on the section').toBeDefined();
+    expect(lead?.closest('details')).toBeNull();
+    // The press's mechanics are the explanation, behind the heading's ⓘ.
+    const help = section()?.querySelector('.oyl-section-head details.oyl-section-help');
+    expect(help?.textContent).toContain(WRITE_UP_REPLACES);
+    expect(help?.hasAttribute('open')).toBe(false);
+    // "Never a picture" is said by the approved paragraph beside the press,
+    // and not a second time above it.
+    expect(text().match(/never a picture/gi)).toHaveLength(1);
+  });
+});
 
 describe('text, and only text', () => {
   const HOSTILE =

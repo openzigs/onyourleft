@@ -282,6 +282,10 @@ const TUCKING_WHEN_POPULATED: Partial<Record<RouteId, readonly string[]>> = {
   // only over the populated ports. Notices and Appeals tuck nothing: each item
   // is read before it is acted on, so each has one short line and no ⓘ.
   moderation: ['The record'],
+  // #1439: what a new write-up does to the ride's saved one is behind the
+  // section's ⓘ; the section has a heading only once a model or an instance
+  // is set up, which the populated ports are.
+  'activity-detail': ['A write-up by your model'],
 };
 
 async function open(page: Page, viewport: Viewport, query: string): Promise<void> {
