@@ -204,7 +204,8 @@ describe('a ride takes the screen over — #423', () => {
     await press('Ride ');
 
     const stops = tabbableElements(document.body).map((each) => each.textContent);
-    expect(stops).toEqual(['Pause', 'End ride']);
+    // #1432: and the HUD's touch lock, beside them.
+    expect(stops).toEqual(['Pause', 'End ride', 'Touch lock']);
   });
 
   it('keeps the landmark and the heading that names it', async () => {
@@ -290,7 +291,8 @@ describe('an update is not offered mid-ride, and is not lost — #423', () => {
     expect(document.querySelector('.oyl-game--riding')).not.toBeNull();
     expect(updateOffer()).toBeNull();
     const stops = tabbableElements(document.body).map((each) => each.textContent);
-    expect(stops).toEqual(['Pause', 'End ride']);
+    // #1432: and the HUD's touch lock, beside them.
+    expect(stops).toEqual(['Pause', 'End ride', 'Touch lock']);
     expect(waiting.activations()).toBe(0);
   });
 

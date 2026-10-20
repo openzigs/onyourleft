@@ -70,6 +70,8 @@ export const RIDE_TIME_CONTROLS: readonly RideTimeControl[] = [
   { surface: 'ride-screen', name: 'Stop', match: 'exact' },
   { surface: 'ride-screen', name: 'Yes, stop the ride', match: 'exact' },
   { surface: 'ride-screen', name: 'Keep riding', match: 'exact' },
+  // #1432: the touch lock, pressed at the bars before the rain.
+  { surface: 'ride-screen', name: 'Touch lock', match: 'exact' },
   // `ride/TrainerPanel.tsx`: the take-control step is pressed at the bars.
   { surface: 'trainer-panel', name: 'Ask the trainer for control', match: 'exact' },
   { surface: 'trainer-panel', name: 'Set target', match: 'exact' },
@@ -87,6 +89,8 @@ export const RIDE_TIME_CONTROLS: readonly RideTimeControl[] = [
   // The same HUD control while the ride is paused (#710's review).
   { surface: 'game-hud', name: 'Resume', match: 'exact' },
   { surface: 'game-hud', name: 'End ride', match: 'exact' },
+  // #1432: and on the HUD, beside them.
+  { surface: 'game-hud', name: 'Touch lock', match: 'exact' },
   // #785: a private race waiting on its line — the rider who made it starts it.
   { surface: 'game-hud', name: 'Start the race', match: 'exact' },
   { surface: 'game-hud', name: 'Mute sounds', match: 'exact' },

@@ -487,7 +487,8 @@ describe('#1430 — one press of the running screen cannot end a ride', () => {
         document,
         '.oyl-ride__group--live .oyl-ride__actions button',
       ).map((each) => (each.textContent ?? '').trim());
-      expect(row).toEqual(['Lap', paused ? 'Resume' : 'Pause', 'Stop']);
+      // #1432: the touch lock, last, after Stop.
+      expect(row).toEqual(['Lap', paused ? 'Resume' : 'Pause', 'Stop', 'Touch lock']);
       await putAway(controller);
     }
   });
@@ -1092,8 +1093,8 @@ describe('the screen is three groups, in the order it always was (#422)', () => 
     expect(
       queryAll(document, '.oyl-ride__group--live button').map((each) => each.textContent),
       // #1318: *Lap*, on a ride with no course under it — first since #1430,
-      // so Pause stands between it and Stop.
-    ).toEqual(['Lap', 'Pause', 'Stop']);
+      // so Pause stands between it and Stop. #1432: the touch lock, last.
+    ).toEqual(['Lap', 'Pause', 'Stop', 'Touch lock']);
   });
 
   it('puts the workout in the TRAINER group, beside the control it depends on', async () => {

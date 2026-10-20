@@ -328,7 +328,11 @@ apps/                 AGPL-3.0-or-later, without exception
                         step at 800 in `--oyl-font-family-display` (the one
                         token ADR 0043's face replaces), and a menu's figures
                         go through `Reading.tsx`. `look.browser.spec.ts` reads
-                        it back on every route
+                        it back on every route. Since #1432 `touch-lock.ts` and
+                        `TouchLockButton.tsx` are the Ride screen's and the
+                        HUD's touch lock: a tap (`detail` > 0) is swallowed, a
+                        key or screen reader is not, and a `touchLockExempt`
+                        control (the trainer's releases) never is
     src/design/illustration/
                         the menus' illustration kit (#938): `Sky`, `Hills`,
                         `RoadRibbon`, `RiderSilhouette` (`game/bicycle.ts`'s own

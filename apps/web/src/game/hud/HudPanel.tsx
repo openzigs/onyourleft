@@ -55,9 +55,11 @@
  * is the prerequisite for that and would not need to change for it.
  */
 
-import type { JSX, ReactNode } from 'react';
+import { useRef, type JSX, type ReactNode } from 'react';
 
 import { RIDE_SIZE_CLASS } from '../../design/Button';
+import { TOUCH_LOCK_EXEMPT, useTouchLock } from '../../design/touch-lock';
+import { TouchLockButton } from '../../design/TouchLockButton';
 import { REPLAN_KEEP_BUTTON } from '../../workout/replan-disclosure';
 import { useUnits } from '../../units/context';
 
@@ -258,6 +260,18 @@ export interface HudPanelProps extends Omit<HudInput, 'units'> {
    * connection is lost (`room-ride.ts` §`raceStandings`).
    */
   readonly standings?: RaceStandingsView | undefined;
+  /**
+   * The touch lock — #1432: on, taps on the HUD's controls do nothing but on
+   * *End ride* and the lock's own control (`design/touch-lock.ts`). Absent,
+   * no lock is offered. `GameView` holds the state, for the ride on the stage.
+   */
+  readonly touchLock?:
+    | {
+        readonly locked: boolean;
+        readonly onLock: () => void;
+        readonly onUnlock: () => void;
+      }
+    | undefined;
 }
 
 /** The id the notice toggle's `aria-controls` names. One HUD per page. */
@@ -273,9 +287,12 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
     hasContent(props.notices) || props.standingNotice?.expanded === true
       ? undefined
       : props.lapNotice;
+  // #1432: the whole HUD, while the rider has locked it.
+  const hud = useRef<HTMLElement>(null);
+  useTouchLock(hud, props.touchLock?.locked === true);
 
   return (
-    <section className="oyl-hud" aria-label="Ride metrics">
+    <section className="oyl-hud" aria-label="Ride metrics" ref={hud}>
       {/*
         A description list, because that is what these are: a label and its
         value, seven times. It was an `ol` of `span`s first, which needed
@@ -363,9 +380,26 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
             className={`oyl-hud__control ${RIDE_SIZE_CLASS}`}
             onClick={props.onEnd}
             style={{ minWidth: CONTROL_MINIMUM_PIXELS, minHeight: CONTROL_MINIMUM_PIXELS }}
+            // #1432: never stopped by the touch lock. It stops what the game
+            // asks of the trainer (`GameView.tsx` §`teardown`), and the
+            // recording under the ride is the Ride screen's and carries on.
+            {...{ [TOUCH_LOCK_EXEMPT]: '' }}
           >
             End ride
           </button>
+          {/*
+            #1432: third, after the two a rider presses every ride, so Pause
+            and End ride keep their places. ⚠️ Its neighbour is End ride, so a
+            tap that misses it ends the game's ride — not the recording, which
+            is the Ride screen's and carries on.
+          */}
+          {props.touchLock === undefined ? null : (
+            <TouchLockButton
+              locked={props.touchLock.locked}
+              onLock={props.touchLock.onLock}
+              onUnlock={props.touchLock.onUnlock}
+            />
+          )}
           {/*
             #437. A constant name and `aria-expanded`, rather than a label that
             flips between "Show" and "Hide": a screen reader then says what the
