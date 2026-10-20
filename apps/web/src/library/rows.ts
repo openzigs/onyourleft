@@ -47,8 +47,6 @@ export interface LibraryRow {
    * ride that moved 0:10) is not the ride.
    */
   readonly movingTime: string;
-  /** Elapsed time, as the selected ride's summary states it. */
-  readonly elapsedTime: string;
   /**
    * What the card says after the moving time — "of 10:31:26 elapsed" — or
    * `undefined` for nothing. `format.ts` §`elapsedBeside`'s rule.
@@ -97,7 +95,6 @@ export function rowFor(summary: ActivitySummary, units: UnitSystem): LibraryRow 
     name: summary.name,
     startedAt: formatStartedAt(summary.startedAt, summary.startedAtTimeZone),
     movingTime: formatDuration(summary.movingTime),
-    elapsedTime: formatDuration(summary.elapsedTime),
     elapsedBeside: elapsedBeside(summary.movingTime, summary.elapsedTime),
     distance: distance === undefined ? undefined : formatDistance(distance, units).value,
     averagePower: averagePower === undefined ? undefined : formatPowerValue(averagePower),

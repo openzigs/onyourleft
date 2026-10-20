@@ -88,6 +88,7 @@ import type { RiderTextPort } from '../rider-text/rider-text-port';
 import { GOALS_WORDS } from '../rider-text/words';
 import type { AthleteMassPort } from '../athlete/store-port';
 import { Button } from '../design/Button';
+import { VisuallyHidden } from '../design/VisuallyHidden';
 // The parts' own files, not the kit's index: the index names every part, and
 // a part these cards do not draw is not this screen's to pull into a bundle.
 import { Hills } from '../design/illustration/Hills';
@@ -138,6 +139,16 @@ import {
 import type { UnitsPort } from '../units/store-port';
 import { readRealisticWorldChoice, writeRealisticWorldChoice } from '../game/world-preference';
 import { readDraftReadingChoice, writeDraftReadingChoice } from '../game/draft-preference';
+import { presentationFor } from '../ride/MetricGrid';
+import type { RideMetricId } from '../ride/metrics';
+import {
+  chosenReadings,
+  moveReading,
+  readRideReadings,
+  showReading,
+  writeRideReadings,
+  type RideReadingsChoice,
+} from '../ride/reading-choice';
 import { KIT_PALETTE } from '../game/bicycle';
 import { PUBLISHED_BASEMAP_URL, type BasemapConfig } from '../map/basemap';
 import { readMapTilesChoice, writeMapTilesChoice } from '../map/tiles-preference';
@@ -641,6 +652,12 @@ export function SettingsView({
           </>
         }
       >
+        {/* #1433: which readings the Ride screen shows, and in which order. */}
+        <RideReadingsPanel
+          units={units}
+          storage={announcements === undefined ? deviceStorage() : announcements}
+        />
+
         <GameWorldPanel storage={announcements === undefined ? deviceStorage() : announcements} />
 
         {/* #787: whether a ride in a room shows and says this rider's draft. */}
@@ -1393,6 +1410,122 @@ function DraftReadingPanel({
     </section>
   );
 }
+
+/**
+ * #1433: what the Ride screen shows a rider was not asked about until now —
+ * which of the four readings, and in which order. Ranked, because the Ride
+ * screen's *Zoom* keeps the top two: the order is what decides what a zoomed
+ * screen shows. Kept on this device (`ride/reading-choice.ts` says why).
+ *
+ * Each row is a checkbox and two buttons, *Up* and *Down*, rather than a drag:
+ * a drag is not operable from a keyboard or a switch, and WCAG 2.2 SC 2.5.7
+ * asks for a single-pointer way that is not one. The buttons at the ends stay
+ * in the tab order and say they cannot move (`aria-disabled`). Each row is
+ * keyed by its reading, so the button pressed moves with its row and keeps
+ * the focus (React puts it back after the move). The last reading shown
+ * cannot be turned off; the panel says so rather than leaving an empty screen.
+ */
+function RideReadingsPanel({
+  units,
+  storage,
+}: {
+  readonly units: UnitSystem;
+  readonly storage: PreferenceStorage | undefined;
+}): JSX.Element {
+  const [choice, setChoice] = useState(() => readRideReadings(storage));
+  const [message, setMessage] = useState<PanelMessage | undefined>(undefined);
+  const labels = presentationFor(units);
+
+  function keep(next: RideReadingsChoice, said: string): void {
+    setChoice(next);
+    const kept = writeRideReadings(storage, next);
+    setMessage({
+      tone: kept ? 'success' : 'warning',
+      text: `${said} ${kept ? ANNOUNCEMENTS_SAVED : ANNOUNCEMENTS_NOT_KEPT}`,
+    });
+  }
+
+  function move(id: RideMetricId, by: -1 | 1): void {
+    const next = moveReading(choice, id, by);
+    if (next === choice) return;
+    keep(next, rideReadingMoved(labels[id].label, next.order.indexOf(id) + 1, next.order.length));
+  }
+
+  const shown = chosenReadings(choice);
+  return (
+    <section className="oyl-panel oyl-ride-readings" aria-labelledby="oyl-ride-readings-heading">
+      <SectionHeading
+        level={3}
+        id="oyl-ride-readings-heading"
+        help={
+          <p className="oyl-muted">
+            The readings the Ride screen shows, top first. With Zoom pressed on the Ride screen it
+            shows the top two, larger.
+          </p>
+        }
+      >
+        Ride screen readings
+      </SectionHeading>
+      <ol className="oyl-ride-readings__list">
+        {choice.order.map((id, index) => {
+          const label = labels[id].label;
+          const on = shown.includes(id);
+          return (
+            <li key={id} className="oyl-ride-readings__row">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={on}
+                  onChange={(event) => {
+                    const next = showReading(choice, id, event.currentTarget.checked);
+                    if (next === choice) {
+                      setMessage({ tone: 'warning', text: RIDE_READINGS_ONE_STAYS });
+                      return;
+                    }
+                    keep(next, `${label} ${on ? 'hidden' : 'shown'}.`);
+                  }}
+                />{' '}
+                {label}
+              </label>
+              {(
+                [
+                  [-1, 'Up', index === 0],
+                  [1, 'Down', index === choice.order.length - 1],
+                ] as const
+              ).map(([by, word, atEnd]) => (
+                <Button
+                  key={word}
+                  variant="secondary"
+                  unavailable={atEnd}
+                  onClick={() => {
+                    move(id, by);
+                  }}
+                >
+                  <VisuallyHidden>{`Move ${label} `}</VisuallyHidden>
+                  {word}
+                </Button>
+              ))}
+            </li>
+          );
+        })}
+      </ol>
+      {message === undefined ? null : (
+        <StatusMessage tone={message.tone} live>
+          {message.text}
+        </StatusMessage>
+      )}
+    </section>
+  );
+}
+
+/** #1433: said when a reading moves. ⚠️ Draft wording for the owner. */
+export function rideReadingMoved(label: string, place: number, of: number): string {
+  return `${label} is now ${String(place)} of ${String(of)}.`;
+}
+
+/** #1433: said when the last reading shown is unticked. ⚠️ Draft wording for the owner. */
+export const RIDE_READINGS_ONE_STAYS =
+  'At least one reading stays on the Ride screen. Tick another first to hide this one.';
 
 /**
  * Whether a ride's map draws tiles under the line — the owner's decision of

@@ -438,7 +438,20 @@ export interface RideWorkoutSnapshot {
    * trace is what it draws, and is not sampled while the ride is paused.
    */
   readonly live?:
-    { readonly power: number | undefined; readonly heartRate: number | undefined } | undefined;
+    | {
+        readonly power: number | undefined;
+        readonly heartRate: number | undefined;
+        /** The rider's cadence now, in rpm — #1434's ERG cue. */
+        readonly cadence?: number | undefined;
+      }
+    | undefined;
+  /**
+   * The rider's mean power through the block being ridden so far, in whole
+   * watts — #1434. Live readings only, sampled once a second of the workout's
+   * own clock, so a pause adds nothing and a dropped meter is not a zero.
+   * `undefined` until the block has one.
+   */
+  readonly blockAverageWatts?: number | undefined;
   /**
    * Whether no target is being sent for the block being ridden, because it
    * would be a large raise (#1305) — the session's `raiseRefused`, the fact
@@ -2931,6 +2944,21 @@ export function createRideController(options: RideControllerOptions): RideContro
      * this one first hands its own over. @see noteWorkoutBlocks
      */
     blocksAfter: number | undefined;
+    /**
+     * The rider's power through the block being ridden so far — #1434: the
+     * block's start, and the sum and count of the live readings sampled in
+     * it. Kept beside the trace rather than read from it, because the trace
+     * is five minutes long and a block may be twenty. @see RideWorkoutSnapshot.blockAverageWatts
+     */
+    blockPower:
+      | {
+          readonly startsAt: number;
+          readonly sum: number;
+          readonly count: number;
+          /** The workout's clock at the last reading summed. */
+          readonly lastAt: number;
+        }
+      | undefined;
   }
 
   /**
@@ -3007,7 +3035,12 @@ export function createRideController(options: RideControllerOptions): RideContro
       // readings it writes, all live — see each field.
       hasControl: control()?.hasControl() === true,
       targetConfirmed: vouchedHolding(state.holding) !== undefined,
-      live: { power: liveReading('power', clock), heartRate: liveReading('heart-rate', clock) },
+      live: {
+        power: liveReading('power', clock),
+        heartRate: liveReading('heart-rate', clock),
+        cadence: liveReading('cadence', clock),
+      },
+      blockAverageWatts: blockAverage(workout),
       refused: state.raiseRefused,
       // The block a rider is in, phrased by the module that phrases them
       // everywhere else — a second wording here would be the ride screen and
@@ -3036,6 +3069,17 @@ export function createRideController(options: RideControllerOptions): RideContro
             },
     };
   };
+
+  /**
+   * The rider's mean power in the block being ridden, from its start to now,
+   * in whole watts — #1434. `undefined` before a live reading has been
+   * sampled in it: the sum is dropped in the same tick as the player enters a
+   * block (`sampleForGraph`), so it is never another block's.
+   */
+  const blockAverage = (current: WorkoutInProgress): number | undefined =>
+    current.blockPower === undefined
+      ? undefined
+      : Math.round(current.blockPower.sum / current.blockPower.count);
 
   /** The player's hold, with why it is off when it is (#1240). */
   const holdOf = (
@@ -3132,13 +3176,34 @@ export function createRideController(options: RideControllerOptions): RideContro
       return;
     }
     const hold = state.player.hold;
+    const power = liveReading('power', at);
+    // #1434: the block's running sum, dropped when a new block begins and
+    // begun on its first live reading — so there is never a sum of nothing. A
+    // reading that is not live is not a zero, so it is left out of the mean.
+    // A tick at the same instant of the workout's clock adds nothing, so the
+    // mean is the trace's one sample a second and not one per tick.
+    const segment = state.player.segment;
+    const elapsed = state.player.elapsed;
+    let summed = current.blockPower;
+    if (summed?.startsAt !== segment?.startsAt) {
+      summed = undefined;
+    }
+    if (segment !== undefined && power !== undefined && elapsed > (summed?.lastAt ?? -Infinity)) {
+      summed = {
+        startsAt: segment.startsAt,
+        sum: (summed?.sum ?? 0) + power,
+        count: (summed?.count ?? 0) + 1,
+        lastAt: elapsed,
+      };
+    }
+    current.blockPower = summed;
     current.trace = withTraceSample(current.trace, {
       at: state.player.elapsed,
       // No control, no confirmed target: `holding` outlives a lost link (the
       // panel says "last set to"), and the graph's lane is the confirmed one.
       // #1313: nor for the tick after control is taken back.
       target: vouchedHolding(state.holding),
-      power: liveReading('power', at),
+      power,
       heartRate: liveReading('heart-rate', at),
       range:
         hold === undefined || hold.reason === 'ineligible'
@@ -3959,6 +4024,7 @@ export function createRideController(options: RideControllerOptions): RideContro
             ? blockLogFrom(markOf(recorder))
             : NO_BLOCKS,
         blocksAfter: undefined,
+        blockPower: undefined,
       };
       workout = started;
       // #1244, P7: only when the rider switched re-plans on for THIS workout,

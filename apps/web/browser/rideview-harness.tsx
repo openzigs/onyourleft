@@ -90,6 +90,7 @@ import { stubAnalysis } from '../src/analysis/testing';
 import { scriptedSidePairing } from '../src/camera/testing';
 import { RIDE_NOTIFICATION_REFUSED, type RideSnapshot } from '../src/ride/controller';
 import { idleSnapshot, ridingSnapshot, stubRideController } from '../src/ride/testing';
+import { RIDE_READINGS_STORAGE_KEY } from '../src/ride/reading-choice';
 import { AppShell } from '../src/shell/AppShell';
 import { viewGroupsLoaded } from './views-loaded';
 import type { CapabilityProbe } from '../src/support/bluetooth-support';
@@ -614,6 +615,14 @@ const NO_SENSORS = QUERY.get('sensors') === 'none';
 const WIDEST_READINGS = QUERY.get('readings') === 'widest';
 
 /**
+ * `rideview.html?zoom=on` — #1433: the Ride screen opened with the rider's
+ * *Zoom* on, as this device stored it. ⚠️ Written, or removed, on EVERY load:
+ * a page shared between cases keeps its origin's storage, and a zoom left
+ * behind by one case would zoom the next one's readings.
+ */
+const ZOOMED = QUERY.get('zoom') === 'on';
+
+/**
  * `rideview.html?ride=saved` — #1042: a ride stopped and SAVED, with its
  * result card at its fullest — a heart rate as well as power, hours of
  * elapsed time, and the longest of the game's outcome sentences — so "the
@@ -960,6 +969,12 @@ export interface RideViewReading {
   readonly reading: Box;
   /** `scrollWidth − clientWidth` of the card: above zero, something spilled. */
   readonly spill: number;
+  /**
+   * #1433: how tall an `8` is drawn in the reading's own computed font, in CSS
+   * px — the glyph's ink from its baseline up, measured by the canvas text
+   * metrics of the font the page loaded, not the line box around it.
+   */
+  readonly digitHeight: number;
 }
 
 /** One standing notice. @see RideViewMeasurement.notices */
@@ -1228,8 +1243,19 @@ function readingsOf(grid: Element | null): RideViewReading[] {
       contentRight: box.right - parseFloat(style.paddingRight) - parseFloat(style.borderRightWidth),
       reading: reading === null ? boxOf(card) : boxOf(reading),
       spill: card.scrollWidth - card.clientWidth,
+      digitHeight: digitHeightOf(card.querySelector('.oyl-reading__value')),
     };
   });
+}
+
+/** @see RideViewReading.digitHeight */
+function digitHeightOf(value: Element | null): number {
+  if (value === null) return 0;
+  const style = window.getComputedStyle(value);
+  const context = document.createElement('canvas').getContext('2d');
+  if (context === null) throw new Error('rideview harness: no 2D canvas to measure a digit with');
+  context.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+  return context.measureText('8').actualBoundingBoxAscent;
 }
 
 /** @see RideViewMeasurement.sensorBanner */
@@ -1688,6 +1714,11 @@ async function run(): Promise<void> {
     throw new Error('rideview harness: #shell is missing from rideview.html');
   }
   window.location.hash = '#/ride';
+  if (ZOOMED) {
+    localStorage.setItem(RIDE_READINGS_STORAGE_KEY, JSON.stringify({ zoomed: true }));
+  } else {
+    localStorage.removeItem(RIDE_READINGS_STORAGE_KEY);
+  }
 
   // #674: the view groups first, so every view renders on the render that asks.
   await viewGroupsLoaded();

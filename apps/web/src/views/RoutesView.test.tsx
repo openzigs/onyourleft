@@ -290,16 +290,26 @@ describe('editing', () => {
 });
 
 describe('the warning before publishing — #73 criterion 5', () => {
-  it('is on the page in the words share.ts states, not a generic notice', async () => {
-    const view = await render(routeStub(ATHLETE, [route()]));
+  it('is beside a chosen route in the words share.ts states, not a generic notice', async () => {
+    const view = await render(routeStub(ATHLETE, [route()]), 'route-1');
     const text = view.container.textContent ?? '';
     expect(text).toContain(PUBLIC_ROUTE_WARNING);
     // The half a generic notice would omit.
     expect(text).toContain('Most routes start at home');
+    // In view of the control that shares the route.
+    expect(view.container.querySelector('#visibility-route-1')).not.toBeNull();
+  });
+
+  it('is not shown with no route chosen, where nothing on the screen shares one — #1442', async () => {
+    const view = await render(routeStub(ATHLETE, [route()]));
+    const text = view.container.textContent ?? '';
+    expect(view.container.querySelector('select[name="visibility"]')).toBeNull();
+    expect(text).not.toContain('Before you share a route');
+    expect(text).not.toContain(PUBLIC_ROUTE_WARNING);
   });
 
   it('keeps the warning on the screen and puts the privacy-zone note behind the ⓘ — #1030', async () => {
-    const view = await render(routeStub(ATHLETE, [route()]));
+    const view = await render(routeStub(ATHLETE, [route()]), 'route-1');
     const heading = [...view.container.querySelectorAll('h2')].find(
       (element) => element.textContent === 'Before you share a route',
     );

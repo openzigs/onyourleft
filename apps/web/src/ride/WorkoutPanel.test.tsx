@@ -419,7 +419,18 @@ describe('the running workout as a picture is not this panel’s — #1307', () 
     expect(text).toContain('Now: 10 min at 60%');
     expect(text).toContain('Holding 150 W.');
     expect(view.container.querySelector('[data-oyl-workout-graph]')).toBeNull();
-    expect(view.container.querySelector('[role="img"]')).toBeNull();
+    // #1434: the one picture here is the block's target band, and it is
+    // after every sentence the panel had.
+    const images = [...view.container.querySelectorAll('[role="img"]')];
+    expect(images).toHaveLength(1);
+    expect(images[0]?.closest('[data-oyl-target-band]')).not.toBeNull();
+    const holding = [...view.container.querySelectorAll('p')].find((each) =>
+      each.textContent?.startsWith('Holding 150 W.'),
+    );
+    expect(holding).toBeDefined();
+    expect(
+      (holding?.compareDocumentPosition(images[0] as Node) ?? 0) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 });
 

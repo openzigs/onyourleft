@@ -174,6 +174,14 @@ export interface ActivityDetailViewProps {
    * there is no store — the box then says so and offers no control.
    */
   readonly riderText?: RiderTextPort | undefined;
+  /**
+   * #1439: drawn inside History's detail pane, which is the ride's one page
+   * there. The pane heads it with the ride's name (`shell/ListDetail.tsx`
+   * §`SELECTED_HEADING_ID`, from the list's own row, so focus has somewhere to land before
+   * this read is back) and has its own way back to the list, so the page
+   * draws neither its own name nor {@link WayOut}.
+   */
+  readonly embedded?: boolean | undefined;
 }
 
 /**
@@ -227,6 +235,7 @@ export function ActivityDetailView({
   writeUp,
   instanceWriteUp,
   riderText,
+  embedded = false,
 }: ActivityDetailViewProps): JSX.Element {
   // Read once, when the screen opens: the switch is on the Settings screen, so
   // it cannot change while this one is showing.
@@ -368,7 +377,7 @@ export function ActivityDetailView({
           No local store on this browser. Rides are kept in this browser&rsquo;s own storage and
           this page cannot reach it — a private window or blocked site data is the usual reason.
         </StatusMessage>
-        <WayOut />
+        {embedded ? null : <WayOut />}
       </>
     );
   }
@@ -379,7 +388,7 @@ export function ActivityDetailView({
         <StatusMessage tone="info" live>
           {READING_RIDE_TEXT}
         </StatusMessage>
-        <WayOut />
+        {embedded ? null : <WayOut />}
       </>
     );
   }
@@ -390,7 +399,7 @@ export function ActivityDetailView({
         <StatusMessage tone="warning" live>
           Could not read this ride from the store on this device. {state.reason}
         </StatusMessage>
-        <WayOut />
+        {embedded ? null : <WayOut />}
       </>
     );
   }
@@ -409,7 +418,7 @@ export function ActivityDetailView({
           No ride on this device has that id. It may have been deleted, or the link may have come
           from a different browser — rides are not shared between them.
         </StatusMessage>
-        <WayOut />
+        {embedded ? null : <WayOut />}
       </>
     );
   }
@@ -424,7 +433,7 @@ export function ActivityDetailView({
 
   return (
     <>
-      <h2>{activity.name}</h2>
+      {embedded ? null : <h2>{activity.name}</h2>}
 
       <dl className="oyl-ride-summary">
         <div>
@@ -564,7 +573,9 @@ export function ActivityDetailView({
                   columns={['From', `${series.label} (${series.unit})`]}
                   rows={rows}
                   emptyMessage="No readings in this ride."
-                  tablePosition="beside"
+                  // #1439: the table is the chart's alternative, not a second
+                  // screen of numbers open under it by default.
+                  tablePosition="disclosed"
                   chart={
                     <Suspense fallback={null}>
                       <TraceChart
@@ -684,7 +695,7 @@ export function ActivityDetailView({
         </>
       ) : undefined}
 
-      <WayOut />
+      {embedded ? null : <WayOut />}
     </>
   );
 }

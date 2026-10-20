@@ -44,9 +44,22 @@ import type {
 /** The section's heading. */
 export const WRITE_UP_HEADING = 'A write-up by your model';
 
-/** What the section says before anything is pressed. */
-export const WRITE_UP_EXPLANATION =
-  'Ask the model you set up to write about this ride. It is sent this ride’s numbers, never a picture, and only when you press the button. A finished write-up replaces the one this ride has; an attempt that fails leaves it as it was.';
+/**
+ * What the section says before anything is pressed — one plain sentence
+ * (#1439). It also said "It is sent this ride’s numbers, never a picture, and
+ * only when you press the button", which the paragraph of what is sent beside
+ * the press says in full (ADR 0035 D-9's approved words), so the page said
+ * what is sent twice.
+ */
+export const WRITE_UP_EXPLANATION = 'Ask the model you set up to write about this ride.';
+
+/**
+ * What a new write-up does to the one a ride has — #1439: behind the
+ * section's ⓘ (`detail/RideWriteUpSection.tsx`), because it explains the
+ * press rather than saying what leaves the device.
+ */
+export const WRITE_UP_REPLACES =
+  'A finished write-up replaces the one this ride has; an attempt that fails leaves it as it was.';
 
 /** The control for each source, first and as the alternative. */
 export const ASK_LABEL: Readonly<Record<RideWriteUpSource, { first: string; other: string }>> = {

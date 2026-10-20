@@ -179,9 +179,10 @@ describe('a ride takes the screen over — #423', () => {
     // #1244's review: the footer under every screen said "No account, no
     // server: everything here stays on this device." There has been an
     // account and a server since ADR 0036, and a rider can now switch on
-    // sending from the Ride screen above it. It says only what holds.
+    // sending from the Ride screen above it. It says only what holds. #1442:
+    // and no longer where rides are, which the screens that need it say once.
     expect(chrome()['footer']?.textContent?.replace(/\s+/g, ' ').trim()).toBe(
-      'On Your Left — free and open source. Your rides are kept on this device.',
+      'On Your Left — free and open source.',
     );
     expect(chrome()['footer']?.textContent).not.toMatch(/no server|everything here stays/i);
   });

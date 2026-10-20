@@ -239,8 +239,9 @@ const TUCKING_SECTIONS: Partial<Record<RouteId, readonly string[]>> = {
   camera: ['Filming a ride: the side camera', 'A side camera on a tripod'],
   game: ['Ride with others'],
   'route-builder': ['Waypoints'],
-  // #1030 (PR #1032): the share note went behind its own ⓘ.
-  routes: ['Saved routes', 'Import a route', 'Before you share a route'],
+  // #1030 (PR #1032): the share note went behind its own ⓘ. #1442: and that
+  // section is said beside a chosen route only, which this walk does not choose.
+  routes: ['Saved routes', 'Import a route'],
   // #623: 'Your kit' is not here. The walk renders Settings with no kit port,
   // where the owner's ruling of 2026-09-28 leaves the kit control ABSENT and
   // with it the ⓘ that explained the choice.
@@ -255,6 +256,8 @@ const TUCKING_SECTIONS: Partial<Record<RouteId, readonly string[]>> = {
     'Appearance',
     'Announcements',
     'Sounds',
+    // #1433: what the order is for — the zoom keeps the top two.
+    'Ride screen readings',
     'Game world',
     // #787: what the draft indicator shows and says, and that it is not the
     // room's own switch.
@@ -281,6 +284,10 @@ const TUCKING_WHEN_POPULATED: Partial<Record<RouteId, readonly string[]>> = {
   // only over the populated ports. Notices and Appeals tuck nothing: each item
   // is read before it is acted on, so each has one short line and no ⓘ.
   moderation: ['The record'],
+  // #1439: what a new write-up does to the ride's saved one is behind the
+  // section's ⓘ; the section has a heading only once a model or an instance
+  // is set up, which the populated ports are.
+  'activity-detail': ['A write-up by your model'],
 };
 
 async function open(page: Page, viewport: Viewport, query: string): Promise<void> {
