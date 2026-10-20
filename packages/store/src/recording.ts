@@ -87,7 +87,6 @@ export const RECORDING_STORED_STATES: readonly RecordingStoredState[] = [
   'stopped',
 ];
 
-/** One end of a lap: the instant, and the recording's own moving time at it. */
 /**
  * The most re-plan records a recording's header keeps — #1328: the ride
  * controller's own bound (`RIDE_REPLAN_RECORDS_LIMIT`), which keeps the
@@ -96,6 +95,7 @@ export const RECORDING_STORED_STATES: readonly RecordingStoredState[] = [
  */
 export const RECORDING_REPLAN_RECORDS_LIMIT = 200;
 
+/** One end of a lap: the instant, and the recording's own moving time at it. */
 export interface RecordedLapMark {
   readonly at: UnixSeconds;
   readonly movingTime: Seconds;
