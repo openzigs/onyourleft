@@ -224,8 +224,18 @@ export interface HudPanelProps extends Omit<HudInput, 'units'> {
    * places. It is a ride-time control (`design/ride-time-controls.ts`) at
    * #669's 48 px. `browser/ride-workout.browser.spec.ts` §"#1244" measures it inside
    * the viewport, and no panel over the rider at the tablet viewports.
+   *
+   * #1324: with it, `sentence` — the waiting move's own sentence from
+   * `workout/replan-text.ts` §`replanSentence`, and nothing else — on a line
+   * above the control, so a rider with announcements off can read what
+   * change the control refuses. ⚠️ **Not a live region** (#445): the HUD's
+   * one region speaks it, with announcements on. ⚠️ **Nothing of what the
+   * move replaced is drawn**: the HUD's strip (#1307) has no plan ahead in it
+   * to outline, and the sentence says what changes. ⚠️ **On a phone the line
+   * gives way** (`theme.css` §"#1324"), where with the longest sentence the
+   * panel ran off the stage or over the rider; the tablets show it.
    */
-  readonly onKeepPlan?: (() => void) | undefined;
+  readonly keepPlan?: { readonly sentence: string; readonly onKeep: () => void } | undefined;
   readonly standingNotice?:
     | {
         readonly content: ReactNode;
@@ -399,14 +409,18 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
           own in `theme.css`: the actions panel is a column that stretches
           its children and spaces them 8 px apart.
         */}
-        {props.onKeepPlan === undefined ? null : (
-          <button
-            type="button"
-            className={`oyl-hud__control ${RIDE_SIZE_CLASS}`}
-            onClick={props.onKeepPlan}
-          >
-            {REPLAN_KEEP_BUTTON}
-          </button>
+        {props.keepPlan === undefined ? null : (
+          <>
+            {/* #1324: the move's sentence, read before the control it explains. */}
+            <p className="oyl-hud__plan-change">{props.keepPlan.sentence}</p>
+            <button
+              type="button"
+              className={`oyl-hud__control ${RIDE_SIZE_CLASS}`}
+              onClick={props.keepPlan.onKeep}
+            >
+              {REPLAN_KEEP_BUTTON}
+            </button>
+          </>
         )}
         {/*
           #551: the side camera's line and its stop, as ONE row under Pause and

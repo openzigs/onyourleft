@@ -697,4 +697,26 @@ describe('a re-plan during the ride, through the game — #1244', () => {
     await pump(10);
     expect(region()?.textContent).not.toContain('Plan change');
   });
+
+  it('shows the waiting move’s sentence beside Keep the plan with announcements off, and no voice says it — #1324', async () => {
+    const shown = (): string | null | undefined =>
+      document.querySelector('.oyl-hud__actions .oyl-hud__plan-change')?.textContent;
+    await startRide(replanPort());
+    await pump(4);
+    expect(shown()).toBeUndefined();
+
+    change = { waiting: { revision: 1, sentence: SENTENCE }, quiet: false };
+    await pump(4);
+    await settle();
+    expect(shown()).toBe(SENTENCE);
+    expect(keepButton()).toBeDefined();
+    // Neither the HUD's region nor any other voice on the stage holds it.
+    expect(region()?.textContent).not.toContain(SENTENCE);
+    expect(voicesOnTheStage().filter((each) => each.textContent?.includes(SENTENCE))).toEqual([]);
+
+    await press(keepButton());
+    await pump(4);
+    await settle();
+    expect(shown()).toBeUndefined();
+  });
 });

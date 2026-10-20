@@ -1832,8 +1832,9 @@ export function GameView(props: GameViewProps): JSX.Element {
       const planDiscarded = planDiscardedAnnouncement(
         planDiscardedSaidRef.current,
         trainerPortRef.current?.workoutPlanDiscarded?.(),
-        // Only of the move this region was offered. The HUD shows no
-        // sentence (#1324), so a held one was neither seen nor heard.
+        // Only of the move this region was offered. Since #1324 the HUD
+        // shows a held move's sentence beside *Keep the plan*, but it was
+        // never heard, so it is not said to have been dropped.
         planOfferedRef.current,
       );
       planDiscardedSaidRef.current = planDiscarded.said;
@@ -2349,13 +2350,18 @@ export function GameView(props: GameViewProps): JSX.Element {
         paused={phase === 'paused'}
         // #1244: *Keep the plan*, only while an accepted re-plan waits for
         // the workout's next block. The controller's own `keepThePlan`.
-        onKeepPlan={
-          props.trainer?.workoutPlanChange?.() === undefined
+        // #1324: with the move's sentence, shown above it.
+        keepPlan={(() => {
+          const waiting = props.trainer?.workoutPlanChange?.()?.waiting;
+          return waiting === undefined
             ? undefined
-            : () => {
-                props.trainer?.keepThePlan?.();
-              }
-        }
+            : {
+                sentence: waiting.sentence,
+                onKeep: () => {
+                  props.trainer?.keepThePlan?.();
+                },
+              };
+        })()}
         // #400: the mute and the volume, on the ride's own screen — SC 1.4.2.
         // Only for a rider who turned sounds on: there is nothing to mute
         // otherwise, and a control that does nothing is noise on a HUD.

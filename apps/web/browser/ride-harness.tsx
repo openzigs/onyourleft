@@ -104,7 +104,7 @@ import {
   REALISTIC_WORLD_STORAGE_KEY,
   writeRealisticWorldChoice,
 } from '../src/game/world-preference';
-import { replanSentence } from '../src/workout/replan-text';
+import { longestReplanSentence } from './replan-longest';
 import { RELEASE_INCOMPLETE } from '../src/workout/session';
 import type { WorkoutGraphInput } from '../src/workout/workout-graph';
 import { MAXIMUM_ROUTE_NAME_LENGTH } from '../src/routes/save';
@@ -614,10 +614,16 @@ const graphPlan = (rampSeconds: number) =>
       },
     ],
   });
-/** The sentence the HUD's region is offered while {@link GRAPH_REPLAN}'s move waits. */
+/**
+ * The move waiting while {@link GRAPH_REPLAN}'s page rides: what the HUD's
+ * region is offered, and since #1324 what its actions show above *Keep the
+ * plan* — {@link longestReplanSentence}. The plan drawn is the ramp shortened
+ * by two minutes: the sentence is chosen for its length and the plan for its
+ * shape, as `rideview-harness.tsx` §`REPLAN_SENTENCE` does.
+ */
 const REPLAN_WAITING = {
   revision: 1,
-  sentence: replanSentence({ kind: 'shorten-block', block: 2, minutes: 2 }, 'goal-duration', 2),
+  sentence: longestReplanSentence(),
 };
 const GRAPH: WorkoutGraphInput | undefined =
   GRAPH_HOLD || GRAPH_KIND === 'plain' || GRAPH_PAUSED || GRAPH_REPLAN
@@ -847,6 +853,8 @@ function measure(): StageMeasurement {
     ['the trainer line', '.oyl-hud__trainer'],
     ['the side camera line', '.oyl-hud__side-camera'],
     ['the side camera stop', '.oyl-hud__side-camera-stop'],
+    // #1324: a waiting re-plan's sentence, above *Keep the plan*.
+    ['the plan change', '.oyl-hud__plan-change'],
   ] as const) {
     const element = document.querySelector(selector);
     if (element !== null) {

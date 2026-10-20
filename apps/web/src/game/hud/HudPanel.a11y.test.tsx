@@ -401,8 +401,11 @@ describe('Keep the plan, in the game — #1244', () => {
       inRideScreen(
         <HudPanel
           {...props()}
-          onKeepPlan={() => {
-            pressed += 1;
+          keepPlan={{
+            sentence: 'Next block shortened by 2 minutes, to fit the duration you chose.',
+            onKeep: () => {
+              pressed += 1;
+            },
           }}
         />,
       ),
@@ -421,6 +424,29 @@ describe('Keep the plan, in the game — #1244', () => {
     keep?.click();
     expect(pressed).toBe(1);
     expect(formatViolations(auditAccessibility(document))).toBe('');
+  });
+
+  it('shows the waiting move’s sentence, and only it, above the control and outside any live region — #1324', async () => {
+    const sentence =
+      'Next block swapped for one from your saved workouts, because your heart rate stayed above the range you chose.';
+    mounted = await mount(
+      inRideScreen(<HudPanel {...props()} keepPlan={{ sentence, onKeep: () => undefined }} />),
+    );
+    const actions = document.querySelector<HTMLElement>('.oyl-hud__actions');
+    const line = actions?.querySelector<HTMLElement>('.oyl-hud__plan-change');
+    expect(line?.textContent).toBe(sentence);
+    // Read before the control it explains, in the document's order.
+    const keep = [...document.querySelectorAll<HTMLElement>('.oyl-hud__control')].at(-1);
+    expect(keep?.textContent).toBe('Keep the plan');
+    expect(line?.nextElementSibling).toBe(keep);
+    // #445: not a second live region, nor inside one.
+    expect(line?.closest('[aria-live], [role="status"], [role="alert"], [role="log"]')).toBeNull();
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+  });
+
+  it('shows no sentence while nothing waits — #1324', async () => {
+    mounted = await mount(inRideScreen(<HudPanel {...props()} />));
+    expect(document.querySelector('.oyl-hud__plan-change')).toBeNull();
   });
 });
 
