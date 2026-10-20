@@ -30,10 +30,16 @@
  *   screen, each of which releases an ERG target. A rider who wants the
  *   resistance the app set gone must not first have to unlock the screen.
  *
- * ⚠️ **The trainer game's HUD has no touch lock yet.** A fourth control in its
- * row did not fit a phone on its side (#1432's pull request measured *Trainer
- * notice* pushed to x 829–901 px of an 844 px viewport); that is its own
- * issue. This module is written for any region, so the HUD can use it.
+ * - **The trainer game's *End ride*** (#1482), which ends the game's gradient
+ *   session — what the game asks of the trainer — and not the recording.
+ *
+ * ## Where it is used
+ *
+ * The Ride screen (`views/RideView.tsx`, #1432), whose lock is the ride
+ * controller's, and the trainer game's HUD (`game/hud/HudPanel.tsx`, #1482),
+ * whose lock is the HUD's own: a game ride need not be recording, and the
+ * controller refuses the lock with no recording in progress. The two are
+ * separate locks.
  */
 
 import { useEffect, type RefObject } from 'react';

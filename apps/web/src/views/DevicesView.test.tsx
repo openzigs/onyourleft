@@ -16,6 +16,7 @@
  * such control on the page at all**, and there is prose saying why instead.
  */
 
+import { act } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { BluetoothPort } from '@onyourleft/sensors/web-bluetooth';
@@ -27,7 +28,7 @@ import { athleteId, recordingSessionId } from '@onyourleft/store';
 
 import { tabbableElements } from '../a11y/audit';
 import { createRideController, type RideSnapshot } from '../ride/controller';
-import { connectionWords } from '../ride/SensorPairing';
+import { connectionWords, POWER_BUT_ANOTHER_APP_HAS_CONTROL } from '../ride/SensorPairing';
 import { idleSnapshot, ridingSnapshot, stubRideController } from '../ride/testing';
 import type { CapabilityProbe } from '../support/bluetooth-support';
 import { activateWithKeyboard, mount, settle, type Mounted } from '../testing/mount';
@@ -353,6 +354,36 @@ describe('each device’s state is in words, not colour or an icon alone (WCAG 2
       expect(connectionWords(state)).toMatch(/^[A-Z][a-z]+/);
     });
   }
+
+  it('says on the trainer’s row that it sends power while another app has control — #1435', async () => {
+    const stub = stubRideController(idleSnapshot());
+    const trainer = {
+      id: deviceId('kickr'),
+      name: 'KICKR 1F2A',
+      role: 'trainer',
+      capabilities: ['power'],
+      state: 'connected',
+    } as const;
+    stub.set({ sensors: [trainer] });
+    mounted = await mount(<DevicesView capabilities={CAPABLE} controller={stub.controller} />);
+    await settle();
+    const row = (): Element | null => mounted?.container.querySelector('.oyl-pairing__row') ?? null;
+    expect(row()?.textContent).not.toContain(POWER_BUT_ANOTHER_APP_HAS_CONTROL);
+
+    await act(async () => {
+      stub.set({ trainer: { ...idleSnapshot().trainer, paired: true, lost: 'permission-lost' } });
+      await Promise.resolve();
+    });
+    expect(row()?.textContent).toContain(POWER_BUT_ANOTHER_APP_HAS_CONTROL);
+
+    // A link that went is not "sending power": the row says link lost alone.
+    await act(async () => {
+      stub.set({ sensors: [{ ...trainer, state: 'disconnected' }] });
+      await Promise.resolve();
+    });
+    expect(row()?.textContent).not.toContain(POWER_BUT_ANOTHER_APP_HAS_CONTROL);
+    expect(row()?.textContent).toContain(connectionWords('disconnected'));
+  });
 
   it('gives every state different words', () => {
     const words = STATES.map(connectionWords);

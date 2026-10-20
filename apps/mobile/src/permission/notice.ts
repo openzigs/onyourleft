@@ -67,8 +67,12 @@ export function permissionNotice(availability: TransportAvailability): Permissio
         // Says what the permission is FOR. Android's own prompt calls this
         // "Nearby devices", which tells a rider nothing about why a cycling app
         // wants it, and the honest answer is short.
+        // ⚠️ "never READS your location", not "never asks for" (#1436). Below
+        // API 31 a Bluetooth scan needs the location permission, and the
+        // plugin asks for it there (the manifest bounds it to API 30): a rider
+        // on Android 11 or older IS asked, so "never asks" was false for them.
         explanation:
-          'Android asks before an app can talk to sensors. Without it, your trainer, heart rate strap and power meter cannot be found — this app never asks for your location.',
+          'Android asks before an app can talk to sensors. Without it, your trainer, heart rate strap and power meter cannot be found — this app never reads your location.',
         action: { label: 'Open app settings', kind: 'open-settings' },
       };
 
