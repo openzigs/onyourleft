@@ -31,8 +31,9 @@ import { keyFingerprint } from '../instance/sync-port';
  *   only: the instance moves the mark of the session's key, never one named.
  * - **A revoke** is offered for every other live key — never this device's,
  *   which would sign it out. So it is never offered for the last key, which
- *   needs a recovery code; the instance's `last_device` is still said. Once one is revoked the list is read again and shown with
- *   `revokeMarks`' marks, {@link AFTER_REVOKE_TEXT} above it.
+ *   needs a recovery code; the instance's `last_device` is still said. Once
+ *   one is revoked the list is read again and shown with `revokeMarks`'
+ *   marks, {@link AFTER_REVOKE_TEXT} above it.
  *
  * ⚠️ **Every sentence here is DRAFT wording awaiting the owner's approval**
  * (ADR 0047 D-14 Q6), with #1193's in `account-change-notices.ts`.
@@ -54,9 +55,12 @@ function day(unixSeconds: number): string {
   return new Date(unixSeconds * 1000).toISOString().slice(0, 10);
 }
 
-/** How a key the rider may revoke is named on its button: as the notices name it. */
+/**
+ * How a key the rider may revoke is named on its button: as the notices name
+ * it, plus its fingerprint, so two keys added the same day stay apart.
+ */
 function revokeName(device: InstanceDevice): string {
-  return `the key added on ${formatDay(device.addedAt)}`;
+  return `the key added on ${formatDay(device.addedAt)} (${keyFingerprint(device.publicKey)})`;
 }
 
 export function InstanceDevices({

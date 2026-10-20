@@ -7,8 +7,7 @@
  *
  * ⚠️ **The wording is a DRAFT for the owner's approval** (ADR 0047 D-14 Q6),
  * proposed in #1193's pull request; #1208's adds the self-revoke sentence.
- * The Instance screen's device list renders it (`views/InstanceView.tsx`
- * §`AccountNotices`), from `InstancePort.accountChanges`, which reads
+ * The Instance screen's device list renders it (`views/InstanceDevices.tsx`), from `InstancePort.accountChanges`, which reads
  * `GET /v1/auth/account-changes` sealed. Change a sentence here and in the
  * pull request that approves it, never only in one.
  *

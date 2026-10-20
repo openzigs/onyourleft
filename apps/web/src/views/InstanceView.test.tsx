@@ -43,6 +43,7 @@ import {
   RECOVERY_CODES_LEAD,
   TERMS_CHANGED_TEXT,
 } from './InstanceView';
+import { keyFingerprint } from '../instance/sync-port';
 import { ACCOUNT_NOTICES_TEXT } from './InstanceDevices';
 
 let mounted: Mounted | undefined;
@@ -358,7 +359,7 @@ describe('the account-change notices and a revoke, on the device list — #1208'
   }
 
   const day = formatDay;
-  const REVOKED_NAME = `the key added on ${day(1_790_100_000)}`;
+  const REVOKED_NAME = `the key added on ${day(1_790_100_000)} (${keyFingerprint(REVOKED)})`;
 
   /** The device list's line for a key, in {@link ORDER}. */
   function item(publicKey: string): string {
@@ -478,7 +479,8 @@ describe('the account-change notices and a revoke, on the device list — #1208'
         .map((each) => each.textContent)
         .filter((name) => (name ?? '').startsWith('Revoke the key'));
     // Two live keys: only the other one is offered.
-    const other = `the key added on ${day(scripted.held.devices[1]?.addedAt ?? 0)}`;
+    const otherDevice = scripted.held.devices[1];
+    const other = `the key added on ${day(otherDevice?.addedAt ?? 0)} (${keyFingerprint(otherDevice?.publicKey ?? '')})`;
     expect(revokes()).toEqual([ACCOUNT_NOTICES_TEXT.revoke(other)]);
     mounted.unmount();
     // The other one revoked: this device is the last live key, and nothing is offered.
@@ -486,6 +488,20 @@ describe('the account-change notices and a revoke, on the device list — #1208'
     mounted = await mount(<InstanceView port={scripted.port} />);
     await settle();
     expect(revokes()).toEqual([]);
+  });
+
+  it('tells two keys added the same day apart on their revoke buttons', async () => {
+    const scripted = fiveKeys();
+    scripted.held.devices = scripted.held.devices.map((device) =>
+      device.thisDevice ? device : { ...device, addedAt: 1_790_100_000 },
+    );
+    mounted = await mount(<InstanceView port={scripted.port} />);
+    await settle();
+    const names = [...mounted.container.querySelectorAll('button')]
+      .map((each) => each.textContent ?? '')
+      .filter((name) => name.startsWith('Revoke the key'));
+    expect(names).toHaveLength(4);
+    expect(new Set(names).size).toBe(4);
   });
 
   it('says why a key was not revoked, and marks nothing', async () => {
