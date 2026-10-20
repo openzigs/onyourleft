@@ -11888,7 +11888,9 @@ describe('#1244 — re-plans during the ride, read from the simulated trainer', 
       rig.controller.dispose();
     });
 
-    it('a new ride starts its own count', async () => {
+    // #1329: until then a new ride started its own count, so stopping and
+    // starting again asked a second time about a minute after the first.
+    it('a new ride does not start its own count: a ride started a minute after a request waits out the three minutes', async () => {
       const { rig, scripted } = await riding({ replans: true, rideSave: storeSavePort() });
       await rideTo(rig, 62);
       expect(scripted.starts()).toHaveLength(1);
@@ -11901,7 +11903,11 @@ describe('#1244 — re-plans during the ride, read from the simulated trainer', 
       await rig.controller.start();
       expect(rig.controller.startWorkout(planned(), THRESHOLD, OWN, { replans: true })).toBe(true);
       await flushMicrotasks(20);
+      // The new ride's first boundary: about a minute after the request.
       await rideTo(rig, 62);
+      expect(scripted.starts()).toHaveLength(1);
+      // Its next boundary is at 300 s: more than three minutes on.
+      await rideTo(rig, 302);
       expect(scripted.starts()).toHaveLength(2);
       rig.controller.dispose();
     });

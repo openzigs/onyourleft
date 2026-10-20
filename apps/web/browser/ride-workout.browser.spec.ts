@@ -34,6 +34,7 @@ import {
 } from './ride-stage';
 
 import type { Box, StageMeasurement } from './ride-harness';
+import { longestReplanSentence } from './replan-longest';
 
 /**
  * #1307 — the running workout drawn on the HUD, `ride-harness.tsx` §`GRAPH`.
@@ -604,7 +605,20 @@ test.describe('the workout strip on a phone — #1313', () => {
  * ⚠️ The HUD's strip does NOT draw the dotted outline of what the move
  * replaced: it is the last five minutes of power or heart rate and a progress
  * bar (#1307), with no plan ahead in it to outline. The outline is on the
- * Ride screen's graph (`rideview.browser.spec.ts`).
+ * Ride screen's graph (`rideview.browser.spec.ts`). #1324 decided to keep it
+ * so: the HUD shows the move's sentence, which says what changes.
+ *
+ * ## #1324: the move's sentence above the control
+ *
+ * Since #1324 the actions show the waiting move's sentence on a line above
+ * *Keep the plan* — the LONGEST sentence `workout/replan-text.ts` can produce
+ * (`replan-longest.ts`), read back off the HUD word for word. At the tablet
+ * viewports the line is on the stage, inside the viewport and uncovered, and
+ * the no-panel-over-the-rider rule above holds with it showing. On the
+ * phones it gives way and is held to be laid out at no height (`theme.css`
+ * §"#1324" has the measurement that ruled it out there), and the actions
+ * panel's clearance from the rider is printed as before. The same ride with
+ * nothing waiting has no such line.
  *
  * ## What is only published
  *
@@ -620,6 +634,9 @@ test.describe('the workout strip on a phone — #1313', () => {
 const REPLAN_ON_THE_HUD = '?trainer=workout&graph=replan';
 
 const KEEP_THE_PLAN = 'control: Keep the plan';
+
+/** `ride-harness.tsx`'s item name for the sentence above it — #1324. */
+const PLAN_CHANGE = 'the plan change';
 
 test.describe('Keep the plan on the HUD while a re-plan waits — #1244', () => {
   test('the three tablet viewports are the ones this holds', () => {
@@ -639,15 +656,32 @@ test.describe('Keep the plan on the HUD while a re-plan waits — #1244', () => 
       await openRide(page, viewport, '?trainer=workout&graph=plain');
       const without = await measure(page);
       expect(without.items.map((each) => each.name)).not.toContain(KEEP_THE_PLAN);
+      expect(without.items.map((each) => each.name)).not.toContain(PLAN_CHANGE);
 
       await openRide(page, viewport, REPLAN_ON_THE_HUD);
+      // #1324: the move's own sentence, the longest there is, and nothing else.
+      const shown = await page.locator('.oyl-hud__actions .oyl-hud__plan-change').textContent();
+      expect(shown).toBe(longestReplanSentence());
       for (const [how, seen] of await bothWays(page)) {
         await test.step(how, () => {
+          const line = seen.items.find((each) => each.name === PLAN_CHANGE);
+          if (line === undefined) {
+            throw new Error(`no ${PLAN_CHANGE} among the HUD's items`);
+          }
           const keep = seen.items.find((each) => each.name === KEEP_THE_PLAN);
           const pause = seen.items.find((each) => each.name === 'control: Pause');
           const end = seen.items.find((each) => each.name === 'control: End ride');
           if (keep === undefined || pause === undefined || end === undefined) {
             throw new Error(`no ${KEEP_THE_PLAN}, Pause or End ride among the HUD's items`);
+          }
+          if (tablet) {
+            // Above the control it explains, and on the stage, uncovered.
+            expect(inside(line.box, viewport), describeItem(line)).toBe(true);
+            expect(line.onTop, describeItem(line)).toBe(true);
+            expect(line.box.bottom).toBeLessThanOrEqual(keep.box.top + SUBPIXEL_TOLERANCE);
+          } else {
+            // On a phone it gives way (`theme.css` §"#1324").
+            expect(line.box.height, describeItem(line)).toBe(0);
           }
           const actions = seen.panels.find((each) => each.name.includes('oyl-hud__actions'));
           const rider = riderBox(viewport);
@@ -657,7 +691,8 @@ test.describe('Keep the plan on the HUD while a re-plan waits — #1244', () => 
           console.log(
             `#1244 Keep the plan on the HUD — ${viewport.name} — ${how}: ` +
               `${keep.box.width.toFixed(1)} × ${keep.box.height.toFixed(1)} px at ` +
-              `[${keep.box.left.toFixed(0)},${keep.box.top.toFixed(0)}]; the actions panel ` +
+              `[${keep.box.left.toFixed(0)},${keep.box.top.toFixed(0)}]; the sentence ` +
+              `${line.box.width.toFixed(0)} × ${line.box.height.toFixed(0)} px; the actions panel ` +
               `${actions?.box.width.toFixed(0) ?? '?'} × ${actions?.box.height.toFixed(0) ?? '?'} px, ` +
               `its top ${((actions?.box.top ?? 0) - rider.bottom).toFixed(0)} px below the rider's box` +
               `, its left ${((actions?.box.left ?? 0) - rider.right).toFixed(0)} px right of it` +
@@ -690,6 +725,87 @@ test.describe('Keep the plan on the HUD while a re-plan waits — #1244', () => 
             expect(over.map(describeItem)).toEqual([]);
           }
         });
+      }
+    });
+  }
+});
+
+/**
+ * #1329 — *Switch re-plans off* on the game's HUD, `ride-harness.tsx`
+ * §`GRAPH_REPLANS_ON`, so a rider in the game can stop what is being sent
+ * without leaving it. A row of its own, last in the actions panel, for as
+ * long as the workout has re-plans on: alone (`graph=replan-on`, most of
+ * such a workout) and under *Keep the plan* and its sentence while a move
+ * waits (`graph=replan`, the tallest the panel gets).
+ *
+ * Held at every overlay viewport, both ways: the control on the stage,
+ * inside the viewport and uncovered, at least #669's 48 px, 8 px or more
+ * from *Pause* and *End ride*, which stay on the stage. At the tablets no
+ * panel is over the rider's box; at the phones the actions panel's
+ * clearance is printed, for #1244's reason. The plain workout
+ * (`graph=plain`, re-plans off) has no such control.
+ */
+const SWITCH_REPLANS_OFF = 'control: Switch re-plans off';
+
+test.describe('Switch re-plans off on the HUD while re-plans are on — #1329', () => {
+  for (const viewport of OVERLAY_VIEWPORTS) {
+    const tablet = TABLET_VIEWPORTS.includes(viewport);
+    test(`is on the stage, a ride-time control${tablet ? ', and no panel covers the rider' : ''} — ${viewport.name}`, async ({
+      page,
+    }) => {
+      await openRide(page, viewport, '?trainer=workout&graph=plain');
+      expect((await measure(page)).items.map((each) => each.name)).not.toContain(
+        SWITCH_REPLANS_OFF,
+      );
+
+      for (const query of ['?trainer=workout&graph=replan-on', REPLAN_ON_THE_HUD]) {
+        await openRide(page, viewport, query);
+        for (const [how, seen] of await bothWays(page)) {
+          await test.step(`${query} — ${how}`, () => {
+            const off = seen.items.find((each) => each.name === SWITCH_REPLANS_OFF);
+            const pause = seen.items.find((each) => each.name === 'control: Pause');
+            const end = seen.items.find((each) => each.name === 'control: End ride');
+            if (off === undefined || pause === undefined || end === undefined) {
+              throw new Error(`no ${SWITCH_REPLANS_OFF}, Pause or End ride among the HUD's items`);
+            }
+            const actions = seen.panels.find((each) => each.name.includes('oyl-hud__actions'));
+            const rider = riderBox(viewport);
+            const over = seen.panels
+              .filter((each) => each.box.height > 0)
+              .filter((each) => overlap(each.box, rider));
+            console.log(
+              `#1329 Switch re-plans off — ${viewport.name} — ${query} — ${how}: ` +
+                `${off.box.width.toFixed(1)} × ${off.box.height.toFixed(1)} px at ` +
+                `[${off.box.left.toFixed(0)},${off.box.top.toFixed(0)}]; the actions panel ` +
+                `${actions?.box.width.toFixed(0) ?? '?'} × ${actions?.box.height.toFixed(0) ?? '?'} px, ` +
+                `its top ${((actions?.box.top ?? 0) - rider.bottom).toFixed(0)} px below the rider's box` +
+                `; panels over the rider: ${over.length === 0 ? 'none' : over.map(describeItem).join(', ')}`,
+            );
+            expect(inside(off.box, viewport), describeItem(off)).toBe(true);
+            expect(off.onTop, describeItem(off)).toBe(true);
+            expect(off.box.width).toBeGreaterThanOrEqual(48 - SUBPIXEL_TOLERANCE);
+            expect(off.box.height).toBeGreaterThanOrEqual(48 - SUBPIXEL_TOLERANCE);
+            for (const other of [pause, end]) {
+              expect(inside(other.box, viewport), describeItem(other)).toBe(true);
+              expect(other.onTop, describeItem(other)).toBe(true);
+              const apartX = Math.max(
+                off.box.left - other.box.right,
+                other.box.left - off.box.right,
+              );
+              const apartY = Math.max(
+                off.box.top - other.box.bottom,
+                other.box.top - off.box.bottom,
+              );
+              expect(
+                Math.max(apartX, apartY),
+                `${SWITCH_REPLANS_OFF} and ${other.name} are closer than 8 px`,
+              ).toBeGreaterThanOrEqual(8 - SUBPIXEL_TOLERANCE);
+            }
+            if (tablet) {
+              expect(over.map(describeItem)).toEqual([]);
+            }
+          });
+        }
       }
     });
   }
@@ -863,8 +979,8 @@ test.describe('a ride on a loop — #1312', () => {
  * *Keep the plan* is a row of the actions panel — a taller panel in one corner
  * and a notice in another, on the one stage.
  *
- * A waiting re-plan puts NO notice on the HUD (#1324: its sentence is the
- * region's, and its control is the row), so there is nothing here for the
+ * A waiting re-plan puts NO notice on the HUD (its sentence is a line of the
+ * actions on a tablet and gives way on a phone, #1324), so there is nothing for the
  * lap's notice to give way to; what is held is that the two do not meet: the
  * notice whole, the control on the stage and on top, no panel over another,
  * and on the tablets no panel over the rider — each change's own bar, with

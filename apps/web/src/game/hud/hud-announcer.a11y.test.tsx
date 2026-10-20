@@ -697,4 +697,109 @@ describe('a re-plan during the ride, through the game — #1244', () => {
     await pump(10);
     expect(region()?.textContent).not.toContain('Plan change');
   });
+
+  it('shows the waiting move’s sentence beside Keep the plan with announcements off, and no voice says it — #1324', async () => {
+    const shown = (): string | null | undefined =>
+      document.querySelector('.oyl-hud__actions .oyl-hud__plan-change')?.textContent;
+    await startRide(replanPort());
+    await pump(4);
+    expect(shown()).toBeUndefined();
+
+    change = { waiting: { revision: 1, sentence: SENTENCE }, quiet: false };
+    await pump(4);
+    await settle();
+    expect(shown()).toBe(SENTENCE);
+    expect(keepButton()).toBeDefined();
+    // Neither the HUD's region nor any other voice on the stage holds it.
+    expect(region()?.textContent).not.toContain(SENTENCE);
+    expect(voicesOnTheStage().filter((each) => each.textContent?.includes(SENTENCE))).toEqual([]);
+
+    await press(keepButton());
+    await pump(4);
+    await settle();
+    expect(shown()).toBeUndefined();
+  });
+});
+
+describe('Switch re-plans off, in the game — #1329', () => {
+  let on: boolean;
+  let switched: number;
+
+  /** A trainer a running workout owns, with re-plans on until the rider switches them off. */
+  function replansPort(): GameTrainerPort {
+    return {
+      ...trainerPort(true),
+      readTrainer: () =>
+        gameTrainerFrom(
+          { paired: true, controllable: true, canSimulate: true, hasControl: true },
+          {
+            setSimulationParameters: () => Promise.resolve(),
+            letGo: () => Promise.resolve({ kind: 'stopped' as const }),
+          } satisfies GradientTrainer,
+          true,
+        ),
+      workoutReplansOn: () => on,
+      switchReplansOff: () => {
+        switched += 1;
+        // As the controller does: off for the rest of the workout.
+        on = false;
+      },
+    };
+  }
+
+  const offButton = (): HTMLButtonElement | undefined =>
+    queryAll<HTMLButtonElement>(document, '.oyl-hud__actions button').find(
+      (each) => each.textContent === 'Switch re-plans off',
+    );
+
+  beforeEach(() => {
+    on = true;
+    switched = 0;
+  });
+
+  it('is on the HUD while re-plans are on, reaches the controller, goes, and the region says so once', async () => {
+    chooseAnnouncements({
+      powerEverySeconds: 'never',
+      distanceEvery: 'never',
+      climbLeadMetres: 'never',
+    });
+    await startRide(replansPort());
+    await pump(4);
+    await settle();
+    const button = offButton();
+    expect(button).toBeDefined();
+    expect(formatViolations(auditAccessibility(document))).toBe('');
+
+    await press(button);
+    expect(switched).toBe(1);
+    expect(await pumpUntil(/Re-plans are off/, 10)).toBe(
+      'Plan change: Re-plans are off for the rest of this workout. Nothing more is sent, and the plan stays as it is.',
+    );
+    // Owed until said, and never offered again once it has been.
+    const offeredWhenSaid = offered.filter((kind) => kind === 'plan-changed').length;
+    await pump(20);
+    await settle();
+    expect(offered.filter((kind) => kind === 'plan-changed')).toHaveLength(offeredWhenSaid);
+    expect(offButton()).toBeUndefined();
+  });
+
+  it('is not on the HUD while re-plans are off', async () => {
+    on = false;
+    await startRide(replansPort());
+    await pump(4);
+    await settle();
+    expect(offButton()).toBeUndefined();
+  });
+
+  it('says nothing about it with announcements off: the control going is the answer', async () => {
+    await startRide(replansPort());
+    await pump(4);
+    await settle();
+    await press(offButton());
+    expect(switched).toBe(1);
+    await pump(10);
+    await settle();
+    expect(region()?.textContent).not.toContain('Re-plans are off');
+    expect(offButton()).toBeUndefined();
+  });
 });

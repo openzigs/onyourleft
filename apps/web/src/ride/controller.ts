@@ -1403,9 +1403,15 @@ export function createRideController(options: RideControllerOptions): RideContro
    */
   let replanRecords: readonly ReplanRecord[] = [];
   /**
-   * When this ride last sent a re-plan request, on the ride's clock — kept
-   * here, above any one workout, so a second workout in the same ride waits
-   * out the first one's three minutes. Cleared with {@link replanRecords}.
+   * When this device last sent a re-plan request, on the ride's clock (the
+   * wall clock, `rideSeconds`) — kept here, above any one workout, so a
+   * second workout in the same ride waits out the first one's three minutes.
+   *
+   * ⚠️ **NOT cleared with {@link replanRecords} when a ride stops** (#1329):
+   * until then, stopping and starting a new ride started the count again, so
+   * a rider could be asked about twice inside three minutes. It outlives the
+   * ride for as long as this controller does; a reload of the page starts it
+   * again, and the instance's own 24 an hour still bounds that.
    */
   let replanLastAskedAt: Seconds | undefined;
   /** Set when a ride saved but its checkpoint could not be removed. @see RideSnapshot.leftover */
@@ -3757,7 +3763,7 @@ export function createRideController(options: RideControllerOptions): RideContro
       workoutFinishedInRide = false;
       // #1244: and the re-plan decisions that went with that ride.
       replanRecords = [];
-      replanLastAskedAt = undefined;
+      // ⚠️ But not `replanLastAskedAt` (#1329): the three minutes outlive the ride.
       leftover = false;
       clock = now();
       changed();

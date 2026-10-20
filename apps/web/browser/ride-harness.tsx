@@ -104,7 +104,7 @@ import {
   REALISTIC_WORLD_STORAGE_KEY,
   writeRealisticWorldChoice,
 } from '../src/game/world-preference';
-import { replanSentence } from '../src/workout/replan-text';
+import { longestReplanSentence } from './replan-longest';
 import { RELEASE_INCOMPLETE } from '../src/workout/session';
 import type { WorkoutGraphInput } from '../src/workout/workout-graph';
 import { MAXIMUM_ROUTE_NAME_LENGTH } from '../src/routes/save';
@@ -591,7 +591,10 @@ const RACE_PORTS =
  * - `replan` (#1244): the plain workout with an accepted re-plan waiting for
  *   its next block — the ramp shortened by two minutes — so the strip draws
  *   what the move replaced as a dotted outline and the HUD's actions show
- *   *Keep the plan*, which no other state of this page does.
+ *   *Keep the plan*, which no other state of this page does — and, since
+ *   #1329, *Switch re-plans off*, as a ride with a move waiting has re-plans on.
+ * - `replan-on` (#1329): the plain workout with re-plans on and nothing
+ *   waiting, which is most of such a workout: *Switch re-plans off* alone.
  */
 const GRAPH_KIND = new URLSearchParams(window.location.search).get('graph');
 const GRAPH_HOLD =
@@ -600,6 +603,8 @@ const GRAPH_HOLD =
 const GRAPH_PAUSED = GRAPH_KIND === 'paused' || GRAPH_KIND === 'paused-hold';
 /** `replan`: an accepted re-plan waiting for the next block — #1244. */
 const GRAPH_REPLAN = GRAPH_KIND === 'replan';
+/** `replan` and `replan-on`: the workout has re-plans on — #1329. */
+const GRAPH_REPLANS_ON = GRAPH_REPLAN || GRAPH_KIND === 'replan-on';
 const graphPlan = (rampSeconds: number) =>
   expandWorkout({
     name: 'Hold',
@@ -614,13 +619,19 @@ const graphPlan = (rampSeconds: number) =>
       },
     ],
   });
-/** The sentence the HUD's region is offered while {@link GRAPH_REPLAN}'s move waits. */
+/**
+ * The move waiting while {@link GRAPH_REPLAN}'s page rides: what the HUD's
+ * region is offered, and since #1324 what its actions show above *Keep the
+ * plan* — {@link longestReplanSentence}. The plan drawn is the ramp shortened
+ * by two minutes: the sentence is chosen for its length and the plan for its
+ * shape, as `rideview-harness.tsx` §`REPLAN_SENTENCE` does.
+ */
 const REPLAN_WAITING = {
   revision: 1,
-  sentence: replanSentence({ kind: 'shorten-block', block: 2, minutes: 2 }, 'goal-duration', 2),
+  sentence: longestReplanSentence(),
 };
 const GRAPH: WorkoutGraphInput | undefined =
-  GRAPH_HOLD || GRAPH_KIND === 'plain' || GRAPH_PAUSED || GRAPH_REPLAN
+  GRAPH_HOLD || GRAPH_KIND === 'plain' || GRAPH_PAUSED || GRAPH_REPLANS_ON
     ? {
         ...(GRAPH_PAUSED ? { status: 'paused', live: { power: 0, heartRate: undefined } } : {}),
         elapsedSeconds: 900,
@@ -732,6 +743,9 @@ const TRAINER: GameTrainerPort = {
   // #1244: a re-plan waiting, which is what puts *Keep the plan* on the HUD.
   workoutPlanChange: () => (GRAPH_REPLAN ? { waiting: REPLAN_WAITING, quiet: false } : undefined),
   keepThePlan: () => undefined,
+  // #1329: re-plans on, which is what puts *Switch re-plans off* on the HUD.
+  workoutReplansOn: () => GRAPH_REPLANS_ON,
+  switchReplansOff: () => undefined,
   // #503: the Ride press's request for control — this double changes nothing.
   askForControlOnRide: () => Promise.resolve(),
   workoutRescue: () => RESCUE,
@@ -847,6 +861,8 @@ function measure(): StageMeasurement {
     ['the trainer line', '.oyl-hud__trainer'],
     ['the side camera line', '.oyl-hud__side-camera'],
     ['the side camera stop', '.oyl-hud__side-camera-stop'],
+    // #1324: a waiting re-plan's sentence, above *Keep the plan*.
+    ['the plan change', '.oyl-hud__plan-change'],
   ] as const) {
     const element = document.querySelector(selector);
     if (element !== null) {

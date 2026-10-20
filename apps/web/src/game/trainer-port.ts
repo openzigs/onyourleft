@@ -301,6 +301,23 @@ export interface GameTrainerPort {
    */
   keepThePlan?(): void;
   /**
+   * Whether the workout running now has re-plans ON and not yet switched
+   * off — #1329: what puts *Switch re-plans off* on the HUD, as
+   * `RideWorkoutSnapshot.replan` present and not `off` puts it on the Ride
+   * screen. `false` with no controller, no workout, a finished one, and one
+   * started with the switch off. Read on every frame, like
+   * {@link workoutHold}. Optional for that method's reason.
+   */
+  workoutReplansOn?(): boolean;
+  /**
+   * *Switch re-plans off* — #1329, ADR 0048 D-7: the ride controller's own
+   * `switchReplansOff`, which is what the Ride screen's control calls. From
+   * the press nothing more is sent for the workout, a job in flight is
+   * cancelled and a waiting move is dropped; it writes nothing to the
+   * trainer. Optional for {@link workoutHold}'s reason.
+   */
+  switchReplansOff?(): void;
+  /**
    * The workout in progress as its graph reads it, or `undefined` when there
    * is none or it has finished — #1307. The Ride screen's own snapshot object
    * (`RideWorkoutSnapshot`), so the HUD's strip and the panel's graph are one
@@ -488,6 +505,8 @@ interface GameTrainerSource {
             | {
                 readonly waiting: WaitingReplan | undefined;
                 readonly discarded?: number | undefined;
+                /** #1329: switched off for the rest of the workout. */
+                readonly off?: boolean | undefined;
               }
             | undefined;
           // #1307: the rest of what the graph reads. Partial only so a source
@@ -530,6 +549,8 @@ interface GameTrainerSource {
    * no workout need not say; the ride controller `main.tsx` hands over has it.
    */
   keepThePlan?(): void;
+  /** #1329. @see GameTrainerPort.switchReplansOff. Optional for {@link keepThePlan}'s reason. */
+  switchReplansOff?(): void;
 }
 
 /** Whether a source's workout says enough to draw — the ride controller's always does. */
@@ -598,6 +619,18 @@ export function gameTrainerPortOver(controller: GameTrainerSource | undefined): 
     workoutPlanDiscarded: () => controller?.getSnapshot().workout?.replan?.discarded,
     keepThePlan: () => {
       controller?.keepThePlan?.();
+    },
+    workoutReplansOn: () => {
+      const workout = controller?.getSnapshot().workout;
+      return (
+        workout !== undefined &&
+        workout.status !== 'finished' &&
+        workout.replan !== undefined &&
+        workout.replan.off !== true
+      );
+    },
+    switchReplansOff: () => {
+      controller?.switchReplansOff?.();
     },
     runningWorkout: () => {
       const workout = controller?.getSnapshot().workout;

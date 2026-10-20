@@ -629,6 +629,42 @@ describe('gameTrainerPortOver — the port main.tsx builds (#503)', () => {
     expect(none.workoutPlanDiscarded?.()).toBeUndefined();
   });
 
+  it('says whether re-plans are on for the running workout, and hands *Switch re-plans off* to the controller’s own — #1329', () => {
+    let switched = 0;
+    let workout:
+      | {
+          status: string;
+          rescue: undefined;
+          replan: { waiting: undefined; off?: boolean } | undefined;
+        }
+      | undefined = { status: 'running', rescue: undefined, replan: { waiting: undefined } };
+    const port = gameTrainerPortOver({
+      getSnapshot: () => ({ trainer: { ...NO_CONTROL, hasControl: true }, workout }),
+      simulationControl: () => undefined,
+      requestTrainerControl: () => Promise.resolve(),
+      noteGameRideEnded: () => undefined,
+      subscribe: () => () => undefined,
+      switchReplansOff: () => {
+        switched += 1;
+      },
+    });
+    expect(port.workoutReplansOn?.()).toBe(true);
+    port.switchReplansOff?.();
+    expect(switched).toBe(1);
+    // Switched off, started with the switch off, finished, and none at all.
+    workout = { status: 'running', rescue: undefined, replan: { waiting: undefined, off: true } };
+    expect(port.workoutReplansOn?.()).toBe(false);
+    workout = { status: 'running', rescue: undefined, replan: undefined };
+    expect(port.workoutReplansOn?.()).toBe(false);
+    workout = { status: 'finished', rescue: undefined, replan: { waiting: undefined } };
+    expect(port.workoutReplansOn?.()).toBe(false);
+    workout = undefined;
+    expect(port.workoutReplansOn?.()).toBe(false);
+    const none = gameTrainerPortOver(undefined);
+    expect(none.workoutReplansOn?.()).toBe(false);
+    expect(() => none.switchReplansOff?.()).not.toThrow();
+  });
+
   it('hands a game ride’s outcome to the ride controller, and to nothing without one — #1042', () => {
     const noted: (string | undefined)[] = [];
     const port = gameTrainerPortOver({

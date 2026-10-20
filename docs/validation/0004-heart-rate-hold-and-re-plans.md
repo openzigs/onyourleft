@@ -340,7 +340,7 @@ before riding.
 | **The tablet signed in to that instance** | *Settings → Instance*. The switch is not offered without a sign-in (`replan-port.ts` §`replanConnected`) |
 | **Both of the rider's own thresholds set** | Threshold power **and** threshold heart rate on the Analysis screen, each set by the rider and not the default. Without both, the switch is not shown at all (`views/RideView.tsx`, `replansAvailable`) |
 | **Trainer control held, and at least one saved workout** | The switch is drawn only then (`ride/WorkoutPanel.tsx` §`offerReplans`) |
-| **The heart-rate strap paired** | No request leaves without a paired strap, a held control point, or with the stall rescue holding the target (P6, `replan-session.ts` §`tick`) |
+| **The heart-rate strap paired, and reading** | No request leaves without a paired strap with a live heart rate (since #1329), a held control point, or with the stall rescue holding the target (P6, `replan-session.ts` §`tick`) |
 | **Typed goals that leave room for a move** | *Settings → Your workout goals*. *Length (minutes)* **40**, longer than the workout's 34: without a length goal, no move may make the workout longer (the eleven decisions, ruling 8, `@onyourleft/domain` §`replan.ts`). *Most power (% of your threshold)* **85**, which is the most it allows. Leave *Time in your range* empty: it is never sent |
 | **The log** | Part A's three lines on the Mac, before the first step: `adb logcat -G 16M`, `adb logcat -c`, then `adb logcat -v time \| grep --line-buffered -i "BluetoothLe" \| tee replan-$(date +%H%M).log`. It shows every write to the trainer. Nothing about a re-plan itself is logged there: the screen, the job table and the export are the record of those |
 | **A clock with seconds** | Every row asks for times. A boundary is the moment the workout panel's block changes |
@@ -357,14 +357,16 @@ before riding.
   no switch.
 - **When a request leaves.** Only **as a block begins**, never at the start of the workout, and
   never as the **last** block begins. Not with less than **30 s** of the new block left, not
-  within **3 minutes** of the last request **of this ride** (across workouts), and not without a
-  strap paired, a held control point, or with the rescue active (`replan-session.ts` §`tick`). In
+  within **3 minutes** of the last request (across workouts and, since #1329, across rides until
+  the page reloads), and not without a strap paired AND reading (since #1329 a paired strap with
+  no live heart rate does not count), a held control point, or with the rescue active
+  (`replan-session.ts` §`tick`). In
   *Re-plan check* below, that is at **5:00, 11:00, 17:00 and 23:00**, and never at 29:00.
 - **One request at a time, and when it is dropped.** A request still out **60 s** after it left
   (`REPLAN_FRESHNESS_SECONDS`), or once the block it was asked in has less than **30 s** to run
   (`REPLAN_BOUNDARY_LEAD_SECONDS`), is dropped: the device stops listening and cancels the job on
   the instance. **Nothing is shown and nothing is said** for a dropped request. A pause, a lost
-  control point, an unpaired strap or the rescue drops one the same way. If an answer slips past
+  control point, an unpaired or quiet strap (#1329) or the rescue drops one the same way. If an answer slips past
   that anyway, the validator refuses it under P5 or P2, and that too shows nothing.
 - **The instance's budget**: 45 s, 4 model turns, 3 tool calls and 6 000 tokens, **counted from
   when the job was queued** (`apps/instance` §`replan-agent.ts` §`REPLAN_BUDGETS`). So a job runs
@@ -395,14 +397,17 @@ before riding.
 - ***Keep the plan***, pressed before the boundary, drops the move and shows *"The plan stays as it
   was."* (`replan-text.ts` §`PLAN_KEPT`). The press writes nothing to the trainer. In the Trainer
   game, with a workout started on the Ride screen, ***Keep the plan*** is on the HUD on a row of
-  its own under *Pause* and *End ride* while a move waits. **The HUD shows no sentence**
-  ([#1324](https://github.com/openzigs/onyourleft/issues/1324), open): there the move is only
-  spoken, with announcements on.
+  its own under *Pause* and *End ride* while a move waits. On the tablet the move's sentence is
+  on the line above it ([#1324](https://github.com/openzigs/onyourleft/issues/1324)); on a phone
+  the sentence gives way and the move is only spoken, with announcements on.
 - ***Switch re-plans off*** (`replan-text.ts` §`REPLAN_OFF_BUTTON`) is on the Ride screen, on the
   same row as *End workout*, while a workout runs with re-plans on. Pressed, it drops a waiting
   move, cancels a job in flight, sends nothing more for that workout, and cannot be undone for
-  it. The panel then says *"Re-plans are off for the rest of this workout. Nothing more is sent,
-  and the plan stays as it is."* (`REPLANS_OFF`). Not on the game HUD.
+  it. The panel then says, labelled **Plan change**, *"Re-plans are off for the rest of this
+  workout. Nothing more is sent, and the plan stays as it is."* (`REPLANS_OFF`). Since
+  [#1329](https://github.com/openzigs/onyourleft/issues/1329) it is on the game HUD too, on a row
+  of its own, last in the actions panel, for as long as re-plans are on. Pressed there, the
+  control goes, and with announcements on the HUD says the same sentence once.
 - **A waiting move dropped by a pause or a lost trainer** (D-8): the panel says, labelled **Plan
   change**, *"That change was dropped because the ride paused or lost the trainer, so the plan
   stays as it was."* (`REPLAN_DISCARDED`). It is spoken only if the move's own sentence was.
@@ -621,7 +626,7 @@ sent"*.
 | Step | What to do | What should happen | ⚠️ Stop if |
 |---|---|---|---|
 | B8.1 | Re-plans on. Ride past 5:00. Count the instance's re-plan jobs. If a move is waiting, leave it | ***Switch re-plans off*** is on the row of *End workout* | |
-| B8.2 | Press ***Switch re-plans off*** before 11:00, and ride past 17:00 | The button goes, and the panel says *"Re-plans are off for the rest of this workout. Nothing more is sent, and the plan stays as it is."* A waiting move is dropped with it, and its block is ridden as loaded. The press writes nothing | a block after the press is not the loaded plan's |
+| B8.2 | Press ***Switch re-plans off*** before 11:00, and ride past 17:00 | The button goes, and the panel says, labelled **Plan change**, *"Re-plans are off for the rest of this workout. Nothing more is sent, and the plan stays as it is."* A waiting move is dropped with it, and its block is ridden as loaded. The press writes nothing | a block after the press is not the loaded plan's |
 | B8.3 | *End workout*, and count the jobs again | **No row was added after the press**: no request at 11:00 or 17:00 | |
 
 **Fails D-7 if:** a job was made after the press, or a move waiting at the press reached its block.
