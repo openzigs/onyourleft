@@ -203,7 +203,7 @@ export type {
   RecoveredRecording,
   UnreadableRecordingSession,
 } from './recording';
-export { RECORDING_STORED_STATES } from './recording';
+export { RECORDING_REPLAN_RECORDS_LIMIT, RECORDING_STORED_STATES } from './recording';
 
 export type { ChannelEncoding, EncodedChannel } from './stream-codec';
 export { channelBytesPerSample, decodeChannel, encodeChannel } from './stream-codec';

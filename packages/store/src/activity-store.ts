@@ -3334,6 +3334,9 @@ export class ActivityStore {
       ...(header.openCourseLap === undefined ? {} : { openCourseLap: header.openCourseLap }),
       roomRaces: header.roomRaces ?? [],
       ...(header.workoutBlocks === undefined ? {} : { workoutBlocks: header.workoutBlocks }),
+      // #1328: so a recovered ride is saved with its re-plan record.
+      ...(header.replans === undefined ? {} : { replans: header.replans }),
+      ...(header.replansDropped === undefined ? {} : { replansDropped: header.replansDropped }),
       chunks: prefix.rows.length,
       chunksAfterGap: stored.chunks.length - prefix.rows.length,
     };

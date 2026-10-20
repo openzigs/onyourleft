@@ -730,7 +730,7 @@ export function racesOf(value: unknown): readonly RoomRaceFact[] | undefined {
  *
  * It names nothing of an unreadable record: not its text, not its place.
  */
-function replanRecordsOf(
+export function replanRecordsOf(
   replans: unknown,
   droppedBefore: unknown,
 ): { readonly replans?: readonly ReplanRecord[]; readonly replansDropped?: number } {

@@ -115,4 +115,5 @@ export {
   unscopedAttemptStoreFactory,
   consentIgnoredStoreFactory,
   piecewiseRideStoreFactory,
+  replanlessCheckpointStoreFactory,
 } from './fakes';

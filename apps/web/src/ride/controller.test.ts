@@ -83,6 +83,7 @@ import {
 import {
   activityId,
   lapId,
+  RECORDING_REPLAN_RECORDS_LIMIT,
   recordingSessionId,
   workoutId,
   type RecordingSessionId,
@@ -131,6 +132,7 @@ import {
   PAIRING_ROLE_CAPABILITIES,
   pairedAgainBeforeForgetLanded,
   RIDE_NOTIFICATION_REFUSED,
+  RIDE_REPLAN_RECORDS_LIMIT,
   type RideController,
   type RideSavePort,
   type RideWorkoutSnapshot,
@@ -11292,6 +11294,145 @@ describe('#1244 — re-plans during the ride, read from the simulated trainer', 
       expect(saved?.rideFacts).toBeDefined();
       expect(saved?.rideFacts && 'replans' in saved.rideFacts).toBe(false);
       rig.controller.dispose();
+    });
+
+    describe('a ride recovered after a crash keeps its decisions — #1328', () => {
+      /**
+       * A move accepted, ridden on long enough for a flush to carry it, then
+       * the tab is gone: `dispose` leaves it as a closed tab does (#212), the
+       * checkpoint on disk and nothing in memory.
+       */
+      const crashedAfterAMove = async (): Promise<RecordingSessionId> => {
+        const { rig, scripted } = await riding({ replans: true });
+        await rideTo(rig, 62);
+        scripted.answer(proposal(EASE));
+        await flushMicrotasks(20);
+        await rideOn(rig, 12);
+        rig.controller.dispose();
+        const id = rig.sessionIds[0];
+        if (id === undefined) throw new Error('no recording was started');
+        return id;
+      };
+
+      /** Overwrite fields of one stored header behind the store's back. */
+      const plantHeader = async (id: RecordingSessionId, fields: object): Promise<void> => {
+        await harness.discard();
+        const database = await new Promise<IDBDatabase>((resolve, reject) => {
+          const request = indexedDB.open(harness.databaseName);
+          request.onsuccess = () => {
+            resolve(request.result);
+          };
+          request.onerror = () => {
+            reject(request.error ?? new Error('the database did not open'));
+          };
+        });
+        try {
+          await new Promise<void>((resolve, reject) => {
+            const transaction = database.transaction('recordingSessions', 'readwrite');
+            const rows = transaction.objectStore('recordingSessions');
+            const read = rows.get(id);
+            read.onsuccess = () => {
+              rows.put({ ...(read.result as object), ...fields });
+            };
+            transaction.oncomplete = () => {
+              resolve();
+            };
+            transaction.onerror = () => {
+              reject(transaction.error ?? new Error('the header was not rewritten'));
+            };
+          });
+        } finally {
+          database.close();
+        }
+      };
+
+      it('saved as it was recovered, with the accepted move, read back through the store', async () => {
+        const id = await crashedAfterAMove();
+        const next = benchWith({ rideSave: storeSavePort() });
+        await next.controller.refreshRecoverable();
+        expect(next.controller.getSnapshot().recoverable.map((each) => each.id)).toEqual([id]);
+        expect(await next.controller.saveRecovered(id)).toBe('saved');
+
+        const saved = await savedRide('ride-1');
+        expect(saved?.rideFacts?.replans).toEqual([
+          expect.objectContaining({
+            decision: 'accepted',
+            move: EASE,
+            reason: 'on-plan',
+            revision: 1,
+          }),
+        ]);
+        expect(saved?.rideFacts?.replansDropped).toBeUndefined();
+        next.controller.dispose();
+      });
+
+      it('continued and stopped: the move before the crash is saved with the ride', async () => {
+        const id = await crashedAfterAMove();
+        const next = benchWith({ rideSave: storeSavePort() });
+        next.bench.advance(seconds(120));
+        await next.controller.pair('trainer');
+        await next.controller.refreshRecoverable();
+        expect(await next.controller.continueRecovered(id)).toBe(true);
+        await next.controller.resume();
+        await ride(next, 3);
+        next.controller.armStop();
+        await next.controller.confirmStop();
+        expect((await savedRide('ride-1'))?.rideFacts?.replans).toEqual([
+          expect.objectContaining({ decision: 'accepted', move: EASE, revision: 1 }),
+        ]);
+        next.controller.dispose();
+      });
+
+      it('a header whose re-plan field is nonsense still recovers the ride, with no record and a count', async () => {
+        const id = await crashedAfterAMove();
+        await plantHeader(id, { replans: 'nonsense' });
+        const next = benchWith({ rideSave: storeSavePort() });
+        await next.controller.refreshRecoverable();
+        expect(next.controller.getSnapshot().recoverable.map((each) => each.id)).toEqual([id]);
+        expect(next.controller.getSnapshot().unreadableRecordings).toEqual([]);
+        expect(await next.controller.saveRecovered(id)).toBe('saved');
+
+        const saved = await savedRide('ride-1');
+        expect(saved?.rideFacts?.replans).toBeUndefined();
+        expect(saved?.rideFacts?.replansDropped).toBe(1);
+        const streams = await harness.read(async (store) =>
+          store.getStreamSet(ATHLETE_A, activityId('ride-1')),
+        );
+        expect(streams?.sampleCount).toBeGreaterThan(60);
+        next.controller.dispose();
+      });
+
+      it('discarded from the recovery offer, it is kept in Recently deleted with the move — #1431’s path', async () => {
+        const id = await crashedAfterAMove();
+        const port = storeSavePort();
+        const next = benchWith({
+          rideSave: {
+            ...port,
+            store: {
+              ...port.store,
+              moveActivityToRecentlyDeleted: async (owner, ride, at) =>
+                harness.write(async (store) =>
+                  store.moveActivityToRecentlyDeleted(owner, ride, at),
+                ),
+            },
+          },
+        });
+        await next.controller.refreshRecoverable();
+        expect(await next.controller.discardRecovered(id)).toBe(true);
+        next.controller.dispose();
+        expect(
+          await harness.write(async (store) =>
+            store.restoreRecentlyDeleted(ATHLETE_A, activityId('ride-1'), unixSeconds(0)),
+          ),
+        ).toBe('restored');
+        expect((await savedRide('ride-1'))?.rideFacts?.replans).toEqual([
+          expect.objectContaining({ decision: 'accepted', move: EASE, revision: 1 }),
+        ]);
+      });
+
+      it('holds the ride’s bound and the checkpoint’s to one number', () => {
+        expect(RIDE_REPLAN_RECORDS_LIMIT).toBe(RECORDING_REPLAN_RECORDS_LIMIT);
+      });
     });
 
     // That the record is NOT synced (the privacy policy's sentence, #1315) is
