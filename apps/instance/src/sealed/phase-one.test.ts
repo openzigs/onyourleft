@@ -331,6 +331,30 @@ describe('no plaintext twin (#1192, ADR 0047 D-7)', () => {
     });
   });
 
+  it('gives a ride’s re-plan record (#1315) no plaintext route: sealed or nothing', async () => {
+    const f = await fixture();
+    const path = '/v1/sync/items/replan-record/ride-1';
+    const body = { body: JSON.stringify([{ decision: 'refused', rule: 'P4', at: 400 }]) };
+    const before = everyRow(f.w.path);
+    for (const [method, request] of [
+      ['POST', { body }],
+      ['GET', {}],
+      ['DELETE', {}],
+    ] as const) {
+      const answer = await f.w.call(method, path, { token: f.bea.token, plain: true, ...request });
+      expect(answer.status, method).toBe(403);
+      expect((answer.body as { error: { code: string } }).error.code, method).toBe(
+        'sealed_required',
+      );
+    }
+    expect(everyRow(f.w.path) === before).toBe(true);
+    // The control: the same put, sealed, is stored and read back.
+    expect((await f.w.call('POST', path, { token: f.bea.token, body })).status).toBe(200);
+    const read = await f.w.call('GET', path, { token: f.bea.token });
+    expect(read.status).toBe(200);
+    expect((read.body as { body: string }).body).toBe(body.body);
+  });
+
   it('gives the typed workout goals (#1237) no plaintext route: sealed or nothing', async () => {
     const f = await fixture();
     const path = '/v1/sync/items/workout-goal/goals';

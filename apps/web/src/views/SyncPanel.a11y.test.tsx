@@ -76,6 +76,8 @@ const REPORT: SyncReport = {
   workoutGoalsPulled: 0,
   workoutGoalsDeletedOnInstance: 0,
   workoutGoalsHiddenOnInstance: 0,
+  replansPushed: 0,
+  replansPulled: 0,
   keysToConfirm: [OTHER_KEY],
   failures: [{ kind: 'activity', key: 'abc', reason: 'key-not-admitted' }],
 };

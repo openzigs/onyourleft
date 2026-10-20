@@ -969,12 +969,17 @@ export class ActivityStore {
    * ride's samples, and a merge would keep a fact the new reading does not
    * support.
    *
+   * With a `condition`, only over the facts it accepts, read inside this
+   * write's own transaction (#1263's rule; #1315's pulled re-plan record).
+   *
    * @returns `false` when this athlete has no such ride, rather than throwing.
+   * @throws {StoreConflictError} if `condition` refuses the facts held.
    */
   async setActivityRideFacts(
     owner: AthleteId,
     activity: ActivityId,
     facts: RideFacts,
+    condition?: WriteCondition<RideFacts>,
   ): Promise<boolean> {
     return this.#db.transaction('rw', [this.#activities], async () => {
       const row = await this.#activities.get(activity);
@@ -982,6 +987,9 @@ export class ActivityStore {
         return false;
       }
       const existing = fromPersistedActivity(row);
+      if (condition !== undefined && !condition.onlyIf(existing.rideFacts)) {
+        throw new StoreConflictError('ride facts changed since they were read');
+      }
       await this.#activities.put(toPersistedActivity({ ...existing, rideFacts: facts }));
       return true;
     });

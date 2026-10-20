@@ -1490,10 +1490,12 @@ seconds before the block ends, is cancelled and no longer listened to, and the v
 the same proposal under P5 or P2 if it arrives between two ticks. Nothing is shown for either.
 
 ⚠️ **What this does not give.**
-- **P9's record is not synced.** It is on the device and in the export. A ride's facts
-  (`RideFacts`) are synced by nothing today: a ride goes to an instance as its activity file, which
-  carries none of them. Syncing the record needs an item kind of its own on the instance:
-  [#1315](https://github.com/openzigs/onyourleft/issues/1315).
+- **P9's record is synced as an item of its own, and the ride's other facts are not.** A ride goes
+  to an instance as its activity file, which carries none of `RideFacts`. Since
+  [#1315](https://github.com/openzigs/onyourleft/issues/1315) the record goes as an item of kind
+  `replan-record` keyed by the ride's id (`instance/sync.ts` rule 11), and a pulled body is read
+  whole by `readReplanRecord` before it is written. `workoutFinished`, `ghostRaced`, races and
+  workout blocks are still synced by nothing.
 - **P9's record does not survive a recovery.** It is in memory until the ride saves; a ride
   recovered after a crash is saved without it:
   [#1328](https://github.com/openzigs/onyourleft/issues/1328).

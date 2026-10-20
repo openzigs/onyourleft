@@ -231,6 +231,25 @@
  *      body writes nothing and is reported `not-workout-goals`.
  *    Goals that cannot be read here (a hand-edited row) send, delete and bring
  *    back nothing that sync, and are reported `not-read`.
+ * 11. **A ride's re-plan record** (#1315, ADR 0048 D-6 P9 and D-10: *"kept
+ *    with the ride on the device and synced with it"*): every decision kept
+ *    with a ride on this device (`packages/store` §`RideFacts.replans`), as
+ *    ONE item of kind `replan-record`, an item of its ride keyed by the
+ *    ride's id like a write-up, its body the list of records as JSON. The
+ *    record is written once, when the ride is saved, and never edited, so
+ *    the rules are rule 5's: the same is remembered; held here and changed
+ *    here, never synced, or gone from the instance, it is pushed; unchanged
+ *    here since the base and moved there, or not here at all, it is pulled.
+ *    ⚠️ **A pulled body is read whole, BEFORE anything is written**: a list
+ *    of at most {@link MAXIMUM_PULLED_REPLANS} entries, each read by
+ *    `@onyourleft/domain` §`readReplanRecord` (a move and a reason from two
+ *    closed lists, and no text). One entry that does not read, or a body
+ *    that is not a list, writes nothing and remembers nothing, and is
+ *    reported `not-replan-records`, so the next sync asks again. The write
+ *    is the ride's facts with the records in them, made only if the ride
+ *    still holds the records the sync read ({@link CHANGED_HERE}). Deleted on
+ *    the instance with its ride, and never sent for a hidden one (rule 3).
+ *    The device's copy is never deleted by a sync (ADR 0036 D-3 (b)).
  *
  * ⚠️ **A pull of rules 8, 9 and 10 writes only over what the sync read**
  * (#1263). It waits on the instance between its read here and its write, and
@@ -251,6 +270,7 @@
 import {
   contentHashOf,
   encodeWorkoutFile,
+  readReplanRecord,
   readWorkoutGoals,
   parseContentHash,
   signActivityRecord,
@@ -261,6 +281,7 @@ import {
   type Sha256,
   type SignatureVerifier,
   type SigningKey,
+  type ReplanRecord,
   type UnixSeconds,
   type WorkoutGoals,
 } from '@onyourleft/domain';
@@ -344,7 +365,7 @@ export function sealedSyncTransport(instance: SealedInstance, token: string): Sy
   };
 }
 
-/** What sync needs of the local store: the transfer screen's port, and sixteen writes and reads. */
+/** What sync needs of the local store: the transfer screen's port, and its writes and reads. */
 export type SyncStore = TransferStore &
   Pick<
     ActivityStore,
@@ -367,6 +388,7 @@ export type SyncStore = TransferStore &
     | 'putWorkout'
     | 'getWorkoutGoals'
     | 'putWorkoutGoals'
+    | 'setActivityRideFacts'
   >;
 
 export interface SyncDependencies {
@@ -561,6 +583,10 @@ export interface SyncReport {
    * holds unchanged (#1237): KEPT here, and not sent back until changed here.
    */
   readonly workoutGoalsHiddenOnInstance: number;
+  /** Rides whose re-plan record was sent to the instance (#1315). */
+  readonly replansPushed: number;
+  /** Rides whose re-plan record was brought back from the instance (#1315). */
+  readonly replansPulled: number;
   /**
    * Keys that signed a record the instance served and this device refused as
    * `key-not-admitted` (#898): listed by the instance as the athlete's, and
@@ -675,6 +701,8 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
   let workoutGoalsPulled = 0;
   let workoutGoalsDeletedOnInstance = 0;
   let workoutGoalsHiddenOnInstance = 0;
+  let replansPushed = 0;
+  let replansPulled = 0;
 
   const manifest = await readManifest(sealed);
   const remote = new Map(manifest.map((entry) => [keyOf(entry.kind, entry.key), entry]));
@@ -708,7 +736,7 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
   ): Promise<void> => {
     for (const [kind, key] of [
       ...(keepActivity ? [] : [['activity', content] as const]),
-      ...[...ITEM_KINDS, 'note' as const].map((each) => [each, activity] as const),
+      ...[...ITEM_KINDS, 'note' as const, REPLAN_KIND].map((each) => [each, activity] as const),
       ['race-consent', activity],
     ] as const) {
       if (base.delete(keyOf(kind, key))) await store.deleteSyncBase(athleteId, kind, key);
@@ -887,6 +915,19 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
       } else {
         failures.push({ kind, key: id, reason: codeOf(answer.body) });
       }
+    }
+  }
+
+  // --- Each ride's re-plan record, three ways (#1315) ------------------------
+  // Rule 11: rule 5's way, and a pulled body read whole before it is written.
+  for (const id of rides) {
+    // A hidden ride's record would put something of it back (#898).
+    if (hidden.has(id)) continue;
+    const outcome = await syncReplans(id);
+    if (outcome === 'pushed') replansPushed += 1;
+    else if (outcome === 'pulled') replansPulled += 1;
+    else if (outcome !== 'same' && outcome !== CHANGED_HERE) {
+      failures.push({ kind: REPLAN_KIND, key: id, reason: outcome });
     }
   }
 
@@ -1134,6 +1175,8 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
     workoutGoalsPulled,
     workoutGoalsDeletedOnInstance,
     workoutGoalsHiddenOnInstance,
+    replansPushed,
+    replansPulled,
     keysToConfirm: [...keysToConfirm].sort(),
     failures,
   };
@@ -1540,6 +1583,98 @@ export async function syncWithInstance(dependencies: SyncDependencies): Promise<
     return 'pulled';
   }
 
+  /**
+   * One ride's re-plan record, both ways — rule 11. Answers `same`,
+   * `pushed`, `pulled`, {@link CHANGED_HERE}, or why not.
+   */
+  async function syncReplans(id: ActivityId): Promise<string> {
+    const entry = remote.get(keyOf(REPLAN_KIND, id));
+    const remoteDigest = entry === undefined || entry.deleted ? null : entry.digest;
+    const local = await localReplans(id);
+    if (local === undefined) {
+      // None here: another device's, or none anywhere.
+      return remoteDigest === null ? 'same' : pullReplans(id, undefined, remoteDigest);
+    }
+    const body = JSON.stringify(local);
+    const localDigest = await hex(utf8(body), sha256);
+    if (remoteDigest === localDigest) {
+      await remember({ kind: REPLAN_KIND, key: id, activityId: id, localDigest, remoteDigest });
+      return 'same';
+    }
+    const known = base.get(keyOf(REPLAN_KIND, id));
+    if (known !== undefined && known.localDigest === localDigest && remoteDigest !== null) {
+      // Unchanged here since the last sync: if the instance's copy moved,
+      // another device replaced it, so it is taken.
+      return remoteDigest === known.remoteDigest ? 'same' : pullReplans(id, body, remoteDigest);
+    }
+    // Changed here, never synced, or gone from the instance: this device's
+    // copy is the one that counts (ADR 0036 D-3).
+    const answer = await sealed.json(
+      'POST',
+      `/v1/sync/items/${REPLAN_KIND}/${encodeURIComponent(id)}`,
+      { body },
+    );
+    if (answer.status !== 200) return codeOf(answer.body);
+    await remember({
+      kind: REPLAN_KIND,
+      key: id,
+      activityId: id,
+      localDigest,
+      remoteDigest: localDigest,
+    });
+    return 'pushed';
+  }
+
+  /** A ride's re-plan records as this device holds them, or `undefined` for none. */
+  async function localReplans(id: ActivityId): Promise<readonly ReplanRecord[] | undefined> {
+    const replans = (await store.getActivity(athleteId, id))?.rideFacts?.replans;
+    return replansBody(replans) === undefined ? undefined : replans;
+  }
+
+  /**
+   * One ride's re-plan record from the instance, read WHOLE before anything
+   * is written — rule 11. `read` is the body this sync read here (`undefined`
+   * for none): the write is made only if the ride still holds it.
+   */
+  async function pullReplans(
+    id: ActivityId,
+    read: string | undefined,
+    remoteDigest: string,
+  ): Promise<string> {
+    const answer = await sealed.json(
+      'GET',
+      `/v1/sync/items/${REPLAN_KIND}/${encodeURIComponent(id)}`,
+    );
+    if (answer.status !== 200) return codeOf(answer.body);
+    const records = replanRecordsFrom((answer.body as { body?: unknown } | null)?.body);
+    if (records === undefined) return 'not-replan-records';
+    // After the wait on the instance: the ride's facts as they are now, with
+    // the records in them — written only over these facts, and only if they
+    // still hold what the sync read before the wait (#1263's rule), checked
+    // inside the write's own transaction.
+    const ride = await store.getActivity(athleteId, id);
+    if (ride === undefined) return 'not-stored';
+    const facts = JSON.stringify(ride.rideFacts);
+    try {
+      const written = await store.setActivityRideFacts(
+        athleteId,
+        id,
+        { ...ride.rideFacts, replans: records },
+        {
+          onlyIf: (held) => JSON.stringify(held) === facts && replansBody(held?.replans) === read,
+        },
+      );
+      if (!written) return 'not-stored';
+    } catch (error) {
+      return error instanceof StoreConflictError ? CHANGED_HERE : 'not-stored';
+    }
+    const kept = await localReplans(id);
+    if (kept === undefined) return 'not-stored';
+    const localDigest = await hex(utf8(JSON.stringify(kept)), sha256);
+    await remember({ kind: REPLAN_KIND, key: id, activityId: id, localDigest, remoteDigest });
+    return 'pulled';
+  }
+
   /** The base for an item just pulled: the copy as this device now reads it. */
   async function rememberItem(kind: ItemKind, id: ActivityId, remoteDigest: string): Promise<void> {
     const kept = await localItem(store, athleteId, kind, id);
@@ -1608,9 +1743,48 @@ const WORKOUT_GOAL_KIND = 'workout-goal';
 /** The one key the typed workout goals are kept under: one set per athlete. */
 const WORKOUT_GOALS_KEY = 'goals';
 
+/** A ride's re-plan record's item kind on the instance, and its sync base kind here (#1315). */
+const REPLAN_KIND = 'replan-record' as const;
+
+/**
+ * The most re-plan records a pulled body may hold: the ride controller's own
+ * bound (`ride/controller.ts` §`RIDE_REPLAN_RECORDS_LIMIT`). A longer list is
+ * not one this program wrote, and is refused whole.
+ */
+export const MAXIMUM_PULLED_REPLANS = 200;
+
+/** A ride's re-plan records as the item's body, or `undefined` for none: none is no item. */
+const replansBody = (replans: readonly ReplanRecord[] | undefined): string | undefined =>
+  replans === undefined || replans.length === 0 ? undefined : JSON.stringify(replans);
+
+/**
+ * A pulled re-plan body, read WHOLE — rule 11: a JSON list of at most
+ * {@link MAXIMUM_PULLED_REPLANS} records, every one read by
+ * `readReplanRecord` — or `undefined`, and nothing of it is kept.
+ */
+function replanRecordsFrom(body: unknown): readonly ReplanRecord[] | undefined {
+  if (typeof body !== 'string') return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return undefined;
+  }
+  if (!Array.isArray(parsed) || parsed.length === 0 || parsed.length > MAXIMUM_PULLED_REPLANS) {
+    return undefined;
+  }
+  const records: ReplanRecord[] = [];
+  for (const each of parsed as unknown[]) {
+    const record = readReplanRecord(each);
+    if (record === undefined) return undefined;
+    records.push(record);
+  }
+  return records;
+}
+
 /**
  * Delete a ride on the instance: its write-up, side-camera report, summary
- * (#835) and note (#836), then the ride (whose file the instance collects unless another rider sent the same
+ * (#835), note (#836) and re-plan record (#1315), then the ride (whose file the instance collects unless another rider sent the same
  * bytes). `not_found` is success — somebody got there first. Answers `deleted`
  * or the instance's error code.
  */
@@ -1620,7 +1794,7 @@ async function deleteRideOnInstance(
   activity: string,
 ): Promise<string> {
   for (const [kind, key] of [
-    ...[...ITEM_KINDS, SUMMARY_KIND, 'note'].map((each) => [each, activity] as const),
+    ...[...ITEM_KINDS, SUMMARY_KIND, 'note', REPLAN_KIND].map((each) => [each, activity] as const),
     ['activity', content] as const,
   ]) {
     const answer = await sealed.json('DELETE', `/v1/sync/items/${kind}/${encodeURIComponent(key)}`);

@@ -433,7 +433,17 @@ export type SyncKind =
    * or a re-plan. Synced sealed only (ADR 0047), like every item, and not
    * indexed for history. The device copy is canonical (ADR 0036 D-3).
    */
-  | 'workout-goal';
+  | 'workout-goal'
+  /**
+   * A ride's re-plan decisions (#1315, ADR 0048 D-6 P9 and D-10): an item of
+   * its ride, keyed by the ride's activity id like a write-up, its body the
+   * list of records as JSON (`@onyourleft/domain` §`readReplanRecord`, which
+   * the device reads every entry of before it writes a pulled one). A move
+   * and a reason from two closed lists, and no text. Synced sealed only
+   * (ADR 0047), never indexed for history and read by no analysis tool. The
+   * device copy is canonical (ADR 0036 D-3); deleted with its ride.
+   */
+  | 'replan-record';
 
 /** One thing an athlete synced, or its tombstone (#776). Added by migration 0009. */
 export interface SyncItemTable {
