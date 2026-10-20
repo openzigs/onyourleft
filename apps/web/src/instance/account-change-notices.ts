@@ -6,11 +6,11 @@
  * revoke. Pure, and every sentence is here.
  *
  * ⚠️ **The wording is a DRAFT for the owner's approval** (ADR 0047 D-14 Q6),
- * proposed in #1193's pull request. Nothing renders it yet: the call that
- * reads `GET /v1/auth/account-changes` goes through the sealed client that
- * #1192 switches the app to, and the Devices screen that shows these notices
- * is built on that, in #1208. Change a sentence here and in the pull
- * request that approves it, never only in one.
+ * proposed in #1193's pull request; #1208's adds the self-revoke sentence.
+ * The Instance screen's device list renders it (`views/InstanceView.tsx`
+ * §`AccountNotices`), from `InstancePort.accountChanges`, which reads
+ * `GET /v1/auth/account-changes` sealed. Change a sentence here and in the
+ * pull request that approves it, never only in one.
  *
  * A key is named the way a rider can recognise it — by the day it was added
  * ("the key added on 12 September"), or as "this device" — and never by its
@@ -109,6 +109,11 @@ export function noticeText(
     case 'link_code_minted':
       return by('made a link code');
     case 'key_revoked':
+      // A key that revoked itself (#1208): there is nothing left to revoke, so
+      // the rider is not asked to revoke it.
+      if (entry.subjectKey !== null && entry.subjectKey === entry.actorKey) {
+        return `On ${when} ${revokedKeyName(entry, day)} revoked itself.`;
+      }
       return by(`revoked ${revokedKeyName(entry, day)}`);
     case 'key_added':
       switch (entry.via) {

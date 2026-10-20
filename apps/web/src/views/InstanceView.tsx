@@ -8,16 +8,17 @@ import { Button } from '../design/Button';
 import { KeptVisible } from '../design/KeptVisible';
 import { StatusMessage } from '../design/StatusMessage';
 import type {
+  AccountChangesOutcome,
   DevicesOutcome,
-  InstanceDevice,
   InstancePort,
   InstanceState,
 } from '../instance/instance-port';
 import type { ModerationPort, ModerationStanding } from '../instance/moderation-port';
-import { keyFingerprint, type SyncPort } from '../instance/sync-port';
+import type { SyncPort } from '../instance/sync-port';
 import { HostedServicePanel } from '../ride-analysis/HostedServicePanel';
 import type { HostedSettingsPort } from '../ride-analysis/hosted-settings-port';
 import { hrefFor, routeById } from '../shell/routes';
+import { InstanceDevices } from './InstanceDevices';
 import { CARD_FIELD_HINT, InstanceKeys } from './InstanceKeys';
 import { SyncPanel } from './SyncPanel';
 
@@ -122,11 +123,6 @@ export const RECOVERY_CODES_LEAD =
   'Write these recovery codes down and keep them somewhere safe. Each one adds a new device to ' +
   'your account once, if you ever lose every device you have. They are shown only now.';
 
-/** A day, in UTC, so the screen says the same thing wherever it is read. */
-function day(unixSeconds: number): string {
-  return new Date(unixSeconds * 1000).toISOString().slice(0, 10);
-}
-
 function Receives(): JSX.Element {
   return (
     <KeptVisible>
@@ -140,25 +136,6 @@ function Receives(): JSX.Element {
       <p>{PUBLIC_ROOMS_ADULTS_ONLY}</p>
       <p>{VOICE_CHAT_IS_DISCORD}</p>
     </KeptVisible>
-  );
-}
-
-function DeviceList({ outcome }: { readonly outcome: DevicesOutcome | undefined }): JSX.Element {
-  if (outcome === undefined) return <p className="oyl-muted">Reading your devices…</p>;
-  if (outcome.kind === 'unavailable') {
-    return <StatusMessage tone="warning">{outcome.text}</StatusMessage>;
-  }
-  return (
-    <ul className="oyl-instance__devices">
-      {outcome.devices.map((device: InstanceDevice) => (
-        <li key={device.publicKey}>
-          <strong>{device.thisDevice ? 'This device' : 'Another device'}</strong>{' '}
-          <code>{keyFingerprint(device.publicKey)}</code>. Added {day(device.addedAt)}; last used{' '}
-          {device.lastUsedAt === null ? 'never' : day(device.lastUsedAt)}
-          {device.revokedAt === null ? '.' : `; removed ${day(device.revokedAt)}.`}
-        </li>
-      ))}
-    </ul>
   );
 }
 
@@ -221,6 +198,9 @@ export function InstanceView({
   const [state, setState] = useState<InstanceState | undefined>(undefined);
   const [standing, setStanding] = useState<ModerationStanding | undefined>(undefined);
   const [devices, setDevices] = useState<DevicesOutcome | undefined>(undefined);
+  const [changes, setChanges] = useState<AccountChangesOutcome | undefined>(undefined);
+  /** The key this screen revoked (#1208): the list is shown marked after it. */
+  const [revoked, setRevoked] = useState<string | undefined>(undefined);
   const [address, setAddress] = useState('');
   const [name, setName] = useState('');
   const [card, setCard] = useState('');
@@ -242,6 +222,8 @@ export function InstanceView({
     if (now.kind === 'connected') {
       setDevices(undefined);
       setDevices(await port.devices());
+      // #1208: every notice, at each sealed read of this screen.
+      setChanges(await port.accountChanges());
       if (moderation !== undefined) setStanding(await moderation.standing());
     }
   }, [port, moderation]);
@@ -293,6 +275,8 @@ export function InstanceView({
     setBusy(false);
     setRecoveryCodes(undefined);
     setDevices(undefined);
+    setChanges(undefined);
+    setRevoked(undefined);
     await read();
   }
 
@@ -523,7 +507,19 @@ export function InstanceView({
       {state.kind === 'connected' ? (
         <section className="oyl-panel" aria-labelledby="oyl-instance-devices">
           <h2 id="oyl-instance-devices">Your devices on this instance</h2>
-          <DeviceList outcome={devices} />
+          <InstanceDevices
+            port={port}
+            devices={devices}
+            changes={changes}
+            revoked={revoked}
+            onRevoked={(publicKey) => {
+              setRevoked(publicKey);
+              void read();
+            }}
+            onAcknowledged={() => {
+              void port.accountChanges().then(setChanges);
+            }}
+          />
         </section>
       ) : null}
 

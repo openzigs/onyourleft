@@ -339,7 +339,7 @@ async function world(options?: Parameters<IdentityTesting['startIdentityInstance
 }
 
 describe('a copy of the app a website served seals nothing (#1192, ADR 0047 D-11)', () => {
-  it('lists no devices, mints no link code and reads no moderators’ page — and sends nothing for them', async () => {
+  it('lists no devices, mints no link code, reads no account-change log, revokes nothing and reads no moderators’ page — and sends nothing for them', async () => {
     const w = await world();
     const send = wire(w);
     const card = (await w.instanceKeys.show()).card;
@@ -352,13 +352,27 @@ describe('a copy of the app a website served seals nothing (#1192, ADR 0047 D-11
     send.mockClear();
     expect(await website.port.devices()).toEqual({ kind: 'unavailable', text: WEB_BUILD_TEXT });
     expect(await website.port.linkCode()).toEqual({ kind: 'unavailable', text: WEB_BUILD_TEXT });
+    // #1208: the account-change log, its acknowledgement and a revoke.
+    expect(await website.port.accountChanges()).toEqual({
+      kind: 'unavailable',
+      text: WEB_BUILD_TEXT,
+    });
+    expect(await website.port.acknowledgeAccountChanges(1)).toEqual({
+      kind: 'unavailable',
+      text: WEB_BUILD_TEXT,
+    });
+    expect(await website.port.revokeDevice('b2'.repeat(32))).toEqual({
+      kind: 'unavailable',
+      text: WEB_BUILD_TEXT,
+    });
     expect(await createModerationPort(website.dependencies).mintInvite('A friend')).toEqual({
       kind: 'refused',
       text: WEB_BUILD_TEXT,
     });
     expect(paths(send).filter((path) => /sealed|instance\/keys/.test(path))).toEqual([]);
-    // The control: the same sign-in, opened locally, lists them.
+    // The control: the same sign-in, opened locally, lists them and reads the log.
     expect((await local.port.devices()).kind).toBe('listed');
+    expect((await local.port.accountChanges()).kind).toBe('read');
   });
 
   it('links no device, and registers no new key, saying why', async () => {

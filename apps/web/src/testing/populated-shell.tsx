@@ -226,7 +226,10 @@ export const POPULATED: Record<RouteId, PopulatedExpectation> = {
     reason: 'no pairing is ever made, so it shows its before-pairing state in both walks',
   },
   // #777/#773: connected, the instance's devices are listed; not, the form.
-  instance: { kind: 'fixture', marker: '.oyl-main .oyl-instance__devices li' },
+  // #1208: the marker is the account-change notices, which are drawn only
+  // beside a listed device list — so every walk over this fixture (axe, the
+  // sentence record, the reflow walk) is proven to reach the notices too.
+  instance: { kind: 'fixture', marker: '.oyl-main .oyl-instance__notices li' },
   // #955: a moderator's queues; empty, an account that moderates nothing.
   moderation: { kind: 'fixture', marker: '.oyl-main .oyl-moderation__pending li' },
   more: { kind: 'none', reason: 'static: a list of the More pages (#1429)' },

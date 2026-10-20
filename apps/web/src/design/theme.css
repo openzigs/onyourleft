@@ -5382,10 +5382,12 @@ select.oyl-input {
  * The Connect screen (#777). An instance's name, its address and a rider's
  * display name all come from the instance, and any of them may be one long
  * word: each breaks where it must rather than widen a 320 px page
- * (`reflow.browser.spec.ts`).
+ * (`reflow.browser.spec.ts`). So may a recovery address an account-change
+ * notice names (#1208).
  */
 .oyl-instance__facts dd,
-.oyl-instance__devices li {
+.oyl-instance__devices li,
+.oyl-instance__notices li {
   overflow-wrap: anywhere;
 }
 

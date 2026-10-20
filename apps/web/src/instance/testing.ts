@@ -28,7 +28,9 @@ export const NO_CARD_DEVICE = {
   signingKey: (): Promise<never> =>
     Promise.reject(new Error('a device with no card signs no sealed request')),
 } as const;
+import type { AccountChangeEntry } from './account-change-notices';
 import type {
+  AccountChangesOutcome,
   CardOutcome,
   ConnectOutcome,
   DevicesOutcome,
@@ -72,6 +74,10 @@ export interface ScriptedInstance {
     termsVersion: string | null;
     /** The terms version this device marked read, if any (#909). */
     termsRead: string | undefined;
+    /** The account-change log (#1208), oldest first. */
+    changes: readonly AccountChangeEntry[];
+    /** This device's mark in it (#1208): the notices are the other keys' entries after it. */
+    acknowledgedThrough: number;
   };
 }
 
@@ -92,10 +98,63 @@ export const SCRIPTED_DEVICES: readonly InstanceDevice[] = [
   },
   {
     publicKey: 'b2'.repeat(32),
-    addedAt: 1_790_100_000,
+    // Noon UTC, so the day a notice names it by is the same in every time zone (#1208).
+    addedAt: 1_790_078_400,
     lastUsedAt: null,
     revokedAt: null,
     thisDevice: false,
+  },
+];
+
+const THIS_DEVICE_KEY = 'a1'.repeat(32);
+const OTHER_DEVICE_KEY = 'b2'.repeat(32);
+
+/**
+ * The account-change log behind {@link SCRIPTED_DEVICES} (#1208): this device
+ * linked the other, and the other then gave a recovery address and made a
+ * link code — two notices on this device until it acknowledges them.
+ */
+export const SCRIPTED_ACCOUNT_CHANGES: readonly AccountChangeEntry[] = [
+  {
+    id: 1,
+    at: 1_790_050_000,
+    kind: 'link_code_minted',
+    actorKey: THIS_DEVICE_KEY,
+    subjectKey: null,
+    subjectAddedAt: null,
+    via: null,
+    address: null,
+  },
+  {
+    id: 2,
+    at: 1_790_078_400,
+    kind: 'key_added',
+    actorKey: THIS_DEVICE_KEY,
+    subjectKey: OTHER_DEVICE_KEY,
+    subjectAddedAt: 1_790_078_400,
+    via: 'link_code',
+    address: null,
+  },
+  {
+    id: 3,
+    // Noon UTC on 23 and 24 September: the same day wherever the record is read.
+    at: 1_790_164_800,
+    kind: 'address_added',
+    actorKey: OTHER_DEVICE_KEY,
+    subjectKey: null,
+    subjectAddedAt: null,
+    via: null,
+    address: 'rider@example.org',
+  },
+  {
+    id: 4,
+    at: 1_790_251_200,
+    kind: 'link_code_minted',
+    actorKey: OTHER_DEVICE_KEY,
+    subjectKey: null,
+    subjectAddedAt: null,
+    via: null,
+    address: null,
   },
 ];
 
@@ -128,6 +187,8 @@ export function scriptedInstance(options: ScriptedInstanceOptions = {}): Scripte
       pin: options.pin,
       termsVersion: null,
       termsRead: undefined,
+      changes: SCRIPTED_ACCOUNT_CHANGES,
+      acknowledgedThrough: 0,
     },
     port: {
       current: () => {
@@ -225,6 +286,60 @@ export function scriptedInstance(options: ScriptedInstanceOptions = {}): Scripte
           ? { kind: 'listed', devices: scripted.held.devices }
           : { kind: 'unavailable', text: 'not connected' };
         return Promise.resolve(answer);
+      },
+      accountChanges: () => {
+        calls.push('accountChanges');
+        const { held } = scripted;
+        const me = held.devices.find((each) => each.thisDevice)?.publicKey;
+        const answer: AccountChangesOutcome = held.connected
+          ? {
+              kind: 'read',
+              changes: held.changes,
+              notices: held.changes.filter(
+                (entry) => entry.id > held.acknowledgedThrough && entry.actorKey !== me,
+              ),
+              acknowledgedThrough: held.acknowledgedThrough,
+            }
+          : { kind: 'unavailable', text: 'not connected' };
+        return Promise.resolve(answer);
+      },
+      acknowledgeAccountChanges: (through) => {
+        calls.push(`acknowledgeAccountChanges ${String(through)}`);
+        const { held } = scripted;
+        // As the instance does: clamped to the newest entry, never moved back.
+        const newest = held.changes.reduce((most, entry) => Math.max(most, entry.id), 0);
+        held.acknowledgedThrough = Math.max(held.acknowledgedThrough, Math.min(through, newest));
+        return Promise.resolve({
+          kind: 'acknowledged',
+          acknowledgedThrough: held.acknowledgedThrough,
+        } as const);
+      },
+      revokeDevice: (publicKey) => {
+        calls.push(`revokeDevice ${publicKey}`);
+        const { held } = scripted;
+        const me = held.devices.find((each) => each.thisDevice)?.publicKey ?? '';
+        const target = held.devices.find((each) => each.publicKey === publicKey);
+        if (target === undefined || target.revokedAt !== null) {
+          return Promise.resolve({ kind: 'unavailable', text: 'not revoked' } as const);
+        }
+        const at = 1_790_600_000;
+        held.devices = held.devices.map((each) =>
+          each.publicKey === publicKey ? { ...each, revokedAt: at } : each,
+        );
+        held.changes = [
+          ...held.changes,
+          {
+            id: held.changes.length + 1,
+            at,
+            kind: 'key_revoked',
+            actorKey: me,
+            subjectKey: publicKey,
+            subjectAddedAt: target.addedAt,
+            via: null,
+            address: null,
+          },
+        ];
+        return Promise.resolve({ kind: 'revoked' } as const);
       },
       markTermsRead: (version) => {
         calls.push(`markTermsRead ${version}`);
