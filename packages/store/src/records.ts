@@ -42,6 +42,7 @@ import type {
   Watts,
   GeographicPosition,
   Workout,
+  WorkoutBlock,
   WorkoutGoals,
 } from '@onyourleft/domain';
 
@@ -467,7 +468,71 @@ export interface RideFacts {
    * and on the way out, as for {@link replans}. @see RoomRaceFact
    */
   readonly races?: readonly RoomRaceFact[];
+  /**
+   * The blocks of each structured workout ridden on this ride, in the order
+   * they came up — #1319. One entry per block of the plan, including the ones
+   * never reached, so the ride's page can say what was ridden of each.
+   * Known only while riding, like {@link workoutFinished}. Absent for a ride
+   * with no workout under a recording.
+   *
+   * ⚠️ **A list that does not read is dropped whole, never the ride**, as a
+   * recording's laps are: a block is numbered by where it stands, so a list
+   * with one entry taken out would call the third block the second.
+   * @see WorkoutBlockFact
+   */
+  readonly workoutBlocks?: readonly WorkoutBlockFact[];
 }
+
+/**
+ * What became of one block of a structured workout on a ride — #1319.
+ *
+ * - `ridden`: the block was ridden from its start to its end.
+ * - `cut-short`: the block was begun and not finished — the workout was ended
+ *   in it, the recording ended or died in it, or the recording began after it
+ *   had started. Its figures are over what was ridden of it.
+ * - `skipped`: the workout ended before this block came up.
+ */
+export type WorkoutBlockOutcome = 'ridden' | 'cut-short' | 'skipped';
+
+/** The outcomes, in one list for a reader that checks one. */
+export const WORKOUT_BLOCK_OUTCOMES: readonly WorkoutBlockOutcome[] = [
+  'ridden',
+  'cut-short',
+  'skipped',
+];
+
+/**
+ * One block of a workout as the ride's page lists it — #1319.
+ *
+ * The block itself is kept as the plan said it when it came up (a re-plan
+ * changes the blocks after the one being ridden, never that one), so its
+ * target is said by `@onyourleft/domain` §`workoutBlockText` from the block,
+ * a share of threshold and never watts.
+ *
+ * ⚠️ **The figures are worked out once, when the ride is saved**, from the
+ * samples the save writes and by the rule a lap's are (`apps/web`
+ * §`recording/laps.ts`): the mean and the highest of the readings that exist
+ * between the block's two marks. Each is absent where nothing measured it.
+ */
+export type WorkoutBlockFact =
+  | {
+      readonly outcome: 'ridden' | 'cut-short';
+      readonly block: WorkoutBlock;
+      /**
+       * The stall rescue eased the trainer at some point in the block (#441).
+       * Present only as `true`: such a block is not a block ridden badly.
+       */
+      readonly eased?: true;
+      readonly startedAt: UnixSeconds;
+      readonly elapsedTime: Seconds;
+      readonly movingTime: Seconds;
+      readonly averagePower?: Watts;
+      readonly maxPower?: Watts;
+      readonly averageHeartRate?: BeatsPerMinute;
+      readonly maxHeartRate?: BeatsPerMinute;
+      readonly averageCadence?: RevolutionsPerMinute;
+    }
+  | { readonly outcome: 'skipped'; readonly block: WorkoutBlock };
 
 /**
  * A race, as its room told the device that rode it — #785. The room's own

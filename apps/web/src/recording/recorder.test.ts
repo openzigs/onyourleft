@@ -46,6 +46,7 @@ import {
   athleteId,
   recordingSessionId,
   type RecordedCourseLap,
+  type RecordedWorkoutBlock,
   type RecordingSessionId,
 } from '@onyourleft/store';
 import {
@@ -594,6 +595,43 @@ describe('#1419 — a lap that ends closes the lap in progress', () => {
     });
     expect(recovered?.courseLaps).toStrictEqual([courseLap(0, 10)]);
     expect(recovered).not.toHaveProperty('openCourseLap');
+  });
+});
+
+describe('#1319 — the workout blocks go out on the header', () => {
+  const block = { kind: 'free-ride', seconds: seconds(60) } as const;
+  const ridden = (from: number, to: number): RecordedWorkoutBlock => ({
+    outcome: 'cut-short',
+    block,
+    from: { at: at(from), movingTime: seconds(from) },
+    to: { at: at(to), movingTime: seconds(to) },
+  });
+
+  it('are on disk after a flush, and a recorder rebuilt from it starts with them', async () => {
+    const recorder = newRecorder();
+    await recorder.start(at(0));
+    for (let t = 0; t < 10; t += 1) {
+      recorder.observeReading(powerReading(t, 200));
+      await recorder.tick(at(t));
+    }
+    // ⚠️ Run on to a mark AHEAD of the instant the header is written: the
+    // session's clock can be, and a header stamped before its last block's
+    // end would have the store drop the list.
+    recorder.noteWorkoutBlocks([ridden(2, 5), { outcome: 'skipped', block }, ridden(5, 13)]);
+    await recorder.stop(at(10));
+    await harness.discard();
+
+    const rebuilt = await recoverRecorder({
+      store: harnessStore(),
+      athleteId: ATHLETE_A,
+      sessionId: recorder.sessionId,
+    });
+    expect(rebuilt?.recovered.workoutBlocks).toStrictEqual([
+      ridden(2, 5),
+      { outcome: 'skipped', block },
+      ridden(5, 13),
+    ]);
+    expect(rebuilt?.recorder.workoutBlocks).toStrictEqual(rebuilt?.recovered.workoutBlocks);
   });
 });
 

@@ -20,6 +20,7 @@ import {
   metres,
   revolutionsPerMinute,
   seconds,
+  thresholdShare,
   unixSeconds,
   watts,
 } from '@onyourleft/domain';
@@ -712,6 +713,45 @@ describe('the lap table', () => {
     mounted = await open(port);
     expect(document.body.textContent).toContain('no laps recorded');
     expect(queryAll(document, 'table.oyl-table')).toHaveLength(0);
+  });
+});
+
+describe('the workout-block table — #1319', () => {
+  const headings = () =>
+    queryAll<HTMLElement>(document, 'h3').map((heading) => heading.textContent ?? '');
+
+  it('lists a ride’s workout blocks under their own heading, after the laps', async () => {
+    const port = stubDetail(ATHLETE, {
+      activity: stubActivity({
+        rideFacts: {
+          workoutBlocks: [
+            {
+              outcome: 'cut-short',
+              block: { kind: 'steady', seconds: seconds(600), target: thresholdShare(0.6) },
+              startedAt: unixSeconds(1_760_000_000),
+              elapsedTime: seconds(300),
+              movingTime: seconds(300),
+            },
+            { outcome: 'skipped', block: { kind: 'free-ride', seconds: seconds(300) } },
+          ],
+        },
+      }),
+      channels: { power: powerSeries(60) },
+      laps: [stubLap(0)],
+    });
+    mounted = await open(port);
+    const shown = headings();
+    expect(shown.indexOf('Workout blocks')).toBeGreaterThan(shown.indexOf('Laps'));
+    const table = queryAll<HTMLElement>(document, 'table').find((each) =>
+      each.querySelector('caption')?.textContent?.startsWith('Workout blocks'),
+    );
+    const rows = queryAll<HTMLElement>(table!, 'tbody th').map((cell) => cell.textContent);
+    expect(rows).toEqual(['1 · Cut short', '2 · Skipped']);
+  });
+
+  it('shows nothing of it for a ride with no workout', async () => {
+    mounted = await open(indoorRide());
+    expect(headings()).not.toContain('Workout blocks');
   });
 });
 

@@ -1422,6 +1422,31 @@ describe('exporting the side camera’s reports (#388)', () => {
         entries(files).find((each) => each['activityId'] === ridden.id)?.['rideFacts'],
       ).toStrictEqual({ workoutFinished: true, races });
     });
+
+    it('carries a ride’s workout blocks, each with its own keys — #1319', async () => {
+      const { written } = await seedLibrary(1);
+      const ridden = written[0]?.ride;
+      if (ridden === undefined) throw new Error('no ride');
+      const workoutBlocks = [
+        {
+          outcome: 'cut-short',
+          eased: true,
+          block: { kind: 'steady', seconds: seconds(600), target: 0.6 },
+          startedAt: 1_700_000_000,
+          elapsedTime: 300,
+          movingTime: 290,
+          averagePower: 150,
+        },
+        { outcome: 'skipped', block: { kind: 'free-ride', seconds: seconds(300) } },
+      ] as const;
+      await harness.write(async (store) =>
+        store.setActivityRideFacts(ATHLETE_A, ridden.id, { workoutBlocks } as never),
+      );
+      const { files } = await runExport();
+      expect(
+        entries(files).find((each) => each['activityId'] === ridden.id)?.['rideFacts'],
+      ).toStrictEqual({ workoutBlocks });
+    });
   });
 
   describe('a ride’s write-up (#800, #801)', () => {

@@ -105,6 +105,7 @@ erDiagram
         string  pauses                   "the intervals that keep a pause apart from a dropout"
         string  courseLaps               "optional (#1312): the laps of a course completed so far, two marks and the course's distance and climb each"
         string  openCourseLap            "optional (#1322): the lap in progress at the last flush, as a part lap"
+        string  workoutBlocks            "optional (#1319): each block of the workouts ridden so far, two marks and what became of it"
     }
     RECORDING_CHUNK {
         string  sessionId    PK "with seq: the compound primary key"

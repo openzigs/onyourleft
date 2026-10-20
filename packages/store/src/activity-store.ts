@@ -3333,6 +3333,7 @@ export class ActivityStore {
       courseLaps: header.courseLaps ?? [],
       ...(header.openCourseLap === undefined ? {} : { openCourseLap: header.openCourseLap }),
       roomRaces: header.roomRaces ?? [],
+      ...(header.workoutBlocks === undefined ? {} : { workoutBlocks: header.workoutBlocks }),
       chunks: prefix.rows.length,
       chunksAfterGap: stored.chunks.length - prefix.rows.length,
     };

@@ -51,10 +51,10 @@
  * possible outcome for a recovery path.
  */
 
-import type { Metres, RecordedPause, Seconds, UnixSeconds } from '@onyourleft/domain';
+import type { Metres, RecordedPause, Seconds, UnixSeconds, WorkoutBlock } from '@onyourleft/domain';
 
 import type { ActivityId, AthleteId, RecordingSessionId } from './ids';
-import type { RoomRaceFact } from './records';
+import type { RoomRaceFact, WorkoutBlockOutcome } from './records';
 import type { StreamChannels } from './streams';
 
 /**
@@ -107,6 +107,28 @@ export interface RecordedCourseLap {
   /** The rider stopped before the line. Absent for a whole lap. */
   readonly partial?: true | undefined;
 }
+
+/**
+ * One block of a structured workout during a recording, as the recording
+ * holds it before there is an activity — #1319. Where it began and ended and
+ * what became of it, and no average: as for a lap
+ * ({@link RecordedCourseLap}), the figures are worked out from the samples
+ * when the ride is saved.
+ *
+ * ⚠️ **The block being ridden is held as `cut-short`**, with its `to` moved on
+ * as it is ridden, until it ends. So a recording that dies inside a block is
+ * recovered with that block cut short, which is what it was.
+ */
+export type RecordedWorkoutBlock =
+  | {
+      readonly outcome: Exclude<WorkoutBlockOutcome, 'skipped'>;
+      readonly block: WorkoutBlock;
+      readonly from: RecordedLapMark;
+      readonly to: RecordedLapMark;
+      /** The stall rescue eased the trainer in this block. */
+      readonly eased?: true | undefined;
+    }
+  | { readonly outcome: 'skipped'; readonly block: WorkoutBlock };
 
 /** The small indexed row: one per recording. */
 export interface RecordingSessionRecord {
@@ -191,6 +213,16 @@ export interface RecordingSessionRecord {
    * recording from recovery, or hide another one. Optional, so not a migration.
    */
   readonly roomRaces?: readonly RoomRaceFact[] | undefined;
+  /**
+   * The blocks of the workouts ridden so far, in order, the one being ridden
+   * last — #1319. On the header for {@link courseLaps}' reason: a ride
+   * recovered after the app closed is saved with its blocks.
+   *
+   * ⚠️ **Untrusted on the way out, and never a reason to refuse a header**:
+   * a list that does not read is dropped whole (blocks are numbered by where
+   * they stand). Optional, so not a migration.
+   */
+  readonly workoutBlocks?: readonly RecordedWorkoutBlock[] | undefined;
   /**
    * The fields of the stored header that did not read — #1325. Absent when
    * every field read. Set by the read path only; the write path ignores it.
@@ -309,6 +341,8 @@ export interface RecoveredRecording {
   readonly openCourseLap?: RecordedCourseLap | undefined;
   /** The header's races, none for a recording in none. @see RecordingSessionRecord.roomRaces */
   readonly roomRaces: readonly RoomRaceFact[];
+  /** The header's workout blocks; absent with none. @see RecordingSessionRecord.workoutBlocks */
+  readonly workoutBlocks?: readonly RecordedWorkoutBlock[] | undefined;
   /**
    * How many chunk rows made up the recovered prefix.
    *

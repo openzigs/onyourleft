@@ -12327,3 +12327,198 @@ describe('#1434 — what the target band is drawn from, through the real control
     rig.controller.dispose();
   });
 });
+
+describe('#1319 — a workout’s blocks are the recording’s, and are saved with the ride', () => {
+  const THRESHOLD = watts(250);
+  const steady = (length: number, target: number): WorkoutBlock => ({
+    kind: 'steady',
+    seconds: seconds(length),
+    target: thresholdShare(target),
+  });
+  const WARM = steady(4, 0.6);
+  const HARD = steady(6, 1.0);
+  const EASY = steady(4, 0.5);
+  const threeBlocks: WorkoutRecord = {
+    id: workoutId('w-three'),
+    createdBy: ATHLETE_A,
+    name: 'Three blocks',
+    workout: { name: 'Three blocks', blocks: [WARM, HARD, EASY] },
+    createdAt: unixSeconds(1),
+    updatedAt: unixSeconds(1),
+  };
+  const savedBlocks = async (id = 'ride-1') =>
+    (await harness.read(async (store) => store.getActivity(ATHLETE_A, activityId(id))))?.rideFacts
+      ?.workoutBlocks;
+
+  /** Paired, in control, recording, and the workout begun. */
+  const riding = async (rig: Bench): Promise<void> => {
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await rig.controller.start();
+    expect(rig.controller.startWorkout(threeBlocks, THRESHOLD)).toBe(true);
+  };
+
+  /**
+   * Tick until the workout is at least `elapsed` seconds in. The bench's
+   * clock moves on with every trainer exchange as well as every tick, so a
+   * count of ticks is not a count of the workout's seconds.
+   */
+  const rideUntil = async (rig: Bench, elapsed: number): Promise<void> => {
+    for (let guard = 0; guard < 200; guard += 1) {
+      if ((rig.controller.getSnapshot().workout?.elapsedSeconds ?? 0) >= elapsed) return;
+      await ride(rig, 1);
+    }
+    throw new Error(`the workout never reached ${String(elapsed)} s`);
+  };
+
+  it('saves each block ridden, from its own start to its own end, read back through the store', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    await riding(rig);
+    await rideUntil(rig, 14);
+    await ride(rig, 2);
+    expect(rig.controller.getSnapshot().workout?.status).toBe('finished');
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+
+    const blocks = await savedBlocks();
+    expect(blocks?.map((each) => [each.outcome, each.block])).toEqual([
+      ['ridden', WARM],
+      ['ridden', HARD],
+      ['ridden', EASY],
+    ]);
+    const ridden = blocks?.flatMap((each) => (each.outcome === 'skipped' ? [] : [each])) ?? [];
+    expect(ridden.map((each) => each.elapsedTime)).toEqual([4, 6, 4]);
+    // One after the other on the ride's clock, with nothing between them.
+    expect(ridden[1]!.startedAt).toBe(ridden[0]!.startedAt + 4);
+    expect(ridden[2]!.startedAt).toBe(ridden[1]!.startedAt + 6);
+    // From the samples the save wrote: the bench's trainer reports power.
+    expect(ridden.every((each) => each.averagePower !== undefined)).toBe(true);
+    rig.controller.dispose();
+  });
+
+  it('ended part-way: the block being ridden is cut short and the rest skipped, and the next ride inherits none', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    await riding(rig);
+    // Into the second block, and out of it before its end.
+    await rideUntil(rig, 6);
+    const endedAt = rig.controller.getSnapshot().workout?.elapsedSeconds ?? 0;
+    expect(endedAt).toBeLessThan(10);
+    rig.controller.endWorkout();
+    await ride(rig, 3);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+
+    const blocks = await savedBlocks();
+    expect(blocks?.map((each) => each.outcome)).toEqual(['ridden', 'cut-short', 'skipped']);
+    expect(blocks?.[2]).toEqual({ outcome: 'skipped', block: EASY });
+    const [warm, cut] = blocks?.flatMap((each) => (each.outcome === 'skipped' ? [] : [each])) ?? [];
+    // Cut short where the workout was ended: as far into it as the rider got.
+    expect(cut?.startedAt).toBe((warm?.startedAt ?? 0) + 4);
+    expect(cut?.elapsedTime).toBe(endedAt - 4);
+
+    expect(await rig.controller.startNewRide()).toBe(true);
+    await rig.controller.start();
+    await ride(rig, 3);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect(await savedBlocks('ride-2')).toBeUndefined();
+    rig.controller.dispose();
+  });
+
+  it('a second workout on the same ride keeps the first one’s blocks and follows them', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    await riding(rig);
+    await rideUntil(rig, 6);
+    // Another workout takes the trainer over part-way through the first.
+    const second: WorkoutRecord = {
+      ...threeBlocks,
+      id: workoutId('w-second'),
+      workout: { name: 'Second', blocks: [EASY] },
+    };
+    expect(rig.controller.startWorkout(second, THRESHOLD)).toBe(true);
+    await rideUntil(rig, 4);
+    await ride(rig, 2);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect((await savedBlocks())?.map((each) => [each.outcome, each.block])).toEqual([
+      ['ridden', WARM],
+      ['cut-short', HARD],
+      ['skipped', EASY],
+      ['ridden', EASY],
+    ]);
+    rig.controller.dispose();
+  });
+
+  it('a stop part-way through ends the workout there: cut short, and the rest skipped', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    await riding(rig);
+    await ride(rig, 2);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    expect((await savedBlocks())?.map((each) => each.outcome)).toEqual([
+      'cut-short',
+      'skipped',
+      'skipped',
+    ]);
+    rig.controller.dispose();
+  });
+
+  it('marks a block the stall rescue eased, and only that block', async () => {
+    const rig = benchWith({ rideSave: storeSavePort() });
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await rig.controller.start();
+    const long: WorkoutRecord = {
+      ...threeBlocks,
+      workout: { name: 'Long', blocks: [steady(30, 1.0), steady(4, 0.5)] },
+    };
+    expect(rig.controller.startWorkout(long, THRESHOLD)).toBe(true);
+    await rideUntil(rig, 2);
+    await flushMicrotasks();
+    // The rider loses the fight under the first block's target.
+    for (const rpm of [88, 80, 72, 64, 56, 50, 46]) {
+      rig.bench.rider.set({ cadence: revolutionsPerMinute(rpm) });
+      await ride(rig, 1);
+      await flushMicrotasks();
+    }
+    expect(rig.controller.getSnapshot().workout?.rescue).toBeDefined();
+    rig.bench.rider.set({ cadence: revolutionsPerMinute(88) });
+    await rideUntil(rig, 34);
+    await ride(rig, 2);
+    rig.controller.armStop();
+    await rig.controller.confirmStop();
+    const blocks = await savedBlocks();
+    expect(blocks?.map((each) => [each.outcome, 'eased' in each && each.eased])).toEqual([
+      ['ridden', true],
+      ['ridden', false],
+    ]);
+    rig.controller.dispose();
+  });
+
+  it('a ride the app closed on mid-block is recovered with that block cut short', async () => {
+    const rig = benchWith();
+    await rig.controller.pair('trainer');
+    await rig.controller.requestTrainerControl();
+    await rig.controller.start();
+    const long: WorkoutRecord = {
+      ...threeBlocks,
+      workout: { name: 'Long', blocks: [WARM, steady(60, 1.0)] },
+    };
+    expect(rig.controller.startWorkout(long, THRESHOLD)).toBe(true);
+    // Past the first block, and long enough for a flush to carry the header.
+    await rideUntil(rig, 20);
+    expect(rig.controller.getSnapshot().storage).toBe('ok');
+    rig.controller.dispose();
+    const id = rig.sessionIds[0];
+    if (id === undefined) throw new Error('no recording was started');
+
+    const next = benchWith({ rideSave: storeSavePort() });
+    await next.controller.refreshRecoverable();
+    expect(await next.controller.saveRecovered(id)).toBe('saved');
+    expect((await savedBlocks())?.map((each) => [each.outcome, each.block])).toEqual([
+      ['ridden', WARM],
+      ['cut-short', steady(60, 1.0)],
+    ]);
+    next.controller.dispose();
+  });
+});

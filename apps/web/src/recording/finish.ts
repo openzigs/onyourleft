@@ -77,6 +77,7 @@ import type {
   NewActivity,
   NewFinishedRide,
   RecordedCourseLap,
+  RecordedWorkoutBlock,
   RecordingSessionId,
   RoomRaceFact,
   StreamChannelValue,
@@ -86,6 +87,7 @@ import { loadSummaryToStore } from '../analysis/summary';
 import { rideFactsOf } from '../progress/ride-facts';
 
 import { lapsToSave } from './laps';
+import { workoutBlocksToSave } from './workout-blocks';
 
 /**
  * The activity, the samples behind it and its laps, ready to write — and the
@@ -133,6 +135,13 @@ export interface RideToSaveInput {
    * this device (`packages/store` §`RideFacts.races`).
    */
   readonly races?: readonly RoomRaceFact[] | undefined;
+  /**
+   * The blocks of the workouts ridden on this ride, as the recording kept
+   * them — #1319, `workout-blocks.ts`. Their figures are worked out here, from
+   * `series`, and kept with the ride (`packages/store`
+   * §`RideFacts.workoutBlocks`). Absent or empty for a ride with no workout.
+   */
+  readonly workoutBlocks?: readonly RecordedWorkoutBlock[] | undefined;
   /**
    * The checkpoint this ride was recorded into — #1326. The store sets its
    * `savedAs` in the same transaction as the ride, so a crash after the save
@@ -195,15 +204,24 @@ export function rideToSave(input: RideToSaveInput): FinishedRide | undefined {
     // #947: what the badges need, worked out while the samples are in hand —
     // and the two things only the ride itself knew, which nothing can find out
     // later. `progress/ride-facts.ts` says why at save rather than on Home.
-    rideFacts: rideFactsOf({
-      power,
-      altitude: series.channels.altitude,
-      sampleInterval: series.sampleInterval,
-      workoutFinished: input.workoutFinished,
-      ghostRaced: input.ghostRaced,
-      replans: input.replans,
-      races: input.races,
-    }),
+    rideFacts: {
+      ...rideFactsOf({
+        power,
+        altitude: series.channels.altitude,
+        sampleInterval: series.sampleInterval,
+        workoutFinished: input.workoutFinished,
+        ghostRaced: input.ghostRaced,
+        replans: input.replans,
+        races: input.races,
+      }),
+      // #1319: known only to the ride that rode them, like the two above, and
+      // worked out from the samples this save writes, by the rule its laps are.
+      ...(input.workoutBlocks === undefined || input.workoutBlocks.length === 0
+        ? {}
+        : {
+            workoutBlocks: workoutBlocksToSave(input.workoutBlocks, series, input.movingTime),
+          }),
+    },
     // ⚠️ No `originalFile`. That key names the file an activity was imported
     // from and this one was not imported — a recorded ride has no file behind
     // it, and inventing a name would put a ride in the deduplication index

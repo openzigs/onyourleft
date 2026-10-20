@@ -196,6 +196,41 @@ export function courseLap(
   course: CourseStretch,
   offset = 0,
 ): LapFigures {
+  return {
+    ...stretchFigures(series, from, to, offset),
+    distance: course.distance,
+    ...(course.ascent === undefined ? {} : { ascent: course.ascent }),
+    ...(course.partial ? { partial: true as const } : {}),
+  };
+}
+
+/** What {@link stretchFigures} states: a lap's figures that come from samples and marks alone. */
+export type StretchFigures = Pick<
+  LapFigures,
+  | 'startedAt'
+  | 'elapsedTime'
+  | 'movingTime'
+  | 'averagePower'
+  | 'maxPower'
+  | 'averageHeartRate'
+  | 'maxHeartRate'
+  | 'averageCadence'
+>;
+
+/**
+ * The times between two marks, and the power, heart rate and cadence of the
+ * samples of `series` in the slots between them ({@link lapSlots}) — the rule
+ * a lap's figures are worked out by, and since #1319 a workout block's
+ * (`workout-blocks.ts`), so the two are one rule.
+ *
+ * `offset` as for {@link courseLap}.
+ */
+export function stretchFigures(
+  series: LapSeries,
+  from: LapMark,
+  to: LapMark,
+  offset = 0,
+): StretchFigures {
   const slots = lapSlots(
     {
       startedAt: series.startedAt,
@@ -214,7 +249,6 @@ export function courseLap(
     startedAt: from.at,
     elapsedTime: seconds(Math.max(0, to.at - from.at)),
     movingTime: seconds(Math.max(0, to.movingTime - from.movingTime)),
-    distance: course.distance,
     ...(power === undefined
       ? {}
       : { averagePower: watts(power.mean), maxPower: watts(power.highest) }),
@@ -225,8 +259,6 @@ export function courseLap(
           maxHeartRate: beatsPerMinute(heartRate.highest),
         }),
     ...(cadence === undefined ? {} : { averageCadence: revolutionsPerMinute(cadence.mean) }),
-    ...(course.ascent === undefined ? {} : { ascent: course.ascent }),
-    ...(course.partial ? { partial: true as const } : {}),
   };
 }
 
@@ -360,13 +392,16 @@ export function bestLapIndex(laps: readonly TimedLap[]): number | undefined {
  *
  * Only the moving times change: the instants, and so the elapsed times and
  * the samples a lap's averages are worked out from, are the marks'.
+ *
+ * Generic over what is held, so a workout's blocks (#1319, `workout-blocks.ts`)
+ * are held to the ride by the same walk.
  */
-function heldToTheRide(
-  ridden: readonly RecordedCourseLap[],
+export function heldToTheRide<Stretch extends Pick<RecordedCourseLap, 'from' | 'to'>>(
+  ridden: readonly Stretch[],
   rideMovingTime: Seconds,
-): readonly RecordedCourseLap[] {
+): readonly Stretch[] {
   let ceiling: number = rideMovingTime;
-  const held: RecordedCourseLap[] = [];
+  const held: Stretch[] = [];
   for (let index = ridden.length - 1; index >= 0; index -= 1) {
     const lap = ridden[index];
     if (lap === undefined) {
