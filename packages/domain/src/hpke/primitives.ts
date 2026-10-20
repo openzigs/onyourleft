@@ -47,6 +47,12 @@ export interface HpkePrimitives<PrivateKey> {
    * Secure Curves `deriveBits` is specified to throw there; an implementation
    * checks the bytes as well, and the HPKE module checks them a third time, so
    * the rule does not rest on any one platform implementing one line.
+   *
+   * **That refusal is an `HpkeError` whose reason is `low-order-point`**
+   * (#1198), so the module can tell it from a key the platform would not
+   * import, which may be any other throw and is reported as
+   * `invalid-public-key`. A WebCrypto implementation turns `deriveBits`'
+   * `OperationError` into it.
    */
   x25519(privateKey: PrivateKey, publicKey: Uint8Array): Promise<Uint8Array>;
 

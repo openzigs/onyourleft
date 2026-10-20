@@ -4,9 +4,10 @@
  * Why an HPKE operation refused (#1188).
  *
  * - `invalid-public-key` — a recipient key or an `enc` that is not 32 bytes,
- *   or that the platform's X25519 refused.
+ *   or that the platform's X25519 refused for any reason but the next one.
  * - `low-order-point` — the Diffie–Hellman output was all zeros (RFC 9180
- *   §7.1.4): the public key is a small-order point.
+ *   §7.1.4): the public key is a small-order point. Either the module saw the
+ *   zeros or the port refused them, as its contract says it must (#1198).
  * - `open-failed` — the ciphertext, the AAD or the sequence number is not the
  *   one it was sealed with. Deliberately one reason for all three: the AEAD
  *   cannot tell them apart and neither should a caller.

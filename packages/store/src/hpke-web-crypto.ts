@@ -14,17 +14,32 @@
  * both lib sets declare: `crypto.subtle`'s own signatures, and byte arrays
  * copied into fresh `ArrayBuffer`s.
  *
+ * ## One implementation in two files (#1198)
+ *
+ * `apps/instance/src/auth/crypto.ts` carries the same port, and the text
+ * between the two `hpke-primitives` markers below is **byte-for-byte the
+ * same** in both files: `apps/instance/src/auth/hpke.test.ts` reads both and
+ * fails on any difference, so a fix made to one copy cannot miss the other.
+ * It is two copies rather than one module because the instance does not
+ * depend on `@onyourleft/store` — its image carries five packages and this is
+ * not one of them (`apps/instance/Dockerfile`) — and `@onyourleft/domain`
+ * cannot name `crypto` at all. **Edit both, identically.**
+ *
  * ## What it guarantees beyond WebCrypto
  *
  * - The X25519 private key is generated **non-extractable**; the private half
  *   never exists as bytes in this program.
- * - `x25519` refuses an all-zero output itself (RFC 9180 §7.1.4), as well as
- *   WebCrypto's Secure Curves `deriveBits` being specified to.
+ * - `x25519` refuses a small-order public key as `low-order-point` (#1198):
+ *   WebCrypto's Secure Curves `deriveBits` throws an `OperationError` there,
+ *   and the port turns that, and an all-zero output it checks for itself
+ *   (RFC 9180 §7.1.4), into the `HpkeError` the HPKE module passes on.
  * - The AES-GCM members refuse a key that is not 16 bytes, rather than run
  *   AES-256 because a 32-byte key was handed in.
  */
 
-import type { HpkePrimitives } from '@onyourleft/domain';
+import { HpkeError, type HpkePrimitives } from '@onyourleft/domain';
+
+// <hpke-primitives> ----------------------------------------------------------
 
 /** The `CryptoKey` type, spelt so that a DOM-less program can name it too. */
 type WebCryptoKey = Awaited<ReturnType<typeof crypto.subtle.importKey>>;
@@ -47,8 +62,21 @@ async function aesKey(key: Uint8Array, usage: 'encrypt' | 'decrypt'): Promise<We
   return crypto.subtle.importKey('raw', bytes(key), AES_GCM, false, [usage]);
 }
 
-/** The client's six HPKE primitives. */
-export const webCryptoHpkePrimitives: HpkePrimitives<WebCryptoKey> = {
+/** The port's refusal of a small-order public key, which the HPKE module passes on. */
+function lowOrderPoint(): HpkeError {
+  return new HpkeError(
+    'low-order-point',
+    'the X25519 output is all zeros: the public key is a small-order point (RFC 9180 §7.1.4)',
+  );
+}
+
+/** How X25519 `deriveBits` refuses an all-zero output (WebCrypto, Secure Curves). */
+function isOperationError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'OperationError';
+}
+
+/** The six HPKE primitives over `crypto.subtle`. */
+const hpkePrimitives: HpkePrimitives<WebCryptoKey> = {
   async generateX25519KeyPair() {
     const pair = await crypto.subtle.generateKey(X25519, false, ['deriveBits']);
     if (!('privateKey' in pair)) {
@@ -63,16 +91,19 @@ export const webCryptoHpkePrimitives: HpkePrimitives<WebCryptoKey> = {
       throw new RangeError(`an X25519 public key is ${String(X25519_BYTES)} bytes`);
     }
     const peer = await crypto.subtle.importKey('raw', bytes(publicKey), X25519, false, []);
-    const shared = new Uint8Array(
-      await crypto.subtle.deriveBits(
+    let derived: ArrayBuffer;
+    try {
+      derived = await crypto.subtle.deriveBits(
         { name: X25519.name, public: peer },
         privateKey,
         8 * X25519_BYTES,
-      ),
-    );
-    if (shared.every((byte) => byte === 0)) {
-      throw new RangeError('the X25519 output is all zeros: a small-order public key');
+      );
+    } catch (error) {
+      if (isOperationError(error)) throw lowOrderPoint();
+      throw error;
     }
+    const shared = new Uint8Array(derived);
+    if (shared.every((byte) => byte === 0)) throw lowOrderPoint();
     return shared;
   },
 
@@ -103,3 +134,8 @@ export const webCryptoHpkePrimitives: HpkePrimitives<WebCryptoKey> = {
     return crypto.getRandomValues(new Uint8Array(count));
   },
 };
+
+// </hpke-primitives> ---------------------------------------------------------
+
+/** The client's six HPKE primitives. */
+export const webCryptoHpkePrimitives: HpkePrimitives<WebCryptoKey> = hpkePrimitives;

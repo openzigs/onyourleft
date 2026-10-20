@@ -124,12 +124,30 @@ describe('HPKE over a stand-in port — #1188', () => {
       expect(error.reason).toBe('low-order-point');
     });
 
-    it('reports a port that throws, as its contract says it must, as a refused key', async () => {
+    it('passes on a port’s low-order refusal, as its contract says it throws one — #1198', async () => {
+      const port = standIn(() => {
+        throw new HpkeError('low-order-point', 'refused by the port');
+      });
+      const sender = await refusal(setupBaseSender(port, new Uint8Array(32).fill(9), INFO));
+      expect(sender.reason).toBe('low-order-point');
+      const recipient = await port.generateX25519KeyPair();
+      const decap = await refusal(
+        setupBaseRecipient(port, recipient, new Uint8Array(32).fill(9), INFO),
+      );
+      expect(decap.reason).toBe('low-order-point');
+    });
+
+    it('reports any other throw from the port as a refused key', async () => {
       const port = standIn(() => {
         throw new Error('OperationError');
       });
       const error = await refusal(setupBaseSender(port, new Uint8Array(32).fill(9), INFO));
       expect(error.reason).toBe('invalid-public-key');
+      const other = standIn(() => {
+        throw new HpkeError('open-failed', 'some other refusal');
+      });
+      const reported = await refusal(setupBaseSender(other, new Uint8Array(32).fill(9), INFO));
+      expect(reported.reason).toBe('invalid-public-key');
     });
   });
 

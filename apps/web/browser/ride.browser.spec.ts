@@ -635,6 +635,106 @@ for (const viewport of STACKED_VIEWPORTS) {
 }
 
 /**
+ * #1158 — the moving time where the HUD STACKS. #1124 sized the time's field
+ * from its own digits in the corners layouts and upright; where the HUD
+ * stacks it was still an `auto-fit` 5.5 rem track's reading, as narrow as
+ * 88 px, and `9:59:59` is 92.5 px on the CI runner's DejaVu Sans. It is
+ * `nowrap`, so it ran past its field into the gap: 2.5 px at 320×568, 4.0 px
+ * at 412×700 and 4.2 px at 700×500, measured for #1124 in no gate's list.
+ *
+ * Each viewport here is held to one line,
+ * {@link MOVING_TIME_SPARE_PIXELS} to spare, the secondary grid inside its
+ * panel and no overlap with any other reading. The readings scroll beneath
+ * the pinned actions panel in a stacked layout (§"Where four panels cannot
+ * share the screen"), so neither being on screen nor clearing a control is
+ * asserted. How many tracks a row holds and how many
+ * rows the tier takes are published, because the fix changes both.
+ */
+const STACKED_MOVING_TIME_VIEWPORTS: readonly Viewport[] = [
+  ...STACKED_VIEWPORTS,
+  { name: 'a small phone upright — 320×568', width: 320, height: 568, unstagedFails: true },
+  { name: 'a phone upright, short — 412×700', width: 412, height: 700, unstagedFails: true },
+  { name: 'a small tablet window — 700×500', width: 700, height: 500, unstagedFails: true },
+];
+
+for (const viewport of STACKED_MOVING_TIME_VIEWPORTS) {
+  test(`#1158 — stacked, the moving time fits its field with room to spare — ${viewport.name}`, async ({
+    browser,
+  }, testInfo) => {
+    const page = await sharedRide(browser, viewport);
+    const seen = await measure(page);
+    const grid = await page.evaluate(() => {
+      const secondary = document.querySelector('.oyl-hud__fields--secondary');
+      if (secondary === null) return { tracks: 0, rows: 0 };
+      const style = getComputedStyle(secondary);
+      return {
+        tracks: style.gridTemplateColumns.split(' ').length,
+        rows: style.gridTemplateRows.split(' ').length,
+      };
+    });
+    const shown = seen.moving;
+    const spare = shown.field - shown.width;
+    const field = named(seen.items, 'reading: Moving');
+    const note =
+      `9:59:59 ${shown.width.toFixed(1)} px in a ${shown.field.toFixed(1)} px field ` +
+      `(${spare.toFixed(1)} px to spare); ${String(grid.tracks)} tracks × ` +
+      `${String(grid.rows)} rows; secondary tier ${String(shown.secondaryOverflow)} px ` +
+      `past its panel; ${describeItem(field)}`;
+    testInfo.annotations.push({ type: '#1158', description: note });
+    console.log(`#1158 — ${viewport.name} — ${note}`);
+    expect(shown.text, note).toBe('9:59:59');
+    expect(shown.lines, note).toBe(1);
+    expect(spare, note).toBeGreaterThanOrEqual(MOVING_TIME_SPARE_PIXELS);
+    expect(shown.secondaryOverflow, note).toBeLessThanOrEqual(0);
+    expect(
+      seen.items
+        .filter(
+          (each) =>
+            each !== field && each.name.startsWith('reading: ') && overlap(each.box, field.box),
+        )
+        .map(describeItem),
+      note,
+    ).toEqual([]);
+  });
+}
+
+/**
+ * #1158's other edge: UPRIGHT the time is drawn beside the controls, out of
+ * the grid (`theme.css` §"THE MOVING TIME ON AN UPRIGHT PHONE"), so the
+ * stacked floor must not reach the upright tier, where height is what is
+ * scarce. 640×960 is the width at which it would cost a row: six readings in
+ * one row of 5.5 rem tracks, two rows of the time's (on DejaVu Sans from
+ * 602 px to 669 px). Held as the count of 5.5 rem tracks the tier's own width
+ * makes.
+ */
+test('#1158 — upright, the secondary tier keeps its 5.5 rem tracks — 640×960', async ({
+  browser,
+}) => {
+  const viewport: Viewport = {
+    name: 'a small tablet upright — 640×960',
+    width: 640,
+    height: 960,
+    unstagedFails: false,
+  };
+  const page = await sharedRide(browser, viewport);
+  const tier = await page.evaluate(() => {
+    const secondary = document.querySelector('.oyl-hud__fields--secondary');
+    if (secondary === null) return { tracks: 0, expected: -1, floor: 0 };
+    const style = getComputedStyle(secondary);
+    const floor = 5.5 * parseFloat(getComputedStyle(document.documentElement).fontSize);
+    const gap = parseFloat(style.columnGap);
+    const content =
+      secondary.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+    return {
+      tracks: style.gridTemplateColumns.split(' ').length,
+      expected: Math.floor((content + gap) / (floor + gap)),
+      floor,
+    };
+  });
+  expect(tier.tracks, JSON.stringify(tier)).toBe(tier.expected);
+});
+
+/**
  * A ride with something to say — `ride-harness.tsx` §`WITH_A_NOTICE`.
  *
  * *"The road is not reaching your trainer"* stands for the whole ride, it is

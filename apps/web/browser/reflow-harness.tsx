@@ -67,6 +67,16 @@
  *
  * `?chooser=as-shipped` is #1028's: Analysis' ride chooser 8rem wide with its
  * name allowed to wrap, as it shipped ({@link applyChooserControl}).
+ *
+ * ## A refused release — #1133
+ *
+ * `?release=refused` hands the game a trainer whose last release was not
+ * confirmed ({@link REFUSED_RELEASE}), so the chooser draws its *Not released*
+ * notice — marked kept-visible, and above the first control on purpose (#940,
+ * #372). `&kept=unrelated` is that fixture's control: the chooser's
+ * *Your trainer* sentence, which is not safety text, marked kept-visible too
+ * ({@link markAnUnrelatedSentence}), which the controls-first gate must still
+ * fail.
  */
 
 import { StrictMode, type JSX } from 'react';
@@ -95,6 +105,8 @@ import {
 } from '../src/shell/routes';
 import { webCryptoDigest } from '../src/transfer/browser';
 import type { TransferPort } from '../src/transfer/store-port';
+import type { GameTrainerPort } from '../src/game/trainer-port';
+import { RELEASE_INCOMPLETE } from '../src/workout/session';
 import {
   AVAILABLE_BLUETOOTH,
   EMPTY_STATES,
@@ -590,8 +602,35 @@ const EXPECTATIONS: Record<RouteId, PopulatedExpectation> = {
   },
 };
 
+/**
+ * `?release=refused` — #1133. A ready trainer whose last release was not
+ * confirmed: the state in which the chooser stands *Not released* above
+ * *Ride*, so a rider sees the trainer may still hold a target before starting
+ * another ride. Nothing here is ever asked to control anything.
+ */
+const REFUSED_RELEASE: GameTrainerPort = {
+  askForControlOnRide: () => Promise.resolve(),
+  workoutRescue: () => undefined,
+  recordingMayStop: () => false,
+  gameRideEnded: () => undefined,
+  rideMovingSeconds: () => undefined,
+  watchRide: () => () => undefined,
+  readTrainer: () => ({
+    kind: 'ready',
+    releaseFault: RELEASE_INCOMPLETE,
+    control: {
+      setSimulationParameters: () => Promise.resolve(),
+      letGo: () => Promise.resolve({ kind: 'stopped' as const }),
+    },
+  }),
+};
+
 function shell(populated: boolean, transfer: TransferPort): JSX.Element {
   const bluetooth = new URLSearchParams(window.location.search).get('bluetooth') === 'available';
+  const release = new URLSearchParams(window.location.search).get('release');
+  if (release !== null && release !== 'refused') {
+    throw new Error(`reflow harness: ?release must be "refused", not ${release}`);
+  }
   // #945's control: the router as it was before #945, every change of fragment
   // applied outside `startTransition` (`shell/useRoute.ts` §`RouteUpdates`).
   const synchronous = new URLSearchParams(window.location.search).get('routes') === 'synchronous';
@@ -600,6 +639,7 @@ function shell(populated: boolean, transfer: TransferPort): JSX.Element {
       populated={populated}
       {...(bluetooth ? { capabilities: AVAILABLE_BLUETOOTH } : {})}
       {...(synchronous ? { routeUpdates: 'synchronous' as const } : {})}
+      {...(release === 'refused' ? { gameTrainer: REFUSED_RELEASE } : {})}
       transfer={transfer}
       map={realMap}
       basemap={{
@@ -1402,6 +1442,12 @@ async function visit(hash: string): Promise<ReflowMeasurement> {
   if (new URLSearchParams(window.location.search).get('line') === 'before993') {
     putTheLineBack(route);
   }
+  if (
+    route.id === 'game' &&
+    new URLSearchParams(window.location.search).get('kept') === 'unrelated'
+  ) {
+    markAnUnrelatedSentence();
+  }
   await nextFrame();
   visited.add(route.id);
   // Read through a `Partial` view on purpose: the spec's "no entry" fault has
@@ -1613,6 +1659,22 @@ function applyShapeControl(): void {
     }
   `;
   document.head.append(style);
+}
+
+/**
+ * `&kept=unrelated` — #1133's control. The chooser's *Your trainer* sentence
+ * (#503's promise) is not safety text, and it stands above the first control;
+ * marked kept-visible, the controls-first gate must fail the game for it even
+ * though *Not released* beside it is allowed there.
+ */
+function markAnUnrelatedSentence(): void {
+  const promise = [...document.querySelectorAll('.oyl-chooser p')].find((each) =>
+    (each.querySelector('.oyl-status__label')?.textContent ?? '').startsWith('Your trainer'),
+  );
+  if (promise === undefined) {
+    throw new Error('reflow harness: the chooser shows no "Your trainer" sentence to mark');
+  }
+  promise.setAttribute('data-oyl-kept-visible', '');
 }
 
 /**

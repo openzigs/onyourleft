@@ -414,15 +414,11 @@ async function refusedAsLowOrder(what: string, attempt: Promise<unknown>): Promi
   try {
     await attempt;
   } catch (error) {
-    // A platform that follows the port contract throws inside `x25519`, which
-    // the module reports as `invalid-public-key`; one that returns the zeros
-    // meets the module's own check. Either is a refusal of the point.
-    if (
-      error instanceof HpkeError &&
-      (error.reason === 'low-order-point' || error.reason === 'invalid-public-key')
-    ) {
-      return;
-    }
+    // A port that follows the contract throws `low-order-point` inside
+    // `x25519`; one that returns the zeros meets the module's own check, which
+    // says the same. `invalid-public-key` here would be a port that refused
+    // the point for some other reason — the distinction #1198 made reachable.
+    if (error instanceof HpkeError && error.reason === 'low-order-point') return;
     throw new HpkeConformanceFailure(`${what}: refused for the wrong reason`);
   }
   throw new HpkeConformanceFailure(`${what}: was accepted`);

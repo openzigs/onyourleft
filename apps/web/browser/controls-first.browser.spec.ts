@@ -220,6 +220,35 @@ const READ_BEFORE_ACTING: Partial<Record<RouteId, string>> = {
 };
 
 /**
+ * A safety notice a route may stand above its first control — #1133 — by the
+ * opening of its text, with the reason it stands there. Unlike
+ * {@link READ_BEFORE_ACTING} it is ALLOWED and never REQUIRED: the notice is
+ * drawn only in the state it describes, so a route without it is as right as
+ * one with it. It lifts #993's "kept-visible text below the controls" for the
+ * text named and nothing else; any other marked text above the first control
+ * on the same route is still a fault (`?kept=unrelated`, below).
+ */
+const SAFETY_NOTICE_ABOVE_CONTROL: Partial<
+  Record<RouteId, { readonly opening: string; readonly reason: string }>
+> = {
+  game: {
+    opening: 'Not released',
+    reason:
+      '#940, #372: the trainer may still hold the last ride’s target, and a rider must ' +
+      'see that before starting another, so the notice stands above Ride',
+  },
+};
+
+/**
+ * A kept sentence's text as it is read aloud: without a status message's
+ * glyph (`design/StatusMessage.tsx` §`GLYPH`), which is `aria-hidden` and
+ * laid out straight against the label — "✕Not released: …".
+ */
+function spoken(text: string): string {
+  return text.replace(/^[i✓!✕](?=\p{Lu})/u, '');
+}
+
+/**
  * The sections that tuck their explanation, by heading, route by route —
  * #699's review, B2. The harness measures a section only where it finds the
  * ⓘ beside its heading (a "More about" disclosure until #1031), so a section
@@ -381,7 +410,8 @@ const SECTION_PROSE_BUDGET_PIXELS = 130;
  *   `data-oyl-kept-visible` before the first control, except on a consent
  *   route ({@link CONSENT_BEFORE_CONTROL}), whose box says the text was read,
  *   or the text a route names in {@link READ_BEFORE_ACTING} (#1009) — which
- *   must stand above the first control there;
+ *   must stand above the first control there — or the safety notice a route
+ *   names in {@link SAFETY_NOTICE_ABOVE_CONTROL} (#1133), which may;
  * - **a help control a thumb and a screen reader can use** — where the route
  *   declares help, the ⓘ is a 44 × 44 target named "Help with …" whose panel
  *   holds the route's words while it is closed (in the page, so offline).
@@ -397,8 +427,11 @@ function lineFaults(route: RouteDefinition, seen: ReflowMeasurement, viewport: V
     );
   }
   const readFirst = READ_BEFORE_ACTING[route.id];
+  const safety = SAFETY_NOTICE_ABOVE_CONTROL[route.id];
   const keptAbove = seen.keptBeforeFirstControl.filter(
-    (text) => readFirst === undefined || !text.startsWith(readFirst),
+    (text) =>
+      (readFirst === undefined || !text.startsWith(readFirst)) &&
+      (safety === undefined || !spoken(text).startsWith(safety.opening)),
   );
   if (keptAbove.length > 0 && !CONSENT_BEFORE_CONTROL.includes(route.id)) {
     faults.push(
@@ -725,6 +758,45 @@ test.describe('#666 — the first control is above the fold on every route', () 
       expect(empty.faults).toEqual([]);
     });
   }
+
+  // #1133. A refused release puts the chooser's *Not released* notice — kept,
+  // and above Ride on purpose (#940, #372) — in front of the game's first
+  // control. SAFETY_NOTICE_ABOVE_CONTROL is what lets it stand there.
+  for (const viewport of [PHONE, ...TABLETS]) {
+    test(`the game with a refused release, on a ${viewport.name}`, async ({ page }) => {
+      await open(page, viewport, 'data=populated&release=refused');
+      const seen = await visit(page, routeById('game'));
+      const verdict = judge(routeById('game'), seen, viewport, true);
+      console.log(
+        `controls first, a refused release, ${viewport.name}\n  ${verdict.line}\n` +
+          `  kept above the first control: ${JSON.stringify(seen.keptBeforeFirstControl)}`,
+      );
+      // The state is the one with the notice above the first control, or this
+      // measured the chooser without it and the allowance went unexercised.
+      expect(
+        seen.keptBeforeFirstControl.map(spoken).filter((text) => text.startsWith('Not released')),
+      ).toHaveLength(1);
+      expect(verdict.faults).toEqual([]);
+      expect(verdict.exempted).toBe(false);
+    });
+  }
+
+  test('#1133’s control: with an unrelated sentence marked above the chooser’s first control, the game fails', async ({
+    page,
+  }) => {
+    await open(page, PHONE, 'data=populated&release=refused&kept=unrelated');
+    const seen = await visit(page, routeById('game'));
+    const verdict = judge(routeById('game'), seen, PHONE, true);
+    console.log(
+      `controls first, CONTROL (kept=unrelated), ${PHONE.name}\n  ${verdict.faults.join('\n  ')}`,
+    );
+    const kept = verdict.faults.filter((fault) => fault.includes('kept-visible text stands above'));
+    // Red for the marked sentence, and for it alone: the safety notice beside
+    // it is still allowed.
+    expect(kept).toHaveLength(1);
+    expect(kept[0]).toContain('Your trainer');
+    expect(kept[0]).not.toContain('Not released');
+  });
 
   test('#943’s control: with the drawing at half the viewport, Activities’ action falls below the fold', async ({
     page,

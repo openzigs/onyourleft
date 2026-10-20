@@ -137,7 +137,7 @@ export type HistorySettings =
 
 /** Why the history index is off. */
 export type HistoryOffCode =
-  'not-set' | 'not-a-url' | 'not-origin' | 'not-local' | 'bad-model' | 'bad-prefix';
+  'not-set' | 'not-a-url' | 'not-origin' | 'not-local' | 'tls-by-name' | 'bad-model' | 'bad-prefix';
 
 /**
  * The analysis model (#1096, ADR 0046 D-9 source 1): an OpenAI-compatible
@@ -442,6 +442,12 @@ const CONTROL = /[\u0000-\u001F\u007F-\u009F]/;
  *   §`configuredHostProblem`), it must be `http:` or `https:`, and it names the
  *   server's origin only — no path, no query, no credentials. Every connection
  *   checks where the name resolved to as well (`embedder.ts`).
+ * - **`https:` only at an address literal** (#1248, as #1187 for the analysis
+ *   model). Every request goes to the address the name was checked at, never
+ *   to the name (`embedder.ts` §`embedUrl`), so a certificate issued to a NAME
+ *   cannot verify: TLS would fail on every request and report only
+ *   `unreachable`. A name with `https:` is refused here instead, saying why
+ *   (`tls-by-name`).
  * - **The model defaults to `nomic-embed-text`** (the owner's ruling, D-5), and
  *   its prefixes to that model's own. For any other model the prefixes default
  *   to none, because another model's convention is its own. A prefix that is
@@ -486,6 +492,12 @@ export function readHistorySettings(raw: RawConfig): HistorySettings {
     return off(
       'not-local',
       `OYL_INSTANCE_EMBEDDING_URL was refused because ${hostProblem}: the embedding model must be on this machine or its private network (ADR 0040 D-6).`,
+    );
+  }
+  if (url.protocol === 'https:' && !isAddressLiteral(url.hostname)) {
+    return off(
+      'tls-by-name',
+      'OYL_INSTANCE_EMBEDDING_URL was refused because it is https: by a name: each request goes to the address the name was checked at, so a certificate issued to the name cannot verify. Use http: on the private network, or https: at the address itself.',
     );
   }
   const model = present(raw.embeddingModel) ? raw.embeddingModel.trim() : DEFAULT_EMBEDDING_MODEL;
