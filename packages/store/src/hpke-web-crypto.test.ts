@@ -70,7 +70,10 @@ describe('the client’s HPKE primitives — #1188', () => {
 
   it('refuse an all-zero X25519 output in the port itself', async () => {
     const pair = await port.generateX25519KeyPair();
-    await expect(port.x25519(pair.privateKey, new Uint8Array(32))).rejects.toThrow();
+    await expect(port.x25519(pair.privateKey, new Uint8Array(32))).rejects.toMatchObject({
+      name: 'HpkeError',
+      reason: 'low-order-point',
+    });
   });
 
   describe('the assertions can fail', () => {
@@ -96,6 +99,16 @@ describe('the client’s HPKE primitives — #1188', () => {
       };
       await expect(
         assertRfc9180A1TamperingRefused(credulous, importX25519PrivateKey),
+      ).rejects.toBeInstanceOf(HpkeConformanceFailure);
+    });
+
+    it('the low-order assertion fails over a port that refuses the point as some other error — #1198', async () => {
+      const vague = {
+        ...port,
+        x25519: () => Promise.reject(new Error('OperationError')),
+      };
+      await expect(
+        assertLowOrderPointsRefused(vague, importX25519PrivateKey),
       ).rejects.toBeInstanceOf(HpkeConformanceFailure);
     });
   });
