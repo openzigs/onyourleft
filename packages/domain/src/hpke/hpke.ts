@@ -420,9 +420,11 @@ async function diffieHellman<PrivateKey>(
   let shared: Uint8Array;
   try {
     shared = await port.x25519(privateKey, publicKey);
-  } catch {
-    // The port's contract is to throw on an all-zero output, so a low-order
-    // point usually arrives here; a key the platform will not import does too.
+  } catch (error) {
+    // The port's contract is to throw an `HpkeError('low-order-point')` for a
+    // small-order point (#1198), and both real ports do; anything else it
+    // throws is a key the platform would not use.
+    if (error instanceof HpkeError && error.reason === 'low-order-point') throw error;
     throw new HpkeError(
       'invalid-public-key',
       'the public key was refused by X25519: it is not a usable Curve25519 key',
