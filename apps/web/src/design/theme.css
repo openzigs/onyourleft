@@ -2445,6 +2445,17 @@ a.oyl-button {
   box-shadow: inset 0 0 0 2px var(--oyl-color-border);
 }
 
+/* #1432: the touch lock's control is released by a press HELD for a second
+   (`design/TouchLockButton.tsx`). Without these a long press on Android
+   selects the word or opens the callout, and a finger that drifts starts a
+   pan, which cancels the pointer and so the hold. */
+.oyl-touch-lock {
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
 /*
  * A SEGMENTED CONTROL — #668. An exclusive choice of two or three that changes
  * how something is shown: a `fieldset` of NATIVE radios (#667's), each inside
@@ -6497,13 +6508,34 @@ select.oyl-input {
    the floor that keeps it above the label beside it.
 
    #551: the side camera's line is the same kind of sentence in the same
-   panel, so it is set the same way and measured against the same pair. */
+   panel, so it is set the same way and measured against the same pair.
+
+   #1324: so is a waiting re-plan's sentence above *Keep the plan*. */
 .oyl-hud__trainer,
-.oyl-hud__side-camera {
+.oyl-hud__side-camera,
+.oyl-hud__plan-change {
   margin: 0;
   color: var(--oyl-color-hud-ink-muted);
   font-size: var(--oyl-font-size-md);
   font-variant-numeric: tabular-nums;
+}
+
+/* #1324: ON A PHONE THE RE-PLAN'S SENTENCE GIVES WAY, and *Keep the plan*
+   stands alone as it did before #1324. Measured, not chosen: with the longest
+   sentence `workout/replan-text.ts` can produce, four lines in the 256 px
+   panel of a phone on its side, the actions panel grew to 253 px and put
+   *Keep the plan* below a 844×390 stage and under another panel at 736×360;
+   upright at 360×800 and 360×752 it put the panel over the rider. The two
+   queries are the stage's own phone layouts (on its side, and upright). A
+   rider there hears the sentence through the HUD's one region with
+   announcements on, and reads it on the Ride screen.
+   `ride-workout.browser.spec.ts` §"#1244" holds it shown on the tablets and
+   gone on the phones. */
+@media (min-width: 46rem) and (min-height: 22.5rem) and (max-height: 30rem),
+  (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) {
+  .oyl-game--riding .oyl-hud__plan-change {
+    display: none;
+  }
 }
 
 .oyl-hud__controls {

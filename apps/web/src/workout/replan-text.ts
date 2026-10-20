@@ -81,7 +81,7 @@ export const REPLAN_DISCARDED =
  * and not the chooser's switch drawn again: once pressed it cannot be undone
  * for that workout, and a switch that cannot be switched back is not one.
  *
- * ⚠️ DRAFT wording, awaiting the owner's approval with the rest.
+ * Approved as final by the owner on 2026-10-20 (#1483), with {@link REPLANS_OFF}.
  */
 export const REPLAN_OFF_BUTTON = 'Switch re-plans off';
 

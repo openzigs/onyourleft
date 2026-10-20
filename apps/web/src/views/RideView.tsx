@@ -55,6 +55,8 @@ import { Reading } from '../design/Reading';
 import { formatDuration } from '../format';
 import { deviceStorage, readAnnouncementPreference } from '../game/hud/announce-preference';
 import { StatusMessage } from '../design/StatusMessage';
+import { useTouchLock } from '../design/touch-lock';
+import { TouchLockButton } from '../design/TouchLockButton';
 import { MetricGrid } from '../ride/MetricGrid';
 import { isReadable } from '../ride/metrics';
 import { readRideReadings, shownReadings, writeRideReadings } from '../ride/reading-choice';
@@ -191,6 +193,14 @@ function LiveRide({
   const lastLap = rideInProgress(snapshot.phase) ? snapshot.manualLap.last : undefined;
   const lapSummary =
     lastLap === undefined ? undefined : manualLapSummary(lastLap.number, lastLap.lap, units);
+  // #1432: the touch lock covers the whole screen — all three groups — and
+  // only while a ride is in progress; `design/touch-lock.ts` says what it
+  // stops and what it never does. The state is the controller's, above the
+  // router, so it is still on when the rider comes back to this screen.
+  const screen = useRef<HTMLDivElement>(null);
+  const touchLocked = snapshot.touchLocked && rideInProgress(snapshot.phase);
+  useTouchLock(screen, touchLocked);
+  const touchLockHelp = useId();
   // #1433: the zoom — the rider's top two readings, larger, or every reading
   // they chose. Only where there are readings to zoom; `RideControls` places
   // it beside *Start recording* and beside Pause and Stop, and not on a
@@ -233,7 +243,7 @@ function LiveRide({
     //
     // The ORDER in the document is unchanged — live, trainer, sensors — so a
     // screen reader and the tab key meet everything in the order they did.
-    <div className="oyl-ride">
+    <div className="oyl-ride" ref={screen}>
       <div className="oyl-ride__group oyl-ride__group--live">
         <div className="oyl-ride__heading">
           <h2>Live</h2>
@@ -282,8 +292,22 @@ function LiveRide({
           Pause / Stop before the numbers, as it met the keep-the-screen-on
           notice before them since #647.
         */}
-        <RideControls controller={controller} snapshot={snapshot} zoom={zoom} />
+        <RideControls
+          controller={controller}
+          snapshot={snapshot}
+          zoom={zoom}
+          touchLockHelp={touchLocked ? touchLockHelp : undefined}
+        />
         <SideCameraOnRide state={sideCamera.state} onStop={sideCamera.stop} />
+        {touchLocked ? (
+          // #1432: AFTER every ride control, for #692's rule — nothing whose
+          // height changes during a ride sits above one. Not `live`: the
+          // control's own `aria-pressed` is what a screen reader hears change,
+          // and this is the sentence it is described by.
+          <StatusMessage tone="info" label={TOUCH_LOCK_ON_LABEL} id={touchLockHelp}>
+            {TOUCH_LOCK_ON_TEXT}
+          </StatusMessage>
+        ) : null}
         {snapshot.notificationNotice !== undefined && rideInProgress(snapshot.phase) ? (
           // #526: set once, on the ride where the rider refused the permission,
           // and it stands for the rest of that ride. ⚠️ AFTER every ride
@@ -694,10 +718,16 @@ function RecoveryOffer({
   );
 }
 
+/** #1432: what the ride screen says while its touch lock is on. ⚠️ Draft wording for the owner. */
+export const TOUCH_LOCK_ON_LABEL = 'Locked';
+export const TOUCH_LOCK_ON_TEXT =
+  'Taps on this screen do nothing. Hold Lock for a second to unlock. End ERG and End workout still work.';
+
 function RideControls({
   controller,
   snapshot,
   zoom,
+  touchLockHelp,
 }: {
   readonly controller: RideController;
   readonly snapshot: RideSnapshot;
@@ -709,6 +739,8 @@ function RideControls({
    * that row is Lap, Pause and Stop and nothing else (#1430).
    */
   readonly zoom: JSX.Element | undefined;
+  /** #1432: the id of the sentence that describes the touch lock while it is on. */
+  readonly touchLockHelp: string | undefined;
 }): JSX.Element {
   // #548, WCAG 2.2 SC 2.4.3: pressing *Start a new ride* unmounts it, and
   // without somewhere to go focus falls to `<body>` — a keyboard or TalkBack
@@ -925,6 +957,24 @@ function RideControls({
           )}
         </div>
         {zoom}
+        {/*
+          #1432: the touch lock, LAST in the row and, like the zoom, a sibling
+          of `.oyl-ride__actions` rather than in it (that row is Lap, Pause and
+          Stop, #1430). Its neighbour is the zoom, so a tap that misses it
+          changes how the readings are shown and nothing else. Here while a
+          ride is in progress, the confirmation included: a rider in the rain
+          may want it on before answering that with a key.
+        */}
+        <TouchLockButton
+          locked={snapshot.touchLocked}
+          onLock={() => {
+            controller.lockTouch();
+          }}
+          onUnlock={() => {
+            controller.unlockTouch();
+          }}
+          describedBy={touchLockHelp}
+        />
       </div>
 
       {snapshot.stopArmed ? (

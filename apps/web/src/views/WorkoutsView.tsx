@@ -210,6 +210,14 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
   const [entries, setEntries] = useState<readonly ListedWorkout[] | undefined>(undefined);
   const [loadFault, setLoadFault] = useState<string | undefined>(undefined);
   const [refusal, setRefusal] = useState<BuildRefusal | undefined>(undefined);
+  /**
+   * #1165: a refused *Add block*, shown inside its own form beside the
+   * button pressed. It shared {@link refusal}'s line until then, which #1161
+   * moved above the block list (#1087), so on a phone the warning was above
+   * the list, the chart and the whole form and a sighted rider saw nothing
+   * happen.
+   */
+  const [blockRefusal, setBlockRefusal] = useState<BuildRefusal | undefined>(undefined);
   const [saved, setSaved] = useState<string | undefined>(undefined);
   const [draft, setDraft] = useState<BlockDraft>(EMPTY_DRAFT);
   const [blocks, setBlocks] = useState<readonly WorkoutBlock[]>([]);
@@ -276,6 +284,7 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
     if (selected === undefined) return;
     setSaved(undefined);
     setRefusal(undefined);
+    setBlockRefusal(undefined);
     setFileNote(undefined);
     setFileFault(undefined);
   }, [selected]);
@@ -331,7 +340,8 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
       event.preventDefault();
       const outcome = blockFromDraft(draft);
       if (outcome.status === 'refused') {
-        setRefusal(outcome.refusal);
+        setBlockRefusal(outcome.refusal);
+        setRefusal(undefined);
         setSaved(undefined);
         return;
       }
@@ -340,6 +350,7 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
       // intervals blocks should not re-pick "Intervals" six times, and a rider
       // who wanted a different kind is one click from it.
       setDraft({ ...EMPTY_DRAFT, kind: draft.kind });
+      setBlockRefusal(undefined);
       setRefusal(undefined);
       setSaved(undefined);
     },
@@ -362,6 +373,8 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
         blocks,
         now: clock(),
       });
+      // One builder message at a time, as when the two shared a line.
+      setBlockRefusal(undefined);
       if (outcome.status === 'refused') {
         setRefusal(outcome.refusal);
         setSaved(undefined);
@@ -660,7 +673,7 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
             under the fold on a phone with four blocks, and 66 px above it on
             the owner's tablet in landscape, 16 px over the 50 px floor, which a
             fifth block would have spent (`controls-first.browser.spec.ts`
-            §"#1050"). A rider names and saves what the list below holds.
+            §"#1050, #1087"). A rider names and saves what the list below holds.
           */}
               <form aria-label="Save this workout" onSubmit={(event) => void onSave(event)}>
                 <p>
@@ -682,7 +695,9 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
             Live since #670's review: each appears because the rider pressed
             *Save workout*, *Add block* or confirmed a delete, which is what
             `StatusMessage` §`live` is for — and without it the one sentence
-            saying a save happened was never announced.
+            saying a save happened was never announced. ⚠️ Since #1165 a
+            refused *Add block* is NOT here but in its own form, beside the
+            button (`blockRefusal`).
           */}
               {refusal === undefined ? null : (
                 <StatusMessage tone="warning" live>
@@ -925,6 +940,12 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
                     onChange={(event) => setDraft({ ...draft, label: event.target.value })}
                   />
                 </p>
+                {/* #1165: the refusal beside the button that was pressed. */}
+                {blockRefusal === undefined ? null : (
+                  <StatusMessage tone="warning" live>
+                    {blockRefusal.message}
+                  </StatusMessage>
+                )}
                 <Button variant="secondary" type="submit">
                   Add block
                 </Button>

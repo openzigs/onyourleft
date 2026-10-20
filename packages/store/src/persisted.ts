@@ -98,6 +98,7 @@ import {
 import { parseKitColour } from './kit-colour';
 import { parseUnitSystem } from './unit-system';
 import { DEFAULT_VISIBILITY, parseVisibility } from './visibility';
+import { workoutBlockFactsOf } from './workout-block-persisted';
 
 // --- On-disk shapes ---------------------------------------------------------
 
@@ -159,6 +160,11 @@ export interface PersistedRideFacts {
   replansDropped?: number;
   /** @see RideFacts.races — #785. Each re-read on the way out: @see racesOf */
   races?: PersistedRoomRace[];
+  /**
+   * @see RideFacts.workoutBlocks — #1319. Plain JSON in the record's own
+   * shape, re-read whole on the way in and out: @see workoutBlockFactsOf
+   */
+  workoutBlocks?: unknown[];
 }
 
 /**
@@ -598,6 +604,10 @@ function toPersistedRideFacts(facts: RideFacts): PersistedRideFacts {
   // never the ride (#785).
   const races = racesOf(facts.races);
   if (races !== undefined) row.races = races.map(toPersistedRoomRace);
+  // #1319: through the reader on the way in too, so only a list that reads
+  // back is written — and one that does not is left out, never the ride.
+  const blocks = workoutBlockFactsOf(facts.workoutBlocks);
+  if (blocks !== undefined) row.workoutBlocks = [...blocks];
   return row;
 }
 
@@ -759,6 +769,8 @@ function fromPersistedRideFacts(row: unknown): RideFacts {
   const replans = replanRecordsOf(facts.replans, facts.replansDropped);
   // #785: never a throw either. @see racesOf
   const races = racesOf(facts.races);
+  // #1319: never a throw either. @see workoutBlockFactsOf
+  const workoutBlocks = workoutBlockFactsOf(facts.workoutBlocks);
   return {
     ...(facts.ascent === undefined
       ? {}
@@ -804,6 +816,7 @@ function fromPersistedRideFacts(row: unknown): RideFacts {
       : { ghostRaced: decodedBoolean('activity.rideFacts.ghostRaced', facts.ghostRaced) }),
     ...replans,
     ...(races === undefined ? {} : { races }),
+    ...(workoutBlocks === undefined ? {} : { workoutBlocks }),
   };
 }
 

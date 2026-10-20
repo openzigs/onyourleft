@@ -780,18 +780,20 @@ export function createReplanSession(options: ReplanSessionOptions): ReplanSessio
       // interrupted. D-8 drops a waiting move on a lost link; this is the
       // same rule for a move that has not arrived yet.
       //
-      // ⚠️ The strap's half is narrower than that. `heartRatePaired` is H1's
-      // word: a heart-rate sensor is in the list of paired devices. A strap
-      // that goes QUIET, or drops its own link, is still paired, so a job
-      // out then is NOT cancelled and its answer is read; only unpairing
-      // the strap cancels it. The heart-rate hold deals with a silent strap
-      // itself, and a summary of a block with no reading carries no heart
-      // rate rather than a made-up one.
+      // ⚠️ The strap's half is a LIVE strap, not only a paired one (#1329).
+      // `heartRatePaired` is H1's word: a heart-rate sensor is in the list
+      // of paired devices. A strap that goes QUIET, or drops its own link,
+      // is still paired, and until #1329 a job out then was not cancelled
+      // and its answer was read. Now a heart rate that is not live (the
+      // controller's `liveReading`, which goes `undefined` once a reading is
+      // stale) cancels a job in flight as unpairing does, and no job is
+      // started without one. The next boundary may ask again.
+      const strap = facts.heartRatePaired && facts.heartRate !== undefined;
       if (
         flight !== undefined &&
         (facts.rescue ||
           !facts.control ||
-          !facts.heartRatePaired ||
+          !strap ||
           now - flight.sentAt > REPLAN_FRESHNESS_SECONDS ||
           where.remaining < REPLAN_BOUNDARY_LEAD_SECONDS)
       ) {
@@ -804,7 +806,7 @@ export function createReplanSession(options: ReplanSessionOptions): ReplanSessio
         flight === undefined &&
         !facts.rescue &&
         facts.control &&
-        facts.heartRatePaired &&
+        strap &&
         !where.last &&
         where.remaining >= REPLAN_BOUNDARY_LEAD_SECONDS &&
         latest.blocks.length <= REPLAN_MAXIMUM_BLOCKS &&

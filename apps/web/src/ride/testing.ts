@@ -58,6 +58,9 @@ export interface RecordedCalls {
   resume: number;
   armStop: number;
   cancelStop: number;
+  /** #1432 — the touch lock. */
+  lockTouch: number;
+  unlockTouch: number;
   confirmStop: number;
   /** #1042 — the latched outcomes the game handed over, in order. */
   readonly noteGameRideEnded: (string | undefined)[];
@@ -93,6 +96,7 @@ export function idleSnapshot(): RideSnapshot {
   return {
     phase: 'idle',
     stopArmed: false,
+    touchLocked: false,
     elapsedSeconds: 0,
     movingSeconds: 0,
     courseLapSeconds: undefined,
@@ -206,6 +210,8 @@ export function stubRideController(
     resume: 0,
     armStop: 0,
     cancelStop: 0,
+    lockTouch: 0,
+    unlockTouch: 0,
     confirmStop: 0,
     noteGameRideEnded: [],
     recordForRoom: 0,
@@ -277,6 +283,12 @@ export function stubRideController(
     },
     cancelStop: () => {
       calls.cancelStop += 1;
+    },
+    lockTouch: () => {
+      calls.lockTouch += 1;
+    },
+    unlockTouch: () => {
+      calls.unlockTouch += 1;
     },
     noteGameRideEnded: (outcome) => {
       calls.noteGameRideEnded.push(outcome);

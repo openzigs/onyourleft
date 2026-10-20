@@ -131,7 +131,12 @@ import {
   type HoldAnnounced,
   type WorkoutHold,
 } from '../workout/hold-text';
-import { planChangeAnnouncement, planDiscardedAnnouncement } from '../workout/replan-text';
+import {
+  planChangeAnnouncement,
+  planDiscardedAnnouncement,
+  REPLAN_LABEL,
+  REPLANS_OFF,
+} from '../workout/replan-text';
 import {
   announce,
   INITIAL_ANNOUNCER,
@@ -464,6 +469,13 @@ export const STANDING_NOTICE_SECONDS = 15;
  * the stylesheet chose, and this is that layout's own condition narrowed.
  */
 const ONE_NOTICE_ONLY_QUERY = '(min-width: 22.5rem) and (width < 25rem) and (min-height: 47rem)';
+
+/**
+ * #1329: what the HUD's region says once *Switch re-plans off* is pressed —
+ * the Ride screen's own answer, under the re-plan lines' label, as the
+ * region says a waiting move's sentence (`replan-text.ts`).
+ */
+const REPLANS_OFF_SAID = `${REPLAN_LABEL}: ${REPLANS_OFF}`;
 
 /** Whether this window is one {@link ONE_NOTICE_ONLY_QUERY} names. `false` with no `matchMedia`. */
 function oneNoticeOnly(): boolean {
@@ -832,6 +844,14 @@ export function GameView(props: GameViewProps): JSX.Element {
   const planOfferedRef = useRef<number | undefined>(undefined);
   /** The discarded re-plan last said to have been discarded, by its revision — #1244. */
   const planDiscardedSaidRef = useRef<number | undefined>(undefined);
+  /**
+   * #1329: the rider pressed *Switch re-plans off* on the HUD and the answer
+   * — `replan-text.ts` §`REPLANS_OFF` — is owed to the region: offered on
+   * every call until it is said (a lower event behind a higher one is
+   * dropped, #647's "owed" rule), with announcements on only. The control
+   * going is what a rider with them off sees, as with *Keep the plan*.
+   */
+  const replansOffOwedRef = useRef(false);
   /**
    * Whether *"Keep the screen on: …"* has been SPOKEN on this ride while the
    * refusal stands — #647, `GameTrainerPort.recordingMayStop`. Cleared when a
@@ -1343,6 +1363,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       holdSeenRef.current = NOTHING_ANNOUNCED;
       planOfferedRef.current = trainerPortRef.current?.workoutPlanChange?.()?.waiting.revision;
       planDiscardedSaidRef.current = trainerPortRef.current?.workoutPlanDiscarded?.();
+      replansOffOwedRef.current = false;
       mayStopSaidRef.current = false;
       gradientRef.current =
         found.control === undefined
@@ -1832,13 +1853,22 @@ export function GameView(props: GameViewProps): JSX.Element {
       const planDiscarded = planDiscardedAnnouncement(
         planDiscardedSaidRef.current,
         trainerPortRef.current?.workoutPlanDiscarded?.(),
-        // Only of the move this region was offered. The HUD shows no
-        // sentence (#1324), so a held one was neither seen nor heard.
+        // Only of the move this region was offered. Since #1324 the HUD
+        // shows a held move's sentence beside *Keep the plan*, but it was
+        // never heard, so it is not said to have been dropped.
         planOfferedRef.current,
       );
       planDiscardedSaidRef.current = planDiscarded.said;
       if (planDiscarded.event !== undefined) {
         events.push(planDiscarded.event);
+      }
+      // #1329: the answer to *Switch re-plans off*, owed until it is said.
+      if (replansOffOwedRef.current) {
+        if (announcementsRef.current.enabled) {
+          events.push({ kind: 'plan-changed', text: REPLANS_OFF_SAID });
+        } else {
+          replansOffOwedRef.current = false;
+        }
       }
       // #1312: the line of the course. The game says only WHERE it was; the
       // lap that comes back is the recording's own (`recording/laps.ts`): its
@@ -1911,6 +1941,9 @@ export function GameView(props: GameViewProps): JSX.Element {
       }
       if (heard.kind === 'lap-ended') {
         lapOwedRef.current = undefined;
+      }
+      if (heard.sentence === REPLANS_OFF_SAID) {
+        replansOffOwedRef.current = false;
       }
       // #400: the distance sound plays on the frame its SENTENCE is said and
       // on no other, so it is never the only carrier of a mark passed.
@@ -2349,12 +2382,27 @@ export function GameView(props: GameViewProps): JSX.Element {
         paused={phase === 'paused'}
         // #1244: *Keep the plan*, only while an accepted re-plan waits for
         // the workout's next block. The controller's own `keepThePlan`.
-        onKeepPlan={
-          props.trainer?.workoutPlanChange?.() === undefined
+        // #1324: with the move's sentence, shown above it.
+        keepPlan={(() => {
+          const waiting = props.trainer?.workoutPlanChange?.()?.waiting;
+          return waiting === undefined
             ? undefined
-            : () => {
-                props.trainer?.keepThePlan?.();
+            : {
+                sentence: waiting.sentence,
+                onKeep: () => {
+                  props.trainer?.keepThePlan?.();
+                },
+              };
+        })()}
+        // #1329: *Switch re-plans off*, for as long as the running workout
+        // has re-plans on. The controller's own `switchReplansOff`.
+        onReplansOff={
+          props.trainer?.workoutReplansOn?.() === true
+            ? () => {
+                props.trainer?.switchReplansOff?.();
+                replansOffOwedRef.current = true;
               }
+            : undefined
         }
         // #400: the mute and the volume, on the ride's own screen — SC 1.4.2.
         // Only for a rider who turned sounds on: there is nothing to mute

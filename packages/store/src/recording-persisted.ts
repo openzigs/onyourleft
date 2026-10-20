@@ -34,12 +34,14 @@ import {
 import {
   RECORDING_STORED_STATES,
   type RecordedCourseLap,
+  type RecordedWorkoutBlock,
   type RecordingHeaderDamage,
   type RecordingSessionRecord,
   type RecordingStoredState,
 } from './recording';
 import type { RoomRaceFact } from './records';
 import type { ChannelEncoding } from './stream-codec';
+import { recordedWorkoutBlocksOf } from './workout-block-persisted';
 
 /** The small indexed row: one per recording. @see RecordingSessionRecord */
 export interface PersistedRecordingSession {
@@ -80,6 +82,13 @@ export interface PersistedRecordingSession {
    * out, and never a throw: @see racesOf
    */
   roomRaces?: PersistedRoomRace[];
+  /**
+   * The workout blocks so far — #1319. Absent with none, and on every header
+   * written before the field existed. Optional and unindexed, so no schema
+   * version moved. Plain JSON in the record's own shape, re-read whole on the
+   * way in and out: @see recordedWorkoutBlocksOf
+   */
+  workoutBlocks?: unknown[];
 }
 
 /** One lap of a course. @see RecordedCourseLap */
@@ -169,7 +178,19 @@ export function toPersistedRecordingSession(
     // #785: only the races that read back are written, so one that does not
     // is left out and never refuses the header (#1316's lesson). @see racesOf
     ...roomRacesRow(record.roomRaces),
+    // #1319: only a list that reads back is written, so one that does not is
+    // left out and never refuses the header. @see recordedWorkoutBlocksOf
+    ...workoutBlocksRow(record.workoutBlocks, record.startedAt, record.updatedAt),
   };
+}
+
+function workoutBlocksRow(
+  value: unknown,
+  startedAt: number,
+  updatedAt: number,
+): { workoutBlocks?: unknown[] } {
+  const blocks = recordedWorkoutBlocksOf(value, startedAt, updatedAt);
+  return blocks === undefined ? {} : { workoutBlocks: [...blocks] };
 }
 
 function toPersistedCourseLap(lap: RecordedCourseLap): PersistedCourseLap {
@@ -249,6 +270,8 @@ export function fromPersistedRecordingSession(
     // #785: never a throw — a race that does not read is dropped, and the
     // recording is listed and recovered all the same. @see racesOf
     ...roomRacesOut(row.roomRaces),
+    // #1319: never a throw — @see recordedWorkoutBlocksOf
+    ...workoutBlocksOut(row.workoutBlocks, startedAt, updatedAt),
     ...(damaged.length === 0 ? {} : { damaged }),
   };
 }
@@ -264,6 +287,15 @@ function readOrUndefined<T>(read: () => T): T | undefined {
   } catch {
     return undefined;
   }
+}
+
+function workoutBlocksOut(
+  value: unknown,
+  startedAt: number,
+  updatedAt: number,
+): { workoutBlocks?: readonly RecordedWorkoutBlock[] } {
+  const blocks = recordedWorkoutBlocksOf(value, startedAt, updatedAt);
+  return blocks === undefined ? {} : { workoutBlocks: blocks };
 }
 
 function roomRacesOut(value: unknown): { roomRaces?: readonly RoomRaceFact[] } {

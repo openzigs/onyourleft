@@ -210,38 +210,53 @@ function reflowWalks(theme: Theme): void {
       });
     }
   }
-}
 
-/**
- * #1087 — the workout builder WITH blocks reflows at 320×256 and 844×390.
- *
- * The walks above render the builder with no blocks, so its block list and
- * block chart (#1043, #1050) — drawn only once a block exists — were never
- * reflow-checked. `?builder=blocks` adds one block of each kind through the
- * builder's own *Add block* form (`reflow-harness.tsx` §`buildOnWorkouts`),
- * and the Workouts route is judged by the same `reflowFaults` as every route
- * in the walk. Its control keeps each block's line on one line
- * (`&blocks=nowrap`), which must scroll the page sideways at 320×256 — so a
- * green case here laid the block list out.
- */
-test.describe('the workout builder with blocks reflows — #1087', () => {
-  const route = ALL_ROUTES.find((each) => each.id === 'workouts');
-  if (route === undefined) {
+  /*
+   * #1087 — the workout builder WITH blocks reflows at 320×256 and 844×390.
+   *
+   * The walks above render the builder with no blocks, so its block list and
+   * block chart (#1043, #1050) — drawn only once a block exists — were never
+   * reflow-checked. `?builder=blocks` adds one block of each kind through the
+   * builder's own *Add block* form (`reflow-harness.tsx` §`buildOnWorkouts`),
+   * and the Workouts route is judged by the same `reflowFaults` as every
+   * route in the walk. Its control is the describe after this function.
+   *
+   * ⚠️ Here, inside the walks, since #1165: it ran in the light palette
+   * only, beside them, while every walk since #672 runs in both.
+   */
+  const workouts = ALL_ROUTES.find((each) => each.id === 'workouts');
+  if (workouts === undefined) {
     throw new Error('ALL_ROUTES has no workouts route');
   }
   for (const [width, height] of VIEWPORTS.filter(([w]) => w !== 390)) {
-    test(`at ${String(width)}×${String(height)}`, async ({ page }) => {
+    test(`the workout builder with blocks reflows at ${String(width)}×${String(height)}, ${theme} — #1087`, async ({
+      page,
+    }) => {
       await open(page, width, height, 'data=populated&builder=blocks');
-      const seen = await visit(page, hrefFor(route));
+      expect(await page.evaluate(() => document.documentElement.dataset['theme'])).toBe(theme);
+      const seen = await visit(page, hrefFor(workouts));
       const builder = page.locator('.oyl-main .oyl-sections').first();
       // The fixture is what it says, or this walked the empty builder again.
       expect(await builder.locator('ol > li').count()).toBe(4);
       expect(await builder.locator('svg.oyl-block-chart').count()).toBe(1);
       console.log(
-        `reflow builder=blocks ${String(width)}×${String(height)}: ${reflowMargin(route, seen)}`,
+        `reflow builder=blocks ${String(width)}×${String(height)} ${theme}: ${reflowMargin(workouts, seen)}`,
       );
-      expect(reflowFaults(route, seen, true)).toEqual([]);
+      expect(reflowFaults(workouts, seen, true)).toEqual([]);
     });
+  }
+}
+
+/**
+ * #1087's control, for the builder-with-blocks case in {@link reflowWalks}:
+ * each block's line kept on one line (`&blocks=nowrap`) must scroll the page
+ * sideways at 320×256 — so a green case there laid the block list out. One
+ * palette is enough for a control: what it fails on is layout.
+ */
+test.describe('the workout builder with blocks reflows — #1087', () => {
+  const route = ALL_ROUTES.find((each) => each.id === 'workouts');
+  if (route === undefined) {
+    throw new Error('ALL_ROUTES has no workouts route');
   }
 
   test('the control — a block line that cannot wrap scrolls the page sideways at 320×256', async ({
@@ -255,6 +270,59 @@ test.describe('the workout builder with blocks reflows — #1087', () => {
       faults.join('\n'),
     ).toBe(true);
   });
+});
+
+/**
+ * #1165 — a refused *Add block* is seen where it was pressed. With blocks in
+ * the builder (`?builder=blocks`) the Add-a-block form is under the list and
+ * the chart, so the press scrolls the page down to *Add block*; the refusal
+ * must then be in the viewport, in that form. Until #1165 it shared the save
+ * form's line above the list (#1161), and the case's control shows that is
+ * where a rider was not looking: at the press, the save form is above the
+ * top of the viewport.
+ */
+test.describe('a refused Add block is shown beside its own form — #1165', () => {
+  const route = ALL_ROUTES.find((each) => each.id === 'workouts');
+  if (route === undefined) {
+    throw new Error('ALL_ROUTES has no workouts route');
+  }
+  for (const [width, height] of [
+    [390, 844],
+    [844, 390],
+  ] as const) {
+    test(`in the viewport at the press at ${String(width)}×${String(height)}`, async ({ page }) => {
+      await open(page, width, height, 'data=populated&builder=blocks');
+      await visit(page, hrefFor(route));
+      const form = page.locator('form[aria-label="Add a block"]');
+      // The fixture's last block keeps its kind in the form; a steady one has a target.
+      await form.locator('#block-kind').selectOption('steady');
+      await form.locator('#block-minutes').fill('10');
+      await form.locator('#block-percent').fill('900');
+      await form.getByRole('button', { name: 'Add block' }).click();
+      const warning = form.locator('.oyl-status', { hasText: '20% to 300%' });
+      await expect(warning).toHaveCount(1);
+      const seen = await page.evaluate(() => {
+        const box = (selector: string) => {
+          const rect = document.querySelector(selector)?.getBoundingClientRect();
+          return rect === undefined ? undefined : { top: rect.top, bottom: rect.bottom };
+        };
+        return {
+          warning: box('form[aria-label="Add a block"] .oyl-status'),
+          save: box('form[aria-label="Save this workout"]'),
+          viewport: window.innerHeight,
+        };
+      });
+      console.log(
+        `#1165 Add block refused at ${String(width)}×${String(height)}: the warning ` +
+          `${seen.warning?.top.toFixed(0) ?? '?'}–${seen.warning?.bottom.toFixed(0) ?? '?'} px ` +
+          `of ${String(seen.viewport)}; the save form's bottom ${seen.save?.bottom.toFixed(0) ?? '?'} px`,
+      );
+      expect(seen.warning?.top ?? -1).toBeGreaterThanOrEqual(0);
+      expect(seen.warning?.bottom ?? Infinity).toBeLessThanOrEqual(seen.viewport);
+      // The control: the line it used to share is out of sight at the press.
+      expect(seen.save?.bottom ?? Infinity).toBeLessThan(0);
+    });
+  }
 });
 
 /**

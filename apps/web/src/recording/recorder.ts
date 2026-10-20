@@ -79,6 +79,7 @@ import type {
   NewRecordingChunk,
   NewRecordingSession,
   RecordedCourseLap,
+  RecordedWorkoutBlock,
   RecordingSessionId,
   RecordingSessionListing,
   RecordingStoredState,
@@ -264,6 +265,21 @@ export interface Recorder {
    * back is left out of that header rather than refusing it.
    */
   noteRoomRace(race: RoomRaceFact): void;
+  /**
+   * The blocks of the workouts ridden during this recording, in order, the one
+   * being ridden last and held as cut short — #1319, `workout-blocks.ts`. A
+   * recorder rebuilt by {@link recoverRecorder} starts with the ones its
+   * checkpoint held.
+   */
+  readonly workoutBlocks: readonly RecordedWorkoutBlock[];
+  /**
+   * Replace the recording's workout blocks with `blocks` — #1319.
+   *
+   * ⚠️ **Writes nothing itself**, for {@link noteRoomRace}'s reason: the
+   * blocks go out in the header every {@link Recorder.flush} rewrites, so a
+   * recording that dies is recovered with them as far as the last flush.
+   */
+  noteWorkoutBlocks(blocks: readonly RecordedWorkoutBlock[]): void;
 
   /** Starts recording and writes the header, so a crash one second in is recoverable. */
   start(at: UnixSeconds): Promise<void>;
@@ -330,6 +346,7 @@ export function createRecorder(options: RecorderOptions): Recorder {
     session,
     { flushedThrough: 0, checkpoints: 0, headerWritten: false },
     interval,
+    [],
     [],
     [],
   );
@@ -405,6 +422,9 @@ export async function recoverRecorder(
       : [...recovered.courseLaps, { ...recovered.openCourseLap, partial: true }],
     // #785, for the same reason.
     recovered.roomRaces,
+    // #1319, for the same reason. The block being ridden when the tab died
+    // is already held as cut short.
+    recovered.workoutBlocks ?? [],
   );
   return { recorder, recovered };
 }
@@ -441,6 +461,7 @@ function recorderOver(
   sampleInterval: Seconds,
   lapsSoFar: readonly RecordedCourseLap[],
   racesSoFar: readonly RoomRaceFact[],
+  blocksSoFar: readonly RecordedWorkoutBlock[],
 ): Recorder {
   const { store, athleteId, sessionId } = options;
   /** @see Recorder.courseLaps */
@@ -449,6 +470,8 @@ function recorderOver(
   let openCourseLap: RecordedCourseLap | undefined;
   /** @see Recorder.roomRaces */
   let roomRaces = racesSoFar;
+  /** @see Recorder.workoutBlocks */
+  let workoutBlocks = blocksSoFar;
   const flushInterval = options.flushIntervalSeconds ?? DEFAULT_FLUSH_INTERVAL_SECONDS;
 
   let storageState: RecorderStorageState = 'ok';
@@ -472,13 +495,25 @@ function recorderOver(
       // restarts its clock at its last RECOVERED slot, which is a second or
       // two before a lap that ended inside the late tolerance — so until its
       // clock moves on, `at` is earlier than a lap it already holds.
-      updatedAt: unixSeconds(Math.max(at, courseLaps.at(-1)?.to.at ?? at)),
+      // #1319: nor than the block being ridden has been run on to, for the
+      // same reason — a list with a block past its header is dropped whole.
+      updatedAt: unixSeconds(Math.max(at, courseLaps.at(-1)?.to.at ?? at, lastBlockEnd())),
       pauses: series.pauses,
       ...(savedAs === undefined ? {} : { savedAs }),
       ...(courseLaps.length === 0 ? {} : { courseLaps }),
       ...(openCourseLap === undefined ? {} : { openCourseLap }),
       ...(roomRaces.length === 0 ? {} : { roomRaces }),
+      ...(workoutBlocks.length === 0 ? {} : { workoutBlocks }),
     };
+  }
+
+  /** The latest instant any workout block has been run on to, or nought with none. */
+  function lastBlockEnd(): number {
+    let latest = 0;
+    for (const block of workoutBlocks) {
+      if (block.outcome !== 'skipped') latest = Math.max(latest, block.to.at);
+    }
+    return latest;
   }
 
   function storedState(): RecordingStoredState {
@@ -575,6 +610,12 @@ function recorderOver(
     },
     noteRoomRace(race: RoomRaceFact): void {
       roomRaces = [...roomRaces, race];
+    },
+    get workoutBlocks() {
+      return workoutBlocks;
+    },
+    noteWorkoutBlocks(blocks: readonly RecordedWorkoutBlock[]): void {
+      workoutBlocks = blocks;
     },
 
     async start(at: UnixSeconds): Promise<void> {

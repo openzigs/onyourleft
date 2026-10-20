@@ -89,6 +89,7 @@ import {
 } from '../detail/load';
 import type { SharedTrack } from '../detail/privacy';
 import { LapsTable } from '../detail/LapsTable';
+import { WorkoutBlocksTable } from '../detail/WorkoutBlocksTable';
 import { SideCameraSection } from '../detail/SideCameraSection';
 import { RideWriteUpSection } from '../detail/RideWriteUpSection';
 import { RaceConsentSection } from '../detail/RaceConsentSection';
@@ -596,6 +597,18 @@ export function ActivityDetailView({
       <h3>Laps</h3>
       {/* #1312: every figure a lap states, the best lap and a part lap marked. */}
       <LapsTable laps={laps} units={units} />
+
+      {/*
+        #1319: a ride with a workout lists its blocks, under their own
+        heading after the laps — two tables, never one (WorkoutBlocksTable).
+        A ride with no workout renders nothing here.
+      */}
+      {activity.rideFacts?.workoutBlocks === undefined ? null : (
+        <>
+          <h3>Workout blocks</h3>
+          <WorkoutBlocksTable blocks={activity.rideFacts.workoutBlocks} />
+        </>
+      )}
 
       {/*
         #388. Only for a ride the side camera filmed — the owner's ruling puts

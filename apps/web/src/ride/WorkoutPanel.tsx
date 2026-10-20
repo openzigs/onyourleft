@@ -418,7 +418,14 @@ export function WorkoutPanel({
           `rideview.browser.spec.ts` §"#1244" measures both.
         */}
         <div className="oyl-workout-controls">
-          <Button variant="secondary" size="ride" type="button" onClick={onEnd}>
+          <Button
+            variant="secondary"
+            size="ride"
+            type="button"
+            onClick={onEnd}
+            // #1432: ends the workout's ERG; never stopped by the touch lock.
+            touchLockExempt
+          >
             End workout
           </Button>
           {workout.replan === undefined ||
@@ -431,7 +438,9 @@ export function WorkoutPanel({
         </div>
         {workout.replan?.off !== true ? null : (
           // The answer to the rider's own press, so it is `live` (#445).
-          <StatusMessage tone="info" live>
+          // #1329: under the re-plan lines' own label, not the design
+          // system's default "Note".
+          <StatusMessage tone="info" label={REPLAN_LABEL} live>
             {REPLANS_OFF}
           </StatusMessage>
         )}

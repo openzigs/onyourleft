@@ -401,7 +401,8 @@ export function TrainerPanel({
               <Button variant="secondary" size="ride" type="submit">
                 Set target
               </Button>
-              <Button variant="secondary" onClick={onClearTarget}>
+              {/* #1432: the trainer's release, never stopped by the touch lock. */}
+              <Button variant="secondary" onClick={onClearTarget} touchLockExempt>
                 End ERG
               </Button>
               {range === undefined ? null : (
