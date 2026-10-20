@@ -58,11 +58,14 @@ const SECRET = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
 function setUp(options: SidePeerNetworkOptions = {}, screenLock?: ScreenLockSource) {
   const network = sidePeerNetwork(options);
   const time = virtualTime();
+  // #1110: how far the wall clock has been moved from the timers' time. Zero
+  // unless a test moves it; the timers never see it.
+  let skew = 0;
   const port = sidePairingPort({
     screenLock,
     peer: network.peer,
     randomBytes: (length) => SECRET.slice(0, length),
-    clock: time.clock,
+    clock: () => time.clock() + skew,
     after: time.after,
     every: time.every,
   });
@@ -73,7 +76,10 @@ function setUp(options: SidePeerNetworkOptions = {}, screenLock?: ScreenLockSour
       await flushSideLink();
     }
   };
-  return { network, time, port, pass };
+  const moveClock = (milliseconds: number): void => {
+    skew += milliseconds;
+  };
+  return { network, time, port, pass, moveClock };
 }
 
 function isPairing<T extends object>(value: T | PairingRefusal): value is T {
@@ -653,6 +659,7 @@ describe('pairing, through both codes', () => {
     expect(phone.link.sideLinkCondition()).toBe('ended');
     // Zero, not nothing: the screen tells a wait that ran out from any other end.
     expect(phone.secondsForTabletToRead()).toBe(0);
+    expect(phone.tabletReadTimedOut()).toBe(true);
     // And no timer of the phone's is left running: not the wait, not the countdown.
     expect(context.time.active()).toBe(tabletTimers);
   });
@@ -661,6 +668,79 @@ describe('pairing, through both codes', () => {
     expect(TABLET_READ_LIMIT_MILLISECONDS).toBe(2 * 60 * 1000);
     expect(TABLET_READ_LIMIT_MILLISECONDS).toBeGreaterThan(CONNECT_LIMIT_MILLISECONDS);
     expect(TABLET_READ_LIMIT_MILLISECONDS).toBeLessThan(OFFER_LIFETIME_MILLISECONDS);
+  });
+
+  it('bounds the phone’s wait by the offer it answers: a scan at 4:30 counts down thirty seconds (#1110)', async () => {
+    const context = setUp();
+    const tablet = await offer(context.port);
+    context.time.advance(OFFER_LIFETIME_MILLISECONDS - 30_000);
+    const phone = await answer(context.port, tablet.offerCode);
+    expect(phone.secondsForTabletToRead()).toBe(30);
+    context.time.advance(30_000 - 1);
+    expect(phone.link.sideLinkCondition()).toBe('connecting');
+    expect(tablet.control.sideControlState().ended).toBeUndefined();
+    context.time.advance(1);
+    // The phone stops with the offer, not ninety seconds after it.
+    expect(tablet.control.sideControlState().ended).toBe('offer-expired');
+    expect(phone.link.sideLinkCondition()).toBe('ended');
+    expect(phone.tabletReadTimedOut()).toBe(true);
+  });
+
+  it('refuses an offer that has run out, before making a connection for it (#1110)', async () => {
+    const context = setUp();
+    const tablet = await offer(context.port);
+    context.time.advance(OFFER_LIFETIME_MILLISECONDS);
+    expect(tablet.control.sideControlState().ended).toBe('offer-expired');
+    const peers = context.network.peers.length;
+    expect(await context.port.answerSideCamera(tablet.offerCode)).toBe('expired');
+    expect(context.network.peers).toHaveLength(peers);
+    // One second earlier, by the second the code names, it is still answerable.
+    const fresh = setUp();
+    const live = await offer(fresh.port);
+    fresh.time.advance(OFFER_LIFETIME_MILLISECONDS - 1000);
+    expect(isPairing(await fresh.port.answerSideCamera(live.offerCode))).toBe(true);
+  });
+
+  it('waits no more than two minutes on a phone whose clock is behind the tablet’s (#1110)', async () => {
+    const context = setUp();
+    const tablet = await offer(context.port);
+    context.moveClock(-10 * 60 * 1000);
+    const phone = await answer(context.port, tablet.offerCode);
+    expect(phone.secondsForTabletToRead()).toBe(TABLET_READ_LIMIT_MILLISECONDS / 1000);
+  });
+
+  it('records that the wait ran out in its own timer, whatever the wall clock did (#1110)', async () => {
+    // The clock moved back ten minutes under the countdown: the seconds left
+    // no longer read zero, and the wait ran out all the same.
+    const back = setUp();
+    const phone = await answer(back.port, (await offer(back.port)).offerCode);
+    back.moveClock(-10 * 60 * 1000);
+    back.time.advance(TABLET_READ_LIMIT_MILLISECONDS);
+    expect(phone.link.sideLinkCondition()).toBe('ended');
+    expect(phone.secondsForTabletToRead()).not.toBe(0);
+    expect(phone.tabletReadTimedOut()).toBe(true);
+    // The clock moved forward past the deadline, and the link ended for
+    // another reason before the wait ran out: that is not a timeout.
+    const forward = setUp();
+    const other = await answer(forward.port, (await offer(forward.port)).offerCode);
+    forward.moveClock(10 * 60 * 1000);
+    forward.time.advance(1000);
+    other.link.endSideLink();
+    expect(other.secondsForTabletToRead()).toBe(0);
+    expect(other.tabletReadTimedOut()).toBe(false);
+  });
+
+  it('does not call the machine handshake running out a read that timed out (#1110)', async () => {
+    const context = setUp();
+    const phone = await answer(context.port, (await offer(context.port)).offerCode);
+    const phoneControl = context.network.peers[1]?.channels.find(
+      (channel) => channel.label === CONTROL_CHANNEL,
+    );
+    Object.assign(phoneControl ?? {}, { readyState: 'open' });
+    phoneControl?.onopen?.();
+    context.time.advance(CONNECT_LIMIT_MILLISECONDS);
+    expect(phone.link.sideLinkCondition()).toBe('ended');
+    expect(phone.tabletReadTimedOut()).toBe(false);
   });
 
   it('counts the wait down once a second, and stops counting once the tablet has read the code (#1108)', async () => {

@@ -43,7 +43,9 @@ import {
 } from '../src/camera/browser-camera';
 import { CameraController } from '../src/camera/session';
 import { mainThreadJpegEncoder } from '../src/camera/side-picture-encoder';
-import { scriptedLink, scriptedSidePairing } from '../src/camera/testing';
+import { pairingCodeText } from '../src/camera/side-link-code';
+import { pairingCodeModules } from '../src/camera/side-link-qr';
+import { photographedCode, scriptedLink, scriptedSidePairing } from '../src/camera/testing';
 import { AppShell } from '../src/shell/AppShell';
 import { viewGroupsLoaded } from './views-loaded';
 import { failLiveTablet, runLiveTablet } from './sidelive-harness';
@@ -64,6 +66,40 @@ const NO_BLUETOOTH: CapabilityProbe = { bluetooth: undefined, secureContext: tru
  * tall as the screen.
  */
 const PAIRING_SCAN = new URLSearchParams(location.search).get('pairing') === 'scan';
+
+/**
+ * `?pairing=answer` — #1110: the same phone, one step on. Its camera "sees" a
+ * code, and the pairing answers with a code the size a real answer is (one
+ * IPv4 candidate, 49 modules), so the phone's own code is on the screen where
+ * the tablet's front camera has to read it — and its drawn width is measured.
+ */
+const PAIRING_ANSWER = new URLSearchParams(location.search).get('pairing') === 'answer';
+
+/** An answer as `side-link.ts` makes one, with one candidate: #1109 measured 149 characters. */
+function realisticAnswer(): string {
+  const made = pairingCodeText('answer', {
+    ufrag: 'Zq8h',
+    password: 'Qm3v0f8y1Jc9dZ2kL5nH7tRp',
+    fingerprint: Uint8Array.from({ length: 32 }, (_, index) => index * 7),
+    setup: 'active',
+    candidates: [{ address: '192.168.68.69', port: 50_123, transport: 'udp', type: 'host' }],
+  });
+  if (!('text' in made)) {
+    throw new Error('side-camera harness: no answer code');
+  }
+  return made.text;
+}
+
+/** What `?pairing=answer` measures: the phone's own code, as drawn. */
+export interface AnswerCodeMeasurement {
+  readonly viewport: { readonly width: number; readonly height: number };
+  /** The drawn code, quiet zone included. */
+  readonly code: Box;
+  /** Its modules across, quiet zone included: the `viewBox`'s width. */
+  readonly modules: number;
+  /** The column it is drawn in: what "as wide as its column" can be at most. */
+  readonly column: Box;
+}
 
 /**
  * `?pictures=worker` and `?pictures=main-thread` — #1112: the phone FILMING
@@ -202,6 +238,8 @@ declare global {
        * picture, which is the order #1108 was filed against.
        */
       readonly oldOrder?: () => void;
+      /** `?pairing=answer` only (#1110): the phone's own code, as drawn. */
+      readonly answerCode?: () => AnswerCodeMeasurement;
       /** `?pictures=` only (#1112): the measured rate. */
       readonly pictures?: PictureRateMeasurement;
     };
@@ -343,8 +381,24 @@ function measurePairing(): PairingMeasurement {
   };
 }
 
-async function runPairingScan(host: Element): Promise<void> {
+async function runPairingScan(host: Element, answering = false): Promise<void> {
   globalThis.location.hash = '#/camera/side';
+  const answerCode = realisticAnswer();
+  const scripted = scriptedSidePairing({ phone: 'pairing', answered: false });
+  // `?pairing=answer`: whatever the camera reads, the pairing answers it.
+  const sidePairing = answering
+    ? {
+        ...scripted,
+        answerSideCamera: () =>
+          Promise.resolve({
+            answerCode,
+            link: scriptedLink('connecting'),
+            secondsForTabletToRead: () => 120,
+            onTabletReadCountdown: () => () => undefined,
+            tabletReadTimedOut: () => false,
+          }),
+      }
+    : scripted;
   const camera = new CameraController({
     secureWindow: browserSecureWindow(),
     port: {
@@ -354,8 +408,12 @@ async function runPairingScan(host: Element): Promise<void> {
         Promise.resolve({
           captureFrame: () => Promise.reject(new Error('this harness does not capture')),
           sampleLuminance: () => Promise.reject(new Error('this harness does not sample')),
-          // Nothing to read, so the screen goes on looking — the state measured.
-          readCodePixels: () => Promise.reject(new Error('this harness reads no code')),
+          // Nothing to read, so the screen goes on looking — the state measured;
+          // or, `?pairing=answer`, a code, so that it moves on to its own.
+          readCodePixels: () =>
+            answering
+              ? Promise.resolve(photographedCode(pairingCodeModules(answerCode)))
+              : Promise.reject(new Error('this harness reads no code')),
           captureSideFrame: () => Promise.reject(new Error('this harness sends no picture')),
           attachCameraPreview: (surface) => {
             surface.srcObject = uprightPicture();
@@ -376,11 +434,7 @@ async function runPairingScan(host: Element): Promise<void> {
   flushSync(() => {
     createRoot(host).render(
       <StrictMode>
-        <AppShell
-          capabilities={NO_BLUETOOTH}
-          camera={camera}
-          sidePairing={scriptedSidePairing({ phone: 'pairing', answered: false })}
-        />
+        <AppShell capabilities={NO_BLUETOOTH} camera={camera} sidePairing={sidePairing} />
       </StrictMode>,
     );
   });
@@ -393,10 +447,12 @@ async function runPairingScan(host: Element): Promise<void> {
   press('Turn the camera on');
   await until(
     () =>
-      (document.querySelector('[data-oyl-side-pairing]')?.textContent ?? '').includes(
-        'Looking for the tablet',
-      ),
-    'the phone looking for the tablet’s code',
+      answering
+        ? document.querySelector('[data-oyl-pairing-code]') !== null
+        : (document.querySelector('[data-oyl-side-pairing]')?.textContent ?? '').includes(
+            'Looking for the tablet',
+          ),
+    answering ? 'the phone’s own code' : 'the phone looking for the tablet’s code',
   );
   // The picture takes its upright shape once the video knows its size.
   await until(
@@ -419,6 +475,21 @@ async function runPairingScan(host: Element): Promise<void> {
         figure.after(pairing);
       }
     },
+    answerCode: measureAnswerCode,
+  };
+}
+
+function measureAnswerCode(): AnswerCodeMeasurement {
+  const code = document.querySelector('[data-oyl-pairing-code]');
+  const column = code?.parentElement;
+  if (code === null || column === null || column === undefined) {
+    throw new Error('side-camera harness: the phone’s code is not on the page');
+  }
+  return {
+    viewport: { width: innerWidth, height: innerHeight },
+    code: boxOf(code),
+    modules: Number(code.getAttribute('viewBox')?.split(' ')[2] ?? Number.NaN),
+    column: boxOf(column),
   };
 }
 
@@ -519,8 +590,8 @@ async function run(): Promise<void> {
   if (host === null) {
     throw new Error('side-camera harness: #shell is missing from sidecamera.html');
   }
-  if (PAIRING_SCAN) {
-    await runPairingScan(host);
+  if (PAIRING_SCAN || PAIRING_ANSWER) {
+    await runPairingScan(host, PAIRING_ANSWER);
     return;
   }
   if (PICTURES !== null) {
