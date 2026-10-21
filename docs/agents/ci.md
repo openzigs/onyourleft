@@ -74,7 +74,7 @@ a secret or a service this project operates. ⚠️ **This used to read "no gate
 outside the runner", and that was never true** ([#841](https://github.com/openzigs/onyourleft/issues/841)):
 the install reaches the npm registry, the browser install Playwright's CDN and Ubuntu's archives,
 and the image check **Docker Hub**, on every run, because a runner starts with no base image. What
-each of those can do is turn `main` red on a day the service is down. For Docker Hub:
+each of those can do is turn `main` red on a day the service is down. For the base image's registry:
 
 - **Its pull-rate limit DID apply here, so since [#1231](https://github.com/openzigs/onyourleft/issues/1231)
   the base image comes from the project's GHCR mirror and the required job never asks Docker Hub.**
@@ -102,9 +102,9 @@ each of those can do is turn `main` red on a day the service is down. For Docker
   digest, then a read-back from GHCR by that digest). That workflow is **not a required check** and
   holds the run's own `GITHUB_TOKEN` with `packages: write` and `contents: read`, nothing more; it
   runs on a push to `main` or a pull request that touches the Dockerfile, the script or itself (a
-  fork's is skipped: its token cannot push), and by hand. Why a mirror is safe to trust: the
+  fork's or Dependabot's is skipped: its token cannot push), copies only a digest GHCR does not already serve, and by hand. Why a mirror is safe to trust: the
   Dockerfile pins the digest, and a registry cannot serve other bytes under one, so a tampered tag
-  cannot change a build. ⚠️ **The GHCR package must be PUBLIC** — the required job and a
+  cannot change a build. ⚠️ **Do not prune the mirror's untagged versions** (a cleanup policy would break builds of older commits); swapping the `FROM` back to Docker Hub's `node` at the same digest is a valid local fallback. ⚠️ **The GHCR package must be PUBLIC** — the required job and a
   self-hoster both pull it anonymously, and GHCR creates a package private, changeable only by its
   owner in the package's settings. Until it is public every pull outside the mirror workflow fails
   as `IMG004`, naming `ghcr.io`. ⚠️ **To move the base image**: change the digest (and tag) in both
@@ -112,7 +112,7 @@ each of those can do is turn `main` red on a day the service is down. For Docker
   request's own run of the mirror workflow copies it across before a re-run of its required check
   pulls it.
 - **An outage is named, not disguised.** The checker pulls the base image as its own step before it
-  builds, so a registry that will not serve it fails as `IMG004`, saying it is Docker Hub and not
+  builds, so a registry that will not serve it fails as `IMG004`, naming the registry host (`ghcr.io`) and not
   `apps/instance` — a re-run, not a fix. Before #841 it failed as `IMG001`, *"the Dockerfile did not
   build"*.
 - **Once the base image is held, the build does not ask the registry again — measured, not

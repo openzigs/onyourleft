@@ -46,14 +46,20 @@ new_fixture() {
     > "${tmp}/repo/apps/instance/Dockerfile"
   printf '0\n' > "${tmp}/fake/copy"
   printf '0\n' > "${tmp}/fake/inspect"
+  printf '1\n' > "${tmp}/fake/before"
+  rm -f "${tmp}/fake/copied"
   : > "${tmp}/fake/calls"
   cat > "${tmp}/bin/skopeo" <<'FAKE'
 #!/usr/bin/env bash
 fake="${OYL_FAKE_DIR}"
 printf 'skopeo %s\n' "$*" >> "${fake}/calls"
 case "$1" in
-  copy) exit "$(cat "${fake}/copy")" ;;
-  inspect) exit "$(cat "${fake}/inspect")" ;;
+  copy) src="${@: -2:1}"; : > "${fake}/copied-${src##*@}"; exit "$(cat "${fake}/copy")" ;;
+  inspect)
+    # Before any copy the mirror answers as `before` says (default: absent);
+    # after one it answers as `inspect` says.
+    if [ -e "${fake}/copied-${3##*@}" ]; then exit "$(cat "${fake}/inspect")"; fi
+    exit "$(cat "${fake}/before")" ;;
   *) printf 'fake skopeo: unexpected %s\n' "$*" >&2; exit 99 ;;
 esac
 FAKE
@@ -117,6 +123,29 @@ run_mirror
 assert_exit 'a last FROM with no newline after it is read (#864'"'"'s shape)' 0
 assert_calls 'and mirrored' 'skopeo copy' 1
 
+new_fixture
+set_fake before 0
+run_mirror
+assert_exit 'a digest the mirror already serves is a pass' 0
+assert_not_asked 'and is not copied again' 'skopeo copy'
+assert_says 'saying it is already mirrored' "already mirrored ${PINNED}"
+
+new_fixture
+dockerfile 'FROM %s\nFROM ghcr.io/openzigs/node:24-alpine@%s\n' "${PINNED}" "${OTHER_DIGEST}"
+printf '0\n' > "${tmp}/fake/before"
+cat > "${tmp}/bin/skopeo" <<'FAKE'
+#!/usr/bin/env bash
+printf 'skopeo %s\n' "$*" >> "${OYL_FAKE_DIR}/calls"
+case "$1" in
+  inspect) case "$3" in *0e0ff40c*) exit 0 ;; *) exit 1 ;; esac ;;
+  *) exit 0 ;;
+esac
+FAKE
+run_mirror
+assert_calls 'only the digest the mirror lacks is copied' 'skopeo copy' 1
+assert_asked 'the missing one' \
+  "skopeo copy --all --preserve-digests --retry-times 3 docker://docker.io/library/node@${OTHER_DIGEST} docker://ghcr.io/openzigs/node:24-alpine"
+
 # --- MIR001: nothing it can mirror -------------------------------------------------
 
 for image in "node:24@${DIGEST}" "ghcr.io/openzigs/node:24.21.0-bookworm-slim" \
@@ -150,7 +179,7 @@ run_mirror
 assert_exit 'a copy that fails fails' 1
 assert_says 'as MIR003, naming both ends' \
   "MIR003 could not copy docker.io/library/node@${DIGEST} to ghcr.io/openzigs/node:24.21.0-bookworm-slim"
-assert_not_asked 'without reading back' 'skopeo inspect'
+assert_calls 'without reading back (only the look before the copy)' 'skopeo inspect' 1
 
 new_fixture
 set_fake inspect 1

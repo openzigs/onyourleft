@@ -87,6 +87,12 @@ for image in "${images[@]}"; do
   digest="${BASH_REMATCH[3]}"
   source="docker.io/library/${name}@${digest}"
   target="${MIRROR}/${name}:${tag}"
+  # A digest the mirror already serves needs no copy: no Docker Hub pull, no
+  # rewrite of the tag. The tag is for people; builds pin the digest.
+  if skopeo inspect --raw "docker://${MIRROR}/${name}@${digest}" >/dev/null 2>&1; then
+    printf 'mirror-base-image: already mirrored %s\n' "${image}"
+    continue
+  fi
   skopeo copy --all --preserve-digests --retry-times 3 "docker://${source}" "docker://${target}" ||
     fail "MIR003 could not copy ${source} to ${target}."
   skopeo inspect --raw "docker://${MIRROR}/${name}@${digest}" >/dev/null ||

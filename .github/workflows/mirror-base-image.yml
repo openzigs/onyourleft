@@ -55,7 +55,8 @@ concurrency:
 jobs:
   mirror:
     name: Mirror the base image to GHCR
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    # Dependabot's pull request gets a read-only token too, so it is skipped.
+    if: github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
