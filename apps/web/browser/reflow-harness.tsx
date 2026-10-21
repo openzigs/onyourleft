@@ -107,6 +107,7 @@ import { webCryptoDigest } from '../src/transfer/browser';
 import type { TransferPort } from '../src/transfer/store-port';
 import type { GameTrainerPort } from '../src/game/trainer-port';
 import { RELEASE_INCOMPLETE } from '../src/workout/session';
+import { idleSnapshot, stubRideController } from '../src/ride/testing';
 import {
   AVAILABLE_BLUETOOTH,
   EMPTY_STATES,
@@ -634,9 +635,16 @@ function shell(populated: boolean, transfer: TransferPort): JSX.Element {
   // #945's control: the router as it was before #945, every change of fragment
   // applied outside `startTransition` (`shell/useRoute.ts` §`RouteUpdates`).
   const synchronous = new URLSearchParams(window.location.search).get('routes') === 'synchronous';
+  // #1512: the shell as it is inside Android — it answers `MainActivity`'s back
+  // press — with no ride on, because the populated fixture's ride is recording
+  // and back does nothing during one.
+  const android = new URLSearchParams(window.location.search).get('shell') === 'android';
   return (
     <PopulatedShell
       populated={populated}
+      {...(android
+        ? { nativeShell: true, rideController: stubRideController(idleSnapshot()).controller }
+        : {})}
       {...(bluetooth ? { capabilities: AVAILABLE_BLUETOOTH } : {})}
       {...(synchronous ? { routeUpdates: 'synchronous' as const } : {})}
       {...(release === 'refused' ? { gameTrainer: REFUSED_RELEASE } : {})}

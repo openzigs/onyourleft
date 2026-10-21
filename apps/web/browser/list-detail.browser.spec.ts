@@ -51,7 +51,13 @@
 import { expect, test, type Page } from '@playwright/test';
 
 import { paletteColours, THEMES } from '../src/design/tokens';
-import { ALL_ROUTES, hrefFor, hrefForSelection, type RouteDefinition } from '../src/shell/routes';
+import {
+  ALL_ROUTES,
+  hrefFor,
+  hrefForSelection,
+  routeById,
+  type RouteDefinition,
+} from '../src/shell/routes';
 
 import {
   applyInsets,
@@ -449,6 +455,46 @@ test.describe('#670 — one pane below 840 px', () => {
       }
     });
   }
+});
+
+/**
+ * #1512: the same walk with Android's back, pressed the way `MainActivity.java`
+ * presses it — the page's `__oylAndroidBack`, handed the WebView's
+ * `canGoBack()` — rather than the browser's own button. `?shell=android` is
+ * the shell inside Android with no ride on (`reflow-harness.tsx`).
+ */
+async function androidBack(page: Page, canGoBack: boolean): Promise<unknown> {
+  return page.evaluate((can) => {
+    const handler = (window as unknown as Record<string, unknown>)['__oylAndroidBack'];
+    return typeof handler === 'function' ? (handler as (c: boolean) => unknown)(can) : 'absent';
+  }, canGoBack);
+}
+
+test.describe('#1512 — Android back, on one pane', () => {
+  test(`back from a selected item returns to the list with it focused, at ${TABLET_UPRIGHT.name}`, async ({
+    page,
+  }) => {
+    await open(page, TABLET_UPRIGHT, 'data=populated&shell=android');
+    for (const route of LIST_DETAIL) {
+      await visit(page, route, hrefFor(route));
+      const id = await selectionOf(page, route);
+      const item = page.locator(`[data-oyl-pane="list"] a[data-oyl-select="${id}"]`);
+      await item.focus();
+      await page.keyboard.press('Enter');
+      await expect(page.locator('#oyl-selected-heading')).toBeFocused();
+
+      expect(await androidBack(page, true), `${route.id}: back left the app`).toBe(true);
+      await expect(item, `${route.id}: back did not return focus to the item`).toBeFocused();
+      expect(page.url()).toContain(hrefFor(route));
+    }
+    await visit(page, routeById('home'), hrefFor(routeById('home')));
+    expect(await androidBack(page, true), 'Home is the top level: back leaves').toBe(false);
+  });
+
+  test('the control — a browser page installs no Android back', async ({ page }) => {
+    await open(page, TABLET_UPRIGHT);
+    expect(await androidBack(page, true)).toBe('absent');
+  });
 });
 
 test.describe('#670 — a selection in the URL', () => {
