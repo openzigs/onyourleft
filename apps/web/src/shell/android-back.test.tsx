@@ -12,8 +12,20 @@
  * owner's list (#733).
  */
 
+import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import {
+  altitudeMetres,
+  degreesLatitude,
+  degreesLongitude,
+  geographicPosition,
+  routeProfile,
+  watts,
+  type RoutePoint,
+} from '@onyourleft/domain';
+
+import type { GamePort, RidableRoute } from '../game/GameView';
 import { idleSnapshot, ridingSnapshot, stubRideController } from '../ride/testing';
 import type { RideSnapshot } from '../ride/controller';
 import type { CapabilityProbe } from '../support/bluetooth-support';
@@ -173,5 +185,73 @@ describe('the shell answers MainActivity’s back press (#1512)', () => {
     mounted?.unmount();
     mounted = undefined;
     expect(installed()).toBeUndefined();
+  });
+});
+
+function ridableRoute(): RidableRoute {
+  const points: RoutePoint[] = [];
+  for (let index = 0; index <= 200; index += 1) {
+    points.push({
+      position: geographicPosition(
+        degreesLatitude(51.5 + (index * 10) / 111_320),
+        degreesLongitude(-0.12),
+      ),
+      elevation: altitudeMetres(index * 0.3),
+    });
+  }
+  return { id: 'route-1', name: 'Test climb', profile: routeProfile(points), attempts: 0 };
+}
+
+const GAME: GamePort = {
+  listRoutes: () => Promise.resolve([ridableRoute()]),
+  loadGhost: () => Promise.resolve(undefined),
+  readSensors: () => ({
+    rider: { power: watts(240), live: true, paired: true },
+    cadence: { value: 85, live: true, paired: true },
+    heartRate: { value: 140, live: true, paired: true },
+  }),
+};
+
+describe('the trainer game’s stage has the screen (#1512)', () => {
+  // The game keeps its own phase and never goes through the ride controller,
+  // so the controller here is idle: `immersive` is the only thing that says a
+  // ride is on, and the only thing between a press and Home.
+  it('consumes the press and stays on the game once the ride has started', async () => {
+    globalThis.location.hash = hrefFor(routeById('game'));
+    mounted = await mount(
+      <AppShell
+        capabilities={NO_BLUETOOTH}
+        nativeShell
+        game={GAME}
+        rideController={stubRideController(idleSnapshot()).controller}
+      />,
+    );
+    await settle();
+
+    // Choosing a route is not a ride: back still works there (the control).
+    const choosing = vi.spyOn(globalThis.history, 'back').mockImplementation(() => undefined);
+    expect(press(true)).toBe(true);
+    expect(choosing).toHaveBeenCalledTimes(1);
+    choosing.mockRestore();
+
+    const start = [...document.querySelectorAll<HTMLButtonElement>('button')].find((each) =>
+      (each.textContent ?? '').startsWith('Ride '),
+    );
+    if (start === undefined) {
+      throw new Error('the game offers no Ride control');
+    }
+    await act(async () => {
+      start.click();
+      await Promise.resolve();
+    });
+    await settle();
+    expect(document.querySelector('.oyl-game--riding')).not.toBeNull();
+
+    const back = vi.spyOn(globalThis.history, 'back').mockImplementation(() => undefined);
+    expect(press(true)).toBe(true);
+    expect(press(false)).toBe(true);
+    expect(back).not.toHaveBeenCalled();
+    await settle();
+    expect(globalThis.location.hash).toBe(hrefFor(routeById('game')));
   });
 });
