@@ -572,14 +572,15 @@ describe('the required check is one job over every shard — #1285', () => {
     const verdict = steps.find((step) => step.includes('check-shard-results.sh')) ?? '';
     expect(verdict).not.toMatch(/^ +(if|shell|continue-on-error):/m);
     expect(uncommented(aggregate).match(/^ +(if|shell):/gm)).toHaveLength(1);
-    // Across the file: the job-level `if:` above and the Docker logout's
-    // `always()` are the only conditions. Any other step-level `if:` can skip
-    // a gate command in a shard and the shard still succeeds.
+    // Across the file: the job-level `if:` above is the only condition (the
+    // Docker logout's `always()` left with the Docker Hub login, #1231). Any
+    // step-level `if:` can skip a gate command in a shard and the shard still
+    // succeeds.
     expect(
       uncommented(workflow)
         .match(/^ +if: .+$/gm)
         ?.map((line) => line.trim()),
-    ).toEqual(['if: always()', 'if: always()']);
+    ).toEqual(['if: always()']);
     expect(uncommented(workflow)).not.toMatch(/^ +shell:/m);
     // A stop of its own, so it cannot be what hangs the required check.
     expect(Number(jobField(aggregate, 'timeout-minutes'))).toBeLessThanOrEqual(5);

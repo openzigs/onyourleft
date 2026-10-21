@@ -42,7 +42,12 @@ bad() {
   printf '%s\n' "${out}" | sed 's/^/     | /'
 }
 
-PINNED='node:24.21.0-bookworm-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6'
+# #1231: the base image is the project's GHCR mirror of Docker Hub's, by the
+# same digest, so the fixture's is too. HUB is the same image named on Docker
+# Hub, which IMG008 refuses.
+DIGEST='sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6'
+PINNED="ghcr.io/openzigs/node:24.21.0-bookworm-slim@${DIGEST}"
+HUB="node:24.21.0-bookworm-slim@${DIGEST}"
 
 # new_fixture -- a repository holding the checker and a Dockerfile, and fakes
 # that, left alone, answer the way a healthy image does.
@@ -254,8 +259,9 @@ assert_says 'as IMG003' 'IMG003 /source does not name'
 new_fixture
 set_fake pull 1
 run_check
-assert_exit 'a base image Docker Hub will not serve fails' 1
-assert_says 'as IMG004, naming Docker Hub rather than the Dockerfile' 'IMG004 the base image'
+assert_exit 'a base image the mirror will not serve fails' 1
+assert_says 'as IMG004, naming the image rather than the Dockerfile' "IMG004 the base image ${PINNED} could not be pulled"
+assert_says 'and naming the registry it asked (#1231)' 'That is ghcr.io'
 assert_says 'and saying it is not this tree' 'not a defect in apps/instance'
 assert_not_asked 'without trying to build' 'docker build'
 
@@ -298,7 +304,7 @@ assert_says 'as IMG005, saying so' 'IMG005 apps/instance/Dockerfile'"'"'s base i
 
 # Every FROM, in every spelling Docker reads (#852). The check used to read the
 # first line starting `FROM`, so each of these passed it.
-OTHER='node:24.21.0-alpine@sha256:1111111111111111111111111111111111111111111111111111111111111111'
+OTHER='ghcr.io/openzigs/node:24.21.0-alpine@sha256:1111111111111111111111111111111111111111111111111111111111111111'
 
 new_fixture
 printf 'FROM %s AS build\nFROM node:24-bookworm-slim\n' "${PINNED}" > "${tmp}/repo/apps/instance/Dockerfile"
@@ -347,6 +353,47 @@ printf 'FROM scratch\n' > "${tmp}/repo/apps/instance/Dockerfile"
 run_check
 assert_exit 'a Dockerfile built only from scratch pulls nothing and passes' 0
 assert_not_asked 'and pulls nothing' 'docker pull'
+
+# --- IMG008 (#1231) ----------------------------------------------------------------
+# Every base image is pulled from the project's GHCR mirror, never from Docker
+# Hub, whose pull limit and auth outages turned the required check red on
+# 2026-10-09. Pinned or not is IMG005's question, asked first.
+
+for hub in "${HUB}" "docker.io/library/${HUB}" "index.docker.io/library/${HUB}" \
+  "registry-1.docker.io/library/${HUB}" "ghcr.io/someone-else/${HUB}" \
+  "ghcr.io/openzigs.example/${HUB}" "ghcr.io/openzigs${HUB}"; do
+  new_fixture
+  printf 'FROM %s\n' "${hub}" > "${tmp}/repo/apps/instance/Dockerfile"
+  run_check
+  assert_exit "a base image from outside the mirror fails: ${hub%%@*}" 1
+  assert_says 'as IMG008, naming it' "IMG008 apps/instance/Dockerfile's base image is not from the project's mirror (ghcr.io/openzigs/): ${hub}"
+  assert_not_asked 'without pulling it' 'docker pull'
+done
+
+new_fixture
+printf 'FROM %s AS install\nFROM %s\n' "${PINNED}" "${HUB}" > "${tmp}/repo/apps/instance/Dockerfile"
+run_check
+assert_exit 'a second stage back on Docker Hub fails' 1
+assert_says 'as IMG008, naming the second base' "from the project's mirror (ghcr.io/openzigs/): ${HUB}"
+
+new_fixture
+printf 'FROM --platform=linux/amd64 %s AS run\n' "${HUB}" > "${tmp}/repo/apps/instance/Dockerfile"
+run_check
+assert_exit 'a Docker Hub base behind an option fails' 1
+assert_says 'as IMG008, naming the image rather than the option' "(ghcr.io/openzigs/): ${HUB}"
+
+new_fixture
+printf 'FROM %s AS install\nFROM install\n' "${PINNED}" > "${tmp}/repo/apps/instance/Dockerfile"
+run_check
+assert_exit 'the Dockerfile'"'"'s own shape, both stages from the mirror, passes' 0
+
+# And the committed one: this suite fails, not only the image check, the day
+# apps/instance/Dockerfile goes back to a Docker Hub FROM.
+new_fixture
+cp "${SCRIPT_DIR}/../apps/instance/Dockerfile" "${tmp}/repo/apps/instance/Dockerfile"
+run_check
+assert_exit 'the committed apps/instance/Dockerfile passes IMG005 and IMG008' 0
+assert_asked 'and its base is pulled from the mirror' 'docker pull --quiet ghcr.io/openzigs/'
 
 printf '\n%d passed, %d failed\n' "${pass}" "${fail}"
 [ "${fail}" -eq 0 ]
