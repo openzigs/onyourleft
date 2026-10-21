@@ -12,6 +12,12 @@ It has the same authority as the root file. Where the text below says "this file
 
 ## Which numbers were taken, and by what (from CLAUDE.md §7, "ADRs")
 
+  ⚠️ **0054 is [ADR 0054](../adr/0054-towns-from-real-map-data.md)**, taken by
+  [#1538](https://github.com/openzigs/onyourleft/issues/1538) on 2026-10-21 for towns from real map
+  data, on the owner's ruling of that day on [#1533](https://github.com/openzigs/onyourleft/issues/1533),
+  and **Accepted** by the owner that day. It supersedes ADR 0032 D-1 in part and is the successor
+  to ADR 0012 that ADR 0012 D-3.2 requires. A reviewer who remembers this sentence offering 0054 is
+  reading the old file.
   ⚠️ **0053 is [ADR 0053](../adr/0053-the-fit-lap-mark-a-developer-field-of-our-own.md)**, taken by
   [#1320](https://github.com/openzigs/onyourleft/issues/1320) on 2026-10-21 for the FIT lap mark, a
   developer field of this client's own, and **accepted on the owner's ruling of that day on
