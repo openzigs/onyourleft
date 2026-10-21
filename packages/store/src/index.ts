@@ -67,6 +67,8 @@ export type {
   SegmentEffortRecord,
   SegmentRecord,
   WorkoutRecord,
+  WorldCorridorRecord,
+  WorldCorridorTileState,
 } from './records';
 export {
   DEFAULT_PRIVACY_ZONE_RADIUS_METRES,
@@ -76,6 +78,7 @@ export {
   SYNC_BASE_KINDS,
   SIDE_SESSION_KINDS,
   SIDE_SESSION_SOURCES,
+  WORLD_CORRIDOR_FEATURES_LIMIT_BYTES,
 } from './records';
 
 // --- Identifiers ------------------------------------------------------------
@@ -149,6 +152,7 @@ export {
   StoreReferentialError,
   StoreValidationError,
   StoreVersionError,
+  WorldCorridorTooLargeError,
 } from './errors';
 
 // --- Schema and migrations --------------------------------------------------

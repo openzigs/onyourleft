@@ -921,6 +921,35 @@ waiting on the instance, so a rider's edit or delete in that wait is not undone
 database ends an IndexedDB transaction, and the write would land outside the check. No schema
 change. `write-condition.test.ts` reads each answer back on a fresh connection.
 
+## World corridors: the one ODbL table — #1545, ADR 0054 D-3
+
+Schema version 20, additive: a new store, `worldCorridors`, and no existing record changes shape.
+⚠️ **This package's code is Apache-2.0; the rows of this one table are ODbL 1.0 data.** They are the
+map features in a route's corridor, read once from the basemap archive by #1539: building footprints
+with `kind`, `height` and `min_height`, land-use polygons with `kind`, water polygons, footway lines
+with `kind` and `kind_detail`, and which tiles were read and when — no OSM identifier, no name, no
+address (ADR 0054 D-3.3). Each record says so, `licence: 'ODbL-1.0'`.
+
+**Why a table of its own.** ADR 0012 D-3 lets OpenStreetMap-derived records be held only in their
+own store, never as fields on a route or any other record, so that nothing else in the database
+becomes a Derivative Database. One row per **(owner, route)**, keyed `[owner+routeId]` and indexed
+`owner`; `getWorldCorridor(owner, routeId)`, `putWorldCorridor(record)` and
+`deleteWorldCorridor(owner, routeId)` all name the owner. `putWorldCorridor` refuses a corridor for
+a route the owner does not have, and refuses a `features` blob over 16 MiB with
+`WorldCorridorTooLargeError`, which names the limit and the size and no coordinate.
+`deleteRoute` deletes the route's corridor in the same transaction, and `deleteAthlete` counts them
+as `worldCorridors`.
+
+**It never leaves the device.** Not in the account export, not in sync, not in any instance call
+(ADR 0054 D-3.5): that is what keeps ODbL §4.4 share-alike from engaging. A change that sends any of
+it anywhere is a change to that ADR. `apps/web/src/transfer/world-corridor-not-exported.test.ts`
+and `apps/web/src/privacy/world-corridor-never-sent.test.ts` hold the line.
+
+**It is a cache that can be dropped.** The route keeps its own geometry, so deleting the table costs
+the rider a re-read, or today's procedural world, and never a ride, a route or a setting. That is
+the rollback too: export → downgrade → re-import keeps every other table and leaves version 20 with
+an empty `worldCorridors`, executed by `migrations.test.ts` §"version 20 rolls back".
+
 ## Not in this package
 
 - **Devices and gear.** Additive object stores in a later schema version.
