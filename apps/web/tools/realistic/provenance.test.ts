@@ -587,7 +587,14 @@ describe('the input lock', () => {
       ]);
       // And every file its outputs are made from is one of those members.
       for (const output of OUTPUTS.filter((each) => each.from === wanted.id)) {
-        const read = output.recipe.how === 'blender' ? output.recipe.args[0] : undefined;
+        // #1548: a Blender step's input, or — for the mapped towns' maps, which
+        // are encoded as they came — the encoder's own.
+        const read =
+          output.recipe.how === 'blender'
+            ? output.recipe.args[0]
+            : output.recipe.how === 'ktx2'
+              ? output.recipe.file
+              : undefined;
         expect(
           archive.members.map((member) => member.path),
           output.file,

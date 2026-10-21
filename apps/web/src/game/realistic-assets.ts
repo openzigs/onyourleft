@@ -79,8 +79,32 @@ export interface SurfaceMaps {
    * 3 m and the grass's 4 m are #457's, read off its screenshots on the
    * tablet; the ground also samples at nine times that and blends by distance,
    * which is the cheapest cure for a tiling that reads as a grid at 150 m.
+   *
+   * For a map that is not square ({@link aspect}) this is the repeat's
+   * HEIGHT, its second texture coordinate.
    */
   readonly tileMetres: number;
+  /**
+   * How many times wider than tall the map is — #1548: 2 for ambientCG's
+   * `PaintedPlaster017`, published at 1024 × 512. Absent for a square map,
+   * which every other is. `realistic-budget.test.ts` holds it to the
+   * committed files' own sizes, so a map that would be drawn stretched is a
+   * red test.
+   */
+  readonly aspect?: number;
+}
+
+/**
+ * How many metres one repeat of a surface covers, across and up — #1548:
+ * {@link SurfaceMaps.tileMetres} up and that times its aspect across, so a
+ * texel of a map twice as wide as it is tall is as square on a wall as it was
+ * in the photograph.
+ */
+export function surfaceRepeat(maps: SurfaceMaps): {
+  readonly across: number;
+  readonly up: number;
+} {
+  return { across: maps.tileMetres * (maps.aspect ?? 1), up: maps.tileMetres };
 }
 
 /**
@@ -138,6 +162,9 @@ export const REALISTIC_SURFACES: {
  * #475 — and the two that wear no photograph: `painted`, a signpost's pole,
  * and — since #500 — `glass`, a window's pane, which takes its look from the
  * environment the sky already lights the world with and costs no texture.
+ *
+ * Since #1548 also the three a MAPPED town's buildings wear that the
+ * procedural kinds never did ({@link TOWN_STRUCTURE_SURFACES}).
  */
 export type StructureSurface =
   | 'brick'
@@ -147,8 +174,28 @@ export type StructureSurface =
   | 'planks'
   | 'corrugated'
   | 'hedge'
+  | 'render'
+  | 'concrete'
+  | 'flat-roof'
   | 'painted'
   | 'glass';
+
+/**
+ * The surfaces a mapped town's buildings wear that no procedural kind does —
+ * #1548, ADR 0054: a rendered or plastered facade (`render`), a concrete
+ * commercial block (`concrete`) and a flat roof under gravel (`flat-roof`).
+ * Each is an ambientCG CC0 material at **1K**, colour and normal map, where
+ * every other structure surface is a 512 px Poly Haven one: the owner ruled on
+ * #1548 (2026-10-21) to raise the realistic build ceiling for them rather than
+ * shrink them to 512² (`realistic-budget.ts` §`REALISTIC_BUILD_BYTES`).
+ *
+ * ⚠️ **Loaded, and worn by no procedural kind.** Nothing in
+ * {@link REALISTIC_BUILDING_SURFACES} or {@link REALISTIC_BOUNDARY_PARTS}
+ * names them: the buildings planned from map data (#1540, drawn by #1549) are
+ * their wearers, and until those land each is a belt with no mesh in it
+ * (`three-renderer.ts` §`RealisticStructureBelts`) and two textures held.
+ */
+export const TOWN_STRUCTURE_SURFACES = ['render', 'concrete', 'flat-roof'] as const;
 
 /** A surface that is a photograph. */
 export type PhotographicSurface = Exclude<StructureSurface, 'painted' | 'glass'>;
@@ -167,13 +214,16 @@ export const PHOTOGRAPHIC_STRUCTURE_SURFACES: readonly PhotographicSurface[] = [
   'planks',
   'corrugated',
   'hedge',
+  // #1548: the mapped towns' three.
+  ...TOWN_STRUCTURE_SURFACES,
 ];
 
 /**
  * The structures' photographic surfaces — #475. Each is a Poly Haven CC0
  * texture, downsized by the pipeline to 512 px (`tools/realistic/sources.ts`
  * §`STRUCTURE_TEXTURES` says which, and why these), and its `tileMetres` is
- * Poly Haven's own stated size for the texture.
+ * Poly Haven's own stated size for the texture. Since #1548 three more are
+ * ambientCG's, at 1K ({@link TOWN_STRUCTURE_SURFACES}).
  *
  * ⚠️ **Surfaces and not buildings, and that is a finding rather than a
  * shortcut.** ADR 0026 D-12 layer 3 asks for realistic structures sourced per
@@ -195,10 +245,24 @@ export const REALISTIC_STRUCTURE_SURFACES: Readonly<Record<PhotographicSurface, 
   planks: structureMaps('dark_planks', 2),
   corrugated: structureMaps('corrugated_iron', 1.12),
   hedge: structureMaps('forest_leaves_02', 3),
+  // #1548: ambientCG's, at 1K — `tools/realistic/sources.ts`
+  // §`TOWN_STRUCTURE_TEXTURES` says which, and why these. The gravel's 1.9 m
+  // is ambientCG's own stated size for the scan; the plaster's and the
+  // concrete's pages state none, and 2 m is this repository's figure, the
+  // brick's and the stone's. The plaster is published at 1024 × 512, so its
+  // repeat is 4 m across and 2 m up.
+  render: { ...townMaps('PaintedPlaster017', 2), aspect: 2 },
+  concrete: townMaps('Concrete048', 2),
+  'flat-roof': townMaps('Gravel035', 1.9),
 };
 
 function structureMaps(id: string, tileMetres: number): SurfaceMaps {
   return { colour: `${id}_diff_512.ktx2`, normal: `${id}_nor_gl_512.ktx2`, tileMetres };
+}
+
+/** A {@link TOWN_STRUCTURE_SURFACES} entry's maps: an ambientCG 1K pair, encoded as it came — #1548. */
+function townMaps(id: string, tileMetres: number): SurfaceMaps {
+  return { colour: `${id}_diff_1k.ktx2`, normal: `${id}_nor_gl_1k.ktx2`, tileMetres };
 }
 
 /**

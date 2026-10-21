@@ -45,6 +45,7 @@ import {
   STRUCTURE_TEXTURES,
   structureMapFiles,
   TEXTURE_SCRIPT,
+  TOWN_STRUCTURE_TEXTURES,
   type AssetSource,
   type InputLock,
   type Ktx2Step,
@@ -57,7 +58,11 @@ import {
   speciesOf,
   type GeneratedSpecies,
 } from './generated-trees';
-import { REALISTIC_RIDER } from '../../src/game/realistic-assets';
+import {
+  REALISTIC_RIDER,
+  REALISTIC_STRUCTURE_SURFACES,
+  TOWN_STRUCTURE_SURFACES,
+} from '../../src/game/realistic-assets';
 
 const polyHaven = SOURCES.find((source) => source.id === 'farm_field') as AssetSource;
 const makeHuman = SOURCES.find((source) => source.id === 'makehuman') as AssetSource;
@@ -131,6 +136,8 @@ describe('what the pipeline keeps — #430, ADR 0026 D-4', () => {
       );
     expect(fromAmbientCg.map((source) => source.id)).toEqual([
       ...AMBIENTCG_GROUND_TEXTURES.map((texture) => texture.id),
+      // #1548: the mapped towns' render, concrete and flat roof.
+      ...TOWN_STRUCTURE_TEXTURES.map((texture) => texture.id),
       ...wornFrom('ambientcg'),
     ]);
     expect(wornFrom('ambientcg').length).toBeGreaterThan(0);
@@ -383,6 +390,45 @@ describe('the structures’ surfaces — #475, ADR 0026 D-12 layer 3', () => {
         expect(args[0], output.file).toBe(
           output.file.includes('_nor_gl_') ? `${texture.id}_nor_gl_1k.jpg` : texture.colourFile,
         );
+      }
+    }
+  });
+});
+
+describe('the mapped towns’ surfaces — #1548', () => {
+  it('takes one ambientCG CC0 material for each of the three, colour and normal map at 1K', () => {
+    expect(TOWN_STRUCTURE_TEXTURES.map((texture) => texture.surface)).toEqual([
+      ...TOWN_STRUCTURE_SURFACES,
+    ]);
+    for (const texture of TOWN_STRUCTURE_TEXTURES) {
+      const source = SOURCES.find((each) => each.id === texture.id);
+      expect(source?.licence, texture.id).toBe('CC0-1.0');
+      expect(source?.licencePage, texture.id).toBe(`https://ambientcg.com/view?id=${texture.id}`);
+      expect(source?.origin, texture.id).toEqual({
+        from: 'ambientcg',
+        attribute: '1K-JPG',
+        maps: ['Color', 'NormalGL'],
+      });
+    }
+  });
+
+  it('makes exactly the two files the renderer loads, ambientCG’s 1K maps encoded with no step between', () => {
+    for (const texture of TOWN_STRUCTURE_TEXTURES) {
+      const maps = REALISTIC_STRUCTURE_SURFACES[texture.surface];
+      const made = OUTPUTS.filter((output) => output.from === texture.id);
+      expect(made.map((output) => output.file).sort(), texture.id).toEqual(
+        [maps.colour, maps.normal].sort(),
+      );
+      for (const output of made) {
+        const normal = output.file === maps.normal;
+        // No Blender, no downsizing: the upstream JPEG straight into the
+        // encoder — and the colour map as colour, the normal map as a normal
+        // map, never the other way.
+        expect(output.recipe, output.file).toEqual({
+          how: 'ktx2',
+          file: `${texture.id}_1K-JPG_${normal ? 'NormalGL' : 'Color'}.jpg`,
+          ktx2: { encoding: normal ? 'normal' : 'colour', origin: 'bottom-left' },
+        });
       }
     }
   });

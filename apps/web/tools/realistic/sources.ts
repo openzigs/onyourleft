@@ -72,8 +72,10 @@ import {
   REALISTIC_BICYCLE_MAP_NAMES,
   REALISTIC_RIDER,
   REALISTIC_RIDER_MAPS,
+  REALISTIC_STRUCTURE_SURFACES,
   REALISTIC_WORDMARK,
   type RealisticBicycleMap,
+  type TOWN_STRUCTURE_SURFACES,
 } from '../../src/game/realistic-assets';
 import {
   WORDMARK_CREATOR,
@@ -790,6 +792,57 @@ const AMBIENTCG_GROUND_ATTRIBUTE = '1K-JPG';
 const AMBIENTCG_GROUND_MAPS = { colour: 'Color', normal: 'NormalGL' } as const;
 
 /**
+ * The surfaces a MAPPED town's buildings wear that the procedural kinds never
+ * did — #1548, ADR 0054 — each an ambientCG CC0 material at 1K, taken through
+ * #1274's origin: its own page's licence, its technique against
+ * {@link AMBIENTCG_TECHNIQUES_KEPT}, its archive pinned by digest. ambientCG is
+ * on ADR 0049 D-10's list already, so this is no new source.
+ *
+ * - `PaintedPlaster017` — `render`: white painted plaster with a hairline
+ *   crack, the rendered or plastered facade of a house or a shop. Published
+ *   at 1024 × 512 (`realistic-assets.ts` §`SurfaceMaps.aspect`).
+ * - `Concrete048` — `concrete`: plain beige cast concrete with a vertical
+ *   brushed grain, the wall of a commercial block.
+ * - `Gravel035` — `flat-roof`: grey rounded gravel, the ballast a flat roof
+ *   is laid under; ambientCG states the scan as 190 cm across.
+ *
+ * Each page, read 2026-10-21, says "All assets are released under the
+ * Creative Commons CC0 license" and names "Surface Photogrammetry" as its one
+ * technique.
+ *
+ * ## Why not a `Facade*` set, and why the windows are not in the photograph
+ *
+ * #1548 named ambientCG's `Facade*` sets as candidates. Read on 2026-10-21
+ * through the site's own search (`ambientcg.com/api/v2/full_json?q=Facade`),
+ * all 26 `Facade*` materials are made procedurally (`PBRProcedural`, which
+ * the asset pages call "Prodedural"), and {@link AMBIENTCG_TECHNIQUES_KEPT}
+ * refuses that. So no facade with windows in it
+ * can be taken from this source today, and a mapped building's windows stay
+ * geometry wearing `glass`, as a procedural building's are (#500). Every
+ * candidate here was measured from a real surface.
+ *
+ * ## At 1K, and encoded as they came
+ *
+ * The owner ruled on #1548 (2026-10-21) to raise the realistic build ceiling
+ * for these rather than shrink them to 512², so they are not run through
+ * {@link TEXTURE_SCRIPT}: each map is ambientCG's own 1K JPEG encoded as KTX2,
+ * as the road's and the grass's are (#618) — and so no Blender step either.
+ * What they cost is `realistic-budget.ts` §`REALISTIC_BUILD_BYTES`.
+ */
+export const TOWN_STRUCTURE_TEXTURES: readonly {
+  readonly id: string;
+  readonly surface: (typeof TOWN_STRUCTURE_SURFACES)[number];
+}[] = [
+  { id: 'PaintedPlaster017', surface: 'render' },
+  { id: 'Concrete048', surface: 'concrete' },
+  { id: 'Gravel035', surface: 'flat-roof' },
+];
+
+/** The archive every {@link TOWN_STRUCTURE_TEXTURES} entry is taken from, and the two maps taken. */
+export const TOWN_STRUCTURE_ATTRIBUTE = '1K-JPG';
+export const TOWN_STRUCTURE_MAPS = { colour: 'Color', normal: 'NormalGL' } as const;
+
+/**
  * The bark and leaves the generated trees wear — #1283, ADR 0049 D-1: each an
  * ambientCG CC0 asset at 1K, taken through #1274's origin (its own page's
  * licence, its technique against {@link AMBIENTCG_TECHNIQUES_KEPT}, its
@@ -1052,6 +1105,13 @@ export const SOURCES: readonly AssetSource[] = [
     ambientCg(texture.id, AMBIENTCG_GROUND_ATTRIBUTE, [
       AMBIENTCG_GROUND_MAPS.colour,
       AMBIENTCG_GROUND_MAPS.normal,
+    ]),
+  ),
+  // #1548: the mapped towns' render, concrete and flat roof, from ambientCG.
+  ...TOWN_STRUCTURE_TEXTURES.map((texture) =>
+    ambientCg(texture.id, TOWN_STRUCTURE_ATTRIBUTE, [
+      TOWN_STRUCTURE_MAPS.colour,
+      TOWN_STRUCTURE_MAPS.normal,
     ]),
   ),
   // #1283: the generated trees' bark and leaves, from ambientCG — and since
@@ -1622,6 +1682,14 @@ export const OUTPUTS: readonly OutputSpec[] = [
       structureMap(made.normal, texture.id, upstream(AMBIENTCG_GROUND_MAPS.normal), 'data'),
     ];
   }),
+  // #1548: the mapped towns' three, ambientCG's 1K maps encoded as they came.
+  ...TOWN_STRUCTURE_TEXTURES.flatMap((texture) => {
+    const maps = REALISTIC_STRUCTURE_SURFACES[texture.surface];
+    return [
+      townMap(maps.colour, texture.id, TOWN_STRUCTURE_MAPS.colour, 'colour'),
+      townMap(maps.normal, texture.id, TOWN_STRUCTURE_MAPS.normal, 'normal'),
+    ];
+  }),
   {
     file: REALISTIC_RIDER,
     from: 'makehuman',
@@ -1714,6 +1782,27 @@ function structureMap(
       ktx2,
     },
     modified: `one map of the texture (${mapFile}), downsized from 1024 to ${String(STRUCTURE_TEXTURE_PIXELS)} px and re-encoded as JPEG; then ${encodingWords(ktx2)}`,
+  };
+}
+
+/**
+ * One map of a {@link TOWN_STRUCTURE_TEXTURES} entry — #1548: ambientCG's 1K
+ * JPEG out of its archive, encoded as KTX2 with no step between, the road's
+ * recipe. `bottom-left`, as every map `TextureLoader` used to flip is.
+ */
+function townMap(
+  file: string,
+  from: string,
+  map: string,
+  encoding: 'colour' | 'normal',
+): OutputSpec {
+  const upstream = `${from}_${TOWN_STRUCTURE_ATTRIBUTE}_${map}.jpg`;
+  const ktx2: Ktx2Step = { encoding, origin: 'bottom-left' };
+  return {
+    file,
+    from,
+    recipe: { how: 'ktx2', file: upstream, ktx2 },
+    modified: `one map of the material (${upstream}), ${encodingWords(ktx2)}`,
   };
 }
 

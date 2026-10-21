@@ -84,6 +84,7 @@ import {
   REALISTIC_VEGETATION,
   REALISTIC_VEGETATION_KINDS,
   realisticUrl,
+  TOWN_STRUCTURE_SURFACES,
   type RealisticModel,
   type StructureSurface,
 } from './realistic-assets';
@@ -1413,7 +1414,18 @@ describe('the realistic structures — ADR 0026 D-12 layer 3, #475', () => {
       ]),
     );
     const belt = new RealisticStructureBelts(textures);
+    // #1548: the mapped towns' three have a belt and no mesh in it until the
+    // mapped buildings (#1540) wear them — the case below holds that.
+    const town = new Set<StructureSurface>(TOWN_STRUCTURE_SURFACES);
+    for (const surface of TOWN_STRUCTURE_SURFACES) {
+      expect(belt.beltOf(surface), surface).toBeDefined();
+      expect(
+        STRUCTURE_KINDS.flatMap((kind) => belt.beltOf(surface)?.meshesOf(kind) ?? []),
+        surface,
+      ).toEqual([]);
+    }
     for (const surface of [...PHOTOGRAPHIC_STRUCTURE_SURFACES, 'painted', 'glass'] as const) {
+      if (town.has(surface)) continue;
       const meshes = STRUCTURE_KINDS.flatMap((kind) => belt.beltOf(surface)?.meshesOf(kind) ?? []);
       expect(meshes.length, surface).toBeGreaterThan(0);
       for (const mesh of meshes) {
@@ -1466,7 +1478,13 @@ describe('the realistic structures — ADR 0026 D-12 layer 3, #475', () => {
 
   it('has no surface nothing wears, and wears no surface it has no maps for', () => {
     const worn = new Set<StructureSurface>(STRUCTURE_KINDS.flatMap(realisticStructureSurfaces));
-    expect([...worn].sort()).toEqual(
+    // ⚠️ #1548's three are the one exception, and a NAMED one: loaded for the
+    // buildings planned from map data (#1540, drawn by #1549), which are not
+    // structure kinds and have not landed. No procedural kind may wear one —
+    // that would change how every farmstead looks — and whoever wires a
+    // mapped building to them deletes this exception here.
+    for (const surface of TOWN_STRUCTURE_SURFACES) expect(worn.has(surface), surface).toBe(false);
+    expect([...worn, ...TOWN_STRUCTURE_SURFACES].sort()).toEqual(
       [...PHOTOGRAPHIC_STRUCTURE_SURFACES, 'painted', 'glass'].sort(),
     );
   });
@@ -1920,9 +1938,32 @@ describe('a failed load releases everything it loaded, including what arrives la
     const surfaces = held.filter((one) => one.url.includes('_512.ktx2'));
     // The structures' maps, and since #627 the ground's verge and rock — and
     // since #1274 its crag — which are made at the same size by the same script.
-    expect(surfaces.length).toBe(2 * PHOTOGRAPHIC_STRUCTURE_SURFACES.length + 6);
+    // #1548's three are 1K, and the case below holds them.
+    expect(surfaces.length).toBe(
+      2 * (PHOTOGRAPHIC_STRUCTURE_SURFACES.length - TOWN_STRUCTURE_SURFACES.length) + 6,
+    );
     expect(surfaces.map((one) => one.url).join(' ')).toContain(REALISTIC_SURFACES.crag.normal);
     expect(surfaces.filter((one) => !one.released).map((one) => one.url)).toEqual([]);
+  });
+
+  it('waits for the mapped towns’ 1K maps too, however late they answer — #1548', async () => {
+    const { loaders, held } = lateLoaders({ fail: REALISTIC_SKY, slowest: '_1k.ktx2' });
+    const outcome = await loadRealisticWorld(loaders);
+    expect(outcome.loaded).toBe(false);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const late = held.filter((one) => one.url.includes('_1k.ktx2'));
+    // The town's six, and the road's and the grass's four, which are 1K too.
+    for (const surface of TOWN_STRUCTURE_SURFACES) {
+      const maps = REALISTIC_STRUCTURE_SURFACES[surface];
+      for (const file of [maps.colour, maps.normal]) {
+        expect(
+          late.map((one) => one.url),
+          file,
+        ).toContainEqual(expect.stringContaining(file));
+      }
+    }
+    expect(late.length).toBe(2 * TOWN_STRUCTURE_SURFACES.length + 4);
+    expect(late.filter((one) => !one.released).map((one) => one.url)).toEqual([]);
   });
 
   it('waits for the crag’s two maps when they alone answer last — #1274', async () => {

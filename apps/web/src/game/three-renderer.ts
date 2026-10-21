@@ -341,6 +341,7 @@ import {
   REALISTIC_BUILDING_SURFACES,
   isPhotographic,
   REALISTIC_STRUCTURE_SURFACES,
+  surfaceRepeat,
   REALISTIC_SURFACES,
   REALISTIC_TREES_DEFAULT,
   REALISTIC_VEGETATION_KINDS,
@@ -5736,6 +5737,12 @@ interface RealisticTextureReport {
    * picture, whose size three never sees.
    */
   readonly bytes: number;
+  /**
+   * Which surface a `structure` map is the colour or normal of — #1548, so the
+   * browser gate can name the mapped towns' three and not only count them.
+   * Absent for every other role.
+   */
+  readonly surface?: StructureSurface;
 }
 
 /**
@@ -5785,7 +5792,11 @@ export function realisticTextureReport(): readonly RealisticTextureReport[] {
   // textures, 48 uploads.
   const seen = new Set<unknown>();
   const out: RealisticTextureReport[] = [];
-  const add = (texture: Texture | null | undefined, role: RealisticTextureReport['role']): void => {
+  const add = (
+    texture: Texture | null | undefined,
+    role: RealisticTextureReport['role'],
+    surface?: StructureSurface,
+  ): void => {
     if (texture === null || texture === undefined || seen.has(texture.source)) return;
     seen.add(texture.source);
     const image = texture.image as { width?: number; height?: number } | undefined;
@@ -5794,6 +5805,7 @@ export function realisticTextureReport(): readonly RealisticTextureReport[] {
       ...realisticTextureFormat(texture),
       width: image?.width ?? 0,
       height: image?.height ?? 0,
+      ...(surface === undefined ? {} : { surface }),
     });
   };
   add(world.sky.texture, 'sky');
@@ -5802,9 +5814,9 @@ export function realisticTextureReport(): readonly RealisticTextureReport[] {
   for (const map of surfaceMapsOf(world)) {
     add(map, map === world.road.colour || map === world.road.normal ? 'road' : 'ground');
   }
-  for (const maps of world.structures.values()) {
-    add(maps.colour, 'structure');
-    add(maps.normal, 'structure');
+  for (const [surface, maps] of world.structures) {
+    add(maps.colour, 'structure', surface);
+    add(maps.normal, 'structure', surface);
   }
   for (const map of REALISTIC_BICYCLE_MAP_NAMES) add(world.bicycle[map], 'bicycle');
   for (const map of REALISTIC_RIDER_MAP_NAMES) add(world.rider[map], 'rider');
@@ -10957,7 +10969,7 @@ export function realisticStructureSurfaces(kind: StructureKind): readonly Struct
  */
 function projectedInMetres(
   geometry: BufferGeometry,
-  tileMetres: number,
+  repeat: { readonly across: number; readonly up: number },
   shade = 1,
   grounded = true,
 ): BufferGeometry {
@@ -10987,8 +10999,9 @@ function projectedInMetres(
       const py = position.getY(at);
       const pz = position.getZ(at);
       const [u, v] = x >= y && x >= z ? [pz, py] : y >= z ? [px, pz] : [px, py];
-      uv[at * 2] = u / tileMetres;
-      uv[at * 2 + 1] = v / tileMetres;
+      // #1548: across and up apart, for a map that is not square.
+      uv[at * 2] = u / repeat.across;
+      uv[at * 2 + 1] = v / repeat.up;
     }
   }
   flat.setAttribute('uv', new BufferAttribute(uv, 2));
@@ -11007,7 +11020,9 @@ export function realisticStructureGeometry(
   surface: StructureSurface,
   variant = 0,
 ): BufferGeometry | undefined {
-  const tile = isPhotographic(surface) ? REALISTIC_STRUCTURE_SURFACES[surface].tileMetres : 1;
+  const tile = isPhotographic(surface)
+    ? surfaceRepeat(REALISTIC_STRUCTURE_SURFACES[surface])
+    : { across: 1, up: 1 };
   const mine: BufferGeometry[] = [];
   for (const part of realisticStructureParts(kind, variant)) {
     if (part.surface === surface)
@@ -11049,6 +11064,11 @@ const STRUCTURE_SURFACE_FINISH: Readonly<
   planks: { roughness: 0.85, metalness: 0, tint: 0xffffff },
   corrugated: { roughness: 0.5, metalness: 0.5, tint: 0xffffff },
   hedge: { roughness: 0.95, metalness: 0, tint: 0x8fcf66 },
+  // #1548: the mapped towns' three, matte as masonry is — a gravel roof the
+  // most, smooth concrete the least.
+  render: { roughness: 0.9, metalness: 0, tint: 0xffffff },
+  concrete: { roughness: 0.85, metalness: 0, tint: 0xffffff },
+  'flat-roof': { roughness: 0.95, metalness: 0, tint: 0xffffff },
   painted: { roughness: 0.6, metalness: 0.2, tint: 0x5a5a5a },
   // #500: a pane. Smooth and a little metallic, so it gives back the sky the
   // environment map already holds — the look of glass for no texture at all —
