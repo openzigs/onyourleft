@@ -93,7 +93,8 @@ the page.
 
 ### D-1 — What of ADR 0032 D-1 this supersedes, and what still holds
 
-ADR 0032 D-1 made three checkable statements. This ADR changes the third and narrows the first; the
+ADR 0032 D-1 made three checkable statements. This ADR changes the third and leaves the first true (`game/` still makes no request; the one
+module outside it does); the
 second, and every other ruling in that ADR, stands.
 
 | ADR 0032 D-1 | After this ADR |
@@ -166,8 +167,21 @@ in a successor ADR. This is that declaration.
    database"* — is false for this store**, so the line that holds it is reason 2 alone: it is never
    published. That makes this item load-bearing. **A change that sends any of this store's contents
    anywhere is a change to this ADR**, not a review note.
-6. **Attribution in the frame.** A frame drawn from these records is a Produced Work (ODbL §4.3,
-   ADR 0032 D-5), and attribution is owed wherever it is shown. While any part of the drawn world came
+
+   ⚠️ **This overrides a warning, openly.** ADR 0012 D-2 says *"do not cite reason 2 without reason
+   1"*, because reason 2 (nothing is published) expires once a server exists, and ADR 0032 D-5
+   repeats it. There is now an instance server (ADR 0036), instance sync, and AI write-ups that run
+   on it (ADR 0046). This ADR cites reason 2 alone anyway, for this store only, because the
+   alternative is to publish an OSM-derived database under ODbL, which D-8 does not ask for. A
+   documented ban is not a gate (CLAUDE.md §8), so **#1539 owes a test that fails if this store
+   reaches any export, export-everything, instance-sync or write-up payload**: it builds each
+   payload from a route whose store is populated and asserts that no byte of the store's records
+   (footprint, land-use, water or footway) is in it, and it is derived from the payload builders so
+   that a new one is a red test until it is listed.
+6. **Attribution in the frame.** A frame drawn from these records is treated as a Produced Work (ODbL §4.3,
+   ADR 0032 D-5) — with ADR 0032 D-5's caveat carried forward: the OSM Produced Work guideline does
+   not say that a 3D scene is one, so this ADR does not rest on it (D-3.1 treats the store as a
+   Derivative Database regardless), and the credit is given as a courtesy that costs nothing — and attribution is owed wherever it is shown. While any part of the drawn world came
    from the store, the game view shows **"© OpenStreetMap contributors"**; the credits screen
    (`apps/web/src/credits/`) gains the same line. Where in the game view, and whether it may fade, is
    D-8 Q3. A ride drawn wholly from the procedural world shows no credit, because it owes none.
@@ -228,23 +242,37 @@ These are rules for #1540 and #1541 to hold with tests; the numbers in them are 
 1. **What the request carries.** Byte-range requests for one archive file, to the origin of D-2.1,
    with no coordinate, no route id, no athlete id and no credential in the URL, a header or a body.
    ⚠️ **The ranges are a function of location**: the host can work out which tiles were read, as it
-   can from any map tile request today, and with them the route's corridor at z15 tile size — under
-   a kilometre at US latitudes. Stated plainly rather than minimised: that is a more exact outline of
+   can from any map tile request today, and with them the route's corridor at z15 tile size — about 0.8 km across at 49 N and about 1.1 km at 25 N (a z15 tile, 0.64–1.23 km² over the archive's 24–50 N, as `apps/mobile/src/android/data-safety.ts` has it). Stated plainly rather than minimised: that is a more exact outline of
    one route than a map view at a lower zoom, sent once per route, to the same host and with the same
    IP address a map view already sends. ADR 0010 D-7's question — who observes it — has the answer it
    has for the map: the project's own archive host and its CDN, or the self-hoster's own.
 2. **A `departing` entry** in `apps/web/src/privacy/boundaries.ts` for that request, owed by #1539,
-   whose test checks that no coordinate pair is in what departs — ADR 0032 D-4 item 4 — and which says
-   in its own words that a tile range is a coarse location.
+   and which says in its own words that a tile range is a coarse location. ADR 0032 D-4 item 4's
+   *"no coordinate pair departs"* test cannot fire here, because the location travels as byte offsets
+   in a `Range` header and not as a pair; the control that protects the rider is D-6.3, so #1539
+   also owes tests that map each requested range back to its tile and check it against the
+   athlete's privacy zones, and that with tiles off nothing is requested.
 3. **A privacy zone stays trimmed.** No tile that touches one of the athlete's privacy zones (ADR 0004
    B, at the zone's own radius) is requested, and the world there is procedural (D-4.2). The read
-   never asks for the tiles around a rider's home, which is stricter than the map view, and
-   deliberately so: a corridor read traces a route into and out of the zone in a way a map view does
-   not.
+   never asks for the tiles touching a rider's zone, which is stricter than the map view, and
+   deliberately so. ⚠️ **The gap is visible**: a corridor with the zone's tiles left out shows the
+   host a hole, and the hole bounds where the zone is. The rule is still right, since asking for the
+   tiles would be worse, but it hides the tiles and not the fact that something is hidden.
 4. **The map-tiles switch governs it.** With map tiles off (`apps/web/src/map/tiles-preference.ts`),
    nothing is asked of the tile host, for the map or for the world. One switch, because a rider who
    turned tiles off asked for exactly that. D-8 Q4.
-5. **The store is location data.** It outlines where a route goes. ADR 0004 D applies to it and to the
+5. **Disclosure and the Play answer move with this, in the same pull request as the read** (the
+   precedent is #387, which changed the policy and `data-safety.ts` with `no-network.test.ts`).
+   (a) `docs/privacy-policy.md` says tiles are requested *"when a map is on screen"* and *"to draw a
+   ride that has a GPS track"*; the world read breaks both, so #1539 rewrites those sentences and
+   the retained-record description. (b) `apps/mobile/src/android/data-safety.ts` answers Approximate
+   location on two facts: the tile host's retained record holds **no `Range` field**, and **every
+   request names one file**. The read must keep both: it is a range request on that one file and
+   **never a `z/x/y` URL**, and #1539 re-checks the retained record. (c) The tiles switch is
+   labelled *"Draw map tiles under my rides"* (`SettingsView.tsx`), which D-6.4 makes inaccurate,
+   so the label and the policy's description of it change with the read. (d) A planet archive
+   (D-8 Q1) would change (b)'s area reasoning, which is written for the 24–50 N archive.
+6. **The store is location data.** It outlines where a route goes. ADR 0004 D applies to it and to the
    read: an error or log line names the field and the constraint and never a coordinate or a tile's
    `z/x/y`, which is a coordinate at tile precision.
 
@@ -263,9 +291,17 @@ Protomaps (ADR 0010 D-1, *"We do not generate"*), which is a separate decision.
 1. **Q0 — Accept this ADR before it merges, or merge it as Proposed?** Recommended: **accept before
    merge**, and the pull request flips the Status line. A Status line cannot be changed by an
    amendment afterwards (ADR 0013), which is why ADR 0044's acceptance needed ADR 0052 D-5.
-2. **Q1 — What riders outside the US get.** Recommended: **today's procedural world, unchanged**
-   (D-4). A world archive (a planet build is about 120 GB, ADR 0010) is a separate issue with a
-   `docs/cost-model.md` change, not part of this ADR.
+2. **Q1 — What riders outside the US get, and what it would cost.** Options: (i) **today's
+   procedural world, unchanged** (D-4): free, no change. (ii) **A Protomaps planet build** on the
+   project's own host: `docs/cost-model.md` measures it at 138 GB (build `20260915`), about
+   **2.07 USD a month** for R2 storage, plus its tile-request line; ADR 0010's ~120 GB is stale.
+   No paid service is a prerequisite (ADR 0036 D-7), because a self-hoster can serve the same
+   archive from their own disk. (iii) **OSM extracts** of chosen regions, built by this project:
+   free to host at a fraction of (ii)'s size, but the build is ours to run (ADR 0010 D-1, *"we do
+   not generate"*), so it needs its own decision. Coverage outside the US by (ii) or (iii) is not
+   free of an owner decision, since it changes `docs/cost-model.md` and the Play Data Safety
+   answer in D-6.5(d). Recommended: **(i) in this ADR**, with (ii) raised as the unavoidable-cost
+   question for the owner: about 2 USD a month more, and a re-reading of Approximate location.
 3. **Q2 — Is `height` alone enough?** Recommended: **yes**, with D-7's rules for storeys and roofs.
 4. **Q3 — Where the OSM credit sits in the game view.** Recommended: **a small line in a corner of
    the game view, clear of the HUD, for the whole ride**, plus the credits screen. The guideline
@@ -306,7 +342,7 @@ Protomaps (ADR 0010 D-1, *"We do not generate"*), which is a separate decision.
 
 | Issue | Constraint |
 |---|---|
-| [#1539](https://github.com/openzigs/onyourleft/issues/1539) | D-2 and D-3 in full; D-6.2–D-6.5; the `PERMITTED_NETWORK_CALLS` entry, the static origin assertion and the browser-gate host assertion; the scoping-test entry; states its tile, byte and time cost |
+| [#1539](https://github.com/openzigs/onyourleft/issues/1539) | D-2 and D-3 in full, including D-3.5's payload test; D-6.2–D-6.6, including the range-to-zone and tiles-off tests, `docs/privacy-policy.md`, `data-safety.ts` and the switch label (D-6.5); the `PERMITTED_NETWORK_CALLS` entry, the static origin assertion and the browser-gate host assertion; the scoping-test entry; states its tile, byte and time cost |
 | [#1540](https://github.com/openzigs/onyourleft/issues/1540) | D-4.1's equality test; D-5.1–D-5.4, D-5.6 and D-5.7; D-7 as the owner rules it; draw calls, triangles and texture memory measured with Part AH |
 | [#1535](https://github.com/openzigs/onyourleft/issues/1535), [#1541](https://github.com/openzigs/onyourleft/issues/1541) | D-5.5: footways from data where read, procedural pavements otherwise |
 | [#1542](https://github.com/openzigs/onyourleft/issues/1542) | Land use only through D-3's store and D-2's read; nothing of its own |
