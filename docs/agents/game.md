@@ -773,6 +773,16 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         the old file: `StructureKind` and `SCENERY_KINDS` are in
                         `scatter.ts`, and the frame carries the structures FIRST
                         on a budget of their own (`QualitySettings.structureItems`)
+    src/game/streets.ts a village's kerbed pavements (#1535) — along each side's
+                        BUILT plots (`settlements.ts` §`siteAt`, §`villagePlots`,
+                        the houses' own decision), on the road's edge, never on
+                        any stretch's carriageway or on water; none for a
+                        farmstead. ⚠️ **A mesh, not structure items**: one
+                        `WeakMap`-cached street a village, `SceneFrame.streets`,
+                        drawn in both worlds in ONE call by `three-renderer.ts`
+                        §`PavementBelt` (ambientCG's paving in the realistic
+                        world), outside `structureItems` and outside
+                        `REALISTIC_FRAME_TRIANGLES` by that constant's own rule
     src/game/buildings.ts
                         the buildings as SHAPES (#500) — walls with their doors
                         and windows cut in, recessed and framed, eaves that

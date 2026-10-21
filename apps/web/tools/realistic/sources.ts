@@ -785,6 +785,22 @@ export const GROUND_BLEND_TEXTURES: readonly {
  */
 export const AMBIENTCG_GROUND_TEXTURES: readonly { readonly id: string }[] = [{ id: 'Rock026' }];
 
+/**
+ * The structures' surfaces taken from ambientCG — #1535, each one of its CC0
+ * materials at 1K, by the same archive, maps and recipe as
+ * {@link AMBIENTCG_GROUND_TEXTURES}.
+ *
+ * - `PavingStones136` — a village's PAVEMENT: square concrete flags laid in a
+ *   grid, made by surface photogrammetry (its own page, read 2026-10-21).
+ *   Chosen over the site's cobbles and herringbones because a pavement beside
+ *   a village road is laid in flags; `PavingStones128` and `126A`, the nearest
+ *   in look, were passed over because their pages name "Procedural with
+ *   Bitmap Elements", which {@link AMBIENTCG_TECHNIQUES_KEPT} does not keep.
+ */
+export const AMBIENTCG_STRUCTURE_TEXTURES: readonly { readonly id: string }[] = [
+  { id: 'PavingStones136' },
+];
+
 /** The archive every {@link AMBIENTCG_GROUND_TEXTURES} entry is taken from, and the two maps taken. */
 const AMBIENTCG_GROUND_ATTRIBUTE = '1K-JPG';
 const AMBIENTCG_GROUND_MAPS = { colour: 'Color', normal: 'NormalGL' } as const;
@@ -1048,7 +1064,8 @@ export const SOURCES: readonly AssetSource[] = [
     polyHaven(texture.id, { type: 'texture', resolution: '1k', maps: ['Diffuse', 'nor_gl'] }),
   ),
   // #1274: the ground's bare rock, from ambientCG.
-  ...AMBIENTCG_GROUND_TEXTURES.map((texture) =>
+  // #1535: a village's pavement, by the same archive and maps.
+  ...[...AMBIENTCG_GROUND_TEXTURES, ...AMBIENTCG_STRUCTURE_TEXTURES].map((texture) =>
     ambientCg(texture.id, AMBIENTCG_GROUND_ATTRIBUTE, [
       AMBIENTCG_GROUND_MAPS.colour,
       AMBIENTCG_GROUND_MAPS.normal,
@@ -1613,7 +1630,8 @@ export const OUTPUTS: readonly OutputSpec[] = [
     ];
   }),
   // #1274: ambientCG's, by the same recipe — its files carry its own names.
-  ...AMBIENTCG_GROUND_TEXTURES.flatMap((texture) => {
+  // #1535: and the pavement's, likewise.
+  ...[...AMBIENTCG_GROUND_TEXTURES, ...AMBIENTCG_STRUCTURE_TEXTURES].flatMap((texture) => {
     const made = structureMapFiles(texture.id);
     const upstream = (map: string): string =>
       `${texture.id}_${AMBIENTCG_GROUND_ATTRIBUTE}_${map}.jpg`;

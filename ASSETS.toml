@@ -1221,6 +1221,30 @@ script = "apps/web/tools/realistic/blender/process_texture.py"
 tool = "Blender 4.4.3, then KTX-Software v4.4.2"
 
 [[asset]]
+path = "apps/web/public/realistic/PavingStones136_diff_512.ktx2"
+source = "ambientCG, PavingStones136 by ambientCG (its own page: made by Surface Photogrammetry); made by this repository's asset pipeline (#430) from the files inputs.lock.json records"
+licence = "CC0-1.0"
+read = "2026-10-21"
+sha256 = "482e7a68cd10b950c1da9562db67bc1d4ecd6e4ce5b238633f1e008ab13f64e8"
+modified = "one map of the texture (PavingStones136_1K-JPG_Color.jpg), downsized from 1024 to 512 px and re-encoded as JPEG; then encoded as KTX2 (Basis Universal ETC1S, sRGB, with its full mipmap chain, its rows reversed so that it samples as the upright picture did) by KTX-Software v4.4.2; the KTX2 step is made by apps/web/tools/realistic/encode-ktx2.ts"
+input = "https://ambientcg.com/view?id=PavingStones136"
+inputsha256 = "9a8eae8043a5f2eb21eff02bdea4ce8af1fd7e6f55443c023788b00949325fa8"
+script = "apps/web/tools/realistic/blender/process_texture.py"
+tool = "Blender 4.4.3, then KTX-Software v4.4.2"
+
+[[asset]]
+path = "apps/web/public/realistic/PavingStones136_nor_gl_512.ktx2"
+source = "ambientCG, PavingStones136 by ambientCG (its own page: made by Surface Photogrammetry); made by this repository's asset pipeline (#430) from the files inputs.lock.json records"
+licence = "CC0-1.0"
+read = "2026-10-21"
+sha256 = "9aa5d89f4b15fa0899409d859d149bc50346d8d97dcb757ba0744edc83b1edb0"
+modified = "one map of the texture (PavingStones136_1K-JPG_NormalGL.jpg), downsized from 1024 to 512 px and re-encoded as JPEG; then encoded as KTX2 (Basis Universal UASTC with Zstandard, linear, with its full mipmap chain, its rows reversed so that it samples as the upright picture did) by KTX-Software v4.4.2; the KTX2 step is made by apps/web/tools/realistic/encode-ktx2.ts"
+input = "https://ambientcg.com/view?id=PavingStones136"
+inputsha256 = "9a8eae8043a5f2eb21eff02bdea4ce8af1fd7e6f55443c023788b00949325fa8"
+script = "apps/web/tools/realistic/blender/process_texture.py"
+tool = "Blender 4.4.3, then KTX-Software v4.4.2"
+
+[[asset]]
 path = "apps/web/public/realistic/rider.glb"
 source = "MakeHuman, makehuman by The MakeHuman team, and makehuman-system-assets by The MakeHuman team (makehuman_system), its licence read on 2026-09-28 at https://static.makehumancommunity.org/assets/assetpacks/makehuman_system_assets.html; made by this repository's asset pipeline (#430) from the files inputs.lock.json records"
 licence = "CC0-1.0"

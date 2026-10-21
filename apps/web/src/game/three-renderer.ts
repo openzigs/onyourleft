@@ -365,6 +365,7 @@ import {
 import { bannerCells } from './gantry-wording';
 import { bannerPlace, boxPoint, standPoint, type PlacedBox, type PlacedStand } from './gantry';
 import type { Billboard } from './billboards';
+import type { VillageStreet } from './streets';
 import {
   LOGO_BOARDS_PER_FRAME,
   billboardLogoPlace,
@@ -1748,6 +1749,13 @@ function releaseLoadedScene(source: Object3D): void {
 export const BRIDGE_COLOUR = 0x8f8a80;
 
 /**
+ * The stylised world's pavement — #1535: a light concrete grey. This
+ * repository's own, derived from nothing (ADR 0009 L2), and lit like the
+ * scenery, so it is in {@link LIT_COLOURS}. @see PavementBelt
+ */
+export const PAVEMENT_COLOUR = 0xa7a49c;
+
+/**
  * Every colour a kind is drawn in when no model stands in for it: its own, and
  * — since #460 — each part of a built shape's. {@link LIT_COLOURS} is built
  * from it, and `three-renderer.test.ts` holds the list to it.
@@ -1806,6 +1814,8 @@ export const LIT_COLOURS: readonly number[] = [
   ...BICYCLE_COLOURS,
   // #459. The bridges' stone, which is lit like the scenery.
   BRIDGE_COLOUR,
+  // #1535. The stylised pavement, lit like the scenery.
+  PAVEMENT_COLOUR,
 ];
 
 /**
@@ -8186,6 +8196,155 @@ export class LogoBelt {
 }
 
 /**
+ * Every village street in view, kerbs and pavements — #1535 (`streets.ts`).
+ * **One mesh and one draw call** however many villages are in view, and none
+ * where a frame holds no street.
+ *
+ * ⚠️ **Rebuilt only when the SET of streets changes**, which is when a village
+ * comes into view or leaves it: `streets.ts` hands every frame the same
+ * objects for the same villages, so a frame whose streets are the last
+ * frame's, in the same order, uploads nothing. A street is fixed in the
+ * corridor's frame, so nothing moves in between.
+ *
+ * A belt per world, as {@link LogoBelt} is: the stylised view's is
+ * {@link PAVEMENT_COLOUR}, lit or flat by the rung (#286); the realistic
+ * world's wears ambientCG's paving (`realistic-assets.ts`
+ * §`REALISTIC_STRUCTURE_SURFACES`' `paving`), its flags the size the
+ * photograph's own repeat says, and breathes the realistic air.
+ */
+export class PavementBelt {
+  readonly #mesh: Mesh;
+  readonly #materials: { readonly lit: Material; readonly flat: Material };
+  /** How many metres one repeat of the photograph covers; 1 where there is none. */
+  readonly #tileMetres: number;
+  /** The streets the mesh holds, in the order it holds them. */
+  #held: readonly VillageStreet[] = [];
+  #shown = true;
+  /** Whether the browser gate has turned the pavements off — its control. */
+  #switchedOn = true;
+
+  constructor(
+    world: 'stylised' | 'realistic',
+    paving?: { readonly colour: Texture; readonly normal: Texture },
+  ) {
+    if (world === 'realistic') {
+      this.#tileMetres = REALISTIC_STRUCTURE_SURFACES.paving.tileMetres;
+      const finish = STRUCTURE_SURFACE_FINISH.paving;
+      const material = withAtmosphere(
+        withTextureLodBias(
+          constructed(
+            new MeshStandardMaterial({
+              color: finish.tint,
+              roughness: finish.roughness,
+              metalness: finish.metalness,
+              ...(paving === undefined ? {} : { map: paving.colour, normalMap: paving.normal }),
+            }),
+          ),
+        ),
+      );
+      // The realistic world has no flat rung, so its two are one material.
+      this.#materials = { lit: material, flat: material };
+    } else {
+      this.#tileMetres = 1;
+      this.#materials = {
+        lit: constructed(new MeshLambertMaterial({ color: PAVEMENT_COLOUR })),
+        flat: constructed(new MeshBasicMaterial({ color: PAVEMENT_COLOUR })),
+      };
+    }
+    this.#mesh = new Mesh(new BufferGeometry(), this.#materials.lit);
+    this.#mesh.visible = false;
+  }
+
+  addTo(scene: Scene): void {
+    scene.add(this.#mesh);
+  }
+
+  /** The mesh. For the browser gate's counts and the jsdom suite. */
+  get mesh(): Mesh {
+    return this.#mesh;
+  }
+
+  setShown(on: boolean): void {
+    this.#shown = on;
+    if (!on) this.#mesh.visible = false;
+  }
+
+  /** @see pavementsShownOf */
+  switchOn(on: boolean): void {
+    this.#switchedOn = on;
+  }
+
+  /** Shades the pavements, or stops shading them — #286. @see QualitySettings.shading */
+  setShading(shading: QualitySettings['shading']): void {
+    this.#mesh.material = this.#materials[shading];
+  }
+
+  /** This frame's streets. */
+  update(streets: readonly VillageStreet[]): void {
+    const drawn = this.#shown && this.#switchedOn ? streets : NO_STREETS;
+    if (!sameStreets(drawn, this.#held)) {
+      this.#held = drawn;
+      const geometry = pavementGeometry(drawn, this.#tileMetres);
+      this.#mesh.geometry.dispose();
+      this.#mesh.geometry = geometry;
+    }
+    this.#mesh.visible = this.#shown && drawn.length > 0;
+  }
+
+  dispose(): void {
+    this.#mesh.geometry.dispose();
+    this.#materials.lit.dispose();
+    if (this.#materials.flat !== this.#materials.lit) this.#materials.flat.dispose();
+  }
+}
+
+/** No streets: what a belt that is off holds. */
+const NO_STREETS: readonly VillageStreet[] = [];
+
+/** Whether two lists hold the same streets, by identity, in the same order. */
+function sameStreets(first: readonly VillageStreet[], second: readonly VillageStreet[]): boolean {
+  return first.length === second.length && first.every((street, index) => street === second[index]);
+}
+
+/**
+ * Every street's pavement as one geometry, its texture coordinates turned from
+ * metres into repeats of a photograph `tileMetres` across.
+ */
+function pavementGeometry(streets: readonly VillageStreet[], tileMetres: number): BufferGeometry {
+  let vertices = 0;
+  let indices = 0;
+  for (const { pavement } of streets) {
+    vertices += pavement.positions.length / 3;
+    indices += pavement.indices.length;
+  }
+  const positions = new Float32Array(vertices * 3);
+  const normals = new Float32Array(vertices * 3);
+  const uvs = new Float32Array(vertices * 2);
+  const index = new Uint32Array(indices);
+  let vertex = 0;
+  let at = 0;
+  for (const { pavement } of streets) {
+    positions.set(pavement.positions, vertex * 3);
+    normals.set(pavement.normals, vertex * 3);
+    for (let each = 0; each < pavement.uvs.length; each += 1) {
+      uvs[vertex * 2 + each] = (pavement.uvs[each] as number) / tileMetres;
+    }
+    for (let each = 0; each < pavement.indices.length; each += 1) {
+      index[at + each] = (pavement.indices[each] as number) + vertex;
+    }
+    vertex += pavement.positions.length / 3;
+    at += pavement.indices.length;
+  }
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new BufferAttribute(positions, 3));
+  geometry.setAttribute('normal', new BufferAttribute(normals, 3));
+  geometry.setAttribute('uv', new BufferAttribute(uvs, 2));
+  geometry.setIndex(new BufferAttribute(index, 1));
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+/**
  * The stylised world's wordmark, once loaded — #966. Module state for
  * {@link sceneryGeometries}' reason: a view is built synchronously, so the
  * texture is loaded first, by {@link loadGameWordmark}.
@@ -11078,6 +11237,9 @@ const STRUCTURE_SURFACE_FINISH: Readonly<
   planks: { roughness: 0.85, metalness: 0, tint: 0xffffff },
   corrugated: { roughness: 0.5, metalness: 0.5, tint: 0xffffff },
   hedge: { roughness: 0.95, metalness: 0, tint: 0x8fcf66 },
+  // #1535: worn by no structure kind — the pavements' finish, which
+  // `PavementBelt` reads. Matte, as concrete flags are.
+  paving: { roughness: 0.9, metalness: 0, tint: 0xffffff },
   painted: { roughness: 0.6, metalness: 0.2, tint: 0x5a5a5a },
   // #500: a pane. Smooth and a little metallic, so it gives back the sky the
   // environment map already holds — the look of glass for no texture at all —
@@ -11210,7 +11372,10 @@ export class RealisticStructureBelts {
       const [first] = realisticStructureSurfaces(kind);
       if (first !== undefined) this.#first.set(kind, first);
     }
-    this.#belts = STRUCTURE_SURFACES.map((surface) => {
+    // #1535: `paving` is the pavements' (`PavementBelt`), and no structure
+    // kind wears it, so it has no belt here: an empty belt would be a mesh a
+    // kind for nothing.
+    this.#belts = STRUCTURE_SURFACES.filter((surface) => surface !== 'paving').map((surface) => {
       const models = new Map<SceneryKind, readonly BufferGeometry[]>();
       for (const kind of STRUCTURE_KINDS) {
         // #500: a building has one shape a variant, and each is a mesh here.
@@ -11380,6 +11545,8 @@ class RealisticDrawing {
   readonly gantries: GantryBelt;
   /** The wordmark's boards, on the start gate and the billboards — #966. */
   readonly logos: LogoBelt;
+  /** The village streets' kerbs and pavements, in ambientCG's paving — #1535. */
+  readonly pavements: PavementBelt;
   readonly environment: Texture;
   /** The road's and the ground's photographic materials. @see setSurfaces */
   #road: MeshStandardMaterial;
@@ -11434,6 +11601,7 @@ class RealisticDrawing {
     this.grounding = new GroundBlobBelt();
     this.gantries = new GantryBelt(world.banners);
     this.logos = new LogoBelt(world.wordmark, 'realistic');
+    this.pavements = new PavementBelt('realistic', world.structures.get('paving'));
     this.#casterLists = [this.vegetation.grounded, this.#structureCasters];
     this.#road = this.#roadMaterial();
     this.#ground = this.#groundMaterial();
@@ -11507,6 +11675,7 @@ class RealisticDrawing {
     this.grounding.addTo(scene);
     this.gantries.addTo(scene);
     this.logos.addTo(scene);
+    this.pavements.addTo(scene);
   }
 
   setShown(on: boolean): void {
@@ -11517,6 +11686,7 @@ class RealisticDrawing {
     this.grounding.setShown(on);
     this.gantries.setShown(on);
     this.logos.setShown(on);
+    this.pavements.setShown(on);
     // #626: shown only by the view, on a rung that grounds riders by contact.
     if (!on) this.shadows.setShown(false);
   }
@@ -11581,6 +11751,7 @@ class RealisticDrawing {
     this.grounding.dispose();
     this.gantries.dispose();
     this.logos.dispose();
+    this.pavements.dispose();
     this.#road.dispose();
     this.#ground.dispose();
     this.environment.dispose();
@@ -12082,6 +12253,31 @@ export function logoBoardsOf(view: GameView): number {
 }
 
 /**
+ * Turns a view's village pavements off, or on again — #1535. The browser
+ * gate's control: with them off, the probe aimed at a pavement must read
+ * something else there, or it was never reading the pavement.
+ *
+ * @test-facing the browser gate's control switch, read by `game-harness.ts`;
+ * the product always draws them.
+ */
+export function pavementsShownOf(view: GameView, on: boolean): void {
+  if (view instanceof ThreeGameView) view.pavementsShown(on);
+}
+
+/**
+ * How many pavement triangles a view drew in its last frame, in the world it
+ * drew — #1535: nought away from a village.
+ *
+ * @test-facing read by `game-harness.ts`, which requires them beside a village
+ * and none in open country.
+ */
+export function pavementTrianglesOf(view: GameView): number {
+  const mesh = view instanceof ThreeGameView ? view.pavementMesh : undefined;
+  if (mesh?.visible !== true) return 0;
+  return (mesh.geometry.index?.count ?? 0) / 3;
+}
+
+/**
  * How many gantry boxes and banners a view drew in its last frame — #679.
  *
  * @test-facing read by `game-harness.ts`, which requires some near a line and
@@ -12514,6 +12710,8 @@ class ThreeGameView implements GameView {
    * {@link loadGameWordmark} loaded before this view was built.
    */
   readonly #logos = new LogoBelt(gameWordmark, 'stylised');
+  /** The stylised world's village pavements — #1535. The realistic world draws its own. */
+  readonly #pavements = new PavementBelt('stylised');
   /**
    * The sun and the sky it is in — #286. Two lamps, built once and pointed
    * every frame by `#updateWorld`, exactly as the fog is coloured every frame.
@@ -12592,6 +12790,8 @@ class ThreeGameView implements GameView {
     // #966: the start gate and the billboards, in the stylised world.
     this.#gantries.addTo(this.#scene);
     this.#logos.addTo(this.#scene);
+    // #1535: the village pavements, in the stylised world.
+    this.#pavements.addTo(this.#scene);
 
     // #349, #368. Added here rather than in `render`, so that a frame carrying
     // no rider draws nothing rather than adding one on the frame it appears.
@@ -12724,6 +12924,9 @@ class ThreeGameView implements GameView {
     this.#realistic?.logos.update(frame.lines, frame.billboards);
     this.#gantries.update(frame.lines);
     this.#logos.update(frame.lines, frame.billboards);
+    // #1535: the village streets, in both worlds; the hidden world's draw nothing.
+    this.#realistic?.pavements.update(frame.streets);
+    this.#pavements.update(frame.streets);
     this.#updateMarkers(
       split?.stylised ??
         (realisticFrame
@@ -12885,6 +13088,7 @@ class ThreeGameView implements GameView {
     // #966: the stylised gate and boards, in the stylised world only.
     this.#gantries.setShown(!realistic);
     this.#logos.setShown(!realistic);
+    this.#pavements.setShown(!realistic);
     // #783: shown in both worlds — in the realistic one it draws only the
     // remote riders `realisticRemoteSplit` hands it, and nothing on a frame
     // with none. @see #updateMarkers
@@ -13049,6 +13253,17 @@ class ThreeGameView implements GameView {
     return this.#drawing === 'realistic' ? this.#realistic?.logos.mesh : this.#logos.mesh;
   }
 
+  /** @see pavementsShownOf */
+  pavementsShown(on: boolean): void {
+    this.#realistic?.pavements.switchOn(on);
+    this.#pavements.switchOn(on);
+  }
+
+  /** @see pavementTrianglesOf — the drawn world's. */
+  get pavementMesh(): Mesh | undefined {
+    return this.#drawing === 'realistic' ? this.#realistic?.pavements.mesh : this.#pavements.mesh;
+  }
+
   /** @see realisticSurfacesOf */
   realisticSurfaces(surfaces: RealisticSurfaces): void {
     this.#surfaces = surfaces;
@@ -13211,6 +13426,7 @@ class ThreeGameView implements GameView {
     this.#bridges.setShading(shading);
     this.#gantries.setShading(shading);
     this.#logos.setShading(shading);
+    this.#pavements.setShading(shading);
   }
 
   /**
@@ -13309,6 +13525,7 @@ class ThreeGameView implements GameView {
     this.#scatter.dispose();
     this.#gantries.dispose();
     this.#logos.dispose();
+    this.#pavements.dispose();
     this.#lighting.dispose();
     this.#riders.dispose();
     for (const belt of this.#ownMeshes) belt.dispose();

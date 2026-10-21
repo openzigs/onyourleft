@@ -35,7 +35,7 @@
  * | `surfaces` | the road, the ground, the hills on the horizon | the same meshes, in their photographed materials |
  * | `vegetation` | the trees, shrubs and rocks | their near meshes |
  * | `impostors` | — (there are none) | the far trees' billboards |
- * | `structures` | buildings, walls, hedges, fences, signposts, and since #966 the start and finish gantries and the wordmark's boards | the same, photographed, and since #679 the start and finish gantries; since #966 the wordmark's boards |
+ * | `structures` | buildings, walls, hedges, fences, signposts, and since #966 the start and finish gantries and the wordmark's boards; since #1535 the village pavements | the same, photographed, and since #679 the start and finish gantries; since #966 the wordmark's boards; since #1535 the village pavements |
  * | `water` | streams, lakes, bridges | the same |
  * | `riders` | the three riders, their contact shadows and the shadow map's catcher | the MakeHuman riders, and the same shadows |
  *
@@ -68,6 +68,7 @@ import {
   GroundBlobBelt,
   HorizonRing,
   LogoBelt,
+  PavementBelt,
   RealisticRiderBelt,
   RealisticStructureBelts,
   RealisticVegetationBelt,
@@ -145,6 +146,8 @@ export const LAYER_OWNERS: ReadonlyMap<{ prototype: object }, Ownership> = new M
   // beside the road.
   [GantryBelt, 'structures'],
   [LogoBelt, 'structures'],
+  // #1535: the village pavements, in both worlds.
+  [PavementBelt, 'structures'],
   [RiderBelt, 'riders'],
   [RealisticRiderBelt, 'riders'],
   [ContactShadowBelt, 'riders'],

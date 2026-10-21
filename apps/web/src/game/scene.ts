@@ -62,6 +62,7 @@ import {
   structuresAt,
   type SettlementFootprint,
 } from './settlements';
+import { streetsAt } from './streets';
 import { bridgeParts, waterSurface, waterways } from './waterways';
 import { worldStyle } from './world';
 import type { RouteProfile } from '@onyourleft/domain';
@@ -212,6 +213,16 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     scatter: items,
     // #966: the billboards in view, out of the structures' budget.
     billboards,
+    // #1535: the village streets along exactly the stretch of road this frame
+    // drew, for `scenery`'s reason — and outside the structures' budget,
+    // because a street is one mesh rather than items a rung could thin.
+    streets: streetsAt(
+      input.profile,
+      input.origin,
+      seed,
+      (corridor.centre[0] as CorridorPoint).along,
+      (corridor.centre[corridor.centre.length - 1] as CorridorPoint).along,
+    ),
     // #458. Built from the corridor just built, so the ground's innermost
     // column is the road's outermost one — `landform.ts` says why that is the
     // whole of the no-crack guarantee. Every band, whatever the rung: the
