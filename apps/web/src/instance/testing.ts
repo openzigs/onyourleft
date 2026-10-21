@@ -87,19 +87,27 @@ export const SCRIPTED_FINGERPRINT = `${'ABCD'.repeat(12)}EFGA`;
 /** A second one, for the confirm-new-card screen. */
 export const SCRIPTED_NEW_FINGERPRINT = `${'WXYZ'.repeat(12)}234A`;
 
+/**
+ * A September 2026 moment on the device's own calendar, in Unix seconds
+ * (#1511): the notices and the Devices row write the device's calendar, so a
+ * fixture at a UTC moment names a different day east of UTC+12 or west of
+ * UTC-11. Local, it names the same day in every zone a test runs in.
+ */
+const september = (date: number, hour = 12, minute = 0): number =>
+  new Date(2026, 8, date, hour, minute).getTime() / 1000;
+
 /** Two devices, one of them this one — the shape `GET /v1/auth/devices` answers. */
 export const SCRIPTED_DEVICES: readonly InstanceDevice[] = [
   {
     publicKey: 'a1'.repeat(32),
-    addedAt: 1_790_000_000,
-    lastUsedAt: 1_790_500_000,
+    addedAt: september(21, 14, 13),
+    lastUsedAt: september(27, 9, 6),
     revokedAt: null,
     thisDevice: true,
   },
   {
     publicKey: 'b2'.repeat(32),
-    // Noon UTC, so the day a notice names it by is the same in every time zone (#1208).
-    addedAt: 1_790_078_400,
+    addedAt: september(22),
     lastUsedAt: null,
     revokedAt: null,
     thisDevice: false,
@@ -117,7 +125,7 @@ const OTHER_DEVICE_KEY = 'b2'.repeat(32);
 export const SCRIPTED_ACCOUNT_CHANGES: readonly AccountChangeEntry[] = [
   {
     id: 1,
-    at: 1_790_050_000,
+    at: september(22, 4, 6),
     kind: 'link_code_minted',
     actorKey: THIS_DEVICE_KEY,
     subjectKey: null,
@@ -127,18 +135,17 @@ export const SCRIPTED_ACCOUNT_CHANGES: readonly AccountChangeEntry[] = [
   },
   {
     id: 2,
-    at: 1_790_078_400,
+    at: september(22),
     kind: 'key_added',
     actorKey: THIS_DEVICE_KEY,
     subjectKey: OTHER_DEVICE_KEY,
-    subjectAddedAt: 1_790_078_400,
+    subjectAddedAt: september(22),
     via: 'link_code',
     address: null,
   },
   {
     id: 3,
-    // Noon UTC on 23 and 24 September: the same day wherever the record is read.
-    at: 1_790_164_800,
+    at: september(23),
     kind: 'address_added',
     actorKey: OTHER_DEVICE_KEY,
     subjectKey: null,
@@ -148,7 +155,7 @@ export const SCRIPTED_ACCOUNT_CHANGES: readonly AccountChangeEntry[] = [
   },
   {
     id: 4,
-    at: 1_790_251_200,
+    at: september(24),
     kind: 'link_code_minted',
     actorKey: OTHER_DEVICE_KEY,
     subjectKey: null,
