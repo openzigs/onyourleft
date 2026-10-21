@@ -410,7 +410,8 @@ function sectionAt(
  * - a pair of **bollards** at each end, at the kerb
  *   ({@link BOLLARD_ENDS_METRES});
  * - one **bench** at the back, half-way between the two lamp posts nearest
- *   the run's middle (or at its middle, where it has fewer than two), facing
+ *   the run's middle (a quarter-spacing past a lone lamp post, so the two never stand
+ *   together; at the run's middle where it has none), facing
  *   the road, and a **bin** {@link BIN_BESIDE_METRES} along from it — only on
  *   a run long enough to hold both clear of the bollards.
  */
@@ -459,7 +460,9 @@ function furnish(run: readonly Section[], into: FurnitureItem[]): void {
   const bench =
     lamps.length >= 2
       ? ((lamps[pair] as number) + (lamps[pair + 1] as number)) / 2
-      : (start + end) / 2;
+      : lamps.length === 1
+        ? (lamps[0] as number) + LAMP_SPACING_METRES / 4
+        : (start + end) / 2;
   place('bench', bench, back - BENCH_SETBACK_METRES);
   place('bin', bench + BIN_BESIDE_METRES, back - BENCH_SETBACK_METRES);
 }

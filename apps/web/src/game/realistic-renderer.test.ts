@@ -3712,7 +3712,7 @@ describe('the street furniture — #1536', () => {
     belt.dispose();
   });
 
-  it('is painted in the stylised world, lit or flat by the rung, its colours in the light budget', () => {
+  it('is painted in the stylised world, lit or flat by the rung', () => {
     const belt = new FurnitureBelt('stylised');
     expect(typeOf(belt.meshOf('lamp-post'))).toBe('MeshLambertMaterial');
     belt.setShading('flat');

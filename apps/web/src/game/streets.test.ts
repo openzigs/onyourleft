@@ -468,6 +468,50 @@ describe('the street furniture — #1536', () => {
     }
   });
 
+  it('furnishes a short run by its length: bollards, bench and bin only where they fit clear', () => {
+    const kinds = (length: number) =>
+      furnitureAlong(
+        FARMLAND,
+        corridorOrigin(FARMLAND),
+        scatterSeed(FARMLAND),
+        1,
+        1_000,
+        1_000 + length,
+      )
+        .map((item) => item.kind)
+        .sort();
+    // Under 2 x 0.6 m nothing; to 2 x 1.8 m the outer pair only.
+    expect(kinds(1)).toEqual([]);
+    expect(kinds(3)).toEqual(['bollard', 'bollard']);
+    // Both pairs, but not yet room for a bench and bin clear of them.
+    expect(kinds(8)).toEqual(['bollard', 'bollard', 'bollard', 'bollard']);
+    // A bench and bin at the middle of a run with no lamp post.
+    expect(kinds(9)).toEqual(['bench', 'bin', 'bollard', 'bollard', 'bollard', 'bollard']);
+    const [lone] = ofKind(
+      furnitureAlong(FARMLAND, corridorOrigin(FARMLAND), scatterSeed(FARMLAND), 1, 1_000, 1_020),
+      'bench',
+    );
+    expect(alongAt(FARMLAND, (lone as FurnitureItem).z)).toBeCloseTo(1_010, 0);
+    // One lamp post: the bench is never beside it.
+    for (const length of [24, 25, 26, 34, 47]) {
+      const items = furnitureAlong(
+        FARMLAND,
+        corridorOrigin(FARMLAND),
+        scatterSeed(FARMLAND),
+        1,
+        1_000,
+        1_000 + length,
+      );
+      const [lamp] = ofKind(items, 'lamp-post');
+      const [bench] = ofKind(items, 'bench');
+      expect(ofKind(items, 'lamp-post'), String(length)).toHaveLength(1);
+      expect(
+        Math.abs((bench as FurnitureItem).z - (lamp as FurnitureItem).z),
+        String(length),
+      ).toBeGreaterThan(2);
+    }
+  });
+
   it('furnishes no pavement the rules refused: a hairpin’s inside, and the stream’s banks', () => {
     const hairpin = hairpinRoute(4);
     const seed = scatterSeed(hairpin);
