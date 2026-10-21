@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest';
 import {
   AFTER_REVOKE_TEXT,
   formatDay,
+  formatIsoDay,
   formatTime,
   keyName,
   noticeText,
@@ -69,8 +70,10 @@ describe('a notice (#1193 draft wording)', () => {
   });
 
   it('names a revoked key by the day it was added, from the entry, and never as this device', () => {
-    // The owner's example, in the device's own calendar.
-    const noon = (month: number, date: number): number => Date.UTC(2026, month, date, 12) / 1000;
+    // The owner's example, in the device's own calendar: local noon, so the
+    // day is the same in every time zone a test runs in (#1511).
+    const noon = (month: number, date: number): number =>
+      new Date(2026, month, date, 12).getTime() / 1000;
     const keys: readonly ListedKey[] = [{ publicKey: 'september', addedAt: noon(8, 12) }];
     expect(
       noticeText(
@@ -144,14 +147,33 @@ describe('a notice (#1193 draft wording)', () => {
   });
 
   it('writes a day as the day and the month', () => {
-    // Noon UTC, so the day is the same in every time zone a test runs in.
-    expect(formatDay(Date.UTC(2026, 9, 3, 12) / 1000)).toBe('3 October');
+    // Local noon, so the day is the same in every time zone a test runs in:
+    // noon UTC is already the next day east of UTC+12 (#1511).
+    expect(formatDay(new Date(2026, 9, 3, 12).getTime() / 1000)).toBe('3 October');
   });
 
   it("writes a time on the device's own 24-hour clock", () => {
     // Local times, so the clock read is the one the rider's device keeps.
     expect(formatTime(new Date(2026, 8, 22, 14, 5).getTime() / 1000)).toBe('14:05');
     expect(formatTime(new Date(2026, 8, 22, 0, 5).getTime() / 1000)).toBe('00:05');
+  });
+});
+
+describe("the Devices row's day (#1511)", () => {
+  const local = (date: number, hour: number, minute: number): number =>
+    new Date(2026, 8, date, hour, minute).getTime() / 1000;
+
+  it("writes a day as the year, month and day, on the device's own calendar", () => {
+    expect(formatIsoDay(local(22, 0, 30))).toBe('2026-09-22');
+    expect(formatIsoDay(local(22, 23, 30))).toBe('2026-09-22');
+    expect(formatIsoDay(new Date(2026, 0, 5, 12).getTime() / 1000)).toBe('2026-01-05');
+  });
+
+  it('names the same day the revoke button does, near midnight too', () => {
+    for (const at of [local(21, 23, 59), local(22, 0, 1)]) {
+      const [, , date] = formatIsoDay(at).split('-');
+      expect(formatDay(at)).toBe(`${String(Number(date))} September`);
+    }
   });
 });
 
