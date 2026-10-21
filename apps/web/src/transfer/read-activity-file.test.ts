@@ -743,6 +743,7 @@ describe('readActivityFile — this client’s own laps (#1320, #1321)', () => {
     expect(ride.laps).toEqual([]);
     expect(ride.faults).toEqual([]);
   });
+
   it('lists the one lap of a marked TCX, which its mark says is a lap', () => {
     const ride = readActivityFile(
       'one.tcx',
