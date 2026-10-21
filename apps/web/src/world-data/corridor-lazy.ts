@@ -33,10 +33,10 @@ const REFUSED: CorridorState = { kind: 'unavailable', why: 'refused' };
 export function lazyWorldCorridorPort(
   options: LazyCorridorPortOptions,
   load: () => Promise<WorldCorridorPort> = async () => {
-    const [port, source] = await Promise.all([
-      import('./corridor-port'),
-      import('./corridor-source'),
-    ]);
+    // Two plain `await import()` bindings, which `check-wiring.mjs` follows
+    // (§`namespaceBindings`); a destructured `Promise.all` it would not.
+    const port = await import('./corridor-port');
+    const source = await import('./corridor-source');
     return port.createWorldCorridorPort({ ...options, archive: source.corridorArchive });
   },
 ): WorldCorridorPort {
