@@ -22,6 +22,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { GameView, type GamePort, type RidableRoute } from './GameView';
+import type { CorridorState } from './world-data/corridor';
 import {
   auditAccessibility,
   formatViolations,
@@ -395,5 +396,71 @@ describe('opened from Home’s next up — #1010', () => {
     globalThis.location.hash = '#/game?route=gone';
     mounted = await mountPicker();
     expect(rideLabel()).toBe('Ride Box Hill');
+  });
+});
+
+describe('the corridor’s line is announced politely, once — #1539', () => {
+  /** A port whose corridor read is held at a count until the test lets it settle. */
+  function corridorPort(): { port: GamePort; settleWith: (state: CorridorState) => void } {
+    let finish: ((state: CorridorState) => void) | undefined;
+    let progressTo: ((state: CorridorState) => void) | undefined;
+    return {
+      port: {
+        ...PORT,
+        loadWorldCorridor: (_route, _signal, progress) => {
+          progressTo = progress;
+          progress({ kind: 'reading', done: 0, of: 40 });
+          return new Promise<CorridorState>((resolve) => {
+            finish = resolve;
+          });
+        },
+      },
+      settleWith: (state) => {
+        progressTo?.({ kind: 'reading', done: 12, of: 40 });
+        finish?.(state);
+      },
+    };
+  }
+
+  const statusOf = (): HTMLElement | undefined =>
+    queryAll(document, '.oyl-chooser__corridor [role="status"]')[0];
+
+  it('draws the count for the eye and keeps it out of every live region', async () => {
+    const { port } = corridorPort();
+    mounted = await mount(
+      <main>
+        <h1>Trainer game</h1>
+        <GameView port={port} />
+      </main>,
+    );
+    await settle();
+    const line = queryAll(document, '.oyl-chooser__corridor')[0];
+    expect(line?.textContent).toBe('Towns from map data: reading (0 of 40)');
+    // The count is aria-hidden, and the status region is empty while it reads.
+    expect(statusOf()?.textContent).toBe('');
+    const hidden = queryAll(document, '.oyl-chooser__corridor [aria-hidden="true"]')[0];
+    expect(hidden?.textContent).toBe('Towns from map data: reading (0 of 40)');
+    for (const live of queryAll(document, '[aria-live], [role="status"], [role="alert"]')) {
+      expect(live.textContent ?? '').not.toMatch(/reading \(\d+ of \d+\)/);
+    }
+    const violations = auditAccessibility(document);
+    expect(violations, formatViolations(violations)).toEqual([]);
+  });
+
+  it('puts the settled words in the polite status region the one time they arrive', async () => {
+    const { port, settleWith } = corridorPort();
+    mounted = await mount(
+      <main>
+        <h1>Trainer game</h1>
+        <GameView port={port} />
+      </main>,
+    );
+    await settle();
+    settleWith({ kind: 'unavailable', why: 'offline' });
+    await settle();
+    expect(statusOf()?.textContent).toBe('Towns from map data: not available for this route');
+    expect(statusOf()?.getAttribute('aria-live')).not.toBe('assertive');
+    const violations = auditAccessibility(document);
+    expect(violations, formatViolations(violations)).toEqual([]);
   });
 });

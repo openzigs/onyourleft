@@ -80,6 +80,7 @@ import type { PacerChoice } from './pacer-choice';
 import { realisticWorldChosenText } from './realistic-assets';
 import { RIDING_POSITIONS, RIDING_POSITION_ORDER, type RidingPosition } from './rider';
 import { MAXIMUM_BEARING_DEGREES, type WindChoice, type WindProblemField } from './wind-choice';
+import { corridorStateText, type CorridorState } from './world-data/corridor';
 
 /** One route the rider could ride, as the picker needs it. */
 export interface RidableRoute {
@@ -229,6 +230,11 @@ interface RoutePickerProps {
   readonly onPosition: (value: RidingPosition) => void;
   /** Whether this device chose the realistic world — #475. @see realisticWorldChosenText */
   readonly worldChosen: boolean;
+  /**
+   * What the chosen route's corridor came to — #1539. `undefined` draws no
+   * line: no port, or nothing asked yet. @see CorridorLine
+   */
+  readonly corridor?: CorridorState | undefined;
   readonly onStart: (
     route: RidableRoute,
     ghost: boolean,
@@ -357,6 +363,11 @@ export function RoutePicker(props: RoutePickerProps): JSX.Element {
       // @see RealisticWorldLine
       <RealisticWorldLine key="world" />
     ) : undefined,
+    props.corridor === undefined ? undefined : (
+      // #1539: towns from map data, in one line that names no place — beside
+      // the world line, because it is about the world.
+      <CorridorLine key="corridor" state={props.corridor} />
+    ),
     props.releaseNotice === undefined ? undefined : (
       // #372: about the machine under the rider now rather than the road they
       // are about to choose. Kept (#1086): trainer-control text is never
@@ -709,6 +720,27 @@ function RealisticWorldLine(): JSX.Element {
         <p className="tw:m-0">{realisticWorldChosenText()}</p>
       </details>
     </div>
+  );
+}
+
+/**
+ * The corridor's one line — #1539 behaviour 5.
+ *
+ * ⚠️ **Announced politely, once, and never as a count.** The progress
+ * (*"reading (12 of 40)"*) is drawn for the eye and hidden from assistive
+ * technology, because a live region that changed with every tile would read
+ * a number out forty times. The settled words (*ready*, *not available*,
+ * *off …*) go into a `status` region, which is polite, the one time they
+ * arrive; `picker.a11y.test.tsx` §"#1539" holds both halves.
+ */
+function CorridorLine(props: { readonly state: CorridorState }): JSX.Element {
+  const text = corridorStateText(props.state);
+  const settled = props.state.kind !== 'reading';
+  return (
+    <p className="oyl-chooser__corridor tw:m-0">
+      <span role="status">{settled ? text : ''}</span>
+      <span aria-hidden="true">{settled ? '' : text}</span>
+    </p>
   );
 }
 

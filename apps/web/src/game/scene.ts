@@ -65,6 +65,7 @@ import {
 import { streetsAt } from './streets';
 import { bridgeParts, waterSurface, waterways } from './waterways';
 import { worldStyle } from './world';
+import type { WorldCorridor } from './world-data/corridor';
 import type { RouteProfile } from '@onyourleft/domain';
 
 /** Everything a frame needs beyond the rider's own state. */
@@ -103,6 +104,19 @@ export interface SceneInput {
   readonly botDistance?: number | undefined;
   /** The rider's own previous attempt, when they chose to race one. Optional. */
   readonly ghost?: GhostTrack | undefined;
+  /**
+   * The route's corridor of map features, fixed when the ride started — #1539,
+   * ADR 0054. Absent on every ride with none: the stylised world, map tiles
+   * off, no archive, offline with nothing kept, or a read still running at
+   * the press.
+   *
+   * ⚠️ **Nothing in this file reads it yet**, and that is the issue's scope:
+   * #1539 delivers the corridor to the frame, and #1540 places buildings from
+   * it (ADR 0054 D-5). `world-data/corridor-wiring.test.tsx` reads it back
+   * off the input `sceneFrame` was handed, which is the guard an optional
+   * field nobody supplies needs (`check-wiring.mjs` §Limits).
+   */
+  readonly worldCorridor?: WorldCorridor | undefined;
   /**
    * Other real riders in a room, where to draw them — #783: the interest set's
    * riders (`net/interest.ts`), each at the distance `net/snapshots.ts`

@@ -26,7 +26,9 @@
  */
 
 import tailwindcss from '@tailwindcss/vite';
-import { defineConfig, type Plugin } from 'vite';
+import { fileURLToPath } from 'node:url';
+
+import { defineConfig, runnerImport, type Plugin } from 'vite';
 
 import {
   buildFixtureArchive,
@@ -74,6 +76,36 @@ function pmtilesFixture(): Plugin {
   };
 }
 
+/**
+ * Emit the archive the corridor read is served from (#1539) — built, never
+ * committed, for `pmtilesFixture`'s reasons. `corridor-fixture.ts` says what
+ * is in it: #1544's synthetic tiles over the harness route, no OSM data.
+ */
+function corridorFixture(): Plugin {
+  return {
+    name: 'oyl-corridor-fixture',
+    async generateBundle() {
+      // ⚠️ Through Vite's own module runner, not a static import: the fixture
+      // decodes with `@onyourleft/map-features`, whose TypeScript source Node
+      // cannot load as the config is loaded, and the runner transforms it.
+      const { module } = await runnerImport<typeof import('./browser/corridor-fixture')>(
+        fileURLToPath(new URL('./browser/corridor-fixture.ts', import.meta.url)),
+        { configFile: false },
+      );
+      this.emitFile({
+        type: 'asset',
+        fileName: module.CORRIDOR_ARCHIVE_FILE,
+        source: await module.buildCorridorFixtureArchive(),
+      });
+      this.emitFile({
+        type: 'asset',
+        fileName: module.LONG_CORRIDOR_ARCHIVE_FILE,
+        source: await module.buildCorridorFixtureArchive(true),
+      });
+    },
+  };
+}
+
 export default defineConfig({
   // #530: the pose runtime the product ships, so `pose.browser.spec.ts` runs
   // the same bytes a rider's tablet would.
@@ -83,7 +115,14 @@ export default defineConfig({
   // #950: the harness pages import `src/design/tailwind.css` after `theme.css`,
   // exactly as `main.tsx` does, so a primitive drawn with utilities is drawn
   // the same here as in the product.
-  plugins: [pmtilesFixture(), themeSelection(), poseRuntime(), basisTranscoder(), tailwindcss()],
+  plugins: [
+    pmtilesFixture(),
+    corridorFixture(),
+    themeSelection(),
+    poseRuntime(),
+    basisTranscoder(),
+    tailwindcss(),
+  ],
   root: 'browser',
   // ⚠️ The APP's `public/`, not a `browser/public/` of the harness's own —
   // since ADR 0026. The realistic world's files are committed there and served
@@ -189,6 +228,10 @@ export default defineConfig({
         // own ViewTransition and Suspense around the real AboutView, with the
         // old markup as the control. `logo-harness.tsx` says what it proves.
         logo: 'browser/logo.html',
+        // #1539: a route's corridor read from a synthetic archive at this
+        // origin, through the product's port and reader, into IndexedDB.
+        // `corridor-harness.ts` says what it does and does not prove.
+        corridor: 'browser/corridor.html',
       },
     },
     // Sourcemaps so a failure in CI names a line of ours rather than a column

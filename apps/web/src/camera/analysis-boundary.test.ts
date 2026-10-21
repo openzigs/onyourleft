@@ -49,6 +49,11 @@ const MAY_NAME_HTTP_TYPES: readonly string[] = [
   // #777: the one transport to an instance (ADR 0036 D-3 (a)). Its port,
   // `instance/instance-port.ts`, names no HTTP type — only what it read.
   join('instance', 'instance-transport.ts'),
+  // #1539, ADR 0054 D-2.5: the one module that asks the basemap archive for a
+  // route's corridor, with its own `fetch` — a `Headers` for its `Range` and
+  // the `Response` it checks. Its port (`world-data/corridor-port.ts`) and the
+  // read (`game/world-data/corridor.ts`) name no HTTP type.
+  join('world-data', 'corridor-source.ts'),
 ];
 
 /**
