@@ -36,6 +36,9 @@
  *   room's id. The listing answers each room's length and climb, never its
  *   route: the route is fetched, as for a code, only once the rider joined.
  * - **Starting** and **a result** send nothing but the room's id.
+ * - **Blocking a rider from a result** (#1516) sends the room's id and the
+ *   ROW the result names them on — never a name, and never an athlete id,
+ *   which this device does not hold.
  * - **Never** the rider's weight here: that goes once, with a room's ticket
  *   (`room-port.ts`), and only when the rider has declared one.
  */
@@ -186,6 +189,16 @@ export type RaceResultAnswer =
   | { readonly kind: 'refused'; readonly reason: RoomsRefusal }
   | { readonly kind: 'unreachable' };
 
+/**
+ * What became of a block made from a race's result — #1516: `blocked` (204),
+ * a refusal — `no-such-room` is a result this rider may no longer read — or
+ * `unreachable`.
+ */
+export type RaceBlockAnswer =
+  | { readonly kind: 'blocked' }
+  | { readonly kind: 'refused'; readonly reason: RoomsRefusal }
+  | { readonly kind: 'unreachable' };
+
 /** What the game may ask about rooms. */
 export interface RoomsPort {
   /** Make a room on one of the rider's own routes. */
@@ -208,6 +221,12 @@ export interface RoomsPort {
   start(roomId: string): Promise<StartRaceAnswer>;
   /** A race's result, for its riders only. */
   results(roomId: string): Promise<RaceResultAnswer>;
+  /**
+   * #1516: block the rider on `row` of the race's result, counted from 1 —
+   * the instance's `POST /v1/rooms/{roomId}/blocks`. By ROW: the result says
+   * who is on it, and blocks only a rider it names to this rider.
+   */
+  blockRider(roomId: string, row: number): Promise<RaceBlockAnswer>;
 }
 
 export interface RoomsPortOptions {
@@ -517,6 +536,22 @@ export function createRoomsPort(options: RoomsPortOptions): RoomsPort {
           return { kind: 'refused', reason: 'instance-refused' };
         }
         return { kind: 'result', rows };
+      } catch {
+        return { kind: 'unreachable' };
+      }
+    },
+
+    async blockRider(roomId, row) {
+      try {
+        const session = await held();
+        if ('refused' in session) return { kind: 'refused', reason: session.refused };
+        const answer = await session.sealedOrKeyless.call('POST', roomPath(roomId, 'blocks'), {
+          token: session.token,
+          body: { row },
+        });
+        if (answer.status === 204) return { kind: 'blocked' };
+        const reason = refusalOf(answer);
+        return reason === undefined ? { kind: 'unreachable' } : { kind: 'refused', reason };
       } catch {
         return { kind: 'unreachable' };
       }

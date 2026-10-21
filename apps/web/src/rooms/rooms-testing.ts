@@ -142,6 +142,8 @@ export class ScriptedInstance {
   joinedPublic: { status: number; body: unknown } = { status: 404, body: null };
   /** #789: `POST /v1/rooms/{roomId}/reports`. */
   reported: { status: number; body: unknown } = { status: 204, body: null };
+  /** #1516: `POST /v1/rooms/{roomId}/blocks`. */
+  blocked: { status: number; body: unknown } = { status: 204, body: null };
 
   /**
    * #788: a public room listed as `listed`, joined from the listing, its route
@@ -238,15 +240,17 @@ export class ScriptedInstance {
               ? this.joinedPublic
               : path.endsWith('/reports')
                 ? this.reported
-                : path.endsWith('/route')
-                  ? this.route
-                  : path.endsWith('/start')
-                    ? this.started
-                    : path.endsWith('/results')
-                      ? this.results
-                      : path.endsWith('/ticket')
-                        ? this.ticket
-                        : { status: 404, body: null };
+                : path.endsWith('/blocks')
+                  ? this.blocked
+                  : path.endsWith('/route')
+                    ? this.route
+                    : path.endsWith('/start')
+                      ? this.started
+                      : path.endsWith('/results')
+                        ? this.results
+                        : path.endsWith('/ticket')
+                          ? this.ticket
+                          : { status: 404, body: null };
     return Promise.resolve(
       // A 204 carries no body at all: a `Response` refuses even an empty one.
       new Response(

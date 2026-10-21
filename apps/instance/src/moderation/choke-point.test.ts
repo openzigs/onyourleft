@@ -130,6 +130,10 @@ const EXEMPT: Readonly<
     heldElsewhere:
       'names a seat in a room the caller is a member of; the athlete in it is the room’s answer, and the report reaches the moderators, never that athlete (#789, rooms/room-moderation.test.ts)',
   },
+  blockFromRaceResult: {
+    heldElsewhere:
+      'names a row of a race’s result the caller may read, and blocks only a rider that result already names to them; the block is the caller’s own row, and the answer names nobody (#1516, rooms/race-result-block.test.ts)',
+  },
   removeFromMyRoom: {
     heldElsewhere:
       'only the host of a private room, for a seat in their own room; the athlete in it is the room’s answer, and the removal is logged (#789, rooms/room-moderation.test.ts)',
@@ -230,6 +234,7 @@ const NOT_AN_ATHLETE_FIELD: Readonly<Record<string, string>> = {
   code: 'a room’s code; its members are whoever holds it (ADR 0028 D-6.3)',
   riderId:
     'a SEAT in a room the caller is in (#789); the room itself says who sits there, and the report or removal goes through the moderators’ log',
+  row: 'a ROW of a race’s result the caller may read (#1516); only a row that result already names to the caller blocks anybody, and the block is the caller’s own',
   grounds: 'the CALLER’s own grounds for appealing a decision about them (#911)',
   item: 'which item a moderator hides — a room’s listing, its route or one result row — by its identifier (#913)',
   outcome: 'a moderator’s outcome for an appeal: upheld or reversed (#911)',
