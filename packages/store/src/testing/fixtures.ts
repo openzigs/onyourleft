@@ -96,6 +96,7 @@ import {
   type AthleteId,
   type LapId,
   type RecordingSessionId,
+  type RouteId,
   type SegmentId,
 } from '../ids';
 import type { DeviceKeyRecord, StoredActivityRecord } from '../identity';
@@ -112,6 +113,7 @@ import type {
   RiderTextRecord,
   TrustedDeviceKeyRecord,
   WorkoutGoalsRecord,
+  WorldCorridorRecord,
   NewActivity,
   NewLap,
   RouteRecord,
@@ -1065,5 +1067,138 @@ export function workoutGoalsFor(owner: AthleteId, seed = 0): WorkoutGoalsRecord 
       effortCheckIns: offset % 2 === 0,
     },
     savedAt: unixSeconds(FIXTURE_EPOCH + 600_000 + offset),
+  };
+}
+
+/**
+ * The decoded features of a world corridor, as a fixture packs them — #1545.
+ * Shaped like ADR 0054 D-3.3's fields (footprints with `kind`, `height` and
+ * `min_height`; land use and water polygons; footway lines with `kind` and
+ * `kind_detail`), in the corridor frame. The store treats the packing as
+ * opaque, so the fixture's own JSON is enough to read features back by.
+ */
+export interface WorldCorridorFixtureFeatures {
+  readonly buildings: readonly {
+    readonly ring: readonly (readonly [number, number])[];
+    readonly kind: string;
+    readonly height: number;
+    readonly minHeight: number;
+  }[];
+  readonly landuse: readonly {
+    readonly ring: readonly (readonly [number, number])[];
+    readonly kind: string;
+  }[];
+  readonly water: readonly { readonly ring: readonly (readonly [number, number])[] }[];
+  readonly footways: readonly {
+    readonly line: readonly (readonly [number, number])[];
+    readonly kind: string;
+    readonly kindDetail: string;
+  }[];
+}
+
+/**
+ * One athlete's corridor features. ⚠️ **Different numbers per athlete and per
+ * `seed`**, so a read that handed back somebody else's corridor cannot match,
+ * and every coordinate carries a fractional part no other fixture uses
+ * (`.4375`), so a scan of an export for one is not fooled by a ride's numbers.
+ */
+export function worldCorridorFeaturesFor(owner: AthleteId, seed = 0): WorldCorridorFixtureFeatures {
+  const offset = (ATHLETES.indexOf(owner) * 10 + seed) * 1000 + 0.4375;
+  return {
+    buildings: [
+      {
+        ring: [
+          [offset + 12, 31],
+          [offset + 22, 31],
+          [offset + 22, 43],
+          [offset + 12, 43],
+        ],
+        kind: 'building',
+        height: 9.4375,
+        minHeight: 0,
+      },
+    ],
+    landuse: [
+      {
+        ring: [
+          [offset - 140, -60],
+          [offset - 40, -60],
+          [offset - 40, -160],
+        ],
+        kind: 'farmland',
+      },
+    ],
+    water: [
+      {
+        ring: [
+          [offset + 200, 150],
+          [offset + 260, 150],
+          [offset + 230, 210],
+        ],
+      },
+    ],
+    footways: [
+      {
+        line: [
+          [offset + 5, 8],
+          [offset + 95, 8],
+        ],
+        kind: 'path',
+        kindDetail: 'sidewalk',
+      },
+    ],
+  };
+}
+
+/** Packs corridor features as the fixture does: gzip over JSON. */
+export async function packWorldCorridorFeatures(
+  features: WorldCorridorFixtureFeatures,
+): Promise<Blob> {
+  const json = new Blob([JSON.stringify(features)]);
+  const gzipped = json.stream().pipeThrough(new CompressionStream('gzip'));
+  return new Blob([await new Response(gzipped).arrayBuffer()], { type: 'application/gzip' });
+}
+
+/** Unpacks what {@link packWorldCorridorFeatures} packed. */
+export async function unpackWorldCorridorFeatures(
+  blob: Blob,
+): Promise<WorldCorridorFixtureFeatures> {
+  const json = blob.stream().pipeThrough(new DecompressionStream('gzip'));
+  return JSON.parse(await new Response(json).text()) as WorldCorridorFixtureFeatures;
+}
+
+/**
+ * One athlete's world corridor around `route` — #1545. The route must be the
+ * owner's and saved first: `putWorldCorridor` refuses one for a route the
+ * owner does not have. `features` overrides the packed blob, for a test of
+ * the size bound.
+ */
+export async function worldCorridorFor(
+  owner: AthleteId,
+  route: RouteId,
+  overrides: { readonly seed?: number; readonly features?: Blob } = {},
+): Promise<WorldCorridorRecord> {
+  const seed = overrides.seed ?? 0;
+  const offset = ATHLETES.indexOf(owner) * 10 + seed;
+  return {
+    owner,
+    routeId: route,
+    routeDigest: String(offset).padStart(64, 'c'),
+    archive: {
+      url: 'https://tiles.example.org/basemap.pmtiles',
+      identity: `"etag-${String(offset)}"`,
+    },
+    readerVersion: 1,
+    halfWidthMetres: 300,
+    readAt: new Date((FIXTURE_EPOCH + 700_000 + offset) * 1000).toISOString(),
+    tiles: [
+      { x: 16_370 + offset, y: 10_890, state: 'covered' },
+      { x: 16_371 + offset, y: 10_890, state: 'privacy-zone' },
+      { x: 16_372 + offset, y: 10_890, state: 'outside-archive' },
+    ],
+    features:
+      overrides.features ??
+      (await packWorldCorridorFeatures(worldCorridorFeaturesFor(owner, seed))),
+    licence: 'ODbL-1.0',
   };
 }

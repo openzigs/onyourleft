@@ -1724,3 +1724,66 @@ export type WorkoutGoalsRead =
   | { readonly status: 'none' }
   | { readonly status: 'kept'; readonly record: WorkoutGoalsRecord }
   | { readonly status: 'fault'; readonly fault: string };
+
+/** Why a tile of a world corridor holds what it holds — #1545, ADR 0054 D-2, D-6. */
+export type WorldCorridorTileState =
+  'covered' | 'refused' | 'privacy-zone' | 'outside-archive' | 'over-cap';
+
+/**
+ * The map features in one route's corridor, read once from the basemap archive
+ * — #1545, ADR 0054 D-3. One row per **(owner, route)**, keyed by both.
+ *
+ * ⚠️ **ODbL 1.0, not Apache-2.0.** This package's *code* is Apache-2.0; the
+ * *data* in this record is a Derivative Database of OpenStreetMap (ADR 0054
+ * D-3.2), which is why it is its own store and never fields on
+ * {@link RouteRecord} (ADR 0012 D-3.1). What it holds, in ADR 0054 D-3.3's one
+ * sentence: building footprint polygons with `kind`, `height` and
+ * `min_height`; land-use polygons with `kind`; water polygons; footway lines
+ * with `kind` and `kind_detail`; and which tiles were read and when — no OSM
+ * identifier, no name, no address.
+ *
+ * ⚠️ **It never leaves the device** (ADR 0054 D-3.5): no account export, no
+ * sync, no instance call. That is the only thing keeping ODbL §4.4
+ * share-alike from engaging, so a change that sends any of it anywhere is a
+ * change to that ADR. It is a cache: the route keeps its own geometry, so the
+ * row can be dropped and read again with nothing of the rider's lost.
+ *
+ * ⚠️ **Location data** (ADR 0054 D-6.6): no error, log or message may carry a
+ * feature, a coordinate or a tile's x/y.
+ */
+export interface WorldCorridorRecord {
+  /** Whose. **Every read of this record names it** — it leads the key. */
+  readonly owner: AthleteId;
+  /** The route the corridor is around. Deleting the route deletes this row. */
+  readonly routeId: RouteId;
+  /** SHA-256 of the route's positions as stored, so an edited route is read again. */
+  readonly routeDigest: string;
+  /** The archive URL and its header etag (or the header's own digest when there is no etag). */
+  readonly archive: { readonly url: string; readonly identity: string };
+  /** Bumped when #1539's decode, or the fields it keeps, change. */
+  readonly readerVersion: number;
+  /** How far either side of the route's line the corridor reaches. */
+  readonly halfWidthMetres: number;
+  /** ISO-8601, the device's clock, when it was read. */
+  readonly readAt: string;
+  /** The tiles asked for, and per tile: covered, or why not. */
+  readonly tiles: readonly {
+    readonly x: number;
+    readonly y: number;
+    readonly state: WorldCorridorTileState;
+  }[];
+  /**
+   * The decoded features in the corridor frame, packed by #1539. Opaque here;
+   * at most {@link WORLD_CORRIDOR_FEATURES_LIMIT_BYTES}, and a larger one is
+   * refused at the write rather than truncated.
+   */
+  readonly features: Blob;
+  /** What the data is licensed under. The only value there is. */
+  readonly licence: 'ODbL-1.0';
+}
+
+/**
+ * The largest `features` blob a world corridor may hold: **16 MiB** (#1545),
+ * the issue's bound for a 600-tile corridor.
+ */
+export const WORLD_CORRIDOR_FEATURES_LIMIT_BYTES = 16 * 1024 * 1024;
