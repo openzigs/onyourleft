@@ -18,13 +18,23 @@ import { sceneFrame } from './scene';
 import { PLOT_METRES, siteAt, siteSpacing, villagePlots, type Site } from './settlements';
 import { atStartLine } from './simulation';
 import {
+  BENCH_SETBACK_METRES,
+  BIN_BESIDE_METRES,
+  BOLLARD_ENDS_METRES,
+  BOLLARD_INSET_METRES,
+  FURNITURE_KINDS,
+  furnitureAlong,
   KERB_HEIGHT_METRES,
   KERB_LATERAL_METRES,
+  LAMP_SETBACK_METRES,
+  LAMP_SPACING_METRES,
   PAVEMENT_END_INSET_METRES,
   PAVEMENT_TRIANGLES_PER_VILLAGE,
   PAVEMENT_WIDTH_METRES,
   pavementAlong,
   streetsAt,
+  type FurnitureItem,
+  type FurnitureKind,
   type PavementMesh,
   type VillageStreet,
 } from './streets';
@@ -359,3 +369,129 @@ function isAlong(vertex: {
   const rz = vertex.z / radial;
   return Math.abs(vertex.nx * rx + vertex.nz * rz) < 0.2;
 }
+
+describe('the street furniture — #1536', () => {
+  const origin = corridorOrigin(FARMLAND);
+  const streets = streetsOf(FARMLAND);
+  const all = streets.flatMap((street) => street.furniture);
+  /** How far out from the kerb's face a piece stands, on a road running north. */
+  const fromKerb = (item: FurnitureItem): number =>
+    distanceToDrawnRoad(FARMLAND, origin, item.x, item.z, 10) - KERB_LATERAL_METRES;
+  const ofKind = (items: readonly FurnitureItem[], kind: FurnitureKind): FurnitureItem[] =>
+    items.filter((item) => item.kind === kind).sort((a, b) => a.z - b.z);
+  const onSide = (items: readonly FurnitureItem[], side: 1 | -1): FurnitureItem[] =>
+    items.filter((item) => sideOf(FARMLAND, item) === side);
+  /** Every unbroken side of every street on the farmland: its furniture. */
+  const sides = streets.flatMap((street) =>
+    ([1, -1] as const)
+      .map((side) => onSide(street.furniture, side))
+      .filter((items) => items.length > 0),
+  );
+
+  it('stands every kind on a village’s pavement, at the pavement’s height, where its rule says', () => {
+    for (const kind of FURNITURE_KINDS) expect(ofKind(all, kind).length, kind).toBeGreaterThan(0);
+    const road = elevationAt(FARMLAND, metres(0)) - origin.elevation;
+    const across: Readonly<Record<FurnitureKind, number>> = {
+      'lamp-post': PAVEMENT_WIDTH_METRES - LAMP_SETBACK_METRES,
+      bollard: BOLLARD_INSET_METRES,
+      bench: PAVEMENT_WIDTH_METRES - BENCH_SETBACK_METRES,
+      bin: PAVEMENT_WIDTH_METRES - BENCH_SETBACK_METRES,
+    };
+    for (const item of all) {
+      expect(item.y).toBeCloseTo(road + KERB_HEIGHT_METRES, 5);
+      expect(fromKerb(item), item.kind).toBeCloseTo(across[item.kind], 3);
+    }
+  });
+
+  it('puts nothing outside the village whose street it is', () => {
+    expect(sides.length).toBeGreaterThan(1);
+    for (const street of streets) {
+      const top = topOf(street.pavement).map((vertex) => vertex.z);
+      for (const item of street.furniture) {
+        expect(item.z).toBeGreaterThanOrEqual(Math.min(...top));
+        expect(item.z).toBeLessThanOrEqual(Math.max(...top));
+      }
+    }
+  });
+
+  it('spaces the lamp posts by rule, the first half a spacing in from the end', () => {
+    for (const items of sides) {
+      const lamps = ofKind(items, 'lamp-post');
+      const bollards = ofKind(items, 'bollard');
+      expect(lamps.length).toBeGreaterThan(1);
+      for (let index = 1; index < lamps.length; index += 1) {
+        expect(
+          (lamps[index] as FurnitureItem).z - (lamps[index - 1] as FurnitureItem).z,
+        ).toBeCloseTo(LAMP_SPACING_METRES, 1);
+      }
+      // The run starts 0.6 m short of the first bollard.
+      const start = (bollards[0] as FurnitureItem).z - (BOLLARD_ENDS_METRES[0] as number);
+      expect((lamps[0] as FurnitureItem).z - start).toBeCloseTo(LAMP_SPACING_METRES / 2, 1);
+    }
+  });
+
+  it('stands a pair of bollards at each end of each run, and nowhere between', () => {
+    for (const items of sides) {
+      const bollards = ofKind(items, 'bollard').map((item) => item.z);
+      expect(bollards).toHaveLength(4);
+      const [first, second, third, fourth] = bollards as [number, number, number, number];
+      const pair = (BOLLARD_ENDS_METRES[1] as number) - (BOLLARD_ENDS_METRES[0] as number);
+      expect(second - first).toBeCloseTo(pair, 1);
+      expect(fourth - third).toBeCloseTo(pair, 1);
+      expect(third - second).toBeGreaterThan(LAMP_SPACING_METRES);
+    }
+  });
+
+  it('sets one bench between the middle lamp posts, facing the road, and a bin beside it', () => {
+    const roadX = roadAt(FARMLAND, 0).x;
+    for (const items of sides) {
+      const lamps = ofKind(items, 'lamp-post').map((item) => item.z);
+      const [bench] = ofKind(items, 'bench');
+      const [bin] = ofKind(items, 'bin');
+      expect(ofKind(items, 'bench')).toHaveLength(1);
+      expect(ofKind(items, 'bin')).toHaveLength(1);
+      const pair = Math.max(0, Math.floor((lamps.length - 2) / 2));
+      expect((bench as FurnitureItem).z).toBeCloseTo(
+        ((lamps[pair] as number) + (lamps[pair + 1] as number)) / 2,
+        1,
+      );
+      expect((bin as FurnitureItem).z - (bench as FurnitureItem).z).toBeCloseTo(
+        BIN_BESIDE_METRES,
+        1,
+      );
+      // Every piece's front (+z, turned by its yaw) points at the road.
+      for (const item of items) {
+        const towardsRoad = roadX - item.x;
+        expect(Math.sin(item.rotation) * towardsRoad, item.kind).toBeGreaterThan(0);
+        expect(Math.abs(Math.cos(item.rotation))).toBeLessThan(0.01);
+      }
+    }
+  });
+
+  it('furnishes no pavement the rules refused: a hairpin’s inside, and the stream’s banks', () => {
+    const hairpin = hairpinRoute(4);
+    const seed = scatterSeed(hairpin);
+    const hairpinOrigin = corridorOrigin(hairpin);
+    expect(furnitureAlong(hairpin, hairpinOrigin, seed, 1, 20, 360)).toEqual([]);
+    // The control: the outside of the same leg is furnished.
+    expect(
+      ofKind(furnitureAlong(hairpin, hairpinOrigin, seed, -1, 20, 360), 'lamp-post').length,
+    ).toBeGreaterThan(10);
+    const valley = valleyRoute();
+    const ways = waterways(valley, scatterSeed(valley));
+    const pieces = furnitureAlong(
+      valley,
+      corridorOrigin(valley),
+      scatterSeed(valley),
+      1,
+      850,
+      1_150,
+    );
+    // Two runs, one either side of the stream: a pair of bollards at each of four ends.
+    expect(ofKind(pieces, 'bollard')).toHaveLength(8);
+    for (const item of pieces) {
+      const along = alongAt(valley, item.z);
+      expect(inWater(ways, valley, metres(along), KERB_LATERAL_METRES + 1), item.kind).toBe(false);
+    }
+  });
+});

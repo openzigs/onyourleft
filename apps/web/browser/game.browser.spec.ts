@@ -1777,6 +1777,13 @@ test.describe('a village and its fields — #460', () => {
     const { settlement } = await harness(harnessRun);
     expectAPavement(settlement.pavement, testInfo, 'stylised');
   });
+
+  test('stands lamp posts, bollards, benches and bins on it, one call a kind, and none in open country — #1536', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { settlement } = await harness(harnessRun);
+    expectStreetFurniture(settlement.pavement, testInfo, 'stylised');
+  });
 });
 
 /**
@@ -1805,6 +1812,34 @@ function expectAPavement(
   expect(offRgb).toHaveLength(3);
   const apart = Math.max(...[0, 1, 2].map((c) => Math.abs((onRgb[c] ?? 0) - (offRgb[c] ?? 0))));
   expect(apart).toBeGreaterThan(8);
+}
+
+/**
+ * #1536's browser-gate half, for either world, on #1535's frames: every kind
+ * of street furniture drawn beside the village, one draw call a kind; with it
+ * switched off the frame loses exactly those calls and the pixels it covered;
+ * and a frame in open country draws none of it.
+ */
+function expectStreetFurniture(
+  pavement: RealisticMeasurement['pavement'],
+  testInfo: { readonly annotations: { type: string; description?: string }[] },
+  world: string,
+): void {
+  const { counts, countsOpen, drawCalls, drawCallsOff, pixels } = pavement.furniture;
+  const kinds = Object.keys(counts) as (keyof typeof counts)[];
+  const measured = `${world}: ${kinds.map((kind) => `${String(counts[kind])} ${kind}`).join(', ')} beside a village, ${kinds.map((kind) => String(countsOpen[kind])).join('/')} in open country; ${String(drawCalls)} draw calls with them, ${String(drawCallsOff)} without; ${String(pixels)} px`;
+  testInfo.annotations.push({ type: 'street furniture', description: measured });
+  console.log(`street furniture — ${measured}`);
+  expect(kinds).toHaveLength(4);
+  for (const kind of kinds) {
+    // Every kind beside the village, and none in open country.
+    expect(counts[kind], kind).toBeGreaterThan(0);
+    expect(countsOpen[kind], kind).toBe(0);
+  }
+  // One instanced draw a kind, however many pieces.
+  expect(drawCalls - drawCallsOff).toBe(kinds.length);
+  // It reaches the drawing buffer.
+  expect(pixels).toBeGreaterThan(100);
 }
 
 test.describe('the road reads as a road — #242', () => {
@@ -3432,6 +3467,13 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
   }, testInfo) => {
     const { pavement } = await realistic(harnessRun);
     expectAPavement(pavement, testInfo, 'realistic');
+  });
+
+  test('stands its street furniture on it, the bench in Poly Haven’s planks, one call a kind — #1536', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { pavement } = await realistic(harnessRun);
+    expectStreetFurniture(pavement, testInfo, 'realistic');
   });
 
   test('tells two instances of one shape apart by their seeded tints, and not without them — #621', async ({
