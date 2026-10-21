@@ -106,6 +106,7 @@ import type {
   RiderTextRecord,
   TrustedDeviceKeyRecord,
   WorkoutGoalsRecord,
+  WorldCorridorRecord,
   MatchCheckpointRecord,
   PrivacyZoneRecord,
   SegmentEffortRecord,
@@ -126,6 +127,9 @@ import {
   riderTextFor,
   trustedDeviceKeyFor,
   workoutGoalsFor,
+  unpackWorldCorridorFeatures,
+  worldCorridorFeaturesFor,
+  worldCorridorFor,
   createStoreHarness,
   effortFor,
   extractableDeviceKey,
@@ -185,6 +189,8 @@ interface World {
   readonly document: RiderTextRecord;
   readonly trustedKey: TrustedDeviceKeyRecord;
   readonly workoutGoals: WorkoutGoalsRecord;
+  /** #1545: the map features around {@link World.route}. */
+  readonly corridor: WorldCorridorRecord;
   /** #1431: a second ride, with a lap and a note, moved to Recently deleted. */
   readonly binned: ReturnType<typeof rideFor>;
 }
@@ -271,6 +277,8 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
   // #1431. A second ride per athlete, deleted, so Recently deleted has a row
   // of each athlete's for every probe of it to be tempted by.
   const binned = rideFor(owner, { name: `Deleted by ${owner}` });
+  // #1545. Different features per athlete, around this athlete's own route.
+  const corridor = await worldCorridorFor(owner, route.id);
 
   await harness.write(async (store) => {
     await store.putRoute(route);
@@ -306,6 +314,7 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
     await store.putLap(lapFor(binned, 1));
     await store.putRiderText(riderTextFor(owner, 'note', binned.id));
     await store.moveActivityToRecentlyDeleted(owner, binned.id, BINNED_AT);
+    await store.putWorldCorridor(corridor);
   });
 
   return {
@@ -329,6 +338,7 @@ async function seedWorld(harness: StoreHarness, owner: AthleteId): Promise<World
     document,
     trustedKey,
     workoutGoals,
+    corridor,
     binned,
   };
 }
@@ -937,6 +947,30 @@ const PROBES: readonly ScopingProbe[] = [
       await expect(store.listTrustedDeviceKeys(mine.owner)).resolves.toStrictEqual([
         mine.trustedKey,
       ]);
+    },
+  },
+  {
+    member: 'getWorldCorridor',
+    leaks:
+      "the map features around another athlete's route — buildings and paths that outline where they ride from",
+    async run(store, mine, theirs) {
+      await expect(store.getWorldCorridor(mine.owner, theirs.route.id)).resolves.toBeUndefined();
+      const read = await store.getWorldCorridor(mine.owner, mine.route.id);
+      expect(read?.owner).toBe(mine.owner);
+      expect(read?.routeId).toBe(mine.route.id);
+      // The features themselves, decoded, are mine: a read that matched the
+      // row and handed back another's blob would pass on the key fields.
+      expect(read && (await unpackWorldCorridorFeatures(read.features))).toStrictEqual(
+        worldCorridorFeaturesFor(mine.owner),
+      );
+    },
+  },
+  {
+    member: 'deleteWorldCorridor',
+    leaks: "the deletion of the map features kept around another athlete's route",
+    async run(store, mine, theirs) {
+      await store.deleteWorldCorridor(mine.owner, theirs.route.id);
+      await expect(store.getWorldCorridor(theirs.owner, theirs.route.id)).resolves.toBeDefined();
     },
   },
   {

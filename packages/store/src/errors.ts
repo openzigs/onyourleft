@@ -73,3 +73,25 @@ export class StoreConflictError extends StoreError {}
  * The supported way back is ADR 0005 section F's: export, downgrade, re-import.
  */
 export class StoreVersionError extends StoreError {}
+
+/**
+ * A world corridor's `features` blob is larger than the store holds (#1545):
+ * refused whole at the write, never truncated, so a corridor is either all of
+ * what was read or not kept at all.
+ *
+ * The message names the limit and the size in bytes and nothing else. The
+ * blob is features near the rider's route, which is location data (ADR 0054
+ * D-6.6), so no coordinate and no tile's x/y may appear in it (ADR 0004 D).
+ */
+export class WorldCorridorTooLargeError extends StoreValidationError {
+  readonly limitBytes: number;
+  readonly sizeBytes: number;
+
+  constructor(limitBytes: number, sizeBytes: number) {
+    super(
+      `worldCorridors.features: ${String(sizeBytes)} bytes is over the limit of ${String(limitBytes)} bytes`,
+    );
+    this.limitBytes = limitBytes;
+    this.sizeBytes = sizeBytes;
+  }
+}

@@ -315,8 +315,8 @@ describe('no string in this client carries a word ADR 0048 D-12 bans (#1245)', (
     }
     // Every package on disk is walked, and each gives the scan something to read.
     expect(PACKAGE_SOURCE_ROOTS.map((root) => relative(PACKAGES_ROOT, root))).toStrictEqual(
-      ['analysis', 'domain', 'fit', 'physics', 'protocol', 'sensors', 'store'].map((name) =>
-        join(name, 'src'),
+      ['analysis', 'domain', 'fit', 'map-features', 'physics', 'protocol', 'sensors', 'store'].map(
+        (name) => join(name, 'src'),
       ),
     );
     for (const root of PACKAGE_SOURCE_ROOTS) {

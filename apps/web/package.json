@@ -45,6 +45,7 @@
   },
   "devDependencies": {
     "@dgreenheck/ez-tree": "1.1.0",
+    "@onyourleft/map-features": "workspace:*",
     "@playwright/test": "1.63.0",
     "@tailwindcss/node": "4.3.3",
     "@tailwindcss/oxide": "4.3.3",
