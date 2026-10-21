@@ -123,6 +123,9 @@ describe('the terms settings (#909)', () => {
     expect(html).toContain('<strong>Public rooms are for people aged 18 or over.</strong>');
     expect(html).not.toContain('A draft, pending the owner');
     expect(html).not.toContain('#909');
+    // A placeholder must never be published, and a waiting account can still export and erase.
+    expect(html).not.toContain('Not settled yet');
+    expect(html).not.toContain('and nothing else');
   });
 });
 

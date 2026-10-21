@@ -48,11 +48,16 @@
     the app has no control that calls it.
   - Section 10 said the app shows the new terms "before you go on". It does not block anything: the
     Instance screen says so, with a link, until the rider marks them read. The text now says that.
+  - **Removal from a private room is in the terms, though the app has no control for it.** Unlike
+    blocking, it is not a feature the terms promise: it is something that happens to a rider, and
+    the rider needs to know it is not a moderator's decision and has no appeal. The terms say it
+    can happen and do not say how.
   - **Blocking is not in the terms.** The instance can block a rider (`/v1/blocks`), but the app
     has no control for it, so the terms do not promise one.
 - **Open for the owner.** Whether a change is "significant" is the owner's call each time; the
   instance tells riders whenever `OYL_INSTANCE_TERMS_VERSION` changes (section 10). The governing
-  law is not chosen (section 11).
+  law is not chosen: the draft has no section for it, and the owner must choose it and add it as
+  a section 11 before approval.
 
 <!-- terms -->
 
@@ -70,8 +75,8 @@ place they are.
 ## 2. Who can use it
 
 - Anybody may ask for an account. A moderator approves each new account before it can ride with
-  others. Until then you can see your own account, choose your name and confirm your age, and
-  nothing else.
+  others. Until then you can manage your own account, choose your name and confirm your age,
+  and export or erase your account, but you cannot ride with anybody or join a room.
 - **Public rooms are for people aged 18 or over.** You confirm your age yourself. We never ask for
   your date of birth.
 - To join a public room, make one or see the list of them, your account must also have been
@@ -83,8 +88,8 @@ place they are.
 
 - In a race, the other riders see your name, your power for your weight (watts per kilogram), and
   how far ahead or behind you are. The race's result shows your place, your time and your power
-  for your weight, to the riders in that race. The privacy policy says
-  exactly what is shared.
+  for your weight, to the riders in that race. If the race's check on power marked you
+  (see below), the result shows the mark too. The privacy policy says exactly what is shared.
 - **The rider who made a private room can remove you from it.** That is their choice, not a
   moderator's decision, so it comes with no written reasons and no appeal. If you think it was
   abuse, report it (section 5).
@@ -169,7 +174,3 @@ Write to the address on the legal page (`/legal`). A person reads every message.
 The date these terms took effect is shown at the top of this page. When we change them in a way
 that matters to you, the Instance screen of the app tells you, with a link to the new terms, until
 you mark them as read.
-
-## 11. The law that applies
-
-Not settled yet: the owner chooses it before these terms are approved.
