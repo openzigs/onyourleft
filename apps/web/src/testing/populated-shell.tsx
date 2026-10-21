@@ -797,7 +797,7 @@ export type PopulatedShellExtras = Pick<
   AppShellProps,
   'map' | 'basemap' | 'rideController' | 'transfer'
 > &
-  Partial<Pick<AppShellProps, 'capabilities' | 'routeUpdates' | 'gameTrainer'>>;
+  Partial<Pick<AppShellProps, 'capabilities' | 'routeUpdates' | 'gameTrainer' | 'nativeShell'>>;
 
 /** The real `AppShell` over the empty or the populated fixture. */
 export function PopulatedShell({

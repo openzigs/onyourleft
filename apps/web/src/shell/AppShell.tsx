@@ -67,7 +67,7 @@ import type { MaskedWordsPort } from '../athlete/masked-words-port';
 import type { WorkoutGoalsPort } from '../workout-goals/workout-goals-port';
 import type { RiderTextPort } from '../rider-text/rider-text-port';
 import type { AthleteMassPort } from '../athlete/store-port';
-import type { RideController } from '../ride/controller';
+import { rideInProgress, type RideController } from '../ride/controller';
 import type { CapabilityProbe } from '../support/bluetooth-support';
 import type { ShellSupportPort } from '../support/shell-support-port';
 import type { AnalysisPort } from '../analysis/store-port';
@@ -110,6 +110,7 @@ import {
   type RouteMatch,
 } from './routes';
 import type { MenuSounds } from './menu-sounds';
+import { useAndroidBack } from './android-back';
 import { mayAnimateBetween, RideHasTheScreen } from './route-motion';
 import { useRoute, type RouteUpdates } from './useRoute';
 import { lazyView, viewGroup, ViewBoundary, ViewLoading, type ViewGroup } from './lazy-view';
@@ -838,6 +839,16 @@ export function AppShell(props: AppShellProps): JSX.Element {
    */
   const mainRef = useRef<HTMLElement>(null);
   const previousRouteId = useRef<string | null>(null);
+
+  // #1512: Android's back, inside the shell. Read at each press: a ride on —
+  // recording, paused, or the game's stage with the screen — consumes it.
+  useAndroidBack(props.nativeShell === true, () => {
+    const phase = props.rideController?.getSnapshot().phase;
+    return {
+      routeId: route.id,
+      rideOn: immersive || (phase !== undefined && rideInProgress(phase)),
+    };
+  });
 
   /*
    * ⚠️ LAYOUT effects, the focus move and the title both, since #945's

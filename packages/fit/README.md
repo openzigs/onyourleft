@@ -412,7 +412,9 @@ The encoder's own gaps, which are not the same list:
   a choice.
 - **A developer field is carried verbatim** — its bytes, its size and its application index, exactly
   as the decoder found them. Nothing is re-derived from a `field_description` the encoder may never
-  have been given.
+  have been given. A `record` and, since #1320, a `lap` carry them, decoded and encoded alike;
+  `apps/web` marks which of its own splits are laps with one of its own (`transfer/fit-lap-mark.ts`),
+  which takes no number from the profile.
 
 ---
 
