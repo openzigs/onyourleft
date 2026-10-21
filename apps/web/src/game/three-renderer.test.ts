@@ -38,7 +38,6 @@
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { BoxGeometry } from 'three';
 
 import {
   altitudeMetres,
@@ -111,7 +110,7 @@ import {
   lateralReachMetres,
   loadSceneryModels,
   prepareSceneryGeometry,
-  projectedInMetres,
+  projectedBoxInMetres,
   RealisticStructureBelts,
   PREPARE_FENCE_LIMIT_MS,
   RiderBelt,
@@ -3745,10 +3744,10 @@ describe('waiting for the GPU after the warm-up draw — #547', () => {
   });
 });
 
-describe('projectedInMetres on a map that is not square - #1548', () => {
+describe('projectedBoxInMetres on a map that is not square - #1548', () => {
   it('divides a wall across by `across` and up by `up`, each on its own axis', () => {
     // A box 8 wide, 6 tall, 10 deep, so no two axes read alike.
-    const projected = projectedInMetres(new BoxGeometry(8, 6, 10), { across: 4, up: 2 });
+    const projected = projectedBoxInMetres(8, 6, 10, { across: 4, up: 2 });
     const position = projected.getAttribute('position');
     const normal = projected.getAttribute('normal');
     const uv = projected.getAttribute('uv');

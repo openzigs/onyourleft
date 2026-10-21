@@ -10967,7 +10967,7 @@ export function realisticStructureSurfaces(kind: StructureKind): readonly Struct
  * coordinates would not give — they stretch one photograph across a whole
  * wall, whatever its size. Position and normal are kept; nothing else is.
  */
-export function projectedInMetres(
+function projectedInMetres(
   geometry: BufferGeometry,
   repeat: { readonly across: number; readonly up: number },
   shade = 1,
@@ -11009,6 +11009,22 @@ export function projectedInMetres(
   // structure materials multiply in. @see groundingShade
   paintGrounded(flat, 0xffffff, shade, grounded);
   return flat;
+}
+
+/**
+ * A `width` x `height` x `depth` box through {@link projectedInMetres} — #1548,
+ * so a test can read each axis's division under a map that is not square.
+ *
+ * @test-facing `three-renderer.test.ts` reads its UVs; the box is built here
+ * because this is the only file that may name `three` (`three-seam.test.ts`)
+ */
+export function projectedBoxInMetres(
+  width: number,
+  height: number,
+  depth: number,
+  repeat: { readonly across: number; readonly up: number },
+): BufferGeometry {
+  return projectedInMetres(new BoxGeometry(width, height, depth), repeat);
 }
 
 /**
