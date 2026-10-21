@@ -55,7 +55,14 @@ import {
   type CorridorPoint,
   type RoadCorridor,
 } from './terrain';
-import { STRUCTURE_MAX_ITEMS, clearOfBuildings, structuresAt } from './settlements';
+import {
+  STRUCTURE_MAX_ITEMS,
+  clearOfBuildings,
+  clearOfSettlements,
+  structuresAt,
+  type SettlementFootprint,
+} from './settlements';
+import { streetsAt } from './streets';
 import { bridgeParts, waterSurface, waterways } from './waterways';
 import { worldStyle } from './world';
 import type { RouteProfile } from '@onyourleft/domain';
@@ -162,6 +169,14 @@ export interface SceneInput {
    * feature, so a ride that forgot it rides the line.
    */
   readonly centreline?: boolean | undefined;
+  /**
+   * Leaves the trees, shrubs and rocks standing on a settlement's ground, as
+   * every frame did before #1534 — the browser gate's control, and nothing
+   * else. Absent, or `false`, clears them (`settlements.ts`
+   * §`clearOfSettlements`). Optional the safe way round, for
+   * {@link centreline}'s reason.
+   */
+  readonly settlementsWooded?: boolean | undefined;
 }
 
 /** Another real rider, where to draw them — #783. @see SceneInput.remoteRiders */
@@ -198,6 +213,16 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     scatter: items,
     // #966: the billboards in view, out of the structures' budget.
     billboards,
+    // #1535: the village streets along exactly the stretch of road this frame
+    // drew, for `scenery`'s reason — and outside the structures' budget,
+    // because a street is one mesh rather than items a rung could thin.
+    streets: streetsAt(
+      input.profile,
+      input.origin,
+      seed,
+      (corridor.centre[0] as CorridorPoint).along,
+      (corridor.centre[corridor.centre.length - 1] as CorridorPoint).along,
+    ),
     // #458. Built from the corridor just built, so the ground's innermost
     // column is the road's outermost one — `landform.ts` says why that is the
     // whole of the no-crack guarantee. Every band, whatever the rung: the
@@ -265,12 +290,21 @@ function scenery(
   // #460. The villages, farmsteads and field boundaries, FIRST — so that a belt
   // spending its budget in frame order never loses a house to a far tree — and
   // the natural scenery kept clear of every building, and of every billboard.
-  const built = structuresAt(input.profile, input.origin, seed, first.along, last.along, {
-    maxItems: structureBudget - billboards.length,
-    riderMetres: riderDistance,
-  });
+  // #1534: and off every settlement's ground, so no house stands in a wood.
+  const footprints: SettlementFootprint[] = [];
+  const built = structuresAt(
+    input.profile,
+    input.origin,
+    seed,
+    first.along,
+    last.along,
+    { maxItems: structureBudget - billboards.length, riderMetres: riderDistance },
+    footprints,
+  );
+  const cleared =
+    input.settlementsWooded === true ? natural : clearOfSettlements(natural, footprints);
   return {
-    scatter: [...built, ...clearOfBillboards(clearOfBuildings(natural, built), billboards)],
+    scatter: [...built, ...clearOfBillboards(clearOfBuildings(cleared, built), billboards)],
     billboards,
   };
 }

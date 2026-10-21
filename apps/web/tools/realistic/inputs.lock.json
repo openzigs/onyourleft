@@ -578,6 +578,35 @@
       ]
     },
     {
+      "id": "PavingStones136",
+      "licence": "CC0-1.0",
+      "licencePage": "https://ambientcg.com/view?id=PavingStones136",
+      "evidence": "All assets are released under the Creative Commons CC0 license",
+      "read": "2026-10-21",
+      "authors": "ambientCG",
+      "technique": "Surface Photogrammetry",
+      "files": [
+        {
+          "path": "PavingStones136_1K-JPG.zip",
+          "url": "https://ambientcg.com/get?file=PavingStones136_1K-JPG.zip",
+          "bytes": 6477861,
+          "sha256": "a0934b008683333265e061319aa1ceb018b3a721969147606415033b27a13ae3"
+        },
+        {
+          "path": "PavingStones136_1K-JPG_Color.jpg",
+          "url": "https://ambientcg.com/get?file=PavingStones136_1K-JPG.zip#PavingStones136_1K-JPG_Color.jpg",
+          "bytes": 1192545,
+          "sha256": "5291854f8a7fcf554f2e278e36426eee9de65dd71d93c7f837b2c3f80ca42cfa"
+        },
+        {
+          "path": "PavingStones136_1K-JPG_NormalGL.jpg",
+          "url": "https://ambientcg.com/get?file=PavingStones136_1K-JPG.zip#PavingStones136_1K-JPG_NormalGL.jpg",
+          "bytes": 1210149,
+          "sha256": "a302144995a7d7b638864a8f28ed1c8bf68d8c7b6c6e3daac6ad5b0bbf4bc9c0"
+        }
+      ]
+    },
+    {
       "id": "PaintedPlaster017",
       "licence": "CC0-1.0",
       "licencePage": "https://ambientcg.com/view?id=PaintedPlaster017",

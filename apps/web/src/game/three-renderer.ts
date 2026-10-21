@@ -367,6 +367,12 @@ import { bannerCells } from './gantry-wording';
 import { bannerPlace, boxPoint, standPoint, type PlacedBox, type PlacedStand } from './gantry';
 import type { Billboard } from './billboards';
 import {
+  FURNITURE_DRAW_METRES,
+  FURNITURE_KINDS,
+  type FurnitureKind,
+  type VillageStreet,
+} from './streets';
+import {
   LOGO_BOARDS_PER_FRAME,
   billboardLogoPlace,
   carriesTheLogo,
@@ -1749,6 +1755,126 @@ function releaseLoadedScene(source: Object3D): void {
 export const BRIDGE_COLOUR = 0x8f8a80;
 
 /**
+ * The stylised world's pavement — #1535: a light concrete grey. This
+ * repository's own, derived from nothing (ADR 0009 L2), and lit like the
+ * scenery, so it is in {@link LIT_COLOURS}. @see PavementBelt
+ */
+export const PAVEMENT_COLOUR = 0xa7a49c;
+
+/** One coloured solid of a piece of street furniture — #1536. */
+interface FurniturePart {
+  readonly colour: number;
+  readonly geometry: () => BufferGeometry;
+}
+
+/** The paint on the street furniture's metal: a dark green-grey. This repository's own. */
+const STREET_PAINT = 0x34403a;
+
+/** A lamp's lantern and a bollard's band: a pale cream. This repository's own. */
+const STREET_CREAM = 0xd9d4c3;
+
+/** A bench's slats: a mid oak. This repository's own; the realistic world wears `planks` instead. */
+const BENCH_WOOD = 0x8a6a48;
+
+/** A bin's body: a darker green. This repository's own. */
+const BIN_GREEN = 0x2f4a3a;
+
+/**
+ * The street furniture — #1536: each piece built from numbers typed here,
+ * standing on its base at y = 0 with its front (+z) to the road, and each
+ * kind wearing ONE realistic surface, so a kind is one instanced draw in
+ * either world. Nothing is downloaded and nothing traced.
+ *
+ * ⚠️ **From numbers, and that is a finding rather than a shortcut** — #475's,
+ * for street furniture. Poly Haven, the CC0 source this world already admits,
+ * publishes `street_lamp_01` at 30 610 triangles, `street_lamp_02` at 20 338
+ * and `metal_trash_can` at 13 960, and no bollard (its API, read 2026-10-21):
+ * one of each is more than a whole village of these. Its `painted_wooden_bench`
+ * (630) would fit, but would be the one GLB a street loads and the only kind
+ * the stylised world could not draw. So the shapes are this repository's own,
+ * and what is photographic is the bench's slats: Poly Haven's `dark_planks`,
+ * already committed (`realistic-assets.ts` §`REALISTIC_STRUCTURE_SURFACES`).
+ *
+ * | kind | triangles | height |
+ * |---|--:|--:|
+ * | `lamp-post` | 88 | 5.3 m, its lantern over the pavement and never the road |
+ * | `bollard` | 64 | 0.95 m |
+ * | `bench` | 108 | 0.84 m |
+ * | `bin` | 64 | 0.9 m |
+ *
+ * `realistic-renderer.test.ts` §"the street furniture" re-counts them off the
+ * belt's own meshes.
+ */
+const FURNITURE_STYLE: Readonly<
+  Record<
+    FurnitureKind,
+    { readonly surface: 'painted' | 'planks'; readonly parts: readonly FurniturePart[] }
+  >
+> = {
+  'lamp-post': {
+    surface: 'painted',
+    parts: [
+      {
+        colour: STREET_PAINT,
+        geometry: () => new CylinderGeometry(0.12, 0.14, 0.4, 8).translate(0, 0.2, 0),
+      },
+      {
+        colour: STREET_PAINT,
+        geometry: () => new CylinderGeometry(0.06, 0.07, 4.9, 8).translate(0, 2.85, 0),
+      },
+      { colour: STREET_PAINT, geometry: () => block(0.06, 0.06, 1.1, 0, 5.2, 0.55) },
+      { colour: STREET_CREAM, geometry: () => block(0.3, 0.14, 0.5, 0, 5.08, 1.2) },
+    ],
+  },
+  bollard: {
+    surface: 'painted',
+    parts: [
+      {
+        colour: STREET_PAINT,
+        geometry: () => new CylinderGeometry(0.1, 0.11, 0.95, 8).translate(0, 0.475, 0),
+      },
+      {
+        colour: STREET_CREAM,
+        geometry: () => new CylinderGeometry(0.106, 0.106, 0.08, 8).translate(0, 0.75, 0),
+      },
+    ],
+  },
+  bench: {
+    surface: 'planks',
+    parts: [
+      // Three seat slats, the sitter facing the road (+z).
+      ...[0.13, -0.01, -0.15].map((z) => ({
+        colour: BENCH_WOOD,
+        geometry: () => block(1.8, 0.04, 0.12, 0, 0.43, z),
+      })),
+      // Two back slats, behind the seat.
+      ...[0.58, 0.74].map((y) => ({
+        colour: BENCH_WOOD,
+        geometry: () => block(1.8, 0.1, 0.03, 0, y, -0.24),
+      })),
+      // Two end frames, each a leg and an upright.
+      ...[-0.75, 0.75].flatMap((x) => [
+        { colour: STREET_PAINT, geometry: () => block(0.05, 0.43, 0.45, x, 0, -0.02) },
+        { colour: STREET_PAINT, geometry: () => block(0.05, 0.42, 0.04, x, 0.43, -0.26) },
+      ]),
+    ],
+  },
+  bin: {
+    surface: 'painted',
+    parts: [
+      {
+        colour: BIN_GREEN,
+        geometry: () => new CylinderGeometry(0.24, 0.22, 0.85, 8).translate(0, 0.425, 0),
+      },
+      {
+        colour: STREET_PAINT,
+        geometry: () => new CylinderGeometry(0.26, 0.26, 0.06, 8).translate(0, 0.87, 0),
+      },
+    ],
+  },
+};
+
+/**
  * Every colour a kind is drawn in when no model stands in for it: its own, and
  * — since #460 — each part of a built shape's. {@link LIT_COLOURS} is built
  * from it, and `three-renderer.test.ts` holds the list to it.
@@ -1807,6 +1933,12 @@ export const LIT_COLOURS: readonly number[] = [
   ...BICYCLE_COLOURS,
   // #459. The bridges' stone, which is lit like the scenery.
   BRIDGE_COLOUR,
+  // #1535. The stylised pavement, lit like the scenery.
+  PAVEMENT_COLOUR,
+  // #1536. The street furniture's, every part of every kind, once.
+  ...new Set(
+    Object.values(FURNITURE_STYLE).flatMap((style) => style.parts.map((part) => part.colour)),
+  ),
 ];
 
 /**
@@ -8198,6 +8330,331 @@ export class LogoBelt {
 }
 
 /**
+ * Every village street in view, kerbs and pavements — #1535 (`streets.ts`).
+ * **One mesh and one draw call** however many villages are in view, and none
+ * where a frame holds no street.
+ *
+ * ⚠️ **Rebuilt only when the SET of streets changes**, which is when a village
+ * comes into view or leaves it: `streets.ts` hands every frame the same
+ * objects for the same villages, so a frame whose streets are the last
+ * frame's, in the same order, uploads nothing. A street is fixed in the
+ * corridor's frame, so nothing moves in between.
+ *
+ * A belt per world, as {@link LogoBelt} is: the stylised view's is
+ * {@link PAVEMENT_COLOUR}, lit or flat by the rung (#286); the realistic
+ * world's wears ambientCG's paving (`realistic-assets.ts`
+ * §`REALISTIC_STRUCTURE_SURFACES`' `paving`), its flags the size the
+ * photograph's own repeat says, and breathes the realistic air.
+ */
+export class PavementBelt {
+  readonly #mesh: Mesh;
+  readonly #materials: { readonly lit: Material; readonly flat: Material };
+  /** How many metres one repeat of the photograph covers; 1 where there is none. */
+  readonly #tileMetres: number;
+  /** The streets the mesh holds, in the order it holds them. */
+  #held: readonly VillageStreet[] = [];
+  #shown = true;
+  /** Whether the browser gate has turned the pavements off — its control. */
+  #switchedOn = true;
+
+  constructor(
+    world: 'stylised' | 'realistic',
+    paving?: { readonly colour: Texture; readonly normal: Texture },
+  ) {
+    if (world === 'realistic') {
+      this.#tileMetres = REALISTIC_STRUCTURE_SURFACES.paving.tileMetres;
+      const finish = STRUCTURE_SURFACE_FINISH.paving;
+      const material = withAtmosphere(
+        withTextureLodBias(
+          constructed(
+            new MeshStandardMaterial({
+              color: finish.tint,
+              roughness: finish.roughness,
+              metalness: finish.metalness,
+              ...(paving === undefined ? {} : { map: paving.colour, normalMap: paving.normal }),
+            }),
+          ),
+        ),
+      );
+      // The realistic world has no flat rung, so its two are one material.
+      this.#materials = { lit: material, flat: material };
+    } else {
+      this.#tileMetres = 1;
+      this.#materials = {
+        lit: constructed(new MeshLambertMaterial({ color: PAVEMENT_COLOUR })),
+        flat: constructed(new MeshBasicMaterial({ color: PAVEMENT_COLOUR })),
+      };
+    }
+    this.#mesh = new Mesh(new BufferGeometry(), this.#materials.lit);
+    this.#mesh.visible = false;
+  }
+
+  addTo(scene: Scene): void {
+    scene.add(this.#mesh);
+  }
+
+  /** The mesh. For the browser gate's counts and the jsdom suite. */
+  get mesh(): Mesh {
+    return this.#mesh;
+  }
+
+  setShown(on: boolean): void {
+    this.#shown = on;
+    if (!on) this.#mesh.visible = false;
+  }
+
+  /** @see pavementsShownOf */
+  switchOn(on: boolean): void {
+    this.#switchedOn = on;
+  }
+
+  /** Shades the pavements, or stops shading them — #286. @see QualitySettings.shading */
+  setShading(shading: QualitySettings['shading']): void {
+    this.#mesh.material = this.#materials[shading];
+  }
+
+  /** This frame's streets. */
+  update(streets: readonly VillageStreet[]): void {
+    const drawn = this.#shown && this.#switchedOn ? streets : NO_STREETS;
+    if (!sameStreets(drawn, this.#held)) {
+      this.#held = drawn;
+      const geometry = pavementGeometry(drawn, this.#tileMetres);
+      this.#mesh.geometry.dispose();
+      this.#mesh.geometry = geometry;
+    }
+    this.#mesh.visible = this.#shown && drawn.length > 0;
+  }
+
+  dispose(): void {
+    this.#mesh.geometry.dispose();
+    this.#materials.lit.dispose();
+    if (this.#materials.flat !== this.#materials.lit) this.#materials.flat.dispose();
+  }
+}
+
+/** No streets: what a belt that is off holds. */
+const NO_STREETS: readonly VillageStreet[] = [];
+
+/** Whether two lists hold the same streets, by identity, in the same order. */
+function sameStreets(first: readonly VillageStreet[], second: readonly VillageStreet[]): boolean {
+  return first.length === second.length && first.every((street, index) => street === second[index]);
+}
+
+/**
+ * Every street's pavement as one geometry, its texture coordinates turned from
+ * metres into repeats of a photograph `tileMetres` across.
+ */
+function pavementGeometry(streets: readonly VillageStreet[], tileMetres: number): BufferGeometry {
+  let vertices = 0;
+  let indices = 0;
+  for (const { pavement } of streets) {
+    vertices += pavement.positions.length / 3;
+    indices += pavement.indices.length;
+  }
+  const positions = new Float32Array(vertices * 3);
+  const normals = new Float32Array(vertices * 3);
+  const uvs = new Float32Array(vertices * 2);
+  const index = new Uint32Array(indices);
+  let vertex = 0;
+  let at = 0;
+  for (const { pavement } of streets) {
+    positions.set(pavement.positions, vertex * 3);
+    normals.set(pavement.normals, vertex * 3);
+    for (let each = 0; each < pavement.uvs.length; each += 1) {
+      uvs[vertex * 2 + each] = (pavement.uvs[each] as number) / tileMetres;
+    }
+    for (let each = 0; each < pavement.indices.length; each += 1) {
+      index[at + each] = (pavement.indices[each] as number) + vertex;
+    }
+    vertex += pavement.positions.length / 3;
+    at += pavement.indices.length;
+  }
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new BufferAttribute(positions, 3));
+  geometry.setAttribute('normal', new BufferAttribute(normals, 3));
+  geometry.setAttribute('uv', new BufferAttribute(uvs, 2));
+  geometry.setIndex(new BufferAttribute(index, 1));
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+/**
+ * The most pieces of one furniture kind a frame draws: **64**. A village at
+ * its fullest has 16 lamp posts and 8 bollards (`streets.ts` §`furnish`), a
+ * frame holds two villages at most, and only what is within
+ * `streets.ts` §`FURNITURE_DRAW_METRES` of the camera is drawn — so the cut
+ * past this never binds on a village the rules built.
+ */
+export const FURNITURE_CAPACITY = 64;
+
+/**
+ * One furniture kind as one geometry: its parts merged, coloured by vertex.
+ * The realistic world's carries texture coordinates in metres too, for the
+ * bench's slats (`projectedInMetres`); the stylised world's needs none.
+ */
+function furnitureGeometry(kind: FurnitureKind, world: 'stylised' | 'realistic'): BufferGeometry {
+  const style = FURNITURE_STYLE[kind];
+  if (world === 'stylised') {
+    return merged(
+      style.parts.map((part) => {
+        const geometry = part.geometry();
+        paintGrounded(geometry, part.colour, 1, false);
+        return geometry;
+      }),
+      ['color'],
+    );
+  }
+  const tile = style.surface === 'planks' ? REALISTIC_STRUCTURE_SURFACES.planks.tileMetres : 1;
+  const parts = style.parts.map((part) => {
+    const projected = projectedInMetres(part.geometry(), { across: tile, up: tile }, 1, false);
+    // The photographed slats wear the photograph's own colour; every other
+    // part its paint, which the planks' map darkens to a frame on a bench.
+    paintGrounded(
+      projected,
+      style.surface === 'planks' && part.colour === BENCH_WOOD ? 0xffffff : part.colour,
+      1,
+      false,
+    );
+    return projected;
+  });
+  const joined = mergeGeometries(parts);
+  for (const part of parts) part.dispose();
+  if (joined === null) throw new Error(`${kind}: its parts could not be merged`);
+  return joined;
+}
+
+/**
+ * The street furniture on the pavements in view — #1536 (`streets.ts`
+ * §`furnish`): **one instanced draw a kind**, four at most, and none where a
+ * frame holds no street. Only what stands within `streets.ts`
+ * §`FURNITURE_DRAW_METRES` of the camera is drawn, which is its level of
+ * detail: a piece is either drawn whole or not at all.
+ *
+ * A belt per world, as {@link PavementBelt} is: the stylised view's is
+ * painted by {@link FURNITURE_STYLE}, lit or flat by the rung; the realistic
+ * world's is the same triangles, physically based, the bench's slats in
+ * Poly Haven's `dark_planks`, breathing the realistic air.
+ */
+export class FurnitureBelt {
+  readonly #meshes = new Map<FurnitureKind, InstancedMesh>();
+  readonly #materials = new Map<
+    FurnitureKind,
+    { readonly lit: Material; readonly flat: Material }
+  >();
+  readonly #matrix = new Matrix4();
+  #shown = true;
+  /** Whether the browser gate has turned the furniture off — its control. */
+  #switchedOn = true;
+
+  constructor(
+    world: 'stylised' | 'realistic',
+    planks?: { readonly colour: Texture; readonly normal: Texture },
+  ) {
+    for (const kind of FURNITURE_KINDS) {
+      const surface = FURNITURE_STYLE[kind].surface;
+      let materials: { readonly lit: Material; readonly flat: Material };
+      if (world === 'realistic') {
+        const finish = STRUCTURE_SURFACE_FINISH[surface];
+        const maps = surface === 'planks' ? planks : undefined;
+        const material = withAtmosphere(
+          (maps === undefined ? (made: Material): Material => made : withTextureLodBias)(
+            constructed(
+              new MeshStandardMaterial({
+                // The paint is in the vertex colour, so the material is white.
+                color: 0xffffff,
+                roughness: finish.roughness,
+                metalness: finish.metalness,
+                vertexColors: true,
+                ...(maps === undefined ? {} : { map: maps.colour, normalMap: maps.normal }),
+              }),
+            ),
+          ),
+        );
+        materials = { lit: material, flat: material };
+      } else {
+        materials = {
+          lit: constructed(new MeshLambertMaterial({ vertexColors: true })),
+          flat: constructed(new MeshBasicMaterial({ vertexColors: true })),
+        };
+      }
+      this.#materials.set(kind, materials);
+      const mesh = new InstancedMesh(
+        furnitureGeometry(kind, world),
+        materials.lit,
+        FURNITURE_CAPACITY,
+      );
+      mesh.instanceMatrix.setUsage(DynamicDrawUsage);
+      mesh.count = 0;
+      // Spread along a village and moved every frame: three's culling would
+      // test a sphere nobody keeps up to date, and four calls are all it saves.
+      mesh.frustumCulled = false;
+      mesh.visible = false;
+      this.#meshes.set(kind, mesh);
+    }
+  }
+
+  addTo(scene: Scene): void {
+    for (const mesh of this.#meshes.values()) scene.add(mesh);
+  }
+
+  /** One kind's mesh. For the browser gate's counts and the jsdom suite. */
+  meshOf(kind: FurnitureKind): InstancedMesh {
+    return this.#meshes.get(kind) as InstancedMesh;
+  }
+
+  setShown(on: boolean): void {
+    this.#shown = on;
+    if (!on) for (const mesh of this.#meshes.values()) mesh.visible = false;
+  }
+
+  /** @see furnitureShownOf */
+  switchOn(on: boolean): void {
+    this.#switchedOn = on;
+  }
+
+  /** Shades the furniture, or stops shading it — #286. @see QualitySettings.shading */
+  setShading(shading: QualitySettings['shading']): void {
+    for (const [kind, mesh] of this.#meshes) {
+      mesh.material = (this.#materials.get(kind) as { lit: Material; flat: Material })[shading];
+    }
+  }
+
+  /** This frame's streets, and where the camera is: what is in reach is drawn. */
+  update(
+    streets: readonly VillageStreet[],
+    camera: { readonly x: number; readonly z: number },
+  ): void {
+    for (const mesh of this.#meshes.values()) mesh.count = 0;
+    if (this.#shown && this.#switchedOn) {
+      for (const street of streets) {
+        for (const item of street.furniture) {
+          if (Math.hypot(item.x - camera.x, item.z - camera.z) > FURNITURE_DRAW_METRES) continue;
+          const mesh = this.#meshes.get(item.kind) as InstancedMesh;
+          if (mesh.count >= FURNITURE_CAPACITY) continue;
+          this.#matrix.makeRotationY(item.rotation).setPosition(item.x, item.y, item.z);
+          mesh.setMatrixAt(mesh.count, this.#matrix);
+          mesh.count += 1;
+        }
+      }
+    }
+    for (const mesh of this.#meshes.values()) {
+      mesh.instanceMatrix.needsUpdate = mesh.count > 0;
+      mesh.visible = mesh.count > 0;
+    }
+  }
+
+  dispose(): void {
+    for (const [kind, mesh] of this.#meshes) {
+      mesh.geometry.dispose();
+      const materials = this.#materials.get(kind);
+      materials?.lit.dispose();
+      if (materials !== undefined && materials.flat !== materials.lit) materials.flat.dispose();
+      mesh.dispose();
+    }
+  }
+}
+
+/**
  * The stylised world's wordmark, once loaded — #966. Module state for
  * {@link sceneryGeometries}' reason: a view is built synchronously, so the
  * texture is loaded first, by {@link loadGameWordmark}.
@@ -8804,6 +9261,35 @@ export class RealisticVegetationBelt {
    */
   get drawnItems(): number {
     return this.#drawn;
+  }
+
+  /**
+   * Where, in plan, every instance the last frame submitted stands — at every
+   * level, the impostors included, read back out of the instanced meshes.
+   *
+   * @test-facing reached through `realisticVegetationPlacesOf` by the browser
+   * gate, which holds what was drawn off every settlement's ground (#1534)
+   */
+  places(): readonly { readonly kind: RealisticVegetationKind; x: number; z: number }[] {
+    const found: { kind: RealisticVegetationKind; x: number; z: number }[] = [];
+    for (const slot of this.#kinds) {
+      const meshes = [
+        ...slot.near.flat(),
+        ...slot.middle.flatMap((each) => each ?? []),
+        ...slot.far.filter((mesh): mesh is InstancedMesh => mesh !== undefined),
+      ];
+      for (const mesh of meshes) {
+        if (!mesh.visible) continue;
+        mesh.updateMatrixWorld();
+        for (let index = 0; index < mesh.count; index += 1) {
+          mesh.getMatrixAt(index, this.#matrix);
+          this.#matrix.premultiply(mesh.matrixWorld);
+          this.#position.setFromMatrixPosition(this.#matrix);
+          found.push({ kind: slot.kind, x: this.#position.x, z: this.#position.z });
+        }
+      }
+    }
+    return found;
   }
 
   /** This frame's vegetation: the trees at their levels, the nearest shrubs and rocks as meshes. */
@@ -11080,6 +11566,9 @@ const STRUCTURE_SURFACE_FINISH: Readonly<
   planks: { roughness: 0.85, metalness: 0, tint: 0xffffff },
   corrugated: { roughness: 0.5, metalness: 0.5, tint: 0xffffff },
   hedge: { roughness: 0.95, metalness: 0, tint: 0x8fcf66 },
+  // #1535: worn by no structure kind — the pavements' finish, which
+  // `PavementBelt` reads. Matte, as concrete flags are.
+  paving: { roughness: 0.9, metalness: 0, tint: 0xffffff },
   // #1548: the mapped towns' three, matte as masonry is — a gravel roof the
   // most, smooth concrete the least.
   render: { roughness: 0.9, metalness: 0, tint: 0xffffff },
@@ -11217,7 +11706,10 @@ export class RealisticStructureBelts {
       const [first] = realisticStructureSurfaces(kind);
       if (first !== undefined) this.#first.set(kind, first);
     }
-    this.#belts = STRUCTURE_SURFACES.map((surface) => {
+    // #1535: `paving` is the pavements' (`PavementBelt`), and no structure
+    // kind wears it, so it has no belt here: an empty belt would be a mesh a
+    // kind for nothing.
+    this.#belts = STRUCTURE_SURFACES.filter((surface) => surface !== 'paving').map((surface) => {
       const models = new Map<SceneryKind, readonly BufferGeometry[]>();
       for (const kind of STRUCTURE_KINDS) {
         // #500: a building has one shape a variant, and each is a mesh here.
@@ -11387,6 +11879,10 @@ class RealisticDrawing {
   readonly gantries: GantryBelt;
   /** The wordmark's boards, on the start gate and the billboards — #966. */
   readonly logos: LogoBelt;
+  /** The village streets' kerbs and pavements, in ambientCG's paving — #1535. */
+  readonly pavements: PavementBelt;
+  /** What stands on them: lamp posts, bollards, benches and bins — #1536. */
+  readonly furniture: FurnitureBelt;
   readonly environment: Texture;
   /** The road's and the ground's photographic materials. @see setSurfaces */
   #road: MeshStandardMaterial;
@@ -11441,6 +11937,8 @@ class RealisticDrawing {
     this.grounding = new GroundBlobBelt();
     this.gantries = new GantryBelt(world.banners);
     this.logos = new LogoBelt(world.wordmark, 'realistic');
+    this.pavements = new PavementBelt('realistic', world.structures.get('paving'));
+    this.furniture = new FurnitureBelt('realistic', world.structures.get('planks'));
     this.#casterLists = [this.vegetation.grounded, this.#structureCasters];
     this.#road = this.#roadMaterial();
     this.#ground = this.#groundMaterial();
@@ -11514,6 +12012,8 @@ class RealisticDrawing {
     this.grounding.addTo(scene);
     this.gantries.addTo(scene);
     this.logos.addTo(scene);
+    this.pavements.addTo(scene);
+    this.furniture.addTo(scene);
   }
 
   setShown(on: boolean): void {
@@ -11524,6 +12024,8 @@ class RealisticDrawing {
     this.grounding.setShown(on);
     this.gantries.setShown(on);
     this.logos.setShown(on);
+    this.pavements.setShown(on);
+    this.furniture.setShown(on);
     // #626: shown only by the view, on a rung that grounds riders by contact.
     if (!on) this.shadows.setShown(false);
   }
@@ -11588,6 +12090,8 @@ class RealisticDrawing {
     this.grounding.dispose();
     this.gantries.dispose();
     this.logos.dispose();
+    this.pavements.dispose();
+    this.furniture.dispose();
     this.#road.dispose();
     this.#ground.dispose();
     this.environment.dispose();
@@ -11794,6 +12298,20 @@ export function realisticShouldersOf(
  */
 export function sceneryDrawnOf(view: GameView): number {
   return view instanceof ThreeGameView ? view.sceneryDrawn : 0;
+}
+
+/**
+ * Where, in plan, every tree, shrub and rock a view's last realistic frame
+ * submitted stands, at whatever level — #1534's browser gate, which holds them
+ * off every settlement's ground. Empty for a stylised frame.
+ *
+ * @unwired reached only from the browser gate's harness; nothing in the render
+ * path needs to ask.
+ */
+export function realisticVegetationPlacesOf(
+  view: GameView,
+): readonly { readonly kind: string; x: number; z: number }[] {
+  return view instanceof ThreeGameView ? view.realisticVegetationPlaces() : [];
 }
 
 /**
@@ -12072,6 +12590,61 @@ export function wordmarkOrientationOf(view: GameView, orientation: WordmarkOrien
 export function logoBoardsOf(view: GameView): number {
   const mesh = view instanceof ThreeGameView ? view.logoMesh : undefined;
   return mesh?.visible === true ? mesh.count : 0;
+}
+
+/**
+ * Turns a view's village pavements off, or on again — #1535. The browser
+ * gate's control: with them off, the probe aimed at a pavement must read
+ * something else there, or it was never reading the pavement.
+ *
+ * @test-facing the browser gate's control switch, read by `game-harness.ts`;
+ * the product always draws them.
+ */
+export function pavementsShownOf(view: GameView, on: boolean): void {
+  if (view instanceof ThreeGameView) view.pavementsShown(on);
+}
+
+/**
+ * Turns a view's street furniture off, or on again — #1536. The browser
+ * gate's control: with it off, the frame must change by the pixels the
+ * furniture covered, and lose one draw call a kind.
+ *
+ * @test-facing the browser gate's control switch, read by `game-harness.ts`;
+ * the product always draws it.
+ */
+export function furnitureShownOf(view: GameView, on: boolean): void {
+  if (view instanceof ThreeGameView) view.furnitureShown(on);
+}
+
+/**
+ * How many pieces of each furniture kind a view drew in its last frame, in the
+ * world it drew — #1536: none away from a village, and none past
+ * `streets.ts` §`FURNITURE_DRAW_METRES`.
+ *
+ * @test-facing read by `game-harness.ts`, which requires every kind beside a
+ * village and none in open country.
+ */
+export function furnitureCountsOf(view: GameView): Readonly<Record<FurnitureKind, number>> {
+  const belt = view instanceof ThreeGameView ? view.furnitureBelt : undefined;
+  const counts = {} as Record<FurnitureKind, number>;
+  for (const kind of FURNITURE_KINDS) {
+    const mesh = belt?.meshOf(kind);
+    counts[kind] = mesh?.visible === true ? mesh.count : 0;
+  }
+  return counts;
+}
+
+/**
+ * How many pavement triangles a view drew in its last frame, in the world it
+ * drew — #1535: nought away from a village.
+ *
+ * @test-facing read by `game-harness.ts`, which requires them beside a village
+ * and none in open country.
+ */
+export function pavementTrianglesOf(view: GameView): number {
+  const mesh = view instanceof ThreeGameView ? view.pavementMesh : undefined;
+  if (mesh?.visible !== true) return 0;
+  return (mesh.geometry.index?.count ?? 0) / 3;
 }
 
 /**
@@ -12507,6 +13080,10 @@ class ThreeGameView implements GameView {
    * {@link loadGameWordmark} loaded before this view was built.
    */
   readonly #logos = new LogoBelt(gameWordmark, 'stylised');
+  /** The stylised world's village pavements — #1535. The realistic world draws its own. */
+  readonly #pavements = new PavementBelt('stylised');
+  /** The stylised world's street furniture — #1536. The realistic world draws its own. */
+  readonly #furniture = new FurnitureBelt('stylised');
   /**
    * The sun and the sky it is in — #286. Two lamps, built once and pointed
    * every frame by `#updateWorld`, exactly as the fog is coloured every frame.
@@ -12585,6 +13162,10 @@ class ThreeGameView implements GameView {
     // #966: the start gate and the billboards, in the stylised world.
     this.#gantries.addTo(this.#scene);
     this.#logos.addTo(this.#scene);
+    // #1535: the village pavements, in the stylised world.
+    this.#pavements.addTo(this.#scene);
+    // #1536: what stands on them.
+    this.#furniture.addTo(this.#scene);
 
     // #349, #368. Added here rather than in `render`, so that a frame carrying
     // no rider draws nothing rather than adding one on the frame it appears.
@@ -12717,6 +13298,12 @@ class ThreeGameView implements GameView {
     this.#realistic?.logos.update(frame.lines, frame.billboards);
     this.#gantries.update(frame.lines);
     this.#logos.update(frame.lines, frame.billboards);
+    // #1535: the village streets, in both worlds; the hidden world's draw nothing.
+    this.#realistic?.pavements.update(frame.streets);
+    this.#pavements.update(frame.streets);
+    // #1536: and what stands on them, within reach of the camera.
+    this.#realistic?.furniture.update(frame.streets, frame.camera);
+    this.#furniture.update(frame.streets, frame.camera);
     this.#updateMarkers(
       split?.stylised ??
         (realisticFrame
@@ -12878,6 +13465,8 @@ class ThreeGameView implements GameView {
     // #966: the stylised gate and boards, in the stylised world only.
     this.#gantries.setShown(!realistic);
     this.#logos.setShown(!realistic);
+    this.#pavements.setShown(!realistic);
+    this.#furniture.setShown(!realistic);
     // #783: shown in both worlds — in the realistic one it draws only the
     // remote riders `realisticRemoteSplit` hands it, and nothing on a frame
     // with none. @see #updateMarkers
@@ -12907,6 +13496,11 @@ class ThreeGameView implements GameView {
   realisticShoulders(): { x: number; y: number; z: number } | undefined {
     const into = { x: 0, y: 0, z: 0 };
     return this.#realistic?.riders.shouldersOf(into) === true ? into : undefined;
+  }
+
+  /** Where the realistic vegetation the last frame drew stands. @see realisticVegetationPlacesOf */
+  realisticVegetationPlaces(): readonly { readonly kind: string; x: number; z: number }[] {
+    return this.#realistic?.vegetation.places() ?? [];
   }
 
   /** How many scenery items the last frame drew, in the world it drew. @see sceneryDrawnOf */
@@ -13035,6 +13629,28 @@ class ThreeGameView implements GameView {
   /** @see logoBoardsOf — the drawn world's. */
   get logoMesh(): InstancedMesh | undefined {
     return this.#drawing === 'realistic' ? this.#realistic?.logos.mesh : this.#logos.mesh;
+  }
+
+  /** @see pavementsShownOf */
+  pavementsShown(on: boolean): void {
+    this.#realistic?.pavements.switchOn(on);
+    this.#pavements.switchOn(on);
+  }
+
+  /** @see pavementTrianglesOf — the drawn world's. */
+  get pavementMesh(): Mesh | undefined {
+    return this.#drawing === 'realistic' ? this.#realistic?.pavements.mesh : this.#pavements.mesh;
+  }
+
+  /** @see furnitureShownOf */
+  furnitureShown(on: boolean): void {
+    this.#realistic?.furniture.switchOn(on);
+    this.#furniture.switchOn(on);
+  }
+
+  /** @see furnitureCountsOf — the drawn world's. */
+  get furnitureBelt(): FurnitureBelt | undefined {
+    return this.#drawing === 'realistic' ? this.#realistic?.furniture : this.#furniture;
   }
 
   /** @see realisticSurfacesOf */
@@ -13199,6 +13815,8 @@ class ThreeGameView implements GameView {
     this.#bridges.setShading(shading);
     this.#gantries.setShading(shading);
     this.#logos.setShading(shading);
+    this.#pavements.setShading(shading);
+    this.#furniture.setShading(shading);
   }
 
   /**
@@ -13297,6 +13915,8 @@ class ThreeGameView implements GameView {
     this.#scatter.dispose();
     this.#gantries.dispose();
     this.#logos.dispose();
+    this.#pavements.dispose();
+    this.#furniture.dispose();
     this.#lighting.dispose();
     this.#riders.dispose();
     for (const belt of this.#ownMeshes) belt.dispose();

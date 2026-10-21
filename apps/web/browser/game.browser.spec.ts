@@ -189,6 +189,7 @@ interface GameHarnessResult {
     readonly drawCallsBare: number;
     readonly withMs: number;
     readonly withoutMs: number;
+    readonly pavement: RealisticMeasurement['pavement'];
   };
   readonly water: {
     readonly crossings: number;
@@ -1771,7 +1772,77 @@ test.describe('a village and its fields — #460', () => {
     // Published, never bounded — validation 0002 Part X is the phone.
     expect(settlement.withMs).toBeGreaterThan(0);
   });
+
+  test('lays a kerbed pavement through a village, in one call, and none in open country — #1535', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { settlement } = await harness(harnessRun);
+    expectAPavement(settlement.pavement, testInfo, 'stylised');
+  });
+
+  test('stands lamp posts, bollards, benches and bins on it, one call a kind, and none in open country — #1536', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { settlement } = await harness(harnessRun);
+    expectStreetFurniture(settlement.pavement, testInfo, 'stylised');
+  });
 });
+
+/**
+ * #1535's browser-gate half, for either world: a village's pavement exists at
+ * a point known from the village's layout, in one draw call; the same square
+ * reads something else with the pavements off (the control that the probe was
+ * reading the pavement); and a frame in open country draws none of it.
+ */
+function expectAPavement(
+  pavement: RealisticMeasurement['pavement'],
+  testInfo: { readonly annotations: { type: string; description?: string }[] },
+  world: string,
+): void {
+  const { triangles, trianglesOpen, drawCalls, drawCallsOff, onRgb, offRgb } = pavement;
+  const measured = `${world}: ${String(triangles)} pavement triangles beside a village, ${String(trianglesOpen)} in open country; ${String(drawCalls)} draw calls with them, ${String(drawCallsOff)} without; the point ${onRgb.map((c) => c.toFixed(0)).join('/')} drawn, ${offRgb.map((c) => c.toFixed(0)).join('/')} without`;
+  testInfo.annotations.push({ type: 'a village pavement', description: measured });
+  console.log(`a village pavement — ${measured}`);
+  // It exists beside the village, and none is drawn in open country.
+  expect(triangles).toBeGreaterThan(100);
+  expect(trianglesOpen).toBe(0);
+  // Every street in view in ONE call.
+  expect(drawCalls - drawCallsOff).toBe(1);
+  // The known point is the pavement: switched off, the same square reads
+  // something else.
+  expect(onRgb).toHaveLength(3);
+  expect(offRgb).toHaveLength(3);
+  const apart = Math.max(...[0, 1, 2].map((c) => Math.abs((onRgb[c] ?? 0) - (offRgb[c] ?? 0))));
+  expect(apart).toBeGreaterThan(8);
+}
+
+/**
+ * #1536's browser-gate half, for either world, on #1535's frames: every kind
+ * of street furniture drawn beside the village, one draw call a kind; with it
+ * switched off the frame loses exactly those calls and the pixels it covered;
+ * and a frame in open country draws none of it.
+ */
+function expectStreetFurniture(
+  pavement: RealisticMeasurement['pavement'],
+  testInfo: { readonly annotations: { type: string; description?: string }[] },
+  world: string,
+): void {
+  const { counts, countsOpen, drawCalls, drawCallsOff, pixels } = pavement.furniture;
+  const kinds = Object.keys(counts) as (keyof typeof counts)[];
+  const measured = `${world}: ${kinds.map((kind) => `${String(counts[kind])} ${kind}`).join(', ')} beside a village, ${kinds.map((kind) => String(countsOpen[kind])).join('/')} in open country; ${String(drawCalls)} draw calls with them, ${String(drawCallsOff)} without; ${String(pixels)} px`;
+  testInfo.annotations.push({ type: 'street furniture', description: measured });
+  console.log(`street furniture — ${measured}`);
+  expect(kinds).toHaveLength(4);
+  for (const kind of kinds) {
+    // Every kind beside the village, and none in open country.
+    expect(counts[kind], kind).toBeGreaterThan(0);
+    expect(countsOpen[kind], kind).toBe(0);
+  }
+  // One instanced draw a kind, however many pieces.
+  expect(drawCalls - drawCallsOff).toBe(kinds.length);
+  // It reaches the drawing buffer.
+  expect(pixels).toBeGreaterThan(100);
+}
 
 test.describe('the road reads as a road — #242', () => {
   paysForTheLoad('', PLAIN_LOAD_BUDGET_MS);
@@ -3408,6 +3479,20 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     expect(glass[2] ?? 0).toBeGreaterThan(glass[0] ?? 0);
   });
 
+  test('lays a village’s pavement in ambientCG’s paving, in one call, and none in open country — #1535', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { pavement } = await realistic(harnessRun);
+    expectAPavement(pavement, testInfo, 'realistic');
+  });
+
+  test('stands its street furniture on it, the bench in Poly Haven’s planks, one call a kind — #1536', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { pavement } = await realistic(harnessRun);
+    expectStreetFurniture(pavement, testInfo, 'realistic');
+  });
+
   test('tells two instances of one shape apart by their seeded tints, and not without them — #621', async ({
     harnessRun,
   }) => {
@@ -3836,6 +3921,26 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     // left out: not one pixel may move, on the road or on the bank.
     expect(road.largest).toBeLessThanOrEqual(SURFACE_BOUNDS_TOLERANCE);
     expect(bank.largest).toBeLessThanOrEqual(SURFACE_BOUNDS_TOLERANCE);
+  });
+
+  test('draws no tree, shrub or rock on a village’s ground, where the same frame left wooded draws some — #1534', async ({
+    harnessRun,
+  }) => {
+    const { settlementClearing: clearing } = await realistic(harnessRun);
+    expect(clearing.measured).toBe(true);
+    console.log(
+      `#1534: ${String(clearing.pieces)} pieces of village ground; ` +
+        `${String(clearing.onGround)} of ${String(clearing.drawn)} instances on them, ` +
+        `${String(clearing.woodedOnGround)} of ${String(clearing.woodedDrawn)} left wooded`,
+    );
+    // The control: the same frame with the rule off draws vegetation on the
+    // village's ground, so a probe that read nothing, or a frame with no
+    // village in it, cannot pass the line after it.
+    expect(clearing.pieces).toBeGreaterThan(0);
+    expect(clearing.woodedOnGround).toBeGreaterThan(0);
+    expect(clearing.onGround).toBe(0);
+    // And the frame still has its countryside.
+    expect(clearing.drawn).toBeGreaterThan(0);
   });
 
   test('stands a gantry at the finish, lettered from the app’s own glyphs, for two calls and only there — #679', async ({

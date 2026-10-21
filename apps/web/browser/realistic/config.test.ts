@@ -69,6 +69,9 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
       'generated-trees',
       'texture-bias',
     ]);
+    // #1534's, the villages' ground left wooded.
+    expect(LEVERS).toContain('settlement-clearing');
+    expect(parseConfig('?levers=-settlement-clearing').leversOff).toEqual(['settlement-clearing']);
     expect(parseConfig('').leversOff).toEqual([]);
     expect(() => parseConfig('?levers=-texture')).toThrow(/levers is a comma-separated list/);
     expect(() => parseConfig('?levers=texture-bias')).toThrow(/levers is a comma-separated list/);

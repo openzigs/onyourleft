@@ -21,7 +21,7 @@
  * | `at` | hold the rider still this far along the route, for a screenshot | metres |
  * | `panel` | the on-screen controls | `1` (default), `0` for a clean screenshot |
  * | `layers` | layers switched OFF, for their share of the GPU (#616) | `-sky`, `-surfaces`, `-vegetation`, `-impostors`, `-structures`, `-water`, `-riders`, `-grounding`, comma-separated; default none |
- * | `levers` | #619's levers switched OFF, for a before/after pair at one rung — since #622 its air and since #1274 its crag, for a by-eye pair, since #1283 the generated trees and #1294 the generated firs, for both, since #1523 the ground blend and the road wear, for a cost pair, and #1523's bounds on both, for a before/after pair | `-foliage-order`, `-texture-bias`, `-air`, `-crag`, `-generated-trees`, `-generated-conifers`, `-ground-blend`, `-road-wear`, `-surface-bounds`, comma-separated; default none |
+ * | `levers` | #619's levers switched OFF, for a before/after pair at one rung — since #622 its air and since #1274 its crag, for a by-eye pair, since #1283 the generated trees and #1294 the generated firs, for both, since #1523 the ground blend and the road wear, for a cost pair, #1523's bounds on both, for a before/after pair, and since #1534 the villages' cleared ground, for both | `-foliage-order`, `-texture-bias`, `-air`, `-crag`, `-generated-trees`, `-generated-conifers`, `-ground-blend`, `-road-wear`, `-surface-bounds`, `-settlement-clearing`, comma-separated; default none |
  * | `facing` | which way the route is turned, relative to the sun (#702, `route.ts` §"Which way it faces") | `sun`, `away`; default the route unturned, which looks 110° to 160° away from the sun |
  *
  * ⚠️ **Unknown parameters and values are REFUSED**, as #457's page refused
@@ -109,6 +109,12 @@ export type Layer = (typeof LAYERS)[number];
  *
  * None of #1523's changes anything a rider can reach: the product always
  * builds both surfaces, bounded, and only this page's URL turns one off.
+ *
+ * - `settlement-clearing` — #1534: the trees, shrubs and rocks left standing on
+ *   a village's or a farmstead's ground, as every frame was before #1534
+ *   (`scene.ts` §`SceneInput.settlementsWooded`). The tablet's cost pair for
+ *   the clearing, which can only take instances away, and the owner's BY-EYE
+ *   pair for it. Changes nothing a rider can reach.
  */
 export const LEVERS = [
   'air',
@@ -118,6 +124,7 @@ export const LEVERS = [
   'generated-trees',
   'ground-blend',
   'road-wear',
+  'settlement-clearing',
   'surface-bounds',
   'texture-bias',
 ] as const;

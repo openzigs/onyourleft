@@ -659,6 +659,32 @@ export const REALISTIC_REMOTE_TRIANGLES = 64_226;
 export const REALISTIC_FRAME_TRIANGLES = 300_000;
 
 /**
+ * The most triangles a frame's village streets may add — #1535's pavements
+ * and #1536's street furniture: **23 104**, in either world.
+ *
+ * | | triangles |
+ * |---|--:|
+ * | Pavements: two villages in view at most, each at `streets.ts` §`PAVEMENT_TRIANGLES_PER_VILLAGE` | 2 × 1 184 = 2 368 |
+ * | Furniture: `three-renderer.ts` §`FURNITURE_CAPACITY` of each kind, each at its shape's triangles (lamp post 88, bollard 64, bench 108, bin 64) | 64 × 324 = 20 736 |
+ *
+ * The furniture's row is the CAPACITY, a hard bound the belt cannot pass; a
+ * village at its fullest has 16 lamp posts, 8 bollards, 2 benches and 2 bins
+ * (2 264), and only what is within `streets.ts` §`FURNITURE_DRAW_METRES` of
+ * the camera is drawn at all.
+ *
+ * ⚠️ **Outside {@link REALISTIC_FRAME_TRIANGLES}, by that constant's own
+ * rule**: a street is the SAME triangles in both worlds, as the corridor, the
+ * terrain and the water are, so it does not change with the world. It adds
+ * no texture: the pavement's 512 px paving pair (0.5 MiB estimated) is
+ * #1535's, counted with the rest of the set, and the bench wears `planks`,
+ * already loaded for the barns.
+ *
+ * @test-facing held by `realistic-renderer.test.ts` §"the street furniture",
+ * which counts the belt's own meshes
+ */
+export const REALISTIC_STREET_TRIANGLES = 23_104;
+
+/**
  * The most triangles the start and finish gantries may add to a frame:
  * **1 000** — #679's ceiling, against the 1 350 its research found spare in the
  * worst frame before #617 freed more. Spent only within

@@ -174,6 +174,7 @@ export type StructureSurface =
   | 'planks'
   | 'corrugated'
   | 'hedge'
+  | 'paving'
   | 'render'
   | 'concrete'
   | 'flat-roof'
@@ -214,6 +215,7 @@ export const PHOTOGRAPHIC_STRUCTURE_SURFACES: readonly PhotographicSurface[] = [
   'planks',
   'corrugated',
   'hedge',
+  'paving',
   // #1548: the mapped towns' three.
   ...TOWN_STRUCTURE_SURFACES,
 ];
@@ -245,6 +247,12 @@ export const REALISTIC_STRUCTURE_SURFACES: Readonly<Record<PhotographicSurface, 
   planks: structureMaps('dark_planks', 2),
   corrugated: structureMaps('corrugated_iron', 1.12),
   hedge: structureMaps('forest_leaves_02', 3),
+  // #1535: a village's pavement — `streets.ts`, drawn by `three-renderer.ts`
+  // §`PavementBelt` and worn by no structure kind. ambientCG's rather than
+  // Poly Haven's, and its page states no size: the photograph is four flags
+  // across, each taken as the common 0.5 m square, so one repeat is 2 m and a
+  // 2 m pavement is four flags wide.
+  paving: structureMaps('PavingStones136', 2),
   // #1548: ambientCG's, at 1K — `tools/realistic/sources.ts`
   // §`TOWN_STRUCTURE_TEXTURES` says which, and why these. The gravel's 1.9 m
   // is ambientCG's own stated size for the scan; the plaster's and the

@@ -10,6 +10,7 @@ import {
   alsoWritten,
   AMBIENTCG_GROUND_TEXTURES,
   AMBIENTCG_PHRASE,
+  AMBIENTCG_STRUCTURE_TEXTURES,
   AMBIENTCG_TECHNIQUES_KEPT,
   ambientCgArchive,
   ambientCgTechniques,
@@ -134,8 +135,10 @@ describe('what the pipeline keeps — #430, ADR 0026 D-4', () => {
       GENERATED_TREE_TEXTURES.filter((texture) => texture.from === from).map(
         (texture) => texture.id,
       );
+    // And since #1535 a village's pavement.
     expect(fromAmbientCg.map((source) => source.id)).toEqual([
       ...AMBIENTCG_GROUND_TEXTURES.map((texture) => texture.id),
+      ...AMBIENTCG_STRUCTURE_TEXTURES.map((texture) => texture.id),
       // #1548: the mapped towns' render, concrete and flat roof.
       ...TOWN_STRUCTURE_TEXTURES.map((texture) => texture.id),
       ...wornFrom('ambientcg'),
@@ -809,9 +812,11 @@ ${more}`;
     expect(archiveOf(makeHuman)).toBeUndefined();
   });
 
-  it('takes each ground surface at 1K, colour and OpenGL normal map, and makes two files of it', () => {
+  it('takes each ground and structure surface at 1K, colour and OpenGL normal map, and makes two files of it', () => {
     expect(AMBIENTCG_GROUND_TEXTURES.length).toBeGreaterThan(0);
-    for (const texture of AMBIENTCG_GROUND_TEXTURES) {
+    // #1535: the pavement's by the same archive, maps and recipe.
+    expect(AMBIENTCG_STRUCTURE_TEXTURES.map((texture) => texture.id)).toEqual(['PavingStones136']);
+    for (const texture of [...AMBIENTCG_GROUND_TEXTURES, ...AMBIENTCG_STRUCTURE_TEXTURES]) {
       const source = SOURCES.find((each) => each.id === texture.id);
       expect(source?.licence, texture.id).toBe('CC0-1.0');
       expect(source?.licencePage, texture.id).toBe(`https://ambientcg.com/view?id=${texture.id}`);
