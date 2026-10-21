@@ -151,6 +151,8 @@ import {
   showGroundBlobsOf,
   roadWearOf,
   groundBlendOf,
+  realisticSurfacesOf,
+  realisticSurfaceUniformsOf,
   impostorsLitOf,
   foliageStillOf,
   gantriesShownOf,
@@ -4518,6 +4520,8 @@ export interface RealisticMeasurement {
   readonly roadWear: RoadWearMeasurement;
   /** #627: a steep bank against level grass, blended and not. @see groundBlendProbe */
   readonly groundBlend: GroundBlendMeasurement;
+  /** #1523: the road's and the ground's programs, each lever off and none. @see surfaceProgramProbe */
+  readonly surfacePrograms: SurfaceProgramMeasurement;
   /** #679: a finish gantry's banner, read, and what the gantries cost. @see gantryProbe */
   readonly gantry: GantryMeasurement;
   /** #966: the wordmark on the gate and a billboard, read back, realistic. @see logoProbe */
@@ -5216,6 +5220,48 @@ const NO_GROUND_BLEND: GroundBlendMeasurement = {
   cragPixels: 0,
   cragWithoutRock: 0,
 };
+
+/** The uniforms of the road's and the ground's programs, as linked. @see realisticSurfaceUniformsOf */
+export interface SurfaceUniforms {
+  readonly road: readonly string[];
+  readonly ground: readonly string[];
+}
+
+/**
+ * #1523 — the owner's `-ground-blend` and `-road-wear` levers, read off the
+ * programs the GPU linked: as the product builds them (the control), with the
+ * ground's blend out, and with the road's wear out — each on the same frame.
+ */
+export interface SurfaceProgramMeasurement {
+  readonly measured: boolean;
+  readonly drawn: SurfaceUniforms;
+  readonly groundBlendOff: SurfaceUniforms;
+  readonly roadWearOff: SurfaceUniforms;
+}
+
+const NO_SURFACES: SurfaceUniforms = { road: [], ground: [] };
+
+const NO_SURFACE_PROGRAMS: SurfaceProgramMeasurement = {
+  measured: false,
+  drawn: NO_SURFACES,
+  groundBlendOff: NO_SURFACES,
+  roadWearOff: NO_SURFACES,
+};
+
+/** @see SurfaceProgramMeasurement */
+function surfaceProgramProbe(view: GameView, frame: SceneFrame): SurfaceProgramMeasurement {
+  const read = (groundBlend: boolean, roadWear: boolean): SurfaceUniforms => {
+    realisticSurfacesOf(view, { groundBlend, roadWear });
+    view.render(frame);
+    return realisticSurfaceUniformsOf(view) ?? NO_SURFACES;
+  };
+  const drawn = read(true, true);
+  const groundBlendOff = read(false, true);
+  const roadWearOff = read(true, false);
+  // Back as the product builds them, for every probe after this one.
+  read(true, true);
+  return { measured: true, drawn, groundBlendOff, roadWearOff };
+}
 
 /**
  * How many level squares are read, each at least three squares' width from
@@ -6352,6 +6398,7 @@ const NO_REALISTIC: RealisticMeasurement = {
   air: NO_AIR,
   roadWear: NO_ROAD_WEAR,
   groundBlend: NO_GROUND_BLEND,
+  surfacePrograms: NO_SURFACE_PROGRAMS,
   gantry: NO_GANTRY,
   logos: NO_LOGO,
   waterReflection: NO_WATER_REFLECTION,
@@ -7634,6 +7681,10 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   const groundBlend = groundBlendProbe(view, gl, canvas, riding);
   phaseEnds('realistic: ground blend — #627');
 
+  // #1523: the owner's cost levers, out of the programs and back.
+  const surfacePrograms = surfaceProgramProbe(view, riding(level, 400));
+  phaseEnds('realistic: surface programs — #1523');
+
   // #679: the finish gantry, read, and what the gantries cost.
   const gantry = gantryProbe(view, gl, canvas, riding);
   phaseEnds('realistic: gantry — #679');
@@ -8104,6 +8155,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     room,
     roadWear,
     groundBlend,
+    surfacePrograms,
     gantry,
     logos,
     waterReflection,

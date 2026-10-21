@@ -3746,6 +3746,47 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     expect(blend.bankScree).toBeLessThan(BLEND_CEILING);
   });
 
+  test('takes the ground’s blend and the road’s wear out of their programs with the owner’s cost levers, and nothing else — #1523', async ({
+    harnessRun,
+  }) => {
+    const { surfacePrograms: programs } = await realistic(harnessRun);
+    expect(programs.measured).toBe(true);
+    const { drawn, groundBlendOff, roadWearOff } = programs;
+    console.log(
+      `#1523: the ground's program holds ${String(drawn.ground.length)} uniforms, ` +
+        `${String(groundBlendOff.ground.length)} with its blend out; the road's ` +
+        `${String(drawn.road.length)}, ${String(roadWearOff.road.length)} with its wear out`,
+    );
+    // The blend's six maps, its shares and the tree line; the wear's patches,
+    // its switch and its colour terms — by the names the GPU linked.
+    const blendUniforms = [
+      'vergeMap',
+      'vergeNormalMap',
+      'rockMap',
+      'rockNormalMap',
+      'cragMap',
+      'cragNormalMap',
+      'treeLine',
+      'groundShares',
+    ];
+    const wearUniforms = ['roadPatches[0]', 'roadWear', 'roadWearColour'];
+    // The control, the default load: the product's programs hold both, so a
+    // read that found nothing cannot pass the lines below.
+    for (const name of blendUniforms) expect(drawn.ground, name).toContain(name);
+    for (const name of wearUniforms) expect(drawn.road, name).toContain(name);
+    // `-ground-blend`: none of the blend in the ground's program, which is
+    // still the photographic ground — and the road's program untouched.
+    for (const name of blendUniforms) expect(groundBlendOff.ground, name).not.toContain(name);
+    expect(groundBlendOff.ground).toContain('map');
+    expect(groundBlendOff.ground).toContain('normalMap');
+    expect(groundBlendOff.road).toEqual(drawn.road);
+    // `-road-wear`: none of the wear in the road's program, which still wears
+    // its photograph — and the ground's program untouched.
+    for (const name of wearUniforms) expect(roadWearOff.road, name).not.toContain(name);
+    expect(roadWearOff.road).toContain('map');
+    expect(roadWearOff.ground).toEqual(drawn.ground);
+  });
+
   test('stands a gantry at the finish, lettered from the app’s own glyphs, for two calls and only there — #679', async ({
     harnessRun,
   }) => {

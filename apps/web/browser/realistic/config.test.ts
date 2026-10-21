@@ -10,6 +10,7 @@ import {
   parseConfig,
   percentiles,
   rungWithLevers,
+  surfacesWithLevers,
   treesWithLevers,
 } from './config';
 import { REALISTIC_TREE_SETS, REALISTIC_TREES_DEFAULT } from '../../src/game/realistic-assets';
@@ -71,6 +72,34 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     expect(parseConfig('').leversOff).toEqual([]);
     expect(() => parseConfig('?levers=-texture')).toThrow(/levers is a comma-separated list/);
     expect(() => parseConfig('?levers=texture-bias')).toThrow(/levers is a comma-separated list/);
+  });
+
+  it('builds both surfaces’ shaders, as the product does, unless a #1523 lever takes one out', () => {
+    expect(LEVERS).toContain('ground-blend');
+    expect(LEVERS).toContain('road-wear');
+    // No lever is the product, and no OTHER lever touches either surface.
+    expect(surfacesWithLevers([])).toEqual({ groundBlend: true, roadWear: true });
+    expect(surfacesWithLevers(parseConfig('?levers=-air,-crag,-texture-bias').leversOff)).toEqual({
+      groundBlend: true,
+      roadWear: true,
+    });
+    // Each lever its own surface, and only that one.
+    expect(surfacesWithLevers(parseConfig('?levers=-ground-blend').leversOff)).toEqual({
+      groundBlend: false,
+      roadWear: true,
+    });
+    expect(surfacesWithLevers(parseConfig('?levers=-road-wear').leversOff)).toEqual({
+      groundBlend: true,
+      roadWear: false,
+    });
+    expect(surfacesWithLevers(parseConfig('?levers=-road-wear,-ground-blend').leversOff)).toEqual({
+      groundBlend: false,
+      roadWear: false,
+    });
+    // And the URL round-trips, so a tablet row names the program it measured.
+    expect(configQuery(parseConfig('?levers=-road-wear,-ground-blend'))).toBe(
+      `?levers=${encodeURIComponent('-ground-blend,-road-wear')}`,
+    );
   });
 
   it('loads the trees the product loads unless the generated ones are switched off — #1283', () => {

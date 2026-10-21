@@ -187,4 +187,59 @@ describe('the road’s wear — #628', () => {
     );
     material.dispose();
   });
+
+  it('builds the road with none of the wear for the owner’s cost lever — #1523', () => {
+    const noTexture = {} as Parameters<typeof photographicRoadMaterial>[0];
+    const compiled = (worn: boolean) => {
+      const material = photographicRoadMaterial(noTexture, noTexture, worn);
+      const shader = {
+        vertexShader: [
+          '#include <common>',
+          '#include <fog_pars_vertex>',
+          'void main() {',
+          '#include <uv_vertex>',
+          '#include <fog_vertex>',
+          '}',
+        ].join('\n'),
+        fragmentShader: [
+          '#include <common>',
+          '#include <fog_pars_fragment>',
+          'void main() {',
+          '#include <map_fragment>',
+          '#include <color_fragment>',
+          '#include <roughnessmap_fragment>',
+          '#include <normal_fragment_begin>',
+          '#include <normal_fragment_maps>',
+          '#include <lights_physical_fragment>',
+          '#include <fog_fragment>',
+          '}',
+        ].join('\n'),
+        uniforms: {} as Record<string, { value: unknown }>,
+        defines: {},
+      };
+      (material.onBeforeCompile as (s: typeof shader) => void)(shader);
+      const key = material.customProgramCacheKey();
+      material.dispose();
+      return { shader, key };
+    };
+    const worn = compiled(true);
+    const bare = compiled(false);
+    // The control: the product's road holds every part of the wear.
+    for (const part of ['roadPatches', 'oylTrackShare', 'oylWorn', 'roughnessFactor *=']) {
+      expect(worn.shader.fragmentShader, part).toContain(part);
+    }
+    expect(worn.shader.vertexShader).toContain('attribute float oylAcross;');
+    // Without it: not one of them, in either stage or in the uniforms.
+    for (const part of ['roadPatches', 'oylTrackShare', 'oylWorn', 'roughnessFactor *=']) {
+      expect(bare.shader.fragmentShader, part).not.toContain(part);
+    }
+    expect(bare.shader.vertexShader).not.toContain('oylAcross');
+    expect(Object.keys(bare.shader.uniforms)).not.toContain('roadPatches');
+    expect(Object.keys(bare.shader.uniforms)).not.toContain('roadWear');
+    // Still the photographic road: its grain and its sheen are not the wear's.
+    expect(bare.shader.fragmentShader).toContain('oylMean');
+    expect(bare.shader.fragmentShader).toContain('material.specularF90 *=');
+    // And a program of its own: three must not hand one road the other's.
+    expect(bare.key).not.toBe(worn.key);
+  });
 });

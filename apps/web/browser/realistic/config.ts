@@ -21,7 +21,7 @@
  * | `at` | hold the rider still this far along the route, for a screenshot | metres |
  * | `panel` | the on-screen controls | `1` (default), `0` for a clean screenshot |
  * | `layers` | layers switched OFF, for their share of the GPU (#616) | `-sky`, `-surfaces`, `-vegetation`, `-impostors`, `-structures`, `-water`, `-riders`, `-grounding`, comma-separated; default none |
- * | `levers` | #619's levers switched OFF, for a before/after pair at one rung — since #622 its air and since #1274 its crag, for a by-eye pair, and since #1283 the generated trees and #1294 the generated firs, for both | `-foliage-order`, `-texture-bias`, `-air`, `-crag`, `-generated-trees`, `-generated-conifers`, comma-separated; default none |
+ * | `levers` | #619's levers switched OFF, for a before/after pair at one rung — since #622 its air and since #1274 its crag, for a by-eye pair, since #1283 the generated trees and #1294 the generated firs, for both, and since #1523 the ground blend and the road wear, for a cost pair | `-foliage-order`, `-texture-bias`, `-air`, `-crag`, `-generated-trees`, `-generated-conifers`, `-ground-blend`, `-road-wear`, comma-separated; default none |
  * | `facing` | which way the route is turned, relative to the sun (#702, `route.ts` §"Which way it faces") | `sun`, `away`; default the route unturned, which looks 110° to 160° away from the sun |
  *
  * ⚠️ **Unknown parameters and values are REFUSED**, as #457's page refused
@@ -30,6 +30,7 @@
  */
 
 import type { RealisticTrees } from '../../src/game/realistic-assets';
+import type { RealisticSurfaces } from '../../src/game/three-renderer';
 
 import type { Facing } from './route';
 
@@ -91,6 +92,18 @@ export type Layer = (typeof LAYERS)[number];
  *   the draw calls and the triangles of one run against the other are the
  *   trees' own difference. ⚠️ **Read at load**: it chooses which files are
  *   fetched, so it is a different URL and not a switch on a running page.
+ * - `ground-blend` — #1523: the realistic ground as it was before #627's
+ *   verge, rock and scree and #1274's crag — #425's near and far photograph
+ *   and #460's patchwork, in a program that holds none of the blend's code or
+ *   its six maps (`three-renderer.ts` §`realisticSurfacesOf`). The tablet's
+ *   COST pair for the blend, which `crag` is not; it changes the picture too.
+ * - `road-wear` — #1523: the realistic road without #628's wear and #879's
+ *   roughness and relief — no wheel track, no dust, no patch loop in its
+ *   program. The tablet's cost pair for the wear, which `game-harness.ts`'s
+ *   wear switch is not: that one zeroes uniforms and keeps the loop.
+ *
+ * Neither of #1523's changes anything a rider can reach: the product always
+ * builds both, and only this page's URL turns one off.
  */
 export const LEVERS = [
   'air',
@@ -98,6 +111,8 @@ export const LEVERS = [
   'foliage-order',
   'generated-conifers',
   'generated-trees',
+  'ground-blend',
+  'road-wear',
   'texture-bias',
 ] as const;
 
@@ -215,6 +230,18 @@ export function rungWithLevers<R extends { readonly textureLodBias: number }>(
 export function treesWithLevers(leversOff: readonly Lever[]): RealisticTrees {
   if (leversOff.includes('generated-trees')) return 'scanned';
   return leversOff.includes('generated-conifers') ? 'scanned-conifers' : 'generated';
+}
+
+/**
+ * Which of the realistic surfaces' shaders this run builds — #1523: both, as
+ * the product does, unless `ground-blend` or `road-wear` is off.
+ * `realistic-harness.ts` hands it to `three-renderer.ts` §`realisticSurfacesOf`.
+ */
+export function surfacesWithLevers(leversOff: readonly Lever[]): RealisticSurfaces {
+  return {
+    groundBlend: !leversOff.includes('ground-blend'),
+    roadWear: !leversOff.includes('road-wear'),
+  };
 }
 
 /** A configuration from a query string. @see RealisticPageConfig */

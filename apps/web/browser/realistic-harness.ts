@@ -64,6 +64,7 @@ import {
   groundBlendOf,
   loadRealisticWorld,
   loadSceneryModels,
+  realisticSurfacesOf,
   realisticTextureReport,
   setRealisticTrees,
   threeGameRenderer,
@@ -73,6 +74,7 @@ import {
   parseConfig,
   percentiles,
   rungWithLevers,
+  surfacesWithLevers,
   treesWithLevers,
   type Layer,
   type Lever,
@@ -321,6 +323,11 @@ async function run(): Promise<void> {
   // first asks for them, so it is applied again after every rung change.
   const foliageOrdered = !config.leversOff.includes('foliage-order');
   foliageOrderedOf(view, foliageOrdered);
+  // #1523's cost pairs: the ground without #627's blend, the road without
+  // #628's wear — the code out of the program, not a uniform at zero. A
+  // setting of the view's, so it survives a rung change; and set BEFORE the
+  // crag below, because a ground rebuilt with its blend starts at every share.
+  realisticSurfacesOf(view, surfacesWithLevers(config.leversOff));
   // #1274's by-eye pair: a steep bank in ambientCG's rock face, or — the crag
   // off — in the scree's photograph, as it was. The ground's material is built
   // with the realistic belts, so this too is applied again after a rung change.
