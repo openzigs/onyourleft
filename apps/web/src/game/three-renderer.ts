@@ -10967,7 +10967,7 @@ export function realisticStructureSurfaces(kind: StructureKind): readonly Struct
  * coordinates would not give — they stretch one photograph across a whole
  * wall, whatever its size. Position and normal are kept; nothing else is.
  */
-function projectedInMetres(
+export function projectedInMetres(
   geometry: BufferGeometry,
   repeat: { readonly across: number; readonly up: number },
   shade = 1,
