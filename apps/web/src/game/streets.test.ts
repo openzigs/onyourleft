@@ -300,6 +300,28 @@ describe('what a pavement may never stand on — #1535', () => {
     expect(all.filter((vertex) => Math.abs(vertex.ny) < 1e-6 && isAlong(vertex)).length).toBe(8);
   });
 
+  it('keeps the kerb off a nearby leg’s carriageway where some of the pavement is still laid', () => {
+    // Wide enough hairpins that only part of the inside pavement is refused:
+    // what is kept must be a true kerb's width from EVERY stretch of road, to
+    // within the chord slack alone.
+    for (const radius of [5, 6, 7, 8]) {
+      const profile = hairpinRoute(radius);
+      const origin = corridorOrigin(profile);
+      const seed = scatterSeed(profile);
+      const whole = pavementAlong(profile, origin, seed, -1, 300, 520) as PavementMesh;
+      const inside = pavementAlong(profile, origin, seed, 1, 300, 520);
+      expect(inside, `radius ${String(radius)}`).toBeDefined();
+      // Some of it was refused, some kept.
+      expect((inside as PavementMesh).indices.length).toBeLessThan(whole.indices.length);
+      for (const vertex of vertices(inside as PavementMesh)) {
+        expect(
+          distanceToDrawnRoad(profile, origin, vertex.x, vertex.z, 10),
+          `radius ${String(radius)}`,
+        ).toBeGreaterThanOrEqual(KERB_LATERAL_METRES - 0.021);
+      }
+    }
+  });
+
   it('never stands in water or on a bank, and is laid either side of it', () => {
     const profile = valleyRoute();
     const origin = corridorOrigin(profile);
@@ -340,6 +362,23 @@ describe('a loop — #1535', () => {
     const second = streetsOf(profile, profile.totalDistance, 2 * profile.totalDistance);
     expect(second).toEqual(once);
     for (const [index, street] of second.entries()) expect(street).toBe(once[index]);
+  });
+
+  it('finds a village first seen from before the start again on the first lap', () => {
+    // 300 m round has three sites and the LAST is a village, so a span that
+    // starts before the line meets it as site -1 first. Its extent must be
+    // kept on the first lap's odometer, not the lap it happened to be met on.
+    const profile = circuitRoute(300, () => 40);
+    const { sites } = siteSpacing(profile);
+    const last = siteAt(profile, scatterSeed(profile), sites - 1);
+    expect(last?.kind).toBe('village');
+    const before = streetsOf(profile, -400, 0);
+    expect(before.length).toBeGreaterThan(0);
+    const street = before[0] as VillageStreet;
+    const along = (street.from + street.to) / 2;
+    expect(along).toBeGreaterThan(0);
+    const found = streetsOf(profile, along - 1, along + 1);
+    expect(found).toContain(street);
   });
 });
 

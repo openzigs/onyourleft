@@ -19,7 +19,9 @@
  * are placed from, never a copy of it — from {@link PAVEMENT_END_INSET_METRES}
  * inside the first built plot's boundary to as far inside the last's. A side
  * with no house on it has no pavement, a farmstead has none (it is a farm, not
- * a street), and nothing outside a village has any.
+ * a street), and nothing outside a village has any. "A house" means a plot
+ * `villagePlots` marks built: `structuresAt` may still drop that house for
+ * clearance or the realistic budget, leaving its pavement without it.
  *
  * Its cross-section, from the road outwards:
  *
@@ -52,6 +54,8 @@
  * A pavement is fixed in the corridor's frame (one origin a ride), so each
  * village's street is built once per route and kept in a `WeakMap` keyed on
  * the profile OBJECT — `waterways.ts` §`computed`'s argument, and its pattern.
+ * Origin and seed are not part of the key: both are derived from the profile in
+ * production, as `waterways.ts` assumes of its seed.
  * A frame carries the streets in view by reference, and the renderer rebuilds
  * its one mesh only when that set changes. A 180 m village with both sides
  * built is about 2 × 92 samples, six vertices and six triangles a sample: about
