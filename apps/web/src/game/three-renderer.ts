@@ -9110,8 +9110,22 @@ function variantOf(variant: number, shapes: number): number {
  * camera looks along the road at a grazing angle, which is exactly where an
  * unfiltered texture shimmers (#425). Whether it does on the tablet is the
  * owner's check, in validation 0002 Part Z; nothing in CI can see shimmer.
+ *
+ * ## `worn` — the tablet's cost pair for the wear, #1523
+ *
+ * `false` builds the road WITHOUT the wear's shader: no wheel track, no dust,
+ * no patch loop, no roughness or relief from the track — and nothing in
+ * {@link ROAD_WEAR}, so no frame writes patches for it either. That is the
+ * road before #628 and #879. ⚠️ Not {@link roadWearOf}'s switch, which zeroes
+ * the wear's uniforms and leaves every fragment running the loop. Only the
+ * owner's page passes `false` (`realistic/config.ts` §`LEVERS`, `road-wear`);
+ * the product always draws the wear.
  */
-export function photographicRoadMaterial(colour: Texture, normal: Texture): MeshStandardMaterial {
+export function photographicRoadMaterial(
+  colour: Texture,
+  normal: Texture,
+  worn = true,
+): MeshStandardMaterial {
   const material = constructed(
     new MeshStandardMaterial({
       vertexColors: true,
@@ -9128,43 +9142,51 @@ export function photographicRoadMaterial(colour: Texture, normal: Texture): Mesh
     on: 1,
     colour: 1,
   };
-  ROAD_WEAR.set(material, wear);
+  if (worn) ROAD_WEAR.set(material, wear);
   material.onBeforeCompile = (shader) => {
     shader.uniforms['tileMetres'] = { value: REALISTIC_SURFACES.road.tileMetres };
-    // #628: the patches lying in this frame's corridor, and the switch the
-    // browser gate's control turns off. The SAME objects every compile, so a
-    // program compiled again still reads what `#updateRoad` writes.
-    shader.uniforms['roadPatches'] = { value: wear.patches };
-    shader.uniforms['roadWear'] = {
-      get value(): number {
-        return wear.on;
-      },
-    };
-    // #879: the colour terms alone, for the browser gate's surface-only read.
-    shader.uniforms['roadWearColour'] = {
-      get value(): number {
-        return wear.colour;
-      },
-    };
+    if (worn) {
+      // #628: the patches lying in this frame's corridor, and the switch the
+      // browser gate's control turns off. The SAME objects every compile, so a
+      // program compiled again still reads what `#updateRoad` writes.
+      shader.uniforms['roadPatches'] = { value: wear.patches };
+      shader.uniforms['roadWear'] = {
+        get value(): number {
+          return wear.on;
+        },
+      };
+      // #879: the colour terms alone, for the browser gate's surface-only read.
+      shader.uniforms['roadWearColour'] = {
+        get value(): number {
+          return wear.colour;
+        },
+      };
+    }
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
-        `#include <common>\nuniform float tileMetres;\n${ROAD_WEAR_VERTEX_PARS}`,
+        `#include <common>\nuniform float tileMetres;\n${worn ? ROAD_WEAR_VERTEX_PARS : ''}`,
       )
-      .replace('#include <uv_vertex>', `#include <uv_vertex>\n${PLANAR_UV}\n${ROAD_WEAR_VERTEX}`);
+      .replace(
+        '#include <uv_vertex>',
+        `#include <uv_vertex>\n${PLANAR_UV}\n${worn ? ROAD_WEAR_VERTEX : ''}`,
+      );
     shader.fragmentShader = shader.fragmentShader
       .replace(
         '#include <common>',
-        `#include <common>\n${DETAIL_COMMON}\n${ROAD_WEAR_FRAGMENT_PARS}`,
+        `#include <common>\n${worn ? `${DETAIL_COMMON}\n${ROAD_WEAR_FRAGMENT_PARS}` : ''}`,
       )
-      .replace('#include <color_fragment>', `#include <color_fragment>\n${ROAD_WEAR_FRAGMENT}`)
+      .replace(
+        '#include <color_fragment>',
+        `#include <color_fragment>\n${worn ? ROAD_WEAR_FRAGMENT : ''}`,
+      )
       .replace(
         '#include <roughnessmap_fragment>',
-        `#include <roughnessmap_fragment>\nroughnessFactor *= mix(1.0, ${glslFloat(WHEEL_TRACK_ROUGHNESS)}, oylTrackShare);`,
+        `#include <roughnessmap_fragment>\n${worn ? `roughnessFactor *= mix(1.0, ${glslFloat(WHEEL_TRACK_ROUGHNESS)}, oylTrackShare);` : ''}`,
       )
       .replace(
         '#include <normal_fragment_maps>',
-        `#include <normal_fragment_maps>\nnormal = normalize(mix(normal, nonPerturbedNormal, ${glslFloat(1 - WHEEL_TRACK_RELIEF)} * oylTrackShare));`,
+        `#include <normal_fragment_maps>\n${worn ? `normal = normalize(mix(normal, nonPerturbedNormal, ${glslFloat(1 - WHEEL_TRACK_RELIEF)} * oylTrackShare));` : ''}`,
       )
       // ⚠️ **Every face is lit as facing UP, whichever way it is wound.**
       // `terrain.ts` §`roadIndices` keeps the winding consistent within a lane
@@ -9201,7 +9223,8 @@ material.specularF90 *= ${ROAD_SHEEN.toFixed(3)};`,
 `,
       );
   };
-  material.customProgramCacheKey = () => 'oyl-photographic-road-worn';
+  material.customProgramCacheKey = () =>
+    worn ? 'oyl-photographic-road-worn' : 'oyl-photographic-road';
   // #619 lever 2 and #622's air, chained after the assignment above.
   return withAtmosphere(withTextureLodBias(material));
 }
@@ -11227,9 +11250,18 @@ class RealisticDrawing {
   readonly gantries: GantryBelt;
   /** The wordmark's boards, on the start gate and the billboards — #966. */
   readonly logos: LogoBelt;
-  readonly road: MeshStandardMaterial;
-  readonly ground: MeshStandardMaterial;
   readonly environment: Texture;
+  /** The road's and the ground's photographic materials. @see setSurfaces */
+  #road: MeshStandardMaterial;
+  #ground: MeshStandardMaterial;
+  /** What {@link setSurfaces} builds them from again. */
+  readonly #world: RealisticWorld;
+  readonly #fields: {
+    readonly span: { value: number };
+    readonly count: { value: number };
+    readonly treeLine: { value: number };
+  };
+  #surfaces: RealisticSurfaces;
   /** This frame's structures, as ground-blob casters — #620. @see groundScenery */
   readonly #structureCasters = blobCasters(REALISTIC_STRUCTURE_ITEMS);
   /** Both lists the blob belt reads, made once. */
@@ -11251,7 +11283,12 @@ class RealisticDrawing {
      * kit by forgetting to pass it on.
      */
     riderKit: RiderKit,
+    /** Which of the surfaces' shaders the road and the ground are built with — #1523. */
+    surfaces: RealisticSurfaces,
   ) {
+    this.#world = world;
+    this.#fields = fields;
+    this.#surfaces = surfaces;
     const anisotropy = Math.min(REALISTIC_ANISOTROPY, renderer.capabilities.getMaxAnisotropy());
     for (const texture of surfaceMapsOf(world)) texture.anisotropy = anisotropy;
     this.vegetation = new RealisticVegetationBelt(world.vegetation, treeLevels);
@@ -11268,19 +11305,60 @@ class RealisticDrawing {
     this.gantries = new GantryBelt(world.banners);
     this.logos = new LogoBelt(world.wordmark, 'realistic');
     this.#casterLists = [this.vegetation.grounded, this.#structureCasters];
-    this.road = photographicRoadMaterial(world.road.colour, world.road.normal);
-    this.ground = photographicGroundMaterial(
+    this.#road = this.#roadMaterial();
+    this.#ground = this.#groundMaterial();
+    const generator = new PMREMGenerator(renderer);
+    this.environment = generator.fromEquirectangular(world.sky.texture).texture;
+    generator.dispose();
+  }
+
+  get road(): MeshStandardMaterial {
+    return this.#road;
+  }
+
+  get ground(): MeshStandardMaterial {
+    return this.#ground;
+  }
+
+  /**
+   * Builds the road and the ground again with `surfaces`' shaders, releasing
+   * the materials they replace — #1523. Only one that changes is rebuilt; the
+   * caller puts the new ones on the meshes.
+   */
+  setSurfaces(surfaces: RealisticSurfaces): void {
+    const was = this.#surfaces;
+    this.#surfaces = surfaces;
+    if (surfaces.roadWear !== was.roadWear) {
+      this.#road.dispose();
+      this.#road = this.#roadMaterial();
+    }
+    if (surfaces.groundBlend !== was.groundBlend) {
+      this.#ground.dispose();
+      this.#ground = this.#groundMaterial();
+    }
+  }
+
+  #roadMaterial(): MeshStandardMaterial {
+    const { road } = this.#world;
+    return photographicRoadMaterial(road.colour, road.normal, this.#surfaces.roadWear);
+  }
+
+  #groundMaterial(): MeshStandardMaterial {
+    const world = this.#world;
+    const fields = this.#fields;
+    return photographicGroundMaterial(
       world.ground.colour,
       world.ground.normal,
       fields.span,
       fields.count,
       // #627: the verge, the rock and scree, and where the tree line is —
-      // and since #1274 the bare rock a steep bank wears.
-      { verge: world.verge, rock: world.rock, crag: world.crag, treeLine: fields.treeLine },
+      // and since #1274 the bare rock a steep bank wears. Without them
+      // (#1523's `ground-blend` lever) the ground is #425's photograph and
+      // #460's patchwork alone, as it was before #627.
+      this.#surfaces.groundBlend
+        ? { verge: world.verge, rock: world.rock, crag: world.crag, treeLine: fields.treeLine }
+        : { treeLine: fields.treeLine },
     );
-    const generator = new PMREMGenerator(renderer);
-    this.environment = generator.fromEquirectangular(world.sky.texture).texture;
-    generator.dispose();
   }
 
   addTo(scene: Scene): void {
@@ -11366,8 +11444,8 @@ class RealisticDrawing {
     this.grounding.dispose();
     this.gantries.dispose();
     this.logos.dispose();
-    this.road.dispose();
-    this.ground.dispose();
+    this.#road.dispose();
+    this.#ground.dispose();
     this.environment.dispose();
   }
 }
@@ -11906,6 +11984,54 @@ export function groundBlendOf(
 }
 
 /**
+ * Which of the realistic surfaces' own shaders are built — #1523, the owner's
+ * cost pairs for #627's ground blend (with #1274's crag) and #628's road wear
+ * (with #879's). Each `false` builds that material WITHOUT its shader, as it
+ * was before: the ground as #425's photograph and #460's patchwork, the road
+ * with no wear. @see photographicRoadMaterial
+ */
+export interface RealisticSurfaces {
+  readonly groundBlend: boolean;
+  readonly roadWear: boolean;
+}
+
+/** What the product draws: both. */
+const REALISTIC_SURFACES_DRAWN: RealisticSurfaces = { groundBlend: true, roadWear: true };
+
+/**
+ * Builds the realistic road and ground with `surfaces`' shaders, in this view
+ * and in every realistic drawing it builds after — a setting of the view's, so
+ * it survives a rung change.
+ *
+ * ⚠️ **Not {@link groundBlendOf} or {@link roadWearOf}**: those set uniforms on
+ * the same program, so every fragment still pays for the blend and the wear.
+ * This takes the code out of the program, which is what a tablet's GPU clock
+ * can tell apart (#1523). A rebuilt ground's blend shares start at 1 again.
+ *
+ * @test-facing the owner's page's `-ground-blend` and `-road-wear` levers
+ * (`realistic-harness.ts`) and the browser gate's read of them
+ * (`game-harness.ts`); the product always draws both.
+ */
+export function realisticSurfacesOf(view: GameView, surfaces: RealisticSurfaces): void {
+  if (view instanceof ThreeGameView) view.realisticSurfaces(surfaces);
+}
+
+/**
+ * The uniforms the GPU holds for the realistic road's and ground's programs as
+ * last drawn, by name and sorted — read from WebGL, not from the material, so
+ * it is what was compiled and linked. `undefined` where the view has no
+ * realistic drawing; a material not yet drawn reads `[]`.
+ *
+ * @test-facing the browser gate's check of {@link realisticSurfacesOf}
+ * (`game-harness.ts`); the product never reads it.
+ */
+export function realisticSurfaceUniformsOf(
+  view: GameView,
+): { readonly road: readonly string[]; readonly ground: readonly string[] } | undefined {
+  return view instanceof ThreeGameView ? view.realisticSurfaceUniforms() : undefined;
+}
+
+/**
  * Takes the realistic road's wear off, or puts it back — #628. The browser
  * gate's control: with the wear off, the wheel track must read back no
  * different from the lane's middle, or the difference the gate measured was
@@ -12124,6 +12250,8 @@ class ThreeGameView implements GameView {
    * later, when a world has loaded, and must be dressed then too.
    */
   #riderKit: RiderKit = RIDER_KITS.rider;
+  /** Which surfaces' shaders the realistic road and ground are built with. @see realisticSurfacesOf */
+  #surfaces: RealisticSurfaces = REALISTIC_SURFACES_DRAWN;
   /** The riders' contact shadows — #426. One draw for all of them. */
   readonly #contactShadows = new ContactShadowBelt();
   /**
@@ -12583,6 +12711,7 @@ class ThreeGameView implements GameView {
           this.#renderer,
           this.#terrain.fields,
           this.#riderKit,
+          this.#surfaces,
         );
         this.#realistic.addTo(this.#scene);
         this.#realistic.setBudget(this.#quality.scatterItems + this.#quality.structureItems);
@@ -12750,6 +12879,40 @@ class ThreeGameView implements GameView {
   /** @see logoBoardsOf — the drawn world's. */
   get logoMesh(): InstancedMesh | undefined {
     return this.#drawing === 'realistic' ? this.#realistic?.logos.mesh : this.#logos.mesh;
+  }
+
+  /** @see realisticSurfacesOf */
+  realisticSurfaces(surfaces: RealisticSurfaces): void {
+    this.#surfaces = surfaces;
+    const drawing = this.#realistic;
+    if (drawing === undefined) return;
+    drawing.setSurfaces(surfaces);
+    if (this.#drawing === 'realistic') {
+      this.#road.material = drawing.road;
+      this.#terrain.setPhotographic(drawing.ground);
+    }
+  }
+
+  /** @see realisticSurfaceUniformsOf */
+  realisticSurfaceUniforms(): { readonly road: string[]; readonly ground: string[] } | undefined {
+    const renderer = this.#renderer;
+    const drawing = this.#realistic;
+    if (renderer === undefined || drawing === undefined) return undefined;
+    const gl = renderer.getContext();
+    const uniformsOf = (material: Material): string[] => {
+      const { currentProgram } = renderer.properties.get(material) as {
+        currentProgram?: { readonly program: WebGLProgram };
+      };
+      if (currentProgram === undefined) return [];
+      const count = gl.getProgramParameter(currentProgram.program, gl.ACTIVE_UNIFORMS) as number;
+      const names: string[] = [];
+      for (let index = 0; index < count; index += 1) {
+        const name = gl.getActiveUniform(currentProgram.program, index)?.name;
+        if (name !== undefined) names.push(name);
+      }
+      return names.sort();
+    };
+    return { road: uniformsOf(drawing.road), ground: uniformsOf(drawing.ground) };
   }
 
   /** @see roadWearOf */
