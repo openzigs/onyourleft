@@ -168,4 +168,15 @@ describe('corridorTileCover at the edges', () => {
     expect(cover.length).toBeGreaterThanOrEqual(1);
     expect(cover.length).toBeLessThanOrEqual(4);
   });
+
+  it('stays fast on a hostile continent-long segment and a glitch to (0,0)', () => {
+    const glitch = geographicPosition(degreesLatitude(0), degreesLongitude(0));
+    const started = performance.now();
+    const cover = corridorTileCover([at(0, 0), glitch, at(0, 0)], HALF_WIDTH, 600);
+    const long = corridorTileCover([at(0, 0), at(0, 1_000_000)], HALF_WIDTH, 1_000_000);
+    expect(cover).toHaveLength(600);
+    expect(long.length).toBeGreaterThan(700);
+    expect(long.length).toBeLessThan(3_000);
+    expect(performance.now() - started).toBeLessThan(1_000);
+  });
 });

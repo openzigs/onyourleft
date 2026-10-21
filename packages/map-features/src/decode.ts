@@ -72,8 +72,9 @@ import type {
  * `kind_detail`, `height` and `min_height` are ever looked at (`schema.ts`).
  *
  * The frame is the game's (`projection.ts`), and the output is `Float32Array`:
- * a millimetre at 50 km from the origin, which is past the end of any corridor
- * read at once.
+ * float32 spacing is about 4 mm at 50 km from the origin and about 3 cm at a few
+ * hundred km, which a long corridor can reach. That is far finer than a drawn
+ * edge, so it is harmless for drawing and not a survey-grade position.
  */
 export function decodeTile(
   bytes: Uint8Array,
@@ -274,6 +275,8 @@ function frameLayer(
 
   // Second pass: where each feature and value is, and which key index is which.
   const features = new Uint32Array(featureCount * 2);
+  // No values-per-layer limit: each value is at least two bytes of the tile, so
+  // `maxBytes` bounds this table (about 4x the tile's size in memory).
   const values = new Uint32Array(valueCount * 2);
   const keys = { kind: -1, kindDetail: -1, height: -1, minHeight: -1 };
   let f = 0;

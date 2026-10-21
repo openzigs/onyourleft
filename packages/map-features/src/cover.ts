@@ -53,22 +53,30 @@ export function corridorTileCover(
     const b = (points[i + 1] ?? a) as { x: number; z: number };
     const length = Math.hypot(b.x - a.x, b.z - a.z);
 
-    // The tiles that the segment's box, widened by the half-width, overlaps.
-    const westX = Math.max(a.x, b.x) + halfWidthMetres;
-    const eastX = Math.min(a.x, b.x) - halfWidthMetres;
+    // The rows the segment's box, widened by the half-width, overlaps. Within a
+    // row only the columns the widened segment can reach are tried, so the work
+    // follows the line (rows plus tiles touched), not the box's area: a segment
+    // across a continent is a thin diagonal, not millions of candidates.
     const northZ = Math.max(a.z, b.z) + halfWidthMetres;
     const southZ = Math.min(a.z, b.z) - halfWidthMetres;
-    const lowColumn = clampTile(
-      columnAtLongitude(frame.longitude - westX / metresPerDegreeLongitude),
-    );
-    const highColumn = clampTile(
-      columnAtLongitude(frame.longitude - eastX / metresPerDegreeLongitude),
-    );
     const lowRow = clampTile(rowAtLatitude(frame.latitude + northZ / METRES_PER_DEGREE_LATITUDE));
     const highRow = clampTile(rowAtLatitude(frame.latitude + southZ / METRES_PER_DEGREE_LATITUDE));
 
     const touched: { tile: TileId; key: number }[] = [];
     for (let y = lowRow; y <= highRow; y++) {
+      const band = tileBox(frame, { z: 15, x: 0, y });
+      const reach = xReach(a, b, band.minZ - halfWidthMetres, band.maxZ + halfWidthMetres);
+      if (reach === null) continue;
+      const lowColumn = clampTile(
+        columnAtLongitude(
+          frame.longitude - (reach.max + halfWidthMetres) / metresPerDegreeLongitude,
+        ),
+      );
+      const highColumn = clampTile(
+        columnAtLongitude(
+          frame.longitude - (reach.min - halfWidthMetres) / metresPerDegreeLongitude,
+        ),
+      );
       for (let x = lowColumn; x <= highColumn; x++) {
         const id = y * TILES_AT_Z15 + x;
         if (seen.has(id)) continue;
@@ -86,6 +94,30 @@ export function corridorTileCover(
     along += length;
   }
   return cover;
+}
+
+/** The `x` extent of the part of segment `ab` with `z` in `[lowZ, highZ]`, or `null`. */
+function xReach(
+  a: Point,
+  b: Point,
+  lowZ: number,
+  highZ: number,
+): { min: number; max: number } | null {
+  const dz = b.z - a.z;
+  let t0 = 0;
+  let t1 = 1;
+  if (dz === 0) {
+    if (a.z < lowZ || a.z > highZ) return null;
+  } else {
+    const p = (lowZ - a.z) / dz;
+    const q = (highZ - a.z) / dz;
+    t0 = Math.max(0, Math.min(p, q));
+    t1 = Math.min(1, Math.max(p, q));
+    if (t0 > t1) return null;
+  }
+  const x0 = a.x + t0 * (b.x - a.x);
+  const x1 = a.x + t1 * (b.x - a.x);
+  return { min: Math.min(x0, x1), max: Math.max(x0, x1) };
 }
 
 function clampTile(fractional: number): number {
