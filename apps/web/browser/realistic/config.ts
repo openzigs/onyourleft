@@ -21,7 +21,7 @@
  * | `at` | hold the rider still this far along the route, for a screenshot | metres |
  * | `panel` | the on-screen controls | `1` (default), `0` for a clean screenshot |
  * | `layers` | layers switched OFF, for their share of the GPU (#616) | `-sky`, `-surfaces`, `-vegetation`, `-impostors`, `-structures`, `-water`, `-riders`, `-grounding`, comma-separated; default none |
- * | `levers` | #619's levers switched OFF, for a before/after pair at one rung — since #622 its air and since #1274 its crag, for a by-eye pair, since #1283 the generated trees and #1294 the generated firs, for both, and since #1523 the ground blend and the road wear, for a cost pair | `-foliage-order`, `-texture-bias`, `-air`, `-crag`, `-generated-trees`, `-generated-conifers`, `-ground-blend`, `-road-wear`, comma-separated; default none |
+ * | `levers` | #619's levers switched OFF, for a before/after pair at one rung — since #622 its air and since #1274 its crag, for a by-eye pair, since #1283 the generated trees and #1294 the generated firs, for both, since #1523 the ground blend and the road wear, for a cost pair, and #1523's bounds on both, for a before/after pair | `-foliage-order`, `-texture-bias`, `-air`, `-crag`, `-generated-trees`, `-generated-conifers`, `-ground-blend`, `-road-wear`, `-surface-bounds`, comma-separated; default none |
  * | `facing` | which way the route is turned, relative to the sun (#702, `route.ts` §"Which way it faces") | `sun`, `away`; default the route unturned, which looks 110° to 160° away from the sun |
  *
  * ⚠️ **Unknown parameters and values are REFUSED**, as #457's page refused
@@ -101,9 +101,14 @@ export type Layer = (typeof LAYERS)[number];
  *   roughness and relief — no wheel track, no dust, no patch loop in its
  *   program. The tablet's cost pair for the wear, which `game-harness.ts`'s
  *   wear switch is not: that one zeroes uniforms and keeps the loop.
+ * - `surface-bounds` — #1523's fix to both: the wear's patch loop only on a
+ *   triangle a patch can reach and the paint's noise only on paint, and the
+ *   ground blend's derivatives taken once. Off builds both shaders as they
+ *   were before it, which draws the same picture (the browser gate holds the
+ *   two to one) — the tablet's before/after pair for the fix on one build.
  *
- * Neither of #1523's changes anything a rider can reach: the product always
- * builds both, and only this page's URL turns one off.
+ * None of #1523's changes anything a rider can reach: the product always
+ * builds both surfaces, bounded, and only this page's URL turns one off.
  */
 export const LEVERS = [
   'air',
@@ -113,6 +118,7 @@ export const LEVERS = [
   'generated-trees',
   'ground-blend',
   'road-wear',
+  'surface-bounds',
   'texture-bias',
 ] as const;
 
@@ -233,14 +239,16 @@ export function treesWithLevers(leversOff: readonly Lever[]): RealisticTrees {
 }
 
 /**
- * Which of the realistic surfaces' shaders this run builds — #1523: both, as
- * the product does, unless `ground-blend` or `road-wear` is off.
+ * Which of the realistic surfaces' shaders this run builds — #1523: both,
+ * bounded, as the product does, unless `ground-blend`, `road-wear` or
+ * `surface-bounds` is off.
  * `realistic-harness.ts` hands it to `three-renderer.ts` §`realisticSurfacesOf`.
  */
 export function surfacesWithLevers(leversOff: readonly Lever[]): RealisticSurfaces {
   return {
     groundBlend: !leversOff.includes('ground-blend'),
     roadWear: !leversOff.includes('road-wear'),
+    bounded: !leversOff.includes('surface-bounds'),
   };
 }
 

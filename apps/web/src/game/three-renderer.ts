@@ -406,6 +406,7 @@ import {
   WHEEL_TRACK_RELIEF,
   WHEEL_TRACK_ROUGHNESS,
   writeRoadAcross,
+  writeRoadPatchReach,
 } from './road-wear';
 import {
   REALISTIC_GROUND_BLOBS,
@@ -9120,11 +9121,22 @@ function variantOf(variant: number, shapes: number): number {
  * the wear's uniforms and leaves every fragment running the loop. Only the
  * owner's page passes `false` (`realistic/config.ts` §`LEVERS`, `road-wear`);
  * the product always draws the wear.
+ *
+ * ## `bounded` — what the wear costs a fragment, #1523
+ *
+ * `true`, the product: a fragment runs the patch loop only on a triangle a
+ * patch can reach (`road-wear.ts` §`writeRoadPatchReach`, read as a `flat`
+ * varying), tests only those patches, and draws the paint's fading noise only
+ * where there is paint. Every term it skips added exactly nought, so the
+ * picture is the one `false` draws. `false` is the wear as #628 and #879 drew
+ * it — all eight patches and the noise on every road fragment: the browser
+ * gate's reference and the owner's `-surface-bounds` before/after pair.
  */
 export function photographicRoadMaterial(
   colour: Texture,
   normal: Texture,
   worn = true,
+  bounded = true,
 ): MeshStandardMaterial {
   const material = constructed(
     new MeshStandardMaterial({
@@ -9141,6 +9153,7 @@ export function photographicRoadMaterial(
     patches: new Float32Array(MAXIMUM_ROAD_PATCHES * ROAD_PATCH_FLOATS),
     on: 1,
     colour: 1,
+    bounded,
   };
   if (worn) ROAD_WEAR.set(material, wear);
   material.onBeforeCompile = (shader) => {
@@ -9165,20 +9178,20 @@ export function photographicRoadMaterial(
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
-        `#include <common>\nuniform float tileMetres;\n${worn ? ROAD_WEAR_VERTEX_PARS : ''}`,
+        `#include <common>\nuniform float tileMetres;\n${worn ? roadWearVertexPars(bounded) : ''}`,
       )
       .replace(
         '#include <uv_vertex>',
-        `#include <uv_vertex>\n${PLANAR_UV}\n${worn ? ROAD_WEAR_VERTEX : ''}`,
+        `#include <uv_vertex>\n${PLANAR_UV}\n${worn ? roadWearVertex(bounded) : ''}`,
       );
     shader.fragmentShader = shader.fragmentShader
       .replace(
         '#include <common>',
-        `#include <common>\n${worn ? `${DETAIL_COMMON}\n${ROAD_WEAR_FRAGMENT_PARS}` : ''}`,
+        `#include <common>\n${worn ? `${DETAIL_COMMON}\n${roadWearFragmentPars(bounded)}` : ''}`,
       )
       .replace(
         '#include <color_fragment>',
-        `#include <color_fragment>\n${worn ? ROAD_WEAR_FRAGMENT : ''}`,
+        `#include <color_fragment>\n${worn ? roadWearFragment(bounded) : ''}`,
       )
       .replace(
         '#include <roughnessmap_fragment>',
@@ -9224,7 +9237,11 @@ material.specularF90 *= ${ROAD_SHEEN.toFixed(3)};`,
       );
   };
   material.customProgramCacheKey = () =>
-    worn ? 'oyl-photographic-road-worn' : 'oyl-photographic-road';
+    worn
+      ? bounded
+        ? 'oyl-photographic-road-worn'
+        : 'oyl-photographic-road-worn-unbounded'
+      : 'oyl-photographic-road';
   // #619 lever 2 and #622's air, chained after the assignment above.
   return withAtmosphere(withTextureLodBias(material));
 }
@@ -9237,30 +9254,48 @@ material.specularF90 *= ${ROAD_SHEEN.toFixed(3)};`,
  */
 const ROAD_WEAR = new WeakMap<
   Material,
-  { readonly patches: Float32Array; on: number; colour: number }
+  {
+    readonly patches: Float32Array;
+    on: number;
+    colour: number;
+    /** #1523: whether the shader reads {@link ROAD_REACH_ATTRIBUTE}. */
+    readonly bounded: boolean;
+  }
 >();
 
 /** The road's across-position attribute's name — #628. @see writeRoadAcross */
 const ROAD_ACROSS_ATTRIBUTE = 'oylAcross';
 
-const ROAD_WEAR_VERTEX_PARS = /* glsl */ `
+/** Which patches can reach a vertex's triangles — #1523. @see writeRoadPatchReach */
+const ROAD_REACH_ATTRIBUTE = 'oylPatchReach';
+
+function roadWearVertexPars(bounded: boolean): string {
+  return /* glsl */ `
 attribute float ${ROAD_ACROSS_ATTRIBUTE};
 varying float vRoadAcross;
 varying vec2 vRoadWorld;
+${bounded ? `attribute float ${ROAD_REACH_ATTRIBUTE};\nflat varying float vRoadReach;` : ''}
 `;
+}
 
-const ROAD_WEAR_VERTEX = /* glsl */ `
+function roadWearVertex(bounded: boolean): string {
+  return /* glsl */ `
 vRoadAcross = ${ROAD_ACROSS_ATTRIBUTE};
 vRoadWorld = (modelMatrix * vec4(position, 1.0)).xz;
+${bounded ? `vRoadReach = ${ROAD_REACH_ATTRIBUTE};` : ''}
 `;
+}
 
-const ROAD_WEAR_FRAGMENT_PARS = /* glsl */ `
+function roadWearFragmentPars(bounded: boolean): string {
+  return /* glsl */ `
 uniform vec4 roadPatches[${String(MAXIMUM_ROAD_PATCHES * 2)}];
 uniform float roadWear;
 uniform float roadWearColour;
 varying float vRoadAcross;
 varying vec2 vRoadWorld;
+${bounded ? 'flat varying float vRoadReach;' : ''}
 `;
+}
 
 /**
  * The wear — #628, after `color_fragment`, so the vertex colour is known: a
@@ -9270,7 +9305,41 @@ varying vec2 vRoadWorld;
  * §`MAXIMUM_WEAR_SHARE` — the arithmetic that keeps the gradient cue.
  * `oylTrackShare` is read again by the roughness and the normal below it.
  */
-const ROAD_WEAR_FRAGMENT = /* glsl */ `
+function roadWearFragment(bounded: boolean): string {
+  // One patch's term — the same text bounded or not, so a patch the bound
+  // keeps is added exactly as it was.
+  const patch = /* glsl */ `
+    vec4 oylPlace = roadPatches[oylAt * 2];
+    vec4 oylSize = roadPatches[oylAt * 2 + 1];
+    vec2 oylFrom = vRoadWorld - oylPlace.xy;
+    float oylAlong = abs(dot(oylFrom, oylPlace.zw));
+    float oylAcross = abs(dot(oylFrom, vec2(-oylPlace.w, oylPlace.z)));
+    float oylInside = (1.0 - smoothstep(oylSize.x - 0.08, oylSize.x, oylAlong))
+      * (1.0 - smoothstep(oylSize.y - 0.08, oylSize.y, oylAcross));
+    oylWorn += oylSize.z * oylInside * step(0.0001, oylSize.x) * roadWear;`;
+  const loop = bounded
+    ? /* glsl */ `
+  // #1523: only the patches that can reach this triangle, and on a triangle
+  // none can, no loop. @see writeRoadPatchReach
+  int oylReach = int(vRoadReach + 0.5);
+  if (oylReach != 0) {
+    for (int oylAt = 0; oylAt < ${String(MAXIMUM_ROAD_PATCHES)}; oylAt += 1) {
+      if ((oylReach & (1 << oylAt)) == 0) continue;
+${patch}
+    }
+  }`
+    : /* glsl */ `
+  for (int oylAt = 0; oylAt < ${String(MAXIMUM_ROAD_PATCHES)}; oylAt += 1) {
+${patch}
+  }`;
+  const faded = /* glsl */ `1.0 - ${glslFloat(PAINT_WEAR)} * roadWear * roadWearColour
+    * smoothstep(0.35, 0.85, oylNoise(vRoadWorld * 0.13) * 0.7 + oylNoise(vRoadWorld * 1.7) * 0.3)`;
+  // #1523: the noise only where there is paint — elsewhere `mix` takes none
+  // of it, so it is exactly the carriageway either way.
+  const fading = bounded
+    ? `float oylFaded = 1.0;\n  if (oylPaint > 0.0) oylFaded = ${faded};`
+    : `float oylFaded = ${faded};`;
+  return /* glsl */ `
 float oylTrackShare = 0.0;
 {
   float oylTrack = 0.0;
@@ -9282,24 +9351,15 @@ ${WHEEL_TRACK_OFFSETS_METRES.map(
   float oylWorn = ${glslFloat(WHEEL_TRACK_LIGHTEN)} * oylTrack;
   oylWorn += ${glslFloat(DUST_LIGHTEN)} * roadWear
     * smoothstep(${glslFloat(CARRIAGEWAY_HALF_METRES - DUST_BAND_METRES)}, ${glslFloat(CARRIAGEWAY_HALF_METRES)}, abs(vRoadAcross));
-  for (int oylAt = 0; oylAt < ${String(MAXIMUM_ROAD_PATCHES)}; oylAt += 1) {
-    vec4 oylPlace = roadPatches[oylAt * 2];
-    vec4 oylSize = roadPatches[oylAt * 2 + 1];
-    vec2 oylFrom = vRoadWorld - oylPlace.xy;
-    float oylAlong = abs(dot(oylFrom, oylPlace.zw));
-    float oylAcross = abs(dot(oylFrom, vec2(-oylPlace.w, oylPlace.z)));
-    float oylInside = (1.0 - smoothstep(oylSize.x - 0.08, oylSize.x, oylAlong))
-      * (1.0 - smoothstep(oylSize.y - 0.08, oylSize.y, oylAcross));
-    oylWorn += oylSize.z * oylInside * step(0.0001, oylSize.x) * roadWear;
-  }
+${loop}
   float oylCarriageway = 1.0 + roadWearColour * clamp(oylWorn, ${glslFloat(-MAXIMUM_WEAR_SHARE)}, ${glslFloat(MAXIMUM_WEAR_SHARE)});
   float oylPaint = smoothstep(0.35, 0.55, dot(vColor.rgb, vec3(0.2126, 0.7152, 0.0722)));
-  float oylFaded = 1.0 - ${glslFloat(PAINT_WEAR)} * roadWear * roadWearColour
-    * smoothstep(0.35, 0.85, oylNoise(vRoadWorld * 0.13) * 0.7 + oylNoise(vRoadWorld * 1.7) * 0.3);
+  ${fading}
   diffuseColor.rgb *= mix(oylCarriageway, oylFaded, oylPaint);
   oylTrackShare = oylTrack * (1.0 - oylPaint);
 }
 `;
+}
 
 /**
  * How much of its specular reflection the photographic road keeps: **0.25** —
@@ -9385,8 +9445,15 @@ vOylGroundUp = normalize(mat3(modelMatrix) * normal).y;
  * derivative inside non-uniform control flow is undefined in GLSL — and scaled
  * by the rung's LOD bias as `withTextureLodBias` would have (#619 lever 2).
  * The grass is sampled everywhere, as before.
+ *
+ * ⚠️ **#1523: the derivatives are taken ONCE, bounded** — each surface's
+ * pair where the shares are, which the normal then reads rather than taking
+ * the same three pairs again: six derivatives where there were twelve.
+ * Unbounded — the browser gate's reference — is the twelve as #627 and #1274
+ * took them. @see groundDerivatives
  */
-const GROUND_BLEND_FRAGMENT_PARS = /* glsl */ `
+function groundBlendFragmentPars(bounded: boolean): string {
+  return /* glsl */ `
 uniform sampler2D vergeMap;
 uniform sampler2D vergeNormalMap;
 uniform sampler2D rockMap;
@@ -9404,21 +9471,13 @@ vec3 oylVergeTexel = vec3(1.0);
 vec3 oylRockTexel = vec3(1.0);
 vec3 oylCragTexel = vec3(1.0);
 vec3 oylGroundWorld = vec3(1.0);
+${bounded ? GROUND_DERIVATIVE_GLOBALS : ''}
 vec2 oylVergeUv() { return vOylGround.xz / ${glslFloat(REALISTIC_SURFACES.verge.tileMetres)}; }
 vec2 oylRockUv() { return vOylGround.xz / ${glslFloat(REALISTIC_SURFACES.rock.tileMetres)}; }
 vec2 oylCragUv() { return vOylGround.xz / ${glslFloat(REALISTIC_SURFACES.crag.tileMetres)}; }
 vec3 oylGroundNormal(vec2 grassUv) {
   vec3 grass = texture2D(normalMap, grassUv).xyz;
-  float oylBias = exp2(oylTextureLodBias);
-  vec2 vergeUv = oylVergeUv();
-  vec2 vergeDx = dFdx(vergeUv) * oylBias;
-  vec2 vergeDy = dFdy(vergeUv) * oylBias;
-  vec2 rockUv = oylRockUv();
-  vec2 rockDx = dFdx(rockUv) * oylBias;
-  vec2 rockDy = dFdy(rockUv) * oylBias;
-  vec2 cragUv = oylCragUv();
-  vec2 cragDx = dFdx(cragUv) * oylBias;
-  vec2 cragDy = dFdy(cragUv) * oylBias;
+${groundDerivatives(bounded, false)}
   vec3 texel = grass;
   if (oylVergeShare > 0.0) {
     texel = mix(texel, textureGrad(vergeNormalMap, vergeUv, vergeDx, vergeDy).xyz, oylVergeShare);
@@ -9435,6 +9494,49 @@ vec3 oylGroundNormal(vec2 grassUv) {
   return texel * (1.0 - oylRockShare) + stone;
 }
 `;
+}
+
+/** The surfaces' coordinates' names, and the functions that give them. */
+const GROUND_BLEND_SURFACES = [
+  ['verge', 'oylVergeUv', 'oylVerge'],
+  ['rock', 'oylRockUv', 'oylRock'],
+  ['crag', 'oylCragUv', 'oylCrag'],
+] as const;
+
+/** Where the shares leave each surface's derivative pair for the normal — #1523. */
+const GROUND_DERIVATIVE_GLOBALS = GROUND_BLEND_SURFACES.map(
+  ([, , global]) => `vec2 ${global}Dx = vec2(0.0);\nvec2 ${global}Dy = vec2(0.0);`,
+).join('\n');
+
+/**
+ * Each surface's coordinates and derivatives, for {@link groundBlendFragmentPars}.
+ * Bounded, the shares (`first`) take each surface's pair — outside any branch,
+ * by the very expression they always used, so the pair is the same to the
+ * bit — and leave it in {@link GROUND_DERIVATIVE_GLOBALS}, which the normal
+ * reads instead of taking its own. Unbounded, each reader takes its own, as
+ * before #1523.
+ */
+function groundDerivatives(bounded: boolean, first: boolean): string {
+  const taken = !bounded || first;
+  const lines = taken ? ['float oylBias = exp2(oylTextureLodBias);'] : [];
+  for (const [name, uv, global] of GROUND_BLEND_SURFACES) {
+    lines.push(`vec2 ${name}Uv = ${uv}();`);
+    if (taken) {
+      lines.push(`vec2 ${name}Dx = dFdx(${name}Uv) * oylBias;`);
+      lines.push(`vec2 ${name}Dy = dFdy(${name}Uv) * oylBias;`);
+    }
+    if (bounded && first) {
+      lines.push(`${global}Dx = ${name}Dx;`);
+      lines.push(`${global}Dy = ${name}Dy;`);
+    }
+    if (bounded && !first) {
+      lines.push(`vec2 ${name}Dx = ${global}Dx;`);
+      lines.push(`vec2 ${name}Dy = ${global}Dy;`);
+    }
+  }
+  const indent = first ? '    ' : '  ';
+  return lines.map((line) => `${indent}${line}`).join('\n');
+}
 
 /**
  * The shares, and the two surfaces' colours — inside the ground's map block,
@@ -9442,7 +9544,8 @@ vec3 oylGroundNormal(vec2 grassUv) {
  * photograph over its own mean times the world's colour (#627: the world's
  * per-route colour still leads).
  */
-const GROUND_BLEND_SHARES_GLSL = /* glsl */ `
+function groundBlendShares(bounded: boolean): string {
+  return /* glsl */ `
   oylGroundWorld = diffuseColor.rgb;
   float oylFromEdge = abs(vFields.y) - ${glslFloat(ROAD_EDGE_METRES)};
   float oylVerge = (1.0 - smoothstep(${glslFloat(VERGE_BLEND_METRES[0])}, ${glslFloat(VERGE_BLEND_METRES[1])}, oylFromEdge)) * groundShares.x;
@@ -9457,16 +9560,7 @@ const GROUND_BLEND_SHARES_GLSL = /* glsl */ `
   oylCragShare = oylRock * groundShares.w;
   oylVergeShare = oylVerge * (1.0 - oylRockShare);
   {
-    float oylBias = exp2(oylTextureLodBias);
-    vec2 vergeUv = oylVergeUv();
-    vec2 vergeDx = dFdx(vergeUv) * oylBias;
-    vec2 vergeDy = dFdy(vergeUv) * oylBias;
-    vec2 rockUv = oylRockUv();
-    vec2 rockDx = dFdx(rockUv) * oylBias;
-    vec2 rockDy = dFdy(rockUv) * oylBias;
-    vec2 cragUv = oylCragUv();
-    vec2 cragDx = dFdx(cragUv) * oylBias;
-    vec2 cragDy = dFdy(cragUv) * oylBias;
+${groundDerivatives(bounded, true)}
     if (oylVergeShare > 0.0) {
       oylVergeTexel = textureGrad(vergeMap, vergeUv, vergeDx, vergeDy).rgb
         / max(textureLod(vergeMap, vec2(0.5), 16.0).rgb, vec3(1e-3));
@@ -9481,6 +9575,7 @@ const GROUND_BLEND_SHARES_GLSL = /* glsl */ `
     }
   }
 `;
+}
 
 /** Mixed in over the grass and its patchwork, times the landform's own vertex colour. */
 const GROUND_BLEND_MIX = /* glsl */ `
@@ -9512,6 +9607,8 @@ export function photographicGroundMaterial(
   fieldSpan: { value: number },
   fieldCount: { value: number },
   blend: GroundBlendMaps = { treeLine: { value: NO_TREE_LINE } },
+  /** #1523: the derivatives once (the product) or as before. @see groundBlendFragmentPars */
+  bounded = true,
 ): MeshStandardMaterial {
   const material = constructed(
     new MeshStandardMaterial({
@@ -9552,7 +9649,7 @@ export function photographicGroundMaterial(
       shader.fragmentShader = shader.fragmentShader
         .replace(
           '#include <normalmap_pars_fragment>',
-          `#include <normalmap_pars_fragment>\n${GROUND_BLEND_FRAGMENT_PARS}`,
+          `#include <normalmap_pars_fragment>\n${groundBlendFragmentPars(bounded)}`,
         )
         .replace(
           '#include <normal_fragment_maps>',
@@ -9574,7 +9671,7 @@ export function photographicGroundMaterial(
       /* glsl */ `
 #ifdef USE_MAP
 {
-${blended ? GROUND_BLEND_SHARES_GLSL : ''}
+${blended ? groundBlendShares(bounded) : ''}
   vec3 oylNear = texture2D(map, vMapUv).rgb;
   vec3 oylFar = texture2D(map, vMapUv * 0.111 + vec2(0.37, 0.61)).rgb;
   float oylFarShare = smoothstep(8.0, 120.0, -vViewPosition.z);
@@ -9587,7 +9684,11 @@ ${blended ? GROUND_BLEND_SHARES_GLSL : ''}
     );
   };
   material.customProgramCacheKey = () =>
-    blended ? 'oyl-photographic-ground-blended' : 'oyl-photographic-ground';
+    blended
+      ? bounded
+        ? 'oyl-photographic-ground-blended'
+        : 'oyl-photographic-ground-blended-unbounded'
+      : 'oyl-photographic-ground';
   // #460's patchwork, chained after the photograph rather than replacing it,
   // and #619 lever 2's bias after both.
   return withAtmosphere(
@@ -11328,11 +11429,12 @@ class RealisticDrawing {
   setSurfaces(surfaces: RealisticSurfaces): void {
     const was = this.#surfaces;
     this.#surfaces = surfaces;
-    if (surfaces.roadWear !== was.roadWear) {
+    const rebound = surfaces.bounded !== was.bounded;
+    if (surfaces.roadWear !== was.roadWear || rebound) {
       this.#road.dispose();
       this.#road = this.#roadMaterial();
     }
-    if (surfaces.groundBlend !== was.groundBlend) {
+    if (surfaces.groundBlend !== was.groundBlend || rebound) {
       this.#ground.dispose();
       this.#ground = this.#groundMaterial();
     }
@@ -11340,7 +11442,12 @@ class RealisticDrawing {
 
   #roadMaterial(): MeshStandardMaterial {
     const { road } = this.#world;
-    return photographicRoadMaterial(road.colour, road.normal, this.#surfaces.roadWear);
+    return photographicRoadMaterial(
+      road.colour,
+      road.normal,
+      this.#surfaces.roadWear,
+      this.#surfaces.bounded,
+    );
   }
 
   #groundMaterial(): MeshStandardMaterial {
@@ -11358,6 +11465,7 @@ class RealisticDrawing {
       this.#surfaces.groundBlend
         ? { verge: world.verge, rock: world.rock, crag: world.crag, treeLine: fields.treeLine }
         : { treeLine: fields.treeLine },
+      this.#surfaces.bounded,
     );
   }
 
@@ -11989,14 +12097,26 @@ export function groundBlendOf(
  * (with #879's). Each `false` builds that material WITHOUT its shader, as it
  * was before: the ground as #425's photograph and #460's patchwork, the road
  * with no wear. @see photographicRoadMaterial
+ *
+ * `bounded` is #1523's fix and not a layer: `true`, the product, draws the
+ * same picture for less — the wear's patch loop only where a patch can reach
+ * and the ground's derivatives taken once. `false` builds both shaders as
+ * they were before it: the browser gate's reference for "the same picture",
+ * and the owner's `-surface-bounds` before/after pair on the tablet.
+ * @see photographicRoadMaterial @see photographicGroundMaterial
  */
 export interface RealisticSurfaces {
   readonly groundBlend: boolean;
   readonly roadWear: boolean;
+  readonly bounded: boolean;
 }
 
-/** What the product draws: both. */
-const REALISTIC_SURFACES_DRAWN: RealisticSurfaces = { groundBlend: true, roadWear: true };
+/** What the product draws: both, bounded. */
+const REALISTIC_SURFACES_DRAWN: RealisticSurfaces = {
+  groundBlend: true,
+  roadWear: true,
+  bounded: true,
+};
 
 /**
  * Builds the realistic road and ground with `surfaces`' shaders, in this view
@@ -13290,6 +13410,12 @@ class ThreeGameView implements GameView {
         ROAD_ACROSS_ATTRIBUTE,
         new BufferAttribute(new Float32Array(this.#vertexCapacity / 3), 1),
       );
+      // #1523: which patches can reach each vertex's triangles, which only the
+      // bounded wear reads. @see writeRoadPatchReach
+      this.#roadGeometry.setAttribute(
+        ROAD_REACH_ATTRIBUTE,
+        new BufferAttribute(new Float32Array(this.#vertexCapacity / 3), 1),
+      );
     }
     if (indices.length > this.#indexCapacity) {
       this.#indexCapacity = indices.length;
@@ -13314,7 +13440,12 @@ class ThreeGameView implements GameView {
       const across = this.#roadGeometry.getAttribute(ROAD_ACROSS_ATTRIBUTE) as BufferAttribute;
       writeRoadAcross(frame.corridor, across.array as Float32Array);
       across.needsUpdate = true;
-      roadPatchUniforms(frame.corridor, wear.patches);
+      const patches = roadPatchUniforms(frame.corridor, wear.patches);
+      if (wear.bounded) {
+        const reach = this.#roadGeometry.getAttribute(ROAD_REACH_ATTRIBUTE) as BufferAttribute;
+        writeRoadPatchReach(frame.corridor, wear.patches, patches, reach.array as Float32Array);
+        reach.needsUpdate = true;
+      }
     }
     // Draw only the triangles this frame actually has, so a shorter corridor
     // does not draw stale ones left in the buffer from a longer one.

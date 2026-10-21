@@ -74,31 +74,40 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     expect(() => parseConfig('?levers=texture-bias')).toThrow(/levers is a comma-separated list/);
   });
 
-  it('builds both surfaces’ shaders, as the product does, unless a #1523 lever takes one out', () => {
+  it('builds both surfaces’ shaders, bounded, as the product does, unless a #1523 lever takes one out', () => {
     expect(LEVERS).toContain('ground-blend');
     expect(LEVERS).toContain('road-wear');
+    expect(LEVERS).toContain('surface-bounds');
+    const drawn = { groundBlend: true, roadWear: true, bounded: true };
     // No lever is the product, and no OTHER lever touches either surface.
-    expect(surfacesWithLevers([])).toEqual({ groundBlend: true, roadWear: true });
-    expect(surfacesWithLevers(parseConfig('?levers=-air,-crag,-texture-bias').leversOff)).toEqual({
-      groundBlend: true,
-      roadWear: true,
-    });
-    // Each lever its own surface, and only that one.
+    expect(surfacesWithLevers([])).toEqual(drawn);
+    expect(surfacesWithLevers(parseConfig('?levers=-air,-crag,-texture-bias').leversOff)).toEqual(
+      drawn,
+    );
+    // Each lever its own setting, and only that one.
     expect(surfacesWithLevers(parseConfig('?levers=-ground-blend').leversOff)).toEqual({
+      ...drawn,
       groundBlend: false,
-      roadWear: true,
     });
     expect(surfacesWithLevers(parseConfig('?levers=-road-wear').leversOff)).toEqual({
-      groundBlend: true,
+      ...drawn,
       roadWear: false,
     });
+    expect(surfacesWithLevers(parseConfig('?levers=-surface-bounds').leversOff)).toEqual({
+      ...drawn,
+      bounded: false,
+    });
     expect(surfacesWithLevers(parseConfig('?levers=-road-wear,-ground-blend').leversOff)).toEqual({
+      ...drawn,
       groundBlend: false,
       roadWear: false,
     });
     // And the URL round-trips, so a tablet row names the program it measured.
     expect(configQuery(parseConfig('?levers=-road-wear,-ground-blend'))).toBe(
       `?levers=${encodeURIComponent('-ground-blend,-road-wear')}`,
+    );
+    expect(configQuery(parseConfig('?levers=-surface-bounds'))).toBe(
+      `?levers=${encodeURIComponent('-surface-bounds')}`,
     );
   });
 

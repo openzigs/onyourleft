@@ -162,6 +162,7 @@ import {
   logosShownOf,
   wordmarkOrientationOf,
   type WordmarkOrientation,
+  type RealisticSurfaces,
   waterFresnelOf,
   waterReflectsOf,
   remoteRiderControlOf,
@@ -4522,6 +4523,8 @@ export interface RealisticMeasurement {
   readonly groundBlend: GroundBlendMeasurement;
   /** #1523: the road's and the ground's programs, each lever off and none. @see surfaceProgramProbe */
   readonly surfacePrograms: SurfaceProgramMeasurement;
+  /** #1523: the bounded surfaces against the unbounded, read back. @see surfaceBoundsProbe */
+  readonly surfaceBounds: SurfaceBoundsMeasurement;
   /** #679: a finish gantry's banner, read, and what the gantries cost. @see gantryProbe */
   readonly gantry: GantryMeasurement;
   /** #966: the wordmark on the gate and a billboard, read back, realistic. @see logoProbe */
@@ -5251,7 +5254,7 @@ const NO_SURFACE_PROGRAMS: SurfaceProgramMeasurement = {
 /** @see SurfaceProgramMeasurement */
 function surfaceProgramProbe(view: GameView, frame: SceneFrame): SurfaceProgramMeasurement {
   const read = (groundBlend: boolean, roadWear: boolean): SurfaceUniforms => {
-    realisticSurfacesOf(view, { groundBlend, roadWear });
+    realisticSurfacesOf(view, { groundBlend, roadWear, bounded: true });
     view.render(frame);
     return realisticSurfaceUniformsOf(view) ?? NO_SURFACES;
   };
@@ -5261,6 +5264,146 @@ function surfaceProgramProbe(view: GameView, frame: SceneFrame): SurfaceProgramM
   // Back as the product builds them, for every probe after this one.
   read(true, true);
   return { measured: true, drawn, groundBlendOff, roadWearOff };
+}
+
+/**
+ * #1523 — one frame drawn four ways, each read back whole: as the product
+ * draws it (bounded), as it was drawn before the bounds (the reference), and
+ * the two controls, with `-road-wear` and with `-ground-blend`.
+ */
+export interface SurfaceBoundsFrame {
+  /** Whether the frame could be built at all. */
+  readonly drawn: boolean;
+  /** The largest difference in any channel of any pixel, bounded against the reference. */
+  readonly largest: number;
+  /** How many pixels differ from the reference in any channel at all, bounded. */
+  readonly differing: number;
+  /** How many pixels each control moves past {@link SURFACE_CONTROL_STEP} from the reference. */
+  readonly wearOff: number;
+  readonly blendOff: number;
+  /** How many pixels the frame has. */
+  readonly pixels: number;
+}
+
+/**
+ * #1523's two frames: the slanted level road with a patch lying
+ * {@link BOUNDS_PATCH_AHEAD} up it (the wear's loop, and the verge beside
+ * it), and #458's steep bank (the crag and the scree).
+ */
+export interface SurfaceBoundsMeasurement {
+  readonly measured: boolean;
+  /** How far along the road frame stands, and the patch it was chosen for. */
+  readonly distance: number;
+  readonly patchAhead: number;
+  readonly road: SurfaceBoundsFrame;
+  readonly bank: SurfaceBoundsFrame;
+}
+
+/**
+ * The summed channel change that counts a pixel as moved by a control: more
+ * than **3**, {@link groundBlendProbe}'s own step.
+ */
+const SURFACE_CONTROL_STEP = 3;
+
+/**
+ * How far up the road #1523's patch lies, in metres: between these two — near
+ * enough to cover rows of the frame. ⚠️ Measured: one 21 m up moved 8 pixels
+ * by one step when the bounds dropped it.
+ */
+const BOUNDS_PATCH_AHEAD: readonly [number, number] = [8, 14];
+
+/**
+ * The least tone #1523's patch may have, as a share: **0.025** of the
+ * ±0.04 a patch can be, so dropping it moves the pixels it covers.
+ */
+const BOUNDS_PATCH_TONE = 0.025;
+
+const NO_BOUNDS_FRAME: SurfaceBoundsFrame = {
+  drawn: false,
+  largest: 0,
+  differing: 0,
+  wearOff: 0,
+  blendOff: 0,
+  pixels: 0,
+};
+
+const NO_SURFACE_BOUNDS: SurfaceBoundsMeasurement = {
+  measured: false,
+  distance: 0,
+  patchAhead: 0,
+  road: NO_BOUNDS_FRAME,
+  bank: NO_BOUNDS_FRAME,
+};
+
+/** @see SurfaceBoundsMeasurement */
+function surfaceBoundsProbe(
+  view: GameView,
+  gl: WebGL2RenderingContext,
+  canvas: HTMLCanvasElement,
+  riding: (profile: ReturnType<typeof northRoute>, distance: number) => SceneFrame,
+): SurfaceBoundsMeasurement {
+  const whole = (frame: SceneFrame, surfaces: RealisticSurfaces): Uint8Array => {
+    realisticSurfacesOf(view, surfaces);
+    view.render(frame);
+    view.render(frame);
+    return readRegion(gl, 0, 0, canvas.width, canvas.height);
+  };
+  const product: RealisticSurfaces = { groundBlend: true, roadWear: true, bounded: true };
+  const read = (frame: SceneFrame | undefined): SurfaceBoundsFrame => {
+    if (frame === undefined) return NO_BOUNDS_FRAME;
+    const reference = whole(frame, { ...product, bounded: false });
+    const wearOff = whole(frame, { ...product, roadWear: false });
+    const blendOff = whole(frame, { ...product, groundBlend: false });
+    // Last, so every probe after this one draws the product's surfaces.
+    const bounded = whole(frame, product);
+    let largest = 0;
+    let differing = 0;
+    let wearMoved = 0;
+    let blendMoved = 0;
+    const moved = (other: Uint8Array, at: number): boolean =>
+      Math.abs((other[at] ?? 0) - (reference[at] ?? 0)) +
+        Math.abs((other[at + 1] ?? 0) - (reference[at + 1] ?? 0)) +
+        Math.abs((other[at + 2] ?? 0) - (reference[at + 2] ?? 0)) >
+      SURFACE_CONTROL_STEP;
+    for (let at = 0; at < reference.length; at += 4) {
+      let here = 0;
+      for (let channel = 0; channel < 3; channel += 1) {
+        here = Math.max(
+          here,
+          Math.abs((bounded[at + channel] ?? 0) - (reference[at + channel] ?? 0)),
+        );
+      }
+      largest = Math.max(largest, here);
+      if (here > 0) differing += 1;
+      if (moved(wearOff, at)) wearMoved += 1;
+      if (moved(blendOff, at)) blendMoved += 1;
+    }
+    return {
+      drawn: true,
+      largest,
+      differing,
+      wearOff: wearMoved,
+      blendOff: blendMoved,
+      pixels: reference.length / 4,
+    };
+  };
+  // The road: a patch BOUNDS_PATCH_AHEAD up it, found by the patches' own rule.
+  const route = slantedLevelRoute();
+  let distance = 400;
+  let patchAhead = 0;
+  for (; distance < 1_200; distance += 1) {
+    const cell = Math.floor((distance + BOUNDS_PATCH_AHEAD[1]) / PATCH_CELL_METRES);
+    const patch = patchInCell(cell);
+    if (patch === undefined || Math.abs(patch.tone) < BOUNDS_PATCH_TONE) continue;
+    const ahead = patch.distance - distance;
+    if (ahead >= BOUNDS_PATCH_AHEAD[0] && ahead <= BOUNDS_PATCH_AHEAD[1]) {
+      patchAhead = ahead;
+      break;
+    }
+  }
+  const road = read({ ...riding(route, distance), markers: [], scatter: [] });
+  const bank = read(steepBankFrame(riding));
+  return { measured: true, distance, patchAhead, road, bank };
 }
 
 /**
@@ -5279,13 +5422,14 @@ const BLEND_PROBE_DISTANCE = 520;
 const BLEND_PROBE_STAND_METRES = 14;
 const BLEND_PROBE_RISE_METRES = 4;
 
-/** @see GroundBlendMeasurement */
-function groundBlendProbe(
-  view: GameView,
-  gl: WebGL2RenderingContext,
-  canvas: HTMLCanvasElement,
+/**
+ * #458's hill seen from above its steepest ground near the rider — the frame
+ * {@link groundBlendProbe} reads, and #1523's {@link surfaceBoundsProbe} too;
+ * `undefined` where the hill has no ground past 45°.
+ */
+function steepBankFrame(
   riding: (profile: ReturnType<typeof northRoute>, distance: number) => SceneFrame,
-): GroundBlendMeasurement {
+): SceneFrame | undefined {
   const ridden = riding(hillRoute(), BLEND_PROBE_DISTANCE);
   // ⚠️ **Turned to face the steepest ground, and raised**, measured: from the
   // chase camera on this climb the only ground past 40° is 40 m or more off
@@ -5306,7 +5450,7 @@ function groundBlendProbe(
       steep = vertex;
     }
   }
-  if (steep < 0) return { ...NO_GROUND_BLEND, measured: true };
+  if (steep < 0) return undefined;
   const at = {
     x: mesh.vertices[steep * 3] ?? 0,
     y: mesh.vertices[steep * 3 + 1] ?? 0,
@@ -5317,7 +5461,7 @@ function groundBlendProbe(
   const toward = Math.hypot(towardX, towardZ) || 1;
   const headingX = towardX / toward;
   const headingZ = towardZ / toward;
-  const frame: SceneFrame = {
+  return {
     ...ridden,
     markers: [],
     scatter: [],
@@ -5331,6 +5475,17 @@ function groundBlendProbe(
       targetRoadY: at.y,
     },
   };
+}
+
+/** @see GroundBlendMeasurement */
+function groundBlendProbe(
+  view: GameView,
+  gl: WebGL2RenderingContext,
+  canvas: HTMLCanvasElement,
+  riding: (profile: ReturnType<typeof northRoute>, distance: number) => SceneFrame,
+): GroundBlendMeasurement {
+  const frame = steepBankFrame(riding);
+  if (frame === undefined) return { ...NO_GROUND_BLEND, measured: true };
   const bare: SceneFrame = {
     ...frame,
     terrain: {
@@ -6399,6 +6554,7 @@ const NO_REALISTIC: RealisticMeasurement = {
   roadWear: NO_ROAD_WEAR,
   groundBlend: NO_GROUND_BLEND,
   surfacePrograms: NO_SURFACE_PROGRAMS,
+  surfaceBounds: NO_SURFACE_BOUNDS,
   gantry: NO_GANTRY,
   logos: NO_LOGO,
   waterReflection: NO_WATER_REFLECTION,
@@ -7685,6 +7841,10 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   const surfacePrograms = surfaceProgramProbe(view, riding(level, 400));
   phaseEnds('realistic: surface programs — #1523');
 
+  // #1523: the bounds draw the picture the unbounded surfaces drew.
+  const surfaceBounds = surfaceBoundsProbe(view, gl, canvas, riding);
+  phaseEnds('realistic: surface bounds — #1523');
+
   // #679: the finish gantry, read, and what the gantries cost.
   const gantry = gantryProbe(view, gl, canvas, riding);
   phaseEnds('realistic: gantry — #679');
@@ -8156,6 +8316,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     roadWear,
     groundBlend,
     surfacePrograms,
+    surfaceBounds,
     gantry,
     logos,
     waterReflection,
