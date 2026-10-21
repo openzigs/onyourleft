@@ -189,6 +189,27 @@ const ANALYSIS_IMPORT_PATTERNS = [
 ];
 
 /**
+ * What `packages/map-features` may not name on top of the shared list (#1544):
+ * a renderer, a map library or a tile fetcher. It turns tile bytes it is handed
+ * into numbers and names no rendering library — `apps/web/src/game/` draws
+ * them, and #1539's one module outside `game/` fetches the bytes with its own
+ * `fetch`, where `no-network.test.ts` can see it (ADR 0054 D-2.5). `pmtiles`
+ * is listed because its built-in source fetches.
+ */
+const MAP_FEATURES_IMPORT_PATTERNS = [
+  {
+    group: ['three', 'three/*', 'maplibre-gl', 'maplibre-gl/*', 'pmtiles', 'pmtiles/*'],
+    message:
+      "packages/map-features is platform-free and names no rendering or map library (#1544): it decodes bytes it is handed. Drawing is apps/web/src/game/; the archive read is #1539's one module.",
+  },
+  {
+    group: ['@onyourleft/store', '@onyourleft/store/*'],
+    message:
+      "packages/map-features holds no map data (#1544): the ODbL corridor store is packages/store's, and it imports this package, never the reverse.",
+  },
+];
+
+/**
  * Globals a platform-isolated package may not name.
  *
  * The package's own `tsconfig.json` is the closure here — `lib: ["ES2024"]` with
@@ -785,6 +806,28 @@ export default tseslint.config(
     files: ['packages/analysis/**/*.test.ts'],
     rules: {
       '@typescript-eslint/no-restricted-imports': ['error', { patterns: ANALYSIS_IMPORT_PATTERNS }],
+    },
+  },
+
+  // --- packages/map-features decodes untrusted tiles, and is platform-free ----
+  // #1544, ADR 0054. A tile is decoded the same way in a browser, in the
+  // Android WebView and on an instance, so the package takes packages/domain's
+  // isolation; `packages/map-features/tsconfig.platform-free.json` is the
+  // closure and this is the fast duplicate. On top of it: no renderer, no map
+  // library, no tile fetcher and no store. The tests run under Node (they hash
+  // the fixtures and read the clock), so they take only the second half.
+  {
+    files: ['packages/map-features/**/*.{ts,tsx}'],
+    ignores: ['**/*.test.ts'],
+    rules: platformIsolation([...BLE_LIBRARY_IMPORT_PATTERNS, ...MAP_FEATURES_IMPORT_PATTERNS]),
+  },
+  {
+    files: ['packages/map-features/**/*.test.ts'],
+    rules: {
+      '@typescript-eslint/no-restricted-imports': [
+        'error',
+        { patterns: MAP_FEATURES_IMPORT_PATTERNS },
+      ],
     },
   },
 

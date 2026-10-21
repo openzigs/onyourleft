@@ -1,0 +1,17 @@
+{
+  // Every module the package ships, with no platform surface at all: `lib` is
+  // ES2024 and `types` is empty, as packages/domain does it
+  // (docs/agents/lint-boundaries.md §4d). A tile is decoded the same way in a
+  // browser, in the Android WebView and on an instance, so a `fetch`, a
+  // `document`, a `TextDecoder` or a `node:zlib` import here is a compile
+  // error: the package is handed bytes and never opens anything.
+  //
+  // Tests are left to tsconfig.json: they run under Node.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2024"],
+    "types": []
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/**/*.test.ts"]
+}
