@@ -363,11 +363,12 @@ refuses to undo 0007 while the log holds a single entry, and changes nothing.
 
 ## Moderation in a room
 
-A room is a group ride or a race (#784, #785). Moderation reaches into rooms in five ways (#789):
+A room is a group ride or a race (#784, #785). Moderation reaches into rooms in six ways (#789, #1516):
 
 | Who | Can | How | Written to the log as |
 |---|---|---|---|
 | A rider in the room | report another rider, by their seat, with one of three fixed reasons: an offensive display name, cheating, or something else about how they rode | `POST /v1/rooms/{roomId}/reports` | not logged: it is a report, and it reaches your queue with the room's id and the second of the ride it was made in. It counts toward the rider's 5 reports an hour. No screenshot and no position are ever sent |
+| A rider in a race, once it is over | block another rider from the race's result, by the row it names them on (#1516): the same block as *Block* above, for a rider the app knows only by name. Only a row the result names to them blocks anybody, so it never hands a rider an id they were not already shown a name for. The answer names nobody, and the blocked rider is not told | `POST /v1/rooms/{roomId}/blocks` | not logged: a block is the rider's own row |
 | The room itself | file a **plausibility flag** as a report, once for each power ceiling a rider breaches (ADR 0028 D-2) | the room's worker, on its own | not logged: a report with **no reporter**, the ceiling's duration and W/kg in it, and never the power trace |
 | The **host** of a private room (the rider who made it) | remove a rider from their own room | `POST /v1/rooms/{roomId}/remove`, by seat, with a reason | `host_remove_from_room`, with the room |
 | **You**, the moderator | remove a rider from **any** room, deciding a report if you name it, with a statement of reasons the rider is shown (#1384) | `POST /v1/moderation/rooms/{roomId}/athletes/{athleteId}/remove` | `remove_from_room`, with the room |
@@ -390,6 +391,10 @@ start a race and remove a rider, and can do nothing else.
 A rider reports from the ride itself (#789): *Follow* reaches another rider and puts their name on
 the screen, *Report* beside it opens the three reasons, and one press of a reason files it. That is
 two presses from the name. The app says whether it was sent; it never says what you did about it.
+A rider blocks another from a race's result (#1516): *Block* beside each name, and a question
+before anything is sent. It is not on the ride's screen, where a phone on its side has no room
+for it, and not in a group ride, which names nobody. The app cannot yet list or undo a rider's
+blocks: it never holds another rider's athlete id, so it has nothing to show them by.
 
 ## What you cannot do, yet
 
