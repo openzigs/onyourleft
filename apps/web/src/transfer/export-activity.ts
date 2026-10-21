@@ -24,8 +24,8 @@
  *
  * ## What each format can carry
  *
- * FIT carries every sample channel and total the store holds, but not a lap
- * row's figures or its kind (#1471). GPX and TCX each drop something, and
+ * FIT carries every sample channel and total the store holds, and which splits
+ * are laps (#1320, `fit-lap-mark.ts`), but not a lap row's figures (#1471). GPX and TCX each drop something, and
  * the codec states what — {@link GPX_LOSSY_CHANNELS}, {@link TCX_LOSSY_CHANNELS}
  * — rather than this file guessing. The view shows those lists beside the
  * format chooser, so the rider picks knowing the cost.
@@ -67,6 +67,7 @@ import type {
 } from '@onyourleft/store';
 
 import type { ActivityFileFormat } from './file-format';
+import { fitLapMarkDeclarations, fitLapMarkOf, type FitLapKind } from './fit-lap-mark';
 import type { DownloadableFile, TransferStore } from './store-port';
 
 /** @see LOSSY_CHANNELS */
@@ -79,10 +80,11 @@ const LAP_ASCENT = 'lap.ascent';
 const LAP_DISTANCE = 'lap.distance';
 
 /**
- * What a FIT lap does not carry of a lap row: its figures, its climb and its
- * kind (which splits are laps, and the part-lap mark). `packages/fit`'s profile
- * subset names no lap field for any of them: a field number goes in only with
- * a provenance ADR 0006 R2 admits, and finding one is #1471's.
+ * What a FIT lap does not carry of a lap row: its figures and its climb.
+ * `packages/fit`'s profile subset names no lap field for either: a field number
+ * goes in only with a provenance ADR 0006 R2 admits, and finding one is
+ * #1471's. Its kind (which splits are laps, and the part-lap mark) is carried
+ * since #1320, in a developer field of this client's own (`fit-lap-mark.ts`).
  * Named as TCX's lap names them, which is how GPX's codec list names them too.
  *
  * @see LOSSY_CHANNELS
@@ -94,8 +96,6 @@ const FIT_LAP_LOSSY_CHANNELS = [
   'lap.averagePower',
   'lap.maxPower',
   LAP_ASCENT,
-  'lap.intensity',
-  'lap.triggerMethod',
 ];
 
 /**
@@ -117,11 +117,12 @@ const FIT_LAP_LOSSY_CHANNELS = [
  * share of the ride's (`trackActivityOf`). GPX's codec list already names the
  * lap's distance.
  *
- * FIT carries every sample channel, the moving time and a lap's own distance,
- * but none of a lap row's figures or its kind: {@link FIT_LAP_LOSSY_CHANNELS}.
- * Until #1321 it was empty, and the screen said FIT carries every channel —
- * which was not true of a lap row's figures, and the owner's ruling of
- * 2026-10-19 on #1458 leaves FIT's lap as it was until #1471.
+ * FIT carries every sample channel, the moving time, a lap's own distance and,
+ * since #1320, its kind, but none of a lap row's figures:
+ * {@link FIT_LAP_LOSSY_CHANNELS}. Until #1321 it was empty, and the screen said
+ * FIT carries every channel — which was not true of a lap row's figures, and
+ * the owner's ruling of 2026-10-19 on #1458 leaves FIT's lap fields as they
+ * were until #1471.
  */
 export const LOSSY_CHANNELS: Readonly<Record<ActivityFileFormat, readonly string[]>> = {
   fit: FIT_LAP_LOSSY_CHANNELS,
@@ -794,6 +795,10 @@ function fitInputOf(
   laps: readonly ExportLap[],
 ): FitEncodeInput {
   const end = endOf(streams);
+  // #1320: a ride with laps marks which of its splits are laps (`fit-lap-mark.ts`).
+  // A ride with none writes no mark and no declaration, so it exports as it
+  // always has, to the byte.
+  const marked = laps.some((lap) => lap.wholeRide !== true);
   return {
     fileId: {
       type: FILE_TYPE_ACTIVITY,
@@ -802,6 +807,7 @@ function fitInputOf(
       serialNumber: undefined,
       timeCreated: instant(activity.createdAt),
     },
+    ...(marked ? fitLapMarkDeclarations() : {}),
     // Flattened from the laps rather than taken from `points` directly, so the
     // records written and the records counted by the laps are the same list.
     // The split preserves order, so this is the stored order sample for sample.
@@ -813,6 +819,7 @@ function fitInputOf(
       totalElapsedTime: lap.elapsedTime,
       totalTimerTime: lap.movingTime,
       totalDistance: lap.distance,
+      developerFields: marked ? [fitLapMarkOf(fitLapKindOf(lap))] : [],
     })),
     sessions: [
       {
@@ -843,6 +850,12 @@ function fitInputOf(
       localTimestamp: undefined,
     },
   };
+}
+
+/** A split as #1320's FIT mark says it: as {@link tcxLapFiguresOf} says it in TCX. */
+function fitLapKindOf(lap: ExportLap): FitLapKind {
+  if (lap.lap === undefined) return 'outside';
+  return lap.lap.partial === true ? 'part' : 'lap';
 }
 
 /**
