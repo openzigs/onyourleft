@@ -1,8 +1,9 @@
 # ADR 0054: Towns from real map data — the route's corridor read once from our own basemap archive, held in an ODbL store, and the procedural world kept whole
 
-- **Status**: Proposed, 2026-10-21. The owner accepts it before phase B's other issues
+- **Status**: Accepted, 2026-10-21, by the owner, on the answers to D-8 recorded on
+  [#1538](https://github.com/openzigs/onyourleft/issues/1538) that day. Phase B's other issues
   ([#1539](https://github.com/openzigs/onyourleft/issues/1539),
-  [#1540](https://github.com/openzigs/onyourleft/issues/1540)) start; D-8 lists what is asked
+  [#1540](https://github.com/openzigs/onyourleft/issues/1540)) are checked against it
 - **Date**: 2026-10-21
 - **Deciders**: **the owner**, on the ruling of 2026-10-21 quoted in Context and on the answers D-8
   asks for. Drafted by the author for that approval
@@ -124,9 +125,11 @@ D-4 here (item 6 and the seventh, offline).
    **300 m** either side, which is beyond anything the world places a structure at today; #1539 sets
    the number to what the renderer draws and states its tile and byte cost. A cap on tiles per route
    is #1539's, with its measurement.
-4. **Once, at route load, never during a ride.** The read runs when the rider chooses a route to
-   ride and before the ride starts, and its result is kept (D-3), so a second ride of the same route
-   asks nothing. **No request for the world is made while a ride is recording.** A read still running
+4. **When a route is chosen or saved, never during a ride.** The read runs when the rider chooses a
+   route to ride, before the ride starts, and when the rider saves a route, and its result is kept
+   (D-3), so a second ride of the same route asks nothing. A save never waits on the read and never
+   fails because of it: the route is saved first, and a read that fails leaves the route saved and
+   the world procedural. **No request for the world is made while a ride is recording.** A read still running
    when the ride starts is abandoned, and that ride is drawn from whatever was already kept. This is
    the answer to ADR 0032 D-1's second count: the disclosure is one corridor, once, and not a sequence
    of positions for an hour.
@@ -183,8 +186,8 @@ in a successor ADR. This is that declaration.
    not say that a 3D scene is one, so this ADR does not rest on it (D-3.1 treats the store as a
    Derivative Database regardless), and the credit is given as a courtesy that costs nothing — and attribution is owed wherever it is shown. While any part of the drawn world came
    from the store, the game view shows **"© OpenStreetMap contributors"**; the credits screen
-   (`apps/web/src/credits/`) gains the same line. Where in the game view, and whether it may fade, is
-   D-8 Q3. A ride drawn wholly from the procedural world shows no credit, because it owes none.
+   (`apps/web/src/credits/`) gains the same line. In the game view it is a small line in a corner, clear
+   of the HUD, for the whole ride (D-8 Q3). A ride drawn wholly from the procedural world shows no credit, because it owes none.
 
 ### D-4 — No data: today's procedural world, unchanged
 
@@ -288,6 +291,15 @@ Protomaps (ADR 0010 D-1, *"We do not generate"*), which is a separate decision.
 
 ### D-8 — What the owner is asked to rule on
 
+> **Answered by the owner, 2026-10-21, on [#1538](https://github.com/openzigs/onyourleft/issues/1538).**
+> Q0: accepted before merge. Q1: (i), today's procedural world outside the US; a planet archive
+> stays open as [#1554](https://github.com/openzigs/onyourleft/issues/1554). Q2: yes, `height` alone
+> with D-7's rules for now; an archive of the project's own that keeps `building:levels` and
+> `roof:shape` is [#1557](https://github.com/openzigs/onyourleft/issues/1557), later. Q3: the
+> recommended corner line plus the credits screen. Q4, Q5 and Q6: yes. The owner also ruled that the
+> read runs when a route is saved as well as when it is chosen (D-2.4). The questions are kept below
+> as they were asked.
+
 1. **Q0 — Accept this ADR before it merges, or merge it as Proposed?** Recommended: **accept before
    merge**, and the pull request flips the Status line. A Status line cannot be changed by an
    amendment afterwards (ADR 0013), which is why ADR 0044's acceptance needed ADR 0052 D-5.
@@ -322,7 +334,7 @@ Protomaps (ADR 0010 D-1, *"We do not generate"*), which is a separate decision.
 
 - **Towns where towns are.** A US route through a town draws that town's buildings at their own
   heights and their own pavements, and a stretch through a forest draws no house.
-- **Phase B can start** once this is accepted: #1539 (the corridor read and the store) and #1540
+- **Phase B can start**: #1539 (the corridor read and the store) and #1540
   (buildings from footprints and lots) have a document to be checked against.
 - **Phase D's land classes** (#1542) have a source where data exists.
 
@@ -347,7 +359,7 @@ Protomaps (ADR 0010 D-1, *"We do not generate"*), which is a separate decision.
 | [#1535](https://github.com/openzigs/onyourleft/issues/1535), [#1541](https://github.com/openzigs/onyourleft/issues/1541) | D-5.5: footways from data where read, procedural pavements otherwise |
 | [#1542](https://github.com/openzigs/onyourleft/issues/1542) | Land use only through D-3's store and D-2's read; nothing of its own |
 | Any sync, share or export feature | D-3.5: the store's contents never leave the device without a change to this ADR |
-| ADR 0032 and ADR 0012 | On acceptance, each gains one appended entry under ADR 0013 pointing here, in the pull request that accepts this ADR. Not before: while this is Proposed, no sentence in either is false |
+| ADR 0032 and ADR 0012 | Each gains one appended entry under ADR 0013 pointing here, in the pull request that accepted this ADR |
 
 ---
 

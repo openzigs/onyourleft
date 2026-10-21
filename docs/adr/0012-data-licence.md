@@ -306,3 +306,9 @@ sound on §4.5 a alone.
 | ODbL 1.0 full text — §1.0 definitions, §4.3, §4.4, §4.5, §4.6, quoted verbatim above | `https://github.com/kemitchell/ODbL-1.0/blob/master/ODbL-1.0.unwrapped.md` (mirror; `opendatacommons.org` is blocked by this environment's egress proxy) | 2026-09-07 |
 | OSMF Collective Database Guideline — independent datasets are a Collective rather than a Derivative Database | `https://osmfoundation.org/wiki/License/Community_Guidelines/Collective_Database_Guideline_Guideline` (**not fetched** — `osmfoundation.org` is blocked; read through search-result summaries only, see D-6) | 2026-09-07 |
 | That a Protomaps basemap archive is distributed as an ODbL **Produced Work** requiring OSM attribution | quoted in [ADR 0010](0010-map-tiles-and-routing.md) from `https://docs.protomaps.com/basemaps/downloads` | 2026-09-03 |
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-10-21** — **The successor D-3.2 requires now exists: [ADR 0054](0054-towns-from-real-map-data.md) D-3, accepted that day.** It holds OpenStreetMap records (land use, building footprints and footways for a route's corridor) in a separate, owner-scoped store declared ODbL 1.0, which never leaves the device. This ADR's decisions for the stores it covers are unchanged; ADR 0054 D-3 governs that one store, including why D-2's first reason does not hold for it.
