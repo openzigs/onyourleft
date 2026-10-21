@@ -185,8 +185,11 @@ function digest(lines: readonly string[]): string {
   return hash.toString(16).padStart(8, '0');
 }
 
-/** Every item of every frame of a sweep along the fixture, in frame order. */
-function sweep(): readonly ScatterItem[] {
+/**
+ * Every item of every frame of a sweep along the fixture, in frame order.
+ * `wooded` is #1534's control: the settlements' ground left as it was.
+ */
+function sweep(wooded = false): readonly ScatterItem[] {
   const profile = routeProfile(bendingRoute());
   const origin = corridorOrigin(profile);
   const start = atStartLine(profile);
@@ -196,6 +199,7 @@ function sweep(): readonly ScatterItem[] {
       profile,
       origin,
       state: { ...start, ride: { ...start.ride, distance: metres(at) } },
+      settlementsWooded: wooded,
     });
     items.push(...frame.scatter);
   }
@@ -252,7 +256,15 @@ describe('the arrangement a route produces — #341', () => {
     // same. `corner-placement.test.ts` is what asserts the property that
     // needed the move — nothing in the carriageway at a planner's sharp
     // corner — and none of it names a coordinate here.
-    expect(digest(placed.map(serialise))).toBe('a68475ff');
+    //
+    // ⚠️ **And regenerated for #1534, which clears the village's ground on
+    // purpose** — `a68475ff` before it. The trees, shrubs and rocks standing on
+    // a settlement's plots, its front gardens and the ground behind its
+    // buildings are taken out (`settlements.ts` §`clearOfSettlements`), and
+    // NOTHING else moved: the sweep with that rule off still gives `a68475ff`
+    // to the digit — "#1534's control" below — which is the evidence that the
+    // scenery outside the settlements is the scenery it was.
+    expect(digest(placed.map(serialise))).toBe('bf49aa71');
   });
 
   it('places the same scenery IN PLAN as it did before the terrain — #458', () => {
@@ -266,7 +278,26 @@ describe('the arrangement a route produces — #341', () => {
     //
     // ⚠️ **#571 moved it too, and it was `d6e24a9e` until then** — the same
     // move as the digest above, in plan.
-    expect(digest(placed.map(serialisePlan))).toBe('2830159f');
+    //
+    // ⚠️ **#1534 moved it, and it was `2830159f` until then** — the village's
+    // ground cleared, as above, and only that.
+    expect(digest(placed.map(serialisePlan))).toBe('66dea453');
+  });
+
+  it('places exactly what it did before #1534 with the settlements’ ground left wooded — #1534’s control', () => {
+    // Every number #571 left behind, unmoved: so what #1534 changed is the
+    // scenery on a settlement's ground and nothing else. `settlements.test.ts`
+    // §"#1534" asserts the same item by item — what went stood on that ground,
+    // and everything that stayed stands where it stood.
+    const wooded = sweep(true);
+    const natural = wooded.filter((item) =>
+      (SCATTER_KINDS as readonly string[]).includes(item.kind),
+    );
+    expect(digest(wooded.map(serialise))).toBe('a68475ff');
+    expect(digest(wooded.map(serialisePlan))).toBe('2830159f');
+    expect(natural.length).toBe(6952);
+    expect(new Set(natural.map((item) => `${item.x},${item.z}`)).size).toBe(1019);
+    expect(wooded.length - natural.length).toBe(1917);
   });
 
   it('places a world at all, so the digest is not over an empty sweep', () => {
@@ -322,8 +353,13 @@ describe('the arrangement a route produces — #341', () => {
     // ⚠️ **6 946 in 1 018 places until #571**, which moved every house a few
     // centimetres with the road it faces: one tree that a garden used to
     // clear stands just outside it now, in six frames.
-    expect(natural.length).toBe(6952);
-    expect(new Set(natural.map((item) => `${item.x},${item.z}`)).size).toBe(1019);
+    //
+    // ⚠️ **6 952 in 1 019 places until #1534**, which clears a settlement's
+    // whole ground — its plots, front gardens and back gardens — where #460
+    // cleared only a ring round each building: 51 places beside the village,
+    // seen 291 times over the sweep, and the structures unmoved.
+    expect(natural.length).toBe(6661);
+    expect(new Set(natural.map((item) => `${item.x},${item.z}`)).size).toBe(968);
     expect(placed.length - natural.length).toBe(1917);
   });
 
@@ -400,8 +436,11 @@ describe('the arrangement a route produces — #341', () => {
     expect(first === undefined ? '' : serialise(first)).toBe(
       'building 32.895 -0.280 193.409 2.058 1.000',
     );
+    // ⚠️ Since #1534 the middle item is a different one again, for #571's
+    // reason the other way round: the cleared village makes the sweep 291
+    // items shorter. The first and last did not move.
     expect(middle === undefined ? '' : serialise(middle)).toBe(
-      'tree-conifer 812.564 26.197 78.134 2.329 1.041',
+      'shrub 804.070 26.402 88.848 2.193 0.747',
     );
     expect(last === undefined ? '' : serialise(last)).toBe(
       'tree-conifer 696.874 42.982 -291.754 0.240 1.178',

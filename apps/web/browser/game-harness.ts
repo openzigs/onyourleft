@@ -99,7 +99,7 @@ import {
   valleyRoute,
 } from '../src/game/route-fixtures-testing';
 import { GRADIENT_TINT_FULL_SCALE_PERCENT } from '../src/game/terrain';
-import { structuresAt } from '../src/game/settlements';
+import { onSettlementGround, settlementFootprintsAt, structuresAt } from '../src/game/settlements';
 import { waterways } from '../src/game/waterways';
 import { HORIZON_RADIUS_METRES, HORIZON_SEGMENTS, VERGE_DROP_METRES } from '../src/game/landform';
 import {
@@ -132,6 +132,7 @@ import {
   sceneMaterialsOf,
   type DrawnPiece,
   sceneryDrawnOf,
+  realisticVegetationPlacesOf,
   realisticShouldersOf,
   realisticRidersShownOf,
   realisticSilhouetteOf,
@@ -4522,6 +4523,8 @@ export interface RealisticMeasurement {
   readonly groundBlend: GroundBlendMeasurement;
   /** #1523: the road's and the ground's programs, each lever off and none. @see surfaceProgramProbe */
   readonly surfacePrograms: SurfaceProgramMeasurement;
+  /** #1534: the vegetation drawn on a village's ground, cleared and not. @see settlementClearingProbe */
+  readonly settlementClearing: SettlementClearingMeasurement;
   /** #679: a finish gantry's banner, read, and what the gantries cost. @see gantryProbe */
   readonly gantry: GantryMeasurement;
   /** #966: the wordmark on the gate and a billboard, read back, realistic. @see logoProbe */
@@ -5261,6 +5264,83 @@ function surfaceProgramProbe(view: GameView, frame: SceneFrame): SurfaceProgramM
   // Back as the product builds them, for every probe after this one.
   read(true, true);
   return { measured: true, drawn, groundBlendOff, roadWearOff };
+}
+
+/**
+ * #1534 — the realistic vegetation a frame beside a village drew, read back out
+ * of its instanced meshes and held against every piece of the village's ground
+ * (`settlements.ts` §`SettlementFootprint`): with the rule, and — the control —
+ * with the ground left wooded, as every frame was before #1534.
+ */
+export interface SettlementClearingMeasurement {
+  readonly measured: boolean;
+  /** How many pieces of settlement ground the frame's stretch holds. */
+  readonly pieces: number;
+  /** Trees, shrubs and rocks drawn, and how many of them on settlement ground. */
+  readonly drawn: number;
+  readonly onGround: number;
+  /** The same, with the ground left wooded. */
+  readonly woodedDrawn: number;
+  readonly woodedOnGround: number;
+}
+
+const NO_SETTLEMENT_CLEARING: SettlementClearingMeasurement = {
+  measured: false,
+  pieces: 0,
+  drawn: 0,
+  onGround: 0,
+  woodedDrawn: 0,
+  woodedOnGround: 0,
+};
+
+/**
+ * Where on `valleyRoute` the rider stands for {@link settlementClearingProbe}:
+ * 80 m short of its second village, looking into it. Measured: that village
+ * runs from about 1 900 m to 2 100 m, and with its ground left wooded the
+ * frame there carries dozens of trees and shrubs on it.
+ */
+const SETTLEMENT_PROBE_DISTANCE = 1_820;
+
+/** @see SettlementClearingMeasurement */
+function settlementClearingProbe(
+  view: GameView,
+  riding: (
+    profile: ReturnType<typeof northRoute>,
+    distance: number,
+    build?: FrameBuild,
+  ) => SceneFrame,
+): SettlementClearingMeasurement {
+  const profile = valleyRoute();
+  const origin = corridorOrigin(profile);
+  const pieces = settlementFootprintsAt(
+    profile,
+    origin,
+    scatterSeed(profile),
+    0,
+    profile.totalDistance,
+  );
+  const read = (build: FrameBuild): { drawn: number; onGround: number } => {
+    const frame = riding(profile, SETTLEMENT_PROBE_DISTANCE, build);
+    // Twice, so the trees' hand-over between levels has settled.
+    view.render(frame);
+    view.render(frame);
+    const places = realisticVegetationPlacesOf(view);
+    return {
+      drawn: places.length,
+      onGround: places.filter((place) => pieces.some((piece) => onSettlementGround(place, piece)))
+        .length,
+    };
+  };
+  const cleared = read(sceneFrame);
+  const wooded = read((input) => sceneFrame({ ...input, settlementsWooded: true }));
+  return {
+    measured: true,
+    pieces: pieces.length,
+    drawn: cleared.drawn,
+    onGround: cleared.onGround,
+    woodedDrawn: wooded.drawn,
+    woodedOnGround: wooded.onGround,
+  };
 }
 
 /**
@@ -6399,6 +6479,7 @@ const NO_REALISTIC: RealisticMeasurement = {
   roadWear: NO_ROAD_WEAR,
   groundBlend: NO_GROUND_BLEND,
   surfacePrograms: NO_SURFACE_PROGRAMS,
+  settlementClearing: NO_SETTLEMENT_CLEARING,
   gantry: NO_GANTRY,
   logos: NO_LOGO,
   waterReflection: NO_WATER_REFLECTION,
@@ -7685,6 +7766,10 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   const surfacePrograms = surfaceProgramProbe(view, riding(level, 400));
   phaseEnds('realistic: surface programs — #1523');
 
+  // #1534: no tree, shrub or rock drawn on a village's ground.
+  const settlementClearing = settlementClearingProbe(view, riding);
+  phaseEnds('realistic: settlement clearing — #1534');
+
   // #679: the finish gantry, read, and what the gantries cost.
   const gantry = gantryProbe(view, gl, canvas, riding);
   phaseEnds('realistic: gantry — #679');
@@ -8156,6 +8241,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     roadWear,
     groundBlend,
     surfacePrograms,
+    settlementClearing,
     gantry,
     logos,
     waterReflection,

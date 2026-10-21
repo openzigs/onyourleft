@@ -8793,6 +8793,35 @@ export class RealisticVegetationBelt {
     return this.#drawn;
   }
 
+  /**
+   * Where, in plan, every instance the last frame submitted stands — at every
+   * level, the impostors included, read back out of the instanced meshes.
+   *
+   * @test-facing reached through `realisticVegetationPlacesOf` by the browser
+   * gate, which holds what was drawn off every settlement's ground (#1534)
+   */
+  places(): readonly { readonly kind: RealisticVegetationKind; x: number; z: number }[] {
+    const found: { kind: RealisticVegetationKind; x: number; z: number }[] = [];
+    for (const slot of this.#kinds) {
+      const meshes = [
+        ...slot.near.flat(),
+        ...slot.middle.flatMap((each) => each ?? []),
+        ...slot.far.filter((mesh): mesh is InstancedMesh => mesh !== undefined),
+      ];
+      for (const mesh of meshes) {
+        if (!mesh.visible) continue;
+        mesh.updateMatrixWorld();
+        for (let index = 0; index < mesh.count; index += 1) {
+          mesh.getMatrixAt(index, this.#matrix);
+          this.#matrix.premultiply(mesh.matrixWorld);
+          this.#position.setFromMatrixPosition(this.#matrix);
+          found.push({ kind: slot.kind, x: this.#position.x, z: this.#position.z });
+        }
+      }
+    }
+    return found;
+  }
+
   /** This frame's vegetation: the trees at their levels, the nearest shrubs and rocks as meshes. */
   update(items: readonly ScatterItem[], pose: CameraPose): void {
     this.#drawn = 0;
@@ -11653,6 +11682,20 @@ export function sceneryDrawnOf(view: GameView): number {
 }
 
 /**
+ * Where, in plan, every tree, shrub and rock a view's last realistic frame
+ * submitted stands, at whatever level — #1534's browser gate, which holds them
+ * off every settlement's ground. Empty for a stylised frame.
+ *
+ * @unwired reached only from the browser gate's harness; nothing in the render
+ * path needs to ask.
+ */
+export function realisticVegetationPlacesOf(
+  view: GameView,
+): readonly { readonly kind: string; x: number; z: number }[] {
+  return view instanceof ThreeGameView ? view.realisticVegetationPlaces() : [];
+}
+
+/**
  * The sky colour a view's water reflected in its last frame, linear RGB — what
  * the browser gate holds the realistic rungs' water to (#475): the line in
  * `render` that hands the water the realistic sky is one jsdom cannot reach,
@@ -12751,6 +12794,11 @@ class ThreeGameView implements GameView {
   realisticShoulders(): { x: number; y: number; z: number } | undefined {
     const into = { x: 0, y: 0, z: 0 };
     return this.#realistic?.riders.shouldersOf(into) === true ? into : undefined;
+  }
+
+  /** Where the realistic vegetation the last frame drew stands. @see realisticVegetationPlacesOf */
+  realisticVegetationPlaces(): readonly { readonly kind: string; x: number; z: number }[] {
+    return this.#realistic?.vegetation.places() ?? [];
   }
 
   /** How many scenery items the last frame drew, in the world it drew. @see sceneryDrawnOf */
