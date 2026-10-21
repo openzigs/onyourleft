@@ -425,6 +425,8 @@ async function run(): Promise<void> {
         distance,
         elapsed: config.at === undefined ? elapsed : 0,
         rung: worldRung(state),
+        // #1534's pair: the villages' ground left wooded.
+        settlementsWooded: config.leversOff.includes('settlement-clearing'),
       }),
     );
     lastFrameCalls = counter.takeCalls();

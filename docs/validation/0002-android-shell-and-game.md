@@ -3229,6 +3229,8 @@ published figures (its run predates `oyl.txt`).
 | #1523 | road wear out (#628, #879) | the same build | — ; `levers=-road-wear` | | | | | | | | |
 | #1523 | bounds before (the wear's loop and the ground's twelve derivatives, as they were) | `main` with #1523's bounds | — ; `levers=-surface-bounds` | | | | | | | | |
 | #1523 | bounds after (the product) | the same build | — | | | | | | | | |
+| #1534 | cleared (the villages' ground, 5 min) | `main` with #1534 | — | | | | | | | | |
+| #1534 | wooded (as before #1534, 5 min) | the same build | — ; `levers=-settlement-clearing` | | | | | | | | |
 
 **Phone (OEM, model, Android, WebView):** Google Pixel Tablet, build `CP2A.260705.006`, Android 17,
 WebView 153.0.8010.36  **Build:** debug, `main` at **`f91a5fb`** (before #617's tree LODs, PR #637)
@@ -3757,6 +3759,23 @@ the same run it requires `-road-wear` and `-ground-blend` to move thousands of p
 | AH-1523-5 | **Before**: build `main` with #1523's bounds, owner's page staged, AH1–AH7 with `&levers=-surface-bounds` added to AH4's URL. `RUN=1523-bounds-before` |
 | AH-1523-6 | **Cool again (AH3, 25–26 °C)**, same build: AH1–AH7, AH4's URL unchanged. `RUN=1523-bounds-after` |
 | AH-1523-7 | Write both rows. The after row's GPU mean should fall towards triage 2's `-road-wear` and `-ground-blend` rows (−25 and −16 MHz) without either lever's change to the picture |
+
+### #1534's rows — the villages' ground cleared of trees, shrubs and rocks
+
+[#1534](https://github.com/openzigs/onyourleft/issues/1534) clears every tree, shrub and rock off a
+settlement's ground — its plots, built on or not, its front gardens and 6 m past the back of each
+building (`settlements.ts` §`SettlementFootprint`) — so no house stands in a wood. It only takes
+instances away, so its cost claim is that **draw calls are unchanged and triangles and overdraw can
+only fall**. One lever on one build gives the pair: `levers=-settlement-clearing` leaves the ground
+wooded, as every frame was before #1534. It is the owner's by-eye pair too. The browser gate holds
+the rule to the vegetation instances drawn beside a village: 0 of 130 on its ground, against 38 of
+168 with the lever's control (`game.browser.spec.ts` §"#1534", measured 2026-10-21).
+
+| Step | What to do |
+|---|---|
+| AH-1534-1 | **After #1523's fix has landed**: build `main` with #1534 and the owner's page staged, and run AH1–AH7 for **5 minutes**, AH4's URL unchanged. `RUN=1534-cleared` |
+| AH-1534-2 | **Cool again (AH3, 25–26 °C)**, same build: AH1–AH7 for 5 minutes with `&levers=-settlement-clearing` added to AH4's URL. `RUN=1534-wooded` |
+| AH-1534-3 | Write both rows into the table above. Draw calls should match; triangles in `1534-cleared` at or below `1534-wooded`. By eye, at a village (`&at=` its odometer): no tree in a garden or between a house and the road |
 
 ## Part AI — the side camera's picture rate, on the owner's phone ([#1112](https://github.com/openzigs/onyourleft/issues/1112))
 

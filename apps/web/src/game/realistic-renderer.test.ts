@@ -37,7 +37,20 @@ import {
   type BlobCasters,
 } from './ground-blob';
 import { terrainCorridor } from './landform';
-import { hillRoute } from './route-fixtures-testing';
+import { hillRoute, northRoute } from './route-fixtures-testing';
+import {
+  BENCH_SETBACK_METRES,
+  BOLLARD_INSET_METRES,
+  FURNITURE_DRAW_METRES,
+  FURNITURE_KINDS,
+  LAMP_SETBACK_METRES,
+  PAVEMENT_TRIANGLES_PER_VILLAGE,
+  PAVEMENT_WIDTH_METRES,
+  streetsAt,
+  type FurnitureItem,
+  type FurnitureKind,
+  type VillageStreet,
+} from './streets';
 import { scatterSeed } from './scatter';
 import { corridorOrigin, roadCorridor } from './terrain';
 import { worldStyle } from './world';
@@ -46,6 +59,7 @@ import {
   REALISTIC_BICYCLE_TRIANGLES,
   REALISTIC_GROUND_BLOBS,
   REALISTIC_NEAR_MESHES,
+  REALISTIC_STREET_TRIANGLES,
   REALISTIC_TREE_LEVELS,
 } from './realistic-budget';
 import { bandFade, treeSlots, type TreeLevels } from './tree-levels';
@@ -99,6 +113,10 @@ import {
   evictRealisticWorldFromGpu,
   loadRealisticWorld,
   materialLayers,
+  PAVEMENT_COLOUR,
+  PavementBelt,
+  FurnitureBelt,
+  FURNITURE_CAPACITY,
   mergeShapeMaterials,
   photographicGroundMaterial,
   photographicRoadMaterial,
@@ -1413,7 +1431,10 @@ describe('the realistic structures — ADR 0026 D-12 layer 3, #475', () => {
       ]),
     );
     const belt = new RealisticStructureBelts(textures);
-    for (const surface of [...PHOTOGRAPHIC_STRUCTURE_SURFACES, 'painted', 'glass'] as const) {
+    // #1535: the paving is the pavements' (`PavementBelt`), and no structure's.
+    expect(belt.beltOf('paving')).toBeUndefined();
+    const worn = PHOTOGRAPHIC_STRUCTURE_SURFACES.filter((surface) => surface !== 'paving');
+    for (const surface of [...worn, 'painted', 'glass'] as const) {
       const meshes = STRUCTURE_KINDS.flatMap((kind) => belt.beltOf(surface)?.meshesOf(kind) ?? []);
       expect(meshes.length, surface).toBeGreaterThan(0);
       for (const mesh of meshes) {
@@ -1466,8 +1487,14 @@ describe('the realistic structures — ADR 0026 D-12 layer 3, #475', () => {
 
   it('has no surface nothing wears, and wears no surface it has no maps for', () => {
     const worn = new Set<StructureSurface>(STRUCTURE_KINDS.flatMap(realisticStructureSurfaces));
+    // #1535: every photograph but the paving, which the pavements wear —
+    // §"the village pavements" holds `PavementBelt` to it.
     expect([...worn].sort()).toEqual(
-      [...PHOTOGRAPHIC_STRUCTURE_SURFACES, 'painted', 'glass'].sort(),
+      [
+        ...PHOTOGRAPHIC_STRUCTURE_SURFACES.filter((surface) => surface !== 'paving'),
+        'painted',
+        'glass',
+      ].sort(),
     );
   });
 });
@@ -3466,3 +3493,246 @@ function renderTargetsIn(source: string): readonly string[] {
   visit(file);
   return found;
 }
+
+describe('the village pavements — #1535', () => {
+  const farmland = northRoute(6_000, () => 40);
+  const streets = streetsAt(
+    farmland,
+    corridorOrigin(farmland),
+    scatterSeed(farmland),
+    0,
+    farmland.totalDistance,
+  );
+  const paving = { colour: aTexture(), normal: aTexture() };
+  const triangles = (list: readonly VillageStreet[]): number =>
+    list.reduce((sum, street) => sum + street.pavement.indices.length / 3, 0);
+
+  it('wears the paving photograph in the realistic world, constructed and in the air', () => {
+    const belt = new PavementBelt('realistic', paving);
+    const material = belt.mesh.material as unknown as {
+      type: string;
+      map: unknown;
+      normalMap: unknown;
+    };
+    expect(material.type).toBe('MeshStandardMaterial');
+    expect(material.map).toBe(paving.colour);
+    expect(material.normalMap).toBe(paving.normal);
+    expect(isConstructedMaterial(belt.mesh.material as never)).toBe(true);
+    expect(breathesTheAir(belt.mesh.material as never)).toBe(true);
+    expect(readsTextureLodBias(belt.mesh.material as never)).toBe(true);
+    belt.dispose();
+  });
+
+  it('is the stylised world’s own grey there, lit or flat by the rung', () => {
+    const belt = new PavementBelt('stylised');
+    const colourOf = (): number =>
+      (belt.mesh.material as unknown as { color: { getHex: () => number } }).color.getHex();
+    expect(typeOf(belt.mesh)).toBe('MeshLambertMaterial');
+    expect(colourOf()).toBe(PAVEMENT_COLOUR);
+    belt.setShading('flat');
+    expect(typeOf(belt.mesh)).toBe('MeshBasicMaterial');
+    expect(colourOf()).toBe(PAVEMENT_COLOUR);
+    belt.dispose();
+  });
+
+  it('draws every street it is handed as one mesh, flags the photograph’s size', () => {
+    expect(streets.length).toBeGreaterThan(1);
+    const belt = new PavementBelt('realistic', paving);
+    belt.update(streets);
+    expect(belt.mesh.visible).toBe(true);
+    const geometry = belt.mesh.geometry;
+    expect((geometry.index?.count ?? 0) / 3).toBe(triangles(streets));
+    // Texture coordinates in repeats of the photograph, from the street's metres.
+    const tile = REALISTIC_STRUCTURE_SURFACES.paving.tileMetres;
+    const uv = geometry.getAttribute('uv');
+    const first = (streets[0] as VillageStreet).pavement.uvs;
+    for (let at = 0; at < 8; at += 1) {
+      expect(uv.getX(at) * tile).toBeCloseTo(first[at * 2] as number, 4);
+      expect(uv.getY(at) * tile).toBeCloseTo(first[at * 2 + 1] as number, 4);
+    }
+    // The second street's indices point at its own vertices, after the first's.
+    const second = (streets[1] as VillageStreet).pavement;
+    const offset = (streets[0] as VillageStreet).pavement.positions.length / 3;
+    const start = (streets[0] as VillageStreet).pavement.indices.length;
+    expect(geometry.index?.getX(start)).toBe((second.indices[0] as number) + offset);
+    belt.dispose();
+  });
+
+  it('uploads nothing while the streets are the same, and empties when there are none', () => {
+    const belt = new PavementBelt('stylised');
+    belt.update(streets);
+    const built = belt.mesh.geometry;
+    belt.update([...streets]);
+    expect(belt.mesh.geometry).toBe(built);
+    belt.update(streets.slice(1));
+    expect(belt.mesh.geometry).not.toBe(built);
+    expect((belt.mesh.geometry.index?.count ?? 0) / 3).toBe(triangles(streets.slice(1)));
+    belt.update([]);
+    expect(belt.mesh.visible).toBe(false);
+    expect(belt.mesh.geometry.index?.count ?? 0).toBe(0);
+    belt.dispose();
+  });
+
+  it('draws nothing in the world not drawn, or with the browser gate’s control on', () => {
+    const belt = new PavementBelt('stylised');
+    belt.setShown(false);
+    belt.update(streets);
+    expect(belt.mesh.visible).toBe(false);
+    belt.setShown(true);
+    belt.update(streets);
+    expect(belt.mesh.visible).toBe(true);
+    belt.switchOn(false);
+    belt.update(streets);
+    expect(belt.mesh.visible).toBe(false);
+    belt.dispose();
+  });
+});
+
+describe('the street furniture — #1536', () => {
+  const farmland = northRoute(6_000, () => 40);
+  const streets = streetsAt(
+    farmland,
+    corridorOrigin(farmland),
+    scatterSeed(farmland),
+    0,
+    farmland.totalDistance,
+  );
+  const planks = { colour: aTexture(), normal: aTexture() };
+  const trianglesOf = (mesh: { readonly geometry: ReturnType<typeof aGeometry> }): number =>
+    (mesh.geometry.index?.count ?? mesh.geometry.getAttribute('position').count) / 3;
+  /** The camera, stood on the first village's first piece of furniture. */
+  const first = (streets[0] as VillageStreet).furniture[0] as FurnitureItem;
+  const near = { x: first.x, z: first.z };
+
+  it('draws one instanced mesh a kind, every piece within reach and none past it', () => {
+    const belt = new FurnitureBelt('stylised');
+    belt.update(streets, near);
+    let drawn = 0;
+    for (const kind of FURNITURE_KINDS) {
+      const expected = streets
+        .flatMap((street) => street.furniture)
+        .filter(
+          (item) =>
+            item.kind === kind &&
+            Math.hypot(item.x - near.x, item.z - near.z) <= FURNITURE_DRAW_METRES,
+        ).length;
+      expect(belt.meshOf(kind).count, kind).toBe(expected);
+      expect(belt.meshOf(kind).visible, kind).toBe(expected > 0);
+      drawn += expected;
+    }
+    // Non-vacuity: a village's worth, and every kind in it.
+    expect(drawn).toBeGreaterThan(10);
+    for (const kind of FURNITURE_KINDS) expect(belt.meshOf(kind).count, kind).toBeGreaterThan(0);
+    // Its level of detail: a camera a village away draws nothing at all.
+    belt.update(streets, { x: near.x, z: near.z - 2 * FURNITURE_DRAW_METRES - 400 });
+    for (const kind of FURNITURE_KINDS) expect(belt.meshOf(kind).visible, kind).toBe(false);
+    belt.dispose();
+  });
+
+  it('places each piece where the street says, turned to face the road', () => {
+    const belt = new FurnitureBelt('stylised');
+    belt.update(streets, near);
+    const mesh = belt.meshOf(first.kind);
+    const elements = mesh.instanceMatrix.array;
+    // The column holding the translation, and the turned +z axis.
+    expect(elements[12]).toBeCloseTo(first.x, 4);
+    expect(elements[13]).toBeCloseTo(first.y, 4);
+    expect(elements[14]).toBeCloseTo(first.z, 4);
+    expect(elements[8]).toBeCloseTo(Math.sin(first.rotation), 5);
+    expect(elements[10]).toBeCloseTo(Math.cos(first.rotation), 5);
+    belt.dispose();
+  });
+
+  it('keeps every shape on the pavement, and a lantern over it, never over the road', () => {
+    const belt = new FurnitureBelt('stylised');
+    // How far each kind stands from the kerb's face, and from the back edge.
+    const fromKerb: Readonly<Record<FurnitureKind, number>> = {
+      'lamp-post': PAVEMENT_WIDTH_METRES - LAMP_SETBACK_METRES,
+      bollard: BOLLARD_INSET_METRES,
+      bench: PAVEMENT_WIDTH_METRES - BENCH_SETBACK_METRES,
+      bin: PAVEMENT_WIDTH_METRES - BENCH_SETBACK_METRES,
+    };
+    for (const kind of FURNITURE_KINDS) {
+      const geometry = belt.meshOf(kind).geometry;
+      geometry.computeBoundingBox();
+      const box = geometry.boundingBox;
+      // +z is towards the road: the front must stop short of the kerb, the
+      // back short of the pavement's back edge, and the foot on the pavement.
+      expect(box?.max.z ?? Infinity, kind).toBeLessThan(fromKerb[kind]);
+      expect(-(box?.min.z ?? -Infinity), kind).toBeLessThan(PAVEMENT_WIDTH_METRES - fromKerb[kind]);
+      expect(box?.min.y ?? -1, kind).toBeCloseTo(0, 5);
+    }
+    belt.dispose();
+  });
+
+  it('holds the streets inside their stated triangles, each kind at its stated shape', () => {
+    const belt = new FurnitureBelt('realistic', planks);
+    const triangles = Object.fromEntries(
+      FURNITURE_KINDS.map((kind) => [kind, trianglesOf(belt.meshOf(kind))]),
+    );
+    expect(triangles).toEqual({ 'lamp-post': 88, bollard: 64, bench: 108, bin: 64 });
+    const furniture = FURNITURE_KINDS.reduce(
+      (sum, kind) => sum + FURNITURE_CAPACITY * (triangles[kind] as number),
+      0,
+    );
+    expect(2 * PAVEMENT_TRIANGLES_PER_VILLAGE + furniture).toBe(REALISTIC_STREET_TRIANGLES);
+    // The SAME triangles in both worlds: why the frame's figure leaves them out.
+    const stylised = new FurnitureBelt('stylised');
+    for (const kind of FURNITURE_KINDS) {
+      expect(trianglesOf(stylised.meshOf(kind)), kind).toBe(triangles[kind]);
+    }
+    stylised.dispose();
+    belt.dispose();
+  });
+
+  it('wears physically based paint in the realistic world, and the bench Poly Haven’s planks', () => {
+    const belt = new FurnitureBelt('realistic', planks);
+    for (const kind of FURNITURE_KINDS) {
+      const mesh = belt.meshOf(kind);
+      const material = mesh.material as unknown as {
+        type: string;
+        map: unknown;
+        normalMap: unknown;
+        vertexColors: boolean;
+      };
+      expect(material.type, kind).toBe('MeshStandardMaterial');
+      expect(material.vertexColors, kind).toBe(true);
+      expect(isConstructedMaterial(mesh.material as never), kind).toBe(true);
+      expect(breathesTheAir(mesh.material as never), kind).toBe(true);
+      if (kind === 'bench') {
+        expect(material.map).toBe(planks.colour);
+        expect(material.normalMap).toBe(planks.normal);
+        expect(readsTextureLodBias(mesh.material as never)).toBe(true);
+        // The slats in metres of the photograph, as a barn's boards are.
+        expect(mesh.geometry.getAttribute('uv')).toBeDefined();
+      } else {
+        expect(material.map ?? null, kind).toBeNull();
+      }
+    }
+    belt.dispose();
+  });
+
+  it('is painted in the stylised world, lit or flat by the rung', () => {
+    const belt = new FurnitureBelt('stylised');
+    expect(typeOf(belt.meshOf('lamp-post'))).toBe('MeshLambertMaterial');
+    belt.setShading('flat');
+    for (const kind of FURNITURE_KINDS)
+      expect(typeOf(belt.meshOf(kind)), kind).toBe('MeshBasicMaterial');
+    belt.dispose();
+  });
+
+  it('draws nothing in the world not drawn, or with the browser gate’s control on', () => {
+    const belt = new FurnitureBelt('stylised');
+    belt.setShown(false);
+    belt.update(streets, near);
+    for (const kind of FURNITURE_KINDS) expect(belt.meshOf(kind).visible, kind).toBe(false);
+    belt.setShown(true);
+    belt.switchOn(false);
+    belt.update(streets, near);
+    for (const kind of FURNITURE_KINDS) expect(belt.meshOf(kind).visible, kind).toBe(false);
+    belt.switchOn(true);
+    belt.update(streets, near);
+    expect(belt.meshOf('lamp-post').visible).toBe(true);
+    belt.dispose();
+  });
+});
