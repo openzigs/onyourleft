@@ -12,6 +12,11 @@ It has the same authority as the root file. Where the text below says "this file
 
 ## Which numbers were taken, and by what (from CLAUDE.md §7, "ADRs")
 
+  ⚠️ **0053 is [ADR 0053](../adr/0053-the-fit-lap-mark-a-developer-field-of-our-own.md)**, taken by
+  [#1320](https://github.com/openzigs/onyourleft/issues/1320) on 2026-10-21 for the FIT lap mark, a
+  developer field of this client's own, and **accepted on the owner's ruling of that day on
+  [#1520](https://github.com/openzigs/onyourleft/pull/1520)**. It relates to ADR 0006 and does not
+  amend it. A reviewer who remembers this sentence offering 0053 is reading the old file.
   ⚠️ **0052 is [ADR 0052](../adr/0052-the-phones-tilt-on-the-side-camera-link-and-adr-0044-accepted.md)**,
   taken by [#1122](https://github.com/openzigs/onyourleft/issues/1122) on 2026-10-16 for the side-camera
   phone's tilt message and ADR 0044's acceptance, and **accepted on the owner's rulings of 2026-10-03

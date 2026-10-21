@@ -28,6 +28,10 @@
  *
  * A ride with no laps is written with no mark and no declaration, as it always
  * was, to the byte (`export-activity.test.ts`, the digests of #1316).
+ *
+ * The format is permanent: [ADR 0053](../../../../docs/adr/0053-the-fit-lap-mark-a-developer-field-of-our-own.md)
+ * records the owner's ruling of 2026-10-21, and a file carrying the mark stays
+ * readable for good.
  */
 
 import {
