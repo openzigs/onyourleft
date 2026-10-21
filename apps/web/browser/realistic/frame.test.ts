@@ -53,3 +53,29 @@ describe('the realistic page’s frames carry the rung’s scenery budget, as Ga
     expect(topTotal).toBeGreaterThan(reducedTotal);
   });
 });
+
+describe('the realistic page’s `-settlement-clearing` lever leaves the settlements’ ground wooded — #1534', () => {
+  it('draws what a ride draws without it, and only adds scenery with it', () => {
+    const top = REALISTIC_LADDER[0] as QualitySettings;
+    let added = 0;
+    for (let distance = 0; distance < profile.totalDistance; distance += 150) {
+      const key = (item: { kind: string; x: number; z: number }): string =>
+        `${item.kind} ${String(item.x)} ${String(item.z)}`;
+      const ride = rideFrame({ profile, origin, distance, elapsed: 10, rung: top });
+      const lever = rideFrame({
+        profile,
+        origin,
+        distance,
+        elapsed: 10,
+        rung: top,
+        settlementsWooded: true,
+      });
+      const wooded = new Set(lever.scatter.map(key));
+      // Everything a ride draws, the lever draws too: it only puts back.
+      for (const item of ride.scatter) expect(wooded.has(key(item)), key(item)).toBe(true);
+      added += lever.scatter.length - ride.scatter.length;
+    }
+    // The control: the page's route has settlements with ground to clear.
+    expect(added).toBeGreaterThan(0);
+  });
+});

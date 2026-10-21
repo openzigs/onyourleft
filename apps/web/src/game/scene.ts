@@ -55,7 +55,13 @@ import {
   type CorridorPoint,
   type RoadCorridor,
 } from './terrain';
-import { STRUCTURE_MAX_ITEMS, clearOfBuildings, structuresAt } from './settlements';
+import {
+  STRUCTURE_MAX_ITEMS,
+  clearOfBuildings,
+  clearOfSettlements,
+  structuresAt,
+  type SettlementFootprint,
+} from './settlements';
 import { bridgeParts, waterSurface, waterways } from './waterways';
 import { worldStyle } from './world';
 import type { RouteProfile } from '@onyourleft/domain';
@@ -162,6 +168,14 @@ export interface SceneInput {
    * feature, so a ride that forgot it rides the line.
    */
   readonly centreline?: boolean | undefined;
+  /**
+   * Leaves the trees, shrubs and rocks standing on a settlement's ground, as
+   * every frame did before #1534 — the browser gate's control, and nothing
+   * else. Absent, or `false`, clears them (`settlements.ts`
+   * §`clearOfSettlements`). Optional the safe way round, for
+   * {@link centreline}'s reason.
+   */
+  readonly settlementsWooded?: boolean | undefined;
 }
 
 /** Another real rider, where to draw them — #783. @see SceneInput.remoteRiders */
@@ -265,12 +279,21 @@ function scenery(
   // #460. The villages, farmsteads and field boundaries, FIRST — so that a belt
   // spending its budget in frame order never loses a house to a far tree — and
   // the natural scenery kept clear of every building, and of every billboard.
-  const built = structuresAt(input.profile, input.origin, seed, first.along, last.along, {
-    maxItems: structureBudget - billboards.length,
-    riderMetres: riderDistance,
-  });
+  // #1534: and off every settlement's ground, so no house stands in a wood.
+  const footprints: SettlementFootprint[] = [];
+  const built = structuresAt(
+    input.profile,
+    input.origin,
+    seed,
+    first.along,
+    last.along,
+    { maxItems: structureBudget - billboards.length, riderMetres: riderDistance },
+    footprints,
+  );
+  const cleared =
+    input.settlementsWooded === true ? natural : clearOfSettlements(natural, footprints);
   return {
-    scatter: [...built, ...clearOfBillboards(clearOfBuildings(natural, built), billboards)],
+    scatter: [...built, ...clearOfBillboards(clearOfBuildings(cleared, built), billboards)],
     billboards,
   };
 }

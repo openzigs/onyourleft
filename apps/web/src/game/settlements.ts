@@ -189,6 +189,10 @@ const STREAM_VARIANT = 4;
  * ⚠️ **Buildings and signposts first, then the boundaries nearest the rider**,
  * and the budget cuts from the end: a rung that takes structures away takes
  * the far walls and hedges before it takes a house.
+ *
+ * `footprints`, when given, is filled with the ground of every settlement whose
+ * sites this call visits — #1534, {@link SettlementFootprint} — whatever the
+ * budget keeps: a rung that drops a house does not plant its garden.
  */
 export function structuresAt(
   profile: RouteProfile,
@@ -197,10 +201,11 @@ export function structuresAt(
   fromMetres: number,
   toMetres: number,
   budget: { readonly maxItems: number; readonly riderMetres: number },
+  footprints?: SettlementFootprint[],
 ): readonly ScatterItem[] {
   const found: ScatterItem[] = [];
   const villages: (readonly [number, number])[] = [];
-  settlementsAt(profile, origin, seed, fromMetres, toMetres, found, villages);
+  settlementsAt(profile, origin, seed, fromMetres, toMetres, found, villages, footprints);
   const edges: { readonly item: ScatterItem; readonly along: number }[] = [];
   fieldEdgesAt(profile, origin, seed, fromMetres, toMetres, villages, edges);
   edges.sort(
@@ -576,6 +581,7 @@ function settlementsAt(
   toMetres: number,
   found: ScatterItem[],
   villages: (readonly [number, number])[],
+  footprints: SettlementFootprint[] | undefined,
 ): void {
   const total = profile.totalDistance;
   const sites = Math.max(1, Math.round(total / SETTLEMENT_SPACING_METRES));
@@ -617,7 +623,6 @@ function settlementsAt(
         const along = centre - half + plot * PLOT_METRES;
         for (const plotSide of [1, -1] as const) {
           const hash = slotHash(seed, wrappedSite * 64 + plot, SITE_KEY + (plotSide === 1 ? 1 : 2));
-          if (uniformFrom(hash, STREAM_PLOT) >= PLOT_BUILT_SHARE) continue;
           // The church at the far end on the site's own side, the shops at the
           // middle on the other, houses on every other plot.
           const [building, lateral]: readonly [StructureKind, number] =
@@ -626,6 +631,19 @@ function settlementsAt(
               : plot === middle && plotSide === -side
                 ? ['shop-row', SETBACK_METRES - 1]
                 : ['building', SETBACK_METRES];
+          // #1534: the plot is the village's ground whether or not it is built
+          // on — an empty plot is a garden or a green, not a wood.
+          pushFootprint(
+            profile,
+            origin,
+            footprints,
+            building,
+            along,
+            lateral,
+            plotSide,
+            PLOT_METRES / 2,
+          );
+          if (uniformFrom(hash, STREAM_PLOT) >= PLOT_BUILT_SHARE) continue;
           const variant = Math.min(5, Math.floor(uniformFrom(hash, STREAM_VARIANT) * 6));
           admit(
             standing(profile, origin, seed, building, along, lateral * plotSide, variant, 'road'),
@@ -662,6 +680,7 @@ function settlementsAt(
       ];
       for (const [building, offset, lateral] of layout) {
         const along = centre + offset;
+        pushFootprint(profile, origin, footprints, building, along, lateral, side, 0);
         const variant = Math.min(5, Math.floor(uniformFrom(base, STREAM_VARIANT) * 6));
         admit(
           standing(profile, origin, seed, building, along, lateral * side, variant, 'road'),
@@ -795,4 +814,132 @@ export function clearOfBuildings(
         Math.hypot(item.x - building.x, item.z - building.z) >= BUILDING_CLEARANCE_METRES,
     ),
   );
+}
+
+/**
+ * How far past a settlement's buildings its cleared ground reaches, in metres:
+ * **6** — a back garden, and a broadleaf's crown kept off the eaves. #1534.
+ */
+export const SETTLEMENT_MARGIN_METRES = 6;
+
+/**
+ * One piece of a settlement's ground, cleared of trees, shrubs and rocks —
+ * #1534. A rectangle in plan, square to the drawn road at {@link along}: from
+ * the road's centreline out to {@link depth} on one side, and {@link half}
+ * either way along it.
+ *
+ * A village is one piece per plot per side, built on or not, each reaching
+ * {@link SETTLEMENT_MARGIN_METRES} past the back of the building that plot
+ * holds or would hold and overlapping its neighbours by the same, so a gentle
+ * bend leaves no wedge between two; a farmstead is one piece per building. So
+ * a settlement's footprint is its buildings, their gardens, and the ground
+ * between them and the road — the front gardens and, once #1535 lays them,
+ * the pavements.
+ *
+ * ⚠️ **Until #1534 nothing cleared this ground**: {@link clearOfBuildings}
+ * holds a tree {@link BUILDING_CLEARANCE_METRES} from a building's middle, and
+ * that left the front gardens, the empty plots and a church's or a row of
+ * shops' far end free to stand in.
+ */
+export interface SettlementFootprint {
+  /** The odometer reading, unwrapped, the piece is square to. */
+  readonly along: number;
+  /** The drawn road's centreline there, local metres. */
+  readonly x: number;
+  readonly z: number;
+  /** Unit, the way the road runs there. */
+  readonly alongX: number;
+  readonly alongZ: number;
+  /** Unit, across the road towards the piece's side. */
+  readonly acrossX: number;
+  readonly acrossZ: number;
+  /** How far either way along the road it reaches, metres. */
+  readonly half: number;
+  /** How far out from the centreline it reaches, metres. */
+  readonly depth: number;
+}
+
+/** The piece of ground one plot or building takes. @see SettlementFootprint */
+function pushFootprint(
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  footprints: SettlementFootprint[] | undefined,
+  kind: StructureKind,
+  along: number,
+  lateral: number,
+  side: number,
+  leastHalf: number,
+): void {
+  if (footprints === undefined) return;
+  const frame = frameAt(profile, origin, distanceOnRoute(profile, along));
+  if (frame === undefined) return;
+  // A building faces the road, so its own `x` runs along it and its `back`
+  // reaches away from it.
+  const shape = STRUCTURE_FOOTPRINTS[kind];
+  footprints.push({
+    along,
+    x: frame.x,
+    z: frame.z,
+    alongX: frame.normalZ,
+    alongZ: -frame.normalX,
+    acrossX: frame.normalX * side,
+    acrossZ: frame.normalZ * side,
+    half: Math.max(shape.x, leastHalf) + SETTLEMENT_MARGIN_METRES,
+    depth: lateral - shape.back + SETTLEMENT_MARGIN_METRES,
+  });
+}
+
+/** Whether a point in plan stands on a piece of a settlement's ground. */
+export function onSettlementGround(
+  point: { readonly x: number; readonly z: number },
+  footprint: SettlementFootprint,
+): boolean {
+  const dx = point.x - footprint.x;
+  const dz = point.z - footprint.z;
+  const along = dx * footprint.alongX + dz * footprint.alongZ;
+  const across = dx * footprint.acrossX + dz * footprint.acrossZ;
+  return Math.abs(along) <= footprint.half && across >= 0 && across <= footprint.depth;
+}
+
+/**
+ * The kinds a settlement's ground is cleared of — #1534: everything the
+ * realistic world's vegetation belt draws. A post marks a tight bend, which a
+ * village may stand on, so it stays.
+ */
+const CLEARED: ReadonlySet<string> = new Set(['tree-broadleaf', 'tree-conifer', 'shrub', 'rock']);
+
+/**
+ * The natural scenery, less every tree, shrub and rock standing on a
+ * settlement's ground — #1534. Pure, and a function of positions only.
+ */
+export function clearOfSettlements(
+  natural: readonly ScatterItem[],
+  footprints: readonly SettlementFootprint[],
+): readonly ScatterItem[] {
+  if (footprints.length === 0) return natural;
+  return natural.filter(
+    (item) =>
+      !CLEARED.has(item.kind) || !footprints.some((piece) => onSettlementGround(item, piece)),
+  );
+}
+
+/**
+ * Every piece of settlement ground {@link structuresAt} visits between two
+ * odometer readings — for the browser gate's probe, which holds what the
+ * realistic world drew against it. @see SettlementFootprint
+ *
+ * @unwired reached only from the browser gate's harness and the tests; the
+ * scene takes the same pieces from `structuresAt`'s `footprints`, in the one
+ * pass that places the buildings.
+ */
+export function settlementFootprintsAt(
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  seed: number,
+  fromMetres: number,
+  toMetres: number,
+): readonly SettlementFootprint[] {
+  const footprints: SettlementFootprint[] = [];
+  settlementsAt(profile, origin, seed, fromMetres, toMetres, [], [], footprints);
+  return footprints;
 }

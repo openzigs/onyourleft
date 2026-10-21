@@ -40,6 +40,8 @@ export function rideFrame(input: {
   readonly distance: number;
   readonly elapsed: number;
   readonly rung: Pick<QualitySettings, 'scatterItems' | 'structureItems'>;
+  /** #1534's control, `levers=-settlement-clearing`: the settlements' ground left wooded. */
+  readonly settlementsWooded?: boolean;
 }): SceneFrame {
   const start = atStartLine(input.profile);
   return sceneFrame({
@@ -57,5 +59,6 @@ export function rideFrame(input: {
     // ladder places less scenery as well as drawing less of it.
     scatterItems: input.rung.scatterItems,
     structureItems: input.rung.structureItems,
+    settlementsWooded: input.settlementsWooded,
   });
 }

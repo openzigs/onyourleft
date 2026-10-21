@@ -29,10 +29,15 @@ import {
   CHURCH_SETBACK_METRES,
   SETBACK_METRES,
   STRUCTURE_FOOTPRINTS,
+  SETTLEMENT_MARGIN_METRES,
   STRUCTURE_MAX_ITEMS,
+  clearOfSettlements,
   distinctPlaces,
+  onSettlementGround,
+  settlementFootprintsAt,
   structureClearance,
   structuresAt,
+  type SettlementFootprint,
 } from './settlements';
 import { atStartLine } from './simulation';
 import {
@@ -480,5 +485,127 @@ describe('nothing stands on the road, whichever stretch of it — #468 review B1
     // Non-vacuity: the fixture really does enclose the fields between the
     // two legs, so the assertion above had boundaries there to judge.
     expect(between).toBeGreaterThan(50);
+  });
+});
+
+describe('no tree, shrub or rock stands on a settlement’s ground — #1534', () => {
+  const CLEARED = new Set(['tree-broadleaf', 'tree-conifer', 'shrub', 'rock']);
+  const origin = corridorOrigin(farmland);
+  const seed = scatterSeed(farmland);
+  const start = atStartLine(farmland);
+
+  /** One frame at `at`, cleared or — the control — as it was before #1534. */
+  function frameAt(at: number, wooded: boolean): readonly ScatterItem[] {
+    return sceneFrame({
+      profile: farmland,
+      origin,
+      state: { ...start, ride: { ...start.ride, distance: metres(at) } },
+      settlementsWooded: wooded,
+    }).scatter;
+  }
+
+  const footprints = settlementFootprintsAt(farmland, origin, seed, 0, LONG);
+  const onGround = (item: { readonly x: number; readonly z: number }): boolean =>
+    footprints.some((piece) => onSettlementGround(item, piece));
+  const key = (item: ScatterItem): string => `${item.kind} ${String(item.x)} ${String(item.z)}`;
+  const buildings = built(farmland, 0, LONG).filter((item) => BUILDINGS.has(item.kind));
+
+  it('clears every frame through the real scene, where the control finds some standing', () => {
+    let cleared = 0;
+    let wooded = 0;
+    for (let at = 0; at < 8_000; at += 230) {
+      const drawn = frameAt(at, false).filter((item) => CLEARED.has(item.kind));
+      for (const item of drawn) {
+        expect(onGround(item), `${key(item)} at ${String(at)} m`).toBe(false);
+      }
+      cleared += drawn.length;
+      wooded += frameAt(at, true).filter((item) => CLEARED.has(item.kind) && onGround(item)).length;
+    }
+    // Non-vacuity both ways: the frames carry scenery, and the rule off leaves
+    // some of it on a settlement's ground.
+    expect(cleared).toBeGreaterThan(1_000);
+    expect(wooded).toBeGreaterThan(20);
+  });
+
+  it('takes away only what stands on the ground, and nothing else moves', () => {
+    let taken = 0;
+    for (let at = 0; at < 8_000; at += 460) {
+      const before = frameAt(at, true);
+      const after = new Set(frameAt(at, false).map(key));
+      for (const item of before) {
+        const kept = after.has(key(item));
+        if (!kept) taken += 1;
+        expect(kept, key(item)).toBe(!(CLEARED.has(item.kind) && onGround(item)));
+      }
+    }
+    expect(taken).toBeGreaterThan(0);
+  });
+
+  it('covers every building, its garden and the ground between it and the road', () => {
+    expect(buildings.length).toBeGreaterThan(40);
+    for (const building of buildings) {
+      const shape = STRUCTURE_FOOTPRINTS[building.kind as keyof typeof STRUCTURE_FOOTPRINTS];
+      // The building's own frame: `z` the way it faces (towards the road), `x` across that.
+      const cos = Math.cos(building.rotation);
+      const sin = Math.sin(building.rotation);
+      const at = (x: number, z: number): { x: number; z: number } => ({
+        x: building.x + x * cos + z * sin,
+        z: building.z - x * sin + z * cos,
+      });
+      const reach = SETTLEMENT_MARGIN_METRES - 0.5;
+      for (const [x, z] of [
+        [-shape.x - reach, shape.back - reach],
+        [shape.x + reach, shape.back - reach],
+        [0, 0],
+        [-shape.x, shape.front],
+        [shape.x, shape.front],
+      ] as const) {
+        expect(onGround(at(x, z)), `${building.kind} at ${String(x)}, ${String(z)}`).toBe(true);
+      }
+      // In front of it, out towards the road: the front garden and the pavement.
+      for (let towards = shape.front; towards < SETBACK_METRES - 4; towards += 1) {
+        expect(onGround(at(0, towards)), `${building.kind} ${String(towards)} m in front`).toBe(
+          true,
+        );
+      }
+    }
+  });
+
+  it('holds the ground of an empty plot too, and reaches no further than a farm’s yard', () => {
+    // A plot left empty is still a piece, so the pieces outnumber what is built.
+    expect(footprints.length).toBeGreaterThan(buildings.length);
+    const deepest = CHURCH_SETBACK_METRES - STRUCTURE_FOOTPRINTS.church.back;
+    for (const piece of footprints) {
+      expect(piece.depth).toBeLessThanOrEqual(
+        Math.max(deepest, 30 - STRUCTURE_FOOTPRINTS.barn.back) + SETTLEMENT_MARGIN_METRES,
+      );
+    }
+  });
+
+  it('records the ground whatever the structures’ budget keeps', () => {
+    const kept: SettlementFootprint[] = [];
+    structuresAt(farmland, origin, seed, 0, LONG, { maxItems: 0, riderMetres: 0 }, kept);
+    expect(kept).toEqual(footprints);
+  });
+
+  it('keeps a post, which marks a bend rather than growing there, and the far side of the road', () => {
+    const piece = footprints[0];
+    expect(piece).toBeDefined();
+    if (piece === undefined) return;
+    const item = (kind: ScatterItem['kind'], side: number): ScatterItem => ({
+      kind,
+      x: piece.x + piece.acrossX * 8 * side,
+      y: 0,
+      z: piece.z + piece.acrossZ * 8 * side,
+      rotation: 0,
+      scale: 1,
+      variant: 0,
+    });
+    const post = item('post', 1);
+    const across = item('shrub', -1);
+    expect(clearOfSettlements([item('shrub', 1), post, item('rock', 1), across], [piece])).toEqual([
+      post,
+      across,
+    ]);
   });
 });

@@ -3836,6 +3836,26 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     expect(bank.largest).toBeLessThanOrEqual(SURFACE_BOUNDS_TOLERANCE);
   });
 
+  test('draws no tree, shrub or rock on a village’s ground, where the same frame left wooded draws some — #1534', async ({
+    harnessRun,
+  }) => {
+    const { settlementClearing: clearing } = await realistic(harnessRun);
+    expect(clearing.measured).toBe(true);
+    console.log(
+      `#1534: ${String(clearing.pieces)} pieces of village ground; ` +
+        `${String(clearing.onGround)} of ${String(clearing.drawn)} instances on them, ` +
+        `${String(clearing.woodedOnGround)} of ${String(clearing.woodedDrawn)} left wooded`,
+    );
+    // The control: the same frame with the rule off draws vegetation on the
+    // village's ground, so a probe that read nothing, or a frame with no
+    // village in it, cannot pass the line after it.
+    expect(clearing.pieces).toBeGreaterThan(0);
+    expect(clearing.woodedOnGround).toBeGreaterThan(0);
+    expect(clearing.onGround).toBe(0);
+    // And the frame still has its countryside.
+    expect(clearing.drawn).toBeGreaterThan(0);
+  });
+
   test('stands a gantry at the finish, lettered from the app’s own glyphs, for two calls and only there — #679', async ({
     harnessRun,
   }) => {
