@@ -10,7 +10,7 @@ Claude Code loads this file whenever a session works on files under `packages/`,
 - Every file is **Apache-2.0**, and its header is `// SPDX-License-Identifier: Apache-2.0`. No GPL or
   AGPL dependency, build-time or shipped; a package exists to be droppable into somebody else's project.
 - Nothing here may import from `apps/` (`boundaries/dependencies`). `domain`, `physics`,
-  `sensors/src`, `sensors/protocol`, `protocol` and `analysis` name **no platform API at all** — two tsconfigs and
+  `sensors/src`, `sensors/protocol`, `protocol`, `analysis` and `map-features` name **no platform API at all** — two tsconfigs and
   the lint rules enforce it, and [`docs/agents/lint-boundaries.md`](../docs/agents/lint-boundaries.md) §4d says how.
 - Read the package's own `README.md` before changing it: it records provenance, units and decisions.
 
@@ -35,6 +35,7 @@ Which packages exist, and when each was created, is in [`docs/agents/packages.md
 | `packages/physics` | Power → speed. Pure computation. | Any rendering, BLE or platform API |
 | `packages/protocol` | The race-room wire format: messages, a bounded decoder, the version handshake (#768) | **Any platform API at all**, as `packages/domain` — and any production dependency |
 | `packages/analysis` | The platform-free core of a model-written ride write-up: the runner, the templates, the input builder, the write-up screen and its angle matchers, the hosted mask (#1094, ADR 0046 D-4, D-5) | **Any platform API at all**, `@onyourleft/store`, any model SDK |
+| `packages/map-features` | One Protomaps v4 tile into bounded, typed features in local metres, and the corridor's tile cover and polygon geometry (#1544, ADR 0054). A tile is untrusted input | **Any platform API at all**, `three`, `maplibre-gl`, `pmtiles`, `@onyourleft/store` |
 | `packages/store` | Local activity, stream, **recording-checkpoint** and **signed-record** persistence, the device keypair, and its migrations | Anything under `apps/` |
 
 ## §5, migrations

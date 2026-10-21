@@ -33,7 +33,7 @@
 /**
  * The current schema version.
  *
- * **19** since #1431; 18 since #1236; 17 since #898; 16 since #836; 15 since #793; 14 since #776 (#893's review); 13 since #800, 12 since #388. Version 2 added `streamSets` and `streamBlobs`; version 3
+ * **20** since #1545; 19 since #1431; 18 since #1236; 17 since #898; 16 since #836; 15 since #793; 14 since #776 (#893's review); 13 since #800, 12 since #388. Version 2 added `streamSets` and `streamBlobs`; version 3
  * added `recordingSessions` and `recordingChunks`; version 4 added `deviceKeys`
  * and `activityRecords`; version 5 added `segments`; version 6 added
  * `segmentEfforts` and `matchCheckpoints`; version 7 added `routes`; version 8
@@ -120,10 +120,22 @@
  * the ride (ADR 0048 D-10). Additive: a new store, and no existing record's
  * shape changes.
  *
+ * ⚠️ **Version 19 is #1431's `recentlyDeleted`** — rides the rider deleted,
+ * held thirty days so one deleted by mistake can be brought back. Additive: a
+ * new store, and no existing record's shape changes.
+ *
+ * ⚠️ **Version 20 is #1545's `worldCorridors`** — the map features in a
+ * route's corridor, read once from the basemap archive (ADR 0054 D-3), one row
+ * per owner and route. Additive: a new store, and no existing record's shape
+ * changes. ⚠️ **Its rows are ODbL 1.0 data, not Apache-2.0**, which is why
+ * they are a store of their own and never fields on a route (ADR 0012 D-3.1);
+ * they never leave the device, and they are a cache, so the rollback below
+ * drops them and loses nothing of the rider's.
+ *
  * Bumping this for a change that *does* alter a record's shape means adding a
  * migration pair.
  */
-export const SCHEMA_VERSION = 19;
+export const SCHEMA_VERSION = 20;
 
 /**
  * Dexie stores its schema version in IndexedDB multiplied by ten, leaving room
@@ -229,6 +241,13 @@ export const TABLE = {
    * athlete.
    */
   recentlyDeleted: 'recentlyDeleted',
+  /**
+   * #1545: the map features in a route's corridor (`records.ts`
+   * §`WorldCorridorRecord`), one row per owner and route, keyed by both so no
+   * row can be named without naming whose it is. ⚠️ **ODbL 1.0 data** (ADR
+   * 0054 D-3): never exported, synced or sent.
+   */
+  worldCorridors: 'worldCorridors',
 } as const;
 
 /**
@@ -416,6 +435,13 @@ export const INDEX = {
   recentlyDeletedByAthlete: 'athleteId',
   /** #1431: one athlete's Recently deleted, newest first, as one index range. */
   recentlyDeletedByAthleteAndDeletedAt: '[athleteId+deletedAt]',
+  /**
+   * #1545: `deleteAthlete`'s cascade. ⚠️ **`owner`, not `athleteId`**: that is
+   * what the record calls its owning column, and an index names a key path
+   * literally — `segmentByCreatorAndId` records the same point. The point
+   * lookup needs no index: the primary key is `[owner+routeId]`.
+   */
+  worldCorridorByOwner: 'owner',
 } as const;
 
 /**
@@ -929,6 +955,27 @@ export const STORES_V19: Readonly<Record<string, string>> = {
   ].join(', '),
 };
 
+/**
+ * Version 20 — #1545's world corridors, added beside the twenty-three stores
+ * that exist. Additive: a new store, no existing shape touched, so
+ * `SCHEMA_MIGRATIONS` gains nothing. Its rollback is export → downgrade →
+ * re-import, executed by `migrations.test.ts` §"version 20 rolls back": what a
+ * downgrade loses is the corridors, which are a cache of the basemap archive —
+ * the route keeps its own geometry, and #1539 reads the corridor again.
+ *
+ * ⚠️ **ODbL 1.0 data in an Apache-2.0 package**, kept apart for exactly that
+ * reason (ADR 0012 D-3, ADR 0054 D-3): its own store, never a field on
+ * `routes`, and nothing in it ever leaves the device.
+ *
+ * The primary key is compound and leads with the owner, for
+ * {@link STORES_V14}'s reason: no row can be read, replaced or deleted without
+ * naming whose it is.
+ */
+export const STORES_V20: Readonly<Record<string, string>> = {
+  // The twenty-three stores of versions 1 to 19 are inherited unchanged.
+  [TABLE.worldCorridors]: ['[owner+routeId]', INDEX.worldCorridorByOwner].join(', '),
+};
+
 export const SCHEMA_VERSIONS: readonly Readonly<Record<string, string>>[] = [
   STORES_V1,
   STORES_V2,
@@ -949,4 +996,5 @@ export const SCHEMA_VERSIONS: readonly Readonly<Record<string, string>>[] = [
   STORES_V17,
   STORES_V18,
   STORES_V19,
+  STORES_V20,
 ];

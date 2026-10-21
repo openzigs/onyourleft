@@ -97,6 +97,16 @@ packages/             Apache-2.0, without exception
                         since #14 the ERG writer, which cannot send a Reset
                         because the method is not on the type it holds
     web-bluetooth/      the browser transport (#40) — the one place a BluetoothDevice exists
+  map-features/       one z15 Protomaps v4 tile, already decompressed, into
+                      bounded, typed features in the corridor's local metres,
+                      and the corridor's tile cover, simplification, clipping,
+                      triangulation and rasterisation (#1544, ADR 0054).
+                      ⚠️ A tile is UNTRUSTED input: every limit is a refusal,
+                      never a throw, and a refusal names no coordinate and no
+                      tile x/y. It fetches nothing and holds no map data; it
+                      restates terrain.ts' projection, which
+                      `apps/web/src/game/map-features-projection.test.ts`
+                      holds equal. Platform-free, as `fit`'s two tsconfigs
   physics/            cycling power/speed model, Martin et al. 1998 (#88), and
                       the synthetic rider that composes #92's rule with it; and
                       since #487 the coefficient set a ride runs (`riding.ts`,
@@ -152,7 +162,8 @@ packages/             Apache-2.0, without exception
 **`apps/web`, `apps/mobile`, `apps/instance`, `packages/domain`, `packages/sensors`, `packages/fit`,
 `packages/store`, `packages/physics`, — since [#768](https://github.com/openzigs/onyourleft/issues/768)
 — `packages/protocol` and — since [#1094](https://github.com/openzigs/onyourleft/issues/1094) —
-`packages/analysis` exist.** `apps/instance` was created by
+`packages/analysis` and — since [#1544](https://github.com/openzigs/onyourleft/issues/1544) —
+`packages/map-features` exist.** `apps/instance` was created by
 [#767](https://github.com/openzigs/onyourleft/issues/767) on 2026-09-29, the first package that
 listens on a socket (ADR 0036).
 The first two were created by [#23](https://github.com/openzigs/onyourleft/issues/23) along with the

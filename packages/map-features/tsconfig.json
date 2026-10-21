@@ -1,0 +1,16 @@
+{
+  // The whole package: `src/` and its tests, plus this package's Vitest config.
+  //
+  // `types: ["node"]` here and NOT in tsconfig.platform-free.json is the point
+  // of having two files, as in packages/fit and packages/analysis: the tests
+  // read the clock and the heap, so the test program needs Node's types; the
+  // decoder that a browser, a native shell and an instance all run must not.
+  // ESLint's project service resolves a file to the nearest `tsconfig.json`,
+  // so this is the config that has to cover every file in the package.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2024"],
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts", "vitest.config.ts"]
+}
