@@ -42,6 +42,7 @@ import type { HorizonRelief, TerrainMesh } from './landform';
 import type { QualitySettings } from './quality';
 import type { RealisticWorldOutcome } from './realistic-assets';
 import type { ScatterItem } from './scatter';
+import type { VillageStreet } from './streets';
 import type { RoadCorridor } from './terrain';
 import type { BridgePart, WaterSurface } from './waterways';
 import type { WorldStyle } from './world';
@@ -292,6 +293,14 @@ export interface SceneFrame {
    * gate's wordmark board, by one instanced mesh.
    */
   readonly billboards: readonly Billboard[];
+  /**
+   * The village streets in view — #1535 (`streets.ts`): each village's kerbed
+   * pavements, the same objects every frame while the same villages are in
+   * view, drawn in both worlds by one mesh (`three-renderer.ts`
+   * §`PavementBelt`). Empty away from a village. NOT counted against the
+   * rung's `structureItems`: a street is one mesh, not items.
+   */
+  readonly streets: readonly VillageStreet[];
 }
 
 /** What {@link SceneFrame.water} carries. */

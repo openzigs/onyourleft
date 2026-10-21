@@ -567,6 +567,102 @@ function standing(
   };
 }
 
+/**
+ * One site's settlement, as the route and the seed decide it — #460. Shared
+ * since #1535 with `streets.ts`, so a pavement is laid beside exactly the
+ * village the houses stand in, from the same decision rather than a copy.
+ */
+export interface Site {
+  readonly kind: 'village' | 'farm';
+  /** The site's index along the route, unwrapped: a loop's second lap counts on. */
+  readonly site: number;
+  /** The same site on the route's first lap — what its hashes are drawn from. */
+  readonly wrappedSite: number;
+  /** Its middle, on the odometer (unwrapped). */
+  readonly centre: number;
+  /** Half its length along the road, in metres. */
+  readonly half: number;
+  /** The side its church (a village) or its buildings (a farmstead) stand on. */
+  readonly side: 1 | -1;
+}
+
+/** How many sites the route is divided into, and how long each is. */
+export function siteSpacing(profile: RouteProfile): {
+  readonly sites: number;
+  readonly span: number;
+} {
+  const sites = Math.max(1, Math.round(profile.totalDistance / SETTLEMENT_SPACING_METRES));
+  return { sites, span: profile.totalDistance / sites };
+}
+
+/**
+ * The settlement at one site, or `undefined` where there is none: open
+ * country, or ground that would not be built on. @see buildable
+ */
+export function siteAt(profile: RouteProfile, seed: number, site: number): Site | undefined {
+  const { sites, span } = siteSpacing(profile);
+  if (!profile.loop && (site < 0 || site >= sites)) return undefined;
+  const wrappedSite = ((site % sites) + sites) % sites;
+  const base = slotHash(seed, wrappedSite, SITE_KEY);
+  const roll = uniformFrom(base, STREAM_KIND);
+  const kind =
+    roll < VILLAGE_CHANCE
+      ? 'village'
+      : roll < VILLAGE_CHANCE + FARMSTEAD_CHANCE
+        ? 'farm'
+        : undefined;
+  if (kind === undefined) return undefined;
+  // Where in its site, clear of the site's ends so two neighbours' plots
+  // never overlap.
+  const centre = site * span + span * (0.3 + 0.4 * uniformFrom(base, STREAM_PLACE));
+  const half = kind === 'village' ? VILLAGE_METRES / 2 : 20;
+  if (!buildable(profile, seed, centre - half, centre + half, SETBACK_METRES)) return undefined;
+  const side = uniformFrom(base, STREAM_SIDE) < 0.5 ? 1 : -1;
+  return { kind, site, wrappedSite, centre, half, side };
+}
+
+/** One built plot of a village: what stands on it, where, and how far back. */
+export interface Plot {
+  readonly along: number;
+  readonly side: 1 | -1;
+  readonly kind: StructureKind;
+  readonly lateral: number;
+  readonly variant: number;
+}
+
+/**
+ * Every BUILT plot of a village, in plot order and the right side before the
+ * left — #460's layout, and since #1535 what `streets.ts` lays a pavement
+ * along: a side of the street with no house on it has none.
+ */
+export function villagePlots(seed: number, village: Site): readonly Plot[] {
+  const plots = Math.floor(VILLAGE_METRES / PLOT_METRES) + 1;
+  const middle = Math.floor(plots / 2);
+  const built: Plot[] = [];
+  for (let plot = 0; plot < plots; plot += 1) {
+    const along = village.centre - village.half + plot * PLOT_METRES;
+    for (const plotSide of [1, -1] as const) {
+      const hash = slotHash(
+        seed,
+        village.wrappedSite * 64 + plot,
+        SITE_KEY + (plotSide === 1 ? 1 : 2),
+      );
+      if (uniformFrom(hash, STREAM_PLOT) >= PLOT_BUILT_SHARE) continue;
+      // The church at the far end on the site's own side, the shops at the
+      // middle on the other, houses on every other plot.
+      const [kind, lateral]: readonly [StructureKind, number] =
+        plot === plots - 1 && plotSide === village.side
+          ? ['church', CHURCH_SETBACK_METRES]
+          : plot === middle && plotSide === -village.side
+            ? ['shop-row', SETBACK_METRES - 1]
+            : ['building', SETBACK_METRES];
+      const variant = Math.min(5, Math.floor(uniformFrom(hash, STREAM_VARIANT) * 6));
+      built.push({ along, side: plotSide, kind, lateral, variant });
+    }
+  }
+  return built;
+}
+
 /** The villages and farmsteads, and their signposts. */
 function settlementsAt(
   profile: RouteProfile,
@@ -577,9 +673,7 @@ function settlementsAt(
   found: ScatterItem[],
   villages: (readonly [number, number])[],
 ): void {
-  const total = profile.totalDistance;
-  const sites = Math.max(1, Math.round(total / SETTLEMENT_SPACING_METRES));
-  const span = total / sites;
+  const { sites, span } = siteSpacing(profile);
   const reach = VILLAGE_METRES / 2 + PLOT_METRES;
   const first = Math.floor((fromMetres - reach) / span);
   // ⚠️ **Never more sites than the route has** — `scatter.ts` §`scatterAt`'s
@@ -588,50 +682,29 @@ function settlementsAt(
   // tens of thousands of sites a frame — every one of them the same few,
   // placed again on top of themselves.
   const last = Math.min(Math.floor((toMetres + reach) / span), first + sites + 1);
-  for (let site = first; site <= last; site += 1) {
-    if (!profile.loop && (site < 0 || site >= sites)) continue;
-    const wrappedSite = ((site % sites) + sites) % sites;
-    const base = slotHash(seed, wrappedSite, SITE_KEY);
-    const roll = uniformFrom(base, STREAM_KIND);
-    const kind =
-      roll < VILLAGE_CHANCE
-        ? 'village'
-        : roll < VILLAGE_CHANCE + FARMSTEAD_CHANCE
-          ? 'farm'
-          : undefined;
-    if (kind === undefined) continue;
-    // Where in its site, clear of the site's ends so two neighbours' plots
-    // never overlap.
-    const centre = site * span + span * (0.3 + 0.4 * uniformFrom(base, STREAM_PLACE));
-    const half = kind === 'village' ? VILLAGE_METRES / 2 : 20;
-    if (!buildable(profile, seed, centre - half, centre + half, SETBACK_METRES)) continue;
-    const side = uniformFrom(base, STREAM_SIDE) < 0.5 ? 1 : -1;
+  for (let index = first; index <= last; index += 1) {
+    const site = siteAt(profile, seed, index);
+    if (site === undefined) continue;
+    const { centre, half, side } = site;
     const admit = (item: ScatterItem | undefined, along: number): void => {
       if (item !== undefined && along >= fromMetres && along < toMetres) found.push(item);
     };
-    if (kind === 'village') {
+    if (site.kind === 'village') {
       villages.push([centre - half - PLOT_METRES, centre + half + PLOT_METRES]);
-      const plots = Math.floor(VILLAGE_METRES / PLOT_METRES) + 1;
-      const middle = Math.floor(plots / 2);
-      for (let plot = 0; plot < plots; plot += 1) {
-        const along = centre - half + plot * PLOT_METRES;
-        for (const plotSide of [1, -1] as const) {
-          const hash = slotHash(seed, wrappedSite * 64 + plot, SITE_KEY + (plotSide === 1 ? 1 : 2));
-          if (uniformFrom(hash, STREAM_PLOT) >= PLOT_BUILT_SHARE) continue;
-          // The church at the far end on the site's own side, the shops at the
-          // middle on the other, houses on every other plot.
-          const [building, lateral]: readonly [StructureKind, number] =
-            plot === plots - 1 && plotSide === side
-              ? ['church', CHURCH_SETBACK_METRES]
-              : plot === middle && plotSide === -side
-                ? ['shop-row', SETBACK_METRES - 1]
-                : ['building', SETBACK_METRES];
-          const variant = Math.min(5, Math.floor(uniformFrom(hash, STREAM_VARIANT) * 6));
-          admit(
-            standing(profile, origin, seed, building, along, lateral * plotSide, variant, 'road'),
-            along,
-          );
-        }
+      for (const plot of villagePlots(seed, site)) {
+        admit(
+          standing(
+            profile,
+            origin,
+            seed,
+            plot.kind,
+            plot.along,
+            plot.lateral * plot.side,
+            plot.variant,
+            'road',
+          ),
+          plot.along,
+        );
       }
       // A signpost at each way in, on the verge, turned along the road.
       for (const [along, verge] of [
@@ -654,6 +727,7 @@ function settlementsAt(
       }
     } else {
       // A farmstead: a farmhouse, a barn and a shed, grouped on one side.
+      const base = slotHash(seed, site.wrappedSite, SITE_KEY);
       const [near, far] = FARM_SETBACK_METRES;
       const layout: readonly (readonly [StructureKind, number, number])[] = [
         ['building', 0, near],

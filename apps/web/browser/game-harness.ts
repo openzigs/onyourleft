@@ -99,7 +99,18 @@ import {
   valleyRoute,
 } from '../src/game/route-fixtures-testing';
 import { GRADIENT_TINT_FULL_SCALE_PERCENT } from '../src/game/terrain';
-import { structuresAt } from '../src/game/settlements';
+import {
+  PLOT_METRES,
+  siteAt,
+  siteSpacing,
+  structuresAt,
+  villagePlots,
+} from '../src/game/settlements';
+import {
+  KERB_HEIGHT_METRES,
+  KERB_LATERAL_METRES,
+  PAVEMENT_WIDTH_METRES,
+} from '../src/game/streets';
 import { waterways } from '../src/game/waterways';
 import { HORIZON_RADIUS_METRES, HORIZON_SEGMENTS, VERGE_DROP_METRES } from '../src/game/landform';
 import {
@@ -160,6 +171,8 @@ import {
   loadGameWordmark,
   logoBoardsOf,
   logosShownOf,
+  pavementsShownOf,
+  pavementTrianglesOf,
   wordmarkOrientationOf,
   type WordmarkOrientation,
   waterFresnelOf,
@@ -345,6 +358,8 @@ interface SettlementMeasurement {
   /** Milliseconds a frame, with the structures and without. */
   readonly withMs: number;
   readonly withoutMs: number;
+  /** #1535: the village's pavement, in the stylised world. @see pavementProbe */
+  readonly pavement: PavementMeasurement;
 }
 
 /** What {@link shadowMapProbe} publishes. */
@@ -2450,6 +2465,7 @@ function settlementProbe(): SettlementMeasurement {
     drawCallsBare: 0,
     withMs: 0,
     withoutMs: 0,
+    pavement: NO_PAVEMENT,
   };
   countingDrawCalls((calls) => {
     const view = threeGameRenderer.create(canvas, NO_RIDER_SHADOWS);
@@ -2486,6 +2502,134 @@ function settlementProbe(): SettlementMeasurement {
     };
     view.destroy();
   });
+  // #1535, on a view of its own: `pavementProbe` counts its own draw calls.
+  const pavementCanvas = document.createElement('canvas');
+  pavementCanvas.width = 600;
+  pavementCanvas.height = 400;
+  const pavementView = threeGameRenderer.create(pavementCanvas, NO_RIDER_SHADOWS);
+  pavementView.resize(600, 400);
+  const pavementGl = pavementCanvas.getContext('webgl2');
+  if (pavementGl !== null) {
+    measured = { ...measured, pavement: pavementProbe(pavementView, pavementGl, pavementCanvas) };
+  }
+  pavementView.destroy();
+  return measured;
+}
+
+/** What {@link pavementProbe} publishes — #1535. */
+interface PavementMeasurement {
+  /** Pavement triangles the view drew beside a village, and in open country — the control. */
+  readonly triangles: number;
+  readonly trianglesOpen: number;
+  /** Draw calls on the village frame with the pavements, and with them switched off. */
+  readonly drawCalls: number;
+  readonly drawCallsOff: number;
+  /**
+   * The mean colour of a 3 × 3 square at a known point on a pavement, drawn,
+   * and with the pavements switched off — when the same square must read
+   * whatever is under it, or the probe was never reading the pavement.
+   */
+  readonly onRgb: readonly number[];
+  readonly offRgb: readonly number[];
+}
+
+/** What {@link pavementProbe} reports when it did not run. */
+const NO_PAVEMENT: PavementMeasurement = {
+  triangles: 0,
+  trianglesOpen: 0,
+  drawCalls: 0,
+  drawCallsOff: 0,
+  onRgb: [],
+  offRgb: [],
+};
+
+/**
+ * #1535: a village's pavement, drawn by `view` in whichever world it draws.
+ * The point read is on the road's LEFT, away from the rider, in the middle of
+ * the pavement and of that side's built plots — known from the village's
+ * layout (`settlements.ts` §`villagePlots`), not from the mesh that is being
+ * tested — 25 m up the road from the camera's centreline.
+ */
+function pavementProbe(
+  view: ReturnType<typeof threeGameRenderer.create>,
+  gl: WebGL2RenderingContext,
+  canvas: HTMLCanvasElement,
+): PavementMeasurement {
+  const profile = northRouteForHarness();
+  const origin = corridorOrigin(profile);
+  const seed = scatterSeed(profile);
+  const { sites } = siteSpacing(profile);
+  const villages = [...Array(sites).keys()]
+    .map((index) => siteAt(profile, seed, index))
+    .filter((site) => site?.kind === 'village');
+  const left = villages
+    .map((site) =>
+      site === undefined
+        ? []
+        : villagePlots(seed, site)
+            .filter((plot) => plot.side === -1)
+            .map((plot) => plot.along),
+    )
+    .find((plots) => plots.length >= 3);
+  if (left === undefined) return NO_PAVEMENT;
+  const middle = (Math.min(...left) + Math.max(...left)) / 2;
+  const start = atStartLine(profile);
+  const frameAt = (distance: number): SceneFrame =>
+    sceneFrame({
+      profile,
+      origin,
+      state: { ...start, ride: { ...start.ride, distance: metres(distance) } },
+    });
+  // The camera's centreline is a few metres behind the rider: 25 m ahead of
+  // it is about 20 m past the rider, the middle of the side's plots.
+  const village = frameAt(middle - 20);
+  const road = onTheRoad(village, 25, -(KERB_LATERAL_METRES + PAVEMENT_WIDTH_METRES / 2));
+  const point = { ...road, y: road.y + KERB_HEIGHT_METRES };
+  const meanRgb = (): number[] => {
+    const centre = pixelFor(village, canvas, point);
+    const pixels = readRegion(gl, Math.round(centre.x) - 1, Math.round(centre.y) - 1, 3, 3);
+    const sums = [0, 0, 0];
+    for (let at = 0; at < pixels.length; at += 4) {
+      for (let channel = 0; channel < 3; channel += 1) {
+        sums[channel] = (sums[channel] ?? 0) + (pixels[at + channel] ?? 0);
+      }
+    }
+    return sums.map((sum) => sum / 9);
+  };
+  let measured = NO_PAVEMENT;
+  countingDrawCalls((calls) => {
+    const drawn = (): number => {
+      view.render(village);
+      const before = calls();
+      view.render(village);
+      return calls() - before;
+    };
+    const drawCalls = drawn();
+    const onRgb = meanRgb();
+    const triangles = pavementTrianglesOf(view);
+    pavementsShownOf(view, false);
+    const drawCallsOff = drawn();
+    const offRgb = meanRgb();
+    pavementsShownOf(view, true);
+    // The control: open country, a frame whose whole corridor touches no
+    // village — found from the sites, not from the streets.
+    const open = [...Array(120).keys()]
+      .map((step) => step * 50)
+      .find((distance) =>
+        villages.every(
+          (site) =>
+            site === undefined ||
+            site.centre + site.half + PLOT_METRES < distance - 100 ||
+            site.centre - site.half - PLOT_METRES > distance + 500,
+        ),
+      );
+    let trianglesOpen = Number.NaN;
+    if (open !== undefined) {
+      view.render(frameAt(open));
+      trianglesOpen = pavementTrianglesOf(view);
+    }
+    measured = { triangles, trianglesOpen, drawCalls, drawCallsOff, onRgb, offRgb };
+  });
   return measured;
 }
 
@@ -2503,6 +2647,7 @@ const NO_SETTLEMENT: SettlementMeasurement = {
   drawCallsBare: 0,
   withMs: 0,
   withoutMs: 0,
+  pavement: NO_PAVEMENT,
 };
 
 /** What {@link waterProbe} reports when it did not run. */
@@ -4666,6 +4811,8 @@ export interface RealisticMeasurement {
   readonly windowGlass: readonly number[];
   readonly windowControl: readonly number[];
   readonly windowWall: readonly number[];
+  /** #1535: a village's pavement in ambientCG's paving. @see pavementProbe */
+  readonly pavement: PavementMeasurement;
   /** #621: two trees and two houses of one shape, tinted and not. @see tintProbe */
   readonly tint: TintMeasurement;
   /** #620: the ground under a tree's blob and 5 m from it, with and without the blobs. @see groundBlobProbe */
@@ -6459,6 +6606,7 @@ const NO_REALISTIC: RealisticMeasurement = {
   windowGlass: [],
   windowControl: [],
   windowWall: [],
+  pavement: NO_PAVEMENT,
   tint: {
     trees: [],
     treesControl: [],
@@ -7979,6 +8127,10 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   const tint = tintProbe(view, gl, canvas, riding(level, 400));
   phaseEnds('realistic: seeded tints');
 
+  // #1535, on the same view: a village's pavement, in ambientCG's paving.
+  const pavement = pavementProbe(view, gl, canvas);
+  phaseEnds('realistic: pavement — #1535');
+
   // #624, on the same view and the same road.
   const tread = treadProbe(view, gl, canvas, riding(level, 400));
   phaseEnds('realistic: the tread — #624');
@@ -8213,6 +8365,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     windowGlass,
     windowControl,
     windowWall,
+    pavement,
     tint,
     grounding,
     tread,

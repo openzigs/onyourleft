@@ -37,7 +37,8 @@ import {
   type BlobCasters,
 } from './ground-blob';
 import { terrainCorridor } from './landform';
-import { hillRoute } from './route-fixtures-testing';
+import { hillRoute, northRoute } from './route-fixtures-testing';
+import { streetsAt, type VillageStreet } from './streets';
 import { scatterSeed } from './scatter';
 import { corridorOrigin, roadCorridor } from './terrain';
 import { worldStyle } from './world';
@@ -99,6 +100,8 @@ import {
   evictRealisticWorldFromGpu,
   loadRealisticWorld,
   materialLayers,
+  PAVEMENT_COLOUR,
+  PavementBelt,
   mergeShapeMaterials,
   photographicGroundMaterial,
   photographicRoadMaterial,
@@ -1413,7 +1416,10 @@ describe('the realistic structures — ADR 0026 D-12 layer 3, #475', () => {
       ]),
     );
     const belt = new RealisticStructureBelts(textures);
-    for (const surface of [...PHOTOGRAPHIC_STRUCTURE_SURFACES, 'painted', 'glass'] as const) {
+    // #1535: the paving is the pavements' (`PavementBelt`), and no structure's.
+    expect(belt.beltOf('paving')).toBeUndefined();
+    const worn = PHOTOGRAPHIC_STRUCTURE_SURFACES.filter((surface) => surface !== 'paving');
+    for (const surface of [...worn, 'painted', 'glass'] as const) {
       const meshes = STRUCTURE_KINDS.flatMap((kind) => belt.beltOf(surface)?.meshesOf(kind) ?? []);
       expect(meshes.length, surface).toBeGreaterThan(0);
       for (const mesh of meshes) {
@@ -1466,8 +1472,14 @@ describe('the realistic structures — ADR 0026 D-12 layer 3, #475', () => {
 
   it('has no surface nothing wears, and wears no surface it has no maps for', () => {
     const worn = new Set<StructureSurface>(STRUCTURE_KINDS.flatMap(realisticStructureSurfaces));
+    // #1535: every photograph but the paving, which the pavements wear —
+    // §"the village pavements" holds `PavementBelt` to it.
     expect([...worn].sort()).toEqual(
-      [...PHOTOGRAPHIC_STRUCTURE_SURFACES, 'painted', 'glass'].sort(),
+      [
+        ...PHOTOGRAPHIC_STRUCTURE_SURFACES.filter((surface) => surface !== 'paving'),
+        'painted',
+        'glass',
+      ].sort(),
     );
   });
 });
@@ -3466,3 +3478,97 @@ function renderTargetsIn(source: string): readonly string[] {
   visit(file);
   return found;
 }
+
+describe('the village pavements — #1535', () => {
+  const farmland = northRoute(6_000, () => 40);
+  const streets = streetsAt(
+    farmland,
+    corridorOrigin(farmland),
+    scatterSeed(farmland),
+    0,
+    farmland.totalDistance,
+  );
+  const paving = { colour: aTexture(), normal: aTexture() };
+  const triangles = (list: readonly VillageStreet[]): number =>
+    list.reduce((sum, street) => sum + street.pavement.indices.length / 3, 0);
+
+  it('wears the paving photograph in the realistic world, constructed and in the air', () => {
+    const belt = new PavementBelt('realistic', paving);
+    const material = belt.mesh.material as unknown as {
+      type: string;
+      map: unknown;
+      normalMap: unknown;
+    };
+    expect(material.type).toBe('MeshStandardMaterial');
+    expect(material.map).toBe(paving.colour);
+    expect(material.normalMap).toBe(paving.normal);
+    expect(isConstructedMaterial(belt.mesh.material as never)).toBe(true);
+    expect(breathesTheAir(belt.mesh.material as never)).toBe(true);
+    expect(readsTextureLodBias(belt.mesh.material as never)).toBe(true);
+    belt.dispose();
+  });
+
+  it('is the stylised world’s own grey there, lit or flat by the rung', () => {
+    const belt = new PavementBelt('stylised');
+    const colourOf = (): number =>
+      (belt.mesh.material as unknown as { color: { getHex: () => number } }).color.getHex();
+    expect(typeOf(belt.mesh)).toBe('MeshLambertMaterial');
+    expect(colourOf()).toBe(PAVEMENT_COLOUR);
+    belt.setShading('flat');
+    expect(typeOf(belt.mesh)).toBe('MeshBasicMaterial');
+    expect(colourOf()).toBe(PAVEMENT_COLOUR);
+    belt.dispose();
+  });
+
+  it('draws every street it is handed as one mesh, flags the photograph’s size', () => {
+    expect(streets.length).toBeGreaterThan(1);
+    const belt = new PavementBelt('realistic', paving);
+    belt.update(streets);
+    expect(belt.mesh.visible).toBe(true);
+    const geometry = belt.mesh.geometry;
+    expect((geometry.index?.count ?? 0) / 3).toBe(triangles(streets));
+    // Texture coordinates in repeats of the photograph, from the street's metres.
+    const tile = REALISTIC_STRUCTURE_SURFACES.paving.tileMetres;
+    const uv = geometry.getAttribute('uv');
+    const first = (streets[0] as VillageStreet).pavement.uvs;
+    for (let at = 0; at < 8; at += 1) {
+      expect(uv.getX(at) * tile).toBeCloseTo(first[at * 2] as number, 4);
+      expect(uv.getY(at) * tile).toBeCloseTo(first[at * 2 + 1] as number, 4);
+    }
+    // The second street's indices point at its own vertices, after the first's.
+    const second = (streets[1] as VillageStreet).pavement;
+    const offset = (streets[0] as VillageStreet).pavement.positions.length / 3;
+    const start = (streets[0] as VillageStreet).pavement.indices.length;
+    expect(geometry.index?.getX(start)).toBe((second.indices[0] as number) + offset);
+    belt.dispose();
+  });
+
+  it('uploads nothing while the streets are the same, and empties when there are none', () => {
+    const belt = new PavementBelt('stylised');
+    belt.update(streets);
+    const built = belt.mesh.geometry;
+    belt.update([...streets]);
+    expect(belt.mesh.geometry).toBe(built);
+    belt.update(streets.slice(1));
+    expect(belt.mesh.geometry).not.toBe(built);
+    expect((belt.mesh.geometry.index?.count ?? 0) / 3).toBe(triangles(streets.slice(1)));
+    belt.update([]);
+    expect(belt.mesh.visible).toBe(false);
+    expect(belt.mesh.geometry.index?.count ?? 0).toBe(0);
+    belt.dispose();
+  });
+
+  it('draws nothing in the world not drawn, or with the browser gate’s control on', () => {
+    const belt = new PavementBelt('stylised');
+    belt.setShown(false);
+    belt.update(streets);
+    expect(belt.mesh.visible).toBe(false);
+    belt.setShown(true);
+    belt.update(streets);
+    expect(belt.mesh.visible).toBe(true);
+    belt.switchOn(false);
+    belt.update(streets);
+    expect(belt.mesh.visible).toBe(false);
+    belt.dispose();
+  });
+});
