@@ -110,6 +110,7 @@ import {
   lateralReachMetres,
   loadSceneryModels,
   prepareSceneryGeometry,
+  projectedBoxInMetres,
   RealisticStructureBelts,
   PREPARE_FENCE_LIMIT_MS,
   RiderBelt,
@@ -3741,5 +3742,38 @@ describe('waiting for the GPU after the warm-up draw — #547', () => {
       ),
     ).resolves.toBeUndefined();
     expect(deleted.looks()).toBe(0);
+  });
+});
+
+describe('projectedBoxInMetres on a map that is not square - #1548', () => {
+  it('divides a wall across by `across` and up by `up`, each on its own axis', () => {
+    // A box 8 wide, 6 tall, 10 deep, so no two axes read alike.
+    const projected = projectedBoxInMetres(8, 6, 10, { across: 4, up: 2 });
+    const position = projected.getAttribute('position');
+    const normal = projected.getAttribute('normal');
+    const uv = projected.getAttribute('uv');
+    const seen = { x: 0, y: 0, z: 0 };
+    for (let i = 0; i < position.count; i += 1) {
+      const x = position.getX(i);
+      const y = position.getY(i);
+      const z = position.getZ(i);
+      if (Math.abs(normal.getX(i)) > 0.5) {
+        // a wall facing x reads (z, y)
+        expect(uv.getX(i)).toBeCloseTo(z / 4);
+        expect(uv.getY(i)).toBeCloseTo(y / 2);
+        seen.x += 1;
+      } else if (Math.abs(normal.getY(i)) > 0.5) {
+        // a roof reads (x, z)
+        expect(uv.getX(i)).toBeCloseTo(x / 4);
+        expect(uv.getY(i)).toBeCloseTo(z / 2);
+        seen.y += 1;
+      } else {
+        // a wall facing z reads (x, y)
+        expect(uv.getX(i)).toBeCloseTo(x / 4);
+        expect(uv.getY(i)).toBeCloseTo(y / 2);
+        seen.z += 1;
+      }
+    }
+    expect(seen).toEqual({ x: 12, y: 12, z: 12 });
   });
 });
