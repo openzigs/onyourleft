@@ -12,7 +12,8 @@
  * plaintext after phase 2: the statements of reasons, their appeal, and the
  * two room routes a rider reports and a host removes by. Its second amendment
  * of 2026-10-16 (#788) adds the public rooms' listing and joining, in the
- * room routes' row.
+ * room routes' row. Its amendment of 2026-10-21 (#1516) adds blocking a
+ * rider from a race's result, by their row, in the room moderation row.
  *
  * The COMMITTED list, as `phase-one.ts` is, and held to the route table the
  * same way: `sealed/phase-one.test.ts` compares the table with BOTH lists in
@@ -43,7 +44,8 @@ const ROOMS = 'The room routes’ HTTP side (D-14 Q5: the sockets are not sealed
 const BLOCKS_AND_REPORTS = 'A rider’s own blocks and reports';
 /** The rows ADR 0047's amendment of 2026-10-16 adds to D-7's table (#1382). */
 const STATEMENTS = 'The statements of reasons about a rider, and their appeal against one';
-const ROOM_MODERATION = 'A report from inside a room, and a host removing a rider from their room';
+const ROOM_MODERATION =
+  'A report from inside a room, a block from a race’s result, and a host removing a rider from their room';
 
 export const PHASE_TWO_SEALED_ROUTES: readonly PhaseOneRoute[] = [
   // Every sign-in, a key the instance holds included; registering a new key
@@ -78,6 +80,7 @@ export const PHASE_TWO_SEALED_ROUTES: readonly PhaseOneRoute[] = [
   only('GET', '/v1/statements', STATEMENTS),
   only('POST', '/v1/statements/{statementId}/appeal', STATEMENTS),
   only('POST', '/v1/rooms/{roomId}/reports', ROOM_MODERATION),
+  only('POST', '/v1/rooms/{roomId}/blocks', ROOM_MODERATION),
   only('POST', '/v1/rooms/{roomId}/remove', ROOM_MODERATION),
   // #788, ADR 0047's second amendment of 2026-10-16: public rooms, sealed
   // from the first, in the room routes' own row.

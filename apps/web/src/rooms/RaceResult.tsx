@@ -26,15 +26,30 @@
  * press, and says plainly when the race is still being ridden — or, for a
  * race that is over with no result (a restart interrupted it, #948 N-d), that
  * there is none and never will be, rather than "ask again later" for ever.
+ *
+ * ## Blocking a rider from here — #1516
+ *
+ * Each row with another rider's NAME on it carries *Block*. This device never
+ * holds another rider's athlete id, so the block goes by the row
+ * (`RoomsPort.blockRider`, the instance's `POST /v1/rooms/{roomId}/blocks`),
+ * and the instance blocks only a rider the result names to this rider — so
+ * there is no *Block* on "a rider" or on the rider's own line. It is here and
+ * not on the HUD: a race is where another rider has a name, and the HUD of a
+ * phone on its side has no room for a fourth control beside *Report*'s
+ * reasons (measured: it ran off the stage).
+ *
+ * A press asks first, because the app cannot undo a block yet (it never
+ * holds the id to unblock by). ⚠️ Every sentence of it is draft wording for
+ * the owner's approval.
  */
 
-import { useEffect, useState, type JSX } from 'react';
+import { useEffect, useRef, useState, type JSX } from 'react';
 
 import { formatModerationItem } from '@onyourleft/domain';
 
 import { Button } from '../design/Button';
 import { StatusMessage } from '../design/StatusMessage';
-import type { RaceResultRow, RoomsPort } from '../net/rooms-port';
+import type { RaceBlockAnswer, RaceResultRow, RoomsPort } from '../net/rooms-port';
 import { raceResultLines } from './race-result';
 import { ROOMS_REFUSAL_TEXT, ROOMS_UNREACHABLE_TEXT } from './RoomPanel';
 
@@ -64,6 +79,34 @@ export const RACE_REFERENCES_SUMMARY = 'References, to report something in this 
 export const RACE_REFERENCES_TEXT =
   'To tell the instance’s moderator about one row of this result, or about the race’s route, ' +
   'copy its reference into the instance’s notice page. About links to it.';
+
+/** #1516: every word of *Block* on a result. ⚠️ Draft wording for the owner's approval. */
+export const RACE_BLOCK_TEXT = {
+  /** The control: "Block", and the rider's name visually hidden after it. */
+  open: 'Block',
+  /** What a press asks first. */
+  question: (rider: string): string =>
+    `Block ${rider}? From your next ride, neither of you is named to the other in a race, and ` +
+    `a public room keeps you apart. ${rider} is not told. The app cannot undo a block yet.`,
+  confirm: (rider: string): string => `Block ${rider}`,
+  cancel: 'Cancel',
+  sending: 'Sending the block…',
+  answers: {
+    blocked: (rider: string): string => `${rider} is blocked.`,
+    refused: 'Not blocked: your instance refused the block.',
+    unreachable: 'Not blocked: your instance could not be reached.',
+  },
+} as const;
+
+function blockAnswerText(answer: RaceBlockAnswer, rider: string): string {
+  if (answer.kind === 'blocked') return RACE_BLOCK_TEXT.answers.blocked(rider);
+  return RACE_BLOCK_TEXT.answers[answer.kind];
+}
+
+/** Where a block from one row of the result is — #1516. One row at a time. */
+type Blocking =
+  | { readonly row: number; readonly kind: 'asking' }
+  | { readonly row: number; readonly kind: 'answered'; readonly text: string };
 
 /** The one control that asks. */
 export const ASK_FOR_RESULT_LABEL = 'Show the race’s result';
@@ -95,6 +138,30 @@ export function RaceResult(props: RaceResultProps): JSX.Element {
     finishers === undefined ? { kind: 'waiting', notOver: false } : { kind: 'asking' },
   );
   const wait = props.wait ?? ((ms: number) => new Promise<void>((done) => setTimeout(done, ms)));
+  const [blocking, setBlocking] = useState<Blocking | undefined>(undefined);
+  /** The rows blocked from here, so their *Block* is gone. */
+  const [blocked, setBlocked] = useState<ReadonlySet<number>>(new Set());
+  const blockAnswer = useRef<HTMLParagraphElement>(null);
+  /** The row whose question was cancelled: its *Block*, back in its place, takes focus. */
+  const [cancelled, setCancelled] = useState<number | undefined>(undefined);
+  const answeredText = blocking?.kind === 'answered' ? blocking.text : undefined;
+  useEffect(() => {
+    // The confirming control is gone: focus goes to what became of the block.
+    if (answeredText !== undefined) blockAnswer.current?.focus();
+  }, [answeredText]);
+
+  const block = (row: number, rider: string): void => {
+    setBlocking({ row, kind: 'answered', text: RACE_BLOCK_TEXT.sending });
+    void rooms.blockRider(roomId, row).then(
+      (answer) => {
+        if (answer.kind === 'blocked') setBlocked((before) => new Set([...before, row]));
+        setBlocking({ row, kind: 'answered', text: blockAnswerText(answer, rider) });
+      },
+      () => {
+        setBlocking({ row, kind: 'answered', text: RACE_BLOCK_TEXT.answers.unreachable });
+      },
+    );
+  };
 
   /** One ask, on the rider's press, for a race they left before it was over. */
   const askOnce = (): void => {
@@ -172,20 +239,70 @@ export function RaceResult(props: RaceResultProps): JSX.Element {
             everyone who rode.
           </p>
           <ol className="oyl-race-result__rows">
-            {raceResultLines(shown.rows, props.ownWatts).map((line, index) => (
-              <li key={index} {...(line.you ? { 'aria-current': 'true' } : {})}>
-                <span className="oyl-race-result__place">{line.place}</span>{' '}
-                <span className="oyl-race-result__who">{line.who}</span>
-                {line.time === undefined ? undefined : <> — {line.time}</>}
-                {line.figure === undefined ? undefined : <>, {line.figure}</>}
-                {line.flags.map((flag) => (
-                  <span key={flag} className="oyl-race-result__flag">
-                    {' '}
-                    {flag}
-                  </span>
-                ))}
-              </li>
-            ))}
+            {raceResultLines(shown.rows, props.ownWatts).map((line, index) => {
+              const row = index + 1;
+              const name = line.you ? null : (shown.rows[index]?.displayName ?? null);
+              const here = blocking?.row === row ? blocking : undefined;
+              return (
+                <li key={index} {...(line.you ? { 'aria-current': 'true' } : {})}>
+                  <span className="oyl-race-result__place">{line.place}</span>{' '}
+                  <span className="oyl-race-result__who">{line.who}</span>
+                  {line.time === undefined ? undefined : <> — {line.time}</>}
+                  {line.figure === undefined ? undefined : <>, {line.figure}</>}
+                  {line.flags.map((flag) => (
+                    <span key={flag} className="oyl-race-result__flag">
+                      {' '}
+                      {flag}
+                    </span>
+                  ))}
+                  {name === null || blocked.has(row) || here?.kind === 'asking' ? null : (
+                    <>
+                      {' '}
+                      <Button
+                        variant="secondary"
+                        focusOnMount={cancelled === row}
+                        onClick={() => {
+                          setCancelled(undefined);
+                          setBlocking({ row, kind: 'asking' });
+                        }}
+                      >
+                        {RACE_BLOCK_TEXT.open}
+                        <span className="oyl-visually-hidden"> {name}</span>
+                      </Button>
+                    </>
+                  )}
+                  {name !== null && here?.kind === 'asking' ? (
+                    <div role="group" aria-label={RACE_BLOCK_TEXT.confirm(name)}>
+                      <p id={`oyl-race-block-${String(row)}`}>{RACE_BLOCK_TEXT.question(name)}</p>
+                      <Button
+                        variant="danger"
+                        focusOnMount
+                        describedBy={`oyl-race-block-${String(row)}`}
+                        onClick={() => {
+                          block(row, name);
+                        }}
+                      >
+                        {RACE_BLOCK_TEXT.confirm(name)}
+                      </Button>{' '}
+                      <Button
+                        variant="secondary"
+                        onClick={() => {
+                          setCancelled(row);
+                          setBlocking(undefined);
+                        }}
+                      >
+                        {RACE_BLOCK_TEXT.cancel}
+                      </Button>
+                    </div>
+                  ) : null}
+                  {here?.kind === 'answered' ? (
+                    <p ref={blockAnswer} tabIndex={-1}>
+                      {here.text}
+                    </p>
+                  ) : null}
+                </li>
+              );
+            })}
           </ol>
           <details className="oyl-race-result__references">
             <summary>{RACE_REFERENCES_SUMMARY}</summary>

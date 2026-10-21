@@ -223,6 +223,50 @@ describe('a race — #785', () => {
   });
 });
 
+describe('blocking a rider from a race’s result — #1516', () => {
+  it('posts the row, and nothing else, to the room’s own block route, with the session token', async () => {
+    const instance = new ScriptedInstance();
+    expect(await port(instance).blockRider('room-xyz', 2)).toEqual({ kind: 'blocked' });
+    expect(instance.seen).toEqual([
+      {
+        method: 'POST',
+        path: '/v1/rooms/room-xyz/blocks',
+        // A row: never a name, never an athlete id.
+        body: { row: 2 },
+        authorization: expect.stringMatching(/^Bearer /) as unknown,
+      },
+    ]);
+  });
+
+  for (const [status, answer] of [
+    [404, { kind: 'refused', reason: 'no-such-room' }],
+    [400, { kind: 'refused', reason: 'instance-refused' }],
+    [503, { kind: 'unreachable' }],
+  ] as const) {
+    it(`reads a ${String(status)} as ${JSON.stringify(answer)}`, async () => {
+      const instance = new ScriptedInstance();
+      instance.blocked = { status, body: { error: { code: 'x' } } };
+      expect(await port(instance).blockRider('room-xyz', 1)).toEqual(answer);
+    });
+  }
+
+  it('sends nothing for a device signed in nowhere, nor for a room id the router could not route', async () => {
+    const instance = new ScriptedInstance();
+    const empty = createRoomsPort({
+      ...NO_CARD_DEVICE,
+      storage: { ...signedInStorage(), getItem: () => null },
+      zones: () => Promise.resolve([]),
+      send: instance.send,
+    });
+    expect(await empty.blockRider('room-xyz', 1)).toEqual({
+      kind: 'refused',
+      reason: 'not-signed-in',
+    });
+    expect(await port(instance).blockRider('../blocks', 1)).toEqual({ kind: 'unreachable' });
+    expect(instance.seen).toEqual([]);
+  });
+});
+
 describe('public rooms — #788', () => {
   const LISTED = {
     roomId: 'room-pub',

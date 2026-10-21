@@ -7505,6 +7505,80 @@
         }
       }
     },
+    "/v1/rooms/{roomId}/blocks": {
+      "post": {
+        "operationId": "blockFromRaceResult",
+        "summary": "Block another rider from a race’s result, by their row, counted from 1 (#1516): the same block as `POST /v1/blocks/{athleteId}`, for a rider the app knows only by the name on that row. `not_found` unless the caller may read the result (`GET /v1/rooms/{roomId}/results`) and the row is in it. A row with no name for the caller, or their own, blocks nobody. The blocked rider is not told, and the answer never names who it was.",
+        "parameters": [
+          {
+            "name": "roomId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,128}$"
+            }
+          }
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "x-oyl-sealed": "only",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "row": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "row"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "400": {
+            "$ref": "#/components/responses/validation_failed"
+          },
+          "401": {
+            "$ref": "#/components/responses/unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/sealed_required"
+          },
+          "404": {
+            "$ref": "#/components/responses/not_found"
+          },
+          "405": {
+            "$ref": "#/components/responses/method_not_allowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/payload_too_large"
+          },
+          "429": {
+            "$ref": "#/components/responses/rate_limited"
+          },
+          "500": {
+            "$ref": "#/components/responses/internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/unavailable"
+          }
+        }
+      }
+    },
     "/v1/rooms/{roomId}/join": {
       "post": {
         "operationId": "joinPublicRoom",

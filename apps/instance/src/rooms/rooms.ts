@@ -134,7 +134,7 @@ import type { ClientInfo } from '../route-kit.ts';
 import type { RoomPhase } from '../room/core/room.ts';
 import type { SqlStore } from '../store/sql-store.ts';
 import { displayRoomCode, newRoomCode, normaliseRoomCode, roomCodeDigest } from './code.ts';
-import { publishRace, type PublishedResult } from './publication.ts';
+import { publishedOrder, publishRace, type PublishedResult } from './publication.ts';
 
 /** The most UTF-8 bytes a room's route may be: inside the instance's 1 MiB body with room to spare. */
 export const MAXIMUM_ROUTE_BYTES = 900 * 1024;
@@ -285,6 +285,16 @@ export interface Rooms {
    */
   standing(caller: Caller, roomId: string): Promise<'host' | 'member' | undefined>;
   results(caller: Caller, roomId: string): Promise<Outcome<PublishedResult>>;
+  /**
+   * The athlete in row `row` (counted from 1) of the race's result as
+   * {@link results} publishes it to `caller` — #1516, for a block made from
+   * the result — or `undefined`: no result the caller may read, a row out of
+   * range, the caller's own row, or a row with no name for them ("a rider":
+   * erased, hidden, or a block between them either way). Only a rider the
+   * caller is already shown by name, so a block by row ties an athlete id to
+   * nothing the caller was not already shown.
+   */
+  namedResultRider(caller: Caller, roomId: string, row: number): Promise<string | undefined>;
   /** A room worker let `roomId` go at `phase` (`room/node/router.ts`). */
   roomLetGo(roomId: string, phase: RoomPhase): Promise<void>;
   /**
@@ -488,7 +498,7 @@ export function createRooms(options: RoomsOptions): Rooms {
     return (await store.isRoomMember(roomId, caller.athleteId)) ? room : undefined;
   }
 
-  return {
+  const rooms: Rooms = {
     async create(caller, body) {
       for (const key of Object.keys(body)) {
         // Refused whole, rather than ignored: a `visibility` would otherwise be
@@ -762,6 +772,17 @@ export function createRooms(options: RoomsOptions): Rooms {
       };
     },
 
+    async namedResultRider(caller, roomId, row) {
+      const published = await rooms.results(caller, roomId);
+      if (!published.ok || !Number.isSafeInteger(row) || row < 1) return undefined;
+      const shown = published.value.rows[row - 1];
+      if (shown === undefined || shown.you || shown.displayName === null) return undefined;
+      const course = await store.getRoomCourse(roomId);
+      // The same order `results` published, row for row (`publication.ts`).
+      return publishedOrder(await store.listRoomResults(roomId), course?.finishers ?? 0)[row - 1]
+        ?.athleteId;
+    },
+
     async roomLetGo(roomId, phase) {
       // A lobby that emptied is not over: a later socket opens it again.
       if (phase !== 'finished' && phase !== 'closed') return;
@@ -805,4 +826,5 @@ export function createRooms(options: RoomsOptions): Rooms {
     ]),
     heldRateLimitKeys: () => creates.size + joinsPerAthlete.size + joinsPerAddress.size,
   };
+  return rooms;
 }
