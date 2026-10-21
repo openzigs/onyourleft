@@ -783,6 +783,12 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         §`PavementBelt` (ambientCG's paving in the realistic
                         world), outside `structureItems` and outside
                         `REALISTIC_FRAME_TRIANGLES` by that constant's own rule
+                        (`REALISTIC_STREET_TRIANGLES` is theirs). Since #1536
+                        each unbroken run carries lamp posts, bollards, a
+                        bench and a bin by rule (`furnish`), built from numbers
+                        (`three-renderer.ts` §`FURNITURE_STYLE` says why not
+                        Poly Haven's) and drawn one instanced call a kind by
+                        §`FurnitureBelt`, only within `FURNITURE_DRAW_METRES`
     src/game/buildings.ts
                         the buildings as SHAPES (#500) — walls with their doors
                         and windows cut in, recessed and framed, eaves that

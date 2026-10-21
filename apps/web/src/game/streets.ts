@@ -134,7 +134,62 @@ export interface PavementMesh {
   readonly indices: Uint32Array;
 }
 
-/** One village's street: which village, where along the road, and its pavements. */
+/**
+ * What stands on a pavement — #1536: a lamp post, a bollard, a bench and a
+ * bin. Each is one instanced draw (`three-renderer.ts` §`FurnitureBelt`).
+ */
+export type FurnitureKind = 'lamp-post' | 'bollard' | 'bench' | 'bin';
+
+/** Every {@link FurnitureKind}, in a fixed order. */
+export const FURNITURE_KINDS: readonly FurnitureKind[] = ['lamp-post', 'bollard', 'bench', 'bin'];
+
+/**
+ * One piece of street furniture, standing on the pavement's top in the
+ * corridor's local metres, turned so its own +z faces the road.
+ */
+export interface FurnitureItem {
+  readonly kind: FurnitureKind;
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  /** Yaw, radians: three's, so a shape's +z ends up facing the road. */
+  readonly rotation: number;
+}
+
+/**
+ * How far apart lamp posts stand along an unbroken run of pavement, in
+ * metres: **24** — the first and last half that from its ends, so they are
+ * spaced evenly about the run's middle and never among the bollards.
+ */
+export const LAMP_SPACING_METRES = 24;
+
+/** How far in from the pavement's back edge a lamp post stands, in metres: **0.35**. */
+export const LAMP_SETBACK_METRES = 0.35;
+
+/** How far out from the kerb's face a bollard stands, in metres: **0.35**. */
+export const BOLLARD_INSET_METRES = 0.35;
+
+/**
+ * Where the bollards stand at each end of a run, in metres in from the end:
+ * **0.6** and **1.8** — a pair, where a pavement meets a road with none.
+ */
+export const BOLLARD_ENDS_METRES = [0.6, 1.8] as const;
+
+/** How far in from the pavement's back edge a bench stands, in metres: **0.45**. */
+export const BENCH_SETBACK_METRES = 0.45;
+
+/** How far along from its bench a bin stands, in metres: **1.6**. */
+export const BIN_BESIDE_METRES = 1.6;
+
+/**
+ * How far from the camera street furniture is drawn, in metres: **120** —
+ * #1536's level of detail. A lamp post is 6 cm across and a bollard 20 cm, a
+ * pixel or two at that distance on the tablet's screen and less under the
+ * fog, so beyond it nothing is drawn at all; nearer, every piece is.
+ */
+export const FURNITURE_DRAW_METRES = 120;
+
+/** One village's street: which village, where along the road, its pavements and what stands on them. */
 export interface VillageStreet {
   /** The village's site on the route's first lap: one street per place, whichever lap. */
   readonly wrappedSite: number;
@@ -142,6 +197,8 @@ export interface VillageStreet {
   readonly from: number;
   readonly to: number;
   readonly pavement: PavementMesh;
+  /** #1536: the lamp posts, bollards, benches and bins on its pavements, and nowhere else. */
+  readonly furniture: readonly FurnitureItem[];
 }
 
 /** One village's street, or `null` where its site has no village or no pavement. */
@@ -205,6 +262,7 @@ function streetOf(
   const lap = (index - wrappedSite) * span;
   const plots = villagePlots(seed, site);
   const mesh = new MeshBuilder();
+  const furniture: FurnitureItem[] = [];
   let from = Number.POSITIVE_INFINITY;
   let to = Number.NEGATIVE_INFINITY;
   for (const side of [1, -1] as const) {
@@ -212,13 +270,13 @@ function streetOf(
     if (mine.length === 0) continue;
     const start = Math.min(...mine) - PLOT_METRES / 2 + PAVEMENT_END_INSET_METRES;
     const end = Math.max(...mine) + PLOT_METRES / 2 - PAVEMENT_END_INSET_METRES;
-    if (lay(mesh, profile, origin, seed, side, start, end)) {
+    if (lay(mesh, furniture, profile, origin, seed, side, start, end)) {
       from = Math.min(from, start);
       to = Math.max(to, end);
     }
   }
   if (mesh.triangles === 0) return null;
-  return { wrappedSite, from, to, pavement: mesh.done() };
+  return { wrappedSite, from, to, pavement: mesh.done(), furniture };
 }
 
 /**
@@ -238,7 +296,27 @@ export function pavementAlong(
   end: number,
 ): PavementMesh | undefined {
   const mesh = new MeshBuilder();
-  return lay(mesh, profile, origin, seed, side, start, end) ? mesh.done() : undefined;
+  return lay(mesh, [], profile, origin, seed, side, start, end) ? mesh.done() : undefined;
+}
+
+/**
+ * The street furniture {@link pavementAlong}'s pavement would carry.
+ *
+ * @test-facing `streets.test.ts` furnishes a hairpin's and a stream's
+ * pavements, where a run is refused or broken; a ride's comes from
+ * {@link streetsAt}, by the same function.
+ */
+export function furnitureAlong(
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  seed: number,
+  side: 1 | -1,
+  start: number,
+  end: number,
+): readonly FurnitureItem[] {
+  const furniture: FurnitureItem[] = [];
+  lay(new MeshBuilder(), furniture, profile, origin, seed, side, start, end);
+  return furniture;
 }
 
 /** One cross-section of a pavement: where its three edges are, and which way is along. */
@@ -257,10 +335,12 @@ interface Section {
 
 /**
  * Lays one side's pavement from `start` to `end` (odometer), as strips broken
- * wherever a section is dropped. Whether any strip was laid.
+ * wherever a section is dropped, and furnishes each strip (#1536). Whether any
+ * strip was laid.
  */
 function lay(
   mesh: MeshBuilder,
+  furniture: FurnitureItem[],
   profile: RouteProfile,
   origin: CorridorOrigin,
   seed: number,
@@ -273,7 +353,10 @@ function lay(
   const before = mesh.triangles;
   let run: Section[] = [];
   const close = (): void => {
-    if (run.length >= 2) mesh.strip(run, side);
+    if (run.length >= 2) {
+      mesh.strip(run, side);
+      furnish(run, furniture);
+    }
     run = [];
   };
   for (let step = 0; step <= steps; step += 1) {
@@ -319,6 +402,73 @@ function sectionAt(
     outX,
     outZ,
   };
+}
+
+/**
+ * The street furniture of one unbroken run of pavement — #1536, by rule and
+ * from nothing but the run itself, so a piece can only stand where the
+ * pavement does:
+ *
+ * - **lamp posts** every {@link LAMP_SPACING_METRES} at the pavement's back,
+ *   the first and last half a spacing in from the run's ends;
+ * - a pair of **bollards** at each end, at the kerb
+ *   ({@link BOLLARD_ENDS_METRES});
+ * - one **bench** at the back, half-way between the two lamp posts nearest
+ *   the run's middle (a quarter-spacing past a lone lamp post, so the two never stand
+ *   together; at the run's middle where it has none), facing
+ *   the road, and a **bin** {@link BIN_BESIDE_METRES} along from it — only on
+ *   a run long enough to hold both clear of the bollards.
+ */
+function furnish(run: readonly Section[], into: FurnitureItem[]): void {
+  const start = (run[0] as Section).along;
+  const end = (run[run.length - 1] as Section).along;
+  const length = end - start;
+  const place = (kind: FurnitureKind, along: number, fromKerb: number): void => {
+    // The two sections either side of `along`, and how far between them.
+    let index = 0;
+    while (index + 2 < run.length && (run[index + 1] as Section).along < along) index += 1;
+    const a = run[index] as Section;
+    const b = run[index + 1] as Section;
+    const t =
+      b.along === a.along ? 0 : Math.min(1, Math.max(0, (along - a.along) / (b.along - a.along)));
+    const outX = a.outX + (b.outX - a.outX) * t;
+    const outZ = a.outZ + (b.outZ - a.outZ) * t;
+    const out = Math.hypot(outX, outZ) || 1;
+    into.push({
+      kind,
+      x: a.innerX + (b.innerX - a.innerX) * t + (outX / out) * fromKerb,
+      y: a.y + (b.y - a.y) * t + KERB_HEIGHT_METRES,
+      z: a.innerZ + (b.innerZ - a.innerZ) * t + (outZ / out) * fromKerb,
+      // Facing the road: back along `out`.
+      rotation: Math.atan2(-outX / out, -outZ / out),
+    });
+  };
+  const back = PAVEMENT_WIDTH_METRES;
+  const lamps: number[] = [];
+  for (
+    let along = start + LAMP_SPACING_METRES / 2;
+    along <= end - LAMP_SPACING_METRES / 2 + 1e-9;
+    along += LAMP_SPACING_METRES
+  ) {
+    lamps.push(along);
+    place('lamp-post', along, back - LAMP_SETBACK_METRES);
+  }
+  for (const inset of BOLLARD_ENDS_METRES) {
+    if (length < 2 * inset) continue;
+    place('bollard', start + inset, BOLLARD_INSET_METRES);
+    place('bollard', end - inset, BOLLARD_INSET_METRES);
+  }
+  const clear = (BOLLARD_ENDS_METRES[1] as number) + 1;
+  if (length < 2 * (clear + BIN_BESIDE_METRES)) return;
+  const pair = Math.max(0, Math.floor((lamps.length - 2) / 2));
+  const bench =
+    lamps.length >= 2
+      ? ((lamps[pair] as number) + (lamps[pair + 1] as number)) / 2
+      : lamps.length === 1
+        ? (lamps[0] as number) + LAMP_SPACING_METRES / 4
+        : (start + end) / 2;
+  place('bench', bench, back - BENCH_SETBACK_METRES);
+  place('bin', bench + BIN_BESIDE_METRES, back - BENCH_SETBACK_METRES);
 }
 
 /**

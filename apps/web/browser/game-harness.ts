@@ -112,6 +112,7 @@ import {
   KERB_HEIGHT_METRES,
   KERB_LATERAL_METRES,
   PAVEMENT_WIDTH_METRES,
+  type FurnitureKind,
 } from '../src/game/streets';
 import { waterways } from '../src/game/waterways';
 import { HORIZON_RADIUS_METRES, HORIZON_SEGMENTS, VERGE_DROP_METRES } from '../src/game/landform';
@@ -174,6 +175,8 @@ import {
   loadGameWordmark,
   logoBoardsOf,
   logosShownOf,
+  furnitureCountsOf,
+  furnitureShownOf,
   pavementsShownOf,
   pavementTrianglesOf,
   wordmarkOrientationOf,
@@ -2535,7 +2538,26 @@ interface PavementMeasurement {
    */
   readonly onRgb: readonly number[];
   readonly offRgb: readonly number[];
+  /** #1536: what stands on the pavements, on the same frames. */
+  readonly furniture: {
+    /** Pieces of each kind drawn beside the village, and in open country — the control. */
+    readonly counts: Readonly<Record<FurnitureKind, number>>;
+    readonly countsOpen: Readonly<Record<FurnitureKind, number>>;
+    /** Draw calls on the village frame with the furniture, and with it switched off. */
+    readonly drawCalls: number;
+    readonly drawCallsOff: number;
+    /** Pixels the furniture changes, against the same frame with it switched off. */
+    readonly pixels: number;
+  };
 }
+
+/** No piece of any kind. */
+const NO_FURNITURE: Readonly<Record<FurnitureKind, number>> = {
+  'lamp-post': 0,
+  bollard: 0,
+  bench: 0,
+  bin: 0,
+};
 
 /** What {@link pavementProbe} reports when it did not run. */
 const NO_PAVEMENT: PavementMeasurement = {
@@ -2545,6 +2567,13 @@ const NO_PAVEMENT: PavementMeasurement = {
   drawCallsOff: 0,
   onRgb: [],
   offRgb: [],
+  furniture: {
+    counts: NO_FURNITURE,
+    countsOpen: NO_FURNITURE,
+    drawCalls: 0,
+    drawCallsOff: 0,
+    pixels: 0,
+  },
 };
 
 /**
@@ -2611,6 +2640,13 @@ function pavementProbe(
     const drawCalls = drawn();
     const onRgb = meanRgb();
     const triangles = pavementTrianglesOf(view);
+    // #1536: the furniture on the same frame, and the same frame without it.
+    const counts = furnitureCountsOf(view);
+    const present = readRegion(gl, 0, 0, canvas.width, canvas.height);
+    furnitureShownOf(view, false);
+    const furnitureDrawCallsOff = drawn();
+    const absent = readRegion(gl, 0, 0, canvas.width, canvas.height);
+    furnitureShownOf(view, true);
     pavementsShownOf(view, false);
     const drawCallsOff = drawn();
     const offRgb = meanRgb();
@@ -2628,11 +2664,32 @@ function pavementProbe(
         ),
       );
     let trianglesOpen = Number.NaN;
+    let countsOpen: Readonly<Record<FurnitureKind, number>> = {
+      'lamp-post': Number.NaN,
+      bollard: Number.NaN,
+      bench: Number.NaN,
+      bin: Number.NaN,
+    };
     if (open !== undefined) {
       view.render(frameAt(open));
       trianglesOpen = pavementTrianglesOf(view);
+      countsOpen = furnitureCountsOf(view);
     }
-    measured = { triangles, trianglesOpen, drawCalls, drawCallsOff, onRgb, offRgb };
+    measured = {
+      triangles,
+      trianglesOpen,
+      drawCalls,
+      drawCallsOff,
+      onRgb,
+      offRgb,
+      furniture: {
+        counts,
+        countsOpen,
+        drawCalls,
+        drawCallsOff: furnitureDrawCallsOff,
+        pixels: shadingAcross(present, absent).pixels,
+      },
+    };
   });
   return measured;
 }
