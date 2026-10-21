@@ -66,7 +66,8 @@ while IFS= read -r line || [ -n "${line}" ]; do
     [ -n "${words[$((index + 2))]:-}" ]; then
     stages+="$(printf '%s' "${words[$((index + 2))]}" | tr '[:upper:]' '[:lower:]') "
   fi
-  [ -n "${lowered}" ] && [ "${lowered}" != scratch ] || continue
+  [ -n "${lowered}" ] || continue
+  [ "${lowered}" != scratch ] || continue
   case "${earlier}" in
     *" ${lowered} "*) continue ;;
   esac
