@@ -7,7 +7,7 @@
  * conflict declared where it was, and the way to ask for a second look.
  */
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { auditAccessibility, formatViolations } from '../a11y/audit';
 import type { RiderStatement, StatementsPort } from '../instance/statements-port';
@@ -53,11 +53,11 @@ const portOf = (statements: readonly RiderStatement[]): StatementsPort => ({
   eraseAccount: () => Promise.reject(new Error('no deletion in this test')),
 });
 
-async function show(port: StatementsPort): Promise<string> {
+async function show(port: StatementsPort, onErased?: () => void): Promise<string> {
   mounted = await mount(
     <main>
       <h1>Instance</h1>
-      <StatementsPanel port={port} />
+      <StatementsPanel port={port} {...(onErased === undefined ? {} : { onErased })} />
     </main>,
   );
   await settle();
@@ -265,6 +265,7 @@ describe('a suspended rider’s own data, from the Instance screen (#1517)', () 
   it('prepares the instance’s copy as a file to save, or says it could not', async () => {
     const created: Blob[] = [];
     const original: unknown = Reflect.get(URL, 'createObjectURL');
+    const originalRevoke: unknown = Reflect.get(URL, 'revokeObjectURL');
     URL.createObjectURL = (blob: Blob) => {
       created.push(blob);
       return 'blob:account';
@@ -287,6 +288,7 @@ describe('a suspended rider’s own data, from the Instance screen (#1517)', () 
       expect(mounted?.container.querySelector('a[download]')).toBeNull();
     } finally {
       Reflect.set(URL, 'createObjectURL', original);
+      Reflect.set(URL, 'revokeObjectURL', originalRevoke);
     }
   });
 
@@ -308,6 +310,23 @@ describe('a suspended rider’s own data, from the Instance screen (#1517)', () 
     await settle();
     expect(port.erased).toBe(1);
     expect(mounted?.container.textContent).toContain(YOUR_DATA_TEXT.erased);
+  });
+
+  it('tells its host the account is gone, so the host re-reads, and only then', async () => {
+    const onErased = vi.fn();
+    await show(dataPort(undefined, { kind: 'refused', text: ERASE_REFUSAL_TEXT }), onErased);
+    await activateWithKeyboard(buttonNamed(YOUR_DATA_TEXT.erase));
+    await settle();
+    await activateWithKeyboard(buttonNamed(YOUR_DATA_TEXT.confirmErase));
+    await settle();
+    expect(onErased).not.toHaveBeenCalled();
+    mounted?.unmount();
+    await show(dataPort(undefined, { kind: 'erased' }), onErased);
+    await activateWithKeyboard(buttonNamed(YOUR_DATA_TEXT.erase));
+    await settle();
+    await activateWithKeyboard(buttonNamed(YOUR_DATA_TEXT.confirmErase));
+    await settle();
+    expect(onErased).toHaveBeenCalledTimes(1);
   });
 
   it('says why the account was not deleted', async () => {

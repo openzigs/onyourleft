@@ -237,7 +237,13 @@ function OneStatement({
 }
 
 /** Saving the instance's copy of the account, and deleting it there (#1517). */
-function YourData({ port }: { readonly port: StatementsPort }): JSX.Element {
+function YourData({
+  port,
+  onErased,
+}: {
+  readonly port: StatementsPort;
+  readonly onErased: () => void;
+}): JSX.Element {
   const [href, setHref] = useState<string | undefined>(undefined);
   const [unreadable, setUnreadable] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -305,6 +311,7 @@ function YourData({ port }: { readonly port: StatementsPort }): JSX.Element {
                 setBusy(false);
                 if (outcome.kind === 'erased') {
                   setErased(true);
+                  onErased();
                 } else {
                   setRefusal(outcome.text);
                 }
@@ -344,7 +351,14 @@ function YourData({ port }: { readonly port: StatementsPort }): JSX.Element {
   );
 }
 
-export function StatementsPanel({ port }: { readonly port: StatementsPort }): JSX.Element | null {
+export function StatementsPanel({
+  port,
+  onErased,
+}: {
+  readonly port: StatementsPort;
+  /** The account is gone and this device no longer holds its sign-in: the host re-reads what it shows. */
+  readonly onErased?: () => void;
+}): JSX.Element | null {
   const [statements, setStatements] = useState<readonly RiderStatement[]>([]);
   const [sent, setSent] = useState(false);
   const read = useCallback(async (): Promise<void> => {
@@ -377,7 +391,7 @@ export function StatementsPanel({ port }: { readonly port: StatementsPort }): JS
         ))}
       </ul>
       {statements.some((statement) => statement.restriction === 'suspend') ? (
-        <YourData port={port} />
+        <YourData port={port} onErased={onErased ?? (() => undefined)} />
       ) : null}
     </section>
   );
