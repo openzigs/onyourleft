@@ -23,6 +23,11 @@ import {
  * or the terms relied on, and what the rider can do about it. A device with
  * no statement shows nothing: there is nothing to explain.
  *
+ * A SUSPENDED rider is also offered their data (#1517): the instance's
+ * export of the account to save, and the account's deletion there —
+ * suspension never stops a rider getting or erasing their own data. Neither
+ * touches the rides on this device (ADR 0036 D-3 (b)).
+ *
  * ⚠️ Draft wording awaiting the owner's approval.
  */
 
@@ -70,6 +75,28 @@ export const APPEAL_TEXT = {
   conflict:
     'The moderator who decided your appeal took the decision you appealed. They declare that ' +
     'conflict of interest here, and it is logged.',
+} as const;
+
+/** A suspended rider's own data on the instance (#1517). ⚠️ Draft wording awaiting the owner's approval. */
+export const YOUR_DATA_TEXT = {
+  heading: 'Your data on this instance',
+  intro:
+    'Being suspended does not stop you taking your data out of this instance or deleting your ' +
+    'account on it. Neither touches the rides on this device.',
+  save: 'Prepare a copy of your data',
+  link: 'Save the copy (a JSON file)',
+  file: 'onyourleft-instance-account.json',
+  unreadable: 'The instance did not answer, so nothing was saved. Try again later.',
+  erase: 'Delete my account on this instance',
+  confirm:
+    'This deletes your account and everything this instance holds about you, and cannot be ' +
+    'undone. It cannot reach a copy anyone already saved, or another instance. The moderation ' +
+    'log is kept. The rides on this device stay here.',
+  confirmErase: 'Delete it',
+  keep: 'Keep my account',
+  erased:
+    'Your account on this instance was deleted, and this device is no longer signed in to it. ' +
+    'Your rides are still on this device.',
 } as const;
 
 /** A moment, in UTC, so the screen says the same thing wherever it is read. */
@@ -209,7 +236,129 @@ function OneStatement({
   );
 }
 
-export function StatementsPanel({ port }: { readonly port: StatementsPort }): JSX.Element | null {
+/** Saving the instance's copy of the account, and deleting it there (#1517). */
+function YourData({
+  port,
+  onErased,
+}: {
+  readonly port: StatementsPort;
+  readonly onErased: () => void;
+}): JSX.Element {
+  const [href, setHref] = useState<string | undefined>(undefined);
+  const [unreadable, setUnreadable] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [refusal, setRefusal] = useState<string | undefined>(undefined);
+  const [erased, setErased] = useState(false);
+  useEffect(
+    () => () => {
+      if (href !== undefined) URL.revokeObjectURL(href);
+    },
+    [href],
+  );
+  if (erased) {
+    return (
+      <StatusMessage tone="success" live>
+        {YOUR_DATA_TEXT.erased}
+      </StatusMessage>
+    );
+  }
+  return (
+    <div className="oyl-statement__appeal">
+      <h3>{YOUR_DATA_TEXT.heading}</h3>
+      <p>{YOUR_DATA_TEXT.intro}</p>
+      <Button
+        variant="secondary"
+        unavailable={busy}
+        onClick={() => {
+          if (busy) return;
+          setBusy(true);
+          void port.exportAccount().then((text) => {
+            setBusy(false);
+            setUnreadable(text === undefined);
+            setHref(
+              text === undefined
+                ? undefined
+                : URL.createObjectURL(new Blob([text], { type: 'application/json' })),
+            );
+          });
+        }}
+      >
+        {YOUR_DATA_TEXT.save}
+      </Button>
+      {href === undefined ? null : (
+        <p>
+          <a href={href} download={YOUR_DATA_TEXT.file}>
+            {YOUR_DATA_TEXT.link}
+          </a>
+        </p>
+      )}
+      {unreadable ? (
+        <StatusMessage tone="warning" label="Not saved" live>
+          {YOUR_DATA_TEXT.unreadable}
+        </StatusMessage>
+      ) : null}
+      {confirming ? (
+        <>
+          <p>{YOUR_DATA_TEXT.confirm}</p>
+          <Button
+            variant="danger"
+            unavailable={busy}
+            onClick={() => {
+              if (busy) return;
+              setBusy(true);
+              void port.eraseAccount().then((outcome) => {
+                setBusy(false);
+                if (outcome.kind === 'erased') {
+                  setErased(true);
+                  onErased();
+                } else {
+                  setRefusal(outcome.text);
+                }
+              });
+            }}
+          >
+            {YOUR_DATA_TEXT.confirmErase}
+          </Button>{' '}
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setConfirming(false);
+              setRefusal(undefined);
+            }}
+          >
+            {YOUR_DATA_TEXT.keep}
+          </Button>
+        </>
+      ) : (
+        <p>
+          <Button
+            variant="danger"
+            onClick={() => {
+              setConfirming(true);
+            }}
+          >
+            {YOUR_DATA_TEXT.erase}
+          </Button>
+        </p>
+      )}
+      {refusal === undefined ? null : (
+        <StatusMessage tone="warning" label="Not deleted" live>
+          {refusal}
+        </StatusMessage>
+      )}
+    </div>
+  );
+}
+
+export function StatementsPanel({
+  port,
+  onErased,
+}: {
+  readonly port: StatementsPort;
+  /** The account is gone and this device no longer holds its sign-in: the host re-reads what it shows. */
+  readonly onErased?: () => void;
+}): JSX.Element | null {
   const [statements, setStatements] = useState<readonly RiderStatement[]>([]);
   const [sent, setSent] = useState(false);
   const read = useCallback(async (): Promise<void> => {
@@ -241,6 +390,9 @@ export function StatementsPanel({ port }: { readonly port: StatementsPort }): JS
           />
         ))}
       </ul>
+      {statements.some((statement) => statement.restriction === 'suspend') ? (
+        <YourData port={port} onErased={onErased ?? (() => undefined)} />
+      ) : null}
     </section>
   );
 }
