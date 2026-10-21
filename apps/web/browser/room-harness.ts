@@ -22,6 +22,10 @@
  * for #784, `tamper: true`, which alters the room's route on its way in, so
  * the page must then refuse it and draw nothing.
  *
+ * Since #782's last criterion it also reports THIS rider's seat and where the
+ * room's newest frame put them, so the spec can read both across an edge
+ * restart (`room.browser.spec.ts` §"an edge drops every room socket").
+ *
  * ⚠️ **What it does not prove**: anything about the game's drawing (the game
  * gate's §"#783" is that), a phone's WebView, the screen going off, or a
  * Cloudflare Tunnel in the path — those are #733's.
@@ -48,6 +52,10 @@ import { createRoomsPort, type EnteredRoom } from '../src/net/rooms-port';
 
 export interface RoomSample {
   readonly status: string;
+  /** This rider's seat, while joined: the room's `riderId` for them. */
+  readonly seat: number | undefined;
+  /** Where the room's newest frame put THIS rider, in metres; `undefined` before one. */
+  readonly ownDistanceMetres: number | undefined;
   readonly others: readonly { readonly riderId: number; readonly distanceMetres: number }[];
 }
 
@@ -219,13 +227,18 @@ window.__oylRoom = {
     if (entered === undefined) throw new Error('this page is in no room');
     joinRoom(entered.roomId, watts, true);
   },
-  sample: () => ({
-    status: connection?.status().kind ?? 'none',
-    others: (connection?.others(performance.now()) ?? []).map((rider) => ({
-      riderId: rider.riderId,
-      distanceMetres: rider.distanceMetres,
-    })),
-  }),
+  sample: () => {
+    const status = connection?.status();
+    return {
+      status: status?.kind ?? 'none',
+      seat: status?.kind === 'joined' ? status.riderId : undefined,
+      ownDistanceMetres: connection?.own()?.rider.distanceMetres,
+      others: (connection?.others(performance.now()) ?? []).map((rider) => ({
+        riderId: rider.riderId,
+        distanceMetres: rider.distanceMetres,
+      })),
+    };
+  },
   leave: () => {
     connection?.leave();
   },
