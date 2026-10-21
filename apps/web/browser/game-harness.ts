@@ -7382,7 +7382,15 @@ function groundBlobProbe(
   // pixels tall and every 3 × 3 read mixed it with the ground beyond it, which
   // read back as half the darkening. 7 m ahead at 1.4 puts the core about ten
   // pixels tall.
-  const scene: SceneFrame = { ...frame, scatter: [tree(7, -9, 1.4), tree(18, -6, 1.4)] };
+  // ⚠️ No street, since #1535: the verge point below is bare GROUND 0.5 m off
+  // the road's edge, and a village's pavement stands exactly there — so on a
+  // stretch the route makes a village of, it read the pavement over the blob
+  // (drawn and hidden alike) where it meant to read the ground under it.
+  const scene: SceneFrame = {
+    ...frame,
+    scatter: [tree(7, -9, 1.4), tree(18, -6, 1.4)],
+    streets: [],
+  };
   // A strip 21 pixels wide and 3 tall on the ground — wide, because the
   // ground's photograph varies pixel to pixel and a mean over 63 of them is
   // what lets the control hold to 3 % (over 27 it read 3.4 % apart); short, because ground is foreshortened
