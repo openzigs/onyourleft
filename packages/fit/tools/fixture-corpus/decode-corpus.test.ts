@@ -174,6 +174,7 @@ describe('nominal-outdoor-ride.fit', () => {
       totalElapsedTime: 119,
       totalTimerTime: 119,
       totalDistance: (samples.at(-1)?.distanceCentimetres ?? 0) / 100,
+      developerFields: [],
     });
     expect(activity.sessions).toHaveLength(1);
     expect(activity.sessions.at(0)).toMatchObject({

@@ -333,6 +333,59 @@ describe('a message that omits a field wider than one element', () => {
   );
 });
 
+describe('a developer field on a lap — #1320', () => {
+  it('is written, and read back resolved against its description', () => {
+    const lap = (offset: number, value: number) => ({
+      timestamp: instant(offset + 10),
+      messageIndex: offset / 10,
+      startTime: instant(offset),
+      totalElapsedTime: undefined,
+      totalTimerTime: undefined,
+      totalDistance: undefined,
+      developerFields: [
+        {
+          developerDataIndex: 0,
+          fieldDefinitionNumber: 0,
+          name: undefined,
+          units: undefined,
+          numeric: undefined,
+          text: undefined,
+          bytes: Uint8Array.of(value),
+        },
+      ],
+    });
+    const { faults, decoded } = roundTrip({
+      fileId: FILE_ID,
+      developerApplications: [
+        {
+          developerDataIndex: 0,
+          applicationId: new Uint8Array(16).fill(0x11),
+          manufacturerId: undefined,
+          applicationVersion: undefined,
+        },
+      ],
+      developerFieldDescriptions: [
+        {
+          developerDataIndex: 0,
+          fieldDefinitionNumber: 0,
+          fitBaseTypeId: 2,
+          name: 'kind',
+          units: undefined,
+        },
+      ],
+      laps: [lap(0, 0), lap(10, 2)],
+    });
+
+    expect(faults).toEqual([]);
+    expect(decoded.faults).toEqual([]);
+    expect(
+      decoded.activity.laps.map((item) =>
+        item.developerFields.map((field) => [field.name, field.numeric, [...field.bytes]]),
+      ),
+    ).toEqual([[['kind', 0, [0]]], [['kind', 2, [2]]]]);
+  });
+});
+
 function instant(offsetSeconds: number): { kind: 'instant'; instant: UnixSeconds } {
   // 2024-06-15T09:00:00Z, the instant the #29 corpus starts at.
   return { kind: 'instant', instant: unixSeconds(1_718_442_000 + offsetSeconds) };

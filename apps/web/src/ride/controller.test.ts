@@ -52,6 +52,7 @@ import {
   isSensorError,
   type SensorTransport,
 } from '@onyourleft/sensors';
+import { decodeFitActivity } from '@onyourleft/fit';
 import { createCapacitorTransport } from '@onyourleft/mobile';
 import { scriptedPort } from '@onyourleft/mobile/testing';
 import {
@@ -8643,6 +8644,7 @@ describe('#1312 — the laps of a course are the recording’s, and are saved wi
           (channel) => channel?.[0] === undefined,
         ),
         backLaps: await lapsOf(`back-${withLaps ? 'laps' : 'plain'}`),
+        bytes,
       };
     };
 
@@ -8693,16 +8695,44 @@ describe('#1312 — the laps of a course are the recording’s, and are saved wi
         );
         expect(LOSSY_CHANNELS[format].includes('activity.movingTime')).toBe(format === 'tcx');
         if (format === 'fit') {
-          // #1320: this client's own FIT comes back with no lap rows. Its
-          // splits include the lead-in and the tail, and nothing in it says
-          // which are laps of the course until #1471 (#1321's FIT half), so
-          // it is read as a file with no laps rather than one whose lead-in
-          // is a lap. `LOSSY_CHANNELS` tells the rider FIT drops the laps'
-          // figures and kind.
-          expect(lapped.backLaps).toEqual([]);
-          expect(LOSSY_CHANNELS.fit).toEqual(
-            expect.arrayContaining(['lap.intensity', 'lap.triggerMethod']),
-          );
+          // #1320: this client's own FIT marks which of its splits are laps,
+          // in a developer field of its own (`fit-lap-mark.ts`), so the laps
+          // come back as rows: the two whole laps and the part lap, not the
+          // lead-in or the tail. FIT states a lap's start, its elapsed and
+          // moving time and its own distance, so all of those come back as
+          // they were stored; its figures are worked out again from the same
+          // samples, so they are the same figures. `LOSSY_CHANNELS` no longer
+          // says FIT drops a lap's kind.
+          //
+          // ⚠️ Not the lap's distance here: an import holds the laps'
+          // distances, in turn, to the road the ride covered
+          // (`read-activity-file.ts` §`lapsWithin`, a file being untrusted),
+          // and this bench's laps are a course's 1000 m against a trainer
+          // ride of under 300 m. The file states the stored figure, asserted
+          // below; a lap within its ride's road comes back with it
+          // (`read-activity-file.test.ts`).
+          const kept = (rows: readonly LapRecord[]) =>
+            rows.map((row) => ({
+              ordinal: row.ordinal,
+              startedAt: row.startedAt,
+              elapsedTime: row.elapsedTime,
+              movingTime: row.movingTime,
+              partial: row.partial,
+              averagePower: row.averagePower,
+              maxPower: row.maxPower,
+              averageHeartRate: row.averageHeartRate,
+              maxHeartRate: row.maxHeartRate,
+              averageCadence: row.averageCadence,
+            }));
+          expect(lapped.laps).toHaveLength(3);
+          expect(kept(lapped.backLaps)).toEqual(kept(lapped.laps));
+          expect(lapped.backLaps.map((lap) => lap.partial === true)).toEqual([false, false, true]);
+          const statedDistances = decodeFitActivity(lapped.bytes)
+            .activity.laps.slice(1, 4)
+            .map((lap) => lap.totalDistance);
+          expect(statedDistances).toEqual(lapped.laps.map((lap) => lap.distance));
+          expect(LOSSY_CHANNELS.fit).not.toContain('lap.intensity');
+          expect(LOSSY_CHANNELS.fit).not.toContain('lap.triggerMethod');
         } else {
           // #1320, with #1321's mark: the laps come back as rows — the two
           // whole laps and the part lap, and not the lead-in or the tail.

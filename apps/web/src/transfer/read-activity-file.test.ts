@@ -26,9 +26,10 @@ import {
 } from '@onyourleft/fit';
 
 import { corpusBytes, IMPORTABLE_CORPUS_FILES, REFUSED_CORPUS_FILES } from './corpus';
-import { LAPPED_FILE_START, lappedFile, syntheticCourseGpx } from './testing';
+import { type FixtureLap, LAPPED_FILE_START, lappedFile, syntheticCourseGpx } from './testing';
 import {
   ActivityImportError,
+  BROKEN_FIT_LAP_MARK,
   MAXIMUM_IMPORTED_LAPS,
   MAXIMUM_IMPORTED_SAMPLES,
   readActivityFile,
@@ -575,10 +576,39 @@ describe('readActivityFile — a file’s laps (#1320)', () => {
 
 /**
  * #1320's remaining boxes, on #1321's mark: this client's own TCX lists the
- * laps it marks, and no split either side of them. Its own FIT carries no mark
- * until #1471, and lists no laps.
+ * laps it marks, and no split either side of them, and since #1320 so does its
+ * own FIT, in a developer field of its own (`fit-lap-mark.ts`).
  */
 describe('readActivityFile — this client’s own laps (#1320, #1321)', () => {
+  /** A FIT `file_id` manufacturer: a file another tool wrote, or re-wrote. */
+  const MAKER = 1;
+
+  /** The splits with their marks taken off. */
+  function unmarked(laps: readonly FixtureLap[]): readonly FixtureLap[] {
+    return laps.map((lap) => ({ ...lap, kind: undefined }));
+  }
+
+  /** {@link OWN_LAPS} as this client's FIT, with the third split's mark bytes edited. */
+  function withThirdMark(edit: (bytes: Uint8Array) => Uint8Array): Uint8Array {
+    const decoded = decodeFitActivity(
+      lappedFile({ format: 'fit', samples: 120, writer: undefined, laps: OWN_LAPS }),
+    ).activity;
+    return encodeFitActivity({
+      ...decoded,
+      laps: decoded.laps.map((lap, ordinal) =>
+        ordinal === 2
+          ? {
+              ...lap,
+              developerFields: lap.developerFields.map((field) => ({
+                ...field,
+                bytes: edit(field.bytes),
+              })),
+            }
+          : lap,
+      ),
+    }).bytes;
+  }
+
   /**
    * A lead-in, two whole laps, a part lap and a tail, as this client exports
    * one: each split's distance is its share of the ride's 595 m.
@@ -610,17 +640,108 @@ describe('readActivityFile — this client’s own laps (#1320, #1321)', () => {
     ]);
   });
 
-  it('lists no laps from its own FIT, which carries no mark until #1471', () => {
-    // The same splits, as this client's FIT export writes them: no maker in
-    // the file_id and no mark on any lap, so a lead-in cannot be told from a
-    // lap and none is listed.
+  it('lists the laps of a marked FIT, the part lap marked, and not the splits either side', () => {
+    // #1320: the same splits, as this client's FIT export writes them: no
+    // maker in the file_id, and its own developer field on every lap.
     const ride = readActivityFile(
       'own.fit',
       lappedFile({ format: 'fit', samples: 120, writer: undefined, laps: OWN_LAPS }),
     );
+    expect(ride.faults).toEqual([]);
+    expect(
+      ride.laps.map((lap) => [
+        lap.startedAt - LAPPED_FILE_START,
+        lap.elapsedTime,
+        lap.distance,
+        lap.partial,
+      ]),
+    ).toEqual([
+      [20, 30, 150, false],
+      [50, 30, 150, false],
+      [80, 25, 125, true],
+    ]);
+  });
+
+  it('lists no laps from its own FIT written before #1320, which carries no mark', () => {
+    // No maker and no mark: a lead-in cannot be told from a lap, so none is listed.
+    const ride = readActivityFile(
+      'old.fit',
+      lappedFile({ format: 'fit', samples: 120, writer: undefined, laps: unmarked(OWN_LAPS) }),
+    );
     expect(ride.laps).toEqual([]);
+    expect(ride.faults).toEqual([]);
     // The ride itself is still read, every sample of it.
     expect(ride.elapsedTime).toBe(119);
+  });
+
+  it('lists the one lap of a marked FIT, which its mark says is a lap', () => {
+    const ride = readActivityFile(
+      'one.fit',
+      lappedFile({
+        format: 'fit',
+        samples: 120,
+        writer: undefined,
+        laps: [
+          { start: 0, elapsed: 40, distance: 200, kind: 'outside' },
+          { start: 40, elapsed: 79, distance: 395, kind: 'lap' },
+        ],
+      }),
+    );
+    expect(ride.laps.map((lap) => lap.startedAt - LAPPED_FILE_START)).toEqual([40]);
+  });
+
+  it.each([
+    ['an unknown mark', (bytes: Uint8Array) => (bytes.length === 1 ? Uint8Array.of(7) : bytes)],
+    ['a mark of two bytes', () => Uint8Array.of(1, 1)],
+  ])(
+    'lists no laps from a FIT that declares the mark and carries %s, and says so',
+    (_name, edit) => {
+      const ride = readActivityFile('edited.fit', withThirdMark(edit));
+      expect(ride.laps).toEqual([]);
+      expect(ride.faults).toContain(BROKEN_FIT_LAP_MARK);
+      expect(ride.elapsedTime).toBe(119);
+    },
+  );
+
+  it('lists no laps from a FIT that declares the mark and leaves a lap without one', () => {
+    const decoded = decodeFitActivity(
+      lappedFile({ format: 'fit', samples: 120, writer: MAKER, laps: OWN_LAPS }),
+    ).activity;
+    const bytes = encodeFitActivity({
+      ...decoded,
+      laps: decoded.laps.map((lap, ordinal) =>
+        ordinal === 2 ? { ...lap, developerFields: [] } : lap,
+      ),
+    }).bytes;
+    // Named a maker, too: a broken mark lists none, rather than every split as a lap.
+    const ride = readActivityFile('edited.fit', bytes);
+    expect(ride.laps).toEqual([]);
+    expect(ride.faults).toContain(BROKEN_FIT_LAP_MARK);
+  });
+
+  it('reads the mark, not the maker: a marked FIT another tool re-wrote lists its laps', () => {
+    const ride = readActivityFile(
+      'rewritten.fit',
+      lappedFile({ format: 'fit', samples: 120, writer: MAKER, laps: OWN_LAPS }),
+    );
+    expect(ride.laps.map((lap) => lap.partial)).toEqual([false, false, true]);
+  });
+
+  it('does not take another application’s developer field on a lap for the mark', () => {
+    const decoded = decodeFitActivity(
+      lappedFile({ format: 'fit', samples: 120, writer: undefined, laps: OWN_LAPS }),
+    ).activity;
+    // The same field, under another application's id.
+    const bytes = encodeFitActivity({
+      ...decoded,
+      developerApplications: decoded.developerApplications.map((app) => ({
+        ...app,
+        applicationId: new Uint8Array(16).fill(0xab),
+      })),
+    }).bytes;
+    const ride = readActivityFile('other-app.fit', bytes);
+    expect(ride.laps).toEqual([]);
+    expect(ride.faults).toEqual([]);
   });
 
   it('lists the one lap of a marked TCX, which its mark says is a lap', () => {
