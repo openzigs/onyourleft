@@ -3333,6 +3333,21 @@ test.describe(
  * describe above, not here: this describe is nightly (#866), and a nightly
  * describe may not read the plain load (`nightly-split.test.ts`).
  */
+/**
+ * #1523: how far, in steps of one channel of one pixel, the bounded road and
+ * ground may draw from the unbounded: **none**. Every term the bounds skip
+ * added exactly nought, and each derivative the ground keeps is the same
+ * expression, so the two pictures are one — measured on 2026-10-21 (a Mac,
+ * SwiftShader): 0 of 230 400 pixels differ in either frame. It was 1690
+ * pixels by up to 5 steps on the bank when the ground took ONE pair over the
+ * world's `xz` and scaled it per surface, a rounding change that moves which
+ * mip a texel is filtered from; that version was not kept.
+ */
+const SURFACE_BOUNDS_TOLERANCE = 0;
+
+/** #1523: how many pixels each cost lever must move, at the least, for the comparison to mean anything. */
+const SURFACE_CONTROL_PIXELS = 1_000;
+
 test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
   paysForTheRealisticLoad();
 
@@ -3828,6 +3843,40 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     for (const name of wearUniforms) expect(roadWearOff.road, name).not.toContain(name);
     expect(roadWearOff.road).toContain('map');
     expect(roadWearOff.ground).toEqual(drawn.ground);
+  });
+
+  test('draws the road’s wear and the ground’s blend the same, bounded, as unbounded — and the cost levers still change them — #1523', async ({
+    harnessRun,
+  }) => {
+    const { surfaceBounds: bounds } = await realistic(harnessRun);
+    expect(bounds.measured).toBe(true);
+    const { road, bank } = bounds;
+    for (const [name, frame] of [
+      ['road', road],
+      ['bank', bank],
+    ] as const) {
+      console.log(
+        `#1523 ${name}: bounded against unbounded, largest channel step ${String(frame.largest)}, ` +
+          `${String(frame.differing)} of ${String(frame.pixels)} pixels differ; ` +
+          `-road-wear moves ${String(frame.wearOff)}, -ground-blend ${String(frame.blendOff)}`,
+      );
+    }
+    console.log(
+      `#1523: the road frame stands at ${String(bounds.distance)} m with a patch ${bounds.patchAhead.toFixed(1)} m ahead`,
+    );
+    expect(road.drawn).toBe(true);
+    expect(bank.drawn).toBe(true);
+    expect(bounds.patchAhead).toBeGreaterThanOrEqual(8);
+    // The controls first: each of #1526's levers changes the frame it is
+    // about, by thousands of pixels — so a read-back that saw nothing, or a
+    // lever that stopped working, cannot pass the tolerance below.
+    expect(road.wearOff).toBeGreaterThan(SURFACE_CONTROL_PIXELS);
+    expect(road.blendOff).toBeGreaterThan(SURFACE_CONTROL_PIXELS);
+    expect(bank.blendOff).toBeGreaterThan(SURFACE_CONTROL_PIXELS);
+    // The same arithmetic, term for term, with the terms that added nought
+    // left out: not one pixel may move, on the road or on the bank.
+    expect(road.largest).toBeLessThanOrEqual(SURFACE_BOUNDS_TOLERANCE);
+    expect(bank.largest).toBeLessThanOrEqual(SURFACE_BOUNDS_TOLERANCE);
   });
 
   test('stands a gantry at the finish, lettered from the app’s own glyphs, for two calls and only there — #679', async ({

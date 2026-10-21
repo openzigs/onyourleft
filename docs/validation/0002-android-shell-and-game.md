@@ -3227,6 +3227,8 @@ published figures (its run predates `oyl.txt`).
 | #1523 | control (every lever on) | `main` with #1523's levers | — | | | | | | | | |
 | #1523 | ground blend out (#627, #1274) | the same build | — ; `levers=-ground-blend` | | | | | | | | |
 | #1523 | road wear out (#628, #879) | the same build | — ; `levers=-road-wear` | | | | | | | | |
+| #1523 | bounds before (the wear's loop and the ground's twelve derivatives, as they were) | `main` with #1523's bounds | — ; `levers=-surface-bounds` | | | | | | | | |
+| #1523 | bounds after (the product) | the same build | — | | | | | | | | |
 
 **Phone (OEM, model, Android, WebView):** Google Pixel Tablet, build `CP2A.260705.006`, Android 17,
 WebView 153.0.8010.36  **Build:** debug, `main` at **`f91a5fb`** (before #617's tree LODs, PR #637)
@@ -3728,6 +3730,33 @@ uniforms the GPU linked, with the default load as the control (`game.browser.spe
 | AH-1523-2 | **Cool again (AH3, 25–26 °C)**, same build: AH1–AH7 with `&levers=-ground-blend` added to AH4's URL. `RUN=1523-ground-blend` |
 | AH-1523-3 | **Cool again**, same build: AH1–AH7 with `&levers=-road-wear` added instead. `RUN=1523-road-wear` |
 | AH-1523-4 | Write the three rows into the table above. Triangles and draw calls should not move between them; the GPU DVFS mean and present p99 are what each lever's share is read from, against #616's spread |
+
+#### The bounds — the same picture for less ([#1523](https://github.com/openzigs/onyourleft/issues/1523), fixes 1 and 3)
+
+Triage 2 (2026-10-21, on #1523) put about 25 MHz on the road wear and 16 MHz on the ground blend.
+The fix changes what each costs a fragment and **not what it draws**:
+
+- **Road wear:** a fragment runs #628's patch loop only on a triangle a patch can reach — the
+  view writes, each frame, which of the eight patches can reach each road vertex's triangles
+  (`road-wear.ts` §`writeRoadPatchReach`), and the shader reads it as a `flat` varying, so a
+  triangle no patch reaches has no loop at all. The paint's fading noise runs only on paint.
+- **Ground blend:** each surface's derivative pair is taken once, where the shares are, and the
+  normal reads it, instead of taking the same three pairs again (six derivatives where there were
+  twelve). The surfaces were already sampled only where their share is above zero.
+- **Anisotropy, reviewed and kept at 8:** the verge, rock and crag lie beside the road at the same
+  grazing angle that #425's shimmer is about. A lower ceiling there would be a visible change, and
+  no browser read-back can show shimmer.
+
+`levers=-surface-bounds` builds both shaders as they were before, on the same build, so the pair
+is one APK. The browser gate draws a road frame (with a patch 8–14 m ahead) and #458's steep bank
+both ways and requires **every pixel identical** (`game.browser.spec.ts` §"#1523", nightly). In
+the same run it requires `-road-wear` and `-ground-blend` to move thousands of pixels each.
+
+| Step | What to do |
+|---|---|
+| AH-1523-5 | **Before**: build `main` with #1523's bounds, owner's page staged, AH1–AH7 with `&levers=-surface-bounds` added to AH4's URL. `RUN=1523-bounds-before` |
+| AH-1523-6 | **Cool again (AH3, 25–26 °C)**, same build: AH1–AH7, AH4's URL unchanged. `RUN=1523-bounds-after` |
+| AH-1523-7 | Write both rows. The after row's GPU mean should fall towards triage 2's `-road-wear` and `-ground-blend` rows (−25 and −16 MHz) without either lever's change to the picture |
 
 ## Part AI — the side camera's picture rate, on the owner's phone ([#1112](https://github.com/openzigs/onyourleft/issues/1112))
 

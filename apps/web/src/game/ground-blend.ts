@@ -115,7 +115,7 @@ export function groundBlend(
  * because the slope's share is one of the two the stone is the larger of.
  *
  * @test-facing the arithmetic `ground-blend.test.ts` holds; the product runs
- * the same arithmetic in GLSL (`three-renderer.ts` §`GROUND_BLEND_SHARES_GLSL`).
+ * the same arithmetic in GLSL (`three-renderer.ts` §`groundBlendShares`).
  *
  * @param rock {@link groundBlend}'s `rock`, the slope's share
  * @param scree {@link groundBlend}'s `scree`, the height's share

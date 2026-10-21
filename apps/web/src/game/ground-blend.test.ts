@@ -108,7 +108,10 @@ const ALL_SURFACES = {
 } satisfies GroundBlend;
 
 /** The ground's material, and its shader as `onBeforeCompile` leaves the chunks it edits. */
-function compiledGround(blend: GroundBlend): {
+function compiledGround(
+  blend: GroundBlend,
+  bounded = true,
+): {
   readonly shader: {
     vertexShader: string;
     fragmentShader: string;
@@ -122,6 +125,7 @@ function compiledGround(blend: GroundBlend): {
     { value: 90 },
     { value: 1 },
     blend,
+    bounded,
   );
   {
     const shader = {
@@ -212,5 +216,48 @@ describe('the bare rock a steep bank wears — #1274', () => {
     expect(shader.fragmentShader).not.toContain('rockMap');
     expect(shader.uniforms['cragMap']).toBeUndefined();
     material.dispose();
+  });
+});
+
+describe('the ground blend’s derivatives, taken once — #1523', () => {
+  const count = (text: string, pattern: RegExp): number => text.match(pattern)?.length ?? 0;
+
+  it('takes each surface’s pair once, outside every branch, by the same expression, and hands it to the normal', () => {
+    const bounded = compiledGround(ALL_SURFACES);
+    const before = compiledGround(ALL_SURFACES, false);
+    const fragment = bounded.shader.fragmentShader;
+    for (const name of ['verge', 'rock', 'crag']) {
+      const dx = `vec2 ${name}Dx = dFdx(${name}Uv) * oylBias;`;
+      const dy = `vec2 ${name}Dy = dFdy(${name}Uv) * oylBias;`;
+      // The control: as #627 and #1274 took them, in each of the two readers.
+      expect(before.shader.fragmentShader.split(dx), name).toHaveLength(3);
+      expect(before.shader.fragmentShader.split(dy), name).toHaveLength(3);
+      // Bounded: the same expression, once.
+      expect(fragment.split(dx), name).toHaveLength(2);
+      expect(fragment.split(dy), name).toHaveLength(2);
+      // The normal reads the pair the shares took.
+      const global = `oyl${name.charAt(0).toUpperCase()}${name.slice(1)}`;
+      expect(fragment, name).toContain(`${global}Dx = ${name}Dx;`);
+      expect(fragment, name).toContain(`vec2 ${name}Dx = ${global}Dx;`);
+      expect(fragment, name).toContain(`vec2 ${name}Dy = ${global}Dy;`);
+      // Taken in `main`'s map block, which runs before the normal's chunk calls the reader.
+      expect(fragment.indexOf(`${global}Dx = ${name}Dx;`)).toBeGreaterThan(
+        fragment.indexOf('void main()'),
+      );
+    }
+    // Six fewer derivatives in the whole program, whatever else takes one.
+    expect(count(fragment, /dFdx\(/g)).toBe(count(before.shader.fragmentShader, /dFdx\(/g) - 3);
+    expect(count(fragment, /dFdy\(/g)).toBe(count(before.shader.fragmentShader, /dFdy\(/g) - 3);
+    // Before the first branch that samples a surface: a derivative inside
+    // non-uniform control flow is undefined.
+    const taken = fragment.indexOf('vec2 vergeDx = dFdx(');
+    expect(taken).toBeGreaterThan(fragment.indexOf('void main()'));
+    expect(taken).toBeLessThan(fragment.indexOf('if (oylVergeShare > 0.0)', taken));
+    // And a program of its own, so three cannot hand one ground the other's.
+    expect(bounded.material.customProgramCacheKey()).not.toBe(
+      before.material.customProgramCacheKey(),
+    );
+    bounded.material.dispose();
+    before.material.dispose();
   });
 });
