@@ -19,7 +19,15 @@
  * (#911, OSA s.21(4)(d)) by the same two sessions, so a suspended rider can
  * appeal without being able to sign in to anything else.
  *
- * Both routes are sealed-only on an instance holding keys (#1382, ADR 0047's
+ * {@link StatementsPort.exportAccount} and {@link StatementsPort.eraseAccount}
+ * take the rider's data out of the instance and delete their account there
+ * (#1517) by the same two sessions: suspension never stops a rider getting or
+ * erasing their own data. The deletion's step-up is a statement signed just
+ * now by this device's key (`oyl-erase-account-v1`, #898). ⚠️ It deletes
+ * nothing on this device (ADR 0036 D-3 (b)): once the instance has deleted the
+ * account, this device forgets only its sign-in there, as a disconnect does.
+ *
+ * Every route here is sealed-only on an instance holding keys (#1382, ADR 0047's
  * amendment of 2026-10-16), so both sessions call them through the sealed
  * path: the held one through `heldAccountSession` (#1210), the way-out one
  * through the sealed instance its opening judged. ⚠️ A device that holds a pin
@@ -32,8 +40,24 @@
  * watches {@link StatementsPort} and {@link createStatementsPort}.
  */
 
-import { heldAccountSession, sessionlessSealed, type SealingDependencies } from './instance-port';
-import { instanceHttp, type InstanceHttp } from './instance-transport';
+import {
+  deviceStatementBytes,
+  ERASE_ACCOUNT_PURPOSE,
+  toHex,
+  unixSeconds,
+} from '@onyourleft/domain';
+
+import {
+  heldAccountSession,
+  instanceEraser,
+  sessionlessSealed,
+  type SealingDependencies,
+} from './instance-port';
+import {
+  instanceHttp,
+  MAXIMUM_ROOM_ROUTE_ANSWER_BYTES,
+  type InstanceHttp,
+} from './instance-transport';
 import { openLeaveSession, readInstanceAccount } from './sign-in';
 
 /** One statement of reasons, as the rider reads it. */
@@ -85,6 +109,14 @@ export const APPEAL_REFUSAL_TEXT = {
   'no-answer': 'The instance did not answer, so the appeal was not sent. Try again later.',
 } as const;
 
+/** What deleting the account did (#1517). */
+export type EraseOutcome =
+  { readonly kind: 'erased' } | { readonly kind: 'refused'; readonly text: string };
+
+/** What the rider is told when the account is not deleted. The owner's approved wording (2026-10-21, on #1528). */
+export const ERASE_REFUSAL_TEXT =
+  'Your account was not deleted: the instance did not answer, or refused. Try again later.';
+
 export type StatementsRead =
   | { readonly kind: 'statements'; readonly statements: readonly RiderStatement[] }
   | { readonly kind: 'not-connected' }
@@ -95,6 +127,13 @@ export interface StatementsPort {
   read(): Promise<StatementsRead>;
   /** Appeal the decision `statementId` explains, with the rider's grounds (#911). */
   appeal(statementId: number, grounds: string): Promise<AppealOutcome>;
+  /**
+   * Everything the instance holds about this rider (`GET /v1/account/export`,
+   * #1517), as the JSON text to save, or `undefined` when it was not read.
+   */
+  exportAccount(): Promise<string | undefined>;
+  /** Delete this rider's account on the instance (`DELETE /v1/account`, #1517). Never this device's copy. */
+  eraseAccount(): Promise<EraseOutcome>;
 }
 
 /**
@@ -259,6 +298,32 @@ export function createStatementsPort(dependencies: StatementsPortDependencies): 
     return request(way.kind === 'sealed' ? way.instance : http, token);
   }
 
+  /**
+   * The deletion's step-up (#898): a challenge from the instance, signed now
+   * for `oyl-erase-account-v1` by this device's key. The challenge is
+   * plaintext, as signing in's is; the statement goes in the sealed request.
+   */
+  async function eraseStatement(origin: string): Promise<Record<string, string | number>> {
+    const key = await dependencies.signingKey();
+    const publicKey = toHex(key.publicKey);
+    const challenge = await instanceHttp(origin, dependencies.send).call(
+      'POST',
+      '/v1/auth/challenge',
+      { body: { publicKey } },
+    );
+    const nonce = record(challenge.body)?.nonce;
+    if (challenge.status !== 200 || typeof nonce !== 'string') throw new Error('no challenge');
+    const now = dependencies.now ?? (() => Date.now());
+    const statement = {
+      purpose: ERASE_ACCOUNT_PURPOSE,
+      instanceOrigin: origin,
+      nonce,
+      publicKey,
+      issuedAt: unixSeconds(Math.floor(now() / 1000)),
+    } as const;
+    return { ...statement, signature: toHex(await key.sign(deviceStatementBytes(statement))) };
+  }
+
   return {
     read: async () => {
       try {
@@ -305,6 +370,47 @@ export function createStatementsPort(dependencies: StatementsPortDependencies): 
         }
       } catch {
         return { kind: 'refused', text: APPEAL_REFUSAL_TEXT['no-answer'] };
+      }
+    },
+
+    exportAccount: async () => {
+      try {
+        const answer = await withSession((sealedOrKeyless, token) =>
+          // The largest answer one call may read (#784's bound): an export is
+          // every record the instance holds, and far past the usual 256 KiB.
+          sealedOrKeyless.call('GET', '/v1/account/export', {
+            token,
+            maximumAnswerBytes: MAXIMUM_ROOM_ROUTE_ANSWER_BYTES,
+          }),
+        );
+        return answer?.status === 200 && record(answer.body) !== undefined
+          ? JSON.stringify(answer.body, null, 2)
+          : undefined;
+      } catch {
+        return undefined;
+      }
+    },
+
+    eraseAccount: async () => {
+      const account = readInstanceAccount(dependencies.storage);
+      if (account === undefined) return { kind: 'refused', text: ERASE_REFUSAL_TEXT };
+      try {
+        const answer = await withSession(async (sealedOrKeyless, token) =>
+          // A fresh statement for each session asked: a challenge is spent once.
+          sealedOrKeyless.call('DELETE', '/v1/account', {
+            token,
+            body: { statement: await eraseStatement(account.origin) },
+          }),
+        );
+        if (answer?.status === 204) {
+          // The account is gone, so the sign-in to it is forgotten — and
+          // nothing else: every ride stays on this device (ADR 0036 D-3 (b)).
+          instanceEraser(dependencies.storage).forget();
+          return { kind: 'erased' };
+        }
+        return { kind: 'refused', text: ERASE_REFUSAL_TEXT };
+      } catch {
+        return { kind: 'refused', text: ERASE_REFUSAL_TEXT };
       }
     },
   };

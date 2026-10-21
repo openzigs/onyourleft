@@ -304,6 +304,47 @@ export const ROOM_ROUTES: readonly Route[] = [
   },
   {
     method: 'POST',
+    path: '/v1/rooms/{roomId}/blocks',
+    sealed: 'only',
+    operationId: 'blockFromRaceResult',
+    reaches: {
+      exempt:
+        'names a ROW of a race’s result the caller rode in, never an athlete; only a row the caller is already shown by name, the block is the caller’s own row, and the answer names nobody (#1516)',
+    },
+    summary:
+      'Block another rider from a race’s result, by their row, counted from 1 (#1516): the same block as `POST /v1/blocks/{athleteId}`, for a rider the app knows only by the name on that row. `not_found` unless the caller may read the result (`GET /v1/rooms/{roomId}/results`) and the row is in it. A row with no name for the caller, or their own, blocks nobody. The blocked rider is not told, and the answer never names who it was.',
+    identity: true,
+    rooms: true,
+    auth: 'session',
+    request: object({ row: { type: 'integer' } }),
+    errors: ['unauthenticated', 'validation_failed', 'not_found'],
+    response: { contentType: 'none' },
+    handle: async (context) => {
+      const caller = callerOf(context);
+      const roomId = context.params.roomId ?? '';
+      const row = context.json.row;
+      const published = await roomsOf(context).results(caller, roomId);
+      if (
+        !published.ok ||
+        typeof row !== 'number' ||
+        !Number.isSafeInteger(row) ||
+        row < 1 ||
+        row > published.value.rows.length
+      ) {
+        return errorResponse('not_found');
+      }
+      const moderation = context.identity?.moderation;
+      if (moderation === undefined) return errorResponse('unavailable');
+      const athleteId = await roomsOf(context).namedResultRider(caller, roomId, row);
+      if (athleteId === undefined) return new Response(null, { status: 204 });
+      return moderationAnswer(
+        await moderation.block(caller.athleteId, athleteId),
+        () => new Response(null, { status: 204 }),
+      );
+    },
+  },
+  {
+    method: 'POST',
     path: '/v1/rooms/{roomId}/remove',
     sealed: 'only',
     operationId: 'removeFromMyRoom',

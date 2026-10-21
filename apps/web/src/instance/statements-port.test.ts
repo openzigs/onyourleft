@@ -21,7 +21,12 @@ import { ensureLocalAthlete, LOCAL_ATHLETE } from '../local-athlete';
 import { createInstancePort, type InstanceStorage } from './instance-port';
 import type { InstanceSend } from './instance-transport';
 import { INSTANCE_ACCOUNT_STORAGE_KEY, readInstanceAccount } from './sign-in';
-import { APPEAL_REFUSAL_TEXT, createStatementsPort, type StatementsPort } from './statements-port';
+import {
+  APPEAL_REFUSAL_TEXT,
+  createStatementsPort,
+  ERASE_REFUSAL_TEXT,
+  type StatementsPort,
+} from './statements-port';
 import { LOADED_FROM_A_WEBSITE, LOADED_LOCALLY } from './testing';
 
 interface TestDevice {
@@ -86,6 +91,8 @@ async function connected(
   me: string;
   storage: InstanceStorage;
   restrict: (path: 'suspend' | 'hide-display-name') => Promise<void>;
+  /** Connect THIS device again, with its same key: the athlete id the instance answers. */
+  reconnect: () => Promise<string | undefined>;
 }> {
   const started: { world?: World } = {};
   const sent: string[] = [];
@@ -155,6 +162,15 @@ async function connected(
       send,
       now: () => world.clock.ms,
     }),
+    reconnect: async () => {
+      const again = await instancePort.connect(
+        testing.TEST_ORIGIN,
+        'Carys',
+        (await world.instanceKeys.show()).card,
+      );
+      if (again.kind !== 'connected') throw new Error(JSON.stringify(again));
+      return readInstanceAccount(storage)?.instanceAthleteId;
+    },
     restrict: async (path) => {
       const done = await world.call('POST', `/v1/moderation/athletes/${me}/${path}`, {
         token: ownerToken,
@@ -302,6 +318,95 @@ describe('the statements of reasons about this rider (#910)', () => {
       send,
     });
     expect(await port.read()).toEqual({ kind: 'not-connected' });
+    expect(send).not.toHaveBeenCalled();
+  });
+});
+
+describe('a SUSPENDED rider takes their data out and deletes their account (#1517)', () => {
+  it('saves the instance’s export of the account through the way-out session', async () => {
+    const { port, restrict, sent, me } = await connected();
+    await restrict('suspend');
+    const before = sent.length;
+    const text = await port.exportAccount();
+    if (text === undefined) throw new Error('no export');
+    const saved = JSON.parse(text) as { athlete?: { id?: unknown }; notIncluded?: unknown };
+    // The rider's own account, as the instance holds it.
+    expect(saved.athlete?.id).toBe(me);
+    expect(saved.notIncluded).toBeDefined();
+    // Sealed with the way-out session, as the statements are: never plaintext.
+    expect(sent.slice(before)).toEqual([
+      '/v1/instance/keys',
+      '/v1/sealed',
+      '/v1/instance/keys',
+      '/v1/auth/challenge',
+      '/v1/sealed',
+      '/v1/sealed',
+    ]);
+  });
+
+  it('deletes the account on the instance, signed by this device’s key, and forgets only the sign-in', async () => {
+    const { port, restrict, storage, sent, me, reconnect } = await connected();
+    await restrict('suspend');
+    const before = sent.length;
+    expect(await port.eraseAccount()).toEqual({ kind: 'erased' });
+    // The held session's attempt is refused; then the way-out session, a
+    // fresh challenge for its own step-up statement, and the deletion sealed.
+    expect(sent.slice(before)).toEqual([
+      '/v1/instance/keys',
+      '/v1/auth/challenge',
+      '/v1/sealed',
+      '/v1/instance/keys',
+      '/v1/auth/challenge',
+      '/v1/sealed',
+      '/v1/auth/challenge',
+      '/v1/sealed',
+    ]);
+    // This device forgot the sign-in, and nothing more.
+    expect(readInstanceAccount(storage)).toBeUndefined();
+    expect(await port.read()).toEqual({ kind: 'not-connected' });
+    // Read back on the instance: this device's key is no account's now, so
+    // connecting with it again registers a NEW athlete — not the suspended one,
+    // whose sign-in would be refused `account_suspended`.
+    const again = await reconnect();
+    expect(again).toBeDefined();
+    expect(again).not.toBe(me);
+  });
+
+  it('deletes the account of a rider who is NOT suspended with the session it holds', async () => {
+    const { port, sent, storage } = await connected();
+    const before = sent.length;
+    expect(await port.eraseAccount()).toEqual({ kind: 'erased' });
+    expect(sent.slice(before)).toEqual(['/v1/instance/keys', '/v1/auth/challenge', '/v1/sealed']);
+    expect(readInstanceAccount(storage)).toBeUndefined();
+  });
+
+  it('says nothing was deleted when the instance will not answer', async () => {
+    const { port, restrict, world, storage } = await connected();
+    await restrict('suspend');
+    await world.close();
+    worlds.splice(worlds.indexOf(world), 1);
+    expect(await port.eraseAccount()).toEqual({
+      kind: 'refused',
+      text: ERASE_REFUSAL_TEXT,
+    });
+    // Not deleted, so the sign-in is still held.
+    expect(readInstanceAccount(storage)).toBeDefined();
+  });
+
+  it('sends nothing on a device connected to no instance', async () => {
+    const send = vi.fn() as unknown as InstanceSend;
+    const port = createStatementsPort({
+      storage: { getItem: () => null, setItem: () => undefined, removeItem: () => undefined },
+      loadedFrom: LOADED_LOCALLY,
+      ensureLocalAthlete: () => Promise.resolve(),
+      signingKey: () => Promise.reject(new Error('no key is asked for')),
+      send,
+    });
+    expect(await port.exportAccount()).toBeUndefined();
+    expect(await port.eraseAccount()).toEqual({
+      kind: 'refused',
+      text: ERASE_REFUSAL_TEXT,
+    });
     expect(send).not.toHaveBeenCalled();
   });
 });

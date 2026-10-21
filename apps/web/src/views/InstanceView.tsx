@@ -468,7 +468,14 @@ export function InstanceView({
         </section>
       )}
 
-      {statements === undefined ? null : <StatementsPanel port={statements} />}
+      {statements === undefined ? null : (
+        <StatementsPanel
+          port={statements}
+          onErased={() => {
+            void read();
+          }}
+        />
+      )}
 
       {recoveryCodes === undefined || recoveryCodes.length === 0 ? null : (
         <section className="oyl-panel" aria-labelledby="oyl-instance-recovery">

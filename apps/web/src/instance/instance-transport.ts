@@ -332,7 +332,7 @@ export function isRoomId(roomId: string): boolean {
  */
 export function roomPath(
   roomId: string,
-  kind: 'ticket' | 'socket' | 'route' | 'results' | 'start' | 'reports' | 'join',
+  kind: 'ticket' | 'socket' | 'route' | 'results' | 'start' | 'reports' | 'blocks' | 'join',
 ): string {
   if (!isRoomId(roomId)) throw new InstanceUnreachableError('refused-path');
   return `/v1/rooms/${roomId}/${kind}`;

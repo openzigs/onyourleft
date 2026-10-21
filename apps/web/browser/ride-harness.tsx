@@ -569,6 +569,7 @@ const RACE_PORTS =
           joinPublic: () => Promise.resolve({ kind: 'unreachable' as const }),
           start: () => Promise.resolve({ kind: 'started' as const }),
           results: () => Promise.resolve({ kind: 'unreachable' as const }),
+          blockRider: () => Promise.resolve({ kind: 'unreachable' as const }),
         },
       };
 

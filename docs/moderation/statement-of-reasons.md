@@ -87,15 +87,19 @@ rider's personal details into the reason (`docs/moderation.md`).
 > deleted [item], and [what is kept, if anything].]
 >
 > **2. Why, and what we relied on** *(Art. 17(3)(b))*: [We acted on a notice sent to us on [date]. |
-> We found it ourselves on [date].] The facts: [what the content was and what it did, without anybody's
-> personal details]. [If the matter involves the moderator: this decision was taken by the moderator,
-> in a matter that involves them. We declare that conflict of interest here, and the decision is
+> We found it ourselves on [date]. | The race room's power check flagged it on [date]; see part 3.]
+> The facts: [what the content was and what it did, without anybody's personal details]. [If the
+> matter involves the moderator: this decision was taken by the moderator, in a matter that involves
+> them. We declare that conflict of interest here, and the decision is
 > logged.] [We are not telling you who sent the notice. | We are telling you who sent the
 > notice because you cannot see why the content is illegal without knowing that: [name].] *(DSA recital
 > 54: only where necessary to identify the illegality.)*
 >
-> **3. Automated means** *(Art. 17(3)(c))*: no automated means were used to find this content or to
-> decide. A person, the moderator, read it and decided.
+> **3. Automated means** *(Art. 17(3)(c))*: [No automated means were used to find this content or to
+> decide. A person, the moderator, read it and decided. | An automated check found it: in a race, the
+> room compares every rider's power-to-weight with its ceilings, and on [date] it flagged that yours,
+> averaged over [duration], went past the ceiling of [W/kg]. The check decided nothing. A person,
+> the moderator, read the flag and decided.]
 >
 > **4. The law we relied on** *(Art. 17(3)(d), only for illegal content)*: [the law, for example the
 > offence and the country], and why the content is illegal under it: [explanation]. [Not applicable:
