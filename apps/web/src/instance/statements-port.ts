@@ -113,7 +113,7 @@ export const APPEAL_REFUSAL_TEXT = {
 export type EraseOutcome =
   { readonly kind: 'erased' } | { readonly kind: 'refused'; readonly text: string };
 
-/** What the rider is told when the account is not deleted. ⚠️ Draft wording awaiting the owner's approval. */
+/** What the rider is told when the account is not deleted. The owner's approved wording (2026-10-21, on #1528). */
 export const ERASE_REFUSAL_TEXT =
   'Your account was not deleted: the instance did not answer, or refused. Try again later.';
 

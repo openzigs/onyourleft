@@ -77,7 +77,7 @@ export const APPEAL_TEXT = {
     'conflict of interest here, and it is logged.',
 } as const;
 
-/** A suspended rider's own data on the instance (#1517). ⚠️ Draft wording awaiting the owner's approval. */
+/** A suspended rider's own data on the instance (#1517). The owner's approved wording (2026-10-21, on #1528). */
 export const YOUR_DATA_TEXT = {
   heading: 'Your data on this instance',
   intro:

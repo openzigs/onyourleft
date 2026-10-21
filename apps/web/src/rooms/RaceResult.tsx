@@ -39,8 +39,8 @@
  * reasons (measured: it ran off the stage).
  *
  * A press asks first, because the app cannot undo a block yet (it never
- * holds the id to unblock by). ⚠️ Every sentence of it is draft wording for
- * the owner's approval.
+ * holds the id to unblock by). Every sentence of it is the owner's approved
+ * wording (2026-10-21, on #1530).
  */
 
 import { useEffect, useRef, useState, type JSX } from 'react';
@@ -80,7 +80,7 @@ export const RACE_REFERENCES_TEXT =
   'To tell the instance’s moderator about one row of this result, or about the race’s route, ' +
   'copy its reference into the instance’s notice page. About links to it.';
 
-/** #1516: every word of *Block* on a result. ⚠️ Draft wording for the owner's approval. */
+/** #1516: every word of *Block* on a result. The owner's approved wording (2026-10-21, on #1530). */
 export const RACE_BLOCK_TEXT = {
   /** The control: "Block", and the rider's name visually hidden after it. */
   open: 'Block',
