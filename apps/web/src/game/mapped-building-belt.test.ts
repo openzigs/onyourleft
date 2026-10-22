@@ -27,7 +27,7 @@ import {
   type FootprintPlan,
   type FootprintRole,
 } from './footprint-buildings';
-import { rowTownFixture } from './footprint-fixtures-testing';
+import { mixedTownFixture, rowTownFixture } from './footprint-fixtures-testing';
 import { landClassMask } from './land-class';
 import {
   FAR_ROLES,
@@ -52,6 +52,7 @@ import {
 } from './realistic-assets';
 import type { ScatterItem } from './scatter';
 import { sceneFrame } from './scene';
+import { STRUCTURE_FOOTPRINTS } from './settlements';
 import { atStartLine } from './simulation';
 import { drawnRoadFrame } from './terrain';
 import {
@@ -523,5 +524,119 @@ describe('the share of the structures’ term a refill takes — #1549, P-12', (
     const over = aBelt();
     refillMappedBuildings(over, view, [], 0, 10 * REALISTIC_STRUCTURE_ITEMS);
     expect(over.stats.triangles).toBeLessThanOrEqual(MAPPED_BUILDING_TRIANGLES);
+  });
+});
+
+describe('the procedural structures and the mapped buildings, ranked together — #1586', () => {
+  const mixed = mixedTownFixture();
+  const mixedLand = landClassMask(mixed.corridor);
+  const mixedBuildings = mappedBuildingsOf(
+    footprintPlans(mixed.corridor, mixedLand, mixed.profile, mixed.origin).plans,
+  );
+
+  /** #1581's mixed town with the rider at `along`, as a realistic rung carries it. */
+  function mixedFrame(along: number): ReturnType<typeof sceneFrame> {
+    const start = atStartLine(mixed.profile);
+    return sceneFrame({
+      profile: mixed.profile,
+      origin: mixed.origin,
+      state: { ...start, ride: { ...start.ride, distance: metres(along) } },
+      worldCorridor: mixed.corridor,
+      landClass: mixedLand,
+      mappedBuildings: mixedBuildings,
+      structureItems: REALISTIC_STRUCTURE_ITEMS,
+    });
+  }
+
+  it('draws the town’s nearest buildings at its edge, the fields beyond filling every structure slot', () => {
+    const frame = mixedFrame(1_750);
+    const view = frame.mappedBuildings;
+    if (view === undefined) throw new Error('the frame carries no mapped buildings');
+    const procedural = frame.scatter.filter((item) =>
+      Object.hasOwn(STRUCTURE_FOOTPRINTS, item.kind),
+    );
+    const billboards = frame.billboards.length;
+    // The issue's frame: the procedural structures alone fill the cap…
+    expect(procedural.length + billboards).toBeGreaterThanOrEqual(REALISTIC_STRUCTURE_ITEMS);
+    // …and the town's nearest building is nearer than most of them: the fields beyond its end.
+    const plans = mixedBuildings.plans;
+    const away = (x: number, z: number): number => Math.hypot(x - view.x, z - view.z);
+    const nearestPlan = plans.reduce(
+      (best, plan, index) =>
+        away(plan.centroid.x, plan.centroid.z) <
+        away((plans[best] as FootprintPlan).centroid.x, (plans[best] as FootprintPlan).centroid.z)
+          ? index
+          : best,
+      0,
+    );
+    const nearestPlanMetres = away(
+      (plans[nearestPlan] as FootprintPlan).centroid.x,
+      (plans[nearestPlan] as FootprintPlan).centroid.z,
+    );
+    const beyond = procedural.filter((item) => away(item.x, item.z) > nearestPlanMetres);
+    expect(beyond.length).toBeGreaterThan(procedural.length / 2);
+
+    const belt = aBelt(mixedBuildings);
+    const cap = refillMappedBuildings(
+      belt,
+      view,
+      frame.scatter,
+      billboards,
+      REALISTIC_STRUCTURE_ITEMS,
+    );
+    // The town is drawn, its nearest building first, read back out of the belt.
+    expect(belt.stats.buildings).toBeGreaterThan(0);
+    expect(belt.drawnAt(0)?.plan).toBe(nearestPlan);
+    // The structure term still holds, the procedural structures within what is left.
+    const structure = REALISTIC_TRIANGLES.structure;
+    expect(cap).toBeGreaterThan(0);
+    expect(((cap ?? 0) + billboards) * structure + belt.stats.triangles).toBeLessThanOrEqual(
+      MAPPED_BUILDING_TRIANGLES,
+    );
+
+    // THE CONTROL: #1549's rule, procedural structures first, draws no building at all.
+    const before = aBelt(mixedBuildings);
+    before.refill(
+      view.x,
+      view.z,
+      Math.max(0, REALISTIC_STRUCTURE_ITEMS - procedural.length - billboards) * structure,
+      view.chunk,
+    );
+    expect(before.stats.buildings).toBe(0);
+  });
+
+  it('still takes procedural structures nearer than the town before its buildings', () => {
+    const frame = mixedFrame(1_750);
+    const view = frame.mappedBuildings;
+    if (view === undefined) throw new Error('the frame carries no mapped buildings');
+    // 36 structures beside the rider, nearer than any house.
+    const beside = Array.from({ length: REALISTIC_STRUCTURE_ITEMS }, (): ScatterItem => ({
+      kind: 'building',
+      x: view.x,
+      y: 0,
+      z: view.z,
+      rotation: 0,
+      scale: 1,
+      variant: 0,
+    }));
+    const belt = aBelt(mixedBuildings);
+    const cap = refillMappedBuildings(belt, view, beside, 0, REALISTIC_STRUCTURE_ITEMS);
+    expect(belt.stats.buildings).toBe(0);
+    expect(cap).toBe(REALISTIC_STRUCTURE_ITEMS);
+  });
+
+  it('ranks the structures by their distance, not by the frame’s order', () => {
+    const view = viewAt(1_500);
+    // A rung of one structure; the frame lists one far out first, and one beside the rider last.
+    const far = { ...structure(view.z), x: view.x + 5_000 };
+    const beside = { ...structure(view.z), x: view.x };
+    const belt = aBelt();
+    refillMappedBuildings(belt, view, [far, beside], 0, 1);
+    // The one beside the rider is nearer than every house, and takes the only slot.
+    expect(belt.stats.buildings).toBe(0);
+    // THE CONTROL: with only the far one, the houses are nearer and take it.
+    const control = aBelt();
+    refillMappedBuildings(control, view, [far], 0, 1);
+    expect(control.stats.buildings).toBeGreaterThan(0);
   });
 });

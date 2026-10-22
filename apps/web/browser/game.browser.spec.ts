@@ -70,6 +70,7 @@ import {
   MAPPED_BUILDING_DRAW_CALLS,
   MAPPED_BUILDING_MAX,
   REALISTIC_REMOTE_TRIANGLES,
+  REALISTIC_STRUCTURE_ITEMS,
   REALISTIC_WOODED_DRAW_CALLS,
 } from '../src/game/realistic-budget';
 import { MAXIMUM_DRAWN_SET } from '../src/net/interest';
@@ -3626,6 +3627,24 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     expect(Math.abs(luminance(facade.wallOff) - luminance(facade.glassOff))).toBeLessThan(4);
     // And the glass is the facade's: off, that place reads the wall it was drawn over.
     expect(luminance(facade.glassOff) - luminance(facade.glass)).toBeGreaterThan(12);
+  });
+
+  test('#1586 a town’s edge is drawn when the fields beyond it fill the structure cap', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { townEdge: edge } = await realistic(harnessRun);
+    const measured =
+      `${String(edge.structures)} structures in the frame; ${String(edge.buildings)} buildings ` +
+      `in ${String(edge.drawCalls)} calls, lever off ${String(edge.drawCallsOff)}`;
+    testInfo.annotations.push({ type: 'a town’s edge', description: measured });
+    console.log(`a town’s edge — ${measured}`);
+    // The issue's frame: the procedural structures alone fill the cap.
+    expect(edge.structures).toBeGreaterThanOrEqual(REALISTIC_STRUCTURE_ITEMS);
+    // Ranked by distance, the houses round the rider are drawn, and submitted.
+    expect(edge.buildings).toBeGreaterThan(0);
+    expect(edge.drawCalls).toBeGreaterThan(0);
+    // THE CONTROL: with `-mapped-buildings` the belt adds no call at all.
+    expect(edge.drawCallsOff).toBe(0);
   });
 
   test('#1549 nothing in the wood: no plan kept there and no building pixel, where -landclass draws one', async ({
