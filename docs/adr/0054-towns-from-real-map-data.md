@@ -394,3 +394,17 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   D-3.6, including that the store never leaves the device (D-3.5), is ODbL 1.0 data and is droppable
   without loss. The street lines are bounded at read time by the decoder and at use by
   `STREET_MAX_METRES`.
+
+- **2026-10-22** — **D-5.6's cap is the structures' triangle term; the count of mapped buildings
+  inside it is #1549's 240.** D-5.6 says the nearest footprints come first "within the cap" of
+  `REALISTIC_STRUCTURE_ITEMS` (36), and "What would make this ADR wrong" speaks of "the nearest 36
+  footprints". #1549 (P-12) reads the cap as a **triangle** term: mapped buildings share the 36 × 640 =
+  **23,040** triangles with the procedural structures and take only what those leave, nearest first,
+  so `REALISTIC_FRAME_TRIANGLES` does not rise and #1523's ceiling is untouched. Most mapped buildings
+  are boxes of 10 to 26 triangles, so 23,040 triangles hold several hundred of them, and
+  `realistic-budget.ts` §`MAPPED_BUILDING_MAX` (240, the stylised world's `STRUCTURE_MAX_ITEMS`)
+  bounds the count. D-5.6's rule that the cap rises only after #1523's fix, and only to a measured
+  number, is unchanged: neither 23,040 nor `REALISTIC_STRUCTURE_ITEMS` moves. **Status: this entry
+  records the reading #1549's pull request implements; it was written by the implementing agent with
+  no owner present, and merging that pull request is the owner's ruling on it.** If the owner reads
+  D-5.6 as 36 buildings, the change is `MAPPED_BUILDING_MAX = 36` and this entry is superseded.

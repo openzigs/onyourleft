@@ -794,9 +794,19 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         P-9's placement rules, in order and counted as
                         `FootprintVerdicts`; storeys, a gable-or-flat roof and
                         surfaces by `land-class.ts` §`kindAt`; ≤ 640 triangles
-                        by role, built ONCE at ride start. ⚠️ **`@unwired`
-                        until #1549 draws the plans**, and nothing in the ride
-                        reads them yet
+                        by role, built ONCE at ride start by `GameView`, and
+                        drawn by #1549 (`mapped-buildings.ts`)
+    src/game/mapped-buildings.ts
+                        which plans are drawn (#1549): indexed ONCE at the
+                        press (`SceneInput.mappedBuildings`), the nearest in
+                        400 m first, ≤ 240, inside what the frame's procedural
+                        structures leave of the 23 040-triangle structure term,
+                        the far level past 150 m, in ≤ 6 surfaces; no tree,
+                        shrub or rock on a plan's ground. ⚠️ **One mesh, a
+                        group a surface** (`three-renderer.ts`
+                        §`MappedBuildingBelt`), refilled only when the rider's
+                        100 m chunk or the rung changes, realistic rungs only;
+                        the tint is a VERTEX attribute, and there is no blob
     src/game/streets.ts a village's kerbed pavements (#1535) — along each side's
                         BUILT plots (`settlements.ts` §`siteAt`, §`villagePlots`,
                         the houses' own decision), on the road's edge, never on
