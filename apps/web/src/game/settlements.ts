@@ -82,6 +82,7 @@ import {
   type RouteProfile,
 } from '@onyourleft/domain';
 
+import { builtUpOrWater, fieldGround, NO_LAND_CLASS, type LandClassMask } from './land-class';
 import { ROAD_CLEARANCE_METRES, fieldSpanMetres, terrainHeightAt } from './landform';
 import {
   SETTLEMENT_GRADE_PERCENT,
@@ -193,6 +194,12 @@ const STREAM_VARIANT = 4;
  * `footprints`, when given, is filled with the ground of every settlement whose
  * sites this call visits — #1534, {@link SettlementFootprint} — whatever the
  * budget keeps: a rung that drops a house does not plant its garden.
+ *
+ * `land` is the ride's land-class mask (#1546): no procedural site stands
+ * where map data was read ({@link siteOnMappedLand}), and no field boundary
+ * runs across mapped built-up land, water, wood or park (`land-class.ts`
+ * §`fieldGround`). {@link NO_LAND_CLASS}, the default, is
+ * today's world.
  */
 export function structuresAt(
   profile: RouteProfile,
@@ -202,12 +209,13 @@ export function structuresAt(
   toMetres: number,
   budget: { readonly maxItems: number; readonly riderMetres: number },
   footprints?: SettlementFootprint[],
+  land: LandClassMask = NO_LAND_CLASS,
 ): readonly ScatterItem[] {
   const found: ScatterItem[] = [];
   const villages: (readonly [number, number])[] = [];
-  settlementsAt(profile, origin, seed, fromMetres, toMetres, found, villages, footprints);
+  settlementsAt(profile, origin, seed, fromMetres, toMetres, found, villages, footprints, land);
   const edges: { readonly item: ScatterItem; readonly along: number }[] = [];
-  fieldEdgesAt(profile, origin, seed, fromMetres, toMetres, villages, edges);
+  fieldEdgesAt(profile, origin, seed, fromMetres, toMetres, villages, edges, land);
   edges.sort(
     (first, second) =>
       Math.abs(first.along - budget.riderMetres) - Math.abs(second.along - budget.riderMetres),
@@ -626,6 +634,60 @@ export function siteAt(profile: RouteProfile, seed: number, site: number): Site 
   return { kind, site, wrappedSite, centre, half, side };
 }
 
+/**
+ * How far either side of the road's centreline a site's ground is sampled for
+ * map data, in metres: **42** — a farmstead's barn
+ * ({@link FARM_SETBACK_METRES} far, plus its depth) and
+ * {@link SETTLEMENT_MARGIN_METRES} behind it, the furthest any site reaches.
+ */
+export const SITE_LAND_REACH_METRES = 42;
+
+/** The sampling step along a site's ground, and across it, in metres. */
+const SITE_LAND_STEP_ALONG_METRES = 10;
+const SITE_LAND_STEP_ACROSS_METRES = 6;
+
+/**
+ * Whether any of a procedural site's ground is where map data was read —
+ * #1546, ADR 0054 D-4.2 and D-5.3. Such a site is not built at all: a
+ * stretch with data is what the data says, and #1540 puts the buildings back
+ * where it says people built.
+ *
+ * The ground is the site's length and {@link PLOT_METRES} either end (where
+ * its signposts stand), {@link SITE_LAND_REACH_METRES} either side, sampled
+ * every {@link SITE_LAND_STEP_ALONG_METRES} along and
+ * {@link SITE_LAND_STEP_ACROSS_METRES} across. Covered land comes in whole
+ * z15 tiles and 320 m chunks, far wider than a step, so the sampling cannot
+ * step over it.
+ */
+export function siteOnMappedLand(
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  site: Site,
+  land: LandClassMask,
+): boolean {
+  // Nothing was read: today's world, at no cost.
+  if (land.bytes === 0) return false;
+  const start = site.centre - site.half - PLOT_METRES;
+  const length = 2 * (site.half + PLOT_METRES);
+  const steps = Math.ceil(length / SITE_LAND_STEP_ALONG_METRES);
+  for (let step = 0; step <= steps; step += 1) {
+    const along = start + Math.min(length, step * SITE_LAND_STEP_ALONG_METRES);
+    const frame = frameAt(profile, origin, distanceOnRoute(profile, along));
+    if (frame !== undefined) {
+      for (
+        let lateral = -SITE_LAND_REACH_METRES;
+        lateral <= SITE_LAND_REACH_METRES + 1e-9;
+        lateral += SITE_LAND_STEP_ACROSS_METRES
+      ) {
+        if (land.covered(frame.x + frame.normalX * lateral, frame.z + frame.normalZ * lateral)) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
 /** One built plot of a village: what stands on it, where, and how far back. */
 export interface Plot {
   readonly along: number;
@@ -693,6 +755,7 @@ function settlementsAt(
   found: ScatterItem[],
   villages: (readonly [number, number])[],
   footprints: SettlementFootprint[] | undefined,
+  land: LandClassMask,
 ): void {
   const { sites, span } = siteSpacing(profile);
   const reach = VILLAGE_METRES / 2 + PLOT_METRES;
@@ -705,7 +768,8 @@ function settlementsAt(
   const last = Math.min(Math.floor((toMetres + reach) / span), first + sites + 1);
   for (let index = first; index <= last; index += 1) {
     const site = siteAt(profile, seed, index);
-    if (site === undefined) continue;
+    // #1546: where map data was read, the data decides, not the seed.
+    if (site === undefined || siteOnMappedLand(profile, origin, site, land)) continue;
     const { centre, half, side } = site;
     const admit = (item: ScatterItem | undefined, along: number): void => {
       if (item !== undefined && along >= fromMetres && along < toMetres) found.push(item);
@@ -790,6 +854,7 @@ function fieldEdgesAt(
   toMetres: number,
   villages: readonly (readonly [number, number])[],
   found: { item: ScatterItem; along: number }[],
+  land: LandClassMask,
 ): void {
   const total = profile.totalDistance;
   // The ground's own field grid, so the patchwork and the walls agree (#425).
@@ -838,7 +903,8 @@ function fieldEdgesAt(
           0,
           'along',
         );
-        if (item !== undefined) found.push({ item, along });
+        // #1546: no boundary across built-up land, water, a wood or a park.
+        if (item !== undefined && fieldGround(land, item.x, item.z)) found.push({ item, along });
       }
       // Out from the road along the field's first edge.
       if (start < fromMetres || start >= toMetres || inVillage(start)) continue;
@@ -851,12 +917,15 @@ function fieldEdgesAt(
         const lateral = FIELD_EDGE_LATERAL_METRES + (index + 0.5) * BOUNDARY_PIECE_METRES;
         const wrapped = distanceOnRoute(profile, start);
         if (inWater(ways, profile, wrapped, lateral * side)) continue;
+        const x = frame.x + frame.normalX * lateral * side;
+        const z = frame.z + frame.normalZ * lateral * side;
+        if (!fieldGround(land, x, z)) continue;
         found.push({
           item: {
             kind,
-            x: frame.x + frame.normalX * lateral * side,
+            x,
             y: terrainHeightAt(profile, origin, seed, wrapped, lateral * side),
-            z: frame.z + frame.normalZ * lateral * side,
+            z,
             // Out from the road: its own length runs along the normal.
             rotation: Math.atan2(frame.normalX * side, frame.normalZ * side),
             scale: 1,
@@ -1000,16 +1069,22 @@ const CLEARED: ReadonlySet<string> = new Set(['tree-broadleaf', 'tree-conifer', 
 
 /**
  * The natural scenery, less every tree, shrub and rock standing on a
- * settlement's ground — #1534. Pure, and a function of positions only.
+ * settlement's ground — #1534 — or, since #1546, on mapped built-up land or
+ * water. Pure, and a function of positions only.
  */
 export function clearOfSettlements(
   natural: readonly ScatterItem[],
   footprints: readonly SettlementFootprint[],
+  land: LandClassMask = NO_LAND_CLASS,
 ): readonly ScatterItem[] {
-  if (footprints.length === 0) return natural;
+  if (footprints.length === 0 && land.bytes === 0) return natural;
   return natural.filter(
     (item) =>
-      !CLEARED.has(item.kind) || !footprints.some((piece) => onSettlementGround(item, piece)),
+      !CLEARED.has(item.kind) ||
+      !(
+        builtUpOrWater(land, item.x, item.z) ||
+        footprints.some((piece) => onSettlementGround(item, piece))
+      ),
   );
 }
 
@@ -1030,6 +1105,6 @@ export function settlementFootprintsAt(
   toMetres: number,
 ): readonly SettlementFootprint[] {
   const footprints: SettlementFootprint[] = [];
-  settlementsAt(profile, origin, seed, fromMetres, toMetres, [], [], footprints);
+  settlementsAt(profile, origin, seed, fromMetres, toMetres, [], [], footprints, NO_LAND_CLASS);
   return footprints;
 }

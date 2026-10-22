@@ -68,7 +68,15 @@
 import { distanceOnRoute, elevationAt, type RouteProfile } from '@onyourleft/domain';
 
 import { distanceToDrawnRoad } from './road-grid';
-import { PLOT_METRES, siteAt, siteSpacing, villagePlots, VILLAGE_METRES } from './settlements';
+import { NO_LAND_CLASS, type LandClassMask } from './land-class';
+import {
+  PLOT_METRES,
+  siteAt,
+  siteOnMappedLand,
+  siteSpacing,
+  villagePlots,
+  VILLAGE_METRES,
+} from './settlements';
 import { drawnRoadFrame, ROAD_WIDTH_METRES, type CorridorOrigin } from './terrain';
 import { inWater, waterways } from './waterways';
 
@@ -219,6 +227,7 @@ export function streetsAt(
   seed: number,
   fromMetres: number,
   toMetres: number,
+  land: LandClassMask = NO_LAND_CLASS,
 ): readonly VillageStreet[] {
   const { sites, span } = siteSpacing(profile);
   const reach = VILLAGE_METRES / 2 + PLOT_METRES;
@@ -234,6 +243,8 @@ export function streetsAt(
   for (let index = first; index <= last; index += 1) {
     const site = siteAt(profile, seed, index);
     if (site === undefined || site.kind !== 'village') continue;
+    // #1546: a village not built on mapped land has no street either.
+    if (siteOnMappedLand(profile, origin, site, land)) continue;
     let street = known.get(site.wrappedSite);
     if (street === undefined) {
       street = streetOf(profile, origin, seed, site.wrappedSite, index);

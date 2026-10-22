@@ -773,6 +773,15 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         the old file: `StructureKind` and `SCENERY_KINDS` are in
                         `scatter.ts`, and the frame carries the structures FIRST
                         on a budget of their own (`QualitySettings.structureItems`)
+    src/game/land-class.ts
+                        what the ground is where map data was read (#1546) — a
+                        sparse 5 m mask built ONCE at the press from the ride's
+                        corridor, `SceneInput.landClass`. ⚠️ **Every placement
+                        rule reads it**: no procedural site touching covered
+                        land (`settlements.ts` §`siteOnMappedLand`, and its
+                        street), no tree, shrub or rock on built-up land or
+                        water, no field boundary off field ground. Absent is
+                        `NO_LAND_CLASS`, today's world, item for item
     src/game/streets.ts a village's kerbed pavements (#1535) — along each side's
                         BUILT plots (`settlements.ts` §`siteAt`, §`villagePlots`,
                         the houses' own decision), on the road's edge, never on
