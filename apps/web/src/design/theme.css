@@ -6522,6 +6522,18 @@ select.oyl-input {
   font-variant-numeric: tabular-nums;
 }
 
+/* #1552: the OpenStreetMap credit, on a ride whose world holds map data
+   (ADR 0054 D-3.6). Last in the actions panel, so it is on the opaque HUD
+   surface and its pair is `hudInkMuted` on `hudSurface`, which
+   `tokens.ts` §`CONTRAST_REQUIREMENTS` holds to AA in both palettes. Small, because
+   it is read once if at all; `hud-value-size.test.ts` keeps it above the
+   HUD's supporting-text floor. */
+.oyl-hud__attribution {
+  margin: 0;
+  color: var(--oyl-color-hud-ink-muted);
+  font-size: var(--oyl-font-size-sm);
+}
+
 /* #1324: ON A PHONE THE RE-PLAN'S SENTENCE GIVES WAY, and *Keep the plan*
    stands alone as it did before #1324. Measured, not chosen: with the longest
    sentence `workout/replan-text.ts` can produce, four lines in the 256 px

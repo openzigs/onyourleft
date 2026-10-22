@@ -35,6 +35,11 @@ import { parseAssetManifest } from '../credits/manifest';
 import { parseNotices, THIRD_PARTY_NOTICES_URL } from '../credits/notices';
 import { THIRD_PARTY_CONTENTS_SOURCE } from '../credits/notices-source';
 import { mount, queryAll, type Mounted } from '../testing/mount';
+import { ODBL_LICENCE_URL, OSM_ATTRIBUTION } from '../map/basemap';
+import {
+  ODBL_LICENCE_URL as FIT_ODBL_LICENCE_URL,
+  OSM_ATTRIBUTION as FIT_OSM_ATTRIBUTION,
+} from '@onyourleft/fit';
 
 import { CreditsView } from './CreditsView';
 
@@ -527,5 +532,38 @@ describe('the software this app includes — #664', () => {
       expect(software()).toContain(`${item.name} ${item.version}, under ${item.licence}`);
     }
     expect(software()).not.toContain('This list may be incomplete');
+  });
+});
+
+describe('the map data — #1552, ADR 0054 D-3.6', () => {
+  const mapData = (): Element | null =>
+    mounted?.container.querySelector('[data-terms="map-data"]') ?? null;
+
+  it('names OpenStreetMap contributors, the ODbL 1.0 with its URL, and ODbL §4.3 a’s sentence', async () => {
+    await render();
+    const section = mapData();
+    expect(section?.querySelector('h2')?.textContent).toBe('Map data');
+    const words = (section?.textContent ?? '').replace(/\s+/g, ' ');
+    expect(words).toContain('© OpenStreetMap contributors');
+    expect(words).toContain('Open Database License 1.0');
+    expect(words).toContain(
+      'Contains information from OpenStreetMap, which is made available here under the Open Database License (ODbL).',
+    );
+    const licence = section?.querySelector<HTMLAnchorElement>(
+      'a[href="https://opendatacommons.org/licenses/odbl/1-0/"]',
+    );
+    expect(licence?.textContent).toBe('Open Database License 1.0');
+    expect(licence?.getAttribute('target')).toBe('_blank');
+    expect(licence?.getAttribute('rel') ?? '').toContain('noreferrer');
+  });
+
+  it('links the same ODbL URL, and credits in the same words, as an exported course', () => {
+    expect(ODBL_LICENCE_URL).toBe(FIT_ODBL_LICENCE_URL);
+    expect(OSM_ATTRIBUTION).toBe(FIT_OSM_ATTRIBUTION);
+  });
+
+  it('is there whatever the asset manifest holds, because it is not an asset', async () => {
+    await render(FIXTURE);
+    expect(mapData()?.textContent ?? '').toContain('© OpenStreetMap contributors');
   });
 });

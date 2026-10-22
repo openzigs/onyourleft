@@ -14,6 +14,7 @@ import { parseNotices, THIRD_PARTY_NOTICES_URL, type IncludedSoftware } from '..
 import { THIRD_PARTY_CONTENTS_SOURCE } from '../credits/notices-source';
 import { ASSET_MANIFEST_SOURCE } from '../credits/source';
 import { StatusMessage } from '../design/StatusMessage';
+import { ODBL_LICENCE_URL, ODBL_NOTICE, OSM_ATTRIBUTION } from '../map/basemap';
 
 /**
  * Who made the art this app ships, generated from `ASSETS.toml` — #358.
@@ -289,6 +290,26 @@ export function CreditsView({
         to it. A file that is not recorded there fails the build, so this page is as complete as
         that record is.
       </p>
+
+      {/*
+        #1552, ADR 0054 D-3.6: the map data. Not a file this app ships, so not
+        in `ASSETS.toml` and not generated from it: the maps, and the towns
+        the realistic world draws from map data, are drawn from OpenStreetMap,
+        and ODbL §4.3 asks for this notice wherever the result is shown. The
+        ride screen and the map show `OSM_ATTRIBUTION` beside the work itself.
+      */}
+      <div data-terms="map-data">
+        <h2>Map data</h2>
+        <p>
+          {OSM_ATTRIBUTION}. The maps in this app, and the towns the realistic world draws from map
+          data, are drawn from OpenStreetMap, whose data is published under the{' '}
+          <a href={ODBL_LICENCE_URL} target="_blank" rel="noreferrer">
+            Open Database License 1.0
+          </a>
+          .
+        </p>
+        <p>{ODBL_NOTICE}</p>
+      </div>
 
       <div data-terms="software">
         <h2>Software this app includes</h2>

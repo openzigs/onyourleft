@@ -284,6 +284,15 @@ export interface HudPanelProps extends Omit<HudInput, 'units'> {
    * connection is lost (`room-ride.ts` §`raceStandings`).
    */
   readonly standings?: RaceStandingsView | undefined;
+  /**
+   * The map data's credit — #1552, ADR 0054 D-3.6 — on a ride whose world
+   * holds map-derived items, and `undefined` on every other (the stylised
+   * world, and a realistic one drawn wholly procedurally). `GameView` decides
+   * when; this only sets it, small, last in the actions panel, so it sits on
+   * an opaque panel (#423) and is on the screen whenever *Pause* is. Plain
+   * text: never a live region, because it says nothing that changes.
+   */
+  readonly attribution?: string | undefined;
 }
 
 /** The id the notice toggle's `aria-controls` names. One HUD per page. */
@@ -548,6 +557,9 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
           </div>
         )}
         {props.sound}
+        {props.attribution === undefined ? null : (
+          <p className="oyl-hud__attribution">{props.attribution}</p>
+        )}
       </div>
 
       {/*
