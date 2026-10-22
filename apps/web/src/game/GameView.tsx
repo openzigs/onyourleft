@@ -1114,6 +1114,7 @@ export function GameView(props: GameViewProps): JSX.Element {
   const landClassRef = useRef<LandClassMask | undefined>(undefined);
   /** #1549: the buildings planned from {@link worldCorridorRef}'s footprints, once, at the press. */
   const mappedBuildingsRef = useRef<MappedBuildings | undefined>(undefined);
+  /** #1550, #1583: the lots' town, built from the same plans as {@link mappedBuildingsRef}, at the press. */
   const mappedTownRef = useRef<MappedTown | undefined>(undefined);
 
   useEffect(() => {

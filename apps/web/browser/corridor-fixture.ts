@@ -32,8 +32,12 @@ import {
 } from '@onyourleft/map-features/testing';
 import { metres, type RouteProfile } from '@onyourleft/domain';
 
-import type { FootprintVerdicts } from '../src/game/footprint-buildings';
-import type { LandClass, LandClassMask } from '../src/game/land-class';
+import {
+  footprintPlans,
+  mappedTown,
+  type FootprintVerdicts,
+} from '../src/game/footprint-buildings';
+import { NO_LAND_CLASS, type LandClass, type LandClassMask } from '../src/game/land-class';
 import { northRoute } from '../src/game/route-fixtures-testing';
 import { STRUCTURE_KINDS, type SceneryKind } from '../src/game/scatter';
 import { sceneFrame } from '../src/game/scene';
@@ -248,6 +252,11 @@ export function classedItems(
   const profile = corridorFixtureRoute();
   const origin = corridorOrigin(profile);
   const start = atStartLine(profile);
+  // #1583: the lots' town, planned once, as `GameView` does at the press.
+  const town = mappedTown(
+    corridor,
+    footprintPlans(corridor, land ?? NO_LAND_CLASS, profile, origin).plans,
+  );
   const seen = new Set<string>();
   const out: ClassedItem[] = [];
   const structures = new Set<SceneryKind>(STRUCTURE_KINDS);
@@ -258,6 +267,7 @@ export function classedItems(
       state: { ...start, ride: { ...start.ride, distance: metres(distance) } },
       worldCorridor: corridor,
       ...(land === undefined ? {} : { landClass: land }),
+      mappedTown: town,
     });
     for (const item of frame.scatter) {
       const key = `${item.kind} ${item.x.toFixed(2)} ${item.z.toFixed(2)}`;
@@ -296,6 +306,11 @@ export function drawnJunctions(
   const profile = corridorFixtureRoute();
   const origin = corridorOrigin(profile);
   const start = atStartLine(profile);
+  // #1583: the lots' town, planned once, as `GameView` does at the press.
+  const town = mappedTown(
+    corridor,
+    footprintPlans(corridor, land ?? NO_LAND_CLASS, profile, origin).plans,
+  );
   const seen = new Set<SideRoad>();
   const out: DrawnJunction[] = [];
   for (let distance = 0; distance <= profile.totalDistance; distance += 100) {
@@ -305,6 +320,7 @@ export function drawnJunctions(
       state: { ...start, ride: { ...start.ride, distance: metres(distance) } },
       worldCorridor: corridor,
       ...(land === undefined ? {} : { landClass: land }),
+      mappedTown: town,
     });
     for (const road of frame.sideRoads) {
       if (seen.has(road) || road.junction.source !== 'mapped') continue;

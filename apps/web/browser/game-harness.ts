@@ -119,7 +119,7 @@ import {
 } from '../src/game/streets';
 import { waterways } from '../src/game/waterways';
 import { landClassMask, NO_LAND_CLASS } from '../src/game/land-class';
-import { footprintPlans, type FootprintPlan } from '../src/game/footprint-buildings';
+import { footprintPlans, mappedTown, type FootprintPlan } from '../src/game/footprint-buildings';
 import {
   besideRoad,
   buildingBeside,
@@ -3106,6 +3106,8 @@ function mappedTownProbe(
       worldCorridor: corridor,
       landClass: mask,
       mappedBuildings: mapped,
+      // #1583: and the lots' town from the same plans, as `GameView` hands it.
+      mappedTown: mappedTown(corridor, mask === land ? plans : plansNoLand),
       // The realistic rung's structures, as `GameView` hands a ride's frame
       // them: the share the mapped buildings take what is left of.
       structureItems: REALISTIC_STRUCTURE_ITEMS,
@@ -3307,6 +3309,8 @@ function levellingProbe(view: ReturnType<typeof threeGameRenderer.create>): Leve
     state: { ...start, ride: { ...start.ride, distance: metres(1_050) } },
     worldCorridor: corridor,
     landClass: land,
+    // #1583: the lots' town, as `GameView` hands it.
+    mappedTown: mappedTown(corridor, footprintPlans(corridor, land, profile, origin).plans),
   });
   const read = (drawn: SceneFrame): number[] => {
     view.render(drawn);
@@ -3409,6 +3413,7 @@ function lotsProbe(
     streets: [],
   };
   const land = landClassMask(corridor);
+  const town = mappedTown(corridor, footprintPlans(corridor, land, profile, origin).plans);
   const start = atStartLine(profile);
   const frameWith = (lotsOff: boolean): SceneFrame =>
     sceneFrame({
@@ -3418,6 +3423,8 @@ function lotsProbe(
       worldCorridor: corridor,
       landClass: land,
       lotsOff,
+      // #1583: the lots' town, as `GameView` hands it.
+      mappedTown: town,
     });
   const lots = frameWith(false);
   const off = frameWith(true);
