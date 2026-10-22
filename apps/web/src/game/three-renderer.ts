@@ -11961,8 +11961,8 @@ const VERTEX_TINT_TAUGHT = new WeakSet<Material>();
 /**
  * Whether a material reads its seeded tint from a VERTEX attribute — #1549.
  *
- * @test-facing held by `realistic-renderer.test.ts` §"#1549", which asserts
- * every mapped building's material is taught it
+ * @test-facing held by `mapped-building-belt.test.ts` §"the mapped buildings’
+ * materials", which asserts every mapped building's material is taught it
  */
 export function readsVertexTint(material: Material): boolean {
   return VERTEX_TINT_TAUGHT.has(material);
@@ -12052,8 +12052,8 @@ let mappedBuildingsMerged = true;
  * submits at most `MAPPED_BUILDING_DRAW_CALLS` calls, and this submits more.
  *
  * @test-facing the browser gate's control, read by `game-harness.ts`
- * §`mappedTownProbe` and `realistic-renderer.test.ts` §"#1549"; the product
- * always merges
+ * §`mappedTownProbe` and `mapped-building-belt.test.ts` §"at most six draw
+ * calls"; the product always merges
  */
 export function setMappedBuildingsMerged(merged: boolean): void {
   mappedBuildingsMerged = merged;
@@ -12709,6 +12709,12 @@ class RealisticDrawing {
    * structure coming into view mid-chunk cannot push the term past
    * `MAPPED_BUILDING_TRIANGLES`: the farthest goes undrawn, as the rung's
    * budget already drops one.
+   *
+   * ⚠️ The cap holds the PROCEDURAL structure belt only. Billboards are
+   * counted at a refill and not between: the logo belts draw them uncapped, so
+   * a board that comes into view mid-chunk can put the structure term a few
+   * items over until the next refill. The held-to-the-budget guarantee is
+   * strict for structures, one refill behind for billboards.
    *
    * Every other frame reads one number and allocates nothing.
    */

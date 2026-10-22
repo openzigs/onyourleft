@@ -10,10 +10,12 @@
 
 import { getHeapStatistics, GCProfiler } from 'node:v8';
 
+import type { BufferAttribute } from 'three';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { metres } from '@onyourleft/domain';
 
+import { FOUNDATION_METRES } from './buildings';
 import {
   BAY_METRES,
   FOOTPRINT_SURFACES,
@@ -52,6 +54,8 @@ import { atStartLine } from './simulation';
 import { drawnRoadFrame } from './terrain';
 import {
   breathesTheAir,
+  GROUNDED_SHADE,
+  GROUNDING_METRES,
   isConstructedMaterial,
   MappedBuildingBelt,
   readsInstanceTint,
@@ -244,6 +248,77 @@ describe('what the buffers hold — #1549', () => {
     }
     expect(checked).toBe(stats.triangles * 3);
     expect(belt.drawnAt(stats.buildings)).toBeUndefined();
+  });
+
+  it('shades each vertex by its role and, on a building with a plinth, by its height above the foundation — #1549', () => {
+    // The shades are written out, not read from the renderer: a plinth and a
+    // door are darker than the wall they wear the photograph of.
+    const shades: Record<FootprintRole, number> = {
+      wall: 1,
+      plinth: 0.62,
+      roof: 1,
+      parapet: 1,
+      door: 0.62,
+    };
+    const rider = viewAt(1_500);
+    const belt = aBelt();
+    const stats = belt.refill(rider.x, rider.z, MAPPED_BUILDING_TRIANGLES);
+    const colour = belt.mesh.geometry.getAttribute('color');
+    let grounded = 0;
+    let doors = 0;
+    for (let place = 0; place < stats.buildings; place += 1) {
+      const drawn = belt.drawnAt(place);
+      if (drawn === undefined) throw new Error('a drawn building is missing');
+      const plan = planned[drawn.plan] as FootprintPlan;
+      const standing = plan.triangles.plinth.length > 0;
+      const same = plan.surfaces.wall === plan.surfaces.roof;
+      let wallCursor = drawn.wallAt;
+      let roofCursor = drawn.roofAt;
+      for (const role of drawn.far ? FAR_ROLES : NEAR_ROLES) {
+        const floats = plan.triangles[role];
+        const vertices = floats.length / FOOTPRINT_VERTEX_FLOATS;
+        const from = role === 'roof' && !same ? roofCursor : wallCursor;
+        for (let vertex = 0; vertex < vertices; vertex += 1) {
+          const y = floats[vertex * FOOTPRINT_VERTEX_FLOATS + 1] as number;
+          const rise = Math.min(
+            1,
+            Math.max(0, (y - (plan.base + FOUNDATION_METRES)) / GROUNDING_METRES),
+          );
+          const ground = standing ? GROUNDED_SHADE + (1 - GROUNDED_SHADE) * rise : 1;
+          for (let channel = 0; channel < 3; channel += 1) {
+            expect(colour.array[(from + vertex) * 3 + channel]).toBeCloseTo(
+              shades[role] * ground,
+              5,
+            );
+          }
+          if (standing && rise === 0) grounded += 1;
+        }
+        if (role === 'door') doors += vertices;
+        if (role === 'roof' && !same) roofCursor += vertices;
+        else wallCursor += vertices;
+      }
+    }
+    // Something was checked at the foot of a grounded wall, and at a door.
+    expect(grounded).toBeGreaterThan(0);
+    expect(doors).toBeGreaterThan(0);
+  });
+
+  it('uploads only the range a refill wrote, and one that wrote nothing uploads nothing — #1549', () => {
+    const belt = aBelt();
+    const rider = viewAt(1_500);
+    const stats = belt.refill(rider.x, rider.z, MAPPED_BUILDING_TRIANGLES);
+    const geometry = belt.mesh.geometry;
+    for (const name of ['position', 'normal', 'uv', 'color', 'oylTint']) {
+      const attribute = geometry.getAttribute(name) as BufferAttribute;
+      expect(attribute.updateRanges).toEqual([
+        { start: 0, count: stats.triangles * 3 * attribute.itemSize },
+      ]);
+    }
+    const empty = belt.refill(rider.x + 1e6, rider.z + 1e6, MAPPED_BUILDING_TRIANGLES);
+    expect(empty.buildings).toBe(0);
+    for (const name of ['position', 'normal', 'uv', 'color', 'oylTint']) {
+      expect((geometry.getAttribute(name) as BufferAttribute).updateRanges).toEqual([]);
+    }
   });
 
   it('carries each building’s seeded tint on every vertex, and lays the photograph at its own size', () => {

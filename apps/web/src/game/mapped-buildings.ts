@@ -48,7 +48,14 @@ import { SETTLEMENT_CLEARED_KINDS, SETTLEMENT_MARGIN_METRES } from './settlement
 /** The side of a cell of {@link MappedBuildings}' clearing grid, metres. */
 const CELL_METRES = 32;
 
-/** The key of the cell `(ix, iz)`: a number, so a lookup allocates nothing. */
+/**
+ * The key of the cell `(ix, iz)`: a number, so a lookup allocates nothing.
+ *
+ * Each axis takes 16 bits around 0x8000, so with {@link CELL_METRES} of 32 two
+ * cells alias beyond about ±1,048 km of local metres from the origin. An alias
+ * only misses a clearing; it cannot fail or crash, and no ride is that far
+ * from its own origin.
+ */
 function cellKey(ix: number, iz: number): number {
   return (ix + 0x8000) * 0x1_0000 + (iz + 0x8000);
 }
@@ -193,6 +200,12 @@ function slotOf(selection: MappedSelection, surface: StructureSurface): number {
  * at its far level. Taken in that order until the next would pass
  * `triangleBudget` or {@link MAPPED_BUILDING_MAX} are taken — so the drawn set
  * is the nearest, and a far building never takes a near one's place.
+ *
+ * ⚠️ **Levels and reach are decided at a refill and held until the next**,
+ * which is up to `MAPPED_CHUNK_METRES` (100 m) of riding. So a building can
+ * stay at its far level until it is about 50 m away, and one comes into reach
+ * 300 to 400 m ahead, not at 400 m. Inside #1549's rule, and one for #1553's
+ * by-eye pass.
  *
  * ⚠️ **One exception to "the nearest", and it is the draw-call bound.** A
  * building whose wall or roof surface would open a surface past `surfaceSlots`
