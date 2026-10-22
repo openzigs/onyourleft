@@ -110,6 +110,7 @@ import type { WorkoutGraphInput } from '../src/workout/workout-graph';
 import { MAXIMUM_ROUTE_NAME_LENGTH } from '../src/routes/save';
 import { AppShell } from '../src/shell/AppShell';
 import { viewGroupsLoaded } from './views-loaded';
+import { corridorRide, corridorRideKind } from './ride-corridor';
 import type { CapabilityProbe } from '../src/support/bluetooth-support';
 
 // The shipping stylesheet, which is the whole point — see this file's header.
@@ -388,6 +389,15 @@ function restoreTheList(): void {
   document.head.append(style);
 }
 
+/**
+ * `ride.html?corridor=archive` / `?corridor=none` — #1552: the ride's route
+ * read through the product's corridor port, so its world has map data or has
+ * none, and the ride screen credits OpenStreetMap or does not. @see ride-corridor.ts
+ */
+const CORRIDOR_KIND = corridorRideKind(window.location.search);
+const CORRIDOR =
+  CORRIDOR_KIND === undefined ? undefined : corridorRide(CORRIDOR_KIND, 'harness', errors);
+
 const GAME: GamePort = {
   // `attempts: 1`, so the picker offers the ghost — see this file's header.
   listRoutes: () =>
@@ -396,12 +406,18 @@ const GAME: GamePort = {
         id: 'harness',
         name: 'Harness hills',
         // #1312: `?lap=riding` and `?lap=ended` ride a loop. @see LAP
+        // #1552: `?corridor=` rides the corridor fixture's route.
         profile:
-          new URLSearchParams(window.location.search).get('lap') === null ? route() : lapCircuit(),
+          CORRIDOR !== undefined
+            ? CORRIDOR.profile
+            : new URLSearchParams(window.location.search).get('lap') === null
+              ? route()
+              : lapCircuit(),
         attempts: 1,
       },
       ...(AT_THE_PICKER ? chooserRoutes() : []),
     ]),
+  ...(CORRIDOR === undefined ? {} : { loadWorldCorridor: CORRIDOR.loadWorldCorridor }),
   loadGhost: () =>
     Promise.resolve(buildGhostTrack({ elapsedSeconds: [0, 3_600], distanceMetres: [0, 36_000] })),
   readSensors: () => ({
@@ -864,6 +880,8 @@ function measure(): StageMeasurement {
     ['the side camera stop', '.oyl-hud__side-camera-stop'],
     // #1324: a waiting re-plan's sentence, above *Keep the plan*.
     ['the plan change', '.oyl-hud__plan-change'],
+    // #1552: the OpenStreetMap credit, on a ride with map data in its world.
+    ['the map credit', '.oyl-hud__attribution'],
   ] as const) {
     const element = document.querySelector(selector);
     if (element !== null) {
@@ -1173,6 +1191,16 @@ async function run(): Promise<void> {
     labelled<HTMLInputElement>('input[type="number"]', 'Wind speed'),
   );
   type(speed, '40');
+  // #1552: the corridor's read, settled on the picker before the press — the
+  // world is fixed at the press (ADR 0054 D-2.4), so a ride started mid-read
+  // is a ride with no map data.
+  if (CORRIDOR_KIND !== undefined) {
+    const settled =
+      CORRIDOR_KIND === 'archive' ? 'Towns from map data: ready' : 'Towns from map data: off';
+    await until(`the picker to say "${settled}"`, () =>
+      (document.querySelector('main')?.textContent ?? '').includes(settled) ? true : undefined,
+    );
+  }
   // A frame, so React has committed the wind before the button reads it.
   await until('the ride button to be usable', () =>
     ride.getAttribute('aria-disabled') === 'true' ? undefined : ride,

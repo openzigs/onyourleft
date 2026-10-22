@@ -165,6 +165,7 @@ import { SoundControls } from './SoundControls';
 import { RoutePicker, type RecordingOffer, type RidableRoute } from './StageChooser';
 import { sharedCueOutput } from './web-audio';
 import type { CorridorState, WorldCorridor } from './world-data/corridor';
+import { OSM_ATTRIBUTION } from '../map/basemap';
 import { landClassMask, type LandClassMask } from './land-class';
 import {
   climbLeadIn,
@@ -1102,6 +1103,10 @@ export function GameView(props: GameViewProps): JSX.Element {
    * read that finishes mid-ride changes the picker's line, not the world.
    */
   const worldCorridorRef = useRef<WorldCorridor | undefined>(undefined);
+  // #1552: whether THIS ride was given a corridor, as state set beside
+  // `setChosen` so the credit's render depends on it explicitly rather than on
+  // the ref having been written before `setPhase` re-rendered.
+  const [rideHasCorridor, setRideHasCorridor] = useState(false);
   /** #1546: what the ground is in {@link worldCorridorRef}, built once from it at the press. */
   const landClassRef = useRef<LandClassMask | undefined>(undefined);
 
@@ -1499,6 +1504,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       const ready = corridorStateRef.current;
       worldCorridorRef.current =
         ready?.kind === 'ready' && ready.corridor.routeId === route.id ? ready.corridor : undefined;
+      setRideHasCorridor(worldCorridorRef.current !== undefined);
       // #1546: the mask every placement rule reads, built ONCE, here — never
       // per frame — and `scene.ts` takes `NO_LAND_CLASS` when there is none.
       landClassRef.current =
@@ -2533,6 +2539,18 @@ export function GameView(props: GameViewProps): JSX.Element {
         // here (#577's review, finding 1): `ride/side-camera.ts`
         // §`sideCameraLostNotice`.
         sideCamera={sideCameraOnHud(sideCamera)}
+        // #1552, ADR 0054 D-3.6: the OpenStreetMap credit, for the WHOLE ride
+        // whose world was given a corridor at the start — never per frame,
+        // because the notice is for the work, not for what is in view. Keyed
+        // on the corridor this ride was given, never on "the realistic world
+        // is chosen": a corridor is `ready` only with a covered tile
+        // (`corridor-port.ts`), and a covered stretch shapes the world even
+        // with no footprint in it (D-5.3: no procedural village there). A
+        // procedural world owes nothing, and a credit there would be false.
+        // ⚠️ Until #1540 draws from the corridor (`scene.ts` §`worldCorridor`
+        // is not read yet) this credits a world still drawn procedurally:
+        // over-crediting, the harmless direction.
+        attribution={rideHasCorridor ? OSM_ATTRIBUTION : undefined}
         onPause={() => {
           setPhase((current) => (current === 'paused' ? 'riding' : 'paused'));
         }}
