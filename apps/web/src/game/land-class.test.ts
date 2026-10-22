@@ -499,4 +499,46 @@ describe('bounded — at most 8 MiB a route', () => {
     expect(mask.covered(0, 150)).toBe(true);
     expect(mask.covered(0, 2_150)).toBe(false);
   });
+
+  it('makes no chunk for a box that reaches less than a cell centre into it', () => {
+    // A chunk is 320 m; the next one's first centre is at 322.5 m.
+    const mask = landClassMask(corridorOf([{ minX: 0, maxX: 321, minZ: 0, maxZ: 100 }], []));
+    expect(mask.bytes).toBe(4096);
+    expect(mask.covered(100, 50)).toBe(true);
+    expect(mask.covered(321, 50)).toBe(false);
+  });
+});
+
+describe('bounded — a work budget on the polygon pass', () => {
+  /** A many-vertex polygon: a jagged ring inside `box`, `vertices` points. */
+  function dense(box: Box, vertices: number): LandUseFeature {
+    const ring = new Float32Array(vertices * 2);
+    for (let i = 0; i < vertices; i += 1) {
+      const angle = (i / vertices) * 2 * Math.PI;
+      const radius = i % 2 === 0 ? 0.5 : 0.45;
+      ring[i * 2] = (box.minX + box.maxX) / 2 + Math.cos(angle) * radius * (box.maxX - box.minX);
+      ring[i * 2 + 1] =
+        (box.minZ + box.maxZ) / 2 + Math.sin(angle) * radius * (box.maxZ - box.minZ);
+    }
+    return { layer: 'landuse', kind: 'farmland', rings: [ring] };
+  }
+  const TILE: Box = { minX: 0, maxX: 1_000, minZ: 0, maxZ: 1_000 };
+
+  it('stops painting polygons once the budget is spent, and keeps the class the cells hold', () => {
+    const features = [rectangle('landuse', 'farmland', TILE), rectangle('water', 'water', TILE)];
+    const unbounded = landClassMask(corridorOf([TILE], features));
+    expect(unbounded.classAt(500, 500)).toBe('water');
+    // One rectangle on this tile costs 4 edges x 64 rows x its chunks: a budget of 1 buys exactly one polygon.
+    const bounded = landClassMask(corridorOf([TILE], features), LAND_CLASS_MAX_BYTES, 1);
+    expect(bounded.classAt(500, 500)).toBe('farmland');
+  });
+
+  it('builds a dense tile — 48 polygons of 8192 vertices — in a fraction of the unbudgeted time', () => {
+    const features = Array.from({ length: 48 }, () => dense(TILE, 8_192));
+    const corridor = corridorOf([TILE], features);
+    const started = performance.now();
+    landClassMask(corridor);
+    const elapsed = performance.now() - started;
+    expect(elapsed).toBeLessThan(250);
+  });
 });

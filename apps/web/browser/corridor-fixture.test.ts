@@ -14,9 +14,8 @@ import { decodeTile, type LandUseFeature } from '@onyourleft/map-features';
 
 import { landClassMask } from '../src/game/land-class';
 import { corridorOrigin } from '../src/game/terrain';
-import { worldCorridorOf } from '../src/game/world-data/corridor';
+import { planCorridor, worldCorridorOf } from '../src/game/world-data/corridor';
 import { classedItems, corridorFixtureRoute, corridorFixtureTiles } from './corridor-fixture';
-import { planCorridor } from '../src/game/world-data/corridor';
 
 function fixtureCorridor() {
   const profile = corridorFixtureRoute();

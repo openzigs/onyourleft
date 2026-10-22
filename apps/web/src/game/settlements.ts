@@ -1070,7 +1070,8 @@ const CLEARED: ReadonlySet<string> = new Set(['tree-broadleaf', 'tree-conifer', 
 /**
  * The natural scenery, less every tree, shrub and rock standing on a
  * settlement's ground — #1534 — or, since #1546, on mapped built-up land or
- * water. Pure, and a function of positions only.
+ * water. Pure, and a function of positions only. In `sceneFrame` the land half is
+ * belt and braces: `scatterAt` has already filtered those items with the same mask.
  */
 export function clearOfSettlements(
   natural: readonly ScatterItem[],

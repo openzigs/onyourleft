@@ -101,6 +101,15 @@ export const LAND_CLASS_CHUNK_CELLS = 64;
 /** The most a route's mask holds: 8 MiB. */
 export const LAND_CLASS_MAX_BYTES = 8 * 1024 * 1024;
 
+/**
+ * The most edge-by-row steps the polygon pass may take, so a hostile or very
+ * dense archive cannot freeze the press: a polygon's cost is its vertices times
+ * the rows it crosses on each existing chunk. Past it the rest of the polygons
+ * are not painted and their cells keep the class they hold (`other`), the same
+ * answer as a tile with no land-use data.
+ */
+export const LAND_CLASS_MAX_WORK = 20_000_000;
+
 const CHUNK_METRES = LAND_CLASS_CELL_METRES * LAND_CLASS_CHUNK_CELLS;
 const CHUNK_BYTES = LAND_CLASS_CHUNK_CELLS * LAND_CLASS_CHUNK_CELLS;
 
@@ -198,6 +207,7 @@ function cellSpan(min: number, max: number, edge: number): readonly [number, num
 export function landClassMask(
   corridor: WorldCorridor,
   maxBytes: number = LAND_CLASS_MAX_BYTES,
+  maxWork: number = LAND_CLASS_MAX_WORK,
 ): LandClassMask {
   const chunks = new Map<number, Uint8Array>();
   const maxChunks = Math.floor(maxBytes / CHUNK_BYTES);
@@ -208,9 +218,11 @@ export function landClassMask(
     full = !markCovered(chunks, box, maxChunks);
   }
   // 2. Every polygon, onto the chunks that exist, keeping the higher class.
+  let work = maxWork;
   for (const feature of corridor.landUse) {
+    if (work <= 0) break;
     const code = CLASS_OF_CODE.indexOf(landClassOfKind(feature.layer, feature.kind));
-    paint(chunks, feature, code);
+    work -= paint(chunks, feature, code);
   }
 
   const classAt = (x: number, z: number): LandClass => {
@@ -246,6 +258,10 @@ function markCovered(chunks: Map<number, Uint8Array>, box: Box, maxChunks: numbe
   for (let row = firstRow; row <= lastRow; row += 1) {
     for (let column = firstColumn; column <= lastColumn; column += 1) {
       if (!inRange(column, row)) continue;
+      const [x0, x1] = cellSpan(box.minX, box.maxX, column * CHUNK_METRES);
+      const [z0, z1] = cellSpan(box.minZ, box.maxZ, row * CHUNK_METRES);
+      // No cell centre in this chunk: make none, so the cap is not spent on nothing.
+      if (x0 > x1 || z0 > z1) continue;
       const key = chunkKey(column, row);
       let chunk = chunks.get(key);
       if (chunk === undefined) {
@@ -253,9 +269,6 @@ function markCovered(chunks: Map<number, Uint8Array>, box: Box, maxChunks: numbe
         chunk = new Uint8Array(CHUNK_BYTES);
         chunks.set(key, chunk);
       }
-      const [x0, x1] = cellSpan(box.minX, box.maxX, column * CHUNK_METRES);
-      const [z0, z1] = cellSpan(box.minZ, box.maxZ, row * CHUNK_METRES);
-      if (x0 > x1) continue;
       for (let cellZ = z0; cellZ <= z1; cellZ += 1) {
         const start = cellZ * LAND_CLASS_CHUNK_CELLS;
         // `other` is the least class, so writing it over a cell that holds it is nothing.
@@ -266,10 +279,16 @@ function markCovered(chunks: Map<number, Uint8Array>, box: Box, maxChunks: numbe
   return true;
 }
 
-/** Writes `code` into every covered cell of every existing chunk the polygon covers, where it outranks. */
-function paint(chunks: Map<number, Uint8Array>, feature: LandUseFeature, code: number): void {
+/**
+ * Writes `code` into every covered cell of every existing chunk the polygon covers, where it outranks.
+ * Returns the work it cost: edges times the rows of each chunk it rasterised.
+ */
+function paint(chunks: Map<number, Uint8Array>, feature: LandUseFeature, code: number): number {
   const outer = feature.rings[0];
-  if (outer === undefined || outer.length < 6) return;
+  if (outer === undefined || outer.length < 6) return 0;
+  let edges = 0;
+  for (const ring of feature.rings) edges += ring.length / 2;
+  let cost = 0;
   let minX = Number.POSITIVE_INFINITY;
   let maxX = Number.NEGATIVE_INFINITY;
   let minZ = Number.POSITIVE_INFINITY;
@@ -296,6 +315,7 @@ function paint(chunks: Map<number, Uint8Array>, feature: LandUseFeature, code: n
         columns: LAND_CLASS_CHUNK_CELLS,
         rows: LAND_CLASS_CHUNK_CELLS,
       };
+      cost += edges * LAND_CLASS_CHUNK_CELLS;
       rasterise(feature, grid, (cell) => {
         const held = chunk[cell] as number;
         // An uncovered cell stays `unknown`: a tile's buffer reaches past it.
@@ -303,4 +323,5 @@ function paint(chunks: Map<number, Uint8Array>, feature: LandUseFeature, code: n
       });
     }
   }
+  return cost;
 }
