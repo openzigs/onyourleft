@@ -556,5 +556,6 @@ describe('bounded — a work budget on the polygon pass', () => {
     const unbudgeted = time(Number.POSITIVE_INFINITY);
     const budgeted = Math.min(time(LAND_CLASS_MAX_WORK), time(LAND_CLASS_MAX_WORK));
     expect(budgeted).toBeLessThan(unbudgeted / 4);
-  });
+    // The unbudgeted build is the slow half on purpose: several seconds under coverage.
+  }, 60_000);
 });
