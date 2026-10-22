@@ -243,9 +243,9 @@ export const REALISTIC_TEXTURE_PIXELS = {
  * bytes and the scanned broadleaves 10 616 301; which go is the owner's to
  * say after the tablet rows (ADR 0049 D-1, #1293).
  *
- * @test-facing held by `realistic-budget.test.ts`, which reads every committed
- * realistic file back off disk against it; the renderer spends it only on the
- * realistic path, which a ride takes only for a rider who chose it (#475)
+ * Read by `realistic-budget.test.ts`, which reads every committed realistic
+ * file back off disk against it, and since #1550 by `footprint-buildings.ts`
+ * §`FOOTPRINT_MAX_TRIANGLES`, which a ride with a corridor plans to.
  */
 export const REALISTIC_TRIANGLES: Readonly<
   Record<RealisticVegetationKind | 'tree-middle' | 'rider' | 'structure', number>

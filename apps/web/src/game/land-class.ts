@@ -307,8 +307,6 @@ function insidePolygon(feature: LandUseFeature, x: number, z: number): boolean {
  * built-up > farmland > other), so it names the land {@link LandClassMask.classAt}
  * classes; `undefined` where none covers it. Read once a footprint at ride
  * start, never per frame: it tests every polygon's box.
- *
- * @unwired #1540's footprint plans are its one reader, and #1549 draws them.
  */
 export function kindAt(corridor: WorldCorridor, x: number, z: number): string | undefined {
   let best: KindIndexEntry | undefined;

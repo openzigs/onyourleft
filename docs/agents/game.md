@@ -777,7 +777,12 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         reviewer who remembers six `SCATTER_KINDS` is reading
                         the old file: `StructureKind` and `SCENERY_KINDS` are in
                         `scatter.ts`, and the frame carries the structures FIRST
-                        on a budget of their own (`QualitySettings.structureItems`)
+                        on a budget of their own (`QualitySettings.structureItems`).
+                        Since #1550, `lotsAt`: houses (shops every fifth plot on
+                        commercial land) along the route's road where the land
+                        is mapped built-up and no mapped footprint stands —
+                        every corner on built-up land, never on wood, water or
+                        park, nothing where no tile was read
     src/game/land-class.ts
                         what the ground is where map data was read (#1546) — a
                         sparse 5 m mask built ONCE at the press from the ride's
@@ -794,9 +799,10 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         P-9's placement rules, in order and counted as
                         `FootprintVerdicts`; storeys, a gable-or-flat roof and
                         surfaces by `land-class.ts` §`kindAt`; ≤ 640 triangles
-                        by role, built ONCE at ride start. ⚠️ **`@unwired`
-                        until #1549 draws the plans**, and nothing in the ride
-                        reads them yet
+                        by role, built ONCE at ride start. Since #1550 the ride
+                        reads their footprints (`mappedTown`, once a corridor):
+                        a procedural lot keeps clear of every kept one. #1549
+                        draws the plans
     src/game/streets.ts a village's kerbed pavements (#1535) — along each side's
                         BUILT plots (`settlements.ts` §`siteAt`, §`villagePlots`,
                         the houses' own decision), on the road's edge, never on

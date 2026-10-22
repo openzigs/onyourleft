@@ -330,8 +330,6 @@ export function distanceToDrawnRoad(
 
 /**
  * The drawn road as {@link roadSegmentsNear} hands it out: its points, and how far apart they are.
- *
- * @unwired #1540's footprint plans are its one reader, and #1549 draws them.
  */
 export interface DrawnRoadPoints {
   /** Two floats a point; segment `s` runs from point `s` to point `s + 1`. */
@@ -347,8 +345,6 @@ export interface DrawnRoadPoints {
  * and the road they index — #1540: a mapped footprint asks once, for its
  * centroid, and then measures each of its vertices against this short list
  * rather than searching the grid again for each.
- *
- * @unwired #1540's footprint plans are its one reader, and #1549 draws them.
  */
 export function roadSegmentsNear(
   profile: RouteProfile,
@@ -375,8 +371,6 @@ export function roadSegmentsNear(
 
 /**
  * Where on the drawn road a point is beside — #1540. @see nearestOnRoadSegments
- *
- * @unwired #1540's footprint plans are its one reader, and #1549 draws them.
  */
 export interface BesideTheRoad {
   /** The route distance of the nearest point of the drawn road. */
@@ -393,8 +387,6 @@ export interface BesideTheRoad {
  * none. The route distance and the side are the ones `landform.ts`
  * §`terrainHeightAt` reads the ground at, so a thing placed from them stands
  * on the ground beside the stretch of road it is nearest.
- *
- * @unwired #1540's footprint plans are its one reader, and #1549 draws them.
  */
 export function nearestOnRoadSegments(
   road: DrawnRoadPoints,

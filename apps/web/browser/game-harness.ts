@@ -3014,6 +3014,141 @@ function levellingProbe(view: ReturnType<typeof threeGameRenderer.create>): Leve
   return { levelled, unlevelled };
 }
 
+/** What {@link lotsProbe} publishes — #1550. */
+interface LotsMeasurement {
+  /** Houses in the frame standing on mapped built-up land, with the lots and with `-lots`. */
+  readonly houses: number;
+  readonly housesOff: number;
+  /**
+   * The mean colour of a 3 × 3 square at the nearest of those houses — its
+   * centre 3 m up, projected from its geometry — drawn, and with `-lots`, when
+   * the same square must read the ground behind it.
+   */
+  readonly onRgb: readonly number[];
+  readonly offRgb: readonly number[];
+}
+
+const NO_LOTS: LotsMeasurement = { houses: 0, housesOff: 0, onRgb: [], offRgb: [] };
+
+/**
+ * #1550: a mapped town with no footprints — a residential polygon 60 m either
+ * side of the level road from 1 000 m to 1 400 m along, every tile there read,
+ * no buildings in it — seen from 1 060 m. The frame is built with the
+ * corridor and its land-class mask, as a ride's is, so `structuresAt` fills
+ * the street with procedural lots; the control is the issue's `&levers=-lots`,
+ * the same frame with `SceneInput.lotsOff`.
+ *
+ * ⚠️ The corridor is built here rather than read from `?corridor=archive`, as
+ * #1547's and #1551's probes build theirs: #1539's archive fixture holds no
+ * residential land within a lot's reach of the road (its block is ~70 m off
+ * it), and what is measured is a lot on a known stretch.
+ */
+function lotsProbe(
+  view: ReturnType<typeof threeGameRenderer.create>,
+  gl: WebGL2RenderingContext,
+  canvas: HTMLCanvasElement,
+): LotsMeasurement {
+  const profile = northRouteForHarness();
+  const origin = corridorOrigin(profile);
+  const at = (along: number, lateral: number): readonly [number, number] | undefined => {
+    const road = drawnRoadFrame(profile, origin, along);
+    return road === undefined
+      ? undefined
+      : [road.x + road.normalX * lateral, road.z + road.normalZ * lateral];
+  };
+  const corners = [at(1_000, -60), at(1_400, -60), at(1_400, 60), at(1_000, 60)];
+  if (corners.some((point) => point === undefined)) return NO_LOTS;
+  const xs = corners.map((point) => point?.[0] ?? 0);
+  const zs = corners.map((point) => point?.[1] ?? 0);
+  const corridor: WorldCorridor = {
+    routeId: 'harness-1550',
+    origin,
+    covered: () => true,
+    // Only the town's own stretch is read: the procedural world decides the rest.
+    coveredBoxes: [
+      {
+        minX: Math.min(...xs) - 100,
+        maxX: Math.max(...xs) + 100,
+        minZ: Math.min(...zs) - 100,
+        maxZ: Math.max(...zs) + 100,
+      },
+    ],
+    landUse: [
+      {
+        layer: 'landuse',
+        kind: 'residential',
+        rings: [Float32Array.from(corners.flatMap((point) => point ?? []))],
+      },
+    ],
+    buildings: [],
+    paths: [],
+    streets: [],
+  };
+  const land = landClassMask(corridor);
+  const start = atStartLine(profile);
+  const frameWith = (lotsOff: boolean): SceneFrame =>
+    sceneFrame({
+      profile,
+      origin,
+      state: { ...start, ride: { ...start.ride, distance: metres(1_060) } },
+      worldCorridor: corridor,
+      landClass: land,
+      lotsOff,
+    });
+  const lots = frameWith(false);
+  const off = frameWith(true);
+  const housesOf = (frame: SceneFrame): ScatterItem[] =>
+    frame.scatter.filter(
+      (item) => item.kind === 'building' && land.classAt(item.x, item.z) === 'built-up',
+    );
+  const houses = housesOf(lots);
+  // The nearest house at least 25 m ahead whose square is on the canvas.
+  const pose = lots.camera;
+  const probe = houses
+    .map((house) => ({
+      house,
+      ahead: (house.x - pose.x) * pose.headingX + (house.z - pose.z) * pose.headingZ,
+    }))
+    .filter(({ ahead }) => ahead >= 25)
+    .map(({ house }) => ({
+      house,
+      pixel: pixelFor(lots, canvas, { x: house.x, y: house.y + 3, z: house.z }),
+    }))
+    .filter(
+      ({ pixel }) =>
+        pixel.x >= 2 && pixel.x < canvas.width - 2 && pixel.y >= 2 && pixel.y < canvas.height - 2,
+    )
+    .sort(
+      (a, b) =>
+        Math.hypot(a.house.x - pose.x, a.house.z - pose.z) -
+        Math.hypot(b.house.x - pose.x, b.house.z - pose.z),
+    )[0];
+  if (probe === undefined) return { ...NO_LOTS, houses: houses.length };
+  const meanAt = (frame: SceneFrame): number[] => {
+    view.render(frame);
+    const pixels = readRegion(
+      gl,
+      Math.round(probe.pixel.x) - 1,
+      Math.round(probe.pixel.y) - 1,
+      3,
+      3,
+    );
+    const sums = [0, 0, 0];
+    for (let index = 0; index < pixels.length; index += 4) {
+      for (let channel = 0; channel < 3; channel += 1) {
+        sums[channel] = (sums[channel] ?? 0) + (pixels[index + channel] ?? 0);
+      }
+    }
+    return sums.map((sum) => sum / 9);
+  };
+  return {
+    houses: houses.length,
+    housesOff: housesOf(off).length,
+    onRgb: meanAt(lots),
+    offRgb: meanAt(off),
+  };
+}
+
 /** Six kilometres of level, low farmland — somewhere a village stands. */
 function northRouteForHarness(): ReturnType<typeof routeProfile> {
   return northRoute(6_000, () => 40);
@@ -5211,6 +5346,8 @@ export interface RealisticMeasurement {
   readonly mappedPavement: MappedPavementMeasurement;
   /** #1547: the drawn ground under a mapped block's centre footprint. @see levellingProbe */
   readonly levelling: LevellingMeasurement;
+  /** #1550: procedural lots in a mapped town with no footprints. @see lotsProbe */
+  readonly lots: LotsMeasurement;
   /** #621: two trees and two houses of one shape, tinted and not. @see tintProbe */
   readonly tint: TintMeasurement;
   /** #620: the ground under a tree's blob and 5 m from it, with and without the blobs. @see groundBlobProbe */
@@ -7238,6 +7375,7 @@ const NO_REALISTIC: RealisticMeasurement = {
   pavement: NO_PAVEMENT,
   mappedPavement: NO_MAPPED_PAVEMENT,
   levelling: NO_LEVELLING,
+  lots: NO_LOTS,
   tint: {
     trees: [],
     treesControl: [],
@@ -8786,6 +8924,10 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   const levelling = levellingProbe(view);
   phaseEnds('realistic: a town on the flat — #1547');
 
+  // #1550, on the same view: procedural lots in a mapped town with no footprints.
+  const lots = lotsProbe(view, gl, canvas);
+  phaseEnds('realistic: lots in an unmapped town — #1550');
+
   // #624, on the same view and the same road.
   const tread = treadProbe(view, gl, canvas, riding(level, 400));
   phaseEnds('realistic: the tread — #624');
@@ -9025,6 +9167,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     pavement,
     mappedPavement,
     levelling,
+    lots,
     tint,
     grounding,
     tread,
