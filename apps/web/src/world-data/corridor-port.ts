@@ -44,6 +44,7 @@ import {
   packCorridorFeatures,
   planCorridor,
   readCorridorTiles,
+  tileTouchesZone,
   unpackCorridorFeatures,
   worldCorridorOf,
   type CorridorArchive,
@@ -167,11 +168,26 @@ export function createWorldCorridorPort(options: WorldCorridorPortOptions): Worl
     const positions = route.profile.positions;
     const digest = await routeDigestOf(positions);
     const record = await kept(route);
+    // The zones are read before a kept record is trusted: a zone added after
+    // the record was kept puts some of its tiles inside it (ADR 0054 D-4.1,
+    // D-6.3), and their features cannot be cut out of a corridor kept whole.
+    // Not knowing the zones is never a reason to use, or to ask for, tiles.
+    let zones: readonly PrivacyZoneRecord[];
+    try {
+      zones = await options.store.listPrivacyZones(options.owner);
+    } catch (error) {
+      log(describeCorridorFailure({ kind: 'store', name: nameOf(error) }));
+      return { kind: 'unavailable', why: 'refused' };
+    }
     const matches =
       record !== undefined &&
       record.routeDigest === digest &&
       record.archive.url === config.archiveUrl &&
-      record.readerVersion === CORRIDOR_READER_VERSION;
+      record.readerVersion === CORRIDOR_READER_VERSION &&
+      !record.tiles.some(
+        (tile) =>
+          tile.state === 'covered' && tileTouchesZone({ z: 15, x: tile.x, y: tile.y }, zones),
+      );
     const identity = seen.get(config.archiveUrl);
     if (matches && (identity === undefined || identity === record.archive.identity)) {
       const state = await fromKept(route, record);
@@ -181,14 +197,6 @@ export function createWorldCorridorPort(options: WorldCorridorPortOptions): Worl
     // (`mustStop` below), so a read that starts while one records asks nothing.
     if (signal.aborted) return { kind: 'unavailable', why: 'refused' };
 
-    let zones: readonly PrivacyZoneRecord[];
-    try {
-      zones = await options.store.listPrivacyZones(options.owner);
-    } catch (error) {
-      // Not knowing the zones is never a reason to ask for tiles near them.
-      log(describeCorridorFailure({ kind: 'store', name: nameOf(error) }));
-      return { kind: 'unavailable', why: 'refused' };
-    }
     const plan = planCorridor(positions, zones);
     if (plan === undefined || plan.requestable.length === 0) return NOTHING_FOR_THIS_ROUTE;
 

@@ -165,6 +165,27 @@ describe('planCorridor', () => {
     for (const tile of plan.requestable) expect(tileTouchesZone(tile, [zone])).toBe(false);
   });
 
+  it('skips a tile exactly as far out as the radius widened by the trim jitter and 1%, no further', () => {
+    // Independent of zoneReachMetres: radius 1000 m, jitter 12.5% -> 1125 m, +1% -> about 1136 m.
+    const tile = corridorTileCover(lineNorth(3_000), CORRIDOR_HALF_WIDTH_METRES, 1)[0] as TileId;
+    const bounds = tileBounds(tile);
+    const longitude = (bounds.west + bounds.east) / 2;
+    const zoneNorthOfTile = (gap: number): PrivacyZoneRecord =>
+      zoneAt(
+        geographicPosition(
+          degreesLatitude(bounds.north + gap / METRES_PER_DEGREE_LATITUDE),
+          degreesLongitude(longitude),
+        ),
+        1_000,
+      );
+    // Inside the widened reach (1125 m is the jitter's worst case): not requested.
+    expect(tileTouchesZone(tile, [zoneNorthOfTile(1_100)])).toBe(true);
+    expect(tileTouchesZone(tile, [zoneNorthOfTile(1_130)])).toBe(true);
+    // Beyond the 1% slack: requestable.
+    expect(tileTouchesZone(tile, [zoneNorthOfTile(1_145)])).toBe(false);
+    expect(tileTouchesZone(tile, [zoneNorthOfTile(1_300)])).toBe(false);
+  });
+
   it('has nothing to request for a route entirely inside a zone', () => {
     const route = lineNorth(500);
     const plan = planCorridor(route, [zoneAt(route[25] as GeographicPosition, 5_000)]);

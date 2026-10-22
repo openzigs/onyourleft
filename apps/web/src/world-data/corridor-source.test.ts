@@ -6,7 +6,7 @@
  * on decompression. Read back through `PMTiles`, the reader the product uses.
  */
 
-import { decodeTile, type DecodedTile } from '@onyourleft/map-features';
+import { decodeTile, MAX_TILE_BYTES, type DecodedTile } from '@onyourleft/map-features';
 import {
   FIXTURE_FRAME,
   FIXTURE_TILE,
@@ -231,6 +231,15 @@ describe('archiveSource: the one fetch', () => {
       .getBytes(0, 10)
       .catch((e: unknown) => e);
     expect(failureOf(refused)).toStrictEqual({ kind: 'not-a-range' });
+  });
+
+  it('asks for no range longer than a tile may be, so no body that size is ever read', async () => {
+    const calls = respond(206, new Uint8Array(10));
+    const refused = await archiveSource(URL_)
+      .getBytes(0, MAX_TILE_BYTES + 1)
+      .catch((e: unknown) => e);
+    expect(failureOf(refused)).toStrictEqual({ kind: 'not-a-range' });
+    expect(calls).toHaveLength(0);
   });
 
   it('says an HTTP error, and a file that changed under the read', async () => {

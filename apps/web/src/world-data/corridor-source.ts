@@ -92,6 +92,9 @@ export function archiveSource(url: string): Source {
   return {
     getKey: () => url,
     getBytes: async (offset, length, signal, etag) => {
+      // The length comes from the archive's own directory, which is untrusted:
+      // no body longer than a tile may be is ever asked for, or read.
+      if (length > MAX_TILE_BYTES) throw corridorError({ kind: 'not-a-range' });
       const headers = new Headers({
         Range: `bytes=${String(offset)}-${String(offset + length - 1)}`,
       });

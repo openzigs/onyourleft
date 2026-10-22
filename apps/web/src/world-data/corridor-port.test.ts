@@ -337,6 +337,41 @@ describe('privacy zones (ADR 0054 D-6.3) — a departing boundary', () => {
     expect(state.kind).toBe('ready');
   });
 
+  it('a zone added after the corridor was kept drops that world: nothing kept is used inside it', async () => {
+    const route = await savedRoute(circuitRoute(300));
+    const store = freshStore();
+    const source = countingSource(await buildArchive({ tiles: corridorTiles(route.profile) }));
+    const first = await load(portOver(store, source, on()), route);
+    expect(first.kind).toBe('ready');
+    const before = source.calls.length;
+
+    await harness.write((s) =>
+      s.putPrivacyZone(zoneAt(route.profile.positions[0] as GeographicPosition, ZONE_RADIUS)),
+    );
+    const second = await load(portOver(freshStore(), source, on()), route);
+    expect(second.kind).toBe('ready');
+    if (first.kind !== 'ready' || second.kind !== 'ready') return;
+    expect(first.corridor.covered(0, 0)).toBe(true);
+    // The route's start is the zone's centre: the world there is procedural again.
+    expect(second.corridor.covered(0, 0)).toBe(false);
+    // The read was redone under the new zones, and asked for none inside it.
+    expect(source.calls.length).toBeGreaterThan(before);
+  });
+
+  it('a zone added after the corridor was kept leaves no kept world to fall back on offline', async () => {
+    const route = await savedRoute(circuitRoute(300));
+    const source = countingSource(await buildArchive({ tiles: corridorTiles(route.profile) }));
+    await load(portOver(freshStore(), source, on()), route);
+    await harness.write((s) =>
+      s.putPrivacyZone(zoneAt(route.profile.positions[0] as GeographicPosition, ZONE_RADIUS)),
+    );
+    source.offline = true;
+    expect(await load(portOver(freshStore(), source, on()), route)).toStrictEqual({
+      kind: 'unavailable',
+      why: 'offline',
+    });
+  });
+
   it('makes no request at all for a route entirely inside zones', async () => {
     const route = await savedRoute(circuitRoute(300));
     await harness.write((store) =>
