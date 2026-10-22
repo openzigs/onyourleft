@@ -10,7 +10,6 @@
 
 import { getHeapStatistics, GCProfiler } from 'node:v8';
 
-import type { BufferAttribute } from 'three';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { metres } from '@onyourleft/domain';
@@ -90,6 +89,15 @@ function roadAt(along: number): { readonly x: number; readonly z: number } {
   const frame = drawnRoadFrame(town.profile, town.origin, along);
   if (frame === undefined) throw new Error('the fixture road has no direction there');
   return { x: frame.x, z: frame.z };
+}
+
+/**
+ * What the upload-range test reads off a belt attribute. Written out rather
+ * than imported, because `three-seam.test.ts` admits one importer of three.
+ */
+interface UploadedAttribute {
+  readonly itemSize: number;
+  readonly updateRanges: readonly { readonly start: number; readonly count: number }[];
 }
 
 /** A frame's view of the mapped buildings at `along`. */
@@ -312,7 +320,7 @@ describe('what the buffers hold — #1549', () => {
     const stats = belt.refill(rider.x, rider.z, MAPPED_BUILDING_TRIANGLES);
     const geometry = belt.mesh.geometry;
     for (const name of ['position', 'normal', 'uv', 'color', 'oylTint']) {
-      const attribute = geometry.getAttribute(name) as BufferAttribute;
+      const attribute = geometry.getAttribute(name) as UploadedAttribute;
       expect(attribute.updateRanges).toEqual([
         { start: 0, count: stats.triangles * 3 * attribute.itemSize },
       ]);
@@ -320,7 +328,7 @@ describe('what the buffers hold — #1549', () => {
     const empty = belt.refill(rider.x + 1e6, rider.z + 1e6, MAPPED_BUILDING_TRIANGLES);
     expect(empty.buildings).toBe(0);
     for (const name of ['position', 'normal', 'uv', 'color', 'oylTint']) {
-      expect((geometry.getAttribute(name) as BufferAttribute).updateRanges).toEqual([]);
+      expect((geometry.getAttribute(name) as UploadedAttribute).updateRanges).toEqual([]);
     }
   });
 
