@@ -36,6 +36,7 @@ import {
   roadClip,
   type BlobCasters,
 } from './ground-blob';
+import { NO_LAND_CLASS } from './land-class';
 import { terrainCorridor } from './landform';
 import { hillRoute, northRoute } from './route-fixtures-testing';
 import {
@@ -3008,7 +3009,7 @@ describe('the ground blob belt — #620', () => {
   const profile = hillRoute();
   const origin = corridorOrigin(profile);
   const corridor = roadCorridor(profile, origin, 900);
-  const terrain = terrainCorridor(profile, origin, corridor, scatterSeed(profile));
+  const terrain = terrainCorridor(profile, origin, corridor, scatterSeed(profile), NO_LAND_CLASS);
   const sun = worldStyle(profile).sun;
   /** Three trees beside the road, 7, 20 and 30 m out: the first a verge's width off the edge. */
   const casters = (): BlobCasters => {

@@ -264,7 +264,13 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     // renderer draws a prefix of them (`three-renderer.ts` §`TerrainBelt`), so
     // the rung moves no vertex and the scenery stands on the same ground.
     terrain: {
-      mesh: terrainCorridor(input.profile, input.origin, corridor, seed),
+      mesh: terrainCorridor(
+        input.profile,
+        input.origin,
+        corridor,
+        seed,
+        input.landClass ?? NO_LAND_CLASS,
+      ),
       horizon: horizonRelief(input.profile, input.origin, seed),
     },
     // #459. The waterways are found once per route (`waterways.ts` §`computed`)

@@ -116,6 +116,9 @@ import { CORRECTION_GRADE_STEP_PERCENT_PER_SECOND } from '../net/correction';
 import { roomPortOver } from '../net/room-port';
 import { frameRider, ManualClock, ScriptedRoom } from '../net/testing';
 import { simulatedOpenTrainer } from '../ride/simulated-trainer-testing';
+import type { LandUseFeature } from '@onyourleft/map-features';
+import { corridorOrigin } from './terrain';
+import type { WorldCorridor } from './world-data/corridor';
 
 /**
  * Two kilometres that climb at 4 % and then fall at 4 %.
@@ -362,6 +365,80 @@ describe('the road the game draws reaches the trainer', () => {
     // perfectly correct ride, and a bound of "greater than zero" alone would
     // pass against a driver stuck on the first sample for ever.
     expect(commands.written.some((parameters) => parameters.grade > 3.5)).toBe(true);
+  });
+
+  it('sends the same grades with a mapped town levelled beside the road — #1547', async () => {
+    // A ride whose corridor maps built-up land 40–200 m either side of the
+    // whole climb: the ground there is levelled (`landform.ts`), and the road
+    // and every grade the trainer is sent must not move. The ground beside the
+    // road is not the road.
+    const route = hillRoute();
+    const origin = corridorOrigin(route.profile);
+    const block = (from: number, to: number): LandUseFeature => ({
+      layer: 'landuse',
+      kind: 'residential',
+      rings: [Float32Array.of(from, -100, to, -100, to, 2_100, from, 2_100)],
+    });
+    const corridor: WorldCorridor = {
+      routeId: route.id,
+      origin,
+      covered: () => true,
+      coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -1_000, maxZ: 3_000 }],
+      landUse: [block(40, 200), block(-200, -40)],
+      buildings: [],
+      paths: [],
+    };
+    const rideOnce = async (
+      loadWorldCorridor: GamePort['loadWorldCorridor'] | undefined,
+    ): Promise<{ readonly grades: number[]; readonly ground: number[] }> => {
+      pending = [];
+      nowMs = 1_000_000;
+      const commands: Commands = { written: [], releases: [], requests: [] };
+      // The ground's heights as each frame was drawn: its arrays are lent (#469).
+      const ground: number[] = [];
+      const renderer: GameRenderer = {
+        loadRealisticWorld: () => Promise.reject(new Error('no realistic world was chosen')),
+        create: () => ({
+          hasContext: true,
+          prepare: () => Promise.resolve(),
+          render: (frame: SceneFrame) => {
+            const vertices = frame.terrain.mesh.vertices;
+            let sum = 0;
+            for (let at = 1; at < vertices.length; at += 3) sum += Math.abs(vertices[at] ?? 0);
+            ground.push(sum);
+          },
+          setQuality: () => undefined,
+          setRiderKit: () => undefined,
+          resize: () => undefined,
+          destroy: () => undefined,
+        }),
+      };
+      mounted = await mount(
+        <GameView
+          port={{
+            ...pedallingPort(route),
+            ...(loadWorldCorridor === undefined ? {} : { loadWorldCorridor }),
+          }}
+          trainer={trainerPort(READY, commands)}
+          renderer={() => Promise.resolve(renderer)}
+          now={() => nowMs}
+        />,
+      );
+      await settle();
+      await clickThrough(buttonStarting('Ride '));
+      await pump(40);
+      await settle();
+      mounted.unmount();
+      mounted = undefined;
+      return { grades: commands.written.map((parameters) => parameters.grade), ground };
+    };
+    const without = await rideOnce(undefined);
+    const levelled = await rideOnce(() => Promise.resolve({ kind: 'ready', corridor }));
+    // Non-vacuity: a ride, writes, and ground that the levelling did move.
+    expect(without.grades.length).toBeGreaterThan(5);
+    expect(levelled.ground.length).toBeGreaterThan(10);
+    expect(levelled.ground).not.toStrictEqual(without.ground);
+    expect(levelled.grades).toStrictEqual(without.grades);
   });
 
   it('does not write faster than the driver allows', async () => {

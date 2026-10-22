@@ -58,6 +58,23 @@
  * `RouteProfile` can say which of two crossing roads is on top, which is the
  * same reason a tunnel is impossible here (`waterways.ts`).
  *
+ * ## ⚠️ A mapped town stands on the flat — #1547
+ *
+ * Where the ride's land-class mask (`land-class.ts`, #1546) maps built-up
+ * land, the invented relief is held to {@link RELIEF_SLOPE} times the distance
+ * to it ({@link LandClassMask.builtUpDistances}): **none on the town itself**,
+ * so it is the road's own height less the verge, and rising from its edge no
+ * faster than the relief rises from the road's clear band. That is the same
+ * rule as rule 2 above, with the town's edge for the road's, and it is what
+ * keeps a mapped footprint off an invented 20 m bank without a step at the
+ * town's edge. A fixed blend margin cannot do both: the relief is up to 45 m,
+ * and 45 m over #1547's proposed 30 m is a slope of 1.5, far past anything the
+ * relief makes by itself. The water's ceiling is applied after, so a stream's
+ * bed is still cut through a town; the road, and the grade a trainer is sent,
+ * are untouched. Where nothing is mapped — `NO_LAND_CLASS`, every ride with no
+ * corridor — the distance is `Infinity` and every height is today's, to the
+ * bit.
+ *
  * ## The trainer is untouched
  *
  * **Visual only.** The grade #362 writes to a trainer comes from `gradeAt` on
@@ -72,10 +89,12 @@
 import { distanceOnRoute, elevationAt, gradeAt, type RouteProfile } from '@onyourleft/domain';
 
 import { treeLineHeight } from './ground-blend';
+import type { LandClassMask } from './land-class';
 import { slotHash, uniformFrom } from './seeded';
 import { DRY, waterNearRoute, waterShaping, waterways, type WaterShaping } from './waterways';
 import {
   ROAD_WIDTH_METRES,
+  drawnRoadFrame,
   ribbonNormals,
   type CorridorOrigin,
   type CorridorPoint,
@@ -401,6 +420,13 @@ export function terrainHeightAt(
   seed: number,
   routeDistance: number,
   signedLateral: number,
+  /**
+   * The ride's land-class mask — #1547: the ground is levelled under mapped
+   * built-up land, so a thing standing there stands on the levelled ground.
+   * Required, so no caller can forget it: `NO_LAND_CLASS` is passed, never
+   * defaulted.
+   */
+  land: LandClassMask,
 ): number {
   const wrapped = distanceOnRoute(profile, routeDistance);
   const road = elevationAt(profile, wrapped) - origin.elevation;
@@ -415,7 +441,7 @@ export function terrainHeightAt(
   // under whatever ceiling water puts on it. A third of the scenery stands in
   // that band, and this is the whole of what it costs to stand it there.
   if (lateral <= RELIEF_CLEAR_METRES && ways.crossings.length + ways.lakes.length === 0) {
-    return groundHeight(road, NO_RELIEF, lateral, DRY);
+    return groundHeight(road, NO_RELIEF, lateral, DRY, Number.POSITIVE_INFINITY);
   }
   // The far field starts to count at the blend's near end; a bracket that
   // ends inside it reads only the near field, and no bracket reads the mottle.
@@ -426,8 +452,9 @@ export function terrainHeightAt(
     side,
     lateral < (RELIEF_BLEND_METRES[0] as number) ? 'height-near-the-road' : 'everything',
   );
+  const sign = side === 0 ? 1 : -1;
   const shaped = (offset: number): WaterShaping =>
-    waterShaping(ways, profile, origin, wrapped, offset * (side === 0 ? 1 : -1), road);
+    waterShaping(ways, profile, origin, wrapped, offset * sign, road);
   let column = 0;
   while (column < COLUMNS - 2 && lateral > (TERRAIN_COLUMN_OFFSETS[column + 1] as number)) {
     column += 1;
@@ -435,8 +462,24 @@ export function terrainHeightAt(
   const inner = TERRAIN_COLUMN_OFFSETS[column] as number;
   const outer = TERRAIN_COLUMN_OFFSETS[column + 1] as number;
   const share = Math.min(1, (lateral - inner) / (outer - inner));
-  const from = groundHeight(road, fields, inner, shaped(inner));
-  const to = groundHeight(road, fields, outer, shaped(outer));
+  // #1547: each column's own hold, at where that column stands beside the
+  // drawn road — the point the mesh's vertex is built at.
+  const frame =
+    land.levellingBytes > 0 && lateral > RELIEF_CLEAR_METRES
+      ? drawnRoadFrame(profile, origin, wrapped)
+      : undefined;
+  if (frame === undefined) {
+    LEVEL_HOLDS[0] = Number.POSITIVE_INFINITY;
+    LEVEL_HOLDS[1] = Number.POSITIVE_INFINITY;
+  } else {
+    LEVEL_POINTS[0] = frame.x + frame.normalX * inner * sign;
+    LEVEL_POINTS[1] = frame.z + frame.normalZ * inner * sign;
+    LEVEL_POINTS[2] = frame.x + frame.normalX * outer * sign;
+    LEVEL_POINTS[3] = frame.z + frame.normalZ * outer * sign;
+    reliefHolds(land, 2);
+  }
+  const from = groundHeight(road, fields, inner, shaped(inner), LEVEL_HOLDS[0] as number);
+  const to = groundHeight(road, fields, outer, shaped(outer), LEVEL_HOLDS[1] as number);
   return from + (to - from) * share;
 }
 
@@ -451,6 +494,13 @@ export function terrainCorridor(
   origin: CorridorOrigin,
   corridor: RoadCorridor,
   seed: number,
+  /**
+   * The ride's land-class mask — #1547: the ground is levelled under mapped
+   * built-up land. Required: `scene.ts` passes the ride's, or `NO_LAND_CLASS`
+   * explicitly, so an optional parameter nobody supplies cannot pass for
+   * wiring (`check-wiring.mjs` §Limits).
+   */
+  land: LandClassMask,
 ): TerrainMesh {
   // #459. The streams and lakes, as a ceiling on the ground and a damping of
   // its relief. @see waterShaping
@@ -466,6 +516,9 @@ export function terrainCorridor(
   );
   const perRow = COLUMNS * 2;
   const { vertices, colours, fields, normals } = lent;
+  // #1547: asked only where the mask levels anything, so a ride with no
+  // corridor pays nothing for it and builds today's ground to the bit.
+  const levelled = land.levellingBytes > 0;
 
   for (let row = 0; row < rows; row += 1) {
     const point = centre[row] as CorridorPoint;
@@ -479,6 +532,16 @@ export function terrainCorridor(
       const relief = reliefFields(profile, seed, point.distance, side);
       const limit = reach[row * 2 + side] as number;
       const tint = 1 + TERRAIN_MOTTLE * relief.mottle;
+      // #1547: every column's hold, asked in one call where anything is levelled.
+      if (levelled) {
+        for (let column = 0; column < COLUMNS; column += 1) {
+          const offset = TERRAIN_COLUMN_OFFSETS[column] as number;
+          const lateral = column < 2 ? offset : Math.min(offset, limit);
+          LEVEL_POINTS[column * 2] = point.x + normalX * lateral * sign;
+          LEVEL_POINTS[column * 2 + 1] = point.z + normalZ * lateral * sign;
+        }
+        reliefHolds(land, COLUMNS);
+      }
       for (let column = 0; column < COLUMNS; column += 1) {
         const offset = TERRAIN_COLUMN_OFFSETS[column] as number;
         // ⚠️ The first two columns are never folded: the road's edge and the
@@ -487,15 +550,23 @@ export function terrainCorridor(
         // never moved.)
         const lateral = column < 2 ? offset : Math.min(offset, limit);
         const at = row * perRow + side * COLUMNS + column;
-        vertices[at * 3] = point.x + normalX * lateral * sign;
+        const x = point.x + normalX * lateral * sign;
+        const z = point.z + normalZ * lateral * sign;
+        vertices[at * 3] = x;
         const shaping = wetRow
           ? waterShaping(ways, profile, origin, point.distance, lateral * sign, point.y)
           : DRY;
         // Column 0 is `point.y` exactly: `groundHeight` drops nothing and adds
         // no relief at the road's half-width, so the edge needs no special case.
-        const height = groundHeight(point.y, relief, lateral, shaping);
+        const height = groundHeight(
+          point.y,
+          relief,
+          lateral,
+          shaping,
+          levelled ? (LEVEL_HOLDS[column] as number) : Number.POSITIVE_INFINITY,
+        );
         vertices[at * 3 + 1] = height;
-        vertices[at * 3 + 2] = point.z + normalZ * lateral * sign;
+        vertices[at * 3 + 2] = z;
         // #501: the wet margin. Column 0 is the road's own edge and is never
         // wet, so the road's verge stays the road's. And only on the shore:
         // ground far from the water is dry however low it lies (#501 review).
@@ -749,16 +820,40 @@ export function wetness(height: number, level: number): number {
 }
 
 /**
+ * The points {@link reliefHolds} is asked about, `x, z` pairs — a column each
+ * of one cross-section — and its answers. Module storage, so a build
+ * allocates nothing for them (#469).
+ */
+const LEVEL_POINTS = new Float64Array(COLUMNS * 2);
+const LEVEL_HOLDS = new Float64Array(COLUMNS);
+
+/**
+ * The most the relief may rise or fall at each of the first `count` of
+ * {@link LEVEL_POINTS}, in metres, into {@link LEVEL_HOLDS} — #1547:
+ * {@link RELIEF_SLOPE} times the distance to mapped built-up land, so none on
+ * it. `Infinity` where none is near. @see LandClassMask.builtUpDistances
+ */
+function reliefHolds(land: LandClassMask, count: number): void {
+  land.builtUpDistances(LEVEL_POINTS, count, LEVEL_HOLDS);
+  for (let index = 0; index < count; index += 1) {
+    LEVEL_HOLDS[index] = RELIEF_SLOPE * (LEVEL_HOLDS[index] as number);
+  }
+}
+
+/**
  * The ground's height at a lateral offset beside a road at height `road`.
  *
  * ⚠️ **Never above the road inside {@link RELIEF_CLEAR_METRES}**: the drop is
- * at least zero, and the relief is exactly zero there.
+ * at least zero, and the relief is exactly zero there. `hold` is
+ * {@link reliefHolds}': the relief is held within it, and `Infinity` holds
+ * nothing.
  */
 function groundHeight(
   road: number,
   fields: ReliefFields,
   lateral: number,
   water: WaterShaping,
+  hold: number,
 ): number {
   const drop =
     lateral <= ROAD_HALF_WIDTH_METRES
@@ -770,12 +865,12 @@ function groundHeight(
   const beyond = Math.max(0, lateral - RELIEF_CLEAR_METRES);
   const amplitude = Math.min(RELIEF_MAX_METRES, beyond * RELIEF_SLOPE);
   const relief = (amplitude * field + fields.tilt * beyond) * water.relief;
+  // #1547: held to the town's; `Math.min` of `Infinity` is the relief's own
+  // bound, so where nothing is mapped this is the line it always was.
+  const most = Math.min(RELIEF_MAX_METRES, hold);
   // #459: the water's bed is a ceiling. Under a bridge that includes the road's
   // own edge, which is the bridge's opening.
-  return Math.min(
-    water.ceiling,
-    road - drop + Math.min(RELIEF_MAX_METRES, Math.max(-RELIEF_MAX_METRES, relief)),
-  );
+  return Math.min(water.ceiling, road - drop + Math.min(most, Math.max(-most, relief)));
 }
 
 /**
