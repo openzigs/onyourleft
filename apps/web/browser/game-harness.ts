@@ -121,6 +121,7 @@ import { waterways } from '../src/game/waterways';
 import { landClassMask, NO_LAND_CLASS } from '../src/game/land-class';
 import { WINDOW_IN_BAY } from '../src/game/facade';
 import {
+  FACADE_FLOATS,
   FOOTPRINT_VERTEX_FLOATS,
   footprintPlans,
   STOREY_METRES,
@@ -3310,6 +3311,9 @@ function mappedFacadeProbe(
   const road = drawnRoadFrame(profile, origin, 1_200);
   if (road === undefined) return NO_MAPPED_FACADE;
   const stride = FOOTPRINT_VERTEX_FLOATS;
+  // The facade's floats are the vertex's last four: across, up, top, skip.
+  const FACADE_ACROSS_AT = stride - FACADE_FLOATS;
+  const FACADE_TOP_AT = FACADE_ACROSS_AT + 2;
   type Aim = { readonly glass: Point3; readonly wall: Point3; readonly ahead: number };
   type Point3 = { readonly x: number; readonly y: number; readonly z: number };
   let best: Aim | undefined;
@@ -3317,7 +3321,7 @@ function mappedFacadeProbe(
     const walls = plan.triangles.wall;
     for (let at = 0; at + 6 * stride <= walls.length; at += 6 * stride) {
       const f = (vertex: number, k: number): number => walls[at + vertex * stride + k] as number;
-      const top = f(0, 10);
+      const top = f(0, FACADE_TOP_AT);
       if (!(top >= 1 + WINDOW_IN_BAY.top)) continue;
       // Facing the road: its normal points back across it, toward the rider's side.
       const nx = f(0, 3);
@@ -3338,10 +3342,10 @@ function mappedFacadeProbe(
       for (let vertex = 0; vertex < 6; vertex += 1) {
         if (f(vertex, 1) !== floor) continue;
         const point = { x: f(vertex, 0), y: floor, z: f(vertex, 2) };
-        if (f(vertex, 8) === 0) a = point;
+        if (f(vertex, FACADE_ACROSS_AT) === 0) a = point;
         else {
           b = point;
-          bays = f(vertex, 8);
+          bays = f(vertex, FACADE_ACROSS_AT);
         }
       }
       if (a === undefined || b === undefined || bays < 1) continue;

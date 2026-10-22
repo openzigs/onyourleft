@@ -888,13 +888,20 @@ describe('the shape’s detail — #1581, over the mixed town', () => {
 
 describe('a door canopy keeps the road’s clearance — #1581', () => {
   /** Houses whose road-facing wall stands `gap` metres outside the clearance, every 20 m. */
-  const porchesAt = (gap: number): number => {
+  const porchesAt = (gap: number, size = 8): number => {
     const profile = northRoute(3_000, () => 10);
     const origin = corridorOrigin(profile);
     const near = ROAD_CLEARANCE_METRES + gap;
     const buildings: BuildingFeature[] = [];
     for (let along = 200; along < 1_400; along += 20) {
-      buildings.push(buildingBeside(profile, origin, [rectangleBeside(along, near + 4, 10, 8)], 6));
+      buildings.push(
+        buildingBeside(
+          profile,
+          origin,
+          [rectangleBeside(along, near + 4, size === 8 ? 10 : size, 8)],
+          6,
+        ),
+      );
     }
     const corridor: WorldCorridor = {
       routeId: 'porch-clearance',
@@ -926,6 +933,14 @@ describe('a door canopy keeps the road’s clearance — #1581', () => {
 
   it('control: the same row a few metres further back has canopies', () => {
     expect(porchesAt(3)).toBeGreaterThan(10);
+  });
+
+  it('stands none over a door edge shorter than the canopy is wide, which would stick out past its corners', () => {
+    // A 1.8 m wall takes a door (1.3 m + 0.4) but not a 2 m canopy.
+    expect(PORCH.width).toBeGreaterThan(1.8);
+    expect(porchesAt(3, 1.8)).toBe(0);
+    // Control: a 2.4 m wall is wide enough for the canopy.
+    expect(porchesAt(3, 2.4)).toBeGreaterThan(0);
   });
 });
 

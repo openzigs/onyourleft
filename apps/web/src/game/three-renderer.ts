@@ -11837,8 +11837,8 @@ const LOT_PAINT_TAUGHT = new WeakMap<Material, 'wall' | 'roof'>();
  * Which instance channel a structure material reads a lot's paint from, or
  * none: it is not a painted surface.
  *
- * @test-facing held by `realistic-renderer.test.ts` §"#1581", which asserts
- * every painted surface's structure material is taught it and no other is
+ * @test-facing held by `three-renderer.test.ts` §"#1581", which asserts the
+ * brick, roof-tiles, planks and glass materials
  */
 export function readsLotPaint(material: Material): 'wall' | 'roof' | undefined {
   return LOT_PAINT_TAUGHT.get(material);
@@ -11857,7 +11857,9 @@ export function readsLotPaint(material: Material): 'wall' | 'roof' | undefined {
  * tint does, if three's program no longer holds an include it is spliced at.
  */
 function withLotPaint<M extends Material>(material: M, surface: StructureSurface): M {
-  const channel = paintChannelOf(surface);
+  // ⚠️ `planks` has a wall list for a mapped barn, but on a lot it is the
+  // joinery and the door, which stay timber: a lot's own walls are never planks.
+  const channel = surface === 'planks' ? undefined : paintChannelOf(surface);
   const paints = paintsOf(surface);
   if (channel === undefined || paints === undefined || LOT_PAINT_TAUGHT.has(material)) {
     return material;
@@ -12208,6 +12210,16 @@ const FACADE_COMMON_GLSL = /* glsl */ `
 `;
 
 /**
+ * Whether a bay has a window at all, as a GLSL expression over `oylCell`,
+ * `oylWinT` and `vOylFacade` (`facade.ts` §`facadePartAt`'s eaves and door-bay
+ * rules). Split out so a test can run the very text the shader runs.
+ *
+ * Exported for `three-renderer.test.ts`, which runs it against `facadePartAt`.
+ */
+export const FACADE_SHOWN_GLSL =
+  'step(0.0, oylCell.y) * step(oylCell.y + oylWinT, vOylFacade.z) * (1.0 - step(oylCell.y, 0.5) * step(abs(oylCell.x - vOylFacade.w), 0.5))';
+
+/**
  * #1581's facade, drawn over the surface's photograph after its colour —
  * `facade.ts` §`facadePartAt`'s layout, from `footprint-buildings.ts`
  * §`FACADE_FLOATS`' four numbers. `oylGlass` and `oylFlat` carry on to the
@@ -12229,8 +12241,7 @@ const FACADE_FRAGMENT_GLSL = /* glsl */ `
     vec2 oylCell = floor(vOylFacade.xy);
     vec2 oylAt = vOylFacade.xy - oylCell;
     vec2 oylW = max(fwidth(vOylFacade.xy) * 0.5, vec2(0.00001));
-    float oylShown = step(0.0, oylCell.y) * step(oylCell.y + oylWinT, vOylFacade.z)
-      * (1.0 - step(oylCell.y, 0.5) * step(abs(oylCell.x - vOylFacade.w), 0.5));
+    float oylShown = ${FACADE_SHOWN_GLSL};
     float oylOuter = oylRect(oylAt, vec2(oylWinL, oylWinB), vec2(oylWinR, oylWinT), oylW) * oylShown;
     float oylInner = oylRect(
       oylAt,

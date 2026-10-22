@@ -18,8 +18,8 @@
  *
  * - A **multiplier** ({@link WALL_PAINTS}, {@link ROOF_PAINTS}), linear, laid
  *   over a surface's photograph: the brick's courses and the plaster's cracks
- *   stay, in another colour. The first entry of every list is `[1, 1, 1]`,
- *   the photograph as it was.
+ *   stay, in another colour. The first entry of every list is `[1, 1, 1]`
+ *   (the photograph as it was), except `render`'s, which is white paint over it.
  * - An **albedo** ({@link TRIM_PAINTS}, {@link DOOR_PAINTS}), linear, drawn in
  *   place of any photograph: a window frame, a sill, a porch and a door are
  *   painted timber, whatever the wall is.

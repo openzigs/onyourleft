@@ -1113,6 +1113,8 @@ function pitchedRoof(
 interface DoorEdge {
   readonly edge: number;
   readonly distance: number;
+  /** The edge's length, so a canopy is only put where it fits between the corners. */
+  readonly length: number;
 }
 
 /**
@@ -1127,6 +1129,7 @@ function doorEdgeOf(
   const n = ring.length / 2;
   const beside: BesideTheRoad = { along: 0, lateral: 0, distance: 0 };
   let best = -1;
+  let bestLength = 0;
   let nearest = Number.POSITIVE_INFINITY;
   for (let i = 0; i < n; i += 1) {
     const j = (i + 1) % n;
@@ -1134,14 +1137,16 @@ function doorEdgeOf(
     const az = ring[i * 2 + 1] as number;
     const bx = ring[j * 2] as number;
     const bz = ring[j * 2 + 1] as number;
-    if (Math.hypot(bx - ax, bz - az) < DOOR_FACE.width + 0.4) continue;
+    const length = Math.hypot(bx - ax, bz - az);
+    if (length < DOOR_FACE.width + 0.4) continue;
     if (!nearestOnRoadSegments(road, segments, (ax + bx) / 2, (az + bz) / 2, beside)) continue;
     if (beside.distance < nearest) {
       nearest = beside.distance;
       best = i;
+      bestLength = length;
     }
   }
-  return best < 0 ? undefined : { edge: best, distance: nearest };
+  return best < 0 ? undefined : { edge: best, distance: nearest, length: bestLength };
 }
 
 /** The middle of a ring's edge, its direction along, and its outward normal. */
@@ -1633,6 +1638,7 @@ function planFootprint(
   const withPorch =
     front !== undefined &&
     use === 'residential' &&
+    front.length >= PORCH.width &&
     front.distance - PORCH.depth >= ROAD_CLEARANCE_METRES &&
     share(STREAM_PORCH) < PORCH_SHARE;
   const withPosts = share(STREAM_POSTS) < PORCH_POSTS_SHARE;
