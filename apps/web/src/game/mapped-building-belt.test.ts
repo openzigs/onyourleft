@@ -154,7 +154,7 @@ describe('the mapped buildings’ materials — #1549', () => {
 });
 
 describe('at most six draw calls for any number of mapped buildings — #1549', () => {
-  it('is one mesh with at most six groups, with 10 and with 240 buildings in reach', () => {
+  it('is one mesh with at most six groups, with 10 and with 36 buildings in reach', () => {
     const rider = viewAt(1_500);
     const belt = aBelt();
     for (const count of [10, MAPPED_BUILDING_MAX]) {
@@ -183,7 +183,7 @@ describe('at most six draw calls for any number of mapped buildings — #1549', 
       expect(belt.mesh.visible).toBe(true);
     }
     // THE CONTROL: a group a building and surface — a mesh a building —
-    // submits far more with 240.
+    // submits far more with 36.
     setMappedBuildingsMerged(false);
     const unmerged = belt.refill(rider.x, rider.z, MAPPED_BUILDING_TRIANGLES);
     expect(unmerged.buildings).toBe(MAPPED_BUILDING_MAX);
@@ -206,7 +206,10 @@ describe('what the buffers hold — #1549', () => {
     roles.flatMap((role) => Array.from(plan.triangles[role]));
 
   it('holds each drawn building’s triangles at its level, nearest first, read back by position', () => {
-    const rider = viewAt(1_500);
+    // 170 m off the road's side: at D-5.6's 36 the nearest from the road are
+    // all within 150 m, and from here they straddle it, so both levels are read.
+    const road = viewAt(1_500);
+    const rider = { ...road, x: road.x + 170 };
     const belt = aBelt();
     const stats = belt.refill(rider.x, rider.z, MAPPED_BUILDING_TRIANGLES);
     expect(stats.buildings).toBe(MAPPED_BUILDING_MAX);

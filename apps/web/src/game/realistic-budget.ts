@@ -615,11 +615,19 @@ export const MAPPED_BUILDING_TRIANGLES = REALISTIC_STRUCTURE_ITEMS * REALISTIC_T
 
 /**
  * The most mapped buildings the realistic world draws at once — #1549:
- * **240**, the stylised world's `scatter.ts` §`STRUCTURE_MAX_ITEMS`. Most are
- * boxes of a few dozen triangles, so {@link MAPPED_BUILDING_TRIANGLES} is
- * several hundred of them, and this count is the cap that bites first.
+ * **36**, ADR 0054 D-5.6's cap, {@link REALISTIC_STRUCTURE_ITEMS}' figure:
+ * the nearest 36 footprints, and no more until #1523's fix and a measured
+ * number raise it (owner ruling, 2026-10-22, on #1549's pull request). Most
+ * are boxes of a few dozen triangles, so 36 of them fit well inside
+ * {@link MAPPED_BUILDING_TRIANGLES}, and this count is the cap that bites
+ * first. Written as the number, not as {@link REALISTIC_STRUCTURE_ITEMS}, so
+ * that raising the procedural structures' count does not raise this one.
+ *
+ * ⚠️ **It was 240 in #1549's first draft**, read from the stylised world's
+ * `scatter.ts` §`STRUCTURE_MAX_ITEMS`; the owner did not approve that reading
+ * of D-5.6. A reviewer who remembers 240 is reading that draft.
  */
-export const MAPPED_BUILDING_MAX = 240;
+export const MAPPED_BUILDING_MAX = 36;
 
 /**
  * Nearer than this a mapped building is drawn whole; further, at its far

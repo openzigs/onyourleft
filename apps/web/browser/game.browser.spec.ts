@@ -3570,7 +3570,7 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     expect(range(levelling.unlevelled)).toBeGreaterThan(5);
   });
 
-  test('#1549 a mapped town is drawn: its front wall reads building, in at most six calls with 10 and with 240', async ({
+  test('#1549 a mapped town is drawn: its front wall reads building, in at most six calls with 10 and with 36', async ({
     harnessRun,
   }, testInfo) => {
     const { mappedTown: town } = await realistic(harnessRun);
@@ -3592,7 +3592,7 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
       expect(calls).toBeGreaterThan(0);
       expect(calls).toBeLessThanOrEqual(MAPPED_BUILDING_DRAW_CALLS);
     }
-    // THE CONTROL: a draw a building and surface is far more with 240.
+    // THE CONTROL: a draw a building and surface is far more with D-5.6's 36.
     expect(town.drawCallsUnmerged).toBeGreaterThan(MAPPED_BUILDING_DRAW_CALLS);
     // The wall: aimed from the plan's geometry, in the frame, and the building is what is there.
     expect(town.wallInFrame).toBe(true);

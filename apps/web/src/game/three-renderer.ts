@@ -12048,7 +12048,7 @@ let mappedBuildingsMerged = true;
 /**
  * Draws the mapped buildings refilled after this call one group a building and
  * surface — a draw call each, as a belt of one mesh a building would — or
- * merged again — #1549's control: with 240 buildings in reach the merged belt
+ * merged again — #1549's control: with D-5.6's 36 buildings in reach the merged belt
  * submits at most `MAPPED_BUILDING_DRAW_CALLS` calls, and this submits more.
  *
  * @test-facing the browser gate's control, read by `game-harness.ts`

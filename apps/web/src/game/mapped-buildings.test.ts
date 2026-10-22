@@ -78,7 +78,7 @@ describe('the numbers #1549 states', () => {
     );
     expect(MAPPED_BUILDING_TRIANGLES).toBe(23_040);
     expect(MAPPED_BUILDING_REACH_METRES).toBe(VIEW_AHEAD_METRES);
-    expect(MAPPED_BUILDING_MAX).toBe(240);
+    expect(MAPPED_BUILDING_MAX).toBe(36);
     expect(MAPPED_BUILDING_DRAW_CALLS).toBe(6);
     expect(mappedChunk(0)).toBe(0);
     expect(mappedChunk(MAPPED_CHUNK_METRES - 0.01)).toBe(0);
@@ -92,21 +92,25 @@ describe('which mapped buildings a refill draws — #1549', () => {
   const inReach = planned.filter((plan) => apart(plan, rider) <= MAPPED_BUILDING_REACH_METRES);
 
   it('draws the nearest, at most MAPPED_BUILDING_MAX, every one past 150 m at its far level', () => {
+    // 170 m off the road's side: at D-5.6's 36 the nearest from the road are
+    // all within 150 m, and from here they straddle it.
+    const aside = { x: rider.x + 170, z: rider.z };
+    const reached = planned.filter((plan) => apart(plan, aside) <= MAPPED_BUILDING_REACH_METRES);
     // Non-vacuity: the count binds, and some of what is drawn is past the near level.
-    expect(inReach.length).toBeGreaterThan(MAPPED_BUILDING_MAX);
+    expect(reached.length).toBeGreaterThan(MAPPED_BUILDING_MAX);
     const selection = new MappedSelection();
-    selectMappedBuildings(buildings, rider.x, rider.z, MAPPED_BUILDING_TRIANGLES, selection);
+    selectMappedBuildings(buildings, aside.x, aside.z, MAPPED_BUILDING_TRIANGLES, selection);
     expect(selection.count).toBe(MAPPED_BUILDING_MAX);
     const plans = drawn(selection);
-    const distances = plans.map((plan) => apart(plan, rider));
+    const distances = plans.map((plan) => apart(plan, aside));
     for (let at = 1; at < distances.length; at += 1) {
       expect(distances[at]).toBeGreaterThanOrEqual(distances[at - 1] as number);
     }
     // The nearest: nothing undrawn in reach is nearer than the farthest drawn.
     const farthest = Math.max(...distances);
     const drawnSet = new Set(plans);
-    for (const plan of inReach.filter((each) => !drawnSet.has(each))) {
-      expect(apart(plan, rider)).toBeGreaterThanOrEqual(farthest);
+    for (const plan of reached.filter((each) => !drawnSet.has(each))) {
+      expect(apart(plan, aside)).toBeGreaterThanOrEqual(farthest);
     }
     // The level: far exactly past MAPPED_BUILDING_NEAR_METRES.
     distances.forEach((distance, at) => {
@@ -130,7 +134,8 @@ describe('which mapped buildings a refill draws — #1549', () => {
 
   it('stops at the budget, nearest first, and the next would not have fitted', () => {
     const selection = new MappedSelection();
-    const budget = 3_000;
+    // Under D-5.6's 36: 500 triangles hold 20 of the fixture's 24-triangle boxes.
+    const budget = 500;
     selectMappedBuildings(buildings, rider.x, rider.z, budget, selection);
     expect(selection.count).toBeGreaterThan(10);
     expect(selection.count).toBeLessThan(MAPPED_BUILDING_MAX);
