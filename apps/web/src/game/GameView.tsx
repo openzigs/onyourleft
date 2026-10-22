@@ -164,6 +164,7 @@ import {
 import { SoundControls } from './SoundControls';
 import { RoutePicker, type RecordingOffer, type RidableRoute } from './StageChooser';
 import { sharedCueOutput } from './web-audio';
+import type { CorridorState, WorldCorridor } from './world-data/corridor';
 import {
   climbLeadIn,
   DEFAULT_ANNOUNCEMENTS,
@@ -236,6 +237,24 @@ export interface GamePort {
    * (`instance/ghost-port.ts`); never more than one, and never stored.
    */
   loadRiderGhost?(routeId: string): Promise<RiderGhostLoad>;
+  /**
+   * The chosen route's corridor of map features — #1539, ADR 0054 D-2: from
+   * the store, or read once from the configured basemap archive. Called when
+   * a route is chosen on the picker; `progress` is how far a read has got.
+   * The ride's world is fixed when it starts (ADR 0054 D-2.4): a corridor
+   * that arrives after the press is kept for the next ride and never drawn
+   * into this one, and the read is abandoned when the ride starts.
+   *
+   * Optional, as {@link riderGhostOffered} is: with no port, the game is
+   * exactly today's. ⚠️ An optional member threaded through JSX, so a
+   * `main.tsx` that stopped supplying it is GREEN in `check:wiring`
+   * (§Limits); `world-data/corridor-wiring.test.tsx` is what goes red.
+   */
+  loadWorldCorridor?(
+    route: RidableRoute,
+    signal: AbortSignal,
+    progress: (state: CorridorState) => void,
+  ): Promise<CorridorState>;
   /**
    * The rider's live sensor readings, sampled per frame.
    *
@@ -1070,6 +1089,19 @@ export function GameView(props: GameViewProps): JSX.Element {
 
   const port = props.port;
 
+  /**
+   * What the picker says about the chosen route's corridor — #1539. Shown
+   * while choosing, and read at the press into {@link worldCorridorRef}.
+   */
+  const [corridorState, setCorridorState] = useState<CorridorState | undefined>(undefined);
+  const corridorStateRef = useRef<CorridorState | undefined>(undefined);
+  /**
+   * The corridor THIS ride's world was given — #1539, ADR 0054 D-2.4. Set once,
+   * at the press, from whatever was ready then, and never during the ride: a
+   * read that finishes mid-ride changes the picker's line, not the world.
+   */
+  const worldCorridorRef = useRef<WorldCorridor | undefined>(undefined);
+
   useEffect(() => {
     if (port === undefined) {
       setRoutes([]);
@@ -1176,6 +1208,32 @@ export function GameView(props: GameViewProps): JSX.Element {
     // There is exactly one way back to the picker (`onEnd`) and exactly one way
     // out of it (`start`), so one reset is the whole of it.
   }, []);
+
+  // #1539: the chosen route's corridor, asked for while the rider chooses and
+  // abandoned when they stop choosing (a ride starts, or the screen goes) —
+  // ADR 0054 D-2.4: no request for the world while a ride is recording. The
+  // port decides whether anything is requested at all (the world chosen, the
+  // tiles switch, the store); this only says which route and when to stop.
+  const choosing = phase === 'choosing';
+  const corridorRoute =
+    routes === undefined ? undefined : (routes.find((route) => route.id === picked) ?? routes[0]);
+  useEffect(() => {
+    corridorStateRef.current = undefined;
+    setCorridorState(undefined);
+    if (port?.loadWorldCorridor === undefined || corridorRoute === undefined || !choosing) {
+      return;
+    }
+    const controller = new AbortController();
+    const shown = (next: CorridorState): void => {
+      if (controller.signal.aborted) return;
+      corridorStateRef.current = next;
+      setCorridorState(next);
+    };
+    void port.loadWorldCorridor(corridorRoute, controller.signal, shown).then(shown);
+    return () => {
+      controller.abort();
+    };
+  }, [port, corridorRoute, choosing]);
 
   useEffect(() => teardown, [teardown]);
 
@@ -1431,6 +1489,13 @@ export function GameView(props: GameViewProps): JSX.Element {
       // about a pacer — so the first frame of every paced ride would have drawn
       // no bot and shown a dash where the gap goes. Reading the one object that
       // has the answer is cheaper than teaching a second one to guess it.
+      // #1539: the world this ride is drawn from is fixed HERE, at the start,
+      // from what was ready for this route — and never changed during it
+      // (ADR 0054 D-2.4). Leaving `choosing` below abandons a read still
+      // running; one that ends anyway changes nothing this ride draws.
+      const ready = corridorStateRef.current;
+      worldCorridorRef.current =
+        ready?.kind === 'ready' && ready.corridor.routeId === route.id ? ready.corridor : undefined;
       setState(simulation.state);
       setChosen(route);
       setPhase('riding');
@@ -2033,6 +2098,10 @@ export function GameView(props: GameViewProps): JSX.Element {
           pedalling: pedallingRef.current,
           // #783: the room's drawn riders — where they are, and nothing else.
           ...(roomNow === undefined ? {} : { remoteRiders: roomNow.remoteRiders }),
+          // #1539: the corridor fixed at the start of the ride, or none.
+          ...(worldCorridorRef.current === undefined
+            ? {}
+            : { worldCorridor: worldCorridorRef.current }),
         });
         if (prepared) {
           view.render(frame);
@@ -2188,6 +2257,8 @@ export function GameView(props: GameViewProps): JSX.Element {
           // #475: a snapshot read for the trainer notice's reason — a rider who
           // changes the choice in Settings and comes back sees it here at once.
           worldChosen={readRealisticWorldChoice(deviceStorage())}
+          // #1539: the one line about the chosen route's corridor.
+          corridor={corridorState}
           releaseNotice={trainerNow?.releaseFault}
           withGhost={withGhost}
           onGhost={chooseOwnGhost}

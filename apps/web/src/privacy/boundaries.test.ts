@@ -80,6 +80,8 @@ import { ensureLocalAthlete, LOCAL_ATHLETE } from '../local-athlete';
 import { createInstanceAnalysis } from '../ride-analysis/instance-analysis';
 import { scriptedJobs, startedWith, succeeded } from '../ride-analysis/instance-job-testing';
 import { replanInput, replanRequest } from '../workout/replan-job';
+import { planCorridor } from '../game/world-data/corridor';
+import { tileBounds } from '@onyourleft/map-features';
 
 import { coordinatesIn, insideZone } from './boundaries';
 import { PATTERNS_ONLY } from '@onyourleft/analysis';
@@ -222,6 +224,19 @@ const BOUNDARIES: readonly Boundary[] = [
     direction: 'departing',
   },
   {
+    module: 'world-data/corridor-source.ts',
+    what: 'byte ranges of the basemap archive around a route, asked for when the rider chooses or saves the route for the realistic world (#1539)',
+    // ⚠️ Departing, and the first boundary whose payload carries NO
+    // coordinate and is still a location. ADR 0054 D-6.2: a tile range is a
+    // coarse location — the host can tell which z15 tiles were read, about
+    // 0.8–1.1 km across — and it travels as byte offsets in a `Range` header,
+    // not as a pair, so the walk below cannot fire on it. What protects the
+    // rider is that no tile touching a privacy zone is asked for at all
+    // (D-6.3); the case below maps each requested tile back to its bounds and
+    // checks every corner and edge point against the zone.
+    direction: 'departing',
+  },
+  {
     module: 'transfer/export-activity.ts',
     what: "the athlete's own ride, written to a file they asked for",
     // ⚠️ Not a mistake, and the one entry in this table worth reading twice.
@@ -264,7 +279,10 @@ function boundaryModulesOnDisk(): readonly string[] {
       // request to the rider's instance.
       // ⚠️ And `replan-job.ts` since #1244: the one builder of a re-plan's
       // request to the rider's instance, sent while a ride is in progress.
+      // ⚠️ And `corridor-source.ts` since #1539: the one module that asks the
+      // basemap archive for a route's corridor.
       if (
+        entry === 'corridor-source.ts' ||
         entry === 'instance-pose.ts' ||
         entry === 'instance-job.ts' ||
         entry === 'replan-job.ts' ||
@@ -417,6 +435,51 @@ describe('a departing payload carries no coordinate inside a privacy zone', () =
     expect(shared.segments).toStrictEqual([]);
     expect(shared.startsAtIndex).toBeUndefined();
     expect(coordinatesIn(shared)).toStrictEqual([]);
+  });
+});
+
+describe('a corridor read asks for no tile touching a zone — #1539', () => {
+  /** A tile's corners and nine points along each edge, as found positions. */
+  const edgePoints = (tile: { x: number; y: number }) => {
+    const b = tileBounds({ z: 15, x: tile.x, y: tile.y });
+    const points = [];
+    for (let i = 0; i <= 10; i++) {
+      const lon = b.west + ((b.east - b.west) * i) / 10;
+      const lat = b.south + ((b.north - b.south) * i) / 10;
+      for (const [latitude, longitude] of [
+        [b.north, lon],
+        [b.south, lon],
+        [lat, b.west],
+        [lat, b.east],
+      ] as const) {
+        points.push(geographicPosition(degreesLatitude(latitude), degreesLongitude(longitude)));
+      }
+    }
+    return coordinatesIn(points);
+  };
+
+  it('plans no request whose tile has a point in the zone, over a route that starts in one', () => {
+    const route = routeFor(ATHLETE_A, { sideMetres: 1_200, spacingMetres: 10 });
+    const start = route.profile.positions[0];
+    if (start === undefined) throw new Error('no start');
+    const zone = { ...zoneOver(route.profile.positions), centre: start };
+    const plan = planCorridor(route.profile.positions, [zone]);
+    expect(plan?.requestable.length).toBeGreaterThan(0);
+    for (const tile of plan?.requestable ?? []) {
+      expect(insideZone(edgePoints(tile), zone, route.id)).toStrictEqual([]);
+    }
+    // Not vacuous: the tile the zone sits in was in the cover, and was held back.
+    const zoned = plan?.tiles.filter((tile) => tile.state === 'privacy-zone') ?? [];
+    const holding = zoned.filter((tile) => {
+      const b = tileBounds({ z: 15, x: tile.x, y: tile.y });
+      return (
+        start.latitude <= b.north &&
+        start.latitude >= b.south &&
+        start.longitude >= b.west &&
+        start.longitude <= b.east
+      );
+    });
+    expect(holding).toHaveLength(1);
   });
 });
 

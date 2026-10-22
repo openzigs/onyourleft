@@ -2790,7 +2790,6 @@ export class ActivityStore {
    * transaction as the write, so a read that finishes after the rider deleted
    * the route cannot leave a corridor that no route deletion will reach.
    *
-   * @unwired #1539 reads it
    * @throws {WorldCorridorTooLargeError} if `features` is over
    * {@link WORLD_CORRIDOR_FEATURES_LIMIT_BYTES}; nothing is written.
    * @throws {StoreValidationError} if the record is not a corridor.
@@ -2826,8 +2825,6 @@ export class ActivityStore {
   /**
    * The map features kept around one of this owner's routes, or `undefined`
    * when none were kept — which #1539 answers by reading the corridor again.
-   *
-   * @unwired #1539 reads it
    */
   async getWorldCorridor(
     owner: AthleteId,
@@ -2840,7 +2837,8 @@ export class ActivityStore {
    * Drops the map features kept around one of this owner's routes. A cache:
    * the route is untouched, and the next read rebuilds it.
    *
-   * @unwired #1539 reads it
+   * @unwired no screen drops one corridor on its own yet: `deleteRoute` takes a route's
+   * corridor with it, and #1539's read replaces a stale one with `putWorldCorridor`
    */
   async deleteWorldCorridor(owner: AthleteId, routeId: RouteId): Promise<void> {
     await this.#worldCorridors.delete([owner, routeId]);
