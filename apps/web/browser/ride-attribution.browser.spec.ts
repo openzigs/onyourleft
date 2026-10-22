@@ -62,6 +62,9 @@ const HUD_INK_MUTED = 'rgb(168, 182, 194)';
 const credit = (page: Page) =>
   page.getByRole('region', { name: 'Ride metrics' }).getByText(OSM_ATTRIBUTION, { exact: true });
 
+/** `theme.css` §`--oyl-space-sm`: the gap the HUD's grid keeps between its panels. */
+const PANEL_GAP = 8;
+
 /** `HudPanel`'s class for the credit, which the harness measures as a panel. */
 const CREDIT_CLASS = 'oyl-hud__attribution';
 
@@ -158,6 +161,15 @@ test.describe('#1552 attribution on a mapped ride', () => {
           expect(Math.abs(line.box.bottom - route.box.bottom), where).toBeLessThanOrEqual(
             SUBPIXEL_TOLERANCE,
           );
+          // …and kept from both bottom panels by at least the gap the HUD's
+          // grid keeps between panels (`--oyl-space-sm`), as a panel would be.
+          const actions = seen.panels.find((each) => each.name.includes('oyl-hud__actions'));
+          if (actions === undefined) throw new Error(`${how}: no actions panel`);
+          expect(line.box.left - route.box.right, where).toBeGreaterThanOrEqual(PANEL_GAP);
+          expect(
+            actions.box.left - line.box.right,
+            `${where}, ${describeItem(actions)}`,
+          ).toBeGreaterThanOrEqual(PANEL_GAP);
         } else {
           // The corner: the start edge, where the primary readings begin…
           const primary = seen.panels.find((each) =>
