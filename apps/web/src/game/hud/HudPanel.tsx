@@ -284,6 +284,16 @@ export interface HudPanelProps extends Omit<HudInput, 'units'> {
    * connection is lost (`room-ride.ts` §`raceStandings`).
    */
   readonly standings?: RaceStandingsView | undefined;
+  /**
+   * The map data's credit — #1552, ADR 0054 D-3.6 — on a ride whose world
+   * holds map-derived items, and `undefined` on every other (the stylised
+   * world, and a realistic one drawn wholly procedurally). `GameView` decides
+   * when; this only sets it, small, as the HUD's last child, which
+   * `theme.css` §`.oyl-hud__attribution` puts in a corner of the stage clear
+   * of every panel, on its own opaque backing (#423). Plain text: never a
+   * live region, because it says nothing that changes.
+   */
+  readonly attribution?: string | undefined;
 }
 
 /** The id the notice toggle's `aria-controls` names. One HUD per page. */
@@ -614,6 +624,19 @@ export function HudPanel(props: HudPanelProps): JSX.Element {
           {lap}
         </div>
       ) : null}
+
+      {/*
+        #1552 — the map data's credit, OUT of every panel since the owner's
+        ruling on #1572 (ADR 0054 D-3.6, D-8 Q3: "a small line in a corner of
+        the game view, clear of the HUD"). A child of the HUD itself, so that
+        on the stage `theme.css` §`.oyl-hud__attribution` can set it in the
+        bottom-start corner of the open road on its own opaque backing, and
+        last in the document because it is read once, if at all. Plain text:
+        never a live region.
+      */}
+      {props.attribution === undefined ? null : (
+        <p className="oyl-hud__attribution">{props.attribution}</p>
+      )}
     </section>
   );
 }
