@@ -5,13 +5,18 @@
  * The OpenStreetMap credit on the HUD, audited — #1552, ADR 0054 D-3.6.
  *
  * Named `*.a11y.test.tsx` so `test:a11y` selects it: the issue asks that the
- * line meet WCAG AA on its panel in both themes and not be a live region, and
- * an assertion of either outside the accessibility gate would leave it outside
- * the one gate built for it.
+ * line meet WCAG AA in both themes and not be a live region, and an assertion
+ * of either outside the accessibility gate would leave it outside the one gate
+ * built for it.
  *
- * ⚠️ jsdom performs no layout and resolves no custom property, so the colour
- * is read from `theme.css` as a file (as `hud-surface.a11y.test.ts` does) and
- * measured from the tokens, and the panel it sits on is read from the DOM.
+ * ⚠️ **Out of every panel since the owner's ruling on #1572**: a small line in
+ * a corner of the game view, clear of the HUD (ADR 0054 D-3.6, D-8 Q3). Over
+ * the world, so #423's rule is met by its own opaque backing rather than by a
+ * panel's.
+ *
+ * ⚠️ jsdom performs no layout and resolves no custom property, so the colours
+ * are read from `theme.css` as a file (as `hud-surface.a11y.test.ts` does) and
+ * measured from the tokens, and where it is in the HUD is read from the DOM.
  * Where it lands on a real screen is `ride-attribution.browser.spec.ts`.
  */
 
@@ -100,25 +105,34 @@ afterEach(() => {
 });
 
 describe('the OpenStreetMap credit on the HUD — #1552', () => {
-  it('is on an opaque HUD panel, as plain text, and audits clean', async () => {
+  it('is a line of the HUD’s own, out of every panel, as plain text, and audits clean', async () => {
     mounted = await mount(hud(OSM_ATTRIBUTION));
     const line = document.querySelector('.oyl-hud__attribution');
     expect(line?.textContent).toBe(OSM_ATTRIBUTION);
-    // On a panel, so the surface behind it is `hudSurface` and never the world.
-    expect(line?.closest('.oyl-hud__panel')).not.toBeNull();
+    // A child of the HUD's region, so `theme.css` can set it in a corner of
+    // the road; in no panel, so it is clear of every one.
+    expect(line?.parentElement?.matches('section.oyl-hud[aria-label="Ride metrics"]')).toBe(true);
+    expect(line?.closest('.oyl-hud__panel')).toBeNull();
     // Never a live region: it says nothing that changes, and the HUD's one
     // region is the only thing on the stage that speaks by itself (#445).
     expect(line?.closest('[role="status"], [role="alert"], [role="log"], [aria-live]')).toBeNull();
     expect(formatViolations(auditAccessibility(document))).toBe('');
   });
 
-  it('is set in the HUD’s muted ink, whose pair on the HUD surface is AA in both themes', () => {
+  it('is set in the HUD’s muted ink on its own opaque HUD surface, a pair AA in both themes', () => {
     const rules = rulesFor('.oyl-hud__attribution');
     expect(rules.length).toBeGreaterThan(0);
-    const colours = rules.flatMap((block) => [...block.matchAll(/(?:^|;|\s)color:\s*([^;]+);/g)]);
-    expect(colours.map((match) => match[1]?.trim())).toEqual(['var(--oyl-color-hud-ink-muted)']);
+    const declared = (property: string): (string | undefined)[] =>
+      rules.flatMap((block) =>
+        [...block.matchAll(new RegExp(`(?:^|;|\\s)${property}:\\s*([^;]+);`, 'g'))].map((match) =>
+          match[1]?.trim(),
+        ),
+      );
+    expect(declared('color')).toEqual(['var(--oyl-color-hud-ink-muted)']);
+    // #423: over the world, so a backing of its own, and only the opaque token.
+    expect(declared('background')).toEqual(['var(--oyl-color-hud-surface)']);
     for (const block of rules) {
-      expect(block).not.toMatch(/\b(opacity|background|backdrop-filter)\s*:/);
+      expect(block).not.toMatch(/\b(opacity|background-color|backdrop-filter)\s*:/);
     }
     const pair = CONTRAST_REQUIREMENTS.find(
       (each) => each.foreground === 'hudInkMuted' && each.background === 'hudSurface',

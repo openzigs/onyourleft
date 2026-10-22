@@ -194,6 +194,13 @@ describe('the OpenStreetMap credit on the ride screen — #1552', () => {
     await startRide(answering({ kind: 'ready', corridor: FAR_AWAY }), 'Towns from map data: ready');
     await pump(4);
     expect(stageText()).toContain(OSM_ATTRIBUTION);
+    // The owner's ruling on #1572: a line of the HUD's own, in a corner of the
+    // road, clear of every panel — not a line in the actions panel.
+    const line = [
+      ...(mounted?.container.querySelectorAll('.oyl-game--riding .oyl-hud *') ?? []),
+    ].find((each) => each.textContent === OSM_ATTRIBUTION && each.children.length === 0);
+    expect(line?.parentElement?.classList.contains('oyl-hud')).toBe(true);
+    expect(line?.closest('.oyl-hud__panel')).toBeNull();
   });
 
   it('stays for the whole ride, across a stretch with no mapped item in frame', async () => {

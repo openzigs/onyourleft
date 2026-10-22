@@ -6522,16 +6522,97 @@ select.oyl-input {
   font-variant-numeric: tabular-nums;
 }
 
-/* #1552: the OpenStreetMap credit, on a ride whose world holds map data
-   (ADR 0054 D-3.6). Last in the actions panel, so it is on the opaque HUD
-   surface and its pair is `hudInkMuted` on `hudSurface`, which
-   `tokens.ts` §`CONTRAST_REQUIREMENTS` holds to AA in both palettes. Small, because
-   it is read once if at all; `hud-value-size.test.ts` keeps it above the
-   HUD's supporting-text floor. */
+/*
+ * THE MAP DATA'S CREDIT — #1552, ADR 0054 D-3.6 and D-8 Q3.
+ *
+ * "© OpenStreetMap contributors", on a ride whose world was given map data,
+ * for the whole ride. The owner's ruling on #1572: a small line in a corner
+ * of the game view, CLEAR OF THE HUD — not a line inside a panel.
+ *
+ * ⚠️ **The START edge of the open road, which is the edge the HUD uses
+ * least.** Top-end is the secondary readings and a race's standings (#1347);
+ * bottom-end is the actions panel, which grows with sounds, a side camera and
+ * a room's row, and on an upright phone the moving time is set beside it
+ * (#1111); a notice takes the top-start, under the primary readings (#437).
+ * So:
+ *
+ * - **Corners layout (a tablet, a phone on its side): bottom-start**, hung
+ *   from the line above the route panel. ⚠️ One exception, measured: on a
+ *   phone on its side with sounds on and a side camera paired, #576 lifts the
+ *   side camera's row into exactly that strip and fills it (1 px under the
+ *   primary panel at 736×360), so there the credit takes the bottom-END of
+ *   the same strip, over the actions panel, where #576's 16 rem column has the
+ *   20 px a line needs and not the 60 px the row does.
+ * - **Column layout (a phone upright): top-start of the road**, hung from the
+ *   line under the route panel (or under the notice standing in its cell).
+ *   That is sky: upright the horizon is 47 % down the frame and the rider's
+ *   helmet 52 % (`camera.ts` §`riderFrameBox`), and the bottom-start was
+ *   measured over the leaning rider whenever the actions panel grows — a
+ *   room's *Report* reasons, sounds with a side camera.
+ *
+ * Placed by `grid-area` and `position: absolute` against the grid's middle
+ * track, so it takes no room from any track and moves no panel; every engine
+ * with CSS grid lays it out the same, with no anchor positioning (#1120).
+ *
+ * #423's rule: HUD text over the world sits on an opaque surface. So it has a
+ * backing of its own, painted `--oyl-color-hud-surface` (six-digit hex, no
+ * alpha), and its ink is `hudInkMuted`, a pair `tokens.ts`
+ * §`CONTRAST_REQUIREMENTS` holds to AA in both palettes — the HUD keeps the
+ * light palette whatever the page is in (#672). Small, because it is read
+ * once if at all; `hud-value-size.test.ts` keeps it above the HUD's
+ * supporting-text floor. `ride-attribution.browser.spec.ts` measures it clear
+ * of every panel, *Pause*, *End ride* and the leaning rider at every overlay
+ * viewport, both with anchor positioning and without, on a plain ride and on
+ * the crowded ones.
+ *
+ * Where the HUD is stacked (no overlay), it is the HUD's last item, under the
+ * world rather than over it, on the same backing.
+ */
 .oyl-hud__attribution {
-  margin: 0;
+  background: var(--oyl-color-hud-surface);
+  border-radius: var(--oyl-radius);
   color: var(--oyl-color-hud-ink-muted);
   font-size: var(--oyl-font-size-sm);
+  margin: 0;
+  padding: 0 var(--oyl-space-xs);
+  width: fit-content;
+}
+
+/* Corners: the middle track is the named `notices` row, and its start edge is
+   the first column's. */
+@media (min-width: 46rem) and (min-height: 22.5rem) {
+  .oyl-game--riding .oyl-hud__attribution {
+    position: absolute;
+    grid-area: notices;
+    bottom: 0;
+    left: 0;
+  }
+}
+
+/* Column: the middle track is the fourth, the unnamed `.` row between the
+   route panel and the actions panel. Every line named, because for an
+   absolutely positioned item an `auto` line is the grid's padding edge
+   (#1120's note on #576). */
+@media (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) {
+  .oyl-game--riding .oyl-hud__attribution {
+    position: absolute;
+    grid-area: 4 / 1 / 5 / 2;
+    top: 0;
+    left: 0;
+  }
+}
+
+/* #576's lifted side-camera row holds the bottom-start strip: take the end.
+   The same condition as the rules that lift it, with and without anchors. */
+@media (min-width: 46rem) and (min-height: 22.5rem) and (max-height: 30rem) {
+  .oyl-game--riding
+    .oyl-hud:has(> .oyl-hud__actions > .oyl-sound):has(
+      > .oyl-hud__actions > .oyl-hud__side-camera-row
+    )
+    > .oyl-hud__attribution {
+    left: auto;
+    right: 0;
+  }
 }
 
 /* #1324: ON A PHONE THE RE-PLAN'S SENTENCE GIVES WAY, and *Keep the plan*
