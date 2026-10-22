@@ -546,6 +546,9 @@ describe('the map data — #1552, ADR 0054 D-3.6', () => {
     const words = (section?.textContent ?? '').replace(/\s+/g, ' ');
     expect(words).toContain('© OpenStreetMap contributors');
     expect(words).toContain('Open Database License 1.0');
+    // Said only of what is true today: the realistic world draws no town from
+    // map data until #1540, so the screen does not claim it.
+    expect(words).not.toContain('towns');
     expect(words).toContain(
       'Contains information from OpenStreetMap, which is made available here under the Open Database License (ODbL).',
     );

@@ -2,8 +2,10 @@
 
 On Your Left draws two things from OpenStreetMap data: the **ride map** (vector tiles from a
 Protomaps basemap archive, [ADR 0010](adr/0010-map-tiles-and-routing.md) and
-[ADR 0012](adr/0012-data-licence.md)), and, since [ADR 0054](adr/0054-towns-from-real-map-data.md),
-the **towns in the realistic world**, from the same archive. OpenStreetMap's data is published under
+[ADR 0012](adr/0012-data-licence.md)), and, once [ADR 0054](adr/0054-towns-from-real-map-data.md) is built
+([#1540](https://github.com/openzigs/onyourleft/issues/1540); until then the realistic world's
+towns are procedural and the corridor is read but not yet drawn), the **towns in the realistic
+world**, from the same archive. OpenStreetMap's data is published under
 the [Open Database License 1.0](https://opendatacommons.org/licenses/odbl/1-0/) (ODbL). This page
 records what that licence asks of the project, where each obligation is met, and which obligations
 the project deliberately does not trigger, with the exact condition that would trigger them.

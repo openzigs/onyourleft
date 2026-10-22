@@ -1102,6 +1102,10 @@ export function GameView(props: GameViewProps): JSX.Element {
    * read that finishes mid-ride changes the picker's line, not the world.
    */
   const worldCorridorRef = useRef<WorldCorridor | undefined>(undefined);
+  // #1552: whether THIS ride was given a corridor, as state set beside
+  // `setChosen` so the credit's render depends on it explicitly rather than on
+  // the ref having been written before `setPhase` re-rendered.
+  const [rideHasCorridor, setRideHasCorridor] = useState(false);
 
   useEffect(() => {
     if (port === undefined) {
@@ -1497,6 +1501,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       const ready = corridorStateRef.current;
       worldCorridorRef.current =
         ready?.kind === 'ready' && ready.corridor.routeId === route.id ? ready.corridor : undefined;
+      setRideHasCorridor(worldCorridorRef.current !== undefined);
       setState(simulation.state);
       setChosen(route);
       setPhase('riding');
@@ -2532,7 +2537,10 @@ export function GameView(props: GameViewProps): JSX.Element {
         // (`corridor-port.ts`), and a covered stretch shapes the world even
         // with no footprint in it (D-5.3: no procedural village there). A
         // procedural world owes nothing, and a credit there would be false.
-        attribution={worldCorridorRef.current === undefined ? undefined : OSM_ATTRIBUTION}
+        // ⚠️ Until #1540 draws from the corridor (`scene.ts` §`worldCorridor`
+        // is not read yet) this credits a world still drawn procedurally:
+        // over-crediting, the harmless direction.
+        attribution={rideHasCorridor ? OSM_ATTRIBUTION : undefined}
         onPause={() => {
           setPhase((current) => (current === 'paused' ? 'riding' : 'paused'));
         }}
