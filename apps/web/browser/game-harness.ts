@@ -119,12 +119,19 @@ import {
 } from '../src/game/streets';
 import { waterways } from '../src/game/waterways';
 import { landClassMask, NO_LAND_CLASS } from '../src/game/land-class';
-import { footprintPlans, type FootprintPlan } from '../src/game/footprint-buildings';
+import { WINDOW_IN_BAY } from '../src/game/facade';
+import {
+  FOOTPRINT_VERTEX_FLOATS,
+  footprintPlans,
+  STOREY_METRES,
+  type FootprintPlan,
+} from '../src/game/footprint-buildings';
 import {
   besideRoad,
   buildingBeside,
   denseTownFixture,
   landBeside,
+  mixedTownFixture,
   rectangleBeside,
 } from '../src/game/footprint-fixtures-testing';
 import { mappedBuildingsOf, type MappedBuildings } from '../src/game/mapped-buildings';
@@ -202,6 +209,7 @@ import {
   mappedBuildingsShownOf,
   mappedBuildingStatsOf,
   setMappedBuildingsMerged,
+  setMappedFacadeShown,
   sideRoadMeshOf,
   sideRoadsShownOf,
   wordmarkOrientationOf,
@@ -3088,7 +3096,9 @@ function mappedTownProbe(
     }
     let foot = Number.POSITIVE_INFINITY;
     const walls = plan.triangles.wall;
-    for (let at = 1; at < walls.length; at += 8) foot = Math.min(foot, walls[at] as number);
+    for (let at = 1; at < walls.length; at += FOOTPRINT_VERTEX_FLOATS) {
+      foot = Math.min(foot, walls[at] as number);
+    }
     return { x: front.x, y: foot + 1.5, z: front.z };
   };
   const wallPoint = frontWallOf(probed);
@@ -3240,6 +3250,152 @@ function mappedTownProbe(
     frameMs,
     frameMsOff,
   };
+}
+
+/** What {@link mappedFacadeProbe} publishes — #1581. */
+interface MappedFacadeMeasurement {
+  /** Whether a house with an upper storey's window was found in the frame to aim at. */
+  readonly aimed: boolean;
+  /** The upper storey's first window's glass, and the wall beside it, with the facade drawn. */
+  readonly glass: readonly number[];
+  readonly wall: readonly number[];
+  /** The same two places with the facade switched off — #1549's walls, the control. */
+  readonly glassOff: readonly number[];
+  readonly wallOff: readonly number[];
+}
+
+const NO_MAPPED_FACADE: MappedFacadeMeasurement = {
+  aimed: false,
+  glass: [],
+  wall: [],
+  glassOff: [],
+  wallOff: [],
+};
+
+/**
+ * #1581: a mapped house has windows. #1581's mixed town
+ * (`footprint-fixtures-testing.ts` §`mixedTownFixture`), the rider at 1 200 m:
+ * of the walls 30 to 70 m ahead with windows on an upper storey and facing
+ * back down the road at the rider, so that they are seen square on, the
+ * nearest that is well inside the frame. ⚠️ Not a wall facing the road: one
+ * of those is seen edge-on from the lane, and the first version of this
+ * probe, aimed at one 49° off the camera's axis, read the wall beside its
+ * window. Aimed from the plan's own facade floats: the glass of the upper
+ * storey's first window (a share of 0.42 across its bay, half-way up the
+ * window, clear of the mullion and the transom) and the wall a share of 0.1
+ * across the same bay. Read with the
+ * facade drawn, and with it switched off (`setMappedFacadeShown(false)`):
+ * the control, which must read glass and wall alike.
+ */
+function mappedFacadeProbe(
+  view: ReturnType<typeof threeGameRenderer.create>,
+  gl: WebGL2RenderingContext,
+  canvas: HTMLCanvasElement,
+): MappedFacadeMeasurement {
+  const town = mixedTownFixture();
+  const { profile, origin, corridor } = town;
+  const land = landClassMask(corridor);
+  const plans = footprintPlans(corridor, land, profile, origin).plans;
+  const start = atStartLine(profile);
+  const frame = sceneFrame({
+    profile,
+    origin,
+    state: { ...start, ride: { ...start.ride, distance: metres(1_200) } },
+    worldCorridor: corridor,
+    landClass: land,
+    mappedBuildings: mappedBuildingsOf(plans),
+    structureItems: REALISTIC_STRUCTURE_ITEMS,
+  });
+  // The walls with windows on an upper storey, ahead, facing the rider.
+  const road = drawnRoadFrame(profile, origin, 1_200);
+  if (road === undefined) return NO_MAPPED_FACADE;
+  const stride = FOOTPRINT_VERTEX_FLOATS;
+  type Aim = { readonly glass: Point3; readonly wall: Point3; readonly ahead: number };
+  type Point3 = { readonly x: number; readonly y: number; readonly z: number };
+  let best: Aim | undefined;
+  for (const plan of plans) {
+    const walls = plan.triangles.wall;
+    for (let at = 0; at + 6 * stride <= walls.length; at += 6 * stride) {
+      const f = (vertex: number, k: number): number => walls[at + vertex * stride + k] as number;
+      const top = f(0, 10);
+      if (!(top >= 1 + WINDOW_IN_BAY.top)) continue;
+      // Facing the road: its normal points back across it, toward the rider's side.
+      const nx = f(0, 3);
+      const nz = f(0, 5);
+      const ex = plan.centroid.x - road.x;
+      const ez = plan.centroid.z - road.z;
+      const across = ex * road.normalX + ez * road.normalZ;
+      const ahead = ex * road.normalZ - ez * road.normalX;
+      if (!(Math.abs(across) < 40 && ahead > 30 && ahead < 70)) continue;
+      // Facing the rider, so its windows are seen square on: back along the road.
+      if (nx * road.normalZ - nz * road.normalX > -0.8) continue;
+      // Its two bottom corners, at u = 0 and u = bays.
+      let a: Point3 | undefined;
+      let b: Point3 | undefined;
+      let bays = 0;
+      let floor = Number.POSITIVE_INFINITY;
+      for (let vertex = 0; vertex < 6; vertex += 1) floor = Math.min(floor, f(vertex, 1));
+      for (let vertex = 0; vertex < 6; vertex += 1) {
+        if (f(vertex, 1) !== floor) continue;
+        const point = { x: f(vertex, 0), y: floor, z: f(vertex, 2) };
+        if (f(vertex, 8) === 0) a = point;
+        else {
+          b = point;
+          bays = f(vertex, 8);
+        }
+      }
+      if (a === undefined || b === undefined || bays < 1) continue;
+      const along = (u: number): Point3 => {
+        const t = u / bays;
+        return {
+          x: a.x + (b.x - a.x) * t,
+          y: floor + (1 + (WINDOW_IN_BAY.bottom + WINDOW_IN_BAY.top) / 2) * STOREY_METRES,
+          z: a.z + (b.z - a.z) * t,
+        };
+      };
+      // A little proud of the wall, toward the road, so the read is the wall's own face.
+      const proud = (point: Point3): Point3 => ({
+        x: point.x + nx * 0.01,
+        y: point.y,
+        z: point.z + nz * 0.01,
+      });
+      // Half-way between the transom and the sill would be the lower pane;
+      // half-way up the window is below the transom, which is two thirds up.
+      const aim: Aim = { glass: proud(along(0.42)), wall: proud(along(0.1)), ahead };
+      const seen = (point: Point3): boolean => {
+        const at3 = inTheFrame(frame, canvas.width / canvas.height, point);
+        return at3.across > 0.05 && at3.across < 0.95 && at3.down > 0.05 && at3.down < 0.95;
+      };
+      if (!seen(aim.glass) || !seen(aim.wall)) continue;
+      if (best === undefined || aim.ahead < best.ahead) best = aim;
+    }
+  }
+  if (best === undefined) return NO_MAPPED_FACADE;
+  const meanAt = (point: Point3): number[] => {
+    const centre = pixelFor(frame, canvas, point);
+    const pixels = readRegion(gl, Math.round(centre.x) - 1, Math.round(centre.y) - 1, 3, 3);
+    const sums = [0, 0, 0];
+    for (let at = 0; at < pixels.length; at += 4) {
+      for (let channel = 0; channel < 3; channel += 1) {
+        sums[channel] = (sums[channel] ?? 0) + (pixels[at + channel] ?? 0);
+      }
+    }
+    return sums.map((sum) => sum / 9);
+  };
+  // No scenery, so a tree between the road and the house cannot stand in for it.
+  const bare: SceneFrame = { ...frame, scatter: [], markers: [] };
+  view.render(bare);
+  view.render(bare);
+  const glass = meanAt(best.glass);
+  const wall = meanAt(best.wall);
+  setMappedFacadeShown(false);
+  try {
+    view.render(bare);
+    view.render(bare);
+    return { aimed: true, glass, wall, glassOff: meanAt(best.glass), wallOff: meanAt(best.wall) };
+  } finally {
+    setMappedFacadeShown(true);
+  }
 }
 
 /** What {@link levellingProbe} publishes — #1547. */
@@ -5672,6 +5828,8 @@ export interface RealisticMeasurement {
   readonly levelling: LevellingMeasurement;
   /** #1549: a town from map data, drawn merged, and nothing in the wood. @see mappedTownProbe */
   readonly mappedTown: MappedTownMeasurement;
+  /** #1581: a mapped house's window, with its facade and without. @see mappedFacadeProbe */
+  readonly mappedFacade: MappedFacadeMeasurement;
   /** #1550: procedural lots in a mapped town with no footprints. @see lotsProbe */
   readonly lots: LotsMeasurement;
   /** #621: two trees and two houses of one shape, tinted and not. @see tintProbe */
@@ -7702,6 +7860,7 @@ const NO_REALISTIC: RealisticMeasurement = {
   mappedPavement: NO_MAPPED_PAVEMENT,
   levelling: NO_LEVELLING,
   mappedTown: NO_MAPPED_TOWN,
+  mappedFacade: NO_MAPPED_FACADE,
   lots: NO_LOTS,
   tint: {
     trees: [],
@@ -9255,6 +9414,10 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   const mappedTown = mappedTownProbe(view, gl, canvas);
   phaseEnds('realistic: a mapped town — #1549');
 
+  // #1581, on the same view: a mapped house's windows, drawn and switched off.
+  const mappedFacade = mappedFacadeProbe(view, gl, canvas);
+  phaseEnds('realistic: a mapped house’s windows — #1581');
+
   // #1550, on the same view: procedural lots in a mapped town with no footprints.
   const lots = lotsProbe(view, gl, canvas);
   phaseEnds('realistic: lots in an unmapped town — #1550');
@@ -9499,6 +9662,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     mappedPavement,
     levelling,
     mappedTown,
+    mappedFacade,
     lots,
     tint,
     grounding,

@@ -82,6 +82,7 @@ import {
   type RouteProfile,
 } from '@onyourleft/domain';
 
+import { lotPaint } from './building-paint';
 import { builtUpOrWater, fieldGround, NO_LAND_CLASS, type LandClassMask } from './land-class';
 import { ROAD_CLEARANCE_METRES, fieldSpanMetres, terrainHeightAt } from './landform';
 import {
@@ -1019,7 +1020,9 @@ export function lotsAt(
         'road',
         mask,
       );
-      if (item !== undefined) found.push(item);
+      // #1581: painted unlike the lots beside it and across the road.
+      if (item !== undefined)
+        found.push({ ...item, paint: lotPaint(seed, wrappedPlot, side === 1 ? 1 : -1) });
     }
   }
 }

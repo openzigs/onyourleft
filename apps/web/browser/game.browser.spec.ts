@@ -3605,6 +3605,29 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     expect(town.refillMs).toBeLessThanOrEqual(4);
   });
 
+  test('#1581 a mapped house has windows: its upper window reads darker than its wall, and alike with the facade off', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { mappedFacade: facade } = await realistic(harnessRun);
+    const rgb = (values: readonly number[]): string => values.map((c) => c.toFixed(0)).join('/');
+    const measured = `glass ${rgb(facade.glass)} and wall ${rgb(facade.wall)} drawn; ${rgb(facade.glassOff)} and ${rgb(facade.wallOff)} with the facade off`;
+    testInfo.annotations.push({ type: 'a mapped house’s windows', description: measured });
+    console.log(`a mapped house’s windows — ${measured}`);
+    const luminance = (values: readonly number[]): number =>
+      0.2126 * (values[0] ?? 0) + 0.7152 * (values[1] ?? 0) + 0.0722 * (values[2] ?? 0);
+    expect(facade.aimed).toBe(true);
+    for (const values of [facade.glass, facade.wall, facade.glassOff, facade.wallOff]) {
+      expect(values).toHaveLength(3);
+    }
+    // The glass is a dark room behind a pane, against a lit wall. Measured
+    // locally (SwiftShader): 23 apart on, under 1 apart off.
+    expect(luminance(facade.wall) - luminance(facade.glass)).toBeGreaterThan(12);
+    // THE CONTROL: with the facade off the same two places are the same wall.
+    expect(Math.abs(luminance(facade.wallOff) - luminance(facade.glassOff))).toBeLessThan(4);
+    // And the glass is the facade's: off, that place reads the wall it was drawn over.
+    expect(luminance(facade.glassOff) - luminance(facade.glass)).toBeGreaterThan(12);
+  });
+
   test('#1549 nothing in the wood: no plan kept there and no building pixel, where -landclass draws one', async ({
     harnessRun,
   }, testInfo) => {

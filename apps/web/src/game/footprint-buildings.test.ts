@@ -12,7 +12,11 @@ import { describe, expect, it } from 'vitest';
 import { distanceOnRoute, metres, type RouteProfile } from '@onyourleft/domain';
 import type { BuildingFeature } from '@onyourleft/map-features';
 
+import { DOOR_PAINTS, paintsOf, TRIM_PAINTS } from './building-paint';
 import {
+  CHIMNEY,
+  CHIMNEY_SHARE,
+  EAVES_OVERHANG_METRES,
   FOOTPRINT_MAX_FAR_TRIANGLES,
   FOOTPRINT_MAX_TRIANGLES,
   FOOTPRINT_ROLES,
@@ -21,9 +25,15 @@ import {
   FOOTPRINT_VERTEX_FLOATS,
   footprintPlans,
   footprintUse,
+  HIP_SHARE,
   minimumAreaRectangle,
+  PAINT_NEIGHBOUR_METRES,
+  paintedAlike,
+  PORCH,
+  ROOF_PITCHES_DEGREES,
   roofSurfaceOf,
   storeysFor,
+  VERGE_OVERHANG_METRES,
   wallSurfaceOf,
   type FootprintPlan,
   type FootprintVerdict,
@@ -34,6 +44,7 @@ import {
   buildingBeside,
   denseTownFixture,
   footprintFixture,
+  mixedTownFixture,
   landBeside,
   rectangleBeside,
   starBeside,
@@ -124,7 +135,11 @@ function digestOf(plans: readonly FootprintPlan[]): string {
         ).buffer,
       ),
     );
-    mix(new TextEncoder().encode(`${plan.roof} ${plan.surfaces.wall} ${plan.surfaces.roof}`));
+    mix(
+      new TextEncoder().encode(
+        `${plan.roof} ${String(plan.pitchDegrees)} ${plan.surfaces.wall} ${plan.surfaces.roof} ${JSON.stringify(plan.paint)}`,
+      ),
+    );
     for (const role of FOOTPRINT_ROLES) {
       const floats = plan.triangles[role];
       mix(new Uint8Array(floats.buffer, floats.byteOffset, floats.byteLength));
@@ -495,9 +510,13 @@ describe('the walls stand on the highest ground, at the mapped height', () => {
 });
 
 describe('the roof rule — P-11', () => {
-  it('puts a gable on a 10 × 14 m residential rectangle, its ridge along the 14 m side', () => {
+  it('pitches the roof of a 10 × 14 m residential rectangle, its ridge along the 14 m side', () => {
     const gable = planned('gable');
-    expect(gable.roof).toBe('gable');
+    // #1581: a pitched roof is a gable or, seeded, a hip — this one's seed
+    // gives a hip, whose ridge is the long side less the short; a gable's
+    // runs the long side and its verges' overhang.
+    expect(gable.roof).not.toBe('flat');
+    const ridgeLength = gable.roof === 'hip' ? 14 - 10 : 14 + 2 * VERGE_OVERHANG_METRES;
     const roof = verticesOf(gable, 'roof');
     const top = Math.max(...roof.map(([, y]) => y as number));
     const ridge = roof.filter(([, y]) => Math.abs((y as number) - top) < 1e-3);
@@ -515,7 +534,7 @@ describe('the roof rule — P-11', () => {
         }
       }
     }
-    expect(longest).toBeCloseTo(14, 1);
+    expect(longest).toBeCloseTo(ridgeLength, 1);
     // The road runs along z on this fixture, and the 14 m side is along the road.
     const [ax, az] = besideRoad(fixture.profile, fixture.origin, 0, 0);
     const [bx, bz] = besideRoad(fixture.profile, fixture.origin, 100, 0);
@@ -714,5 +733,262 @@ describe('deterministic — the same corridor, route and seed give the same plan
     );
     expect(second).toBe(first);
     expect(first.length).toBeGreaterThan(0);
+  });
+});
+
+describe('the shape’s detail — #1581, over the mixed town', () => {
+  const mixed = mixedTownFixture();
+  const mixedLand = landClassMask(mixed.corridor);
+  const { plans: town } = footprintPlans(mixed.corridor, mixedLand, mixed.profile, mixed.origin);
+  const pitched = town.filter((plan) => plan.roof !== 'flat');
+  /** The eaves of a plan: the top of its walls, read off its windowed walls' facade. */
+  const eavesOf = (plan: FootprintPlan): number => {
+    const walls = verticesOf(plan, 'wall');
+    const floats = plan.triangles.wall;
+    let top = Number.NEGATIVE_INFINITY;
+    for (let at = 0; at < floats.length; at += FOOTPRINT_VERTEX_FLOATS) {
+      // A ring wall's top: the gable ends' apexes are higher, and are plain.
+      if ((floats[at + 10] as number) > 0) top = Math.max(top, floats[at + 1] as number);
+    }
+    return top === Number.NEGATIVE_INFINITY ? Math.max(...walls.map(([, y]) => y as number)) : top;
+  };
+
+  it('holds every plan to 640 triangles and its far level to 200, with the detail on', () => {
+    expect(town.length).toBeGreaterThan(150);
+    for (const plan of town) {
+      expect(plan.triangleCount).toBeLessThanOrEqual(FOOTPRINT_MAX_TRIANGLES);
+      expect(plan.farTriangleCount).toBeLessThanOrEqual(FOOTPRINT_MAX_FAR_TRIANGLES);
+      const counted = FOOTPRINT_ROLES.reduce(
+        (sum, role) => sum + plan.triangles[role].length / (3 * FOOTPRINT_VERTEX_FLOATS),
+        0,
+      );
+      expect(counted).toBe(plan.triangleCount);
+    }
+  });
+
+  it('seeds the pitch from 25° to 45°, and a hip on some residential roofs, by the footprint', () => {
+    expect(new Set(pitched.map((plan) => plan.pitchDegrees))).toStrictEqual(
+      new Set(ROOF_PITCHES_DEGREES),
+    );
+    for (const plan of town.filter((each) => each.roof === 'flat'))
+      expect(plan.pitchDegrees).toBe(0);
+    const hips = pitched.filter((plan) => plan.roof === 'hip').length;
+    expect(hips / pitched.length).toBeGreaterThan(HIP_SHARE - 0.15);
+    expect(hips / pitched.length).toBeLessThan(HIP_SHARE + 0.15);
+    // Every slope is at the plan's pitch: a roof normal's rise is its cosine.
+    for (const plan of pitched) {
+      const floats = plan.triangles.roof;
+      const cos = Math.cos((plan.pitchDegrees * Math.PI) / 180);
+      for (let at = 0; at < floats.length; at += FOOTPRINT_VERTEX_FLOATS) {
+        expect(floats[at + 4] as number).toBeCloseTo(cos, 5);
+      }
+    }
+  });
+
+  it('builds a hip with no gable end, and a gable with its two', () => {
+    for (const plan of pitched) {
+      const eaves = eavesOf(plan);
+      const above = verticesOf(plan, 'wall').filter(([, y]) => (y as number) > eaves + 1e-3);
+      if (plan.roof === 'hip') expect(above).toStrictEqual([]);
+      else expect(above).toHaveLength(2);
+    }
+  });
+
+  it('overhangs the walls: the roof reaches past the footprint, its eaves below the wall top', () => {
+    for (const plan of pitched) {
+      const roof = verticesOf(plan, 'roof');
+      const eaves = eavesOf(plan);
+      // The lowest edge of the roof is the overhang's, its fall below the wall top.
+      const low = Math.min(...roof.map(([, y]) => y as number));
+      const fall = EAVES_OVERHANG_METRES * Math.tan((plan.pitchDegrees * Math.PI) / 180);
+      expect(low).toBeCloseTo(eaves - fall, 3);
+      // And the roof's reach past the footprint's rectangle is the overhang.
+      const rectangle = minimumAreaRectangle(plan.footprint);
+      let reach = 0;
+      for (const [x, , z] of roof) {
+        const dx = (x as number) - rectangle.cx;
+        const dz = (z as number) - rectangle.cz;
+        const across = Math.abs(-dx * rectangle.uz + dz * rectangle.ux);
+        reach = Math.max(reach, across - rectangle.halfShort);
+      }
+      expect(reach).toBeCloseTo(EAVES_OVERHANG_METRES, 3);
+      // Its underside is painted trim: the soffit is there to be seen from the road.
+      expect(plan.triangles.trim.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('stands a chimney above the ridge on most pitched houses, and on no flat roof', () => {
+    const residential = pitched.filter(
+      (plan) => plan.surfaces.wall === 'brick' || plan.surfaces.wall === 'render',
+    );
+    const withChimney = residential.filter((plan) => plan.triangles.chimney.length > 0);
+    expect(withChimney.length / residential.length).toBeGreaterThan(CHIMNEY_SHARE - 0.15);
+    expect(withChimney.length / residential.length).toBeLessThan(CHIMNEY_SHARE + 0.15);
+    for (const plan of withChimney) {
+      const ridge = Math.max(...verticesOf(plan, 'roof').map(([, y]) => y as number));
+      const top = Math.max(...verticesOf(plan, 'chimney').map(([, y]) => y as number));
+      expect(top).toBeCloseTo(ridge + CHIMNEY.above, 4);
+      // A box: four sides and a top.
+      expect(plan.triangles.chimney.length / (3 * FOOTPRINT_VERTEX_FLOATS)).toBe(10);
+    }
+    for (const plan of town.filter((each) => each.roof === 'flat')) {
+      expect(plan.triangles.chimney.length).toBe(0);
+    }
+  });
+
+  it('puts a canopy over some front doors, on posts or brackets, clear of the road', () => {
+    let porches = 0;
+    let posts = 0;
+    let doors = 0;
+    for (const plan of town) {
+      const door = verticesOf(plan, 'door');
+      if (door.length === 0) continue;
+      doors += 1;
+      const doorTop = Math.max(...door.map(([, y]) => y as number));
+      const doorFoot = Math.min(...door.map(([, y]) => y as number));
+      const cx = door.reduce((sum, [x]) => sum + (x as number), 0) / door.length;
+      const cz = door.reduce((sum, [, , z]) => sum + (z as number), 0) / door.length;
+      // The canopy: trim over the door, within its depth of the door's middle.
+      const canopy = verticesOf(plan, 'trim').filter(
+        ([x, y, z]) =>
+          (y as number) > doorTop &&
+          (y as number) < doorTop + 0.5 &&
+          Math.hypot((x as number) - cx, (z as number) - cz) < PORCH.width / 2 + PORCH.depth + 0.1,
+      );
+      if (canopy.length === 0) continue;
+      porches += 1;
+      const standing = verticesOf(plan, 'trim').filter(
+        ([x, y, z]) =>
+          Math.abs((y as number) - doorFoot) < 1e-3 &&
+          Math.hypot((x as number) - cx, (z as number) - cz) < PORCH.width / 2 + PORCH.depth,
+      );
+      if (standing.length > 0) posts += 1;
+      // Clear of the road, as the walls are.
+      for (const [x, , z] of canopy) {
+        const segments: number[] = [];
+        const road = roadSegmentsNear(
+          mixed.profile,
+          mixed.origin,
+          x as number,
+          z as number,
+          200,
+          segments,
+        );
+        const beside: BesideTheRoad = { along: 0, lateral: 0, distance: 0 };
+        nearestOnRoadSegments(road, segments, x as number, z as number, beside);
+        expect(beside.distance).toBeGreaterThanOrEqual(ROAD_CLEARANCE_METRES);
+      }
+    }
+    expect(doors).toBeGreaterThan(150);
+    expect(porches).toBeGreaterThan(10);
+    expect(posts).toBeGreaterThan(0);
+    expect(posts).toBeLessThan(porches);
+  });
+});
+
+describe('a door canopy keeps the road’s clearance — #1581', () => {
+  /** Houses whose road-facing wall stands `gap` metres outside the clearance, every 20 m. */
+  const porchesAt = (gap: number): number => {
+    const profile = northRoute(3_000, () => 10);
+    const origin = corridorOrigin(profile);
+    const near = ROAD_CLEARANCE_METRES + gap;
+    const buildings: BuildingFeature[] = [];
+    for (let along = 200; along < 1_400; along += 20) {
+      buildings.push(
+        buildingBeside(profile, origin, [rectangleBeside(along, near + 4, 10, 8)], 6),
+      );
+    }
+    const corridor: WorldCorridor = {
+      routeId: 'porch-clearance',
+      origin,
+      covered: () => true,
+      coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
+      landUse: [landBeside(profile, origin, 'landuse', 'residential', 100, 1_500, -60, 60)],
+      buildings,
+      paths: [],
+      streets: [],
+    };
+    const { plans } = footprintPlans(corridor, landClassMask(corridor), profile, origin);
+    expect(plans).toHaveLength(buildings.length);
+    // A canopy is trim standing out over the door: anything nearer the road than the wall.
+    return plans.filter((plan) =>
+      verticesOf(plan, 'trim').some(([x, , z]) => {
+        const segments: number[] = [];
+        const road = roadSegmentsNear(profile, origin, x as number, z as number, 100, segments);
+        const beside: BesideTheRoad = { along: 0, lateral: 0, distance: 0 };
+        nearestOnRoadSegments(road, segments, x as number, z as number, beside);
+        return beside.distance < near - EAVES_OVERHANG_METRES - 0.05;
+      }),
+    ).length;
+  };
+
+  it('stands none where the door is under a canopy’s depth outside the clearance', () => {
+    expect(porchesAt(PORCH.depth / 2)).toBe(0);
+  });
+
+  it('control: the same row a few metres further back has canopies', () => {
+    expect(porchesAt(3)).toBeGreaterThan(10);
+  });
+});
+
+describe('the paint — #1581: seeded per building, and never a neighbour’s', () => {
+  const towns = [
+    ['mixed', mixedTownFixture()],
+    ['dense', denseTownFixture()],
+  ] as const;
+
+  it.each(towns)(
+    'paints no two plans within 30 m of the %s town alike, nor the nearest two in one wall',
+    (_, each) => {
+      const { plans } = footprintPlans(
+        each.corridor,
+        landClassMask(each.corridor),
+        each.profile,
+        each.origin,
+      );
+      let pairs = 0;
+      const walls = new Set<string>();
+      for (const plan of plans) {
+        let nearest: FootprintPlan | undefined;
+        let least = Number.POSITIVE_INFINITY;
+        for (const other of plans) {
+          if (other === plan) continue;
+          const apart = Math.hypot(
+            other.centroid.x - plan.centroid.x,
+            other.centroid.z - plan.centroid.z,
+          );
+          if (apart <= PAINT_NEIGHBOUR_METRES) {
+            expect(paintedAlike(plan, other)).toBe(false);
+            pairs += 1;
+          }
+          if (apart < least) {
+            least = apart;
+            nearest = other;
+          }
+        }
+        if (nearest === undefined) throw new Error('a plan with no neighbour');
+        expect(
+          nearest.surfaces.wall === plan.surfaces.wall && nearest.paint.wall === plan.paint.wall,
+        ).toBe(false);
+        walls.add(`${plan.surfaces.wall} ${String(plan.paint.wall)}`);
+      }
+      expect(pairs).toBeGreaterThan(plans.length);
+      // And the variety is there: brick's five and render's eight, nearly all worn.
+      expect(walls.size).toBeGreaterThanOrEqual(10);
+    },
+  );
+
+  it('keeps each paint inside its list, the same on a second build', () => {
+    const each = mixedTownFixture();
+    const land = landClassMask(each.corridor);
+    const first = footprintPlans(each.corridor, land, each.profile, each.origin).plans;
+    const second = footprintPlans(each.corridor, land, each.profile, each.origin).plans;
+    first.forEach((plan, index) => {
+      expect(plan.paint.wall).toBeLessThan(paintsOf(plan.surfaces.wall)?.length ?? 0);
+      expect(plan.paint.roof).toBeLessThan(paintsOf(plan.surfaces.roof)?.length ?? 0);
+      expect(plan.paint.trim).toBeLessThan(TRIM_PAINTS.length);
+      expect(plan.paint.door).toBeLessThan(DOOR_PAINTS.length);
+      expect(second[index]?.paint).toStrictEqual(plan.paint);
+    });
   });
 });

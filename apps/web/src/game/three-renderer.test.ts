@@ -113,6 +113,7 @@ import {
   prepareSceneryGeometry,
   projectedBoxInMetres,
   RealisticStructureBelts,
+  readsLotPaint,
   PREPARE_FENCE_LIMIT_MS,
   RiderBelt,
   realisticRemoteSplit,
@@ -130,6 +131,7 @@ import {
   sceneryColours,
 } from './three-renderer';
 import type { CameraPose, RiderMarker, SceneFrame } from './port';
+import { LOT_PAINTS, lotPaint, lotPaintChannel, ROOF_PAINTS } from './building-paint';
 import {
   fogFactor,
   irradianceOn,
@@ -3424,6 +3426,61 @@ describe('what the realistic structures cost in meshes — #482', () => {
     }
     expect(built).toBe(pairs.size);
     expect(built).toBe(REALISTIC_STRUCTURE_MESHES);
+    belts.dispose();
+  });
+});
+
+describe('a lot’s paint reaches its instance and its materials — #1581', () => {
+  it('writes a lot’s wall and roof in the channels its walls’ and roof’s materials read, and nought for a village house', () => {
+    const belts = new RealisticStructureBelts(new Map());
+    const lot: ScatterItem = item({ kind: 'building', x: 0, z: 20, paint: lotPaint(0, 3, 1) });
+    const house: ScatterItem = item({ kind: 'building', x: 0, z: 40 });
+    belts.update([lot, house], POSE);
+    const brick = belts.beltOf('brick')?.meshesOf('building')[0];
+    const tiles = belts.beltOf('roof-tiles')?.meshesOf('building')[0];
+    if (brick === undefined || tiles === undefined)
+      throw new Error('a house has no brick or tile mesh');
+    expect(brick.count).toBe(2);
+    const channelsOf = (
+      mesh: { readonly instanceColor: { readonly array: ArrayLike<number> } | null },
+      slot: number,
+    ): readonly number[] => [0, 1, 2].map((at) => mesh.instanceColor?.array[slot * 3 + at] ?? NaN);
+    for (const mesh of [brick, tiles]) {
+      const [wall, roof] = channelsOf(mesh, 0);
+      expect(wall).toBe(lotPaintChannel(lot.paint, 'wall'));
+      expect(roof).toBe(lotPaintChannel(lot.paint, 'roof'));
+      expect(wall).toBeGreaterThan(0);
+      // The village house is drawn as it was: no paint.
+      expect(channelsOf(mesh, 1).slice(0, 2)).toStrictEqual([0, 0]);
+    }
+    expect(readsLotPaint(brick.material as never)).toBe('wall');
+    expect(readsLotPaint(tiles.material as never)).toBe('roof');
+    // Glass and the joinery's timber are never painted.
+    const glass = belts.beltOf('glass')?.meshesOf('building')[0];
+    expect(readsLotPaint(glass?.material as never)).toBeUndefined();
+    belts.dispose();
+  });
+
+  it('splices each surface’s own first five paints into the program, read from its channel', () => {
+    const belts = new RealisticStructureBelts(new Map());
+    const material = belts.beltOf('slate')?.meshesOf('shop-row')[0]?.material as never as {
+      onBeforeCompile: (shader: unknown, renderer: unknown) => void;
+    };
+    const shader = {
+      uniforms: {},
+      vertexShader:
+        '#include <common>\n#include <begin_vertex>\n#include <color_vertex>\n#include <fog_pars_vertex>\n#include <fog_vertex>',
+      fragmentShader:
+        '#include <common>\n#include <clipping_planes_fragment>\n#include <map_fragment>\n#include <color_fragment>\n#include <fog_pars_fragment>\n#include <fog_fragment>',
+    };
+    material.onBeforeCompile(shader, undefined);
+    const slate = ROOF_PAINTS.slate ?? [];
+    expect(shader.vertexShader).toContain(`const vec3 oylLotPaints[${String(LOT_PAINTS)}]`);
+    expect(shader.vertexShader).toContain(
+      `vec3(${(slate[1] ?? []).map((each) => (Number.isInteger(each) ? `${String(each)}.0` : String(each))).join(', ')})`,
+    );
+    expect(shader.vertexShader).toContain('int(instanceColor.y + 0.5) - 1');
+    expect(shader.fragmentShader).toContain('diffuseColor.rgb *= vOylPaint;');
     belts.dispose();
   });
 });

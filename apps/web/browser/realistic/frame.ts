@@ -22,10 +22,13 @@ import { metres, metresPerSecond, seconds, type RouteProfile } from '@onyourleft
 
 import { simulatedCrankAngle } from '../../src/game/bicycle';
 import type { SceneFrame } from '../../src/game/port';
+import type { LandClassMask } from '../../src/game/land-class';
+import type { MappedBuildings } from '../../src/game/mapped-buildings';
 import type { QualitySettings } from '../../src/game/quality';
 import { sceneFrame } from '../../src/game/scene';
 import { atStartLine } from '../../src/game/simulation';
 import type { CorridorOrigin } from '../../src/game/terrain';
+import type { WorldCorridor } from '../../src/game/world-data/corridor';
 
 /** How fast the rider goes: about 32 km/h. */
 export const RIDE_METRES_PER_SECOND = 9;
@@ -42,6 +45,15 @@ export function rideFrame(input: {
   readonly rung: Pick<QualitySettings, 'scatterItems' | 'structureItems'>;
   /** #1534's control, `levers=-settlement-clearing`: the settlements' ground left wooded. */
   readonly settlementsWooded?: boolean;
+  /**
+   * #1581's `town=mixed`: the ride's corridor, its land and its planned
+   * buildings, as `GameView` hands a ride's frames them.
+   */
+  readonly town?: {
+    readonly corridor: WorldCorridor;
+    readonly land: LandClassMask;
+    readonly buildings: MappedBuildings;
+  };
 }): SceneFrame {
   const start = atStartLine(input.profile);
   return sceneFrame({
@@ -60,5 +72,12 @@ export function rideFrame(input: {
     scatterItems: input.rung.scatterItems,
     structureItems: input.rung.structureItems,
     settlementsWooded: input.settlementsWooded,
+    ...(input.town === undefined
+      ? {}
+      : {
+          worldCorridor: input.town.corridor,
+          landClass: input.town.land,
+          mappedBuildings: input.town.buildings,
+        }),
   });
 }

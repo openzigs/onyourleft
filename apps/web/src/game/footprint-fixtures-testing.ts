@@ -333,3 +333,89 @@ export function rowTownFixture(): {
     },
   };
 }
+
+/**
+ * #1581's fixture: a town of mixed footprints, as a real map has them, where
+ * #1549's are identical boxes in rows. Along 1 km of level road from 1 000 m,
+ * both sides: houses every 20 m in two rows, each a rectangle 6 to 14 m along
+ * by 6 to 12 m deep, turned up to 15° off the road, 3.5 to 12 m high or with
+ * no height mapped; every fifth an L. Residential land to 1 600 m and
+ * commercial beyond, so a high street of flat roofs follows the houses. Every
+ * number is drawn from a fixed sequence, so the town is the same every run.
+ */
+export function mixedTownFixture(): {
+  readonly profile: RouteProfile;
+  readonly origin: CorridorOrigin;
+  readonly corridor: WorldCorridor;
+} {
+  const profile = northRoute(3_000, () => 10);
+  const origin = corridorOrigin(profile);
+  let state = 0x15_81;
+  const next = (): number => {
+    // A 32-bit xorshift: a fixed sequence, not a seed the ride reads.
+    state ^= state << 13;
+    state ^= state >>> 17;
+    state ^= state << 5;
+    return (state >>> 0) / 0x1_0000_0000;
+  };
+  const heights = [null, 3.5, 5, 6, 7, 8.5, 9, 12] as const;
+  const buildings: BuildingFeature[] = [];
+  for (let along = 1_000; along < 2_000; along += 20) {
+    for (const [lateral, row] of [
+      [22, 0],
+      [-22, 0],
+      [48, 1],
+      [-48, 1],
+    ] as const) {
+      const length = 6 + next() * 8;
+      const depth = 6 + next() * 6;
+      const turn = ((next() * 2 - 1) * 15 * Math.PI) / 180;
+      const height = heights[Math.floor(next() * heights.length)] ?? null;
+      const ell = (buildings.length + row) % 5 === 0;
+      const centreAlong = along + (next() - 0.5) * 4;
+      const centreLateral = lateral + (next() - 0.5) * 4;
+      const a = length / 2;
+      const d = depth / 2;
+      const corners: readonly (readonly [number, number])[] = ell
+        ? [
+            [-a, -d],
+            [a, -d],
+            [a, 0],
+            [0, 0],
+            [0, d],
+            [-a, d],
+          ]
+        : [
+            [-a, -d],
+            [a, -d],
+            [a, d],
+            [-a, d],
+          ];
+      const ring = corners.map(
+        ([x, y]) =>
+          [
+            centreAlong + x * Math.cos(turn) - y * Math.sin(turn),
+            centreLateral + x * Math.sin(turn) + y * Math.cos(turn),
+          ] as const,
+      );
+      buildings.push(buildingBeside(profile, origin, [ring], height));
+    }
+  }
+  return {
+    profile,
+    origin,
+    corridor: {
+      routeId: 'mixed-town',
+      origin,
+      covered: () => true,
+      coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
+      landUse: [
+        landBeside(profile, origin, 'landuse', 'residential', 950, 1_600, -70, 70),
+        landBeside(profile, origin, 'landuse', 'commercial', 1_600, 2_050, -70, 70),
+      ],
+      buildings,
+      paths: [],
+      streets: [],
+    },
+  };
+}

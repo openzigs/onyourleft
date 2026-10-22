@@ -127,19 +127,30 @@ export function mappedChunk(distanceMetres: number): number {
 /** The roles a building's far level keeps: its walls and its roof (#1540's `farTriangleCount`). */
 export const FAR_ROLES: readonly FootprintRole[] = ['wall', 'roof'];
 
-/** The roles a building's near level draws: all of them. */
-export const NEAR_ROLES: readonly FootprintRole[] = ['wall', 'plinth', 'roof', 'parapet', 'door'];
+/** The roles a building's near level draws: all of them, #1581's chimney and trim among them. */
+export const NEAR_ROLES: readonly FootprintRole[] = [
+  'wall',
+  'plinth',
+  'roof',
+  'parapet',
+  'door',
+  'chimney',
+  'trim',
+];
 
 /**
  * The surface a role wears: the roof the plan's roof surface, and everything
- * else — walls, plinth, parapet and door — its wall surface.
+ * else — walls, plinth, parapet, door and, since #1581, chimney and trim — its
+ * wall surface.
  *
- * ⚠️ **The door and the plinth wear the wall's photograph, darker**, where a
+ * ⚠️ **The door, the trim and the plinth wear the wall's photograph**, where a
  * procedural house's wear timber (`realistic-assets.ts`
  * §`REALISTIC_BUILDING_SURFACES`). A third surface a building would put a
  * town's surfaces past {@link MAPPED_BUILDING_DRAW_CALLS} at once: brick,
  * render, two roofs and a flat roof are five, and timber doors a sixth before
- * the first shop. The shade is `three-renderer.ts`' own `REALISTIC_ROLE_SHADE`.
+ * the first shop. The plinth is darker, by `three-renderer.ts`' own
+ * `REALISTIC_ROLE_SHADE`; since #1581 the door and the trim are painted over
+ * the photograph instead (`three-renderer.ts` §`withFacade`).
  */
 export function surfaceOfRole(plan: FootprintPlan, role: FootprintRole): StructureSurface {
   return role === 'roof' ? plan.surfaces.roof : plan.surfaces.wall;

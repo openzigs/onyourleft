@@ -58,9 +58,32 @@
  * {@link FOOTPRINT_GABLE_MAX_EAVES_METRES}), and flat behind a
  * {@link PARAPET_METRES} parapet otherwise. **No windows are cut**: a
  * footprint can have forty walls, and the openings `buildings.ts` cuts would
- * not fit in {@link FOOTPRINT_MAX_TRIANGLES}. The facade wears a storey-high
- * window texture instead, laid one repeat a storey by one a bay
- * ({@link BAY_METRES}).
+ * not fit in {@link FOOTPRINT_MAX_TRIANGLES}.
+ *
+ * ## The detail (#1581, the owner's ruling of 2026-10-22)
+ *
+ * #1549 drew these plans as boxes, and the owner's verdict was that they
+ * "look terrible and do not have enough variety". Since #1581:
+ *
+ * - **Windows and a front door, in no triangle.** Every wall vertex carries
+ *   its place in whole bays and storeys and where the eaves are
+ *   ({@link FACADE_FLOATS}), and `three-renderer.ts` §`withFacade` draws a
+ *   window in every bay of every storey from `facade.ts`' layout, and the
+ *   door and its surround on the door's quad ({@link DOOR_FACE}). No window
+ *   stands behind the door, nor above the eaves.
+ * - **The roof's shape**, seeded: a gable or a hip ({@link HIP_SHARE}) at one
+ *   of {@link ROOF_PITCHES_DEGREES}, overhanging at the eaves and the verges,
+ *   with painted soffits and fascias (`trim`).
+ * - **A chimney** on most pitched houses ({@link CHIMNEY_SHARE}) and **a
+ *   canopy over the front door** on about half, on posts or brackets
+ *   ({@link PORCH_SHARE}), only where it stands clear of the road.
+ * - **Paint**, seeded per plan from its footprint and never a neighbour's
+ *   (`paintTown`, {@link PAINT_NEIGHBOUR_METRES}): `building-paint.ts`.
+ *
+ * The near level stays inside {@link FOOTPRINT_MAX_TRIANGLES} and the far
+ * level, walls and roof, inside {@link FOOTPRINT_MAX_FAR_TRIANGLES}: a house's
+ * detail is about 40 triangles, and none of it is on the far level but the
+ * roof's overhang.
  *
  * ## The surfaces
  *
@@ -83,6 +106,7 @@ import {
   type Ring,
 } from '@onyourleft/map-features';
 
+import { DOOR_PAINTS, paintsOf, TRIM_PAINTS } from './building-paint';
 import { DOOR, FOUNDATION_METRES, PLINTH_TOP_METRES } from './buildings';
 import { MASONRY_TINT, packedInstanceTint } from './instance-tint';
 import { kindAt, type LandClass, type LandClassMask } from './land-class';
@@ -124,8 +148,12 @@ export const FOOTPRINT_VERDICTS: readonly FootprintVerdict[] = [
 /** How many footprints came to each verdict. */
 export type FootprintVerdicts = Readonly<Record<FootprintVerdict, number>>;
 
-/** The parts a plan's triangles are made of — #1549 dresses each by its surface. */
-export type FootprintRole = 'wall' | 'plinth' | 'roof' | 'parapet' | 'door';
+/**
+ * The parts a plan's triangles are made of — #1549 dresses each by its
+ * surface. Since #1581: `chimney`, a stack on a pitched house, and `trim`, the
+ * painted timber — a roof's soffits and fascias, and a porch.
+ */
+export type FootprintRole = 'wall' | 'plinth' | 'roof' | 'parapet' | 'door' | 'chimney' | 'trim';
 
 /** Every {@link FootprintRole}, in a fixed order. */
 export const FOOTPRINT_ROLES: readonly FootprintRole[] = [
@@ -134,15 +162,59 @@ export const FOOTPRINT_ROLES: readonly FootprintRole[] = [
   'roof',
   'parapet',
   'door',
+  'chimney',
+  'trim',
 ];
 
 /**
- * How many floats one vertex of a plan's triangles is: **8** — position
- * (three), normal (three) and texture coordinate (two), in that order. Three
- * vertices a triangle and no index: the triangles are appended into #1549's
- * merged buffers, whose indices are theirs to write.
+ * How many floats one vertex of a plan's triangles is: **12** — position
+ * (three), normal (three), texture coordinate (two) and, since #1581, the
+ * facade's four ({@link FACADE_FLOATS}), in that order. Three vertices a
+ * triangle and no index: the triangles are appended into #1549's merged
+ * buffers, whose indices are theirs to write.
  */
-export const FOOTPRINT_VERTEX_FLOATS = 8;
+export const FOOTPRINT_VERTEX_FLOATS = 12;
+
+/**
+ * What a vertex tells the facade shader — #1581, four floats: `u` and `v`,
+ * then `top` and `skip`. `three-renderer.ts` §`withFacade` draws from them,
+ * so a window costs no triangle, no texture and no draw call.
+ *
+ * - **`top > 0`, a windowed wall.** `u` counts bays round the wall, a window
+ *   in each, every wall's bays a whole number laid end to end
+ *   ({@link baysOf}); `v` counts storeys up from the floor. A window stands
+ *   in every bay of every storey whose window top is at most `top` storeys up,
+ *   which is the eaves — so none is cut by a roof. On the ground storey,
+ *   bay `skip` has none: the front door is there (−1 where it is not).
+ * - **`top = 0`, plain**: the photograph and nothing on it.
+ * - **`top = −1`, a door**: `u` and `v` across its quad, `[0, 1]`, which
+ *   holds the leaf and its surround ({@link DOOR_SURROUND_METRES}).
+ * - **`top = −2`, paint**: the trim's colour in place of the photograph.
+ */
+export const FACADE_FLOATS = 4;
+
+/** `top` of a plain face. @see FACADE_FLOATS */
+export const FACADE_PLAIN = 0;
+/** `top` of a door's face. @see FACADE_FLOATS */
+export const FACADE_DOOR = -1;
+/** `top` of a painted face. @see FACADE_FLOATS */
+export const FACADE_PAINT = -2;
+
+/** The roof shapes a plan can have: since #1581 a hip as well as a gable, seeded. */
+export type FootprintRoof = 'gable' | 'hip' | 'flat';
+
+/**
+ * What a plan is painted — #1581: an entry of each of `building-paint.ts`'
+ * lists, its wall surface's, its roof surface's, the trim's and the door's.
+ * Seeded from the footprint, and never the same as a neighbour's
+ * ({@link PAINT_NEIGHBOUR_METRES}).
+ */
+export interface FootprintPaint {
+  readonly wall: number;
+  readonly roof: number;
+  readonly trim: number;
+  readonly door: number;
+}
 
 /** One mapped building, planned. */
 export interface FootprintPlan {
@@ -158,8 +230,12 @@ export interface FootprintPlan {
   /** Metres, local: the plinth's foot — or, for a part on a `min_height`, its base. */
   readonly base: number;
   readonly storeys: number;
-  readonly roof: 'gable' | 'flat';
+  readonly roof: FootprintRoof;
+  /** A pitched roof's pitch, degrees, seeded ({@link ROOF_PITCHES_DEGREES}); 0 on a flat one. */
+  readonly pitchDegrees: number;
   readonly surfaces: { readonly wall: StructureSurface; readonly roof: StructureSurface };
+  /** What it is painted — #1581. */
+  readonly paint: FootprintPaint;
   /** `instance-tint.ts`' seeded tint, packed, keyed by the centroid (#621). */
   readonly tint: number;
   /**
@@ -219,8 +295,52 @@ export const FOOTPRINT_GABLE_MIN_RECTANGULARITY = 0.85;
 /** A gable only under eaves at most this high: **12 m**. */
 export const FOOTPRINT_GABLE_MAX_EAVES_METRES = 12;
 
-/** A gable's pitch: **35°**, this repository's own, near `buildings.ts`' houses. */
-export const GABLE_PITCH_DEGREES = 35;
+/**
+ * A pitched roof's pitch, seeded — #1581: **25° to 45°** in fives, round
+ * #1540's 35°, which is near `buildings.ts`' houses. A low-pitched bungalow
+ * and a steep cottage, where #1549 drew every roof alike.
+ */
+export const ROOF_PITCHES_DEGREES: readonly number[] = [25, 30, 35, 40, 45];
+
+/** The share of pitched roofs that are hipped rather than gabled: **0.35** (#1581). */
+export const HIP_SHARE = 0.35;
+
+/** How far the eaves overhang the walls, across a slope: **0.4 m** (#1581). */
+export const EAVES_OVERHANG_METRES = 0.4;
+
+/** How far a gable's verges overhang its ends: **0.25 m** (#1581). */
+export const VERGE_OVERHANG_METRES = 0.25;
+
+/** How thick a pitched roof is drawn at its edges — its fascia: **0.15 m** (#1581). */
+export const ROOF_THICKNESS_METRES = 0.15;
+
+/** The share of pitched houses with a chimney: **0.7** (#1581). */
+export const CHIMNEY_SHARE = 0.7;
+
+/** A chimney's breadth along the ridge, its depth across it, and its height above the ridge (#1581). */
+export const CHIMNEY = { along: 0.6, across: 0.9, above: 0.9 } as const;
+
+/** The share of houses whose front door has a canopy over it: **0.55** (#1581). */
+export const PORCH_SHARE = 0.55;
+
+/** The share of those canopies that stand on two posts — a porch — rather than on brackets. */
+export const PORCH_POSTS_SHARE = 0.5;
+
+/** A door canopy: its width, how far it stands out from the wall, and its thickness (#1581). */
+export const PORCH = { width: 2, depth: 1, thickness: 0.15, post: 0.12 } as const;
+
+/** How wide a front door's painted surround is, either side and over it: **0.15 m** (#1581). */
+export const DOOR_SURROUND_METRES = 0.15;
+
+/** The shortest wall that has a window in it: **2 m**; below it a wall is blank (#1581). */
+export const WINDOW_MIN_WALL_METRES = 2;
+
+/**
+ * How near two plans' centroids are for them to be neighbours that may not be
+ * painted alike: **30 m** (#1581), a house and the two or three either side
+ * of it and across a lane.
+ */
+export const PAINT_NEIGHBOUR_METRES = 30;
 
 /** Over this many storeys a building wears `concrete`: **5** (#1548, was `stone`). */
 export const TOWER_STOREYS = 5;
@@ -230,6 +350,12 @@ export const BRICK_SHARE = 0.6;
 
 /** How far a door stands proud of its wall: **2 cm**, so it never fights the facade's depth. */
 const DOOR_PROUD_METRES = 0.02;
+
+/** A door with its surround: what {@link door} draws, and the shader's `[0, 1]` across it. */
+export const DOOR_FACE = {
+  width: DOOR.width + 2 * DOOR_SURROUND_METRES,
+  height: DOOR.height + DOOR_SURROUND_METRES,
+} as const;
 
 /** What a footprint's land is used for, as its surfaces and its roof read it. */
 export type FootprintUse = 'residential' | 'commercial' | 'industrial' | 'farmland';
@@ -266,7 +392,7 @@ export function footprintUse(landClass: LandClass, kind: string | undefined): Fo
 export function wallSurfaceOf(
   use: FootprintUse,
   storeys: number,
-  roof: 'gable' | 'flat',
+  roof: FootprintRoof,
   share: number,
 ): StructureSurface {
   if (storeys > TOWER_STOREYS) return 'concrete';
@@ -283,7 +409,7 @@ export function wallSurfaceOf(
 }
 
 /** A plan's roof's surface: `roof-tiles` or `slate` on a gable, by a seeded half; `flat-roof` (#1548) on a flat one. */
-export function roofSurfaceOf(roof: 'gable' | 'flat', share: number): StructureSurface {
+export function roofSurfaceOf(roof: FootprintRoof, share: number): StructureSurface {
   if (roof === 'flat') return 'flat-roof';
   return share < 0.5 ? 'roof-tiles' : 'slate';
 }
@@ -310,6 +436,16 @@ export const FOOTPRINT_SURFACES: readonly StructureSurface[] = [
 /** The seeded streams a footprint draws from. */
 const STREAM_WALL = 0;
 const STREAM_ROOF = 1;
+// #1581's: the shape's detail and the paint, each its own.
+const STREAM_PITCH = 2;
+const STREAM_HIP = 3;
+const STREAM_CHIMNEY = 4;
+const STREAM_PORCH = 5;
+const STREAM_POSTS = 6;
+const STREAM_PAINT_WALL = 7;
+const STREAM_PAINT_ROOF = 8;
+const STREAM_PAINT_TRIM = 9;
+const STREAM_PAINT_DOOR = 10;
 
 /** The key under which {@link slotHash} hashes footprints, apart from every other placement. */
 const FOOTPRINT_KEY = 0x15_40;
@@ -564,22 +700,38 @@ export function storeysFor(heightMetres: number | null): number {
   return Math.max(1, Math.round(heightMetres / STOREY_METRES));
 }
 
-/** A role's triangles while a plan is built: eight numbers a vertex. */
+/** A role's triangles while a plan is built: {@link FOOTPRINT_VERTEX_FLOATS} numbers a vertex. */
 type Writing = Record<FootprintRole, number[]>;
 
 type Vec = readonly [number, number, number];
+type Pair = readonly [number, number];
+type Three<T> = readonly [T, T, T];
+type Four<T> = readonly [T, T, T, T];
 
-/** One triangle into `into`, wound counter-clockwise seen from `normal`'s side. */
+/** What a face tells the facade shader besides its corners' `u, v`. @see FACADE_FLOATS */
+interface Face {
+  readonly top: number;
+  readonly skip: number;
+}
+
+const PLAIN: Face = { top: FACADE_PLAIN, skip: -1 };
+const PAINTED: Face = { top: FACADE_PAINT, skip: -1 };
+const AT_NOUGHT: Pair = [0, 0];
+const NO_FACADE: Four<Pair> = [AT_NOUGHT, AT_NOUGHT, AT_NOUGHT, AT_NOUGHT];
+
+/**
+ * One triangle into `into`, wound counter-clockwise seen from `normal`'s side,
+ * each corner with its photograph's `uv` and, since #1581, its facade's.
+ */
 function triangle(
   into: number[],
-  a: Vec,
-  b: Vec,
-  c: Vec,
+  corners: Three<Vec>,
   normal: Vec,
-  uvA: readonly [number, number],
-  uvB: readonly [number, number],
-  uvC: readonly [number, number],
+  uvs: Three<Pair>,
+  face: Face = PLAIN,
+  facade: Three<Pair> = [AT_NOUGHT, AT_NOUGHT, AT_NOUGHT],
 ): void {
+  const [a, b, c] = corners;
   const ux = b[0] - a[0];
   const uy = b[1] - a[1];
   const uz = b[2] - a[2];
@@ -590,61 +742,142 @@ function triangle(
     (uy * vz - uz * vy) * normal[0] +
     (uz * vx - ux * vz) * normal[1] +
     (ux * vy - uy * vx) * normal[2];
-  const corners = facing >= 0 ? [a, b, c] : [a, c, b];
-  const uvs = facing >= 0 ? [uvA, uvB, uvC] : [uvA, uvC, uvB];
-  for (let corner = 0; corner < 3; corner += 1) {
+  const order = facing >= 0 ? [0, 1, 2] : [0, 2, 1];
+  for (const corner of order) {
     const p = corners[corner] as Vec;
-    const uv = uvs[corner] as readonly [number, number];
+    const uv = uvs[corner] as Pair;
+    const f = facade[corner] as Pair;
     into.push(p[0], p[1], p[2], normal[0], normal[1], normal[2], uv[0], uv[1]);
+    into.push(f[0], f[1], face.top, face.skip);
   }
 }
 
 /** A quad `a b c d` (in order round it) as two triangles facing `normal`. */
 function quad(
   into: number[],
-  a: Vec,
-  b: Vec,
-  c: Vec,
-  d: Vec,
+  corners: Four<Vec>,
   normal: Vec,
-  uv: readonly (readonly [number, number])[],
+  uv: Four<Pair>,
+  face: Face = PLAIN,
+  facade: Four<Pair> = NO_FACADE,
 ): void {
-  triangle(
-    into,
-    a,
-    b,
-    c,
-    normal,
-    uv[0] as [number, number],
-    uv[1] as [number, number],
-    uv[2] as [number, number],
-  );
-  triangle(
-    into,
-    a,
-    c,
-    d,
-    normal,
-    uv[0] as [number, number],
-    uv[2] as [number, number],
-    uv[3] as [number, number],
-  );
+  const [a, b, c, d] = corners;
+  triangle(into, [a, b, c], normal, [uv[0], uv[1], uv[2]], face, [facade[0], facade[1], facade[2]]);
+  triangle(into, [a, c, d], normal, [uv[0], uv[2], uv[3]], face, [facade[0], facade[2], facade[3]]);
+}
+
+/** Which of a box's ends {@link box} draws. */
+interface BoxEnds {
+  readonly top: boolean;
+  readonly bottom: boolean;
+}
+
+/**
+ * A box's four upright faces into `into`, and its top and bottom where asked —
+ * #1581: a chimney, a canopy, a post. Centred on `centre`, `half` either way
+ * along `axis` and along its normal `(az, −ax)`, from `bottom` to `top`;
+ * `u, v` in bays and storeys of plan from `floor`.
+ */
+function box(
+  into: number[],
+  centre: Pair,
+  axis: Pair,
+  half: Pair,
+  heights: readonly [bottom: number, top: number, floor: number],
+  face: Face,
+  ends: BoxEnds,
+): void {
+  const [cx, cz] = centre;
+  const [ex, ez] = axis;
+  const nx = ez;
+  const nz = -ex;
+  const [halfE, halfN] = half;
+  const [bottom, top, floor] = heights;
+  const at = (e: number, n: number, y: number): Vec => [
+    cx + ex * e + nx * n,
+    y,
+    cz + ez * e + nz * n,
+  ];
+  const v0 = (bottom - floor) / STOREY_METRES;
+  const v1 = (top - floor) / STOREY_METRES;
+  // Each face's two bottom corners `(e, n)`, its normal, and its width.
+  const sides: readonly (readonly [Pair, Pair, Vec, number])[] = [
+    [[-halfE, halfN], [halfE, halfN], [nx, 0, nz], 2 * halfE],
+    [[halfE, -halfN], [-halfE, -halfN], [-nx, 0, -nz], 2 * halfE],
+    [[halfE, halfN], [halfE, -halfN], [ex, 0, ez], 2 * halfN],
+    [[-halfE, -halfN], [-halfE, halfN], [-ex, 0, -ez], 2 * halfN],
+  ];
+  for (const [[e0, n0], [e1, n1], normal, width] of sides) {
+    const u1 = width / BAY_METRES;
+    quad(
+      into,
+      [at(e0, n0, bottom), at(e1, n1, bottom), at(e1, n1, top), at(e0, n0, top)],
+      normal,
+      [
+        [0, v0],
+        [u1, v0],
+        [u1, v1],
+        [0, v1],
+      ],
+      face,
+    );
+  }
+  const cap = (y: number, normal: Vec): void => {
+    const u = halfE / STOREY_METRES;
+    const v = halfN / STOREY_METRES;
+    quad(
+      into,
+      [at(-halfE, -halfN, y), at(halfE, -halfN, y), at(halfE, halfN, y), at(-halfE, halfN, y)],
+      normal,
+      [
+        [-u, -v],
+        [u, -v],
+        [u, v],
+        [-u, v],
+      ],
+      face,
+    );
+  };
+  if (ends.top) cap(top, [0, 1, 0]);
+  if (ends.bottom) cap(bottom, [0, -1, 0]);
+}
+
+/**
+ * How many window bays a wall `length` metres long has — #1581: one a
+ * {@link BAY_METRES}, rounded, and at least one, so every wall's bays are
+ * whole and its windows centred in them, never cut by a corner; none on a
+ * wall shorter than {@link WINDOW_MIN_WALL_METRES}.
+ */
+export function baysOf(length: number): number {
+  if (!(length >= WINDOW_MIN_WALL_METRES)) return 0;
+  return Math.max(1, Math.round(length / BAY_METRES));
+}
+
+/** Where a plan's windows go, for {@link ringWalls}: under `top` storeys, and none behind the door. */
+interface Windows {
+  /** The eaves, in storeys above the floor. @see FACADE_FLOATS */
+  readonly top: number;
+  /** The outer ring's edge the front door is on, or −1. */
+  readonly doorEdge: number;
 }
 
 /**
  * Upright quads round each ring from `bottom` to `top`, facing away from the
  * building's material — out of the outer ring, into each hole — and, with
  * `inside`, a second face the other way (a parapet's back). `u` runs round
- * the ring in bays and `v` up it in storeys from `from`.
+ * the ring in bays and `v` up it in storeys from `from`. With `windows`, each
+ * wall carries #1581's facade ({@link FACADE_FLOATS}): its own whole bays
+ * ({@link baysOf}), and on the door's edge no ground-floor window behind the
+ * door — an odd count's middle bay; an even count's door stands between two.
  */
 function ringWalls(
   into: number[],
   rings: readonly Ring[],
-  bottom: number,
-  top: number,
-  from: number,
+  heights: readonly [bottom: number, top: number, from: number],
   inside = false,
+  windows?: Windows,
 ): void {
+  const [bottom, top, from] = heights;
   rings.forEach((ring, index) => {
     const n = ring.length / 2;
     const counter = signedArea(ring) > 0;
@@ -665,38 +898,35 @@ function ringWalls(
       const u1 = (round + length) / BAY_METRES;
       const v0 = (bottom - from) / STOREY_METRES;
       const v1 = (top - from) / STOREY_METRES;
-      const corners: Vec[] = [
+      const corners: Four<Vec> = [
         [ax, bottom, az],
         [bx, bottom, bz],
         [bx, top, bz],
         [ax, top, az],
       ];
-      const uv: [number, number][] = [
+      const uv: Four<Pair> = [
         [u0, v0],
         [u1, v0],
         [u1, v1],
         [u0, v1],
       ];
-      quad(
-        into,
-        corners[0] as Vec,
-        corners[1] as Vec,
-        corners[2] as Vec,
-        corners[3] as Vec,
-        normal,
-        uv,
-      );
+      const bays = windows === undefined ? 0 : baysOf(length);
+      const face: Face =
+        windows === undefined || bays === 0
+          ? PLAIN
+          : {
+              top: windows.top,
+              skip: index === 0 && i === windows.doorEdge && bays % 2 === 1 ? (bays - 1) / 2 : -1,
+            };
+      quad(into, corners, normal, uv, face, [
+        [0, v0],
+        [bays, v0],
+        [bays, v1],
+        [0, v1],
+      ]);
       if (inside) {
         const back: Vec = [-normal[0], 0, -normal[2]];
-        quad(
-          into,
-          corners[0] as Vec,
-          corners[1] as Vec,
-          corners[2] as Vec,
-          corners[3] as Vec,
-          back,
-          uv,
-        );
+        quad(into, corners, back, uv);
       }
       round += length;
     }
@@ -714,7 +944,7 @@ function flatRoof(into: number[], rings: readonly Ring[], height: number): void 
     height,
     flat[index * 2 + 1] as number,
   ];
-  const uv = (index: number): [number, number] => [
+  const uv = (index: number): Pair => [
     (flat[index * 2] as number) / STOREY_METRES,
     (flat[index * 2 + 1] as number) / STOREY_METRES,
   ];
@@ -722,73 +952,179 @@ function flatRoof(into: number[], rings: readonly Ring[], height: number): void 
     const a = indices[i] as number;
     const b = indices[i + 1] as number;
     const c = indices[i + 2] as number;
-    triangle(into, at(a), at(b), at(c), up, uv(a), uv(b), uv(c));
+    triangle(into, [at(a), at(b), at(c)], up, [uv(a), uv(b), uv(c)]);
   }
 }
 
+/** Where a pitched roof's ridge is, for a chimney to stand astride it. */
+interface Ridge {
+  readonly top: number;
+  /** Half the ridge's length, along the long axis. */
+  readonly half: number;
+}
+
 /**
- * A gable over the minimum-area rectangle, its ridge along the long axis: two
- * slopes (`roof`) and two gable ends (`wall`), from the eaves at `eaves`.
+ * A pitched roof over the minimum-area rectangle, its ridge along the long
+ * axis, rising from the eaves at `eaves` at `pitchDegrees` — #1540's gable,
+ * and since #1581 a hip, both overhanging the walls
+ * ({@link EAVES_OVERHANG_METRES}, {@link VERGE_OVERHANG_METRES}) and drawn
+ * {@link ROOF_THICKNESS_METRES} thick: the slopes (`roof`), a gable's two
+ * ends (`wall`), and the soffit under every slope and the fascia round every
+ * edge (`trim`, painted).
  */
-function gableRoof(writing: Writing, rectangle: Rectangle, eaves: number, floor: number): void {
+function pitchedRoof(
+  writing: Writing,
+  rectangle: Rectangle,
+  heights: readonly [eaves: number, floor: number],
+  shape: 'gable' | 'hip',
+  pitchDegrees: number,
+): Ridge {
   const { cx, cz, ux, uz, halfLong, halfShort } = rectangle;
+  const [eaves, floor] = heights;
   const vx = -uz;
   const vz = ux;
-  const rise = halfShort * Math.tan((GABLE_PITCH_DEGREES * Math.PI) / 180);
-  const corner = (along: number, across: number, y: number): Vec => [
-    cx + ux * along + vx * across,
+  const pitch = (pitchDegrees * Math.PI) / 180;
+  const tan = Math.tan(pitch);
+  const sin = Math.sin(pitch);
+  const cos = Math.cos(pitch);
+  const ridgeTop = eaves + halfShort * tan;
+  const across = halfShort + EAVES_OVERHANG_METRES;
+  const along = halfLong + (shape === 'gable' ? VERGE_OVERHANG_METRES : EAVES_OVERHANG_METRES);
+  // Overhanging, the eaves line falls below the wall top by the overhang's drop.
+  const eaveY = eaves - EAVES_OVERHANG_METRES * tan;
+  const ridgeHalf = shape === 'gable' ? along : Math.max(0, halfLong - halfShort);
+  const thick = ROOF_THICKNESS_METRES;
+  const corner = (a: number, c: number, y: number): Vec => [
+    cx + ux * a + vx * c,
     y,
-    cz + uz * along + vz * across,
+    cz + uz * a + vz * c,
   ];
-  const ridgeTop = eaves + rise;
-  const slope = Math.hypot(halfShort, rise);
-  for (const side of [1, -1]) {
-    // Out and up: across the slope, `rise` over `halfShort`.
-    const normal: Vec = [(vx * side * rise) / slope, halfShort / slope, (vz * side * rise) / slope];
+  const below = (p: Vec): Vec => [p[0], p[1] - thick, p[2]];
+  const flip = (n: Vec): Vec => [-n[0], -n[1], -n[2]];
+  const slopeUv = (a: number, upSlope: number): Pair => [
+    a / STOREY_METRES,
+    upSlope / STOREY_METRES,
+  ];
+  const slopeLength = across / cos;
+  // A slope: its top in `roof`, its soffit under it in `trim`.
+  const slope = (corners: readonly Vec[], normal: Vec, uvs: readonly Pair[]): void => {
+    if (corners.length === 4) {
+      const c = corners as Four<Vec>;
+      const u = uvs as Four<Pair>;
+      quad(writing.roof, c, normal, u);
+      quad(
+        writing.trim,
+        [below(c[0]), below(c[1]), below(c[2]), below(c[3])],
+        flip(normal),
+        u,
+        PAINTED,
+      );
+    } else {
+      const c = corners as Three<Vec>;
+      const u = uvs as Three<Pair>;
+      triangle(writing.roof, c, normal, u);
+      triangle(writing.trim, [below(c[0]), below(c[1]), below(c[2])], flip(normal), u, PAINTED);
+    }
+  };
+  // An edge of the roof, `p` to `q` along its top: the fascia under it, facing `normal`.
+  const fascia = (p: Vec, q: Vec, normal: Vec): void => {
+    const width = Math.hypot(q[0] - p[0], q[2] - p[2]) / BAY_METRES;
     quad(
-      writing.roof,
-      corner(-halfLong, halfShort * side, eaves),
-      corner(halfLong, halfShort * side, eaves),
-      corner(halfLong, 0, ridgeTop),
-      corner(-halfLong, 0, ridgeTop),
+      writing.trim,
+      [below(p), below(q), q, p],
       normal,
       [
-        [-halfLong / STOREY_METRES, 0],
-        [halfLong / STOREY_METRES, 0],
-        [halfLong / STOREY_METRES, slope / STOREY_METRES],
-        [-halfLong / STOREY_METRES, slope / STOREY_METRES],
+        [0, 0],
+        [width, 0],
+        [width, thick / STOREY_METRES],
+        [0, thick / STOREY_METRES],
       ],
+      PAINTED,
     );
+  };
+  for (const side of [1, -1]) {
+    // Out and up, across the slope.
+    const normal: Vec = [vx * side * sin, cos, vz * side * sin];
+    const eaveA = corner(-along, across * side, eaveY);
+    const eaveB = corner(along, across * side, eaveY);
+    if (ridgeHalf > 1e-3) {
+      slope(
+        [eaveA, eaveB, corner(ridgeHalf, 0, ridgeTop), corner(-ridgeHalf, 0, ridgeTop)],
+        normal,
+        [
+          slopeUv(-along, 0),
+          slopeUv(along, 0),
+          slopeUv(ridgeHalf, slopeLength),
+          slopeUv(-ridgeHalf, slopeLength),
+        ],
+      );
+    } else {
+      // A hip over a square: a pyramid, its ridge a point.
+      slope([eaveA, eaveB, corner(0, 0, ridgeTop)], normal, [
+        slopeUv(-along, 0),
+        slopeUv(along, 0),
+        slopeUv(0, slopeLength),
+      ]);
+    }
+    fascia(eaveA, eaveB, [vx * side, 0, vz * side]);
   }
   for (const end of [1, -1]) {
-    const normal: Vec = [ux * end, 0, uz * end];
-    triangle(
-      writing.wall,
-      corner(halfLong * end, halfShort, eaves),
-      corner(halfLong * end, -halfShort, eaves),
-      corner(halfLong * end, 0, ridgeTop),
-      normal,
-      [halfShort / BAY_METRES, (eaves - floor) / STOREY_METRES],
-      [-halfShort / BAY_METRES, (eaves - floor) / STOREY_METRES],
-      [0, (ridgeTop - floor) / STOREY_METRES],
-    );
+    const outward: Vec = [ux * end, 0, uz * end];
+    if (shape === 'hip') {
+      // A hipped end: the same pitch, from the eaves at the end up to the ridge's end.
+      const normal: Vec = [ux * end * sin, cos, uz * end * sin];
+      const left = corner(along * end, across, eaveY);
+      const right = corner(along * end, -across, eaveY);
+      slope([left, right, corner(ridgeHalf * end, 0, ridgeTop)], normal, [
+        slopeUv(across, 0),
+        slopeUv(-across, 0),
+        slopeUv(0, slopeLength),
+      ]);
+      fascia(left, right, outward);
+    } else {
+      // A gable end: the wall's triangle up to the ridge, and a verge's fascia either side.
+      triangle(
+        writing.wall,
+        [
+          corner(halfLong * end, halfShort, eaves),
+          corner(halfLong * end, -halfShort, eaves),
+          corner(halfLong * end, 0, ridgeTop),
+        ],
+        outward,
+        [
+          [halfShort / BAY_METRES, (eaves - floor) / STOREY_METRES],
+          [-halfShort / BAY_METRES, (eaves - floor) / STOREY_METRES],
+          [0, (ridgeTop - floor) / STOREY_METRES],
+        ],
+      );
+      for (const side of [1, -1]) {
+        fascia(
+          corner(along * end, across * side, eaveY),
+          corner(along * end, 0, ridgeTop),
+          outward,
+        );
+      }
+    }
   }
+  return { top: ridgeTop, half: ridgeHalf };
+}
+
+/** The outer ring's edge a front door goes on, and how far its middle is from the road. */
+interface DoorEdge {
+  readonly edge: number;
+  readonly distance: number;
 }
 
 /**
- * A door, `buildings.ts` §`DOOR`'s size, on the middle of the outer ring's
- * edge whose middle is nearest the road, standing on `floor`; none where no
- * edge is wide enough.
+ * The outer ring's edge whose middle is nearest the road and is wide enough
+ * for a door in its surround ({@link DOOR_FACE}); none where no edge is.
  */
-function door(
-  into: number[],
+function doorEdgeOf(
   ring: Ring,
-  floor: number,
   road: DrawnRoadPoints,
   segments: readonly number[],
-): void {
+): DoorEdge | undefined {
   const n = ring.length / 2;
-  const outward = signedArea(ring) > 0 ? 1 : -1;
   const beside: BesideTheRoad = { along: 0, lateral: 0, distance: 0 };
   let best = -1;
   let nearest = Number.POSITIVE_INFINITY;
@@ -798,40 +1134,129 @@ function door(
     const az = ring[i * 2 + 1] as number;
     const bx = ring[j * 2] as number;
     const bz = ring[j * 2 + 1] as number;
-    if (Math.hypot(bx - ax, bz - az) < DOOR.width + 0.4) continue;
+    if (Math.hypot(bx - ax, bz - az) < DOOR_FACE.width + 0.4) continue;
     if (!nearestOnRoadSegments(road, segments, (ax + bx) / 2, (az + bz) / 2, beside)) continue;
     if (beside.distance < nearest) {
       nearest = beside.distance;
       best = i;
     }
   }
-  if (best < 0) return;
-  const j = (best + 1) % n;
-  const ax = ring[best * 2] as number;
-  const az = ring[best * 2 + 1] as number;
+  return best < 0 ? undefined : { edge: best, distance: nearest };
+}
+
+/** The middle of a ring's edge, its direction along, and its outward normal. */
+interface EdgeFrame {
+  readonly mx: number;
+  readonly mz: number;
+  readonly ex: number;
+  readonly ez: number;
+  readonly nx: number;
+  readonly nz: number;
+}
+
+function edgeFrameOf(ring: Ring, edge: number): EdgeFrame {
+  const n = ring.length / 2;
+  const j = (edge + 1) % n;
+  const ax = ring[edge * 2] as number;
+  const az = ring[edge * 2 + 1] as number;
   const bx = ring[j * 2] as number;
   const bz = ring[j * 2 + 1] as number;
   const length = Math.hypot(bx - ax, bz - az);
+  const outward = signedArea(ring) > 0 ? 1 : -1;
   const ex = (bx - ax) / length;
   const ez = (bz - az) / length;
-  const nx = ez * outward;
-  const nz = -ex * outward;
-  const mx = (ax + bx) / 2 + nx * DOOR_PROUD_METRES;
-  const mz = (az + bz) / 2 + nz * DOOR_PROUD_METRES;
-  const half = DOOR.width / 2;
+  return { mx: (ax + bx) / 2, mz: (az + bz) / 2, ex, ez, nx: ez * outward, nz: -ex * outward };
+}
+
+/**
+ * The front door — `buildings.ts` §`DOOR`'s leaf in a painted surround
+ * ({@link DOOR_FACE}, #1581) — on the middle of its edge, standing on `floor`,
+ * a little proud of the wall. The shader draws the leaf and the surround.
+ */
+function door(into: number[], at: EdgeFrame, floor: number): void {
+  const { ex, ez, nx, nz } = at;
+  const mx = at.mx + nx * DOOR_PROUD_METRES;
+  const mz = at.mz + nz * DOOR_PROUD_METRES;
+  const half = DOOR_FACE.width / 2;
+  const unit: Four<Pair> = [
+    [0, 0],
+    [1, 0],
+    [1, 1],
+    [0, 1],
+  ];
   quad(
     into,
-    [mx - ex * half, floor, mz - ez * half],
-    [mx + ex * half, floor, mz + ez * half],
-    [mx + ex * half, floor + DOOR.height, mz + ez * half],
-    [mx - ex * half, floor + DOOR.height, mz - ez * half],
-    [nx, 0, nz],
     [
-      [0, 0],
-      [1, 0],
-      [1, 1],
-      [0, 1],
+      [mx - ex * half, floor, mz - ez * half],
+      [mx + ex * half, floor, mz + ez * half],
+      [mx + ex * half, floor + DOOR_FACE.height, mz + ez * half],
+      [mx - ex * half, floor + DOOR_FACE.height, mz - ez * half],
     ],
+    [nx, 0, nz],
+    unit,
+    { top: FACADE_DOOR, skip: -1 },
+    unit,
+  );
+}
+
+/** How far a canopy's underside is above the top of the door's surround: **0.1 m**. */
+const PORCH_ABOVE_DOOR_METRES = 0.1;
+
+/**
+ * A canopy over the front door, {@link PORCH}'s size, and with `posts` the two
+ * posts it stands on — #1581, painted (`trim`).
+ */
+function porch(into: number[], at: EdgeFrame, floor: number, posts: boolean): void {
+  const bottom = floor + DOOR_FACE.height + PORCH_ABOVE_DOOR_METRES;
+  const top = bottom + PORCH.thickness;
+  const axis: Pair = [at.ex, at.ez];
+  const out = PORCH.depth / 2;
+  box(
+    into,
+    [at.mx + at.nx * out, at.mz + at.nz * out],
+    axis,
+    [PORCH.width / 2, out],
+    [bottom, top, floor],
+    PAINTED,
+    { top: true, bottom: true },
+  );
+  if (!posts) return;
+  const halfPost = PORCH.post / 2;
+  const outward = PORCH.depth - halfPost;
+  for (const end of [1, -1]) {
+    const along = end * (PORCH.width / 2 - halfPost);
+    box(
+      into,
+      [at.mx + at.ex * along + at.nx * outward, at.mz + at.ez * along + at.nz * outward],
+      axis,
+      [halfPost, halfPost],
+      [floor, bottom, floor],
+      PAINTED,
+      { top: false, bottom: false },
+    );
+  }
+}
+
+/** How far along the ridge from its middle a chimney stands, as a share of its half: **0.7**. */
+const CHIMNEY_ALONG_RIDGE = 0.7;
+
+/** A chimney astride the ridge, toward its `end` — #1581, {@link CHIMNEY}'s size, wearing the walls. */
+function chimney(
+  into: number[],
+  rectangle: Rectangle,
+  ridge: Ridge,
+  heights: readonly [eaves: number, floor: number],
+  end: number,
+): void {
+  const along = end * CHIMNEY_ALONG_RIDGE * Math.min(ridge.half, rectangle.halfLong);
+  box(
+    into,
+    [rectangle.cx + rectangle.ux * along, rectangle.cz + rectangle.uz * along],
+    [rectangle.ux, rectangle.uz],
+    [CHIMNEY.along / 2, CHIMNEY.across / 2],
+    [heights[0], ridge.top + CHIMNEY.above, heights[1]],
+    PLAIN,
+    { top: true, bottom: false },
   );
 }
 
@@ -884,7 +1309,148 @@ export function footprintPlans(
       plans.push(planned);
     }
   }
-  return { plans, verdicts: counts };
+  return { plans: paintTown(plans), verdicts: counts };
+}
+
+/** The entry a seeded draw in `[0, 1)` comes to, of `count`. */
+function seededEntry(share: number, count: number): number {
+  return Math.min(count - 1, Math.floor(share * count));
+}
+
+/** Whether two plans are painted alike: the same surfaces, in the same four paints. */
+export function paintedAlike(a: FootprintPlan, b: FootprintPlan): boolean {
+  return (
+    a.surfaces.wall === b.surfaces.wall &&
+    a.surfaces.roof === b.surfaces.roof &&
+    a.paint.wall === b.paint.wall &&
+    a.paint.roof === b.paint.roof &&
+    a.paint.trim === b.paint.trim &&
+    a.paint.door === b.paint.door
+  );
+}
+
+/**
+ * The entry of `count`, from `start` round, whose nearest wearer is farthest
+ * away (`nearest`, infinite for one no neighbour wears): the first free one,
+ * and where none is free, the one worn farthest off — so a list that runs out
+ * repeats across the street before it repeats next door.
+ */
+function farthestEntry(start: number, count: number, nearest: (entry: number) => number): number {
+  let best = start;
+  let farthest = -1;
+  for (let step = 0; step < count; step += 1) {
+    const entry = (start + step) % count;
+    const apart = nearest(entry);
+    if (apart === Number.POSITIVE_INFINITY) return entry;
+    if (apart > farthest) {
+      farthest = apart;
+      best = entry;
+    }
+  }
+  return best;
+}
+
+/** A plan already painted within {@link PAINT_NEIGHBOUR_METRES}, and how far off. */
+interface Neighbour {
+  readonly plan: FootprintPlan;
+  readonly apart: number;
+}
+
+/** How near the nearest of `near` that `wears` is: infinite where none does. */
+function nearestWearer(
+  near: readonly Neighbour[],
+  wears: (plan: FootprintPlan) => boolean,
+): number {
+  let least = Number.POSITIVE_INFINITY;
+  for (const { plan, apart } of near) if (apart < least && wears(plan)) least = apart;
+  return least;
+}
+
+/**
+ * The town's plans, painted so that no two neighbours match — #1581.
+ *
+ * In the corridor's order, each plan keeps its seeded paint where no plan
+ * already painted within {@link PAINT_NEIGHBOUR_METRES} of it wears it, and
+ * otherwise takes the next entry along that none does — or, where every one
+ * is worn, the one worn farthest off ({@link farthestEntry}):
+ *
+ * 1. its **wall** paint, against the neighbours of the same wall surface;
+ * 2. its **roof** paint, against those of the same roof surface;
+ * 3. its **trim** and its **door**, against every neighbour.
+ *
+ * A list can run out — a street of more brick houses within 30 m than brick
+ * has paints — and where one does that entry repeats; but the four together
+ * do not: a plan still painted like a neighbour walks its trims and doors
+ * until it is not, and there are 42 of those. So **no two plans within 30 m
+ * are painted alike** ({@link paintedAlike}) while fewer than 42 neighbours
+ * share both its surfaces, which `footprint-buildings.test.ts` holds over the
+ * dense town. The order is the corridor's, so the same corridor paints the
+ * same town.
+ */
+function paintTown(plans: readonly FootprintPlan[]): FootprintPlan[] {
+  const reach = PAINT_NEIGHBOUR_METRES;
+  const cells = new Map<number, number[]>();
+  const painted: FootprintPlan[] = [];
+  const near: Neighbour[] = [];
+  const key = (ix: number, iz: number): number => (ix + 0x8000) * 0x1_0000 + (iz + 0x8000);
+  const alike = (each: FootprintPlan): boolean =>
+    near.some((other) => paintedAlike(other.plan, each));
+  for (const plan of plans) {
+    const ix = Math.floor(plan.centroid.x / reach);
+    const iz = Math.floor(plan.centroid.z / reach);
+    near.length = 0;
+    for (let dx = -1; dx <= 1; dx += 1) {
+      for (let dz = -1; dz <= 1; dz += 1) {
+        for (const index of cells.get(key(ix + dx, iz + dz)) ?? []) {
+          const other = painted[index] as FootprintPlan;
+          const apart = Math.hypot(
+            other.centroid.x - plan.centroid.x,
+            other.centroid.z - plan.centroid.z,
+          );
+          if (apart <= reach) near.push({ plan: other, apart });
+        }
+      }
+    }
+    const { wall: wallSurface, roof: roofSurface } = plan.surfaces;
+    const paint: FootprintPaint = {
+      wall: farthestEntry(plan.paint.wall, paintsOf(wallSurface)?.length ?? 1, (entry) =>
+        nearestWearer(
+          near,
+          (other) => other.surfaces.wall === wallSurface && other.paint.wall === entry,
+        ),
+      ),
+      roof: farthestEntry(plan.paint.roof, paintsOf(roofSurface)?.length ?? 1, (entry) =>
+        nearestWearer(
+          near,
+          (other) => other.surfaces.roof === roofSurface && other.paint.roof === entry,
+        ),
+      ),
+      trim: farthestEntry(plan.paint.trim, TRIM_PAINTS.length, (entry) =>
+        nearestWearer(near, (other) => other.paint.trim === entry),
+      ),
+      door: farthestEntry(plan.paint.door, DOOR_PAINTS.length, (entry) =>
+        nearestWearer(near, (other) => other.paint.door === entry),
+      ),
+    };
+    let candidate: FootprintPlan = { ...plan, paint };
+    const combinations = TRIM_PAINTS.length * DOOR_PAINTS.length;
+    for (let step = 1; alike(candidate) && step < combinations; step += 1) {
+      candidate = {
+        ...plan,
+        paint: {
+          ...paint,
+          trim: (paint.trim + Math.floor(step / DOOR_PAINTS.length)) % TRIM_PAINTS.length,
+          door: (paint.door + step) % DOOR_PAINTS.length,
+        },
+      };
+    }
+    const cell = key(ix, iz);
+    const list = cells.get(cell);
+    if (list === undefined) cells.set(cell, [painted.length]);
+    else list.push(painted.length);
+    painted.push(candidate);
+  }
+  return painted;
 }
 
 /** One corridor's town, kept with the mask and the profile it was built against. */
@@ -1037,13 +1603,39 @@ function planFootprint(
   const use = footprintUse(landClass, kindAt(corridor, centroid.x, centroid.z));
   const rectangle = minimumAreaRectangle(drawn);
   const rectangularity = rectangle.area > 0 ? Math.abs(signedArea(drawn)) / rectangle.area : 0;
-  const roof: 'gable' | 'flat' =
+  const share = (stream: number): number => footprintShare(seed, centroid.x, centroid.z, stream);
+  const pitched =
     area <= FOOTPRINT_GABLE_MAX_AREA &&
     rectangularity >= FOOTPRINT_GABLE_MIN_RECTANGULARITY &&
     wallHeight <= FOOTPRINT_GABLE_MAX_EAVES_METRES &&
-    (use === 'residential' || use === 'farmland')
-      ? 'gable'
-      : 'flat';
+    (use === 'residential' || use === 'farmland');
+  // #1581: a pitched roof is a gable or, seeded, a hip; a barn is always a gable.
+  const roof: FootprintRoof = !pitched
+    ? 'flat'
+    : use === 'residential' && share(STREAM_HIP) < HIP_SHARE
+      ? 'hip'
+      : 'gable';
+  const pitchDegrees =
+    roof === 'flat'
+      ? 0
+      : (ROOF_PITCHES_DEGREES[
+          Math.floor(share(STREAM_PITCH) * ROOF_PITCHES_DEGREES.length)
+        ] as number);
+  const front = part ? undefined : doorEdgeOf(drawn, road, nearSegments);
+  const frontFrame = front === undefined ? undefined : edgeFrameOf(drawn, front.edge);
+  const windows: Windows = {
+    top: (eaves - floor) / STOREY_METRES,
+    doorEdge: front?.edge ?? -1,
+  };
+  const withChimney =
+    roof !== 'flat' && use === 'residential' && share(STREAM_CHIMNEY) < CHIMNEY_SHARE;
+  // A canopy only where it stands clear of the road's clearance, as the walls do.
+  const withPorch =
+    front !== undefined &&
+    use === 'residential' &&
+    front.distance - PORCH.depth >= ROAD_CLEARANCE_METRES &&
+    share(STREAM_PORCH) < PORCH_SHARE;
+  const withPosts = share(STREAM_POSTS) < PORCH_POSTS_SHARE;
 
   const holes = building.rings
     .slice(1)
@@ -1051,16 +1643,31 @@ function planFootprint(
     .map((hole) => simplifyRing(hole, FOOTPRINT_SIMPLIFY_METRES, maxVertices));
   const build = (withHoles: boolean): Writing => {
     const rings = withHoles ? [drawn, ...holes] : [drawn];
-    const writing: Writing = { wall: [], plinth: [], roof: [], parapet: [], door: [] };
-    if (!part) ringWalls(writing.plinth, rings, base, floor, floor);
-    ringWalls(writing.wall, rings, floor, eaves, floor);
-    if (roof === 'gable') {
-      gableRoof(writing, rectangle, eaves, floor);
-    } else {
+    const writing: Writing = {
+      wall: [],
+      plinth: [],
+      roof: [],
+      parapet: [],
+      door: [],
+      chimney: [],
+      trim: [],
+    };
+    if (!part) ringWalls(writing.plinth, rings, [base, floor, floor]);
+    ringWalls(writing.wall, rings, [floor, eaves, floor], false, windows);
+    if (roof === 'flat') {
       flatRoof(writing.roof, rings, eaves);
-      ringWalls(writing.parapet, rings, eaves, eaves + PARAPET_METRES, floor, true);
+      ringWalls(writing.parapet, rings, [eaves, eaves + PARAPET_METRES, floor], true);
+    } else {
+      const ridge = pitchedRoof(writing, rectangle, [eaves, floor], roof, pitchDegrees);
+      if (withChimney) {
+        const end = share(STREAM_CHIMNEY) < CHIMNEY_SHARE / 2 ? 1 : -1;
+        chimney(writing.chimney, rectangle, ridge, [eaves, floor], end);
+      }
     }
-    if (!part) door(writing.door, drawn, floor, road, nearSegments);
+    if (frontFrame !== undefined) {
+      door(writing.door, frontFrame, floor);
+      if (withPorch) porch(writing.trim, frontFrame, floor, withPosts);
+    }
     return writing;
   };
   const fits = (writing: Writing): boolean =>
@@ -1076,7 +1683,11 @@ function planFootprint(
     roof: Float32Array.from(writing.roof),
     parapet: Float32Array.from(writing.parapet),
     door: Float32Array.from(writing.door),
+    chimney: Float32Array.from(writing.chimney),
+    trim: Float32Array.from(writing.trim),
   };
+  const wallSurface = wallSurfaceOf(use, storeys, roof, share(STREAM_WALL));
+  const roofSurface = roofSurfaceOf(roof, share(STREAM_ROOF));
   const triangleCount = FOOTPRINT_ROLES.reduce((sum, role) => sum + trianglesOf(writing[role]), 0);
   return {
     centroid,
@@ -1084,14 +1695,14 @@ function planFootprint(
     base,
     storeys,
     roof,
-    surfaces: {
-      wall: wallSurfaceOf(
-        use,
-        storeys,
-        roof,
-        footprintShare(seed, centroid.x, centroid.z, STREAM_WALL),
-      ),
-      roof: roofSurfaceOf(roof, footprintShare(seed, centroid.x, centroid.z, STREAM_ROOF)),
+    pitchDegrees,
+    surfaces: { wall: wallSurface, roof: roofSurface },
+    // Where the paint starts; `paintTown` moves it off a neighbour's.
+    paint: {
+      wall: seededEntry(share(STREAM_PAINT_WALL), paintsOf(wallSurface)?.length ?? 1),
+      roof: seededEntry(share(STREAM_PAINT_ROOF), paintsOf(roofSurface)?.length ?? 1),
+      trim: seededEntry(share(STREAM_PAINT_TRIM), TRIM_PAINTS.length),
+      door: seededEntry(share(STREAM_PAINT_DOOR), DOOR_PAINTS.length),
     },
     tint: packedInstanceTint(centroid.x, centroid.z, MASONRY_TINT),
     triangles,

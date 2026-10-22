@@ -14,9 +14,12 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { metres } from '@onyourleft/domain';
 
+import { DOOR_PAINTS, ROOF_PAINTS, TRIM_PAINTS, WALL_PAINTS } from './building-paint';
 import { FOUNDATION_METRES } from './buildings';
+import { WINDOW_IN_BAY } from './facade';
 import {
   BAY_METRES,
+  FACADE_FLOATS,
   FOOTPRINT_SURFACES,
   FOOTPRINT_VERTEX_FLOATS,
   STOREY_METRES,
@@ -59,6 +62,7 @@ import {
   MappedBuildingBelt,
   readsInstanceTint,
   readsTextureLodBias,
+  drawsFacade,
   readsVertexTint,
   refillMappedBuildings,
   setMappedBuildingsMerged,
@@ -137,6 +141,8 @@ describe('the mapped buildings’ materials — #1549', () => {
       expect(breathesTheAir(material as never), surface).toBe(true);
       expect(readsTextureLodBias(material as never), surface).toBe(true);
       expect(readsVertexTint(material as never), surface).toBe(true);
+      // #1581: and draws the windows and the door from its vertices.
+      expect(drawsFacade(material as never), surface).toBe(true);
       // There is no instance to read a tint from.
       expect(readsInstanceTint(material as never), surface).toBe(false);
     }
@@ -151,13 +157,30 @@ describe('the mapped buildings’ materials — #1549', () => {
       vertexShader:
         '#include <common>\n#include <begin_vertex>\n#include <color_vertex>\n#include <fog_pars_vertex>\n#include <fog_vertex>',
       fragmentShader:
-        '#include <common>\n#include <clipping_planes_fragment>\n#include <map_fragment>\n#include <color_fragment>\n#include <fog_pars_fragment>\n#include <fog_fragment>',
+        '#include <common>\n#include <clipping_planes_fragment>\n#include <map_fragment>\n#include <color_fragment>\n#include <roughnessmap_fragment>\n#include <metalnessmap_fragment>\n#include <normal_fragment_begin>\n#include <normal_fragment_maps>\n#include <fog_pars_fragment>\n#include <fog_fragment>',
     };
     material?.onBeforeCompile(shader as never, undefined as never);
     expect(shader.vertexShader).toContain('attribute float oylTint;');
     expect(shader.vertexShader).toContain('vOylTint = oylTintOf(oylTint);');
     expect(shader.fragmentShader).toContain('oylTinted(diffuseColor.rgb, vOylTint)');
     expect(belt.mesh.geometry.getAttribute('oylTint').itemSize).toBe(1);
+    // #1581: the facade, from the two attributes the belt fills, read after
+    // the tint's varying is declared, and carried on to the finish.
+    expect(shader.vertexShader).toContain('attribute vec4 oylFacade;');
+    expect(shader.vertexShader).toContain('vOylFacade = oylFacade;');
+    expect(shader.vertexShader).toContain('vOylTrim = oylTrim;');
+    expect(shader.fragmentShader).toContain('if (vOylFacade.z > 0.0)');
+    expect(shader.fragmentShader).toContain(`const float oylWinL = ${String(WINDOW_IN_BAY.left)};`);
+    expect(shader.fragmentShader).toContain('roughnessFactor = mix(mix(roughnessFactor');
+    expect(shader.fragmentShader).toContain(
+      'metalnessFactor = mix(metalnessFactor, 0.35, oylGlass);',
+    );
+    expect(shader.fragmentShader).toContain('normal = normalize(mix(normal, nonPerturbedNormal');
+    expect(shader.fragmentShader.indexOf('varying vec3 vOylTint;')).toBeLessThan(
+      shader.fragmentShader.indexOf('float oylLit'),
+    );
+    expect(belt.mesh.geometry.getAttribute('oylFacade').itemSize).toBe(FACADE_FLOATS);
+    expect(belt.mesh.geometry.getAttribute('oylTrim').itemSize).toBe(3);
   });
 });
 
@@ -262,15 +285,27 @@ describe('what the buffers hold — #1549', () => {
   });
 
   it('shades each vertex by its role and, on a building with a plinth, by its height above the foundation — #1549', () => {
-    // The shades are written out, not read from the renderer: a plinth and a
-    // door are darker than the wall they wear the photograph of.
+    // The shades are written out, not read from the renderer: a plinth is
+    // darker than the wall it wears the photograph of, and a chimney a
+    // little; since #1581 the door and the trim are painted, not shaded.
     const shades: Record<FootprintRole, number> = {
       wall: 1,
       plinth: 0.62,
       roof: 1,
       parapet: 1,
-      door: 0.62,
+      door: 1,
+      chimney: 0.9,
+      trim: 1,
     };
+    // And the paint, written out too: the wall surface's list on everything
+    // but the roof, the door and the trim, which wear their own.
+    const paintOf = (plan: FootprintPlan, role: FootprintRole): readonly number[] => {
+      if (role === 'roof') return ROOF_PAINTS[plan.surfaces.roof]?.[plan.paint.roof] ?? [];
+      if (role === 'door') return DOOR_PAINTS[plan.paint.door] ?? [];
+      if (role === 'trim') return TRIM_PAINTS[plan.paint.trim] ?? [];
+      return WALL_PAINTS[plan.surfaces.wall]?.[plan.paint.wall] ?? [];
+    };
+    let painted = 0;
     const rider = viewAt(1_500);
     const belt = aBelt();
     const stats = belt.refill(rider.x, rider.z, MAPPED_BUILDING_TRIANGLES);
@@ -296,12 +331,14 @@ describe('what the buffers hold — #1549', () => {
             Math.max(0, (y - (plan.base + FOUNDATION_METRES)) / GROUNDING_METRES),
           );
           const ground = standing ? GROUNDED_SHADE + (1 - GROUNDED_SHADE) * rise : 1;
+          const paint = paintOf(plan, role);
           for (let channel = 0; channel < 3; channel += 1) {
             expect(colour.array[(from + vertex) * 3 + channel]).toBeCloseTo(
-              shades[role] * ground,
+              (paint[channel] as number) * shades[role] * ground,
               5,
             );
           }
+          if (paint.some((each) => each !== 1)) painted += 1;
           if (standing && rise === 0) grounded += 1;
         }
         if (role === 'door') doors += vertices;
@@ -312,6 +349,8 @@ describe('what the buffers hold — #1549', () => {
     // Something was checked at the foot of a grounded wall, and at a door.
     expect(grounded).toBeGreaterThan(0);
     expect(doors).toBeGreaterThan(0);
+    // And the paint is really there: most vertices are not the photograph as it was.
+    expect(painted).toBeGreaterThan(0);
   });
 
   it('uploads only the range a refill wrote, and one that wrote nothing uploads nothing — #1549', () => {
@@ -319,7 +358,7 @@ describe('what the buffers hold — #1549', () => {
     const rider = viewAt(1_500);
     const stats = belt.refill(rider.x, rider.z, MAPPED_BUILDING_TRIANGLES);
     const geometry = belt.mesh.geometry;
-    for (const name of ['position', 'normal', 'uv', 'color', 'oylTint']) {
+    for (const name of ['position', 'normal', 'uv', 'color', 'oylTint', 'oylFacade', 'oylTrim']) {
       const attribute = geometry.getAttribute(name) as UploadedAttribute;
       expect(attribute.updateRanges).toEqual([
         { start: 0, count: stats.triangles * 3 * attribute.itemSize },
@@ -327,9 +366,39 @@ describe('what the buffers hold — #1549', () => {
     }
     const empty = belt.refill(rider.x + 1e6, rider.z + 1e6, MAPPED_BUILDING_TRIANGLES);
     expect(empty.buildings).toBe(0);
-    for (const name of ['position', 'normal', 'uv', 'color', 'oylTint']) {
+    for (const name of ['position', 'normal', 'uv', 'color', 'oylTint', 'oylFacade', 'oylTrim']) {
       expect((geometry.getAttribute(name) as UploadedAttribute).updateRanges).toEqual([]);
     }
+  });
+
+  it('carries each vertex’s facade and its building’s trim paint, as the plan has them — #1581', () => {
+    const rider = viewAt(1_500);
+    const belt = aBelt();
+    const stats = belt.refill(rider.x, rider.z, MAPPED_BUILDING_TRIANGLES);
+    const facade = belt.mesh.geometry.getAttribute('oylFacade');
+    const trim = belt.mesh.geometry.getAttribute('oylTrim');
+    let windowed = 0;
+    for (let place = 0; place < stats.buildings; place += 1) {
+      const drawn = belt.drawnAt(place);
+      if (drawn === undefined) throw new Error('a drawn building is missing');
+      const plan = planned[drawn.plan] as FootprintPlan;
+      const paint = TRIM_PAINTS[plan.paint.trim] ?? [];
+      // The walls are first in their surface's run: read them back from there.
+      const walls = plan.triangles.wall;
+      for (let vertex = 0; vertex < walls.length / FOOTPRINT_VERTEX_FLOATS; vertex += 1) {
+        const at = drawn.wallAt + vertex;
+        const from = vertex * FOOTPRINT_VERTEX_FLOATS + 8;
+        expect(facade.getX(at)).toBe(walls[from]);
+        expect(facade.getY(at)).toBe(walls[from + 1]);
+        expect(facade.getZ(at)).toBe(walls[from + 2]);
+        expect(facade.getW(at)).toBe(walls[from + 3]);
+        if ((walls[from + 2] as number) > 0) windowed += 1;
+        expect([trim.getX(at), trim.getY(at), trim.getZ(at)]).toStrictEqual(
+          paint.map((channel) => Math.fround(channel)),
+        );
+      }
+    }
+    expect(windowed).toBeGreaterThan(0);
   });
 
   it('carries each building’s seeded tint on every vertex, and lays the photograph at its own size', () => {
