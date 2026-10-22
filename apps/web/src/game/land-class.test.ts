@@ -36,6 +36,7 @@ import {
 import { NO_PAVEMENT_DATA } from './footways';
 import {
   LAND_CLASS_MAX_BYTES,
+  LAND_CLASS_MAX_WORK,
   LAND_CLASS_OF_KIND,
   landClassMask,
   landClassOfKind,
@@ -545,9 +546,15 @@ describe('bounded — a work budget on the polygon pass', () => {
   it('builds a dense tile — 48 polygons of 8192 vertices — in a fraction of the unbudgeted time', () => {
     const features = Array.from({ length: 48 }, () => dense(TILE, 8_192));
     const corridor = corridorOf([TILE], features);
-    const started = performance.now();
-    landClassMask(corridor);
-    const elapsed = performance.now() - started;
-    expect(elapsed).toBeLessThan(250);
+    // Relative, not a wall-clock limit: coverage instrumentation slows both
+    // builds alike, and a fixed millisecond figure failed under it on CI.
+    const time = (maxWork: number): number => {
+      const started = performance.now();
+      landClassMask(corridor, LAND_CLASS_MAX_BYTES, maxWork);
+      return performance.now() - started;
+    };
+    const unbudgeted = time(Number.POSITIVE_INFINITY);
+    const budgeted = Math.min(time(LAND_CLASS_MAX_WORK), time(LAND_CLASS_MAX_WORK));
+    expect(budgeted).toBeLessThan(unbudgeted / 4);
   });
 });
