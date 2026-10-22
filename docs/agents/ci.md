@@ -1254,7 +1254,11 @@ arithmetic that fits all four hanging inside the gate's own 580 s (`playwright.c
 day later green loads on the slower runner reached 39 s, 45 s, 111 s and 105 s — 78 %, 69 %, 93 %
 and 88 % of their budgets — and a green gate took 547 s of its 580 (run 36405580515), so the budgets
 are **60 s, 70 s, 165 s and 160 s** and the gate's stop **840 s**, each about 1.5 times the slowest
-green figure. If every game load hangs, and `realistic.browser.spec.ts`' page with them:
+green figure. ⚠️ **`?realistic`'s is 275 s since [#1574](https://github.com/openzigs/onyourleft/issues/1574)**,
+1.5 times the 182 s it now takes whole on the EPYC 7763; the measurement and the nightly's new
+worst case (795 s of 840) are `game.browser.spec.ts` §`REALISTIC_LOAD_BUDGET_MS` and
+§`paysForTheRealisticLoad`.
+If every game load hangs, and `realistic.browser.spec.ts`' page with them:
 
 | | seconds |
 |---|---|
