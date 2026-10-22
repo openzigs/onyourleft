@@ -62,6 +62,7 @@ import {
   clearOfBuildings,
   clearOfSettlements,
   structuresAt,
+  type MappedTown,
   type SettlementFootprint,
 } from './settlements';
 import {
@@ -71,7 +72,6 @@ import {
   sideRoadsAt,
   type SideRoad,
 } from './cross-streets';
-import { mappedTown } from './footprint-buildings';
 import { NO_PAVEMENT_DATA, pavementSides } from './footways';
 import { BILLBOARD_FOOTPRINT } from './logo-board';
 import { streetsAt } from './streets';
@@ -161,6 +161,14 @@ export interface SceneInput {
    * `world-data/corridor-wiring.test.tsx` reads it back off the input.
    */
   readonly mappedBuildings?: MappedBuildings | undefined;
+  /**
+   * What #1550's procedural lots read of the corridor's footprints, built ONCE,
+   * at the press, by `GameView`, from the SAME plans {@link mappedBuildings} is
+   * indexed from — #1583. `sceneFrame` never plans: planning a dense corridor
+   * can take its whole 400 ms budget, which a render frame cannot spend.
+   * Absent is no mapped town, as on every ride with no corridor.
+   */
+  readonly mappedTown?: MappedTown | undefined;
   /**
    * Other real riders in a room, where to draw them — #783: the interest set's
    * riders (`net/interest.ts`), each at the distance `net/snapshots.ts`
@@ -415,11 +423,7 @@ function scenery(
     // #1550: the corridor's kept footprints and commercial land, built once a
     // corridor, which the procedural lots of a mapped town keep clear of.
     // `null` is the `-lots` control: no lots at all.
-    input.lotsOff === true
-      ? null
-      : input.worldCorridor === undefined
-        ? NO_MAPPED_TOWN
-        : mappedTown(input.worldCorridor, land, input.profile, input.origin),
+    input.lotsOff === true ? null : (input.mappedTown ?? NO_MAPPED_TOWN),
   );
   // #1565: no wall, hedge, fence, signpost or building on a side road, and no
   // tree, shrub or rock either.

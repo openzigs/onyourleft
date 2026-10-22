@@ -49,6 +49,20 @@ import type { SceneInput } from '../scene';
 import { CORRIDOR_HALF_WIDTH_METRES, type CorridorState, type WorldCorridor } from './corridor';
 
 const inputs: SceneInput[] = [];
+/** #1583: how many times `footprintPlans` had run when each scene frame began. */
+let planCalls = 0;
+const planCallsAtFrame: number[] = [];
+
+vi.mock('../footprint-buildings', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../footprint-buildings')>();
+  return {
+    ...actual,
+    footprintPlans: (...args: Parameters<typeof actual.footprintPlans>) => {
+      planCalls += 1;
+      return actual.footprintPlans(...args);
+    },
+  };
+});
 
 vi.mock('../scene', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../scene')>();
@@ -56,6 +70,7 @@ vi.mock('../scene', async (importOriginal) => {
     ...actual,
     sceneFrame: (input: SceneInput) => {
       inputs.push(input);
+      planCallsAtFrame.push(planCalls);
       return actual.sceneFrame(input);
     },
   };
@@ -71,6 +86,8 @@ let stores: ActivityStore[];
 
 beforeEach(async () => {
   inputs.length = 0;
+  planCalls = 0;
+  planCallsAtFrame.length = 0;
   pending = [];
   nowMs = 0;
   resetFixtureIds();
@@ -239,6 +256,14 @@ describe('the chosen route’s corridor reaches the scene — #1539', () => {
     const carried = frames.filter((each) => each.mappedBuildings !== undefined);
     expect(carried.length).toBeGreaterThan(0);
     for (const frame of carried) expect(frame.mappedBuildings?.buildings).toBe(town);
+    // #1583: the lots' town is built at the press too, from the same plans, and
+    // is one object on every frame. Planning ran exactly once, at the press:
+    // no scene frame — the first one included — plans.
+    const lots = new Set(ride.map((input) => input.mappedTown));
+    expect(lots.size).toBe(1);
+    expect([...lots][0]).toBeDefined();
+    expect(planCalls).toBe(1);
+    expect(new Set(planCallsAtFrame)).toStrictEqual(new Set([1]));
   });
 
   it('hands no corridor to the scene with no port method — today’s game', async () => {
@@ -262,6 +287,7 @@ describe('the chosen route’s corridor reaches the scene — #1539', () => {
       expect(input.landClass).toBeUndefined();
       // #1549: and no mapped buildings.
       expect(input.mappedBuildings).toBeUndefined();
+      expect(input.mappedTown).toBeUndefined();
     }
   });
 });
@@ -345,6 +371,7 @@ describe('nothing changes during a ride — ADR 0054 D-2.4', () => {
       expect(input.landClass).toBeUndefined();
       // #1549: and no mapped buildings.
       expect(input.mappedBuildings).toBeUndefined();
+      expect(input.mappedTown).toBeUndefined();
     }
   });
 });

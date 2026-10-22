@@ -167,8 +167,9 @@ import { sharedCueOutput } from './web-audio';
 import type { CorridorState, WorldCorridor } from './world-data/corridor';
 import { OSM_ATTRIBUTION } from '../map/basemap';
 import { landClassMask, type LandClassMask } from './land-class';
-import { footprintPlans } from './footprint-buildings';
+import { footprintPlans, mappedTown } from './footprint-buildings';
 import { mappedBuildingsOf, type MappedBuildings } from './mapped-buildings';
+import type { MappedTown } from './settlements';
 import {
   climbLeadIn,
   DEFAULT_ANNOUNCEMENTS,
@@ -1113,6 +1114,7 @@ export function GameView(props: GameViewProps): JSX.Element {
   const landClassRef = useRef<LandClassMask | undefined>(undefined);
   /** #1549: the buildings planned from {@link worldCorridorRef}'s footprints, once, at the press. */
   const mappedBuildingsRef = useRef<MappedBuildings | undefined>(undefined);
+  const mappedTownRef = useRef<MappedTown | undefined>(undefined);
 
   useEffect(() => {
     if (port === undefined) {
@@ -1515,19 +1517,23 @@ export function GameView(props: GameViewProps): JSX.Element {
         worldCorridorRef.current === undefined
           ? undefined
           : landClassMask(worldCorridorRef.current);
-      // #1540, #1549: and every mapped footprint planned, from the same
-      // corridor and mask, ONCE, here — #1540 states ≤ 400 ms for a dense town.
-      mappedBuildingsRef.current =
-        worldCorridorRef.current === undefined || landClassRef.current === undefined
-          ? undefined
-          : mappedBuildingsOf(
-              footprintPlans(
-                worldCorridorRef.current,
-                landClassRef.current,
-                route.profile,
-                corridorOrigin(route.profile),
-              ).plans,
-            );
+      // #1540, #1549, #1583: and every mapped footprint planned, from the same
+      // corridor and mask, ONCE, here — #1540 states <= 400 ms for a dense town.
+      // The belt's index and the lots' town are both built from these plans, so
+      // no scene frame plans.
+      if (worldCorridorRef.current === undefined || landClassRef.current === undefined) {
+        mappedBuildingsRef.current = undefined;
+        mappedTownRef.current = undefined;
+      } else {
+        const { plans } = footprintPlans(
+          worldCorridorRef.current,
+          landClassRef.current,
+          route.profile,
+          corridorOrigin(route.profile),
+        );
+        mappedBuildingsRef.current = mappedBuildingsOf(plans);
+        mappedTownRef.current = mappedTown(worldCorridorRef.current, plans);
+      }
       setState(simulation.state);
       setChosen(route);
       setPhase('riding');
@@ -2138,6 +2144,7 @@ export function GameView(props: GameViewProps): JSX.Element {
           ...(mappedBuildingsRef.current === undefined
             ? {}
             : { mappedBuildings: mappedBuildingsRef.current }),
+          ...(mappedTownRef.current === undefined ? {} : { mappedTown: mappedTownRef.current }),
         });
         if (prepared) {
           view.render(frame);
