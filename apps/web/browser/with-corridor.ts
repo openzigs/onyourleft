@@ -15,6 +15,7 @@
 
 import type { RouteProfile } from '@onyourleft/domain';
 
+import { NO_LAND_CLASS } from '../src/game/land-class';
 import { terrainCorridor } from '../src/game/landform';
 import type { SceneFrame } from '../src/game/port';
 import { scatterSeed } from '../src/game/scatter';
@@ -32,7 +33,10 @@ export function withCorridor(
   return {
     ...frame,
     corridor,
-    terrain: { ...frame.terrain, mesh: terrainCorridor(profile, origin, corridor, seed) },
+    terrain: {
+      ...frame.terrain,
+      mesh: terrainCorridor(profile, origin, corridor, seed, NO_LAND_CLASS),
+    },
     water: {
       ...frame.water,
       surface: waterSurface(profile, origin, corridor, ways),

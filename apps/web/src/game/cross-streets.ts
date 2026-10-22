@@ -663,7 +663,9 @@ function lineMetres(line: Float32Array): number {
  * The height a side road's vertex stands at: the ground under it and the
  * lift, never under the main road's height less the verge's drop spread over
  * {@link SIDE_ROAD_RAMP_METRES}, and sunk over the last
- * {@link SIDE_ROAD_FADE_METRES}. `out` is how far from the mouth.
+ * {@link SIDE_ROAD_FADE_METRES}. `out` is how far from the mouth. The ground
+ * is read with the ride's `land` mask, so under mapped built-up land the side
+ * road stands on #1547's levelled ground, as the mesh beneath it does.
  */
 function heightAt(
   profile: RouteProfile,
@@ -672,10 +674,11 @@ function heightAt(
   x: number,
   z: number,
   out: number,
+  land: LandClassMask,
 ): { readonly y: number; readonly ground: number } {
   const near = nearestOnDrawnRoad(profile, origin, x, z, SIDE_ROAD_METRES + 40);
   if (near === undefined) return { y: SIDE_ROAD_LIFT_METRES, ground: 0 };
-  const ground = terrainHeightAt(profile, origin, seed, near.along, near.lateral);
+  const ground = terrainHeightAt(profile, origin, seed, near.along, near.lateral, land);
   const road = elevationAt(profile, distanceOnRoute(profile, near.along)) - origin.elevation;
   const ramp = Math.min(
     1,
@@ -723,6 +726,7 @@ function armMesh(
   profile: RouteProfile,
   origin: CorridorOrigin,
   seed: number,
+  land: LandClassMask,
 ): void {
   const half = SIDE_ROAD_WIDTHS[arm.widthClass] / 2;
   const length = lineMetres(arm.line);
@@ -773,8 +777,8 @@ function armMesh(
     const lz = l?.z ?? station.z - az * half;
     const rx = r?.x ?? station.x + ax * half;
     const rz = r?.z ?? station.z + az * half;
-    const lh = heightAt(profile, origin, seed, lx, lz, out);
-    const rh = heightAt(profile, origin, seed, rx, rz, out);
+    const lh = heightAt(profile, origin, seed, lx, lz, out, land);
+    const rh = heightAt(profile, origin, seed, rx, rz, out, land);
     return {
       l: mesh.vertex(lx, lh.y, lz, TARMAC, -half),
       r: mesh.vertex(rx, rh.y, rz, TARMAC, half),
@@ -804,10 +808,10 @@ function armMesh(
       ] as const) {
         const p = mesh.positions;
         const footA =
-          heightAt(profile, origin, seed, p[ta * 3] as number, p[ta * 3 + 2] as number, a.out)
+          heightAt(profile, origin, seed, p[ta * 3] as number, p[ta * 3 + 2] as number, a.out, land)
             .ground - SKIRT_FOOT_METRES;
         const footB =
-          heightAt(profile, origin, seed, p[tb * 3] as number, p[tb * 3 + 2] as number, b.out)
+          heightAt(profile, origin, seed, p[tb * 3] as number, p[tb * 3 + 2] as number, b.out, land)
             .ground - SKIRT_FOOT_METRES;
         const fa = mesh.vertex(
           p[ta * 3] as number,
@@ -847,7 +851,8 @@ function armMesh(
       const ids = corners.map(([x, z], index) =>
         mesh.vertex(
           x,
-          heightAt(profile, origin, seed, x, z, regular + offset - mouth).y + PAINT_LIFT_METRES,
+          heightAt(profile, origin, seed, x, z, regular + offset - mouth, land).y +
+            PAINT_LIFT_METRES,
           z,
           PAINT,
           index < 2 ? from : to,
@@ -858,8 +863,12 @@ function armMesh(
   }
 }
 
-/** Every junction's side roads, built on first sight. */
-const built = new WeakMap<Junction, SideRoad>();
+/**
+ * Every junction's side roads, built on first sight — per land-class mask,
+ * since #1547 levels the ground a side road stands on under mapped built-up
+ * land, so the same junction stands differently with and without the mask.
+ */
+const built = new WeakMap<LandClassMask, WeakMap<Junction, SideRoad>>();
 
 /** A junction's side roads: its mesh and its clearance segments, built once. */
 function sideRoadOf(
@@ -867,20 +876,27 @@ function sideRoadOf(
   profile: RouteProfile,
   origin: CorridorOrigin,
   seed: number,
+  land: LandClassMask,
 ): SideRoad {
-  const known = built.get(junction);
+  let byJunction = built.get(land);
+  if (byJunction === undefined) {
+    byJunction = new WeakMap();
+    built.set(land, byJunction);
+  }
+  const known = byJunction.get(junction);
   if (known !== undefined) return known;
   const mesh = new MeshBuilder();
   const segments: number[] = [];
   const halfWidths: number[] = [];
-  for (const arm of junction.arms) armMesh(mesh, segments, halfWidths, arm, profile, origin, seed);
+  for (const arm of junction.arms)
+    armMesh(mesh, segments, halfWidths, arm, profile, origin, seed, land);
   const road: SideRoad = {
     junction,
     mesh: mesh.done(),
     segments: Float32Array.from(segments),
     halfWidths: Float32Array.from(halfWidths),
   };
-  built.set(junction, road);
+  byJunction.set(junction, road);
   return road;
 }
 
@@ -950,7 +966,7 @@ export function sideRoadsAt(
   for (const { junction } of found) {
     if (arms + junction.arms.length > SIDE_ROADS_PER_FRAME) break;
     arms += junction.arms.length;
-    roads.push(sideRoadOf(junction, profile, origin, seed));
+    roads.push(sideRoadOf(junction, profile, origin, seed, land));
   }
   // In route order, so a frame's list is stable while the same junctions are in view.
   roads.sort((a, b) => a.junction.along - b.junction.along);

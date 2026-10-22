@@ -12501,6 +12501,22 @@ export function groundBlobsOf(view: GameView): {
   };
 }
 
+/**
+ * The ground's vertex positions as the view last uploaded them — #1547, for
+ * the browser gate: read off the renderer's own position attribute, a copy,
+ * so a probe measures the triangles a GPU was handed rather than the
+ * `TerrainMesh` they were built from. Empty for a view that is not three.js.
+ *
+ * @test-facing read by `game-harness.ts` for #1547's probe; nothing in the
+ * render path needs to ask.
+ */
+export function terrainPositionsOf(view: GameView): Float32Array {
+  if (!(view instanceof ThreeGameView)) return new Float32Array(0);
+  const position = view.terrainMesh.geometry.getAttribute('position') as
+    BufferAttribute | undefined;
+  return position === undefined ? new Float32Array(0) : Float32Array.from(position.array);
+}
+
 /** How many numbers {@link writeTriangles} writes for a geometry: nine a triangle. */
 function triangleNumbers(geometry: BufferGeometry): number {
   const index = geometry.getIndex();
@@ -13732,6 +13748,11 @@ class ThreeGameView implements GameView {
   showGroundBlobs(on: boolean): void {
     this.#groundBlobsShown = on;
     this.#realistic?.grounding.setShown(on && this.#drawing === 'realistic');
+  }
+
+  /** @see terrainPositionsOf */
+  get terrainMesh(): Mesh {
+    return this.#terrain.mesh;
   }
 
   /** @see groundBlobsOf */

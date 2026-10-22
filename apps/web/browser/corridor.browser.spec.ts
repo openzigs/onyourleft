@@ -19,6 +19,7 @@ import { CORRIDOR_MAX_TILES } from '../src/game/world-data/corridor';
 import { MAP_TILES_STORAGE_KEY } from '../src/map/tiles-preference';
 import {
   CORRIDOR_ARCHIVE_FILE,
+  CORRIDOR_FIXTURE_VERDICTS,
   expectedCorridorCounts,
   FIXTURE_JUNCTIONS,
 } from './corridor-fixture';
@@ -105,6 +106,30 @@ test.describe('#1546 nothing on a mapped wood', () => {
         (item) => item.structure && item.kind !== 'signpost' && item.landClass === 'wood',
       ).length,
     ).toBeGreaterThan(0);
+  });
+});
+
+test.describe('#1540 the mapped buildings’ verdicts', () => {
+  test('plans the corridor’s footprints to the same verdicts as the unit test, exactly', async ({
+    page,
+  }) => {
+    const corridor = await readCorridor(page);
+    expect(corridor.errors).toStrictEqual([]);
+    expect(corridor.state).toBe('ready');
+    expect(corridor.verdicts).toStrictEqual(CORRIDOR_FIXTURE_VERDICTS);
+    console.log(
+      `#1540 footprint plans: ${String(corridor.buildings)} footprints planned in ${corridor.planMilliseconds.toFixed(1)} ms`,
+    );
+  });
+
+  test('plans the 2 000-footprint town in Chromium within its 400 ms', async ({ page }) => {
+    const corridor = await readCorridor(page);
+    expect(corridor.errors).toStrictEqual([]);
+    expect(corridor.townKept).toBe(2_000);
+    console.log(
+      `#1540 the dense town: 2000 footprints planned in ${corridor.townPlanMilliseconds.toFixed(1)} ms (fastest of three)`,
+    );
+    expect(corridor.townPlanMilliseconds).toBeLessThanOrEqual(400);
   });
 });
 

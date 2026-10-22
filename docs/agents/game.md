@@ -748,7 +748,12 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         harness that holds two frames takes
                         `frame-testing.ts` §`retainedFrame` first. Comparing
                         two frames' arrays without it compares one array
-                        with itself and passes
+                        with itself and passes. ⚠️ Since #1547 the relief is
+                        held to `RELIEF_SLOPE` × the distance to mapped
+                        built-up land (`land-class.ts` §`builtUpDistances`),
+                        so a mapped town is level with the road; the mask is
+                        a REQUIRED argument of `terrainCorridor` and
+                        `terrainHeightAt`, `NO_LAND_CLASS` passed explicitly
     src/game/waterways.ts
                         water and bridges (#459) — a stream at every valley
                         floor of the route's own elevation, a lake beside a
@@ -781,7 +786,17 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         land (`settlements.ts` §`siteOnMappedLand`, and its
                         street), no tree, shrub or rock on built-up land or
                         water, no field boundary off field ground. Absent is
-                        `NO_LAND_CLASS`, today's world, item for item
+                        `NO_LAND_CLASS`, today's world, item for item. Since
+                        #1547 it also carries each cell's distance to
+                        built-up land, which `landform.ts` levels by
+    src/game/footprint-buildings.ts
+                        each mapped footprint planned as a building (#1540):
+                        P-9's placement rules, in order and counted as
+                        `FootprintVerdicts`; storeys, a gable-or-flat roof and
+                        surfaces by `land-class.ts` §`kindAt`; ≤ 640 triangles
+                        by role, built ONCE at ride start. ⚠️ **`@unwired`
+                        until #1549 draws the plans**, and nothing in the ride
+                        reads them yet
     src/game/streets.ts a village's kerbed pavements (#1535) — along each side's
                         BUILT plots (`settlements.ts` §`siteAt`, §`villagePlots`,
                         the houses' own decision), on the road's edge, never on

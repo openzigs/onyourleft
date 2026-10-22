@@ -98,6 +98,7 @@ import {
   hillRoute,
   lakeValleyRoute,
   northRoute,
+  steadyClimb,
   valleyRoute,
 } from '../src/game/route-fixtures-testing';
 import { GRADIENT_TINT_FULL_SCALE_PERCENT } from '../src/game/terrain';
@@ -117,7 +118,13 @@ import {
   type FurnitureKind,
 } from '../src/game/streets';
 import { waterways } from '../src/game/waterways';
-import { HORIZON_RADIUS_METRES, HORIZON_SEGMENTS, VERGE_DROP_METRES } from '../src/game/landform';
+import { landClassMask, NO_LAND_CLASS } from '../src/game/land-class';
+import {
+  HORIZON_RADIUS_METRES,
+  HORIZON_SEGMENTS,
+  terrainCorridor,
+  VERGE_DROP_METRES,
+} from '../src/game/landform';
 import {
   directionalFogColour,
   ridgeLift,
@@ -163,6 +170,7 @@ import {
   waterSkyOf,
   filterWaterRipplesOf,
   groundBlobsOf,
+  terrainPositionsOf,
   nearFieldOf,
   nearFieldShapes,
   showGroundBlobsOf,
@@ -2910,6 +2918,102 @@ function mappedPavementProbe(
   };
 }
 
+/** What {@link levellingProbe} publishes — #1547. */
+interface LevellingMeasurement {
+  /**
+   * The drawn ground's height at the four corners of the block's centre
+   * footprint, each less the road's at the nearest centreline point, read off
+   * the renderer's own position attribute: with the land-class mask, and —
+   * the `-levelling` control — the same frame's ground built with none.
+   */
+  readonly levelled: readonly number[];
+  readonly unlevelled: readonly number[];
+}
+
+const NO_LEVELLING: LevellingMeasurement = { levelled: [], unlevelled: [] };
+
+/**
+ * #1547: a mapped residential block 40–200 m off a 6 % climb, from 1 000 m to
+ * 1 300 m along it, and the 40 m footprint at its centre — 1 150 m along,
+ * 120 m out — seen from 1 050 m. The frame is built with the block's
+ * land-class mask, as a ride's is (`SceneInput.landClass`), drawn, and the
+ * four corners read off the position attribute the view uploaded
+ * (`three-renderer.ts` §`terrainPositionsOf`) through `ground-blob.ts`
+ * §`groundUnder`, which finds the triangle under a point.
+ *
+ * ⚠️ The corridor is built here rather than read from `?corridor=archive`,
+ * as #1551's probe builds its own: #1539's archive fixture holds no block a
+ * known distance from a climb, and what is measured is the ground under a
+ * known block. The control is the issue's `&levers=-levelling`, taken in the
+ * same run: the same frame, its ground built with `NO_LAND_CLASS`.
+ */
+function levellingProbe(view: ReturnType<typeof threeGameRenderer.create>): LevellingMeasurement {
+  const profile = steadyClimb();
+  const origin = corridorOrigin(profile);
+  const at = (along: number, lateral: number): readonly [number, number] | undefined => {
+    const road = drawnRoadFrame(profile, origin, along);
+    return road === undefined
+      ? undefined
+      : [road.x + road.normalX * lateral, road.z + road.normalZ * lateral];
+  };
+  const corners = [at(1_000, 40), at(1_300, 40), at(1_300, 200), at(1_000, 200)];
+  const footprint = [at(1_130, 100), at(1_170, 100), at(1_130, 140), at(1_170, 140)];
+  if ([...corners, ...footprint].some((point) => point === undefined)) return NO_LEVELLING;
+  const corridor: WorldCorridor = {
+    routeId: 'harness-1547',
+    origin,
+    covered: () => true,
+    coveredBoxes: [{ minX: -2_000, maxX: 2_000, minZ: -2_000, maxZ: 5_000 }],
+    landUse: [
+      {
+        layer: 'landuse',
+        kind: 'residential',
+        rings: [Float32Array.from(corners.flatMap((point) => point ?? []))],
+      },
+    ],
+    buildings: [],
+    paths: [],
+    streets: [],
+  };
+  const land = landClassMask(corridor);
+  const start = atStartLine(profile);
+  const frame = sceneFrame({
+    profile,
+    origin,
+    state: { ...start, ride: { ...start.ride, distance: metres(1_050) } },
+    worldCorridor: corridor,
+    landClass: land,
+  });
+  const read = (drawn: SceneFrame): number[] => {
+    view.render(drawn);
+    const mesh = { ...drawn.terrain.mesh, vertices: terrainPositionsOf(view) };
+    return footprint.map((point) => {
+      const [x, z] = point ?? [0, 0];
+      const under = { y: Number.NaN, nx: 0, ny: 1, nz: 0 };
+      if (!groundUnder(mesh, drawn.corridor.centre, x, z, under)) return Number.NaN;
+      let nearest = Number.POSITIVE_INFINITY;
+      let road = Number.NaN;
+      for (const each of drawn.corridor.centre) {
+        const apart = Math.hypot(each.x - x, each.z - z);
+        if (apart < nearest) {
+          nearest = apart;
+          road = each.y;
+        }
+      }
+      return under.y - road;
+    });
+  };
+  const levelled = read(frame);
+  const unlevelled = read({
+    ...frame,
+    terrain: {
+      ...frame.terrain,
+      mesh: terrainCorridor(profile, origin, frame.corridor, scatterSeed(profile), NO_LAND_CLASS),
+    },
+  });
+  return { levelled, unlevelled };
+}
+
 /** Six kilometres of level, low farmland — somewhere a village stands. */
 function northRouteForHarness(): ReturnType<typeof routeProfile> {
   return northRoute(6_000, () => 40);
@@ -5105,6 +5209,8 @@ export interface RealisticMeasurement {
   readonly pavement: PavementMeasurement;
   /** #1551: the pavement on the side a sidewalk is mapped on. @see mappedPavementProbe */
   readonly mappedPavement: MappedPavementMeasurement;
+  /** #1547: the drawn ground under a mapped block's centre footprint. @see levellingProbe */
+  readonly levelling: LevellingMeasurement;
   /** #621: two trees and two houses of one shape, tinted and not. @see tintProbe */
   readonly tint: TintMeasurement;
   /** #620: the ground under a tree's blob and 5 m from it, with and without the blobs. @see groundBlobProbe */
@@ -7131,6 +7237,7 @@ const NO_REALISTIC: RealisticMeasurement = {
   windowWall: [],
   pavement: NO_PAVEMENT,
   mappedPavement: NO_MAPPED_PAVEMENT,
+  levelling: NO_LEVELLING,
   tint: {
     trees: [],
     treesControl: [],
@@ -8675,6 +8782,10 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   const mappedPavement = mappedPavementProbe(view, gl, canvas);
   phaseEnds('realistic: pavement on the mapped side — #1551');
 
+  // #1547, on the same view: the ground under a mapped town, levelled.
+  const levelling = levellingProbe(view);
+  phaseEnds('realistic: a town on the flat — #1547');
+
   // #624, on the same view and the same road.
   const tread = treadProbe(view, gl, canvas, riding(level, 400));
   phaseEnds('realistic: the tread — #624');
@@ -8913,6 +9024,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     windowWall,
     pavement,
     mappedPavement,
+    levelling,
     tint,
     grounding,
     tread,

@@ -38,6 +38,9 @@ import {
   LAND_CLASS_MAX_BYTES,
   LAND_CLASS_MAX_WORK,
   LAND_CLASS_OF_KIND,
+  LEVELLING_MAX_CHUNKS,
+  LEVELLING_REACH_METRES,
+  kindAt,
   landClassMask,
   landClassOfKind,
   NO_LAND_CLASS,
@@ -57,6 +60,13 @@ import { atStartLine } from './simulation';
 import { streetsAt } from './streets';
 import { corridorOrigin } from './terrain';
 import { planCorridor, type WorldCorridor } from './world-data/corridor';
+
+/** One point's distance to built-up land, through the mask's batch read. */
+function builtUpDistance(land: LandClassMask, x: number, z: number): number {
+  const into = new Float64Array(1);
+  land.builtUpDistances(Float64Array.of(x, z), 1, into);
+  return into[0] as number;
+}
 
 /** A corridor of the given covered boxes and land use, in local metres. */
 function corridorOf(boxes: readonly Box[], landUse: readonly LandUseFeature[]): WorldCorridor {
@@ -559,4 +569,150 @@ describe('bounded — a work budget on the polygon pass', () => {
     expect(budgeted).toBeLessThan(unbudgeted / 4);
     // The unbudgeted build is the slow half on purpose: several seconds under coverage.
   }, 60_000);
+});
+
+describe('how far built-up land is — #1547', () => {
+  const COVERED: Box = { minX: -1_000, maxX: 1_000, minZ: -1_000, maxZ: 1_000 };
+  /** A residential square 0–100 m in x and z. */
+  const TOWN: Box = { minX: 0, maxX: 100, minZ: 0, maxZ: 100 };
+  const mask = landClassMask(corridorOf([COVERED], [rectangle('landuse', 'residential', TOWN)]));
+
+  it('is 0 anywhere on the town, to its edge', () => {
+    // To a side's edge; a corner is rounded by the interpolation, by a cell at most.
+    for (const [x, z] of [
+      [50, 50],
+      [2.5, 50],
+      [99.9, 50],
+      [50, 99.9],
+      [50, 0.1],
+    ] as const) {
+      expect(builtUpDistance(mask, x, z)).toBe(0);
+    }
+  });
+
+  it('is the straight-line distance off it, within the chamfer’s 8 % and a cell, across chunk edges', () => {
+    // East and west off the town's edge, north into the next 320 m chunk, and
+    // diagonally off its corner.
+    for (const [x, z, metres] of [
+      [130, 50, 30],
+      [200, 50, 100],
+      [-150, 50, 150],
+      [50, 330, 230],
+      [100 + 100 * Math.SQRT1_2, 100 + 100 * Math.SQRT1_2, 100],
+    ] as const) {
+      const distance = builtUpDistance(mask, x, z);
+      expect(distance).toBeGreaterThanOrEqual(metres - 5);
+      expect(distance).toBeLessThanOrEqual(metres * 1.08 + 5);
+    }
+  });
+
+  it('is continuous: a metre’s walk moves it by little more than a metre', () => {
+    let worst = 0;
+    for (let x = -240; x < 340; x += 1) {
+      worst = Math.max(
+        worst,
+        Math.abs(builtUpDistance(mask, x + 1, 37) - builtUpDistance(mask, x, 37)),
+      );
+    }
+    expect(worst).toBeLessThanOrEqual(1.5);
+  });
+
+  it('is Infinity past the reach, outside every chunk, at NaN, and with NO_LAND_CLASS', () => {
+    expect(builtUpDistance(mask, 50, 100 + LEVELLING_REACH_METRES + 20)).toBe(
+      Number.POSITIVE_INFINITY,
+    );
+    expect(builtUpDistance(mask, 5_000, 5_000)).toBe(Number.POSITIVE_INFINITY);
+    expect(builtUpDistance(mask, Number.NaN, 0)).toBe(Number.POSITIVE_INFINITY);
+    expect(builtUpDistance(NO_LAND_CLASS, 50, 50)).toBe(Number.POSITIVE_INFINITY);
+    expect(NO_LAND_CLASS.levellingBytes).toBe(0);
+  });
+
+  it('builds no field where no built-up land is mapped', () => {
+    const wood = landClassMask(corridorOf([COVERED], [rectangle('landuse', 'wood', TOWN)]));
+    expect(wood.levellingBytes).toBe(0);
+    expect(builtUpDistance(wood, 50, 50)).toBe(Number.POSITIVE_INFINITY);
+    expect(mask.levellingBytes).toBeGreaterThan(0);
+  });
+
+  it('a wood drawn over the town is not the town', () => {
+    const wooded = landClassMask(
+      corridorOf(
+        [COVERED],
+        [rectangle('landuse', 'residential', TOWN), rectangle('landuse', 'wood', TOWN)],
+      ),
+    );
+    expect(builtUpDistance(wooded, 50, 50)).toBe(Number.POSITIVE_INFINITY);
+  });
+
+  it('measures at most the cap’s chunks, in route order, and the rest read far', () => {
+    // Two towns a kilometre apart, the first in the first box.
+    const boxes: Box[] = [
+      { minX: -100, maxX: 100, minZ: 0, maxZ: 300 },
+      { minX: -100, maxX: 100, minZ: 1_000, maxZ: 1_300 },
+    ];
+    const towns = [
+      rectangle('landuse', 'residential', { minX: -50, maxX: 50, minZ: 50, maxZ: 150 }),
+      rectangle('landuse', 'residential', { minX: -50, maxX: 50, minZ: 1_050, maxZ: 1_150 }),
+    ];
+    const capped = landClassMask(
+      corridorOf(boxes, towns),
+      LAND_CLASS_MAX_BYTES,
+      LAND_CLASS_MAX_WORK,
+      2,
+    );
+    expect(builtUpDistance(capped, 0, 100)).toBe(0);
+    expect(builtUpDistance(capped, 0, 1_100)).toBe(Number.POSITIVE_INFINITY);
+    const whole = landClassMask(corridorOf(boxes, towns));
+    expect(builtUpDistance(whole, 0, 1_100)).toBe(0);
+    expect(LEVELLING_MAX_CHUNKS).toBe(512);
+  });
+
+  it('shares one array for every chunk built-up throughout', () => {
+    const chunk = 320;
+    const solid = landClassMask(
+      corridorOf(
+        [{ minX: 0, maxX: chunk * 2, minZ: 0, maxZ: chunk }],
+        [
+          rectangle('landuse', 'residential', {
+            minX: -10,
+            maxX: chunk * 2 + 10,
+            minZ: -10,
+            maxZ: chunk + 10,
+          }),
+        ],
+      ),
+    );
+    expect(builtUpDistance(solid, 100, 100)).toBe(0);
+    expect(builtUpDistance(solid, 500, 100)).toBe(0);
+    expect(solid.levellingBytes).toBe(4096);
+  });
+});
+
+describe('the land use under a point — kindAt, #1540', () => {
+  const COVERED: Box = { minX: -1_000, maxX: 1_000, minZ: -1_000, maxZ: 1_000 };
+  const block: LandUseFeature = {
+    layer: 'landuse',
+    kind: 'commercial',
+    rings: [
+      Float32Array.of(0, 0, 200, 0, 200, 200, 0, 200),
+      // A courtyard out of it.
+      Float32Array.of(150, 150, 190, 150, 190, 190, 150, 190),
+    ],
+  };
+  const corridor = corridorOf(
+    [COVERED],
+    [block, rectangle('landuse', 'wood', { minX: 20, maxX: 60, minZ: 20, maxZ: 60 })],
+  );
+
+  it('names the kind the mask classes, by its precedence', () => {
+    expect(kindAt(corridor, 100, 100)).toBe('commercial');
+    // A wood inside the block is a wood, as the mask has it.
+    expect(kindAt(corridor, 40, 40)).toBe('wood');
+    expect(landClassMask(corridor).classAt(40, 40)).toBe('wood');
+  });
+
+  it('is undefined outside every polygon, and in a hole', () => {
+    expect(kindAt(corridor, 500, 500)).toBeUndefined();
+    expect(kindAt(corridor, 170, 170)).toBeUndefined();
+  });
 });

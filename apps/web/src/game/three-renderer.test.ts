@@ -53,6 +53,7 @@ import { LINE_HOME_OFFSET_METRES, LINE_LIMIT_METRES, racingLine } from './racing
 import { sceneFrame } from './scene';
 import { atStartLine } from './simulation';
 import { corridorOrigin, roadCorridor } from './terrain';
+import { NO_LAND_CLASS } from './land-class';
 import { horizonRelief, terrainCorridor } from './landform';
 
 import { QUALITY_LADDER, qualitySettings, type QualityLevel } from './quality';
@@ -1647,7 +1648,13 @@ function frameWithScatter(): SceneFrame {
       const profile = routeProfile(flatRouteAt(120));
       const origin = corridorOrigin(profile);
       return {
-        mesh: terrainCorridor(profile, origin, roadCorridor(profile, origin, 100), 7),
+        mesh: terrainCorridor(
+          profile,
+          origin,
+          roadCorridor(profile, origin, 100),
+          7,
+          NO_LAND_CLASS,
+        ),
         horizon: horizonRelief(profile, origin, 7),
       };
     })(),

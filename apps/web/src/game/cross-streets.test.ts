@@ -31,6 +31,7 @@ import {
   type Junction,
   type SideRoad,
 } from './cross-streets';
+import { NO_LAND_CLASS, type LandClassMask } from './land-class';
 import { terrainHeightAt, VERGE_DROP_METRES } from './landform';
 import { BILLBOARD_FOOTPRINT } from './logo-board';
 import { distanceToDrawnRoad } from './road-grid';
@@ -440,6 +441,7 @@ describe('what a side road is — #1565', () => {
         SEED,
         crossing.junction.along + along,
         lateral,
+        NO_LAND_CLASS,
       );
       const out = Math.abs(lateral) - 3.5;
       if (out < 0.01) expect(y).toBeCloseTo(road + SIDE_ROAD_LIFT_METRES, 2);
@@ -451,6 +453,49 @@ describe('what a side road is — #1565', () => {
         expect(y - ground).toBeCloseTo(-SIDE_ROAD_SINK_METRES, 2);
       }
     }
+  });
+
+  it('stands on #1547’s levelled ground under mapped built-up land, not the unlevelled relief', () => {
+    // Built-up everywhere: the ground beside the road is levelled to the road
+    // less the verge, so the side road's far end, sunk into the ground, must
+    // follow the levelled ground rather than the relief the mask flattened.
+    const town: LandClassMask = {
+      classAt: () => 'built-up',
+      covered: () => true,
+      builtUpDistances: (_points, count, into) => {
+        into.fill(0, 0, count);
+      },
+      bytes: 0,
+      // Non-zero: `landform.ts` reads the field only where some was measured.
+      levellingBytes: 1,
+    };
+    const levelled = sideRoadsAt(FARMLAND, ORIGIN, SEED, t - 100, cross + 100, t, mapped, town);
+    const crossing = levelled.filter((road) => road.junction.source === 'mapped')[1] as SideRoad;
+    // Control: the same junction without the mask is a different mesh, so the relief there is not already level.
+    const unlevelled = mappedRoads[1] as SideRoad;
+    expect(crossing).not.toBe(unlevelled);
+    const here = roadAt(crossing.junction.along);
+    let ends = 0;
+    let differs = 0;
+    const plain = tarmac(unlevelled);
+    tarmac(crossing).forEach(([x, y, z], at) => {
+      const lateral = (x - here.x) * here.normalX + (z - here.z) * here.normalZ;
+      const along = (x - here.x) * here.forwardX + (z - here.z) * here.forwardZ;
+      if (Math.abs(y - (plain[at]?.[1] ?? y)) > 0.1) differs += 1;
+      if (Math.abs(lateral) - 3.5 <= SIDE_ROAD_METRES - 0.5) return;
+      const ground = terrainHeightAt(
+        FARMLAND,
+        ORIGIN,
+        SEED,
+        crossing.junction.along + along,
+        lateral,
+        town,
+      );
+      expect(y - ground).toBeCloseTo(-SIDE_ROAD_SINK_METRES, 2);
+      ends += 1;
+    });
+    expect(ends).toBeGreaterThan(0);
+    expect(differs).toBeGreaterThan(0);
   });
 
   it('carries a give-way line of the road’s own paint at each mouth', () => {

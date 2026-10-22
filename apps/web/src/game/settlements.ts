@@ -559,6 +559,8 @@ function standing(
   signedLateral: number,
   variant: number,
   facing: 'road' | 'along',
+  /** #1547: the ground it stands on is levelled near mapped built-up land. */
+  land: LandClassMask,
 ): ScatterItem | undefined {
   const wrapped = distanceOnRoute(profile, along);
   const frame = frameAt(profile, origin, wrapped);
@@ -572,7 +574,7 @@ function standing(
   return {
     kind,
     x: frame.x + frame.normalX * signedLateral,
-    y: terrainHeightAt(profile, origin, seed, wrapped, signedLateral),
+    y: terrainHeightAt(profile, origin, seed, wrapped, signedLateral, land),
     z: frame.z + frame.normalZ * signedLateral,
     rotation: Math.atan2(fx, fz),
     scale: 1,
@@ -802,6 +804,7 @@ function settlementsAt(
             plot.lateral * plot.side,
             plot.variant,
             'road',
+            land,
           ),
           plot.along,
         );
@@ -821,6 +824,7 @@ function settlementsAt(
             SIGNPOST_LATERAL_METRES * verge,
             0,
             'along',
+            land,
           ),
           along,
         );
@@ -839,7 +843,7 @@ function settlementsAt(
         pushFootprint(profile, origin, footprints, building, along, lateral, side, 0);
         const variant = Math.min(5, Math.floor(uniformFrom(base, STREAM_VARIANT) * 6));
         admit(
-          standing(profile, origin, seed, building, along, lateral * side, variant, 'road'),
+          standing(profile, origin, seed, building, along, lateral * side, variant, 'road', land),
           along,
         );
       }
@@ -904,6 +908,7 @@ function fieldEdgesAt(
           FIELD_EDGE_LATERAL_METRES * side,
           0,
           'along',
+          land,
         );
         // #1546: no boundary across built-up land, water, a wood or a park.
         if (item !== undefined && fieldGround(land, item.x, item.z)) found.push({ item, along });
@@ -926,7 +931,7 @@ function fieldEdgesAt(
           item: {
             kind,
             x,
-            y: terrainHeightAt(profile, origin, seed, wrapped, lateral * side),
+            y: terrainHeightAt(profile, origin, seed, wrapped, lateral * side, land),
             z,
             // Out from the road: its own length runs along the normal.
             rotation: Math.atan2(frame.normalX * side, frame.normalZ * side),

@@ -3550,6 +3550,24 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     expect(apart(leftProcedural, leftOff)).toBeGreaterThan(8);
   });
 
+  test('#1547 a town on the flat: the drawn ground under a mapped block’s centre footprint is within 1 m, and over 5 m without the levelling', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { levelling } = await realistic(harnessRun);
+    const range = (values: readonly number[]): number => Math.max(...values) - Math.min(...values);
+    expect(levelling.levelled).toHaveLength(4);
+    expect(levelling.unlevelled).toHaveLength(4);
+    for (const value of [...levelling.levelled, ...levelling.unlevelled]) {
+      expect(Number.isFinite(value)).toBe(true);
+    }
+    const measured = `levelled ${range(levelling.levelled).toFixed(3)} m, -levelling ${range(levelling.unlevelled).toFixed(3)} m`;
+    testInfo.annotations.push({ type: 'a town on the flat', description: measured });
+    console.log(`a town on the flat — ${measured}`);
+    expect(range(levelling.levelled)).toBeLessThanOrEqual(1);
+    // The control: without the levelling the same footprint stands on a bank.
+    expect(range(levelling.unlevelled)).toBeGreaterThan(5);
+  });
+
   test('stands its street furniture on it, the bench in Poly Haven’s planks, one call a kind — #1536', async ({
     harnessRun,
   }, testInfo) => {

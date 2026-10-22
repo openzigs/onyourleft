@@ -12,6 +12,7 @@
 
 import { describe, expect, it } from 'vitest';
 
+import { NO_LAND_CLASS } from './land-class';
 import {
   HORIZON_RADIUS_METRES,
   HORIZON_SEGMENTS,
@@ -70,6 +71,7 @@ function groundAt(odometer: number) {
     corridorOrigin(profile),
     roadCorridor(profile, corridorOrigin(profile), odometer),
     scatterSeed(profile),
+    NO_LAND_CLASS,
   );
 }
 
