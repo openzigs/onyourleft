@@ -10,12 +10,18 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { decodeTile, type LandUseFeature } from '@onyourleft/map-features';
+import { decodeTile, type BuildingFeature, type LandUseFeature } from '@onyourleft/map-features';
 
+import { footprintPlans } from '../src/game/footprint-buildings';
 import { landClassMask } from '../src/game/land-class';
 import { corridorOrigin } from '../src/game/terrain';
 import { planCorridor, worldCorridorOf } from '../src/game/world-data/corridor';
-import { classedItems, corridorFixtureRoute, corridorFixtureTiles } from './corridor-fixture';
+import {
+  classedItems,
+  CORRIDOR_FIXTURE_VERDICTS,
+  corridorFixtureRoute,
+  corridorFixtureTiles,
+} from './corridor-fixture';
 
 function fixtureCorridor() {
   const profile = corridorFixtureRoute();
@@ -52,5 +58,29 @@ describe('#1546 nothing on a mapped wood — the browser case’s fixture', () =
         (item) => item.structure && item.kind !== 'signpost' && item.landClass === 'wood',
       ).length,
     ).toBeGreaterThan(0);
+  });
+});
+
+describe('#1540 the plans’ verdicts — the browser case’s fixture', () => {
+  it('drops the wood’s footprint and plans the residential block’s, exactly as the page must', () => {
+    const profile = corridorFixtureRoute();
+    const plan = planCorridor(profile.positions, []);
+    if (plan === undefined) throw new Error('the fixture route plans no corridor');
+    const landUse: LandUseFeature[] = [];
+    const buildings: BuildingFeature[] = [];
+    for (const tile of corridorFixtureTiles()) {
+      const decoded = decodeTile(tile.bytes, { z: 15, x: tile.x, y: tile.y }, plan.frame);
+      if ('reason' in decoded) throw new Error(`a fixture tile was refused: ${decoded.reason}`);
+      landUse.push(...decoded.landUse);
+      buildings.push(...decoded.buildings);
+    }
+    const origin = corridorOrigin(profile);
+    const corridor = worldCorridorOf('fixture', origin, plan.tiles, {
+      landUse,
+      buildings,
+      paths: [],
+    });
+    const { verdicts } = footprintPlans(corridor, landClassMask(corridor), profile, origin);
+    expect(verdicts).toStrictEqual(CORRIDOR_FIXTURE_VERDICTS);
   });
 });
