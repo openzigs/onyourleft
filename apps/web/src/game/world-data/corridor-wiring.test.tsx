@@ -49,6 +49,42 @@ import type { SceneInput } from '../scene';
 import { CORRIDOR_HALF_WIDTH_METRES, type CorridorState, type WorldCorridor } from './corridor';
 
 const inputs: SceneInput[] = [];
+/** #1583: how many times `footprintPlans` had run when each scene frame began. */
+let planCalls = 0;
+const planCallsAtFrame: number[] = [];
+/**
+ * #1583: how many rings planning simplified, counted where the planner crosses
+ * into another module. `footprintPlans`' counter above sees only callers that
+ * import it: a call from inside `footprint-buildings.ts` goes through the local
+ * binding and is never counted. Every kept footprint passes through
+ * `simplifyRing`, and nothing else in the game calls it, so a frame that plans
+ * by any route — however it reaches the planner — moves this count.
+ */
+let ringsSimplified = 0;
+/** #1583: how many rings each scene frame simplified, start to finish. */
+const ringsSimplifiedInFrame: number[] = [];
+
+vi.mock('@onyourleft/map-features', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@onyourleft/map-features')>();
+  return {
+    ...actual,
+    simplifyRing: (...args: Parameters<typeof actual.simplifyRing>) => {
+      ringsSimplified += 1;
+      return actual.simplifyRing(...args);
+    },
+  };
+});
+
+vi.mock('../footprint-buildings', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../footprint-buildings')>();
+  return {
+    ...actual,
+    footprintPlans: (...args: Parameters<typeof actual.footprintPlans>) => {
+      planCalls += 1;
+      return actual.footprintPlans(...args);
+    },
+  };
+});
 
 vi.mock('../scene', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../scene')>();
@@ -56,7 +92,11 @@ vi.mock('../scene', async (importOriginal) => {
     ...actual,
     sceneFrame: (input: SceneInput) => {
       inputs.push(input);
-      return actual.sceneFrame(input);
+      planCallsAtFrame.push(planCalls);
+      const before = ringsSimplified;
+      const frame = actual.sceneFrame(input);
+      ringsSimplifiedInFrame.push(ringsSimplified - before);
+      return frame;
     },
   };
 });
@@ -71,6 +111,10 @@ let stores: ActivityStore[];
 
 beforeEach(async () => {
   inputs.length = 0;
+  planCalls = 0;
+  planCallsAtFrame.length = 0;
+  ringsSimplified = 0;
+  ringsSimplifiedInFrame.length = 0;
   pending = [];
   nowMs = 0;
   resetFixtureIds();
@@ -239,6 +283,19 @@ describe('the chosen route’s corridor reaches the scene — #1539', () => {
     const carried = frames.filter((each) => each.mappedBuildings !== undefined);
     expect(carried.length).toBeGreaterThan(0);
     for (const frame of carried) expect(frame.mappedBuildings?.buildings).toBe(town);
+    // #1583: the lots' town is built at the press too, from the same plans, and
+    // is one object on every frame. Planning ran exactly once, at the press:
+    // no scene frame — the first one included — plans.
+    const lots = new Set(ride.map((input) => input.mappedTown));
+    expect(lots.size).toBe(1);
+    expect([...lots][0]).toBeDefined();
+    expect(planCalls).toBe(1);
+    expect(new Set(planCallsAtFrame)).toStrictEqual(new Set([1]));
+    // ...and by any route, not only through `footprintPlans`' export: the
+    // press simplified rings, and no scene frame simplified one.
+    expect(ringsSimplified).toBeGreaterThan(0);
+    expect(ringsSimplifiedInFrame.length).toBe(inputs.length);
+    expect(new Set(ringsSimplifiedInFrame)).toStrictEqual(new Set([0]));
   });
 
   it('hands no corridor to the scene with no port method — today’s game', async () => {
@@ -262,6 +319,7 @@ describe('the chosen route’s corridor reaches the scene — #1539', () => {
       expect(input.landClass).toBeUndefined();
       // #1549: and no mapped buildings.
       expect(input.mappedBuildings).toBeUndefined();
+      expect(input.mappedTown).toBeUndefined();
     }
   });
 });
@@ -345,6 +403,7 @@ describe('nothing changes during a ride — ADR 0054 D-2.4', () => {
       expect(input.landClass).toBeUndefined();
       // #1549: and no mapped buildings.
       expect(input.mappedBuildings).toBeUndefined();
+      expect(input.mappedTown).toBeUndefined();
     }
   });
 });

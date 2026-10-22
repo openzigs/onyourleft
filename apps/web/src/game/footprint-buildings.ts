@@ -1458,34 +1458,23 @@ function paintTown(plans: readonly FootprintPlan[]): FootprintPlan[] {
   return painted;
 }
 
-/** One corridor's town, kept with the mask and the profile it was built against. */
-const townsBuilt = new WeakMap<
-  WorldCorridor,
-  { readonly land: LandClassMask; readonly profile: RouteProfile; readonly town: MappedTown }
->();
-
 /**
  * What #1550's procedural lots read of a corridor (`settlements.ts`
- * §`MappedTown`): every kept plan's footprint ({@link footprintPlans}), in a
- * grid, and whether a place's land is mapped `commercial`. Built once a
- * corridor, at its first frame, and the same object after.
+ * §`MappedTown`): every kept plan's footprint, in a grid, and whether a place's
+ * land is mapped `commercial`.
+ *
+ * ⚠️ Takes the plans, never plans them (#1583): `GameView` plans a corridor
+ * once, at the press, and hands the same plans here and to #1549's belt, so
+ * the first scene frame never pays #1540's 400 ms budget. The town is built
+ * at the press too and carried on `SceneInput.mappedTown`.
  *
  * ⚠️ `commercialAt` reads `land-class.ts` §`kindAt`, which tests every
  * land-use polygon's box: so each answer is kept, by the place to the
  * decimetre, and a lot's place is a pure function of the route, so every
  * later frame and lap is a lookup.
  */
-export function mappedTown(
-  corridor: WorldCorridor,
-  land: LandClassMask,
-  profile: RouteProfile,
-  origin: CorridorOrigin,
-): MappedTown {
-  const cached = townsBuilt.get(corridor);
-  if (cached?.land === land && cached.profile === profile) return cached.town;
-  const index = footprintIndexOf(
-    footprintPlans(corridor, land, profile, origin).plans.map((plan) => plan.footprint),
-  );
+export function mappedTown(corridor: WorldCorridor, plans: readonly FootprintPlan[]): MappedTown {
+  const index = footprintIndexOf(plans.map((plan) => plan.footprint));
   // Keyed by decimetre, x then z: two small integers, never a boxed number.
   const commercial = new Map<number, Map<number, boolean>>();
   const town: MappedTown = {
@@ -1505,7 +1494,6 @@ export function mappedTown(
       return answer;
     },
   };
-  townsBuilt.set(corridor, { land, profile, town });
   return town;
 }
 

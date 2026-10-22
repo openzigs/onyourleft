@@ -17,7 +17,7 @@ import { getHeapStatistics, GCProfiler } from 'node:v8';
 
 import { describe, expect, it } from 'vitest';
 
-import { mappedTown } from './footprint-buildings';
+import { footprintPlans, mappedTown } from './footprint-buildings';
 import { buildingBeside, landBeside, rectangleBeside } from './footprint-fixtures-testing';
 import { landClassMask } from './land-class';
 import { northRoute } from './route-fixtures-testing';
@@ -51,7 +51,7 @@ describe('#1550 the per-lot queries are allocation-free — #240 NFR-3', () => {
       streets: [],
     };
     const land = landClassMask(corridor);
-    const town = mappedTown(corridor, land, profile, origin);
+    const town = mappedTown(corridor, footprintPlans(corridor, land, profile, origin).plans);
     const frame = drawnRoadFrame(profile, origin, 500);
     if (frame === undefined) throw new Error('no road');
     let sink = 0;
