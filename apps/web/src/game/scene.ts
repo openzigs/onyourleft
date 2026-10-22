@@ -57,6 +57,7 @@ import {
   type RoadCorridor,
 } from './terrain';
 import {
+  NO_MAPPED_TOWN,
   STRUCTURE_MAX_ITEMS,
   clearOfBuildings,
   clearOfSettlements,
@@ -70,12 +71,19 @@ import {
   sideRoadsAt,
   type SideRoad,
 } from './cross-streets';
+import { mappedTown } from './footprint-buildings';
 import { NO_PAVEMENT_DATA, pavementSides } from './footways';
 import { BILLBOARD_FOOTPRINT } from './logo-board';
 import { streetsAt } from './streets';
 import { bridgeParts, waterSurface, waterways } from './waterways';
 import { worldStyle } from './world';
 import type { WorldCorridor } from './world-data/corridor';
+import {
+  clearOfMappedBuildings,
+  mappedChunk,
+  type MappedBuildings,
+  type MappedBuildingsInView,
+} from './mapped-buildings';
 import type { RouteProfile } from '@onyourleft/domain';
 
 /** Everything a frame needs beyond the rider's own state. */
@@ -141,6 +149,18 @@ export interface SceneInput {
    * `world-data/corridor-wiring.test.tsx` reads it back off the input.
    */
   readonly landClass?: LandClassMask | undefined;
+  /**
+   * The buildings planned from {@link worldCorridor}'s footprints — #1540's
+   * plans, indexed by `mapped-buildings.ts` §`mappedBuildingsOf` — built ONCE,
+   * at the press, by `GameView`, as {@link landClass} is. #1549: each frame
+   * carries them on to the renderer with the rider's chunk
+   * (`SceneFrame.mappedBuildings`), and no tree, shrub or rock stands on their
+   * ground.
+   *
+   * Absent on every ride with no corridor, which is today's world.
+   * `world-data/corridor-wiring.test.tsx` reads it back off the input.
+   */
+  readonly mappedBuildings?: MappedBuildings | undefined;
   /**
    * Other real riders in a room, where to draw them — #783: the interest set's
    * riders (`net/interest.ts`), each at the distance `net/snapshots.ts`
@@ -215,6 +235,14 @@ export interface SceneInput {
    * {@link centreline}'s reason.
    */
   readonly settlementsWooded?: boolean | undefined;
+  /**
+   * Builds no procedural lot in a mapped town, as every frame did before
+   * #1550 — the browser gate's `-lots` control, and nothing else. Absent, or
+   * `false`, fills mapped built-up land that has no footprints with lots
+   * (`settlements.ts` §`lotsAt`). Optional the safe way round, for
+   * {@link centreline}'s reason.
+   */
+  readonly lotsOff?: boolean | undefined;
 }
 
 /** Another real rider, where to draw them — #783. @see SceneInput.remoteRiders */
@@ -254,6 +282,10 @@ export function sceneFrame(input: SceneInput): SceneFrame {
   );
   const { scatter: items, billboards } = scenery(corridor, input, riderDistance, seed, sideRoads);
   return {
+    // #1549: the ride's mapped buildings, and where the rider is among them.
+    ...(input.mappedBuildings === undefined
+      ? {}
+      : { mappedBuildings: mappedInView(input.mappedBuildings, corridor, riderDistance) }),
     corridor,
     // The camera follows the rider sideways — their drawn place, not the line's
     // — so the rider stays where `camera.ts` §`riderFrameBox` says they are.
@@ -380,18 +412,43 @@ function scenery(
     { maxItems: structureBudget - billboards.length, riderMetres: riderDistance },
     footprints,
     land,
+    // #1550: the corridor's kept footprints and commercial land, built once a
+    // corridor, which the procedural lots of a mapped town keep clear of.
+    // `null` is the `-lots` control: no lots at all.
+    input.lotsOff === true
+      ? null
+      : input.worldCorridor === undefined
+        ? NO_MAPPED_TOWN
+        : mappedTown(input.worldCorridor, land, input.profile, input.origin),
   );
   // #1565: no wall, hedge, fence, signpost or building on a side road, and no
   // tree, shrub or rock either.
   const built = clearOfSideRoads(placed, sideRoads);
+  // #1549: and off every mapped building's ground, by #1534's rule — whose
+  // control (`settlementsWooded`) leaves both standing.
   const cleared = clearOfSideRoads(
-    input.settlementsWooded === true ? natural : clearOfSettlements(natural, footprints, land),
+    input.settlementsWooded === true
+      ? natural
+      : clearOfMappedBuildings(
+          clearOfSettlements(natural, footprints, land),
+          input.mappedBuildings,
+        ),
     sideRoads,
   );
   return {
     scatter: [...built, ...clearOfBillboards(clearOfBuildings(cleared, built), billboards)],
     billboards,
   };
+}
+
+/** The mapped buildings, with the rider's chunk and drawn place. @see SceneFrame.mappedBuildings */
+function mappedInView(
+  buildings: MappedBuildings,
+  corridor: RoadCorridor,
+  riderDistance: number,
+): MappedBuildingsInView {
+  const here = placeOnCorridor(corridor, riderDistance);
+  return { buildings, chunk: mappedChunk(riderDistance), x: here.x, z: here.z };
 }
 
 /**

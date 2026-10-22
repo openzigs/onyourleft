@@ -243,9 +243,12 @@ export const REALISTIC_TEXTURE_PIXELS = {
  * bytes and the scanned broadleaves 10 616 301; which go is the owner's to
  * say after the tablet rows (ADR 0049 D-1, #1293).
  *
- * @test-facing held by `realistic-budget.test.ts`, which reads every committed
- * realistic file back off disk against it; the renderer spends it only on the
- * realistic path, which a ride takes only for a rider who chose it (#475)
+ * Held by `realistic-budget.test.ts`, which reads every committed realistic
+ * file back off disk against it. Since #1549 the renderer reads its
+ * `structure` figure too, to share the structure term between the procedural
+ * structures and the mapped buildings (`three-renderer.ts`
+ * §`RealisticDrawing.updateMapped`), and since #1550 `footprint-buildings.ts`
+ * §`FOOTPRINT_MAX_TRIANGLES` reads it, which a ride with a corridor plans to.
  */
 export const REALISTIC_TRIANGLES: Readonly<
   Record<RealisticVegetationKind | 'tree-middle' | 'rider' | 'structure', number>
@@ -591,6 +594,67 @@ export const REALISTIC_GROUND_BLOBS =
  * meshes `RealisticStructureBelts` actually builds against it
  */
 export const REALISTIC_STRUCTURE_MESHES = 35;
+
+/**
+ * The triangles the realistic structures may spend in a frame, procedural and
+ * mapped together — #1549, #1538's P-12: **23 040**,
+ * {@link REALISTIC_STRUCTURE_ITEMS} at {@link REALISTIC_TRIANGLES}' `structure`.
+ * It is the structure term `realistic-budget.test.ts` has summed since #506,
+ * and it is NOT raised for mapped buildings: they take what the procedural
+ * structures in the frame leave of it, nearest first
+ * (`three-renderer.ts` §`MappedBuildingBelt`). It is also the capacity, in
+ * triangles, of the one buffer the belt preallocates, so no plan list,
+ * however long, can grow it.
+ *
+ * ⚠️ **Mapped buildings carry no ground blob** (#620): a blob is an instance
+ * under an instance, and a merged town has none. Whether a merged town wants
+ * contact darkening is a by-eye call at #1553, and no follow-up is filed.
+ * {@link REALISTIC_GROUND_BLOBS} is unchanged by them.
+ */
+export const MAPPED_BUILDING_TRIANGLES = REALISTIC_STRUCTURE_ITEMS * REALISTIC_TRIANGLES.structure;
+
+/**
+ * The most mapped buildings the realistic world draws at once — #1549:
+ * **36**, ADR 0054 D-5.6's cap, {@link REALISTIC_STRUCTURE_ITEMS}' figure:
+ * the nearest 36 footprints, and no more until #1523's fix and a measured
+ * number raise it (owner ruling, 2026-10-22, on #1549's pull request). Most
+ * are boxes of a few dozen triangles, so 36 of them fit well inside
+ * {@link MAPPED_BUILDING_TRIANGLES}, and this count is the cap that bites
+ * first. Written as the number, not as {@link REALISTIC_STRUCTURE_ITEMS}, so
+ * that raising the procedural structures' count does not raise this one.
+ *
+ * ⚠️ **It was 240 in #1549's first draft**, read from the stylised world's
+ * `scatter.ts` §`STRUCTURE_MAX_ITEMS`; the owner did not approve that reading
+ * of D-5.6. A reviewer who remembers 240 is reading that draft.
+ */
+export const MAPPED_BUILDING_MAX = 36;
+
+/**
+ * Nearer than this a mapped building is drawn whole; further, at its far
+ * level, its walls and roof only — #1549: **150 m**.
+ */
+export const MAPPED_BUILDING_NEAR_METRES = 150;
+
+/**
+ * How far from the rider a mapped building is drawn at all — #1549: **400 m**,
+ * `terrain.ts` §`VIEW_AHEAD_METRES`, the road's own reach.
+ */
+export const MAPPED_BUILDING_REACH_METRES = 400;
+
+/**
+ * How far along the route the rider rides between two refills of the mapped
+ * buildings — #1549: **100 m**, about ten seconds at 36 km/h. The set is
+ * rebuilt only when the rider's chunk changes, never per frame.
+ */
+export const MAPPED_CHUNK_METRES = 100;
+
+/**
+ * The most draw calls the mapped buildings may spend — #1549: **6**, whatever
+ * their count. The belt is one mesh with at most this many groups, one a
+ * surface; a building whose surfaces would open a seventh waits for a refill
+ * nearer it (`mapped-buildings.ts` §`selectMappedBuildings`).
+ */
+export const MAPPED_BUILDING_DRAW_CALLS = 6;
 
 /**
  * How many OTHER real riders in a room wear the realistic body — #783: **2**,

@@ -67,6 +67,8 @@ import {
 } from '../src/game/realistic-assets';
 import { modelFacts } from '../src/game/realistic-bytes-testing';
 import {
+  MAPPED_BUILDING_DRAW_CALLS,
+  MAPPED_BUILDING_MAX,
   REALISTIC_REMOTE_TRIANGLES,
   REALISTIC_WOODED_DRAW_CALLS,
 } from '../src/game/realistic-budget';
@@ -3566,6 +3568,82 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     expect(range(levelling.levelled)).toBeLessThanOrEqual(1);
     // The control: without the levelling the same footprint stands on a bank.
     expect(range(levelling.unlevelled)).toBeGreaterThan(5);
+  });
+
+  test('#1549 a mapped town is drawn: its front wall reads building, in at most six calls with 10 and with 36', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { mappedTown: town } = await realistic(harnessRun);
+    const rgb = (values: readonly number[]): string => values.map((c) => c.toFixed(0)).join('/');
+    const measured =
+      `${String(town.buildings)} buildings in ${String(town.drawCalls)} calls, ` +
+      `${String(town.buildingsSmall)} in ${String(town.drawCallsSmall)}, ` +
+      `a group a building ${String(town.drawCallsUnmerged)}, lever off ${String(town.drawCallsOff)}; ` +
+      `wall ${rgb(town.wall)} drawn, ${rgb(town.wallOff)} without; ` +
+      `refill ${town.refillMs.toFixed(2)} ms; frame ${town.frameMs.toFixed(2)} ms drawn, ` +
+      `${town.frameMsOff.toFixed(2)} ms without`;
+    testInfo.annotations.push({ type: 'a mapped town', description: measured });
+    console.log(`a mapped town — ${measured}`);
+    const apart = (a: readonly number[], b: readonly number[]): number =>
+      Math.max(...[0, 1, 2].map((c) => Math.abs((a[c] ?? 0) - (b[c] ?? 0))));
+    expect(town.buildings).toBe(MAPPED_BUILDING_MAX);
+    expect(town.buildingsSmall).toBe(10);
+    for (const calls of [town.drawCalls, town.drawCallsSmall]) {
+      expect(calls).toBeGreaterThan(0);
+      expect(calls).toBeLessThanOrEqual(MAPPED_BUILDING_DRAW_CALLS);
+    }
+    // THE CONTROL: a draw a building and surface is far more with D-5.6's 36.
+    expect(town.drawCallsUnmerged).toBeGreaterThan(MAPPED_BUILDING_DRAW_CALLS);
+    // The wall: aimed from the plan's geometry, in the frame, and the building is what is there.
+    expect(town.wallInFrame).toBe(true);
+    expect(town.wall).toHaveLength(3);
+    expect(town.wallOff).toHaveLength(3);
+    expect(apart(town.wall, town.wallOff)).toBeGreaterThan(20);
+    // THE CONTROL: with `-mapped-buildings` the belt adds no call at all.
+    expect(town.drawCallsOff).toBe(0);
+    // #1549's CPU budget for a refill of the dense town.
+    expect(town.refillMs).toBeLessThanOrEqual(4);
+  });
+
+  test('#1549 nothing in the wood: no plan kept there and no building pixel, where -landclass draws one', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { mappedTown: town } = await realistic(harnessRun);
+    const rgb = (values: readonly number[]): string => values.map((c) => c.toFixed(0)).join('/');
+    const measured = `kept in the wood ${String(town.woodKept)}, ${String(town.woodKeptNoLand)} with -landclass; centre ${rgb(town.wood)} on, ${rgb(town.woodOff)} off; -landclass ${rgb(town.woodNoLand)} on, ${rgb(town.woodNoLandOff)} off`;
+    testInfo.annotations.push({ type: 'nothing in the wood', description: measured });
+    console.log(`nothing in the wood — ${measured}`);
+    const apart = (a: readonly number[], b: readonly number[]): number =>
+      Math.max(...[0, 1, 2].map((c) => Math.abs((a[c] ?? 0) - (b[c] ?? 0))));
+    for (const values of [town.wood, town.woodOff, town.woodNoLand, town.woodNoLandOff]) {
+      expect(values).toHaveLength(3);
+    }
+    expect(town.woodKept).toBe(0);
+    // No building pixel: switching the buildings off changes nothing there.
+    expect(apart(town.wood, town.woodOff)).toBeLessThan(3);
+    // THE CONTROL: without the land-class mask the footprint is kept and drawn there.
+    expect(town.woodKeptNoLand).toBe(1);
+    expect(apart(town.woodNoLand, town.woodNoLandOff)).toBeGreaterThan(20);
+  });
+
+  test('#1550 lots in an unmapped town: houses stand on mapped built-up land with no footprints, and none with -lots', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { lots } = await realistic(harnessRun);
+    const rgb = (values: readonly number[]): string => values.map((c) => c.toFixed(0)).join('/');
+    const measured = `${String(lots.houses)} houses on built-up land in frame, ${String(lots.housesOff)} with -lots; the nearest ${rgb(lots.onRgb)} drawn, ${rgb(lots.offRgb)} with -lots`;
+    testInfo.annotations.push({ type: 'lots in an unmapped town', description: measured });
+    console.log(`lots in an unmapped town — ${measured}`);
+    expect(lots.houses).toBeGreaterThan(0);
+    expect(lots.onRgb).toHaveLength(3);
+    expect(lots.offRgb).toHaveLength(3);
+    // The control: with -lots the harness lists none on that stretch…
+    expect(lots.housesOff).toBe(0);
+    // …and the square the house was drawn in reads something else: the ground.
+    const apart = Math.max(
+      ...[0, 1, 2].map((c) => Math.abs((lots.onRgb[c] ?? 0) - (lots.offRgb[c] ?? 0))),
+    );
+    expect(apart).toBeGreaterThan(8);
   });
 
   test('stands its street furniture on it, the bench in Poly Haven’s planks, one call a kind — #1536', async ({

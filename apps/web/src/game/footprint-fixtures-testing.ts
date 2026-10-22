@@ -297,3 +297,39 @@ export function denseTownFixture(count = 2_000): {
     },
   };
 }
+
+/**
+ * #1549's fixture: a town strung along 3 km of level road — 8 × 8 m houses
+ * every 12 m, two rows a side at 25 m and 60 m out, all on residential land.
+ * From anywhere along its middle more than `MAPPED_BUILDING_MAX` stand within
+ * the belt's reach and some stand past its near level, so the count, the
+ * budget and the far level all bind in one fixture.
+ */
+export function rowTownFixture(): {
+  readonly profile: RouteProfile;
+  readonly origin: CorridorOrigin;
+  readonly corridor: WorldCorridor;
+} {
+  const profile = northRoute(3_000, () => 10);
+  const origin = corridorOrigin(profile);
+  const buildings: BuildingFeature[] = [];
+  for (let along = 50; along < 2_950; along += 12) {
+    for (const lateral of [25, 60, -25, -60]) {
+      buildings.push(buildingBeside(profile, origin, [rectangleBeside(along, lateral, 8, 8)], 6));
+    }
+  }
+  return {
+    profile,
+    origin,
+    corridor: {
+      routeId: 'row-town',
+      origin,
+      covered: () => true,
+      coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
+      landUse: [landBeside(profile, origin, 'landuse', 'residential', 10, 2_990, -100, 100)],
+      buildings,
+      paths: [],
+      streets: [],
+    },
+  };
+}

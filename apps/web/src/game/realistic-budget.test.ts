@@ -56,6 +56,8 @@ import {
   REALISTIC_RIDER_SURFACES,
   REALISTIC_TOWN_SURFACES,
   REALISTIC_BUILD_BYTES,
+  MAPPED_BUILDING_MAX,
+  MAPPED_BUILDING_TRIANGLES,
   REALISTIC_FRAME_TRIANGLES,
   REALISTIC_GANTRY_TRIANGLES,
   REALISTIC_GROUND_BLOBS,
@@ -83,13 +85,18 @@ import { STRUCTURE_KINDS } from './scatter';
 import { SCENERY_MODELS } from './scenery-models';
 import { BUILT_KINDS } from './buildings';
 import { footprintPlans } from './footprint-buildings';
-import { footprintFixture } from './footprint-fixtures-testing';
+import { denseTownFixture, footprintFixture } from './footprint-fixtures-testing';
+import { mappedBuildingsOf } from './mapped-buildings';
+import type { ScatterItem } from './scatter';
+import { drawnRoadFrame } from './terrain';
 import { landClassMask } from './land-class';
 import { REALISTIC_LADDER } from './quality';
 import {
+  MappedBuildingBelt,
   realisticBicycleTriangles,
   realisticStructureTriangles,
   realisticStructureTrianglesOf,
+  refillMappedBuildings,
   ScatterBelt,
   stylisedRiderTriangles,
 } from './three-renderer';
@@ -495,6 +502,61 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
     ).toBeLessThanOrEqual(REALISTIC_FRAME_TRIANGLES);
     // And the figure the rungs spend is the one `realistic-budget.ts` states.
     expect(structureItems).toBe(REALISTIC_STRUCTURE_ITEMS);
+  });
+
+  it('holds it with a covered town at MAPPED_BUILDING_MAX, the structure term unchanged — #1549', () => {
+    const { vegetation, riders, structureItems, blobs, gantries } = worstFrame();
+    const structureTerm = structureItems * REALISTIC_TRIANGLES.structure;
+    // The term is the one the frame has priced since #506, not a new one.
+    expect(structureTerm).toBe(23_040);
+    expect(MAPPED_BUILDING_TRIANGLES).toBe(structureTerm);
+    const dense = denseTownFixture();
+    const town = mappedBuildingsOf(
+      footprintPlans(dense.corridor, landClassMask(dense.corridor), dense.profile, dense.origin)
+        .plans,
+    );
+    const road = drawnRoadFrame(dense.profile, dense.origin, 700);
+    if (road === undefined) throw new Error('the dense road has no direction there');
+    const building = (z: number): ScatterItem => ({
+      kind: 'building',
+      x: 20,
+      y: 0,
+      z,
+      rotation: 0,
+      scale: 1,
+      variant: 0,
+    });
+    for (const procedural of [0, 10, 30, structureItems]) {
+      const belt = new MappedBuildingBelt(town, new Map());
+      const cap = refillMappedBuildings(
+        belt,
+        { buildings: town, chunk: 7, x: road.x, z: road.z },
+        Array.from({ length: procedural }, (_, at) => building(at * 10)),
+        0,
+        structureItems,
+      );
+      const mapped = belt.stats.triangles;
+      belt.dispose();
+      // Procedural first, at the term's price each; the mapped buildings the rest…
+      const structures = procedural * REALISTIC_TRIANGLES.structure + mapped;
+      expect(structures, String(procedural)).toBeLessThanOrEqual(structureTerm);
+      // …and until the next refill the procedural keep to what the town left.
+      expect(cap, String(procedural)).toBeGreaterThanOrEqual(procedural);
+      expect(
+        (cap ?? 0) * REALISTIC_TRIANGLES.structure + mapped,
+        String(procedural),
+      ).toBeLessThanOrEqual(structureTerm);
+      expect(vegetation + riders + structures + blobs + gantries).toBeLessThanOrEqual(
+        REALISTIC_FRAME_TRIANGLES,
+      );
+      if (procedural === 0) {
+        // Non-vacuity: a covered town at its count cap, a real share of the term.
+        expect(belt.stats.buildings).toBe(MAPPED_BUILDING_MAX);
+        expect(mapped).toBeGreaterThan(REALISTIC_TRIANGLES.structure);
+      }
+      // A frame whose procedural structures fill the term draws no mapped building.
+      if (procedural === structureItems) expect(belt.stats.buildings).toBe(0);
+    }
   });
 
   it('counts a ground blob under every mesh and structure a frame can draw, inside #620’s 124 — #620', () => {

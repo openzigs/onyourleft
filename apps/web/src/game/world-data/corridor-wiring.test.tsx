@@ -230,6 +230,15 @@ describe('the chosen route’s corridor reaches the scene — #1539', () => {
     const [mask] = [...masks];
     expect(mask?.bytes).toBeGreaterThan(0);
     expect(mask?.covered(0, 0)).toBe(true);
+    // #1549: the footprints planned from that corridor and mask ONCE, at the
+    // press — one index on every frame — and carried on to the renderer.
+    const towns = new Set(ride.map((input) => input.mappedBuildings));
+    expect(towns.size).toBe(1);
+    const [town] = [...towns];
+    expect(town?.plans.length).toBeGreaterThan(0);
+    const carried = frames.filter((each) => each.mappedBuildings !== undefined);
+    expect(carried.length).toBeGreaterThan(0);
+    for (const frame of carried) expect(frame.mappedBuildings?.buildings).toBe(town);
   });
 
   it('hands no corridor to the scene with no port method — today’s game', async () => {
@@ -251,6 +260,8 @@ describe('the chosen route’s corridor reaches the scene — #1539', () => {
       expect(input.worldCorridor).toBeUndefined();
       // #1546: and no land-class mask, so the scene takes `NO_LAND_CLASS`.
       expect(input.landClass).toBeUndefined();
+      // #1549: and no mapped buildings.
+      expect(input.mappedBuildings).toBeUndefined();
     }
   });
 });
@@ -332,6 +343,8 @@ describe('nothing changes during a ride — ADR 0054 D-2.4', () => {
       expect(input.worldCorridor).toBeUndefined();
       // #1546: and no land-class mask, so the scene takes `NO_LAND_CLASS`.
       expect(input.landClass).toBeUndefined();
+      // #1549: and no mapped buildings.
+      expect(input.mappedBuildings).toBeUndefined();
     }
   });
 });

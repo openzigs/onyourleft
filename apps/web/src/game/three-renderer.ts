@@ -241,9 +241,28 @@ import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import type { KitColour } from '@onyourleft/store';
 
 import {
+  BAY_METRES,
+  FOOTPRINT_SURFACES,
+  FOOTPRINT_VERTEX_FLOATS,
+  STOREY_METRES,
+  type FootprintPlan,
+  type FootprintRole,
+} from './footprint-buildings';
+import {
+  FAR_ROLES,
+  MappedSelection,
+  NEAR_ROLES,
+  roleTriangles,
+  selectMappedBuildings,
+  surfaceOfRole,
+  type MappedBuildings,
+  type MappedBuildingsInView,
+} from './mapped-buildings';
+import {
   BUILDING_ROLES,
   BUILDING_VARIANTS,
   buildingPlan,
+  FOUNDATION_METRES,
   isBuiltKind,
   type BuildingPlan,
   type BuildingRole,
@@ -351,6 +370,7 @@ import {
   type RealisticRiderMap,
   type RealisticTrees,
   type RealisticVegetationKind,
+  type PhotographicSurface,
   type RealisticWorldOutcome,
   type StructureSurface,
 } from './realistic-assets';
@@ -417,12 +437,15 @@ import {
   writeRoadPatchReach,
 } from './road-wear';
 import {
+  MAPPED_BUILDING_DRAW_CALLS,
+  MAPPED_BUILDING_TRIANGLES,
   REALISTIC_GROUND_BLOBS,
   REALISTIC_NEAR_MESHES,
   REALISTIC_REMOTE_RIDERS,
   REALISTIC_REMOTE_STYLISED_RIDERS,
   REALISTIC_STRUCTURE_ITEMS,
   REALISTIC_TREE_LEVELS,
+  REALISTIC_TRIANGLES,
 } from './realistic-budget';
 import { MAXIMUM_DRAWN_SET } from '../net/interest';
 import {
@@ -11907,6 +11930,490 @@ export class RealisticStructureBelts {
   }
 }
 
+/** What one {@link MappedBuildingBelt.refill} drew. @see MappedBuildingBelt */
+export interface MappedBuildingStats {
+  /** The buildings drawn, near and far together. */
+  readonly buildings: number;
+  readonly near: number;
+  readonly far: number;
+  readonly triangles: number;
+  /** The groups the one mesh draws: one a surface, at most `MAPPED_BUILDING_DRAW_CALLS`. */
+  readonly drawCalls: number;
+  /**
+   * In reach and inside the budget, but passed over because its surfaces would
+   * have opened a seventh — `mapped-buildings.ts` §`selectMappedBuildings`.
+   */
+  readonly passed: number;
+}
+
+/** A mapped building's role's shade, as {@link REALISTIC_ROLE_SHADE} darkens a procedural one's. */
+const MAPPED_ROLE_SHADE: Readonly<Record<FootprintRole, number>> = {
+  wall: REALISTIC_ROLE_SHADE.wall,
+  plinth: REALISTIC_ROLE_SHADE.plinth,
+  roof: REALISTIC_ROLE_SHADE.roof,
+  parapet: REALISTIC_ROLE_SHADE.wall,
+  door: REALISTIC_ROLE_SHADE.door,
+};
+
+/** The materials {@link withVertexTint} has taught. */
+const VERTEX_TINT_TAUGHT = new WeakSet<Material>();
+
+/**
+ * Whether a material reads its seeded tint from a VERTEX attribute — #1549.
+ *
+ * @test-facing held by `mapped-building-belt.test.ts` §"the mapped buildings’
+ * materials", which asserts every mapped building's material is taught it
+ */
+export function readsVertexTint(material: Material): boolean {
+  return VERTEX_TINT_TAUGHT.has(material);
+}
+
+/**
+ * Teaches a material #621's seeded tint from a vertex attribute, `oylTint` —
+ * #1549. A procedural structure carries its tint in its INSTANCE colour's
+ * third channel ({@link withInstanceChannels}); a merged mesh has no instance,
+ * so each vertex carries its building's tint instead, the same one packed float
+ * (`instance-tint.ts` §`packedInstanceTint`), decoded and applied by the same
+ * GLSL ({@link TINT_DECODE_GLSL}, {@link TINT_APPLY_GLSL}). Throws, as the
+ * instance path does, if three's program no longer holds an include it is
+ * spliced at. Idempotent.
+ */
+function withVertexTint<M extends Material>(material: M): M {
+  if (VERTEX_TINT_TAUGHT.has(material)) return material;
+  VERTEX_TINT_TAUGHT.add(material);
+  const earlier = material.onBeforeCompile.bind(material);
+  const earlierKey = material.customProgramCacheKey();
+  material.onBeforeCompile = (shader, renderer) => {
+    earlier(shader, renderer);
+    shader.vertexShader = replacedOrThrown(
+      replacedOrThrown(
+        shader.vertexShader,
+        '#include <common>',
+        `#include <common>\nattribute float oylTint;\nvarying vec3 vOylTint;\n${TINT_DECODE_GLSL}`,
+        'vertex',
+      ),
+      '#include <color_vertex>',
+      '#include <color_vertex>\nvOylTint = oylTintOf(oylTint);',
+      'vertex',
+    );
+    shader.fragmentShader = replacedOrThrown(
+      replacedOrThrown(
+        shader.fragmentShader,
+        '#include <common>',
+        `#include <common>\nvarying vec3 vOylTint;\n${TINT_APPLY_GLSL}`,
+        'fragment',
+      ),
+      '#include <color_fragment>',
+      '#include <color_fragment>\ndiffuseColor.rgb = oylTinted(diffuseColor.rgb, vOylTint);',
+      'fragment',
+    );
+  };
+  material.customProgramCacheKey = () => `${earlierKey}|oyl-vertex-tint`;
+  return material;
+}
+
+/**
+ * One mapped building surface's material — #1549: the structure surface's
+ * own photograph and finish ({@link STRUCTURE_SURFACE_FINISH}), constructed
+ * here (ADR 0026 D-11) from the world's compressed textures (#618), with its
+ * texture bias (#619), the realistic air (#622), and its tint from the vertex
+ * ({@link withVertexTint}).
+ */
+function mappedBuildingMaterial(
+  surface: StructureSurface,
+  textures: RealisticWorld['structures'],
+): MeshStandardMaterial {
+  const finish = STRUCTURE_SURFACE_FINISH[surface];
+  const maps = isPhotographic(surface) ? textures.get(surface) : undefined;
+  const material = constructed(
+    new MeshStandardMaterial({
+      color: finish.tint,
+      roughness: finish.roughness,
+      metalness: finish.metalness,
+      vertexColors: true,
+      ...(maps === undefined ? {} : { map: maps.colour, normalMap: maps.normal }),
+    }),
+  );
+  return withAtmosphere(
+    withVertexTint(maps === undefined ? material : withTextureLodBias(material)),
+  );
+}
+
+/**
+ * Whether the mapped buildings are merged, a group a surface — always, but
+ * for the browser gate's control. @see setMappedBuildingsMerged
+ */
+let mappedBuildingsMerged = true;
+
+/**
+ * Draws the mapped buildings refilled after this call one group a building and
+ * surface — a draw call each, as a belt of one mesh a building would — or
+ * merged again — #1549's control: with D-5.6's 36 buildings in reach the merged belt
+ * submits at most `MAPPED_BUILDING_DRAW_CALLS` calls, and this submits more.
+ *
+ * @test-facing the browser gate's control, read by `game-harness.ts`
+ * §`mappedTownProbe` and `mapped-building-belt.test.ts` §"at most six draw
+ * calls"; the product always merges
+ */
+export function setMappedBuildingsMerged(merged: boolean): void {
+  mappedBuildingsMerged = merged;
+}
+
+/** The capacity of {@link MappedBuildingBelt}'s buffer, in vertices. */
+const MAPPED_VERTICES = MAPPED_BUILDING_TRIANGLES * 3;
+
+/** One drawn building, where its triangles are. @see MappedBuildingBelt.drawnAt */
+export interface DrawnMappedBuilding {
+  /** Its plan's place in `MappedBuildings.plans`. */
+  readonly plan: number;
+  readonly far: boolean;
+  /** Its first vertex in its wall surface's range, and in its roof surface's. */
+  readonly wallAt: number;
+  readonly roofAt: number;
+}
+
+/**
+ * The realistic world's buildings from map data — #1549, ADR 0054.
+ *
+ * A footprint is unique, so it cannot be instanced. The plans in reach
+ * (`mapped-buildings.ts` §`selectMappedBuildings`) are appended into **one
+ * preallocated buffer** of `realistic-budget.ts` §`MAPPED_BUILDING_TRIANGLES`
+ * triangles, laid out surface by surface, and drawn by **one mesh with a group
+ * a surface**: at most `MAPPED_BUILDING_DRAW_CALLS` draw calls whatever the
+ * count, because the selection never opens a seventh surface.
+ *
+ * ⚠️ **One buffer with a range a surface, not a buffer a surface.** The
+ * budget is shared, and one surface can take all of it (a street of brick),
+ * so a buffer a surface would each need the whole capacity: eight surfaces,
+ * eight times the memory, where one buffer of the budget holds any mix.
+ *
+ * - **Rebuilt only at a refill**, which the view runs when the rider's chunk
+ *   (`MAPPED_CHUNK_METRES`) changes, or the rung does; never per frame. A
+ *   frame that is not a refill reads one number and allocates nothing.
+ * - **Uploaded in part**: each attribute's update range is what was written.
+ * - **The far level**, beyond `MAPPED_BUILDING_NEAR_METRES`, is a plan's walls
+ *   and roof (#1540's `farTriangleCount`). The plinth, parapet and door are
+ *   left out.
+ * - **The texture coordinates** of a plan are in its storeys and bays
+ *   (`footprint-buildings.ts` §`BAY_METRES`). They are taken back to metres and
+ *   laid at the photograph's own size, as {@link projectedInMetres} lays a
+ *   procedural building's, so a brick is a brick's size on both.
+ * - **The vertex colour** is the role's shade ({@link MAPPED_ROLE_SHADE}) and
+ *   #500's grounding above the ground the plinth stands in. A part raised on a
+ *   `min_height` has no plinth and no grounding.
+ * - **#621's tint** is a vertex attribute here, not the instance colour's
+ *   third channel: there is no instance. @see withVertexTint
+ * - **No ground blob** (#620): `realistic-budget.ts` §`MAPPED_BUILDING_TRIANGLES`.
+ * - **Never culled as a whole** (`frustumCulled` off): the buildings in reach
+ *   stand all round the rider, so a sphere about them always holds the camera.
+ */
+export class MappedBuildingBelt {
+  readonly mesh: Mesh;
+  readonly buildings: MappedBuildings;
+  readonly #materials: ReadonlyMap<StructureSurface, MeshStandardMaterial>;
+  /** The mesh's material list: the surface each group draws, by its place. */
+  readonly #slots: Material[];
+  readonly #position: BufferAttribute;
+  readonly #normal: BufferAttribute;
+  readonly #uv: BufferAttribute;
+  readonly #colour: BufferAttribute;
+  readonly #tint: BufferAttribute;
+  readonly #selection = new MappedSelection();
+  /** Where each surface's range starts, and where its next triangle goes, in vertices. */
+  readonly #starts = new Int32Array(MAPPED_BUILDING_DRAW_CALLS);
+  readonly #cursors = new Int32Array(MAPPED_BUILDING_DRAW_CALLS);
+  /** Each drawn building's first vertex in its wall surface's range and in its roof's. */
+  readonly #wallAt: Int32Array;
+  readonly #roofAt: Int32Array;
+  #stats: MappedBuildingStats = {
+    buildings: 0,
+    near: 0,
+    far: 0,
+    triangles: 0,
+    drawCalls: 0,
+    passed: 0,
+  };
+  /** The chunk the last refill was for; `undefined` before the first, or once the rung moved. */
+  #chunk: number | undefined;
+  #refills = 0;
+  #shown = true;
+  /** Whether the browser gate has turned the mapped buildings off — its control. */
+  #switchedOn = true;
+  /** Whether this frame carried the mapped buildings at all. @see setCarried */
+  #carried = true;
+
+  /** @param textures the world's structure surfaces. @see RealisticWorld.structures */
+  constructor(buildings: MappedBuildings, textures: RealisticWorld['structures']) {
+    this.buildings = buildings;
+    this.#wallAt = new Int32Array(this.#selection.plans.length);
+    this.#roofAt = new Int32Array(this.#selection.plans.length);
+    this.#materials = new Map(
+      FOOTPRINT_SURFACES.map((surface) => [surface, mappedBuildingMaterial(surface, textures)]),
+    );
+    const first = this.#materials.get(FOOTPRINT_SURFACES[0] as StructureSurface) as Material;
+    this.#slots = Array.from({ length: MAPPED_BUILDING_DRAW_CALLS }, () => first);
+    const attribute = (size: number): BufferAttribute =>
+      new BufferAttribute(new Float32Array(MAPPED_VERTICES * size), size).setUsage(
+        DynamicDrawUsage,
+      );
+    this.#position = attribute(3);
+    this.#normal = attribute(3);
+    this.#uv = attribute(2);
+    this.#colour = attribute(3);
+    this.#tint = attribute(1);
+    const geometry = new BufferGeometry();
+    geometry.setAttribute('position', this.#position);
+    geometry.setAttribute('normal', this.#normal);
+    geometry.setAttribute('uv', this.#uv);
+    geometry.setAttribute('color', this.#colour);
+    geometry.setAttribute('oylTint', this.#tint);
+    geometry.setDrawRange(0, 0);
+    this.mesh = new Mesh(geometry, this.#slots);
+    this.mesh.frustumCulled = false;
+    this.mesh.visible = false;
+  }
+
+  addTo(scene: Scene): void {
+    scene.add(this.mesh);
+  }
+
+  /** What the last refill drew. */
+  get stats(): MappedBuildingStats {
+    return this.#stats;
+  }
+
+  /** How many refills this belt has run — for the tests' count over a ride. */
+  get refills(): number {
+    return this.#refills;
+  }
+
+  /** The material a surface wears here: one each, constructed with the belt. */
+  materialOf(surface: StructureSurface): MeshStandardMaterial | undefined {
+    return this.#materials.get(surface);
+  }
+
+  /** Whether a frame at `chunk` needs a refill: the rider's chunk changed, or the rung did. */
+  needsRefill(chunk: number): boolean {
+    return chunk !== this.#chunk;
+  }
+
+  /** The rung changed: the next frame refills, whatever its chunk. */
+  invalidate(): void {
+    this.#chunk = undefined;
+  }
+
+  setShown(on: boolean): void {
+    this.#shown = on;
+    this.#applyVisible();
+  }
+
+  /** @see mappedBuildingsShownOf */
+  switchOn(on: boolean): void {
+    this.#switchedOn = on;
+    this.#applyVisible();
+  }
+
+  /**
+   * Whether the frame carried the mapped buildings — a frame with none (the
+   * browser gate's bare frame) draws none, and the next that carries them
+   * draws what the last refill wrote.
+   */
+  setCarried(on: boolean): void {
+    this.#carried = on;
+    this.#applyVisible();
+  }
+
+  /** Whether the mapped buildings are drawn at all: shown, switched on and carried. */
+  get drawing(): boolean {
+    return this.#shown && this.#switchedOn && this.#carried;
+  }
+
+  #applyVisible(): void {
+    this.mesh.visible = this.drawing && this.#stats.triangles > 0;
+  }
+
+  /**
+   * The buildings nearest `(riderX, riderZ)` that fit `triangleBudget`,
+   * appended in place, with the draw range and the groups set — #1549. The
+   * view calls it when {@link needsRefill}; `chunk` is recorded so the next
+   * frame in that chunk does not refill again.
+   */
+  refill(
+    riderX: number,
+    riderZ: number,
+    triangleBudget: number,
+    chunk?: number,
+  ): MappedBuildingStats {
+    this.#refills += 1;
+    this.#chunk = chunk;
+    const selection = this.#selection;
+    selectMappedBuildings(
+      this.buildings,
+      riderX,
+      riderZ,
+      Math.min(triangleBudget, MAPPED_BUILDING_TRIANGLES),
+      selection,
+    );
+    const surfaces = selection.surfaces;
+    let end = 0;
+    for (let slot = 0; slot < surfaces.length; slot += 1) {
+      this.#starts[slot] = end;
+      this.#cursors[slot] = end;
+      end += (selection.surfaceTriangles[slot] ?? 0) * 3;
+      this.#slots[slot] = this.#materials.get(surfaces[slot] as StructureSurface) as Material;
+    }
+    for (let at = 0; at < selection.count; at += 1) {
+      const plan = this.buildings.plans[selection.plans[at] as number] as FootprintPlan;
+      const wall = surfaces.indexOf(plan.surfaces.wall);
+      const roof = surfaces.indexOf(plan.surfaces.roof);
+      this.#wallAt[at] = this.#cursors[wall] as number;
+      this.#roofAt[at] = this.#cursors[roof] as number;
+      for (const role of selection.far[at] === 1 ? FAR_ROLES : NEAR_ROLES) {
+        const slot = role === 'roof' ? roof : wall;
+        this.#cursors[slot] = this.#append(plan, role, this.#cursors[slot] as number);
+      }
+    }
+    const geometry = this.mesh.geometry;
+    geometry.clearGroups();
+    if (mappedBuildingsMerged) {
+      for (let slot = 0; slot < surfaces.length; slot += 1) {
+        const count = (selection.surfaceTriangles[slot] ?? 0) * 3;
+        if (count > 0) geometry.addGroup(this.#starts[slot] as number, count, slot);
+      }
+    } else {
+      this.#groupEachBuilding();
+    }
+    geometry.setDrawRange(0, end);
+    for (const attribute of [this.#position, this.#normal, this.#uv, this.#colour, this.#tint]) {
+      attribute.clearUpdateRanges();
+      if (end > 0) {
+        attribute.addUpdateRange(0, end * attribute.itemSize);
+        attribute.needsUpdate = true;
+      }
+    }
+    this.#stats = {
+      buildings: selection.count,
+      near: selection.near,
+      far: selection.farCount,
+      triangles: selection.triangles,
+      drawCalls: geometry.groups.length,
+      passed: selection.passed,
+    };
+    this.#applyVisible();
+    return this.#stats;
+  }
+
+  /** The browser gate's control: a group — a draw call — per building and surface. */
+  #groupEachBuilding(): void {
+    const selection = this.#selection;
+    for (let at = 0; at < selection.count; at += 1) {
+      const plan = this.buildings.plans[selection.plans[at] as number] as FootprintPlan;
+      let walls = 0;
+      for (const role of selection.far[at] === 1 ? FAR_ROLES : NEAR_ROLES) {
+        if (role !== 'roof') walls += roleTriangles(plan, role) * 3;
+      }
+      const geometry = this.mesh.geometry;
+      const surfaces = selection.surfaces;
+      geometry.addGroup(this.#wallAt[at] as number, walls, surfaces.indexOf(plan.surfaces.wall));
+      geometry.addGroup(
+        this.#roofAt[at] as number,
+        roleTriangles(plan, 'roof') * 3,
+        surfaces.indexOf(plan.surfaces.roof),
+      );
+    }
+  }
+
+  /** Writes one role of a plan from vertex `at`; returns the vertex after it. */
+  #append(plan: FootprintPlan, role: FootprintRole, at: number): number {
+    const floats = plan.triangles[role];
+    const vertices = roleTriangles(plan, role) * 3;
+    const surface = surfaceOfRole(plan, role) as PhotographicSurface;
+    const repeat = surfaceRepeat(REALISTIC_STRUCTURE_SURFACES[surface]);
+    // A plan's texture coordinates are bays across and storeys up, and a
+    // roof's storeys both ways: back to metres, then the photograph's repeats.
+    const acrossMetres = role === 'roof' ? STOREY_METRES : BAY_METRES;
+    const shade = MAPPED_ROLE_SHADE[role];
+    // A plan with a plinth stands in the ground at its foot; a raised part does not.
+    const grounded = plan.triangles.plinth.length > 0;
+    const ground = plan.base + FOUNDATION_METRES;
+    const position = this.#position.array as Float32Array;
+    const normal = this.#normal.array as Float32Array;
+    const uv = this.#uv.array as Float32Array;
+    const colour = this.#colour.array as Float32Array;
+    const tint = this.#tint.array as Float32Array;
+    for (let vertex = 0; vertex < vertices; vertex += 1) {
+      const from = vertex * FOOTPRINT_VERTEX_FLOATS;
+      const to = at + vertex;
+      const y = floats[from + 1] as number;
+      position[to * 3] = floats[from] as number;
+      position[to * 3 + 1] = y;
+      position[to * 3 + 2] = floats[from + 2] as number;
+      normal[to * 3] = floats[from + 3] as number;
+      normal[to * 3 + 1] = floats[from + 4] as number;
+      normal[to * 3 + 2] = floats[from + 5] as number;
+      uv[to * 2] = ((floats[from + 6] as number) * acrossMetres) / repeat.across;
+      uv[to * 2 + 1] = ((floats[from + 7] as number) * STOREY_METRES) / repeat.up;
+      const light = shade * (grounded ? groundingShade(y - ground) : 1);
+      colour[to * 3] = light;
+      colour[to * 3 + 1] = light;
+      colour[to * 3 + 2] = light;
+      tint[to] = plan.tint;
+    }
+    return at + vertices;
+  }
+
+  /**
+   * The drawn building at `place`, nearest first, and where its triangles are
+   * — for the tests, which read the buffers back against the plan.
+   */
+  drawnAt(place: number): DrawnMappedBuilding | undefined {
+    if (place < 0 || place >= this.#selection.count) return undefined;
+    return {
+      plan: this.#selection.plans[place] as number,
+      far: this.#selection.far[place] === 1,
+      wallAt: this.#wallAt[place] as number,
+      roofAt: this.#roofAt[place] as number,
+    };
+  }
+
+  dispose(): void {
+    this.mesh.geometry.dispose();
+    for (const material of this.#materials.values()) material.dispose();
+  }
+}
+
+/**
+ * One frame's turn of the mapped buildings — #1549, `RealisticDrawing`'s
+ * rule, apart from the view so a test can ride it: refills `belt` when the
+ * frame's chunk changed (or the rung did, {@link MappedBuildingBelt.invalidate}),
+ * with the triangles the frame's procedural structures leave of the rung's
+ * `structureItems` (at most `REALISTIC_STRUCTURE_ITEMS`), each structure item
+ * and billboard counted at `REALISTIC_TRIANGLES.structure`. Returns the most
+ * procedural structures may then draw until the next refill, or `undefined`
+ * on a frame that is not a refill — which reads one number and allocates
+ * nothing.
+ */
+export function refillMappedBuildings(
+  belt: MappedBuildingBelt,
+  view: MappedBuildingsInView,
+  scatter: readonly ScatterItem[],
+  billboards: number,
+  structureItems: number,
+): number | undefined {
+  if (!belt.needsRefill(view.chunk)) return undefined;
+  const structure = REALISTIC_TRIANGLES.structure;
+  const items = Math.min(structureItems, REALISTIC_STRUCTURE_ITEMS);
+  let procedural = billboards;
+  for (const item of scatter) if (isStructureKind(item.kind)) procedural += 1;
+  const stats = belt.refill(
+    view.x,
+    view.z,
+    Math.max(0, items - procedural) * structure,
+    view.chunk,
+  );
+  return items - Math.ceil(stats.triangles / structure);
+}
+
 /** Which of #621's bounds a realistic item's tint is drawn inside. @see realisticTints */
 type RealisticTintClass = 'foliage' | 'masonry';
 
@@ -12012,6 +12519,23 @@ class RealisticDrawing {
   readonly #casterLists: readonly BlobCasters[];
   /** The rung's scenery budget, as the structure belts spend it. @see setBudget */
   #budget = Number.POSITIVE_INFINITY;
+  /** The rung's structures — what the procedural and the mapped buildings share. @see setBudget */
+  #structureItems: number = REALISTIC_STRUCTURE_ITEMS;
+  /**
+   * The most procedural structures a frame may draw while the mapped buildings
+   * hold their share — #1549: the rung's structures less what the last refill
+   * took. Unbounded with none drawn. @see updateMapped
+   */
+  #structureCap = Number.POSITIVE_INFINITY;
+  /** What the last refill left the procedural structures, re-applied on every frame that carries the town. */
+  #mappedCap = Number.POSITIVE_INFINITY;
+  /** The ride's buildings from map data, once a frame has carried them — #1549. */
+  #mapped: MappedBuildingBelt | undefined;
+  /** Whether the browser gate has switched them off. @see mappedBuildingsShownOf */
+  #mappedOn = true;
+  #shown = true;
+  /** Where the belts were added, for the mapped buildings' belt, built later. */
+  #scene: Scene | undefined;
 
   constructor(
     world: RealisticWorld,
@@ -12115,6 +12639,8 @@ class RealisticDrawing {
   }
 
   addTo(scene: Scene): void {
+    this.#scene = scene;
+    this.#mapped?.addTo(scene);
     this.vegetation.addTo(scene);
     this.structures.addTo(scene);
     this.primitives.addTo(scene);
@@ -12128,6 +12654,8 @@ class RealisticDrawing {
   }
 
   setShown(on: boolean): void {
+    this.#shown = on;
+    this.#mapped?.setShown(on);
     this.vegetation.setShown(on);
     this.structures.setShown(on);
     this.primitives.setShown(on);
@@ -12156,11 +12684,87 @@ class RealisticDrawing {
    * belt alone, and the trees — the realistic world's cost — were free.
    * @see RealisticVegetationBelt.setBudget
    */
-  setBudget(items: number): void {
+  setBudget(items: number, structureItems: number): void {
     this.#budget = items;
+    // #1549: a new rung is a new share between the procedural structures and
+    // the mapped buildings, so the next frame refills whatever its chunk.
+    if (structureItems !== this.#structureItems) this.#mapped?.invalidate();
+    this.#structureItems = structureItems;
     this.vegetation.setBudget(items);
-    this.structures.setBudget(items);
+    this.structures.setBudget(Math.min(items, this.#structureCap));
     this.primitives.setBudget(items);
+  }
+
+  /**
+   * The ride's buildings from map data — #1549. Called once a frame, BEFORE
+   * {@link updateScenery}, with the frame's own scenery and billboards.
+   *
+   * On a frame whose chunk changed (or whose rung did) the belt refills with
+   * the triangles the frame's procedural structures leave of the rung's —
+   * every structure item and billboard in the frame counted at
+   * `REALISTIC_TRIANGLES.structure`, which is what the structure term prices
+   * each at — so the procedural structures are taken first, as `structuresAt`
+   * orders them. Until the next refill the procedural structures keep to
+   * what the mapped buildings left them ({@link #structureCap}), so a
+   * structure coming into view mid-chunk cannot push the term past
+   * `MAPPED_BUILDING_TRIANGLES`: the farthest goes undrawn, as the rung's
+   * budget already drops one.
+   *
+   * ⚠️ The cap holds the PROCEDURAL structure belt only. Billboards are
+   * counted at a refill and not between: the logo belts draw them uncapped, so
+   * a board that comes into view mid-chunk can put the structure term a few
+   * items over until the next refill. The held-to-the-budget guarantee is
+   * strict for structures, one refill behind for billboards.
+   *
+   * Every other frame reads one number and allocates nothing.
+   */
+  updateMapped(
+    view: MappedBuildingsInView | undefined,
+    scatter: readonly ScatterItem[],
+    billboards: number,
+  ): void {
+    if (view === undefined || !this.#mappedOn) {
+      this.#mapped?.setCarried(view !== undefined);
+      this.#capStructures(Number.POSITIVE_INFINITY);
+      return;
+    }
+    if (this.#mapped?.buildings !== view.buildings) {
+      this.#mapped?.mesh.removeFromParent();
+      this.#mapped?.dispose();
+      this.#mapped = new MappedBuildingBelt(view.buildings, this.#world.structures);
+      this.#mapped.setShown(this.#shown);
+      if (this.#scene !== undefined) this.#mapped.addTo(this.#scene);
+    }
+    this.#mapped.setCarried(true);
+    const cap = refillMappedBuildings(
+      this.#mapped,
+      view,
+      scatter,
+      billboards,
+      this.#structureItems,
+    );
+    if (cap !== undefined) this.#mappedCap = cap;
+    this.#capStructures(this.#mappedCap);
+  }
+
+  /** Holds the procedural structures to `cap` items. @see updateMapped */
+  #capStructures(cap: number): void {
+    if (cap === this.#structureCap) return;
+    this.#structureCap = cap;
+    this.structures.setBudget(Math.min(this.#budget, cap));
+  }
+
+  /** The mapped buildings' belt, once a frame has carried them — #1549. */
+  get mapped(): MappedBuildingBelt | undefined {
+    return this.#mapped;
+  }
+
+  /** @see mappedBuildingsShownOf */
+  mappedShown(on: boolean): void {
+    this.#mappedOn = on;
+    this.#mapped?.switchOn(on);
+    // The next frame with them on refills: what it drew before may be stale.
+    if (on) this.#mapped?.invalidate();
   }
 
   /**
@@ -12180,7 +12784,7 @@ class RealisticDrawing {
     structureCasters(
       items,
       pose,
-      this.#budget,
+      Math.min(this.#budget, this.#structureCap),
       (kind) => this.structures.heightOf(kind),
       this.#structureCasters,
     );
@@ -12193,6 +12797,7 @@ class RealisticDrawing {
   }
 
   dispose(): void {
+    this.#mapped?.dispose();
     this.vegetation.dispose();
     this.structures.dispose();
     this.primitives.dispose();
@@ -12717,6 +13322,34 @@ export function wordmarkOrientationOf(view: GameView, orientation: WordmarkOrien
 export function logoBoardsOf(view: GameView): number {
   const mesh = view instanceof ThreeGameView ? view.logoMesh : undefined;
   return mesh?.visible === true ? mesh.count : 0;
+}
+
+/**
+ * Turns a view's buildings from map data off, or on again — #1549. The
+ * browser gate's control (`&levers=-mapped-buildings`): with them off, the
+ * probe aimed at a mapped wall must read the ground behind it, and the frame
+ * spend none of their draw calls.
+ *
+ * @test-facing the browser gate's control switch, read by `game-harness.ts`;
+ * the product always draws them.
+ */
+export function mappedBuildingsShownOf(view: GameView, on: boolean): void {
+  if (view instanceof ThreeGameView) view.mappedBuildingsShown(on);
+}
+
+/**
+ * What a view's buildings from map data drew at its last refill, and the
+ * belt itself — #1549, for the browser gate's counts. `undefined` before a
+ * realistic frame has carried any.
+ *
+ * @test-facing read by `game-harness.ts` §`mappedTownProbe`; the product
+ * reads the belt's stats nowhere
+ */
+export function mappedBuildingStatsOf(
+  view: GameView,
+): { readonly stats: MappedBuildingStats; readonly refills: number } | undefined {
+  const belt = view instanceof ThreeGameView ? view.mappedBuildings : undefined;
+  return belt === undefined ? undefined : { stats: belt.stats, refills: belt.refills };
 }
 
 /**
@@ -13435,6 +14068,9 @@ class ThreeGameView implements GameView {
         )
       : frame.scatter;
     this.#scatter.update(scenery, frame.camera);
+    // #1549: the buildings from map data, refilled only at a chunk — before
+    // the structures, whose share of the rung it may change.
+    this.#realistic?.updateMapped(frame.mappedBuildings, frame.scatter, frame.billboards.length);
     this.#realistic?.updateScenery(scenery, frame.camera);
     this.#realistic?.groundScenery(
       scenery,
@@ -13563,7 +14199,10 @@ class ThreeGameView implements GameView {
     // ⚠️ Since #460 the frame carries the structures before the scenery, each
     // with a budget of its own, so the belt's is the two together.
     this.#scatter.setBudget(settings.scatterItems + settings.structureItems);
-    this.#realistic?.setBudget(settings.scatterItems + settings.structureItems);
+    this.#realistic?.setBudget(
+      settings.scatterItems + settings.structureItems,
+      settings.structureItems,
+    );
     // #367, and the same argument one line up: a rung is a property of the belt
     // between frames, so the render loop takes no decision about how many
     // distinct shapes it may draw. @see ScatterBelt.setVariants
@@ -13617,7 +14256,10 @@ class ThreeGameView implements GameView {
           this.#surfaces,
         );
         this.#realistic.addTo(this.#scene);
-        this.#realistic.setBudget(this.#quality.scatterItems + this.#quality.structureItems);
+        this.#realistic.setBudget(
+          this.#quality.scatterItems + this.#quality.structureItems,
+          this.#quality.structureItems,
+        );
       }
     }
     const drawing = realistic ? this.#realistic : undefined;
@@ -13794,6 +14436,16 @@ class ThreeGameView implements GameView {
   /** @see logoBoardsOf — the drawn world's. */
   get logoMesh(): InstancedMesh | undefined {
     return this.#drawing === 'realistic' ? this.#realistic?.logos.mesh : this.#logos.mesh;
+  }
+
+  /** @see mappedBuildingsShownOf */
+  mappedBuildingsShown(on: boolean): void {
+    this.#realistic?.mappedShown(on);
+  }
+
+  /** @see mappedBuildingStatsOf */
+  get mappedBuildings(): MappedBuildingBelt | undefined {
+    return this.#realistic?.mapped;
   }
 
   /** @see pavementsShownOf */

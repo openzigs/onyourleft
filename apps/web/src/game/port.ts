@@ -39,6 +39,7 @@ import type { PlacedStand } from './gantry';
 import type { KitColour } from '@onyourleft/store';
 
 import type { HorizonRelief, TerrainMesh } from './landform';
+import type { MappedBuildingsInView } from './mapped-buildings';
 import type { QualitySettings } from './quality';
 import type { RealisticWorldOutcome } from './realistic-assets';
 import type { ScatterItem } from './scatter';
@@ -311,6 +312,15 @@ export interface SceneFrame {
    * §`SideRoadBelt`). Empty away from a junction.
    */
   readonly sideRoads: readonly SideRoad[];
+  /**
+   * The ride's mapped buildings and where the rider is among them — #1549.
+   * Absent on a ride with no corridor. Drawn only on the realistic rungs
+   * (`three-renderer.ts` §`MappedBuildingBelt`), refilled only when
+   * `chunk` changes; the stylised world draws none (ADR 0026 D-3's rule is
+   * the arrangement, and a ride is given a corridor only in the realistic
+   * world, ADR 0054 D-6).
+   */
+  readonly mappedBuildings?: MappedBuildingsInView;
 }
 
 /** What {@link SceneFrame.water} carries. */
