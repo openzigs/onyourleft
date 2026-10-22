@@ -2781,34 +2781,36 @@ function mappedPavementProbe(
   const mapped = frameWith(corridor);
   const procedural = frameWith(undefined);
   const lateral = KERB_LATERAL_METRES + PAVEMENT_WIDTH_METRES / 2;
-  const probe = (frame: SceneFrame, across: number): number[] => {
+  // ONE render a state, both probes read off it: this load is within seconds
+  // of its budget on the runner (`paysForTheLoad`), and a render is ~0.3 s there.
+  const probes = (frame: SceneFrame): { right: number[]; left: number[] } => {
     view.render(frame);
-    view.render(frame);
-    const road = onTheRoad(frame, 25, across);
-    const centre = pixelFor(frame, canvas, { ...road, y: road.y + KERB_HEIGHT_METRES });
-    const pixels = readRegion(gl, Math.round(centre.x) - 1, Math.round(centre.y) - 1, 3, 3);
-    const sums = [0, 0, 0];
-    for (let at = 0; at < pixels.length; at += 4) {
-      for (let channel = 0; channel < 3; channel += 1) {
-        sums[channel] = (sums[channel] ?? 0) + (pixels[at + channel] ?? 0);
+    const meanAt = (across: number): number[] => {
+      const road = onTheRoad(frame, 25, across);
+      const centre = pixelFor(frame, canvas, { ...road, y: road.y + KERB_HEIGHT_METRES });
+      const pixels = readRegion(gl, Math.round(centre.x) - 1, Math.round(centre.y) - 1, 3, 3);
+      const sums = [0, 0, 0];
+      for (let at = 0; at < pixels.length; at += 4) {
+        for (let channel = 0; channel < 3; channel += 1) {
+          sums[channel] = (sums[channel] ?? 0) + (pixels[at + channel] ?? 0);
+        }
       }
-    }
-    return sums.map((sum) => sum / 9);
+      return sums.map((sum) => sum / 9);
+    };
+    return { right: meanAt(lateral), left: meanAt(-lateral) };
   };
-  const rightMapped = probe(mapped, lateral);
-  const leftMapped = probe(mapped, -lateral);
-  const leftProcedural = probe(procedural, -lateral);
+  const withMap = probes(mapped);
+  const ownSides = probes(procedural);
   pavementsShownOf(view, false);
-  const rightOff = probe(mapped, lateral);
-  const leftOff = probe(mapped, -lateral);
+  const off = probes(mapped);
   pavementsShownOf(view, true);
   return {
     sideAtProbe: pavementSides(corridor, profile, origin).sideAt(middle),
-    rightMapped,
-    rightOff,
-    leftMapped,
-    leftProcedural,
-    leftOff,
+    rightMapped: withMap.right,
+    rightOff: off.right,
+    leftMapped: withMap.left,
+    leftProcedural: ownSides.left,
+    leftOff: off.left,
   };
 }
 
