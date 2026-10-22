@@ -246,6 +246,80 @@ export function fieldGround(land: LandClassMask, x: number, z: number): boolean 
   return here === 'unknown' || here === 'farmland' || here === 'other';
 }
 
+/** One land-use polygon's bounding box, for {@link kindAt}'s first test. */
+interface KindIndexEntry {
+  readonly feature: LandUseFeature;
+  readonly code: number;
+  readonly minX: number;
+  readonly maxX: number;
+  readonly minZ: number;
+  readonly maxZ: number;
+}
+
+/** Each corridor's land-use polygons with their boxes, built on first ask. */
+const kindIndexes = new WeakMap<WorldCorridor, readonly KindIndexEntry[]>();
+
+function kindIndexOf(corridor: WorldCorridor): readonly KindIndexEntry[] {
+  const known = kindIndexes.get(corridor);
+  if (known !== undefined) return known;
+  const entries: KindIndexEntry[] = [];
+  for (const feature of corridor.landUse) {
+    const outer = feature.rings[0];
+    if (outer === undefined || outer.length < 6) continue;
+    let minX = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let minZ = Number.POSITIVE_INFINITY;
+    let maxZ = Number.NEGATIVE_INFINITY;
+    for (let i = 0; i + 1 < outer.length; i += 2) {
+      minX = Math.min(minX, outer[i] as number);
+      maxX = Math.max(maxX, outer[i] as number);
+      minZ = Math.min(minZ, outer[i + 1] as number);
+      maxZ = Math.max(maxZ, outer[i + 1] as number);
+    }
+    const code = CLASS_OF_CODE.indexOf(landClassOfKind(feature.layer, feature.kind));
+    entries.push({ feature, code, minX, maxX, minZ, maxZ });
+  }
+  kindIndexes.set(corridor, entries);
+  return entries;
+}
+
+/** Even-odd: whether `(x, z)` is inside the polygon, holes and all. */
+function insidePolygon(feature: LandUseFeature, x: number, z: number): boolean {
+  let inside = false;
+  for (const ring of feature.rings) {
+    const n = ring.length / 2;
+    for (let i = 0, j = n - 1; i < n; j = i, i += 1) {
+      const xi = ring[i * 2] as number;
+      const zi = ring[i * 2 + 1] as number;
+      const xj = ring[j * 2] as number;
+      const zj = ring[j * 2 + 1] as number;
+      if (zi > z !== zj > z && x < ((xj - xi) * (z - zi)) / (zj - zi) + xi) inside = !inside;
+    }
+  }
+  return inside;
+}
+
+/**
+ * The `landuse` (or `water`) `kind` at `(x, z)` — #1540: which built-up land a
+ * mapped building stands on, `residential`, `commercial` or `industrial`,
+ * which the mask's class does not keep. Of the polygons covering the point,
+ * the one whose class wins by the mask's precedence (water > wood > park >
+ * built-up > farmland > other), so it names the land {@link LandClassMask.classAt}
+ * classes; `undefined` where none covers it. Read once a footprint at ride
+ * start, never per frame: it tests every polygon's box.
+ *
+ * @unwired #1540's footprint plans are its one reader, and #1549 draws them.
+ */
+export function kindAt(corridor: WorldCorridor, x: number, z: number): string | undefined {
+  let best: KindIndexEntry | undefined;
+  for (const entry of kindIndexOf(corridor)) {
+    if (x < entry.minX || x > entry.maxX || z < entry.minZ || z > entry.maxZ) continue;
+    if (best !== undefined && entry.code <= best.code) continue;
+    if (insidePolygon(entry.feature, x, z)) best = entry;
+  }
+  return best?.feature.kind;
+}
+
 function chunkKey(column: number, row: number): number {
   return (row + CHUNK_RANGE) * CHUNK_STRIDE + (column + CHUNK_RANGE);
 }

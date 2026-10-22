@@ -31,6 +31,7 @@ import {
 } from '@onyourleft/map-features/testing';
 import { metres, type RouteProfile } from '@onyourleft/domain';
 
+import type { FootprintVerdicts } from '../src/game/footprint-buildings';
 import type { LandClass, LandClassMask } from '../src/game/land-class';
 import { northRoute } from '../src/game/route-fixtures-testing';
 import { STRUCTURE_KINDS, type SceneryKind } from '../src/game/scatter';
@@ -74,8 +75,34 @@ export function roadsideWoodTile(): Uint8Array {
         },
       ],
     },
+    // #1540: a footprint inside the wood, which the plans must drop.
+    {
+      name: 'buildings',
+      features: [
+        {
+          type: 3,
+          tags: { kind: 'building', height: 6 },
+          geometry: polygon([outerRing(rectangle(800, 2000, 860, 2060))]),
+        },
+      ],
+    },
   ]);
 }
+
+/**
+ * What #1540's plans make of this archive's footprints — exact, because
+ * `corridor-fixture.test.ts` plans the same tiles in Node and
+ * `corridor.browser.spec.ts` holds the page's `__oylCorridor.verdicts` to the
+ * same numbers, so the harness and the unit test cannot drift.
+ */
+export const CORRIDOR_FIXTURE_VERDICTS: FootprintVerdicts = {
+  kept: 5,
+  'on-excluded-land': 1,
+  'on-road': 0,
+  'too-steep': 1,
+  'too-small': 0,
+  'too-large': 0,
+};
 
 const FIXTURES = [
   residentialBlockTile,

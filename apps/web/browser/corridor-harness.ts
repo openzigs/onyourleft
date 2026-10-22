@@ -23,9 +23,15 @@
  * `?levers=-landclass` — a harness-only lever the product cannot reach —
  * hands the scene no mask, which is the browser case's control.
  *
+ * Since #1540 it also publishes {@link CorridorHarness.verdicts}: what
+ * `footprint-buildings.ts` §`footprintPlans` made of the corridor's
+ * footprints, with the corridor's own mask, and how long that took. The spec
+ * holds them to `corridor-fixture.ts` §`CORRIDOR_FIXTURE_VERDICTS`, which
+ * `corridor-fixture.test.ts` holds the same plans to in Node.
+ *
  * ⚠️ What it does NOT prove: anything about the hosted archive's latency
  * (ADR 0010 D-1's 500 ms+; #1553 measures that on the tablet), or that the
- * realistic world draws anything from the corridor (#1540).
+ * realistic world draws anything from the corridor (#1549 draws the plans).
  */
 
 import { openActivityStore } from '@onyourleft/store';
@@ -34,6 +40,8 @@ import { unixSeconds } from '@onyourleft/domain';
 import { corridorOrigin } from '../src/game/terrain';
 import { sceneFrame } from '../src/game/scene';
 import { atStartLine } from '../src/game/simulation';
+import { footprintPlans, type FootprintVerdicts } from '../src/game/footprint-buildings';
+import { denseTownFixture } from '../src/game/footprint-fixtures-testing';
 import { landClassMask } from '../src/game/land-class';
 import type { CorridorState, WorldCorridor } from '../src/game/world-data/corridor';
 import { ensureLocalAthlete, LOCAL_ATHLETE } from '../src/local-athlete';
@@ -73,6 +81,17 @@ export interface CorridorHarness {
   readonly maskBytes: number;
   /** #1546: every item along the route and the class under it; empty for `?long` or no corridor. */
   readonly classed: readonly ClassedItem[];
+  /** #1540: the plans' verdicts on the corridor's footprints; `undefined` with no corridor. */
+  readonly verdicts: FootprintVerdicts | undefined;
+  /** #1540: how long planning them took, at ride start. */
+  readonly planMilliseconds: number;
+  /**
+   * #1540's budget: the fastest of three plans of the 2 000-footprint town
+   * (`footprint-fixtures-testing.ts` §`denseTownFixture`), and what was kept.
+   * 0 for `?long`.
+   */
+  readonly townPlanMilliseconds: number;
+  readonly townKept: number;
   readonly errors: readonly string[];
 }
 
@@ -142,6 +161,25 @@ async function run(): Promise<CorridorHarness> {
   const maskStarted = performance.now();
   const mask = ready === undefined ? undefined : landClassMask(ready);
   const maskMilliseconds = performance.now() - maskStarted;
+  // #1540: the plans, once, as a ride's start would make them.
+  const planStarted = performance.now();
+  const verdicts =
+    ready === undefined || mask === undefined
+      ? undefined
+      : footprintPlans(ready, mask, profile, corridorOrigin(profile)).verdicts;
+  const planMilliseconds = performance.now() - planStarted;
+  let townPlanMilliseconds = 0;
+  let townKept = 0;
+  if (!LONG) {
+    const town = denseTownFixture();
+    const townLand = landClassMask(town.corridor);
+    townPlanMilliseconds = Number.POSITIVE_INFINITY;
+    for (let run = 0; run < 3; run += 1) {
+      const started = performance.now();
+      townKept = footprintPlans(town.corridor, townLand, town.profile, town.origin).verdicts.kept;
+      townPlanMilliseconds = Math.min(townPlanMilliseconds, performance.now() - started);
+    }
+  }
   const classed =
     ready === undefined || mask === undefined || LONG
       ? []
@@ -159,6 +197,10 @@ async function run(): Promise<CorridorHarness> {
     maskMilliseconds,
     maskBytes: mask?.bytes ?? 0,
     classed,
+    verdicts,
+    planMilliseconds,
+    townPlanMilliseconds,
+    townKept,
     errors,
   };
 }
@@ -181,6 +223,10 @@ void run().then(
       maskMilliseconds: 0,
       maskBytes: 0,
       classed: [],
+      verdicts: undefined,
+      planMilliseconds: 0,
+      townPlanMilliseconds: 0,
+      townKept: 0,
       errors: [error instanceof Error ? error.message : String(error)],
     };
   },

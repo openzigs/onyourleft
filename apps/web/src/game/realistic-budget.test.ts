@@ -82,6 +82,9 @@ import {
 import { STRUCTURE_KINDS } from './scatter';
 import { SCENERY_MODELS } from './scenery-models';
 import { BUILT_KINDS } from './buildings';
+import { footprintPlans } from './footprint-buildings';
+import { footprintFixture } from './footprint-fixtures-testing';
+import { landClassMask } from './land-class';
 import { REALISTIC_LADDER } from './quality';
 import {
   realisticBicycleTriangles,
@@ -1012,6 +1015,15 @@ describe('the realistic structures — #475, ADR 0026 D-12 layer 3', () => {
       const triangles = realisticStructureTriangles(kind);
       expect(triangles, kind).toBeGreaterThan(0);
       expect(triangles, kind).toBeLessThanOrEqual(REALISTIC_TRIANGLES.structure);
+    }
+  });
+
+  it('keeps every mapped building’s plan at or under a structure’s triangles — #1540', () => {
+    const { profile, origin, corridor } = footprintFixture();
+    const { plans } = footprintPlans(corridor, landClassMask(corridor), profile, origin);
+    expect(plans.length).toBeGreaterThan(5);
+    for (const plan of plans) {
+      expect(plan.triangleCount).toBeLessThanOrEqual(REALISTIC_TRIANGLES.structure);
     }
   });
 

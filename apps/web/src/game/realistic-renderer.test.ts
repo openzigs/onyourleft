@@ -103,6 +103,7 @@ import {
   type RealisticModel,
   type StructureSurface,
 } from './realistic-assets';
+import { FOOTPRINT_SURFACES } from './footprint-buildings';
 import { HORIZON_AZIMUTH_BINS } from './realistic-light';
 import type { CameraPose } from './port';
 import { STRUCTURE_KINDS, type ScatterItem, type SceneryKind } from './scatter';
@@ -1436,7 +1437,7 @@ describe('the realistic structures — ADR 0026 D-12 layer 3, #475', () => {
     // #1535: the paving is the pavements' (`PavementBelt`), and no structure's.
     expect(belt.beltOf('paving')).toBeUndefined();
     // #1548: the mapped towns' three have a belt and no mesh in it until the
-    // mapped buildings (#1540) wear them — the case below holds that.
+    // mapped buildings (#1540) are drawn by #1549 — the case below holds that.
     const town = new Set<StructureSurface>(TOWN_STRUCTURE_SURFACES);
     for (const surface of TOWN_STRUCTURE_SURFACES) {
       expect(belt.beltOf(surface), surface).toBeDefined();
@@ -1500,16 +1501,20 @@ describe('the realistic structures — ADR 0026 D-12 layer 3, #475', () => {
   });
 
   it('has no surface nothing wears, and wears no surface it has no maps for', () => {
-    const worn = new Set<StructureSurface>(STRUCTURE_KINDS.flatMap(realisticStructureSurfaces));
+    const procedural = new Set<StructureSurface>(
+      STRUCTURE_KINDS.flatMap(realisticStructureSurfaces),
+    );
     // #1535: every photograph but the paving, which the pavements wear —
     // §"the village pavements" holds `PavementBelt` to it.
-    // ⚠️ #1548's three are the one exception, and a NAMED one: loaded for the
-    // buildings planned from map data (#1540, drawn by #1549), which are not
-    // structure kinds and have not landed. No procedural kind may wear one —
-    // that would change how every farmstead looks — and whoever wires a
-    // mapped building to them deletes this exception here.
-    for (const surface of TOWN_STRUCTURE_SURFACES) expect(worn.has(surface), surface).toBe(false);
-    expect([...worn, ...TOWN_STRUCTURE_SURFACES].sort()).toEqual(
+    // #1548's three are worn by the buildings planned from map data
+    // (`footprint-buildings.ts`, #1540; drawn by #1549), and by no procedural
+    // kind — that would change how every farmstead looks.
+    for (const surface of TOWN_STRUCTURE_SURFACES) {
+      expect(procedural.has(surface), surface).toBe(false);
+      expect(FOOTPRINT_SURFACES, surface).toContain(surface);
+    }
+    const worn = new Set<StructureSurface>([...procedural, ...FOOTPRINT_SURFACES]);
+    expect([...worn].sort()).toEqual(
       [
         ...PHOTOGRAPHIC_STRUCTURE_SURFACES.filter((surface) => surface !== 'paving'),
         'painted',

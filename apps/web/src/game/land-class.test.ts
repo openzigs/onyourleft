@@ -40,6 +40,7 @@ import {
   LAND_CLASS_OF_KIND,
   LEVELLING_MAX_CHUNKS,
   LEVELLING_REACH_METRES,
+  kindAt,
   landClassMask,
   landClassOfKind,
   NO_LAND_CLASS,
@@ -683,5 +684,34 @@ describe('how far built-up land is — #1547', () => {
     expect(builtUpDistance(solid, 100, 100)).toBe(0);
     expect(builtUpDistance(solid, 500, 100)).toBe(0);
     expect(solid.levellingBytes).toBe(4096);
+  });
+});
+
+describe('the land use under a point — kindAt, #1540', () => {
+  const COVERED: Box = { minX: -1_000, maxX: 1_000, minZ: -1_000, maxZ: 1_000 };
+  const block: LandUseFeature = {
+    layer: 'landuse',
+    kind: 'commercial',
+    rings: [
+      Float32Array.of(0, 0, 200, 0, 200, 200, 0, 200),
+      // A courtyard out of it.
+      Float32Array.of(150, 150, 190, 150, 190, 190, 150, 190),
+    ],
+  };
+  const corridor = corridorOf(
+    [COVERED],
+    [block, rectangle('landuse', 'wood', { minX: 20, maxX: 60, minZ: 20, maxZ: 60 })],
+  );
+
+  it('names the kind the mask classes, by its precedence', () => {
+    expect(kindAt(corridor, 100, 100)).toBe('commercial');
+    // A wood inside the block is a wood, as the mask has it.
+    expect(kindAt(corridor, 40, 40)).toBe('wood');
+    expect(landClassMask(corridor).classAt(40, 40)).toBe('wood');
+  });
+
+  it('is undefined outside every polygon, and in a hole', () => {
+    expect(kindAt(corridor, 500, 500)).toBeUndefined();
+    expect(kindAt(corridor, 170, 170)).toBeUndefined();
   });
 });
