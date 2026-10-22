@@ -22,6 +22,7 @@ import {
   onMappedGround,
   selectMappedBuildings,
   type MappedBuildings,
+  type RivalStructures,
 } from './mapped-buildings';
 import {
   MAPPED_BUILDING_DRAW_CALLS,
@@ -204,6 +205,92 @@ describe('which mapped buildings a refill draws — #1549', () => {
     selectMappedBuildings(buildings, rider.x, rider.z, MAPPED_BUILDING_TRIANGLES, first);
     selectMappedBuildings(buildings, rider.x, rider.z, MAPPED_BUILDING_TRIANGLES, second);
     expect(Array.from(second.plans)).toStrictEqual(Array.from(first.plans));
+  });
+});
+
+describe('the mapped buildings ranked with the procedural structures, under one budget — #1586', () => {
+  const rider = roadAt(1_500);
+  const structure = REALISTIC_TRIANGLES.structure;
+  const sorted = planned
+    .filter((plan) => apart(plan, rider) <= MAPPED_BUILDING_REACH_METRES)
+    .sort((a, b) => apart(a, rider) - apart(b, rider));
+  const rivalsAt = (...distances: number[]): RivalStructures => ({
+    distances: Float64Array.from(distances),
+    count: distances.length,
+    triangles: structure,
+  });
+
+  it('takes a building nearer than every structure before them, and the structures fill the rest', () => {
+    // 36 structures 300 m out: the issue's fields beyond a town's end.
+    const selection = new MappedSelection();
+    const rivals = rivalsAt(...Array.from({ length: REALISTIC_STRUCTURE_ITEMS }, () => 300));
+    selectMappedBuildings(
+      buildings,
+      rider.x,
+      rider.z,
+      MAPPED_BUILDING_TRIANGLES,
+      selection,
+      MAPPED_BUILDING_DRAW_CALLS,
+      rivals,
+    );
+    // Non-vacuity: the fixture's nearest 36 houses are all nearer than 300 m.
+    expect(apart(sorted[MAPPED_BUILDING_MAX - 1] as FootprintPlan, rider)).toBeLessThan(300);
+    expect(selection.count).toBe(MAPPED_BUILDING_MAX);
+    expect(new Set(drawn(selection))).toStrictEqual(new Set(sorted.slice(0, MAPPED_BUILDING_MAX)));
+    // The structures take what is left, whole ones only, and the term holds.
+    expect(selection.rivals).toBe(
+      Math.floor((MAPPED_BUILDING_TRIANGLES - selection.triangles) / structure),
+    );
+    expect(selection.rivals).toBeLessThan(REALISTIC_STRUCTURE_ITEMS);
+    expect(selection.triangles + selection.rivals * structure).toBeLessThanOrEqual(
+      MAPPED_BUILDING_TRIANGLES,
+    );
+  });
+
+  it('takes structures nearer than every building first, and draws no building past them', () => {
+    const selection = new MappedSelection();
+    const rivals = rivalsAt(...Array.from({ length: REALISTIC_STRUCTURE_ITEMS }, () => 0));
+    selectMappedBuildings(
+      buildings,
+      rider.x,
+      rider.z,
+      MAPPED_BUILDING_TRIANGLES,
+      selection,
+      MAPPED_BUILDING_DRAW_CALLS,
+      rivals,
+    );
+    expect(selection.rivals).toBe(REALISTIC_STRUCTURE_ITEMS);
+    expect(selection.count).toBe(0);
+  });
+
+  it('interleaves by distance: a building beyond a structure that fills the budget is not drawn', () => {
+    const nearest = apart(sorted[0] as FootprintPlan, rider);
+    // The houses nearest the rider stand in pairs across the road, as near as each other.
+    const level = sorted.findIndex((plan) => apart(plan, rider) > nearest);
+    const second = apart(sorted[level] as FootprintPlan, rider);
+    // Non-vacuity: room between the nearest and the next for a structure.
+    expect(level).toBeGreaterThan(0);
+    expect(second).toBeGreaterThan(nearest);
+    const first = sorted.slice(0, level);
+    // A budget of the nearest buildings and one structure, the structure between them and the next.
+    const budget = first.reduce((sum, plan) => sum + plan.triangleCount, 0) + structure;
+    const selection = new MappedSelection();
+    selectMappedBuildings(
+      buildings,
+      rider.x,
+      rider.z,
+      budget,
+      selection,
+      MAPPED_BUILDING_DRAW_CALLS,
+      rivalsAt((nearest + second) / 2, (nearest + second) / 2),
+    );
+    expect(new Set(drawn(selection))).toStrictEqual(new Set(first));
+    expect(selection.rivals).toBe(1);
+    // THE CONTROL: with no structure, the same budget draws the next building too.
+    const alone = new MappedSelection();
+    selectMappedBuildings(buildings, rider.x, rider.z, budget, alone);
+    expect(alone.count).toBeGreaterThan(level);
+    expect(alone.rivals).toBe(0);
   });
 });
 

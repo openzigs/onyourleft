@@ -12,9 +12,9 @@
  *   `GameView` — never per frame.
  * - {@link selectMappedBuildings}: the set a refill draws — nearest first,
  *   within {@link MAPPED_BUILDING_REACH_METRES}, at most
- *   {@link MAPPED_BUILDING_MAX}, inside the triangles the frame's procedural
- *   structures leave of `realistic-budget.ts` §`MAPPED_BUILDING_TRIANGLES`,
- *   every one beyond {@link MAPPED_BUILDING_NEAR_METRES} at its far level, and
+ *   {@link MAPPED_BUILDING_MAX}, ranked by distance with the frame's
+ *   procedural structures (#1586) inside `realistic-budget.ts`
+ *   §`MAPPED_BUILDING_TRIANGLES`, every one beyond {@link MAPPED_BUILDING_NEAR_METRES} at its far level, and
  *   in at most {@link MAPPED_BUILDING_DRAW_CALLS} surfaces.
  * - {@link mappedChunk}: when a refill is due — only when the rider's chunk
  *   of {@link MAPPED_CHUNK_METRES} changes.
@@ -182,6 +182,8 @@ export class MappedSelection {
    * surfaces would have opened a surface past {@link MAPPED_BUILDING_DRAW_CALLS}.
    */
   passed = 0;
+  /** How many of the {@link RivalStructures} were ranked in, nearer than where the selection stopped — #1586. */
+  rivals = 0;
   /** The surfaces drawn, in the order they were opened: at most {@link MAPPED_BUILDING_DRAW_CALLS}. */
   readonly surfaces: StructureSurface[] = [];
   /** Each surface's triangles, by its place in {@link surfaces}: room for every surface a plan wears. */
@@ -193,6 +195,7 @@ export class MappedSelection {
     this.farCount = 0;
     this.triangles = 0;
     this.passed = 0;
+    this.rivals = 0;
     this.surfaces.length = 0;
     this.surfaceTriangles.fill(0);
   }
@@ -204,6 +207,25 @@ function slotOf(selection: MappedSelection, surface: StructureSurface): number {
 }
 
 /**
+ * The frame's procedural structures, as one refill ranks the mapped buildings
+ * against them — #1586, ADR 0054 D-5.6's "the nearest come first, within the
+ * cap". Each is priced at `triangles`, the structure term's price of one.
+ */
+export interface RivalStructures {
+  /** Each one's distance from the rider, metres, nearest first; the first {@link count} are read. */
+  readonly distances: Float64Array;
+  readonly count: number;
+  readonly triangles: number;
+}
+
+/** No procedural structure to rank against: the budget is the mapped buildings' alone. */
+export const NO_RIVALS: RivalStructures = {
+  distances: new Float64Array(0),
+  count: 0,
+  triangles: 0,
+};
+
+/**
  * The mapped buildings one refill draws, written into `into` — #1549.
  *
  * Every plan within {@link MAPPED_BUILDING_REACH_METRES} of `(x, z)` by its
@@ -211,6 +233,15 @@ function slotOf(selection: MappedSelection, surface: StructureSurface): number {
  * at its far level. Taken in that order until the next would pass
  * `triangleBudget` or {@link MAPPED_BUILDING_MAX} are taken — so the drawn set
  * is the nearest, and a far building never takes a near one's place.
+ *
+ * **Ranked with the procedural structures, under the one budget** — #1586.
+ * Each of `rivals` nearer than (or as near as) the next building is taken
+ * first, at its price, and the walk stops at the first of either that would
+ * pass `triangleBudget`; once the buildings are done, or at their count cap,
+ * the rest of the rivals are taken in order while they fit. `into.rivals` is
+ * how many were. So a hedge 300 m ahead no longer outranks a house 20 m away:
+ * until #1586 the procedural structures were all taken first, and a frame
+ * whose fields filled the cap drew no mapped building at all.
  *
  * ⚠️ **Levels and reach are decided at a refill and held until the next**,
  * which is up to `MAPPED_CHUNK_METRES` (100 m) of riding. So a building can
@@ -232,8 +263,20 @@ export function selectMappedBuildings(
   triangleBudget: number,
   into: MappedSelection,
   surfaceSlots: number = MAPPED_BUILDING_DRAW_CALLS,
+  rivals: RivalStructures = NO_RIVALS,
 ): void {
   into.reset();
+  /** The triangles the rivals ranked in so far take. */
+  let rivalTriangles = 0;
+  /** Takes every rival no farther than `apart` while it fits; false at the first that does not. */
+  const rivalsWithin = (apart: number): boolean => {
+    while (into.rivals < rivals.count && (rivals.distances[into.rivals] as number) <= apart) {
+      if (into.triangles + rivalTriangles + rivals.triangles > triangleBudget) return false;
+      rivalTriangles += rivals.triangles;
+      into.rivals += 1;
+    }
+    return true;
+  };
   const { plans, order, distances } = buildings;
   let inReach = 0;
   for (let index = 0; index < plans.length; index += 1) {
@@ -249,12 +292,21 @@ export function selectMappedBuildings(
     .subarray(0, inReach)
     .sort((a, b) => (distances[a] as number) - (distances[b] as number) || a - b);
   const slots = Math.min(surfaceSlots, FOOTPRINT_SURFACES.length);
+  let stopped = false;
   for (let at = 0; at < inReach && into.count < MAPPED_BUILDING_MAX; at += 1) {
     const index = order[at] as number;
     const plan = plans[index] as FootprintPlan;
-    const far = (distances[index] as number) > MAPPED_BUILDING_NEAR_METRES;
+    const apart = distances[index] as number;
+    if (!rivalsWithin(apart)) {
+      stopped = true;
+      break;
+    }
+    const far = apart > MAPPED_BUILDING_NEAR_METRES;
     const triangles = far ? plan.farTriangleCount : plan.triangleCount;
-    if (into.triangles + triangles > triangleBudget) break;
+    if (into.triangles + rivalTriangles + triangles > triangleBudget) {
+      stopped = true;
+      break;
+    }
     const wall = slotOf(into, plan.surfaces.wall);
     const roof = slotOf(into, plan.surfaces.roof);
     const opened =
@@ -276,6 +328,7 @@ export function selectMappedBuildings(
     else into.near += 1;
     into.triangles += triangles;
   }
+  if (!stopped) rivalsWithin(Number.POSITIVE_INFINITY);
 }
 
 /** Whether `(x, z)` is inside `ring` (`(x, z)` pairs), by the even-odd rule. */

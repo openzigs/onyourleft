@@ -263,11 +263,13 @@ import {
   FAR_ROLES,
   MappedSelection,
   NEAR_ROLES,
+  NO_RIVALS,
   roleTriangles,
   selectMappedBuildings,
   surfaceOfRole,
   type MappedBuildings,
   type MappedBuildingsInView,
+  type RivalStructures,
 } from './mapped-buildings';
 import {
   BUILDING_ROLES,
@@ -12598,15 +12600,16 @@ export class MappedBuildingBelt {
 
   /**
    * The buildings nearest `(riderX, riderZ)` that fit `triangleBudget`,
-   * appended in place, with the draw range and the groups set — #1549. The
-   * view calls it when {@link needsRefill}; `chunk` is recorded so the next
-   * frame in that chunk does not refill again.
+   * ranked with `rivals` (#1586), appended in place, with the draw range and
+   * the groups set — #1549. The view calls it when {@link needsRefill};
+   * `chunk` is recorded so the next frame in that chunk does not refill again.
    */
   refill(
     riderX: number,
     riderZ: number,
     triangleBudget: number,
     chunk?: number,
+    rivals: RivalStructures = NO_RIVALS,
   ): MappedBuildingStats {
     this.#refills += 1;
     this.#chunk = chunk;
@@ -12617,6 +12620,8 @@ export class MappedBuildingBelt {
       riderZ,
       Math.min(triangleBudget, MAPPED_BUILDING_TRIANGLES),
       selection,
+      MAPPED_BUILDING_DRAW_CALLS,
+      rivals,
     );
     const surfaces = selection.surfaces;
     let end = 0;
@@ -12768,12 +12773,25 @@ export class MappedBuildingBelt {
  * One frame's turn of the mapped buildings — #1549, `RealisticDrawing`'s
  * rule, apart from the view so a test can ride it: refills `belt` when the
  * frame's chunk changed (or the rung did, {@link MappedBuildingBelt.invalidate}),
- * with the triangles the frame's procedural structures leave of the rung's
- * `structureItems` (at most `REALISTIC_STRUCTURE_ITEMS`), each structure item
- * and billboard counted at `REALISTIC_TRIANGLES.structure`. Returns the most
- * procedural structures may then draw until the next refill, or `undefined`
- * on a frame that is not a refill — which reads one number and allocates
- * nothing.
+ * inside the rung's `structureItems` (at most `REALISTIC_STRUCTURE_ITEMS`),
+ * each structure item and billboard counted at `REALISTIC_TRIANGLES.structure`.
+ * Returns the most procedural structures may then draw until the next refill,
+ * or `undefined` on a frame that is not a refill — which reads one number and
+ * allocates nothing.
+ *
+ * **The frame's procedural structures and the mapped buildings are ranked
+ * together, by distance from the rider, under the one cap** — #1586, ADR 0054
+ * D-5.6's "the nearest come first, within the cap" (the owner's lane
+ * direction). Until #1586 every procedural structure was taken first, so a
+ * town's edge with 36 field boundaries ahead drew none of its buildings.
+ * The billboards are still taken first: they carry no place here, and the
+ * logo belts draw them uncapped whatever this decides.
+ *
+ * ⚠️ **The ranking decides how many procedural structures are drawn, not
+ * which.** The returned cap is a count, and the structure belts admit the
+ * first that many in view in the frame's own order (`settlements.ts`
+ * §`structuresAt`: buildings and lots first, then field boundaries nearest the
+ * rider), so the ones the cap drops are that order's tail.
  */
 export function refillMappedBuildings(
   belt: MappedBuildingBelt,
@@ -12785,16 +12803,32 @@ export function refillMappedBuildings(
   if (!belt.needsRefill(view.chunk)) return undefined;
   const structure = REALISTIC_TRIANGLES.structure;
   const items = Math.min(structureItems, REALISTIC_STRUCTURE_ITEMS);
-  let procedural = billboards;
-  for (const item of scatter) if (isStructureKind(item.kind)) procedural += 1;
+  let count = 0;
+  for (const item of scatter) if (isStructureKind(item.kind)) count += 1;
+  if (rivalDistances.length < count) rivalDistances = new Float64Array(count);
+  let at = 0;
+  for (const item of scatter) {
+    if (!isStructureKind(item.kind)) continue;
+    rivalDistances[at] = Math.hypot(item.x - view.x, item.z - view.z);
+    at += 1;
+  }
+  rivalDistances.subarray(0, count).sort();
   const stats = belt.refill(
     view.x,
     view.z,
-    Math.max(0, items - procedural) * structure,
+    Math.max(0, items - billboards) * structure,
     view.chunk,
+    {
+      distances: rivalDistances,
+      count,
+      triangles: structure,
+    },
   );
   return items - Math.ceil(stats.triangles / structure);
 }
+
+/** {@link refillMappedBuildings}' scratch: grown, never shrunk, so a refill rarely allocates. */
+let rivalDistances = new Float64Array(REALISTIC_STRUCTURE_ITEMS);
 
 /** Which of #621's bounds a realistic item's tint is drawn inside. @see realisticTints */
 type RealisticTintClass = 'foliage' | 'masonry';
@@ -13081,12 +13115,12 @@ class RealisticDrawing {
    * The ride's buildings from map data — #1549. Called once a frame, BEFORE
    * {@link updateScenery}, with the frame's own scenery and billboards.
    *
-   * On a frame whose chunk changed (or whose rung did) the belt refills with
-   * the triangles the frame's procedural structures leave of the rung's —
-   * every structure item and billboard in the frame counted at
-   * `REALISTIC_TRIANGLES.structure`, which is what the structure term prices
-   * each at — so the procedural structures are taken first, as `structuresAt`
-   * orders them. Until the next refill the procedural structures keep to
+   * On a frame whose chunk changed (or whose rung did) the belt refills inside
+   * the rung's structure term, the frame's procedural structures and the
+   * mapped buildings ranked together by distance from the rider (#1586,
+   * {@link refillMappedBuildings}) — every structure item and billboard in the
+   * frame counted at `REALISTIC_TRIANGLES.structure`, which is what the
+   * structure term prices each at. Until the next refill the procedural structures keep to
    * what the mapped buildings left them ({@link #structureCap}), so a
    * structure coming into view mid-chunk cannot push the term past
    * `MAPPED_BUILDING_TRIANGLES`: the farthest goes undrawn, as the rung's

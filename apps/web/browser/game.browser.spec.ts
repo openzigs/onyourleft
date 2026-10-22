@@ -70,6 +70,7 @@ import {
   MAPPED_BUILDING_DRAW_CALLS,
   MAPPED_BUILDING_MAX,
   REALISTIC_REMOTE_TRIANGLES,
+  REALISTIC_STRUCTURE_ITEMS,
   REALISTIC_WOODED_DRAW_CALLS,
 } from '../src/game/realistic-budget';
 import { MAXIMUM_DRAWN_SET } from '../src/net/interest';
@@ -801,8 +802,30 @@ async function harness(
  * phase grew: #624's tread added 1.9 s and the rest is the runner's spread
  * (texture formats 21.4 s to 24.1 s, house window 11.7 s to 13.1 s). 165 s is
  * 1.49 times the slowest, and §`paysForTheRealisticLoad` is the sum it fits in.
+ *
+ * ⚠️ **It is 275 s since #1574, and a reviewer who remembers 165 is reading the
+ * old file.** The load grew phase by phase rather than by spread: #1523's
+ * surface bounds (6.3 s to 6.8 s on the EPYC 7763), #1535's pavement (1.6 s to
+ * 2.6 s), #1551 (1.2 s), #1549's mapped town (10.7 s to 10.9 s) and #1581's
+ * windows (1.1 s), about 22 s in all, and no older phase moved by more than a
+ * second. Read off each run's phase lines, from Playwright's "Running" line to
+ * the last phase printed, on the 7763 — still the slowest model `ubuntu-latest`
+ * lands on:
+ *
+ *     156.4 s, 154.9 s   whole, green: 39394282796 and 39570460751 (Oct 20, 21)
+ *     168.1 s, 167.2 s   whole, red at 165: 39749180935 (`main`) and
+ *                        39769985219 (#1573)
+ *     165.8 s            #1581's 39851593370, killed with every
+ *                        `realisticProbe` phase done and the #545 near field
+ *                        (`game-harness.ts` §`run`, 16.4 s to 18.1 s on that
+ *                        CPU) still to draw: **about 182 s whole**
+ *
+ * and 103 s to 127 s whole on the four other models read the same day (Intel
+ * Xeon 6973P-C, Xeon Platinum 8573C, AMD EPYC 9V74 and 9V45). 275 s is 1.51
+ * times 182, the margin every budget in this file keeps; the nightly's
+ * worst case beside it is §`paysForTheRealisticLoad`'s.
  */
-const REALISTIC_LOAD_BUDGET_MS = 165_000;
+const REALISTIC_LOAD_BUDGET_MS = 275_000;
 /**
  * `?realistic&trees` — 79 s to 80 s alone on the last three of #651's runs, so
  * 120 s was 1.5 times. ⚠️ **160 s since #682**: on 36405580515 it took 105 s,
@@ -1016,6 +1039,14 @@ const WHEEL_TRACK_CEILING = 0.08;
  * and `?shadow-map` hanging — 60 + 70 + about 30 + the rest of the gate — well
  * inside `GATE_BUDGET_MS`; the nightly run's is 60 + 165 + 160 + that spec's
  * two 150 s waits, also inside it, which is why 840 s did not move.
+ *
+ * ⚠️ **Since #1574 that is 60 + 275 + 160 + 300 = 795 s**, 45 s inside 840,
+ * where it was 155 s. What is left has to hold the worker replacements (#651's
+ * 30 s) and the nightly cases that do not hang, so a run where every load hung
+ * at once can now meet the gate's own stop with its last describe
+ * interrupted — which still reports, and names what was running. A green
+ * nightly is far from it: 9.5 minutes of Playwright on the 7763
+ * (39570460751), about 27 s more with the load at 182 s.
  */
 function paysForTheRealisticLoad(): void {
   paysForTheLoad('?realistic', REALISTIC_LOAD_BUDGET_MS);
@@ -3626,6 +3657,24 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     expect(Math.abs(luminance(facade.wallOff) - luminance(facade.glassOff))).toBeLessThan(4);
     // And the glass is the facade's: off, that place reads the wall it was drawn over.
     expect(luminance(facade.glassOff) - luminance(facade.glass)).toBeGreaterThan(12);
+  });
+
+  test('#1586 a town’s edge is drawn when the fields beyond it fill the structure cap', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { townEdge: edge } = await realistic(harnessRun);
+    const measured =
+      `${String(edge.structures)} structures in the frame; ${String(edge.buildings)} buildings ` +
+      `in ${String(edge.drawCalls)} calls, lever off ${String(edge.drawCallsOff)}`;
+    testInfo.annotations.push({ type: 'a town’s edge', description: measured });
+    console.log(`a town’s edge — ${measured}`);
+    // The issue's frame: the procedural structures alone fill the cap.
+    expect(edge.structures).toBeGreaterThanOrEqual(REALISTIC_STRUCTURE_ITEMS);
+    // Ranked by distance, the houses round the rider are drawn, and submitted.
+    expect(edge.buildings).toBeGreaterThan(0);
+    expect(edge.drawCalls).toBeGreaterThan(0);
+    // THE CONTROL: with `-mapped-buildings` the belt adds no call at all.
+    expect(edge.drawCallsOff).toBe(0);
   });
 
   test('#1549 nothing in the wood: no plan kept there and no building pixel, where -landclass draws one', async ({

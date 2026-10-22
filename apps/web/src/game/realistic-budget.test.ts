@@ -537,11 +537,12 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
       );
       const mapped = belt.stats.triangles;
       belt.dispose();
-      // Procedural first, at the term's price each; the mapped buildings the rest…
-      const structures = procedural * REALISTIC_TRIANGLES.structure + mapped;
+      // Ranked together by distance (#1586), at the term's price each; until
+      // the next refill the procedural keep to what the town left…
+      const drawnProcedural = Math.min(procedural, cap ?? 0);
+      const structures = drawnProcedural * REALISTIC_TRIANGLES.structure + mapped;
       expect(structures, String(procedural)).toBeLessThanOrEqual(structureTerm);
-      // …and until the next refill the procedural keep to what the town left.
-      expect(cap, String(procedural)).toBeGreaterThanOrEqual(procedural);
+      // …and the cap itself, all of it spent, holds the term too.
       expect(
         (cap ?? 0) * REALISTIC_TRIANGLES.structure + mapped,
         String(procedural),
@@ -554,8 +555,13 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
         expect(belt.stats.buildings).toBe(MAPPED_BUILDING_MAX);
         expect(mapped).toBeGreaterThan(REALISTIC_TRIANGLES.structure);
       }
-      // A frame whose procedural structures fill the term draws no mapped building.
-      if (procedural === structureItems) expect(belt.stats.buildings).toBe(0);
+      // A frame whose procedural structures fill the term, all of them farther
+      // than the town's nearest, still draws the town (#1586), and the cap
+      // drops the procedural structures it has no room for.
+      if (procedural === structureItems) {
+        expect(belt.stats.buildings).toBeGreaterThan(0);
+        expect(cap).toBeLessThan(procedural);
+      }
     }
   });
 

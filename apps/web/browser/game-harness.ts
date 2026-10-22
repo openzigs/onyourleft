@@ -108,6 +108,7 @@ import {
   settlementFootprintsAt,
   siteAt,
   siteSpacing,
+  STRUCTURE_FOOTPRINTS,
   structuresAt,
   villagePlots,
 } from '../src/game/settlements';
@@ -3405,6 +3406,85 @@ function mappedFacadeProbe(
   }
 }
 
+/** What {@link townEdgeProbe} publishes — #1586. */
+interface TownEdgeMeasurement {
+  /** The procedural structures and billboards in the frame: the issue's frame fills the cap with them. */
+  readonly structures: number;
+  /** The mapped buildings the belt drew at the frame's refill. */
+  readonly buildings: number;
+  /**
+   * The non-empty draw calls the mapped buildings added to the frame, at the
+   * WebGL entry points: the frame less the same frame with none in it — and
+   * with `-mapped-buildings` (the control, which must be 0).
+   */
+  readonly drawCalls: number;
+  readonly drawCallsOff: number;
+}
+
+const NO_TOWN_EDGE: TownEdgeMeasurement = {
+  structures: -1,
+  buildings: 0,
+  drawCalls: 0,
+  drawCallsOff: -1,
+};
+
+/**
+ * #1586: a town's edge with fields beyond it. #1581's mixed town
+ * (`footprint-fixtures-testing.ts` §`mixedTownFixture`), the rider at 1 750 m,
+ * where the hedges and fences beyond the town's end at 2 050 m and its lots
+ * fill all 36 of the realistic rung's structure slots. Until #1586 the
+ * procedural structures were all taken first and no mapped building was drawn
+ * here; ranked together by distance, the houses round the rider are. The
+ * frame is the view's own: its scatter, through `updateMapped`. The control
+ * of the old rule is `mapped-building-belt.test.ts` §"#1586", in Node.
+ */
+function townEdgeProbe(view: ReturnType<typeof threeGameRenderer.create>): TownEdgeMeasurement {
+  const { profile, origin, corridor } = mixedTownFixture();
+  const land = landClassMask(corridor);
+  const plans = footprintPlans(corridor, land, profile, origin).plans;
+  const start = atStartLine(profile);
+  const frame = sceneFrame({
+    profile,
+    origin,
+    state: { ...start, ride: { ...start.ride, distance: metres(1_750) } },
+    worldCorridor: corridor,
+    landClass: land,
+    // A new index, so the view refills for this frame whatever ran before it.
+    mappedBuildings: mappedBuildingsOf(plans),
+    structureItems: REALISTIC_STRUCTURE_ITEMS,
+  });
+  if (frame.mappedBuildings === undefined) return NO_TOWN_EDGE;
+  const bare: SceneFrame = { ...frame };
+  delete (bare as { mappedBuildings?: unknown }).mappedBuildings;
+  const callsAdded = (): number => {
+    let added = 0;
+    countingNonEmptyDrawCalls((calls) => {
+      view.render(frame);
+      const before = calls();
+      view.render(frame);
+      const withTown = calls() - before;
+      view.render(bare);
+      const middle = calls();
+      view.render(bare);
+      added = withTown - (calls() - middle);
+    });
+    return added;
+  };
+  const drawCalls = callsAdded();
+  const buildings = mappedBuildingStatsOf(view)?.stats.buildings ?? 0;
+  mappedBuildingsShownOf(view, false);
+  let drawCallsOff: number;
+  try {
+    drawCallsOff = callsAdded();
+  } finally {
+    mappedBuildingsShownOf(view, true);
+  }
+  const structures =
+    frame.scatter.filter((item) => Object.hasOwn(STRUCTURE_FOOTPRINTS, item.kind)).length +
+    frame.billboards.length;
+  return { structures, buildings, drawCalls, drawCallsOff };
+}
+
 /** What {@link levellingProbe} publishes — #1547. */
 interface LevellingMeasurement {
   /**
@@ -5842,6 +5922,8 @@ export interface RealisticMeasurement {
   readonly mappedTown: MappedTownMeasurement;
   /** #1581: a mapped house's window, with its facade and without. @see mappedFacadeProbe */
   readonly mappedFacade: MappedFacadeMeasurement;
+  /** #1586: a mapped town's edge, with fields beyond filling the structure cap. @see townEdgeProbe */
+  readonly townEdge: TownEdgeMeasurement;
   /** #1550: procedural lots in a mapped town with no footprints. @see lotsProbe */
   readonly lots: LotsMeasurement;
   /** #621: two trees and two houses of one shape, tinted and not. @see tintProbe */
@@ -7873,6 +7955,7 @@ const NO_REALISTIC: RealisticMeasurement = {
   levelling: NO_LEVELLING,
   mappedTown: NO_MAPPED_TOWN,
   mappedFacade: NO_MAPPED_FACADE,
+  townEdge: NO_TOWN_EDGE,
   lots: NO_LOTS,
   tint: {
     trees: [],
@@ -9430,6 +9513,10 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   const mappedFacade = mappedFacadeProbe(view, gl, canvas);
   phaseEnds('realistic: a mapped house’s windows — #1581');
 
+  // #1586, on the same view: a town's edge, the fields beyond it filling the structure cap.
+  const townEdge = townEdgeProbe(view);
+  phaseEnds('realistic: a town’s edge — #1586');
+
   // #1550, on the same view: procedural lots in a mapped town with no footprints.
   const lots = lotsProbe(view, gl, canvas);
   phaseEnds('realistic: lots in an unmapped town — #1550');
@@ -9675,6 +9762,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     levelling,
     mappedTown,
     mappedFacade,
+    townEdge,
     lots,
     tint,
     grounding,
