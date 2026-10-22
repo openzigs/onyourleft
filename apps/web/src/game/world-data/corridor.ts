@@ -44,6 +44,7 @@ import {
   type LandUseFeature,
   type PathFeature,
   type StreetFeature,
+  type StreetGrade,
   type TileId,
 } from '@onyourleft/map-features';
 import type { PrivacyZoneRecord, WorldCorridorTileState } from '@onyourleft/store';
@@ -502,7 +503,8 @@ interface PackedFeatures {
     rings: number[][];
   }[];
   readonly paths: readonly { kind: string; detail: string; line: number[] }[];
-  readonly streets: readonly { kind: string; detail: string; line: number[] }[];
+  /** `g` is the street's grade (#1565); a record without one is read as at grade. */
+  readonly streets: readonly { kind: string; detail: string; g?: StreetGrade; line: number[] }[];
 }
 
 const toInts = (values: Float32Array): number[] =>
@@ -559,6 +561,7 @@ export async function packCorridorFeatures(features: CorridorFeatures): Promise<
     streets: features.streets.map((f) => ({
       kind: f.kind,
       detail: f.kindDetail,
+      g: f.grade,
       line: toInts(f.line),
     })),
   };
@@ -592,6 +595,7 @@ export async function unpackCorridorFeatures(blob: Blob): Promise<CorridorFeatur
     streets: packed.streets.map((f) => ({
       kind: f.kind,
       kindDetail: f.detail,
+      grade: f.g === 'bridge' || f.g === 'tunnel' ? f.g : 'ground',
       line: fromInts(f.line),
     })),
   };

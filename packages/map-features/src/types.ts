@@ -49,6 +49,9 @@ export interface PathFeature {
   readonly line: Float32Array;
 }
 
+/** Whether a street is at grade, on a bridge or in a tunnel (#1565). A bridge wins if both are set. */
+export type StreetGrade = 'ground' | 'bridge' | 'tunnel';
+
 /**
  * A `roads` line that is a street (#1565): `kind` in {@link STREET_KINDS}, or
  * {@link OTHER_ROAD_KIND} with a street's `kind_detail`. Never a footway — a
@@ -59,6 +62,8 @@ export interface StreetFeature {
   readonly kind: string;
   /** `''` when the feature carries no `kind_detail`. */
   readonly kindDetail: string;
+  /** From `is_bridge` and `is_tunnel`: `'ground'` unless either is `true`. */
+  readonly grade: StreetGrade;
   /** `x0, z0, x1, z1, …` in local metres. */
   readonly line: Float32Array;
 }

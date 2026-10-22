@@ -384,11 +384,13 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
 - **2026-10-22** — **Street lines are a fourth kind of record in `worldCorridors`.** The Context says
   *"three kinds of record (land use, building footprints, footways), and nothing else"* and D-3.3
   lists footway lines only. #1565 (cross streets at their mapped junctions) asked, at the owner's
-  request, for the mapped streets themselves, so the store now also holds **street lines with `kind` and
-  `kind_detail`** (the decoder's `StreetFeature`: motorway to service road, no OSM identifier, no
-  name). D-3.3's sentence reads, from this date: building footprint polygons with `kind`, `height` and
-  `min_height`; land-use polygons with `kind`; water polygons; footway lines with `kind` and
-  `kind_detail`; street lines with `kind` and `kind_detail`; and which tiles were read and when. What
-  still stands, unchanged: D-3.1 to D-3.6, including that the store never leaves the device (D-3.5), is
-  ODbL 1.0 data and is droppable without loss. The street lines are bounded at read time by the
-  decoder and at use by `STREET_MAX_METRES`.
+  request, for the mapped streets themselves, so the store now also holds **street lines with `kind`,
+  `kind_detail` and whether each is a bridge or a tunnel** (the decoder's `StreetFeature`: motorway to
+  service road, its `grade` from the tile's `is_bridge` and `is_tunnel`, read as booleans and only for
+  a street; no OSM identifier, no name). D-3.3's sentence reads, from this date: building footprint
+  polygons with `kind`, `height` and `min_height`; land-use polygons with `kind`; water polygons;
+  footway lines with `kind` and `kind_detail`; street lines with `kind`, `kind_detail` and whether each
+  is a bridge or a tunnel; and which tiles were read and when. What still stands, unchanged: D-3.1 to
+  D-3.6, including that the store never leaves the device (D-3.5), is ODbL 1.0 data and is droppable
+  without loss. The street lines are bounded at read time by the decoder and at use by
+  `STREET_MAX_METRES`.

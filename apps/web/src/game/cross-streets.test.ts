@@ -10,7 +10,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { metres, type RouteProfile } from '@onyourleft/domain';
-import type { StreetFeature } from '@onyourleft/map-features';
+import type { StreetFeature, StreetGrade } from '@onyourleft/map-features';
 
 import {
   JUNCTION_TOLERANCE_METRES,
@@ -34,7 +34,7 @@ import {
 import { terrainHeightAt, VERGE_DROP_METRES } from './landform';
 import { BILLBOARD_FOOTPRINT } from './logo-board';
 import { distanceToDrawnRoad } from './road-grid';
-import { northRoute } from './route-fixtures-testing';
+import { hairpinRoute, northRoute, valleyRoute } from './route-fixtures-testing';
 import { scatterSeed } from './scatter';
 import { sceneFrame } from './scene';
 import {
@@ -47,6 +47,7 @@ import {
 } from './settlements';
 import { atStartLine } from './simulation';
 import { corridorOrigin, drawnRoadFrame, MARKING_COLOUR } from './terrain';
+import { waterways } from './waterways';
 import type { WorldCorridor } from './world-data/corridor';
 
 /** Six kilometres of level, low farmland running due north. */
@@ -80,6 +81,7 @@ function leaving(
   return {
     kind,
     kindDetail,
+    grade: 'ground',
     line: Float32Array.from([
       here.x + dx * from,
       here.z + dz * from,
@@ -90,11 +92,18 @@ function leaving(
 }
 
 /** A straight street right across the road at `along`, `half` metres each side, square to it. */
-function across(along: number, half: number, kind = 'minor_road'): StreetFeature {
-  const here = roadAt(along);
+function across(
+  along: number,
+  half: number,
+  kind = 'minor_road',
+  grade: StreetGrade = 'ground',
+  profile: RouteProfile = FARMLAND,
+): StreetFeature {
+  const here = roadAt(along, profile);
   return {
     kind,
     kindDetail: '',
+    grade,
     line: Float32Array.from([
       here.x - here.normalX * half,
       here.z - here.normalZ * half,
@@ -111,16 +120,22 @@ function beside(from: number, to: number, offset: number): StreetFeature {
     const here = roadAt(along);
     points.push(here.x + here.normalX * offset, here.z + here.normalZ * offset);
   }
-  return { kind: 'minor_road', kindDetail: 'residential', line: Float32Array.from(points) };
+  return {
+    kind: 'minor_road',
+    kindDetail: 'residential',
+    grade: 'ground',
+    line: Float32Array.from(points),
+  };
 }
 
 function corridorOf(
   streets: readonly StreetFeature[],
   covered: (x: number, z: number) => boolean = () => true,
+  origin = ORIGIN,
 ): WorldCorridor {
   return {
     routeId: 'cross-streets-fixture',
-    origin: ORIGIN,
+    origin,
     covered,
     coveredBoxes: [],
     landUse: [],
@@ -232,6 +247,8 @@ describe('where a mapped junction is — #1565', () => {
         beside(along, along + 200, 30),
         // A shallow fork, 20° off the road.
         leaving(along + 300, 1, 20, 120),
+        // A shallow fork leaning back, 20° off the road behind.
+        leaving(along + 400, -1, 160, 120),
         // A stub: 9 m past the tolerance.
         leaving(along + 500, -1, 90, JUNCTION_TOLERANCE_METRES + 6),
         // A street that ends short of the road, beyond the tolerance.
@@ -250,6 +267,96 @@ describe('where a mapped junction is — #1565', () => {
       SEED,
     );
     expect(one).toHaveLength(1);
+  });
+
+  it('keeps an arm leaning back as far as the filter allows, and none past it', () => {
+    const along = awayFromVillages(150, cross + 2_200);
+    const back = mappedJunctions(
+      corridorOf([leaving(along, -1, 140, 120)]),
+      FARMLAND,
+      ORIGIN,
+      SEED,
+    );
+    expect(
+      back.map((junction) => junction.arms.map((arm) => Math.round(arm.angleDegrees))),
+    ).toEqual([[140]]);
+  });
+
+  it('finds none where the street crosses on a bridge or in a tunnel, or is a highway — grade separation', () => {
+    const along = awayFromVillages(150, cross + 2_600);
+    const separated = mappedJunctions(
+      corridorOf([
+        across(along, 120, 'major_road', 'bridge'),
+        across(along + 200, 120, 'minor_road', 'tunnel'),
+        // A motorway, even one a tile does not flag as a bridge.
+        across(along + 400, 120, 'highway'),
+      ]),
+      FARMLAND,
+      ORIGIN,
+      SEED,
+    );
+    expect(separated).toEqual([]);
+    // The control: the same streets at grade, and a major road for the motorway, are crossroads.
+    const atGrade = mappedJunctions(
+      corridorOf([
+        across(along, 120, 'major_road'),
+        across(along + 200, 120, 'minor_road'),
+        across(along + 400, 120, 'major_road'),
+      ]),
+      FARMLAND,
+      ORIGIN,
+      SEED,
+    );
+    expect(atGrade.map((junction) => junction.arms.length)).toEqual([2, 2, 2]);
+  });
+
+  it('stops an arm short of another stretch of the route — a hairpin', () => {
+    // Two legs 50 m apart; one street square across both.
+    const radius = 25;
+    const hairpin = hairpinRoute(radius);
+    const origin = corridorOrigin(hairpin);
+    const junctions = mappedJunctions(
+      corridorOf(
+        [across(200, 2 * radius + 100, 'minor_road', 'ground', hairpin)],
+        () => true,
+        origin,
+      ),
+      hairpin,
+      origin,
+      scatterSeed(hairpin),
+    );
+    expect(junctions).toHaveLength(2);
+    const inner = junctions.flatMap((junction) =>
+      junction.arms.map((arm) => {
+        const n = arm.line.length;
+        return Math.hypot(
+          (arm.line[n - 2] as number) - (arm.line[0] as number),
+          (arm.line[n - 1] as number) - (arm.line[1] as number),
+        );
+      }),
+    );
+    // Each leg's arm toward the other ends 15 m short of it, not at its 8 m tolerance.
+    const short = inner.filter((length) => length < 2 * radius);
+    expect(short).toHaveLength(2);
+    for (const length of short) expect(length).toBeLessThanOrEqual(2 * radius - 15 + 0.5);
+  });
+
+  it('stops an arm where it would run into water — a street along a stream', () => {
+    const valley = valleyRoute();
+    const origin = corridorOrigin(valley);
+    const seed = scatterSeed(valley);
+    const stream = waterways(valley, seed).crossings[0];
+    if (stream === undefined) throw new Error('the valley fixture has no stream');
+    const find = (along: number): readonly Junction[] =>
+      mappedJunctions(
+        corridorOf([across(along, 120, 'minor_road', 'ground', valley)], () => true, origin),
+        valley,
+        origin,
+        seed,
+      );
+    expect(find(stream.distance)).toEqual([]);
+    // The control: the same street clear of the stream's channel is a crossroads.
+    expect(find(stream.distance + 200).map((junction) => junction.arms.length)).toEqual([2]);
   });
 
   it('reads nothing where the land was not read', () => {
@@ -287,7 +394,7 @@ describe('where a mapped junction is — #1565', () => {
 describe('what a side road is — #1565', () => {
   const t = awayFromVillages(150);
   const cross = awayFromVillages(150, t + 300);
-  const corridor = corridorOf([leaving(t, 1, 60, 120), across(cross, 120, 'highway')]);
+  const corridor = corridorOf([leaving(t, 1, 60, 120), across(cross, 120, 'major_road')]);
   const mapped = mappedJunctions(corridor, FARMLAND, ORIGIN, SEED);
   const roads = sideRoadsAt(FARMLAND, ORIGIN, SEED, t - 100, cross + 100, t, mapped);
   const mappedRoads = roads.filter((road) => road.junction.source === 'mapped');
@@ -306,7 +413,7 @@ describe('what a side road is — #1565', () => {
   it('runs its stated length from the main road’s edge, at its width, and never on the carriageway', () => {
     const crossing = mappedRoads[1] as SideRoad;
     const here = roadAt(crossing.junction.along);
-    const half = SIDE_ROAD_WIDTHS.highway / 2;
+    const half = SIDE_ROAD_WIDTHS.major / 2;
     for (const [x, , z] of tarmac(crossing)) {
       expect(distanceToDrawnRoad(FARMLAND, ORIGIN, x, z, 10)).toBeGreaterThan(3.5 - 0.05);
       // Square to the road: every vertex within its half-width of the junction's normal line.
@@ -372,10 +479,14 @@ describe('what a side road is — #1565', () => {
   });
 
   it('costs each arm no more than its stated triangles, and a frame no more than its own', () => {
-    // The heaviest: a highway, square and at the shallowest angle kept.
+    // The heaviest a junction can be: a major road (a highway is never one), square and at
+    // the shallowest angle kept.
     const at = awayFromVillages(150, cross + 1_500);
     const heavy = mappedJunctions(
-      corridorOf([across(at, 120, 'highway'), leaving(at + 400, 1, 31, 150, 0, 'highway')]),
+      corridorOf([
+        across(at, 120, 'major_road'),
+        leaving(at + 400, 1, 31, 150, 0, 'major_road', 'primary'),
+      ]),
       FARMLAND,
       ORIGIN,
       SEED,
@@ -418,6 +529,7 @@ describe('what a side road is — #1565', () => {
     const hostile: StreetFeature = {
       kind: 'minor_road',
       kindDetail: '',
+      grade: 'ground',
       line: Float32Array.from([9e5, 9e5, 9e5 + STREET_MAX_METRES * 2, 9e5]),
     };
     const after = mappedJunctions(corridorOf([hostile, across(from, 100)]), FARMLAND, ORIGIN, SEED);

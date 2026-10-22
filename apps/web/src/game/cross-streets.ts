@@ -21,6 +21,13 @@
  *   along the route are one junction, and two arms of it on the same side
  *   within {@link ARM_SAME_DEGREES} of each other (a street split at the
  *   junction's node) are one arm.
+ * - ⚠️ **Only a street that meets the route at grade** ({@link meetsAtGrade}):
+ *   a street on a bridge or in a tunnel (`StreetFeature.grade`, from the
+ *   tile's `is_bridge` and `is_tunnel`) passes over or under the route and
+ *   is never a junction, and nor is a `highway` — a motorway or its link —
+ *   which a cycling route meets at grade almost never, and whose bridge a
+ *   tile may not flag on every way. The route's own grade is not known: a
+ *   route crossing a street on its own bridge still gets a junction there.
  * - **Procedural** ({@link villageJunction}): one crossroads at the centre of
  *   every procedural village (`settlements.ts` §`Site`), square to the road,
  *   so that the world with no map data (ADR 0054 D-4) has them too. The plots
@@ -219,6 +226,14 @@ export interface SideRoad {
  * the streets are not read, as `FOOTWAY_MAX_METRES` stops the footways.
  */
 export const STREET_MAX_METRES = 400_000;
+
+/**
+ * Whether a street can meet the route at grade: not a `highway`, and neither
+ * a bridge nor a tunnel. @see the header
+ */
+export function meetsAtGrade(street: Pick<StreetFeature, 'kind' | 'grade'>): boolean {
+  return street.kind !== 'highway' && street.grade === 'ground';
+}
 
 /** A street's points every {@link SIDE_ROAD_STEP_METRES}, its own vertices kept, drawn from `budget`. */
 function resampled(line: Float32Array, budget: { metres: number }): number[] {
@@ -439,6 +454,7 @@ export function mappedJunctions(
   const candidates: Candidate[] = [];
   const budget = { metres: STREET_MAX_METRES };
   for (const street of corridor.streets) {
+    if (!meetsAtGrade(street)) continue;
     const points = resampled(street.line, budget);
     const count = points.length / 2;
     if (count < 2) continue;

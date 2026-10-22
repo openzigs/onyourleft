@@ -44,6 +44,7 @@ function across(along: number): StreetFeature {
   return {
     kind: 'minor_road',
     kindDetail: 'residential',
+    grade: 'ground',
     line: Float32Array.from([
       here.x - here.normalX * 100,
       here.z - here.normalZ * 100,

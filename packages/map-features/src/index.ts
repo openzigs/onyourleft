@@ -42,5 +42,6 @@ export type {
   PolygonFeature,
   Ring,
   StreetFeature,
+  StreetGrade,
   TileId,
 } from './types';

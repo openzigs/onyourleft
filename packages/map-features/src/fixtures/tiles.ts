@@ -262,6 +262,10 @@ export const STREET_FIXTURE_ROADS: readonly {
   readonly kind: string;
   readonly kindDetail?: string;
   readonly sink: 'streets' | 'paths' | null;
+  /** `is_bridge` and `is_tunnel`, where the feature carries them, and the grade a street gets. */
+  readonly isBridge?: boolean;
+  readonly isTunnel?: boolean;
+  readonly grade?: 'ground' | 'bridge' | 'tunnel';
   readonly line: readonly (readonly [number, number])[];
 }[] = [
   {
@@ -344,6 +348,41 @@ export const STREET_FIXTURE_ROADS: readonly {
       [4000, 3950],
     ],
   },
+  // Grade separation: a bridge, a tunnel, and a flag that is `false`.
+  {
+    kind: 'major_road',
+    kindDetail: 'secondary',
+    sink: 'streets',
+    isBridge: true,
+    grade: 'bridge',
+    line: [
+      [100, 4000],
+      [4000, 4000],
+    ],
+  },
+  {
+    kind: 'minor_road',
+    kindDetail: 'tertiary',
+    sink: 'streets',
+    isTunnel: true,
+    grade: 'tunnel',
+    line: [
+      [100, 4040],
+      [4000, 4040],
+    ],
+  },
+  {
+    kind: 'minor_road',
+    kindDetail: 'unclassified',
+    sink: 'streets',
+    isBridge: false,
+    isTunnel: false,
+    grade: 'ground',
+    line: [
+      [100, 4080],
+      [4000, 4080],
+    ],
+  },
 ];
 
 /** {@link STREET_FIXTURE_ROADS} as one `roads` layer, every feature carrying a name and an id. */
@@ -359,6 +398,8 @@ export function streetsTile(): Uint8Array {
           ...poisonTags,
           kind: road.kind,
           ...(road.kindDetail === undefined ? {} : { kind_detail: road.kindDetail }),
+          ...(road.isBridge === undefined ? {} : { is_bridge: road.isBridge }),
+          ...(road.isTunnel === undefined ? {} : { is_tunnel: road.isTunnel }),
         },
         geometry: line([road.line]),
       })),

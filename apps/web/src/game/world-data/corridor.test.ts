@@ -409,6 +409,24 @@ describe('packing', () => {
     });
   });
 
+  it("keeps each street's grade, so a bridge or a tunnel is still one when the corridor is kept (#1565)", async () => {
+    const line = Float32Array.from([0, 0, 0, 100]);
+    const streets = (['ground', 'bridge', 'tunnel'] as const).map((grade) => ({
+      kind: 'major_road',
+      kindDetail: 'primary',
+      grade,
+      line,
+    }));
+    const back = await unpackCorridorFeatures(
+      await packCorridorFeatures({ landUse: [], buildings: [], paths: [], streets }),
+    );
+    expect(back.streets.map((street) => street.grade)).toStrictEqual([
+      'ground',
+      'bridge',
+      'tunnel',
+    ]);
+  });
+
   it('refuses a blob it did not write', async () => {
     // #1565: a version-1 blob, as a reader before the streets kept it, is not read.
     const json = new Blob([JSON.stringify({ v: 1 })])

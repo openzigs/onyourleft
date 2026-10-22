@@ -20,7 +20,9 @@ an ADR disagree, the ADR wins.
   ADR 0054 D-3). Per (owner, route), on the rider's device only, in its own IndexedDB object store in
   `packages/store` (`WorldCorridorRecord`): building footprints with `kind`, `height` and
   `min_height`; land-use and water polygons with `kind`; footway lines with `kind` and
-  `kind_detail`; and which tiles were read and when. No OSM identifier, no name and no address.
+  `kind_detail`; street lines with `kind`, `kind_detail` and whether each is a bridge or a tunnel
+  (#1565, ADR 0054's 2026-10-22 amendment); and which tiles were read and when. No OSM identifier,
+  no name and no address.
   Every record carries `licence: 'ODbL-1.0'`: the store is treated as a **Derivative Database** of
   OpenStreetMap (D-3.2). It is droppable without loss and is erased with its route and by the device
   erase (D-3.4).

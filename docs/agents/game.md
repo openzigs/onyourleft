@@ -813,7 +813,8 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         cross streets (#1565) — a side road 60 m off the
                         route at each junction where a mapped street
                         (`WorldCorridor.streets`, #1544's decoder keeps them
-                        since #1565) leaves the route, and one crossroads at
+                        since #1565) leaves the route at grade — never a
+                        bridge, a tunnel or a `highway` — and one crossroads at
                         every procedural village's centre, whose middle plots
                         are empty for it (`settlements.ts`). ⚠️ **Drawn in the
                         ROAD's material** by one mesh in both worlds

@@ -153,6 +153,17 @@ describe('decodeTile on the named fixtures', () => {
     expect(tile.streets).toHaveLength(
       STREET_FIXTURE_ROADS.filter((r) => r.sink === 'streets').length,
     );
+    // Grade separation (#1565): `is_bridge` and `is_tunnel` as booleans; absent or `false` is at grade.
+    for (const road of STREET_FIXTURE_ROADS.filter((r) => r.sink === 'streets')) {
+      const street = tile.streets.find(
+        (f) => f.kind === road.kind && f.kindDetail === (road.kindDetail ?? ''),
+      );
+      expect([road.kind, road.kindDetail, street?.grade]).toEqual([
+        road.kind,
+        road.kindDetail,
+        road.grade ?? 'ground',
+      ]);
+    }
     // Along its line, in the corridor frame: the minor road's two ends.
     const minor = tile.streets.find((f) => f.kind === 'minor_road');
     const got = vertices(minor?.line as Float32Array);
@@ -221,6 +232,7 @@ describe('decodeTile returns only the fields P-4 names', () => {
         'heightMetres',
         'minHeightMetres',
         'kindDetail',
+        'grade',
         'line',
       ];
       for (const key of keys) expect(allowed).toContain(key);
