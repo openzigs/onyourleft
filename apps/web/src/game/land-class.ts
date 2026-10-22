@@ -11,6 +11,9 @@
  * `settlements.ts` (no procedural site on mapped land, no field boundary off
  * field ground — {@link fieldGround}), `scatter.ts` (no tree, shrub or rock on built-up
  * land or water) and `streets.ts` (no pavement for a site that is not built).
+ * Since #1547 it also carries how far each cell is from built-up land
+ * ({@link LandClassMask.builtUpDistances}), which `landform.ts` levels a mapped
+ * town's ground by.
  *
  * ⚠️ **Read every frame, on the thread GATT notifications arrive on** (#240
  * NFR-2, #469), so {@link LandClassMask.classAt} is one `Map` lookup and one
@@ -121,6 +124,9 @@ const CHUNK_BYTES = LAND_CLASS_CHUNK_CELLS * LAND_CLASS_CHUNK_CELLS;
 const CHUNK_RANGE = 2 ** 13;
 const CHUNK_STRIDE = 2 * CHUNK_RANGE;
 
+/** Cells either side of the origin a chunk key can name: past it is far. */
+const CELL_RANGE = CHUNK_RANGE * LAND_CLASS_CHUNK_CELLS;
+
 /**
  * The classes by code, the code being the precedence: a cell keeps the
  * highest code written to it. 0 is `unknown`, which nothing writes.
@@ -135,6 +141,42 @@ const CLASS_OF_CODE: readonly LandClass[] = [
   'water',
 ];
 const CODE_OTHER = 1;
+const CODE_BUILT_UP = CLASS_OF_CODE.indexOf('built-up');
+
+/**
+ * How far the levelling field reaches from mapped built-up land, in metres:
+ * **250** — #1547.
+ *
+ * `landform.ts` holds the ground's invented relief to `RELIEF_SLOPE` times
+ * {@link LandClassMask.builtUpDistances}, the rule its clear band already holds
+ * beside the road, so a mapped town stands on the road's own height and the
+ * hills rise from its edge no faster than they rise from the road. Its relief
+ * is at most `RELIEF_MAX_METRES` (45 m) and `RELIEF_SLOPE` is 0.18, so past
+ * 45 / 0.18 = 250 m nothing is held and the field need not reach further.
+ * `landform.test.ts` holds the two files to that arithmetic.
+ */
+export const LEVELLING_REACH_METRES = 250;
+
+/**
+ * The most chunks the levelling field measures, in route order: **512** — #1547.
+ *
+ * Measuring a chunk is a chamfer over it and its neighbours' apron, about
+ * 0.3 ms in Node on the development machine, and it runs at the press: 512 of
+ * them is ~150 ms there, 52 km² of ground beside a town. Past it a town's
+ * ground is not levelled — today's ground, never a refusal — the
+ * {@link LAND_CLASS_MAX_BYTES} precedent. A chunk that is built-up throughout
+ * costs nothing and is not counted.
+ */
+export const LEVELLING_MAX_CHUNKS = 512;
+
+/** The stored distance past {@link LEVELLING_REACH_METRES}: a byte's most, in metres. */
+const LEVEL_FAR = 255;
+
+/** Cells of neighbouring chunk a chunk's distances are measured over: the reach, and one. */
+const LEVEL_APRON_CELLS = Math.ceil(LEVELLING_REACH_METRES / LAND_CLASS_CELL_METRES) + 1;
+
+/** The side of the grid one chunk's distances are measured on: the chunk and its apron. */
+const LEVEL_SCRATCH_CELLS = LAND_CLASS_CHUNK_CELLS + 2 * LEVEL_APRON_CELLS;
 
 /** Answers "what is the ground here?" in the corridor's local metres. */
 export interface LandClassMask {
@@ -142,15 +184,37 @@ export interface LandClassMask {
   classAt(x: number, z: number): LandClass;
   /** True where the corridor is covered (P-8), whatever the class. */
   covered(x: number, z: number): boolean;
-  /** What the mask holds, for the budget. */
+  /**
+   * Metres to the nearest mapped built-up land at each of `count` points —
+   * #1547 — `points` holding them as `x, z` pairs and `into` taking one
+   * distance a point. Read off a field built once, with the mask, and
+   * interpolated between cell centres, so it is continuous and the ground
+   * levelled by it has no step; measured to a built-up cell's edge rather than
+   * its centre, so it is 0 anywhere on one. `Infinity` where no built-up land
+   * is within {@link LEVELLING_REACH_METRES}, outside every chunk the mask
+   * holds, and everywhere in {@link NO_LAND_CLASS}.
+   *
+   * ⚠️ **Points in and distances out through arrays, never as numbers**: a
+   * call that is not inlined boxes every number it is passed or returns, and
+   * this is read for every vertex of the ground (#469). `landform-levelling.test.ts`
+   * measures the heap a build.
+   */
+  builtUpDistances(points: Float64Array, count: number, into: Float64Array): void;
+  /** What the mask holds, for the budget: the classes. */
   readonly bytes: number;
+  /** What the levelling field holds, in bytes: 0 where no built-up land was mapped. */
+  readonly levellingBytes: number;
 }
 
 /** Everything `unknown`: today's world, and what the scene takes with no corridor. */
 export const NO_LAND_CLASS: LandClassMask = Object.freeze({
   classAt: (): LandClass => 'unknown',
   covered: (): boolean => false,
+  builtUpDistances: (_points: Float64Array, count: number, into: Float64Array): void => {
+    into.fill(Number.POSITIVE_INFINITY, 0, count);
+  },
   bytes: 0,
+  levellingBytes: 0,
 });
 
 /**
@@ -208,6 +272,7 @@ export function landClassMask(
   corridor: WorldCorridor,
   maxBytes: number = LAND_CLASS_MAX_BYTES,
   maxWork: number = LAND_CLASS_MAX_WORK,
+  maxLevelledChunks: number = LEVELLING_MAX_CHUNKS,
 ): LandClassMask {
   const chunks = new Map<number, Uint8Array>();
   const maxChunks = Math.floor(maxBytes / CHUNK_BYTES);
@@ -224,6 +289,8 @@ export function landClassMask(
     const code = CLASS_OF_CODE.indexOf(landClassOfKind(feature.layer, feature.kind));
     work -= paint(chunks, feature, code);
   }
+  // 3. #1547: how far every cell near built-up land is from it.
+  const { levels, bytes: levellingBytes } = levellingField(chunks, maxLevelledChunks);
 
   const classAt = (x: number, z: number): LandClass => {
     const column = Math.floor(x / CHUNK_METRES);
@@ -242,11 +309,203 @@ export function landClassMask(
     );
     return CLASS_OF_CODE[chunk[cellZ * LAND_CLASS_CHUNK_CELLS + cellX] as number] as LandClass;
   };
+  /** The stored distance at a cell, by its index across the whole grid. */
+  const levelCell = (cellX: number, cellZ: number): number => {
+    const column = Math.floor(cellX / LAND_CLASS_CHUNK_CELLS);
+    const row = Math.floor(cellZ / LAND_CLASS_CHUNK_CELLS);
+    if (!inRange(column, row)) return LEVEL_FAR;
+    const chunk = levels.get(chunkKey(column, row));
+    if (chunk === undefined) return LEVEL_FAR;
+    const at =
+      (cellZ - row * LAND_CLASS_CHUNK_CELLS) * LAND_CLASS_CHUNK_CELLS +
+      (cellX - column * LAND_CLASS_CHUNK_CELLS);
+    return chunk[at] as number;
+  };
+  /**
+   * Every point's distance, into `into`. The four stored distances around a
+   * point come from one chunk where all four are in it — all but one row and
+   * one column of it — and cell by cell across a chunk's edge.
+   */
+  const builtUpDistances = (points: Float64Array, count: number, into: Float64Array): void => {
+    for (let point = 0; point < count; point += 1) {
+      // Between the four cell centres around the point, so the field is continuous.
+      const fx = (points[point * 2] as number) / LAND_CLASS_CELL_METRES - 0.5;
+      const fz = (points[point * 2 + 1] as number) / LAND_CLASS_CELL_METRES - 0.5;
+      const cellX = Math.floor(fx);
+      const cellZ = Math.floor(fz);
+      // `NaN` and the infinities: nothing is near.
+      if (!(Math.abs(cellX) < CELL_RANGE && Math.abs(cellZ) < CELL_RANGE)) {
+        into[point] = Number.POSITIVE_INFINITY;
+        continue;
+      }
+      const column = Math.floor(cellX / LAND_CLASS_CHUNK_CELLS);
+      const row = Math.floor(cellZ / LAND_CLASS_CHUNK_CELLS);
+      const localX = cellX - column * LAND_CLASS_CHUNK_CELLS;
+      const localZ = cellZ - row * LAND_CLASS_CHUNK_CELLS;
+      let a: number;
+      let b: number;
+      let c: number;
+      let d: number;
+      if (localX < LAND_CLASS_CHUNK_CELLS - 1 && localZ < LAND_CLASS_CHUNK_CELLS - 1) {
+        const chunk = inRange(column, row) ? levels.get(chunkKey(column, row)) : undefined;
+        if (chunk === undefined) {
+          into[point] = Number.POSITIVE_INFINITY;
+          continue;
+        }
+        const at = localZ * LAND_CLASS_CHUNK_CELLS + localX;
+        a = chunk[at] as number;
+        b = chunk[at + 1] as number;
+        c = chunk[at + LAND_CLASS_CHUNK_CELLS] as number;
+        d = chunk[at + LAND_CLASS_CHUNK_CELLS + 1] as number;
+      } else {
+        a = levelCell(cellX, cellZ);
+        b = levelCell(cellX + 1, cellZ);
+        c = levelCell(cellX, cellZ + 1);
+        d = levelCell(cellX + 1, cellZ + 1);
+      }
+      if (a === LEVEL_FAR && b === LEVEL_FAR && c === LEVEL_FAR && d === LEVEL_FAR) {
+        into[point] = Number.POSITIVE_INFINITY;
+        continue;
+      }
+      const tx = fx - cellX;
+      const near = a + (b - a) * tx;
+      const far = c + (d - c) * tx;
+      // From the cells' centres to their edge: a built-up cell is built-up to
+      // its edge, so a point inside one, or half a cell off it, is on the town.
+      into[point] = Math.max(0, near + (far - near) * (fz - cellZ) - LAND_CLASS_CELL_METRES / 2);
+    }
+  };
   return {
     classAt,
     covered: (x, z) => classAt(x, z) !== 'unknown',
+    builtUpDistances,
     bytes: chunks.size * CHUNK_BYTES,
+    levellingBytes,
   };
+}
+
+/** The chamfer's step to a side neighbour and to a diagonal one, in metres. */
+const SIDE_STEP = LAND_CLASS_CELL_METRES;
+const DIAGONAL_STEP = LAND_CLASS_CELL_METRES * Math.SQRT2;
+
+/**
+ * Every chunk's distance to the nearest built-up cell, in whole metres up to
+ * {@link LEVEL_FAR} — #1547. A chunk with no built-up cell in it or in any of
+ * its eight neighbours gets none, and reads as far: a 320 m chunk is wider
+ * than the reach, so nothing further away can be within it.
+ *
+ * Each chunk is measured on its own grid with an apron of its neighbours'
+ * cells, by a two-pass chamfer (side and diagonal steps, within 8 % of the
+ * straight-line distance), so a town across a chunk's edge is as near as it
+ * is. Built once, at the press, with the mask; one scratch grid for all of it.
+ * A chunk built-up throughout is 0 throughout, and shares one array; past
+ * `maxChunks` measured, in route order, the rest get none.
+ */
+function levellingField(
+  chunks: Map<number, Uint8Array>,
+  maxChunks: number,
+): { readonly levels: Map<number, Uint8Array>; readonly bytes: number } {
+  const levels = new Map<number, Uint8Array>();
+  const builtUp = new Set<number>();
+  const throughout = new Set<number>();
+  for (const [key, chunk] of chunks) {
+    if (!chunk.includes(CODE_BUILT_UP)) continue;
+    builtUp.add(key);
+    let every = true;
+    for (let cell = 0; cell < CHUNK_BYTES && every; cell += 1) {
+      every = chunk[cell] === CODE_BUILT_UP;
+    }
+    if (every) throughout.add(key);
+  }
+  if (builtUp.size === 0) return { levels, bytes: 0 };
+  const onTheTown = throughout.size > 0 ? new Uint8Array(CHUNK_BYTES) : undefined;
+  const side = LEVEL_SCRATCH_CELLS;
+  const scratch = new Float32Array(side * side);
+  let measured = 0;
+  for (const key of chunks.keys()) {
+    if (onTheTown !== undefined && throughout.has(key)) {
+      levels.set(key, onTheTown);
+      continue;
+    }
+    if (measured >= maxChunks) continue;
+    const column = (key % CHUNK_STRIDE) - CHUNK_RANGE;
+    const row = Math.floor(key / CHUNK_STRIDE) - CHUNK_RANGE;
+    let near = false;
+    for (let dRow = -1; dRow <= 1 && !near; dRow += 1) {
+      for (let dColumn = -1; dColumn <= 1 && !near; dColumn += 1) {
+        near =
+          inRange(column + dColumn, row + dRow) &&
+          builtUp.has(chunkKey(column + dColumn, row + dRow));
+      }
+    }
+    if (!near) continue;
+    measured += 1;
+    scratch.fill(Number.POSITIVE_INFINITY);
+    // The seeds: every built-up cell of this chunk and of its neighbours' aprons.
+    for (let dRow = -1; dRow <= 1; dRow += 1) {
+      for (let dColumn = -1; dColumn <= 1; dColumn += 1) {
+        if (!inRange(column + dColumn, row + dRow)) continue;
+        const neighbourKey = chunkKey(column + dColumn, row + dRow);
+        if (!builtUp.has(neighbourKey)) continue;
+        const neighbour = chunks.get(neighbourKey) as Uint8Array;
+        const offsetX = dColumn * LAND_CLASS_CHUNK_CELLS + LEVEL_APRON_CELLS;
+        const offsetZ = dRow * LAND_CLASS_CHUNK_CELLS + LEVEL_APRON_CELLS;
+        const fromX = Math.max(0, -offsetX);
+        const toX = Math.min(LAND_CLASS_CHUNK_CELLS, side - offsetX);
+        const fromZ = Math.max(0, -offsetZ);
+        const toZ = Math.min(LAND_CLASS_CHUNK_CELLS, side - offsetZ);
+        for (let cellZ = fromZ; cellZ < toZ; cellZ += 1) {
+          for (let cellX = fromX; cellX < toX; cellX += 1) {
+            if (neighbour[cellZ * LAND_CLASS_CHUNK_CELLS + cellX] === CODE_BUILT_UP) {
+              scratch[(cellZ + offsetZ) * side + cellX + offsetX] = 0;
+            }
+          }
+        }
+      }
+    }
+    chamfer(scratch, side);
+    const level = new Uint8Array(CHUNK_BYTES);
+    for (let cellZ = 0; cellZ < LAND_CLASS_CHUNK_CELLS; cellZ += 1) {
+      const from = (cellZ + LEVEL_APRON_CELLS) * side + LEVEL_APRON_CELLS;
+      for (let cellX = 0; cellX < LAND_CLASS_CHUNK_CELLS; cellX += 1) {
+        const metres = scratch[from + cellX] as number;
+        level[cellZ * LAND_CLASS_CHUNK_CELLS + cellX] =
+          metres >= LEVEL_FAR ? LEVEL_FAR : Math.round(metres);
+      }
+    }
+    levels.set(key, level);
+  }
+  return { levels, bytes: (measured + (onTheTown === undefined ? 0 : 1)) * CHUNK_BYTES };
+}
+
+/** A two-pass chamfer distance transform over a square grid, in place. */
+function chamfer(grid: Float32Array, side: number): void {
+  for (let z = 0; z < side; z += 1) {
+    for (let x = 0; x < side; x += 1) {
+      const at = z * side + x;
+      let best = grid[at] as number;
+      if (x > 0) best = Math.min(best, (grid[at - 1] as number) + SIDE_STEP);
+      if (z > 0) {
+        best = Math.min(best, (grid[at - side] as number) + SIDE_STEP);
+        if (x > 0) best = Math.min(best, (grid[at - side - 1] as number) + DIAGONAL_STEP);
+        if (x + 1 < side) best = Math.min(best, (grid[at - side + 1] as number) + DIAGONAL_STEP);
+      }
+      grid[at] = best;
+    }
+  }
+  for (let z = side - 1; z >= 0; z -= 1) {
+    for (let x = side - 1; x >= 0; x -= 1) {
+      const at = z * side + x;
+      let best = grid[at] as number;
+      if (x + 1 < side) best = Math.min(best, (grid[at + 1] as number) + SIDE_STEP);
+      if (z + 1 < side) {
+        best = Math.min(best, (grid[at + side] as number) + SIDE_STEP);
+        if (x + 1 < side) best = Math.min(best, (grid[at + side + 1] as number) + DIAGONAL_STEP);
+        if (x > 0) best = Math.min(best, (grid[at + side - 1] as number) + DIAGONAL_STEP);
+      }
+      grid[at] = best;
+    }
+  }
 }
 
 /** Marks a covered box's cells `other`, making chunks as needed. `false` once the cap is reached. */

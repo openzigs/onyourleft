@@ -1069,7 +1069,7 @@ function fillCell(
           // `terrainHeightAt` is the surface `landform.ts` builds the mesh
           // from, column for column. Plan positions are untouched, and
           // `arrangement-unchanged.test.ts`' plan digest is what says so.
-          y: terrainHeightAt(profile, origin, seed, at, lateral * side),
+          y: terrainHeightAt(profile, origin, seed, at, lateral * side, land),
           z,
           rotation: uniform(base, STREAM_ROTATION) * Math.PI * 2,
           scale:

@@ -23,6 +23,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { metres, type RouteProfile } from '@onyourleft/domain';
 
 import { retainedFrame } from './frame-testing';
+import { NO_LAND_CLASS } from './land-class';
 import {
   TERRAIN_COLUMN_OFFSETS,
   terrainCorridor,
@@ -162,14 +163,26 @@ describe('a lent array carries nothing over from the frame before — #469', () 
     const profile = hillRoute();
     const origin = corridorOrigin(profile);
     const seed = scatterSeed(profile);
-    const hillside = terrainCorridor(profile, origin, roadCorridor(profile, origin, 500), seed);
+    const hillside = terrainCorridor(
+      profile,
+      origin,
+      roadCorridor(profile, origin, 500),
+      seed,
+      NO_LAND_CLASS,
+    );
     let tilted = 0;
     for (let at = 0; at < hillside.normals.length; at += 3) {
       if (Math.abs(hillside.normals[at] as number) > 1e-3) tilted += 1;
     }
     // Non-vacuity: the array about to be lent again is full of sideways normals.
     expect(tilted).toBeGreaterThan(100);
-    const start = terrainCorridor(profile, origin, roadCorridor(profile, origin, 0), seed);
+    const start = terrainCorridor(
+      profile,
+      origin,
+      roadCorridor(profile, origin, 0),
+      seed,
+      NO_LAND_CLASS,
+    );
     expect(start.normals).toBe(hillside.normals);
     // The first row is 60 m behind the start line: collapsed onto it.
     const perRow = start.vertices.length / 3 / start.rows;
@@ -245,7 +258,15 @@ describe('the lent storage when the size changes — #472', () => {
     // The reference: each size built in its OWN fresh module, so each is a
     // first allocation and nothing a mutation does to reuse can reach it.
     const owned = async (corridor: RoadCorridor): Promise<Record<string, number[] | number>> =>
-      groundOf((await freshBuilders()).landform.terrainCorridor(profile, origin, corridor, seed));
+      groundOf(
+        (await freshBuilders()).landform.terrainCorridor(
+          profile,
+          origin,
+          corridor,
+          seed,
+          NO_LAND_CLASS,
+        ),
+      );
     const expectedShort = await owned(short);
     const expectedLong = await owned(long);
 
@@ -258,7 +279,7 @@ describe('the lent storage when the size changes — #472', () => {
       [long, expectedLong],
       [short, expectedShort],
     ] as const) {
-      const built = landform.terrainCorridor(profile, origin, corridor, seed);
+      const built = landform.terrainCorridor(profile, origin, corridor, seed, NO_LAND_CLASS);
       expect(built.rows).toBe(corridor.centre.length);
       expect(built.vertices.length).toBe(built.rows * floatsPerRow);
       expect(built.vertices.every(Number.isFinite)).toBe(true);
@@ -272,8 +293,8 @@ describe('the lent storage when the size changes — #472', () => {
       [short, long],
       [long, short],
     ] as const) {
-      const held = terrainCorridor(profile, origin, before, seed);
-      const built = terrainCorridor(profile, origin, after, seed);
+      const held = terrainCorridor(profile, origin, before, seed, NO_LAND_CLASS);
+      const built = terrainCorridor(profile, origin, after, seed, NO_LAND_CLASS);
       expect(terrainMeshIsCurrent(held)).toBe(false);
       expect(() => {
         belt.update(held, 0x557744);

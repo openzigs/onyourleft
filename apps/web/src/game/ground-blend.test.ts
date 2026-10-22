@@ -11,6 +11,7 @@ import {
   treeLineHeight,
   VERGE_BLEND_METRES,
 } from './ground-blend';
+import { NO_LAND_CLASS } from './land-class';
 import { terrainCorridor, VERGE_METRES } from './landform';
 import { REALISTIC_SURFACES } from './realistic-assets';
 import { hillRoute } from './route-fixtures-testing';
@@ -62,9 +63,9 @@ describe('the realistic ground’s blend — #627', () => {
     );
     // And the landform carries it to the renderer with every mesh.
     const corridor = roadCorridor(route, origin, 500);
-    expect(terrainCorridor(route, origin, corridor, scatterSeed(route)).treeLine).toBe(
-      treeLineHeight(origin),
-    );
+    expect(
+      terrainCorridor(route, origin, corridor, scatterSeed(route), NO_LAND_CLASS).treeLine,
+    ).toBe(treeLineHeight(origin));
   });
 
   it('blends in the ground’s one shader, from attributes the ground already has', () => {
