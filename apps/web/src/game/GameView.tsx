@@ -165,6 +165,7 @@ import { SoundControls } from './SoundControls';
 import { RoutePicker, type RecordingOffer, type RidableRoute } from './StageChooser';
 import { sharedCueOutput } from './web-audio';
 import type { CorridorState, WorldCorridor } from './world-data/corridor';
+import { landClassMask, type LandClassMask } from './land-class';
 import {
   climbLeadIn,
   DEFAULT_ANNOUNCEMENTS,
@@ -1101,6 +1102,8 @@ export function GameView(props: GameViewProps): JSX.Element {
    * read that finishes mid-ride changes the picker's line, not the world.
    */
   const worldCorridorRef = useRef<WorldCorridor | undefined>(undefined);
+  /** #1546: what the ground is in {@link worldCorridorRef}, built once from it at the press. */
+  const landClassRef = useRef<LandClassMask | undefined>(undefined);
 
   useEffect(() => {
     if (port === undefined) {
@@ -1496,6 +1499,12 @@ export function GameView(props: GameViewProps): JSX.Element {
       const ready = corridorStateRef.current;
       worldCorridorRef.current =
         ready?.kind === 'ready' && ready.corridor.routeId === route.id ? ready.corridor : undefined;
+      // #1546: the mask every placement rule reads, built ONCE, here — never
+      // per frame — and `scene.ts` takes `NO_LAND_CLASS` when there is none.
+      landClassRef.current =
+        worldCorridorRef.current === undefined
+          ? undefined
+          : landClassMask(worldCorridorRef.current);
       setState(simulation.state);
       setChosen(route);
       setPhase('riding');
@@ -2102,6 +2111,7 @@ export function GameView(props: GameViewProps): JSX.Element {
           ...(worldCorridorRef.current === undefined
             ? {}
             : { worldCorridor: worldCorridorRef.current }),
+          ...(landClassRef.current === undefined ? {} : { landClass: landClassRef.current }),
         });
         if (prepared) {
           view.render(frame);

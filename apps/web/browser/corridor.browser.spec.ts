@@ -14,6 +14,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
 import { HARNESS_ORIGIN } from '../playwright.config';
+import { LAND_CLASS_MAX_BYTES } from '../src/game/land-class';
 import { CORRIDOR_MAX_TILES } from '../src/game/world-data/corridor';
 import { MAP_TILES_STORAGE_KEY } from '../src/map/tiles-preference';
 import { CORRIDOR_ARCHIVE_FILE, expectedCorridorCounts } from './corridor-fixture';
@@ -71,12 +72,48 @@ test.describe('#1539 corridor read', () => {
   });
 });
 
+test.describe('#1546 nothing on a mapped wood', () => {
+  const BLOCKED = new Set(['wood', 'water', 'park']);
+
+  test('no structure stands on wood, water or park ground', async ({ page }) => {
+    const corridor = await readCorridor(page);
+    expect(corridor.errors).toStrictEqual([]);
+    expect(corridor.state).toBe('ready');
+    expect(corridor.classed.length).toBeGreaterThan(0);
+    // The fixture's wood is there to be stood on: the ground under the items has some.
+    expect(corridor.classed.some((item) => item.landClass === 'wood')).toBe(true);
+    expect(
+      corridor.classed.filter((item) => item.structure && BLOCKED.has(item.landClass)),
+    ).toStrictEqual([]);
+    console.log(
+      `#1546 land-class mask: ${String(corridor.maskBytes)} bytes, built in ${corridor.maskMilliseconds.toFixed(1)} ms`,
+    );
+  });
+
+  test('control: with -landclass a procedural building stands inside the wood', async ({
+    page,
+  }) => {
+    const corridor = await readCorridor(page, '?levers=-landclass');
+    expect(corridor.state).toBe('ready');
+    expect(
+      corridor.classed.filter(
+        (item) => item.structure && item.kind !== 'signpost' && item.landClass === 'wood',
+      ).length,
+    ).toBeGreaterThan(0);
+  });
+});
+
 test.describe('#1539 the 600-tile corridor', () => {
   test('reads all 600 tiles at the harness origin — the floor of the budget', async ({ page }) => {
     const corridor = await readCorridor(page, '?long');
     expect(corridor.errors).toStrictEqual([]);
     expect(corridor.state).toBe('ready');
     expect(corridor.coveredTiles).toBe(CORRIDOR_MAX_TILES);
+    // #1546: the mask of a 600-tile corridor, within its 8 MiB.
+    expect(corridor.maskBytes).toBeLessThanOrEqual(LAND_CLASS_MAX_BYTES);
+    console.log(
+      `#1546 600-tile land-class mask: ${String(corridor.maskBytes)} bytes, built in ${corridor.maskMilliseconds.toFixed(1)} ms`,
+    );
     // Recorded, not asserted: a loopback number is the floor, and the hosted
     // one carries R2's latency (ADR 0010 D-1); #1553 measures it on the tablet.
     console.log(

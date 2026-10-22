@@ -37,6 +37,7 @@ import {
   describeRefusal,
   tileBounds,
   tileBox,
+  type Box,
   type BuildingFeature,
   type CorridorFrame,
   type DecodeRefusal,
@@ -91,6 +92,13 @@ export interface WorldCorridor {
   readonly origin: CorridorOrigin;
   /** Whether map data was read at `(x, z)` in local metres. O(1) and allocation-free. */
   readonly covered: (x: number, z: number) => boolean;
+  /**
+   * Every covered tile's box in local metres, in route order — what
+   * `land-class.ts` §`landClassMask` builds its chunks over (#1546). A z15
+   * tile is an exact axis-aligned rectangle in this frame: `x` reads the
+   * longitude alone and `z` the latitude alone.
+   */
+  readonly coveredBoxes: readonly Box[];
   readonly landUse: readonly LandUseFeature[];
   readonly buildings: readonly BuildingFeature[];
   readonly paths: readonly PathFeature[];
@@ -610,6 +618,9 @@ export function worldCorridorOf(
     routeId,
     origin,
     covered: coveredLookup(origin, tiles),
+    coveredBoxes: tiles
+      .filter((tile) => tile.state === 'covered')
+      .map((tile) => tileBox(origin, { z: 15, x: tile.x, y: tile.y })),
     landUse: features.landUse,
     buildings: features.buildings,
     paths: features.paths,
