@@ -92,6 +92,8 @@ function corridorOf(
     routeId: 'footways-fixture',
     origin: ORIGIN,
     covered,
+    // #1546's land-class mask is not under test here: no boxes.
+    coveredBoxes: [],
     landUse: [],
     buildings: [],
     paths,

@@ -2766,6 +2766,8 @@ function mappedPavementProbe(
     routeId: 'harness-1551',
     origin,
     covered: () => true,
+    // #1546's land-class mask is not under test here: no boxes.
+    coveredBoxes: [],
     landUse: [],
     buildings: [],
     paths: [{ kind: 'path', kindDetail: 'sidewalk', line: Float32Array.from(line) }],
