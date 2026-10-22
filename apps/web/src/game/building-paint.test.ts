@@ -11,13 +11,21 @@ import { describe, expect, it } from 'vitest';
 import {
   DOOR_PAINTS,
   linearFromSrgb,
+  LOT_CLAD_STEP,
   LOT_PAINTS,
+  lotClad,
   lotPaint,
   lotPaintChannel,
+  lotPaintEntry,
+  lotSidingPaints,
   PAINT_LIMITS,
   paintChannelOf,
   paintsOf,
   ROOF_PAINTS,
+  roofPaintsOf,
+  SHINGLE_PAINTS,
+  SHINGLE_SHARE,
+  SIDING_SHARE,
   TRIM_PAINTS,
   WALL_PAINTS,
   type Rgb,
@@ -84,15 +92,16 @@ describe('the paints — #1581', () => {
 });
 
 describe('a lot is painted unlike the lots a rider sees beside it — #1581', () => {
-  const wall = (packed: number): number => lotPaintChannel(packed, 'wall') - 1;
-  const roof = (packed: number): number => lotPaintChannel(packed, 'roof') - 1;
+  // Since #1588 a channel also carries the cladding: the entry is what the rule is about.
+  const wall = (packed: number): number => lotPaintEntry(packed, 'wall');
+  const roof = (packed: number): number => lotPaintEntry(packed, 'roof');
 
   it('differs in wall and roof from the next lot either side, across the road, and diagonally across', () => {
     let pairs = 0;
     for (const seed of [0, 1, 7, 0x7fff_ffff, 0xdead_beef]) {
       for (let plot = -50; plot < 200; plot += 1) {
         for (const side of [1, -1] as const) {
-          const here = lotPaint(seed, plot, side);
+          const here = lotPaint(seed, plot, side, true);
           expect(wall(here)).toBeGreaterThanOrEqual(0);
           expect(wall(here)).toBeLessThan(LOT_PAINTS);
           expect(roof(here)).toBeGreaterThanOrEqual(0);
@@ -104,7 +113,7 @@ describe('a lot is painted unlike the lots a rider sees beside it — #1581', ()
             [plot + 1, other],
             [plot - 1, other],
           ] as const) {
-            const there = lotPaint(seed, nextPlot, nextSide);
+            const there = lotPaint(seed, nextPlot, nextSide, true);
             expect(wall(there)).not.toBe(wall(here));
             expect(roof(there)).not.toBe(roof(here));
             pairs += 1;
@@ -126,5 +135,68 @@ describe('a lot is painted unlike the lots a rider sees beside it — #1581', ()
     expect(lotPaintChannel(undefined, 'wall')).toBe(0);
     expect(lotPaintChannel(undefined, 'roof')).toBe(0);
     expect(lotPaintChannel(lotPaint(0, 0, 1), 'wall')).toBeGreaterThan(0);
+  });
+});
+
+describe('the US house’s paints — #1588', () => {
+  it('sells asphalt shingles in greys, browns and greens, as dark as asphalt granules are', () => {
+    let greys = 0;
+    let browns = 0;
+    let greens = 0;
+    for (const [r, g, b] of SHINGLE_PAINTS) {
+      for (const channel of [r, g, b]) {
+        expect(channel).toBeGreaterThanOrEqual(PAINT_LIMITS.albedoLowest);
+        expect(channel).toBeLessThan(0.2);
+      }
+      if (Math.max(r, g, b) - Math.min(r, g, b) < 0.012) greys += 1;
+      else if (r > g && g > b) browns += 1;
+      else if (g > r && g > b) greens += 1;
+    }
+    expect(greys).toBeGreaterThanOrEqual(2);
+    expect(browns).toBeGreaterThanOrEqual(2);
+    expect(greens).toBeGreaterThanOrEqual(2);
+    expect(SHINGLE_PAINTS.length).toBeGreaterThanOrEqual(LOT_PAINTS);
+  });
+
+  it('gives a shingled roof the shingles’ list, and any other its surface’s', () => {
+    expect(roofPaintsOf('slate', true)).toBe(SHINGLE_PAINTS);
+    expect(roofPaintsOf('slate', false)).toBe(ROOF_PAINTS.slate);
+    expect(roofPaintsOf('roof-tiles', false)).toBe(ROOF_PAINTS['roof-tiles']);
+  });
+
+  it('sides a lot in the house paints, the first five of render’s', () => {
+    expect(lotSidingPaints()).toStrictEqual((WALL_PAINTS.render ?? []).slice(0, LOT_PAINTS));
+  });
+
+  it('clads most house lots in clapboard and under shingles, and never a shop', () => {
+    let houses = 0;
+    let clapboard = 0;
+    let shingled = 0;
+    for (const seed of [0, 7, 0xdead_beef]) {
+      for (let plot = 0; plot < 300; plot += 1) {
+        for (const side of [1, -1] as const) {
+          const house = lotPaint(seed, plot, side, true);
+          houses += 1;
+          if (lotClad(house, 'wall')) clapboard += 1;
+          if (lotClad(house, 'roof')) shingled += 1;
+          // The entry is still the colouring's, under the cladding.
+          expect(lotPaintEntry(house, 'wall')).toBe(
+            lotPaintEntry(lotPaint(seed, plot, side), 'wall'),
+          );
+          expect(lotPaintEntry(house, 'wall')).toBeLessThan(LOT_PAINTS);
+          expect(lotPaintChannel(house, 'wall')).toBeLessThanOrEqual(LOT_PAINTS + LOT_CLAD_STEP);
+          // A shop is never clad.
+          const shop = lotPaint(seed, plot, side, false);
+          expect(lotClad(shop, 'wall')).toBe(false);
+          expect(lotClad(shop, 'roof')).toBe(false);
+        }
+      }
+    }
+    expect(clapboard / houses).toBeGreaterThan(SIDING_SHARE - 0.05);
+    expect(clapboard / houses).toBeLessThan(SIDING_SHARE + 0.05);
+    expect(shingled / houses).toBeGreaterThan(SHINGLE_SHARE - 0.05);
+    expect(shingled / houses).toBeLessThan(SHINGLE_SHARE + 0.05);
+    expect(lotClad(undefined, 'wall')).toBe(false);
+    expect(lotPaintEntry(undefined, 'roof')).toBe(-1);
   });
 });

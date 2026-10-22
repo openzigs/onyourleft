@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest';
 import { metres, type RouteProfile } from '@onyourleft/domain';
 import type { BuildingFeature, LandUseFeature } from '@onyourleft/map-features';
 
-import { lotPaintChannel } from './building-paint';
+import { lotClad, lotPaintChannel, lotPaintEntry } from './building-paint';
 import { footprintPlans, mappedTown } from './footprint-buildings';
 import { buildingBeside, landBeside, rectangleBeside } from './footprint-fixtures-testing';
 import { landClassMask, NO_LAND_CLASS, type LandClassMask } from './land-class';
@@ -569,13 +569,25 @@ describe('#1581 a lot is painted unlike the lots beside it', () => {
         const across = Math.sign(there.across) !== Math.sign(here.across);
         // The next lot along on its side, and the three across the road from it.
         if ((plots === 1 && !across) || (plots <= 1 && across)) {
-          expect(lotPaintChannel(other.paint, 'wall')).not.toBe(lotPaintChannel(lot.paint, 'wall'));
-          expect(lotPaintChannel(other.paint, 'roof')).not.toBe(lotPaintChannel(lot.paint, 'roof'));
+          // Since #1588 a channel carries the cladding too: the colouring is the entry's.
+          expect(lotPaintEntry(other.paint, 'wall')).not.toBe(lotPaintEntry(lot.paint, 'wall'));
+          expect(lotPaintEntry(other.paint, 'roof')).not.toBe(lotPaintEntry(lot.paint, 'roof'));
           neighbours += 1;
         }
       }
     }
     expect(neighbours).toBeGreaterThan(lots.length);
+    // #1588: most house lots are clad, in clapboard and under shingles; a shop never.
+    const houses = lots.filter((lot) => lot.kind === 'building');
+    expect(houses.filter((lot) => lotClad(lot.paint, 'wall')).length).toBeGreaterThan(
+      houses.length / 2,
+    );
+    expect(houses.filter((lot) => lotClad(lot.paint, 'roof')).length).toBeGreaterThan(
+      houses.length / 2,
+    );
+    for (const shop of lots.filter((lot) => lot.kind === 'shop-row')) {
+      expect(lotClad(shop.paint, 'wall')).toBe(false);
+    }
   });
 
   it('control: a village’s houses, on land no map covered, carry no paint', () => {

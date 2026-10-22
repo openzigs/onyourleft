@@ -33,7 +33,7 @@
  */
 
 import type { FootprintPlan, FootprintRole } from './footprint-buildings';
-import { FOOTPRINT_SURFACES, FOOTPRINT_VERTEX_FLOATS } from './footprint-buildings';
+import { FOOTPRINT_SURFACES, FOOTPRINT_VERTEX_FLOATS, ROOF_ROLES } from './footprint-buildings';
 import {
   MAPPED_BUILDING_DRAW_CALLS,
   MAPPED_BUILDING_MAX,
@@ -87,13 +87,16 @@ export function mappedBuildingsOf(plans: readonly FootprintPlan[]): MappedBuildi
   const radii = new Float32Array(plans.length);
   const cells = new Map<number, number[]>();
   plans.forEach((plan, index) => {
-    const { footprint: outline, centroid } = plan;
+    const { footprint: outline, centroid, driveway } = plan;
     let radius = 0;
-    for (let at = 0; at + 1 < outline.length; at += 2) {
-      radius = Math.max(
-        radius,
-        Math.hypot((outline[at] as number) - centroid.x, (outline[at + 1] as number) - centroid.z),
-      );
+    // #1588: a driveway's ground is the building's too, so its reach takes it in.
+    for (const ring of [outline, driveway]) {
+      for (let at = 0; at + 1 < ring.length; at += 2) {
+        radius = Math.max(
+          radius,
+          Math.hypot((ring[at] as number) - centroid.x, (ring[at + 1] as number) - centroid.z),
+        );
+      }
     }
     radii[index] = radius;
     const reach = radius + SETTLEMENT_MARGIN_METRES;
@@ -127,7 +130,10 @@ export function mappedChunk(distanceMetres: number): number {
 /** The roles a building's far level keeps: its walls and its roof (#1540's `farTriangleCount`). */
 export const FAR_ROLES: readonly FootprintRole[] = ['wall', 'roof'];
 
-/** The roles a building's near level draws: all of them, #1581's chimney and trim among them. */
+/**
+ * The roles a building's near level draws: all of them, #1581's chimney and
+ * trim and #1588's dormers and driveway among them.
+ */
 export const NEAR_ROLES: readonly FootprintRole[] = [
   'wall',
   'plinth',
@@ -136,12 +142,18 @@ export const NEAR_ROLES: readonly FootprintRole[] = [
   'door',
   'chimney',
   'trim',
+  'dormer',
+  'dormer-roof',
+  'driveway',
 ];
 
 /**
- * The surface a role wears: the roof the plan's roof surface, and everything
- * else — walls, plinth, parapet, door and, since #1581, chimney and trim — its
- * wall surface.
+ * The surface a role wears: the roof and, since #1588, a dormer's roof the
+ * plan's roof surface (`footprint-buildings.ts` §`ROOF_ROLES`), and
+ * everything else — walls, plinth, parapet, door, since #1581 chimney and
+ * trim, and since #1588 a dormer's front and cheeks and the driveway — its
+ * wall surface. A driveway wears the wall's group only to cost no draw call:
+ * the shader paints it, and no photograph shows.
  *
  * ⚠️ **The door, the trim and the plinth wear the wall's photograph**, where a
  * procedural house's wear timber (`realistic-assets.ts`
@@ -153,7 +165,7 @@ export const NEAR_ROLES: readonly FootprintRole[] = [
  * the photograph instead (`three-renderer.ts` §`withFacade`).
  */
 export function surfaceOfRole(plan: FootprintPlan, role: FootprintRole): StructureSurface {
-  return role === 'roof' ? plan.surfaces.roof : plan.surfaces.wall;
+  return ROOF_ROLES.has(role) ? plan.surfaces.roof : plan.surfaces.wall;
 }
 
 /** How many triangles one role of a plan is. */
@@ -364,8 +376,15 @@ function squaredToRing(ring: Float32Array, x: number, z: number): number {
 }
 
 /**
+ * How far beside a driveway nothing stands — #1588: **1 m**, a verge a
+ * shrub's crown clears, where a house keeps #1534's whole margin.
+ */
+export const DRIVEWAY_MARGIN_METRES = 1;
+
+/**
  * Whether `(x, z)` stands on a mapped building's ground: inside a planned
- * footprint, or within #1534's {@link SETTLEMENT_MARGIN_METRES} of one.
+ * footprint, or within #1534's {@link SETTLEMENT_MARGIN_METRES} of one, or
+ * since #1588 on its driveway or within {@link DRIVEWAY_MARGIN_METRES} of it.
  */
 export function onMappedGround(buildings: MappedBuildings, x: number, z: number): boolean {
   const list = buildings.cells.get(
@@ -381,6 +400,10 @@ export function onMappedGround(buildings: MappedBuildings, x: number, z: number)
     if (dx * dx + dz * dz > reach * reach) continue;
     if (insideRing(plan.footprint, x, z)) return true;
     if (squaredToRing(plan.footprint, x, z) <= margin * margin) return true;
+    if (plan.driveway.length > 0) {
+      if (insideRing(plan.driveway, x, z)) return true;
+      if (squaredToRing(plan.driveway, x, z) <= DRIVEWAY_MARGIN_METRES ** 2) return true;
+    }
   }
   return false;
 }

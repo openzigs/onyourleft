@@ -12,11 +12,13 @@ import { describe, expect, it } from 'vitest';
 import { distanceOnRoute, metres, type RouteProfile } from '@onyourleft/domain';
 import type { BuildingFeature } from '@onyourleft/map-features';
 
-import { DOOR_PAINTS, paintsOf, TRIM_PAINTS } from './building-paint';
+import { DOOR_PAINTS, paintsOf, roofPaintsOf, TRIM_PAINTS } from './building-paint';
 import {
   CHIMNEY,
   CHIMNEY_SHARE,
   EAVES_OVERHANG_METRES,
+  FACADE_DOOR,
+  FACADE_OFFSET,
   FOOTPRINT_MAX_FAR_TRIANGLES,
   FOOTPRINT_MAX_TRIANGLES,
   FOOTPRINT_ROLES,
@@ -25,6 +27,7 @@ import {
   FOOTPRINT_VERTEX_FLOATS,
   footprintPlans,
   footprintUse,
+  GUTTER,
   HIP_SHARE,
   minimumAreaRectangle,
   PAINT_NEIGHBOUR_METRES,
@@ -93,6 +96,18 @@ function verticesOf(plan: FootprintPlan, role: (typeof FOOTPRINT_ROLES)[number])
   const out: number[][] = [];
   for (let at = 0; at < floats.length; at += FOOTPRINT_VERTEX_FLOATS) {
     out.push([floats[at] as number, floats[at + 1] as number, floats[at + 2] as number]);
+  }
+  return out;
+}
+
+/** The front door's vertices, as `[x, y, z]`: since #1588 a garage's door is a `door` too. */
+function frontDoorOf(plan: FootprintPlan): number[][] {
+  const floats = plan.triangles.door;
+  const out: number[][] = [];
+  for (let at = 0; at < floats.length; at += FOOTPRINT_VERTEX_FLOATS) {
+    if (floats[at + FACADE_OFFSET + 2] === FACADE_DOOR) {
+      out.push([floats[at] as number, floats[at + 1] as number, floats[at + 2] as number]);
+    }
   }
   return out;
 }
@@ -675,7 +690,7 @@ describe('the triangles — winding and the door', () => {
 
   it('puts the door on the wall nearest the road, and faces it out', () => {
     const gable = planned('gable');
-    const door = verticesOf(gable, 'door');
+    const door = frontDoorOf(gable);
     expect(door).toHaveLength(6);
     // The gable is 35–45 m out: its near wall is the one at 35 m.
     const [nx, nz] = besideRoad(fixture.profile, fixture.origin, 330, 35);
@@ -841,7 +856,7 @@ describe('the shape’s detail — #1581, over the mixed town', () => {
     let posts = 0;
     let doors = 0;
     for (const plan of town) {
-      const door = verticesOf(plan, 'door');
+      const door = frontDoorOf(plan);
       if (door.length === 0) continue;
       doors += 1;
       const doorTop = Math.max(...door.map(([, y]) => y as number));
@@ -915,14 +930,15 @@ describe('a door canopy keeps the road’s clearance — #1581', () => {
     };
     const { plans } = footprintPlans(corridor, landClassMask(corridor), profile, origin);
     expect(plans).toHaveLength(buildings.length);
-    // A canopy is trim standing out over the door: anything nearer the road than the wall.
+    // A canopy is trim standing out over the door: anything nearer the road
+    // than the wall by more than the eaves and, since #1588, their gutter.
     return plans.filter((plan) =>
       verticesOf(plan, 'trim').some(([x, , z]) => {
         const segments: number[] = [];
         const road = roadSegmentsNear(profile, origin, x as number, z as number, 100, segments);
         const beside: BesideTheRoad = { along: 0, lateral: 0, distance: 0 };
         nearestOnRoadSegments(road, segments, x as number, z as number, beside);
-        return beside.distance < near - EAVES_OVERHANG_METRES - 0.05;
+        return beside.distance < near - EAVES_OVERHANG_METRES - GUTTER.width - 0.05;
       }),
     ).length;
   };
@@ -998,7 +1014,9 @@ describe('the paint — #1581: seeded per building, and never a neighbour’s', 
     const second = footprintPlans(each.corridor, land, each.profile, each.origin).plans;
     first.forEach((plan, index) => {
       expect(plan.paint.wall).toBeLessThan(paintsOf(plan.surfaces.wall)?.length ?? 0);
-      expect(plan.paint.roof).toBeLessThan(paintsOf(plan.surfaces.roof)?.length ?? 0);
+      expect(plan.paint.roof).toBeLessThan(
+        roofPaintsOf(plan.surfaces.roof, plan.cladding.roof === 'shingle')?.length ?? 0,
+      );
       expect(plan.paint.trim).toBeLessThan(TRIM_PAINTS.length);
       expect(plan.paint.door).toBeLessThan(DOOR_PAINTS.length);
       expect(second[index]?.paint).toStrictEqual(plan.paint);

@@ -20,9 +20,14 @@
  *   over a surface's photograph: the brick's courses and the plaster's cracks
  *   stay, in another colour. The first entry of every list is `[1, 1, 1]`
  *   (the photograph as it was), except `render`'s, which is white paint over it.
- * - An **albedo** ({@link TRIM_PAINTS}, {@link DOOR_PAINTS}), linear, drawn in
- *   place of any photograph: a window frame, a sill, a porch and a door are
- *   painted timber, whatever the wall is.
+ * - An **albedo** ({@link TRIM_PAINTS}, {@link DOOR_PAINTS} and, since #1588,
+ *   {@link SHINGLE_PAINTS}), linear, drawn in place of any photograph: a
+ *   window frame, a sill, a porch and a door are painted timber, whatever the
+ *   wall is, and an asphalt shingle is its own colour, whatever the roof
+ *   photograph under it.
+ * - **Clapboard** (#1588) wears its `render` list: the eight house paints are
+ *   a sided house's colours as much as a plastered one's, and the shader lays
+ *   them over white paint's albedo rather than over the plaster photograph.
  *
  * Every albedo is written as the sRGB a paint chart would give and converted
  * here ({@link linearFromSrgb}), because that is how a colour is checked by
@@ -45,6 +50,7 @@
  */
 
 import type { StructureSurface } from './realistic-assets';
+import { slotHash, uniformFrom } from './seeded';
 
 /** A linear colour, red, green and blue. */
 export type Rgb = readonly [number, number, number];
@@ -147,6 +153,33 @@ export const ROOF_PAINTS: Readonly<Partial<Record<StructureSurface, readonly Rgb
   ],
 };
 
+/**
+ * An asphalt-shingle roof's colour — #1588, an albedo, drawn in place of the
+ * roof photograph by `three-renderer.ts` §`withFacade`'s shingle courses:
+ * the greys, browns and greens a US roofing chart sells. Asphalt granules are
+ * dark, so every entry is under 0.2 linear.
+ */
+export const SHINGLE_PAINTS: readonly Rgb[] = [
+  linear(0x5c_5d_5e), // pewter grey
+  linear(0x3c_3e_42), // charcoal
+  linear(0x6e_6a_64), // weathered wood grey
+  linear(0x5e_4b_3c), // driftwood brown
+  linear(0x4b_3a_2e), // chestnut brown
+  linear(0x4a_57_47), // hunter green
+  linear(0x5f_66_5a), // sage green
+];
+
+/**
+ * The paints a roof chooses among — #1588: an asphalt-shingle roof's
+ * {@link SHINGLE_PAINTS}, and otherwise its surface's multipliers.
+ */
+export function roofPaintsOf(
+  surface: StructureSurface,
+  shingled: boolean,
+): readonly Rgb[] | undefined {
+  return shingled ? SHINGLE_PAINTS : paintsOf(surface);
+}
+
 /** A window frame's, a sill's and a porch's paint — #1581. */
 export const TRIM_PAINTS: readonly Rgb[] = [
   linear(0xf4_f2_ec), // white
@@ -193,6 +226,34 @@ export function paintChannelOf(surface: StructureSurface): 'wall' | 'roof' | und
 const LOT_PAINT_BASE = 16;
 
 /**
+ * What a lot's channel adds for its cladding — #1588: an entry is under
+ * {@link LOT_PAINTS}, so the channel's entry and its cladding share a number,
+ * `entry + 8 × clad`, and the shader takes them apart.
+ */
+export const LOT_CLAD_STEP = 8;
+
+/**
+ * The share of residential houses clad in clapboard — #1588: **0.7**, the
+ * default; a mapped house's (`footprint-buildings.ts`) and a lot's alike.
+ */
+export const SIDING_SHARE = 0.7;
+
+/** The share of pitched roofs in asphalt shingles — #1588: **0.75**; a mapped house's and a lot's. */
+export const SHINGLE_SHARE = 0.75;
+
+/** The key {@link lotPaint} hashes a lot's cladding under, apart from every other draw. */
+const LOT_CLAD_KEY = 0x15_88;
+
+/**
+ * A lot's siding paint, by its wall entry — #1588: `render`'s first
+ * {@link LOT_PAINTS} house paints, which a clapboard lot wears in place of its
+ * wall surface's multipliers. @see lotPaint
+ */
+export function lotSidingPaints(): readonly Rgb[] {
+  return (WALL_PAINTS.render ?? []).slice(0, LOT_PAINTS);
+}
+
+/**
  * A procedural lot's wall and roof, packed into one number for its scatter
  * item — #1581, #1550's lots.
  *
@@ -205,23 +266,56 @@ const LOT_PAINT_BASE = 16;
  * 4` are never `0 mod 5`. ⚠️ The plot is the ride's wrapped plot, so on a loop
  * the last and the first plot are neighbours that this rule does not hold
  * apart; it holds everywhere else.
+ *
+ * Since #1588 a `house` is clad, seeded by its plot and side: in clapboard
+ * ({@link SIDING_SHARE}), whose wall entry is then one of
+ * {@link lotSidingPaints}, and under asphalt shingles ({@link SHINGLE_SHARE}),
+ * whose roof entry is one of {@link SHINGLE_PAINTS}. A shop is never clad.
  */
-export function lotPaint(seed: number, plot: number, side: 1 | -1): number {
+export function lotPaint(seed: number, plot: number, side: 1 | -1, house = false): number {
   const s = side === 1 ? 0 : 1;
   const turn = (seed >>> 0) % LOT_PAINTS;
   const wall = (((plot + 2 * s + turn) % LOT_PAINTS) + LOT_PAINTS) % LOT_PAINTS;
   const roof = (((2 * plot + s + turn) % LOT_PAINTS) + LOT_PAINTS) % LOT_PAINTS;
-  return 1 + wall + LOT_PAINT_BASE * roof;
+  const hash = slotHash(seed, plot * 2 + s, LOT_CLAD_KEY);
+  const clapboard = house && uniformFrom(hash, 0) < SIDING_SHARE ? 1 : 0;
+  const shingled = house && uniformFrom(hash, 1) < SHINGLE_SHARE ? 1 : 0;
+  return 1 + wall + LOT_CLAD_STEP * clapboard + LOT_PAINT_BASE * (roof + LOT_CLAD_STEP * shingled);
 }
 
 /**
  * What a lot's packed {@link lotPaint} says of one channel, as the instance
- * colour carries it: its entry **plus one**, so that nought — an item no lot
- * rule painted, and three's default — is no paint. Allocates nothing: the
- * structures' belts write it for every item they draw.
+ * colour carries it: its entry, and since #1588 {@link LOT_CLAD_STEP} for its
+ * cladding, **plus one**, so that nought — an item no lot rule painted, and
+ * three's default — is no paint. Allocates nothing: the structures' belts
+ * write it for every item they draw.
  */
 export function lotPaintChannel(packed: number | undefined, channel: 'wall' | 'roof'): number {
   if (packed === undefined || !(packed >= 1)) return 0;
   const code = packed - 1;
   return 1 + (channel === 'wall' ? code % LOT_PAINT_BASE : Math.floor(code / LOT_PAINT_BASE));
+}
+
+/**
+ * A lot's paint entry in one channel, or −1 for none — #1588, the shader's
+ * own decoding (`three-renderer.ts` §`withLotPaint`), in TypeScript.
+ *
+ * @test-facing held by `building-paint.test.ts` and `settlements-lots.test.ts`;
+ * the product decodes it in the shader
+ */
+export function lotPaintEntry(packed: number | undefined, channel: 'wall' | 'roof'): number {
+  const value = lotPaintChannel(packed, channel);
+  return value === 0 ? -1 : (value - 1) % LOT_CLAD_STEP;
+}
+
+/**
+ * Whether a lot's channel is clad — clapboard on the wall, shingles on the
+ * roof — #1588, the shader's own decoding in TypeScript.
+ *
+ * @test-facing held by `building-paint.test.ts` and `settlements-lots.test.ts`;
+ * the product decodes it in the shader
+ */
+export function lotClad(packed: number | undefined, channel: 'wall' | 'roof'): boolean {
+  const value = lotPaintChannel(packed, channel);
+  return value > 0 && Math.floor((value - 1) / LOT_CLAD_STEP) === 1;
 }

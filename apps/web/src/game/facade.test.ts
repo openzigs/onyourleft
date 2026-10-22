@@ -169,10 +169,10 @@ describe('the plans’ facades — #1581, over the mixed town', () => {
     const seen = new Set<number>();
     let doors = 0;
     for (const plan of plans) {
-      const door = verticesOf(plan, 'door');
+      // Since #1588 a garage's door is a `door` too: the front door is the one in its surround.
+      const door = verticesOf(plan, 'door').filter((vertex) => vertex.top === FACADE_DOOR);
       if (door.length === 0) continue;
       expect(door).toHaveLength(6);
-      expect(door.every((vertex) => vertex.top === FACADE_DOOR)).toBe(true);
       const cx = door.reduce((sum, vertex) => sum + vertex.x, 0) / door.length;
       const cz = door.reduce((sum, vertex) => sum + vertex.z, 0) / door.length;
       // The wall the door stands on: its bottom edge passes under the door's middle.

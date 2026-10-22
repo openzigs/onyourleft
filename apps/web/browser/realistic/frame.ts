@@ -25,6 +25,7 @@ import type { SceneFrame } from '../../src/game/port';
 import type { LandClassMask } from '../../src/game/land-class';
 import type { MappedBuildings } from '../../src/game/mapped-buildings';
 import type { QualitySettings } from '../../src/game/quality';
+import type { MappedTown } from '../../src/game/settlements';
 import { sceneFrame } from '../../src/game/scene';
 import { atStartLine } from '../../src/game/simulation';
 import type { CorridorOrigin } from '../../src/game/terrain';
@@ -53,6 +54,12 @@ export function rideFrame(input: {
     readonly corridor: WorldCorridor;
     readonly land: LandClassMask;
     readonly buildings: MappedBuildings;
+    /**
+     * #1588: what the lots read of the plans — their footprints and, since
+     * #1588, their driveways — as `GameView` passes it. Without it the lots
+     * stood where no mapped building was known, over the houses.
+     */
+    readonly lots: MappedTown;
   };
 }): SceneFrame {
   const start = atStartLine(input.profile);
@@ -78,6 +85,7 @@ export function rideFrame(input: {
           worldCorridor: input.town.corridor,
           landClass: input.town.land,
           mappedBuildings: input.town.buildings,
+          mappedTown: input.town.lots,
         }),
   });
 }

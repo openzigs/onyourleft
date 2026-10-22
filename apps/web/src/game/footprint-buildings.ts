@@ -80,10 +80,33 @@
  * - **Paint**, seeded per plan from its footprint and never a neighbour's
  *   (`paintTown`, {@link PAINT_NEIGHBOUR_METRES}): `building-paint.ts`.
  *
+ * ## The US house (#1588, the owner's ruling of 2026-10-22)
+ *
+ * A residential plan is drawn as a US house, mostly in the shader, so that it
+ * costs no download. Each vertex carries its face's cladding and its windows'
+ * style ({@link STYLE_FLOATS}) besides its facade:
+ *
+ * - **Clapboard** on most houses' walls ({@link SIDING_SHARE}), its courses
+ *   {@link CLAPBOARD_COURSE_METRES} apart, seeded, in `render`'s eight house
+ *   paints; brick and render stay for the rest and for every other use.
+ * - **Asphalt shingles** on most pitched roofs ({@link SHINGLE_SHARE}), in
+ *   `building-paint.ts` §`SHINGLE_PAINTS`; clay tile and slate for the rest.
+ * - **Double-hung sash windows** on every residential wall, paired in a wide
+ *   bay, a picture window beside the door of some single-storey houses
+ *   ({@link PICTURE_SHARE}), and shutters on some ({@link SHUTTER_SHARE}):
+ *   `facade.ts` lays them out.
+ * - **A foundation band** of block or brick under a clapboard house.
+ * - **A garage** on some wide fronts ({@link GARAGE_SHARE}): a panelled door
+ *   over an end bay of the front, and a driveway from it to the road's edge,
+ *   kept off every other footprint.
+ * - **Gutters and a downpipe** under a pitched roof's eaves, and **dormers**
+ *   on a steep one ({@link DORMER_MIN_PITCH_DEGREES}).
+ *
  * The near level stays inside {@link FOOTPRINT_MAX_TRIANGLES} and the far
  * level, walls and roof, inside {@link FOOTPRINT_MAX_FAR_TRIANGLES}: a house's
- * detail is about 40 triangles, and none of it is on the far level but the
- * roof's overhang.
+ * detail is about 40 triangles, and since #1588 about 60 more — gutters, a
+ * downpipe, dormers, a garage door and a driveway — and none of it is on the
+ * far level but the roof's overhang.
  *
  * ## The surfaces
  *
@@ -106,7 +129,14 @@ import {
   type Ring,
 } from '@onyourleft/map-features';
 
-import { DOOR_PAINTS, paintsOf, TRIM_PAINTS } from './building-paint';
+import {
+  DOOR_PAINTS,
+  paintsOf,
+  roofPaintsOf,
+  SHINGLE_SHARE,
+  SIDING_SHARE,
+  TRIM_PAINTS,
+} from './building-paint';
 import { DOOR, FOUNDATION_METRES, PLINTH_TOP_METRES } from './buildings';
 import { MASONRY_TINT, packedInstanceTint } from './instance-tint';
 import { kindAt, type LandClass, type LandClassMask } from './land-class';
@@ -123,7 +153,7 @@ import {
 import { scatterSeed } from './scatter';
 import { footprintIndexOf, type MappedTown } from './settlements';
 import { slotHash, uniformFrom } from './seeded';
-import type { CorridorOrigin } from './terrain';
+import { ROAD_WIDTH_METRES, type CorridorOrigin } from './terrain';
 import type { WorldCorridor } from './world-data/corridor';
 
 /** What became of a footprint: planned, or the rule that dropped it. */
@@ -151,9 +181,23 @@ export type FootprintVerdicts = Readonly<Record<FootprintVerdict, number>>;
 /**
  * The parts a plan's triangles are made of — #1549 dresses each by its
  * surface. Since #1581: `chimney`, a stack on a pitched house, and `trim`, the
- * painted timber — a roof's soffits and fascias, and a porch.
+ * painted timber — a roof's soffits and fascias, and a porch. Since #1588:
+ * `dormer`, a dormer's front and cheeks, which wear the walls; `dormer-roof`,
+ * its roof, which wears the roof; and `driveway`, the paved strip from a
+ * garage to the road, which the shader paints. A garage's door is a `door`,
+ * and the gutters and the downpipe are `trim`.
  */
-export type FootprintRole = 'wall' | 'plinth' | 'roof' | 'parapet' | 'door' | 'chimney' | 'trim';
+export type FootprintRole =
+  | 'wall'
+  | 'plinth'
+  | 'roof'
+  | 'parapet'
+  | 'door'
+  | 'chimney'
+  | 'trim'
+  | 'dormer'
+  | 'dormer-roof'
+  | 'driveway';
 
 /** Every {@link FootprintRole}, in a fixed order. */
 export const FOOTPRINT_ROLES: readonly FootprintRole[] = [
@@ -164,16 +208,13 @@ export const FOOTPRINT_ROLES: readonly FootprintRole[] = [
   'door',
   'chimney',
   'trim',
+  'dormer',
+  'dormer-roof',
+  'driveway',
 ];
 
-/**
- * How many floats one vertex of a plan's triangles is: **12** — position
- * (three), normal (three), texture coordinate (two) and, since #1581, the
- * facade's four ({@link FACADE_FLOATS}), in that order. Three vertices a
- * triangle and no index: the triangles are appended into #1549's merged
- * buffers, whose indices are theirs to write.
- */
-export const FOOTPRINT_VERTEX_FLOATS = 12;
+/** The roles that wear a plan's roof surface — #1588; every other wears its wall surface. */
+export const ROOF_ROLES: ReadonlySet<FootprintRole> = new Set(['roof', 'dormer-roof']);
 
 /**
  * What a vertex tells the facade shader — #1581, four floats: `u` and `v`,
@@ -190,6 +231,15 @@ export const FOOTPRINT_VERTEX_FLOATS = 12;
  * - **`top = −1`, a door**: `u` and `v` across its quad, `[0, 1]`, which
  *   holds the leaf and its surround ({@link DOOR_SURROUND_METRES}).
  * - **`top = −2`, paint**: the trim's colour in place of the photograph.
+ * - **`top = −3`, a dormer's front**, and **`top = −4`, a garage's door**
+ *   (#1588): `u` and `v` in metres across the face and up it, from its
+ *   lower left corner; the style says how wide and how high
+ *   ({@link STYLE_FLOATS}).
+ *
+ * On a plain face whose cladding has courses (`clad` ≥ {@link CLAD_SHINGLE}),
+ * `u` and `v` are metres across and up the face too: along a roof's eaves and
+ * up its slope, along a plinth and down from the floor, across a driveway and
+ * along it. A clapboard wall's are the bays and storeys above.
  */
 export const FACADE_FLOATS = 4;
 
@@ -199,6 +249,75 @@ export const FACADE_PLAIN = 0;
 export const FACADE_DOOR = -1;
 /** `top` of a painted face. @see FACADE_FLOATS */
 export const FACADE_PAINT = -2;
+/** `top` of a dormer's front — #1588. @see FACADE_FLOATS */
+export const FACADE_DORMER = -3;
+/** `top` of a garage's door — #1588. @see FACADE_FLOATS */
+export const FACADE_GARAGE = -4;
+
+/**
+ * What a vertex tells the shader of its face's cladding and its windows'
+ * style — #1588, four floats after the facade's: `clad`, `flags`, `width` and
+ * `extra`.
+ *
+ * - **`clad`**: what the face is clad in, `CLAD_*`, in its integer part; for
+ *   clapboard and shingles the course, in metres, in its fraction (a course is
+ *   under a metre). {@link CLAD_PHOTOGRAPH} is the surface's photograph.
+ * - **`flags`**, summed: {@link STYLE_SASH} (US double-hung windows rather
+ *   than #1581's casements), {@link STYLE_SHUTTERS}, {@link STYLE_EAVES} (an
+ *   overhanging roof shades the wall's top) and
+ *   {@link STYLE_BRICK_FOUNDATION} (a clapboard wall's foundation band is
+ *   brick, not block).
+ * - **`width`**: a windowed wall's bay, in metres — what pairs its windows;
+ *   a dormer's or a garage's face's width.
+ * - **`extra`**: a windowed wall's picture-window bay on the ground storey,
+ *   or −1; a dormer front's height; a garage door's leaf's height.
+ */
+export const STYLE_FLOATS = 4;
+
+/** Where a vertex's facade floats start, after its position, normal and texture coordinate: **8**. */
+export const FACADE_OFFSET = 3 + 3 + 2;
+
+/** Where a vertex's style floats start, after its facade: **12**. @see STYLE_FLOATS */
+export const STYLE_OFFSET = FACADE_OFFSET + FACADE_FLOATS;
+
+/**
+ * How many floats one vertex of a plan's triangles is: **16** — position
+ * (three), normal (three), texture coordinate (two), since #1581 the facade's
+ * four ({@link FACADE_FLOATS}) and since #1588 the style's four
+ * ({@link STYLE_FLOATS}), in that order. Three vertices a triangle and no
+ * index: the triangles are appended into #1549's merged buffers, whose
+ * indices are theirs to write.
+ */
+export const FOOTPRINT_VERTEX_FLOATS = STYLE_OFFSET + STYLE_FLOATS;
+/** `clad`: the surface's photograph, as #1581 drew every face. @see STYLE_FLOATS */
+export const CLAD_PHOTOGRAPH = 0;
+/** `clad`: clapboard siding, its course in the fraction. @see STYLE_FLOATS */
+export const CLAD_CLAPBOARD = 1;
+/** `clad`: asphalt shingles, their course in the fraction. @see STYLE_FLOATS */
+export const CLAD_SHINGLE = 2;
+/** `clad`: concrete block, a foundation. @see STYLE_FLOATS */
+export const CLAD_BLOCK = 3;
+/** `clad`: brick, a foundation. @see STYLE_FLOATS */
+export const CLAD_BRICK = 4;
+/** `clad`: concrete paving, a driveway. @see STYLE_FLOATS */
+export const CLAD_PAVING = 5;
+
+/** `flags`: US double-hung sash windows. @see STYLE_FLOATS */
+export const STYLE_SASH = 1;
+/** `flags`: painted shutters either side of each window. @see STYLE_FLOATS */
+export const STYLE_SHUTTERS = 2;
+/** `flags`: an overhanging roof above, whose shade darkens the wall's top. @see STYLE_FLOATS */
+export const STYLE_EAVES = 4;
+/** `flags`: a clapboard wall's foundation band is brick. @see STYLE_FLOATS */
+export const STYLE_BRICK_FOUNDATION = 8;
+
+/** What a plan is clad in — #1588. */
+export interface FootprintCladding {
+  readonly wall: 'clapboard' | 'photograph';
+  readonly roof: 'shingle' | 'photograph';
+  /** A clapboard course, in metres, seeded in {@link CLAPBOARD_COURSE_METRES}; 0 for none. */
+  readonly course: number;
+}
 
 /** The roof shapes a plan can have: since #1581 a hip as well as a gable, seeded. */
 export type FootprintRoof = 'gable' | 'hip' | 'flat';
@@ -234,8 +353,20 @@ export interface FootprintPlan {
   /** A pitched roof's pitch, degrees, seeded ({@link ROOF_PITCHES_DEGREES}); 0 on a flat one. */
   readonly pitchDegrees: number;
   readonly surfaces: { readonly wall: StructureSurface; readonly roof: StructureSurface };
+  /** What it is clad in — #1588. A clapboard house wears `render`, a shingled roof `slate`. */
+  readonly cladding: FootprintCladding;
   /** What it is painted — #1581. */
   readonly paint: FootprintPaint;
+  /** Whether it has a garage on its front — #1588. */
+  readonly garage: boolean;
+  /**
+   * The garage's driveway, from the garage to the road's edge, as `x, z`
+   * pairs round it in local metres; empty without a garage — #1588. Cleared of
+   * trees and lots, as the footprint is.
+   */
+  readonly driveway: Ring;
+  /** How many dormers its roof has — #1588. */
+  readonly dormers: number;
   /** `instance-tint.ts`' seeded tint, packed, keyed by the centroid (#621). */
   readonly tint: number;
   /**
@@ -348,6 +479,87 @@ export const TOWER_STOREYS = 5;
 /** The share of residential buildings in `brick` rather than `render`: **0.6**. */
 export const BRICK_SHARE = 0.6;
 
+/**
+ * The share of residential houses clad in clapboard — #1588: **0.7**, the
+ * default; the rest are #1540's brick and render. `building-paint.ts`'
+ * own, which a lot reads too.
+ */
+export { SIDING_SHARE, SHINGLE_SHARE } from './building-paint';
+
+/**
+ * The surface a clapboard house wears — #1588: `render`, whose photograph the
+ * shader paints over, so its eight house paints are the siding's and no
+ * surface — no draw call — is added.
+ */
+export const SIDING_SURFACE: StructureSurface = 'render';
+
+/** A clapboard course, seeded per house between these, in metres: **0.10 to 0.15** (#1588). */
+export const CLAPBOARD_COURSE_METRES = { least: 0.1, most: 0.15 } as const;
+
+/** The surface a shingled roof wears — #1588: `slate`, whose photograph the shader paints over. */
+export const SHINGLE_SURFACE: StructureSurface = 'slate';
+
+/** A shingle course's exposure, in metres: **0.14**, a standard strip's 5⅝ inches (#1588). */
+export const SHINGLE_COURSE_METRES = 0.14;
+
+/** The share of US houses with shutters at their windows — #1588: **0.4**. */
+export const SHUTTER_SHARE = 0.4;
+
+/** The share of single-storey houses with a picture window beside the front door — #1588: **0.5**. */
+export const PICTURE_SHARE = 0.5;
+
+/** The share of clapboard houses on a brick foundation rather than block — #1588: **0.3**. */
+export const BRICK_FOUNDATION_SHARE = 0.3;
+
+/** The share of wide residential fronts with a garage — #1588: **0.6**. */
+export const GARAGE_SHARE = 0.6;
+
+/** The fewest bays a front has for a garage to take one of them, the door another: **3** (#1588). */
+export const GARAGE_MIN_BAYS = 3;
+
+/**
+ * A garage door — #1588: its leaf's height (**2.13 m**, seven feet), how high
+ * above the floor its face reaches — over the ground storey's window in its
+ * bay, which it covers — and its painted surround's width.
+ */
+export const GARAGE = { leaf: 2.13, reach: 2.5, surround: 0.12 } as const;
+
+/**
+ * A driveway — #1588: how far above the drawn ground it is laid (**5 cm**),
+ * the longest piece it is laid in before it is bent to the ground again, how
+ * much narrower than its garage's bay it is either side, the longest it may
+ * be, and how far short of the carriageway's edge it stops.
+ */
+export const DRIVEWAY = { lift: 0.05, piece: 2, inset: 0.15, longest: 40, short: 0.1 } as const;
+
+/** A gutter under a pitched roof's eaves — #1588: its width, its depth, and its top under the roof's edge. */
+export const GUTTER = { width: 0.12, depth: 0.12, below: 0.03 } as const;
+
+/** A downpipe — #1588: its breadth, and its middle's distance from the wall's corner. */
+export const DOWNPIPE = { size: 0.08, fromCorner: 0.15 } as const;
+
+/** A dormer only on a roof at least this steep: **40°** (#1588). */
+export const DORMER_MIN_PITCH_DEGREES = 40;
+
+/** The share of steep residential roofs with dormers: **0.8** (#1588). */
+export const DORMER_SHARE = 0.8;
+
+/**
+ * A gabled dormer — #1588: its width, its front wall's height, how far inside
+ * the wall's line its front stands, and the least its ridge is under the
+ * roof's.
+ */
+export const DORMER = { width: 1.5, front: 1.5, setBack: 0.5, belowRidge: 0.25 } as const;
+
+/**
+ * How far along the ridge from its middle a roof reaches — the ridge's half,
+ * and no more than the walls' — for one dormer in the middle, clear of a
+ * chimney at 0.7 of it: **1.8 m**; and for two either side of the middle at
+ * 0.35 of it, twice that (#1588).
+ */
+export const DORMER_ONE_REACH_METRES = 1.8;
+export const DORMER_TWO_REACH_METRES = 2 * DORMER_ONE_REACH_METRES;
+
 /** How far a door stands proud of its wall: **2 cm**, so it never fights the facade's depth. */
 const DOOR_PROUD_METRES = 0.02;
 
@@ -446,6 +658,16 @@ const STREAM_PAINT_WALL = 7;
 const STREAM_PAINT_ROOF = 8;
 const STREAM_PAINT_TRIM = 9;
 const STREAM_PAINT_DOOR = 10;
+// #1588's, each its own.
+const STREAM_SIDING = 11;
+const STREAM_SHINGLE = 12;
+const STREAM_COURSE = 13;
+const STREAM_SHUTTERS = 14;
+const STREAM_PICTURE = 15;
+const STREAM_FOUNDATION = 16;
+const STREAM_GARAGE = 17;
+const STREAM_GARAGE_END = 18;
+const STREAM_DORMER = 19;
 
 /** The key under which {@link slotHash} hashes footprints, apart from every other placement. */
 const FOOTPRINT_KEY = 0x15_40;
@@ -708,14 +930,35 @@ type Pair = readonly [number, number];
 type Three<T> = readonly [T, T, T];
 type Four<T> = readonly [T, T, T, T];
 
-/** What a face tells the facade shader besides its corners' `u, v`. @see FACADE_FLOATS */
+/** A face's four style floats. @see STYLE_FLOATS */
+type Style = Four<number>;
+
+/** The photograph, with no style: what #1581 wrote on every face. */
+const NO_STYLE: Style = [CLAD_PHOTOGRAPH, 0, 0, -1];
+
+/**
+ * What a face tells the facade shader besides its corners' `u, v`: its `top`
+ * and `skip` ({@link FACADE_FLOATS}) and, since #1588, its style
+ * ({@link STYLE_FLOATS}).
+ */
 interface Face {
   readonly top: number;
   readonly skip: number;
+  readonly style: Style;
 }
 
-const PLAIN: Face = { top: FACADE_PLAIN, skip: -1 };
-const PAINTED: Face = { top: FACADE_PAINT, skip: -1 };
+const PLAIN: Face = { top: FACADE_PLAIN, skip: -1, style: NO_STYLE };
+const PAINTED: Face = { top: FACADE_PAINT, skip: -1, style: NO_STYLE };
+
+/** A plain face in `style`. */
+function plainIn(style: Style): Face {
+  return { top: FACADE_PLAIN, skip: -1, style };
+}
+
+/** A cladding's `clad` float: its code, and its course in metres in the fraction. @see STYLE_FLOATS */
+export function cladOf(code: number, course = 0): number {
+  return code + course;
+}
 const AT_NOUGHT: Pair = [0, 0];
 const NO_FACADE: Four<Pair> = [AT_NOUGHT, AT_NOUGHT, AT_NOUGHT, AT_NOUGHT];
 
@@ -749,6 +992,7 @@ function triangle(
     const f = facade[corner] as Pair;
     into.push(p[0], p[1], p[2], normal[0], normal[1], normal[2], uv[0], uv[1]);
     into.push(f[0], f[1], face.top, face.skip);
+    into.push(face.style[0], face.style[1], face.style[2], face.style[3]);
   }
 }
 
@@ -859,6 +1103,24 @@ interface Windows {
   readonly top: number;
   /** The outer ring's edge the front door is on, or −1. */
   readonly doorEdge: number;
+  /** #1588: the walls' `clad` and `flags` ({@link STYLE_FLOATS}). */
+  readonly clad: number;
+  readonly flags: number;
+  /** #1588: the door edge's picture-window bay on the ground storey, or −1. */
+  readonly picture: number;
+}
+
+/** How {@link ringWalls} draws. */
+interface WallOptions {
+  /** A second face the other way (a parapet's back). */
+  readonly inside?: boolean;
+  /** #1581's facade on every wall. */
+  readonly windows?: Windows;
+  /**
+   * #1588: a plain face in this style, its `u, v` in metres round the ring
+   * and up from `from` — a plinth's foundation.
+   */
+  readonly metres?: Style;
 }
 
 /**
@@ -868,16 +1130,18 @@ interface Windows {
  * the ring in bays and `v` up it in storeys from `from`. With `windows`, each
  * wall carries #1581's facade ({@link FACADE_FLOATS}): its own whole bays
  * ({@link baysOf}), and on the door's edge no ground-floor window behind the
- * door — an odd count's middle bay; an even count's door stands between two.
+ * door — an odd count's middle bay; an even count's door stands between two
+ * — and, since #1588, its style ({@link STYLE_FLOATS}): its cladding, its
+ * windows' flags, its bay in metres and the door edge's picture window.
  */
 function ringWalls(
   into: number[],
   rings: readonly Ring[],
   heights: readonly [bottom: number, top: number, from: number],
-  inside = false,
-  windows?: Windows,
+  options: WallOptions = {},
 ): void {
   const [bottom, top, from] = heights;
+  const { inside = false, windows, metres } = options;
   rings.forEach((ring, index) => {
     const n = ring.length / 2;
     const counter = signedArea(ring) > 0;
@@ -911,19 +1175,39 @@ function ringWalls(
         [u0, v1],
       ];
       const bays = windows === undefined ? 0 : baysOf(length);
-      const face: Face =
-        windows === undefined || bays === 0
-          ? PLAIN
-          : {
-              top: windows.top,
-              skip: index === 0 && i === windows.doorEdge && bays % 2 === 1 ? (bays - 1) / 2 : -1,
-            };
-      quad(into, corners, normal, uv, face, [
+      let face: Face = PLAIN;
+      let facade: Four<Pair> = [
         [0, v0],
         [bays, v0],
         [bays, v1],
         [0, v1],
-      ]);
+      ];
+      if (windows !== undefined) {
+        const front = index === 0 && i === windows.doorEdge;
+        const style: Style = [
+          windows.clad,
+          windows.flags,
+          bays > 0 ? length / bays : 0,
+          front && bays > 0 ? windows.picture : -1,
+        ];
+        face =
+          bays === 0
+            ? plainIn(style)
+            : {
+                top: windows.top,
+                skip: front && bays % 2 === 1 ? (bays - 1) / 2 : -1,
+                style,
+              };
+      } else if (metres !== undefined) {
+        face = plainIn(metres);
+        facade = [
+          [round, bottom - from],
+          [round + length, bottom - from],
+          [round + length, top - from],
+          [round, top - from],
+        ];
+      }
+      quad(into, corners, normal, uv, face, facade);
       if (inside) {
         const back: Vec = [-normal[0], 0, -normal[2]];
         quad(into, corners, back, uv);
@@ -963,6 +1247,84 @@ interface Ridge {
   readonly half: number;
 }
 
+/** How a pitched roof is dressed — #1588. */
+interface RoofDress {
+  /** The slopes' style: shingles' course, or the photograph. */
+  readonly roof: Style;
+  /** A gable end's style: the walls' cladding. */
+  readonly gable: Style;
+  /**
+   * Gutters under both long eaves, and a downpipe under the `side` one (`1`
+   * along the rectangle's `+v`) at its `end` (`1` along `+u`), down to
+   * `ground`; none where absent.
+   */
+  readonly gutters?: { readonly side: number; readonly end: number; readonly ground: number };
+}
+
+/** A face of a box {@link boxFaces} draws: its normal, along the long axis, across it, or down. */
+type BoxFace = 'a+' | 'a-' | 'c+' | 'y-';
+
+/** No photograph on a painted face: its corners' texture coordinates, all nought. */
+const UNMAPPED: Four<Pair> = [AT_NOUGHT, AT_NOUGHT, AT_NOUGHT, AT_NOUGHT];
+
+/**
+ * The asked `faces` of a box in a rectangle's frame — #1588: `a` along its
+ * long axis, `c` across it on `side`, `y` up — painted (`trim`). A gutter, a
+ * downpipe and its neck.
+ */
+function boxFaces(
+  into: number[],
+  rectangle: Rectangle,
+  side: number,
+  extent: readonly [a: Pair, c: Pair, y: Pair],
+  faces: readonly BoxFace[],
+): void {
+  const { cx, cz, ux, uz } = rectangle;
+  const vx = -uz * side;
+  const vz = ux * side;
+  const [[a0, a1], [c0, c1], [y0, y1]] = extent;
+  const at = (a: number, c: number, y: number): Vec => [
+    cx + ux * a + vx * c,
+    y,
+    cz + uz * a + vz * c,
+  ];
+  for (const face of faces) {
+    switch (face) {
+      case 'a+':
+      case 'a-': {
+        const a = face === 'a+' ? a1 : a0;
+        const sign = face === 'a+' ? 1 : -1;
+        quad(
+          into,
+          [at(a, c0, y0), at(a, c1, y0), at(a, c1, y1), at(a, c0, y1)],
+          [ux * sign, 0, uz * sign],
+          UNMAPPED,
+          PAINTED,
+        );
+        break;
+      }
+      case 'c+':
+        quad(
+          into,
+          [at(a0, c1, y0), at(a1, c1, y0), at(a1, c1, y1), at(a0, c1, y1)],
+          [vx, 0, vz],
+          UNMAPPED,
+          PAINTED,
+        );
+        break;
+      case 'y-':
+        quad(
+          into,
+          [at(a0, c0, y0), at(a1, c0, y0), at(a1, c1, y0), at(a0, c1, y0)],
+          [0, -1, 0],
+          UNMAPPED,
+          PAINTED,
+        );
+        break;
+    }
+  }
+}
+
 /**
  * A pitched roof over the minimum-area rectangle, its ridge along the long
  * axis, rising from the eaves at `eaves` at `pitchDegrees` — #1540's gable,
@@ -970,7 +1332,10 @@ interface Ridge {
  * ({@link EAVES_OVERHANG_METRES}, {@link VERGE_OVERHANG_METRES}) and drawn
  * {@link ROOF_THICKNESS_METRES} thick: the slopes (`roof`), a gable's two
  * ends (`wall`), and the soffit under every slope and the fascia round every
- * edge (`trim`, painted).
+ * edge (`trim`, painted). Since #1588 the slopes and the gable ends carry
+ * `dress`'s styles — the slopes' facade `u, v` in metres along the eaves and
+ * up the slope — and, with `dress.gutters`, a gutter hangs under each long
+ * eave and a downpipe runs down one wall to the ground (`trim`).
  */
 function pitchedRoof(
   writing: Writing,
@@ -978,6 +1343,7 @@ function pitchedRoof(
   heights: readonly [eaves: number, floor: number],
   shape: 'gable' | 'hip',
   pitchDegrees: number,
+  dress: RoofDress,
 ): Ridge {
   const { cx, cz, ux, uz, halfLong, halfShort } = rectangle;
   const [eaves, floor] = heights;
@@ -1005,13 +1371,20 @@ function pitchedRoof(
     a / STOREY_METRES,
     upSlope / STOREY_METRES,
   ];
+  const inMetres = (uv: Pair): Pair => [uv[0] * STOREY_METRES, uv[1] * STOREY_METRES];
+  const slopeFace = plainIn(dress.roof);
   const slopeLength = across / cos;
   // A slope: its top in `roof`, its soffit under it in `trim`.
   const slope = (corners: readonly Vec[], normal: Vec, uvs: readonly Pair[]): void => {
     if (corners.length === 4) {
       const c = corners as Four<Vec>;
       const u = uvs as Four<Pair>;
-      quad(writing.roof, c, normal, u);
+      quad(writing.roof, c, normal, u, slopeFace, [
+        inMetres(u[0]),
+        inMetres(u[1]),
+        inMetres(u[2]),
+        inMetres(u[3]),
+      ]);
       quad(
         writing.trim,
         [below(c[0]), below(c[1]), below(c[2]), below(c[3])],
@@ -1022,7 +1395,11 @@ function pitchedRoof(
     } else {
       const c = corners as Three<Vec>;
       const u = uvs as Three<Pair>;
-      triangle(writing.roof, c, normal, u);
+      triangle(writing.roof, c, normal, u, slopeFace, [
+        inMetres(u[0]),
+        inMetres(u[1]),
+        inMetres(u[2]),
+      ]);
       triangle(writing.trim, [below(c[0]), below(c[1]), below(c[2])], flip(normal), u, PAINTED);
     }
   };
@@ -1083,6 +1460,11 @@ function pitchedRoof(
       fascia(left, right, outward);
     } else {
       // A gable end: the wall's triangle up to the ridge, and a verge's fascia either side.
+      const gableUv: Three<Pair> = [
+        [halfShort / BAY_METRES, (eaves - floor) / STOREY_METRES],
+        [-halfShort / BAY_METRES, (eaves - floor) / STOREY_METRES],
+        [0, (ridgeTop - floor) / STOREY_METRES],
+      ];
       triangle(
         writing.wall,
         [
@@ -1091,11 +1473,9 @@ function pitchedRoof(
           corner(halfLong * end, 0, ridgeTop),
         ],
         outward,
-        [
-          [halfShort / BAY_METRES, (eaves - floor) / STOREY_METRES],
-          [-halfShort / BAY_METRES, (eaves - floor) / STOREY_METRES],
-          [0, (ridgeTop - floor) / STOREY_METRES],
-        ],
+        gableUv,
+        plainIn(dress.gable),
+        gableUv,
       );
       for (const side of [1, -1]) {
         fascia(
@@ -1106,7 +1486,179 @@ function pitchedRoof(
       }
     }
   }
+  if (dress.gutters !== undefined) {
+    // #1588: a gutter hung on each long fascia, its top a little under the roof's edge.
+    const top = eaveY - GUTTER.below;
+    const bottom = top - GUTTER.depth;
+    const out: Pair = [across, across + GUTTER.width];
+    for (const side of [1, -1]) {
+      boxFaces(
+        writing.trim,
+        rectangle,
+        side,
+        [[-along, along], out, [bottom, top]],
+        ['c+', 'y-', 'a+', 'a-'],
+      );
+    }
+    // And a downpipe down the wall near one corner, its neck out under the soffit to the gutter.
+    const { side, end, ground } = dress.gutters;
+    const a = end * (halfLong - DOWNPIPE.fromCorner);
+    const half = DOWNPIPE.size / 2;
+    const span: Pair = [a - half, a + half];
+    boxFaces(
+      writing.trim,
+      rectangle,
+      side,
+      [span, [halfShort, halfShort + DOWNPIPE.size], [ground, bottom]],
+      ['c+', 'a+', 'a-'],
+    );
+    boxFaces(
+      writing.trim,
+      rectangle,
+      side,
+      [span, [halfShort, across + GUTTER.width / 2], [bottom - DOWNPIPE.size, bottom]],
+      ['y-', 'a+', 'a-'],
+    );
+  }
   return { top: ridgeTop, half: ridgeHalf };
+}
+
+/**
+ * Gabled dormers on the `side` slope of a pitched roof — #1588: `count` of
+ * them (one in the middle, or two either side of it), each {@link DORMER}'s
+ * size, standing from the slope a little inside the wall's line, at the
+ * roof's own pitch, its ridge under the roof's. The front and the cheeks
+ * (`dormer`) wear the walls' cladding, the front a sash window in it
+ * ({@link FACADE_DORMER}); the roof (`dormer-roof`) the roof's. Returns how
+ * many it built: none where the slope is too low for one under the ridge.
+ */
+function dormers(
+  writing: Writing,
+  rectangle: Rectangle,
+  heights: readonly [eaves: number, floor: number],
+  ridge: Ridge,
+  pitchDegrees: number,
+  placing: { readonly side: number; readonly count: number; readonly reach: number },
+  styles: { readonly wall: Style; readonly roof: Style },
+): number {
+  const { cx, cz, ux, uz, halfShort } = rectangle;
+  const { side, count } = placing;
+  const [eaves, floor] = heights;
+  const pitch = (pitchDegrees * Math.PI) / 180;
+  const tan = Math.tan(pitch);
+  const sin = Math.sin(pitch);
+  const cos = Math.cos(pitch);
+  const vx = -uz * side;
+  const vz = ux * side;
+  // `c` from the ridge's line toward the eaves; the slope is at `ridge.top − c·tan`.
+  const at = (a: number, c: number, y: number): Vec => [
+    cx + ux * a + vx * c,
+    y,
+    cz + uz * a + vz * c,
+  ];
+  const half = DORMER.width / 2;
+  const front = halfShort - DORMER.setBack;
+  const foot = ridge.top - front * tan;
+  const head = foot + DORMER.front;
+  const apex = head + half * tan;
+  if (!(apex <= ridge.top - DORMER.belowRidge) || !(foot >= eaves)) return 0;
+  const back = (ridge.top - head) / tan;
+  const end = (ridge.top - apex) / tan;
+  const places = count === 1 ? [0] : [-0.35 * placing.reach, 0.35 * placing.reach];
+  const storeys = (y: number): number => (y - floor) / STOREY_METRES;
+  const outward: Vec = [vx, 0, vz];
+  for (const a0 of places) {
+    const left = a0 - half;
+    const right = a0 + half;
+    // The front, a window in it, its `u, v` in metres.
+    quad(
+      writing.dormer,
+      [
+        at(left, front, foot),
+        at(right, front, foot),
+        at(right, front, head),
+        at(left, front, head),
+      ],
+      outward,
+      [
+        [0, storeys(foot)],
+        [DORMER.width / BAY_METRES, storeys(foot)],
+        [DORMER.width / BAY_METRES, storeys(head)],
+        [0, storeys(head)],
+      ],
+      {
+        top: FACADE_DORMER,
+        skip: -1,
+        style: [styles.wall[0], styles.wall[1], DORMER.width, DORMER.front],
+      },
+      [
+        [0, 0],
+        [DORMER.width, 0],
+        [DORMER.width, DORMER.front],
+        [0, DORMER.front],
+      ],
+    );
+    // Its gable over the front.
+    const gableUv: Three<Pair> = [
+      [0, storeys(head)],
+      [DORMER.width / BAY_METRES, storeys(head)],
+      [half / BAY_METRES, storeys(apex)],
+    ];
+    triangle(
+      writing.dormer,
+      [at(left, front, head), at(right, front, head), at(a0, front, apex)],
+      outward,
+      gableUv,
+      plainIn(styles.wall),
+      gableUv,
+    );
+    // Its cheeks, from the front back to where its eaves meet the slope.
+    for (const [a, sign] of [
+      [left, -1],
+      [right, 1],
+    ] as const) {
+      const cheekUv: Three<Pair> = [
+        [0, storeys(foot)],
+        [0, storeys(head)],
+        [(front - back) / BAY_METRES, storeys(head)],
+      ];
+      triangle(
+        writing.dormer,
+        [at(a, front, foot), at(a, front, head), at(a, back, head)],
+        [ux * sign, 0, uz * sign],
+        cheekUv,
+        plainIn(styles.wall),
+        cheekUv,
+      );
+    }
+    // Its roof: two slopes from its eaves to its ridge, back to the main slope.
+    const slopeLength = half / cos;
+    for (const [eave, sign] of [
+      [left, -1],
+      [right, 1],
+    ] as const) {
+      const uv: Four<Pair> = [
+        [front / STOREY_METRES, 0],
+        [front / STOREY_METRES, slopeLength / STOREY_METRES],
+        [end / STOREY_METRES, slopeLength / STOREY_METRES],
+        [back / STOREY_METRES, 0],
+      ];
+      quad(
+        writing['dormer-roof'],
+        [at(eave, front, head), at(a0, front, apex), at(a0, end, apex), at(eave, back, head)],
+        [ux * sign * sin, cos, uz * sign * sin],
+        uv,
+        plainIn(styles.roof),
+        [
+          [front, 0],
+          [front, slopeLength],
+          [end, slopeLength],
+          [back, 0],
+        ],
+      );
+    }
+  }
+  return places.length;
 }
 
 /** The outer ring's edge a front door goes on, and how far its middle is from the road. */
@@ -1199,7 +1751,7 @@ function door(into: number[], at: EdgeFrame, floor: number): void {
     ],
     [nx, 0, nz],
     unit,
-    { top: FACADE_DOOR, skip: -1 },
+    { top: FACADE_DOOR, skip: -1, style: NO_STYLE },
     unit,
   );
 }
@@ -1240,6 +1792,212 @@ function porch(into: number[], at: EdgeFrame, floor: number, posts: boolean): vo
       { top: false, bottom: false },
     );
   }
+}
+
+/**
+ * A garage's door — #1588: over the whole of a front's bay, `along` from the
+ * edge's middle and `width` wide, a little proud of the wall, from the ground
+ * in front of it to {@link GARAGE}'s reach above the floor, so that it covers
+ * the ground storey's window in that bay. The shader draws its panelled leaf
+ * and its surround ({@link FACADE_GARAGE}); its `u, v` are metres.
+ */
+function garageDoor(
+  into: number[],
+  at: EdgeFrame,
+  along: number,
+  width: number,
+  heights: readonly [ground: number, floor: number],
+): void {
+  const { ex, ez, nx, nz } = at;
+  const [ground, floor] = heights;
+  const mx = at.mx + ex * along + nx * DOOR_PROUD_METRES;
+  const mz = at.mz + ez * along + nz * DOOR_PROUD_METRES;
+  const half = width / 2;
+  const top = floor + GARAGE.reach;
+  const height = top - ground;
+  quad(
+    into,
+    [
+      [mx - ex * half, ground, mz - ez * half],
+      [mx + ex * half, ground, mz + ez * half],
+      [mx + ex * half, top, mz + ez * half],
+      [mx - ex * half, top, mz - ez * half],
+    ],
+    [nx, 0, nz],
+    UNMAPPED,
+    { top: FACADE_GARAGE, skip: -1, style: [CLAD_PHOTOGRAPH, 0, width, GARAGE.leaf] },
+    [
+      [0, 0],
+      [width, 0],
+      [width, height],
+      [0, height],
+    ],
+  );
+}
+
+/** A driveway, planned: where it starts, which way it runs, how wide and how long. */
+interface DrivewayPlan {
+  readonly x: number;
+  readonly z: number;
+  /** Out from the wall, unit. */
+  readonly nx: number;
+  readonly nz: number;
+  /** Along the wall, unit. */
+  readonly ex: number;
+  readonly ez: number;
+  readonly width: number;
+  readonly length: number;
+}
+
+/** A driveway's outline, its four corners round it. */
+function drivewayRing(plan: DrivewayPlan): Ring {
+  const { x, z, nx, nz, ex, ez, width, length } = plan;
+  const h = width / 2;
+  return Float32Array.of(
+    x - ex * h,
+    z - ez * h,
+    x + ex * h,
+    z + ez * h,
+    x + ex * h + nx * length,
+    z + ez * h + nz * length,
+    x - ex * h + nx * length,
+    z - ez * h + nz * length,
+  );
+}
+
+/**
+ * A driveway's paving — #1588: a strip `plan.length` long from the garage,
+ * laid {@link DRIVEWAY}'s lift above the drawn ground in pieces no longer
+ * than its `piece`, each corner on the ground beneath it, so it follows a
+ * slope rather than floating over it or sinking into it. The shader paints
+ * it ({@link CLAD_PAVING}); its `u, v` are metres across and along.
+ */
+function drivewayPaving(
+  into: number[],
+  plan: DrivewayPlan,
+  groundAt: (x: number, z: number) => number,
+): void {
+  const { x, z, nx, nz, ex, ez, width, length } = plan;
+  const pieces = Math.max(1, Math.ceil(length / DRIVEWAY.piece));
+  const h = width / 2;
+  const at = (t: number, side: number): Vec => {
+    const px = x + nx * t + ex * h * side;
+    const pz = z + nz * t + ez * h * side;
+    return [px, groundAt(px, pz) + DRIVEWAY.lift, pz];
+  };
+  const face = plainIn([CLAD_PAVING, 0, width, -1]);
+  for (let piece = 0; piece < pieces; piece += 1) {
+    const t0 = (length * piece) / pieces;
+    const t1 = (length * (piece + 1)) / pieces;
+    quad(into, [at(t0, -1), at(t0, 1), at(t1, 1), at(t1, -1)], [0, 1, 0], UNMAPPED, face, [
+      [0, t0],
+      [width, t0],
+      [width, t1],
+      [0, t1],
+    ]);
+  }
+}
+
+/** The side of a cell of {@link RingGrid}: **32 m**. */
+const RING_CELL_METRES = 32;
+
+/**
+ * Every footprint of a corridor in a grid — #1588, so a driveway can be kept
+ * off every other building, planned or not.
+ */
+class RingGrid {
+  readonly #rings: readonly Ring[];
+  readonly #cells = new Map<number, number[]>();
+
+  constructor(rings: readonly Ring[]) {
+    this.#rings = rings;
+    rings.forEach((ring, index) => {
+      const [minX, maxX, minZ, maxZ] = boundsOf(ring);
+      for (
+        let ix = Math.floor(minX / RING_CELL_METRES);
+        ix <= Math.floor(maxX / RING_CELL_METRES);
+        ix += 1
+      ) {
+        for (
+          let iz = Math.floor(minZ / RING_CELL_METRES);
+          iz <= Math.floor(maxZ / RING_CELL_METRES);
+          iz += 1
+        ) {
+          const key = (ix + 0x8000) * 0x1_0000 + (iz + 0x8000);
+          const list = this.#cells.get(key);
+          if (list === undefined) this.#cells.set(key, [index]);
+          else list.push(index);
+        }
+      }
+    });
+  }
+
+  /** Whether `quad` (four corners) meets any ring but the `own`th. */
+  meets(quad: Ring, own: number): boolean {
+    const [minX, maxX, minZ, maxZ] = boundsOf(quad);
+    const seen = new Set<number>();
+    for (
+      let ix = Math.floor(minX / RING_CELL_METRES);
+      ix <= Math.floor(maxX / RING_CELL_METRES);
+      ix += 1
+    ) {
+      for (
+        let iz = Math.floor(minZ / RING_CELL_METRES);
+        iz <= Math.floor(maxZ / RING_CELL_METRES);
+        iz += 1
+      ) {
+        for (const index of this.#cells.get((ix + 0x8000) * 0x1_0000 + (iz + 0x8000)) ?? []) {
+          if (index === own || seen.has(index)) continue;
+          seen.add(index);
+          if (ringsMeet(quad, this.#rings[index] as Ring)) return true;
+        }
+      }
+    }
+    return false;
+  }
+}
+
+/** A ring's bounding box: `minX, maxX, minZ, maxZ`. */
+function boundsOf(ring: Ring): readonly [number, number, number, number] {
+  let minX = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let minZ = Number.POSITIVE_INFINITY;
+  let maxZ = Number.NEGATIVE_INFINITY;
+  for (let i = 0; i + 1 < ring.length; i += 2) {
+    minX = Math.min(minX, ring[i] as number);
+    maxX = Math.max(maxX, ring[i] as number);
+    minZ = Math.min(minZ, ring[i + 1] as number);
+    maxZ = Math.max(maxZ, ring[i + 1] as number);
+  }
+  return [minX, maxX, minZ, maxZ];
+}
+
+/** Whether two rings overlap: an edge of one crosses the other's, or one stands inside the other. */
+function ringsMeet(a: Ring, b: Ring): boolean {
+  if (b.length < 6 || a.length < 6) return false;
+  if (insideRing(b, a[0] as number, a[1] as number)) return true;
+  if (insideRing(a, b[0] as number, b[1] as number)) return true;
+  const n = a.length / 2;
+  const m = b.length / 2;
+  for (let i = 0, j = n - 1; i < n; j = i, i += 1) {
+    for (let k = 0, l = m - 1; k < m; l = k, k += 1) {
+      if (
+        segmentsMeet(
+          a[j * 2] as number,
+          a[j * 2 + 1] as number,
+          a[i * 2] as number,
+          a[i * 2 + 1] as number,
+          b[l * 2] as number,
+          b[l * 2 + 1] as number,
+          b[k * 2] as number,
+          b[k * 2 + 1] as number,
+        )
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 /** How far along the ridge from its middle a chimney stands, as a share of its half: **0.7**. */
@@ -1305,8 +2063,15 @@ export function footprintPlans(
     'too-large': 0,
   };
   const plans: FootprintPlan[] = [];
-  for (const building of corridor.buildings) {
-    const planned = planFootprint(building, corridor, land, profile, origin, seed, maxVertices);
+  // #1588: every footprint, planned or not, so a driveway keeps off each.
+  const others = new RingGrid(
+    corridor.buildings.map((building) => building.rings[0] ?? new Float32Array(0)),
+  );
+  for (const [index, building] of corridor.buildings.entries()) {
+    const planned = planFootprint(building, corridor, land, profile, origin, seed, maxVertices, {
+      grid: others,
+      own: index,
+    });
     if (typeof planned === 'string') {
       counts[planned] += 1;
     } else {
@@ -1380,7 +2145,8 @@ function nearestWearer(
  * is worn, the one worn farthest off ({@link farthestEntry}):
  *
  * 1. its **wall** paint, against the neighbours of the same wall surface;
- * 2. its **roof** paint, against those of the same roof surface;
+ * 2. its **roof** paint, against those of the same roof surface — since
+ *    #1588 a shingled roof's list is the shingles', and it wears `slate`;
  * 3. its **trim** and its **door**, against every neighbour.
  *
  * A list can run out — a street of more brick houses within 30 m than brick
@@ -1417,6 +2183,7 @@ function paintTown(plans: readonly FootprintPlan[]): FootprintPlan[] {
       }
     }
     const { wall: wallSurface, roof: roofSurface } = plan.surfaces;
+    const shingled = plan.cladding.roof === 'shingle';
     const paint: FootprintPaint = {
       wall: farthestEntry(plan.paint.wall, paintsOf(wallSurface)?.length ?? 1, (entry) =>
         nearestWearer(
@@ -1424,11 +2191,14 @@ function paintTown(plans: readonly FootprintPlan[]): FootprintPlan[] {
           (other) => other.surfaces.wall === wallSurface && other.paint.wall === entry,
         ),
       ),
-      roof: farthestEntry(plan.paint.roof, paintsOf(roofSurface)?.length ?? 1, (entry) =>
-        nearestWearer(
-          near,
-          (other) => other.surfaces.roof === roofSurface && other.paint.roof === entry,
-        ),
+      roof: farthestEntry(
+        plan.paint.roof,
+        roofPaintsOf(roofSurface, shingled)?.length ?? 1,
+        (entry) =>
+          nearestWearer(
+            near,
+            (other) => other.surfaces.roof === roofSurface && other.paint.roof === entry,
+          ),
       ),
       trim: farthestEntry(plan.paint.trim, TRIM_PAINTS.length, (entry) =>
         nearestWearer(near, (other) => other.paint.trim === entry),
@@ -1474,7 +2244,12 @@ function paintTown(plans: readonly FootprintPlan[]): FootprintPlan[] {
  * later frame and lap is a lookup.
  */
 export function mappedTown(corridor: WorldCorridor, plans: readonly FootprintPlan[]): MappedTown {
-  const index = footprintIndexOf(plans.map((plan) => plan.footprint));
+  // #1588: a lot keeps off a driveway as it does off the house.
+  const index = footprintIndexOf(
+    plans.flatMap((plan) =>
+      plan.driveway.length > 0 ? [plan.footprint, plan.driveway] : [plan.footprint],
+    ),
+  );
   // Keyed by decimetre, x then z: two small integers, never a boxed number.
   const commercial = new Map<number, Map<number, boolean>>();
   const town: MappedTown = {
@@ -1497,6 +2272,89 @@ export function mappedTown(corridor: WorldCorridor, plans: readonly FootprintPla
   return town;
 }
 
+/** A plan with no driveway's outline: no ring. */
+const NO_RING: Ring = new Float32Array(0);
+
+/** A garage, planned — #1588: its bay of the front, where that is along it, and its driveway. */
+interface Garage {
+  readonly bay: number;
+  /** From the front edge's middle to the bay's, along it. */
+  readonly along: number;
+  /** The bay's width: the garage door's. */
+  readonly width: number;
+  /** The drawn ground in front of it, which its door stands on. */
+  readonly ground: number;
+  readonly plan: DrivewayPlan;
+}
+
+/** How far a driveway is held off its own house's walls when it is checked against them: **5 cm**. */
+const DRIVEWAY_CHECK_METRES = 0.05;
+
+/**
+ * A garage on bay `bay` of a front `length` metres long in `bays` — #1588,
+ * with its driveway straight out from the wall to {@link DRIVEWAY}'s `short`
+ * of the carriageway's edge, measured at the nearer of its far corners; or
+ * none, where the wall does not face the road within {@link DRIVEWAY}'s
+ * `longest`, or the driveway would cross any other footprint or its own.
+ */
+function garageOf(
+  front: { readonly length: number; readonly bays: number; readonly bay: number },
+  frame: EdgeFrame,
+  road: DrawnRoadPoints,
+  own: { readonly ring: Ring; readonly others: { readonly grid: RingGrid; readonly own: number } },
+  groundAt: (x: number, z: number) => number,
+): Garage | undefined {
+  const { length, bays, bay } = front;
+  const bayWidth = length / bays;
+  const along = (bay + 0.5) * bayWidth - length / 2;
+  const x = frame.mx + frame.ex * along;
+  const z = frame.mz + frame.ez * along;
+  const width = bayWidth - 2 * DRIVEWAY.inset;
+  const half = width / 2;
+  const target = ROAD_WIDTH_METRES / 2 + DRIVEWAY.short;
+  const beside: BesideTheRoad = { along: 0, lateral: 0, distance: 0 };
+  const gap = (t: number): number => {
+    let least = Number.POSITIVE_INFINITY;
+    for (const side of [-1, 1]) {
+      const px = x + frame.nx * t + frame.ex * half * side;
+      const pz = z + frame.nz * t + frame.ez * half * side;
+      if (nearestOnRoadSegments(road, nearSegments, px, pz, beside)) {
+        least = Math.min(least, beside.distance);
+      }
+    }
+    return least - target;
+  };
+  // Out along the wall's normal by what is left to the road, until it is there.
+  let t = 0;
+  for (let step = 0; step < 16 && t <= DRIVEWAY.longest; step += 1) {
+    const left = gap(t);
+    if (!Number.isFinite(left)) return undefined;
+    if (Math.abs(left) < 0.01) break;
+    t += left;
+  }
+  if (!(t > 0 && t <= DRIVEWAY.longest) || !(Math.abs(gap(t)) < 0.05)) return undefined;
+  const plan: DrivewayPlan = {
+    x,
+    z,
+    nx: frame.nx,
+    nz: frame.nz,
+    ex: frame.ex,
+    ez: frame.ez,
+    width,
+    length: t,
+  };
+  const checked = drivewayRing({
+    ...plan,
+    x: x + frame.nx * DRIVEWAY_CHECK_METRES,
+    z: z + frame.nz * DRIVEWAY_CHECK_METRES,
+    length: t - DRIVEWAY_CHECK_METRES,
+  });
+  if (own.others.grid.meets(checked, own.others.own) || ringsMeet(checked, own.ring)) {
+    return undefined;
+  }
+  return { bay, along, width: bayWidth, ground: groundAt(x, z), plan };
+}
+
 /** One footprint: its plan, or the verdict that dropped it. */
 function planFootprint(
   building: BuildingFeature,
@@ -1506,6 +2364,7 @@ function planFootprint(
   origin: CorridorOrigin,
   seed: number,
   maxVertices: number,
+  others: { readonly grid: RingGrid; readonly own: number },
 ): FootprintPlan | Exclude<FootprintVerdict, 'kept'> {
   const outer = building.rings[0];
   if (outer === undefined || outer.length < 6) return 'too-small';
@@ -1616,26 +2475,105 @@ function planFootprint(
         ] as number);
   const front = part ? undefined : doorEdgeOf(drawn, road, nearSegments);
   const frontFrame = front === undefined ? undefined : edgeFrameOf(drawn, front.edge);
-  const windows: Windows = {
-    top: (eaves - floor) / STOREY_METRES,
-    doorEdge: front?.edge ?? -1,
-  };
-  const withChimney =
-    roof !== 'flat' && use === 'residential' && share(STREAM_CHIMNEY) < CHIMNEY_SHARE;
+  const residential = use === 'residential';
+  const withChimney = roof !== 'flat' && residential && share(STREAM_CHIMNEY) < CHIMNEY_SHARE;
   // A canopy only where it stands clear of the road's clearance, as the walls do.
   const withPorch =
     front !== undefined &&
-    use === 'residential' &&
+    residential &&
     front.length >= PORCH.width &&
     front.distance - PORCH.depth >= ROAD_CLEARANCE_METRES &&
     share(STREAM_PORCH) < PORCH_SHARE;
   const withPosts = share(STREAM_POSTS) < PORCH_POSTS_SHARE;
 
+  // #1588: the US house — its cladding, its windows' style, a garage.
+  const clapboard =
+    residential && !part && storeys <= TOWER_STOREYS && share(STREAM_SIDING) < SIDING_SHARE;
+  const shingled = roof !== 'flat' && share(STREAM_SHINGLE) < SHINGLE_SHARE;
+  const { least, most } = CLAPBOARD_COURSE_METRES;
+  const course = clapboard ? least + (most - least) * share(STREAM_COURSE) : 0;
+  const wallClad = clapboard ? cladOf(CLAD_CLAPBOARD, course) : CLAD_PHOTOGRAPH;
+  const brickFoundation = clapboard && share(STREAM_FOUNDATION) < BRICK_FOUNDATION_SHARE;
+  const flags =
+    (residential ? STYLE_SASH : 0) +
+    (residential && share(STREAM_SHUTTERS) < SHUTTER_SHARE ? STYLE_SHUTTERS : 0) +
+    (roof === 'flat' ? 0 : STYLE_EAVES) +
+    (brickFoundation ? STYLE_BRICK_FOUNDATION : 0);
+  const wallStyle: Style = [wallClad, flags, 0, -1];
+  const roofStyle: Style = shingled
+    ? [cladOf(CLAD_SHINGLE, SHINGLE_COURSE_METRES), 0, 0, -1]
+    : NO_STYLE;
+  const frontBays = front === undefined ? 0 : baysOf(front.length);
+  const garage =
+    front !== undefined &&
+    frontFrame !== undefined &&
+    residential &&
+    frontBays >= GARAGE_MIN_BAYS &&
+    share(STREAM_GARAGE) < GARAGE_SHARE
+      ? garageOf(
+          {
+            length: front.length,
+            bays: frontBays,
+            bay: share(STREAM_GARAGE_END) < 0.5 ? 0 : frontBays - 1,
+          },
+          frontFrame,
+          road,
+          { ring: drawn, others },
+          groundAt,
+        )
+      : undefined;
+  const middle = (frontBays - 1) / 2;
+  const picture =
+    storeys === 1 &&
+    residential &&
+    frontBays >= 3 &&
+    frontBays % 2 === 1 &&
+    share(STREAM_PICTURE) < PICTURE_SHARE
+      ? garage === undefined
+        ? middle + (share(STREAM_PICTURE) < PICTURE_SHARE / 2 ? -1 : 1)
+        : middle + (garage.bay === 0 ? 1 : -1)
+      : -1;
+  const windows: Windows = {
+    top: (eaves - floor) / STOREY_METRES,
+    doorEdge: front?.edge ?? -1,
+    clad: wallClad,
+    flags,
+    picture,
+  };
+  // The slope the gutters' downpipe and the dormers are on: the one facing the front.
+  const facing =
+    frontFrame === undefined
+      ? 1
+      : frontFrame.nx * -rectangle.uz + frontFrame.nz * rectangle.ux >= 0
+        ? 1
+        : -1;
+  // The downpipe's end: away from the garage, where it is on that slope's wall.
+  const garageEnd =
+    garage === undefined
+      ? share(STREAM_GARAGE_END) < 0.5
+        ? 1
+        : -1
+      : (garage.plan.x - rectangle.cx) * rectangle.ux +
+            (garage.plan.z - rectangle.cz) * rectangle.uz >=
+          0
+        ? 1
+        : -1;
+  const withDormers =
+    roof !== 'flat' &&
+    residential &&
+    pitchDegrees >= DORMER_MIN_PITCH_DEGREES &&
+    share(STREAM_DORMER) < DORMER_SHARE;
+
   const holes = building.rings
     .slice(1)
     .filter((hole) => hole.length >= 6)
     .map((hole) => simplifyRing(hole, FOOTPRINT_SIMPLIFY_METRES, maxVertices));
-  const build = (withHoles: boolean): Writing => {
+  /** What one build drew of #1588's extras. */
+  interface Extras {
+    garage: boolean;
+    dormers: number;
+  }
+  const build = (withHoles: boolean): { writing: Writing; drew: Extras } => {
     const rings = withHoles ? [drawn, ...holes] : [drawn];
     const writing: Writing = {
       wall: [],
@@ -1645,43 +2583,81 @@ function planFootprint(
       door: [],
       chimney: [],
       trim: [],
+      dormer: [],
+      'dormer-roof': [],
+      driveway: [],
     };
-    if (!part) ringWalls(writing.plinth, rings, [base, floor, floor]);
-    ringWalls(writing.wall, rings, [floor, eaves, floor], false, windows);
+    const drew: Extras = { garage: false, dormers: 0 };
+    if (!part) {
+      ringWalls(
+        writing.plinth,
+        rings,
+        [base, floor, floor],
+        clapboard ? { metres: [cladOf(brickFoundation ? CLAD_BRICK : CLAD_BLOCK), 0, 0, -1] } : {},
+      );
+    }
+    ringWalls(writing.wall, rings, [floor, eaves, floor], { windows });
     if (roof === 'flat') {
       flatRoof(writing.roof, rings, eaves);
-      ringWalls(writing.parapet, rings, [eaves, eaves + PARAPET_METRES, floor], true);
+      ringWalls(writing.parapet, rings, [eaves, eaves + PARAPET_METRES, floor], { inside: true });
     } else {
-      const ridge = pitchedRoof(writing, rectangle, [eaves, floor], roof, pitchDegrees);
+      const ridge = pitchedRoof(writing, rectangle, [eaves, floor], roof, pitchDegrees, {
+        roof: roofStyle,
+        gable: wallStyle,
+        ...(residential
+          ? { gutters: { side: facing, end: -garageEnd, ground: base + FOUNDATION_METRES } }
+          : {}),
+      });
       if (withChimney) {
         const end = share(STREAM_CHIMNEY) < CHIMNEY_SHARE / 2 ? 1 : -1;
         chimney(writing.chimney, rectangle, ridge, [eaves, floor], end);
+      }
+      if (withDormers) {
+        // Clear of the chimney: one in the middle, or two either side of it.
+        const reach = Math.min(ridge.half, rectangle.halfLong);
+        const count =
+          reach >= DORMER_TWO_REACH_METRES ? 2 : reach >= DORMER_ONE_REACH_METRES ? 1 : 0;
+        if (count > 0) {
+          drew.dormers = dormers(
+            writing,
+            rectangle,
+            [eaves, floor],
+            ridge,
+            pitchDegrees,
+            { side: facing, count, reach },
+            { wall: wallStyle, roof: roofStyle },
+          );
+        }
       }
     }
     if (frontFrame !== undefined) {
       door(writing.door, frontFrame, floor);
       if (withPorch) porch(writing.trim, frontFrame, floor, withPosts);
+      if (garage !== undefined) {
+        garageDoor(writing.door, frontFrame, garage.along, garage.width, [garage.ground, floor]);
+        drivewayPaving(writing.driveway, garage.plan, groundAt);
+        drew.garage = true;
+      }
     }
-    return writing;
+    return { writing, drew };
   };
   const fits = (writing: Writing): boolean =>
     FOOTPRINT_ROLES.reduce((sum, role) => sum + trianglesOf(writing[role]), 0) <=
       FOOTPRINT_MAX_TRIANGLES &&
     trianglesOf(writing.wall) + trianglesOf(writing.roof) <= FOOTPRINT_MAX_FAR_TRIANGLES;
-  let writing = build(holes.length > 0);
-  if (holes.length > 0 && !fits(writing)) writing = build(false);
+  // Holes while they fit. #1588's detail needs no such rule: a flat plan of
+  // 48 walls with a garage, the longest driveway and a canopy is about 500.
+  let built = build(holes.length > 0);
+  if (holes.length > 0 && !fits(built.writing)) built = build(false);
+  const { writing, drew } = built;
 
-  const triangles = {
-    wall: Float32Array.from(writing.wall),
-    plinth: Float32Array.from(writing.plinth),
-    roof: Float32Array.from(writing.roof),
-    parapet: Float32Array.from(writing.parapet),
-    door: Float32Array.from(writing.door),
-    chimney: Float32Array.from(writing.chimney),
-    trim: Float32Array.from(writing.trim),
-  };
-  const wallSurface = wallSurfaceOf(use, storeys, roof, share(STREAM_WALL));
-  const roofSurface = roofSurfaceOf(roof, share(STREAM_ROOF));
+  const triangles = Object.fromEntries(
+    FOOTPRINT_ROLES.map((role) => [role, Float32Array.from(writing[role])]),
+  ) as Record<FootprintRole, Float32Array>;
+  const wallSurface = clapboard
+    ? SIDING_SURFACE
+    : wallSurfaceOf(use, storeys, roof, share(STREAM_WALL));
+  const roofSurface = shingled ? SHINGLE_SURFACE : roofSurfaceOf(roof, share(STREAM_ROOF));
   const triangleCount = FOOTPRINT_ROLES.reduce((sum, role) => sum + trianglesOf(writing[role]), 0);
   return {
     centroid,
@@ -1691,13 +2667,21 @@ function planFootprint(
     roof,
     pitchDegrees,
     surfaces: { wall: wallSurface, roof: roofSurface },
+    cladding: {
+      wall: clapboard ? 'clapboard' : 'photograph',
+      roof: shingled ? 'shingle' : 'photograph',
+      course,
+    },
     // Where the paint starts; `paintTown` moves it off a neighbour's.
     paint: {
       wall: seededEntry(share(STREAM_PAINT_WALL), paintsOf(wallSurface)?.length ?? 1),
-      roof: seededEntry(share(STREAM_PAINT_ROOF), paintsOf(roofSurface)?.length ?? 1),
+      roof: seededEntry(share(STREAM_PAINT_ROOF), roofPaintsOf(roofSurface, shingled)?.length ?? 1),
       trim: seededEntry(share(STREAM_PAINT_TRIM), TRIM_PAINTS.length),
       door: seededEntry(share(STREAM_PAINT_DOOR), DOOR_PAINTS.length),
     },
+    garage: drew.garage,
+    driveway: drew.garage && garage !== undefined ? drivewayRing(garage.plan) : NO_RING,
+    dormers: drew.dormers,
     tint: packedInstanceTint(centroid.x, centroid.z, MASONRY_TINT),
     triangles,
     triangleCount,
