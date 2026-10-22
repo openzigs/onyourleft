@@ -26,6 +26,7 @@ import {
   SIDE_ROAD_WIDTHS,
   SIDE_ROADS_PER_FRAME,
   sideRoadsAt,
+  STREET_MAX_METRES,
   widthClassOf,
   type Junction,
   type SideRoad,
@@ -410,6 +411,24 @@ describe('what a side road is — #1565', () => {
         expect(Math.abs(junction.along - (from + 300))).toBeGreaterThanOrEqual(kept);
       }
     }
+  });
+
+  it('stops resampling at STREET_MAX_METRES, so a hostile tile cannot exhaust memory', () => {
+    const from = awayFromVillages(200, 1_000);
+    const hostile: StreetFeature = {
+      kind: 'minor_road',
+      kindDetail: '',
+      line: Float32Array.from([9e5, 9e5, 9e5 + STREET_MAX_METRES * 2, 9e5]),
+    };
+    const after = mappedJunctions(corridorOf([hostile, across(from, 100)]), FARMLAND, ORIGIN, SEED);
+    expect(after).toHaveLength(0);
+    const before = mappedJunctions(
+      corridorOf([across(from, 100), hostile]),
+      FARMLAND,
+      ORIGIN,
+      SEED,
+    );
+    expect(before.length).toBeGreaterThan(0);
   });
 
   it('is the same objects every call', () => {

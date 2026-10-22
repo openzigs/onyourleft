@@ -212,8 +212,16 @@ export interface SideRoad {
 
 // --- Mapped junctions ----------------------------------------------------
 
-/** A street's points every {@link SIDE_ROAD_STEP_METRES}, its own vertices kept. */
-function resampled(line: Float32Array): number[] {
+/**
+ * The most metres of street one corridor resamples: **400 000**, in file order. A
+ * decoded tile bounds vertices, not length, so a hostile tile of long segments
+ * would otherwise become hundreds of millions of points; past this the rest of
+ * the streets are not read, as `FOOTWAY_MAX_METRES` stops the footways.
+ */
+export const STREET_MAX_METRES = 400_000;
+
+/** A street's points every {@link SIDE_ROAD_STEP_METRES}, its own vertices kept, drawn from `budget`. */
+function resampled(line: Float32Array, budget: { metres: number }): number[] {
   const out: number[] = [];
   for (let at = 0; at + 1 < line.length; at += 2) {
     const ax = line[at] as number;
@@ -224,7 +232,13 @@ function resampled(line: Float32Array): number[] {
     const bx = line[at + 2] as number;
     const bz = line[at + 3] as number;
     if (!Number.isFinite(bx) || !Number.isFinite(bz)) return out;
-    const steps = Math.max(1, Math.ceil(Math.hypot(bx - ax, bz - az) / SIDE_ROAD_STEP_METRES));
+    const length = Math.hypot(bx - ax, bz - az);
+    if (length > budget.metres) {
+      budget.metres = 0;
+      return out;
+    }
+    budget.metres -= length;
+    const steps = Math.max(1, Math.ceil(length / SIDE_ROAD_STEP_METRES));
     for (let step = 1; step <= steps; step += 1) {
       out.push(ax + ((bx - ax) * step) / steps, az + ((bz - az) * step) / steps);
     }
@@ -423,8 +437,9 @@ export function mappedJunctions(
   const cached = junctionsFound.get(corridor);
   if (cached?.profile === profile) return cached.junctions;
   const candidates: Candidate[] = [];
+  const budget = { metres: STREET_MAX_METRES };
   for (const street of corridor.streets) {
-    const points = resampled(street.line);
+    const points = resampled(street.line, budget);
     const count = points.length / 2;
     if (count < 2) continue;
     const on = new Uint8Array(count);

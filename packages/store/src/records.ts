@@ -1739,7 +1739,7 @@ export type WorldCorridorTileState =
  * {@link RouteRecord} (ADR 0012 D-3.1). What it holds, in ADR 0054 D-3.3's one
  * sentence: building footprint polygons with `kind`, `height` and
  * `min_height`; land-use polygons with `kind`; water polygons; footway lines
- * with `kind` and `kind_detail`; and which tiles were read and when — no OSM
+ * with `kind` and `kind_detail`; street lines with `kind` and `kind_detail`; and which tiles were read and when — no OSM
  * identifier, no name, no address.
  *
  * ⚠️ **It never leaves the device** (ADR 0054 D-3.5): no account export, no
