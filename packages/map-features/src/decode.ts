@@ -33,7 +33,10 @@ import {
   MAX_KIND_LENGTH,
   MIN_EXTENT,
   MVT_VERSION,
+  OTHER_ROAD_KIND,
+  OTHER_STREET_KIND_DETAILS,
   READ_LAYERS,
+  STREET_KINDS,
   GEOMETRY_LINE,
   type ReadLayer,
 } from './schema';
@@ -45,6 +48,7 @@ import type {
   LandUseFeature,
   PathFeature,
   Ring,
+  StreetFeature,
   TileId,
 } from './types';
 
@@ -188,6 +192,7 @@ function decodeChecked(
   const landUse: LandUseFeature[] = [];
   const buildings: BuildingFeature[] = [];
   const paths: PathFeature[] = [];
+  const streets: StreetFeature[] = [];
   for (const layer of framed) {
     state.layer = layer.name;
     const project = new Projector(tile, origin, layer.extent);
@@ -200,12 +205,12 @@ function decodeChecked(
         project,
         limits,
         state,
-        { landUse, buildings, paths },
+        { landUse, buildings, paths, streets },
       );
     }
   }
   state.layer = null;
-  return { tile, landUse, buildings, paths };
+  return { tile, landUse, buildings, paths, streets };
 }
 
 /** The layer's name if it is one this package reads or checks for, else `null`. Never decodes it. */
@@ -367,6 +372,25 @@ interface Sinks {
   readonly landUse: LandUseFeature[];
   readonly buildings: BuildingFeature[];
   readonly paths: PathFeature[];
+  readonly streets: StreetFeature[];
+}
+
+/**
+ * Which sink a `roads` feature goes to (#1565): a footway first - #1551's
+ * set, unchanged - then a street, else none, and its geometry is never read.
+ */
+function roadSink(kind: string | null, kindDetail: string): 'paths' | 'streets' | null {
+  if (kind === FOOTWAY_KIND || (FOOTWAY_KIND_DETAILS as readonly string[]).includes(kindDetail)) {
+    return 'paths';
+  }
+  if ((STREET_KINDS as readonly (string | null)[]).includes(kind)) return 'streets';
+  if (
+    kind === OTHER_ROAD_KIND &&
+    (OTHER_STREET_KIND_DETAILS as readonly string[]).includes(kindDetail)
+  ) {
+    return 'streets';
+  }
+  return null;
 }
 
 function decodeFeature(
@@ -412,13 +436,8 @@ function decodeFeature(
     return;
   }
   const kindDetail = attributes.kindDetail ?? '';
-  if (
-    layer.name === 'roads' &&
-    kind !== FOOTWAY_KIND &&
-    !(FOOTWAY_KIND_DETAILS as readonly string[]).includes(kindDetail)
-  ) {
-    return;
-  }
+  const road = layer.name === 'roads' ? roadSink(kind, kindDetail) : null;
+  if (layer.name === 'roads' && road === null) return;
   if (geometry === null) throw new Malformed();
   const parts = decodeGeometry(bytes, geometry, type, layer, project, limits, state);
   switch (layer.name) {
@@ -440,7 +459,11 @@ function decodeFeature(
       return;
     case 'roads':
       for (const line of parts as Float32Array[]) {
-        sinks.paths.push({ kind: kind as string, kindDetail, line });
+        (road === 'paths' ? sinks.paths : sinks.streets).push({
+          kind: kind as string,
+          kindDetail,
+          line,
+        });
       }
       return;
   }

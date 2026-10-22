@@ -80,6 +80,28 @@ export const FOOTWAY_KIND_DETAILS = [
   'cycleway',
 ] as const;
 
+/**
+ * The `roads.kind` values that are streets a rider sees from the route (#1565,
+ * read from docs.protomaps.com/basemaps/layers on 2026-10-22): kept whatever
+ * their `kind_detail`, unless that makes them a footway, which
+ * {@link FOOTWAY_KIND_DETAILS} decides first. `rail`, `ferry`, `aerialway`,
+ * `pier` and `aeroway` are not streets and are dropped.
+ */
+export const STREET_KINDS = ['highway', 'major_road', 'minor_road'] as const;
+
+/** The `roads.kind` kept only where its `kind_detail` says it is a street (#1565). */
+export const OTHER_ROAD_KIND = 'other';
+
+/** The `kind_detail` values that make an {@link OTHER_ROAD_KIND} road a street (#1565). */
+export const OTHER_STREET_KIND_DETAILS = [
+  'residential',
+  'unclassified',
+  'road',
+  'living_street',
+  'service',
+  'alley',
+] as const;
+
 /** The MVT layer version this decoder reads (spec 2.1). */
 export const MVT_VERSION = 2;
 

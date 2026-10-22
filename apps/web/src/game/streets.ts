@@ -80,6 +80,7 @@
 
 import { distanceOnRoute, elevationAt, type RouteProfile } from '@onyourleft/domain';
 
+import { VILLAGE_MOUTH_HALF_METRES } from './cross-streets';
 import { NO_PAVEMENT_DATA, type PavementSide, type PavementSides } from './footways';
 import { distanceToDrawnRoad } from './road-grid';
 import { NO_LAND_CLASS, type LandClassMask } from './land-class';
@@ -109,6 +110,18 @@ export const PAVEMENT_WIDTH_METRES = 2;
  * with room to spare, so no gap shows under its outer edge.
  */
 export const PAVEMENT_FOOTING_METRES = 0.45;
+
+/**
+ * How high the kerb stands at a dropped kerb, in metres: **0.02** — #1565:
+ * where a village's pavement meets its crossroads
+ * (`cross-streets.ts` §`villageJunction`), it is broken over the side road's
+ * mouth and its kerb dropped over the {@link DROPPED_KERB_METRES} either side,
+ * flush enough to cross.
+ */
+export const DROPPED_KERB_HEIGHT_METRES = 0.02;
+
+/** How far from a side road's mouth a pavement's kerb is dropped, in metres: **2**, one section. */
+export const DROPPED_KERB_METRES = 2;
 
 /** How far apart a pavement's cross-sections are along the road, at most, in metres: **2**. */
 export const PAVEMENT_STEP_METRES = 2;
@@ -311,6 +324,11 @@ function streetOf(
   });
   const street = streetSpan(spans);
   if (street === undefined) return null;
+  // #1565: the village's crossroads, at its centre, on this lap's odometer.
+  const mouth = {
+    from: site.centre - lap - VILLAGE_MOUTH_HALF_METRES,
+    to: site.centre - lap + VILLAGE_MOUTH_HALF_METRES,
+  };
   // #1551: whether any of the street's road was read. @see the header
   const read = wasRead(sides, street.start, street.end);
   for (const [at, side] of ([1, -1] as const).entries()) {
@@ -318,14 +336,18 @@ function streetOf(
     let laid: boolean;
     if (!read) {
       if (own === undefined) continue;
-      laid = lay(mesh, furniture, profile, origin, seed, side, own.start, own.end);
+      laid = lay(mesh, furniture, profile, origin, seed, side, own.start, own.end, undefined, [
+        mouth,
+      ]);
     } else {
       const allowed = (along: number): boolean => {
         const here = sides.sideAt(along);
         if (here === 'unknown') return own !== undefined && along >= own.start && along <= own.end;
         return onSide(here, side);
       };
-      laid = lay(mesh, furniture, profile, origin, seed, side, street.start, street.end, allowed);
+      laid = lay(mesh, furniture, profile, origin, seed, side, street.start, street.end, allowed, [
+        mouth,
+      ]);
     }
     if (laid) {
       from = Math.min(from, read || own === undefined ? street.start : own.start);
@@ -414,6 +436,8 @@ interface Section {
   readonly outerZ: number;
   /** The road's height here: the kerb's foot. */
   readonly y: number;
+  /** How high the kerb stands here: {@link KERB_HEIGHT_METRES}, or dropped beside a mouth (#1565). */
+  readonly kerb: number;
   /** Out from the road, on this side. */
   readonly outX: number;
   readonly outZ: number;
@@ -434,8 +458,17 @@ function lay(
   start: number,
   end: number,
   allowed: (along: number) => boolean = () => true,
+  mouths: readonly { readonly from: number; readonly to: number }[] = [],
 ): boolean {
   const ways = waterways(profile, seed);
+  // #1565: no pavement over a side road's mouth, and a dropped kerb beside it.
+  const inMouth = (along: number): boolean =>
+    mouths.some((mouth) => along >= mouth.from && along <= mouth.to);
+  const besideMouth = (along: number): boolean =>
+    mouths.some(
+      (mouth) =>
+        along >= mouth.from - DROPPED_KERB_METRES && along <= mouth.to + DROPPED_KERB_METRES,
+    );
   const steps = Math.max(1, Math.ceil((end - start) / PAVEMENT_STEP_METRES));
   const before = mesh.triangles;
   let run: Section[] = [];
@@ -448,7 +481,10 @@ function lay(
   };
   for (let step = 0; step <= steps; step += 1) {
     const along = start + ((end - start) * step) / steps;
-    const section = allowed(along) ? sectionAt(profile, origin, ways, side, along) : undefined;
+    const section =
+      allowed(along) && !inMouth(along)
+        ? sectionAt(profile, origin, ways, side, along, besideMouth(along))
+        : undefined;
     if (section === undefined) close();
     else run.push(section);
   }
@@ -463,6 +499,7 @@ function sectionAt(
   ways: ReturnType<typeof waterways>,
   side: 1 | -1,
   along: number,
+  dropped: boolean,
 ): Section | undefined {
   const wrapped = distanceOnRoute(profile, along);
   const frame = drawnRoadFrame(profile, origin, wrapped);
@@ -486,6 +523,7 @@ function sectionAt(
     outerX: frame.x + outX * outer,
     outerZ: frame.z + outZ * outer,
     y: elevationAt(profile, wrapped) - origin.elevation,
+    kerb: dropped ? DROPPED_KERB_HEIGHT_METRES : KERB_HEIGHT_METRES,
     outX,
     outZ,
   };
@@ -524,7 +562,7 @@ function furnish(run: readonly Section[], into: FurnitureItem[]): void {
     into.push({
       kind,
       x: a.innerX + (b.innerX - a.innerX) * t + (outX / out) * fromKerb,
-      y: a.y + (b.y - a.y) * t + KERB_HEIGHT_METRES,
+      y: a.y + (b.y - a.y) * t + a.kerb + (b.kerb - a.kerb) * t,
       z: a.innerZ + (b.innerZ - a.innerZ) * t + (outZ / out) * fromKerb,
       // Facing the road: back along `out`.
       rotation: Math.atan2(-outX / out, -outZ / out),
@@ -582,7 +620,7 @@ class MeshBuilder {
 
   /** One unbroken run of sections: the kerb face, the top, the back face and both ends. */
   strip(run: readonly Section[], side: 1 | -1): void {
-    const top = (section: Section): number => section.y + KERB_HEIGHT_METRES;
+    const top = (section: Section): number => section.y + section.kerb;
     const foot = (section: Section): number => section.y - PAVEMENT_FOOTING_METRES;
     const first = run[0] as Section;
     const last = run[run.length - 1] as Section;
@@ -592,9 +630,9 @@ class MeshBuilder {
       // The kerb's face, looking at the road.
       this.#quad(
         [a.innerX, a.y, a.innerZ, a.along, 0],
-        [a.innerX, top(a), a.innerZ, a.along, KERB_HEIGHT_METRES],
+        [a.innerX, top(a), a.innerZ, a.along, a.kerb],
         [b.innerX, b.y, b.innerZ, b.along, 0],
-        [b.innerX, top(b), b.innerZ, b.along, KERB_HEIGHT_METRES],
+        [b.innerX, top(b), b.innerZ, b.along, b.kerb],
         [-(a.outX + b.outX) / 2, 0, -(a.outZ + b.outZ) / 2],
       );
       // The pavement, looking up.

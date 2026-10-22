@@ -310,6 +310,7 @@ describe('nothing changes during a ride — ADR 0054 D-2.4', () => {
         },
       ],
       paths: [],
+      streets: [],
     };
     const withLate = await rideFor(
       route,

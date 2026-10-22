@@ -1664,6 +1664,7 @@ function frameWithScatter(): SceneFrame {
     lines: [],
     billboards: [],
     streets: [],
+    sideRoads: [],
   };
 }
 

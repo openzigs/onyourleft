@@ -396,10 +396,22 @@ describe('packing', () => {
     expect(back.paths.map((p) => p.kindDetail)).toStrictEqual(
       outcome.features.paths.map((p) => p.kindDetail),
     );
+    // #1565: the streets, read back through the same unpack a kept corridor takes.
+    expect(outcome.features.streets.length).toBeGreaterThan(0);
+    expect(back.streets.map((f) => [f.kind, f.kindDetail, f.line.length])).toStrictEqual(
+      outcome.features.streets.map((f) => [f.kind, f.kindDetail, f.line.length]),
+    );
+    back.streets.forEach((street, index) => {
+      const before = outcome.features.streets[index]?.line as Float32Array;
+      street.line.forEach((value, at) => {
+        expect(Math.abs(value - (before[at] as number))).toBeLessThanOrEqual(0.005 + 1e-3);
+      });
+    });
   });
 
   it('refuses a blob it did not write', async () => {
-    const json = new Blob([JSON.stringify({ v: 2 })])
+    // #1565: a version-1 blob, as a reader before the streets kept it, is not read.
+    const json = new Blob([JSON.stringify({ v: 1 })])
       .stream()
       .pipeThrough(new CompressionStream('gzip'));
     await expect(

@@ -42,6 +42,7 @@ import type { HorizonRelief, TerrainMesh } from './landform';
 import type { QualitySettings } from './quality';
 import type { RealisticWorldOutcome } from './realistic-assets';
 import type { ScatterItem } from './scatter';
+import type { SideRoad } from './cross-streets';
 import type { VillageStreet } from './streets';
 import type { RoadCorridor } from './terrain';
 import type { BridgePart, WaterSurface } from './waterways';
@@ -301,6 +302,15 @@ export interface SceneFrame {
    * rung's `structureItems`: a street is one mesh, not items.
    */
   readonly streets: readonly VillageStreet[];
+  /**
+   * The cross streets in view — #1565 (`cross-streets.ts`): a side road a
+   * short way off the route at each junction, mapped where the corridor has
+   * streets and one crossroads at each procedural village, the same objects
+   * every frame while the same junctions are in view, drawn in both worlds in
+   * the road's own material by one mesh (`three-renderer.ts`
+   * §`SideRoadBelt`). Empty away from a junction.
+   */
+  readonly sideRoads: readonly SideRoad[];
 }
 
 /** What {@link SceneFrame.water} carries. */

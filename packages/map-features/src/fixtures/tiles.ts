@@ -224,7 +224,7 @@ export const SIDEWALK_LINE: readonly (readonly [number, number])[] = [
   [3300, 2060],
 ];
 
-/** A sidewalk beside a residential street; the street is not a footway and is dropped. */
+/** A sidewalk beside a residential street; the street is not a footway, and since #1565 is a street. */
 export function sidewalkTile(): Uint8Array {
   return encodeTile([
     EARTH,
@@ -253,6 +253,119 @@ export function sidewalkTile(): Uint8Array {
   ]);
 }
 
+/**
+ * The roads a cross street is read from (#1565), each a straight line of two
+ * points in tile pixels, with the sink it must land in: `streets`, `paths` or
+ * `null` (dropped).
+ */
+export const STREET_FIXTURE_ROADS: readonly {
+  readonly kind: string;
+  readonly kindDetail?: string;
+  readonly sink: 'streets' | 'paths' | null;
+  readonly line: readonly (readonly [number, number])[];
+}[] = [
+  {
+    kind: 'highway',
+    kindDetail: 'motorway',
+    sink: 'streets',
+    line: [
+      [100, 400],
+      [4000, 400],
+    ],
+  },
+  {
+    kind: 'major_road',
+    kindDetail: 'primary',
+    sink: 'streets',
+    line: [
+      [100, 900],
+      [4000, 900],
+    ],
+  },
+  {
+    kind: 'minor_road',
+    sink: 'streets',
+    line: [
+      [100, 1400],
+      [4000, 1400],
+    ],
+  },
+  {
+    kind: 'other',
+    kindDetail: 'residential',
+    sink: 'streets',
+    line: [
+      [100, 1900],
+      [4000, 1900],
+    ],
+  },
+  {
+    kind: 'other',
+    kindDetail: 'platform',
+    sink: null,
+    line: [
+      [100, 2400],
+      [4000, 2400],
+    ],
+  },
+  {
+    kind: 'minor_road',
+    kindDetail: 'sidewalk',
+    sink: 'paths',
+    line: [
+      [100, 2900],
+      [4000, 2900],
+    ],
+  },
+  {
+    kind: 'rail',
+    kindDetail: 'rail',
+    sink: null,
+    line: [
+      [100, 3300],
+      [4000, 3300],
+    ],
+  },
+  {
+    kind: 'ferry',
+    sink: null,
+    line: [
+      [100, 3700],
+      [4000, 3700],
+    ],
+  },
+  // A street's detail on a kind that is not a street: still not one.
+  {
+    kind: 'aeroway',
+    kindDetail: 'road',
+    sink: null,
+    line: [
+      [100, 3950],
+      [4000, 3950],
+    ],
+  },
+];
+
+/** {@link STREET_FIXTURE_ROADS} as one `roads` layer, every feature carrying a name and an id. */
+export function streetsTile(): Uint8Array {
+  return encodeTile([
+    EARTH,
+    {
+      name: 'roads',
+      features: STREET_FIXTURE_ROADS.map((road, index) => ({
+        id: POISON.id + index,
+        type: 2,
+        tags: {
+          ...poisonTags,
+          kind: road.kind,
+          ...(road.kindDetail === undefined ? {} : { kind_detail: road.kindDetail }),
+        },
+        geometry: line([road.line]),
+      })),
+    },
+  ]);
+}
+
 /** A `building_part` on a raised base, and an address point that is dropped. */
 export function buildingPartTile(): Uint8Array {
   return encodeTile([
@@ -276,11 +389,12 @@ export function buildingPartTile(): Uint8Array {
   ]);
 }
 
-/** The five named fixtures, for the walks that run over all of them. */
+/** The six named fixtures, for the walks that run over all of them. */
 export const NAMED_FIXTURES: Readonly<Record<string, () => Uint8Array>> = {
   residentialBlock: residentialBlockTile,
   woodWithHole: woodWithHoleTile,
   lake: lakeTile,
   sidewalk: sidewalkTile,
   buildingPart: buildingPartTile,
+  streets: streetsTile,
 };

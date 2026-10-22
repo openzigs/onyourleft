@@ -69,6 +69,7 @@ function corridorOf(boxes: readonly Box[], landUse: readonly LandUseFeature[]): 
     landUse,
     buildings: [],
     paths: [],
+    streets: [],
   };
 }
 

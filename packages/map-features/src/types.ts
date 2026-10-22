@@ -49,11 +49,27 @@ export interface PathFeature {
   readonly line: Float32Array;
 }
 
+/**
+ * A `roads` line that is a street (#1565): `kind` in {@link STREET_KINDS}, or
+ * {@link OTHER_ROAD_KIND} with a street's `kind_detail`. Never a footway — a
+ * line that is one of those is a {@link PathFeature} — and, like it, never a
+ * name or an id.
+ */
+export interface StreetFeature {
+  readonly kind: string;
+  /** `''` when the feature carries no `kind_detail`. */
+  readonly kindDetail: string;
+  /** `x0, z0, x1, z1, …` in local metres. */
+  readonly line: Float32Array;
+}
+
 export interface DecodedTile {
   readonly tile: TileId;
   readonly landUse: readonly LandUseFeature[];
   readonly buildings: readonly BuildingFeature[];
   readonly paths: readonly PathFeature[];
+  /** #1565: the streets, for the cross streets at their junctions with the route. */
+  readonly streets: readonly StreetFeature[];
 }
 
 /**
