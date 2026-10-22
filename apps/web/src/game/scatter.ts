@@ -203,6 +203,13 @@ export interface ScatterItem {
    * its own hash stream.
    */
   readonly variant: number;
+  /**
+   * What a procedural lot is painted — #1581, `building-paint.ts`
+   * §`lotPaint`'s packed wall and roof. Only #1550's lots carry one; every
+   * other item is drawn as its photographs are. Like the variant it changes
+   * what stands somewhere, never where.
+   */
+  readonly paint?: number;
 }
 
 /**

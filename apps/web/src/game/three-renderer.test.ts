@@ -113,6 +113,8 @@ import {
   prepareSceneryGeometry,
   projectedBoxInMetres,
   RealisticStructureBelts,
+  FACADE_SHOWN_GLSL,
+  readsLotPaint,
   PREPARE_FENCE_LIMIT_MS,
   RiderBelt,
   realisticRemoteSplit,
@@ -129,7 +131,9 @@ import {
   BRIDGE_COLOUR,
   sceneryColours,
 } from './three-renderer';
+import { WINDOW_IN_BAY, facadePartAt } from './facade';
 import type { CameraPose, RiderMarker, SceneFrame } from './port';
+import { LOT_PAINTS, lotPaint, lotPaintChannel, ROOF_PAINTS } from './building-paint';
 import {
   fogFactor,
   irradianceOn,
@@ -3428,6 +3432,64 @@ describe('what the realistic structures cost in meshes — #482', () => {
   });
 });
 
+describe('a lot’s paint reaches its instance and its materials — #1581', () => {
+  it('writes a lot’s wall and roof in the channels its walls’ and roof’s materials read, and nought for a village house', () => {
+    const belts = new RealisticStructureBelts(new Map());
+    const lot: ScatterItem = item({ kind: 'building', x: 0, z: 20, paint: lotPaint(0, 3, 1) });
+    const house: ScatterItem = item({ kind: 'building', x: 0, z: 40 });
+    belts.update([lot, house], POSE);
+    const brick = belts.beltOf('brick')?.meshesOf('building')[0];
+    const tiles = belts.beltOf('roof-tiles')?.meshesOf('building')[0];
+    if (brick === undefined || tiles === undefined)
+      throw new Error('a house has no brick or tile mesh');
+    expect(brick.count).toBe(2);
+    const channelsOf = (
+      mesh: { readonly instanceColor: { readonly array: ArrayLike<number> } | null },
+      slot: number,
+    ): readonly number[] => [0, 1, 2].map((at) => mesh.instanceColor?.array[slot * 3 + at] ?? NaN);
+    for (const mesh of [brick, tiles]) {
+      const [wall, roof] = channelsOf(mesh, 0);
+      expect(wall).toBe(lotPaintChannel(lot.paint, 'wall'));
+      expect(roof).toBe(lotPaintChannel(lot.paint, 'roof'));
+      expect(wall).toBeGreaterThan(0);
+      // The village house is drawn as it was: no paint.
+      expect(channelsOf(mesh, 1).slice(0, 2)).toStrictEqual([0, 0]);
+    }
+    expect(readsLotPaint(brick.material as never)).toBe('wall');
+    expect(readsLotPaint(tiles.material as never)).toBe('roof');
+    // Glass and the joinery's timber are never painted.
+    const glass = belts.beltOf('glass')?.meshesOf('building')[0];
+    expect(readsLotPaint(glass?.material as never)).toBeUndefined();
+    const planks = belts.beltOf('planks')?.meshesOf('building')[0];
+    expect(planks).toBeDefined();
+    expect(readsLotPaint(planks?.material as never)).toBeUndefined();
+    belts.dispose();
+  });
+
+  it('splices each surface’s own first five paints into the program, read from its channel', () => {
+    const belts = new RealisticStructureBelts(new Map());
+    const material = belts.beltOf('slate')?.meshesOf('shop-row')[0]?.material as never as {
+      onBeforeCompile: (shader: unknown, renderer: unknown) => void;
+    };
+    const shader = {
+      uniforms: {},
+      vertexShader:
+        '#include <common>\n#include <begin_vertex>\n#include <color_vertex>\n#include <fog_pars_vertex>\n#include <fog_vertex>',
+      fragmentShader:
+        '#include <common>\n#include <clipping_planes_fragment>\n#include <map_fragment>\n#include <color_fragment>\n#include <fog_pars_fragment>\n#include <fog_fragment>',
+    };
+    material.onBeforeCompile(shader, undefined);
+    const slate = ROOF_PAINTS.slate ?? [];
+    expect(shader.vertexShader).toContain(`const vec3 oylLotPaints[${String(LOT_PAINTS)}]`);
+    expect(shader.vertexShader).toContain(
+      `vec3(${(slate[1] ?? []).map((each) => (Number.isInteger(each) ? `${String(each)}.0` : String(each))).join(', ')})`,
+    );
+    expect(shader.vertexShader).toContain('int(instanceColor.y + 0.5) - 1');
+    expect(shader.fragmentShader).toContain('diffuseColor.rgb *= vOylPaint;');
+    belts.dispose();
+  });
+});
+
 describe('the riders lean into a bend — #499', () => {
   /** A rider facing `heading`, leaning `lean`, cranks at `crankAngle`. */
   function leaning(
@@ -3783,5 +3845,54 @@ describe('projectedBoxInMetres on a map that is not square - #1548', () => {
       }
     }
     expect(seen).toEqual({ x: 12, y: 12, z: 12 });
+  });
+});
+
+describe('the facade shader’s window rule is facadePartAt’s — #1581', () => {
+  // The GLSL expression is run as JavaScript: step, abs and the vectors' fields are all it uses.
+  // eslint-disable-next-line @typescript-eslint/no-implied-eval -- runs the shader's own expression text
+  const shown = new Function(
+    'oylCell',
+    'oylWinT',
+    'vOylFacade',
+    'step',
+    'abs',
+    `return ${FACADE_SHOWN_GLSL.replace(/(\d)\.0\b/g, '$1')
+      .replace(/oylCell\.y/g, 'oylCell[1]')
+      .replace(/oylCell\.x/g, 'oylCell[0]')
+      .replace(/vOylFacade\.z/g, 'vOylFacade[2]')
+      .replace(/vOylFacade\.w/g, 'vOylFacade[3]')};`,
+  ) as (
+    cell: number[],
+    top: number,
+    facade: number[],
+    step: (edge: number, x: number) => number,
+    abs: (x: number) => number,
+  ) => number;
+  const shaderShows = (bay: number, storey: number, top: number, skip: number): boolean =>
+    shown(
+      [bay, storey],
+      WINDOW_IN_BAY.top,
+      [bay + 0.5, storey + 0.5, top, skip],
+      (edge, x) => (x >= edge ? 1 : 0),
+      Math.abs,
+    ) > 0;
+
+  it('shows a window exactly where facadePartAt finds glass at the window’s middle', () => {
+    const middle = (WINDOW_IN_BAY.bottom + WINDOW_IN_BAY.top) / 2;
+    let shownCount = 0;
+    for (const top of [1.5, 2.3, 2.5, 2.8, 3.4]) {
+      for (const skip of [-1, 0, 2]) {
+        for (let bay = 0; bay < 4; bay += 1) {
+          for (let storey = -1; storey < 4; storey += 1) {
+            const drawn = shaderShows(bay, storey, top, skip);
+            const layout = facadePartAt(bay + 0.5, storey + middle, top, skip) !== 'wall';
+            expect(drawn, `bay ${bay} storey ${storey} top ${top} skip ${skip}`).toBe(layout);
+            if (drawn) shownCount += 1;
+          }
+        }
+      }
+    }
+    expect(shownCount).toBeGreaterThan(20);
   });
 });

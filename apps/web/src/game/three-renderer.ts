@@ -241,7 +241,18 @@ import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import type { KitColour } from '@onyourleft/store';
 
 import {
+  DOOR_PAINTS,
+  LOT_PAINTS,
+  lotPaintChannel,
+  paintChannelOf,
+  paintsOf,
+  TRIM_PAINTS,
+  type Rgb,
+} from './building-paint';
+import { DOOR_IN_FACE, WINDOW_IN_BAY } from './facade';
+import {
   BAY_METRES,
+  FACADE_FLOATS,
   FOOTPRINT_SURFACES,
   FOOTPRINT_VERTEX_FLOATS,
   STOREY_METRES,
@@ -2640,9 +2651,13 @@ export class ScatterBelt {
       this.#matrix.compose(this.#position, this.#quaternion, this.#scale);
       mesh.setMatrixAt(mesh.count, this.#matrix);
       if (this.#tint !== undefined && mesh.instanceColor !== null) {
-        // #621: the tint alone; the dither's two channels stay nought, which
-        // a structure's material does not read. @see withInstanceChannels
-        (mesh.instanceColor.array as Float32Array)[mesh.count * 3 + 2] = packedInstanceTint(
+        // #621: the tint; and since #1581 a lot's paint in the two channels a
+        // tree's dither uses and a structure's did not — nought, unpainted,
+        // for every item but a lot. @see withInstanceChannels, withLotPaint
+        const channels = mesh.instanceColor.array as Float32Array;
+        channels[mesh.count * 3] = lotPaintChannel(item.paint, 'wall');
+        channels[mesh.count * 3 + 1] = lotPaintChannel(item.paint, 'roof');
+        channels[mesh.count * 3 + 2] = packedInstanceTint(
           item.x,
           item.z,
           realisticTints[this.#tint],
@@ -11785,8 +11800,11 @@ function structureMaterials(
   // shares; masonry's bound is small enough that glass stays glass, and the
   // browser gate's window-glass assertions are unchanged by it.
   const biased = <M extends Material>(material: M): M =>
-    withAtmosphere(
-      withInstanceChannels(maps === undefined ? material : withTextureLodBias(material), false),
+    withLotPaint(
+      withAtmosphere(
+        withInstanceChannels(maps === undefined ? material : withTextureLodBias(material), false),
+      ),
+      surface,
     );
   return {
     lit: biased(
@@ -11810,6 +11828,89 @@ function structureMaterials(
       ),
     ),
   };
+}
+
+/** The materials {@link withLotPaint} has taught, and the channel each reads. */
+const LOT_PAINT_TAUGHT = new WeakMap<Material, 'wall' | 'roof'>();
+
+/**
+ * Which instance channel a structure material reads a lot's paint from, or
+ * none: it is not a painted surface.
+ *
+ * @test-facing held by `three-renderer.test.ts` §"#1581", which asserts the
+ * brick, roof-tiles, planks and glass materials
+ */
+export function readsLotPaint(material: Material): 'wall' | 'roof' | undefined {
+  return LOT_PAINT_TAUGHT.get(material);
+}
+
+/**
+ * Teaches a structure surface's material a procedural lot's paint — #1581,
+ * #1550's lots. `settlements.ts` §`lotsAt` paints a lot
+ * (`building-paint.ts` §`lotPaint`), and the belt writes its wall's entry in
+ * the instance colour's first channel and its roof's in the second, each plus
+ * one (§`lotPaintChannel`). A wall surface reads the first, a roof surface
+ * the second, and each looks its entry up in its own first
+ * {@link LOT_PAINTS} multipliers, baked into the program: nought is no paint,
+ * so a village house, a barn and a church are drawn as they were. A surface
+ * that is not painted (`paintChannelOf`) is returned untaught. Throws, as the
+ * tint does, if three's program no longer holds an include it is spliced at.
+ */
+function withLotPaint<M extends Material>(material: M, surface: StructureSurface): M {
+  // ⚠️ `planks` has a wall list for a mapped barn, but on a lot it is the
+  // joinery and the door, which stay timber: a lot's own walls are never planks.
+  const channel = surface === 'planks' ? undefined : paintChannelOf(surface);
+  const paints = paintsOf(surface);
+  if (channel === undefined || paints === undefined || LOT_PAINT_TAUGHT.has(material)) {
+    return material;
+  }
+  LOT_PAINT_TAUGHT.set(material, channel);
+  const entries = paints
+    .slice(0, LOT_PAINTS)
+    .map((rgb) => `vec3(${rgb.map(glslFloat).join(', ')})`)
+    .join(', ');
+  const read = channel === 'wall' ? 'x' : 'y';
+  const spliced = "#1581's lot paint";
+  const earlier = material.onBeforeCompile.bind(material);
+  const earlierKey = material.customProgramCacheKey();
+  material.onBeforeCompile = (shader, renderer) => {
+    earlier(shader, renderer);
+    shader.vertexShader = replacedOrThrown(
+      replacedOrThrown(
+        shader.vertexShader,
+        '#include <common>',
+        `#include <common>\nvarying vec3 vOylPaint;\nconst vec3 oylLotPaints[${String(LOT_PAINTS)}] = vec3[${String(LOT_PAINTS)}](${entries});`,
+        'vertex',
+        spliced,
+      ),
+      '#include <begin_vertex>',
+      [
+        '#include <begin_vertex>',
+        'vOylPaint = vec3(1.0);',
+        '#ifdef USE_INSTANCING_COLOR',
+        `int oylEntry = int(instanceColor.${read} + 0.5) - 1;`,
+        `if (oylEntry >= 0) vOylPaint = oylLotPaints[min(oylEntry, ${String(LOT_PAINTS - 1)})];`,
+        '#endif',
+      ].join('\n'),
+      'vertex',
+      spliced,
+    );
+    shader.fragmentShader = replacedOrThrown(
+      replacedOrThrown(
+        shader.fragmentShader,
+        '#include <common>',
+        '#include <common>\nvarying vec3 vOylPaint;',
+        'fragment',
+        spliced,
+      ),
+      '#include <color_fragment>',
+      '#include <color_fragment>\ndiffuseColor.rgb *= vOylPaint;',
+      'fragment',
+      spliced,
+    );
+  };
+  material.customProgramCacheKey = () => `${earlierKey}|oyl-lot-paint-${surface}`;
+  return material;
 }
 
 /**
@@ -11946,14 +12047,40 @@ export interface MappedBuildingStats {
   readonly passed: number;
 }
 
-/** A mapped building's role's shade, as {@link REALISTIC_ROLE_SHADE} darkens a procedural one's. */
+/**
+ * A mapped building's role's shade, as {@link REALISTIC_ROLE_SHADE} darkens a
+ * procedural one's. Since #1581 the door and the trim are painted
+ * (`building-paint.ts`), so neither is darkened: the paint is the colour.
+ */
 const MAPPED_ROLE_SHADE: Readonly<Record<FootprintRole, number>> = {
   wall: REALISTIC_ROLE_SHADE.wall,
   plinth: REALISTIC_ROLE_SHADE.plinth,
   roof: REALISTIC_ROLE_SHADE.roof,
   parapet: REALISTIC_ROLE_SHADE.wall,
-  door: REALISTIC_ROLE_SHADE.door,
+  door: 1,
+  chimney: REALISTIC_ROLE_SHADE.chimney,
+  trim: 1,
 };
+
+/**
+ * The colour a role of `plan` is painted, before its shade — #1581: the wall
+ * surface's multiplier on the walls, the plinth, the parapet and the chimney;
+ * the roof surface's on the roof; the door's paint on the door and the trim's
+ * on the trim.
+ */
+export function mappedRolePaint(plan: FootprintPlan, role: FootprintRole): Rgb {
+  const unpainted: Rgb = [1, 1, 1];
+  switch (role) {
+    case 'roof':
+      return paintsOf(plan.surfaces.roof)?.[plan.paint.roof] ?? unpainted;
+    case 'door':
+      return DOOR_PAINTS[plan.paint.door] ?? unpainted;
+    case 'trim':
+      return TRIM_PAINTS[plan.paint.trim] ?? unpainted;
+    default:
+      return paintsOf(plan.surfaces.wall)?.[plan.paint.wall] ?? unpainted;
+  }
+}
 
 /** The materials {@link withVertexTint} has taught. */
 const VERTEX_TINT_TAUGHT = new WeakSet<Material>();
@@ -12012,12 +12139,242 @@ function withVertexTint<M extends Material>(material: M): M {
   return material;
 }
 
+/** The materials {@link withFacade} has taught. */
+const FACADE_TAUGHT = new WeakSet<Material>();
+
+/**
+ * Whether the facade is drawn: 1 in the product, 0 the browser gate's
+ * control. One uniform every mapped building's material shares, for
+ * `ATMOSPHERE`'s reason. @see setMappedFacadeShown
+ */
+const FACADE_SWITCH = { oylFacadeOn: { value: 1 } };
+
+/**
+ * Draws the mapped buildings' walls with their windows and doors, or — the
+ * browser gate's control — with the photograph alone, as #1549 drew them.
+ *
+ * @test-facing the browser gate's control, read by `game-harness.ts`
+ * §`mappedFacadeProbe`; the product always draws the facade
+ */
+export function setMappedFacadeShown(on: boolean): void {
+  FACADE_SWITCH.oylFacadeOn.value = on ? 1 : 0;
+}
+
+/**
+ * Whether a material draws #1581's windows and doors from its vertices.
+ *
+ * @test-facing held by `mapped-building-belt.test.ts` §"the mapped buildings’
+ * materials", which asserts every mapped building's material is taught it
+ */
+export function drawsFacade(material: Material): boolean {
+  return FACADE_TAUGHT.has(material);
+}
+
+/** `facade.ts`' layout, as the GLSL constants {@link FACADE_FRAGMENT_GLSL} reads. */
+const FACADE_CONSTANTS_GLSL = /* glsl */ `
+  const float oylWinL = ${glslFloat(WINDOW_IN_BAY.left)};
+  const float oylWinR = ${glslFloat(WINDOW_IN_BAY.right)};
+  const float oylWinB = ${glslFloat(WINDOW_IN_BAY.bottom)};
+  const float oylWinT = ${glslFloat(WINDOW_IN_BAY.top)};
+  const float oylFrameA = ${glslFloat(WINDOW_IN_BAY.frameAcross)};
+  const float oylFrameU = ${glslFloat(WINDOW_IN_BAY.frameUp)};
+  const float oylBarA = ${glslFloat(WINDOW_IN_BAY.barAcross)};
+  const float oylBarU = ${glslFloat(WINDOW_IN_BAY.barUp)};
+  const float oylTransom = ${glslFloat(WINDOW_IN_BAY.transom)};
+  const float oylSillA = ${glslFloat(WINDOW_IN_BAY.sillAcross)};
+  const float oylSillU = ${glslFloat(WINDOW_IN_BAY.sillUp)};
+  const float oylDoorA = ${glslFloat(DOOR_IN_FACE.surroundAcross)};
+  const float oylDoorU = ${glslFloat(DOOR_IN_FACE.surroundUp)};
+  const float oylFan = ${glslFloat(DOOR_IN_FACE.fanlight)};
+`;
+
+/**
+ * The facade's declarations and helpers, in GLSL: a band and a rectangle
+ * softened over a pixel's footprint (`fwidth`), so a window's edge never
+ * crawls as the rider rides past it.
+ */
+const FACADE_COMMON_GLSL = /* glsl */ `
+  uniform float oylFacadeOn;
+  varying vec4 vOylFacade;
+  varying vec3 vOylTrim;
+  ${FACADE_CONSTANTS_GLSL}
+  float oylBand(float x, float lo, float hi, float w) {
+    return smoothstep(lo - w, lo + w, x) - smoothstep(hi - w, hi + w, x);
+  }
+  float oylRect(vec2 p, vec2 lo, vec2 hi, vec2 w) {
+    return oylBand(p.x, lo.x, hi.x, w.x) * oylBand(p.y, lo.y, hi.y, w.y);
+  }
+  float oylWindowHash(vec2 cell) {
+    return fract(sin(dot(cell, vec2(12.9898, 78.233))) * 43758.5453);
+  }
+`;
+
+/**
+ * Whether a bay has a window at all, as a GLSL expression over `oylCell`,
+ * `oylWinT` and `vOylFacade` (`facade.ts` §`facadePartAt`'s eaves and door-bay
+ * rules). Split out so a test can run the very text the shader runs.
+ *
+ * Exported for `three-renderer.test.ts`, which runs it against `facadePartAt`.
+ */
+export const FACADE_SHOWN_GLSL =
+  'step(0.0, oylCell.y) * step(oylCell.y + oylWinT, vOylFacade.z) * (1.0 - step(oylCell.y, 0.5) * step(abs(oylCell.x - vOylFacade.w), 0.5))';
+
+/**
+ * #1581's facade, drawn over the surface's photograph after its colour —
+ * `facade.ts` §`facadePartAt`'s layout, from `footprint-buildings.ts`
+ * §`FACADE_FLOATS`' four numbers. `oylGlass` and `oylFlat` carry on to the
+ * finish: a pane is smooth and a little metallic, so it gives back the sky the
+ * environment map holds, and paint is smoother than brick and loses the
+ * photograph's relief. Past a few pixels a bay, the layout fades to its mean,
+ * so a far street does not shimmer.
+ *
+ * ⚠️ `vOylTint` is #1549's ({@link withVertexTint}), read here in `main` —
+ * after every declaration — so that one window in five is a lit room by
+ * where it is on which building, not the same window on every house.
+ */
+const FACADE_FRAGMENT_GLSL = /* glsl */ `
+  float oylGlass = 0.0;
+  float oylFlat = 0.0;
+  if (oylFacadeOn < 0.5) {
+    // The control: the photograph alone, as #1549 drew it.
+  } else if (vOylFacade.z > 0.0) {
+    vec2 oylCell = floor(vOylFacade.xy);
+    vec2 oylAt = vOylFacade.xy - oylCell;
+    vec2 oylW = max(fwidth(vOylFacade.xy) * 0.5, vec2(0.00001));
+    float oylShown = ${FACADE_SHOWN_GLSL};
+    float oylOuter = oylRect(oylAt, vec2(oylWinL, oylWinB), vec2(oylWinR, oylWinT), oylW) * oylShown;
+    float oylInner = oylRect(
+      oylAt,
+      vec2(oylWinL + oylFrameA, oylWinB + oylFrameU),
+      vec2(oylWinR - oylFrameA, oylWinT - oylFrameU),
+      oylW
+    );
+    float oylBars = max(
+      1.0 - smoothstep(oylBarA - oylW.x, oylBarA + oylW.x, abs(oylAt.x - 0.5)),
+      1.0 - smoothstep(oylBarU - oylW.y, oylBarU + oylW.y, abs(oylAt.y - oylTransom))
+    );
+    float oylPaneShare = oylInner * (1.0 - oylBars) * oylShown;
+    float oylFrame = max(oylOuter - oylPaneShare, 0.0);
+    float oylSill = oylRect(
+      oylAt,
+      vec2(oylWinL - oylSillA, oylWinB - oylSillU),
+      vec2(oylWinR + oylSillA, oylWinB),
+      oylW
+    ) * oylShown;
+    float oylLit = step(0.8, oylWindowHash(oylCell + floor(vOylTint.xy * 1000.0)));
+    vec3 oylRoom = mix(vec3(0.012, 0.014, 0.018), vec3(0.09, 0.07, 0.045), oylLit);
+    vec3 oylPane = oylRoom + vec3(0.03, 0.04, 0.05) * smoothstep(oylWinB, oylWinT, oylAt.y);
+    vec3 oylWall = diffuseColor.rgb;
+    vec3 oylDrawn = mix(mix(mix(oylWall, vOylTrim, oylFrame), vOylTrim * 0.85, oylSill), oylPane, oylPaneShare);
+    float oylArea = (oylWinR - oylWinL) * (oylWinT - oylWinB) * oylShown;
+    vec3 oylMean = mix(oylWall, mix(vOylTrim, oylPane, 0.75), oylArea);
+    float oylFade = clamp(max(oylW.x, oylW.y) * 8.0 - 0.5, 0.0, 1.0);
+    diffuseColor.rgb = mix(oylDrawn, oylMean, oylFade);
+    oylGlass = oylPaneShare * (1.0 - oylFade);
+    oylFlat = max(oylOuter, oylSill) * (1.0 - oylFade);
+  } else if (vOylFacade.z < -0.5 && vOylFacade.z > -1.5) {
+    vec2 oylAt = vOylFacade.xy;
+    vec2 oylW = max(fwidth(oylAt) * 0.5, vec2(0.00001));
+    float oylLeaf = oylRect(oylAt, vec2(oylDoorA, -1.0), vec2(1.0 - oylDoorA, 1.0 - oylDoorU), oylW);
+    float oylFanlight = oylRect(
+      oylAt,
+      vec2(oylDoorA + 0.04, oylFan),
+      vec2(1.0 - oylDoorA - 0.04, 1.0 - oylDoorU - 0.02),
+      oylW
+    );
+    float oylPanels = oylRect(
+      vec2(abs(oylAt.x - 0.5), oylAt.y),
+      vec2(0.05, 0.08),
+      vec2(0.27, oylFan - 0.06),
+      oylW
+    );
+    vec3 oylDoor = mix(vOylTrim, vColor.rgb * (1.0 - 0.3 * oylPanels), oylLeaf);
+    diffuseColor.rgb = mix(oylDoor, vec3(0.02, 0.025, 0.03), oylFanlight);
+    oylFlat = 1.0;
+    oylGlass = oylFanlight;
+  } else if (vOylFacade.z < -1.5) {
+    diffuseColor.rgb = vColor.rgb;
+    oylFlat = 1.0;
+  }
+`;
+
+/**
+ * Teaches a mapped building's material #1581's facade: the windows of every
+ * storey, the front door in its surround, and the painted trim — from two
+ * vertex attributes, `oylFacade` (`footprint-buildings.ts` §`FACADE_FLOATS`)
+ * and `oylTrim` (the trim's paint), so they cost no triangle, no texture and
+ * no draw call. Spliced after #1549's vertex tint ({@link withVertexTint}),
+ * whose varying it reads. Throws, as the tint does, if three's program no
+ * longer holds an include it is spliced at. Idempotent.
+ */
+function withFacade<M extends Material>(material: M): M {
+  if (FACADE_TAUGHT.has(material)) return material;
+  FACADE_TAUGHT.add(material);
+  const earlier = material.onBeforeCompile.bind(material);
+  const earlierKey = material.customProgramCacheKey();
+  const spliced = "#1581's facade";
+  material.onBeforeCompile = (shader, renderer) => {
+    earlier(shader, renderer);
+    shader.uniforms.oylFacadeOn = FACADE_SWITCH.oylFacadeOn;
+    shader.vertexShader = replacedOrThrown(
+      replacedOrThrown(
+        shader.vertexShader,
+        '#include <common>',
+        '#include <common>\nattribute vec4 oylFacade;\nattribute vec3 oylTrim;\nvarying vec4 vOylFacade;\nvarying vec3 vOylTrim;',
+        'vertex',
+        spliced,
+      ),
+      '#include <begin_vertex>',
+      '#include <begin_vertex>\nvOylFacade = oylFacade;\nvOylTrim = oylTrim;',
+      'vertex',
+      spliced,
+    );
+    let fragment = replacedOrThrown(
+      shader.fragmentShader,
+      '#include <common>',
+      `#include <common>\n${FACADE_COMMON_GLSL}`,
+      'fragment',
+      spliced,
+    );
+    fragment = replacedOrThrown(
+      fragment,
+      '#include <color_fragment>',
+      `#include <color_fragment>\n${FACADE_FRAGMENT_GLSL}`,
+      'fragment',
+      spliced,
+    );
+    fragment = replacedOrThrown(
+      fragment,
+      '#include <roughnessmap_fragment>',
+      '#include <roughnessmap_fragment>\nroughnessFactor = mix(mix(roughnessFactor, 0.6, oylFlat), 0.08, oylGlass);',
+      'fragment',
+      spliced,
+    );
+    fragment = replacedOrThrown(
+      fragment,
+      '#include <metalnessmap_fragment>',
+      '#include <metalnessmap_fragment>\nmetalnessFactor = mix(metalnessFactor, 0.35, oylGlass);',
+      'fragment',
+      spliced,
+    );
+    shader.fragmentShader = replacedOrThrown(
+      fragment,
+      '#include <normal_fragment_maps>',
+      '#include <normal_fragment_maps>\nnormal = normalize(mix(normal, nonPerturbedNormal, oylFlat));',
+      'fragment',
+      spliced,
+    );
+  };
+  material.customProgramCacheKey = () => `${earlierKey}|oyl-facade`;
+  return material;
+}
+
 /**
  * One mapped building surface's material — #1549: the structure surface's
  * own photograph and finish ({@link STRUCTURE_SURFACE_FINISH}), constructed
  * here (ADR 0026 D-11) from the world's compressed textures (#618), with its
- * texture bias (#619), the realistic air (#622), and its tint from the vertex
- * ({@link withVertexTint}).
+ * texture bias (#619), the realistic air (#622), its tint from the vertex
+ * ({@link withVertexTint}) and, since #1581, its facade ({@link withFacade}).
  */
 function mappedBuildingMaterial(
   surface: StructureSurface,
@@ -12035,7 +12392,7 @@ function mappedBuildingMaterial(
     }),
   );
   return withAtmosphere(
-    withVertexTint(maps === undefined ? material : withTextureLodBias(material)),
+    withFacade(withVertexTint(maps === undefined ? material : withTextureLodBias(material))),
   );
 }
 
@@ -12118,6 +12475,9 @@ export class MappedBuildingBelt {
   readonly #uv: BufferAttribute;
   readonly #colour: BufferAttribute;
   readonly #tint: BufferAttribute;
+  /** #1581: each vertex's facade, and its building's trim paint. @see withFacade */
+  readonly #facade: BufferAttribute;
+  readonly #trim: BufferAttribute;
   readonly #selection = new MappedSelection();
   /** Where each surface's range starts, and where its next triangle goes, in vertices. */
   readonly #starts = new Int32Array(MAPPED_BUILDING_DRAW_CALLS);
@@ -12161,12 +12521,16 @@ export class MappedBuildingBelt {
     this.#uv = attribute(2);
     this.#colour = attribute(3);
     this.#tint = attribute(1);
+    this.#facade = attribute(FACADE_FLOATS);
+    this.#trim = attribute(3);
     const geometry = new BufferGeometry();
     geometry.setAttribute('position', this.#position);
     geometry.setAttribute('normal', this.#normal);
     geometry.setAttribute('uv', this.#uv);
     geometry.setAttribute('color', this.#colour);
     geometry.setAttribute('oylTint', this.#tint);
+    geometry.setAttribute('oylFacade', this.#facade);
+    geometry.setAttribute('oylTrim', this.#trim);
     geometry.setDrawRange(0, 0);
     this.mesh = new Mesh(geometry, this.#slots);
     this.mesh.frustumCulled = false;
@@ -12284,7 +12648,15 @@ export class MappedBuildingBelt {
       this.#groupEachBuilding();
     }
     geometry.setDrawRange(0, end);
-    for (const attribute of [this.#position, this.#normal, this.#uv, this.#colour, this.#tint]) {
+    for (const attribute of [
+      this.#position,
+      this.#normal,
+      this.#uv,
+      this.#colour,
+      this.#tint,
+      this.#facade,
+      this.#trim,
+    ]) {
       attribute.clearUpdateRanges();
       if (end > 0) {
         attribute.addUpdateRange(0, end * attribute.itemSize);
@@ -12333,6 +12705,8 @@ export class MappedBuildingBelt {
     // roof's storeys both ways: back to metres, then the photograph's repeats.
     const acrossMetres = role === 'roof' ? STOREY_METRES : BAY_METRES;
     const shade = MAPPED_ROLE_SHADE[role];
+    const [red, green, blue] = mappedRolePaint(plan, role);
+    const [trimRed, trimGreen, trimBlue] = mappedRolePaint(plan, 'trim');
     // A plan with a plinth stands in the ground at its foot; a raised part does not.
     const grounded = plan.triangles.plinth.length > 0;
     const ground = plan.base + FOUNDATION_METRES;
@@ -12341,6 +12715,8 @@ export class MappedBuildingBelt {
     const uv = this.#uv.array as Float32Array;
     const colour = this.#colour.array as Float32Array;
     const tint = this.#tint.array as Float32Array;
+    const facade = this.#facade.array as Float32Array;
+    const trim = this.#trim.array as Float32Array;
     for (let vertex = 0; vertex < vertices; vertex += 1) {
       const from = vertex * FOOTPRINT_VERTEX_FLOATS;
       const to = at + vertex;
@@ -12354,10 +12730,16 @@ export class MappedBuildingBelt {
       uv[to * 2] = ((floats[from + 6] as number) * acrossMetres) / repeat.across;
       uv[to * 2 + 1] = ((floats[from + 7] as number) * STOREY_METRES) / repeat.up;
       const light = shade * (grounded ? groundingShade(y - ground) : 1);
-      colour[to * 3] = light;
-      colour[to * 3 + 1] = light;
-      colour[to * 3 + 2] = light;
+      colour[to * 3] = red * light;
+      colour[to * 3 + 1] = green * light;
+      colour[to * 3 + 2] = blue * light;
       tint[to] = plan.tint;
+      for (let at4 = 0; at4 < FACADE_FLOATS; at4 += 1) {
+        facade[to * FACADE_FLOATS + at4] = floats[from + 8 + at4] as number;
+      }
+      trim[to * 3] = trimRed;
+      trim[to * 3 + 1] = trimGreen;
+      trim[to * 3 + 2] = trimBlue;
     }
     return at + vertices;
   }

@@ -797,8 +797,11 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
     src/game/footprint-buildings.ts
                         each mapped footprint planned as a building (#1540):
                         P-9's placement rules, in order and counted as
-                        `FootprintVerdicts`; storeys, a gable-or-flat roof and
-                        surfaces by `land-class.ts` §`kindAt`; ≤ 640 triangles
+                        `FootprintVerdicts`; storeys, a roof and surfaces by
+                        `land-class.ts` §`kindAt`; since #1581 a seeded gable
+                        or hip at a seeded pitch, overhanging, a chimney, a
+                        door canopy and four seeded paints no neighbour within
+                        30 m shares (`paintTown`); ≤ 640 triangles
                         by role, built ONCE at ride start by `GameView`, and
                         drawn by #1549 (`mapped-buildings.ts`). Since #1550 the
                         ride also reads their footprints (`mappedTown`, once a
@@ -815,6 +818,22 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         §`MappedBuildingBelt`), refilled only when the rider's
                         100 m chunk or the rung changes, realistic rungs only;
                         the tint is a VERTEX attribute, and there is no ground blob (#620)
+    src/game/facade.ts  a mapped building's windows and front door, laid out in
+                        a bay and a storey (#1581) — drawn by the shader
+                        (`three-renderer.ts` §`withFacade`) from each wall
+                        vertex's `FACADE_FLOATS`, so no triangle, texture or
+                        draw call; `facadePartAt` is the TypeScript twin the
+                        tests hold the layout with. `setMappedFacadeShown` is
+                        the browser gate's control
+    src/game/building-paint.ts
+                        what a realistic building is painted (#1581): each wall
+                        and roof surface's multipliers, the trim's and the
+                        door's paints. A mapped plan carries four entries
+                        (vertex colour, `oylTrim`); a #1550 lot carries a wall
+                        and a roof (`lotPaint`, unlike its five neighbours) in
+                        the instance colour's first two channels, read by the
+                        structure materials (`withLotPaint`). A village house
+                        carries none and is drawn as it was
     src/game/streets.ts a village's kerbed pavements (#1535) — along each side's
                         BUILT plots (`settlements.ts` §`siteAt`, §`villagePlots`,
                         the houses' own decision), on the road's edge, never on

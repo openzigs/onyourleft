@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest';
 import { metres, type RouteProfile } from '@onyourleft/domain';
 import type { BuildingFeature, LandUseFeature } from '@onyourleft/map-features';
 
+import { lotPaintChannel } from './building-paint';
 import { footprintPlans, mappedTown } from './footprint-buildings';
 import { buildingBeside, landBeside, rectangleBeside } from './footprint-fixtures-testing';
 import { landClassMask, NO_LAND_CLASS, type LandClassMask } from './land-class';
@@ -541,5 +542,46 @@ describe('#1550 uncovered land is today’s', () => {
 
   it('control: the same call with the town’s own mask adds lots', () => {
     expect(lotsOf(residential, 0, straight.totalDistance).length).toBeGreaterThan(0);
+  });
+});
+
+describe('#1581 a lot is painted unlike the lots beside it', () => {
+  it('paints every lot, and no two a plot apart or across the road alike, through the real scene', () => {
+    const start = atStartLine(straight);
+    const frame = sceneFrame({
+      profile: straight,
+      origin: residential.origin,
+      state: { ...start, ride: { ...start.ride, distance: metres(700) } },
+      worldCorridor: residential.corridor,
+      landClass: residential.land,
+    });
+    const lots = frame.scatter.filter((item) => BUILT.has(item.kind));
+    expect(lots.length).toBeGreaterThan(10);
+    const { span } = lotSpacing(straight);
+    let neighbours = 0;
+    for (const lot of lots) {
+      expect(lotPaintChannel(lot.paint, 'wall'), 'a lot wears a wall paint').toBeGreaterThan(0);
+      const here = besideAt(straight, residential.origin, 700, lot);
+      for (const other of lots) {
+        if (other === lot) continue;
+        const there = besideAt(straight, residential.origin, 700, other);
+        const plots = Math.round(Math.abs(there.along - here.along) / span);
+        const across = Math.sign(there.across) !== Math.sign(here.across);
+        // The next lot along on its side, and the three across the road from it.
+        if ((plots === 1 && !across) || (plots <= 1 && across)) {
+          expect(lotPaintChannel(other.paint, 'wall')).not.toBe(lotPaintChannel(lot.paint, 'wall'));
+          expect(lotPaintChannel(other.paint, 'roof')).not.toBe(lotPaintChannel(lot.paint, 'roof'));
+          neighbours += 1;
+        }
+      }
+    }
+    expect(neighbours).toBeGreaterThan(lots.length);
+  });
+
+  it('control: a village’s houses, on land no map covered, carry no paint', () => {
+    const today = structuresAt(straight, residential.origin, residential.seed, 0, 2_000, ALL);
+    const houses = today.filter((item) => BUILT.has(item.kind));
+    expect(houses.length).toBeGreaterThan(0);
+    for (const house of houses) expect(house.paint).toBeUndefined();
   });
 });

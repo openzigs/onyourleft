@@ -56,6 +56,10 @@ import {
   type WorldQualityState,
 } from '../src/game/quality';
 import { realisticWorldNotice, type RealisticWorldOutcome } from '../src/game/realistic-assets';
+import { footprintPlans } from '../src/game/footprint-buildings';
+import { mixedTownFixture } from '../src/game/footprint-fixtures-testing';
+import { landClassMask } from '../src/game/land-class';
+import { mappedBuildingsOf } from '../src/game/mapped-buildings';
 import { corridorOrigin } from '../src/game/terrain';
 import {
   drawnWorldOf,
@@ -93,6 +97,9 @@ const WARM_UP_SECONDS = 3;
 const START_METRES = 2_550;
 const LOOP_FROM_METRES = 300;
 const LOOP_METRES = 3_500;
+/** #1581's `town=mixed`: from 100 m short of the town to its far end, and round again. */
+const TOWN_FROM_METRES = 900;
+const TOWN_METRES = 1_200;
 
 /** One window's numbers. */
 export interface RealisticSample {
@@ -301,9 +308,21 @@ async function run(): Promise<void> {
   const notice = outcome === undefined ? undefined : realisticWorldNotice(outcome);
   publish({ outcome, notice });
 
-  // #702: turned towards the sun or away from it only when the URL asks.
-  const profile = realisticRoute(config.facing);
-  const origin = corridorOrigin(profile);
+  // #702: turned towards the sun or away from it only when the URL asks. #1581:
+  // or the mixed town's straight road, with its corridor, land and buildings
+  // built once, as `GameView` builds a ride's at the press.
+  const mixed = config.town === 'mixed' ? mixedTownFixture() : undefined;
+  const profile = mixed?.profile ?? realisticRoute(config.facing);
+  const origin = mixed?.origin ?? corridorOrigin(profile);
+  const town = ((): Parameters<typeof rideFrame>[0]['town'] => {
+    if (mixed === undefined) return undefined;
+    const land = landClassMask(mixed.corridor);
+    const { plans } = footprintPlans(mixed.corridor, land, profile, origin);
+    return { corridor: mixed.corridor, land, buildings: mappedBuildingsOf(plans) };
+  })();
+  const loopFrom = town === undefined ? LOOP_FROM_METRES : TOWN_FROM_METRES;
+  const loopLength = town === undefined ? LOOP_METRES : TOWN_METRES;
+  const startAt = town === undefined ? START_METRES : TOWN_FROM_METRES;
   document.body.style.cssText = 'margin:0;background:#000;overflow:hidden';
   const canvas = document.createElement('canvas');
   canvas.style.cssText = 'display:block;width:100vw;height:100vh';
@@ -414,8 +433,7 @@ async function run(): Promise<void> {
     }
     const distance =
       config.at ??
-      LOOP_FROM_METRES +
-        ((START_METRES - LOOP_FROM_METRES + elapsed * RIDE_METRES_PER_SECOND) % LOOP_METRES);
+      loopFrom + ((startAt - loopFrom + elapsed * RIDE_METRES_PER_SECOND) % loopLength);
     // The rung the ladder is on decides how much scenery the frame carries, as
     // it does in `GameView` — #478. @see rideFrame
     view.render(
@@ -427,6 +445,7 @@ async function run(): Promise<void> {
         rung: worldRung(state),
         // #1534's pair: the villages' ground left wooded.
         settlementsWooded: config.leversOff.includes('settlement-clearing'),
+        ...(town === undefined ? {} : { town }),
       }),
     );
     lastFrameCalls = counter.takeCalls();
