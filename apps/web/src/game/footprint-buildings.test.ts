@@ -894,9 +894,7 @@ describe('a door canopy keeps the road’s clearance — #1581', () => {
     const near = ROAD_CLEARANCE_METRES + gap;
     const buildings: BuildingFeature[] = [];
     for (let along = 200; along < 1_400; along += 20) {
-      buildings.push(
-        buildingBeside(profile, origin, [rectangleBeside(along, near + 4, 10, 8)], 6),
-      );
+      buildings.push(buildingBeside(profile, origin, [rectangleBeside(along, near + 4, 10, 8)], 6));
     }
     const corridor: WorldCorridor = {
       routeId: 'porch-clearance',
