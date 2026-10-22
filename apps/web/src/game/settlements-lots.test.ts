@@ -95,7 +95,7 @@ function townOf(
     seed: scatterSeed(profile),
     corridor,
     land,
-    town: mappedTown(corridor, land, profile, origin),
+    town: mappedTown(corridor, footprintPlans(corridor, land, profile, origin).plans),
   };
 }
 
@@ -329,6 +329,7 @@ describe('#1550 none where a footprint stands', () => {
       state: { ...start, ride: { ...start.ride, distance: metres(650) } },
       worldCorridor: block.corridor,
       landClass: block.land,
+      mappedTown: block.town,
     });
     const houses = frame.scatter.filter((item) => BUILT.has(item.kind));
     expect(houses.length).toBeGreaterThan(5);
@@ -340,6 +341,7 @@ describe('#1550 none where a footprint stands', () => {
       state: { ...start, ride: { ...start.ride, distance: metres(650) } },
       worldCorridor: block.corridor,
       landClass: block.land,
+      mappedTown: block.town,
       lotsOff: true,
     });
     expect(off.scatter.filter((item) => BUILT.has(item.kind))).toStrictEqual([]);
