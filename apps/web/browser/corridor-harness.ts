@@ -12,10 +12,10 @@
  *
  * Publishes `window.__oylCorridor`: the state the read came to, how many tiles
  * were covered, the feature counts, and two digests of what the scene builds
- * at the start line — with the corridor (if any) and with none. Nothing reads
- * the corridor into the scene yet (#1540), so the two are equal; the offline
- * control asserts that they are, which is the browser half of "offline, the
- * world is today's".
+ * at the start line — with the corridor (if any) and with none. Since #1551
+ * a village's pavement sides read the corridor's footways, so the two may
+ * differ when it is ready; the offline control asserts that they are equal,
+ * which is the browser half of "offline, the world is today's".
  *
  * ⚠️ What it does NOT prove: anything about the hosted archive's latency
  * (ADR 0010 D-1's 500 ms+; #1553 measures that on the tablet), or that the

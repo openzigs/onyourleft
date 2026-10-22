@@ -62,6 +62,7 @@ import {
   structuresAt,
   type SettlementFootprint,
 } from './settlements';
+import { NO_PAVEMENT_DATA, pavementSides } from './footways';
 import { streetsAt } from './streets';
 import { bridgeParts, waterSurface, waterways } from './waterways';
 import { worldStyle } from './world';
@@ -110,9 +111,10 @@ export interface SceneInput {
    * off, no archive, offline with nothing kept, or a read still running at
    * the press.
    *
-   * ⚠️ **Nothing in this file reads it yet**, and that is the issue's scope:
-   * #1539 delivers the corridor to the frame, and #1540 places buildings from
-   * it (ADR 0054 D-5). `world-data/corridor-wiring.test.tsx` reads it back
+   * Since #1551 the village streets read its footways: a pavement stands on
+   * the side a sidewalk is mapped on, where the corridor was read
+   * (`footways.ts` §`pavementSides`). #1540 places buildings from it (ADR
+   * 0054 D-5). `world-data/corridor-wiring.test.tsx` reads it back
    * off the input `sceneFrame` was handed, which is the guard an optional
    * field nobody supplies needs (`check-wiring.mjs` §Limits).
    */
@@ -236,6 +238,10 @@ export function sceneFrame(input: SceneInput): SceneFrame {
       seed,
       (corridor.centre[0] as CorridorPoint).along,
       (corridor.centre[corridor.centre.length - 1] as CorridorPoint).along,
+      // #1551: built once a corridor, so this is a lookup on every later frame.
+      input.worldCorridor === undefined
+        ? NO_PAVEMENT_DATA
+        : pavementSides(input.worldCorridor, input.profile, input.origin),
     ),
     // #458. Built from the corridor just built, so the ground's innermost
     // column is the road's outermost one — `landform.ts` says why that is the
