@@ -12,10 +12,16 @@
  *
  * Publishes `window.__oylCorridor`: the state the read came to, how many tiles
  * were covered, the feature counts, and two digests of what the scene builds
- * at the start line — with the corridor (if any) and with none. Nothing reads
- * the corridor into the scene yet (#1540), so the two are equal; the offline
- * control asserts that they are, which is the browser half of "offline, the
- * world is today's".
+ * at the start line — with the corridor (if any) and with none. Since #1551
+ * a village's pavement sides read the corridor's footways, so the two may
+ * differ when it is ready; the offline control asserts that they are equal,
+ * which is the browser half of "offline, the world is today's".
+ *
+ * Since #1546 it also publishes {@link CorridorHarness.classed}: every
+ * structure and scatter item the scene stands along the route with the
+ * corridor's land-class mask, each with the class of the ground under it.
+ * `?levers=-landclass` — a harness-only lever the product cannot reach —
+ * hands the scene no mask, which is the browser case's control.
  *
  * ⚠️ What it does NOT prove: anything about the hosted archive's latency
  * (ADR 0010 D-1's 500 ms+; #1553 measures that on the tablet), or that the
@@ -28,6 +34,7 @@ import { unixSeconds } from '@onyourleft/domain';
 import { corridorOrigin } from '../src/game/terrain';
 import { sceneFrame } from '../src/game/scene';
 import { atStartLine } from '../src/game/simulation';
+import { landClassMask } from '../src/game/land-class';
 import type { CorridorState, WorldCorridor } from '../src/game/world-data/corridor';
 import { ensureLocalAthlete, LOCAL_ATHLETE } from '../src/local-athlete';
 import { readMapTilesChoice } from '../src/map/tiles-preference';
@@ -36,13 +43,20 @@ import { corridorArchive } from '../src/world-data/corridor-source';
 import { routeId } from '@onyourleft/store';
 
 import {
+  classedItems,
   CORRIDOR_ARCHIVE_FILE,
   corridorFixtureRoute,
   LONG_CORRIDOR_ARCHIVE_FILE,
+  type ClassedItem,
 } from './corridor-fixture';
 
+const QUERY = new URLSearchParams(location.search);
+
 /** `?long`: the 600-tile corridor, for the performance budget. */
-const LONG = new URLSearchParams(location.search).has('long');
+const LONG = QUERY.has('long');
+
+/** `?levers=-landclass`: #1546's control — the scene is handed no land-class mask. */
+const NO_LAND_CLASS_LEVER = (QUERY.get('levers') ?? '').split(',').includes('-landclass');
 
 export interface CorridorHarness {
   readonly state: CorridorState['kind'];
@@ -54,6 +68,11 @@ export interface CorridorHarness {
   readonly sceneDigest: string;
   readonly proceduralDigest: string;
   readonly milliseconds: number;
+  /** #1546: how long building the land-class mask took, and what it holds. */
+  readonly maskMilliseconds: number;
+  readonly maskBytes: number;
+  /** #1546: every item along the route and the class under it; empty for `?long` or no corridor. */
+  readonly classed: readonly ClassedItem[];
   readonly errors: readonly string[];
 }
 
@@ -119,6 +138,14 @@ async function run(): Promise<CorridorHarness> {
   const ready = state.kind === 'ready' ? state.corridor : undefined;
   const kept = await store.getWorldCorridor(LOCAL_ATHLETE, id);
   store.close();
+  // #1546: the mask, built once from the ready corridor, as `GameView` builds it at the press.
+  const maskStarted = performance.now();
+  const mask = ready === undefined ? undefined : landClassMask(ready);
+  const maskMilliseconds = performance.now() - maskStarted;
+  const classed =
+    ready === undefined || mask === undefined || LONG
+      ? []
+      : classedItems(ready, NO_LAND_CLASS_LEVER ? undefined : mask, mask);
   return {
     state: state.kind,
     why: 'why' in state ? state.why : undefined,
@@ -129,6 +156,9 @@ async function run(): Promise<CorridorHarness> {
     sceneDigest: digestOf(ready),
     proceduralDigest: digestOf(undefined),
     milliseconds,
+    maskMilliseconds,
+    maskBytes: mask?.bytes ?? 0,
+    classed,
     errors,
   };
 }
@@ -148,6 +178,9 @@ void run().then(
       sceneDigest: '',
       proceduralDigest: '',
       milliseconds: 0,
+      maskMilliseconds: 0,
+      maskBytes: 0,
+      classed: [],
       errors: [error instanceof Error ? error.message : String(error)],
     };
   },

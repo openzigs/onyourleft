@@ -3486,6 +3486,30 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     expectAPavement(pavement, testInfo, 'realistic');
   });
 
+  test('#1551 pavement on the mapped side: the right reads pavement and the left verge, and #1535’s own sides differ', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { mappedPavement } = await realistic(harnessRun);
+    const { sideAtProbe, rightMapped, rightOff, leftMapped, leftProcedural, leftOff } =
+      mappedPavement;
+    const rgb = (values: readonly number[]): string => values.map((c) => c.toFixed(0)).join('/');
+    const measured = `side ${sideAtProbe}; right ${rgb(rightMapped)} drawn, ${rgb(rightOff)} without pavements; left ${rgb(leftMapped)} mapped, ${rgb(leftProcedural)} with #1535's own sides, ${rgb(leftOff)} without pavements`;
+    testInfo.annotations.push({ type: 'pavement on the mapped side', description: measured });
+    console.log(`pavement on the mapped side — ${measured}`);
+    const apart = (a: readonly number[], b: readonly number[]): number =>
+      Math.max(...[0, 1, 2].map((c) => Math.abs((a[c] ?? 0) - (b[c] ?? 0))));
+    expect(sideAtProbe).toBe('right');
+    for (const values of [rightMapped, rightOff, leftMapped, leftProcedural, leftOff]) {
+      expect(values).toHaveLength(3);
+    }
+    // The mapped side reads pavement: switched off, the same square reads something else.
+    expect(apart(rightMapped, rightOff)).toBeGreaterThan(8);
+    // The other side reads the verge: the same as with no pavement drawn at all.
+    expect(apart(leftMapped, leftOff)).toBeLessThan(3);
+    // The control: #1535's own sides put a pavement on the left here.
+    expect(apart(leftProcedural, leftOff)).toBeGreaterThan(8);
+  });
+
   test('stands its street furniture on it, the bench in Poly Haven’s planks, one call a kind — #1536', async ({
     harnessRun,
   }, testInfo) => {

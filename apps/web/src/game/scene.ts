@@ -36,6 +36,7 @@ import {
   simulatedCrankAngle,
   type RiderRoll,
 } from './bicycle';
+import { NO_LAND_CLASS, type LandClassMask } from './land-class';
 import { horizonRelief, terrainCorridor } from './landform';
 import { CAMERA_BEHIND_METRES, CAMERA_TARGET_AHEAD_METRES } from './camera';
 import type { CameraPose, RiderMarker, SceneFrame, WaterFrame } from './port';
@@ -62,6 +63,7 @@ import {
   structuresAt,
   type SettlementFootprint,
 } from './settlements';
+import { NO_PAVEMENT_DATA, pavementSides } from './footways';
 import { streetsAt } from './streets';
 import { bridgeParts, waterSurface, waterways } from './waterways';
 import { worldStyle } from './world';
@@ -110,13 +112,27 @@ export interface SceneInput {
    * off, no archive, offline with nothing kept, or a read still running at
    * the press.
    *
-   * ⚠️ **Nothing in this file reads it yet**, and that is the issue's scope:
-   * #1539 delivers the corridor to the frame, and #1540 places buildings from
-   * it (ADR 0054 D-5). `world-data/corridor-wiring.test.tsx` reads it back
-   * off the input `sceneFrame` was handed, which is the guard an optional
-   * field nobody supplies needs (`check-wiring.mjs` §Limits).
+   * Read here twice since #1546 and #1551. #1546 reads it through
+   * {@link landClass}, built from it once at the press; since #1551 the
+   * village streets read its footways: a pavement stands on the side a
+   * sidewalk is mapped on, where the corridor was read (`footways.ts`
+   * §`pavementSides`). #1540 places buildings from it (ADR 0054 D-5).
+   * `world-data/corridor-wiring.test.tsx` reads it back off the input
+   * `sceneFrame` was handed, which is the guard an optional field nobody
+   * supplies needs (`check-wiring.mjs` §Limits).
    */
   readonly worldCorridor?: WorldCorridor | undefined;
+  /**
+   * What the ground is where {@link worldCorridor} read map data — #1546,
+   * `land-class.ts`, built from it ONCE, at the press, by `GameView`. Every
+   * placement rule reads it: no procedural site on mapped land, and no tree,
+   * shrub, rock or field boundary on mapped built-up land or water.
+   *
+   * Absent is {@link NO_LAND_CLASS}, today's world — every ride with no
+   * corridor, and the browser gate's `-landclass` control.
+   * `world-data/corridor-wiring.test.tsx` reads it back off the input.
+   */
+  readonly landClass?: LandClassMask | undefined;
   /**
    * Other real riders in a room, where to draw them — #783: the interest set's
    * riders (`net/interest.ts`), each at the distance `net/snapshots.ts`
@@ -236,6 +252,11 @@ export function sceneFrame(input: SceneInput): SceneFrame {
       seed,
       (corridor.centre[0] as CorridorPoint).along,
       (corridor.centre[corridor.centre.length - 1] as CorridorPoint).along,
+      // #1551: built once a corridor, so this is a lookup on every later frame.
+      input.worldCorridor === undefined
+        ? NO_PAVEMENT_DATA
+        : pavementSides(input.worldCorridor, input.profile, input.origin),
+      input.landClass ?? NO_LAND_CLASS,
     ),
     // #458. Built from the corridor just built, so the ground's innermost
     // column is the road's outermost one — `landform.ts` says why that is the
@@ -289,10 +310,17 @@ function scenery(
 ): { readonly scatter: readonly ScatterItem[]; readonly billboards: readonly Billboard[] } {
   const first = corridor.centre[0] as CorridorPoint;
   const last = corridor.centre[corridor.centre.length - 1] as CorridorPoint;
-  const natural = scatterAt(input.profile, input.origin, seed, first.along, last.along, {
-    maxItems: input.scatterItems ?? SCATTER_MAX_ITEMS,
-    riderMetres: riderDistance,
-  });
+  // #1546: what the ground is where map data was read; nothing, where it was not.
+  const land = input.landClass ?? NO_LAND_CLASS;
+  const natural = scatterAt(
+    input.profile,
+    input.origin,
+    seed,
+    first.along,
+    last.along,
+    { maxItems: input.scatterItems ?? SCATTER_MAX_ITEMS, riderMetres: riderDistance },
+    land,
+  );
   // #966. The billboards come out of the structures' budget FIRST: a rung that
   // takes structures away takes them too, and none is ever extra.
   const structureBudget = Math.max(0, input.structureItems ?? STRUCTURE_MAX_ITEMS);
@@ -314,9 +342,10 @@ function scenery(
     last.along,
     { maxItems: structureBudget - billboards.length, riderMetres: riderDistance },
     footprints,
+    land,
   );
   const cleared =
-    input.settlementsWooded === true ? natural : clearOfSettlements(natural, footprints);
+    input.settlementsWooded === true ? natural : clearOfSettlements(natural, footprints, land);
   return {
     scatter: [...built, ...clearOfBillboards(clearOfBuildings(cleared, built), billboards)],
     billboards,

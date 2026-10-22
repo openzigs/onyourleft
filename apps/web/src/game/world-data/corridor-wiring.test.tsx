@@ -223,6 +223,13 @@ describe('the chosen route’s corridor reaches the scene — #1539', () => {
       expect(input.worldCorridor?.routeId).toBe(route.id);
       expect(input.worldCorridor?.buildings.length).toBeGreaterThan(0);
     }
+    // #1546: the land-class mask, built from that corridor ONCE, at the press —
+    // one object on every frame — and covering where the ride starts.
+    const masks = new Set(ride.map((input) => input.landClass));
+    expect(masks.size).toBe(1);
+    const [mask] = [...masks];
+    expect(mask?.bytes).toBeGreaterThan(0);
+    expect(mask?.covered(0, 0)).toBe(true);
   });
 
   it('hands no corridor to the scene with no port method — today’s game', async () => {
@@ -240,7 +247,11 @@ describe('the chosen route’s corridor reaches the scene — #1539', () => {
     await pressRide();
     await pump(10);
     expect(inputs.length).toBeGreaterThan(3);
-    for (const input of inputs) expect(input.worldCorridor).toBeUndefined();
+    for (const input of inputs) {
+      expect(input.worldCorridor).toBeUndefined();
+      // #1546: and no land-class mask, so the scene takes `NO_LAND_CLASS`.
+      expect(input.landClass).toBeUndefined();
+    }
   });
 });
 
@@ -288,6 +299,7 @@ describe('nothing changes during a ride — ADR 0054 D-2.4', () => {
       routeId: route.id,
       origin: { latitude: 51.5, longitude: -0.12, elevation: 0 },
       covered: () => true,
+      coveredBoxes: [],
       landUse: [],
       buildings: [
         {
@@ -315,7 +327,11 @@ describe('nothing changes during a ride — ADR 0054 D-2.4', () => {
     expect(finish).toBeDefined();
     expect(withLate.length).toBeGreaterThan(100);
     expect(structures(withLate)).toBe(structures(plain));
-    for (const input of inputs) expect(input.worldCorridor).toBeUndefined();
+    for (const input of inputs) {
+      expect(input.worldCorridor).toBeUndefined();
+      // #1546: and no land-class mask, so the scene takes `NO_LAND_CLASS`.
+      expect(input.landClass).toBeUndefined();
+    }
   });
 });
 

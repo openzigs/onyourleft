@@ -80,6 +80,7 @@ import {
   type RouteProfile,
 } from '@onyourleft/domain';
 
+import { builtUpOrWater, NO_LAND_CLASS, type LandClassMask } from './land-class';
 import { terrainHeightAt } from './landform';
 import { distanceToDrawnRoad } from './road-grid';
 import { mixInto, slotHash, uniformFrom } from './seeded';
@@ -821,6 +822,10 @@ export function scatterSeed(profile: RouteProfile): number {
  * `fromMetres` and `toMetres` are odometer readings — unwrapped, like
  * `CorridorPoint.along` — so on a loop the caller passes the same
  * ever-increasing numbers the simulation produces and the wrap is handled here.
+ *
+ * `land` is the ride's land-class mask (#1546): no tree, shrub or rock stands
+ * on mapped built-up land or water. {@link NO_LAND_CLASS}, the default, is
+ * today's world.
  */
 export function scatterAt(
   profile: RouteProfile,
@@ -829,6 +834,7 @@ export function scatterAt(
   fromMetres: number,
   toMetres: number,
   budget: ScatterBudget,
+  land: LandClassMask = NO_LAND_CLASS,
 ): readonly ScatterItem[] {
   // ⚠️ **There is deliberately no early return for a degenerate call**, and
   // three of them were written here and then removed because no mutation could
@@ -890,6 +896,7 @@ export function scatterAt(
       seed,
       { cell, wrapped, cellCount, span, fromMetres, toMetres },
       found,
+      land,
     );
   }
 
@@ -953,6 +960,7 @@ function fillCell(
   seed: number,
   cell: Cell,
   found: Placed[],
+  land: LandClassMask,
 ): void {
   // ⚠️ The **wrapped** cell, and this one is belt and braces rather than load
   // bearing: every profile reader below goes through `distanceOnRoute`, which
@@ -1042,9 +1050,17 @@ function fillCell(
         continue;
       }
 
+      const kind = pickKind(weights, uniform(base, STREAM_KIND));
+      // #1546: nothing grows on mapped built-up land or water. Dropped after
+      // every draw and before {@link thin}, as the water and the road above.
+      // A post marks a bend, which built-up land may have, so it stays.
+      if (kind !== 'post' && builtUpOrWater(land, x, z)) {
+        continue;
+      }
+
       found.push({
         item: {
-          kind: pickKind(weights, uniform(base, STREAM_KIND)),
+          kind,
           x,
           // ⚠️ **On the ground, not at the road's height — #458.** It was
           // `elevationAt(at)` until then, which was right while the ground was
