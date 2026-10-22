@@ -13,6 +13,8 @@
  *
  * Plans are built **once, at ride start**, never per frame: `GameView` makes
  * them at the press, and `mapped-buildings.ts` indexes them for #1549's belt.
+ * Since #1550 the ride also reads their footprints ({@link mappedTown}): a
+ * procedural lot keeps clear of every kept one.
  *
  * ## The placement rules (#1538's P-9), in order
  *
@@ -95,6 +97,7 @@ import {
   type DrawnRoadPoints,
 } from './road-grid';
 import { scatterSeed } from './scatter';
+import { footprintIndexOf, type MappedTown } from './settlements';
 import { slotHash, uniformFrom } from './seeded';
 import type { CorridorOrigin } from './terrain';
 import type { WorldCorridor } from './world-data/corridor';
@@ -106,8 +109,8 @@ export type FootprintVerdict =
 /**
  * Every verdict, in the rules' order.
  *
- * @test-facing `footprint-buildings.test.ts` walks it for the exact counts; the
- * ride reads only the kept plans
+ * @test-facing held by `footprint-buildings.test.ts`, which names each verdict
+ * the fixture comes to; the ride reads only the kept plans
  */
 export const FOOTPRINT_VERDICTS: readonly FootprintVerdict[] = [
   'kept',
@@ -146,11 +149,12 @@ export interface FootprintPlan {
   /** The footprint's centroid, in local metres: what #1549's index is keyed by. */
   readonly centroid: { readonly x: number; readonly z: number };
   /**
-   * The ring that was drawn — the simplified outer ring, `(x, z)` pairs in
-   * local metres — for #1549's clearing: no tree, shrub or rock stands inside
-   * it or within #1534's margin of it (`mapped-buildings.ts`).
+   * The outer ring as drawn — simplified by rule 6 — in local metres, `x, z`
+   * pairs. #1549's clearing reads it (no tree, shrub or rock stands inside it
+   * or within #1534's margin of it, `mapped-buildings.ts`), and #1550's
+   * procedural lots keep clear of it (`settlements.ts` §`footprintIndexOf`).
    */
-  readonly outline: Float32Array;
+  readonly footprint: Ring;
   /** Metres, local: the plinth's foot — or, for a part on a `min_height`, its base. */
   readonly base: number;
   readonly storeys: number;
@@ -883,6 +887,57 @@ export function footprintPlans(
   return { plans, verdicts: counts };
 }
 
+/** One corridor's town, kept with the mask and the profile it was built against. */
+const townsBuilt = new WeakMap<
+  WorldCorridor,
+  { readonly land: LandClassMask; readonly profile: RouteProfile; readonly town: MappedTown }
+>();
+
+/**
+ * What #1550's procedural lots read of a corridor (`settlements.ts`
+ * §`MappedTown`): every kept plan's footprint ({@link footprintPlans}), in a
+ * grid, and whether a place's land is mapped `commercial`. Built once a
+ * corridor, at its first frame, and the same object after.
+ *
+ * ⚠️ `commercialAt` reads `land-class.ts` §`kindAt`, which tests every
+ * land-use polygon's box: so each answer is kept, by the place to the
+ * decimetre, and a lot's place is a pure function of the route, so every
+ * later frame and lap is a lookup.
+ */
+export function mappedTown(
+  corridor: WorldCorridor,
+  land: LandClassMask,
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+): MappedTown {
+  const cached = townsBuilt.get(corridor);
+  if (cached?.land === land && cached.profile === profile) return cached.town;
+  const index = footprintIndexOf(
+    footprintPlans(corridor, land, profile, origin).plans.map((plan) => plan.footprint),
+  );
+  // Keyed by decimetre, x then z: two small integers, never a boxed number.
+  const commercial = new Map<number, Map<number, boolean>>();
+  const town: MappedTown = {
+    overlaps: (lot) => index.overlaps(lot),
+    commercialAt(x, z) {
+      const column = Math.round(x * 10);
+      const row = Math.round(z * 10);
+      let rows = commercial.get(column);
+      if (rows === undefined) {
+        rows = new Map();
+        commercial.set(column, rows);
+      }
+      const known = rows.get(row);
+      if (known !== undefined) return known;
+      const answer = kindAt(corridor, x, z) === 'commercial';
+      rows.set(row, answer);
+      return answer;
+    },
+  };
+  townsBuilt.set(corridor, { land, profile, town });
+  return town;
+}
+
 /** One footprint: its plan, or the verdict that dropped it. */
 function planFootprint(
   building: BuildingFeature,
@@ -1025,7 +1080,7 @@ function planFootprint(
   const triangleCount = FOOTPRINT_ROLES.reduce((sum, role) => sum + trianglesOf(writing[role]), 0);
   return {
     centroid,
-    outline: Float32Array.from(drawn),
+    footprint: Float32Array.from(drawn),
     base,
     storeys,
     roof,

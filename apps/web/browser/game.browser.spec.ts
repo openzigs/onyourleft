@@ -3626,6 +3626,26 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     expect(apart(town.woodNoLand, town.woodNoLandOff)).toBeGreaterThan(20);
   });
 
+  test('#1550 lots in an unmapped town: houses stand on mapped built-up land with no footprints, and none with -lots', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { lots } = await realistic(harnessRun);
+    const rgb = (values: readonly number[]): string => values.map((c) => c.toFixed(0)).join('/');
+    const measured = `${String(lots.houses)} houses on built-up land in frame, ${String(lots.housesOff)} with -lots; the nearest ${rgb(lots.onRgb)} drawn, ${rgb(lots.offRgb)} with -lots`;
+    testInfo.annotations.push({ type: 'lots in an unmapped town', description: measured });
+    console.log(`lots in an unmapped town — ${measured}`);
+    expect(lots.houses).toBeGreaterThan(0);
+    expect(lots.onRgb).toHaveLength(3);
+    expect(lots.offRgb).toHaveLength(3);
+    // The control: with -lots the harness lists none on that stretch…
+    expect(lots.housesOff).toBe(0);
+    // …and the square the house was drawn in reads something else: the ground.
+    const apart = Math.max(
+      ...[0, 1, 2].map((c) => Math.abs((lots.onRgb[c] ?? 0) - (lots.offRgb[c] ?? 0))),
+    );
+    expect(apart).toBeGreaterThan(8);
+  });
+
   test('stands its street furniture on it, the bench in Poly Haven’s planks, one call a kind — #1536', async ({
     harnessRun,
   }, testInfo) => {

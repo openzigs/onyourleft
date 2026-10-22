@@ -87,7 +87,7 @@ export function mappedBuildingsOf(plans: readonly FootprintPlan[]): MappedBuildi
   const radii = new Float32Array(plans.length);
   const cells = new Map<number, number[]>();
   plans.forEach((plan, index) => {
-    const { outline, centroid } = plan;
+    const { footprint: outline, centroid } = plan;
     let radius = 0;
     for (let at = 0; at + 1 < outline.length; at += 2) {
       radius = Math.max(
@@ -315,8 +315,8 @@ export function onMappedGround(buildings: MappedBuildings, x: number, z: number)
     const dx = x - plan.centroid.x;
     const dz = z - plan.centroid.z;
     if (dx * dx + dz * dz > reach * reach) continue;
-    if (insideRing(plan.outline, x, z)) return true;
-    if (squaredToRing(plan.outline, x, z) <= margin * margin) return true;
+    if (insideRing(plan.footprint, x, z)) return true;
+    if (squaredToRing(plan.footprint, x, z) <= margin * margin) return true;
   }
   return false;
 }

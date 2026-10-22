@@ -777,7 +777,12 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         reviewer who remembers six `SCATTER_KINDS` is reading
                         the old file: `StructureKind` and `SCENERY_KINDS` are in
                         `scatter.ts`, and the frame carries the structures FIRST
-                        on a budget of their own (`QualitySettings.structureItems`)
+                        on a budget of their own (`QualitySettings.structureItems`).
+                        Since #1550, `lotsAt`: houses (shops every fifth plot on
+                        commercial land) along the route's road where the land
+                        is mapped built-up and no mapped footprint stands —
+                        every corner on built-up land, never on wood, water or
+                        park, nothing where no tile was read
     src/game/land-class.ts
                         what the ground is where map data was read (#1546) — a
                         sparse 5 m mask built ONCE at the press from the ride's
@@ -795,7 +800,9 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `FootprintVerdicts`; storeys, a gable-or-flat roof and
                         surfaces by `land-class.ts` §`kindAt`; ≤ 640 triangles
                         by role, built ONCE at ride start by `GameView`, and
-                        drawn by #1549 (`mapped-buildings.ts`)
+                        drawn by #1549 (`mapped-buildings.ts`). Since #1550 the
+                        ride also reads their footprints (`mappedTown`, once a
+                        corridor): a procedural lot keeps clear of every kept one
     src/game/mapped-buildings.ts
                         which plans are drawn (#1549): indexed ONCE at the
                         press (`SceneInput.mappedBuildings`), the nearest in
@@ -806,7 +813,7 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         group a surface** (`three-renderer.ts`
                         §`MappedBuildingBelt`), refilled only when the rider's
                         100 m chunk or the rung changes, realistic rungs only;
-                        the tint is a VERTEX attribute, and there is no blob
+                        the tint is a VERTEX attribute, and there is no ground blob (#620)
     src/game/streets.ts a village's kerbed pavements (#1535) — along each side's
                         BUILT plots (`settlements.ts` §`siteAt`, §`villagePlots`,
                         the houses' own decision), on the road's edge, never on

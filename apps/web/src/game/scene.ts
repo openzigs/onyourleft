@@ -57,6 +57,7 @@ import {
   type RoadCorridor,
 } from './terrain';
 import {
+  NO_MAPPED_TOWN,
   STRUCTURE_MAX_ITEMS,
   clearOfBuildings,
   clearOfSettlements,
@@ -70,6 +71,7 @@ import {
   sideRoadsAt,
   type SideRoad,
 } from './cross-streets';
+import { mappedTown } from './footprint-buildings';
 import { NO_PAVEMENT_DATA, pavementSides } from './footways';
 import { BILLBOARD_FOOTPRINT } from './logo-board';
 import { streetsAt } from './streets';
@@ -233,6 +235,14 @@ export interface SceneInput {
    * {@link centreline}'s reason.
    */
   readonly settlementsWooded?: boolean | undefined;
+  /**
+   * Builds no procedural lot in a mapped town, as every frame did before
+   * #1550 — the browser gate's `-lots` control, and nothing else. Absent, or
+   * `false`, fills mapped built-up land that has no footprints with lots
+   * (`settlements.ts` §`lotsAt`). Optional the safe way round, for
+   * {@link centreline}'s reason.
+   */
+  readonly lotsOff?: boolean | undefined;
 }
 
 /** Another real rider, where to draw them — #783. @see SceneInput.remoteRiders */
@@ -402,6 +412,14 @@ function scenery(
     { maxItems: structureBudget - billboards.length, riderMetres: riderDistance },
     footprints,
     land,
+    // #1550: the corridor's kept footprints and commercial land, built once a
+    // corridor, which the procedural lots of a mapped town keep clear of.
+    // `null` is the `-lots` control: no lots at all.
+    input.lotsOff === true
+      ? null
+      : input.worldCorridor === undefined
+        ? NO_MAPPED_TOWN
+        : mappedTown(input.worldCorridor, land, input.profile, input.origin),
   );
   // #1565: no wall, hedge, fence, signpost or building on a side road, and no
   // tree, shrub or rock either.

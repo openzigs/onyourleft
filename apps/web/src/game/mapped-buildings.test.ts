@@ -214,7 +214,7 @@ describe('no tree, shrub or rock on a mapped building’s ground — #1549, #153
   });
   /** A point `out` metres beyond the outline's first edge's middle, away from the centroid. */
   const beyondEdge = (out: number): { readonly x: number; readonly z: number } => {
-    const [ax, az, bx, bz] = Array.from(plan.outline.subarray(0, 4));
+    const [ax, az, bx, bz] = Array.from(plan.footprint.subarray(0, 4));
     const mx = ((ax as number) + (bx as number)) / 2;
     const mz = ((az as number) + (bz as number)) / 2;
     const dx = mx - plan.centroid.x;
@@ -285,7 +285,7 @@ describe('the scene keeps the trees off a mapped footprint — #1549, through sc
       wooded.some(
         (item) =>
           item.kind.startsWith('tree') &&
-          insideOutline((plans[0] as FootprintPlan).outline, item.x, item.z),
+          insideOutline((plans[0] as FootprintPlan).footprint, item.x, item.z),
       ),
     ).toBe(true);
   });

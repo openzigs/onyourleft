@@ -247,7 +247,8 @@ export const REALISTIC_TEXTURE_PIXELS = {
  * file back off disk against it. Since #1549 the renderer reads its
  * `structure` figure too, to share the structure term between the procedural
  * structures and the mapped buildings (`three-renderer.ts`
- * §`RealisticDrawing.updateMapped`).
+ * §`RealisticDrawing.updateMapped`), and since #1550 `footprint-buildings.ts`
+ * §`FOOTPRINT_MAX_TRIANGLES` reads it, which a ride with a corridor plans to.
  */
 export const REALISTIC_TRIANGLES: Readonly<
   Record<RealisticVegetationKind | 'tree-middle' | 'rider' | 'structure', number>
