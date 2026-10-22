@@ -7,7 +7,7 @@
  * `ride.html?corridor=archive` reads the harness route's corridor through the
  * product's own port from the synthetic archive (`ride-corridor.ts`), rides
  * it, and the credit must be in the HUD's region as text, found by an
- * accessible locator, OUTSIDE every panel, in its corner of the road on its
+ * accessible locator, OUTSIDE every panel, in its place on the road on its
  * own opaque backing, and over nothing — no panel, no control, not the leaning
  * rider — at every overlay viewport, both with anchor positioning and
  * without. `?corridor=none` is the control: the realistic world asked for and
@@ -15,7 +15,8 @@
  *
  * ⚠️ **Where it is, since the owner's ruling on #1572** (ADR 0054 D-3.6, D-8
  * Q3): a small line in a corner of the game view, clear of the HUD —
- * `theme.css` §"THE MAP DATA'S CREDIT" says which corner and why. The first
+ * `theme.css` §"THE MAP DATA'S CREDIT" says which corner, and why a phone on
+ * its side has none to give and gets the bottom-centre under the rider. The first
  * version put it inside the actions panel; this file held it there.
  *
  * ⚠️ The issue names `game.html?realistic&corridor=archive`. `game.html` is
@@ -69,6 +70,11 @@ function isColumn(viewport: Viewport): boolean {
   return viewport.width < 736 && viewport.height >= 752;
 }
 
+/** The SHORT corners layout (a phone on its side): 46 rem wide or more, 30 rem tall or less. */
+function isShortCorners(viewport: Viewport): boolean {
+  return viewport.width >= 736 && viewport.height <= 480;
+}
+
 /**
  * The rides the HUD is most crowded on, each with map data: what `ride.browser`,
  * `ride-notices`, `ride-workout` and `ride-room` measure without a credit.
@@ -76,7 +82,7 @@ function isColumn(viewport: Viewport): boolean {
  */
 const CROWDED: readonly { readonly name: string; readonly query: string }[] = [
   // #576: on a phone on its side the side camera's row is lifted into the
-  // bottom-start strip — the credit's own corner — so the credit gives way.
+  // bottom-start strip, which on CI's fonts left the credit no room there.
   { name: 'sounds on and a side camera filming', query: '&side=filming&sounds=on' },
   // #647's standing notice, which takes the route panel's cell on a phone.
   { name: 'a standing notice and a workout', query: '&keepalive=failed&trainer=workout' },
@@ -111,7 +117,7 @@ function clearOfEverything(seen: StageMeasurement, viewport: Viewport, how: stri
 
 test.describe('#1552 attribution on a mapped ride', () => {
   for (const viewport of OVERLAY_VIEWPORTS) {
-    test(`the credit is in its corner, out of every panel, on its own backing and over nothing — ${viewport.name}`, async ({
+    test(`the credit is in its place, out of every panel, on its own backing and over nothing — ${viewport.name}`, async ({
       browser,
     }) => {
       const page = await sharedRide(browser, viewport, '?corridor=archive');
@@ -139,26 +145,36 @@ test.describe('#1552 attribution on a mapped ride', () => {
       for (const [how, seen] of await bothWays(page)) {
         clearOfEverything(seen, viewport, how);
         const line = named(seen.items, 'the map credit');
-        // The corner: the start edge, where the primary readings begin…
-        const primary = seen.panels.find((each) => each.name.includes('oyl-hud__fields--primary'));
-        if (primary === undefined) throw new Error(`${how}: no primary panel`);
-        expect(
-          Math.abs(line.box.left - primary.box.left),
-          `${how}: ${describeItem(line)}`,
-        ).toBeLessThanOrEqual(SUBPIXEL_TOLERANCE);
-        // …hung from the route panel: above it on a tablet or a phone on its
-        // side, under it (in the sky) on a phone upright.
         const route = seen.panels.find((each) => each.name.includes('oyl-hud__route'));
         if (route === undefined) throw new Error(`${how}: no route panel`);
-        const gap = isColumn(viewport)
-          ? line.box.top - route.box.bottom
-          : route.box.top - line.box.bottom;
-        expect(gap, `${how}: ${describeItem(line)} beside ${describeItem(route)}`).toBeGreaterThan(
-          0,
-        );
-        expect(gap, `${how}: ${describeItem(line)} beside ${describeItem(route)}`).toBeLessThan(
-          16 + SUBPIXEL_TOLERANCE,
-        );
+        const where = `${how}: ${describeItem(line)} beside ${describeItem(route)}`;
+        if (isShortCorners(viewport)) {
+          // A phone on its side: bottom-centre, between the bottom panels and
+          // under the rider (`theme.css` says why it is not a corner there).
+          const centre = (line.box.left + line.box.right) / 2;
+          expect(Math.abs(centre - viewport.width / 2), where).toBeLessThanOrEqual(
+            SUBPIXEL_TOLERANCE,
+          );
+          expect(Math.abs(line.box.bottom - route.box.bottom), where).toBeLessThanOrEqual(
+            SUBPIXEL_TOLERANCE,
+          );
+        } else {
+          // The corner: the start edge, where the primary readings begin…
+          const primary = seen.panels.find((each) =>
+            each.name.includes('oyl-hud__fields--primary'),
+          );
+          if (primary === undefined) throw new Error(`${how}: no primary panel`);
+          expect(Math.abs(line.box.left - primary.box.left), where).toBeLessThanOrEqual(
+            SUBPIXEL_TOLERANCE,
+          );
+          // …hung from the route panel: above it on a tablet, under it (in
+          // the sky) on a phone upright.
+          const gap = isColumn(viewport)
+            ? line.box.top - route.box.bottom
+            : route.box.top - line.box.bottom;
+          expect(gap, where).toBeGreaterThan(0);
+          expect(gap, where).toBeLessThan(16 + SUBPIXEL_TOLERANCE);
+        }
         // Pause and End ride are still on screen and on top…
         for (const control of ['control: Pause', 'control: End ride']) {
           const seenControl = named(seen.items, control);

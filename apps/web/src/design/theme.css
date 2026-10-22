@@ -6536,13 +6536,17 @@ select.oyl-input {
  * (#1111); a notice takes the top-start, under the primary readings (#437).
  * So:
  *
- * - **Corners layout (a tablet, a phone on its side): bottom-start**, hung
- *   from the line above the route panel. ⚠️ One exception, measured: on a
- *   phone on its side with sounds on and a side camera paired, #576 lifts the
- *   side camera's row into exactly that strip and fills it (1 px under the
- *   primary panel at 736×360), so there the credit takes the bottom-END of
- *   the same strip, over the actions panel, where #576's 16 rem column has the
- *   20 px a line needs and not the 60 px the row does.
+ * - **A tablet (the corners layout, 47 rem tall or more): bottom-start**,
+ *   hung from the line above the route panel.
+ * - **A phone on its side (the short corners layout): bottom-centre**, between
+ *   the two bottom panels and under the rider — and that is NOT a corner, on
+ *   purpose. All four corners of a 736×360 stage are panels, and the strip
+ *   above the bottom-start one is no room at all on a crowded ride: on the CI
+ *   runner's fonts, with sounds on and a side camera paired (#576 lifts the
+ *   camera's row into that very strip) or a standing notice in the route
+ *   panel's cell, the line was drawn 8 px into the primary readings, and at
+ *   the bottom-end 11 px into the secondary ones. Under the rider there is
+ *   65 px of road at 736×360 that no panel uses.
  * - **Column layout (a phone upright): top-start of the road**, hung from the
  *   line under the route panel (or under the notice standing in its cell).
  *   That is sky: upright the horizon is 47 % down the frame and the rider's
@@ -6551,7 +6555,8 @@ select.oyl-input {
  *   room's *Report* reasons, sounds with a side camera.
  *
  * Placed by `grid-area` and `position: absolute` against the grid's middle
- * track, so it takes no room from any track and moves no panel; every engine
+ * track (the bottom row, on a phone on its side), so it takes no room from
+ * any track and moves no panel; every engine
  * with CSS grid lays it out the same, with no anchor positioning (#1120).
  *
  * #423's rule: HUD text over the world sits on an opaque surface. So it has a
@@ -6602,16 +6607,18 @@ select.oyl-input {
   }
 }
 
-/* #576's lifted side-camera row holds the bottom-start strip: take the end.
-   The same condition as the rules that lift it, with and without anchors. */
+/* A phone on its side (the SHORT corners layout): bottom-centre, between the
+   two 16 rem bottom panels, under the rider — the strip above them is no
+   room at all on a crowded ride (the comment above says what CI measured).
+   The width left between the panels, less a gap each side; it wraps to two
+   lines where that is narrower than the line (736 px). */
 @media (min-width: 46rem) and (min-height: 22.5rem) and (max-height: 30rem) {
-  .oyl-game--riding
-    .oyl-hud:has(> .oyl-hud__actions > .oyl-sound):has(
-      > .oyl-hud__actions > .oyl-hud__side-camera-row
-    )
-    > .oyl-hud__attribution {
-    left: auto;
-    right: 0;
+  .oyl-game--riding .oyl-hud__attribution {
+    grid-area: 3 / 1 / 4 / 3;
+    left: 50%;
+    max-width: calc(100% - 32rem - 2 * var(--oyl-space-md));
+    text-align: center;
+    transform: translateX(-50%);
   }
 }
 
