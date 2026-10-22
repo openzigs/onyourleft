@@ -119,6 +119,15 @@ import {
 } from '../src/game/streets';
 import { waterways } from '../src/game/waterways';
 import { landClassMask, NO_LAND_CLASS } from '../src/game/land-class';
+import { footprintPlans, type FootprintPlan } from '../src/game/footprint-buildings';
+import {
+  besideRoad,
+  buildingBeside,
+  denseTownFixture,
+  landBeside,
+  rectangleBeside,
+} from '../src/game/footprint-fixtures-testing';
+import { mappedBuildingsOf, type MappedBuildings } from '../src/game/mapped-buildings';
 import {
   HORIZON_RADIUS_METRES,
   HORIZON_SEGMENTS,
@@ -189,6 +198,10 @@ import {
   furnitureShownOf,
   pavementsShownOf,
   pavementTrianglesOf,
+  MappedBuildingBelt,
+  mappedBuildingsShownOf,
+  mappedBuildingStatsOf,
+  setMappedBuildingsMerged,
   sideRoadMeshOf,
   sideRoadsShownOf,
   wordmarkOrientationOf,
@@ -232,7 +245,12 @@ import {
   type InstanceTint,
   type TintBound,
 } from '../src/game/instance-tint';
-import { HARD_SWAP_TREE_LEVELS, REALISTIC_TREE_LEVELS } from '../src/game/realistic-budget';
+import {
+  HARD_SWAP_TREE_LEVELS,
+  MAPPED_BUILDING_TRIANGLES,
+  REALISTIC_STRUCTURE_ITEMS,
+  REALISTIC_TREE_LEVELS,
+} from '../src/game/realistic-budget';
 import type { TreeLevels } from '../src/game/tree-levels';
 import { COUNTED_DRAWS, trianglesInDraw } from './realistic/draws';
 import { FRESNEL_CONTROL, FRESNEL_REFERENCE, WATER_BAND_ROWS } from './realistic-surfaces-fixture';
@@ -2918,6 +2936,312 @@ function mappedPavementProbe(
   };
 }
 
+/** What {@link mappedTownProbe} publishes — #1549. */
+interface MappedTownMeasurement {
+  /** The buildings the belt drew at its last refill: the whole town, and its nearest ten. */
+  readonly buildings: number;
+  readonly buildingsSmall: number;
+  /**
+   * The draw calls the mapped buildings added to the frame, counted at the
+   * WebGL entry points as #679's are: the frame less the same frame with no
+   * mapped buildings in it — with the town, with ten of it, with the town
+   * drawn a group a building and surface (the control), and with the
+   * `-mapped-buildings` lever off (the control, which must be 0).
+   */
+  readonly drawCalls: number;
+  readonly drawCallsSmall: number;
+  readonly drawCallsUnmerged: number;
+  readonly drawCallsOff: number;
+  /**
+   * The mean sRGB of a 3 × 3 square at the centre of a kept footprint's front
+   * wall, aimed from its plan's geometry: drawn, and with the lever off.
+   */
+  readonly wall: readonly number[];
+  readonly wallOff: readonly number[];
+  /** Whether the wall's probe point is in the frame at all. */
+  readonly wallInFrame: boolean;
+  /**
+   * The fixture wood's footprint: how many plans are kept inside the wood,
+   * with the land-class mask and (the control, `-landclass`) without — and
+   * the square at its centre with the buildings on and off, both ways.
+   */
+  readonly woodKept: number;
+  readonly woodKeptNoLand: number;
+  readonly wood: readonly number[];
+  readonly woodOff: readonly number[];
+  readonly woodNoLand: readonly number[];
+  readonly woodNoLandOff: readonly number[];
+  /** The fastest of three refills of #1540's dense town, ms, in this browser. */
+  readonly refillMs: number;
+  /** The mean frame time with the town drawn, and with the lever off, ms. */
+  readonly frameMs: number;
+  readonly frameMsOff: number;
+}
+
+const NO_MAPPED_TOWN: MappedTownMeasurement = {
+  buildings: 0,
+  buildingsSmall: 0,
+  drawCalls: 0,
+  drawCallsSmall: 0,
+  drawCallsUnmerged: 0,
+  drawCallsOff: -1,
+  wall: [],
+  wallOff: [],
+  wallInFrame: false,
+  woodKept: -1,
+  woodKeptNoLand: -1,
+  wood: [],
+  woodOff: [],
+  woodNoLand: [],
+  woodNoLandOff: [],
+  refillMs: Number.NaN,
+  frameMs: Number.NaN,
+  frameMsOff: Number.NaN,
+};
+
+/**
+ * #1549: a town from map data, drawn. 8 × 8 m houses every 12 m in two rows
+ * either side of 3 km of level road, all residential, every tile read, and a
+ * wood on the left from 1 520 m to 1 620 m with one footprint in it, at
+ * 1 545 m, and none of the rows. The rider is at 1 500 m.
+ *
+ * - **"a mapped town is drawn"**: the kept plan nearest 1 540 m, 25 m to the
+ *   right, is probed at the middle of the wall facing the road, a storey up
+ *   — the point aimed from the plan's own outline and triangles — with the
+ *   town drawn and with `-mapped-buildings` (the lever). The draw calls the
+ *   belt adds are counted with the whole town in reach and with its nearest
+ *   ten, and with the town drawn a group a building (the control).
+ * - **"nothing in the wood"**: the wood's footprint is not kept, and the
+ *   square at its front wall — aimed from the plan the control makes of it —
+ *   reads the same with the buildings on and off, in a frame with no scenery
+ *   (no tree can hide a building there, or stand in for one). The control:
+ *   with the frame built with no land-class mask (`-landclass`) it IS kept,
+ *   and switching the buildings on changes that square.
+ *
+ * ⚠️ The corridor is built here rather than read from `?corridor=archive`,
+ * as #1551's and #1547's probes build theirs: what is measured is a known
+ * town drawn, and #1539's archive fixture holds no town a known distance up
+ * a straight road.
+ */
+function mappedTownProbe(
+  view: ReturnType<typeof threeGameRenderer.create>,
+  gl: WebGL2RenderingContext,
+  canvas: HTMLCanvasElement,
+): MappedTownMeasurement {
+  const profile = northRoute(3_000, () => 10);
+  const origin = corridorOrigin(profile);
+  const inWood = (along: number, lateral: number): boolean =>
+    lateral < 0 && along >= 1_520 && along <= 1_620;
+  const buildings = [];
+  for (let along = 50; along < 2_950; along += 12) {
+    for (const lateral of [25, 60, -25, -60]) {
+      if (inWood(along, lateral)) continue;
+      buildings.push(buildingBeside(profile, origin, [rectangleBeside(along, lateral, 8, 8)], 6));
+    }
+  }
+  // The wood's footprint: 45 m up the road, its front wall 25 m to the left.
+  const woodFootprint = buildingBeside(profile, origin, [rectangleBeside(1_545, -30, 10, 10)], 6);
+  const corridor: WorldCorridor = {
+    routeId: 'harness-1549',
+    origin,
+    covered: () => true,
+    coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
+    landUse: [
+      landBeside(profile, origin, 'landuse', 'residential', 10, 2_990, -100, 100),
+      landBeside(profile, origin, 'landuse', 'wood', 1_520, 1_620, -100, -12),
+    ],
+    buildings: [...buildings, woodFootprint],
+    paths: [],
+    streets: [],
+  };
+  const land = landClassMask(corridor);
+  const plans = footprintPlans(corridor, land, profile, origin).plans;
+  const plansNoLand = footprintPlans(corridor, NO_LAND_CLASS, profile, origin).plans;
+  const woodCentre = besideRoad(profile, origin, 1_545, -30);
+  const inTheWood = (plan: FootprintPlan): boolean =>
+    Math.hypot(plan.centroid.x - woodCentre[0], plan.centroid.z - woodCentre[1]) < 5;
+  const wallTarget = besideRoad(profile, origin, 1_540, 25);
+  const probed = [...plans].sort(
+    (a, b) =>
+      Math.hypot(a.centroid.x - wallTarget[0], a.centroid.z - wallTarget[1]) -
+      Math.hypot(b.centroid.x - wallTarget[0], b.centroid.z - wallTarget[1]),
+  )[0];
+  // Planned only without the mask: the control's footprint.
+  const woodPlan = plansNoLand.find(inTheWood);
+  if (probed === undefined || woodPlan === undefined) return NO_MAPPED_TOWN;
+  /** A plan's front wall — its outline's edge whose middle is nearest the road — a storey up. */
+  const frontWallOf = (plan: FootprintPlan): { x: number; y: number; z: number } | undefined => {
+    const road = drawnRoadFrame(profile, origin, 1_540);
+    if (road === undefined) return undefined;
+    let front = { x: plan.centroid.x, z: plan.centroid.z };
+    let nearest = Number.POSITIVE_INFINITY;
+    const ring = plan.outline;
+    for (let i = 0, j = ring.length / 2 - 1; i < ring.length / 2; j = i, i += 1) {
+      const x = ((ring[i * 2] as number) + (ring[j * 2] as number)) / 2;
+      const z = ((ring[i * 2 + 1] as number) + (ring[j * 2 + 1] as number)) / 2;
+      // Across the road only: the road runs straight along z here.
+      const apart = Math.abs(x - road.x);
+      if (apart < nearest) {
+        nearest = apart;
+        front = { x, z };
+      }
+    }
+    let foot = Number.POSITIVE_INFINITY;
+    const walls = plan.triangles.wall;
+    for (let at = 1; at < walls.length; at += 8) foot = Math.min(foot, walls[at] as number);
+    return { x: front.x, y: foot + 1.5, z: front.z };
+  };
+  const wallPoint = frontWallOf(probed);
+  const woodPoint = frontWallOf(woodPlan);
+  if (wallPoint === undefined || woodPoint === undefined) return NO_MAPPED_TOWN;
+
+  const town = mappedBuildingsOf(plans);
+  const townNoLand = mappedBuildingsOf(plansNoLand);
+  const start = atStartLine(profile);
+  const frameOf = (mask: typeof land, mapped: MappedBuildings): SceneFrame =>
+    sceneFrame({
+      profile,
+      origin,
+      state: { ...start, ride: { ...start.ride, distance: metres(1_500) } },
+      worldCorridor: corridor,
+      landClass: mask,
+      mappedBuildings: mapped,
+      // The realistic rung's structures, as `GameView` hands a ride's frame
+      // them: the share the mapped buildings take what is left of.
+      structureItems: REALISTIC_STRUCTURE_ITEMS,
+    });
+  const frame = frameOf(land, town);
+  const rider = frame.mappedBuildings;
+  if (rider === undefined) return NO_MAPPED_TOWN;
+  const small = mappedBuildingsOf(
+    [...plans]
+      .sort(
+        (a, b) =>
+          Math.hypot(a.centroid.x - rider.x, a.centroid.z - rider.z) -
+          Math.hypot(b.centroid.x - rider.x, b.centroid.z - rider.z),
+      )
+      .slice(0, 10),
+  );
+  const frameSmall: SceneFrame = { ...frame, mappedBuildings: { ...rider, buildings: small } };
+  // The same frame with no mapped buildings in it: what the calls are counted against.
+  const bare: SceneFrame = { ...frame };
+  delete (bare as { mappedBuildings?: unknown }).mappedBuildings;
+  const meanAt = (point: { readonly x: number; readonly y: number; readonly z: number }) => {
+    const centre = pixelFor(frame, canvas, point);
+    const pixels = readRegion(gl, Math.round(centre.x) - 1, Math.round(centre.y) - 1, 3, 3);
+    const sums = [0, 0, 0];
+    for (let at = 0; at < pixels.length; at += 4) {
+      for (let channel = 0; channel < 3; channel += 1) {
+        sums[channel] = (sums[channel] ?? 0) + (pixels[at + channel] ?? 0);
+      }
+    }
+    return sums.map((sum) => sum / 9);
+  };
+  const callsAdded = (drawn: SceneFrame): number => {
+    let added = 0;
+    countingNonEmptyDrawCalls((calls) => {
+      view.render(drawn);
+      const before = calls();
+      view.render(drawn);
+      const withTown = calls() - before;
+      view.render(bare);
+      const middle = calls();
+      view.render(bare);
+      added = withTown - (calls() - middle);
+    });
+    return added;
+  };
+
+  const drawCalls = callsAdded(frame);
+  const buildingsDrawn = mappedBuildingStatsOf(view)?.stats.buildings ?? 0;
+  view.render(frame);
+  const wall = meanAt(wallPoint);
+  // The wood is read with no scenery in the frame, so a tree between the road
+  // and the footprint cannot stand in for the building, nor hide one.
+  const bareOf = (drawn: SceneFrame): SceneFrame => ({ ...drawn, scatter: [], markers: [] });
+  view.render(bareOf(frame));
+  const wood = meanAt(woodPoint);
+  const drawCallsSmall = callsAdded(frameSmall);
+  const buildingsSmall = mappedBuildingStatsOf(view)?.stats.buildings ?? 0;
+  setMappedBuildingsMerged(false);
+  // A new index refills at once — a group a building and surface — and the
+  // switch is put back whatever the count does.
+  const drawCallsUnmerged = ((): number => {
+    try {
+      return callsAdded({
+        ...frame,
+        mappedBuildings: { ...rider, buildings: mappedBuildingsOf(plans) },
+      });
+    } finally {
+      setMappedBuildingsMerged(true);
+    }
+  })();
+  // Timed: the town drawn and the lever off, each settled first.
+  const timed = (drawn: SceneFrame): number => {
+    view.render(drawn);
+    gl.finish();
+    const started = performance.now();
+    for (let at = 0; at < 5; at += 1) view.render(drawn);
+    gl.finish();
+    return (performance.now() - started) / 5;
+  };
+  const frameMs = timed(frame);
+  mappedBuildingsShownOf(view, false);
+  const drawCallsOff = callsAdded(frame);
+  const frameMsOff = timed(frame);
+  view.render(frame);
+  const wallOff = meanAt(wallPoint);
+  view.render(bareOf(frame));
+  const woodOff = meanAt(woodPoint);
+  // The control: no land-class mask, so the wood's footprint is planned and drawn.
+  const noLand = bareOf(frameOf(NO_LAND_CLASS, townNoLand));
+  view.render(noLand);
+  const woodNoLandOff = meanAt(woodPoint);
+  mappedBuildingsShownOf(view, true);
+  view.render(noLand);
+  const woodNoLand = meanAt(woodPoint);
+
+  // #1549's CPU figure: a refill of #1540's dense town, the fastest of three.
+  const dense = denseTownFixture();
+  const denseTown = mappedBuildingsOf(
+    footprintPlans(dense.corridor, landClassMask(dense.corridor), dense.profile, dense.origin)
+      .plans,
+  );
+  const denseRoad = drawnRoadFrame(dense.profile, dense.origin, 700);
+  const belt = new MappedBuildingBelt(denseTown, new Map());
+  let refillMs = Number.POSITIVE_INFINITY;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const started = performance.now();
+    belt.refill(denseRoad?.x ?? 0, denseRoad?.z ?? 0, MAPPED_BUILDING_TRIANGLES);
+    refillMs = Math.min(refillMs, performance.now() - started);
+  }
+  belt.dispose();
+
+  return {
+    buildings: buildingsDrawn,
+    buildingsSmall,
+    drawCalls,
+    drawCallsSmall,
+    drawCallsUnmerged,
+    drawCallsOff,
+    wall,
+    wallOff,
+    wallInFrame: (() => {
+      const at = inTheFrame(frame, canvas.width / canvas.height, wallPoint);
+      return at.across > 0 && at.across < 1 && at.down > 0 && at.down < 1;
+    })(),
+    woodKept: plans.filter(inTheWood).length,
+    woodKeptNoLand: plansNoLand.filter(inTheWood).length,
+    wood,
+    woodOff,
+    woodNoLand,
+    woodNoLandOff,
+    refillMs,
+    frameMs,
+    frameMsOff,
+  };
+}
+
 /** What {@link levellingProbe} publishes — #1547. */
 interface LevellingMeasurement {
   /**
@@ -5211,6 +5535,8 @@ export interface RealisticMeasurement {
   readonly mappedPavement: MappedPavementMeasurement;
   /** #1547: the drawn ground under a mapped block's centre footprint. @see levellingProbe */
   readonly levelling: LevellingMeasurement;
+  /** #1549: a town from map data, drawn merged, and nothing in the wood. @see mappedTownProbe */
+  readonly mappedTown: MappedTownMeasurement;
   /** #621: two trees and two houses of one shape, tinted and not. @see tintProbe */
   readonly tint: TintMeasurement;
   /** #620: the ground under a tree's blob and 5 m from it, with and without the blobs. @see groundBlobProbe */
@@ -7238,6 +7564,7 @@ const NO_REALISTIC: RealisticMeasurement = {
   pavement: NO_PAVEMENT,
   mappedPavement: NO_MAPPED_PAVEMENT,
   levelling: NO_LEVELLING,
+  mappedTown: NO_MAPPED_TOWN,
   tint: {
     trees: [],
     treesControl: [],
@@ -8786,6 +9113,10 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   const levelling = levellingProbe(view);
   phaseEnds('realistic: a town on the flat — #1547');
 
+  // #1549, on the same view: a town from map data, merged, and nothing in the wood.
+  const mappedTown = mappedTownProbe(view, gl, canvas);
+  phaseEnds('realistic: a mapped town — #1549');
+
   // #624, on the same view and the same road.
   const tread = treadProbe(view, gl, canvas, riding(level, 400));
   phaseEnds('realistic: the tread — #624');
@@ -9025,6 +9356,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     pavement,
     mappedPavement,
     levelling,
+    mappedTown,
     tint,
     grounding,
     tread,

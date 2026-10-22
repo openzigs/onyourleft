@@ -167,6 +167,8 @@ import { sharedCueOutput } from './web-audio';
 import type { CorridorState, WorldCorridor } from './world-data/corridor';
 import { OSM_ATTRIBUTION } from '../map/basemap';
 import { landClassMask, type LandClassMask } from './land-class';
+import { footprintPlans } from './footprint-buildings';
+import { mappedBuildingsOf, type MappedBuildings } from './mapped-buildings';
 import {
   climbLeadIn,
   DEFAULT_ANNOUNCEMENTS,
@@ -1109,6 +1111,8 @@ export function GameView(props: GameViewProps): JSX.Element {
   const [rideHasCorridor, setRideHasCorridor] = useState(false);
   /** #1546: what the ground is in {@link worldCorridorRef}, built once from it at the press. */
   const landClassRef = useRef<LandClassMask | undefined>(undefined);
+  /** #1549: the buildings planned from {@link worldCorridorRef}'s footprints, once, at the press. */
+  const mappedBuildingsRef = useRef<MappedBuildings | undefined>(undefined);
 
   useEffect(() => {
     if (port === undefined) {
@@ -1511,6 +1515,19 @@ export function GameView(props: GameViewProps): JSX.Element {
         worldCorridorRef.current === undefined
           ? undefined
           : landClassMask(worldCorridorRef.current);
+      // #1540, #1549: and every mapped footprint planned, from the same
+      // corridor and mask, ONCE, here — #1540 states ≤ 400 ms for a dense town.
+      mappedBuildingsRef.current =
+        worldCorridorRef.current === undefined || landClassRef.current === undefined
+          ? undefined
+          : mappedBuildingsOf(
+              footprintPlans(
+                worldCorridorRef.current,
+                landClassRef.current,
+                route.profile,
+                corridorOrigin(route.profile),
+              ).plans,
+            );
       setState(simulation.state);
       setChosen(route);
       setPhase('riding');
@@ -2118,6 +2135,9 @@ export function GameView(props: GameViewProps): JSX.Element {
             ? {}
             : { worldCorridor: worldCorridorRef.current }),
           ...(landClassRef.current === undefined ? {} : { landClass: landClassRef.current }),
+          ...(mappedBuildingsRef.current === undefined
+            ? {}
+            : { mappedBuildings: mappedBuildingsRef.current }),
         });
         if (prepared) {
           view.render(frame);
@@ -2547,9 +2567,7 @@ export function GameView(props: GameViewProps): JSX.Element {
         // (`corridor-port.ts`), and a covered stretch shapes the world even
         // with no footprint in it (D-5.3: no procedural village there). A
         // procedural world owes nothing, and a credit there would be false.
-        // ⚠️ Until #1540 draws from the corridor (`scene.ts` §`worldCorridor`
-        // is not read yet) this credits a world still drawn procedurally:
-        // over-crediting, the harmless direction.
+        // Since #1549 the realistic world draws its mapped buildings from it.
         attribution={rideHasCorridor ? OSM_ATTRIBUTION : undefined}
         onPause={() => {
           setPhase((current) => (current === 'paused' ? 'riding' : 'paused'));

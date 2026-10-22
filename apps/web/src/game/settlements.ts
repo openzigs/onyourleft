@@ -1070,9 +1070,15 @@ export function onSettlementGround(
 /**
  * The kinds a settlement's ground is cleared of — #1534: everything the
  * realistic world's vegetation belt draws. A post marks a tight bend, which a
- * village may stand on, so it stays.
+ * village may stand on, so it stays. Since #1549 a mapped building's ground
+ * is cleared of the same kinds (`mapped-buildings.ts` §`clearOfMappedBuildings`).
  */
-const CLEARED: ReadonlySet<string> = new Set(['tree-broadleaf', 'tree-conifer', 'shrub', 'rock']);
+export const SETTLEMENT_CLEARED_KINDS: ReadonlySet<string> = new Set([
+  'tree-broadleaf',
+  'tree-conifer',
+  'shrub',
+  'rock',
+]);
 
 /**
  * The natural scenery, less every tree, shrub and rock standing on a
@@ -1088,7 +1094,7 @@ export function clearOfSettlements(
   if (footprints.length === 0 && land.bytes === 0) return natural;
   return natural.filter(
     (item) =>
-      !CLEARED.has(item.kind) ||
+      !SETTLEMENT_CLEARED_KINDS.has(item.kind) ||
       !(
         builtUpOrWater(land, item.x, item.z) ||
         footprints.some((piece) => onSettlementGround(item, piece))
