@@ -49,6 +49,19 @@
  *   is built on, loses its pavement there rather than gaining one in the road;
  * - its middle stands in water or on a bank (`waterways.ts` §`inWater`).
  *
+ * ## Where the map was read — #1551
+ *
+ * A {@link PavementSides} from `footways.ts` overrides the side rule, and only
+ * the side rule, at every section whose stretch of road was read: there a
+ * side has a pavement exactly where a sidewalk is mapped beside it, anywhere
+ * along the village's street (the span from its first built plot on either
+ * side to its last), and neither side has one where none is mapped. Where the
+ * stretch was not read (`unknown`) the rule above stands. A village none of
+ * whose street was read is laid by exactly the code it was before, so with
+ * {@link NO_PAVEMENT_DATA} every street is byte-identical to #1535's. Covered
+ * land can only move a pavement from one side of a village's street to the
+ * other, or remove it: its cost is still a village's.
+ *
  * ## Cost, and why it is computed once
  *
  * A pavement is fixed in the corridor's frame (one origin a ride), so each
@@ -67,8 +80,17 @@
 
 import { distanceOnRoute, elevationAt, type RouteProfile } from '@onyourleft/domain';
 
+import { NO_PAVEMENT_DATA, type PavementSide, type PavementSides } from './footways';
 import { distanceToDrawnRoad } from './road-grid';
-import { PLOT_METRES, siteAt, siteSpacing, villagePlots, VILLAGE_METRES } from './settlements';
+import { NO_LAND_CLASS, type LandClassMask } from './land-class';
+import {
+  PLOT_METRES,
+  siteAt,
+  siteOnMappedLand,
+  siteSpacing,
+  villagePlots,
+  VILLAGE_METRES,
+} from './settlements';
 import { drawnRoadFrame, ROAD_WIDTH_METRES, type CorridorOrigin } from './terrain';
 import { inWater, waterways } from './waterways';
 
@@ -204,8 +226,11 @@ export interface VillageStreet {
 /** One village's street, or `null` where its site has no village or no pavement. */
 type Known = VillageStreet | null;
 
-/** Every street of each route, by site, built on first sight. @see the header */
-const built = new WeakMap<RouteProfile, Map<number, Known>>();
+/**
+ * Every street of each route, by site, built on first sight — per
+ * {@link PavementSides}, which a ride fixes when it starts. @see the header
+ */
+const built = new WeakMap<PavementSides, WeakMap<RouteProfile, Map<number, Known>>>();
 
 /**
  * Every village street whose pavements overlap the odometer span
@@ -219,24 +244,33 @@ export function streetsAt(
   seed: number,
   fromMetres: number,
   toMetres: number,
+  sides: PavementSides = NO_PAVEMENT_DATA,
+  land: LandClassMask = NO_LAND_CLASS,
 ): readonly VillageStreet[] {
   const { sites, span } = siteSpacing(profile);
   const reach = VILLAGE_METRES / 2 + PLOT_METRES;
   const first = Math.floor((fromMetres - reach) / span);
   // Never more sites than the route has — `settlements.ts` §`settlementsAt`'s bound.
   const last = Math.min(Math.floor((toMetres + reach) / span), first + sites + 1);
-  let known = built.get(profile);
+  let bySides = built.get(sides);
+  if (bySides === undefined) {
+    bySides = new WeakMap();
+    built.set(sides, bySides);
+  }
+  let known = bySides.get(profile);
   if (known === undefined) {
     known = new Map();
-    built.set(profile, known);
+    bySides.set(profile, known);
   }
   const found: VillageStreet[] = [];
   for (let index = first; index <= last; index += 1) {
     const site = siteAt(profile, seed, index);
     if (site === undefined || site.kind !== 'village') continue;
+    // #1546: a village not built on mapped land has no street either.
+    if (siteOnMappedLand(profile, origin, site, land)) continue;
     let street = known.get(site.wrappedSite);
     if (street === undefined) {
-      street = streetOf(profile, origin, seed, site.wrappedSite, index);
+      street = streetOf(profile, origin, seed, site.wrappedSite, index, sides);
       known.set(site.wrappedSite, street);
     }
     if (street === null || found.includes(street)) continue;
@@ -254,6 +288,7 @@ function streetOf(
   seed: number,
   wrappedSite: number,
   index: number,
+  sides: PavementSides,
 ): Known {
   const site = siteAt(profile, seed, index);
   if (site === undefined) return null;
@@ -265,18 +300,69 @@ function streetOf(
   const furniture: FurnitureItem[] = [];
   let from = Number.POSITIVE_INFINITY;
   let to = Number.NEGATIVE_INFINITY;
-  for (const side of [1, -1] as const) {
+  const spans = ([1, -1] as const).map((side) => {
     const mine = plots.filter((plot) => plot.side === side).map((plot) => plot.along - lap);
-    if (mine.length === 0) continue;
-    const start = Math.min(...mine) - PLOT_METRES / 2 + PAVEMENT_END_INSET_METRES;
-    const end = Math.max(...mine) + PLOT_METRES / 2 - PAVEMENT_END_INSET_METRES;
-    if (lay(mesh, furniture, profile, origin, seed, side, start, end)) {
-      from = Math.min(from, start);
-      to = Math.max(to, end);
+    return mine.length === 0
+      ? undefined
+      : {
+          start: Math.min(...mine) - PLOT_METRES / 2 + PAVEMENT_END_INSET_METRES,
+          end: Math.max(...mine) + PLOT_METRES / 2 - PAVEMENT_END_INSET_METRES,
+        };
+  });
+  const street = streetSpan(spans);
+  if (street === undefined) return null;
+  // #1551: whether any of the street's road was read. @see the header
+  const read = wasRead(sides, street.start, street.end);
+  for (const [at, side] of ([1, -1] as const).entries()) {
+    const own = spans[at];
+    let laid: boolean;
+    if (!read) {
+      if (own === undefined) continue;
+      laid = lay(mesh, furniture, profile, origin, seed, side, own.start, own.end);
+    } else {
+      const allowed = (along: number): boolean => {
+        const here = sides.sideAt(along);
+        if (here === 'unknown') return own !== undefined && along >= own.start && along <= own.end;
+        return onSide(here, side);
+      };
+      laid = lay(mesh, furniture, profile, origin, seed, side, street.start, street.end, allowed);
+    }
+    if (laid) {
+      from = Math.min(from, read || own === undefined ? street.start : own.start);
+      to = Math.max(to, read || own === undefined ? street.end : own.end);
     }
   }
   if (mesh.triangles === 0) return null;
   return { wrappedSite, from, to, pavement: mesh.done(), furniture };
+}
+
+/** The whole street: from the first side's start to the last side's end. */
+function streetSpan(
+  spans: readonly ({ start: number; end: number } | undefined)[],
+): { start: number; end: number } | undefined {
+  let start = Number.POSITIVE_INFINITY;
+  let end = Number.NEGATIVE_INFINITY;
+  for (const span of spans) {
+    if (span === undefined) continue;
+    start = Math.min(start, span.start);
+    end = Math.max(end, span.end);
+  }
+  return start <= end ? { start, end } : undefined;
+}
+
+/** Whether any section {@link lay} would take from `start` to `end` is on road that was read. */
+function wasRead(sides: PavementSides, start: number, end: number): boolean {
+  if (sides === NO_PAVEMENT_DATA) return false;
+  const steps = Math.max(1, Math.ceil((end - start) / PAVEMENT_STEP_METRES));
+  for (let step = 0; step <= steps; step += 1) {
+    if (sides.sideAt(start + ((end - start) * step) / steps) !== 'unknown') return true;
+  }
+  return false;
+}
+
+/** Whether a mapped `here` puts a pavement on `side` (+1 the road's normal, its right). */
+function onSide(here: PavementSide, side: 1 | -1): boolean {
+  return here === 'both' || here === (side === 1 ? 'right' : 'left');
 }
 
 /**
@@ -347,6 +433,7 @@ function lay(
   side: 1 | -1,
   start: number,
   end: number,
+  allowed: (along: number) => boolean = () => true,
 ): boolean {
   const ways = waterways(profile, seed);
   const steps = Math.max(1, Math.ceil((end - start) / PAVEMENT_STEP_METRES));
@@ -361,7 +448,7 @@ function lay(
   };
   for (let step = 0; step <= steps; step += 1) {
     const along = start + ((end - start) * step) / steps;
-    const section = sectionAt(profile, origin, ways, side, along);
+    const section = allowed(along) ? sectionAt(profile, origin, ways, side, along) : undefined;
     if (section === undefined) close();
     else run.push(section);
   }

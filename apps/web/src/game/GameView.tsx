@@ -166,6 +166,7 @@ import { RoutePicker, type RecordingOffer, type RidableRoute } from './StageChoo
 import { sharedCueOutput } from './web-audio';
 import type { CorridorState, WorldCorridor } from './world-data/corridor';
 import { OSM_ATTRIBUTION } from '../map/basemap';
+import { landClassMask, type LandClassMask } from './land-class';
 import {
   climbLeadIn,
   DEFAULT_ANNOUNCEMENTS,
@@ -1106,6 +1107,8 @@ export function GameView(props: GameViewProps): JSX.Element {
   // `setChosen` so the credit's render depends on it explicitly rather than on
   // the ref having been written before `setPhase` re-rendered.
   const [rideHasCorridor, setRideHasCorridor] = useState(false);
+  /** #1546: what the ground is in {@link worldCorridorRef}, built once from it at the press. */
+  const landClassRef = useRef<LandClassMask | undefined>(undefined);
 
   useEffect(() => {
     if (port === undefined) {
@@ -1502,6 +1505,12 @@ export function GameView(props: GameViewProps): JSX.Element {
       worldCorridorRef.current =
         ready?.kind === 'ready' && ready.corridor.routeId === route.id ? ready.corridor : undefined;
       setRideHasCorridor(worldCorridorRef.current !== undefined);
+      // #1546: the mask every placement rule reads, built ONCE, here — never
+      // per frame — and `scene.ts` takes `NO_LAND_CLASS` when there is none.
+      landClassRef.current =
+        worldCorridorRef.current === undefined
+          ? undefined
+          : landClassMask(worldCorridorRef.current);
       setState(simulation.state);
       setChosen(route);
       setPhase('riding');
@@ -2108,6 +2117,7 @@ export function GameView(props: GameViewProps): JSX.Element {
           ...(worldCorridorRef.current === undefined
             ? {}
             : { worldCorridor: worldCorridorRef.current }),
+          ...(landClassRef.current === undefined ? {} : { landClass: landClassRef.current }),
         });
         if (prepared) {
           view.render(frame);

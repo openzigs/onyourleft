@@ -773,6 +773,15 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         the old file: `StructureKind` and `SCENERY_KINDS` are in
                         `scatter.ts`, and the frame carries the structures FIRST
                         on a budget of their own (`QualitySettings.structureItems`)
+    src/game/land-class.ts
+                        what the ground is where map data was read (#1546) — a
+                        sparse 5 m mask built ONCE at the press from the ride's
+                        corridor, `SceneInput.landClass`. ⚠️ **Every placement
+                        rule reads it**: no procedural site touching covered
+                        land (`settlements.ts` §`siteOnMappedLand`, and its
+                        street), no tree, shrub or rock on built-up land or
+                        water, no field boundary off field ground. Absent is
+                        `NO_LAND_CLASS`, today's world, item for item
     src/game/streets.ts a village's kerbed pavements (#1535) — along each side's
                         BUILT plots (`settlements.ts` §`siteAt`, §`villagePlots`,
                         the houses' own decision), on the road's edge, never on
@@ -788,7 +797,18 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         bench and a bin by rule (`furnish`), built from numbers
                         (`three-renderer.ts` §`FURNITURE_STYLE` says why not
                         Poly Haven's) and drawn one instanced call a kind by
-                        §`FurnitureBelt`, only within `FURNITURE_DRAW_METRES`
+                        §`FurnitureBelt`, only within `FURNITURE_DRAW_METRES`.
+                        Since #1551 a covered stretch takes its sides from
+                        `footways.ts` instead
+    src/game/footways.ts
+                        footways from the corridor's map data (#1551) —
+                        `pavementSides`, the side of the drawn road's NORMAL a
+                        sidewalk is mapped on (3–12 m out, within 20°), which
+                        `streets.ts` lays a village's pavement on where read
+                        (`unknown`, and #1535's own rule, where not); and
+                        `footwayNetwork`, 2 m polylines off the carriageway
+                        and inside the corridor for #1541 (`@unwired` until
+                        then). No crossing is either
     src/game/buildings.ts
                         the buildings as SHAPES (#500) — walls with their doors
                         and windows cut in, recessed and framed, eaves that

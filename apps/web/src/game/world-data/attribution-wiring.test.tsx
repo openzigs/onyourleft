@@ -100,6 +100,7 @@ const FAR_AWAY: WorldCorridor = {
   routeId: ROUTE.id,
   origin: { latitude: 40, longitude: -75, elevation: 10 },
   covered: () => true,
+  coveredBoxes: [],
   landUse: [],
   buildings: [
     {
