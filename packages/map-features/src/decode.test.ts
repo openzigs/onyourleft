@@ -22,6 +22,8 @@ import {
   residentialBlockTile,
   SIDEWALK_LINE,
   sidewalkTile,
+  STREET_FIXTURE_ROADS,
+  streetsTile,
   tileAtLimit,
   WOOD_HOLE,
   WOOD_OUTER,
@@ -115,9 +117,13 @@ describe('decodeTile on the named fixtures', () => {
     expect(tile.paths).toEqual([]);
   });
 
-  it('sidewalk: the footway is kept along its line; the street beside it is not', () => {
+  it('sidewalk: the footway is kept along its line; the street beside it is a street, not a path', () => {
     const tile = decoded(sidewalkTile());
     expect(tile.paths).toHaveLength(1);
+    // #1565: the residential street is kept, in `streets`, never in `paths`.
+    expect(tile.streets.map((street) => [street.kind, street.kindDetail])).toEqual([
+      ['minor_road', 'residential'],
+    ]);
     const path = tile.paths[0];
     expect(path?.kind).toBe('path');
     expect(path?.kindDetail).toBe('sidewalk');
@@ -127,6 +133,44 @@ describe('decodeTile on the named fixtures', () => {
       const want = expectedMetres(px, py);
       expect(Math.abs((got[i] as [number, number])[0] - want.x)).toBeLessThan(0.01);
       expect(Math.abs((got[i] as [number, number])[1] - want.z)).toBeLessThan(0.01);
+    });
+  });
+
+  it('streets — #1565: highway, major and minor roads, and `other` where it is a street; never rail, ferry or a footway', () => {
+    const tile = decoded(streetsTile());
+    const sinkOf = (kind: string, detail: string): string | null => {
+      if (tile.streets.some((f) => f.kind === kind && f.kindDetail === detail)) return 'streets';
+      if (tile.paths.some((f) => f.kind === kind && f.kindDetail === detail)) return 'paths';
+      return null;
+    };
+    for (const road of STREET_FIXTURE_ROADS) {
+      expect([road.kind, road.kindDetail, sinkOf(road.kind, road.kindDetail ?? '')]).toEqual([
+        road.kind,
+        road.kindDetail,
+        road.sink,
+      ]);
+    }
+    expect(tile.streets).toHaveLength(
+      STREET_FIXTURE_ROADS.filter((r) => r.sink === 'streets').length,
+    );
+    // Grade separation (#1565): `is_bridge` and `is_tunnel` as booleans; absent or `false` is at grade.
+    for (const road of STREET_FIXTURE_ROADS.filter((r) => r.sink === 'streets')) {
+      const street = tile.streets.find(
+        (f) => f.kind === road.kind && f.kindDetail === (road.kindDetail ?? ''),
+      );
+      expect([road.kind, road.kindDetail, street?.grade]).toEqual([
+        road.kind,
+        road.kindDetail,
+        road.grade ?? 'ground',
+      ]);
+    }
+    // Along its line, in the corridor frame: the minor road's two ends.
+    const minor = tile.streets.find((f) => f.kind === 'minor_road');
+    const got = vertices(minor?.line as Float32Array);
+    const want = [expectedMetres(100, 1400), expectedMetres(4000, 1400)];
+    want.forEach((point, i) => {
+      expect(Math.abs((got[i] as [number, number])[0] - point.x)).toBeLessThan(0.01);
+      expect(Math.abs((got[i] as [number, number])[1] - point.z)).toBeLessThan(0.01);
     });
   });
 
@@ -181,12 +225,14 @@ describe('decodeTile returns only the fields P-4 names', () => {
         'landUse',
         'buildings',
         'paths',
+        'streets',
         'layer',
         'kind',
         'rings',
         'heightMetres',
         'minHeightMetres',
         'kindDetail',
+        'grade',
         'line',
       ];
       for (const key of keys) expect(allowed).toContain(key);

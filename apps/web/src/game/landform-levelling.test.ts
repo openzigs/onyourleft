@@ -117,6 +117,7 @@ function blockBeside(
     landUse: [block],
     buildings: [],
     paths: [],
+    streets: [],
   };
   return { profile, origin, seed: scatterSeed(profile), from, to, mask: landClassMask(corridor) };
 }
@@ -496,6 +497,7 @@ describe('unchanged where nothing is mapped — #1547', () => {
       ],
       buildings: [],
       paths: [],
+      streets: [],
     };
     const mask = landClassMask(wood);
     expect(mask.bytes).toBeGreaterThan(0);

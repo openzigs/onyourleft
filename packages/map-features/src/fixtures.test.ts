@@ -25,6 +25,7 @@ const DIGESTS: Readonly<Record<string, string>> = {
   lake: 'be4cc2dd1a6e37408137c704f712d9d5e97a6f029f67eda7786037f07357c2e5',
   sidewalk: 'd3be4fa925a4fa736f16319e6edeece2124a8dd29ab4200da4d3ad829964c936',
   buildingPart: 'af4566be1ffb30a9abb4d78678fb87bd87b31537ddd2a3609636dbfad403db44',
+  streets: 'fe3bd3eeeb96e84b90626f48bf57bd8919aba69332ead3951515eb4797ffbaf0',
 };
 
 describe('the synthetic fixtures', () => {

@@ -720,15 +720,17 @@ function everyVillagePlot(
         village.wrappedSite * 64 + plot,
         SITE_KEY + (plotSide === 1 ? 1 : 2),
       );
-      // The church at the far end on the site's own side, the shops at the
-      // middle on the other, houses on every other plot.
+      // The church at the far end on the site's own side, the shops just past
+      // the middle on the other, houses on every other plot — and since #1565
+      // nothing on the middle plot of either side, which is the village's
+      // crossroads (`cross-streets.ts` §`villageJunction`, at its centre).
       const [kind, lateral]: readonly [StructureKind, number] =
         plot === plots - 1 && plotSide === village.side
           ? ['church', CHURCH_SETBACK_METRES]
-          : plot === middle && plotSide === -village.side
+          : plot === middle + 1 && plotSide === -village.side
             ? ['shop-row', SETBACK_METRES - 1]
             : ['building', SETBACK_METRES];
-      const built = uniformFrom(hash, STREAM_PLOT) < PLOT_BUILT_SHARE;
+      const built = plot !== middle && uniformFrom(hash, STREAM_PLOT) < PLOT_BUILT_SHARE;
       const variant = Math.min(5, Math.floor(uniformFrom(hash, STREAM_VARIANT) * 6));
       every.push({ along, side: plotSide, kind, lateral, variant, built });
     }

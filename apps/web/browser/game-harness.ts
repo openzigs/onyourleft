@@ -189,6 +189,8 @@ import {
   furnitureShownOf,
   pavementsShownOf,
   pavementTrianglesOf,
+  sideRoadMeshOf,
+  sideRoadsShownOf,
   wordmarkOrientationOf,
   type WordmarkOrientation,
   type RealisticSurfaces,
@@ -2548,6 +2550,19 @@ interface PavementMeasurement {
    */
   readonly onRgb: readonly number[];
   readonly offRgb: readonly number[];
+  /**
+   * #1565: the village's crossroads — the side roads' triangles, the draw
+   * calls with them and switched off, whether they wear the road's material,
+   * and a point on one, drawn and switched off.
+   */
+  readonly sideRoads: {
+    readonly triangles: number;
+    readonly drawCalls: number;
+    readonly drawCallsOff: number;
+    readonly sameMaterial: boolean;
+    readonly onRgb: readonly number[];
+    readonly offRgb: readonly number[];
+  };
   /** #1536: what stands on the pavements, on the same frames. */
   readonly furniture: {
     /** Pieces of each kind drawn beside the village, and in open country — the control. */
@@ -2577,6 +2592,14 @@ const NO_PAVEMENT: PavementMeasurement = {
   drawCallsOff: 0,
   onRgb: [],
   offRgb: [],
+  sideRoads: {
+    triangles: 0,
+    drawCalls: 0,
+    drawCallsOff: 0,
+    sameMaterial: false,
+    onRgb: [],
+    offRgb: [],
+  },
   furniture: {
     counts: NO_FURNITURE,
     countsOpen: NO_FURNITURE,
@@ -2585,6 +2608,31 @@ const NO_PAVEMENT: PavementMeasurement = {
     pixels: 0,
   },
 };
+
+/**
+ * Where a pavement probe reads, along the road: the built plot on the road's
+ * LEFT nearest the middle of that side's built plots, of the first village
+ * with three of them — and since #1565 never the village's middle plot, which
+ * is its crossroads, where the pavement is broken for the side road's mouth.
+ */
+function pavedPlotAlong(
+  villages: readonly (ReturnType<typeof siteAt> | undefined)[],
+  seed: number,
+): { readonly along: number; readonly site: NonNullable<ReturnType<typeof siteAt>> } | undefined {
+  for (const site of villages) {
+    if (site === undefined) continue;
+    const left = villagePlots(seed, site)
+      .filter((plot) => plot.side === -1)
+      .map((plot) => plot.along);
+    if (left.length < 3) continue;
+    const middle = (Math.min(...left) + Math.max(...left)) / 2;
+    const away = left
+      .filter((along) => Math.abs(along - site.centre) >= PLOT_METRES - 1)
+      .sort((a, b) => Math.abs(a - middle) - Math.abs(b - middle));
+    if (away[0] !== undefined) return { along: away[0], site };
+  }
+  return undefined;
+}
 
 /**
  * #1535: a village's pavement, drawn by `view` in whichever world it draws.
@@ -2605,17 +2653,9 @@ function pavementProbe(
   const villages = [...Array(sites).keys()]
     .map((index) => siteAt(profile, seed, index))
     .filter((site) => site?.kind === 'village');
-  const left = villages
-    .map((site) =>
-      site === undefined
-        ? []
-        : villagePlots(seed, site)
-            .filter((plot) => plot.side === -1)
-            .map((plot) => plot.along),
-    )
-    .find((plots) => plots.length >= 3);
-  if (left === undefined) return NO_PAVEMENT;
-  const middle = (Math.min(...left) + Math.max(...left)) / 2;
+  const paved = pavedPlotAlong(villages, seed);
+  if (paved === undefined) return NO_PAVEMENT;
+  const middle = paved.along;
   const start = atStartLine(profile);
   const frameAt = (distance: number): SceneFrame =>
     sceneFrame({
@@ -2661,6 +2701,56 @@ function pavementProbe(
     const drawCallsOff = drawn();
     const offRgb = meanRgb();
     pavementsShownOf(view, true);
+    // #1565: the village's crossroads, 30 m up the road, in the road's own
+    // material and one call. The point read is 12 m out on its LEFT arm — on
+    // the side road, from the village's centre and the road's frame; its
+    // height is the side road's own, read off the mesh under test.
+    const crossroads = frameAt(paved.site.centre - 30);
+    const sideCalls = (): number => {
+      view.render(crossroads);
+      const before = calls();
+      view.render(crossroads);
+      return calls() - before;
+    };
+    const sideDrawCalls = sideCalls();
+    const meshes = sideRoadMeshOf(view);
+    const sideTriangles =
+      meshes?.sideRoads.visible === true ? (meshes.sideRoads.geometry.index?.count ?? 0) / 3 : 0;
+    const sameMaterial = meshes !== undefined && meshes.sideRoads.material === meshes.road.material;
+    const at = drawnRoadFrame(profile, origin, paved.site.centre);
+    let sideRgb: number[] = [];
+    let sideOffRgb: number[] = [];
+    let sideDrawCallsOff = Number.NaN;
+    if (at !== undefined && meshes !== undefined) {
+      const x = at.x - at.normalX * 12;
+      const z = at.z - at.normalZ * 12;
+      const positions = meshes.sideRoads.geometry.getAttribute('position');
+      let y = 0;
+      let nearest = Number.POSITIVE_INFINITY;
+      for (let vertex = 0; vertex < (positions?.count ?? 0); vertex += 1) {
+        const gap = Math.hypot(positions.getX(vertex) - x, positions.getZ(vertex) - z);
+        if (gap < nearest) {
+          nearest = gap;
+          y = positions.getY(vertex);
+        }
+      }
+      const meanAt = (): number[] => {
+        const centre = pixelFor(crossroads, canvas, { x, y, z });
+        const pixels = readRegion(gl, Math.round(centre.x) - 1, Math.round(centre.y) - 1, 3, 3);
+        const sums = [0, 0, 0];
+        for (let each = 0; each < pixels.length; each += 4) {
+          for (let channel = 0; channel < 3; channel += 1) {
+            sums[channel] = (sums[channel] ?? 0) + (pixels[each + channel] ?? 0);
+          }
+        }
+        return sums.map((sum) => sum / 9);
+      };
+      sideRgb = meanAt();
+      sideRoadsShownOf(view, false);
+      sideDrawCallsOff = sideCalls();
+      sideOffRgb = meanAt();
+      sideRoadsShownOf(view, true);
+    }
     // The control: open country, a frame whose whole corridor touches no
     // village — found from the sites, not from the streets.
     const open = [...Array(120).keys()]
@@ -2692,6 +2782,14 @@ function pavementProbe(
       drawCallsOff,
       onRgb,
       offRgb,
+      sideRoads: {
+        triangles: sideTriangles,
+        drawCalls: sideDrawCalls,
+        drawCallsOff: sideDrawCallsOff,
+        sameMaterial,
+        onRgb: sideRgb,
+        offRgb: sideOffRgb,
+      },
       furniture: {
         counts,
         countsOpen,
@@ -2751,19 +2849,14 @@ function mappedPavementProbe(
   const origin = corridorOrigin(profile);
   const seed = scatterSeed(profile);
   const { sites } = siteSpacing(profile);
-  const left = [...Array(sites).keys()]
-    .map((index) => siteAt(profile, seed, index))
-    .filter((site) => site?.kind === 'village')
-    .map((site) =>
-      site === undefined
-        ? []
-        : villagePlots(seed, site)
-            .filter((plot) => plot.side === -1)
-            .map((plot) => plot.along),
-    )
-    .find((plots) => plots.length >= 3);
-  if (left === undefined) return NO_MAPPED_PAVEMENT;
-  const middle = (Math.min(...left) + Math.max(...left)) / 2;
+  const paved = pavedPlotAlong(
+    [...Array(sites).keys()]
+      .map((index) => siteAt(profile, seed, index))
+      .filter((site) => site?.kind === 'village'),
+    seed,
+  );
+  if (paved === undefined) return NO_MAPPED_PAVEMENT;
+  const middle = paved.along;
   const line: number[] = [];
   for (let along = middle - 150; along <= middle + 150; along += 10) {
     const road = drawnRoadFrame(profile, origin, along);
@@ -2779,6 +2872,7 @@ function mappedPavementProbe(
     landUse: [],
     buildings: [],
     paths: [{ kind: 'path', kindDetail: 'sidewalk', line: Float32Array.from(line) }],
+    streets: [],
   };
   const start = atStartLine(profile);
   const frameWith = (worldCorridor: WorldCorridor | undefined): SceneFrame =>
@@ -2879,6 +2973,7 @@ function levellingProbe(view: ReturnType<typeof threeGameRenderer.create>): Leve
     ],
     buildings: [],
     paths: [],
+    streets: [],
   };
   const land = landClassMask(corridor);
   const start = atStartLine(profile);

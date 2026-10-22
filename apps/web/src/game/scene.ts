@@ -63,7 +63,15 @@ import {
   structuresAt,
   type SettlementFootprint,
 } from './settlements';
+import {
+  boardsClearOfSideRoads,
+  clearOfSideRoads,
+  mappedJunctions,
+  sideRoadsAt,
+  type SideRoad,
+} from './cross-streets';
 import { NO_PAVEMENT_DATA, pavementSides } from './footways';
+import { BILLBOARD_FOOTPRINT } from './logo-board';
 import { streetsAt } from './streets';
 import { bridgeParts, waterSurface, waterways } from './waterways';
 import { worldStyle } from './world';
@@ -228,7 +236,23 @@ export function sceneFrame(input: SceneInput): SceneFrame {
   // tree and the hillside it stands on are hashed from the same route.
   const seed = scatterSeed(input.profile);
   const riders = placedRiders(input, corridor);
-  const { scatter: items, billboards } = scenery(corridor, input, riderDistance, seed);
+  // #1565: the cross streets along exactly the stretch of road this frame drew
+  // — mapped where the corridor has streets (found once a corridor), and a
+  // crossroads at each procedural village — before the scenery, which is kept
+  // off them.
+  const sideRoads = sideRoadsAt(
+    input.profile,
+    input.origin,
+    seed,
+    (corridor.centre[0] as CorridorPoint).along,
+    (corridor.centre[corridor.centre.length - 1] as CorridorPoint).along,
+    riderDistance,
+    input.worldCorridor === undefined
+      ? []
+      : mappedJunctions(input.worldCorridor, input.profile, input.origin, seed),
+    input.landClass ?? NO_LAND_CLASS,
+  );
+  const { scatter: items, billboards } = scenery(corridor, input, riderDistance, seed, sideRoads);
   return {
     corridor,
     // The camera follows the rider sideways — their drawn place, not the line's
@@ -243,6 +267,7 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     scatter: items,
     // #966: the billboards in view, out of the structures' budget.
     billboards,
+    sideRoads,
     // #1535: the village streets along exactly the stretch of road this frame
     // drew, for `scenery`'s reason — and outside the structures' budget,
     // because a street is one mesh rather than items a rung could thin.
@@ -313,6 +338,7 @@ function scenery(
   input: SceneInput,
   riderDistance: number,
   seed: number,
+  sideRoads: readonly SideRoad[],
 ): { readonly scatter: readonly ScatterItem[]; readonly billboards: readonly Billboard[] } {
   const first = corridor.centre[0] as CorridorPoint;
   const last = corridor.centre[corridor.centre.length - 1] as CorridorPoint;
@@ -330,17 +356,22 @@ function scenery(
   // #966. The billboards come out of the structures' budget FIRST: a rung that
   // takes structures away takes them too, and none is ever extra.
   const structureBudget = Math.max(0, input.structureItems ?? STRUCTURE_MAX_ITEMS);
-  const billboards = nearestBillboards(
-    billboardsAt(input.profile, input.origin, seed, first.along, last.along),
-    riderDistance,
-    structureBudget,
+  // #1565: and none on a side road.
+  const billboards = boardsClearOfSideRoads(
+    nearestBillboards(
+      billboardsAt(input.profile, input.origin, seed, first.along, last.along),
+      riderDistance,
+      structureBudget,
+    ),
+    sideRoads,
+    BILLBOARD_FOOTPRINT,
   );
   // #460. The villages, farmsteads and field boundaries, FIRST — so that a belt
   // spending its budget in frame order never loses a house to a far tree — and
   // the natural scenery kept clear of every building, and of every billboard.
   // #1534: and off every settlement's ground, so no house stands in a wood.
   const footprints: SettlementFootprint[] = [];
-  const built = structuresAt(
+  const placed = structuresAt(
     input.profile,
     input.origin,
     seed,
@@ -350,8 +381,13 @@ function scenery(
     footprints,
     land,
   );
-  const cleared =
-    input.settlementsWooded === true ? natural : clearOfSettlements(natural, footprints, land);
+  // #1565: no wall, hedge, fence, signpost or building on a side road, and no
+  // tree, shrub or rock either.
+  const built = clearOfSideRoads(placed, sideRoads);
+  const cleared = clearOfSideRoads(
+    input.settlementsWooded === true ? natural : clearOfSettlements(natural, footprints, land),
+    sideRoads,
+  );
   return {
     scatter: [...built, ...clearOfBillboards(clearOfBuildings(cleared, built), billboards)],
     billboards,

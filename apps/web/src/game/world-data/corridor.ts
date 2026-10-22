@@ -43,6 +43,8 @@ import {
   type DecodeRefusal,
   type LandUseFeature,
   type PathFeature,
+  type StreetFeature,
+  type StreetGrade,
   type TileId,
 } from '@onyourleft/map-features';
 import type { PrivacyZoneRecord, WorldCorridorTileState } from '@onyourleft/store';
@@ -71,9 +73,10 @@ export const READ_TIMEOUT_MS = 120_000;
 /**
  * Bumped when the decode, or the fields this keeps, change — so a record kept
  * by an older reader is read again rather than trusted (`records.ts`
- * §`WorldCorridorRecord.readerVersion`).
+ * §`WorldCorridorRecord.readerVersion`). **2** since #1565, which keeps the
+ * streets a version-1 record never decoded.
  */
-export const CORRIDOR_READER_VERSION = 1;
+export const CORRIDOR_READER_VERSION = 2;
 
 /** What the chooser says about the corridor, and what a ride starts from. */
 export type CorridorState =
@@ -102,6 +105,8 @@ export interface WorldCorridor {
   readonly landUse: readonly LandUseFeature[];
   readonly buildings: readonly BuildingFeature[];
   readonly paths: readonly PathFeature[];
+  /** #1565: the streets the cross streets are found from (`cross-streets.ts`). */
+  readonly streets: readonly StreetFeature[];
 }
 
 /** One tile of a corridor, and why it holds what it holds. */
@@ -317,6 +322,7 @@ export interface CorridorFeatures {
   readonly landUse: readonly LandUseFeature[];
   readonly buildings: readonly BuildingFeature[];
   readonly paths: readonly PathFeature[];
+  readonly streets: readonly StreetFeature[];
 }
 
 /** What {@link readCorridorTiles} came to. */
@@ -410,6 +416,7 @@ export async function readCorridorTiles(options: CorridorReadOptions): Promise<C
     const landUse: LandUseFeature[] = [];
     const buildings: BuildingFeature[] = [];
     const paths: PathFeature[] = [];
+    const streets: StreetFeature[] = [];
     let done = 0;
     let arrived = 0;
     const of = queue.length;
@@ -435,6 +442,7 @@ export async function readCorridorTiles(options: CorridorReadOptions): Promise<C
         for (const feature of decoded.landUse) landUse.push(feature);
         for (const feature of decoded.buildings) buildings.push(feature);
         for (const feature of decoded.paths) paths.push(feature);
+        for (const feature of decoded.streets) streets.push(feature);
       } catch (error) {
         states.set(key(tile), 'refused');
         const failure =
@@ -472,7 +480,7 @@ export async function readCorridorTiles(options: CorridorReadOptions): Promise<C
       kind: 'read',
       identity: opening.identity,
       tiles,
-      features: { landUse, buildings, paths },
+      features: { landUse, buildings, paths, streets },
     };
   } finally {
     whole.done();
@@ -485,7 +493,8 @@ export async function readCorridorTiles(options: CorridorReadOptions): Promise<C
 const PACK_SCALE = 100;
 
 interface PackedFeatures {
-  readonly v: 1;
+  /** 2 since #1565, which added {@link streets}. */
+  readonly v: 2;
   readonly landUse: readonly { layer: 'landuse' | 'water'; kind: string; rings: number[][] }[];
   readonly buildings: readonly {
     kind: 'building' | 'building_part';
@@ -494,6 +503,8 @@ interface PackedFeatures {
     rings: number[][];
   }[];
   readonly paths: readonly { kind: string; detail: string; line: number[] }[];
+  /** `g` is the street's grade (#1565); a record without one is read as at grade. */
+  readonly streets: readonly { kind: string; detail: string; g?: StreetGrade; line: number[] }[];
 }
 
 const toInts = (values: Float32Array): number[] =>
@@ -530,7 +541,7 @@ export async function streamBytes(
 /** The features as the store keeps them: gzip over JSON, coordinates in centimetres. */
 export async function packCorridorFeatures(features: CorridorFeatures): Promise<Blob> {
   const packed: PackedFeatures = {
-    v: 1,
+    v: 2,
     landUse: features.landUse.map((f) => ({
       layer: f.layer,
       kind: f.kind,
@@ -547,6 +558,12 @@ export async function packCorridorFeatures(features: CorridorFeatures): Promise<
       detail: f.kindDetail,
       line: toInts(f.line),
     })),
+    streets: features.streets.map((f) => ({
+      kind: f.kind,
+      detail: f.kindDetail,
+      g: f.grade,
+      line: toInts(f.line),
+    })),
   };
   const json = new Blob([JSON.stringify(packed)]);
   const gzipped = json.stream().pipeThrough(new CompressionStream('gzip'));
@@ -557,7 +574,7 @@ export async function packCorridorFeatures(features: CorridorFeatures): Promise<
 export async function unpackCorridorFeatures(blob: Blob): Promise<CorridorFeatures> {
   const json = blob.stream().pipeThrough(new DecompressionStream('gzip'));
   const packed = JSON.parse(new TextDecoder().decode(await streamBytes(json))) as PackedFeatures;
-  if (packed.v !== 1) throw new Error('worldCorridors.features: not a version this reads');
+  if (packed.v !== 2) throw new Error('worldCorridors.features: not a version this reads');
   return {
     landUse: packed.landUse.map((f) => ({
       layer: f.layer,
@@ -573,6 +590,12 @@ export async function unpackCorridorFeatures(blob: Blob): Promise<CorridorFeatur
     paths: packed.paths.map((f) => ({
       kind: f.kind,
       kindDetail: f.detail,
+      line: fromInts(f.line),
+    })),
+    streets: packed.streets.map((f) => ({
+      kind: f.kind,
+      kindDetail: f.detail,
+      grade: f.g === 'bridge' || f.g === 'tunnel' ? f.g : 'ground',
       line: fromInts(f.line),
     })),
   };
@@ -624,5 +647,6 @@ export function worldCorridorOf(
     landUse: features.landUse,
     buildings: features.buildings,
     paths: features.paths,
+    streets: features.streets,
   };
 }

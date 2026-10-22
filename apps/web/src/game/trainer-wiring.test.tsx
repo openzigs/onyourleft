@@ -387,6 +387,7 @@ describe('the road the game draws reaches the trainer', () => {
       landUse: [block(40, 200), block(-200, -40)],
       buildings: [],
       paths: [],
+      streets: [],
     };
     const rideOnce = async (
       loadWorldCorridor: GamePort['loadWorldCorridor'] | undefined,

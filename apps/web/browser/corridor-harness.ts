@@ -29,6 +29,12 @@
  * holds them to `corridor-fixture.ts` §`CORRIDOR_FIXTURE_VERDICTS`, which
  * `corridor-fixture.test.ts` holds the same plans to in Node.
  *
+ * Since #1565 it also publishes {@link CorridorHarness.junctions}: every
+ * mapped cross street the scene draws along the route, with each arm's
+ * heading read back from its mesh (`corridor-fixture.ts` §`drawnJunctions`).
+ * `?levers=-streets` — harness-only too — hands the scene the corridor with
+ * its streets layer emptied, which is that case's control.
+ *
  * ⚠️ What it does NOT prove: anything about the hosted archive's latency
  * (ADR 0010 D-1's 500 ms+; #1553 measures that on the tablet), or that the
  * realistic world draws anything from the corridor (#1549 draws the plans).
@@ -54,8 +60,10 @@ import {
   classedItems,
   CORRIDOR_ARCHIVE_FILE,
   corridorFixtureRoute,
+  drawnJunctions,
   LONG_CORRIDOR_ARCHIVE_FILE,
   type ClassedItem,
+  type DrawnJunction,
 } from './corridor-fixture';
 
 const QUERY = new URLSearchParams(location.search);
@@ -66,6 +74,9 @@ const LONG = QUERY.has('long');
 /** `?levers=-landclass`: #1546's control — the scene is handed no land-class mask. */
 const NO_LAND_CLASS_LEVER = (QUERY.get('levers') ?? '').split(',').includes('-landclass');
 
+/** `?levers=-streets`: #1565's control — the scene is handed the corridor with no streets. */
+const NO_STREETS_LEVER = (QUERY.get('levers') ?? '').split(',').includes('-streets');
+
 export interface CorridorHarness {
   readonly state: CorridorState['kind'];
   readonly why: string | undefined;
@@ -73,6 +84,8 @@ export interface CorridorHarness {
   readonly buildings: number;
   readonly landUse: number;
   readonly paths: number;
+  /** #1565: the streets the corridor kept. */
+  readonly streets: number;
   readonly sceneDigest: string;
   readonly proceduralDigest: string;
   readonly milliseconds: number;
@@ -92,6 +105,8 @@ export interface CorridorHarness {
    */
   readonly townPlanMilliseconds: number;
   readonly townKept: number;
+  /** #1565: every mapped cross street drawn along the route; empty for `?long` or no corridor. */
+  readonly junctions: readonly DrawnJunction[];
   readonly errors: readonly string[];
 }
 
@@ -110,7 +125,14 @@ function digestOf(corridor: WorldCorridor | undefined): string {
     state: atStartLine(profile),
     ...(corridor === undefined ? {} : { worldCorridor: corridor }),
   });
-  const text = JSON.stringify([frame.scatter, frame.billboards, frame.streets, frame.lines]);
+  const text = JSON.stringify([
+    frame.scatter,
+    frame.billboards,
+    frame.streets,
+    frame.lines,
+    // #1565: the cross streets at the start line.
+    frame.sideRoads.map((road) => [road.junction.along, road.junction.arms]),
+  ]);
   let hash = 0x81_1c_9d_c5;
   for (let i = 0; i < text.length; i++) {
     hash ^= text.charCodeAt(i);
@@ -184,6 +206,12 @@ async function run(): Promise<CorridorHarness> {
     ready === undefined || mask === undefined || LONG
       ? []
       : classedItems(ready, NO_LAND_CLASS_LEVER ? undefined : mask, mask);
+  // #1565: the cross streets, through the scene, from the corridor as read —
+  // or, for the control, the same corridor with its streets layer off.
+  const junctions =
+    ready === undefined || LONG
+      ? []
+      : drawnJunctions(NO_STREETS_LEVER ? { ...ready, streets: [] } : ready, mask);
   return {
     state: state.kind,
     why: 'why' in state ? state.why : undefined,
@@ -191,6 +219,7 @@ async function run(): Promise<CorridorHarness> {
     buildings: ready?.buildings.length ?? 0,
     landUse: ready?.landUse.length ?? 0,
     paths: ready?.paths.length ?? 0,
+    streets: ready?.streets.length ?? 0,
     sceneDigest: digestOf(ready),
     proceduralDigest: digestOf(undefined),
     milliseconds,
@@ -201,6 +230,7 @@ async function run(): Promise<CorridorHarness> {
     planMilliseconds,
     townPlanMilliseconds,
     townKept,
+    junctions,
     errors,
   };
 }
@@ -217,6 +247,7 @@ void run().then(
       buildings: 0,
       landUse: 0,
       paths: 0,
+      streets: 0,
       sceneDigest: '',
       proceduralDigest: '',
       milliseconds: 0,
@@ -227,6 +258,7 @@ void run().then(
       planMilliseconds: 0,
       townPlanMilliseconds: 0,
       townKept: 0,
+      junctions: [],
       errors: [error instanceof Error ? error.message : String(error)],
     };
   },

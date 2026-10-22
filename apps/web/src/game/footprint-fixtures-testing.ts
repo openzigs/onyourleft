@@ -255,6 +255,7 @@ export function footprintFixture(): {
     ],
     buildings: Object.values(named),
     paths: [],
+    streets: [],
   };
   return { profile, origin, corridor, named };
 }
@@ -292,6 +293,7 @@ export function denseTownFixture(count = 2_000): {
       landUse: [landBeside(profile, origin, 'landuse', 'residential', 100, 1_300, -220, 220)],
       buildings,
       paths: [],
+      streets: [],
     },
   };
 }

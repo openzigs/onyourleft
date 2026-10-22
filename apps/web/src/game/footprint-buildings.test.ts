@@ -228,6 +228,7 @@ describe('a road wholly inside the footprint — rule 3', () => {
     landUse: [],
     buildings: [over],
     paths: [],
+    streets: [],
   };
 
   it('drops the footprint a road runs wholly inside', () => {
@@ -266,6 +267,7 @@ describe('nothing on any stretch of the road — rule 3, #468', () => {
     landUse: [landBeside(profile, origin, 'landuse', 'residential', 0, 390, 5, 75)],
     buildings: inside,
     paths: [],
+    streets: [],
   };
   const land = landClassMask(corridor);
   /** The drawn road, every half metre, the whole route. */
