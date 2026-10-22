@@ -82,7 +82,9 @@ import type { WorldStyle } from '../src/game/world';
 
 import { sceneFrame as builtSceneFrame } from '../src/game/scene';
 import { retainedFrame } from '../src/game/frame-testing';
-import { corridorOrigin } from '../src/game/terrain';
+import { corridorOrigin, drawnRoadFrame } from '../src/game/terrain';
+import { pavementSides } from '../src/game/footways';
+import type { WorldCorridor } from '../src/game/world-data/corridor';
 import {
   QUALITY_LADDER,
   qualitySettings,
@@ -2694,6 +2696,124 @@ function pavementProbe(
   return measured;
 }
 
+/** What {@link mappedPavementProbe} publishes — #1551. */
+interface MappedPavementMeasurement {
+  /** What `pavementSides` said at the probe's stretch: `right`, or the probe proves nothing. */
+  readonly sideAtProbe: string;
+  /** The right-hand probe: with the mapped sidewalk, and with the pavements switched off. */
+  readonly rightMapped: readonly number[];
+  readonly rightOff: readonly number[];
+  /**
+   * The left-hand probe: with the mapped sidewalk; with no corridor at all —
+   * #1535's own sides, the `-pavement-data` control; and switched off.
+   */
+  readonly leftMapped: readonly number[];
+  readonly leftProcedural: readonly number[];
+  readonly leftOff: readonly number[];
+}
+
+const NO_MAPPED_PAVEMENT: MappedPavementMeasurement = {
+  sideAtProbe: '',
+  rightMapped: [],
+  rightOff: [],
+  leftMapped: [],
+  leftProcedural: [],
+  leftOff: [],
+};
+
+/**
+ * #1551: #1535's village, with a corridor whose one footway is a sidewalk 6 m
+ * to the road's RIGHT for 300 m through it, every tile read. Two probes at
+ * the pavement's middle 25 m up the road, either side of it — the left one at
+ * {@link pavementProbe}'s point, where #1535 alone lays a pavement. The
+ * corridor goes into `sceneFrame` as a ride's does, as `worldCorridor`.
+ *
+ * ⚠️ The corridor is built here rather than read from an archive
+ * (`corridor.browser.spec.ts` reads #1539's archive end to end): what is
+ * measured is the side the pavement is drawn on from a known sidewalk.
+ * The control is the same frame with no corridor, which is what the issue's
+ * `&levers=-pavement-data` asks for: #1535's own sides.
+ */
+function mappedPavementProbe(
+  view: ReturnType<typeof threeGameRenderer.create>,
+  gl: WebGL2RenderingContext,
+  canvas: HTMLCanvasElement,
+): MappedPavementMeasurement {
+  const profile = northRouteForHarness();
+  const origin = corridorOrigin(profile);
+  const seed = scatterSeed(profile);
+  const { sites } = siteSpacing(profile);
+  const left = [...Array(sites).keys()]
+    .map((index) => siteAt(profile, seed, index))
+    .filter((site) => site?.kind === 'village')
+    .map((site) =>
+      site === undefined
+        ? []
+        : villagePlots(seed, site)
+            .filter((plot) => plot.side === -1)
+            .map((plot) => plot.along),
+    )
+    .find((plots) => plots.length >= 3);
+  if (left === undefined) return NO_MAPPED_PAVEMENT;
+  const middle = (Math.min(...left) + Math.max(...left)) / 2;
+  const line: number[] = [];
+  for (let along = middle - 150; along <= middle + 150; along += 10) {
+    const road = drawnRoadFrame(profile, origin, along);
+    if (road === undefined) continue;
+    line.push(road.x + road.normalX * 6, road.z + road.normalZ * 6);
+  }
+  const corridor: WorldCorridor = {
+    routeId: 'harness-1551',
+    origin,
+    covered: () => true,
+    landUse: [],
+    buildings: [],
+    paths: [{ kind: 'path', kindDetail: 'sidewalk', line: Float32Array.from(line) }],
+  };
+  const start = atStartLine(profile);
+  const frameWith = (worldCorridor: WorldCorridor | undefined): SceneFrame =>
+    sceneFrame({
+      profile,
+      origin,
+      state: { ...start, ride: { ...start.ride, distance: metres(middle - 20) } },
+      ...(worldCorridor === undefined ? {} : { worldCorridor }),
+    });
+  const mapped = frameWith(corridor);
+  const procedural = frameWith(undefined);
+  const lateral = KERB_LATERAL_METRES + PAVEMENT_WIDTH_METRES / 2;
+  // ONE render a state, both probes read off it: this load is within seconds
+  // of its budget on the runner (`paysForTheLoad`), and a render is ~0.3 s there.
+  const probes = (frame: SceneFrame): { right: number[]; left: number[] } => {
+    view.render(frame);
+    const meanAt = (across: number): number[] => {
+      const road = onTheRoad(frame, 25, across);
+      const centre = pixelFor(frame, canvas, { ...road, y: road.y + KERB_HEIGHT_METRES });
+      const pixels = readRegion(gl, Math.round(centre.x) - 1, Math.round(centre.y) - 1, 3, 3);
+      const sums = [0, 0, 0];
+      for (let at = 0; at < pixels.length; at += 4) {
+        for (let channel = 0; channel < 3; channel += 1) {
+          sums[channel] = (sums[channel] ?? 0) + (pixels[at + channel] ?? 0);
+        }
+      }
+      return sums.map((sum) => sum / 9);
+    };
+    return { right: meanAt(lateral), left: meanAt(-lateral) };
+  };
+  const withMap = probes(mapped);
+  const ownSides = probes(procedural);
+  pavementsShownOf(view, false);
+  const off = probes(mapped);
+  pavementsShownOf(view, true);
+  return {
+    sideAtProbe: pavementSides(corridor, profile, origin).sideAt(middle),
+    rightMapped: withMap.right,
+    rightOff: off.right,
+    leftMapped: withMap.left,
+    leftProcedural: ownSides.left,
+    leftOff: off.left,
+  };
+}
+
 /** Six kilometres of level, low farmland — somewhere a village stands. */
 function northRouteForHarness(): ReturnType<typeof routeProfile> {
   return northRoute(6_000, () => 40);
@@ -4887,6 +5007,8 @@ export interface RealisticMeasurement {
   readonly windowWall: readonly number[];
   /** #1535: a village's pavement in ambientCG's paving. @see pavementProbe */
   readonly pavement: PavementMeasurement;
+  /** #1551: the pavement on the side a sidewalk is mapped on. @see mappedPavementProbe */
+  readonly mappedPavement: MappedPavementMeasurement;
   /** #621: two trees and two houses of one shape, tinted and not. @see tintProbe */
   readonly tint: TintMeasurement;
   /** #620: the ground under a tree's blob and 5 m from it, with and without the blobs. @see groundBlobProbe */
@@ -6912,6 +7034,7 @@ const NO_REALISTIC: RealisticMeasurement = {
   windowControl: [],
   windowWall: [],
   pavement: NO_PAVEMENT,
+  mappedPavement: NO_MAPPED_PAVEMENT,
   tint: {
     trees: [],
     treesControl: [],
@@ -8452,6 +8575,10 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   const pavement = pavementProbe(view, gl, canvas);
   phaseEnds('realistic: pavement — #1535');
 
+  // #1551, on the same view and #1535's village: the pavement on the mapped side.
+  const mappedPavement = mappedPavementProbe(view, gl, canvas);
+  phaseEnds('realistic: pavement on the mapped side — #1551');
+
   // #624, on the same view and the same road.
   const tread = treadProbe(view, gl, canvas, riding(level, 400));
   phaseEnds('realistic: the tread — #624');
@@ -8689,6 +8816,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     windowControl,
     windowWall,
     pavement,
+    mappedPavement,
     tint,
     grounding,
     tread,

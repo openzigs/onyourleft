@@ -12,10 +12,10 @@
  *
  * Publishes `window.__oylCorridor`: the state the read came to, how many tiles
  * were covered, the feature counts, and two digests of what the scene builds
- * at the start line — with the corridor (if any) and with none. Nothing reads
- * the corridor into the scene yet (#1540), so the two are equal; the offline
- * control asserts that they are, which is the browser half of "offline, the
- * world is today's".
+ * at the start line — with the corridor (if any) and with none. Since #1551
+ * a village's pavement sides read the corridor's footways, so the two may
+ * differ when it is ready; the offline control asserts that they are equal,
+ * which is the browser half of "offline, the world is today's".
  *
  * Since #1546 it also publishes {@link CorridorHarness.classed}: every
  * structure and scatter item the scene stands along the route with the

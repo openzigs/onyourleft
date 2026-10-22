@@ -33,6 +33,7 @@ import {
   woodWithHoleTile,
 } from '@onyourleft/map-features/testing';
 
+import { NO_PAVEMENT_DATA } from './footways';
 import {
   LAND_CLASS_MAX_BYTES,
   LAND_CLASS_OF_KIND,
@@ -252,7 +253,15 @@ describe('no procedural village in mapped land — P-9, ADR 0054 D-5.3', () => {
   });
 
   it('lays no village street on the covered stretch either', () => {
-    const covered = streetsAt(ROUTE, ORIGIN, SEED, 0, ROUTE.totalDistance, farmland);
+    const covered = streetsAt(
+      ROUTE,
+      ORIGIN,
+      SEED,
+      0,
+      ROUTE.totalDistance,
+      NO_PAVEMENT_DATA,
+      farmland,
+    );
     const today = streetsAt(ROUTE, ORIGIN, SEED, 0, ROUTE.totalDistance);
     const onIt = (from: number, to: number): boolean => to >= MIDDLE.minZ && from <= MIDDLE.maxZ;
     expect(covered.filter((street) => onIt(street.from, street.to))).toStrictEqual([]);
