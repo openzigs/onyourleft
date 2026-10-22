@@ -10,27 +10,36 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { decodeTile, type LandUseFeature } from '@onyourleft/map-features';
+import { decodeTile, type LandUseFeature, type StreetFeature } from '@onyourleft/map-features';
 
 import { landClassMask } from '../src/game/land-class';
 import { corridorOrigin } from '../src/game/terrain';
 import { planCorridor, worldCorridorOf } from '../src/game/world-data/corridor';
-import { classedItems, corridorFixtureRoute, corridorFixtureTiles } from './corridor-fixture';
+import {
+  classedItems,
+  corridorFixtureRoute,
+  corridorFixtureTiles,
+  drawnJunctions,
+  FIXTURE_JUNCTIONS,
+} from './corridor-fixture';
 
 function fixtureCorridor() {
   const profile = corridorFixtureRoute();
   const plan = planCorridor(profile.positions, []);
   if (plan === undefined) throw new Error('the fixture route plans no corridor');
   const landUse: LandUseFeature[] = [];
+  const streets: StreetFeature[] = [];
   for (const tile of corridorFixtureTiles()) {
     const decoded = decodeTile(tile.bytes, { z: 15, x: tile.x, y: tile.y }, plan.frame);
     if ('reason' in decoded) throw new Error(`a fixture tile was refused: ${decoded.reason}`);
     landUse.push(...decoded.landUse);
+    streets.push(...decoded.streets);
   }
   return worldCorridorOf('fixture', corridorOrigin(profile), plan.tiles, {
     landUse,
     buildings: [],
     paths: [],
+    streets,
   });
 }
 
@@ -52,5 +61,30 @@ describe('#1546 nothing on a mapped wood — the browser case’s fixture', () =
         (item) => item.structure && item.kind !== 'signpost' && item.landClass === 'wood',
       ).length,
     ).toBeGreaterThan(0);
+  });
+});
+
+describe('#1565 cross streets — the browser case’s fixture', () => {
+  const corridor = fixtureCorridor();
+  const mask = landClassMask(corridor);
+
+  it('draws the T and the crossroads at the fixture’s angles, read back from the meshes', () => {
+    const drawn = drawnJunctions(corridor, mask);
+    expect(drawn).toHaveLength(FIXTURE_JUNCTIONS.length);
+    FIXTURE_JUNCTIONS.forEach((fixture, index) => {
+      const junction = drawn[index];
+      expect(junction?.meshAngles.map((arm) => arm.side)).toStrictEqual(
+        fixture.arms.map((arm) => arm.side),
+      );
+      fixture.arms.forEach((arm, at) => {
+        expect(
+          Math.abs((junction?.meshAngles[at]?.angleDegrees ?? 0) - arm.angleDegrees),
+        ).toBeLessThan(3);
+      });
+    });
+  });
+
+  it('control: with the streets layer off, there are none', () => {
+    expect(drawnJunctions({ ...corridor, streets: [] }, mask)).toStrictEqual([]);
   });
 });

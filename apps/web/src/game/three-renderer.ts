@@ -372,6 +372,7 @@ import {
   type FurnitureKind,
   type VillageStreet,
 } from './streets';
+import type { SideRoad } from './cross-streets';
 import {
   LOGO_BOARDS_PER_FRAME,
   billboardLogoPlace,
@@ -8479,6 +8480,116 @@ function pavementGeometry(streets: readonly VillageStreet[], tileMetres: number)
 }
 
 /**
+ * Every cross street in view — #1565 (`cross-streets.ts`): the side roads a
+ * short way off the route at each junction, and their give-way lines. **One
+ * mesh and one draw call** however many are in view, and none where a frame
+ * holds none.
+ *
+ * ⚠️ **It wears the ROAD's material, whatever the road wears** —
+ * `ThreeGameView` hands it the road mesh's own every frame: the stylised
+ * road's grain, or the photograph and #628's wear. So it adds no texture and
+ * no material, and its buffers carry what that material reads: a colour, an
+ * up normal, #628's across-position, and #1523's patch reach, which is nought
+ * — no wear patch is ever on a side road, so the bounded wear runs no patch
+ * loop on one.
+ *
+ * Rebuilt only when the SET of side roads changes, as {@link PavementBelt}
+ * is: `cross-streets.ts` hands every frame the same objects for the same
+ * junctions.
+ */
+export class SideRoadBelt {
+  readonly #mesh: Mesh;
+  /** The side roads the mesh holds, in the order it holds them. */
+  #held: readonly SideRoad[] = [];
+  /** Whether the browser gate has turned the side roads off — its control. */
+  #switchedOn = true;
+
+  constructor(material: Material) {
+    this.#mesh = new Mesh(new BufferGeometry(), material);
+    this.#mesh.visible = false;
+  }
+
+  addTo(scene: Scene): void {
+    scene.add(this.#mesh);
+  }
+
+  /** The mesh. For the browser gate's counts and the jsdom suite. */
+  get mesh(): Mesh {
+    return this.#mesh;
+  }
+
+  /** The road's material, this frame. Not this belt's to dispose. */
+  setMaterial(material: Material): void {
+    this.#mesh.material = material;
+  }
+
+  /** @see sideRoadsShownOf */
+  switchOn(on: boolean): void {
+    this.#switchedOn = on;
+  }
+
+  /** This frame's side roads. */
+  update(roads: readonly SideRoad[]): void {
+    const drawn = this.#switchedOn ? roads : NO_SIDE_ROADS;
+    if (!sameSideRoads(drawn, this.#held)) {
+      this.#held = drawn;
+      const geometry = sideRoadGeometry(drawn);
+      this.#mesh.geometry.dispose();
+      this.#mesh.geometry = geometry;
+    }
+    this.#mesh.visible = drawn.length > 0;
+  }
+
+  dispose(): void {
+    this.#mesh.geometry.dispose();
+  }
+}
+
+/** No side roads: what a belt that is off holds. */
+const NO_SIDE_ROADS: readonly SideRoad[] = [];
+
+function sameSideRoads(first: readonly SideRoad[], second: readonly SideRoad[]): boolean {
+  return first.length === second.length && first.every((road, index) => road === second[index]);
+}
+
+/** Every side road as one geometry, with the attributes the road's material reads. */
+function sideRoadGeometry(roads: readonly SideRoad[]): BufferGeometry {
+  let vertices = 0;
+  let indices = 0;
+  for (const { mesh } of roads) {
+    vertices += mesh.positions.length / 3;
+    indices += mesh.indices.length;
+  }
+  const positions = new Float32Array(vertices * 3);
+  const colours = new Float32Array(vertices * 3);
+  const normals = new Float32Array(vertices * 3);
+  const across = new Float32Array(vertices);
+  const index = new Uint32Array(indices);
+  let vertex = 0;
+  let at = 0;
+  for (const { mesh } of roads) {
+    positions.set(mesh.positions, vertex * 3);
+    colours.set(mesh.colours, vertex * 3);
+    across.set(mesh.across, vertex);
+    for (let each = 0; each < mesh.indices.length; each += 1) {
+      index[at + each] = (mesh.indices[each] as number) + vertex;
+    }
+    vertex += mesh.positions.length / 3;
+    at += mesh.indices.length;
+  }
+  for (let up = 1; up < normals.length; up += 3) normals[up] = 1;
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new BufferAttribute(positions, 3));
+  geometry.setAttribute('color', new BufferAttribute(colours, 3));
+  geometry.setAttribute('normal', new BufferAttribute(normals, 3));
+  geometry.setAttribute(ROAD_ACROSS_ATTRIBUTE, new BufferAttribute(across, 1));
+  geometry.setAttribute(ROAD_REACH_ATTRIBUTE, new BufferAttribute(new Float32Array(vertices), 1));
+  geometry.setIndex(new BufferAttribute(index, 1));
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+/**
  * The most pieces of one furniture kind a frame draws: **64**. A village at
  * its fullest has 16 lamp posts and 8 bollards (`streets.ts` §`furnish`), a
  * frame holds two villages at most, and only what is within
@@ -12605,6 +12716,31 @@ export function pavementsShownOf(view: GameView, on: boolean): void {
 }
 
 /**
+ * Turns a view's cross streets off, or on again — #1565. The browser gate's
+ * control: with them off, a frame at a junction draws none.
+ *
+ * @test-facing the browser gate's control switch, read by `game-harness.ts`;
+ * the product always draws them.
+ */
+export function sideRoadsShownOf(view: GameView, on: boolean): void {
+  if (view instanceof ThreeGameView) view.sideRoadsShown(on);
+}
+
+/**
+ * The mesh a view draws its cross streets with, and the road's own — #1565:
+ * one mesh for every side road in view, wearing the road's material.
+ *
+ * @test-facing read by `three-renderer.test.ts` and `game-harness.ts`.
+ */
+export function sideRoadMeshOf(
+  view: GameView,
+): { readonly sideRoads: Mesh; readonly road: Mesh } | undefined {
+  return view instanceof ThreeGameView
+    ? { sideRoads: view.sideRoadMesh, road: view.roadMesh }
+    : undefined;
+}
+
+/**
  * Turns a view's street furniture off, or on again — #1536. The browser
  * gate's control: with it off, the frame must change by the pixels the
  * furniture covered, and lose one draw call a kind.
@@ -13084,6 +13220,8 @@ class ThreeGameView implements GameView {
   readonly #pavements = new PavementBelt('stylised');
   /** The stylised world's street furniture — #1536. The realistic world draws its own. */
   readonly #furniture = new FurnitureBelt('stylised');
+  /** The cross streets — #1565: ONE belt for both worlds, in whatever the road wears. */
+  readonly #sideRoads: SideRoadBelt;
   /**
    * The sun and the sky it is in — #286. Two lamps, built once and pointed
    * every frame by `#updateWorld`, exactly as the fog is coloured every frame.
@@ -13157,6 +13295,9 @@ class ThreeGameView implements GameView {
     // cull the road we just built. There is one mesh; culling it saves nothing.
     this.#road.frustumCulled = false;
     this.#scene.add(this.#road);
+    // #1565: the side roads, in the road's own material.
+    this.#sideRoads = new SideRoadBelt(this.#roadMaterial);
+    this.#sideRoads.addTo(this.#scene);
 
     this.#scatter.addTo(this.#scene);
     // #966: the start gate and the billboards, in the stylised world.
@@ -13256,6 +13397,9 @@ class ThreeGameView implements GameView {
     );
     this.#bridges.update(frame.water.bridges);
     this.#updateRoad(frame);
+    // #1565: the cross streets, in whatever the road wears this frame.
+    this.#sideRoads.setMaterial(this.#road.material as Material);
+    this.#sideRoads.update(frame.sideRoads);
     // ⚠️ Both worlds' belts are handed the frame, and the hidden world's
     // return at once (ADR 0026 D-3): one frame, one arrangement, whichever
     // world draws it — so the two can never disagree about where a tree is.
@@ -13642,6 +13786,21 @@ class ThreeGameView implements GameView {
     return this.#drawing === 'realistic' ? this.#realistic?.pavements.mesh : this.#pavements.mesh;
   }
 
+  /** @see sideRoadsShownOf */
+  sideRoadsShown(on: boolean): void {
+    this.#sideRoads.switchOn(on);
+  }
+
+  /** @see sideRoadMeshOf */
+  get sideRoadMesh(): Mesh {
+    return this.#sideRoads.mesh;
+  }
+
+  /** The road's mesh, for {@link sideRoadMeshOf}'s caller to compare materials. */
+  get roadMesh(): Mesh {
+    return this.#road;
+  }
+
   /** @see furnitureShownOf */
   furnitureShown(on: boolean): void {
     this.#realistic?.furniture.switchOn(on);
@@ -13917,6 +14076,7 @@ class ThreeGameView implements GameView {
     this.#logos.dispose();
     this.#pavements.dispose();
     this.#furniture.dispose();
+    this.#sideRoads.dispose();
     this.#lighting.dispose();
     this.#riders.dispose();
     for (const belt of this.#ownMeshes) belt.dispose();

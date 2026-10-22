@@ -264,7 +264,16 @@ describe('the arrangement a route produces — #341', () => {
     // NOTHING else moved: the sweep with that rule off still gives `a68475ff`
     // to the digit — "#1534's control" below — which is the evidence that the
     // scenery outside the settlements is the scenery it was.
-    expect(digest(placed.map(serialise))).toBe('bf49aa71');
+    //
+    // ⚠️ **And regenerated for #1565, which moves the arrangement on purpose**
+    // — `bf49aa71` before it. A village's middle plot, either side, is its
+    // crossroads (`settlements.ts` §`everyVillagePlot`, `cross-streets.ts`
+    // §`villageJunction`): the house that stood on it is gone, and the row of
+    // shops stands one plot further on. The natural scenery did not move — 6 661
+    // items in 968 places, below, exactly as #1534 left them — and the
+    // structures are 16 fewer over the sweep: the middle plot's houses, seen
+    // in every frame that holds them.
+    expect(digest(placed.map(serialise))).toBe('6f8fe1a7');
   });
 
   it('places the same scenery IN PLAN as it did before the terrain — #458', () => {
@@ -281,7 +290,10 @@ describe('the arrangement a route produces — #341', () => {
     //
     // ⚠️ **#1534 moved it, and it was `2830159f` until then** — the village's
     // ground cleared, as above, and only that.
-    expect(digest(placed.map(serialisePlan))).toBe('66dea453');
+    //
+    // ⚠️ **#1565 moved it, and it was `66dea453` until then** — the village's
+    // crossroads, as above, and only that.
+    expect(digest(placed.map(serialisePlan))).toBe('6b432fa3');
   });
 
   it('places exactly what it did before #1534 with the settlements’ ground left wooded — #1534’s control', () => {
@@ -289,15 +301,21 @@ describe('the arrangement a route produces — #341', () => {
     // scenery on a settlement's ground and nothing else. `settlements.test.ts`
     // §"#1534" asserts the same item by item — what went stood on that ground,
     // and everything that stayed stands where it stood.
+    //
+    // ⚠️ **#1565 moved this control too, and it was `a68475ff` / `2830159f`,
+    // 6 952 natural items in 1 019 places and 1 917 structures until then**:
+    // the house on a village's middle plot is its crossroads now, so with the
+    // ground left wooded one tree it used to clear (`clearOfBuildings`)
+    // stands, in eight frames, and the structures are #1565's 16 fewer.
     const wooded = sweep(true);
     const natural = wooded.filter((item) =>
       (SCATTER_KINDS as readonly string[]).includes(item.kind),
     );
-    expect(digest(wooded.map(serialise))).toBe('a68475ff');
-    expect(digest(wooded.map(serialisePlan))).toBe('2830159f');
-    expect(natural.length).toBe(6952);
-    expect(new Set(natural.map((item) => `${item.x},${item.z}`)).size).toBe(1019);
-    expect(wooded.length - natural.length).toBe(1917);
+    expect(digest(wooded.map(serialise))).toBe('0be00237');
+    expect(digest(wooded.map(serialisePlan))).toBe('a196f437');
+    expect(natural.length).toBe(6960);
+    expect(new Set(natural.map((item) => `${item.x},${item.z}`)).size).toBe(1020);
+    expect(wooded.length - natural.length).toBe(1901);
   });
 
   it('places a world at all, so the digest is not over an empty sweep', () => {
@@ -360,7 +378,8 @@ describe('the arrangement a route produces — #341', () => {
     // seen 291 times over the sweep, and the structures unmoved.
     expect(natural.length).toBe(6661);
     expect(new Set(natural.map((item) => `${item.x},${item.z}`)).size).toBe(968);
-    expect(placed.length - natural.length).toBe(1917);
+    // ⚠️ 1 917 until #1565, whose crossroads takes each village's middle plot.
+    expect(placed.length - natural.length).toBe(1901);
   });
 
   it('changes WHAT stands somewhere and not WHERE — #367', () => {
@@ -439,8 +458,10 @@ describe('the arrangement a route produces — #341', () => {
     // ⚠️ Since #1534 the middle item is a different one again, for #571's
     // reason the other way round: the cleared village makes the sweep 291
     // items shorter. The first and last did not move.
+    // ⚠️ And since #1565, 16 structures shorter (the crossroads), so the
+    // middle is a different item once more; the first and last did not move.
     expect(middle === undefined ? '' : serialise(middle)).toBe(
-      'shrub 804.070 26.402 88.848 2.193 0.747',
+      'tree-conifer 779.333 23.185 173.764 5.459 0.741',
     );
     expect(last === undefined ? '' : serialise(last)).toBe(
       'tree-conifer 696.874 42.982 -291.754 0.240 1.178',

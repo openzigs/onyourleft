@@ -8,7 +8,7 @@
  * `places` are never read: they carry names, and the world names no place.
  * `name`, every `name:*`, `pmap:*`, `addr_housenumber`, `sort_rank`, `layer`
  * and the feature `id` are **not decoded at all**: the decoder looks a key up
- * only to compare it with the four keys below, so a value under any other key
+ * only to compare it with the six keys below, so a value under any other key
  * is never turned into a string. That is what keeps an OSM id or a name out of
  * the store by construction rather than by a filter somebody might loosen —
  * ADR 0012 D-3's trap.
@@ -30,6 +30,13 @@ export const KEY_KIND = 'kind';
 export const KEY_KIND_DETAIL = 'kind_detail';
 export const KEY_HEIGHT = 'height';
 export const KEY_MIN_HEIGHT = 'min_height';
+/**
+ * A `roads` feature's grade separation (#1565, read from
+ * docs.protomaps.com/basemaps/layers on 2026-10-22: booleans). Read only as a
+ * boolean, only for a street, into `StreetFeature.grade`.
+ */
+export const KEY_IS_BRIDGE = 'is_bridge';
+export const KEY_IS_TUNNEL = 'is_tunnel';
 
 /** MVT geometry types (spec 2.1 §4.3.4). */
 export const GEOMETRY_POINT = 1;
@@ -78,6 +85,28 @@ export const FOOTWAY_KIND_DETAILS = [
   'pedestrian',
   'steps',
   'cycleway',
+] as const;
+
+/**
+ * The `roads.kind` values that are streets a rider sees from the route (#1565,
+ * read from docs.protomaps.com/basemaps/layers on 2026-10-22): kept whatever
+ * their `kind_detail`, unless that makes them a footway, which
+ * {@link FOOTWAY_KIND_DETAILS} decides first. `rail`, `ferry`, `aerialway`,
+ * `pier` and `aeroway` are not streets and are dropped.
+ */
+export const STREET_KINDS = ['highway', 'major_road', 'minor_road'] as const;
+
+/** The `roads.kind` kept only where its `kind_detail` says it is a street (#1565). */
+export const OTHER_ROAD_KIND = 'other';
+
+/** The `kind_detail` values that make an {@link OTHER_ROAD_KIND} road a street (#1565). */
+export const OTHER_STREET_KIND_DETAILS = [
+  'residential',
+  'unclassified',
+  'road',
+  'living_street',
+  'service',
+  'alley',
 ] as const;
 
 /** The MVT layer version this decoder reads (spec 2.1). */

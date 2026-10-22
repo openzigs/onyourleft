@@ -22,6 +22,8 @@ import {
   BIN_BESIDE_METRES,
   BOLLARD_ENDS_METRES,
   BOLLARD_INSET_METRES,
+  DROPPED_KERB_HEIGHT_METRES,
+  DROPPED_KERB_METRES,
   FURNITURE_KINDS,
   furnitureAlong,
   KERB_HEIGHT_METRES,
@@ -40,6 +42,7 @@ import {
 } from './streets';
 import { corridorOrigin, drawnRoadFrame } from './terrain';
 import { inWater, waterways } from './waterways';
+import { VILLAGE_MOUTH_HALF_METRES } from './cross-streets';
 
 /** Six kilometres of level, low farmland running due north: `x` is across, `z` along. */
 const FARMLAND = northRoute(6_000, () => 40);
@@ -90,6 +93,12 @@ function sitesOf(profile: RouteProfile): readonly Site[] {
     if (site !== undefined) found.push(site);
   }
   return found;
+}
+
+/** Where a street's village has its crossroads (#1565): the `z` of its centre, on a road running north. */
+function crossroadsZ(profile: RouteProfile, street: VillageStreet): number {
+  const site = siteAt(profile, scatterSeed(profile), street.wrappedSite) as Site;
+  return roadAt(profile, site.centre).z;
 }
 
 /** Every vertex of a mesh, with its normal. */
@@ -214,7 +223,21 @@ describe('what a pavement is — #1535', () => {
     const road = elevationAt(FARMLAND, metres(0)) - origin.elevation;
     const top = topOf(street.pavement);
     expect(top.length).toBeGreaterThan(0);
-    for (const vertex of top) expect(vertex.y).toBeCloseTo(road + KERB_HEIGHT_METRES, 5);
+    // A kerb high, except at the dropped kerb either side of the crossroads (#1565).
+    const centre = crossroadsZ(FARMLAND, street);
+    const dropped = VILLAGE_MOUTH_HALF_METRES + DROPPED_KERB_METRES + 0.01;
+    for (const vertex of top) {
+      expect(vertex.y).toBeCloseTo(
+        road +
+          (Math.abs(vertex.z - centre) <= dropped
+            ? DROPPED_KERB_HEIGHT_METRES
+            : KERB_HEIGHT_METRES),
+        5,
+      );
+    }
+    expect(
+      top.some((vertex) => Math.abs(vertex.y - road - DROPPED_KERB_HEIGHT_METRES) < 1e-5),
+    ).toBe(true);
     const across = top.map((vertex) => Math.abs(vertex.x));
     expect(Math.min(...across)).toBeCloseTo(KERB_LATERAL_METRES, 4);
     expect(Math.max(...across)).toBeCloseTo(KERB_LATERAL_METRES + PAVEMENT_WIDTH_METRES, 4);
@@ -250,14 +273,33 @@ describe('what a pavement is — #1535', () => {
 
   it('closes both ends, each looking away along the road', () => {
     const ends = vertices(street.pavement).filter((vertex) => Math.abs(vertex.nz) > 0.999);
-    // Two strips (a side each), two ends each, four corners an end.
-    expect(ends.length).toBe(16);
+    // Four strips — a side each, broken at the crossroads since #1565 — two
+    // ends each, four corners an end.
+    expect(ends.length).toBe(32);
+    const centre = crossroadsZ(FARMLAND, street);
     for (const side of [1, -1]) {
-      const mine = ends.filter((vertex) => sideOf(FARMLAND, vertex) === side);
-      const nearest = Math.min(...mine.map((vertex) => vertex.z));
-      for (const vertex of mine) {
-        // The end nearer the start looks back (−z); the far end looks on.
-        expect(Math.sign(vertex.nz)).toBe(vertex.z === nearest ? -1 : 1);
+      for (const before of [true, false]) {
+        const mine = ends.filter(
+          (vertex) => sideOf(FARMLAND, vertex) === side && vertex.z < centre === before,
+        );
+        expect(mine).toHaveLength(8);
+        const nearest = Math.min(...mine.map((vertex) => vertex.z));
+        for (const vertex of mine) {
+          // The end nearer the start looks back (−z); the far end looks on.
+          expect(Math.sign(vertex.nz)).toBe(vertex.z === nearest ? -1 : 1);
+        }
+      }
+    }
+  });
+
+  it('breaks at the village’s crossroads, with nothing over its mouth — #1565', () => {
+    for (const each of streetsOf(FARMLAND)) {
+      const centre = crossroadsZ(FARMLAND, each);
+      for (const vertex of vertices(each.pavement)) {
+        expect(Math.abs(vertex.z - centre)).toBeGreaterThan(VILLAGE_MOUTH_HALF_METRES - 0.01);
+      }
+      for (const item of each.furniture) {
+        expect(Math.abs(item.z - centre)).toBeGreaterThan(VILLAGE_MOUTH_HALF_METRES);
       }
     }
   });
@@ -420,12 +462,19 @@ describe('the street furniture — #1536', () => {
     items.filter((item) => item.kind === kind).sort((a, b) => a.z - b.z);
   const onSide = (items: readonly FurnitureItem[], side: 1 | -1): FurnitureItem[] =>
     items.filter((item) => sideOf(FARMLAND, item) === side);
-  /** Every unbroken side of every street on the farmland: its furniture. */
-  const sides = streets.flatMap((street) =>
-    ([1, -1] as const)
-      .map((side) => onSide(street.furniture, side))
-      .filter((items) => items.length > 0),
-  );
+  /**
+   * Every unbroken run of every street on the farmland: its furniture. A side
+   * is two runs since #1565, broken at the village's crossroads.
+   */
+  const sides = streets.flatMap((street) => {
+    const centre = crossroadsZ(FARMLAND, street);
+    return ([1, -1] as const)
+      .flatMap((side) => {
+        const mine = onSide(street.furniture, side);
+        return [mine.filter((item) => item.z < centre), mine.filter((item) => item.z > centre)];
+      })
+      .filter((items) => items.length > 0);
+  });
 
   it('stands every kind on a village’s pavement, at the pavement’s height, where its rule says', () => {
     for (const kind of FURNITURE_KINDS) expect(ofKind(all, kind).length, kind).toBeGreaterThan(0);
@@ -437,9 +486,14 @@ describe('the street furniture — #1536', () => {
       bin: PAVEMENT_WIDTH_METRES - BENCH_SETBACK_METRES,
     };
     for (const item of all) {
-      expect(item.y).toBeCloseTo(road + KERB_HEIGHT_METRES, 5);
+      // On the kerb's top, which drops beside the crossroads (#1565).
+      expect(item.y).toBeGreaterThanOrEqual(road + DROPPED_KERB_HEIGHT_METRES - 1e-5);
+      expect(item.y).toBeLessThanOrEqual(road + KERB_HEIGHT_METRES + 1e-5);
       expect(fromKerb(item), item.kind).toBeCloseTo(across[item.kind], 3);
     }
+    // Away from a dropped kerb, a kerb high.
+    const lamps = ofKind(all, 'lamp-post');
+    for (const lamp of lamps) expect(lamp.y).toBeCloseTo(road + KERB_HEIGHT_METRES, 5);
   });
 
   it('puts nothing outside the village whose street it is', () => {

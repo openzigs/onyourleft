@@ -17,7 +17,11 @@ import { HARNESS_ORIGIN } from '../playwright.config';
 import { LAND_CLASS_MAX_BYTES } from '../src/game/land-class';
 import { CORRIDOR_MAX_TILES } from '../src/game/world-data/corridor';
 import { MAP_TILES_STORAGE_KEY } from '../src/map/tiles-preference';
-import { CORRIDOR_ARCHIVE_FILE, expectedCorridorCounts } from './corridor-fixture';
+import {
+  CORRIDOR_ARCHIVE_FILE,
+  expectedCorridorCounts,
+  FIXTURE_JUNCTIONS,
+} from './corridor-fixture';
 import type { CorridorHarness } from './corridor-harness';
 
 async function readCorridor(page: Page, query = ''): Promise<CorridorHarness> {
@@ -48,6 +52,7 @@ test.describe('#1539 corridor read', () => {
     expect(corridor.buildings).toBe(expected.buildings);
     expect(corridor.landUse).toBe(expected.landUse);
     expect(corridor.paths).toBe(expected.paths);
+    expect(corridor.streets).toBe(expected.streets);
     const archive = requested.filter((url) => url.endsWith(`/${CORRIDOR_ARCHIVE_FILE}`));
     expect(archive.length).toBeGreaterThan(expected.tiles);
     const origins = new Set(requested.map((url) => new URL(url).origin));
@@ -100,6 +105,48 @@ test.describe('#1546 nothing on a mapped wood', () => {
         (item) => item.structure && item.kind !== 'signpost' && item.landClass === 'wood',
       ).length,
     ).toBeGreaterThan(0);
+  });
+});
+
+test.describe('#1565 cross streets at their mapped junctions', () => {
+  test('a T and a crossroads: the side roads are drawn at the fixture’s angles, read back from the meshes', async ({
+    page,
+  }) => {
+    const corridor = await readCorridor(page);
+    expect(corridor.errors).toStrictEqual([]);
+    expect(corridor.state).toBe('ready');
+    expect(corridor.streets).toBeGreaterThan(0);
+    // The fixture's junctions in route order: the T comes first (its row is further south).
+    expect(corridor.junctions).toHaveLength(FIXTURE_JUNCTIONS.length);
+    FIXTURE_JUNCTIONS.forEach((fixture, index) => {
+      const drawn = corridor.junctions[index];
+      expect(drawn?.arms.map((arm) => arm.side)).toStrictEqual(fixture.arms.map((arm) => arm.side));
+      expect(drawn?.meshAngles.map((arm) => arm.side)).toStrictEqual(
+        fixture.arms.map((arm) => arm.side),
+      );
+      fixture.arms.forEach((arm, at) => {
+        expect(Math.abs((drawn?.arms[at]?.angleDegrees ?? 0) - arm.angleDegrees)).toBeLessThan(2);
+        expect(
+          Math.abs((drawn?.meshAngles[at]?.angleDegrees ?? 0) - arm.angleDegrees),
+        ).toBeLessThan(3);
+      });
+      expect(drawn?.triangles ?? 0).toBeGreaterThan(50);
+    });
+    console.log(
+      `#1565 cross streets: ${corridor.junctions
+        .map(
+          (junction) =>
+            `at ${junction.along.toFixed(0)} m, ${junction.meshAngles.map((arm) => `${arm.side > 0 ? 'right' : 'left'} ${arm.angleDegrees.toFixed(1)}°`).join(' and ')}, ${String(junction.triangles)} triangles`,
+        )
+        .join('; ')}`,
+    );
+  });
+
+  test('control: with the streets layer off, there are none', async ({ page }) => {
+    const corridor = await readCorridor(page, '?levers=-streets');
+    expect(corridor.state).toBe('ready');
+    expect(corridor.streets).toBeGreaterThan(0);
+    expect(corridor.junctions).toStrictEqual([]);
   });
 });
 

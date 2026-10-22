@@ -927,7 +927,8 @@ Schema version 20, additive: a new store, `worldCorridors`, and no existing reco
 ⚠️ **This package's code is Apache-2.0; the rows of this one table are ODbL 1.0 data.** They are the
 map features in a route's corridor, read once from the basemap archive by #1539: building footprints
 with `kind`, `height` and `min_height`, land-use polygons with `kind`, water polygons, footway lines
-with `kind` and `kind_detail`, and which tiles were read and when — no OSM identifier, no name, no
+with `kind` and `kind_detail`, street lines with `kind`, `kind_detail` and whether each is a bridge or a
+tunnel, and which tiles were read and when — no OSM identifier, no name, no
 address (ADR 0054 D-3.3). Each record says so, `licence: 'ODbL-1.0'`.
 
 **Why a table of its own.** ADR 0012 D-3 lets OpenStreetMap-derived records be held only in their

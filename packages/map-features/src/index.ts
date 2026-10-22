@@ -20,7 +20,15 @@ export {
 } from './limits';
 export { localMetres, METRES_PER_DEGREE_LATITUDE, tileBounds } from './projection';
 export { describeRefusal } from './refusal';
-export { BUILDING_KINDS, FOOTWAY_KIND, FOOTWAY_KIND_DETAILS, READ_LAYERS } from './schema';
+export {
+  BUILDING_KINDS,
+  FOOTWAY_KIND,
+  FOOTWAY_KIND_DETAILS,
+  OTHER_ROAD_KIND,
+  OTHER_STREET_KIND_DETAILS,
+  READ_LAYERS,
+  STREET_KINDS,
+} from './schema';
 export type {
   BuildingFeature,
   Box,
@@ -33,5 +41,7 @@ export type {
   PathFeature,
   PolygonFeature,
   Ring,
+  StreetFeature,
+  StreetGrade,
   TileId,
 } from './types';

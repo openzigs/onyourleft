@@ -71,6 +71,7 @@ import {
   REALISTIC_WOODED_DRAW_CALLS,
 } from '../src/game/realistic-budget';
 import { MAXIMUM_DRAWN_SET } from '../src/net/interest';
+import { SIDE_ROAD_FRAME_TRIANGLES } from '../src/game/cross-streets';
 import { SURFACE_WEAR_ALLOWANCE, WORN_ROAD_CONTRAST_FLOOR } from '../src/game/road-wear';
 
 import { NIGHTLY } from './nightly';
@@ -1786,7 +1787,39 @@ test.describe('a village and its fields — #460', () => {
     const { settlement } = await harness(harnessRun);
     expectStreetFurniture(settlement.pavement, testInfo, 'stylised');
   });
+
+  test('draws a village’s crossroads in the road’s own material, in one call — #1565', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { settlement } = await harness(harnessRun);
+    expectSideRoads(settlement.pavement, testInfo, 'stylised');
+  });
 });
+
+/**
+ * #1565's browser-gate half, for either world: a village's crossroads is
+ * drawn, wearing the road mesh's own material, every side road in view in ONE
+ * call; and a point on its left arm reads something else with the side roads
+ * switched off — the control that the probe was reading the side road.
+ */
+function expectSideRoads(
+  pavement: RealisticMeasurement['pavement'],
+  testInfo: { readonly annotations: { type: string; description?: string }[] },
+  world: string,
+): void {
+  const { triangles, drawCalls, drawCallsOff, sameMaterial, onRgb, offRgb } = pavement.sideRoads;
+  const measured = `${world}: ${String(triangles)} side-road triangles at a village's crossroads; ${String(drawCalls)} draw calls with them, ${String(drawCallsOff)} without; the point ${onRgb.map((c) => c.toFixed(0)).join('/')} drawn, ${offRgb.map((c) => c.toFixed(0)).join('/')} without`;
+  testInfo.annotations.push({ type: 'a village crossroads', description: measured });
+  console.log(`a village crossroads — ${measured}`);
+  expect(triangles).toBeGreaterThan(100);
+  expect(triangles).toBeLessThanOrEqual(SIDE_ROAD_FRAME_TRIANGLES);
+  expect(sameMaterial).toBe(true);
+  expect(drawCalls - drawCallsOff).toBe(1);
+  expect(onRgb).toHaveLength(3);
+  expect(offRgb).toHaveLength(3);
+  const apart = Math.max(...[0, 1, 2].map((c) => Math.abs((onRgb[c] ?? 0) - (offRgb[c] ?? 0))));
+  expect(apart).toBeGreaterThan(8);
+}
 
 /**
  * #1535's browser-gate half, for either world: a village's pavement exists at
@@ -3484,6 +3517,13 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
   }, testInfo) => {
     const { pavement } = await realistic(harnessRun);
     expectAPavement(pavement, testInfo, 'realistic');
+  });
+
+  test('draws a village’s crossroads in the photographic road’s material, in one call — #1565', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { pavement } = await realistic(harnessRun);
+    expectSideRoads(pavement, testInfo, 'realistic');
   });
 
   test('#1551 pavement on the mapped side: the right reads pavement and the left verge, and #1535’s own sides differ', async ({

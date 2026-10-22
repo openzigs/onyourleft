@@ -111,6 +111,7 @@ const FAR_AWAY: WorldCorridor = {
     },
   ],
   paths: [],
+  streets: [],
 };
 
 function capturingRenderer(): GameRenderer {

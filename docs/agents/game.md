@@ -809,6 +809,20 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `footwayNetwork`, 2 m polylines off the carriageway
                         and inside the corridor for #1541 (`@unwired` until
                         then). No crossing is either
+    src/game/cross-streets.ts
+                        cross streets (#1565) — a side road 60 m off the
+                        route at each junction where a mapped street
+                        (`WorldCorridor.streets`, #1544's decoder keeps them
+                        since #1565) leaves the route at grade — never a
+                        bridge, a tunnel or a `highway` — and one crossroads at
+                        every procedural village's centre, whose middle plots
+                        are empty for it (`settlements.ts`). ⚠️ **Drawn in the
+                        ROAD's material** by one mesh in both worlds
+                        (`three-renderer.ts` §`SideRoadBelt`), and it fades by
+                        sinking under the ground, not by transparency. Every
+                        scatter item, structure and billboard in view is kept
+                        off it (`clearOfSideRoads`), and a village's pavement
+                        is broken at its crossroads with dropped kerbs
     src/game/buildings.ts
                         the buildings as SHAPES (#500) — walls with their doors
                         and windows cut in, recessed and framed, eaves that

@@ -130,8 +130,8 @@ const load = (port: WorldCorridorPort, route: RouteRecord): Promise<CorridorStat
 
 function featuresOf(state: CorridorState) {
   if (state.kind !== 'ready') throw new Error(`not ready: ${JSON.stringify(state)}`);
-  const { buildings, landUse, paths } = state.corridor;
-  return { buildings, landUse, paths };
+  const { buildings, landUse, paths, streets } = state.corridor;
+  return { buildings, landUse, paths, streets };
 }
 
 function shifted(profile: RouteProfile, northMetres: number): RouteProfile {
@@ -160,6 +160,8 @@ describe('read once, then from the store', () => {
     expect(firstFeatures.buildings.length).toBeGreaterThan(0);
     expect(firstFeatures.landUse.length).toBeGreaterThan(0);
     expect(firstFeatures.paths.length).toBeGreaterThan(0);
+    // #1565: the streets come back from the store too.
+    expect(firstFeatures.streets.length).toBeGreaterThan(0);
 
     for (const store of stores) store.close();
     const second = await load(portOver(freshStore(), source, on()), route);

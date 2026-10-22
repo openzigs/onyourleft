@@ -23,6 +23,8 @@ import {
   FOOTWAY_KIND,
   FOOTWAY_KIND_DETAILS,
   KEY_HEIGHT,
+  KEY_IS_BRIDGE,
+  KEY_IS_TUNNEL,
   KEY_KIND,
   KEY_KIND_DETAIL,
   KEY_MIN_HEIGHT,
@@ -33,7 +35,10 @@ import {
   MAX_KIND_LENGTH,
   MIN_EXTENT,
   MVT_VERSION,
+  OTHER_ROAD_KIND,
+  OTHER_STREET_KIND_DETAILS,
   READ_LAYERS,
+  STREET_KINDS,
   GEOMETRY_LINE,
   type ReadLayer,
 } from './schema';
@@ -45,6 +50,8 @@ import type {
   LandUseFeature,
   PathFeature,
   Ring,
+  StreetFeature,
+  StreetGrade,
   TileId,
 } from './types';
 
@@ -69,7 +76,8 @@ import type {
  *
  * Only the layers {@link READ_LAYERS} names are decoded; every other layer is
  * skipped by its length after its name is compared. Of those, only `kind`,
- * `kind_detail`, `height` and `min_height` are ever looked at (`schema.ts`).
+ * `kind_detail`, `height`, `min_height`, `is_bridge` and `is_tunnel` are ever
+ * looked at (`schema.ts`).
  *
  * The frame is the game's (`projection.ts`), and the output is `Float32Array`:
  * float32 spacing is about 4 mm at 50 km from the origin and about 3 cm at a few
@@ -130,10 +138,18 @@ interface FramedLayer {
   readonly features: Uint32Array; // start, end pairs
   readonly values: Uint32Array; // start, end pairs
   readonly keyCount: number;
-  readonly keys: { kind: number; kindDetail: number; height: number; minHeight: number };
+  readonly keys: {
+    kind: number;
+    kindDetail: number;
+    height: number;
+    minHeight: number;
+    isBridge: number;
+    isTunnel: number;
+  };
   /** Decoded values by index, filled as features ask for them. */
   readonly identifiers: Map<number, string | null>;
   readonly heights: Map<number, number | null>;
+  readonly flags: Map<number, boolean>;
 }
 
 function decodeChecked(
@@ -188,6 +204,7 @@ function decodeChecked(
   const landUse: LandUseFeature[] = [];
   const buildings: BuildingFeature[] = [];
   const paths: PathFeature[] = [];
+  const streets: StreetFeature[] = [];
   for (const layer of framed) {
     state.layer = layer.name;
     const project = new Projector(tile, origin, layer.extent);
@@ -200,12 +217,12 @@ function decodeChecked(
         project,
         limits,
         state,
-        { landUse, buildings, paths },
+        { landUse, buildings, paths, streets },
       );
     }
   }
   state.layer = null;
-  return { tile, landUse, buildings, paths };
+  return { tile, landUse, buildings, paths, streets };
 }
 
 /** The layer's name if it is one this package reads or checks for, else `null`. Never decodes it. */
@@ -278,7 +295,7 @@ function frameLayer(
   // No values-per-layer limit: each value is at least two bytes of the tile, so
   // `maxBytes` bounds this table (about 4x the tile's size in memory).
   const values = new Uint32Array(valueCount * 2);
-  const keys = { kind: -1, kindDetail: -1, height: -1, minHeight: -1 };
+  const keys = { kind: -1, kindDetail: -1, height: -1, minHeight: -1, isBridge: -1, isTunnel: -1 };
   let f = 0;
   let v = 0;
   let k = 0;
@@ -300,6 +317,8 @@ function frameLayer(
           keys.kindDetail = k;
         else if (bytesEqualAscii(bytes, range.start, range.end, KEY_HEIGHT)) keys.height = k;
         else if (bytesEqualAscii(bytes, range.start, range.end, KEY_MIN_HEIGHT)) keys.minHeight = k;
+        else if (bytesEqualAscii(bytes, range.start, range.end, KEY_IS_BRIDGE)) keys.isBridge = k;
+        else if (bytesEqualAscii(bytes, range.start, range.end, KEY_IS_TUNNEL)) keys.isTunnel = k;
         k++;
       }
     } else {
@@ -315,6 +334,7 @@ function frameLayer(
     keys,
     identifiers: new Map(),
     heights: new Map(),
+    flags: new Map(),
   };
 }
 
@@ -367,6 +387,25 @@ interface Sinks {
   readonly landUse: LandUseFeature[];
   readonly buildings: BuildingFeature[];
   readonly paths: PathFeature[];
+  readonly streets: StreetFeature[];
+}
+
+/**
+ * Which sink a `roads` feature goes to (#1565): a footway first - #1551's
+ * set, unchanged - then a street, else none, and its geometry is never read.
+ */
+function roadSink(kind: string | null, kindDetail: string): 'paths' | 'streets' | null {
+  if (kind === FOOTWAY_KIND || (FOOTWAY_KIND_DETAILS as readonly string[]).includes(kindDetail)) {
+    return 'paths';
+  }
+  if ((STREET_KINDS as readonly (string | null)[]).includes(kind)) return 'streets';
+  if (
+    kind === OTHER_ROAD_KIND &&
+    (OTHER_STREET_KIND_DETAILS as readonly string[]).includes(kindDetail)
+  ) {
+    return 'streets';
+  }
+  return null;
 }
 
 function decodeFeature(
@@ -412,13 +451,8 @@ function decodeFeature(
     return;
   }
   const kindDetail = attributes.kindDetail ?? '';
-  if (
-    layer.name === 'roads' &&
-    kind !== FOOTWAY_KIND &&
-    !(FOOTWAY_KIND_DETAILS as readonly string[]).includes(kindDetail)
-  ) {
-    return;
-  }
+  const road = layer.name === 'roads' ? roadSink(kind, kindDetail) : null;
+  if (layer.name === 'roads' && road === null) return;
   if (geometry === null) throw new Malformed();
   const parts = decodeGeometry(bytes, geometry, type, layer, project, limits, state);
   switch (layer.name) {
@@ -440,7 +474,14 @@ function decodeFeature(
       return;
     case 'roads':
       for (const line of parts as Float32Array[]) {
-        sinks.paths.push({ kind: kind as string, kindDetail, line });
+        if (road === 'paths') sinks.paths.push({ kind: kind as string, kindDetail, line });
+        else
+          sinks.streets.push({
+            kind: kind as string,
+            kindDetail,
+            grade: gradeOf(attributes),
+            line,
+          });
       }
       return;
   }
@@ -451,15 +492,31 @@ interface Attributes {
   kindDetail: string | null;
   height: number | null;
   minHeight: number | null;
+  isBridge: boolean;
+  isTunnel: boolean;
 }
 
-/** Reads the four keys' values. Every other key's value is skipped without being decoded. */
+/** A street's grade separation: a bridge over anything a tunnel is not, either way not at grade. */
+function gradeOf(attributes: Attributes): StreetGrade {
+  if (attributes.isBridge) return 'bridge';
+  if (attributes.isTunnel) return 'tunnel';
+  return 'ground';
+}
+
+/** Reads the six keys' values. Every other key's value is skipped without being decoded. */
 function readTags(
   bytes: Uint8Array,
   layer: FramedLayer,
   tags: { start: number; end: number } | null,
 ): Attributes {
-  const out: Attributes = { kind: null, kindDetail: null, height: null, minHeight: null };
+  const out: Attributes = {
+    kind: null,
+    kindDetail: null,
+    height: null,
+    minHeight: null,
+    isBridge: false,
+    isTunnel: false,
+  };
   if (tags === null) return out;
   const reader = new ProtoReader(bytes, tags.start, tags.end);
   const valueCount = layer.values.length / 2;
@@ -472,8 +529,38 @@ function readTags(
     else if (key === layer.keys.kindDetail) out.kindDetail = cachedIdentifier(bytes, layer, value);
     else if (key === layer.keys.height) out.height = cachedHeight(bytes, layer, value);
     else if (key === layer.keys.minHeight) out.minHeight = cachedHeight(bytes, layer, value);
+    else if (key === layer.keys.isBridge) out.isBridge = cachedFlag(bytes, layer, value);
+    else if (key === layer.keys.isTunnel) out.isTunnel = cachedFlag(bytes, layer, value);
   }
   return out;
+}
+
+function cachedFlag(bytes: Uint8Array, layer: FramedLayer, index: number): boolean {
+  let value = layer.flags.get(index);
+  if (value === undefined) {
+    value = flagValue(bytes, layer, index);
+    layer.flags.set(index, value);
+  }
+  return value;
+}
+
+/** A boolean value that is `true`; anything else — `false`, a string, a number — is `false`. */
+function flagValue(bytes: Uint8Array, layer: FramedLayer, index: number): boolean {
+  const reader = new ProtoReader(
+    bytes,
+    layer.values[index * 2] as number,
+    layer.values[index * 2 + 1] as number,
+  );
+  let result = false;
+  while (!reader.atEnd()) {
+    const tag = reader.uint32();
+    if (tag >>> 3 === 7 && (tag & 7) === WIRE_VARINT) result = reader.uint64() !== 0;
+    else {
+      reader.skip(tag & 7);
+      result = false;
+    }
+  }
+  return result;
 }
 
 /**
