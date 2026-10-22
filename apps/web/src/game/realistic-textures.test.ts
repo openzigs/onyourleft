@@ -292,7 +292,7 @@ describe('the realistic textures stay compressed on the GPU — #618', () => {
     const report = renderer.realisticTextureReport();
     const worn = report.filter((texture) => texture.role !== 'sky');
     // Non-vacuity: the whole set — two maps a surface (#627's verge and rock
-    // and #1274's crag among them: ten), fourteen structure maps,
+    // and #1274's crag among them: ten), twenty structure maps (#1548 added six),
     // the bicycle's four (#624), four impostors and every map inside a tree,
     // shrub and rock — ONCE PER IMAGE, read off the committed files: a fir's
     // live and dead branches are two textures over one image, which three

@@ -42,6 +42,7 @@ import {
   REALISTIC_VEGETATION_KINDS,
   realisticFiles,
   realisticVegetation,
+  TOWN_STRUCTURE_SURFACES,
   type RealisticModel,
   type RealisticTrees,
 } from './realistic-assets';
@@ -53,6 +54,7 @@ import {
   estimatedTextureBytes,
   REALISTIC_BICYCLE_SURFACES,
   REALISTIC_RIDER_SURFACES,
+  REALISTIC_TOWN_SURFACES,
   REALISTIC_BUILD_BYTES,
   REALISTIC_FRAME_TRIANGLES,
   REALISTIC_GANTRY_TRIANGLES,
@@ -226,12 +228,21 @@ describe('each committed file inside its class’s budget — ADR 0026 D-6', () 
         );
       }
     }
-    // #475: the structures' surfaces.
+    // #475: the structures' surfaces — and #1548's mapped towns' three, at
+    // their own class's 1K. Every other structure surface is still held to 512.
     for (const surface of PHOTOGRAPHIC_STRUCTURE_SURFACES) {
       const maps = REALISTIC_STRUCTURE_SURFACES[surface];
+      const limit = (TOWN_STRUCTURE_SURFACES as readonly string[]).includes(surface)
+        ? REALISTIC_TEXTURE_PIXELS.town
+        : REALISTIC_TEXTURE_PIXELS.structure;
       for (const file of [maps.colour, maps.normal]) {
-        expect(largest(file), file).toBeLessThanOrEqual(REALISTIC_TEXTURE_PIXELS.structure);
+        expect(largest(file), file).toBeLessThanOrEqual(limit);
         expect(largest(file), file).toBeGreaterThan(0);
+        // #1548: as wide for its height as its table says, so the renderer's
+        // repeat (`surfaceRepeat`) draws a texel square. ambientCG publishes
+        // some materials at 2:1, and one drawn as if square is stretched.
+        const { width, height } = fileKtx2Facts(at(file));
+        expect(width / height, file).toBe(maps.aspect ?? 1);
       }
     }
     for (const limit of Object.values(REALISTIC_TEXTURE_PIXELS)) {
@@ -916,6 +927,35 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
     // The kit is colour, ETC1S; the relief and the occlusion/roughness/mask
     // are data, UASTC.
     expect(rider.map(({ facts }) => facts.scheme).sort()).toEqual(['etc1s', 'uastc', 'uastc']);
+  });
+
+  it('adds the mapped towns’ three surfaces inside #1548’s own ceiling, texture memory and build alike', () => {
+    const town = TOWN_STRUCTURE_SURFACES.flatMap((surface) => {
+      const maps = REALISTIC_STRUCTURE_SURFACES[surface];
+      return [maps.colour, maps.normal];
+    });
+    // Non-vacuity: a colour and a normal map for each of the three, read off disk.
+    expect(town).toHaveLength(2 * TOWN_STRUCTURE_SURFACES.length);
+    expect(TOWN_STRUCTURE_SURFACES).toEqual(['render', 'concrete', 'flat-roof']);
+    const facts = town.map((file) => ({ file, facts: fileKtx2Facts(at(file)) }));
+    const memory = facts.reduce(
+      (sum, { facts: each }) =>
+        sum + estimatedTextureBytes({ ...each, bytesPerTexel: onTheTablet(each), mipmapped: true }),
+      0,
+    );
+    const build = town.reduce((sum, file) => sum + statSync(at(file)).size, 0);
+    console.log(
+      `#1548: the mapped towns' six maps are ${(memory / 2 ** 20).toFixed(2)} MiB estimated on the tablet ` +
+        `and ${String(build)} bytes in the build`,
+    );
+    expect(memory).toBeLessThanOrEqual(REALISTIC_TOWN_SURFACES.textureBytes);
+    expect(build).toBeLessThanOrEqual(REALISTIC_TOWN_SURFACES.buildBytes);
+    // Each at the 1K the owner's ruling kept, a colour map as ETC1S and a
+    // normal map as UASTC — never the other way, which would misprice both.
+    for (const { file, facts: each } of facts) {
+      expect(each.width, file).toBe(REALISTIC_TEXTURE_PIXELS.town);
+      expect(each.scheme, file).toBe(file.includes('_nor_gl_') ? 'uastc' : 'etc1s');
+    }
   });
 
   it('adds no more to the build than its share, the transcoder included — #618', () => {

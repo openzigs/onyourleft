@@ -102,6 +102,12 @@ export const REALISTIC_TEXTURE_CEILING_PIXELS = 2048;
  *   under 2 mm a texel, which is finer than the chase camera shows; 1024 is
  *   what #618's compression makes affordable inside the 6 MiB #623 allows,
  *   where RGBA8 would have been 16 MiB for the three.
+ * - `town` 1024 — #1548: a mapped town's render, concrete and flat roof
+ *   (`realistic-assets.ts` §`TOWN_STRUCTURE_SURFACES`), colour and normal,
+ *   at the 1K ambientCG publishes them. The owner ruled on #1548 to keep them
+ *   at 1K and raise {@link REALISTIC_BUILD_BYTES} rather than take them to
+ *   `structure`'s 512. A town's wall fills more of the screen than a
+ *   farmstead's, for longer, and is seen from the road at a few metres.
  *
  * @test-facing held by `realistic-budget.test.ts`, which reads every committed
  * realistic file back off disk against it; the renderer spends it only on the
@@ -115,6 +121,7 @@ export const REALISTIC_TEXTURE_PIXELS = {
   structure: 512,
   bicycle: 256,
   rider: 1024,
+  town: 1024,
 } as const;
 
 /**
@@ -804,6 +811,37 @@ export const REALISTIC_RIDER_SURFACES = {
 } as const;
 
 /**
+ * What a mapped town's three surfaces may add — #1548's own ceiling, inside
+ * {@link REALISTIC_TEXTURE_MEMORY_BYTES} and {@link REALISTIC_BUILD_BYTES}:
+ * **5 MiB** of texture memory as the tablet is handed it, and **3.5 MiB** of
+ * build. What the six maps spend is exactly 5 MiB estimated — ETC1S colour
+ * maps at half a byte a texel and UASTC normal maps at a byte, each a third
+ * again for its mipmaps, two pairs at 1024² and the plaster's at 1024 × 512 —
+ * and 3 587 223 bytes of KTX2 in the build; `realistic-budget.test.ts` reads
+ * both off the committed files and prints them.
+ *
+ * ⚠️ **More texture memory than #1548 budgeted, and that is the owner's
+ * ruling's consequence, not an overrun.** #1548's table asked for at most
+ * +3 MiB, written for its recommended answer — 512² maps, and no normal map
+ * on the flat roof. The owner ruled on #1548 (2026-10-21) to raise the build
+ * ceiling rather than shrink them to 512², so they are 1K with normals, and
+ * the set's estimate stays far inside the 160 MiB ceiling.
+ *
+ * ⚠️ **No triangles and no draw calls today**: nothing procedural wears them
+ * (`realistic-assets.ts` §`TOWN_STRUCTURE_SURFACES`), so each is a belt with
+ * no mesh in it; the mapped buildings that will wear them (#1549) spend
+ * their own calls.
+ *
+ * @test-facing held by `realistic-budget.test.ts`, which reads the committed
+ * town maps back off disk against it; the renderer spends it only on the
+ * realistic path
+ */
+export const REALISTIC_TOWN_SURFACES = {
+  textureBytes: 5 * MEBIBYTE,
+  buildBytes: 3.5 * MEBIBYTE,
+} as const;
+
+/**
  * What the realistic riders' bike-shaped shadow may hold on the GPU — #626's
  * own ceiling, inside {@link REALISTIC_TEXTURE_MEMORY_BYTES}: **128 KiB**, one
  * texture. The silhouette spends 64 KiB — 256 × 128 texels, two bytes each,
@@ -833,11 +871,32 @@ export const REALISTIC_RIDER_SILHOUETTE_BYTES = 128 * 1024;
  * `tools/basis/transcoder-plugin.ts` — because they are in the build only for
  * the realistic world. `realistic-budget.test.ts` adds them.
  *
+ * ## Raised to 43 MiB for the mapped towns — #1548
+ *
+ * **Old ceiling 40 MiB (41 943 040 bytes), new 43 MiB (45 088 768).** The
+ * owner ruled on #1548 (2026-10-21) to raise it for the render, concrete and
+ * flat-roof materials rather than shrink them to 512². Measured on the
+ * committed files: the realistic set with its transcoder was 41 144 981
+ * bytes, 798 059 under the old ceiling; the six maps add **3 587 223**
+ * ({@link REALISTIC_TOWN_SURFACES}), so it is **44 732 204**, 356 564 under
+ * the new one. 43 MiB is the smallest whole figure the set fits under, so the
+ * next addition is again a decision rather than a margin.
+ *
+ * What that does to a download: the **APK** carries the same 3 587 223 bytes
+ * more, since every file in `dist` ships in it (ADR 0026 D-7). The KTX2
+ * payloads are BasisLZ and Zstandard already, so the APK's own zip is not
+ * expected to win much back — expected, not measured: no APK was built for
+ * #1548. A **browser's first download** of
+ * the app does not move: the realistic files are outside the service worker's
+ * precache by their location (`realistic-assets.ts` §`REALISTIC_DIRECTORY`),
+ * and are fetched only when a rider picks the realistic world, which then
+ * fetches the 3.4 MiB more.
+ *
  * @test-facing held by `realistic-budget.test.ts`, which reads every committed
  * realistic file back off disk against it; the renderer spends it only on the
  * realistic path, which a ride takes only for a rider who chose it (#475)
  */
-export const REALISTIC_BUILD_BYTES = 40 * MEBIBYTE;
+export const REALISTIC_BUILD_BYTES = 43 * MEBIBYTE;
 
 /**
  * The shape of one texture, for {@link estimatedTextureBytes}.

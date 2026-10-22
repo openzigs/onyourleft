@@ -57,6 +57,8 @@ import {
 } from '../src/camera/presence';
 import {
   PHOTOGRAPHIC_STRUCTURE_SURFACES,
+  REALISTIC_STRUCTURE_SURFACES,
+  TOWN_STRUCTURE_SURFACES,
   REALISTIC_BICYCLE_MAP_NAMES,
   REALISTIC_RIDER_MAP_NAMES,
   REALISTIC_SURFACES,
@@ -4041,7 +4043,7 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
   }) => {
     const { textures, firstFrameMs, loadMs } = await realistic(harnessRun);
     // Non-vacuity, and EXACT (#618's review — a floor let up to eight maps go
-    // missing): ten surface maps, fourteen structure maps, and every map in a
+    // missing): ten surface maps, twenty structure maps (#1548 added six), and every map in a
     // model plus its impostor, once per IMAGE, read off the committed files the
     // way `realistic-textures.test.ts` reads them.
     expect(textures.worn.length).toBe(realisticImageCount());
@@ -4092,6 +4094,42 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
         `offered ${textures.offered.join(' ')} on ${textures.platform}; ` +
         `loaded in ${loadMs.toFixed(0)} ms, first realistic frame at ${firstFrameMs.toFixed(0)} ms (SwiftShader)`,
     );
+  });
+
+  test('#1548 the new surfaces load compressed', async ({ harnessRun }) => {
+    const { textures } = await realistic(harnessRun);
+    // ⚠️ On `?realistic`, not `?realistic&corridor=archive` as #1548 wrote it:
+    // that query is #1539's, which has not landed, and the town surfaces are
+    // loaded with every other structure surface whatever the corridor is.
+    const town = textures.worn.filter(
+      (texture) =>
+        texture.surface !== undefined &&
+        (TOWN_STRUCTURE_SURFACES as readonly string[]).includes(texture.surface),
+    );
+    // Non-vacuity, and EXACT: a colour and a normal map for each of the three,
+    // named by surface rather than counted among the structures.
+    expect(town.map((texture) => texture.surface).sort()).toEqual(
+      TOWN_STRUCTURE_SURFACES.flatMap((surface) => [surface, surface]).sort(),
+    );
+    const expected = textures.desktopRule ? ['BC7'] : ['ASTC 4x4', 'ETC2 RGB'];
+    for (const texture of town) {
+      expect(expected, JSON.stringify(texture)).toContain(texture.format);
+      // At the 1K the owner's ruling kept — the plaster is published 2:1 —
+      // and exactly its block chain.
+      const maps =
+        REALISTIC_STRUCTURE_SURFACES[texture.surface as (typeof TOWN_STRUCTURE_SURFACES)[number]];
+      expect(texture.width, JSON.stringify(texture)).toBe(1024);
+      expect(texture.height, JSON.stringify(texture)).toBe(1024 / (maps.aspect ?? 1));
+      expect(texture.bytes, JSON.stringify(texture)).toBe(
+        blockChainBytes(texture.width, texture.height, BLOCK_BYTES[texture.format] ?? Number.NaN),
+      );
+    }
+    // ⚠️ THE CONTROL, #618's: the same probe's loader told the device offers
+    // no compressed format uploads RGBA8 and says so — the label above can
+    // tell a compressed texture from a fallback.
+    expect(textures.control.uploads).toEqual(['RGBA8']);
+    expect(textures.control.compressed).toBe(false);
+    expect(expected).not.toContain(textures.control.format);
   });
 
   test('draws the canopy after the opaque world, and the frame is the same picture — #619 lever 1', async ({
