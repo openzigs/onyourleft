@@ -44,7 +44,7 @@ import { landClassMask, NO_LAND_CLASS, type LandClassMask } from './land-class';
 import { ROAD_CLEARANCE_METRES, terrainHeightAt } from './landform';
 import { REALISTIC_TRIANGLES } from './realistic-budget';
 import { nearestOnRoadSegments, roadSegmentsNear, type BesideTheRoad } from './road-grid';
-import { hairpinRoute } from './route-fixtures-testing';
+import { hairpinRoute, northRoute } from './route-fixtures-testing';
 import { scatterSeed } from './scatter';
 import { sceneFrame } from './scene';
 import { atStartLine } from './simulation';
@@ -174,6 +174,65 @@ describe('nothing on a mapped wood, water or park — rule 2', () => {
     for (const name of ['inWood', 'inPark', 'inLake'] as const) {
       expect(typeof planOf(name, NO_LAND_CLASS), name).toBe('object');
     }
+  });
+});
+
+describe('rule 2 at every vertex, not only the centroid', () => {
+  // Along 398–410 m, 120 m out on the left: the wood ends at 400 m, so the
+  // centroid (404 m) is clear of it, and the first two vertices are in it.
+  const straddling = buildingBeside(fixture.profile, fixture.origin, [
+    rectangleBeside(404, -120, 12, 10),
+  ]);
+  const only = (land: LandClassMask): FootprintVerdict =>
+    FOOTPRINT_VERDICTS.find(
+      (verdict) =>
+        footprintPlans(
+          { ...fixture.corridor, buildings: [straddling] },
+          land,
+          fixture.profile,
+          fixture.origin,
+        ).verdicts[verdict] > 0,
+    ) as FootprintVerdict;
+
+  it('drops a footprint that straddles a wood edge with its centroid outside the wood', () => {
+    const [cx, cz] = besideRoad(fixture.profile, fixture.origin, 404, -120);
+    expect(mask.classAt(cx, cz)).not.toBe('wood');
+    expect(only(mask)).toBe('on-excluded-land');
+  });
+
+  it('control: with no land classes the same footprint is kept', () => {
+    expect(only(NO_LAND_CLASS)).toBe('kept');
+  });
+});
+
+describe('a road wholly inside the footprint — rule 3', () => {
+  // A 30 m road with a 120 × 120 m footprint over all of it: every segment of
+  // the road lies inside the ring, more than the clearance from each edge, so
+  // no segment meets an edge.
+  const profile = northRoute(30, () => 10);
+  const origin = corridorOrigin(profile);
+  const [mx, mz] = besideRoad(profile, origin, 15, 0);
+  const over: BuildingFeature = {
+    kind: 'building',
+    heightMetres: null,
+    minHeightMetres: null,
+    rings: [
+      Float32Array.of(mx - 60, mz - 60, mx + 60, mz - 60, mx + 60, mz + 60, mx - 60, mz + 60),
+    ],
+  };
+  const corridor: WorldCorridor = {
+    routeId: 'road-inside',
+    origin,
+    covered: () => true,
+    coveredBoxes: [{ minX: -500, maxX: 500, minZ: -500, maxZ: 500 }],
+    landUse: [],
+    buildings: [over],
+    paths: [],
+  };
+
+  it('drops the footprint a road runs wholly inside', () => {
+    const { verdicts } = footprintPlans(corridor, landClassMask(corridor), profile, origin);
+    expect(verdicts).toMatchObject({ 'on-road': 1, kept: 0 });
   });
 });
 
@@ -373,6 +432,63 @@ describe('the height rules — P-10', () => {
     );
     // Its 15 m height less its 6 m base is 3 storeys.
     expect(part.storeys).toBe(3);
+  });
+});
+
+describe('the walls stand on the highest ground, at the mapped height', () => {
+  // On the 8 % climb, 12 m along the road: about 1 m of rise under it.
+  const sloped = buildingBeside(fixture.profile, fixture.origin, [
+    rectangleBeside(2_000, 40, 12, 10),
+  ]);
+  const slopedPlan = (): FootprintPlan => {
+    const { plans } = footprintPlans(
+      { ...fixture.corridor, buildings: [sloped] },
+      mask,
+      fixture.profile,
+      fixture.origin,
+    );
+    if (plans[0] === undefined) throw new Error('the sloped footprint was not planned');
+    return plans[0];
+  };
+
+  it('lifts the plinth top and the wall foot to at least the ground at every vertex', () => {
+    const plan = slopedPlan();
+    const ground = verticesOf(plan, 'wall').map(([x, , z]) =>
+      groundUnder(fixture.profile, fixture.origin, mask, x as number, z as number),
+    );
+    expect(Math.max(...ground) - Math.min(...ground)).toBeGreaterThan(0.5);
+    for (const role of ['plinth', 'wall'] as const) {
+      for (const [x, y, z] of verticesOf(plan, role)) {
+        // Every vertex of the walls and plinth at or above its own ground.
+        if (role === 'plinth' && Math.abs((y as number) - plan.base) < 1e-4) continue;
+        expect(y as number).toBeGreaterThanOrEqual(
+          groundUnder(fixture.profile, fixture.origin, mask, x as number, z as number) - 1e-4,
+        );
+      }
+    }
+    expect(
+      Math.min(...verticesOf(plan, 'wall').map(([, y]) => y as number)),
+    ).toBeGreaterThanOrEqual(Math.max(...ground) - 1e-4);
+  });
+
+  it('raises the eaves by the mapped height, not the rounded storeys', () => {
+    // 7 m is two storeys (6 m) rounded: a flat-roofed block's walls stand 7 m.
+    const block = buildingBeside(
+      fixture.profile,
+      fixture.origin,
+      [rectangleBeside(850, 60, 30, 20)],
+      7,
+    );
+    const { plans } = footprintPlans(
+      { ...fixture.corridor, buildings: [block] },
+      mask,
+      fixture.profile,
+      fixture.origin,
+    );
+    const plan = plans[0] as FootprintPlan;
+    expect(plan.roof).toBe('flat');
+    const ys = verticesOf(plan, 'wall').map(([, y]) => y as number);
+    expect(Math.max(...ys) - Math.min(...ys)).toBeCloseTo(7, 3);
   });
 });
 
