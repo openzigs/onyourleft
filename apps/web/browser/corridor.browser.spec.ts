@@ -120,9 +120,9 @@ test.describe('#1546 nothing on a mapped wood', () => {
  * 400 ms exactly, as #1540 set it.
  *
  * {@link REFERENCE_AT_BUDGET_MS} was read on that laptop on 2026-10-23, in
- * three runs of this spec: the reference's fastest sample was 62.5 ms to
- * 64.6 ms, alongside a town of 64.6 ms to 66.8 ms and a median ratio of 1.06
- * to 1.08.
+ * eight runs of this spec: the reference's fastest sample was 59.6 ms to
+ * 63.6 ms, alongside a town of 70.0 ms to 74.3 ms and a median ratio of 1.01
+ * to 1.20. Three runs of the browser shard on CI read 1.24, 1.19 and 1.34.
  */
 const TOWN_BUDGET_MS = 400;
 const REFERENCE_AT_BUDGET_MS = 63;
