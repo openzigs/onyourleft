@@ -52,12 +52,17 @@
     blocking, it is not a feature the terms promise: it is something that happens to a rider, and
     the rider needs to know it is not a moderator's decision and has no appeal. The terms say it
     can happen and do not say how.
-  - **Blocking is not in the terms.** The instance can block a rider (`/v1/blocks`), but the app
-    has no control for it, so the terms do not promise one.
+  - **Blocking is in the terms (owner, 2026-10-23).** The app blocks a rider from a race's result
+    since #1516; section 3 uses the app's own approved wording, including that the app cannot undo
+    a block yet.
+  - **Export and delete while suspended are in the terms (owner, 2026-10-23).** The app offers
+    both beside the statements on the Instance screen since #1517 (section 6).
+  - **Reporting child sexual abuse material (owner, 2026-10-23).** The operator is in the United
+    States, so section 5 names NCMEC's CyberTipline (18 U.S.C. § 2258A), not the UK's National
+    Crime Agency. The UK intimate image rule stays, for riders in the UK.
 - **Open for the owner.** Whether a change is "significant" is the owner's call each time; the
   instance tells riders whenever `OYL_INSTANCE_TERMS_VERSION` changes (section 10). The governing
-  law is not chosen: the draft has no section for it, and the owner must choose it and add it as
-  a section 11 before approval.
+  law is New York's (owner, 2026-10-23), in section 11.
 
 <!-- terms -->
 
@@ -96,6 +101,9 @@ place they are.
 - **A race checks power.** If a rider's power goes over what this instance accepts as possible for
   a person, the race marks it beside their name, for everybody in the race, and tells the
   moderator. A mark is not a decision. A person looks at it.
+- **You can block another rider** from a race's result. From your next ride, neither of you is
+  named to the other in a race, and a public room keeps you apart. The rider is not told. The app
+  cannot undo a block yet.
 
 ## 4. What you must not do
 
@@ -136,14 +144,17 @@ You must also not:
   route shown in a room, or a row of a race's result), hide a display name, remove a rider from a
   room, or suspend an account. Hiding something does not delete it, and your rides stay on your
   device.
-- Some things we must report to the authorities, such as child sexual abuse material, which in the
-  UK goes to the National Crime Agency.
+- Some things we must report to the authorities. Child sexual abuse material is reported to the
+  CyberTipline of the National Center for Missing & Exploited Children (NCMEC), as US law requires.
 
 ## 6. What happens when we act
 
 - When we restrict your account or something you shared, you can read **why**, on the Instance
   screen of the app: what we did, the facts, the law or the rules we relied on, and what you can do.
   This works even if your account is suspended.
+- Even while your account is suspended, you can save everything the instance holds about you, or
+  delete your account on the instance, from the same screen. Deleting it there never deletes the
+  rides on your device.
 - We never tell you who reported you, unless you cannot see why without knowing.
 - **One person moderates this instance.** Sometimes the matter involves them, for example a report
   about them or a complaint about their own decision. They still decide it, but they say so in the
@@ -174,3 +185,9 @@ Write to the address on the legal page (`/legal`). A person reads every message.
 The date these terms took effect is shown at the top of this page. When we change them in a way
 that matters to you, the Instance screen of the app tells you, with a link to the new terms, until
 you mark them as read.
+
+## 11. The law that applies
+
+These terms are governed by the law of the State of New York, United States. If you live somewhere
+else, you keep any protection the law where you live gives you and that an agreement cannot take
+away.
