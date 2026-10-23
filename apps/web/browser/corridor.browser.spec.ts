@@ -110,20 +110,23 @@ test.describe('#1546 nothing on a mapped wood', () => {
 });
 
 /**
- * #1540's 400 ms, normalised for the runner (#1600). A fixed wall-clock limit
- * measured the load on a shared runner: the same town planned in 72 ms to 75 ms
- * on a laptop (where the reference reads 26 ms) and 246 ms to 479 ms on CI, with no change to the planner. The
- * harness times a fixed non-planner workload in the same page
- * (`corridor-harness.ts` §`referenceWorkloadMilliseconds`), and the budget is
- * 400 ms scaled by how much slower than {@link REFERENCE_AT_BUDGET_MS} this
- * page ran it. On the machine that figure was read on the limit is 400 ms
- * exactly, as #1540 set it.
+ * #1540's 400 ms, normalised for the runner (#1600, #1604). A fixed wall-clock
+ * limit measured the load on a shared runner: the same town planned in 74 ms
+ * to 87 ms on a laptop and 246 ms to 479 ms on CI, with no change to the
+ * planner. The harness times a fixed non-planner workload in the same page
+ * (`corridor-harness.ts` §`referenceWorkload`) next to each town sample, and
+ * the gate is on the median of town ÷ reference across the pairs: 400 ms over
+ * what the reference takes on the calibration machine. There the limit is
+ * 400 ms exactly, as #1540 set it.
+ *
+ * {@link REFERENCE_AT_BUDGET_MS} was read on that laptop on 2026-10-23, in
+ * three runs of this spec: the reference's fastest sample was 62.5 ms to
+ * 64.6 ms, alongside a town of 64.6 ms to 66.8 ms and a median ratio of 1.06
+ * to 1.08.
  */
 const TOWN_BUDGET_MS = 400;
-const REFERENCE_AT_BUDGET_MS = 26;
-function townBudgetMilliseconds(referenceMilliseconds: number): number {
-  return TOWN_BUDGET_MS * (referenceMilliseconds / REFERENCE_AT_BUDGET_MS);
-}
+const REFERENCE_AT_BUDGET_MS = 63;
+const TOWN_RATIO_LIMIT = TOWN_BUDGET_MS / REFERENCE_AT_BUDGET_MS;
 
 test.describe('#1540 the mapped buildings’ verdicts', () => {
   test('plans the corridor’s footprints to the same verdicts as the unit test, exactly', async ({
@@ -144,22 +147,23 @@ test.describe('#1540 the mapped buildings’ verdicts', () => {
     const corridor = await readCorridor(page);
     expect(corridor.errors).toStrictEqual([]);
     expect(corridor.townKept).toBe(2_000);
-    const budget = townBudgetMilliseconds(corridor.referenceMilliseconds);
     console.log(
-      `#1540 the dense town: 2000 footprints planned in ${corridor.townPlanMilliseconds.toFixed(1)} ms (fastest of three), reference ${corridor.referenceMilliseconds.toFixed(1)} ms, budget ${budget.toFixed(1)} ms`,
+      `#1540 the dense town: 2000 footprints planned in ${corridor.townPlanMilliseconds.toFixed(1)} ms (fastest), reference ${corridor.referenceMilliseconds.toFixed(1)} ms (fastest), town/reference ${corridor.townRatio.toFixed(3)} (median of ${corridor.townRatios.map((ratio) => ratio.toFixed(3)).join(', ')}), limit ${TOWN_RATIO_LIMIT.toFixed(3)}`,
     );
     expect(corridor.referenceMilliseconds).toBeGreaterThan(0);
-    expect(corridor.townPlanMilliseconds).toBeLessThanOrEqual(budget);
+    expect(corridor.townRatios.length).toBeGreaterThanOrEqual(3);
+    expect(corridor.townRatio).toBeLessThanOrEqual(TOWN_RATIO_LIMIT);
   });
 
-  test('control: a planner eight times slower is over the same normalised budget (#1600)', async ({
+  test('control: a planner sixteen times slower is over the same normalised budget (#1600, #1604)', async ({
     page,
   }) => {
     const corridor = await readCorridor(page, '?levers=slowplan');
     expect(corridor.errors).toStrictEqual([]);
-    expect(corridor.townPlanMilliseconds).toBeGreaterThan(
-      townBudgetMilliseconds(corridor.referenceMilliseconds),
+    console.log(
+      `#1604 control: town/reference ${corridor.townRatio.toFixed(3)} with the planner run sixteen times, limit ${TOWN_RATIO_LIMIT.toFixed(3)}`,
     );
+    expect(corridor.townRatio).toBeGreaterThan(TOWN_RATIO_LIMIT);
   });
 });
 

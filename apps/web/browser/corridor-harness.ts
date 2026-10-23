@@ -78,35 +78,115 @@ const NO_LAND_CLASS_LEVER = (QUERY.get('levers') ?? '').split(',').includes('-la
 const NO_STREETS_LEVER = (QUERY.get('levers') ?? '').split(',').includes('-streets');
 /**
  * #1600's control: the town is planned this many times per timed sample, which
- * is a planner several times slower as far as the budget can tell.
+ * is a planner this many times slower as far as the budget can tell. #1604
+ * raised it from 8 so that the control clears the budget by a wide margin on
+ * every runner rather than by a few per cent on a slow one.
  */
-const SLOW_PLAN_PASSES = (QUERY.get('levers') ?? '').split(',').includes('slowplan') ? 8 : 1;
+const SLOW_PLAN_PASSES = (QUERY.get('levers') ?? '').split(',').includes('slowplan') ? 16 : 1;
 
 /**
- * #1600: a fixed workload that is not the planner — float arithmetic over a
- * typed array and short-lived small arrays, the mix planning is made of — whose
- * time is this runner's speed. It reads the same page, the same minute and the
- * same JIT as the town it normalises, and nothing under `src/` is in it, so a
- * slower planner cannot slow it.
+ * #1604: how many (reference, town) pairs are timed. The control plans the
+ * town sixteen times a sample, so it takes three to stay inside the test's
+ * timeout on a slow runner.
  */
-function referenceWorkloadMilliseconds(): number {
-  const samples = new Float32Array(4_096);
-  let best = Number.POSITIVE_INFINITY;
-  let sink = 0;
-  for (let run = 0; run < 5; run += 1) {
-    const started = performance.now();
-    for (let pass = 0; pass < 1_200; pass += 1) {
-      for (let index = 0; index < samples.length; index += 1) {
-        samples[index] = Math.sqrt(index + pass) * Math.sin(index * 0.01 + pass);
-      }
-      const pair = [samples[pass % samples.length] ?? 0, samples[(pass * 7) % samples.length] ?? 0];
-      sink += (pair[0] ?? 0) * (pair[1] ?? 0);
+const TOWN_PAIRS = SLOW_PLAN_PASSES === 1 ? 5 : 3;
+
+/**
+ * #1600, reshaped by #1604: a fixed workload that is not the planner, whose
+ * time is this runner's speed. It is made of what planning is made of —
+ * 2 000 small shapes built from point tuples that are sorted, flattened
+ * through a `number[]` into a `Float32Array`, bucketed in a `Map` grid and
+ * queried for neighbours into object lists — and every one of them escapes
+ * into the returned array, so the allocation and the collector are measured
+ * along with the arithmetic. #1600's float loop was not: on a shared runner it
+ * slowed 3.2× where the planner slowed 2.3×, and the budget it set was too
+ * lenient. Nothing under `src/` is in it, so a slower planner cannot slow it.
+ */
+interface ReferenceShape {
+  readonly ring: Float32Array;
+  readonly centre: { readonly x: number; readonly y: number };
+  readonly near: { readonly index: number; readonly apart: number }[];
+}
+
+const REFERENCE_SHAPES = 2_000;
+const REFERENCE_CELL_METRES = 50;
+
+function referenceWorkload(): readonly ReferenceShape[] {
+  let seed = 0x25_45_f4_91;
+  const random = (): number => {
+    seed = (Math.imul(seed, 1_664_525) + 1_013_904_223) >>> 0;
+    return seed / 4_294_967_296;
+  };
+  const cellKey = (x: number, y: number): number =>
+    Math.floor(x / REFERENCE_CELL_METRES) * 4_096 + Math.floor(y / REFERENCE_CELL_METRES);
+  const shapes: ReferenceShape[] = [];
+  const grid = new Map<number, number[]>();
+  for (let index = 0; index < REFERENCE_SHAPES; index += 1) {
+    const x = random() * 1_500;
+    const y = random() * 1_500;
+    const points: [number, number][] = [];
+    for (let vertex = 0; vertex < 24; vertex += 1) {
+      const angle = random() * Math.PI * 2;
+      const radius = 4 + random() * 12;
+      points.push([x + Math.cos(angle) * radius, y + Math.sin(angle) * radius]);
     }
-    best = Math.min(best, performance.now() - started);
+    points.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    const flat: number[] = [];
+    for (const point of points) flat.push(point[0], point[1]);
+    const key = cellKey(x, y);
+    const cell = grid.get(key);
+    if (cell === undefined) grid.set(key, [index]);
+    else cell.push(index);
+    shapes.push({ ring: Float32Array.from(flat), centre: { x, y }, near: [] });
   }
-  // The result is read so the loop is not dead code to the optimiser.
-  if (Number.isNaN(sink)) throw new Error('the reference workload produced NaN');
-  return best;
+  for (const [index, shape] of shapes.entries()) {
+    for (let dx = -1; dx <= 1; dx += 1) {
+      for (let dy = -1; dy <= 1; dy += 1) {
+        const cell = grid.get(
+          cellKey(
+            shape.centre.x + dx * REFERENCE_CELL_METRES,
+            shape.centre.y + dy * REFERENCE_CELL_METRES,
+          ),
+        );
+        for (const other of cell ?? []) {
+          if (other === index) continue;
+          const there = shapes[other];
+          if (there === undefined) continue;
+          const apart = Math.hypot(
+            there.centre.x - shape.centre.x,
+            there.centre.y - shape.centre.y,
+          );
+          if (apart <= REFERENCE_CELL_METRES) shape.near.push({ index: other, apart });
+        }
+      }
+    }
+    shape.near.sort((a, b) => a.apart - b.apart);
+  }
+  return shapes;
+}
+
+/** How many times one reference sample builds the shapes: about the town's own time. */
+const REFERENCE_ROUNDS = 10;
+
+/** One timed sample of {@link referenceWorkload}; its result is read so it is not dead code. */
+function referenceMillisecondsOnce(): number {
+  const kept: (readonly ReferenceShape[])[] = [];
+  const started = performance.now();
+  for (let round = 0; round < REFERENCE_ROUNDS; round += 1) kept.push(referenceWorkload());
+  const milliseconds = performance.now() - started;
+  if (kept.some((shapes) => shapes.length !== REFERENCE_SHAPES)) {
+    throw new Error('the reference workload did not run');
+  }
+  return milliseconds;
+}
+
+/** The middle value; the samples are few and a collector pause can land on either side. */
+function median(values: readonly number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1
+    ? (sorted[middle] ?? 0)
+    : ((sorted[middle - 1] ?? 0) + (sorted[middle] ?? 0)) / 2;
 }
 
 export interface CorridorHarness {
@@ -131,14 +211,20 @@ export interface CorridorHarness {
   /** #1540: how long planning them took, at ride start. */
   readonly planMilliseconds: number;
   /**
-   * #1540's budget: the fastest of three plans of the 2 000-footprint town
+   * #1540's budget: the fastest of the paired plans of the 2 000-footprint town
    * (`footprint-fixtures-testing.ts` §`denseTownFixture`), and what was kept.
    * 0 for `?long`.
    */
   readonly townPlanMilliseconds: number;
   readonly townKept: number;
-  /** #1600: the reference workload's best of five, on this page, in this run; 0 for `?long`. */
+  /** #1600: the reference workload's fastest sample, on this page, in this run; 0 for `?long`. */
   readonly referenceMilliseconds: number;
+  /**
+   * #1604: each town sample over the reference sample timed next to it, in
+   * order; the budget is read from their median. Empty for `?long`.
+   */
+  readonly townRatios: readonly number[];
+  readonly townRatio: number;
   /** #1565: every mapped cross street drawn along the route; empty for `?long` or no corridor. */
   readonly junctions: readonly DrawnJunction[];
   readonly errors: readonly string[];
@@ -227,17 +313,37 @@ async function run(): Promise<CorridorHarness> {
   let townPlanMilliseconds = 0;
   let townKept = 0;
   let referenceMilliseconds = 0;
+  const townRatios: number[] = [];
   if (!LONG) {
-    referenceMilliseconds = referenceWorkloadMilliseconds();
     const town = denseTownFixture();
     const townLand = landClassMask(town.corridor);
-    townPlanMilliseconds = Number.POSITIVE_INFINITY;
-    for (let run = 0; run < 3; run += 1) {
+    const planTown = (): number => {
       const started = performance.now();
       for (let pass = 0; pass < SLOW_PLAN_PASSES; pass += 1) {
         townKept = footprintPlans(town.corridor, townLand, town.profile, town.origin).verdicts.kept;
       }
-      townPlanMilliseconds = Math.min(townPlanMilliseconds, performance.now() - started);
+      return performance.now() - started;
+    };
+    // One of each untimed, so neither pays the first compile inside a sample.
+    referenceMillisecondsOnce();
+    planTown();
+    townPlanMilliseconds = Number.POSITIVE_INFINITY;
+    referenceMilliseconds = Number.POSITIVE_INFINITY;
+    for (let pair = 0; pair < TOWN_PAIRS; pair += 1) {
+      // The order alternates so that a runner speeding up or slowing down
+      // across the pairs is not always charged to the same side.
+      let reference: number;
+      let plan: number;
+      if (pair % 2 === 0) {
+        reference = referenceMillisecondsOnce();
+        plan = planTown();
+      } else {
+        plan = planTown();
+        reference = referenceMillisecondsOnce();
+      }
+      townRatios.push(plan / reference);
+      townPlanMilliseconds = Math.min(townPlanMilliseconds, plan);
+      referenceMilliseconds = Math.min(referenceMilliseconds, reference);
     }
   }
   const classed =
@@ -269,6 +375,8 @@ async function run(): Promise<CorridorHarness> {
     townPlanMilliseconds,
     townKept,
     referenceMilliseconds,
+    townRatios,
+    townRatio: townRatios.length === 0 ? 0 : median(townRatios),
     junctions,
     errors,
   };
@@ -298,6 +406,8 @@ void run().then(
       townPlanMilliseconds: 0,
       townKept: 0,
       referenceMilliseconds: 0,
+      townRatios: [],
+      townRatio: 0,
       junctions: [],
       errors: [error instanceof Error ? error.message : String(error)],
     };
