@@ -109,6 +109,22 @@ test.describe('#1546 nothing on a mapped wood', () => {
   });
 });
 
+/**
+ * #1540's 400 ms, normalised for the runner (#1600). A fixed wall-clock limit
+ * measured the load on a shared runner: the same town planned in 72 ms to 75 ms
+ * on a laptop (where the reference reads 26 ms) and 246 ms to 479 ms on CI, with no change to the planner. The
+ * harness times a fixed non-planner workload in the same page
+ * (`corridor-harness.ts` §`referenceWorkloadMilliseconds`), and the budget is
+ * 400 ms scaled by how much slower than {@link REFERENCE_AT_BUDGET_MS} this
+ * page ran it. On the machine that figure was read on the limit is 400 ms
+ * exactly, as #1540 set it.
+ */
+const TOWN_BUDGET_MS = 400;
+const REFERENCE_AT_BUDGET_MS = 26;
+function townBudgetMilliseconds(referenceMilliseconds: number): number {
+  return TOWN_BUDGET_MS * (referenceMilliseconds / REFERENCE_AT_BUDGET_MS);
+}
+
 test.describe('#1540 the mapped buildings’ verdicts', () => {
   test('plans the corridor’s footprints to the same verdicts as the unit test, exactly', async ({
     page,
@@ -122,14 +138,28 @@ test.describe('#1540 the mapped buildings’ verdicts', () => {
     );
   });
 
-  test('plans the 2 000-footprint town in Chromium within its 400 ms', async ({ page }) => {
+  test('plans the 2 000-footprint town in Chromium within its 400 ms, normalised for the runner', async ({
+    page,
+  }) => {
     const corridor = await readCorridor(page);
     expect(corridor.errors).toStrictEqual([]);
     expect(corridor.townKept).toBe(2_000);
+    const budget = townBudgetMilliseconds(corridor.referenceMilliseconds);
     console.log(
-      `#1540 the dense town: 2000 footprints planned in ${corridor.townPlanMilliseconds.toFixed(1)} ms (fastest of three)`,
+      `#1540 the dense town: 2000 footprints planned in ${corridor.townPlanMilliseconds.toFixed(1)} ms (fastest of three), reference ${corridor.referenceMilliseconds.toFixed(1)} ms, budget ${budget.toFixed(1)} ms`,
     );
-    expect(corridor.townPlanMilliseconds).toBeLessThanOrEqual(400);
+    expect(corridor.referenceMilliseconds).toBeGreaterThan(0);
+    expect(corridor.townPlanMilliseconds).toBeLessThanOrEqual(budget);
+  });
+
+  test('control: a planner eight times slower is over the same normalised budget (#1600)', async ({
+    page,
+  }) => {
+    const corridor = await readCorridor(page, '?levers=slowplan');
+    expect(corridor.errors).toStrictEqual([]);
+    expect(corridor.townPlanMilliseconds).toBeGreaterThan(
+      townBudgetMilliseconds(corridor.referenceMilliseconds),
+    );
   });
 });
 
