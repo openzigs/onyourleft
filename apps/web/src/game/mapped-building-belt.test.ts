@@ -200,8 +200,9 @@ describe('the mapped buildings’ materials — #1549', () => {
     expect(shader.fragmentShader).toContain(`const float oylSashW = ${String(SASH.width)};`);
     expect(shader.fragmentShader).toContain('normal = normalize(normal + oylTilt');
     // A sash's own top is what the eaves rule tests on a sash wall.
+    // Since #1590 a commercial wall's taller window's top is, on its wall.
     expect(shader.fragmentShader).toContain(
-      'float oylTopShare = mix(oylWinT, oylSashTop, oylSashOn);',
+      'float oylTopShare = mix(mix(oylWinT, oylCwT, oylComOn), oylSashTop, oylSashOn);',
     );
     expect(shader.fragmentShader).toContain(`const float oylSashTop = ${String(SASH_TOP_SHARE)};`);
     expect(belt.mesh.geometry.getAttribute('oylStyle').itemSize).toBe(STYLE_FLOATS);
@@ -353,6 +354,7 @@ describe('what the buffers hold — #1549', () => {
       dormer: 1,
       'dormer-roof': 1,
       driveway: 1,
+      shopfront: 1,
     };
     // And the paint, written out too: the wall surface's list on everything
     // but the roof, the door and the trim, which wear their own — and since
@@ -366,7 +368,11 @@ describe('what the buffers hold — #1549', () => {
       }
       if (role === 'door') return DOOR_PAINTS[plan.paint.door] ?? [];
       if (role === 'trim') return TRIM_PAINTS[plan.paint.trim] ?? [];
-      if (role === 'driveway' || (role === 'plinth' && plan.cladding.wall === 'clapboard')) {
+      if (
+        role === 'driveway' ||
+        role === 'shopfront' ||
+        (role === 'plinth' && plan.cladding.wall === 'clapboard')
+      ) {
         return [1, 1, 1];
       }
       return WALL_PAINTS[plan.surfaces.wall]?.[plan.paint.wall] ?? [];
@@ -402,7 +408,8 @@ describe('what the buffers hold — #1549', () => {
             standing && role !== 'driveway' ? GROUNDED_SHADE + (1 - GROUNDED_SHADE) * rise : 1;
           // #1588: trim facing down — a soffit, a gutter's underside — is in the eaves' shade.
           const underneath =
-            role === 'trim' && (floats[vertex * FOOTPRINT_VERTEX_FLOATS + 4] as number) < -0.5
+            (role === 'trim' || role === 'shopfront') &&
+            (floats[vertex * FOOTPRINT_VERTEX_FLOATS + 4] as number) < -0.5
               ? FACADE_AO.soffit
               : 1;
           const paint = paintOf(plan, role);

@@ -202,6 +202,39 @@ export const DOOR_PAINTS: readonly Rgb[] = [
 ];
 
 /**
+ * A shop's sign band's paint — #1590: a plain painted panel over its shop
+ * front, in the deep and muted colours a main street's fascias are painted.
+ * **No text, no brand and no logo is ever drawn on one** (the issue's ruling:
+ * trademarks); a sign band is its colour and its moulding.
+ */
+export const SIGN_PAINTS: readonly Rgb[] = [
+  linear(0x1f_3d_2f), // bottle green
+  linear(0x5a_1e_24), // oxblood
+  linear(0x1e_2b_45), // navy
+  linear(0x24_24_24), // black
+  linear(0xe6_dc_c3), // cream
+  linear(0x8a_6a_2c), // old gold
+  linear(0x2c_4f_55), // teal
+  linear(0x6b_5a_7a), // heather
+];
+
+/**
+ * A shop's awning's canvas — #1590: its colour, and the cream its stripes
+ * alternate with ({@link AWNING_STRIPE_PAINT}) where it is striped.
+ */
+export const AWNING_PAINTS: readonly Rgb[] = [
+  linear(0x2f_5d_3a), // green
+  linear(0x8c_23_23), // red
+  linear(0x23_3f_6e), // blue
+  linear(0x3a_3a_3a), // charcoal
+  linear(0xb5_6b_1f), // orange
+  linear(0x6e_2a_4f), // plum
+];
+
+/** The cream a striped awning's other stripes are — #1590. */
+export const AWNING_STRIPE_PAINT: Rgb = linear(0xee_e6_d2);
+
+/**
  * The bounds every entry is held to: a multiplier never more than 1.1 — a
  * photograph brightened past that clips in the sun — and no albedo above 0.92,
  * which is fresh white paint, nor below 0.01, which is soot.
