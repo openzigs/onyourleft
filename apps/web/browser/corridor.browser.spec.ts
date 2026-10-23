@@ -25,12 +25,10 @@ import {
 } from './corridor-fixture';
 import type { CorridorHarness } from './corridor-harness';
 
-async function readCorridor(page: Page, query = ''): Promise<CorridorHarness> {
+async function readCorridor(page: Page, query = '', timeout = 30_000): Promise<CorridorHarness> {
   const response = await page.goto(`${HARNESS_ORIGIN}/corridor.html${query}`);
   expect(response?.ok()).toBe(true);
-  await page.waitForFunction(() => window.__oylCorridor !== undefined, undefined, {
-    timeout: 30_000,
-  });
+  await page.waitForFunction(() => window.__oylCorridor !== undefined, undefined, { timeout });
   return (await page.evaluate(() => window.__oylCorridor)) as CorridorHarness;
 }
 
@@ -54,6 +52,8 @@ test.describe('#1539 corridor read', () => {
     expect(corridor.landUse).toBe(expected.landUse);
     expect(corridor.paths).toBe(expected.paths);
     expect(corridor.streets).toBe(expected.streets);
+    // Only a load that asks for the town's timing pays for it (#1604).
+    expect(corridor.townRatios).toStrictEqual([]);
     const archive = requested.filter((url) => url.endsWith(`/${CORRIDOR_ARCHIVE_FILE}`));
     expect(archive.length).toBeGreaterThan(expected.tiles);
     const origins = new Set(requested.map((url) => new URL(url).origin));
@@ -144,7 +144,9 @@ test.describe('#1540 the mapped buildings’ verdicts', () => {
   test('plans the 2 000-footprint town in Chromium within its 400 ms, normalised for the runner', async ({
     page,
   }) => {
-    const corridor = await readCorridor(page);
+    // The timing takes 12-13 s on a CI runner (#1604): room for a runner several times slower.
+    test.setTimeout(150_000);
+    const corridor = await readCorridor(page, '?levers=towntime', 120_000);
     expect(corridor.errors).toStrictEqual([]);
     expect(corridor.townKept).toBe(2_000);
     console.log(
@@ -158,7 +160,9 @@ test.describe('#1540 the mapped buildings’ verdicts', () => {
   test('control: a planner sixteen times slower is over the same normalised budget (#1600, #1604)', async ({
     page,
   }) => {
-    const corridor = await readCorridor(page, '?levers=slowplan');
+    // 22-25 s on a CI runner (#1604's review): room for a runner several times slower.
+    test.setTimeout(150_000);
+    const corridor = await readCorridor(page, '?levers=slowplan', 120_000);
     expect(corridor.errors).toStrictEqual([]);
     console.log(
       `#1604 control: town/reference ${corridor.townRatio.toFixed(3)} with the planner run sixteen times, limit ${TOWN_RATIO_LIMIT.toFixed(3)}`,

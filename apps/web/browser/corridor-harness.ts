@@ -85,6 +85,15 @@ const NO_STREETS_LEVER = (QUERY.get('levers') ?? '').split(',').includes('-stree
 const SLOW_PLAN_PASSES = (QUERY.get('levers') ?? '').split(',').includes('slowplan') ? 16 : 1;
 
 /**
+ * `?levers=towntime`: time the dense town against the reference (#1540's
+ * budget). Only the two tests that read the timing ask for it, with this or
+ * `slowplan`: the warm-ups and pairs take about 12 s on a CI runner, and every
+ * other corridor test would otherwise pay for them too.
+ */
+const TIME_TOWN =
+  SLOW_PLAN_PASSES !== 1 || (QUERY.get('levers') ?? '').split(',').includes('towntime');
+
+/**
  * #1604: how many (reference, town) pairs are timed. The control plans the
  * town sixteen times a sample, so it takes three to stay inside the test's
  * timeout on a slow runner.
@@ -351,7 +360,7 @@ async function run(): Promise<CorridorHarness> {
   let townKept = 0;
   let referenceMilliseconds = 0;
   const townRatios: number[] = [];
-  if (!LONG) {
+  if (!LONG && TIME_TOWN) {
     const town = denseTownFixture();
     const townLand = landClassMask(town.corridor);
     const planTown = (): number => {
