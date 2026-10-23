@@ -83,6 +83,7 @@ import {
 } from '@onyourleft/domain';
 
 import { lotPaint } from './building-paint';
+import { BUILDING_VARIANTS, LOT_PORCH_FRONT_METRES } from './buildings';
 import { builtUpOrWater, fieldGround, NO_LAND_CLASS, type LandClassMask } from './land-class';
 import { ROAD_CLEARANCE_METRES, fieldSpanMetres, terrainHeightAt } from './landform';
 import {
@@ -359,6 +360,21 @@ export const STRUCTURE_FOOTPRINTS: Readonly<
   fence: { x: 0.1, back: -BOUNDARY_PIECE_METRES / 2, front: BOUNDARY_PIECE_METRES / 2 },
   signpost: { x: 0.1, back: -0.95, front: 0.95 },
 };
+
+/**
+ * A lot's farmhouse with its front porch — #1589: the farmhouse's
+ * {@link STRUCTURE_FOOTPRINTS footprint}, its front out to where the porch's
+ * roof and steps reach (`buildings.ts` §`LOT_PORCH_FRONT_METRES`). A lot has
+ * its porch only where this is clear of the road and of every mapped
+ * footprint, as {@link lotsAt} keeps the house itself.
+ */
+export const LOT_PORCH_FOOTPRINT = {
+  ...STRUCTURE_FOOTPRINTS.building,
+  front: Math.max(STRUCTURE_FOOTPRINTS.building.front, LOT_PORCH_FRONT_METRES),
+} as const;
+
+/** The farmhouse's variant, of {@link BUILDING_VARIANTS}, that is built with a porch (`buildings.ts` §`LOT_PORCH`). */
+export const LOT_PORCH_VARIANT = 0;
 
 /**
  * How close a structure's whole {@link STRUCTURE_FOOTPRINTS footprint} comes
@@ -963,6 +979,12 @@ export function lotSpacing(profile: RouteProfile): {
  *    mapped town is not a procedural village.
  * 5. Off every stretch of the road by {@link ROAD_CLEARANCE_METRES} — which is
  *    {@link structuresAt}'s rule for every structure, not this function's.
+ * 6. Since #1589 a farmhouse of {@link LOT_PORCH_VARIANT} — half of them —
+ *    has its **front porch**, where its wider {@link LOT_PORCH_FOOTPRINT} is
+ *    as clear as rules 1 to 3 and 5 hold the house: on built-up land, off
+ *    every mapped footprint and off every stretch of the road. One that is
+ *    not is drawn without it: a lot's porch is one shape, so it is dropped,
+ *    never shortened.
  *
  * **Along the route's own road only**: the game draws one road, and a lot
  * beside a mapped side street the game does not draw would face nothing.
@@ -1021,12 +1043,20 @@ export function lotsAt(
         mask,
       );
       // #1581: painted unlike the lots beside it and across the road; #1588: clad.
-      if (item !== undefined)
+      if (item !== undefined) {
+        // #1589: a porch where its reach is clear, as the house's is.
+        const porch =
+          kind === 'building' &&
+          ((variant % BUILDING_VARIANTS) + BUILDING_VARIANTS) % BUILDING_VARIANTS ===
+            LOT_PORCH_VARIANT &&
+          footprintClearance(profile, origin, item, LOT_PORCH_FOOTPRINT) >= ROAD_CLEARANCE_METRES &&
+          lotStands(mask, mapped, placeLot(lotScratch, x, z, LOT_PORCH_FOOTPRINT, rotation));
         found.push({
           ...item,
           // #1588: a house is clad, a shop never.
-          paint: lotPaint(seed, wrappedPlot, side === 1 ? 1 : -1, kind === 'building'),
+          paint: lotPaint(seed, wrappedPlot, side === 1 ? 1 : -1, kind === 'building', porch),
         });
+      }
     }
   }
 }

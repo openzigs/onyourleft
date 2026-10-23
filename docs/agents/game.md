@@ -805,6 +805,9 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         clapboard, shingles, sash windows, a foundation band,
                         a garage and its driveway, gutters, a downpipe and
                         dormers — each vertex's style in `STYLE_FLOATS`;
+                        since #1589 a front porch on about half its houses
+                        (`porch.ts`, shared with a lot's farmhouse), kept
+                        off the road's clearance, shortened or dropped;
                         ≤ 640 triangles
                         by role, built ONCE at ride start by `GameView`, and
                         drawn by #1549 (`mapped-buildings.ts`). Since #1550 the
@@ -840,8 +843,11 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         structure materials (`withLotPaint`); since #1588 a house
                         lot's channel also says it is clad (`LOT_CLAD_STEP`),
                         and the shader draws clapboard and shingles, keeping its
-                        chimney's brick by each vertex's `oylPart`. A village
-                        house carries none and is drawn as it was
+                        chimney's brick by each vertex's `oylPart`; since #1589
+                        a lot's porch (`LOT_PORCH_STEP`), without which every
+                        structure material folds the farmhouse's porch away
+                        (`withLotPorch`). A village house carries none and is
+                        drawn as it was
     src/game/streets.ts a village's kerbed pavements (#1535) — along each side's
                         BUILT plots (`settlements.ts` §`siteAt`, §`villagePlots`,
                         the houses' own decision), on the road's edge, never on
