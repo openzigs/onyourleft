@@ -66,7 +66,10 @@ import { nearestOnRoadSegments, roadSegmentsNear, type BesideTheRoad } from './r
 import { hairpinRoute, northRoute } from './route-fixtures-testing';
 import { scatterSeed, type ScatterItem } from './scatter';
 import {
+  BUILDING_CLEARANCE_METRES,
   footprintClearance,
+  footprintIndexOf,
+  type MappedTown,
   LOT_PORCH_FOOTPRINT,
   LOT_PORCH_VARIANT,
   lotsAt,
@@ -603,6 +606,45 @@ describe('a front porch on #1550’s lots — #1589', () => {
           clearance(item) < ROAD_CLEARANCE_METRES,
       ).length,
     ).toBeGreaterThan(0);
+  });
+
+  it('drops a lot’s porch where its reach would come within a mapped footprint’s clearance, the house itself clear', () => {
+    const house = houses.find((item) => lotPorch(item.paint)) as ScatterItem;
+    expect(house).toBeDefined();
+    // A footprint whose nearest face is between the house's clearance and the
+    // porch's: ahead of the front door, past the house's reach and the
+    // clearance, but within the porch's reach and the clearance.
+    const house9 = STRUCTURE_FOOTPRINTS.building.front + BUILDING_CLEARANCE_METRES;
+    const porch9 = LOT_PORCH_FOOTPRINT.front + BUILDING_CLEARANCE_METRES;
+    expect(porch9 - house9).toBeGreaterThan(1);
+    const townWith = (ahead: number): MappedTown => {
+      const x = house.x + ahead * Math.sin(house.rotation);
+      const z = house.z + ahead * Math.cos(house.rotation);
+      const ring = Float32Array.of(
+        x - 0.5,
+        z - 0.5,
+        x + 0.5,
+        z - 0.5,
+        x + 0.5,
+        z + 0.5,
+        x - 0.5,
+        z + 0.5,
+      );
+      return { ...footprintIndexOf([ring]), commercialAt: () => false };
+    };
+    const lotsWith = (town: MappedTown): ScatterItem | undefined => {
+      const found: ScatterItem[] = [];
+      lotsAt(straight, origin, scatterSeed(straight), 0, straight.totalDistance, land, town, found);
+      return found.find((item) => item.x === house.x && item.z === house.z);
+    };
+    // Between the two: the house stands, its porch does not.
+    const between = lotsWith(townWith((house9 + porch9) / 2 + 0.5)) as ScatterItem;
+    expect(between).toBeDefined();
+    expect(lotPorch(between.paint)).toBe(false);
+    // Control: a footprint beyond the porch's clearance too leaves the porch.
+    const beyond = lotsWith(townWith(porch9 + 3)) as ScatterItem;
+    expect(beyond).toBeDefined();
+    expect(lotPorch(beyond.paint)).toBe(true);
   });
 
   it('reaches no further than the footprint a lot checks for it', () => {
