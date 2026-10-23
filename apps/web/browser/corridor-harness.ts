@@ -89,7 +89,7 @@ const SLOW_PLAN_PASSES = (QUERY.get('levers') ?? '').split(',').includes('slowpl
  * town sixteen times a sample, so it takes three to stay inside the test's
  * timeout on a slow runner.
  */
-const TOWN_PAIRS = SLOW_PLAN_PASSES === 1 ? 5 : 3;
+const TOWN_PAIRS = SLOW_PLAN_PASSES === 1 ? 7 : 3;
 
 /** #1604: untimed rounds of the reference and of one plan before the pairs. */
 const WARM_UP_ROUNDS = 8;
@@ -107,12 +107,23 @@ const WARM_UP_ROUNDS = 8;
  */
 interface ReferenceShape {
   readonly ring: Float32Array;
+  readonly walls: Float32Array;
   readonly centre: { readonly x: number; readonly y: number };
   readonly near: { readonly index: number; readonly apart: number }[];
 }
 
 const REFERENCE_SHAPES = 2_000;
 const REFERENCE_CELL_METRES = 50;
+const REFERENCE_STOREYS = 3;
+/** Two triangles a wall panel: which end of the edge, and bottom or top. */
+const REFERENCE_QUAD: readonly (readonly [0 | 1, 0 | 1])[] = [
+  [0, 0],
+  [1, 0],
+  [1, 1],
+  [0, 0],
+  [1, 1],
+  [0, 1],
+];
 
 function referenceWorkload(): readonly ReferenceShape[] {
   let seed = 0x25_45_f4_91;
@@ -136,11 +147,34 @@ function referenceWorkload(): readonly ReferenceShape[] {
     points.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
     const flat: number[] = [];
     for (const point of points) flat.push(point[0], point[1]);
+    // Walls, as the planner writes them: eight floats a vertex pushed onto a
+    // growing `number[]`, copied into a `Float32Array` that the shape keeps.
+    // The planner writes about 17 KB of these a footprint, 34 MB a town, and
+    // this is about as much; it is the bulk of what both put through memory.
+    const walls: number[] = [];
+    for (let storey = 0; storey < REFERENCE_STOREYS; storey += 1) {
+      for (let edge = 0; edge < points.length; edge += 1) {
+        const a = points[edge] ?? [x, y];
+        const b = points[(edge + 1) % points.length] ?? [x, y];
+        const length = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+        const nx = (b[1] - a[1]) / length;
+        const nz = (a[0] - b[0]) / length;
+        for (const [corner, up] of REFERENCE_QUAD) {
+          const at = corner === 0 ? a : b;
+          walls.push(at[0], (storey + up) * 3, at[1], nx, 0, nz, corner * length, up);
+        }
+      }
+    }
     const key = cellKey(x, y);
     const cell = grid.get(key);
     if (cell === undefined) grid.set(key, [index]);
     else cell.push(index);
-    shapes.push({ ring: Float32Array.from(flat), centre: { x, y }, near: [] });
+    shapes.push({
+      ring: Float32Array.from(flat),
+      walls: Float32Array.from(walls),
+      centre: { x, y },
+      near: [],
+    });
   }
   for (const [index, shape] of shapes.entries()) {
     for (let dx = -1; dx <= 1; dx += 1) {
@@ -169,7 +203,7 @@ function referenceWorkload(): readonly ReferenceShape[] {
 }
 
 /** How many times one reference sample builds the shapes: about the town's own time. */
-const REFERENCE_ROUNDS = 10;
+const REFERENCE_ROUNDS = 2;
 
 /** One timed sample of {@link referenceWorkload}; its result is read so it is not dead code. */
 function referenceMillisecondsOnce(): number {
