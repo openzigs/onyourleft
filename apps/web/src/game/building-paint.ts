@@ -255,8 +255,8 @@ export function paintChannelOf(surface: StructureSurface): 'wall' | 'roof' | und
   return undefined;
 }
 
-/** The base {@link lotPaint} packs a wall and a roof in. */
-const LOT_PAINT_BASE = 16;
+/** The base {@link lotPaint} packs a wall and a roof in: 32 since #1589's porch, 16 before. */
+const LOT_PAINT_BASE = 32;
 
 /**
  * What a lot's channel adds for its cladding — #1588: an entry is under
@@ -264,6 +264,12 @@ const LOT_PAINT_BASE = 16;
  * `entry + 8 × clad`, and the shader takes them apart.
  */
 export const LOT_CLAD_STEP = 8;
+
+/**
+ * What a lot's wall channel adds for a front porch — #1589: above the entry
+ * and its cladding, so the channel is `entry + 8 × clad + 16 × porch`.
+ */
+export const LOT_PORCH_STEP = 16;
 
 /**
  * The share of residential houses clad in clapboard — #1588: **0.7**, the
@@ -304,8 +310,17 @@ export function lotSidingPaints(): readonly Rgb[] {
  * ({@link SIDING_SHARE}), whose wall entry is then one of
  * {@link lotSidingPaints}, and under asphalt shingles ({@link SHINGLE_SHARE}),
  * whose roof entry is one of {@link SHINGLE_PAINTS}. A shop is never clad.
+ *
+ * Since #1589 the wall channel also says whether the lot has its front porch
+ * ({@link LOT_PORCH_STEP}): `settlements.ts` §`lotsAt` decides it.
  */
-export function lotPaint(seed: number, plot: number, side: 1 | -1, house = false): number {
+export function lotPaint(
+  seed: number,
+  plot: number,
+  side: 1 | -1,
+  house = false,
+  porch = false,
+): number {
   const s = side === 1 ? 0 : 1;
   const turn = (seed >>> 0) % LOT_PAINTS;
   const wall = (((plot + 2 * s + turn) % LOT_PAINTS) + LOT_PAINTS) % LOT_PAINTS;
@@ -313,7 +328,13 @@ export function lotPaint(seed: number, plot: number, side: 1 | -1, house = false
   const hash = slotHash(seed, plot * 2 + s, LOT_CLAD_KEY);
   const clapboard = house && uniformFrom(hash, 0) < SIDING_SHARE ? 1 : 0;
   const shingled = house && uniformFrom(hash, 1) < SHINGLE_SHARE ? 1 : 0;
-  return 1 + wall + LOT_CLAD_STEP * clapboard + LOT_PAINT_BASE * (roof + LOT_CLAD_STEP * shingled);
+  return (
+    1 +
+    wall +
+    LOT_CLAD_STEP * clapboard +
+    (porch ? LOT_PORCH_STEP : 0) +
+    LOT_PAINT_BASE * (roof + LOT_CLAD_STEP * shingled)
+  );
 }
 
 /**
@@ -350,5 +371,17 @@ export function lotPaintEntry(packed: number | undefined, channel: 'wall' | 'roo
  */
 export function lotClad(packed: number | undefined, channel: 'wall' | 'roof'): boolean {
   const value = lotPaintChannel(packed, channel);
-  return value > 0 && Math.floor((value - 1) / LOT_CLAD_STEP) === 1;
+  return value > 0 && Math.floor((value - 1) / LOT_CLAD_STEP) % 2 === 1;
+}
+
+/**
+ * Whether a lot has its front porch — #1589, the shader's own decoding
+ * (`three-renderer.ts` §`withLotPorch`) in TypeScript.
+ *
+ * @test-facing held by `building-paint.test.ts` and `settlements-lots.test.ts`;
+ * the product decodes it in the shader
+ */
+export function lotPorch(packed: number | undefined): boolean {
+  const value = lotPaintChannel(packed, 'wall');
+  return value > 0 && Math.floor((value - 1) / LOT_PORCH_STEP) % 2 === 1;
 }

@@ -89,7 +89,7 @@ import {
 } from './camera';
 import type { QualitySettings } from './quality';
 import type { SceneryKind, ScatterItem, StructureKind } from './scatter';
-import { STRUCTURE_FOOTPRINTS } from './settlements';
+import { LOT_PORCH_FOOTPRINT, STRUCTURE_FOOTPRINTS } from './settlements';
 
 /** Which world a frame is drawn in. @see QualitySettings.world */
 export type DrawnWorld = QualitySettings['world'];
@@ -214,11 +214,17 @@ const STRUCTURE_FOUNDATION_METRES = 0.6;
  */
 const STRUCTURE_PLAN_MARGIN_METRES = 0.1;
 
-/** The box every item of a kind fits inside, in its own frame, at a scale of 1, in the world named. */
+/**
+ * The box every item of a kind fits inside, in its own frame, at a scale of 1,
+ * in the world named. ⚠️ A house's reaches out to a lot's front porch
+ * (#1589, `settlements.ts` §`LOT_PORCH_FOOTPRINT`): the porch is in the
+ * farmhouse's triangles, which step 2 reads, whether or not a lot draws it.
+ */
 export function sceneryReach(kind: SceneryKind, world: DrawnWorld): Reach {
   const naturals = NATURAL_REACH[world];
   if (kind in naturals) return naturals[kind as NaturalKind];
-  const footprint = STRUCTURE_FOOTPRINTS[kind as StructureKind];
+  const footprint =
+    kind === 'building' ? LOT_PORCH_FOOTPRINT : STRUCTURE_FOOTPRINTS[kind as StructureKind];
   return {
     x: footprint.x + STRUCTURE_PLAN_MARGIN_METRES,
     back: footprint.back - STRUCTURE_PLAN_MARGIN_METRES,

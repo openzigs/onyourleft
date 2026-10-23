@@ -26,6 +26,7 @@ import { FACADE_AO, SASH, SASH_TOP_SHARE, WINDOW_IN_BAY } from './facade';
 import {
   BAY_METRES,
   FACADE_FLOATS,
+  FACADE_RAILING,
   FOOTPRINT_SURFACES,
   FOOTPRINT_VERTEX_FLOATS,
   ROOF_ROLES,
@@ -37,6 +38,7 @@ import {
   type FootprintRole,
 } from './footprint-buildings';
 import { mixedTownFixture, rowTownFixture } from './footprint-fixtures-testing';
+import { FRONT_PORCH } from './porch';
 import { landClassMask } from './land-class';
 import {
   FAR_ROLES,
@@ -206,6 +208,17 @@ describe('the mapped buildings’ materials — #1549', () => {
     );
     expect(shader.fragmentShader).toContain(`const float oylSashTop = ${String(SASH_TOP_SHARE)};`);
     expect(belt.mesh.geometry.getAttribute('oylStyle').itemSize).toBe(STYLE_FLOATS);
+    // #1589: a porch's railing, on its own face, its rails and balusters from `porch.ts`' numbers.
+    expect(shader.fragmentShader).toContain('} else if (abs(oylTop - oylRailingTop) < 0.5) {');
+    expect(shader.fragmentShader).toContain(
+      `const float oylRailingTop = ${String(FACADE_RAILING)}.0;`,
+    );
+    expect(shader.fragmentShader).toContain(
+      `const float oylBalusterGap = ${String(FRONT_PORCH.railing.spacing)};`,
+    );
+    expect(shader.fragmentShader).toContain(
+      'diffuseColor.rgb = vColor.rgb * mix(oylRailingGap, 1.0, oylOn);',
+    );
   });
 
   it('reads the sun’s direction from the lamps that light the scene — #1588', () => {
@@ -355,19 +368,25 @@ describe('what the buffers hold — #1549', () => {
       'dormer-roof': 1,
       driveway: 1,
       shopfront: 1,
+      // #1589: a porch is painted, and its roof shaded as the roof.
+      porch: 1,
+      'porch-roof': 1,
+      'porch-trim': 1,
     };
     // And the paint, written out too: the wall surface's list on everything
     // but the roof, the door and the trim, which wear their own — and since
     // #1588 a shingled roof's albedo, and none on a driveway or under a
     // clapboard house's foundation, whose colours the shader lays.
     const paintOf = (plan: FootprintPlan, role: FootprintRole): readonly number[] => {
-      if (role === 'roof' || role === 'dormer-roof') {
+      if (role === 'roof' || role === 'dormer-roof' || role === 'porch-roof') {
         return plan.cladding.roof === 'shingle'
           ? (SHINGLE_PAINTS[plan.paint.roof] ?? [])
           : (ROOF_PAINTS[plan.surfaces.roof]?.[plan.paint.roof] ?? []);
       }
       if (role === 'door') return DOOR_PAINTS[plan.paint.door] ?? [];
-      if (role === 'trim') return TRIM_PAINTS[plan.paint.trim] ?? [];
+      if (role === 'trim' || role === 'porch' || role === 'porch-trim') {
+        return TRIM_PAINTS[plan.paint.trim] ?? [];
+      }
       if (
         role === 'driveway' ||
         role === 'shopfront' ||
@@ -385,6 +404,7 @@ describe('what the buffers hold — #1549', () => {
     let grounded = 0;
     let doors = 0;
     let soffits = 0;
+    let decks = 0;
     for (let place = 0; place < stats.buildings; place += 1) {
       const drawn = belt.drawnAt(place);
       if (drawn === undefined) throw new Error('a drawn building is missing');
@@ -406,12 +426,19 @@ describe('what the buffers hold — #1549', () => {
           // A driveway lies on the ground, and is not grounded.
           const ground =
             standing && role !== 'driveway' ? GROUNDED_SHADE + (1 - GROUNDED_SHADE) * rise : 1;
-          // #1588: trim facing down — a soffit, a gutter's underside — is in the eaves' shade.
+          // #1588: trim facing down — a soffit, a gutter's underside — is in the eaves' shade;
+          // #1589: so is a porch's ceiling, and its deck is in its roof's.
+          const facing = floats[vertex * FOOTPRINT_VERTEX_FLOATS + 4] as number;
           const underneath =
-            (role === 'trim' || role === 'shopfront') &&
-            (floats[vertex * FOOTPRINT_VERTEX_FLOATS + 4] as number) < -0.5
+            (role === 'trim' ||
+              role === 'porch' ||
+              role === 'porch-trim' ||
+              role === 'shopfront') &&
+            facing < -0.5
               ? FACADE_AO.soffit
-              : 1;
+              : role === 'porch' && facing > 0.5
+                ? FACADE_AO.porchFloor
+                : 1;
           const paint = paintOf(plan, role);
           for (let channel = 0; channel < 3; channel += 1) {
             expect(colour.array[(from + vertex) * 3 + channel]).toBeCloseTo(
@@ -419,7 +446,8 @@ describe('what the buffers hold — #1549', () => {
               5,
             );
           }
-          if (underneath !== 1) soffits += 1;
+          if (underneath === FACADE_AO.soffit) soffits += 1;
+          if (underneath === FACADE_AO.porchFloor) decks += 1;
           if (paint.some((each) => each !== 1)) painted += 1;
           if (standing && rise === 0) grounded += 1;
         }
@@ -432,6 +460,7 @@ describe('what the buffers hold — #1549', () => {
     expect(grounded).toBeGreaterThan(0);
     expect(doors).toBeGreaterThan(0);
     expect(soffits).toBeGreaterThan(0);
+    expect(decks).toBeGreaterThan(0);
     // And the paint is really there: most vertices are not the photograph as it was.
     expect(painted).toBeGreaterThan(0);
   });
