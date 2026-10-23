@@ -17,6 +17,7 @@ import {
   porchReachOf,
   porchSpanOf,
   porchStepsOf,
+  porchTriangleCount,
   porchTriangles,
   postLineOf,
   type PorchPiece,
@@ -225,8 +226,17 @@ describe('its pieces — #1589', () => {
       expect(porchReachOf(SPEC)).toBeCloseTo(Math.max(out, SPEC.depth + FRONT_PORCH.overhang), 9);
     });
 
-    it(`is about a hundred triangles (${roof})`, () => {
+    it(`is about a hundred triangles, as it is counted without being made (${roof})`, () => {
       const count = porchTriangles(pieces);
+      for (const steps of [2, 3]) {
+        for (const four of [true, false]) {
+          const span = porchSpanOf({ left: 4, right: 4 }, 6, four, 1) as NonNullable<
+            ReturnType<typeof porchSpanOf>
+          >;
+          const each = { ...SPEC, ...span, roof, steps };
+          expect(porchTriangleCount(each)).toBe(porchTriangles(porchPieces(each)));
+        }
+      }
       expect(count).toBeGreaterThanOrEqual(75);
       expect(count).toBeLessThanOrEqual(150);
     });

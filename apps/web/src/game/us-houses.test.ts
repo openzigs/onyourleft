@@ -497,22 +497,11 @@ describe('gutters, a downpipe and dormers — #1588', () => {
       for (const vertex of fronts) {
         expect([top, top - GUTTER.depth].some((y) => Math.abs(vertex.y - y) < 1e-3)).toBe(true);
       }
-      // The downpipe reaches the ground at the plinth's foot level. Since #1589 a
-      // porch's steps are trim too, and stand out from a wall, past the corner's pipe.
-      const along = (vertex: Vertex): number =>
-        Math.abs(
-          (vertex.x - rectangle.cx) * rectangle.ux + (vertex.z - rectangle.cz) * rectangle.uz,
-        );
-      const byWall = verticesOf(plan, 'trim').filter(
-        (vertex) =>
-          outside(vertex) <= rectangle.halfShort + DOWNPIPE.size + 1e-3 &&
-          Math.abs(along(vertex) - (rectangle.halfLong - DOWNPIPE.fromCorner)) <=
-            DOWNPIPE.size / 2 + 1e-3,
-      );
-      const lowest = Math.min(...byWall.map((vertex) => vertex.y));
+      // The downpipe reaches the ground at the plinth's foot level.
+      const lowest = Math.min(...verticesOf(plan, 'trim').map((vertex) => vertex.y));
       expect(lowest).toBeCloseTo(plan.base + FOUNDATION_METRES, 3);
       // Down the wall: its foot against the rectangle's long wall, where no porch post stands.
-      const pipe = byWall.filter((vertex) => vertex.y < lowest + 1e-3);
+      const pipe = verticesOf(plan, 'trim').filter((vertex) => vertex.y < lowest + 1e-3);
       // Three faces, each with three of its six corners at its foot.
       expect(pipe.length).toBe(9);
       for (const vertex of pipe) {

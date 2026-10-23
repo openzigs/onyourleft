@@ -807,7 +807,8 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         dormers — each vertex's style in `STYLE_FLOATS`;
                         since #1589 a front porch on about half its houses
                         (`porch.ts`, shared with a lot's farmhouse), kept
-                        off the road's clearance, shortened or dropped;
+                        off the road's clearance, shortened or dropped, its
+                        triangles written when first read, not at the press;
                         ≤ 640 triangles
                         by role, built ONCE at ride start by `GameView`, and
                         drawn by #1549 (`mapped-buildings.ts`). Since #1550 the

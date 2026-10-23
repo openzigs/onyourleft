@@ -37,11 +37,13 @@ import {
   FACADE_RAILING,
   FOOTPRINT_MAX_TRIANGLES,
   FOOTPRINT_VERTEX_FLOATS,
+  FOOTPRINT_ROLES,
   footprintPlans,
   FOOTPRINT_MAX_FAR_TRIANGLES,
   FOOTPRINT_MAX_VERTICES,
   frontPorchOf,
   GUTTER,
+  PORCH_ROLES,
   porchWallTopOf,
   ROOF_ROLES,
   STYLE_OFFSET,
@@ -165,9 +167,7 @@ describe('a front porch on a mapped house — #1589, over the mixed town', () =>
     expect(share).toBeGreaterThanOrEqual(0.4);
     expect(share).toBeLessThanOrEqual(0.6);
     for (const plan of town) {
-      const has = trianglesOf(plan, 'porch') > 0;
-      expect(has).toBe(plan.porch);
-      expect(trianglesOf(plan, 'porch-roof') > 0).toBe(plan.porch);
+      for (const role of PORCH_ROLES) expect(trianglesOf(plan, role) > 0).toBe(plan.porch);
       if (plan.porch) expect(fronted.includes(plan)).toBe(true);
     }
   });
@@ -196,7 +196,7 @@ describe('a front porch on a mapped house — #1589, over the mixed town', () =>
       expect(doorZ).toBeLessThanOrEqual(Math.max(...zs) + 0.05);
       // Two or three treads, below the floor.
       const treads = new Set(
-        verticesOf(plan, 'trim')
+        verticesOf(plan, 'porch-trim')
           .filter((vertex) => vertex.ny === 1 && vertex.y < floor - 1e-3)
           .map((vertex) => vertex.y.toFixed(4)),
       );
@@ -237,7 +237,7 @@ describe('a front porch on a mapped house — #1589, over the mixed town', () =>
     expect(both.length).toBeGreaterThan(0);
     for (const plan of both) {
       const ring = plan.driveway;
-      for (const role of ['porch', 'porch-roof', 'trim'] as const) {
+      for (const role of PORCH_ROLES) {
         for (const vertex of verticesOf(plan, role)) {
           if (vertex.top === FACADE_GARAGE) continue;
           expect(insideQuad(ring, vertex.x, vertex.z)).toBe(false);
@@ -246,12 +246,36 @@ describe('a front porch on a mapped house — #1589, over the mixed town', () =>
     }
   });
 
+  it('counts its porch at the press as the triangles it writes, once, when first read', () => {
+    const fresh = footprintPlans(
+      mixed.corridor,
+      landClassMask(mixed.corridor),
+      mixed.profile,
+      mixed.origin,
+    ).plans.filter((plan) => plan.porch);
+    expect(fresh.length).toBe(porched.length);
+    for (const plan of fresh) {
+      // The count is the press's; the reads below are the first.
+      const counted = plan.triangleCount;
+      const written = FOOTPRINT_ROLES.reduce((sum, role) => sum + trianglesOf(plan, role), 0);
+      expect(written).toBe(counted);
+      // The same arrays every read, and the same numbers as another plan of the same footprint.
+      for (const role of PORCH_ROLES) expect(plan.triangles[role]).toBe(plan.triangles[role]);
+    }
+    const again = fresh[0] as FootprintPlan;
+    const before = porched.find(
+      (plan) => plan.centroid.x === again.centroid.x && plan.centroid.z === again.centroid.z,
+    ) as FootprintPlan;
+    for (const role of PORCH_ROLES) {
+      expect(Array.from(again.triangles[role])).toStrictEqual(Array.from(before.triangles[role]));
+    }
+  });
+
   it('is 75 to 100 triangles, all near: the far level is the walls and the roof alone', () => {
     for (const plan of porched) {
-      // The porch and its roof, and in the trim its steps and its fascia: 4 a step, 3 a fascia's side.
-      const own = trianglesOf(plan, 'porch') + trianglesOf(plan, 'porch-roof');
-      expect(own).toBeGreaterThanOrEqual(50);
-      expect(own).toBeLessThanOrEqual(80);
+      const own = PORCH_ROLES.reduce((sum, role) => sum + trianglesOf(plan, role), 0);
+      expect(own).toBeGreaterThanOrEqual(75);
+      expect(own).toBeLessThanOrEqual(100);
       expect(plan.triangleCount).toBeLessThanOrEqual(FOOTPRINT_MAX_TRIANGLES);
       expect(plan.farTriangleCount).toBe(trianglesOf(plan, 'wall') + trianglesOf(plan, 'roof'));
     }
@@ -332,7 +356,7 @@ function fromRoadOf(row: ReturnType<typeof rowAt>, plan: FootprintPlan): number 
 /** The nearest any of a plan's porch's vertices comes to the road's centreline. */
 function porchFromRoad(row: ReturnType<typeof rowAt>, plan: FootprintPlan): number {
   let least = Number.POSITIVE_INFINITY;
-  for (const role of ['porch', 'porch-roof', 'trim'] as const) {
+  for (const role of PORCH_ROLES) {
     for (const vertex of verticesOf(plan, role)) {
       least = Math.min(least, fromRoad(row.profile, row.origin, vertex.x, vertex.z));
     }
@@ -393,6 +417,7 @@ describe('a front porch keeps #1540’s road clearance — #1589', () => {
     floor: 0.5,
     wallTop: 3.3,
     groundAt: () => 0,
+    lowest: 0,
     clear: (corners) => Math.max(...corners.map(([, n]) => n)) <= reach,
     ...extra,
   });

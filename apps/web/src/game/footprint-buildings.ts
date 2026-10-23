@@ -119,9 +119,16 @@
  * of the garage's bay, and keeps #1540's road clearance: a porch that would
  * reach within {@link ROAD_CLEARANCE_METRES} of the drawn road is shortened,
  * and dropped where it still would ({@link frontPorchOf}). Its roof is
- * `porch-roof` and wears the house's roof; the rest is `porch`, painted in
- * the trim, but its steps and its fascia, which are `trim`. About 75 to 100
- * triangles, none of them on the far level.
+ * `porch-roof` and wears the house's roof; its steps and fascia are
+ * `porch-trim`, and the rest is `porch`, all painted in the trim. About 75 to
+ * 100 triangles, none of them on the far level.
+ *
+ * ⚠️ **A porch's triangles are written the first time they are read**, not at
+ * the press ({@link FootprintPlan.triangles}): writing them was a third of
+ * #1540's 400 ms town (`corridor.browser.spec.ts`), 1 041 porches in its
+ * 2 000 footprints, where the most a refill reads is a few dozen. Whether a
+ * plan has one, and how many triangles, is decided at the press like
+ * everything else.
  *
  * ## The surfaces
  *
@@ -161,6 +168,7 @@ import {
   porchReachOf,
   porchSpanOf,
   porchStepsOf,
+  porchTriangleCount,
   type PorchPiece,
   type PorchPoint,
   type PorchSpec,
@@ -214,8 +222,8 @@ export type FootprintVerdicts = Readonly<Record<FootprintVerdict, number>>;
  * garage to the road, which the shader paints. A garage's door is a `door`,
  * and the gutters and the downpipe are `trim`. Since #1589: `porch`, a front
  * porch's deck, ceiling, posts and railing, painted and wearing the walls;
- * and `porch-roof`, its roof, which wears the roof. Its steps and its fascia
- * are `trim`.
+ * `porch-roof`, its roof, which wears the roof; and `porch-trim`, its steps
+ * and its fascia, painted in the trim as `trim` is.
  */
 export type FootprintRole =
   | 'wall'
@@ -229,7 +237,8 @@ export type FootprintRole =
   | 'dormer-roof'
   | 'driveway'
   | 'porch'
-  | 'porch-roof';
+  | 'porch-roof'
+  | 'porch-trim';
 
 /** Every {@link FootprintRole}, in a fixed order. */
 export const FOOTPRINT_ROLES: readonly FootprintRole[] = [
@@ -245,7 +254,17 @@ export const FOOTPRINT_ROLES: readonly FootprintRole[] = [
   'driveway',
   'porch',
   'porch-roof',
+  'porch-trim',
 ];
+
+/**
+ * A front porch's roles — #1589, written the first time they are read
+ * ({@link FootprintPlan.triangles}).
+ */
+export const PORCH_ROLES: readonly PorchRole[] = ['porch', 'porch-roof', 'porch-trim'];
+
+/** One of {@link PORCH_ROLES}. */
+export type PorchRole = Extract<FootprintRole, 'porch' | 'porch-roof' | 'porch-trim'>;
 
 /** The roles that wear a plan's roof surface — #1588, #1589; every other wears its wall surface. */
 export const ROOF_ROLES: ReadonlySet<FootprintRole> = new Set([
@@ -417,6 +436,8 @@ export interface FootprintPlan {
   /**
    * Each role's triangles, {@link FOOTPRINT_VERTEX_FLOATS} floats a vertex in
    * local metres, wound counter-clockwise seen from the side the normal faces.
+   * ⚠️ Since #1589 the {@link PORCH_ROLES}' are written the first time any of
+   * them is read, and kept: the same triangles every read.
    */
   readonly triangles: Readonly<Record<FootprintRole, Float32Array>>;
   /** ≤ {@link FOOTPRINT_MAX_TRIANGLES}. */
@@ -1875,6 +1896,8 @@ export interface PorchSite {
   readonly wallTop: number;
   /** The drawn ground at `(a, n)` in the porch's frame. */
   readonly groundAt: (a: number, n: number) => number;
+  /** The lowest drawn ground under the house, which the deck's skirt reaches below. */
+  readonly lowest: number;
   /** Whether a ring of `(a, n)` corners in the porch's frame is clear of the road and every footprint. */
   readonly clear: (corners: readonly (readonly [number, number])[]) => boolean;
 }
@@ -1941,19 +1964,12 @@ export function frontPorchOf(site: PorchSite, draws: PorchDraws): PorchSpec | un
       FRONT_PORCH.pitchDegrees[roof],
     );
     if (pitchDegrees === undefined) return undefined;
-    const grounds = [
-      foot,
-      site.groundAt(span.from, 0),
-      site.groundAt(span.to, 0),
-      site.groundAt(span.from, depth),
-      site.groundAt(span.to, depth),
-    ];
     return {
       ...span,
       depth,
       floor: site.floor,
       ground: foot,
-      footing: Math.min(...grounds) - FOUNDATION_METRES / 2,
+      footing: Math.min(foot, site.lowest) - FOUNDATION_METRES / 2,
       wallY: site.wallTop,
       roof,
       pitchDegrees,
@@ -1967,9 +1983,14 @@ export function frontPorchOf(site: PorchSite, draws: PorchDraws): PorchSpec | un
  * A front porch's pieces into `writing` on the front edge `at` — #1589: its
  * roof `porch-roof` in the roof's `roofStyle`, the shingles' courses up its
  * slope in metres; its railing `porch` with {@link FACADE_RAILING}'s
- * pattern; its steps and its fascia `trim`; and the rest `porch`, painted.
+ * pattern; its steps and its fascia `porch-trim`; and the rest `porch`, painted.
  */
-function frontPorch(writing: Writing, at: EdgeFrame, spec: PorchSpec, roofStyle: Style): void {
+function frontPorch(
+  writing: Pick<Writing, 'porch' | 'porch-roof' | 'porch-trim'>,
+  at: EdgeFrame,
+  spec: PorchSpec,
+  roofStyle: Style,
+): void {
   const { mx, mz, ex, ez, nx, nz } = at;
   const world = (p: PorchPoint): Vec => [
     mx + ex * p[0] + nx * p[1],
@@ -2037,7 +2058,7 @@ function frontPorch(writing: Writing, at: EdgeFrame, spec: PorchSpec, roofStyle:
       }
       case 'step':
       case 'fascia':
-        draw(writing.trim, piece, PAINTED, nought(piece), nought(piece));
+        draw(writing['porch-trim'], piece, PAINTED, nought(piece), nought(piece));
         break;
       default:
         draw(writing.porch, piece, PAINTED, nought(piece), nought(piece));
@@ -2614,6 +2635,32 @@ export function garageOf(
   return { bay, along, width: bayWidth, ground: groundAt(x, z), plan };
 }
 
+/**
+ * Makes `triangles`' {@link PORCH_ROLES} written the first time any of them is
+ * read — #1589 — by `write`, once, and kept: every later read is the same
+ * array. @see FootprintPlan.triangles
+ */
+function porchOnRead(
+  triangles: Record<FootprintRole, Float32Array>,
+  write: () => Record<'porch' | 'porch-roof' | 'porch-trim', number[]>,
+): void {
+  let written: Record<'porch' | 'porch-roof' | 'porch-trim', Float32Array> | undefined;
+  const read = (): typeof written & object => {
+    if (written === undefined) {
+      const floats = write();
+      written = {
+        porch: Float32Array.from(floats.porch),
+        'porch-roof': Float32Array.from(floats['porch-roof']),
+        'porch-trim': Float32Array.from(floats['porch-trim']),
+      };
+    }
+    return written;
+  };
+  for (const role of PORCH_ROLES) {
+    Object.defineProperty(triangles, role, { enumerable: true, get: () => read()[role] });
+  }
+}
+
 /** One footprint: its plan, or the verdict that dropped it. */
 function planFootprint(
   building: BuildingFeature,
@@ -2782,6 +2829,28 @@ function planFootprint(
           groundAt,
         )
       : undefined;
+  // #1589: whether a porch's ring is clear of the road. The front edge's
+  // middle is exactly `front.distance` from the nearest stretch of it, so a
+  // ring within that less the clearance of it is, and only one nearer asks
+  // the road, as rule 3 asks it of a footprint.
+  const clearOfRoad = (ring: Ring): boolean => {
+    if (front !== undefined && frontFrame !== undefined) {
+      const reach = radiusAbout(ring, frontFrame.mx, frontFrame.mz);
+      if (front.distance - reach >= ROAD_CLEARANCE_METRES) return true;
+    }
+    const middle = centroidOf(ring);
+    const near = roadSegmentsNear(
+      profile,
+      origin,
+      middle.x,
+      middle.z,
+      radiusAbout(ring, middle.x, middle.z) + ROAD_CLEARANCE_METRES,
+      porchSegments,
+    );
+    return (
+      porchSegments.length === 0 || ringToRoad(ring, near, porchSegments) >= ROAD_CLEARANCE_METRES
+    );
+  };
   // #1589: a front porch round the door, where it fits; it replaces the canopy.
   const frontPorchSpec =
     front !== undefined &&
@@ -2796,6 +2865,7 @@ function planFootprint(
               : { garage: { along: garage.along, width: garage.width } }),
             floor,
             wallTop: porchWallTopOf(floor, eaves, roof, pitchDegrees),
+            lowest,
             groundAt: (a, n) =>
               groundAt(
                 frontFrame.mx + frontFrame.ex * a + frontFrame.nx * n,
@@ -2808,20 +2878,8 @@ function planFootprint(
                   frontFrame.mz + frontFrame.ez * a + frontFrame.nz * n,
                 ]),
               );
-              const middle = centroidOf(ring);
-              const near = roadSegmentsNear(
-                profile,
-                origin,
-                middle.x,
-                middle.z,
-                radiusAbout(ring, middle.x, middle.z) + ROAD_CLEARANCE_METRES,
-                porchSegments,
-              );
               return (
-                (porchSegments.length === 0 ||
-                  ringToRoad(ring, near, porchSegments) >= ROAD_CLEARANCE_METRES) &&
-                !others.grid.meets(ring, others.own) &&
-                !ringsMeet(ring, drawn)
+                clearOfRoad(ring) && !others.grid.meets(ring, others.own) && !ringsMeet(ring, drawn)
               );
             },
           },
@@ -2880,11 +2938,10 @@ function planFootprint(
     .slice(1)
     .filter((hole) => hole.length >= 6)
     .map((hole) => simplifyRing(hole, FOOTPRINT_SIMPLIFY_METRES, maxVertices));
-  /** What one build drew of #1588's extras, and #1589's porch. */
+  /** What one build drew of #1588's extras. */
   interface Extras {
     garage: boolean;
     dormers: number;
-    porch: boolean;
   }
   const build = (withHoles: boolean): { writing: Writing; drew: Extras } => {
     const rings = withHoles ? [drawn, ...holes] : [drawn];
@@ -2901,8 +2958,9 @@ function planFootprint(
       driveway: [],
       porch: [],
       'porch-roof': [],
+      'porch-trim': [],
     };
-    const drew: Extras = { garage: false, dormers: 0, porch: false };
+    const drew: Extras = { garage: false, dormers: 0 };
     if (!part) {
       ringWalls(
         writing.plinth,
@@ -2947,10 +3005,8 @@ function planFootprint(
     }
     if (frontFrame !== undefined) {
       door(writing.door, frontFrame, floor);
-      if (frontPorchSpec !== undefined) {
-        frontPorch(writing, frontFrame, frontPorchSpec, roofStyle);
-        drew.porch = true;
-      } else if (withPorch) {
+      // #1589: a porch, written when it is first read, replaces the canopy.
+      if (frontPorchSpec === undefined && withPorch) {
         porch(writing.trim, frontFrame, floor, withPosts);
       }
       if (garage !== undefined) {
@@ -2961,8 +3017,9 @@ function planFootprint(
     }
     return { writing, drew };
   };
+  const porchCount = frontPorchSpec === undefined ? 0 : porchTriangleCount(frontPorchSpec);
   const fits = (writing: Writing): boolean =>
-    FOOTPRINT_ROLES.reduce((sum, role) => sum + trianglesOf(writing[role]), 0) <=
+    FOOTPRINT_ROLES.reduce((sum, role) => sum + trianglesOf(writing[role]), 0) + porchCount <=
       FOOTPRINT_MAX_TRIANGLES &&
     trianglesOf(writing.wall) + trianglesOf(writing.roof) <= FOOTPRINT_MAX_FAR_TRIANGLES;
   // Holes while they fit. #1588's and #1589's detail needs no such rule: a
@@ -2975,11 +3032,19 @@ function planFootprint(
   const triangles = Object.fromEntries(
     FOOTPRINT_ROLES.map((role) => [role, Float32Array.from(writing[role])]),
   ) as Record<FootprintRole, Float32Array>;
+  if (frontPorchSpec !== undefined && frontFrame !== undefined) {
+    porchOnRead(triangles, () => {
+      const porchWriting = { porch: [], 'porch-roof': [], 'porch-trim': [] };
+      frontPorch(porchWriting, frontFrame, frontPorchSpec, roofStyle);
+      return porchWriting;
+    });
+  }
   const wallSurface = clapboard
     ? SIDING_SURFACE
     : wallSurfaceOf(use, storeys, roof, share(STREAM_WALL));
   const roofSurface = shingled ? SHINGLE_SURFACE : roofSurfaceOf(roof, share(STREAM_ROOF));
-  const triangleCount = FOOTPRINT_ROLES.reduce((sum, role) => sum + trianglesOf(writing[role]), 0);
+  const triangleCount =
+    FOOTPRINT_ROLES.reduce((sum, role) => sum + trianglesOf(writing[role]), 0) + porchCount;
   return {
     centroid,
     footprint: Float32Array.from(drawn),
@@ -3003,7 +3068,7 @@ function planFootprint(
     garage: drew.garage,
     driveway: drew.garage && garage !== undefined ? drivewayRing(garage.plan) : NO_RING,
     dormers: drew.dormers,
-    porch: drew.porch,
+    porch: frontPorchSpec !== undefined,
     tint: packedInstanceTint(centroid.x, centroid.z, MASONRY_TINT),
     triangles,
     triangleCount,

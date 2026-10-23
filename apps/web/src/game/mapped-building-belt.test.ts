@@ -369,6 +369,7 @@ describe('what the buffers hold — #1549', () => {
       // #1589: a porch is painted, and its roof shaded as the roof.
       porch: 1,
       'porch-roof': 1,
+      'porch-trim': 1,
     };
     // And the paint, written out too: the wall surface's list on everything
     // but the roof, the door and the trim, which wear their own — and since
@@ -381,7 +382,9 @@ describe('what the buffers hold — #1549', () => {
           : (ROOF_PAINTS[plan.surfaces.roof]?.[plan.paint.roof] ?? []);
       }
       if (role === 'door') return DOOR_PAINTS[plan.paint.door] ?? [];
-      if (role === 'trim' || role === 'porch') return TRIM_PAINTS[plan.paint.trim] ?? [];
+      if (role === 'trim' || role === 'porch' || role === 'porch-trim') {
+        return TRIM_PAINTS[plan.paint.trim] ?? [];
+      }
       if (role === 'driveway' || (role === 'plinth' && plan.cladding.wall === 'clapboard')) {
         return [1, 1, 1];
       }
@@ -421,7 +424,7 @@ describe('what the buffers hold — #1549', () => {
           // #1589: so is a porch's ceiling, and its deck is in its roof's.
           const facing = floats[vertex * FOOTPRINT_VERTEX_FLOATS + 4] as number;
           const underneath =
-            (role === 'trim' || role === 'porch') && facing < -0.5
+            (role === 'trim' || role === 'porch' || role === 'porch-trim') && facing < -0.5
               ? FACADE_AO.soffit
               : role === 'porch' && facing > 0.5
                 ? FACADE_AO.porchFloor

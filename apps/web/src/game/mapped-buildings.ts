@@ -147,6 +147,7 @@ export const NEAR_ROLES: readonly FootprintRole[] = [
   'driveway',
   'porch',
   'porch-roof',
+  'porch-trim',
 ];
 
 /**

@@ -537,6 +537,18 @@ export function porchPieces(spec: PorchSpec): PorchPiece[] {
 }
 
 /**
+ * How many triangles {@link porchPieces} makes of `spec`, without making them
+ * — #1589: the deck's 8, the roof's (a shed's 10, a hip's 14 with its ceiling
+ * and fascia), the header's 6, and each post's 8, rail run's 4 (a post a
+ * run) and step's 8. A mapped plan counts its porch by this at the press and
+ * writes it when it is first drawn.
+ */
+export function porchTriangleCount(spec: PorchSpec): number {
+  const posts = spec.posts.length;
+  return 8 + (spec.roof === 'hip' ? 14 : 10) + 6 + 8 * posts + 4 * posts + 8 * spec.steps;
+}
+
+/**
  * How many triangles a porch's pieces are: a quad two, a triangle one.
  *
  * @test-facing held by `porch.test.ts` and `front-porches.test.ts`, which state

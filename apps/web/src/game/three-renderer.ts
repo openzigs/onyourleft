@@ -12390,6 +12390,7 @@ const MAPPED_ROLE_SHADE: Readonly<Record<FootprintRole, number>> = {
   // #1589: a porch is painted, and its roof is shaded as the roof it wears.
   porch: 1,
   'porch-roof': REALISTIC_ROLE_SHADE.roof,
+  'porch-trim': 1,
 };
 
 /**
@@ -12421,6 +12422,7 @@ export function mappedRolePaint(plan: FootprintPlan, role: FootprintRole): Rgb {
       return DOOR_PAINTS[plan.paint.door] ?? unpainted;
     case 'trim':
     case 'porch':
+    case 'porch-trim':
       return TRIM_PAINTS[plan.paint.trim] ?? unpainted;
     default:
       return paintsOf(plan.surfaces.wall)?.[plan.paint.wall] ?? unpainted;
@@ -13438,7 +13440,7 @@ export class MappedBuildingBelt {
     // #1588: a soffit's and a gutter's underside, in the shade of the wall and the eaves;
     // #1589: a porch's ceiling likewise, and its deck in the shade of its roof.
     const porch = role === 'porch';
-    const underside = role === 'trim' || porch ? FACADE_AO.soffit : 1;
+    const underside = role === 'trim' || role === 'porch-trim' || porch ? FACADE_AO.soffit : 1;
     const upside = porch ? FACADE_AO.porchFloor : 1;
     const ground = plan.base + FOUNDATION_METRES;
     const position = this.#position.array as Float32Array;
