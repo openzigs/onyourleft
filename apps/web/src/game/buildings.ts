@@ -43,6 +43,11 @@
  *   eaves and the door steps included, so no shape here moves where anything
  *   may stand: `arrangement-unchanged.test.ts`' digest is untouched, and
  *   `buildings.test.ts` holds every vertex of every variant to the footprint.
+ *   ⚠️ **But a lot's front porch** (#1589, {@link LOT_PORCH}): the farmhouse's
+ *   `porch` and `porch-roof` reach past it, to `settlements.ts`
+ *   §`LOT_PORCH_FOOTPRINT`, and are drawn only on a lot whose wider footprint
+ *   `settlements.ts` §`lotsAt` found clear; on every other house the renderer
+ *   folds them away (`three-renderer.ts` §`withLotPorch`).
  * - **Every triangle is wound to face outwards**, counter-clockwise seen from
  *   the side it is meant to be seen from, because the materials that draw it
  *   cull back faces. {@link Soup.tri} orders the corners from the direction a
@@ -60,6 +65,16 @@
  * the stylised world's scenery already made (#367).
  */
 
+import {
+  FRONT_PORCH,
+  porchPieces,
+  porchPitchOf,
+  porchReachOf,
+  porchSpanOf,
+  porchStepsOf,
+  type PorchPoint,
+  type PorchSpec,
+} from './porch';
 import type { StructureKind } from './scatter';
 
 /** The structures with walls, a roof and a way in: the ones #500 details. */
@@ -88,9 +103,21 @@ export function isBuiltKind(kind: string): kind is BuiltKind {
  * - `joinery` — every frame, sill, fascia, barge board, shop sign and step.
  * - `door` — a door leaf.
  * - `glass` — a pane.
+ * - `porch` — #1589: a lot's front porch, all but its roof: deck, ceiling,
+ *   posts, railing, steps and fascia, in the joinery's timber.
+ * - `porch-roof` — its roof, which wears the roof.
  */
 export type BuildingRole =
-  'wall' | 'plinth' | 'roof' | 'ridge' | 'chimney' | 'joinery' | 'door' | 'glass';
+  | 'wall'
+  | 'plinth'
+  | 'roof'
+  | 'ridge'
+  | 'chimney'
+  | 'joinery'
+  | 'door'
+  | 'glass'
+  | 'porch'
+  | 'porch-roof';
 
 /** Every {@link BuildingRole}, in a fixed order. */
 export const BUILDING_ROLES: readonly BuildingRole[] = [
@@ -102,6 +129,8 @@ export const BUILDING_ROLES: readonly BuildingRole[] = [
   'joinery',
   'door',
   'glass',
+  'porch',
+  'porch-roof',
 ];
 
 /**
@@ -281,6 +310,8 @@ class Soup {
     joinery: [],
     door: [],
     glass: [],
+    porch: [],
+    'porch-roof': [],
   };
 
   readonly openings: PlannedOpening[] = [];
@@ -934,6 +965,54 @@ function buildCanopy(soup: Soup, u: number, wallZ: number, springY: number): voi
   );
 }
 
+/**
+ * A lot's front porch — #1589, on the farmhouse's front round its door: four
+ * posts, a hip roof tied under the first floor's windows, a railing and two
+ * steps, `porch.ts` §`porchPieces`' layout with these numbers. The house's
+ * floor is its threshold, {@link PLINTH_TOP_METRES} up, on ground at 0.
+ */
+export const LOT_PORCH: PorchSpec = (() => {
+  const floor = PLINTH_TOP_METRES;
+  const depth = 2;
+  const wallY = SILL_HEIGHTS[1] - 0.35;
+  const span = porchSpanOf({ left: 3.5, right: 3.5 }, 5.4, true, 1);
+  if (span === undefined) throw new Error('a lot’s porch does not fit its farmhouse');
+  return {
+    ...span,
+    depth,
+    floor,
+    ground: 0,
+    footing: -FOUNDATION_METRES / 2,
+    wallY,
+    roof: 'hip',
+    pitchDegrees: porchPitchOf(floor, wallY, depth, FRONT_PORCH.pitchDegrees.hip) ?? 0,
+    steps: porchStepsOf(floor) ?? 2,
+  };
+})();
+
+/** Where the farmhouse's front wall stands, along +z, which a lot's porch stands against. */
+const LOT_PORCH_WALL_Z = 3.3;
+
+/**
+ * How far along +z a lot's porch reaches, roof and steps together: the front
+ * of `settlements.ts` §`LOT_PORCH_FOOTPRINT`, which a lot must keep clear for it.
+ */
+export const LOT_PORCH_FRONT_METRES = LOT_PORCH_WALL_Z + porchReachOf(LOT_PORCH);
+
+/**
+ * A lot's front porch's pieces into `soup`, on a front wall `wallZ` out along
+ * +z — #1589: its roof `porch-roof`, everything else `porch`.
+ */
+function buildLotPorch(soup: Soup, wallZ: number): void {
+  const at = (p: PorchPoint): Point => [p[0], p[2], wallZ + p[1]];
+  const towards = (p: PorchPoint): Point => [p[0], p[2], p[1]];
+  for (const piece of porchPieces(LOT_PORCH)) {
+    const role: BuildingRole = piece.part === 'roof' ? 'porch-roof' : 'porch';
+    const corners = piece.corners.map(at);
+    soup.polygon(role, corners, towards(piece.normal));
+  }
+}
+
 /** A window on a storey: its centre along the wall and which storey. */
 function window(u: number, storey: 0 | 1): OpeningSpec {
   return { kind: 'window', u, v: SILL_HEIGHTS[storey], ...WINDOW };
@@ -972,6 +1051,8 @@ function house(soup: Soup, variant: number, withOpenings: boolean): void {
       },
       withOpenings,
     );
+    // #1589: on a lot, a front porch; on every other farmhouse it is folded away.
+    buildLotPorch(soup, LOT_PORCH_WALL_Z);
     return;
   }
   buildBody(

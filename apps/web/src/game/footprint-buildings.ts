@@ -108,6 +108,57 @@
  * downpipe, dormers, a garage door and a driveway — and none of it is on the
  * far level but the roof's overhang.
  *
+ * ## The main street (#1590, the owner's ruling of 2026-10-22)
+ *
+ * A commercial plan — land the map calls retail, commercial or anything
+ * built up but houses and industry ({@link footprintUse}) — is drawn as a
+ * main-street shop, mostly in the shader, so it costs no download:
+ *
+ * - **Its windows** are taller ({@link STYLE_COMMERCIAL}, `facade.ts`
+ *   §`COMMERCIAL_WINDOW`), every storey.
+ * - **A shop front** over the ground storey of the wall the door is on, where
+ *   that wall is at least {@link SHOP_FRONT_MIN_WALL_METRES} long: one quad,
+ *   a centimetre proud ({@link FACADE_SHOPFRONT}), on which the shader draws
+ *   glass across most of the wall, a stall riser, mullions and a transom; the
+ *   door in its middle is a shop's glazed door in a recess.
+ * - **A sign band** over it ({@link FACADE_SIGN}): one quad, a plain panel in
+ *   a seeded `building-paint.ts` §`SIGN_PAINTS` in its moulding. **No text,
+ *   brand or logo.**
+ * - **An awning** on a seeded share of shop fronts ({@link AWNING}'s
+ *   `share`): a sloped canvas quad, its underside, a valance and two cheeks,
+ *   striped or plain ({@link FACADE_AWNING}), and none where it would reach
+ *   the road's clearance.
+ * - **A cornice** along the top of its flat roof's parapet ({@link CORNICE}),
+ *   in the trim's paint: a front, a soffit and a top along each outer wall,
+ *   so about 24 triangles on a rectangle; dropped from a plan it would put
+ *   past {@link FOOTPRINT_MAX_TRIANGLES}.
+ *
+ * The shop front, the sign and the awning are `shopfront`, which wears the
+ * walls and is painted by the shader alone; the cornice is `trim`. None of it
+ * is on the far level.
+ *
+ * ## The front porch (#1589, the owner's ruling of 2026-10-22)
+ *
+ * About half of the residential houses with a front door have a **front
+ * porch** round it ({@link FRONT_PORCH}'s `share`, seeded per footprint), laid
+ * out by `porch.ts`: a deck at the floor's height, three or four posts under
+ * a header, a shed or hip roof tied to the wall under the eaves, a railing
+ * whose rails and balusters the shader draws ({@link FACADE_RAILING}), and two
+ * or three steps down to the ground. It replaces #1581's canopy, keeps clear
+ * of the garage's bay, and keeps #1540's road clearance: a porch that would
+ * reach within {@link ROAD_CLEARANCE_METRES} of the drawn road is shortened,
+ * and dropped where it still would ({@link frontPorchOf}). Its roof is
+ * `porch-roof` and wears the house's roof; its steps and fascia are
+ * `porch-trim`, and the rest is `porch`, all painted in the trim. About 75 to
+ * 100 triangles, none of them on the far level.
+ *
+ * ⚠️ **A porch's triangles are written the first time they are read**, not at
+ * the press ({@link FootprintPlan.triangles}): writing them was a third of
+ * #1540's 400 ms town (`corridor.browser.spec.ts`), 1 041 porches in its
+ * 2 000 footprints, where the most a refill reads is a few dozen. Whether a
+ * plan has one, and how many triangles, is decided at the press like
+ * everything else.
+ *
  * ## The surfaces
  *
  * By the land use under the centroid ({@link FootprintUse}, from `land-class.ts`
@@ -130,14 +181,29 @@ import {
 } from '@onyourleft/map-features';
 
 import {
+  AWNING_PAINTS,
   DOOR_PAINTS,
   paintsOf,
   roofPaintsOf,
   SHINGLE_SHARE,
   SIDING_SHARE,
+  SIGN_PAINTS,
   TRIM_PAINTS,
 } from './building-paint';
 import { DOOR, FOUNDATION_METRES, PLINTH_TOP_METRES } from './buildings';
+import {
+  FRONT_PORCH,
+  hipFits,
+  porchPieces,
+  porchPitchOf,
+  porchReachOf,
+  porchSpanOf,
+  porchStepsOf,
+  porchTriangleCount,
+  type PorchPiece,
+  type PorchPoint,
+  type PorchSpec,
+} from './porch';
 import { MASONRY_TINT, packedInstanceTint } from './instance-tint';
 import { kindAt, type LandClass, type LandClassMask } from './land-class';
 import { ROAD_CLEARANCE_METRES, terrainHeightAt } from './landform';
@@ -185,7 +251,12 @@ export type FootprintVerdicts = Readonly<Record<FootprintVerdict, number>>;
  * `dormer`, a dormer's front and cheeks, which wear the walls; `dormer-roof`,
  * its roof, which wears the roof; and `driveway`, the paved strip from a
  * garage to the road, which the shader paints. A garage's door is a `door`,
- * and the gutters and the downpipe are `trim`.
+ * and the gutters and the downpipe are `trim`. Since #1589: `porch`, a front
+ * porch's deck, ceiling, posts and railing, painted and wearing the walls;
+ * `porch-roof`, its roof, which wears the roof; and `porch-trim`, its steps
+ * and its fascia, painted in the trim as `trim` is. Since #1590: `shopfront`, a
+ * shop's front, its sign band and its awning, which wear the walls and which
+ * the shader paints; a commercial roof's cornice is `trim`.
  */
 export type FootprintRole =
   | 'wall'
@@ -197,7 +268,11 @@ export type FootprintRole =
   | 'trim'
   | 'dormer'
   | 'dormer-roof'
-  | 'driveway';
+  | 'driveway'
+  | 'shopfront'
+  | 'porch'
+  | 'porch-roof'
+  | 'porch-trim';
 
 /** Every {@link FootprintRole}, in a fixed order. */
 export const FOOTPRINT_ROLES: readonly FootprintRole[] = [
@@ -211,10 +286,27 @@ export const FOOTPRINT_ROLES: readonly FootprintRole[] = [
   'dormer',
   'dormer-roof',
   'driveway',
+  'shopfront',
+  'porch',
+  'porch-roof',
+  'porch-trim',
 ];
 
-/** The roles that wear a plan's roof surface — #1588; every other wears its wall surface. */
-export const ROOF_ROLES: ReadonlySet<FootprintRole> = new Set(['roof', 'dormer-roof']);
+/**
+ * A front porch's roles — #1589, written the first time they are read
+ * ({@link FootprintPlan.triangles}).
+ */
+export const PORCH_ROLES: readonly PorchRole[] = ['porch', 'porch-roof', 'porch-trim'];
+
+/** One of {@link PORCH_ROLES}. */
+export type PorchRole = Extract<FootprintRole, 'porch' | 'porch-roof' | 'porch-trim'>;
+
+/** The roles that wear a plan's roof surface — #1588, #1589; every other wears its wall surface. */
+export const ROOF_ROLES: ReadonlySet<FootprintRole> = new Set([
+  'roof',
+  'dormer-roof',
+  'porch-roof',
+]);
 
 /**
  * What a vertex tells the facade shader — #1581, four floats: `u` and `v`,
@@ -235,6 +327,14 @@ export const ROOF_ROLES: ReadonlySet<FootprintRole> = new Set(['roof', 'dormer-r
  *   (#1588): `u` and `v` in metres across the face and up it, from its
  *   lower left corner; the style says how wide and how high
  *   ({@link STYLE_FLOATS}).
+ * - **`top = −6`, a shop front; `−7`, a sign band; `−8`, an awning** (#1590):
+ *   `u` and `v` in metres across the face and up it (down an awning's slope);
+ *   the style's `width` is the face's width, and its `extra` a shop front's or
+ *   a sign's height, or an awning's paint; a sign's `flags` are its paint, and
+ *   an awning's 1 where it is striped.
+ * - **`top = −5`, a porch's railing** (#1589): `u` and `v` in metres along
+ *   it and up it; the style's `width` is its length and its `extra` its
+ *   height.
  *
  * On a plain face whose cladding has courses (`clad` ≥ {@link CLAD_SHINGLE}),
  * `u` and `v` are metres across and up the face too: along a roof's eaves and
@@ -253,6 +353,14 @@ export const FACADE_PAINT = -2;
 export const FACADE_DORMER = -3;
 /** `top` of a garage's door — #1588. @see FACADE_FLOATS */
 export const FACADE_GARAGE = -4;
+/** `top` of a shop front — #1590. @see FACADE_FLOATS */
+export const FACADE_SHOPFRONT = -6;
+/** `top` of a sign band — #1590. @see FACADE_FLOATS */
+export const FACADE_SIGN = -7;
+/** `top` of an awning's canvas — #1590. @see FACADE_FLOATS */
+export const FACADE_AWNING = -8;
+/** `top` of a porch's railing — #1589. @see FACADE_FLOATS */
+export const FACADE_RAILING = -5;
 
 /**
  * What a vertex tells the shader of its face's cladding and its windows'
@@ -310,6 +418,11 @@ export const STYLE_SHUTTERS = 2;
 export const STYLE_EAVES = 4;
 /** `flags`: a clapboard wall's foundation band is brick. @see STYLE_FLOATS */
 export const STYLE_BRICK_FOUNDATION = 8;
+/**
+ * `flags`: a commercial building's — #1590: taller windows on its walls, and on
+ * its door's face a shop's glazed door in a recess. @see STYLE_FLOATS
+ */
+export const STYLE_COMMERCIAL = 16;
 
 /** What a plan is clad in — #1588. */
 export interface FootprintCladding {
@@ -367,11 +480,17 @@ export interface FootprintPlan {
   readonly driveway: Ring;
   /** How many dormers its roof has — #1588. */
   readonly dormers: number;
+  /** Whether it has a shop front and a sign band, an awning, and a cornice — #1590. */
+  readonly shop: { readonly front: boolean; readonly awning: boolean; readonly cornice: boolean };
+  /** Whether it has a front porch — #1589. */
+  readonly porch: boolean;
   /** `instance-tint.ts`' seeded tint, packed, keyed by the centroid (#621). */
   readonly tint: number;
   /**
    * Each role's triangles, {@link FOOTPRINT_VERTEX_FLOATS} floats a vertex in
    * local metres, wound counter-clockwise seen from the side the normal faces.
+   * ⚠️ Since #1589 the {@link PORCH_ROLES}' are written the first time any of
+   * them is read, and kept: the same triangles every read.
    */
   readonly triangles: Readonly<Record<FootprintRole, Float32Array>>;
   /** ≤ {@link FOOTPRINT_MAX_TRIANGLES}. */
@@ -560,6 +679,44 @@ export const DORMER = { width: 1.5, front: 1.5, setBack: 0.5, belowRidge: 0.25 }
 export const DORMER_ONE_REACH_METRES = 1.8;
 export const DORMER_TWO_REACH_METRES = 2 * DORMER_ONE_REACH_METRES;
 
+/** The shortest front wall that has a shop front — #1590: **4 m**; a shorter one keeps its door alone. */
+export const SHOP_FRONT_MIN_WALL_METRES = 4;
+
+/**
+ * A shop front's place on its wall — #1590: how far in from either end it
+ * stops (`inset`, a pilaster's width of wall), how high it reaches above the
+ * floor (`height`) and the least it may (`least`), and how far proud of the
+ * wall it stands — under the door's 2 cm, so the door is in front of it.
+ */
+export const SHOP_FRONT_PLACE = { inset: 0.3, height: 2.7, least: 2.4, proud: 0.01 } as const;
+
+/** A sign band — #1590: its gap over the shop front, its height, and how proud it stands. */
+export const SIGN_BAND = { gap: 0.05, height: 0.6, proud: 0.03 } as const;
+
+/**
+ * An awning — #1590: the share of shop fronts with one, its depth out from the
+ * wall, seeded, and the least it is shortened to before it is dropped, how far
+ * its outer edge drops below where it meets the wall, its valance's depth,
+ * and how far it stops short of the shop front's ends.
+ */
+export const AWNING = {
+  share: 0.5,
+  depth: { least: 1, most: 1.4 },
+  leastDepth: 0.7,
+  drop: 0.45,
+  valance: 0.22,
+  inset: 0.1,
+} as const;
+
+/** The share of awnings that are striped — #1590; the rest are plain. */
+export const AWNING_STRIPED_SHARE = 0.5;
+
+/**
+ * A commercial roof's cornice — #1590: how far it projects past the parapet,
+ * how deep its band is down from the parapet's top, and how far it caps it.
+ */
+export const CORNICE = { projection: 0.25, depth: 0.3, cap: 0.02 } as const;
+
 /** How far a door stands proud of its wall: **2 cm**, so it never fights the facade's depth. */
 const DOOR_PROUD_METRES = 0.02;
 
@@ -668,6 +825,19 @@ const STREAM_FOUNDATION = 16;
 const STREAM_GARAGE = 17;
 const STREAM_GARAGE_END = 18;
 const STREAM_DORMER = 19;
+// #1590's, each its own (#1589 holds 20 to 25).
+const STREAM_SIGN = 26;
+const STREAM_AWNING = 27;
+const STREAM_AWNING_PAINT = 28;
+const STREAM_AWNING_STRIPES = 29;
+const STREAM_AWNING_DEPTH = 30;
+// #1589's, each its own.
+const STREAM_FRONT_PORCH = 20;
+const STREAM_PORCH_WIDTH = 21;
+const STREAM_PORCH_DEPTH = 22;
+const STREAM_PORCH_POSTS = 23;
+const STREAM_PORCH_SIDE = 24;
+const STREAM_PORCH_ROOF = 25;
 
 /** The key under which {@link slotHash} hashes footprints, apart from every other placement. */
 const FOOTPRINT_KEY = 0x15_40;
@@ -1728,9 +1898,11 @@ function edgeFrameOf(ring: Ring, edge: number): EdgeFrame {
 /**
  * The front door — `buildings.ts` §`DOOR`'s leaf in a painted surround
  * ({@link DOOR_FACE}, #1581) — on the middle of its edge, standing on `floor`,
- * a little proud of the wall. The shader draws the leaf and the surround.
+ * a little proud of the wall. The shader draws the leaf and the surround;
+ * since #1590 a shop's (`style`, {@link STYLE_COMMERCIAL}) a glazed leaf in a
+ * recess.
  */
-function door(into: number[], at: EdgeFrame, floor: number): void {
+function door(into: number[], at: EdgeFrame, floor: number, style: Style = NO_STYLE): void {
   const { ex, ez, nx, nz } = at;
   const mx = at.mx + nx * DOOR_PROUD_METRES;
   const mz = at.mz + nz * DOOR_PROUD_METRES;
@@ -1751,9 +1923,203 @@ function door(into: number[], at: EdgeFrame, floor: number): void {
     ],
     [nx, 0, nz],
     unit,
-    { top: FACADE_DOOR, skip: -1, style: NO_STYLE },
+    { top: FACADE_DOOR, skip: -1, style },
     unit,
   );
+}
+
+/** A shop's front, decided — #1590: its width and height on its wall, and its awning's depth, or 0. */
+interface ShopPlan {
+  readonly width: number;
+  readonly height: number;
+  /** The sign band's height, or 0 where there is no room under the eaves for one. */
+  readonly sign: number;
+  readonly signPaint: number;
+  readonly awning: number;
+  readonly awningPaint: number;
+  readonly striped: boolean;
+}
+
+/**
+ * A shop's front on the edge `at`, standing on `floor` — #1590: the shop
+ * front's face over the ground storey ({@link FACADE_SHOPFRONT}), the sign
+ * band's over it ({@link FACADE_SIGN}), and with `shop.awning` an awning
+ * between them ({@link FACADE_AWNING}): its canvas and the canvas's
+ * underside, its valance either side, and a cheek at either end. Every face's
+ * `u, v` are metres; the shader paints all of it.
+ */
+function shopFront(into: number[], at: EdgeFrame, floor: number, shop: ShopPlan): void {
+  const { ex, ez, nx, nz } = at;
+  const point = (a: number, n: number, y: number): Vec => [
+    at.mx + ex * a + nx * n,
+    y,
+    at.mz + ez * a + nz * n,
+  ];
+  const out: Vec = [nx, 0, nz];
+  const half = shop.width / 2;
+  const metres = (w: number, h: number): Four<Pair> => [
+    [0, 0],
+    [w, 0],
+    [w, h],
+    [0, h],
+  ];
+  quad(
+    into,
+    [
+      point(-half, SHOP_FRONT_PLACE.proud, floor),
+      point(half, SHOP_FRONT_PLACE.proud, floor),
+      point(half, SHOP_FRONT_PLACE.proud, floor + shop.height),
+      point(-half, SHOP_FRONT_PLACE.proud, floor + shop.height),
+    ],
+    out,
+    UNMAPPED,
+    {
+      top: FACADE_SHOPFRONT,
+      skip: -1,
+      style: [CLAD_PHOTOGRAPH, STYLE_COMMERCIAL, shop.width, shop.height],
+    },
+    metres(shop.width, shop.height),
+  );
+  if (shop.sign > 0) {
+    const bottom = floor + shop.height + SIGN_BAND.gap;
+    quad(
+      into,
+      [
+        point(-half, SIGN_BAND.proud, bottom),
+        point(half, SIGN_BAND.proud, bottom),
+        point(half, SIGN_BAND.proud, bottom + shop.sign),
+        point(-half, SIGN_BAND.proud, bottom + shop.sign),
+      ],
+      out,
+      UNMAPPED,
+      {
+        top: FACADE_SIGN,
+        skip: -1,
+        style: [CLAD_PHOTOGRAPH, shop.signPaint, shop.width, shop.sign],
+      },
+      metres(shop.width, shop.sign),
+    );
+  }
+  if (shop.awning > 0) {
+    const a0 = -half + AWNING.inset;
+    const a1 = half - AWNING.inset;
+    const length = a1 - a0;
+    const top = floor + shop.height;
+    const low = top - AWNING.drop;
+    const d = shop.awning;
+    const slope = Math.hypot(d, AWNING.drop);
+    const face: Face = {
+      top: FACADE_AWNING,
+      skip: -1,
+      style: [CLAD_PHOTOGRAPH, shop.striped ? 1 : 0, length, shop.awningPaint],
+    };
+    const up: Vec = [nx * (AWNING.drop / slope), d / slope, nz * (AWNING.drop / slope)];
+    const corners: Four<Vec> = [
+      point(a0, d, low),
+      point(a1, d, low),
+      point(a1, 0, top),
+      point(a0, 0, top),
+    ];
+    const canvas: Four<Pair> = [
+      [0, slope],
+      [length, slope],
+      [length, 0],
+      [0, 0],
+    ];
+    quad(into, corners, up, UNMAPPED, face, canvas);
+    quad(into, corners, [-up[0], -up[1], -up[2]], UNMAPPED, face, canvas);
+    // The valance: a strip hanging from the outer edge, seen from either side.
+    const valance: Four<Vec> = [
+      point(a0, d, low - AWNING.valance),
+      point(a1, d, low - AWNING.valance),
+      point(a1, d, low),
+      point(a0, d, low),
+    ];
+    const hanging: Four<Pair> = [
+      [0, slope + AWNING.valance],
+      [length, slope + AWNING.valance],
+      [length, slope],
+      [0, slope],
+    ];
+    quad(into, valance, out, UNMAPPED, face, hanging);
+    quad(into, valance, [-nx, 0, -nz], UNMAPPED, face, hanging);
+    // A cheek at either end, under the canvas.
+    for (const [a, sign] of [
+      [a0, -1],
+      [a1, 1],
+    ] as const) {
+      triangle(
+        into,
+        [point(a, 0, top), point(a, d, low), point(a, 0, low)],
+        [ex * sign, 0, ez * sign],
+        [AT_NOUGHT, AT_NOUGHT, AT_NOUGHT],
+        face,
+        [
+          [0, 0],
+          [0, slope],
+          [0, AWNING.drop],
+        ],
+      );
+    }
+  }
+}
+
+/**
+ * A commercial roof's cornice along the top of its parapet, round the outer
+ * ring — #1590, {@link CORNICE}'s size, painted (`trim`): along each wall a
+ * front {@link CORNICE}'s projection out, a soffit under it back to the
+ * wall, and a cap over it and the parapet's top. Its corners are mitred, the
+ * projection taken along each corner's bisector.
+ */
+function cornice(into: number[], ring: Ring, top: number): void {
+  const n = ring.length / 2;
+  const outward = signedArea(ring) > 0 ? 1 : -1;
+  const normals: Pair[] = [];
+  for (let i = 0; i < n; i += 1) {
+    const j = (i + 1) % n;
+    const dx = (ring[j * 2] as number) - (ring[i * 2] as number);
+    const dz = (ring[j * 2 + 1] as number) - (ring[i * 2 + 1] as number);
+    const length = Math.hypot(dx, dz);
+    normals.push(length > 1e-6 ? [(dz / length) * outward, (-dx / length) * outward] : [0, 0]);
+  }
+  // Each corner's projected point: along the bisector of its two walls' normals.
+  const outer: Pair[] = [];
+  for (let i = 0; i < n; i += 1) {
+    const [ax, az] = normals[(i + n - 1) % n] as Pair;
+    const [bx, bz] = normals[i] as Pair;
+    const scale = CORNICE.projection / Math.max(0.3, 1 + ax * bx + az * bz);
+    outer.push([
+      (ring[i * 2] as number) + (ax + bx) * scale,
+      (ring[i * 2 + 1] as number) + (az + bz) * scale,
+    ]);
+  }
+  const bottom = top - CORNICE.depth;
+  const cap = top + CORNICE.cap;
+  for (let i = 0; i < n; i += 1) {
+    const j = (i + 1) % n;
+    const [nx, nz] = normals[i] as Pair;
+    if (nx === 0 && nz === 0) continue;
+    const a: Pair = [ring[i * 2] as number, ring[i * 2 + 1] as number];
+    const b: Pair = [ring[j * 2] as number, ring[j * 2 + 1] as number];
+    const a1 = outer[i] as Pair;
+    const b1 = outer[j] as Pair;
+    const at = (p: Pair, y: number): Vec => [p[0], y, p[1]];
+    quad(
+      into,
+      [at(a1, bottom), at(b1, bottom), at(b1, cap), at(a1, cap)],
+      [nx, 0, nz],
+      UNMAPPED,
+      PAINTED,
+    );
+    quad(
+      into,
+      [at(a, bottom), at(b, bottom), at(b1, bottom), at(a1, bottom)],
+      [0, -1, 0],
+      UNMAPPED,
+      PAINTED,
+    );
+    quad(into, [at(a1, cap), at(b1, cap), at(b, cap), at(a, cap)], [0, 1, 0], UNMAPPED, PAINTED);
+  }
 }
 
 /** How far a canopy's underside is above the top of the door's surround: **0.1 m**. */
@@ -1791,6 +2157,205 @@ function porch(into: number[], at: EdgeFrame, floor: number, posts: boolean): vo
       PAINTED,
       { top: false, bottom: false },
     );
+  }
+}
+
+/**
+ * Where a front porch's roof may meet its wall at the most — #1589: under
+ * the eaves, and on a house of more than one storey under the next storey's
+ * floor, so that it is tied below the upstairs windows. Under a pitched roof
+ * it is below the gutter's foot (`GUTTER`), so it passes under the gutter
+ * and the soffit; under a flat roof, below the roof itself.
+ */
+export function porchWallTopOf(
+  floor: number,
+  eaves: number,
+  roof: FootprintRoof,
+  pitchDegrees: number,
+): number {
+  const storey = floor + STOREY_METRES - 0.05;
+  if (roof === 'flat') return Math.min(storey, eaves - 0.15);
+  const eaveY = eaves - EAVES_OVERHANG_METRES * Math.tan((pitchDegrees * Math.PI) / 180);
+  return Math.min(storey, eaveY - GUTTER.below - GUTTER.depth - 0.03);
+}
+
+/** What {@link frontPorchOf} reads of a house besides its seeded draws. */
+export interface PorchSite {
+  /** The front edge's length, and the garage's bay along it where there is one. */
+  readonly length: number;
+  readonly garage?: { readonly along: number; readonly width: number };
+  readonly floor: number;
+  /** Where the roof may meet the wall at the most. @see porchWallTopOf */
+  readonly wallTop: number;
+  /** The drawn ground at `(a, n)` in the porch's frame. */
+  readonly groundAt: (a: number, n: number) => number;
+  /** The lowest drawn ground under the house, which the deck's skirt reaches below. */
+  readonly lowest: number;
+  /** Whether a ring of `(a, n)` corners in the porch's frame is clear of the road and every footprint. */
+  readonly clear: (corners: readonly (readonly [number, number])[]) => boolean;
+}
+
+/** A front porch's seeded draws, each in `[0, 1)`. */
+export interface PorchDraws {
+  readonly width: number;
+  readonly depth: number;
+  readonly posts: number;
+  readonly side: number;
+  readonly roof: number;
+}
+
+/**
+ * A house's front porch, or none — #1589. Its span along the wall
+ * (`porch.ts` §`porchSpanOf`) keeps {@link FRONT_PORCH}'s `endMargin` from
+ * either end and from a garage's bay. Its depth is seeded and **shortened**
+ * by `shorten` at a time while the porch, its roof's overhang and its steps
+ * would come within the road's clearance or onto any footprint
+ * (`site.clear`), and the porch is **dropped** where even `leastDepth`
+ * would. It is dropped too where its roof cannot be tied under the eaves
+ * with headroom under its header (`porchPitchOf`), or the ground is too far
+ * below its deck for three steps (`porchStepsOf`).
+ */
+export function frontPorchOf(site: PorchSite, draws: PorchDraws): PorchSpec | undefined {
+  const { endMargin, overhang, width, depth: depthRange, shorten, leastDepth } = FRONT_PORCH;
+  let left = site.length / 2 - endMargin;
+  let right = site.length / 2 - endMargin;
+  if (site.garage !== undefined) {
+    const { along, width: bay } = site.garage;
+    if (along > 0) right = Math.min(right, along - bay / 2 - endMargin);
+    else left = Math.min(left, -along - bay / 2 - endMargin);
+  }
+  const span = porchSpanOf(
+    { left, right },
+    width.least + (width.most - width.least) * draws.width,
+    draws.posts < FRONT_PORCH.fourPostShare,
+    draws.side < 0.5 ? 1 : -1,
+  );
+  if (span === undefined) return undefined;
+  const { stepsAt } = span;
+  for (
+    let depth = depthRange.least + (depthRange.most - depthRange.least) * draws.depth;
+    depth >= leastDepth - 1e-9;
+    depth -= shorten
+  ) {
+    const foot = site.groundAt(stepsAt, depth + 2 * FRONT_PORCH.step.tread);
+    const steps = porchStepsOf(site.floor - foot);
+    if (steps === undefined) return undefined;
+    const reach = porchReachOf({ depth, steps });
+    const ring = [
+      [span.from - overhang, 0.05],
+      [span.to + overhang, 0.05],
+      [span.to + overhang, reach],
+      [span.from - overhang, reach],
+    ] as const;
+    if (!site.clear(ring)) continue;
+    const hip = draws.roof < FRONT_PORCH.hipShare && hipFits(span.to - span.from, depth);
+    const roof = hip ? 'hip' : 'shed';
+    const pitchDegrees = porchPitchOf(
+      site.floor,
+      site.wallTop,
+      depth,
+      FRONT_PORCH.pitchDegrees[roof],
+    );
+    if (pitchDegrees === undefined) return undefined;
+    return {
+      ...span,
+      depth,
+      floor: site.floor,
+      ground: foot,
+      footing: Math.min(foot, site.lowest) - FOUNDATION_METRES / 2,
+      wallY: site.wallTop,
+      roof,
+      pitchDegrees,
+      steps,
+    };
+  }
+  return undefined;
+}
+
+/**
+ * A front porch's pieces into `writing` on the front edge `at` — #1589: its
+ * roof `porch-roof` in the roof's `roofStyle`, the shingles' courses up its
+ * slope in metres; its railing `porch` with {@link FACADE_RAILING}'s
+ * pattern; its steps and its fascia `porch-trim`; and the rest `porch`, painted.
+ */
+function frontPorch(
+  writing: Pick<Writing, 'porch' | 'porch-roof' | 'porch-trim'>,
+  at: EdgeFrame,
+  spec: PorchSpec,
+  roofStyle: Style,
+): void {
+  const { mx, mz, ex, ez, nx, nz } = at;
+  const world = (p: PorchPoint): Vec => [
+    mx + ex * p[0] + nx * p[1],
+    p[2],
+    mz + ez * p[0] + nz * p[1],
+  ];
+  const direction = (p: PorchPoint): Vec => [ex * p[0] + nx * p[1], p[2], ez * p[0] + nz * p[1]];
+  const sinPitch = Math.sin((spec.pitchDegrees * Math.PI) / 180);
+  const draw = (
+    into: number[],
+    piece: PorchPiece,
+    face: Face,
+    facade: readonly Pair[],
+    uv: readonly Pair[],
+  ): void => {
+    const corners = piece.corners.map(world);
+    const normal = direction(piece.normal);
+    if (corners.length === 4) {
+      quad(
+        into,
+        corners as unknown as Four<Vec>,
+        normal,
+        uv as Four<Pair>,
+        face,
+        facade as Four<Pair>,
+      );
+    } else {
+      triangle(
+        into,
+        corners as unknown as Three<Vec>,
+        normal,
+        uv as Three<Pair>,
+        face,
+        facade as Three<Pair>,
+      );
+    }
+  };
+  const nought = (piece: PorchPiece): Pair[] => piece.corners.map((): Pair => AT_NOUGHT);
+  for (const piece of porchPieces(spec)) {
+    switch (piece.part) {
+      case 'roof': {
+        // Along its eaves and up its slope, in metres: a hip's end runs out from the wall.
+        const low = Math.min(...piece.corners.map((p) => p[2]));
+        const across = Math.abs(piece.normal[0]) > Math.abs(piece.normal[1]) ? 1 : 0;
+        const metres = piece.corners.map((p): Pair => [p[across], (p[2] - low) / sinPitch]);
+        const uv = metres.map((m): Pair => [m[0] / BAY_METRES, m[1] / STOREY_METRES]);
+        draw(writing['porch-roof'], piece, plainIn(roofStyle), metres, uv);
+        break;
+      }
+      case 'railing': {
+        const { length, height } = piece.railing ?? { length: 0, height: 0 };
+        draw(
+          writing.porch,
+          piece,
+          { top: FACADE_RAILING, skip: -1, style: [CLAD_PHOTOGRAPH, 0, length, height] },
+          [
+            [0, 0],
+            [length, 0],
+            [length, height],
+            [0, height],
+          ],
+          nought(piece),
+        );
+        break;
+      }
+      case 'step':
+      case 'fascia':
+        draw(writing['porch-trim'], piece, PAINTED, nought(piece), nought(piece));
+        break;
+      default:
+        draw(writing.porch, piece, PAINTED, nought(piece), nought(piece));
+    }
   }
 }
 
@@ -2037,6 +2602,9 @@ const GROUND_REACHES = [32, 64, 128, 256, 512, 1_024, 2_560] as const;
 
 /** Scratch: the road segments near the footprint being planned. */
 const nearSegments: number[] = [];
+
+/** Scratch: the road segments near a front porch being placed — #1589. */
+const porchSegments: number[] = [];
 
 /**
  * Every mapped footprint in the corridor, planned or dropped — #1540.
@@ -2360,6 +2928,95 @@ export function garageOf(
   return { bay, along, width: bayWidth, ground: groundAt(x, z), plan };
 }
 
+/** Scratch: the road segments near an awning being placed — #1590. */
+const awningSegments: number[] = [];
+
+/** A shop front's seeded draws, each in `[0, 1)` — #1590. */
+interface ShopDraws {
+  readonly sign: number;
+  readonly awning: number;
+  readonly paint: number;
+  readonly stripes: number;
+  readonly depth: number;
+}
+
+/**
+ * A shop's front on a front wall `length` long, `room` from the floor to the
+ * eaves — #1590, or none where the room is under {@link SHOP_FRONT_PLACE}'s
+ * least. The front spans the wall less its `inset` either end, as tall as its
+ * `height` or the room less 0.3 m; the sign band over it where it fits under
+ * the eaves; and an awning on {@link AWNING}'s share, its depth seeded and
+ * shortened 0.1 m at a time while its ring (`(a, n)` corners in the wall's
+ * frame) is not `clear`, and none below its least.
+ */
+export function shopOf(
+  length: number,
+  room: number,
+  clear: (corners: readonly (readonly [number, number])[]) => boolean,
+  draws: ShopDraws,
+): ShopPlan | undefined {
+  const height = Math.min(SHOP_FRONT_PLACE.height, room - 0.3);
+  if (height < SHOP_FRONT_PLACE.least) return undefined;
+  const width = length - 2 * SHOP_FRONT_PLACE.inset;
+  const sign = height + SIGN_BAND.gap + SIGN_BAND.height <= room - 0.05 ? SIGN_BAND.height : 0;
+  let awning = 0;
+  if (draws.awning < AWNING.share) {
+    const half = width / 2 - AWNING.inset;
+    const { least, most } = AWNING.depth;
+    for (
+      let depth = least + (most - least) * draws.depth;
+      depth >= AWNING.leastDepth - 1e-9;
+      depth -= 0.1
+    ) {
+      const ring = [
+        [-half, 0.05],
+        [half, 0.05],
+        [half, depth],
+        [-half, depth],
+      ] as const;
+      if (clear(ring)) {
+        awning = depth;
+        break;
+      }
+    }
+  }
+  return {
+    width,
+    height,
+    sign,
+    signPaint: seededEntry(draws.sign, SIGN_PAINTS.length),
+    awning,
+    awningPaint: seededEntry(draws.paint, AWNING_PAINTS.length),
+    striped: draws.stripes < AWNING_STRIPED_SHARE,
+  };
+}
+
+/**
+ * Makes `triangles`' {@link PORCH_ROLES} written the first time any of them is
+ * read — #1589 — by `write`, once, and kept: every later read is the same
+ * array. @see FootprintPlan.triangles
+ */
+function porchOnRead(
+  triangles: Record<FootprintRole, Float32Array>,
+  write: () => Record<'porch' | 'porch-roof' | 'porch-trim', number[]>,
+): void {
+  let written: Record<'porch' | 'porch-roof' | 'porch-trim', Float32Array> | undefined;
+  const read = (): typeof written & object => {
+    if (written === undefined) {
+      const floats = write();
+      written = {
+        porch: Float32Array.from(floats.porch),
+        'porch-roof': Float32Array.from(floats['porch-roof']),
+        'porch-trim': Float32Array.from(floats['porch-trim']),
+      };
+    }
+    return written;
+  };
+  for (const role of PORCH_ROLES) {
+    Object.defineProperty(triangles, role, { enumerable: true, get: () => read()[role] });
+  }
+}
+
 /** One footprint: its plan, or the verdict that dropped it. */
 function planFootprint(
   building: BuildingFeature,
@@ -2503,7 +3160,8 @@ function planFootprint(
     (residential ? STYLE_SASH : 0) +
     (residential && share(STREAM_SHUTTERS) < SHUTTER_SHARE ? STYLE_SHUTTERS : 0) +
     (roof === 'flat' ? 0 : STYLE_EAVES) +
-    (brickFoundation ? STYLE_BRICK_FOUNDATION : 0);
+    (brickFoundation ? STYLE_BRICK_FOUNDATION : 0) +
+    (use === 'commercial' ? STYLE_COMMERCIAL : 0);
   const wallStyle: Style = [wallClad, flags, 0, -1];
   const roofStyle: Style = shingled
     ? [cladOf(CLAD_SHINGLE, SHINGLE_COURSE_METRES), 0, 0, -1]
@@ -2526,6 +3184,109 @@ function planFootprint(
           nearSegments,
           { ring: drawn, others },
           groundAt,
+        )
+      : undefined;
+  // #1590: a shop's front on a commercial building's front wall, where it is long enough.
+  const shop =
+    front !== undefined &&
+    frontFrame !== undefined &&
+    use === 'commercial' &&
+    front.length >= SHOP_FRONT_MIN_WALL_METRES
+      ? shopOf(
+          front.length,
+          eaves - floor,
+          (corners) => {
+            const ring = Float32Array.from(
+              corners.flatMap(([a, n]) => [
+                frontFrame.mx + frontFrame.ex * a + frontFrame.nx * n,
+                frontFrame.mz + frontFrame.ez * a + frontFrame.nz * n,
+              ]),
+            );
+            const middle = centroidOf(ring);
+            const near = roadSegmentsNear(
+              profile,
+              origin,
+              middle.x,
+              middle.z,
+              radiusAbout(ring, middle.x, middle.z) + ROAD_CLEARANCE_METRES,
+              awningSegments,
+            );
+            return (
+              (awningSegments.length === 0 ||
+                ringToRoad(ring, near, awningSegments) >= ROAD_CLEARANCE_METRES) &&
+              !others.grid.meets(ring, others.own)
+            );
+          },
+          {
+            sign: share(STREAM_SIGN),
+            awning: share(STREAM_AWNING),
+            paint: share(STREAM_AWNING_PAINT),
+            stripes: share(STREAM_AWNING_STRIPES),
+            depth: share(STREAM_AWNING_DEPTH),
+          },
+        )
+      : undefined;
+  // #1589: whether a porch's ring is clear of the road. The front edge's
+  // middle is exactly `front.distance` from the nearest stretch of it, so a
+  // ring within that less the clearance of it is, and only one nearer asks
+  // the road, as rule 3 asks it of a footprint.
+  const clearOfRoad = (ring: Ring): boolean => {
+    if (front !== undefined && frontFrame !== undefined) {
+      const reach = radiusAbout(ring, frontFrame.mx, frontFrame.mz);
+      if (front.distance - reach >= ROAD_CLEARANCE_METRES) return true;
+    }
+    const middle = centroidOf(ring);
+    const near = roadSegmentsNear(
+      profile,
+      origin,
+      middle.x,
+      middle.z,
+      radiusAbout(ring, middle.x, middle.z) + ROAD_CLEARANCE_METRES,
+      porchSegments,
+    );
+    return (
+      porchSegments.length === 0 || ringToRoad(ring, near, porchSegments) >= ROAD_CLEARANCE_METRES
+    );
+  };
+  // #1589: a front porch round the door, where it fits; it replaces the canopy.
+  const frontPorchSpec =
+    front !== undefined &&
+    frontFrame !== undefined &&
+    residential &&
+    share(STREAM_FRONT_PORCH) < FRONT_PORCH.share
+      ? frontPorchOf(
+          {
+            length: front.length,
+            ...(garage === undefined
+              ? {}
+              : { garage: { along: garage.along, width: garage.width } }),
+            floor,
+            wallTop: porchWallTopOf(floor, eaves, roof, pitchDegrees),
+            lowest,
+            groundAt: (a, n) =>
+              groundAt(
+                frontFrame.mx + frontFrame.ex * a + frontFrame.nx * n,
+                frontFrame.mz + frontFrame.ez * a + frontFrame.nz * n,
+              ),
+            clear: (corners) => {
+              const ring = Float32Array.from(
+                corners.flatMap(([a, n]) => [
+                  frontFrame.mx + frontFrame.ex * a + frontFrame.nx * n,
+                  frontFrame.mz + frontFrame.ez * a + frontFrame.nz * n,
+                ]),
+              );
+              return (
+                clearOfRoad(ring) && !others.grid.meets(ring, others.own) && !ringsMeet(ring, drawn)
+              );
+            },
+          },
+          {
+            width: share(STREAM_PORCH_WIDTH),
+            depth: share(STREAM_PORCH_DEPTH),
+            posts: share(STREAM_PORCH_POSTS),
+            side: share(STREAM_PORCH_SIDE),
+            roof: share(STREAM_PORCH_ROOF),
+          },
         )
       : undefined;
   const middle = (frontBays - 1) / 2;
@@ -2574,12 +3335,13 @@ function planFootprint(
     .slice(1)
     .filter((hole) => hole.length >= 6)
     .map((hole) => simplifyRing(hole, FOOTPRINT_SIMPLIFY_METRES, maxVertices));
-  /** What one build drew of #1588's extras. */
+  /** What one build drew of #1588's extras, and #1590's cornice. */
   interface Extras {
     garage: boolean;
     dormers: number;
+    cornice: boolean;
   }
-  const build = (withHoles: boolean): { writing: Writing; drew: Extras } => {
+  const build = (withHoles: boolean, withCornice: boolean): { writing: Writing; drew: Extras } => {
     const rings = withHoles ? [drawn, ...holes] : [drawn];
     const writing: Writing = {
       wall: [],
@@ -2592,8 +3354,12 @@ function planFootprint(
       dormer: [],
       'dormer-roof': [],
       driveway: [],
+      shopfront: [],
+      porch: [],
+      'porch-roof': [],
+      'porch-trim': [],
     };
-    const drew: Extras = { garage: false, dormers: 0 };
+    const drew: Extras = { garage: false, dormers: 0, cornice: false };
     if (!part) {
       ringWalls(
         writing.plinth,
@@ -2606,6 +3372,11 @@ function planFootprint(
     if (roof === 'flat') {
       flatRoof(writing.roof, rings, eaves);
       ringWalls(writing.parapet, rings, [eaves, eaves + PARAPET_METRES, floor], { inside: true });
+      // #1590: a commercial roof's parapet under a cornice.
+      if (withCornice && use === 'commercial' && !part) {
+        cornice(writing.trim, drawn, eaves + PARAPET_METRES);
+        drew.cornice = true;
+      }
     } else {
       const ridge = pitchedRoof(writing, rectangle, [eaves, floor], roof, pitchDegrees, {
         roof: roofStyle,
@@ -2637,8 +3408,17 @@ function planFootprint(
       }
     }
     if (frontFrame !== undefined) {
-      door(writing.door, frontFrame, floor);
-      if (withPorch) porch(writing.trim, frontFrame, floor, withPosts);
+      door(
+        writing.door,
+        frontFrame,
+        floor,
+        shop === undefined ? NO_STYLE : [CLAD_PHOTOGRAPH, STYLE_COMMERCIAL, 0, -1],
+      );
+      if (shop !== undefined) shopFront(writing.shopfront, frontFrame, floor, shop);
+      // #1589: a porch, written when it is first read, replaces the canopy.
+      if (frontPorchSpec === undefined && withPorch) {
+        porch(writing.trim, frontFrame, floor, withPosts);
+      }
       if (garage !== undefined) {
         garageDoor(writing.door, frontFrame, garage.along, garage.width, [garage.ground, floor]);
         drivewayPaving(writing.driveway, garage.plan, groundAt);
@@ -2647,24 +3427,39 @@ function planFootprint(
     }
     return { writing, drew };
   };
+  const porchCount = frontPorchSpec === undefined ? 0 : porchTriangleCount(frontPorchSpec);
   const fits = (writing: Writing): boolean =>
-    FOOTPRINT_ROLES.reduce((sum, role) => sum + trianglesOf(writing[role]), 0) <=
+    FOOTPRINT_ROLES.reduce((sum, role) => sum + trianglesOf(writing[role]), 0) + porchCount <=
       FOOTPRINT_MAX_TRIANGLES &&
     trianglesOf(writing.wall) + trianglesOf(writing.roof) <= FOOTPRINT_MAX_FAR_TRIANGLES;
-  // Holes while they fit. #1588's detail needs no such rule: a flat plan of
-  // 48 walls with a garage, the longest driveway and a canopy is about 500.
-  let built = build(holes.length > 0);
-  if (holes.length > 0 && !fits(built.writing)) built = build(false);
+  // Holes while they fit. #1588's and #1589's detail needs no such rule: a
+  // flat plan of 48 walls with a garage, the longest driveway and a porch is
+  // about 600 (`front-porches.test.ts` §"the most a plan can be").
+  // #1590: a cornice round a footprint of many walls may not fit; the plan
+  // does without it before it does without its holes, and only a plan that
+  // drew one is built again for it.
+  const holed = holes.length > 0;
+  let built = build(holed, true);
+  if (!fits(built.writing) && built.drew.cornice) built = build(holed, false);
+  if (holed && !fits(built.writing)) built = build(false, false);
   const { writing, drew } = built;
 
   const triangles = Object.fromEntries(
     FOOTPRINT_ROLES.map((role) => [role, Float32Array.from(writing[role])]),
   ) as Record<FootprintRole, Float32Array>;
+  if (frontPorchSpec !== undefined && frontFrame !== undefined) {
+    porchOnRead(triangles, () => {
+      const porchWriting = { porch: [], 'porch-roof': [], 'porch-trim': [] };
+      frontPorch(porchWriting, frontFrame, frontPorchSpec, roofStyle);
+      return porchWriting;
+    });
+  }
   const wallSurface = clapboard
     ? SIDING_SURFACE
     : wallSurfaceOf(use, storeys, roof, share(STREAM_WALL));
   const roofSurface = shingled ? SHINGLE_SURFACE : roofSurfaceOf(roof, share(STREAM_ROOF));
-  const triangleCount = FOOTPRINT_ROLES.reduce((sum, role) => sum + trianglesOf(writing[role]), 0);
+  const triangleCount =
+    FOOTPRINT_ROLES.reduce((sum, role) => sum + trianglesOf(writing[role]), 0) + porchCount;
   return {
     centroid,
     footprint: Float32Array.from(drawn),
@@ -2688,6 +3483,12 @@ function planFootprint(
     garage: drew.garage,
     driveway: drew.garage && garage !== undefined ? drivewayRing(garage.plan) : NO_RING,
     dormers: drew.dormers,
+    shop: {
+      front: shop !== undefined,
+      awning: shop !== undefined && shop.awning > 0,
+      cornice: drew.cornice,
+    },
+    porch: frontPorchSpec !== undefined,
     tint: packedInstanceTint(centroid.x, centroid.z, MASONRY_TINT),
     triangles,
     triangleCount,

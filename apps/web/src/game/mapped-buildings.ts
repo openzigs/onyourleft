@@ -132,7 +132,7 @@ export const FAR_ROLES: readonly FootprintRole[] = ['wall', 'roof'];
 
 /**
  * The roles a building's near level draws: all of them, #1581's chimney and
- * trim and #1588's dormers and driveway among them.
+ * trim, #1588's dormers and driveway, #1589's porch and #1590's shop fronts among them.
  */
 export const NEAR_ROLES: readonly FootprintRole[] = [
   'wall',
@@ -145,6 +145,10 @@ export const NEAR_ROLES: readonly FootprintRole[] = [
   'dormer',
   'dormer-roof',
   'driveway',
+  'shopfront',
+  'porch',
+  'porch-roof',
+  'porch-trim',
 ];
 
 /**

@@ -3947,16 +3947,19 @@ describe('a clad lot — #1588', () => {
     const parts = new Set(Array.from(brick.getAttribute('oylPart').array as Float32Array));
     expect(parts).toStrictEqual(new Set([LOT_PART.wall, LOT_PART.plinth, LOT_PART.other]));
     brick.dispose();
-    // A roof, a hedge: no part a clad lot draws differently.
-    for (const [kind, surface] of [
-      ['building', 'roof-tiles'],
-      ['hedge', 'hedge'],
+    // A roof, a hedge: no part a clad lot draws differently — but since #1589
+    // a farmhouse's porch, in its roof's tiles and its joinery's planks.
+    for (const [kind, surface, variant, parts] of [
+      ['building', 'roof-tiles', 1, [LOT_PART.other]],
+      ['building', 'roof-tiles', 0, [LOT_PART.other, LOT_PART.porch]],
+      ['building', 'planks', 0, [LOT_PART.other, LOT_PART.porch]],
+      ['hedge', 'hedge', 0, [LOT_PART.other]],
     ] as const) {
-      const geometry = realisticStructureGeometry(kind, surface);
+      const geometry = realisticStructureGeometry(kind, surface, variant);
       if (geometry === undefined) throw new Error(`${kind} has no ${surface}`);
       expect(
         new Set(Array.from(geometry.getAttribute('oylPart').array as Float32Array)),
-      ).toStrictEqual(new Set([LOT_PART.other]));
+      ).toStrictEqual(new Set(parts));
       geometry.dispose();
     }
   });
@@ -4002,7 +4005,9 @@ describe('a clad lot — #1588', () => {
     expect(walls.vertexShader).toContain(
       `const vec3 oylCladPaints[${String(LOT_PAINTS)}] = vec3[${String(LOT_PAINTS)}](${glsl(lotSidingPaints())});`,
     );
-    expect(walls.vertexShader).toContain(`bool oylClad = oylCode >= ${String(LOT_CLAD_STEP)};`);
+    expect(walls.vertexShader).toContain(
+      `bool oylClad = (oylCode / ${String(LOT_CLAD_STEP)}) % 2 == 1;`,
+    );
     expect(walls.vertexShader).toContain('vOylLot.w = oylClad ? 1.0 + oylPart : 0.0;');
     // A clad lot's chimney keeps its photograph, unpainted.
     expect(walls.vertexShader).toContain('oylPart > 0.5 ? oylCladPaints[oylEntry] : vec3(1.0)');
