@@ -71,6 +71,25 @@ const hourMinute = new Intl.DateTimeFormat('en-GB', {
 export const formatTime: DayFormat = (unixSeconds) =>
   hourMinute.format(new Date(unixSeconds * 1000));
 
+// Made at load beside `dayMonth`, so the two resolve the same zone.
+const isoParts = new Intl.DateTimeFormat('en-GB', {
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+});
+
+/**
+ * The device's own calendar as the Devices row writes a day, "2026-10-03"
+ * (#1511): the same calendar as {@link formatDay}, so a row's `Added …` and
+ * the revoke button beside it never name different days for one key.
+ */
+export const formatIsoDay: DayFormat = (unixSeconds) => {
+  const parts = isoParts.formatToParts(new Date(unixSeconds * 1000));
+  const part = (type: Intl.DateTimeFormatPartTypes): string =>
+    parts.find((each) => each.type === type)?.value ?? '';
+  return `${part('year')}-${part('month')}-${part('day')}`;
+};
+
 /**
  * How a key the rider may revoke is named on its revoke button and in the
  * sentence that confirms it (#1208): by its day, as the notices name it —

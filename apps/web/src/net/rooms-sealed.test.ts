@@ -52,7 +52,19 @@ interface IdentityInstance {
     }): Promise<number>;
   };
   freshRead<T>(
-    read: (store: { markRaceStarted(roomId: string, at: number): Promise<void> }) => Promise<T>,
+    read: (store: {
+      markRaceStarted(roomId: string, at: number): Promise<void>;
+      markRaceFinished(roomId: string, at: number): Promise<void>;
+      putResult(result: {
+        roomId: string;
+        athleteId: string;
+        finishMs: number | null;
+        flags: number;
+        place: number | null;
+        wattsPerKilogram: number | null;
+        flaggedDurationsSeconds: readonly number[];
+      }): Promise<void>;
+    }) => Promise<T>,
   ): Promise<T>;
   readonly instanceKeys: { show(): Promise<{ readonly card: string }> };
   call(
@@ -323,5 +335,62 @@ describe('a room as the real instance tells it, after #929’s review — #948',
     // The instance restarts in the middle of it, and its first sweep ends it.
     expect(await w.rooms.sweep({ claim: () => true, release: () => undefined })).toBe(1);
     expect(await bea.rooms().results(made.roomId)).toEqual({ kind: 'no-result' });
+  });
+});
+
+describe('blocking a rider from a race’s result, through the real instance — #1516', () => {
+  it('blocks the rider on a named row, sealed, and the result and the block list read it back', async () => {
+    const w = await world();
+    const send = wire(w);
+    const anna = await rider(w, send, 'Anna');
+    const bea = await rider(w, send, 'Bea');
+    const made = await anna.rooms().create({
+      kind: 'race',
+      ridingPosition: 'hoods',
+      drafting: true,
+      route: ROUTE,
+    });
+    if (made.kind !== 'created') throw new Error(JSON.stringify(made));
+    expect((await bea.rooms().join(made.room.code ?? '')).kind).toBe('joined');
+    /** Who a device is, asked of the instance sealed, as a rider's other device would. */
+    const whoIs = async (device: typeof anna) => {
+      const held = JSON.parse(device.storage.map.get(INSTANCE_SESSION_STORAGE_KEY) ?? '{}') as {
+        token: string;
+      };
+      const signer = { signingKey: await device.dependencies.signingKey() };
+      const session = await w.call('GET', '/v1/auth/session', { token: held.token, signer });
+      return { ...held, signer, athleteId: (session.body as { athleteId: string }).athleteId };
+    };
+    const [annaIs, beaIs] = [await whoIs(anna), await whoIs(bea)];
+    await w.freshRead(async (store) => {
+      for (const [index, athleteId] of [annaIs.athleteId, beaIs.athleteId].entries()) {
+        await store.putResult({
+          roomId: made.room.roomId,
+          athleteId,
+          finishMs: 600_000 + index * 1_000,
+          flags: 0,
+          place: index + 1,
+          wattsPerKilogram: 4,
+          flaggedDurationsSeconds: [],
+        });
+      }
+      await store.markRaceFinished(made.room.roomId, 1_790_000_100);
+    });
+    const names = async (device: typeof anna) => {
+      const answer = await device.rooms().results(made.room.roomId);
+      return answer.kind === 'result' ? answer.rows.map((row) => row.displayName) : answer;
+    };
+    expect(await names(bea)).toEqual(['Anna', 'Bea']);
+    send.mockClear();
+
+    expect(await bea.rooms().blockRider(made.room.roomId, 1)).toEqual({ kind: 'blocked' });
+    expect(plaintextPhaseTwo(send)).toEqual([]);
+    expect(paths(send)).toContain('POST /v1/sealed');
+
+    // Read back: Bea's own block list holds Anna, and neither is named to the other.
+    const list = await w.call('GET', '/v1/blocks', { token: beaIs.token, signer: beaIs.signer });
+    expect(list.body).toEqual({ athleteIds: [annaIs.athleteId] });
+    expect(await names(bea)).toEqual([null, 'Bea']);
+    expect(await names(anna)).toEqual(['Anna', null]);
   });
 });

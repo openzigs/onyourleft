@@ -33,6 +33,7 @@ describe('a race with no result — #948 N-d', () => {
         asks += 1;
         return Promise.resolve({ kind: 'no-result' });
       },
+      blockRider: () => Promise.resolve({ kind: 'unreachable' }),
     };
     mounted = await mount(
       <RaceResult

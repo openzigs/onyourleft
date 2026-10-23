@@ -7,12 +7,12 @@
  * conflict declared where it was, and the way to ask for a second look.
  */
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { auditAccessibility, formatViolations } from '../a11y/audit';
 import type { RiderStatement, StatementsPort } from '../instance/statements-port';
 import { mount, settle, type Mounted } from '../testing/mount';
-import { APPEAL_REFUSAL_TEXT } from '../instance/statements-port';
+import { APPEAL_REFUSAL_TEXT, ERASE_REFUSAL_TEXT } from '../instance/statements-port';
 import { activateWithKeyboard, typeIntoTextArea } from '../testing/mount';
 import {
   APPEAL_TEXT,
@@ -22,6 +22,7 @@ import {
   NO_AUTOMATED_MEANS_TEXT,
   STATEMENTS_HEADING,
   StatementsPanel,
+  YOUR_DATA_TEXT,
 } from './StatementsPanel';
 
 let mounted: Mounted | undefined;
@@ -48,13 +49,15 @@ const SUSPENDED: RiderStatement = {
 const portOf = (statements: readonly RiderStatement[]): StatementsPort => ({
   read: () => Promise.resolve({ kind: 'statements', statements }),
   appeal: () => Promise.reject(new Error('no appeal in this test')),
+  exportAccount: () => Promise.reject(new Error('no export in this test')),
+  eraseAccount: () => Promise.reject(new Error('no deletion in this test')),
 });
 
-async function show(port: StatementsPort): Promise<string> {
+async function show(port: StatementsPort, onErased?: () => void): Promise<string> {
   mounted = await mount(
     <main>
       <h1>Instance</h1>
-      <StatementsPanel port={port} />
+      <StatementsPanel port={port} {...(onErased === undefined ? {} : { onErased })} />
     </main>,
   );
   await settle();
@@ -119,6 +122,8 @@ describe('the statements of reasons, shown (#910)', () => {
       await show({
         read: () => Promise.resolve({ kind: 'unreachable' }),
         appeal: () => Promise.reject(new Error('no appeal')),
+        exportAccount: () => Promise.reject(new Error('no export')),
+        eraseAccount: () => Promise.reject(new Error('no deletion')),
       }),
     ).not.toContain(STATEMENTS_HEADING);
   });
@@ -131,6 +136,8 @@ describe('appealing, from the Instance screen (#911)', () => {
     return {
       appealed,
       read: () => Promise.resolve({ kind: 'statements', statements: held }),
+      exportAccount: () => Promise.reject(new Error('no export in this test')),
+      eraseAccount: () => Promise.reject(new Error('no deletion in this test')),
       appeal: (statementId, grounds) => {
         appealed.push([statementId, grounds]);
         if (grounds.trim() === '') {
@@ -218,5 +225,119 @@ describe('appealing, from the Instance screen (#911)', () => {
     expect(mounted?.container.querySelector('textarea')).toBeNull();
     const violations = auditAccessibility(document);
     expect(violations, formatViolations(violations)).toEqual([]);
+  });
+});
+
+describe('a suspended rider’s own data, from the Instance screen (#1517)', () => {
+  function buttonNamed(name: string): HTMLButtonElement {
+    const found = [...(mounted?.container.querySelectorAll('button') ?? [])].find(
+      (each) => each.textContent === name,
+    );
+    if (found === undefined) throw new Error(`no button ${name}`);
+    return found;
+  }
+
+  function dataPort(
+    exported: string | undefined,
+    erase: Awaited<ReturnType<StatementsPort['eraseAccount']>>,
+  ): StatementsPort & { erased: number } {
+    const port = {
+      erased: 0,
+      read: () => Promise.resolve({ kind: 'statements' as const, statements: [SUSPENDED] }),
+      appeal: () => Promise.reject(new Error('no appeal in this test')),
+      exportAccount: () => Promise.resolve(exported),
+      eraseAccount: () => {
+        port.erased += 1;
+        return Promise.resolve(erase);
+      },
+    };
+    return port;
+  }
+
+  it('is offered only to a rider who was suspended', async () => {
+    expect(await show(portOf([SUSPENDED]))).toContain(YOUR_DATA_TEXT.heading);
+    mounted?.unmount();
+    expect(await show(portOf([{ ...SUSPENDED, restriction: 'hide_display_name' }]))).not.toContain(
+      YOUR_DATA_TEXT.heading,
+    );
+  });
+
+  it('prepares the instance’s copy as a file to save, or says it could not', async () => {
+    const created: Blob[] = [];
+    const original: unknown = Reflect.get(URL, 'createObjectURL');
+    const originalRevoke: unknown = Reflect.get(URL, 'revokeObjectURL');
+    URL.createObjectURL = (blob: Blob) => {
+      created.push(blob);
+      return 'blob:account';
+    };
+    URL.revokeObjectURL = () => undefined;
+    try {
+      await show(dataPort('{"athlete":{"id":"a1"}}', { kind: 'erased' }));
+      await activateWithKeyboard(buttonNamed(YOUR_DATA_TEXT.save));
+      await settle();
+      const link = mounted?.container.querySelector('a[download]');
+      expect(link?.getAttribute('download')).toBe(YOUR_DATA_TEXT.file);
+      expect(link?.getAttribute('href')).toBe('blob:account');
+      expect(link?.textContent).toBe(YOUR_DATA_TEXT.link);
+      expect(JSON.parse(await created[0]!.text())).toEqual({ athlete: { id: 'a1' } });
+      mounted?.unmount();
+      await show(dataPort(undefined, { kind: 'erased' }));
+      await activateWithKeyboard(buttonNamed(YOUR_DATA_TEXT.save));
+      await settle();
+      expect(mounted?.container.textContent).toContain(YOUR_DATA_TEXT.unreadable);
+      expect(mounted?.container.querySelector('a[download]')).toBeNull();
+    } finally {
+      Reflect.set(URL, 'createObjectURL', original);
+      Reflect.set(URL, 'revokeObjectURL', originalRevoke);
+    }
+  });
+
+  it('deletes the account only once the rider confirms, then says the rides stay', async () => {
+    const port = dataPort(undefined, { kind: 'erased' });
+    await show(port);
+    await activateWithKeyboard(buttonNamed(YOUR_DATA_TEXT.erase));
+    await settle();
+    expect(port.erased).toBe(0);
+    expect(mounted?.container.textContent).toContain(YOUR_DATA_TEXT.confirm);
+    const violations = auditAccessibility(document);
+    expect(violations, formatViolations(violations)).toEqual([]);
+    await activateWithKeyboard(buttonNamed(YOUR_DATA_TEXT.keep));
+    await settle();
+    expect(mounted?.container.textContent).not.toContain(YOUR_DATA_TEXT.confirm);
+    await activateWithKeyboard(buttonNamed(YOUR_DATA_TEXT.erase));
+    await settle();
+    await activateWithKeyboard(buttonNamed(YOUR_DATA_TEXT.confirmErase));
+    await settle();
+    expect(port.erased).toBe(1);
+    expect(mounted?.container.textContent).toContain(YOUR_DATA_TEXT.erased);
+  });
+
+  it('tells its host the account is gone, so the host re-reads, and only then', async () => {
+    const onErased = vi.fn();
+    await show(dataPort(undefined, { kind: 'refused', text: ERASE_REFUSAL_TEXT }), onErased);
+    await activateWithKeyboard(buttonNamed(YOUR_DATA_TEXT.erase));
+    await settle();
+    await activateWithKeyboard(buttonNamed(YOUR_DATA_TEXT.confirmErase));
+    await settle();
+    expect(onErased).not.toHaveBeenCalled();
+    mounted?.unmount();
+    await show(dataPort(undefined, { kind: 'erased' }), onErased);
+    await activateWithKeyboard(buttonNamed(YOUR_DATA_TEXT.erase));
+    await settle();
+    await activateWithKeyboard(buttonNamed(YOUR_DATA_TEXT.confirmErase));
+    await settle();
+    expect(onErased).toHaveBeenCalledTimes(1);
+  });
+
+  it('says why the account was not deleted', async () => {
+    const port = dataPort(undefined, { kind: 'refused', text: ERASE_REFUSAL_TEXT });
+    await show(port);
+    await activateWithKeyboard(buttonNamed(YOUR_DATA_TEXT.erase));
+    await settle();
+    await activateWithKeyboard(buttonNamed(YOUR_DATA_TEXT.confirmErase));
+    await settle();
+    const text = mounted?.container.textContent ?? '';
+    expect(text).toContain(ERASE_REFUSAL_TEXT);
+    expect(text).not.toContain(YOUR_DATA_TEXT.erased);
   });
 });

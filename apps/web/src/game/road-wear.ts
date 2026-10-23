@@ -279,3 +279,72 @@ export function writeRoadAcross(corridor: RoadCorridor, into: Float32Array): voi
   }
   into.fill(0, surface, Math.min(corridor.vertices.length / 3, into.length));
 }
+
+/**
+ * How far past a triangle a patch is still counted as reaching it, in metres:
+ * **0.05**. The shader reads a patch where its fragment's interpolated world
+ * position is, which lies inside the triangle up to float rounding — the
+ * canvas has no multisampling (`three-renderer.ts`, `antialias: false`), so
+ * no fragment is shaded at a pixel centre outside its triangle. Fifty
+ * millimetres is far more than that rounding and far less than a patch.
+ */
+export const PATCH_REACH_MARGIN_METRES = 0.05;
+
+/**
+ * Which of this frame's patches can reach each road vertex's triangles, as a
+ * bitmask per vertex (bit `n` is slot `n` of {@link roadPatchUniforms}' array)
+ * — #1523. The shader reads it as a `flat` varying, so a triangle's fragments
+ * test only the patches its provoking vertex names, and a triangle no patch
+ * reaches does not run the patch loop at all.
+ *
+ * ⚠️ **Every vertex of a triangle carries that triangle's patches**, so it
+ * does not matter which of the three GL takes the flat value from. A patch
+ * changes a fragment only where `|along| < half length` and `|across| < half
+ * width` (the shader's `smoothstep` is exactly 0 from its upper edge on), so
+ * only within `hypot(half length, half width)` of its centre; a triangle is
+ * given a patch when its own bounding box, grown by
+ * {@link PATCH_REACH_MARGIN_METRES}, comes that close. A patch it is not
+ * given would have added exactly nought, so the picture is the same.
+ *
+ * `patches` is the array {@link roadPatchUniforms} wrote and `count` what it
+ * returned; `into` holds a float a vertex. Allocates nothing.
+ */
+export function writeRoadPatchReach(
+  corridor: RoadCorridor,
+  patches: Float32Array,
+  count: number,
+  into: Float32Array,
+): void {
+  const { vertices, indices } = corridor;
+  into.fill(0, 0, Math.min(vertices.length / 3, into.length));
+  if (count <= 0) return;
+  for (let at = 0; at + 2 < indices.length; at += 3) {
+    const a = indices[at] as number;
+    const b = indices[at + 1] as number;
+    const c = indices[at + 2] as number;
+    const ax = vertices[a * 3] as number;
+    const az = vertices[a * 3 + 2] as number;
+    const bx = vertices[b * 3] as number;
+    const bz = vertices[b * 3 + 2] as number;
+    const cx = vertices[c * 3] as number;
+    const cz = vertices[c * 3 + 2] as number;
+    const minX = Math.min(ax, bx, cx) - PATCH_REACH_MARGIN_METRES;
+    const maxX = Math.max(ax, bx, cx) + PATCH_REACH_MARGIN_METRES;
+    const minZ = Math.min(az, bz, cz) - PATCH_REACH_MARGIN_METRES;
+    const maxZ = Math.max(az, bz, cz) + PATCH_REACH_MARGIN_METRES;
+    let reach = 0;
+    for (let patch = 0; patch < count && patch < MAXIMUM_ROAD_PATCHES; patch += 1) {
+      const from = patch * ROAD_PATCH_FLOATS;
+      const px = patches[from] as number;
+      const pz = patches[from + 1] as number;
+      const radius = Math.hypot(patches[from + 4] as number, patches[from + 5] as number);
+      const dx = Math.max(minX - px, 0, px - maxX);
+      const dz = Math.max(minZ - pz, 0, pz - maxZ);
+      if (dx * dx + dz * dz <= radius * radius) reach |= 1 << patch;
+    }
+    if (reach === 0) continue;
+    into[a] = (into[a] as number) | reach;
+    into[b] = (into[b] as number) | reach;
+    into[c] = (into[c] as number) | reach;
+  }
+}

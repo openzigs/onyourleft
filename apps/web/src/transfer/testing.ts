@@ -31,6 +31,7 @@ import {
 import { activityId, type ActivityId } from '@onyourleft/store';
 
 import type { ImportSource } from './import-batch';
+import { fitLapMarkDeclarations, fitLapMarkOf } from './fit-lap-mark';
 
 /** Arbitrary bytes under a filename, for the things a bulk export also contains. */
 export function bytesSource(fileName: string, contents: string | Uint8Array): ImportSource {
@@ -149,8 +150,8 @@ export interface FixtureLap {
   /**
    * #1321's mark, as this client's export writes it (`export-activity.ts`
    * §`tcxLapFiguresOf`): a whole lap, a part lap, or a split outside every
-   * lap. No mark when absent. **TCX only**: a FIT lap carries no mark until
-   * #1471, so a FIT file is written without one whatever this says.
+   * lap. No mark when absent. In FIT, #1320's developer field
+   * (`fit-lap-mark.ts`), declared when any lap carries one.
    */
   readonly kind?: 'lap' | 'part' | 'outside' | undefined;
 }
@@ -223,7 +224,9 @@ export function lappedFile(options: LappedFileOptions): Uint8Array {
     );
   }
   const instant = (at: number): FitDateTime => ({ kind: 'instant', instant: unixSeconds(at) });
+  const marked = options.laps.some((lap) => lap.kind !== undefined);
   return encodeFitActivity({
+    ...(marked ? fitLapMarkDeclarations() : {}),
     fileId: {
       type: FILE_TYPE_ACTIVITY,
       manufacturer: typeof options.writer === 'number' ? options.writer : undefined,
@@ -243,6 +246,7 @@ export function lappedFile(options: LappedFileOptions): Uint8Array {
       totalElapsedTime: lap.elapsed === undefined ? undefined : seconds(lap.elapsed),
       totalTimerTime: seconds(lap.moving ?? lap.elapsed ?? 0),
       totalDistance: lap.distance === undefined ? undefined : metres(lap.distance),
+      developerFields: lap.kind === undefined ? [] : [fitLapMarkOf(lap.kind)],
     })),
     sessions: [
       {

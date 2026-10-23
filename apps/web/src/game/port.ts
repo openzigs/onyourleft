@@ -39,9 +39,12 @@ import type { PlacedStand } from './gantry';
 import type { KitColour } from '@onyourleft/store';
 
 import type { HorizonRelief, TerrainMesh } from './landform';
+import type { MappedBuildingsInView } from './mapped-buildings';
 import type { QualitySettings } from './quality';
 import type { RealisticWorldOutcome } from './realistic-assets';
 import type { ScatterItem } from './scatter';
+import type { SideRoad } from './cross-streets';
+import type { VillageStreet } from './streets';
 import type { RoadCorridor } from './terrain';
 import type { BridgePart, WaterSurface } from './waterways';
 import type { WorldStyle } from './world';
@@ -292,6 +295,32 @@ export interface SceneFrame {
    * gate's wordmark board, by one instanced mesh.
    */
   readonly billboards: readonly Billboard[];
+  /**
+   * The village streets in view — #1535 (`streets.ts`): each village's kerbed
+   * pavements, the same objects every frame while the same villages are in
+   * view, drawn in both worlds by one mesh (`three-renderer.ts`
+   * §`PavementBelt`). Empty away from a village. NOT counted against the
+   * rung's `structureItems`: a street is one mesh, not items.
+   */
+  readonly streets: readonly VillageStreet[];
+  /**
+   * The cross streets in view — #1565 (`cross-streets.ts`): a side road a
+   * short way off the route at each junction, mapped where the corridor has
+   * streets and one crossroads at each procedural village, the same objects
+   * every frame while the same junctions are in view, drawn in both worlds in
+   * the road's own material by one mesh (`three-renderer.ts`
+   * §`SideRoadBelt`). Empty away from a junction.
+   */
+  readonly sideRoads: readonly SideRoad[];
+  /**
+   * The ride's mapped buildings and where the rider is among them — #1549.
+   * Absent on a ride with no corridor. Drawn only on the realistic rungs
+   * (`three-renderer.ts` §`MappedBuildingBelt`), refilled only when
+   * `chunk` changes; the stylised world draws none (ADR 0026 D-3's rule is
+   * the arrangement, and a ride is given a corridor only in the realistic
+   * world, ADR 0054 D-6).
+   */
+  readonly mappedBuildings?: MappedBuildingsInView;
 }
 
 /** What {@link SceneFrame.water} carries. */

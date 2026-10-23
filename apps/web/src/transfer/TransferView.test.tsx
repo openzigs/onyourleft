@@ -648,13 +648,13 @@ describe('TransferView — exporting', () => {
     if (select === null) {
       throw new Error('the format chooser is not on the page');
     }
-    // FIT carries no lap row's figures or kind until #1471, so the screen says
-    // so rather than that FIT carries everything.
+    // FIT carries no lap row's figures until #1471, so the screen says so
+    // rather than that FIT carries everything. Which splits are laps it
+    // carries since #1320, in this client's own mark.
     expect(document.body.textContent).toContain(
       'This format cannot carry: each lap’s average heart rate, each lap’s highest heart rate, ' +
         'each lap’s average cadence, each lap’s average power, each lap’s best power, ' +
-        'each lap’s climb, which splits are laps and which are part laps. ' +
-        'The stored ride keeps them.',
+        'each lap’s climb. The stored ride keeps them.',
     );
     expect(document.body.textContent).not.toMatch(/lap\.[a-z]/);
     expect(document.body.textContent).not.toContain('FIT carries every channel');

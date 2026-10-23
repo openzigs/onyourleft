@@ -3224,6 +3224,13 @@ published figures (its run predates `oyl.txt`).
 | #1283 | after (the generated broadleaves, beside the scanned firs) | #1294's merge | — ; `levers=-generated-conifers` | | | | | | | | |
 | #1294 | before (the scanned firs, beside the generated broadleaves) | #1294's merge | — ; `levers=-generated-conifers` | | | | | | | | |
 | #1294 | after (the generated firs) | #1294's merge | — | | | | | | | | |
+| #1523 | control (every lever on) | `main` with #1523's levers | — | | | | | | | | |
+| #1523 | ground blend out (#627, #1274) | the same build | — ; `levers=-ground-blend` | | | | | | | | |
+| #1523 | road wear out (#628, #879) | the same build | — ; `levers=-road-wear` | | | | | | | | |
+| #1523 | bounds before (the wear's loop and the ground's twelve derivatives, as they were) | `main` with #1523's bounds | — ; `levers=-surface-bounds` | | | | | | | | |
+| #1523 | bounds after (the product) | the same build | — | | | | | | | | |
+| #1534 | cleared (the villages' ground, 5 min) | `main` with #1534 | — | | | | | | | | |
+| #1534 | wooded (as before #1534, 5 min) | the same build | — ; `levers=-settlement-clearing` | | | | | | | | |
 
 **Phone (OEM, model, Android, WebView):** Google Pixel Tablet, build `CP2A.260705.006`, Android 17,
 WebView 153.0.8010.36  **Build:** debug, `main` at **`f91a5fb`** (before #617's tree LODs, PR #637)
@@ -3697,6 +3704,78 @@ until the cards are fewer.**
 | In the product (AH-1294-5): is any level's change visible, and do the needles shimmer at a distance? | |
 | Up close: do the sprig cards read as boughs, or as flat cards? Is the top of the tree a fir's, or a blob? | |
 | Keep the generated firs and delete the scanned ones (8.7 MB of build back), or go back to the scans? | |
+
+### #1523's rows — the ground blend and the road wear, on one build
+
+[#1523](https://github.com/openzigs/onyourleft/issues/1523): the realistic top rung on `main` runs
+the tablet's GPU at its 848 MHz ceiling. Its triage named the generated firs (#1294) for the
+dropped frames, and left about 90 MHz above #616's baseline that the `surfaces` layer holds the
+largest share of. The prime suspects there are #627's ground blend (with #1274's crag) and #628's
+road wear (with #879's), and until #1523 neither had a switch that changed what the GPU runs:
+`levers=-crag` and the browser gate's wear switch set uniforms on the SAME program.
+
+**Two levers now take the code out of the program**, on one build (`realistic/config.ts`
+§`LEVERS`):
+
+- `levers=-ground-blend` — the ground as #425's near and far photograph and #460's patchwork, with
+  none of the verge, rock, scree or crag in its program and none of their six maps bound.
+- `levers=-road-wear` — the road with no wheel track, dust, patch loop or track roughness and
+  relief in its program.
+
+Each changes the picture, so neither is a by-eye pair: the row is the cost. **The product always
+draws both**; nothing a rider reaches turns either off. The browser gate holds each lever to the
+uniforms the GPU linked, with the default load as the control (`game.browser.spec.ts` §"#1523").
+
+| Step | What to do |
+|---|---|
+| AH-1523-1 | **Control**: build `main` with #1523's levers and the owner's page staged, and run AH1–AH7, AH4's URL unchanged. `RUN=1523-control` |
+| AH-1523-2 | **Cool again (AH3, 25–26 °C)**, same build: AH1–AH7 with `&levers=-ground-blend` added to AH4's URL. `RUN=1523-ground-blend` |
+| AH-1523-3 | **Cool again**, same build: AH1–AH7 with `&levers=-road-wear` added instead. `RUN=1523-road-wear` |
+| AH-1523-4 | Write the three rows into the table above. Triangles and draw calls should not move between them; the GPU DVFS mean and present p99 are what each lever's share is read from, against #616's spread |
+
+#### The bounds — the same picture for less ([#1523](https://github.com/openzigs/onyourleft/issues/1523), fixes 1 and 3)
+
+Triage 2 (2026-10-21, on #1523) put about 25 MHz on the road wear and 16 MHz on the ground blend.
+The fix changes what each costs a fragment and **not what it draws**:
+
+- **Road wear:** a fragment runs #628's patch loop only on a triangle a patch can reach — the
+  view writes, each frame, which of the eight patches can reach each road vertex's triangles
+  (`road-wear.ts` §`writeRoadPatchReach`), and the shader reads it as a `flat` varying, so a
+  triangle no patch reaches has no loop at all. The paint's fading noise runs only on paint.
+- **Ground blend:** each surface's derivative pair is taken once, where the shares are, and the
+  normal reads it, instead of taking the same three pairs again (six derivatives where there were
+  twelve). The surfaces were already sampled only where their share is above zero.
+- **Anisotropy, reviewed and kept at 8:** the verge, rock and crag lie beside the road at the same
+  grazing angle that #425's shimmer is about. A lower ceiling there would be a visible change, and
+  no browser read-back can show shimmer.
+
+`levers=-surface-bounds` builds both shaders as they were before, on the same build, so the pair
+is one APK. The browser gate draws a road frame (with a patch 8–14 m ahead) and #458's steep bank
+both ways and requires **every pixel identical** (`game.browser.spec.ts` §"#1523", nightly). In
+the same run it requires `-road-wear` and `-ground-blend` to move thousands of pixels each.
+
+| Step | What to do |
+|---|---|
+| AH-1523-5 | **Before**: build `main` with #1523's bounds, owner's page staged, AH1–AH7 with `&levers=-surface-bounds` added to AH4's URL. `RUN=1523-bounds-before` |
+| AH-1523-6 | **Cool again (AH3, 25–26 °C)**, same build: AH1–AH7, AH4's URL unchanged. `RUN=1523-bounds-after` |
+| AH-1523-7 | Write both rows. The after row's GPU mean should fall towards triage 2's `-road-wear` and `-ground-blend` rows (−25 and −16 MHz) without either lever's change to the picture |
+
+### #1534's rows — the villages' ground cleared of trees, shrubs and rocks
+
+[#1534](https://github.com/openzigs/onyourleft/issues/1534) clears every tree, shrub and rock off a
+settlement's ground — its plots, built on or not, its front gardens and 6 m past the back of each
+building (`settlements.ts` §`SettlementFootprint`) — so no house stands in a wood. It only takes
+instances away, so its cost claim is that **draw calls are unchanged and triangles and overdraw can
+only fall**. One lever on one build gives the pair: `levers=-settlement-clearing` leaves the ground
+wooded, as every frame was before #1534. It is the owner's by-eye pair too. The browser gate holds
+the rule to the vegetation instances drawn beside a village: 0 of 130 on its ground, against 38 of
+168 with the lever's control (`game.browser.spec.ts` §"#1534", measured 2026-10-21).
+
+| Step | What to do |
+|---|---|
+| AH-1534-1 | **After #1523's fix has landed**: build `main` with #1534 and the owner's page staged, and run AH1–AH7 for **5 minutes**, AH4's URL unchanged. `RUN=1534-cleared` |
+| AH-1534-2 | **Cool again (AH3, 25–26 °C)**, same build: AH1–AH7 for 5 minutes with `&levers=-settlement-clearing` added to AH4's URL. `RUN=1534-wooded` |
+| AH-1534-3 | Write both rows into the table above. Draw calls should match; triangles in `1534-cleared` at or below `1534-wooded`. By eye, at a village (`&at=` its odometer): no tree in a garden or between a house and the road |
 
 ## Part AI — the side camera's picture rate, on the owner's phone ([#1112](https://github.com/openzigs/onyourleft/issues/1112))
 

@@ -34,8 +34,15 @@ interface RoadGrid {
   readonly origin: CorridorOrigin;
   /** Two floats a point: the drawn road every two metres, in plan. */
   readonly points: Float64Array;
+  /**
+   * How far apart the points are along the route, in metres: two, or more on a
+   * very long one. Point `s` is `s` times this along, up to the route's length.
+   */
+  readonly step: number;
   /** Segment `s` runs from point `s` to point `s + 1`. */
   readonly cells: ReadonlyMap<number, readonly number[]>;
+  /** The route's length, which the last point is at. */
+  readonly total: number;
 }
 
 const roadGrids = new WeakMap<RouteProfile, RoadGrid>();
@@ -111,7 +118,7 @@ function roadGrid(profile: RouteProfile, origin: CorridorOrigin): RoadGrid {
       }
     }
   }
-  const grid = { origin, points, cells };
+  const grid = { origin, points, cells, step, total };
   roadGrids.set(profile, grid);
   return grid;
 }
@@ -215,6 +222,72 @@ export function squaredToSegment(
   return ox * ox + oz * oz;
 }
 
+/** Where on the drawn road a point is nearest, and how far off it — #1565. */
+export interface NearestOnRoad {
+  /** How far from the drawn centreline, in metres. */
+  readonly distance: number;
+  /** The route distance of the nearest point, on the first lap. */
+  readonly along: number;
+  /** Signed: positive on the road's normal side, its RIGHT (`terrain.ts` §`drawnRoadFrame`). */
+  readonly lateral: number;
+}
+
+/**
+ * Where on ANY stretch of the drawn road `(x, z)` is nearest, if within
+ * `reach` — #1565: what a cross street's junction is placed at, and what the
+ * ground under its side road is read from (`landform.ts` §`terrainHeightAt`
+ * takes a route distance and a signed lateral). {@link distanceToDrawnRoad}
+ * asks the same cells for the distance alone; this one keeps which segment it
+ * was, so it allocates one answer.
+ */
+export function nearestOnDrawnRoad(
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  x: number,
+  z: number,
+  reach: number,
+): NearestOnRoad | undefined {
+  const road = roadGrid(profile, origin);
+  const points = road.points;
+  let least = reach * reach;
+  let best = -1;
+  let bestT = 0;
+  const lastColumn = Math.floor((x + reach) / ROAD_CELL_METRES);
+  const lastRow = Math.floor((z + reach) / ROAD_CELL_METRES);
+  const firstRow = Math.floor((z - reach) / ROAD_CELL_METRES);
+  for (let column = Math.floor((x - reach) / ROAD_CELL_METRES); column <= lastColumn; column += 1) {
+    for (let row = firstRow; row <= lastRow; row += 1) {
+      for (const segment of road.cells.get(roadCellKey(column, row)) ?? NO_SEGMENTS) {
+        const ax = points[segment * 2] as number;
+        const az = points[segment * 2 + 1] as number;
+        const dx = (points[segment * 2 + 2] as number) - ax;
+        const dz = (points[segment * 2 + 3] as number) - az;
+        const span = dx * dx + dz * dz;
+        const squared = squaredToSegment(x, z, ax, az, dx, dz, span);
+        if (squared < least || (squared === least && best < 0)) {
+          least = squared;
+          best = segment;
+          bestT = span > 0 ? Math.min(1, Math.max(0, ((x - ax) * dx + (z - az) * dz) / span)) : 0;
+        }
+      }
+    }
+  }
+  if (best < 0) return undefined;
+  const ax = points[best * 2] as number;
+  const az = points[best * 2 + 1] as number;
+  const dx = (points[best * 2 + 2] as number) - ax;
+  const dz = (points[best * 2 + 3] as number) - az;
+  const length = Math.hypot(dx, dz);
+  const distance = Math.sqrt(least);
+  // The normal is the forward direction turned a quarter: (−dz, dx), the rider's right.
+  const across = length > 0 ? ((x - ax) * -dz + (z - az) * dx) / length : 0;
+  return {
+    distance,
+    along: Math.min(profile.totalDistance, (best + bestT) * road.step),
+    lateral: across >= 0 ? distance : -distance,
+  };
+}
+
 /** The point {@link distanceToDrawnRoad} measures from, reused between calls. */
 const pointQuery = { x: 0, z: 0 };
 
@@ -253,4 +326,94 @@ export function distanceToDrawnRoad(
   pointQuery.x = x;
   pointQuery.z = z;
   return Math.sqrt(leastSquaredNearRoad(profile, origin, reach, pointToSegmentSquared, pointQuery));
+}
+
+/**
+ * The drawn road as {@link roadSegmentsNear} hands it out: its points, and how far apart they are.
+ */
+export interface DrawnRoadPoints {
+  /** Two floats a point; segment `s` runs from point `s` to point `s + 1`. */
+  readonly points: Float64Array;
+  /** How far along the route point `s` is: `s` times this, up to {@link total}. */
+  readonly step: number;
+  readonly total: number;
+}
+
+/**
+ * Every segment of the drawn road that may lie within `reach` of `(x, z)`,
+ * written into `into` (cleared first; a segment in two cells is there twice),
+ * and the road they index — #1540: a mapped footprint asks once, for its
+ * centroid, and then measures each of its vertices against this short list
+ * rather than searching the grid again for each.
+ */
+export function roadSegmentsNear(
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  x: number,
+  z: number,
+  reach: number,
+  into: number[],
+): DrawnRoadPoints {
+  const road = roadGrid(profile, origin);
+  into.length = 0;
+  const lastColumn = Math.floor((x + reach) / ROAD_CELL_METRES);
+  const lastRow = Math.floor((z + reach) / ROAD_CELL_METRES);
+  const firstRow = Math.floor((z - reach) / ROAD_CELL_METRES);
+  for (let column = Math.floor((x - reach) / ROAD_CELL_METRES); column <= lastColumn; column += 1) {
+    for (let row = firstRow; row <= lastRow; row += 1) {
+      for (const segment of road.cells.get(roadCellKey(column, row)) ?? NO_SEGMENTS) {
+        into.push(segment);
+      }
+    }
+  }
+  return road;
+}
+
+/**
+ * Where on the drawn road a point is beside — #1540. @see nearestOnRoadSegments
+ */
+export interface BesideTheRoad {
+  /** The route distance of the nearest point of the drawn road. */
+  along: number;
+  /** How far out from it, positive on its normal's side — the right, as `terrain.ts`'s. */
+  lateral: number;
+  /** How far from it: `|lateral|`, but for a point past either end of the road. */
+  distance: number;
+}
+
+/**
+ * The nearest point to `(x, z)` on the segments {@link roadSegmentsNear}
+ * found, written into `into` — `false`, and `into` untouched, when there are
+ * none. The route distance and the side are the ones `landform.ts`
+ * §`terrainHeightAt` reads the ground at, so a thing placed from them stands
+ * on the ground beside the stretch of road it is nearest.
+ */
+export function nearestOnRoadSegments(
+  road: DrawnRoadPoints,
+  segments: readonly number[],
+  x: number,
+  z: number,
+  into: BesideTheRoad,
+): boolean {
+  const points = road.points;
+  let best = Number.POSITIVE_INFINITY;
+  for (const segment of segments) {
+    const ax = points[segment * 2] as number;
+    const az = points[segment * 2 + 1] as number;
+    const dx = (points[segment * 2 + 2] as number) - ax;
+    const dz = (points[segment * 2 + 3] as number) - az;
+    const span = dx * dx + dz * dz;
+    const t = span > 0 ? Math.min(1, Math.max(0, ((x - ax) * dx + (z - az) * dz) / span)) : 0;
+    const ox = x - (ax + dx * t);
+    const oz = z - (az + dz * t);
+    const squared = ox * ox + oz * oz;
+    if (squared >= best) continue;
+    best = squared;
+    const length = Math.sqrt(span);
+    into.along = Math.min(road.total, (segment + t) * road.step);
+    into.distance = Math.sqrt(squared);
+    // The segment's normal is `(-dz, dx)` of its heading: `terrain.ts`'s.
+    into.lateral = length > 0 ? (oz * dx - ox * dz) / length : into.distance;
+  }
+  return best < Number.POSITIVE_INFINITY;
 }

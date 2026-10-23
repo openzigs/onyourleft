@@ -1,0 +1,27 @@
+{
+  "name": "@onyourleft/map-features",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "description": "Decodes one z15 Protomaps v4 vector tile into bounded, typed features in a corridor's local metres, and the pure geometry a corridor read needs: the tile cover, simplification, clipping, triangulation and rasterisation (#1544, ADR 0054). Fetches nothing and holds no map data.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/testing.ts"
+  },
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit --project tsconfig.json && tsc --noEmit --project tsconfig.platform-free.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@onyourleft/domain": "workspace:*",
+    "earcut": "3.2.4"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.3",
+    "typescript": "6.0.3",
+    "vitest": "4.1.11"
+  }
+}

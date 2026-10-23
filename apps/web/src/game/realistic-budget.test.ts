@@ -42,6 +42,7 @@ import {
   REALISTIC_VEGETATION_KINDS,
   realisticFiles,
   realisticVegetation,
+  TOWN_STRUCTURE_SURFACES,
   type RealisticModel,
   type RealisticTrees,
 } from './realistic-assets';
@@ -53,7 +54,10 @@ import {
   estimatedTextureBytes,
   REALISTIC_BICYCLE_SURFACES,
   REALISTIC_RIDER_SURFACES,
+  REALISTIC_TOWN_SURFACES,
   REALISTIC_BUILD_BYTES,
+  MAPPED_BUILDING_MAX,
+  MAPPED_BUILDING_TRIANGLES,
   REALISTIC_FRAME_TRIANGLES,
   REALISTIC_GANTRY_TRIANGLES,
   REALISTIC_GROUND_BLOBS,
@@ -80,11 +84,19 @@ import {
 import { STRUCTURE_KINDS } from './scatter';
 import { SCENERY_MODELS } from './scenery-models';
 import { BUILT_KINDS } from './buildings';
+import { footprintPlans } from './footprint-buildings';
+import { denseTownFixture, footprintFixture } from './footprint-fixtures-testing';
+import { mappedBuildingsOf } from './mapped-buildings';
+import type { ScatterItem } from './scatter';
+import { drawnRoadFrame } from './terrain';
+import { landClassMask } from './land-class';
 import { REALISTIC_LADDER } from './quality';
 import {
+  MappedBuildingBelt,
   realisticBicycleTriangles,
   realisticStructureTriangles,
   realisticStructureTrianglesOf,
+  refillMappedBuildings,
   ScatterBelt,
   stylisedRiderTriangles,
 } from './three-renderer';
@@ -226,12 +238,21 @@ describe('each committed file inside its class’s budget — ADR 0026 D-6', () 
         );
       }
     }
-    // #475: the structures' surfaces.
+    // #475: the structures' surfaces — and #1548's mapped towns' three, at
+    // their own class's 1K. Every other structure surface is still held to 512.
     for (const surface of PHOTOGRAPHIC_STRUCTURE_SURFACES) {
       const maps = REALISTIC_STRUCTURE_SURFACES[surface];
+      const limit = (TOWN_STRUCTURE_SURFACES as readonly string[]).includes(surface)
+        ? REALISTIC_TEXTURE_PIXELS.town
+        : REALISTIC_TEXTURE_PIXELS.structure;
       for (const file of [maps.colour, maps.normal]) {
-        expect(largest(file), file).toBeLessThanOrEqual(REALISTIC_TEXTURE_PIXELS.structure);
+        expect(largest(file), file).toBeLessThanOrEqual(limit);
         expect(largest(file), file).toBeGreaterThan(0);
+        // #1548: as wide for its height as its table says, so the renderer's
+        // repeat (`surfaceRepeat`) draws a texel square. ambientCG publishes
+        // some materials at 2:1, and one drawn as if square is stretched.
+        const { width, height } = fileKtx2Facts(at(file));
+        expect(width / height, file).toBe(maps.aspect ?? 1);
       }
     }
     for (const limit of Object.values(REALISTIC_TEXTURE_PIXELS)) {
@@ -481,6 +502,67 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
     ).toBeLessThanOrEqual(REALISTIC_FRAME_TRIANGLES);
     // And the figure the rungs spend is the one `realistic-budget.ts` states.
     expect(structureItems).toBe(REALISTIC_STRUCTURE_ITEMS);
+  });
+
+  it('holds it with a covered town at MAPPED_BUILDING_MAX, the structure term unchanged — #1549', () => {
+    const { vegetation, riders, structureItems, blobs, gantries } = worstFrame();
+    const structureTerm = structureItems * REALISTIC_TRIANGLES.structure;
+    // The term is the one the frame has priced since #506, not a new one.
+    expect(structureTerm).toBe(23_040);
+    expect(MAPPED_BUILDING_TRIANGLES).toBe(structureTerm);
+    const dense = denseTownFixture();
+    const town = mappedBuildingsOf(
+      footprintPlans(dense.corridor, landClassMask(dense.corridor), dense.profile, dense.origin)
+        .plans,
+    );
+    const road = drawnRoadFrame(dense.profile, dense.origin, 700);
+    if (road === undefined) throw new Error('the dense road has no direction there');
+    const building = (z: number): ScatterItem => ({
+      kind: 'building',
+      x: 20,
+      y: 0,
+      z,
+      rotation: 0,
+      scale: 1,
+      variant: 0,
+    });
+    for (const procedural of [0, 10, 30, structureItems]) {
+      const belt = new MappedBuildingBelt(town, new Map());
+      const cap = refillMappedBuildings(
+        belt,
+        { buildings: town, chunk: 7, x: road.x, z: road.z },
+        Array.from({ length: procedural }, (_, at) => building(at * 10)),
+        0,
+        structureItems,
+      );
+      const mapped = belt.stats.triangles;
+      belt.dispose();
+      // Ranked together by distance (#1586), at the term's price each; until
+      // the next refill the procedural keep to what the town left…
+      const drawnProcedural = Math.min(procedural, cap ?? 0);
+      const structures = drawnProcedural * REALISTIC_TRIANGLES.structure + mapped;
+      expect(structures, String(procedural)).toBeLessThanOrEqual(structureTerm);
+      // …and the cap itself, all of it spent, holds the term too.
+      expect(
+        (cap ?? 0) * REALISTIC_TRIANGLES.structure + mapped,
+        String(procedural),
+      ).toBeLessThanOrEqual(structureTerm);
+      expect(vegetation + riders + structures + blobs + gantries).toBeLessThanOrEqual(
+        REALISTIC_FRAME_TRIANGLES,
+      );
+      if (procedural === 0) {
+        // Non-vacuity: a covered town at its count cap, a real share of the term.
+        expect(belt.stats.buildings).toBe(MAPPED_BUILDING_MAX);
+        expect(mapped).toBeGreaterThan(REALISTIC_TRIANGLES.structure);
+      }
+      // A frame whose procedural structures fill the term, all of them farther
+      // than the town's nearest, still draws the town (#1586), and the cap
+      // drops the procedural structures it has no room for.
+      if (procedural === structureItems) {
+        expect(belt.stats.buildings).toBeGreaterThan(0);
+        expect(cap).toBeLessThan(procedural);
+      }
+    }
   });
 
   it('counts a ground blob under every mesh and structure a frame can draw, inside #620’s 124 — #620', () => {
@@ -918,6 +1000,35 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
     expect(rider.map(({ facts }) => facts.scheme).sort()).toEqual(['etc1s', 'uastc', 'uastc']);
   });
 
+  it('adds the mapped towns’ three surfaces inside #1548’s own ceiling, texture memory and build alike', () => {
+    const town = TOWN_STRUCTURE_SURFACES.flatMap((surface) => {
+      const maps = REALISTIC_STRUCTURE_SURFACES[surface];
+      return [maps.colour, maps.normal];
+    });
+    // Non-vacuity: a colour and a normal map for each of the three, read off disk.
+    expect(town).toHaveLength(2 * TOWN_STRUCTURE_SURFACES.length);
+    expect(TOWN_STRUCTURE_SURFACES).toEqual(['render', 'concrete', 'flat-roof']);
+    const facts = town.map((file) => ({ file, facts: fileKtx2Facts(at(file)) }));
+    const memory = facts.reduce(
+      (sum, { facts: each }) =>
+        sum + estimatedTextureBytes({ ...each, bytesPerTexel: onTheTablet(each), mipmapped: true }),
+      0,
+    );
+    const build = town.reduce((sum, file) => sum + statSync(at(file)).size, 0);
+    console.log(
+      `#1548: the mapped towns' six maps are ${(memory / 2 ** 20).toFixed(2)} MiB estimated on the tablet ` +
+        `and ${String(build)} bytes in the build`,
+    );
+    expect(memory).toBeLessThanOrEqual(REALISTIC_TOWN_SURFACES.textureBytes);
+    expect(build).toBeLessThanOrEqual(REALISTIC_TOWN_SURFACES.buildBytes);
+    // Each at the 1K the owner's ruling kept, a colour map as ETC1S and a
+    // normal map as UASTC — never the other way, which would misprice both.
+    for (const { file, facts: each } of facts) {
+      expect(each.width, file).toBe(REALISTIC_TEXTURE_PIXELS.town);
+      expect(each.scheme, file).toBe(file.includes('_nor_gl_') ? 'uastc' : 'etc1s');
+    }
+  });
+
   it('adds no more to the build than its share, the transcoder included — #618', () => {
     const files = realisticFiles().reduce((sum, file) => sum + statSync(at(file)).size, 0);
     const transcoder = TRANSCODER_FILES.reduce(
@@ -972,6 +1083,15 @@ describe('the realistic structures — #475, ADR 0026 D-12 layer 3', () => {
       const triangles = realisticStructureTriangles(kind);
       expect(triangles, kind).toBeGreaterThan(0);
       expect(triangles, kind).toBeLessThanOrEqual(REALISTIC_TRIANGLES.structure);
+    }
+  });
+
+  it('keeps every mapped building’s plan at or under a structure’s triangles — #1540', () => {
+    const { profile, origin, corridor } = footprintFixture();
+    const { plans } = footprintPlans(corridor, landClassMask(corridor), profile, origin);
+    expect(plans.length).toBeGreaterThan(5);
+    for (const plan of plans) {
+      expect(plan.triangleCount).toBeLessThanOrEqual(REALISTIC_TRIANGLES.structure);
     }
   });
 

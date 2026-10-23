@@ -21,8 +21,9 @@
  * | `at` | hold the rider still this far along the route, for a screenshot | metres |
  * | `panel` | the on-screen controls | `1` (default), `0` for a clean screenshot |
  * | `layers` | layers switched OFF, for their share of the GPU (#616) | `-sky`, `-surfaces`, `-vegetation`, `-impostors`, `-structures`, `-water`, `-riders`, `-grounding`, comma-separated; default none |
- * | `levers` | #619's levers switched OFF, for a before/after pair at one rung — since #622 its air and since #1274 its crag, for a by-eye pair, and since #1283 the generated trees and #1294 the generated firs, for both | `-foliage-order`, `-texture-bias`, `-air`, `-crag`, `-generated-trees`, `-generated-conifers`, comma-separated; default none |
+ * | `levers` | #619's levers switched OFF, for a before/after pair at one rung — since #622 its air and since #1274 its crag, for a by-eye pair, since #1283 the generated trees and #1294 the generated firs, for both, since #1523 the ground blend and the road wear, for a cost pair, #1523's bounds on both, for a before/after pair, and since #1534 the villages' cleared ground, for both | `-foliage-order`, `-texture-bias`, `-air`, `-crag`, `-generated-trees`, `-generated-conifers`, `-ground-blend`, `-road-wear`, `-surface-bounds`, `-settlement-clearing`, comma-separated; default none |
  * | `facing` | which way the route is turned, relative to the sun (#702, `route.ts` §"Which way it faces") | `sun`, `away`; default the route unturned, which looks 110° to 160° away from the sun |
+ * | `town` | ride through a mapped town instead of `route.ts`' road (#1581): `footprint-fixtures-testing.ts` §`mixedTownFixture`'s mixed footprints, planned, drawn and lotted as a ride's corridor is, from 900 m to 2 100 m | `mixed`; default none |
  *
  * ⚠️ **Unknown parameters and values are REFUSED**, as #457's page refused
  * them: a typo in a soak URL would otherwise measure the default under another
@@ -30,6 +31,7 @@
  */
 
 import type { RealisticTrees } from '../../src/game/realistic-assets';
+import type { RealisticSurfaces } from '../../src/game/three-renderer';
 
 import type { Facing } from './route';
 
@@ -91,6 +93,29 @@ export type Layer = (typeof LAYERS)[number];
  *   the draw calls and the triangles of one run against the other are the
  *   trees' own difference. ⚠️ **Read at load**: it chooses which files are
  *   fetched, so it is a different URL and not a switch on a running page.
+ * - `ground-blend` — #1523: the realistic ground as it was before #627's
+ *   verge, rock and scree and #1274's crag — #425's near and far photograph
+ *   and #460's patchwork, in a program that holds none of the blend's code or
+ *   its six maps (`three-renderer.ts` §`realisticSurfacesOf`). The tablet's
+ *   COST pair for the blend, which `crag` is not; it changes the picture too.
+ * - `road-wear` — #1523: the realistic road without #628's wear and #879's
+ *   roughness and relief — no wheel track, no dust, no patch loop in its
+ *   program. The tablet's cost pair for the wear, which `game-harness.ts`'s
+ *   wear switch is not: that one zeroes uniforms and keeps the loop.
+ * - `surface-bounds` — #1523's fix to both: the wear's patch loop only on a
+ *   triangle a patch can reach and the paint's noise only on paint, and the
+ *   ground blend's derivatives taken once. Off builds both shaders as they
+ *   were before it, which draws the same picture (the browser gate holds the
+ *   two to one) — the tablet's before/after pair for the fix on one build.
+ *
+ * None of #1523's changes anything a rider can reach: the product always
+ * builds both surfaces, bounded, and only this page's URL turns one off.
+ *
+ * - `settlement-clearing` — #1534: the trees, shrubs and rocks left standing on
+ *   a village's or a farmstead's ground, as every frame was before #1534
+ *   (`scene.ts` §`SceneInput.settlementsWooded`). The tablet's cost pair for
+ *   the clearing, which can only take instances away, and the owner's BY-EYE
+ *   pair for it. Changes nothing a rider can reach.
  */
 export const LEVERS = [
   'air',
@@ -98,6 +123,10 @@ export const LEVERS = [
   'foliage-order',
   'generated-conifers',
   'generated-trees',
+  'ground-blend',
+  'road-wear',
+  'settlement-clearing',
+  'surface-bounds',
   'texture-bias',
 ] as const;
 
@@ -122,6 +151,11 @@ export interface RealisticPageConfig {
    * the one every Part Z and Part AH row was taken on.
    */
   readonly facing: Facing | undefined;
+  /**
+   * A mapped town to ride through — #1581's by-eye pair for the owner, near a
+   * town and inside one. `undefined` is `route.ts`' road, with no corridor.
+   */
+  readonly town: 'mixed' | undefined;
 }
 
 /** The ride the owner is asked to look at: the realistic world, the ladder running. */
@@ -136,6 +170,7 @@ export const DEFAULT_CONFIG: RealisticPageConfig = {
   layersOff: [],
   leversOff: [],
   facing: undefined,
+  town: undefined,
 };
 
 const KNOWN = new Set([
@@ -149,6 +184,7 @@ const KNOWN = new Set([
   'layers',
   'levers',
   'facing',
+  'town',
 ]);
 
 /**
@@ -217,6 +253,20 @@ export function treesWithLevers(leversOff: readonly Lever[]): RealisticTrees {
   return leversOff.includes('generated-conifers') ? 'scanned-conifers' : 'generated';
 }
 
+/**
+ * Which of the realistic surfaces' shaders this run builds — #1523: both,
+ * bounded, as the product does, unless `ground-blend`, `road-wear` or
+ * `surface-bounds` is off.
+ * `realistic-harness.ts` hands it to `three-renderer.ts` §`realisticSurfacesOf`.
+ */
+export function surfacesWithLevers(leversOff: readonly Lever[]): RealisticSurfaces {
+  return {
+    groundBlend: !leversOff.includes('ground-blend'),
+    roadWear: !leversOff.includes('road-wear'),
+    bounded: !leversOff.includes('surface-bounds'),
+  };
+}
+
 /** A configuration from a query string. @see RealisticPageConfig */
 export function parseConfig(search: string): RealisticPageConfig {
   const params = new URLSearchParams(search);
@@ -254,6 +304,7 @@ export function parseConfig(search: string): RealisticPageConfig {
     layersOff: layersFrom(params.get('layers')),
     leversOff: leversFrom(params.get('levers')),
     facing: params.has('facing') ? oneOf('facing', ['sun', 'away'] as const, 'sun') : undefined,
+    town: params.has('town') ? oneOf('town', ['mixed'] as const, 'mixed') : undefined,
   };
 }
 
@@ -274,6 +325,7 @@ export function configQuery(config: RealisticPageConfig): string {
     params.set('levers', config.leversOff.map((lever) => `-${lever}`).join(','));
   }
   if (config.facing !== undefined) params.set('facing', config.facing);
+  if (config.town !== undefined) params.set('town', config.town);
   const query = params.toString();
   return query === '' ? '' : `?${query}`;
 }

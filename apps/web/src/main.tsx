@@ -137,6 +137,10 @@ import type { WorkoutPort } from './workouts/store-port';
 import { raceRouteOf } from './detail/race-consent';
 import type { DetailPort } from './detail/store-port';
 import { browserBasemapConfig } from './map/basemap';
+import { readMapTilesChoice } from './map/tiles-preference';
+import { readRealisticWorldChoice } from './game/world-preference';
+import { lazyWorldCorridorPort, readingCorridorOnSave } from './world-data/corridor-lazy';
+import type { WorldCorridorPort } from './world-data/corridor-port';
 import type { MapPort } from './map/port';
 import { forgettingOnDelete, type LibraryPort } from './library/store-port';
 import type { TransferPort } from './transfer/store-port';
@@ -562,8 +566,41 @@ function buildMatchPort(): MatchPort {
  * another athlete's anything. `ActivityStore` satisfies it structurally, like
  * the five ports above.
  */
-function buildRoutePort(): RoutePort {
-  return { store: localStore(), athleteId: LOCAL_ATHLETE };
+function buildRoutePort(corridors: WorldCorridorPort): RoutePort {
+  // #1539: a saved route's corridor is read after the save, never before it.
+  return { store: readingCorridorOnSave(localStore(), corridors), athleteId: LOCAL_ATHLETE };
+}
+
+/**
+ * The corridor of map features around a route — #1539, ADR 0054 D-2.4: read
+ * when a route is chosen for a ride and when one is saved, from the archive
+ * `readBasemapConfig` names, through `world-data/corridor-source.ts` and
+ * nothing else, into the store's ODbL table.
+ *
+ * ⚠️ **One for the tab**, so the game and the two screens that save a route
+ * share what this device last saw the archive answer with. Every gate is
+ * read at each call: the realistic world, the map-tiles switch, the archive,
+ * and whether a ride is recording (`rideInProgress`), which stops a read.
+ * Nothing is logged: the read's failures are in `describeCorridorFailure`'s
+ * words if a caller ever passes `log`, and none does yet.
+ */
+let worldCorridors: WorldCorridorPort | undefined;
+
+function buildWorldCorridorPort(rideController: RideController | undefined): WorldCorridorPort {
+  // Lazily loaded (`world-data/corridor-lazy.ts`), so the reader and the
+  // decoder are not in the entry chunk; the archive is always the one
+  // `world-data/corridor-source.ts` reads.
+  worldCorridors ??= lazyWorldCorridorPort({
+    store: localStore(),
+    owner: LOCAL_ATHLETE,
+    basemap: browserBasemapConfig,
+    mapTilesOn: () => readMapTilesChoice(deviceStorage()),
+    realisticOn: () => readRealisticWorldChoice(deviceStorage()),
+    recording: () =>
+      rideController !== undefined && rideInProgress(rideController.getSnapshot().phase),
+    now: () => new Date(),
+  });
+  return worldCorridors;
 }
 
 /**
@@ -660,9 +697,14 @@ async function loadGameRenderer(): Promise<GameRenderer> {
 function buildGamePort(
   rideController: RideController | undefined,
   ghosts: GhostPort | undefined,
+  corridors: WorldCorridorPort,
 ): GamePort {
   const store = localStore();
   return {
+    // #1539: the chosen route's corridor, from the store or read once. ⚠️ An
+    // optional member, so dropping this line is green in `check:wiring`;
+    // `world-data/corridor-wiring.test.tsx` is what goes red.
+    loadWorldCorridor: (route, signal, progress) => corridors.load(route, signal, progress),
     // #331: another rider's ghost, only through the instance (ADR 0039 D-2.5).
     // No instance, no choice: `ghosts` is undefined or says it is not offered.
     riderGhostOffered: () => ghosts?.offered() === true,
@@ -801,12 +843,13 @@ function deviceTrainerTargets(): TrainerTargetMemory {
   return trainerTargetMemory;
 }
 
-function buildTransferPort(): TransferPort | undefined {
+function buildTransferPort(corridors: WorldCorridorPort): TransferPort | undefined {
   if (globalThis.crypto?.subtle === undefined) {
     return undefined;
   }
   return {
-    store: localStore(),
+    // #1539: a file kept as a course has its corridor read after the save.
+    store: readingCorridorOnSave(localStore(), corridors),
     athleteId: LOCAL_ATHLETE,
     newActivityId: () => activityId(globalThis.crypto.randomUUID()),
     // #232: a file the rider decides was a course after all. A separate
@@ -1459,6 +1502,8 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
   // line is what supplies it.
   const platform = await buildPlatform(capabilities, camera);
   const rideController = platform.rideController;
+  // #1539: after the ride controller, whose recording stops a corridor read.
+  const worldCorridorPort = buildWorldCorridorPort(rideController);
   // #1102: built once, after the ride controller it watches.
   const instanceAnalysis = buildInstanceAnalysis(camera, rideController);
   // #388. Each pairing's post-ride report, saved with the ride it filmed —
@@ -1572,7 +1617,7 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           {...(athlete?.units === undefined ? {} : { units: athlete.units })}
           rideController={rideController}
           menuSounds={menuSounds}
-          transfer={buildTransferPort()}
+          transfer={buildTransferPort(worldCorridorPort)}
           library={buildLibraryPort()}
           detail={buildDetailPort()}
           rideAnalysis={rideAnalysis}
@@ -1580,10 +1625,10 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           analysis={buildAnalysisPort()}
           segments={buildSegmentPort()}
           match={buildMatchPort()}
-          routes={buildRoutePort()}
+          routes={buildRoutePort(worldCorridorPort)}
           workouts={buildWorkoutPort()}
           efforts={buildEffortPort()}
-          game={buildGamePort(rideController, buildGhostPort())}
+          game={buildGamePort(rideController, buildGhostPort(), worldCorridorPort)}
           gameTrainer={buildGameTrainerPort(rideController)}
           gameRenderer={loadGameRenderer}
           screenLock={browserScreenLockSource(platformWakeLock())}

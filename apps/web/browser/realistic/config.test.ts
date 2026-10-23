@@ -10,6 +10,7 @@ import {
   parseConfig,
   percentiles,
   rungWithLevers,
+  surfacesWithLevers,
   treesWithLevers,
 } from './config';
 import { REALISTIC_TREE_SETS, REALISTIC_TREES_DEFAULT } from '../../src/game/realistic-assets';
@@ -24,7 +25,7 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
   it('reads every parameter', () => {
     expect(
       parseConfig(
-        '?world=stylised&rung=1&ladder=0&seconds=60&soak=20&at=900&panel=0&layers=-water,-sky&levers=-texture-bias&facing=sun',
+        '?world=stylised&rung=1&ladder=0&seconds=60&soak=20&at=900&panel=0&layers=-water,-sky&levers=-texture-bias&facing=sun&town=mixed',
       ),
     ).toEqual({
       world: 'stylised',
@@ -37,7 +38,15 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
       layersOff: ['sky', 'water'],
       leversOff: ['texture-bias'],
       facing: 'sun',
+      town: 'mixed',
     });
+  });
+
+  it('rides through the mixed town only when asked, and refuses any other — #1581', () => {
+    expect(parseConfig('').town).toBeUndefined();
+    expect(parseConfig('?town=mixed').town).toBe('mixed');
+    expect(configQuery(parseConfig('?town=mixed&at=1200'))).toBe('?at=1200&town=mixed');
+    expect(() => parseConfig('?town=rows')).toThrow(/town is one of mixed/);
   });
 
   it('turns the route towards the sun or away from it only when asked — #702', () => {
@@ -68,9 +77,49 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
       'generated-trees',
       'texture-bias',
     ]);
+    // #1534's, the villages' ground left wooded.
+    expect(LEVERS).toContain('settlement-clearing');
+    expect(parseConfig('?levers=-settlement-clearing').leversOff).toEqual(['settlement-clearing']);
     expect(parseConfig('').leversOff).toEqual([]);
     expect(() => parseConfig('?levers=-texture')).toThrow(/levers is a comma-separated list/);
     expect(() => parseConfig('?levers=texture-bias')).toThrow(/levers is a comma-separated list/);
+  });
+
+  it('builds both surfaces’ shaders, bounded, as the product does, unless a #1523 lever takes one out', () => {
+    expect(LEVERS).toContain('ground-blend');
+    expect(LEVERS).toContain('road-wear');
+    expect(LEVERS).toContain('surface-bounds');
+    const drawn = { groundBlend: true, roadWear: true, bounded: true };
+    // No lever is the product, and no OTHER lever touches either surface.
+    expect(surfacesWithLevers([])).toEqual(drawn);
+    expect(surfacesWithLevers(parseConfig('?levers=-air,-crag,-texture-bias').leversOff)).toEqual(
+      drawn,
+    );
+    // Each lever its own setting, and only that one.
+    expect(surfacesWithLevers(parseConfig('?levers=-ground-blend').leversOff)).toEqual({
+      ...drawn,
+      groundBlend: false,
+    });
+    expect(surfacesWithLevers(parseConfig('?levers=-road-wear').leversOff)).toEqual({
+      ...drawn,
+      roadWear: false,
+    });
+    expect(surfacesWithLevers(parseConfig('?levers=-surface-bounds').leversOff)).toEqual({
+      ...drawn,
+      bounded: false,
+    });
+    expect(surfacesWithLevers(parseConfig('?levers=-road-wear,-ground-blend').leversOff)).toEqual({
+      ...drawn,
+      groundBlend: false,
+      roadWear: false,
+    });
+    // And the URL round-trips, so a tablet row names the program it measured.
+    expect(configQuery(parseConfig('?levers=-road-wear,-ground-blend'))).toBe(
+      `?levers=${encodeURIComponent('-ground-blend,-road-wear')}`,
+    );
+    expect(configQuery(parseConfig('?levers=-surface-bounds'))).toBe(
+      `?levers=${encodeURIComponent('-surface-bounds')}`,
+    );
   });
 
   it('loads the trees the product loads unless the generated ones are switched off — #1283', () => {

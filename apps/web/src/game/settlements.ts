@@ -82,6 +82,8 @@ import {
   type RouteProfile,
 } from '@onyourleft/domain';
 
+import { lotPaint } from './building-paint';
+import { builtUpOrWater, fieldGround, NO_LAND_CLASS, type LandClassMask } from './land-class';
 import { ROAD_CLEARANCE_METRES, fieldSpanMetres, terrainHeightAt } from './landform';
 import {
   SETTLEMENT_GRADE_PERCENT,
@@ -189,6 +191,23 @@ const STREAM_VARIANT = 4;
  * ⚠️ **Buildings and signposts first, then the boundaries nearest the rider**,
  * and the budget cuts from the end: a rung that takes structures away takes
  * the far walls and hedges before it takes a house.
+ *
+ * `footprints`, when given, is filled with the ground of every settlement whose
+ * sites this call visits — #1534, {@link SettlementFootprint} — whatever the
+ * budget keeps: a rung that drops a house does not plant its garden.
+ *
+ * `land` is the ride's land-class mask (#1546): no procedural site stands
+ * where map data was read ({@link siteOnMappedLand}), and no field boundary
+ * runs across mapped built-up land, water, wood or park (`land-class.ts`
+ * §`fieldGround`). {@link NO_LAND_CLASS}, the default, is
+ * today's world.
+ *
+ * `town` is the corridor's mapped footprints and commercial land (#1550,
+ * {@link MappedTown}): where the land is mapped built-up and no footprint
+ * stands, {@link lotsAt} fills the street frontage with procedural lots, after
+ * the settlements and before the field boundaries. {@link NO_MAPPED_TOWN}, the
+ * default, is a town with no footprints at all; `null` builds no lots — the
+ * browser gate's `-lots` control (`scene.ts` §`SceneInput.lotsOff`).
  */
 export function structuresAt(
   profile: RouteProfile,
@@ -197,12 +216,16 @@ export function structuresAt(
   fromMetres: number,
   toMetres: number,
   budget: { readonly maxItems: number; readonly riderMetres: number },
+  footprints?: SettlementFootprint[],
+  land: LandClassMask = NO_LAND_CLASS,
+  town: MappedTown | null = NO_MAPPED_TOWN,
 ): readonly ScatterItem[] {
   const found: ScatterItem[] = [];
   const villages: (readonly [number, number])[] = [];
-  settlementsAt(profile, origin, seed, fromMetres, toMetres, found, villages);
+  settlementsAt(profile, origin, seed, fromMetres, toMetres, found, villages, footprints, land);
+  if (town !== null) lotsAt(profile, origin, seed, fromMetres, toMetres, land, town, found);
   const edges: { readonly item: ScatterItem; readonly along: number }[] = [];
-  fieldEdgesAt(profile, origin, seed, fromMetres, toMetres, villages, edges);
+  fieldEdgesAt(profile, origin, seed, fromMetres, toMetres, villages, edges, land);
   edges.sort(
     (first, second) =>
       Math.abs(first.along - budget.riderMetres) - Math.abs(second.along - budget.riderMetres),
@@ -546,6 +569,8 @@ function standing(
   signedLateral: number,
   variant: number,
   facing: 'road' | 'along',
+  /** #1547: the ground it stands on is levelled near mapped built-up land. */
+  land: LandClassMask,
 ): ScatterItem | undefined {
   const wrapped = distanceOnRoute(profile, along);
   const frame = frameAt(profile, origin, wrapped);
@@ -559,12 +584,179 @@ function standing(
   return {
     kind,
     x: frame.x + frame.normalX * signedLateral,
-    y: terrainHeightAt(profile, origin, seed, wrapped, signedLateral),
+    y: terrainHeightAt(profile, origin, seed, wrapped, signedLateral, land),
     z: frame.z + frame.normalZ * signedLateral,
     rotation: Math.atan2(fx, fz),
     scale: 1,
     variant,
   };
+}
+
+/**
+ * One site's settlement, as the route and the seed decide it — #460. Shared
+ * since #1535 with `streets.ts`, so a pavement is laid beside exactly the
+ * village the houses stand in, from the same decision rather than a copy.
+ */
+export interface Site {
+  readonly kind: 'village' | 'farm';
+  /** The site's index along the route, unwrapped: a loop's second lap counts on. */
+  readonly site: number;
+  /** The same site on the route's first lap — what its hashes are drawn from. */
+  readonly wrappedSite: number;
+  /** Its middle, on the odometer (unwrapped). */
+  readonly centre: number;
+  /** Half its length along the road, in metres. */
+  readonly half: number;
+  /** The side its church (a village) or its buildings (a farmstead) stand on. */
+  readonly side: 1 | -1;
+}
+
+/** How many sites the route is divided into, and how long each is. */
+export function siteSpacing(profile: RouteProfile): {
+  readonly sites: number;
+  readonly span: number;
+} {
+  const sites = Math.max(1, Math.round(profile.totalDistance / SETTLEMENT_SPACING_METRES));
+  return { sites, span: profile.totalDistance / sites };
+}
+
+/**
+ * The settlement at one site, or `undefined` where there is none: open
+ * country, or ground that would not be built on. @see buildable
+ */
+export function siteAt(profile: RouteProfile, seed: number, site: number): Site | undefined {
+  const { sites, span } = siteSpacing(profile);
+  if (!profile.loop && (site < 0 || site >= sites)) return undefined;
+  const wrappedSite = ((site % sites) + sites) % sites;
+  const base = slotHash(seed, wrappedSite, SITE_KEY);
+  const roll = uniformFrom(base, STREAM_KIND);
+  const kind =
+    roll < VILLAGE_CHANCE
+      ? 'village'
+      : roll < VILLAGE_CHANCE + FARMSTEAD_CHANCE
+        ? 'farm'
+        : undefined;
+  if (kind === undefined) return undefined;
+  // Where in its site, clear of the site's ends so two neighbours' plots
+  // never overlap.
+  const centre = site * span + span * (0.3 + 0.4 * uniformFrom(base, STREAM_PLACE));
+  const half = kind === 'village' ? VILLAGE_METRES / 2 : 20;
+  if (!buildable(profile, seed, centre - half, centre + half, SETBACK_METRES)) return undefined;
+  const side = uniformFrom(base, STREAM_SIDE) < 0.5 ? 1 : -1;
+  return { kind, site, wrappedSite, centre, half, side };
+}
+
+/**
+ * How far either side of the road's centreline a site's ground is sampled for
+ * map data, in metres: **42** — a farmstead's barn
+ * ({@link FARM_SETBACK_METRES} far, plus its depth) and
+ * {@link SETTLEMENT_MARGIN_METRES} behind it, the furthest any site reaches.
+ */
+export const SITE_LAND_REACH_METRES = 42;
+
+/** The sampling step along a site's ground, and across it, in metres. */
+const SITE_LAND_STEP_ALONG_METRES = 10;
+const SITE_LAND_STEP_ACROSS_METRES = 6;
+
+/**
+ * Whether any of a procedural site's ground is where map data was read —
+ * #1546, ADR 0054 D-4.2 and D-5.3. Such a site is not built at all: a
+ * stretch with data is what the data says, and #1540 puts the buildings back
+ * where it says people built.
+ *
+ * The ground is the site's length and {@link PLOT_METRES} either end (where
+ * its signposts stand), {@link SITE_LAND_REACH_METRES} either side, sampled
+ * every {@link SITE_LAND_STEP_ALONG_METRES} along and
+ * {@link SITE_LAND_STEP_ACROSS_METRES} across. Covered land comes in whole
+ * z15 tiles and 320 m chunks, far wider than a step, so the sampling cannot
+ * step over it.
+ */
+export function siteOnMappedLand(
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  site: Site,
+  land: LandClassMask,
+): boolean {
+  // Nothing was read: today's world, at no cost.
+  if (land.bytes === 0) return false;
+  const start = site.centre - site.half - PLOT_METRES;
+  const length = 2 * (site.half + PLOT_METRES);
+  const steps = Math.ceil(length / SITE_LAND_STEP_ALONG_METRES);
+  for (let step = 0; step <= steps; step += 1) {
+    const along = start + Math.min(length, step * SITE_LAND_STEP_ALONG_METRES);
+    const frame = frameAt(profile, origin, distanceOnRoute(profile, along));
+    if (frame !== undefined) {
+      for (
+        let lateral = -SITE_LAND_REACH_METRES;
+        lateral <= SITE_LAND_REACH_METRES + 1e-9;
+        lateral += SITE_LAND_STEP_ACROSS_METRES
+      ) {
+        if (land.covered(frame.x + frame.normalX * lateral, frame.z + frame.normalZ * lateral)) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+/** One built plot of a village: what stands on it, where, and how far back. */
+export interface Plot {
+  readonly along: number;
+  readonly side: 1 | -1;
+  readonly kind: StructureKind;
+  readonly lateral: number;
+  readonly variant: number;
+}
+
+/**
+ * Every plot of a village, built or not, in plot order and the right side
+ * before the left — #460's layout. #1534 clears the trees off every one of
+ * them (an empty plot is a garden or a green, not a wood); #1535 lays a
+ * pavement only along the built ones, {@link villagePlots}.
+ */
+function everyVillagePlot(
+  seed: number,
+  village: Site,
+): readonly (Plot & { readonly built: boolean })[] {
+  const plots = Math.floor(VILLAGE_METRES / PLOT_METRES) + 1;
+  const middle = Math.floor(plots / 2);
+  const every: (Plot & { readonly built: boolean })[] = [];
+  for (let plot = 0; plot < plots; plot += 1) {
+    const along = village.centre - village.half + plot * PLOT_METRES;
+    for (const plotSide of [1, -1] as const) {
+      const hash = slotHash(
+        seed,
+        village.wrappedSite * 64 + plot,
+        SITE_KEY + (plotSide === 1 ? 1 : 2),
+      );
+      // The church at the far end on the site's own side, the shops just past
+      // the middle on the other, houses on every other plot — and since #1565
+      // nothing on the middle plot of either side, which is the village's
+      // crossroads (`cross-streets.ts` §`villageJunction`, at its centre).
+      const [kind, lateral]: readonly [StructureKind, number] =
+        plot === plots - 1 && plotSide === village.side
+          ? ['church', CHURCH_SETBACK_METRES]
+          : plot === middle + 1 && plotSide === -village.side
+            ? ['shop-row', SETBACK_METRES - 1]
+            : ['building', SETBACK_METRES];
+      const built = plot !== middle && uniformFrom(hash, STREAM_PLOT) < PLOT_BUILT_SHARE;
+      const variant = Math.min(5, Math.floor(uniformFrom(hash, STREAM_VARIANT) * 6));
+      every.push({ along, side: plotSide, kind, lateral, variant, built });
+    }
+  }
+  return every;
+}
+
+/**
+ * Every BUILT plot of a village, in plot order and the right side before the
+ * left — #460's layout, and since #1535 what `streets.ts` lays a pavement
+ * along: a side of the street with no house on it has none.
+ */
+export function villagePlots(seed: number, village: Site): readonly Plot[] {
+  return everyVillagePlot(seed, village)
+    .filter((plot) => plot.built)
+    .map(({ along, side, kind, lateral, variant }) => ({ along, side, kind, lateral, variant }));
 }
 
 /** The villages and farmsteads, and their signposts. */
@@ -576,10 +768,10 @@ function settlementsAt(
   toMetres: number,
   found: ScatterItem[],
   villages: (readonly [number, number])[],
+  footprints: SettlementFootprint[] | undefined,
+  land: LandClassMask,
 ): void {
-  const total = profile.totalDistance;
-  const sites = Math.max(1, Math.round(total / SETTLEMENT_SPACING_METRES));
-  const span = total / sites;
+  const { sites, span } = siteSpacing(profile);
   const reach = VILLAGE_METRES / 2 + PLOT_METRES;
   const first = Math.floor((fromMetres - reach) / span);
   // ⚠️ **Never more sites than the route has** — `scatter.ts` §`scatterAt`'s
@@ -588,50 +780,44 @@ function settlementsAt(
   // tens of thousands of sites a frame — every one of them the same few,
   // placed again on top of themselves.
   const last = Math.min(Math.floor((toMetres + reach) / span), first + sites + 1);
-  for (let site = first; site <= last; site += 1) {
-    if (!profile.loop && (site < 0 || site >= sites)) continue;
-    const wrappedSite = ((site % sites) + sites) % sites;
-    const base = slotHash(seed, wrappedSite, SITE_KEY);
-    const roll = uniformFrom(base, STREAM_KIND);
-    const kind =
-      roll < VILLAGE_CHANCE
-        ? 'village'
-        : roll < VILLAGE_CHANCE + FARMSTEAD_CHANCE
-          ? 'farm'
-          : undefined;
-    if (kind === undefined) continue;
-    // Where in its site, clear of the site's ends so two neighbours' plots
-    // never overlap.
-    const centre = site * span + span * (0.3 + 0.4 * uniformFrom(base, STREAM_PLACE));
-    const half = kind === 'village' ? VILLAGE_METRES / 2 : 20;
-    if (!buildable(profile, seed, centre - half, centre + half, SETBACK_METRES)) continue;
-    const side = uniformFrom(base, STREAM_SIDE) < 0.5 ? 1 : -1;
+  for (let index = first; index <= last; index += 1) {
+    const site = siteAt(profile, seed, index);
+    // #1546: where map data was read, the data decides, not the seed.
+    if (site === undefined || siteOnMappedLand(profile, origin, site, land)) continue;
+    const { centre, half, side } = site;
     const admit = (item: ScatterItem | undefined, along: number): void => {
       if (item !== undefined && along >= fromMetres && along < toMetres) found.push(item);
     };
-    if (kind === 'village') {
+    if (site.kind === 'village') {
       villages.push([centre - half - PLOT_METRES, centre + half + PLOT_METRES]);
-      const plots = Math.floor(VILLAGE_METRES / PLOT_METRES) + 1;
-      const middle = Math.floor(plots / 2);
-      for (let plot = 0; plot < plots; plot += 1) {
-        const along = centre - half + plot * PLOT_METRES;
-        for (const plotSide of [1, -1] as const) {
-          const hash = slotHash(seed, wrappedSite * 64 + plot, SITE_KEY + (plotSide === 1 ? 1 : 2));
-          if (uniformFrom(hash, STREAM_PLOT) >= PLOT_BUILT_SHARE) continue;
-          // The church at the far end on the site's own side, the shops at the
-          // middle on the other, houses on every other plot.
-          const [building, lateral]: readonly [StructureKind, number] =
-            plot === plots - 1 && plotSide === side
-              ? ['church', CHURCH_SETBACK_METRES]
-              : plot === middle && plotSide === -side
-                ? ['shop-row', SETBACK_METRES - 1]
-                : ['building', SETBACK_METRES];
-          const variant = Math.min(5, Math.floor(uniformFrom(hash, STREAM_VARIANT) * 6));
-          admit(
-            standing(profile, origin, seed, building, along, lateral * plotSide, variant, 'road'),
-            along,
-          );
-        }
+      for (const plot of everyVillagePlot(seed, site)) {
+        // #1534: the plot is the village's ground whether or not it is built
+        // on — an empty plot is a garden or a green, not a wood.
+        pushFootprint(
+          profile,
+          origin,
+          footprints,
+          plot.kind,
+          plot.along,
+          plot.lateral,
+          plot.side,
+          PLOT_METRES / 2,
+        );
+        if (!plot.built) continue;
+        admit(
+          standing(
+            profile,
+            origin,
+            seed,
+            plot.kind,
+            plot.along,
+            plot.lateral * plot.side,
+            plot.variant,
+            'road',
+            land,
+          ),
+          plot.along,
+        );
       }
       // A signpost at each way in, on the verge, turned along the road.
       for (const [along, verge] of [
@@ -648,12 +834,14 @@ function settlementsAt(
             SIGNPOST_LATERAL_METRES * verge,
             0,
             'along',
+            land,
           ),
           along,
         );
       }
     } else {
       // A farmstead: a farmhouse, a barn and a shed, grouped on one side.
+      const base = slotHash(seed, site.wrappedSite, SITE_KEY);
       const [near, far] = FARM_SETBACK_METRES;
       const layout: readonly (readonly [StructureKind, number, number])[] = [
         ['building', 0, near],
@@ -662,14 +850,416 @@ function settlementsAt(
       ];
       for (const [building, offset, lateral] of layout) {
         const along = centre + offset;
+        pushFootprint(profile, origin, footprints, building, along, lateral, side, 0);
         const variant = Math.min(5, Math.floor(uniformFrom(base, STREAM_VARIANT) * 6));
         admit(
-          standing(profile, origin, seed, building, along, lateral * side, variant, 'road'),
+          standing(profile, origin, seed, building, along, lateral * side, variant, 'road', land),
           along,
         );
       }
     }
   }
+}
+
+// --- Procedural lots in a mapped town — #1550 ------------------------------
+
+/**
+ * How many floats one lot is, as {@link placeLot} writes it: **7** — where it
+ * stands (`x, z`), the cosine and sine of its yaw, and its footprint's `half`
+ * width, `back` and `front` ({@link Footprint}).
+ *
+ * ⚠️ **A lot is handed over in a typed array, never as numbers** — #1550,
+ * `land-class.ts` §`builtUpDistances`' rule: a call that is not inlined boxes
+ * every number it is passed, and #1550's first draft of
+ * {@link MappedFootprintIndex.overlaps}, which took `(x, z, footprint,
+ * rotation)`, measured 48 bytes a query for exactly that.
+ */
+export const LOT_FLOATS = 7;
+
+/** Writes a lot — `footprint` at `(x, z)`, turned by a yaw of `rotation` — into `into`. @see LOT_FLOATS */
+export function placeLot(
+  into: Float64Array,
+  x: number,
+  z: number,
+  footprint: Footprint,
+  rotation: number,
+): Float64Array {
+  into[0] = x;
+  into[1] = z;
+  into[2] = Math.cos(rotation);
+  into[3] = Math.sin(rotation);
+  into[4] = footprint.x;
+  into[5] = footprint.back;
+  into[6] = footprint.front;
+  return into;
+}
+
+/**
+ * #1540's kept footprints, in a grid for O(1) overlap queries — #1550.
+ * Allocation-free: it is asked for every lot in view, every frame.
+ */
+export interface MappedFootprintIndex {
+  /**
+   * Whether a lot ({@link LOT_FLOATS}), grown by
+   * {@link BUILDING_CLEARANCE_METRES} all round, meets any kept footprint.
+   */
+  overlaps(lot: Float64Array): boolean;
+}
+
+/**
+ * What {@link lotsAt} reads of a ride's corridor: its kept footprints, and
+ * whether a lot's land is mapped `commercial` — the one land-use `kind` the
+ * land-class mask does not keep (`land-class.ts` §`kindAt`).
+ */
+export interface MappedTown extends MappedFootprintIndex {
+  /** Whether the `landuse.kind` at `(x, z)` is `commercial`. Kept per place after the first ask. */
+  commercialAt(x: number, z: number): boolean;
+}
+
+/** No footprints and no commercial land: what a ride with no corridor is handed. */
+export const NO_MAPPED_TOWN: MappedTown = Object.freeze({
+  overlaps: (): boolean => false,
+  commercialAt: (): boolean => false,
+});
+
+/**
+ * Every how many lots a row of shops stands on commercial land: **5** — #1550's
+ * rule 4, the fifth plot along the route counted from its start.
+ */
+export const LOT_SHOP_EVERY = 5;
+
+/** The key the lots are hashed under, outside anything else's. */
+const LOT_KEY = 0x7_0000;
+
+/** How many lot plots the route is divided into, and how long each is. */
+export function lotSpacing(profile: RouteProfile): {
+  readonly plots: number;
+  readonly span: number;
+} {
+  const plots = Math.max(1, Math.round(profile.totalDistance / PLOT_METRES));
+  return { plots, span: profile.totalDistance / plots };
+}
+
+/**
+ * Procedural lots where the land is mapped built-up but no mapped footprint
+ * stands — #1550. OSM's building coverage is uneven: some towns have every
+ * footprint, and some only their `residential` polygon. The route's own road
+ * is divided into plots {@link PLOT_METRES} apart (stretched to divide it
+ * evenly, as {@link siteSpacing} is, so a loop's seam is an ordinary
+ * boundary), and on each side of each, in order:
+ *
+ * 1. **Built-up ground.** A house (or a row of shops, rule 4) at
+ *    {@link SETBACK_METRES}, facing the road, is a candidate only where
+ *    `classAt` is `built-up` at its centre and at the four corners of its
+ *    {@link STRUCTURE_FOOTPRINTS} entry.
+ * 2. **No mapped footprint.** Dropped if its footprint, grown by
+ *    {@link BUILDING_CLEARANCE_METRES}, meets any kept #1540 plan's
+ *    ({@link MappedFootprintIndex}).
+ * 3. **Never on wood, water or park** (P-9, the owner's rule): rule 1's
+ *    corners already exclude them, since those classes are not `built-up`.
+ * 4. {@link PLOT_BUILT_SHARE} of candidates are built, by a hash of the plot.
+ *    The kind is a house, with a row of shops every {@link LOT_SHOP_EVERY}th
+ *    plot where the land is mapped `commercial`. No church and no signpost: a
+ *    mapped town is not a procedural village.
+ * 5. Off every stretch of the road by {@link ROAD_CLEARANCE_METRES} — which is
+ *    {@link structuresAt}'s rule for every structure, not this function's.
+ *
+ * **Along the route's own road only**: the game draws one road, and a lot
+ * beside a mapped side street the game does not draw would face nothing.
+ * Stateless and seeded, each lot admitted on its unwrapped `along` half-open,
+ * so two adjacent spans partition the lots and lap two is lap one.
+ *
+ * Nothing at all where nothing was read ({@link NO_LAND_CLASS}): today's world.
+ */
+export function lotsAt(
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  seed: number,
+  fromMetres: number,
+  toMetres: number,
+  mask: LandClassMask,
+  mapped: MappedTown,
+  found: ScatterItem[],
+): void {
+  if (mask.bytes === 0) return;
+  const { plots, span } = lotSpacing(profile);
+  const first = Math.floor(fromMetres / span) - 1;
+  // Never more plots than the route has. @see settlementsAt's bound.
+  const last = Math.min(Math.floor(toMetres / span), first + plots + 1);
+  for (let plot = first; plot <= last; plot += 1) {
+    if (!profile.loop && (plot < 0 || plot >= plots)) continue;
+    const along = (plot + 0.5) * span;
+    if (along < fromMetres || along >= toMetres) continue;
+    const wrappedPlot = ((plot % plots) + plots) % plots;
+    const frame = frameAt(profile, origin, distanceOnRoute(profile, along));
+    if (frame === undefined) continue;
+    for (let side = 1; side >= -1; side -= 2) {
+      const hash = slotHash(seed, wrappedPlot, LOT_KEY + (side === 1 ? 1 : 2));
+      // Rule 4's share first: it is the cheapest, and it reads no land.
+      if (uniformFrom(hash, STREAM_PLOT) >= PLOT_BUILT_SHARE) continue;
+      const x = frame.x + frame.normalX * SETBACK_METRES * side;
+      const z = frame.z + frame.normalZ * SETBACK_METRES * side;
+      const shops = wrappedPlot % LOT_SHOP_EVERY === 0 && mapped.commercialAt(x, z);
+      const kind: StructureKind = shops ? 'shop-row' : 'building';
+      // Facing the road: back along the normal from its side. @see standing
+      const rotation = Math.atan2(-frame.normalX * side, -frame.normalZ * side);
+      if (
+        !lotStands(mask, mapped, placeLot(lotScratch, x, z, STRUCTURE_FOOTPRINTS[kind], rotation))
+      ) {
+        continue;
+      }
+      const variant = Math.min(5, Math.floor(uniformFrom(hash, STREAM_VARIANT) * 6));
+      const item = standing(
+        profile,
+        origin,
+        seed,
+        kind,
+        along,
+        SETBACK_METRES * side,
+        variant,
+        'road',
+        mask,
+      );
+      // #1581: painted unlike the lots beside it and across the road; #1588: clad.
+      if (item !== undefined)
+        found.push({
+          ...item,
+          // #1588: a house is clad, a shop never.
+          paint: lotPaint(seed, wrappedPlot, side === 1 ? 1 : -1, kind === 'building'),
+        });
+    }
+  }
+}
+
+/** The lot {@link lotsAt} is deciding, reused between plots. */
+const lotScratch = new Float64Array(LOT_FLOATS);
+
+/**
+ * {@link lotsAt}'s rules 1 to 3 for one lot ({@link LOT_FLOATS}): built-up
+ * land at its centre and at its footprint's four corners, and no mapped
+ * footprint within {@link BUILDING_CLEARANCE_METRES} of it. Allocation-free.
+ */
+export function lotStands(
+  mask: LandClassMask,
+  mapped: MappedFootprintIndex,
+  lot: Float64Array,
+): boolean {
+  const x = lot[0] as number;
+  const z = lot[1] as number;
+  const cos = lot[2] as number;
+  const sin = lot[3] as number;
+  // The centre and the four corners, from the footprint's own frame — a yaw,
+  // as three applies it: `x` across, `z` the way it faces. One loop and one
+  // call site, not arrays and not five calls: arrays allocate, and a call site
+  // left out of inlining boxes the numbers it passes (#469).
+  for (let point = 0; point < 5; point += 1) {
+    const corner = point - 1;
+    const across = point === 0 ? 0 : (corner & 1) === 0 ? -(lot[4] as number) : (lot[4] as number);
+    const ahead = point === 0 ? 0 : (corner & 2) === 0 ? (lot[5] as number) : (lot[6] as number);
+    if (
+      mask.classAt(x + across * cos + ahead * sin, z - across * sin + ahead * cos) !== 'built-up'
+    ) {
+      return false;
+    }
+  }
+  return !mapped.overlaps(lot);
+}
+
+/** The side of one cell of {@link footprintIndexOf}'s grid, in metres: **32**. */
+const FOOTPRINT_CELL_METRES = 32;
+
+/**
+ * Cells either side of the origin a grid key can name: 8 192, 262 km. Past it
+ * a footprint is filed under the last cell, which is still correct, only less
+ * selective. Small enough that every key is a small integer, which a `Map`
+ * looks up without boxing a number (`land-class.ts`' own reason).
+ */
+const FOOTPRINT_CELL_RANGE = 2 ** 13;
+
+function footprintCellKey(column: number, row: number): number {
+  return (
+    (row + FOOTPRINT_CELL_RANGE) * (2 * FOOTPRINT_CELL_RANGE) + (column + FOOTPRINT_CELL_RANGE)
+  );
+}
+
+/**
+ * A {@link MappedFootprintIndex} over `rings` — each an outer ring in local
+ * metres, `x, z` pairs, as #1540's `FootprintPlan.footprint` is. Built once a
+ * corridor: each ring is filed under every {@link FOOTPRINT_CELL_METRES} cell
+ * its bounding box touches, and a query reads only the cells within the
+ * footprint's reach and the clearance.
+ *
+ * A footprint meets a ring grown by the clearance exactly when it is nearer
+ * the ring than {@link BUILDING_CLEARANCE_METRES}: when the box comes within
+ * that of any of the ring's edges (`segmentToBoxSquared`, the measure
+ * {@link structureClearance} holds a house off the road by), or when it
+ * stands inside the ring altogether.
+ */
+export function footprintIndexOf(rings: readonly Float32Array[]): MappedFootprintIndex {
+  const cells = new Map<number, number[]>();
+  const kept = rings.filter((ring) => ring.length >= 6);
+  // Each ring's bounding box, `minX, maxX, minZ, maxZ`: a query reaches the
+  // exact measure only for a ring whose box is within its reach.
+  const boxes = new Float64Array(kept.length * 4);
+  kept.forEach((ring, index) => {
+    let minX = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let minZ = Number.POSITIVE_INFINITY;
+    let maxZ = Number.NEGATIVE_INFINITY;
+    for (let i = 0; i + 1 < ring.length; i += 2) {
+      minX = Math.min(minX, ring[i] as number);
+      maxX = Math.max(maxX, ring[i] as number);
+      minZ = Math.min(minZ, ring[i + 1] as number);
+      maxZ = Math.max(maxZ, ring[i + 1] as number);
+    }
+    boxes[index * 4] = minX;
+    boxes[index * 4 + 1] = maxX;
+    boxes[index * 4 + 2] = minZ;
+    boxes[index * 4 + 3] = maxZ;
+    const [lowX, highX] = [cellOfFootprint(minX), cellOfFootprint(maxX)];
+    const [lowZ, highZ] = [cellOfFootprint(minZ), cellOfFootprint(maxZ)];
+    for (let column = lowX; column <= highX; column += 1) {
+      for (let row = lowZ; row <= highZ; row += 1) {
+        const key = footprintCellKey(column, row);
+        const filed = cells.get(key);
+        if (filed === undefined) cells.set(key, [index]);
+        else filed.push(index);
+      }
+    }
+  });
+  const clearance = BUILDING_CLEARANCE_METRES * BUILDING_CLEARANCE_METRES;
+  return {
+    overlaps(lot) {
+      if (kept.length === 0) return false;
+      const x = lot[0] as number;
+      const z = lot[1] as number;
+      const back = lot[5] as number;
+      const front = lot[6] as number;
+      const half = lot[4] as number;
+      const deep = Math.max(-back, front);
+      // Not `Math.hypot`, which is a call that boxes its numbers: 48 bytes a query, measured.
+      const reach = Math.sqrt(half * half + deep * deep) + BUILDING_CLEARANCE_METRES;
+      // Every number below stays in this function or goes in the lot: a helper
+      // handed one that is not inlined boxes it. @see LOT_FLOATS
+      const lowX = Math.max(-FOOTPRINT_CELL_RANGE, Math.floor((x - reach) / FOOTPRINT_CELL_METRES));
+      const highX = Math.min(
+        FOOTPRINT_CELL_RANGE - 1,
+        Math.floor((x + reach) / FOOTPRINT_CELL_METRES),
+      );
+      const lowZ = Math.max(-FOOTPRINT_CELL_RANGE, Math.floor((z - reach) / FOOTPRINT_CELL_METRES));
+      const highZ = Math.min(
+        FOOTPRINT_CELL_RANGE - 1,
+        Math.floor((z + reach) / FOOTPRINT_CELL_METRES),
+      );
+      for (let column = lowX; column <= highX; column += 1) {
+        for (let row = lowZ; row <= highZ; row += 1) {
+          const filed = cells.get(footprintCellKey(column, row));
+          if (filed === undefined) continue;
+          for (let at = 0; at < filed.length; at += 1) {
+            const which = filed[at] as number;
+            if (
+              x + reach < (boxes[which * 4] as number) ||
+              x - reach > (boxes[which * 4 + 1] as number) ||
+              z + reach < (boxes[which * 4 + 2] as number) ||
+              z - reach > (boxes[which * 4 + 3] as number)
+            ) {
+              continue;
+            }
+            const ring = kept[which] as Float32Array;
+            if (ringHoldsLot(ring, lot) || ringNearLot(ring, lot, clearance)) return true;
+          }
+        }
+      }
+      return false;
+    },
+  };
+}
+
+function cellOfFootprint(metres: number): number {
+  return Math.max(
+    -FOOTPRINT_CELL_RANGE,
+    Math.min(FOOTPRINT_CELL_RANGE - 1, Math.floor(metres / FOOTPRINT_CELL_METRES)),
+  );
+}
+
+/**
+ * Whether any edge of `ring` comes nearer than `√squared` to a lot's box —
+ * `segmentToBoxSquared`'s measure, written out in one function: this is asked
+ * of every edge of every footprint near a lot in view, every frame, and the
+ * nested measure's calls boxed their numbers. @see LOT_FLOATS
+ */
+function ringNearLot(ring: Float32Array, query: Float64Array, squared: number): boolean {
+  const x = query[0] as number;
+  const z = query[1] as number;
+  const cos = query[2] as number;
+  const sin = query[3] as number;
+  const half = query[4] as number;
+  const back = query[5] as number;
+  const front = query[6] as number;
+  const count = ring.length / 2;
+  for (let i = 0, j = count - 1; i < count; j = i, i += 1) {
+    // The edge in the box's own frame — the inverse of a yaw of `rotation`.
+    const wx = (ring[j * 2] as number) - x;
+    const wz = (ring[j * 2 + 1] as number) - z;
+    const vx = (ring[i * 2] as number) - x;
+    const vz = (ring[i * 2 + 1] as number) - z;
+    const ax = wx * cos - wz * sin;
+    const az = wx * sin + wz * cos;
+    const bx = vx * cos - vz * sin;
+    const bz = vx * sin + vz * cos;
+    const dx = bx - ax;
+    const dz = bz - az;
+    // Liang–Barsky: does any of the edge lie inside the box?
+    let enter = 0;
+    let leave = 1;
+    for (let side = 0; side < 4; side += 1) {
+      const p = side === 0 ? -dx : side === 1 ? dx : side === 2 ? -dz : dz;
+      const q =
+        side === 0 ? ax + half : side === 1 ? half - ax : side === 2 ? az - back : front - az;
+      if (p === 0) {
+        if (q < 0) leave = -1;
+      } else if (p < 0) {
+        enter = Math.max(enter, q / p);
+      } else {
+        leave = Math.min(leave, q / p);
+      }
+    }
+    if (enter <= leave) return true;
+    // Each end to the box.
+    const aOutX = Math.max(0, Math.abs(ax) - half);
+    const aOutZ = Math.max(0, back - az, az - front);
+    if (aOutX * aOutX + aOutZ * aOutZ < squared) return true;
+    const bOutX = Math.max(0, Math.abs(bx) - half);
+    const bOutZ = Math.max(0, back - bz, bz - front);
+    if (bOutX * bOutX + bOutZ * bOutZ < squared) return true;
+    // Each corner of the box to the edge.
+    const span = dx * dx + dz * dz;
+    for (let corner = 0; corner < 4; corner += 1) {
+      const cx = (corner & 1) === 0 ? -half : half;
+      const cz = (corner & 2) === 0 ? back : front;
+      const t = span > 0 ? Math.min(1, Math.max(0, ((cx - ax) * dx + (cz - az) * dz) / span)) : 0;
+      const ox = ax + dx * t - cx;
+      const oz = az + dz * t - cz;
+      if (ox * ox + oz * oz < squared) return true;
+    }
+  }
+  return false;
+}
+
+/** Even-odd: whether a lot's place is inside a ring of `x, z` pairs. */
+function ringHoldsLot(ring: Float32Array, lot: Float64Array): boolean {
+  const x = lot[0] as number;
+  const z = lot[1] as number;
+  let inside = false;
+  const count = ring.length / 2;
+  for (let i = 0, j = count - 1; i < count; j = i, i += 1) {
+    const xi = ring[i * 2] as number;
+    const zi = ring[i * 2 + 1] as number;
+    const xj = ring[j * 2] as number;
+    const zj = ring[j * 2 + 1] as number;
+    if (zi > z !== zj > z && x < ((xj - xi) * (z - zi)) / (zj - zi) + xi) inside = !inside;
+  }
+  return inside;
 }
 
 /** The walls, hedges and fences, each with the odometer it stands at. */
@@ -681,6 +1271,7 @@ function fieldEdgesAt(
   toMetres: number,
   villages: readonly (readonly [number, number])[],
   found: { item: ScatterItem; along: number }[],
+  land: LandClassMask,
 ): void {
   const total = profile.totalDistance;
   // The ground's own field grid, so the patchwork and the walls agree (#425).
@@ -728,8 +1319,10 @@ function fieldEdgesAt(
           FIELD_EDGE_LATERAL_METRES * side,
           0,
           'along',
+          land,
         );
-        if (item !== undefined) found.push({ item, along });
+        // #1546: no boundary across built-up land, water, a wood or a park.
+        if (item !== undefined && fieldGround(land, item.x, item.z)) found.push({ item, along });
       }
       // Out from the road along the field's first edge.
       if (start < fromMetres || start >= toMetres || inVillage(start)) continue;
@@ -742,12 +1335,15 @@ function fieldEdgesAt(
         const lateral = FIELD_EDGE_LATERAL_METRES + (index + 0.5) * BOUNDARY_PIECE_METRES;
         const wrapped = distanceOnRoute(profile, start);
         if (inWater(ways, profile, wrapped, lateral * side)) continue;
+        const x = frame.x + frame.normalX * lateral * side;
+        const z = frame.z + frame.normalZ * lateral * side;
+        if (!fieldGround(land, x, z)) continue;
         found.push({
           item: {
             kind,
-            x: frame.x + frame.normalX * lateral * side,
-            y: terrainHeightAt(profile, origin, seed, wrapped, lateral * side),
-            z: frame.z + frame.normalZ * lateral * side,
+            x,
+            y: terrainHeightAt(profile, origin, seed, wrapped, lateral * side, land),
+            z,
             // Out from the road: its own length runs along the normal.
             rotation: Math.atan2(frame.normalX * side, frame.normalZ * side),
             scale: 1,
@@ -795,4 +1391,145 @@ export function clearOfBuildings(
         Math.hypot(item.x - building.x, item.z - building.z) >= BUILDING_CLEARANCE_METRES,
     ),
   );
+}
+
+/**
+ * How far past a settlement's buildings its cleared ground reaches, in metres:
+ * **6** — a back garden, and a broadleaf's crown kept off the eaves. #1534.
+ */
+export const SETTLEMENT_MARGIN_METRES = 6;
+
+/**
+ * One piece of a settlement's ground, cleared of trees, shrubs and rocks —
+ * #1534. A rectangle in plan, square to the drawn road at {@link along}: from
+ * the road's centreline out to {@link depth} on one side, and {@link half}
+ * either way along it.
+ *
+ * A village is one piece per plot per side, built on or not, each reaching
+ * {@link SETTLEMENT_MARGIN_METRES} past the back of the building that plot
+ * holds or would hold and overlapping its neighbours by the same, so a gentle
+ * bend leaves no wedge between two; a farmstead is one piece per building. So
+ * a settlement's footprint is its buildings, their gardens, and the ground
+ * between them and the road — the front gardens and, once #1535 lays them,
+ * the pavements.
+ *
+ * ⚠️ **Until #1534 nothing cleared this ground**: {@link clearOfBuildings}
+ * holds a tree {@link BUILDING_CLEARANCE_METRES} from a building's middle, and
+ * that left the front gardens, the empty plots and a church's or a row of
+ * shops' far end free to stand in.
+ */
+export interface SettlementFootprint {
+  /** The odometer reading, unwrapped, the piece is square to. */
+  readonly along: number;
+  /** The drawn road's centreline there, local metres. */
+  readonly x: number;
+  readonly z: number;
+  /** Unit, the way the road runs there. */
+  readonly alongX: number;
+  readonly alongZ: number;
+  /** Unit, across the road towards the piece's side. */
+  readonly acrossX: number;
+  readonly acrossZ: number;
+  /** How far either way along the road it reaches, metres. */
+  readonly half: number;
+  /** How far out from the centreline it reaches, metres. */
+  readonly depth: number;
+}
+
+/** The piece of ground one plot or building takes. @see SettlementFootprint */
+function pushFootprint(
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  footprints: SettlementFootprint[] | undefined,
+  kind: StructureKind,
+  along: number,
+  lateral: number,
+  side: number,
+  leastHalf: number,
+): void {
+  if (footprints === undefined) return;
+  const frame = frameAt(profile, origin, distanceOnRoute(profile, along));
+  if (frame === undefined) return;
+  // A building faces the road, so its own `x` runs along it and its `back`
+  // reaches away from it.
+  const shape = STRUCTURE_FOOTPRINTS[kind];
+  footprints.push({
+    along,
+    x: frame.x,
+    z: frame.z,
+    alongX: frame.normalZ,
+    alongZ: -frame.normalX,
+    acrossX: frame.normalX * side,
+    acrossZ: frame.normalZ * side,
+    half: Math.max(shape.x, leastHalf) + SETTLEMENT_MARGIN_METRES,
+    depth: lateral - shape.back + SETTLEMENT_MARGIN_METRES,
+  });
+}
+
+/** Whether a point in plan stands on a piece of a settlement's ground. */
+export function onSettlementGround(
+  point: { readonly x: number; readonly z: number },
+  footprint: SettlementFootprint,
+): boolean {
+  const dx = point.x - footprint.x;
+  const dz = point.z - footprint.z;
+  const along = dx * footprint.alongX + dz * footprint.alongZ;
+  const across = dx * footprint.acrossX + dz * footprint.acrossZ;
+  return Math.abs(along) <= footprint.half && across >= 0 && across <= footprint.depth;
+}
+
+/**
+ * The kinds a settlement's ground is cleared of — #1534: everything the
+ * realistic world's vegetation belt draws. A post marks a tight bend, which a
+ * village may stand on, so it stays. Since #1549 a mapped building's ground
+ * is cleared of the same kinds (`mapped-buildings.ts` §`clearOfMappedBuildings`).
+ */
+export const SETTLEMENT_CLEARED_KINDS: ReadonlySet<string> = new Set([
+  'tree-broadleaf',
+  'tree-conifer',
+  'shrub',
+  'rock',
+]);
+
+/**
+ * The natural scenery, less every tree, shrub and rock standing on a
+ * settlement's ground — #1534 — or, since #1546, on mapped built-up land or
+ * water. Pure, and a function of positions only. In `sceneFrame` the land half is
+ * belt and braces: `scatterAt` has already filtered those items with the same mask.
+ */
+export function clearOfSettlements(
+  natural: readonly ScatterItem[],
+  footprints: readonly SettlementFootprint[],
+  land: LandClassMask = NO_LAND_CLASS,
+): readonly ScatterItem[] {
+  if (footprints.length === 0 && land.bytes === 0) return natural;
+  return natural.filter(
+    (item) =>
+      !SETTLEMENT_CLEARED_KINDS.has(item.kind) ||
+      !(
+        builtUpOrWater(land, item.x, item.z) ||
+        footprints.some((piece) => onSettlementGround(item, piece))
+      ),
+  );
+}
+
+/**
+ * Every piece of settlement ground {@link structuresAt} visits between two
+ * odometer readings — for the browser gate's probe, which holds what the
+ * realistic world drew against it. @see SettlementFootprint
+ *
+ * @unwired reached only from the browser gate's harness and the tests; the
+ * scene takes the same pieces from `structuresAt`'s `footprints`, in the one
+ * pass that places the buildings.
+ */
+export function settlementFootprintsAt(
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  seed: number,
+  fromMetres: number,
+  toMetres: number,
+): readonly SettlementFootprint[] {
+  const footprints: SettlementFootprint[] = [];
+  settlementsAt(profile, origin, seed, fromMetres, toMetres, [], [], footprints, NO_LAND_CLASS);
+  return footprints;
 }

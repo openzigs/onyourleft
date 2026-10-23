@@ -92,6 +92,7 @@ import type {
   RiderTextRecord,
   TrustedDeviceKeyRecord,
   WorkoutGoalsRecord,
+  WorldCorridorRecord,
   SegmentEffortRecord,
   SegmentRecord,
   WorkoutRecord,
@@ -225,6 +226,9 @@ function bindStore(real: ActivityStore): PersistentStore {
     putWorkoutGoals: async (record, condition) => real.putWorkoutGoals(record, condition),
     getWorkoutGoals: async (owner) => real.getWorkoutGoals(owner),
     deleteWorkoutGoals: async (owner) => real.deleteWorkoutGoals(owner),
+    putWorldCorridor: async (record) => real.putWorldCorridor(record),
+    getWorldCorridor: async (owner, route) => real.getWorldCorridor(owner, route),
+    deleteWorldCorridor: async (owner, route) => real.deleteWorldCorridor(owner, route),
   };
 }
 
@@ -352,6 +356,12 @@ export function memoryWriteStoreFactory(): StoreFactory {
         putWorkoutGoals: (record: WorkoutGoalsRecord) => {
           memory.set(`workout-goals:${record.athleteId}`, record);
           return Promise.resolve(record);
+        },
+        // #1545. A corridor that was "kept" and is not there is a cache miss
+        // to #1539, which reads the archive again on every ride.
+        putWorldCorridor: (record: WorldCorridorRecord) => {
+          memory.set(`world-corridor:${record.owner}:${record.routeId}`, record);
+          return Promise.resolve();
         },
       };
     },

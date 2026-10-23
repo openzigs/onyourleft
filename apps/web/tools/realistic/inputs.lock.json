@@ -578,6 +578,122 @@
       ]
     },
     {
+      "id": "PavingStones136",
+      "licence": "CC0-1.0",
+      "licencePage": "https://ambientcg.com/view?id=PavingStones136",
+      "evidence": "All assets are released under the Creative Commons CC0 license",
+      "read": "2026-10-21",
+      "authors": "ambientCG",
+      "technique": "Surface Photogrammetry",
+      "files": [
+        {
+          "path": "PavingStones136_1K-JPG.zip",
+          "url": "https://ambientcg.com/get?file=PavingStones136_1K-JPG.zip",
+          "bytes": 6477861,
+          "sha256": "a0934b008683333265e061319aa1ceb018b3a721969147606415033b27a13ae3"
+        },
+        {
+          "path": "PavingStones136_1K-JPG_Color.jpg",
+          "url": "https://ambientcg.com/get?file=PavingStones136_1K-JPG.zip#PavingStones136_1K-JPG_Color.jpg",
+          "bytes": 1192545,
+          "sha256": "5291854f8a7fcf554f2e278e36426eee9de65dd71d93c7f837b2c3f80ca42cfa"
+        },
+        {
+          "path": "PavingStones136_1K-JPG_NormalGL.jpg",
+          "url": "https://ambientcg.com/get?file=PavingStones136_1K-JPG.zip#PavingStones136_1K-JPG_NormalGL.jpg",
+          "bytes": 1210149,
+          "sha256": "a302144995a7d7b638864a8f28ed1c8bf68d8c7b6c6e3daac6ad5b0bbf4bc9c0"
+        }
+      ]
+    },
+    {
+      "id": "PaintedPlaster017",
+      "licence": "CC0-1.0",
+      "licencePage": "https://ambientcg.com/view?id=PaintedPlaster017",
+      "evidence": "All assets are released under the Creative Commons CC0 license",
+      "read": "2026-10-21",
+      "authors": "ambientCG",
+      "technique": "Surface Photogrammetry",
+      "files": [
+        {
+          "path": "PaintedPlaster017_1K-JPG.zip",
+          "url": "https://ambientcg.com/get?file=PaintedPlaster017_1K-JPG.zip",
+          "bytes": 4721132,
+          "sha256": "bae0380d82b6ccac8943b4980417cb3c9de5c896218339c108056f1dfb8e886c"
+        },
+        {
+          "path": "PaintedPlaster017_1K-JPG_Color.jpg",
+          "url": "https://ambientcg.com/get?file=PaintedPlaster017_1K-JPG.zip#PaintedPlaster017_1K-JPG_Color.jpg",
+          "bytes": 378542,
+          "sha256": "ed8a69a6437de9d41d2cf380f7e6a216232fc4754f256c3405985c857547ffef"
+        },
+        {
+          "path": "PaintedPlaster017_1K-JPG_NormalGL.jpg",
+          "url": "https://ambientcg.com/get?file=PaintedPlaster017_1K-JPG.zip#PaintedPlaster017_1K-JPG_NormalGL.jpg",
+          "bytes": 1115299,
+          "sha256": "1bef1887c10e1ce104be1a557e4dbd7634ef6d5ece6e3b4237dab2d0962f57fa"
+        }
+      ]
+    },
+    {
+      "id": "Concrete048",
+      "licence": "CC0-1.0",
+      "licencePage": "https://ambientcg.com/view?id=Concrete048",
+      "evidence": "All assets are released under the Creative Commons CC0 license",
+      "read": "2026-10-21",
+      "authors": "ambientCG",
+      "technique": "Surface Photogrammetry",
+      "files": [
+        {
+          "path": "Concrete048_1K-JPG.zip",
+          "url": "https://ambientcg.com/get?file=Concrete048_1K-JPG.zip",
+          "bytes": 7536748,
+          "sha256": "af13b985a7a72c89f2a8e0c8ef5651a8f13126bf792b5ca5f6a0861712156df6"
+        },
+        {
+          "path": "Concrete048_1K-JPG_Color.jpg",
+          "url": "https://ambientcg.com/get?file=Concrete048_1K-JPG.zip#Concrete048_1K-JPG_Color.jpg",
+          "bytes": 1126366,
+          "sha256": "1bf2156b86866732660e6d3ccd1942598ac2b9e73a9bb97a23763574ac4d7722"
+        },
+        {
+          "path": "Concrete048_1K-JPG_NormalGL.jpg",
+          "url": "https://ambientcg.com/get?file=Concrete048_1K-JPG.zip#Concrete048_1K-JPG_NormalGL.jpg",
+          "bytes": 1548946,
+          "sha256": "16d110670d8a1ca4dd85d498bb46afaa6953456878dae7ab6717053600dddcfc"
+        }
+      ]
+    },
+    {
+      "id": "Gravel035",
+      "licence": "CC0-1.0",
+      "licencePage": "https://ambientcg.com/view?id=Gravel035",
+      "evidence": "All assets are released under the Creative Commons CC0 license",
+      "read": "2026-10-21",
+      "authors": "ambientCG",
+      "technique": "Surface Photogrammetry",
+      "files": [
+        {
+          "path": "Gravel035_1K-JPG.zip",
+          "url": "https://ambientcg.com/get?file=Gravel035_1K-JPG.zip",
+          "bytes": 10559484,
+          "sha256": "7619496b2c6410dd49b2c3765c44af1dec451a7a162296367b5529f4165e869a"
+        },
+        {
+          "path": "Gravel035_1K-JPG_Color.jpg",
+          "url": "https://ambientcg.com/get?file=Gravel035_1K-JPG.zip#Gravel035_1K-JPG_Color.jpg",
+          "bytes": 1788520,
+          "sha256": "33db5c773a9012819087c66d18ce326bad3f4181300c42e58768b060b88421fa"
+        },
+        {
+          "path": "Gravel035_1K-JPG_NormalGL.jpg",
+          "url": "https://ambientcg.com/get?file=Gravel035_1K-JPG.zip#Gravel035_1K-JPG_NormalGL.jpg",
+          "bytes": 2441528,
+          "sha256": "301ab362fde4296c6b8cf7b21ab5628c8bdaa57ae838ff56ae88baae25bd672b"
+        }
+      ]
+    },
+    {
       "id": "Bark012",
       "licence": "CC0-1.0",
       "licencePage": "https://ambientcg.com/view?id=Bark012",
