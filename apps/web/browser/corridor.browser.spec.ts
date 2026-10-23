@@ -25,12 +25,10 @@ import {
 } from './corridor-fixture';
 import type { CorridorHarness } from './corridor-harness';
 
-async function readCorridor(page: Page, query = ''): Promise<CorridorHarness> {
+async function readCorridor(page: Page, query = '', timeout = 30_000): Promise<CorridorHarness> {
   const response = await page.goto(`${HARNESS_ORIGIN}/corridor.html${query}`);
   expect(response?.ok()).toBe(true);
-  await page.waitForFunction(() => window.__oylCorridor !== undefined, undefined, {
-    timeout: 30_000,
-  });
+  await page.waitForFunction(() => window.__oylCorridor !== undefined, undefined, { timeout });
   return (await page.evaluate(() => window.__oylCorridor)) as CorridorHarness;
 }
 
@@ -54,6 +52,8 @@ test.describe('#1539 corridor read', () => {
     expect(corridor.landUse).toBe(expected.landUse);
     expect(corridor.paths).toBe(expected.paths);
     expect(corridor.streets).toBe(expected.streets);
+    // Only a load that asks for the town's timing pays for it (#1604).
+    expect(corridor.townRatios).toStrictEqual([]);
     const archive = requested.filter((url) => url.endsWith(`/${CORRIDOR_ARCHIVE_FILE}`));
     expect(archive.length).toBeGreaterThan(expected.tiles);
     const origins = new Set(requested.map((url) => new URL(url).origin));
@@ -110,20 +110,23 @@ test.describe('#1546 nothing on a mapped wood', () => {
 });
 
 /**
- * #1540's 400 ms, normalised for the runner (#1600). A fixed wall-clock limit
- * measured the load on a shared runner: the same town planned in 72 ms to 75 ms
- * on a laptop (where the reference reads 26 ms) and 246 ms to 479 ms on CI, with no change to the planner. The
- * harness times a fixed non-planner workload in the same page
- * (`corridor-harness.ts` §`referenceWorkloadMilliseconds`), and the budget is
- * 400 ms scaled by how much slower than {@link REFERENCE_AT_BUDGET_MS} this
- * page ran it. On the machine that figure was read on the limit is 400 ms
- * exactly, as #1540 set it.
+ * #1540's 400 ms, normalised for the runner (#1600, #1604). A fixed wall-clock
+ * limit measured the load on a shared runner: the same town planned in 74 ms
+ * to 87 ms on a laptop and 246 ms to 479 ms on CI, with no change to the
+ * planner. The harness times a fixed non-planner workload in the same page
+ * (`corridor-harness.ts` §`referenceWorkload`) next to each town sample, and
+ * the gate is on the median of town ÷ reference across the pairs: 400 ms over
+ * what the reference takes on the calibration machine. There the limit is
+ * 400 ms exactly, as #1540 set it.
+ *
+ * {@link REFERENCE_AT_BUDGET_MS} was read on that laptop on 2026-10-23, in
+ * eight runs of this spec: the reference's fastest sample was 59.6 ms to
+ * 63.6 ms, alongside a town of 70.0 ms to 74.3 ms and a median ratio of 1.01
+ * to 1.20. Three runs of the browser shard on CI read 1.24, 1.19 and 1.34.
  */
 const TOWN_BUDGET_MS = 400;
-const REFERENCE_AT_BUDGET_MS = 26;
-function townBudgetMilliseconds(referenceMilliseconds: number): number {
-  return TOWN_BUDGET_MS * (referenceMilliseconds / REFERENCE_AT_BUDGET_MS);
-}
+const REFERENCE_AT_BUDGET_MS = 63;
+const TOWN_RATIO_LIMIT = TOWN_BUDGET_MS / REFERENCE_AT_BUDGET_MS;
 
 test.describe('#1540 the mapped buildings’ verdicts', () => {
   test('plans the corridor’s footprints to the same verdicts as the unit test, exactly', async ({
@@ -141,25 +144,30 @@ test.describe('#1540 the mapped buildings’ verdicts', () => {
   test('plans the 2 000-footprint town in Chromium within its 400 ms, normalised for the runner', async ({
     page,
   }) => {
-    const corridor = await readCorridor(page);
+    // The timing takes 12-13 s on a CI runner (#1604): room for a runner several times slower.
+    test.setTimeout(150_000);
+    const corridor = await readCorridor(page, '?levers=towntime', 120_000);
     expect(corridor.errors).toStrictEqual([]);
     expect(corridor.townKept).toBe(2_000);
-    const budget = townBudgetMilliseconds(corridor.referenceMilliseconds);
     console.log(
-      `#1540 the dense town: 2000 footprints planned in ${corridor.townPlanMilliseconds.toFixed(1)} ms (fastest of three), reference ${corridor.referenceMilliseconds.toFixed(1)} ms, budget ${budget.toFixed(1)} ms`,
+      `#1540 the dense town: 2000 footprints planned in ${corridor.townPlanMilliseconds.toFixed(1)} ms (fastest), reference ${corridor.referenceMilliseconds.toFixed(1)} ms (fastest), town/reference ${corridor.townRatio.toFixed(3)} (median of ${corridor.townRatios.map((ratio) => ratio.toFixed(3)).join(', ')}), limit ${TOWN_RATIO_LIMIT.toFixed(3)}`,
     );
     expect(corridor.referenceMilliseconds).toBeGreaterThan(0);
-    expect(corridor.townPlanMilliseconds).toBeLessThanOrEqual(budget);
+    expect(corridor.townRatios.length).toBeGreaterThanOrEqual(3);
+    expect(corridor.townRatio).toBeLessThanOrEqual(TOWN_RATIO_LIMIT);
   });
 
-  test('control: a planner eight times slower is over the same normalised budget (#1600)', async ({
+  test('control: a planner sixteen times slower is over the same normalised budget (#1600, #1604)', async ({
     page,
   }) => {
-    const corridor = await readCorridor(page, '?levers=slowplan');
+    // 22-25 s on a CI runner (#1604's review): room for a runner several times slower.
+    test.setTimeout(150_000);
+    const corridor = await readCorridor(page, '?levers=slowplan', 120_000);
     expect(corridor.errors).toStrictEqual([]);
-    expect(corridor.townPlanMilliseconds).toBeGreaterThan(
-      townBudgetMilliseconds(corridor.referenceMilliseconds),
+    console.log(
+      `#1604 control: town/reference ${corridor.townRatio.toFixed(3)} with the planner run sixteen times, limit ${TOWN_RATIO_LIMIT.toFixed(3)}`,
     );
+    expect(corridor.townRatio).toBeGreaterThan(TOWN_RATIO_LIMIT);
   });
 });
 
