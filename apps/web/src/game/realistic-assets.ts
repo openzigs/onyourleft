@@ -682,6 +682,40 @@ export const REALISTIC_BICYCLE_MAP_NAMES: readonly RealisticBicycleMap[] = [
 export const REALISTIC_WORDMARK = 'game-wordmark.ktx2';
 
 /**
+ * The house models a mapped footprint may be drawn as — #1585: GildedAge's
+ * RVA set and Orzechu's brick building with shop, CC-BY-4.0, each a GLB of
+ * geometry alone (`<id>.glb`), every one mapped into the one colour atlas,
+ * {@link REALISTIC_HOUSE_ATLAS}, so that every model drawn is one draw call.
+ * `house-models.ts` says what each is and which footprints it fits.
+ */
+export const REALISTIC_HOUSE_MODEL_IDS = [
+  'old_american_brick_shop',
+  'rva_detached_house_01a',
+  'rva_detached_house_02a',
+  'rva_detached_house_02b',
+  'rva_detached_house_03a',
+  'rva_detached_house_03c',
+  'rva_detached_house_04a',
+  'rva_detached_house_04b',
+  'rva_duplex_01a',
+  'rva_duplex_01b',
+  'rva_duplex_02a',
+  'rva_duplex_02b',
+  'rva_house_01_brick_alternate',
+] as const;
+
+/** One of {@link REALISTIC_HOUSE_MODEL_IDS}. */
+export type HouseModelId = (typeof REALISTIC_HOUSE_MODEL_IDS)[number];
+
+/** A house model's file. */
+export function houseModelFile(id: HouseModelId): string {
+  return `${id}.glb`;
+}
+
+/** The one colour atlas every house model is mapped into — #1585, KTX2 ETC1S. */
+export const REALISTIC_HOUSE_ATLAS = 'house_models_atlas.ktx2';
+
+/**
  * Every file the tables above name, once.
  *
  * @test-facing held by `realistic-assets.test.ts`, `realistic-budget.test.ts`
@@ -721,6 +755,8 @@ export function realisticFiles(): readonly string[] {
     ...REALISTIC_RIDER_MAP_NAMES.map((map) => REALISTIC_RIDER_MAPS[map]),
     ...REALISTIC_BICYCLE_MAP_NAMES.map((map) => REALISTIC_BICYCLE_MAPS[map]),
     REALISTIC_WORDMARK,
+    ...REALISTIC_HOUSE_MODEL_IDS.map(houseModelFile),
+    REALISTIC_HOUSE_ATLAS,
   ];
 }
 

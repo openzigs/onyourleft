@@ -70,6 +70,8 @@ function urlsOf(source: AssetSource): readonly string[] {
   if (source.origin.from === 'ambientcg') {
     return [source.licencePage, ambientCgArchive(source).url];
   }
+  // #1585: a placed model's public record, and its own page.
+  if (source.origin.from === 'placed') return [source.licencePage, source.origin.page];
   return [source.licencePage];
 }
 
@@ -160,7 +162,11 @@ describe('what the lists decide about a URL — ADR 0049 D-11', () => {
         'https://files.makehumancommunity.org/asset_packs/makehuman_system_assets/',
       ],
       Kenney: [],
-      'An individual model under CC-BY-4.0': [],
+      // #1585: the house models' public records and their own pages.
+      'An individual model under CC-BY-4.0': [
+        'https://api.sketchfab.com/v3/models/',
+        'https://sketchfab.com/3d-models/',
+      ],
       'EZ-Tree’s output': ['https://github.com/dgreenheck/ez-tree/'],
       'The Base Mesh': ['https://www.thebasemesh.com/'],
       'Blender Studio Human Base Meshes': [
@@ -203,13 +209,16 @@ describe('what the lists decide about a URL — ADR 0049 D-11', () => {
         owners.set(source.id, (owners.get(source.id) ?? new Set()).add(verdict.source.name));
       }
     }
-    // Three sources are used today — ambientCG since #1274, which ADR 0026 D-4
-    // had already admitted — and nothing ADR 0049 admits is adopted by #1275.
+    // Four sources are used today — ambientCG since #1274, which ADR 0026 D-4
+    // had already admitted, and since #1585 D-4's individual CC-BY-4.0 models
+    // — and nothing ADR 0049 admits is adopted by #1275.
     expect([...new Set([...owners.values()].flatMap((names) => [...names]))].sort()).toEqual([
+      'An individual model under CC-BY-4.0',
       'MakeHuman’s own files',
       'Poly Haven',
       'ambientCG',
     ]);
+    expect(owners.get('rva_duplex_02a')).toEqual(new Set(['An individual model under CC-BY-4.0']));
     expect(owners.get('Rock026')).toEqual(new Set(['ambientCG']));
     expect(owners.get('makehuman')).toEqual(new Set(['MakeHuman’s own files']));
     expect(owners.get('makehuman-system-assets')).toEqual(new Set(['MakeHuman’s own files']));

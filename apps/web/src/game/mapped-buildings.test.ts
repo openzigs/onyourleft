@@ -16,8 +16,10 @@ import {
   buildingBeside,
   mixedTownFixture,
   rectangleBeside,
+  richmondStreetFixture,
   rowTownFixture,
 } from './footprint-fixtures-testing';
+import { HOUSE_MODELS } from './house-models';
 import { landClassMask } from './land-class';
 import {
   clearOfMappedBuildings,
@@ -483,3 +485,137 @@ function insideOutline(ring: Float32Array, x: number, z: number): boolean {
   }
   return inside;
 }
+
+describe('the house models in the selection — #1585', () => {
+  const street = richmondStreetFixture();
+  const streetPlans = footprintPlans(
+    street.corridor,
+    landClassMask(street.corridor),
+    street.profile,
+    street.origin,
+  ).plans;
+  const streetBuildings = mappedBuildingsOf(streetPlans);
+  const models = HOUSE_MODELS.map((model) => model.triangles);
+  const frame = drawnRoadFrame(street.profile, street.origin, 1_100);
+  if (frame === undefined) throw new Error('the fixture road has no direction there');
+  // Past the street's end: ten lots near, the rest of it far, under the cap.
+  const end = drawnRoadFrame(street.profile, street.origin, 1_500);
+  if (end === undefined) throw new Error('the fixture road has no direction there');
+
+  it('draws a near plan with a model as its model, at the model’s triangles, and a far one as its extrusion', () => {
+    const selection = new MappedSelection();
+    selectMappedBuildings(
+      streetBuildings,
+      frame.x,
+      frame.z,
+      MAPPED_BUILDING_TRIANGLES,
+      selection,
+      MAPPED_BUILDING_DRAW_CALLS,
+      undefined,
+      models,
+    );
+    expect(selection.modelCount).toBeGreaterThan(0);
+    let modelTriangles = 0;
+    let extrusionTriangles = 0;
+    for (let at = 0; at < selection.count; at += 1) {
+      const plan = streetPlans[selection.plans[at] as number] as FootprintPlan;
+      const far = apart(plan, frame) > MAPPED_BUILDING_NEAR_METRES;
+      expect(selection.modelled[at], String(at)).toBe(!far && plan.model !== undefined ? 1 : 0);
+      expect(selection.far[at], String(at)).toBe(far ? 1 : 0);
+      if (selection.modelled[at] === 1) modelTriangles += models[plan.model?.model ?? -1] ?? NaN;
+      else extrusionTriangles += far ? plan.farTriangleCount : plan.triangleCount;
+    }
+    expect(selection.modelTriangles).toBe(modelTriangles);
+    expect(selection.triangles).toBe(modelTriangles + extrusionTriangles);
+    expect(selection.triangles).toBeLessThanOrEqual(MAPPED_BUILDING_TRIANGLES);
+    // The models are one group, counted inside the six.
+    expect(selection.surfaces.length + 1).toBeLessThanOrEqual(MAPPED_BUILDING_DRAW_CALLS);
+  });
+
+  it('pools the structure term: the models take it until the next would pass it', () => {
+    const selection = new MappedSelection();
+    selectMappedBuildings(
+      streetBuildings,
+      frame.x,
+      frame.z,
+      MAPPED_BUILDING_TRIANGLES,
+      selection,
+      MAPPED_BUILDING_DRAW_CALLS,
+      undefined,
+      models,
+    );
+    // Thirty-odd houses of 1 100 to 2 900 triangles do not all fit 23 040.
+    expect(selection.count).toBeLessThan(MAPPED_BUILDING_MAX);
+    expect(selection.triangles).toBeGreaterThan(MAPPED_BUILDING_TRIANGLES - Math.max(...models));
+  });
+
+  it('draws every plan as its extrusion when the models are not loaded — today’s world', () => {
+    const withModels = new MappedSelection();
+    const without = new MappedSelection();
+    selectMappedBuildings(streetBuildings, frame.x, frame.z, MAPPED_BUILDING_TRIANGLES, without);
+    expect(without.modelCount).toBe(0);
+    expect([...without.modelled.subarray(0, without.count)].every((each) => each === 0)).toBe(true);
+    selectMappedBuildings(
+      streetBuildings,
+      frame.x,
+      frame.z,
+      MAPPED_BUILDING_TRIANGLES,
+      withModels,
+      MAPPED_BUILDING_DRAW_CALLS,
+      undefined,
+      models,
+    );
+    expect(withModels.modelCount).toBeGreaterThan(0);
+  });
+
+  it('counts the models’ group inside the bound: with two calls and the models open, no wall-and-roof pair opens', () => {
+    // Models of a triangle each, so the budget never stops the walk before a
+    // far plan, which is an extrusion and would open a surface.
+    const light = HOUSE_MODELS.map(() => 1);
+    const selection = new MappedSelection();
+    selectMappedBuildings(
+      streetBuildings,
+      end.x,
+      end.z,
+      MAPPED_BUILDING_TRIANGLES,
+      selection,
+      2,
+      undefined,
+      light,
+    );
+    expect(selection.modelCount).toBeGreaterThan(0);
+    expect(selection.surfaces).toEqual([]);
+    expect(selection.modelCount).toBe(selection.count);
+    // Every far plan in reach wears two surfaces: with the models' call open,
+    // two more would be three calls, so each was passed over.
+    expect(selection.passed).toBeGreaterThan(0);
+  });
+
+  it('draws a far plan as its extrusion even when its model would fit the budget', () => {
+    const light = HOUSE_MODELS.map(() => 1);
+    const selection = new MappedSelection();
+    selectMappedBuildings(
+      streetBuildings,
+      end.x,
+      end.z,
+      MAPPED_BUILDING_TRIANGLES,
+      selection,
+      MAPPED_BUILDING_DRAW_CALLS,
+      undefined,
+      light,
+    );
+    expect(selection.farCount).toBeGreaterThan(0);
+    for (let at = 0; at < selection.count; at += 1) {
+      const plan = streetPlans[selection.plans[at] as number] as FootprintPlan;
+      expect(selection.modelled[at], String(at)).toBe(
+        selection.far[at] === 0 && plan.model !== undefined ? 1 : 0,
+      );
+    }
+    // Some far plan has a model it is not drawn as.
+    expect(
+      [...selection.plans.subarray(0, selection.count)].some(
+        (index, at) => selection.far[at] === 1 && streetPlans[index]?.model !== undefined,
+      ),
+    ).toBe(true);
+  });
+});

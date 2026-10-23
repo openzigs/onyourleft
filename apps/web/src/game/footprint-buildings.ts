@@ -204,6 +204,7 @@ import {
   type PorchPoint,
   type PorchSpec,
 } from './porch';
+import { frontOf, houseModelsFitting, placeHouseModel, type HousePlacement } from './house-models';
 import { MASONRY_TINT, packedInstanceTint } from './instance-tint';
 import { kindAt, type LandClass, type LandClassMask } from './land-class';
 import { ROAD_CLEARANCE_METRES, terrainHeightAt } from './landform';
@@ -484,6 +485,13 @@ export interface FootprintPlan {
   readonly shop: { readonly front: boolean; readonly awning: boolean; readonly cornice: boolean };
   /** Whether it has a front porch — #1589. */
   readonly porch: boolean;
+  /**
+   * The house model it is drawn as at the near level, where one fits — #1585
+   * (`house-models.ts`); `undefined` for every other plan, which keeps its
+   * extrusion. A modelled plan keeps its extrusion too: it is its far level,
+   * and what is drawn where the models are not loaded.
+   */
+  readonly model: HousePlacement | undefined;
   /** `instance-tint.ts`' seeded tint, packed, keyed by the centroid (#621). */
   readonly tint: number;
   /**
@@ -838,6 +846,8 @@ const STREAM_PORCH_DEPTH = 22;
 const STREAM_PORCH_POSTS = 23;
 const STREAM_PORCH_SIDE = 24;
 const STREAM_PORCH_ROOF = 25;
+/** #1585: which of the house models that fit a footprint it is drawn as. */
+const STREAM_HOUSE_MODEL = 31;
 
 /** The key under which {@link slotHash} hashes footprints, apart from every other placement. */
 const FOOTPRINT_KEY = 0x15_40;
@@ -3454,6 +3464,28 @@ function planFootprint(
       return porchWriting;
     });
   }
+  // #1585: a house model, where one fits the footprint (`house-models.ts`).
+  const fitting =
+    part || frontFrame === undefined
+      ? []
+      : houseModelsFitting({
+          long: 2 * rectangle.halfLong,
+          short: 2 * rectangle.halfShort,
+          rectangularity,
+          storeys,
+          use,
+          front: frontOf(rectangle, frontFrame.nx, frontFrame.nz),
+        });
+  const model =
+    fitting.length === 0
+      ? undefined
+      : placeHouseModel(
+          fitting[seededEntry(share(STREAM_HOUSE_MODEL), fitting.length)] as number,
+          rectangle,
+          frontFrame?.nx ?? 0,
+          frontFrame?.nz ?? 0,
+          base,
+        );
   const wallSurface = clapboard
     ? SIDING_SURFACE
     : wallSurfaceOf(use, storeys, roof, share(STREAM_WALL));
@@ -3489,6 +3521,7 @@ function planFootprint(
       cornice: drew.cornice,
     },
     porch: frontPorchSpec !== undefined,
+    model,
     tint: packedInstanceTint(centroid.x, centroid.z, MASONRY_TINT),
     triangles,
     triangleCount,

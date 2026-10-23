@@ -250,6 +250,7 @@ import {
   LOT_CLAD_STEP,
   LOT_PORCH_STEP,
   lotSidingPaints,
+  modelPaint,
   paintsOf,
   roofPaintsOf,
   SHINGLE_PAINTS,
@@ -285,6 +286,7 @@ import {
   WINDOW_SILL_METRES,
 } from './facade';
 import { FRONT_PORCH } from './porch';
+import { placedPoint, type HousePlacement } from './house-models';
 import {
   BAY_METRES,
   CLAD_BLOCK,
@@ -426,6 +428,9 @@ import {
   REALISTIC_BICYCLE_MAP_NAMES,
   REALISTIC_RIDER,
   REALISTIC_WORDMARK,
+  REALISTIC_HOUSE_ATLAS,
+  REALISTIC_HOUSE_MODEL_IDS,
+  houseModelFile,
   REALISTIC_RIDER_KIT_MEAN,
   REALISTIC_RIDER_MAPS,
   REALISTIC_RIDER_MAP_NAMES,
@@ -5745,6 +5750,60 @@ interface RealisticWorld {
   readonly banners?: { readonly atlas: BannerAtlas; readonly texture: DataTexture };
   /** The game's wordmark, KTX2 — #966: on the gates (the finish since #978) and the billboards. */
   readonly wordmark: Texture;
+  /**
+   * The house models and their one atlas — #1585. Absent where a loader gave
+   * a scene with no mesh in it (a test's), and then every mapped building is
+   * its extrusion.
+   */
+  readonly houses?: RealisticHouses;
+}
+
+/** One house model's triangles, as the belt copies them: not indexed, three floats a vertex. */
+export interface HouseGeometry {
+  readonly position: Float32Array;
+  readonly normal: Float32Array;
+  readonly uv: Float32Array;
+  readonly triangles: number;
+}
+
+/** The house models, by their place in `house-models.ts` §`HOUSE_MODELS`, and their atlas — #1585. */
+export interface RealisticHouses {
+  readonly models: readonly HouseGeometry[];
+  readonly atlas: Texture;
+  /** Each model's triangles, as `mapped-buildings.ts` §`selectMappedBuildings` reads them. */
+  readonly triangles: readonly number[];
+}
+
+/**
+ * A house model's GLB as the belt copies it — #1585: its one mesh's triangles,
+ * not indexed, or `undefined` where the scene holds no mesh with positions,
+ * normals and texture coordinates.
+ */
+export function houseGeometryOf(scene: Object3D): HouseGeometry | undefined {
+  let found: Mesh | undefined;
+  scene.traverse((node) => {
+    if (found === undefined && (node as Partial<Mesh>).isMesh === true) found = node as Mesh;
+  });
+  const geometry = found?.geometry;
+  if (
+    geometry?.getAttribute('position') === undefined ||
+    geometry.getAttribute('normal') === undefined ||
+    geometry.getAttribute('uv') === undefined
+  ) {
+    return undefined;
+  }
+  const flat = geometry.index === null ? geometry : geometry.toNonIndexed();
+  const copy = (name: string): Float32Array =>
+    Float32Array.from(flat.getAttribute(name).array as ArrayLike<number>);
+  const position = copy('position');
+  const result = {
+    position,
+    normal: copy('normal'),
+    uv: copy('uv'),
+    triangles: position.length / 9,
+  };
+  if (flat !== geometry) flat.dispose();
+  return result;
 }
 
 /**
@@ -6203,6 +6262,11 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
       map,
       texture: texture(() => loaders.texture(realisticUrl(REALISTIC_BICYCLE_MAPS[map]))),
     }));
+    // #1585: the house models and their atlas, loaded and settled with everything else.
+    const houseScenes = REALISTIC_HOUSE_MODEL_IDS.map((id) =>
+      model(() => loaders.model(realisticUrl(houseModelFile(id)))),
+    );
+    const houseAtlas = texture(() => loaders.texture(realisticUrl(REALISTIC_HOUSE_ATLAS)));
     // #475: the structures' surfaces, loaded with everything else and settled
     // with it — a world whose buildings could not load is half a world.
     const structureMaps = PHOTOGRAPHIC_STRUCTURE_SURFACES.map((surface) => ({
@@ -6262,6 +6326,8 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
       wordmark,
       ...riderMaps.map((each) => each.texture),
       ...bicycleMaps.map((each) => each.texture),
+      ...houseScenes,
+      houseAtlas,
       ...structureMaps.flatMap((each) => [each.colour, each.normal]),
       ...shapes.flatMap((each) =>
         each.models.flatMap((one) => [one.scene, one.strip, one.normals, one.middle]),
@@ -6391,6 +6457,27 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
     const glyphBytes = await glyphs;
     const banners = bannersOf(glyphBytes);
     if (banners !== undefined) loaded.textures.push(banners.texture);
+    // #1585: the models' triangles, copied once; the atlas, never repeated.
+    const houseGeometries = await Promise.all(
+      houseScenes.map(async (each) => houseGeometryOf(await each)),
+    );
+    // ⚠️ The loader's scenes are not released: they were never drawn, so they
+    // hold nothing on the GPU, and a loader may hand the same scene for two
+    // files (a test's does), which a release here would take from the other.
+    const atlasTexture = await houseAtlas;
+    atlasTexture.colorSpace = SRGBColorSpace;
+    atlasTexture.minFilter = LinearMipmapLinearFilter;
+    atlasTexture.wrapS = ClampToEdgeWrapping;
+    atlasTexture.wrapT = ClampToEdgeWrapping;
+    const houses: RealisticHouses | undefined = houseGeometries.every(
+      (each): each is HouseGeometry => each !== undefined,
+    )
+      ? {
+          models: houseGeometries,
+          atlas: atlasTexture,
+          triangles: houseGeometries.map((each) => each.triangles),
+        }
+      : undefined;
     const previous = realisticWorld;
     realisticWorld = {
       sky: skyRead,
@@ -6406,6 +6493,7 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
       bicycle,
       ...(banners === undefined ? {} : { banners }),
       wordmark: wordmarkTexture,
+      ...(houses === undefined ? {} : { houses }),
     };
     // #545: the near-plane cull's shapes, built now rather than on a frame.
     warmNearFieldShapes('realistic');
@@ -6580,6 +6668,8 @@ function releaseRealisticWorld(world: RealisticWorld): void {
   world.sky.texture.dispose();
   world.banners?.texture.dispose();
   world.wordmark.dispose();
+  // #1585: the house models' atlas; their triangles are plain arrays.
+  world.houses?.atlas.dispose();
   for (const texture of surfaceMapsOf(world)) texture.dispose();
   for (const shapes of world.vegetation.values()) {
     for (const shape of shapes) releaseRealisticShape(shape);
@@ -12375,8 +12465,14 @@ export interface MappedBuildingStats {
   readonly near: number;
   readonly far: number;
   readonly triangles: number;
-  /** The groups the one mesh draws: one a surface, at most `MAPPED_BUILDING_DRAW_CALLS`. */
+  /**
+   * The draw calls: a group a surface, and since #1585 one more for every
+   * house model drawn, together at most `MAPPED_BUILDING_DRAW_CALLS`.
+   */
   readonly drawCalls: number;
+  /** How many are drawn as house models, and their triangles — #1585. */
+  readonly modelled: number;
+  readonly modelTriangles: number;
   /**
    * In reach and inside the budget, but passed over because its surfaces would
    * have opened a seventh — `mapped-buildings.ts` §`selectMappedBuildings`.
@@ -13231,6 +13327,25 @@ function mappedBuildingMaterial(
 }
 
 /**
+ * The house models' one material — #1585: the atlas, the plan's paint as a
+ * vertex colour, #621's tint, and the atmosphere every structure wears. A
+ * belt built without the models carries it with no map and draws nothing in it.
+ */
+function houseModelMaterial(atlas: Texture | undefined): MeshStandardMaterial {
+  const material = constructed(
+    new MeshStandardMaterial({
+      roughness: 0.85,
+      metalness: 0,
+      vertexColors: true,
+      ...(atlas === undefined ? {} : { map: atlas }),
+    }),
+  );
+  return withAtmosphere(
+    withVertexTint(atlas === undefined ? material : withTextureLodBias(material)),
+  );
+}
+
+/**
  * Whether the mapped buildings are merged, a group a surface — always, but
  * for the browser gate's control. @see setMappedBuildingsMerged
  */
@@ -13258,9 +13373,11 @@ export interface DrawnMappedBuilding {
   /** Its plan's place in `MappedBuildings.plans`. */
   readonly plan: number;
   readonly far: boolean;
-  /** Its first vertex in its wall surface's range, and in its roof surface's. */
+  /** Its first vertex in its wall surface's range, and in its roof surface's; -1 for a model. */
   readonly wallAt: number;
   readonly roofAt: number;
+  /** Its first vertex in the house models' buffer, or -1 for an extrusion — #1585. */
+  readonly modelAt: number;
 }
 
 /**
@@ -13314,6 +13431,19 @@ export class MappedBuildingBelt {
   readonly #trim: BufferAttribute;
   /** #1588: each vertex's cladding and windows' style. @see withFacade */
   readonly #style: BufferAttribute;
+  /**
+   * #1585: the house models, one mesh in the atlas's one material — one
+   * draw call whatever their count — refilled with the surfaces.
+   */
+  readonly modelMesh: Mesh;
+  readonly #houses: RealisticHouses | undefined;
+  readonly #modelPosition: BufferAttribute;
+  readonly #modelNormal: BufferAttribute;
+  readonly #modelUv: BufferAttribute;
+  readonly #modelColour: BufferAttribute;
+  readonly #modelTint: BufferAttribute;
+  /** Each drawn building's first vertex in the models' buffer, or -1 for an extrusion. */
+  readonly #modelAt: Int32Array;
   readonly #selection = new MappedSelection();
   /** Where each surface's range starts, and where its next triangle goes, in vertices. */
   readonly #starts = new Int32Array(MAPPED_BUILDING_DRAW_CALLS);
@@ -13328,6 +13458,8 @@ export class MappedBuildingBelt {
     triangles: 0,
     drawCalls: 0,
     passed: 0,
+    modelled: 0,
+    modelTriangles: 0,
   };
   /** The chunk the last refill was for; `undefined` before the first, or once the rung moved. */
   #chunk: number | undefined;
@@ -13338,9 +13470,18 @@ export class MappedBuildingBelt {
   /** Whether this frame carried the mapped buildings at all. @see setCarried */
   #carried = true;
 
-  /** @param textures the world's structure surfaces. @see RealisticWorld.structures */
-  constructor(buildings: MappedBuildings, textures: RealisticWorld['structures']) {
+  /**
+   * @param textures the world's structure surfaces. @see RealisticWorld.structures
+   * @param houses the house models and their atlas (#1585); without them every
+   * plan is its extrusion
+   */
+  constructor(
+    buildings: MappedBuildings,
+    textures: RealisticWorld['structures'],
+    houses?: RealisticHouses,
+  ) {
     this.buildings = buildings;
+    this.#houses = houses;
     this.#wallAt = new Int32Array(this.#selection.plans.length);
     this.#roofAt = new Int32Array(this.#selection.plans.length);
     this.#materials = new Map(
@@ -13373,10 +13514,29 @@ export class MappedBuildingBelt {
     this.mesh = new Mesh(geometry, this.#slots);
     this.mesh.frustumCulled = false;
     this.mesh.visible = false;
+    // #1585: the house models' own buffer, of the same capacity — the budget
+    // is shared, and the models may take all of it.
+    this.#modelAt = new Int32Array(this.#selection.plans.length);
+    const models = new BufferGeometry();
+    this.#modelPosition = attribute(3);
+    this.#modelNormal = attribute(3);
+    this.#modelUv = attribute(2);
+    this.#modelColour = attribute(3);
+    this.#modelTint = attribute(1);
+    models.setAttribute('position', this.#modelPosition);
+    models.setAttribute('normal', this.#modelNormal);
+    models.setAttribute('uv', this.#modelUv);
+    models.setAttribute('color', this.#modelColour);
+    models.setAttribute('oylTint', this.#modelTint);
+    models.setDrawRange(0, 0);
+    this.modelMesh = new Mesh(models, houseModelMaterial(houses?.atlas));
+    this.modelMesh.frustumCulled = false;
+    this.modelMesh.visible = false;
   }
 
   addTo(scene: Scene): void {
     scene.add(this.mesh);
+    scene.add(this.modelMesh);
   }
 
   /** What the last refill drew. */
@@ -13431,7 +13591,8 @@ export class MappedBuildingBelt {
   }
 
   #applyVisible(): void {
-    this.mesh.visible = this.drawing && this.#stats.triangles > 0;
+    this.mesh.visible = this.drawing && this.#stats.triangles - this.#stats.modelTriangles > 0;
+    this.modelMesh.visible = this.drawing && this.#stats.modelled > 0;
   }
 
   /**
@@ -13458,6 +13619,7 @@ export class MappedBuildingBelt {
       selection,
       MAPPED_BUILDING_DRAW_CALLS,
       rivals,
+      this.#houses?.triangles,
     );
     const surfaces = selection.surfaces;
     let end = 0;
@@ -13467,8 +13629,18 @@ export class MappedBuildingBelt {
       end += (selection.surfaceTriangles[slot] ?? 0) * 3;
       this.#slots[slot] = this.#materials.get(surfaces[slot] as StructureSurface) as Material;
     }
+    let modelEnd = 0;
     for (let at = 0; at < selection.count; at += 1) {
       const plan = this.buildings.plans[selection.plans[at] as number] as FootprintPlan;
+      // #1585: a modelled plan's triangles are its model's, in the models' buffer.
+      if (selection.modelled[at] === 1 && plan.model !== undefined) {
+        this.#modelAt[at] = modelEnd;
+        this.#wallAt[at] = -1;
+        this.#roofAt[at] = -1;
+        modelEnd = this.#appendModel(plan, plan.model, modelEnd);
+        continue;
+      }
+      this.#modelAt[at] = -1;
       const wall = surfaces.indexOf(plan.surfaces.wall);
       const roof = surfaces.indexOf(plan.surfaces.roof);
       this.#wallAt[at] = this.#cursors[wall] as number;
@@ -13505,13 +13677,30 @@ export class MappedBuildingBelt {
         attribute.needsUpdate = true;
       }
     }
+    const models = this.modelMesh.geometry;
+    models.setDrawRange(0, modelEnd);
+    for (const attribute of [
+      this.#modelPosition,
+      this.#modelNormal,
+      this.#modelUv,
+      this.#modelColour,
+      this.#modelTint,
+    ]) {
+      attribute.clearUpdateRanges();
+      if (modelEnd > 0) {
+        attribute.addUpdateRange(0, modelEnd * attribute.itemSize);
+        attribute.needsUpdate = true;
+      }
+    }
     this.#stats = {
       buildings: selection.count,
       near: selection.near,
       far: selection.farCount,
       triangles: selection.triangles,
-      drawCalls: geometry.groups.length,
+      drawCalls: geometry.groups.length + (selection.modelCount > 0 ? 1 : 0),
       passed: selection.passed,
+      modelled: selection.modelCount,
+      modelTriangles: selection.modelTriangles,
     };
     this.#applyVisible();
     return this.#stats;
@@ -13521,6 +13710,7 @@ export class MappedBuildingBelt {
   #groupEachBuilding(): void {
     const selection = this.#selection;
     for (let at = 0; at < selection.count; at += 1) {
+      if (selection.modelled[at] === 1) continue;
       const plan = this.buildings.plans[selection.plans[at] as number] as FootprintPlan;
       let walls = 0;
       let roofs = 0;
@@ -13533,6 +13723,54 @@ export class MappedBuildingBelt {
       geometry.addGroup(this.#wallAt[at] as number, walls, surfaces.indexOf(plan.surfaces.wall));
       geometry.addGroup(this.#roofAt[at] as number, roofs, surfaces.indexOf(plan.surfaces.roof));
     }
+  }
+
+  /**
+   * Writes a plan's house model from vertex `at` of the models' buffer —
+   * #1585: each vertex placed by `house-models.ts` §`placedPoint`, its normal
+   * turned with it and taken through the stretch's inverse, its colour the
+   * plan's wall paint as a model wears it (`building-paint.ts` §`modelPaint`),
+   * and #621's seeded tint. Returns the vertex after it.
+   */
+  #appendModel(plan: FootprintPlan, placement: HousePlacement, at: number): number {
+    const model = this.#houses?.models[placement.model];
+    if (model === undefined) return at;
+    const [red, green, blue] = modelPaint(mappedRolePaint(plan, 'wall'));
+    const { ax, az, stretchX, stretchZ } = placement;
+    const position = this.#modelPosition.array as Float32Array;
+    const normal = this.#modelNormal.array as Float32Array;
+    const uv = this.#modelUv.array as Float32Array;
+    const colour = this.#modelColour.array as Float32Array;
+    const tint = this.#modelTint.array as Float32Array;
+    const vertices = model.triangles * 3;
+    for (let vertex = 0; vertex < vertices; vertex += 1) {
+      const to = at + vertex;
+      const [x, y, z] = placedPoint(
+        placement,
+        model.position[vertex * 3] as number,
+        model.position[vertex * 3 + 1] as number,
+        model.position[vertex * 3 + 2] as number,
+      );
+      position[to * 3] = x;
+      position[to * 3 + 1] = y;
+      position[to * 3 + 2] = z;
+      const along = (model.normal[vertex * 3] as number) / stretchX;
+      const up = model.normal[vertex * 3 + 1] as number;
+      const across = (model.normal[vertex * 3 + 2] as number) / stretchZ;
+      const nx = along * ax - across * az;
+      const nz = along * az + across * ax;
+      const length = Math.hypot(nx, up, nz) || 1;
+      normal[to * 3] = nx / length;
+      normal[to * 3 + 1] = up / length;
+      normal[to * 3 + 2] = nz / length;
+      uv[to * 2] = model.uv[vertex * 2] as number;
+      uv[to * 2 + 1] = model.uv[vertex * 2 + 1] as number;
+      colour[to * 3] = red;
+      colour[to * 3 + 1] = green;
+      colour[to * 3 + 2] = blue;
+      tint[to] = plan.tint;
+    }
+    return at + vertices;
   }
 
   /** Writes one role of a plan from vertex `at`; returns the vertex after it. */
@@ -13611,12 +13849,15 @@ export class MappedBuildingBelt {
       far: this.#selection.far[place] === 1,
       wallAt: this.#wallAt[place] as number,
       roofAt: this.#roofAt[place] as number,
+      modelAt: this.#modelAt[place] as number,
     };
   }
 
   dispose(): void {
     this.mesh.geometry.dispose();
     for (const material of this.#materials.values()) material.dispose();
+    this.modelMesh.geometry.dispose();
+    (this.modelMesh.material as Material).dispose();
   }
 }
 
@@ -13997,8 +14238,13 @@ class RealisticDrawing {
     }
     if (this.#mapped?.buildings !== view.buildings) {
       this.#mapped?.mesh.removeFromParent();
+      this.#mapped?.modelMesh.removeFromParent();
       this.#mapped?.dispose();
-      this.#mapped = new MappedBuildingBelt(view.buildings, this.#world.structures);
+      this.#mapped = new MappedBuildingBelt(
+        view.buildings,
+        this.#world.structures,
+        this.#world.houses,
+      );
       this.#mapped.setShown(this.#shown);
       if (this.#scene !== undefined) this.#mapped.addTo(this.#scene);
     }

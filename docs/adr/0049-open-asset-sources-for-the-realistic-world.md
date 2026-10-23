@@ -390,3 +390,25 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   `api.polyhaven.com`, MakeHuman's hosts and every licence page `SOURCES` reads answered without a
   redirect. D-10's two tables stand as written.
   ([#1278](https://github.com/openzigs/onyourleft/issues/1278))
+- **2026-10-23** — **A CC-BY-4.0 model's bundled textures are admitted on the model's own
+  licence grant.** D-1 refused EZ-Tree's bundled bark images because *"a file whose origin is not
+  stated on its own page is not a grant"*, and D-10 and D-11 verify each asset's provenance per
+  file. Asked on [#1585](https://github.com/openzigs/onyourleft/issues/1585) whether the textures
+  inside GildedAge's RVA set and Orzechu's "Low-poly Old American brick building with shop." may be
+  shipped when no page says where their photographic material came from, the owner ruled
+  ([comment](https://github.com/openzigs/onyourleft/issues/1585#issuecomment-6376340508)): for a
+  CC-BY-4.0 model, **the model's own licence grant on its page is enough provenance for the textures
+  bundled in that model**. What this admits, exactly: the pictures inside the archive of a model
+  whose own page grants CC-BY-4.0, taken with that model, credited as that model is (title, author,
+  link, licence, and what was modified, in `ASSETS.toml` and so on the Credits screen). What stays
+  out, whatever the grant: a photograph of an identifiable real interior, of a person, or of
+  branding or text — painted over before anything reads the picture, or the model's surfaces
+  replaced where it cannot be separated cleanly — and anything D-2 calls AI-generated. The first
+  models taken under it are the thirteen #1585 names; the shop's photograph of a real shop interior
+  behind its window and the "OPEN" sign on its door are painted over with #1590's glass by
+  `apps/web/tools/realistic/blender/process_house_models.py`. It admits no new source: D-4's
+  "an individual model under CC-BY-4.0" row is the one these are under, and Sketchfab's public model
+  record and each model's own page are added to that row's addresses under D-11's third bullet. A
+  model whose download needs an account is fetched by no script: the owner downloads it with their
+  own account and the archive is pinned by its digest (`sources.ts` §`HOUSE_MODEL_SOURCES`).
+  ([#1585](https://github.com/openzigs/onyourleft/issues/1585))

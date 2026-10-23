@@ -57,7 +57,7 @@ import {
 } from '../src/game/quality';
 import { realisticWorldNotice, type RealisticWorldOutcome } from '../src/game/realistic-assets';
 import { footprintPlans, mappedTown } from '../src/game/footprint-buildings';
-import { mixedTownFixture } from '../src/game/footprint-fixtures-testing';
+import { mixedTownFixture, richmondStreetFixture } from '../src/game/footprint-fixtures-testing';
 import { landClassMask } from '../src/game/land-class';
 import { mappedBuildingsOf } from '../src/game/mapped-buildings';
 import { corridorOrigin } from '../src/game/terrain';
@@ -311,7 +311,13 @@ async function run(): Promise<void> {
   // #702: turned towards the sun or away from it only when the URL asks. #1581:
   // or the mixed town's straight road, with its corridor, land and buildings
   // built once, as `GameView` builds a ride's at the press.
-  const mixed = config.town === 'mixed' ? mixedTownFixture() : undefined;
+  // #1585: or the Richmond street, its narrow lots drawn as house models.
+  const mixed =
+    config.town === 'mixed'
+      ? mixedTownFixture()
+      : config.town === 'richmond'
+        ? richmondStreetFixture()
+        : undefined;
   const profile = mixed?.profile ?? realisticRoute(config.facing);
   const origin = mixed?.origin ?? corridorOrigin(profile);
   const town = ((): Parameters<typeof rideFrame>[0]['town'] => {

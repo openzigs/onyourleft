@@ -60,6 +60,7 @@ import {
   type GeneratedSpecies,
 } from './generated-trees';
 import {
+  REALISTIC_HOUSE_ATLAS,
   REALISTIC_RIDER,
   REALISTIC_STRUCTURE_SURFACES,
   TOWN_STRUCTURE_SURFACES,
@@ -117,9 +118,12 @@ describe('what the pipeline keeps — #430, ADR 0026 D-4', () => {
     // the same author under the same grant, falls under D-4's MakeHuman row.
     // ⚠️ Since #1274 ambientCG is read too, and that is no new host: D-4's own
     // table has admitted it from the start, and nothing here had used it.
+    // ⚠️ Since #1585 Sketchfab's public model records are read too, and that
+    // is no new host either: D-4's "an individual model under CC-BY-4.0" row
+    // admits a model wherever it is hosted, verified per asset.
     for (const source of SOURCES) {
       expect(new URL(source.licencePage).hostname, source.id).toMatch(
-        /^(?:polyhaven\.com|ambientcg\.com|raw\.githubusercontent\.com|static\.makehumancommunity\.org)$/,
+        /^(?:polyhaven\.com|ambientcg\.com|raw\.githubusercontent\.com|static\.makehumancommunity\.org|api\.sketchfab\.com)$/,
       );
     }
     // Every ambientCG asset is read through ambientCG's OWN origin, whose page
@@ -489,7 +493,14 @@ describe('the KTX2 step — #618, ADR 0026 D-8', () => {
       // v = 0, and never went through TextureLoader — so it is not flipped.
       if (recipe.how === 'drawn') expect(recipe.ktx2.origin, output.file).toBe('top-left');
       if (recipe.how === 'blender') {
-        if (recipe.ktx2 !== undefined) expect(recipe.ktx2.origin, output.file).toBe('bottom-left');
+        // #1585: the house models' atlas is read at their GLBs' own texture
+        // coordinates, which `GLTFLoader` never flips, and Blender writes it
+        // top row first as those coordinates read it — the rider's case.
+        if (recipe.ktx2 !== undefined) {
+          expect(recipe.ktx2.origin, output.file).toBe(
+            output.file === REALISTIC_HOUSE_ATLAS ? 'top-left' : 'bottom-left',
+          );
+        }
         // #623: the rider's maps are read at the body's own glTF texture
         // coordinates, which `GLTFLoader` never flips, and `process_rider.py`
         // writes them top row first as those coordinates read them.

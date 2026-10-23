@@ -18,6 +18,9 @@
  *   in at most {@link MAPPED_BUILDING_DRAW_CALLS} surfaces.
  * - {@link mappedChunk}: when a refill is due — only when the rider's chunk
  *   of {@link MAPPED_CHUNK_METRES} changes.
+ * - Since #1585 a near plan with a house model that fits it
+ *   (`FootprintPlan.model`, `house-models.ts`) is drawn as that model, in one
+ *   more call counted inside {@link MAPPED_BUILDING_DRAW_CALLS}.
  * - {@link clearOfMappedBuildings}: no tree, shrub or rock inside a mapped
  *   footprint or within #1534's margin of it. That is #1534's rule, extended
  *   from a settlement's ground to a mapped one.
@@ -188,6 +191,14 @@ export class MappedSelection {
   readonly plans = new Int32Array(MAPPED_BUILDING_MAX);
   /** 1 where the drawn building at that place is at its far level. */
   readonly far = new Uint8Array(MAPPED_BUILDING_MAX);
+  /**
+   * 1 where the drawn building at that place is drawn as its house model —
+   * #1585: near, with a model that fits, and the models loaded.
+   */
+  readonly modelled = new Uint8Array(MAPPED_BUILDING_MAX);
+  /** How many are drawn as models, and their triangles — #1585. */
+  modelCount = 0;
+  modelTriangles = 0;
   /** How many are drawn whole, and how many at the far level. */
   near = 0;
   farCount = 0;
@@ -214,6 +225,8 @@ export class MappedSelection {
     this.rivals = 0;
     this.surfaces.length = 0;
     this.surfaceTriangles.fill(0);
+    this.modelCount = 0;
+    this.modelTriangles = 0;
   }
 }
 
@@ -270,6 +283,16 @@ export const NO_RIVALS: RivalStructures = {
  * is passed over, counted in `passed`, and the next is tried: a seventh
  * surface would be a seventh draw call. A refill nearer it draws it.
  *
+ * **House models** — #1585. With `models` (each model's triangles, by its
+ * place in `house-models.ts` §`HOUSE_MODELS`), a near plan that has one
+ * (`FootprintPlan.model`) is drawn as it, at the model's triangles, in ONE
+ * more group of the same mesh's draw calls whatever the count: the models
+ * are counted INSIDE `surfaceSlots`, so a refill that draws any model opens
+ * at most `surfaceSlots - 1` surfaces. A model that would open the group past
+ * the bound is passed over like a surface. Without `models` — the stylised
+ * world, a test, a realistic world whose models did not load — every plan is
+ * its extrusion, as before #1585. A far plan is always its extrusion.
+ *
  * `surfaceSlots` is a parameter so a test can lift the bound, its control.
  */
 export function selectMappedBuildings(
@@ -280,6 +303,7 @@ export function selectMappedBuildings(
   into: MappedSelection,
   surfaceSlots: number = MAPPED_BUILDING_DRAW_CALLS,
   rivals: RivalStructures = NO_RIVALS,
+  models?: readonly number[],
 ): void {
   into.reset();
   /** The triangles the rivals ranked in so far take. */
@@ -318,16 +342,38 @@ export function selectMappedBuildings(
       break;
     }
     const far = apart > MAPPED_BUILDING_NEAR_METRES;
-    const triangles = far ? plan.farTriangleCount : plan.triangleCount;
+    // #1585: near, with a model that fits, and the models loaded.
+    const modelTriangles =
+      far || plan.model === undefined || models === undefined
+        ? undefined
+        : models[plan.model.model];
+    const triangles = modelTriangles ?? (far ? plan.farTriangleCount : plan.triangleCount);
     if (into.triangles + rivalTriangles + triangles > triangleBudget) {
       stopped = true;
       break;
+    }
+    /** The models' one group, counted inside the slots once it is open. */
+    const modelGroup = into.modelCount > 0 ? 1 : 0;
+    if (modelTriangles !== undefined) {
+      if (modelGroup === 0 && into.surfaces.length + 1 > slots) {
+        into.passed += 1;
+        continue;
+      }
+      into.plans[into.count] = index;
+      into.far[into.count] = 0;
+      into.modelled[into.count] = 1;
+      into.count += 1;
+      into.near += 1;
+      into.modelCount += 1;
+      into.modelTriangles += modelTriangles;
+      into.triangles += modelTriangles;
+      continue;
     }
     const wall = slotOf(into, plan.surfaces.wall);
     const roof = slotOf(into, plan.surfaces.roof);
     const opened =
       (wall < 0 ? 1 : 0) + (roof < 0 && plan.surfaces.roof !== plan.surfaces.wall ? 1 : 0);
-    if (into.surfaces.length + opened > slots) {
+    if (into.surfaces.length + opened + modelGroup > slots) {
       into.passed += 1;
       continue;
     }
@@ -339,6 +385,7 @@ export function selectMappedBuildings(
     }
     into.plans[into.count] = index;
     into.far[into.count] = far ? 1 : 0;
+    into.modelled[into.count] = 0;
     into.count += 1;
     if (far) into.farCount += 1;
     else into.near += 1;

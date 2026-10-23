@@ -19,6 +19,8 @@ import {
   lotPaintChannel,
   lotPaintEntry,
   lotSidingPaints,
+  MODEL_PAINT_STRENGTH,
+  modelPaint,
   PAINT_LIMITS,
   paintChannelOf,
   paintsOf,
@@ -201,5 +203,39 @@ describe('the US house’s paints — #1588', () => {
     expect(shingled / houses).toBeLessThan(SHINGLE_SHARE + 0.05);
     expect(lotClad(undefined, 'wall')).toBe(false);
     expect(lotPaintEntry(undefined, 'roof')).toBe(-1);
+  });
+});
+
+describe('a paint as a house model wears it — #1585', () => {
+  const luma = ([r, g, b]: readonly [number, number, number]): number =>
+    0.2126 * r + 0.7152 * g + 0.0722 * b;
+
+  it('leaves the photograph alone where the paint is the photograph', () => {
+    expect(modelPaint([1, 1, 1])).toEqual([1, 1, 1]);
+  });
+
+  it('moves a third of the way, the strength the owner is shown', () => {
+    expect(MODEL_PAINT_STRENGTH).toBe(0.35);
+    // Sage, worn: greener than the photograph, never sage itself.
+    const [red, green] = modelPaint([0.55, 0.65, 0.47]);
+    expect(green).toBeGreaterThan(red);
+    expect(green).toBeLessThan(1.1);
+  });
+
+  it('keeps the picture’s brightness and moves only its hue, by MODEL_PAINT_STRENGTH', () => {
+    for (const paint of WALL_PAINTS.render ?? []) {
+      const worn = modelPaint(paint);
+      expect(luma(worn)).toBeCloseTo(1, 6);
+      // A third of the way from white to the paint's own hue at that brightness.
+      const hue = paint.map((channel) => channel / luma(paint));
+      worn.forEach((channel, at) => {
+        expect(channel).toBeCloseTo(1 + ((hue[at] as number) - 1) * MODEL_PAINT_STRENGTH, 9);
+      });
+    }
+  });
+
+  it('keeps two neighbours `paintTown` painted apart apart, as a model wears them', () => {
+    const worn = (WALL_PAINTS.render ?? []).map((paint) => modelPaint(paint).join());
+    expect(new Set(worn).size).toBe(worn.length);
   });
 });

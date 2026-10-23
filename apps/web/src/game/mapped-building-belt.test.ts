@@ -37,7 +37,12 @@ import {
   type FootprintPlan,
   type FootprintRole,
 } from './footprint-buildings';
-import { mixedTownFixture, rowTownFixture } from './footprint-fixtures-testing';
+import {
+  mixedTownFixture,
+  richmondStreetFixture,
+  rowTownFixture,
+} from './footprint-fixtures-testing';
+import { HOUSE_MODELS, placedPoint } from './house-models';
 import { FRONT_PORCH } from './porch';
 import { landClassMask } from './land-class';
 import {
@@ -836,5 +841,91 @@ describe('the procedural structures and the mapped buildings, ranked together �
     const control = aBelt();
     refillMappedBuildings(control, view, [far], 0, 1);
     expect(control.stats.buildings).toBeGreaterThan(0);
+  });
+});
+
+describe('the house models in the belt — #1585', () => {
+  const street = richmondStreetFixture();
+  const streetBuildings = mappedBuildingsOf(
+    footprintPlans(street.corridor, landClassMask(street.corridor), street.profile, street.origin)
+      .plans,
+  );
+  /** A stand-in model: one triangle a model, its corners where the model's index says. */
+  const triangle = (index: number): Float32Array =>
+    Float32Array.from([index, 0, 0, index + 1, 2, 0, index, 0, 3]);
+  const atlas = aTexture();
+  const houses = {
+    models: HOUSE_MODELS.map((_, index) => ({
+      position: triangle(index),
+      // The first corner faces the model's +X, the others its +Z.
+      normal: Float32Array.from([1, 0, 0, 0, 0, 1, 0, 0, 1]),
+      uv: Float32Array.from([0.1, 0.2, 0.3, 0.4, 0.5, 0.6]),
+      triangles: 1,
+    })),
+    atlas,
+    triangles: HOUSE_MODELS.map((model) => model.triangles),
+  };
+  const frame = drawnRoadFrame(street.profile, street.origin, 1_100);
+  if (frame === undefined) throw new Error('the fixture road has no direction there');
+
+  it('writes each modelled building’s model where `house-models.ts` places it, into one call', () => {
+    const belt = new MappedBuildingBelt(streetBuildings, textures, houses);
+    belts.push(belt);
+    const stats = belt.refill(frame.x, frame.z, MAPPED_BUILDING_TRIANGLES);
+    expect(stats.modelled).toBeGreaterThan(0);
+    expect(stats.drawCalls).toBeLessThanOrEqual(MAPPED_BUILDING_DRAW_CALLS);
+    const geometry = belt.modelMesh.geometry;
+    expect(geometry.drawRange.count).toBe(stats.modelled * 3);
+    const position = geometry.getAttribute('position').array;
+    const uv = geometry.getAttribute('uv').array;
+    let seen = 0;
+    for (let place = 0; ; place += 1) {
+      const drawn = belt.drawnAt(place);
+      if (drawn === undefined) break;
+      if (drawn.modelAt < 0) continue;
+      seen += 1;
+      const plan = streetBuildings.plans[drawn.plan];
+      const placed = plan?.model;
+      if (placed === undefined) throw new Error('a modelled plan has no model');
+      const source = triangle(placed.model);
+      for (let vertex = 0; vertex < 3; vertex += 1) {
+        const want = placedPoint(
+          placed,
+          source[vertex * 3] as number,
+          source[vertex * 3 + 1] as number,
+          source[vertex * 3 + 2] as number,
+        );
+        const at = (drawn.modelAt + vertex) * 3;
+        // To a float32's millimetre a kilometre out.
+        expect(position[at]).toBeCloseTo(want[0], 3);
+        expect(position[at + 1]).toBeCloseTo(want[1], 3);
+        expect(position[at + 2]).toBeCloseTo(want[2], 3);
+      }
+      expect(uv[drawn.modelAt * 2]).toBeCloseTo(0.1, 6);
+      // The model's normals turned with it: +X along the plan's long axis
+      // toward its front, +Z across it.
+      const normal = geometry.getAttribute('normal').array;
+      const first = drawn.modelAt * 3;
+      expect(normal[first]).toBeCloseTo(placed.ax, 5);
+      expect(normal[first + 1]).toBeCloseTo(0, 5);
+      expect(normal[first + 2]).toBeCloseTo(placed.az, 5);
+      expect(normal[first + 3]).toBeCloseTo(-placed.az, 5);
+      expect(normal[first + 5]).toBeCloseTo(placed.ax, 5);
+    }
+    expect(seen).toBe(stats.modelled);
+    expect(belt.modelMesh.visible).toBe(true);
+    const material = belt.modelMesh.material as unknown as { map: unknown };
+    expect(material.map).toBe(atlas);
+    expect(readsVertexTint(belt.modelMesh.material as never)).toBe(true);
+    expect(breathesTheAir(belt.modelMesh.material as never)).toBe(true);
+  });
+
+  it('draws no model, and the extrusions as before, where the models are not loaded', () => {
+    const belt = aBelt(streetBuildings);
+    const stats = belt.refill(frame.x, frame.z, MAPPED_BUILDING_TRIANGLES);
+    expect(stats.modelled).toBe(0);
+    expect(belt.modelMesh.geometry.drawRange.count).toBe(0);
+    expect(belt.modelMesh.visible).toBe(false);
+    expect(stats.buildings).toBeGreaterThan(0);
   });
 });
