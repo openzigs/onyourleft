@@ -56,7 +56,7 @@ import {
   type WorldQualityState,
 } from '../src/game/quality';
 import { realisticWorldNotice, type RealisticWorldOutcome } from '../src/game/realistic-assets';
-import { footprintPlans } from '../src/game/footprint-buildings';
+import { footprintPlans, mappedTown } from '../src/game/footprint-buildings';
 import { mixedTownFixture } from '../src/game/footprint-fixtures-testing';
 import { landClassMask } from '../src/game/land-class';
 import { mappedBuildingsOf } from '../src/game/mapped-buildings';
@@ -318,7 +318,12 @@ async function run(): Promise<void> {
     if (mixed === undefined) return undefined;
     const land = landClassMask(mixed.corridor);
     const { plans } = footprintPlans(mixed.corridor, land, profile, origin);
-    return { corridor: mixed.corridor, land, buildings: mappedBuildingsOf(plans) };
+    return {
+      corridor: mixed.corridor,
+      land,
+      buildings: mappedBuildingsOf(plans),
+      lots: mappedTown(mixed.corridor, plans),
+    };
   })();
   const loopFrom = town === undefined ? LOOP_FROM_METRES : TOWN_FROM_METRES;
   const loopLength = town === undefined ? LOOP_METRES : TOWN_METRES;

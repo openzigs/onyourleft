@@ -114,7 +114,10 @@ import {
   projectedBoxInMetres,
   RealisticStructureBelts,
   FACADE_SHOWN_GLSL,
+  LOT_CLADDING_GLSL,
+  LOT_PART,
   readsLotPaint,
+  realisticStructureGeometry,
   PREPARE_FENCE_LIMIT_MS,
   RiderBelt,
   realisticRemoteSplit,
@@ -131,9 +134,19 @@ import {
   BRIDGE_COLOUR,
   sceneryColours,
 } from './three-renderer';
-import { WINDOW_IN_BAY, facadePartAt } from './facade';
+import { SASH, SASH_TOP_SHARE, WINDOW_IN_BAY, WINDOW_SILL_METRES, facadePartAt } from './facade';
+import { STYLE_SASH, STOREY_METRES } from './footprint-buildings';
 import type { CameraPose, RiderMarker, SceneFrame } from './port';
-import { LOT_PAINTS, lotPaint, lotPaintChannel, ROOF_PAINTS } from './building-paint';
+import {
+  LOT_CLAD_STEP,
+  LOT_PAINTS,
+  lotClad,
+  lotPaint,
+  lotPaintChannel,
+  lotSidingPaints,
+  ROOF_PAINTS,
+  SHINGLE_PAINTS,
+} from './building-paint';
 import {
   fogFactor,
   irradianceOn,
@@ -3853,7 +3866,7 @@ describe('the facade shader’s window rule is facadePartAt’s — #1581', () =
   // eslint-disable-next-line @typescript-eslint/no-implied-eval -- runs the shader's own expression text
   const shown = new Function(
     'oylCell',
-    'oylWinT',
+    'oylTopShare',
     'vOylFacade',
     'step',
     'abs',
@@ -3878,6 +3891,36 @@ describe('the facade shader’s window rule is facadePartAt’s — #1581', () =
       Math.abs,
     ) > 0;
 
+  it('shows a sash exactly where facadePartAt finds one, by the sash’s own top — #1588', () => {
+    const middle = (WINDOW_SILL_METRES + SASH.height / 4) / STOREY_METRES;
+    const style = { flags: STYLE_SASH, width: 3, extra: -1 };
+    let shownCount = 0;
+    let differs = 0;
+    for (const top of [1.7, 1.75, 1.8, 2.75, 2.8, 3.4]) {
+      for (const skip of [-1, 0, 2]) {
+        for (let bay = 0; bay < 4; bay += 1) {
+          for (let storey = -1; storey < 4; storey += 1) {
+            const drawn =
+              shown(
+                [bay, storey],
+                SASH_TOP_SHARE,
+                [bay + 0.5, storey + 0.5, top, skip],
+                (edge, x) => (x >= edge ? 1 : 0),
+                Math.abs,
+              ) > 0;
+            const layout = facadePartAt(bay + 0.5, storey + middle, top, skip, style) !== 'wall';
+            expect(drawn, `bay ${bay} storey ${storey} top ${top} skip ${skip}`).toBe(layout);
+            if (drawn) shownCount += 1;
+            if (drawn !== shaderShows(bay, storey, top, skip)) differs += 1;
+          }
+        }
+      }
+    }
+    expect(shownCount).toBeGreaterThan(20);
+    // Control: a casement's top lets some of these storeys have one a sash may not.
+    expect(differs).toBeGreaterThan(0);
+  });
+
   it('shows a window exactly where facadePartAt finds glass at the window’s middle', () => {
     const middle = (WINDOW_IN_BAY.bottom + WINDOW_IN_BAY.top) / 2;
     let shownCount = 0;
@@ -3894,5 +3937,84 @@ describe('the facade shader’s window rule is facadePartAt’s — #1581', () =
       }
     }
     expect(shownCount).toBeGreaterThan(20);
+  });
+});
+
+describe('a clad lot — #1588', () => {
+  it('tags each structure vertex with its part: a house’s walls, its plinth, and the rest — its chimney among them', () => {
+    const brick = realisticStructureGeometry('building', 'brick');
+    if (brick === undefined) throw new Error('a house has no brick');
+    const parts = new Set(Array.from(brick.getAttribute('oylPart').array as Float32Array));
+    expect(parts).toStrictEqual(new Set([LOT_PART.wall, LOT_PART.plinth, LOT_PART.other]));
+    brick.dispose();
+    // A roof, a hedge: no part a clad lot draws differently.
+    for (const [kind, surface] of [
+      ['building', 'roof-tiles'],
+      ['hedge', 'hedge'],
+    ] as const) {
+      const geometry = realisticStructureGeometry(kind, surface);
+      if (geometry === undefined) throw new Error(`${kind} has no ${surface}`);
+      expect(
+        new Set(Array.from(geometry.getAttribute('oylPart').array as Float32Array)),
+      ).toStrictEqual(new Set([LOT_PART.other]));
+      geometry.dispose();
+    }
+  });
+
+  it('writes a clad lot’s channels a cladding step up, and its materials decode the step', () => {
+    let packed: number | undefined;
+    for (let plot = 0; packed === undefined; plot += 1) {
+      const each = lotPaint(0, plot, 1, true);
+      if (lotClad(each, 'wall') && lotClad(each, 'roof')) packed = each;
+    }
+    const belts = new RealisticStructureBelts(new Map());
+    belts.update([item({ kind: 'building', x: 0, z: 20, paint: packed })], POSE);
+    const brick = belts.beltOf('brick')?.meshesOf('building')[0];
+    const tiles = belts.beltOf('roof-tiles')?.meshesOf('building')[0];
+    if (brick === undefined || tiles === undefined)
+      throw new Error('a house has no brick or tile mesh');
+    expect(brick.instanceColor?.array[0]).toBe(lotPaintChannel(packed, 'wall'));
+    expect(brick.instanceColor?.array[0]).toBeGreaterThan(LOT_CLAD_STEP);
+    expect(tiles.instanceColor?.array[1]).toBeGreaterThan(LOT_CLAD_STEP);
+    const programOf = (material: unknown): { vertexShader: string; fragmentShader: string } => {
+      const shader = {
+        uniforms: {},
+        vertexShader:
+          '#include <common>\n#include <begin_vertex>\n#include <color_vertex>\n#include <fog_pars_vertex>\n#include <fog_vertex>',
+        fragmentShader:
+          '#include <common>\n#include <clipping_planes_fragment>\n#include <map_fragment>\n#include <color_fragment>\n#include <normal_fragment_begin>\n#include <normal_fragment_maps>\n#include <fog_pars_fragment>\n#include <fog_fragment>',
+      };
+      (
+        material as { onBeforeCompile: (shader: unknown, renderer: unknown) => void }
+      ).onBeforeCompile(shader, undefined);
+      return shader;
+    };
+    const glsl = (list: readonly (readonly number[])[]): string =>
+      list
+        .slice(0, LOT_PAINTS)
+        .map(
+          (rgb) =>
+            `vec3(${rgb.map((each) => (Number.isInteger(each) ? `${String(each)}.0` : String(each))).join(', ')})`,
+        )
+        .join(', ');
+    const walls = programOf(brick.material);
+    expect(walls.vertexShader).toContain('attribute float oylPart;');
+    expect(walls.vertexShader).toContain(
+      `const vec3 oylCladPaints[${String(LOT_PAINTS)}] = vec3[${String(LOT_PAINTS)}](${glsl(lotSidingPaints())});`,
+    );
+    expect(walls.vertexShader).toContain(`bool oylClad = oylCode >= ${String(LOT_CLAD_STEP)};`);
+    expect(walls.vertexShader).toContain('vOylLot.w = oylClad ? 1.0 + oylPart : 0.0;');
+    // A clad lot's chimney keeps its photograph, unpainted.
+    expect(walls.vertexShader).toContain('oylPart > 0.5 ? oylCladPaints[oylEntry] : vec3(1.0)');
+    expect(walls.fragmentShader).toContain(LOT_CLADDING_GLSL);
+    expect(walls.fragmentShader).toContain('const float vOylLotRoof = 0.0;');
+    expect(walls.fragmentShader).toContain(
+      'normal = normalize(mix(normal, nonPerturbedNormal, oylLotFlat));',
+    );
+    const roof = programOf(tiles.material);
+    expect(roof.vertexShader).toContain(`= vec3[${String(LOT_PAINTS)}](${glsl(SHINGLE_PAINTS)});`);
+    expect(roof.vertexShader).toContain('vOylLot.w = oylClad ? 1.0 : 0.0;');
+    expect(roof.fragmentShader).toContain('const float vOylLotRoof = 1.0;');
+    belts.dispose();
   });
 });

@@ -1020,9 +1020,13 @@ export function lotsAt(
         'road',
         mask,
       );
-      // #1581: painted unlike the lots beside it and across the road.
+      // #1581: painted unlike the lots beside it and across the road; #1588: clad.
       if (item !== undefined)
-        found.push({ ...item, paint: lotPaint(seed, wrappedPlot, side === 1 ? 1 : -1) });
+        found.push({
+          ...item,
+          // #1588: a house is clad, a shop never.
+          paint: lotPaint(seed, wrappedPlot, side === 1 ? 1 : -1, kind === 'building'),
+        });
     }
   }
 }

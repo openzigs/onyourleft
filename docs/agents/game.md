@@ -801,7 +801,11 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `land-class.ts` §`kindAt`; since #1581 a seeded gable
                         or hip at a seeded pitch, overhanging, a chimney, a
                         door canopy and four seeded paints no neighbour within
-                        30 m shares (`paintTown`); ≤ 640 triangles
+                        30 m shares (`paintTown`); since #1588 a US house —
+                        clapboard, shingles, sash windows, a foundation band,
+                        a garage and its driveway, gutters, a downpipe and
+                        dormers — each vertex's style in `STYLE_FLOATS`;
+                        ≤ 640 triangles
                         by role, built ONCE at ride start by `GameView`, and
                         drawn by #1549 (`mapped-buildings.ts`). Since #1550 the
                         ride also reads their footprints (`mappedTown`, once a
@@ -819,12 +823,13 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         100 m chunk or the rung changes, realistic rungs only;
                         the tint is a VERTEX attribute, and there is no ground blob (#620)
     src/game/facade.ts  a mapped building's windows and front door, laid out in
-                        a bay and a storey (#1581) — drawn by the shader
+                        a bay and a storey (#1581), and since #1588 its US sash
+                        windows, shutters, reveal and cladding — drawn by the shader
                         (`three-renderer.ts` §`withFacade`) from each wall
                         vertex's `FACADE_FLOATS`, so no triangle, texture or
-                        draw call; `facadePartAt` is the TypeScript twin the
-                        tests hold the layout with. `setMappedFacadeShown` is
-                        the browser gate's control
+                        draw call; `facadePartAt` and `claddingPartAt` are the
+                        TypeScript twins the tests hold the layout with.
+                        `setMappedFacadeShown` is the browser gate's control
     src/game/building-paint.ts
                         what a realistic building is painted (#1581): each wall
                         and roof surface's multipliers, the trim's and the
@@ -832,8 +837,11 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         (vertex colour, `oylTrim`); a #1550 lot carries a wall
                         and a roof (`lotPaint`, unlike its five neighbours) in
                         the instance colour's first two channels, read by the
-                        structure materials (`withLotPaint`). A village house
-                        carries none and is drawn as it was
+                        structure materials (`withLotPaint`); since #1588 a house
+                        lot's channel also says it is clad (`LOT_CLAD_STEP`),
+                        and the shader draws clapboard and shingles, keeping its
+                        chimney's brick by each vertex's `oylPart`. A village
+                        house carries none and is drawn as it was
     src/game/streets.ts a village's kerbed pavements (#1535) — along each side's
                         BUILT plots (`settlements.ts` §`siteAt`, §`villagePlots`,
                         the houses' own decision), on the road's edge, never on
