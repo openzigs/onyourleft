@@ -52,11 +52,13 @@ import {
   FOOTPRINT_MAX_TRIANGLES,
   FOOTPRINT_VERTEX_FLOATS,
   footprintPlans,
+  garageOf,
   GARAGE,
   GARAGE_MIN_BAYS,
   GUTTER,
   mappedTown,
   minimumAreaRectangle,
+  RingGrid,
   SHINGLE_COURSE_METRES,
   SHINGLE_SHARE,
   SIDING_SHARE,
@@ -69,10 +71,12 @@ import {
   type FootprintRole,
 } from './footprint-buildings';
 import {
+  besideRoad,
   buildingBeside,
   landBeside,
   mixedTownFixture,
   rectangleBeside,
+  ringBeside,
 } from './footprint-fixtures-testing';
 import { FOUNDATION_METRES } from './buildings';
 import { landClassMask } from './land-class';
@@ -584,6 +588,10 @@ describe('gutters, a downpipe and dormers — #1588', () => {
       for (const vertex of roof) expect(vertex.clad).toBe(roofClad);
     }
     expect(built).toBeGreaterThan(10);
+    // A long enough roof carries two, either side of the middle where the chimney stands.
+    expect(town.some((plan) => plan.dormers === 2)).toBe(true);
+    expect(town.some((plan) => plan.dormers === 1)).toBe(true);
+    expect(Math.max(...town.map((plan) => plan.dormers))).toBe(2);
     // Control: steep enough roofs do get them, and none below the pitch.
     expect(
       town.some((plan) => plan.pitchDegrees < DORMER_MIN_PITCH_DEGREES && plan.dormers > 0),
@@ -726,6 +734,88 @@ describe('a garage and its driveway — #1588', () => {
       town.map((each) => ({ ...each, driveway: new Float32Array(0) })),
     );
     expect(without.overlaps(lot)).toBe(false);
+  });
+});
+
+describe('a garage’s driveway keeps off its own house — #1588', () => {
+  const profile = northRoute(3_000, () => 10);
+  const origin = corridorOrigin(profile);
+  /** The front wall's frame: 10.5 m of it, 797.5 to 808 m along and 26 m out, facing the road. */
+  const frame = (out: number): Parameters<typeof garageOf>[1] => {
+    const [mx, mz] = besideRoad(profile, origin, 802.75, out);
+    const [ax, az] = besideRoad(profile, origin, 797.5, out);
+    const [bx, bz] = besideRoad(profile, origin, 808, out);
+    const [rx, rz] = besideRoad(profile, origin, 802.75, out - 1);
+    const length = Math.hypot(bx - ax, bz - az);
+    return {
+      mx,
+      mz,
+      ex: (bx - ax) / length,
+      ez: (bz - az) / length,
+      nx: rx - mx,
+      nz: rz - mz,
+    };
+  };
+  /** The garage on `bay` of three, beside a house whose ring is `pairs` of (along, lateral). */
+  const garageBeside = (
+    pairs: readonly (readonly [number, number])[],
+    bay: number,
+    out = 26,
+  ): ReturnType<typeof garageOf> => {
+    const segments: number[] = [];
+    const wall = frame(out);
+    const road = roadSegmentsNear(profile, origin, wall.mx, wall.mz, 100, segments);
+    const ring = ringBeside(profile, origin, pairs);
+    return garageOf(
+      { length: 10.5, bays: 3, bay },
+      wall,
+      road,
+      segments,
+      { ring, others: { grid: new RingGrid([ring]), own: 0 } },
+      () => 10,
+    );
+  };
+
+  it('builds one off a convex house at either end of its front, 20 to 40 m long', () => {
+    const house = rectangleBeside(802.75, 30, 10.5, 8);
+    for (const bay of [0, 2]) {
+      const garage = garageBeside(house, bay);
+      expect(garage).toBeDefined();
+      expect(garage?.plan.length).toBeGreaterThan(20);
+      expect(garage?.plan.length).toBeLessThan(DRIVEWAY.longest);
+    }
+  });
+
+  it('builds none where the road is further than the longest driveway', () => {
+    const far = rectangleBeside(802.75, 56, 10.5, 8);
+    expect(garageBeside(far, 0, 52)).toBeUndefined();
+    expect(garageBeside(rectangleBeside(802.75, 30, 10.5, 8), 0, 26)).toBeDefined();
+  });
+
+  it('builds none at the end where a wing of an L-shaped house leans over it, and one at the other', () => {
+    // The wall runs 797.5 to 808 m along. The wing's toe is 6 m out from it,
+    // and reaches 2.5 m past where its root meets the wall.
+    const house: (readonly [number, number])[] = [
+      [790, 20],
+      [797.5, 20],
+      [797.5, 26],
+      [808, 26],
+      [808, 34],
+      [790, 34],
+    ];
+    const lean: (readonly [number, number])[] = [
+      [790, 20],
+      [800, 20],
+      [797.5, 26],
+      [808, 26],
+      [808, 34],
+      [790, 34],
+    ];
+    expect(house).toHaveLength(6);
+    const ends = [0, 2].map((bay) => garageBeside(lean, bay) === undefined);
+    expect(ends.filter(Boolean)).toHaveLength(1);
+    // Control: the same house with the wing cut back to the wall leaves both ends.
+    expect([0, 2].map((bay) => garageBeside(house, bay) !== undefined)).toStrictEqual([true, true]);
   });
 });
 

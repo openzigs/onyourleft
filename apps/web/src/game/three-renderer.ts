@@ -11927,10 +11927,11 @@ export function readsLotPaint(material: Material): 'wall' | 'roof' | undefined {
  */
 export const LOT_CLADDING_GLSL = /* glsl */ `
   float oylLotFlat = 0.0;
+  // Derivatives are taken here, out of every branch: GLSL ES leaves them undefined in non-uniform control flow.
+  vec3 oylLocalN = normalize(vOylLotNormal);
+  vec2 oylL = vec2(abs(oylLocalN.x) > abs(oylLocalN.z) ? vOylLot.z : vOylLot.x, vOylLot.y);
+  vec2 oylLw = max(fwidth(oylL), vec2(0.00001));
   if (vOylLot.w > 0.5) {
-    vec3 oylLocalN = normalize(vOylLotNormal);
-    vec2 oylL = vec2(abs(oylLocalN.x) > abs(oylLocalN.z) ? vOylLot.z : vOylLot.x, vOylLot.y);
-    vec2 oylLw = max(fwidth(oylL), vec2(0.00001));
     if (vOylLotRoof > 0.5) {
       // Shingles: a course's rise is its exposure up the slope times the slope's sine.
       float oylSinP = sqrt(max(1.0 - oylLocalN.y * oylLocalN.y, 0.0));
@@ -12339,7 +12340,9 @@ const FACADE_SWITCH = { oylFacadeOn: { value: 1 } };
  * facade's inset reveal, which shades the jamb on the sun's side. One uniform
  * every mapped building's material shares, written by the sun's own `apply`,
  * so the facade reads the very direction the scene is lit from without naming
- * three's lamp uniforms (`three-seam.test.ts`).
+ * three's lamp uniforms (`three-seam.test.ts`). Module-wide, like
+ * `FACADE_SWITCH`: it assumes one live scene, and with two the last `apply`'s
+ * sun is the one both read.
  */
 const FACADE_SUN = { oylSunWorld: { value: new Vector3(0, 1, 0) } };
 

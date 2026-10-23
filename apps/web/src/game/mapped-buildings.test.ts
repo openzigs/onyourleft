@@ -341,7 +341,19 @@ describe('no tree, shrub or rock on a mapped building’s ground — #1549, #153
       town.profile,
       town.origin,
     );
-    const garaged = plans.find((each) => each.garage && each.driveway.length > 0);
+    // The longest, whose road end is furthest from its house: the reach has to take the driveway in.
+    const drivewayLength = (each: FootprintPlan): number =>
+      Math.hypot(
+        (each.driveway[4] as number) - (each.driveway[0] as number),
+        (each.driveway[5] as number) - (each.driveway[1] as number),
+      );
+    const garaged = plans
+      .filter((each) => each.garage && each.driveway.length > 0)
+      .reduce<FootprintPlan | undefined>(
+        (longest, each) =>
+          longest === undefined || drivewayLength(each) > drivewayLength(longest) ? each : longest,
+        undefined,
+      );
     if (garaged === undefined) throw new Error('the mixed town has no driveway');
     const indexed = mappedBuildingsOf(plans);
     const ring = garaged.driveway;
@@ -360,6 +372,7 @@ describe('no tree, shrub or rock on a mapped building’s ground — #1549, #153
     const across = [(b[0] - a[0]) / width, (b[1] - a[1]) / width] as const;
     const half = width / 2;
     const t = Math.max(0.5, 1 - (SETTLEMENT_MARGIN_METRES + 2) / length);
+    expect(length).toBeGreaterThan(30);
     const onX = startX + (endX - startX) * t;
     const onZ = startZ + (endZ - startZ) * t;
     const on = item('shrub', onX, onZ);
@@ -368,16 +381,23 @@ describe('no tree, shrub or rock on a mapped building’s ground — #1549, #153
       onX + across[0] * (half + DRIVEWAY_MARGIN_METRES / 2),
       onZ + across[1] * (half + DRIVEWAY_MARGIN_METRES / 2),
     );
+    // Past the road end, in the carriageway: nothing else's ground.
     const off = item(
       'shrub',
-      onX + across[0] * (half + DRIVEWAY_MARGIN_METRES + 3),
-      onZ + across[1] * (half + DRIVEWAY_MARGIN_METRES + 3),
+      endX + ((endX - startX) / length) * (DRIVEWAY_MARGIN_METRES + 3),
+      endZ + ((endZ - startZ) / length) * (DRIVEWAY_MARGIN_METRES + 3),
     );
-    expect(clearOfMappedBuildings([on, beside, off], indexed)).toStrictEqual([off]);
-    // Control: the same plans with no driveway leave the shrubs on it standing.
+    // Out of reach of the footprint alone: only the driveway's own reach clears it.
     const bare = mappedBuildingsOf(
       plans.map((each) => ({ ...each, driveway: new Float32Array(0) })),
     );
+    const footprintReach =
+      (bare.radii[plans.indexOf(garaged)] as number) + SETTLEMENT_MARGIN_METRES;
+    expect(Math.hypot(onX - garaged.centroid.x, onZ - garaged.centroid.z)).toBeGreaterThan(
+      footprintReach,
+    );
+    expect(clearOfMappedBuildings([on, beside, off], indexed)).toStrictEqual([off]);
+    // Control: the same plans with no driveway leave the shrubs on it standing.
     expect(clearOfMappedBuildings([on, beside, off], bare)).toStrictEqual([on, beside, off]);
   });
 

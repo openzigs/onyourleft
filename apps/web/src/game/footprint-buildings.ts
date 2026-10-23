@@ -1905,7 +1905,7 @@ const RING_CELL_METRES = 32;
  * Every footprint of a corridor in a grid — #1588, so a driveway can be kept
  * off every other building, planned or not.
  */
-class RingGrid {
+export class RingGrid {
   readonly #rings: readonly Ring[];
   readonly #cells = new Map<number, number[]>();
 
@@ -2157,6 +2157,10 @@ function nearestWearer(
  * share both its surfaces, which `footprint-buildings.test.ts` holds over the
  * dense town. The order is the corridor's, so the same corridor paints the
  * same town.
+ *
+ * "Alike" compares the surface and the paint entry, not the cladding the rider
+ * sees: shingled and plain slate roofs, or clapboard and plastered walls, with
+ * the same entry count as alike. That only over-constrains the choice.
  */
 function paintTown(plans: readonly FootprintPlan[]): FootprintPlan[] {
   const reach = PAINT_NEIGHBOUR_METRES;
@@ -2297,10 +2301,11 @@ const DRIVEWAY_CHECK_METRES = 0.05;
  * none, where the wall does not face the road within {@link DRIVEWAY}'s
  * `longest`, or the driveway would cross any other footprint or its own.
  */
-function garageOf(
+export function garageOf(
   front: { readonly length: number; readonly bays: number; readonly bay: number },
   frame: EdgeFrame,
   road: DrawnRoadPoints,
+  segments: readonly number[],
   own: { readonly ring: Ring; readonly others: { readonly grid: RingGrid; readonly own: number } },
   groundAt: (x: number, z: number) => number,
 ): Garage | undefined {
@@ -2318,7 +2323,7 @@ function garageOf(
     for (const side of [-1, 1]) {
       const px = x + frame.nx * t + frame.ex * half * side;
       const pz = z + frame.nz * t + frame.ez * half * side;
-      if (nearestOnRoadSegments(road, nearSegments, px, pz, beside)) {
+      if (nearestOnRoadSegments(road, segments, px, pz, beside)) {
         least = Math.min(least, beside.distance);
       }
     }
@@ -2326,7 +2331,7 @@ function garageOf(
   };
   // Out along the wall's normal by what is left to the road, until it is there.
   let t = 0;
-  for (let step = 0; step < 16 && t <= DRIVEWAY.longest; step += 1) {
+  for (let step = 0; step < 16; step += 1) {
     const left = gap(t);
     if (!Number.isFinite(left)) return undefined;
     if (Math.abs(left) < 0.01) break;
@@ -2518,6 +2523,7 @@ function planFootprint(
           },
           frontFrame,
           road,
+          nearSegments,
           { ring: drawn, others },
           groundAt,
         )
