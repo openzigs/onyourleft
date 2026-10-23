@@ -76,6 +76,38 @@ const NO_LAND_CLASS_LEVER = (QUERY.get('levers') ?? '').split(',').includes('-la
 
 /** `?levers=-streets`: #1565's control — the scene is handed the corridor with no streets. */
 const NO_STREETS_LEVER = (QUERY.get('levers') ?? '').split(',').includes('-streets');
+/**
+ * #1600's control: the town is planned this many times per timed sample, which
+ * is a planner several times slower as far as the budget can tell.
+ */
+const SLOW_PLAN_PASSES = (QUERY.get('levers') ?? '').split(',').includes('slowplan') ? 8 : 1;
+
+/**
+ * #1600: a fixed workload that is not the planner — float arithmetic over a
+ * typed array and short-lived small arrays, the mix planning is made of — whose
+ * time is this runner's speed. It reads the same page, the same minute and the
+ * same JIT as the town it normalises, and nothing under `src/` is in it, so a
+ * slower planner cannot slow it.
+ */
+function referenceWorkloadMilliseconds(): number {
+  const samples = new Float32Array(4_096);
+  let best = Number.POSITIVE_INFINITY;
+  let sink = 0;
+  for (let run = 0; run < 5; run += 1) {
+    const started = performance.now();
+    for (let pass = 0; pass < 1_200; pass += 1) {
+      for (let index = 0; index < samples.length; index += 1) {
+        samples[index] = Math.sqrt(index + pass) * Math.sin(index * 0.01 + pass);
+      }
+      const pair = [samples[pass % samples.length] ?? 0, samples[(pass * 7) % samples.length] ?? 0];
+      sink += (pair[0] ?? 0) * (pair[1] ?? 0);
+    }
+    best = Math.min(best, performance.now() - started);
+  }
+  // The result is read so the loop is not dead code to the optimiser.
+  if (Number.isNaN(sink)) throw new Error('the reference workload produced NaN');
+  return best;
+}
 
 export interface CorridorHarness {
   readonly state: CorridorState['kind'];
@@ -105,6 +137,8 @@ export interface CorridorHarness {
    */
   readonly townPlanMilliseconds: number;
   readonly townKept: number;
+  /** #1600: the reference workload's best of five, on this page, in this run; 0 for `?long`. */
+  readonly referenceMilliseconds: number;
   /** #1565: every mapped cross street drawn along the route; empty for `?long` or no corridor. */
   readonly junctions: readonly DrawnJunction[];
   readonly errors: readonly string[];
@@ -192,13 +226,17 @@ async function run(): Promise<CorridorHarness> {
   const planMilliseconds = performance.now() - planStarted;
   let townPlanMilliseconds = 0;
   let townKept = 0;
+  let referenceMilliseconds = 0;
   if (!LONG) {
+    referenceMilliseconds = referenceWorkloadMilliseconds();
     const town = denseTownFixture();
     const townLand = landClassMask(town.corridor);
     townPlanMilliseconds = Number.POSITIVE_INFINITY;
     for (let run = 0; run < 3; run += 1) {
       const started = performance.now();
-      townKept = footprintPlans(town.corridor, townLand, town.profile, town.origin).verdicts.kept;
+      for (let pass = 0; pass < SLOW_PLAN_PASSES; pass += 1) {
+        townKept = footprintPlans(town.corridor, townLand, town.profile, town.origin).verdicts.kept;
+      }
       townPlanMilliseconds = Math.min(townPlanMilliseconds, performance.now() - started);
     }
   }
@@ -230,6 +268,7 @@ async function run(): Promise<CorridorHarness> {
     planMilliseconds,
     townPlanMilliseconds,
     townKept,
+    referenceMilliseconds,
     junctions,
     errors,
   };
@@ -258,6 +297,7 @@ void run().then(
       planMilliseconds: 0,
       townPlanMilliseconds: 0,
       townKept: 0,
+      referenceMilliseconds: 0,
       junctions: [],
       errors: [error instanceof Error ? error.message : String(error)],
     };
