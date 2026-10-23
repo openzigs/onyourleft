@@ -805,6 +805,9 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         clapboard, shingles, sash windows, a foundation band,
                         a garage and its driveway, gutters, a downpipe and
                         dormers — each vertex's style in `STYLE_FLOATS`;
+                        since #1590 a commercial one a main-street shop — a
+                        shop front, a plain sign band (no text), an awning on
+                        some, a cornice and taller windows;
                         ≤ 640 triangles
                         by role, built ONCE at ride start by `GameView`, and
                         drawn by #1549 (`mapped-buildings.ts`). Since #1550 the
