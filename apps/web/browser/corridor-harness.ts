@@ -91,6 +91,9 @@ const SLOW_PLAN_PASSES = (QUERY.get('levers') ?? '').split(',').includes('slowpl
  */
 const TOWN_PAIRS = SLOW_PLAN_PASSES === 1 ? 5 : 3;
 
+/** #1604: untimed rounds of the reference and of one plan before the pairs. */
+const WARM_UP_ROUNDS = 8;
+
 /**
  * #1600, reshaped by #1604: a fixed workload that is not the planner, whose
  * time is this runner's speed. It is made of what planning is made of —
@@ -324,9 +327,14 @@ async function run(): Promise<CorridorHarness> {
       }
       return performance.now() - started;
     };
-    // One of each untimed, so neither pays the first compile inside a sample.
-    referenceMillisecondsOnce();
-    planTown();
+    // Untimed rounds of each first, so that neither is still being compiled
+    // inside a sample. Where the runner has no spare core for V8's background
+    // compiler — a shared CI runner — the planner, the larger of the two, is
+    // compiled for longer, and one round left the ratio 40 % high (#1604).
+    for (let warm = 0; warm < WARM_UP_ROUNDS; warm += 1) {
+      referenceMillisecondsOnce();
+      footprintPlans(town.corridor, townLand, town.profile, town.origin);
+    }
     townPlanMilliseconds = Number.POSITIVE_INFINITY;
     referenceMilliseconds = Number.POSITIVE_INFINITY;
     for (let pair = 0; pair < TOWN_PAIRS; pair += 1) {
