@@ -3435,10 +3435,13 @@ function planFootprint(
   // Holes while they fit. #1588's and #1589's detail needs no such rule: a
   // flat plan of 48 walls with a garage, the longest driveway and a porch is
   // about 600 (`front-porches.test.ts` §"the most a plan can be").
-  let built = build(holes.length > 0, true);
-  if (holes.length > 0 && !fits(built.writing)) built = build(false, true);
-  // #1590: a cornice round a footprint of many walls may not fit; the plan does without it.
-  if (!fits(built.writing)) built = build(false, false);
+  // #1590: a cornice round a footprint of many walls may not fit; the plan
+  // does without it before it does without its holes, and only a plan that
+  // drew one is built again for it.
+  const holed = holes.length > 0;
+  let built = build(holed, true);
+  if (!fits(built.writing) && built.drew.cornice) built = build(holed, false);
+  if (holed && !fits(built.writing)) built = build(false, false);
   const { writing, drew } = built;
 
   const triangles = Object.fromEntries(

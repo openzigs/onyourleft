@@ -402,6 +402,63 @@ describe('a main street — #1590, over the mixed town', () => {
     expect(few.shop.cornice).toBe(true);
   });
 
+  /** One building on retail land beside a straight road, planned alone. */
+  function plannedAlone(
+    profile: RouteProfile,
+    origin: CorridorOrigin,
+    building: BuildingFeature,
+  ): FootprintPlan {
+    const corridor: WorldCorridor = {
+      routeId: 'cornice-alone',
+      origin,
+      covered: () => true,
+      coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
+      landUse: [landBeside(profile, origin, 'landuse', 'retail', 900, 1_200, -80, 80)],
+      buildings: [building],
+      paths: [],
+      streets: [],
+    };
+    const { plans, verdicts } = footprintPlans(corridor, landClassMask(corridor), profile, origin);
+    expect(verdicts.kept, JSON.stringify(verdicts)).toBe(1);
+    return plans[0] as FootprintPlan;
+  }
+
+  it('drops the cornice before the courtyard where both would put the plan past 640', () => {
+    const profile = northRoute(3_000, () => 10);
+    const origin = corridorOrigin(profile);
+    const outer = starBeside(1_000, 40, 14, 12, 40);
+    const hole = polygonBeside(1_000, 40, 6, 8);
+    const holed = plannedAlone(profile, origin, buildingBeside(profile, origin, [outer, hole], 6));
+    const solid = plannedAlone(profile, origin, buildingBeside(profile, origin, [outer], 6));
+    // Its 40 walls take a cornice of 240 triangles on their own...
+    expect(solid.shop.cornice).toBe(true);
+    // ...but not with the courtyard's walls too, so the courtyard is kept and the cornice is not.
+    expect(trianglesOf(holed, 'wall')).toBeGreaterThan(trianglesOf(solid, 'wall'));
+    expect(holed.shop.cornice).toBe(false);
+    expect(holed.triangleCount).toBeLessThanOrEqual(FOOTPRINT_MAX_TRIANGLES);
+    expect(holed.triangleCount + 6 * (holed.footprint.length / 2)).toBeGreaterThan(
+      FOOTPRINT_MAX_TRIANGLES,
+    );
+  });
+
+  it('caps no building part with a cornice, and the same building whole with one', () => {
+    const profile = northRoute(3_000, () => 10);
+    const origin = corridorOrigin(profile);
+    const ring = rectangleBeside(1_000, 40, 14, 12);
+    const whole = plannedAlone(profile, origin, buildingBeside(profile, origin, [ring], 12));
+    const part = plannedAlone(
+      profile,
+      origin,
+      buildingBeside(profile, origin, [ring], 12, { minHeightMetres: 4 }),
+    );
+    expect(part.roof).toBe('flat');
+    expect(part.shop.cornice).toBe(false);
+    expect(trianglesOf(part, 'trim')).toBe(0);
+    // Control: the whole building takes one.
+    expect(whole.roof).toBe('flat');
+    expect(whole.shop.cornice).toBe(true);
+  });
+
   it('adds nothing to the far level, and keeps every plan inside its budgets', () => {
     for (const plan of town) {
       expect(plan.triangleCount).toBeLessThanOrEqual(FOOTPRINT_MAX_TRIANGLES);
