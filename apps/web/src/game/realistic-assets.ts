@@ -297,6 +297,8 @@ export const REALISTIC_BUILDING_SURFACES: Readonly<
     joinery: 'planks',
     door: 'planks',
     glass: 'glass',
+    porch: 'planks',
+    'porch-roof': 'roof-tiles',
   },
   barn: {
     wall: 'planks',
@@ -307,6 +309,8 @@ export const REALISTIC_BUILDING_SURFACES: Readonly<
     joinery: 'planks',
     door: 'planks',
     glass: 'glass',
+    porch: 'planks',
+    'porch-roof': 'corrugated',
   },
   church: {
     wall: 'stone',
@@ -317,6 +321,8 @@ export const REALISTIC_BUILDING_SURFACES: Readonly<
     joinery: 'planks',
     door: 'planks',
     glass: 'glass',
+    porch: 'planks',
+    'porch-roof': 'slate',
   },
   'shop-row': {
     wall: 'brick',
@@ -327,6 +333,8 @@ export const REALISTIC_BUILDING_SURFACES: Readonly<
     joinery: 'planks',
     door: 'planks',
     glass: 'glass',
+    porch: 'planks',
+    'porch-roof': 'slate',
   },
   shed: {
     wall: 'corrugated',
@@ -337,6 +345,8 @@ export const REALISTIC_BUILDING_SURFACES: Readonly<
     joinery: 'corrugated',
     door: 'corrugated',
     glass: 'glass',
+    porch: 'corrugated',
+    'porch-roof': 'corrugated',
   },
 };
 

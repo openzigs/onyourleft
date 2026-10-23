@@ -9,6 +9,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  AWNING_PAINTS,
   DOOR_PAINTS,
   linearFromSrgb,
   LOT_CLAD_STEP,
@@ -26,6 +27,7 @@ import {
   SHINGLE_PAINTS,
   SHINGLE_SHARE,
   SIDING_SHARE,
+  SIGN_PAINTS,
   TRIM_PAINTS,
   WALL_PAINTS,
   type Rgb,
@@ -51,7 +53,8 @@ describe('the paints — #1581', () => {
       // No two entries of one list alike: a list of one paint is no variety.
       expect(new Set(list.map((rgb) => rgb.join())).size).toBe(list.length);
     }
-    for (const list of [TRIM_PAINTS, DOOR_PAINTS]) {
+    // #1590: and a sign band's and an awning's.
+    for (const list of [TRIM_PAINTS, DOOR_PAINTS, SIGN_PAINTS, AWNING_PAINTS]) {
       expect(new Set(list.map((rgb) => rgb.join())).size).toBe(list.length);
       for (const rgb of list) {
         for (const channel of rgb) {

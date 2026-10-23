@@ -142,8 +142,9 @@ describe('which mapped buildings a refill draws — #1549', () => {
   it('stops at the budget, nearest first, and the next would not have fitted', () => {
     const selection = new MappedSelection();
     // Under D-5.6's 36: since #1581 the fixture's houses are 38 to 78
-    // triangles near, so 1 000 hold more than ten of them and fewer than 36.
-    const budget = 1_000;
+    // triangles near, and since #1588 and #1589 66 to 188 — a porch on about
+    // half of them — so 2 000 hold more than ten of them and fewer than 36.
+    const budget = 2_000;
     selectMappedBuildings(buildings, rider.x, rider.z, budget, selection);
     expect(selection.count).toBeGreaterThan(10);
     expect(selection.count).toBeLessThan(MAPPED_BUILDING_MAX);

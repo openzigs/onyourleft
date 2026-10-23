@@ -62,6 +62,26 @@
  * ({@link PAVING}); and its shade ({@link FACADE_AO}): under the eaves, at a
  * wall's foot. A dormer's front holds one sash ({@link DORMER_SASH}) and a
  * garage's face a panelled door ({@link GARAGE_DOOR}).
+ *
+ * ## The main street (#1590)
+ *
+ * A commercial building's walls carry `STYLE_COMMERCIAL`, and their windows
+ * are taller ({@link COMMERCIAL_WINDOW_IN_BAY}). Its front wall's ground
+ * storey is covered by a shop front's face (`FACADE_SHOPFRONT`, laid out by
+ * {@link shopFrontPartAt}): glass across most of the wall over a stall riser,
+ * mullions and a transom, and the door's place, where its door stands — a
+ * glazed door in a recess, the door's face with the commercial style. Over
+ * it a sign band (`FACADE_SIGN`), a plain painted panel in a moulding: **no
+ * text, brand or logo**. Under the sign, on some, an awning (`FACADE_AWNING`)
+ * of canvas, striped or plain.
+ *
+ * ## The porch (#1589)
+ *
+ * A front porch's railing is one quad (`footprint-buildings.ts`
+ * §`FACADE_RAILING`), and on it a top rail, a bottom rail and a baluster
+ * every `porch.ts` §`FRONT_PORCH`'s `railing.spacing`, with the porch's
+ * shade between them ({@link RAILING}): drawn, not cut, so the railing is
+ * four triangles a run and no `discard` in a material every wall shares.
  */
 
 import { linearFromSrgb, type Rgb } from './building-paint';
@@ -78,12 +98,18 @@ import {
   FACADE_DOOR,
   FACADE_DORMER,
   FACADE_GARAGE,
+  FACADE_AWNING,
   FACADE_PAINT,
+  FACADE_SHOPFRONT,
+  FACADE_SIGN,
+  FACADE_RAILING,
   GARAGE,
   STOREY_METRES,
+  STYLE_COMMERCIAL,
   STYLE_SASH,
   STYLE_SHUTTERS,
 } from './footprint-buildings';
+import { FRONT_PORCH } from './porch';
 
 /** How far a window's sill is above its own floor: **0.9 m**, as a procedural house's is. */
 export const WINDOW_SILL_METRES = 0.9;
@@ -118,6 +144,95 @@ export const WINDOW_IN_BAY = {
   sillAcross: SILL.overrun / BAY_METRES,
   sillUp: SILL.depth / STOREY_METRES,
 } as const;
+
+/**
+ * A commercial building's window — #1590: **1.2 m by 1.8 m**, its sill 0.75 m
+ * above its floor, as #1581's casement is laid out but taller, as a shop's
+ * upper floors' sashes are; the numbers both {@link facadePartAt} and the
+ * shader read, as shares of the bay across and the storey up.
+ */
+export const COMMERCIAL_WINDOW = { width: 1.2, height: 1.8, sill: 0.75 } as const;
+
+/** {@link COMMERCIAL_WINDOW} in its bay, as {@link WINDOW_IN_BAY} lays #1581's. */
+export const COMMERCIAL_WINDOW_IN_BAY = {
+  left: 0.5 - COMMERCIAL_WINDOW.width / BAY_METRES / 2,
+  right: 0.5 + COMMERCIAL_WINDOW.width / BAY_METRES / 2,
+  bottom: COMMERCIAL_WINDOW.sill / STOREY_METRES,
+  top: (COMMERCIAL_WINDOW.sill + COMMERCIAL_WINDOW.height) / STOREY_METRES,
+  frameAcross: FRAME_METRES / BAY_METRES,
+  frameUp: FRAME_METRES / STOREY_METRES,
+  barAcross: GLAZING_BAR_METRES / BAY_METRES / 2,
+  barUp: GLAZING_BAR_METRES / STOREY_METRES / 2,
+  /** The transom, a share of the storey up: a quarter of the way down the window. */
+  transom: (COMMERCIAL_WINDOW.sill + (COMMERCIAL_WINDOW.height * 3) / 4) / STOREY_METRES,
+  sillAcross: SILL.overrun / BAY_METRES,
+  sillUp: SILL.depth / STOREY_METRES,
+} as const;
+
+/**
+ * A shop front — #1590, in metres across its face and up from the floor:
+ * `frame`, its surround's width; `riser`, the stall riser's height under the
+ * glass, and `sill`, the sill on it; `transom`, the bar under the transom
+ * lights, from and to; `mullion`, a mullion's width; and `light`, the widest
+ * a pane is between them.
+ */
+export const SHOP_FRONT = {
+  frame: 0.1,
+  riser: 0.45,
+  sill: 0.07,
+  transom: [2.02, 2.1],
+  mullion: 0.06,
+  light: 1.4,
+} as const;
+
+/** A shop's door — #1590: its glazed leaf's frame, in metres, within the door's face. */
+export const SHOP_DOOR = { frame: 0.09, rail: 0.14 } as const;
+
+/** A sign band's moulding round its panel — #1590, in metres. */
+export const SIGN_MOULDING_METRES = 0.05;
+
+/** A striped awning's stripe — #1590: its width along the awning, in metres. */
+export const AWNING_STRIPE_METRES = 0.3;
+
+/**
+ * What a point of a shop front is — #1590: its `frame` (surround, sill,
+ * mullions and the transom bar), the stall `riser`, the `glass`, or the
+ * `door`'s place, where the door's own face stands.
+ *
+ * @test-facing what {@link shopFrontPartAt} answers, for `main-street.test.ts`
+ */
+export type ShopFrontPart = 'frame' | 'riser' | 'glass' | 'door';
+
+/**
+ * The part of a shop front `width` by `height` at `(u, v)`, metres across it
+ * and up from the floor — #1590, the layout `three-renderer.ts`
+ * §`withFacade` draws from the same numbers. The door is in its middle, as
+ * the front door is in its wall's; either side of it the glass is split into
+ * equal panes no wider than {@link SHOP_FRONT}'s `light`.
+ *
+ * @test-facing held by `main-street.test.ts`; the product draws it in the shader
+ */
+export function shopFrontPartAt(
+  u: number,
+  v: number,
+  width: number,
+  height: number,
+): ShopFrontPart {
+  const { frame, riser, sill, transom, mullion, light } = SHOP_FRONT;
+  if (u < frame || u > width - frame || v > height - frame) return 'frame';
+  const doorHalf = DOOR_FACE.width / 2;
+  if (Math.abs(u - width / 2) <= doorHalf) return 'door';
+  if (v < riser) return 'riser';
+  if (v < riser + sill) return 'frame';
+  if (v >= transom[0] && v <= transom[1]) return 'frame';
+  // Either side of the door, equal panes between the surround and the door.
+  const from = u < width / 2 ? frame : width / 2 + doorHalf;
+  const span = width / 2 - doorHalf - frame;
+  const panes = Math.max(1, Math.round(span / light));
+  const t = ((u - from) / span) * panes;
+  const off = Math.abs(t - Math.round(t)) * (span / panes);
+  return off <= mullion / 2 ? 'frame' : 'glass';
+}
 
 /** The door's parts in its quad, as shares of it across and up. */
 export const DOOR_IN_FACE = {
@@ -234,7 +349,9 @@ export const PAVING = { slab: 1.5, joint: 0.015, colour: [0.36, 0.35, 0.33] as R
  * The facade's ambient occlusion — #1588: a wall darkened under overhanging
  * eaves (to `eaves`, over `eavesMetres` below them) and at its foot (to
  * `base`, over `baseMetres` above the floor); a soffit's and a gutter's
- * underside darkened at its vertices (`soffit`), by `three-renderer.ts`.
+ * underside darkened at its vertices (`soffit`), by `three-renderer.ts`;
+ * and since #1589 a porch's deck, under its roof, darkened at its vertices
+ * (`porchFloor`) — its ceiling is a soffit.
  */
 export const FACADE_AO = {
   eaves: 0.7,
@@ -242,11 +359,33 @@ export const FACADE_AO = {
   base: 0.82,
   baseMetres: 0.4,
   soffit: 0.65,
+  porchFloor: 0.72,
 } as const;
 
 /**
+ * A porch's railing — #1589: what shows between its rails and balusters, as
+ * a share of its paint's light — the porch behind it, in its own shade.
+ */
+export const RAILING = { gapShade: 0.22 } as const;
+
+/**
+ * The share of a railing's face its rails and balusters cover: what it fades
+ * to far off — #1589.
+ *
+ * @test-facing held by `front-porches.test.ts`; the shader computes the same
+ * share per fragment from the face's height (`oylCover`)
+ */
+export function railingCover(height: number): number {
+  const { rail, bottom, baluster, spacing } = FRONT_PORCH.railing;
+  const between = Math.max(0, height - rail - bottom[1]);
+  return Math.min(1, (rail + (bottom[1] - bottom[0]) + (between * baluster) / spacing) / height);
+}
+
+/**
  * What a point of a facade is. Since #1588 `shutter`, and `reveal`: glass in
- * the inset reveal's shadow.
+ * the inset reveal's shadow. Since #1590 a shop front's `riser`, a sign band's
+ * `panel`, and an awning's `canvas` and `stripe`; a shop door's recess is a
+ * `reveal`. Since #1589 `rail`, `baluster` and `gap`: a porch railing's.
  *
  * @test-facing what {@link facadePartAt} answers, for `facade.test.ts`
  */
@@ -260,7 +399,14 @@ export type FacadePart =
   | 'fanlight'
   | 'paint'
   | 'shutter'
-  | 'reveal';
+  | 'reveal'
+  | 'panel'
+  | 'riser'
+  | 'stripe'
+  | 'canvas'
+  | 'rail'
+  | 'baluster'
+  | 'gap';
 
 /**
  * A face's style, as `footprint-buildings.ts` §`STYLE_FLOATS` carries it —
@@ -346,6 +492,32 @@ export function facadePartAt(
   style?: FacadeStyle,
 ): FacadePart {
   if (top === FACADE_PAINT) return 'paint';
+  if (top === FACADE_SHOPFRONT) {
+    // #1590: the style's width and its extra are the shop front's, in metres;
+    // behind the door is its recess.
+    const part = shopFrontPartAt(u, v, style?.width ?? 0, style?.extra ?? 0);
+    return part === 'door' ? 'reveal' : part;
+  }
+  if (top === FACADE_SIGN) {
+    // #1590: a plain panel in its moulding — the style's width and its height, metres.
+    const width = style?.width ?? 0;
+    const height = style?.extra ?? 0;
+    const m = SIGN_MOULDING_METRES;
+    return u < m || u > width - m || v < m || v > height - m ? 'frame' : 'panel';
+  }
+  if (top === FACADE_AWNING) {
+    // #1590: striped where the style's flags say, plain canvas otherwise.
+    const striped = (style?.flags ?? 0) !== 0;
+    return striped && Math.floor(u / AWNING_STRIPE_METRES) % 2 === 1 ? 'stripe' : 'canvas';
+  }
+  if (top === FACADE_RAILING) {
+    // #1589: `u, v` in metres along and up; the style's extra is the railing's height.
+    const { rail, bottom, baluster, spacing } = FRONT_PORCH.railing;
+    const height = style?.extra ?? 0;
+    if (v >= height - rail || (v >= bottom[0] && v <= bottom[1])) return 'rail';
+    const off = Math.abs(u / spacing - Math.round(u / spacing)) * spacing;
+    return v > bottom[1] && off <= baluster / 2 ? 'baluster' : 'gap';
+  }
   if (top === FACADE_GARAGE) {
     // #1588: `u, v` in metres; the style's width is the face's, its extra the leaf's height.
     const s = GARAGE.surround;
@@ -371,6 +543,24 @@ export function facadePartAt(
     };
     return sashPartAt(u - width / 2, v, sash, layout) ?? 'wall';
   }
+  if (top === FACADE_DOOR && style !== undefined && (style.flags & STYLE_COMMERCIAL) !== 0) {
+    // #1590: a shop's door — a glazed leaf in a frame, in a recess its surround's width deep.
+    const { surroundAcross, surroundUp } = DOOR_IN_FACE;
+    if (u < surroundAcross || u > 1 - surroundAcross || v > 1 - surroundUp) return 'reveal';
+    const x = u * DOOR_FACE.width;
+    const y = v * DOOR_FACE.height;
+    const inner = DOOR_FACE.width - DOOR_SURROUND_METRES;
+    const head = DOOR_FACE.height - DOOR_SURROUND_METRES;
+    if (
+      x < DOOR_SURROUND_METRES + SHOP_DOOR.frame ||
+      x > inner - SHOP_DOOR.frame ||
+      y < SHOP_DOOR.rail ||
+      y > head - SHOP_DOOR.frame
+    ) {
+      return 'frame';
+    }
+    return 'glass';
+  }
   if (top === FACADE_DOOR) {
     const { surroundAcross, surroundUp, fanlight } = DOOR_IN_FACE;
     if (u < surroundAcross || u > 1 - surroundAcross || v > 1 - surroundUp) return 'surround';
@@ -381,7 +571,8 @@ export function facadePartAt(
   const storey = Math.floor(v);
   const x = u - bay;
   const y = v - storey;
-  const w = WINDOW_IN_BAY;
+  const commercial = style !== undefined && (style.flags & STYLE_COMMERCIAL) !== 0;
+  const w = commercial ? COMMERCIAL_WINDOW_IN_BAY : WINDOW_IN_BAY;
   const sash = style !== undefined && (style.flags & STYLE_SASH) !== 0;
   if (storey < 0 || storey + (sash ? SASH_TOP_SHARE : w.top) > top) return 'wall';
   if (storey === 0 && bay === skip) return 'wall';

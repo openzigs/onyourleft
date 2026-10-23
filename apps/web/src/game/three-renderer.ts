@@ -241,20 +241,26 @@ import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import type { KitColour } from '@onyourleft/store';
 
 import {
+  AWNING_PAINTS,
+  AWNING_STRIPE_PAINT,
   DOOR_PAINTS,
   LOT_PAINTS,
   lotPaintChannel,
   paintChannelOf,
   LOT_CLAD_STEP,
+  LOT_PORCH_STEP,
   lotSidingPaints,
   paintsOf,
   roofPaintsOf,
   SHINGLE_PAINTS,
+  SIGN_PAINTS,
   TRIM_PAINTS,
   type Rgb,
 } from './building-paint';
 import {
+  AWNING_STRIPE_METRES,
   CLAPBOARD,
+  COMMERCIAL_WINDOW_IN_BAY,
   DOOR_IN_FACE,
   DORMER_SASH,
   FACADE_AO,
@@ -265,15 +271,20 @@ import {
   PAIR_MIN_BAY_METRES,
   PAVING,
   PICTURE,
+  RAILING,
   REVEAL,
   SASH,
   SASH_TOP_SHARE,
   SHINGLE,
+  SHOP_DOOR,
+  SHOP_FRONT,
   SHUTTER,
+  SIGN_MOULDING_METRES,
   SILL,
   WINDOW_IN_BAY,
   WINDOW_SILL_METRES,
 } from './facade';
+import { FRONT_PORCH } from './porch';
 import {
   BAY_METRES,
   CLAD_BLOCK,
@@ -281,10 +292,16 @@ import {
   CLAD_CLAPBOARD,
   CLAD_PAVING,
   CLAD_SHINGLE,
+  DOOR_FACE,
+  DOOR_SURROUND_METRES,
+  FACADE_AWNING,
   FACADE_DORMER,
   FACADE_FLOATS,
   FACADE_GARAGE,
   FACADE_OFFSET,
+  FACADE_SHOPFRONT,
+  FACADE_SIGN,
+  FACADE_RAILING,
   FOOTPRINT_SURFACES,
   FOOTPRINT_VERTEX_FLOATS,
   GARAGE,
@@ -292,6 +309,7 @@ import {
   SHINGLE_COURSE_METRES,
   STOREY_METRES,
   STYLE_BRICK_FOUNDATION,
+  STYLE_COMMERCIAL,
   STYLE_EAVES,
   STYLE_FLOATS,
   STYLE_OFFSET,
@@ -318,6 +336,7 @@ import {
   buildingPlan,
   FOUNDATION_METRES,
   isBuiltKind,
+  LOT_PORCH,
   PLINTH_TOP_METRES,
   type BuildingPlan,
   type BuildingRole,
@@ -1159,6 +1178,8 @@ const STRUCTURE_STYLE: Readonly<Record<StylisedBuiltKind, Readonly<Record<Buildi
       joinery: 0xcfc8b8,
       door: 0x5b2a22,
       glass: 0x28323a,
+      porch: 0xcfc8b8,
+      'porch-roof': 0x4a4038,
     },
     church: {
       wall: 0xb8b2a4,
@@ -1169,6 +1190,8 @@ const STRUCTURE_STYLE: Readonly<Record<StylisedBuiltKind, Readonly<Record<Buildi
       joinery: 0x6b5238,
       door: 0x4a3524,
       glass: 0x28323a,
+      porch: 0x6b5238,
+      'porch-roof': 0x55595e,
     },
     'shop-row': {
       wall: 0xb58a68,
@@ -1179,6 +1202,8 @@ const STRUCTURE_STYLE: Readonly<Record<StylisedBuiltKind, Readonly<Record<Buildi
       joinery: 0x2f4a3f,
       door: 0x3a3f4a,
       glass: 0x28323a,
+      porch: 0x2f4a3f,
+      'porch-roof': 0x5e6166,
     },
     shed: {
       wall: 0x8c9296,
@@ -1189,6 +1214,8 @@ const STRUCTURE_STYLE: Readonly<Record<StylisedBuiltKind, Readonly<Record<Buildi
       joinery: 0x7b8185,
       door: 0x5f6468,
       glass: 0x28323a,
+      porch: 0x7b8185,
+      'porch-roof': 0x6f7478,
     },
   };
 
@@ -11578,6 +11605,10 @@ const REALISTIC_ROLE_SHADE: Readonly<Record<BuildingRole, number>> = {
   joinery: 1,
   door: 0.62,
   glass: 1,
+  // #1589: a lot's porch is the joinery's timber, its roof the roof's; its
+  // deck and ceiling are shaded apart (`porchShadedParts`).
+  porch: 1,
+  'porch-roof': 1,
 };
 
 /** One part of a realistic structure: the surface it wears, how dark, and its triangles. */
@@ -11601,9 +11632,42 @@ interface StructurePart {
  * attribute {@link withLotPaint} reads: a house's walls are clapboard, its
  * plinth a foundation, and everything else — a chimney wears the same brick
  * — keeps its photograph. Every structure geometry carries it, nought where
- * it is none of these, so the belts' merged geometries all share it.
+ * it is none of these, so the belts' merged geometries all share it. Since
+ * #1589 `porch`: a farmhouse's front porch and its roof, which only a lot
+ * with a porch draws ({@link withLotPorch}).
  */
-export const LOT_PART = { other: 0, wall: 1, plinth: 2 } as const;
+export const LOT_PART = { other: 0, wall: 1, plinth: 2, porch: 3 } as const;
+
+/**
+ * A lot's porch's triangles (`buildings.ts` §`LOT_PORCH`), split by the shade
+ * each is in — #1589: its ceiling, facing down, in a soffit's
+ * (`facade.ts` §`FACADE_AO`), its deck, facing up at the floor, in the shade
+ * of its roof, and the rest in none — as the mapped porch's vertices are.
+ */
+function porchShadedParts(triangles: readonly number[]): { shade: number; triangles: number[] }[] {
+  const ceiling: number[] = [];
+  const deck: number[] = [];
+  const rest: number[] = [];
+  for (let at = 0; at + 8 < triangles.length; at += 9) {
+    const t = (k: number): number => triangles[at + k] as number;
+    // The normal's up component, from the winding: (b − a) × (c − a).
+    const up = (t(5) - t(2)) * (t(6) - t(0)) - (t(3) - t(0)) * (t(8) - t(2));
+    const length = Math.hypot(
+      (t(4) - t(1)) * (t(8) - t(2)) - (t(5) - t(2)) * (t(7) - t(1)),
+      up,
+      (t(3) - t(0)) * (t(7) - t(1)) - (t(4) - t(1)) * (t(6) - t(0)),
+    );
+    const ny = length > 0 ? up / length : 0;
+    const floor = Math.min(t(1), t(4), t(7)) >= LOT_PORCH.floor - 1e-6;
+    const into = ny < -0.5 ? ceiling : ny > 0.5 && floor ? deck : rest;
+    for (let k = 0; k < 9; k += 1) into.push(t(k));
+  }
+  return [
+    { shade: FACADE_AO.soffit, triangles: ceiling },
+    { shade: FACADE_AO.porchFloor, triangles: deck },
+    { shade: 1, triangles: rest },
+  ].filter((part) => part.triangles.length > 0);
+}
 
 /**
  * One structure's parts in one variant — #475, and since #500 a building's are
@@ -11623,6 +11687,25 @@ function realisticStructureParts(kind: StructureKind, variant = 0): StructurePar
     const plan = planOf(kind, variant);
     const parts: StructurePart[] = [];
     for (const role of BUILDING_ROLES) {
+      if (role === 'porch' && plan.triangles.porch.length > 0) {
+        // #1589: a lot's porch, its ceiling and its deck each in its own shade.
+        for (const shaded of porchShadedParts(plan.triangles.porch)) {
+          const geometry = new BufferGeometry();
+          geometry.setAttribute(
+            'position',
+            new BufferAttribute(new Float32Array(shaded.triangles), 3),
+          );
+          geometry.computeVertexNormals();
+          parts.push({
+            surface: REALISTIC_BUILDING_SURFACES[kind][role],
+            shade: REALISTIC_ROLE_SHADE[role] * shaded.shade,
+            grounded: true,
+            part: LOT_PART.porch,
+            geometry,
+          });
+        }
+        continue;
+      }
       const geometry = roleGeometry(plan, role);
       if (geometry === undefined) continue;
       parts.push({
@@ -11630,7 +11713,13 @@ function realisticStructureParts(kind: StructureKind, variant = 0): StructurePar
         shade: REALISTIC_ROLE_SHADE[role],
         grounded: true,
         part:
-          role === 'wall' ? LOT_PART.wall : role === 'plinth' ? LOT_PART.plinth : LOT_PART.other,
+          role === 'wall'
+            ? LOT_PART.wall
+            : role === 'plinth'
+              ? LOT_PART.plinth
+              : role === 'porch-roof'
+                ? LOT_PART.porch
+                : LOT_PART.other,
         geometry,
       });
     }
@@ -11868,12 +11957,15 @@ function structureMaterials(
   // its own walls rather than being the one thing on a house that every house
   // shares; masonry's bound is small enough that glass stays glass, and the
   // browser gate's window-glass assertions are unchanged by it.
+  // #1589: and a farmhouse's porch is folded away but on a lot that has one.
   const biased = <M extends Material>(material: M): M =>
-    withLotPaint(
-      withAtmosphere(
-        withInstanceChannels(maps === undefined ? material : withTextureLodBias(material), false),
+    withLotPorch(
+      withLotPaint(
+        withAtmosphere(
+          withInstanceChannels(maps === undefined ? material : withTextureLodBias(material), false),
+        ),
+        surface,
       ),
-      surface,
     );
   return {
     lit: biased(
@@ -12036,7 +12128,8 @@ function withLotPaint<M extends Material>(material: M, surface: StructureSurface
         `int oylCode = int(instanceColor.${read} + 0.5) - 1;`,
         'if (oylCode >= 0) {',
         `  int oylEntry = min(oylCode % ${String(LOT_CLAD_STEP)}, ${String(LOT_PAINTS - 1)});`,
-        `  bool oylClad = oylCode >= ${String(LOT_CLAD_STEP)};`,
+        // #1589: the wall channel carries a porch above the cladding, so the cladding is one bit.
+        `  bool oylClad = (oylCode / ${String(LOT_CLAD_STEP)}) % 2 == 1;`,
         // A clad lot's chimney keeps its photograph, unpainted.
         channel === 'wall'
           ? '  vOylPaint = oylClad ? (oylPart > 0.5 ? oylCladPaints[oylEntry] : vec3(1.0)) : oylLotPaints[oylEntry];'
@@ -12080,6 +12173,80 @@ function withLotPaint<M extends Material>(material: M, surface: StructureSurface
     shader.fragmentShader = fragment;
   };
   material.customProgramCacheKey = () => `${earlierKey}|oyl-lot-paint-${surface}`;
+  return material;
+}
+
+/** The materials {@link withLotPorch} has taught. */
+const LOT_PORCH_TAUGHT = new WeakSet<Material>();
+
+/**
+ * Whether a structure material folds a farmhouse's porch away but on a lot
+ * that has one — #1589.
+ *
+ * @test-facing held by `three-renderer.test.ts` §"#1589", which asserts every
+ * realistic structure material is taught it
+ */
+export function foldsLotPorch(material: Material): boolean {
+  return LOT_PORCH_TAUGHT.has(material);
+}
+
+/**
+ * The vertex rule {@link withLotPorch} splices after `begin_vertex`: a porch's
+ * vertex ({@link LOT_PART}'s `porch`) is folded to the structure's origin —
+ * every corner of its triangles to one point, which draws nothing — unless
+ * its instance is a lot whose wall channel carries `building-paint.ts`
+ * §`LOT_PORCH_STEP`. Without instance colours no lot is known, so it folds.
+ *
+ * Exported for `three-renderer.test.ts`, which holds its program text.
+ */
+export const LOT_PORCH_VERTEX_GLSL = [
+  'if (oylPart > 2.5) {',
+  '  bool oylPorch = false;',
+  '#ifdef USE_INSTANCING_COLOR',
+  '  int oylPorchCode = int(instanceColor.x + 0.5) - 1;',
+  `  oylPorch = oylPorchCode >= 0 && (oylPorchCode / ${String(LOT_PORCH_STEP)}) % 2 == 1;`,
+  '#endif',
+  '  if (!oylPorch) transformed = vec3(0.0);',
+  '}',
+].join('\n');
+
+/**
+ * Teaches a structure material to draw a farmhouse's front porch only on a
+ * lot that has one — #1589. `buildings.ts` builds the porch into the
+ * farmhouse, and every farmhouse of a variant is one instanced mesh, so a
+ * village house, which has no room for one before the road, and a lot whose
+ * porch would reach the road's clearance (`settlements.ts` §`lotsAt`) fold it
+ * away in the vertex shader ({@link LOT_PORCH_VERTEX_GLSL}) and draw nothing
+ * of it. Declares `oylPart` unless an earlier splice ({@link withLotPaint})
+ * has. Throws, as the tint does, if three's program no longer holds the
+ * include it is spliced at. Idempotent.
+ */
+function withLotPorch<M extends Material>(material: M): M {
+  if (LOT_PORCH_TAUGHT.has(material)) return material;
+  LOT_PORCH_TAUGHT.add(material);
+  const earlier = material.onBeforeCompile.bind(material);
+  const earlierKey = material.customProgramCacheKey();
+  const spliced = "#1589's lot porch";
+  material.onBeforeCompile = (shader, renderer) => {
+    earlier(shader, renderer);
+    const declared = shader.vertexShader.includes('attribute float oylPart;');
+    shader.vertexShader = replacedOrThrown(
+      declared
+        ? shader.vertexShader
+        : replacedOrThrown(
+            shader.vertexShader,
+            '#include <common>',
+            '#include <common>\nattribute float oylPart;',
+            'vertex',
+            spliced,
+          ),
+      '#include <begin_vertex>',
+      `#include <begin_vertex>\n${LOT_PORCH_VERTEX_GLSL}`,
+      'vertex',
+      spliced,
+    );
+  };
+  material.customProgramCacheKey = () => `${earlierKey}|oyl-lot-porch`;
   return material;
 }
 
@@ -12234,6 +12401,12 @@ const MAPPED_ROLE_SHADE: Readonly<Record<FootprintRole, number>> = {
   dormer: REALISTIC_ROLE_SHADE.wall,
   'dormer-roof': REALISTIC_ROLE_SHADE.roof,
   driveway: 1,
+  // #1590: a shop's front, sign and awning are painted by the shader.
+  shopfront: 1,
+  // #1589: a porch is painted, and its roof is shaded as the roof it wears.
+  porch: 1,
+  'porch-roof': REALISTIC_ROLE_SHADE.roof,
+  'porch-trim': 1,
 };
 
 /**
@@ -12244,17 +12417,21 @@ const MAPPED_ROLE_SHADE: Readonly<Record<FootprintRole, number>> = {
  * dormer's roof, the walls' paint on a dormer, and none on a driveway or on a
  * clapboard house's plinth, whose colours the shader lays (`facade.ts`
  * §`PAVING`, §`FOUNDATION`) — so their vertex colour is their light alone.
+ * Since #1590 none on a shop's front, sign or awning, which it paints too.
+ * Since #1589 a porch's roof is the roof's, and the porch the trim's.
  */
 export function mappedRolePaint(plan: FootprintPlan, role: FootprintRole): Rgb {
   const unpainted: Rgb = [1, 1, 1];
   switch (role) {
     case 'roof':
     case 'dormer-roof':
+    case 'porch-roof':
       return (
         roofPaintsOf(plan.surfaces.roof, plan.cladding.roof === 'shingle')?.[plan.paint.roof] ??
         unpainted
       );
     case 'driveway':
+    case 'shopfront':
       return unpainted;
     case 'plinth':
       if (plan.cladding.wall === 'clapboard') return unpainted;
@@ -12262,6 +12439,8 @@ export function mappedRolePaint(plan: FootprintPlan, role: FootprintRole): Rgb {
     case 'door':
       return DOOR_PAINTS[plan.paint.door] ?? unpainted;
     case 'trim':
+    case 'porch':
+    case 'porch-trim':
       return TRIM_PAINTS[plan.paint.trim] ?? unpainted;
     default:
       return paintsOf(plan.surfaces.wall)?.[plan.paint.wall] ?? unpainted;
@@ -12452,6 +12631,37 @@ const FACADE_CONSTANTS_GLSL = /* glsl */ `
   const float oylBrickFlag = ${glslFloat(STYLE_BRICK_FOUNDATION)};
   const float oylDormerTop = ${glslFloat(FACADE_DORMER)};
   const float oylGarageTop = ${glslFloat(FACADE_GARAGE)};
+  const float oylShopTop = ${glslFloat(FACADE_SHOPFRONT)};
+  const float oylSignTop = ${glslFloat(FACADE_SIGN)};
+  const float oylAwningTop = ${glslFloat(FACADE_AWNING)};
+  const float oylCommercialFlag = ${glslFloat(STYLE_COMMERCIAL)};
+  const float oylCwL = ${glslFloat(COMMERCIAL_WINDOW_IN_BAY.left)};
+  const float oylCwR = ${glslFloat(COMMERCIAL_WINDOW_IN_BAY.right)};
+  const float oylCwB = ${glslFloat(COMMERCIAL_WINDOW_IN_BAY.bottom)};
+  const float oylCwT = ${glslFloat(COMMERCIAL_WINDOW_IN_BAY.top)};
+  const float oylCwTransom = ${glslFloat(COMMERCIAL_WINDOW_IN_BAY.transom)};
+  const float oylShopFrame = ${glslFloat(SHOP_FRONT.frame)};
+  const float oylShopRiser = ${glslFloat(SHOP_FRONT.riser)};
+  const float oylShopSill = ${glslFloat(SHOP_FRONT.sill)};
+  const vec2 oylShopTransom = ${glslVec(SHOP_FRONT.transom)};
+  const float oylShopMullion = ${glslFloat(SHOP_FRONT.mullion)};
+  const float oylShopPaneMost = ${glslFloat(SHOP_FRONT.light)};
+  const float oylDoorW = ${glslFloat(DOOR_FACE.width)};
+  const float oylDoorH = ${glslFloat(DOOR_FACE.height)};
+  const float oylDoorSurround = ${glslFloat(DOOR_SURROUND_METRES)};
+  const float oylShopDoorFrame = ${glslFloat(SHOP_DOOR.frame)};
+  const float oylShopDoorRail = ${glslFloat(SHOP_DOOR.rail)};
+  const float oylSignMoulding = ${glslFloat(SIGN_MOULDING_METRES)};
+  const float oylStripe = ${glslFloat(AWNING_STRIPE_METRES)};
+  const vec3 oylStripeC = ${glslVec(AWNING_STRIPE_PAINT)};
+  const vec3 oylSignPaints[${String(SIGN_PAINTS.length)}] = vec3[${String(SIGN_PAINTS.length)}](${SIGN_PAINTS.map(glslVec).join(', ')});
+  const vec3 oylAwningPaints[${String(AWNING_PAINTS.length)}] = vec3[${String(AWNING_PAINTS.length)}](${AWNING_PAINTS.map(glslVec).join(', ')});
+  const float oylRailingTop = ${glslFloat(FACADE_RAILING)};
+  const float oylRailDepth = ${glslFloat(FRONT_PORCH.railing.rail)};
+  const vec2 oylRailFoot = ${glslVec(FRONT_PORCH.railing.bottom)};
+  const float oylBaluster = ${glslFloat(FRONT_PORCH.railing.baluster)};
+  const float oylBalusterGap = ${glslFloat(FRONT_PORCH.railing.spacing)};
+  const float oylRailingGap = ${glslFloat(RAILING.gapShade)};
   const float oylLotCourse = ${glslFloat(LOT_CLAPBOARD_COURSE_METRES)};
   const float oylLotBand = ${glslFloat(PLINTH_TOP_METRES + FOUNDATION.onWall)};
   const float oylShingleCourse = ${glslFloat(SHINGLE_COURSE_METRES)};
@@ -12684,7 +12894,9 @@ const FACADE_FRAGMENT_GLSL = /* glsl */ `
       vec2 oylCell = floor(vOylFacade.xy);
       vec2 oylAt = vOylFacade.xy - oylCell;
       float oylSashOn = oylFlag(oylFlags, oylSashFlag);
-      float oylTopShare = mix(oylWinT, oylSashTop, oylSashOn);
+      // #1590: a commercial wall's taller window, a sash's own top, or #1581's casement's.
+      float oylComOn = oylFlag(oylFlags, oylCommercialFlag);
+      float oylTopShare = mix(mix(oylWinT, oylCwT, oylComOn), oylSashTop, oylSashOn);
       float oylShown = ${FACADE_SHOWN_GLSL};
       vec3 oylWall = diffuseColor.rgb;
       float oylLit = step(0.8, oylWindowHash(oylCell + floor(vOylTint.xy * 1000.0)));
@@ -12728,28 +12940,34 @@ const FACADE_FRAGMENT_GLSL = /* glsl */ `
         oylTilt *= 1.0 - min(1.0, oylParts + oylGlass);
       } else {
         vec2 oylW = oylFw * 0.5;
-        float oylOuter = oylRect(oylAt, vec2(oylWinL, oylWinB), vec2(oylWinR, oylWinT), oylW) * oylShown;
+        // #1590: a commercial wall's window is #1581's laid out taller.
+        float oylWL = mix(oylWinL, oylCwL, oylComOn);
+        float oylWR = mix(oylWinR, oylCwR, oylComOn);
+        float oylWB = mix(oylWinB, oylCwB, oylComOn);
+        float oylWT = mix(oylWinT, oylCwT, oylComOn);
+        float oylWTr = mix(oylTransom, oylCwTransom, oylComOn);
+        float oylOuter = oylRect(oylAt, vec2(oylWL, oylWB), vec2(oylWR, oylWT), oylW) * oylShown;
         float oylInner = oylRect(
           oylAt,
-          vec2(oylWinL + oylFrameA, oylWinB + oylFrameU),
-          vec2(oylWinR - oylFrameA, oylWinT - oylFrameU),
+          vec2(oylWL + oylFrameA, oylWB + oylFrameU),
+          vec2(oylWR - oylFrameA, oylWT - oylFrameU),
           oylW
         );
         float oylBars = max(
           1.0 - smoothstep(oylBarA - oylW.x, oylBarA + oylW.x, abs(oylAt.x - 0.5)),
-          1.0 - smoothstep(oylBarU - oylW.y, oylBarU + oylW.y, abs(oylAt.y - oylTransom))
+          1.0 - smoothstep(oylBarU - oylW.y, oylBarU + oylW.y, abs(oylAt.y - oylWTr))
         );
         float oylPaneShare = oylInner * (1.0 - oylBars) * oylShown;
         float oylFrame = max(oylOuter - oylPaneShare, 0.0);
         float oylSill = oylRect(
           oylAt,
-          vec2(oylWinL - oylSillA, oylWinB - oylSillU),
-          vec2(oylWinR + oylSillA, oylWinB),
+          vec2(oylWL - oylSillA, oylWB - oylSillU),
+          vec2(oylWR + oylSillA, oylWB),
           oylW
         ) * oylShown;
-        vec3 oylPane = oylRoom + vec3(0.03, 0.04, 0.05) * smoothstep(oylWinB, oylWinT, oylAt.y);
+        vec3 oylPane = oylRoom + vec3(0.03, 0.04, 0.05) * smoothstep(oylWB, oylWT, oylAt.y);
         vec3 oylDrawn = mix(mix(mix(oylWall, vOylTrim, oylFrame), vOylTrim * 0.85, oylSill), oylPane, oylPaneShare);
-        float oylArea = (oylWinR - oylWinL) * (oylWinT - oylWinB) * oylShown;
+        float oylArea = (oylWR - oylWL) * (oylWT - oylWB) * oylShown;
         vec3 oylMean = mix(oylWall, mix(vOylTrim, oylPane, 0.75), oylArea);
         float oylFade = clamp(max(oylW.x, oylW.y) * 8.0 - 0.5, 0.0, 1.0);
         diffuseColor.rgb = mix(oylDrawn, oylMean, oylFade);
@@ -12781,6 +12999,22 @@ const FACADE_FRAGMENT_GLSL = /* glsl */ `
       diffuseColor.rgb = mix(oylDoor, vec3(0.02, 0.025, 0.03), oylFanlight);
       oylFlat = 1.0;
       oylGlass = oylFanlight;
+      if (oylFlag(vOylStyle.y, oylCommercialFlag) > 0.5) {
+        // #1590: a shop's door — a glazed leaf in its frame, set back in a recess.
+        vec2 oylD = oylAt * vec2(oylDoorW, oylDoorH);
+        vec2 oylDw = oylW * 2.0 * vec2(oylDoorW, oylDoorH);
+        float oylIn = oylRect(oylD, vec2(oylDoorSurround, -1.0), vec2(oylDoorW - oylDoorSurround, oylDoorH - oylDoorSurround), oylDw);
+        float oylPane = oylRect(
+          oylD,
+          vec2(oylDoorSurround + oylShopDoorFrame, oylShopDoorRail),
+          vec2(oylDoorW - oylDoorSurround - oylShopDoorFrame, oylDoorH - oylDoorSurround - oylShopDoorFrame),
+          oylDw
+        );
+        vec3 oylRecess = vec3(0.035, 0.033, 0.03);
+        vec3 oylShopPane = vec3(0.02, 0.025, 0.03) + vec3(0.05, 0.04, 0.025) * step(0.5, oylWindowHash(floor(vOylTint.xy * 1000.0)));
+        diffuseColor.rgb = mix(oylRecess, mix(vOylTrim, oylShopPane, oylPane), oylIn);
+        oylGlass = oylPane;
+      }
     } else if (oylTop < -1.5 && oylTop > -2.5) {
       diffuseColor.rgb = vColor.rgb;
       oylFlat = 1.0;
@@ -12828,6 +13062,69 @@ const FACADE_FRAGMENT_GLSL = /* glsl */ `
       diffuseColor.rgb = mix(vOylTrim * 0.88, vOylTrim * oylShade, oylLeaf);
       oylFlat = 1.0;
       oylRough = 0.5;
+      oylTilt = 0.0;
+    } else if (abs(oylTop - oylShopTop) < 0.5) {
+      // #1590: a shop front — glass over a stall riser, mullions and a transom, in the trim's paint.
+      float oylShopW = vOylStyle.z;
+      float oylShopH = vOylStyle.w;
+      vec2 oylS = vOylFacade.xy;
+      float oylDoorHalf = oylDoorW * 0.5;
+      float oylInside = oylRect(oylS, vec2(oylShopFrame), vec2(oylShopW - oylShopFrame, oylShopH - oylShopFrame), oylMw);
+      float oylDoorway = 1.0 - smoothstep(oylDoorHalf - oylMw.x, oylDoorHalf + oylMw.x, abs(oylS.x - oylShopW * 0.5));
+      float oylRiser = 1.0 - smoothstep(oylShopRiser - oylMw.y, oylShopRiser + oylMw.y, oylS.y);
+      float oylSillBar = oylBand(oylS.y, oylShopRiser, oylShopRiser + oylShopSill, oylMw.y);
+      float oylTransomBar = oylBand(oylS.y, oylShopTransom.x, oylShopTransom.y, oylMw.y);
+      float oylFromX = oylS.x < oylShopW * 0.5 ? oylShopFrame : oylShopW * 0.5 + oylDoorHalf;
+      float oylSpan = max(oylShopW * 0.5 - oylDoorHalf - oylShopFrame, 0.1);
+      float oylPanes = max(1.0, floor(oylSpan / oylShopPaneMost + 0.5));
+      float oylPaneW = oylSpan / oylPanes;
+      float oylMull = oylLine((oylS.x - oylFromX) / oylPaneW, oylShopMullion * 0.5 / oylPaneW, oylMw.x / oylPaneW);
+      float oylBars = max(max(oylSillBar, oylTransomBar), oylMull);
+      float oylPaneOn = oylInside * (1.0 - oylDoorway) * (1.0 - oylRiser) * (1.0 - oylBars);
+      float oylLitShop = step(0.5, oylWindowHash(floor(vOylTint.xy * 1000.0) + vec2(7.0, 3.0)));
+      vec3 oylShopRoom = mix(vec3(0.015, 0.016, 0.02), vec3(0.11, 0.085, 0.05), oylLitShop);
+      vec3 oylShopGlass = oylShopRoom + vec3(0.03, 0.04, 0.05) * smoothstep(oylShopRiser, oylShopH, oylS.y);
+      vec3 oylFrameC = mix(vOylTrim, vOylTrim * 0.8, oylRiser * oylInside);
+      vec3 oylDrawn = mix(oylFrameC, oylShopGlass, oylPaneOn);
+      diffuseColor.rgb = vColor.rgb * mix(oylDrawn, vec3(0.035, 0.033, 0.03), oylDoorway * oylInside);
+      oylGlass = oylPaneOn;
+      oylFlat = 1.0;
+      oylTilt = 0.0;
+    } else if (abs(oylTop - oylSignTop) < 0.5) {
+      // #1590: a sign band — a plain painted panel in its moulding. No text, no brand, no logo.
+      vec2 oylG = vOylFacade.xy;
+      float oylPanel = oylRect(oylG, vec2(oylSignMoulding), vec2(vOylStyle.z, vOylStyle.w) - vec2(oylSignMoulding), oylMw);
+      vec3 oylSignC = oylSignPaints[int(clamp(vOylStyle.y + 0.5, 0.0, ${String(SIGN_PAINTS.length - 1)}.0))];
+      diffuseColor.rgb = vColor.rgb * mix(vOylTrim, oylSignC, oylPanel);
+      oylFlat = 1.0;
+      oylRough = 0.45;
+      oylTilt = 0.0;
+    } else if (abs(oylTop - oylAwningTop) < 0.5) {
+      // #1590: an awning's canvas, striped along it with cream where its flags say.
+      vec3 oylCanvas = oylAwningPaints[int(clamp(vOylStyle.w + 0.5, 0.0, ${String(AWNING_PAINTS.length - 1)}.0))];
+      float oylStripeW = oylMw.x / oylStripe;
+      float oylStripeOn = step(0.5, vOylStyle.y)
+        * mix(step(1.0, mod(vOylFacade.x / oylStripe, 2.0)), 0.5, oylFadeOf(oylStripeW));
+      diffuseColor.rgb = vColor.rgb * mix(oylCanvas, oylStripeC, oylStripeOn);
+      oylFlat = 1.0;
+      oylRough = 0.85;
+      oylTilt = 0.0;
+    } else if (abs(oylTop - oylRailingTop) < 0.5) {
+      // #1589: a porch's railing — a top rail and a bottom rail, a baluster every
+      // spacing between them, and the porch's shade through the gaps.
+      float oylRailH = vOylStyle.w;
+      vec2 oylR = vOylFacade.xy;
+      float oylTopRail = smoothstep(oylRailH - oylRailDepth - oylMw.y, oylRailH - oylRailDepth + oylMw.y, oylR.y);
+      float oylFootRail = oylBand(oylR.y, oylRailFoot.x, oylRailFoot.y, oylMw.y);
+      float oylBalW = oylMw.x / oylBalusterGap;
+      float oylBal = oylLine(oylR.x / oylBalusterGap, oylBaluster * 0.5 / oylBalusterGap, oylBalW)
+        * step(oylRailFoot.y, oylR.y);
+      float oylSolid = max(max(oylTopRail, oylFootRail), oylBal);
+      float oylCover = (oylRailDepth + oylRailFoot.y - oylRailFoot.x
+        + max(oylRailH - oylRailDepth - oylRailFoot.y, 0.0) * oylBaluster / oylBalusterGap) / max(oylRailH, 0.01);
+      float oylOn = mix(oylSolid, oylCover, oylFadeOf(oylBalW));
+      diffuseColor.rgb = vColor.rgb * mix(oylRailingGap, 1.0, oylOn);
+      oylFlat = 1.0;
       oylTilt = 0.0;
     }
   }
@@ -13253,8 +13550,15 @@ export class MappedBuildingBelt {
     // A plan with a plinth stands in the ground at its foot; a raised part
     // does not, and nor does a driveway, which is laid on the ground.
     const grounded = plan.triangles.plinth.length > 0 && role !== 'driveway';
-    // #1588: a soffit's and a gutter's underside, in the shade of the wall and the eaves.
-    const underside = role === 'trim' ? FACADE_AO.soffit : 1;
+    // #1588: a soffit's and a gutter's underside, in the shade of the wall and the eaves;
+    // #1589: a porch's ceiling likewise, and its deck in the shade of its roof;
+    // #1590: an awning's underside likewise.
+    const porch = role === 'porch';
+    const underside =
+      role === 'trim' || role === 'porch-trim' || porch || role === 'shopfront'
+        ? FACADE_AO.soffit
+        : 1;
+    const upside = porch ? FACADE_AO.porchFloor : 1;
     const ground = plan.base + FOUNDATION_METRES;
     const position = this.#position.array as Float32Array;
     const normal = this.#normal.array as Float32Array;
@@ -13276,8 +13580,9 @@ export class MappedBuildingBelt {
       normal[to * 3 + 2] = floats[from + 5] as number;
       uv[to * 2] = ((floats[from + 6] as number) * acrossMetres) / repeat.across;
       uv[to * 2 + 1] = ((floats[from + 7] as number) * STOREY_METRES) / repeat.up;
-      const downward = (floats[from + 4] as number) < -0.5 ? underside : 1;
-      const light = shade * downward * (grounded ? groundingShade(y - ground) : 1);
+      const facing = floats[from + 4] as number;
+      const occluded = facing < -0.5 ? underside : facing > 0.5 ? upside : 1;
+      const light = shade * occluded * (grounded ? groundingShade(y - ground) : 1);
       colour[to * 3] = red * light;
       colour[to * 3 + 1] = green * light;
       colour[to * 3 + 2] = blue * light;
