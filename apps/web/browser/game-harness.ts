@@ -120,9 +120,9 @@ import {
 } from '../src/game/streets';
 import { waterways } from '../src/game/waterways';
 import { landClassMask, NO_LAND_CLASS } from '../src/game/land-class';
-import { WINDOW_IN_BAY } from '../src/game/facade';
+import { SASH, SASH_TOP_SHARE, WINDOW_IN_BAY, WINDOW_SILL_METRES } from '../src/game/facade';
 import {
-  FACADE_FLOATS,
+  FACADE_OFFSET,
   FOOTPRINT_VERTEX_FLOATS,
   footprintPlans,
   mappedTown,
@@ -3315,8 +3315,9 @@ function mappedFacadeProbe(
   const road = drawnRoadFrame(profile, origin, 1_200);
   if (road === undefined) return NO_MAPPED_FACADE;
   const stride = FOOTPRINT_VERTEX_FLOATS;
-  // The facade's floats are the vertex's last four: across, up, top, skip.
-  const FACADE_ACROSS_AT = stride - FACADE_FLOATS;
+  // The facade's floats: across, up, top, skip. #1588 put the style's four
+  // after them, so they are no longer the vertex's last four.
+  const FACADE_ACROSS_AT = FACADE_OFFSET;
   const FACADE_TOP_AT = FACADE_ACROSS_AT + 2;
   type Aim = { readonly glass: Point3; readonly wall: Point3; readonly ahead: number };
   type Point3 = { readonly x: number; readonly y: number; readonly z: number };
@@ -3326,7 +3327,8 @@ function mappedFacadeProbe(
     for (let at = 0; at + 6 * stride <= walls.length; at += 6 * stride) {
       const f = (vertex: number, k: number): number => walls[at + vertex * stride + k] as number;
       const top = f(0, FACADE_TOP_AT);
-      if (!(top >= 1 + WINDOW_IN_BAY.top)) continue;
+      // An upper storey with a window in it: a #1581 casement's top, or a #1588 sash's.
+      if (!(top >= 1 + Math.max(WINDOW_IN_BAY.top, SASH_TOP_SHARE))) continue;
       // Facing the road: its normal points back across it, toward the rider's side.
       const nx = f(0, 3);
       const nz = f(0, 5);
@@ -3357,7 +3359,9 @@ function mappedFacadeProbe(
         const t = u / bays;
         return {
           x: a.x + (b.x - a.x) * t,
-          y: floor + (1 + (WINDOW_IN_BAY.bottom + WINDOW_IN_BAY.top) / 2) * STOREY_METRES,
+          // #1588: the lower sash's middle, under a sash's meeting rail and a
+          // casement's transom alike — the window's middle is the rail's height.
+          y: floor + STOREY_METRES + WINDOW_SILL_METRES + SASH.height / 4,
           z: a.z + (b.z - a.z) * t,
         };
       };
@@ -3367,8 +3371,7 @@ function mappedFacadeProbe(
         y: point.y,
         z: point.z + nz * 0.01,
       });
-      // Half-way between the transom and the sill would be the lower pane;
-      // half-way up the window is below the transom, which is two thirds up.
+      // Across: inside a casement's lower pane and a sash's — one, or either of a pair.
       const aim: Aim = { glass: proud(along(0.42)), wall: proud(along(0.1)), ahead };
       const seen = (point: Point3): boolean => {
         const at3 = inTheFrame(frame, canvas.width / canvas.height, point);
