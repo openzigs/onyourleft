@@ -1,0 +1,87 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Copy the instance's base image from Docker Hub to the project's GHCR mirror
+# (#1231).
+#
+# `apps/instance/Dockerfile` builds from ghcr.io/openzigs/node:<tag>@<digest>,
+# and IMG008 (scripts/check-instance-image.sh) keeps it there, so the required
+# check's `instance image` never asks Docker Hub: on 2026-10-09 Docker Hub's
+# pull limit and auth timeouts turned it red three times. This workflow is the
+# one place that does ask Docker Hub, and it is NOT a required check, so a day
+# Docker Hub will not answer delays a base-image bump and blocks nothing else.
+# scripts/mirror-base-image.sh does the copy -- by the pinned digest, every
+# platform, digests preserved -- and reads it back from GHCR by that digest.
+#
+# ⚠️ **The one credential is the run's own GITHUB_TOKEN with `packages: write`**,
+# which is what pushing to GHCR takes, and nothing else: `contents: read` for
+# the checkout. No stored secret. The required job holds no GHCR credential at
+# all: it pulls a PUBLIC package anonymously, which is also how a self-hoster
+# building apps/instance pulls it. ⚠️ A package GHCR creates is PRIVATE until
+# its owner changes that once, by hand, in the package's settings (there is no
+# API for it); until then every pull outside this workflow is refused, and the
+# image check fails as IMG004 naming ghcr.io.
+#
+# Why a tampered tag would not matter: the Dockerfile pins the digest, and a
+# registry cannot serve other bytes under a digest. The copy is safe to run
+# from any branch that can push for that reason, and the trigger on a pull
+# request is what lets a base-image bump's own pull request mirror the new
+# digest before its required check pulls it. A fork's pull request gets a
+# read-only token, so the job is skipped there rather than failing.
+#
+# Standard runner label only (CLAUDE.md section 8); skopeo ships on it.
+
+name: Mirror the instance's base image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - apps/instance/Dockerfile
+      - scripts/mirror-base-image.sh
+      - .github/workflows/mirror-base-image.yml
+  pull_request:
+    paths:
+      - apps/instance/Dockerfile
+      - scripts/mirror-base-image.sh
+      - .github/workflows/mirror-base-image.yml
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: mirror-base-image
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    name: Mirror the base image to GHCR
+    # Dependabot's pull request gets a read-only token too, so it is skipped.
+    if: github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out the repository
+        #   gh api repos/actions/checkout/git/ref/tags/v7.0.1 --jq .object.sha
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Mirror script tests
+        run: bash scripts/mirror-base-image.test.sh
+
+      - name: Log in to GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          skopeo --version
+          printf '%s' "${GHCR_TOKEN}" | skopeo login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
+
+      - name: Mirror
+        run: bash scripts/mirror-base-image.sh
+
+      - name: Log out of GHCR
+        if: always()
+        run: skopeo logout ghcr.io || true

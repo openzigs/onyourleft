@@ -74,23 +74,45 @@ a secret or a service this project operates. ⚠️ **This used to read "no gate
 outside the runner", and that was never true** ([#841](https://github.com/openzigs/onyourleft/issues/841)):
 the install reaches the npm registry, the browser install Playwright's CDN and Ubuntu's archives,
 and the image check **Docker Hub**, on every run, because a runner starts with no base image. What
-each of those can do is turn `main` red on a day the service is down. For Docker Hub:
+each of those can do is turn `main` red on a day the service is down. For the base image's registry:
 
-- **Its pull-rate limit DID apply here, and since [#1231](https://github.com/openzigs/onyourleft/issues/1231)
-  the job logs in.** GitHub's [Actions limits](https://docs.github.com/en/actions/reference/limits)
-  page says *"GitHub-hosted runners pulling public images: Docker Hub's rate limit is not applied"*
-  (read 2026-09-29, and the same words again on 2026-10-09), and the base image is public — but on
-  2026-10-09 run 37994349506 on `main` failed in `instance image` with `toomanyrequests:
-  unauthenticated pull rate limit`, and runs 37994374884 and 37995040607 with auth timeouts against
-  `registry-1.docker.io` / `auth.docker.io`; re-runs about 20 minutes later passed. ⚠️ A reviewer
-  who remembers "does not apply here" is reading the old file: the page's sentence is not what the
-  runner observed. So, the owner's stop-gap of 2026-10-09, the step `Log in to Docker Hub` (below,
-  §"exactly three steps") logs in with a read-only pull token before `Checks, concurrently`, which
-  moves the limit from the runner's shared address to the account. It does **not** help an auth
-  outage, which a logged-in pull goes through too, and a fork's pull request gets no secret and
-  stays unauthenticated. #1231's GHCR mirror is still owed and is the fix for both.
+- **Its pull-rate limit DID apply here, so since [#1231](https://github.com/openzigs/onyourleft/issues/1231)
+  the base image comes from the project's GHCR mirror and the required job never asks Docker Hub.**
+  What the two pages say, re-read on **2026-10-21**: GitHub's [Actions limits](https://docs.github.com/en/actions/reference/limits)
+  page still says *"GitHub-hosted runners pulling public images: Docker Hub's rate limit is not
+  applied"* (the same words as on 2026-09-29 and 2026-10-09), with private images and every
+  self-hosted runner subject to it; Docker Hub's [usage and limits](https://docs.docker.com/docker-hub/usage/)
+  page gives an unauthenticated limit of *"100 per IPv4 address or IPv6 /64 subnet"* per 6 hours,
+  200 for a signed-in Personal account and unlimited for paid tiers, and says nothing of GitHub or
+  any exemption. The base image is public — yet on 2026-10-09 run 37994349506 on `main` failed in
+  `instance image` with `toomanyrequests: unauthenticated pull rate limit`, and runs 37994374884
+  and 37995040607 with auth timeouts against `registry-1.docker.io` / `auth.docker.io`; re-runs
+  about 20 minutes later passed. ⚠️ A reviewer who remembers "does not apply here" is reading the
+  old file: the page's sentence is not what the runner observed, and the re-read changed nothing.
+  **Chosen: (a), the mirror** (the owner's recommendation, 2026-10-09). Of the three options #1231
+  set out, (b) a read-only Docker Hub token in the required job fixed the rate limit but not an
+  auth outage, which a logged-in pull goes through too, left a fork's pull request unauthenticated,
+  and was the job's one secret — it was the stop-gap from 2026-10-09 to #1231's mirror, and both its
+  steps are gone. (c), accepting re-runs, leaves `main` red on a day nobody chose. The mirror fixes
+  both failures, needs no secret in the required job, and a fork pulls the same image:
+  `apps/instance/Dockerfile` builds from `ghcr.io/openzigs/node:<tag>@<digest>`, **Docker Hub's own
+  digest**, unchanged, and `IMG008` (`scripts/check-instance-image.sh`) fails any base image from
+  elsewhere — a bare `node:…`, `docker.io/…`, another GHCR owner. `.github/workflows/mirror-base-image.yml`
+  copies it (`scripts/mirror-base-image.sh`: `skopeo copy --all --preserve-digests` by the pinned
+  digest, then a read-back from GHCR by that digest). That workflow is **not a required check** and
+  holds the run's own `GITHUB_TOKEN` with `packages: write` and `contents: read`, nothing more; it
+  runs on a push to `main` or a pull request that touches the Dockerfile, the script or itself (a
+  fork's or Dependabot's is skipped: its token cannot push), copies only a digest GHCR does not already serve, and by hand. Why a mirror is safe to trust: the
+  Dockerfile pins the digest, and a registry cannot serve other bytes under one, so a tampered tag
+  cannot change a build. ⚠️ **Do not prune the mirror's untagged versions** (a cleanup policy would break builds of older commits); swapping the `FROM` back to Docker Hub's `node` at the same digest is a valid local fallback. ⚠️ **The GHCR package must be PUBLIC** — the required job and a
+  self-hoster both pull it anonymously, and GHCR creates a package private, changeable only by its
+  owner in the package's settings. Until it is public every pull outside the mirror workflow fails
+  as `IMG004`, naming `ghcr.io`. ⚠️ **To move the base image**: change the digest (and tag) in both
+  `FROM` lines to Docker Hub's, read with `docker buildx imagetools inspect node:<tag>`; that pull
+  request's own run of the mirror workflow copies it across before a re-run of its required check
+  pulls it.
 - **An outage is named, not disguised.** The checker pulls the base image as its own step before it
-  builds, so a registry that will not serve it fails as `IMG004`, saying it is Docker Hub and not
+  builds, so a registry that will not serve it fails as `IMG004`, naming the registry host (`ghcr.io`) and not
   `apps/instance` — a re-run, not a fix. Before #841 it failed as `IMG001`, *"the Dockerfile did not
   build"*.
 - **Once the base image is held, the build does not ask the registry again — measured, not
@@ -105,11 +127,10 @@ each of those can do is turn `main` red on a day the service is down. For Docker
   runner's own Docker; a different engine or builder driver could resolve differently.
 - **The check stays in the required job, decided.** It is the only gate that the image builds and
   that `/source` names its commit (AGPL-3.0 §13), a second job could not block a merge, and it is
-  exposed to one more registry than the job already was — the same trade as the install. Mirroring
-  the base image to GHCR would move the dependency rather than remove it, and would add a push
-  credential, which this job holds none of (its one secret, since #1231, is a read-only Docker Hub
-  pull token). ⚠️ Since #1231's failures the owner prefers that mirror as the long-term fix, in a
-  separate non-required workflow; the login is the stop-gap until it lands. Removing `'instance image'` from `Checks, concurrently`
+  exposed to one more registry than the job already was — the same trade as the install. Since
+  #1231 that registry is GHCR rather than Docker Hub: the mirror moved the dependency rather than
+  removing it, onto the host that already serves this repository and its Actions, and its push
+  credential is in the separate workflow above, so this job holds no secret at all. Removing `'instance image'` from `Checks, concurrently`
   is a one-line revert if an outage ever outlasts the patience of the day.
 
 | What | Where | Why |
@@ -873,7 +894,7 @@ shard.
 | Concurrency runner tests | `checks` |
 | Record the runner's CPU | every shard — each is its own runner |
 | Drop the unrelated Chrome apt source | `browser`, before the install it is for |
-| Log in to Docker Hub; Log out of Docker Hub | `checks`, around the `instance image` pull (still skipped on a fork's pull request) |
+| Log in to Docker Hub; Log out of Docker Hub | gone since #1231's GHCR mirror: the `instance image` pull is anonymous, from `ghcr.io` |
 | Checks, concurrently — 25 of its 26 commands | `checks`, the same step |
 | …its 26th, `playwright install --with-deps chromium` | `browser`, a step of its own, `Install the pinned Chromium` |
 | Accessibility (`check:a11y-suite`, `test:a11y`) | `tests` |
@@ -1138,7 +1159,7 @@ If CI ever needs a step this file does not list, **this
 file is wrong and gets fixed in the same PR**; CI must not accumulate private knowledge, because
 that is how a contributor's local green becomes CI's red with no explanation.
 
-⚠️ **There are exactly three steps that are not §4a commands** (two until #1231; since #1285 `Record the runner's CPU` is in every shard, the apt-source step in `browser` and the Docker login in `checks`), and since #1128's review one §4a
+⚠️ **There are exactly two steps that are not §4a commands** (three from #1231's stop-gap login to its GHCR mirror; since #1285 `Record the runner's CPU` is in every shard and the apt-source step in `browser`), and since #1128's review one §4a
 command is run under a wrapper: `Browser gate` is `timeout --verbose --kill-after=10s 825s pnpm run
 test:browser` (765 s until #651), for the reason §"What bounds the browser gate's step" gives — locally the command is
 the same without it. The first, since #866, is `Record
@@ -1159,19 +1180,12 @@ therefore makes CI trust **less** than it did, which is why it is a safe answer 
 not a workaround with a cost. It is a no-op the day Google's index is consistent again, and
 deleting the step is a one-line revert if the trade is ever judged wrong.
 
-The third, since [#1231](https://github.com/openzigs/onyourleft/issues/1231), is `Log in to Docker
-Hub`, just before `Checks, concurrently` (whose `instance image` pulls the base image), with a
-`Log out of Docker Hub` at the end of the job (`if: always()`, `|| true`, so it cannot fail it). It
-reads the repository secret `DOCKERHUB_TOKEN` — a read-only *Public Repo Read-only* token, and **the
-only secret this job holds** — and the repository **variable** `DOCKERHUB_USERNAME`, a variable on
-purpose because Actions redacts a secret's value everywhere in a log (#338). The token goes to
-`docker login --password-stdin` and is never printed. Present and wrong, the login fails the step;
-absent — a fork's pull request, which GitHub gives no secret — the step says so and passes, and the
-pull is unauthenticated. Why: three `instance image` failures on 2026-10-09 (above, §"Its pull-rate
-limit DID apply here"). Credentials fix the rate limit, not an auth outage. ⚠️ On a same-repository
-pull request or `main` the credential sits in the runner's Docker config while later steps run that
-branch's code; it can pull public images and nothing else. Deleting both steps is the revert once
-the GHCR mirror lands.
+From #1231's stop-gap of 2026-10-09 to its GHCR mirror there was a third, `Log in to Docker Hub`
+(with a `Log out of Docker Hub` at the end of the job), reading a read-only Docker Hub token, the
+repository secret `DOCKERHUB_TOKEN`, and the repository variable `DOCKERHUB_USERNAME`. Both steps
+are gone: the base image is pulled anonymously from `ghcr.io` (§"Its pull-rate limit DID apply
+here"), so the job holds no secret. The secret and the variable can be deleted from the
+repository's settings; nothing reads them.
 
 > ⚠️ **The workflow's `name:` and its last job's `name:` are both `Repository rules`, and `main`
 > requires a status check whose context is exactly that string.** Rename either and the required

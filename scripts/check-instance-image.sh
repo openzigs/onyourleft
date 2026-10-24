@@ -24,24 +24,31 @@
 # Needs Docker and the network (the base image is pulled by digest the first
 # time), so it is NOT in `check:repo`, the bare-clone set.
 #
-# ⚠️ **The one outside service it needs is Docker Hub** (#841). The base image
-# is pulled from there whenever this machine does not already hold it -- on
-# every CI run, because a runner starts empty. GitHub's own documentation says
-# Docker Hub's rate limit is not applied to GitHub-hosted runners pulling a
-# public image (read 2026-09-29), so what is left is an OUTAGE, and that is
-# what IMG004 names: the pull is its own step, before the build, so a registry
-# that is down reads as the registry being down rather than as a Dockerfile
-# that stopped building. docs/agents/ci.md §4c records the decision to keep this in the
-# required job anyway.
+# ⚠️ **The one outside service it needs is the base image's registry** (#841),
+# and since #1231 that is the project's own GHCR mirror, ghcr.io/openzigs/,
+# not Docker Hub. The base image is pulled whenever this machine does not
+# already hold it -- on every CI run, because a runner starts empty. On
+# 2026-10-09 Docker Hub turned the required check red three times (a
+# `toomanyrequests` pull limit, then auth timeouts) although GitHub's own page
+# says its limit is not applied to GitHub-hosted runners, so the Dockerfile now
+# names the mirror, by the same digest, and IMG008 keeps it there.
+# `.github/workflows/mirror-base-image.yml` (scripts/mirror-base-image.sh)
+# copies the image across; the digest pin is what makes a copy safe to trust.
+# What is left is an OUTAGE of ghcr.io, and that is what IMG004 names: the pull
+# is its own step, before the build, so a registry that is down reads as the
+# registry being down rather than as a Dockerfile that stopped building.
+# docs/agents/ci.md §4c records the decision to keep this in the required job
+# anyway.
 #
 # Rules:
 #   IMG001  the image does not build
 #   IMG002  the container never reports healthy
 #   IMG003  /source does not name the commit the image was built from
-#   IMG004  the base image could not be pulled (Docker Hub, not this tree)
+#   IMG004  the base image could not be pulled (the registry, not this tree)
 #   IMG005  the Dockerfile's base image is not pinned by digest
 #   IMG006  the migrate step (`node src/operator/cli.ts migrate`) failed in the image
 #   IMG007  /ready is not `ready`: the store did not open, or a room worker is down
+#   IMG008  a base image is not from the project's GHCR mirror, ghcr.io/openzigs/ (#1231)
 #
 # Its own suite, with a fake `docker` on PATH and no Docker needed:
 #   bash scripts/check-instance-image.test.sh
@@ -58,6 +65,8 @@ VOLUME="onyourleft-instance-check-$$"
 # is 30 s with a 5 s start period; this asks every second instead of waiting on
 # it, by running the image's own probe with `docker exec`.
 DEADLINE_SECONDS=30
+# The one registry a base image may come from (#1231, IMG008).
+MIRROR='ghcr.io/openzigs/'
 
 cleanup() {
   docker rm -f "${NAME}" >/dev/null 2>&1 || true
@@ -118,8 +127,15 @@ while IFS= read -r line || [ -n "${line}" ]; do
     esac
   fi
   case "${image}" in
-    *@sha256:*) bases+=("${image}") ;;
+    *@sha256:*) ;;
     *) fail "IMG005 apps/instance/Dockerfile's base image is not pinned by digest: ${image:-(a FROM line with no image)}" ;;
+  esac
+  # #1231: from the mirror, never from Docker Hub -- whose bare `node:...` is
+  # Docker Hub too. The slash is part of the prefix, so a look-alike owner
+  # (`ghcr.io/openzigs.example/`) is not the mirror.
+  case "${image}" in
+    "${MIRROR}"*) bases+=("${image}") ;;
+    *) fail "IMG008 apps/instance/Dockerfile's base image is not from the project's mirror (${MIRROR}): ${image}" ;;
   esac
 done < "${ROOT}/apps/instance/Dockerfile"
 [ "${from_lines}" -gt 0 ] ||
@@ -127,7 +143,7 @@ done < "${ROOT}/apps/instance/Dockerfile"
 for base in ${bases[@]+"${bases[@]}"}; do
   if ! docker image inspect "${base}" >/dev/null 2>&1; then
     docker pull --quiet "${base}" >/dev/null ||
-      fail "IMG004 the base image ${base} could not be pulled. That is Docker Hub (an outage, or no network), not a defect in apps/instance -- re-run once it answers."
+      fail "IMG004 the base image ${base} could not be pulled. That is ${base%%/*}, the project's mirror (an outage, no network, or the image not yet mirrored -- .github/workflows/mirror-base-image.yml), not a defect in apps/instance -- re-run once it answers."
   fi
 done
 

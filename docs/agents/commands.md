@@ -656,8 +656,10 @@ npm view typescript-eslint peerDependencies.typescript
 # since #780 requires /ready to be `ready` (IMG007: the store opened, so its
 # runtime dependencies are in the image). IMG001-IMG005: since #841 the base
 # image must be pinned by digest (IMG005) and is pulled as its own step, so a
-# Docker Hub that will not serve it is IMG004 -- the registry, named -- rather
-# than an IMG001 that reads like a broken Dockerfile. ⚠️ Since #852 that is
+# registry that will not serve it is IMG004 -- the registry, named -- rather
+# than an IMG001 that reads like a broken Dockerfile. Since #1231 every base
+# image must come from the project's GHCR mirror, ghcr.io/openzigs/ (IMG008),
+# never Docker Hub (§4c). ⚠️ Since #852 that is
 # EVERY `FROM`, in any case, with options such as `--platform=` before the
 # image; a stage naming an earlier stage, and `scratch`, are not base images.
 # Until then it read the first line beginning `FROM` alone. A base image already
@@ -672,6 +674,14 @@ bash scripts/check-instance-image.sh
 # and waits for nothing; every IMG id has a case that goes red. 71 cases on
 # 2026-09-29 (69 with #780 before #864's merge, 62 with #864 alone, 43 before #852) -- the count is what the run prints.
 bash scripts/check-instance-image.test.sh
+
+# The mirror's script and its suite (#1231). The script copies Docker Hub's
+# official image, by the digest the Dockerfile pins, to ghcr.io/openzigs/, and
+# needs skopeo and a GHCR login with `packages: write`, so it is run by
+# .github/workflows/mirror-base-image.yml and not by hand. The suite fakes
+# `skopeo` and needs neither; it runs in the required `checks` shard.
+bash scripts/mirror-base-image.sh
+bash scripts/mirror-base-image.test.sh
 
 # The same image by hand. The commit is a REQUIRED build argument: the build
 # fails without it, rather than an instance that cannot say which source it
