@@ -6,7 +6,7 @@ import { REALISTIC_LADDER, type QualitySettings } from '../../src/game/quality';
 import { STRUCTURE_KINDS, type SceneryKind } from '../../src/game/scatter';
 import { corridorOrigin } from '../../src/game/terrain';
 import { rideFrame } from './frame';
-import { realisticRoute } from './route';
+import { VILLAGE_HOLD_METRES, realisticRoute, villageRoute } from './route';
 
 const profile = realisticRoute();
 const origin = corridorOrigin(profile);
@@ -77,5 +77,31 @@ describe('the realistic page’s `-settlement-clearing` lever leaves the settlem
     }
     // The control: the page's route has settlements with ground to clear.
     expect(added).toBeGreaterThan(0);
+  });
+});
+
+describe('the realistic page’s `-people` lever places nobody — #1541', () => {
+  it('puts people on the village road’s pavements at the top rung, and none with the lever', () => {
+    const village = villageRoute();
+    const villageOrigin = corridorOrigin(village);
+    const top = REALISTIC_LADDER[0] as QualitySettings;
+    const count = (peopleOff: boolean): number => {
+      let total = 0;
+      for (let elapsed = 0; elapsed < 60; elapsed += 10) {
+        const frame = rideFrame({
+          profile: village,
+          origin: villageOrigin,
+          distance: VILLAGE_HOLD_METRES,
+          elapsed,
+          rung: top,
+          peopleOff,
+        });
+        total += (frame.people?.near.length ?? 0) + (frame.people?.far.length ?? 0);
+      }
+      return total;
+    };
+    // The control: the page's village hold has people to place.
+    expect(count(false)).toBeGreaterThan(0);
+    expect(count(true)).toBe(0);
   });
 });

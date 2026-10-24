@@ -23,6 +23,7 @@ import {
   PERSON_CLEARANCE_METRES,
   PERSON_HALF_WIDTH_METRES,
   RUNNER_SHARE,
+  streetWalks,
   peopleAt,
   personLook,
   villageDensity,
@@ -38,6 +39,7 @@ import { scatterSeed } from './scatter';
 import { sceneFrame } from './scene';
 import { siteAt, siteSpacing, type Site } from './settlements';
 import { atStartLine } from './simulation';
+import { KERB_LATERAL_METRES, PAVEMENT_WIDTH_METRES, streetsAt } from './streets';
 import { ROAD_WIDTH_METRES, corridorOrigin, drawnRoadFrame } from './terrain';
 import type { WorldCorridor } from './world-data/corridor';
 
@@ -268,6 +270,32 @@ describe('people in a ride’s frame — #1541, through `sceneFrame`', () => {
       }
     }
     expect(seen).toBeGreaterThan(0);
+  });
+
+  it('walks the pavement itself, inside its width, and each front path', () => {
+    const road: RoadDistance = (x, z, reach) => distanceToDrawnRoad(FARMLAND, ORIGIN, x, z, reach);
+    const streets = streetsAt(
+      FARMLAND,
+      ORIGIN,
+      SEED,
+      village.centre - village.half,
+      village.centre + village.half,
+    );
+    const lines = streets.flatMap((street) => streetWalks(street, road));
+    const pavements = lines.filter((line) => line.kind === 'pavement');
+    expect(pavements.length).toBeGreaterThan(0);
+    expect(lines.filter((line) => line.kind === 'door-path').length).toBeGreaterThan(0);
+    for (const line of pavements) {
+      for (let at = 0; at < line.points.length; at += 3) {
+        const x = line.points[at] as number;
+        const z = line.points[at + 2] as number;
+        const out = road(x, z, 20);
+        expect(out).toBeGreaterThan(KERB_LATERAL_METRES + PERSON_HALF_WIDTH_METRES);
+        expect(out).toBeLessThan(
+          KERB_LATERAL_METRES + PAVEMENT_WIDTH_METRES - PERSON_HALF_WIDTH_METRES,
+        );
+      }
+    }
   });
 
   it('places nobody where the rung draws nobody — every stylised rung, and the realistic second', () => {
