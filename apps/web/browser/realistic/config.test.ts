@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
   configQuery,
   DEFAULT_CONFIG,
+  firPrepassWithLevers,
   LAYERS,
   LEVERS,
   parseConfig,
@@ -138,6 +139,23 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     );
     expect(configQuery(parseConfig('?levers=-surface-bounds'))).toBe(
       `?levers=${encodeURIComponent('-surface-bounds')}`,
+    );
+  });
+
+  it('draws the firs after their depth pre-pass, as the product does, unless its #1523 lever is off', () => {
+    expect(LEVERS).toContain('fir-prepass');
+    // No lever is the product, and no OTHER lever touches the pre-pass.
+    expect(firPrepassWithLevers([])).toBe('drawn');
+    expect(
+      firPrepassWithLevers(
+        parseConfig('?levers=-surface-bounds,-generated-conifers,-foliage-order').leversOff,
+      ),
+    ).toBe('drawn');
+    expect(firPrepassWithLevers(parseConfig('?levers=-fir-prepass').leversOff)).toBe('off');
+    // The gate's control is never a URL's to ask for.
+    expect(() => parseConfig('?levers=-unprepared')).toThrow(/levers is a comma-separated list/);
+    expect(configQuery(parseConfig('?levers=-fir-prepass'))).toBe(
+      `?levers=${encodeURIComponent('-fir-prepass')}`,
     );
   });
 

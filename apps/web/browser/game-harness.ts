@@ -171,6 +171,7 @@ import {
   horizonColoursOf,
   horizonFromSkyOf,
   drawOrderOf,
+  firDepthPrepassOf,
   foliageOrderedOf,
   sceneMaterialsOf,
   type DrawnPiece,
@@ -220,6 +221,7 @@ import {
   sideRoadsShownOf,
   wordmarkOrientationOf,
   type WordmarkOrientation,
+  type DepthPrepassMode,
   type RealisticSurfaces,
   waterFresnelOf,
   waterReflectsOf,
@@ -5859,6 +5861,8 @@ export interface RealisticMeasurement {
   readonly surfacePrograms: SurfaceProgramMeasurement;
   /** #1523: the bounded surfaces against the unbounded, read back. @see surfaceBoundsProbe */
   readonly surfaceBounds: SurfaceBoundsMeasurement;
+  /** #1523: the wooded frame with the firs' depth pre-pass and without, read back. @see firPrepassProbe */
+  readonly firPrepass: FirPrepassMeasurement;
   /** #1534: the vegetation drawn on a village's ground, cleared and not. @see settlementClearingProbe */
   readonly settlementClearing: SettlementClearingMeasurement;
   /** #679: a finish gantry's banner, read, and what the gantries cost. @see gantryProbe */
@@ -6754,6 +6758,92 @@ function surfaceBoundsProbe(
   const road = read({ ...riding(route, distance), markers: [], scatter: [] });
   const bank = read(steepBankFrame(riding));
   return { measured: true, distance, patchAhead, road, bank };
+}
+
+/**
+ * #1523 — the wooded frame drawn with the firs' depth pre-pass (the product),
+ * without it (the reference, the firs as they were), and with the EQUAL depth
+ * test and no pre-pass (the control), each read back whole, with the frame's
+ * non-empty draw calls counted in the first two.
+ */
+export interface FirPrepassMeasurement {
+  readonly measured: boolean;
+  /** The largest difference in any channel of any pixel, pre-pass against reference. */
+  readonly largest: number;
+  /** How many pixels differ from the reference in any channel at all, with the pre-pass. */
+  readonly differing: number;
+  /** How many pixels the control moves past {@link SURFACE_CONTROL_STEP} from the reference. */
+  readonly unprepared: number;
+  /** The frame's non-empty draw calls with the pre-pass, and without it. */
+  readonly calls: number;
+  readonly callsWithout: number;
+  /** How many pixels the frame has. */
+  readonly pixels: number;
+}
+
+const NO_FIR_PREPASS: FirPrepassMeasurement = {
+  measured: false,
+  largest: 0,
+  differing: 0,
+  unprepared: 0,
+  calls: 0,
+  callsWithout: 0,
+  pixels: 0,
+};
+
+/** @see FirPrepassMeasurement */
+function firPrepassProbe(
+  view: GameView,
+  gl: WebGL2RenderingContext,
+  canvas: HTMLCanvasElement,
+  frame: SceneFrame,
+): FirPrepassMeasurement {
+  const whole = (mode: DepthPrepassMode): Uint8Array => {
+    firDepthPrepassOf(view, mode);
+    view.render(frame);
+    view.render(frame);
+    return readRegion(gl, 0, 0, canvas.width, canvas.height);
+  };
+  const callsOf = (mode: DepthPrepassMode): number => {
+    let calls = 0;
+    firDepthPrepassOf(view, mode);
+    view.render(frame);
+    countingNonEmptyDrawCalls((counted) => {
+      view.render(frame);
+      calls = counted();
+    });
+    return calls;
+  };
+  const reference = whole('off');
+  const callsWithout = callsOf('off');
+  const control = whole('unprepared');
+  // Last, so every probe after this one draws the product's firs.
+  const calls = callsOf('drawn');
+  const drawn = whole('drawn');
+  let largest = 0;
+  let differing = 0;
+  let unprepared = 0;
+  for (let at = 0; at < reference.length; at += 4) {
+    let here = 0;
+    let moved = 0;
+    for (let channel = 0; channel < 3; channel += 1) {
+      const was = reference[at + channel] ?? 0;
+      here = Math.max(here, Math.abs((drawn[at + channel] ?? 0) - was));
+      moved += Math.abs((control[at + channel] ?? 0) - was);
+    }
+    largest = Math.max(largest, here);
+    if (here > 0) differing += 1;
+    if (moved > SURFACE_CONTROL_STEP) unprepared += 1;
+  }
+  return {
+    measured: true,
+    largest,
+    differing,
+    unprepared,
+    calls,
+    callsWithout,
+    pixels: reference.length / 4,
+  };
 }
 
 /**
@@ -7982,6 +8072,7 @@ const NO_REALISTIC: RealisticMeasurement = {
   groundBlend: NO_GROUND_BLEND,
   surfacePrograms: NO_SURFACE_PROGRAMS,
   surfaceBounds: NO_SURFACE_BOUNDS,
+  firPrepass: NO_FIR_PREPASS,
   settlementClearing: NO_SETTLEMENT_CLEARING,
   gantry: NO_GANTRY,
   logos: NO_LOGO,
@@ -9288,6 +9379,10 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   const surfaceBounds = surfaceBoundsProbe(view, gl, canvas, riding);
   phaseEnds('realistic: surface bounds — #1523');
 
+  // #1523: the firs' depth pre-pass draws the picture the firs drew without it.
+  const firPrepass = firPrepassProbe(view, gl, canvas, wooded);
+  phaseEnds('realistic: fir depth pre-pass — #1523');
+
   // #1534: no tree, shrub or rock drawn on a village's ground.
   const settlementClearing = settlementClearingProbe(view, riding);
   phaseEnds('realistic: settlement clearing — #1534');
@@ -9792,6 +9887,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     groundBlend,
     surfacePrograms,
     surfaceBounds,
+    firPrepass,
     settlementClearing,
     gantry,
     logos,
