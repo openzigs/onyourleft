@@ -15,6 +15,12 @@ From the layout tree of CLAUDE.md §2, from `apps/` down to `apps/web/src/game/`
 ```
 apps/                 AGPL-3.0-or-later, without exception
   web/                browser client — the Phase 1 product (#48-#51)
+    demo/               the demo page (#1645, epic #1643): its own build,
+                        vite.demo.config.ts into demo/dist/, with its code in
+                        src/demo/. No trainer, Bluetooth, network or storage
+                        module may be in its bundle (tools/demo/), and none of
+                        it may be in the product's. docs/architecture.md's
+                        component table has the row.
     browser/            the browser gate (#63) — the one place a real browser runs;
                         a harness page driving the map adapter, and its Playwright
                         spec, and since #63's cold-load criterion the PMTiles

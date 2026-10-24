@@ -1,0 +1,23 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<html lang="en">
+  <head>
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; connect-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; img-src 'self' blob: data:"
+    />
+    <meta charset="UTF-8" />
+    <!-- #1645. The policy comes before the charset, because a meta policy covers only what
+         follows it and the theme script is written in after the charset.
+         No network: connect-src is this origin alone. The inline theme
+         script is allowed by its hash, which tools/demo/content-security.ts
+         adds to script-src at build time. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>On Your Left — demo</title>
+    <meta name="color-scheme" content="light dark" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="../src/demo/main.tsx"></script>
+  </body>
+</html>
