@@ -6,12 +6,14 @@
  * and no fill across a stretch with no map data.
  */
 
+import type { Metres, RouteProfile } from '@onyourleft/domain';
+import type { BuildingFeature } from '@onyourleft/map-features';
 import { describe, expect, it } from 'vitest';
 
 import { FOOTPRINT_MAX_VERTICES, footprintPlans } from './footprint-buildings';
 import { denseTownFixture } from './footprint-fixtures-testing';
 import { landClassMask } from './land-class';
-import { circuitRoute } from './route-fixtures-testing';
+import { circuitRoute, hairpinRoute } from './route-fixtures-testing';
 import { corridorOrigin } from './terrain';
 import { urbanFixture, type UrbanStretch } from './testing/urban-fixtures';
 import { NO_URBAN_CLASS, urbanClassMap, type UrbanClass } from './urban-class';
@@ -148,6 +150,13 @@ describe('urbanClassMap — no map data, no class (#1633, ADR 0054 D-4)', () => 
     expect(at(Number.NaN)).toBe('unknown');
   });
 
+  it('is NO_URBAN_CLASS for a route with no length', () => {
+    const fixture = urbanFixture([{ kind: 'town', from: 100, to: 2_900 }]);
+    const empty = { ...fixture.profile, totalDistance: 0 as Metres };
+    const map = urbanClassMap(fixture.corridor, landClassMask(fixture.corridor), empty);
+    expect(map).toBe(NO_URBAN_CLASS);
+  });
+
   it('wraps a loop route', () => {
     const loop = circuitRoute(400);
     const origin = corridorOrigin(loop);
@@ -166,6 +175,51 @@ describe('urbanClassMap — no map data, no class (#1633, ADR 0054 D-4)', () => 
     expect(map.classAt(2 * loop.totalDistance + 50)).toBe('rural');
     expect(map.classAt(-50)).toBe('rural');
   });
+});
+
+/** A uniform 25 % town over a square kilometre around the route: 10 m houses on a 20 m grid. */
+function uniformTownBeside(profile: RouteProfile) {
+  const origin = corridorOrigin(profile);
+  const ring = (x: number, z: number, side: number): Float32Array =>
+    Float32Array.of(x, z, x + side, z, x + side, z + side, x, z + side);
+  const buildings: BuildingFeature[] = [];
+  for (let x = -700; x < 700; x += 20) {
+    for (let z = -700; z < 1_200; z += 20) {
+      buildings.push({
+        kind: 'building',
+        heightMetres: 6,
+        minHeightMetres: null,
+        rings: [ring(x, z, 10)],
+      });
+    }
+  }
+  const corridor = {
+    routeId: 'uniform-town',
+    origin,
+    covered: () => true,
+    coveredBoxes: [{ minX: -5_000, maxX: 5_000, minZ: -5_000, maxZ: 5_000 }],
+    landUse: [{ layer: 'landuse' as const, kind: 'residential', rings: [ring(-800, -800, 2_000)] }],
+    buildings,
+    paths: [],
+    streets: [],
+  };
+  return { corridor, map: urbanClassMap(corridor, landClassMask(corridor), profile) };
+}
+
+describe('urbanClassMap — a route passing within its own sweep (#1633)', () => {
+  it.each([100, 6])(
+    'reads the same 25 % town down both legs of a hairpin of radius %d m, not a village',
+    (radius) => {
+      const profile = hairpinRoute(radius);
+      const { map } = uniformTownBeside(profile);
+      // Land is counted into the window of the road point nearest it, as the footprints are.
+      // The windows well clear of the turn, whose normals fan out and sample it sparsely.
+      const total = profile.totalDistance;
+      for (const along of [150, 250, total - 250, total - 150]) {
+        expect(map.classAt(along)).toBe('town');
+      }
+    },
+  );
 });
 
 describe('urbanClassMap — handed to the footprints at the press (#1633)', () => {
@@ -196,7 +250,6 @@ describe('urbanClassMap — handed to the footprints at the press (#1633)', () =
     const town = denseTownFixture();
     const map = urbanClassMap(town.corridor, landClassMask(town.corridor), town.profile);
     // 8 × 8 m houses on a 12 m grid to 215 m out: well past a town's coverage.
-    expect(map.classAt(700)).not.toBe('unknown');
-    expect(map.classAt(700)).not.toBe('rural');
+    expect(map.classAt(700)).toBe('town');
   });
 });

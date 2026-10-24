@@ -256,14 +256,18 @@ export function urbanClassMap(
     }
     return false;
   };
+  const sweepNear: number[] = [];
+  const sweepBeside: BesideTheRoad = { along: 0, lateral: 0, distance: 0 };
   const road = drawnRoadPoints(profile, origin);
   const points = road.points;
   const count = points.length / 2;
   const stride = Math.max(1, Math.round(URBAN_SAMPLE_METRES / road.step));
+  // The nearest road point may be a sweep step away, not exactly this one.
+  const alongTolerance = stride * road.step;
   const reach = Math.floor(CORRIDOR_HALF_WIDTH_METRES / URBAN_SAMPLE_METRES);
   for (let point = 0; point < count; point += stride) {
     const along = Math.min(total, point * road.step);
-    const window = Math.min(windows - 1, Math.floor(along / URBAN_WINDOW_METRES));
+    const ownWindow = Math.min(windows - 1, Math.floor(along / URBAN_WINDOW_METRES));
     // The road's heading here: forward, or backward at its last point.
     const from = point + 1 < count ? point : point - 1;
     if (from < 0) break;
@@ -279,6 +283,19 @@ export function urbanClassMap(
       const lateral = step * URBAN_SAMPLE_METRES;
       const x = x0 + normalX * lateral;
       const z = z0 + normalZ * lateral;
+      // Counted only by the sweep at the road point nearest it, as step 2 counts a footprint once: where
+      // the route passes within the sweep of itself, a second pass reaches the same land and must not
+      // count it again, or coverage is divided by the number of passes.
+      if (step !== 0) {
+        const nearRoad = roadSegmentsNear(profile, origin, x, z, Math.abs(lateral) + 1, sweepNear);
+        if (
+          nearestOnRoadSegments(nearRoad, sweepNear, x, z, sweepBeside) &&
+          Math.abs(sweepBeside.along - along) > alongTolerance
+        ) {
+          continue;
+        }
+      }
+      const window = ownWindow;
       samples[window] = (samples[window] as number) + 1;
       const here = mask.classAt(x, z);
       if (here === 'unknown') continue;
@@ -360,14 +377,14 @@ export function urbanClassMap(
     ) {
       nearTowers += towers[other] as number;
     }
-    const count = footprints[window] as number;
+    const footprintCount = footprints[window] as number;
     codes[window] = classify({
       coverage: landSamples === 0 ? 0 : (area[window] as number) / (landSamples * cellArea),
       commercial: landSamples === 0 ? 0 : (commercial[window] as number) / landSamples,
       builtUp: landSamples === 0 ? 0 : (builtUp[window] as number) / landSamples,
       medianStoreys: medianOf(mapped[window] as number[]),
       towers: nearTowers,
-      midriseShare: count === 0 ? 0 : (midrise[window] as number) / count,
+      midriseShare: footprintCount === 0 ? 0 : (midrise[window] as number) / footprintCount,
     });
   }
 
