@@ -469,3 +469,47 @@ export function richmondStreetFixture(): {
     },
   };
 }
+
+/**
+ * #1542's countryside, for the owner's by-eye pair on the realistic page
+ * (`?town=countryside`): from 900 m to 2 100 m of a level road, fields either
+ * side with a gap between two of them, a field set back behind open ground, a
+ * wood on each side and a park — every class #1542 plants and bounds by. No
+ * building. Every tile covered.
+ */
+export function countrysideFixture(): {
+  readonly profile: RouteProfile;
+  readonly origin: CorridorOrigin;
+  readonly corridor: WorldCorridor;
+} {
+  const profile = northRoute(3_000, () => 10);
+  const origin = corridorOrigin(profile);
+  const land = (kind: string, from: number, to: number, near: number, far: number) =>
+    landBeside(profile, origin, 'landuse', kind, from, to, near, far);
+  return {
+    profile,
+    origin,
+    corridor: {
+      routeId: 'countryside',
+      origin,
+      covered: () => true,
+      coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
+      landUse: [
+        // Positive lateral: two fields with a gap, a wood, a field set back.
+        land('farmland', 900, 1_180, 4, 300),
+        land('farmland', 1_230, 1_450, 4, 300),
+        land('wood', 1_450, 1_700, 4, 300),
+        land('farmland', 1_700, 2_100, 40, 300),
+        // Negative: a field, a wood 30 m back behind a strip of field, a park.
+        land('farmland', 900, 1_350, -300, -4),
+        land('wood', 1_350, 1_650, -300, -30),
+        land('farmland', 1_350, 1_650, -30, -4),
+        land('park', 1_650, 1_850, -300, -4),
+        land('farmland', 1_850, 2_100, -300, -4),
+      ],
+      buildings: [],
+      paths: [],
+      streets: [],
+    },
+  };
+}

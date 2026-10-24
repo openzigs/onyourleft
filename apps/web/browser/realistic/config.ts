@@ -21,9 +21,9 @@
  * | `at` | hold the rider still this far along the route, for a screenshot | metres |
  * | `panel` | the on-screen controls | `1` (default), `0` for a clean screenshot |
  * | `layers` | layers switched OFF, for their share of the GPU (#616) | `-sky`, `-surfaces`, `-vegetation`, `-impostors`, `-structures`, `-water`, `-riders`, `-grounding`, comma-separated; default none |
- * | `levers` | #619's levers switched OFF, for a before/after pair at one rung — since #622 its air and since #1274 its crag, for a by-eye pair, since #1283 the generated trees and #1294 the generated firs, for both, since #1523 the ground blend and the road wear, for a cost pair, #1523's bounds on both, for a before/after pair, since #1534 the villages' cleared ground, for both, since #1523 the firs' depth pre-pass, for a before/after pair, and since #1541 the people, for both | `-foliage-order`, `-texture-bias`, `-air`, `-crag`, `-generated-trees`, `-generated-conifers`, `-ground-blend`, `-road-wear`, `-surface-bounds`, `-settlement-clearing`, `-fir-prepass`, `-people`, comma-separated; default none |
+ * | `levers` | #619's levers switched OFF, for a before/after pair at one rung — since #622 its air and since #1274 its crag, for a by-eye pair, since #1283 the generated trees and #1294 the generated firs, for both, since #1523 the ground blend and the road wear, for a cost pair, #1523's bounds on both, for a before/after pair, since #1534 the villages' cleared ground, for both, since #1523 the firs' depth pre-pass, for a before/after pair, since #1541 the people, for both, and since #1542 the countryside's planting, field boundaries, ground clutter, broken roadside hedge and small stones, for both | `-foliage-order`, `-texture-bias`, `-air`, `-crag`, `-generated-trees`, `-generated-conifers`, `-ground-blend`, `-road-wear`, `-surface-bounds`, `-settlement-clearing`, `-fir-prepass`, `-people`, `-land-planting`, `-land-boundaries`, `-ground-clutter`, `-hedge-breaks`, `-small-stones`, comma-separated; default none |
  * | `facing` | which way the route is turned, relative to the sun (#702, `route.ts` §"Which way it faces") | `sun`, `away`; default the route unturned, which looks 110° to 160° away from the sun |
- * | `town` | ride through a mapped town instead of `route.ts`' road (#1581): `footprint-fixtures-testing.ts` §`mixedTownFixture`'s mixed footprints, planned, drawn and lotted as a ride's corridor is, from 900 m to 2 100 m; since #1585 `richmond`, `footprint-fixtures-testing.ts` §`richmondStreetFixture`'s narrow lots drawn as house models beside square ones drawn as extrusions, from 900 m to 1 500 m | `mixed`, `richmond`; default none |
+ * | `town` | ride through a mapped town instead of `route.ts`' road (#1581): `footprint-fixtures-testing.ts` §`mixedTownFixture`'s mixed footprints, planned, drawn and lotted as a ride's corridor is, from 900 m to 2 100 m; since #1585 `richmond`, `footprint-fixtures-testing.ts` §`richmondStreetFixture`'s narrow lots drawn as house models beside square ones drawn as extrusions, from 900 m to 1 500 m; since #1542 `countryside`, `footprint-fixtures-testing.ts` §`countrysideFixture`'s fields, woods and a park, from 900 m to 2 100 m, for #1542's levers | `mixed`, `richmond`, `countryside`; default none |
  * | `route` | which of `route.ts`' roads is ridden (#1559): absent, the valley road every Part Z and Part AH row was taken on; `village`, `route.ts` §`villageRoute`, a level road through two villages, for validation 0002 AE2 (`at=820` holds the first one's church and shops in frame). Refused beside `town`, which is a road of its own | `village`; default none |
  *
  * ⚠️ **Unknown parameters and values are REFUSED**, as #457's page refused
@@ -31,6 +31,7 @@
  * name, and a table of numbers cannot show that it did.
  */
 
+import type { CountrysideLever } from '../../src/game/land-class';
 import type { RealisticTrees } from '../../src/game/realistic-assets';
 import type { DepthPrepassMode, RealisticSurfaces } from '../../src/game/three-renderer';
 
@@ -131,6 +132,26 @@ export type Layer = (typeof LAYERS)[number];
  *   (`scene.ts` §`SceneInput.settlementsWooded`). The tablet's cost pair for
  *   the clearing, which can only take instances away, and the owner's BY-EYE
  *   pair for it. Changes nothing a rider can reach.
+ *
+ * - `land-planting`, `land-boundaries`, `ground-clutter` — #1542's three
+ *   changes, each off on its own (`scene.ts` §`SceneInput.countrysideOff`):
+ *   the species mix and clustering by land class, field boundaries along
+ *   farmland's edges, and stones on pasture and a wood's floor. Off is the
+ *   countryside before #1542. They change only covered land, so pair them with
+ *   `town=countryside`: on `route.ts`' road, which has no corridor, every one
+ *   is the same picture. The owner's BY-EYE pair, and the tablet's cost pair
+ *   (validation 0002 Part AH, #1542's rows).
+ *
+ * - `hedge-breaks`, `small-stones` — the owner's ruling of 2026-10-24 on
+ *   #1542, each off on its own: mapped farmland's roadside hedge lowered and
+ *   broken by gaps, a gate, fence and open verge (`settlements.ts`
+ *   §`roadsidePiece`), and rocks on mapped farmland and a wood smaller and
+ *   kept back from the road (`scatter.ts` §`STONE_SCALE`). Off, each is the
+ *   countryside as #1542 first drew it. `hedge-breaks` has nothing to change
+ *   with `land-boundaries` off; `small-stones` has nothing to change only
+ *   with BOTH `land-planting` and `ground-clutter` off — with `ground-clutter`
+ *   alone off it still shrinks a wood's rocks and keeps them back from the
+ *   road.
  */
 export const LEVERS = [
   'air',
@@ -140,9 +161,14 @@ export const LEVERS = [
   'generated-conifers',
   'generated-trees',
   'ground-blend',
+  'ground-clutter',
+  'hedge-breaks',
+  'land-boundaries',
+  'land-planting',
   'people',
   'road-wear',
   'settlement-clearing',
+  'small-stones',
   'surface-bounds',
   'texture-bias',
 ] as const;
@@ -172,7 +198,7 @@ export interface RealisticPageConfig {
    * A mapped town to ride through — #1581's by-eye pair for the owner, near a
    * town and inside one. `undefined` is `route.ts`' road, with no corridor.
    */
-  readonly town: 'mixed' | 'richmond' | undefined;
+  readonly town: 'mixed' | 'richmond' | 'countryside' | undefined;
   /**
    * #1559: `route.ts` §`villageRoute` instead of its default road, for
    * validation 0002 AE2. `undefined` is the default road, unchanged.
@@ -251,6 +277,17 @@ function switchedOff<T extends string>(
     off.add(found);
   }
   return names.filter((each) => off.has(each));
+}
+
+/** #1542's changes a run switches off, as `scene.ts` §`SceneInput.countrysideOff` takes them. */
+export function countrysideWithLevers(leversOff: readonly Lever[]): readonly CountrysideLever[] {
+  const off: CountrysideLever[] = [];
+  if (leversOff.includes('land-planting')) off.push('planting');
+  if (leversOff.includes('land-boundaries')) off.push('boundaries');
+  if (leversOff.includes('ground-clutter')) off.push('clutter');
+  if (leversOff.includes('hedge-breaks')) off.push('hedge-breaks');
+  if (leversOff.includes('small-stones')) off.push('small-stones');
+  return off;
 }
 
 /**
@@ -337,7 +374,9 @@ export function parseConfig(search: string): RealisticPageConfig {
     layersOff: layersFrom(params.get('layers')),
     leversOff: leversFrom(params.get('levers')),
     facing: params.has('facing') ? oneOf('facing', ['sun', 'away'] as const, 'sun') : undefined,
-    town: params.has('town') ? oneOf('town', ['mixed', 'richmond'] as const, 'mixed') : undefined,
+    town: params.has('town')
+      ? oneOf('town', ['mixed', 'richmond', 'countryside'] as const, 'mixed')
+      : undefined,
     route: params.has('route') ? routeFrom(params) : undefined,
   };
 }

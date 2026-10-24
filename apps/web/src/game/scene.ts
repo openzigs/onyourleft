@@ -36,7 +36,12 @@ import {
   simulatedCrankAngle,
   type RiderRoll,
 } from './bicycle';
-import { NO_LAND_CLASS, type LandClassMask } from './land-class';
+import {
+  countrysideWithout,
+  NO_LAND_CLASS,
+  type CountrysideLever,
+  type LandClassMask,
+} from './land-class';
 import { horizonRelief, terrainCorridor } from './landform';
 import { CAMERA_BEHIND_METRES, CAMERA_TARGET_AHEAD_METRES } from './camera';
 import type { CameraPose, RiderMarker, SceneFrame, WaterFrame } from './port';
@@ -278,6 +283,14 @@ export interface SceneInput {
    * carriageway. Optional the safe way round, for {@link centreline}'s reason.
    */
   readonly peopleOnTheRoad?: boolean | undefined;
+  /**
+   * #1542's changes switched off, each restoring the countryside before it —
+   * the realistic page's `-land-planting`, `-land-boundaries` and
+   * `-ground-clutter` levers, and nothing else (`land-class.ts`
+   * §`CountrysideLever`). Absent, or empty, is every change on. Optional the
+   * safe way round, for {@link centreline}'s reason.
+   */
+  readonly countrysideOff?: readonly CountrysideLever[] | undefined;
 }
 
 /** Another real rider, where to draw them — #783. @see SceneInput.remoteRiders */
@@ -450,6 +463,8 @@ function scenery(
   const last = corridor.centre[corridor.centre.length - 1] as CorridorPoint;
   // #1546: what the ground is where map data was read; nothing, where it was not.
   const land = input.landClass ?? NO_LAND_CLASS;
+  // #1542: what the countryside makes of it, lever by lever.
+  const countryside = countrysideWithout(input.countrysideOff ?? []);
   const natural = scatterAt(
     input.profile,
     input.origin,
@@ -458,6 +473,7 @@ function scenery(
     last.along,
     { maxItems: input.scatterItems ?? SCATTER_MAX_ITEMS, riderMetres: riderDistance },
     land,
+    countryside,
   );
   // #966. The billboards come out of the structures' budget FIRST: a rung that
   // takes structures away takes them too, and none is ever extra.
@@ -490,6 +506,7 @@ function scenery(
     // corridor, which the procedural lots of a mapped town keep clear of.
     // `null` is the `-lots` control: no lots at all.
     input.lotsOff === true ? null : (input.mappedTown ?? NO_MAPPED_TOWN),
+    countryside,
   );
   // #1565: no wall, hedge, fence, signpost or building on a side road, and no
   // tree, shrub or rock either.
