@@ -884,7 +884,10 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         Poly Haven's) and drawn one instanced call a kind by
                         §`FurnitureBelt`, only within `FURNITURE_DRAW_METRES`.
                         Since #1551 a covered stretch takes its sides from
-                        `footways.ts` instead
+                        `footways.ts` instead. Since #1564 each built plot
+                        whose pavement is laid has one path to its building's
+                        front door (read off `buildingPlan`), merged into the
+                        pavements' one call, one geometry group a path
     src/game/footways.ts
                         footways from the corridor's map data (#1551) —
                         `pavementSides`, the side of the drawn road's NORMAL a

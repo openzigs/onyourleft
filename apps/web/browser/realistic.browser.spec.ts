@@ -27,6 +27,13 @@
  * is seen — with each frame's triangles and draw calls printed, which are the
  * figures validation 0002's #1283 and #1294 rows start from.
  *
+ * And since #1559, a fifth: **the village road**. `?route=village` rides
+ * `route.ts` §`villageRoute`, and its hold at `VILLAGE_HOLD_METRES` is
+ * validation 0002 AE2's frame: the page's census of the frame it drew holds a
+ * church and a row of shops in the camera's view, #1535's pavements and every
+ * kind of #1536's furniture. The default URL's road is read back too, by its
+ * fingerprint, on the #616 load: the same road every row was taken on.
+ *
  * ⚠️ **What it does not prove**: anything about the tablet's GPU clock, which
  * is what the switch is FOR — that is validation 0002's Part for #616, run by
  * the owner. And it holds only the vegetation to a number; the other six
@@ -44,6 +51,7 @@ import { REALISTIC_WOODED_DRAW_CALLS } from '../src/game/realistic-budget';
 
 import { NIGHTLY } from './nightly';
 import { LAYERS } from './realistic/config';
+import { realisticRoute, routeDigest, VILLAGE_HOLD_METRES, villageRoute } from './realistic/route';
 import type { RealisticSample } from './realistic-harness';
 
 /** A realistic load's budget: the same 31 MiB `game.browser.spec.ts` §#607 pays for. */
@@ -69,21 +77,25 @@ const VEGETATION_AT_LEAST = 60_000;
 
 /**
  * The most draw calls the owner's page may REPORT held at `at=2550` with the
- * trees a ride draws: **33**, the figure #1289 left it at with two seeds a
- * species, two under `REALISTIC_WOODED_DRAW_CALLS`.
+ * trees a ride draws: **34**, one under `REALISTIC_WOODED_DRAW_CALLS`.
  *
- * **This is the figure #1294's criterion names**: "at or under 33 at
- * `at=2550`" is the page's own `drawCalls`, a mean over its window. It is
- * asserted, and so is the frame's own count below.
+ * ⚠️ **#1294's criterion names 33** — "at or under 33 at `at=2550`", the
+ * figure #1289 left it at — and a reviewer who remembers 33 is reading the
+ * page before #1523. #1523 draws each fir mesh after a depth-only pre-pass,
+ * which is three calls on this frame ({@link FRAME_DRAW_CALLS_AT_2550}); with
+ * `levers=-fir-prepass` the frame makes the 31 it made before. It is the
+ * page's own `drawCalls`, a mean over its window, and is asserted, as is the
+ * frame's own count below.
  */
-const PAGE_DRAW_CALLS_AT_2550 = 33;
+const PAGE_DRAW_CALLS_AT_2550 = 34;
 
 /**
  * What one held frame at `at=2550` makes, counted at the WebGL draw calls:
- * **31**, with the generated firs and with the scanned ones alike (two shapes
- * stand where two stood, and they add no call), on a Mac and on the CI runner,
- * 2026-10-12. Held at the measured figure, so one added call is a red test
- * and not two calls of room under {@link PAGE_DRAW_CALLS_AT_2550}.
+ * **34**, with the generated firs and with the scanned ones alike (two shapes
+ * stand where two stood, and they add no call), on a Mac, 2026-10-24 — 31,
+ * on a Mac and on the CI runner on 2026-10-12, and three for #1523's fir
+ * pre-passes ({@link FRAME_DRAW_CALLS_WITHOUT_PREPASS}). Held at the measured
+ * figure, so one added call is a red test.
  *
  * ⚠️ **The page's mean read 32 to 35 for this frame until #1294**, because
  * its window also held the warm-up and the page's first render, which makes
@@ -91,7 +103,14 @@ const PAGE_DRAW_CALLS_AT_2550 = 33;
  * now starts where the warm-up ends, so a held frame's mean IS its count, and
  * the test below holds the two equal.
  */
-const FRAME_DRAW_CALLS_AT_2550 = 31;
+const FRAME_DRAW_CALLS_AT_2550 = 34;
+
+/**
+ * #1523: the same held frame with `levers=-fir-prepass`: **31**, the figure
+ * #1294 measured — so the three calls above are the pre-passes and nothing
+ * else.
+ */
+const FRAME_DRAW_CALLS_WITHOUT_PREPASS = 31;
 
 type Published = NonNullable<Window['__oylRealistic']>;
 
@@ -137,6 +156,10 @@ test.describe('the realistic page’s instruments — #616', { tag: NIGHTLY }, (
         `layers ${JSON.stringify(all.page.layers)}`,
     );
     expect(all.result.layersOff).toEqual([]);
+    // #1559: the default URL rides the road every Part Z and AH row was taken
+    // on (`route.test.ts` pins it), with no village in this frame.
+    expect(all.page.routeDigest).toBe(routeDigest(realisticRoute()));
+    expect(all.page.census?.structures.church.carried).toBe(0);
     // #639's own criterion, on the page it names and the load this already
     // pays for: the wooded view at `at=2550`, counted at the draw calls, is at
     // or under the budget. The rider and the ladder are held, so the window's
@@ -276,5 +299,68 @@ test.describe('the realistic page’s tree levers — #1283, #1294', { tag: NIGH
     expect(scannedFirs.page.textures?.bytes ?? Infinity).toBeLessThan(
       scanned.page.textures?.bytes ?? 0,
     );
+  });
+
+  test('draws a depth pre-pass for each fir mesh, and with #1523’s lever off the frame #1294 drew', async ({
+    page,
+  }) => {
+    test.setTimeout(2 * REALISTIC_LOAD_BUDGET_MS);
+    const drawn = await ride(page, HELD);
+    const off = await ride(page, `${HELD}&levers=-fir-prepass`);
+    console.log(
+      `#1523 at=2550, held: ${String(drawn.result.lastFrame.calls)} draw calls and ` +
+        `${String(drawn.result.lastFrame.triangles)} triangles with the firs' pre-pass; ` +
+        `${String(off.result.lastFrame.calls)} and ${String(off.result.lastFrame.triangles)} without`,
+    );
+    expect(drawn.result.leversOff).toEqual([]);
+    expect(off.result.leversOff).toEqual(['fir-prepass']);
+    // The lever takes the pre-passes out and nothing else: the frame #1294 drew.
+    expect(off.result.lastFrame.calls).toBe(FRAME_DRAW_CALLS_WITHOUT_PREPASS);
+    expect(drawn.result.lastFrame.calls).toBe(FRAME_DRAW_CALLS_AT_2550);
+    // At most one call for each fir mesh — two shapes at two levels — and the
+    // triangles of the firs drawn twice.
+    expect(drawn.result.lastFrame.calls - off.result.lastFrame.calls).toBeGreaterThan(0);
+    expect(drawn.result.lastFrame.calls - off.result.lastFrame.calls).toBeLessThanOrEqual(
+      2 * REALISTIC_CONIFERS.generated.length,
+    );
+    expect(drawn.result.lastFrame.triangles).toBeGreaterThan(off.result.lastFrame.triangles);
+    // The lever chooses the pre-pass and nothing else: the rung does not move.
+    expect(off.result.rung).toBe(drawn.result.rung);
+  });
+});
+
+test.describe('the realistic page’s village road — #1559', { tag: NIGHTLY }, () => {
+  test('holds a church, a row of shops, pavements and furniture in frame, read off the frame it drew', async ({
+    page,
+  }) => {
+    test.setTimeout(REALISTIC_LOAD_BUDGET_MS);
+
+    // Validation 0002 AE2's URL, the panel and the ladder held as the row is.
+    const village = await ride(
+      page,
+      `?ladder=0&panel=0&seconds=1&at=${String(VILLAGE_HOLD_METRES)}&route=village`,
+    );
+    const census = village.page.census;
+    console.log(
+      `#1559 route=village at=${String(VILLAGE_HOLD_METRES)}: ${JSON.stringify(census)}; ` +
+        `${String(village.result.lastFrame.triangles)} triangles in ` +
+        `${String(village.result.lastFrame.calls)} draw calls`,
+    );
+    // Another road from the default one, and the one `route.test.ts` pins.
+    expect(village.page.routeDigest).toBe(routeDigest(villageRoute()));
+    expect(village.page.routeDigest).not.toBe(routeDigest(realisticRoute()));
+    if (census === undefined) throw new Error('the page published no census');
+    expect(census.structures.church.inView).toBeGreaterThanOrEqual(1);
+    expect(census.structures['shop-row'].inView).toBeGreaterThanOrEqual(1);
+    expect(census.structures.building.inView).toBeGreaterThan(5);
+    // #1535's pavements and #1536's furniture, every kind of it in view.
+    expect(census.streets).toBeGreaterThanOrEqual(1);
+    expect(census.pavementTriangles).toBeGreaterThan(0);
+    for (const [kind, counted] of Object.entries(census.furniture)) {
+      expect(counted.inView, kind).toBeGreaterThan(0);
+    }
+    // And the frame was drawn, not only built.
+    expect(village.result.lastFrame.triangles).toBeGreaterThan(0);
+    expect(village.result.lastFrame.calls).toBeGreaterThan(0);
   });
 });

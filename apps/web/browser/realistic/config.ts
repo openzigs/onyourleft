@@ -21,9 +21,10 @@
  * | `at` | hold the rider still this far along the route, for a screenshot | metres |
  * | `panel` | the on-screen controls | `1` (default), `0` for a clean screenshot |
  * | `layers` | layers switched OFF, for their share of the GPU (#616) | `-sky`, `-surfaces`, `-vegetation`, `-impostors`, `-structures`, `-water`, `-riders`, `-grounding`, comma-separated; default none |
- * | `levers` | #619's levers switched OFF, for a before/after pair at one rung — since #622 its air and since #1274 its crag, for a by-eye pair, since #1283 the generated trees and #1294 the generated firs, for both, since #1523 the ground blend and the road wear, for a cost pair, #1523's bounds on both, for a before/after pair, and since #1534 the villages' cleared ground, for both | `-foliage-order`, `-texture-bias`, `-air`, `-crag`, `-generated-trees`, `-generated-conifers`, `-ground-blend`, `-road-wear`, `-surface-bounds`, `-settlement-clearing`, comma-separated; default none |
+ * | `levers` | #619's levers switched OFF, for a before/after pair at one rung — since #622 its air and since #1274 its crag, for a by-eye pair, since #1283 the generated trees and #1294 the generated firs, for both, since #1523 the ground blend and the road wear, for a cost pair, #1523's bounds on both, for a before/after pair, since #1534 the villages' cleared ground, for both, and since #1523 the firs' depth pre-pass, for a before/after pair | `-foliage-order`, `-texture-bias`, `-air`, `-crag`, `-generated-trees`, `-generated-conifers`, `-ground-blend`, `-road-wear`, `-surface-bounds`, `-settlement-clearing`, `-fir-prepass`, comma-separated; default none |
  * | `facing` | which way the route is turned, relative to the sun (#702, `route.ts` §"Which way it faces") | `sun`, `away`; default the route unturned, which looks 110° to 160° away from the sun |
  * | `town` | ride through a mapped town instead of `route.ts`' road (#1581): `footprint-fixtures-testing.ts` §`mixedTownFixture`'s mixed footprints, planned, drawn and lotted as a ride's corridor is, from 900 m to 2 100 m; since #1585 `richmond`, `footprint-fixtures-testing.ts` §`richmondStreetFixture`'s narrow lots drawn as house models beside square ones drawn as extrusions, from 900 m to 1 500 m | `mixed`, `richmond`; default none |
+ * | `route` | which of `route.ts`' roads is ridden (#1559): absent, the valley road every Part Z and Part AH row was taken on; `village`, `route.ts` §`villageRoute`, a level road through two villages, for validation 0002 AE2 (`at=820` holds the first one's church and shops in frame). Refused beside `town`, which is a road of its own | `village`; default none |
  *
  * ⚠️ **Unknown parameters and values are REFUSED**, as #457's page refused
  * them: a typo in a soak URL would otherwise measure the default under another
@@ -31,7 +32,7 @@
  */
 
 import type { RealisticTrees } from '../../src/game/realistic-assets';
-import type { RealisticSurfaces } from '../../src/game/three-renderer';
+import type { DepthPrepassMode, RealisticSurfaces } from '../../src/game/three-renderer';
 
 import type { Facing } from './route';
 
@@ -111,6 +112,13 @@ export type Layer = (typeof LAYERS)[number];
  * None of #1523's changes anything a rider can reach: the product always
  * builds both surfaces, bounded, and only this page's URL turns one off.
  *
+ * - `fir-prepass` — #1523's fix to the generated firs (#1294): each fir mesh
+ *   drawn after a depth pre-pass that only cuts, so the lit shader runs on
+ *   the one fragment a pixel keeps (`three-renderer.ts` §`withDepthPrepass`).
+ *   Off draws the firs as they were before it, which is the same picture (the
+ *   browser gate holds the two to one) — the tablet's before/after pair for
+ *   the fix on one build. The product always draws the pre-pass.
+ *
  * - `settlement-clearing` — #1534: the trees, shrubs and rocks left standing on
  *   a village's or a farmstead's ground, as every frame was before #1534
  *   (`scene.ts` §`SceneInput.settlementsWooded`). The tablet's cost pair for
@@ -120,6 +128,7 @@ export type Layer = (typeof LAYERS)[number];
 export const LEVERS = [
   'air',
   'crag',
+  'fir-prepass',
   'foliage-order',
   'generated-conifers',
   'generated-trees',
@@ -156,6 +165,11 @@ export interface RealisticPageConfig {
    * town and inside one. `undefined` is `route.ts`' road, with no corridor.
    */
   readonly town: 'mixed' | 'richmond' | undefined;
+  /**
+   * #1559: `route.ts` §`villageRoute` instead of its default road, for
+   * validation 0002 AE2. `undefined` is the default road, unchanged.
+   */
+  readonly route: 'village' | undefined;
 }
 
 /** The ride the owner is asked to look at: the realistic world, the ladder running. */
@@ -171,6 +185,7 @@ export const DEFAULT_CONFIG: RealisticPageConfig = {
   leversOff: [],
   facing: undefined,
   town: undefined,
+  route: undefined,
 };
 
 const KNOWN = new Set([
@@ -185,6 +200,7 @@ const KNOWN = new Set([
   'levers',
   'facing',
   'town',
+  'route',
 ]);
 
 /**
@@ -267,6 +283,15 @@ export function surfacesWithLevers(leversOff: readonly Lever[]): RealisticSurfac
   };
 }
 
+/**
+ * How this run draws the firs — #1523: after their depth pre-pass, as the
+ * product does, unless `fir-prepass` is off. `realistic-harness.ts` hands it
+ * to `three-renderer.ts` §`firDepthPrepassOf`.
+ */
+export function firPrepassWithLevers(leversOff: readonly Lever[]): DepthPrepassMode {
+  return leversOff.includes('fir-prepass') ? 'off' : 'drawn';
+}
+
 /** A configuration from a query string. @see RealisticPageConfig */
 export function parseConfig(search: string): RealisticPageConfig {
   const params = new URLSearchParams(search);
@@ -305,7 +330,22 @@ export function parseConfig(search: string): RealisticPageConfig {
     leversOff: leversFrom(params.get('levers')),
     facing: params.has('facing') ? oneOf('facing', ['sun', 'away'] as const, 'sun') : undefined,
     town: params.has('town') ? oneOf('town', ['mixed', 'richmond'] as const, 'mixed') : undefined,
+    route: params.has('route') ? routeFrom(params) : undefined,
   };
+}
+
+/**
+ * `?route=village` — #1559. Refused beside `town`, which rides a road of its
+ * own: a URL naming both would measure one of them under the other's name.
+ */
+function routeFrom(params: URLSearchParams): 'village' {
+  const value = params.get('route');
+  if (value !== 'village')
+    throw new Error(`realistic: route is one of village, not "${String(value)}"`);
+  if (params.has('town')) {
+    throw new Error('realistic: route and town are two roads; name one of them, not both');
+  }
+  return value;
 }
 
 /** The query string that reproduces a configuration — the inverse of {@link parseConfig}. */
@@ -326,6 +366,7 @@ export function configQuery(config: RealisticPageConfig): string {
   }
   if (config.facing !== undefined) params.set('facing', config.facing);
   if (config.town !== undefined) params.set('town', config.town);
+  if (config.route !== undefined) params.set('route', config.route);
   const query = params.toString();
   return query === '' ? '' : `?${query}`;
 }

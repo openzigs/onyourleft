@@ -1110,6 +1110,7 @@ describe('the generated trees, loaded and drawn through the product’s own path
         '#include <map_fragment>',
         '#include <color_fragment>',
         '#include <alphamap_fragment>',
+        '#include <alphatest_fragment>',
         '#include <roughnessmap_fragment>',
         '#include <normal_fragment_begin>',
         '#include <normal_fragment_maps>',
@@ -1366,4 +1367,129 @@ describe('the generated trees, loaded and drawn through the product’s own path
     },
     120_000,
   );
+
+  /** What this reads of a fir mesh and its depth pre-pass — #1523. */
+  interface PrepassedMesh extends DrawnMesh {
+    readonly parent: unknown;
+    readonly renderOrder: number;
+    readonly visible: boolean;
+    readonly children: readonly unknown[];
+    readonly material: DrawnMesh['material'] & {
+      depthFunc: number;
+      readonly colorWrite: boolean;
+      depthWrite: boolean;
+      customProgramCacheKey(): string;
+    };
+    onBeforeRender(...args: unknown[]): void;
+    onAfterRender(...args: unknown[]): void;
+  }
+
+  /** three's `LessEqualDepth` and `EqualDepth`, which this file may not import. */
+  const LESS_EQUAL_DEPTH = 3;
+  const EQUAL_DEPTH = 4;
+
+  it('draws each fir mesh after a depth pre-pass of its own program, and no broadleaf — #1523', async () => {
+    const renderer = await loadedOn(TABLET, 'generated');
+    const belt = renderer.realisticVegetationOfLoadedWorld();
+    if (belt === undefined) throw new Error('no world is loaded');
+    const levelsOf = (kind: TreeKind) =>
+      belt.levelsOf(kind) as unknown as {
+        readonly full: readonly (readonly PrepassedMesh[])[];
+        readonly middle: readonly (readonly PrepassedMesh[] | undefined)[];
+      };
+    const meshesOf = (kind: TreeKind): PrepassedMesh[] => {
+      const levels = levelsOf(kind);
+      return [...levels.full.flat(), ...levels.middle.flatMap((meshes) => meshes ?? [])];
+    };
+    const firs = meshesOf('tree-conifer');
+    const prepasses = belt.depthPrepasses as unknown as readonly {
+      readonly full: PrepassedMesh;
+      readonly prepass: PrepassedMesh;
+    }[];
+    // One pre-pass for every fir mesh at the full and the middle level — two
+    // shapes, two levels — and none for a broadleaf.
+    expect(firs).toHaveLength(2 * REALISTIC_CONIFERS.generated.length);
+    expect(prepasses).toHaveLength(firs.length);
+    prepasses.forEach((each, at) => expect(each.full).toBe(firs[at]));
+    for (const broadleaf of meshesOf('tree-broadleaf')) expect(broadleaf.children).toEqual([]);
+
+    for (const { full, prepass } of prepasses) {
+      // Drawn with the mesh: its child, its instances, its geometry, and
+      // ahead of it in three's order.
+      expect(prepass.parent).toBe(full);
+      expect(prepass.instanceMatrix).toBe(full.instanceMatrix);
+      expect(prepass.instanceColor).toBe(full.instanceColor);
+      expect(prepass.geometry).toBe(full.geometry);
+      expect(prepass.renderOrder).toBeLessThan(full.renderOrder);
+      expect(prepass.visible).toBe(true);
+      // Writing depth and no colour, from the mesh's own program.
+      expect(prepass.material).not.toBe(full.material);
+      expect(prepass.material.colorWrite).toBe(false);
+      expect(full.material.colorWrite).toBe(true);
+      expect(prepass.material.customProgramCacheKey()).toBe(full.material.customProgramCacheKey());
+      const own = compiled(full.material);
+      const twin = compiled(prepass.material);
+      expect(twin.fragment).toBe(own.fragment);
+      expect(twin.vertex).toBe(own.vertex);
+      // The one difference is the uniform: the pre-pass stops after the cut.
+      // It cuts by three's own alpha test, before the tint, and returns.
+      expect(own.fragment).toContain(
+        [
+          '#include <color_fragment>',
+          'if ( oylDepthOnly ) {',
+          '#include <alphatest_fragment>',
+          '  gl_FragColor = vec4( 0.0 );',
+          '  return;',
+          '}',
+          'diffuseColor.rgb = oylTinted(diffuseColor.rgb, vOylTint);',
+        ].join('\n'),
+      );
+      expect(own.uniforms['oylDepthOnly']?.value).toBe(false);
+      expect(twin.uniforms['oylDepthOnly']?.value).toBe(true);
+    }
+
+    // The pre-pass draws what its mesh draws, read at the moment it is drawn.
+    belt.update(trees(REALISTIC_CONIFERS.generated.length, 'tree-conifer'), POSE);
+    const drawn = prepasses.filter(({ full }) => full.count > 0);
+    expect(drawn.length).toBeGreaterThan(1);
+    for (const { full, prepass } of drawn) {
+      prepass.onBeforeRender();
+      expect(prepass.count).toBe(full.count);
+    }
+
+    // The mesh is drawn with the EQUAL test, and its material put back after.
+    const each = drawn[0];
+    if (each === undefined) throw new Error('no fir drawn');
+    const material = each.full.material;
+    const drawWith = (): number => {
+      each.full.onBeforeRender();
+      const during = material.depthFunc;
+      const writing = material.depthWrite;
+      each.full.onAfterRender();
+      expect(material.depthFunc).toBe(LESS_EQUAL_DEPTH);
+      expect(material.depthWrite).toBe(true);
+      return during === EQUAL_DEPTH ? (writing ? -1 : EQUAL_DEPTH) : during;
+    };
+    expect(material.depthFunc).toBe(LESS_EQUAL_DEPTH);
+    expect(material.depthWrite).toBe(true);
+    // EQUAL and no depth write while drawn (-1 would mean it still wrote).
+    expect(drawWith()).toBe(EQUAL_DEPTH);
+    // Off: no pre-pass drawn and the mesh's own test, as before #1523.
+    belt.setDepthPrepass('off');
+    expect(prepasses.every(({ prepass }) => !prepass.visible)).toBe(true);
+    expect(drawWith()).toBe(LESS_EQUAL_DEPTH);
+    // The gate's control: the EQUAL test with no pre-pass drawn.
+    belt.setDepthPrepass('unprepared');
+    expect(prepasses.every(({ prepass }) => !prepass.visible)).toBe(true);
+    expect(drawWith()).toBe(EQUAL_DEPTH);
+    belt.setDepthPrepass('drawn');
+    expect(prepasses.every(({ prepass }) => prepass.visible)).toBe(true);
+
+    // And #619's order off keeps each pre-pass just ahead of its mesh.
+    belt.setFoliageOrdered(false);
+    for (const { full, prepass } of prepasses) {
+      expect(full.renderOrder).toBe(0);
+      expect(prepass.renderOrder).toBeLessThan(0);
+    }
+  }, 120_000);
 });

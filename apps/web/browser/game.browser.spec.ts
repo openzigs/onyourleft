@@ -1880,6 +1880,29 @@ function expectAPavement(
   expect(offRgb).toHaveLength(3);
   const apart = Math.max(...[0, 1, 2].map((c) => Math.abs((onRgb[c] ?? 0) - (offRgb[c] ?? 0))));
   expect(apart).toBeGreaterThan(8);
+  expectDoorPaths(pavement, testInfo, world);
+}
+
+/**
+ * #1564's browser-gate half, for either world, on #1535's village frame:
+ * every built plot has exactly one front path, read back off the drawn
+ * pavement mesh, and no path stands anywhere else; with the paths switched
+ * off none is drawn (the control); and they cost no draw call of their own.
+ */
+function expectDoorPaths(
+  pavement: RealisticMeasurement['pavement'],
+  testInfo: { readonly annotations: { type: string; description?: string }[] },
+  world: string,
+): void {
+  const { built, withOne, elsewhere, drawnOff, drawCallsOff } = pavement.doorPaths;
+  const measured = `${world}: ${String(withOne)} of ${String(built)} built plots with exactly one path, ${String(elsewhere)} elsewhere; ${String(drawnOff)} drawn with them off; ${String(pavement.drawCalls)} draw calls with them, ${String(drawCallsOff)} without`;
+  testInfo.annotations.push({ type: 'front paths', description: measured });
+  console.log(`front paths — ${measured}`);
+  expect(built).toBeGreaterThan(10);
+  expect(withOne).toBe(built);
+  expect(elsewhere).toBe(0);
+  expect(drawnOff).toBe(0);
+  expect(drawCallsOff).toBe(pavement.drawCalls);
 }
 
 /**
@@ -3451,6 +3474,24 @@ const SURFACE_BOUNDS_TOLERANCE = 0;
 /** #1523: how many pixels each cost lever must move, at the least, for the comparison to mean anything. */
 const SURFACE_CONTROL_PIXELS = 1_000;
 
+/**
+ * #1523: how far, in steps of one channel of one pixel, the wooded frame drawn
+ * with the firs' depth pre-pass may differ from the same frame drawn without
+ * it: **none**. Both passes are one program (`three-renderer.ts`
+ * §`withDepthPrepass`), so every kept fragment lands on the depth its
+ * pre-pass wrote and is lit as it was.
+ */
+const FIR_PREPASS_TOLERANCE = 0;
+
+/** #1523: how many pixels the EQUAL test with no pre-pass must move, at the least. */
+const FIR_PREPASS_CONTROL_PIXELS = 1_000;
+
+/**
+ * #1523: the most draw calls the pre-pass may add — one for each fir mesh at
+ * the full and middle level, two shapes of each: **4**.
+ */
+const FIR_PREPASS_MOST_CALLS = 4;
+
 test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
   paysForTheRealisticLoad();
 
@@ -4153,6 +4194,28 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     // left out: not one pixel may move, on the road or on the bank.
     expect(road.largest).toBeLessThanOrEqual(SURFACE_BOUNDS_TOLERANCE);
     expect(bank.largest).toBeLessThanOrEqual(SURFACE_BOUNDS_TOLERANCE);
+  });
+
+  test('draws the firs the same after their depth pre-pass as without it — and draws none with the EQUAL test alone — #1523', async ({
+    harnessRun,
+  }) => {
+    const { firPrepass: prepass } = await realistic(harnessRun);
+    expect(prepass.measured).toBe(true);
+    console.log(
+      `#1523 firs: pre-pass against none, largest channel step ${String(prepass.largest)}, ` +
+        `${String(prepass.differing)} of ${String(prepass.pixels)} pixels differ; ` +
+        `the EQUAL test with no pre-pass moves ${String(prepass.unprepared)}; ` +
+        `${String(prepass.calls)} draw calls with the pre-pass, ${String(prepass.callsWithout)} without`,
+    );
+    // The control first: with the EQUAL test and nothing laid before it, the
+    // firs are not drawn — so the full pass really is tested against the
+    // pre-pass's depth, and a frame with no fir in it cannot pass below.
+    expect(prepass.unprepared).toBeGreaterThan(FIR_PREPASS_CONTROL_PIXELS);
+    // The pre-pass is drawn: one more call for each fir mesh in the frame.
+    expect(prepass.calls).toBeGreaterThan(prepass.callsWithout);
+    expect(prepass.calls - prepass.callsWithout).toBeLessThanOrEqual(FIR_PREPASS_MOST_CALLS);
+    // And it is a cost, never a picture: not one pixel moves.
+    expect(prepass.largest).toBeLessThanOrEqual(FIR_PREPASS_TOLERANCE);
   });
 
   test('draws no tree, shrub or rock on a village’s ground, where the same frame left wooded draws some — #1534', async ({

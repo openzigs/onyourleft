@@ -160,6 +160,7 @@ import {
   DoubleSide,
   DataTexture,
   DynamicDrawUsage,
+  EqualDepth,
   EquirectangularReflectionMapping,
   Euler,
   FileLoader,
@@ -213,6 +214,7 @@ import {
   Vector4,
   WebGLRenderer,
   type Bone,
+  type DepthModes,
   type Material,
   type Object3D,
   type SkinnedMesh,
@@ -469,6 +471,7 @@ import {
   FURNITURE_DRAW_METRES,
   FURNITURE_KINDS,
   type FurnitureKind,
+  type PavementMesh,
   type VillageStreet,
 } from './streets';
 import type { SideRoad } from './cross-streets';
@@ -7853,6 +7856,184 @@ function withTreeDither(material: MeshStandardMaterial): void {
   withInstanceChannels(material, true);
 }
 
+/**
+ * How a fir's meshes are drawn — #1523:
+ *
+ * - `drawn`, the product's: each fir mesh at its full and middle level is
+ *   drawn twice. First its depth pre-pass ({@link withDepthPrepass}) lays the
+ *   depth of every fragment that survives the cut, writing no colour; then the
+ *   mesh itself is drawn with an EQUAL depth test, so the whole lit shader runs
+ *   only on the fragment each pixel keeps.
+ * - `off`: the mesh alone, as before #1523 — the owner's page's
+ *   `levers=-fir-prepass`, and the browser gate's reference picture.
+ * - `unprepared`: the EQUAL test with no pre-pass, which draws no fir at all.
+ *   The browser gate's control that the full pass really is tested against
+ *   the pre-pass's depth; nothing else sets it.
+ */
+export type DepthPrepassMode = 'drawn' | 'off' | 'unprepared';
+
+/**
+ * Where a depth pre-pass stops — #1523: three's own alpha test, as the mesh
+ * runs it further down, as soon as the colour's alpha is known (its map, its
+ * layer's cut and its vertex colour), and before the seeded tint, which moves
+ * only the colour. The test is three's chunk itself, expanded here a second
+ * time, so the two passes cut by the same arithmetic.
+ */
+const DEPTH_ONLY_GLSL = `if ( oylDepthOnly ) {
+#include <alphatest_fragment>
+  gl_FragColor = vec4( 0.0 );
+  return;
+}`;
+
+/** Every material {@link withDepthPrepass} has taught. */
+const DEPTH_PREPASS_TAUGHT = new WeakSet<Material>();
+
+/**
+ * Teaches a tree's material its depth pre-pass — #1523.
+ *
+ * ## Why
+ *
+ * A generated fir is about 1 100 sprig cards with under a quarter of each
+ * covered by needles (`realistic-budget.ts` §"The generated firs, measured").
+ * A card fragment is shaded whenever it passes the depth test, and it passes
+ * whenever nothing nearer has been drawn there YET: every transparent part of
+ * every card in front of the needle a pixel finally shows, and every card
+ * behind it drawn before it. Rasterised on the CPU from the committed
+ * `generated_fir_a.glb` and its own decoded sprig, the full level seen from
+ * 9 m on three sides passes the depth test in 198 404 2×2 quads to show
+ * 58 582 pixels — about eight fragments shaded for each one kept. Laid first
+ * by a pass that only cuts, the depth lets the lit pass through in 39 353
+ * quads, a fifth. A `LessEqual` test after the pre-pass would still pass 146
+ * 265, because the cut-away fragments IN FRONT of the kept one pass it too;
+ * only EQUAL removes them.
+ *
+ * ## How: one program, two materials
+ *
+ * The pre-pass is the SAME program as the mesh's own: this adds a uniform,
+ * `oylDepthOnly`, and when it is set the program cuts and returns as soon as
+ * the alpha is known ({@link DEPTH_ONLY_GLSL}), so the pre-pass runs the
+ * dither, the layer's colour read and the cut and nothing past them. Its material is a twin of this one
+ * ({@link depthPrepassMaterial}) with the same cache key, so three links one
+ * program for both. That is what lets the EQUAL test hold: the two passes
+ * compute `gl_Position` with the same compiled code from the same inputs, so
+ * every kept fragment lands on exactly the depth its pre-pass wrote, and the
+ * same alpha decides the cut in both.
+ *
+ * ⚠️ Throws, at compile, where three's program no longer holds the include it
+ * is spliced at, for {@link replacedOrThrown}'s reason. Idempotent.
+ */
+function withDepthPrepass(material: MeshStandardMaterial): void {
+  if (DEPTH_PREPASS_TAUGHT.has(material)) return;
+  DEPTH_PREPASS_TAUGHT.add(material);
+  const earlier = material.onBeforeCompile.bind(material);
+  const earlierKey = material.customProgramCacheKey();
+  const spliced = "#1523's depth pre-pass";
+  material.onBeforeCompile = (shader, renderer) => {
+    earlier(shader, renderer);
+    shader.uniforms['oylDepthOnly'] = { value: false };
+    shader.fragmentShader = replacedOrThrown(
+      replacedOrThrown(
+        shader.fragmentShader,
+        '#include <common>',
+        '#include <common>\nuniform bool oylDepthOnly;',
+        'fragment',
+        spliced,
+      ),
+      '#include <color_fragment>',
+      `#include <color_fragment>\n${DEPTH_ONLY_GLSL}`,
+      'fragment',
+      spliced,
+    );
+  };
+  material.customProgramCacheKey = () => `${earlierKey}|oyl-depth-prepass`;
+}
+
+/**
+ * The material a mesh's depth pre-pass wears — #1523: a copy of the mesh's
+ * own, writing no colour, whose program is the mesh's own program with
+ * `oylDepthOnly` set. Its compile step and its cache key are the original's,
+ * read when three asks, so anything taught to the original later through
+ * those two is taught to this too. Its material properties (map, alphaTest,
+ * side, opacity) are a snapshot from `clone()`: change one on the original
+ * after this and the two passes cut differently, and EQUAL drops needles.
+ * @see withDepthPrepass
+ */
+function depthPrepassMaterial(material: MeshStandardMaterial): MeshStandardMaterial {
+  const twin = constructed(material.clone());
+  twin.name = `${material.name} depth pre-pass`;
+  twin.colorWrite = false;
+  twin.onBeforeCompile = (shader, renderer) => {
+    material.onBeforeCompile(shader, renderer);
+    shader.uniforms['oylDepthOnly'] = { value: true };
+  };
+  twin.customProgramCacheKey = () => material.customProgramCacheKey();
+  // The same program, so taught what the original was: the instance's tint
+  // and keeps (#621, #617), #619's texture bias and #622's air — which the
+  // browser gate's census of the realistic materials reads.
+  INSTANCE_TAUGHT.set(twin, true);
+  TEXTURE_BIASED.add(twin);
+  ATMOSPHERIC.add(twin);
+  DEPTH_PREPASS_TAUGHT.add(twin);
+  return twin;
+}
+
+/**
+ * How far ahead of its mesh in three's draw order a depth pre-pass is drawn:
+ * half a place, so it is drawn before the mesh it lays depth for and after
+ * everything drawn before that mesh — #1523. @see FOLIAGE_RENDER_ORDER
+ */
+const DEPTH_PREPASS_LEAD = 0.5;
+
+/** One fir mesh and the pre-pass that lays its depth — #1523. */
+interface DepthPrepass {
+  readonly full: InstancedMesh;
+  readonly prepass: InstancedMesh;
+}
+
+/**
+ * A depth pre-pass for an instanced tree mesh — #1523. A child of the mesh,
+ * so it is drawn only when the mesh is (three skips a hidden object's
+ * children), with the mesh's own instance matrices and channels, and its
+ * count copied from the mesh's at the moment it is drawn. The mesh is drawn
+ * with an EQUAL depth test while `mode` says so, and its material is put back
+ * to the test it had as soon as it has been drawn, so nothing else that wears
+ * the material is ever drawn with it.
+ */
+function depthPrepassOf(
+  full: InstancedMesh,
+  twin: MeshStandardMaterial,
+  mode: () => DepthPrepassMode,
+): DepthPrepass {
+  const prepass = new InstancedMesh(full.geometry, twin, 0);
+  prepass.instanceMatrix = full.instanceMatrix;
+  prepass.instanceColor = full.instanceColor;
+  // Shared buffers: disposing a pre-pass alone would delete the live mesh's
+  // GL buffers (three's InstancedMesh dispose). Dispose them only with `full`.
+  prepass.frustumCulled = false;
+  prepass.renderOrder = full.renderOrder - DEPTH_PREPASS_LEAD;
+  prepass.onBeforeRender = () => {
+    prepass.count = full.count;
+  };
+  full.add(prepass);
+  const own = full.material as Material;
+  let restore: { readonly func: DepthModes; readonly write: boolean } | undefined;
+  full.onBeforeRender = () => {
+    if (mode() === 'off') return;
+    restore = { func: own.depthFunc, write: own.depthWrite };
+    own.depthFunc = EqualDepth;
+    // Redundant under EQUAL, and a depth write beside `discard` makes some
+    // mobile GPUs test depth late, so the lit shader would run on every fragment.
+    own.depthWrite = false;
+  };
+  full.onAfterRender = () => {
+    if (restore === undefined) return;
+    own.depthFunc = restore.func;
+    own.depthWrite = restore.write;
+    restore = undefined;
+  };
+  return { full, prepass };
+}
+
 /** A unit quad standing on its bottom edge: x in [−0.5, 0.5], y in [0, 1]. */
 /**
  * The uniforms every realistic plant's breeze and every impostor's light read
@@ -8537,9 +8718,14 @@ export class LogoBelt {
 }
 
 /**
- * Every village street in view, kerbs and pavements — #1535 (`streets.ts`).
+ * Every village street in view, kerbs and pavements — #1535 (`streets.ts`) —
+ * and since #1564 the path from the pavement to each front door.
  * **One mesh and one draw call** however many villages are in view, and none
- * where a frame holds no street.
+ * where a frame holds no street: the paths are merged into the pavements'
+ * geometry, in their material, and add no call. Each path is one geometry
+ * GROUP over its own triangles — a single-material mesh draws its whole index
+ * in one call whatever its groups — so the browser gate can read every path
+ * back off the drawn mesh ({@link doorPathsDrawnOf}).
  *
  * ⚠️ **Rebuilt only when the SET of streets changes**, which is when a village
  * comes into view or leaves it: `streets.ts` hands every frame the same
@@ -8563,6 +8749,10 @@ export class PavementBelt {
   #shown = true;
   /** Whether the browser gate has turned the pavements off — its control. */
   #switchedOn = true;
+  /** Whether the browser gate has turned the front paths off — #1564's control. */
+  #pathsOn = true;
+  /** Whether the mesh holds the front paths of {@link #held}. */
+  #heldPaths = true;
 
   constructor(
     world: 'stylised' | 'realistic',
@@ -8615,6 +8805,11 @@ export class PavementBelt {
     this.#switchedOn = on;
   }
 
+  /** @see doorPathsShownOf */
+  switchPathsOn(on: boolean): void {
+    this.#pathsOn = on;
+  }
+
   /** Shades the pavements, or stops shading them — #286. @see QualitySettings.shading */
   setShading(shading: QualitySettings['shading']): void {
     this.#mesh.material = this.#materials[shading];
@@ -8623,9 +8818,10 @@ export class PavementBelt {
   /** This frame's streets. */
   update(streets: readonly VillageStreet[]): void {
     const drawn = this.#shown && this.#switchedOn ? streets : NO_STREETS;
-    if (!sameStreets(drawn, this.#held)) {
+    if (!sameStreets(drawn, this.#held) || this.#pathsOn !== this.#heldPaths) {
       this.#held = drawn;
-      const geometry = pavementGeometry(drawn, this.#tileMetres);
+      this.#heldPaths = this.#pathsOn;
+      const geometry = pavementGeometry(drawn, this.#tileMetres, this.#pathsOn);
       this.#mesh.geometry.dispose();
       this.#mesh.geometry = geometry;
     }
@@ -8649,34 +8845,45 @@ function sameStreets(first: readonly VillageStreet[], second: readonly VillageSt
 
 /**
  * Every street's pavement as one geometry, its texture coordinates turned from
- * metres into repeats of a photograph `tileMetres` across.
+ * metres into repeats of a photograph `tileMetres` across — and, `withPaths`,
+ * every street's front paths after them (#1564), one group each.
  */
-function pavementGeometry(streets: readonly VillageStreet[], tileMetres: number): BufferGeometry {
+function pavementGeometry(
+  streets: readonly VillageStreet[],
+  tileMetres: number,
+  withPaths: boolean,
+): BufferGeometry {
+  const meshes: PavementMesh[] = [];
+  for (const { pavement } of streets) meshes.push(pavement);
+  const firstPath = meshes.length;
+  if (withPaths)
+    for (const { doorPaths } of streets) for (const { mesh } of doorPaths) meshes.push(mesh);
   let vertices = 0;
   let indices = 0;
-  for (const { pavement } of streets) {
-    vertices += pavement.positions.length / 3;
-    indices += pavement.indices.length;
+  for (const mesh of meshes) {
+    vertices += mesh.positions.length / 3;
+    indices += mesh.indices.length;
   }
   const positions = new Float32Array(vertices * 3);
   const normals = new Float32Array(vertices * 3);
   const uvs = new Float32Array(vertices * 2);
   const index = new Uint32Array(indices);
+  const geometry = new BufferGeometry();
   let vertex = 0;
   let at = 0;
-  for (const { pavement } of streets) {
-    positions.set(pavement.positions, vertex * 3);
-    normals.set(pavement.normals, vertex * 3);
-    for (let each = 0; each < pavement.uvs.length; each += 1) {
-      uvs[vertex * 2 + each] = (pavement.uvs[each] as number) / tileMetres;
+  meshes.forEach((mesh, which) => {
+    positions.set(mesh.positions, vertex * 3);
+    normals.set(mesh.normals, vertex * 3);
+    for (let each = 0; each < mesh.uvs.length; each += 1) {
+      uvs[vertex * 2 + each] = (mesh.uvs[each] as number) / tileMetres;
     }
-    for (let each = 0; each < pavement.indices.length; each += 1) {
-      index[at + each] = (pavement.indices[each] as number) + vertex;
+    for (let each = 0; each < mesh.indices.length; each += 1) {
+      index[at + each] = (mesh.indices[each] as number) + vertex;
     }
-    vertex += pavement.positions.length / 3;
-    at += pavement.indices.length;
-  }
-  const geometry = new BufferGeometry();
+    if (which >= firstPath) geometry.addGroup(at, mesh.indices.length);
+    vertex += mesh.positions.length / 3;
+    at += mesh.indices.length;
+  });
   geometry.setAttribute('position', new BufferAttribute(positions, 3));
   geometry.setAttribute('normal', new BufferAttribute(normals, 3));
   geometry.setAttribute('uv', new BufferAttribute(uvs, 2));
@@ -9395,6 +9602,10 @@ export class RealisticVegetationBelt {
   /** Which of this frame's items are trees the camera can see — grown, never per frame. */
   #seen = new Uint8Array(SCATTER_INSTANCE_CAPACITY);
   #shown = true;
+  /** #1523: each fir mesh's depth pre-pass, and the materials they wear. @see withDepthPrepass */
+  readonly #prepasses: DepthPrepass[] = [];
+  readonly #prepassMaterials: MeshStandardMaterial[] = [];
+  #prepassMode: DepthPrepassMode = 'drawn';
   /**
    * The rung's scenery budget — #245's, shared with the primitives belt (#478).
    *
@@ -9448,6 +9659,8 @@ export class RealisticVegetationBelt {
         for (const part of shape.parts) {
           if (tree) withTreeDither(part.material);
           else withInstanceChannels(part.material, false);
+          // #1523: a fir is drawn after a depth pre-pass.
+          if (kind === 'tree-conifer') withDepthPrepass(part.material);
         }
       }
       this.#kinds.push({
@@ -9487,6 +9700,53 @@ export class RealisticVegetationBelt {
         footprint: shapes.map((shape) => groundFootprint(shape.parts)),
       });
     }
+    this.#prepareFirs();
+  }
+
+  /**
+   * Gives every fir mesh at its full and middle level a depth pre-pass —
+   * #1523. One twin material a material, shared by the two levels as the
+   * material is. A fir's merged material is cut, so this is every part of it;
+   * drawn apart (`setRealisticMaterialsMerged`, the browser gate's #639
+   * control) its bark gets one too, so the two loads still submit the same
+   * triangles. @see withDepthPrepass
+   */
+  #prepareFirs(): void {
+    const firs = this.#kinds.find((each) => each.kind === 'tree-conifer');
+    if (firs === undefined) return;
+    const twins = new Map<Material, MeshStandardMaterial>();
+    const mode = (): DepthPrepassMode => this.#prepassMode;
+    for (const mesh of [...firs.near.flat(), ...firs.middle.flatMap((meshes) => meshes ?? [])]) {
+      const material = mesh.material as MeshStandardMaterial;
+      let twin = twins.get(material);
+      if (twin === undefined) {
+        twin = depthPrepassMaterial(material);
+        twins.set(material, twin);
+        this.#prepassMaterials.push(twin);
+      }
+      this.#prepasses.push(depthPrepassOf(mesh, twin, mode));
+    }
+  }
+
+  /**
+   * The firs' depth pre-passes — #1523: drawn (the product), off (the owner's
+   * page's `-fir-prepass`, and the browser gate's reference), or the EQUAL
+   * test without them (the gate's control). @see DepthPrepassMode
+   */
+  setDepthPrepass(mode: DepthPrepassMode): void {
+    this.#prepassMode = mode;
+    for (const { prepass } of this.#prepasses) prepass.visible = mode === 'drawn';
+  }
+
+  /**
+   * Each fir mesh's depth pre-pass — #1523.
+   *
+   * @test-facing held by `realistic-textures.test.ts` §"#1523", which reads
+   * each pre-pass against its mesh; the renderer draws them as the meshes'
+   * children
+   */
+  get depthPrepasses(): readonly DepthPrepass[] {
+    return this.#prepasses;
   }
 
   /** Every mesh the belt draws with. For the tests and the harness. */
@@ -9534,6 +9794,10 @@ export class RealisticVegetationBelt {
       for (const [level, meshes] of levels) {
         for (const mesh of meshes) mesh.renderOrder = on ? foliageRenderOrder(mesh, level) : 0;
       }
+    }
+    // #1523: a pre-pass keeps its place just ahead of its mesh either way.
+    for (const { full, prepass } of this.#prepasses) {
+      prepass.renderOrder = full.renderOrder - DEPTH_PREPASS_LEAD;
     }
   }
 
@@ -9807,6 +10071,8 @@ export class RealisticVegetationBelt {
   /** Releases the belt's own buffers. The shapes are the loaded world's and outlive it. */
   dispose(): void {
     for (const mesh of this.meshes) mesh.dispose();
+    for (const { prepass } of this.#prepasses) prepass.dispose();
+    for (const material of this.#prepassMaterials) material.dispose();
     this.#quad.dispose();
   }
 
@@ -14878,6 +15144,46 @@ export function pavementsShownOf(view: GameView, on: boolean): void {
 }
 
 /**
+ * Turns a view's front paths off, or on again — #1564. The browser gate's
+ * control: with them off, the village frame's drawn mesh holds none.
+ *
+ * @test-facing the browser gate's control switch, read by `game-harness.ts`;
+ * the product always draws them.
+ */
+export function doorPathsShownOf(view: GameView, on: boolean): void {
+  if (view instanceof ThreeGameView) view.doorPathsShown(on);
+}
+
+/**
+ * Where each front path a view drew in its last frame is — #1564: the middle,
+ * in plan, of each path's group of the drawn pavement mesh, in the world it
+ * drew. Empty where the mesh was not drawn.
+ *
+ * @test-facing read by `game-harness.ts`, which holds them to the village's
+ * built plots: exactly one on each, none on an unbuilt one.
+ */
+export function doorPathsDrawnOf(
+  view: GameView,
+): readonly { readonly x: number; readonly z: number }[] {
+  const mesh = view instanceof ThreeGameView ? view.pavementMesh : undefined;
+  if (mesh?.visible !== true) return [];
+  const { geometry } = mesh;
+  const positions = geometry.getAttribute('position');
+  const index = geometry.index;
+  if (positions === undefined || index === null) return [];
+  return geometry.groups.map((group) => {
+    let x = 0;
+    let z = 0;
+    for (let at = group.start; at < group.start + group.count; at += 1) {
+      const vertex = index.getX(at);
+      x += positions.getX(vertex);
+      z += positions.getZ(vertex);
+    }
+    return { x: x / Math.max(1, group.count), z: z / Math.max(1, group.count) };
+  });
+}
+
+/**
  * Turns a view's cross streets off, or on again — #1565. The browser gate's
  * control: with them off, a frame at a junction draws none.
  *
@@ -15168,6 +15474,21 @@ export function airOf(view: GameView): AirReading | undefined {
  */
 export function foliageOrderedOf(view: GameView, on: boolean): void {
   if (view instanceof ThreeGameView) view.foliageOrdered(on);
+}
+
+/**
+ * Draws a view's realistic firs with their depth pre-pass, without it, or —
+ * the browser gate's control — with the EQUAL test and no pre-pass, which
+ * draws no fir. Drawn and off must read back identical: the pre-pass is a
+ * cost, never a picture. @see DepthPrepassMode
+ *
+ * @test-facing the owner's page's `-fir-prepass` lever (`realistic-harness.ts`)
+ * and the browser gate's read of it (`game-harness.ts`); the product always
+ * draws the pre-pass. The view builds its realistic belts when a rung first
+ * asks for them, so a caller applies it again after a rung change.
+ */
+export function firDepthPrepassOf(view: GameView, mode: DepthPrepassMode): void {
+  if (view instanceof ThreeGameView) view.firDepthPrepass(mode);
 }
 
 /**
@@ -15967,6 +16288,12 @@ class ThreeGameView implements GameView {
     this.#pavements.switchOn(on);
   }
 
+  /** @see doorPathsShownOf */
+  doorPathsShown(on: boolean): void {
+    this.#realistic?.pavements.switchPathsOn(on);
+    this.#pavements.switchPathsOn(on);
+  }
+
   /** @see pavementTrianglesOf — the drawn world's. */
   get pavementMesh(): Mesh | undefined {
     return this.#drawing === 'realistic' ? this.#realistic?.pavements.mesh : this.#pavements.mesh;
@@ -16068,6 +16395,11 @@ class ThreeGameView implements GameView {
   /** @see foliageOrderedOf */
   foliageOrdered(on: boolean): void {
     this.#realistic?.vegetation.setFoliageOrdered(on);
+  }
+
+  /** @see firDepthPrepassOf */
+  firDepthPrepass(mode: DepthPrepassMode): void {
+    this.#realistic?.vegetation.setDepthPrepass(mode);
   }
 
   /**

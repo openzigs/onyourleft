@@ -23,7 +23,7 @@
  * with the owner's exceptions, named below: #1076's of 2026-10-03 and
  * #1137's of 2026-10-05. Any further exception is the owner's ruling,
  * recorded here and in docs/agents/ci.md §4c.
- * Four of the ten describes below draw the REALISTIC world, which is a rung
+ * Six of the twelve describes below draw the REALISTIC world, which is a rung
  * a rider chooses in Settings and is off by default (ADR 0026 D-3), or
  * measure the owner's instruments for it. The other six are the DEFAULT
  * world, every rider's, and each is an owner's exception. One is #1076's: the
@@ -130,6 +130,16 @@ export const NIGHTLY_CHECKS: readonly NightlyCheck[] = [
       'and draw calls. An instrument of a page that ships in no build; which files the ' +
       'PRODUCT asks for is held in the required suite by `realistic-renderer.test.ts` ' +
       '§"asks for the generated broadleaves".',
+  },
+  {
+    spec: 'realistic.browser.spec.ts',
+    describe: 'the realistic page’s village road — #1559',
+    seconds: 'one more load of the owner’s page, about 18 s on a Mac',
+    why:
+      'the owner’s page’s `route=village`, for validation 0002 AE2: that its hold puts a ' +
+      'church, a row of shops, pavements and furniture in the frame it drew. An instrument of ' +
+      'a page that ships in no build; the village road itself is held in the required suite ' +
+      'by `realistic/route.test.ts` §"the village road".',
   },
   {
     spec: 'reflow.browser.spec.ts',

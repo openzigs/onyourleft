@@ -464,6 +464,138 @@ describe('a front porch keeps #1540’s road clearance — #1589', () => {
   });
 });
 
+/** A point in the ground plane, `x, z`. */
+type Flat = readonly [number, number];
+
+/** The convex hull of `points`, round it. */
+function hullOf(points: readonly Flat[]): Flat[] {
+  const sorted = [...points].sort((p, q) => p[0] - q[0] || p[1] - q[1]);
+  const cross = (o: Flat, a: Flat, b: Flat): number =>
+    (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const half = (list: readonly Flat[]): Flat[] => {
+    const out: Flat[] = [];
+    for (const p of list) {
+      while (
+        out.length >= 2 &&
+        cross(out[out.length - 2] as Flat, out[out.length - 1] as Flat, p) <= 0
+      ) {
+        out.pop();
+      }
+      out.push(p);
+    }
+    return out.slice(0, -1);
+  };
+  return [...half(sorted), ...half([...sorted].reverse())];
+}
+
+/** Whether two convex outlines overlap by more than `slack` metres across every edge of either. */
+function overlapping(a: readonly Flat[], b: readonly Flat[], slack = 0.02): boolean {
+  for (const outline of [a, b]) {
+    for (let i = 0; i < outline.length; i += 1) {
+      const p = outline[i] as Flat;
+      const q = outline[(i + 1) % outline.length] as Flat;
+      const length = Math.hypot(q[0] - p[0], q[1] - p[1]);
+      const across = (t: Flat): number => (-(q[1] - p[1]) * t[0] + (q[0] - p[0]) * t[1]) / length;
+      const pa = a.map(across);
+      const pb = b.map(across);
+      const shared =
+        Math.min(Math.max(...pa), Math.max(...pb)) - Math.max(Math.min(...pa), Math.min(...pb));
+      if (shared <= slack) return false;
+    }
+  }
+  return true;
+}
+
+/** The outline of a plan's porch as drawn: the hull of every vertex of its roles. */
+function porchOutline(plan: FootprintPlan): Flat[] {
+  return hullOf(
+    PORCH_ROLES.flatMap((role) =>
+      verticesOf(plan, role).map((vertex): Flat => [vertex.x, vertex.z]),
+    ),
+  );
+}
+
+/** A driveway's outline, its four corners. */
+const drivewayOutline = (plan: FootprintPlan): Flat[] =>
+  [0, 1, 2, 3].map((i): Flat => [
+    plan.driveway[i * 2] as number,
+    plan.driveway[i * 2 + 1] as number,
+  ]);
+
+/**
+ * A tight row of 10 × 8 m two-storey houses on residential land, every
+ * `spacing` metres along the road, turned `turn` degrees off it one way and
+ * the next the other, so that each pair's fronts face a little towards each
+ * other and their porches and driveways reach into the same ground.
+ */
+function turnedRow(turn: number, spacing: number): readonly FootprintPlan[] {
+  const profile = northRoute(3_000, () => 10);
+  const origin = corridorOrigin(profile);
+  const lateral = ROAD_CLEARANCE_METRES + 10;
+  const buildings: BuildingFeature[] = [];
+  for (let along = 200, k = 0; along < 2_600; along += spacing, k += 1) {
+    const angle = ((k % 2 === 0 ? 1 : -1) * turn * Math.PI) / 180;
+    const ring = rectangleBeside(0, 0, 10, 8).map(([x, y]): Flat => [
+      along + x * Math.cos(angle) - y * Math.sin(angle),
+      lateral + x * Math.sin(angle) + y * Math.cos(angle),
+    ]);
+    buildings.push(buildingBeside(profile, origin, [ring], 6));
+  }
+  const corridor: WorldCorridor = {
+    routeId: 'turned-row',
+    origin,
+    covered: () => true,
+    coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
+    landUse: [landBeside(profile, origin, 'landuse', 'residential', 100, 2_700, -60, 60)],
+    buildings,
+    paths: [],
+    streets: [],
+  };
+  return footprintPlans(corridor, landClassMask(corridor), profile, origin).plans;
+}
+
+describe('a front porch keeps off its neighbours’ porches and driveways — #1601', () => {
+  // Before #1601 each of these rows had porches over porches, or on a drive.
+  const rows = (
+    [
+      [30, 11],
+      [20, 12],
+      [30, 13],
+    ] as const
+  ).map(([turn, spacing]) => turnedRow(turn, spacing));
+
+  it('stands on no other house’s porch and on no other house’s driveway', () => {
+    for (const plans of rows) {
+      const porched = plans.filter((plan) => plan.porch);
+      const outlines = new Map(porched.map((plan) => [plan, porchOutline(plan)]));
+      // Control: the rows are full of porches and of garages, so the check binds.
+      expect(porched.length).toBeGreaterThan(80);
+      expect(plans.filter((plan) => plan.garage).length).toBeGreaterThan(40);
+      for (const plan of porched) {
+        const outline = outlines.get(plan) as Flat[];
+        for (const other of plans) {
+          if (other === plan) continue;
+          const theirs = outlines.get(other);
+          if (theirs !== undefined) expect(overlapping(outline, theirs)).toBe(false);
+          if (other.garage) expect(overlapping(outline, drivewayOutline(other))).toBe(false);
+        }
+      }
+    }
+  });
+
+  it('finds an overlap where there is one: the test’s own control', () => {
+    const square = (x: number): Flat[] => [
+      [x, 0],
+      [x + 2, 0],
+      [x + 2, 2],
+      [x, 2],
+    ];
+    expect(overlapping(square(0), square(1))).toBe(true);
+    // Two that only touch along an edge do not.
+    expect(overlapping(square(0), square(2))).toBe(false);
+  });
+});
+
 describe('the most a plan can be, with a porch — #1589', () => {
   it('holds flat residential plans of 48 walls, a garage, a long driveway and a porch to 640', () => {
     // A 16 m front 34 m from the road — a driveway near the longest — and a

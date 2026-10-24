@@ -16,6 +16,14 @@
  *
  * Latitude 51.5°, the fixtures' latitude, for the same sun.
  *
+ * ## The village road — #1559
+ *
+ * That road passes farmsteads and no village (validation 0002 §"AE2 cannot be
+ * taken on this page"), and phase A of #1533 changes villages only. So
+ * {@link villageRoute} is a second road, `?route=village` on the page: the
+ * same meander, level and low, from another start, so its seed lays two
+ * villages beside it. {@link realisticRoute} is untouched by it.
+ *
  * ## Which way it faces — #702
  *
  * The sun stands at one azimuth in every world (`world.ts`
@@ -108,6 +116,86 @@ export function facingTurn(facing: Facing): number {
  * and otherwise exactly the route every Part Z and Part AH row was taken on.
  */
 export function realisticRoute(facing?: Facing): RouteProfile {
+  return meanderingRoute(DEFAULT_START_LONGITUDE, realisticElevation, facing);
+}
+
+/** Where the default route starts, degrees east: the fixtures' longitude. */
+const DEFAULT_START_LONGITUDE = -0.12;
+
+/**
+ * Where {@link villageRoute} starts, degrees east: about 3.5 km east of
+ * {@link realisticRoute}'s first point — #1559.
+ *
+ * ⚠️ **Chosen by searching, not by reasoning.** `scatter.ts` §`scatterSeed`
+ * reads the first point and the length, and `settlements.ts` hashes a kind per
+ * site from that seed, so where a village stands is the seed's say. Of the
+ * starts 0.01° apart from −0.12° east, this is the first whose level road
+ * holds two villages, each with its row of shops nearer the start than its
+ * church — so a rider riding up the road sees both ahead (`route.test.ts`
+ * §"#1559" holds the villages; {@link VILLAGE_HOLD_METRES} the frame).
+ */
+const VILLAGE_START_LONGITUDE = -0.07;
+
+/** How high the village route's road runs, metres: level, and low enough to be built on. */
+export const VILLAGE_ELEVATION_METRES = 30;
+
+/**
+ * Where `?route=village&at=` holds the rider so the first village's church and
+ * its row of shops are both in frame, on the owner's tablet's 16 : 10 frame —
+ * validation 0002 AE2. `route.test.ts` §"#1559" and the browser gate hold
+ * that, read off the frame the page draws (`village.ts` §`frameCensus`).
+ */
+export const VILLAGE_HOLD_METRES = 820;
+
+/**
+ * The route `?route=village` rides — #1559: the same meander as
+ * {@link realisticRoute}, on a level road at {@link VILLAGE_ELEVATION_METRES},
+ * from {@link VILLAGE_START_LONGITUDE}, so it passes through villages where
+ * the default route passes only farmsteads (validation 0002 §"AE2 cannot be
+ * taken on this page"). Level because `settlements.ts` builds only on level,
+ * low, dry ground; the valley, the lake and the bridge stay the default
+ * route's. Turned to `facing` as that one is.
+ */
+export function villageRoute(facing?: Facing): RouteProfile {
+  return meanderingRoute(VILLAGE_START_LONGITUDE, () => VILLAGE_ELEVATION_METRES, facing);
+}
+
+/**
+ * A short fingerprint of a route — #1559: FNV-1a over its positions to 1e-9 of
+ * a degree, its heights to the millimetre and its length to the metre, as
+ * eight hex digits. The page publishes it so the browser gate can see that the
+ * default URL rides {@link realisticRoute} and `?route=village`
+ * {@link villageRoute}, without the page carrying a hash library. Not a
+ * security property: two routes are told apart, not defended.
+ *
+ * ⚠️ **Rounded, because Chromium and Node disagree in the last bits.** The
+ * village road's length summed to 3995.3689064678824 m in the pinned Chromium
+ * and 3995.3689064678833 m under Vitest (2026-10-24), from the same points, so
+ * a digest of the raw numbers differed between the page and the test that
+ * pins it. `route.test.ts`' sha-256 above stays exact, in Node.
+ */
+export function routeDigest(profile: RouteProfile): string {
+  const text = [
+    profile.positions
+      .map((point) => `${point.latitude.toFixed(9)},${point.longitude.toFixed(9)}`)
+      .join(';'),
+    profile.elevations.map((height) => height.toFixed(3)).join(';'),
+    Math.round(profile.totalDistance),
+  ].join('|');
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+/** The ±25° meander from `longitude` at 51.5° north, at `elevation`, turned to `facing`. */
+function meanderingRoute(
+  longitude: number,
+  elevation: (along: number) => number,
+  facing: Facing | undefined,
+): RouteProfile {
   const points: RoutePoint[] = [];
   let east = 0;
   let north = 0;
@@ -117,9 +205,9 @@ export function realisticRoute(facing?: Facing): RouteProfile {
     points.push({
       position: geographicPosition(
         degreesLatitude(LATITUDE + north / METRES_PER_DEGREE),
-        degreesLongitude(-0.12 + east / perLongitude),
+        degreesLongitude(longitude + east / perLongitude),
       ),
-      elevation: altitudeMetres(realisticElevation(along)),
+      elevation: altitudeMetres(elevation(along)),
     });
     const heading = realisticHeading(along + step / 2);
     east += Math.sin(heading) * step;

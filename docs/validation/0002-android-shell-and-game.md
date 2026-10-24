@@ -2881,7 +2881,7 @@ route as Part Z (§"Build and install"), from a `main` that has #506 in it.
 | Step | What to do | What should happen |
 |---|---|---|
 | AE1 | Z6's 30-second realistic row, with its `dumpsys` block: `?panel=0&ladder=0`, held beside the first farmstead as AA3 was | Draw calls and GPU p50 / p90 / p99 against AA3's **35 calls and GPU 5 / 8 / 12 ms**. Triangles, if the page reports them |
-| AE2 | The same row in a **village**, with the church and the shops in frame | The same figures. This is the view the 35 structure meshes are justified against |
+| AE2 | The same row in a **village**, with the church and the shops in frame: since [#1559](https://github.com/openzigs/onyourleft/issues/1559), `?world=realistic&panel=0&ladder=0&at=820&route=village` — the owner's page on its village road (`browser/realistic/route.ts` §`villageRoute`), held 45 m short of the first village's row of shops with its church about 125 m up the road. Record the page's `census` beside the row (`window.__oylRealistic.census`: each structure kind carried and in the camera's view, the streets, the pavement's triangles and the furniture), so the row says what was in frame | The same figures. This is the view the 35 structure meshes are justified against |
 | AE3 | Ride the realistic world past a village and on into fields, at your usual speed | Is every house there? Do the **field walls, hedges and fences** end where they did not before — and does that read as wrong from a saddle? |
 
 ### AE results
@@ -3151,12 +3151,20 @@ does not disturb a cool-down, and before the tablet is restored:
   `location.href = '/harness/realistic.html?world=realistic&panel=0&ladder=0&at=1045'` (AA2's hold),
   wait 30 s, and take Z6's `dumpsys` block. Record draw calls, triangles (the page's `OYL-REALISTIC`
   line) and GPU p50 / p90 / p99 against AA3's 35 calls and 5 / 8 / 12 ms.
-- ⚠️ **AE2 cannot be taken on this page.** Its route has no village. `structuresAt` over the whole
-  route, run on `f91a5fb`, finds buildings at only two places: a house, a barn and a shed at
-  1 050–1 100 m, and a shed, a house and a barn at 3 700–3 800 m. Both are farmsteads, with no church
-  and no shops. AE2 needs a route with a village in the product, ridden with the realistic world
-  chosen in Settings, or a harness route that has one. That is a change to the page, not something
-  a session can do.
+- ⚠️ **AE2 could not be taken on this page until #1559.** Its route has no village. `structuresAt`
+  over the whole route, run on `f91a5fb`, finds buildings at only two places: a house, a barn and a
+  shed at 1 050–1 100 m, and a shed, a house and a barn at 3 700–3 800 m. Both are farmsteads, with
+  no church and no shops. The default URL still rides that route, unchanged.
+- **AE2 since [#1559](https://github.com/openzigs/onyourleft/issues/1559)**: the page has a second
+  road, `&route=village` (`browser/realistic/route.ts` §`villageRoute`): the same meander, level at
+  30 m, from a start 0.05° east, so its seed lays two villages beside it (their rows of shops at
+  about 865 m and 3 445 m, their churches at about 945 m and 3 495 m). Hold it with
+  `location.href = '/harness/realistic.html?world=realistic&panel=0&ladder=0&at=820&route=village'`,
+  wait 30 s, and take Z6's `dumpsys` block as for AE1. Read the page's census too (the log's
+  `OYL-REALISTIC-CENSUS` line, or `window.__oylRealistic.census`). It must show `church` and `shop-row` with `inView` of at least 1, or
+  the row is not of a village in frame. The browser gate (`realistic.browser.spec.ts` §"the
+  realistic page's village road — #1559", nightly) and `realistic/route.test.ts` §"the village
+  road" hold that hold to both, on the desktop and on the tablet's 16 : 10 frame.
 
 ### What each column is
 
@@ -3229,8 +3237,12 @@ published figures (its run predates `oyl.txt`).
 | #1523 | road wear out (#628, #879) | the same build | — ; `levers=-road-wear` | | | | | | | | |
 | #1523 | bounds before (the wear's loop and the ground's twelve derivatives, as they were) | `main` with #1523's bounds | — ; `levers=-surface-bounds` | | | | | | | | |
 | #1523 | bounds after (the product) | the same build | — | | | | | | | | |
+| #1523 | fir pre-pass before (the firs as #1294 drew them) | `main` with #1523's fir pre-pass | — ; `levers=-fir-prepass` | | | | | | | | |
+| #1523 | fir pre-pass after (the product) | the same build | — | | | | | | | | |
 | #1534 | cleared (the villages' ground, 5 min) | `main` with #1534 | — | | | | | | | | |
 | #1534 | wooded (as before #1534, 5 min) | the same build | — ; `levers=-settlement-clearing` | | | | | | | | |
+| #1537 | before phase A (AE2's village, 5 min) | the build AH-1537-1 names | — ; `route=village&at=820` | | | | | | | | |
+| #1537 | after each phase-A merge (AE2's village, 5 min, one row each) | that merge, with #1559's page | — ; `route=village&at=820` | | | | | | | | |
 
 **Phone (OEM, model, Android, WebView):** Google Pixel Tablet, build `CP2A.260705.006`, Android 17,
 WebView 153.0.8010.36  **Build:** debug, `main` at **`f91a5fb`** (before #617's tree LODs, PR #637)
@@ -3760,6 +3772,40 @@ the same run it requires `-road-wear` and `-ground-blend` to move thousands of p
 | AH-1523-6 | **Cool again (AH3, 25–26 °C)**, same build: AH1–AH7, AH4's URL unchanged. `RUN=1523-bounds-after` |
 | AH-1523-7 | Write both rows. The after row's GPU mean should fall towards triage 2's `-road-wear` and `-ground-blend` rows (−25 and −16 MHz) without either lever's change to the picture |
 
+#### The firs' depth pre-pass — the same picture for less ([#1523](https://github.com/openzigs/onyourleft/issues/1523), fix 2)
+
+Triage 1 (2026-10-21, on #1523) put the dropped frames on #1294's generated firs: with only the
+firs reverted to the scans, frames over 20 ms fell from 2.1 % to 0.2 %. A fir is about 1 100 sprig
+cards with under a quarter of each covered by needles, and a card fragment is lit whenever it
+passes the depth test: every cut-away part of a card in front of the needle a pixel finally shows,
+and every card behind it drawn first. Rasterised on a CPU from the committed `generated_fir_a.glb`
+and its own decoded sprig, the full level seen from 9 m on three sides passes the depth test in
+**198 404** 2×2 quads to show 58 582 pixels.
+
+The fix draws each fir mesh twice, at the full and the middle level
+(`three-renderer.ts` §`withDepthPrepass`): a **pre-pass** that runs the mesh's own program only as
+far as its alpha cut and writes depth and no colour, then the mesh itself with an **EQUAL** depth
+test, so the lit shader runs on the one fragment each pixel keeps — **39 353** quads in the same
+model, a fifth. Both passes are one compiled program, so every kept fragment lands on exactly the
+depth its pre-pass wrote. No look is meant to change, and nothing about the firs' files does.
+
+**Its cost is draw calls**: one more for each fir mesh a frame draws, at most four (two shapes, two
+levels). The browser gate's wooded frame makes **32** where it made **29**, inside #639's 35. #615's
+rule 1 says draw calls may not rise; these are depth-only calls of a program the frame already
+uses, traded for most of the firs' lit fragments, and the rows below are what says whether the
+trade is worth it. It is the owner's to rule on.
+
+`levers=-fir-prepass` draws the firs as they were before, on the same build. The browser gate draws
+its wooded frame both ways and requires **every pixel identical** (0 of 230 400 on 2026-10-24), and
+as its control draws the EQUAL test with no pre-pass, which must take the firs out (6 444 pixels
+moved) (`game.browser.spec.ts` §"#1523", nightly).
+
+| Step | What to do |
+|---|---|
+| AH-1523-8 | **Before**: build `main` with #1523's fir pre-pass, owner's page staged, AH1–AH7 with `&levers=-fir-prepass` added to AH4's URL. `RUN=1523-firs-before` |
+| AH-1523-9 | **Cool again (AH3, 25–26 °C)**, same build: AH1–AH7, AH4's URL unchanged. `RUN=1523-firs-after` |
+| AH-1523-10 | Write both rows. Draw calls should rise by up to four and triangles by the firs' own. The after row's GPU mean should fall towards triage 1's `-generated-conifers` row, and its frames over 20 ms towards 0.2 %, without a change to the firs a rider can see |
+
 ### #1534's rows — the villages' ground cleared of trees, shrubs and rocks
 
 [#1534](https://github.com/openzigs/onyourleft/issues/1534) clears every tree, shrub and rock off a
@@ -3776,6 +3822,26 @@ the rule to the vegetation instances drawn beside a village: 0 of 130 on its gro
 | AH-1534-1 | **After #1523's fix has landed**: build `main` with #1534 and the owner's page staged, and run AH1–AH7 for **5 minutes**, AH4's URL unchanged. `RUN=1534-cleared` |
 | AH-1534-2 | **Cool again (AH3, 25–26 °C)**, same build: AH1–AH7 for 5 minutes with `&levers=-settlement-clearing` added to AH4's URL. `RUN=1534-wooded` |
 | AH-1534-3 | Write both rows into the table above. Draw calls should match; triangles in `1534-cleared` at or below `1534-wooded`. By eye, at a village (`&at=` its odometer): no tree in a garden or between a house and the road |
+
+### #1537's rows — a village on the tablet, before and after phase A
+
+[#1537](https://github.com/openzigs/onyourleft/issues/1537) measures phase A of
+[#1533](https://github.com/openzigs/onyourleft/issues/1533) (#1534's cleared ground, #1535's
+pavements, #1536's street furniture), which changes villages only, so its rows are taken at **AE2's
+hold** on the page's village road (#1559). Its hard limit is #1523's: the top rung off the GPU
+ceiling, GPU p50 below 848 MHz and frames over 20 ms at most 0.2 %.
+
+⚠️ **Phase A has merged** (#1534, #1535 and #1536 are closed), so the before row is either a build
+of `main` from before the first of them with #1559's page cherry-picked in, or today's `main` with
+#1534's `levers=-settlement-clearing` for the one change that has a lever. #1535 and #1536 have no
+lever on the owner's page. Which of the two the before row is, is #1537's call, and the row says
+which.
+
+| Step | What to do |
+|---|---|
+| AH-1537-1 | **AE2**: AE1's procedure (§"#506's AE1 and AE2 in the same session") at `&route=village&at=820`, on the build the row names. Record draw calls, triangles, GPU p50 / p90 / p99 and the page's `census` |
+| AH-1537-2 | AH1–AH7 for **5 minutes**, held at the village: AH4's URL with `&route=village&at=820` added. `RUN=1537-before`, or `RUN=1537-after-<issue>` for each phase-A merge |
+| AH-1537-3 | Write the rows into the table above and post them on #1537 and #733 |
 
 ## Part AI — the side camera's picture rate, on the owner's phone ([#1112](https://github.com/openzigs/onyourleft/issues/1112))
 

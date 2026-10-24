@@ -75,14 +75,39 @@
  * 1 100 vertices and 1 100 triangles — `three-renderer.ts` §`PavementBelt`
  * draws every street in view in ONE call.
  *
+ * ## A path to each front door — #1564
+ *
+ * Each built plot whose pavement is laid in front of it gets one short paved
+ * path, {@link DOOR_PATH_WIDTH_METRES} wide, from just under the pavement's
+ * back edge straight to its building's front door, on the plot's own side
+ * ({@link DoorPath}). The door is read off the very plan the renderer draws
+ * the building from (`buildings.ts` §`buildingPlan`): of its doors in a wall
+ * turned to the road, the one nearest the middle — a house's only one, the
+ * church tower's, and a row of shops' middle shop. A path follows the ground
+ * {@link DOOR_PATH_LIFT_METRES} above it, leaves the pavement's top no faster
+ * than {@link DOOR_PATH_FALL} a metre, and has a skirt down into the ground
+ * along both edges so no gap shows under it.
+ *
+ * A plot gets none where its side's pavement is not laid in front of the
+ * door, or where any section of the path would be on ANY stretch of the
+ * carriageway or in water. "Built" is #1535's: a plot `villagePlots` marks
+ * built, whose house `structuresAt` may still drop for clearance or the
+ * budget, leaving its path as it leaves its pavement. The paths are part of
+ * the street, so they are drawn in the pavements' ONE call, in their paving;
+ * and they lie inside the
+ * plot's cleared ground (`settlements.ts` §`SettlementFootprint` reaches from
+ * the centreline past the house), so no tree, shrub or rock stands on one.
+ *
  * Pure, and names no rendering library.
  */
 
 import { distanceOnRoute, elevationAt, type RouteProfile } from '@onyourleft/domain';
 
+import { buildingPlan, isBuiltKind, type BuiltKind } from './buildings';
 import { VILLAGE_MOUTH_HALF_METRES } from './cross-streets';
 import { NO_PAVEMENT_DATA, type PavementSide, type PavementSides } from './footways';
-import { distanceToDrawnRoad } from './road-grid';
+import { terrainHeightAt } from './landform';
+import { distanceToDrawnRoad, nearestOnDrawnRoad } from './road-grid';
 import { NO_LAND_CLASS, type LandClassMask } from './land-class';
 import {
   PLOT_METRES,
@@ -91,6 +116,7 @@ import {
   siteSpacing,
   villagePlots,
   VILLAGE_METRES,
+  type Plot,
 } from './settlements';
 import { drawnRoadFrame, ROAD_WIDTH_METRES, type CorridorOrigin } from './terrain';
 import { inWater, waterways } from './waterways';
@@ -224,6 +250,63 @@ export const BIN_BESIDE_METRES = 1.6;
  */
 export const FURNITURE_DRAW_METRES = 120;
 
+/** How wide a front path is, in metres: **1.2** — a door's metre and a little either side. */
+export const DOOR_PATH_WIDTH_METRES = 1.2;
+
+/** How far above the ground a front path stands, in metres: **0.03** — a side road's lift. */
+export const DOOR_PATH_LIFT_METRES = 0.03;
+
+/**
+ * How fast a front path may fall from the pavement's top towards the ground,
+ * in metres a metre: **0.25** — so the kerb's 0.12 m and the verge's 0.25 m
+ * drop (`landform.ts` §`VERGE_DROP_METRES`) are taken over about a metre and
+ * a half, rather than as a step down off the pavement's back.
+ */
+export const DOOR_PATH_FALL = 0.25;
+
+/** How far a front path's sections are apart, at most, in metres: **1**. */
+const DOOR_PATH_STEP_METRES = 1;
+
+/**
+ * How far under the pavement's back edge a front path starts, in metres:
+ * **0.3** — so a bend, where the pavement's edge and the path's square end
+ * part a little, leaves no grass between them.
+ */
+const DOOR_PATH_UNDER_PAVEMENT_METRES = 0.3;
+
+/** How far below the ground a front path's skirts reach, in metres: **0.1**. */
+const DOOR_PATH_SKIRT_METRES = 0.1;
+
+/**
+ * The longest front path laid, in metres: **8** — a church's, the furthest
+ * door from the pavement (`settlements.ts` §`CHURCH_SETBACK_METRES` less its
+ * tower's reach, 7.8 m at most); a longer one is not laid, so the bound below
+ * holds by construction.
+ */
+const DOOR_PATH_MOST_METRES = 8;
+
+/**
+ * The most triangles one village's front paths can be: **960** — every plot
+ * but the two at its crossroads built (`settlements.ts` §`everyVillagePlot`),
+ * each path at its longest, {@link DOOR_PATH_MOST_METRES} in
+ * {@link DOOR_PATH_STEP_METRES} sections of six triangles (its top and its two
+ * skirts). Two villages in a frame at most: 1 920.
+ *
+ * @test-facing held by `streets.test.ts`
+ */
+export const DOOR_PATH_TRIANGLES_PER_VILLAGE =
+  (2 * (Math.floor(VILLAGE_METRES / PLOT_METRES) + 1) - 2) *
+  6 *
+  Math.ceil(DOOR_PATH_MOST_METRES / DOOR_PATH_STEP_METRES);
+
+/** One front path — #1564: the plot it leads into, and its triangles. */
+export interface DoorPath {
+  /** Its plot's middle, on the odometer of the lap the street was built on, and its side. */
+  readonly along: number;
+  readonly side: 1 | -1;
+  readonly mesh: PavementMesh;
+}
+
 /** One village's street: which village, where along the road, its pavements and what stands on them. */
 export interface VillageStreet {
   /** The village's site on the route's first lap: one street per place, whichever lap. */
@@ -234,6 +317,8 @@ export interface VillageStreet {
   readonly pavement: PavementMesh;
   /** #1536: the lamp posts, bollards, benches and bins on its pavements, and nowhere else. */
   readonly furniture: readonly FurnitureItem[];
+  /** #1564: a path from the pavement to each built plot's front door, in plot order. */
+  readonly doorPaths: readonly DoorPath[];
 }
 
 /** One village's street, or `null` where its site has no village or no pavement. */
@@ -241,9 +326,14 @@ type Known = VillageStreet | null;
 
 /**
  * Every street of each route, by site, built on first sight — per
- * {@link PavementSides}, which a ride fixes when it starts. @see the header
+ * {@link PavementSides} and land-class mask, both of which a ride fixes when
+ * it starts: since #1564 a street's front paths stand on the ground the mask
+ * levels. @see the header
  */
-const built = new WeakMap<PavementSides, WeakMap<RouteProfile, Map<number, Known>>>();
+const built = new WeakMap<
+  LandClassMask,
+  WeakMap<PavementSides, WeakMap<RouteProfile, Map<number, Known>>>
+>();
 
 /**
  * Every village street whose pavements overlap the odometer span
@@ -265,10 +355,15 @@ export function streetsAt(
   const first = Math.floor((fromMetres - reach) / span);
   // Never more sites than the route has — `settlements.ts` §`settlementsAt`'s bound.
   const last = Math.min(Math.floor((toMetres + reach) / span), first + sites + 1);
-  let bySides = built.get(sides);
+  let byLand = built.get(land);
+  if (byLand === undefined) {
+    byLand = new WeakMap();
+    built.set(land, byLand);
+  }
+  let bySides = byLand.get(sides);
   if (bySides === undefined) {
     bySides = new WeakMap();
-    built.set(sides, bySides);
+    byLand.set(sides, bySides);
   }
   let known = bySides.get(profile);
   if (known === undefined) {
@@ -283,7 +378,7 @@ export function streetsAt(
     if (siteOnMappedLand(profile, origin, site, land)) continue;
     let street = known.get(site.wrappedSite);
     if (street === undefined) {
-      street = streetOf(profile, origin, seed, site.wrappedSite, index, sides);
+      street = streetOf(profile, origin, seed, site.wrappedSite, index, sides, land);
       known.set(site.wrappedSite, street);
     }
     if (street === null || found.includes(street)) continue;
@@ -302,6 +397,7 @@ function streetOf(
   wrappedSite: number,
   index: number,
   sides: PavementSides,
+  land: LandClassMask,
 ): Known {
   const site = siteAt(profile, seed, index);
   if (site === undefined) return null;
@@ -331,16 +427,22 @@ function streetOf(
   };
   // #1551: whether any of the street's road was read. @see the header
   const read = wasRead(sides, street.start, street.end);
+  const ways = waterways(profile, seed);
+  const doorPaths: DoorPath[] = [];
   for (const [at, side] of ([1, -1] as const).entries()) {
     const own = spans[at];
     let laid: boolean;
+    let range: { readonly start: number; readonly end: number };
+    let allowed: (along: number) => boolean = () => true;
     if (!read) {
       if (own === undefined) continue;
+      range = own;
       laid = lay(mesh, furniture, profile, origin, seed, side, own.start, own.end, undefined, [
         mouth,
       ]);
     } else {
-      const allowed = (along: number): boolean => {
+      range = street;
+      allowed = (along: number): boolean => {
         const here = sides.sideAt(along);
         if (here === 'unknown') return own !== undefined && along >= own.start && along <= own.end;
         return onSide(here, side);
@@ -352,10 +454,160 @@ function streetOf(
     if (laid) {
       from = Math.min(from, read || own === undefined ? street.start : own.start);
       to = Math.max(to, read || own === undefined ? street.end : own.end);
+      // #1564: wherever this side's pavement is laid in front of a door, a path to it.
+      const paved = (along: number): boolean =>
+        along >= range.start &&
+        along <= range.end &&
+        allowed(along) &&
+        sectionAt(profile, origin, ways, side, along, false) !== undefined;
+      for (const plot of plots) {
+        if (plot.side !== side) continue;
+        const path = doorPathOf(profile, origin, seed, ways, plot, lap, paved, land);
+        if (path !== undefined) doorPaths.push(path);
+      }
     }
   }
   if (mesh.triangles === 0) return null;
-  return { wrappedSite, from, to, pavement: mesh.done(), furniture };
+  return { wrappedSite, from, to, pavement: mesh.done(), furniture, doorPaths };
+}
+
+/** Each built kind's front door in each variant, building-local, as its plan cuts it. */
+const doors = new Map<string, { readonly x: number; readonly z: number } | null>();
+
+/**
+ * Where a building's front door is, building-local (`+z` faces the road): of
+ * the doors its plan (`buildings.ts` §`buildingPlan`) cuts in a wall facing
+ * `+z`, the one nearest the middle, at the middle of its sill on the wall's
+ * face. `null` where it has none.
+ */
+function frontDoorOf(
+  kind: BuiltKind,
+  variant: number,
+): { readonly x: number; readonly z: number } | null {
+  const key = `${kind}:${String(variant)}`;
+  const known = doors.get(key);
+  if (known !== undefined) return known;
+  let best: { readonly x: number; readonly z: number } | null = null;
+  for (const opening of buildingPlan(kind, variant).openings) {
+    if (opening.kind !== 'door' || opening.face.normal[2] < 0.99) continue;
+    const us = opening.outline.map((point) => point[0]);
+    const u = (Math.min(...us) + Math.max(...us)) / 2;
+    const x = opening.face.origin[0] + opening.face.right[0] * u;
+    const z = opening.face.origin[2] + opening.face.right[2] * u;
+    if (best === null || Math.abs(x) < Math.abs(best.x)) best = { x, z };
+  }
+  doors.set(key, best);
+  return best;
+}
+
+/**
+ * The front path of one built plot — #1564 — or `undefined` where it gets
+ * none. `lap` turns the plot's odometer into the street's; `paved` says
+ * whether the side's pavement is laid at a reading of the street's. @see the
+ * header
+ */
+function doorPathOf(
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  seed: number,
+  ways: ReturnType<typeof waterways>,
+  plot: Plot,
+  lap: number,
+  paved: (along: number) => boolean,
+  land: LandClassMask,
+): DoorPath | undefined {
+  if (!isBuiltKind(plot.kind)) return undefined;
+  const door = frontDoorOf(plot.kind, plot.variant);
+  if (door === null) return undefined;
+  // The building as `settlements.ts` §`standing` places it: on the plot's
+  // frame, `lateral` out on its side, turned to face the road.
+  const frame = drawnRoadFrame(profile, origin, distanceOnRoute(profile, plot.along));
+  if (frame === undefined) return undefined;
+  const faceX = -frame.normalX * plot.side;
+  const faceZ = -frame.normalZ * plot.side;
+  const house = {
+    x: frame.x + frame.normalX * plot.side * plot.lateral,
+    z: frame.z + frame.normalZ * plot.side * plot.lateral,
+  };
+  // A yaw about y takes building-local +z to the face and +x to (faceZ, −faceX).
+  const rightX = faceZ;
+  const rightZ = -faceX;
+  const doorX = house.x + rightX * door.x + faceX * door.z;
+  const doorZ = house.z + rightZ * door.x + faceZ * door.z;
+  const length =
+    plot.lateral -
+    door.z -
+    (KERB_LATERAL_METRES + PAVEMENT_WIDTH_METRES - DOOR_PATH_UNDER_PAVEMENT_METRES);
+  if (!(length > 0) || length > DOOR_PATH_MOST_METRES) return undefined;
+  // From the pavement end, `s` = 0, to the door, `s` = `length`.
+  const startX = doorX + faceX * length;
+  const startZ = doorZ + faceZ * length;
+  const mouth = nearestOnDrawnRoad(profile, origin, startX, startZ, PAVEMENT_WIDTH_METRES * 4);
+  if (mouth === undefined || !paved(mouth.along)) return undefined;
+  const pavementTop =
+    elevationAt(profile, distanceOnRoute(profile, mouth.along)) -
+    origin.elevation +
+    KERB_HEIGHT_METRES;
+  const steps = Math.ceil(length / DOOR_PATH_STEP_METRES);
+  const half = DOOR_PATH_WIDTH_METRES / 2;
+  const sections: PathSection[] = [];
+  for (let step = 0; step <= steps; step += 1) {
+    const s = (length * step) / steps;
+    const x = startX - faceX * s;
+    const z = startZ - faceZ * s;
+    const near = nearestOnDrawnRoad(profile, origin, x, z, plot.lateral + PLOT_METRES);
+    // Never on ANY stretch of the carriageway, never in water.
+    if (near === undefined || near.distance < KERB_LATERAL_METRES) return undefined;
+    if (inWater(ways, profile, near.along, near.lateral)) return undefined;
+    const ground = terrainHeightAt(profile, origin, seed, near.along, near.lateral, land);
+    const y = Math.max(
+      ground + DOOR_PATH_LIFT_METRES,
+      pavementTop - DOOR_PATH_LIFT_METRES - DOOR_PATH_FALL * s,
+    );
+    sections.push({
+      s,
+      leftX: x - rightX * half,
+      leftZ: z - rightZ * half,
+      rightX: x + rightX * half,
+      rightZ: z + rightZ * half,
+      y,
+      foot: Math.min(y, ground) - DOOR_PATH_SKIRT_METRES,
+    });
+  }
+  const mesh = new MeshBuilder();
+  mesh.path(sections, { x: rightX, z: rightZ });
+  return { along: plot.along - lap, side: plot.side, mesh: mesh.done() };
+}
+
+/**
+ * The front path {@link streetsAt} would lay for `plot` (on the route's first
+ * lap), where `paved` says the pavement is laid — by default everywhere.
+ *
+ * @test-facing `streets.test.ts` lays one across a stream and over a
+ * hairpin's other leg, where the rules have something to refuse, which no
+ * village a fixture builds reaches; a ride's paths come from
+ * {@link streetsAt}, by the same function.
+ */
+export function doorPathFor(
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  seed: number,
+  plot: Plot,
+  paved: (along: number) => boolean = () => true,
+): DoorPath | undefined {
+  return doorPathOf(profile, origin, seed, waterways(profile, seed), plot, 0, paved, NO_LAND_CLASS);
+}
+
+/** One cross-section of a front path: its two edges, its top and its skirts' foot. */
+interface PathSection {
+  /** Metres from the pavement end. */
+  readonly s: number;
+  readonly leftX: number;
+  readonly leftZ: number;
+  readonly rightX: number;
+  readonly rightZ: number;
+  readonly y: number;
+  readonly foot: number;
 }
 
 /** The whole street: from the first side's start to the last side's end. */
@@ -668,6 +920,36 @@ class MeshBuilder {
         [end.outerX, top(end), end.outerZ, PAVEMENT_WIDTH_METRES, KERB_HEIGHT_METRES],
         [ax, 0, az],
       );
+    }
+  }
+
+  /** One front path's run of sections: its top, and a skirt down each edge. @see doorPathOf */
+  path(run: readonly PathSection[], right: { readonly x: number; readonly z: number }): void {
+    for (let index = 0; index + 1 < run.length; index += 1) {
+      const a = run[index] as PathSection;
+      const b = run[index + 1] as PathSection;
+      // The top, looking up: across in `u`, along in `v`.
+      this.#quad(
+        [a.leftX, a.y, a.leftZ, 0, a.s],
+        [a.rightX, a.y, a.rightZ, DOOR_PATH_WIDTH_METRES, a.s],
+        [b.leftX, b.y, b.leftZ, 0, b.s],
+        [b.rightX, b.y, b.rightZ, DOOR_PATH_WIDTH_METRES, b.s],
+        [0, 1, 0],
+      );
+      // The skirts, each looking out from its edge.
+      for (const sign of [-1, 1] as const) {
+        const ax = sign === -1 ? a.leftX : a.rightX;
+        const az = sign === -1 ? a.leftZ : a.rightZ;
+        const bx = sign === -1 ? b.leftX : b.rightX;
+        const bz = sign === -1 ? b.leftZ : b.rightZ;
+        this.#quad(
+          [ax, a.foot, az, a.s, a.foot - a.y],
+          [ax, a.y, az, a.s, 0],
+          [bx, b.foot, bz, b.s, b.foot - b.y],
+          [bx, b.y, bz, b.s, 0],
+          [right.x * sign, 0, right.z * sign],
+        );
+      }
     }
   }
 

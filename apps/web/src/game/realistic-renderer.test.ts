@@ -45,6 +45,7 @@ import {
   FURNITURE_DRAW_METRES,
   FURNITURE_KINDS,
   LAMP_SETBACK_METRES,
+  DOOR_PATH_TRIANGLES_PER_VILLAGE,
   PAVEMENT_TRIANGLES_PER_VILLAGE,
   PAVEMENT_WIDTH_METRES,
   streetsAt,
@@ -3552,8 +3553,15 @@ describe('the village pavements — #1535', () => {
     farmland.totalDistance,
   );
   const paving = { colour: aTexture(), normal: aTexture() };
+  // #1564: each street's front paths are merged into the same mesh.
   const triangles = (list: readonly VillageStreet[]): number =>
-    list.reduce((sum, street) => sum + street.pavement.indices.length / 3, 0);
+    list.reduce(
+      (sum, street) =>
+        sum +
+        street.pavement.indices.length / 3 +
+        street.doorPaths.reduce((paths, path) => paths + path.mesh.indices.length / 3, 0),
+      0,
+    );
 
   it('wears the paving photograph in the realistic world, constructed and in the air', () => {
     const belt = new PavementBelt('realistic', paving);
@@ -3723,7 +3731,9 @@ describe('the street furniture — #1536', () => {
       (sum, kind) => sum + FURNITURE_CAPACITY * (triangles[kind] as number),
       0,
     );
-    expect(2 * PAVEMENT_TRIANGLES_PER_VILLAGE + furniture).toBe(REALISTIC_STREET_TRIANGLES);
+    expect(2 * (PAVEMENT_TRIANGLES_PER_VILLAGE + DOOR_PATH_TRIANGLES_PER_VILLAGE) + furniture).toBe(
+      REALISTIC_STREET_TRIANGLES,
+    );
     // The SAME triangles in both worlds: why the frame's figure leaves them out.
     const stylised = new FurnitureBelt('stylised');
     for (const kind of FURNITURE_KINDS) {

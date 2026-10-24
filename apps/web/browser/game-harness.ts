@@ -83,6 +83,7 @@ import type { WorldStyle } from '../src/game/world';
 import { sceneFrame as builtSceneFrame } from '../src/game/scene';
 import { retainedFrame } from '../src/game/frame-testing';
 import { corridorOrigin, drawnRoadFrame } from '../src/game/terrain';
+import { nearestOnDrawnRoad } from '../src/game/road-grid';
 import { pavementSides } from '../src/game/footways';
 import type { WorldCorridor } from '../src/game/world-data/corridor';
 import {
@@ -170,6 +171,7 @@ import {
   horizonColoursOf,
   horizonFromSkyOf,
   drawOrderOf,
+  firDepthPrepassOf,
   foliageOrderedOf,
   sceneMaterialsOf,
   type DrawnPiece,
@@ -206,6 +208,8 @@ import {
   logosShownOf,
   furnitureCountsOf,
   furnitureShownOf,
+  doorPathsDrawnOf,
+  doorPathsShownOf,
   pavementsShownOf,
   pavementTrianglesOf,
   MappedBuildingBelt,
@@ -217,6 +221,7 @@ import {
   sideRoadsShownOf,
   wordmarkOrientationOf,
   type WordmarkOrientation,
+  type DepthPrepassMode,
   type RealisticSurfaces,
   waterFresnelOf,
   waterReflectsOf,
@@ -2592,6 +2597,21 @@ interface PavementMeasurement {
     readonly onRgb: readonly number[];
     readonly offRgb: readonly number[];
   };
+  /**
+   * #1564: the front paths of the village frame, read back off the drawn
+   * pavement mesh and each put on the plot it stands in, from the village's
+   * layout: how many plots are built, how many of those hold exactly one
+   * path, how many paths stand anywhere else; how many are drawn with the
+   * paths switched off (the control); and the draw calls with them off, which
+   * must be the same — they are merged into the pavements' one call.
+   */
+  readonly doorPaths: {
+    readonly built: number;
+    readonly withOne: number;
+    readonly elsewhere: number;
+    readonly drawnOff: number;
+    readonly drawCallsOff: number;
+  };
   /** #1536: what stands on the pavements, on the same frames. */
   readonly furniture: {
     /** Pieces of each kind drawn beside the village, and in open country — the control. */
@@ -2629,6 +2649,7 @@ const NO_PAVEMENT: PavementMeasurement = {
     onRgb: [],
     offRgb: [],
   },
+  doorPaths: { built: 0, withOne: 0, elsewhere: 0, drawnOff: 0, drawCallsOff: 0 },
   furniture: {
     counts: NO_FURNITURE,
     countsOpen: NO_FURNITURE,
@@ -2730,6 +2751,9 @@ function pavementProbe(
     const drawCallsOff = drawn();
     const offRgb = meanRgb();
     pavementsShownOf(view, true);
+    // #1564: the front paths on the same frame, each put on its plot from the
+    // villages' layout — never from the streets under test.
+    const doorPaths = doorPathsOnPlots(villages, seed, paved.site, drawn, view);
     // #1565: the village's crossroads, 30 m up the road, in the road's own
     // material and one call. The point read is 12 m out on its LEFT arm — on
     // the side road, from the village's centre and the road's frame; its
@@ -2819,6 +2843,7 @@ function pavementProbe(
         onRgb: sideRgb,
         offRgb: sideOffRgb,
       },
+      doorPaths,
       furniture: {
         counts,
         countsOpen,
@@ -2829,6 +2854,73 @@ function pavementProbe(
     };
   });
   return measured;
+}
+
+/**
+ * #1564: the front paths `view` drew on its last frame — read back off the
+ * drawn pavement mesh (`three-renderer.ts` §`doorPathsDrawnOf`) — each put on
+ * the plot it stands in from the villages' layout: a plot is
+ * `settlements.ts` §`PLOT_METRES` of road, from the village's first, on the
+ * side the path is. Then the same frame, `drawn` again with the paths
+ * switched off: what is drawn then, and its draw calls.
+ */
+function doorPathsOnPlots(
+  villages: readonly (ReturnType<typeof siteAt> | undefined)[],
+  seed: number,
+  site: NonNullable<ReturnType<typeof siteAt>>,
+  drawn: () => number,
+  view: ReturnType<typeof threeGameRenderer.create>,
+): PavementMeasurement['doorPaths'] {
+  const profile = northRouteForHarness();
+  const origin = corridorOrigin(profile);
+  const slot = (wrappedSite: number, plot: number, side: number): string =>
+    `${String(wrappedSite)} ${String(plot)} ${String(side)}`;
+  const built = new Set<string>();
+  for (const village of villages) {
+    if (village === undefined) continue;
+    const first = village.centre - village.half;
+    for (const plot of villagePlots(seed, village)) {
+      built.add(
+        slot(village.wrappedSite, Math.round((plot.along - first) / PLOT_METRES), plot.side),
+      );
+    }
+  }
+  const counts = new Map<string, number>();
+  let elsewhere = 0;
+  // The frame drawn as it is, so the mesh read is this frame's.
+  drawn();
+  for (const path of doorPathsDrawnOf(view)) {
+    const near = nearestOnDrawnRoad(profile, origin, path.x, path.z, 40);
+    const village = villages.find(
+      (each) =>
+        each !== undefined &&
+        near !== undefined &&
+        Math.abs(near.along - each.centre) <= each.half + PLOT_METRES / 2,
+    );
+    if (near === undefined || village === undefined) {
+      elsewhere += 1;
+      continue;
+    }
+    const plot = Math.round((near.along - (village.centre - village.half)) / PLOT_METRES);
+    const key = slot(village.wrappedSite, plot, Math.sign(near.lateral));
+    if (!built.has(key)) elsewhere += 1;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  const mine = villagePlots(seed, site);
+  const withOne = mine.filter((plot) => {
+    const key = slot(
+      site.wrappedSite,
+      Math.round((plot.along - (site.centre - site.half)) / PLOT_METRES),
+      plot.side,
+    );
+    return counts.get(key) === 1;
+  }).length;
+  doorPathsShownOf(view, false);
+  const drawCallsOff = drawn();
+  const drawnOff = doorPathsDrawnOf(view).length;
+  doorPathsShownOf(view, true);
+  drawn();
+  return { built: mine.length, withOne, elsewhere, drawnOff, drawCallsOff };
 }
 
 /** What {@link mappedPavementProbe} publishes — #1551. */
@@ -5769,6 +5861,8 @@ export interface RealisticMeasurement {
   readonly surfacePrograms: SurfaceProgramMeasurement;
   /** #1523: the bounded surfaces against the unbounded, read back. @see surfaceBoundsProbe */
   readonly surfaceBounds: SurfaceBoundsMeasurement;
+  /** #1523: the wooded frame with the firs' depth pre-pass and without, read back. @see firPrepassProbe */
+  readonly firPrepass: FirPrepassMeasurement;
   /** #1534: the vegetation drawn on a village's ground, cleared and not. @see settlementClearingProbe */
   readonly settlementClearing: SettlementClearingMeasurement;
   /** #679: a finish gantry's banner, read, and what the gantries cost. @see gantryProbe */
@@ -6664,6 +6758,92 @@ function surfaceBoundsProbe(
   const road = read({ ...riding(route, distance), markers: [], scatter: [] });
   const bank = read(steepBankFrame(riding));
   return { measured: true, distance, patchAhead, road, bank };
+}
+
+/**
+ * #1523 — the wooded frame drawn with the firs' depth pre-pass (the product),
+ * without it (the reference, the firs as they were), and with the EQUAL depth
+ * test and no pre-pass (the control), each read back whole, with the frame's
+ * non-empty draw calls counted in the first two.
+ */
+export interface FirPrepassMeasurement {
+  readonly measured: boolean;
+  /** The largest difference in any channel of any pixel, pre-pass against reference. */
+  readonly largest: number;
+  /** How many pixels differ from the reference in any channel at all, with the pre-pass. */
+  readonly differing: number;
+  /** How many pixels the control moves past {@link SURFACE_CONTROL_STEP} from the reference. */
+  readonly unprepared: number;
+  /** The frame's non-empty draw calls with the pre-pass, and without it. */
+  readonly calls: number;
+  readonly callsWithout: number;
+  /** How many pixels the frame has. */
+  readonly pixels: number;
+}
+
+const NO_FIR_PREPASS: FirPrepassMeasurement = {
+  measured: false,
+  largest: 0,
+  differing: 0,
+  unprepared: 0,
+  calls: 0,
+  callsWithout: 0,
+  pixels: 0,
+};
+
+/** @see FirPrepassMeasurement */
+function firPrepassProbe(
+  view: GameView,
+  gl: WebGL2RenderingContext,
+  canvas: HTMLCanvasElement,
+  frame: SceneFrame,
+): FirPrepassMeasurement {
+  const whole = (mode: DepthPrepassMode): Uint8Array => {
+    firDepthPrepassOf(view, mode);
+    view.render(frame);
+    view.render(frame);
+    return readRegion(gl, 0, 0, canvas.width, canvas.height);
+  };
+  const callsOf = (mode: DepthPrepassMode): number => {
+    let calls = 0;
+    firDepthPrepassOf(view, mode);
+    view.render(frame);
+    countingNonEmptyDrawCalls((counted) => {
+      view.render(frame);
+      calls = counted();
+    });
+    return calls;
+  };
+  const reference = whole('off');
+  const callsWithout = callsOf('off');
+  const control = whole('unprepared');
+  // Last, so every probe after this one draws the product's firs.
+  const calls = callsOf('drawn');
+  const drawn = whole('drawn');
+  let largest = 0;
+  let differing = 0;
+  let unprepared = 0;
+  for (let at = 0; at < reference.length; at += 4) {
+    let here = 0;
+    let moved = 0;
+    for (let channel = 0; channel < 3; channel += 1) {
+      const was = reference[at + channel] ?? 0;
+      here = Math.max(here, Math.abs((drawn[at + channel] ?? 0) - was));
+      moved += Math.abs((control[at + channel] ?? 0) - was);
+    }
+    largest = Math.max(largest, here);
+    if (here > 0) differing += 1;
+    if (moved > SURFACE_CONTROL_STEP) unprepared += 1;
+  }
+  return {
+    measured: true,
+    largest,
+    differing,
+    unprepared,
+    calls,
+    callsWithout,
+    pixels: reference.length / 4,
+  };
 }
 
 /**
@@ -7892,6 +8072,7 @@ const NO_REALISTIC: RealisticMeasurement = {
   groundBlend: NO_GROUND_BLEND,
   surfacePrograms: NO_SURFACE_PROGRAMS,
   surfaceBounds: NO_SURFACE_BOUNDS,
+  firPrepass: NO_FIR_PREPASS,
   settlementClearing: NO_SETTLEMENT_CLEARING,
   gantry: NO_GANTRY,
   logos: NO_LOGO,
@@ -9198,6 +9379,10 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   const surfaceBounds = surfaceBoundsProbe(view, gl, canvas, riding);
   phaseEnds('realistic: surface bounds — #1523');
 
+  // #1523: the firs' depth pre-pass draws the picture the firs drew without it.
+  const firPrepass = firPrepassProbe(view, gl, canvas, wooded);
+  phaseEnds('realistic: fir depth pre-pass — #1523');
+
   // #1534: no tree, shrub or rock drawn on a village's ground.
   const settlementClearing = settlementClearingProbe(view, riding);
   phaseEnds('realistic: settlement clearing — #1534');
@@ -9702,6 +9887,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     groundBlend,
     surfacePrograms,
     surfaceBounds,
+    firPrepass,
     settlementClearing,
     gantry,
     logos,
