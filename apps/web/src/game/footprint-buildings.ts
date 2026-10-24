@@ -50,8 +50,10 @@
  * ## The shape (P-10, P-11; the owner's ruling of 2026-10-21 on #1540)
  *
  * Storeys are the mapped `height` over {@link STOREY_METRES}, rounded, and at
- * least one; two where the height is missing. The eaves stand at the mapped
- * height where there is one and at the storeys' where there is not. The roof
+ * least one; two where the height is missing; `L` where the height is
+ * Protomaps' levels-derived `3L + 2` (#1629, {@link storeysFor}). The eaves
+ * stand at the mapped height where there is one and at the storeys' where
+ * there is not. The roof
  * is a gable along the long axis of the footprint's minimum-area rectangle
  * where the footprint is small, rectangular, low and residential or farmland
  * ({@link FOOTPRINT_GABLE_MAX_AREA}, {@link FOOTPRINT_GABLE_MIN_RECTANGULARITY},
@@ -221,6 +223,7 @@ import { scatterSeed } from './scatter';
 import { footprintIndexOf, type MappedTown } from './settlements';
 import { slotHash, uniformFrom } from './seeded';
 import { ROAD_WIDTH_METRES, type CorridorOrigin } from './terrain';
+import type { UrbanClass, UrbanClassMap } from './urban-class';
 import type { WorldCorridor } from './world-data/corridor';
 
 /** What became of a footprint: planned, or the rule that dropped it. */
@@ -487,6 +490,13 @@ export interface FootprintPlan {
   readonly shop: { readonly front: boolean; readonly awning: boolean; readonly cornice: boolean };
   /** Whether it has a front porch — #1589. */
   readonly porch: boolean;
+  /**
+   * How built-up the stretch of route it stands beside is — #1633
+   * (`urban-class.ts`), read at the route distance its centroid is nearest;
+   * `unknown` where the press had no map, or no class, there. What #1634–#1637
+   * style a footprint by; nothing draws from it yet.
+   */
+  readonly urban: UrbanClass;
   /**
    * The house model it is drawn as at the near level, where one fits — #1585
    * (`house-models.ts`); `undefined` for every other plan, which keeps its
@@ -1098,9 +1108,30 @@ export function minimumAreaRectangle(ring: Ring): Rectangle & { readonly area: n
   return best ?? { cx: 0, cz: 0, ux: 1, uz: 0, halfLong: 0, halfShort: 0, area: 0 };
 }
 
-/** The storeys for a mapped height, or {@link DEFAULT_STOREYS} for none: never 0. */
+/**
+ * How far a height may sit from `3L + 2` and still be read as levels-derived:
+ * **0.01 m** — #1629.
+ */
+export const LEVELS_HEIGHT_TOLERANCE_METRES = 0.01;
+
+/**
+ * The storeys for a mapped height, or {@link DEFAULT_STOREYS} for none: never 0.
+ *
+ * #1629: where OSM has `building:levels` and no `height`, Protomaps writes
+ * `height = max(levels, 1) × 3 + 2` (`Buildings.java` §`parseHeight`, ADR 0054's
+ * amendment of 2026-10-24). A height within {@link LEVELS_HEIGHT_TOLERANCE_METRES}
+ * of `3L + 2` for a whole `L ≥ 1` is read as `L` storeys; every other height
+ * is over {@link STOREY_METRES}, rounded, as P-10 has it.
+ */
 export function storeysFor(heightMetres: number | null): number {
   if (heightMetres === null || !Number.isFinite(heightMetres)) return DEFAULT_STOREYS;
+  const levels = Math.round((heightMetres - 2) / STOREY_METRES);
+  if (
+    levels >= 1 &&
+    Math.abs(heightMetres - (levels * STOREY_METRES + 2)) <= LEVELS_HEIGHT_TOLERANCE_METRES
+  ) {
+    return levels;
+  }
   return Math.max(1, Math.round(heightMetres / STOREY_METRES));
 }
 
@@ -2639,7 +2670,9 @@ const porchSegments: number[] = [];
  *
  * `land` is the ride's land-class mask (#1546), built from the same corridor;
  * `NO_LAND_CLASS` reads every footprint as on unmapped land, which is rule 2
- * switched off. `maxVertices` is rule 6's cap, a parameter so the triangle
+ * switched off. `urban` is the ride's urban class (#1633), built at the press
+ * beside the mask; with none every plan's {@link FootprintPlan.urban} is
+ * `unknown`. `maxVertices` is rule 6's cap, a parameter so the triangle
  * budget's control can lift it.
  */
 export function footprintPlans(
@@ -2648,6 +2681,7 @@ export function footprintPlans(
   profile: RouteProfile,
   origin: CorridorOrigin,
   maxVertices: number = FOOTPRINT_MAX_VERTICES,
+  urban?: UrbanClassMap,
 ): { readonly plans: readonly FootprintPlan[]; readonly verdicts: FootprintVerdicts } {
   const seed = scatterSeed(profile);
   const counts: Record<FootprintVerdict, number> = {
@@ -2668,12 +2702,17 @@ export function footprintPlans(
   const porches = new RingGrid([]);
   const driveways = new RingGrid([]);
   for (const [index, building] of corridor.buildings.entries()) {
-    const planned = planFootprint(building, corridor, land, profile, origin, seed, maxVertices, {
-      grid: others,
-      own: index,
-      porches,
-      driveways,
-    });
+    const planned = planFootprint(
+      building,
+      corridor,
+      land,
+      urban,
+      profile,
+      origin,
+      seed,
+      maxVertices,
+      { grid: others, own: index, porches, driveways },
+    );
     if (typeof planned === 'string') {
       counts[planned] += 1;
     } else {
@@ -3068,6 +3107,7 @@ function planFootprint(
   building: BuildingFeature,
   corridor: WorldCorridor,
   land: LandClassMask,
+  urban: UrbanClassMap | undefined,
   profile: RouteProfile,
   origin: CorridorOrigin,
   seed: number,
@@ -3133,6 +3173,8 @@ function planFootprint(
   }
   // Farther from the road than any tile of a corridor can be: no ground to stand on.
   if (!found) return 'too-steep';
+  // #1633: the stretch of route the centroid is beside, before `beside` is reused.
+  const urbanClass = urban?.classAt(beside.along) ?? 'unknown';
   const groundAt = (x: number, z: number): number => {
     nearestOnRoadSegments(road, nearSegments, x, z, beside);
     return terrainHeightAt(profile, origin, seed, beside.along, beside.lateral, land);
@@ -3579,6 +3621,7 @@ function planFootprint(
       cornice: drew.cornice,
     },
     porch: frontPorchSpec !== undefined,
+    urban: urbanClass,
     model,
     tint: packedInstanceTint(centroid.x, centroid.z, MASONRY_TINT),
     triangles,

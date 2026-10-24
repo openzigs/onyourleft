@@ -36,6 +36,7 @@ import {
   ROOF_PITCHES_DEGREES,
   roofSurfaceOf,
   storeysFor,
+  TOWER_STOREYS,
   VERGE_OVERHANG_METRES,
   wallSurfaceOf,
   type FootprintPlan,
@@ -464,6 +465,50 @@ describe('the height rules — P-10', () => {
     );
     // Its 15 m height less its 6 m base is 3 storeys.
     expect(part.storeys).toBe(3);
+  });
+});
+
+describe('a levels-derived height — #1629', () => {
+  // Protomaps writes `max(levels, 1) × 3 + 2` where OSM has `building:levels`
+  // and no `height`; P-10's rounding read each one a storey too tall.
+  it.each([
+    [5, 1],
+    [8, 2],
+    [14, 4],
+    [17, 5],
+    [32, 10],
+    [14.005, 4],
+  ])('reads %f m (3L + 2) as %i storeys', (height, storeys) => {
+    expect(storeysFor(height)).toBe(storeys);
+  });
+
+  it('keeps P-10 for a height that is not 3L + 2', () => {
+    expect(storeysFor(10.5)).toBe(4);
+    expect(storeysFor(14.02)).toBe(5);
+    expect(storeysFor(2)).toBe(1);
+    expect(storeysFor(-1)).toBe(1);
+  });
+
+  // The press reads storeys through `footprintPlans`, so the plan is checked, not the helper.
+  const commercialAt = (heightMetres: number): FootprintPlan => {
+    const { plans } = footprintPlans(
+      { ...fixture.corridor, buildings: [{ ...fixture.named.commercial, heightMetres }] },
+      mask,
+      fixture.profile,
+      fixture.origin,
+    );
+    if (plans[0] === undefined) throw new Error('the commercial footprint was not planned');
+    return plans[0];
+  };
+
+  it('plans an 8 m footprint as 2 storeys', () => {
+    expect(commercialAt(8).storeys).toBe(2);
+  });
+
+  it('plans a 17 m footprint as 5 storeys, not a concrete tower', () => {
+    const plan = commercialAt(17);
+    expect(plan.storeys).toBe(TOWER_STOREYS);
+    expect(plan.surfaces.wall).not.toBe('concrete');
   });
 });
 
