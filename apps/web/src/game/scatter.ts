@@ -1106,6 +1106,15 @@ function fillCell(
       if (kind !== 'post' && builtUpOrWater(land, x, z)) {
         continue;
       }
+      // #1542's `small-stones`, the owner's ruling of 2026-10-24: on mapped
+      // farmland and a wood, no rock in the nearest bands and every one smaller.
+      const stone =
+        countryside['small-stones'] &&
+        kind === 'rock' &&
+        (cover === 'farmland' || cover === 'wood');
+      if (stone && band < STONE_FIRST_BAND) {
+        continue;
+      }
 
       found.push({
         item: {
@@ -1122,8 +1131,9 @@ function fillCell(
           z,
           rotation: uniform(base, STREAM_ROTATION) * Math.PI * 2,
           scale:
-            SCATTER_SCALE_LOWEST +
-            uniform(base, STREAM_SCALE) * (SCATTER_SCALE_HIGHEST - SCATTER_SCALE_LOWEST),
+            (SCATTER_SCALE_LOWEST +
+              uniform(base, STREAM_SCALE) * (SCATTER_SCALE_HIGHEST - SCATTER_SCALE_LOWEST)) *
+            (stone ? STONE_SCALE : 1),
           // ⚠️ `Math.min` rather than trusting the multiply: `uniform` returns
           // a value in `[0, 1)` by construction, but a float at the very top of
           // that range can floor to the slot count on some inputs, and an
@@ -1203,6 +1213,22 @@ export const PARK_TREE_SHARE = 0.3;
  * card is the overdraw the tablet's GPU has no room for (#1523).
  */
 export const CLUTTER_SHARE = 0.03;
+
+/**
+ * How big a rock on mapped farmland or a wood is drawn, of the procedural
+ * rock's size, under #1542's `small-stones`: **0.5** — `boulder_01` fitted to
+ * 0.45 m to 0.9 m rather than a metre or more. The owner's ruling of
+ * 2026-10-24: the rocks read as boulders. The same mesh, drawn smaller.
+ */
+export const STONE_SCALE = 0.5;
+
+/**
+ * The nearest band a rock on mapped farmland or a wood stands in, under
+ * `small-stones`: **2** — none in the two bands nearest the road, so none
+ * nearer than {@link ROAD_WIDTH_METRES}/2 + {@link SCATTER_VERGE_METRES} + 6 m
+ * (12.5 m) to the centreline. The same ruling: fewer near the road.
+ */
+export const STONE_FIRST_BAND = 2;
 
 function landPlantings(place: Place, procedural: readonly number[]): LandPlantings {
   const post = procedural[4] as number;

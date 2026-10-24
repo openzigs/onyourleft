@@ -92,6 +92,13 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
         parseConfig('?levers=-ground-clutter,-land-planting,-land-boundaries').leversOff,
       ),
     ).toEqual(['planting', 'boundaries', 'clutter']);
+    // The owner's ruling of 2026-10-24: the broken roadside and the small stones.
+    expect(countrysideWithLevers(parseConfig('?levers=-hedge-breaks').leversOff)).toEqual([
+      'hedge-breaks',
+    ]);
+    expect(countrysideWithLevers(parseConfig('?levers=-small-stones').leversOff)).toEqual([
+      'small-stones',
+    ]);
   });
 
   it('turns the route towards the sun or away from it only when asked — #702', () => {

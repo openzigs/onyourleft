@@ -31,12 +31,18 @@ import {
   scatterSeed,
   HEDGEROW_EDGE_METRES,
   SCATTER_BAND_METRES,
+  SCATTER_SCALE_HIGHEST,
+  SCATTER_SCALE_LOWEST,
   SCATTER_VERGE_METRES,
+  STONE_FIRST_BAND,
+  STONE_SCALE,
   type ScatterItem,
 } from './scatter';
 import { sceneFrame } from './scene';
 import {
   BOUNDARY_PIECE_METRES,
+  FIELD_GATE_SCALE,
+  LOW_HEDGE_SCALE,
   PLOT_METRES,
   siteAt,
   siteSpacing,
@@ -54,7 +60,15 @@ const SEED = scatterSeed(ROUTE);
 /** The middle 2 km, covered, 1 km either side of the road. */
 const MIDDLE: Box = { minX: -1_000, maxX: 1_000, minZ: 2_000, maxZ: 4_000 };
 const ALL = { maxItems: 100_000, riderMetres: 0 };
-const OFF: Countryside = countrysideWithout(['planting', 'boundaries', 'clutter']);
+const OFF: Countryside = countrysideWithout([
+  'planting',
+  'boundaries',
+  'clutter',
+  'hedge-breaks',
+  'small-stones',
+]);
+/** #1542 as first drawn: the owner's ruling of 2026-10-24's two levers off. */
+const FIRST_CUT: Countryside = countrysideWithout(['hedge-breaks', 'small-stones']);
 
 function corridorOf(landUse: readonly LandUseFeature[]): WorldCorridor {
   return {
@@ -244,7 +258,7 @@ describe('#1542 field boundaries along farmland’s edges', () => {
     (item: ScatterItem): boolean =>
       land.classAt(item.x, item.z) === 'farmland';
 
-  it('hedges a mapped field all along the road', () => {
+  it('hedges a mapped field all along the road, with hedge-breaks off', () => {
     const verge = (items: readonly ScatterItem[], side: number): readonly number[] =>
       items
         .filter(inside)
@@ -255,13 +269,13 @@ describe('#1542 field boundaries along farmland’s edges', () => {
     const widest = (along: readonly number[]): number =>
       Math.max(...along.slice(1).map((z, index) => z - (along[index] as number)));
     for (const side of [-1, 1]) {
-      const hedged = verge(structures(FARMLAND), side);
+      const hedged = verge(structures(FARMLAND, FIRST_CUT), side);
       expect(widest(hedged)).toBeLessThan(BOUNDARY_PIECE_METRES + 1);
       // Control: the procedural fields leave some open.
       expect(widest(verge(structures(OTHER), side))).toBeGreaterThan(50);
     }
     const kinds = new Set(
-      structures(FARMLAND)
+      structures(FARMLAND, FIRST_CUT)
         .filter(inside)
         .filter((item) => !beyondVerge(item))
         .map((item) => item.kind),
@@ -451,26 +465,124 @@ describe('#1542 boundaries on the span, and clear of villages and streams', () =
       covered: () => true,
       coveredBoxes: [box],
     });
-    const verge = structuresAt(
-      valley,
-      origin,
+    const vergeOf = (countryside: Countryside) =>
+      structuresAt(
+        valley,
+        origin,
+        seed,
+        0,
+        valley.totalDistance,
+        ALL,
+        undefined,
+        land,
+        undefined,
+        countryside,
+      ).filter((item) => BOUNDARIES.has(item.kind) && Math.abs(item.x) < 8);
+    const kindsOn =
+      (countryside: Countryside) =>
+      (from: number, to: number): readonly string[] => [
+        ...new Set(
+          vergeOf(countryside)
+            .filter((item) => item.z > from && item.z < to)
+            .map((item) => item.kind),
+        ),
+      ];
+    for (const countryside of [FIRST_CUT, COUNTRYSIDE]) {
+      // The valley's sides fall at 5%, past the 4% a boundary is walled above;
+      // and a wall is not broken up by `hedge-breaks`.
+      expect(kindsOn(countryside)(500, 900)).toStrictEqual(['wall']);
+      expect(kindsOn(countryside)(1_100, 1_500)).toStrictEqual(['wall']);
+    }
+    // Level at both ends: a hedge, and with `hedge-breaks` a hedge and fence.
+    expect(kindsOn(FIRST_CUT)(50, 350)).toStrictEqual(['hedge']);
+    expect([...kindsOn(COUNTRYSIDE)(50, 350)].sort()).toStrictEqual(['fence', 'hedge']);
+  });
+});
+
+describe('#1542 the owner’s ruling of 2026-10-24: a low, broken roadside', () => {
+  const roadside = (countryside: Countryside, seed = SEED) =>
+    structuresAt(
+      ROUTE,
+      ORIGIN,
       seed,
       0,
-      valley.totalDistance,
+      ROUTE.totalDistance,
       ALL,
       undefined,
-      land,
+      FARMLAND,
       undefined,
-      COUNTRYSIDE,
-    ).filter((item) => BOUNDARIES.has(item.kind) && Math.abs(item.x) < 8);
-    const kindsOn = (from: number, to: number): readonly string[] => [
-      ...new Set(verge.filter((item) => item.z > from && item.z < to).map((item) => item.kind)),
-    ];
-    // The valley's sides fall at 5%, past the 4% a boundary is walled above.
-    expect(kindsOn(500, 900)).toStrictEqual(['wall']);
-    expect(kindsOn(1_100, 1_500)).toStrictEqual(['wall']);
-    // Level at both ends: a hedge.
-    expect(kindsOn(50, 350)).toStrictEqual(['hedge']);
+      countryside,
+    )
+      .filter(inside)
+      .filter((item) => BOUNDARIES.has(item.kind) && Math.abs(item.x) < 8);
+  const widestGap = (items: readonly ScatterItem[], side: number): number => {
+    const along = items
+      .filter((item) => Math.sign(item.x) === side)
+      .map((item) => item.z)
+      .sort((a, b) => a - b);
+    return Math.max(...along.slice(1).map((z, index) => z - (along[index] as number)));
+  };
+
+  it('lowers the hedge and breaks it with gaps, gates, fence and open verge', () => {
+    const items = roadside(COUNTRYSIDE);
+    const hedges = items.filter((item) => item.kind === 'hedge');
+    const fences = items.filter((item) => item.kind === 'fence');
+    // Still mostly hedge, every piece of it lower and shorter than the 1.3 m by 8 m piece.
+    expect(hedges.length / items.length).toBeGreaterThan(0.5);
+    for (const hedge of hedges) {
+      expect(hedge.scale).toBeGreaterThanOrEqual(LOW_HEDGE_SCALE[0]);
+      expect(hedge.scale).toBeLessThanOrEqual(LOW_HEDGE_SCALE[1]);
+    }
+    // Stretches of fence, and gates: the fence's shape drawn smaller.
+    expect(fences.filter((item) => item.scale === 1).length).toBeGreaterThan(10);
+    expect(fences.filter((item) => item.scale === FIELD_GATE_SCALE).length).toBeGreaterThan(2);
+    for (const side of [-1, 1]) {
+      // Open verge: a stretch of three pieces with nothing on it.
+      expect(widestGap(items, side)).toBeGreaterThan(3 * BOUNDARY_PIECE_METRES);
+    }
+    // Uneven gaps: the pieces are not all on the 8 m grid.
+    const offGrid = hedges.filter((item) => {
+      const along = (item.z - 2_000) / BOUNDARY_PIECE_METRES;
+      return Math.abs(along - Math.round(along)) > 0.05;
+    });
+    expect(offGrid.length).toBeGreaterThan(hedges.length / 4);
+    // Control: the lever off is the solid, full-size hedge.
+    const solid = roadside(FIRST_CUT);
+    expect(solid.every((item) => item.kind === 'hedge' && item.scale === 1)).toBe(true);
+    for (const side of [-1, 1]) {
+      expect(widestGap(solid, side)).toBeLessThan(BOUNDARY_PIECE_METRES + 1);
+    }
+  });
+
+  it('is the same from the same seed and differs from another', () => {
+    const full = (item: ScatterItem): string => `${key(item)} ${item.scale.toFixed(3)}`;
+    expect(roadside(COUNTRYSIDE).map(full)).toStrictEqual(roadside(COUNTRYSIDE).map(full));
+    expect(roadside(COUNTRYSIDE, SEED + 1).map(full)).not.toStrictEqual(
+      roadside(COUNTRYSIDE).map(full),
+    );
+  });
+
+  it('keeps rocks small and back from the road, on farmland and a wood', () => {
+    const nearest =
+      ROAD_WIDTH_METRES / 2 + SCATTER_VERGE_METRES + (STONE_FIRST_BAND * SCATTER_BAND_METRES) / 5;
+    const wood = mask(rectangle('wood', MIDDLE));
+    for (const land of [FARMLAND, wood]) {
+      const rocks = (countryside: Countryside) =>
+        scenery(land, countryside)
+          .filter(inside)
+          .filter((item) => item.kind === 'rock');
+      const small = rocks(COUNTRYSIDE);
+      expect(small.length).toBeGreaterThan(5);
+      for (const rock of small) {
+        expect(Math.abs(rock.x)).toBeGreaterThanOrEqual(nearest - 1e-6);
+        expect(rock.scale).toBeLessThanOrEqual(SCATTER_SCALE_HIGHEST * STONE_SCALE);
+      }
+      // Control: the lever off stands some by the road, and some big.
+      const first = rocks(FIRST_CUT);
+      expect(first.some((rock) => Math.abs(rock.x) < nearest)).toBe(true);
+      expect(first.some((rock) => rock.scale > SCATTER_SCALE_LOWEST)).toBe(true);
+      expect(small.length).toBeLessThan(first.length);
+    }
   });
 });
 
@@ -499,10 +611,18 @@ describe('#1542 levers', () => {
     const frame = (land: LandClassMask, off?: Parameters<typeof countrysideWithout>[0]) =>
       sceneFrame({ ...input, landClass: land, countrysideOff: off }).scatter.map(key);
     const on = frame(FARMLAND);
-    for (const lever of ['planting', 'boundaries', 'clutter'] as const) {
+    for (const lever of [
+      'planting',
+      'boundaries',
+      'clutter',
+      'hedge-breaks',
+      'small-stones',
+    ] as const) {
       expect(frame(FARMLAND, [lever]), lever).not.toStrictEqual(on);
     }
-    expect(frame(FARMLAND, ['planting', 'boundaries', 'clutter'])).toStrictEqual(frame(OTHER));
+    expect(
+      frame(FARMLAND, ['planting', 'boundaries', 'clutter', 'hedge-breaks', 'small-stones']),
+    ).toStrictEqual(frame(OTHER));
     expect(frame(FARMLAND, [])).toStrictEqual(on);
   });
 });

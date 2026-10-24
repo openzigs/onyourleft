@@ -1368,6 +1368,8 @@ function fieldEdgesAt(
         : uniformFrom(hash, 1) < HEDGE_SHARE
           ? 'hedge'
           : 'fence';
+      // #1542's `hedge-breaks`: which of this side's pieces is the field's gate.
+      const gate = Math.floor(uniformFrom(hash, 2) * pieces);
       for (let index = 0; index < pieces; index += 1) {
         const along = start + (index + 0.5) * piece;
         if (along < fromMetres || along >= toMetres || inVillage(along)) continue;
@@ -1388,10 +1390,34 @@ function fieldEdgesAt(
         // #1542: a mapped field beside the road is hedged along it, whatever
         // the procedural field's hash says.
         if (onFarmland(item.x, item.z)) {
-          found.push({
-            item: walled ? { ...item, kind: 'wall' } : { ...item, kind: 'hedge' },
-            along,
-          });
+          if (walled || !countryside['hedge-breaks']) {
+            found.push({
+              item: walled ? { ...item, kind: 'wall' } : { ...item, kind: 'hedge' },
+              along,
+            });
+            continue;
+          }
+          // The owner's ruling of 2026-10-24: low and broken, not a solid
+          // head-high hedge. Admitted on `along`, as every piece is.
+          const chosen = roadsidePiece(seed, wrappedField, side, index, gate);
+          if (chosen === undefined) continue;
+          const placed =
+            chosen.shift === 0
+              ? item
+              : standing(
+                  profile,
+                  origin,
+                  seed,
+                  chosen.kind,
+                  along + chosen.shift,
+                  FIELD_EDGE_LATERAL_METRES * side,
+                  0,
+                  'along',
+                  land,
+                );
+          if (placed !== undefined) {
+            found.push({ item: { ...placed, kind: chosen.kind, scale: chosen.scale }, along });
+          }
           continue;
         }
         // #1546: no boundary across built-up land, water, a wood or a park.
@@ -1441,6 +1467,87 @@ function fieldEdgesAt(
       }
     }
   }
+}
+
+/**
+ * How many verge pieces one stretch of a mapped field's roadside is, under
+ * #1542's `hedge-breaks`: **3** (24 m). A stretch is hedge, fence or open
+ * verge as a whole, so the roadside changes in runs rather than piece by piece.
+ */
+export const ROADSIDE_RUN_PIECES = 3;
+
+/** The share of roadside stretches left open, no boundary at all: **0.15**. */
+export const OPEN_VERGE_SHARE = 0.15;
+
+/** The share of roadside stretches fenced rather than hedged: **0.2**. */
+export const FENCE_RUN_SHARE = 0.2;
+
+/** The share of a hedged stretch's pieces left out, a gap in it: **0.15**. */
+export const HEDGE_GAP_SHARE = 0.15;
+
+/**
+ * How big a roadside hedge piece is drawn, of the 1.3 m by 8 m piece
+ * `three-renderer.ts` §`BOUNDARY_STYLE` builds: **0.6** to **0.8**, so its top
+ * is 0.78 m to 1.04 m — below a rider's eye, where the solid hedge was at it —
+ * and it is 4.8 m to 6.4 m long, so light shows between pieces. The one
+ * instanced hedge, drawn smaller: no new shape, material or draw.
+ */
+export const LOW_HEDGE_SCALE = [0.6, 0.8] as const;
+
+/**
+ * How big a field gate is drawn, of the fence piece: **0.75** — 6 m of rail,
+ * 1 m high, in a gap in the hedge. A gate is the fence's own shape, so it adds
+ * no shape and no draw beyond the fence's one.
+ */
+export const FIELD_GATE_SCALE = 0.75;
+
+const ROADSIDE_KEY = 0x9_0000;
+
+/** What stands on one roadside piece of a mapped field. @see roadsidePiece */
+export interface RoadsidePiece {
+  readonly kind: 'hedge' | 'fence';
+  readonly scale: number;
+  /** Along the road from the piece's centre, in metres, so the gaps are uneven. */
+  readonly shift: number;
+}
+
+/**
+ * One roadside piece of mapped farmland under #1542's `hedge-breaks` — the
+ * owner's ruling of 2026-10-24 that the solid, head-high hedge on both sides
+ * boxed the view in. `undefined` is no piece: a gap, or open verge.
+ *
+ * Each {@link ROADSIDE_RUN_PIECES}-piece stretch of a side is open
+ * ({@link OPEN_VERGE_SHARE}), fenced ({@link FENCE_RUN_SHARE}) or hedged; a
+ * hedged stretch's pieces are {@link LOW_HEDGE_SCALE}, each shifted along so
+ * the gaps between them differ, with {@link HEDGE_GAP_SHARE} left out and the
+ * field's `gate` piece a {@link FIELD_GATE_SCALE} fence. Everything is hashed
+ * from the seed, the wrapped field, the side and the piece, so a place is the
+ * same on every lap and every visit.
+ */
+export function roadsidePiece(
+  seed: number,
+  field: number,
+  side: 1 | -1,
+  index: number,
+  gate: number,
+): RoadsidePiece | undefined {
+  const sideKey = side === 1 ? 0 : 1;
+  const stretch = uniformFrom(
+    slotHash(seed, field, ROADSIDE_KEY + 2 * Math.floor(index / ROADSIDE_RUN_PIECES) + sideKey),
+    0,
+  );
+  if (stretch < OPEN_VERGE_SHARE) return undefined;
+  if (stretch < OPEN_VERGE_SHARE + FENCE_RUN_SHARE) return { kind: 'fence', scale: 1, shift: 0 };
+  if (index === gate) return { kind: 'fence', scale: FIELD_GATE_SCALE, shift: 0 };
+  const each = slotHash(seed, field, ROADSIDE_KEY + 0x8000 + 2 * index + sideKey);
+  if (uniformFrom(each, 0) < HEDGE_GAP_SHARE) return undefined;
+  const [lowest, highest] = LOW_HEDGE_SCALE;
+  const scale = lerp(lowest, highest, uniformFrom(each, 1));
+  return {
+    kind: 'hedge',
+    scale,
+    shift: (uniformFrom(each, 2) - 0.5) * (1 - scale) * BOUNDARY_PIECE_METRES,
+  };
 }
 
 /** The span a call admits, and where its pieces go. @see landEdgesAt */

@@ -282,11 +282,19 @@ export function fieldGround(land: LandClassMask, x: number, z: number): boolean 
  * - `clutter`: field stones on pasture and rocks on a wood's floor — opaque, and
  *   out of the rocks' own near-mesh cap (`realistic-budget.ts`
  *   §`REALISTIC_NEAR_MESHES`).
+ * - `hedge-breaks`: mapped farmland's roadside hedge lowered and broken up —
+ *   gaps, a field gate, stretches of fence and of open verge
+ *   (`settlements.ts` §`roadsidePiece`). The owner's ruling of 2026-10-24: the
+ *   solid, head-high hedge boxed the view in. Reads nothing with `boundaries`
+ *   off, which has no such hedge.
+ * - `small-stones`: rocks on mapped farmland and a wood smaller, and none in
+ *   the nearest bands (`scatter.ts` §`STONE_SCALE`). The same ruling.
  *
  * Each reads only covered land: where the mask is `unknown` the world is the
  * procedural one, item for item. Off, each is the world before #1542 exactly.
  */
-export type CountrysideLever = 'planting' | 'boundaries' | 'clutter';
+export type CountrysideLever =
+  'planting' | 'boundaries' | 'clutter' | 'hedge-breaks' | 'small-stones';
 
 /** Which of {@link CountrysideLever}s are on. */
 export type Countryside = Readonly<Record<CountrysideLever, boolean>>;
@@ -296,6 +304,8 @@ export const COUNTRYSIDE: Countryside = Object.freeze({
   planting: true,
   boundaries: true,
   clutter: true,
+  'hedge-breaks': true,
+  'small-stones': true,
 });
 
 /** {@link COUNTRYSIDE} with `off` switched off — the levers' one reader. */
@@ -304,6 +314,8 @@ export function countrysideWithout(off: readonly CountrysideLever[]): Countrysid
     planting: !off.includes('planting'),
     boundaries: !off.includes('boundaries'),
     clutter: !off.includes('clutter'),
+    'hedge-breaks': !off.includes('hedge-breaks'),
+    'small-stones': !off.includes('small-stones'),
   };
 }
 
