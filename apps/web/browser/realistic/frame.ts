@@ -43,9 +43,11 @@ export function rideFrame(input: {
   readonly origin: CorridorOrigin;
   readonly distance: number;
   readonly elapsed: number;
-  readonly rung: Pick<QualitySettings, 'scatterItems' | 'structureItems'>;
+  readonly rung: Pick<QualitySettings, 'scatterItems' | 'structureItems' | 'people'>;
   /** #1534's control, `levers=-settlement-clearing`: the settlements' ground left wooded. */
   readonly settlementsWooded?: boolean;
+  /** #1541's lever, `levers=-people`: nobody on the streets, whatever the rung draws. */
+  readonly peopleOff?: boolean;
   /**
    * #1581's `town=mixed`: the ride's corridor, its land and its planned
    * buildings, as `GameView` hands a ride's frames them.
@@ -78,6 +80,8 @@ export function rideFrame(input: {
     // ladder places less scenery as well as drawing less of it.
     scatterItems: input.rung.scatterItems,
     structureItems: input.rung.structureItems,
+    // #1541: the rung's people, as `GameView` passes them — or none, the lever's pair.
+    people: input.peopleOff === true ? 0 : input.rung.people,
     settlementsWooded: input.settlementsWooded,
     ...(input.town === undefined
       ? {}

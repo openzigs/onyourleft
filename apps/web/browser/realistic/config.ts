@@ -21,7 +21,7 @@
  * | `at` | hold the rider still this far along the route, for a screenshot | metres |
  * | `panel` | the on-screen controls | `1` (default), `0` for a clean screenshot |
  * | `layers` | layers switched OFF, for their share of the GPU (#616) | `-sky`, `-surfaces`, `-vegetation`, `-impostors`, `-structures`, `-water`, `-riders`, `-grounding`, comma-separated; default none |
- * | `levers` | #619's levers switched OFF, for a before/after pair at one rung — since #622 its air and since #1274 its crag, for a by-eye pair, since #1283 the generated trees and #1294 the generated firs, for both, since #1523 the ground blend and the road wear, for a cost pair, #1523's bounds on both, for a before/after pair, since #1534 the villages' cleared ground, for both, and since #1523 the firs' depth pre-pass, for a before/after pair | `-foliage-order`, `-texture-bias`, `-air`, `-crag`, `-generated-trees`, `-generated-conifers`, `-ground-blend`, `-road-wear`, `-surface-bounds`, `-settlement-clearing`, `-fir-prepass`, comma-separated; default none |
+ * | `levers` | #619's levers switched OFF, for a before/after pair at one rung — since #622 its air and since #1274 its crag, for a by-eye pair, since #1283 the generated trees and #1294 the generated firs, for both, since #1523 the ground blend and the road wear, for a cost pair, #1523's bounds on both, for a before/after pair, since #1534 the villages' cleared ground, for both, since #1523 the firs' depth pre-pass, for a before/after pair, and since #1541 the people, for both | `-foliage-order`, `-texture-bias`, `-air`, `-crag`, `-generated-trees`, `-generated-conifers`, `-ground-blend`, `-road-wear`, `-surface-bounds`, `-settlement-clearing`, `-fir-prepass`, `-people`, comma-separated; default none |
  * | `facing` | which way the route is turned, relative to the sun (#702, `route.ts` §"Which way it faces") | `sun`, `away`; default the route unturned, which looks 110° to 160° away from the sun |
  * | `town` | ride through a mapped town instead of `route.ts`' road (#1581): `footprint-fixtures-testing.ts` §`mixedTownFixture`'s mixed footprints, planned, drawn and lotted as a ride's corridor is, from 900 m to 2 100 m; since #1585 `richmond`, `footprint-fixtures-testing.ts` §`richmondStreetFixture`'s narrow lots drawn as house models beside square ones drawn as extrusions, from 900 m to 1 500 m | `mixed`, `richmond`; default none |
  * | `route` | which of `route.ts`' roads is ridden (#1559): absent, the valley road every Part Z and Part AH row was taken on; `village`, `route.ts` §`villageRoute`, a level road through two villages, for validation 0002 AE2 (`at=820` holds the first one's church and shops in frame). Refused beside `town`, which is a road of its own | `village`; default none |
@@ -119,6 +119,13 @@ export type Layer = (typeof LAYERS)[number];
  *   browser gate holds the two to one) — the tablet's before/after pair for
  *   the fix on one build. The product always draws the pre-pass.
  *
+ * - `people` — #1541: the people on the pavements, front paths and footways
+ *   (`people.ts`, `three-renderer.ts` §`PeopleBelt`). Off places nobody, so the
+ *   frame draws neither their bodies' call nor their impostors' — the tablet's
+ *   COST pair for them (validation 0002 Part AJ), and the owner's by-eye pair.
+ *   The product draws them on the top realistic rung (`quality.ts`
+ *   §`QualitySettings.people`).
+ *
  * - `settlement-clearing` — #1534: the trees, shrubs and rocks left standing on
  *   a village's or a farmstead's ground, as every frame was before #1534
  *   (`scene.ts` §`SceneInput.settlementsWooded`). The tablet's cost pair for
@@ -133,6 +140,7 @@ export const LEVERS = [
   'generated-conifers',
   'generated-trees',
   'ground-blend',
+  'people',
   'road-wear',
   'settlement-clearing',
   'surface-bounds',
