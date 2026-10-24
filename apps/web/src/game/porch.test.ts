@@ -79,6 +79,27 @@ describe('a porch’s span along its wall — #1589', () => {
     // Control: a little more room has one.
     expect(porchSpanOf({ left: 2.5, right: 2.5 }, 6, true, 1)).toBeDefined();
   });
+
+  it('keeps the steps, centred on the door, off every post, at every width it lays out — #1601', () => {
+    // The steps' half-width and the opening's little either side of them.
+    const clearance = step.width / 2 + 0.05;
+    let three = 0;
+    for (let width = 2.5; width <= 4.5 + 1e-9; width += 0.005) {
+      for (const four of [true, false]) {
+        for (const side of [1, -1] as const) {
+          const span = porchSpanOf({ left: 4, right: 4 }, width, four, side);
+          if (span === undefined) continue;
+          if (span.posts.length === 3) three += 1;
+          for (const at of span.posts) {
+            expect(Math.abs(at - span.stepsAt) - post / 2).toBeGreaterThanOrEqual(clearance - 1e-9);
+          }
+        }
+      }
+    }
+    // Control: three-post spans were laid out, down to the narrowest that fits.
+    expect(three).toBeGreaterThan(100);
+    expect(porchSpanOf({ left: 4, right: 4 }, 4 * (clearance + post), false, 1)).toBeDefined();
+  });
 });
 
 describe('its pitch and its steps — #1589', () => {

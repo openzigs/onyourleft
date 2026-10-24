@@ -516,6 +516,64 @@ describe('an awning keeps the road’s clearance — #1590', () => {
   });
 });
 
+/**
+ * A row of 12 × 10 m two-storey shops on retail land, well back from the
+ * road, each with a fin of wall standing out from the right-hand end of its
+ * front: `acute`, leaning back over the front from the corner, so the corner
+ * between them is reflex past a right angle; else square to it. Every edge
+ * of the fin is shorter than a door's place, so the front stays the wall
+ * the door is on.
+ */
+function finnedShops(acute: boolean): readonly FootprintPlan[] {
+  const profile = northRoute(3_000, () => 10);
+  const origin = corridorOrigin(profile);
+  const lateral = ROAD_CLEARANCE_METRES + 5 + 5;
+  // `(along, lateral)` about the shop's middle; the front is at −5, the road beyond it.
+  const fin: readonly (readonly [number, number])[] = acute
+    ? [
+        [5.2, -6],
+        [6.6, -6],
+        [6.6, 5],
+      ]
+    : [
+        [6, -6.2],
+        [7, -6.2],
+        [7, 5],
+      ];
+  const buildings: BuildingFeature[] = [];
+  for (let along = 200; along < 2_600; along += 40) {
+    const ring = [[-6, -5] as const, [6, -5] as const, ...fin, [-6, 5] as const].map(
+      ([a, l]) => [along + a, lateral + l] as const,
+    );
+    buildings.push(buildingBeside(profile, origin, [ring], 6));
+  }
+  const corridor: WorldCorridor = {
+    routeId: 'finned-shops',
+    origin,
+    covered: () => true,
+    coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
+    landUse: [landBeside(profile, origin, 'landuse', 'retail', 100, 2_700, -60, 60)],
+    buildings,
+    paths: [],
+    streets: [],
+  };
+  return footprintPlans(corridor, landClassMask(corridor), profile, origin).plans;
+}
+
+describe('an awning keeps off its own building — #1601', () => {
+  it('has none where the building’s own wing stands across it, past a reflex corner', () => {
+    const shops = finnedShops(true);
+    expect(shops.filter((plan) => plan.shop.front).length).toBe(60);
+    expect(shops.filter((plan) => plan.shop.awning)).toStrictEqual([]);
+  });
+
+  it('keeps it where the corner is square: the 0.4 m inset clears the wing', () => {
+    const shops = finnedShops(false);
+    expect(shops.filter((plan) => plan.shop.front).length).toBe(60);
+    expect(shops.filter((plan) => plan.shop.awning).length).toBeGreaterThan(10);
+  });
+});
+
 describe('an awning’s depth — #1590, shopOf', () => {
   const draws = { sign: 0, awning: 0, paint: 0, stripes: 0, depth: 1 };
   const reachingTo = (reach: number) => (corners: readonly (readonly [number, number])[]) =>
