@@ -25,18 +25,26 @@ import {
   type Countryside,
   type LandClassMask,
 } from './land-class';
-import { northRoute } from './route-fixtures-testing';
+import { northRoute, valleyRoute } from './route-fixtures-testing';
 import {
   scatterAt,
   scatterSeed,
+  HEDGEROW_EDGE_METRES,
   SCATTER_BAND_METRES,
   SCATTER_VERGE_METRES,
   type ScatterItem,
 } from './scatter';
 import { sceneFrame } from './scene';
-import { BOUNDARY_PIECE_METRES, structuresAt } from './settlements';
+import {
+  BOUNDARY_PIECE_METRES,
+  PLOT_METRES,
+  siteAt,
+  siteSpacing,
+  structuresAt,
+} from './settlements';
 import { atStartLine } from './simulation';
-import { corridorOrigin, ROAD_WIDTH_METRES } from './terrain';
+import { corridorOrigin, drawnRoadFrame, ROAD_WIDTH_METRES } from './terrain';
+import { CHANNEL_BANK_METRES, waterways } from './waterways';
 import type { WorldCorridor } from './world-data/corridor';
 
 /** A level 6 km road due north: local `z` is distance along, `x` is across. */
@@ -159,6 +167,21 @@ describe('#1542 planting by land class', () => {
     // Open: under a fifth of what the procedural world stands there.
     expect(pasture.length).toBeLessThan(procedural.filter((item) => !hedgerow(item)).length / 5);
     expect(pasture.length).toBeGreaterThan(0);
+  });
+
+  it('stands hedgerow trees within a hedgerow’s reach of a field’s edge, not only by the road', () => {
+    // Pasture from 14 m out on the positive side, past the nearest band: only
+    // the edge rule can plant a hedgerow tree there. The items reach about 22 m.
+    const near = (items: readonly ScatterItem[]): readonly ScatterItem[] =>
+      items.filter(inside).filter((item) => item.x > 15 && item.x < 14 + HEDGEROW_EDGE_METRES);
+    const atEdge = near(scenery(mask(rectangle('farmland', { ...MIDDLE, minX: 14 }))));
+    // Control: the same ground in a field whose edge is the road's far side.
+    const inField = near(scenery(FARMLAND));
+    expect(atEdge.length).toBeGreaterThan(10);
+    expect(inField.length).toBeGreaterThan(0);
+    expect(share(atEdge, TREES)).toBeGreaterThan(0.75);
+    // A hedgerow keeps ten times the pasture's trees.
+    expect(atEdge.length).toBeGreaterThan(inField.length * 4);
   });
 
   it('plants a park with specimen trees and no rock', () => {
@@ -297,6 +320,157 @@ describe('#1542 field boundaries along farmland’s edges', () => {
       .filter((item) => BOUNDARIES.has(item.kind) && beyondVerge(item))
       .filter(onFarmland(FARMLAND));
     expect(out).toStrictEqual([]);
+  });
+});
+
+describe('#1542 boundaries on the span, and clear of villages and streams', () => {
+  const edgesOf = (items: readonly ScatterItem[]): readonly ScatterItem[] =>
+    items.filter((item) => BOUNDARIES.has(item.kind) && Math.abs(item.x) > 8);
+  /** A field 25 m out on the positive side, over the whole covered stretch. */
+  const setBack = (box: Box, route = ROUTE): LandClassMask =>
+    landClassMask({
+      ...corridorOf([rectangle('farmland', { ...box, minX: 25 })]),
+      covered: (x, z) => x >= box.minX && x < box.maxX && z >= box.minZ && z < box.maxZ,
+      coveredBoxes: [box],
+      routeId: String(route.totalDistance),
+    });
+
+  it('admits each piece to exactly one of two adjacent spans', () => {
+    const land = mask(
+      rectangle('farmland', { minX: 25, maxX: 220, minZ: 3_200, maxZ: 3_600 }),
+      rectangle('wood', { minX: -220, maxX: -30, minZ: 3_200, maxZ: 3_600 }),
+      rectangle('farmland', { minX: -30, maxX: -10, minZ: 3_200, maxZ: 3_600 }),
+    );
+    const span = (from: number, to: number): readonly string[] =>
+      edgesOf(
+        structuresAt(ROUTE, ORIGIN, SEED, from, to, ALL, undefined, land, undefined, COUNTRYSIDE),
+      )
+        .filter((item) => item.z > 3_150 && item.z < 3_650)
+        .map(key)
+        .sort();
+    const whole = span(3_000, 3_800);
+    expect(whole.length).toBeGreaterThan(20);
+    // Split at every metre across several pieces, so some split lands exactly
+    // on a piece's own odometer.
+    for (let at = 3_300; at <= 3_340; at += 1) {
+      const halves = [...span(3_000, at), ...span(at, 3_800)].sort();
+      expect(halves, `split at ${String(at)} m`).toStrictEqual(whole);
+    }
+  });
+
+  it('stands no mapped edge through a procedural village', () => {
+    const { sites } = siteSpacing(ROUTE);
+    const village = Array.from({ length: sites }, (_, index) => siteAt(ROUTE, SEED, index)).find(
+      (site) => site?.kind === 'village' && site.centre > 2_300 && site.centre < 3_700,
+    );
+    if (village === undefined) throw new Error('the fixture route has no village in the middle');
+    // ⚠️ A village is built only where `siteOnMappedLand` finds no map data, and
+    // it looks every 10 m along the site. So the data here leaves out the 5 m cell
+    // each of those looks falls in and covers the cells between: the village is
+    // still built, and the field's edges in the cells between are still mapped.
+    const start = village.centre - village.half - PLOT_METRES;
+    const length = 2 * (village.half + PLOT_METRES);
+    const looked = new Set<number>();
+    for (let step = 0; step <= Math.ceil(length / 10); step += 1) {
+      const frame = drawnRoadFrame(ROUTE, ORIGIN, start + Math.min(length, step * 10));
+      if (frame === undefined) throw new Error('no frame');
+      for (let lateral = -42; lateral <= 42; lateral += 6) {
+        looked.add(Math.floor((frame.z + frame.normalZ * lateral) / 5));
+      }
+    }
+    const boxes: Box[] = [];
+    for (let cell = Math.floor(MIDDLE.minZ / 5); cell < MIDDLE.maxZ / 5; cell += 1) {
+      const within = cell * 5 + 2.5 > start - 5 && cell * 5 + 2.5 < start + length + 5;
+      if (!within || !looked.has(cell)) {
+        boxes.push({ minX: -1_000, maxX: 1_000, minZ: cell * 5, maxZ: (cell + 1) * 5 });
+      }
+    }
+    const land = landClassMask({
+      ...corridorOf([rectangle('farmland', { ...MIDDLE, minX: 25 })]),
+      covered: (_x, z) => boxes.some((box) => z >= box.minZ && z < box.maxZ),
+      coveredBoxes: boxes,
+    });
+    const items = structures(land);
+    const inVillage = (item: ScatterItem): boolean => item.z >= start && item.z < start + length;
+    // The village was built, with the field mapped around it ...
+    expect(
+      items.filter((item) => inVillage(item) && !BOUNDARIES.has(item.kind)).length,
+    ).toBeGreaterThan(5);
+    // ... and edged on both sides of it, but not through it.
+    expect(
+      edgesOf(items).filter((item) => item.z > start - 200 && item.z < start).length,
+    ).toBeGreaterThan(0);
+    expect(
+      edgesOf(items).filter((item) => item.z >= start + length && item.z < start + length + 200)
+        .length,
+    ).toBeGreaterThan(0);
+    expect(edgesOf(items).filter(inVillage)).toStrictEqual([]);
+  });
+
+  it('stands no mapped edge in a stream’s channel', () => {
+    const valley = valleyRoute();
+    const origin = corridorOrigin(valley);
+    const seed = scatterSeed(valley);
+    const stream = waterways(valley, seed).crossings[0];
+    if (stream === undefined) throw new Error('the valley fixture has no stream');
+    const box: Box = { minX: -1_000, maxX: 1_000, minZ: 0, maxZ: 3_000 };
+    const land = setBack(box, valley);
+    const items = edgesOf(
+      structuresAt(
+        valley,
+        origin,
+        seed,
+        0,
+        valley.totalDistance,
+        ALL,
+        undefined,
+        land,
+        undefined,
+        COUNTRYSIDE,
+      ),
+    );
+    const channel = (item: ScatterItem): boolean =>
+      Math.abs(item.z - stream.distance) <= CHANNEL_BANK_METRES;
+    expect(items.filter(channel)).toStrictEqual([]);
+    // Control: both banks of the channel are edged.
+    expect(
+      items.filter((item) => item.z < stream.distance - CHANNEL_BANK_METRES).length,
+    ).toBeGreaterThan(5);
+    expect(
+      items.filter((item) => item.z > stream.distance + CHANNEL_BANK_METRES).length,
+    ).toBeGreaterThan(5);
+  });
+
+  it('walls a mapped field’s roadside on steep ground, and hedges it on level ground', () => {
+    const valley = valleyRoute();
+    const origin = corridorOrigin(valley);
+    const seed = scatterSeed(valley);
+    const box: Box = { minX: -1_000, maxX: 1_000, minZ: 0, maxZ: 3_000 };
+    const land = landClassMask({
+      ...corridorOf([rectangle('farmland', box)]),
+      covered: () => true,
+      coveredBoxes: [box],
+    });
+    const verge = structuresAt(
+      valley,
+      origin,
+      seed,
+      0,
+      valley.totalDistance,
+      ALL,
+      undefined,
+      land,
+      undefined,
+      COUNTRYSIDE,
+    ).filter((item) => BOUNDARIES.has(item.kind) && Math.abs(item.x) < 8);
+    const kindsOn = (from: number, to: number): readonly string[] => [
+      ...new Set(verge.filter((item) => item.z > from && item.z < to).map((item) => item.kind)),
+    ];
+    // The valley's sides fall at 5%, past the 4% a boundary is walled above.
+    expect(kindsOn(500, 900)).toStrictEqual(['wall']);
+    expect(kindsOn(1_100, 1_500)).toStrictEqual(['wall']);
+    // Level at both ends: a hedge.
+    expect(kindsOn(50, 350)).toStrictEqual(['hedge']);
   });
 });
 
