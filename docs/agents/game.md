@@ -829,6 +829,21 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         §`MappedBuildingBelt`), refilled only when the rider's
                         100 m chunk or the rung changes, realistic rungs only;
                         the tint is a VERTEX attribute, and there is no ground blob (#620)
+    src/game/house-models.ts
+                        which mapped plans are drawn as a house MODEL (#1585):
+                        GildedAge's RVA set and Orzechu's shop, CC-BY-4.0, the
+                        owner's download (Sketchfab needs an account; the lock
+                        pins each archive, `sources.ts` §`HOUSE_MODEL_SOURCES`).
+                        A plan fits when its minimum-area rectangle's sides are
+                        0.8 to 1.25 of a model's, rectangularity ≥ 0.85, storeys
+                        ±1, the same use and the door on the same end or side
+                        (`HOUSE_FIT`); #1581's mixed town fits none, a Richmond
+                        street's narrow lots. Near level only; one more mesh in ONE
+                        material (the atlas), counted INSIDE the belt's 6 calls,
+                        its triangles pooled in the 23 040. ⚠️ Textures are
+                        admitted on the model's grant (ADR 0049's 2026-10-23
+                        amendment); the shop's interior photo and door sign are
+                        painted over in `blender/process_house_models.py`
     src/game/facade.ts  a mapped building's windows and front door, laid out in
                         a bay and a storey (#1581), and since #1588 its US sash
                         windows, shutters, reveal and cladding — drawn by the shader

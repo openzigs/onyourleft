@@ -74,6 +74,9 @@ def import_scan(path):
         dropped += len(triangles_of) - len(first)
         return triangles_of[np.sort(first)].reshape(-1, 1)
 
+    # #1585: only the meshes THIS import made are counted, so a script may
+    # import several files into one scene; into an empty scene it is all of them.
+    before = set(bpy.data.meshes)
     BinaryData.decode_accessor = staticmethod(decode_without_repeats)
     try:
         bpy.ops.import_scene.gltf(filepath=path)
@@ -82,7 +85,7 @@ def import_scan(path):
 
     # What `mesh.validate()` may still have dropped is its choice, not the
     # pipeline's: refuse it rather than ship a coin toss.
-    imported = sum(len(mesh.polygons) for mesh in bpy.data.meshes)
+    imported = sum(len(mesh.polygons) for mesh in bpy.data.meshes if mesh not in before)
     declared = -dropped
     for mesh in document.get("meshes", []):
         for primitive in mesh["primitives"]:

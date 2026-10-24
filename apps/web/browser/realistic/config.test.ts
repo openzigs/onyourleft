@@ -47,6 +47,8 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     expect(parseConfig('?town=mixed').town).toBe('mixed');
     expect(configQuery(parseConfig('?town=mixed&at=1200'))).toBe('?at=1200&town=mixed');
     expect(() => parseConfig('?town=rows')).toThrow(/town is one of mixed/);
+    // #1585: the Richmond street, models beside extrusions.
+    expect(parseConfig('?town=richmond').town).toBe('richmond');
   });
 
   it('turns the route towards the sun or away from it only when asked — #702', () => {

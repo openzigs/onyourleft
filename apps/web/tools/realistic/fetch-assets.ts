@@ -50,6 +50,7 @@ import {
   systemAssetVerdict,
   type AssetSource,
   type InputLock,
+  type LockedFile,
   type LockedSource,
   type ResolvedFile,
 } from './sources';
@@ -163,6 +164,60 @@ const md5 = (data: Buffer): string => createHash('md5').update(data).digest('hex
 const sha256 = (data: Buffer): string => createHash('sha256').update(data).digest('hex');
 
 /**
+ * A placed archive's files, as the lock records them — #1585: the archive
+ * under `run.raw/<id>/`, which must be there (nothing here downloads it) and,
+ * unless `run.relock`, be the archive the lock records; then each member taken
+ * out of it, held to the lock and to any phrase it must carry.
+ */
+export function placedFiles(
+  id: string,
+  origin: Extract<AssetSource['origin'], { readonly from: 'placed' }>,
+  expected: LockedSource | undefined,
+  run: Pick<FetchRun, 'raw' | 'relock' | 'log'>,
+): LockedFile[] {
+  const { relock } = run;
+  if (!safeRelativePath(origin.archive)) throw new Error(`${id}: refused path ${origin.archive}`);
+  const target = join(run.raw, id, origin.archive);
+  if (!existsSync(target)) {
+    throw new Error(
+      `${id}: ${target} is not there. It is the owner's own download of ${origin.page} (an account is needed, so this script never fetches it); place it there and run again`,
+    );
+  }
+  const archive = readFileSync(target);
+  const archiveDigest = sha256(archive);
+  if (!relock) {
+    const fault = lockFault(id, origin.archive, archiveDigest, expected);
+    if (fault !== undefined) throw new Error(fault);
+  }
+  const files: LockedFile[] = [
+    { path: origin.archive, url: origin.page, bytes: archive.length, sha256: archiveDigest },
+  ];
+  for (const member of origin.members) {
+    if (!safeRelativePath(member.path)) throw new Error(`${id}: refused path ${member.path}`);
+    const body = Buffer.from(zipMember(archive, member.path));
+    if (member.mustContain !== undefined && !body.toString('utf8').includes(member.mustContain)) {
+      throw new Error(`${id}/${member.path}: it does not state "${member.mustContain}"`);
+    }
+    const digest = sha256(body);
+    if (!relock) {
+      const fault = lockFault(id, member.path, digest, expected);
+      if (fault !== undefined) throw new Error(fault);
+    }
+    const memberTarget = join(run.raw, id, member.path);
+    mkdirSync(dirname(memberTarget), { recursive: true });
+    writeFileSync(memberTarget, body);
+    files.push({
+      path: member.path,
+      url: `${origin.page}#${member.path}`,
+      bytes: body.length,
+      sha256: digest,
+    });
+    run.log(`${id}/${member.path} ${String(body.length)} bytes`);
+  }
+  return files;
+}
+
+/**
  * One source, read: its licence page held to {@link licenceVerdict}, its files
  * downloaded into `run.raw` and, unless `run.relock`, each held to `expected`,
  * the lock's entry for it. Returns what the lock records for it.
@@ -190,6 +245,12 @@ export async function readSource(
   }
   const files = [];
   const origin = source.origin;
+  // #1585: an archive the owner downloaded with their own account and placed
+  // by hand. Nothing is fetched for it; it is held to the lock's digest, and
+  // only its members are taken out.
+  if (origin.from === 'placed') {
+    files.push(...placedFiles(source.id, origin, expected, run));
+  }
   // An archive downloaded whole and pinned by its digest: MakeHuman's pack
   // (#623), or an ambientCG asset (#1274), whose own page `licenceVerdict`
   // has just held to `sources.ts` §`ambientCgVerdict`.
@@ -247,7 +308,9 @@ export async function readSource(
       run.log(`${source.id}/${member.path} ${String(body.length)} bytes`);
     }
   }
-  for (const file of archived !== undefined ? [] : await resolve(run, source)) {
+  for (const file of archived !== undefined || origin.from === 'placed'
+    ? []
+    : await resolve(run, source)) {
     if (!safeRelativePath(file.path)) throw new Error(`${source.id}: refused path ${file.path}`);
     const target = join(run.raw, source.id, file.path);
     let body: Buffer;

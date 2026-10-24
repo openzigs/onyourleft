@@ -134,6 +134,24 @@ export const WALL_PAINTS: Readonly<Partial<Record<StructureSurface, readonly Rgb
   ],
 };
 
+/**
+ * How far a house model's picture is moved toward its plan's wall paint —
+ * #1585: **0.35**. A model wears its own photographed brick and siding, so
+ * the plan's paint is laid over it as a hue alone, a third of the way: a
+ * sage plan's model is a greener house and a cream one's a warmer one, and
+ * two neighbours `paintTown` painted apart stay apart, without brick turning
+ * blue. Its brightness is the photograph's.
+ */
+export const MODEL_PAINT_STRENGTH = 0.35;
+
+/** A paint as a house model wears it: its hue, at {@link MODEL_PAINT_STRENGTH}. */
+export function modelPaint(paint: Rgb): Rgb {
+  const luma = 0.2126 * paint[0] + 0.7152 * paint[1] + 0.0722 * paint[2];
+  if (!(luma > 0)) return [1, 1, 1];
+  const toward = (channel: number): number => 1 + (channel / luma - 1) * MODEL_PAINT_STRENGTH;
+  return [toward(paint[0]), toward(paint[1]), toward(paint[2])];
+}
+
 /** Each roof surface's multipliers — #1581: new tile, weathered, mossed; slate blue to grey. */
 export const ROOF_PAINTS: Readonly<Partial<Record<StructureSurface, readonly Rgb[]>>> = {
   'roof-tiles': [

@@ -419,3 +419,53 @@ export function mixedTownFixture(): {
     },
   };
 }
+
+/**
+ * #1585's fixture: a Richmond street, the kind of footprint the RVA set was
+ * modelled from — along 400 m of level road from 1 000 m, both sides, a lot
+ * every 10 m: a house 7 m along the road by 19 m deep, its narrow end to the
+ * road, on residential land; and beyond 1 200 m on commercial land a shop
+ * 7.5 m by 24 m. Every third lot is instead a square 11 m house or shop,
+ * which no model fits, so models and extrusions stand side by side. Every
+ * footprint is a rectangle square to the road, with no height mapped, so
+ * each is two storeys (#1540's default).
+ */
+export function richmondStreetFixture(): {
+  readonly profile: RouteProfile;
+  readonly origin: CorridorOrigin;
+  readonly corridor: WorldCorridor;
+} {
+  const profile = northRoute(3_000, () => 10);
+  const origin = corridorOrigin(profile);
+  const buildings: BuildingFeature[] = [];
+  for (let along = 1_000, lot = 0; along < 1_400; along += 10, lot += 1) {
+    const shop = along >= 1_200;
+    const square = lot % 3 === 2;
+    const wide = square ? 11 : shop ? 7.5 : 7;
+    const deep = square ? 11 : shop ? 24 : 19;
+    for (const side of [1, -1]) {
+      buildings.push(
+        buildingBeside(profile, origin, [
+          rectangleBeside(along, side * (12 + deep / 2), wide, deep),
+        ]),
+      );
+    }
+  }
+  return {
+    profile,
+    origin,
+    corridor: {
+      routeId: 'richmond-street',
+      origin,
+      covered: () => true,
+      coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
+      landUse: [
+        landBeside(profile, origin, 'landuse', 'residential', 950, 1_195, -70, 70),
+        landBeside(profile, origin, 'landuse', 'commercial', 1_195, 1_450, -70, 70),
+      ],
+      buildings,
+      paths: [],
+      streets: [],
+    },
+  };
+}

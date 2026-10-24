@@ -653,6 +653,12 @@ export const MAPPED_CHUNK_METRES = 100;
  * their count. The belt is one mesh with at most this many groups, one a
  * surface; a building whose surfaces would open a seventh waits for a refill
  * nearer it (`mapped-buildings.ts` §`selectMappedBuildings`).
+ *
+ * ⚠️ **Since #1585 the house models are counted INSIDE it, not added to it**:
+ * every model drawn is one more mesh in one material, one call whatever their
+ * count, and a refill that draws any opens at most five surfaces. So a town
+ * with models in reach is still at most six calls, and the frame's other
+ * ceilings are unchanged.
  */
 export const MAPPED_BUILDING_DRAW_CALLS = 6;
 
@@ -906,6 +912,28 @@ export const REALISTIC_TOWN_SURFACES = {
 } as const;
 
 /**
+ * What the house models may add — #1585's own ceiling, inside
+ * {@link REALISTIC_TEXTURE_MEMORY_BYTES} and {@link REALISTIC_BUILD_BYTES}:
+ * **11 MiB** of texture memory as the tablet is handed it, and **3 MiB** of
+ * build. The one atlas is 4096² ETC1S, half a byte a texel and a third again
+ * for its mipmaps, 10.7 MiB estimated; the thirteen GLBs and the atlas are
+ * 2 636 337 bytes. `house-models.test.ts` reads both off the committed files.
+ *
+ * ⚠️ **One draw call, and triangles from the shared term**: the models are
+ * one mesh in one material, counted inside {@link MAPPED_BUILDING_DRAW_CALLS},
+ * and their triangles are ranked inside {@link MAPPED_BUILDING_TRIANGLES} with
+ * every other structure (the owner's ruling: they pool the 23 040, and need
+ * not be decimated to {@link REALISTIC_TRIANGLES}' 640 each).
+ *
+ * @test-facing held by `house-models.test.ts`, which reads the committed house
+ * files back off disk against it; the renderer spends it only on the realistic path
+ */
+export const REALISTIC_HOUSE_MODEL_SURFACES = {
+  textureBytes: 11 * MEBIBYTE,
+  buildBytes: 3 * MEBIBYTE,
+} as const;
+
+/**
  * What the realistic riders' bike-shaped shadow may hold on the GPU — #626's
  * own ceiling, inside {@link REALISTIC_TEXTURE_MEMORY_BYTES}: **128 KiB**, one
  * texture. The silhouette spends 64 KiB — 256 × 128 texels, two bytes each,
@@ -956,11 +984,23 @@ export const REALISTIC_RIDER_SILHOUETTE_BYTES = 128 * 1024;
  * and are fetched only when a rider picks the realistic world, which then
  * fetches the 3.4 MiB more.
  *
+ * ## Raised to 46 MiB for the house models — #1585
+ *
+ * **Old ceiling 43 MiB (45 088 768 bytes), new 46 MiB (48 234 496).** The
+ * owner ruled on #1585 (2026-10-22) that it may rise by up to about 5 MB for
+ * the house models' atlas. Measured on the committed files: the realistic set
+ * with its transcoder was 44 944 660 bytes, 144 108 under the old ceiling;
+ * the thirteen house models' GLBs and their one atlas add **2 636 337**
+ * ({@link REALISTIC_HOUSE_MODEL_SURFACES}), so it is **47 580 997**, 653 499
+ * under the new one — a rise of 3 MiB, inside the 5 MB the ruling allows.
+ * As for #1548, the APK carries the same bytes more, and a browser's first
+ * download does not move: the files are outside the precache.
+ *
  * @test-facing held by `realistic-budget.test.ts`, which reads every committed
  * realistic file back off disk against it; the renderer spends it only on the
  * realistic path, which a ride takes only for a rider who chose it (#475)
  */
-export const REALISTIC_BUILD_BYTES = 43 * MEBIBYTE;
+export const REALISTIC_BUILD_BYTES = 46 * MEBIBYTE;
 
 /**
  * The shape of one texture, for {@link estimatedTextureBytes}.
