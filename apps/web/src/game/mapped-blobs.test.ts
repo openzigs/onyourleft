@@ -33,6 +33,7 @@ import {
   ROAD_EDGE_METRES,
   type BlobCasters,
 } from './ground-blob';
+import { FOUNDATION_METRES } from './buildings';
 import { landClassMask } from './land-class';
 import { mappedBuildingsOf, type MappedBuildings } from './mapped-buildings';
 import {
@@ -49,6 +50,7 @@ import { corridorOrigin, type CorridorPoint } from './terrain';
 import {
   GroundBlobBelt,
   MappedBuildingBelt,
+  mappedBlobList,
   refillMappedBuildings,
   structureCasters,
 } from './three-renderer';
@@ -141,7 +143,8 @@ function groundFrame(
     );
   }
   structureCasters(frame.scatter, frame.camera, Number.POSITIVE_INFINITY, heightOf, procedural);
-  const lists = mapped === undefined ? [procedural] : [procedural, mapped.grounded];
+  const lists: BlobCasters[] = [blobCasters(0), procedural, blobCasters(0)];
+  mappedBlobList(lists, true, mapped);
   grounding.update(lists, frame.corridor, frame.terrain.mesh, sun);
 }
 
@@ -316,6 +319,38 @@ describe('a ground blob under every drawn mapped building — #1657', () => {
     expect(mapped.grounded.count).toBe(0);
     mapped.setCarried(true);
     expect(mapped.grounded.count).toBe(mapped.stats.buildings);
+  });
+});
+
+describe('the mapped list as the product assembles it — #1657', () => {
+  it('hands the belt its own grounded list while shown, and none otherwise', () => {
+    const view = townFrame(1_500).mappedBuildings;
+    if (view === undefined) throw new Error('the frame carries no mapped buildings');
+    const mapped = kept(new MappedBuildingBelt(buildings, textures));
+    refillMappedBuildings(mapped, view, [], 0, REALISTIC_STRUCTURE_ITEMS);
+    const lists: BlobCasters[] = [blobCasters(0), blobCasters(0), blobCasters(0)];
+    mappedBlobList(lists, true, mapped);
+    expect(lists[2]).toBe(mapped.grounded);
+    expect(mapped.grounded.count).toBeGreaterThan(0);
+    mappedBlobList(lists, false, mapped);
+    expect(lists[2]?.count).toBe(0);
+    mappedBlobList(lists, true, undefined);
+    expect(lists[2]?.count).toBe(0);
+  });
+
+  it('sets each caster at the ground of its foot, as tall as its eaves stand above that', () => {
+    const view = townFrame(1_500).mappedBuildings;
+    if (view === undefined) throw new Error('the frame carries no mapped buildings');
+    const mapped = kept(new MappedBuildingBelt(buildings, textures));
+    refillMappedBuildings(mapped, view, [], 0, REALISTIC_STRUCTURE_ITEMS);
+    const plans = drawnPlans(mapped);
+    expect(plans.length).toBeGreaterThan(0);
+    plans.forEach((index, place) => {
+      const plan = buildings.plans[index] as FootprintPlan;
+      const caster = mapped.grounded.casters[place] as BlobCasters['casters'][number];
+      expect(caster.y).toBeCloseTo(plan.base + FOUNDATION_METRES, 5);
+      expect(caster.height).toBeCloseTo(Math.max(0, plan.eaves - plan.base - FOUNDATION_METRES), 5);
+    });
   });
 });
 

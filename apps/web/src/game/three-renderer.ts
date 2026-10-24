@@ -14862,6 +14862,19 @@ export class MappedBuildingBelt {
 const NO_BLOB_CASTERS: BlobCasters = { casters: [], count: 0 };
 
 /**
+ * #1657: puts the mapped buildings' list last in `lists` (slot 2), the belt's
+ * `grounded` while they are shown and drawn, none otherwise. Apart from the
+ * view so a Node test runs the line the product runs.
+ */
+export function mappedBlobList(
+  lists: BlobCasters[],
+  shown: boolean,
+  mapped: MappedBuildingBelt | undefined,
+): void {
+  lists[2] = shown && mapped !== undefined ? mapped.grounded : NO_BLOB_CASTERS;
+}
+
+/**
  * Writes `plan` into `caster` as #1657 grounds it: a rectangle, not round,
  * at its footprint's minimum-area rectangle, turned so that +Z runs along the
  * rectangle's long axis, as tall as its eaves stand above its foot.
@@ -14869,14 +14882,14 @@ const NO_BLOB_CASTERS: BlobCasters = { casters: [], count: 0 };
 function groundMappedBuilding(plan: FootprintPlan, caster: BlobCaster): void {
   const rectangle = minimumAreaRectangle(plan.footprint);
   caster.x = rectangle.cx;
-  caster.y = plan.base;
+  caster.y = plan.base + FOUNDATION_METRES;
   caster.z = rectangle.cz;
   caster.yaw = Math.atan2(rectangle.ux, rectangle.uz);
   caster.round = false;
   caster.halfAlong = rectangle.halfLong;
   caster.halfAcross = rectangle.halfShort;
   caster.centreAlong = 0;
-  caster.height = Math.max(0, plan.eaves - plan.base);
+  caster.height = Math.max(0, plan.eaves - plan.base - FOUNDATION_METRES);
   caster.strength = 1;
 }
 
@@ -15333,8 +15346,7 @@ class RealisticDrawing {
     );
     // #1657: the mapped buildings' blobs, written at their refill, read last
     // so that the procedural blobs keep the slots they had before them.
-    this.#casterLists[2] =
-      this.#mappedBlobs && this.#mapped !== undefined ? this.#mapped.grounded : NO_BLOB_CASTERS;
+    mappedBlobList(this.#casterLists, this.#mappedBlobs, this.#mapped);
     this.grounding.update(this.#casterLists, corridor, terrain, sun);
   }
 
