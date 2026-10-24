@@ -311,6 +311,7 @@ import {
   FOOTPRINT_SURFACES,
   FOOTPRINT_VERTEX_FLOATS,
   GARAGE,
+  minimumAreaRectangle,
   ROOF_ROLES,
   SHINGLE_COURSE_METRES,
   STOREY_METRES,
@@ -412,6 +413,7 @@ import {
   groundUnderBlob,
   placeGroundBlob,
   roadClip,
+  type BlobCaster,
   type BlobCasters,
   type GroundBlob,
   type GroundPoint,
@@ -540,6 +542,7 @@ import {
 } from './road-wear';
 import {
   MAPPED_BUILDING_DRAW_CALLS,
+  MAPPED_BUILDING_MAX,
   MAPPED_BUILDING_TRIANGLES,
   REALISTIC_GROUND_BLOBS,
   REALISTIC_NEAR_MESHES,
@@ -14370,7 +14373,9 @@ export interface DrawnMappedBuilding {
  *   `min_height` has no plinth and no grounding.
  * - **#621's tint** is a vertex attribute here, not the instance colour's
  *   third channel: there is no instance. @see withVertexTint
- * - **No ground blob** (#620): `realistic-budget.ts` §`MAPPED_BUILDING_TRIANGLES`.
+ * - **A ground blob under each drawn building** — #1657: its footprint's
+ *   minimum-area rectangle, worked out at the refill and read by
+ *   `GroundBlobBelt` every frame. @see grounded
  * - **Never culled as a whole** (`frustumCulled` off): the buildings in reach
  *   stand all round the rider, so a sphere about them always holds the camera.
  */
@@ -14404,6 +14409,8 @@ export class MappedBuildingBelt {
   /** Each drawn building's first vertex in the models' buffer, or -1 for an extrusion. */
   readonly #modelAt: Int32Array;
   readonly #selection = new MappedSelection();
+  /** The drawn buildings as ground-blob casters, written at a refill. @see grounded */
+  readonly #grounded = blobCasters(MAPPED_BUILDING_MAX);
   /** Where each surface's range starts, and where its next triangle goes, in vertices. */
   readonly #starts = new Int32Array(MAPPED_BUILDING_DRAW_CALLS);
   readonly #cursors = new Int32Array(MAPPED_BUILDING_DRAW_CALLS);
@@ -14549,6 +14556,17 @@ export class MappedBuildingBelt {
     return this.#shown && this.#switchedOn && this.#carried;
   }
 
+  /**
+   * The ground-blob casters under what this belt draws — #1657: one a drawn
+   * building, near or far, extrusion or house model, nearest first; none
+   * while it draws nothing ({@link drawing}). Written at {@link refill} and
+   * only read here, so a frame that is not a refill reads one flag and
+   * allocates nothing.
+   */
+  get grounded(): BlobCasters {
+    return this.drawing ? this.#grounded : NO_BLOB_CASTERS;
+  }
+
   #applyVisible(): void {
     this.mesh.visible = this.drawing && this.#stats.triangles - this.#stats.modelTriangles > 0;
     this.modelMesh.visible = this.drawing && this.#stats.modelled > 0;
@@ -14651,6 +14669,7 @@ export class MappedBuildingBelt {
         attribute.needsUpdate = true;
       }
     }
+    this.#groundSelection();
     this.#stats = {
       buildings: selection.count,
       near: selection.near,
@@ -14663,6 +14682,25 @@ export class MappedBuildingBelt {
     };
     this.#applyVisible();
     return this.#stats;
+  }
+
+  /**
+   * Each drawn building as a ground-blob caster — #1657: its footprint's
+   * minimum-area rectangle (`footprint-buildings.ts` §`minimumAreaRectangle`),
+   * its middle, its long axis as the yaw, its half extents, and the height of
+   * its eaves above its foot. Once a refill, never a frame.
+   */
+  #groundSelection(): void {
+    const selection = this.#selection;
+    const into = this.#grounded;
+    into.count = 0;
+    for (let at = 0; at < selection.count; at += 1) {
+      const caster = into.casters[at];
+      if (caster === undefined) break;
+      const plan = this.buildings.plans[selection.plans[at] as number] as FootprintPlan;
+      groundMappedBuilding(plan, caster);
+      into.count += 1;
+    }
   }
 
   /** The browser gate's control: a group — a draw call — per building and surface. */
@@ -14818,6 +14856,28 @@ export class MappedBuildingBelt {
     this.modelMesh.geometry.dispose();
     (this.modelMesh.material as Material).dispose();
   }
+}
+
+/** A list of no ground-blob casters: what a belt that draws nothing hands the blob belt. */
+const NO_BLOB_CASTERS: BlobCasters = { casters: [], count: 0 };
+
+/**
+ * Writes `plan` into `caster` as #1657 grounds it: a rectangle, not round,
+ * at its footprint's minimum-area rectangle, turned so that +Z runs along the
+ * rectangle's long axis, as tall as its eaves stand above its foot.
+ */
+function groundMappedBuilding(plan: FootprintPlan, caster: BlobCaster): void {
+  const rectangle = minimumAreaRectangle(plan.footprint);
+  caster.x = rectangle.cx;
+  caster.y = plan.base;
+  caster.z = rectangle.cz;
+  caster.yaw = Math.atan2(rectangle.ux, rectangle.uz);
+  caster.round = false;
+  caster.halfAlong = rectangle.halfLong;
+  caster.halfAcross = rectangle.halfShort;
+  caster.centreAlong = 0;
+  caster.height = Math.max(0, plan.eaves - plan.base);
+  caster.strength = 1;
 }
 
 /**
@@ -14984,8 +15044,14 @@ class RealisticDrawing {
   #surfaces: RealisticSurfaces;
   /** This frame's structures, as ground-blob casters — #620. @see groundScenery */
   readonly #structureCasters = blobCasters(REALISTIC_STRUCTURE_ITEMS);
-  /** Both lists the blob belt reads, made once. */
-  readonly #casterLists: readonly BlobCasters[];
+  /**
+   * The three lists the blob belt reads, made once: the vegetation's, the
+   * structures' and, since #1657, the mapped buildings', which
+   * {@link groundScenery} points at the mapped belt's own each frame.
+   */
+  readonly #casterLists: BlobCasters[];
+  /** Whether the mapped buildings are grounded — #1657's lever. @see mappedBlobsShownOf */
+  #mappedBlobs = true;
   /** The rung's scenery budget, as the structure belts spend it. @see setBudget */
   #budget = Number.POSITIVE_INFINITY;
   /** The rung's structures — what the procedural and the mapped buildings share. @see setBudget */
@@ -15044,7 +15110,7 @@ class RealisticDrawing {
     this.pavements = new PavementBelt('realistic', world.structures.get('paving'));
     this.furniture = new FurnitureBelt('realistic', world.structures.get('planks'));
     this.people = new PeopleBelt(world.body);
-    this.#casterLists = [this.vegetation.grounded, this.#structureCasters];
+    this.#casterLists = [this.vegetation.grounded, this.#structureCasters, NO_BLOB_CASTERS];
     this.#road = this.#roadMaterial();
     this.#ground = this.#groundMaterial();
     const generator = new PMREMGenerator(renderer);
@@ -15265,7 +15331,16 @@ class RealisticDrawing {
       (kind) => this.structures.heightOf(kind),
       this.#structureCasters,
     );
+    // #1657: the mapped buildings' blobs, written at their refill, read last
+    // so that the procedural blobs keep the slots they had before them.
+    this.#casterLists[2] =
+      this.#mappedBlobs && this.#mapped !== undefined ? this.#mapped.grounded : NO_BLOB_CASTERS;
     this.grounding.update(this.#casterLists, corridor, terrain, sun);
+  }
+
+  /** @see mappedBlobsShownOf */
+  mappedBlobsShown(on: boolean): void {
+    this.#mappedBlobs = on;
   }
 
   /** How many scenery items the last frame drew, every belt together. */
@@ -15816,6 +15891,19 @@ export function mappedBuildingsShownOf(view: GameView, on: boolean): void {
 }
 
 /**
+ * Grounds a view's buildings from map data, or stops — #1657. The owner's
+ * page's lever (`&levers=-mapped-blobs`): off, no mapped building is handed
+ * to the ground-blob belt, which is the picture and the cost before #1657.
+ * A setting of the view's, so it holds across a rung change.
+ *
+ * @test-facing the realistic page's lever, read by `realistic-harness.ts`;
+ * the product always grounds them.
+ */
+export function mappedBlobsShownOf(view: GameView, on: boolean): void {
+  if (view instanceof ThreeGameView) view.mappedBlobsShown(on);
+}
+
+/**
  * What a view's buildings from map data drew at its last refill, and the
  * belt itself — #1549, for the browser gate's counts. `undefined` before a
  * realistic frame has carried any.
@@ -16269,6 +16357,8 @@ class ThreeGameView implements GameView {
   #clearOfTheCamera = true;
   /** Whether the realistic world's ground blobs are drawn. @see showGroundBlobsOf */
   #groundBlobsShown = true;
+  /** Whether the mapped buildings are grounded — #1657. @see mappedBlobsShownOf */
+  #mappedBlobsShown = true;
   /** Reused every frame: `#placeCamera` allocated a `Vector3` per frame until #424 (NFR-3). */
   readonly #lookAt = new Vector3();
   readonly #roadGeometry = new BufferGeometry();
@@ -16791,6 +16881,7 @@ class ThreeGameView implements GameView {
           this.#surfaces,
         );
         this.#realistic.addTo(this.#scene);
+        this.#realistic.mappedBlobsShown(this.#mappedBlobsShown);
         this.#realistic.setBudget(
           this.#quality.scatterItems + this.#quality.structureItems,
           this.#quality.structureItems,
@@ -16976,6 +17067,12 @@ class ThreeGameView implements GameView {
   /** @see mappedBuildingsShownOf */
   mappedBuildingsShown(on: boolean): void {
     this.#realistic?.mappedShown(on);
+  }
+
+  /** @see mappedBlobsShownOf */
+  mappedBlobsShown(on: boolean): void {
+    this.#mappedBlobsShown = on;
+    this.#realistic?.mappedBlobsShown(on);
   }
 
   /** @see mappedBuildingStatsOf */

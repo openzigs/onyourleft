@@ -152,6 +152,14 @@ export type Layer = (typeof LAYERS)[number];
  *   with BOTH `land-planting` and `ground-clutter` off — with `ground-clutter`
  *   alone off it still shrinks a wood's rocks and keeps them back from the
  *   road.
+ *
+ * - `mapped-blobs` — #1657: the ground blob under every drawn mapped building
+ *   (`three-renderer.ts` §`MappedBuildingBelt.grounded`). Off hands no mapped
+ *   building to the blob belt, which is the picture and the cost before
+ *   #1657: the tablet's COST pair (two triangles a building, and the blended
+ *   ground under it) and the owner's BY-EYE pair. Only a town has mapped
+ *   buildings, so pair it with `town=mixed`; on `route.ts`' road the two are
+ *   the same picture. The product always grounds them.
  */
 export const LEVERS = [
   'air',
@@ -165,6 +173,7 @@ export const LEVERS = [
   'hedge-breaks',
   'land-boundaries',
   'land-planting',
+  'mapped-blobs',
   'people',
   'road-wear',
   'settlement-clearing',

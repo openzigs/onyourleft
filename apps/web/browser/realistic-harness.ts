@@ -74,6 +74,7 @@ import {
   groundBlendOf,
   loadRealisticWorld,
   loadSceneryModels,
+  mappedBlobsShownOf,
   realisticSurfacesOf,
   realisticTextureReport,
   setRealisticTrees,
@@ -399,6 +400,9 @@ async function run(): Promise<void> {
   // before #622. A setting of the view's, so it survives a rung change.
   const airOn = !config.leversOff.includes('air');
   atmosphereOf(view, { table: airOn ? 'directional' : 'flattened', valley: airOn });
+  // #1657's cost and by-eye pair: the mapped buildings grounded, or as they
+  // were before it. A setting of the view's, so it survives a rung change.
+  mappedBlobsShownOf(view, !config.leversOff.includes('mapped-blobs'));
   const resize = (): void => view.resize(canvas.clientWidth, canvas.clientHeight);
   resize();
   addEventListener('resize', resize);

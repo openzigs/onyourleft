@@ -528,36 +528,6 @@ export const HARD_SWAP_TREE_LEVELS: TreeLevels = {
 export const REALISTIC_STRUCTURE_ITEMS = 36;
 
 /**
- * How many ground blobs a realistic frame may draw — #620: **62**, one under
- * every item the realistic world draws as a MESH and every structure it may
- * carry. `three-renderer.ts` §`GroundBlobBelt` is built with exactly this
- * capacity.
- *
- * | Casters | Blobs |
- * |---|--:|
- * | Trees at the full or middle level ({@link REALISTIC_TREE_LEVELS}: 1 full, 4 middle, the full-to-middle band) | 6 |
- * | Shrubs and rocks drawn as meshes ({@link REALISTIC_NEAR_MESHES}) | 8 + 12 |
- * | Structures ({@link REALISTIC_STRUCTURE_ITEMS}) | 36 |
- *
- * ⚠️ **A tree in the middle-to-impostor band, or drawn as its impostor, has
- * none**: an impostor is 40 m and more away, where a blob is a few pixels the
- * fog is already taking, and #620's ceiling of 124 triangles is these 62 at
- * two each.
- *
- * ⚠️ **They are counted in the frame's triangles**:
- * `realistic-budget.test.ts` adds `REALISTIC_GROUND_BLOBS × 2` to the worst
- * frame, which the structures had left 1 350 triangles of room under
- * {@link REALISTIC_FRAME_TRIANGLES} — 124 of it spent, 1 226 left.
- */
-export const REALISTIC_GROUND_BLOBS =
-  REALISTIC_TREE_LEVELS.near +
-  REALISTIC_TREE_LEVELS.middle +
-  (REALISTIC_TREE_LEVELS.dithered ? 1 : 0) +
-  REALISTIC_NEAR_MESHES.shrub +
-  REALISTIC_NEAR_MESHES.rock +
-  REALISTIC_STRUCTURE_ITEMS;
-
-/**
  * The most instanced meshes the realistic STRUCTURES may cost: **35** — #482,
  * from #481's review (finding 6), which found the figure bounded and stated
  * nowhere; and since #500, which gave every building two shapes and dressed
@@ -613,10 +583,12 @@ export const REALISTIC_STRUCTURE_MESHES = 35;
  * triangles, of the one buffer the belt preallocates, so no plan list,
  * however long, can grow it.
  *
- * ⚠️ **Mapped buildings carry no ground blob** (#620): a blob is an instance
- * under an instance, and a merged town has none. Whether a merged town wants
- * contact darkening is a by-eye call at #1553, and no follow-up is filed.
- * {@link REALISTIC_GROUND_BLOBS} is unchanged by them.
+ * **Each drawn mapped building carries a ground blob** — #1657, the
+ * follow-up #1553's by-eye pass asked for: the minimum-area rectangle of its
+ * footprint, worked out once a refill (`three-renderer.ts`
+ * §`MappedBuildingBelt.grounded`). They are two triangles each, counted in
+ * {@link REALISTIC_GROUND_BLOBS} (which rose by {@link MAPPED_BUILDING_MAX},
+ * the owner's ruling (d) of 2026-10-24) and not in this term.
  */
 export const MAPPED_BUILDING_TRIANGLES = REALISTIC_STRUCTURE_ITEMS * REALISTIC_TRIANGLES.structure;
 
@@ -635,6 +607,45 @@ export const MAPPED_BUILDING_TRIANGLES = REALISTIC_STRUCTURE_ITEMS * REALISTIC_T
  * of D-5.6. A reviewer who remembers 240 is reading that draft.
  */
 export const MAPPED_BUILDING_MAX = 36;
+
+/**
+ * How many ground blobs a realistic frame may draw — #620: **98**, one under
+ * every item the realistic world draws as a MESH, every structure it may
+ * carry and, since #1657, every mapped building it draws. `three-renderer.ts`
+ * §`GroundBlobBelt` is built with exactly this capacity.
+ *
+ * | Casters | Blobs |
+ * |---|--:|
+ * | Trees at the full or middle level ({@link REALISTIC_TREE_LEVELS}: 1 full, 4 middle, the full-to-middle band) | 6 |
+ * | Shrubs and rocks drawn as meshes ({@link REALISTIC_NEAR_MESHES}) | 8 + 12 |
+ * | Structures ({@link REALISTIC_STRUCTURE_ITEMS}) | 36 |
+ * | Mapped buildings ({@link MAPPED_BUILDING_MAX}) — #1657 | 36 |
+ *
+ * ⚠️ **A tree in the middle-to-impostor band, or drawn as its impostor, has
+ * none**: an impostor is 40 m and more away, where a blob is a few pixels the
+ * fog is already taking. #620's ceiling was 124 triangles, the first 62 at two
+ * each; the owner's ruling (d) of 2026-10-24 on #1657 let it rise by up to 36
+ * blobs for the mapped buildings, so it is 196.
+ *
+ * ⚠️ **The mapped buildings have their own 36**, not a share of the
+ * structures'. The refill holds the two to one structure term, but #1657's
+ * research could not confirm that their blobs never pass 36 between them in
+ * one frame, and the belt reads the mapped list last, so a shared cap would
+ * drop the town's blobs first. A list of their own removes the question.
+ * Written as the sum, so lowering {@link MAPPED_BUILDING_MAX} lowers it.
+ *
+ * ⚠️ **They are counted in the frame's triangles**:
+ * `realistic-budget.test.ts` adds `REALISTIC_GROUND_BLOBS × 2` to the worst
+ * frame, and holds the sum under {@link REALISTIC_FRAME_TRIANGLES}.
+ */
+export const REALISTIC_GROUND_BLOBS =
+  REALISTIC_TREE_LEVELS.near +
+  REALISTIC_TREE_LEVELS.middle +
+  (REALISTIC_TREE_LEVELS.dithered ? 1 : 0) +
+  REALISTIC_NEAR_MESHES.shrub +
+  REALISTIC_NEAR_MESHES.rock +
+  REALISTIC_STRUCTURE_ITEMS +
+  MAPPED_BUILDING_MAX;
 
 /**
  * Nearer than this a mapped building is drawn whole; further, at its far

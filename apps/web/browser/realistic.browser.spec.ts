@@ -47,7 +47,8 @@ import {
   REALISTIC_CONIFERS,
   type RealisticModel,
 } from '../src/game/realistic-assets';
-import { REALISTIC_WOODED_DRAW_CALLS } from '../src/game/realistic-budget';
+import { GROUND_BLOB_TRIANGLES } from '../src/game/ground-blob';
+import { MAPPED_BUILDING_MAX, REALISTIC_WOODED_DRAW_CALLS } from '../src/game/realistic-budget';
 
 import { NIGHTLY } from './nightly';
 import { LAYERS } from './realistic/config';
@@ -362,5 +363,35 @@ test.describe('the realistic page’s village road — #1559', { tag: NIGHTLY },
     // And the frame was drawn, not only built.
     expect(village.result.lastFrame.triangles).toBeGreaterThan(0);
     expect(village.result.lastFrame.calls).toBeGreaterThan(0);
+  });
+});
+
+test.describe('the realistic page’s mapped-blobs lever — #1657', { tag: NIGHTLY }, () => {
+  test('grounds the mixed town’s buildings, and with the lever off draws none of their blobs', async ({
+    page,
+  }) => {
+    test.setTimeout(2 * REALISTIC_LOAD_BUDGET_MS);
+    // Inside #1581's mixed town, held; the people off, so that nothing but
+    // the lever differs between the two frames.
+    const town = '?ladder=0&panel=0&seconds=1&town=mixed&at=1300&levers=-people';
+    const grounded = await ride(page, town);
+    const off = await ride(page, `${town},-mapped-blobs`);
+    const added = grounded.result.lastFrame.triangles - off.result.lastFrame.triangles;
+    console.log(
+      `#1657 town=mixed at=1300: ${String(grounded.result.lastFrame.triangles)} triangles in ` +
+        `${String(grounded.result.lastFrame.calls)} draw calls grounded, ` +
+        `${String(off.result.lastFrame.triangles)} in ${String(off.result.lastFrame.calls)} ` +
+        `with the lever off: ${String(added / GROUND_BLOB_TRIANGLES)} mapped blobs`,
+    );
+    expect(grounded.result.leversOff).toEqual(['people']);
+    expect(off.result.leversOff).toEqual(['mapped-blobs', 'people']);
+    // The lever reaches the blobs: off, the frame draws fewer, a quad each,
+    // and at most one a mapped building.
+    expect(added).toBeGreaterThan(0);
+    expect(added % GROUND_BLOB_TRIANGLES).toBe(0);
+    expect(added).toBeLessThanOrEqual(MAPPED_BUILDING_MAX * GROUND_BLOB_TRIANGLES);
+    // No call of its own: the blobs are the one belt's instances.
+    expect(grounded.result.lastFrame.calls - off.result.lastFrame.calls).toBeLessThanOrEqual(1);
+    expect(off.result.rung).toBe(grounded.result.rung);
   });
 });
