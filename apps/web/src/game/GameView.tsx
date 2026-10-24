@@ -167,8 +167,9 @@ import { sharedCueOutput } from './web-audio';
 import type { CorridorState, WorldCorridor } from './world-data/corridor';
 import { OSM_ATTRIBUTION } from '../map/basemap';
 import { landClassMask, type LandClassMask } from './land-class';
-import { footprintPlans, mappedTown } from './footprint-buildings';
+import { FOOTPRINT_MAX_VERTICES, footprintPlans, mappedTown } from './footprint-buildings';
 import { mappedBuildingsOf, type MappedBuildings } from './mapped-buildings';
+import { NO_URBAN_CLASS, urbanClassMap } from './urban-class';
 import type { MappedTown } from './settlements';
 import {
   climbLeadIn,
@@ -1522,6 +1523,13 @@ export function GameView(props: GameViewProps): JSX.Element {
       // corridor and mask, ONCE, here — #1540 states <= 400 ms for a dense town.
       // The belt's index and the lots' town are both built from these plans, so
       // no scene frame plans.
+      // #1633: and how built-up each stretch of the route is, from the same
+      // corridor and mask, ONCE, here — `NO_URBAN_CLASS`, every stretch
+      // `unknown`, with no corridor — handed to the footprints' planning.
+      const urban =
+        worldCorridorRef.current === undefined || landClassRef.current === undefined
+          ? NO_URBAN_CLASS
+          : urbanClassMap(worldCorridorRef.current, landClassRef.current, route.profile);
       if (worldCorridorRef.current === undefined || landClassRef.current === undefined) {
         mappedBuildingsRef.current = undefined;
         mappedTownRef.current = undefined;
@@ -1531,6 +1539,8 @@ export function GameView(props: GameViewProps): JSX.Element {
           landClassRef.current,
           route.profile,
           corridorOrigin(route.profile),
+          FOOTPRINT_MAX_VERTICES,
+          urban,
         );
         mappedBuildingsRef.current = mappedBuildingsOf(plans);
         mappedTownRef.current = mappedTown(worldCorridorRef.current, plans);
