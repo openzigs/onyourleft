@@ -92,8 +92,9 @@
  * door, or where any section of the path would be on ANY stretch of the
  * carriageway or in water. "Built" is #1535's: a plot `villagePlots` marks
  * built, whose house `structuresAt` may still drop for clearance or the
- * budget, leaving its path as it leaves its pavement. The paths are part of the street, so they are
- * drawn in the pavements' ONE call, in their paving; and they lie inside the
+ * budget, leaving its path as it leaves its pavement. The paths are part of
+ * the street, so they are drawn in the pavements' ONE call, in their paving;
+ * and they lie inside the
  * plot's cleared ground (`settlements.ts` §`SettlementFootprint` reaches from
  * the centreline past the house), so no tree, shrub or rock stands on one.
  *
@@ -458,7 +459,6 @@ function streetOf(
         along >= range.start &&
         along <= range.end &&
         allowed(along) &&
-        !(along >= mouth.from && along <= mouth.to) &&
         sectionAt(profile, origin, ways, side, along, false) !== undefined;
       for (const plot of plots) {
         if (plot.side !== side) continue;

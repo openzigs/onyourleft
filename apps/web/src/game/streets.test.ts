@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest';
 import { elevationAt, metres, type RouteProfile } from '@onyourleft/domain';
 
 import type { PavementSides } from './footways';
-import { NO_LAND_CLASS } from './land-class';
+import { NO_LAND_CLASS, type LandClassMask } from './land-class';
 import { terrainHeightAt } from './landform';
 import { REALISTIC_STREET_TRIANGLES } from './realistic-budget';
 import { distanceToDrawnRoad, nearestOnDrawnRoad, type NearestOnRoad } from './road-grid';
@@ -784,6 +784,51 @@ describe('a path to each front door — #1564', () => {
     }
     // Non-vacuity: most of each path lies on the ground rather than on its ramp.
     expect(grounded).toBeGreaterThan(allPaths.length * 6);
+  });
+
+  it('lies on the ground the ride’s land-class mask levels, not on the unmapped relief', () => {
+    // A mask that maps no village (so none is dropped) yet holds the relief to
+    // nothing everywhere: the ground is the road less the verge.
+    const levelled: LandClassMask = {
+      ...NO_LAND_CLASS,
+      bytes: 1,
+      levellingBytes: 1,
+      builtUpDistances: (_points, count, into) => into.fill(0, 0, count),
+    };
+    const paths = streetsAt(
+      FARMLAND,
+      origin,
+      seed,
+      0,
+      FARMLAND.totalDistance,
+      undefined,
+      levelled,
+    ).flatMap((street) => street.doorPaths);
+    expect(paths.length).toBe(allPaths.length);
+    let moved = 0;
+    let onLevelled = 0;
+    for (const path of paths) {
+      for (const vertex of topOf(path.mesh)) {
+        const near = nearestOnDrawnRoad(FARMLAND, origin, vertex.x, vertex.z, 30) as NearestOnRoad;
+        const flat = terrainHeightAt(FARMLAND, origin, seed, near.along, near.lateral, levelled);
+        const relief = terrainHeightAt(
+          FARMLAND,
+          origin,
+          seed,
+          near.along,
+          near.lateral,
+          NO_LAND_CLASS,
+        );
+        expect(vertex.y).toBeGreaterThanOrEqual(flat + DOOR_PATH_LIFT_METRES - 1e-3);
+        if (Math.abs(vertex.y - (flat + DOOR_PATH_LIFT_METRES)) < 2e-3) {
+          onLevelled += 1;
+          if (Math.abs(flat - relief) > 0.01) moved += 1;
+        }
+      }
+    }
+    // Non-vacuity: past the clear band the levelling moves the ground a path lies on.
+    expect(onLevelled).toBeGreaterThan(paths.length * 6);
+    expect(moved).toBeGreaterThan(0);
   });
 
   it('turns every triangle to face the way its normal says, so none is culled', () => {

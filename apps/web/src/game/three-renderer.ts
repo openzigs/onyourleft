@@ -8675,7 +8675,7 @@ function pavementGeometry(
 ): BufferGeometry {
   const meshes: PavementMesh[] = [];
   for (const { pavement } of streets) meshes.push(pavement);
-  const paths = meshes.length;
+  const firstPath = meshes.length;
   if (withPaths)
     for (const { doorPaths } of streets) for (const { mesh } of doorPaths) meshes.push(mesh);
   let vertices = 0;
@@ -8700,7 +8700,7 @@ function pavementGeometry(
     for (let each = 0; each < mesh.indices.length; each += 1) {
       index[at + each] = (mesh.indices[each] as number) + vertex;
     }
-    if (which >= paths) geometry.addGroup(at, mesh.indices.length);
+    if (which >= firstPath) geometry.addGroup(at, mesh.indices.length);
     vertex += mesh.positions.length / 3;
     at += mesh.indices.length;
   });
