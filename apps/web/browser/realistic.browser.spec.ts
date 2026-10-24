@@ -27,6 +27,13 @@
  * is seen — with each frame's triangles and draw calls printed, which are the
  * figures validation 0002's #1283 and #1294 rows start from.
  *
+ * And since #1559, a fifth: **the village road**. `?route=village` rides
+ * `route.ts` §`villageRoute`, and its hold at `VILLAGE_HOLD_METRES` is
+ * validation 0002 AE2's frame: the page's census of the frame it drew holds a
+ * church and a row of shops in the camera's view, #1535's pavements and every
+ * kind of #1536's furniture. The default URL's road is read back too, by its
+ * fingerprint, on the #616 load: the same road every row was taken on.
+ *
  * ⚠️ **What it does not prove**: anything about the tablet's GPU clock, which
  * is what the switch is FOR — that is validation 0002's Part for #616, run by
  * the owner. And it holds only the vegetation to a number; the other six
@@ -44,6 +51,7 @@ import { REALISTIC_WOODED_DRAW_CALLS } from '../src/game/realistic-budget';
 
 import { NIGHTLY } from './nightly';
 import { LAYERS } from './realistic/config';
+import { realisticRoute, routeDigest, VILLAGE_HOLD_METRES, villageRoute } from './realistic/route';
 import type { RealisticSample } from './realistic-harness';
 
 /** A realistic load's budget: the same 31 MiB `game.browser.spec.ts` §#607 pays for. */
@@ -137,6 +145,10 @@ test.describe('the realistic page’s instruments — #616', { tag: NIGHTLY }, (
         `layers ${JSON.stringify(all.page.layers)}`,
     );
     expect(all.result.layersOff).toEqual([]);
+    // #1559: the default URL rides the road every Part Z and AH row was taken
+    // on (`route.test.ts` pins it), with no village in this frame.
+    expect(all.page.routeDigest).toBe(routeDigest(realisticRoute()));
+    expect(all.page.census?.structures.church.carried).toBe(0);
     // #639's own criterion, on the page it names and the load this already
     // pays for: the wooded view at `at=2550`, counted at the draw calls, is at
     // or under the budget. The rider and the ladder are held, so the window's
@@ -276,5 +288,41 @@ test.describe('the realistic page’s tree levers — #1283, #1294', { tag: NIGH
     expect(scannedFirs.page.textures?.bytes ?? Infinity).toBeLessThan(
       scanned.page.textures?.bytes ?? 0,
     );
+  });
+});
+
+test.describe('the realistic page’s village road — #1559', { tag: NIGHTLY }, () => {
+  test('holds a church, a row of shops, pavements and furniture in frame, read off the frame it drew', async ({
+    page,
+  }) => {
+    test.setTimeout(REALISTIC_LOAD_BUDGET_MS);
+
+    // Validation 0002 AE2's URL, the panel and the ladder held as the row is.
+    const village = await ride(
+      page,
+      `?ladder=0&panel=0&seconds=1&at=${String(VILLAGE_HOLD_METRES)}&route=village`,
+    );
+    const census = village.page.census;
+    console.log(
+      `#1559 route=village at=${String(VILLAGE_HOLD_METRES)}: ${JSON.stringify(census)}; ` +
+        `${String(village.result.lastFrame.triangles)} triangles in ` +
+        `${String(village.result.lastFrame.calls)} draw calls`,
+    );
+    // Another road from the default one, and the one `route.test.ts` pins.
+    expect(village.page.routeDigest).toBe(routeDigest(villageRoute()));
+    expect(village.page.routeDigest).not.toBe(routeDigest(realisticRoute()));
+    if (census === undefined) throw new Error('the page published no census');
+    expect(census.structures.church.inView).toBeGreaterThanOrEqual(1);
+    expect(census.structures['shop-row'].inView).toBeGreaterThanOrEqual(1);
+    expect(census.structures.building.inView).toBeGreaterThan(5);
+    // #1535's pavements and #1536's furniture, every kind of it in view.
+    expect(census.streets).toBeGreaterThanOrEqual(1);
+    expect(census.pavementTriangles).toBeGreaterThan(0);
+    for (const [kind, counted] of Object.entries(census.furniture)) {
+      expect(counted.inView, kind).toBeGreaterThan(0);
+    }
+    // And the frame was drawn, not only built.
+    expect(village.result.lastFrame.triangles).toBeGreaterThan(0);
+    expect(village.result.lastFrame.calls).toBeGreaterThan(0);
   });
 });

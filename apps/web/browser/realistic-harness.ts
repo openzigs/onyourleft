@@ -60,6 +60,7 @@ import { footprintPlans, mappedTown } from '../src/game/footprint-buildings';
 import { mixedTownFixture, richmondStreetFixture } from '../src/game/footprint-fixtures-testing';
 import { landClassMask } from '../src/game/land-class';
 import { mappedBuildingsOf } from '../src/game/mapped-buildings';
+import type { SceneFrame } from '../src/game/port';
 import { corridorOrigin } from '../src/game/terrain';
 import {
   drawnWorldOf,
@@ -89,7 +90,8 @@ import { rideFrame, RIDE_METRES_PER_SECOND } from './realistic/frame';
 import { installLayerSwitch, type LayerCensus } from './realistic/layers';
 import { describe, guarded, MAXIMUM_FRAME_GAP_MS, MeasurementClock } from './realistic/loop';
 import { readoutLine, takeOverReporting } from './realistic/reporting';
-import { realisticRoute } from './realistic/route';
+import { realisticRoute, routeDigest, villageRoute } from './realistic/route';
+import { frameCensus, type FrameCensus } from './realistic/village';
 
 /** How long the scene runs before anything is sampled: shader compiles, first uploads. */
 const WARM_UP_SECONDS = 3;
@@ -229,6 +231,18 @@ declare global {
       readonly soak: readonly (RealisticSample & { readonly minute: number })[];
       /** What the layer switch found in the scene, by layer — #616. @see LayerCensus */
       readonly layers: LayerCensus | undefined;
+      /**
+       * #1559: `route.ts` §`routeDigest` of the road ridden, so a gate can see
+       * the default URL ride the road every Part Z and Part AH row was taken
+       * on, and `route=village` another. Absent until the road is built.
+       */
+      readonly routeDigest?: string;
+      /**
+       * #1559: what the frame drawn last before the result was published holds
+       * of a village — its structures, streets and furniture, carried and in
+       * the camera's view. Absent with the result. @see frameCensus
+       */
+      readonly census?: FrameCensus;
     };
   }
 }
@@ -318,8 +332,12 @@ async function run(): Promise<void> {
       : config.town === 'richmond'
         ? richmondStreetFixture()
         : undefined;
-  const profile = mixed?.profile ?? realisticRoute(config.facing);
+  // #1559: or the level road through two villages, for validation 0002 AE2.
+  const profile =
+    mixed?.profile ??
+    (config.route === 'village' ? villageRoute(config.facing) : realisticRoute(config.facing));
   const origin = mixed?.origin ?? corridorOrigin(profile);
+  publish({ routeDigest: routeDigest(profile) });
   const town = ((): Parameters<typeof rideFrame>[0]['town'] => {
     if (mixed === undefined) return undefined;
     const land = landClassMask(mixed.corridor);
@@ -383,6 +401,8 @@ async function run(): Promise<void> {
   let lastFrameCalls = 0;
   let lastFrameRendererTriangles: number | undefined;
   let shownAt = 0;
+  /** The frame handed to `view.render` last — #1559's census reads it. */
+  let drawn: SceneFrame | undefined;
   const soak: (RealisticSample & { minute: number })[] = [];
 
   const sample = (frames: readonly number[], stalls: number): RealisticSample => ({
@@ -447,18 +467,17 @@ async function run(): Promise<void> {
       loopFrom + ((startAt - loopFrom + elapsed * RIDE_METRES_PER_SECOND) % loopLength);
     // The rung the ladder is on decides how much scenery the frame carries, as
     // it does in `GameView` — #478. @see rideFrame
-    view.render(
-      rideFrame({
-        profile,
-        origin,
-        distance,
-        elapsed: config.at === undefined ? elapsed : 0,
-        rung: worldRung(state),
-        // #1534's pair: the villages' ground left wooded.
-        settlementsWooded: config.leversOff.includes('settlement-clearing'),
-        ...(town === undefined ? {} : { town }),
-      }),
-    );
+    drawn = rideFrame({
+      profile,
+      origin,
+      distance,
+      elapsed: config.at === undefined ? elapsed : 0,
+      rung: worldRung(state),
+      // #1534's pair: the villages' ground left wooded.
+      settlementsWooded: config.leversOff.includes('settlement-clearing'),
+      ...(town === undefined ? {} : { town }),
+    });
+    view.render(drawn);
     lastFrameCalls = counter.takeCalls();
     callsInWindow += lastFrameCalls;
     lastFrameTriangles = counter.takeTriangles();
@@ -482,7 +501,13 @@ async function run(): Promise<void> {
       trianglesInWindow = 0;
       framesInWindow = 0;
       const layers = layerSwitch.census();
-      publish({ result, layers });
+      const census =
+        drawn === undefined
+          ? undefined
+          : frameCensus(drawn, canvas.clientWidth / Math.max(1, canvas.clientHeight));
+      publish({ result, layers, census });
+      // #1559: for `adb logcat`, as the result is — AE2's row says what was in frame.
+      if (census !== undefined) console.log(`OYL-REALISTIC-CENSUS ${JSON.stringify(census)}`);
       console.log(`OYL-REALISTIC ${JSON.stringify(result)}`);
       // #616: a share read with something the switch could not place still on
       // is a share of an unknown thing, so a run that switched a layer off says so.
