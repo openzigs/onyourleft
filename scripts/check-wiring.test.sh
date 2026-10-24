@@ -291,7 +291,7 @@ write apps/web/src/demo/main.tsx <<'TS'
 export {};
 TS
 run_check
-assert_red '#1645: the same export with the demo’s import removed is not'
+assert_red '#1645: the same export with the import in the demo removed is not'
 assert_says '#1645: and is named' 'WIRE002 apps/web/src/ride/controller.ts:2'
 
 # --- WIRE002 green once something production reaches it -----------------------
