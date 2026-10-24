@@ -1880,6 +1880,29 @@ function expectAPavement(
   expect(offRgb).toHaveLength(3);
   const apart = Math.max(...[0, 1, 2].map((c) => Math.abs((onRgb[c] ?? 0) - (offRgb[c] ?? 0))));
   expect(apart).toBeGreaterThan(8);
+  expectDoorPaths(pavement, testInfo, world);
+}
+
+/**
+ * #1564's browser-gate half, for either world, on #1535's village frame:
+ * every built plot has exactly one front path, read back off the drawn
+ * pavement mesh, and no path stands anywhere else; with the paths switched
+ * off none is drawn (the control); and they cost no draw call of their own.
+ */
+function expectDoorPaths(
+  pavement: RealisticMeasurement['pavement'],
+  testInfo: { readonly annotations: { type: string; description?: string }[] },
+  world: string,
+): void {
+  const { built, withOne, elsewhere, drawnOff, drawCallsOff } = pavement.doorPaths;
+  const measured = `${world}: ${String(withOne)} of ${String(built)} built plots with exactly one path, ${String(elsewhere)} elsewhere; ${String(drawnOff)} drawn with them off; ${String(pavement.drawCalls)} draw calls with them, ${String(drawCallsOff)} without`;
+  testInfo.annotations.push({ type: 'front paths', description: measured });
+  console.log(`front paths — ${measured}`);
+  expect(built).toBeGreaterThan(10);
+  expect(withOne).toBe(built);
+  expect(elsewhere).toBe(0);
+  expect(drawnOff).toBe(0);
+  expect(drawCallsOff).toBe(pavement.drawCalls);
 }
 
 /**

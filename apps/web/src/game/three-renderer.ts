@@ -469,6 +469,7 @@ import {
   FURNITURE_DRAW_METRES,
   FURNITURE_KINDS,
   type FurnitureKind,
+  type PavementMesh,
   type VillageStreet,
 } from './streets';
 import type { SideRoad } from './cross-streets';
@@ -8537,9 +8538,14 @@ export class LogoBelt {
 }
 
 /**
- * Every village street in view, kerbs and pavements — #1535 (`streets.ts`).
+ * Every village street in view, kerbs and pavements — #1535 (`streets.ts`) —
+ * and since #1564 the path from the pavement to each front door.
  * **One mesh and one draw call** however many villages are in view, and none
- * where a frame holds no street.
+ * where a frame holds no street: the paths are merged into the pavements'
+ * geometry, in their material, and add no call. Each path is one geometry
+ * GROUP over its own triangles — a single-material mesh draws its whole index
+ * in one call whatever its groups — so the browser gate can read every path
+ * back off the drawn mesh ({@link doorPathsDrawnOf}).
  *
  * ⚠️ **Rebuilt only when the SET of streets changes**, which is when a village
  * comes into view or leaves it: `streets.ts` hands every frame the same
@@ -8563,6 +8569,10 @@ export class PavementBelt {
   #shown = true;
   /** Whether the browser gate has turned the pavements off — its control. */
   #switchedOn = true;
+  /** Whether the browser gate has turned the front paths off — #1564's control. */
+  #pathsOn = true;
+  /** Whether the mesh holds the front paths of {@link #held}. */
+  #heldPaths = true;
 
   constructor(
     world: 'stylised' | 'realistic',
@@ -8615,6 +8625,11 @@ export class PavementBelt {
     this.#switchedOn = on;
   }
 
+  /** @see doorPathsShownOf */
+  switchPathsOn(on: boolean): void {
+    this.#pathsOn = on;
+  }
+
   /** Shades the pavements, or stops shading them — #286. @see QualitySettings.shading */
   setShading(shading: QualitySettings['shading']): void {
     this.#mesh.material = this.#materials[shading];
@@ -8623,9 +8638,10 @@ export class PavementBelt {
   /** This frame's streets. */
   update(streets: readonly VillageStreet[]): void {
     const drawn = this.#shown && this.#switchedOn ? streets : NO_STREETS;
-    if (!sameStreets(drawn, this.#held)) {
+    if (!sameStreets(drawn, this.#held) || this.#pathsOn !== this.#heldPaths) {
       this.#held = drawn;
-      const geometry = pavementGeometry(drawn, this.#tileMetres);
+      this.#heldPaths = this.#pathsOn;
+      const geometry = pavementGeometry(drawn, this.#tileMetres, this.#pathsOn);
       this.#mesh.geometry.dispose();
       this.#mesh.geometry = geometry;
     }
@@ -8649,34 +8665,45 @@ function sameStreets(first: readonly VillageStreet[], second: readonly VillageSt
 
 /**
  * Every street's pavement as one geometry, its texture coordinates turned from
- * metres into repeats of a photograph `tileMetres` across.
+ * metres into repeats of a photograph `tileMetres` across — and, `withPaths`,
+ * every street's front paths after them (#1564), one group each.
  */
-function pavementGeometry(streets: readonly VillageStreet[], tileMetres: number): BufferGeometry {
+function pavementGeometry(
+  streets: readonly VillageStreet[],
+  tileMetres: number,
+  withPaths: boolean,
+): BufferGeometry {
+  const meshes: PavementMesh[] = [];
+  for (const { pavement } of streets) meshes.push(pavement);
+  const paths = meshes.length;
+  if (withPaths)
+    for (const { doorPaths } of streets) for (const { mesh } of doorPaths) meshes.push(mesh);
   let vertices = 0;
   let indices = 0;
-  for (const { pavement } of streets) {
-    vertices += pavement.positions.length / 3;
-    indices += pavement.indices.length;
+  for (const mesh of meshes) {
+    vertices += mesh.positions.length / 3;
+    indices += mesh.indices.length;
   }
   const positions = new Float32Array(vertices * 3);
   const normals = new Float32Array(vertices * 3);
   const uvs = new Float32Array(vertices * 2);
   const index = new Uint32Array(indices);
+  const geometry = new BufferGeometry();
   let vertex = 0;
   let at = 0;
-  for (const { pavement } of streets) {
-    positions.set(pavement.positions, vertex * 3);
-    normals.set(pavement.normals, vertex * 3);
-    for (let each = 0; each < pavement.uvs.length; each += 1) {
-      uvs[vertex * 2 + each] = (pavement.uvs[each] as number) / tileMetres;
+  meshes.forEach((mesh, which) => {
+    positions.set(mesh.positions, vertex * 3);
+    normals.set(mesh.normals, vertex * 3);
+    for (let each = 0; each < mesh.uvs.length; each += 1) {
+      uvs[vertex * 2 + each] = (mesh.uvs[each] as number) / tileMetres;
     }
-    for (let each = 0; each < pavement.indices.length; each += 1) {
-      index[at + each] = (pavement.indices[each] as number) + vertex;
+    for (let each = 0; each < mesh.indices.length; each += 1) {
+      index[at + each] = (mesh.indices[each] as number) + vertex;
     }
-    vertex += pavement.positions.length / 3;
-    at += pavement.indices.length;
-  }
-  const geometry = new BufferGeometry();
+    if (which >= paths) geometry.addGroup(at, mesh.indices.length);
+    vertex += mesh.positions.length / 3;
+    at += mesh.indices.length;
+  });
   geometry.setAttribute('position', new BufferAttribute(positions, 3));
   geometry.setAttribute('normal', new BufferAttribute(normals, 3));
   geometry.setAttribute('uv', new BufferAttribute(uvs, 2));
@@ -14878,6 +14905,46 @@ export function pavementsShownOf(view: GameView, on: boolean): void {
 }
 
 /**
+ * Turns a view's front paths off, or on again — #1564. The browser gate's
+ * control: with them off, the village frame's drawn mesh holds none.
+ *
+ * @test-facing the browser gate's control switch, read by `game-harness.ts`;
+ * the product always draws them.
+ */
+export function doorPathsShownOf(view: GameView, on: boolean): void {
+  if (view instanceof ThreeGameView) view.doorPathsShown(on);
+}
+
+/**
+ * Where each front path a view drew in its last frame is — #1564: the middle,
+ * in plan, of each path's group of the drawn pavement mesh, in the world it
+ * drew. Empty where the mesh was not drawn.
+ *
+ * @test-facing read by `game-harness.ts`, which holds them to the village's
+ * built plots: exactly one on each, none on an unbuilt one.
+ */
+export function doorPathsDrawnOf(
+  view: GameView,
+): readonly { readonly x: number; readonly z: number }[] {
+  const mesh = view instanceof ThreeGameView ? view.pavementMesh : undefined;
+  if (mesh?.visible !== true) return [];
+  const { geometry } = mesh;
+  const positions = geometry.getAttribute('position');
+  const index = geometry.index;
+  if (positions === undefined || index === null) return [];
+  return geometry.groups.map((group) => {
+    let x = 0;
+    let z = 0;
+    for (let at = group.start; at < group.start + group.count; at += 1) {
+      const vertex = index.getX(at);
+      x += positions.getX(vertex);
+      z += positions.getZ(vertex);
+    }
+    return { x: x / Math.max(1, group.count), z: z / Math.max(1, group.count) };
+  });
+}
+
+/**
  * Turns a view's cross streets off, or on again — #1565. The browser gate's
  * control: with them off, a frame at a junction draws none.
  *
@@ -15965,6 +16032,12 @@ class ThreeGameView implements GameView {
   pavementsShown(on: boolean): void {
     this.#realistic?.pavements.switchOn(on);
     this.#pavements.switchOn(on);
+  }
+
+  /** @see doorPathsShownOf */
+  doorPathsShown(on: boolean): void {
+    this.#realistic?.pavements.switchPathsOn(on);
+    this.#pavements.switchPathsOn(on);
   }
 
   /** @see pavementTrianglesOf — the drawn world's. */
