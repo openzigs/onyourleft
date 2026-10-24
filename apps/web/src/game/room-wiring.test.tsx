@@ -74,6 +74,7 @@ function capturingRenderer(frames: SceneFrame[]): GameRenderer {
       },
       setQuality: () => undefined,
       setRiderKit: () => undefined,
+      setSeason: () => undefined,
       resize: () => undefined,
       destroy: () => undefined,
     }),
