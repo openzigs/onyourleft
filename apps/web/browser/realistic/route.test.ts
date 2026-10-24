@@ -246,6 +246,23 @@ describe('the village road — #1559, validation 0002 AE2', () => {
     }
   }
 
+  // The census's `inView` is the frustum's count, not the frame's: at 940 m
+  // the frame still carries the shop row but the camera has it out of view.
+  it('counts the shop row carried but not in view at 940 m', () => {
+    const profile = villageRoute();
+    const census = frameCensus(
+      rideFrame({
+        profile,
+        origin: corridorOrigin(profile),
+        distance: 940,
+        elapsed: 0,
+        rung: worldRung({ realistic: true, quality: INITIAL_QUALITY }),
+      }),
+      TABLET_ASPECT,
+    );
+    expect(census.structures['shop-row']).toEqual({ carried: 1, inView: 0 });
+  });
+
   it('is a hold the default road cannot give: no church or shop row in its frame there', () => {
     const profile = realisticRoute();
     const census = frameCensus(

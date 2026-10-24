@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { cameraRig, horizontalSpread } from '../../src/game/camera';
+import { cameraRig, horizontalSpread, NEAR_PLANE_METRES } from '../../src/game/camera';
 import type { SceneFrame } from '../../src/game/port';
 import { INITIAL_QUALITY, worldRung } from '../../src/game/quality';
 import { corridorOrigin } from '../../src/game/terrain';
@@ -49,6 +49,19 @@ describe('what the owner’s page counts as in frame — #1559', () => {
     expect(inView(frame, 16 / 10, at(100, -1.05 * spread * 100))).toBe(false);
     // The same point, on a frame wide enough to take it in.
     expect(inView(frame, 2.2, at(100, 1.05 * spread * 100))).toBe(true);
+  });
+
+  it('refuses a point nearer than the near plane, still ahead of the camera', () => {
+    // On the view axis itself, so only the near plane can refuse it.
+    const axis = { x: target.x - eye.x, y: target.y - eye.y, z: target.z - eye.z };
+    const norm = Math.hypot(axis.x, axis.y, axis.z);
+    const along = (d: number) => ({
+      x: eye.x + (axis.x / norm) * d,
+      y: eye.y + (axis.y / norm) * d,
+      z: eye.z + (axis.z / norm) * d,
+    });
+    expect(inView(frame, 16 / 10, along(NEAR_PLANE_METRES / 2))).toBe(false);
+    expect(inView(frame, 16 / 10, along(NEAR_PLANE_METRES * 2))).toBe(true);
   });
 
   it('ends above the frame’s top as well as at its sides', () => {
