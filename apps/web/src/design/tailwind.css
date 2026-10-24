@@ -141,5 +141,9 @@
 @source not '../**/*.test.{ts,tsx}';
 @source not '../**/*-testing.{ts,tsx}';
 @source not '../**/testing/**';
+/* #1645: nor the demo, which is its own build. A class only the demo used
+   would otherwise be written into the stylesheet every rider downloads
+   (`tools/demo/demo-stays-out.ts`). */
+@source not '../demo/**';
 
 @tailwind utilities source(none);

@@ -258,6 +258,42 @@ run_check
 assert_red 'a harness page is not a production entry point'
 assert_says 'and the symbol it alone reaches is still reported' '`stopRide`'
 
+# --- #1645: the demo page is a second entry point -----------------------------
+# The demo is its own build (`vite.demo.config.ts`) and is served to visitors,
+# so an export only it reaches is shipped. Both directions: reached from the
+# demo entry alone is green, and the same tree with that import removed is red.
+demo_fixture() {
+  new_fixture
+  write apps/web/src/main.tsx <<'TS'
+import { startRide } from './ride/controller';
+startRide();
+TS
+  write apps/web/src/ride/controller.ts <<'TS'
+export function startRide(): void {}
+export function replayRide(): void {}
+TS
+  write apps/web/demo/index.html <<'HTML'
+<!doctype html>
+<html lang="en"><body><script type="module" src="../src/demo/main.tsx"></script></body></html>
+HTML
+}
+demo_fixture
+write apps/web/src/demo/main.tsx <<'TS'
+import { replayRide } from '../ride/controller';
+replayRide();
+TS
+run_check
+assert_green '#1645: an export reached only from the demo entry is wired'
+assert_silent_about '#1645: and is not reported' '`replayRide`'
+
+demo_fixture
+write apps/web/src/demo/main.tsx <<'TS'
+export {};
+TS
+run_check
+assert_red '#1645: the same export with the demo’s import removed is not'
+assert_says '#1645: and is named' 'WIRE002 apps/web/src/ride/controller.ts:2'
+
 # --- WIRE002 green once something production reaches it -----------------------
 new_fixture
 write apps/web/src/main.tsx <<'TS'
