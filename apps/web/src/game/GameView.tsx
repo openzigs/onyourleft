@@ -1371,13 +1371,19 @@ export function GameView(props: GameViewProps): JSX.Element {
       // date into this line. Holidays follow the rider's day; nature follows
       // the ROUTE's hemisphere (owner ruling (a) of 2026-10-24). The view is
       // told when it is built: `teardown` destroys the last ride's, so no view
-      // exists here.
-      seasonRef.current = seasonOn(
-        (props.today ?? deviceToday)(),
-        routeHemisphere(profile),
-        routeLatitudeMagnitude(profile),
-        readHolidayDecorations(deviceStorage()),
-      );
+      // exists here. ⚠️ Guarded: the season is decorative, so a clock or
+      // time zone that throws (V8 refuses an `Etc/Unknown` it reported itself)
+      // costs the decorations and never the ride — it starts with NO_SEASON.
+      try {
+        seasonRef.current = seasonOn(
+          (props.today ?? deviceToday)(),
+          routeHemisphere(profile),
+          routeLatitudeMagnitude(profile),
+          readHolidayDecorations(deviceStorage()),
+        );
+      } catch {
+        seasonRef.current = NO_SEASON;
+      }
       qualityRef.current = realistic ? INITIAL_REALISTIC_QUALITY : STYLISED_START;
       setQualityLevel(INITIAL_QUALITY.level);
       setRealisticRung(realistic);

@@ -291,6 +291,11 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
       expect(parseConfig(configQuery(config))).toEqual(config);
     }
   });
+
+  it('writes `date` back as the zero-padded `YYYY-MM-DD` it was read from — #1622', () => {
+    expect(configQuery(parseConfig('?date=2026-10-31'))).toBe('?date=2026-10-31');
+    expect(configQuery(parseConfig('?date=0999-01-06'))).toBe('?date=0999-01-06');
+  });
 });
 
 describe('the page’s day and its decorations — #1622', () => {

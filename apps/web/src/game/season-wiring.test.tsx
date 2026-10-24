@@ -27,9 +27,9 @@ import { SettingsView } from '../views/SettingsView';
 
 import { GameView, type GamePort, type RidableRoute } from './GameView';
 import { HOLIDAY_DECORATIONS_STORAGE_KEY } from './holiday-preference';
-import type { GameRenderer } from './port';
+import type { GameRenderer, GameView as RendererView } from './port';
 import { qualitySettings } from './quality';
-import type { CalendarDay, Season } from './season';
+import { NO_SEASON, type CalendarDay, type Season } from './season';
 import { seasonOf, threeGameRenderer } from './three-renderer';
 
 function northernRoute(): RidableRoute {
@@ -171,6 +171,69 @@ describe('the holiday-decorations switch reaches the ride — #1622', () => {
     // The switch governs holidays only: the route's nature is the same.
     expect(off?.nature).toEqual(on?.nature);
     expect(on?.nature.autumn).toBeGreaterThan(0);
+  });
+});
+
+describe('a clock that throws costs the decorations, never the ride — #1622', () => {
+  it('starts the ride, and its view holds NO_SEASON', async () => {
+    // The product's view, behind a double that owns the context jsdom lacks:
+    // what the season reaches is read back through `seasonOf`, as the
+    // renderer's own consumers read it.
+    let real: RendererView | undefined;
+    const renderer: GameRenderer = {
+      create: (canvas, quality) => {
+        const view = threeGameRenderer.create(canvas, quality);
+        real = view;
+        return {
+          hasContext: true,
+          prepare: () => Promise.resolve(),
+          render: () => undefined,
+          setQuality: () => undefined,
+          setRiderKit: () => undefined,
+          setSeason: (season) => {
+            view.setSeason(season);
+          },
+          resize: () => undefined,
+          destroy: () => {
+            view.destroy();
+          },
+        };
+      },
+      loadRealisticWorld: () => Promise.reject(new Error('no realistic world was chosen')),
+    };
+    mounted = await mount(
+      <GameView
+        port={PORT}
+        renderer={() => Promise.resolve(renderer)}
+        now={() => clock}
+        today={() => {
+          throw new RangeError('Invalid time zone specified: Etc/Unknown');
+        }}
+      />,
+    );
+    await settle();
+    const button = queryAll<HTMLButtonElement>(mounted.container, 'button').find((each) =>
+      (each.textContent ?? '').startsWith('Ride '),
+    );
+    await act(async () => {
+      button?.click();
+      await Promise.resolve();
+    });
+    await settle();
+    for (let index = 0; index < 3; index += 1) {
+      clock += 16;
+      await act(async () => {
+        pending.shift()?.(clock);
+        await Promise.resolve();
+      });
+    }
+    await settle();
+    const endRide = queryAll<HTMLButtonElement>(mounted.container, 'button').find(
+      (each) => each.textContent === 'End ride',
+    );
+    expect(endRide).toBeDefined();
+    expect(real).toBeDefined();
+    expect(real === undefined ? undefined : seasonOf(real)).toEqual(NO_SEASON);
   });
 });
 

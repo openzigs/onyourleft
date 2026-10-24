@@ -162,6 +162,7 @@ export function seasonOn(
 }
 
 function latitudeStrength(absLatitude: number): number {
+  // Defensive, for a direct caller: the product path never passes a NaN here.
   if (!Number.isFinite(absLatitude)) return 0;
   const share =
     (absLatitude - SEASONS_FROM_DEGREES) / (SEASONS_FULL_DEGREES - SEASONS_FROM_DEGREES);

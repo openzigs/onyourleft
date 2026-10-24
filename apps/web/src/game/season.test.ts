@@ -154,6 +154,17 @@ describe('routeHemisphere — the route’s signed half of the world', () => {
     );
     expect(nature).toEqual({ autumn: 0, winter: 0 });
   });
+
+  it('is unknown for a route exactly on the equator: it has no half', () => {
+    const points: RoutePoint[] = [];
+    for (let index = 0; index <= 20; index += 1) {
+      points.push({
+        position: geographicPosition(degreesLatitude(0), degreesLongitude(10 + index / 111_320)),
+        elevation: altitudeMetres(20),
+      });
+    }
+    expect(routeHemisphere(routeProfile(points))).toBe('unknown');
+  });
 });
 
 describe('natureOn — the route’s season, mirrored across the equator', () => {
