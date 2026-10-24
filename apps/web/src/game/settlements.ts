@@ -1399,7 +1399,7 @@ function fieldEdgesAt(
           }
           // The owner's ruling of 2026-10-24: low and broken, not a solid
           // head-high hedge. Admitted on `along`, as every piece is.
-          const chosen = roadsidePiece(seed, wrappedField, side, index, gate);
+          const chosen = roadsidePiece(seed, wrappedField, side, index, pieces, piece, gate);
           if (chosen === undefined) continue;
           const placed =
             chosen.shift === 0
@@ -1489,8 +1489,8 @@ export const HEDGE_GAP_SHARE = 0.15;
  * How big a roadside hedge piece is drawn, of the 1.3 m by 8 m piece
  * `three-renderer.ts` §`BOUNDARY_STYLE` builds: **0.6** to **0.8**, so its top
  * is 0.78 m to 1.04 m — below a rider's eye, where the solid hedge was at it —
- * and it is 4.8 m to 6.4 m long, so light shows between pieces. The one
- * instanced hedge, drawn smaller: no new shape, material or draw.
+ * and it is 4.8 m to 6.4 m long. One height a stretch. The one instanced
+ * hedge, drawn smaller: no new shape, material or draw.
  */
 export const LOW_HEDGE_SCALE = [0.6, 0.8] as const;
 
@@ -1507,7 +1507,7 @@ const ROADSIDE_KEY = 0x9_0000;
 export interface RoadsidePiece {
   readonly kind: 'hedge' | 'fence';
   readonly scale: number;
-  /** Along the road from the piece's centre, in metres, so the gaps are uneven. */
+  /** Along the road from the piece's own centre, in metres. */
   readonly shift: number;
 }
 
@@ -1517,37 +1517,41 @@ export interface RoadsidePiece {
  * boxed the view in. `undefined` is no piece: a gap, or open verge.
  *
  * Each {@link ROADSIDE_RUN_PIECES}-piece stretch of a side is open
- * ({@link OPEN_VERGE_SHARE}), fenced ({@link FENCE_RUN_SHARE}) or hedged; a
- * hedged stretch's pieces are {@link LOW_HEDGE_SCALE}, each shifted along so
- * the gaps between them differ, with {@link HEDGE_GAP_SHARE} left out and the
- * field's `gate` piece a {@link FIELD_GATE_SCALE} fence. Everything is hashed
- * from the seed, the wrapped field, the side and the piece, so a place is the
- * same on every lap and every visit.
+ * ({@link OPEN_VERGE_SHARE}), fenced ({@link FENCE_RUN_SHARE}) or hedged. A
+ * hedged stretch is one height, {@link LOW_HEDGE_SCALE}, and its pieces are
+ * drawn closed up on its middle — `shift` — so it reads as one low hedge with
+ * the gap at its ends rather than as a row of boxes; {@link HEDGE_GAP_SHARE}
+ * of its pieces are left out, and the field's `gate` piece is a
+ * {@link FIELD_GATE_SCALE} fence. Everything is hashed from the seed, the
+ * wrapped field, the side and the piece, so a place is the same on every lap.
+ *
+ * `pieces` is how many the field's side has and `piece` how long each is.
  */
 export function roadsidePiece(
   seed: number,
   field: number,
   side: 1 | -1,
   index: number,
+  pieces: number,
+  piece: number,
   gate: number,
 ): RoadsidePiece | undefined {
   const sideKey = side === 1 ? 0 : 1;
-  const stretch = uniformFrom(
-    slotHash(seed, field, ROADSIDE_KEY + 2 * Math.floor(index / ROADSIDE_RUN_PIECES) + sideKey),
-    0,
-  );
-  if (stretch < OPEN_VERGE_SHARE) return undefined;
-  if (stretch < OPEN_VERGE_SHARE + FENCE_RUN_SHARE) return { kind: 'fence', scale: 1, shift: 0 };
+  const run = Math.floor(index / ROADSIDE_RUN_PIECES);
+  const stretch = slotHash(seed, field, ROADSIDE_KEY + 2 * run + sideKey);
+  const what = uniformFrom(stretch, 0);
+  if (what < OPEN_VERGE_SHARE) return undefined;
+  if (what < OPEN_VERGE_SHARE + FENCE_RUN_SHARE) return { kind: 'fence', scale: 1, shift: 0 };
   if (index === gate) return { kind: 'fence', scale: FIELD_GATE_SCALE, shift: 0 };
   const each = slotHash(seed, field, ROADSIDE_KEY + 0x8000 + 2 * index + sideKey);
   if (uniformFrom(each, 0) < HEDGE_GAP_SHARE) return undefined;
   const [lowest, highest] = LOW_HEDGE_SCALE;
-  const scale = lerp(lowest, highest, uniformFrom(each, 1));
-  return {
-    kind: 'hedge',
-    scale,
-    shift: (uniformFrom(each, 2) - 0.5) * (1 - scale) * BOUNDARY_PIECE_METRES,
-  };
+  const scale = lerp(lowest, highest, uniformFrom(stretch, 1));
+  // Closed up on the stretch's middle: each piece `scale` of a piece from the
+  // next, so they meet. A field's last stretch may be short.
+  const first = run * ROADSIDE_RUN_PIECES;
+  const middle = (Math.min(ROADSIDE_RUN_PIECES, pieces - first) - 1) / 2;
+  return { kind: 'hedge', scale, shift: (index - first - middle) * piece * (scale - 1) };
 }
 
 /** The span a call admits, and where its pieces go. @see landEdgesAt */

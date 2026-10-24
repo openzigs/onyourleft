@@ -44,6 +44,7 @@ import {
   FIELD_GATE_SCALE,
   LOW_HEDGE_SCALE,
   PLOT_METRES,
+  roadsidePiece,
   siteAt,
   siteSpacing,
   structuresAt,
@@ -540,18 +541,47 @@ describe('#1542 the owner’s ruling of 2026-10-24: a low, broken roadside', () 
       // Open verge: a stretch of three pieces with nothing on it.
       expect(widestGap(items, side)).toBeGreaterThan(3 * BOUNDARY_PIECE_METRES);
     }
-    // Uneven gaps: the pieces are not all on the 8 m grid.
-    const offGrid = hedges.filter((item) => {
-      const along = (item.z - 2_000) / BOUNDARY_PIECE_METRES;
-      return Math.abs(along - Math.round(along)) > 0.05;
-    });
-    expect(offGrid.length).toBeGreaterThan(hedges.length / 4);
-    // Control: the lever off is the solid, full-size hedge.
+    // A hedged stretch is one low hedge: its pieces closed up so they meet,
+    // one piece's drawn length apart, not on the 8 m grid with light between.
     const solid = roadside(FIRST_CUT);
+    let meeting = 0;
+    for (const side of [-1, 1]) {
+      const along = hedges.filter((item) => Math.sign(item.x) === side).sort((a, b) => a.z - b.z);
+      along.slice(1).forEach((item, index) => {
+        const before = along[index] as ScatterItem;
+        if (before.scale !== item.scale) return;
+        const apart = item.z - before.z;
+        if (Math.abs(apart - item.scale * BOUNDARY_PIECE_METRES) < 0.5) meeting += 1;
+      });
+    }
+    expect(meeting).toBeGreaterThan(10);
+    // Control: the lever off is the solid, full-size hedge.
     expect(solid.every((item) => item.kind === 'hedge' && item.scale === 1)).toBe(true);
     for (const side of [-1, 1]) {
       expect(widestGap(solid, side)).toBeLessThan(BOUNDARY_PIECE_METRES + 1);
     }
+  });
+
+  it('leaves gaps inside a hedged stretch, one height a stretch', () => {
+    let gaps = 0;
+    let hedged = 0;
+    for (let field = 0; field < 200; field += 1) {
+      for (const side of [1, -1] as const) {
+        // A full stretch, no gate in it.
+        const stretch = [0, 1, 2].map((index) =>
+          roadsidePiece(SEED, field, side, index, 12, BOUNDARY_PIECE_METRES, -1),
+        );
+        const hedges = stretch.filter((each) => each?.kind === 'hedge');
+        if (hedges.length === 0) continue;
+        hedged += 1;
+        if (hedges.length < 3) gaps += 1;
+        expect(new Set(hedges.map((each) => each?.scale)).size).toBe(1);
+      }
+    }
+    expect(hedged).toBeGreaterThan(100);
+    // About 1 − 0.85³ of hedged stretches have a gap.
+    expect(gaps / hedged).toBeGreaterThan(0.2);
+    expect(gaps / hedged).toBeLessThan(0.6);
   });
 
   it('is the same from the same seed and differs from another', () => {
