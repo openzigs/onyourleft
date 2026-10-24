@@ -2021,10 +2021,11 @@ test.describe('#397 — the announcement controls', () => {
     // Sounds panel, which carries the same class so its switch and its volume
     // slider are held to the same floor, and #475's Game world switch, which
     // carries it for the same reason and shipped without it. Twenty-seven
-    // since #787's Draft switch, which carries it too.
+    // since #787's Draft switch, which carries it too. Twenty-eight since
+    // #1622's Holiday decorations switch, in the Game world panel.
     expect(seen.filter((each) => each.name === 'LABEL')).toHaveLength(22);
     expect(seen.filter((each) => each.name === 'SELECT')).toHaveLength(0);
-    expect(seen.length).toBe(27);
+    expect(seen.length).toBe(28);
     for (const control of seen) {
       expect(control.width, control.name).toBeGreaterThanOrEqual(MINIMUM_TARGET_PIXELS);
       expect(control.height, control.name).toBeGreaterThanOrEqual(MINIMUM_TARGET_PIXELS);
