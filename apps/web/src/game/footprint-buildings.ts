@@ -50,8 +50,10 @@
  * ## The shape (P-10, P-11; the owner's ruling of 2026-10-21 on #1540)
  *
  * Storeys are the mapped `height` over {@link STOREY_METRES}, rounded, and at
- * least one; two where the height is missing. The eaves stand at the mapped
- * height where there is one and at the storeys' where there is not. The roof
+ * least one; two where the height is missing; `L` where the height is
+ * Protomaps' levels-derived `3L + 2` (#1629, {@link storeysFor}). The eaves
+ * stand at the mapped height where there is one and at the storeys' where
+ * there is not. The roof
  * is a gable along the long axis of the footprint's minimum-area rectangle
  * where the footprint is small, rectangular, low and residential or farmland
  * ({@link FOOTPRINT_GABLE_MAX_AREA}, {@link FOOTPRINT_GABLE_MIN_RECTANGULARITY},
@@ -1096,9 +1098,30 @@ export function minimumAreaRectangle(ring: Ring): Rectangle & { readonly area: n
   return best ?? { cx: 0, cz: 0, ux: 1, uz: 0, halfLong: 0, halfShort: 0, area: 0 };
 }
 
-/** The storeys for a mapped height, or {@link DEFAULT_STOREYS} for none: never 0. */
+/**
+ * How far a height may sit from `3L + 2` and still be read as levels-derived:
+ * **0.01 m** — #1629.
+ */
+export const LEVELS_HEIGHT_TOLERANCE_METRES = 0.01;
+
+/**
+ * The storeys for a mapped height, or {@link DEFAULT_STOREYS} for none: never 0.
+ *
+ * #1629: where OSM has `building:levels` and no `height`, Protomaps writes
+ * `height = max(levels, 1) × 3 + 2` (`Buildings.java` §`parseHeight`, ADR 0054's
+ * amendment of 2026-10-24). A height within {@link LEVELS_HEIGHT_TOLERANCE_METRES}
+ * of `3L + 2` for a whole `L ≥ 1` is read as `L` storeys; every other height
+ * is over {@link STOREY_METRES}, rounded, as P-10 has it.
+ */
 export function storeysFor(heightMetres: number | null): number {
   if (heightMetres === null || !Number.isFinite(heightMetres)) return DEFAULT_STOREYS;
+  const levels = Math.round((heightMetres - 2) / STOREY_METRES);
+  if (
+    levels >= 1 &&
+    Math.abs(heightMetres - (levels * STOREY_METRES + 2)) <= LEVELS_HEIGHT_TOLERANCE_METRES
+  ) {
+    return levels;
+  }
   return Math.max(1, Math.round(heightMetres / STOREY_METRES));
 }
 
