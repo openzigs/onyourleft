@@ -11,11 +11,26 @@ import { describe, expect, it } from 'vitest';
 
 import { elevationAt, metres, type RouteProfile } from '@onyourleft/domain';
 
-import { distanceToDrawnRoad } from './road-grid';
+import type { PavementSides } from './footways';
+import { NO_LAND_CLASS, type LandClassMask } from './land-class';
+import { terrainHeightAt } from './landform';
+import { REALISTIC_STREET_TRIANGLES } from './realistic-budget';
+import { distanceToDrawnRoad, nearestOnDrawnRoad, type NearestOnRoad } from './road-grid';
 import { circuitRoute, hairpinRoute, northRoute, valleyRoute } from './route-fixtures-testing';
-import { scatterSeed } from './scatter';
+import { scatterSeed, type ScatterItem } from './scatter';
 import { sceneFrame } from './scene';
-import { PLOT_METRES, siteAt, siteSpacing, villagePlots, type Site } from './settlements';
+import {
+  clearOfSettlements,
+  onSettlementGround,
+  PLOT_METRES,
+  settlementFootprintsAt,
+  siteAt,
+  siteSpacing,
+  villagePlots,
+  VILLAGE_METRES,
+  type Plot,
+  type Site,
+} from './settlements';
 import { atStartLine } from './simulation';
 import {
   BENCH_SETBACK_METRES,
@@ -24,6 +39,11 @@ import {
   BOLLARD_INSET_METRES,
   DROPPED_KERB_HEIGHT_METRES,
   DROPPED_KERB_METRES,
+  DOOR_PATH_FALL,
+  DOOR_PATH_LIFT_METRES,
+  DOOR_PATH_TRIANGLES_PER_VILLAGE,
+  DOOR_PATH_WIDTH_METRES,
+  doorPathFor,
   FURNITURE_KINDS,
   furnitureAlong,
   KERB_HEIGHT_METRES,
@@ -35,6 +55,7 @@ import {
   PAVEMENT_WIDTH_METRES,
   pavementAlong,
   streetsAt,
+  type DoorPath,
   type FurnitureItem,
   type FurnitureKind,
   type PavementMesh,
@@ -629,6 +650,320 @@ describe('the street furniture — #1536', () => {
     for (const item of pieces) {
       const along = alongAt(valley, item.z);
       expect(inWater(ways, valley, metres(along), KERB_LATERAL_METRES + 1), item.kind).toBe(false);
+    }
+  });
+});
+
+describe('a path to each front door — #1564', () => {
+  const origin = corridorOrigin(FARMLAND);
+  const seed = scatterSeed(FARMLAND);
+  const villages = sitesOf(FARMLAND).filter((site) => site.kind === 'village');
+  const streets = streetsOf(FARMLAND);
+
+  /** Where a point is in its plot's frame: metres out on the plot's side, and along the road. */
+  function inPlot(path: DoorPath, x: number, z: number) {
+    const frame = roadAt(FARMLAND, path.along);
+    const dx = x - frame.x;
+    const dz = z - frame.z;
+    return {
+      out: (dx * frame.normalX + dz * frame.normalZ) * path.side,
+      along: dx * frame.normalZ - dz * frame.normalX,
+    };
+  }
+
+  /** The middle of a path's top at its pavement end (`first`) or at its door (`last`). */
+  function endOf(path: DoorPath, which: 'first' | 'last') {
+    const top = topOf(path.mesh);
+    const out = top.map((vertex) => inPlot(path, vertex.x, vertex.z).out);
+    const at = which === 'first' ? Math.min(...out) : Math.max(...out);
+    const end = top.filter((_, index) => Math.abs((out[index] as number) - at) < 1e-3);
+    const x = end.reduce((sum, vertex) => sum + vertex.x, 0) / end.length;
+    const z = end.reduce((sum, vertex) => sum + vertex.z, 0) / end.length;
+    return { ...inPlot(path, x, z), y: (end[0] as { readonly y: number }).y };
+  }
+
+  const allPaths = streets.flatMap((street) => street.doorPaths);
+
+  it('leads into every built plot exactly once, and into no unbuilt one', () => {
+    const key = (along: number, side: number): string => `${along.toFixed(3)} ${String(side)}`;
+    const wanted = villages.flatMap((site) =>
+      villagePlots(seed, site).map((plot) => key(plot.along, plot.side)),
+    );
+    const laid = allPaths.map((path) => key(path.along, path.side));
+    // Non-vacuity: the farmland's villages have plenty of built plots.
+    expect(wanted.length).toBeGreaterThan(30);
+    expect(new Set(wanted).size).toBe(wanted.length);
+    expect([...laid].sort()).toEqual([...wanted].sort());
+  });
+
+  it('runs from under the pavement’s back edge, on the plot’s own side, to its building’s door', () => {
+    // Each kind's door nearest the middle of the face it turns to the road,
+    // as `buildings.ts`' plans cut it: [along its front, out from its middle].
+    const doors: Readonly<Record<string, readonly [number, number]>> = {
+      'building 0': [0, 3.3],
+      'building 1': [-0.8, 3],
+      'shop-row 0': [1.8, 3.3],
+      'shop-row 1': [-2.2, 3.3],
+      'church 0': [0, 8.5],
+      'church 1': [0, 7],
+    };
+    const seen = new Set<string>();
+    for (const site of villages) {
+      const street = streets.find((each) => each.wrappedSite === site.wrappedSite);
+      for (const plot of villagePlots(seed, site)) {
+        const path = street?.doorPaths.find(
+          (each) => Math.abs(each.along - plot.along) < 1e-6 && each.side === plot.side,
+        ) as DoorPath;
+        const kind = `${plot.kind} ${String(plot.variant % 2)}`;
+        const [front, out] = doors[kind] as readonly [number, number];
+        seen.add(kind);
+        for (const vertex of vertices(path.mesh)) expect(sideOf(FARMLAND, vertex)).toBe(plot.side);
+        const start = endOf(path, 'first');
+        const door = endOf(path, 'last');
+        // From 0.3 m under the pavement's back edge…
+        expect(start.out).toBeCloseTo(KERB_LATERAL_METRES + PAVEMENT_WIDTH_METRES - 0.3, 2);
+        // …square to the road, to the door. A building faces the road, so its
+        // own right runs against the road on the road's right-hand side.
+        expect(door.out, kind).toBeCloseTo(plot.lateral - out, 2);
+        expect(door.along, kind).toBeCloseTo(-plot.side * front, 2);
+        expect(start.along, kind).toBeCloseTo(door.along, 2);
+        const across = topOf(path.mesh).map((vertex) => inPlot(path, vertex.x, vertex.z).along);
+        expect(Math.max(...across) - Math.min(...across)).toBeCloseTo(DOOR_PATH_WIDTH_METRES, 2);
+      }
+    }
+    // Non-vacuity: a house of each variant, a row of shops and a church.
+    expect(seen.has('building 0') && seen.has('building 1')).toBe(true);
+    expect([...seen].some((kind) => kind.startsWith('shop-row'))).toBe(true);
+    expect([...seen].some((kind) => kind.startsWith('church'))).toBe(true);
+  });
+
+  it('leaves the pavement’s top no faster than its fall, then lies on the ground, skirted into it', () => {
+    let grounded = 0;
+    for (const path of allPaths) {
+      const frame = roadAt(FARMLAND, path.along);
+      const pavementTop =
+        elevationAt(FARMLAND, metres(path.along)) - origin.elevation + KERB_HEIGHT_METRES;
+      const top = topOf(path.mesh)
+        .map((vertex) => ({ ...vertex, out: inPlot(path, vertex.x, vertex.z).out }))
+        .sort((a, b) => a.out - b.out);
+      const first = top[0] as (typeof top)[number];
+      // Just under the pavement's top where it starts: hidden by it, never over it.
+      expect(first.y).toBeCloseTo(pavementTop - DOOR_PATH_LIFT_METRES, 3);
+      for (const vertex of top) {
+        const near = nearestOnDrawnRoad(FARMLAND, origin, vertex.x, vertex.z, 30) as NearestOnRoad;
+        const ground = terrainHeightAt(
+          FARMLAND,
+          origin,
+          seed,
+          near.along,
+          near.lateral,
+          NO_LAND_CLASS,
+        );
+        // Read at the path's middle, so its edge may stand a millimetre off.
+        expect(vertex.y).toBeGreaterThanOrEqual(ground + DOOR_PATH_LIFT_METRES - 1e-3);
+        expect(vertex.y).toBeLessThan(pavementTop);
+        expect(vertex.y).toBeGreaterThanOrEqual(
+          first.y - DOOR_PATH_FALL * (vertex.out - first.out) - 1e-4,
+        );
+        if (Math.abs(vertex.y - (ground + DOOR_PATH_LIFT_METRES)) < 2e-3) grounded += 1;
+      }
+      // A skirt down each edge, looking out across the path, into the ground.
+      const skirt = vertices(path.mesh).filter((vertex) => Math.abs(vertex.ny) < 1e-6);
+      expect(skirt.length).toBeGreaterThan(0);
+      expect(Math.min(...skirt.map((vertex) => vertex.y))).toBeLessThan(
+        Math.min(...top.map((vertex) => vertex.y)) - DOOR_PATH_LIFT_METRES,
+      );
+      const middle = top.reduce((sum, vertex) => sum + inPlot(path, vertex.x, vertex.z).along, 0);
+      for (const vertex of skirt) {
+        const across = vertex.nx * frame.normalZ - vertex.nz * frame.normalX;
+        expect(Math.abs(across)).toBeCloseTo(1, 3);
+        // Out from the path, so it is not culled from where it is seen.
+        const offset = inPlot(path, vertex.x, vertex.z).along - middle / top.length;
+        expect(Math.sign(across)).toBe(Math.sign(offset));
+      }
+    }
+    // Non-vacuity: most of each path lies on the ground rather than on its ramp.
+    expect(grounded).toBeGreaterThan(allPaths.length * 6);
+  });
+
+  it('lies on the ground the ride’s land-class mask levels, not on the unmapped relief', () => {
+    // A mask that maps no village (so none is dropped) yet holds the relief to
+    // nothing everywhere: the ground is the road less the verge.
+    const levelled: LandClassMask = {
+      ...NO_LAND_CLASS,
+      bytes: 1,
+      levellingBytes: 1,
+      builtUpDistances: (_points, count, into) => into.fill(0, 0, count),
+    };
+    const paths = streetsAt(
+      FARMLAND,
+      origin,
+      seed,
+      0,
+      FARMLAND.totalDistance,
+      undefined,
+      levelled,
+    ).flatMap((street) => street.doorPaths);
+    expect(paths.length).toBe(allPaths.length);
+    let moved = 0;
+    let onLevelled = 0;
+    for (const path of paths) {
+      for (const vertex of topOf(path.mesh)) {
+        const near = nearestOnDrawnRoad(FARMLAND, origin, vertex.x, vertex.z, 30) as NearestOnRoad;
+        const flat = terrainHeightAt(FARMLAND, origin, seed, near.along, near.lateral, levelled);
+        const relief = terrainHeightAt(
+          FARMLAND,
+          origin,
+          seed,
+          near.along,
+          near.lateral,
+          NO_LAND_CLASS,
+        );
+        expect(vertex.y).toBeGreaterThanOrEqual(flat + DOOR_PATH_LIFT_METRES - 1e-3);
+        if (Math.abs(vertex.y - (flat + DOOR_PATH_LIFT_METRES)) < 2e-3) {
+          onLevelled += 1;
+          if (Math.abs(flat - relief) > 0.01) moved += 1;
+        }
+      }
+    }
+    // Non-vacuity: past the clear band the levelling moves the ground a path lies on.
+    expect(onLevelled).toBeGreaterThan(paths.length * 6);
+    expect(moved).toBeGreaterThan(0);
+  });
+
+  it('turns every triangle to face the way its normal says, so none is culled', () => {
+    for (const path of allPaths) {
+      const { positions, normals, indices } = path.mesh;
+      const p = (vertex: number, axis: number): number => positions[vertex * 3 + axis] as number;
+      for (let at = 0; at < indices.length; at += 3) {
+        const a = indices[at] as number;
+        const b = indices[at + 1] as number;
+        const c = indices[at + 2] as number;
+        const e = [0, 1, 2].map((axis) => p(b, axis) - p(a, axis)) as [number, number, number];
+        const f = [0, 1, 2].map((axis) => p(c, axis) - p(a, axis)) as [number, number, number];
+        const n = [e[1] * f[2] - e[2] * f[1], e[2] * f[0] - e[0] * f[2], e[0] * f[1] - e[1] * f[0]];
+        const facing = n.reduce(
+          (sum, value, axis) => sum + value * (normals[a * 3 + axis] as number),
+          0,
+        );
+        expect(facing).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it('stands on the village’s cleared ground, so no tree, shrub or rock is placed on a path — #1534', () => {
+    const footprints = settlementFootprintsAt(FARMLAND, origin, seed, 0, FARMLAND.totalDistance);
+    const trees: ScatterItem[] = [];
+    for (const path of allPaths) {
+      for (const vertex of topOf(path.mesh)) {
+        expect(footprints.some((piece) => onSettlementGround(vertex, piece))).toBe(true);
+        for (const kind of ['tree-broadleaf', 'tree-conifer', 'shrub', 'rock'] as const) {
+          trees.push({
+            kind,
+            x: vertex.x,
+            y: vertex.y,
+            z: vertex.z,
+            rotation: 0,
+            scale: 1,
+            variant: 0,
+          });
+        }
+      }
+    }
+    expect(trees.length).toBeGreaterThan(400);
+    expect(clearOfSettlements(trees, footprints)).toEqual([]);
+  });
+
+  it('lays none where the side’s pavement is not laid: a mapped sidewalk on the right only — #1551', () => {
+    const rightOnly: PavementSides = { sideAt: () => 'right' };
+    const paths = streetsAt(FARMLAND, origin, seed, 0, FARMLAND.totalDistance, rightOnly).flatMap(
+      (street) => street.doorPaths,
+    );
+    const right = villages
+      .flatMap((site) => villagePlots(seed, site))
+      .filter((plot) => plot.side === 1);
+    expect(right.length).toBeGreaterThan(10);
+    expect(paths.filter((path) => path.side === 1)).toHaveLength(right.length);
+    expect(paths.filter((path) => path.side === -1)).toEqual([]);
+  });
+
+  it('lays none in front of a stretch of pavement that is not laid, and every one where it is', () => {
+    // Mapped: the left-hand sidewalk only past each village's crossroads.
+    const centres = villages.map((site) => site.centre);
+    const halfway: PavementSides = {
+      sideAt: (along) =>
+        centres.some((centre) => along > centre && along < centre + VILLAGE_METRES)
+          ? 'both'
+          : 'right',
+    };
+    const left = streetsAt(FARMLAND, origin, seed, 0, FARMLAND.totalDistance, halfway)
+      .flatMap((street) => street.doorPaths)
+      .filter((path) => path.side === -1);
+    const plots = villages.flatMap((site) =>
+      villagePlots(seed, site)
+        .filter((plot) => plot.side === -1)
+        .map((plot) => ({ ...plot, past: plot.along > site.centre })),
+    );
+    const past = plots.filter((plot) => plot.past);
+    // Non-vacuity: left-hand plots either side of a crossroads.
+    expect(past.length).toBeGreaterThan(3);
+    expect(plots.length - past.length).toBeGreaterThan(3);
+    expect(left.map((path) => path.along).sort()).toEqual(past.map((plot) => plot.along).sort());
+  });
+
+  it('never runs onto ANY stretch of the carriageway: a hairpin’s other leg', () => {
+    // Legs 12 m apart: the inside plot's path, 5.2 m to 11.7 m out, would end
+    // in the other leg's carriageway, though its own pavement is laid.
+    const profile = hairpinRoute(6);
+    const plot: Plot = { along: 200, side: 1, kind: 'building', lateral: 15, variant: 0 };
+    const path = (side: 1 | -1) =>
+      doorPathFor(profile, corridorOrigin(profile), scatterSeed(profile), { ...plot, side });
+    // The control: the outside of the same leg has its path.
+    expect(path(-1)).toBeDefined();
+    expect(path(1)).toBeUndefined();
+  });
+
+  it('never runs through water or over a bank', () => {
+    const profile = valleyRoute();
+    const valleySeed = scatterSeed(profile);
+    const ways = waterways(profile, valleySeed);
+    // Non-vacuity: the stream crosses the road at 1 000 m, and 850 m is dry.
+    expect(inWater(ways, profile, metres(1_000), 8)).toBe(true);
+    expect(inWater(ways, profile, metres(850), 8)).toBe(false);
+    const plot = (along: number): Plot => ({
+      along,
+      side: 1,
+      kind: 'building',
+      lateral: 15,
+      variant: 0,
+    });
+    const valleyOrigin = corridorOrigin(profile);
+    expect(doorPathFor(profile, valleyOrigin, valleySeed, plot(850))).toBeDefined();
+    expect(doorPathFor(profile, valleyOrigin, valleySeed, plot(1_000))).toBeUndefined();
+  });
+
+  it('costs one village no more than its stated triangles, and two fit the street budget', () => {
+    const counts = streets.map((street) =>
+      street.doorPaths.reduce((sum, path) => sum + path.mesh.indices.length / 3, 0),
+    );
+    for (const count of counts) expect(count).toBeLessThanOrEqual(DOOR_PATH_TRIANGLES_PER_VILLAGE);
+    // Non-vacuity: a well-built village is a good share of the bound.
+    expect(Math.max(...counts)).toBeGreaterThan(DOOR_PATH_TRIANGLES_PER_VILLAGE * 0.6);
+    expect(DOOR_PATH_TRIANGLES_PER_VILLAGE).toBe(960);
+    // `realistic-budget.ts` §`REALISTIC_STREET_TRIANGLES`: two villages'
+    // pavements and paths, and the furniture belt's capacity.
+    expect(REALISTIC_STREET_TRIANGLES).toBe(
+      2 * (PAVEMENT_TRIANGLES_PER_VILLAGE + DOOR_PATH_TRIANGLES_PER_VILLAGE) + 64 * 324,
+    );
+  });
+
+  it('leaves every pavement as it was: no pavement vertex past its back edge', () => {
+    for (const street of streets) {
+      for (const vertex of vertices(street.pavement)) {
+        expect(distanceToDrawnRoad(FARMLAND, origin, vertex.x, vertex.z, 20)).toBeLessThanOrEqual(
+          KERB_LATERAL_METRES + PAVEMENT_WIDTH_METRES + 1e-3,
+        );
+      }
     }
   });
 });

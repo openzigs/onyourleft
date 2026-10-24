@@ -83,6 +83,7 @@ import type { WorldStyle } from '../src/game/world';
 import { sceneFrame as builtSceneFrame } from '../src/game/scene';
 import { retainedFrame } from '../src/game/frame-testing';
 import { corridorOrigin, drawnRoadFrame } from '../src/game/terrain';
+import { nearestOnDrawnRoad } from '../src/game/road-grid';
 import { pavementSides } from '../src/game/footways';
 import type { WorldCorridor } from '../src/game/world-data/corridor';
 import {
@@ -206,6 +207,8 @@ import {
   logosShownOf,
   furnitureCountsOf,
   furnitureShownOf,
+  doorPathsDrawnOf,
+  doorPathsShownOf,
   pavementsShownOf,
   pavementTrianglesOf,
   MappedBuildingBelt,
@@ -2592,6 +2595,21 @@ interface PavementMeasurement {
     readonly onRgb: readonly number[];
     readonly offRgb: readonly number[];
   };
+  /**
+   * #1564: the front paths of the village frame, read back off the drawn
+   * pavement mesh and each put on the plot it stands in, from the village's
+   * layout: how many plots are built, how many of those hold exactly one
+   * path, how many paths stand anywhere else; how many are drawn with the
+   * paths switched off (the control); and the draw calls with them off, which
+   * must be the same — they are merged into the pavements' one call.
+   */
+  readonly doorPaths: {
+    readonly built: number;
+    readonly withOne: number;
+    readonly elsewhere: number;
+    readonly drawnOff: number;
+    readonly drawCallsOff: number;
+  };
   /** #1536: what stands on the pavements, on the same frames. */
   readonly furniture: {
     /** Pieces of each kind drawn beside the village, and in open country — the control. */
@@ -2629,6 +2647,7 @@ const NO_PAVEMENT: PavementMeasurement = {
     onRgb: [],
     offRgb: [],
   },
+  doorPaths: { built: 0, withOne: 0, elsewhere: 0, drawnOff: 0, drawCallsOff: 0 },
   furniture: {
     counts: NO_FURNITURE,
     countsOpen: NO_FURNITURE,
@@ -2730,6 +2749,9 @@ function pavementProbe(
     const drawCallsOff = drawn();
     const offRgb = meanRgb();
     pavementsShownOf(view, true);
+    // #1564: the front paths on the same frame, each put on its plot from the
+    // villages' layout — never from the streets under test.
+    const doorPaths = doorPathsOnPlots(villages, seed, paved.site, drawn, view);
     // #1565: the village's crossroads, 30 m up the road, in the road's own
     // material and one call. The point read is 12 m out on its LEFT arm — on
     // the side road, from the village's centre and the road's frame; its
@@ -2819,6 +2841,7 @@ function pavementProbe(
         onRgb: sideRgb,
         offRgb: sideOffRgb,
       },
+      doorPaths,
       furniture: {
         counts,
         countsOpen,
@@ -2829,6 +2852,73 @@ function pavementProbe(
     };
   });
   return measured;
+}
+
+/**
+ * #1564: the front paths `view` drew on its last frame — read back off the
+ * drawn pavement mesh (`three-renderer.ts` §`doorPathsDrawnOf`) — each put on
+ * the plot it stands in from the villages' layout: a plot is
+ * `settlements.ts` §`PLOT_METRES` of road, from the village's first, on the
+ * side the path is. Then the same frame, `drawn` again with the paths
+ * switched off: what is drawn then, and its draw calls.
+ */
+function doorPathsOnPlots(
+  villages: readonly (ReturnType<typeof siteAt> | undefined)[],
+  seed: number,
+  site: NonNullable<ReturnType<typeof siteAt>>,
+  drawn: () => number,
+  view: ReturnType<typeof threeGameRenderer.create>,
+): PavementMeasurement['doorPaths'] {
+  const profile = northRouteForHarness();
+  const origin = corridorOrigin(profile);
+  const slot = (wrappedSite: number, plot: number, side: number): string =>
+    `${String(wrappedSite)} ${String(plot)} ${String(side)}`;
+  const built = new Set<string>();
+  for (const village of villages) {
+    if (village === undefined) continue;
+    const first = village.centre - village.half;
+    for (const plot of villagePlots(seed, village)) {
+      built.add(
+        slot(village.wrappedSite, Math.round((plot.along - first) / PLOT_METRES), plot.side),
+      );
+    }
+  }
+  const counts = new Map<string, number>();
+  let elsewhere = 0;
+  // The frame drawn as it is, so the mesh read is this frame's.
+  drawn();
+  for (const path of doorPathsDrawnOf(view)) {
+    const near = nearestOnDrawnRoad(profile, origin, path.x, path.z, 40);
+    const village = villages.find(
+      (each) =>
+        each !== undefined &&
+        near !== undefined &&
+        Math.abs(near.along - each.centre) <= each.half + PLOT_METRES / 2,
+    );
+    if (near === undefined || village === undefined) {
+      elsewhere += 1;
+      continue;
+    }
+    const plot = Math.round((near.along - (village.centre - village.half)) / PLOT_METRES);
+    const key = slot(village.wrappedSite, plot, Math.sign(near.lateral));
+    if (!built.has(key)) elsewhere += 1;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  const mine = villagePlots(seed, site);
+  const withOne = mine.filter((plot) => {
+    const key = slot(
+      site.wrappedSite,
+      Math.round((plot.along - (site.centre - site.half)) / PLOT_METRES),
+      plot.side,
+    );
+    return counts.get(key) === 1;
+  }).length;
+  doorPathsShownOf(view, false);
+  const drawCallsOff = drawn();
+  const drawnOff = doorPathsDrawnOf(view).length;
+  doorPathsShownOf(view, true);
+  drawn();
+  return { built: mine.length, withOne, elsewhere, drawnOff, drawCallsOff };
 }
 
 /** What {@link mappedPavementProbe} publishes — #1551. */
