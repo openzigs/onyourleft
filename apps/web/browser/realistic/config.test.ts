@@ -14,6 +14,7 @@ import {
   rungWithLevers,
   surfacesWithLevers,
   treesWithLevers,
+  windowRevealsWithLevers,
 } from './config';
 import { REALISTIC_TREE_SETS, REALISTIC_TREES_DEFAULT } from '../../src/game/realistic-assets';
 
@@ -135,6 +136,19 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     expect(parseConfig('').leversOff).toEqual([]);
     expect(() => parseConfig('?levers=-texture')).toThrow(/levers is a comma-separated list/);
     expect(() => parseConfig('?levers=texture-bias')).toThrow(/levers is a comma-separated list/);
+  });
+
+  it('builds the mapped windows’ reveals, as the product does, unless #1659’s lever takes them out', () => {
+    expect(LEVERS).toContain('window-reveals');
+    expect(windowRevealsWithLevers([])).toBe(true);
+    // No OTHER lever touches them.
+    expect(windowRevealsWithLevers(LEVERS.filter((lever) => lever !== 'window-reveals'))).toBe(
+      true,
+    );
+    expect(windowRevealsWithLevers(parseConfig('?levers=-window-reveals').leversOff)).toBe(false);
+    expect(configQuery(parseConfig('?town=mixed&levers=-window-reveals'))).toBe(
+      `?levers=${encodeURIComponent('-window-reveals')}&town=mixed`,
+    );
   });
 
   it('builds both surfaces’ shaders, bounded, as the product does, unless a #1523 lever takes one out', () => {
