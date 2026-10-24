@@ -857,8 +857,9 @@ describe('the house models in the belt — #1585', () => {
   const houses = {
     models: HOUSE_MODELS.map((_, index) => ({
       position: triangle(index),
-      // The first corner faces the model's +X, the others its +Z.
-      normal: Float32Array.from([1, 0, 0, 0, 0, 1, 0, 0, 1]),
+      // The first corner faces the model's +X, the second its +Z, the third
+      // between them, as a sloped roof's does, so the stretch's inverse shows.
+      normal: Float32Array.from([1, 0, 0, 0, 0, 1, Math.SQRT1_2, 0, Math.SQRT1_2]),
       uv: Float32Array.from([0.1, 0.2, 0.3, 0.4, 0.5, 0.6]),
       triangles: 1,
     })),
@@ -874,11 +875,14 @@ describe('the house models in the belt — #1585', () => {
     const stats = belt.refill(frame.x, frame.z, MAPPED_BUILDING_TRIANGLES);
     expect(stats.modelled).toBeGreaterThan(0);
     expect(stats.drawCalls).toBeLessThanOrEqual(MAPPED_BUILDING_DRAW_CALLS);
+    // The stat counts what is drawn: the extrusions' groups and the models' one call.
+    expect(stats.drawCalls).toBe(belt.mesh.geometry.groups.length + 1);
     const geometry = belt.modelMesh.geometry;
     expect(geometry.drawRange.count).toBe(stats.modelled * 3);
     const position = geometry.getAttribute('position').array;
     const uv = geometry.getAttribute('uv').array;
     let seen = 0;
+    let unevenly = 0;
     for (let place = 0; ; place += 1) {
       const drawn = belt.drawnAt(place);
       if (drawn === undefined) break;
@@ -911,8 +915,17 @@ describe('the house models in the belt — #1585', () => {
       expect(normal[first + 2]).toBeCloseTo(placed.az, 5);
       expect(normal[first + 3]).toBeCloseTo(-placed.az, 5);
       expect(normal[first + 5]).toBeCloseTo(placed.ax, 5);
+      // A slanted normal goes through the stretch's inverse before it turns.
+      const along = Math.SQRT1_2 / placed.stretchX;
+      const across = Math.SQRT1_2 / placed.stretchZ;
+      const length = Math.hypot(along, across);
+      expect(normal[first + 6]).toBeCloseTo((along * placed.ax - across * placed.az) / length, 5);
+      expect(normal[first + 8]).toBeCloseTo((along * placed.az + across * placed.ax) / length, 5);
+      if (Math.abs(placed.stretchX - placed.stretchZ) > 0.02) unevenly += 1;
     }
     expect(seen).toBe(stats.modelled);
+    // Some model is stretched unevenly, or the inverse would go unseen.
+    expect(unevenly).toBeGreaterThan(0);
     expect(belt.modelMesh.visible).toBe(true);
     const material = belt.modelMesh.material as unknown as { map: unknown };
     expect(material.map).toBe(atlas);

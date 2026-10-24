@@ -591,6 +591,43 @@ describe('the house models in the selection — #1585', () => {
     expect(selection.passed).toBeGreaterThan(0);
   });
 
+  it('draws a near plan with a model as its extrusion when the models’ group has no slot left, not passing it over', () => {
+    // Every plan wears the same two surfaces, and the nearest has no model, so
+    // it opens both of two slots first: a modelled plan behind it cannot open
+    // the models' group, but its extrusion needs no new slot.
+    const nearest = streetPlans.reduce((best, plan) =>
+      apart(plan, frame) < apart(best, frame) ? plan : best,
+    );
+    const alike = mappedBuildingsOf(
+      streetPlans.map((plan) => ({
+        ...plan,
+        model: plan === nearest ? undefined : plan.model,
+        surfaces: { wall: 'brick', roof: 'slate' },
+      })),
+    );
+    const light = HOUSE_MODELS.map(() => 1);
+    const selection = new MappedSelection();
+    selectMappedBuildings(
+      alike,
+      frame.x,
+      frame.z,
+      MAPPED_BUILDING_TRIANGLES,
+      selection,
+      2,
+      undefined,
+      light,
+    );
+    expect(selection.surfaces).toEqual(['brick', 'slate']);
+    expect(selection.modelCount).toBe(0);
+    expect(selection.passed).toBe(0);
+    // Some near plan that has a model was drawn, as its extrusion.
+    expect(
+      [...selection.plans.subarray(0, selection.count)].some(
+        (index, at) => selection.far[at] === 0 && streetPlans[index]?.model !== undefined,
+      ),
+    ).toBe(true);
+  });
+
   it('draws a far plan as its extrusion even when its model would fit the budget', () => {
     const light = HOUSE_MODELS.map(() => 1);
     const selection = new MappedSelection();

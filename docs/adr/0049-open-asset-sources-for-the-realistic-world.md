@@ -406,7 +406,7 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   replaced where it cannot be separated cleanly — and anything D-2 calls AI-generated. The first
   models taken under it are the thirteen #1585 names; the shop's photograph of a real shop interior
   behind its window and the "OPEN" sign on its door are painted over with #1590's glass by
-  `apps/web/tools/realistic/blender/process_house_models.py`. It admits no new source: D-4's
+  `apps/web/tools/realistic/blender/process_house_models.py`. It admits no new source: D-10's
   "an individual model under CC-BY-4.0" row is the one these are under, and Sketchfab's public model
   record and each model's own page are added to that row's addresses under D-11's third bullet. A
   model whose download needs an account is fetched by no script: the owner downloads it with their

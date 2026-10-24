@@ -342,9 +342,14 @@ export function selectMappedBuildings(
       break;
     }
     const far = apart > MAPPED_BUILDING_NEAR_METRES;
-    // #1585: near, with a model that fits, and the models loaded.
+    // #1585: near, with a model that fits, and the models loaded. With no
+    // slot left for the models' group the plan is drawn as its extrusion,
+    // whose surfaces may already be open, rather than passed over.
     const modelTriangles =
-      far || plan.model === undefined || models === undefined
+      far ||
+      plan.model === undefined ||
+      models === undefined ||
+      (into.modelCount === 0 && into.surfaces.length + 1 > slots)
         ? undefined
         : models[plan.model.model];
     const triangles = modelTriangles ?? (far ? plan.farTriangleCount : plan.triangleCount);
@@ -355,10 +360,6 @@ export function selectMappedBuildings(
     /** The models' one group, counted inside the slots once it is open. */
     const modelGroup = into.modelCount > 0 ? 1 : 0;
     if (modelTriangles !== undefined) {
-      if (modelGroup === 0 && into.surfaces.length + 1 > slots) {
-        into.passed += 1;
-        continue;
-      }
       into.plans[into.count] = index;
       into.far[into.count] = 0;
       into.modelled[into.count] = 1;

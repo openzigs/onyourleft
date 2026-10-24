@@ -838,7 +838,7 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         0.8 to 1.25 of a model's, rectangularity ≥ 0.85, storeys
                         ±1, the same use and the door on the same end or side
                         (`HOUSE_FIT`); #1581's mixed town fits none, a Richmond
-                        street all. Near level only; one more mesh in ONE
+                        street's narrow lots. Near level only; one more mesh in ONE
                         material (the atlas), counted INSIDE the belt's 6 calls,
                         its triangles pooled in the 23 040. ⚠️ Textures are
                         admitted on the model's grant (ADR 0049's 2026-10-23
