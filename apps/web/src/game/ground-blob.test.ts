@@ -29,6 +29,7 @@ import {
   type GroundBlob,
   type GroundPoint,
 } from './ground-blob';
+import { NO_LAND_CLASS } from './land-class';
 import { terrainCorridor, terrainHeightAt } from './landform';
 import { hairpinRoute, hillRoute } from './route-fixtures-testing';
 import { scatterAt, scatterSeed, type ScatterItem } from './scatter';
@@ -139,7 +140,7 @@ describe('a ground blob lies on the landform, not on a plane — #620', () => {
   const origin = corridorOrigin(profile);
   const seed = scatterSeed(profile);
   const corridor = roadCorridor(profile, origin, 900);
-  const mesh = terrainCorridor(profile, origin, corridor, seed);
+  const mesh = terrainCorridor(profile, origin, corridor, seed, NO_LAND_CLASS);
 
   it('reads the height of the triangle it is over, which is where the ground is drawn', () => {
     let checked = 0;
@@ -156,7 +157,14 @@ describe('a ground blob lies on the landform, not on a plane — #620', () => {
         const z = point.z + rightZ * lateral;
         const into = ground();
         expect(groundUnder(mesh, corridor.centre, x, z, into)).toBe(true);
-        const expected = terrainHeightAt(profile, origin, seed, point.distance, lateral);
+        const expected = terrainHeightAt(
+          profile,
+          origin,
+          seed,
+          point.distance,
+          lateral,
+          NO_LAND_CLASS,
+        );
         // The mesh is piecewise-linear across columns and rows; the point is
         // on a row, so only the columns' interpolation is in it.
         expect(Math.abs(into.y - expected)).toBeLessThan(0.05);
@@ -204,7 +212,7 @@ describe('a ground blob lies on the landform, not on a plane — #620', () => {
     const profile = hairpinRoute(10);
     const at = corridorOrigin(profile);
     const bend = roadCorridor(profile, at, 400);
-    const ground10 = terrainCorridor(profile, at, bend, scatterSeed(profile));
+    const ground10 = terrainCorridor(profile, at, bend, scatterSeed(profile), NO_LAND_CLASS);
     const vertices = ground10.vertices;
     let found = 0;
     let asked = 0;
@@ -369,7 +377,7 @@ describe('a ground blob never lies on the carriageway — #620, on the hairpin',
       const seed = scatterSeed(profile);
       // The rider in the bend, so the corridor holds both legs and the arc.
       const corridor = roadCorridor(profile, origin, 400 + (Math.PI * radius) / 2);
-      const mesh = terrainCorridor(profile, origin, corridor, seed);
+      const mesh = terrainCorridor(profile, origin, corridor, seed, NO_LAND_CLASS);
       const centre = corridor.centre;
 
       // The scenery the route really has there, and a dense grid of trees and
@@ -548,7 +556,7 @@ describe('which ground a blob lies on — #620, #686’s review', () => {
     const profile = hillRoute();
     const origin = corridorOrigin(profile);
     const corridor = roadCorridor(profile, origin, 900);
-    const mesh = terrainCorridor(profile, origin, corridor, scatterSeed(profile));
+    const mesh = terrainCorridor(profile, origin, corridor, scatterSeed(profile), NO_LAND_CLASS);
     let laid = 0;
     for (let row = 30; row < corridor.centre.length - 30; row += 4) {
       const point = corridor.centre[row] as CorridorPoint;
@@ -596,7 +604,7 @@ describe('which ground a blob lies on — #620, #686’s review', () => {
     const seed = scatterSeed(profile);
     const bendAt = 400 + (Math.PI * 10) / 2;
     const corridor = roadCorridor(profile, origin, bendAt);
-    const mesh = terrainCorridor(profile, origin, corridor, seed);
+    const mesh = terrainCorridor(profile, origin, corridor, seed, NO_LAND_CLASS);
     const items = scatterAt(profile, origin, seed, bendAt - 60, bendAt + 150, {
       maxItems: 100_000,
       riderMetres: bendAt,

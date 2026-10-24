@@ -241,10 +241,105 @@ import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import type { KitColour } from '@onyourleft/store';
 
 import {
+  AWNING_PAINTS,
+  AWNING_STRIPE_PAINT,
+  DOOR_PAINTS,
+  LOT_PAINTS,
+  lotPaintChannel,
+  paintChannelOf,
+  LOT_CLAD_STEP,
+  LOT_PORCH_STEP,
+  lotSidingPaints,
+  modelPaint,
+  paintsOf,
+  roofPaintsOf,
+  SHINGLE_PAINTS,
+  SIGN_PAINTS,
+  TRIM_PAINTS,
+  type Rgb,
+} from './building-paint';
+import {
+  AWNING_STRIPE_METRES,
+  CLAPBOARD,
+  COMMERCIAL_WINDOW_IN_BAY,
+  DOOR_IN_FACE,
+  DORMER_SASH,
+  FACADE_AO,
+  FOUNDATION,
+  GARAGE_DOOR,
+  LOT_CLAPBOARD_COURSE_METRES,
+  MULLION_METRES,
+  PAIR_MIN_BAY_METRES,
+  PAVING,
+  PICTURE,
+  RAILING,
+  REVEAL,
+  SASH,
+  SASH_TOP_SHARE,
+  SHINGLE,
+  SHOP_DOOR,
+  SHOP_FRONT,
+  SHUTTER,
+  SIGN_MOULDING_METRES,
+  SILL,
+  WINDOW_IN_BAY,
+  WINDOW_SILL_METRES,
+} from './facade';
+import { FRONT_PORCH } from './porch';
+import { placedPoint, type HousePlacement } from './house-models';
+import {
+  BAY_METRES,
+  CLAD_BLOCK,
+  CLAD_BRICK,
+  CLAD_CLAPBOARD,
+  CLAD_PAVING,
+  CLAD_SHINGLE,
+  DOOR_FACE,
+  DOOR_SURROUND_METRES,
+  FACADE_AWNING,
+  FACADE_DORMER,
+  FACADE_FLOATS,
+  FACADE_GARAGE,
+  FACADE_OFFSET,
+  FACADE_SHOPFRONT,
+  FACADE_SIGN,
+  FACADE_RAILING,
+  FOOTPRINT_SURFACES,
+  FOOTPRINT_VERTEX_FLOATS,
+  GARAGE,
+  ROOF_ROLES,
+  SHINGLE_COURSE_METRES,
+  STOREY_METRES,
+  STYLE_BRICK_FOUNDATION,
+  STYLE_COMMERCIAL,
+  STYLE_EAVES,
+  STYLE_FLOATS,
+  STYLE_OFFSET,
+  STYLE_SASH,
+  STYLE_SHUTTERS,
+  type FootprintPlan,
+  type FootprintRole,
+} from './footprint-buildings';
+import {
+  FAR_ROLES,
+  MappedSelection,
+  NEAR_ROLES,
+  NO_RIVALS,
+  roleTriangles,
+  selectMappedBuildings,
+  surfaceOfRole,
+  type MappedBuildings,
+  type MappedBuildingsInView,
+  type RivalStructures,
+} from './mapped-buildings';
+import {
   BUILDING_ROLES,
   BUILDING_VARIANTS,
   buildingPlan,
+  FOUNDATION_METRES,
   isBuiltKind,
+  LOT_PORCH,
+  PLINTH_TOP_METRES,
   type BuildingPlan,
   type BuildingRole,
   type BuiltKind,
@@ -333,6 +428,9 @@ import {
   REALISTIC_BICYCLE_MAP_NAMES,
   REALISTIC_RIDER,
   REALISTIC_WORDMARK,
+  REALISTIC_HOUSE_ATLAS,
+  REALISTIC_HOUSE_MODEL_IDS,
+  houseModelFile,
   REALISTIC_RIDER_KIT_MEAN,
   REALISTIC_RIDER_MAPS,
   REALISTIC_RIDER_MAP_NAMES,
@@ -341,6 +439,7 @@ import {
   REALISTIC_BUILDING_SURFACES,
   isPhotographic,
   REALISTIC_STRUCTURE_SURFACES,
+  surfaceRepeat,
   REALISTIC_SURFACES,
   REALISTIC_TREES_DEFAULT,
   REALISTIC_VEGETATION_KINDS,
@@ -350,6 +449,7 @@ import {
   type RealisticRiderMap,
   type RealisticTrees,
   type RealisticVegetationKind,
+  type PhotographicSurface,
   type RealisticWorldOutcome,
   type StructureSurface,
 } from './realistic-assets';
@@ -365,6 +465,13 @@ import {
 import { bannerCells } from './gantry-wording';
 import { bannerPlace, boxPoint, standPoint, type PlacedBox, type PlacedStand } from './gantry';
 import type { Billboard } from './billboards';
+import {
+  FURNITURE_DRAW_METRES,
+  FURNITURE_KINDS,
+  type FurnitureKind,
+  type VillageStreet,
+} from './streets';
+import type { SideRoad } from './cross-streets';
 import {
   LOGO_BOARDS_PER_FRAME,
   billboardLogoPlace,
@@ -406,14 +513,18 @@ import {
   WHEEL_TRACK_RELIEF,
   WHEEL_TRACK_ROUGHNESS,
   writeRoadAcross,
+  writeRoadPatchReach,
 } from './road-wear';
 import {
+  MAPPED_BUILDING_DRAW_CALLS,
+  MAPPED_BUILDING_TRIANGLES,
   REALISTIC_GROUND_BLOBS,
   REALISTIC_NEAR_MESHES,
   REALISTIC_REMOTE_RIDERS,
   REALISTIC_REMOTE_STYLISED_RIDERS,
   REALISTIC_STRUCTURE_ITEMS,
   REALISTIC_TREE_LEVELS,
+  REALISTIC_TRIANGLES,
 } from './realistic-budget';
 import { MAXIMUM_DRAWN_SET } from '../net/interest';
 import {
@@ -1072,6 +1183,8 @@ const STRUCTURE_STYLE: Readonly<Record<StylisedBuiltKind, Readonly<Record<Buildi
       joinery: 0xcfc8b8,
       door: 0x5b2a22,
       glass: 0x28323a,
+      porch: 0xcfc8b8,
+      'porch-roof': 0x4a4038,
     },
     church: {
       wall: 0xb8b2a4,
@@ -1082,6 +1195,8 @@ const STRUCTURE_STYLE: Readonly<Record<StylisedBuiltKind, Readonly<Record<Buildi
       joinery: 0x6b5238,
       door: 0x4a3524,
       glass: 0x28323a,
+      porch: 0x6b5238,
+      'porch-roof': 0x55595e,
     },
     'shop-row': {
       wall: 0xb58a68,
@@ -1092,6 +1207,8 @@ const STRUCTURE_STYLE: Readonly<Record<StylisedBuiltKind, Readonly<Record<Buildi
       joinery: 0x2f4a3f,
       door: 0x3a3f4a,
       glass: 0x28323a,
+      porch: 0x2f4a3f,
+      'porch-roof': 0x5e6166,
     },
     shed: {
       wall: 0x8c9296,
@@ -1102,6 +1219,8 @@ const STRUCTURE_STYLE: Readonly<Record<StylisedBuiltKind, Readonly<Record<Buildi
       joinery: 0x7b8185,
       door: 0x5f6468,
       glass: 0x28323a,
+      porch: 0x7b8185,
+      'porch-roof': 0x6f7478,
     },
   };
 
@@ -1747,6 +1866,126 @@ function releaseLoadedScene(source: Object3D): void {
 export const BRIDGE_COLOUR = 0x8f8a80;
 
 /**
+ * The stylised world's pavement — #1535: a light concrete grey. This
+ * repository's own, derived from nothing (ADR 0009 L2), and lit like the
+ * scenery, so it is in {@link LIT_COLOURS}. @see PavementBelt
+ */
+export const PAVEMENT_COLOUR = 0xa7a49c;
+
+/** One coloured solid of a piece of street furniture — #1536. */
+interface FurniturePart {
+  readonly colour: number;
+  readonly geometry: () => BufferGeometry;
+}
+
+/** The paint on the street furniture's metal: a dark green-grey. This repository's own. */
+const STREET_PAINT = 0x34403a;
+
+/** A lamp's lantern and a bollard's band: a pale cream. This repository's own. */
+const STREET_CREAM = 0xd9d4c3;
+
+/** A bench's slats: a mid oak. This repository's own; the realistic world wears `planks` instead. */
+const BENCH_WOOD = 0x8a6a48;
+
+/** A bin's body: a darker green. This repository's own. */
+const BIN_GREEN = 0x2f4a3a;
+
+/**
+ * The street furniture — #1536: each piece built from numbers typed here,
+ * standing on its base at y = 0 with its front (+z) to the road, and each
+ * kind wearing ONE realistic surface, so a kind is one instanced draw in
+ * either world. Nothing is downloaded and nothing traced.
+ *
+ * ⚠️ **From numbers, and that is a finding rather than a shortcut** — #475's,
+ * for street furniture. Poly Haven, the CC0 source this world already admits,
+ * publishes `street_lamp_01` at 30 610 triangles, `street_lamp_02` at 20 338
+ * and `metal_trash_can` at 13 960, and no bollard (its API, read 2026-10-21):
+ * one of each is more than a whole village of these. Its `painted_wooden_bench`
+ * (630) would fit, but would be the one GLB a street loads and the only kind
+ * the stylised world could not draw. So the shapes are this repository's own,
+ * and what is photographic is the bench's slats: Poly Haven's `dark_planks`,
+ * already committed (`realistic-assets.ts` §`REALISTIC_STRUCTURE_SURFACES`).
+ *
+ * | kind | triangles | height |
+ * |---|--:|--:|
+ * | `lamp-post` | 88 | 5.3 m, its lantern over the pavement and never the road |
+ * | `bollard` | 64 | 0.95 m |
+ * | `bench` | 108 | 0.84 m |
+ * | `bin` | 64 | 0.9 m |
+ *
+ * `realistic-renderer.test.ts` §"the street furniture" re-counts them off the
+ * belt's own meshes.
+ */
+const FURNITURE_STYLE: Readonly<
+  Record<
+    FurnitureKind,
+    { readonly surface: 'painted' | 'planks'; readonly parts: readonly FurniturePart[] }
+  >
+> = {
+  'lamp-post': {
+    surface: 'painted',
+    parts: [
+      {
+        colour: STREET_PAINT,
+        geometry: () => new CylinderGeometry(0.12, 0.14, 0.4, 8).translate(0, 0.2, 0),
+      },
+      {
+        colour: STREET_PAINT,
+        geometry: () => new CylinderGeometry(0.06, 0.07, 4.9, 8).translate(0, 2.85, 0),
+      },
+      { colour: STREET_PAINT, geometry: () => block(0.06, 0.06, 1.1, 0, 5.2, 0.55) },
+      { colour: STREET_CREAM, geometry: () => block(0.3, 0.14, 0.5, 0, 5.08, 1.2) },
+    ],
+  },
+  bollard: {
+    surface: 'painted',
+    parts: [
+      {
+        colour: STREET_PAINT,
+        geometry: () => new CylinderGeometry(0.1, 0.11, 0.95, 8).translate(0, 0.475, 0),
+      },
+      {
+        colour: STREET_CREAM,
+        geometry: () => new CylinderGeometry(0.106, 0.106, 0.08, 8).translate(0, 0.75, 0),
+      },
+    ],
+  },
+  bench: {
+    surface: 'planks',
+    parts: [
+      // Three seat slats, the sitter facing the road (+z).
+      ...[0.13, -0.01, -0.15].map((z) => ({
+        colour: BENCH_WOOD,
+        geometry: () => block(1.8, 0.04, 0.12, 0, 0.43, z),
+      })),
+      // Two back slats, behind the seat.
+      ...[0.58, 0.74].map((y) => ({
+        colour: BENCH_WOOD,
+        geometry: () => block(1.8, 0.1, 0.03, 0, y, -0.24),
+      })),
+      // Two end frames, each a leg and an upright.
+      ...[-0.75, 0.75].flatMap((x) => [
+        { colour: STREET_PAINT, geometry: () => block(0.05, 0.43, 0.45, x, 0, -0.02) },
+        { colour: STREET_PAINT, geometry: () => block(0.05, 0.42, 0.04, x, 0.43, -0.26) },
+      ]),
+    ],
+  },
+  bin: {
+    surface: 'painted',
+    parts: [
+      {
+        colour: BIN_GREEN,
+        geometry: () => new CylinderGeometry(0.24, 0.22, 0.85, 8).translate(0, 0.425, 0),
+      },
+      {
+        colour: STREET_PAINT,
+        geometry: () => new CylinderGeometry(0.26, 0.26, 0.06, 8).translate(0, 0.87, 0),
+      },
+    ],
+  },
+};
+
+/**
  * Every colour a kind is drawn in when no model stands in for it: its own, and
  * — since #460 — each part of a built shape's. {@link LIT_COLOURS} is built
  * from it, and `three-renderer.test.ts` holds the list to it.
@@ -1805,6 +2044,12 @@ export const LIT_COLOURS: readonly number[] = [
   ...BICYCLE_COLOURS,
   // #459. The bridges' stone, which is lit like the scenery.
   BRIDGE_COLOUR,
+  // #1535. The stylised pavement, lit like the scenery.
+  PAVEMENT_COLOUR,
+  // #1536. The street furniture's, every part of every kind, once.
+  ...new Set(
+    Object.values(FURNITURE_STYLE).flatMap((style) => style.parts.map((part) => part.colour)),
+  ),
 ];
 
 /**
@@ -1917,6 +2162,8 @@ export class WorldLamps {
     this.#ambient.intensity = sun.ambient * LAMBERT_IRRADIANCE_SCALE * ambientShare;
     this.#sun.intensity = sun.direct * LAMBERT_IRRADIANCE_SCALE;
     this.#sun.position.set(sun.x, sun.y, sun.z);
+    // #1588: the facade's inset reveal reads the same direction.
+    FACADE_SUN.oylSunWorld.value.set(sun.x, sun.y, sun.z).normalize();
   }
 
   /**
@@ -2482,9 +2729,13 @@ export class ScatterBelt {
       this.#matrix.compose(this.#position, this.#quaternion, this.#scale);
       mesh.setMatrixAt(mesh.count, this.#matrix);
       if (this.#tint !== undefined && mesh.instanceColor !== null) {
-        // #621: the tint alone; the dither's two channels stay nought, which
-        // a structure's material does not read. @see withInstanceChannels
-        (mesh.instanceColor.array as Float32Array)[mesh.count * 3 + 2] = packedInstanceTint(
+        // #621: the tint; and since #1581 a lot's paint in the two channels a
+        // tree's dither uses and a structure's did not — nought, unpainted,
+        // for every item but a lot. @see withInstanceChannels, withLotPaint
+        const channels = mesh.instanceColor.array as Float32Array;
+        channels[mesh.count * 3] = lotPaintChannel(item.paint, 'wall');
+        channels[mesh.count * 3 + 1] = lotPaintChannel(item.paint, 'roof');
+        channels[mesh.count * 3 + 2] = packedInstanceTint(
           item.x,
           item.z,
           realisticTints[this.#tint],
@@ -3647,6 +3898,11 @@ const GROUND_BLOB_FRAGMENT = /* glsl */ `
 /** A number as a GLSL float literal. */
 function glslFloat(value: number): string {
   return Number.isInteger(value) ? `${String(value)}.0` : String(value);
+}
+
+/** A `vec2` or `vec3` of numbers as a GLSL constructor — #1588. */
+function glslVec(values: readonly number[]): string {
+  return `vec${String(values.length)}(${values.map(glslFloat).join(', ')})`;
 }
 
 /**
@@ -5494,6 +5750,60 @@ interface RealisticWorld {
   readonly banners?: { readonly atlas: BannerAtlas; readonly texture: DataTexture };
   /** The game's wordmark, KTX2 — #966: on the gates (the finish since #978) and the billboards. */
   readonly wordmark: Texture;
+  /**
+   * The house models and their one atlas — #1585. Absent where a loader gave
+   * a scene with no mesh in it (a test's), and then every mapped building is
+   * its extrusion.
+   */
+  readonly houses?: RealisticHouses;
+}
+
+/** One house model's triangles, as the belt copies them: not indexed, three floats a vertex. */
+export interface HouseGeometry {
+  readonly position: Float32Array;
+  readonly normal: Float32Array;
+  readonly uv: Float32Array;
+  readonly triangles: number;
+}
+
+/** The house models, by their place in `house-models.ts` §`HOUSE_MODELS`, and their atlas — #1585. */
+export interface RealisticHouses {
+  readonly models: readonly HouseGeometry[];
+  readonly atlas: Texture;
+  /** Each model's triangles, as `mapped-buildings.ts` §`selectMappedBuildings` reads them. */
+  readonly triangles: readonly number[];
+}
+
+/**
+ * A house model's GLB as the belt copies it — #1585: its one mesh's triangles,
+ * not indexed, or `undefined` where the scene holds no mesh with positions,
+ * normals and texture coordinates.
+ */
+export function houseGeometryOf(scene: Object3D): HouseGeometry | undefined {
+  let found: Mesh | undefined;
+  scene.traverse((node) => {
+    if (found === undefined && (node as Partial<Mesh>).isMesh === true) found = node as Mesh;
+  });
+  const geometry = found?.geometry;
+  if (
+    geometry?.getAttribute('position') === undefined ||
+    geometry.getAttribute('normal') === undefined ||
+    geometry.getAttribute('uv') === undefined
+  ) {
+    return undefined;
+  }
+  const flat = geometry.index === null ? geometry : geometry.toNonIndexed();
+  const copy = (name: string): Float32Array =>
+    Float32Array.from(flat.getAttribute(name).array as ArrayLike<number>);
+  const position = copy('position');
+  const result = {
+    position,
+    normal: copy('normal'),
+    uv: copy('uv'),
+    triangles: position.length / 9,
+  };
+  if (flat !== geometry) flat.dispose();
+  return result;
 }
 
 /**
@@ -5735,6 +6045,12 @@ interface RealisticTextureReport {
    * picture, whose size three never sees.
    */
   readonly bytes: number;
+  /**
+   * Which surface a `structure` map is the colour or normal of — #1548, so the
+   * browser gate can name the mapped towns' three and not only count them.
+   * Absent for every other role.
+   */
+  readonly surface?: StructureSurface;
 }
 
 /**
@@ -5784,7 +6100,11 @@ export function realisticTextureReport(): readonly RealisticTextureReport[] {
   // textures, 48 uploads.
   const seen = new Set<unknown>();
   const out: RealisticTextureReport[] = [];
-  const add = (texture: Texture | null | undefined, role: RealisticTextureReport['role']): void => {
+  const add = (
+    texture: Texture | null | undefined,
+    role: RealisticTextureReport['role'],
+    surface?: StructureSurface,
+  ): void => {
     if (texture === null || texture === undefined || seen.has(texture.source)) return;
     seen.add(texture.source);
     const image = texture.image as { width?: number; height?: number } | undefined;
@@ -5793,6 +6113,7 @@ export function realisticTextureReport(): readonly RealisticTextureReport[] {
       ...realisticTextureFormat(texture),
       width: image?.width ?? 0,
       height: image?.height ?? 0,
+      ...(surface === undefined ? {} : { surface }),
     });
   };
   add(world.sky.texture, 'sky');
@@ -5801,9 +6122,9 @@ export function realisticTextureReport(): readonly RealisticTextureReport[] {
   for (const map of surfaceMapsOf(world)) {
     add(map, map === world.road.colour || map === world.road.normal ? 'road' : 'ground');
   }
-  for (const maps of world.structures.values()) {
-    add(maps.colour, 'structure');
-    add(maps.normal, 'structure');
+  for (const [surface, maps] of world.structures) {
+    add(maps.colour, 'structure', surface);
+    add(maps.normal, 'structure', surface);
   }
   for (const map of REALISTIC_BICYCLE_MAP_NAMES) add(world.bicycle[map], 'bicycle');
   for (const map of REALISTIC_RIDER_MAP_NAMES) add(world.rider[map], 'rider');
@@ -5941,6 +6262,11 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
       map,
       texture: texture(() => loaders.texture(realisticUrl(REALISTIC_BICYCLE_MAPS[map]))),
     }));
+    // #1585: the house models and their atlas, loaded and settled with everything else.
+    const houseScenes = REALISTIC_HOUSE_MODEL_IDS.map((id) =>
+      model(() => loaders.model(realisticUrl(houseModelFile(id)))),
+    );
+    const houseAtlas = texture(() => loaders.texture(realisticUrl(REALISTIC_HOUSE_ATLAS)));
     // #475: the structures' surfaces, loaded with everything else and settled
     // with it — a world whose buildings could not load is half a world.
     const structureMaps = PHOTOGRAPHIC_STRUCTURE_SURFACES.map((surface) => ({
@@ -6000,6 +6326,8 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
       wordmark,
       ...riderMaps.map((each) => each.texture),
       ...bicycleMaps.map((each) => each.texture),
+      ...houseScenes,
+      houseAtlas,
       ...structureMaps.flatMap((each) => [each.colour, each.normal]),
       ...shapes.flatMap((each) =>
         each.models.flatMap((one) => [one.scene, one.strip, one.normals, one.middle]),
@@ -6129,6 +6457,27 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
     const glyphBytes = await glyphs;
     const banners = bannersOf(glyphBytes);
     if (banners !== undefined) loaded.textures.push(banners.texture);
+    // #1585: the models' triangles, copied once; the atlas, never repeated.
+    const houseGeometries = await Promise.all(
+      houseScenes.map(async (each) => houseGeometryOf(await each)),
+    );
+    // ⚠️ The loader's scenes are not released: they were never drawn, so they
+    // hold nothing on the GPU, and a loader may hand the same scene for two
+    // files (a test's does), which a release here would take from the other.
+    const atlasTexture = await houseAtlas;
+    atlasTexture.colorSpace = SRGBColorSpace;
+    atlasTexture.minFilter = LinearMipmapLinearFilter;
+    atlasTexture.wrapS = ClampToEdgeWrapping;
+    atlasTexture.wrapT = ClampToEdgeWrapping;
+    const houses: RealisticHouses | undefined = houseGeometries.every(
+      (each): each is HouseGeometry => each !== undefined,
+    )
+      ? {
+          models: houseGeometries,
+          atlas: atlasTexture,
+          triangles: houseGeometries.map((each) => each.triangles),
+        }
+      : undefined;
     const previous = realisticWorld;
     realisticWorld = {
       sky: skyRead,
@@ -6144,6 +6493,7 @@ async function loadEveryRealisticFile(loaders: RealisticLoaders): Promise<Realis
       bicycle,
       ...(banners === undefined ? {} : { banners }),
       wordmark: wordmarkTexture,
+      ...(houses === undefined ? {} : { houses }),
     };
     // #545: the near-plane cull's shapes, built now rather than on a frame.
     warmNearFieldShapes('realistic');
@@ -6318,6 +6668,8 @@ function releaseRealisticWorld(world: RealisticWorld): void {
   world.sky.texture.dispose();
   world.banners?.texture.dispose();
   world.wordmark.dispose();
+  // #1585: the house models' atlas; their triangles are plain arrays.
+  world.houses?.atlas.dispose();
   for (const texture of surfaceMapsOf(world)) texture.dispose();
   for (const shapes of world.vegetation.values()) {
     for (const shape of shapes) releaseRealisticShape(shape);
@@ -8185,6 +8537,441 @@ export class LogoBelt {
 }
 
 /**
+ * Every village street in view, kerbs and pavements — #1535 (`streets.ts`).
+ * **One mesh and one draw call** however many villages are in view, and none
+ * where a frame holds no street.
+ *
+ * ⚠️ **Rebuilt only when the SET of streets changes**, which is when a village
+ * comes into view or leaves it: `streets.ts` hands every frame the same
+ * objects for the same villages, so a frame whose streets are the last
+ * frame's, in the same order, uploads nothing. A street is fixed in the
+ * corridor's frame, so nothing moves in between.
+ *
+ * A belt per world, as {@link LogoBelt} is: the stylised view's is
+ * {@link PAVEMENT_COLOUR}, lit or flat by the rung (#286); the realistic
+ * world's wears ambientCG's paving (`realistic-assets.ts`
+ * §`REALISTIC_STRUCTURE_SURFACES`' `paving`), its flags the size the
+ * photograph's own repeat says, and breathes the realistic air.
+ */
+export class PavementBelt {
+  readonly #mesh: Mesh;
+  readonly #materials: { readonly lit: Material; readonly flat: Material };
+  /** How many metres one repeat of the photograph covers; 1 where there is none. */
+  readonly #tileMetres: number;
+  /** The streets the mesh holds, in the order it holds them. */
+  #held: readonly VillageStreet[] = [];
+  #shown = true;
+  /** Whether the browser gate has turned the pavements off — its control. */
+  #switchedOn = true;
+
+  constructor(
+    world: 'stylised' | 'realistic',
+    paving?: { readonly colour: Texture; readonly normal: Texture },
+  ) {
+    if (world === 'realistic') {
+      this.#tileMetres = REALISTIC_STRUCTURE_SURFACES.paving.tileMetres;
+      const finish = STRUCTURE_SURFACE_FINISH.paving;
+      const material = withAtmosphere(
+        withTextureLodBias(
+          constructed(
+            new MeshStandardMaterial({
+              color: finish.tint,
+              roughness: finish.roughness,
+              metalness: finish.metalness,
+              ...(paving === undefined ? {} : { map: paving.colour, normalMap: paving.normal }),
+            }),
+          ),
+        ),
+      );
+      // The realistic world has no flat rung, so its two are one material.
+      this.#materials = { lit: material, flat: material };
+    } else {
+      this.#tileMetres = 1;
+      this.#materials = {
+        lit: constructed(new MeshLambertMaterial({ color: PAVEMENT_COLOUR })),
+        flat: constructed(new MeshBasicMaterial({ color: PAVEMENT_COLOUR })),
+      };
+    }
+    this.#mesh = new Mesh(new BufferGeometry(), this.#materials.lit);
+    this.#mesh.visible = false;
+  }
+
+  addTo(scene: Scene): void {
+    scene.add(this.#mesh);
+  }
+
+  /** The mesh. For the browser gate's counts and the jsdom suite. */
+  get mesh(): Mesh {
+    return this.#mesh;
+  }
+
+  setShown(on: boolean): void {
+    this.#shown = on;
+    if (!on) this.#mesh.visible = false;
+  }
+
+  /** @see pavementsShownOf */
+  switchOn(on: boolean): void {
+    this.#switchedOn = on;
+  }
+
+  /** Shades the pavements, or stops shading them — #286. @see QualitySettings.shading */
+  setShading(shading: QualitySettings['shading']): void {
+    this.#mesh.material = this.#materials[shading];
+  }
+
+  /** This frame's streets. */
+  update(streets: readonly VillageStreet[]): void {
+    const drawn = this.#shown && this.#switchedOn ? streets : NO_STREETS;
+    if (!sameStreets(drawn, this.#held)) {
+      this.#held = drawn;
+      const geometry = pavementGeometry(drawn, this.#tileMetres);
+      this.#mesh.geometry.dispose();
+      this.#mesh.geometry = geometry;
+    }
+    this.#mesh.visible = this.#shown && drawn.length > 0;
+  }
+
+  dispose(): void {
+    this.#mesh.geometry.dispose();
+    this.#materials.lit.dispose();
+    if (this.#materials.flat !== this.#materials.lit) this.#materials.flat.dispose();
+  }
+}
+
+/** No streets: what a belt that is off holds. */
+const NO_STREETS: readonly VillageStreet[] = [];
+
+/** Whether two lists hold the same streets, by identity, in the same order. */
+function sameStreets(first: readonly VillageStreet[], second: readonly VillageStreet[]): boolean {
+  return first.length === second.length && first.every((street, index) => street === second[index]);
+}
+
+/**
+ * Every street's pavement as one geometry, its texture coordinates turned from
+ * metres into repeats of a photograph `tileMetres` across.
+ */
+function pavementGeometry(streets: readonly VillageStreet[], tileMetres: number): BufferGeometry {
+  let vertices = 0;
+  let indices = 0;
+  for (const { pavement } of streets) {
+    vertices += pavement.positions.length / 3;
+    indices += pavement.indices.length;
+  }
+  const positions = new Float32Array(vertices * 3);
+  const normals = new Float32Array(vertices * 3);
+  const uvs = new Float32Array(vertices * 2);
+  const index = new Uint32Array(indices);
+  let vertex = 0;
+  let at = 0;
+  for (const { pavement } of streets) {
+    positions.set(pavement.positions, vertex * 3);
+    normals.set(pavement.normals, vertex * 3);
+    for (let each = 0; each < pavement.uvs.length; each += 1) {
+      uvs[vertex * 2 + each] = (pavement.uvs[each] as number) / tileMetres;
+    }
+    for (let each = 0; each < pavement.indices.length; each += 1) {
+      index[at + each] = (pavement.indices[each] as number) + vertex;
+    }
+    vertex += pavement.positions.length / 3;
+    at += pavement.indices.length;
+  }
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new BufferAttribute(positions, 3));
+  geometry.setAttribute('normal', new BufferAttribute(normals, 3));
+  geometry.setAttribute('uv', new BufferAttribute(uvs, 2));
+  geometry.setIndex(new BufferAttribute(index, 1));
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+/**
+ * Every cross street in view — #1565 (`cross-streets.ts`): the side roads a
+ * short way off the route at each junction, and their give-way lines. **One
+ * mesh and one draw call** however many are in view, and none where a frame
+ * holds none.
+ *
+ * ⚠️ **It wears the ROAD's material, whatever the road wears** —
+ * `ThreeGameView` hands it the road mesh's own every frame: the stylised
+ * road's grain, or the photograph and #628's wear. So it adds no texture and
+ * no material, and its buffers carry what that material reads: a colour, an
+ * up normal, #628's across-position, and #1523's patch reach, which is nought
+ * — no wear patch is ever on a side road, so the bounded wear runs no patch
+ * loop on one.
+ *
+ * Rebuilt only when the SET of side roads changes, as {@link PavementBelt}
+ * is: `cross-streets.ts` hands every frame the same objects for the same
+ * junctions.
+ */
+export class SideRoadBelt {
+  readonly #mesh: Mesh;
+  /** The side roads the mesh holds, in the order it holds them. */
+  #held: readonly SideRoad[] = [];
+  /** Whether the browser gate has turned the side roads off — its control. */
+  #switchedOn = true;
+
+  constructor(material: Material) {
+    this.#mesh = new Mesh(new BufferGeometry(), material);
+    this.#mesh.visible = false;
+  }
+
+  addTo(scene: Scene): void {
+    scene.add(this.#mesh);
+  }
+
+  /** The mesh. For the browser gate's counts and the jsdom suite. */
+  get mesh(): Mesh {
+    return this.#mesh;
+  }
+
+  /** The road's material, this frame. Not this belt's to dispose. */
+  setMaterial(material: Material): void {
+    this.#mesh.material = material;
+  }
+
+  /** @see sideRoadsShownOf */
+  switchOn(on: boolean): void {
+    this.#switchedOn = on;
+  }
+
+  /** This frame's side roads. */
+  update(roads: readonly SideRoad[]): void {
+    const drawn = this.#switchedOn ? roads : NO_SIDE_ROADS;
+    if (!sameSideRoads(drawn, this.#held)) {
+      this.#held = drawn;
+      const geometry = sideRoadGeometry(drawn);
+      this.#mesh.geometry.dispose();
+      this.#mesh.geometry = geometry;
+    }
+    this.#mesh.visible = drawn.length > 0;
+  }
+
+  dispose(): void {
+    this.#mesh.geometry.dispose();
+  }
+}
+
+/** No side roads: what a belt that is off holds. */
+const NO_SIDE_ROADS: readonly SideRoad[] = [];
+
+function sameSideRoads(first: readonly SideRoad[], second: readonly SideRoad[]): boolean {
+  return first.length === second.length && first.every((road, index) => road === second[index]);
+}
+
+/** Every side road as one geometry, with the attributes the road's material reads. */
+function sideRoadGeometry(roads: readonly SideRoad[]): BufferGeometry {
+  let vertices = 0;
+  let indices = 0;
+  for (const { mesh } of roads) {
+    vertices += mesh.positions.length / 3;
+    indices += mesh.indices.length;
+  }
+  const positions = new Float32Array(vertices * 3);
+  const colours = new Float32Array(vertices * 3);
+  const normals = new Float32Array(vertices * 3);
+  const across = new Float32Array(vertices);
+  const index = new Uint32Array(indices);
+  let vertex = 0;
+  let at = 0;
+  for (const { mesh } of roads) {
+    positions.set(mesh.positions, vertex * 3);
+    colours.set(mesh.colours, vertex * 3);
+    across.set(mesh.across, vertex);
+    for (let each = 0; each < mesh.indices.length; each += 1) {
+      index[at + each] = (mesh.indices[each] as number) + vertex;
+    }
+    vertex += mesh.positions.length / 3;
+    at += mesh.indices.length;
+  }
+  for (let up = 1; up < normals.length; up += 3) normals[up] = 1;
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new BufferAttribute(positions, 3));
+  geometry.setAttribute('color', new BufferAttribute(colours, 3));
+  geometry.setAttribute('normal', new BufferAttribute(normals, 3));
+  geometry.setAttribute(ROAD_ACROSS_ATTRIBUTE, new BufferAttribute(across, 1));
+  geometry.setAttribute(ROAD_REACH_ATTRIBUTE, new BufferAttribute(new Float32Array(vertices), 1));
+  geometry.setIndex(new BufferAttribute(index, 1));
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+/**
+ * The most pieces of one furniture kind a frame draws: **64**. A village at
+ * its fullest has 16 lamp posts and 8 bollards (`streets.ts` §`furnish`), a
+ * frame holds two villages at most, and only what is within
+ * `streets.ts` §`FURNITURE_DRAW_METRES` of the camera is drawn — so the cut
+ * past this never binds on a village the rules built.
+ */
+export const FURNITURE_CAPACITY = 64;
+
+/**
+ * One furniture kind as one geometry: its parts merged, coloured by vertex.
+ * The realistic world's carries texture coordinates in metres too, for the
+ * bench's slats (`projectedInMetres`); the stylised world's needs none.
+ */
+function furnitureGeometry(kind: FurnitureKind, world: 'stylised' | 'realistic'): BufferGeometry {
+  const style = FURNITURE_STYLE[kind];
+  if (world === 'stylised') {
+    return merged(
+      style.parts.map((part) => {
+        const geometry = part.geometry();
+        paintGrounded(geometry, part.colour, 1, false);
+        return geometry;
+      }),
+      ['color'],
+    );
+  }
+  const tile = style.surface === 'planks' ? REALISTIC_STRUCTURE_SURFACES.planks.tileMetres : 1;
+  const parts = style.parts.map((part) => {
+    const projected = projectedInMetres(part.geometry(), { across: tile, up: tile }, 1, false);
+    // The photographed slats wear the photograph's own colour; every other
+    // part its paint, which the planks' map darkens to a frame on a bench.
+    paintGrounded(
+      projected,
+      style.surface === 'planks' && part.colour === BENCH_WOOD ? 0xffffff : part.colour,
+      1,
+      false,
+    );
+    return projected;
+  });
+  const joined = mergeGeometries(parts);
+  for (const part of parts) part.dispose();
+  if (joined === null) throw new Error(`${kind}: its parts could not be merged`);
+  return joined;
+}
+
+/**
+ * The street furniture on the pavements in view — #1536 (`streets.ts`
+ * §`furnish`): **one instanced draw a kind**, four at most, and none where a
+ * frame holds no street. Only what stands within `streets.ts`
+ * §`FURNITURE_DRAW_METRES` of the camera is drawn, which is its level of
+ * detail: a piece is either drawn whole or not at all.
+ *
+ * A belt per world, as {@link PavementBelt} is: the stylised view's is
+ * painted by {@link FURNITURE_STYLE}, lit or flat by the rung; the realistic
+ * world's is the same triangles, physically based, the bench's slats in
+ * Poly Haven's `dark_planks`, breathing the realistic air.
+ */
+export class FurnitureBelt {
+  readonly #meshes = new Map<FurnitureKind, InstancedMesh>();
+  readonly #materials = new Map<
+    FurnitureKind,
+    { readonly lit: Material; readonly flat: Material }
+  >();
+  readonly #matrix = new Matrix4();
+  #shown = true;
+  /** Whether the browser gate has turned the furniture off — its control. */
+  #switchedOn = true;
+
+  constructor(
+    world: 'stylised' | 'realistic',
+    planks?: { readonly colour: Texture; readonly normal: Texture },
+  ) {
+    for (const kind of FURNITURE_KINDS) {
+      const surface = FURNITURE_STYLE[kind].surface;
+      let materials: { readonly lit: Material; readonly flat: Material };
+      if (world === 'realistic') {
+        const finish = STRUCTURE_SURFACE_FINISH[surface];
+        const maps = surface === 'planks' ? planks : undefined;
+        const material = withAtmosphere(
+          (maps === undefined ? (made: Material): Material => made : withTextureLodBias)(
+            constructed(
+              new MeshStandardMaterial({
+                // The paint is in the vertex colour, so the material is white.
+                color: 0xffffff,
+                roughness: finish.roughness,
+                metalness: finish.metalness,
+                vertexColors: true,
+                ...(maps === undefined ? {} : { map: maps.colour, normalMap: maps.normal }),
+              }),
+            ),
+          ),
+        );
+        materials = { lit: material, flat: material };
+      } else {
+        materials = {
+          lit: constructed(new MeshLambertMaterial({ vertexColors: true })),
+          flat: constructed(new MeshBasicMaterial({ vertexColors: true })),
+        };
+      }
+      this.#materials.set(kind, materials);
+      const mesh = new InstancedMesh(
+        furnitureGeometry(kind, world),
+        materials.lit,
+        FURNITURE_CAPACITY,
+      );
+      mesh.instanceMatrix.setUsage(DynamicDrawUsage);
+      mesh.count = 0;
+      // Spread along a village and moved every frame: three's culling would
+      // test a sphere nobody keeps up to date, and four calls are all it saves.
+      mesh.frustumCulled = false;
+      mesh.visible = false;
+      this.#meshes.set(kind, mesh);
+    }
+  }
+
+  addTo(scene: Scene): void {
+    for (const mesh of this.#meshes.values()) scene.add(mesh);
+  }
+
+  /** One kind's mesh. For the browser gate's counts and the jsdom suite. */
+  meshOf(kind: FurnitureKind): InstancedMesh {
+    return this.#meshes.get(kind) as InstancedMesh;
+  }
+
+  setShown(on: boolean): void {
+    this.#shown = on;
+    if (!on) for (const mesh of this.#meshes.values()) mesh.visible = false;
+  }
+
+  /** @see furnitureShownOf */
+  switchOn(on: boolean): void {
+    this.#switchedOn = on;
+  }
+
+  /** Shades the furniture, or stops shading it — #286. @see QualitySettings.shading */
+  setShading(shading: QualitySettings['shading']): void {
+    for (const [kind, mesh] of this.#meshes) {
+      mesh.material = (this.#materials.get(kind) as { lit: Material; flat: Material })[shading];
+    }
+  }
+
+  /** This frame's streets, and where the camera is: what is in reach is drawn. */
+  update(
+    streets: readonly VillageStreet[],
+    camera: { readonly x: number; readonly z: number },
+  ): void {
+    for (const mesh of this.#meshes.values()) mesh.count = 0;
+    if (this.#shown && this.#switchedOn) {
+      for (const street of streets) {
+        for (const item of street.furniture) {
+          if (Math.hypot(item.x - camera.x, item.z - camera.z) > FURNITURE_DRAW_METRES) continue;
+          const mesh = this.#meshes.get(item.kind) as InstancedMesh;
+          if (mesh.count >= FURNITURE_CAPACITY) continue;
+          this.#matrix.makeRotationY(item.rotation).setPosition(item.x, item.y, item.z);
+          mesh.setMatrixAt(mesh.count, this.#matrix);
+          mesh.count += 1;
+        }
+      }
+    }
+    for (const mesh of this.#meshes.values()) {
+      mesh.instanceMatrix.needsUpdate = mesh.count > 0;
+      mesh.visible = mesh.count > 0;
+    }
+  }
+
+  dispose(): void {
+    for (const [kind, mesh] of this.#meshes) {
+      mesh.geometry.dispose();
+      const materials = this.#materials.get(kind);
+      materials?.lit.dispose();
+      if (materials !== undefined && materials.flat !== materials.lit) materials.flat.dispose();
+      mesh.dispose();
+    }
+  }
+}
+
+/**
  * The stylised world's wordmark, once loaded — #966. Module state for
  * {@link sceneryGeometries}' reason: a view is built synchronously, so the
  * texture is loaded first, by {@link loadGameWordmark}.
@@ -8793,6 +9580,35 @@ export class RealisticVegetationBelt {
     return this.#drawn;
   }
 
+  /**
+   * Where, in plan, every instance the last frame submitted stands — at every
+   * level, the impostors included, read back out of the instanced meshes.
+   *
+   * @test-facing reached through `realisticVegetationPlacesOf` by the browser
+   * gate, which holds what was drawn off every settlement's ground (#1534)
+   */
+  places(): readonly { readonly kind: RealisticVegetationKind; x: number; z: number }[] {
+    const found: { kind: RealisticVegetationKind; x: number; z: number }[] = [];
+    for (const slot of this.#kinds) {
+      const meshes = [
+        ...slot.near.flat(),
+        ...slot.middle.flatMap((each) => each ?? []),
+        ...slot.far.filter((mesh): mesh is InstancedMesh => mesh !== undefined),
+      ];
+      for (const mesh of meshes) {
+        if (!mesh.visible) continue;
+        mesh.updateMatrixWorld();
+        for (let index = 0; index < mesh.count; index += 1) {
+          mesh.getMatrixAt(index, this.#matrix);
+          this.#matrix.premultiply(mesh.matrixWorld);
+          this.#position.setFromMatrixPosition(this.#matrix);
+          found.push({ kind: slot.kind, x: this.#position.x, z: this.#position.z });
+        }
+      }
+    }
+    return found;
+  }
+
   /** This frame's vegetation: the trees at their levels, the nearest shrubs and rocks as meshes. */
   update(items: readonly ScatterItem[], pose: CameraPose): void {
     this.#drawn = 0;
@@ -9110,8 +9926,33 @@ function variantOf(variant: number, shapes: number): number {
  * camera looks along the road at a grazing angle, which is exactly where an
  * unfiltered texture shimmers (#425). Whether it does on the tablet is the
  * owner's check, in validation 0002 Part Z; nothing in CI can see shimmer.
+ *
+ * ## `worn` — the tablet's cost pair for the wear, #1523
+ *
+ * `false` builds the road WITHOUT the wear's shader: no wheel track, no dust,
+ * no patch loop, no roughness or relief from the track — and nothing in
+ * {@link ROAD_WEAR}, so no frame writes patches for it either. That is the
+ * road before #628 and #879. ⚠️ Not {@link roadWearOf}'s switch, which zeroes
+ * the wear's uniforms and leaves every fragment running the loop. Only the
+ * owner's page passes `false` (`realistic/config.ts` §`LEVERS`, `road-wear`);
+ * the product always draws the wear.
+ *
+ * ## `bounded` — what the wear costs a fragment, #1523
+ *
+ * `true`, the product: a fragment runs the patch loop only on a triangle a
+ * patch can reach (`road-wear.ts` §`writeRoadPatchReach`, read as a `flat`
+ * varying), tests only those patches, and draws the paint's fading noise only
+ * where there is paint. Every term it skips added exactly nought, so the
+ * picture is the one `false` draws. `false` is the wear as #628 and #879 drew
+ * it — all eight patches and the noise on every road fragment: the browser
+ * gate's reference and the owner's `-surface-bounds` before/after pair.
  */
-export function photographicRoadMaterial(colour: Texture, normal: Texture): MeshStandardMaterial {
+export function photographicRoadMaterial(
+  colour: Texture,
+  normal: Texture,
+  worn = true,
+  bounded = true,
+): MeshStandardMaterial {
   const material = constructed(
     new MeshStandardMaterial({
       vertexColors: true,
@@ -9127,44 +9968,53 @@ export function photographicRoadMaterial(colour: Texture, normal: Texture): Mesh
     patches: new Float32Array(MAXIMUM_ROAD_PATCHES * ROAD_PATCH_FLOATS),
     on: 1,
     colour: 1,
+    bounded,
   };
-  ROAD_WEAR.set(material, wear);
+  if (worn) ROAD_WEAR.set(material, wear);
   material.onBeforeCompile = (shader) => {
     shader.uniforms['tileMetres'] = { value: REALISTIC_SURFACES.road.tileMetres };
-    // #628: the patches lying in this frame's corridor, and the switch the
-    // browser gate's control turns off. The SAME objects every compile, so a
-    // program compiled again still reads what `#updateRoad` writes.
-    shader.uniforms['roadPatches'] = { value: wear.patches };
-    shader.uniforms['roadWear'] = {
-      get value(): number {
-        return wear.on;
-      },
-    };
-    // #879: the colour terms alone, for the browser gate's surface-only read.
-    shader.uniforms['roadWearColour'] = {
-      get value(): number {
-        return wear.colour;
-      },
-    };
+    if (worn) {
+      // #628: the patches lying in this frame's corridor, and the switch the
+      // browser gate's control turns off. The SAME objects every compile, so a
+      // program compiled again still reads what `#updateRoad` writes.
+      shader.uniforms['roadPatches'] = { value: wear.patches };
+      shader.uniforms['roadWear'] = {
+        get value(): number {
+          return wear.on;
+        },
+      };
+      // #879: the colour terms alone, for the browser gate's surface-only read.
+      shader.uniforms['roadWearColour'] = {
+        get value(): number {
+          return wear.colour;
+        },
+      };
+    }
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
-        `#include <common>\nuniform float tileMetres;\n${ROAD_WEAR_VERTEX_PARS}`,
+        `#include <common>\nuniform float tileMetres;\n${worn ? roadWearVertexPars(bounded) : ''}`,
       )
-      .replace('#include <uv_vertex>', `#include <uv_vertex>\n${PLANAR_UV}\n${ROAD_WEAR_VERTEX}`);
+      .replace(
+        '#include <uv_vertex>',
+        `#include <uv_vertex>\n${PLANAR_UV}\n${worn ? roadWearVertex(bounded) : ''}`,
+      );
     shader.fragmentShader = shader.fragmentShader
       .replace(
         '#include <common>',
-        `#include <common>\n${DETAIL_COMMON}\n${ROAD_WEAR_FRAGMENT_PARS}`,
+        `#include <common>\n${worn ? `${DETAIL_COMMON}\n${roadWearFragmentPars(bounded)}` : ''}`,
       )
-      .replace('#include <color_fragment>', `#include <color_fragment>\n${ROAD_WEAR_FRAGMENT}`)
+      .replace(
+        '#include <color_fragment>',
+        `#include <color_fragment>\n${worn ? roadWearFragment(bounded) : ''}`,
+      )
       .replace(
         '#include <roughnessmap_fragment>',
-        `#include <roughnessmap_fragment>\nroughnessFactor *= mix(1.0, ${glslFloat(WHEEL_TRACK_ROUGHNESS)}, oylTrackShare);`,
+        `#include <roughnessmap_fragment>\n${worn ? `roughnessFactor *= mix(1.0, ${glslFloat(WHEEL_TRACK_ROUGHNESS)}, oylTrackShare);` : ''}`,
       )
       .replace(
         '#include <normal_fragment_maps>',
-        `#include <normal_fragment_maps>\nnormal = normalize(mix(normal, nonPerturbedNormal, ${glslFloat(1 - WHEEL_TRACK_RELIEF)} * oylTrackShare));`,
+        `#include <normal_fragment_maps>\n${worn ? `normal = normalize(mix(normal, nonPerturbedNormal, ${glslFloat(1 - WHEEL_TRACK_RELIEF)} * oylTrackShare));` : ''}`,
       )
       // ⚠️ **Every face is lit as facing UP, whichever way it is wound.**
       // `terrain.ts` §`roadIndices` keeps the winding consistent within a lane
@@ -9201,7 +10051,12 @@ material.specularF90 *= ${ROAD_SHEEN.toFixed(3)};`,
 `,
       );
   };
-  material.customProgramCacheKey = () => 'oyl-photographic-road-worn';
+  material.customProgramCacheKey = () =>
+    worn
+      ? bounded
+        ? 'oyl-photographic-road-worn'
+        : 'oyl-photographic-road-worn-unbounded'
+      : 'oyl-photographic-road';
   // #619 lever 2 and #622's air, chained after the assignment above.
   return withAtmosphere(withTextureLodBias(material));
 }
@@ -9214,30 +10069,48 @@ material.specularF90 *= ${ROAD_SHEEN.toFixed(3)};`,
  */
 const ROAD_WEAR = new WeakMap<
   Material,
-  { readonly patches: Float32Array; on: number; colour: number }
+  {
+    readonly patches: Float32Array;
+    on: number;
+    colour: number;
+    /** #1523: whether the shader reads {@link ROAD_REACH_ATTRIBUTE}. */
+    readonly bounded: boolean;
+  }
 >();
 
 /** The road's across-position attribute's name — #628. @see writeRoadAcross */
 const ROAD_ACROSS_ATTRIBUTE = 'oylAcross';
 
-const ROAD_WEAR_VERTEX_PARS = /* glsl */ `
+/** Which patches can reach a vertex's triangles — #1523. @see writeRoadPatchReach */
+const ROAD_REACH_ATTRIBUTE = 'oylPatchReach';
+
+function roadWearVertexPars(bounded: boolean): string {
+  return /* glsl */ `
 attribute float ${ROAD_ACROSS_ATTRIBUTE};
 varying float vRoadAcross;
 varying vec2 vRoadWorld;
+${bounded ? `attribute float ${ROAD_REACH_ATTRIBUTE};\nflat varying float vRoadReach;` : ''}
 `;
+}
 
-const ROAD_WEAR_VERTEX = /* glsl */ `
+function roadWearVertex(bounded: boolean): string {
+  return /* glsl */ `
 vRoadAcross = ${ROAD_ACROSS_ATTRIBUTE};
 vRoadWorld = (modelMatrix * vec4(position, 1.0)).xz;
+${bounded ? `vRoadReach = ${ROAD_REACH_ATTRIBUTE};` : ''}
 `;
+}
 
-const ROAD_WEAR_FRAGMENT_PARS = /* glsl */ `
+function roadWearFragmentPars(bounded: boolean): string {
+  return /* glsl */ `
 uniform vec4 roadPatches[${String(MAXIMUM_ROAD_PATCHES * 2)}];
 uniform float roadWear;
 uniform float roadWearColour;
 varying float vRoadAcross;
 varying vec2 vRoadWorld;
+${bounded ? 'flat varying float vRoadReach;' : ''}
 `;
+}
 
 /**
  * The wear — #628, after `color_fragment`, so the vertex colour is known: a
@@ -9247,7 +10120,41 @@ varying vec2 vRoadWorld;
  * §`MAXIMUM_WEAR_SHARE` — the arithmetic that keeps the gradient cue.
  * `oylTrackShare` is read again by the roughness and the normal below it.
  */
-const ROAD_WEAR_FRAGMENT = /* glsl */ `
+function roadWearFragment(bounded: boolean): string {
+  // One patch's term — the same text bounded or not, so a patch the bound
+  // keeps is added exactly as it was.
+  const patch = /* glsl */ `
+    vec4 oylPlace = roadPatches[oylAt * 2];
+    vec4 oylSize = roadPatches[oylAt * 2 + 1];
+    vec2 oylFrom = vRoadWorld - oylPlace.xy;
+    float oylAlong = abs(dot(oylFrom, oylPlace.zw));
+    float oylAcross = abs(dot(oylFrom, vec2(-oylPlace.w, oylPlace.z)));
+    float oylInside = (1.0 - smoothstep(oylSize.x - 0.08, oylSize.x, oylAlong))
+      * (1.0 - smoothstep(oylSize.y - 0.08, oylSize.y, oylAcross));
+    oylWorn += oylSize.z * oylInside * step(0.0001, oylSize.x) * roadWear;`;
+  const loop = bounded
+    ? /* glsl */ `
+  // #1523: only the patches that can reach this triangle, and on a triangle
+  // none can, no loop. @see writeRoadPatchReach
+  int oylReach = int(vRoadReach + 0.5);
+  if (oylReach != 0) {
+    for (int oylAt = 0; oylAt < ${String(MAXIMUM_ROAD_PATCHES)}; oylAt += 1) {
+      if ((oylReach & (1 << oylAt)) == 0) continue;
+${patch}
+    }
+  }`
+    : /* glsl */ `
+  for (int oylAt = 0; oylAt < ${String(MAXIMUM_ROAD_PATCHES)}; oylAt += 1) {
+${patch}
+  }`;
+  const faded = /* glsl */ `1.0 - ${glslFloat(PAINT_WEAR)} * roadWear * roadWearColour
+    * smoothstep(0.35, 0.85, oylNoise(vRoadWorld * 0.13) * 0.7 + oylNoise(vRoadWorld * 1.7) * 0.3)`;
+  // #1523: the noise only where there is paint — elsewhere `mix` takes none
+  // of it, so it is exactly the carriageway either way.
+  const fading = bounded
+    ? `float oylFaded = 1.0;\n  if (oylPaint > 0.0) oylFaded = ${faded};`
+    : `float oylFaded = ${faded};`;
+  return /* glsl */ `
 float oylTrackShare = 0.0;
 {
   float oylTrack = 0.0;
@@ -9259,24 +10166,15 @@ ${WHEEL_TRACK_OFFSETS_METRES.map(
   float oylWorn = ${glslFloat(WHEEL_TRACK_LIGHTEN)} * oylTrack;
   oylWorn += ${glslFloat(DUST_LIGHTEN)} * roadWear
     * smoothstep(${glslFloat(CARRIAGEWAY_HALF_METRES - DUST_BAND_METRES)}, ${glslFloat(CARRIAGEWAY_HALF_METRES)}, abs(vRoadAcross));
-  for (int oylAt = 0; oylAt < ${String(MAXIMUM_ROAD_PATCHES)}; oylAt += 1) {
-    vec4 oylPlace = roadPatches[oylAt * 2];
-    vec4 oylSize = roadPatches[oylAt * 2 + 1];
-    vec2 oylFrom = vRoadWorld - oylPlace.xy;
-    float oylAlong = abs(dot(oylFrom, oylPlace.zw));
-    float oylAcross = abs(dot(oylFrom, vec2(-oylPlace.w, oylPlace.z)));
-    float oylInside = (1.0 - smoothstep(oylSize.x - 0.08, oylSize.x, oylAlong))
-      * (1.0 - smoothstep(oylSize.y - 0.08, oylSize.y, oylAcross));
-    oylWorn += oylSize.z * oylInside * step(0.0001, oylSize.x) * roadWear;
-  }
+${loop}
   float oylCarriageway = 1.0 + roadWearColour * clamp(oylWorn, ${glslFloat(-MAXIMUM_WEAR_SHARE)}, ${glslFloat(MAXIMUM_WEAR_SHARE)});
   float oylPaint = smoothstep(0.35, 0.55, dot(vColor.rgb, vec3(0.2126, 0.7152, 0.0722)));
-  float oylFaded = 1.0 - ${glslFloat(PAINT_WEAR)} * roadWear * roadWearColour
-    * smoothstep(0.35, 0.85, oylNoise(vRoadWorld * 0.13) * 0.7 + oylNoise(vRoadWorld * 1.7) * 0.3);
+  ${fading}
   diffuseColor.rgb *= mix(oylCarriageway, oylFaded, oylPaint);
   oylTrackShare = oylTrack * (1.0 - oylPaint);
 }
 `;
+}
 
 /**
  * How much of its specular reflection the photographic road keeps: **0.25** —
@@ -9362,8 +10260,15 @@ vOylGroundUp = normalize(mat3(modelMatrix) * normal).y;
  * derivative inside non-uniform control flow is undefined in GLSL — and scaled
  * by the rung's LOD bias as `withTextureLodBias` would have (#619 lever 2).
  * The grass is sampled everywhere, as before.
+ *
+ * ⚠️ **#1523: the derivatives are taken ONCE, bounded** — each surface's
+ * pair where the shares are, which the normal then reads rather than taking
+ * the same three pairs again: six derivatives where there were twelve.
+ * Unbounded — the browser gate's reference — is the twelve as #627 and #1274
+ * took them. @see groundDerivatives
  */
-const GROUND_BLEND_FRAGMENT_PARS = /* glsl */ `
+function groundBlendFragmentPars(bounded: boolean): string {
+  return /* glsl */ `
 uniform sampler2D vergeMap;
 uniform sampler2D vergeNormalMap;
 uniform sampler2D rockMap;
@@ -9381,21 +10286,13 @@ vec3 oylVergeTexel = vec3(1.0);
 vec3 oylRockTexel = vec3(1.0);
 vec3 oylCragTexel = vec3(1.0);
 vec3 oylGroundWorld = vec3(1.0);
+${bounded ? GROUND_DERIVATIVE_GLOBALS : ''}
 vec2 oylVergeUv() { return vOylGround.xz / ${glslFloat(REALISTIC_SURFACES.verge.tileMetres)}; }
 vec2 oylRockUv() { return vOylGround.xz / ${glslFloat(REALISTIC_SURFACES.rock.tileMetres)}; }
 vec2 oylCragUv() { return vOylGround.xz / ${glslFloat(REALISTIC_SURFACES.crag.tileMetres)}; }
 vec3 oylGroundNormal(vec2 grassUv) {
   vec3 grass = texture2D(normalMap, grassUv).xyz;
-  float oylBias = exp2(oylTextureLodBias);
-  vec2 vergeUv = oylVergeUv();
-  vec2 vergeDx = dFdx(vergeUv) * oylBias;
-  vec2 vergeDy = dFdy(vergeUv) * oylBias;
-  vec2 rockUv = oylRockUv();
-  vec2 rockDx = dFdx(rockUv) * oylBias;
-  vec2 rockDy = dFdy(rockUv) * oylBias;
-  vec2 cragUv = oylCragUv();
-  vec2 cragDx = dFdx(cragUv) * oylBias;
-  vec2 cragDy = dFdy(cragUv) * oylBias;
+${groundDerivatives(bounded, false)}
   vec3 texel = grass;
   if (oylVergeShare > 0.0) {
     texel = mix(texel, textureGrad(vergeNormalMap, vergeUv, vergeDx, vergeDy).xyz, oylVergeShare);
@@ -9412,6 +10309,49 @@ vec3 oylGroundNormal(vec2 grassUv) {
   return texel * (1.0 - oylRockShare) + stone;
 }
 `;
+}
+
+/** The surfaces' coordinates' names, and the functions that give them. */
+const GROUND_BLEND_SURFACES = [
+  ['verge', 'oylVergeUv', 'oylVerge'],
+  ['rock', 'oylRockUv', 'oylRock'],
+  ['crag', 'oylCragUv', 'oylCrag'],
+] as const;
+
+/** Where the shares leave each surface's derivative pair for the normal — #1523. */
+const GROUND_DERIVATIVE_GLOBALS = GROUND_BLEND_SURFACES.map(
+  ([, , global]) => `vec2 ${global}Dx = vec2(0.0);\nvec2 ${global}Dy = vec2(0.0);`,
+).join('\n');
+
+/**
+ * Each surface's coordinates and derivatives, for {@link groundBlendFragmentPars}.
+ * Bounded, the shares (`first`) take each surface's pair — outside any branch,
+ * by the very expression they always used, so the pair is the same to the
+ * bit — and leave it in {@link GROUND_DERIVATIVE_GLOBALS}, which the normal
+ * reads instead of taking its own. Unbounded, each reader takes its own, as
+ * before #1523.
+ */
+function groundDerivatives(bounded: boolean, first: boolean): string {
+  const taken = !bounded || first;
+  const lines = taken ? ['float oylBias = exp2(oylTextureLodBias);'] : [];
+  for (const [name, uv, global] of GROUND_BLEND_SURFACES) {
+    lines.push(`vec2 ${name}Uv = ${uv}();`);
+    if (taken) {
+      lines.push(`vec2 ${name}Dx = dFdx(${name}Uv) * oylBias;`);
+      lines.push(`vec2 ${name}Dy = dFdy(${name}Uv) * oylBias;`);
+    }
+    if (bounded && first) {
+      lines.push(`${global}Dx = ${name}Dx;`);
+      lines.push(`${global}Dy = ${name}Dy;`);
+    }
+    if (bounded && !first) {
+      lines.push(`vec2 ${name}Dx = ${global}Dx;`);
+      lines.push(`vec2 ${name}Dy = ${global}Dy;`);
+    }
+  }
+  const indent = first ? '    ' : '  ';
+  return lines.map((line) => `${indent}${line}`).join('\n');
+}
 
 /**
  * The shares, and the two surfaces' colours — inside the ground's map block,
@@ -9419,7 +10359,8 @@ vec3 oylGroundNormal(vec2 grassUv) {
  * photograph over its own mean times the world's colour (#627: the world's
  * per-route colour still leads).
  */
-const GROUND_BLEND_SHARES_GLSL = /* glsl */ `
+function groundBlendShares(bounded: boolean): string {
+  return /* glsl */ `
   oylGroundWorld = diffuseColor.rgb;
   float oylFromEdge = abs(vFields.y) - ${glslFloat(ROAD_EDGE_METRES)};
   float oylVerge = (1.0 - smoothstep(${glslFloat(VERGE_BLEND_METRES[0])}, ${glslFloat(VERGE_BLEND_METRES[1])}, oylFromEdge)) * groundShares.x;
@@ -9434,16 +10375,7 @@ const GROUND_BLEND_SHARES_GLSL = /* glsl */ `
   oylCragShare = oylRock * groundShares.w;
   oylVergeShare = oylVerge * (1.0 - oylRockShare);
   {
-    float oylBias = exp2(oylTextureLodBias);
-    vec2 vergeUv = oylVergeUv();
-    vec2 vergeDx = dFdx(vergeUv) * oylBias;
-    vec2 vergeDy = dFdy(vergeUv) * oylBias;
-    vec2 rockUv = oylRockUv();
-    vec2 rockDx = dFdx(rockUv) * oylBias;
-    vec2 rockDy = dFdy(rockUv) * oylBias;
-    vec2 cragUv = oylCragUv();
-    vec2 cragDx = dFdx(cragUv) * oylBias;
-    vec2 cragDy = dFdy(cragUv) * oylBias;
+${groundDerivatives(bounded, true)}
     if (oylVergeShare > 0.0) {
       oylVergeTexel = textureGrad(vergeMap, vergeUv, vergeDx, vergeDy).rgb
         / max(textureLod(vergeMap, vec2(0.5), 16.0).rgb, vec3(1e-3));
@@ -9458,6 +10390,7 @@ const GROUND_BLEND_SHARES_GLSL = /* glsl */ `
     }
   }
 `;
+}
 
 /** Mixed in over the grass and its patchwork, times the landform's own vertex colour. */
 const GROUND_BLEND_MIX = /* glsl */ `
@@ -9489,6 +10422,8 @@ export function photographicGroundMaterial(
   fieldSpan: { value: number },
   fieldCount: { value: number },
   blend: GroundBlendMaps = { treeLine: { value: NO_TREE_LINE } },
+  /** #1523: the derivatives once (the product) or as before. @see groundBlendFragmentPars */
+  bounded = true,
 ): MeshStandardMaterial {
   const material = constructed(
     new MeshStandardMaterial({
@@ -9529,7 +10464,7 @@ export function photographicGroundMaterial(
       shader.fragmentShader = shader.fragmentShader
         .replace(
           '#include <normalmap_pars_fragment>',
-          `#include <normalmap_pars_fragment>\n${GROUND_BLEND_FRAGMENT_PARS}`,
+          `#include <normalmap_pars_fragment>\n${groundBlendFragmentPars(bounded)}`,
         )
         .replace(
           '#include <normal_fragment_maps>',
@@ -9551,7 +10486,7 @@ export function photographicGroundMaterial(
       /* glsl */ `
 #ifdef USE_MAP
 {
-${blended ? GROUND_BLEND_SHARES_GLSL : ''}
+${blended ? groundBlendShares(bounded) : ''}
   vec3 oylNear = texture2D(map, vMapUv).rgb;
   vec3 oylFar = texture2D(map, vMapUv * 0.111 + vec2(0.37, 0.61)).rgb;
   float oylFarShare = smoothstep(8.0, 120.0, -vViewPosition.z);
@@ -9564,7 +10499,11 @@ ${blended ? GROUND_BLEND_SHARES_GLSL : ''}
     );
   };
   material.customProgramCacheKey = () =>
-    blended ? 'oyl-photographic-ground-blended' : 'oyl-photographic-ground';
+    blended
+      ? bounded
+        ? 'oyl-photographic-ground-blended'
+        : 'oyl-photographic-ground-blended-unbounded'
+      : 'oyl-photographic-ground';
   // #460's patchwork, chained after the photograph rather than replacing it,
   // and #619 lever 2's bias after both.
   return withAtmosphere(
@@ -10756,6 +11695,10 @@ const REALISTIC_ROLE_SHADE: Readonly<Record<BuildingRole, number>> = {
   joinery: 1,
   door: 0.62,
   glass: 1,
+  // #1589: a lot's porch is the joinery's timber, its roof the roof's; its
+  // deck and ceiling are shaded apart (`porchShadedParts`).
+  porch: 1,
+  'porch-roof': 1,
 };
 
 /** One part of a realistic structure: the surface it wears, how dark, and its triangles. */
@@ -10769,7 +11712,51 @@ interface StructurePart {
    * bottom (§`builtStyle`), so a hedge is the same in both worlds.
    */
   readonly grounded: boolean;
+  /** #1588: what a clad lot draws it as. @see LOT_PART */
+  readonly part: number;
   readonly geometry: BufferGeometry;
+}
+
+/**
+ * What a structure's vertex is to a clad lot — #1588, the `oylPart` vertex
+ * attribute {@link withLotPaint} reads: a house's walls are clapboard, its
+ * plinth a foundation, and everything else — a chimney wears the same brick
+ * — keeps its photograph. Every structure geometry carries it, nought where
+ * it is none of these, so the belts' merged geometries all share it. Since
+ * #1589 `porch`: a farmhouse's front porch and its roof, which only a lot
+ * with a porch draws ({@link withLotPorch}).
+ */
+export const LOT_PART = { other: 0, wall: 1, plinth: 2, porch: 3 } as const;
+
+/**
+ * A lot's porch's triangles (`buildings.ts` §`LOT_PORCH`), split by the shade
+ * each is in — #1589: its ceiling, facing down, in a soffit's
+ * (`facade.ts` §`FACADE_AO`), its deck, facing up at the floor, in the shade
+ * of its roof, and the rest in none — as the mapped porch's vertices are.
+ */
+function porchShadedParts(triangles: readonly number[]): { shade: number; triangles: number[] }[] {
+  const ceiling: number[] = [];
+  const deck: number[] = [];
+  const rest: number[] = [];
+  for (let at = 0; at + 8 < triangles.length; at += 9) {
+    const t = (k: number): number => triangles[at + k] as number;
+    // The normal's up component, from the winding: (b − a) × (c − a).
+    const up = (t(5) - t(2)) * (t(6) - t(0)) - (t(3) - t(0)) * (t(8) - t(2));
+    const length = Math.hypot(
+      (t(4) - t(1)) * (t(8) - t(2)) - (t(5) - t(2)) * (t(7) - t(1)),
+      up,
+      (t(3) - t(0)) * (t(7) - t(1)) - (t(4) - t(1)) * (t(6) - t(0)),
+    );
+    const ny = length > 0 ? up / length : 0;
+    const floor = Math.min(t(1), t(4), t(7)) >= LOT_PORCH.floor - 1e-6;
+    const into = ny < -0.5 ? ceiling : ny > 0.5 && floor ? deck : rest;
+    for (let k = 0; k < 9; k += 1) into.push(t(k));
+  }
+  return [
+    { shade: FACADE_AO.soffit, triangles: ceiling },
+    { shade: FACADE_AO.porchFloor, triangles: deck },
+    { shade: 1, triangles: rest },
+  ].filter((part) => part.triangles.length > 0);
 }
 
 /**
@@ -10790,12 +11777,39 @@ function realisticStructureParts(kind: StructureKind, variant = 0): StructurePar
     const plan = planOf(kind, variant);
     const parts: StructurePart[] = [];
     for (const role of BUILDING_ROLES) {
+      if (role === 'porch' && plan.triangles.porch.length > 0) {
+        // #1589: a lot's porch, its ceiling and its deck each in its own shade.
+        for (const shaded of porchShadedParts(plan.triangles.porch)) {
+          const geometry = new BufferGeometry();
+          geometry.setAttribute(
+            'position',
+            new BufferAttribute(new Float32Array(shaded.triangles), 3),
+          );
+          geometry.computeVertexNormals();
+          parts.push({
+            surface: REALISTIC_BUILDING_SURFACES[kind][role],
+            shade: REALISTIC_ROLE_SHADE[role] * shaded.shade,
+            grounded: true,
+            part: LOT_PART.porch,
+            geometry,
+          });
+        }
+        continue;
+      }
       const geometry = roleGeometry(plan, role);
       if (geometry === undefined) continue;
       parts.push({
         surface: REALISTIC_BUILDING_SURFACES[kind][role],
         shade: REALISTIC_ROLE_SHADE[role],
         grounded: true,
+        part:
+          role === 'wall'
+            ? LOT_PART.wall
+            : role === 'plinth'
+              ? LOT_PART.plinth
+              : role === 'porch-roof'
+                ? LOT_PART.porch
+                : LOT_PART.other,
         geometry,
       });
     }
@@ -10806,6 +11820,7 @@ function realisticStructureParts(kind: StructureKind, variant = 0): StructurePar
     surface: surfaces[index] ?? 'painted',
     shade: 1,
     grounded: false,
+    part: LOT_PART.other,
     geometry: part.geometry(),
   }));
 }
@@ -10829,13 +11844,15 @@ export function realisticStructureSurfaces(kind: StructureKind): readonly Struct
  * a top reads (x, z). So a brick is the same size on every wall of every
  * building and a course of them runs level, which a box's own 0-to-1
  * coordinates would not give — they stretch one photograph across a whole
- * wall, whatever its size. Position and normal are kept; nothing else is.
+ * wall, whatever its size. Position and normal are kept; nothing else is —
+ * and since #1588 every vertex carries its `part` (`oylPart`, {@link LOT_PART}).
  */
 function projectedInMetres(
   geometry: BufferGeometry,
-  tileMetres: number,
+  repeat: { readonly across: number; readonly up: number },
   shade = 1,
   grounded = true,
+  part: number = LOT_PART.other,
 ): BufferGeometry {
   const flat = geometry.index === null ? geometry : geometry.toNonIndexed();
   if (flat !== geometry) geometry.dispose();
@@ -10863,15 +11880,34 @@ function projectedInMetres(
       const py = position.getY(at);
       const pz = position.getZ(at);
       const [u, v] = x >= y && x >= z ? [pz, py] : y >= z ? [px, pz] : [px, py];
-      uv[at * 2] = u / tileMetres;
-      uv[at * 2 + 1] = v / tileMetres;
+      // #1548: across and up apart, for a map that is not square.
+      uv[at * 2] = u / repeat.across;
+      uv[at * 2 + 1] = v / repeat.up;
     }
   }
   flat.setAttribute('uv', new BufferAttribute(uv, 2));
   // #500: the grounding and the part's own shade, as a vertex colour the
   // structure materials multiply in. @see groundingShade
   paintGrounded(flat, 0xffffff, shade, grounded);
+  // #1588: what a clad lot draws each vertex as. @see LOT_PART
+  flat.setAttribute('oylPart', new BufferAttribute(new Float32Array(position.count).fill(part), 1));
   return flat;
+}
+
+/**
+ * A `width` x `height` x `depth` box through {@link projectedInMetres} — #1548,
+ * so a test can read each axis's division under a map that is not square.
+ *
+ * @test-facing `three-renderer.test.ts` reads its UVs; the box is built here
+ * because this is the only file that may name `three` (`three-seam.test.ts`)
+ */
+export function projectedBoxInMetres(
+  width: number,
+  height: number,
+  depth: number,
+  repeat: { readonly across: number; readonly up: number },
+): BufferGeometry {
+  return projectedInMetres(new BoxGeometry(width, height, depth), repeat);
 }
 
 /**
@@ -10883,11 +11919,13 @@ export function realisticStructureGeometry(
   surface: StructureSurface,
   variant = 0,
 ): BufferGeometry | undefined {
-  const tile = isPhotographic(surface) ? REALISTIC_STRUCTURE_SURFACES[surface].tileMetres : 1;
+  const tile = isPhotographic(surface)
+    ? surfaceRepeat(REALISTIC_STRUCTURE_SURFACES[surface])
+    : { across: 1, up: 1 };
   const mine: BufferGeometry[] = [];
   for (const part of realisticStructureParts(kind, variant)) {
     if (part.surface === surface)
-      mine.push(projectedInMetres(part.geometry, tile, part.shade, part.grounded));
+      mine.push(projectedInMetres(part.geometry, tile, part.shade, part.grounded, part.part));
     else part.geometry.dispose();
   }
   if (mine.length === 0) return undefined;
@@ -10925,6 +11963,14 @@ const STRUCTURE_SURFACE_FINISH: Readonly<
   planks: { roughness: 0.85, metalness: 0, tint: 0xffffff },
   corrugated: { roughness: 0.5, metalness: 0.5, tint: 0xffffff },
   hedge: { roughness: 0.95, metalness: 0, tint: 0x8fcf66 },
+  // #1535: worn by no structure kind — the pavements' finish, which
+  // `PavementBelt` reads. Matte, as concrete flags are.
+  paving: { roughness: 0.9, metalness: 0, tint: 0xffffff },
+  // #1548: the mapped towns' three, matte as masonry is — a gravel roof the
+  // most, smooth concrete the least.
+  render: { roughness: 0.9, metalness: 0, tint: 0xffffff },
+  concrete: { roughness: 0.85, metalness: 0, tint: 0xffffff },
+  'flat-roof': { roughness: 0.95, metalness: 0, tint: 0xffffff },
   painted: { roughness: 0.6, metalness: 0.2, tint: 0x5a5a5a },
   // #500: a pane. Smooth and a little metallic, so it gives back the sky the
   // environment map already holds — the look of glass for no texture at all —
@@ -11001,9 +12047,15 @@ function structureMaterials(
   // its own walls rather than being the one thing on a house that every house
   // shares; masonry's bound is small enough that glass stays glass, and the
   // browser gate's window-glass assertions are unchanged by it.
+  // #1589: and a farmhouse's porch is folded away but on a lot that has one.
   const biased = <M extends Material>(material: M): M =>
-    withAtmosphere(
-      withInstanceChannels(maps === undefined ? material : withTextureLodBias(material), false),
+    withLotPorch(
+      withLotPaint(
+        withAtmosphere(
+          withInstanceChannels(maps === undefined ? material : withTextureLodBias(material), false),
+        ),
+        surface,
+      ),
     );
   return {
     lit: biased(
@@ -11027,6 +12079,265 @@ function structureMaterials(
       ),
     ),
   };
+}
+
+/** The materials {@link withLotPaint} has taught, and the channel each reads. */
+const LOT_PAINT_TAUGHT = new WeakMap<Material, 'wall' | 'roof'>();
+
+/**
+ * Which instance channel a structure material reads a lot's paint from, or
+ * none: it is not a painted surface.
+ *
+ * @test-facing held by `three-renderer.test.ts` §"#1581", which asserts the
+ * brick, roof-tiles, planks and glass materials
+ */
+export function readsLotPaint(material: Material): 'wall' | 'roof' | undefined {
+  return LOT_PAINT_TAUGHT.get(material);
+}
+
+/**
+ * A clad lot's walls and roof, drawn in place of the photograph — #1588,
+ * after the lot's colour. `vOylLot` is the vertex in the structure's own
+ * frame and, in `w`, what it is: nought unclad; on a wall surface one more
+ * than its {@link LOT_PART} (so 1 a chimney, which keeps the photograph, 2 a
+ * wall, 3 a plinth); on a roof surface 1. A wall is clapboard in its siding
+ * paint with a foundation band at its foot, a plinth the band, and a roof
+ * shingles, each across the face — along `x` on a face that looks along `z`
+ * — and up it, as `facade.ts` §`claddingPartAt` lays them.
+ *
+ * Exported for `three-renderer.test.ts`, which holds its program text.
+ */
+export const LOT_CLADDING_GLSL = /* glsl */ `
+  float oylLotFlat = 0.0;
+  // Derivatives are taken here, out of every branch: GLSL ES leaves them undefined in non-uniform control flow.
+  vec3 oylLocalN = normalize(vOylLotNormal);
+  vec2 oylL = vec2(abs(oylLocalN.x) > abs(oylLocalN.z) ? vOylLot.z : vOylLot.x, vOylLot.y);
+  vec2 oylLw = max(fwidth(oylL), vec2(0.00001));
+  if (vOylLot.w > 0.5) {
+    if (vOylLotRoof > 0.5) {
+      // Shingles: a course's rise is its exposure up the slope times the slope's sine.
+      float oylSinP = sqrt(max(1.0 - oylLocalN.y * oylLocalN.y, 0.0));
+      float oylRise = oylShingleCourse * max(oylSinP, 0.1);
+      float oylRow = floor(oylL.y / oylRise);
+      float oylF = fract(oylL.y / oylRise);
+      float oylTw = oylLw.y / oylRise;
+      float oylTabT = oylL.x / oylTab + 0.5 * mod(oylRow, 2.0);
+      float oylTabW = oylLw.x / oylTab;
+      float oylKey = oylLine(oylTabT, oylKeyway * 0.5 / oylTab, oylTabW);
+      float oylShadow = smoothstep(1.0 - oylShingleShadow - oylTw, 1.0 - oylShingleShadow + oylTw, oylF);
+      float oylGrain = oylWindowHash(vec2(oylRow, floor(oylTabT)));
+      float oylShade = (1.0 - oylShingleDepth * oylShadow) * (1.0 - oylKeywayDepth * oylKey)
+        * (1.0 + oylShingleVary * (oylGrain - 0.5));
+      float oylMean = (1.0 - oylShingleDepth * oylShingleShadow) * (1.0 - oylKeywayDepth * oylKeyway / oylTab);
+      oylShade = mix(oylShade, oylMean, oylFadeOf(max(oylTw, oylTabW)));
+      diffuseColor.rgb = vColor.rgb * vOylPaint * mix(1.0, oylShade, step(0.1, oylSinP));
+      oylLotFlat = 1.0;
+    } else if (vOylLot.w > 2.5 || (vOylLot.w > 1.5 && vOylLot.y < oylLotBand)) {
+      // The foundation: the plinth, and the wall's foot above it.
+      diffuseColor.rgb = oylBond(oylL, oylLw, 0.0) * mix(vColor.rgb, vec3(oylBandShade), step(vOylLot.w, 2.5));
+      oylLotFlat = 1.0;
+    } else if (vOylLot.w > 1.5) {
+      float oylT = oylL.y / oylLotCourse;
+      float oylTw = oylLw.y / oylLotCourse;
+      float oylF = fract(oylT);
+      float oylLap = smoothstep(1.0 - oylLapShadow - oylTw, 1.0 - oylLapShadow + oylTw, oylF);
+      float oylButtStrip = 1.0 - smoothstep(oylButt - oylTw, oylButt + oylTw, oylF);
+      float oylShade = 1.0 - oylLapDepth * oylLap + oylButtBright * oylButtStrip;
+      float oylMean = 1.0 - oylLapDepth * oylLapShadow + oylButtBright * oylButt;
+      diffuseColor.rgb = vColor.rgb * vOylPaint * oylSidingWhite * mix(oylShade, oylMean, oylFadeOf(oylTw));
+      oylLotFlat = 1.0;
+    }
+  }
+`;
+
+/**
+ * Teaches a structure surface's material a procedural lot's paint — #1581,
+ * #1550's lots. `settlements.ts` §`lotsAt` paints a lot
+ * (`building-paint.ts` §`lotPaint`), and the belt writes its wall's entry in
+ * the instance colour's first channel and its roof's in the second, each plus
+ * one (§`lotPaintChannel`). A wall surface reads the first, a roof surface
+ * the second, and each looks its entry up in its own first
+ * {@link LOT_PAINTS} multipliers, baked into the program: nought is no paint,
+ * so a village house, a barn and a church are drawn as they were. A surface
+ * that is not painted (`paintChannelOf`) is returned untaught. Throws, as the
+ * tint does, if three's program no longer holds an include it is spliced at.
+ *
+ * Since #1588 a channel also says whether the lot is clad
+ * (`building-paint.ts` §`LOT_CLAD_STEP`): a clad wall's entry is one of the
+ * siding's paints (§`lotSidingPaints`) and a clad roof's one of the shingles'
+ * (§`SHINGLE_PAINTS`), and {@link LOT_CLADDING_GLSL} draws them, reading each
+ * vertex's part ({@link LOT_PART}) so that a clad house's chimney keeps its
+ * brick. A lit material's normal map is flattened where it is clad.
+ */
+function withLotPaint<M extends Material>(material: M, surface: StructureSurface): M {
+  // ⚠️ `planks` has a wall list for a mapped barn, but on a lot it is the
+  // joinery and the door, which stay timber: a lot's own walls are never planks.
+  const channel = surface === 'planks' ? undefined : paintChannelOf(surface);
+  const paints = paintsOf(surface);
+  if (channel === undefined || paints === undefined || LOT_PAINT_TAUGHT.has(material)) {
+    return material;
+  }
+  LOT_PAINT_TAUGHT.set(material, channel);
+  const listOf = (list: readonly Rgb[]): string =>
+    list
+      .slice(0, LOT_PAINTS)
+      .map((rgb) => `vec3(${rgb.map(glslFloat).join(', ')})`)
+      .join(', ');
+  const entries = listOf(paints);
+  const clad = listOf(channel === 'wall' ? lotSidingPaints() : SHINGLE_PAINTS);
+  const read = channel === 'wall' ? 'x' : 'y';
+  const spliced = "#1581's lot paint";
+  const earlier = material.onBeforeCompile.bind(material);
+  const earlierKey = material.customProgramCacheKey();
+  const count = String(LOT_PAINTS);
+  material.onBeforeCompile = (shader, renderer) => {
+    earlier(shader, renderer);
+    shader.vertexShader = replacedOrThrown(
+      replacedOrThrown(
+        shader.vertexShader,
+        '#include <common>',
+        [
+          '#include <common>',
+          'attribute float oylPart;',
+          'varying vec3 vOylPaint;',
+          'varying vec4 vOylLot;',
+          'varying vec3 vOylLotNormal;',
+          `const vec3 oylLotPaints[${count}] = vec3[${count}](${entries});`,
+          `const vec3 oylCladPaints[${count}] = vec3[${count}](${clad});`,
+        ].join('\n'),
+        'vertex',
+        spliced,
+      ),
+      '#include <begin_vertex>',
+      [
+        '#include <begin_vertex>',
+        'vOylPaint = vec3(1.0);',
+        'vOylLot = vec4(position, 0.0);',
+        'vOylLotNormal = normal;',
+        '#ifdef USE_INSTANCING_COLOR',
+        `int oylCode = int(instanceColor.${read} + 0.5) - 1;`,
+        'if (oylCode >= 0) {',
+        `  int oylEntry = min(oylCode % ${String(LOT_CLAD_STEP)}, ${String(LOT_PAINTS - 1)});`,
+        // #1589: the wall channel carries a porch above the cladding, so the cladding is one bit.
+        `  bool oylClad = (oylCode / ${String(LOT_CLAD_STEP)}) % 2 == 1;`,
+        // A clad lot's chimney keeps its photograph, unpainted.
+        channel === 'wall'
+          ? '  vOylPaint = oylClad ? (oylPart > 0.5 ? oylCladPaints[oylEntry] : vec3(1.0)) : oylLotPaints[oylEntry];'
+          : '  vOylPaint = oylClad ? oylCladPaints[oylEntry] : oylLotPaints[oylEntry];',
+        channel === 'wall'
+          ? '  vOylLot.w = oylClad ? 1.0 + oylPart : 0.0;'
+          : '  vOylLot.w = oylClad ? 1.0 : 0.0;',
+        '}',
+        '#endif',
+      ].join('\n'),
+      'vertex',
+      spliced,
+    );
+    let fragment = replacedOrThrown(
+      replacedOrThrown(
+        shader.fragmentShader,
+        '#include <common>',
+        [
+          '#include <common>',
+          'varying vec3 vOylPaint;',
+          'varying vec4 vOylLot;',
+          'varying vec3 vOylLotNormal;',
+          `const float vOylLotRoof = ${channel === 'roof' ? '1.0' : '0.0'};`,
+          CLADDING_HELPERS_GLSL,
+        ].join('\n'),
+        'fragment',
+        spliced,
+      ),
+      '#include <color_fragment>',
+      `#include <color_fragment>\ndiffuseColor.rgb *= vOylPaint;\n${LOT_CLADDING_GLSL}`,
+      'fragment',
+      spliced,
+    );
+    // A lit material: a clad face loses the photograph's relief.
+    if (fragment.includes('#include <normal_fragment_maps>')) {
+      fragment = fragment.replace(
+        '#include <normal_fragment_maps>',
+        '#include <normal_fragment_maps>\nnormal = normalize(mix(normal, nonPerturbedNormal, oylLotFlat));',
+      );
+    }
+    shader.fragmentShader = fragment;
+  };
+  material.customProgramCacheKey = () => `${earlierKey}|oyl-lot-paint-${surface}`;
+  return material;
+}
+
+/** The materials {@link withLotPorch} has taught. */
+const LOT_PORCH_TAUGHT = new WeakSet<Material>();
+
+/**
+ * Whether a structure material folds a farmhouse's porch away but on a lot
+ * that has one — #1589.
+ *
+ * @test-facing held by `three-renderer.test.ts` §"#1589", which asserts every
+ * realistic structure material is taught it
+ */
+export function foldsLotPorch(material: Material): boolean {
+  return LOT_PORCH_TAUGHT.has(material);
+}
+
+/**
+ * The vertex rule {@link withLotPorch} splices after `begin_vertex`: a porch's
+ * vertex ({@link LOT_PART}'s `porch`) is folded to the structure's origin —
+ * every corner of its triangles to one point, which draws nothing — unless
+ * its instance is a lot whose wall channel carries `building-paint.ts`
+ * §`LOT_PORCH_STEP`. Without instance colours no lot is known, so it folds.
+ *
+ * Exported for `three-renderer.test.ts`, which holds its program text.
+ */
+export const LOT_PORCH_VERTEX_GLSL = [
+  'if (oylPart > 2.5) {',
+  '  bool oylPorch = false;',
+  '#ifdef USE_INSTANCING_COLOR',
+  '  int oylPorchCode = int(instanceColor.x + 0.5) - 1;',
+  `  oylPorch = oylPorchCode >= 0 && (oylPorchCode / ${String(LOT_PORCH_STEP)}) % 2 == 1;`,
+  '#endif',
+  '  if (!oylPorch) transformed = vec3(0.0);',
+  '}',
+].join('\n');
+
+/**
+ * Teaches a structure material to draw a farmhouse's front porch only on a
+ * lot that has one — #1589. `buildings.ts` builds the porch into the
+ * farmhouse, and every farmhouse of a variant is one instanced mesh, so a
+ * village house, which has no room for one before the road, and a lot whose
+ * porch would reach the road's clearance (`settlements.ts` §`lotsAt`) fold it
+ * away in the vertex shader ({@link LOT_PORCH_VERTEX_GLSL}) and draw nothing
+ * of it. Declares `oylPart` unless an earlier splice ({@link withLotPaint})
+ * has. Throws, as the tint does, if three's program no longer holds the
+ * include it is spliced at. Idempotent.
+ */
+function withLotPorch<M extends Material>(material: M): M {
+  if (LOT_PORCH_TAUGHT.has(material)) return material;
+  LOT_PORCH_TAUGHT.add(material);
+  const earlier = material.onBeforeCompile.bind(material);
+  const earlierKey = material.customProgramCacheKey();
+  const spliced = "#1589's lot porch";
+  material.onBeforeCompile = (shader, renderer) => {
+    earlier(shader, renderer);
+    const declared = shader.vertexShader.includes('attribute float oylPart;');
+    shader.vertexShader = replacedOrThrown(
+      declared
+        ? shader.vertexShader
+        : replacedOrThrown(
+            shader.vertexShader,
+            '#include <common>',
+            '#include <common>\nattribute float oylPart;',
+            'vertex',
+            spliced,
+          ),
+      '#include <begin_vertex>',
+      `#include <begin_vertex>\n${LOT_PORCH_VERTEX_GLSL}`,
+      'vertex',
+      spliced,
+    );
+  };
+  material.customProgramCacheKey = () => `${earlierKey}|oyl-lot-porch`;
+  return material;
 }
 
 /**
@@ -11057,7 +12368,10 @@ export class RealisticStructureBelts {
       const [first] = realisticStructureSurfaces(kind);
       if (first !== undefined) this.#first.set(kind, first);
     }
-    this.#belts = STRUCTURE_SURFACES.map((surface) => {
+    // #1535: `paving` is the pavements' (`PavementBelt`), and no structure
+    // kind wears it, so it has no belt here: an empty belt would be a mesh a
+    // kind for nothing.
+    this.#belts = STRUCTURE_SURFACES.filter((surface) => surface !== 'paving').map((surface) => {
       const models = new Map<SceneryKind, readonly BufferGeometry[]>();
       for (const kind of STRUCTURE_KINDS) {
         // #500: a building has one shape a variant, and each is a mesh here.
@@ -11144,6 +12458,1470 @@ export class RealisticStructureBelts {
   }
 }
 
+/** What one {@link MappedBuildingBelt.refill} drew. @see MappedBuildingBelt */
+export interface MappedBuildingStats {
+  /** The buildings drawn, near and far together. */
+  readonly buildings: number;
+  readonly near: number;
+  readonly far: number;
+  readonly triangles: number;
+  /**
+   * The draw calls: a group a surface, and since #1585 one more for every
+   * house model drawn, together at most `MAPPED_BUILDING_DRAW_CALLS`.
+   */
+  readonly drawCalls: number;
+  /** How many are drawn as house models, and their triangles — #1585. */
+  readonly modelled: number;
+  readonly modelTriangles: number;
+  /**
+   * In reach and inside the budget, but passed over because its surfaces would
+   * have opened a seventh — `mapped-buildings.ts` §`selectMappedBuildings`.
+   */
+  readonly passed: number;
+}
+
+/**
+ * A mapped building's role's shade, as {@link REALISTIC_ROLE_SHADE} darkens a
+ * procedural one's. Since #1581 the door and the trim are painted
+ * (`building-paint.ts`), so neither is darkened: the paint is the colour.
+ */
+const MAPPED_ROLE_SHADE: Readonly<Record<FootprintRole, number>> = {
+  wall: REALISTIC_ROLE_SHADE.wall,
+  plinth: REALISTIC_ROLE_SHADE.plinth,
+  roof: REALISTIC_ROLE_SHADE.roof,
+  parapet: REALISTIC_ROLE_SHADE.wall,
+  door: 1,
+  chimney: REALISTIC_ROLE_SHADE.chimney,
+  trim: 1,
+  // #1588: a dormer is shaded as the wall and the roof it is built of; a driveway is painted.
+  dormer: REALISTIC_ROLE_SHADE.wall,
+  'dormer-roof': REALISTIC_ROLE_SHADE.roof,
+  driveway: 1,
+  // #1590: a shop's front, sign and awning are painted by the shader.
+  shopfront: 1,
+  // #1589: a porch is painted, and its roof is shaded as the roof it wears.
+  porch: 1,
+  'porch-roof': REALISTIC_ROLE_SHADE.roof,
+  'porch-trim': 1,
+};
+
+/**
+ * The colour a role of `plan` is painted, before its shade — #1581: the wall
+ * surface's multiplier on the walls, the plinth, the parapet and the chimney;
+ * the roof surface's on the roof; the door's paint on the door and the trim's
+ * on the trim. Since #1588: a shingled roof's albedo on the roof and a
+ * dormer's roof, the walls' paint on a dormer, and none on a driveway or on a
+ * clapboard house's plinth, whose colours the shader lays (`facade.ts`
+ * §`PAVING`, §`FOUNDATION`) — so their vertex colour is their light alone.
+ * Since #1590 none on a shop's front, sign or awning, which it paints too.
+ * Since #1589 a porch's roof is the roof's, and the porch the trim's.
+ */
+export function mappedRolePaint(plan: FootprintPlan, role: FootprintRole): Rgb {
+  const unpainted: Rgb = [1, 1, 1];
+  switch (role) {
+    case 'roof':
+    case 'dormer-roof':
+    case 'porch-roof':
+      return (
+        roofPaintsOf(plan.surfaces.roof, plan.cladding.roof === 'shingle')?.[plan.paint.roof] ??
+        unpainted
+      );
+    case 'driveway':
+    case 'shopfront':
+      return unpainted;
+    case 'plinth':
+      if (plan.cladding.wall === 'clapboard') return unpainted;
+      return paintsOf(plan.surfaces.wall)?.[plan.paint.wall] ?? unpainted;
+    case 'door':
+      return DOOR_PAINTS[plan.paint.door] ?? unpainted;
+    case 'trim':
+    case 'porch':
+    case 'porch-trim':
+      return TRIM_PAINTS[plan.paint.trim] ?? unpainted;
+    default:
+      return paintsOf(plan.surfaces.wall)?.[plan.paint.wall] ?? unpainted;
+  }
+}
+
+/** The materials {@link withVertexTint} has taught. */
+const VERTEX_TINT_TAUGHT = new WeakSet<Material>();
+
+/**
+ * Whether a material reads its seeded tint from a VERTEX attribute — #1549.
+ *
+ * @test-facing held by `mapped-building-belt.test.ts` §"the mapped buildings’
+ * materials", which asserts every mapped building's material is taught it
+ */
+export function readsVertexTint(material: Material): boolean {
+  return VERTEX_TINT_TAUGHT.has(material);
+}
+
+/**
+ * Teaches a material #621's seeded tint from a vertex attribute, `oylTint` —
+ * #1549. A procedural structure carries its tint in its INSTANCE colour's
+ * third channel ({@link withInstanceChannels}); a merged mesh has no instance,
+ * so each vertex carries its building's tint instead, the same one packed float
+ * (`instance-tint.ts` §`packedInstanceTint`), decoded and applied by the same
+ * GLSL ({@link TINT_DECODE_GLSL}, {@link TINT_APPLY_GLSL}). Throws, as the
+ * instance path does, if three's program no longer holds an include it is
+ * spliced at. Idempotent.
+ */
+function withVertexTint<M extends Material>(material: M): M {
+  if (VERTEX_TINT_TAUGHT.has(material)) return material;
+  VERTEX_TINT_TAUGHT.add(material);
+  const earlier = material.onBeforeCompile.bind(material);
+  const earlierKey = material.customProgramCacheKey();
+  material.onBeforeCompile = (shader, renderer) => {
+    earlier(shader, renderer);
+    shader.vertexShader = replacedOrThrown(
+      replacedOrThrown(
+        shader.vertexShader,
+        '#include <common>',
+        `#include <common>\nattribute float oylTint;\nvarying vec3 vOylTint;\n${TINT_DECODE_GLSL}`,
+        'vertex',
+      ),
+      '#include <color_vertex>',
+      '#include <color_vertex>\nvOylTint = oylTintOf(oylTint);',
+      'vertex',
+    );
+    shader.fragmentShader = replacedOrThrown(
+      replacedOrThrown(
+        shader.fragmentShader,
+        '#include <common>',
+        `#include <common>\nvarying vec3 vOylTint;\n${TINT_APPLY_GLSL}`,
+        'fragment',
+      ),
+      '#include <color_fragment>',
+      '#include <color_fragment>\ndiffuseColor.rgb = oylTinted(diffuseColor.rgb, vOylTint);',
+      'fragment',
+    );
+  };
+  material.customProgramCacheKey = () => `${earlierKey}|oyl-vertex-tint`;
+  return material;
+}
+
+/** The materials {@link withFacade} has taught. */
+const FACADE_TAUGHT = new WeakSet<Material>();
+
+/**
+ * Whether the facade is drawn: 1 in the product, 0 the browser gate's
+ * control. One uniform every mapped building's material shares, for
+ * `ATMOSPHERE`'s reason. @see setMappedFacadeShown
+ */
+const FACADE_SWITCH = { oylFacadeOn: { value: 1 } };
+
+/**
+ * Where the sun is, a unit vector toward it in the world — #1588, for the
+ * facade's inset reveal, which shades the jamb on the sun's side. One uniform
+ * every mapped building's material shares, written by the sun's own `apply`,
+ * so the facade reads the very direction the scene is lit from without naming
+ * three's lamp uniforms (`three-seam.test.ts`). Module-wide, like
+ * `FACADE_SWITCH`: it assumes one live scene, and with two the last `apply`'s
+ * sun is the one both read.
+ */
+const FACADE_SUN = { oylSunWorld: { value: new Vector3(0, 1, 0) } };
+
+/**
+ * Draws the mapped buildings' walls with their windows and doors, or — the
+ * browser gate's control — with the photograph alone, as #1549 drew them.
+ *
+ * @test-facing the browser gate's control, read by `game-harness.ts`
+ * §`mappedFacadeProbe`; the product always draws the facade
+ */
+export function setMappedFacadeShown(on: boolean): void {
+  FACADE_SWITCH.oylFacadeOn.value = on ? 1 : 0;
+}
+
+/**
+ * Whether a material draws #1581's windows and doors from its vertices.
+ *
+ * @test-facing held by `mapped-building-belt.test.ts` §"the mapped buildings’
+ * materials", which asserts every mapped building's material is taught it
+ */
+export function drawsFacade(material: Material): boolean {
+  return FACADE_TAUGHT.has(material);
+}
+
+/** `facade.ts`' layout, as the GLSL constants {@link FACADE_FRAGMENT_GLSL} reads. */
+const FACADE_CONSTANTS_GLSL = /* glsl */ `
+  const float oylWinL = ${glslFloat(WINDOW_IN_BAY.left)};
+  const float oylWinR = ${glslFloat(WINDOW_IN_BAY.right)};
+  const float oylWinB = ${glslFloat(WINDOW_IN_BAY.bottom)};
+  const float oylWinT = ${glslFloat(WINDOW_IN_BAY.top)};
+  const float oylFrameA = ${glslFloat(WINDOW_IN_BAY.frameAcross)};
+  const float oylFrameU = ${glslFloat(WINDOW_IN_BAY.frameUp)};
+  const float oylBarA = ${glslFloat(WINDOW_IN_BAY.barAcross)};
+  const float oylBarU = ${glslFloat(WINDOW_IN_BAY.barUp)};
+  const float oylTransom = ${glslFloat(WINDOW_IN_BAY.transom)};
+  const float oylSillA = ${glslFloat(WINDOW_IN_BAY.sillAcross)};
+  const float oylSillU = ${glslFloat(WINDOW_IN_BAY.sillUp)};
+  const float oylDoorA = ${glslFloat(DOOR_IN_FACE.surroundAcross)};
+  const float oylDoorU = ${glslFloat(DOOR_IN_FACE.surroundUp)};
+  const float oylFan = ${glslFloat(DOOR_IN_FACE.fanlight)};
+  const float oylStoreyM = ${glslFloat(STOREY_METRES)};
+  const float oylBayM = ${glslFloat(BAY_METRES)};
+  const float oylSashW = ${glslFloat(SASH.width)};
+  const float oylSashH = ${glslFloat(SASH.height)};
+  const float oylSashFrame = ${glslFloat(SASH.frame)};
+  const float oylRail = ${glslFloat(SASH.rail)};
+  const float oylSillM = ${glslFloat(WINDOW_SILL_METRES)};
+  const float oylSashTop = ${glslFloat(SASH_TOP_SHARE)};
+  const float oylPairMin = ${glslFloat(PAIR_MIN_BAY_METRES)};
+  const float oylMullion = ${glslFloat(MULLION_METRES)};
+  const float oylPicMost = ${glslFloat(PICTURE.most)};
+  const float oylPicMargin = ${glslFloat(PICTURE.margin)};
+  const float oylShutterShare = ${glslFloat(SHUTTER.share)};
+  const float oylShutterGap = ${glslFloat(SHUTTER.gap)};
+  const float oylLouvre = ${glslFloat(SHUTTER.louvre)};
+  const float oylShutterMargin = ${glslFloat(SHUTTER.margin)};
+  const float oylRevealHead = ${glslFloat(REVEAL.head)};
+  const float oylRevealJamb = ${glslFloat(REVEAL.jamb)};
+  const float oylRevealShade = ${glslFloat(REVEAL.shade)};
+  const float oylSillOver = ${glslFloat(SILL.overrun)};
+  const float oylSillDepth = ${glslFloat(SILL.depth)};
+  const float oylDormerW = ${glslFloat(DORMER_SASH.width)};
+  const float oylDormerH = ${glslFloat(DORMER_SASH.height)};
+  const float oylDormerSill = ${glslFloat(DORMER_SASH.sill)};
+  const float oylDormerMargin = ${glslFloat(DORMER_SASH.margin)};
+  const float oylLapShadow = ${glslFloat(CLAPBOARD.lapShadow)};
+  const float oylLapDepth = ${glslFloat(CLAPBOARD.shadowDepth)};
+  const float oylButt = ${glslFloat(CLAPBOARD.butt)};
+  const float oylButtBright = ${glslFloat(CLAPBOARD.buttBright)};
+  const float oylLapTilt = ${glslFloat(CLAPBOARD.tilt)};
+  const float oylButtTilt = ${glslFloat(CLAPBOARD.buttTilt)};
+  const float oylSidingWhite = ${glslFloat(CLAPBOARD.white)};
+  const float oylTab = ${glslFloat(SHINGLE.tab)};
+  const float oylKeyway = ${glslFloat(SHINGLE.keyway)};
+  const float oylShingleShadow = ${glslFloat(SHINGLE.buttShadow)};
+  const float oylShingleDepth = ${glslFloat(SHINGLE.shadowDepth)};
+  const float oylKeywayDepth = ${glslFloat(SHINGLE.keywayDepth)};
+  const float oylShingleVary = ${glslFloat(SHINGLE.variation)};
+  const vec2 oylBlock = ${glslVec(FOUNDATION.block)};
+  const vec2 oylBrick = ${glslVec(FOUNDATION.brick)};
+  const float oylMortar = ${glslFloat(FOUNDATION.mortar)};
+  const float oylBandM = ${glslFloat(FOUNDATION.onWall)};
+  const float oylBandShade = ${glslFloat(FOUNDATION.bandShade)};
+  const vec3 oylBlockC = ${glslVec(FOUNDATION.blockColour)};
+  const vec3 oylBrickC = ${glslVec(FOUNDATION.brickColour)};
+  const vec3 oylMortarC = ${glslVec(FOUNDATION.mortarColour)};
+  const float oylSlab = ${glslFloat(PAVING.slab)};
+  const float oylSlabJoint = ${glslFloat(PAVING.joint)};
+  const vec3 oylPavingC = ${glslVec(PAVING.colour)};
+  const float oylAoEaves = ${glslFloat(FACADE_AO.eaves)};
+  const float oylAoEavesM = ${glslFloat(FACADE_AO.eavesMetres)};
+  const float oylAoBase = ${glslFloat(FACADE_AO.base)};
+  const float oylAoBaseM = ${glslFloat(FACADE_AO.baseMetres)};
+  const float oylGarageS = ${glslFloat(GARAGE.surround)};
+  const float oylGarageSections = ${glslFloat(GARAGE_DOOR.sections)};
+  const float oylGaragePanel = ${glslFloat(GARAGE_DOOR.panel)};
+  const float oylGarageGroove = ${glslFloat(GARAGE_DOOR.groove)};
+  const float oylGarageInset = ${glslFloat(GARAGE_DOOR.inset)};
+  const float oylClapboard = ${glslFloat(CLAD_CLAPBOARD)};
+  const float oylShingle = ${glslFloat(CLAD_SHINGLE)};
+  const float oylBlockCode = ${glslFloat(CLAD_BLOCK)};
+  const float oylBrickCode = ${glslFloat(CLAD_BRICK)};
+  const float oylPaving = ${glslFloat(CLAD_PAVING)};
+  const float oylSashFlag = ${glslFloat(STYLE_SASH)};
+  const float oylShuttersFlag = ${glslFloat(STYLE_SHUTTERS)};
+  const float oylEavesFlag = ${glslFloat(STYLE_EAVES)};
+  const float oylBrickFlag = ${glslFloat(STYLE_BRICK_FOUNDATION)};
+  const float oylDormerTop = ${glslFloat(FACADE_DORMER)};
+  const float oylGarageTop = ${glslFloat(FACADE_GARAGE)};
+  const float oylShopTop = ${glslFloat(FACADE_SHOPFRONT)};
+  const float oylSignTop = ${glslFloat(FACADE_SIGN)};
+  const float oylAwningTop = ${glslFloat(FACADE_AWNING)};
+  const float oylCommercialFlag = ${glslFloat(STYLE_COMMERCIAL)};
+  const float oylCwL = ${glslFloat(COMMERCIAL_WINDOW_IN_BAY.left)};
+  const float oylCwR = ${glslFloat(COMMERCIAL_WINDOW_IN_BAY.right)};
+  const float oylCwB = ${glslFloat(COMMERCIAL_WINDOW_IN_BAY.bottom)};
+  const float oylCwT = ${glslFloat(COMMERCIAL_WINDOW_IN_BAY.top)};
+  const float oylCwTransom = ${glslFloat(COMMERCIAL_WINDOW_IN_BAY.transom)};
+  const float oylShopFrame = ${glslFloat(SHOP_FRONT.frame)};
+  const float oylShopRiser = ${glslFloat(SHOP_FRONT.riser)};
+  const float oylShopSill = ${glslFloat(SHOP_FRONT.sill)};
+  const vec2 oylShopTransom = ${glslVec(SHOP_FRONT.transom)};
+  const float oylShopMullion = ${glslFloat(SHOP_FRONT.mullion)};
+  const float oylShopPaneMost = ${glslFloat(SHOP_FRONT.light)};
+  const float oylDoorW = ${glslFloat(DOOR_FACE.width)};
+  const float oylDoorH = ${glslFloat(DOOR_FACE.height)};
+  const float oylDoorSurround = ${glslFloat(DOOR_SURROUND_METRES)};
+  const float oylShopDoorFrame = ${glslFloat(SHOP_DOOR.frame)};
+  const float oylShopDoorRail = ${glslFloat(SHOP_DOOR.rail)};
+  const float oylSignMoulding = ${glslFloat(SIGN_MOULDING_METRES)};
+  const float oylStripe = ${glslFloat(AWNING_STRIPE_METRES)};
+  const vec3 oylStripeC = ${glslVec(AWNING_STRIPE_PAINT)};
+  const vec3 oylSignPaints[${String(SIGN_PAINTS.length)}] = vec3[${String(SIGN_PAINTS.length)}](${SIGN_PAINTS.map(glslVec).join(', ')});
+  const vec3 oylAwningPaints[${String(AWNING_PAINTS.length)}] = vec3[${String(AWNING_PAINTS.length)}](${AWNING_PAINTS.map(glslVec).join(', ')});
+  const float oylRailingTop = ${glslFloat(FACADE_RAILING)};
+  const float oylRailDepth = ${glslFloat(FRONT_PORCH.railing.rail)};
+  const vec2 oylRailFoot = ${glslVec(FRONT_PORCH.railing.bottom)};
+  const float oylBaluster = ${glslFloat(FRONT_PORCH.railing.baluster)};
+  const float oylBalusterGap = ${glslFloat(FRONT_PORCH.railing.spacing)};
+  const float oylRailingGap = ${glslFloat(RAILING.gapShade)};
+  const float oylLotCourse = ${glslFloat(LOT_CLAPBOARD_COURSE_METRES)};
+  const float oylLotBand = ${glslFloat(PLINTH_TOP_METRES + FOUNDATION.onWall)};
+  const float oylShingleCourse = ${glslFloat(SHINGLE_COURSE_METRES)};
+`;
+
+/**
+ * The facade's constants and helpers, in GLSL — every one a mapped building's
+ * material and, since #1588, a clad lot's reads: a band and a rectangle
+ * softened over a pixel's footprint (`fwidth`), so a window's edge never
+ * crawls as the rider rides past it; since #1588 a line at every whole
+ * number, a pattern's fade to its mean once it is a few pixels across, a
+ * style flag and a running bond (`facade.ts` §`FOUNDATION`), each the
+ * TypeScript twin's rule (`claddingPartAt`) from the same numbers.
+ *
+ * ⚠️ Every local is `oyl`-prefixed: GLSL ES reserves `half`, `input`,
+ * `output` and `fixed`, and a sash has a half.
+ */
+const CLADDING_HELPERS_GLSL = /* glsl */ `
+  ${FACADE_CONSTANTS_GLSL}
+  float oylBand(float x, float lo, float hi, float w) {
+    return smoothstep(lo - w, lo + w, x) - smoothstep(hi - w, hi + w, x);
+  }
+  float oylRect(vec2 p, vec2 lo, vec2 hi, vec2 w) {
+    return oylBand(p.x, lo.x, hi.x, w.x) * oylBand(p.y, lo.y, hi.y, w.y);
+  }
+  float oylWindowHash(vec2 cell) {
+    return fract(sin(dot(cell, vec2(12.9898, 78.233))) * 43758.5453);
+  }
+  float oylLine(float t, float halfWidth, float aa) {
+    return 1.0 - smoothstep(halfWidth - aa, halfWidth + aa, abs(t - floor(t + 0.5)));
+  }
+  float oylFadeOf(float perPixel) {
+    return clamp(perPixel * 4.0 - 0.5, 0.0, 1.0);
+  }
+  float oylFlag(float flags, float bit) {
+    return mod(floor(flags / bit + 0.001), 2.0);
+  }
+  vec3 oylBond(vec2 m, vec2 mw, float brick) {
+    vec2 oylUnit = mix(oylBlock, oylBrick, brick);
+    float oylRowOf = floor(m.y / oylUnit.y);
+    vec2 oylT = vec2(m.x / oylUnit.x + 0.5 * mod(oylRowOf, 2.0), m.y / oylUnit.y);
+    vec2 oylTw = max(mw / oylUnit, vec2(0.00001));
+    float oylJoint = max(
+      oylLine(oylT.x, oylMortar * 0.5 / oylUnit.x, oylTw.x),
+      oylLine(oylT.y, oylMortar * 0.5 / oylUnit.y, oylTw.y)
+    );
+    float oylFade = oylFadeOf(max(oylTw.x, oylTw.y));
+    oylJoint = mix(oylJoint, oylMortar / oylUnit.x + oylMortar / oylUnit.y, oylFade);
+    float oylVary = mix(0.9 + 0.2 * oylWindowHash(floor(oylT) + vec2(brick * 17.0, 3.0)), 1.0, oylFade);
+    return mix(mix(oylBlockC, oylBrickC, brick) * oylVary, oylMortarC, oylJoint);
+  }
+`;
+
+/** {@link CLADDING_HELPERS_GLSL}, a mapped building's varyings, and its sash window. */
+const FACADE_COMMON_GLSL = /* glsl */ `
+  uniform float oylFacadeOn;
+  uniform vec3 oylSunWorld;
+  varying vec4 vOylFacade;
+  varying vec4 vOylStyle;
+  varying vec3 vOylTrim;
+  ${CLADDING_HELPERS_GLSL}
+  void oylSash(
+    vec2 p, vec2 pw, vec3 win, float bay, float paired, float picture, float shutters, float sun,
+    out float frame, out float glass, out float reveal, out float shutter, out float sill
+  ) {
+    float oylHalfW = win.x * 0.5;
+    float oylHead = win.z + win.y;
+    float oylAcross = mix(p.x, abs(p.x) - (oylHalfW + oylMullion * 0.5), paired);
+    float oylSpan = mix(oylHalfW, win.x + oylMullion * 0.5, paired);
+    float oylOuter = oylRect(p, vec2(-oylSpan, win.z), vec2(oylSpan, oylHead), pw);
+    float oylInner = oylBand(oylAcross, -oylHalfW + oylSashFrame, oylHalfW - oylSashFrame, pw.x)
+      * oylBand(p.y, win.z + oylSashFrame, oylHead - oylSashFrame, pw.y);
+    float oylRailOn = (1.0 - picture)
+      * (1.0 - smoothstep(oylRail * 0.5 - pw.y, oylRail * 0.5 + pw.y, abs(p.y - (win.z + win.y * 0.5))));
+    glass = oylInner * (1.0 - oylRailOn) * oylOuter;
+    frame = max(oylOuter - glass, 0.0);
+    float oylToward = sun * mix(1.0, sign(p.x), paired);
+    float oylUnderHead = smoothstep(
+      oylHead - oylSashFrame - oylRevealHead - pw.y,
+      oylHead - oylSashFrame - oylRevealHead + pw.y,
+      p.y
+    );
+    float oylByJamb = abs(oylToward) * smoothstep(
+      oylHalfW - oylSashFrame - oylRevealJamb - pw.x,
+      oylHalfW - oylSashFrame - oylRevealJamb + pw.x,
+      oylToward * oylAcross
+    );
+    reveal = max(oylUnderHead, oylByJamb);
+    float oylShutterW = win.x * oylShutterShare;
+    float oylOut = mix(abs(p.x), oylAcross, paired);
+    float oylFits = step(2.0 * (oylSpan + oylShutterGap + oylShutterW + oylShutterMargin), bay);
+    shutter = shutters * (1.0 - picture) * oylFits
+      * oylBand(oylOut, oylHalfW + oylShutterGap, oylHalfW + oylShutterGap + oylShutterW, pw.x)
+      * oylBand(p.y, win.z, oylHead, pw.y);
+    sill = oylRect(p, vec2(-oylSpan - oylSillOver, win.z - oylSillDepth), vec2(oylSpan + oylSillOver, win.z), pw)
+      * (1.0 - oylOuter);
+  }
+`;
+
+/**
+ * Whether a bay has a window at all, as a GLSL expression over `oylCell`,
+ * `oylTopShare` (a window's top as a share of its storey: #1581's casement's
+ * or, since #1588, a sash's) and `vOylFacade` (`facade.ts` §`facadePartAt`'s
+ * eaves and door-bay rules). Split out so a test can run the very text the
+ * shader runs.
+ *
+ * Exported for `three-renderer.test.ts`, which runs it against `facadePartAt`.
+ */
+export const FACADE_SHOWN_GLSL =
+  'step(0.0, oylCell.y) * step(oylCell.y + oylTopShare, vOylFacade.z) * (1.0 - step(oylCell.y, 0.5) * step(abs(oylCell.x - vOylFacade.w), 0.5))';
+
+/**
+ * #1581's facade, drawn over the surface's photograph after its colour —
+ * `facade.ts` §`facadePartAt`'s layout, from `footprint-buildings.ts`
+ * §`FACADE_FLOATS`' four numbers. `oylGlass` and `oylFlat` carry on to the
+ * finish: a pane is smooth and a little metallic, so it gives back the sky the
+ * environment map holds, and paint is smoother than brick and loses the
+ * photograph's relief. Past a few pixels a bay, the layout fades to its mean,
+ * so a far street does not shimmer.
+ *
+ * Since #1588, in three steps:
+ *
+ * 1. **The cladding** (`STYLE_FLOATS`' `clad`), in place of the photograph:
+ *    clapboard courses in the house's paint, with a shadow under each lap
+ *    and a normal tilt (`oylTilt`) for the finish; shingles in staggered
+ *    tabs; a foundation's bond — on a plinth, and at a clapboard wall's foot
+ *    — and a driveway's slabs. Each fades to its mean as #1581's windows do.
+ * 2. **The openings**: #1581's casements, or US sash windows (`STYLE_SASH`)
+ *    with their meeting rail, a pair in a wide bay, a picture window, the
+ *    shutters, and the inset reveal's shadow on the side the sun is on — the
+ *    sun's direction across the face (`oylSunAcross`) is {@link FACADE_SUN}'s,
+ *    against the face's `u` from its derivatives; a dormer's sash; a
+ *    garage's panelled door.
+ * 3. **The shade**: a wall darkened under overhanging eaves and at its foot.
+ *
+ * ⚠️ `vOylTint` is #1549's ({@link withVertexTint}), read here in `main` —
+ * after every declaration — so that one window in five is a lit room by
+ * where it is on which building, not the same window on every house.
+ */
+const FACADE_FRAGMENT_GLSL = /* glsl */ `
+  float oylGlass = 0.0;
+  float oylFlat = 0.0;
+  float oylRough = 0.6;
+  float oylTilt = 0.0;
+  // The sun's side along the face's u, from the face's own derivatives: outside every branch.
+  float oylSun = 0.0;
+  {
+    vec3 oylQx = dFdx(vViewPosition);
+    vec3 oylQy = dFdy(vViewPosition);
+    vec3 oylN = normalize(cross(oylQx, oylQy));
+    vec3 oylAlongU = -(cross(oylQy, oylN) * dFdx(vOylFacade.x) + cross(oylN, oylQx) * dFdy(vOylFacade.x));
+    vec3 oylToSun = normalize((viewMatrix * vec4(oylSunWorld, 0.0)).xyz);
+    float oylAlongLength = length(oylAlongU);
+    float oylSunAcross = oylAlongLength > 1e-8 ? dot(oylAlongU / oylAlongLength, oylToSun) : 0.0;
+    oylSun = step(0.0, dot(oylN, oylToSun)) * sign(oylSunAcross) * step(0.15, abs(oylSunAcross));
+  }
+  vec2 oylFw = max(fwidth(vOylFacade.xy), vec2(0.00001));
+  if (oylFacadeOn < 0.5) {
+    // The control: the photograph alone, as #1549 drew it.
+  } else {
+    float oylTop = vOylFacade.z;
+    float oylKind = floor(vOylStyle.x + 0.0001);
+    float oylCourse = max(vOylStyle.x - oylKind, 0.001);
+    float oylFlags = vOylStyle.y;
+    // Metres across and up the face: a wall's bays and storeys, or metres already.
+    float oylStoreyed = step(-0.5, oylTop) * (1.0 - step(1.5, oylKind));
+    vec2 oylScale = vec2(
+      oylTop > 0.0 ? vOylStyle.z : mix(1.0, oylBayM, oylStoreyed),
+      mix(1.0, oylStoreyM, oylStoreyed)
+    );
+    vec2 oylM = vOylFacade.xy * oylScale;
+    vec2 oylMw = max(oylFw * oylScale, vec2(0.00001));
+    // 1. The cladding.
+    if (abs(oylKind - oylClapboard) < 0.5) {
+      float oylT = oylM.y / oylCourse;
+      float oylTw = oylMw.y / oylCourse;
+      float oylF = fract(oylT);
+      float oylFade = oylFadeOf(oylTw);
+      float oylLap = smoothstep(1.0 - oylLapShadow - oylTw, 1.0 - oylLapShadow + oylTw, oylF);
+      float oylButtStrip = 1.0 - smoothstep(oylButt - oylTw, oylButt + oylTw, oylF);
+      float oylBoard = 1.0 + 0.05 * (oylWindowHash(vec2(floor(oylT), floor(vOylTint.x * 1000.0))) - 0.5);
+      float oylShade = (1.0 - oylLapDepth * oylLap + oylButtBright * oylButtStrip) * oylBoard;
+      float oylMean = 1.0 - oylLapDepth * oylLapShadow + oylButtBright * oylButt;
+      diffuseColor.rgb = vColor.rgb * oylSidingWhite * mix(oylShade, oylMean, oylFade);
+      oylFlat = 1.0;
+      oylRough = 0.55;
+      oylTilt = (1.0 - oylFade) * mix(oylLapTilt, -oylButtTilt, oylLap);
+      // The foundation band at the wall's foot, above the plinth.
+      float oylBandOn = oylStoreyed * (1.0 - step(oylBandM, oylM.y));
+      diffuseColor.rgb = mix(
+        diffuseColor.rgb,
+        oylBond(oylM, oylMw, oylFlag(oylFlags, oylBrickFlag)) * oylBandShade,
+        oylBandOn
+      );
+      oylTilt *= 1.0 - oylBandOn;
+    } else if (abs(oylKind - oylShingle) < 0.5) {
+      float oylRow = floor(oylM.y / oylCourse);
+      float oylF = fract(oylM.y / oylCourse);
+      float oylTw = oylMw.y / oylCourse;
+      float oylTabT = oylM.x / oylTab + 0.5 * mod(oylRow, 2.0);
+      float oylTabW = oylMw.x / oylTab;
+      float oylKey = oylLine(oylTabT, oylKeyway * 0.5 / oylTab, oylTabW);
+      float oylShadow = smoothstep(1.0 - oylShingleShadow - oylTw, 1.0 - oylShingleShadow + oylTw, oylF);
+      float oylGrain = oylWindowHash(vec2(oylRow, floor(oylTabT)) + floor(vOylTint.xy * 1000.0));
+      float oylShade = (1.0 - oylShingleDepth * oylShadow) * (1.0 - oylKeywayDepth * oylKey)
+        * (1.0 + oylShingleVary * (oylGrain - 0.5));
+      float oylMean = (1.0 - oylShingleDepth * oylShingleShadow) * (1.0 - oylKeywayDepth * oylKeyway / oylTab);
+      diffuseColor.rgb = vColor.rgb * mix(oylShade, oylMean, oylFadeOf(max(oylTw, oylTabW)));
+      oylFlat = 1.0;
+      oylRough = 0.9;
+    } else if (oylKind > oylBlockCode - 0.5 && oylKind < oylBrickCode + 0.5) {
+      diffuseColor.rgb = oylBond(oylM, oylMw, step(oylBrickCode - 0.5, oylKind)) * vColor.rgb;
+      oylFlat = 1.0;
+      oylRough = 0.9;
+    } else if (abs(oylKind - oylPaving) < 0.5) {
+      float oylSlabW = oylMw.y / oylSlab;
+      float oylFade = oylFadeOf(oylSlabW);
+      float oylJoint = oylLine(oylM.y / oylSlab, oylSlabJoint * 0.5 / oylSlab, oylSlabW) * (1.0 - oylFade);
+      float oylVary = mix(
+        0.94 + 0.12 * oylWindowHash(vec2(floor(oylM.y / oylSlab), floor(vOylTint.x * 1000.0))),
+        1.0,
+        oylFade
+      );
+      diffuseColor.rgb = oylPavingC * vColor.rgb * oylVary * (1.0 - 0.5 * oylJoint);
+      oylFlat = 1.0;
+      oylRough = 0.85;
+    }
+    // 2. The openings.
+    if (oylTop > 0.0) {
+      vec2 oylCell = floor(vOylFacade.xy);
+      vec2 oylAt = vOylFacade.xy - oylCell;
+      float oylSashOn = oylFlag(oylFlags, oylSashFlag);
+      // #1590: a commercial wall's taller window, a sash's own top, or #1581's casement's.
+      float oylComOn = oylFlag(oylFlags, oylCommercialFlag);
+      float oylTopShare = mix(mix(oylWinT, oylCwT, oylComOn), oylSashTop, oylSashOn);
+      float oylShown = ${FACADE_SHOWN_GLSL};
+      vec3 oylWall = diffuseColor.rgb;
+      float oylLit = step(0.8, oylWindowHash(oylCell + floor(vOylTint.xy * 1000.0)));
+      vec3 oylRoom = mix(vec3(0.012, 0.014, 0.018), vec3(0.09, 0.07, 0.045), oylLit);
+      if (oylSashOn > 0.5) {
+        float oylBayW = vOylStyle.z;
+        vec2 oylP = vec2((oylAt.x - 0.5) * oylBayW, oylAt.y * oylStoreyM);
+        float oylPicture = (1.0 - step(0.5, oylCell.y)) * (1.0 - step(0.5, abs(oylCell.x - vOylStyle.w)));
+        float oylPaired = step(oylPairMin, oylBayW) * (1.0 - oylPicture);
+        float oylWinW = mix(oylSashW, min(oylBayW - oylPicMargin, oylPicMost), oylPicture);
+        float oylFrameOn;
+        float oylPaneOn;
+        float oylRevealOn;
+        float oylShutterOn;
+        float oylSillOn;
+        oylSash(
+          oylP, oylMw, vec3(oylWinW, oylSashH, oylSillM), oylBayW, oylPaired, oylPicture,
+          oylFlag(oylFlags, oylShuttersFlag), oylSun,
+          oylFrameOn, oylPaneOn, oylRevealOn, oylShutterOn, oylSillOn
+        );
+        oylFrameOn *= oylShown;
+        oylPaneOn *= oylShown;
+        oylShutterOn *= oylShown;
+        oylSillOn *= oylShown;
+        vec3 oylPane = (oylRoom + vec3(0.03, 0.04, 0.05) * smoothstep(oylSillM, oylSillM + oylSashH, oylP.y))
+          * (1.0 - oylRevealShade * oylRevealOn);
+        float oylSlat = oylLine(oylP.y / oylLouvre, 0.15, oylMw.y / oylLouvre);
+        vec3 oylShutterC = vOylTrim * (0.92 - 0.25 * oylSlat);
+        vec3 oylDrawn = mix(
+          mix(mix(mix(oylWall, oylShutterC, oylShutterOn), vOylTrim, oylFrameOn), vOylTrim * 0.85, oylSillOn),
+          oylPane,
+          oylPaneOn
+        );
+        float oylArea = oylShown * oylWinW * (1.0 + oylPaired) * oylSashH / (oylBayW * oylStoreyM);
+        vec3 oylMean = mix(oylWall, mix(vOylTrim, oylRoom, 0.75), oylArea);
+        float oylFade = oylFadeOf(max(oylMw.x / oylBayW, oylMw.y / oylStoreyM));
+        diffuseColor.rgb = mix(oylDrawn, oylMean, oylFade);
+        float oylParts = max(max(oylFrameOn, oylSillOn), oylShutterOn) * (1.0 - oylFade);
+        oylGlass = oylPaneOn * (1.0 - oylFade);
+        oylFlat = max(oylFlat, oylParts);
+        oylTilt *= 1.0 - min(1.0, oylParts + oylGlass);
+      } else {
+        vec2 oylW = oylFw * 0.5;
+        // #1590: a commercial wall's window is #1581's laid out taller.
+        float oylWL = mix(oylWinL, oylCwL, oylComOn);
+        float oylWR = mix(oylWinR, oylCwR, oylComOn);
+        float oylWB = mix(oylWinB, oylCwB, oylComOn);
+        float oylWT = mix(oylWinT, oylCwT, oylComOn);
+        float oylWTr = mix(oylTransom, oylCwTransom, oylComOn);
+        float oylOuter = oylRect(oylAt, vec2(oylWL, oylWB), vec2(oylWR, oylWT), oylW) * oylShown;
+        float oylInner = oylRect(
+          oylAt,
+          vec2(oylWL + oylFrameA, oylWB + oylFrameU),
+          vec2(oylWR - oylFrameA, oylWT - oylFrameU),
+          oylW
+        );
+        float oylBars = max(
+          1.0 - smoothstep(oylBarA - oylW.x, oylBarA + oylW.x, abs(oylAt.x - 0.5)),
+          1.0 - smoothstep(oylBarU - oylW.y, oylBarU + oylW.y, abs(oylAt.y - oylWTr))
+        );
+        float oylPaneShare = oylInner * (1.0 - oylBars) * oylShown;
+        float oylFrame = max(oylOuter - oylPaneShare, 0.0);
+        float oylSill = oylRect(
+          oylAt,
+          vec2(oylWL - oylSillA, oylWB - oylSillU),
+          vec2(oylWR + oylSillA, oylWB),
+          oylW
+        ) * oylShown;
+        vec3 oylPane = oylRoom + vec3(0.03, 0.04, 0.05) * smoothstep(oylWB, oylWT, oylAt.y);
+        vec3 oylDrawn = mix(mix(mix(oylWall, vOylTrim, oylFrame), vOylTrim * 0.85, oylSill), oylPane, oylPaneShare);
+        float oylArea = (oylWR - oylWL) * (oylWT - oylWB) * oylShown;
+        vec3 oylMean = mix(oylWall, mix(vOylTrim, oylPane, 0.75), oylArea);
+        float oylFade = clamp(max(oylW.x, oylW.y) * 8.0 - 0.5, 0.0, 1.0);
+        diffuseColor.rgb = mix(oylDrawn, oylMean, oylFade);
+        oylGlass = oylPaneShare * (1.0 - oylFade);
+        oylFlat = max(oylFlat, max(oylOuter, oylSill) * (1.0 - oylFade));
+      }
+      // 3. The shade: under overhanging eaves, and at the wall's foot.
+      float oylUnderEaves = oylFlag(oylFlags, oylEavesFlag)
+        * (1.0 - smoothstep(0.0, oylAoEavesM, (oylTop - vOylFacade.y) * oylStoreyM));
+      float oylAtFoot = 1.0 - smoothstep(0.0, oylAoBaseM, vOylFacade.y * oylStoreyM);
+      diffuseColor.rgb *= (1.0 - (1.0 - oylAoEaves) * oylUnderEaves) * (1.0 - (1.0 - oylAoBase) * oylAtFoot);
+    } else if (oylTop < -0.5 && oylTop > -1.5) {
+      vec2 oylAt = vOylFacade.xy;
+      vec2 oylW = oylFw * 0.5;
+      float oylLeaf = oylRect(oylAt, vec2(oylDoorA, -1.0), vec2(1.0 - oylDoorA, 1.0 - oylDoorU), oylW);
+      float oylFanlight = oylRect(
+        oylAt,
+        vec2(oylDoorA + 0.04, oylFan),
+        vec2(1.0 - oylDoorA - 0.04, 1.0 - oylDoorU - 0.02),
+        oylW
+      );
+      float oylPanels = oylRect(
+        vec2(abs(oylAt.x - 0.5), oylAt.y),
+        vec2(0.05, 0.08),
+        vec2(0.27, oylFan - 0.06),
+        oylW
+      );
+      vec3 oylDoor = mix(vOylTrim, vColor.rgb * (1.0 - 0.3 * oylPanels), oylLeaf);
+      diffuseColor.rgb = mix(oylDoor, vec3(0.02, 0.025, 0.03), oylFanlight);
+      oylFlat = 1.0;
+      oylGlass = oylFanlight;
+      if (oylFlag(vOylStyle.y, oylCommercialFlag) > 0.5) {
+        // #1590: a shop's door — a glazed leaf in its frame, set back in a recess.
+        vec2 oylD = oylAt * vec2(oylDoorW, oylDoorH);
+        vec2 oylDw = oylW * 2.0 * vec2(oylDoorW, oylDoorH);
+        float oylIn = oylRect(oylD, vec2(oylDoorSurround, -1.0), vec2(oylDoorW - oylDoorSurround, oylDoorH - oylDoorSurround), oylDw);
+        float oylPane = oylRect(
+          oylD,
+          vec2(oylDoorSurround + oylShopDoorFrame, oylShopDoorRail),
+          vec2(oylDoorW - oylDoorSurround - oylShopDoorFrame, oylDoorH - oylDoorSurround - oylShopDoorFrame),
+          oylDw
+        );
+        vec3 oylRecess = vec3(0.035, 0.033, 0.03);
+        vec3 oylShopPane = vec3(0.02, 0.025, 0.03) + vec3(0.05, 0.04, 0.025) * step(0.5, oylWindowHash(floor(vOylTint.xy * 1000.0)));
+        diffuseColor.rgb = mix(oylRecess, mix(vOylTrim, oylShopPane, oylPane), oylIn);
+        oylGlass = oylPane;
+      }
+    } else if (oylTop < -1.5 && oylTop > -2.5) {
+      diffuseColor.rgb = vColor.rgb;
+      oylFlat = 1.0;
+    } else if (abs(oylTop - oylDormerTop) < 0.5) {
+      // A dormer's front: one sash in the middle of its cladding.
+      float oylFaceW = vOylStyle.z;
+      float oylFaceH = vOylStyle.w;
+      vec2 oylP = vec2(vOylFacade.x - oylFaceW * 0.5, vOylFacade.y);
+      vec3 oylWin = vec3(
+        min(oylDormerW, oylFaceW - 2.0 * oylDormerMargin),
+        min(oylDormerH, oylFaceH - oylDormerSill - oylDormerMargin),
+        oylDormerSill
+      );
+      float oylFrameOn;
+      float oylPaneOn;
+      float oylRevealOn;
+      float oylShutterOn;
+      float oylSillOn;
+      oylSash(
+        oylP, oylMw, oylWin, oylFaceW, 0.0, 0.0, 0.0, oylSun,
+        oylFrameOn, oylPaneOn, oylRevealOn, oylShutterOn, oylSillOn
+      );
+      vec3 oylPane = vec3(0.012, 0.014, 0.018) * (1.0 - oylRevealShade * oylRevealOn) + vec3(0.03, 0.04, 0.05);
+      diffuseColor.rgb = mix(mix(mix(diffuseColor.rgb, vOylTrim, oylFrameOn), vOylTrim * 0.85, oylSillOn), oylPane, oylPaneOn);
+      oylGlass = oylPaneOn;
+      oylFlat = 1.0;
+      oylTilt *= 1.0 - min(1.0, oylFrameOn + oylPaneOn + oylSillOn);
+    } else if (abs(oylTop - oylGarageTop) < 0.5) {
+      // A garage door: a panelled leaf in its surround, in the trim's paint.
+      float oylFaceW = vOylStyle.z;
+      float oylLeafH = vOylStyle.w;
+      vec2 oylG = vOylFacade.xy;
+      float oylLeaf = oylBand(oylG.x, oylGarageS, oylFaceW - oylGarageS, oylMw.x)
+        * (1.0 - smoothstep(oylLeafH - oylMw.y, oylLeafH + oylMw.y, oylG.y));
+      float oylLeafW = max(oylFaceW - 2.0 * oylGarageS, 0.1);
+      float oylCols = max(2.0, floor(oylLeafW / oylGaragePanel + 0.5));
+      vec2 oylPer = vec2(oylCols / oylLeafW, oylGarageSections / oylLeafH);
+      vec2 oylCell = vec2(oylG.x - oylGarageS, oylG.y) * oylPer;
+      vec2 oylCellW = oylMw * oylPer;
+      float oylGroove = oylLine(oylCell.y, oylGarageGroove * 0.5 * oylPer.y, oylCellW.y);
+      vec2 oylInset = oylGarageInset * oylPer;
+      float oylPanel = oylRect(fract(oylCell), oylInset, vec2(1.0) - oylInset, oylCellW);
+      float oylFade = oylFadeOf(max(oylCellW.x, oylCellW.y));
+      float oylShade = mix((1.0 - 0.45 * oylGroove) * (0.9 + 0.1 * oylPanel), 0.95, oylFade);
+      diffuseColor.rgb = mix(vOylTrim * 0.88, vOylTrim * oylShade, oylLeaf);
+      oylFlat = 1.0;
+      oylRough = 0.5;
+      oylTilt = 0.0;
+    } else if (abs(oylTop - oylShopTop) < 0.5) {
+      // #1590: a shop front — glass over a stall riser, mullions and a transom, in the trim's paint.
+      float oylShopW = vOylStyle.z;
+      float oylShopH = vOylStyle.w;
+      vec2 oylS = vOylFacade.xy;
+      float oylDoorHalf = oylDoorW * 0.5;
+      float oylInside = oylRect(oylS, vec2(oylShopFrame), vec2(oylShopW - oylShopFrame, oylShopH - oylShopFrame), oylMw);
+      float oylDoorway = 1.0 - smoothstep(oylDoorHalf - oylMw.x, oylDoorHalf + oylMw.x, abs(oylS.x - oylShopW * 0.5));
+      float oylRiser = 1.0 - smoothstep(oylShopRiser - oylMw.y, oylShopRiser + oylMw.y, oylS.y);
+      float oylSillBar = oylBand(oylS.y, oylShopRiser, oylShopRiser + oylShopSill, oylMw.y);
+      float oylTransomBar = oylBand(oylS.y, oylShopTransom.x, oylShopTransom.y, oylMw.y);
+      float oylFromX = oylS.x < oylShopW * 0.5 ? oylShopFrame : oylShopW * 0.5 + oylDoorHalf;
+      float oylSpan = max(oylShopW * 0.5 - oylDoorHalf - oylShopFrame, 0.1);
+      float oylPanes = max(1.0, floor(oylSpan / oylShopPaneMost + 0.5));
+      float oylPaneW = oylSpan / oylPanes;
+      float oylMull = oylLine((oylS.x - oylFromX) / oylPaneW, oylShopMullion * 0.5 / oylPaneW, oylMw.x / oylPaneW);
+      float oylBars = max(max(oylSillBar, oylTransomBar), oylMull);
+      float oylPaneOn = oylInside * (1.0 - oylDoorway) * (1.0 - oylRiser) * (1.0 - oylBars);
+      float oylLitShop = step(0.5, oylWindowHash(floor(vOylTint.xy * 1000.0) + vec2(7.0, 3.0)));
+      vec3 oylShopRoom = mix(vec3(0.015, 0.016, 0.02), vec3(0.11, 0.085, 0.05), oylLitShop);
+      vec3 oylShopGlass = oylShopRoom + vec3(0.03, 0.04, 0.05) * smoothstep(oylShopRiser, oylShopH, oylS.y);
+      vec3 oylFrameC = mix(vOylTrim, vOylTrim * 0.8, oylRiser * oylInside);
+      vec3 oylDrawn = mix(oylFrameC, oylShopGlass, oylPaneOn);
+      diffuseColor.rgb = vColor.rgb * mix(oylDrawn, vec3(0.035, 0.033, 0.03), oylDoorway * oylInside);
+      oylGlass = oylPaneOn;
+      oylFlat = 1.0;
+      oylTilt = 0.0;
+    } else if (abs(oylTop - oylSignTop) < 0.5) {
+      // #1590: a sign band — a plain painted panel in its moulding. No text, no brand, no logo.
+      vec2 oylG = vOylFacade.xy;
+      float oylPanel = oylRect(oylG, vec2(oylSignMoulding), vec2(vOylStyle.z, vOylStyle.w) - vec2(oylSignMoulding), oylMw);
+      vec3 oylSignC = oylSignPaints[int(clamp(vOylStyle.y + 0.5, 0.0, ${String(SIGN_PAINTS.length - 1)}.0))];
+      diffuseColor.rgb = vColor.rgb * mix(vOylTrim, oylSignC, oylPanel);
+      oylFlat = 1.0;
+      oylRough = 0.45;
+      oylTilt = 0.0;
+    } else if (abs(oylTop - oylAwningTop) < 0.5) {
+      // #1590: an awning's canvas, striped along it with cream where its flags say.
+      vec3 oylCanvas = oylAwningPaints[int(clamp(vOylStyle.w + 0.5, 0.0, ${String(AWNING_PAINTS.length - 1)}.0))];
+      float oylStripeW = oylMw.x / oylStripe;
+      float oylStripeOn = step(0.5, vOylStyle.y)
+        * mix(step(1.0, mod(vOylFacade.x / oylStripe, 2.0)), 0.5, oylFadeOf(oylStripeW));
+      diffuseColor.rgb = vColor.rgb * mix(oylCanvas, oylStripeC, oylStripeOn);
+      oylFlat = 1.0;
+      oylRough = 0.85;
+      oylTilt = 0.0;
+    } else if (abs(oylTop - oylRailingTop) < 0.5) {
+      // #1589: a porch's railing — a top rail and a bottom rail, a baluster every
+      // spacing between them, and the porch's shade through the gaps.
+      float oylRailH = vOylStyle.w;
+      vec2 oylR = vOylFacade.xy;
+      float oylTopRail = smoothstep(oylRailH - oylRailDepth - oylMw.y, oylRailH - oylRailDepth + oylMw.y, oylR.y);
+      float oylFootRail = oylBand(oylR.y, oylRailFoot.x, oylRailFoot.y, oylMw.y);
+      float oylBalW = oylMw.x / oylBalusterGap;
+      float oylBal = oylLine(oylR.x / oylBalusterGap, oylBaluster * 0.5 / oylBalusterGap, oylBalW)
+        * step(oylRailFoot.y, oylR.y);
+      float oylSolid = max(max(oylTopRail, oylFootRail), oylBal);
+      float oylCover = (oylRailDepth + oylRailFoot.y - oylRailFoot.x
+        + max(oylRailH - oylRailDepth - oylRailFoot.y, 0.0) * oylBaluster / oylBalusterGap) / max(oylRailH, 0.01);
+      float oylOn = mix(oylSolid, oylCover, oylFadeOf(oylBalW));
+      diffuseColor.rgb = vColor.rgb * mix(oylRailingGap, 1.0, oylOn);
+      oylFlat = 1.0;
+      oylTilt = 0.0;
+    }
+  }
+`;
+
+/**
+ * Teaches a mapped building's material #1581's facade: the windows of every
+ * storey, the front door in its surround, and the painted trim — from vertex
+ * attributes, `oylFacade` (`footprint-buildings.ts` §`FACADE_FLOATS`),
+ * `oylTrim` (the trim's paint) and since #1588 `oylStyle` (§`STYLE_FLOATS`:
+ * the cladding and the windows' style), so they cost no triangle, no texture
+ * and no draw call. Spliced after #1549's vertex tint ({@link withVertexTint}),
+ * whose varying it reads. Throws, as the tint does, if three's program no
+ * longer holds an include it is spliced at. Idempotent.
+ */
+function withFacade<M extends Material>(material: M): M {
+  if (FACADE_TAUGHT.has(material)) return material;
+  FACADE_TAUGHT.add(material);
+  const earlier = material.onBeforeCompile.bind(material);
+  const earlierKey = material.customProgramCacheKey();
+  const spliced = "#1581's facade";
+  material.onBeforeCompile = (shader, renderer) => {
+    earlier(shader, renderer);
+    shader.uniforms.oylFacadeOn = FACADE_SWITCH.oylFacadeOn;
+    shader.uniforms.oylSunWorld = FACADE_SUN.oylSunWorld;
+    shader.vertexShader = replacedOrThrown(
+      replacedOrThrown(
+        shader.vertexShader,
+        '#include <common>',
+        '#include <common>\nattribute vec4 oylFacade;\nattribute vec4 oylStyle;\nattribute vec3 oylTrim;\nvarying vec4 vOylFacade;\nvarying vec4 vOylStyle;\nvarying vec3 vOylTrim;',
+        'vertex',
+        spliced,
+      ),
+      '#include <begin_vertex>',
+      '#include <begin_vertex>\nvOylFacade = oylFacade;\nvOylStyle = oylStyle;\nvOylTrim = oylTrim;',
+      'vertex',
+      spliced,
+    );
+    let fragment = replacedOrThrown(
+      shader.fragmentShader,
+      '#include <common>',
+      `#include <common>\n${FACADE_COMMON_GLSL}`,
+      'fragment',
+      spliced,
+    );
+    fragment = replacedOrThrown(
+      fragment,
+      '#include <color_fragment>',
+      `#include <color_fragment>\n${FACADE_FRAGMENT_GLSL}`,
+      'fragment',
+      spliced,
+    );
+    fragment = replacedOrThrown(
+      fragment,
+      '#include <roughnessmap_fragment>',
+      '#include <roughnessmap_fragment>\nroughnessFactor = mix(mix(roughnessFactor, oylRough, oylFlat), 0.08, oylGlass);',
+      'fragment',
+      spliced,
+    );
+    fragment = replacedOrThrown(
+      fragment,
+      '#include <metalnessmap_fragment>',
+      '#include <metalnessmap_fragment>\nmetalnessFactor = mix(metalnessFactor, 0.35, oylGlass);',
+      'fragment',
+      spliced,
+    );
+    shader.fragmentShader = replacedOrThrown(
+      fragment,
+      '#include <normal_fragment_maps>',
+      '#include <normal_fragment_maps>\nnormal = normalize(mix(normal, nonPerturbedNormal, oylFlat));\nnormal = normalize(normal + oylTilt * normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz));',
+      'fragment',
+      spliced,
+    );
+  };
+  material.customProgramCacheKey = () => `${earlierKey}|oyl-facade`;
+  return material;
+}
+
+/**
+ * One mapped building surface's material — #1549: the structure surface's
+ * own photograph and finish ({@link STRUCTURE_SURFACE_FINISH}), constructed
+ * here (ADR 0026 D-11) from the world's compressed textures (#618), with its
+ * texture bias (#619), the realistic air (#622), its tint from the vertex
+ * ({@link withVertexTint}) and, since #1581, its facade ({@link withFacade}).
+ */
+function mappedBuildingMaterial(
+  surface: StructureSurface,
+  textures: RealisticWorld['structures'],
+): MeshStandardMaterial {
+  const finish = STRUCTURE_SURFACE_FINISH[surface];
+  const maps = isPhotographic(surface) ? textures.get(surface) : undefined;
+  const material = constructed(
+    new MeshStandardMaterial({
+      color: finish.tint,
+      roughness: finish.roughness,
+      metalness: finish.metalness,
+      vertexColors: true,
+      ...(maps === undefined ? {} : { map: maps.colour, normalMap: maps.normal }),
+    }),
+  );
+  return withAtmosphere(
+    withFacade(withVertexTint(maps === undefined ? material : withTextureLodBias(material))),
+  );
+}
+
+/**
+ * The house models' one material — #1585: the atlas, the plan's paint as a
+ * vertex colour, #621's tint, and the atmosphere every structure wears. A
+ * belt built without the models carries it with no map and draws nothing in it.
+ */
+function houseModelMaterial(atlas: Texture | undefined): MeshStandardMaterial {
+  const material = constructed(
+    new MeshStandardMaterial({
+      roughness: 0.85,
+      metalness: 0,
+      vertexColors: true,
+      ...(atlas === undefined ? {} : { map: atlas }),
+    }),
+  );
+  return withAtmosphere(
+    withVertexTint(atlas === undefined ? material : withTextureLodBias(material)),
+  );
+}
+
+/**
+ * Whether the mapped buildings are merged, a group a surface — always, but
+ * for the browser gate's control. @see setMappedBuildingsMerged
+ */
+let mappedBuildingsMerged = true;
+
+/**
+ * Draws the mapped buildings refilled after this call one group a building and
+ * surface — a draw call each, as a belt of one mesh a building would — or
+ * merged again — #1549's control: with D-5.6's 36 buildings in reach the merged belt
+ * submits at most `MAPPED_BUILDING_DRAW_CALLS` calls, and this submits more.
+ *
+ * @test-facing the browser gate's control, read by `game-harness.ts`
+ * §`mappedTownProbe` and `mapped-building-belt.test.ts` §"at most six draw
+ * calls"; the product always merges
+ */
+export function setMappedBuildingsMerged(merged: boolean): void {
+  mappedBuildingsMerged = merged;
+}
+
+/** The capacity of {@link MappedBuildingBelt}'s buffer, in vertices. */
+const MAPPED_VERTICES = MAPPED_BUILDING_TRIANGLES * 3;
+
+/** One drawn building, where its triangles are. @see MappedBuildingBelt.drawnAt */
+export interface DrawnMappedBuilding {
+  /** Its plan's place in `MappedBuildings.plans`. */
+  readonly plan: number;
+  readonly far: boolean;
+  /** Its first vertex in its wall surface's range, and in its roof surface's; -1 for a model. */
+  readonly wallAt: number;
+  readonly roofAt: number;
+  /** Its first vertex in the house models' buffer, or -1 for an extrusion — #1585. */
+  readonly modelAt: number;
+}
+
+/**
+ * The realistic world's buildings from map data — #1549, ADR 0054.
+ *
+ * A footprint is unique, so it cannot be instanced. The plans in reach
+ * (`mapped-buildings.ts` §`selectMappedBuildings`) are appended into **one
+ * preallocated buffer** of `realistic-budget.ts` §`MAPPED_BUILDING_TRIANGLES`
+ * triangles, laid out surface by surface, and drawn by **one mesh with a group
+ * a surface**: at most `MAPPED_BUILDING_DRAW_CALLS` draw calls whatever the
+ * count, because the selection never opens a seventh surface.
+ *
+ * ⚠️ **One buffer with a range a surface, not a buffer a surface.** The
+ * budget is shared, and one surface can take all of it (a street of brick),
+ * so a buffer a surface would each need the whole capacity: eight surfaces,
+ * eight times the memory, where one buffer of the budget holds any mix.
+ *
+ * - **Rebuilt only at a refill**, which the view runs when the rider's chunk
+ *   (`MAPPED_CHUNK_METRES`) changes, or the rung does; never per frame. A
+ *   frame that is not a refill reads one number and allocates nothing.
+ * - **Uploaded in part**: each attribute's update range is what was written.
+ * - **The far level**, beyond `MAPPED_BUILDING_NEAR_METRES`, is a plan's walls
+ *   and roof (#1540's `farTriangleCount`). The plinth, parapet and door are
+ *   left out.
+ * - **The texture coordinates** of a plan are in its storeys and bays
+ *   (`footprint-buildings.ts` §`BAY_METRES`). They are taken back to metres and
+ *   laid at the photograph's own size, as {@link projectedInMetres} lays a
+ *   procedural building's, so a brick is a brick's size on both.
+ * - **The vertex colour** is the role's shade ({@link MAPPED_ROLE_SHADE}) and
+ *   #500's grounding above the ground the plinth stands in. A part raised on a
+ *   `min_height` has no plinth and no grounding.
+ * - **#621's tint** is a vertex attribute here, not the instance colour's
+ *   third channel: there is no instance. @see withVertexTint
+ * - **No ground blob** (#620): `realistic-budget.ts` §`MAPPED_BUILDING_TRIANGLES`.
+ * - **Never culled as a whole** (`frustumCulled` off): the buildings in reach
+ *   stand all round the rider, so a sphere about them always holds the camera.
+ */
+export class MappedBuildingBelt {
+  readonly mesh: Mesh;
+  readonly buildings: MappedBuildings;
+  readonly #materials: ReadonlyMap<StructureSurface, MeshStandardMaterial>;
+  /** The mesh's material list: the surface each group draws, by its place. */
+  readonly #slots: Material[];
+  readonly #position: BufferAttribute;
+  readonly #normal: BufferAttribute;
+  readonly #uv: BufferAttribute;
+  readonly #colour: BufferAttribute;
+  readonly #tint: BufferAttribute;
+  /** #1581: each vertex's facade, and its building's trim paint. @see withFacade */
+  readonly #facade: BufferAttribute;
+  readonly #trim: BufferAttribute;
+  /** #1588: each vertex's cladding and windows' style. @see withFacade */
+  readonly #style: BufferAttribute;
+  /**
+   * #1585: the house models, one mesh in the atlas's one material — one
+   * draw call whatever their count — refilled with the surfaces.
+   */
+  readonly modelMesh: Mesh;
+  readonly #houses: RealisticHouses | undefined;
+  readonly #modelPosition: BufferAttribute;
+  readonly #modelNormal: BufferAttribute;
+  readonly #modelUv: BufferAttribute;
+  readonly #modelColour: BufferAttribute;
+  readonly #modelTint: BufferAttribute;
+  /** Each drawn building's first vertex in the models' buffer, or -1 for an extrusion. */
+  readonly #modelAt: Int32Array;
+  readonly #selection = new MappedSelection();
+  /** Where each surface's range starts, and where its next triangle goes, in vertices. */
+  readonly #starts = new Int32Array(MAPPED_BUILDING_DRAW_CALLS);
+  readonly #cursors = new Int32Array(MAPPED_BUILDING_DRAW_CALLS);
+  /** Each drawn building's first vertex in its wall surface's range and in its roof's. */
+  readonly #wallAt: Int32Array;
+  readonly #roofAt: Int32Array;
+  #stats: MappedBuildingStats = {
+    buildings: 0,
+    near: 0,
+    far: 0,
+    triangles: 0,
+    drawCalls: 0,
+    passed: 0,
+    modelled: 0,
+    modelTriangles: 0,
+  };
+  /** The chunk the last refill was for; `undefined` before the first, or once the rung moved. */
+  #chunk: number | undefined;
+  #refills = 0;
+  #shown = true;
+  /** Whether the browser gate has turned the mapped buildings off — its control. */
+  #switchedOn = true;
+  /** Whether this frame carried the mapped buildings at all. @see setCarried */
+  #carried = true;
+
+  /**
+   * @param textures the world's structure surfaces. @see RealisticWorld.structures
+   * @param houses the house models and their atlas (#1585); without them every
+   * plan is its extrusion
+   */
+  constructor(
+    buildings: MappedBuildings,
+    textures: RealisticWorld['structures'],
+    houses?: RealisticHouses,
+  ) {
+    this.buildings = buildings;
+    this.#houses = houses;
+    this.#wallAt = new Int32Array(this.#selection.plans.length);
+    this.#roofAt = new Int32Array(this.#selection.plans.length);
+    this.#materials = new Map(
+      FOOTPRINT_SURFACES.map((surface) => [surface, mappedBuildingMaterial(surface, textures)]),
+    );
+    const first = this.#materials.get(FOOTPRINT_SURFACES[0] as StructureSurface) as Material;
+    this.#slots = Array.from({ length: MAPPED_BUILDING_DRAW_CALLS }, () => first);
+    const attribute = (size: number): BufferAttribute =>
+      new BufferAttribute(new Float32Array(MAPPED_VERTICES * size), size).setUsage(
+        DynamicDrawUsage,
+      );
+    this.#position = attribute(3);
+    this.#normal = attribute(3);
+    this.#uv = attribute(2);
+    this.#colour = attribute(3);
+    this.#tint = attribute(1);
+    this.#facade = attribute(FACADE_FLOATS);
+    this.#trim = attribute(3);
+    this.#style = attribute(STYLE_FLOATS);
+    const geometry = new BufferGeometry();
+    geometry.setAttribute('position', this.#position);
+    geometry.setAttribute('normal', this.#normal);
+    geometry.setAttribute('uv', this.#uv);
+    geometry.setAttribute('color', this.#colour);
+    geometry.setAttribute('oylTint', this.#tint);
+    geometry.setAttribute('oylFacade', this.#facade);
+    geometry.setAttribute('oylTrim', this.#trim);
+    geometry.setAttribute('oylStyle', this.#style);
+    geometry.setDrawRange(0, 0);
+    this.mesh = new Mesh(geometry, this.#slots);
+    this.mesh.frustumCulled = false;
+    this.mesh.visible = false;
+    // #1585: the house models' own buffer, of the same capacity — the budget
+    // is shared, and the models may take all of it.
+    this.#modelAt = new Int32Array(this.#selection.plans.length);
+    const models = new BufferGeometry();
+    this.#modelPosition = attribute(3);
+    this.#modelNormal = attribute(3);
+    this.#modelUv = attribute(2);
+    this.#modelColour = attribute(3);
+    this.#modelTint = attribute(1);
+    models.setAttribute('position', this.#modelPosition);
+    models.setAttribute('normal', this.#modelNormal);
+    models.setAttribute('uv', this.#modelUv);
+    models.setAttribute('color', this.#modelColour);
+    models.setAttribute('oylTint', this.#modelTint);
+    models.setDrawRange(0, 0);
+    this.modelMesh = new Mesh(models, houseModelMaterial(houses?.atlas));
+    this.modelMesh.frustumCulled = false;
+    this.modelMesh.visible = false;
+  }
+
+  addTo(scene: Scene): void {
+    scene.add(this.mesh);
+    scene.add(this.modelMesh);
+  }
+
+  /** What the last refill drew. */
+  get stats(): MappedBuildingStats {
+    return this.#stats;
+  }
+
+  /** How many refills this belt has run — for the tests' count over a ride. */
+  get refills(): number {
+    return this.#refills;
+  }
+
+  /** The material a surface wears here: one each, constructed with the belt. */
+  materialOf(surface: StructureSurface): MeshStandardMaterial | undefined {
+    return this.#materials.get(surface);
+  }
+
+  /** Whether a frame at `chunk` needs a refill: the rider's chunk changed, or the rung did. */
+  needsRefill(chunk: number): boolean {
+    return chunk !== this.#chunk;
+  }
+
+  /** The rung changed: the next frame refills, whatever its chunk. */
+  invalidate(): void {
+    this.#chunk = undefined;
+  }
+
+  setShown(on: boolean): void {
+    this.#shown = on;
+    this.#applyVisible();
+  }
+
+  /** @see mappedBuildingsShownOf */
+  switchOn(on: boolean): void {
+    this.#switchedOn = on;
+    this.#applyVisible();
+  }
+
+  /**
+   * Whether the frame carried the mapped buildings — a frame with none (the
+   * browser gate's bare frame) draws none, and the next that carries them
+   * draws what the last refill wrote.
+   */
+  setCarried(on: boolean): void {
+    this.#carried = on;
+    this.#applyVisible();
+  }
+
+  /** Whether the mapped buildings are drawn at all: shown, switched on and carried. */
+  get drawing(): boolean {
+    return this.#shown && this.#switchedOn && this.#carried;
+  }
+
+  #applyVisible(): void {
+    this.mesh.visible = this.drawing && this.#stats.triangles - this.#stats.modelTriangles > 0;
+    this.modelMesh.visible = this.drawing && this.#stats.modelled > 0;
+  }
+
+  /**
+   * The buildings nearest `(riderX, riderZ)` that fit `triangleBudget`,
+   * ranked with `rivals` (#1586), appended in place, with the draw range and
+   * the groups set — #1549. The view calls it when {@link needsRefill};
+   * `chunk` is recorded so the next frame in that chunk does not refill again.
+   */
+  refill(
+    riderX: number,
+    riderZ: number,
+    triangleBudget: number,
+    chunk?: number,
+    rivals: RivalStructures = NO_RIVALS,
+  ): MappedBuildingStats {
+    this.#refills += 1;
+    this.#chunk = chunk;
+    const selection = this.#selection;
+    selectMappedBuildings(
+      this.buildings,
+      riderX,
+      riderZ,
+      Math.min(triangleBudget, MAPPED_BUILDING_TRIANGLES),
+      selection,
+      MAPPED_BUILDING_DRAW_CALLS,
+      rivals,
+      this.#houses?.triangles,
+    );
+    const surfaces = selection.surfaces;
+    let end = 0;
+    for (let slot = 0; slot < surfaces.length; slot += 1) {
+      this.#starts[slot] = end;
+      this.#cursors[slot] = end;
+      end += (selection.surfaceTriangles[slot] ?? 0) * 3;
+      this.#slots[slot] = this.#materials.get(surfaces[slot] as StructureSurface) as Material;
+    }
+    let modelEnd = 0;
+    for (let at = 0; at < selection.count; at += 1) {
+      const plan = this.buildings.plans[selection.plans[at] as number] as FootprintPlan;
+      // #1585: a modelled plan's triangles are its model's, in the models' buffer.
+      if (selection.modelled[at] === 1 && plan.model !== undefined) {
+        this.#modelAt[at] = modelEnd;
+        this.#wallAt[at] = -1;
+        this.#roofAt[at] = -1;
+        modelEnd = this.#appendModel(plan, plan.model, modelEnd);
+        continue;
+      }
+      this.#modelAt[at] = -1;
+      const wall = surfaces.indexOf(plan.surfaces.wall);
+      const roof = surfaces.indexOf(plan.surfaces.roof);
+      this.#wallAt[at] = this.#cursors[wall] as number;
+      this.#roofAt[at] = this.#cursors[roof] as number;
+      for (const role of selection.far[at] === 1 ? FAR_ROLES : NEAR_ROLES) {
+        const slot = ROOF_ROLES.has(role) ? roof : wall;
+        this.#cursors[slot] = this.#append(plan, role, this.#cursors[slot] as number);
+      }
+    }
+    const geometry = this.mesh.geometry;
+    geometry.clearGroups();
+    if (mappedBuildingsMerged) {
+      for (let slot = 0; slot < surfaces.length; slot += 1) {
+        const count = (selection.surfaceTriangles[slot] ?? 0) * 3;
+        if (count > 0) geometry.addGroup(this.#starts[slot] as number, count, slot);
+      }
+    } else {
+      this.#groupEachBuilding();
+    }
+    geometry.setDrawRange(0, end);
+    for (const attribute of [
+      this.#position,
+      this.#normal,
+      this.#uv,
+      this.#colour,
+      this.#tint,
+      this.#facade,
+      this.#trim,
+      this.#style,
+    ]) {
+      attribute.clearUpdateRanges();
+      if (end > 0) {
+        attribute.addUpdateRange(0, end * attribute.itemSize);
+        attribute.needsUpdate = true;
+      }
+    }
+    const models = this.modelMesh.geometry;
+    models.setDrawRange(0, modelEnd);
+    for (const attribute of [
+      this.#modelPosition,
+      this.#modelNormal,
+      this.#modelUv,
+      this.#modelColour,
+      this.#modelTint,
+    ]) {
+      attribute.clearUpdateRanges();
+      if (modelEnd > 0) {
+        attribute.addUpdateRange(0, modelEnd * attribute.itemSize);
+        attribute.needsUpdate = true;
+      }
+    }
+    this.#stats = {
+      buildings: selection.count,
+      near: selection.near,
+      far: selection.farCount,
+      triangles: selection.triangles,
+      drawCalls: geometry.groups.length + (selection.modelCount > 0 ? 1 : 0),
+      passed: selection.passed,
+      modelled: selection.modelCount,
+      modelTriangles: selection.modelTriangles,
+    };
+    this.#applyVisible();
+    return this.#stats;
+  }
+
+  /** The browser gate's control: a group — a draw call — per building and surface. */
+  #groupEachBuilding(): void {
+    const selection = this.#selection;
+    for (let at = 0; at < selection.count; at += 1) {
+      if (selection.modelled[at] === 1) continue;
+      const plan = this.buildings.plans[selection.plans[at] as number] as FootprintPlan;
+      let walls = 0;
+      let roofs = 0;
+      for (const role of selection.far[at] === 1 ? FAR_ROLES : NEAR_ROLES) {
+        if (ROOF_ROLES.has(role)) roofs += roleTriangles(plan, role) * 3;
+        else walls += roleTriangles(plan, role) * 3;
+      }
+      const geometry = this.mesh.geometry;
+      const surfaces = selection.surfaces;
+      geometry.addGroup(this.#wallAt[at] as number, walls, surfaces.indexOf(plan.surfaces.wall));
+      geometry.addGroup(this.#roofAt[at] as number, roofs, surfaces.indexOf(plan.surfaces.roof));
+    }
+  }
+
+  /**
+   * Writes a plan's house model from vertex `at` of the models' buffer —
+   * #1585: each vertex placed by `house-models.ts` §`placedPoint`, its normal
+   * turned with it and taken through the stretch's inverse, its colour the
+   * plan's wall paint as a model wears it (`building-paint.ts` §`modelPaint`),
+   * and #621's seeded tint. Returns the vertex after it.
+   */
+  #appendModel(plan: FootprintPlan, placement: HousePlacement, at: number): number {
+    const model = this.#houses?.models[placement.model];
+    if (model === undefined) return at;
+    const [red, green, blue] = modelPaint(mappedRolePaint(plan, 'wall'));
+    const { ax, az, stretchX, stretchZ } = placement;
+    const position = this.#modelPosition.array as Float32Array;
+    const normal = this.#modelNormal.array as Float32Array;
+    const uv = this.#modelUv.array as Float32Array;
+    const colour = this.#modelColour.array as Float32Array;
+    const tint = this.#modelTint.array as Float32Array;
+    const vertices = model.triangles * 3;
+    for (let vertex = 0; vertex < vertices; vertex += 1) {
+      const to = at + vertex;
+      const [x, y, z] = placedPoint(
+        placement,
+        model.position[vertex * 3] as number,
+        model.position[vertex * 3 + 1] as number,
+        model.position[vertex * 3 + 2] as number,
+      );
+      position[to * 3] = x;
+      position[to * 3 + 1] = y;
+      position[to * 3 + 2] = z;
+      const along = (model.normal[vertex * 3] as number) / stretchX;
+      const up = model.normal[vertex * 3 + 1] as number;
+      const across = (model.normal[vertex * 3 + 2] as number) / stretchZ;
+      const nx = along * ax - across * az;
+      const nz = along * az + across * ax;
+      const length = Math.hypot(nx, up, nz) || 1;
+      normal[to * 3] = nx / length;
+      normal[to * 3 + 1] = up / length;
+      normal[to * 3 + 2] = nz / length;
+      uv[to * 2] = model.uv[vertex * 2] as number;
+      uv[to * 2 + 1] = model.uv[vertex * 2 + 1] as number;
+      colour[to * 3] = red;
+      colour[to * 3 + 1] = green;
+      colour[to * 3 + 2] = blue;
+      tint[to] = plan.tint;
+    }
+    return at + vertices;
+  }
+
+  /** Writes one role of a plan from vertex `at`; returns the vertex after it. */
+  #append(plan: FootprintPlan, role: FootprintRole, at: number): number {
+    const floats = plan.triangles[role];
+    const vertices = roleTriangles(plan, role) * 3;
+    const surface = surfaceOfRole(plan, role) as PhotographicSurface;
+    const repeat = surfaceRepeat(REALISTIC_STRUCTURE_SURFACES[surface]);
+    // A plan's texture coordinates are bays across and storeys up, and a
+    // roof's storeys both ways: back to metres, then the photograph's repeats.
+    const acrossMetres = role === 'roof' ? STOREY_METRES : BAY_METRES;
+    const shade = MAPPED_ROLE_SHADE[role];
+    const [red, green, blue] = mappedRolePaint(plan, role);
+    const [trimRed, trimGreen, trimBlue] = mappedRolePaint(plan, 'trim');
+    // A plan with a plinth stands in the ground at its foot; a raised part
+    // does not, and nor does a driveway, which is laid on the ground.
+    const grounded = plan.triangles.plinth.length > 0 && role !== 'driveway';
+    // #1588: a soffit's and a gutter's underside, in the shade of the wall and the eaves;
+    // #1589: a porch's ceiling likewise, and its deck in the shade of its roof;
+    // #1590: an awning's underside likewise.
+    const porch = role === 'porch';
+    const underside =
+      role === 'trim' || role === 'porch-trim' || porch || role === 'shopfront'
+        ? FACADE_AO.soffit
+        : 1;
+    const upside = porch ? FACADE_AO.porchFloor : 1;
+    const ground = plan.base + FOUNDATION_METRES;
+    const position = this.#position.array as Float32Array;
+    const normal = this.#normal.array as Float32Array;
+    const uv = this.#uv.array as Float32Array;
+    const colour = this.#colour.array as Float32Array;
+    const tint = this.#tint.array as Float32Array;
+    const facade = this.#facade.array as Float32Array;
+    const trim = this.#trim.array as Float32Array;
+    const style = this.#style.array as Float32Array;
+    for (let vertex = 0; vertex < vertices; vertex += 1) {
+      const from = vertex * FOOTPRINT_VERTEX_FLOATS;
+      const to = at + vertex;
+      const y = floats[from + 1] as number;
+      position[to * 3] = floats[from] as number;
+      position[to * 3 + 1] = y;
+      position[to * 3 + 2] = floats[from + 2] as number;
+      normal[to * 3] = floats[from + 3] as number;
+      normal[to * 3 + 1] = floats[from + 4] as number;
+      normal[to * 3 + 2] = floats[from + 5] as number;
+      uv[to * 2] = ((floats[from + 6] as number) * acrossMetres) / repeat.across;
+      uv[to * 2 + 1] = ((floats[from + 7] as number) * STOREY_METRES) / repeat.up;
+      const facing = floats[from + 4] as number;
+      const occluded = facing < -0.5 ? underside : facing > 0.5 ? upside : 1;
+      const light = shade * occluded * (grounded ? groundingShade(y - ground) : 1);
+      colour[to * 3] = red * light;
+      colour[to * 3 + 1] = green * light;
+      colour[to * 3 + 2] = blue * light;
+      tint[to] = plan.tint;
+      for (let at4 = 0; at4 < FACADE_FLOATS; at4 += 1) {
+        facade[to * FACADE_FLOATS + at4] = floats[from + FACADE_OFFSET + at4] as number;
+      }
+      for (let at4 = 0; at4 < STYLE_FLOATS; at4 += 1) {
+        style[to * STYLE_FLOATS + at4] = floats[from + STYLE_OFFSET + at4] as number;
+      }
+      trim[to * 3] = trimRed;
+      trim[to * 3 + 1] = trimGreen;
+      trim[to * 3 + 2] = trimBlue;
+    }
+    return at + vertices;
+  }
+
+  /**
+   * The drawn building at `place`, nearest first, and where its triangles are
+   * — for the tests, which read the buffers back against the plan.
+   */
+  drawnAt(place: number): DrawnMappedBuilding | undefined {
+    if (place < 0 || place >= this.#selection.count) return undefined;
+    return {
+      plan: this.#selection.plans[place] as number,
+      far: this.#selection.far[place] === 1,
+      wallAt: this.#wallAt[place] as number,
+      roofAt: this.#roofAt[place] as number,
+      modelAt: this.#modelAt[place] as number,
+    };
+  }
+
+  dispose(): void {
+    this.mesh.geometry.dispose();
+    for (const material of this.#materials.values()) material.dispose();
+    this.modelMesh.geometry.dispose();
+    (this.modelMesh.material as Material).dispose();
+  }
+}
+
+/**
+ * One frame's turn of the mapped buildings — #1549, `RealisticDrawing`'s
+ * rule, apart from the view so a test can ride it: refills `belt` when the
+ * frame's chunk changed (or the rung did, {@link MappedBuildingBelt.invalidate}),
+ * inside the rung's `structureItems` (at most `REALISTIC_STRUCTURE_ITEMS`),
+ * each structure item and billboard counted at `REALISTIC_TRIANGLES.structure`.
+ * Returns the most procedural structures may then draw until the next refill,
+ * or `undefined` on a frame that is not a refill — which reads one number and
+ * allocates nothing.
+ *
+ * **The frame's procedural structures and the mapped buildings are ranked
+ * together, by distance from the rider, under the one cap** — #1586, ADR 0054
+ * D-5.6's "the nearest come first, within the cap" (the owner's lane
+ * direction). Until #1586 every procedural structure was taken first, so a
+ * town's edge with 36 field boundaries ahead drew none of its buildings.
+ * The billboards are still taken first: they carry no place here, and the
+ * logo belts draw them uncapped whatever this decides.
+ *
+ * ⚠️ **The ranking decides how many procedural structures are drawn, not
+ * which.** The returned cap is a count, and the structure belts admit the
+ * first that many in view in the frame's own order (`settlements.ts`
+ * §`structuresAt`: buildings and lots first, then field boundaries nearest the
+ * rider), so the ones the cap drops are that order's tail.
+ */
+export function refillMappedBuildings(
+  belt: MappedBuildingBelt,
+  view: MappedBuildingsInView,
+  scatter: readonly ScatterItem[],
+  billboards: number,
+  structureItems: number,
+): number | undefined {
+  if (!belt.needsRefill(view.chunk)) return undefined;
+  const structure = REALISTIC_TRIANGLES.structure;
+  const items = Math.min(structureItems, REALISTIC_STRUCTURE_ITEMS);
+  let count = 0;
+  for (const item of scatter) if (isStructureKind(item.kind)) count += 1;
+  if (rivalDistances.length < count) rivalDistances = new Float64Array(count);
+  let at = 0;
+  for (const item of scatter) {
+    if (!isStructureKind(item.kind)) continue;
+    rivalDistances[at] = Math.hypot(item.x - view.x, item.z - view.z);
+    at += 1;
+  }
+  rivalDistances.subarray(0, count).sort();
+  const stats = belt.refill(
+    view.x,
+    view.z,
+    Math.max(0, items - billboards) * structure,
+    view.chunk,
+    {
+      distances: rivalDistances,
+      count,
+      triangles: structure,
+    },
+  );
+  return items - Math.ceil(stats.triangles / structure);
+}
+
+/** {@link refillMappedBuildings}' scratch: grown, never shrunk, so a refill rarely allocates. */
+let rivalDistances = new Float64Array(REALISTIC_STRUCTURE_ITEMS);
+
 /** Which of #621's bounds a realistic item's tint is drawn inside. @see realisticTints */
 type RealisticTintClass = 'foliage' | 'masonry';
 
@@ -11227,15 +14005,45 @@ class RealisticDrawing {
   readonly gantries: GantryBelt;
   /** The wordmark's boards, on the start gate and the billboards — #966. */
   readonly logos: LogoBelt;
-  readonly road: MeshStandardMaterial;
-  readonly ground: MeshStandardMaterial;
+  /** The village streets' kerbs and pavements, in ambientCG's paving — #1535. */
+  readonly pavements: PavementBelt;
+  /** What stands on them: lamp posts, bollards, benches and bins — #1536. */
+  readonly furniture: FurnitureBelt;
   readonly environment: Texture;
+  /** The road's and the ground's photographic materials. @see setSurfaces */
+  #road: MeshStandardMaterial;
+  #ground: MeshStandardMaterial;
+  /** What {@link setSurfaces} builds them from again. */
+  readonly #world: RealisticWorld;
+  readonly #fields: {
+    readonly span: { value: number };
+    readonly count: { value: number };
+    readonly treeLine: { value: number };
+  };
+  #surfaces: RealisticSurfaces;
   /** This frame's structures, as ground-blob casters — #620. @see groundScenery */
   readonly #structureCasters = blobCasters(REALISTIC_STRUCTURE_ITEMS);
   /** Both lists the blob belt reads, made once. */
   readonly #casterLists: readonly BlobCasters[];
   /** The rung's scenery budget, as the structure belts spend it. @see setBudget */
   #budget = Number.POSITIVE_INFINITY;
+  /** The rung's structures — what the procedural and the mapped buildings share. @see setBudget */
+  #structureItems: number = REALISTIC_STRUCTURE_ITEMS;
+  /**
+   * The most procedural structures a frame may draw while the mapped buildings
+   * hold their share — #1549: the rung's structures less what the last refill
+   * took. Unbounded with none drawn. @see updateMapped
+   */
+  #structureCap = Number.POSITIVE_INFINITY;
+  /** What the last refill left the procedural structures, re-applied on every frame that carries the town. */
+  #mappedCap = Number.POSITIVE_INFINITY;
+  /** The ride's buildings from map data, once a frame has carried them — #1549. */
+  #mapped: MappedBuildingBelt | undefined;
+  /** Whether the browser gate has switched them off. @see mappedBuildingsShownOf */
+  #mappedOn = true;
+  #shown = true;
+  /** Where the belts were added, for the mapped buildings' belt, built later. */
+  #scene: Scene | undefined;
 
   constructor(
     world: RealisticWorld,
@@ -11251,7 +14059,12 @@ class RealisticDrawing {
      * kit by forgetting to pass it on.
      */
     riderKit: RiderKit,
+    /** Which of the surfaces' shaders the road and the ground are built with — #1523. */
+    surfaces: RealisticSurfaces,
   ) {
+    this.#world = world;
+    this.#fields = fields;
+    this.#surfaces = surfaces;
     const anisotropy = Math.min(REALISTIC_ANISOTROPY, renderer.capabilities.getMaxAnisotropy());
     for (const texture of surfaceMapsOf(world)) texture.anisotropy = anisotropy;
     this.vegetation = new RealisticVegetationBelt(world.vegetation, treeLevels);
@@ -11267,23 +14080,75 @@ class RealisticDrawing {
     this.grounding = new GroundBlobBelt();
     this.gantries = new GantryBelt(world.banners);
     this.logos = new LogoBelt(world.wordmark, 'realistic');
+    this.pavements = new PavementBelt('realistic', world.structures.get('paving'));
+    this.furniture = new FurnitureBelt('realistic', world.structures.get('planks'));
     this.#casterLists = [this.vegetation.grounded, this.#structureCasters];
-    this.road = photographicRoadMaterial(world.road.colour, world.road.normal);
-    this.ground = photographicGroundMaterial(
-      world.ground.colour,
-      world.ground.normal,
-      fields.span,
-      fields.count,
-      // #627: the verge, the rock and scree, and where the tree line is —
-      // and since #1274 the bare rock a steep bank wears.
-      { verge: world.verge, rock: world.rock, crag: world.crag, treeLine: fields.treeLine },
-    );
+    this.#road = this.#roadMaterial();
+    this.#ground = this.#groundMaterial();
     const generator = new PMREMGenerator(renderer);
     this.environment = generator.fromEquirectangular(world.sky.texture).texture;
     generator.dispose();
   }
 
+  get road(): MeshStandardMaterial {
+    return this.#road;
+  }
+
+  get ground(): MeshStandardMaterial {
+    return this.#ground;
+  }
+
+  /**
+   * Builds the road and the ground again with `surfaces`' shaders, releasing
+   * the materials they replace — #1523. Only one that changes is rebuilt; the
+   * caller puts the new ones on the meshes.
+   */
+  setSurfaces(surfaces: RealisticSurfaces): void {
+    const was = this.#surfaces;
+    this.#surfaces = surfaces;
+    const rebound = surfaces.bounded !== was.bounded;
+    if (surfaces.roadWear !== was.roadWear || rebound) {
+      this.#road.dispose();
+      this.#road = this.#roadMaterial();
+    }
+    if (surfaces.groundBlend !== was.groundBlend || rebound) {
+      this.#ground.dispose();
+      this.#ground = this.#groundMaterial();
+    }
+  }
+
+  #roadMaterial(): MeshStandardMaterial {
+    const { road } = this.#world;
+    return photographicRoadMaterial(
+      road.colour,
+      road.normal,
+      this.#surfaces.roadWear,
+      this.#surfaces.bounded,
+    );
+  }
+
+  #groundMaterial(): MeshStandardMaterial {
+    const world = this.#world;
+    const fields = this.#fields;
+    return photographicGroundMaterial(
+      world.ground.colour,
+      world.ground.normal,
+      fields.span,
+      fields.count,
+      // #627: the verge, the rock and scree, and where the tree line is —
+      // and since #1274 the bare rock a steep bank wears. Without them
+      // (#1523's `ground-blend` lever) the ground is #425's photograph and
+      // #460's patchwork alone, as it was before #627.
+      this.#surfaces.groundBlend
+        ? { verge: world.verge, rock: world.rock, crag: world.crag, treeLine: fields.treeLine }
+        : { treeLine: fields.treeLine },
+      this.#surfaces.bounded,
+    );
+  }
+
   addTo(scene: Scene): void {
+    this.#scene = scene;
+    this.#mapped?.addTo(scene);
     this.vegetation.addTo(scene);
     this.structures.addTo(scene);
     this.primitives.addTo(scene);
@@ -11292,9 +14157,13 @@ class RealisticDrawing {
     this.grounding.addTo(scene);
     this.gantries.addTo(scene);
     this.logos.addTo(scene);
+    this.pavements.addTo(scene);
+    this.furniture.addTo(scene);
   }
 
   setShown(on: boolean): void {
+    this.#shown = on;
+    this.#mapped?.setShown(on);
     this.vegetation.setShown(on);
     this.structures.setShown(on);
     this.primitives.setShown(on);
@@ -11302,6 +14171,8 @@ class RealisticDrawing {
     this.grounding.setShown(on);
     this.gantries.setShown(on);
     this.logos.setShown(on);
+    this.pavements.setShown(on);
+    this.furniture.setShown(on);
     // #626: shown only by the view, on a rung that grounds riders by contact.
     if (!on) this.shadows.setShown(false);
   }
@@ -11321,11 +14192,92 @@ class RealisticDrawing {
    * belt alone, and the trees — the realistic world's cost — were free.
    * @see RealisticVegetationBelt.setBudget
    */
-  setBudget(items: number): void {
+  setBudget(items: number, structureItems: number): void {
     this.#budget = items;
+    // #1549: a new rung is a new share between the procedural structures and
+    // the mapped buildings, so the next frame refills whatever its chunk.
+    if (structureItems !== this.#structureItems) this.#mapped?.invalidate();
+    this.#structureItems = structureItems;
     this.vegetation.setBudget(items);
-    this.structures.setBudget(items);
+    this.structures.setBudget(Math.min(items, this.#structureCap));
     this.primitives.setBudget(items);
+  }
+
+  /**
+   * The ride's buildings from map data — #1549. Called once a frame, BEFORE
+   * {@link updateScenery}, with the frame's own scenery and billboards.
+   *
+   * On a frame whose chunk changed (or whose rung did) the belt refills inside
+   * the rung's structure term, the frame's procedural structures and the
+   * mapped buildings ranked together by distance from the rider (#1586,
+   * {@link refillMappedBuildings}) — every structure item and billboard in the
+   * frame counted at `REALISTIC_TRIANGLES.structure`, which is what the
+   * structure term prices each at. Until the next refill the procedural structures keep to
+   * what the mapped buildings left them ({@link #structureCap}), so a
+   * structure coming into view mid-chunk cannot push the term past
+   * `MAPPED_BUILDING_TRIANGLES`: the farthest goes undrawn, as the rung's
+   * budget already drops one.
+   *
+   * ⚠️ The cap holds the PROCEDURAL structure belt only. Billboards are
+   * counted at a refill and not between: the logo belts draw them uncapped, so
+   * a board that comes into view mid-chunk can put the structure term a few
+   * items over until the next refill. The held-to-the-budget guarantee is
+   * strict for structures, one refill behind for billboards.
+   *
+   * Every other frame reads one number and allocates nothing.
+   */
+  updateMapped(
+    view: MappedBuildingsInView | undefined,
+    scatter: readonly ScatterItem[],
+    billboards: number,
+  ): void {
+    if (view === undefined || !this.#mappedOn) {
+      this.#mapped?.setCarried(view !== undefined);
+      this.#capStructures(Number.POSITIVE_INFINITY);
+      return;
+    }
+    if (this.#mapped?.buildings !== view.buildings) {
+      this.#mapped?.mesh.removeFromParent();
+      this.#mapped?.modelMesh.removeFromParent();
+      this.#mapped?.dispose();
+      this.#mapped = new MappedBuildingBelt(
+        view.buildings,
+        this.#world.structures,
+        this.#world.houses,
+      );
+      this.#mapped.setShown(this.#shown);
+      if (this.#scene !== undefined) this.#mapped.addTo(this.#scene);
+    }
+    this.#mapped.setCarried(true);
+    const cap = refillMappedBuildings(
+      this.#mapped,
+      view,
+      scatter,
+      billboards,
+      this.#structureItems,
+    );
+    if (cap !== undefined) this.#mappedCap = cap;
+    this.#capStructures(this.#mappedCap);
+  }
+
+  /** Holds the procedural structures to `cap` items. @see updateMapped */
+  #capStructures(cap: number): void {
+    if (cap === this.#structureCap) return;
+    this.#structureCap = cap;
+    this.structures.setBudget(Math.min(this.#budget, cap));
+  }
+
+  /** The mapped buildings' belt, once a frame has carried them — #1549. */
+  get mapped(): MappedBuildingBelt | undefined {
+    return this.#mapped;
+  }
+
+  /** @see mappedBuildingsShownOf */
+  mappedShown(on: boolean): void {
+    this.#mappedOn = on;
+    this.#mapped?.switchOn(on);
+    // The next frame with them on refills: what it drew before may be stale.
+    if (on) this.#mapped?.invalidate();
   }
 
   /**
@@ -11345,7 +14297,7 @@ class RealisticDrawing {
     structureCasters(
       items,
       pose,
-      this.#budget,
+      Math.min(this.#budget, this.#structureCap),
       (kind) => this.structures.heightOf(kind),
       this.#structureCasters,
     );
@@ -11358,6 +14310,7 @@ class RealisticDrawing {
   }
 
   dispose(): void {
+    this.#mapped?.dispose();
     this.vegetation.dispose();
     this.structures.dispose();
     this.primitives.dispose();
@@ -11366,8 +14319,10 @@ class RealisticDrawing {
     this.grounding.dispose();
     this.gantries.dispose();
     this.logos.dispose();
-    this.road.dispose();
-    this.ground.dispose();
+    this.pavements.dispose();
+    this.furniture.dispose();
+    this.#road.dispose();
+    this.#ground.dispose();
     this.environment.dispose();
   }
 }
@@ -11575,6 +14530,20 @@ export function sceneryDrawnOf(view: GameView): number {
 }
 
 /**
+ * Where, in plan, every tree, shrub and rock a view's last realistic frame
+ * submitted stands, at whatever level — #1534's browser gate, which holds them
+ * off every settlement's ground. Empty for a stylised frame.
+ *
+ * @unwired reached only from the browser gate's harness; nothing in the render
+ * path needs to ask.
+ */
+export function realisticVegetationPlacesOf(
+  view: GameView,
+): readonly { readonly kind: string; x: number; z: number }[] {
+  return view instanceof ThreeGameView ? view.realisticVegetationPlaces() : [];
+}
+
+/**
  * The sky colour a view's water reflected in its last frame, linear RGB — what
  * the browser gate holds the realistic rungs' water to (#475): the line in
  * `render` that hands the water the realistic sky is one jsdom cannot reach,
@@ -11648,6 +14617,22 @@ export function groundBlobsOf(view: GameView): {
     triangles: blobs * ((index?.count ?? 0) / 3),
     matrices: mesh === undefined ? [] : Array.from(mesh.instanceMatrix.array.slice(0, blobs * 16)),
   };
+}
+
+/**
+ * The ground's vertex positions as the view last uploaded them — #1547, for
+ * the browser gate: read off the renderer's own position attribute, a copy,
+ * so a probe measures the triangles a GPU was handed rather than the
+ * `TerrainMesh` they were built from. Empty for a view that is not three.js.
+ *
+ * @test-facing read by `game-harness.ts` for #1547's probe; nothing in the
+ * render path needs to ask.
+ */
+export function terrainPositionsOf(view: GameView): Float32Array {
+  if (!(view instanceof ThreeGameView)) return new Float32Array(0);
+  const position = view.terrainMesh.geometry.getAttribute('position') as
+    BufferAttribute | undefined;
+  return position === undefined ? new Float32Array(0) : Float32Array.from(position.array);
 }
 
 /** How many numbers {@link writeTriangles} writes for a geometry: nine a triangle. */
@@ -11853,6 +14838,114 @@ export function logoBoardsOf(view: GameView): number {
 }
 
 /**
+ * Turns a view's buildings from map data off, or on again — #1549. The
+ * browser gate's control (`&levers=-mapped-buildings`): with them off, the
+ * probe aimed at a mapped wall must read the ground behind it, and the frame
+ * spend none of their draw calls.
+ *
+ * @test-facing the browser gate's control switch, read by `game-harness.ts`;
+ * the product always draws them.
+ */
+export function mappedBuildingsShownOf(view: GameView, on: boolean): void {
+  if (view instanceof ThreeGameView) view.mappedBuildingsShown(on);
+}
+
+/**
+ * What a view's buildings from map data drew at its last refill, and the
+ * belt itself — #1549, for the browser gate's counts. `undefined` before a
+ * realistic frame has carried any.
+ *
+ * @test-facing read by `game-harness.ts` §`mappedTownProbe`; the product
+ * reads the belt's stats nowhere
+ */
+export function mappedBuildingStatsOf(
+  view: GameView,
+): { readonly stats: MappedBuildingStats; readonly refills: number } | undefined {
+  const belt = view instanceof ThreeGameView ? view.mappedBuildings : undefined;
+  return belt === undefined ? undefined : { stats: belt.stats, refills: belt.refills };
+}
+
+/**
+ * Turns a view's village pavements off, or on again — #1535. The browser
+ * gate's control: with them off, the probe aimed at a pavement must read
+ * something else there, or it was never reading the pavement.
+ *
+ * @test-facing the browser gate's control switch, read by `game-harness.ts`;
+ * the product always draws them.
+ */
+export function pavementsShownOf(view: GameView, on: boolean): void {
+  if (view instanceof ThreeGameView) view.pavementsShown(on);
+}
+
+/**
+ * Turns a view's cross streets off, or on again — #1565. The browser gate's
+ * control: with them off, a frame at a junction draws none.
+ *
+ * @test-facing the browser gate's control switch, read by `game-harness.ts`;
+ * the product always draws them.
+ */
+export function sideRoadsShownOf(view: GameView, on: boolean): void {
+  if (view instanceof ThreeGameView) view.sideRoadsShown(on);
+}
+
+/**
+ * The mesh a view draws its cross streets with, and the road's own — #1565:
+ * one mesh for every side road in view, wearing the road's material.
+ *
+ * @test-facing read by `three-renderer.test.ts` and `game-harness.ts`.
+ */
+export function sideRoadMeshOf(
+  view: GameView,
+): { readonly sideRoads: Mesh; readonly road: Mesh } | undefined {
+  return view instanceof ThreeGameView
+    ? { sideRoads: view.sideRoadMesh, road: view.roadMesh }
+    : undefined;
+}
+
+/**
+ * Turns a view's street furniture off, or on again — #1536. The browser
+ * gate's control: with it off, the frame must change by the pixels the
+ * furniture covered, and lose one draw call a kind.
+ *
+ * @test-facing the browser gate's control switch, read by `game-harness.ts`;
+ * the product always draws it.
+ */
+export function furnitureShownOf(view: GameView, on: boolean): void {
+  if (view instanceof ThreeGameView) view.furnitureShown(on);
+}
+
+/**
+ * How many pieces of each furniture kind a view drew in its last frame, in the
+ * world it drew — #1536: none away from a village, and none past
+ * `streets.ts` §`FURNITURE_DRAW_METRES`.
+ *
+ * @test-facing read by `game-harness.ts`, which requires every kind beside a
+ * village and none in open country.
+ */
+export function furnitureCountsOf(view: GameView): Readonly<Record<FurnitureKind, number>> {
+  const belt = view instanceof ThreeGameView ? view.furnitureBelt : undefined;
+  const counts = {} as Record<FurnitureKind, number>;
+  for (const kind of FURNITURE_KINDS) {
+    const mesh = belt?.meshOf(kind);
+    counts[kind] = mesh?.visible === true ? mesh.count : 0;
+  }
+  return counts;
+}
+
+/**
+ * How many pavement triangles a view drew in its last frame, in the world it
+ * drew — #1535: nought away from a village.
+ *
+ * @test-facing read by `game-harness.ts`, which requires them beside a village
+ * and none in open country.
+ */
+export function pavementTrianglesOf(view: GameView): number {
+  const mesh = view instanceof ThreeGameView ? view.pavementMesh : undefined;
+  if (mesh?.visible !== true) return 0;
+  return (mesh.geometry.index?.count ?? 0) / 3;
+}
+
+/**
  * How many gantry boxes and banners a view drew in its last frame — #679.
  *
  * @test-facing read by `game-harness.ts`, which requires some near a line and
@@ -11903,6 +14996,66 @@ export function groundBlendOf(
   crag = 1,
 ): void {
   if (view instanceof ThreeGameView) view.groundBlend(verge, rock, scree, crag);
+}
+
+/**
+ * Which of the realistic surfaces' own shaders are built — #1523, the owner's
+ * cost pairs for #627's ground blend (with #1274's crag) and #628's road wear
+ * (with #879's). Each `false` builds that material WITHOUT its shader, as it
+ * was before: the ground as #425's photograph and #460's patchwork, the road
+ * with no wear. @see photographicRoadMaterial
+ *
+ * `bounded` is #1523's fix and not a layer: `true`, the product, draws the
+ * same picture for less — the wear's patch loop only where a patch can reach
+ * and the ground's derivatives taken once. `false` builds both shaders as
+ * they were before it: the browser gate's reference for "the same picture",
+ * and the owner's `-surface-bounds` before/after pair on the tablet.
+ * @see photographicRoadMaterial @see photographicGroundMaterial
+ */
+export interface RealisticSurfaces {
+  readonly groundBlend: boolean;
+  readonly roadWear: boolean;
+  readonly bounded: boolean;
+}
+
+/** What the product draws: both, bounded. */
+const REALISTIC_SURFACES_DRAWN: RealisticSurfaces = {
+  groundBlend: true,
+  roadWear: true,
+  bounded: true,
+};
+
+/**
+ * Builds the realistic road and ground with `surfaces`' shaders, in this view
+ * and in every realistic drawing it builds after — a setting of the view's, so
+ * it survives a rung change.
+ *
+ * ⚠️ **Not {@link groundBlendOf} or {@link roadWearOf}**: those set uniforms on
+ * the same program, so every fragment still pays for the blend and the wear.
+ * This takes the code out of the program, which is what a tablet's GPU clock
+ * can tell apart (#1523). A rebuilt ground's blend shares start at 1 again.
+ *
+ * @test-facing the owner's page's `-ground-blend` and `-road-wear` levers
+ * (`realistic-harness.ts`) and the browser gate's read of them
+ * (`game-harness.ts`); the product always draws both.
+ */
+export function realisticSurfacesOf(view: GameView, surfaces: RealisticSurfaces): void {
+  if (view instanceof ThreeGameView) view.realisticSurfaces(surfaces);
+}
+
+/**
+ * The uniforms the GPU holds for the realistic road's and ground's programs as
+ * last drawn, by name and sorted — read from WebGL, not from the material, so
+ * it is what was compiled and linked. `undefined` where the view has no
+ * realistic drawing; a material not yet drawn reads `[]`.
+ *
+ * @test-facing the browser gate's check of {@link realisticSurfacesOf}
+ * (`game-harness.ts`); the product never reads it.
+ */
+export function realisticSurfaceUniformsOf(
+  view: GameView,
+): { readonly road: readonly string[]; readonly ground: readonly string[] } | undefined {
+  return view instanceof ThreeGameView ? view.realisticSurfaceUniforms() : undefined;
 }
 
 /**
@@ -12124,6 +15277,8 @@ class ThreeGameView implements GameView {
    * later, when a world has loaded, and must be dressed then too.
    */
   #riderKit: RiderKit = RIDER_KITS.rider;
+  /** Which surfaces' shaders the realistic road and ground are built with. @see realisticSurfacesOf */
+  #surfaces: RealisticSurfaces = REALISTIC_SURFACES_DRAWN;
   /** The riders' contact shadows — #426. One draw for all of them. */
   readonly #contactShadows = new ContactShadowBelt();
   /**
@@ -12223,6 +15378,12 @@ class ThreeGameView implements GameView {
    * {@link loadGameWordmark} loaded before this view was built.
    */
   readonly #logos = new LogoBelt(gameWordmark, 'stylised');
+  /** The stylised world's village pavements — #1535. The realistic world draws its own. */
+  readonly #pavements = new PavementBelt('stylised');
+  /** The stylised world's street furniture — #1536. The realistic world draws its own. */
+  readonly #furniture = new FurnitureBelt('stylised');
+  /** The cross streets — #1565: ONE belt for both worlds, in whatever the road wears. */
+  readonly #sideRoads: SideRoadBelt;
   /**
    * The sun and the sky it is in — #286. Two lamps, built once and pointed
    * every frame by `#updateWorld`, exactly as the fog is coloured every frame.
@@ -12296,11 +15457,18 @@ class ThreeGameView implements GameView {
     // cull the road we just built. There is one mesh; culling it saves nothing.
     this.#road.frustumCulled = false;
     this.#scene.add(this.#road);
+    // #1565: the side roads, in the road's own material.
+    this.#sideRoads = new SideRoadBelt(this.#roadMaterial);
+    this.#sideRoads.addTo(this.#scene);
 
     this.#scatter.addTo(this.#scene);
     // #966: the start gate and the billboards, in the stylised world.
     this.#gantries.addTo(this.#scene);
     this.#logos.addTo(this.#scene);
+    // #1535: the village pavements, in the stylised world.
+    this.#pavements.addTo(this.#scene);
+    // #1536: what stands on them.
+    this.#furniture.addTo(this.#scene);
 
     // #349, #368. Added here rather than in `render`, so that a frame carrying
     // no rider draws nothing rather than adding one on the frame it appears.
@@ -12391,6 +15559,9 @@ class ThreeGameView implements GameView {
     );
     this.#bridges.update(frame.water.bridges);
     this.#updateRoad(frame);
+    // #1565: the cross streets, in whatever the road wears this frame.
+    this.#sideRoads.setMaterial(this.#road.material as Material);
+    this.#sideRoads.update(frame.sideRoads);
     // ⚠️ Both worlds' belts are handed the frame, and the hidden world's
     // return at once (ADR 0026 D-3): one frame, one arrangement, whichever
     // world draws it — so the two can never disagree about where a tree is.
@@ -12410,6 +15581,9 @@ class ThreeGameView implements GameView {
         )
       : frame.scatter;
     this.#scatter.update(scenery, frame.camera);
+    // #1549: the buildings from map data, refilled only at a chunk — before
+    // the structures, whose share of the rung it may change.
+    this.#realistic?.updateMapped(frame.mappedBuildings, frame.scatter, frame.billboards.length);
     this.#realistic?.updateScenery(scenery, frame.camera);
     this.#realistic?.groundScenery(
       scenery,
@@ -12433,6 +15607,12 @@ class ThreeGameView implements GameView {
     this.#realistic?.logos.update(frame.lines, frame.billboards);
     this.#gantries.update(frame.lines);
     this.#logos.update(frame.lines, frame.billboards);
+    // #1535: the village streets, in both worlds; the hidden world's draw nothing.
+    this.#realistic?.pavements.update(frame.streets);
+    this.#pavements.update(frame.streets);
+    // #1536: and what stands on them, within reach of the camera.
+    this.#realistic?.furniture.update(frame.streets, frame.camera);
+    this.#furniture.update(frame.streets, frame.camera);
     this.#updateMarkers(
       split?.stylised ??
         (realisticFrame
@@ -12532,7 +15712,10 @@ class ThreeGameView implements GameView {
     // ⚠️ Since #460 the frame carries the structures before the scenery, each
     // with a budget of its own, so the belt's is the two together.
     this.#scatter.setBudget(settings.scatterItems + settings.structureItems);
-    this.#realistic?.setBudget(settings.scatterItems + settings.structureItems);
+    this.#realistic?.setBudget(
+      settings.scatterItems + settings.structureItems,
+      settings.structureItems,
+    );
     // #367, and the same argument one line up: a rung is a property of the belt
     // between frames, so the render loop takes no decision about how many
     // distinct shapes it may draw. @see ScatterBelt.setVariants
@@ -12583,9 +15766,13 @@ class ThreeGameView implements GameView {
           this.#renderer,
           this.#terrain.fields,
           this.#riderKit,
+          this.#surfaces,
         );
         this.#realistic.addTo(this.#scene);
-        this.#realistic.setBudget(this.#quality.scatterItems + this.#quality.structureItems);
+        this.#realistic.setBudget(
+          this.#quality.scatterItems + this.#quality.structureItems,
+          this.#quality.structureItems,
+        );
       }
     }
     const drawing = realistic ? this.#realistic : undefined;
@@ -12593,6 +15780,8 @@ class ThreeGameView implements GameView {
     // #966: the stylised gate and boards, in the stylised world only.
     this.#gantries.setShown(!realistic);
     this.#logos.setShown(!realistic);
+    this.#pavements.setShown(!realistic);
+    this.#furniture.setShown(!realistic);
     // #783: shown in both worlds — in the realistic one it draws only the
     // remote riders `realisticRemoteSplit` hands it, and nothing on a frame
     // with none. @see #updateMarkers
@@ -12622,6 +15811,11 @@ class ThreeGameView implements GameView {
   realisticShoulders(): { x: number; y: number; z: number } | undefined {
     const into = { x: 0, y: 0, z: 0 };
     return this.#realistic?.riders.shouldersOf(into) === true ? into : undefined;
+  }
+
+  /** Where the realistic vegetation the last frame drew stands. @see realisticVegetationPlacesOf */
+  realisticVegetationPlaces(): readonly { readonly kind: string; x: number; z: number }[] {
+    return this.#realistic?.vegetation.places() ?? [];
   }
 
   /** How many scenery items the last frame drew, in the world it drew. @see sceneryDrawnOf */
@@ -12711,6 +15905,11 @@ class ThreeGameView implements GameView {
     this.#realistic?.grounding.setShown(on && this.#drawing === 'realistic');
   }
 
+  /** @see terrainPositionsOf */
+  get terrainMesh(): Mesh {
+    return this.#terrain.mesh;
+  }
+
   /** @see groundBlobsOf */
   get groundBlobMesh(): InstancedMesh | undefined {
     return this.#realistic?.grounding.mesh;
@@ -12750,6 +15949,87 @@ class ThreeGameView implements GameView {
   /** @see logoBoardsOf — the drawn world's. */
   get logoMesh(): InstancedMesh | undefined {
     return this.#drawing === 'realistic' ? this.#realistic?.logos.mesh : this.#logos.mesh;
+  }
+
+  /** @see mappedBuildingsShownOf */
+  mappedBuildingsShown(on: boolean): void {
+    this.#realistic?.mappedShown(on);
+  }
+
+  /** @see mappedBuildingStatsOf */
+  get mappedBuildings(): MappedBuildingBelt | undefined {
+    return this.#realistic?.mapped;
+  }
+
+  /** @see pavementsShownOf */
+  pavementsShown(on: boolean): void {
+    this.#realistic?.pavements.switchOn(on);
+    this.#pavements.switchOn(on);
+  }
+
+  /** @see pavementTrianglesOf — the drawn world's. */
+  get pavementMesh(): Mesh | undefined {
+    return this.#drawing === 'realistic' ? this.#realistic?.pavements.mesh : this.#pavements.mesh;
+  }
+
+  /** @see sideRoadsShownOf */
+  sideRoadsShown(on: boolean): void {
+    this.#sideRoads.switchOn(on);
+  }
+
+  /** @see sideRoadMeshOf */
+  get sideRoadMesh(): Mesh {
+    return this.#sideRoads.mesh;
+  }
+
+  /** The road's mesh, for {@link sideRoadMeshOf}'s caller to compare materials. */
+  get roadMesh(): Mesh {
+    return this.#road;
+  }
+
+  /** @see furnitureShownOf */
+  furnitureShown(on: boolean): void {
+    this.#realistic?.furniture.switchOn(on);
+    this.#furniture.switchOn(on);
+  }
+
+  /** @see furnitureCountsOf — the drawn world's. */
+  get furnitureBelt(): FurnitureBelt | undefined {
+    return this.#drawing === 'realistic' ? this.#realistic?.furniture : this.#furniture;
+  }
+
+  /** @see realisticSurfacesOf */
+  realisticSurfaces(surfaces: RealisticSurfaces): void {
+    this.#surfaces = surfaces;
+    const drawing = this.#realistic;
+    if (drawing === undefined) return;
+    drawing.setSurfaces(surfaces);
+    if (this.#drawing === 'realistic') {
+      this.#road.material = drawing.road;
+      this.#terrain.setPhotographic(drawing.ground);
+    }
+  }
+
+  /** @see realisticSurfaceUniformsOf */
+  realisticSurfaceUniforms(): { readonly road: string[]; readonly ground: string[] } | undefined {
+    const renderer = this.#renderer;
+    const drawing = this.#realistic;
+    if (renderer === undefined || drawing === undefined) return undefined;
+    const gl = renderer.getContext();
+    const uniformsOf = (material: Material): string[] => {
+      const { currentProgram } = renderer.properties.get(material) as {
+        currentProgram?: { readonly program: WebGLProgram };
+      };
+      if (currentProgram === undefined) return [];
+      const count = gl.getProgramParameter(currentProgram.program, gl.ACTIVE_UNIFORMS) as number;
+      const names: string[] = [];
+      for (let index = 0; index < count; index += 1) {
+        const name = gl.getActiveUniform(currentProgram.program, index)?.name;
+        if (name !== undefined) names.push(name);
+      }
+      return names.sort();
+    };
+    return { road: uniformsOf(drawing.road), ground: uniformsOf(drawing.ground) };
   }
 
   /** @see roadWearOf */
@@ -12880,6 +16160,8 @@ class ThreeGameView implements GameView {
     this.#bridges.setShading(shading);
     this.#gantries.setShading(shading);
     this.#logos.setShading(shading);
+    this.#pavements.setShading(shading);
+    this.#furniture.setShading(shading);
   }
 
   /**
@@ -12978,6 +16260,9 @@ class ThreeGameView implements GameView {
     this.#scatter.dispose();
     this.#gantries.dispose();
     this.#logos.dispose();
+    this.#pavements.dispose();
+    this.#furniture.dispose();
+    this.#sideRoads.dispose();
     this.#lighting.dispose();
     this.#riders.dispose();
     for (const belt of this.#ownMeshes) belt.dispose();
@@ -13127,6 +16412,12 @@ class ThreeGameView implements GameView {
         ROAD_ACROSS_ATTRIBUTE,
         new BufferAttribute(new Float32Array(this.#vertexCapacity / 3), 1),
       );
+      // #1523: which patches can reach each vertex's triangles, which only the
+      // bounded wear reads. @see writeRoadPatchReach
+      this.#roadGeometry.setAttribute(
+        ROAD_REACH_ATTRIBUTE,
+        new BufferAttribute(new Float32Array(this.#vertexCapacity / 3), 1),
+      );
     }
     if (indices.length > this.#indexCapacity) {
       this.#indexCapacity = indices.length;
@@ -13151,7 +16442,12 @@ class ThreeGameView implements GameView {
       const across = this.#roadGeometry.getAttribute(ROAD_ACROSS_ATTRIBUTE) as BufferAttribute;
       writeRoadAcross(frame.corridor, across.array as Float32Array);
       across.needsUpdate = true;
-      roadPatchUniforms(frame.corridor, wear.patches);
+      const patches = roadPatchUniforms(frame.corridor, wear.patches);
+      if (wear.bounded) {
+        const reach = this.#roadGeometry.getAttribute(ROAD_REACH_ATTRIBUTE) as BufferAttribute;
+        writeRoadPatchReach(frame.corridor, wear.patches, patches, reach.array as Float32Array);
+        reach.needsUpdate = true;
+      }
     }
     // Draw only the triangles this frame actually has, so a shorter corridor
     // does not draw stale ones left in the buffer from a longer one.

@@ -10,6 +10,7 @@ import {
   alsoWritten,
   AMBIENTCG_GROUND_TEXTURES,
   AMBIENTCG_PHRASE,
+  AMBIENTCG_STRUCTURE_TEXTURES,
   AMBIENTCG_TECHNIQUES_KEPT,
   ambientCgArchive,
   ambientCgTechniques,
@@ -45,6 +46,7 @@ import {
   STRUCTURE_TEXTURES,
   structureMapFiles,
   TEXTURE_SCRIPT,
+  TOWN_STRUCTURE_TEXTURES,
   type AssetSource,
   type InputLock,
   type Ktx2Step,
@@ -57,7 +59,12 @@ import {
   speciesOf,
   type GeneratedSpecies,
 } from './generated-trees';
-import { REALISTIC_RIDER } from '../../src/game/realistic-assets';
+import {
+  REALISTIC_HOUSE_ATLAS,
+  REALISTIC_RIDER,
+  REALISTIC_STRUCTURE_SURFACES,
+  TOWN_STRUCTURE_SURFACES,
+} from '../../src/game/realistic-assets';
 
 const polyHaven = SOURCES.find((source) => source.id === 'farm_field') as AssetSource;
 const makeHuman = SOURCES.find((source) => source.id === 'makehuman') as AssetSource;
@@ -111,9 +118,12 @@ describe('what the pipeline keeps — #430, ADR 0026 D-4', () => {
     // the same author under the same grant, falls under D-4's MakeHuman row.
     // ⚠️ Since #1274 ambientCG is read too, and that is no new host: D-4's own
     // table has admitted it from the start, and nothing here had used it.
+    // ⚠️ Since #1585 Sketchfab's public model records are read too, and that
+    // is no new host either: D-4's "an individual model under CC-BY-4.0" row
+    // admits a model wherever it is hosted, verified per asset.
     for (const source of SOURCES) {
       expect(new URL(source.licencePage).hostname, source.id).toMatch(
-        /^(?:polyhaven\.com|ambientcg\.com|raw\.githubusercontent\.com|static\.makehumancommunity\.org)$/,
+        /^(?:polyhaven\.com|ambientcg\.com|raw\.githubusercontent\.com|static\.makehumancommunity\.org|api\.sketchfab\.com)$/,
       );
     }
     // Every ambientCG asset is read through ambientCG's OWN origin, whose page
@@ -129,8 +139,12 @@ describe('what the pipeline keeps — #430, ADR 0026 D-4', () => {
       GENERATED_TREE_TEXTURES.filter((texture) => texture.from === from).map(
         (texture) => texture.id,
       );
+    // And since #1535 a village's pavement.
     expect(fromAmbientCg.map((source) => source.id)).toEqual([
       ...AMBIENTCG_GROUND_TEXTURES.map((texture) => texture.id),
+      ...AMBIENTCG_STRUCTURE_TEXTURES.map((texture) => texture.id),
+      // #1548: the mapped towns' render, concrete and flat roof.
+      ...TOWN_STRUCTURE_TEXTURES.map((texture) => texture.id),
       ...wornFrom('ambientcg'),
     ]);
     expect(wornFrom('ambientcg').length).toBeGreaterThan(0);
@@ -388,6 +402,45 @@ describe('the structures’ surfaces — #475, ADR 0026 D-12 layer 3', () => {
   });
 });
 
+describe('the mapped towns’ surfaces — #1548', () => {
+  it('takes one ambientCG CC0 material for each of the three, colour and normal map at 1K', () => {
+    expect(TOWN_STRUCTURE_TEXTURES.map((texture) => texture.surface)).toEqual([
+      ...TOWN_STRUCTURE_SURFACES,
+    ]);
+    for (const texture of TOWN_STRUCTURE_TEXTURES) {
+      const source = SOURCES.find((each) => each.id === texture.id);
+      expect(source?.licence, texture.id).toBe('CC0-1.0');
+      expect(source?.licencePage, texture.id).toBe(`https://ambientcg.com/view?id=${texture.id}`);
+      expect(source?.origin, texture.id).toEqual({
+        from: 'ambientcg',
+        attribute: '1K-JPG',
+        maps: ['Color', 'NormalGL'],
+      });
+    }
+  });
+
+  it('makes exactly the two files the renderer loads, ambientCG’s 1K maps encoded with no step between', () => {
+    for (const texture of TOWN_STRUCTURE_TEXTURES) {
+      const maps = REALISTIC_STRUCTURE_SURFACES[texture.surface];
+      const made = OUTPUTS.filter((output) => output.from === texture.id);
+      expect(made.map((output) => output.file).sort(), texture.id).toEqual(
+        [maps.colour, maps.normal].sort(),
+      );
+      for (const output of made) {
+        const normal = output.file === maps.normal;
+        // No Blender, no downsizing: the upstream JPEG straight into the
+        // encoder — and the colour map as colour, the normal map as a normal
+        // map, never the other way.
+        expect(output.recipe, output.file).toEqual({
+          how: 'ktx2',
+          file: `${texture.id}_1K-JPG_${normal ? 'NormalGL' : 'Color'}.jpg`,
+          ktx2: { encoding: normal ? 'normal' : 'colour', origin: 'bottom-left' },
+        });
+      }
+    }
+  });
+});
+
 describe('the KTX2 step — #618, ADR 0026 D-8', () => {
   const colour: Ktx2Step = { encoding: 'colour', origin: 'bottom-left' };
 
@@ -440,7 +493,14 @@ describe('the KTX2 step — #618, ADR 0026 D-8', () => {
       // v = 0, and never went through TextureLoader — so it is not flipped.
       if (recipe.how === 'drawn') expect(recipe.ktx2.origin, output.file).toBe('top-left');
       if (recipe.how === 'blender') {
-        if (recipe.ktx2 !== undefined) expect(recipe.ktx2.origin, output.file).toBe('bottom-left');
+        // #1585: the house models' atlas is read at their GLBs' own texture
+        // coordinates, which `GLTFLoader` never flips, and Blender writes it
+        // top row first as those coordinates read it — the rider's case.
+        if (recipe.ktx2 !== undefined) {
+          expect(recipe.ktx2.origin, output.file).toBe(
+            output.file === REALISTIC_HOUSE_ATLAS ? 'top-left' : 'bottom-left',
+          );
+        }
         // #623: the rider's maps are read at the body's own glTF texture
         // coordinates, which `GLTFLoader` never flips, and `process_rider.py`
         // writes them top row first as those coordinates read them.
@@ -763,9 +823,11 @@ ${more}`;
     expect(archiveOf(makeHuman)).toBeUndefined();
   });
 
-  it('takes each ground surface at 1K, colour and OpenGL normal map, and makes two files of it', () => {
+  it('takes each ground and structure surface at 1K, colour and OpenGL normal map, and makes two files of it', () => {
     expect(AMBIENTCG_GROUND_TEXTURES.length).toBeGreaterThan(0);
-    for (const texture of AMBIENTCG_GROUND_TEXTURES) {
+    // #1535: the pavement's by the same archive, maps and recipe.
+    expect(AMBIENTCG_STRUCTURE_TEXTURES.map((texture) => texture.id)).toEqual(['PavingStones136']);
+    for (const texture of [...AMBIENTCG_GROUND_TEXTURES, ...AMBIENTCG_STRUCTURE_TEXTURES]) {
       const source = SOURCES.find((each) => each.id === texture.id);
       expect(source?.licence, texture.id).toBe('CC0-1.0');
       expect(source?.licencePage, texture.id).toBe(`https://ambientcg.com/view?id=${texture.id}`);

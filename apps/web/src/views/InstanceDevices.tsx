@@ -6,6 +6,7 @@ import { Button } from '../design/Button';
 import { StatusMessage } from '../design/StatusMessage';
 import {
   AFTER_REVOKE_TEXT,
+  formatIsoDay,
   noticeText,
   REVOKE_MARK_TEXT,
   revokeKeyName,
@@ -50,10 +51,12 @@ export const ACCOUNT_NOTICES_TEXT = {
   keep: 'Keep it',
 } as const;
 
-/** A day, in UTC, so the screen says the same thing wherever it is read. */
-function day(unixSeconds: number): string {
-  return new Date(unixSeconds * 1000).toISOString().slice(0, 10);
-}
+/**
+ * A day on the device's own calendar, as the revoke button names a key by
+ * (#1511): in UTC, a key added near midnight read "Added" one day and
+ * "Revoke the key added on" the next.
+ */
+const day = formatIsoDay;
 
 export function InstanceDevices({
   port,

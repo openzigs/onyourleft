@@ -85,6 +85,21 @@ import type { Theme } from '../design/tokens';
  */
 export const OSM_ATTRIBUTION = '© OpenStreetMap contributors';
 
+/**
+ * The Open Database License 1.0, which OpenStreetMap's data is published
+ * under — linked from the credits screen's map-data entry (#1552). The same
+ * URL `@onyourleft/fit` writes into an exported course (`ODBL_LICENCE_URL`),
+ * held equal to it by `CreditsView.test.tsx`.
+ */
+export const ODBL_LICENCE_URL = 'https://opendatacommons.org/licenses/odbl/1-0/';
+
+/**
+ * ODbL §4.3 a's own example notice, word for word — the credits screen's
+ * sentence for the map data (#1552, ADR 0054 D-3.6).
+ */
+export const ODBL_NOTICE =
+  'Contains information from OpenStreetMap, which is made available here under the Open Database License (ODbL).';
+
 /** Where the basemap is, and what must be credited for it. */
 export interface BasemapConfig {
   /**

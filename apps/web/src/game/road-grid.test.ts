@@ -10,7 +10,13 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { distanceToDrawnRoad, squaredToSegment } from './road-grid';
+import {
+  distanceToDrawnRoad,
+  nearestOnRoadSegments,
+  roadSegmentsNear,
+  squaredToSegment,
+  type BesideTheRoad,
+} from './road-grid';
 import { northRoute, plannerCornerRoute } from './route-fixtures-testing';
 import { corridorOrigin, drawnRoadFrame } from './terrain';
 
@@ -51,6 +57,41 @@ describe('the distance to any stretch of the drawn road — #613', () => {
       if (distanceToDrawnRoad(corner, cornerOrigin, x, z, 10) < 6.5) nearer += 1;
     }
     expect(nearer).toBe(1);
+  });
+});
+
+describe('where beside the drawn road a point is — #1540', () => {
+  const profile = northRoute(1_000, () => 0);
+  const origin = corridorOrigin(profile);
+
+  it('reads the route distance and the signed offset the road’s own frame gives', () => {
+    for (const [along, lateral] of [
+      [300, 12],
+      [300, -40],
+      [742.5, 150],
+    ] as const) {
+      const frame = drawnRoadFrame(profile, origin, along);
+      if (frame === undefined) throw new Error('a straight road has a direction');
+      const x = frame.x + frame.normalX * lateral;
+      const z = frame.z + frame.normalZ * lateral;
+      const segments: number[] = [];
+      const road = roadSegmentsNear(profile, origin, x, z, 200, segments);
+      expect(segments.length).toBeGreaterThan(0);
+      const beside: BesideTheRoad = { along: 0, lateral: 0, distance: 0 };
+      expect(nearestOnRoadSegments(road, segments, x, z, beside)).toBe(true);
+      expect(beside.along).toBeCloseTo(along, 1);
+      expect(beside.lateral).toBeCloseTo(lateral, 2);
+      expect(beside.distance).toBeCloseTo(Math.abs(lateral), 2);
+    }
+  });
+
+  it('finds nothing where no segment is near, and leaves its answer alone', () => {
+    const segments: number[] = [];
+    const road = roadSegmentsNear(profile, origin, 5_000, 5_000, 50, segments);
+    expect(segments).toHaveLength(0);
+    const beside: BesideTheRoad = { along: 7, lateral: 7, distance: 7 };
+    expect(nearestOnRoadSegments(road, segments, 5_000, 5_000, beside)).toBe(false);
+    expect(beside).toStrictEqual({ along: 7, lateral: 7, distance: 7 });
   });
 });
 

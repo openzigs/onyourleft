@@ -797,6 +797,7 @@ describe('on-delete behaviour — cascade, chosen explicitly', () => {
       trustedDeviceKeys: 0,
       workoutGoals: 0,
       recentlyDeleted: 0,
+      worldCorridors: 0,
     });
 
     // Re-create the athlete before reading. If the cascade had left the rows
@@ -862,6 +863,7 @@ describe('on-delete behaviour — cascade, chosen explicitly', () => {
       trustedDeviceKeys: 0,
       workoutGoals: 0,
       recentlyDeleted: 0,
+      worldCorridors: 0,
     });
   });
 

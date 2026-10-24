@@ -578,6 +578,122 @@
       ]
     },
     {
+      "id": "PavingStones136",
+      "licence": "CC0-1.0",
+      "licencePage": "https://ambientcg.com/view?id=PavingStones136",
+      "evidence": "All assets are released under the Creative Commons CC0 license",
+      "read": "2026-10-21",
+      "authors": "ambientCG",
+      "technique": "Surface Photogrammetry",
+      "files": [
+        {
+          "path": "PavingStones136_1K-JPG.zip",
+          "url": "https://ambientcg.com/get?file=PavingStones136_1K-JPG.zip",
+          "bytes": 6477861,
+          "sha256": "a0934b008683333265e061319aa1ceb018b3a721969147606415033b27a13ae3"
+        },
+        {
+          "path": "PavingStones136_1K-JPG_Color.jpg",
+          "url": "https://ambientcg.com/get?file=PavingStones136_1K-JPG.zip#PavingStones136_1K-JPG_Color.jpg",
+          "bytes": 1192545,
+          "sha256": "5291854f8a7fcf554f2e278e36426eee9de65dd71d93c7f837b2c3f80ca42cfa"
+        },
+        {
+          "path": "PavingStones136_1K-JPG_NormalGL.jpg",
+          "url": "https://ambientcg.com/get?file=PavingStones136_1K-JPG.zip#PavingStones136_1K-JPG_NormalGL.jpg",
+          "bytes": 1210149,
+          "sha256": "a302144995a7d7b638864a8f28ed1c8bf68d8c7b6c6e3daac6ad5b0bbf4bc9c0"
+        }
+      ]
+    },
+    {
+      "id": "PaintedPlaster017",
+      "licence": "CC0-1.0",
+      "licencePage": "https://ambientcg.com/view?id=PaintedPlaster017",
+      "evidence": "All assets are released under the Creative Commons CC0 license",
+      "read": "2026-10-21",
+      "authors": "ambientCG",
+      "technique": "Surface Photogrammetry",
+      "files": [
+        {
+          "path": "PaintedPlaster017_1K-JPG.zip",
+          "url": "https://ambientcg.com/get?file=PaintedPlaster017_1K-JPG.zip",
+          "bytes": 4721132,
+          "sha256": "bae0380d82b6ccac8943b4980417cb3c9de5c896218339c108056f1dfb8e886c"
+        },
+        {
+          "path": "PaintedPlaster017_1K-JPG_Color.jpg",
+          "url": "https://ambientcg.com/get?file=PaintedPlaster017_1K-JPG.zip#PaintedPlaster017_1K-JPG_Color.jpg",
+          "bytes": 378542,
+          "sha256": "ed8a69a6437de9d41d2cf380f7e6a216232fc4754f256c3405985c857547ffef"
+        },
+        {
+          "path": "PaintedPlaster017_1K-JPG_NormalGL.jpg",
+          "url": "https://ambientcg.com/get?file=PaintedPlaster017_1K-JPG.zip#PaintedPlaster017_1K-JPG_NormalGL.jpg",
+          "bytes": 1115299,
+          "sha256": "1bef1887c10e1ce104be1a557e4dbd7634ef6d5ece6e3b4237dab2d0962f57fa"
+        }
+      ]
+    },
+    {
+      "id": "Concrete048",
+      "licence": "CC0-1.0",
+      "licencePage": "https://ambientcg.com/view?id=Concrete048",
+      "evidence": "All assets are released under the Creative Commons CC0 license",
+      "read": "2026-10-21",
+      "authors": "ambientCG",
+      "technique": "Surface Photogrammetry",
+      "files": [
+        {
+          "path": "Concrete048_1K-JPG.zip",
+          "url": "https://ambientcg.com/get?file=Concrete048_1K-JPG.zip",
+          "bytes": 7536748,
+          "sha256": "af13b985a7a72c89f2a8e0c8ef5651a8f13126bf792b5ca5f6a0861712156df6"
+        },
+        {
+          "path": "Concrete048_1K-JPG_Color.jpg",
+          "url": "https://ambientcg.com/get?file=Concrete048_1K-JPG.zip#Concrete048_1K-JPG_Color.jpg",
+          "bytes": 1126366,
+          "sha256": "1bf2156b86866732660e6d3ccd1942598ac2b9e73a9bb97a23763574ac4d7722"
+        },
+        {
+          "path": "Concrete048_1K-JPG_NormalGL.jpg",
+          "url": "https://ambientcg.com/get?file=Concrete048_1K-JPG.zip#Concrete048_1K-JPG_NormalGL.jpg",
+          "bytes": 1548946,
+          "sha256": "16d110670d8a1ca4dd85d498bb46afaa6953456878dae7ab6717053600dddcfc"
+        }
+      ]
+    },
+    {
+      "id": "Gravel035",
+      "licence": "CC0-1.0",
+      "licencePage": "https://ambientcg.com/view?id=Gravel035",
+      "evidence": "All assets are released under the Creative Commons CC0 license",
+      "read": "2026-10-21",
+      "authors": "ambientCG",
+      "technique": "Surface Photogrammetry",
+      "files": [
+        {
+          "path": "Gravel035_1K-JPG.zip",
+          "url": "https://ambientcg.com/get?file=Gravel035_1K-JPG.zip",
+          "bytes": 10559484,
+          "sha256": "7619496b2c6410dd49b2c3765c44af1dec451a7a162296367b5529f4165e869a"
+        },
+        {
+          "path": "Gravel035_1K-JPG_Color.jpg",
+          "url": "https://ambientcg.com/get?file=Gravel035_1K-JPG.zip#Gravel035_1K-JPG_Color.jpg",
+          "bytes": 1788520,
+          "sha256": "33db5c773a9012819087c66d18ce326bad3f4181300c42e58768b060b88421fa"
+        },
+        {
+          "path": "Gravel035_1K-JPG_NormalGL.jpg",
+          "url": "https://ambientcg.com/get?file=Gravel035_1K-JPG.zip#Gravel035_1K-JPG_NormalGL.jpg",
+          "bytes": 2441528,
+          "sha256": "301ab362fde4296c6b8cf7b21ab5628c8bdaa57ae838ff56ae88baae25bd672b"
+        }
+      ]
+    },
+    {
       "id": "Bark012",
       "licence": "CC0-1.0",
       "licencePage": "https://ambientcg.com/view?id=Bark012",
@@ -912,6 +1028,676 @@
           "url": "https://files.makehumancommunity.org/asset_packs/makehuman_system_assets/makehuman_system_assets_cc0.zip#eyebrows/eyebrow001/eyebrow001.mhmat",
           "bytes": 1098,
           "sha256": "976e5f4f1d3922d7a11c6e2db233f8b4584b068d00619d5749687e81c92d61fc"
+        }
+      ]
+    },
+    {
+      "id": "old_american_brick_shop",
+      "licence": "CC-BY-4.0",
+      "licencePage": "https://api.sketchfab.com/v3/models/3170993b67ee4e58b27d69d5877f71bd",
+      "evidence": "creativecommons.org/licenses/by/4.0/",
+      "read": "2026-10-23",
+      "authors": "Orzechu",
+      "files": [
+        {
+          "path": "3170993b67ee4e58b27d69d5877f71bd.zip",
+          "url": "https://sketchfab.com/3d-models/low-poly-old-american-brick-building-with-shop-3170993b67ee4e58b27d69d5877f71bd",
+          "bytes": 2699576,
+          "sha256": "bdca6f3ba4fefaf9aeec27a502b39b6aaf0f46afdfa1362c5ecf4a93a88a975b"
+        },
+        {
+          "path": "scene.gltf",
+          "url": "https://sketchfab.com/3d-models/low-poly-old-american-brick-building-with-shop-3170993b67ee4e58b27d69d5877f71bd#scene.gltf",
+          "bytes": 5952,
+          "sha256": "c61b036941ddadb6ca915b5afd765c97daa2d78b5f7c0cb291d0cded990579a4"
+        },
+        {
+          "path": "scene.bin",
+          "url": "https://sketchfab.com/3d-models/low-poly-old-american-brick-building-with-shop-3170993b67ee4e58b27d69d5877f71bd#scene.bin",
+          "bytes": 433584,
+          "sha256": "4a232e66fbd6bf1b281c273dc12c3855abbf66489c2dce90bdfa31d37af5a7cb"
+        },
+        {
+          "path": "textures/MainBuilding_baseColor.jpeg",
+          "url": "https://sketchfab.com/3d-models/low-poly-old-american-brick-building-with-shop-3170993b67ee4e58b27d69d5877f71bd#textures/MainBuilding_baseColor.jpeg",
+          "bytes": 725375,
+          "sha256": "49415eaa9b99f62eecb1b029f010a358251f9443b233a4d63792577b18d0eba2"
+        },
+        {
+          "path": "textures/MainBuilding_metallicRoughness.png",
+          "url": "https://sketchfab.com/3d-models/low-poly-old-american-brick-building-with-shop-3170993b67ee4e58b27d69d5877f71bd#textures/MainBuilding_metallicRoughness.png",
+          "bytes": 1018347,
+          "sha256": "8f3290c9c242c93e7c41e605fcec63a2c1912309f3e7a86ea5988dce7ca8e0ac"
+        },
+        {
+          "path": "textures/MainBuilding_normal.jpeg",
+          "url": "https://sketchfab.com/3d-models/low-poly-old-american-brick-building-with-shop-3170993b67ee4e58b27d69d5877f71bd#textures/MainBuilding_normal.jpeg",
+          "bytes": 891055,
+          "sha256": "923eb4cbabc8c97b72ac3b2f7e3640fdc55b03943b9b9c93fbae42fa0f855ced"
+        },
+        {
+          "path": "license.txt",
+          "url": "https://sketchfab.com/3d-models/low-poly-old-american-brick-building-with-shop-3170993b67ee4e58b27d69d5877f71bd#license.txt",
+          "bytes": 802,
+          "sha256": "373bb3f9cc41efe3d13d13088782bb600eb81f80719f4ddcc2013fdff483e0dc"
+        }
+      ]
+    },
+    {
+      "id": "rva_detached_house_01a",
+      "licence": "CC-BY-4.0",
+      "licencePage": "https://api.sketchfab.com/v3/models/2a4536b39df14c7fb953ec38699c817a",
+      "evidence": "creativecommons.org/licenses/by/4.0/",
+      "read": "2026-10-23",
+      "authors": "GildedAge",
+      "files": [
+        {
+          "path": "2a4536b39df14c7fb953ec38699c817a.zip",
+          "url": "https://sketchfab.com/3d-models/rva-detached-house-01a-2a4536b39df14c7fb953ec38699c817a",
+          "bytes": 2952919,
+          "sha256": "71df4be9fbb5e78187a1d5f41cdeae0792470a67f1f40fc0b185e51375a82fbd"
+        },
+        {
+          "path": "scene.gltf",
+          "url": "https://sketchfab.com/3d-models/rva-detached-house-01a-2a4536b39df14c7fb953ec38699c817a#scene.gltf",
+          "bytes": 5756,
+          "sha256": "9b77ab3dd612f680ad8eb5a0e4bfef8db634f620af6a2960e63f07a35986161d"
+        },
+        {
+          "path": "scene.bin",
+          "url": "https://sketchfab.com/3d-models/rva-detached-house-01a-2a4536b39df14c7fb953ec38699c817a#scene.bin",
+          "bytes": 150768,
+          "sha256": "862ecc8f0a7055cf45064837514b96e5f21b30237a80b782ff5ae8ee4645e268"
+        },
+        {
+          "path": "textures/All_Surfaces_diffuse.png",
+          "url": "https://sketchfab.com/3d-models/rva-detached-house-01a-2a4536b39df14c7fb953ec38699c817a#textures/All_Surfaces_diffuse.png",
+          "bytes": 1511949,
+          "sha256": "1d5f79875fad3f6fb8da9e285bf686dd0d323af98c296864dead29a1daeed56e"
+        },
+        {
+          "path": "textures/All_Surfaces_normal.png",
+          "url": "https://sketchfab.com/3d-models/rva-detached-house-01a-2a4536b39df14c7fb953ec38699c817a#textures/All_Surfaces_normal.png",
+          "bytes": 1386627,
+          "sha256": "97019fa7e8636cde531df4ba72ec6e668112c11df14cde307b28c1ed596f0dfc"
+        },
+        {
+          "path": "textures/All_Surfaces_specularGlossiness.png",
+          "url": "https://sketchfab.com/3d-models/rva-detached-house-01a-2a4536b39df14c7fb953ec38699c817a#textures/All_Surfaces_specularGlossiness.png",
+          "bytes": 3329,
+          "sha256": "a64475c6872b997b4d81e6a7c99ee7fc9a15c57dc195025101098c0a89bd29c7"
+        },
+        {
+          "path": "license.txt",
+          "url": "https://sketchfab.com/3d-models/rva-detached-house-01a-2a4536b39df14c7fb953ec38699c817a#license.txt",
+          "bytes": 712,
+          "sha256": "ab9d261e2a181944768efa131421a956789f63c7adbb9e48df86d8c7e2efba5a"
+        }
+      ]
+    },
+    {
+      "id": "rva_detached_house_02a",
+      "licence": "CC-BY-4.0",
+      "licencePage": "https://api.sketchfab.com/v3/models/1402df424d674ac39374f1791d56376e",
+      "evidence": "creativecommons.org/licenses/by/4.0/",
+      "read": "2026-10-23",
+      "authors": "GildedAge",
+      "files": [
+        {
+          "path": "1402df424d674ac39374f1791d56376e.zip",
+          "url": "https://sketchfab.com/3d-models/rva-detached-house-02a-1402df424d674ac39374f1791d56376e",
+          "bytes": 1464787,
+          "sha256": "cc8f8f69f94aa2cf5d6ad62ad4bd6ca2fcdb5957e0c7a8fb3fe7ab208994125b"
+        },
+        {
+          "path": "scene.gltf",
+          "url": "https://sketchfab.com/3d-models/rva-detached-house-02a-1402df424d674ac39374f1791d56376e#scene.gltf",
+          "bytes": 4968,
+          "sha256": "7419e0cb2d78e2b697e3cf89cdd191a82ea7e79846a0512bf2a6ffd16010630a"
+        },
+        {
+          "path": "scene.bin",
+          "url": "https://sketchfab.com/3d-models/rva-detached-house-02a-1402df424d674ac39374f1791d56376e#scene.bin",
+          "bytes": 85008,
+          "sha256": "30692c44a05349564f49be721fd873fd7681739b640e7d7e3c98bc3de5e448ec"
+        },
+        {
+          "path": "textures/All_Surfaces_diffuse.png",
+          "url": "https://sketchfab.com/3d-models/rva-detached-house-02a-1402df424d674ac39374f1791d56376e#textures/All_Surfaces_diffuse.png",
+          "bytes": 1429772,
+          "sha256": "a8308fc2d759d9f1d39fbc272e6eeaee87b87d5fababace1ec1af4c73cf6b189"
+        },
+        {
+          "path": "textures/All_Surfaces_specularGlossiness.png",
+          "url": "https://sketchfab.com/3d-models/rva-detached-house-02a-1402df424d674ac39374f1791d56376e#textures/All_Surfaces_specularGlossiness.png",
+          "bytes": 5927,
+          "sha256": "fd51071cb5265f7cfa18a9a0c71d20dcf35ccb145e2bf0781401482aab1817a2"
+        },
+        {
+          "path": "license.txt",
+          "url": "https://sketchfab.com/3d-models/rva-detached-house-02a-1402df424d674ac39374f1791d56376e#license.txt",
+          "bytes": 712,
+          "sha256": "0e120fd41fde546ea173323f68cf535b637190f5608062404ec03c68e241fcfd"
+        }
+      ]
+    },
+    {
+      "id": "rva_detached_house_02b",
+      "licence": "CC-BY-4.0",
+      "licencePage": "https://api.sketchfab.com/v3/models/2e8c66f89f45465f904f6422acc2aab1",
+      "evidence": "creativecommons.org/licenses/by/4.0/",
+      "read": "2026-10-23",
+      "authors": "GildedAge",
+      "files": [
+        {
+          "path": "2e8c66f89f45465f904f6422acc2aab1.zip",
+          "url": "https://sketchfab.com/3d-models/rva-detached-house-02b-2e8c66f89f45465f904f6422acc2aab1",
+          "bytes": 2679428,
+          "sha256": "0cbe9dc489eaffa72567bb3f533e0e601a2ed2be881c3c87e9e9a270d9dd878c"
+        },
+        {
+          "path": "scene.gltf",
+          "url": "https://sketchfab.com/3d-models/rva-detached-house-02b-2e8c66f89f45465f904f6422acc2aab1#scene.gltf",
+          "bytes": 5587,
+          "sha256": "276454d10bea293e78cfdc083dfbb2afe35382ba4e66cc125b88dd09391d9af0"
+        },
+        {
+          "path": "scene.bin",
+          "url": "https://sketchfab.com/3d-models/rva-detached-house-02b-2e8c66f89f45465f904f6422acc2aab1#scene.bin",
+          "bytes": 119760,
+          "sha256": "21b40f62ff7cbcc304f40607e1cf6b81203ec7d1dbb690af95896353809ab573"
+        },
+        {
+          "path": "textures/All_Surfaces_diffuse.png",
+          "url": "https://sketchfab.com/3d-models/rva-detached-house-02b-2e8c66f89f45465f904f6422acc2aab1#textures/All_Surfaces_diffuse.png",
+          "bytes": 1372929,
+          "sha256": "e99be597ad8ba6beb7832482fe4f17e7296c25f8079fa5140e9d6448eb72561c"
+        },
+        {
+          "path": "textures/All_Surfaces_normal.png",
+          "url": "https://sketchfab.com/3d-models/rva-detached-house-02b-2e8c66f89f45465f904f6422acc2aab1#textures/All_Surfaces_normal.png",
+          "bytes": 1258210,
+          "sha256": "a3ed1d388f2a6d37785994eb38f0f70df32ec807447955b741e9a06f47c77849"
+        },
+        {
+          "path": "textures/All_Surfaces_specularGlossiness.png",
+          "url": "https://sketchfab.com/3d-models/rva-detached-house-02b-2e8c66f89f45465f904f6422acc2aab1#textures/All_Surfaces_specularGlossiness.png",
+          "bytes": 6258,
+          "sha256": "5f06843d906166a38886f2593a5d13b6cf7ceff2ca2e9c874c06af75b36e2e7f"
+        },
+        {
+          "path": "license.txt",
+          "url": "https://sketchfab.com/3d-models/rva-detached-house-02b-2e8c66f89f45465f904f6422acc2aab1#license.txt",
+          "bytes": 712,
+          "sha256": "5baa54a62b37bc68c9f6af3522b64afb76426269e5daeb67b8cb9144585a82fe"
+        }
+      ]
+    },
+    {
+      "id": "rva_detached_house_03a",
+      "licence": "CC-BY-4.0",
+      "licencePage": "https://api.sketchfab.com/v3/models/8de5dcfdc4b44456879604c9a6795b4d",
+      "evidence": "creativecommons.org/licenses/by/4.0/",
+      "read": "2026-10-23",
+      "authors": "GildedAge",
+      "files": [
+        {
+          "path": "8de5dcfdc4b44456879604c9a6795b4d.zip",
+          "url": "https://sketchfab.com/3d-models/rva-detached-house-03a-8de5dcfdc4b44456879604c9a6795b4d",
+          "bytes": 2523807,
+          "sha256": "737555dda333bff02d7e585bc31bdb2a6aae3f991a4b36cbc31cbf29a45f5872"
+        },
+        {
+          "path": "scene.gltf",
+          "url": "https://sketchfab.com/3d-models/rva-detached-house-03a-8de5dcfdc4b44456879604c9a6795b4d#scene.gltf",
+          "bytes": 4626,
+          "sha256": "db4b640b5e37c73d00bf4faab0adfb82d97f3fbf36cc4a80371c4a7ddcdb2269"
+        },
+        {
+          "path": "scene.bin",
+          "url": "https://sketchfab.com/3d-models/rva-detached-house-03a-8de5dcfdc4b44456879604c9a6795b4d#scene.bin",
+          "bytes": 118620,
+          "sha256": "ec0883b5d3b10a931f6d2827f98bcb817b74b5369bdf839dd858c9d215947cd3"
+        },
+        {
+          "path": "textures/Material_diffuse.png",
+          "url": "https://sketchfab.com/3d-models/rva-detached-house-03a-8de5dcfdc4b44456879604c9a6795b4d#textures/Material_diffuse.png",
+          "bytes": 1304481,
+          "sha256": "0410802015bd6d531281adcf089803c54b5eb94f627b2f547daf4de67510d935"
+        },
+        {
+          "path": "textures/Material_normal.png",
+          "url": "https://sketchfab.com/3d-models/rva-detached-house-03a-8de5dcfdc4b44456879604c9a6795b4d#textures/Material_normal.png",
+          "bytes": 1173779,
+          "sha256": "68843bc62512c67c12f60ef9d1e45603205a68d35b8c5eb63d4ebe8fbf8bcb31"
+        },
+        {
+          "path": "textures/Material_specularGlossiness.png",
+          "url": "https://sketchfab.com/3d-models/rva-detached-house-03a-8de5dcfdc4b44456879604c9a6795b4d#textures/Material_specularGlossiness.png",
+          "bytes": 5336,
+          "sha256": "f1aaf455a014b5d9f27470a53928b22d682d048408a3cd56bce523a837c1ef64"
+        },
+        {
+          "path": "license.txt",
+          "url": "https://sketchfab.com/3d-models/rva-detached-house-03a-8de5dcfdc4b44456879604c9a6795b4d#license.txt",
+          "bytes": 712,
+          "sha256": "767adc8b391720368aa5cd8fac9e7c46e2e7919151967b77fb3c81e8d67dcbd1"
+        }
+      ]
+    },
+    {
+      "id": "rva_detached_house_03c",
+      "licence": "CC-BY-4.0",
+      "licencePage": "https://api.sketchfab.com/v3/models/712addc7d8464ce88e958433bacdf76a",
+      "evidence": "creativecommons.org/licenses/by/4.0/",
+      "read": "2026-10-23",
+      "authors": "GildedAge",
+      "files": [
+        {
+          "path": "712addc7d8464ce88e958433bacdf76a.zip",
+          "url": "https://sketchfab.com/3d-models/rva-detached-house-03c-712addc7d8464ce88e958433bacdf76a",
+          "bytes": 2525038,
+          "sha256": "019c8dbeb5b7564f6c3a59c8779b255fbed379c51f0f9ca5ef1bd666e0510374"
+        },
+        {
+          "path": "scene.gltf",
+          "url": "https://sketchfab.com/3d-models/rva-detached-house-03c-712addc7d8464ce88e958433bacdf76a#scene.gltf",
+          "bytes": 4605,
+          "sha256": "4b7faf9e47f260ee5424b7997cce8aad6129481ec579bec2f47c1bd34879449b"
+        },
+        {
+          "path": "scene.bin",
+          "url": "https://sketchfab.com/3d-models/rva-detached-house-03c-712addc7d8464ce88e958433bacdf76a#scene.bin",
+          "bytes": 126744,
+          "sha256": "ea7b33cd0c8f47e23c0a483906f7b168afd540fa6a9d3343dc16dfafbfddaaa0"
+        },
+        {
+          "path": "textures/Material_diffuse.png",
+          "url": "https://sketchfab.com/3d-models/rva-detached-house-03c-712addc7d8464ce88e958433bacdf76a#textures/Material_diffuse.png",
+          "bytes": 1304481,
+          "sha256": "0410802015bd6d531281adcf089803c54b5eb94f627b2f547daf4de67510d935"
+        },
+        {
+          "path": "textures/Material_normal.png",
+          "url": "https://sketchfab.com/3d-models/rva-detached-house-03c-712addc7d8464ce88e958433bacdf76a#textures/Material_normal.png",
+          "bytes": 1173779,
+          "sha256": "68843bc62512c67c12f60ef9d1e45603205a68d35b8c5eb63d4ebe8fbf8bcb31"
+        },
+        {
+          "path": "textures/Material_specularGlossiness.png",
+          "url": "https://sketchfab.com/3d-models/rva-detached-house-03c-712addc7d8464ce88e958433bacdf76a#textures/Material_specularGlossiness.png",
+          "bytes": 5336,
+          "sha256": "f1aaf455a014b5d9f27470a53928b22d682d048408a3cd56bce523a837c1ef64"
+        },
+        {
+          "path": "license.txt",
+          "url": "https://sketchfab.com/3d-models/rva-detached-house-03c-712addc7d8464ce88e958433bacdf76a#license.txt",
+          "bytes": 712,
+          "sha256": "b09e5c2cfa2155cc716d8341997e869fd138e87659d87047a4a7aa6cd52678f2"
+        }
+      ]
+    },
+    {
+      "id": "rva_detached_house_04a",
+      "licence": "CC-BY-4.0",
+      "licencePage": "https://api.sketchfab.com/v3/models/24e0d7d6d9514e69b504d11c6b8117f3",
+      "evidence": "creativecommons.org/licenses/by/4.0/",
+      "read": "2026-10-23",
+      "authors": "GildedAge",
+      "files": [
+        {
+          "path": "24e0d7d6d9514e69b504d11c6b8117f3.zip",
+          "url": "https://sketchfab.com/3d-models/rva-detached-house-04a-24e0d7d6d9514e69b504d11c6b8117f3",
+          "bytes": 2659887,
+          "sha256": "feabb828b2c62ad7e46b3c3d4b08a47b21748361723b8c2a9b36c777614fd382"
+        },
+        {
+          "path": "scene.gltf",
+          "url": "https://sketchfab.com/3d-models/rva-detached-house-04a-24e0d7d6d9514e69b504d11c6b8117f3#scene.gltf",
+          "bytes": 4670,
+          "sha256": "92fbc7cb4e6a80213932530f4541f5b2e929e35b14f299c0871d4c3547a8564e"
+        },
+        {
+          "path": "scene.bin",
+          "url": "https://sketchfab.com/3d-models/rva-detached-house-04a-24e0d7d6d9514e69b504d11c6b8117f3#scene.bin",
+          "bytes": 106188,
+          "sha256": "ff07393fa3ce7e6d6506a5c75da2650c18389ef76c9db9d878f495d565b17264"
+        },
+        {
+          "path": "textures/Material.001_diffuse.png",
+          "url": "https://sketchfab.com/3d-models/rva-detached-house-04a-24e0d7d6d9514e69b504d11c6b8117f3#textures/Material.001_diffuse.png",
+          "bytes": 1371353,
+          "sha256": "9e5d96c5936b686cb2980880a9e9e8a296ac3271ce840235ea60aedc875f6efc"
+        },
+        {
+          "path": "textures/Material.001_normal.png",
+          "url": "https://sketchfab.com/3d-models/rva-detached-house-04a-24e0d7d6d9514e69b504d11c6b8117f3#textures/Material.001_normal.png",
+          "bytes": 1205251,
+          "sha256": "b4bfe6f55890cc500471116cf40a307336610215949ed120f5bfb288816508da"
+        },
+        {
+          "path": "textures/Material.001_specularGlossiness.png",
+          "url": "https://sketchfab.com/3d-models/rva-detached-house-04a-24e0d7d6d9514e69b504d11c6b8117f3#textures/Material.001_specularGlossiness.png",
+          "bytes": 47843,
+          "sha256": "b0f1ea67eba4cc88b87efeccb12a95baad78a3dd30ea9024084122610ae0130d"
+        },
+        {
+          "path": "license.txt",
+          "url": "https://sketchfab.com/3d-models/rva-detached-house-04a-24e0d7d6d9514e69b504d11c6b8117f3#license.txt",
+          "bytes": 712,
+          "sha256": "c25f1c85aa67343ad8491f88751f278e5d65e746d75a0bb57823f32218e2cf9f"
+        }
+      ]
+    },
+    {
+      "id": "rva_detached_house_04b",
+      "licence": "CC-BY-4.0",
+      "licencePage": "https://api.sketchfab.com/v3/models/d18cb26c342146aabb3b4aadbf860369",
+      "evidence": "creativecommons.org/licenses/by/4.0/",
+      "read": "2026-10-23",
+      "authors": "GildedAge",
+      "files": [
+        {
+          "path": "d18cb26c342146aabb3b4aadbf860369.zip",
+          "url": "https://sketchfab.com/3d-models/rva-detached-house-04b-d18cb26c342146aabb3b4aadbf860369",
+          "bytes": 2659737,
+          "sha256": "222f70ac6814b62931219645eb63490bef0c6d46222afc83a5cad07d61bda8d2"
+        },
+        {
+          "path": "scene.gltf",
+          "url": "https://sketchfab.com/3d-models/rva-detached-house-04b-d18cb26c342146aabb3b4aadbf860369#scene.gltf",
+          "bytes": 4776,
+          "sha256": "d0287e9ebbdad3ebbc61c636733b6cc2602ac0d964604e65c7e273871a4e0419"
+        },
+        {
+          "path": "scene.bin",
+          "url": "https://sketchfab.com/3d-models/rva-detached-house-04b-d18cb26c342146aabb3b4aadbf860369#scene.bin",
+          "bytes": 105888,
+          "sha256": "918a69ae63d6e62e788ffcbc58b2681ca2925fc7ec55a52a85dafc1ea36814b1"
+        },
+        {
+          "path": "textures/Material.001_diffuse.png",
+          "url": "https://sketchfab.com/3d-models/rva-detached-house-04b-d18cb26c342146aabb3b4aadbf860369#textures/Material.001_diffuse.png",
+          "bytes": 1371353,
+          "sha256": "9e5d96c5936b686cb2980880a9e9e8a296ac3271ce840235ea60aedc875f6efc"
+        },
+        {
+          "path": "textures/Material.001_normal.png",
+          "url": "https://sketchfab.com/3d-models/rva-detached-house-04b-d18cb26c342146aabb3b4aadbf860369#textures/Material.001_normal.png",
+          "bytes": 1205251,
+          "sha256": "b4bfe6f55890cc500471116cf40a307336610215949ed120f5bfb288816508da"
+        },
+        {
+          "path": "textures/Material.001_specularGlossiness.png",
+          "url": "https://sketchfab.com/3d-models/rva-detached-house-04b-d18cb26c342146aabb3b4aadbf860369#textures/Material.001_specularGlossiness.png",
+          "bytes": 47843,
+          "sha256": "b0f1ea67eba4cc88b87efeccb12a95baad78a3dd30ea9024084122610ae0130d"
+        },
+        {
+          "path": "license.txt",
+          "url": "https://sketchfab.com/3d-models/rva-detached-house-04b-d18cb26c342146aabb3b4aadbf860369#license.txt",
+          "bytes": 712,
+          "sha256": "89cd7a00bf205d0859c64c32c2e22d262c23c1bbb8ed9357c23d1e3d9a8a6243"
+        }
+      ]
+    },
+    {
+      "id": "rva_duplex_01a",
+      "licence": "CC-BY-4.0",
+      "licencePage": "https://api.sketchfab.com/v3/models/70436f6bde1b43c8a8fe2e630f0fa4d0",
+      "evidence": "creativecommons.org/licenses/by/4.0/",
+      "read": "2026-10-23",
+      "authors": "GildedAge",
+      "files": [
+        {
+          "path": "70436f6bde1b43c8a8fe2e630f0fa4d0.zip",
+          "url": "https://sketchfab.com/3d-models/rva-duplex-01a-70436f6bde1b43c8a8fe2e630f0fa4d0",
+          "bytes": 2712759,
+          "sha256": "3e226a56e91c6103f70e1b72be7731cdb83cc8d1c04f4139794785412c7b0835"
+        },
+        {
+          "path": "scene.gltf",
+          "url": "https://sketchfab.com/3d-models/rva-duplex-01a-70436f6bde1b43c8a8fe2e630f0fa4d0#scene.gltf",
+          "bytes": 4641,
+          "sha256": "e1f92d1a9dac7860100c0cb36041b9e657335bd8d941f00548cc4355e7a8e261"
+        },
+        {
+          "path": "scene.bin",
+          "url": "https://sketchfab.com/3d-models/rva-duplex-01a-70436f6bde1b43c8a8fe2e630f0fa4d0#scene.bin",
+          "bytes": 107844,
+          "sha256": "38529ba736a777b320f5e7d99c3cd1df07a548829d6e3502cfd0afd7a63b59f4"
+        },
+        {
+          "path": "textures/All_Surfaces_diffuse.png",
+          "url": "https://sketchfab.com/3d-models/rva-duplex-01a-70436f6bde1b43c8a8fe2e630f0fa4d0#textures/All_Surfaces_diffuse.png",
+          "bytes": 1405425,
+          "sha256": "43b71181bcabca99cc509d068e6b7ded8bfb099cbea791c763bae37804fbca24"
+        },
+        {
+          "path": "textures/All_Surfaces_normal.png",
+          "url": "https://sketchfab.com/3d-models/rva-duplex-01a-70436f6bde1b43c8a8fe2e630f0fa4d0#textures/All_Surfaces_normal.png",
+          "bytes": 1268951,
+          "sha256": "654d46b17090009ecb57d34e73323e5a0d4e0ac87d33c1adab4fd54a1def4838"
+        },
+        {
+          "path": "textures/All_Surfaces_specularGlossiness.png",
+          "url": "https://sketchfab.com/3d-models/rva-duplex-01a-70436f6bde1b43c8a8fe2e630f0fa4d0#textures/All_Surfaces_specularGlossiness.png",
+          "bytes": 5573,
+          "sha256": "8f861ceca95adbfb0082a1ae6a39ccaec6d72fb8b934f8b14507a46029184a05"
+        },
+        {
+          "path": "license.txt",
+          "url": "https://sketchfab.com/3d-models/rva-duplex-01a-70436f6bde1b43c8a8fe2e630f0fa4d0#license.txt",
+          "bytes": 680,
+          "sha256": "22d40d31c52b9b3022c4fa77d17ec34bd50ffd920c721bef82adcd1f9259d59d"
+        }
+      ]
+    },
+    {
+      "id": "rva_duplex_01b",
+      "licence": "CC-BY-4.0",
+      "licencePage": "https://api.sketchfab.com/v3/models/c15aa7e064a24323b10271c05c8dc35d",
+      "evidence": "creativecommons.org/licenses/by/4.0/",
+      "read": "2026-10-23",
+      "authors": "GildedAge",
+      "files": [
+        {
+          "path": "c15aa7e064a24323b10271c05c8dc35d.zip",
+          "url": "https://sketchfab.com/3d-models/rva-duplex-01b-c15aa7e064a24323b10271c05c8dc35d",
+          "bytes": 2712840,
+          "sha256": "0891d9bef188b8454c888f1551310f6f96d7f6cbb6d4591b944b2f86fc4e628f"
+        },
+        {
+          "path": "scene.gltf",
+          "url": "https://sketchfab.com/3d-models/rva-duplex-01b-c15aa7e064a24323b10271c05c8dc35d#scene.gltf",
+          "bytes": 4640,
+          "sha256": "2b3296b0fa82e86f8cb607ddd27af10f134e4cfc81bd730ed00b60bf582cc19c"
+        },
+        {
+          "path": "scene.bin",
+          "url": "https://sketchfab.com/3d-models/rva-duplex-01b-c15aa7e064a24323b10271c05c8dc35d#scene.bin",
+          "bytes": 108624,
+          "sha256": "5cf39dd493beb18014fa4ab92af178a692a53f84fb006256252ca12d7a16cbfb"
+        },
+        {
+          "path": "textures/All_Surfaces_diffuse.png",
+          "url": "https://sketchfab.com/3d-models/rva-duplex-01b-c15aa7e064a24323b10271c05c8dc35d#textures/All_Surfaces_diffuse.png",
+          "bytes": 1405425,
+          "sha256": "43b71181bcabca99cc509d068e6b7ded8bfb099cbea791c763bae37804fbca24"
+        },
+        {
+          "path": "textures/All_Surfaces_normal.png",
+          "url": "https://sketchfab.com/3d-models/rva-duplex-01b-c15aa7e064a24323b10271c05c8dc35d#textures/All_Surfaces_normal.png",
+          "bytes": 1268951,
+          "sha256": "654d46b17090009ecb57d34e73323e5a0d4e0ac87d33c1adab4fd54a1def4838"
+        },
+        {
+          "path": "textures/All_Surfaces_specularGlossiness.png",
+          "url": "https://sketchfab.com/3d-models/rva-duplex-01b-c15aa7e064a24323b10271c05c8dc35d#textures/All_Surfaces_specularGlossiness.png",
+          "bytes": 5573,
+          "sha256": "8f861ceca95adbfb0082a1ae6a39ccaec6d72fb8b934f8b14507a46029184a05"
+        },
+        {
+          "path": "license.txt",
+          "url": "https://sketchfab.com/3d-models/rva-duplex-01b-c15aa7e064a24323b10271c05c8dc35d#license.txt",
+          "bytes": 680,
+          "sha256": "aa5bdc3e716e35942b68f017e1b4ab17b1b1b41835933f463d790630de7a7c5d"
+        }
+      ]
+    },
+    {
+      "id": "rva_duplex_02a",
+      "licence": "CC-BY-4.0",
+      "licencePage": "https://api.sketchfab.com/v3/models/564e912772eb45bab4abb2c176aace8c",
+      "evidence": "creativecommons.org/licenses/by/4.0/",
+      "read": "2026-10-23",
+      "authors": "GildedAge",
+      "files": [
+        {
+          "path": "564e912772eb45bab4abb2c176aace8c.zip",
+          "url": "https://sketchfab.com/3d-models/rva-duplex-02a-564e912772eb45bab4abb2c176aace8c",
+          "bytes": 2720115,
+          "sha256": "1ab6dfdfe04131fbbe5a459eb5b0fc37d5a714a9868fd648c295eff278cf4e21"
+        },
+        {
+          "path": "scene.gltf",
+          "url": "https://sketchfab.com/3d-models/rva-duplex-02a-564e912772eb45bab4abb2c176aace8c#scene.gltf",
+          "bytes": 4636,
+          "sha256": "29dd86daccf008853ceaa053735e5c6682b14c1d805aa33969f525f003c20ff5"
+        },
+        {
+          "path": "scene.bin",
+          "url": "https://sketchfab.com/3d-models/rva-duplex-02a-564e912772eb45bab4abb2c176aace8c#scene.bin",
+          "bytes": 139272,
+          "sha256": "50ba4aac90dbdadc30bf5ec0eb693dc7f5781d10a75ec6b4adaa63aeab299f9f"
+        },
+        {
+          "path": "textures/All_Surfaces_diffuse.png",
+          "url": "https://sketchfab.com/3d-models/rva-duplex-02a-564e912772eb45bab4abb2c176aace8c#textures/All_Surfaces_diffuse.png",
+          "bytes": 1405425,
+          "sha256": "43b71181bcabca99cc509d068e6b7ded8bfb099cbea791c763bae37804fbca24"
+        },
+        {
+          "path": "textures/All_Surfaces_normal.png",
+          "url": "https://sketchfab.com/3d-models/rva-duplex-02a-564e912772eb45bab4abb2c176aace8c#textures/All_Surfaces_normal.png",
+          "bytes": 1268951,
+          "sha256": "654d46b17090009ecb57d34e73323e5a0d4e0ac87d33c1adab4fd54a1def4838"
+        },
+        {
+          "path": "textures/All_Surfaces_specularGlossiness.png",
+          "url": "https://sketchfab.com/3d-models/rva-duplex-02a-564e912772eb45bab4abb2c176aace8c#textures/All_Surfaces_specularGlossiness.png",
+          "bytes": 5573,
+          "sha256": "8f861ceca95adbfb0082a1ae6a39ccaec6d72fb8b934f8b14507a46029184a05"
+        },
+        {
+          "path": "license.txt",
+          "url": "https://sketchfab.com/3d-models/rva-duplex-02a-564e912772eb45bab4abb2c176aace8c#license.txt",
+          "bytes": 680,
+          "sha256": "3bb8dc753308922c5e8d341753a0bffba6a655c5b8533a11fb645412ae41f58b"
+        }
+      ]
+    },
+    {
+      "id": "rva_duplex_02b",
+      "licence": "CC-BY-4.0",
+      "licencePage": "https://api.sketchfab.com/v3/models/9cc8cfa308da400bb3e6c8a304ffb4ae",
+      "evidence": "creativecommons.org/licenses/by/4.0/",
+      "read": "2026-10-23",
+      "authors": "GildedAge",
+      "files": [
+        {
+          "path": "9cc8cfa308da400bb3e6c8a304ffb4ae.zip",
+          "url": "https://sketchfab.com/3d-models/rva-duplex-02b-9cc8cfa308da400bb3e6c8a304ffb4ae",
+          "bytes": 2719748,
+          "sha256": "6f98373c24e41ab021fc5d015371d1c8ad39346ceac2cb5aa792b3ecdb89be17"
+        },
+        {
+          "path": "scene.gltf",
+          "url": "https://sketchfab.com/3d-models/rva-duplex-02b-9cc8cfa308da400bb3e6c8a304ffb4ae#scene.gltf",
+          "bytes": 4639,
+          "sha256": "6545a6efc40781a6c35632f27725dfe97e4c92db9e6bac1b06df01a6f8cf7032"
+        },
+        {
+          "path": "scene.bin",
+          "url": "https://sketchfab.com/3d-models/rva-duplex-02b-9cc8cfa308da400bb3e6c8a304ffb4ae#scene.bin",
+          "bytes": 138900,
+          "sha256": "8d377aae6ccdef14ab654fdaa143626f4b761b1ef49d87f0abff292319d2bcde"
+        },
+        {
+          "path": "textures/All_Surfaces_diffuse.png",
+          "url": "https://sketchfab.com/3d-models/rva-duplex-02b-9cc8cfa308da400bb3e6c8a304ffb4ae#textures/All_Surfaces_diffuse.png",
+          "bytes": 1405425,
+          "sha256": "43b71181bcabca99cc509d068e6b7ded8bfb099cbea791c763bae37804fbca24"
+        },
+        {
+          "path": "textures/All_Surfaces_normal.png",
+          "url": "https://sketchfab.com/3d-models/rva-duplex-02b-9cc8cfa308da400bb3e6c8a304ffb4ae#textures/All_Surfaces_normal.png",
+          "bytes": 1268951,
+          "sha256": "654d46b17090009ecb57d34e73323e5a0d4e0ac87d33c1adab4fd54a1def4838"
+        },
+        {
+          "path": "textures/All_Surfaces_specularGlossiness.png",
+          "url": "https://sketchfab.com/3d-models/rva-duplex-02b-9cc8cfa308da400bb3e6c8a304ffb4ae#textures/All_Surfaces_specularGlossiness.png",
+          "bytes": 5573,
+          "sha256": "8f861ceca95adbfb0082a1ae6a39ccaec6d72fb8b934f8b14507a46029184a05"
+        },
+        {
+          "path": "license.txt",
+          "url": "https://sketchfab.com/3d-models/rva-duplex-02b-9cc8cfa308da400bb3e6c8a304ffb4ae#license.txt",
+          "bytes": 680,
+          "sha256": "24c71a24ae1503b299e4d2b95593a15f970d2f88ce328e783b836e9236ef6bae"
+        }
+      ]
+    },
+    {
+      "id": "rva_house_01_brick_alternate",
+      "licence": "CC-BY-4.0",
+      "licencePage": "https://api.sketchfab.com/v3/models/1a0383de1d9f426e95a7b9fe01881621",
+      "evidence": "creativecommons.org/licenses/by/4.0/",
+      "read": "2026-10-23",
+      "authors": "GildedAge",
+      "files": [
+        {
+          "path": "1a0383de1d9f426e95a7b9fe01881621.zip",
+          "url": "https://sketchfab.com/3d-models/rva-house-01-brick-alternate-1a0383de1d9f426e95a7b9fe01881621",
+          "bytes": 2952992,
+          "sha256": "e7b03bb3b9a623ef6dbebb41b6c26935002ac6443010dfaee1f961254a6c5880"
+        },
+        {
+          "path": "scene.gltf",
+          "url": "https://sketchfab.com/3d-models/rva-house-01-brick-alternate-1a0383de1d9f426e95a7b9fe01881621#scene.gltf",
+          "bytes": 4845,
+          "sha256": "cdebd0909a1d7ddf9d83495d176656a8cc78afcb198215e87a87988b9906b643"
+        },
+        {
+          "path": "scene.bin",
+          "url": "https://sketchfab.com/3d-models/rva-house-01-brick-alternate-1a0383de1d9f426e95a7b9fe01881621#scene.bin",
+          "bytes": 151404,
+          "sha256": "f3180c01397f5660b46e5d6fb01a4514de837459339a75273ada70903ce2e34d"
+        },
+        {
+          "path": "textures/All_Surfaces_diffuse.png",
+          "url": "https://sketchfab.com/3d-models/rva-house-01-brick-alternate-1a0383de1d9f426e95a7b9fe01881621#textures/All_Surfaces_diffuse.png",
+          "bytes": 1511949,
+          "sha256": "1d5f79875fad3f6fb8da9e285bf686dd0d323af98c296864dead29a1daeed56e"
+        },
+        {
+          "path": "textures/All_Surfaces_normal.png",
+          "url": "https://sketchfab.com/3d-models/rva-house-01-brick-alternate-1a0383de1d9f426e95a7b9fe01881621#textures/All_Surfaces_normal.png",
+          "bytes": 1386627,
+          "sha256": "97019fa7e8636cde531df4ba72ec6e668112c11df14cde307b28c1ed596f0dfc"
+        },
+        {
+          "path": "textures/All_Surfaces_specularGlossiness.png",
+          "url": "https://sketchfab.com/3d-models/rva-house-01-brick-alternate-1a0383de1d9f426e95a7b9fe01881621#textures/All_Surfaces_specularGlossiness.png",
+          "bytes": 3329,
+          "sha256": "a64475c6872b997b4d81e6a7c99ee7fc9a15c57dc195025101098c0a89bd29c7"
+        },
+        {
+          "path": "license.txt",
+          "url": "https://sketchfab.com/3d-models/rva-house-01-brick-alternate-1a0383de1d9f426e95a7b9fe01881621#license.txt",
+          "bytes": 736,
+          "sha256": "3ec4da772e94f235cbd40ec730e51d5562b3fa0897865ce997b726adab758fb9"
         }
       ]
     }

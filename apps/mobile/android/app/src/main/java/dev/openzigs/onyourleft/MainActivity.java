@@ -2,6 +2,8 @@
 
 package dev.openzigs.onyourleft;
 
+import android.webkit.WebView;
+import androidx.activity.OnBackPressedCallback;
 import androidx.core.content.ContextCompat;
 import com.getcapacitor.Bridge;
 import com.getcapacitor.BridgeActivity;
@@ -32,6 +34,56 @@ public class MainActivity extends BridgeActivity {
         Bridge bridge = getBridge();
         if (bridge != null && bridge.getWebView() != null) {
             bridge.getWebView().setBackgroundColor(ContextCompat.getColor(this, R.color.oyl_canvas));
+            getOnBackPressedDispatcher().addCallback(this, new AskThePage(bridge.getWebView()));
+        }
+    }
+
+    /**
+     * #1512: Android's back gesture or button, asked of the page before anything else happens.
+     *
+     * <p>Without it {@code BridgeActivity} takes Android's default and leaves the app from every
+     * screen. This takes every press and calls the page's {@code window.__oylAndroidBack} with the
+     * one fact only the WebView knows, whether its own history can go back --
+     * {@code apps/web/src/shell/android-back.ts} decides the rest: in-app back, nothing at all while
+     * a ride is on, and leaving only from Home. The script is a constant plus that one boolean, so
+     * nothing a page holds is ever written into it.
+     *
+     * <p>Only a literal {@code true} answer keeps the rider in the app. Anything else -- no page yet,
+     * no function, a page that threw -- falls through to Android's default, so a broken page can
+     * never trap a rider in the app. The fall-through disables this callback for that one dispatch,
+     * which is how {@code OnBackPressedDispatcher} reaches the activity's own default.
+     *
+     * <p>CI does not build Android: {@code apps/mobile/src/android/back-source.test.ts} reads this
+     * source, and whether a device's back behaves is a check on the owner's list (#733).
+     */
+    private final class AskThePage extends OnBackPressedCallback {
+
+        private final WebView webView;
+
+        AskThePage(WebView webView) {
+            super(true);
+            this.webView = webView;
+        }
+
+        @Override
+        public void handleOnBackPressed() {
+            String canGoBack = webView.canGoBack() ? "true" : "false";
+            webView.evaluateJavascript(
+                    "(function(){var f=window.__oylAndroidBack;"
+                            + "try{return typeof f==='function'&&f("
+                            + canGoBack
+                            + ")===true;}catch(e){return false;}})()",
+                    answer -> {
+                        if (!"true".equals(answer)) {
+                            leave();
+                        }
+                    });
+        }
+
+        private void leave() {
+            setEnabled(false);
+            getOnBackPressedDispatcher().onBackPressed();
+            setEnabled(true);
         }
     }
 }

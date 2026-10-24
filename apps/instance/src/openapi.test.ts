@@ -668,6 +668,29 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
     await world.freshRead((store) => store.markRaceFinished(room.roomId, 1_790_000_100));
     return send(world, 'GET', `/v1/rooms/${room.roomId}/results`, rider.token);
   },
+  blockFromRaceResult: async (world) => {
+    const rider = await riderIn(world, await testDevice());
+    const other = await riderIn(world, await testDevice());
+    const room = await madeRoom(world, rider.token);
+    for (const [athleteId, place] of [
+      [rider.athleteId, 1],
+      [other.athleteId, 2],
+    ] as const) {
+      await world.freshRead((store) =>
+        store.putResult({
+          roomId: room.roomId,
+          athleteId,
+          finishMs: 61_000 * place,
+          flags: 0,
+          place,
+          wattsPerKilogram: 4,
+          flaggedDurationsSeconds: [],
+        }),
+      );
+    }
+    await world.freshRead((store) => store.markRaceFinished(room.roomId, 1_790_000_100));
+    return send(world, 'POST', `/v1/rooms/${room.roomId}/blocks`, rider.token, { row: 2 });
+  },
   requestEmailRecovery: (world) =>
     send(world, 'POST', '/v1/auth/recover/email', undefined, { address: 'anna@example.org' }),
   setRecoveryEmail: async (world) =>

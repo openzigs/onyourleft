@@ -11,7 +11,7 @@ It has the same authority as the root file. Where the text below says "this file
 ---
 
 The toolchain pins and their reasons (TypeScript 6.0.3 not 7.x, Node 24 until 2026-10-28,
-Vitest 4.1.11), pnpm's 24-hour `minimumReleaseAge` (pin an older version; never add a
+Vitest 4.1.12), pnpm's 24-hour `minimumReleaseAge` (pin an older version; never add a
 `minimumReleaseAgeExclude`), install scripts and `allowBuilds` in `pnpm-workspace.yaml` (a
 security-relevant file on every fork pull request), and why a recorder fed only power
 auto-pauses are in [`docs/agents/toolchain.md`](toolchain.md).
@@ -27,7 +27,7 @@ admits 7.x.
 **Node 26 is not the answer yet.** It enters Active LTS on **2026-10-28**. Until then Node 24
 "Krypton" is the line. Move on the date, not before.
 
-**Vitest 5.0.0 is released, and this repository stays on 4.1.11 deliberately.** This line used
+**Vitest 5.0.0 is released, and this repository stays on 4.1.12 deliberately.** This line used
 to read *"Vitest 5 is in release candidate"*; `npm view vitest dist-tags` reported `latest:
 5.0.0` on 2026-09-14, so that reason has expired and the pin now rests on a different one. A
 major version of the test runner moves `vitest`, `@vitest/coverage-v8` and every

@@ -216,6 +216,12 @@ describe('the router', () => {
     // Generated from `ASSETS.toml`, so this is what the manifest says today
     // rather than a string in a view.
     expect(document.querySelector('main')?.textContent ?? '').toContain('Kenney');
+    // #1552: and the map data's entry, reached the same way.
+    const mapData = document.querySelector('main [data-terms="map-data"]')?.textContent ?? '';
+    expect(mapData).toContain('© OpenStreetMap contributors');
+    expect(mapData).toContain(
+      'Contains information from OpenStreetMap, which is made available here under the Open Database License (ODbL).',
+    );
   });
 
   it('hands the Camera page the rider’s instance, for the side camera’s pictures — #1106', async () => {

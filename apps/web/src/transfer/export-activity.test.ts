@@ -63,6 +63,7 @@ import {
   lossyChannelNames,
 } from './export-activity';
 import type { ActivityFileFormat } from './file-format';
+import { FIT_APPLICATION_ID, FIT_LAP_KIND_NAME, fitLapKindsOf } from './fit-lap-mark';
 import { readActivityFile } from './read-activity-file';
 
 /** Small enough to assert sample by sample, long enough to have a shape. */
@@ -373,7 +374,6 @@ describe('LOSSY_CHANNELS in plain words — #1452', () => {
       'each lap’s average power',
       'each lap’s best power',
       'each lap’s climb',
-      'which splits are laps and which are part laps',
     ]);
     expect(lossyChannelNames('tcx')).toEqual([
       'temperature',
@@ -398,8 +398,8 @@ describe('LOSSY_CHANNELS in plain words — #1452', () => {
   });
 
   it('says a lap’s kind once, though two entries carry it', () => {
-    expect(LOSSY_CHANNELS.fit).toContain('lap.intensity');
-    expect(LOSSY_CHANNELS.fit).toContain('lap.triggerMethod');
+    expect(LOSSY_CHANNELS.gpx).toContain('lap.intensity');
+    expect(LOSSY_CHANNELS.gpx).toContain('lap.triggerMethod');
     expect(lossyChannelName('lap.intensity')).toBe(lossyChannelName('lap.triggerMethod'));
     for (const format of ['fit', 'gpx', 'tcx'] as const) {
       const names = lossyChannelNames(format);
@@ -829,13 +829,15 @@ describe('exportActivity — the ride’s own splits (#221)', () => {
  * |---|---|---|---|
  * | average and highest power and heart rate, average cadence | **no**: #1471 | yes | no |
  * | climb | **no**: #1471 | **no**: no element | no |
- * | the part-lap mark | **no**: #1471 | yes, by `Manual` against `Location`, in this client's own file | no |
- * | which splits are laps | **no**: #1471 | yes, by intensity | no |
+ * | the part-lap mark | yes, in this client's own developer field (#1320) | yes, by `Manual` against `Location`, in this client's own file | no |
+ * | which splits are laps | yes, in this client's own developer field (#1320) | yes, by intensity | no |
  * | the lap's own distance | yes | **no**: a lap states its share of the ride's | no |
  *
- * FIT's lap is as it was before #1321: the owner ruled on 2026-10-19 (#1458)
- * that the TCX half ships now and the FIT half waits on #1471, which has to
- * find lap field numbers ADR 0006 R2 admits.
+ * FIT's lap fields are as they were before #1321: the owner ruled on
+ * 2026-10-19 (#1458) that the TCX half ships now and the FIT half waits on
+ * #1471, which has to find lap field numbers ADR 0006 R2 admits. Its mark is a
+ * developer field of this client's own (#1320, `fit-lap-mark.ts`), which needs
+ * no number from the profile.
  */
 describe('exportActivity — a lap’s figures and its kind (#1321)', () => {
   /**
@@ -882,7 +884,7 @@ describe('exportActivity — a lap’s figures and its kind (#1321)', () => {
     return { open, ride };
   }
 
-  it('writes FIT laps as before #1321: the lap’s own distance, and none of its figures or its kind', async () => {
+  it('writes FIT laps with the lap’s own distance and #1320’s mark, and none of its figures', async () => {
     const { open, ride } = await seedLappedRide();
 
     const bytes = (await exportFrom(open, ride.id, 'fit')).bytes;
@@ -894,8 +896,18 @@ describe('exportActivity — a lap’s figures and its kind (#1321)', () => {
     [1, 2, 3].forEach((index) => {
       expect(activity.laps[index]?.totalDistance).toBe(2_000);
     });
-    // Every lap message declares the six fields it always has, and nothing
-    // else: no figure, no climb and no mark until #1471 sources their numbers.
+    // #1320: which splits are laps, in this client's own developer field —
+    // the lead-in and the tail outside, two whole laps, and the part lap.
+    expect(fitLapKindsOf(activity)).toEqual(['outside', 'lap', 'lap', 'part', 'outside']);
+    expect(activity.developerApplications.map((app) => [...(app.applicationId ?? [])])).toEqual([
+      [...FIT_APPLICATION_ID],
+    ]);
+    expect(activity.developerFieldDescriptions.map((field) => field.name)).toEqual([
+      FIT_LAP_KIND_NAME,
+    ]);
+    // Every lap message declares the six profile fields it always has, and
+    // nothing else of the profile: no figure and no climb until #1471 sources
+    // their numbers.
     const lapFields = readFitContainer(bytes)
       .messages.filter((message) => message.globalMessageNumber === GLOBAL_MESSAGE.lap)
       .map((message) => message.fields.map((field) => field.number));
@@ -910,6 +922,10 @@ describe('exportActivity — a lap’s figures and its kind (#1321)', () => {
         FIELD.lap.totalDistance,
       ]);
     }
+    // And a reader that knows nothing of the mark still reads the file whole.
+    const third = await readWithThirdParty(bytes);
+    expect(third.error).toBeUndefined();
+    expect(third.records).toHaveLength(SAMPLE_COUNT);
   });
 
   it('carries the averages and the kind in TCX, and not the climb or the lap’s own distance', async () => {
@@ -949,10 +965,11 @@ describe('exportActivity — a lap’s figures and its kind (#1321)', () => {
         'lap.averagePower',
         'lap.maxPower',
         'lap.ascent',
-        'lap.intensity',
-        'lap.triggerMethod',
       ]),
     );
+    // #1320: FIT carries which splits are laps, in this client's own mark.
+    expect(LOSSY_CHANNELS.fit).not.toContain('lap.intensity');
+    expect(LOSSY_CHANNELS.fit).not.toContain('lap.triggerMethod');
     expect(LOSSY_CHANNELS.fit).not.toContain('lap.distance');
     expect(LOSSY_CHANNELS.fit).not.toContain('activity.movingTime');
     expect(LOSSY_CHANNELS.tcx).toEqual(expect.arrayContaining(['lap.ascent', 'lap.distance']));

@@ -45,6 +45,7 @@ const ROOMS: RoomsPort = {
   joinPublic: () => Promise.resolve({ kind: 'refused', reason: 'no-such-room' }),
   start: () => Promise.resolve({ kind: 'started' }),
   results: () => Promise.resolve({ kind: 'result', rows: ROWS }),
+  blockRider: () => Promise.resolve({ kind: 'unreachable' as const }),
 };
 
 let mounted: Mounted | undefined;

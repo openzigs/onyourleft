@@ -1555,3 +1555,9 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   is: they never existed in plaintext. They are listed in
   `apps/instance/src/sealed/phase-two.ts`. The room sockets stay unsealed (D-14 Q5). The body
   above is not edited. (#788)
+- **2026-10-21** — **D-7's phase-2 list gains `POST /v1/rooms/{roomId}/blocks`, in the row of a
+  report from inside a room** (#1516). A rider blocks another from a race's result, by the row the
+  result names them on: the app never holds another rider's athlete id, so
+  `POST /v1/blocks/{athleteId}` could not be called for them. It is marked `only` from the first, as every other room route's
+  HTTP side is: it never existed in plaintext. It is listed in
+  `apps/instance/src/sealed/phase-two.ts`. The body above is not edited. (#1516)

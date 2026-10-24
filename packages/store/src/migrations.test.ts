@@ -37,7 +37,7 @@ import {
 import Dexie from 'dexie';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { openActivityStore } from './activity-store';
+import { deleteActivityStore, openActivityStore } from './activity-store';
 import { StoreDecodeError } from './errors';
 import { activityId, athleteId, recordingSessionId, routeId } from './ids';
 
@@ -57,6 +57,7 @@ import type {
   PersistedSideCameraReport,
   PersistedSideCameraReportV12,
 } from './persisted';
+import type { WorldCorridorRecord } from './records';
 import {
   cameraFrameFor,
   framingReferenceFor,
@@ -66,7 +67,14 @@ import {
   trustedDeviceKeyFor,
   workoutGoalsFor,
   sideCameraReportFor,
+  ATHLETES,
+  createStoreHarness,
+  openOlderSchema,
+  seedAthletes,
+  seedEveryTable,
+  unpackWorldCorridorFeatures,
 } from './testing';
+import type { StoreHarness } from './testing';
 import { ensureDeviceSigningKey, webCryptoSha256, webCryptoVerifier } from './web-crypto';
 
 /**
@@ -308,7 +316,8 @@ describe('the production registry', () => {
     // Version 17 (#898) adds `trustedDeviceKeys`: a new store, nothing again.
     // Version 18 (#1236) adds `workoutGoals`: a new store, nothing again.
     // Version 19 (#1431) adds `recentlyDeleted`: a new store, nothing again.
-    expect(SCHEMA_VERSION).toBe(19);
+    // Version 20 (#1545) adds `worldCorridors`: a new store, nothing again.
+    expect(SCHEMA_VERSION).toBe(20);
     expect(SCHEMA_MIGRATIONS).toStrictEqual([SIDE_REPORT_POSE_SUMMARY, ACTIVITY_MAY_BE_RACED]);
   });
 
@@ -1271,5 +1280,162 @@ describe('version 18 to version 19 — #1431’s Recently deleted', () => {
     expect(listed.map((each) => each.summary.name)).toStrictEqual(['Written at eighteen']);
     expect(restored).toBe('restored');
     expect(onDisk).toStrictEqual([ride]);
+  });
+});
+
+describe('version 19 to version 20 — #1545’s world corridors', () => {
+  /**
+   * Additive: a new store, `worldCorridors`, and nothing else changes. Both
+   * halves run against a database with rows in **every** table — the tables
+   * come from `SCHEMA_VERSIONS`, and the world is `seedEveryTable`'s, so a
+   * table added later is in this test the day it is in the schema, and fails
+   * here until the seed fills it.
+   *
+   * ⚠️ **The "export" here is every table but `worldCorridors`, read raw.**
+   * ADR 0005 F's rollback is export → downgrade → re-import, and what this
+   * version adds is a cache that the account export never carries (ADR 0054
+   * D-3.5; `apps/web/src/transfer/world-corridor-not-exported.test.ts` holds
+   * that) — so what a downgrade must keep is everything else, and the honest
+   * way to say "everything else" in this package is every other table.
+   */
+
+  /** Every table any version declares, the way Dexie merges them. */
+  function tablesOf(versions: readonly Readonly<Record<string, string>>[]): string[] {
+    return [...new Set(versions.flatMap((stores) => Object.keys(stores)))].sort();
+  }
+
+  /** Every row of every table, read on a raw connection at the current version. */
+  async function dumpEveryTable(name: string): Promise<Map<string, unknown[]>> {
+    const raw = new Dexie(name);
+    SCHEMA_VERSIONS.forEach((stores, index) => {
+      raw.version(index + 1).stores(stores);
+    });
+    try {
+      const dump = new Map<string, unknown[]>();
+      for (const table of tablesOf(SCHEMA_VERSIONS)) {
+        dump.set(table, await raw.table(table).toArray());
+      }
+      return dump;
+    } finally {
+      raw.close();
+    }
+  }
+
+  /** The current build's database, with all three athletes' footprints in every table. */
+  async function seededAtTwenty(): Promise<{
+    harness: StoreHarness;
+    dump: Map<string, unknown[]>;
+  }> {
+    const harness = createStoreHarness();
+    await seedAthletes(harness);
+    for (const athlete of ATHLETES) {
+      await seedEveryTable(harness, athlete);
+    }
+    await harness.discard();
+    const dump = await dumpEveryTable(harness.databaseName);
+    const empty = [...dump].filter(([, rows]) => rows.length === 0).map(([table]) => table);
+    expect(empty, 'seedEveryTable left this table empty, so nothing here checks it').toStrictEqual(
+      [],
+    );
+    return { harness, dump };
+  }
+
+  /**
+   * Re-imports `dump` into a database the version-19 build makes: deletes the
+   * newer one first (IndexedDB refuses to open lower — `VersionError`), opens
+   * at 19, and puts every row of every table version 19 has.
+   */
+  async function reimportAtNineteen(name: string, dump: Map<string, unknown[]>): Promise<string[]> {
+    await deleteActivityStore(name);
+    const older = await openOlderSchema(name, 19);
+    try {
+      expect(older.version).toBe(19);
+      for (const table of older.tables) {
+        for (const row of dump.get(table) ?? []) {
+          await older.put(table, row);
+        }
+      }
+      return [...older.tables].sort();
+    } finally {
+      older.close();
+    }
+  }
+
+  it('carries every row of a version-19 database with rows in every table, and adds an empty, usable worldCorridors', async () => {
+    const { harness, dump } = await seededAtTwenty();
+    try {
+      const tablesAtNineteen = await reimportAtNineteen(harness.databaseName, dump);
+      expect(tablesAtNineteen).toStrictEqual(tablesOf(SCHEMA_VERSIONS.slice(0, 19)));
+      expect(tablesAtNineteen).not.toContain(TABLE.worldCorridors);
+
+      // Upgrade: the current build opens it.
+      const store = openActivityStore(harness.databaseName);
+      const [corridor] = dump.get(TABLE.worldCorridors) as WorldCorridorRecord[];
+      expect(corridor).toBeDefined();
+      if (corridor === undefined) return;
+      const before = await store.getWorldCorridor(corridor.owner, corridor.routeId);
+      store.close();
+
+      const after = await dumpEveryTable(harness.databaseName);
+      for (const table of tablesAtNineteen) {
+        expect(after.get(table), `${table} did not come through the upgrade`).toStrictEqual(
+          dump.get(table),
+        );
+      }
+      expect(before).toBeUndefined();
+      expect(after.get(TABLE.worldCorridors)).toStrictEqual([]);
+
+      // And usable: a corridor kept at 20 reads back on a fresh connection.
+      const writer = openActivityStore(harness.databaseName);
+      await writer.putWorldCorridor(corridor);
+      writer.close();
+      const reader = openActivityStore(harness.databaseName);
+      const read = await reader.getWorldCorridor(corridor.owner, corridor.routeId);
+      reader.close();
+      expect(read?.routeDigest).toBe(corridor.routeDigest);
+      expect(read && (await unpackWorldCorridorFeatures(read.features))).toStrictEqual(
+        await unpackWorldCorridorFeatures(corridor.features),
+      );
+    } finally {
+      await harness.destroy();
+    }
+  });
+
+  it('version 20 rolls back: export → open at 19 → re-import keeps every other table, and 20 again has no corridor', async () => {
+    const { harness, dump } = await seededAtTwenty();
+    try {
+      const corridors = dump.get(TABLE.worldCorridors) as WorldCorridorRecord[];
+      expect(corridors).toHaveLength(ATHLETES.length);
+
+      // Export, downgrade, re-import.
+      const tablesAtNineteen = await reimportAtNineteen(harness.databaseName, dump);
+
+      // Upgrade again: every other table's rows survived, and the corridors
+      // are gone — a cache, which #1539 reads again on the next ride.
+      const store = openActivityStore(harness.databaseName);
+      const reads = await Promise.all(
+        corridors.map(async (each) => store.getWorldCorridor(each.owner, each.routeId)),
+      );
+      const routes = await Promise.all(
+        corridors.map(async (each) => store.getRoute(each.owner, each.routeId)),
+      );
+      store.close();
+      const after = await dumpEveryTable(harness.databaseName);
+
+      expect(
+        tablesOf(SCHEMA_VERSIONS).filter((table) => !tablesAtNineteen.includes(table)),
+      ).toStrictEqual([TABLE.worldCorridors]);
+      for (const table of tablesAtNineteen) {
+        expect(after.get(table), `${table} lost rows in the rollback`).toStrictEqual(
+          dump.get(table),
+        );
+      }
+      expect(after.get(TABLE.worldCorridors)).toStrictEqual([]);
+      expect(reads).toStrictEqual(corridors.map(() => undefined));
+      // The routes the corridors were around are all still there.
+      expect(routes.map((route) => route?.id)).toStrictEqual(corridors.map((each) => each.routeId));
+    } finally {
+      await harness.destroy();
+    }
   });
 });

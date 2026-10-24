@@ -6522,6 +6522,106 @@ select.oyl-input {
   font-variant-numeric: tabular-nums;
 }
 
+/*
+ * THE MAP DATA'S CREDIT — #1552, ADR 0054 D-3.6 and D-8 Q3.
+ *
+ * "© OpenStreetMap contributors", on a ride whose world was given map data,
+ * for the whole ride. The owner's ruling on #1572: a small line in a corner
+ * of the game view, CLEAR OF THE HUD — not a line inside a panel.
+ *
+ * ⚠️ **The START edge of the open road, which is the edge the HUD uses
+ * least.** Top-end is the secondary readings and a race's standings (#1347);
+ * bottom-end is the actions panel, which grows with sounds, a side camera and
+ * a room's row, and on an upright phone the moving time is set beside it
+ * (#1111); a notice takes the top-start, under the primary readings (#437).
+ * So:
+ *
+ * - **A tablet (the corners layout, 47 rem tall or more): bottom-start**,
+ *   hung from the line above the route panel.
+ * - **A phone on its side (the short corners layout): bottom-centre**, between
+ *   the two bottom panels and under the rider — and that is NOT a corner, on
+ *   purpose. All four corners of a 736×360 stage are panels, and the strip
+ *   above the bottom-start one is no room at all on a crowded ride: on the CI
+ *   runner's fonts, with sounds on and a side camera paired (#576 lifts the
+ *   camera's row into that very strip) or a standing notice in the route
+ *   panel's cell, the line was drawn 8 px into the primary readings, and at
+ *   the bottom-end 11 px into the secondary ones. Under the rider there is
+ *   65 px of road at 736×360 that no panel uses.
+ * - **Column layout (a phone upright): top-start of the road**, hung from the
+ *   line under the route panel (or under the notice standing in its cell).
+ *   That is sky: upright the horizon is 47 % down the frame and the rider's
+ *   helmet 52 % (`camera.ts` §`riderFrameBox`), and the bottom-start was
+ *   measured over the leaning rider whenever the actions panel grows — a
+ *   room's *Report* reasons, sounds with a side camera.
+ *
+ * Placed by `grid-area` and `position: absolute` against the grid's middle
+ * track (the bottom row, on a phone on its side), so it takes no room from
+ * any track and moves no panel; every engine
+ * with CSS grid lays it out the same, with no anchor positioning (#1120).
+ *
+ * #423's rule: HUD text over the world sits on an opaque surface. So it has a
+ * backing of its own, painted `--oyl-color-hud-surface` (six-digit hex, no
+ * alpha), and its ink is `hudInkMuted`, a pair `tokens.ts`
+ * §`CONTRAST_REQUIREMENTS` holds to AA in both palettes — the HUD keeps the
+ * light palette whatever the page is in (#672). Small, because it is read
+ * once if at all; `hud-value-size.test.ts` keeps it above the HUD's
+ * supporting-text floor. `ride-attribution.browser.spec.ts` measures it clear
+ * of every panel, *Pause*, *End ride* and the leaning rider at every overlay
+ * viewport, both with anchor positioning and without, on a plain ride and on
+ * the crowded ones.
+ *
+ * Where the HUD is stacked (no overlay), it is the HUD's last item, under the
+ * world rather than over it, on the same backing.
+ */
+.oyl-hud__attribution {
+  background: var(--oyl-color-hud-surface);
+  border-radius: var(--oyl-radius);
+  color: var(--oyl-color-hud-ink-muted);
+  font-size: var(--oyl-font-size-sm);
+  margin: 0;
+  padding: 0 var(--oyl-space-xs);
+  width: fit-content;
+}
+
+/* Corners: the middle track is the named `notices` row, and its start edge is
+   the first column's. */
+@media (min-width: 46rem) and (min-height: 22.5rem) {
+  .oyl-game--riding .oyl-hud__attribution {
+    position: absolute;
+    grid-area: notices;
+    bottom: 0;
+    left: 0;
+  }
+}
+
+/* Column: the middle track is the fourth, the unnamed `.` row between the
+   route panel and the actions panel. Every line named, because for an
+   absolutely positioned item an `auto` line is the grid's padding edge
+   (#1120's note on #576). */
+@media (min-width: 22.5rem) and (width < 46rem) and (min-height: 47rem) {
+  .oyl-game--riding .oyl-hud__attribution {
+    position: absolute;
+    grid-area: 4 / 1 / 5 / 2;
+    top: 0;
+    left: 0;
+  }
+}
+
+/* A phone on its side (the SHORT corners layout): bottom-centre, between the
+   two 16 rem bottom panels, under the rider — the strip above them is no
+   room at all on a crowded ride (the comment above says what CI measured).
+   The width left between the panels, less a gap each side; it wraps to two
+   lines where that is narrower than the line (736 px). */
+@media (min-width: 46rem) and (min-height: 22.5rem) and (max-height: 30rem) {
+  .oyl-game--riding .oyl-hud__attribution {
+    grid-area: 3 / 1 / 4 / 3;
+    left: 50%;
+    max-width: calc(100% - 32rem - 2 * var(--oyl-space-md));
+    text-align: center;
+    transform: translateX(-50%);
+  }
+}
+
 /* #1324: ON A PHONE THE RE-PLAN'S SENTENCE GIVES WAY, and *Keep the plan*
    stands alone as it did before #1324. Measured, not chosen: with the longest
    sentence `workout/replan-text.ts` can produce, four lines in the 256 px

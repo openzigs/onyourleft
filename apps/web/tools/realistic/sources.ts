@@ -72,8 +72,13 @@ import {
   REALISTIC_BICYCLE_MAP_NAMES,
   REALISTIC_RIDER,
   REALISTIC_RIDER_MAPS,
+  REALISTIC_STRUCTURE_SURFACES,
   REALISTIC_WORDMARK,
+  REALISTIC_HOUSE_ATLAS,
+  houseModelFile,
+  type HouseModelId,
   type RealisticBicycleMap,
+  type TOWN_STRUCTURE_SURFACES,
 } from '../../src/game/realistic-assets';
 import {
   WORDMARK_CREATOR,
@@ -188,12 +193,15 @@ export const ADMITTED_SOURCES: readonly AdmittedSource[] = [
     prefixes: [],
   },
   {
-    // Verified per asset under ADR 0023, wherever it is hosted: none is taken.
+    // Verified per asset under ADR 0023, wherever it is hosted. #1585 adopts
+    // the house models from Sketchfab: each model's public record, read for
+    // its licence, and its own page, which its credit links. No file is
+    // downloaded from either -- the owner placed each archive by hand.
     name: 'An individual model under CC-BY-4.0',
     licence: 'CC-BY-4.0',
     decidedBy: 'ADR 0026 D-4',
     kind: 'files',
-    prefixes: [],
+    prefixes: ['https://api.sketchfab.com/v3/models/', 'https://sketchfab.com/3d-models/'],
   },
   {
     name: 'EZ-Tree’s output',
@@ -418,6 +426,31 @@ export interface AssetSource {
         readonly from: 'archive';
         readonly url: string;
         readonly members: readonly ArchiveMember[];
+      }
+    | {
+        /**
+         * #1585: a model whose host serves its download only to an account
+         * (Sketchfab answers `401` without one, the wall #369 recorded), so
+         * the OWNER downloaded the archive with their own account and placed
+         * it under `build/raw/<id>/` by hand. Nothing here fetches it: the
+         * lock pins its digest, `realistic:fetch` refuses an archive that is
+         * absent or not that digest, and only `members` are taken out. The
+         * licence is still read off the model's own public record, without
+         * credentials ({@link sketchfabVerdict}).
+         */
+        readonly from: 'placed';
+        /** The archive's file name, under `build/raw/<id>/`. */
+        readonly archive: string;
+        /** The model's own page: the link its credit gives. */
+        readonly page: string;
+        /** The files taken out of the archive. */
+        readonly members: readonly Pick<ArchiveMember, 'path' | 'mustContain'>[];
+        /** What the model's public record must say it is. */
+        readonly sketchfab: {
+          readonly uid: string;
+          readonly username: string;
+          readonly title: string;
+        };
       }
     | {
         /**
@@ -702,6 +735,291 @@ export function ambientCgVerdict(source: AssetSource, pageHtml: string): Licence
 }
 
 /**
+ * The house models a mapped footprint may be drawn as — #1585, the owner's
+ * ruling of 2026-10-22 on it: GildedAge's RVA set (twelve houses and duplexes
+ * after Richmond, Virginia) and Orzechu's "Low-poly Old American brick
+ * building with shop.", each CC-BY-4.0 on its own Sketchfab page.
+ *
+ * ⚠️ **Downloaded by the owner, not by this pipeline.** Sketchfab answers a
+ * download `401` without an account (the wall #369 recorded), so the owner
+ * downloaded each model's glTF archive with their own account on 2026-10-23
+ * and the archives are placed under `build/raw/<id>/` by hand; no credential
+ * is in this repository or used by any script ({@link AssetSource}'s `placed`).
+ * The licence is read off each model's own public record, with none.
+ *
+ * ⚠️ **Their textures are admitted on the model's own grant** — ADR 0049's
+ * amendment of 2026-10-23, the owner's ruling on #1585 — except the shop's
+ * photograph of a real interior and the sign on its door, which
+ * `blender/process_house_models.py` paints over before anything reads them.
+ */
+export const HOUSE_MODEL_SOURCES: readonly {
+  readonly id: string;
+  readonly uid: string;
+  readonly title: string;
+  readonly author: string;
+  readonly username: string;
+  readonly page: string;
+  /**
+   * The archive's pictures. The importer reads every one its glTF names, so
+   * all are inputs; only the colour picture is baked into the atlas.
+   */
+  readonly textures: readonly string[];
+}[] = [
+  {
+    id: 'old_american_brick_shop',
+    uid: '3170993b67ee4e58b27d69d5877f71bd',
+    title: 'Low-poly Old American brick building with shop.',
+    author: 'Orzechu',
+    username: 'Orzechu',
+    page: 'https://sketchfab.com/3d-models/low-poly-old-american-brick-building-with-shop-3170993b67ee4e58b27d69d5877f71bd',
+    textures: [
+      'textures/MainBuilding_baseColor.jpeg',
+      'textures/MainBuilding_metallicRoughness.png',
+      'textures/MainBuilding_normal.jpeg',
+    ],
+  },
+  {
+    id: 'rva_detached_house_01a',
+    uid: '2a4536b39df14c7fb953ec38699c817a',
+    title: 'RVA Detached House 01a',
+    author: 'GildedAge',
+    username: 'gildedage',
+    page: 'https://sketchfab.com/3d-models/rva-detached-house-01a-2a4536b39df14c7fb953ec38699c817a',
+    textures: [
+      'textures/All_Surfaces_diffuse.png',
+      'textures/All_Surfaces_normal.png',
+      'textures/All_Surfaces_specularGlossiness.png',
+    ],
+  },
+  {
+    id: 'rva_detached_house_02a',
+    uid: '1402df424d674ac39374f1791d56376e',
+    title: 'RVA Detached House 02a',
+    author: 'GildedAge',
+    username: 'gildedage',
+    page: 'https://sketchfab.com/3d-models/rva-detached-house-02a-1402df424d674ac39374f1791d56376e',
+    textures: ['textures/All_Surfaces_diffuse.png', 'textures/All_Surfaces_specularGlossiness.png'],
+  },
+  {
+    id: 'rva_detached_house_02b',
+    uid: '2e8c66f89f45465f904f6422acc2aab1',
+    title: 'RVA Detached House 02B',
+    author: 'GildedAge',
+    username: 'gildedage',
+    page: 'https://sketchfab.com/3d-models/rva-detached-house-02b-2e8c66f89f45465f904f6422acc2aab1',
+    textures: [
+      'textures/All_Surfaces_diffuse.png',
+      'textures/All_Surfaces_normal.png',
+      'textures/All_Surfaces_specularGlossiness.png',
+    ],
+  },
+  {
+    id: 'rva_detached_house_03a',
+    uid: '8de5dcfdc4b44456879604c9a6795b4d',
+    title: 'RVA Detached House 03a',
+    author: 'GildedAge',
+    username: 'gildedage',
+    page: 'https://sketchfab.com/3d-models/rva-detached-house-03a-8de5dcfdc4b44456879604c9a6795b4d',
+    textures: [
+      'textures/Material_diffuse.png',
+      'textures/Material_normal.png',
+      'textures/Material_specularGlossiness.png',
+    ],
+  },
+  {
+    id: 'rva_detached_house_03c',
+    uid: '712addc7d8464ce88e958433bacdf76a',
+    title: 'RVA Detached House 03c',
+    author: 'GildedAge',
+    username: 'gildedage',
+    page: 'https://sketchfab.com/3d-models/rva-detached-house-03c-712addc7d8464ce88e958433bacdf76a',
+    textures: [
+      'textures/Material_diffuse.png',
+      'textures/Material_normal.png',
+      'textures/Material_specularGlossiness.png',
+    ],
+  },
+  {
+    id: 'rva_detached_house_04a',
+    uid: '24e0d7d6d9514e69b504d11c6b8117f3',
+    title: 'RVA Detached House 04a',
+    author: 'GildedAge',
+    username: 'gildedage',
+    page: 'https://sketchfab.com/3d-models/rva-detached-house-04a-24e0d7d6d9514e69b504d11c6b8117f3',
+    textures: [
+      'textures/Material.001_diffuse.png',
+      'textures/Material.001_normal.png',
+      'textures/Material.001_specularGlossiness.png',
+    ],
+  },
+  {
+    id: 'rva_detached_house_04b',
+    uid: 'd18cb26c342146aabb3b4aadbf860369',
+    title: 'RVA Detached House 04b',
+    author: 'GildedAge',
+    username: 'gildedage',
+    page: 'https://sketchfab.com/3d-models/rva-detached-house-04b-d18cb26c342146aabb3b4aadbf860369',
+    textures: [
+      'textures/Material.001_diffuse.png',
+      'textures/Material.001_normal.png',
+      'textures/Material.001_specularGlossiness.png',
+    ],
+  },
+  {
+    id: 'rva_duplex_01a',
+    uid: '70436f6bde1b43c8a8fe2e630f0fa4d0',
+    title: 'RVA Duplex 01a',
+    author: 'GildedAge',
+    username: 'gildedage',
+    page: 'https://sketchfab.com/3d-models/rva-duplex-01a-70436f6bde1b43c8a8fe2e630f0fa4d0',
+    textures: [
+      'textures/All_Surfaces_diffuse.png',
+      'textures/All_Surfaces_normal.png',
+      'textures/All_Surfaces_specularGlossiness.png',
+    ],
+  },
+  {
+    id: 'rva_duplex_01b',
+    uid: 'c15aa7e064a24323b10271c05c8dc35d',
+    title: 'RVA Duplex 01b',
+    author: 'GildedAge',
+    username: 'gildedage',
+    page: 'https://sketchfab.com/3d-models/rva-duplex-01b-c15aa7e064a24323b10271c05c8dc35d',
+    textures: [
+      'textures/All_Surfaces_diffuse.png',
+      'textures/All_Surfaces_normal.png',
+      'textures/All_Surfaces_specularGlossiness.png',
+    ],
+  },
+  {
+    id: 'rva_duplex_02a',
+    uid: '564e912772eb45bab4abb2c176aace8c',
+    title: 'RVA Duplex 02a',
+    author: 'GildedAge',
+    username: 'gildedage',
+    page: 'https://sketchfab.com/3d-models/rva-duplex-02a-564e912772eb45bab4abb2c176aace8c',
+    textures: [
+      'textures/All_Surfaces_diffuse.png',
+      'textures/All_Surfaces_normal.png',
+      'textures/All_Surfaces_specularGlossiness.png',
+    ],
+  },
+  {
+    id: 'rva_duplex_02b',
+    uid: '9cc8cfa308da400bb3e6c8a304ffb4ae',
+    title: 'RVA Duplex 02b',
+    author: 'GildedAge',
+    username: 'gildedage',
+    page: 'https://sketchfab.com/3d-models/rva-duplex-02b-9cc8cfa308da400bb3e6c8a304ffb4ae',
+    textures: [
+      'textures/All_Surfaces_diffuse.png',
+      'textures/All_Surfaces_normal.png',
+      'textures/All_Surfaces_specularGlossiness.png',
+    ],
+  },
+  {
+    id: 'rva_house_01_brick_alternate',
+    uid: '1a0383de1d9f426e95a7b9fe01881621',
+    title: 'RVA House 01 Brick Alternate',
+    author: 'GildedAge',
+    username: 'gildedage',
+    page: 'https://sketchfab.com/3d-models/rva-house-01-brick-alternate-1a0383de1d9f426e95a7b9fe01881621',
+    textures: [
+      'textures/All_Surfaces_diffuse.png',
+      'textures/All_Surfaces_normal.png',
+      'textures/All_Surfaces_specularGlossiness.png',
+    ],
+  },
+];
+
+/** Where a Sketchfab model's public record is read, with no credentials — #1585. */
+export function sketchfabRecordUrl(uid: string): string {
+  return `https://api.sketchfab.com/v3/models/${uid}`;
+}
+
+/** The licence a Sketchfab model's record must name: Creative Commons Attribution 4.0. */
+export const SKETCHFAB_CC_BY_4 = 'creativecommons.org/licenses/by/4.0/';
+
+/** One house model, as a source: its own record, and the owner's archive of it. */
+function houseModel(model: (typeof HOUSE_MODEL_SOURCES)[number]): AssetSource {
+  return {
+    id: model.id,
+    licencePage: sketchfabRecordUrl(model.uid),
+    licencePhrase: SKETCHFAB_CC_BY_4,
+    licence: 'CC-BY-4.0',
+    author: model.author,
+    origin: {
+      from: 'placed',
+      archive: `${model.uid}.zip`,
+      page: model.page,
+      members: [
+        { path: 'scene.gltf' },
+        { path: 'scene.bin' },
+        ...model.textures.map((path) => ({ path })),
+        // Sketchfab's own credit file, which names the licence and the author.
+        { path: 'license.txt', mustContain: `CC-BY-4.0 (http://${SKETCHFAB_CC_BY_4})` },
+      ],
+      sketchfab: { uid: model.uid, username: model.username, title: model.title },
+    },
+  };
+}
+
+/**
+ * Whether a Sketchfab model may be kept, given its public record —
+ * `api.sketchfab.com/v3/models/{uid}`, read with no credentials — #1585.
+ *
+ * The record is JSON, so it is READ, not searched: a description that quotes
+ * a licence's address cannot vouch for the model. Kept only where the record
+ * is this model's (its `uid`), by the author named here (`user.username`),
+ * under this title (`name`), and its own `license` names Creative Commons
+ * Attribution 4.0 (`slug` `by` and the 4.0 deed) — and where
+ * {@link statedLicence}'s checks of the text hold as well (no barred host, no
+ * NC, ND or SA term anywhere in it).
+ */
+export function sketchfabVerdict(source: AssetSource, recordText: string): LicenceVerdict {
+  if (source.origin.from !== 'placed') {
+    return { kept: false, reason: `${source.id}: not a placed model` };
+  }
+  const expected = source.origin.sketchfab;
+  let record: unknown;
+  try {
+    record = JSON.parse(recordText);
+  } catch {
+    return { kept: false, reason: `${source.id}: ${source.licencePage} is not a model's record` };
+  }
+  const field = (value: unknown, key: string): unknown =>
+    typeof value === 'object' && value !== null
+      ? (value as Readonly<Record<string, unknown>>)[key]
+      : undefined;
+  const licence = field(record, 'license');
+  const deed = field(licence, 'url');
+  const facts: [string, boolean][] = [
+    [`its uid is ${expected.uid}`, field(record, 'uid') === expected.uid],
+    [
+      `it is by ${expected.username}`,
+      field(field(record, 'user'), 'username') === expected.username,
+    ],
+    [`it is titled "${expected.title}"`, field(record, 'name') === expected.title],
+    [
+      `its licence is ${SKETCHFAB_CC_BY_4}`,
+      field(licence, 'slug') === 'by' &&
+        typeof deed === 'string' &&
+        deed.replace(/^https?:\/\//, '') === SKETCHFAB_CC_BY_4,
+    ],
+  ];
+  const failed = facts.find(([, holds]) => !holds);
+  if (failed !== undefined) {
+    return {
+      kept: false,
+      reason: `${source.id}: ${source.licencePage} does not say ${failed[0]}`,
+    };
+  }
+  // Re-written, because the record escapes every `/` in its strings (`http:\/\/`)
+  // and the phrase is an address.
+  return statedLicence(source, JSON.stringify(record));
+}
+
+/**
  * The photographic surfaces the realistic structures wear — #475, ADR 0026
  * D-12 layer 3 — each a Poly Haven CC0 texture: its id, and the file name Poly
  * Haven gives its 1K colour map (one of them spells it `diffuse`). How many
@@ -785,9 +1103,76 @@ export const GROUND_BLEND_TEXTURES: readonly {
  */
 export const AMBIENTCG_GROUND_TEXTURES: readonly { readonly id: string }[] = [{ id: 'Rock026' }];
 
+/**
+ * The structures' surfaces taken from ambientCG — #1535, each one of its CC0
+ * materials at 1K, by the same archive, maps and recipe as
+ * {@link AMBIENTCG_GROUND_TEXTURES}.
+ *
+ * - `PavingStones136` — a village's PAVEMENT: square concrete flags laid in a
+ *   grid, made by surface photogrammetry (its own page, read 2026-10-21).
+ *   Chosen over the site's cobbles and herringbones because a pavement beside
+ *   a village road is laid in flags; `PavingStones128` and `126A`, the nearest
+ *   in look, were passed over because their pages name "Procedural with
+ *   Bitmap Elements", which {@link AMBIENTCG_TECHNIQUES_KEPT} does not keep.
+ */
+export const AMBIENTCG_STRUCTURE_TEXTURES: readonly { readonly id: string }[] = [
+  { id: 'PavingStones136' },
+];
+
 /** The archive every {@link AMBIENTCG_GROUND_TEXTURES} entry is taken from, and the two maps taken. */
 const AMBIENTCG_GROUND_ATTRIBUTE = '1K-JPG';
 const AMBIENTCG_GROUND_MAPS = { colour: 'Color', normal: 'NormalGL' } as const;
+
+/**
+ * The surfaces a MAPPED town's buildings wear that the procedural kinds never
+ * did — #1548, ADR 0054 — each an ambientCG CC0 material at 1K, taken through
+ * #1274's origin: its own page's licence, its technique against
+ * {@link AMBIENTCG_TECHNIQUES_KEPT}, its archive pinned by digest. ambientCG is
+ * on ADR 0049 D-10's list already, so this is no new source.
+ *
+ * - `PaintedPlaster017` — `render`: white painted plaster with a hairline
+ *   crack, the rendered or plastered facade of a house or a shop. Published
+ *   at 1024 × 512 (`realistic-assets.ts` §`SurfaceMaps.aspect`).
+ * - `Concrete048` — `concrete`: plain beige cast concrete with a vertical
+ *   brushed grain, the wall of a commercial block.
+ * - `Gravel035` — `flat-roof`: grey rounded gravel, the ballast a flat roof
+ *   is laid under; ambientCG states the scan as 190 cm across.
+ *
+ * Each page, read 2026-10-21, says "All assets are released under the
+ * Creative Commons CC0 license" and names "Surface Photogrammetry" as its one
+ * technique.
+ *
+ * ## Why not a `Facade*` set, and why the windows are not in the photograph
+ *
+ * #1548 named ambientCG's `Facade*` sets as candidates. Read on 2026-10-21
+ * through the site's own search (`ambientcg.com/api/v2/full_json?q=Facade`),
+ * all 26 `Facade*` materials are made procedurally (`PBRProcedural`, which
+ * the asset pages call "Prodedural"), and {@link AMBIENTCG_TECHNIQUES_KEPT}
+ * refuses that. So no facade with windows in it
+ * can be taken from this source today, and a mapped building's windows stay
+ * geometry wearing `glass`, as a procedural building's are (#500). Every
+ * candidate here was measured from a real surface.
+ *
+ * ## At 1K, and encoded as they came
+ *
+ * The owner ruled on #1548 (2026-10-21) to raise the realistic build ceiling
+ * for these rather than shrink them to 512², so they are not run through
+ * {@link TEXTURE_SCRIPT}: each map is ambientCG's own 1K JPEG encoded as KTX2,
+ * as the road's and the grass's are (#618) — and so no Blender step either.
+ * What they cost is `realistic-budget.ts` §`REALISTIC_BUILD_BYTES`.
+ */
+export const TOWN_STRUCTURE_TEXTURES: readonly {
+  readonly id: string;
+  readonly surface: (typeof TOWN_STRUCTURE_SURFACES)[number];
+}[] = [
+  { id: 'PaintedPlaster017', surface: 'render' },
+  { id: 'Concrete048', surface: 'concrete' },
+  { id: 'Gravel035', surface: 'flat-roof' },
+];
+
+/** The archive every {@link TOWN_STRUCTURE_TEXTURES} entry is taken from, and the two maps taken. */
+export const TOWN_STRUCTURE_ATTRIBUTE = '1K-JPG';
+export const TOWN_STRUCTURE_MAPS = { colour: 'Color', normal: 'NormalGL' } as const;
 
 /**
  * The bark and leaves the generated trees wear — #1283, ADR 0049 D-1: each an
@@ -1048,10 +1433,18 @@ export const SOURCES: readonly AssetSource[] = [
     polyHaven(texture.id, { type: 'texture', resolution: '1k', maps: ['Diffuse', 'nor_gl'] }),
   ),
   // #1274: the ground's bare rock, from ambientCG.
-  ...AMBIENTCG_GROUND_TEXTURES.map((texture) =>
+  // #1535: a village's pavement, by the same archive and maps.
+  ...[...AMBIENTCG_GROUND_TEXTURES, ...AMBIENTCG_STRUCTURE_TEXTURES].map((texture) =>
     ambientCg(texture.id, AMBIENTCG_GROUND_ATTRIBUTE, [
       AMBIENTCG_GROUND_MAPS.colour,
       AMBIENTCG_GROUND_MAPS.normal,
+    ]),
+  ),
+  // #1548: the mapped towns' render, concrete and flat roof, from ambientCG.
+  ...TOWN_STRUCTURE_TEXTURES.map((texture) =>
+    ambientCg(texture.id, TOWN_STRUCTURE_ATTRIBUTE, [
+      TOWN_STRUCTURE_MAPS.colour,
+      TOWN_STRUCTURE_MAPS.normal,
     ]),
   ),
   // #1283: the generated trees' bark and leaves, from ambientCG — and since
@@ -1134,7 +1527,8 @@ export const SOURCES: readonly AssetSource[] = [
         },
       ],
     },
-  },
+  }, // #1585: the house models, placed by the owner (HOUSE_MODEL_SOURCES).
+  ...HOUSE_MODEL_SOURCES.map(houseModel),
 ];
 
 /** The Blender version every derived asset was made with, and the one a re-run must use. */
@@ -1436,6 +1830,11 @@ export interface OutputSpec {
   readonly recipe: OutputRecipe;
   /** What was changed, in words — ADR 0023's `modified`, for a derived file. */
   readonly modified?: string;
+  /**
+   * Who a CC-BY-4.0 file credits and the link, where it is not its one
+   * source's author and page — #1585: the atlas is every house model's.
+   */
+  readonly credit?: { readonly creator: string; readonly url: string };
 }
 
 const TREE_SCRIPT = 'blender/process_tree.py';
@@ -1550,6 +1949,15 @@ export const RIDER_MADE = {
 /** Where {@link structureMap}'s script lives — #475. */
 export const TEXTURE_SCRIPT = 'blender/process_texture.py';
 
+/** The script that makes the house models and their atlas — #1585. */
+export const HOUSE_SCRIPT = 'blender/process_house_models.py';
+
+/** What the house models' atlas run writes, before the KTX2 step. */
+export const HOUSE_ATLAS_MADE = 'house_models_atlas.png';
+
+/** The house models' atlas encoding: ETC1S colour, rows as Blender wrote them. */
+const HOUSE_ATLAS_KTX2: Ktx2Step = { encoding: 'colour', origin: 'top-left' };
+
 /**
  * Every shipped file, in the order the pipeline makes them.
  *
@@ -1613,13 +2021,22 @@ export const OUTPUTS: readonly OutputSpec[] = [
     ];
   }),
   // #1274: ambientCG's, by the same recipe — its files carry its own names.
-  ...AMBIENTCG_GROUND_TEXTURES.flatMap((texture) => {
+  // #1535: and the pavement's, likewise.
+  ...[...AMBIENTCG_GROUND_TEXTURES, ...AMBIENTCG_STRUCTURE_TEXTURES].flatMap((texture) => {
     const made = structureMapFiles(texture.id);
     const upstream = (map: string): string =>
       `${texture.id}_${AMBIENTCG_GROUND_ATTRIBUTE}_${map}.jpg`;
     return [
       structureMap(made.colour, texture.id, upstream(AMBIENTCG_GROUND_MAPS.colour), 'colour'),
       structureMap(made.normal, texture.id, upstream(AMBIENTCG_GROUND_MAPS.normal), 'data'),
+    ];
+  }),
+  // #1548: the mapped towns' three, ambientCG's 1K maps encoded as they came.
+  ...TOWN_STRUCTURE_TEXTURES.flatMap((texture) => {
+    const maps = REALISTIC_STRUCTURE_SURFACES[texture.surface];
+    return [
+      townMap(maps.colour, texture.id, TOWN_STRUCTURE_MAPS.colour, 'colour'),
+      townMap(maps.normal, texture.id, TOWN_STRUCTURE_MAPS.normal, 'normal'),
     ];
   }),
   {
@@ -1680,8 +2097,49 @@ export const OUTPUTS: readonly OutputSpec[] = [
     from: WORDMARK_FROM,
     recipe: { how: 'wordmark', ktx2: WORDMARK_KTX2 },
     modified: `${WORDMARK_MODIFIED_WORDS}; then ${encodingWords(WORDMARK_KTX2)}${KTX2_STEP_WORDS}${KTX2_SCRIPT_PATH}`,
-  },
+  }, // #1585: the house models — a GLB of each one's geometry, and the one atlas.
+  ...HOUSE_MODEL_SOURCES.map((model) => houseModelOutput(model.id)),
+  houseAtlasOutput(),
 ];
+
+/** Every house model's source but `id`'s: each run reads them all, for the one packing. */
+function otherHouses(id: string): readonly string[] {
+  return HOUSE_MODEL_SOURCES.map((model) => model.id).filter((other) => other !== id);
+}
+
+/** One house model's GLB — #1585: its geometry, mapped into the shared atlas. */
+function houseModelOutput(id: string): OutputSpec {
+  return {
+    file: houseModelFile(id as HouseModelId),
+    from: id,
+    recipe: { how: 'blender', script: HOUSE_SCRIPT, args: [id], alsoReads: otherHouses(id) },
+    modified:
+      'its parts joined and brought to metres, turned so that its long axis is X and stood on the origin, faces of no area dissolved and every face shaded flat, its materials and its own texture coordinates dropped for one new set into the atlas every house model shares (Smart UV Project over all thirteen at once); geometry only, no picture',
+  };
+}
+
+/** The atlas every house model is mapped into — #1585. */
+function houseAtlasOutput(): OutputSpec {
+  const [first] = HOUSE_MODEL_SOURCES;
+  if (first === undefined) throw new Error('no house model');
+  return {
+    file: REALISTIC_HOUSE_ATLAS,
+    from: first.id,
+    recipe: {
+      how: 'blender',
+      script: HOUSE_SCRIPT,
+      args: ['atlas'],
+      alsoReads: otherHouses(first.id),
+      made: HOUSE_ATLAS_MADE,
+      ktx2: HOUSE_ATLAS_KTX2,
+    },
+    credit: {
+      creator: [...new Set(HOUSE_MODEL_SOURCES.map((model) => model.author))].join(' and '),
+      url: 'https://sketchfab.com/gildedage',
+    },
+    modified: `each house model's colour picture baked by Cycles on one thread, as an emission through its own texture coordinates, into one 4096 px square every model is mapped into; the shop's photograph of a shop interior behind its window, and the “OPEN” sign on its door, painted over first with a dark glass (#1585, ADR 0049's amendment of 2026-10-23); then ${encodingWords(HOUSE_ATLAS_KTX2)}`,
+  };
+}
 
 /** The digest of the pixels a drawn map's encoder reads — its row's `inputsha256`. */
 export function drawnDigest(map: RealisticBicycleMap): string {
@@ -1714,6 +2172,27 @@ function structureMap(
       ktx2,
     },
     modified: `one map of the texture (${mapFile}), downsized from 1024 to ${String(STRUCTURE_TEXTURE_PIXELS)} px and re-encoded as JPEG; then ${encodingWords(ktx2)}`,
+  };
+}
+
+/**
+ * One map of a {@link TOWN_STRUCTURE_TEXTURES} entry — #1548: ambientCG's 1K
+ * JPEG out of its archive, encoded as KTX2 with no step between, the road's
+ * recipe. `bottom-left`, as every map `TextureLoader` used to flip is.
+ */
+function townMap(
+  file: string,
+  from: string,
+  map: string,
+  encoding: 'colour' | 'normal',
+): OutputSpec {
+  const upstream = `${from}_${TOWN_STRUCTURE_ATTRIBUTE}_${map}.jpg`;
+  const ktx2: Ktx2Step = { encoding, origin: 'bottom-left' };
+  return {
+    file,
+    from,
+    recipe: { how: 'ktx2', file: upstream, ktx2 },
+    modified: `one map of the material (${upstream}), ${encodingWords(ktx2)}`,
   };
 }
 
@@ -1905,9 +2384,9 @@ export type LicenceVerdict =
  * wrong function.
  */
 export function licenceVerdict(source: AssetSource, pageText: string): LicenceVerdict {
-  return source.origin.from === 'ambientcg'
-    ? ambientCgVerdict(source, pageText)
-    : statedLicence(source, pageText);
+  if (source.origin.from === 'ambientcg') return ambientCgVerdict(source, pageText);
+  if (source.origin.from === 'placed') return sketchfabVerdict(source, pageText);
+  return statedLicence(source, pageText);
 }
 
 /** {@link licenceVerdict}'s checks of the page's own words, which every origin shares. */
@@ -1939,6 +2418,7 @@ function fixedUrls(source: AssetSource): readonly string[] {
   if (source.origin.from === 'urls') return source.origin.files.map((file) => file.url);
   if (source.origin.from === 'archive') return [source.origin.url];
   if (source.origin.from === 'ambientcg') return [ambientCgArchive(source).url];
+  if (source.origin.from === 'placed') return [source.origin.page];
   return [];
 }
 
@@ -2178,16 +2658,26 @@ export function assetRecord(file: string, lock: InputLock, sha256: string): Asse
   if (source === undefined) throw new Error(`${file}: ${output.from} is not in the lock`);
   const path = `${OUTPUT_DIRECTORY}/${file}`;
   // #1274: an ambientCG asset says so, and says how its page said it was made.
+  const from = SOURCES.find((each) => each.id === source.id)?.origin.from;
   const origin =
     source.id === 'makehuman'
       ? 'MakeHuman'
-      : SOURCES.find((each) => each.id === source.id)?.origin.from === 'ambientcg'
+      : from === 'ambientcg'
         ? 'ambientCG'
-        : 'Poly Haven';
+        : from === 'placed'
+          ? 'Sketchfab (the owner’s download, #1585)'
+          : 'Poly Haven';
   const by =
     source.technique === undefined
       ? source.authors
       : `${source.authors} (its own page: made by ${source.technique})`;
+  // #1585: a house model is credited by its title and its page, as CC BY asks.
+  const titled = (id: string, authors: string): string => {
+    const model = HOUSE_MODEL_SOURCES.find((each) => each.id === id);
+    return model === undefined
+      ? `${id} by ${authors}`
+      : `“${model.title}” (${id}) by ${authors}, ${model.page}`;
+  };
   // #623: a run that reads a second source names it, and digests it too.
   const also =
     output.recipe.how === 'blender'
@@ -2241,18 +2731,31 @@ export function assetRecord(file: string, lock: InputLock, sha256: string): Asse
   const alsoFrom = also
     .map(
       (each) =>
-        `, and ${each.id} by ${each.authors}, its licence read on ${each.read} at ${each.licencePage}`,
+        `, and ${titled(each.id, each.authors)}, its licence read on ${each.read} at ${each.licencePage}`,
     )
     .join('');
+  // #1585: a CC-BY-4.0 file records whom it credits and the link (ASSET006).
+  const placed = SOURCES.find((each) => each.id === source.id)?.origin;
+  const credit =
+    source.licence !== 'CC-BY-4.0'
+      ? []
+      : [
+          ['creator', output.credit?.creator ?? source.authors],
+          [
+            'url',
+            output.credit?.url ?? (placed?.from === 'placed' ? placed.page : source.licencePage),
+          ],
+        ];
   return [
     ['path', path],
     [
       'source',
-      `${origin}, ${source.id} by ${by}${alsoFrom}; made by this repository's asset pipeline (#430) from the files inputs.lock.json records`,
+      `${origin}, ${titled(source.id, by)}${alsoFrom}; made by this repository's asset pipeline (#430) from the files inputs.lock.json records`,
     ],
     ['licence', source.licence],
     ['read', source.read],
     ['sha256', sha256],
+    ...(credit as [string, string][]),
     ['modified', `${described}${second}`],
     ['input', [source, ...also].map((each) => each.licencePage).join(' and ')],
     [

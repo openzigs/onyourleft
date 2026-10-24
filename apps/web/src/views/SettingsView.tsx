@@ -259,6 +259,9 @@ export const SETTINGS_KEPT_VISIBLE: readonly string[] = [
   'opening a ride that has GPS asks',
   'sends the map area and your device’s IP address to',
   'It sends no ride data.',
+  // #1539: the corridor read, from the same host, and never near a zone.
+  'With the realistic world chosen, choosing or saving a route also asks',
+  'never for the map near your privacy zones',
   'keeps a record of each map request',
   'We don’t use it or share it.',
   'the app asks',
@@ -1587,7 +1590,9 @@ function MapTilesPanel({
             <p className="oyl-muted">
               When this is on, opening a ride that has GPS asks {host} for the map around where you
               rode. That sends the map area and your device’s IP address to {host}. It sends no ride
-              data.
+              data. With the realistic world chosen, choosing or saving a route also asks {host},
+              once for that route, for the map along it, so the game can place towns where the map
+              has them — but never for the map near your privacy zones.
               {ours
                 ? ` Cloudflare, which runs ${host} for us, keeps a record of each map request — your IP address, the time, and your device or browser type, not which part of the map — that our Cloudflare account can see for up to 7 days. We don’t use it or share it.`
                 : ''}{' '}
@@ -1611,7 +1616,7 @@ function MapTilesPanel({
                   );
                 }}
               />{' '}
-              Draw map tiles under my rides
+              Use map tiles for ride maps and the realistic world’s towns
             </label>
           </p>
         </>

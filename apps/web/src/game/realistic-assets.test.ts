@@ -7,7 +7,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { shippedFiles } from '../../tools/realistic/sources';
 import {
+  isPhotographic,
   isRealisticVegetation,
+  PHOTOGRAPHIC_STRUCTURE_SURFACES,
+  REALISTIC_BOUNDARY_PARTS,
+  REALISTIC_BUILDING_SURFACES,
+  REALISTIC_STRUCTURE_SURFACES,
+  surfaceRepeat,
+  TOWN_STRUCTURE_SURFACES,
   REALISTIC_BROADLEAVES,
   REALISTIC_CONIFERS,
   REALISTIC_TREE_MAKING,
@@ -42,6 +49,45 @@ describe('what the renderer loads is what the pipeline ships — #430', () => {
   it('serves them under one directory, which is what the precache excludes', () => {
     for (const file of realisticFiles()) {
       expect(realisticUrl(file)).toBe(`/${REALISTIC_DIRECTORY}${file}`);
+    }
+  });
+});
+
+describe('the mapped towns’ surfaces — #1548', () => {
+  const isTown = (surface: string): boolean =>
+    (TOWN_STRUCTURE_SURFACES as readonly string[]).includes(surface);
+
+  it('are three photographic surfaces, loaded with the rest, and worn by no procedural kind yet', () => {
+    expect([...TOWN_STRUCTURE_SURFACES]).toEqual(['render', 'concrete', 'flat-roof']);
+    for (const surface of TOWN_STRUCTURE_SURFACES) {
+      expect(isPhotographic(surface), surface).toBe(true);
+      // Loaded: the renderer loads exactly this list's maps.
+      expect(PHOTOGRAPHIC_STRUCTURE_SURFACES, surface).toContain(surface);
+    }
+    expect(PHOTOGRAPHIC_STRUCTURE_SURFACES.filter(isTown)).toEqual([...TOWN_STRUCTURE_SURFACES]);
+    // Their wearers are #1540's mapped buildings: a procedural kind wearing
+    // one would be a change to how every farmstead looks, which #1548 is not.
+    const worn = [
+      ...Object.values(REALISTIC_BUILDING_SURFACES).flatMap((roles) => Object.values(roles)),
+      ...Object.values(REALISTIC_BOUNDARY_PARTS).flat(),
+    ];
+    for (const surface of TOWN_STRUCTURE_SURFACES) expect(worn, surface).not.toContain(surface);
+  });
+
+  it('repeats a 2:1 map twice as far across as up, and a square one the same both ways', () => {
+    expect(surfaceRepeat(REALISTIC_STRUCTURE_SURFACES.render)).toEqual({ across: 4, up: 2 });
+    expect(surfaceRepeat(REALISTIC_STRUCTURE_SURFACES.concrete)).toEqual({ across: 2, up: 2 });
+    expect(surfaceRepeat(REALISTIC_STRUCTURE_SURFACES['flat-roof'])).toEqual({
+      across: 1.9,
+      up: 1.9,
+    });
+    // Every procedural surface is square, and its repeat is what it was.
+    for (const surface of PHOTOGRAPHIC_STRUCTURE_SURFACES.filter((each) => !isTown(each))) {
+      const maps = REALISTIC_STRUCTURE_SURFACES[surface];
+      expect(surfaceRepeat(maps), surface).toEqual({
+        across: maps.tileMetres,
+        up: maps.tileMetres,
+      });
     }
   });
 });

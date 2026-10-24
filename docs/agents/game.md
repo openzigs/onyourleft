@@ -748,7 +748,12 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         harness that holds two frames takes
                         `frame-testing.ts` §`retainedFrame` first. Comparing
                         two frames' arrays without it compares one array
-                        with itself and passes
+                        with itself and passes. ⚠️ Since #1547 the relief is
+                        held to `RELIEF_SLOPE` × the distance to mapped
+                        built-up land (`land-class.ts` §`builtUpDistances`),
+                        so a mapped town is level with the road; the mask is
+                        a REQUIRED argument of `terrainCorridor` and
+                        `terrainHeightAt`, `NO_LAND_CLASS` passed explicitly
     src/game/waterways.ts
                         water and bridges (#459) — a stream at every valley
                         floor of the route's own elevation, a lake beside a
@@ -772,7 +777,137 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         reviewer who remembers six `SCATTER_KINDS` is reading
                         the old file: `StructureKind` and `SCENERY_KINDS` are in
                         `scatter.ts`, and the frame carries the structures FIRST
-                        on a budget of their own (`QualitySettings.structureItems`)
+                        on a budget of their own (`QualitySettings.structureItems`).
+                        Since #1550, `lotsAt`: houses (shops every fifth plot on
+                        commercial land) along the route's road where the land
+                        is mapped built-up and no mapped footprint stands —
+                        every corner on built-up land, never on wood, water or
+                        park, nothing where no tile was read
+    src/game/land-class.ts
+                        what the ground is where map data was read (#1546) — a
+                        sparse 5 m mask built ONCE at the press from the ride's
+                        corridor, `SceneInput.landClass`. ⚠️ **Every placement
+                        rule reads it**: no procedural site touching covered
+                        land (`settlements.ts` §`siteOnMappedLand`, and its
+                        street), no tree, shrub or rock on built-up land or
+                        water, no field boundary off field ground. Absent is
+                        `NO_LAND_CLASS`, today's world, item for item. Since
+                        #1547 it also carries each cell's distance to
+                        built-up land, which `landform.ts` levels by
+    src/game/footprint-buildings.ts
+                        each mapped footprint planned as a building (#1540):
+                        P-9's placement rules, in order and counted as
+                        `FootprintVerdicts`; storeys, a roof and surfaces by
+                        `land-class.ts` §`kindAt`; since #1581 a seeded gable
+                        or hip at a seeded pitch, overhanging, a chimney, a
+                        door canopy and four seeded paints no neighbour within
+                        30 m shares (`paintTown`); since #1588 a US house —
+                        clapboard, shingles, sash windows, a foundation band,
+                        a garage and its driveway, gutters, a downpipe and
+                        dormers — each vertex's style in `STYLE_FLOATS`;
+                        since #1590 a commercial one a main-street shop — a
+                        shop front, a plain sign band (no text), an awning on
+                        some, a cornice and taller windows;
+                        since #1589 a front porch on about half its houses
+                        (`porch.ts`, shared with a lot's farmhouse), kept
+                        off the road's clearance, shortened or dropped, its
+                        triangles written when first read, not at the press;
+                        ≤ 640 triangles
+                        by role, built ONCE at ride start by `GameView`, and
+                        drawn by #1549 (`mapped-buildings.ts`). Since #1550 the
+                        ride also reads their footprints (`mappedTown`, once a
+                        corridor): a procedural lot keeps clear of every kept one
+    src/game/mapped-buildings.ts
+                        which plans are drawn (#1549): indexed ONCE at the
+                        press (`SceneInput.mappedBuildings`), the nearest in
+                        400 m first, ≤ 36 (ADR 0054 D-5.6's cap, the owner's
+                        ruling), ranked by distance with the frame's procedural
+                        structures inside the 23 040-triangle term (#1586), the far
+                        level past 150 m, in ≤ 6 surfaces; no tree,
+                        shrub or rock on a plan's ground. ⚠️ **One mesh, a
+                        group a surface** (`three-renderer.ts`
+                        §`MappedBuildingBelt`), refilled only when the rider's
+                        100 m chunk or the rung changes, realistic rungs only;
+                        the tint is a VERTEX attribute, and there is no ground blob (#620)
+    src/game/house-models.ts
+                        which mapped plans are drawn as a house MODEL (#1585):
+                        GildedAge's RVA set and Orzechu's shop, CC-BY-4.0, the
+                        owner's download (Sketchfab needs an account; the lock
+                        pins each archive, `sources.ts` §`HOUSE_MODEL_SOURCES`).
+                        A plan fits when its minimum-area rectangle's sides are
+                        0.8 to 1.25 of a model's, rectangularity ≥ 0.85, storeys
+                        ±1, the same use and the door on the same end or side
+                        (`HOUSE_FIT`); #1581's mixed town fits none, a Richmond
+                        street's narrow lots. Near level only; one more mesh in ONE
+                        material (the atlas), counted INSIDE the belt's 6 calls,
+                        its triangles pooled in the 23 040. ⚠️ Textures are
+                        admitted on the model's grant (ADR 0049's 2026-10-23
+                        amendment); the shop's interior photo and door sign are
+                        painted over in `blender/process_house_models.py`
+    src/game/facade.ts  a mapped building's windows and front door, laid out in
+                        a bay and a storey (#1581), and since #1588 its US sash
+                        windows, shutters, reveal and cladding — drawn by the shader
+                        (`three-renderer.ts` §`withFacade`) from each wall
+                        vertex's `FACADE_FLOATS`, so no triangle, texture or
+                        draw call; `facadePartAt` and `claddingPartAt` are the
+                        TypeScript twins the tests hold the layout with.
+                        `setMappedFacadeShown` is the browser gate's control
+    src/game/building-paint.ts
+                        what a realistic building is painted (#1581): each wall
+                        and roof surface's multipliers, the trim's and the
+                        door's paints. A mapped plan carries four entries
+                        (vertex colour, `oylTrim`); a #1550 lot carries a wall
+                        and a roof (`lotPaint`, unlike its five neighbours) in
+                        the instance colour's first two channels, read by the
+                        structure materials (`withLotPaint`); since #1588 a house
+                        lot's channel also says it is clad (`LOT_CLAD_STEP`),
+                        and the shader draws clapboard and shingles, keeping its
+                        chimney's brick by each vertex's `oylPart`; since #1589
+                        a lot's porch (`LOT_PORCH_STEP`), without which every
+                        structure material folds the farmhouse's porch away
+                        (`withLotPorch`). A village house carries none and is
+                        drawn as it was
+    src/game/streets.ts a village's kerbed pavements (#1535) — along each side's
+                        BUILT plots (`settlements.ts` §`siteAt`, §`villagePlots`,
+                        the houses' own decision), on the road's edge, never on
+                        any stretch's carriageway or on water; none for a
+                        farmstead. ⚠️ **A mesh, not structure items**: one
+                        `WeakMap`-cached street a village, `SceneFrame.streets`,
+                        drawn in both worlds in ONE call by `three-renderer.ts`
+                        §`PavementBelt` (ambientCG's paving in the realistic
+                        world), outside `structureItems` and outside
+                        `REALISTIC_FRAME_TRIANGLES` by that constant's own rule
+                        (`REALISTIC_STREET_TRIANGLES` is theirs). Since #1536
+                        each unbroken run carries lamp posts, bollards, a
+                        bench and a bin by rule (`furnish`), built from numbers
+                        (`three-renderer.ts` §`FURNITURE_STYLE` says why not
+                        Poly Haven's) and drawn one instanced call a kind by
+                        §`FurnitureBelt`, only within `FURNITURE_DRAW_METRES`.
+                        Since #1551 a covered stretch takes its sides from
+                        `footways.ts` instead
+    src/game/footways.ts
+                        footways from the corridor's map data (#1551) —
+                        `pavementSides`, the side of the drawn road's NORMAL a
+                        sidewalk is mapped on (3–12 m out, within 20°), which
+                        `streets.ts` lays a village's pavement on where read
+                        (`unknown`, and #1535's own rule, where not); and
+                        `footwayNetwork`, 2 m polylines off the carriageway
+                        and inside the corridor for #1541 (`@unwired` until
+                        then). No crossing is either
+    src/game/cross-streets.ts
+                        cross streets (#1565) — a side road 60 m off the
+                        route at each junction where a mapped street
+                        (`WorldCorridor.streets`, #1544's decoder keeps them
+                        since #1565) leaves the route at grade — never a
+                        bridge, a tunnel or a `highway` — and one crossroads at
+                        every procedural village's centre, whose middle plots
+                        are empty for it (`settlements.ts`). ⚠️ **Drawn in the
+                        ROAD's material** by one mesh in both worlds
+                        (`three-renderer.ts` §`SideRoadBelt`), and it fades by
+                        sinking under the ground, not by transparency. Every
+                        scatter item, structure and billboard in view is kept
+                        off it (`clearOfSideRoads`), and a village's pavement
+                        is broken at its crossroads with dropped kerbs
     src/game/buildings.ts
                         the buildings as SHAPES (#500) — walls with their doors
                         and windows cut in, recessed and framed, eaves that

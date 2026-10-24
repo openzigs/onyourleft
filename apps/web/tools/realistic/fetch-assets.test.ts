@@ -15,7 +15,15 @@
  */
 
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { crc32 } from 'node:zlib';
@@ -23,7 +31,13 @@ import { crc32 } from 'node:zlib';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { MAXIMUM_REDIRECTS, readSource, type Fetch, type FetchRun } from './fetch-assets';
-import { AMBIENTCG_PHRASE, type AssetSource, type LockedSource } from './sources';
+import {
+  AMBIENTCG_PHRASE,
+  HOUSE_MODEL_SOURCES,
+  SOURCES,
+  type AssetSource,
+  type LockedSource,
+} from './sources';
 
 const sha256 = (data: Uint8Array | string): string =>
   createHash('sha256').update(data).digest('hex');
@@ -383,5 +397,101 @@ describe('an archive whose own name is not a path under its directory', () => {
     );
     expect(requested).toEqual([pack.licencePage]);
     expect(existsSync(join(raw, 'pack'))).toBe(false);
+  });
+});
+
+describe('a placed house model: the owner’s archive, its record, its members — #1585', () => {
+  const model = HOUSE_MODEL_SOURCES.find((each) => each.id === 'rva_duplex_02a');
+  const source = SOURCES.find((each) => each.id === 'rva_duplex_02a') as AssetSource;
+  if (model === undefined || source.origin.from !== 'placed') throw new Error('no such model');
+  const origin = source.origin;
+  const credit = `* license type:\tCC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)`;
+  const archiveOf = (licence: string = credit): Uint8Array =>
+    zipOf({
+      'scene.gltf': '{"asset":{}}',
+      'scene.bin': 'bytes',
+      'license.txt': licence,
+      ...Object.fromEntries(model.textures.map((path) => [path, `picture ${path}`])),
+    });
+  // The record as Sketchfab serves it: every `/` escaped.
+  const record = JSON.stringify({
+    uid: model.uid,
+    name: model.title,
+    user: { username: model.username },
+    license: { slug: 'by', url: 'http://creativecommons.org/licenses/by/4.0/' },
+  }).replaceAll('/', '\\/');
+  const place = (bytes: Uint8Array): void => {
+    mkdirSync(join(raw, source.id), { recursive: true });
+    writeFileSync(join(raw, source.id, origin.archive), bytes);
+  };
+
+  it('reads the record, never the archive, and takes the members out of the placed archive', async () => {
+    const archive = archiveOf();
+    place(archive);
+    const { fetch, requested } = fakeWeb({ [source.licencePage]: record });
+    const locked = await readSource(source, undefined, runWith(fetch, true));
+    // The one request is the public record: nothing is downloaded.
+    expect(requested).toEqual([source.licencePage]);
+    expect(locked.licence).toBe('CC-BY-4.0');
+    expect(locked.authors).toBe('GildedAge');
+    expect(locked.files[0]).toEqual({
+      path: origin.archive,
+      url: model.page,
+      bytes: archive.length,
+      sha256: sha256(archive),
+    });
+    expect(locked.files.map((file) => file.path)).toEqual([
+      origin.archive,
+      'scene.gltf',
+      'scene.bin',
+      ...model.textures,
+      'license.txt',
+    ]);
+    expect(readFileSync(join(raw, source.id, 'scene.bin'), 'utf8')).toBe('bytes');
+    // And held to the lock it just wrote, it reads the same again.
+    await expect(readSource(source, locked, runWith(fetch, false))).resolves.toEqual(locked);
+  });
+
+  it('refuses an archive that is not there, and says whose download it is', async () => {
+    const { fetch } = fakeWeb({ [source.licencePage]: record });
+    await expect(readSource(source, undefined, runWith(fetch, true))).rejects.toThrow(
+      `the owner's own download of ${model.page}`,
+    );
+  });
+
+  it('refuses an archive that is not the one the lock records', async () => {
+    place(archiveOf());
+    const { fetch } = fakeWeb({ [source.licencePage]: record });
+    const locked = await readSource(source, undefined, runWith(fetch, true));
+    place(archiveOf(`${credit} `));
+    await expect(readSource(source, locked, runWith(fetch, false))).rejects.toThrow(
+      `${source.id}/${origin.archive}: not the input the lock records`,
+    );
+  });
+
+  it('refuses an archive whose credit file does not name CC-BY-4.0', async () => {
+    place(archiveOf('* license type:\tCC-BY-NC-4.0'));
+    const { fetch } = fakeWeb({ [source.licencePage]: record });
+    await expect(readSource(source, undefined, runWith(fetch, true))).rejects.toThrow(
+      `${source.id}/license.txt: it does not state`,
+    );
+  });
+
+  it('refuses a model whose record is not this model’s, or not CC-BY-4.0, before reading the archive', async () => {
+    place(archiveOf());
+    for (const [change, reason] of [
+      [{ uid: 'another' }, `its uid is ${model.uid}`],
+      [{ user: { username: 'someone' } }, `it is by ${model.username}`],
+      [{ name: 'Another house' }, `it is titled`],
+      [
+        { license: { slug: 'by-nc', url: 'http://creativecommons.org/licenses/by-nc/4.0/' } },
+        `its licence is creativecommons.org/licenses/by/4.0/`,
+      ],
+    ] as const) {
+      const wrong = JSON.stringify({ ...JSON.parse(record.replaceAll('\\/', '/')), ...change });
+      const { fetch } = fakeWeb({ [source.licencePage]: wrong });
+      await expect(readSource(source, undefined, runWith(fetch, true))).rejects.toThrow(reason);
+    }
+    expect(written()).toEqual([`${source.id}/${origin.archive}`]);
   });
 });

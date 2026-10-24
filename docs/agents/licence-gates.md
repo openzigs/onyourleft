@@ -132,3 +132,12 @@ package's own files notice it.
 ⚠️ **A dependency bump now fails CI until somebody regenerates**, on purpose: `pnpm run
 notices:generate`, then read the licence text in the diff before committing it. A Dependabot pull
 request goes red at `Third-party notices` for exactly that reason.
+
+#### Map data is a licence question too — #1552
+
+OpenStreetMap data (the map's tiles, and the world corridor store ADR 0054 keeps on the device) is
+under the ODbL, not a package licence, so none of the gates above sees it.
+[`docs/odbl.md`](../odbl.md) records what is held and where, the attribution rule
+(`map/basemap.ts` §`OSM_ATTRIBUTION`, on the ride screen only when the ride's world has map data),
+and why share-alike (§4.4) is not engaged: **read it before any change that sends corridor records
+anywhere**, which is a superseding ADR and not a code change.

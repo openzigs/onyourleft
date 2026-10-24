@@ -53,58 +53,27 @@ import Dexie from 'dexie';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { SCHEMA_VERSIONS } from './schema';
-import type { AthleteId } from './ids';
-import { privacyZoneId } from './ids';
-import type { MatchCheckpointRecord, PrivacyZoneRecord } from './records';
 import {
   ATHLETE_A,
   ATHLETE_B,
   ATHLETE_C,
   ATHLETES,
-  cameraFrameFor,
-  chunksOf,
-  framingReferenceFor,
-  sideCameraReportFor,
-  rideWriteUpFor,
-  syncBaseFor,
-  riderTextFor,
-  trustedDeviceKeyFor,
-  workoutGoalsFor,
   createStoreHarness,
-  effortFor,
-  extractableDeviceKey,
-  FIXTURE_EPOCH,
-  lapFor,
-  recordingFor,
   resetFixtureIds,
-  rideFor,
-  routeFor,
   seedAthletes,
-  segmentFor,
-  signedRecordFor,
-  streamSetFor,
-  workoutFor,
+  seedEveryTable,
 } from './testing';
 import type { StoreHarness } from './testing';
-import {
-  degreesLatitude,
-  degreesLongitude,
-  geographicPosition,
-  metres,
-  unixSeconds,
-} from '@onyourleft/domain';
-
-const SAMPLE_COUNT = 60;
-const CHUNK_SAMPLES = 30;
 
 /**
  * The keys a row uses to say whose it is.
  *
- * Three rather than one because the store genuinely uses three: `athleteId` on
- * most rows, `createdBy` on a segment and a workout, and the primary key itself
- * on `athletes` and `deviceKeys`, which are keyed *by* the athlete.
+ * Four rather than one because the store genuinely uses four: `athleteId` on
+ * most rows, `createdBy` on a segment and a workout, `owner` on a world
+ * corridor (#1545), and the primary key itself on `athletes` and `deviceKeys`,
+ * which are keyed *by* the athlete.
  */
-const ATHLETE_KEYS = ['athleteId', 'createdBy'] as const;
+const ATHLETE_KEYS = ['athleteId', 'createdBy', 'owner'] as const;
 
 /**
  * Tables whose primary key **is** the athlete id, so a row belongs to whoever
@@ -143,86 +112,6 @@ function ownerOfRow(table: string, key: unknown, row: Record<string, unknown>): 
   return undefined;
 }
 
-/** Everything one athlete owns, written through the public path. */
-async function seedEverything(harness: StoreHarness, owner: AthleteId): Promise<void> {
-  const route = routeFor(owner);
-  const workout = workoutFor(owner);
-  const segment = segmentFor(owner);
-  const ride = rideFor(owner, { routeId: route.id, hasPosition: true });
-  const streams = streamSetFor(ride, { sampleCount: SAMPLE_COUNT });
-  const recording = recordingFor(owner);
-  const chunks = chunksOf(recording, streams, CHUNK_SAMPLES);
-  const zone: PrivacyZoneRecord = {
-    id: privacyZoneId(`zone-${owner}`),
-    athleteId: owner,
-    centre: geographicPosition(degreesLatitude(51.5), degreesLongitude(-0.12)),
-    radius: metres(500),
-    label: 'home',
-    createdAt: unixSeconds(FIXTURE_EPOCH),
-  };
-  const checkpoint: MatchCheckpointRecord = {
-    athleteId: owner,
-    lastStartedAt: ride.startedAt,
-    lastActivityId: ride.id,
-    swept: 1,
-    updatedAt: unixSeconds(FIXTURE_EPOCH),
-  };
-  const { record: deviceKey, key } = await extractableDeviceKey(owner);
-  const signed = await signedRecordFor(ride, key);
-
-  await harness.write(async (store) => {
-    await store.putRoute(route);
-    await store.putWorkout(workout);
-    await store.putSegment(segment);
-    await store.putActivity(ride);
-    await store.putStreamSet(streams);
-    await store.putLap(lapFor(ride, 1));
-    await store.putPrivacyZone(zone);
-    await store.putActivityEfforts(owner, ride.id, [effortFor(owner, segment.id, ride.id)]);
-    await store.putRecordingSession(recording);
-    for (const chunk of chunks) {
-      await store.appendRecordingChunk(chunk);
-    }
-    await store.putDeviceKey(deviceKey);
-    await store.putActivityRecord(signed);
-    await store.putMatchCheckpoint(checkpoint);
-    // #384. A kept picture is the most sensitive row this store holds, and the
-    // whole of ADR 0029 D-11's remedy is that an erase removes it — so the
-    // fixture has to put one there, or "empty afterwards" is true of a table
-    // nothing ever filled.
-    await store.putCameraFrame(cameraFrameFor(owner));
-    // #528. Numbers read off a picture of the rider, and ADR 0029 D-4's
-    // "everything derived from one" — seeded so "empty afterwards" is checked
-    // against a table something filled.
-    await store.putFramingReference(framingReferenceFor(owner));
-    // #388. Sentences read off pictures of the rider, on this rider's ride —
-    // seeded so "empty afterwards" is checked against a table something filled.
-    await store.putSideCameraReport(sideCameraReportFor(owner, ride.id));
-    // #800. A model's words about this rider's ride — seeded so "empty
-    // afterwards" is checked against a table something filled.
-    await store.putRideWriteUp(rideWriteUpFor(owner, ride.id));
-    // #776 (#893's review). What this device last agreed with its instance
-    // about this rider's ride — seeded for the same reason.
-    await store.putSyncBase(syncBaseFor(owner, ride.id));
-    await store.putSyncBase(syncBaseFor(owner, ride.id, 'write-up'));
-    // #836. The rider's own goals, a note on their ride and a document —
-    // free text, seeded for the same reason.
-    await store.putRiderText(riderTextFor(owner, 'goal'));
-    await store.putRiderText(riderTextFor(owner, 'note', ride.id));
-    await store.putRiderText(riderTextFor(owner, 'document'));
-    // #898. Another device's key, admitted here for this rider.
-    await store.putTrustedDeviceKey(trustedDeviceKeyFor(owner));
-    // #1236. The rider's typed workout goals.
-    await store.putWorkoutGoals(workoutGoalsFor(owner));
-    // #1431. A deleted ride, held in Recently deleted, with its lap and note.
-    const deleted = rideFor(owner, { name: 'Deleted' });
-    await store.putActivity(deleted);
-    await store.putLap(lapFor(deleted, 1));
-    await store.putRiderText(riderTextFor(owner, 'note', deleted.id));
-    await store.moveActivityToRecentlyDeleted(owner, deleted.id, unixSeconds(FIXTURE_EPOCH));
-  });
-}
-
 /** Rows per athlete, per table, read through a connection nothing wrote on. */
 async function censusOf(databaseName: string): Promise<Map<string, Map<string, number>>> {
   const database = new Dexie(databaseName);
@@ -257,8 +146,9 @@ describe('the erasure enumeration comes from the schema', () => {
     // the seventeenth, #800's `rideWriteUps` the eighteenth, #776's
     // `syncBases` (#893's review) the nineteenth, #836's `riderTexts` the
     // twentieth, #898's `trustedDeviceKeys` the twenty-first, #1236's
-    // `workoutGoals` the twenty-second.
-    expect(tablesInSchema().length).toBeGreaterThanOrEqual(22);
+    // `workoutGoals` the twenty-second, #1431's `recentlyDeleted` the
+    // twenty-third, #1545's `worldCorridors` the twenty-fourth.
+    expect(tablesInSchema().length).toBeGreaterThanOrEqual(24);
   });
 
   it('claims no table is unscoped without that being checked', () => {
@@ -276,7 +166,7 @@ describe('deleting an athlete leaves nothing of theirs in any table', () => {
     harness = createStoreHarness();
     await seedAthletes(harness);
     for (const athlete of ATHLETES) {
-      await seedEverything(harness, athlete);
+      await seedEveryTable(harness, athlete);
     }
   });
 

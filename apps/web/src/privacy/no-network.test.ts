@@ -405,6 +405,15 @@ export const PERMITTED_NETWORK_CALLS: readonly {
   // `WebSocket` to it: a WebSocket anywhere else in the client, a second one
   // here, or this one gone, is a red run (the fixtures below, "#782").
   { module: join('instance', 'instance-transport.ts'), primitive: 'WebSocket', count: 1 },
+  // #1539, ADR 0054 D-2.5: a route's corridor, read once from the configured
+  // basemap archive — byte ranges of the one file the ride map already reads,
+  // on the same host. Its OWN `fetch`, never `pmtiles`' `FetchSource`, because
+  // a request made inside a dependency is one this scan cannot see. Not
+  // instance traffic: ADR 0036 D-3 (a)'s one instance module is untouched.
+  // `privacy/boundaries.test.ts` declares it departing, and
+  // `docs/privacy-policy.md` and `apps/mobile/src/android/data-safety.ts` say
+  // what it sends.
+  { module: join('world-data', 'corridor-source.ts'), primitive: 'fetch', count: 1 },
 ];
 
 /** One source file, by its path relative to `apps/web/src`. */
@@ -492,12 +501,19 @@ describe('the narrowed gate itself — #387', () => {
       'const sender: InstanceSend = send ?? (async (url, init) => fetch(url, init));\n' +
       'const platformSocket = (url, events) => { const socket = new WebSocket(url); return socket; };',
   };
+  // #1539, ADR 0054 D-2.5: the corridor read's range requests, made by the
+  // module's own `fetch` so this scan sees them.
+  const CORRIDOR = join('world-data', 'corridor-source.ts');
+  const corridor: ScannedFile = {
+    path: CORRIDOR,
+    source: 'response = await fetch(url, { headers, credentials: "omit" });',
+  };
   const quiet: ScannedFile = { path: join('views', 'CameraView.tsx'), source: 'const x = 1;' };
 
   it('is clean over a tree that is exactly what the policy describes', () => {
     expect(
       networkFindingsOutside(
-        [instance, hosted, transport, link, quiet, fence],
+        [corridor, instance, hosted, transport, link, quiet, fence],
         PERMITTED_NETWORK_CALLS,
       ),
     ).toEqual([]);
@@ -511,7 +527,7 @@ describe('the narrowed gate itself — #387', () => {
       source: "const r = await fetch('https://example.invalid/upload', { method: 'POST' });",
     };
     const findings = networkFindingsOutside(
-      [instance, hosted, transport, link, elsewhere, fence],
+      [corridor, instance, hosted, transport, link, elsewhere, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -526,7 +542,7 @@ describe('the narrowed gate itself — #387', () => {
     };
     expect(
       networkFindingsOutside(
-        [instance, hosted, transport, link, sibling, fence],
+        [corridor, instance, hosted, transport, link, sibling, fence],
         PERMITTED_NETWORK_CALLS,
       ),
     ).toHaveLength(1);
@@ -538,7 +554,10 @@ describe('the narrowed gate itself — #387', () => {
       source: `${transport.source}\nvoid fetch('https://example.invalid/telemetry');`,
     };
     expect(
-      networkFindingsOutside([instance, hosted, twice, link, fence], PERMITTED_NETWORK_CALLS),
+      networkFindingsOutside(
+        [corridor, instance, hosted, twice, link, fence],
+        PERMITTED_NETWORK_CALLS,
+      ),
     ).toHaveLength(1);
   });
 
@@ -548,7 +567,7 @@ describe('the narrowed gate itself — #387', () => {
       source: `${transport.source}\nconst s = new WebSocket(url);`,
     };
     const findings = networkFindingsOutside(
-      [instance, hosted, socket, link, fence],
+      [corridor, instance, hosted, socket, link, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -558,7 +577,7 @@ describe('the narrowed gate itself — #387', () => {
   it('goes red when the permitted call is gone, so the list cannot outlive it', () => {
     const emptied: ScannedFile = { path: TRANSPORT, source: 'const send = options.send;' };
     const findings = networkFindingsOutside(
-      [instance, hosted, emptied, link, fence],
+      [corridor, instance, hosted, emptied, link, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -573,7 +592,7 @@ describe('the narrowed gate itself — #387', () => {
       source: `${link.source}\nconst another = new RTCPeerConnection(config);`,
     };
     const findings = networkFindingsOutside(
-      [instance, hosted, transport, twice, fence],
+      [corridor, instance, hosted, transport, twice, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -586,7 +605,7 @@ describe('the narrowed gate itself — #387', () => {
       source: `${link.source}\nvoid fetch('https://stun.example.invalid');`,
     };
     const findings = networkFindingsOutside(
-      [instance, hosted, transport, fetched, fence],
+      [corridor, instance, hosted, transport, fetched, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -599,7 +618,7 @@ describe('the narrowed gate itself — #387', () => {
       source: 'const peer = new webkitRTCPeerConnection({});',
     };
     const findings = networkFindingsOutside(
-      [instance, hosted, transport, link, elsewhere, fence],
+      [corridor, instance, hosted, transport, link, elsewhere, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -610,7 +629,7 @@ describe('the narrowed gate itself — #387', () => {
   // a red run.
   it('goes red when the pose worker’s fence is gone', () => {
     const findings = networkFindingsOutside(
-      [instance, hosted, transport, link],
+      [corridor, instance, hosted, transport, link],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -623,7 +642,7 @@ describe('the narrowed gate itself — #387', () => {
       source: 'const request = new XMLHttpRequest();',
     };
     const findings = networkFindingsOutside(
-      [instance, hosted, transport, link, fence, elsewhere],
+      [corridor, instance, hosted, transport, link, fence, elsewhere],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -637,7 +656,7 @@ describe('the narrowed gate itself — #387', () => {
       source: `${hosted.source}\nvoid fetch('https://example.invalid/telemetry');`,
     };
     const findings = networkFindingsOutside(
-      [instance, transport, link, fence, twice],
+      [corridor, instance, transport, link, fence, twice],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -650,7 +669,7 @@ describe('the narrowed gate itself — #387', () => {
       source: `${hosted.source}\nconst s = new WebSocket(url);`,
     };
     const findings = networkFindingsOutside(
-      [instance, transport, link, fence, socket],
+      [corridor, instance, transport, link, fence, socket],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -660,7 +679,7 @@ describe('the narrowed gate itself — #387', () => {
   it('goes red when the hosted transport’s fetch is gone', () => {
     const emptied: ScannedFile = { path: HOSTED, source: 'const send = options.send;' };
     const findings = networkFindingsOutside(
-      [instance, transport, link, fence, emptied],
+      [corridor, instance, transport, link, fence, emptied],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -671,7 +690,7 @@ describe('the narrowed gate itself — #387', () => {
   it('goes red when the side link’s peer connection is gone', () => {
     const emptied: ScannedFile = { path: LINK, source: 'const Peer = undefined;' };
     const findings = networkFindingsOutside(
-      [instance, hosted, transport, emptied, fence],
+      [corridor, instance, hosted, transport, emptied, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -686,7 +705,7 @@ describe('the narrowed gate itself — #387', () => {
       source: `${instance.source}\nvoid fetch('https://example.invalid/telemetry');`,
     };
     const findings = networkFindingsOutside(
-      [twice, hosted, transport, link, fence],
+      [corridor, twice, hosted, transport, link, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -699,7 +718,7 @@ describe('the narrowed gate itself — #387', () => {
       source: `${instance.source}\nconst s = new EventSource('https://ride.example/v1/events');`,
     };
     const findings = networkFindingsOutside(
-      [source, hosted, transport, link, fence],
+      [corridor, source, hosted, transport, link, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -714,7 +733,7 @@ describe('the narrowed gate itself — #387', () => {
       source: `${instance.source}\nconst s = new WebSocket('wss://ride.example/elsewhere');`,
     };
     const findings = networkFindingsOutside(
-      [twice, hosted, transport, link, fence],
+      [corridor, twice, hosted, transport, link, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toEqual([expect.stringContaining('2 WebSocket')]);
@@ -729,7 +748,7 @@ describe('the narrowed gate itself — #387', () => {
     ]) {
       const elsewhere: ScannedFile = { path, source: 'const socket = new WebSocket(url);' };
       const findings = networkFindingsOutside(
-        [instance, elsewhere, hosted, transport, link, fence],
+        [corridor, instance, elsewhere, hosted, transport, link, fence],
         PERMITTED_NETWORK_CALLS,
       );
       expect(findings, path).toEqual([expect.stringContaining(path)]);
@@ -745,7 +764,7 @@ describe('the narrowed gate itself — #387', () => {
       const path = join('net', 'room-port.ts');
       const elsewhere: ScannedFile = { path, source };
       const findings = networkFindingsOutside(
-        [instance, elsewhere, hosted, transport, link, fence],
+        [corridor, instance, elsewhere, hosted, transport, link, fence],
         PERMITTED_NETWORK_CALLS,
       );
       expect(findings, source).toEqual([expect.stringContaining(path)]);
@@ -758,7 +777,7 @@ describe('the narrowed gate itself — #387', () => {
       source: 'const sender: InstanceSend = send ?? (async (url, init) => fetch(url, init));',
     };
     const findings = networkFindingsOutside(
-      [emptied, hosted, transport, link, fence],
+      [corridor, emptied, hosted, transport, link, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toEqual([expect.stringContaining('0 WebSocket')]);
@@ -770,7 +789,7 @@ describe('the narrowed gate itself — #387', () => {
       source: 'const sender = send;\nconst socket = new WebSocket(url);',
     };
     const findings = networkFindingsOutside(
-      [emptied, hosted, transport, link, fence],
+      [corridor, emptied, hosted, transport, link, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
@@ -784,11 +803,63 @@ describe('the narrowed gate itself — #387', () => {
       source: "void fetch('https://ride.example/v1/auth/session');",
     };
     const findings = networkFindingsOutside(
-      [instance, sibling, hosted, transport, link, fence],
+      [corridor, instance, sibling, hosted, transport, link, fence],
       PERMITTED_NETWORK_CALLS,
     );
     expect(findings).toHaveLength(1);
     expect(findings[0]).toContain(join('instance', 'instance-port.ts'));
+  });
+  // #1539: the corridor read's three, as #387's.
+  it('goes red for a second fetch inside the corridor read', () => {
+    const twice: ScannedFile = {
+      path: CORRIDOR,
+      source: `${corridor.source}\nvoid fetch('https://example.invalid/telemetry');`,
+    };
+    const findings = networkFindingsOutside(
+      [twice, instance, hosted, transport, link, fence],
+      PERMITTED_NETWORK_CALLS,
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toContain('2 fetch');
+  });
+
+  it('goes red for a different primitive inside the corridor read', () => {
+    const socket: ScannedFile = {
+      path: CORRIDOR,
+      source: `${corridor.source}\nconst s = new WebSocket(url);`,
+    };
+    const findings = networkFindingsOutside(
+      [socket, instance, hosted, transport, link, fence],
+      PERMITTED_NETWORK_CALLS,
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toContain('WebSocket');
+  });
+
+  it('goes red when the corridor read’s fetch is gone', () => {
+    const emptied: ScannedFile = { path: CORRIDOR, source: 'const source = new FetchSource(url);' };
+    const findings = networkFindingsOutside(
+      [emptied, instance, hosted, transport, link, fence],
+      PERMITTED_NETWORK_CALLS,
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toContain(CORRIDOR);
+    expect(findings[0]).toContain('0 fetch');
+  });
+
+  it('goes red for a fetch beside the corridor read, and under game/', () => {
+    for (const path of [
+      join('world-data', 'corridor-port.ts'),
+      join('game', 'world-data', 'corridor.ts'),
+    ]) {
+      const beside: ScannedFile = { path, source: 'void fetch(url);' };
+      const findings = networkFindingsOutside(
+        [corridor, beside, instance, hosted, transport, link, fence],
+        PERMITTED_NETWORK_CALLS,
+      );
+      expect(findings, path).toHaveLength(1);
+      expect(findings[0]).toContain(path);
+    }
   });
 });
 
@@ -814,8 +885,8 @@ describe('a side-camera picture goes to an instance through the one instance mod
     source: readFileSync(join(SOURCE_ROOT, path), 'utf8'),
   });
 
-  it('gave the picture path no permit: the list is the six entries it was, one module for instance traffic', () => {
-    expect(PERMITTED_NETWORK_CALLS).toHaveLength(6);
+  it('gave the picture path no permit: the list is the seven entries it is (#1539 added the corridor read), one module for instance traffic', () => {
+    expect(PERMITTED_NETWORK_CALLS).toHaveLength(7);
     const modules = PERMITTED_NETWORK_CALLS.map((entry) => entry.module);
     expect(modules).not.toContain(PICTURE_PATH);
     expect(modules).not.toContain(SERVICE_READER);
@@ -873,7 +944,8 @@ describe('the client', () => {
         'paired by scanning, a question — never a picture — to a hosted service on the ' +
         'rider’s own key, a sign-in to an instance the rider chose (#777), a room’s ' +
         'power reports to that instance (#782), and the side camera’s pictures, sealed, to ' +
-        'that instance when the rider switched that on (#1106); that is now ' +
+        'that instance when the rider switched that on (#1106), and a route’s map tiles from the ' +
+        'basemap archive for the realistic world (#1539); that is now ' +
         'false, and the policy and the Data Safety form are what ' +
         'must change',
     ).toEqual([]);
@@ -1195,6 +1267,34 @@ describe('the default basemap is disclosed — #534', () => {
     ).toContain('up to 7 days');
     expect(why).toContain('IP address');
     expect(why).toContain('not which part of the map');
+  });
+
+  /**
+   * #1539, ADR 0054 D-6.5: the corridor read is a second kind of tile request
+   * to the same host — made by this app's code, for a route rather than for a
+   * map on screen — and the policy and the Play answer say so in the same
+   * pull request as the read. Each place, on its own.
+   */
+  it('says a route read for the realistic world requests its tiles from the same host, once — #1539', () => {
+    const policy = readFileSync(join(REPOSITORY_ROOT, 'docs', 'privacy-policy.md'), 'utf8');
+    const leaving = normalised(policySection(policy, 'What leaves the device'));
+    expect(leaving, 'the policy does not describe the realistic world’s tile read').toContain(
+      'if you choose the realistic world in settings, then when you choose a route for a game ride, or save a route, your device requests the map tiles along that route',
+    );
+    expect(leaving).toContain('from the same file on the same host, once for that route');
+    expect(leaving).toContain('it never requests a tile near one of your privacy zones');
+    expect(normalised(policySection(policy, 'The short version'))).toContain(
+      'it also asks once for the map along a route you choose or save',
+    );
+    const why = locationWhy(
+      readFileSync(
+        join(REPOSITORY_ROOT, 'apps', 'mobile', 'src', 'android', 'data-safety.ts'),
+        'utf8',
+      ),
+    );
+    expect(why).toContain(
+      'With the realistic world chosen, choosing or saving a route also requests that route’s tiles from the same host, once for that route, as byte ranges of the same file',
+    );
   });
 
   it('is not satisfied by a comment — the parse sees the `why` string and nothing else', () => {

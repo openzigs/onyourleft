@@ -61,6 +61,7 @@ import {
 import type { StreamChannel, StreamChannels, StreamChannelValue } from '@onyourleft/store';
 
 import { recordedStretch } from '../recording/laps';
+import { fitLapKindsOf } from './fit-lap-mark';
 import { courseVerdict, type CourseVerdict } from './course-shaped';
 import { detectActivityFileFormat, type ActivityFileFormat } from './file-format';
 import { distanceAlongTrack } from './track-distance';
@@ -238,6 +239,13 @@ export function readActivityFile(fileName: string, bytes: Uint8Array): ImportedR
 function readFit(fileName: string, bytes: Uint8Array): ImportedRide {
   const result = decode(() => decodeFitActivity(bytes));
   const session = result.activity.sessions[0];
+  // #1320: this client's own FIT marks which of its splits are laps, in a
+  // developer field of its own (`fit-lap-mark.ts`). A file with no mark is
+  // every file from elsewhere and every one this client wrote before.
+  const marks = fitLapKindsOf(result.activity);
+  const kinds = typeof marks === 'string' ? undefined : marks;
+  const faults = result.faults.map((fault) => fault.message);
+  if (marks === 'broken') faults.push(BROKEN_FIT_LAP_MARK);
   return rideOf({
     format: 'fit',
     fileName,
@@ -250,21 +258,33 @@ function readFit(fileName: string, bytes: Uint8Array): ImportedRide {
     statedElapsedTime: session?.totalElapsedTime,
     statedMovingTime: session?.totalTimerTime,
     statedDistance: session?.totalDistance,
-    statedLaps: result.activity.laps.map(statedLapOfFit),
+    statedLaps: result.activity.laps.map((lap, ordinal) =>
+      statedLapOfFit(lap, kinds?.[ordinal] ?? 'lap'),
+    ),
     // FIT's `file_id` names the maker of the device or app that wrote it. This
-    // client's own export names none (`export-activity.ts` §`fitInputOf`).
+    // client's own export names none (`export-activity.ts` §`fitInputOf`), so
+    // an unmarked file naming none is this client's from before #1320, whose
+    // lead-in would read as a lap: it lists none.
     //
-    // ⚠️ **This client's own FIT file lists no laps** (#1471). It does not
-    // mark which of its splits are laps: #1321's FIT half, the lap's intensity
-    // and trigger, waits on field numbers ADR 0006 R2 admits. Unmarked, a
-    // lead-in would read as a lap, so the file is read with none.
-    listsLaps: result.activity.fileId?.manufacturer !== undefined,
-    marked: false,
-    faults: result.faults.map((fault) => fault.message),
+    // ⚠️ **A file that declares this client's mark and breaks it lists no
+    // laps**, whoever it names as its maker, for the same reason.
+    listsLaps:
+      kinds !== undefined ||
+      (marks === 'unmarked' && result.activity.fileId?.manufacturer !== undefined),
+    marked: kinds !== undefined,
+    faults,
   });
 }
 
-function statedLapOfFit(lap: FitLap): StatedLap {
+/**
+ * The fault a FIT file gets when it declares this client's lap mark and a lap
+ * carries none, or one this client does not write — #1320.
+ */
+export const BROKEN_FIT_LAP_MARK =
+  'the file marks which of its splits are laps, and a split’s mark is missing or unknown, ' +
+  'so its laps are not listed';
+
+function statedLapOfFit(lap: FitLap, kind: LapKind): StatedLap {
   return {
     // A system time cannot be placed on the ride's clock: the lap then starts
     // where the one before it ended (`lapsWithin`).
@@ -272,8 +292,7 @@ function statedLapOfFit(lap: FitLap): StatedLap {
     elapsedTime: lap.totalElapsedTime,
     movingTime: lap.totalTimerTime,
     distance: lap.totalDistance,
-    // `packages/fit` decodes no mark for a FIT lap (#1471).
-    kind: 'lap',
+    kind,
   };
 }
 
@@ -681,9 +700,10 @@ interface LapGrid {
  * before #1321, or one with no splits, carries no mark and is read with no
  * laps, as every such file was before #1320.
  *
- * ⚠️ **This client's own FIT file carries no mark, and lists no laps**: the
- * FIT half of #1321 waits on #1471, which has to find lap field numbers
- * ADR 0006 R2 admits.
+ * Its FIT marks them the same way since #1320, in a developer field of this
+ * client's own (`fit-lap-mark.ts`), because FIT's own lap fields for it wait
+ * on #1471 (ADR 0006 R2). A FIT this client wrote before #1320 names no maker
+ * and carries no mark, and lists no laps.
  *
  * A marked file's laps differ from a listed file's in two ways: one lap is
  * listed (its mark says it is a lap, not the ride said again), and a part lap

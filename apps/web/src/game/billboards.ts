@@ -60,6 +60,7 @@
 
 import { distanceOnRoute, type RouteProfile } from '@onyourleft/domain';
 
+import { NO_LAND_CLASS } from './land-class';
 import { ROAD_CLEARANCE_METRES, terrainHeightAt } from './landform';
 import { BILLBOARDS_PER_FRAME, BILLBOARD_FOOTPRINT, LOGO_POST_ACROSS_METRES } from './logo-board';
 import { TIGHT_BEND_RADIANS_PER_METRE, type ScatterItem } from './scatter';
@@ -214,7 +215,7 @@ function billboardAt(
   if (meetsAStructure(profile, origin, seed, along, board)) return undefined;
   return {
     ...board,
-    y: terrainHeightAt(profile, origin, seed, at, lateral),
+    y: terrainHeightAt(profile, origin, seed, at, lateral, NO_LAND_CLASS),
     along,
     side,
   };

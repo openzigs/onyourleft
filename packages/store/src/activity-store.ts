@@ -70,6 +70,7 @@ import {
   StoreReferentialError,
   StoreValidationError,
   StoreVersionError,
+  WorldCorridorTooLargeError,
 } from './errors';
 import type {
   ActivityId,
@@ -161,7 +162,9 @@ import type {
   SegmentRecord,
   RouteRecord,
   WorkoutRecord,
+  WorldCorridorRecord,
 } from './records';
+import { WORLD_CORRIDOR_FEATURES_LIMIT_BYTES } from './records';
 import { parseKitColour, type KitColour } from './kit-colour';
 import { parseMaskedWords } from '@onyourleft/analysis';
 import { MAXIMUM_RIDER_DOCUMENTS, riderTextProblem, tidyRiderText } from './rider-text';
@@ -411,6 +414,12 @@ export interface AthleteDeletionCounts {
    * restore copy may outlive an erase.
    */
   readonly recentlyDeleted: number;
+  /**
+   * The map features kept around the rider's routes removed — #1545. A cache
+   * of the basemap archive, but it outlines where the rider's routes go, so
+   * it is location data and goes with them (ADR 0054 D-6.6).
+   */
+  readonly worldCorridors: number;
 }
 
 /**
@@ -635,6 +644,10 @@ export class ActivityStore {
 
   get #recentlyDeleted(): Table<PersistedRecentlyDeleted, string> {
     return this.#db.table<PersistedRecentlyDeleted, string>(TABLE.recentlyDeleted);
+  }
+
+  get #worldCorridors(): Table<WorldCorridorRecord, [string, string]> {
+    return this.#db.table<WorldCorridorRecord, [string, string]>(TABLE.worldCorridors);
   }
 
   get #riderTexts(): Table<RiderTextRecord, [string, string, string]> {
@@ -1031,6 +1044,7 @@ export class ActivityStore {
         this.#trustedDeviceKeys,
         this.#workoutGoals,
         this.#recentlyDeleted,
+        this.#worldCorridors,
       ],
       async () => {
         // The signed records and the device key go with the athlete. The key is
@@ -1131,6 +1145,12 @@ export class ActivityStore {
           .where(INDEX.recentlyDeletedByAthlete)
           .equals(id)
           .delete();
+        // #1545. The map features around the rider's routes. Their routes
+        // went above; these outline where those routes go.
+        const worldCorridors = await this.#worldCorridors
+          .where(INDEX.worldCorridorByOwner)
+          .equals(id)
+          .delete();
         await this.#athletes.delete(id);
         return {
           activities,
@@ -1151,6 +1171,7 @@ export class ActivityStore {
           trustedDeviceKeys,
           workoutGoals,
           recentlyDeleted,
+          worldCorridors,
         };
       },
     );
@@ -2038,7 +2059,10 @@ export class ActivityStore {
   }
 
   /**
-   * Deletes one of this athlete's routes.
+   * Deletes one of this athlete's routes, **and its world corridor in the same
+   * transaction** (#1545, ADR 0054 D-3.4): the corridor is the map around this
+   * route and nothing else, so a route that is gone takes it, and no read
+   * between the two deletes can find one without the other.
    *
    * @returns whether a route was removed. `false` for one that does not exist
    * **and** for one that belongs to somebody else, which are deliberately
@@ -2046,7 +2070,7 @@ export class ActivityStore {
    * have a route with this id" to athlete A.
    */
   async deleteRoute(owner: AthleteId, id: RouteId): Promise<boolean> {
-    return this.#db.transaction('rw', [this.#routes], async () => {
+    return this.#db.transaction('rw', [this.#routes, this.#worldCorridors], async () => {
       const existing = await this.#routes
         .where(INDEX.routeByOwnerAndId)
         .equals([owner, id])
@@ -2055,6 +2079,7 @@ export class ActivityStore {
         return false;
       }
       await this.#routes.delete(id);
+      await this.#worldCorridors.delete([owner, id]);
       return true;
     });
   }
@@ -2751,6 +2776,72 @@ export class ActivityStore {
       await this.#workoutGoals.delete(owner);
       return true;
     });
+  }
+
+  // --- World corridors (#1545, ADR 0054 D-3) -------------------------------
+
+  /**
+   * Keeps the map features in one route's corridor (`records.ts`
+   * §`WorldCorridorRecord`), **replacing** whatever was kept for that owner
+   * and route. ⚠️ ODbL 1.0 data that never leaves the device: nothing that
+   * exports, syncs or sends may read it.
+   *
+   * Refuses a corridor for a route that is not this owner's, inside the same
+   * transaction as the write, so a read that finishes after the rider deleted
+   * the route cannot leave a corridor that no route deletion will reach.
+   *
+   * @throws {WorldCorridorTooLargeError} if `features` is over
+   * {@link WORLD_CORRIDOR_FEATURES_LIMIT_BYTES}; nothing is written.
+   * @throws {StoreValidationError} if the record is not a corridor.
+   * @throws {StoreReferentialError} if the owner has no such route.
+   */
+  async putWorldCorridor(record: WorldCorridorRecord): Promise<void> {
+    if (record.licence !== 'ODbL-1.0') {
+      throw new StoreValidationError('worldCorridors.licence: must be ODbL-1.0');
+    }
+    if (!(record.features instanceof Blob)) {
+      throw new StoreValidationError('worldCorridors.features: must be a Blob');
+    }
+    if (record.features.size > WORLD_CORRIDOR_FEATURES_LIMIT_BYTES) {
+      throw new WorldCorridorTooLargeError(
+        WORLD_CORRIDOR_FEATURES_LIMIT_BYTES,
+        record.features.size,
+      );
+    }
+    await this.#db.transaction('rw', [this.#routes, this.#worldCorridors], async () => {
+      const route = await this.#routes
+        .where(INDEX.routeByOwnerAndId)
+        .equals([record.owner, record.routeId])
+        .first();
+      if (route === undefined) {
+        throw new StoreReferentialError(
+          `cannot keep a world corridor for route ${record.routeId}: the athlete has no such route`,
+        );
+      }
+      await this.#worldCorridors.put(record);
+    });
+  }
+
+  /**
+   * The map features kept around one of this owner's routes, or `undefined`
+   * when none were kept — which #1539 answers by reading the corridor again.
+   */
+  async getWorldCorridor(
+    owner: AthleteId,
+    routeId: RouteId,
+  ): Promise<WorldCorridorRecord | undefined> {
+    return this.#worldCorridors.get([owner, routeId]);
+  }
+
+  /**
+   * Drops the map features kept around one of this owner's routes. A cache:
+   * the route is untouched, and the next read rebuilds it.
+   *
+   * @unwired no screen drops one corridor on its own yet: `deleteRoute` takes a route's
+   * corridor with it, and #1539's read replaces a stale one with `putWorldCorridor`
+   */
+  async deleteWorldCorridor(owner: AthleteId, routeId: RouteId): Promise<void> {
+    await this.#worldCorridors.delete([owner, routeId]);
   }
 
   // --- Segment efforts (#66) ------------------------------------------------

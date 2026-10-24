@@ -9,7 +9,9 @@ app's About page and from the Google Play listing, and those two links point at 
 
 There is no account unless you connect the app to an instance, and the app contains no analytics.
 **Your rides stay on your device.** To draw a
-map, the app asks our tile server for the map around where you rode. It sends no ride data.
+map, the app asks our tile server for the map around where you rode. If you choose the realistic
+world, it also asks once for the map along a route you choose or save, so the game can place towns
+where the map has them. It sends no ride data.
 **Cloudflare, which runs the tile server for us, keeps a record of each map request — your IP
 address, the time, and your device or browser type, not which part of the map — that our Cloudflare
 account can see for up to 7 days**, as part of the standard traffic analytics it keeps for every
@@ -100,9 +102,12 @@ ride with a GPS track is shown on a map, the map library the app uses requests m
 `tiles.openzigs.com`, which is where this project keeps its basemap. That is a request the map
 library makes, not this app's code, and it is **on by default** — it carries no account, cookie or
 identifier of ours, but the host sees your IP address and roughly which area you are looking at
-while it answers. The record Cloudflare keeps afterwards — your IP address, the time, and your
-device or browser type, not which part of the map — our Cloudflare account can see for up to 7 days. **You can turn it off**: Settings → *Ride map* → *Draw map tiles under my rides*. With it off the app
-requests nothing from `tiles.openzigs.com`, and still draws your route on a plain background.
+while it answers. And **if you choose the realistic world**, choosing or saving a route makes this
+app's own code request that route's map tiles from the same host, once for that route, to place
+towns in the game. The record Cloudflare keeps afterwards — your IP address, the time, and your
+device or browser type, not which part of the map — our Cloudflare account can see for up to 7 days. **You can turn it off**: Settings → *Ride map* → *Use map tiles for ride maps and the realistic world’s towns*. With it off the app
+requests nothing from `tiles.openzigs.com`, still draws your route on a plain background, and draws
+the realistic world's towns the way it always has, without map data.
 
 ## What the app holds, and where
 
@@ -222,9 +227,9 @@ ride sent to your own computer** below).
 - **The side camera's pictures, sealed, sent to your instance, if you switch that on** — and on
   from there to a hosted service you hold your own key for, only if you also agree to that service
   by name. See **Side-camera pictures sent to your instance** below.
-- **Map tile requests, when a map is on screen.** Map tiles are **on by default**, and you can turn
-  them off in Settings → *Ride map*. To draw a ride that has
-  a GPS track, your device requests map tiles from `tiles.openzigs.com` — a single static
+- **Map tile requests, when a map is on screen or a route is read for the realistic world.** Map
+  tiles are **on by default**, and you can turn them off in Settings → *Ride map*. To draw a ride
+  that has a GPS track, your device requests map tiles from `tiles.openzigs.com` — a single static
   file this project keeps on Cloudflare R2 storage, served through Cloudflare. Nothing is sent with
   the request but the request itself: no ride data, no account, no cookie and no identifier. But the host
   sees your IP address and which tiles you asked for, and for your own ride that is roughly **where
@@ -244,10 +249,22 @@ ride sent to your own computer** below).
   as our service provider, under its own privacy policy. With map tiles off, the app requests nothing
   from `tiles.openzigs.com` and draws your route on a plain background, with the OpenStreetMap
   credit beneath it.
-  Indoor rides, and the map drawn during a game ride, request nothing. The tiles cover the
-  contiguous United States; elsewhere the map shows your line on a plain background, and after
+  **The realistic world's towns.** If you choose the realistic world in Settings, then when you
+  choose a route for a game ride, or save a route, your device requests the map tiles along that
+  route — up to about 250 m either side of it — from the same file on the same host, once for that
+  route, and keeps what it read on this device, so riding the route again requests nothing. That
+  outlines where the route goes more closely than a map view does, because the tiles are the most
+  detailed ones the file has. **It never requests a tile near one of your privacy zones**, and the
+  game draws the world there without map data; the gap in what is asked for does show the host that
+  something was left out. No request is made while a ride is recording, none with the stylised
+  world, and none with map tiles off. What is kept is map data and never leaves your device: it is
+  not in an export, not synced, and not sent to an instance.
+  Indoor rides, and the map drawn during a game ride, request nothing while you ride. The tiles cover the
+  contiguous United States; elsewhere the map shows your line on a plain background, the game draws
+  its towns without map data, and after
   reading the file's index the app requests no tiles at all. A build of the app can be pointed at another tile
-  host, or at none.
+  host — the map and the game's towns both read from it — or at none, in which case the game draws
+  the world it always has.
 
 ## An instance you connect to
 

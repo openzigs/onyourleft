@@ -105,6 +105,7 @@ import {
   formatRecord,
   GENERATED_TREE_SCRIPT,
   generatedTreeMaps,
+  HOUSE_SCRIPT,
   OUTPUT_DIRECTORY,
   OUTPUTS,
   PINNED_BLENDER,
@@ -150,7 +151,10 @@ function blender(script: string, args: readonly string[]): string {
 /** The input a script reads: a Poly Haven glTF, MakeHuman's directory, or a texture's (#475). */
 function inputFor(output: OutputSpec): string {
   if (output.from.startsWith('makehuman')) return join(RAW, output.from);
-  if (output.recipe.how === 'blender' && output.recipe.script === TEXTURE_SCRIPT) {
+  if (
+    output.recipe.how === 'blender' &&
+    (output.recipe.script === TEXTURE_SCRIPT || output.recipe.script === HOUSE_SCRIPT)
+  ) {
     return join(RAW, output.from);
   }
   return join(RAW, output.from, `${output.from}_1k.gltf`);

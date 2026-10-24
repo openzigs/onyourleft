@@ -57,6 +57,8 @@ import {
 } from '../src/camera/presence';
 import {
   PHOTOGRAPHIC_STRUCTURE_SURFACES,
+  REALISTIC_STRUCTURE_SURFACES,
+  TOWN_STRUCTURE_SURFACES,
   REALISTIC_BICYCLE_MAP_NAMES,
   REALISTIC_RIDER_MAP_NAMES,
   REALISTIC_SURFACES,
@@ -65,10 +67,14 @@ import {
 } from '../src/game/realistic-assets';
 import { modelFacts } from '../src/game/realistic-bytes-testing';
 import {
+  MAPPED_BUILDING_DRAW_CALLS,
+  MAPPED_BUILDING_MAX,
   REALISTIC_REMOTE_TRIANGLES,
+  REALISTIC_STRUCTURE_ITEMS,
   REALISTIC_WOODED_DRAW_CALLS,
 } from '../src/game/realistic-budget';
 import { MAXIMUM_DRAWN_SET } from '../src/net/interest';
+import { SIDE_ROAD_FRAME_TRIANGLES } from '../src/game/cross-streets';
 import { SURFACE_WEAR_ALLOWANCE, WORN_ROAD_CONTRAST_FLOOR } from '../src/game/road-wear';
 
 import { NIGHTLY } from './nightly';
@@ -187,6 +193,7 @@ interface GameHarnessResult {
     readonly drawCallsBare: number;
     readonly withMs: number;
     readonly withoutMs: number;
+    readonly pavement: RealisticMeasurement['pavement'];
   };
   readonly water: {
     readonly crossings: number;
@@ -795,8 +802,30 @@ async function harness(
  * phase grew: #624's tread added 1.9 s and the rest is the runner's spread
  * (texture formats 21.4 s to 24.1 s, house window 11.7 s to 13.1 s). 165 s is
  * 1.49 times the slowest, and §`paysForTheRealisticLoad` is the sum it fits in.
+ *
+ * ⚠️ **It is 275 s since #1574, and a reviewer who remembers 165 is reading the
+ * old file.** The load grew phase by phase rather than by spread: #1523's
+ * surface bounds (6.3 s to 6.8 s on the EPYC 7763), #1535's pavement (1.6 s to
+ * 2.6 s), #1551 (1.2 s), #1549's mapped town (10.7 s to 10.9 s) and #1581's
+ * windows (1.1 s), about 22 s in all, and no older phase moved by more than a
+ * second. Read off each run's phase lines, from Playwright's "Running" line to
+ * the last phase printed, on the 7763 — still the slowest model `ubuntu-latest`
+ * lands on:
+ *
+ *     156.4 s, 154.9 s   whole, green: 39394282796 and 39570460751 (Oct 20, 21)
+ *     168.1 s, 167.2 s   whole, red at 165: 39749180935 (`main`) and
+ *                        39769985219 (#1573)
+ *     165.8 s            #1581's 39851593370, killed with every
+ *                        `realisticProbe` phase done and the #545 near field
+ *                        (`game-harness.ts` §`run`, 16.4 s to 18.1 s on that
+ *                        CPU) still to draw: **about 182 s whole**
+ *
+ * and 103 s to 127 s whole on the four other models read the same day (Intel
+ * Xeon 6973P-C, Xeon Platinum 8573C, AMD EPYC 9V74 and 9V45). 275 s is 1.51
+ * times 182, the margin every budget in this file keeps; the nightly's
+ * worst case beside it is §`paysForTheRealisticLoad`'s.
  */
-const REALISTIC_LOAD_BUDGET_MS = 165_000;
+const REALISTIC_LOAD_BUDGET_MS = 275_000;
 /**
  * `?realistic&trees` — 79 s to 80 s alone on the last three of #651's runs, so
  * 120 s was 1.5 times. ⚠️ **160 s since #682**: on 36405580515 it took 105 s,
@@ -1010,6 +1039,14 @@ const WHEEL_TRACK_CEILING = 0.08;
  * and `?shadow-map` hanging — 60 + 70 + about 30 + the rest of the gate — well
  * inside `GATE_BUDGET_MS`; the nightly run's is 60 + 165 + 160 + that spec's
  * two 150 s waits, also inside it, which is why 840 s did not move.
+ *
+ * ⚠️ **Since #1574 that is 60 + 275 + 160 + 300 = 795 s**, 45 s inside 840,
+ * where it was 155 s. What is left has to hold the worker replacements (#651's
+ * 30 s) and the nightly cases that do not hang, so a run where every load hung
+ * at once can now meet the gate's own stop with its last describe
+ * interrupted — which still reports, and names what was running. A green
+ * nightly is far from it: 9.5 minutes of Playwright on the 7763
+ * (39570460751), about 27 s more with the load at 182 s.
  */
 function paysForTheRealisticLoad(): void {
   paysForTheLoad('?realistic', REALISTIC_LOAD_BUDGET_MS);
@@ -1769,7 +1806,109 @@ test.describe('a village and its fields — #460', () => {
     // Published, never bounded — validation 0002 Part X is the phone.
     expect(settlement.withMs).toBeGreaterThan(0);
   });
+
+  test('lays a kerbed pavement through a village, in one call, and none in open country — #1535', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { settlement } = await harness(harnessRun);
+    expectAPavement(settlement.pavement, testInfo, 'stylised');
+  });
+
+  test('stands lamp posts, bollards, benches and bins on it, one call a kind, and none in open country — #1536', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { settlement } = await harness(harnessRun);
+    expectStreetFurniture(settlement.pavement, testInfo, 'stylised');
+  });
+
+  test('draws a village’s crossroads in the road’s own material, in one call — #1565', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { settlement } = await harness(harnessRun);
+    expectSideRoads(settlement.pavement, testInfo, 'stylised');
+  });
 });
+
+/**
+ * #1565's browser-gate half, for either world: a village's crossroads is
+ * drawn, wearing the road mesh's own material, every side road in view in ONE
+ * call; and a point on its left arm reads something else with the side roads
+ * switched off — the control that the probe was reading the side road.
+ */
+function expectSideRoads(
+  pavement: RealisticMeasurement['pavement'],
+  testInfo: { readonly annotations: { type: string; description?: string }[] },
+  world: string,
+): void {
+  const { triangles, drawCalls, drawCallsOff, sameMaterial, onRgb, offRgb } = pavement.sideRoads;
+  const measured = `${world}: ${String(triangles)} side-road triangles at a village's crossroads; ${String(drawCalls)} draw calls with them, ${String(drawCallsOff)} without; the point ${onRgb.map((c) => c.toFixed(0)).join('/')} drawn, ${offRgb.map((c) => c.toFixed(0)).join('/')} without`;
+  testInfo.annotations.push({ type: 'a village crossroads', description: measured });
+  console.log(`a village crossroads — ${measured}`);
+  expect(triangles).toBeGreaterThan(100);
+  expect(triangles).toBeLessThanOrEqual(SIDE_ROAD_FRAME_TRIANGLES);
+  expect(sameMaterial).toBe(true);
+  expect(drawCalls - drawCallsOff).toBe(1);
+  expect(onRgb).toHaveLength(3);
+  expect(offRgb).toHaveLength(3);
+  const apart = Math.max(...[0, 1, 2].map((c) => Math.abs((onRgb[c] ?? 0) - (offRgb[c] ?? 0))));
+  expect(apart).toBeGreaterThan(8);
+}
+
+/**
+ * #1535's browser-gate half, for either world: a village's pavement exists at
+ * a point known from the village's layout, in one draw call; the same square
+ * reads something else with the pavements off (the control that the probe was
+ * reading the pavement); and a frame in open country draws none of it.
+ */
+function expectAPavement(
+  pavement: RealisticMeasurement['pavement'],
+  testInfo: { readonly annotations: { type: string; description?: string }[] },
+  world: string,
+): void {
+  const { triangles, trianglesOpen, drawCalls, drawCallsOff, onRgb, offRgb } = pavement;
+  const measured = `${world}: ${String(triangles)} pavement triangles beside a village, ${String(trianglesOpen)} in open country; ${String(drawCalls)} draw calls with them, ${String(drawCallsOff)} without; the point ${onRgb.map((c) => c.toFixed(0)).join('/')} drawn, ${offRgb.map((c) => c.toFixed(0)).join('/')} without`;
+  testInfo.annotations.push({ type: 'a village pavement', description: measured });
+  console.log(`a village pavement — ${measured}`);
+  // It exists beside the village, and none is drawn in open country.
+  expect(triangles).toBeGreaterThan(100);
+  expect(trianglesOpen).toBe(0);
+  // Every street in view in ONE call.
+  expect(drawCalls - drawCallsOff).toBe(1);
+  // The known point is the pavement: switched off, the same square reads
+  // something else.
+  expect(onRgb).toHaveLength(3);
+  expect(offRgb).toHaveLength(3);
+  const apart = Math.max(...[0, 1, 2].map((c) => Math.abs((onRgb[c] ?? 0) - (offRgb[c] ?? 0))));
+  expect(apart).toBeGreaterThan(8);
+}
+
+/**
+ * #1536's browser-gate half, for either world, on #1535's frames: every kind
+ * of street furniture drawn beside the village, one draw call a kind; with it
+ * switched off the frame loses exactly those calls and the pixels it covered;
+ * and a frame in open country draws none of it.
+ */
+function expectStreetFurniture(
+  pavement: RealisticMeasurement['pavement'],
+  testInfo: { readonly annotations: { type: string; description?: string }[] },
+  world: string,
+): void {
+  const { counts, countsOpen, drawCalls, drawCallsOff, pixels } = pavement.furniture;
+  const kinds = Object.keys(counts) as (keyof typeof counts)[];
+  const measured = `${world}: ${kinds.map((kind) => `${String(counts[kind])} ${kind}`).join(', ')} beside a village, ${kinds.map((kind) => String(countsOpen[kind])).join('/')} in open country; ${String(drawCalls)} draw calls with them, ${String(drawCallsOff)} without; ${String(pixels)} px`;
+  testInfo.annotations.push({ type: 'street furniture', description: measured });
+  console.log(`street furniture — ${measured}`);
+  expect(kinds).toHaveLength(4);
+  for (const kind of kinds) {
+    // Every kind beside the village, and none in open country.
+    expect(counts[kind], kind).toBeGreaterThan(0);
+    expect(countsOpen[kind], kind).toBe(0);
+  }
+  // One instanced draw a kind, however many pieces.
+  expect(drawCalls - drawCallsOff).toBe(kinds.length);
+  // It reaches the drawing buffer.
+  expect(pixels).toBeGreaterThan(100);
+}
 
 test.describe('the road reads as a road — #242', () => {
   paysForTheLoad('', PLAIN_LOAD_BUDGET_MS);
@@ -3297,6 +3436,21 @@ test.describe(
  * describe above, not here: this describe is nightly (#866), and a nightly
  * describe may not read the plain load (`nightly-split.test.ts`).
  */
+/**
+ * #1523: how far, in steps of one channel of one pixel, the bounded road and
+ * ground may draw from the unbounded: **none**. Every term the bounds skip
+ * added exactly nought, and each derivative the ground keeps is the same
+ * expression, so the two pictures are one — measured on 2026-10-21 (a Mac,
+ * SwiftShader): 0 of 230 400 pixels differ in either frame. It was 1690
+ * pixels by up to 5 steps on the bank when the ground took ONE pair over the
+ * world's `xz` and scaled it per surface, a rounding change that moves which
+ * mip a texel is filtered from; that version was not kept.
+ */
+const SURFACE_BOUNDS_TOLERANCE = 0;
+
+/** #1523: how many pixels each cost lever must move, at the least, for the comparison to mean anything. */
+const SURFACE_CONTROL_PIXELS = 1_000;
+
 test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
   paysForTheRealisticLoad();
 
@@ -3389,6 +3543,186 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     // warm, and well under half the wall's brightness.
     expect(luminance(glass)).toBeLessThan(luminance(control) / 2);
     expect(glass[2] ?? 0).toBeGreaterThan(glass[0] ?? 0);
+  });
+
+  test('lays a village’s pavement in ambientCG’s paving, in one call, and none in open country — #1535', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { pavement } = await realistic(harnessRun);
+    expectAPavement(pavement, testInfo, 'realistic');
+  });
+
+  test('draws a village’s crossroads in the photographic road’s material, in one call — #1565', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { pavement } = await realistic(harnessRun);
+    expectSideRoads(pavement, testInfo, 'realistic');
+  });
+
+  test('#1551 pavement on the mapped side: the right reads pavement and the left verge, and #1535’s own sides differ', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { mappedPavement } = await realistic(harnessRun);
+    const { sideAtProbe, rightMapped, rightOff, leftMapped, leftProcedural, leftOff } =
+      mappedPavement;
+    const rgb = (values: readonly number[]): string => values.map((c) => c.toFixed(0)).join('/');
+    const measured = `side ${sideAtProbe}; right ${rgb(rightMapped)} drawn, ${rgb(rightOff)} without pavements; left ${rgb(leftMapped)} mapped, ${rgb(leftProcedural)} with #1535's own sides, ${rgb(leftOff)} without pavements`;
+    testInfo.annotations.push({ type: 'pavement on the mapped side', description: measured });
+    console.log(`pavement on the mapped side — ${measured}`);
+    const apart = (a: readonly number[], b: readonly number[]): number =>
+      Math.max(...[0, 1, 2].map((c) => Math.abs((a[c] ?? 0) - (b[c] ?? 0))));
+    expect(sideAtProbe).toBe('right');
+    for (const values of [rightMapped, rightOff, leftMapped, leftProcedural, leftOff]) {
+      expect(values).toHaveLength(3);
+    }
+    // The mapped side reads pavement: switched off, the same square reads something else.
+    expect(apart(rightMapped, rightOff)).toBeGreaterThan(8);
+    // The other side reads the verge: the same as with no pavement drawn at all.
+    expect(apart(leftMapped, leftOff)).toBeLessThan(3);
+    // The control: #1535's own sides put a pavement on the left here.
+    expect(apart(leftProcedural, leftOff)).toBeGreaterThan(8);
+  });
+
+  test('#1547 a town on the flat: the drawn ground under a mapped block’s centre footprint is within 1 m, and over 5 m without the levelling', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { levelling } = await realistic(harnessRun);
+    const range = (values: readonly number[]): number => Math.max(...values) - Math.min(...values);
+    expect(levelling.levelled).toHaveLength(4);
+    expect(levelling.unlevelled).toHaveLength(4);
+    for (const value of [...levelling.levelled, ...levelling.unlevelled]) {
+      expect(Number.isFinite(value)).toBe(true);
+    }
+    const measured = `levelled ${range(levelling.levelled).toFixed(3)} m, -levelling ${range(levelling.unlevelled).toFixed(3)} m`;
+    testInfo.annotations.push({ type: 'a town on the flat', description: measured });
+    console.log(`a town on the flat — ${measured}`);
+    expect(range(levelling.levelled)).toBeLessThanOrEqual(1);
+    // The control: without the levelling the same footprint stands on a bank.
+    expect(range(levelling.unlevelled)).toBeGreaterThan(5);
+  });
+
+  test('#1549 a mapped town is drawn: its front wall reads building, in at most six calls with 10 and with 36', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { mappedTown: town } = await realistic(harnessRun);
+    const rgb = (values: readonly number[]): string => values.map((c) => c.toFixed(0)).join('/');
+    const measured =
+      `${String(town.buildings)} buildings in ${String(town.drawCalls)} calls, ` +
+      `${String(town.buildingsSmall)} in ${String(town.drawCallsSmall)}, ` +
+      `a group a building ${String(town.drawCallsUnmerged)}, lever off ${String(town.drawCallsOff)}; ` +
+      `wall ${rgb(town.wall)} drawn, ${rgb(town.wallOff)} without; ` +
+      `refill ${town.refillMs.toFixed(2)} ms; frame ${town.frameMs.toFixed(2)} ms drawn, ` +
+      `${town.frameMsOff.toFixed(2)} ms without`;
+    testInfo.annotations.push({ type: 'a mapped town', description: measured });
+    console.log(`a mapped town — ${measured}`);
+    const apart = (a: readonly number[], b: readonly number[]): number =>
+      Math.max(...[0, 1, 2].map((c) => Math.abs((a[c] ?? 0) - (b[c] ?? 0))));
+    expect(town.buildings).toBe(MAPPED_BUILDING_MAX);
+    expect(town.buildingsSmall).toBe(10);
+    for (const calls of [town.drawCalls, town.drawCallsSmall]) {
+      expect(calls).toBeGreaterThan(0);
+      expect(calls).toBeLessThanOrEqual(MAPPED_BUILDING_DRAW_CALLS);
+    }
+    // THE CONTROL: a draw a building and surface is far more with D-5.6's 36.
+    expect(town.drawCallsUnmerged).toBeGreaterThan(MAPPED_BUILDING_DRAW_CALLS);
+    // The wall: aimed from the plan's geometry, in the frame, and the building is what is there.
+    expect(town.wallInFrame).toBe(true);
+    expect(town.wall).toHaveLength(3);
+    expect(town.wallOff).toHaveLength(3);
+    expect(apart(town.wall, town.wallOff)).toBeGreaterThan(20);
+    // THE CONTROL: with `-mapped-buildings` the belt adds no call at all.
+    expect(town.drawCallsOff).toBe(0);
+    // #1549's CPU budget for a refill of the dense town.
+    expect(town.refillMs).toBeLessThanOrEqual(4);
+  });
+
+  test('#1581 a mapped house has windows: its upper window reads darker than its wall, and alike with the facade off', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { mappedFacade: facade } = await realistic(harnessRun);
+    const rgb = (values: readonly number[]): string => values.map((c) => c.toFixed(0)).join('/');
+    const measured = `glass ${rgb(facade.glass)} and wall ${rgb(facade.wall)} drawn; ${rgb(facade.glassOff)} and ${rgb(facade.wallOff)} with the facade off`;
+    testInfo.annotations.push({ type: 'a mapped house’s windows', description: measured });
+    console.log(`a mapped house’s windows — ${measured}`);
+    const luminance = (values: readonly number[]): number =>
+      0.2126 * (values[0] ?? 0) + 0.7152 * (values[1] ?? 0) + 0.0722 * (values[2] ?? 0);
+    expect(facade.aimed).toBe(true);
+    for (const values of [facade.glass, facade.wall, facade.glassOff, facade.wallOff]) {
+      expect(values).toHaveLength(3);
+    }
+    // The glass is a dark room behind a pane, against a lit wall. Measured
+    // locally (SwiftShader): 23 apart on, under 1 apart off.
+    expect(luminance(facade.wall) - luminance(facade.glass)).toBeGreaterThan(12);
+    // THE CONTROL: with the facade off the same two places are the same wall.
+    expect(Math.abs(luminance(facade.wallOff) - luminance(facade.glassOff))).toBeLessThan(4);
+    // And the glass is the facade's: off, that place reads the wall it was drawn over.
+    expect(luminance(facade.glassOff) - luminance(facade.glass)).toBeGreaterThan(12);
+  });
+
+  test('#1586 a town’s edge is drawn when the fields beyond it fill the structure cap', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { townEdge: edge } = await realistic(harnessRun);
+    const measured =
+      `${String(edge.structures)} structures in the frame; ${String(edge.buildings)} buildings ` +
+      `in ${String(edge.drawCalls)} calls, lever off ${String(edge.drawCallsOff)}`;
+    testInfo.annotations.push({ type: 'a town’s edge', description: measured });
+    console.log(`a town’s edge — ${measured}`);
+    // The issue's frame: the procedural structures alone fill the cap.
+    expect(edge.structures).toBeGreaterThanOrEqual(REALISTIC_STRUCTURE_ITEMS);
+    // Ranked by distance, the houses round the rider are drawn, and submitted.
+    expect(edge.buildings).toBeGreaterThan(0);
+    expect(edge.drawCalls).toBeGreaterThan(0);
+    // THE CONTROL: with `-mapped-buildings` the belt adds no call at all.
+    expect(edge.drawCallsOff).toBe(0);
+  });
+
+  test('#1549 nothing in the wood: no plan kept there and no building pixel, where -landclass draws one', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { mappedTown: town } = await realistic(harnessRun);
+    const rgb = (values: readonly number[]): string => values.map((c) => c.toFixed(0)).join('/');
+    const measured = `kept in the wood ${String(town.woodKept)}, ${String(town.woodKeptNoLand)} with -landclass; centre ${rgb(town.wood)} on, ${rgb(town.woodOff)} off; -landclass ${rgb(town.woodNoLand)} on, ${rgb(town.woodNoLandOff)} off`;
+    testInfo.annotations.push({ type: 'nothing in the wood', description: measured });
+    console.log(`nothing in the wood — ${measured}`);
+    const apart = (a: readonly number[], b: readonly number[]): number =>
+      Math.max(...[0, 1, 2].map((c) => Math.abs((a[c] ?? 0) - (b[c] ?? 0))));
+    for (const values of [town.wood, town.woodOff, town.woodNoLand, town.woodNoLandOff]) {
+      expect(values).toHaveLength(3);
+    }
+    expect(town.woodKept).toBe(0);
+    // No building pixel: switching the buildings off changes nothing there.
+    expect(apart(town.wood, town.woodOff)).toBeLessThan(3);
+    // THE CONTROL: without the land-class mask the footprint is kept and drawn there.
+    expect(town.woodKeptNoLand).toBe(1);
+    expect(apart(town.woodNoLand, town.woodNoLandOff)).toBeGreaterThan(20);
+  });
+
+  test('#1550 lots in an unmapped town: houses stand on mapped built-up land with no footprints, and none with -lots', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { lots } = await realistic(harnessRun);
+    const rgb = (values: readonly number[]): string => values.map((c) => c.toFixed(0)).join('/');
+    const measured = `${String(lots.houses)} houses on built-up land in frame, ${String(lots.housesOff)} with -lots; the nearest ${rgb(lots.onRgb)} drawn, ${rgb(lots.offRgb)} with -lots`;
+    testInfo.annotations.push({ type: 'lots in an unmapped town', description: measured });
+    console.log(`lots in an unmapped town — ${measured}`);
+    expect(lots.houses).toBeGreaterThan(0);
+    expect(lots.onRgb).toHaveLength(3);
+    expect(lots.offRgb).toHaveLength(3);
+    // The control: with -lots the harness lists none on that stretch…
+    expect(lots.housesOff).toBe(0);
+    // …and the square the house was drawn in reads something else: the ground.
+    const apart = Math.max(
+      ...[0, 1, 2].map((c) => Math.abs((lots.onRgb[c] ?? 0) - (lots.offRgb[c] ?? 0))),
+    );
+    expect(apart).toBeGreaterThan(8);
+  });
+
+  test('stands its street furniture on it, the bench in Poly Haven’s planks, one call a kind — #1536', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { pavement } = await realistic(harnessRun);
+    expectStreetFurniture(pavement, testInfo, 'realistic');
   });
 
   test('tells two instances of one shape apart by their seeded tints, and not without them — #621', async ({
@@ -3746,6 +4080,101 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     expect(blend.bankScree).toBeLessThan(BLEND_CEILING);
   });
 
+  test('takes the ground’s blend and the road’s wear out of their programs with the owner’s cost levers, and nothing else — #1523', async ({
+    harnessRun,
+  }) => {
+    const { surfacePrograms: programs } = await realistic(harnessRun);
+    expect(programs.measured).toBe(true);
+    const { drawn, groundBlendOff, roadWearOff } = programs;
+    console.log(
+      `#1523: the ground's program holds ${String(drawn.ground.length)} uniforms, ` +
+        `${String(groundBlendOff.ground.length)} with its blend out; the road's ` +
+        `${String(drawn.road.length)}, ${String(roadWearOff.road.length)} with its wear out`,
+    );
+    // The blend's six maps, its shares and the tree line; the wear's patches,
+    // its switch and its colour terms — by the names the GPU linked.
+    const blendUniforms = [
+      'vergeMap',
+      'vergeNormalMap',
+      'rockMap',
+      'rockNormalMap',
+      'cragMap',
+      'cragNormalMap',
+      'treeLine',
+      'groundShares',
+    ];
+    const wearUniforms = ['roadPatches[0]', 'roadWear', 'roadWearColour'];
+    // The control, the default load: the product's programs hold both, so a
+    // read that found nothing cannot pass the lines below.
+    for (const name of blendUniforms) expect(drawn.ground, name).toContain(name);
+    for (const name of wearUniforms) expect(drawn.road, name).toContain(name);
+    // `-ground-blend`: none of the blend in the ground's program, which is
+    // still the photographic ground — and the road's program untouched.
+    for (const name of blendUniforms) expect(groundBlendOff.ground, name).not.toContain(name);
+    expect(groundBlendOff.ground).toContain('map');
+    expect(groundBlendOff.ground).toContain('normalMap');
+    expect(groundBlendOff.road).toEqual(drawn.road);
+    // `-road-wear`: none of the wear in the road's program, which still wears
+    // its photograph — and the ground's program untouched.
+    for (const name of wearUniforms) expect(roadWearOff.road, name).not.toContain(name);
+    expect(roadWearOff.road).toContain('map');
+    expect(roadWearOff.ground).toEqual(drawn.ground);
+  });
+
+  test('draws the road’s wear and the ground’s blend the same, bounded, as unbounded — and the cost levers still change them — #1523', async ({
+    harnessRun,
+  }) => {
+    const { surfaceBounds: bounds } = await realistic(harnessRun);
+    expect(bounds.measured).toBe(true);
+    const { road, bank } = bounds;
+    for (const [name, frame] of [
+      ['road', road],
+      ['bank', bank],
+    ] as const) {
+      console.log(
+        `#1523 ${name}: bounded against unbounded, largest channel step ${String(frame.largest)}, ` +
+          `${String(frame.differing)} of ${String(frame.pixels)} pixels differ; ` +
+          `-road-wear moves ${String(frame.wearOff)}, -ground-blend ${String(frame.blendOff)}`,
+      );
+    }
+    console.log(
+      `#1523: the road frame stands at ${String(bounds.distance)} m with a patch ${bounds.patchAhead.toFixed(1)} m ahead`,
+    );
+    expect(road.drawn).toBe(true);
+    expect(bank.drawn).toBe(true);
+    expect(bounds.patchAhead).toBeGreaterThanOrEqual(8);
+    // The controls first: each of #1526's levers changes the frame it is
+    // about, by thousands of pixels — so a read-back that saw nothing, or a
+    // lever that stopped working, cannot pass the tolerance below.
+    expect(road.wearOff).toBeGreaterThan(SURFACE_CONTROL_PIXELS);
+    expect(road.blendOff).toBeGreaterThan(SURFACE_CONTROL_PIXELS);
+    expect(bank.blendOff).toBeGreaterThan(SURFACE_CONTROL_PIXELS);
+    // The same arithmetic, term for term, with the terms that added nought
+    // left out: not one pixel may move, on the road or on the bank.
+    expect(road.largest).toBeLessThanOrEqual(SURFACE_BOUNDS_TOLERANCE);
+    expect(bank.largest).toBeLessThanOrEqual(SURFACE_BOUNDS_TOLERANCE);
+  });
+
+  test('draws no tree, shrub or rock on a village’s ground, where the same frame left wooded draws some — #1534', async ({
+    harnessRun,
+  }) => {
+    const { settlementClearing: clearing } = await realistic(harnessRun);
+    expect(clearing.measured).toBe(true);
+    console.log(
+      `#1534: ${String(clearing.pieces)} pieces of village ground; ` +
+        `${String(clearing.onGround)} of ${String(clearing.drawn)} instances on them, ` +
+        `${String(clearing.woodedOnGround)} of ${String(clearing.woodedDrawn)} left wooded`,
+    );
+    // The control: the same frame with the rule off draws vegetation on the
+    // village's ground, so a probe that read nothing, or a frame with no
+    // village in it, cannot pass the line after it.
+    expect(clearing.pieces).toBeGreaterThan(0);
+    expect(clearing.woodedOnGround).toBeGreaterThan(0);
+    expect(clearing.onGround).toBe(0);
+    // And the frame still has its countryside.
+    expect(clearing.drawn).toBeGreaterThan(0);
+  });
+
   test('stands a gantry at the finish, lettered from the app’s own glyphs, for two calls and only there — #679', async ({
     harnessRun,
   }) => {
@@ -3846,7 +4275,7 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
   }) => {
     const { textures, firstFrameMs, loadMs } = await realistic(harnessRun);
     // Non-vacuity, and EXACT (#618's review — a floor let up to eight maps go
-    // missing): ten surface maps, fourteen structure maps, and every map in a
+    // missing): ten surface maps, twenty structure maps (#1548 added six), and every map in a
     // model plus its impostor, once per IMAGE, read off the committed files the
     // way `realistic-textures.test.ts` reads them.
     expect(textures.worn.length).toBe(realisticImageCount());
@@ -3897,6 +4326,42 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
         `offered ${textures.offered.join(' ')} on ${textures.platform}; ` +
         `loaded in ${loadMs.toFixed(0)} ms, first realistic frame at ${firstFrameMs.toFixed(0)} ms (SwiftShader)`,
     );
+  });
+
+  test('#1548 the new surfaces load compressed', async ({ harnessRun }) => {
+    const { textures } = await realistic(harnessRun);
+    // ⚠️ On `?realistic`, not `?realistic&corridor=archive` as #1548 wrote it:
+    // that query is #1539's, which has not landed, and the town surfaces are
+    // loaded with every other structure surface whatever the corridor is.
+    const town = textures.worn.filter(
+      (texture) =>
+        texture.surface !== undefined &&
+        (TOWN_STRUCTURE_SURFACES as readonly string[]).includes(texture.surface),
+    );
+    // Non-vacuity, and EXACT: a colour and a normal map for each of the three,
+    // named by surface rather than counted among the structures.
+    expect(town.map((texture) => texture.surface).sort()).toEqual(
+      TOWN_STRUCTURE_SURFACES.flatMap((surface) => [surface, surface]).sort(),
+    );
+    const expected = textures.desktopRule ? ['BC7'] : ['ASTC 4x4', 'ETC2 RGB'];
+    for (const texture of town) {
+      expect(expected, JSON.stringify(texture)).toContain(texture.format);
+      // At the 1K the owner's ruling kept — the plaster is published 2:1 —
+      // and exactly its block chain.
+      const maps =
+        REALISTIC_STRUCTURE_SURFACES[texture.surface as (typeof TOWN_STRUCTURE_SURFACES)[number]];
+      expect(texture.width, JSON.stringify(texture)).toBe(1024);
+      expect(texture.height, JSON.stringify(texture)).toBe(1024 / (maps.aspect ?? 1));
+      expect(texture.bytes, JSON.stringify(texture)).toBe(
+        blockChainBytes(texture.width, texture.height, BLOCK_BYTES[texture.format] ?? Number.NaN),
+      );
+    }
+    // ⚠️ THE CONTROL, #618's: the same probe's loader told the device offers
+    // no compressed format uploads RGBA8 and says so — the label above can
+    // tell a compressed texture from a fallback.
+    expect(textures.control.uploads).toEqual(['RGBA8']);
+    expect(textures.control.compressed).toBe(false);
+    expect(expected).not.toContain(textures.control.format);
   });
 
   test('draws the canopy after the opaque world, and the frame is the same picture — #619 lever 1', async ({

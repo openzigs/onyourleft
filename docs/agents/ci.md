@@ -141,7 +141,7 @@ each of those can do is turn `main` red on a day the service is down. For the ba
 | Rooms: the conformance suite (`src/room/conformance.test.ts`) against the reference, the Durable Object adapter under in-memory fakes and — since #780 — the Node adapter over real `ws` sockets on loopback | the Vitest run (`instance`) | #781, #780; a few seconds |
 | Rooms: the Node adapter's router with real forked room workers, backpressure, the keepalive through a fake idle-closing proxy, and a SIGTERM mid-race through `node src/main.ts` | the Vitest run (`instance`) | #780, #791. ⚠️ These wait on real 1 Hz ticks and real processes — the instance's slowest files (`router.test.ts`, `room-host.test.ts`, `instance.test.ts`), about 45 s of case time locally |
 | Rooms: the Durable Object adapter under a real `workerd` | **not CI** — `test:workerd`, a local command (§4a), decided by #781 | about 35 s, most of it waiting on the runtime's alarms and its ten-second eviction, which a job already past fifteen minutes on the 7763 cannot spend on every pull request; its logic runs in CI under the fakes. ⚠️ **The 35 s is a LOCAL figure** (34.6 s again on #781's review, on a Mac) — the suite has never run on the runner, so this decision rests on the local figure and #771's *"measure its cost on the runner before deciding"* is not met. ⚠️ The ~130 MB `workerd` binary is still downloaded by CI's install, and **that costs well under a second there** — measured for #864, §8 |
-| Rooms: the two-browser e2e spec with its fan-out control | `test:browser`, the `chromium` project (`room.browser.spec.ts`, #782) | a real `startInstance` with one room worker in the spec's own process; about 9 s of case time and 3 s to start the instance, locally. Its control is a page with fan-out off, which must see nobody move |
+| Rooms: the two-browser e2e spec with its fan-out control | `test:browser`, the `chromium` project (`room.browser.spec.ts`, #782) | a real `startInstance` with one room worker in the spec's own process; about 9 s of case time and 3 s to start the instance, locally. Its control is a page with fan-out off, which must see nobody move. Since #782's edge-restart case, a second instance behind a relay adds about 15 s of case time |
 | Rooms: made on a route, shared by code, joined, drawn and ridden (#784) | the same spec, a second case on an instance of its own (an address registers three riders an hour) | about 7 s of case time and 2 s to start its instance, locally. Its control is a page whose copy of the room's route is altered on the way in, which must be refused and draw nothing. ⚠️ **No two-browser RACE case**: a race with its 10 s countdown is about 25 s more, and §4f's all-hang arithmetic has 26 s of margin; the race is held at the jsdom shell (`rooms/rooms-shell.test.tsx`) and through the real instance, router and worker (`instance.test.ts` §"a rider's race") |
 | A load test, and a Cloudflare bill | **not CI** (#792, #464) | a measurement and an account, not gates |
 
@@ -1268,7 +1268,11 @@ arithmetic that fits all four hanging inside the gate's own 580 s (`playwright.c
 day later green loads on the slower runner reached 39 s, 45 s, 111 s and 105 s — 78 %, 69 %, 93 %
 and 88 % of their budgets — and a green gate took 547 s of its 580 (run 36405580515), so the budgets
 are **60 s, 70 s, 165 s and 160 s** and the gate's stop **840 s**, each about 1.5 times the slowest
-green figure. If every game load hangs, and `realistic.browser.spec.ts`' page with them:
+green figure. ⚠️ **`?realistic`'s is 275 s since [#1574](https://github.com/openzigs/onyourleft/issues/1574)**,
+1.5 times the 182 s it now takes whole on the EPYC 7763; the measurement and the nightly's new
+worst case (795 s of 840) are `game.browser.spec.ts` §`REALISTIC_LOAD_BUDGET_MS` and
+§`paysForTheRealisticLoad`.
+If every game load hangs, and `realistic.browser.spec.ts`' page with them:
 
 | | seconds |
 |---|---|

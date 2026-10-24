@@ -185,6 +185,11 @@ export interface FitLap {
   /** Duration excluding pauses. Different from `totalElapsedTime`, and both are read. */
   readonly totalTimerTime: Seconds | undefined;
   readonly totalDistance: Metres | undefined;
+  /**
+   * The lap's developer fields, resolved as a record's are — #1320: this
+   * client marks which of its own splits are laps with one of its own.
+   */
+  readonly developerFields: readonly FitDeveloperField[];
 }
 
 /** A `session` message. */
@@ -651,6 +656,7 @@ function createActivityAssembler(
             (raw) => metres(raw / SCALE.distance),
             faults,
           ),
+          developerFields: readDeveloperFields(message, descriptions),
         });
         break;
 
