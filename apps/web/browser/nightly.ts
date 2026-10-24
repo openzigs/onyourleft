@@ -23,7 +23,7 @@
  * with the owner's exceptions, named below: #1076's of 2026-10-03 and
  * #1137's of 2026-10-05. Any further exception is the owner's ruling,
  * recorded here and in docs/agents/ci.md §4c.
- * Six of the twelve describes below draw the REALISTIC world, which is a rung
+ * Seven of the thirteen describes below draw the REALISTIC world, which is a rung
  * a rider chooses in Settings and is off by default (ADR 0026 D-3), or
  * measure the owner's instruments for it. The other six are the DEFAULT
  * world, every rider's, and each is an owner's exception. One is #1076's: the
@@ -142,6 +142,16 @@ export const NIGHTLY_CHECKS: readonly NightlyCheck[] = [
       'church, a row of shops, pavements and furniture in the frame it drew. An instrument of ' +
       'a page that ships in no build; the village road itself is held in the required suite ' +
       'by `realistic/route.test.ts` §"the village road".',
+  },
+  {
+    spec: 'realistic.browser.spec.ts',
+    describe: 'the realistic page’s mapped-blobs lever — #1657',
+    seconds: 'two more loads of the owner’s page',
+    why:
+      'the owner’s page’s `-mapped-blobs` lever, for #1657’s cost and by-eye pairs: that it ' +
+      'takes the mapped buildings’ ground blobs out of the frame it drew, and nothing else. ' +
+      'An instrument of a page that ships in no build; the blobs themselves are held in the ' +
+      'required suite by `mapped-blobs.test.ts`.',
   },
   {
     spec: 'reflow.browser.spec.ts',
