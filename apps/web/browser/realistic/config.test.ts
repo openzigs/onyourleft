@@ -39,7 +39,24 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
       leversOff: ['texture-bias'],
       facing: 'sun',
       town: 'mixed',
+      route: undefined,
     });
+  });
+
+  it('rides the village road only when asked, refuses any other, and never beside a town — #1559', () => {
+    expect(parseConfig('').route).toBeUndefined();
+    expect(parseConfig('?route=village').route).toBe('village');
+    expect(configQuery(parseConfig('?route=village&at=820&panel=0&ladder=0'))).toBe(
+      '?ladder=0&at=820&panel=0&route=village',
+    );
+    // A typo would otherwise ride the valley road under the village's name.
+    expect(() => parseConfig('?route=villages')).toThrow(/route is one of village/);
+    expect(() => parseConfig('?route=')).toThrow(/route is one of village/);
+    // Two roads named at once would measure one under the other's name.
+    expect(() => parseConfig('?route=village&town=mixed')).toThrow(/route and town/);
+    expect(() => parseConfig('?town=richmond&route=village')).toThrow(/route and town/);
+    // The village road turns to the sun as the default one does.
+    expect(parseConfig('?route=village&facing=sun').facing).toBe('sun');
   });
 
   it('rides through the mixed town only when asked, and refuses any other — #1581', () => {
