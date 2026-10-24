@@ -895,6 +895,7 @@ describe('the kit colour reaches the ride (#623)', () => {
         setRiderKit: (chosen) => {
           handed.push(chosen);
         },
+        setSeason: () => undefined,
         resize: () => undefined,
         destroy: () => undefined,
       }),

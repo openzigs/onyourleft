@@ -340,6 +340,15 @@ export interface DrawnRoadPoints {
 }
 
 /**
+ * The whole drawn road, every two metres — #1633: `urban-class.ts` sweeps the
+ * corridor across it, window by window. The same cached grid
+ * {@link roadSegmentsNear} hands out.
+ */
+export function drawnRoadPoints(profile: RouteProfile, origin: CorridorOrigin): DrawnRoadPoints {
+  return roadGrid(profile, origin);
+}
+
+/**
  * Every segment of the drawn road that may lie within `reach` of `(x, z)`,
  * written into `into` (cleared first; a segment in two cells is there twice),
  * and the road they index — #1540: a mapped footprint asks once, for its

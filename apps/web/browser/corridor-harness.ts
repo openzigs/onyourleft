@@ -35,6 +35,15 @@
  * `?levers=-streets` — harness-only too — hands the scene the corridor with
  * its streets layer emptied, which is that case's control.
  *
+ * Since #1633 it also publishes {@link CorridorHarness.urbanRuns} and
+ * {@link CorridorHarness.cityRuns}: the runs of each urban class
+ * (`urban-class.ts`) along the read corridor's route and along a synthetic
+ * city's (`testing/urban-fixtures.ts`, no OpenStreetMap data), each read off
+ * the ONE map built the way `GameView` builds it at the press — beside the
+ * mask, and handed to `footprintPlans` — not off a second build. And how long
+ * building it took for #1540's 2 000-footprint dense town, which the spec
+ * prints and nothing gates (#1633: no new hard timing gate).
+ *
  * ⚠️ What it does NOT prove: anything about the hosted archive's latency
  * (ADR 0010 D-1's 500 ms+; #1553 measures that on the tablet), or that the
  * realistic world draws anything from the corridor (#1549 draws the plans).
@@ -46,9 +55,20 @@ import { unixSeconds } from '@onyourleft/domain';
 import { corridorOrigin } from '../src/game/terrain';
 import { sceneFrame } from '../src/game/scene';
 import { atStartLine } from '../src/game/simulation';
-import { footprintPlans, type FootprintVerdicts } from '../src/game/footprint-buildings';
+import {
+  FOOTPRINT_MAX_VERTICES,
+  footprintPlans,
+  type FootprintVerdicts,
+} from '../src/game/footprint-buildings';
 import { denseTownFixture } from '../src/game/footprint-fixtures-testing';
 import { landClassMask } from '../src/game/land-class';
+import { urbanFixture } from '../src/game/testing/urban-fixtures';
+import {
+  URBAN_WINDOW_METRES,
+  urbanClassMap,
+  type UrbanClass,
+  type UrbanClassMap,
+} from '../src/game/urban-class';
 import type { CorridorState, WorldCorridor } from '../src/game/world-data/corridor';
 import { ensureLocalAthlete, LOCAL_ATHLETE } from '../src/local-athlete';
 import { readMapTilesChoice } from '../src/map/tiles-preference';
@@ -235,6 +255,44 @@ function median(values: readonly number[]): number {
     : ((sorted[middle - 1] ?? 0) + (sorted[middle] ?? 0)) / 2;
 }
 
+/** One run of an urban class along a route — #1633. */
+export interface UrbanRun {
+  readonly urban: UrbanClass;
+  readonly metres: number;
+}
+
+/** Every run of `map` along a route of `total` metres, window by window, read through `classAt`. */
+function urbanRunsOf(map: UrbanClassMap, total: number): readonly UrbanRun[] {
+  const runs: { urban: UrbanClass; metres: number }[] = [];
+  for (let start = 0; start < total; start += URBAN_WINDOW_METRES) {
+    const urban = map.classAt(start + Math.min(URBAN_WINDOW_METRES, total - start) / 2);
+    const metres = Math.min(URBAN_WINDOW_METRES, total - start);
+    const last = runs[runs.length - 1];
+    if (last?.urban === urban) last.metres += metres;
+    else runs.push({ urban, metres });
+  }
+  return runs;
+}
+
+/**
+ * #1633: a synthetic city — a city centre by height, then one by commerce, in
+ * a village's outskirts — set up as a ride's press sets it up: the mask, the
+ * urban map beside it, and the plans handed that same map. Its runs are read
+ * off the map the plans were handed.
+ */
+function cityRuns(): readonly UrbanRun[] {
+  const city = urbanFixture([
+    { kind: 'village', from: 300, to: 900 },
+    { kind: 'city-height', from: 900, to: 1_300 },
+    { kind: 'city-commerce', from: 1_300, to: 1_900 },
+    { kind: 'village', from: 1_900, to: 2_500 },
+  ]);
+  const land = landClassMask(city.corridor);
+  const urban = urbanClassMap(city.corridor, land, city.profile);
+  footprintPlans(city.corridor, land, city.profile, city.origin, FOOTPRINT_MAX_VERTICES, urban);
+  return urbanRunsOf(urban, city.profile.totalDistance);
+}
+
 export interface CorridorHarness {
   readonly state: CorridorState['kind'];
   readonly why: string | undefined;
@@ -273,6 +331,14 @@ export interface CorridorHarness {
   readonly townRatio: number;
   /** #1565: every mapped cross street drawn along the route; empty for `?long` or no corridor. */
   readonly junctions: readonly DrawnJunction[];
+  /** #1633: the read corridor's route's length, which {@link urbanRuns} spans. */
+  readonly routeMetres: number;
+  /** #1633: the urban class's runs along the read corridor's route; empty with no corridor. */
+  readonly urbanRuns: readonly UrbanRun[];
+  /** #1633: the same along the synthetic city ({@link cityRuns}); empty for `?long`. */
+  readonly cityRuns: readonly UrbanRun[];
+  /** #1633: how long the urban map took to build for #1540's dense town; 0 for `?long`. */
+  readonly townUrbanMilliseconds: number;
   readonly errors: readonly string[];
 }
 
@@ -349,13 +415,26 @@ async function run(): Promise<CorridorHarness> {
   const maskStarted = performance.now();
   const mask = ready === undefined ? undefined : landClassMask(ready);
   const maskMilliseconds = performance.now() - maskStarted;
-  // #1540: the plans, once, as a ride's start would make them.
+  // #1633: the urban map, once, beside the mask, as the press builds it.
+  const urban =
+    ready === undefined || mask === undefined ? undefined : urbanClassMap(ready, mask, profile);
+  // #1540: the plans, once, as a ride's start would make them — handed that map.
   const planStarted = performance.now();
   const verdicts =
     ready === undefined || mask === undefined
       ? undefined
-      : footprintPlans(ready, mask, profile, corridorOrigin(profile)).verdicts;
+      : footprintPlans(ready, mask, profile, corridorOrigin(profile), FOOTPRINT_MAX_VERTICES, urban)
+          .verdicts;
   const planMilliseconds = performance.now() - planStarted;
+  // #1633's cost: the dense town's urban map, built once, timed, printed and not gated.
+  let townUrbanMilliseconds = 0;
+  if (!LONG) {
+    const town = denseTownFixture();
+    const townLand = landClassMask(town.corridor);
+    const started = performance.now();
+    urbanClassMap(town.corridor, townLand, town.profile);
+    townUrbanMilliseconds = performance.now() - started;
+  }
   let townPlanMilliseconds = 0;
   let townKept = 0;
   let referenceMilliseconds = 0;
@@ -429,6 +508,10 @@ async function run(): Promise<CorridorHarness> {
     townRatios,
     townRatio: townRatios.length === 0 ? 0 : median(townRatios),
     junctions,
+    routeMetres: profile.totalDistance,
+    urbanRuns: urban === undefined ? [] : urbanRunsOf(urban, profile.totalDistance),
+    cityRuns: LONG ? [] : cityRuns(),
+    townUrbanMilliseconds,
     errors,
   };
 }
@@ -460,6 +543,10 @@ void run().then(
       townRatios: [],
       townRatio: 0,
       junctions: [],
+      routeMetres: 0,
+      urbanRuns: [],
+      cityRuns: [],
+      townUrbanMilliseconds: 0,
       errors: [error instanceof Error ? error.message : String(error)],
     };
   },

@@ -257,3 +257,48 @@ test.describe('#1539 offline from the store', () => {
     }
   });
 });
+
+test.describe('#1633 the urban class, built once at the press', () => {
+  test('a synthetic city reads a city-centre run through the page', async ({ page }) => {
+    const corridor = await readCorridor(page);
+    expect(corridor.errors).toStrictEqual([]);
+    // `corridor-harness.ts` §`cityRuns`: a village, a city centre by height
+    // then by commerce, a village, in rural land either side.
+    // The last run ends where the fixture road does, which a profile's grid
+    // lands within a few metres of its 3 km.
+    expect(corridor.cityRuns.slice(0, 4)).toStrictEqual([
+      { urban: 'rural', metres: 300 },
+      { urban: 'village', metres: 600 },
+      { urban: 'city-centre', metres: 1_000 },
+      { urban: 'village', metres: 600 },
+    ]);
+    expect(corridor.cityRuns.slice(4).map((run) => run.urban)).toStrictEqual(['rural']);
+    // #1633's cost: printed, and not gated.
+    console.log(
+      `#1633 the dense town: urban class of 2000 footprints built in ${corridor.townUrbanMilliseconds.toFixed(1)} ms`,
+    );
+  });
+
+  test('the read corridor’s runs span its route, from the map its plans were handed', async ({
+    page,
+  }) => {
+    const corridor = await readCorridor(page);
+    expect(corridor.state).toBe('ready');
+    expect(corridor.urbanRuns.length).toBeGreaterThan(0);
+    const spanned = corridor.urbanRuns.reduce((sum, run) => sum + run.metres, 0);
+    expect(spanned).toBeCloseTo(corridor.routeMetres, 6);
+  });
+
+  test('control: with no corridor there is no urban map, and no run', async ({ browser }) => {
+    const context = await browser.newContext();
+    try {
+      const page = await context.newPage();
+      await page.route('**/*.pmtiles', (route) => route.abort());
+      const corridor = await readCorridor(page);
+      expect(corridor.state).toBe('unavailable');
+      expect(corridor.urbanRuns).toStrictEqual([]);
+    } finally {
+      await context.close();
+    }
+  });
+});

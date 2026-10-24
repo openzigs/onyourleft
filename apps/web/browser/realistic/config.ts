@@ -21,9 +21,10 @@
  * | `at` | hold the rider still this far along the route, for a screenshot | metres |
  * | `panel` | the on-screen controls | `1` (default), `0` for a clean screenshot |
  * | `layers` | layers switched OFF, for their share of the GPU (#616) | `-sky`, `-surfaces`, `-vegetation`, `-impostors`, `-structures`, `-water`, `-riders`, `-grounding`, comma-separated; default none |
- * | `levers` | #619's levers switched OFF, for a before/after pair at one rung — since #622 its air and since #1274 its crag, for a by-eye pair, since #1283 the generated trees and #1294 the generated firs, for both, since #1523 the ground blend and the road wear, for a cost pair, #1523's bounds on both, for a before/after pair, since #1534 the villages' cleared ground, for both, since #1523 the firs' depth pre-pass, for a before/after pair, since #1541 the people, for both, and since #1542 the countryside's planting, field boundaries, ground clutter, broken roadside hedge and small stones, for both | `-foliage-order`, `-texture-bias`, `-air`, `-crag`, `-generated-trees`, `-generated-conifers`, `-ground-blend`, `-road-wear`, `-surface-bounds`, `-settlement-clearing`, `-fir-prepass`, `-people`, `-land-planting`, `-land-boundaries`, `-ground-clutter`, `-hedge-breaks`, `-small-stones`, comma-separated; default none |
+ * | `levers` | #619's levers switched OFF, for a before/after pair at one rung — since #622 its air and since #1274 its crag, for a by-eye pair, since #1283 the generated trees and #1294 the generated firs, for both, since #1523 the ground blend and the road wear, for a cost pair, #1523's bounds on both, for a before/after pair, since #1534 the villages' cleared ground, for both, since #1523 the firs' depth pre-pass, for a before/after pair, since #1541 the people, for both, since #1542 the countryside's planting, field boundaries, ground clutter, broken roadside hedge and small stones, for both, and since #1622 the holiday decorations, for any `date` without its holiday | `-foliage-order`, `-texture-bias`, `-air`, `-crag`, `-generated-trees`, `-generated-conifers`, `-ground-blend`, `-road-wear`, `-surface-bounds`, `-settlement-clearing`, `-fir-prepass`, `-people`, `-land-planting`, `-land-boundaries`, `-ground-clutter`, `-hedge-breaks`, `-small-stones`, `-decorations`, comma-separated; default none |
  * | `facing` | which way the route is turned, relative to the sun (#702, `route.ts` §"Which way it faces") | `sun`, `away`; default the route unturned, which looks 110° to 160° away from the sun |
  * | `town` | ride through a mapped town instead of `route.ts`' road (#1581): `footprint-fixtures-testing.ts` §`mixedTownFixture`'s mixed footprints, planned, drawn and lotted as a ride's corridor is, from 900 m to 2 100 m; since #1585 `richmond`, `footprint-fixtures-testing.ts` §`richmondStreetFixture`'s narrow lots drawn as house models beside square ones drawn as extrusions, from 900 m to 1 500 m; since #1542 `countryside`, `footprint-fixtures-testing.ts` §`countrysideFixture`'s fields, woods and a park, from 900 m to 2 100 m, for #1542's levers | `mixed`, `richmond`, `countryside`; default none |
+ * | `date` | the rider's local day the ride starts on (#1622), in either world: its holiday (`season.ts` §`holidayOn`) and the route's season. A malformed or impossible day is REFUSED | `YYYY-MM-DD`; default this device's own day |
  * | `route` | which of `route.ts`' roads is ridden (#1559): absent, the valley road every Part Z and Part AH row was taken on; `village`, `route.ts` §`villageRoute`, a level road through two villages, for validation 0002 AE2 (`at=820` holds the first one's church and shops in frame). Refused beside `town`, which is a road of its own | `village`; default none |
  *
  * ⚠️ **Unknown parameters and values are REFUSED**, as #457's page refused
@@ -33,6 +34,13 @@
 
 import type { CountrysideLever } from '../../src/game/land-class';
 import type { RealisticTrees } from '../../src/game/realistic-assets';
+import {
+  parseCalendarDay,
+  seasonOn,
+  type CalendarDay,
+  type Hemisphere,
+  type Season,
+} from '../../src/game/season';
 import type { DepthPrepassMode, RealisticSurfaces } from '../../src/game/three-renderer';
 
 import type { Facing } from './route';
@@ -133,6 +141,10 @@ export type Layer = (typeof LAYERS)[number];
  *   the clearing, which can only take instances away, and the owner's BY-EYE
  *   pair for it. Changes nothing a rider can reach.
  *
+ * - `decorations` — #1622: no holiday on any `date`, as a rider who switched
+ *   Settings' "Holiday decorations" off rides. The route's seasonal nature is
+ *   unaffected (`season.ts` §`seasonOn`).
+ *
  * - `land-planting`, `land-boundaries`, `ground-clutter` — #1542's three
  *   changes, each off on its own (`scene.ts` §`SceneInput.countrysideOff`):
  *   the species mix and clustering by land class, field boundaries along
@@ -156,6 +168,7 @@ export type Layer = (typeof LAYERS)[number];
 export const LEVERS = [
   'air',
   'crag',
+  'decorations',
   'fir-prepass',
   'foliage-order',
   'generated-conifers',
@@ -204,6 +217,11 @@ export interface RealisticPageConfig {
    * validation 0002 AE2. `undefined` is the default road, unchanged.
    */
   readonly route: 'village' | undefined;
+  /**
+   * #1622: the rider's local day the ride starts on. `undefined` is this
+   * device's own day, as a ride reads it (`season.ts` §`deviceToday`).
+   */
+  readonly date: CalendarDay | undefined;
 }
 
 /** The ride the owner is asked to look at: the realistic world, the ladder running. */
@@ -220,6 +238,7 @@ export const DEFAULT_CONFIG: RealisticPageConfig = {
   facing: undefined,
   town: undefined,
   route: undefined,
+  date: undefined,
 };
 
 const KNOWN = new Set([
@@ -235,6 +254,7 @@ const KNOWN = new Set([
   'facing',
   'town',
   'route',
+  'date',
 ]);
 
 /**
@@ -378,7 +398,40 @@ export function parseConfig(search: string): RealisticPageConfig {
       ? oneOf('town', ['mixed', 'richmond', 'countryside'] as const, 'mixed')
       : undefined,
     route: params.has('route') ? routeFrom(params) : undefined,
+    date: params.has('date') ? dateFrom(params.get('date') ?? '') : undefined,
   };
+}
+
+/**
+ * `?date=2026-10-31` — #1622. REFUSED unless it is a strict `YYYY-MM-DD`
+ * naming a real day, on the terms an unknown lever is: a typo would otherwise
+ * ride today under the named day, and a screenshot cannot show that it did.
+ */
+function dateFrom(value: string): CalendarDay {
+  const day = parseCalendarDay(value);
+  if (day === undefined) {
+    throw new Error(`realistic: date is a real day written YYYY-MM-DD, not "${value}"`);
+  }
+  return day;
+}
+
+/**
+ * The season this run's view is told — #1622: the URL's `date`, or `today`
+ * when it names none, in whichever world; no holiday with `-decorations`, and
+ * the route's own nature either way. `realistic-harness.ts` hands it to
+ * `GameView.setSeason`, as `GameView` does at a ride's start.
+ */
+export function seasonWithLevers(
+  config: Pick<RealisticPageConfig, 'date' | 'leversOff'>,
+  place: { readonly hemisphere: Hemisphere; readonly absLatitude: number },
+  today: () => CalendarDay,
+): Season {
+  return seasonOn(
+    config.date ?? today(),
+    place.hemisphere,
+    place.absLatitude,
+    !config.leversOff.includes('decorations'),
+  );
 }
 
 /**
@@ -414,6 +467,13 @@ export function configQuery(config: RealisticPageConfig): string {
   if (config.facing !== undefined) params.set('facing', config.facing);
   if (config.town !== undefined) params.set('town', config.town);
   if (config.route !== undefined) params.set('route', config.route);
+  if (config.date !== undefined) {
+    const { year, month, day } = config.date;
+    params.set(
+      'date',
+      `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
+    );
+  }
   const query = params.toString();
   return query === '' ? '' : `?${query}`;
 }

@@ -138,6 +138,7 @@ import {
 } from '../shell/menu-sound-preference';
 import type { UnitsPort } from '../units/store-port';
 import { readRealisticWorldChoice, writeRealisticWorldChoice } from '../game/world-preference';
+import { readHolidayDecorations, writeHolidayDecorations } from '../game/holiday-preference';
 import { readDraftReadingChoice, writeDraftReadingChoice } from '../game/draft-preference';
 import { presentationFor } from '../ride/MetricGrid';
 import type { RideMetricId } from '../ride/metrics';
@@ -1283,6 +1284,8 @@ function GameWorldPanel({
   readonly storage: PreferenceStorage | undefined;
 }): JSX.Element {
   const [chosen, setChosen] = useState(() => readRealisticWorldChoice(storage));
+  // #1622: on by default, in either world — only a stored "off" turns it off.
+  const [decorated, setDecorated] = useState(() => readHolidayDecorations(storage));
   const [message, setMessage] = useState<PanelMessage | undefined>(undefined);
   // ⚠️ `oyl-announce` for its switch's declared 24×24 target (`theme.css`
   // §`.oyl-announce input[type='checkbox']`), as the Sounds panel carries it:
@@ -1334,6 +1337,25 @@ function GameWorldPanel({
             }}
           />{' '}
           Ride in the realistic world
+        </label>
+      </p>
+      <p>
+        <label className="oyl-announce__switch">
+          <input
+            type="checkbox"
+            role="switch"
+            checked={decorated}
+            onChange={(event) => {
+              const next = event.currentTarget.checked;
+              setDecorated(next);
+              setMessage(
+                writeHolidayDecorations(storage, next)
+                  ? { tone: 'success', text: ANNOUNCEMENTS_SAVED }
+                  : { tone: 'warning', text: ANNOUNCEMENTS_NOT_KEPT },
+              );
+            }}
+          />{' '}
+          Holiday decorations
         </label>
       </p>
       {message === undefined ? null : (

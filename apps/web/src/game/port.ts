@@ -44,6 +44,7 @@ import type { PeopleInView } from './people';
 import type { QualitySettings } from './quality';
 import type { RealisticWorldOutcome } from './realistic-assets';
 import type { ScatterItem } from './scatter';
+import type { Season } from './season';
 import type { SideRoad } from './cross-streets';
 import type { VillageStreet } from './streets';
 import type { RoadCorridor } from './terrain';
@@ -385,6 +386,15 @@ export interface GameView {
    * reasoning; `GameView.test.tsx` §"#623" reads what a view was handed.
    */
   setRiderKit(chosen: KitColour | undefined): void;
+  /**
+   * The ride's season — #1622: the holiday on the RIDER's local day at ride
+   * start, and the ROUTE's seasonal nature (`season.ts`). Told once when a live
+   * ride starts and held for the ride; a view built later in the ride is told
+   * the same answer, never a fresh read of the clock. #1623 to #1627 draw from
+   * what the view holds. Required, on {@link RiderMarker.crankAngle}'s
+   * reasoning.
+   */
+  setSeason(season: Season): void;
   /** Tell the renderer the canvas changed size. */
   resize(widthCssPixels: number, heightCssPixels: number): void;
   /** Release the GL context and every buffer. */
