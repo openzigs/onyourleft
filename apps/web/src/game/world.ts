@@ -74,6 +74,8 @@ import { VIEW_AHEAD_METRES } from './terrain';
 
 import type { GeographicPosition, RouteProfile } from '@onyourleft/domain';
 
+import type { Hemisphere } from './season';
+
 /**
  * How the world looks, derived from the route. Pure; no `three` type appears
  * here, which is what lets it cross `port.ts`.
@@ -519,6 +521,35 @@ export function worldStyle(profile: RouteProfile): WorldStyle {
     // rather than a direction, and #286 adds a direction. @see sunFor
     sun: sunFor(warmth),
   };
+}
+
+/**
+ * Which half of the world a route is in — #1622, for `season.ts`
+ * §`natureOn`: the sign of the mean SIGNED latitude, which {@link worldStyle}
+ * drops by reading magnitudes, and is left untouched by.
+ *
+ * ⚠️ **`unknown` for a profile with no positions**, where the mean would be
+ * 0/0. A route on the equator exactly is `unknown` too: it has no half.
+ */
+export function routeHemisphere(profile: RouteProfile): Hemisphere {
+  if (profile.positions.length === 0) return 'unknown';
+  const mean = meanOverSamples(profile.positions, (position: GeographicPosition) =>
+    Number(position.latitude),
+  );
+  if (!Number.isFinite(mean) || mean === 0) return 'unknown';
+  return mean > 0 ? 'north' : 'south';
+}
+
+/**
+ * How far from the equator a route is, in degrees — #1622: the mean magnitude
+ * {@link worldStyle} reads, and 0 for a profile with no positions rather than
+ * 0/0. `season.ts` §`natureOn` scales the seasons by it.
+ */
+export function routeLatitudeMagnitude(profile: RouteProfile): number {
+  if (profile.positions.length === 0) return 0;
+  return meanOverSamples(profile.positions, (position: GeographicPosition) =>
+    Math.abs(position.latitude),
+  );
 }
 
 /**

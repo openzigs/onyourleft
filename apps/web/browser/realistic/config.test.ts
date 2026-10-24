@@ -11,6 +11,7 @@ import {
   parseConfig,
   percentiles,
   rungWithLevers,
+  seasonWithLevers,
   surfacesWithLevers,
   treesWithLevers,
 } from './config';
@@ -41,6 +42,7 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
       facing: 'sun',
       town: 'mixed',
       route: undefined,
+      date: undefined,
     });
   });
 
@@ -250,9 +252,67 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
       '?rung=1&ladder=0&levers=-foliage-order,-texture-bias',
       '?at=2550&facing=sun&levers=-air',
       '?facing=away',
+      '?date=2026-10-31&levers=-decorations',
+      '?world=stylised&date=0999-01-06',
     ]) {
       const config = parseConfig(search);
       expect(parseConfig(configQuery(config))).toEqual(config);
+    }
+  });
+});
+
+describe('the page’s day and its decorations — #1622', () => {
+  const NORTH = { hemisphere: 'north', absLatitude: 50 } as const;
+  /** "Today" for the page: never Halloween, so a date that is ignored shows. */
+  const MID_JULY = () => ({ year: 2026, month: 7, day: 15 });
+
+  it('is this device’s day when the URL names none', () => {
+    expect(parseConfig('').date).toBeUndefined();
+    expect(DEFAULT_CONFIG.date).toBeUndefined();
+    expect(seasonWithLevers(parseConfig(''), NORTH, MID_JULY).holiday).toBeUndefined();
+  });
+
+  it('overrides the day in either world', () => {
+    for (const world of ['realistic', 'stylised']) {
+      const config = parseConfig(`?world=${world}&date=2026-10-31`);
+      expect(config.date).toEqual({ year: 2026, month: 10, day: 31 });
+      expect(seasonWithLevers(config, NORTH, MID_JULY).holiday).toBe('halloween');
+    }
+    expect(seasonWithLevers(parseConfig('?date=2027-01-06'), NORTH, MID_JULY).holiday).toBe(
+      'winter-lights',
+    );
+  });
+
+  it('refuses a malformed or impossible day, as it refuses an unknown lever', () => {
+    for (const bad of [
+      '2026-02-30',
+      '2026-13-01',
+      '2026-1-5',
+      '26-10-31',
+      '2026-10-31T00:00',
+      '',
+      '2026-10-31x',
+      'today',
+    ]) {
+      expect(() => parseConfig(`?date=${encodeURIComponent(bad)}`)).toThrow(
+        /date is a real day written YYYY-MM-DD/,
+      );
+    }
+    expect(() => parseConfig('?levers=-decoration')).toThrow(/levers is a comma-separated list/);
+  });
+
+  it('drops the holiday on any date with -decorations, and leaves the nature alone', () => {
+    expect(LEVERS).toContain('decorations');
+    for (const date of ['2026-10-24', '2026-10-31', '2026-11-01', '2026-12-25', '2027-01-06']) {
+      const shown = seasonWithLevers(parseConfig(`?date=${date}`), NORTH, MID_JULY);
+      const hidden = seasonWithLevers(
+        parseConfig(`?date=${date}&levers=-decorations`),
+        NORTH,
+        MID_JULY,
+      );
+      expect(shown.holiday).toBeDefined();
+      expect(hidden.holiday).toBeUndefined();
+      expect(hidden.nature).toEqual(shown.nature);
     }
   });
 });

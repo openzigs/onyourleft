@@ -35,6 +35,7 @@ import {
 } from './GameView';
 import { NO_GAME_TRAINER, type GameTrainerPort } from './trainer-port';
 import type { GameRenderer, SceneFrame } from './port';
+import type { CalendarDay, Season } from './season';
 import {
   FRAME_MS_REDUCE_ABOVE,
   QUALITY_LADDER,
@@ -167,6 +168,9 @@ function capturingRenderer(frames: SceneFrame[]): GameRenderer {
       setRiderKit: (chosen: KitColour | undefined) => {
         kitsHanded.push({ chosen, framesBefore: frames.length });
       },
+      setSeason: (season: Season) => {
+        seasonsHanded.push(season);
+      },
       resize: () => undefined,
       destroy: () => undefined,
     }),
@@ -178,6 +182,8 @@ function capturingRenderer(frames: SceneFrame[]): GameRenderer {
  * drawn by then — #623. @see capturingRenderer
  */
 let kitsHanded: { readonly chosen: KitColour | undefined; readonly framesBefore: number }[] = [];
+/** Every season a view was told this test — #1622. @see capturingRenderer */
+let seasonsHanded: Season[] = [];
 
 let pending: FrameRequestCallback[] = [];
 let nowMs = 0;
@@ -193,6 +199,7 @@ let sensorReads = 0;
 
 beforeEach(() => {
   kitsHanded = [];
+  seasonsHanded = [];
   pending = [];
   rungs = [];
   sensorReads = 0;
@@ -274,6 +281,8 @@ async function startRiding(options: {
   readonly camera?: CameraThrottle;
   /** The platform's thermal forecast — #247. */
   readonly thermal?: ThermalPort;
+  /** The rider's local day — #1622. @see GameViewProps.today */
+  readonly today?: () => CalendarDay;
 }): Promise<SceneFrame[]> {
   const route = options.ghost === true ? { ...testRoute(), attempts: 1 } : testRoute();
   const frames: SceneFrame[] = [];
@@ -288,6 +297,7 @@ async function startRiding(options: {
       now={() => nowMs}
       camera={options.camera}
       thermal={options.thermal}
+      today={options.today}
     />,
   );
   await settle();
@@ -1284,6 +1294,78 @@ describe('the ride is in the athlete’s own kit colour (#623)', () => {
 
     expect(kitsHanded.length).toBeGreaterThan(0);
     expect(kitsHanded.every((handed) => handed.chosen === undefined)).toBe(true);
+  });
+});
+
+/**
+ * The ride's season reaches the renderer — #1622. Read through what the
+ * renderer double was HANDED, which is the path `three-renderer.ts`
+ * §`ThreeGameView.setSeason` keeps and #1623 to #1627 draw from.
+ */
+describe('the ride’s season is the rider’s day at ride start (#1622)', () => {
+  it('holds Halloween for a ride started on 1 Nov after the clock crosses into 2 Nov', async () => {
+    let day: CalendarDay = { year: 2026, month: 11, day: 1 };
+    let reads = 0;
+    const today = (): CalendarDay => {
+      reads += 1;
+      return day;
+    };
+    await startRiding({ pacer: false, today });
+    await pump(10);
+    expect(seasonsHanded.map((season) => season.holiday)).toEqual(['halloween']);
+
+    // Local midnight passes mid-ride.
+    day = { year: 2026, month: 11, day: 2 };
+    await pump(40);
+
+    expect(reads).toBe(1);
+    expect(seasonsHanded).toHaveLength(1);
+    expect(seasonsHanded[0]?.holiday).toBe('halloween');
+  });
+
+  it('reads the day again for the NEXT ride, and only then', async () => {
+    let day: CalendarDay = { year: 2026, month: 11, day: 1 };
+    await startRiding({ pacer: false, today: () => day });
+    await pump(5);
+    await clickThrough(endRideButton());
+    day = { year: 2026, month: 12, day: 1 };
+    await clickThrough(rideButton());
+    await pump(2, 1000 / 30);
+    await settle();
+    await pump(5);
+
+    expect(seasonsHanded.map((season) => season.holiday)).toEqual(['halloween', 'winter-lights']);
+  });
+
+  it('never takes the day from a ghost: a 31 Oct attempt ridden on 15 Jul is no holiday', async () => {
+    // A recorded attempt that carries the day it was ridden, as a stored
+    // activity does. Nothing in the ride may read it.
+    const recordedOnHalloween = {
+      ...FAST_GHOST,
+      startedAt: '2026-10-31T09:00:00Z',
+      start: new Date('2026-10-31T09:00:00Z'),
+    } as GhostTrack;
+    const asked: unknown[][] = [];
+    const today = (...args: unknown[]): CalendarDay => {
+      asked.push(args);
+      return { year: 2026, month: 7, day: 15 };
+    };
+    const frames = await startRiding({
+      pacer: false,
+      ghost: true,
+      track: recordedOnHalloween,
+      today,
+    });
+    await pump(10);
+
+    // The ghost IS on the road, so the test is not vacuous…
+    expect(frames.at(-1)?.markers.some((marker) => marker.kind === 'ghost')).toBe(true);
+    // …and the day came from `today`, asked with nothing.
+    expect(asked).toEqual([[]]);
+    expect(seasonsHanded).toHaveLength(1);
+    expect(seasonsHanded[0]?.holiday).toBeUndefined();
+    // Mid-July on a northern route: summer, not the ghost's autumn.
+    expect(seasonsHanded[0]?.nature).toEqual({ autumn: 0, winter: 0 });
   });
 });
 
