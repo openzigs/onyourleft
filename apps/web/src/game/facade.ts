@@ -48,10 +48,8 @@
  *   rail** across its middle; **two** either side of a mullion in a bay at
  *   least {@link PAIR_MIN_BAY_METRES} wide; a **picture window**
  *   ({@link PICTURE}) in the bay the style names, beside the door;
- * - a **fake inset reveal** ({@link REVEAL}): the glass is shaded under the
- *   head and in from the jamb on the sun's side, so it reads as set into the
- *   wall — the sun's side is the shader's, from its light; the twin takes it
- *   as an argument;
+ * - an **inset reveal** ({@link REVEAL}): since #1659 every kind's, and
+ *   drawn from the view ({@link revealOf});
  * - **shutters** ({@link SHUTTER}) either side, in the trim's paint, where the
  *   style asks for them and the bay is wide enough.
  *
@@ -75,6 +73,23 @@
  * text, brand or logo**. Under the sign, on some, an awning (`FACADE_AWNING`)
  * of canvas, striped or plain.
  *
+ * ## The reveal (#1659)
+ *
+ * Every window kind — the sash, single, paired or a picture window, #1581's
+ * casement, #1590's commercial window and a dormer's sash — is glazed
+ * {@link REVEAL_DEPTH_METRES} behind its frame, and one rule ({@link revealOf},
+ * the shader's `oylRevealOf`) draws what that depth does as the view and the
+ * sun move, in the face's own frame ({@link FacadeView}):
+ *
+ * - **parallax**: the glass is seen through the opening shifted by the depth
+ *   along the eye's slant, and the strip it uncovers inside the far jamb is
+ *   the opening's side, a `reveal`;
+ * - **the sun's shadow** on the glass, from the head and from the jamb on the
+ *   sun's side, as deep as the sun's slant makes it — a `reveal` too — and
+ *   none where the sun is behind the face;
+ * - **the sill's shadow** down the wall below it ({@link SILL}'s depth), a
+ *   `shadow`.
+ *
  * ## The porch (#1589)
  *
  * A front porch's railing is one quad (`footprint-buildings.ts`
@@ -85,7 +100,7 @@
  */
 
 import { linearFromSrgb, type Rgb } from './building-paint';
-import { WINDOW } from './buildings';
+import { OPENING_RECESS_METRES, WINDOW } from './buildings';
 import {
   BAY_METRES,
   CLAD_BLOCK,
@@ -268,10 +283,26 @@ export const PICTURE = { most: 2.2, margin: 0.8 } as const;
 export const SHUTTER = { share: 0.5, gap: 0.03, louvre: 0.05, margin: 0.05 } as const;
 
 /**
- * The inset reveal's shadow on the glass — #1588: how far down from the head
- * and in from the sun-side jamb, and how much of the light it takes.
+ * The inset reveal — #1588: how much of the light a reveal's side out of the
+ * sun, and the glass in its shadow, lose (`shade`). Since #1659 the shadow's
+ * depth is the sun's ({@link revealOf}); `head` and `jamb` are only the
+ * shadow, down from the head and in from the sun-side jamb, of the sun that a
+ * caller who names no view is answered for ({@link viewOf}).
  */
 export const REVEAL = { head: 0.09, jamb: 0.07, shade: 0.55 } as const;
+
+/**
+ * How far every mapped window's glass is set behind its frame — #1659: a
+ * procedural house's real recess, `buildings.ts` §`OPENING_RECESS_METRES`.
+ */
+export const REVEAL_DEPTH_METRES = OPENING_RECESS_METRES;
+
+/**
+ * The least the eye's slant onto a face is divided by — #1659: a face seen
+ * edge-on shifts its glass by at most five times the recess, not without
+ * bound.
+ */
+export const REVEAL_GRAZE = 0.2;
 
 /** A dormer's window — #1588: a sash at most this wide and high, its sill this far up its front. */
 export const DORMER_SASH = { width: 0.7, height: 1.1, sill: 0.2, margin: 0.15 } as const;
@@ -386,6 +417,8 @@ export function railingCover(height: number): number {
  * the inset reveal's shadow. Since #1590 a shop front's `riser`, a sign band's
  * `panel`, and an awning's `canvas` and `stripe`; a shop door's recess is a
  * `reveal`. Since #1589 `rail`, `baluster` and `gap`: a porch railing's.
+ * Since #1659 a `reveal` is also an opening's side, seen past its glass, and
+ * `shadow` the wall in a sill's shadow.
  *
  * @test-facing what {@link facadePartAt} answers, for `facade.test.ts`
  */
@@ -406,22 +439,104 @@ export type FacadePart =
   | 'canvas'
   | 'rail'
   | 'baluster'
-  | 'gap';
+  | 'gap'
+  | 'shadow';
 
 /**
  * A face's style, as `footprint-buildings.ts` §`STYLE_FLOATS` carries it —
  * #1588 — and the side the sun is on along the face's `u` (1 toward
  * increasing `u`, −1 the other way, 0 in shade), which the shader reads from
- * its light.
- *
- * @test-facing what {@link facadePartAt} is asked with, for the tests; the
- * product's style is the vertex's four floats
+ * its light. What {@link facadePartAt} is asked with; the product's style is
+ * the vertex's four floats.
  */
 export interface FacadeStyle {
   readonly flags: number;
   readonly width: number;
   readonly extra: number;
   readonly sun?: number;
+  /** #1659: where the eye and the sun are, in the face's frame; {@link viewOf}'s if absent. */
+  readonly view?: FacadeView;
+}
+
+/** A direction in a face's frame — #1659: along its `u`, up its `v`, and out of it. */
+export type FaceDirection = readonly [along: number, up: number, out: number];
+
+/**
+ * Where a face is seen from and lit from — #1659: unit vectors toward the eye
+ * and toward the sun in the face's frame, as the shader's `oylToEyeV` and
+ * `oylToSunV` are read in `oylFaceU`, `oylFaceUp` and `oylFaceN`. What
+ * {@link facadePartAt} is asked with; the product's view is the shader's own.
+ */
+export interface FacadeView {
+  readonly eye: FaceDirection;
+  readonly sun: FaceDirection;
+}
+
+/**
+ * The view a style that names none is answered for — #1659: the face seen
+ * square on, and the sun whose shadow is {@link REVEAL}'s `head` down from the
+ * head and, on the side the style's `sun` names, its `jamb` in from that
+ * jamb: #1588's fixed band, as one sun of the many the rule takes.
+ */
+function viewOf(style?: FacadeStyle): FacadeView {
+  if (style?.view !== undefined) return style.view;
+  const along = (style?.sun ?? 0) * REVEAL.jamb;
+  const length = Math.hypot(along, REVEAL.head, REVEAL_DEPTH_METRES);
+  return {
+    eye: [0, 0, 1],
+    sun: [along / length, REVEAL.head / length, REVEAL_DEPTH_METRES / length],
+  };
+}
+
+/** A rectangle in metres on a face: its low and high corners, across and up. */
+interface Opening {
+  readonly lo: readonly [number, number];
+  readonly hi: readonly [number, number];
+}
+
+/**
+ * What a point `(x, y)` of an opening shows — #1659, the shader's
+ * `oylRevealOf`: the glass at `(gx, gy)`, the point of it seen through
+ * `(x, y)`, unless the eye's slant shows the opening's `side` there instead;
+ * and whether that glass is `shaded`, in the shadow of the head or of the
+ * sun-side jamb. `(x, y)` and the opening are metres on the face.
+ */
+function revealOf(
+  x: number,
+  y: number,
+  opening: Opening,
+  view: FacadeView,
+): { readonly gx: number; readonly gy: number; readonly side: boolean; readonly shaded: boolean } {
+  const [ex, ey, ez] = view.eye;
+  const [sx, sy, sz] = view.sun;
+  const slant = Math.max(ez, REVEAL_GRAZE);
+  const gx = x - (REVEAL_DEPTH_METRES * ex) / slant;
+  const gy = y - (REVEAL_DEPTH_METRES * ey) / slant;
+  const { lo, hi } = opening;
+  const side = gx < lo[0] || gx > hi[0] || gy < lo[1] || gy > hi[1];
+  if (!(sz > 0)) return { gx, gy, side, shaded: false };
+  const head = (REVEAL_DEPTH_METRES * Math.max(sy, 0)) / sz;
+  const jamb = (REVEAL_DEPTH_METRES * Math.abs(sx)) / sz;
+  const byJamb = sx > 0 ? gx > hi[0] - jamb : sx < 0 && gx < lo[0] + jamb;
+  return { gx, gy, side, shaded: gy > hi[1] - head || byJamb };
+}
+
+/**
+ * Whether a point `(x, y)` of the wall is in the shadow of a sill whose face
+ * is `sill` — #1659: the sill stands {@link SILL}'s depth proud, so the sun
+ * throws it that depth along its slant, down and across.
+ */
+function inSillShadow(x: number, y: number, sill: Opening, view: FacadeView): boolean {
+  const [sx, sy, sz] = view.sun;
+  if (!(sz > 0)) return false;
+  const down = (SILL.depth * Math.max(sy, 0)) / sz;
+  const across = (SILL.depth * sx) / sz;
+  return (
+    y < sill.lo[1] &&
+    y >= sill.lo[1] - down &&
+    x >= sill.lo[0] - Math.max(across, 0) &&
+    x <= sill.hi[0] - Math.min(across, 0)
+  );
 }
 
 /** A sash window's size and place in its face, in metres. */
@@ -435,7 +550,8 @@ interface Sash {
  * The part of a sash window at `(x, y)` — metres across from the window's
  * middle, up from the floor — or none: the wall round it. `bay` is the
  * bay's width; `paired` lays two sashes either side of a mullion, `picture`
- * one wide pane with no rail; `shutters` asks for shutters where they fit.
+ * one wide pane with no rail; `shutters` asks for shutters where they fit;
+ * since #1659 `view` is where the eye and the sun are ({@link revealOf}).
  */
 function sashPartAt(
   x: number,
@@ -446,26 +562,29 @@ function sashPartAt(
     readonly paired: boolean;
     readonly picture: boolean;
     readonly shutters: boolean;
-    readonly sun: number;
+    readonly view: FacadeView;
   },
 ): FacadePart | undefined {
   const { width, height, sill } = sash;
-  const { bay, paired, picture, shutters, sun } = layout;
+  const { bay, paired, picture, shutters, view } = layout;
   const half = width / 2;
   const head = sill + height;
   // Across one window from its middle: a pair's folded about the mullion, outward positive.
   const across = paired ? Math.abs(x) - (half + MULLION_METRES / 2) : x;
   const span = paired ? width + MULLION_METRES / 2 : half;
   if (Math.abs(x) <= span && y >= sill && y <= head) {
-    const inner =
-      Math.abs(across) <= half - SASH.frame && y >= sill + SASH.frame && y <= head - SASH.frame;
-    if (!inner) return 'frame';
-    if (!picture && Math.abs(y - (sill + height / 2)) <= SASH.rail / 2) return 'frame';
-    if (y >= head - SASH.frame - REVEAL.head) return 'reveal';
-    // The sun's side in this window's own `across`: a pair's left window is mirrored.
-    const toward = paired ? sun * Math.sign(x) : sun;
-    if (toward !== 0 && toward * across >= half - SASH.frame - REVEAL.jamb) return 'reveal';
-    return 'glass';
+    const inner = half - SASH.frame;
+    if (!(Math.abs(across) <= inner && y >= sill + SASH.frame && y <= head - SASH.frame)) {
+      return 'frame';
+    }
+    // #1659: across this one window, unfolded, so that its +u jamb is on its +u side.
+    const local = paired ? x - Math.sign(x) * (half + MULLION_METRES / 2) : x;
+    const opening: Opening = { lo: [-inner, sill + SASH.frame], hi: [inner, head - SASH.frame] };
+    const seen = revealOf(local, y, opening, view);
+    if (seen.side) return 'reveal';
+    // The meeting rail is the sashes', behind the frame: where the glass is seen.
+    if (!picture && Math.abs(seen.gy - (sill + height / 2)) <= SASH.rail / 2) return 'frame';
+    return seen.shaded ? 'reveal' : 'glass';
   }
   if (shutters && !picture && y >= sill && y <= head) {
     const shutter = width * SHUTTER.share;
@@ -474,7 +593,11 @@ function sashPartAt(
     if (fits && out >= half + SHUTTER.gap && out <= half + SHUTTER.gap + shutter) return 'shutter';
   }
   if (Math.abs(x) <= span + SILL.overrun && y >= sill - SILL.depth && y < sill) return 'sill';
-  return undefined;
+  const sillFace: Opening = {
+    lo: [-span - SILL.overrun, sill - SILL.depth],
+    hi: [span + SILL.overrun, sill],
+  };
+  return inSillShadow(x, y, sillFace, view) ? 'shadow' : undefined;
 }
 
 /**
@@ -539,7 +662,7 @@ export function facadePartAt(
       paired: false,
       picture: false,
       shutters: false,
-      sun: style?.sun ?? 0,
+      view: viewOf(style),
     };
     return sashPartAt(u - width / 2, v, sash, layout) ?? 'wall';
   }
@@ -584,7 +707,7 @@ export function facadePartAt(
       paired: !picture && style.width >= PAIR_MIN_BAY_METRES,
       picture,
       shutters: (style.flags & STYLE_SHUTTERS) !== 0,
-      sun: style.sun ?? 0,
+      view: viewOf(style),
     };
     const window: Sash = {
       width: picture ? Math.min(style.width - PICTURE.margin, PICTURE.most) : SASH.width,
@@ -593,14 +716,27 @@ export function facadePartAt(
     };
     return sashPartAt((x - 0.5) * style.width, y * STOREY_METRES, window, layout) ?? 'wall';
   }
+  // #1659: the window in metres, for its reveal — its bay as wide as the style lays it.
+  const bayMetres = style !== undefined && style.width > 0 ? style.width : BAY_METRES;
+  const view = viewOf(style);
   if (x >= w.left && x <= w.right && y >= w.bottom && y <= w.top) {
     const inside =
       x >= w.left + w.frameAcross &&
       x <= w.right - w.frameAcross &&
       y >= w.bottom + w.frameUp &&
       y <= w.top - w.frameUp;
-    const bar = Math.abs(x - 0.5) <= w.barAcross || Math.abs(y - w.transom) <= w.barUp;
-    return inside && !bar ? 'glass' : 'frame';
+    if (!inside) return 'frame';
+    const opening: Opening = {
+      lo: [(w.left + w.frameAcross) * bayMetres, (w.bottom + w.frameUp) * STOREY_METRES],
+      hi: [(w.right - w.frameAcross) * bayMetres, (w.top - w.frameUp) * STOREY_METRES],
+    };
+    const seen = revealOf(x * bayMetres, y * STOREY_METRES, opening, view);
+    if (seen.side) return 'reveal';
+    // The mullion and the transom are the glazing's, behind the frame: where the glass is seen.
+    const gx = seen.gx / bayMetres;
+    const gy = seen.gy / STOREY_METRES;
+    if (Math.abs(gx - 0.5) <= w.barAcross || Math.abs(gy - w.transom) <= w.barUp) return 'frame';
+    return seen.shaded ? 'reveal' : 'glass';
   }
   if (
     x >= w.left - w.sillAcross &&
@@ -610,7 +746,11 @@ export function facadePartAt(
   ) {
     return 'sill';
   }
-  return 'wall';
+  const sillFace: Opening = {
+    lo: [(w.left - w.sillAcross) * bayMetres, (w.bottom - w.sillUp) * STOREY_METRES],
+    hi: [(w.right + w.sillAcross) * bayMetres, w.bottom * STOREY_METRES],
+  };
+  return inSillShadow(x * bayMetres, y * STOREY_METRES, sillFace, view) ? 'shadow' : 'wall';
 }
 
 /**

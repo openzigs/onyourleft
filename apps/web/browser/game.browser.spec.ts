@@ -3745,6 +3745,36 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     expect(luminance(facade.glassOff) - luminance(facade.glass)).toBeGreaterThan(12);
   });
 
+  test('#1659 a mapped casement seen from the side shows its reveal at the far jamb, and none with -window-reveals', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { windowReveal: reveal } = await realistic(harnessRun);
+    const rgb = (values: readonly number[]): string => values.map((c) => c.toFixed(0)).join('/');
+    const measured =
+      `${reveal.commercial ? 'a commercial window' : 'a casement'} ` +
+      `${reveal.metres.toFixed(1)} m away, ${reveal.slantDegrees.toFixed(0)}° off square, a ` +
+      `${reveal.stripMetres.toFixed(3)} m strip ${reveal.stripPixels.toFixed(1)} px wide: jamb ` +
+      `${rgb(reveal.jamb)} against glass ${rgb(reveal.glass)}; ${rgb(reveal.jambOff)} and ` +
+      `${rgb(reveal.glassOff)} with -window-reveals`;
+    testInfo.annotations.push({ type: 'a mapped window’s reveal', description: measured });
+    console.log(`a mapped window’s reveal — ${measured}`);
+    const luminance = (values: readonly number[]): number =>
+      0.2126 * (values[0] ?? 0) + 0.7152 * (values[1] ?? 0) + 0.0722 * (values[2] ?? 0);
+    expect(reveal.aimed).toBe(true);
+    for (const values of [reveal.jamb, reveal.glass, reveal.jambOff, reveal.glassOff]) {
+      expect(values).toHaveLength(3);
+    }
+    // Wide enough on screen that the read is the strip's and not its edge.
+    expect(reveal.stripPixels).toBeGreaterThanOrEqual(3);
+    // The jamb's strip is the opening's side, the wall's, against a dark room
+    // behind its glass — the same gap #1581's window is held to against its
+    // wall. Measured locally (SwiftShader, 2026-10-24): 57/48/33 against 3/4/6
+    // on a commercial window 4 m off, 45° off square; 3/4/6 both with the lever.
+    expect(Math.abs(luminance(reveal.jamb) - luminance(reveal.glass))).toBeGreaterThan(12);
+    // THE CONTROL: with the term out of the program the strip is the same glass.
+    expect(Math.abs(luminance(reveal.jambOff) - luminance(reveal.glassOff))).toBeLessThan(4);
+  });
+
   test('#1586 a town’s edge is drawn when the fields beyond it fill the structure cap', async ({
     harnessRun,
   }, testInfo) => {
