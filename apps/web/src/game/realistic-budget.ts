@@ -766,6 +766,27 @@ export const REALISTIC_FRAME_TRIANGLES = 300_000;
 export const REALISTIC_STREET_TRIANGLES = 25_024;
 
 /**
+ * The most triangles the people may add to a realistic frame — #1541:
+ * **32 000**, sixteen bodies (`people.ts` §`PEOPLE_NEAR_MAX`) of at most
+ * 2 000 each (`people-body.ts` §`PERSON_MAX_TRIANGLES`), in one draw call;
+ * the impostors beyond add two triangles each, at most 64, in one more.
+ *
+ * ⚠️ **Outside {@link REALISTIC_FRAME_TRIANGLES}, and NOT by that
+ * constant's own rule**: people are drawn in the realistic world only. It is
+ * the owner's ruling of 2026-10-24 — "build now, before #1553's tablet room
+ * row, within this issue's stated budget" — and validation 0002 Part AJ is
+ * the tablet's measurement of whether the frame has room for it. If it has
+ * not, `quality.ts` §`QualitySettings.people` goes to 0 on the top rung until
+ * it has. Their animation texture is 1 MiB at most, made at load and in no
+ * committed file (`people-body.ts` §`PERSON_ANIMATION_MAX_BYTES`), and
+ * `realistic-budget.test.ts` adds it to the texture estimate.
+ *
+ * @test-facing held by `people-body.test.ts`, which cuts the committed body
+ * sixteen times inside it, and by `game.browser.spec.ts` §"#1541"
+ */
+export const REALISTIC_PEOPLE_TRIANGLES = 32_000;
+
+/**
  * The most triangles the start and finish gantries may add to a frame:
  * **1 000** — #679's ceiling, against the 1 350 its research found spare in the
  * worst frame before #617 freed more. Spent only within

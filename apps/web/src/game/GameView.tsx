@@ -985,6 +985,11 @@ export function GameView(props: GameViewProps): JSX.Element {
    */
   const structureItemsRef = useRef<number>(qualitySettings(INITIAL_QUALITY.level).structureItems);
   /**
+   * How many people the rung draws — #1541 — held the way
+   * {@link scatterItemsRef} is and for its reason.
+   */
+  const peopleRef = useRef<number>(qualitySettings(INITIAL_QUALITY.level).people);
+  /**
    * The rung's frame cap — #476 — held the way {@link scatterItemsRef} is, for
    * the same reason: the loop does not re-run on a rung change.
    */
@@ -2158,6 +2163,8 @@ export function GameView(props: GameViewProps): JSX.Element {
           scatterItems: scatterItemsRef.current,
           // #460, the same shape for the same reason. @see structureItemsRef
           structureItems: structureItemsRef.current,
+          // #1541: the people the rung draws — none but on the realistic top rung.
+          people: peopleRef.current,
           // #349: how far the cranks have turned. `port.ts`
           // §`RiderMarker.crankAngle` records that an optional field nobody
           // supplies is a hole this repository's gates cannot see, which is
@@ -2271,6 +2278,7 @@ export function GameView(props: GameViewProps): JSX.Element {
     // `ScatterBelt.setBudget` says why neither alone is the whole of it.
     scatterItemsRef.current = settings.scatterItems;
     structureItemsRef.current = settings.structureItems;
+    peopleRef.current = settings.people;
     // #476: the loop reads this on its next animation frame.
     frameCapRef.current = settings.frameCap;
     viewRef.current?.setQuality(settings);

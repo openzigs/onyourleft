@@ -98,6 +98,14 @@
  * plot's cleared ground (`settlements.ts` §`SettlementFootprint` reaches from
  * the centreline past the house), so no tree, shrub or rock stands on one.
  *
+ * ## Where people walk — #1541
+ *
+ * Each unbroken run of pavement carries the line a person walks along it,
+ * {@link WALK_FROM_KERB_METRES} out from the kerb on the pavement's top
+ * ({@link VillageStreet.walks}), and each front path its middle
+ * ({@link DoorPath.walk}). `people.ts` walks them; nothing here places a
+ * person.
+ *
  * Pure, and names no rendering library.
  */
 
@@ -305,7 +313,19 @@ export interface DoorPath {
   readonly along: number;
   readonly side: 1 | -1;
   readonly mesh: PavementMesh;
+  /**
+   * #1541: the path's middle, from the pavement to the door, on its top — `x,
+   * y, z` a section, corridor frame — which a person may walk.
+   */
+  readonly walk: Float32Array;
 }
+
+/**
+ * How far out from the kerb's face a person walks a pavement, in metres:
+ * **0.9** — #1541: inside the pavement's 2 m, clear of the bollards at 0.35
+ * and of the lamp posts and benches at its back.
+ */
+export const WALK_FROM_KERB_METRES = 0.9;
 
 /** One village's street: which village, where along the road, its pavements and what stands on them. */
 export interface VillageStreet {
@@ -319,6 +339,12 @@ export interface VillageStreet {
   readonly furniture: readonly FurnitureItem[];
   /** #1564: a path from the pavement to each built plot's front door, in plot order. */
   readonly doorPaths: readonly DoorPath[];
+  /**
+   * #1541: each unbroken run of its pavements as the line a person walks —
+   * {@link WALK_FROM_KERB_METRES} out from the kerb, on the pavement's top,
+   * `x, y, z` a section, corridor frame.
+   */
+  readonly walks: readonly Float32Array[];
 }
 
 /** One village's street, or `null` where its site has no village or no pavement. */
@@ -407,6 +433,7 @@ function streetOf(
   const plots = villagePlots(seed, site);
   const mesh = new MeshBuilder();
   const furniture: FurnitureItem[] = [];
+  const walks: Float32Array[] = [];
   let from = Number.POSITIVE_INFINITY;
   let to = Number.NEGATIVE_INFINITY;
   const spans = ([1, -1] as const).map((side) => {
@@ -437,9 +464,19 @@ function streetOf(
     if (!read) {
       if (own === undefined) continue;
       range = own;
-      laid = lay(mesh, furniture, profile, origin, seed, side, own.start, own.end, undefined, [
-        mouth,
-      ]);
+      laid = lay(
+        mesh,
+        furniture,
+        profile,
+        origin,
+        seed,
+        side,
+        own.start,
+        own.end,
+        undefined,
+        [mouth],
+        walks,
+      );
     } else {
       range = street;
       allowed = (along: number): boolean => {
@@ -447,9 +484,19 @@ function streetOf(
         if (here === 'unknown') return own !== undefined && along >= own.start && along <= own.end;
         return onSide(here, side);
       };
-      laid = lay(mesh, furniture, profile, origin, seed, side, street.start, street.end, allowed, [
-        mouth,
-      ]);
+      laid = lay(
+        mesh,
+        furniture,
+        profile,
+        origin,
+        seed,
+        side,
+        street.start,
+        street.end,
+        allowed,
+        [mouth],
+        walks,
+      );
     }
     if (laid) {
       from = Math.min(from, read || own === undefined ? street.start : own.start);
@@ -468,7 +515,7 @@ function streetOf(
     }
   }
   if (mesh.triangles === 0) return null;
-  return { wrappedSite, from, to, pavement: mesh.done(), furniture, doorPaths };
+  return { wrappedSite, from, to, pavement: mesh.done(), furniture, doorPaths, walks };
 }
 
 /** Each built kind's front door in each variant, building-local, as its plan cuts it. */
@@ -576,7 +623,14 @@ function doorPathOf(
   }
   const mesh = new MeshBuilder();
   mesh.path(sections, { x: rightX, z: rightZ });
-  return { along: plot.along - lap, side: plot.side, mesh: mesh.done() };
+  // #1541: its middle, which a person walks.
+  const walk = new Float32Array(sections.length * 3);
+  sections.forEach((section, at) => {
+    walk[at * 3] = (section.leftX + section.rightX) / 2;
+    walk[at * 3 + 1] = section.y;
+    walk[at * 3 + 2] = (section.leftZ + section.rightZ) / 2;
+  });
+  return { along: plot.along - lap, side: plot.side, mesh: mesh.done(), walk };
 }
 
 /**
@@ -711,6 +765,7 @@ function lay(
   end: number,
   allowed: (along: number) => boolean = () => true,
   mouths: readonly { readonly from: number; readonly to: number }[] = [],
+  walks: Float32Array[] = [],
 ): boolean {
   const ways = waterways(profile, seed);
   // #1565: no pavement over a side road's mouth, and a dropped kerb beside it.
@@ -728,6 +783,7 @@ function lay(
     if (run.length >= 2) {
       mesh.strip(run, side);
       furnish(run, furniture);
+      walks.push(walkOf(run));
     }
     run = [];
   };
@@ -779,6 +835,21 @@ function sectionAt(
     outX,
     outZ,
   };
+}
+
+/**
+ * The line a person walks along one unbroken run of pavement — #1541:
+ * {@link WALK_FROM_KERB_METRES} out from the kerb's face, on the pavement's
+ * top, a point a section.
+ */
+function walkOf(run: readonly Section[]): Float32Array {
+  const walk = new Float32Array(run.length * 3);
+  run.forEach((section, at) => {
+    walk[at * 3] = section.innerX + section.outX * WALK_FROM_KERB_METRES;
+    walk[at * 3 + 1] = section.y + section.kerb;
+    walk[at * 3 + 2] = section.innerZ + section.outZ * WALK_FROM_KERB_METRES;
+  });
+  return walk;
 }
 
 /**

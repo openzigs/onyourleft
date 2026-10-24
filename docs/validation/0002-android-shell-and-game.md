@@ -3843,6 +3843,40 @@ which.
 | AH-1537-2 | AH1–AH7 for **5 minutes**, held at the village: AH4's URL with `&route=village&at=820` added. `RUN=1537-before`, or `RUN=1537-after-<issue>` for each phase-A merge |
 | AH-1537-3 | Write the rows into the table above and post them on #1537 and #733 |
 
+### #1542's rows — the countryside planted and bounded by land class
+
+[#1542](https://github.com/openzigs/onyourleft/issues/1542) reads #1546's land-class mask for three
+changes, each with a lever on the owner's page: a wood planted throughout with a broadleaf and scrub edge,
+hedgerow trees and open pasture on farmland and specimen trees in a park (`-land-planting`); field
+boundaries along farmland's edges instead of the procedural field spacing (`-land-boundaries`); and
+stones on pasture and a wood's floor (`-ground-clutter`). Off, each is the countryside before #1542.
+Since the owner's ruling of 2026-10-24 two more: mapped farmland's roadside hedge low and broken by
+gaps, a gate, fence and open verge (`-hedge-breaks`), and rocks on farmland and a wood smaller and
+back from the road (`-small-stones`); each changes nothing with `-land-boundaries` or
+`-ground-clutter` and `-land-planting` off, so AH-1542-2's URL is still the world before #1542.
+They change only land a corridor covers, so **`route.ts`' road, which has none, draws the same
+picture with or without them**: every row below is on `&town=countryside`
+(`footprint-fixtures-testing.ts` §`countrysideFixture`, 900 m to 2 100 m).
+
+**What they cost, stated before the tablet row.** No new kind, shape, material or mesh: the trees
+are held by `REALISTIC_TREE_LEVELS`, shrubs and rocks by `REALISTIC_NEAR_MESHES` (the clutter's
+rocks at most 12 × 2 500 triangles), the boundaries by `REALISTIC_STRUCTURE_ITEMS` (36). A frame's
+calls are a call a shape a level, so they follow which shapes the nearest trees happen to be. On
+the pinned Chromium, 24 holds 50 m apart (2026-10-24): **draw calls most 36 and mean 31.0 with the
+levers on, most 36 and mean 32.8 with all three off** (4 holds rose by 1–2 and 16 fell); triangles
+mean 137 775 on and 143 388 off. The clutter alone adds 16 000–19 000 triangles and no call; the
+planting takes more away. The scene's build in Node: 0.54 ms a frame with them, 0.51 ms without.
+These were read with a throwaway spec on the owner's page, not a gate: the nightly job had
+no room for twelve more loads of it (#1542's PR). ⚠️ None of that is the tablet: #1523 put its GPU at its ceiling, so the row
+below is what decides whether this stays on.
+
+| Step | What to do |
+|---|---|
+| AH-1542-1 | **After #1523's fix has landed**: build `main` with #1542 and the owner's page staged, and run AH1–AH7 for **5 minutes**, AH4's URL with `&town=countryside` added. `RUN=1542-on` |
+| AH-1542-2 | **Cool again (AH3, 25–26 °C)**, same build: AH1–AH7 for 5 minutes with `&town=countryside&levers=-ground-clutter,-land-boundaries,-land-planting` added to AH4's URL. `RUN=1542-off` |
+| AH-1542-3 | Only if `1542-on` is over #1523's limit (GPU p50 at or above 848 MHz, or frames over 20 ms above 0.2 %) and `1542-off` is not: one more 5-minute run each with `-land-planting`, `-land-boundaries`, `-ground-clutter`, `-hedge-breaks` and `-small-stones` alone, cooling between, to name the change to switch off. `RUN=1542-no-<lever>` |
+| AH-1542-4 | Write the rows into the table above. Draw calls in `1542-on` at or below `1542-off`, triangles below. By eye, the panel off (`&panel=0&at=`): at 1 150 hedgerow trees along the fields and open pasture beyond, and on one side the gap between two fields left open; at 1 500 a wood's scrubby edge on one side and a fenced wood behind a strip of field on the other; at 1 780 a park's specimen trees. Post the rows on #1542 and #733 |
+
 ## Part AI — the side camera's picture rate, on the owner's phone ([#1112](https://github.com/openzigs/onyourleft/issues/1112))
 
 **Added 2026-10-04** by #1112. Checked with `grep '^## Part'` for a duplicate letter first — AH was
@@ -3887,3 +3921,38 @@ so a good last ten seconds after a slow start reads as five. Many
 well under 5 is the timer being throttled (power management), and `visibility: hidden` says the
 WebView thinks the page is not shown. A large `repeatedVideoFrames` is a camera video that stopped
 advancing while pictures were still sent.
+
+## Part AJ — is there room on the tablet for people? ([#1541](https://github.com/openzigs/onyourleft/issues/1541))
+
+**Added 2026-10-24** by #1541. Checked with `grep '^## Part'` for a duplicate letter first — AI was
+the last, and AJ was free. It changes no resistance: no trainer is needed.
+
+The owner ruled on 2026-10-24 that the people are built **before** #1553's tablet room row, inside
+the issue's budget — at most 16 bodies within 60 m (about 2 000 triangles each, 32 000 in all), one
+draw call for them and one for the impostors beyond, about 1 MiB of animation texture — with a lever
+of their own, and that **if the tablet shows no room, people stay off by default until there is**.
+This Part is that measurement. The product draws them on the top realistic rung only
+(`quality.ts` §`QualitySettings.people`); the owner's page's `levers=-people` places nobody, so one
+build gives the pair. Its hard limit is #1523's: the top rung off the GPU ceiling, GPU p50 below
+848 MHz and frames over 20 ms at most 0.2 %.
+
+| Step | What to do |
+|---|---|
+| AJ1 | Build `main` with #1541's merge and the owner's page staged. **AE2's hold** on the village road: AE1's procedure (§"#506's AE1 and AE2 in the same session") at `&route=village&at=820`, people on. Record draw calls, triangles, GPU p50 / p90 / p99 and the page's `census` |
+| AJ2 | The same hold with `&levers=-people` added. The draw calls should fall by 1 or 2, and the triangles by the bodies in view at about 2 000 each |
+| AJ3 | AH1–AH7 for **5 minutes**, held at the village: AH4's URL with `&route=village&at=820` added. `RUN=1541-people` |
+| AJ4 | **Cool again (AH3, 25–26 °C)**, same build: AH1–AH7 for 5 minutes with `&route=village&at=820&levers=-people`. `RUN=1541-no-people` |
+| AJ5 | By eye, at the hold and riding through the village (drop `&at=`): nobody on the road; walkers on the pavements and front paths; nobody sliding, floating or sunk; the far figures readable as people and not flickering. A picture of each |
+
+| Reading | People on (AJ1, AJ3) | `levers=-people` (AJ2, AJ4) |
+|---|---|---|
+| Draw calls at the hold | | |
+| Triangles at the hold | | |
+| GPU p50 / p90 / p99, MHz | | |
+| Frames over 20 ms, % | | |
+| Skin at minute 5, °C | | |
+
+**Reading it.** People on inside #1523's limit is **room**: the default stays as it ships. Over the
+limit with people on and inside it with `-people` is **no room**: `QualitySettings.people` goes to
+0 on the top realistic rung too, until there is — the owner's ruling. Post the table on #1541 and
+#733.

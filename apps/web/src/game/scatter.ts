@@ -69,6 +69,12 @@
  * and reaching for one would be #240's "merely expensive" list item 1 — the
  * first outbound request `apps/web/src` has ever made. That is #248's decision
  * to take, not this file's.
+ *
+ * ⚠️ **Land use is read since #1546 and #1542**, from the ride's land-class
+ * mask, handed in rather than fetched here: built-up land and water carry
+ * nothing, and a wood, farmland and a park are planted as what they are
+ * ({@link landPlanting}). Where the mask is `unknown` this file is what the
+ * paragraph above describes, item for item.
  */
 
 import {
@@ -80,7 +86,15 @@ import {
   type RouteProfile,
 } from '@onyourleft/domain';
 
-import { builtUpOrWater, NO_LAND_CLASS, type LandClassMask } from './land-class';
+import {
+  atClassEdge,
+  builtUpOrWater,
+  COUNTRYSIDE,
+  NO_LAND_CLASS,
+  type Countryside,
+  type LandClass,
+  type LandClassMask,
+} from './land-class';
 import { terrainHeightAt } from './landform';
 import { distanceToDrawnRoad } from './road-grid';
 import { mixInto, slotHash, uniformFrom } from './seeded';
@@ -832,7 +846,9 @@ export function scatterSeed(profile: RouteProfile): number {
  *
  * `land` is the ride's land-class mask (#1546): no tree, shrub or rock stands
  * on mapped built-up land or water. {@link NO_LAND_CLASS}, the default, is
- * today's world.
+ * today's world. Since #1542 a wood, farmland and a park are planted as what
+ * they are ({@link landPlanting}), each lever of `countryside` switching one
+ * change off; where the mask is `unknown` nothing here reads it.
  */
 export function scatterAt(
   profile: RouteProfile,
@@ -842,6 +858,7 @@ export function scatterAt(
   toMetres: number,
   budget: ScatterBudget,
   land: LandClassMask = NO_LAND_CLASS,
+  countryside: Countryside = COUNTRYSIDE,
 ): readonly ScatterItem[] {
   // ⚠️ **There is deliberately no early return for a degenerate call**, and
   // three of them were written here and then removed because no mutation could
@@ -904,6 +921,7 @@ export function scatterAt(
       { cell, wrapped, cellCount, span, fromMetres, toMetres },
       found,
       land,
+      countryside,
     );
   }
 
@@ -968,6 +986,7 @@ function fillCell(
   cell: Cell,
   found: Placed[],
   land: LandClassMask,
+  countryside: Countryside,
 ): void {
   // ⚠️ The **wrapped** cell, and this one is belt and braces rather than load
   // bearing: every profile reader below goes through `distanceOnRoute`, which
@@ -985,19 +1004,28 @@ function fillCell(
   // and a route at one altitude on one gradient had the same density from end
   // to end — every cell filled to the same fraction, which is what makes a
   // hashed placement still read as a grid.
-  const density = densityAt(place) * clusterAt(seed, cell);
+  const plain = densityAt(place);
+  const density = plain * clusterAt(seed, cell);
   // #459. Cached per profile, so this is a lookup. @see waterways
   const ways = waterways(profile, seed);
   const weights = kindWeights(place);
   // ⚠️ **Whole bands, dropped rather than squeezed.** @see MINIMUM_SCATTER_SEPARATION_METRES
   const bands = bandsAt(place.curvature);
+  // #1542: whether anything here reads what the ground is. Absent a mask, or
+  // with both levers off, a cell is kept and picked exactly as before.
+  const mapped = land !== NO_LAND_CLASS && (countryside.planting || countryside.clutter);
+  // The most any class keeps is the geography's own `plain` density and its
+  // stones, so a slot over that is dropped before its place is worked out.
+  const ceiling = mapped ? Math.max(density, plain * (1 + CLUTTER_SHARE)) : density;
+  const plantings = mapped && countryside.planting ? landPlantings(place, weights) : undefined;
 
   for (const side of [-1, 1]) {
     for (let band = 0; band < bands; band += 1) {
       // ⚠️ Hashed on the WRAPPED cell, so the same place on lap two is the same
       // place. Hashing the unwrapped cell would reseed the whole world every lap.
       const base = hash(seed, cell.wrapped, side * SCATTER_BANDS_PER_SIDE + band);
-      if (uniform(base, STREAM_KEEP) >= density) {
+      const keep = uniform(base, STREAM_KEEP);
+      if (keep >= ceiling) {
         continue;
       }
 
@@ -1057,11 +1085,34 @@ function fillCell(
         continue;
       }
 
-      const kind = pickKind(weights, uniform(base, STREAM_KIND));
+      // #1542: what the map says grows here, where it says anything; the
+      // procedural mix and the clustering field where it does not.
+      const cover: LandClass = mapped ? land.classAt(x, z) : 'unknown';
+      const planting =
+        plantings === undefined ? undefined : landPlanting(plantings, land, cover, x, z, band);
+      const kept = planting?.density ?? density;
+      const stones =
+        countryside.clutter && (cover === 'farmland' || cover === 'wood')
+          ? plain * CLUTTER_SHARE
+          : 0;
+      if (keep >= kept + stones) {
+        continue;
+      }
+      const kind =
+        keep >= kept ? 'rock' : pickKind(planting?.weights ?? weights, uniform(base, STREAM_KIND));
       // #1546: nothing grows on mapped built-up land or water. Dropped after
       // every draw and before {@link thin}, as the water and the road above.
       // A post marks a bend, which built-up land may have, so it stays.
       if (kind !== 'post' && builtUpOrWater(land, x, z)) {
+        continue;
+      }
+      // #1542's `small-stones`, the owner's ruling of 2026-10-24: on mapped
+      // farmland and a wood, no rock in the nearest bands and every one smaller.
+      const stone =
+        countryside['small-stones'] &&
+        kind === 'rock' &&
+        (cover === 'farmland' || cover === 'wood');
+      if (stone && band < STONE_FIRST_BAND) {
         continue;
       }
 
@@ -1080,8 +1131,9 @@ function fillCell(
           z,
           rotation: uniform(base, STREAM_ROTATION) * Math.PI * 2,
           scale:
-            SCATTER_SCALE_LOWEST +
-            uniform(base, STREAM_SCALE) * (SCATTER_SCALE_HIGHEST - SCATTER_SCALE_LOWEST),
+            (SCATTER_SCALE_LOWEST +
+              uniform(base, STREAM_SCALE) * (SCATTER_SCALE_HIGHEST - SCATTER_SCALE_LOWEST)) *
+            (stone ? STONE_SCALE : 1),
           // ⚠️ `Math.min` rather than trusting the multiply: `uniform` returns
           // a value in `[0, 1)` by construction, but a float at the very top of
           // that range can floor to the slot count on some inputs, and an
@@ -1095,6 +1147,160 @@ function fillCell(
         along,
       });
     }
+  }
+}
+
+/**
+ * How a wood, farmland and a park are planted — #1542, the owner's "repetitive
+ * and sparse" (2026-10-21). **This repository's own**, judged against the
+ * look of lowland countryside rather than measured, like every density above.
+ *
+ * The geography still says how much CAN grow ({@link densityAt}); the map says
+ * how much of that does, and what:
+ *
+ * | Class | Kept, of the geography's density | What |
+ * |---|--:|---|
+ * | `wood` | all of it, with no open stretch ({@link clusterAt} is not read) | the procedural mix; within {@link WOOD_EDGE_METRES} of its edge, broadleaf and scrub — trees mostly, because a shrub past the nearest `REALISTIC_NEAR_MESHES.shrub` (8) is not drawn at all |
+ * | `farmland`, nearest band or within {@link HEDGEROW_EDGE_METRES} of its edge | {@link HEDGEROW_TREE_SHARE} | hedgerow trees |
+ * | `farmland`, elsewhere | {@link PASTURE_TREE_SHARE} | open pasture: a lone field tree |
+ * | `park` | {@link PARK_TREE_SHARE} | specimen trees on mown grass, no rock |
+ * | `other`, `unknown` | the procedural world, clustering and all | |
+ *
+ * ⚠️ **No new kind, shape, material or mesh**: every item is one the
+ * procedural world already places, so the cost of a frame is bounded where it
+ * was — the trees by `realistic-budget.ts` §`REALISTIC_TREE_LEVELS`, shrubs
+ * and rocks by §`REALISTIC_NEAR_MESHES`, all of it by {@link ScatterBudget}.
+ */
+interface LandPlanting {
+  readonly density: number;
+  readonly weights: readonly number[];
+}
+
+/** One cell's plantings, built once a cell so an item allocates nothing. */
+interface LandPlantings {
+  readonly wood: LandPlanting;
+  readonly woodEdge: LandPlanting;
+  readonly hedgerow: LandPlanting;
+  readonly pasture: LandPlanting;
+  readonly park: LandPlanting;
+}
+
+/** How far into a wood its edge's scrub reaches, in metres: **8**. */
+export const WOOD_EDGE_METRES = 8;
+
+/** How near a field's edge a hedgerow tree stands, in metres: **6**. */
+export const HEDGEROW_EDGE_METRES = 6;
+
+/** The share of the geography's density a hedgerow keeps: **0.6**. */
+export const HEDGEROW_TREE_SHARE = 0.6;
+
+/** The share open pasture keeps: **0.06** — a lone tree every few fields. */
+export const PASTURE_TREE_SHARE = 0.06;
+
+/** The share a park keeps: **0.3**. */
+export const PARK_TREE_SHARE = 0.3;
+
+/**
+ * Ground clutter — #1542's third bullet: the share of the geography's density
+ * kept as a field stone on farmland or a rock on a wood's floor, ON TOP of
+ * what is planted: **0.03**.
+ *
+ * ⚠️ **Rocks only, because they are the clutter that is cheap**: opaque, one
+ * of the shapes already drawn, and drawn as a mesh only for the nearest
+ * `realistic-budget.ts` §`REALISTIC_NEAR_MESHES.rock` (12), so a frame's rock
+ * triangles cannot rise past 12 × 2 500 however many are placed. Tall grass is
+ * NOT here: no grass card is in ADR 0049's admitted set, and an alpha-tested
+ * card is the overdraw the tablet's GPU has no room for (#1523).
+ */
+export const CLUTTER_SHARE = 0.03;
+
+/**
+ * How big a rock on mapped farmland or a wood is drawn, of the procedural
+ * rock's size, under #1542's `small-stones`: **0.5** — `boulder_01` fitted to
+ * 0.45 m to 0.9 m rather than a metre or more. The owner's ruling of
+ * 2026-10-24: the rocks read as boulders. The same mesh, drawn smaller.
+ */
+export const STONE_SCALE = 0.5;
+
+/**
+ * The nearest band a rock on mapped farmland or a wood stands in, under
+ * `small-stones`: **2** — none in the two bands nearest the road, so none
+ * nearer than {@link ROAD_WIDTH_METRES}/2 + {@link SCATTER_VERGE_METRES} + 6 m
+ * (12.5 m) to the centreline. The same ruling: fewer near the road.
+ */
+export const STONE_FIRST_BAND = 2;
+
+function landPlantings(place: Place, procedural: readonly number[]): LandPlantings {
+  const post = procedural[4] as number;
+  // Above the trees the geography's rock and scrub stand, whatever the map says.
+  // ⚠️ Planted and farmed land's trees are broadleaf below the boreal belt —
+  // {@link plantedConiferShare} — where the procedural share is 0.86 conifer
+  // at 51.5° and a hedgerow of firs is not lowland countryside. A wood keeps
+  // the procedural mix: plantations are conifer.
+  const mix = (trees: number, shrub: number): readonly number[] => {
+    if (aboveTheTrees(place)) return procedural;
+    const conifer = plantedConiferShare(place);
+    return [trees * (1 - conifer), trees * conifer, shrub, 0, post];
+  };
+  const plain = densityAt(place);
+  return {
+    wood: { density: plain, weights: procedural },
+    woodEdge: { density: plain, weights: mix(5, 2) },
+    hedgerow: { density: plain * HEDGEROW_TREE_SHARE, weights: mix(7, 1) },
+    pasture: { density: plain * PASTURE_TREE_SHARE, weights: mix(5, 1) },
+    park: { density: plain * PARK_TREE_SHARE, weights: mix(6, 1) },
+  };
+}
+
+/**
+ * The latitude below which a hedgerow, a field and a park are wholly
+ * broadleaf: **55°** — #1542, this repository's own. From it to
+ * {@link BOREAL_LATITUDE_DEGREES} the share rises to all conifer, as
+ * {@link coniferShare}'s does from the equator.
+ */
+export const PLANTED_BROADLEAF_LATITUDE_DEGREES = 55;
+
+/**
+ * {@link coniferShare} for planted and farmed land: the altitude term as it is,
+ * the latitude term from {@link PLANTED_BROADLEAF_LATITUDE_DEGREES}. Called
+ * below the tree line only, for {@link coniferShare}'s reason.
+ */
+function plantedConiferShare(place: Place): number {
+  return clamp01(
+    Math.max(
+      (place.latitude - PLANTED_BROADLEAF_LATITUDE_DEGREES) /
+        (BOREAL_LATITUDE_DEGREES - PLANTED_BROADLEAF_LATITUDE_DEGREES),
+      place.altitude / place.treeLine,
+    ),
+  );
+}
+
+/**
+ * The planting at `(x, z)`, or `undefined` for the procedural world. `band` is
+ * the item's depth from the road: the nearest band of a field is its roadside
+ * hedgerow.
+ */
+function landPlanting(
+  plantings: LandPlantings,
+  land: LandClassMask,
+  cover: LandClass,
+  x: number,
+  z: number,
+  band: number,
+): LandPlanting | undefined {
+  switch (cover) {
+    case 'wood':
+      return atClassEdge(land, 'wood', x, z, WOOD_EDGE_METRES)
+        ? plantings.woodEdge
+        : plantings.wood;
+    case 'farmland':
+      return band === 0 || atClassEdge(land, 'farmland', x, z, HEDGEROW_EDGE_METRES)
+        ? plantings.hedgerow
+        : plantings.pasture;
+    case 'park':
+      return plantings.park;
+    default:
+      return undefined;
   }
 }
 

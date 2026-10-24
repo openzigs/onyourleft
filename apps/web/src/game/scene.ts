@@ -36,7 +36,12 @@ import {
   simulatedCrankAngle,
   type RiderRoll,
 } from './bicycle';
-import { NO_LAND_CLASS, type LandClassMask } from './land-class';
+import {
+  countrysideWithout,
+  NO_LAND_CLASS,
+  type CountrysideLever,
+  type LandClassMask,
+} from './land-class';
 import { horizonRelief, terrainCorridor } from './landform';
 import { CAMERA_BEHIND_METRES, CAMERA_TARGET_AHEAD_METRES } from './camera';
 import type { CameraPose, RiderMarker, SceneFrame, WaterFrame } from './port';
@@ -74,7 +79,16 @@ import {
 } from './cross-streets';
 import { NO_PAVEMENT_DATA, pavementSides } from './footways';
 import { BILLBOARD_FOOTPRINT } from './logo-board';
-import { streetsAt } from './streets';
+import {
+  NO_PEOPLE,
+  footwayWalks,
+  groundOf,
+  peopleAt,
+  streetWalks,
+  type PeopleInView,
+} from './people';
+import { distanceToDrawnRoad } from './road-grid';
+import { streetsAt, type VillageStreet } from './streets';
 import { bridgeParts, waterSurface, waterways } from './waterways';
 import { worldStyle } from './world';
 import type { WorldCorridor } from './world-data/corridor';
@@ -251,6 +265,32 @@ export interface SceneInput {
    * {@link centreline}'s reason.
    */
   readonly lotsOff?: boolean | undefined;
+  /**
+   * How many people the rung draws as bodies — #1541 (`quality.ts`
+   * §`QualitySettings.people`): `people.ts` §`PEOPLE_NEAR_MAX` at most.
+   * Absent, or 0, places nobody.
+   *
+   * ⚠️ **Optional the UNSAFE way round**, which `check-wiring.mjs` §Limits
+   * names: a ride that forgot it draws no people. `realistic-choice.test.tsx` §"#1541"
+   * reads it back off the frame the renderer was handed, as it reads
+   * `crankAngle`; the owner's page passes it in `browser/realistic/frame.ts`.
+   */
+  readonly people?: number | undefined;
+  /**
+   * Places people with #1541's rule OFF — on a line's every point and between,
+   * carriageway or not (`people.ts` §`PeopleOptions.rule`): the browser gate's
+   * control, and nothing else. Absent, or `false`, keeps everybody off the
+   * carriageway. Optional the safe way round, for {@link centreline}'s reason.
+   */
+  readonly peopleOnTheRoad?: boolean | undefined;
+  /**
+   * #1542's changes switched off, each restoring the countryside before it —
+   * the realistic page's `-land-planting`, `-land-boundaries` and
+   * `-ground-clutter` levers, and nothing else (`land-class.ts`
+   * §`CountrysideLever`). Absent, or empty, is every change on. Optional the
+   * safe way round, for {@link centreline}'s reason.
+   */
+  readonly countrysideOff?: readonly CountrysideLever[] | undefined;
 }
 
 /** Another real rider, where to draw them — #783. @see SceneInput.remoteRiders */
@@ -289,6 +329,22 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     input.landClass ?? NO_LAND_CLASS,
   );
   const { scatter: items, billboards } = scenery(corridor, input, riderDistance, seed, sideRoads);
+  // #1535: the village streets along exactly the stretch of road this frame
+  // drew, for `scenery`'s reason — and outside the structures' budget,
+  // because a street is one mesh rather than items a rung could thin.
+  const streets = streetsAt(
+    input.profile,
+    input.origin,
+    seed,
+    (corridor.centre[0] as CorridorPoint).along,
+    (corridor.centre[corridor.centre.length - 1] as CorridorPoint).along,
+    // #1551: built once a corridor, so this is a lookup on every later frame.
+    input.worldCorridor === undefined
+      ? NO_PAVEMENT_DATA
+      : pavementSides(input.worldCorridor, input.profile, input.origin),
+    input.landClass ?? NO_LAND_CLASS,
+  );
+  const camera = cameraPose(corridor, riderDistance, (riders[0] as PlacedRider).lateral);
   return {
     // #1549: the ride's mapped buildings, and where the rider is among them.
     ...(input.mappedBuildings === undefined
@@ -297,7 +353,7 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     corridor,
     // The camera follows the rider sideways — their drawn place, not the line's
     // — so the rider stays where `camera.ts` §`riderFrameBox` says they are.
-    camera: cameraPose(corridor, riderDistance, (riders[0] as PlacedRider).lateral),
+    camera,
     markers: riders.map((rider) => rider.marker),
     // Recomputed per frame rather than cached against the profile: it is two
     // bounded passes over at most `WORLD_SAMPLE_LIMIT` samples, and a cache
@@ -308,21 +364,10 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     // #966: the billboards in view, out of the structures' budget.
     billboards,
     sideRoads,
-    // #1535: the village streets along exactly the stretch of road this frame
-    // drew, for `scenery`'s reason — and outside the structures' budget,
-    // because a street is one mesh rather than items a rung could thin.
-    streets: streetsAt(
-      input.profile,
-      input.origin,
-      seed,
-      (corridor.centre[0] as CorridorPoint).along,
-      (corridor.centre[corridor.centre.length - 1] as CorridorPoint).along,
-      // #1551: built once a corridor, so this is a lookup on every later frame.
-      input.worldCorridor === undefined
-        ? NO_PAVEMENT_DATA
-        : pavementSides(input.worldCorridor, input.profile, input.origin),
-      input.landClass ?? NO_LAND_CLASS,
-    ),
+    streets,
+    // #1541: the people on those streets' pavements and the corridor's
+    // footways, near the rider, at the ride's own clock.
+    people: people(input, streets, camera, seed),
     // #458. Built from the corridor just built, so the ground's innermost
     // column is the road's outermost one — `landform.ts` says why that is the
     // whole of the no-crack guarantee. Every band, whatever the rung: the
@@ -350,6 +395,40 @@ export function sceneFrame(input: SceneInput): SceneFrame {
       lineStands(input.profile, input.units ?? 'metric'),
     ),
   };
+}
+
+/**
+ * The people a frame draws — #1541 (`people.ts`): on the frame's village
+ * streets and the corridor's footways, around the rider's drawn place, at the
+ * ride's own clock — the one #625's breath runs on, which a held ride holds.
+ * Nobody where the rung draws nobody.
+ */
+function people(
+  input: SceneInput,
+  streets: readonly VillageStreet[],
+  camera: CameraPose,
+  seed: number,
+): PeopleInView {
+  const near = input.people ?? 0;
+  if (near <= 0) return NO_PEOPLE;
+  const { profile, origin } = input;
+  const land = input.landClass ?? NO_LAND_CLASS;
+  const rule = input.peopleOnTheRoad !== true;
+  const road = (x: number, z: number, reach: number): number =>
+    distanceToDrawnRoad(profile, origin, x, z, reach);
+  const lines = streets.flatMap((street) => streetWalks(street, road, rule));
+  if (input.worldCorridor !== undefined) {
+    lines.push(...footwayWalks(input.worldCorridor, profile, origin, land, rule));
+  }
+  return peopleAt(lines, {
+    x: camera.x,
+    z: camera.z,
+    seconds: ghostClock(input.state),
+    near,
+    rule,
+    road,
+    ground: groundOf(profile, origin, seed, land),
+  });
 }
 
 /** The streams, lakes and bridges in view. @see SceneFrame.water */
@@ -384,6 +463,8 @@ function scenery(
   const last = corridor.centre[corridor.centre.length - 1] as CorridorPoint;
   // #1546: what the ground is where map data was read; nothing, where it was not.
   const land = input.landClass ?? NO_LAND_CLASS;
+  // #1542: what the countryside makes of it, lever by lever.
+  const countryside = countrysideWithout(input.countrysideOff ?? []);
   const natural = scatterAt(
     input.profile,
     input.origin,
@@ -392,6 +473,7 @@ function scenery(
     last.along,
     { maxItems: input.scatterItems ?? SCATTER_MAX_ITEMS, riderMetres: riderDistance },
     land,
+    countryside,
   );
   // #966. The billboards come out of the structures' budget FIRST: a rung that
   // takes structures away takes them too, and none is ever extra.
@@ -424,6 +506,7 @@ function scenery(
     // corridor, which the procedural lots of a mapped town keep clear of.
     // `null` is the `-lots` control: no lots at all.
     input.lotsOff === true ? null : (input.mappedTown ?? NO_MAPPED_TOWN),
+    countryside,
   );
   // #1565: no wall, hedge, fence, signpost or building on a side road, and no
   // tree, shrub or rock either.

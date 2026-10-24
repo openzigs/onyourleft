@@ -793,7 +793,23 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         water, no field boundary off field ground. Absent is
                         `NO_LAND_CLASS`, today's world, item for item. Since
                         #1547 it also carries each cell's distance to
-                        built-up land, which `landform.ts` levels by
+                        built-up land, which `landform.ts` levels by.
+                        Since #1542 the countryside is read off it: a wood
+                        planted throughout with a broadleaf edge, hedgerow
+                        trees and open pasture on farmland, specimen trees
+                        in a park (`scatter.ts` §`landPlanting`); field
+                        boundaries along farmland's EDGES, not the field
+                        grid (`settlements.ts` §`landEdgesAt`); stones on
+                        pasture and a wood's floor. No new kind or shape.
+                        The roadside hedge on mapped farmland is low and
+                        broken (`settlements.ts` §`roadsidePiece`), rocks
+                        small and set back (`scatter.ts` §`STONE_SCALE`).
+                        ⚠️ `unknown` and `other` are the procedural world,
+                        item for item, and each change has a lever
+                        (`SceneInput.countrysideOff`, the realistic page's
+                        `-land-planting`, `-land-boundaries`,
+                        `-ground-clutter`, `-hedge-breaks`,
+                        `-small-stones`, shown on `town=countryside`)
     src/game/footprint-buildings.ts
                         each mapped footprint planned as a building (#1540):
                         P-9's placement rules, in order and counted as
@@ -895,8 +911,34 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `streets.ts` lays a village's pavement on where read
                         (`unknown`, and #1535's own rule, where not); and
                         `footwayNetwork`, 2 m polylines off the carriageway
-                        and inside the corridor for #1541 (`@unwired` until
-                        then). No crossing is either
+                        and inside the corridor, which #1541's people walk
+                        (`people.ts`). No crossing is either
+    src/game/people.ts  people walking and running (#1541) — on a village's
+                        pavements and front paths (`streets.ts`'s `walks`
+                        and `DoorPath.walk`) and the mapped footways, never
+                        on the carriageway: every line is broken, and every
+                        person dropped, within `PERSON_CLEARANCE_METRES`
+                        (3.8) of ANY stretch of the drawn road. Where each is
+                        is a function of the ride's clock, seeded per line and
+                        slot; density by village size and land use; runners
+                        only on paths and in parks. ≤ 16 bodies within 60 m,
+                        ≤ 32 impostors to 150 m. ⚠️ `SceneInput.people` is
+                        optional the UNSAFE way round (absent places nobody):
+                        `realistic-choice.test.tsx` §"#1541" reads what
+                        `GameView` asks for. `peopleOnTheRoad` is the browser
+                        gate's control. `gait.ts` is the parametric walk and
+                        run (the owner's ruling of 2026-10-24: no animation
+                        source); `people-body.ts` cuts the rider's MakeHuman
+                        body to ≤ 2 000 triangles at load and sizes the
+                        animation texture (≤ 1 MiB); `three-renderer.ts`
+                        §`PeopleBelt` bakes and draws them, realistic top rung
+                        only (`QualitySettings.people`), in two calls.
+                        `levers=-people` on the owner's page is the tablet's
+                        cost pair (validation 0002 Part AJ). ⚠️ The bodies'
+                        geometry carries a `normal` attribute the shader never
+                        reads: without one, three compiles a standard material
+                        FLAT_SHADED and every triangle is lit as a facet
+                        (the owner's look of PR #1615)
     src/game/cross-streets.ts
                         cross streets (#1565) — a side road 60 m off the
                         route at each junction where a mapped street

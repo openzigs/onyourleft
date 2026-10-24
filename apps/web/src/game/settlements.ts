@@ -84,7 +84,15 @@ import {
 
 import { lotPaint } from './building-paint';
 import { BUILDING_VARIANTS, LOT_PORCH_FRONT_METRES } from './buildings';
-import { builtUpOrWater, fieldGround, NO_LAND_CLASS, type LandClassMask } from './land-class';
+import {
+  builtUpOrWater,
+  COUNTRYSIDE,
+  fieldGround,
+  NO_LAND_CLASS,
+  type Countryside,
+  type LandClass,
+  type LandClassMask,
+} from './land-class';
 import { ROAD_CLEARANCE_METRES, fieldSpanMetres, terrainHeightAt } from './landform';
 import {
   SETTLEMENT_GRADE_PERCENT,
@@ -220,13 +228,14 @@ export function structuresAt(
   footprints?: SettlementFootprint[],
   land: LandClassMask = NO_LAND_CLASS,
   town: MappedTown | null = NO_MAPPED_TOWN,
+  countryside: Countryside = COUNTRYSIDE,
 ): readonly ScatterItem[] {
   const found: ScatterItem[] = [];
   const villages: (readonly [number, number])[] = [];
   settlementsAt(profile, origin, seed, fromMetres, toMetres, found, villages, footprints, land);
   if (town !== null) lotsAt(profile, origin, seed, fromMetres, toMetres, land, town, found);
   const edges: { readonly item: ScatterItem; readonly along: number }[] = [];
-  fieldEdgesAt(profile, origin, seed, fromMetres, toMetres, villages, edges, land);
+  fieldEdgesAt(profile, origin, seed, fromMetres, toMetres, villages, edges, land, countryside);
   edges.sort(
     (first, second) =>
       Math.abs(first.along - budget.riderMetres) - Math.abs(second.along - budget.riderMetres),
@@ -239,12 +248,17 @@ export function structuresAt(
   // the same place — `scatter.ts` §`scatterAt` makes the same promise for the
   // scenery. Two copies of one wall at one place would be two instances drawn
   // into the same pixels.
-  const once = distinctPlaces(found).filter(
-    // ⚠️ Off EVERY stretch of the road, not only the one it was placed beside.
-    // @see structureClearance
-    (item) => structureClearance(profile, origin, item) >= ROAD_CLEARANCE_METRES,
-  );
-  return once.slice(0, Math.max(0, budget.maxItems));
+  // The first `maxItems` of them off EVERY stretch of the road, not only the
+  // one each was placed beside — @see structureClearance — measured only until
+  // the budget is spent (#1542: a mapped field's edges are more pieces than a
+  // realistic rung keeps).
+  const most = Math.max(0, budget.maxItems);
+  const kept: ScatterItem[] = [];
+  for (const item of distinctPlaces(found)) {
+    if (kept.length >= most) break;
+    if (structureClearance(profile, origin, item) >= ROAD_CLEARANCE_METRES) kept.push(item);
+  }
+  return kept;
 }
 
 /**
@@ -1292,7 +1306,24 @@ function ringHoldsLot(ring: Float32Array, lot: Float64Array): boolean {
   return inside;
 }
 
-/** The walls, hedges and fences, each with the odometer it stands at. */
+/**
+ * The walls, hedges and fences, each with the odometer it stands at.
+ *
+ * ⚠️ **Since #1542, mapped farmland is bounded where it ENDS, not every
+ * field's span.** Where the mask (`countryside.boundaries` on) says a piece's
+ * ground is `farmland`, the procedural field's hash is not read: the roadside
+ * piece is always there, a hedge (a wall on high or steep ground, as before),
+ * and the procedural field's side boundary is not drawn. Instead
+ * {@link landEdgesAt} stands a piece wherever farmland meets another mapped
+ * class, on a grid of {@link BOUNDARY_PIECE_METRES}: out from the road where
+ * the edge crosses the verge, along it where a field starts back from the
+ * road. Where the ground is `unknown` or `other` — no field mapped — the
+ * fields are the procedural ones, item for item.
+ *
+ * With `countryside['hedge-breaks']` on (the owner's ruling of 2026-10-24)
+ * that roadside hedge is low and broken up, {@link roadsidePiece}; a wall is
+ * not.
+ */
 function fieldEdgesAt(
   profile: RouteProfile,
   origin: CorridorOrigin,
@@ -1302,6 +1333,7 @@ function fieldEdgesAt(
   villages: readonly (readonly [number, number])[],
   found: { item: ScatterItem; along: number }[],
   land: LandClassMask,
+  countryside: Countryside,
 ): void {
   const total = profile.totalDistance;
   // The ground's own field grid, so the patchwork and the walls agree (#425).
@@ -1313,6 +1345,10 @@ function fieldEdgesAt(
   const last = Math.min(Math.floor(toMetres / span), first + fields + 1);
   const inVillage = (along: number): boolean =>
     villages.some(([from, to]) => along >= from && along <= to);
+  // #1542: whether a piece reads the mask at all. Off, or with no mask, the
+  // fields are exactly the procedural ones.
+  const mapped = countryside.boundaries && land !== NO_LAND_CLASS;
+  const onFarmland = (x: number, z: number): boolean => mapped && land.classAt(x, z) === 'farmland';
   for (let field = first; field <= last; field += 1) {
     if (!profile.loop && (field < 0 || field >= fields)) continue;
     const wrappedField = ((field % fields) + fields) % fields;
@@ -1323,18 +1359,21 @@ function fieldEdgesAt(
     const altitude = elevationAt(profile, middle);
     const steep = Math.abs(gradeAt(profile, middle));
     if (altitude >= treeLine || steep > FIELD_GRADE_PERCENT) continue;
+    const walled = altitude > treeLine * WALL_TREE_LINE_FRACTION || steep > WALL_GRADE_PERCENT;
+    // Along the verge, the whole length of the field.
+    const pieces = Math.max(1, Math.round(span / BOUNDARY_PIECE_METRES));
+    const piece = span / pieces;
+    let frames: readonly (Frame | undefined)[] | undefined;
     for (const side of [1, -1] as const) {
       const hash = slotHash(seed, wrappedField, FIELD_KEY + (side === 1 ? 1 : 2));
-      if (uniformFrom(hash, 0) >= ENCLOSED_SHARE) continue;
-      const kind: StructureKind =
-        altitude > treeLine * WALL_TREE_LINE_FRACTION || steep > WALL_GRADE_PERCENT
-          ? 'wall'
-          : uniformFrom(hash, 1) < HEDGE_SHARE
-            ? 'hedge'
-            : 'fence';
-      // Along the verge, the whole length of the field.
-      const pieces = Math.max(1, Math.round(span / BOUNDARY_PIECE_METRES));
-      const piece = span / pieces;
+      const enclosed = uniformFrom(hash, 0) < ENCLOSED_SHARE;
+      const kind: StructureKind = walled
+        ? 'wall'
+        : uniformFrom(hash, 1) < HEDGE_SHARE
+          ? 'hedge'
+          : 'fence';
+      // #1542's `hedge-breaks`: which of this side's pieces is the field's gate.
+      const gate = Math.floor(uniformFrom(hash, 2) * pieces);
       for (let index = 0; index < pieces; index += 1) {
         const along = start + (index + 0.5) * piece;
         if (along < fromMetres || along >= toMetres || inVillage(along)) continue;
@@ -1351,11 +1390,58 @@ function fieldEdgesAt(
           'along',
           land,
         );
+        if (item === undefined) continue;
+        // #1542: a mapped field beside the road is hedged along it, whatever
+        // the procedural field's hash says.
+        if (onFarmland(item.x, item.z)) {
+          if (walled || !countryside['hedge-breaks']) {
+            found.push({
+              item: walled ? { ...item, kind: 'wall' } : { ...item, kind: 'hedge' },
+              along,
+            });
+            continue;
+          }
+          // The owner's ruling of 2026-10-24: low and broken, not a solid
+          // head-high hedge. Admitted on `along`, as every piece is.
+          const chosen = roadsidePiece(seed, wrappedField, side, index, pieces, piece, gate);
+          if (chosen === undefined) continue;
+          const placed =
+            chosen.shift === 0
+              ? item
+              : standing(
+                  profile,
+                  origin,
+                  seed,
+                  chosen.kind,
+                  along + chosen.shift,
+                  FIELD_EDGE_LATERAL_METRES * side,
+                  0,
+                  'along',
+                  land,
+                );
+          if (placed !== undefined) {
+            found.push({ item: { ...placed, kind: chosen.kind, scale: chosen.scale }, along });
+          }
+          continue;
+        }
         // #1546: no boundary across built-up land, water, a wood or a park.
-        if (item !== undefined && fieldGround(land, item.x, item.z)) found.push({ item, along });
+        if (enclosed && fieldGround(land, item.x, item.z)) found.push({ item, along });
+      }
+      if (mapped) {
+        // The road's frames at the pieces' centres, the last field's last one
+        // first: built once a field, for both sides.
+        frames ??= Array.from({ length: pieces + 1 }, (_, index) =>
+          frameAt(profile, origin, distanceOnRoute(profile, start + (index - 0.5) * piece)),
+        );
+        landEdgesAt(profile, origin, seed, start, frames, piece, side, walled, ways, land, {
+          fromMetres,
+          toMetres,
+          inVillage,
+          found,
+        });
       }
       // Out from the road along the field's first edge.
-      if (start < fromMetres || start >= toMetres || inVillage(start)) continue;
+      if (!enclosed || start < fromMetres || start >= toMetres || inVillage(start)) continue;
       const frame = frameAt(profile, origin, distanceOnRoute(profile, start));
       if (frame === undefined) continue;
       const outward = Math.round(
@@ -1367,7 +1453,8 @@ function fieldEdgesAt(
         if (inWater(ways, profile, wrapped, lateral * side)) continue;
         const x = frame.x + frame.normalX * lateral * side;
         const z = frame.z + frame.normalZ * lateral * side;
-        if (!fieldGround(land, x, z)) continue;
+        // #1542: a mapped field's sides are its own edges, not this grid's.
+        if (!fieldGround(land, x, z) || onFarmland(x, z)) continue;
         found.push({
           item: {
             kind,
@@ -1384,6 +1471,264 @@ function fieldEdgesAt(
       }
     }
   }
+}
+
+/**
+ * How many verge pieces one stretch of a mapped field's roadside is, under
+ * #1542's `hedge-breaks`: **3** (24 m). A stretch is hedge, fence or open
+ * verge as a whole, so the roadside changes in runs rather than piece by piece.
+ */
+export const ROADSIDE_RUN_PIECES = 3;
+
+/** The share of roadside stretches left open, no boundary at all: **0.15**. */
+export const OPEN_VERGE_SHARE = 0.15;
+
+/** The share of roadside stretches fenced rather than hedged: **0.2**. */
+export const FENCE_RUN_SHARE = 0.2;
+
+/** The share of a hedged stretch's pieces left out, a gap in it: **0.15**. */
+export const HEDGE_GAP_SHARE = 0.15;
+
+/**
+ * How big a roadside hedge piece is drawn, of the 1.3 m by 8 m piece
+ * `three-renderer.ts` §`BOUNDARY_STYLE` builds: **0.6** to **0.8**, so its top
+ * is 0.78 m to 1.04 m — below a rider's eye, where the solid hedge was at it —
+ * and it is 4.8 m to 6.4 m long. One height a stretch. The one instanced
+ * hedge, drawn smaller: no new shape, material or draw.
+ */
+export const LOW_HEDGE_SCALE = [0.6, 0.8] as const;
+
+/**
+ * How big a field gate is drawn, of the fence piece: **0.75** — 6 m of rail,
+ * 1 m high, in a gap in the hedge. A gate is the fence's own shape, so it adds
+ * no shape and no draw beyond the fence's one.
+ */
+export const FIELD_GATE_SCALE = 0.75;
+
+const ROADSIDE_KEY = 0x9_0000;
+
+/** What stands on one roadside piece of a mapped field. @see roadsidePiece */
+export interface RoadsidePiece {
+  readonly kind: 'hedge' | 'fence';
+  readonly scale: number;
+  /** Along the road from the piece's own centre, in metres. */
+  readonly shift: number;
+}
+
+/**
+ * One roadside piece of mapped farmland under #1542's `hedge-breaks` — the
+ * owner's ruling of 2026-10-24 that the solid, head-high hedge on both sides
+ * boxed the view in. `undefined` is no piece: a gap, or open verge.
+ *
+ * Each {@link ROADSIDE_RUN_PIECES}-piece stretch of a side is open
+ * ({@link OPEN_VERGE_SHARE}), fenced ({@link FENCE_RUN_SHARE}) or hedged. A
+ * hedged stretch is one height, {@link LOW_HEDGE_SCALE}, and its pieces are
+ * drawn closed up on its middle — `shift` — so it reads as one low hedge with
+ * the gap at its ends rather than as a row of boxes; {@link HEDGE_GAP_SHARE}
+ * of its pieces are left out, and the field's `gate` piece is a
+ * {@link FIELD_GATE_SCALE} fence. Everything is hashed from the seed, the
+ * wrapped field, the side and the piece, so a place is the same on every lap.
+ *
+ * `pieces` is how many the field's side has and `piece` how long each is.
+ */
+export function roadsidePiece(
+  seed: number,
+  field: number,
+  side: 1 | -1,
+  index: number,
+  pieces: number,
+  piece: number,
+  gate: number,
+): RoadsidePiece | undefined {
+  const sideKey = side === 1 ? 0 : 1;
+  const run = Math.floor(index / ROADSIDE_RUN_PIECES);
+  const stretch = slotHash(seed, field, ROADSIDE_KEY + 2 * run + sideKey);
+  const what = uniformFrom(stretch, 0);
+  if (what < OPEN_VERGE_SHARE) return undefined;
+  if (what < OPEN_VERGE_SHARE + FENCE_RUN_SHARE) return { kind: 'fence', scale: 1, shift: 0 };
+  if (index === gate) return { kind: 'fence', scale: FIELD_GATE_SCALE, shift: 0 };
+  const each = slotHash(seed, field, ROADSIDE_KEY + 0x8000 + 2 * index + sideKey);
+  if (uniformFrom(each, 0) < HEDGE_GAP_SHARE) return undefined;
+  const [lowest, highest] = LOW_HEDGE_SCALE;
+  const scale = lerp(lowest, highest, uniformFrom(stretch, 1));
+  // Closed up on the stretch's middle: each piece `scale` of a piece from the
+  // next, so they meet. A field's last stretch may be short.
+  const first = run * ROADSIDE_RUN_PIECES;
+  const middle = (Math.min(ROADSIDE_RUN_PIECES, pieces - first) - 1) / 2;
+  return { kind: 'hedge', scale, shift: (index - first - middle) * piece * (scale - 1) };
+}
+
+/** The span a call admits, and where its pieces go. @see landEdgesAt */
+interface EdgeSpan {
+  readonly fromMetres: number;
+  readonly toMetres: number;
+  readonly inVillage: (along: number) => boolean;
+  readonly found: { item: ScatterItem; along: number }[];
+}
+
+/**
+ * The pieces of one field's side that stand on a mapped farmland edge — #1542.
+ *
+ * The field's pieces are a grid: {@link BOUNDARY_PIECE_METRES} along the road
+ * (the verge's own pieces, `piece` long) by {@link BOUNDARY_PIECE_METRES} out
+ * from {@link FIELD_EDGE_LATERAL_METRES} to {@link FIELD_DEPTH_METRES}. Two
+ * neighbouring grid points of which exactly one is farmland and the other is
+ * mapped (not `unknown`, which is the end of the map rather than of a field)
+ * have an edge between them, and a piece stands on it: **out from the road**
+ * between two points along it, **along the road** between two points out from
+ * it. Each is admitted on its own odometer, half-open, as every piece is.
+ *
+ * What it is: a hedge, a fence where the field meets a wood or a park, a wall
+ * on the high or steep ground every boundary is walled on.
+ *
+ * ⚠️ **Out of the structures' own budget**, nearest the rider first, as every
+ * boundary: `realistic-budget.ts` §`REALISTIC_STRUCTURE_ITEMS` (36) bounds what a
+ * realistic frame draws, so following an edge spends no triangle and no draw
+ * call the procedural fields could not — a wall, a hedge and a fence are each
+ * one instanced draw, whatever the count.
+ */
+function landEdgesAt(
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  seed: number,
+  start: number,
+  /** The road's frame a piece's length before the field, then at each piece's centre. */
+  frames: readonly (Frame | undefined)[],
+  piece: number,
+  side: 1 | -1,
+  walled: boolean,
+  ways: ReturnType<typeof waterways>,
+  land: LandClassMask,
+  span: EdgeSpan,
+): void {
+  const depths = Math.round(
+    (FIELD_DEPTH_METRES - FIELD_EDGE_LATERAL_METRES) / BOUNDARY_PIECE_METRES,
+  );
+  const lateralAt = (depth: number): number =>
+    FIELD_EDGE_LATERAL_METRES + (depth + 0.5) * BOUNDARY_PIECE_METRES;
+  const stand = (
+    along: number,
+    lateral: number,
+    x: number,
+    z: number,
+    rotation: number,
+    neighbour: LandClass,
+  ): void => {
+    if (along < span.fromMetres || along >= span.toMetres || span.inVillage(along)) return;
+    const wrapped = distanceOnRoute(profile, along);
+    if (inWater(ways, profile, wrapped, lateral * side)) return;
+    const kind: StructureKind = walled
+      ? 'wall'
+      : neighbour === 'wood' || neighbour === 'park'
+        ? 'fence'
+        : 'hedge';
+    span.found.push({
+      item: {
+        kind,
+        x,
+        y: terrainHeightAt(profile, origin, seed, wrapped, lateral * side, land),
+        z,
+        rotation,
+        scale: 1,
+        variant: 0,
+      },
+      along,
+    });
+  };
+  for (let index = 0; index + 1 < frames.length; index += 1) {
+    const centre = start + (index + 0.5) * piece;
+    const before = frames[index];
+    const frame = frames[index + 1];
+    if (frame === undefined) continue;
+    // Out from the road, between the last piece's centre and this one's.
+    const boundary = centre - piece / 2;
+    for (let depth = 0; depth < depths && before !== undefined; depth += 1) {
+      const lateral = lateralAt(depth) * side;
+      const was = land.classAt(
+        before.x + before.normalX * lateral,
+        before.z + before.normalZ * lateral,
+      );
+      const now = land.classAt(
+        frame.x + frame.normalX * lateral,
+        frame.z + frame.normalZ * lateral,
+      );
+      const neighbour = farmlandEdge(was, now);
+      if (neighbour === undefined) continue;
+      // A quarter of the way from the field's own point, so it stands near
+      // the edge; on the field's point itself where that quarter is not the
+      // field's, so every piece stands on the field it bounds.
+      const t = fieldNearestEdge(land, before, frame, lateral, was === 'farmland' ? 0 : 1);
+      const x = lerp(before.x, frame.x, t) + lerp(before.normalX, frame.normalX, t) * lateral;
+      const z = lerp(before.z, frame.z, t) + lerp(before.normalZ, frame.normalZ, t) * lateral;
+      // Out from the road: its own length runs along the normal.
+      const rotation = Math.atan2(frame.normalX * side, frame.normalZ * side);
+      stand(boundary, lateralAt(depth), x, z, rotation, neighbour);
+    }
+    // Along the road, between two depths at this piece's centre.
+    let inner = land.classAt(
+      frame.x + frame.normalX * lateralAt(0) * side,
+      frame.z + frame.normalZ * lateralAt(0) * side,
+    );
+    for (let depth = 1; depth < depths; depth += 1) {
+      const lateral = lateralAt(depth) * side;
+      const outer = land.classAt(
+        frame.x + frame.normalX * lateral,
+        frame.z + frame.normalZ * lateral,
+      );
+      const neighbour = farmlandEdge(inner, outer);
+      inner = outer;
+      if (neighbour === undefined) continue;
+      // A quarter of a piece in from the field's own point, for the reason above.
+      const field = outer === 'farmland' ? lateral : lateral - BOUNDARY_PIECE_METRES * side;
+      const quarter = field + (outer === 'farmland' ? -0.25 : 0.25) * BOUNDARY_PIECE_METRES * side;
+      const between =
+        land.classAt(frame.x + frame.normalX * quarter, frame.z + frame.normalZ * quarter) ===
+        'farmland'
+          ? quarter
+          : field;
+      stand(
+        centre,
+        Math.abs(between),
+        frame.x + frame.normalX * between,
+        frame.z + frame.normalZ * between,
+        // Along the road, as `standing` faces a verge piece.
+        Math.atan2(frame.normalZ, -frame.normalX),
+        neighbour,
+      );
+    }
+  }
+}
+
+function lerp(from: number, to: number, t: number): number {
+  return from + (to - from) * t;
+}
+
+/**
+ * Where between two road frames, `lateral` out, an edge piece stands: a
+ * quarter of the way from the field's own end `field` (0 or 1) if that is
+ * still farmland, and at `field` itself if not. @see landEdgesAt
+ */
+function fieldNearestEdge(
+  land: LandClassMask,
+  before: Frame,
+  frame: Frame,
+  lateral: number,
+  field: 0 | 1,
+): number {
+  const t = field === 0 ? 0.25 : 0.75;
+  const x = lerp(before.x, frame.x, t) + lerp(before.normalX, frame.normalX, t) * lateral;
+  const z = lerp(before.z, frame.z, t) + lerp(before.normalZ, frame.normalZ, t) * lateral;
+  return land.classAt(x, z) === 'farmland' ? t : field;
+}
+
+/**
+ * The class across a farmland edge between two grid points, or `undefined`
+ * where there is none: neither or both farmland, or the other `unknown`.
+ */
+function farmlandEdge(a: LandClass, b: LandClass): LandClass | undefined {
+  if ((a === 'farmland') === (b === 'farmland')) return undefined;
+  const other = a === 'farmland' ? b : a;
+  return other === 'unknown' ? undefined : other;
 }
 
 /**

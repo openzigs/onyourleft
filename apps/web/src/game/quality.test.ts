@@ -594,8 +594,9 @@ describe('the realistic world is a ladder above the stylised one — ADR 0026 D-
 
   it('is the stylised target with the world swapped, so its cost is the world alone', () => {
     const [top] = REALISTIC_LADDER;
-    // …but the structures, #506. @see REALISTIC_STRUCTURE_ITEMS
-    expect({ ...top, world: 'stylised', label: '', structureItems: 0 }).toEqual({
+    // …but the structures, #506 (@see REALISTIC_STRUCTURE_ITEMS), and the
+    // people, #1541, which only the realistic world draws (`people.test.ts`).
+    expect({ ...top, world: 'stylised', label: '', structureItems: 0, people: 0 }).toEqual({
       ...QUALITY_LADDER[0],
       label: '',
       structureItems: 0,
@@ -728,10 +729,10 @@ describe('the extra display-rate step — the owner’s ruling, #482', () => {
 
   it('keeps D-3: the realistic rungs are stylised 0 and 1 with the world swapped, and realism goes two steps before any frame rate', () => {
     REALISTIC_LADDER.forEach((rung, level) => {
-      // The structures apart — #506 — and the texture bias — #619 — each
-      // asserted on its own.
+      // The structures apart — #506 — the texture bias — #619 — and the
+      // people — #1541 — each asserted on its own.
       expect(
-        { ...rung, world: 'stylised', label: '', structureItems: 0, textureLodBias: 0 },
+        { ...rung, world: 'stylised', label: '', structureItems: 0, textureLodBias: 0, people: 0 },
         rung.label,
       ).toEqual({
         ...QUALITY_LADDER[level],
