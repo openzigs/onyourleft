@@ -142,17 +142,6 @@ export const NIGHTLY_CHECKS: readonly NightlyCheck[] = [
       'by `realistic/route.test.ts` §"the village road".',
   },
   {
-    spec: 'realistic.browser.spec.ts',
-    describe: 'the realistic page’s countryside — #1542',
-    seconds: 'twelve more loads of the owner’s page, 1.8 min on a Mac',
-    why:
-      'the draw calls and triangles of #1542’s countryside on the owner’s page’s ' +
-      '`town=countryside`, with its three levers and without: a cost reading of a page that ' +
-      'ships in no build. The rules themselves — the planting, the field edges, the clutter ' +
-      'and each lever restoring the world before — are held in the required suite by ' +
-      '`countryside.test.ts`.',
-  },
-  {
     spec: 'reflow.browser.spec.ts',
     describe: 'the dark palette — #672, nightly since #1076',
     seconds: 'about 22 s on the EPYC 7763 (run 37131982824): six walks of every route',

@@ -3862,8 +3862,8 @@ the pinned Chromium, 24 holds 50 m apart (2026-10-24): **draw calls most 36 and 
 levers on, most 36 and mean 32.8 with all three off** (4 holds rose by 1–2 and 16 fell); triangles
 mean 137 775 on and 143 388 off. The clutter alone adds 16 000–19 000 triangles and no call; the
 planting takes more away. The scene's build in Node: 0.54 ms a frame with them, 0.51 ms without.
-The browser gate holds the most and the mean on six of those holds (`realistic.browser.spec.ts`
-§"#1542", nightly). ⚠️ None of that is the tablet: #1523 put its GPU at its ceiling, so the row
+These were read with a throwaway spec on the owner's page, not a gate: the nightly job had
+no room for twelve more loads of it (#1542's PR). ⚠️ None of that is the tablet: #1523 put its GPU at its ceiling, so the row
 below is what decides whether this stays on.
 
 | Step | What to do |
