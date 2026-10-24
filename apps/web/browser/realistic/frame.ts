@@ -22,7 +22,7 @@ import { metres, metresPerSecond, seconds, type RouteProfile } from '@onyourleft
 
 import { simulatedCrankAngle } from '../../src/game/bicycle';
 import type { SceneFrame } from '../../src/game/port';
-import type { LandClassMask } from '../../src/game/land-class';
+import type { CountrysideLever, LandClassMask } from '../../src/game/land-class';
 import type { MappedBuildings } from '../../src/game/mapped-buildings';
 import type { QualitySettings } from '../../src/game/quality';
 import type { MappedTown } from '../../src/game/settlements';
@@ -46,6 +46,8 @@ export function rideFrame(input: {
   readonly rung: Pick<QualitySettings, 'scatterItems' | 'structureItems'>;
   /** #1534's control, `levers=-settlement-clearing`: the settlements' ground left wooded. */
   readonly settlementsWooded?: boolean;
+  /** #1542's levers, `levers=-land-planting` and its two siblings: those changes off. */
+  readonly countrysideOff?: readonly CountrysideLever[];
   /**
    * #1581's `town=mixed`: the ride's corridor, its land and its planned
    * buildings, as `GameView` hands a ride's frames them.
@@ -79,6 +81,7 @@ export function rideFrame(input: {
     scatterItems: input.rung.scatterItems,
     structureItems: input.rung.structureItems,
     settlementsWooded: input.settlementsWooded,
+    countrysideOff: input.countrysideOff,
     ...(input.town === undefined
       ? {}
       : {

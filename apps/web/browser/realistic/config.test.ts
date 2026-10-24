@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   configQuery,
+  countrysideWithLevers,
   DEFAULT_CONFIG,
   firPrepassWithLevers,
   LAYERS,
@@ -67,6 +68,30 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     expect(() => parseConfig('?town=rows')).toThrow(/town is one of mixed/);
     // #1585: the Richmond street, models beside extrusions.
     expect(parseConfig('?town=richmond').town).toBe('richmond');
+    // #1542: the countryside, for its levers.
+    expect(parseConfig('?town=countryside').town).toBe('countryside');
+    expect(configQuery(parseConfig('?town=countryside&levers=-land-planting'))).toBe(
+      '?levers=-land-planting&town=countryside',
+    );
+  });
+
+  it('switches #1542’s three changes off one by one, and none unless asked', () => {
+    expect(countrysideWithLevers(parseConfig('').leversOff)).toEqual([]);
+    expect(countrysideWithLevers(parseConfig('?levers=-air,-crag').leversOff)).toEqual([]);
+    expect(countrysideWithLevers(parseConfig('?levers=-land-planting').leversOff)).toEqual([
+      'planting',
+    ]);
+    expect(countrysideWithLevers(parseConfig('?levers=-land-boundaries').leversOff)).toEqual([
+      'boundaries',
+    ]);
+    expect(countrysideWithLevers(parseConfig('?levers=-ground-clutter').leversOff)).toEqual([
+      'clutter',
+    ]);
+    expect(
+      countrysideWithLevers(
+        parseConfig('?levers=-ground-clutter,-land-planting,-land-boundaries').leversOff,
+      ),
+    ).toEqual(['planting', 'boundaries', 'clutter']);
   });
 
   it('turns the route towards the sun or away from it only when asked — #702', () => {

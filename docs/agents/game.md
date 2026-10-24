@@ -793,7 +793,19 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         water, no field boundary off field ground. Absent is
                         `NO_LAND_CLASS`, today's world, item for item. Since
                         #1547 it also carries each cell's distance to
-                        built-up land, which `landform.ts` levels by
+                        built-up land, which `landform.ts` levels by.
+                        Since #1542 the countryside is read off it: a wood
+                        planted throughout with a broadleaf edge, hedgerow
+                        trees and open pasture on farmland, specimen trees
+                        in a park (`scatter.ts` §`landPlanting`); field
+                        boundaries along farmland's EDGES, not the field
+                        grid (`settlements.ts` §`landEdgesAt`); stones on
+                        pasture and a wood's floor. No new kind or shape.
+                        ⚠️ `unknown` and `other` are the procedural world,
+                        item for item, and each change has a lever
+                        (`SceneInput.countrysideOff`, the realistic page's
+                        `-land-planting`, `-land-boundaries`,
+                        `-ground-clutter`, shown on `town=countryside`)
     src/game/footprint-buildings.ts
                         each mapped footprint planned as a building (#1540):
                         P-9's placement rules, in order and counted as

@@ -364,3 +364,57 @@ test.describe('the realistic page’s village road — #1559', { tag: NIGHTLY },
     expect(village.result.lastFrame.calls).toBeGreaterThan(0);
   });
 });
+
+test.describe('the realistic page’s countryside — #1542', { tag: NIGHTLY }, () => {
+  test('draws no more calls, and fewer triangles, with the countryside read off the land than with its levers off', async ({
+    page,
+  }) => {
+    test.setTimeout(12 * REALISTIC_LOAD_BUDGET_MS);
+
+    // Six holds along `countrysideFixture`'s fields, gap, woods and park. ⚠️ A
+    // frame's calls are a call a SHAPE a level, so they follow which shapes the
+    // nearest trees happen to be and move by one or two either way from hold to
+    // hold with any change to the arrangement — on 24 holds 50 m apart
+    // (2026-10-24) 4 rose and 16 fell. What a change can be held to is the
+    // most and the mean over the ride: 36 and 31.0 with the levers on, 36 and
+    // 32.8 off. These six are a sample of those 24, read in one session.
+    const OFF = '&levers=-ground-clutter,-land-boundaries,-land-planting';
+    const on: { calls: number; triangles: number }[] = [];
+    const off: { calls: number; triangles: number }[] = [];
+    for (const at of [1_050, 1_250, 1_500, 1_650, 1_850, 2_000]) {
+      const held = `?ladder=0&panel=0&seconds=1&at=${String(at)}&town=countryside`;
+      const drawn = await ride(page, held);
+      const without = await ride(page, `${held}${OFF}`);
+      expect(drawn.result.leversOff).toEqual([]);
+      expect(without.result.leversOff).toEqual([
+        'ground-clutter',
+        'land-boundaries',
+        'land-planting',
+      ]);
+      // The rung does not move.
+      expect(without.result.rung).toBe(drawn.result.rung);
+      on.push(drawn.result.lastFrame);
+      off.push(without.result.lastFrame);
+    }
+    const most = (frames: readonly { calls: number }[]): number =>
+      Math.max(...frames.map((frame) => frame.calls));
+    const mean = (
+      frames: readonly { calls: number; triangles: number }[],
+      key: 'calls' | 'triangles',
+    ): number => frames.reduce((sum, frame) => sum + frame[key], 0) / frames.length;
+    console.log(
+      `#1542 town=countryside, six holds: draw calls ${on.map((frame) => frame.calls).join(', ')} ` +
+        `(most ${String(most(on))}, mean ${mean(on, 'calls').toFixed(2)}), triangles mean ` +
+        `${mean(on, 'triangles').toFixed(0)}; with ${OFF.slice(1)}: ` +
+        `${off.map((frame) => frame.calls).join(', ')} (most ${String(most(off))}, mean ` +
+        `${mean(off, 'calls').toFixed(2)}), triangles mean ${mean(off, 'triangles').toFixed(0)}`,
+    );
+    expect(Math.min(...on.map((frame) => frame.calls))).toBeGreaterThan(0);
+    // #1542's lane: no change may raise the frame's draw calls.
+    expect(most(on)).toBeLessThanOrEqual(most(off));
+    expect(mean(on, 'calls')).toBeLessThanOrEqual(mean(off, 'calls'));
+    // The control: the levers change what is drawn, so the pair is a pair —
+    // and what they change is fewer triangles: the pasture is open.
+    expect(mean(on, 'triangles')).toBeLessThan(mean(off, 'triangles'));
+  });
+});
