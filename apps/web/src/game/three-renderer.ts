@@ -15029,10 +15029,7 @@ export function setTreeLevels(levels: TreeLevels): void {
  * - The road's and the ground's photographic materials, swapped onto the
  *   stylised meshes, so the road stays one mesh and one draw call (#425).
  * - The environment map, prefiltered from the sky with this view's own
- *   renderer — a `PMREMGenerator` needs one, which is why this is built in the
- *   view and not at load. The generator is disposed as soon as the map exists,
- *   releasing its ping-pong target (`realistic-budget.ts`
- *   §`environmentMapBytes`).
+ *   renderer ({@link prefilteredSky}), which it is handed and owns.
  */
 class RealisticDrawing {
   readonly vegetation: RealisticVegetationBelt;
@@ -15098,7 +15095,13 @@ class RealisticDrawing {
 
   constructor(
     world: RealisticWorld,
-    renderer: WebGLRenderer,
+    /** The renderer's `capabilities.getMaxAnisotropy()`. */
+    maxAnisotropy: number,
+    /**
+     * The sky prefiltered with the view's own renderer, which this drawing
+     * owns and disposes. @see prefilteredSky
+     */
+    environment: Texture,
     fields: {
       readonly span: { value: number };
       readonly count: { value: number };
@@ -15116,7 +15119,7 @@ class RealisticDrawing {
     this.#world = world;
     this.#fields = fields;
     this.#surfaces = surfaces;
-    const anisotropy = Math.min(REALISTIC_ANISOTROPY, renderer.capabilities.getMaxAnisotropy());
+    const anisotropy = Math.min(REALISTIC_ANISOTROPY, maxAnisotropy);
     for (const texture of surfaceMapsOf(world)) texture.anisotropy = anisotropy;
     this.vegetation = new RealisticVegetationBelt(world.vegetation, treeLevels);
     this.structures = new RealisticStructureBelts(world.structures);
@@ -15137,9 +15140,7 @@ class RealisticDrawing {
     this.#casterLists = [this.vegetation.grounded, this.#structureCasters, NO_BLOB_CASTERS];
     this.#road = this.#roadMaterial();
     this.#ground = this.#groundMaterial();
-    const generator = new PMREMGenerator(renderer);
-    this.environment = generator.fromEquirectangular(world.sky.texture).texture;
-    generator.dispose();
+    this.environment = environment;
   }
 
   get road(): MeshStandardMaterial {
@@ -15388,6 +15389,43 @@ class RealisticDrawing {
     this.#ground.dispose();
     this.environment.dispose();
   }
+}
+
+/**
+ * The environment map, prefiltered from `sky` with `renderer` — a
+ * `PMREMGenerator` needs one, which is why a view builds it and not the load.
+ * The generator is disposed as soon as the map exists, releasing its
+ * ping-pong target (`realistic-budget.ts` §`environmentMapBytes`).
+ */
+function prefilteredSky(renderer: WebGLRenderer, sky: Texture): Texture {
+  const generator = new PMREMGenerator(renderer);
+  const environment = generator.fromEquirectangular(sky).texture;
+  generator.dispose();
+  return environment;
+}
+
+/**
+ * The realistic world's drawing, built from the loaded world as a view builds
+ * it — #1657 — but with no GPU: no anisotropy, and an empty map where a
+ * view's renderer would prefilter the sky. `undefined` when no world is loaded.
+ *
+ * @test-facing `realistic-textures.test.ts` runs a ride's frame through its
+ * `updateMapped`, `updateScenery` and `groundScenery`, and reads the mapped
+ * buildings' blobs back off its `grounding` mesh; a view builds its own in
+ * `#applyWorld`
+ */
+export function realisticDrawingOfLoadedWorld(): RealisticDrawing | undefined {
+  const world = realisticWorld;
+  return world === undefined
+    ? undefined
+    : new RealisticDrawing(
+        world,
+        1,
+        new DataTexture(),
+        { span: { value: 1 }, count: { value: 1 }, treeLine: { value: 0 } },
+        RIDER_KITS.rider,
+        REALISTIC_SURFACES_DRAWN,
+      );
 }
 
 /**
@@ -16900,7 +16938,8 @@ class ThreeGameView implements GameView {
       if (this.#realistic === undefined) {
         this.#realistic = new RealisticDrawing(
           loaded,
-          this.#renderer,
+          this.#renderer.capabilities.getMaxAnisotropy(),
+          prefilteredSky(this.#renderer, loaded.sky.texture),
           this.#terrain.fields,
           this.#riderKit,
           this.#surfaces,

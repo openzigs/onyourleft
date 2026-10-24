@@ -6,8 +6,10 @@
  * instance matrices and its clip planes, which are what the GPU is handed —
  * after the belts run exactly as `three-renderer.ts` §`RealisticDrawing.groundScenery`
  * runs them: the structures' casters, then the mapped belt's
- * `grounded`, in one `update`. What needs a GPU (the lever reaching the
- * owner's page) is `realistic.browser.spec.ts` §"#1657".
+ * `grounded`, in one `update`. That `groundScenery` itself hands the belt
+ * that list is `realistic-textures.test.ts` §"#1657", on a real load of the
+ * world. What needs a GPU (the lever reaching the owner's page) is
+ * `realistic.browser.spec.ts` §"#1657".
  */
 
 import { getHeapStatistics, GCProfiler } from 'node:v8';
