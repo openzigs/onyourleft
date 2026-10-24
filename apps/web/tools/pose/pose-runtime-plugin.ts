@@ -4,7 +4,7 @@
  * **The pose model's WebAssembly runtime, served from this app's own origin**
  * — [#530](https://github.com/openzigs/onyourleft/issues/530).
  *
- * `@mediapipe/tasks-vision` ships its runtime as an 11 MB `.wasm` beside its
+ * `@mediapipe/tasks-vision` ships its runtime as a 13.5 MB `.wasm` beside its
  * JavaScript, and MediaPipe's own guide points `FilesetResolver` at a CDN for
  * it. Spike 0010 §7 forbids that: the runtime is served from the app's own
  * origin or not at all. So this plugin copies the ONE file the pose worker

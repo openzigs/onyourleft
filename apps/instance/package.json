@@ -33,7 +33,7 @@
     "@types/ws": "8.18.2",
     "rolldown": "1.2.13",
     "typescript": "6.0.3",
-    "vitest": "4.1.11",
+    "vitest": "4.1.12",
     "workerd": "1.20261010.1"
   }
 }

@@ -18,7 +18,7 @@ scripts/check-third-party-notices.mjs. Do not edit it by hand.
 Part 1 — in the app (73 packages)
   @capacitor-community/bluetooth-le 8.3.0 — MIT
   @capacitor/android 8.5.2 — MIT
-  @capacitor/core 8.5.2 — MIT
+  @capacitor/core 8.5.3 — MIT
   @mapbox/jsonlint-lines-primitives 2.0.3 — MIT
   @mapbox/point-geometry 1.1.0 — ISC
   @mapbox/tiny-sdf 2.2.0 — BSD-2-Clause
@@ -28,7 +28,7 @@ Part 1 — in the app (73 packages)
   @maplibre/maplibre-gl-style-spec 26.4.4 — ISC
   @maplibre/mlt 1.3.0 — (MIT OR Apache-2.0)
   @maplibre/vt-pbf 4.3.2 — MIT
-  @mediapipe/tasks-vision 1.0.1 — Apache-2.0
+  @mediapipe/tasks-vision 1.1.1 — Apache-2.0
   @radix-ui/primitive 1.1.7 — MIT
   @radix-ui/react-alert-dialog 1.1.24 — MIT
   @radix-ui/react-compose-refs 1.1.5 — MIT
@@ -57,7 +57,7 @@ Part 1 — in the app (73 packages)
   dexie 4.4.6 — Apache-2.0
   earcut 3.2.4 — ISC
   fflate 0.8.3 — MIT
-  framer-motion 14.0.0 — MIT
+  framer-motion 14.3.0 — MIT
   get-nonce 1.0.1 — MIT
   gl-matrix 3.4.4 — MIT
   json-stringify-pretty-compact 4.0.0 — MIT
@@ -66,17 +66,17 @@ Part 1 — in the app (73 packages)
   lucide-react 1.52.0 — ISC
   maplibre-gl 6.12.0 — BSD-3-Clause
   minimist 1.2.8 — MIT
-  motion 14.0.0 — MIT
-  motion-dom 14.0.0 — MIT
-  motion-utils 14.0.0 — MIT
+  motion 14.3.0 — MIT
+  motion-dom 14.3.0 — MIT
+  motion-utils 14.1.1 — MIT
   murmurhash-js 1.0.0 — MIT
   pbf 5.1.2 — BSD-3-Clause
   pmtiles 4.5.0 — BSD-3-Clause
   potpack 2.1.0 — ISC
   protocol-buffers-schema 3.6.1 — MIT
   quickselect 3.0.0 — ISC
-  react 19.3.0 — MIT
-  react-dom 19.3.0 — MIT
+  react 19.3.1 — MIT
+  react-dom 19.3.1 — MIT
   react-remove-scroll 2.7.2 — MIT
   react-remove-scroll-bar 2.3.8 — MIT
   react-style-singleton 2.2.3 — MIT
@@ -148,7 +148,7 @@ Part 2 — in the Android app only (50 libraries)
   :capacitor-cordova-android-plugins — Written by `cap sync` and holding no Cordova plugin, because this app uses none. It contributes no third-party code of its own; the Cordova framework it depends on is listed above.
 
 Part 3 — files copied out of a package into the build
-  pose/vision_wasm_module_internal.wasm — from @mediapipe/tasks-vision 1.0.1 (apps/web/tools/pose/pose-runtime-plugin.ts)
+  pose/vision_wasm_module_internal.wasm — from @mediapipe/tasks-vision 1.1.1 (apps/web/tools/pose/pose-runtime-plugin.ts)
   realistic/basis/basis_transcoder.js — from three 0.185.1 (apps/web/tools/basis/transcoder-plugin.ts); it is Basis Universal transcoder 1.50, vendored there — Apache-2.0 AND BSD-3-Clause
   realistic/basis/basis_transcoder.wasm — from three 0.185.1 (apps/web/tools/basis/transcoder-plugin.ts); it is Basis Universal transcoder 1.50, vendored there — Apache-2.0 AND BSD-3-Clause
 
@@ -158,7 +158,7 @@ Part 3 — files copied out of a package into the build
 
 Part 4 — code the build tools write into the app
   vite 8.3.2 — MIT: its module-preload polyfill and its __vitePreload helper, in the entry chunk
-  rolldown 1.2.12 — MIT: its CommonJS-interop runtime (the __commonJS, __toESM and __export helpers), in the assets/rolldown-runtime-*.js chunk
+  rolldown 1.2.13 — MIT: its CommonJS-interop runtime (the __commonJS, __toESM and __export helpers), in the assets/rolldown-runtime-*.js chunk
 
 Part 5 — fonts committed in the source repository and served by the app
   Barlow 1.408 — OFL-1.1: apps/web/src/design/fonts/barlow-latin-700.woff2, apps/web/src/design/fonts/barlow-latin-800.woff2 (apps/web/tools/fonts/subset-fonts.ts)
@@ -225,7 +225,7 @@ SOFTWARE.
 
 ========================================================================
 Name: @capacitor/core
-Version: 8.5.2
+Version: 8.5.3
 Licence: MIT
 Part: app
 
@@ -875,7 +875,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ========================================================================
 Name: @mediapipe/tasks-vision
-Version: 1.0.1
+Version: 1.1.1
 Licence: Apache-2.0
 Part: app
 
@@ -1934,7 +1934,7 @@ SOFTWARE.
 
 ========================================================================
 Name: framer-motion
-Version: 14.0.0
+Version: 14.3.0
 Licence: MIT
 Part: app
 
@@ -2490,7 +2490,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ========================================================================
 Name: motion
-Version: 14.0.0
+Version: 14.3.0
 Licence: MIT
 Part: app
 
@@ -2520,7 +2520,7 @@ SOFTWARE.
 
 ========================================================================
 Name: motion-dom
-Version: 14.0.0
+Version: 14.3.0
 Licence: MIT
 Part: app
 
@@ -2550,7 +2550,7 @@ SOFTWARE.
 
 ========================================================================
 Name: motion-utils
-Version: 14.0.0
+Version: 14.1.1
 Licence: MIT
 Part: app
 
@@ -2740,7 +2740,7 @@ THIS SOFTWARE.
 
 ========================================================================
 Name: react
-Version: 19.3.0
+Version: 19.3.1
 Licence: MIT
 Part: app
 
@@ -2770,7 +2770,7 @@ SOFTWARE.
 
 ========================================================================
 Name: react-dom
-Version: 19.3.0
+Version: 19.3.1
 Licence: MIT
 Part: app
 
@@ -3364,7 +3364,7 @@ SOFTWARE.
 
 ========================================================================
 Name: rolldown
-Version: 1.2.12
+Version: 1.2.13
 Licence: MIT
 Part: bundler
 
