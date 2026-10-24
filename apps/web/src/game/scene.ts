@@ -266,7 +266,7 @@ export interface SceneInput {
    * Absent, or 0, places nobody.
    *
    * ⚠️ **Optional the UNSAFE way round**, which `check-wiring.mjs` §Limits
-   * names: a ride that forgot it draws no people. `GameView.test.tsx` §"#1541"
+   * names: a ride that forgot it draws no people. `realistic-choice.test.tsx` §"#1541"
    * reads it back off the frame the renderer was handed, as it reads
    * `crankAngle`; the owner's page passes it in `browser/realistic/frame.ts`.
    */

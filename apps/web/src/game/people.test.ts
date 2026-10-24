@@ -10,7 +10,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { metres, seconds } from '@onyourleft/domain';
-import type { PathFeature } from '@onyourleft/map-features';
+import type { LandUseFeature, PathFeature } from '@onyourleft/map-features';
 
 import { STRIDE_PER_HEIGHT } from './gait';
 import {
@@ -23,6 +23,7 @@ import {
   PERSON_CLEARANCE_METRES,
   PERSON_HALF_WIDTH_METRES,
   RUNNER_SHARE,
+  footwayWalks,
   streetWalks,
   peopleAt,
   personLook,
@@ -32,6 +33,7 @@ import {
   type RoadDistance,
   type WalkLine,
 } from './people';
+import { NO_LAND_CLASS, type LandClass, type LandClassMask } from './land-class';
 import { QUALITY_LADDER, REALISTIC_LADDER } from './quality';
 import { distanceToDrawnRoad } from './road-grid';
 import { northRoute } from './route-fixtures-testing';
@@ -221,8 +223,10 @@ describe('where each person is at a second of the ride — #1541', () => {
     );
     const placed = peopleAt(
       dipping,
-      options({ z: 20, road: (x, z) => (z > 15 && z < 25 ? 3 : Math.abs(x)) }),
+      // 3.5 m: off the carriageway, but inside the 3.8 m a person keeps.
+      options({ z: 20, road: (x, z) => (z > 15 && z < 25 ? 3.5 : Math.abs(x)) }),
     );
+    expect(placed.near.length).toBeGreaterThan(0);
     for (const person of placed.near) expect(person.z <= 15 || person.z >= 25).toBe(true);
   });
 });
@@ -354,5 +358,110 @@ describe('people in a ride’s frame — #1541, through `sceneFrame`', () => {
     }
     expect(ruled).toBeGreaterThan(0);
     expect(over).toBeGreaterThan(0);
+  });
+});
+
+describe('the mapped footways, by the land they cross — #1541, through `footwayWalks`', () => {
+  const ROUTE = northRoute(6_000, () => 40);
+  const ORIGIN = corridorOrigin(ROUTE);
+  const SPOTS = { park: 1_000, commercial: 2_500, residential: 4_000, field: 5_500 } as const;
+  type Spot = keyof typeof SPOTS;
+  const SPOT_NAMES = Object.keys(SPOTS) as Spot[];
+
+  const centreOf = (spot: Spot): { x: number; z: number } => {
+    const road = drawnRoadFrame(ROUTE, ORIGIN, SPOTS[spot]);
+    if (road === undefined) throw new Error('no road');
+    return { x: road.x, z: road.z };
+  };
+  const nearestSpot = (x: number, z: number): Spot =>
+    SPOT_NAMES.reduce((best, spot) => {
+      const a = centreOf(spot);
+      const b = centreOf(best);
+      return Math.hypot(x - a.x, z - a.z) < Math.hypot(x - b.x, z - b.z) ? spot : best;
+    });
+  const classes: Record<Spot, LandClass> = {
+    park: 'park',
+    commercial: 'built-up',
+    residential: 'built-up',
+    field: 'farmland',
+  };
+  const land: LandClassMask = {
+    ...NO_LAND_CLASS,
+    classAt: (x, z) => classes[nearestSpot(x, z)],
+    covered: () => true,
+  };
+
+  const sideLine = (spot: Spot): Float32Array => {
+    const points: number[] = [];
+    for (let at = SPOTS[spot] - 150; at <= SPOTS[spot] + 150; at += 10) {
+      const road = drawnRoadFrame(ROUTE, ORIGIN, at);
+      if (road === undefined) continue;
+      points.push(road.x + road.normalX * 6, road.z + road.normalZ * 6);
+    }
+    return Float32Array.from(points);
+  };
+  const c = centreOf('commercial');
+  const half = 400;
+  const commercial: LandUseFeature = {
+    layer: 'landuse',
+    kind: 'commercial',
+    rings: [
+      Float32Array.from([
+        c.x - half,
+        c.z - half,
+        c.x + half,
+        c.z - half,
+        c.x + half,
+        c.z + half,
+        c.x - half,
+        c.z + half,
+      ]),
+    ],
+  };
+  const corridor: WorldCorridor = {
+    routeId: 'people-footway-fixture',
+    origin: ORIGIN,
+    covered: () => true,
+    coveredBoxes: [],
+    landUse: [commercial],
+    buildings: [],
+    paths: SPOT_NAMES.map((spot): PathFeature => ({
+      kind: 'path',
+      kindDetail: 'sidewalk',
+      line: sideLine(spot),
+    })),
+    streets: [],
+  };
+
+  const walks = footwayWalks(corridor, ROUTE, ORIGIN, land);
+  const at = (spot: Spot): { kinds: Set<string>; people: number; length: number } => {
+    const lines = walks.filter((line) => {
+      const middle = Math.floor(line.points.length / 6) * 3;
+      return nearestSpot(line.points[middle] as number, line.points[middle + 2] as number) === spot;
+    });
+    return {
+      kinds: new Set(lines.map((line) => line.kind)),
+      people: lines.reduce((sum, line) => sum + line.people, 0),
+      length: lines.reduce((sum, line) => sum + line.length, 0),
+    };
+  };
+
+  it('sends runners to the mapped paths of a park, and leaves a sidewalk elsewhere a sidewalk', () => {
+    expect([...at('park').kinds]).toEqual(['park']);
+    for (const spot of ['commercial', 'residential', 'field'] as const) {
+      expect([...at(spot).kinds]).toEqual(['sidewalk']);
+    }
+  });
+
+  it('carries each line’s people by its land: commercial, built-up, park, then anywhere else', () => {
+    const within = (spot: Spot, density: number): void => {
+      const found = at(spot);
+      expect(found.length).toBeGreaterThan(200);
+      expect(Math.abs(found.people / found.length - density)).toBeLessThan(0.006);
+    };
+    within('commercial', PEOPLE_PER_METRE.commercial);
+    within('residential', PEOPLE_PER_METRE['built-up']);
+    within('park', PEOPLE_PER_METRE.park);
+    within('field', PEOPLE_PER_METRE.elsewhere);
   });
 });
