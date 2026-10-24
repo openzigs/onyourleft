@@ -240,6 +240,12 @@ jobs:
       #   build -- a green typecheck is not a green build: the bundler resolves
       #   imports the typechecker only reads types from.
       #
+      #   demo build -- #1645. The demo's own build (vite.demo.config.ts), whose
+      #   plugins are its guarantees: it fails if its bundle holds a trainer,
+      #   Bluetooth, network or storage module, if its page's policy cannot
+      #   allow its inline script by hash, or if it writes a service worker or
+      #   a manifest. Not part of `build`, so a rider's build never waits on it.
+      #
       #   check-shard-results.test.sh -- #1285. The suite of the script the
       #   `rules` job at the bottom of this file runs: the required check's
       #   whole verdict. Its cases are the passes that job must not give --
@@ -301,6 +307,7 @@ jobs:
           'dependency licence checker tests' 'bash scripts/check-dependency-licences.test.sh'
           'dependency licences' 'pnpm run check:licences'
           'build' 'pnpm run build'
+          'demo build' 'pnpm --filter @onyourleft/web run build:demo'
           'instance image' 'bash scripts/check-instance-image.sh'
           'instance image checker tests' 'bash scripts/check-instance-image.test.sh'
           'mirror script tests' 'bash scripts/mirror-base-image.test.sh'

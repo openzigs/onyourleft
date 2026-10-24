@@ -47,8 +47,8 @@ function asset(fileName: string, ...originalFileNames: string[]): BuiltAsset {
 }
 
 /** The plugin's hook, run against a bundle of the shape Rolldown hands it. */
-function runPlugin(bundle: Record<string, unknown>): void {
-  const plugin = copiedIntoBuild(WEB_ROOT);
+function runPlugin(bundle: Record<string, unknown>, reportStale = true): void {
+  const plugin = copiedIntoBuild(WEB_ROOT, { reportStale });
   const hook = plugin.generateBundle as unknown as (
     this: { error: (message: string) => never },
     options: unknown,
@@ -224,5 +224,44 @@ describe('code a package vendors from somebody else is named in the notices — 
     }).toThrow(
       /ktx-parse\.module\.js is in .* §vendoredIntoBundle and the build did not bundle it/,
     );
+  });
+});
+
+describe('the demo build reports what it copies unnamed, and not what it leaves out — #1645', () => {
+  it('lets through a build that writes only the transcoder and bundles no renderer', () => {
+    expect(() => {
+      runPlugin({ ...TRANSCODER }, false);
+    }).not.toThrow();
+  });
+
+  it('still fails a package’s binary the list does not name', () => {
+    expect(() => {
+      runPlugin(
+        {
+          ...TRANSCODER,
+          'assets/basis_transcoder-abc.wasm': {
+            type: 'asset',
+            fileName: 'assets/basis_transcoder-abc.wasm',
+            originalFileNames: [],
+          },
+        },
+        false,
+      );
+    }).toThrow(/assets\/basis_transcoder-abc\.wasm is written out of a package/);
+  });
+
+  it('still fails a vendored module the list does not name', () => {
+    expect(() => {
+      runPlugin(
+        {
+          'assets/demo-abc.js': {
+            type: 'chunk',
+            fileName: 'assets/demo-abc.js',
+            modules: { [`${THREE}examples/jsm/libs/fflate.module.js`]: {} },
+          },
+        },
+        false,
+      );
+    }).toThrow(/three\/examples\/jsm\/libs\/fflate\.module\.js is somebody else's code/);
   });
 });

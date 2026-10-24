@@ -22,6 +22,7 @@ import { build, defineConfig, type Plugin } from 'vite';
 
 import { POSE_DIRECTORY, POSE_WORKER_CHUNK } from './src/camera/pose-files';
 import { lazyViewsStayLazy } from './tools/bundle/entry-graph';
+import { demoStaysOut } from './tools/demo/demo-stays-out';
 import { onlyImportedIcons } from './tools/bundle/icon-modules';
 import { copiedIntoBuild } from './tools/notices/copied-into-build';
 import { basisTranscoder } from './tools/basis/transcoder-plugin';
@@ -201,6 +202,8 @@ export default defineConfig({
     lazyViewsStayLazy(ROOT),
     // #673, ADR 0034 D-2: the Lucide icons that ship are the ones the source names.
     onlyImportedIcons(),
+    // #1645: nothing of the demo (`vite.demo.config.ts`) is in what riders download.
+    demoStaysOut(ROOT),
   ],
   worker: {
     rolldownOptions: {
