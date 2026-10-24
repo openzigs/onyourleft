@@ -153,7 +153,11 @@ export function porchSpanOf(
     const behind = towards === 1 ? room.left : room.right;
     const ahead = towards === 1 ? room.right : room.left;
     const w = Math.min(width, 4 * behind, (4 * ahead) / 3);
-    if (w / 2 - post < STEP_OPENING) return undefined;
+    // #1601: the bay is `w / 2` between the posts' middles, but the end post
+    // stands a whole breadth inside it and the middle post half of one, so
+    // the steps, centred on the door, are nearer the end post: each side of
+    // the door keeps half the opening from the post's face, as four do.
+    if (w / 4 - post < STEP_OPENING / 2) return undefined;
     const ends = [-w / 4, (3 * w) / 4].map((at) => at * towards).sort((p, q) => p - q) as [
       number,
       number,

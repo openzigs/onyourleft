@@ -2201,7 +2201,7 @@ export interface PorchSite {
   readonly groundAt: (a: number, n: number) => number;
   /** The lowest drawn ground under the house, which the deck's skirt reaches below. */
   readonly lowest: number;
-  /** Whether a ring of `(a, n)` corners in the porch's frame is clear of the road and every footprint. */
+  /** Whether a ring of `(a, n)` corners in the porch's frame is clear of the road, every footprint, and every porch and driveway placed. */
   readonly clear: (corners: readonly (readonly [number, number])[]) => boolean;
 }
 
@@ -2215,18 +2215,36 @@ export interface PorchDraws {
 }
 
 /**
+ * The ground a front porch takes — #1589: its deck, its roof's overhang and
+ * its steps, as `(a, n)` corners in its frame, from just off the wall.
+ */
+export function porchRingOf(
+  spec: Pick<PorchSpec, 'from' | 'to' | 'depth' | 'steps'>,
+): readonly (readonly [number, number])[] {
+  const { overhang } = FRONT_PORCH;
+  const reach = porchReachOf(spec);
+  return [
+    [spec.from - overhang, 0.05],
+    [spec.to + overhang, 0.05],
+    [spec.to + overhang, reach],
+    [spec.from - overhang, reach],
+  ];
+}
+
+/**
  * A house's front porch, or none — #1589. Its span along the wall
  * (`porch.ts` §`porchSpanOf`) keeps {@link FRONT_PORCH}'s `endMargin` from
  * either end and from a garage's bay. Its depth is seeded and **shortened**
  * by `shorten` at a time while the porch, its roof's overhang and its steps
- * would come within the road's clearance or onto any footprint
- * (`site.clear`), and the porch is **dropped** where even `leastDepth`
+ * would come within the road's clearance, onto any footprint, or (#1601)
+ * onto a porch or a driveway already placed (`site.clear`, its ring
+ * {@link porchRingOf}), and the porch is **dropped** where even `leastDepth`
  * would. It is dropped too where its roof cannot be tied under the eaves
  * with headroom under its header (`porchPitchOf`), or the ground is too far
  * below its deck for three steps (`porchStepsOf`).
  */
 export function frontPorchOf(site: PorchSite, draws: PorchDraws): PorchSpec | undefined {
-  const { endMargin, overhang, width, depth: depthRange, shorten, leastDepth } = FRONT_PORCH;
+  const { endMargin, width, depth: depthRange, shorten, leastDepth } = FRONT_PORCH;
   let left = site.length / 2 - endMargin;
   let right = site.length / 2 - endMargin;
   if (site.garage !== undefined) {
@@ -2250,14 +2268,7 @@ export function frontPorchOf(site: PorchSite, draws: PorchDraws): PorchSpec | un
     const foot = site.groundAt(stepsAt, depth + 2 * FRONT_PORCH.step.tread);
     const steps = porchStepsOf(site.floor - foot);
     if (steps === undefined) return undefined;
-    const reach = porchReachOf({ depth, steps });
-    const ring = [
-      [span.from - overhang, 0.05],
-      [span.to + overhang, 0.05],
-      [span.to + overhang, reach],
-      [span.from - overhang, reach],
-    ] as const;
-    if (!site.clear(ring)) continue;
+    if (!site.clear(porchRingOf({ ...span, depth, steps }))) continue;
     const hip = draws.roof < FRONT_PORCH.hipShare && hipFits(span.to - span.from, depth);
     const roof = hip ? 'hip' : 'shed';
     const pitchDegrees = porchPitchOf(
@@ -2478,33 +2489,38 @@ const RING_CELL_METRES = 32;
 
 /**
  * Every footprint of a corridor in a grid — #1588, so a driveway can be kept
- * off every other building, planned or not.
+ * off every other building, planned or not. Since #1601 also every porch and
+ * driveway placed so far, {@link RingGrid.add}ed as each plan is made.
  */
 export class RingGrid {
-  readonly #rings: readonly Ring[];
+  readonly #rings: Ring[] = [];
   readonly #cells = new Map<number, number[]>();
 
   constructor(rings: readonly Ring[]) {
-    this.#rings = rings;
-    rings.forEach((ring, index) => {
-      const [minX, maxX, minZ, maxZ] = boundsOf(ring);
+    for (const ring of rings) this.add(ring);
+  }
+
+  /** Adds `ring`, as the next index. */
+  add(ring: Ring): void {
+    const index = this.#rings.length;
+    this.#rings.push(ring);
+    const [minX, maxX, minZ, maxZ] = boundsOf(ring);
+    for (
+      let ix = Math.floor(minX / RING_CELL_METRES);
+      ix <= Math.floor(maxX / RING_CELL_METRES);
+      ix += 1
+    ) {
       for (
-        let ix = Math.floor(minX / RING_CELL_METRES);
-        ix <= Math.floor(maxX / RING_CELL_METRES);
-        ix += 1
+        let iz = Math.floor(minZ / RING_CELL_METRES);
+        iz <= Math.floor(maxZ / RING_CELL_METRES);
+        iz += 1
       ) {
-        for (
-          let iz = Math.floor(minZ / RING_CELL_METRES);
-          iz <= Math.floor(maxZ / RING_CELL_METRES);
-          iz += 1
-        ) {
-          const key = (ix + 0x8000) * 0x1_0000 + (iz + 0x8000);
-          const list = this.#cells.get(key);
-          if (list === undefined) this.#cells.set(key, [index]);
-          else list.push(index);
-        }
+        const key = (ix + 0x8000) * 0x1_0000 + (iz + 0x8000);
+        const list = this.#cells.get(key);
+        if (list === undefined) this.#cells.set(key, [index]);
+        else list.push(index);
       }
-    });
+    }
   }
 
   /** Whether `quad` (four corners) meets any ring but the `own`th. */
@@ -2645,10 +2661,16 @@ export function footprintPlans(
   const others = new RingGrid(
     corridor.buildings.map((building) => building.rings[0] ?? new Float32Array(0)),
   );
+  // #1601: every porch and driveway placed so far, so a porch keeps off a
+  // neighbour's porch and drive, and a driveway off a neighbour's porch.
+  const porches = new RingGrid([]);
+  const driveways = new RingGrid([]);
   for (const [index, building] of corridor.buildings.entries()) {
     const planned = planFootprint(building, corridor, land, profile, origin, seed, maxVertices, {
       grid: others,
       own: index,
+      porches,
+      driveways,
     });
     if (typeof planned === 'string') {
       counts[planned] += 1;
@@ -2877,14 +2899,22 @@ const DRIVEWAY_CHECK_METRES = 0.05;
  * with its driveway straight out from the wall to {@link DRIVEWAY}'s `short`
  * of the carriageway's edge, measured at the nearer of its far corners; or
  * none, where the wall does not face the road within {@link DRIVEWAY}'s
- * `longest`, or the driveway would cross any other footprint or its own.
+ * `longest`, or the driveway would cross any other footprint or its own, or
+ * (#1601) a porch already placed in `others.porches`.
  */
 export function garageOf(
   front: { readonly length: number; readonly bays: number; readonly bay: number },
   frame: EdgeFrame,
   road: DrawnRoadPoints,
   segments: readonly number[],
-  own: { readonly ring: Ring; readonly others: { readonly grid: RingGrid; readonly own: number } },
+  own: {
+    readonly ring: Ring;
+    readonly others: {
+      readonly grid: RingGrid;
+      readonly own: number;
+      readonly porches?: RingGrid;
+    };
+  },
   groundAt: (x: number, z: number) => number,
 ): Garage | undefined {
   const { length, bays, bay } = front;
@@ -2932,7 +2962,11 @@ export function garageOf(
     z: z + frame.nz * DRIVEWAY_CHECK_METRES,
     length: t - DRIVEWAY_CHECK_METRES,
   });
-  if (own.others.grid.meets(checked, own.others.own) || ringsMeet(checked, own.ring)) {
+  if (
+    own.others.grid.meets(checked, own.others.own) ||
+    ringsMeet(checked, own.ring) ||
+    own.others.porches?.meets(checked, -1) === true
+  ) {
     return undefined;
   }
   return { bay, along, width: bayWidth, ground: groundAt(x, z), plan };
@@ -3036,7 +3070,12 @@ function planFootprint(
   origin: CorridorOrigin,
   seed: number,
   maxVertices: number,
-  others: { readonly grid: RingGrid; readonly own: number },
+  others: {
+    readonly grid: RingGrid;
+    readonly own: number;
+    readonly porches: RingGrid;
+    readonly driveways: RingGrid;
+  },
 ): FootprintPlan | Exclude<FootprintVerdict, 'kept'> {
   const outer = building.rings[0];
   if (outer === undefined || outer.length < 6) return 'too-small';
@@ -3224,7 +3263,9 @@ function planFootprint(
             return (
               (awningSegments.length === 0 ||
                 ringToRoad(ring, near, awningSegments) >= ROAD_CLEARANCE_METRES) &&
-              !others.grid.meets(ring, others.own)
+              !others.grid.meets(ring, others.own) &&
+              // #1601: nor through the building's own wing, past a reflex corner.
+              !ringsMeet(ring, drawn)
             );
           },
           {
@@ -3258,6 +3299,16 @@ function planFootprint(
       porchSegments.length === 0 || ringToRoad(ring, near, porchSegments) >= ROAD_CLEARANCE_METRES
     );
   };
+  // #1589: a front porch's or its ring's `(a, n)` corners in the front's frame, in the world.
+  const onFront = (corners: readonly (readonly [number, number])[]): Ring =>
+    frontFrame === undefined
+      ? NO_RING
+      : Float32Array.from(
+          corners.flatMap(([a, n]) => [
+            frontFrame.mx + frontFrame.ex * a + frontFrame.nx * n,
+            frontFrame.mz + frontFrame.ez * a + frontFrame.nz * n,
+          ]),
+        );
   // #1589: a front porch round the door, where it fits; it replaces the canopy.
   const frontPorchSpec =
     front !== undefined &&
@@ -3279,14 +3330,14 @@ function planFootprint(
                 frontFrame.mz + frontFrame.ez * a + frontFrame.nz * n,
               ),
             clear: (corners) => {
-              const ring = Float32Array.from(
-                corners.flatMap(([a, n]) => [
-                  frontFrame.mx + frontFrame.ex * a + frontFrame.nx * n,
-                  frontFrame.mz + frontFrame.ez * a + frontFrame.nz * n,
-                ]),
-              );
+              const ring = onFront(corners);
               return (
-                clearOfRoad(ring) && !others.grid.meets(ring, others.own) && !ringsMeet(ring, drawn)
+                clearOfRoad(ring) &&
+                !others.grid.meets(ring, others.own) &&
+                !ringsMeet(ring, drawn) &&
+                // #1601: and off every porch and driveway placed before it.
+                !others.porches.meets(ring, -1) &&
+                !others.driveways.meets(ring, -1)
               );
             },
           },
@@ -3492,6 +3543,10 @@ function planFootprint(
   const roofSurface = shingled ? SHINGLE_SURFACE : roofSurfaceOf(roof, share(STREAM_ROOF));
   const triangleCount =
     FOOTPRINT_ROLES.reduce((sum, role) => sum + trianglesOf(writing[role]), 0) + porchCount;
+  const driveway = drew.garage && garage !== undefined ? drivewayRing(garage.plan) : NO_RING;
+  // #1601: placed, so the plans after this one keep off them.
+  if (frontPorchSpec !== undefined) others.porches.add(onFront(porchRingOf(frontPorchSpec)));
+  if (driveway.length > 0) others.driveways.add(driveway);
   return {
     centroid,
     footprint: Float32Array.from(drawn),
@@ -3513,7 +3568,7 @@ function planFootprint(
       door: seededEntry(share(STREAM_PAINT_DOOR), DOOR_PAINTS.length),
     },
     garage: drew.garage,
-    driveway: drew.garage && garage !== undefined ? drivewayRing(garage.plan) : NO_RING,
+    driveway,
     dormers: drew.dormers,
     shop: {
       front: shop !== undefined,
