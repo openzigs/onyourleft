@@ -390,6 +390,35 @@ describe('the shader’s reveal — #1659', () => {
     expect(fragment).not.toContain('oylRevealJamb');
   });
 
+  it('lights a side by the sun’s facing, and darkens one facing away, at every site that draws a side', () => {
+    const { fragment } = compiled();
+    // The side the eye's ray met is lit by the sun when it faces it, and the
+    // reveal lever's empty program says `lit = 1.0` — so the on program must not.
+    expect(fragment).toContain(
+      'float oylFacing = mix(sign(oylShift.y) * s.y, sign(oylShift.x) * s.x, oylJambSide);',
+    );
+    expect(fragment).toContain('lit = step(0.0001, oylFacing) * oylFront;');
+    // The sash, the commercial window and the dormer/shopfront sash each take
+    // the wall's light on a lit side and REVEAL.shade on one facing away.
+    expect(fragment.split('(1.0 - oylRevealShade * (1.0 - oylSideLit))').length - 1).toBe(3);
+  });
+
+  it('shadows the glass under the head and the sun-side jamb, and the wall under the sill', () => {
+    const { fragment } = compiled();
+    expect(fragment).toContain('shade = oylFront * max(oylUnderHead, oylByJamb);');
+    // The casement's and the commercial window's glass (the sash's is its `reveal`).
+    expect(fragment).toContain('oylPane * (1.0 - oylRevealShade * oylShadeOn)');
+    expect(fragment.split('* (1.0 - oylRevealShade * oylRevealOn)').length - 1).toBe(2);
+    // The sill's shadow on the wall, at the sash, the casement and the dormer.
+    expect(fragment.split('(1.0 - oylRevealShade * oylSillShade)').length - 1).toBe(3);
+    // And the lever's empty program has none of it.
+    windowRevealsOf({} as never, false);
+    const off = compiled().fragment;
+    windowRevealsOf({} as never, true);
+    expect(off).not.toContain('oylUnderHead');
+    expect(off).not.toContain('oylFacing');
+  });
+
   it('builds the program without the term with `-window-reveals`, and with it otherwise', () => {
     const on = compiled();
     expect(on.fragment).toContain('vec2 oylShift = oylRecess * e.xy / max(e.z, oylGraze);');
