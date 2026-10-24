@@ -562,15 +562,21 @@ describe('#1542 the owner’s ruling of 2026-10-24: a low, broken roadside', () 
     }
   });
 
-  it('leaves gaps inside a hedged stretch, one height a stretch', () => {
+  it('makes each stretch open verge, fence, or one low hedge with gaps in it', () => {
     let gaps = 0;
     let hedged = 0;
+    let open = 0;
+    let fenced = 0;
+    let stretches = 0;
     for (let field = 0; field < 200; field += 1) {
       for (const side of [1, -1] as const) {
         // A full stretch, no gate in it.
         const stretch = [0, 1, 2].map((index) =>
           roadsidePiece(SEED, field, side, index, 12, BOUNDARY_PIECE_METRES, -1),
         );
+        stretches += 1;
+        if (stretch.every((each) => each === undefined)) open += 1;
+        if (stretch.every((each) => each?.kind === 'fence' && each.scale === 1)) fenced += 1;
         const hedges = stretch.filter((each) => each?.kind === 'hedge');
         if (hedges.length === 0) continue;
         hedged += 1;
@@ -578,6 +584,11 @@ describe('#1542 the owner’s ruling of 2026-10-24: a low, broken roadside', () 
         expect(new Set(hedges.map((each) => each?.scale)).size).toBe(1);
       }
     }
+    // About 0.15 open (a hedged stretch with all three left out is 0.003).
+    expect(open / stretches).toBeGreaterThan(0.08);
+    expect(open / stretches).toBeLessThan(0.25);
+    expect(fenced / stretches).toBeGreaterThan(0.1);
+    expect(fenced / stretches).toBeLessThan(0.3);
     expect(hedged).toBeGreaterThan(100);
     // About 1 − 0.85³ of hedged stretches have a gap.
     expect(gaps / hedged).toBeGreaterThan(0.2);
