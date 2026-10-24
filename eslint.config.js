@@ -1081,6 +1081,35 @@ export default tseslint.config(
     ]),
   },
 
+  // --- The demo riders are deterministic: time arrives as a parameter --------
+  // #1646. `apps/web/src/demo/` rides authored scripts through the physics
+  // tick, and `runner.test.ts` pins a SHA-256 digest of each preset's series:
+  // the video export (#1655) and the browser gate (#1648) need a preset to be
+  // the same ride every time. A clock or a random number here breaks that, so
+  // both are refused, as `packages/physics` refuses `Date`.
+  {
+    files: ['apps/web/src/demo/**/*.ts'],
+    rules: {
+      'no-restricted-globals': [
+        'error',
+        ...['Date', 'performance'].map((name) => ({
+          name,
+          message:
+            'src/demo/ reads no clock (#1646): ride time arrives as a parameter, so a preset is the same ride every time.',
+        })),
+      ],
+      'no-restricted-properties': [
+        'error',
+        {
+          object: 'Math',
+          property: 'random',
+          message:
+            'src/demo/ is deterministic (#1646): every number in a demo ride is authored, never drawn.',
+        },
+      ],
+    },
+  },
+
   // --- The announcer's core is pure: time arrives as a parameter -------------
   // #396. `apps/web/src/game/hud/announce.ts` decides whether a rider hears a
   // sentence, and its whole test suite drives it with a fake clock — which is
