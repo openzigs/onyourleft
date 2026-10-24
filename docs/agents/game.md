@@ -918,7 +918,11 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         §`PeopleBelt` bakes and draws them, realistic top rung
                         only (`QualitySettings.people`), in two calls.
                         `levers=-people` on the owner's page is the tablet's
-                        cost pair (validation 0002 Part AJ)
+                        cost pair (validation 0002 Part AJ). ⚠️ The bodies'
+                        geometry carries a `normal` attribute the shader never
+                        reads: without one, three compiles a standard material
+                        FLAT_SHADED and every triangle is lit as a facet
+                        (the owner's look of PR #1615)
     src/game/cross-streets.ts
                         cross streets (#1565) — a side road 60 m off the
                         route at each junction where a mapped street

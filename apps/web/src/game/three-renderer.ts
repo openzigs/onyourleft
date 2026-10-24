@@ -11822,6 +11822,12 @@ function bakedPeople(body: Object3D): BakedPeople {
   geometry.setAttribute('position', new BufferAttribute(rest, 3));
   geometry.setAttribute('oylVertex', new BufferAttribute(column, 1));
   geometry.setAttribute('oylRegion', new BufferAttribute(region, 1));
+  // ⚠️ A `normal` attribute, though the shader reads the texture's normal
+  // rows instead: a standard material over a geometry with none is compiled
+  // FLAT_SHADED by three, whose fragment then takes each triangle's own normal
+  // from screen derivatives and never reads the smooth one the vertex wrote.
+  // That is the faceted face and clothes the owner saw on PR #1615 (#1541).
+  geometry.setAttribute('normal', new BufferAttribute(vertexNormals(rest, cut.indices), 3));
   geometry.setIndex(new BufferAttribute(cut.indices, 1));
   geometry.computeBoundingSphere();
 
@@ -12141,6 +12147,19 @@ float oylCapsule(vec2 p, vec2 a, vec2 b, float r) {
  */
 export function peopleShownOf(view: GameView, on: boolean): void {
   if (view instanceof ThreeGameView) view.peopleShown(on);
+}
+
+/**
+ * The fragment shader source the GPU was handed for every program the
+ * people's bodies' material made — #1541, the owner's look of PR #1615, so
+ * the browser gate can read whether three compiled them FLAT_SHADED: flat, a
+ * body lights each triangle as a facet and never reads the baked smooth
+ * normals (@see bakedPeople). Empty before any body is drawn.
+ *
+ * @test-facing read by `game-harness.ts` §`peopleProbe`
+ */
+export function peopleBodyFragmentsOf(view: GameView): readonly string[] {
+  return view instanceof ThreeGameView ? view.peopleBodyFragments() : [];
 }
 
 /**
@@ -16978,6 +16997,19 @@ class ThreeGameView implements GameView {
   /** @see peopleDrawnOf — the realistic world's, whether or not it is the one drawn. */
   get people(): PeopleBelt | undefined {
     return this.#realistic?.people;
+  }
+
+  /** @see peopleBodyFragmentsOf */
+  peopleBodyFragments(): string[] {
+    const renderer = this.#renderer;
+    if (renderer === undefined) return [];
+    const gl = renderer.getContext();
+    // The bodies' programs, by `peopleBodyMaterial`'s key; the impostors' is `oyl-people-far`.
+    return (renderer.info.programs ?? [])
+      .filter((program) => /oyl-people-\d/.test(program.cacheKey))
+      .flatMap((program) => gl.getAttachedShaders(program.program as WebGLProgram) ?? [])
+      .filter((shader) => gl.getShaderParameter(shader, gl.SHADER_TYPE) === gl.FRAGMENT_SHADER)
+      .map((shader) => gl.getShaderSource(shader) ?? '');
   }
 
   /** @see doorPathsShownOf */

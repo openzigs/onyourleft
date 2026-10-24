@@ -214,6 +214,7 @@ import {
   doorPathsShownOf,
   pavementsShownOf,
   pavementTrianglesOf,
+  peopleBodyFragmentsOf,
   peopleDrawnOf,
   peopleShownOf,
   MappedBuildingBelt,
@@ -3068,6 +3069,16 @@ interface PeopleMeasurement {
    */
   readonly bodyPixels: number;
   readonly impostorPixels: number;
+  /**
+   * The bodies' fragment shaders as the GPU was handed them
+   * (`peopleBodyFragmentsOf`): how many, how many of them are FLAT_SHADED —
+   * the owner's look of PR #1615, every triangle lit as a facet — and how many
+   * carry the bodies' own colour splice, which says the read is of THEIR
+   * program and not of something else's.
+   */
+  readonly bodyFragments: number;
+  readonly bodyFragmentsFlat: number;
+  readonly bodyFragmentsSpliced: number;
 }
 
 const NO_PEOPLE_MEASURED: PeopleMeasurement = {
@@ -3080,6 +3091,9 @@ const NO_PEOPLE_MEASURED: PeopleMeasurement = {
   animationBytes: -1,
   bodyPixels: -1,
   impostorPixels: -1,
+  bodyFragments: -1,
+  bodyFragmentsFlat: -1,
+  bodyFragmentsSpliced: -1,
 };
 
 /**
@@ -3272,6 +3286,7 @@ function peopleProbe(
   const bodyPixels = changed(body === undefined ? undefined : box(body, 6));
   const impostorPixels = changed(impostor === undefined ? undefined : box(impostor, 3));
   const belt = peopleDrawnOf(view);
+  const fragments = peopleBodyFragmentsOf(view);
   return {
     clearance: ruled.clearance,
     clearanceOff: control.clearance,
@@ -3282,6 +3297,9 @@ function peopleProbe(
     animationBytes: belt?.animationBytes ?? -1,
     bodyPixels,
     impostorPixels,
+    bodyFragments: fragments.length,
+    bodyFragmentsFlat: fragments.filter((source) => source.includes('#define FLAT_SHADED')).length,
+    bodyFragmentsSpliced: fragments.filter((source) => source.includes('vOylColour')).length,
   };
 }
 

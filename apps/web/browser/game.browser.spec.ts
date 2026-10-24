@@ -3653,6 +3653,22 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     expect(people.impostorPixels).toBeGreaterThan(0);
   });
 
+  test('#1541 people up close: a body is smooth-shaded, never compiled FLAT_SHADED', async ({
+    harnessRun,
+  }) => {
+    const { people } = await realistic(harnessRun);
+    console.log(
+      `people shading — ${String(people.bodyFragments)} body fragment shaders, ` +
+        `${String(people.bodyFragmentsFlat)} flat, ${String(people.bodyFragmentsSpliced)} with the colour splice`,
+    );
+    // Not vacuous: the bodies' own programs were read, each with their splice.
+    expect(people.bodyFragments).toBeGreaterThan(0);
+    expect(people.bodyFragmentsSpliced).toBe(people.bodyFragments);
+    // The owner's look of PR #1615: a flat body lights every triangle as a
+    // facet, whatever normals the animation texture holds.
+    expect(people.bodyFragmentsFlat).toBe(0);
+  });
+
   test('#1547 a town on the flat: the drawn ground under a mapped block’s centre footprint is within 1 m, and over 5 m without the levelling', async ({
     harnessRun,
   }, testInfo) => {
