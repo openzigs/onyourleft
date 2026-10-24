@@ -14,6 +14,7 @@
     "realistic:process": "node --import ./tools/ts-extensionless-resolve.mjs tools/realistic/process-assets.ts",
     "realistic:stage": "node --import ./tools/ts-extensionless-resolve.mjs tools/realistic/stage-into-apk.ts",
     "build": "tsc --noEmit --project tsconfig.json && vite build",
+    "build:demo": "vite build --config vite.demo.config.ts",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit --project tsconfig.json",
     "test": "vitest run",

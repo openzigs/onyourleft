@@ -35,8 +35,9 @@
  *
  * So the question asked is narrow: **is this reachable from the code the
  * product actually loads?** The entry point is read out of each app's own
- * `index.html` — the page Vite builds — and the module graph is walked from
- * there, through
+ * `index.html` — the page Vite builds — and, since #1645, from the demo's
+ * `demo/index.html` (`vite.demo.config.ts`, a build visitors are served), and
+ * the module graph is walked from there, through
  * relative imports, workspace `exports` maps and `import()` calls written with
  * a literal. Test files are not entry points, and neither is
  * `apps/web/browser/`: a harness page is a gate, and #236 is what happens when
@@ -364,8 +365,19 @@ export function specifiersOf(source) {
 }
 
 /**
+ * The pages, relative to an app's directory, whose module scripts are entry
+ * points. `demo/index.html` since #1645: the demo is its own build, served to
+ * every visitor of the site that embeds it, so what only it reaches is
+ * shipped — and without this a `game/` export only the demo used was a red
+ * WIRE002. A script's `src` resolves against the page's own directory, which
+ * is the Vite root each config builds that page from.
+ */
+const ENTRY_PAGES = ['index.html', 'demo/index.html'];
+
+/**
  * The module scripts every app's own `index.html` loads — or, for an app with
- * no page, the file its `package.json` names as `main` (#767's instance).
+ * no page, the file its `package.json` names as `main` (#767's instance) —
+ * and those of its other {@link ENTRY_PAGES}.
  *
  * Read from the page rather than written down here, so a client that stops
  * mounting `main.tsx` cannot leave this checking a file nothing loads. ⚠️
@@ -397,17 +409,21 @@ export function entryPoints(root) {
       if (file !== undefined) found.push(file);
       continue;
     }
-    for (const match of readFileSync(page, 'utf8').matchAll(
-      /<script[^>]*\ssrc=["']([^"']+)["']/g,
-    )) {
-      const source = match[1];
-      if (/^[a-z]+:\/\//.test(source)) continue;
-      const appDirectory = join(root, 'apps', app.name);
-      const base = source.startsWith('/')
-        ? join(appDirectory, source.slice(1))
-        : resolve(appDirectory, source);
-      const file = fileFor(base);
-      if (file !== undefined) found.push(file);
+    for (const name of ENTRY_PAGES) {
+      const entryPage = join(root, 'apps', app.name, name);
+      if (!existsSync(entryPage)) continue;
+      const pageDirectory = dirname(entryPage);
+      for (const match of readFileSync(entryPage, 'utf8').matchAll(
+        /<script[^>]*\ssrc=["']([^"']+)["']/g,
+      )) {
+        const source = match[1];
+        if (/^[a-z]+:\/\//.test(source)) continue;
+        const base = source.startsWith('/')
+          ? join(pageDirectory, source.slice(1))
+          : resolve(pageDirectory, source);
+        const file = fileFor(base);
+        if (file !== undefined) found.push(file);
+      }
     }
   }
   return found;

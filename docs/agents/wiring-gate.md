@@ -36,7 +36,10 @@ well typed.**
 rather than a path written down twice — **or, for an app with no page, out of its `package.json`'s
 `main`** (since [#767](https://github.com/openzigs/onyourleft/issues/767)): `apps/instance` is
 started as `node src/main.ts`, and without this every `*-port.ts` it grows would be reported as
-reached by nothing. Two fixture cases pin both directions. ⚠️ **`apps/web/browser/` is deliberately NOT an entry
+reached by nothing. Two fixture cases pin both directions. **And out of `apps/web/demo/index.html`** since
+[#1645](https://github.com/openzigs/onyourleft/issues/1645): the demo is its own build, served to
+visitors, so what only it reaches is shipped; a script's `src` resolves against its page's
+directory, the Vite root that page is built from. Two more fixture cases pin both directions. ⚠️ **`apps/web/browser/` is deliberately NOT an entry
 point**: a harness page is a gate, and #236 is exactly what happens when a harness's own canvas is
 mistaken for the product's. Neither is a test — every one of the five defects was unit-tested and
 green, so a test calling something is not evidence that anything ships it.
