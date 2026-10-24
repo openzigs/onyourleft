@@ -7951,8 +7951,11 @@ function withDepthPrepass(material: MeshStandardMaterial): void {
  * The material a mesh's depth pre-pass wears — #1523: a copy of the mesh's
  * own, writing no colour, whose program is the mesh's own program with
  * `oylDepthOnly` set. Its compile step and its cache key are the original's,
- * read when three asks, so anything taught to the original later is taught
- * to this too. @see withDepthPrepass
+ * read when three asks, so anything taught to the original later through
+ * those two is taught to this too. Its material properties (map, alphaTest,
+ * side, opacity) are a snapshot from `clone()`: change one on the original
+ * after this and the two passes cut differently, and EQUAL drops needles.
+ * @see withDepthPrepass
  */
 function depthPrepassMaterial(material: MeshStandardMaterial): MeshStandardMaterial {
   const twin = constructed(material.clone());
@@ -8003,6 +8006,8 @@ function depthPrepassOf(
   const prepass = new InstancedMesh(full.geometry, twin, 0);
   prepass.instanceMatrix = full.instanceMatrix;
   prepass.instanceColor = full.instanceColor;
+  // Shared buffers: disposing a pre-pass alone would delete the live mesh's
+  // GL buffers (three's InstancedMesh dispose). Dispose them only with `full`.
   prepass.frustumCulled = false;
   prepass.renderOrder = full.renderOrder - DEPTH_PREPASS_LEAD;
   prepass.onBeforeRender = () => {
@@ -8010,15 +8015,19 @@ function depthPrepassOf(
   };
   full.add(prepass);
   const own = full.material as Material;
-  let restore: DepthModes | undefined;
+  let restore: { readonly func: DepthModes; readonly write: boolean } | undefined;
   full.onBeforeRender = () => {
     if (mode() === 'off') return;
-    restore = own.depthFunc;
+    restore = { func: own.depthFunc, write: own.depthWrite };
     own.depthFunc = EqualDepth;
+    // Redundant under EQUAL, and a depth write beside `discard` makes some
+    // mobile GPUs test depth late, so the lit shader would run on every fragment.
+    own.depthWrite = false;
   };
   full.onAfterRender = () => {
     if (restore === undefined) return;
-    own.depthFunc = restore;
+    own.depthFunc = restore.func;
+    own.depthWrite = restore.write;
     restore = undefined;
   };
   return { full, prepass };

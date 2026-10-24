@@ -308,7 +308,9 @@ test.describe('the realistic page’s tree levers — #1283, #1294', { tag: NIGH
     // At most one call for each fir mesh — two shapes at two levels — and the
     // triangles of the firs drawn twice.
     expect(drawn.result.lastFrame.calls - off.result.lastFrame.calls).toBeGreaterThan(0);
-    expect(drawn.result.lastFrame.calls - off.result.lastFrame.calls).toBeLessThanOrEqual(4);
+    expect(drawn.result.lastFrame.calls - off.result.lastFrame.calls).toBeLessThanOrEqual(
+      2 * REALISTIC_CONIFERS.generated.length,
+    );
     expect(drawn.result.lastFrame.triangles).toBeGreaterThan(off.result.lastFrame.triangles);
     // The lever chooses the pre-pass and nothing else: the rung does not move.
     expect(off.result.rung).toBe(drawn.result.rung);

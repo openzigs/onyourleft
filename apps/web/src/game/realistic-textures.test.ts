@@ -1377,6 +1377,7 @@ describe('the generated trees, loaded and drawn through the product’s own path
     readonly material: DrawnMesh['material'] & {
       depthFunc: number;
       readonly colorWrite: boolean;
+      depthWrite: boolean;
       customProgramCacheKey(): string;
     };
     onBeforeRender(...args: unknown[]): void;
@@ -1463,11 +1464,15 @@ describe('the generated trees, loaded and drawn through the product’s own path
     const drawWith = (): number => {
       each.full.onBeforeRender();
       const during = material.depthFunc;
+      const writing = material.depthWrite;
       each.full.onAfterRender();
       expect(material.depthFunc).toBe(LESS_EQUAL_DEPTH);
-      return during;
+      expect(material.depthWrite).toBe(true);
+      return during === EQUAL_DEPTH ? (writing ? -1 : EQUAL_DEPTH) : during;
     };
     expect(material.depthFunc).toBe(LESS_EQUAL_DEPTH);
+    expect(material.depthWrite).toBe(true);
+    // EQUAL and no depth write while drawn (-1 would mean it still wrote).
     expect(drawWith()).toBe(EQUAL_DEPTH);
     // Off: no pre-pass drawn and the mesh's own test, as before #1523.
     belt.setDepthPrepass('off');
