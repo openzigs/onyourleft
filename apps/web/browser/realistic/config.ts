@@ -140,8 +140,11 @@ export type Layer = (typeof LAYERS)[number];
  *   broken by gaps, a gate, fence and open verge (`settlements.ts`
  *   §`roadsidePiece`), and rocks on mapped farmland and a wood smaller and
  *   kept back from the road (`scatter.ts` §`STONE_SCALE`). Off, each is the
- *   countryside as #1542 first drew it; with `land-boundaries` or
- *   `ground-clutter` off as well, they have nothing to change.
+ *   countryside as #1542 first drew it. `hedge-breaks` has nothing to change
+ *   with `land-boundaries` off; `small-stones` has nothing to change only
+ *   with BOTH `land-planting` and `ground-clutter` off — with `ground-clutter`
+ *   alone off it still shrinks a wood's rocks and keeps them back from the
+ *   road.
  */
 export const LEVERS = [
   'air',

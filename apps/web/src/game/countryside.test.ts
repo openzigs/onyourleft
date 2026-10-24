@@ -595,6 +595,27 @@ describe('#1542 the owner’s ruling of 2026-10-24: a low, broken roadside', () 
     expect(gaps / hedged).toBeLessThan(0.6);
   });
 
+  it('admits each roadside piece to exactly one of two adjacent spans (#243)', () => {
+    // The roadside pieces themselves, at 5.6 m: a piece closed up on its
+    // stretch stands off its own odometer, and is admitted on that odometer.
+    const span = (from: number, to: number): readonly string[] =>
+      structuresAt(ROUTE, ORIGIN, SEED, from, to, ALL, undefined, FARMLAND, undefined, COUNTRYSIDE)
+        .filter((item) => BOUNDARIES.has(item.kind) && Math.abs(item.x) < 8)
+        .filter((item) => item.z > 3_050 && item.z < 3_750)
+        .map((item) => `${key(item)} ${item.scale.toFixed(3)}`)
+        .sort();
+    const whole = span(3_000, 3_800);
+    expect(whole.length).toBeGreaterThan(80);
+    // Control: some of them stand off their odometer, closed up.
+    expect(whole.some((each) => / 0\.[67]\d\d$/.test(each))).toBe(true);
+    // Split finer than a piece, so some split falls between a shifted piece's
+    // odometer and where it is drawn.
+    for (let at = 3_000; at <= 3_800; at += 1.7) {
+      const halves = [...span(3_000, at), ...span(at, 3_800)].sort();
+      expect(halves, `split at ${at.toFixed(1)} m`).toStrictEqual(whole);
+    }
+  });
+
   it('is the same from the same seed and differs from another', () => {
     const full = (item: ScatterItem): string => `${key(item)} ${item.scale.toFixed(3)}`;
     expect(roadside(COUNTRYSIDE).map(full)).toStrictEqual(roadside(COUNTRYSIDE).map(full));
@@ -664,6 +685,10 @@ describe('#1542 levers', () => {
     expect(
       frame(FARMLAND, ['planting', 'boundaries', 'clutter', 'hedge-breaks', 'small-stones']),
     ).toStrictEqual(frame(OTHER));
+    // The page's three-lever URL (`-ground-clutter,-land-boundaries,-land-planting`,
+    // validation 0002 AH-1542-2) is still the world before #1542: with those
+    // off, the two later levers have nothing to change.
+    expect(frame(FARMLAND, ['planting', 'boundaries', 'clutter'])).toStrictEqual(frame(OTHER));
     expect(frame(FARMLAND, [])).toStrictEqual(on);
   });
 });
