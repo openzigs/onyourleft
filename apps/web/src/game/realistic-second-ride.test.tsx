@@ -282,6 +282,7 @@ describe('two realistic rides in one mount — #475’s review', () => {
             mine.push(next);
           },
           setRiderKit: () => undefined,
+          setSeason: () => undefined,
           resize: () => undefined,
           destroy: () => undefined,
         };

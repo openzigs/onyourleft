@@ -76,6 +76,9 @@ import {
 import { REALISTIC_WORLD_LEFT_NOTICE, realisticWorldNotice } from './realistic-assets';
 import { readDraftReadingChoice } from './draft-preference';
 import { readRealisticWorldChoice } from './world-preference';
+import { readHolidayDecorations } from './holiday-preference';
+import { deviceToday, NO_SEASON, seasonOn, type CalendarDay, type Season } from './season';
+import { routeHemisphere, routeLatitudeMagnitude } from './world';
 import { createGradientSession, type GradientSession, type GradientSessionState } from './gradient';
 import {
   NO_GAME_TRAINER,
@@ -167,8 +170,9 @@ import { sharedCueOutput } from './web-audio';
 import type { CorridorState, WorldCorridor } from './world-data/corridor';
 import { OSM_ATTRIBUTION } from '../map/basemap';
 import { landClassMask, type LandClassMask } from './land-class';
-import { footprintPlans, mappedTown } from './footprint-buildings';
+import { FOOTPRINT_MAX_VERTICES, footprintPlans, mappedTown } from './footprint-buildings';
 import { mappedBuildingsOf, type MappedBuildings } from './mapped-buildings';
+import { NO_URBAN_CLASS, urbanClassMap } from './urban-class';
 import type { MappedTown } from './settlements';
 import {
   climbLeadIn,
@@ -351,6 +355,13 @@ export interface GameViewProps {
   readonly trainer?: GameTrainerPort | undefined;
   /** Injected so a test can drive the loop without a real animation frame. */
   readonly now?: (() => number) | undefined;
+  /**
+   * The rider's local calendar day — #1622. Read ONCE, when a live ride
+   * starts, for the ride's holiday (`season.ts`). Absent, it is this device's
+   * own clock in its own time zone (`season.ts` §`deviceToday`); a test
+   * injects one so it can cross midnight mid-ride.
+   */
+  readonly today?: (() => CalendarDay) | undefined;
   /**
    * Where the ride's non-speech sounds go — #400. The platform's own Web Audio
    * (`web-audio.ts` §`sharedCueOutput`) unless a test hands in a double; the
@@ -723,6 +734,13 @@ export function GameView(props: GameViewProps): JSX.Element {
    * built after `start`, because `three` arrives asynchronously.
    */
   const kitColourRef = useRef<KitColour | undefined>(undefined);
+  /**
+   * THIS ride's season — #1622. Read once when a live ride starts, from the
+   * rider's day and the route, and handed to the view when the view exists,
+   * as {@link kitColourRef} is. Never re-read mid-ride: a ride that crosses
+   * midnight keeps the day it started on.
+   */
+  const seasonRef = useRef<Season>(NO_SEASON);
   /**
    * Whether THIS ride asked for the realistic world — read from the device at
    * the start of the ride (`world-preference.ts`), off unless the rider chose
@@ -1349,6 +1367,24 @@ export function GameView(props: GameViewProps): JSX.Element {
       // dressed now; a view not yet built is dressed when it is.
       kitColourRef.current = props.kitColour;
       viewRef.current?.setRiderKit(props.kitColour);
+      // #1622: the rider's own day, read ONCE here at the start of a live ride
+      // and held for it — never a ghost's or a past activity's, which carry no
+      // date into this line. Holidays follow the rider's day; nature follows
+      // the ROUTE's hemisphere (owner ruling (a) of 2026-10-24). The view is
+      // told when it is built: `teardown` destroys the last ride's, so no view
+      // exists here. ⚠️ Guarded: the season is decorative, so a clock or
+      // time zone that throws (V8 refuses an `Etc/Unknown` it reported itself)
+      // costs the decorations and never the ride — it starts with NO_SEASON.
+      try {
+        seasonRef.current = seasonOn(
+          (props.today ?? deviceToday)(),
+          routeHemisphere(profile),
+          routeLatitudeMagnitude(profile),
+          readHolidayDecorations(deviceStorage()),
+        );
+      } catch {
+        seasonRef.current = NO_SEASON;
+      }
       qualityRef.current = realistic ? INITIAL_REALISTIC_QUALITY : STYLISED_START;
       setQualityLevel(INITIAL_QUALITY.level);
       setRealisticRung(realistic);
@@ -1527,6 +1563,13 @@ export function GameView(props: GameViewProps): JSX.Element {
       // corridor and mask, ONCE, here — #1540 states <= 400 ms for a dense town.
       // The belt's index and the lots' town are both built from these plans, so
       // no scene frame plans.
+      // #1633: and how built-up each stretch of the route is, from the same
+      // corridor and mask, ONCE, here — `NO_URBAN_CLASS`, every stretch
+      // `unknown`, with no corridor — handed to the footprints' planning.
+      const urban =
+        worldCorridorRef.current === undefined || landClassRef.current === undefined
+          ? NO_URBAN_CLASS
+          : urbanClassMap(worldCorridorRef.current, landClassRef.current, route.profile);
       if (worldCorridorRef.current === undefined || landClassRef.current === undefined) {
         mappedBuildingsRef.current = undefined;
         mappedTownRef.current = undefined;
@@ -1536,6 +1579,8 @@ export function GameView(props: GameViewProps): JSX.Element {
           landClassRef.current,
           route.profile,
           corridorOrigin(route.profile),
+          FOOTPRINT_MAX_VERTICES,
+          urban,
         );
         mappedBuildingsRef.current = mappedBuildingsOf(plans);
         mappedTownRef.current = mappedTown(worldCorridorRef.current, plans);
@@ -1558,6 +1603,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       props.screenLock,
       props.riderMass,
       props.kitColour,
+      props.today,
       props.trainer,
       props.room,
       props.roomId,
@@ -1652,6 +1698,8 @@ export function GameView(props: GameViewProps): JSX.Element {
           viewRef.current = view;
           // #623: dressed before its first frame. @see kitColourRef
           view.setRiderKit(kitColourRef.current);
+          // #1622: the season this ride started with, not a fresh read.
+          view.setSeason(seasonRef.current);
           view.resize(canvas.clientWidth || 320, canvas.clientHeight || 180);
           // #475: the realistic world, for a ride that asked for it — AFTER
           // the view exists, so the rider rides the stylised world while ~33

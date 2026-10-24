@@ -87,6 +87,7 @@ const RENDERER: GameRenderer = {
         told.push(next);
       },
       setRiderKit: () => undefined,
+      setSeason: () => undefined,
       resize: () => undefined,
       destroy: () => undefined,
     };

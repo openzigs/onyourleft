@@ -74,6 +74,7 @@ function sizingRenderer(sizes: [number, number][]): GameRenderer {
       render: () => undefined,
       setQuality: () => undefined,
       setRiderKit: () => undefined,
+      setSeason: () => undefined,
       resize: (width: number, height: number) => {
         sizes.push([width, height]);
       },

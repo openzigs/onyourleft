@@ -405,6 +405,7 @@ describe('the game’s HUD — #647', () => {
       render: () => undefined,
       setQuality: () => undefined,
       setRiderKit: () => undefined,
+      setSeason: () => undefined,
       resize: () => undefined,
       destroy: () => undefined,
     }),

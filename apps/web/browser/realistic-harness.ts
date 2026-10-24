@@ -66,6 +66,8 @@ import { landClassMask } from '../src/game/land-class';
 import { mappedBuildingsOf } from '../src/game/mapped-buildings';
 import type { SceneFrame } from '../src/game/port';
 import { corridorOrigin } from '../src/game/terrain';
+import { deviceToday } from '../src/game/season';
+import { routeHemisphere, routeLatitudeMagnitude } from '../src/game/world';
 import {
   drawnWorldOf,
   atmosphereOf,
@@ -85,6 +87,7 @@ import {
   parseConfig,
   percentiles,
   rungWithLevers,
+  seasonWithLevers,
   firPrepassWithLevers,
   surfacesWithLevers,
   treesWithLevers,
@@ -378,6 +381,15 @@ async function run(): Promise<void> {
   // taken back out; the label, cap and scenery the page reports are the rung's.
   const drawnRung = (at: WorldQualityState) => rungWithLevers(worldRung(at), config.leversOff);
   const view = threeGameRenderer.create(canvas, drawnRung(state));
+  // #1622: the URL's `date`, or this device's day, told once as a ride's start
+  // tells it — in either world; `-decorations` drops the holiday.
+  view.setSeason(
+    seasonWithLevers(
+      config,
+      { hemisphere: routeHemisphere(profile), absLatitude: routeLatitudeMagnitude(profile) },
+      deviceToday,
+    ),
+  );
   // #619 lever 1's control. The view builds its realistic belts when a rung
   // first asks for them, so it is applied again after every rung change.
   const foliageOrdered = !config.leversOff.includes('foliage-order');

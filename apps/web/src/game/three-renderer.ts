@@ -653,6 +653,7 @@ import {
   type WaterSurface,
 } from './waterways';
 import type { SunStyle, WorldStyle } from './world';
+import { NO_SEASON, type Season } from './season';
 
 /*
  * ⚠️ **The camera's four numbers lived here until #424 and do not any more** —
@@ -12217,6 +12218,16 @@ export function riderKitsOf(
 }
 
 /**
+ * The season a view holds — #1622.
+ *
+ * @test-facing `season-wiring.test.tsx` reads it to hold `ThreeGameView.setSeason`
+ * to what the product's renderer keeps, in jsdom.
+ */
+export function seasonOf(view: GameView): Season | undefined {
+  return view instanceof ThreeGameView ? view.season : undefined;
+}
+
+/**
  * Draws a view's realistic riders in their kit's pattern, or in one colour —
  * #623. The browser gate's control: with the pattern off, the rider's back
  * must read back flatter than the floor the kit is held above.
@@ -16486,6 +16497,8 @@ class ThreeGameView implements GameView {
    * later, when a world has loaded, and must be dressed then too.
    */
   #riderKit: RiderKit = RIDER_KITS.rider;
+  /** What {@link setSeason} was last told. #1623 to #1627 draw from it. */
+  #season: Season = NO_SEASON;
   /** Which surfaces' shaders the realistic road and ground are built with. @see realisticSurfacesOf */
   #surfaces: RealisticSurfaces = REALISTIC_SURFACES_DRAWN;
   /** The riders' contact shadows — #426. One draw for all of them. */
@@ -17061,6 +17074,16 @@ class ThreeGameView implements GameView {
     this.#riderKit = kit;
     this.#riders.setRiderKit(kit);
     this.#realistic?.riders.setRiderKit(kit);
+  }
+
+  /** The ride's season — #1622. Held, and drawn nothing from yet. @see GameView.setSeason */
+  setSeason(season: Season): void {
+    this.#season = season;
+  }
+
+  /** @see seasonOf */
+  get season(): Season {
+    return this.#season;
   }
 
   /** @see riderKitsOf */
