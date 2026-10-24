@@ -394,3 +394,17 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   D-3.6, including that the store never leaves the device (D-3.5), is ODbL 1.0 data and is droppable
   without loss. The street lines are bounded at read time by the decoder and at use by
   `STREET_MAX_METRES`.
+- **2026-10-24** — **The archive does carry `building:levels`, folded into `height`**
+  ([#1629](https://github.com/openzigs/onyourleft/issues/1629), the owner's ruling of that day on
+  [#1628](https://github.com/openzigs/onyourleft/issues/1628)). Context item 1's *"It has no
+  `building:levels`"* and D-7's first sentence, *"The archive carries `height` and `min_height` and no
+  `building:levels`"*, were wrong. Protomaps' `Buildings.java` §`parseHeight` (protomaps/basemaps at
+  [`8da818b4`](https://github.com/protomaps/basemaps/blob/8da818b44572c2c0b3f8f2ecdece3bad1c9ad75d/tiles/src/main/java/com/protomaps/basemap/layers/Buildings.java#L69-L78),
+  tiles 4.13.3, and unchanged on `main`) writes `height = max(levels, 1) × 3 + 2` for a building
+  with `building:levels` and no `height`, so the field is in the archive as a height. D-7's rule of
+  storeys as `height` over a fixed storey read each such building one storey too tall. From this
+  date `storeysFor` (`apps/web/src/game/footprint-buildings.ts`) reads a height within 0.01 m of
+  `3L + 2`, for a whole `L ≥ 1`, as `L` storeys, and every other height as before; the eaves stay at
+  the mapped height. What still holds, unchanged: `roof:shape` and the OSM building type are not in
+  the archive, and reading them is still
+  [#1557](https://github.com/openzigs/onyourleft/issues/1557).
