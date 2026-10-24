@@ -1319,6 +1319,10 @@ function ringHoldsLot(ring: Float32Array, lot: Float64Array): boolean {
  * the edge crosses the verge, along it where a field starts back from the
  * road. Where the ground is `unknown` or `other` — no field mapped — the
  * fields are the procedural ones, item for item.
+ *
+ * With `countryside['hedge-breaks']` on (the owner's ruling of 2026-10-24)
+ * that roadside hedge is low and broken up, {@link roadsidePiece}; a wall is
+ * not.
  */
 function fieldEdgesAt(
   profile: RouteProfile,

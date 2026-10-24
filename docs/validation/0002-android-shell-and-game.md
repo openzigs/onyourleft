@@ -3850,6 +3850,10 @@ changes, each with a lever on the owner's page: a wood planted throughout with a
 hedgerow trees and open pasture on farmland and specimen trees in a park (`-land-planting`); field
 boundaries along farmland's edges instead of the procedural field spacing (`-land-boundaries`); and
 stones on pasture and a wood's floor (`-ground-clutter`). Off, each is the countryside before #1542.
+Since the owner's ruling of 2026-10-24 two more: mapped farmland's roadside hedge low and broken by
+gaps, a gate, fence and open verge (`-hedge-breaks`), and rocks on farmland and a wood smaller and
+back from the road (`-small-stones`); each changes nothing with `-land-boundaries` or
+`-ground-clutter` and `-land-planting` off, so AH-1542-2's URL is still the world before #1542.
 They change only land a corridor covers, so **`route.ts`' road, which has none, draws the same
 picture with or without them**: every row below is on `&town=countryside`
 (`footprint-fixtures-testing.ts` §`countrysideFixture`, 900 m to 2 100 m).
@@ -3870,7 +3874,7 @@ below is what decides whether this stays on.
 |---|---|
 | AH-1542-1 | **After #1523's fix has landed**: build `main` with #1542 and the owner's page staged, and run AH1–AH7 for **5 minutes**, AH4's URL with `&town=countryside` added. `RUN=1542-on` |
 | AH-1542-2 | **Cool again (AH3, 25–26 °C)**, same build: AH1–AH7 for 5 minutes with `&town=countryside&levers=-ground-clutter,-land-boundaries,-land-planting` added to AH4's URL. `RUN=1542-off` |
-| AH-1542-3 | Only if `1542-on` is over #1523's limit (GPU p50 at or above 848 MHz, or frames over 20 ms above 0.2 %) and `1542-off` is not: one more 5-minute run each with `-land-planting`, `-land-boundaries` and `-ground-clutter` alone, cooling between, to name the change to switch off. `RUN=1542-no-<lever>` |
+| AH-1542-3 | Only if `1542-on` is over #1523's limit (GPU p50 at or above 848 MHz, or frames over 20 ms above 0.2 %) and `1542-off` is not: one more 5-minute run each with `-land-planting`, `-land-boundaries`, `-ground-clutter`, `-hedge-breaks` and `-small-stones` alone, cooling between, to name the change to switch off. `RUN=1542-no-<lever>` |
 | AH-1542-4 | Write the rows into the table above. Draw calls in `1542-on` at or below `1542-off`, triangles below. By eye, the panel off (`&panel=0&at=`): at 1 150 hedgerow trees along the fields and open pasture beyond, and on one side the gap between two fields left open; at 1 500 a wood's scrubby edge on one side and a fenced wood behind a strip of field on the other; at 1 780 a park's specimen trees. Post the rows on #1542 and #733 |
 
 ## Part AI — the side camera's picture rate, on the owner's phone ([#1112](https://github.com/openzigs/onyourleft/issues/1112))

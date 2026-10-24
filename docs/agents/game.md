@@ -801,11 +801,15 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         boundaries along farmland's EDGES, not the field
                         grid (`settlements.ts` §`landEdgesAt`); stones on
                         pasture and a wood's floor. No new kind or shape.
+                        The roadside hedge on mapped farmland is low and
+                        broken (`settlements.ts` §`roadsidePiece`), rocks
+                        small and set back (`scatter.ts` §`STONE_SCALE`).
                         ⚠️ `unknown` and `other` are the procedural world,
                         item for item, and each change has a lever
                         (`SceneInput.countrysideOff`, the realistic page's
                         `-land-planting`, `-land-boundaries`,
-                        `-ground-clutter`, shown on `town=countryside`)
+                        `-ground-clutter`, `-hedge-breaks`,
+                        `-small-stones`, shown on `town=countryside`)
     src/game/footprint-buildings.ts
                         each mapped footprint planned as a building (#1540):
                         P-9's placement rules, in order and counted as
