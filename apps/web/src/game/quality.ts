@@ -39,6 +39,7 @@
  */
 
 import { TERRAIN_BANDS } from './landform';
+import { PEOPLE_NEAR_MAX } from './people';
 import { REALISTIC_STRUCTURE_ITEMS } from './realistic-budget';
 import { SCATTER_MAX_ITEMS } from './scatter';
 import { STRUCTURE_MAX_ITEMS } from './settlements';
@@ -311,6 +312,27 @@ export interface QualitySettings {
    */
   readonly structureItems: number;
   /**
+   * How many people this rung draws as bodies — #1541 (`people.ts`): at most
+   * `people.ts` §`PEOPLE_NEAR_MAX` (16) within 60 m of the rider, and
+   * impostors beyond. **0 draws nobody**, near or far.
+   *
+   * **16 on {@link REALISTIC_LADDER}'s top rung and 0 everywhere else.** The
+   * body is MakeHuman's, which only the realistic world loads; and the first
+   * step down inside the realistic world gives the people up whole, with the
+   * resolution and the scenery, rather than thinning them, because a street
+   * with three people on it reads as emptier than one with none.
+   *
+   * ## ⚠️ Provenance — the owner's ruling of 2026-10-24, not a measurement
+   *
+   * "Build now, before #1553's tablet room row, within this issue's stated
+   * budget": 16 within 60 m, about 32 000 triangles, 1–2 draw calls, about
+   * 1 MiB of animation texture. Validation 0002 Part AJ is the tablet's
+   * measurement of whether there is room; if there is not, this goes to 0 on
+   * the top rung too until there is. The owner's page's `levers=-people` is
+   * the cost pair.
+   */
+  readonly people: number;
+  /**
    * Whether the road and the ground carry their procedural surface detail —
    * #425: a grain on the tarmac, a mottle and a patchwork of fields on the
    * ground, computed in the fragment from where it is.
@@ -521,6 +543,7 @@ const REDUCED_AT_DISPLAY_RATE: QualitySettings = {
   terrainBands: 10,
   water: 'flat',
   structureItems: 120,
+  people: 0,
   surfaceDetail: false,
   textureLodBias: 0,
   shading: 'lit',
@@ -617,6 +640,7 @@ export const QUALITY_LADDER: readonly QualitySettings[] = [
     terrainBands: TERRAIN_BANDS,
     water: 'shaded',
     structureItems: STRUCTURE_MAX_ITEMS,
+    people: 0,
     surfaceDetail: true,
     textureLodBias: 0,
     shading: 'lit',
@@ -648,6 +672,7 @@ export const QUALITY_LADDER: readonly QualitySettings[] = [
     terrainBands: 9,
     water: 'flat',
     structureItems: 60,
+    people: 0,
     surfaceDetail: false,
     textureLodBias: 0,
     shading: 'lit',
@@ -675,6 +700,7 @@ export const QUALITY_LADDER: readonly QualitySettings[] = [
     terrainBands: 8,
     water: 'flat',
     structureItems: 40,
+    people: 0,
     surfaceDetail: false,
     textureLodBias: 0,
     shading: 'flat',
@@ -1000,6 +1026,8 @@ export const REALISTIC_LADDER: readonly QualitySettings[] = [
     ...(QUALITY_LADDER[0] as QualitySettings),
     // #506. @see REALISTIC_STRUCTURE_ITEMS
     structureItems: REALISTIC_STRUCTURE_ITEMS,
+    // #1541: the people, on this rung only. @see QualitySettings.people
+    people: PEOPLE_NEAR_MAX,
     world: 'realistic',
     label: 'realistic',
   },

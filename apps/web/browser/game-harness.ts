@@ -66,6 +66,7 @@ import {
   metres,
   metresPerSecond,
   routeProfile,
+  seconds,
   type RoutePoint,
 } from '@onyourleft/domain';
 import type { KitColour } from '@onyourleft/store';
@@ -82,8 +83,9 @@ import type { WorldStyle } from '../src/game/world';
 
 import { sceneFrame as builtSceneFrame } from '../src/game/scene';
 import { retainedFrame } from '../src/game/frame-testing';
-import { corridorOrigin, drawnRoadFrame } from '../src/game/terrain';
-import { nearestOnDrawnRoad } from '../src/game/road-grid';
+import { ROAD_WIDTH_METRES, corridorOrigin, drawnRoadFrame } from '../src/game/terrain';
+import { distanceToDrawnRoad, nearestOnDrawnRoad } from '../src/game/road-grid';
+import { PEOPLE_NEAR_MAX, PERSON_HALF_WIDTH_METRES } from '../src/game/people';
 import { pavementSides } from '../src/game/footways';
 import type { WorldCorridor } from '../src/game/world-data/corridor';
 import {
@@ -212,6 +214,9 @@ import {
   doorPathsShownOf,
   pavementsShownOf,
   pavementTrianglesOf,
+  peopleBodyFragmentsOf,
+  peopleDrawnOf,
+  peopleShownOf,
   MappedBuildingBelt,
   mappedBuildingsShownOf,
   mappedBuildingStatsOf,
@@ -3036,6 +3041,265 @@ function mappedPavementProbe(
     leftMapped: withMap.left,
     leftProcedural: ownSides.left,
     leftOff: off.left,
+  };
+}
+
+/** What {@link peopleProbe} publishes — #1541. */
+interface PeopleMeasurement {
+  /**
+   * How far outside the carriageway's edge the nearest drawn person's
+   * shoulder stood, metres — negative is over the kerb line — at the worst
+   * second the probe found, read back off what the view DREW: with the rule,
+   * and with it off (the control, `peopleOnTheRoad`).
+   */
+  readonly clearance: number;
+  readonly clearanceOff: number;
+  /** The bodies and impostors the view drew at those two seconds. */
+  readonly drawn: readonly number[];
+  readonly drawnOff: readonly number[];
+  /** The draw calls a frame with bodies and impostors makes, less the same frame with the people switched off. */
+  readonly drawCalls: number;
+  /** One body's triangles, as cut, and the animation texture's bytes, read off the belt. */
+  readonly triangles: number;
+  readonly animationBytes: number;
+  /**
+   * How many pixels of a box around the nearest body in frame, and around the
+   * nearest impostor, change when the people are switched off: what is drawn
+   * is a person, at the place `people.ts` put them.
+   */
+  readonly bodyPixels: number;
+  readonly impostorPixels: number;
+  /**
+   * The bodies' fragment shaders as the GPU was handed them
+   * (`peopleBodyFragmentsOf`): how many, how many of them are FLAT_SHADED —
+   * the owner's look of PR #1615, every triangle lit as a facet — and how many
+   * carry the bodies' own colour splice, which says the read is of THEIR
+   * program and not of something else's.
+   */
+  readonly bodyFragments: number;
+  readonly bodyFragmentsFlat: number;
+  readonly bodyFragmentsSpliced: number;
+}
+
+const NO_PEOPLE_MEASURED: PeopleMeasurement = {
+  clearance: Number.NaN,
+  clearanceOff: Number.NaN,
+  drawn: [],
+  drawnOff: [],
+  drawCalls: -1,
+  triangles: -1,
+  animationBytes: -1,
+  bodyPixels: -1,
+  impostorPixels: -1,
+  bodyFragments: -1,
+  bodyFragmentsFlat: -1,
+  bodyFragmentsSpliced: -1,
+};
+
+/**
+ * #1541: people on #1535's village and #1551's mapped sidewalks, drawn. The
+ * corridor maps a sidewalk 6 m to the road's right through the village, as
+ * #1551's probe does, and one 3.6 m to its LEFT — off the carriageway, which
+ * #1551's network keeps, but close enough that a person's shoulder walking it
+ * is over the kerb line. The rider is 20 m short of the village's middle.
+ *
+ * - **"no pedestrian is ever inside the carriageway"**: of 40 seconds of the
+ *   ride, the one where a placed person comes nearest the road is drawn, and
+ *   every person the view DREW (`peopleDrawnOf`, bodies and impostors) is
+ *   held clear of every stretch of the drawn road by the road's half-width
+ *   and a person's half-width. The control: the same frames with the rule off
+ *   (`peopleOnTheRoad`), where the kerbside sidewalk puts a shoulder over it.
+ * - **one or two draw calls**: the frame less the same frame with the people
+ *   switched off, at a second with bodies and impostors both in view.
+ * - **what is drawn is a person**: the pixels around the nearest body's and
+ *   the nearest impostor's middle, in a frame with no scenery to hide them,
+ *   change when the people are switched off.
+ */
+function peopleProbe(
+  view: ReturnType<typeof threeGameRenderer.create>,
+  gl: WebGL2RenderingContext,
+  canvas: HTMLCanvasElement,
+): PeopleMeasurement {
+  const profile = northRouteForHarness();
+  const origin = corridorOrigin(profile);
+  const seed = scatterSeed(profile);
+  const { sites } = siteSpacing(profile);
+  const paved = pavedPlotAlong(
+    [...Array(sites).keys()]
+      .map((index) => siteAt(profile, seed, index))
+      .filter((site) => site?.kind === 'village'),
+    seed,
+  );
+  if (paved === undefined) return NO_PEOPLE_MEASURED;
+  const middle = paved.along;
+  const line = (offset: number): Float32Array => {
+    const points: number[] = [];
+    for (let along = middle - 150; along <= middle + 150; along += 10) {
+      const road = drawnRoadFrame(profile, origin, along);
+      if (road === undefined) continue;
+      points.push(road.x + road.normalX * offset, road.z + road.normalZ * offset);
+    }
+    return Float32Array.from(points);
+  };
+  const corridor: WorldCorridor = {
+    routeId: 'harness-1541',
+    origin,
+    covered: () => true,
+    coveredBoxes: [],
+    landUse: [],
+    buildings: [],
+    paths: [
+      { kind: 'path', kindDetail: 'sidewalk', line: line(6) },
+      { kind: 'path', kindDetail: 'sidewalk', line: line(-3.6) },
+    ],
+    streets: [],
+  };
+  const start = atStartLine(profile);
+  const frameAt = (second: number, onTheRoad: boolean): SceneFrame =>
+    sceneFrame({
+      profile,
+      origin,
+      state: {
+        ...start,
+        ride: { ...start.ride, distance: metres(middle - 20) },
+        elapsed: seconds(second),
+        ridden: seconds(second),
+      },
+      worldCorridor: corridor,
+      people: PEOPLE_NEAR_MAX,
+      peopleOnTheRoad: onTheRoad,
+    });
+  const shoulderClear = (x: number, z: number): number =>
+    distanceToDrawnRoad(profile, origin, x, z, 30) -
+    ROAD_WIDTH_METRES / 2 -
+    PERSON_HALF_WIDTH_METRES;
+  // The second whose PLACED people come nearest the road, each way.
+  const worst = (onTheRoad: boolean): number => {
+    let found = 0;
+    let least = Number.POSITIVE_INFINITY;
+    for (let second = 0; second < 240; second += 6) {
+      const people = builtSceneFrame({
+        profile,
+        origin,
+        state: {
+          ...start,
+          ride: { ...start.ride, distance: metres(middle - 20) },
+          elapsed: seconds(second),
+          ridden: seconds(second),
+        },
+        worldCorridor: corridor,
+        people: PEOPLE_NEAR_MAX,
+        peopleOnTheRoad: onTheRoad,
+      }).people;
+      for (const person of [...(people?.near ?? []), ...(people?.far ?? [])]) {
+        const clear = shoulderClear(person.x, person.z);
+        if (clear < least) {
+          least = clear;
+          found = second;
+        }
+      }
+    }
+    return found;
+  };
+  // What the view DREW at a second: its people's least clearance, and how many.
+  const drawnAt = (frame: SceneFrame): { clearance: number; drawn: number[] } => {
+    view.render(frame);
+    const drawn = peopleDrawnOf(view);
+    const all = [...(drawn?.near ?? []), ...(drawn?.far ?? [])];
+    return {
+      clearance: Math.min(...all.map((person) => shoulderClear(person.x, person.z))),
+      drawn: [drawn?.near.length ?? 0, drawn?.far.length ?? 0],
+    };
+  };
+  const ruled = drawnAt(frameAt(worst(false), false));
+  const control = drawnAt(frameAt(worst(true), true));
+
+  // A second with bodies and impostors both in view, for the calls and the pixels.
+  let busy = frameAt(0, false);
+  for (let second = 0; second < 240; second += 6) {
+    const frame = frameAt(second, false);
+    if ((frame.people?.near.length ?? 0) > 0 && (frame.people?.far.length ?? 0) > 0) {
+      busy = frame;
+      break;
+    }
+  }
+  let drawCalls = 0;
+  countingNonEmptyDrawCalls((calls) => {
+    view.render(busy);
+    const before = calls();
+    view.render(busy);
+    const withPeople = calls() - before;
+    peopleShownOf(view, false);
+    view.render(busy);
+    const afterOff = calls();
+    view.render(busy);
+    drawCalls = withPeople - (calls() - afterOff);
+    peopleShownOf(view, true);
+  });
+  // The pixels, with no scenery in front of anybody.
+  const bare: SceneFrame = { ...busy, scatter: [], billboards: [] };
+  const box = (
+    person: { readonly x: number; readonly y: number; readonly z: number; readonly height: number },
+    half: number,
+  ): { x: number; y: number; width: number; height: number } => {
+    const middle = pixelFor(bare, canvas, { ...person, y: person.y + person.height * 0.6 });
+    const size = half * 2 + 1;
+    return {
+      x: Math.max(0, Math.round(middle.x) - half),
+      y: Math.max(0, Math.round(middle.y) - half),
+      width: size,
+      height: size,
+    };
+  };
+  const inFrame = (person: { readonly x: number; readonly y: number; readonly z: number }) => {
+    // In front of the camera, and inside the picture with a margin.
+    const ahead =
+      (person.x - bare.camera.x) * bare.camera.headingX +
+      (person.z - bare.camera.z) * bare.camera.headingZ;
+    if (ahead < 3) return false;
+    const at = pixelFor(bare, canvas, { ...person, y: person.y + 1 });
+    return at.x > 8 && at.x < canvas.width - 8 && at.y > 8 && at.y < canvas.height - 8;
+  };
+  const body = bare.people?.near.find(inFrame);
+  const impostor = bare.people?.far.find(inFrame);
+  const changed = (
+    where: { x: number; y: number; width: number; height: number } | undefined,
+  ): number => {
+    if (where === undefined) return -1;
+    view.render(bare);
+    const on = readRegion(gl, where.x, where.y, where.width, where.height);
+    peopleShownOf(view, false);
+    view.render(bare);
+    const off = readRegion(gl, where.x, where.y, where.width, where.height);
+    peopleShownOf(view, true);
+    let count = 0;
+    for (let at = 0; at < on.length; at += 4) {
+      const apart = Math.max(
+        Math.abs((on[at] ?? 0) - (off[at] ?? 0)),
+        Math.abs((on[at + 1] ?? 0) - (off[at + 1] ?? 0)),
+        Math.abs((on[at + 2] ?? 0) - (off[at + 2] ?? 0)),
+      );
+      if (apart > 6) count += 1;
+    }
+    return count;
+  };
+  const bodyPixels = changed(body === undefined ? undefined : box(body, 6));
+  const impostorPixels = changed(impostor === undefined ? undefined : box(impostor, 3));
+  const belt = peopleDrawnOf(view);
+  const fragments = peopleBodyFragmentsOf(view);
+  return {
+    clearance: ruled.clearance,
+    clearanceOff: control.clearance,
+    drawn: ruled.drawn,
+    drawnOff: control.drawn,
+    drawCalls,
+    triangles: belt?.triangles ?? -1,
+    animationBytes: belt?.animationBytes ?? -1,
+    bodyPixels,
+    impostorPixels,
+    bodyFragments: fragments.length,
+    bodyFragmentsFlat: fragments.filter((source) => source.includes('#define FLAT_SHADED')).length,
+    bodyFragmentsSpliced: fragments.filter((source) => source.includes('vOylColour')).length,
   };
 }
 
@@ -6013,6 +6277,8 @@ export interface RealisticMeasurement {
   readonly pavement: PavementMeasurement;
   /** #1551: the pavement on the side a sidewalk is mapped on. @see mappedPavementProbe */
   readonly mappedPavement: MappedPavementMeasurement;
+  /** #1541: the people on the village's pavements and the mapped sidewalks. @see peopleProbe */
+  readonly people: PeopleMeasurement;
   /** #1547: the drawn ground under a mapped block's centre footprint. @see levellingProbe */
   readonly levelling: LevellingMeasurement;
   /** #1549: a town from map data, drawn merged, and nothing in the wood. @see mappedTownProbe */
@@ -8136,6 +8402,7 @@ const NO_REALISTIC: RealisticMeasurement = {
   windowWall: [],
   pavement: NO_PAVEMENT,
   mappedPavement: NO_MAPPED_PAVEMENT,
+  people: NO_PEOPLE_MEASURED,
   levelling: NO_LEVELLING,
   mappedTown: NO_MAPPED_TOWN,
   mappedFacade: NO_MAPPED_FACADE,
@@ -9689,6 +9956,10 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   const mappedPavement = mappedPavementProbe(view, gl, canvas);
   phaseEnds('realistic: pavement on the mapped side — #1551');
 
+  // #1541, on the same view and #1535's village: people, never on the carriageway.
+  const people = peopleProbe(view, gl, canvas);
+  phaseEnds('realistic: people — #1541');
+
   // #1547, on the same view: the ground under a mapped town, levelled.
   const levelling = levellingProbe(view);
   phaseEnds('realistic: a town on the flat — #1547');
@@ -9948,6 +10219,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     windowWall,
     pavement,
     mappedPavement,
+    people,
     levelling,
     mappedTown,
     mappedFacade,

@@ -57,7 +57,11 @@ import {
 } from '../src/game/quality';
 import { realisticWorldNotice, type RealisticWorldOutcome } from '../src/game/realistic-assets';
 import { footprintPlans, mappedTown } from '../src/game/footprint-buildings';
-import { mixedTownFixture, richmondStreetFixture } from '../src/game/footprint-fixtures-testing';
+import {
+  countrysideFixture,
+  mixedTownFixture,
+  richmondStreetFixture,
+} from '../src/game/footprint-fixtures-testing';
 import { landClassMask } from '../src/game/land-class';
 import { mappedBuildingsOf } from '../src/game/mapped-buildings';
 import type { SceneFrame } from '../src/game/port';
@@ -83,6 +87,7 @@ import {
   firPrepassWithLevers,
   surfacesWithLevers,
   treesWithLevers,
+  countrysideWithLevers,
   type Layer,
   type Lever,
   type Percentiles,
@@ -333,7 +338,9 @@ async function run(): Promise<void> {
       ? mixedTownFixture()
       : config.town === 'richmond'
         ? richmondStreetFixture()
-        : undefined;
+        : config.town === 'countryside'
+          ? countrysideFixture()
+          : undefined;
   // #1559: or the level road through two villages, for validation 0002 AE2.
   const profile =
     mixed?.profile ??
@@ -483,6 +490,10 @@ async function run(): Promise<void> {
       rung: worldRung(state),
       // #1534's pair: the villages' ground left wooded.
       settlementsWooded: config.leversOff.includes('settlement-clearing'),
+      // #1541's pair: the people off.
+      peopleOff: config.leversOff.includes('people'),
+      // #1542's three, each off on its own.
+      countrysideOff: countrysideWithLevers(config.leversOff),
       ...(town === undefined ? {} : { town }),
     });
     view.render(drawn);

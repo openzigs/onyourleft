@@ -74,6 +74,7 @@ import {
   REALISTIC_TRIANGLES,
 } from './realistic-budget';
 import { GROUND_BLOB_TRIANGLES } from './ground-blob';
+import { PERSON_ANIMATION_MAX_BYTES } from './people-body';
 import { readGlb } from './model-bytes-testing';
 import {
   fileImageSize,
@@ -816,6 +817,8 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
       ) +
       skyBytes() +
       REALISTIC_RIDER_SILHOUETTE_BYTES +
+      // #1541: the people's animation texture, made at load at its own ceiling.
+      PERSON_ANIMATION_MAX_BYTES +
       banners
     );
   };
@@ -894,7 +897,13 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
     });
     expect(banners).toBeLessThanOrEqual(2 ** 20);
     // #626: and the riders' silhouette, made at runtime at its own ceiling.
-    const total = compressed + skyBytes() + REALISTIC_RIDER_SILHOUETTE_BYTES + banners;
+    // #1541: and the people's animation texture, made at load at its own ceiling.
+    const total =
+      compressed +
+      skyBytes() +
+      REALISTIC_RIDER_SILHOUETTE_BYTES +
+      PERSON_ANIMATION_MAX_BYTES +
+      banners;
     const before = decoded + skyBytes();
     const mib = (bytes: number): string => (bytes / 2 ** 20).toFixed(1);
     const tablet = (facts: Ktx2Facts): number =>

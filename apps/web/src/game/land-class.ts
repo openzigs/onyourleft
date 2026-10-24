@@ -231,6 +231,31 @@ export function landClassOfKind(
     : 'other';
 }
 
+/**
+ * Whether `(x, z)` is `here`'s class and some ground `reach` metres to one of
+ * its four sides is not — #1542's edge test: four lookups, no allocation. Ground
+ * outside every covered chunk (`unknown`) is no edge, so the end of the map is
+ * not read as the end of a wood.
+ */
+export function atClassEdge(
+  land: LandClassMask,
+  here: LandClass,
+  x: number,
+  z: number,
+  reach: number,
+): boolean {
+  return (
+    otherClass(land.classAt(x + reach, z), here) ||
+    otherClass(land.classAt(x - reach, z), here) ||
+    otherClass(land.classAt(x, z + reach), here) ||
+    otherClass(land.classAt(x, z - reach), here)
+  );
+}
+
+function otherClass(there: LandClass, here: LandClass): boolean {
+  return there !== here && there !== 'unknown';
+}
+
 /** Whether nothing grows at `(x, z)`: mapped built-up land or water. */
 export function builtUpOrWater(land: LandClassMask, x: number, z: number): boolean {
   const here = land.classAt(x, z);
@@ -244,6 +269,54 @@ export function builtUpOrWater(land: LandClassMask, x: number, z: number): boole
 export function fieldGround(land: LandClassMask, x: number, z: number): boolean {
   const here = land.classAt(x, z);
   return here === 'unknown' || here === 'farmland' || here === 'other';
+}
+
+/**
+ * What the countryside makes of the mask — #1542, one lever a change:
+ *
+ * - `planting`: the species mix and clustering by class (`scatter.ts`
+ *   §`landPlanting`) — a wood planted throughout with a broadleaf and scrub edge,
+ *   hedgerow trees and open pasture on farmland, specimen trees in a park.
+ * - `boundaries`: field boundaries along farmland's edges rather than at the
+ *   procedural field spacing (`settlements.ts` §`fieldEdgesAt`).
+ * - `clutter`: field stones on pasture and rocks on a wood's floor — opaque, and
+ *   out of the rocks' own near-mesh cap (`realistic-budget.ts`
+ *   §`REALISTIC_NEAR_MESHES`).
+ * - `hedge-breaks`: mapped farmland's roadside hedge lowered and broken up —
+ *   gaps, a field gate, stretches of fence and of open verge
+ *   (`settlements.ts` §`roadsidePiece`). The owner's ruling of 2026-10-24: the
+ *   solid, head-high hedge boxed the view in. Reads nothing with `boundaries`
+ *   off, which has no such hedge.
+ * - `small-stones`: rocks on mapped farmland and a wood smaller, and none in
+ *   the nearest bands (`scatter.ts` §`STONE_SCALE`). The same ruling.
+ *
+ * Each reads only covered land: where the mask is `unknown` the world is the
+ * procedural one, item for item. Off, each is the world before #1542 exactly.
+ */
+export type CountrysideLever =
+  'planting' | 'boundaries' | 'clutter' | 'hedge-breaks' | 'small-stones';
+
+/** Which of {@link CountrysideLever}s are on. */
+export type Countryside = Readonly<Record<CountrysideLever, boolean>>;
+
+/** Every lever on: the product's countryside. */
+export const COUNTRYSIDE: Countryside = Object.freeze({
+  planting: true,
+  boundaries: true,
+  clutter: true,
+  'hedge-breaks': true,
+  'small-stones': true,
+});
+
+/** {@link COUNTRYSIDE} with `off` switched off — the levers' one reader. */
+export function countrysideWithout(off: readonly CountrysideLever[]): Countryside {
+  return {
+    planting: !off.includes('planting'),
+    boundaries: !off.includes('boundaries'),
+    clutter: !off.includes('clutter'),
+    'hedge-breaks': !off.includes('hedge-breaks'),
+    'small-stones': !off.includes('small-stones'),
+  };
 }
 
 /** One land-use polygon's bounding box, for {@link kindAt}'s first test. */
