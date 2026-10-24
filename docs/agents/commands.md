@@ -768,7 +768,7 @@ The stack the workspace is built on is decided in ADR 0005 and is not open:
 | Web client | React 19 + Vite 8 |
 | Styling | `theme.css` over `design/tokens.ts`, and since #950 Tailwind CSS **4.3.3** utilities built from those tokens (`tw:` prefix, no preflight) — [ADR 0042](../adr/0042-tailwind-and-radix-over-the-tokens.md) |
 | Headless UI primitives | Radix, one package per primitive, lazily loaded — `@radix-ui/react-alert-dialog` 1.1.23 since #950 (ADR 0042 D-6) |
-| Test runner | Vitest 4.1.11 + `@vitest/coverage-v8` |
+| Test runner | Vitest 4.1.12 + `@vitest/coverage-v8` |
 | Linter / formatter | ESLint 10 + typescript-eslint + Prettier 3 |
 | Typechecker | `tsc --noEmit` |
 | Local data layer | IndexedDB via **Dexie 4.4.5** |

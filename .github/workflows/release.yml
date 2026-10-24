@@ -45,7 +45,7 @@ jobs:
         with:
           node-version-file: .nvmrc
 
-      #   gh api repos/actions/setup-java/commits/v6.0.1 --jq .sha
+      #   gh api repos/actions/setup-java/commits/v6.1.0 --jq .sha
       - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
         with:
           distribution: temurin
