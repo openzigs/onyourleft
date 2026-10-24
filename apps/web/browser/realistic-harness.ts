@@ -64,6 +64,7 @@ import { corridorOrigin } from '../src/game/terrain';
 import {
   drawnWorldOf,
   atmosphereOf,
+  firDepthPrepassOf,
   foliageOrderedOf,
   groundBlendOf,
   loadRealisticWorld,
@@ -78,6 +79,7 @@ import {
   parseConfig,
   percentiles,
   rungWithLevers,
+  firPrepassWithLevers,
   surfacesWithLevers,
   treesWithLevers,
   type Layer,
@@ -353,6 +355,11 @@ async function run(): Promise<void> {
   // first asks for them, so it is applied again after every rung change.
   const foliageOrdered = !config.leversOff.includes('foliage-order');
   foliageOrderedOf(view, foliageOrdered);
+  // #1523's before/after pair for the firs' depth pre-pass, on one build. The
+  // fir meshes are the realistic belts', so it too is applied again after a
+  // rung change.
+  const firPrepass = firPrepassWithLevers(config.leversOff);
+  firDepthPrepassOf(view, firPrepass);
   // #1523's cost pairs: the ground without #627's blend, the road without
   // #628's wear — the code out of the program, not a uniform at zero. A
   // setting of the view's, so it survives a rung change; and set BEFORE the
@@ -424,6 +431,7 @@ async function run(): Promise<void> {
       if (next.realistic !== state.realistic || next.quality.level !== state.quality.level) {
         view.setQuality(drawnRung(next));
         foliageOrderedOf(view, foliageOrdered);
+        firDepthPrepassOf(view, firPrepass);
         groundBlendOf(view, 1, 1, 1, crag);
       }
       state = next;

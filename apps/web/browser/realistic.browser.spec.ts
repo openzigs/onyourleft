@@ -69,21 +69,25 @@ const VEGETATION_AT_LEAST = 60_000;
 
 /**
  * The most draw calls the owner's page may REPORT held at `at=2550` with the
- * trees a ride draws: **33**, the figure #1289 left it at with two seeds a
- * species, two under `REALISTIC_WOODED_DRAW_CALLS`.
+ * trees a ride draws: **34**, one under `REALISTIC_WOODED_DRAW_CALLS`.
  *
- * **This is the figure #1294's criterion names**: "at or under 33 at
- * `at=2550`" is the page's own `drawCalls`, a mean over its window. It is
- * asserted, and so is the frame's own count below.
+ * ⚠️ **#1294's criterion names 33** — "at or under 33 at `at=2550`", the
+ * figure #1289 left it at — and a reviewer who remembers 33 is reading the
+ * page before #1523. #1523 draws each fir mesh after a depth-only pre-pass,
+ * which is three calls on this frame ({@link FRAME_DRAW_CALLS_AT_2550}); with
+ * `levers=-fir-prepass` the frame makes the 31 it made before. It is the
+ * page's own `drawCalls`, a mean over its window, and is asserted, as is the
+ * frame's own count below.
  */
-const PAGE_DRAW_CALLS_AT_2550 = 33;
+const PAGE_DRAW_CALLS_AT_2550 = 34;
 
 /**
  * What one held frame at `at=2550` makes, counted at the WebGL draw calls:
- * **31**, with the generated firs and with the scanned ones alike (two shapes
- * stand where two stood, and they add no call), on a Mac and on the CI runner,
- * 2026-10-12. Held at the measured figure, so one added call is a red test
- * and not two calls of room under {@link PAGE_DRAW_CALLS_AT_2550}.
+ * **34**, with the generated firs and with the scanned ones alike (two shapes
+ * stand where two stood, and they add no call), on a Mac, 2026-10-24 — 31,
+ * on a Mac and on the CI runner on 2026-10-12, and three for #1523's fir
+ * pre-passes ({@link FRAME_DRAW_CALLS_WITHOUT_PREPASS}). Held at the measured
+ * figure, so one added call is a red test.
  *
  * ⚠️ **The page's mean read 32 to 35 for this frame until #1294**, because
  * its window also held the warm-up and the page's first render, which makes
@@ -91,7 +95,14 @@ const PAGE_DRAW_CALLS_AT_2550 = 33;
  * now starts where the warm-up ends, so a held frame's mean IS its count, and
  * the test below holds the two equal.
  */
-const FRAME_DRAW_CALLS_AT_2550 = 31;
+const FRAME_DRAW_CALLS_AT_2550 = 34;
+
+/**
+ * #1523: the same held frame with `levers=-fir-prepass`: **31**, the figure
+ * #1294 measured — so the three calls above are the pre-passes and nothing
+ * else.
+ */
+const FRAME_DRAW_CALLS_WITHOUT_PREPASS = 31;
 
 type Published = NonNullable<Window['__oylRealistic']>;
 
@@ -276,5 +287,30 @@ test.describe('the realistic page’s tree levers — #1283, #1294', { tag: NIGH
     expect(scannedFirs.page.textures?.bytes ?? Infinity).toBeLessThan(
       scanned.page.textures?.bytes ?? 0,
     );
+  });
+
+  test('draws a depth pre-pass for each fir mesh, and with #1523’s lever off the frame #1294 drew', async ({
+    page,
+  }) => {
+    test.setTimeout(2 * REALISTIC_LOAD_BUDGET_MS);
+    const drawn = await ride(page, HELD);
+    const off = await ride(page, `${HELD}&levers=-fir-prepass`);
+    console.log(
+      `#1523 at=2550, held: ${String(drawn.result.lastFrame.calls)} draw calls and ` +
+        `${String(drawn.result.lastFrame.triangles)} triangles with the firs' pre-pass; ` +
+        `${String(off.result.lastFrame.calls)} and ${String(off.result.lastFrame.triangles)} without`,
+    );
+    expect(drawn.result.leversOff).toEqual([]);
+    expect(off.result.leversOff).toEqual(['fir-prepass']);
+    // The lever takes the pre-passes out and nothing else: the frame #1294 drew.
+    expect(off.result.lastFrame.calls).toBe(FRAME_DRAW_CALLS_WITHOUT_PREPASS);
+    expect(drawn.result.lastFrame.calls).toBe(FRAME_DRAW_CALLS_AT_2550);
+    // At most one call for each fir mesh — two shapes at two levels — and the
+    // triangles of the firs drawn twice.
+    expect(drawn.result.lastFrame.calls - off.result.lastFrame.calls).toBeGreaterThan(0);
+    expect(drawn.result.lastFrame.calls - off.result.lastFrame.calls).toBeLessThanOrEqual(4);
+    expect(drawn.result.lastFrame.triangles).toBeGreaterThan(off.result.lastFrame.triangles);
+    // The lever chooses the pre-pass and nothing else: the rung does not move.
+    expect(off.result.rung).toBe(drawn.result.rung);
   });
 });

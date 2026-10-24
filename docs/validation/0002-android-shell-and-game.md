@@ -3229,6 +3229,8 @@ published figures (its run predates `oyl.txt`).
 | #1523 | road wear out (#628, #879) | the same build | — ; `levers=-road-wear` | | | | | | | | |
 | #1523 | bounds before (the wear's loop and the ground's twelve derivatives, as they were) | `main` with #1523's bounds | — ; `levers=-surface-bounds` | | | | | | | | |
 | #1523 | bounds after (the product) | the same build | — | | | | | | | | |
+| #1523 | fir pre-pass before (the firs as #1294 drew them) | `main` with #1523's fir pre-pass | — ; `levers=-fir-prepass` | | | | | | | | |
+| #1523 | fir pre-pass after (the product) | the same build | — | | | | | | | | |
 | #1534 | cleared (the villages' ground, 5 min) | `main` with #1534 | — | | | | | | | | |
 | #1534 | wooded (as before #1534, 5 min) | the same build | — ; `levers=-settlement-clearing` | | | | | | | | |
 
@@ -3759,6 +3761,40 @@ the same run it requires `-road-wear` and `-ground-blend` to move thousands of p
 | AH-1523-5 | **Before**: build `main` with #1523's bounds, owner's page staged, AH1–AH7 with `&levers=-surface-bounds` added to AH4's URL. `RUN=1523-bounds-before` |
 | AH-1523-6 | **Cool again (AH3, 25–26 °C)**, same build: AH1–AH7, AH4's URL unchanged. `RUN=1523-bounds-after` |
 | AH-1523-7 | Write both rows. The after row's GPU mean should fall towards triage 2's `-road-wear` and `-ground-blend` rows (−25 and −16 MHz) without either lever's change to the picture |
+
+#### The firs' depth pre-pass — the same picture for less ([#1523](https://github.com/openzigs/onyourleft/issues/1523), fix 2)
+
+Triage 1 (2026-10-21, on #1523) put the dropped frames on #1294's generated firs: with only the
+firs reverted to the scans, frames over 20 ms fell from 2.1 % to 0.2 %. A fir is about 1 100 sprig
+cards with under a quarter of each covered by needles, and a card fragment is lit whenever it
+passes the depth test: every cut-away part of a card in front of the needle a pixel finally shows,
+and every card behind it drawn first. Rasterised on a CPU from the committed `generated_fir_a.glb`
+and its own decoded sprig, the full level seen from 9 m on three sides passes the depth test in
+**198 404** 2×2 quads to show 58 582 pixels.
+
+The fix draws each fir mesh twice, at the full and the middle level
+(`three-renderer.ts` §`withDepthPrepass`): a **pre-pass** that runs the mesh's own program only as
+far as its alpha cut and writes depth and no colour, then the mesh itself with an **EQUAL** depth
+test, so the lit shader runs on the one fragment each pixel keeps — **39 353** quads in the same
+model, a fifth. Both passes are one compiled program, so every kept fragment lands on exactly the
+depth its pre-pass wrote. No look is meant to change, and nothing about the firs' files does.
+
+**Its cost is draw calls**: one more for each fir mesh a frame draws, at most four (two shapes, two
+levels). The browser gate's wooded frame makes **32** where it made **29**, inside #639's 35. #615's
+rule 1 says draw calls may not rise; these are depth-only calls of a program the frame already
+uses, traded for most of the firs' lit fragments, and the rows below are what says whether the
+trade is worth it. It is the owner's to rule on.
+
+`levers=-fir-prepass` draws the firs as they were before, on the same build. The browser gate draws
+its wooded frame both ways and requires **every pixel identical** (0 of 230 400 on 2026-10-24), and
+as its control draws the EQUAL test with no pre-pass, which must take the firs out (6 444 pixels
+moved) (`game.browser.spec.ts` §"#1523", nightly).
+
+| Step | What to do |
+|---|---|
+| AH-1523-8 | **Before**: build `main` with #1523's fir pre-pass, owner's page staged, AH1–AH7 with `&levers=-fir-prepass` added to AH4's URL. `RUN=1523-firs-before` |
+| AH-1523-9 | **Cool again (AH3, 25–26 °C)**, same build: AH1–AH7, AH4's URL unchanged. `RUN=1523-firs-after` |
+| AH-1523-10 | Write both rows. Draw calls should rise by up to four and triangles by the firs' own. The after row's GPU mean should fall towards triage 1's `-generated-conifers` row, and its frames over 20 ms towards 0.2 %, without a change to the firs a rider can see |
 
 ### #1534's rows — the villages' ground cleared of trees, shrubs and rocks
 

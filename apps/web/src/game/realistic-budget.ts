@@ -432,6 +432,13 @@ export const REALISTIC_TREE_LEVELS: TreeLevels = {
  * generated firs add no call to either view. {@link REALISTIC_TRIANGLES},
  * "The generated firs, measured".
  *
+ * ⚠️ **#1523 spends three more, on purpose**: each fir mesh a frame draws at
+ * its full or middle level is drawn after a depth pre-pass of its own
+ * (`three-renderer.ts` §`withDepthPrepass`), a depth-only call that lets the
+ * lit pass skip about four fragments in five of a fir's cut cards. The gate's
+ * wooded view makes **32** calls with it and 29 without; at most four are
+ * added (two shapes, two levels). This ceiling was not raised.
+ *
  * ⚠️ **A browser-gate figure, not a device measurement.** The call count does
  * not depend on the GPU, so SwiftShader counts what the tablet would; what the
  * calls COST there is validation 0002 Part AH's row, which is the owner's.
