@@ -309,6 +309,11 @@ describe('the sun’s shadow in the reveal, not a constant — #1659', () => {
   it('throws none with the sun behind the face', () => {
     expect(headShadow(sash, 1.5, sashHead, sunHigh(70, true))).toBeLessThan(0.001);
     expect(headShadow(casement, casementX, casementHead, sunHigh(70, true))).toBeLessThan(0.001);
+    // Nor with the sun in the face's own plane, which lights none of it: no
+    // division by its zero slant shades the whole pane.
+    const grazing = seenFrom(SQUARE, [HALF, HALF, 0]);
+    expect(sash.part(grazing, 1.5, WINDOW_SILL_METRES + SASH.height / 4)).toBe('glass');
+    expect(sash.part(grazing, 1.5, WINDOW_SILL_METRES - SILL.depth - 0.01)).toBe('wall');
   });
 
   it('throws the sun-side jamb’s shadow d · |s.x| / s.z across the glass, on that side only', () => {

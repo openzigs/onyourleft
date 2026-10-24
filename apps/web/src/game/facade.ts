@@ -446,10 +446,8 @@ export type FacadePart =
  * A face's style, as `footprint-buildings.ts` §`STYLE_FLOATS` carries it —
  * #1588 — and the side the sun is on along the face's `u` (1 toward
  * increasing `u`, −1 the other way, 0 in shade), which the shader reads from
- * its light.
- *
- * @test-facing what {@link facadePartAt} is asked with, for the tests; the
- * product's style is the vertex's four floats
+ * its light. What {@link facadePartAt} is asked with; the product's style is
+ * the vertex's four floats.
  */
 export interface FacadeStyle {
   readonly flags: number;
@@ -466,10 +464,8 @@ export type FaceDirection = readonly [along: number, up: number, out: number];
 /**
  * Where a face is seen from and lit from — #1659: unit vectors toward the eye
  * and toward the sun in the face's frame, as the shader's `oylToEyeV` and
- * `oylToSunV` are read in `oylFaceU`, `oylFaceUp` and `oylFaceN`.
- *
- * @test-facing what {@link facadePartAt} is asked with, for the tests; the
- * product's view is the shader's own
+ * `oylToSunV` are read in `oylFaceU`, `oylFaceUp` and `oylFaceN`. What
+ * {@link facadePartAt} is asked with; the product's view is the shader's own.
  */
 export interface FacadeView {
   readonly eye: FaceDirection;
@@ -482,7 +478,7 @@ export interface FacadeView {
  * head and, on the side the style's `sun` names, its `jamb` in from that
  * jamb: #1588's fixed band, as one sun of the many the rule takes.
  */
-export function viewOf(style?: FacadeStyle): FacadeView {
+function viewOf(style?: FacadeStyle): FacadeView {
   if (style?.view !== undefined) return style.view;
   const along = (style?.sun ?? 0) * REVEAL.jamb;
   const length = Math.hypot(along, REVEAL.head, REVEAL_DEPTH_METRES);
