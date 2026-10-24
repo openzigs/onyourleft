@@ -895,8 +895,30 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `streets.ts` lays a village's pavement on where read
                         (`unknown`, and #1535's own rule, where not); and
                         `footwayNetwork`, 2 m polylines off the carriageway
-                        and inside the corridor for #1541 (`@unwired` until
-                        then). No crossing is either
+                        and inside the corridor, which #1541's people walk
+                        (`people.ts`). No crossing is either
+    src/game/people.ts  people walking and running (#1541) — on a village's
+                        pavements and front paths (`streets.ts`'s `walks`
+                        and `DoorPath.walk`) and the mapped footways, never
+                        on the carriageway: every line is broken, and every
+                        person dropped, within `PERSON_CLEARANCE_METRES`
+                        (3.8) of ANY stretch of the drawn road. Where each is
+                        is a function of the ride's clock, seeded per line and
+                        slot; density by village size and land use; runners
+                        only on paths and in parks. ≤ 16 bodies within 60 m,
+                        ≤ 32 impostors to 150 m. ⚠️ `SceneInput.people` is
+                        optional the UNSAFE way round (absent places nobody):
+                        `realistic-choice.test.tsx` §"#1541" reads what
+                        `GameView` asks for. `peopleOnTheRoad` is the browser
+                        gate's control. `gait.ts` is the parametric walk and
+                        run (the owner's ruling of 2026-10-24: no animation
+                        source); `people-body.ts` cuts the rider's MakeHuman
+                        body to ≤ 2 000 triangles at load and sizes the
+                        animation texture (≤ 1 MiB); `three-renderer.ts`
+                        §`PeopleBelt` bakes and draws them, realistic top rung
+                        only (`QualitySettings.people`), in two calls.
+                        `levers=-people` on the owner's page is the tablet's
+                        cost pair (validation 0002 Part AJ)
     src/game/cross-streets.ts
                         cross streets (#1565) — a side road 60 m off the
                         route at each junction where a mapped street

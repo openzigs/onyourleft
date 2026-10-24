@@ -3887,3 +3887,38 @@ so a good last ten seconds after a slow start reads as five. Many
 well under 5 is the timer being throttled (power management), and `visibility: hidden` says the
 WebView thinks the page is not shown. A large `repeatedVideoFrames` is a camera video that stopped
 advancing while pictures were still sent.
+
+## Part AJ — is there room on the tablet for people? ([#1541](https://github.com/openzigs/onyourleft/issues/1541))
+
+**Added 2026-10-24** by #1541. Checked with `grep '^## Part'` for a duplicate letter first — AI was
+the last, and AJ was free. It changes no resistance: no trainer is needed.
+
+The owner ruled on 2026-10-24 that the people are built **before** #1553's tablet room row, inside
+the issue's budget — at most 16 bodies within 60 m (about 2 000 triangles each, 32 000 in all), one
+draw call for them and one for the impostors beyond, about 1 MiB of animation texture — with a lever
+of their own, and that **if the tablet shows no room, people stay off by default until there is**.
+This Part is that measurement. The product draws them on the top realistic rung only
+(`quality.ts` §`QualitySettings.people`); the owner's page's `levers=-people` places nobody, so one
+build gives the pair. Its hard limit is #1523's: the top rung off the GPU ceiling, GPU p50 below
+848 MHz and frames over 20 ms at most 0.2 %.
+
+| Step | What to do |
+|---|---|
+| AJ1 | Build `main` with #1541's merge and the owner's page staged. **AE2's hold** on the village road: AE1's procedure (§"#506's AE1 and AE2 in the same session") at `&route=village&at=820`, people on. Record draw calls, triangles, GPU p50 / p90 / p99 and the page's `census` |
+| AJ2 | The same hold with `&levers=-people` added. The draw calls should fall by 1 or 2, and the triangles by the bodies in view at about 2 000 each |
+| AJ3 | AH1–AH7 for **5 minutes**, held at the village: AH4's URL with `&route=village&at=820` added. `RUN=1541-people` |
+| AJ4 | **Cool again (AH3, 25–26 °C)**, same build: AH1–AH7 for 5 minutes with `&route=village&at=820&levers=-people`. `RUN=1541-no-people` |
+| AJ5 | By eye, at the hold and riding through the village (drop `&at=`): nobody on the road; walkers on the pavements and front paths; nobody sliding, floating or sunk; the far figures readable as people and not flickering. A picture of each |
+
+| Reading | People on (AJ1, AJ3) | `levers=-people` (AJ2, AJ4) |
+|---|---|---|
+| Draw calls at the hold | | |
+| Triangles at the hold | | |
+| GPU p50 / p90 / p99, MHz | | |
+| Frames over 20 ms, % | | |
+| Skin at minute 5, °C | | |
+
+**Reading it.** People on inside #1523's limit is **room**: the default stays as it ships. Over the
+limit with people on and inside it with `-people` is **no room**: `QualitySettings.people` goes to
+0 on the top realistic rung too, until there is — the owner's ruling. Post the table on #1541 and
+#733.

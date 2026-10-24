@@ -40,6 +40,7 @@ import type { KitColour } from '@onyourleft/store';
 
 import type { HorizonRelief, TerrainMesh } from './landform';
 import type { MappedBuildingsInView } from './mapped-buildings';
+import type { PeopleInView } from './people';
 import type { QualitySettings } from './quality';
 import type { RealisticWorldOutcome } from './realistic-assets';
 import type { ScatterItem } from './scatter';
@@ -303,6 +304,14 @@ export interface SceneFrame {
    * rung's `structureItems`: a street is one mesh, not items.
    */
   readonly streets: readonly VillageStreet[];
+  /**
+   * The people in view — #1541 (`people.ts`): on the village streets'
+   * pavements and front paths and the corridor's mapped footways, never on
+   * the carriageway; the nearest as bodies (`three-renderer.ts`
+   * §`PeopleBelt`, one draw), the farther as impostors (one more). Drawn in
+   * the realistic world only. Absent, or empty, where the rung draws nobody.
+   */
+  readonly people?: PeopleInView | undefined;
   /**
    * The cross streets in view — #1565 (`cross-streets.ts`): a side road a
    * short way off the route at each junction, mapped where the corridor has

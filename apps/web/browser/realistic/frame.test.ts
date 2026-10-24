@@ -14,7 +14,7 @@ const structures = new Set<SceneryKind>(STRUCTURE_KINDS);
 
 /** How many scenery items and how many structures one frame of the ride carries. */
 function carried(
-  rung: Pick<QualitySettings, 'scatterItems' | 'structureItems'>,
+  rung: Pick<QualitySettings, 'scatterItems' | 'structureItems' | 'people'>,
   distance: number,
 ): { readonly scenery: number; readonly structures: number } {
   const frame = rideFrame({ profile, origin, distance, elapsed: 10, rung });
@@ -29,7 +29,7 @@ describe('the realistic page’s frames carry the rung’s scenery budget, as Ga
 
   it('carries no more than a small rung allows, scenery and structures each', () => {
     for (const distance of along) {
-      const frame = carried({ scatterItems: 5, structureItems: 2 }, distance);
+      const frame = carried({ scatterItems: 5, structureItems: 2, people: 0 }, distance);
       expect(frame.scenery, `${String(distance)} m`).toBeLessThanOrEqual(5);
       expect(frame.structures, `${String(distance)} m`).toBeLessThanOrEqual(2);
     }

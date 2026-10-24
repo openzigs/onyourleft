@@ -159,6 +159,7 @@ import {
   DirectionalLight,
   DoubleSide,
   DataTexture,
+  DataUtils,
   DynamicDrawUsage,
   EqualDepth,
   EquirectangularReflectionMapping,
@@ -178,6 +179,7 @@ import {
   MeshBasicMaterial,
   MeshLambertMaterial,
   MeshStandardMaterial,
+  NearestFilter,
   NoToneMapping,
   OctahedronGeometry,
   PerspectiveCamera,
@@ -423,6 +425,24 @@ import {
   type TerrainMesh,
 } from './landform';
 import type { QualitySettings } from './quality';
+import { GAIT_PHASES, GAITS, gaitPose } from './gait';
+import {
+  ANIMATION_BYTES_PER_TEXEL,
+  ANIMATION_ROWS,
+  PERSON_MAX_TRIANGLES,
+  animationRow,
+  clusterDecimate,
+  regionOf,
+  vertexNormals,
+} from './people-body';
+import {
+  NO_PEOPLE,
+  PEOPLE_FAR_MAX,
+  PEOPLE_NEAR_MAX,
+  gaitIndex,
+  type PeopleInView,
+  type Person,
+} from './people';
 import {
   isRealisticVegetation,
   PHOTOGRAPHIC_STRUCTURE_SURFACES,
@@ -11508,6 +11528,660 @@ export function realisticRidersOfLoadedWorld(): RealisticRiderBelt | undefined {
 }
 
 /**
+ * The people — #1541 (`people.ts` places them, `gait.ts` moves them,
+ * `people-body.ts` cuts and dresses their body). Two draw calls, whatever is
+ * in view, and none where nobody is.
+ *
+ * ## The bodies: one instanced draw, animated by a texture
+ *
+ * The rider's MakeHuman body (already loaded, ADR 0026's admitted CC0 base
+ * mesh) is cut to at most `people-body.ts` §`PERSON_MAX_TRIANGLES` by
+ * `clusterDecimate` when the realistic world is built, and posed by its own
+ * skeleton at `gait.ts` §`GAIT_PHASES` phases of a walk and of a run from
+ * `gait.ts` §`gaitPose` — a parametric gait in code, the owner's ruling of
+ * 2026-10-24 — with each phase's skinned positions and their normals baked
+ * into ONE half-float texture ({@link PeopleBelt.animationBytes}, under
+ * `people-body.ts` §`PERSON_ANIMATION_MAX_BYTES`). The vertex shader reads a
+ * vertex's column at its instance's gait and phase, blending the two nearest
+ * phases, so the GPU does no skinning and the sixteen bodies are one call.
+ * Each phase is set on the ground by its lowest vertex, so the standing foot
+ * is planted; a run's flight lifts it after.
+ *
+ * Each instance carries its own look (`people.ts` §`personLook`): skin, top,
+ * bottoms, shoes and hair, as packed sRGB, chosen per vertex by the region
+ * `people-body.ts` §`regionOf` gave it.
+ *
+ * ## The impostors: one more instanced draw
+ *
+ * Beyond `people.ts` §`PEOPLE_NEAR_METRES` a person is a quad turned to the
+ * camera about the vertical, on which the fragment shader draws a figure —
+ * head, trunk, legs and arms, in the same five colours — whose legs and arms
+ * swing by the same `gaitPose` hip angle, read on the CPU, foreshortened by
+ * how side-on the person is to the camera. No texture.
+ *
+ * Both materials are constructed here and breathe the realistic air (ADR
+ * 0026 D-11, #622). Neither casts a shadow.
+ */
+export class PeopleBelt {
+  readonly #group = new Group();
+  readonly #bodies: InstancedMesh;
+  readonly #impostors: InstancedMesh;
+  readonly #animation: DataTexture;
+  readonly #materials: readonly MeshStandardMaterial[];
+  /** Per body: skin, top, bottoms, shoes — packed sRGB. */
+  readonly #bodyLooks: InstancedBufferAttribute;
+  /** Per body: gait index, phase, hair (packed), unused. */
+  readonly #bodyMotion: InstancedBufferAttribute;
+  readonly #farLooks: InstancedBufferAttribute;
+  /** Per impostor: yaw, left hip, right hip, hair (packed). */
+  readonly #farMotion: InstancedBufferAttribute;
+  /** The body's triangles, as cut. */
+  readonly triangles: number;
+  readonly #matrix = new Matrix4();
+  readonly #position = new Vector3();
+  readonly #turn = new Quaternion();
+  readonly #scale = new Vector3();
+  readonly #up = new Vector3(0, 1, 0);
+  #shown = true;
+  #switchedOn = true;
+
+  constructor(body: Object3D) {
+    const baked = bakedPeople(body);
+    this.triangles = baked.geometry.index === null ? 0 : baked.geometry.index.count / 3;
+    this.#animation = baked.animation;
+    this.#bodyLooks = new InstancedBufferAttribute(new Float32Array(PEOPLE_NEAR_MAX * 4), 4);
+    this.#bodyMotion = new InstancedBufferAttribute(new Float32Array(PEOPLE_NEAR_MAX * 4), 4);
+    this.#bodyLooks.setUsage(DynamicDrawUsage);
+    this.#bodyMotion.setUsage(DynamicDrawUsage);
+    baked.geometry.setAttribute('oylLook', this.#bodyLooks);
+    baked.geometry.setAttribute('oylMotion', this.#bodyMotion);
+    const bodyMaterial = peopleBodyMaterial(this.#animation, baked.vertices);
+    this.#bodies = new InstancedMesh(baked.geometry, bodyMaterial, PEOPLE_NEAR_MAX);
+    this.#bodies.instanceMatrix.setUsage(DynamicDrawUsage);
+    this.#bodies.count = 0;
+    this.#bodies.frustumCulled = false;
+    this.#bodies.visible = false;
+
+    const quad = new PlaneGeometry(1, 1);
+    // Feet at the instance's origin, the crown at its height.
+    quad.translate(0, 0.5, 0);
+    this.#farLooks = new InstancedBufferAttribute(new Float32Array(PEOPLE_FAR_MAX * 4), 4);
+    this.#farMotion = new InstancedBufferAttribute(new Float32Array(PEOPLE_FAR_MAX * 4), 4);
+    this.#farLooks.setUsage(DynamicDrawUsage);
+    this.#farMotion.setUsage(DynamicDrawUsage);
+    quad.setAttribute('oylLook', this.#farLooks);
+    quad.setAttribute('oylMotion', this.#farMotion);
+    const impostorMaterial = peopleImpostorMaterial();
+    this.#impostors = new InstancedMesh(quad, impostorMaterial, PEOPLE_FAR_MAX);
+    this.#impostors.instanceMatrix.setUsage(DynamicDrawUsage);
+    this.#impostors.count = 0;
+    this.#impostors.frustumCulled = false;
+    this.#impostors.visible = false;
+    this.#materials = [bodyMaterial, impostorMaterial];
+    this.#group.add(this.#bodies, this.#impostors);
+  }
+
+  addTo(scene: Scene): void {
+    scene.add(this.#group);
+  }
+
+  /** The bodies' mesh. For the browser gate's read-back. */
+  get bodies(): InstancedMesh {
+    return this.#bodies;
+  }
+
+  /** The impostors' mesh. For the browser gate's read-back. */
+  get impostors(): InstancedMesh {
+    return this.#impostors;
+  }
+
+  /** Every material the people wear. For the D-11 assertion. */
+  get materials(): readonly Material[] {
+    return this.#materials;
+  }
+
+  /** The animation texture's size in bytes: half-float RGBA. */
+  get animationBytes(): number {
+    return textureBytesOf(this.#animation);
+  }
+
+  /** Whether the realistic world draws at all — false while the stylised one does. */
+  setShown(on: boolean): void {
+    this.#shown = on;
+    if (!on) {
+      this.#bodies.visible = false;
+      this.#impostors.visible = false;
+    }
+  }
+
+  /** @see peopleShownOf */
+  switchOn(on: boolean): void {
+    this.#switchedOn = on;
+  }
+
+  /** This frame's people. */
+  update(people: PeopleInView | undefined): void {
+    const drawn = this.#shown && this.#switchedOn ? (people ?? NO_PEOPLE) : NO_PEOPLE;
+    drawn.near.forEach((person, index) => {
+      this.#place(this.#bodies, index, person, true);
+      this.#bodyLooks.setXYZW(
+        index,
+        person.look.skin,
+        person.look.top,
+        person.look.bottoms,
+        person.look.shoes,
+      );
+      this.#bodyMotion.setXYZW(index, gaitIndex(person.gait), person.phase, person.look.hair, 0);
+    });
+    drawn.far.forEach((person, index) => {
+      this.#place(this.#impostors, index, person, false);
+      this.#farLooks.setXYZW(
+        index,
+        person.look.skin,
+        person.look.top,
+        person.look.bottoms,
+        person.look.shoes,
+      );
+      const pose = gaitPose(person.gait, person.phase);
+      this.#farMotion.setXYZW(index, person.yaw, pose.left.hip, pose.right.hip, person.look.hair);
+    });
+    this.#bodies.count = drawn.near.length;
+    this.#impostors.count = drawn.far.length;
+    for (const attribute of [
+      this.#bodies.instanceMatrix,
+      this.#impostors.instanceMatrix,
+      this.#bodyLooks,
+      this.#bodyMotion,
+      this.#farLooks,
+      this.#farMotion,
+    ]) {
+      attribute.needsUpdate = true;
+    }
+    this.#bodies.visible = drawn.near.length > 0;
+    this.#impostors.visible = drawn.far.length > 0;
+  }
+
+  /** One instance: at the person's feet, turned to face their way (a body only), their height tall. */
+  #place(mesh: InstancedMesh, index: number, person: Person, turned: boolean): void {
+    this.#position.set(person.x, person.y, person.z);
+    this.#turn.setFromAxisAngle(this.#up, turned ? person.yaw : 0);
+    this.#scale.setScalar(person.height);
+    mesh.setMatrixAt(index, this.#matrix.compose(this.#position, this.#turn, this.#scale));
+  }
+
+  dispose(): void {
+    this.#bodies.geometry.dispose();
+    this.#impostors.geometry.dispose();
+    this.#animation.dispose();
+    for (const material of this.#materials) material.dispose();
+  }
+}
+
+/** A half-float RGBA texture's size in bytes. */
+function textureBytesOf(texture: DataTexture): number {
+  const { width, height } = texture.image;
+  return width * height * ANIMATION_BYTES_PER_TEXEL;
+}
+
+/** The body cut, dressed and baked: its geometry, its animation texture, and how many vertices. */
+interface BakedPeople {
+  readonly geometry: BufferGeometry;
+  readonly animation: DataTexture;
+  readonly vertices: number;
+}
+
+/** A bone turned about a WORLD axis through its own joint, by `angle`. */
+function turnBoneInWorld(bone: Bone, axis: Vector3, angle: number): void {
+  const turn = new Quaternion().setFromAxisAngle(axis, angle);
+  const world = bone.getWorldQuaternion(new Quaternion());
+  const parent = new Quaternion();
+  bone.parent?.getWorldQuaternion(parent);
+  bone.quaternion.copy(parent.invert().multiply(turn.multiply(world)));
+  bone.updateMatrixWorld(true);
+}
+
+/**
+ * The rider's body cut to a person's, dressed by region, and posed at every
+ * phase of both gaits into the animation texture — #1541. @see PeopleBelt
+ */
+function bakedPeople(body: Object3D): BakedPeople {
+  const holder = cloneSkinned(body);
+  let skinned: SkinnedMesh | undefined;
+  holder.traverse((node) => {
+    if ((node as Partial<SkinnedMesh>).isSkinnedMesh === true) skinned = node as SkinnedMesh;
+  });
+  if (skinned === undefined) throw new Error('the rider model holds no skinned mesh');
+  const mesh: SkinnedMesh = skinned;
+  holder.updateMatrixWorld(true);
+  const source = mesh.geometry;
+  const position = source.getAttribute('position');
+  const skinIndex = source.getAttribute('skinIndex');
+  const skinWeight = source.getAttribute('skinWeight');
+  const index = source.index;
+  if (index === null) throw new Error('the rider model’s body is not indexed');
+  const vertexCount = position.count;
+  const positions = new Float32Array(vertexCount * 3);
+  const dominant = new Uint16Array(vertexCount);
+  for (let vertex = 0; vertex < vertexCount; vertex += 1) {
+    positions[vertex * 3] = position.getX(vertex);
+    positions[vertex * 3 + 1] = position.getY(vertex);
+    positions[vertex * 3 + 2] = position.getZ(vertex);
+    let best = 0;
+    for (let slot = 1; slot < 4; slot += 1) {
+      if (skinWeight.getComponent(vertex, slot) > skinWeight.getComponent(vertex, best)) {
+        best = slot;
+      }
+    }
+    dominant[vertex] = skinIndex.getComponent(vertex, best);
+  }
+  const indices = new Uint32Array(index.count);
+  for (let at = 0; at < index.count; at += 1) indices[at] = index.getX(at);
+  const cut = clusterDecimate(positions, indices, dominant, PERSON_MAX_TRIANGLES);
+  const kept = cut.kept.length;
+
+  const bones = new Map<string, Bone>();
+  for (const bone of mesh.skeleton.bones) bones.set(bone.name, bone);
+  const local = (name: string): Vector3 =>
+    mesh.worldToLocal(boneOf(bones, name).getWorldPosition(new Vector3()));
+  let lowest = Number.POSITIVE_INFINITY;
+  let highest = Number.NEGATIVE_INFINITY;
+  for (let vertex = 0; vertex < vertexCount; vertex += 1) {
+    lowest = Math.min(lowest, positions[vertex * 3 + 1] as number);
+    highest = Math.max(highest, positions[vertex * 3 + 1] as number);
+  }
+  const restHeight = highest - lowest;
+  const head = local('head');
+  const landmarks = {
+    waistY: local('spine04').y,
+    headY: head.y,
+    headZ: head.z,
+    crownY: highest,
+  };
+
+  // The geometry the instances share: each kept vertex's column, its region,
+  // and its rest place at unit height (for the bounds only — the shader reads
+  // the texture).
+  const rest = new Float32Array(kept * 3);
+  const column = new Float32Array(kept);
+  const region = new Float32Array(kept);
+  for (let vertex = 0; vertex < kept; vertex += 1) {
+    const from = cut.kept[vertex] as number;
+    rest[vertex * 3] = (positions[from * 3] as number) / restHeight;
+    rest[vertex * 3 + 1] = ((positions[from * 3 + 1] as number) - lowest) / restHeight;
+    rest[vertex * 3 + 2] = (positions[from * 3 + 2] as number) / restHeight;
+    column[vertex] = vertex;
+    const bone = mesh.skeleton.bones[dominant[from] as number];
+    region[vertex] = regionOf(
+      bone?.name ?? '',
+      positions[from * 3 + 1] as number,
+      positions[from * 3 + 2] as number,
+      landmarks,
+    );
+  }
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new BufferAttribute(rest, 3));
+  geometry.setAttribute('oylVertex', new BufferAttribute(column, 1));
+  geometry.setAttribute('oylRegion', new BufferAttribute(region, 1));
+  geometry.setIndex(new BufferAttribute(cut.indices, 1));
+  geometry.computeBoundingSphere();
+
+  // The poses, baked.
+  const ordered = mesh.skeleton.bones;
+  const restQuaternions = ordered.map((bone) => bone.quaternion.clone());
+  const restPositions = ordered.map((bone) => bone.position.clone());
+  const across = new Vector3(1, 0, 0);
+  const forward = new Vector3(0, 0, 1);
+  const up = new Vector3(0, 1, 0);
+  // How far the rest pose holds each arm out from the side, measured — never typed.
+  const abduction = (side: 'L' | 'R'): number => {
+    const shoulder = local(`upperarm01.${side}`);
+    const elbow = local(`lowerarm01.${side}`);
+    return Math.atan2(Math.abs(elbow.x - shoulder.x), shoulder.y - elbow.y);
+  };
+  // And how bent the rest pose holds the elbow.
+  const restElbow = (side: 'L' | 'R'): number => {
+    const shoulder = local(`upperarm01.${side}`);
+    const elbow = local(`lowerarm01.${side}`);
+    const wrist = local(`wrist.${side}`);
+    return elbow.clone().sub(shoulder).angleTo(wrist.clone().sub(elbow));
+  };
+  const held = { L: abduction('L'), R: abduction('R') };
+  const bent = { L: restElbow('L'), R: restElbow('R') };
+  // The arms hang this far out from the side when walking.
+  const hang = (8 * Math.PI) / 180;
+  const width = kept;
+  const height = ANIMATION_ROWS;
+  const data = new Uint16Array(width * height * 4);
+  const scratch = new Vector3();
+  const posed = new Float32Array(kept * 3);
+  GAITS.forEach((gait, gaitAt) => {
+    for (let phase = 0; phase < GAIT_PHASES; phase += 1) {
+      ordered.forEach((bone, at) => {
+        bone.quaternion.copy(restQuaternions[at] as Quaternion);
+        bone.position.copy(restPositions[at] as Vector3);
+      });
+      holder.updateMatrixWorld(true);
+      const pose = gaitPose(gait, phase / GAIT_PHASES);
+      for (const [side, limb, sign] of [
+        ['L', pose.left, -1],
+        ['R', pose.right, 1],
+      ] as const) {
+        // The arm down to the side, swung, and its elbow bent.
+        turnBoneInWorld(boneOf(bones, `upperarm01.${side}`), forward, sign * (held[side] - hang));
+        turnBoneInWorld(boneOf(bones, `upperarm01.${side}`), across, -limb.shoulder);
+        turnBoneInWorld(boneOf(bones, `lowerarm01.${side}`), across, bent[side] - limb.elbow);
+        // The leg: hip, knee and ankle, in the body's own sagittal plane.
+        turnBoneInWorld(boneOf(bones, `upperleg01.${side}`), across, -limb.hip);
+        turnBoneInWorld(boneOf(bones, `lowerleg01.${side}`), across, limb.knee);
+        turnBoneInWorld(boneOf(bones, `foot.${side}`), across, -limb.ankle);
+      }
+      // The trunk leans, the head is held level, and the pelvis turns under
+      // shoulders that stay square.
+      turnBoneInWorld(boneOf(bones, 'spine05'), across, pose.lean);
+      turnBoneInWorld(boneOf(bones, 'neck01'), across, -pose.lean);
+      turnBoneInWorld(boneOf(bones, 'root'), up, -pose.pelvisTurn);
+      turnBoneInWorld(boneOf(bones, 'spine05'), up, pose.pelvisTurn);
+      holder.updateMatrixWorld(true);
+      let floor = Number.POSITIVE_INFINITY;
+      for (let vertex = 0; vertex < kept; vertex += 1) {
+        const from = cut.kept[vertex] as number;
+        scratch.set(
+          positions[from * 3] as number,
+          positions[from * 3 + 1] as number,
+          positions[from * 3 + 2],
+        );
+        mesh.applyBoneTransform(from, scratch);
+        posed[vertex * 3] = scratch.x / restHeight;
+        posed[vertex * 3 + 1] = scratch.y / restHeight;
+        posed[vertex * 3 + 2] = scratch.z / restHeight;
+        floor = Math.min(floor, posed[vertex * 3 + 1] as number);
+      }
+      // Planted on the ground, and a run's flight above it.
+      const lift = pose.lift / 1.75 - floor;
+      for (let vertex = 0; vertex < kept; vertex += 1) {
+        posed[vertex * 3 + 1] = (posed[vertex * 3 + 1] as number) + lift;
+      }
+      const normals = vertexNormals(posed, cut.indices);
+      const row = animationRow(gaitAt, phase);
+      for (let vertex = 0; vertex < kept; vertex += 1) {
+        const at = (row * width + vertex) * 4;
+        const normalAt = ((row + ANIMATION_ROWS / 2) * width + vertex) * 4;
+        for (let axis = 0; axis < 3; axis += 1) {
+          data[at + axis] = DataUtils.toHalfFloat(posed[vertex * 3 + axis] as number);
+          data[normalAt + axis] = DataUtils.toHalfFloat(normals[vertex * 3 + axis] as number);
+        }
+        data[at + 3] = DataUtils.toHalfFloat(1);
+        data[normalAt + 3] = DataUtils.toHalfFloat(0);
+      }
+    }
+  });
+  const animation = new DataTexture(data, width, height, RGBAFormat, HalfFloatType);
+  animation.minFilter = NearestFilter;
+  animation.magFilter = NearestFilter;
+  animation.generateMipmaps = false;
+  animation.needsUpdate = true;
+  return { geometry, animation, vertices: kept };
+}
+
+/** Packed sRGB `0xRRGGBB` in a float, to linear RGB — the GLSL both people materials share. */
+const PEOPLE_UNPACK = /* glsl */ `
+vec3 oylUnpack(float packed) {
+  float r = floor(packed / 65536.0);
+  float g = floor((packed - r * 65536.0) / 256.0);
+  float b = packed - r * 65536.0 - g * 256.0;
+  vec3 c = vec3(r, g, b) / 255.0;
+  return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));
+}
+`;
+
+/**
+ * The bodies' material — #1541: physically based, its positions and normals
+ * read from the animation texture at the instance's gait and phase, its
+ * colour the instance's for the vertex's region. @see PeopleBelt
+ */
+function peopleBodyMaterial(animation: DataTexture, vertices: number): MeshStandardMaterial {
+  const material = constructed(
+    new MeshStandardMaterial({ color: 0xffffff, roughness: 0.85, metalness: 0 }),
+  );
+  const spliced = "#1541's people";
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms['oylAnimation'] = { value: animation };
+    shader.vertexShader = replacedOrThrown(
+      replacedOrThrown(
+        replacedOrThrown(
+          shader.vertexShader,
+          '#include <common>',
+          /* glsl */ `#include <common>
+uniform highp sampler2D oylAnimation;
+attribute float oylVertex;
+attribute float oylRegion;
+attribute vec4 oylLook;
+attribute vec4 oylMotion;
+varying vec3 vOylColour;
+${PEOPLE_UNPACK}`,
+          'vertex',
+          spliced,
+        ),
+        '#include <beginnormal_vertex>',
+        /* glsl */ `
+float oylAt = oylMotion.y * ${glslFloat(GAIT_PHASES)};
+float oylLow = floor(oylAt);
+float oylBlend = oylAt - oylLow;
+int oylBase = int(oylMotion.x + 0.5) * ${String(GAIT_PHASES)};
+int oylRowA = oylBase + int(oylLow) % ${String(GAIT_PHASES)};
+int oylRowB = oylBase + (int(oylLow) + 1) % ${String(GAIT_PHASES)};
+int oylColumn = int(oylVertex + 0.5);
+vec3 objectNormal = normalize(mix(
+  texelFetch(oylAnimation, ivec2(oylColumn, oylRowA + ${String(ANIMATION_ROWS / 2)}), 0).xyz,
+  texelFetch(oylAnimation, ivec2(oylColumn, oylRowB + ${String(ANIMATION_ROWS / 2)}), 0).xyz,
+  oylBlend));
+#ifdef USE_TANGENT
+  vec3 objectTangent = vec3(1.0, 0.0, 0.0);
+#endif
+vOylColour = oylRegion < 0.5 ? oylUnpack(oylLook.x)
+  : oylRegion < 1.5 ? oylUnpack(oylLook.y)
+  : oylRegion < 2.5 ? oylUnpack(oylLook.z)
+  : oylRegion < 3.5 ? oylUnpack(oylLook.w)
+  : oylUnpack(oylMotion.z);`,
+        'vertex',
+        spliced,
+      ),
+      '#include <begin_vertex>',
+      /* glsl */ `vec3 transformed = mix(
+  texelFetch(oylAnimation, ivec2(oylColumn, oylRowA), 0).xyz,
+  texelFetch(oylAnimation, ivec2(oylColumn, oylRowB), 0).xyz,
+  oylBlend);`,
+      'vertex',
+      spliced,
+    );
+    shader.fragmentShader = replacedOrThrown(
+      replacedOrThrown(
+        shader.fragmentShader,
+        '#include <common>',
+        '#include <common>\nvarying vec3 vOylColour;',
+        'fragment',
+        spliced,
+      ),
+      '#include <color_fragment>',
+      '#include <color_fragment>\ndiffuseColor.rgb *= vOylColour;',
+      'fragment',
+      spliced,
+    );
+  };
+  material.customProgramCacheKey = () => `oyl-people-${String(vertices)}`;
+  return withAtmosphere(material);
+}
+
+/**
+ * The impostors' material — #1541: a quad turned to the camera about the
+ * vertical, on which the fragment draws a figure from capsules and a circle
+ * in the instance's colours, its legs and arms swung by the instance's hip
+ * angles and foreshortened by how side-on it stands. @see PeopleBelt
+ */
+function peopleImpostorMaterial(): MeshStandardMaterial {
+  const material = constructed(
+    new MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, metalness: 0 }),
+  );
+  const spliced = "#1541's people far off";
+  material.onBeforeCompile = (shader) => {
+    shader.vertexShader = replacedOrThrown(
+      replacedOrThrown(
+        replacedOrThrown(
+          shader.vertexShader,
+          '#include <common>',
+          /* glsl */ `#include <common>
+attribute vec4 oylLook;
+attribute vec4 oylMotion;
+varying vec2 vOylQuad;
+varying float vOylSide;
+varying vec2 vOylHips;
+varying vec3 vOylSkin;
+varying vec3 vOylTop;
+varying vec3 vOylBottoms;
+varying vec3 vOylShoes;
+varying vec3 vOylHair;
+${PEOPLE_UNPACK}`,
+          'vertex',
+          spliced,
+        ),
+        '#include <beginnormal_vertex>',
+        /* glsl */ `
+vec3 oylFeet = (modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+vec3 oylToCamera = cameraPosition - oylFeet;
+oylToCamera.y = 0.0;
+oylToCamera = length(oylToCamera) > 1e-4 ? normalize(oylToCamera) : vec3(0.0, 0.0, 1.0);
+vec3 oylRight = vec3(oylToCamera.z, 0.0, -oylToCamera.x);
+vec3 objectNormal = oylToCamera;
+#ifdef USE_TANGENT
+  vec3 objectTangent = oylRight;
+#endif
+vec3 oylFacing = vec3(sin(oylMotion.x), 0.0, cos(oylMotion.x));
+vOylSide = dot(oylFacing, -oylRight);
+vOylHips = oylMotion.yz;
+vOylQuad = vec2(position.x, position.y);
+vOylSkin = oylUnpack(oylLook.x);
+vOylTop = oylUnpack(oylLook.y);
+vOylBottoms = oylUnpack(oylLook.z);
+vOylShoes = oylUnpack(oylLook.w);
+vOylHair = oylUnpack(oylMotion.w);`,
+        'vertex',
+        spliced,
+      ),
+      '#include <begin_vertex>',
+      'vec3 transformed = oylRight * position.x * 0.5 + vec3(0.0, position.y, 0.0);',
+      'vertex',
+      spliced,
+    );
+    shader.fragmentShader = replacedOrThrown(
+      replacedOrThrown(
+        shader.fragmentShader,
+        '#include <common>',
+        /* glsl */ `#include <common>
+varying vec2 vOylQuad;
+varying float vOylSide;
+varying vec2 vOylHips;
+varying vec3 vOylSkin;
+varying vec3 vOylTop;
+varying vec3 vOylBottoms;
+varying vec3 vOylShoes;
+varying vec3 vOylHair;
+float oylCapsule(vec2 p, vec2 a, vec2 b, float r) {
+  vec2 pa = p - a;
+  vec2 ba = b - a;
+  float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+  return length(pa - ba * h) - r;
+}`,
+        'fragment',
+        spliced,
+      ),
+      '#include <color_fragment>',
+      /* glsl */ `#include <color_fragment>
+{
+  // In heights: the quad is half a height wide, feet at 0, crown at 1.
+  vec2 p = vec2(vOylQuad.x * 0.5, vOylQuad.y);
+  float side = abs(vOylSide);
+  float facing = vOylSide >= 0.0 ? 1.0 : -1.0;
+  float apart = 0.05 * (1.0 - side);
+  vec2 hipL = vec2(-apart, 0.5);
+  vec2 hipR = vec2(apart, 0.5);
+  vec2 footL = hipL + 0.47 * vec2(sin(vOylHips.x) * side * facing, -cos(vOylHips.x));
+  vec2 footR = hipR + 0.47 * vec2(sin(vOylHips.y) * side * facing, -cos(vOylHips.y));
+  float shoulders = 0.13 * (1.0 - 0.5 * side);
+  vec2 armL = vec2(-shoulders, 0.8);
+  vec2 armR = vec2(shoulders, 0.8);
+  vec2 handL = armL + 0.33 * vec2(-sin(vOylHips.x) * 0.6 * side * facing, -1.0);
+  vec2 handR = armR + 0.33 * vec2(-sin(vOylHips.y) * 0.6 * side * facing, -1.0);
+  float legs = min(oylCapsule(p, hipL, footL, 0.035), oylCapsule(p, hipR, footR, 0.035));
+  float arms = min(oylCapsule(p, armL, handL, 0.026), oylCapsule(p, armR, handR, 0.026));
+  vec2 trunk = abs(p - vec2(0.0, 0.66)) - vec2(0.11 * (1.0 - 0.35 * side), 0.16);
+  float body = length(max(trunk, 0.0)) + min(max(trunk.x, trunk.y), 0.0) - 0.02;
+  float head = length(p - vec2(0.0, 0.93)) - 0.06;
+  if (min(min(legs, arms), min(body, head)) > 0.0) discard;
+  vec3 colour = vOylBottoms;
+  if (head <= 0.0) colour = p.y > 0.945 ? vOylHair : vOylSkin;
+  else if (body <= 0.0) colour = vOylTop;
+  else if (arms <= 0.0) colour = p.y > 0.62 ? vOylTop : vOylSkin;
+  else if (p.y < 0.04) colour = vOylShoes;
+  diffuseColor.rgb *= colour;
+}`,
+      'fragment',
+      spliced,
+    );
+  };
+  material.customProgramCacheKey = () => 'oyl-people-far';
+  return withAtmosphere(material);
+}
+
+/**
+ * Turns a view's people off, or on again — #1541. The browser gate's switch,
+ * for the frame time and draw calls they cost; the product draws them on the
+ * rung that asks for them (`quality.ts` §`QualitySettings.people`).
+ *
+ * @test-facing the browser gate's control switch, read by `game-harness.ts`
+ */
+export function peopleShownOf(view: GameView, on: boolean): void {
+  if (view instanceof ThreeGameView) view.peopleShown(on);
+}
+
+/**
+ * Where each person a view drew in its last frame stands — #1541: each
+ * instance's feet, read back off the belt's two meshes, the bodies' and the
+ * impostors', with its height. `undefined` where no realistic world is built.
+ *
+ * @test-facing read by `game-harness.ts`, which holds every one of them off
+ * the carriageway
+ */
+export function peopleDrawnOf(view: GameView):
+  | {
+      readonly near: readonly { readonly x: number; readonly z: number; readonly height: number }[];
+      readonly far: readonly { readonly x: number; readonly z: number; readonly height: number }[];
+      readonly triangles: number;
+      readonly animationBytes: number;
+    }
+  | undefined {
+  const belt = view instanceof ThreeGameView ? view.people : undefined;
+  if (belt === undefined) return undefined;
+  const read = (mesh: InstancedMesh) => {
+    if (!mesh.visible) return [];
+    const matrix = new Matrix4();
+    const at = new Vector3();
+    const turn = new Quaternion();
+    const scale = new Vector3();
+    return [...Array(mesh.count).keys()].map((index) => {
+      mesh.getMatrixAt(index, matrix);
+      matrix.decompose(at, turn, scale);
+      return { x: at.x, z: at.z, height: scale.y };
+    });
+  };
+  return {
+    near: read(belt.bodies),
+    far: read(belt.impostors),
+    triangles: belt.triangles,
+    animationBytes: belt.animationBytes,
+  };
+}
+
+/**
  * The kit a view holds for the rider, and the one its stylised belt draws the
  * rider in — #623.
  *
@@ -14275,6 +14949,8 @@ class RealisticDrawing {
   readonly pavements: PavementBelt;
   /** What stands on them: lamp posts, bollards, benches and bins — #1536. */
   readonly furniture: FurnitureBelt;
+  /** Who walks them, and the footways — #1541. */
+  readonly people: PeopleBelt;
   readonly environment: Texture;
   /** The road's and the ground's photographic materials. @see setSurfaces */
   #road: MeshStandardMaterial;
@@ -14348,6 +15024,7 @@ class RealisticDrawing {
     this.logos = new LogoBelt(world.wordmark, 'realistic');
     this.pavements = new PavementBelt('realistic', world.structures.get('paving'));
     this.furniture = new FurnitureBelt('realistic', world.structures.get('planks'));
+    this.people = new PeopleBelt(world.body);
     this.#casterLists = [this.vegetation.grounded, this.#structureCasters];
     this.#road = this.#roadMaterial();
     this.#ground = this.#groundMaterial();
@@ -14425,6 +15102,7 @@ class RealisticDrawing {
     this.logos.addTo(scene);
     this.pavements.addTo(scene);
     this.furniture.addTo(scene);
+    this.people.addTo(scene);
   }
 
   setShown(on: boolean): void {
@@ -14439,6 +15117,7 @@ class RealisticDrawing {
     this.logos.setShown(on);
     this.pavements.setShown(on);
     this.furniture.setShown(on);
+    this.people.setShown(on);
     // #626: shown only by the view, on a rung that grounds riders by contact.
     if (!on) this.shadows.setShown(false);
   }
@@ -14587,6 +15266,7 @@ class RealisticDrawing {
     this.logos.dispose();
     this.pavements.dispose();
     this.furniture.dispose();
+    this.people.dispose();
     this.#road.dispose();
     this.#ground.dispose();
     this.environment.dispose();
@@ -15934,6 +16614,8 @@ class ThreeGameView implements GameView {
     // #1536: and what stands on them, within reach of the camera.
     this.#realistic?.furniture.update(frame.streets, frame.camera);
     this.#furniture.update(frame.streets, frame.camera);
+    // #1541: and who walks them, in the realistic world only.
+    this.#realistic?.people.update(frame.people);
     this.#updateMarkers(
       split?.stylised ??
         (realisticFrame
@@ -16286,6 +16968,16 @@ class ThreeGameView implements GameView {
   pavementsShown(on: boolean): void {
     this.#realistic?.pavements.switchOn(on);
     this.#pavements.switchOn(on);
+  }
+
+  /** @see peopleShownOf */
+  peopleShown(on: boolean): void {
+    this.#realistic?.people.switchOn(on);
+  }
+
+  /** @see peopleDrawnOf — the realistic world's, whether or not it is the one drawn. */
+  get people(): PeopleBelt | undefined {
+    return this.#realistic?.people;
   }
 
   /** @see doorPathsShownOf */

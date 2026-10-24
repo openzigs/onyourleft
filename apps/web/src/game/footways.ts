@@ -14,8 +14,8 @@
  *    sidewalk is mapped. Where nothing was read the answer is `unknown`, and
  *    #1535's own rule stands ({@link NO_PAVEMENT_DATA}).
  * 2. **{@link footwayNetwork}** — the footways as 2 m polylines in the corridor
- *    frame, clipped to the corridor and kept off the carriageway, for #1541's
- *    pedestrians.
+ *    frame, clipped to the corridor and kept off the carriageway, which #1541's
+ *    pedestrians walk (`people.ts`).
  *
  * ## ⚠️ The side is the road's NORMAL, never the sign of `x`
  *
@@ -67,18 +67,10 @@ export const PAVEMENT_SIDES_STEP_METRES = 2;
 /** How far apart a {@link FootwayNetwork} line's points are, in metres: **2**. */
 export const FOOTWAY_STEP_METRES = 2;
 
-/**
- * The most lines a route's network keeps: **2 000**, nearest the route first.
- *
- * @unwired #1541 passes it to `footwayNetwork` (phase C), its first production reader.
- */
+/** The most lines a route's network keeps: **2 000**, nearest the route first. */
 export const FOOTWAY_MAX_LINES = 2_000;
 
-/**
- * The most metres of footway a route's network keeps: **50 000**, nearest the route first.
- *
- * @unwired #1541 passes it to `footwayNetwork` (phase C), its first production reader.
- */
+/** The most metres of footway a route's network keeps: **50 000**, nearest the route first. */
 export const FOOTWAY_MAX_METRES = 50_000;
 
 /**
@@ -103,14 +95,15 @@ export interface PavementSides {
   sideAt(along: number): PavementSide;
 }
 
-/**
- * What #1541's pedestrians walk on.
- *
- * @unwired #1541 walks it (phase C): its pedestrians are its first production reader.
- */
+/** What #1541's pedestrians walk on (`people.ts` §`footwayWalks`). */
 export interface FootwayNetwork {
   /** Corridor frame, `x0, z0, x1, z1, …`, resampled every 2 m, clipped to the corridor. */
   readonly lines: readonly Float32Array[];
+  /**
+   * #1541: each line's footway's `kind_detail` — `sidewalk`, `footway`, or
+   * `''` for a plain `path` — so a runner keeps to a path and off a sidewalk.
+   */
+  readonly details: readonly string[];
   readonly totalMetres: number;
 }
 
@@ -279,10 +272,11 @@ export function pavementSides(
 
 // --- The walkable network -------------------------------------------------
 
-/** One run of kept points, and how near the road it comes. */
+/** One run of kept points, how near the road it comes, and its footway's `kind_detail`. */
 interface Run {
   readonly points: number[];
   readonly nearest: number;
+  readonly detail: string;
 }
 
 /**
@@ -345,8 +339,6 @@ function metresOf(points: readonly number[]): number {
  * point is on the carriageway, outside the corridor's half-width or on land
  * that was not read, and bounded by `limits` — nearest the route first, the
  * line that reaches `maxMetres` cut where it does.
- *
- * @unwired #1541 walks it (phase C): its pedestrians are its first production reader.
  */
 export function footwayNetwork(
   corridor: WorldCorridor,
@@ -362,7 +354,7 @@ export function footwayNetwork(
     let nearest = Number.POSITIVE_INFINITY;
     let previous = Number.POSITIVE_INFINITY;
     const close = (): void => {
-      if (run.length >= 4) runs.push({ points: run, nearest });
+      if (run.length >= 4) runs.push({ points: run, nearest, detail: path.kindDetail });
       run = [];
       nearest = Number.POSITIVE_INFINITY;
     };
@@ -385,6 +377,7 @@ export function footwayNetwork(
   }
   runs.sort((a, b) => a.nearest - b.nearest);
   const lines: Float32Array[] = [];
+  const details: string[] = [];
   let totalMetres = 0;
   for (const run of runs) {
     if (lines.length >= limits.maxLines || totalMetres >= limits.maxMetres) break;
@@ -407,7 +400,8 @@ export function footwayNetwork(
       metres = kept;
     }
     lines.push(Float32Array.from(points));
+    details.push(run.detail);
     totalMetres += metres;
   }
-  return { lines, totalMetres };
+  return { lines, details, totalMetres };
 }

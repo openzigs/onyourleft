@@ -483,6 +483,8 @@ async function run(): Promise<void> {
       rung: worldRung(state),
       // #1534's pair: the villages' ground left wooded.
       settlementsWooded: config.leversOff.includes('settlement-clearing'),
+      // #1541's pair: the people off.
+      peopleOff: config.leversOff.includes('people'),
       ...(town === undefined ? {} : { town }),
     });
     view.render(drawn);

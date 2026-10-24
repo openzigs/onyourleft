@@ -75,6 +75,7 @@ import {
 } from '../src/game/realistic-budget';
 import { MAXIMUM_DRAWN_SET } from '../src/net/interest';
 import { SIDE_ROAD_FRAME_TRIANGLES } from '../src/game/cross-streets';
+import { PERSON_ANIMATION_MAX_BYTES, PERSON_MAX_TRIANGLES } from '../src/game/people-body';
 import { SURFACE_WEAR_ALLOWANCE, WORN_ROAD_CONTRAST_FLOOR } from '../src/game/road-wear';
 
 import { NIGHTLY } from './nightly';
@@ -3622,6 +3623,34 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     expect(apart(leftMapped, leftOff)).toBeLessThan(3);
     // The control: #1535's own sides put a pavement on the left here.
     expect(apart(leftProcedural, leftOff)).toBeGreaterThan(8);
+  });
+
+  test('#1541 people: never inside the carriageway, and with the rule off a shoulder is; in at most two draw calls', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { people } = await realistic(harnessRun);
+    const measured =
+      `clearance ${people.clearance.toFixed(2)} m with the rule (${people.drawn.join(' bodies, ')} impostors), ` +
+      `${people.clearanceOff.toFixed(2)} m without (${people.drawnOff.join(' bodies, ')} impostors); ` +
+      `${String(people.drawCalls)} draw calls; ${String(people.triangles)} triangles a body; ` +
+      `${String(people.animationBytes)} bytes of animation; pixels changed: body ${String(people.bodyPixels)}, impostor ${String(people.impostorPixels)}`;
+    testInfo.annotations.push({ type: 'people', description: measured });
+    console.log(`people — ${measured}`);
+    // Somebody was drawn, so the rule had somebody to hold.
+    expect((people.drawn[0] ?? 0) + (people.drawn[1] ?? 0)).toBeGreaterThan(0);
+    // No drawn person's shoulder is over the kerb line of any stretch of the road.
+    expect(people.clearance).toBeGreaterThanOrEqual(0);
+    // The control: with the rule off, the kerbside sidewalk puts one over it.
+    expect(people.clearanceOff).toBeLessThan(0);
+    // The budget: one call for the bodies and one for the impostors.
+    expect(people.drawCalls).toBe(2);
+    expect(people.triangles).toBeGreaterThan(0);
+    expect(people.triangles).toBeLessThanOrEqual(PERSON_MAX_TRIANGLES);
+    expect(people.animationBytes).toBeGreaterThan(0);
+    expect(people.animationBytes).toBeLessThanOrEqual(PERSON_ANIMATION_MAX_BYTES);
+    // What is drawn is a person, where `people.ts` put them, near and far.
+    expect(people.bodyPixels).toBeGreaterThan(10);
+    expect(people.impostorPixels).toBeGreaterThan(0);
   });
 
   test('#1547 a town on the flat: the drawn ground under a mapped block’s centre footprint is within 1 m, and over 5 m without the levelling', async ({
