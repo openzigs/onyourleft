@@ -24,6 +24,7 @@
     "test:browser:nightly:shard-2": "vite build && vite build --config vite.browser.config.ts && playwright test --project nightly --workers 1 realistic.browser.spec.ts",
     "test:browser:nightly:shard-3": "vite build && vite build --config vite.browser.config.ts && playwright test --project nightly --workers 1 realistic-trees.browser.spec.ts realistic-wreath.browser.spec.ts",
     "test:browser:nightly:shard-4": "vite build && vite build --config vite.browser.config.ts && playwright test --project nightly --workers 1 realistic-town.browser.spec.ts",
+    "test:browser:nightly:shard-5": "vite build && vite build --config vite.browser.config.ts && playwright test --project nightly --workers 1 realistic-mapped.browser.spec.ts",
     "test:browser:shard-1": "vite build && vite build --config vite.browser.config.ts || exit 1; playwright test --project chromium --shard 1/2 --workers 3 --global-timeout 720000",
     "test:browser:shard-2": "vite build && vite build --config vite.browser.config.ts || exit 1; playwright test --project chromium --shard 2/2 --workers 3 --global-timeout 720000; chromium=$?; playwright test --project game --global-timeout 85000 --output browser/dist/test-results/game; game=$?; [ $chromium -eq 0 ] && [ $game -eq 0 ]"
   },

@@ -74,6 +74,7 @@ on:
       - apps/web/browser/not-run-reporter.ts
       - apps/web/browser/realistic.browser.spec.ts
       - apps/web/browser/realistic-ride.ts
+      - apps/web/browser/realistic-mapped.browser.spec.ts
       - apps/web/browser/realistic-town.browser.spec.ts
       - apps/web/browser/realistic-trees.browser.spec.ts
       - apps/web/browser/reflow.browser.spec.ts
@@ -154,7 +155,7 @@ jobs:
       # old file: on one worker the whole set took 804 s of its 840 s stop
       # (run 40141730529) and three runs stopped there with 9 to 15 not run.
       # This shard is every nightly spec but the owner's realistic page, whose
-      # three spec files the `browser-2`, `browser-3` and `browser-4` jobs
+      # four spec files the `browser-2` to `browser-5` jobs
       # below run, each on a runner of its own, so each still has the CPU to
       # itself (#1698: the page's one file outgrew one job, reaching 840 s on
       # run 40188796060). Split by FILE rather than with `--shard`, which
@@ -165,7 +166,7 @@ jobs:
       # one shard, and each realistic shard's page loads inside 60 % of its
       # stop. docs/agents/ci.md section 4c "Four nightly browser shards --
       # #1698" has the measurements.
-      - name: Nightly browser checks (1 of 4)
+      - name: Nightly browser checks (1 of 5)
         run: pnpm run test:browser:nightly:shard-1
 
       # --- The coverage report (#1280) ----------------------------------------
@@ -213,7 +214,7 @@ jobs:
   # `realistic.browser.spec.ts`: the instruments (#616) and the route's
   # season (#1623). Every step and pin is `heavy`'s, whose comments say why.
   browser-2:
-    name: Nightly browser checks (2 of 4)
+    name: Nightly browser checks (2 of 5)
     runs-on: ubuntu-latest
     # A stop, not a budget: the Playwright run stops itself at 840 s
     # (playwright.config.ts GATE_BUDGET_MS), about 90 s into the job.
@@ -250,16 +251,16 @@ jobs:
       - name: Install the pinned Chromium
         run: pnpm --filter @onyourleft/web exec playwright install --with-deps chromium
 
-      - name: Nightly browser checks (2 of 4)
+      - name: Nightly browser checks (2 of 5)
         run: pnpm run test:browser:nightly:shard-2
 
   # `realistic-trees.browser.spec.ts`: the page's tree levers (#1283, #1294,
   # #1523). As `browser-2`, whose comment says why it is a job of its own.
-  # A deliberate copy of `browser-2` (and `browser-4` of both), not a matrix:
-  # `nightly-split.test.ts` holds each shard in a job of its own, so a change
-  # to one job's steps or SHA pins is made in all three.
+  # A deliberate copy of `browser-2` (and `browser-4` and `browser-5` of
+  # both), not a matrix: `nightly-split.test.ts` holds each shard in a job of
+  # its own, so a change to one job's steps or SHA pins is made in all four.
   browser-3:
-    name: Nightly browser checks (3 of 4)
+    name: Nightly browser checks (3 of 5)
     runs-on: ubuntu-latest
     # A stop, not a budget: the Playwright run stops itself at 840 s
     # (playwright.config.ts GATE_BUDGET_MS), about 90 s into the job.
@@ -296,14 +297,14 @@ jobs:
       - name: Install the pinned Chromium
         run: pnpm --filter @onyourleft/web exec playwright install --with-deps chromium
 
-      - name: Nightly browser checks (3 of 4)
+      - name: Nightly browser checks (3 of 5)
         run: pnpm run test:browser:nightly:shard-3
 
-  # `realistic-town.browser.spec.ts`: the village road (#1559), the
-  # mapped-blobs lever (#1657) and the holiday decorations (#1624). As
+  # `realistic-town.browser.spec.ts`: the village road (#1559), the holiday
+  # decorations (#1624) and the village frame's freeze (#1689). As
   # `browser-2`, whose comment says why it is a job of its own.
   browser-4:
-    name: Nightly browser checks (4 of 4)
+    name: Nightly browser checks (4 of 5)
     runs-on: ubuntu-latest
     # A stop, not a budget: the Playwright run stops itself at 840 s
     # (playwright.config.ts GATE_BUDGET_MS), about 90 s into the job.
@@ -340,16 +341,61 @@ jobs:
       - name: Install the pinned Chromium
         run: pnpm --filter @onyourleft/web exec playwright install --with-deps chromium
 
-      - name: Nightly browser checks (4 of 4)
+      - name: Nightly browser checks (4 of 5)
         run: pnpm run test:browser:nightly:shard-4
+
+  # `realistic-mapped.browser.spec.ts`: the mapped-blobs lever (#1657) and
+  # the city centre (#1636), out of `browser-4` since the combined PR that
+  # brought #1636 and #1689 together took it past 7 loads. As `browser-2`,
+  # whose comment says why it is a job of its own.
+  browser-5:
+    name: Nightly browser checks (5 of 5)
+    runs-on: ubuntu-latest
+    # A stop, not a budget: the Playwright run stops itself at 840 s
+    # (playwright.config.ts GATE_BUDGET_MS), about 90 s into the job.
+    timeout-minutes: 20
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Record the runner's CPU
+        run: lscpu | grep -E '^(Model name|Thread|Core|Socket|CPU\(s\))'
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Enable pnpm through corepack
+        env:
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+        run: |
+          corepack enable pnpm
+          pnpm --version
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Drop the unrelated Chrome apt source
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/google-chrome.list \
+                     /etc/apt/sources.list.d/google-chrome.sources
+
+      - name: Install the pinned Chromium
+        run: pnpm --filter @onyourleft/web exec playwright install --with-deps chromium
+
+      - name: Nightly browser checks (5 of 5)
+        run: pnpm run test:browser:nightly:shard-5
 
   # A red nightly run has to be SEEN, or moving a check here is deleting it.
   # Opens an issue the first time, and comments on it while it stays open.
   report:
     name: Report a red run
-    # Every job since #1675 (four since #1698): a red realistic shard has to
-    # open the issue too.
-    needs: [heavy, browser-2, browser-3, browser-4]
+    # Every job since #1675 (four since #1698, five since #1636 met #1689): a
+    # red realistic shard has to open the issue too.
+    needs: [heavy, browser-2, browser-3, browser-4, browser-5]
     # `result` rather than `failure()`: a job stopped by its timeout-minutes
     # ends `cancelled`, not `failed`, and a hung run must be reported too.
     # (A run cancelled by hand is reported as well; that is the cheaper error.)

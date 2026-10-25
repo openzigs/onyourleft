@@ -1,17 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * The owner's realistic page in a town, in the pinned Chromium — #1559,
- * #1657, #1624 and #1689; in a file of their own since #1698.
+ * The owner's realistic page in a village, in the pinned Chromium — #1559,
+ * #1624 and #1689; in a file of their own since #1698.
  *
  * - **The village road** (#1559): `?route=village` rides `route.ts`
  *   §`villageRoute`, and its hold at `VILLAGE_HOLD_METRES` is validation 0002
  *   AE2's frame: the page's census of the frame it drew holds a church and a
  *   row of shops in the camera's view, #1535's pavements and every kind of
  *   #1536's furniture.
- * - **The mapped-blobs lever** (#1657): `levers=-mapped-blobs` takes the
- *   mapped buildings' ground blobs out of the mixed town's frame, and nothing
- *   else.
  * - **The holiday decorations** (#1624, #1625): on a day in Halloween, the
  *   village in reach carries the product's own pumpkins and jack-o'-lanterns
  *   (`decorations.ts` §`HOLIDAY_DECORATIONS`; until #1625 a probe box on
@@ -28,6 +25,11 @@
  *   feature that adds a village call is red until it removes one, and a merge
  *   that saves one lowers the number.
  *
+ * ⚠️ **The mapped towns' describes — the mapped-blobs lever (#1657) and the
+ * city centre (#1636) — are in `realistic-mapped.browser.spec.ts`** since the
+ * combined PR that brought #1636 and #1689 together: with both, this file's
+ * loads passed the 7 a shard may hold (`nightly-split.test.ts`, #1698).
+ *
  * ⚠️ **Until #1698 these describes were in `realistic.browser.spec.ts`**,
  * which one nightly job ran alone until its loads outgrew the job's 840 s
  * stop. This file's nightly describes are a job of their own
@@ -37,9 +39,7 @@
 
 import { expect, test } from '@playwright/test';
 
-import { GROUND_BLOB_TRIANGLES } from '../src/game/ground-blob';
 import {
-  MAPPED_BUILDING_MAX,
   REALISTIC_DECORATION_TRIANGLES,
   REALISTIC_VILLAGE_DRAW_CALLS,
   REALISTIC_WINTER_LIGHTS_TRIANGLES,
@@ -88,59 +88,6 @@ test.describe('the realistic page’s village road — #1559', { tag: NIGHTLY },
     // And the frame was drawn, not only built.
     expect(village.result.lastFrame.triangles).toBeGreaterThan(0);
     expect(village.result.lastFrame.calls).toBeGreaterThan(0);
-  });
-});
-
-test.describe('the realistic page’s mapped-blobs lever — #1657', { tag: NIGHTLY }, () => {
-  test('grounds the mixed town’s buildings, and with the lever off draws none of their blobs', async ({
-    page,
-  }) => {
-    test.setTimeout(2 * REALISTIC_LOAD_BUDGET_MS);
-    // Inside #1581's mixed town, held; the people off, so that nothing but
-    // the lever differs between the two frames.
-    const town = '?ladder=0&panel=0&seconds=1&town=mixed&at=1300&levers=-people';
-    const grounded = await ride(page, town);
-    const off = await ride(page, `${town},-mapped-blobs`);
-    const added = grounded.result.lastFrame.triangles - off.result.lastFrame.triangles;
-    console.log(
-      `#1657 town=mixed at=1300: ${String(grounded.result.lastFrame.triangles)} triangles in ` +
-        `${String(grounded.result.lastFrame.calls)} draw calls grounded, ` +
-        `${String(off.result.lastFrame.triangles)} in ${String(off.result.lastFrame.calls)} ` +
-        `with the lever off: ${String(added / GROUND_BLOB_TRIANGLES)} mapped blobs`,
-    );
-    expect(grounded.result.leversOff).toEqual(['people']);
-    expect(off.result.leversOff).toEqual(['mapped-blobs', 'people']);
-    // The lever reaches the blobs: off, the frame draws fewer, a quad each,
-    // and at most one a mapped building.
-    expect(added).toBeGreaterThan(0);
-    expect(added % GROUND_BLOB_TRIANGLES).toBe(0);
-    expect(added).toBeLessThanOrEqual(MAPPED_BUILDING_MAX * GROUND_BLOB_TRIANGLES);
-    // No call of its own: the blobs are the one belt's instances.
-    expect(grounded.result.lastFrame.calls - off.result.lastFrame.calls).toBeLessThanOrEqual(1);
-    expect(off.result.rung).toBe(grounded.result.rung);
-  });
-});
-
-test.describe('the realistic page’s city centre — #1636', { tag: NIGHTLY }, () => {
-  test('draws a city centre’s shop fronts and its tower inside the page’s 35 calls', async ({
-    page,
-  }) => {
-    test.setTimeout(2 * REALISTIC_LOAD_BUDGET_MS);
-    // Inside `cityCentreFixture`'s city, held between its two towers; the
-    // people off, so the frame is the city's and the road's.
-    for (const at of [1_430, 1_500]) {
-      const city = await ride(
-        page,
-        `?ladder=0&panel=0&seconds=1&town=city&at=${String(at)}&levers=-people`,
-      );
-      console.log(
-        `#1636 town=city at=${String(at)}: ${String(city.result.lastFrame.triangles)} triangles in ` +
-          `${String(city.result.lastFrame.calls)} draw calls`,
-      );
-      expect(city.result.lastFrame.calls).toBeGreaterThan(0);
-      expect(city.result.lastFrame.calls).toBeLessThanOrEqual(REALISTIC_WOODED_DRAW_CALLS);
-    }
-    expect(REALISTIC_WOODED_DRAW_CALLS).toBe(35);
   });
 });
 

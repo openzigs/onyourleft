@@ -155,7 +155,7 @@ export const NIGHTLY_CHECKS: readonly NightlyCheck[] = [
       'by `realistic/route.test.ts` §"the village road".',
   },
   {
-    spec: 'realistic-town.browser.spec.ts',
+    spec: 'realistic-mapped.browser.spec.ts',
     describe: 'the realistic page’s city centre — #1636',
     seconds: 'two more loads of the owner’s page',
     why:
@@ -165,7 +165,7 @@ export const NIGHTLY_CHECKS: readonly NightlyCheck[] = [
       '`city-centre.test.ts`, and the belt’s six calls by the same.',
   },
   {
-    spec: 'realistic-town.browser.spec.ts',
+    spec: 'realistic-mapped.browser.spec.ts',
     describe: 'the realistic page’s mapped-blobs lever — #1657',
     seconds: 'two more loads of the owner’s page',
     why:
