@@ -248,10 +248,12 @@ import {
   remoteRiderControlOf,
   windowRevealsOf,
   overhangShadowsOf,
+  weatheringOf,
 } from '../src/game/three-renderer';
 import {
   overhangShadowsWithLevers,
   parseConfig,
+  weatheringWithLevers,
   windowRevealsWithLevers,
 } from './realistic/config';
 import { MAXIMUM_DRAWN_SET } from '../src/net/interest';
@@ -4266,6 +4268,9 @@ function overhangShadowProbe(
     }
     return sums.map((sum) => sum / (pixels.length / 4));
   };
+  // #1661: the shadow alone — the weathering's grime and tile-breaking noise
+  // differ between the two heights, and are held by their own probe.
+  weatheringOf(view, false);
   view.render(frame);
   view.render(frame);
   const near = meanAt(nearPoint);
@@ -4290,6 +4295,229 @@ function overhangShadowProbe(
     };
   } finally {
     overhangShadowsOf(view, true);
+    weatheringOf(view, true);
+  }
+}
+
+/** What {@link weatheringProbe} publishes — #1661. */
+interface WeatheringMeasurement {
+  /** Whether a mapped render wall was found facing the road, with plain wall at both heights. */
+  readonly aimed: boolean;
+  /** How far the camera is from the wall, metres. */
+  readonly metres: number;
+  /** The wall {@link WEATHERING_PROBE_UP} above its floor, weathered. */
+  readonly near: readonly number[];
+  readonly far: readonly number[];
+  /** The same two places with `-weathering`: main's program, and #1588's 0.4 m band alone. */
+  readonly nearOff: readonly number[];
+  readonly farOff: readonly number[];
+}
+
+/** How far above a wall's floor {@link weatheringProbe} reads it: **0.3 m** and **1.5 m**. */
+const WEATHERING_PROBE_UP = [0.3, 1.5] as const;
+
+/** How far {@link weatheringProbe}'s camera is from the wall: **5 m**. */
+const WEATHERING_PROBE_METRES = 5;
+
+const NO_WEATHERING: WeatheringMeasurement = {
+  aimed: false,
+  metres: 0,
+  near: [],
+  far: [],
+  nearOff: [],
+  farOff: [],
+};
+
+/**
+ * #1661: a mapped wall's splash grime reaches the screen. #1581's mixed town
+ * (`?town=mixed`'s): of the walls in the `render` photograph (not clapboard)
+ * that face the road, 8 to 40 m from it somewhere from 1 000 m along it, on
+ * a house with no porch, garage or shop front, the nearest bay line with
+ * plain wall either side (`facade.ts` §`facadePartAt`) at both heights read,
+ * and a camera {@link WEATHERING_PROBE_METRES} out from it, level, between
+ * the two, the sun square to the wall at #1658's 60° so that both are lit
+ * alike. The wall 0.3 m above its floor is in the grime and 1.5 m up is not.
+ * Read weathered, and with the weathering taken out as the owner's
+ * `&levers=-weathering` takes it (`weatheringOf`): main's program, in which
+ * only #1588's 0.4 m band at the foot darkens the lower one, a little.
+ */
+function weatheringProbe(
+  view: ReturnType<typeof threeGameRenderer.create>,
+  gl: WebGL2RenderingContext,
+  canvas: HTMLCanvasElement,
+): WeatheringMeasurement {
+  const town = mixedTownFixture();
+  const { profile, origin, corridor } = town;
+  const land = landClassMask(corridor);
+  const plans = footprintPlans(corridor, land, profile, origin).plans;
+  const mappedBuildings = mappedBuildingsOf(plans);
+  const stride = FOOTPRINT_VERTEX_FLOATS;
+  type Point3 = { readonly x: number; readonly y: number; readonly z: number };
+  interface Line {
+    readonly foot: Point3;
+    readonly nx: number;
+    readonly nz: number;
+  }
+  const [nearUp, farUp] = WEATHERING_PROBE_UP;
+  const lines: Line[] = [];
+  for (const plan of plans) {
+    if (plan.porch || plan.garage || plan.shop.front) continue;
+    if (plan.surfaces.wall !== 'render' || plan.cladding.wall !== 'photograph') continue;
+    const walls = plan.triangles.wall;
+    for (let at = 0; at + 6 * stride <= walls.length; at += 6 * stride) {
+      const f = (vertex: number, k: number): number => walls[at + vertex * stride + k] as number;
+      const top = f(0, FACADE_OFFSET + 2);
+      const skip = f(0, FACADE_OFFSET + 3);
+      const flags = f(0, STYLE_OFFSET + 1);
+      if (!(top > 0)) continue;
+      // Clear of the eaves' shadow and the parapet's drip.
+      if (top * STOREY_METRES < farUp + 2) continue;
+      const style = { flags, width: f(0, STYLE_OFFSET + 2), extra: f(0, STYLE_OFFSET + 3) };
+      let a: Point3 | undefined;
+      let b: Point3 | undefined;
+      let bays = 0;
+      let floor = Number.POSITIVE_INFINITY;
+      for (let vertex = 0; vertex < 6; vertex += 1) floor = Math.min(floor, f(vertex, 1));
+      for (let vertex = 0; vertex < 6; vertex += 1) {
+        if (f(vertex, 1) !== floor) continue;
+        const point = { x: f(vertex, 0), y: floor, z: f(vertex, 2) };
+        if (f(vertex, FACADE_OFFSET) === 0) a = point;
+        else {
+          b = point;
+          bays = f(vertex, FACADE_OFFSET);
+        }
+      }
+      if (a === undefined || b === undefined || bays < 2) continue;
+      const length = Math.hypot(b.x - a.x, b.z - a.z);
+      const bay = length / bays;
+      const plain = (k: number): boolean =>
+        [nearUp, farUp].every((up) =>
+          [-0.15, 0, 0.15].every((off) =>
+            [-0.1, 0, 0.1].every(
+              (dy) =>
+                facadePartAt(k + off / bay, (up + dy) / STOREY_METRES, top, skip, style) === 'wall',
+            ),
+          ),
+        );
+      for (let k = 1; k < bays; k += 1) {
+        if (!plain(k)) continue;
+        lines.push({
+          foot: {
+            x: a.x + ((b.x - a.x) / length) * k * bay,
+            y: floor,
+            z: a.z + ((b.z - a.z) / length) * k * bay,
+          },
+          nx: f(0, 3),
+          nz: f(0, 5),
+        });
+      }
+    }
+  }
+  const start = atStartLine(profile);
+  let chosen: { readonly along: number; readonly line: Line } | undefined;
+  for (let along = 1_000; along <= 2_000 && chosen === undefined; along += 50) {
+    const road = drawnRoadFrame(profile, origin, along);
+    if (road === undefined) continue;
+    let nearest = Number.POSITIVE_INFINITY;
+    for (const line of lines) {
+      const distance = Math.hypot(road.x - line.foot.x, road.z - line.foot.z);
+      const facing =
+        ((road.x - line.foot.x) * line.nx + (road.z - line.foot.z) * line.nz) / distance;
+      if (distance < 8 || distance > 40 || facing < 0.7) continue;
+      if (distance < nearest) {
+        nearest = distance;
+        chosen = { along, line };
+      }
+    }
+  }
+  if (chosen === undefined) return NO_WEATHERING;
+  const { line } = chosen;
+  // A point `up` metres above the wall's floor, a little proud of it.
+  const above = (up: number): Point3 => ({
+    x: line.foot.x + line.nx * 0.01,
+    y: line.foot.y + up,
+    z: line.foot.z + line.nz * 0.01,
+  });
+  const nearPoint = above(nearUp);
+  const farPoint = above(farUp);
+  const eye = {
+    x: line.foot.x + line.nx * WEATHERING_PROBE_METRES,
+    y: (nearPoint.y + farPoint.y) / 2,
+    z: line.foot.z + line.nz * WEATHERING_PROBE_METRES,
+  };
+  const headingX = -line.nx;
+  const headingZ = -line.nz;
+  const base = sceneFrame({
+    profile,
+    origin,
+    state: { ...start, ride: { ...start.ride, distance: metres(chosen.along) } },
+    worldCorridor: corridor,
+    landClass: land,
+    mappedBuildings,
+    structureItems: REALISTIC_STRUCTURE_ITEMS,
+  });
+  // The sun square to the wall, as #1658's probe sets it, so that both heights are lit alike.
+  const elevation = (OVERHANG_PROBE_SUN_DEGREES * Math.PI) / 180;
+  const across = Math.hypot(line.nx, line.nz);
+  const frame: SceneFrame = {
+    ...base,
+    scatter: [],
+    markers: [],
+    world: {
+      ...base.world,
+      sun: {
+        ...base.world.sun,
+        x: (line.nx / across) * Math.cos(elevation),
+        y: Math.sin(elevation),
+        z: (line.nz / across) * Math.cos(elevation),
+      },
+    },
+    camera: {
+      ...base.camera,
+      x: eye.x + headingX * CAMERA_BEHIND_METRES,
+      z: eye.z + headingZ * CAMERA_BEHIND_METRES,
+      headingX,
+      headingZ,
+      eyeRoadY: eye.y - CAMERA_ABOVE_METRES,
+      targetRoadY: eye.y,
+    },
+  };
+  const meanAt = (point: Point3): number[] => {
+    // A patch 0.16 m tall and five pixels wide: inside the grime's solid band
+    // at 0.3 m, and wide enough that one streak or one brick is not the read.
+    const top = pixelFor(frame, canvas, { ...point, y: point.y + 0.08 });
+    const bottom = pixelFor(frame, canvas, { ...point, y: point.y - 0.08 });
+    const x = Math.round((top.x + bottom.x) / 2) - 2;
+    const y0 = Math.round(Math.min(top.y, bottom.y));
+    const rows = Math.max(1, Math.round(Math.abs(top.y - bottom.y)));
+    const pixels = readRegion(gl, x, y0, 5, rows);
+    const sums = [0, 0, 0];
+    for (let at = 0; at < pixels.length; at += 4) {
+      for (let channel = 0; channel < 3; channel += 1) {
+        sums[channel] = (sums[channel] ?? 0) + (pixels[at + channel] ?? 0);
+      }
+    }
+    return sums.map((sum) => sum / (pixels.length / 4));
+  };
+  view.render(frame);
+  view.render(frame);
+  const near = meanAt(nearPoint);
+  const far = meanAt(farPoint);
+  // The owner's lever, read as the page reads it.
+  weatheringOf(view, weatheringWithLevers(parseConfig('?levers=-weathering').leversOff));
+  try {
+    view.render(frame);
+    view.render(frame);
+    return {
+      aimed: true,
+      metres: WEATHERING_PROBE_METRES,
+      near,
+      far,
+      nearOff: meanAt(nearPoint),
+      farOff: meanAt(farPoint),
+    };
+  } finally {
+    weatheringOf(view, true);
   }
 }
 
@@ -6817,6 +7045,8 @@ export interface RealisticMeasurement {
   readonly windowReveal: WindowRevealMeasurement;
   /** #1658: a sunlit mapped wall under its eaves, with the overhang's shadow and without. @see overhangShadowProbe */
   readonly overhangShadow: OverhangShadowMeasurement;
+  /** #1661: a mapped render wall's foot and above it, weathered and not. @see weatheringProbe */
+  readonly weathering: WeatheringMeasurement;
   /** #1586: a mapped town's edge, with fields beyond filling the structure cap. @see townEdgeProbe */
   readonly townEdge: TownEdgeMeasurement;
   /** #1550: procedural lots in a mapped town with no footprints. @see lotsProbe */
@@ -8940,6 +9170,7 @@ const NO_REALISTIC: RealisticMeasurement = {
   mappedFacade: NO_MAPPED_FACADE,
   windowReveal: NO_WINDOW_REVEAL,
   overhangShadow: NO_OVERHANG_SHADOW,
+  weathering: NO_WEATHERING,
   townEdge: NO_TOWN_EDGE,
   lots: NO_LOTS,
   tint: {
@@ -10514,6 +10745,10 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   const overhangShadow = overhangShadowProbe(view, gl, canvas);
   phaseEnds('realistic: the shadow under a mapped wall’s eaves — #1658');
 
+  // #1661, on the same view: a mapped render wall's foot and 1.5 m up, weathered and not.
+  const weathering = weatheringProbe(view, gl, canvas);
+  phaseEnds('realistic: a mapped wall’s weathering — #1661');
+
   // #1586, on the same view: a town's edge, the fields beyond it filling the structure cap.
   const townEdge = townEdgeProbe(view);
   phaseEnds('realistic: a town’s edge — #1586');
@@ -10767,6 +11002,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     mappedFacade,
     windowReveal,
     overhangShadow,
+    weathering,
     townEdge,
     lots,
     tint,

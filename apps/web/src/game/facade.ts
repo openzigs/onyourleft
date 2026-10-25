@@ -100,6 +100,17 @@
  * awning's shadow are not drawn: a wall's floats do not say that a cornice is
  * over it, nor a shop front's that an awning is.
  *
+ * ## The weathering (#1661)
+ *
+ * No mapped wall is as clean as a render: {@link WEATHERING} is one constant
+ * an effect — splash grime at a wall's foot, streaks under the sills, a flat
+ * roof's drip, a roof's eaves courses and moss, a parged plinth, and noise
+ * that breaks the photograph's repeat — each scaled by the building's seeded
+ * age ({@link weatheringAgeOf}), and {@link weatheringAt} is the shader's
+ * `oylWeather*` functions in TypeScript. The photograph itself is laid
+ * differently on each building ({@link photographShiftOf}), so that two
+ * neighbours do not share one brick's phase. No texture, no second fetch.
+ *
  * ## The porch (#1589)
  *
  * A front porch's railing is one quad (`footprint-buildings.ts`
@@ -927,5 +938,271 @@ export function claddingPartAt(clad: number, x: number, y: number): CladdingPart
       return offWhole(y / PAVING.slab) * PAVING.slab <= PAVING.joint / 2 ? 'joint' : 'slab';
     default:
       return 'photograph';
+  }
+}
+
+/**
+ * A mapped building's weathering — #1661: grime, streaks, drips, moss and the
+ * wear of years, which break the photograph's repeat and its freshly rendered
+ * look at no byte and no draw call. One constant an effect, the same for
+ * every land use: how much grime a US small town wants is the research's open
+ * question 7, which the owner answers on the look pair, and these move to
+ * match. Every length is metres.
+ *
+ * - `youngest`: the share of every effect a building shows at age 0
+ *   ({@link weatheringAgeOf}); at age 1 it shows all of it.
+ * - `tile`: the photograph's light moved up to `strength` either way by
+ *   world-space value noise at two `scales`, in `weights`, so that a brick's
+ *   repeat no longer reads along a 20 m wall. No second texture fetch: IQ's
+ *   two-fetch technique doubles wall texture bandwidth, #1523's scarce
+ *   resource.
+ * - `splash`: grime at a wall's foot, solid to `solid` of the way up a band
+ *   whose top the noise breaks between `top`'s two heights, every `edge`
+ *   along the wall; at full age it takes `strength` of the light and greys it
+ *   by `grey`. It extends #1588's `FACADE_AO.base`, which stays.
+ * - `streak`: under a window's sill, across its width, a darkening that falls
+ *   off over `metres`, in columns `column` wide; `brick`'s share of it on
+ *   brick and stone, which show less of it than render, concrete and paint.
+ * - `drip`: down `metres` from a flat roof's parapet, in columns.
+ * - `courses`: a pitched roof's lowest courses darkened, over `metres` up the
+ *   slope from its eaves. Shingles keep #1588's `SHINGLE.variation`.
+ * - `moss`: anything that faces up from `facing`, a roof, tinted toward
+ *   `colour` where low-frequency noise at `scale` passes `cover`, thicker and
+ *   thinner by noise at `detail`.
+ * - `parging`: a render or concrete plinth lightened by `lighten` and
+ *   roughened to `rough`: the parged band a rendered house stands on.
+ */
+export const WEATHERING = {
+  youngest: 0.5,
+  tile: { scales: [1.7, 4.3], weights: [0.6, 0.4], strength: 0.05 },
+  splash: { top: [0.6, 1.0], solid: 0.4, edge: 0.45, strength: 0.35, grey: 0.35 },
+  streak: { metres: 1.0, column: 0.04, strength: 0.22, brick: 0.5 },
+  drip: { metres: 0.5, column: 0.06, strength: 0.22 },
+  courses: { metres: 0.6, strength: 0.25 },
+  moss: {
+    scale: 8,
+    detail: 0.8,
+    cover: [0.45, 0.75],
+    facing: [0.3, 0.6],
+    strength: 0.35,
+    colour: [0.05, 0.07, 0.025] as Rgb,
+  },
+  parging: { lighten: 0.12, rough: 0.95 },
+} as const;
+
+/**
+ * One of {@link WEATHERING}'s effects, and what the twin needs to know of a point for it.
+ *
+ * @test-facing what {@link weatheringAt} is asked, for `weathering.test.ts`
+ */
+export type WeatheringTerm =
+  | { readonly effect: 'tile' }
+  | { readonly effect: 'splash'; readonly up: number }
+  | {
+      readonly effect: 'streak';
+      /** Metres under the sill's foot, and across from the window's middle. */
+      readonly below: number;
+      readonly across: number;
+      /** Half the sill's width. */
+      readonly half: number;
+      /** {@link streakShareOf}'s. */
+      readonly share: number;
+    }
+  | { readonly effect: 'drip'; readonly below: number; readonly flat: boolean }
+  | { readonly effect: 'courses'; readonly upSlope: number; readonly pitched: boolean }
+  | { readonly effect: 'moss'; readonly facing: number }
+  | { readonly effect: 'parging'; readonly parged: boolean };
+
+/**
+ * Where a point is, for {@link weatheringAt}: `plane`, its place in metres on
+ * the plane the noise is laid in (along a wall and up it, or a roof's `x` and
+ * `z`; for a streak and a drip, along the wall, where their columns are); its
+ * building's `age` ({@link weatheringAgeOf}); and `pw`, its fragment's
+ * footprint in metres, from which every term with detail fades to its mean
+ * far off. Nought, or none, is near.
+ *
+ * @test-facing what {@link weatheringAt} is asked, for `weathering.test.ts`
+ */
+export interface WeatheringAt {
+  readonly plane: readonly [number, number];
+  readonly age: number;
+  readonly pw?: number;
+}
+
+/**
+ * What a term does to a point: `light`, what its light is multiplied by;
+ * `grey`, the share it is moved toward its own luminance; and `moss`, the
+ * share it is moved toward {@link WEATHERING}'s moss.
+ *
+ * @test-facing what {@link weatheringAt} answers, for `weathering.test.ts`
+ */
+export interface Weathered {
+  readonly light: number;
+  readonly grey: number;
+  readonly moss: number;
+}
+
+/** GLSL's `fract`. */
+function fractOf(x: number): number {
+  return x - Math.floor(x);
+}
+
+/** GLSL's `mod`. */
+function modOf(x: number, y: number): number {
+  return x - y * Math.floor(x / y);
+}
+
+/** GLSL's `mix`. */
+function mixOf(a: number, b: number, t: number): number {
+  return a * (1 - t) + b * t;
+}
+
+/** The shader's `oylFadeOf`: nought near, 1 once a pattern is a few pixels across. */
+function fadeOf(perPixel: number): number {
+  return Math.min(1, Math.max(0, perPixel * 4 - 0.5));
+}
+
+/**
+ * The weathering's hash, 0 to 1 — the shader's `oylWeatherHash`: a lattice
+ * point's, its numbers folded under a thousand so that the sine is taken of
+ * a number the GPU holds well. `weathering.test.ts` runs the shader's own
+ * text against it.
+ */
+export function weatheringHash(a: number, b: number): number {
+  return fractOf(Math.sin(modOf(a, 1000) * 127.1 + modOf(b, 1000) * 311.7) * 43758.5453);
+}
+
+/** Value noise, 0 to 1, smooth between whole numbers — the shader's `oylWeatherNoise`. Its mean is a half. */
+function weatheringNoise(a: number, b: number): number {
+  const ia = Math.floor(a);
+  const ib = Math.floor(b);
+  const fa = a - ia;
+  const fb = b - ib;
+  const ua = fa * fa * (3 - 2 * fa);
+  const ub = fb * fb * (3 - 2 * fb);
+  const lo = mixOf(weatheringHash(ia, ib), weatheringHash(ia + 1, ib), ua);
+  const hi = mixOf(weatheringHash(ia, ib + 1), weatheringHash(ia + 1, ib + 1), ua);
+  return mixOf(lo, hi, ub);
+}
+
+/**
+ * A building's age, 0 to 1, from its seeded tint as the shader decodes it
+ * (`vOylTint`: hue in radians, saturation, brightness) — #1661: seeded by
+ * where the building is, so that lap two weathers it as lap one did. The
+ * shader's `oylWeatherAgeOf`.
+ *
+ * @test-facing held by `weathering.test.ts`; the product computes it in the shader
+ */
+export function weatheringAgeOf(tint: readonly [number, number, number]): number {
+  return weatheringHash(tint[0] * 1000, tint[1] * 1000 + tint[2] * 7000);
+}
+
+/** How much of an effect a building of `age` shows. */
+function ageShareOf(age: number): number {
+  return WEATHERING.youngest + (1 - WEATHERING.youngest) * age;
+}
+
+/**
+ * How a building's photograph is laid on it — #1661: `turn`, 1 or −1 (a half
+ * turn, so that a brick's courses stay level), and `shift`, how far it is
+ * moved along each of its texture coordinates, in repeats; from its seeded
+ * tint (`vOylTint`), so that neighbours wearing one photograph do not share
+ * one brick's phase. The shader's `oylPhotoTurn` and `oylPhotoShift`, laid on
+ * the map's and the normal map's coordinates in the vertex shader.
+ *
+ * @test-facing held by `weathering.test.ts`; the product lays it in the shader
+ */
+export function photographShiftOf(tint: readonly [number, number, number]): {
+  readonly turn: number;
+  readonly shift: readonly [number, number];
+} {
+  const [h, s, b] = tint;
+  return {
+    turn: weatheringHash(s * 1000 + 41, b * 1000) < 0.5 ? -1 : 1,
+    shift: [weatheringHash(h * 1000 + 13, s * 1000), weatheringHash(b * 1000 + 29, h * 1000)],
+  };
+}
+
+/**
+ * How much of {@link WEATHERING}'s `streak` a wall of `surface` shows: all of
+ * it on render, concrete, paint and clapboard (`clapboard`, whatever its
+ * surface), `brick`'s share on brick and stone.
+ */
+export function streakShareOf(surface: string, clapboard = false): number {
+  if (clapboard) return 1;
+  return surface === 'brick' || surface === 'stone' ? WEATHERING.streak.brick : 1;
+}
+
+/** A streak's or a drip's columns: a multiplier whose mean is 1, faded to it over `pw` of a `width`. */
+function columnOf(along: number, width: number, seed: number, pw: number): number {
+  return mixOf(0.4 + 1.2 * weatheringHash(Math.floor(along / width), seed), 1, fadeOf(pw / width));
+}
+
+/**
+ * What one of {@link WEATHERING}'s effects does to a point — #1661, the
+ * shader's `oylWeather*` functions, from the same numbers. Every term with
+ * detail fades to its mean with `pw`, as #1581's layout does, so that a far
+ * wall neither shimmers nor changes its brightness as it fades.
+ *
+ * @test-facing held by `weathering.test.ts`; the product draws it in the shader
+ */
+export function weatheringAt(term: WeatheringTerm, at: WeatheringAt): Weathered {
+  const [a, b] = at.plane;
+  const pw = at.pw ?? 0;
+  const share = ageShareOf(at.age);
+  const none: Weathered = { light: 1, grey: 0, moss: 0 };
+  switch (term.effect) {
+    case 'tile': {
+      const { scales, weights, strength } = WEATHERING.tile;
+      const [near, far] = scales;
+      const n1 = mixOf(weatheringNoise(a / near, b / near), 0.5, fadeOf(pw / near));
+      const n2 = mixOf(weatheringNoise(a / far + 31.7, b / far + 11.3), 0.5, fadeOf(pw / far));
+      return { ...none, light: 1 + 2 * strength * (weights[0] * n1 + weights[1] * n2 - 0.5) };
+    }
+    case 'splash': {
+      const { top, solid, edge, strength, grey } = WEATHERING.splash;
+      const broken = mixOf(weatheringNoise(a / edge, 7), 0.5, fadeOf(pw / edge));
+      const height = mixOf(top[0], top[1], broken);
+      const grime = share * (1 - smoothstep(solid * height, height, term.up));
+      return { light: 1 - strength * grime, grey: grey * grime, moss: 0 };
+    }
+    case 'streak': {
+      const { metres, column, strength } = WEATHERING.streak;
+      const under = smoothstep(-pw, pw, term.below) * (1 - smoothstep(0, metres, term.below));
+      const within = 1 - smoothstep(term.half - pw, term.half + pw, Math.abs(term.across));
+      const dark = strength * term.share * share * under * within * columnOf(a, column, 5, pw);
+      return { ...none, light: 1 - dark };
+    }
+    case 'drip': {
+      if (!term.flat) return none;
+      const { metres, column, strength } = WEATHERING.drip;
+      const under = smoothstep(-pw, pw, term.below) * (1 - smoothstep(0, metres, term.below));
+      return { ...none, light: 1 - strength * share * under * columnOf(a, column, 9, pw) };
+    }
+    case 'courses': {
+      if (!term.pitched) return none;
+      const { metres, strength } = WEATHERING.courses;
+      return { ...none, light: 1 - strength * share * (1 - smoothstep(0, metres, term.upSlope)) };
+    }
+    case 'moss': {
+      const { scale, detail, cover, facing, strength } = WEATHERING.moss;
+      // Where it grows: patches `scale` across, wider than 18 pixels anywhere
+      // inside a mapped building's 400 m reach, so with nothing to fade.
+      const where = smoothstep(
+        cover[0],
+        cover[1],
+        weatheringNoise(a / scale + 3.1, b / scale + 5.7),
+      );
+      // How thick, finer: a multiplier whose mean is 1, faded to it.
+      const thick = mixOf(
+        0.4 + 1.2 * weatheringNoise(a / detail + 8.3, b / detail + 1.9),
+        1,
+        fadeOf(pw / detail),
+      );
+      const up = smoothstep(facing[0], facing[1], term.facing);
+      return { ...none, moss: strength * share * where * thick * up };
+    }
+    case 'parging':
+      return term.parged ? { ...none, light: 1 + WEATHERING.parging.lighten } : none;
   }
 }
