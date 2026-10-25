@@ -118,11 +118,17 @@ describe('a baked route, read into memory — #1652', () => {
     });
   });
 
-  it('refuses a whole file whose digest is not the manifest’s', async () => {
-    const original = files.get(bundlePath()) as Uint8Array<ArrayBuffer>;
-    const changed = new Uint8Array(original);
-    changed[changed.length - 1] = (changed[changed.length - 1] ?? 0) ^ 0xff;
-    const served = new Map([...files, [bundlePath(), changed]]);
+  it('refuses a whole, readable file whose digest is not the manifest’s', async () => {
+    // A bundle that reads perfectly well, so only the digest can refuse it.
+    const { bundle } = await readRouteBundle(files.get(bundlePath()) as Uint8Array<ArrayBuffer>);
+    const other = await encodeRouteBundle({
+      ...bundle,
+      tiles: { ...bundle.tiles, uncovered: [{ index: 0, state: 'privacy-zone' }] },
+    });
+    expect((await loadBakedRoute('fixture', reader(servedWithBundle(other)).read)).kind).toBe(
+      'ready',
+    );
+    const served = new Map([...files, [bundlePath(), other]]);
     expect(await loadBakedRoute('fixture', reader(served).read)).toEqual({
       kind: 'failed',
       notice: BAKED_ROUTE_UNAVAILABLE,
