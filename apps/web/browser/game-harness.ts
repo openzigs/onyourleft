@@ -1608,6 +1608,8 @@ const NO_WORLD: WorldStyle = {
   // use: no rider ever sees it, and a *plausible* sun here would let a spec
   // that stopped reading the real one go on passing.
   sun: { x: 0, y: 1, z: 0, ambient: 0, direct: 0 },
+  // #1623: no snow, for the same reason.
+  snow: { bareColour: 0, aboveSnowMetres: 0, winterLoweringMetres: 0 },
 };
 
 /** One pixel out of the drawing buffer, in readPixels coordinates (origin bottom left). */

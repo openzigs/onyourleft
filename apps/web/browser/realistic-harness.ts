@@ -108,7 +108,7 @@ import { rideFrame, RIDE_METRES_PER_SECOND } from './realistic/frame';
 import { installLayerSwitch, type LayerCensus } from './realistic/layers';
 import { describe, guarded, MAXIMUM_FRAME_GAP_MS, MeasurementClock } from './realistic/loop';
 import { readoutLine, takeOverReporting } from './realistic/reporting';
-import { realisticRoute, routeDigest, villageRoute } from './realistic/route';
+import { placeLatitude, realisticRoute, routeDigest, villageRoute } from './realistic/route';
 import { frameCensus, type FrameCensus } from './realistic/village';
 
 /** How long the scene runs before anything is sampled: shader compiles, first uploads. */
@@ -350,18 +350,22 @@ async function run(): Promise<void> {
   // or the mixed town's straight road, with its corridor, land and buildings
   // built once, as `GameView` builds a ride's at the press.
   // #1585: or the Richmond street, its narrow lots drawn as house models.
+  // #1623: each at `place`, for the route's own season.
+  const latitude = placeLatitude(config.place);
   const mixed =
     config.town === 'mixed'
-      ? mixedTownFixture()
+      ? mixedTownFixture(latitude)
       : config.town === 'richmond'
-        ? richmondStreetFixture()
+        ? richmondStreetFixture(latitude)
         : config.town === 'countryside'
-          ? countrysideFixture()
+          ? countrysideFixture(latitude)
           : undefined;
   // #1559: or the level road through two villages, for validation 0002 AE2.
   const profile =
     mixed?.profile ??
-    (config.route === 'village' ? villageRoute(config.facing) : realisticRoute(config.facing));
+    (config.route === 'village'
+      ? villageRoute(config.facing, config.place)
+      : realisticRoute(config.facing, config.place));
   const origin = mixed?.origin ?? corridorOrigin(profile);
   publish({ routeDigest: routeDigest(profile) });
   const town = ((): Parameters<typeof rideFrame>[0]['town'] => {

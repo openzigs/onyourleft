@@ -658,7 +658,7 @@ import {
   type BridgePart,
   type WaterSurface,
 } from './waterways';
-import type { SunStyle, WorldStyle } from './world';
+import { groundColourIn, roofSnowIn, type SunStyle, type WorldStyle } from './world';
 import { NO_SEASON, type Holiday, type Season } from './season';
 import {
   decorationsFor,
@@ -2042,6 +2042,15 @@ export function sceneryColours(kind: SceneryKind): readonly number[] {
 }
 
 /**
+ * The snow a roof wears, packed sRGB: **0xe4e9ee** — #1623. `world.ts`'s
+ * ground snow, a little dimmer: that one is 0xe8edf2, whose blue lit
+ * square-on by the lowest sun would pass white, and a roof is lit, so this
+ * one is inside `three-renderer.test.ts` §"lights no colour past white"'s
+ * sweep ({@link LIT_COLOURS}).
+ */
+export const ROOF_SNOW = 0xe4e9ee;
+
+/**
  * Every colour **this file** decides that a lit material carries — #286.
  *
  * ⚠️ **It is no longer the whole of the scene's palette, and that sentence used
@@ -2089,6 +2098,8 @@ export const LIT_COLOURS: readonly number[] = [
   ...new Set(
     Object.values(FURNITURE_STYLE).flatMap((style) => style.parts.map((part) => part.colour)),
   ),
+  // #1623. The snow a roof wears.
+  ROOF_SNOW,
 ];
 
 /**
@@ -7767,6 +7778,124 @@ const TINT_APPLY_GLSL = /* glsl */ `
 `;
 
 /**
+ * The route's season, as the realistic world's materials read it — #1623:
+ * `oylAutumn`, how far into autumn its broadleaves are, and `oylRoofSnow`,
+ * how much snow a level roof carries. One pair every such material shares,
+ * for `FOLIAGE`'s reason, written by the view that draws: its season on
+ * `setSeason` and on every realistic frame, and the roofs' from the frame's
+ * world (`world.ts` §`roofSnowIn`). Both 0 is the season-free world, drawn
+ * exactly as before #1623: a turn of nothing and a mix of nothing.
+ */
+const SEASON = {
+  oylAutumn: { value: 0 },
+  oylRoofSnow: { value: 0 },
+};
+
+/**
+ * How far a full autumn turns a broadleaf's green toward orange, degrees:
+ * **75** — #1623. This repository's own: green foliage sits near 100° to 120°
+ * of hue, and 75° fewer is the yellows and oranges of a turned beech or maple
+ * (25° to 45°). A global season, not variation, which is why it is not
+ * `instance-tint.ts` §`TINT_CODEC_RANGE`'s ±16°: each tree's own tint still
+ * turns it a little either side of this, so a wood does not turn as one.
+ */
+export const AUTUMN_HUE_DEGREES = 75;
+
+/**
+ * How green a fragment must be to turn, as `(g − max(r, b)) / g`: none at
+ * **0.05** and all of it from **0.3** — #1623. Bark, a trunk and a dead leaf
+ * are not green-led, so a merged tree material (#639), whose bark and leaves
+ * are one program, turns its leaves and leaves its bark brown.
+ */
+const AUTUMN_LEAFY_SHARE: readonly [number, number] = [0.05, 0.3];
+
+/**
+ * A broadleaf in autumn, in GLSL — #1623: its green turned toward orange about
+ * the grey axis, as `oylTinted` turns a hue, by `autumn` (0 to 1) of
+ * {@link AUTUMN_HUE_DEGREES}, the less the less green it is. Applied after
+ * `oylTinted`. At `autumn` 0 the turn is nothing and the colour is returned
+ * as it came. `realistic-renderer.test.ts` §"#1623" evaluates it from the
+ * program three is handed (`glsl-testing.ts`).
+ */
+const AUTUMN_GLSL = /* glsl */ `
+  vec3 oylAutumnOf(vec3 colour, float autumn) {
+    float leafy = smoothstep(${glslFloat(AUTUMN_LEAFY_SHARE[0])}, ${glslFloat(AUTUMN_LEAFY_SHARE[1])}, (colour.g - max(colour.r, colour.b)) / max(colour.g, 0.0001));
+    float turn = -autumn * leafy * ${((AUTUMN_HUE_DEGREES * Math.PI) / 180).toFixed(8)};
+    float turnCos = cos(turn);
+    float turnSin = sin(turn);
+    vec3 grey = vec3(0.57735027);
+    vec3 turned = colour * turnCos + cross(grey, colour) * turnSin
+      + grey * dot(grey, colour) * (1.0 - turnCos);
+    return max(turned, vec3(0.0));
+  }
+`;
+
+/** The materials {@link withAutumn} has taught. */
+const AUTUMN_TAUGHT = new WeakSet<Material>();
+
+/**
+ * Whether a material turns in autumn — #1623: a realistic broadleaf's, at
+ * every level, and nothing else.
+ *
+ * @test-facing held by `realistic-renderer.test.ts` §"#1623", which asserts
+ * the broadleaves are taught it and the conifers, shrubs and rocks are not
+ */
+export function turnsInAutumn(material: Material): boolean {
+  return AUTUMN_TAUGHT.has(material);
+}
+
+/**
+ * Teaches a broadleaf's material its autumn — #1623: {@link AUTUMN_GLSL}
+ * applied after #621's seeded tint, reading {@link SEASON}'s `oylAutumn`.
+ * Spliced at compile, as the tint is: a mesh's material must already have
+ * been taught its instance channels ({@link withInstanceChannels}), whose
+ * tint line this splices after; an impostor's `ShaderMaterial` is spliced at
+ * its own tint line. Throws at compile, as the tint does, if the line it is
+ * spliced at is not there. Idempotent.
+ */
+function withAutumn(material: Material): void {
+  if (AUTUMN_TAUGHT.has(material)) return;
+  AUTUMN_TAUGHT.add(material);
+  const spliced = "#1623's autumn";
+  const [line, turned] =
+    material instanceof ShaderMaterial
+      ? [
+          IMPOSTOR_TINT_LINE,
+          'gl_FragColor = vec4(oylAutumnOf(oylTinted(texel.rgb, vOylTint), oylAutumn), 1.0);',
+        ]
+      : [
+          MESH_TINT_LINE,
+          `${MESH_TINT_LINE}\ndiffuseColor.rgb = oylAutumnOf(diffuseColor.rgb, oylAutumn);`,
+        ];
+  const earlier = material.onBeforeCompile.bind(material);
+  const earlierKey = material.customProgramCacheKey();
+  material.onBeforeCompile = (shader, renderer) => {
+    earlier(shader, renderer);
+    shader.uniforms['oylAutumn'] = SEASON.oylAutumn;
+    shader.fragmentShader = replacedOrThrown(
+      replacedOrThrown(
+        shader.fragmentShader,
+        '#include <common>',
+        `#include <common>\nuniform float oylAutumn;\n${AUTUMN_GLSL}`,
+        'fragment',
+        spliced,
+      ),
+      line,
+      turned,
+      'fragment',
+      spliced,
+    );
+  };
+  material.customProgramCacheKey = () => `${earlierKey}|oyl-autumn`;
+}
+
+/** The line a realistic mesh's fragment applies #621's tint at. @see withInstanceChannels */
+const MESH_TINT_LINE = 'diffuseColor.rgb = oylTinted(diffuseColor.rgb, vOylTint);';
+
+/** The line a tree's impostor applies #621's tint at. @see impostorMaterial */
+const IMPOSTOR_TINT_LINE = 'gl_FragColor = vec4(oylTinted(texel.rgb, vOylTint), 1.0);';
+
+/**
  * What each material {@link withInstanceChannels} has taught reads: `true`
  * for a tree, which also keeps its half of the hand-over dither.
  */
@@ -7848,7 +7977,7 @@ function withInstanceChannels<M extends Material>(material: M, dither: boolean):
     fragment = replacedOrThrown(
       fragment,
       '#include <color_fragment>',
-      '#include <color_fragment>\ndiffuseColor.rgb = oylTinted(diffuseColor.rgb, vOylTint);',
+      `#include <color_fragment>\n${MESH_TINT_LINE}`,
       'fragment',
     );
     shader.fragmentShader = fragment;
@@ -9819,7 +9948,7 @@ function impostorMaterial(
         }
         #endif
         // #621: the same tint the tree's meshes wear, on the light it was baked with.
-        gl_FragColor = vec4(oylTinted(texel.rgb, vOylTint), 1.0);
+        ${IMPOSTOR_TINT_LINE}
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
         #include <fog_fragment>
@@ -10103,8 +10232,15 @@ export class RealisticVegetationBelt {
         for (const part of shape.parts) {
           if (tree) withTreeDither(part.material);
           else withInstanceChannels(part.material, false);
+          // #1623: a broadleaf turns in autumn; a fir stays green.
+          if (kind === 'tree-broadleaf') withAutumn(part.material);
           // #1523: a fir is drawn after a depth pre-pass.
           if (kind === 'tree-conifer') withDepthPrepass(part.material);
+        }
+      }
+      if (kind === 'tree-broadleaf') {
+        for (const shape of shapes) {
+          if (shape.impostor !== undefined) withAutumn(shape.impostor.material);
         }
       }
       this.#kinds.push({
@@ -14893,6 +15029,29 @@ function facadeFragmentGlsl(overhangs: boolean): string {
 }
 
 /**
+ * Where a roof holds snow, as the cosine of its pitch (its normal's
+ * vertical): none at **0.5**, steeper than 60°, where it slides, and all of it
+ * from **0.766**, 40° and flatter — #1623. This repository's own. A wall's is 0.
+ */
+const ROOF_SNOW_UP: readonly [number, number] = [0.5, 0.766];
+
+/**
+ * A roof under snow, in GLSL — #1623: `colour` mixed toward {@link ROOF_SNOW}
+ * by `snow` (0 to 1, `world.ts` §`roofSnowIn`), where the surface faces up
+ * (`up`, its normal's vertical). `realistic-renderer.test.ts` §"#1623"
+ * evaluates it from the program three is handed.
+ */
+const ROOF_SNOW_GLSL = (() => {
+  const linear = new Color(ROOF_SNOW);
+  return /* glsl */ `
+  vec3 oylSnowedRoof(vec3 colour, float up, float snow) {
+    float lying = snow * smoothstep(${glslFloat(ROOF_SNOW_UP[0])}, ${glslFloat(ROOF_SNOW_UP[1])}, up);
+    return mix(colour, vec3(${linear.r.toFixed(6)}, ${linear.g.toFixed(6)}, ${linear.b.toFixed(6)}), lying);
+  }
+`;
+})();
+
+/**
  * Teaches a mapped building's material #1581's facade: the windows of every
  * storey, the front door in its surround, and the painted trim — from vertex
  * attributes, `oylFacade` (`footprint-buildings.ts` §`FACADE_FLOATS`),
@@ -14913,6 +15072,8 @@ function withFacade<M extends Material>(material: M): M {
     earlier(shader, renderer);
     shader.uniforms.oylFacadeOn = FACADE_SWITCH.oylFacadeOn;
     shader.uniforms.oylSunWorld = FACADE_SUN.oylSunWorld;
+    // #1623: the snow a roof carries, from the route's season.
+    shader.uniforms.oylRoofSnow = SEASON.oylRoofSnow;
     shader.vertexShader = replacedOrThrown(
       replacedOrThrown(
         shader.vertexShader,
@@ -14929,7 +15090,7 @@ function withFacade<M extends Material>(material: M): M {
     let fragment = replacedOrThrown(
       shader.fragmentShader,
       '#include <common>',
-      `#include <common>\n${facadeCommonGlsl(revealsBuiltIn(material), overhangsBuiltIn(material))}`,
+      `#include <common>\n${facadeCommonGlsl(revealsBuiltIn(material), overhangsBuiltIn(material))}\nuniform float oylRoofSnow;\n${ROOF_SNOW_GLSL}`,
       'fragment',
       spliced,
     );
@@ -14957,7 +15118,8 @@ function withFacade<M extends Material>(material: M): M {
     shader.fragmentShader = replacedOrThrown(
       fragment,
       '#include <normal_fragment_maps>',
-      '#include <normal_fragment_maps>\nnormal = normalize(mix(normal, nonPerturbedNormal, oylFlat));\nnormal = normalize(normal + oylTilt * normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz));',
+      // #1623: and snow on what faces up, by the surface's own facing, not its map's.
+      '#include <normal_fragment_maps>\nnormal = normalize(mix(normal, nonPerturbedNormal, oylFlat));\nnormal = normalize(normal + oylTilt * normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz));\ndiffuseColor.rgb = oylSnowedRoof(diffuseColor.rgb, dot(normalize(nonPerturbedNormal), normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz)), oylRoofSnow);',
       'fragment',
       spliced,
     );
@@ -17310,6 +17472,7 @@ class ThreeGameView implements GameView {
     horizonColour: UNSET_COLOUR,
     fogDensity: 0,
     sun: { x: 0, y: 1, z: 0, ambient: 0, direct: 0 },
+    snow: { bareColour: UNSET_COLOUR, aboveSnowMetres: 0, winterLoweringMetres: 0 },
   };
   #widthCssPixels = 1;
   #heightCssPixels = 1;
@@ -17412,6 +17575,8 @@ class ThreeGameView implements GameView {
     if (this.#drawing === 'realistic') {
       // #630: the ride's clock for the breeze, and the world's sun for the far band.
       FOLIAGE.oylWindTime.value = frame.water.seconds;
+      // #1623: this view's season, for the reason the breeze's clock is written here.
+      SEASON.oylAutumn.value = this.#season.nature.autumn;
       FOLIAGE.oylSunToward.value
         .set(frame.world.sun.x, frame.world.sun.y, frame.world.sun.z)
         .normalize();
@@ -17433,7 +17598,14 @@ class ThreeGameView implements GameView {
     // Worked out once a frame: the horizon, the near-plane cull and the camera
     // all read it.
     const rig = cameraRig(frame.camera);
-    this.#terrain.update(frame.terrain.mesh, frame.world.groundColour);
+    // #1623: in the realistic world, the ground under the route's own winter,
+    // and the roofs' snow from the same cover. The stylised world draws no season.
+    const winter = this.#drawing === 'realistic' ? this.#season.nature.winter : 0;
+    SEASON.oylRoofSnow.value = roofSnowIn(frame.world, winter);
+    this.#terrain.update(
+      frame.terrain.mesh,
+      winter === 0 ? frame.world.groundColour : groundColourIn(frame.world, winter),
+    );
     this.#horizon.update(
       frame.terrain.horizon,
       frame.world,
@@ -17769,9 +17941,14 @@ class ThreeGameView implements GameView {
     this.#realistic?.riders.setRiderKit(kit);
   }
 
-  /** The ride's season — #1622. Held, and drawn nothing from yet. @see GameView.setSeason */
+  /**
+   * The ride's season — #1622. Held; since #1623 the realistic broadleaves
+   * turn by its autumn from here on, and the ground and the roofs take its
+   * winter on the next frame (`#stage`). @see GameView.setSeason
+   */
   setSeason(season: Season): void {
     this.#season = season;
+    SEASON.oylAutumn.value = season.nature.autumn;
   }
 
   /** @see seasonOf */
