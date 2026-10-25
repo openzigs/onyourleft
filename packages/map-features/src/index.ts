@@ -12,6 +12,7 @@ export { clipToBox, rasterise, simplifyRing, triangulate } from './geometry';
 export {
   DEFAULT_DECODE_LIMITS,
   MAX_FEATURES_PER_LAYER,
+  MAX_PLACES_PER_TILE,
   MAX_RINGS_PER_POLYGON,
   MAX_TILE_BYTES,
   MAX_VERTICES_PER_FEATURE,
@@ -39,6 +40,7 @@ export type {
   LandUseFeature,
   LandUseKind,
   PathFeature,
+  PlaceFeature,
   PolygonFeature,
   Ring,
   StreetFeature,

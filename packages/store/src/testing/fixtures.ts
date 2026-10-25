@@ -1074,7 +1074,8 @@ export function workoutGoalsFor(owner: AthleteId, seed = 0): WorkoutGoalsRecord 
  * The decoded features of a world corridor, as a fixture packs them — #1545.
  * Shaped like ADR 0054 D-3.3's fields (footprints with `kind`, `height` and
  * `min_height`; land use and water polygons; footway lines with `kind` and
- * `kind_detail`), in the corridor frame. The store treats the packing as
+ * `kind_detail`; and, since ADR 0055 and #1632, place points with `kind`,
+ * `kind_detail` and `population_rank`), in the corridor frame. The store treats the packing as
  * opaque, so the fixture's own JSON is enough to read features back by.
  */
 export interface WorldCorridorFixtureFeatures {
@@ -1093,6 +1094,12 @@ export interface WorldCorridorFixtureFeatures {
     readonly line: readonly (readonly [number, number])[];
     readonly kind: string;
     readonly kindDetail: string;
+  }[];
+  readonly places: readonly {
+    readonly point: readonly [number, number];
+    readonly kind: string;
+    readonly kindDetail: string;
+    readonly populationRank: number;
   }[];
 }
 
@@ -1146,6 +1153,9 @@ export function worldCorridorFeaturesFor(owner: AthleteId, seed = 0): WorldCorri
         kind: 'path',
         kindDetail: 'sidewalk',
       },
+    ],
+    places: [
+      { point: [offset + 420, 365.4375], kind: 'locality', kindDetail: 'city', populationRank: 11 },
     ],
   };
 }

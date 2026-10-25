@@ -56,21 +56,20 @@ import {
   type WorldQualityState,
 } from '../src/game/quality';
 import { realisticWorldNotice, type RealisticWorldOutcome } from '../src/game/realistic-assets';
+import { mappedTown } from '../src/game/footprint-buildings';
 import {
-  FOOTPRINT_MAX_VERTICES,
-  footprintPlans,
-  mappedTown,
-} from '../src/game/footprint-buildings';
-import {
+  // #1637's city centre, whose street and terraced blocks `town=city-street` rides;
+  // `town=city` is #1636's, from `testing/urban-fixtures.ts`.
+  cityCentreFixture as cityStreetscapeFixture,
   countrysideFixture,
   mixedTownFixture,
   richmondStreetFixture,
+  terraceStreetFixture,
 } from '../src/game/footprint-fixtures-testing';
-import { landClassMask } from '../src/game/land-class';
 import { mappedBuildingsOf } from '../src/game/mapped-buildings';
+import { cityCentreFixture } from '../src/game/testing/urban-fixtures';
 import type { SceneFrame } from '../src/game/port';
 import { corridorOrigin } from '../src/game/terrain';
-import { NO_URBAN_CLASS, urbanClassMap } from '../src/game/urban-class';
 import { deviceToday } from '../src/game/season';
 import { routeHemisphere, routeLatitudeMagnitude } from '../src/game/world';
 import {
@@ -78,6 +77,7 @@ import {
   atmosphereOf,
   decorationBeltOf,
   decorationKindsOf,
+  facadeWreathOf,
   firDepthPrepassOf,
   foliageOrderedOf,
   groundBlendOf,
@@ -89,11 +89,13 @@ import {
   realisticTextureReport,
   setRealisticTrees,
   threeGameRenderer,
+  weatheringOf,
   windowRevealsOf,
 } from '../src/game/three-renderer';
 import {
   configQuery,
   decorationsWithConfig,
+  facadeWreathWithLevers,
   parseConfig,
   percentiles,
   rungWithLevers,
@@ -101,9 +103,9 @@ import {
   firPrepassWithLevers,
   surfacesWithLevers,
   treesWithLevers,
-  urbanClassWithLevers,
   windowRevealsWithLevers,
   overhangShadowsWithLevers,
+  weatheringWithLevers,
   countrysideWithLevers,
   type Layer,
   type Lever,
@@ -120,6 +122,7 @@ import {
   routeDigest,
   villageRoute,
 } from '../src/demo/synthetic-road';
+import { plannedTown } from './realistic/town';
 import { frameCensus, type FrameCensus } from './realistic/village';
 
 /** How long the scene runs before anything is sampled: shader compiles, first uploads. */
@@ -370,7 +373,13 @@ async function run(): Promise<void> {
         ? richmondStreetFixture(latitude)
         : config.town === 'countryside'
           ? countrysideFixture(latitude)
-          : undefined;
+          : config.town === 'terrace'
+            ? terraceStreetFixture(latitude)
+            : config.town === 'city'
+              ? cityCentreFixture(latitude)
+              : config.town === 'city-street'
+                ? cityStreetscapeFixture(latitude)
+                : undefined;
   // #1559: or the level road through two villages, for validation 0002 AE2.
   const profile =
     mixed?.profile ??
@@ -381,24 +390,13 @@ async function run(): Promise<void> {
   publish({ routeDigest: routeDigest(profile) });
   const town = ((): Parameters<typeof rideFrame>[0]['town'] => {
     if (mixed === undefined) return undefined;
-    const land = landClassMask(mixed.corridor);
-    // #1634: and its urban class, as the press builds it, unless the lever is off.
-    const urban = urbanClassWithLevers(config.leversOff)
-      ? urbanClassMap(mixed.corridor, land, profile)
-      : NO_URBAN_CLASS;
-    const { plans } = footprintPlans(
-      mixed.corridor,
-      land,
-      profile,
-      origin,
-      FOOTPRINT_MAX_VERTICES,
-      urban,
-    );
+    // #1634's urban class and #1660's split roofs, as the press builds them, unless a lever is off.
+    const { land, plans, urban } = plannedTown(mixed, config.leversOff);
     return {
       corridor: mixed.corridor,
       land,
       buildings: mappedBuildingsOf(plans),
-      lots: mappedTown(mixed.corridor, plans),
+      lots: mappedTown(mixed.corridor, plans, urban),
     };
   })();
   const loopFrom = town === undefined ? LOOP_FROM_METRES : TOWN_FROM_METRES;
@@ -448,6 +446,9 @@ async function run(): Promise<void> {
   // #1658's cost pair: the mapped walls without the sun's shadow under their
   // eaves, the term out of the facade's program, as the reveals' is.
   overhangShadowsOf(view, overhangShadowsWithLevers(config.leversOff));
+  // #1661's cost pair: the mapped facades without their weathering, the term
+  // out of both of the facade's programs, as the shadows' is.
+  weatheringOf(view, weatheringWithLevers(config.leversOff));
   // #1274's by-eye pair: a steep bank in ambientCG's rock face, or — the crag
   // off — in the scree's photograph, as it was. The ground's material is built
   // with the realistic belts, so this too is applied again after a rung change.
@@ -462,6 +463,9 @@ async function run(): Promise<void> {
   mappedBlobsShownOf(view, !config.leversOff.includes('mapped-blobs'));
   // #1624: the product's decorations, or with `decorations=probe` the probe.
   decorationKindsOf(view, decorationsWithConfig(config));
+  // #1626's cost pair: the mapped doors' winter wreath, or never. A setting
+  // of the module's, applied to the season told above.
+  facadeWreathOf(view, facadeWreathWithLevers(config.leversOff));
   const resize = (): void => view.resize(canvas.clientWidth, canvas.clientHeight);
   resize();
   addEventListener('resize', resize);

@@ -44,6 +44,7 @@ import {
   BOLLARD_INSET_METRES,
   FURNITURE_DRAW_METRES,
   FURNITURE_KINDS,
+  FURNITURE_SURFACES,
   LAMP_SETBACK_METRES,
   DOOR_PATH_TRIANGLES_PER_VILLAGE,
   PAVEMENT_TRIANGLES_PER_VILLAGE,
@@ -51,6 +52,7 @@ import {
   streetsAt,
   type FurnitureItem,
   type FurnitureKind,
+  type FurnitureSurface,
   type VillageStreet,
 } from './streets';
 import { scatterSeed } from './scatter';
@@ -3666,42 +3668,94 @@ describe('the street furniture — #1536', () => {
   const first = (streets[0] as VillageStreet).furniture[0] as FurnitureItem;
   const near = { x: first.x, z: first.z };
 
-  it('draws one instanced mesh a kind, every piece within reach and none past it', () => {
-    const belt = new FurnitureBelt('stylised');
-    belt.update(streets, near);
-    let drawn = 0;
-    for (const kind of FURNITURE_KINDS) {
-      const expected = streets
-        .flatMap((street) => street.furniture)
-        .filter(
-          (item) =>
-            item.kind === kind &&
-            Math.hypot(item.x - near.x, item.z - near.z) <= FURNITURE_DRAW_METRES,
-        ).length;
-      expect(belt.meshOf(kind).count, kind).toBe(expected);
-      expect(belt.meshOf(kind).visible, kind).toBe(expected > 0);
-      drawn += expected;
+  /** The pieces of `kind` within reach of `camera`. */
+  const inReach = (kind: FurnitureKind, camera: { x: number; z: number }): FurnitureItem[] =>
+    streets
+      .flatMap((street) => street.furniture)
+      .filter(
+        (item) =>
+          item.kind === kind &&
+          Math.hypot(item.x - camera.x, item.z - camera.z) <= FURNITURE_DRAW_METRES,
+      );
+  const kindsOf = (surface: FurnitureSurface): FurnitureKind[] =>
+    FURNITURE_KINDS.filter((kind) => (surface === 'planks' ? kind === 'bench' : kind !== 'bench'));
+
+  it('draws one merged mesh a surface, every piece within reach and none past it — #1689', () => {
+    for (const world of ['stylised', 'realistic'] as const) {
+      const belt = new FurnitureBelt(world, planks);
+      // Two meshes join the scene, so the frame draws two calls, not one a kind.
+      const added: unknown[] = [];
+      belt.addTo({ add: (object: unknown) => added.push(object) } as never);
+      expect(added).toEqual(FURNITURE_SURFACES.map((surface) => belt.meshOf(surface)));
+      expect(FURNITURE_SURFACES).toHaveLength(2);
+      belt.update(streets, near);
+      let drawn = 0;
+      for (const surface of FURNITURE_SURFACES) {
+        let triangles = 0;
+        for (const kind of kindsOf(surface)) {
+          const expected = inReach(kind, near).length;
+          expect(belt.drawnOf(kind), kind).toBe(expected);
+          // Non-vacuity: every kind in a village's worth.
+          expect(expected, kind).toBeGreaterThan(0);
+          triangles += expected * trianglesOf({ geometry: belt.shapeOf(kind) });
+          drawn += expected;
+        }
+        const mesh = belt.meshOf(surface);
+        expect(trianglesOf(mesh), surface).toBe(triangles);
+        expect(mesh.visible, surface).toBe(true);
+        // One material, so one call whatever it holds.
+        expect(Array.isArray(mesh.material), surface).toBe(false);
+      }
+      expect(drawn).toBeGreaterThan(10);
+      // Its level of detail: a camera a village away draws nothing at all.
+      belt.update(streets, { x: near.x, z: near.z - 2 * FURNITURE_DRAW_METRES - 400 });
+      for (const surface of FURNITURE_SURFACES) {
+        expect(belt.meshOf(surface).visible, surface).toBe(false);
+      }
+      for (const kind of FURNITURE_KINDS) expect(belt.drawnOf(kind), kind).toBe(0);
+      belt.dispose();
     }
-    // Non-vacuity: a village's worth, and every kind in it.
-    expect(drawn).toBeGreaterThan(10);
-    for (const kind of FURNITURE_KINDS) expect(belt.meshOf(kind).count, kind).toBeGreaterThan(0);
-    // Its level of detail: a camera a village away draws nothing at all.
-    belt.update(streets, { x: near.x, z: near.z - 2 * FURNITURE_DRAW_METRES - 400 });
-    for (const kind of FURNITURE_KINDS) expect(belt.meshOf(kind).visible, kind).toBe(false);
-    belt.dispose();
   });
 
   it('places each piece where the street says, turned to face the road', () => {
     const belt = new FurnitureBelt('stylised');
     belt.update(streets, near);
-    const mesh = belt.meshOf(first.kind);
-    const elements = mesh.instanceMatrix.array;
-    // The column holding the translation, and the turned +z axis.
-    expect(elements[12]).toBeCloseTo(first.x, 4);
-    expect(elements[13]).toBeCloseTo(first.y, 4);
-    expect(elements[14]).toBeCloseTo(first.z, 4);
-    expect(elements[8]).toBeCloseTo(Math.sin(first.rotation), 5);
-    expect(elements[10]).toBeCloseTo(Math.cos(first.rotation), 5);
+    // `first` is the first piece of its surface in the street's order, so its
+    // vertices open the surface's mesh.
+    const shape = belt.shapeOf(first.kind);
+    const mesh = belt.meshOf(first.kind === 'bench' ? 'planks' : 'painted');
+    const [cos, sin] = [Math.cos(first.rotation), Math.sin(first.rotation)];
+    // Non-vacuity: a piece that is turned, so a missed turn cannot pass.
+    expect(Math.abs(sin)).toBeGreaterThan(0.1);
+    for (const name of ['position', 'normal'] as const) {
+      const from = shape.getAttribute(name);
+      const to = mesh.geometry.getAttribute(name);
+      const [dx, dy, dz] = name === 'position' ? [first.x, first.y, first.z] : [0, 0, 0];
+      for (let vertex = 0; vertex < from.count; vertex += 1) {
+        const [x, y, z] = [from.getX(vertex), from.getY(vertex), from.getZ(vertex)];
+        const at = `${name} ${String(vertex)}`;
+        // three's `makeRotationY`, then the piece's place.
+        expect(to.getX(vertex), at).toBeCloseTo(cos * x + sin * z + dx, 4);
+        expect(to.getY(vertex), at).toBeCloseTo(y + dy, 4);
+        expect(to.getZ(vertex), at).toBeCloseTo(-sin * x + cos * z + dz, 4);
+      }
+    }
+    // The colours ride along untouched.
+    expect(Array.from(mesh.geometry.getAttribute('color').array.slice(0, 9))).toEqual(
+      Array.from(shape.getAttribute('color').array.slice(0, 9)),
+    );
+    belt.dispose();
+  });
+
+  it('uploads nothing while the pieces in reach are the same, and rebuilds when they change — #1689', () => {
+    const belt = new FurnitureBelt('realistic', planks);
+    belt.update(streets, near);
+    const held = belt.meshOf('painted').geometry;
+    belt.update(streets, { x: near.x + 0.5, z: near.z });
+    expect(belt.meshOf('painted').geometry).toBe(held);
+    // A village away: the pieces in reach change, so the mesh is rebuilt.
+    belt.update(streets, { x: near.x, z: near.z - 2 * FURNITURE_DRAW_METRES - 400 });
+    expect(belt.meshOf('painted').geometry).not.toBe(held);
     belt.dispose();
   });
 
@@ -3715,7 +3769,7 @@ describe('the street furniture — #1536', () => {
       bin: PAVEMENT_WIDTH_METRES - BENCH_SETBACK_METRES,
     };
     for (const kind of FURNITURE_KINDS) {
-      const geometry = belt.meshOf(kind).geometry;
+      const geometry = belt.shapeOf(kind);
       geometry.computeBoundingBox();
       const box = geometry.boundingBox;
       // +z is towards the road: the front must stop short of the kerb, the
@@ -3730,7 +3784,7 @@ describe('the street furniture — #1536', () => {
   it('holds the streets inside their stated triangles, each kind at its stated shape', () => {
     const belt = new FurnitureBelt('realistic', planks);
     const triangles = Object.fromEntries(
-      FURNITURE_KINDS.map((kind) => [kind, trianglesOf(belt.meshOf(kind))]),
+      FURNITURE_KINDS.map((kind) => [kind, trianglesOf({ geometry: belt.shapeOf(kind) })]),
     );
     expect(triangles).toEqual({ 'lamp-post': 88, bollard: 64, bench: 108, bin: 64 });
     const furniture = FURNITURE_KINDS.reduce(
@@ -3743,7 +3797,7 @@ describe('the street furniture — #1536', () => {
     // The SAME triangles in both worlds: why the frame's figure leaves them out.
     const stylised = new FurnitureBelt('stylised');
     for (const kind of FURNITURE_KINDS) {
-      expect(trianglesOf(stylised.meshOf(kind)), kind).toBe(triangles[kind]);
+      expect(trianglesOf({ geometry: stylised.shapeOf(kind) }), kind).toBe(triangles[kind]);
     }
     stylised.dispose();
     belt.dispose();
@@ -3751,26 +3805,26 @@ describe('the street furniture — #1536', () => {
 
   it('wears physically based paint in the realistic world, and the bench Poly Haven’s planks', () => {
     const belt = new FurnitureBelt('realistic', planks);
-    for (const kind of FURNITURE_KINDS) {
-      const mesh = belt.meshOf(kind);
+    for (const surface of FURNITURE_SURFACES) {
+      const mesh = belt.meshOf(surface);
       const material = mesh.material as unknown as {
         type: string;
         map: unknown;
         normalMap: unknown;
         vertexColors: boolean;
       };
-      expect(material.type, kind).toBe('MeshStandardMaterial');
-      expect(material.vertexColors, kind).toBe(true);
-      expect(isConstructedMaterial(mesh.material as never), kind).toBe(true);
-      expect(breathesTheAir(mesh.material as never), kind).toBe(true);
-      if (kind === 'bench') {
+      expect(material.type, surface).toBe('MeshStandardMaterial');
+      expect(material.vertexColors, surface).toBe(true);
+      expect(isConstructedMaterial(mesh.material as never), surface).toBe(true);
+      expect(breathesTheAir(mesh.material as never), surface).toBe(true);
+      if (surface === 'planks') {
         expect(material.map).toBe(planks.colour);
         expect(material.normalMap).toBe(planks.normal);
         expect(readsTextureLodBias(mesh.material as never)).toBe(true);
         // The slats in metres of the photograph, as a barn's boards are.
-        expect(mesh.geometry.getAttribute('uv')).toBeDefined();
+        expect(belt.shapeOf('bench').getAttribute('uv')).toBeDefined();
       } else {
-        expect(material.map ?? null, kind).toBeNull();
+        expect(material.map ?? null, surface).toBeNull();
       }
     }
     belt.dispose();
@@ -3778,10 +3832,11 @@ describe('the street furniture — #1536', () => {
 
   it('is painted in the stylised world, lit or flat by the rung', () => {
     const belt = new FurnitureBelt('stylised');
-    expect(typeOf(belt.meshOf('lamp-post'))).toBe('MeshLambertMaterial');
+    for (const surface of FURNITURE_SURFACES)
+      expect(typeOf(belt.meshOf(surface)), surface).toBe('MeshLambertMaterial');
     belt.setShading('flat');
-    for (const kind of FURNITURE_KINDS)
-      expect(typeOf(belt.meshOf(kind)), kind).toBe('MeshBasicMaterial');
+    for (const surface of FURNITURE_SURFACES)
+      expect(typeOf(belt.meshOf(surface)), surface).toBe('MeshBasicMaterial');
     belt.dispose();
   });
 
@@ -3789,14 +3844,21 @@ describe('the street furniture — #1536', () => {
     const belt = new FurnitureBelt('stylised');
     belt.setShown(false);
     belt.update(streets, near);
-    for (const kind of FURNITURE_KINDS) expect(belt.meshOf(kind).visible, kind).toBe(false);
+    for (const surface of FURNITURE_SURFACES) {
+      expect(belt.meshOf(surface).visible, surface).toBe(false);
+    }
     belt.setShown(true);
     belt.switchOn(false);
     belt.update(streets, near);
-    for (const kind of FURNITURE_KINDS) expect(belt.meshOf(kind).visible, kind).toBe(false);
+    for (const surface of FURNITURE_SURFACES) {
+      expect(belt.meshOf(surface).visible, surface).toBe(false);
+    }
+    for (const kind of FURNITURE_KINDS) expect(belt.drawnOf(kind), kind).toBe(0);
     belt.switchOn(true);
     belt.update(streets, near);
-    expect(belt.meshOf('lamp-post').visible).toBe(true);
+    for (const surface of FURNITURE_SURFACES) {
+      expect(belt.meshOf(surface).visible, surface).toBe(true);
+    }
     belt.dispose();
   });
 });

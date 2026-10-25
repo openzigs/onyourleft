@@ -405,10 +405,12 @@ mapped blobs, 114 s for the decorations' three, and 143 s and 126 s for #1623's 
 |---|---|---|---|--:|--:|
 | `test:browser:nightly:shard-1` | `heavy` | every nightly spec but the page's | (#1675) | — | — |
 | `test:browser:nightly:shard-2` | `browser-2` | `realistic.browser.spec.ts` | #616, #1623 | 6 | 337 s |
-| `test:browser:nightly:shard-3` | `browser-3` | `realistic-trees.browser.spec.ts` | #1283, #1294, #1523 | 5 | 259 s |
-| `test:browser:nightly:shard-4` | `browser-4` | `realistic-town.browser.spec.ts` | #1559, #1657, #1624 | 6 | 234 s |
+| `test:browser:nightly:shard-3` | `browser-3` | `realistic-trees.browser.spec.ts`, since #1626 `realistic-wreath.browser.spec.ts` | #1283, #1294, #1523, #1626 | 7 | 259 s |
+| `test:browser:nightly:shard-4` | `browser-4` | `realistic-town.browser.spec.ts` | #1559, #1624 (#1625, #1626), #1689 | 6 | — |
+| `test:browser:nightly:shard-5` | `browser-5` | `realistic-mapped.browser.spec.ts` | #1657, #1636 | 3 | — |
 
-The last column is the sum of those cases on the one-job run, not a run of the shard. Split by
+The last column is the sum of those cases on the one-job run, not a run of the shard; #1626's
+loads (one in the town's shard, the wreath's two in the trees') came after it. Split by
 describe into files, as #1675 split by file, so each shard is still a file filter that
 `nightly-split.test.ts` can hold every nightly spec to exactly one of; the load they share is
 `apps/web/browser/realistic-ride.ts`. The same test now also holds **each shard's loads of the page
@@ -416,12 +418,19 @@ times the slowest load measured** (72 s, #1623's case on that run) **at or under
 stop**: 7 loads is the most one shard may hold, so a lever that would take a shard past it is a red
 case in the required suite, not a nightly run that stops. It counts `ride(page` and `ridden(page`
 calls in each nightly describe, and refuses a realistic spec whose loads it counts as none.
-`report` needs all four jobs.
+`report` needs every job.
 
-**Where the next lever's describe goes**: shard 2 holds 6 loads (432 s of the 504 s cap), so a
-describe with two or more loads there is a red case. Put it in the shard with the fewest loads
-(shard 3 or 4 hold 5 and 6); if every shard would pass 7, add `realistic-<name>.browser.spec.ts`,
-a `test:browser:nightly:shard-5` script and a `browser-5` job copied from `browser-4`, name the new
+⚠️ **Five shards since the combined PR that merged #1626, #1636 and #1689 together.** Each added one
+load to `realistic-town.browser.spec.ts` and each passed alone; together the file held 9 loads, past
+the 7 a shard may hold. The mapped towns' describes (#1657's lever, #1636's city centre) moved to
+`realistic-mapped.browser.spec.ts` in `browser-5`, by the procedure below; the heading keeps
+#1698's name because the spec files cite it. The loads column counts as the test does, lexically:
+#1636's case loads the page twice in one loop, so `browser-5` makes four loads.
+
+**Where the next lever's describe goes**: shards 2, 3, 4 and 5 hold 6, 7, 6 and 3 loads (504 s is
+the cap: 7 loads), so a describe with one load in shard 3 is a red case. Put it in the shard with the
+fewest loads (shard 5); if every shard would pass 7, add `realistic-<name>.browser.spec.ts`,
+a `test:browser:nightly:shard-6` script and a `browser-6` job copied from `browser-5`, name the new
 `spec` in `nightly.ts`, and add the job to `report`'s `needs`. The load count is lexical, so a
 load made through an alias of `ride` or a direct `page.goto` of the page is not counted: call `ride`.
 

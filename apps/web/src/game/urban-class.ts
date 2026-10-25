@@ -29,6 +29,20 @@
  * Only `building` features count, not `building_part`: a part stands inside
  * its building, and counting both would count its area twice.
  *
+ * ## The place prior (#1632, ADR 0055 D-5)
+ *
+ * A window {@link classify} puts at `town` whose coverage is at least
+ * {@link PLACE_PRIOR_MIN_COVERAGE} — with no upper bound: a downtown whose
+ * towers carry no mapped height is the case this is for — is lifted to
+ * `city-centre` when a **lifting point** stands within
+ * {@link PLACE_PRIOR_REACH_METRES} of the window's centre on the drawn road: a
+ * `locality`/`city` of rank {@link PLACE_PRIOR_MIN_CITY_RANK} or more, or a
+ * `neighbourhood`/`suburb` of any rank. Nothing else is lifted and nothing is
+ * lowered: rural and village built form stay as they are whatever stands
+ * near, and an `unknown` window stays `unknown`. The prior is applied before
+ * the smoothing, so a lifted run still needs {@link URBAN_MIN_RUN_METRES}. A
+ * `town`, `village`, `hamlet` or `quarter` point lifts nothing (D-5.5).
+ *
  * ## No map data, no class
  *
  * A window less than {@link URBAN_MIN_COVERED_SHARE} covered is `unknown` —
@@ -57,7 +71,7 @@
  */
 
 import type { RouteProfile } from '@onyourleft/domain';
-import type { Box } from '@onyourleft/map-features';
+import type { Box, PlaceFeature } from '@onyourleft/map-features';
 
 import { storeysFor } from './footprint-buildings';
 import { kindAt, type LandClassMask } from './land-class';
@@ -151,6 +165,33 @@ export const CITY_TOWER_REACH_METRES = 200;
 
 /** …or this commercial share: **50 %** (#1633). Provisional (#1630). */
 export const CITY_COMMERCIAL = 0.5;
+
+/**
+ * The place prior lifts only a `town` window of at least this footprint
+ * coverage: **0.25** (ADR 0055 D-5.1), with no upper bound. Provisional (#1630).
+ */
+export const PLACE_PRIOR_MIN_COVERAGE = 0.25;
+
+/**
+ * …when a lifting point stands within this of the window's centre on the
+ * drawn road: **800 m** (ADR 0055 D-5.1). Provisional (#1630).
+ */
+export const PLACE_PRIOR_REACH_METRES = 800;
+
+/**
+ * A `locality`/`city` point lifts only at this `population_rank` or more:
+ * **9**, a population of 100,000 or more by the archive's breaks (ADR 0055
+ * D-5.2, the owner's Q1 ruling of 2026-10-25). Provisional (#1630).
+ */
+export const PLACE_PRIOR_MIN_CITY_RANK = 9;
+
+/** Whether a place point may lift a window (ADR 0055 D-5.2). */
+function liftsAWindow(place: PlaceFeature): boolean {
+  if (place.kind === 'locality' && place.kindDetail === 'city') {
+    return place.populationRank >= PLACE_PRIOR_MIN_CITY_RANK;
+  }
+  return place.kind === 'neighbourhood' && place.kindDetail === 'suburb';
+}
 
 /** The classes by code; 0 is `unknown`. */
 const CLASS_OF_CODE: readonly UrbanClass[] = ['unknown', 'rural', 'village', 'town', 'city-centre'];
@@ -386,6 +427,20 @@ export function urbanClassMap(
   // Each sample stands for its share of the window: the sweep's spacing along, by its spacing across.
   const cellArea = stride * road.step * URBAN_SAMPLE_METRES;
   const towerWindows = Math.floor(CITY_TOWER_REACH_METRES / URBAN_WINDOW_METRES);
+  const lifting = (corridor.places ?? []).filter(liftsAWindow);
+  const reachSquared = PLACE_PRIOR_REACH_METRES * PLACE_PRIOR_REACH_METRES;
+  /** Whether a lifting point stands within reach of the window's centre on the drawn road. */
+  const nearLiftingPoint = (window: number): boolean => {
+    const centre = Math.min(total, (window + 0.5) * URBAN_WINDOW_METRES);
+    const point = Math.min(count - 1, Math.max(0, Math.round(centre / road.step)));
+    const x = points[point * 2] as number;
+    const z = points[point * 2 + 1] as number;
+    return lifting.some((place) => {
+      const dx = place.x - x;
+      const dz = place.z - z;
+      return dx * dx + dz * dz <= reachSquared;
+    });
+  };
   const codes = new Uint8Array(windows);
   for (let window = 0; window < windows; window += 1) {
     const sampled = samples[window] as number;
@@ -403,14 +458,20 @@ export function urbanClassMap(
       nearTowers += towers[other] as number;
     }
     const footprintCount = footprints[window] as number;
-    codes[window] = classify({
-      coverage: landSamples === 0 ? 0 : (area[window] as number) / (landSamples * cellArea),
+    const coverage = landSamples === 0 ? 0 : (area[window] as number) / (landSamples * cellArea);
+    const code = classify({
+      coverage,
       commercial: landSamples === 0 ? 0 : (commercial[window] as number) / landSamples,
       builtUp: landSamples === 0 ? 0 : (builtUp[window] as number) / landSamples,
       medianStoreys: medianOf(mapped[window] as number[]),
       towers: nearTowers,
       midriseShare: footprintCount === 0 ? 0 : (midrise[window] as number) / footprintCount,
     });
+    // 3a. The place prior, before the smoothing (ADR 0055 D-5.3).
+    codes[window] =
+      code === TOWN && coverage >= PLACE_PRIOR_MIN_COVERAGE && nearLiftingPoint(window)
+        ? CITY
+        : code;
   }
 
   // 4. The smoothing, within each stretch of covered windows.

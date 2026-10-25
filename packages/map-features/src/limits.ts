@@ -42,6 +42,11 @@ export interface DecodeLimits {
   readonly maxVerticesPerTile: number;
   /** Rings in one polygon, its outer ring and its holes together. */
   readonly maxRingsPerPolygon: number;
+  /**
+   * Place points kept from one tile (ADR 0055 D-2.5). Not a refusal: the
+   * decoder stops reading `places` at it, and the tile's other layers stand.
+   */
+  readonly maxPlacesPerTile: number;
 }
 
 /**
@@ -78,6 +83,18 @@ export const MAX_VERTICES_PER_TILE = 400_000;
 /** 256. The most rings measured in one polygon was 125 (a wood full of clearings). */
 export const MAX_RINGS_PER_POLYGON = 256;
 
+/**
+ * 768 (#1632, ADR 0055 D-2.5). The archive thins `places` with a label grid:
+ * at z15, 16-pixel cells of at most 3 points each (`Places.java` at
+ * `c809cd18`, as ADR 0055 records). A 256-pixel tile is 256 such cells, so the
+ * archive itself writes at most 768 points a tile; the most measured on
+ * ADR 0055's downtown sample was 24 over 7 tiles. Past it a tile is not the
+ * archive's output, and the decoder **stops**: the points after it are
+ * dropped, never decoded, and the tile is not refused, since a place is a
+ * prior and worth less than the footprints beside it.
+ */
+export const MAX_PLACES_PER_TILE = 768;
+
 /** The limits a caller gets when it names none. */
 export const DEFAULT_DECODE_LIMITS: DecodeLimits = {
   maxBytes: MAX_TILE_BYTES,
@@ -85,4 +102,5 @@ export const DEFAULT_DECODE_LIMITS: DecodeLimits = {
   maxVerticesPerFeature: MAX_VERTICES_PER_FEATURE,
   maxVerticesPerTile: MAX_VERTICES_PER_TILE,
   maxRingsPerPolygon: MAX_RINGS_PER_POLYGON,
+  maxPlacesPerTile: MAX_PLACES_PER_TILE,
 };

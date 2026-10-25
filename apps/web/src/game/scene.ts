@@ -316,6 +316,10 @@ export function sceneFrame(input: SceneInput): SceneFrame {
   // — mapped where the corridor has streets (found once a corridor), and a
   // crossroads at each procedural village — before the scenery, which is kept
   // off them.
+  const junctions =
+    input.worldCorridor === undefined
+      ? undefined
+      : mappedJunctions(input.worldCorridor, input.profile, input.origin, seed);
   const sideRoads = sideRoadsAt(
     input.profile,
     input.origin,
@@ -323,9 +327,7 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     (corridor.centre[0] as CorridorPoint).along,
     (corridor.centre[corridor.centre.length - 1] as CorridorPoint).along,
     riderDistance,
-    input.worldCorridor === undefined
-      ? []
-      : mappedJunctions(input.worldCorridor, input.profile, input.origin, seed),
+    junctions ?? [],
     input.landClass ?? NO_LAND_CLASS,
   );
   const { scatter: items, billboards } = scenery(corridor, input, riderDistance, seed, sideRoads);
@@ -343,6 +345,11 @@ export function sceneFrame(input: SceneInput): SceneFrame {
       ? NO_PAVEMENT_DATA
       : pavementSides(input.worldCorridor, input.profile, input.origin),
     input.landClass ?? NO_LAND_CLASS,
+    // #1637: and a city centre's street wherever the ride's urban class says
+    // so, broken over the mapped junctions' mouths — both fixed at the press,
+    // so this too is a lookup on every later frame.
+    input.mappedTown?.urban,
+    junctions,
   );
   const camera = cameraPose(corridor, riderDistance, (riders[0] as PlacedRider).lateral);
   return {

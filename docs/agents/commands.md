@@ -315,14 +315,16 @@ pnpm run test:browser:nightly
 
 # The nightly checks as CI runs them, in four jobs (#1675, #1698, §4c §"Four
 # nightly browser shards"): the first every nightly spec but the realistic
-# page's, then `realistic.browser.spec.ts`, `realistic-trees.browser.spec.ts`
-# and `realistic-town.browser.spec.ts`, one each, on one worker under the same
+# page's, then `realistic.browser.spec.ts`, `realistic-trees.browser.spec.ts`,
+# `realistic-town.browser.spec.ts` and `realistic-mapped.browser.spec.ts`, one
+# each, on one worker under the same
 # 840 s stop. `nightly-split.test.ts` holds every nightly spec in exactly one,
 # and each shard's realistic loads inside 60 % of the stop.
 pnpm run test:browser:nightly:shard-1
 pnpm run test:browser:nightly:shard-2
 pnpm run test:browser:nightly:shard-3
 pnpm run test:browser:nightly:shard-4
+pnpm run test:browser:nightly:shard-5
 
 # The browser gate as CI runs it, in two halves (#1362, §4c §"Two browser
 # shards"): each builds both pages and runs half the `chromium` project with

@@ -75,6 +75,7 @@ import {
 } from '../src/game/realistic-budget';
 import { MAXIMUM_DRAWN_SET } from '../src/net/interest';
 import { SIDE_ROAD_FRAME_TRIANGLES } from '../src/game/cross-streets';
+import { FURNITURE_SURFACES } from '../src/game/streets';
 import { PERSON_ANIMATION_MAX_BYTES, PERSON_MAX_TRIANGLES } from '../src/game/people-body';
 import { SURFACE_WEAR_ALLOWANCE, WORN_ROAD_CONTRAST_FLOOR } from '../src/game/road-wear';
 
@@ -1815,7 +1816,7 @@ test.describe('a village and its fields — #460', () => {
     expectAPavement(settlement.pavement, testInfo, 'stylised');
   });
 
-  test('stands lamp posts, bollards, benches and bins on it, one call a kind, and none in open country — #1536', async ({
+  test('stands lamp posts, bollards, benches and bins on it, one call a surface, and none in open country — #1536', async ({
     harnessRun,
   }, testInfo) => {
     const { settlement } = await harness(harnessRun);
@@ -1908,7 +1909,8 @@ function expectDoorPaths(
 
 /**
  * #1536's browser-gate half, for either world, on #1535's frames: every kind
- * of street furniture drawn beside the village, one draw call a kind; with it
+ * of street furniture drawn beside the village, one draw call a surface
+ * (#1689: the lamp post, bollard and bin share the painted one); with it
  * switched off the frame loses exactly those calls and the pixels it covered;
  * and a frame in open country draws none of it.
  */
@@ -1928,8 +1930,8 @@ function expectStreetFurniture(
     expect(counts[kind], kind).toBeGreaterThan(0);
     expect(countsOpen[kind], kind).toBe(0);
   }
-  // One instanced draw a kind, however many pieces.
-  expect(drawCalls - drawCallsOff).toBe(kinds.length);
+  // One merged draw a surface, however many pieces and kinds — #1689.
+  expect(drawCalls - drawCallsOff).toBe(FURNITURE_SURFACES.length);
   // It reaches the drawing buffer.
   expect(pixels).toBeGreaterThan(100);
 }
@@ -3811,6 +3813,36 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     expect(Math.abs(luminance(shadow.far) - luminance(shadow.farOff))).toBeLessThan(4);
   });
 
+  test('#1661 a mapped render wall is grimed 0.3 m above its floor and not 1.5 m up, and neither with -weathering', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { weathering } = await realistic(harnessRun);
+    const rgb = (values: readonly number[]): string => values.map((c) => c.toFixed(0)).join('/');
+    const measured =
+      `a render wall seen from ${weathering.metres.toFixed(0)} m: ${rgb(weathering.near)} 0.3 m ` +
+      `above its floor against ${rgb(weathering.far)} 1.5 m up; ${rgb(weathering.nearOff)} and ` +
+      `${rgb(weathering.farOff)} with -weathering`;
+    testInfo.annotations.push({ type: 'a mapped wall’s weathering', description: measured });
+    console.log(`a mapped wall’s weathering — ${measured}`);
+    const luminance = (values: readonly number[]): number =>
+      0.2126 * (values[0] ?? 0) + 0.7152 * (values[1] ?? 0) + 0.0722 * (values[2] ?? 0);
+    expect(weathering.aimed).toBe(true);
+    for (const values of [weathering.near, weathering.far, weathering.nearOff, weathering.farOff]) {
+      expect(values).toHaveLength(3);
+    }
+    const apart = luminance(weathering.far) - luminance(weathering.near);
+    const apartOff = luminance(weathering.farOff) - luminance(weathering.nearOff);
+    // The grime takes at least 16 % of the light at 0.3 m on the youngest
+    // building (`WEATHERING.splash`), which AgX draws at about 40 % of its
+    // size; the tile-breaking noise moves either reading a level or two.
+    expect(apart).toBeGreaterThan(8);
+    // THE CONTROL: with the term out of the program, main's 0.4 m band at the
+    // foot is all that darkens the lower place, by a few levels ...
+    expect(apartOff).toBeLessThan(6);
+    // ... and the grime is what more than that is, past the gate's tolerance of 4.
+    expect(apart - apartOff).toBeGreaterThan(4);
+  });
+
   test('#1586 a town’s edge is drawn when the fields beyond it fill the structure cap', async ({
     harnessRun,
   }, testInfo) => {
@@ -3870,7 +3902,7 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     expect(apart).toBeGreaterThan(8);
   });
 
-  test('stands its street furniture on it, the bench in Poly Haven’s planks, one call a kind — #1536', async ({
+  test('stands its street furniture on it, the bench in Poly Haven’s planks, one call a surface — #1536', async ({
     harnessRun,
   }, testInfo) => {
     const { pavement } = await realistic(harnessRun);

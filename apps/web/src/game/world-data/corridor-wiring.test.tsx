@@ -290,6 +290,9 @@ describe('the chosen route’s corridor reaches the scene — #1539', () => {
     const lots = new Set(ride.map((input) => input.mappedTown));
     expect(lots.size).toBe(1);
     expect([...lots][0]).toBeDefined();
+    // #1637: carrying the urban class the press built, which the lots and a
+    // city centre's streets read off it.
+    expect(typeof [...lots][0]?.urban?.classAt).toBe('function');
     expect(planCalls).toBe(1);
     expect(new Set(planCallsAtFrame)).toStrictEqual(new Set([1]));
     // ...and by any route, not only through `footprintPlans`' export: the

@@ -62,6 +62,21 @@
  * footprint can have forty walls, and the openings `buildings.ts` cuts would
  * not fit in {@link FOOTPRINT_MAX_TRIANGLES}.
  *
+ * ## Split roofs (#1660, the owner's ruling (b) of 2026-10-24)
+ *
+ * The rectangularity gate is not the only way to a pitched roof: a footprint
+ * that snaps to 1 to 3 rectangles (`rectilinear-roofs.ts` §`rectanglesOf`) —
+ * an L, a T, a U, a Z — passes it, and its roof is one pitched roof a
+ * rectangle, at one pitch from one eaves, gable or hip as one draw says for
+ * them all. Same-pitch roofs over overlapping rectangles meet in the right
+ * valleys by the depth test alone. The gutters, the downpipe and the dormers
+ * are the largest rectangle's; the chimney stands on the highest ridge. A
+ * one-rectangle split is the minimum-area rectangle where it is that to a
+ * centimetre, so a rectangle plans as before, and its snapped self otherwise,
+ * so no roof hangs over a notch. A split roof that would not fit the caps is
+ * planned flat, never truncated. `?levers=-split-roofs`
+ * ({@link FootprintPlanOptions}) is `main`'s rule.
+ *
  * ## The detail (#1581, the owner's ruling of 2026-10-22)
  *
  * #1549 drew these plans as boxes, and the owner's verdict was that they
@@ -161,6 +176,20 @@
  * plan has one, and how many triangles, is decided at the press like
  * everything else.
  *
+ * ## Terraces (#1635, epic #1628)
+ *
+ * In a `town` or a `city-centre` ({@link TERRACE_CLASSES}, #1633's class), two
+ * kept footprints whose edges lie on one line — within
+ * {@link PARTY_WALL_OFFSET_METRES} and {@link PARTY_WALL_ANGLE_DEGREES} —
+ * for at least {@link PARTY_WALL_MIN_OVERLAP_METRES} share that stretch as a
+ * **party wall** ({@link partyWallsOf}, found in a grid of edges, never by
+ * testing every pair). So every footprint is measured before any is built.
+ * A party wall has no window, door or shutter: where the two are the same
+ * height ({@link PARTY_WALL_SAME_HEIGHT_METRES}) neither draws it, and where
+ * they are not only the taller draws it, above the lower roof. A terraced
+ * roof is flat behind its parapet under #1590's cornice, whatever P-11 says,
+ * and the row reads as one street wall. Elsewhere nothing changes.
+ *
  * ## The surfaces
  *
  * By the land use under the centroid ({@link FootprintUse}, from `land-class.ts`
@@ -211,6 +240,7 @@ import { MASONRY_TINT, packedInstanceTint } from './instance-tint';
 import { kindAt, type LandClass, type LandClassMask } from './land-class';
 import { ROAD_CLEARANCE_METRES, terrainHeightAt } from './landform';
 import { REALISTIC_TRIANGLES } from './realistic-budget';
+import { rectanglesOf, type Rectangle } from './rectilinear-roofs';
 import type { StructureSurface } from './realistic-assets';
 import {
   nearestOnRoadSegments,
@@ -220,9 +250,17 @@ import {
   type DrawnRoadPoints,
 } from './road-grid';
 import { scatterSeed } from './scatter';
-import { footprintIndexOf, type MappedTown } from './settlements';
+import {
+  footprintIndexOf,
+  LOT_FLOATS,
+  lotSpacing,
+  lotStands,
+  placeLot,
+  type MappedTown,
+} from './settlements';
+import { CITY_PAVEMENT_WIDTH_METRES, KERB_LATERAL_METRES } from './streets';
 import { slotHash, uniformFrom } from './seeded';
-import { ROAD_WIDTH_METRES, type CorridorOrigin } from './terrain';
+import { drawnRoadFrame, ROAD_WIDTH_METRES, type CorridorOrigin } from './terrain';
 import type { UrbanClass, UrbanClassMap } from './urban-class';
 import type { WorldCorridor } from './world-data/corridor';
 
@@ -378,7 +416,8 @@ export const FACADE_RAILING = -5;
  *   than #1581's casements), {@link STYLE_SHUTTERS}, {@link STYLE_EAVES} (an
  *   overhanging roof shades the wall's top) and
  *   {@link STYLE_BRICK_FOUNDATION} (a clapboard wall's foundation band is
- *   brick, not block).
+ *   brick, not block); since #1661 {@link STYLE_FLAT_ROOF} (a parapet above);
+ *   since #1636 {@link STYLE_GLAZED} (a tower's curtain wall).
  * - **`width`**: a windowed wall's bay, in metres — what pairs its windows;
  *   a dormer's or a garage's face's width.
  * - **`extra`**: a windowed wall's picture-window bay on the ground storey,
@@ -427,6 +466,24 @@ export const STYLE_BRICK_FOUNDATION = 8;
  * its door's face a shop's glazed door in a recess. @see STYLE_FLOATS
  */
 export const STYLE_COMMERCIAL = 16;
+/**
+ * `flags`: a tower's curtain wall — #1636: glazing bands every storey over
+ * spandrels, with thin mullions, drawn by the shader in place of windows
+ * (`facade.ts` §`CURTAIN_WALL`) on a building of {@link GLAZED_MIN_STOREYS}
+ * or more. @see STYLE_FLOATS
+ */
+export const STYLE_GLAZED = 32;
+
+/** The least storeys a building has whose walls are a curtain wall — #1636: **9**. */
+export const GLAZED_MIN_STOREYS = 9;
+
+/**
+ * `flags`: a wall under a flat roof's parapet — #1661, where the parapet's
+ * drip streaks it (`facade.ts` §`WEATHERING`). A gable end carries no
+ * {@link STYLE_EAVES} either, so the want of that flag does not say the roof
+ * is flat. Bit **64**: 32 is #1636's. @see STYLE_FLOATS
+ */
+export const STYLE_FLAT_ROOF = 64;
 
 /** What a plan is clad in — #1588. */
 export interface FootprintCladding {
@@ -569,6 +626,24 @@ export const FOOTPRINT_GABLE_MIN_RECTANGULARITY = 0.85;
 
 /** A gable only under eaves at most this high: **12 m**. */
 export const FOOTPRINT_GABLE_MAX_EAVES_METRES = 12;
+
+/** The urban classes whose footprints are terraced where they share a wall — #1635. */
+export const TERRACE_CLASSES: ReadonlySet<UrbanClass> = new Set(['town', 'city-centre']);
+
+/** Two edges are one party wall within this perpendicular offset: **0.5 m** (#1635). */
+export const PARTY_WALL_OFFSET_METRES = 0.5;
+
+/** …and within this angle of each other: **5°** (#1635). */
+export const PARTY_WALL_ANGLE_DEGREES = 5;
+
+/** …where they overlap along their length by at least: **2 m** (#1635). */
+export const PARTY_WALL_MIN_OVERLAP_METRES = 2;
+
+/**
+ * Two terraced buildings are the same height within: **0.5 m** (#1635), and
+ * then their party wall is drawn by neither.
+ */
+export const PARTY_WALL_SAME_HEIGHT_METRES = 0.5;
 
 /**
  * A pitched roof's pitch, seeded — #1581: **25° to 45°** in fives, round
@@ -1062,16 +1137,6 @@ function convexHull(ring: Ring): [number, number][] {
   return [...lower.slice(0, -1), ...upper.slice(0, -1)];
 }
 
-/** A rectangle: its centre, its long axis (unit) and its half-lengths along and across it. */
-interface Rectangle {
-  readonly cx: number;
-  readonly cz: number;
-  readonly ux: number;
-  readonly uz: number;
-  readonly halfLong: number;
-  readonly halfShort: number;
-}
-
 /**
  * The minimum-area rectangle around a ring — by its hull's edges, one of
  * which a minimum-area rectangle always has a side along — with its long axis
@@ -1479,6 +1544,43 @@ interface Windows {
    * stands the gable's triangle on its top and so has no eaves over it (#1658).
    */
   readonly gableAxis?: readonly [x: number, z: number];
+  /**
+   * #1660: a split gable roof's rectangles. A wall is then a gable end where
+   * it stands on no rectangle's long side ({@link gableEndAmong}).
+   */
+  readonly gableRectangles?: readonly Rectangle[];
+}
+
+/** How near a wall must stand to a rectangle's side to be under its eaves: **0.5 m** (#1660). */
+const EAVES_SIDE_METRES = 0.5;
+
+/**
+ * Whether the wall from `(ax, az)` to `(bx, bz)` is a gable end of a split
+ * gable roof — #1660: it runs along no rectangle's long side, so no eaves
+ * overhang it. A wall that is one wing's end and another's side (an L's
+ * outer wall, where the wings meet) is under the side's eaves.
+ */
+function gableEndAmong(
+  rectangles: readonly Rectangle[],
+  ends: readonly [ax: number, az: number, bx: number, bz: number],
+): boolean {
+  const [ax, az, bx, bz] = ends;
+  const length = Math.hypot(bx - ax, bz - az);
+  const mx = (ax + bx) / 2;
+  const mz = (az + bz) / 2;
+  for (const each of rectangles) {
+    const along = Math.abs(((bx - ax) * each.ux + (bz - az) * each.uz) / length);
+    if (along < Math.SQRT1_2) continue;
+    const a = (mx - each.cx) * each.ux + (mz - each.cz) * each.uz;
+    const c = -(mx - each.cx) * each.uz + (mz - each.cz) * each.ux;
+    if (
+      Math.abs(Math.abs(c) - each.halfShort) <= EAVES_SIDE_METRES &&
+      Math.abs(a) <= each.halfLong + EAVES_SIDE_METRES
+    ) {
+      return false;
+    }
+  }
+  return true;
 }
 
 /** How {@link ringWalls} draws. */
@@ -1492,6 +1594,12 @@ interface WallOptions {
    * and up from `from` — a plinth's foundation.
    */
   readonly metres?: Style;
+  /**
+   * #1635: the outer ring's party walls, and the building's eaves. A party
+   * wall's stretch is drawn only above a lower neighbour's roof
+   * ({@link partyFaceFrom}), with no window, door or shutter.
+   */
+  readonly party?: { readonly walls: readonly PartyWall[]; readonly eaves: number };
 }
 
 /**
@@ -1504,6 +1612,8 @@ interface WallOptions {
  * door — an odd count's middle bay; an even count's door stands between two
  * — and, since #1588, its style ({@link STYLE_FLOATS}): its cladding, its
  * windows' flags, its bay in metres and the door edge's picture window.
+ * Since #1635 an outer edge with `party` walls is drawn in pieces: off them
+ * as any wall, and on them only above a lower neighbour, plain.
  */
 function ringWalls(
   into: number[],
@@ -1512,7 +1622,7 @@ function ringWalls(
   options: WallOptions = {},
 ): void {
   const [bottom, top, from] = heights;
-  const { inside = false, windows, metres } = options;
+  const { inside = false, windows, metres, party } = options;
   rings.forEach((ring, index) => {
     const n = ring.length / 2;
     const counter = signedArea(ring) > 0;
@@ -1529,72 +1639,140 @@ function ringWalls(
       const length = Math.hypot(bx - ax, bz - az);
       if (!(length > 1e-6)) continue;
       const normal: Vec = [((bz - az) / length) * outward, 0, (-(bx - ax) / length) * outward];
-      const u0 = round / BAY_METRES;
-      const u1 = (round + length) / BAY_METRES;
-      const v0 = (bottom - from) / STOREY_METRES;
-      const v1 = (top - from) / STOREY_METRES;
-      const corners: Four<Vec> = [
-        [ax, bottom, az],
-        [bx, bottom, bz],
-        [bx, top, bz],
-        [ax, top, az],
-      ];
-      const uv: Four<Pair> = [
-        [u0, v0],
-        [u1, v0],
-        [u1, v1],
-        [u0, v1],
-      ];
-      const bays = windows === undefined ? 0 : baysOf(length);
-      let face: Face = PLAIN;
-      let facade: Four<Pair> = [
-        [0, v0],
-        [bays, v0],
-        [bays, v1],
-        [0, v1],
-      ];
-      if (windows !== undefined) {
-        const front = index === 0 && i === windows.doorEdge;
-        const axis = windows.gableAxis;
-        // A gable end (its edge across the long axis) carries no eaves flag.
-        const gableEnd =
-          axis !== undefined &&
-          Math.abs(((bx - ax) * axis[0] + (bz - az) * axis[1]) / length) < Math.SQRT1_2;
-        const flags =
-          gableEnd && Math.floor(windows.flags / STYLE_EAVES) % 2 === 1
-            ? windows.flags - STYLE_EAVES
-            : windows.flags;
-        const style: Style = [
-          windows.clad,
-          flags,
-          bays > 0 ? length / bays : 0,
-          front && bays > 0 ? windows.picture : -1,
-        ];
-        face =
-          bays === 0
-            ? plainIn(style)
-            : {
-                top: windows.top,
-                skip: front && bays % 2 === 1 ? (bays - 1) / 2 : -1,
-                style,
-              };
-      } else if (metres !== undefined) {
-        face = plainIn(metres);
-        facade = [
-          [round, bottom - from],
-          [round + length, bottom - from],
-          [round + length, top - from],
-          [round, top - from],
-        ];
+      const shared =
+        index === 0 && party !== undefined
+          ? party.walls.filter((wall) => wall.edge === i)
+          : NO_PARTY_WALLS;
+      if (party === undefined || shared.length === 0) {
+        wallPiece(into, [ax, az, bx, bz], normal, [round, length], heights, {
+          inside,
+          windows,
+          metres,
+          front: index === 0 && windows !== undefined && i === windows.doorEdge,
+        });
+        round += length;
+        continue;
       }
-      quad(into, corners, normal, uv, face, facade);
-      if (inside) {
-        const back: Vec = [-normal[0], 0, -normal[2]];
-        quad(into, corners, back, uv);
+      const ex = (bx - ax) / length;
+      const ez = (bz - az) / length;
+      for (const [s0, s1, wall] of edgePieces(length, shared)) {
+        const ends: Four<number> = [ax + ex * s0, az + ez * s0, ax + ex * s1, az + ez * s1];
+        const along: Pair = [round + s0, s1 - s0];
+        if (wall === undefined) {
+          wallPiece(into, ends, normal, along, heights, { inside, windows, metres, front: false });
+          continue;
+        }
+        const shows = partyFaceFrom(wall, party.eaves, bottom, top);
+        if (shows === undefined) continue;
+        // Plain, keeping only the cladding and a brick foundation: no window, door or shutter.
+        const plain: Style | undefined =
+          windows === undefined
+            ? undefined
+            : [windows.clad, windows.flags & STYLE_BRICK_FOUNDATION, 0, -1];
+        wallPiece(into, ends, normal, along, [shows, top, from], {
+          inside,
+          windows: undefined,
+          metres: plain ?? metres,
+          front: false,
+          plain: plain !== undefined,
+        });
       }
       round += length;
     }
   });
+}
+
+/**
+ * One upright quad of {@link ringWalls}, from `(ax, az)` to `(bx, bz)`, `round`
+ * metres round its ring and `length` long — since #1635, which draws an edge
+ * in pieces, a function of its own.
+ */
+function wallPiece(
+  into: number[],
+  ends: Four<number>,
+  normal: Vec,
+  along: Pair,
+  heights: readonly [bottom: number, top: number, from: number],
+  options: {
+    readonly inside: boolean;
+    readonly windows: Windows | undefined;
+    readonly metres: Style | undefined;
+    readonly front: boolean;
+    /** #1635: a party wall's face, plain in `metres`, its facade in bays and storeys as a wall's. */
+    readonly plain?: boolean;
+  },
+): void {
+  const [ax, az, bx, bz] = ends;
+  const [round, length] = along;
+  const [bottom, top, from] = heights;
+  const { inside, windows, metres, front } = options;
+  const u0 = round / BAY_METRES;
+  const u1 = (round + length) / BAY_METRES;
+  const v0 = (bottom - from) / STOREY_METRES;
+  const v1 = (top - from) / STOREY_METRES;
+  const corners: Four<Vec> = [
+    [ax, bottom, az],
+    [bx, bottom, bz],
+    [bx, top, bz],
+    [ax, top, az],
+  ];
+  const uv: Four<Pair> = [
+    [u0, v0],
+    [u1, v0],
+    [u1, v1],
+    [u0, v1],
+  ];
+  const bays = windows === undefined ? 0 : baysOf(length);
+  let face: Face = PLAIN;
+  let facade: Four<Pair> = [
+    [0, v0],
+    [bays, v0],
+    [bays, v1],
+    [0, v1],
+  ];
+  if (windows !== undefined) {
+    const axis = windows.gableAxis;
+    // A gable end (its edge across the long axis) carries no eaves flag; since #1660 a split
+    // roof's is one under no rectangle's long side.
+    const gableEnd =
+      windows.gableRectangles === undefined
+        ? axis !== undefined &&
+          Math.abs(((bx - ax) * axis[0] + (bz - az) * axis[1]) / length) < Math.SQRT1_2
+        : gableEndAmong(windows.gableRectangles, ends);
+    const flags =
+      gableEnd && Math.floor(windows.flags / STYLE_EAVES) % 2 === 1
+        ? windows.flags - STYLE_EAVES
+        : windows.flags;
+    const style: Style = [
+      windows.clad,
+      flags,
+      bays > 0 ? length / bays : 0,
+      front && bays > 0 ? windows.picture : -1,
+    ];
+    face =
+      bays === 0
+        ? plainIn(style)
+        : {
+            top: windows.top,
+            skip: front && bays % 2 === 1 ? (bays - 1) / 2 : -1,
+            style,
+          };
+  } else if (metres !== undefined) {
+    face = plainIn(metres);
+    if (options.plain !== true) {
+      facade = [
+        [round, bottom - from],
+        [round + length, bottom - from],
+        [round + length, top - from],
+        [round, top - from],
+      ];
+    }
+  }
+  quad(into, corners, normal, uv, face, facade);
+  if (inside) {
+    const back: Vec = [-normal[0], 0, -normal[2]];
+    quad(into, corners, back, uv);
+  }
 }
 
 /** A flat roof over the rings at `height`, facing up, `u, v` in storeys of plan. */
@@ -2057,6 +2235,7 @@ function doorEdgeOf(
   ring: Ring,
   road: DrawnRoadPoints,
   segments: readonly number[],
+  party: readonly PartyWall[] = NO_PARTY_WALLS,
 ): DoorEdge | undefined {
   const n = ring.length / 2;
   const beside: BesideTheRoad = { along: 0, lateral: 0, distance: 0 };
@@ -2071,6 +2250,8 @@ function doorEdgeOf(
     const bz = ring[j * 2 + 1] as number;
     const length = Math.hypot(bx - ax, bz - az);
     if (length < DOOR_FACE.width + 0.4) continue;
+    // #1635: never on a party wall.
+    if (party.some((wall) => wall.edge === i)) continue;
     if (!nearestOnRoadSegments(road, segments, (ax + bx) / 2, (az + bz) / 2, beside)) continue;
     if (beside.distance < nearest) {
       nearest = beside.distance;
@@ -2279,9 +2460,19 @@ function shopFront(into: number[], at: EdgeFrame, floor: number, shop: ShopPlan)
  * ring — #1590, {@link CORNICE}'s size, painted (`trim`): along each wall a
  * front {@link CORNICE}'s projection out, a soffit under it back to the
  * wall, and a cap over it and the parapet's top. Its corners are mitred, the
- * projection taken along each corner's bisector.
+ * projection taken along each corner's bisector. Since #1635 a terraced
+ * roof's too, and not along a party wall but above a lower neighbour
+ * ({@link partyFaceFrom}): there the row's cornice runs on.
  */
-function cornice(into: number[], ring: Ring, top: number): void {
+function cornice(
+  into: number[],
+  ring: Ring,
+  top: number,
+  party: { readonly walls: readonly PartyWall[]; readonly eaves: number } = {
+    walls: NO_PARTY_WALLS,
+    eaves: 0,
+  },
+): void {
   const n = ring.length / 2;
   const outward = signedArea(ring) > 0 ? 1 : -1;
   const normals: Pair[] = [];
@@ -2313,23 +2504,62 @@ function cornice(into: number[], ring: Ring, top: number): void {
     const b: Pair = [ring[j * 2] as number, ring[j * 2 + 1] as number];
     const a1 = outer[i] as Pair;
     const b1 = outer[j] as Pair;
-    const at = (p: Pair, y: number): Vec => [p[0], y, p[1]];
-    quad(
-      into,
-      [at(a1, bottom), at(b1, bottom), at(b1, cap), at(a1, cap)],
-      [nx, 0, nz],
-      UNMAPPED,
-      PAINTED,
-    );
-    quad(
-      into,
-      [at(a, bottom), at(b, bottom), at(b1, bottom), at(a1, bottom)],
-      [0, -1, 0],
-      UNMAPPED,
-      PAINTED,
-    );
-    quad(into, [at(a1, cap), at(b1, cap), at(b, cap), at(a, cap)], [0, 1, 0], UNMAPPED, PAINTED);
+    const shared = party.walls.filter((wall) => wall.edge === i);
+    if (shared.length === 0) {
+      cornicePiece(into, [a, b, a1, b1], [nx, nz], [bottom, cap]);
+      continue;
+    }
+    // #1635: in pieces, each end's inner and outer points a share of the way along.
+    const length = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    const lerp = (p: Pair, q: Pair, t: number): Pair => [
+      p[0] + (q[0] - p[0]) * t,
+      p[1] + (q[1] - p[1]) * t,
+    ];
+    for (const [s0, s1, wall] of edgePieces(length, shared)) {
+      if (wall !== undefined && partyFaceFrom(wall, party.eaves, -Infinity, top) === undefined) {
+        continue;
+      }
+      const t0 = s0 / length;
+      const t1 = s1 / length;
+      cornicePiece(
+        into,
+        [lerp(a, b, t0), lerp(a, b, t1), lerp(a1, b1, t0), lerp(a1, b1, t1)],
+        [nx, nz],
+        [bottom, cap],
+      );
+    }
   }
+}
+
+/**
+ * One stretch of {@link cornice}: from the wall's `a` to `b`, out to `a1` and
+ * `b1`, facing `normal`, from `bottom` to `cap`.
+ */
+function cornicePiece(
+  into: number[],
+  points: Four<Pair>,
+  normal: Pair,
+  heights: readonly [bottom: number, cap: number],
+): void {
+  const [a, b, a1, b1] = points;
+  const [nx, nz] = normal;
+  const [bottom, cap] = heights;
+  const at = (p: Pair, y: number): Vec => [p[0], y, p[1]];
+  quad(
+    into,
+    [at(a1, bottom), at(b1, bottom), at(b1, cap), at(a1, cap)],
+    [nx, 0, nz],
+    UNMAPPED,
+    PAINTED,
+  );
+  quad(
+    into,
+    [at(a, bottom), at(b, bottom), at(b1, bottom), at(a1, bottom)],
+    [0, -1, 0],
+    UNMAPPED,
+    PAINTED,
+  );
+  quad(into, [at(a1, cap), at(b1, cap), at(b, cap), at(a, cap)], [0, 1, 0], UNMAPPED, PAINTED);
 }
 
 /** How far a canopy's underside is above the top of the door's surround: **0.1 m**. */
@@ -2833,6 +3063,228 @@ const nearSegments: number[] = [];
 const porchSegments: number[] = [];
 
 /**
+ * Whether a footprint's roof is pitched — #1540's P-11: small, rectangular,
+ * low, and residential or farmland — since #1660 rectangular or 1 to 3
+ * rectangles; and since #1635 not terraced, since a
+ * terraced roof is flat behind its parapet and cornice. One named rule, so a
+ * later one extends it rather than copying it.
+ */
+function pitchedFootprint(footprint: {
+  readonly area: number;
+  readonly rectangularity: number;
+  readonly wallHeight: number;
+  readonly use: FootprintUse;
+  readonly terraced: boolean;
+  /** #1660: whether it is 1 to 3 rectangles ({@link rectanglesOf}), which replaces the rectangularity gate. */
+  readonly rectilinear: boolean;
+}): boolean {
+  const { area, rectangularity, wallHeight, use, terraced, rectilinear } = footprint;
+  return (
+    !terraced &&
+    area <= FOOTPRINT_GABLE_MAX_AREA &&
+    (rectilinear || rectangularity >= FOOTPRINT_GABLE_MIN_RECTANGULARITY) &&
+    wallHeight <= FOOTPRINT_GABLE_MAX_EAVES_METRES &&
+    (use === 'residential' || use === 'farmland')
+  );
+}
+
+/**
+ * A stretch of a footprint's outer edge that it shares with a neighbour —
+ * #1635: from `from` to `to` metres along edge `edge` (from its first
+ * vertex), and the neighbour's eaves.
+ */
+interface PartyWall {
+  readonly edge: number;
+  readonly from: number;
+  readonly to: number;
+  readonly neighbourEaves: number;
+}
+
+const NO_PARTY_WALLS: readonly PartyWall[] = [];
+
+/** The side of a cell of {@link partyWallsOf}' edge grid: **16 m**. */
+const PARTY_CELL_METRES = 16;
+
+/**
+ * Every kept footprint's party walls, by its corridor index — #1635: an edge
+ * of one and an edge of another within {@link PARTY_WALL_OFFSET_METRES} and
+ * {@link PARTY_WALL_ANGLE_DEGREES} of one line, overlapping by at least
+ * {@link PARTY_WALL_MIN_OVERLAP_METRES}, both footprints `building`s in one
+ * of {@link TERRACE_CLASSES}. The overlap is the party wall, on each.
+ *
+ * The edges are put in a grid of {@link PARTY_CELL_METRES} cells and each is
+ * tested against those in its own cells only, never every pair.
+ */
+function partyWallsOf(measured: readonly (Measured | undefined)[]): Map<number, PartyWall[]> {
+  const walls = new Map<number, PartyWall[]>();
+  // Every edge of every terraced candidate, as `owner, edge` pairs, in the cells its box reaches.
+  const owners: number[] = [];
+  const edges: number[] = [];
+  const cells = new Map<number, number[]>();
+  const key = (ix: number, iz: number): number => (ix + 0x8000) * 0x1_0000 + (iz + 0x8000);
+  const reach = PARTY_WALL_OFFSET_METRES;
+  const cellsOf = (ring: Ring, edge: number, visit: (cell: number) => void): void => {
+    const n = ring.length / 2;
+    const j = (edge + 1) % n;
+    const ax = ring[edge * 2] as number;
+    const az = ring[edge * 2 + 1] as number;
+    const bx = ring[j * 2] as number;
+    const bz = ring[j * 2 + 1] as number;
+    const x1 = Math.floor((Math.max(ax, bx) + reach) / PARTY_CELL_METRES);
+    const z0 = Math.floor((Math.min(az, bz) - reach) / PARTY_CELL_METRES);
+    const z1 = Math.floor((Math.max(az, bz) + reach) / PARTY_CELL_METRES);
+    for (let ix = Math.floor((Math.min(ax, bx) - reach) / PARTY_CELL_METRES); ix <= x1; ix += 1) {
+      for (let iz = z0; iz <= z1; iz += 1) visit(key(ix, iz));
+    }
+  };
+  for (const [owner, each] of measured.entries()) {
+    if (each === undefined || each.part || !TERRACE_CLASSES.has(each.urbanClass)) continue;
+    const n = each.drawn.length / 2;
+    for (let edge = 0; edge < n; edge += 1) {
+      const index = owners.length;
+      owners.push(owner);
+      edges.push(edge);
+      cellsOf(each.drawn, edge, (cell) => {
+        const list = cells.get(cell);
+        if (list === undefined) cells.set(cell, [index]);
+        else list.push(index);
+      });
+    }
+  }
+  const sinLimit = Math.sin((PARTY_WALL_ANGLE_DEGREES * Math.PI) / 180);
+  const add = (owner: number, wall: PartyWall): void => {
+    const list = walls.get(owner);
+    if (list === undefined) walls.set(owner, [wall]);
+    else list.push(wall);
+  };
+  const seen = new Set<number>();
+  for (let index = 0; index < owners.length; index += 1) {
+    const owner = owners[index] as number;
+    const a = measured[owner] as Measured;
+    const edge = edges[index] as number;
+    const ring = a.drawn;
+    const n = ring.length / 2;
+    const j = (edge + 1) % n;
+    const px = ring[edge * 2] as number;
+    const pz = ring[edge * 2 + 1] as number;
+    const length = Math.hypot((ring[j * 2] as number) - px, (ring[j * 2 + 1] as number) - pz);
+    if (!(length >= PARTY_WALL_MIN_OVERLAP_METRES)) continue;
+    const dx = ((ring[j * 2] as number) - px) / length;
+    const dz = ((ring[j * 2 + 1] as number) - pz) / length;
+    seen.clear();
+    cellsOf(ring, edge, (cell) => {
+      for (const other of cells.get(cell) ?? []) {
+        // Each pair once: the later edge is tested from the earlier owner.
+        const otherOwner = owners[other] as number;
+        if (otherOwner <= owner || seen.has(other)) continue;
+        seen.add(other);
+        const b = measured[otherOwner] as Measured;
+        const otherEdge = edges[other] as number;
+        const shared = sharedStretch(px, pz, dx, dz, length, b.drawn, otherEdge, sinLimit);
+        if (shared === undefined) continue;
+        add(owner, { edge, from: shared[0], to: shared[1], neighbourEaves: b.eaves });
+        add(otherOwner, {
+          edge: otherEdge,
+          from: shared[2],
+          to: shared[3],
+          neighbourEaves: a.eaves,
+        });
+      }
+    });
+  }
+  for (const list of walls.values()) list.sort((p, q) => p.edge - q.edge || p.from - q.from);
+  return walls;
+}
+
+/**
+ * Where edge `edge` of `ring` and the edge from `(px, pz)` along `(dx, dz)`
+ * for `length` are one wall — #1635: the overlap, as metres along the first
+ * edge and then along `ring`'s, or `undefined` where they are not.
+ */
+function sharedStretch(
+  px: number,
+  pz: number,
+  dx: number,
+  dz: number,
+  length: number,
+  ring: Ring,
+  edge: number,
+  sinLimit: number,
+): readonly [number, number, number, number] | undefined {
+  const n = ring.length / 2;
+  const j = (edge + 1) % n;
+  const qx = ring[edge * 2] as number;
+  const qz = ring[edge * 2 + 1] as number;
+  const rx = ring[j * 2] as number;
+  const rz = ring[j * 2 + 1] as number;
+  const otherLength = Math.hypot(rx - qx, rz - qz);
+  if (!(otherLength >= PARTY_WALL_MIN_OVERLAP_METRES)) return undefined;
+  const gx = (rx - qx) / otherLength;
+  const gz = (rz - qz) / otherLength;
+  if (Math.abs(dx * gz - dz * gx) > sinLimit) return undefined;
+  const s0 = (qx - px) * dx + (qz - pz) * dz;
+  const s1 = (rx - px) * dx + (rz - pz) * dz;
+  const from = Math.max(0, Math.min(s0, s1));
+  const to = Math.min(length, Math.max(s0, s1));
+  if (!(to - from >= PARTY_WALL_MIN_OVERLAP_METRES)) return undefined;
+  // The other edge's offset from this one's line where the overlap starts and ends.
+  const offsetAt = (s: number): number => {
+    const t = (s - s0) / (s1 - s0);
+    const x = qx + (rx - qx) * t - px;
+    const z = qz + (rz - qz) * t - pz;
+    return Math.abs(x * dz - z * dx);
+  };
+  if (offsetAt(from) > PARTY_WALL_OFFSET_METRES || offsetAt(to) > PARTY_WALL_OFFSET_METRES) {
+    return undefined;
+  }
+  // The same stretch along the other edge.
+  const along = (s: number): number =>
+    Math.min(otherLength, Math.max(0, (px + dx * s - qx) * gx + (pz + dz * s - qz) * gz));
+  const u0 = along(from);
+  const u1 = along(to);
+  return [from, to, Math.min(u0, u1), Math.max(u0, u1)];
+}
+
+/**
+ * The pieces of an edge `length` long that `party` (its party walls, sorted)
+ * cut it into, in order: each `[from, to, wall]`, `wall` undefined off them.
+ */
+function edgePieces(
+  length: number,
+  party: readonly PartyWall[],
+): readonly (readonly [number, number, PartyWall | undefined])[] {
+  const pieces: [number, number, PartyWall | undefined][] = [];
+  let at = 0;
+  for (const wall of party) {
+    const from = Math.max(at, wall.from);
+    const to = Math.min(length, wall.to);
+    if (!(to > from)) continue;
+    if (from > at) pieces.push([at, from, undefined]);
+    pieces.push([from, to, wall]);
+    at = to;
+  }
+  if (length > at) pieces.push([at, length, undefined]);
+  return pieces;
+}
+
+/**
+ * Where a party wall's face shows from, between `bottom` and `top`, on a
+ * building whose eaves are `eaves` — #1635: above the neighbour's roof, and
+ * only where the neighbour is lower by more than
+ * {@link PARTY_WALL_SAME_HEIGHT_METRES}; `undefined` where none of it shows.
+ */
+function partyFaceFrom(
+  wall: PartyWall,
+  eaves: number,
+  bottom: number,
+  top: number,
+): number | undefined {
+  if (!(eaves - wall.neighbourEaves > PARTY_WALL_SAME_HEIGHT_METRES)) return undefined;
+  const from = Math.max(bottom, wall.neighbourEaves);
+  return from < top ? from : undefined;
+}
+
+/**
  * Every mapped footprint in the corridor, planned or dropped — #1540.
  *
  * `land` is the ride's land-class mask (#1546), built from the same corridor;
@@ -2849,6 +3301,7 @@ export function footprintPlans(
   origin: CorridorOrigin,
   maxVertices: number = FOOTPRINT_MAX_VERTICES,
   urban?: UrbanClassMap,
+  options: FootprintPlanOptions = {},
 ): { readonly plans: readonly FootprintPlan[]; readonly verdicts: FootprintVerdicts } {
   const seed = scatterSeed(profile);
   const counts: Record<FootprintVerdict, number> = {
@@ -2870,8 +3323,10 @@ export function footprintPlans(
   const driveways = new RingGrid([]);
   // #1634: the tagged footprints an untagged one is chosen beside — only with a class.
   const tagged = urban === undefined ? undefined : new TaggedNeighbours(corridor.buildings);
-  for (const [index, building] of corridor.buildings.entries()) {
-    const planned = planFootprint(
+  // #1635: every footprint measured before any is built, so a party wall is found between two.
+  const measured: (Measured | undefined)[] = [];
+  for (const building of corridor.buildings) {
+    const each = measureFootprint(
       building,
       corridor,
       land,
@@ -2880,16 +3335,206 @@ export function footprintPlans(
       origin,
       seed,
       maxVertices,
-      { grid: others, own: index, porches, driveways, tagged },
+      tagged,
     );
-    if (typeof planned === 'string') {
-      counts[planned] += 1;
+    if (typeof each === 'string') {
+      counts[each] += 1;
+      measured.push(undefined);
     } else {
-      counts.kept += 1;
-      plans.push(planned);
+      measured.push(each);
     }
   }
+  const party = partyWallsOf(measured);
+  for (const [index, each] of measured.entries()) {
+    if (each === undefined) continue;
+    counts.kept += 1;
+    plans.push(
+      planFootprint(
+        each,
+        land,
+        profile,
+        origin,
+        seed,
+        maxVertices,
+        { grid: others, own: index, porches, driveways },
+        party.get(index) ?? NO_PARTY_WALLS,
+        { split: options.splitRoofs ?? true, flat: false },
+      ),
+    );
+  }
+  // #1637: and a city centre's lots, as terraced blocks, off every one kept.
+  // Not footprints of the corridor's, so no verdict counts them.
+  if (urban !== undefined) {
+    plans.push(
+      ...terracePlans(
+        corridor,
+        land,
+        urban,
+        profile,
+        origin,
+        seed,
+        maxVertices,
+        plans,
+        {
+          grid: others,
+          own: -1,
+          porches,
+          driveways,
+          tagged,
+          terrace: true,
+        },
+        { split: options.splitRoofs ?? true, flat: false },
+      ),
+    );
+  }
   return { plans: paintTown(plans), verdicts: counts };
+}
+
+/**
+ * How far a terraced block's front stands back from a city centre's
+ * pavement, in metres: **0.5** — #1637, so its shop fronts and their doors
+ * stand at the back of `streets.ts` §`CITY_PAVEMENT_WIDTH_METRES`, with no
+ * front path.
+ */
+export const TERRACE_GAP_METRES = 0.5;
+
+/** How deep a terraced block is, from its front back, in metres: **12** — #1637. */
+export const TERRACE_DEPTH_METRES = 12;
+
+/** How many storeys a terraced block has, seeded per plot and side: **3 or 4** — #1637. */
+export const TERRACE_STOREYS: readonly number[] = [3, 4];
+
+/** The key a terraced block's storeys are hashed under, apart from every other draw. */
+const TERRACE_KEY = 0x16_37;
+
+/** The road's stretches near the block `terracePlans` is deciding. */
+const terraceSegments: number[] = [];
+
+/** The terraced block `terracePlans` is deciding, as `settlements.ts` §`placeLot` writes one. */
+const terraceScratch = new Float64Array(LOT_FLOATS);
+
+/**
+ * A city centre's lots — #1637. Where the ride's urban class is
+ * `city-centre`, the lot plots `settlements.ts` §`lotsAt` divides the route
+ * into ({@link lotSpacing}) are terraced blocks instead of its houses: on each
+ * side of each plot, a block from the plot's start to its end — so blocks are
+ * packed edge to edge with no side yard — from
+ * {@link TERRACE_GAP_METRES} behind the city's pavement to
+ * {@link TERRACE_DEPTH_METRES} behind that, {@link TERRACE_STOREYS} high,
+ * planned as a commercial footprint is ({@link planFootprint}): a flat roof
+ * behind its parapet under #1590's cornice, a shop front on the wall turned to
+ * the road, and no porch, driveway or garage, all of which are a house's.
+ *
+ * A block stands only where a lot would: on built-up land at its middle and
+ * corners and clear of every footprint kept, its driveway included
+ * (`settlements.ts` §`lotStands`, #1550's rules 1 to 3), and then by every
+ * rule a mapped footprint keeps — never on wood, water or park, and off every
+ * stretch of the road by its clearance (ADR 0054 D-5.2, D-5.4), and with no
+ * wall on the pavement even where a bend's chord sags toward it.
+ *
+ * The first lap only: a plan stands in the corridor's frame, once a place.
+ */
+function terracePlans(
+  corridor: WorldCorridor,
+  land: LandClassMask,
+  urban: UrbanClassMap,
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  seed: number,
+  maxVertices: number,
+  kept: readonly FootprintPlan[],
+  others: PlanNeighbours,
+  roofing: RoofSplitting,
+): FootprintPlan[] {
+  if (land.bytes === 0) return [];
+  const index = footprintIndexOf(
+    kept.flatMap((plan) =>
+      plan.driveway.length > 0 ? [plan.footprint, plan.driveway] : [plan.footprint],
+    ),
+  );
+  const { plots, span } = lotSpacing(profile);
+  const total: number = profile.totalDistance;
+  const front = KERB_LATERAL_METRES + CITY_PAVEMENT_WIDTH_METRES + TERRACE_GAP_METRES;
+  const back = front + TERRACE_DEPTH_METRES;
+  const lot = { x: span / 2, back: -TERRACE_DEPTH_METRES / 2, front: TERRACE_DEPTH_METRES / 2 };
+  const planned: FootprintPlan[] = [];
+  for (let plot = 0; plot < plots; plot += 1) {
+    const along = (plot + 0.5) * span;
+    if (urban.classAt(along) !== 'city-centre') continue;
+    const middle = drawnRoadFrame(profile, origin, along);
+    const start = drawnRoadFrame(profile, origin, plot * span);
+    const end = drawnRoadFrame(profile, origin, Math.min(total, (plot + 1) * span));
+    if (middle === undefined || start === undefined || end === undefined) continue;
+    for (const side of [1, -1] as const) {
+      const out = (front + back) / 2;
+      // Facing the road, as a lot does: back along the normal from its side.
+      const rotation = Math.atan2(-middle.normalX * side, -middle.normalZ * side);
+      placeLot(
+        terraceScratch,
+        middle.x + middle.normalX * out * side,
+        middle.z + middle.normalZ * out * side,
+        lot,
+        rotation,
+      );
+      if (!lotStands(land, index, terraceScratch)) continue;
+      const at = (frame: typeof start, lateral: number): [number, number] => [
+        frame.x + frame.normalX * lateral * side,
+        frame.z + frame.normalZ * lateral * side,
+      ];
+      const ring = Float32Array.from([
+        ...at(start, front),
+        ...at(end, front),
+        ...at(end, back),
+        ...at(start, back),
+      ]);
+      // The front is a chord between two frames: on a curve's outside it sags
+      // toward the road, so measure the ring itself, not the frames it joins.
+      const reach = span + back + KERB_LATERAL_METRES + CITY_PAVEMENT_WIDTH_METRES;
+      const road = roadSegmentsNear(profile, origin, middle.x, middle.z, reach, terraceSegments);
+      if (
+        terraceSegments.length > 0 &&
+        ringToRoad(ring, road, terraceSegments) < KERB_LATERAL_METRES + CITY_PAVEMENT_WIDTH_METRES
+      ) {
+        continue;
+      }
+      const draw = uniformFrom(slotHash(seed, plot, TERRACE_KEY + (side === 1 ? 1 : 2)), 0);
+      const storeys = TERRACE_STOREYS[seededEntry(draw, TERRACE_STOREYS.length)] as number;
+      // #1635: measured, then planned, as a mapped footprint is; with no party
+      // wall found between two blocks: a commercial block is flat whatever.
+      const measured = measureFootprint(
+        {
+          kind: 'building',
+          heightMetres: storeys * STOREY_METRES,
+          minHeightMetres: null,
+          rings: [ring],
+        },
+        corridor,
+        land,
+        urban,
+        profile,
+        origin,
+        seed,
+        maxVertices,
+        others.tagged,
+        others.terrace === true,
+      );
+      if (typeof measured === 'string') continue;
+      planned.push(
+        planFootprint(
+          measured,
+          land,
+          profile,
+          origin,
+          seed,
+          maxVertices,
+          others,
+          NO_PARTY_WALLS,
+          roofing,
+        ),
+      );
+    }
+  }
+  return planned;
 }
 
 /** The entry a seeded draw in `[0, 1)` comes to, of `count`. */
@@ -3056,8 +3701,16 @@ function paintTown(plans: readonly FootprintPlan[]): FootprintPlan[] {
  * land-use polygon's box: so each answer is kept, by the place to the
  * decimetre, and a lot's place is a pure function of the route, so every
  * later frame and lap is a lookup.
+ *
+ * `urban`, since #1637, is the ride's urban class, built at the press beside
+ * the plans: carried on the town for `settlements.ts` §`lotsAt` and
+ * `streets.ts` (`MappedTown.urban`).
  */
-export function mappedTown(corridor: WorldCorridor, plans: readonly FootprintPlan[]): MappedTown {
+export function mappedTown(
+  corridor: WorldCorridor,
+  plans: readonly FootprintPlan[],
+  urban?: UrbanClassMap,
+): MappedTown {
   // #1588: a lot keeps off a driveway as it does off the house.
   const index = footprintIndexOf(
     plans.flatMap((plan) =>
@@ -3067,6 +3720,8 @@ export function mappedTown(corridor: WorldCorridor, plans: readonly FootprintPla
   // Keyed by decimetre, x then z: two small integers, never a boxed number.
   const commercial = new Map<number, Map<number, boolean>>();
   const town: MappedTown = {
+    // #1637: the ride's urban class, which the lots and the streets read.
+    ...(urban === undefined ? {} : { urban }),
     overlaps: (lot) => index.overlaps(lot),
     commercialAt(x, z) {
       const column = Math.round(x * 10);
@@ -3271,8 +3926,45 @@ function porchOnRead(
   }
 }
 
-/** One footprint: its plan, or the verdict that dropped it. */
-function planFootprint(
+/** What a plan is kept off, and what it is planned beside. @see planFootprint */
+interface PlanNeighbours {
+  readonly grid: RingGrid;
+  readonly own: number;
+  readonly porches: RingGrid;
+  readonly driveways: RingGrid;
+  readonly tagged: TaggedNeighbours | undefined;
+  /** #1637: a city centre's terraced block, which is commercial whatever the land under it. */
+  readonly terrace?: boolean;
+}
+
+/**
+ * A footprint that passed the placement rules, measured — #1635: the first
+ * half of a plan, so every kept footprint's ring and eaves are known before
+ * any is built, and a party wall can be found between two of them
+ * ({@link partyWallsOf}).
+ */
+interface Measured {
+  readonly building: BuildingFeature;
+  readonly centroid: { readonly x: number; readonly z: number };
+  /** The outer ring as drawn: rule 6's simplification. */
+  readonly drawn: Ring;
+  /** The road near it, and its segments — a copy, since the scratch is reused. */
+  readonly road: DrawnRoadPoints;
+  readonly segments: readonly number[];
+  readonly urbanClass: UrbanClass;
+  readonly lowest: number;
+  readonly area: number;
+  readonly part: boolean;
+  readonly use: FootprintUse;
+  readonly storeys: number;
+  readonly wallHeight: number;
+  readonly base: number;
+  readonly floor: number;
+  readonly eaves: number;
+}
+
+/** One footprint, measured, or the verdict that dropped it: rules 1 to 6 and its height. */
+function measureFootprint(
   building: BuildingFeature,
   corridor: WorldCorridor,
   land: LandClassMask,
@@ -3281,14 +3973,10 @@ function planFootprint(
   origin: CorridorOrigin,
   seed: number,
   maxVertices: number,
-  others: {
-    readonly grid: RingGrid;
-    readonly own: number;
-    readonly porches: RingGrid;
-    readonly driveways: RingGrid;
-    readonly tagged: TaggedNeighbours | undefined;
-  },
-): FootprintPlan | Exclude<FootprintVerdict, 'kept'> {
+  tagged: TaggedNeighbours | undefined,
+  // #1637: a city centre's terraced block, commercial whatever the land under it.
+  terrace = false,
+): Measured | Exclude<FootprintVerdict, 'kept'> {
   const outer = building.rings[0];
   if (outer === undefined || outer.length < 6) return 'too-small';
   const centroid = centroidOf(outer);
@@ -3371,7 +4059,10 @@ function planFootprint(
   const span =
     building.heightMetres === null ? null : Math.max(0, building.heightMetres - minHeight);
   const landClass = land.classAt(centroid.x, centroid.z);
-  const use = footprintUse(landClass, kindAt(corridor, centroid.x, centroid.z));
+  // #1637: a terraced block is a shop below and flats above, on any land.
+  const use = terrace
+    ? 'commercial'
+    : footprintUse(landClass, kindAt(corridor, centroid.x, centroid.z));
   const share = (stream: number): number => footprintShare(seed, centroid.x, centroid.z, stream);
   // #1634: a mapped height is P-10's and #1629's; an untagged one is chosen.
   const storeys =
@@ -3381,21 +4072,103 @@ function planFootprint(
           urbanClass,
           use,
           area,
-          urbanClass === 'unknown' ? undefined : others.tagged?.medianNear(centroid.x, centroid.z),
+          urbanClass === 'unknown' ? undefined : tagged?.medianNear(centroid.x, centroid.z),
           share(STREAM_STOREYS),
         );
   const wallHeight = span !== null && span > 0 ? span : storeys * STOREY_METRES;
   const base = part ? lowest + minHeight : lowest - FOUNDATION_METRES;
   const floor = part ? base : highest + PLINTH_TOP_METRES;
-  const eaves = floor + wallHeight;
+  return {
+    building,
+    centroid,
+    drawn,
+    road,
+    segments: nearSegments.slice(),
+    urbanClass,
+    lowest,
+    area,
+    part,
+    use,
+    storeys,
+    wallHeight,
+    base,
+    floor,
+    eaves: floor + wallHeight,
+  };
+}
 
+/**
+ * How a plan's roof may be split — #1660: `split`, the product's, roofs an L,
+ * T, U or Z over its rectangles ({@link rectanglesOf}); `flat` is the
+ * fallback for a split roof that would not fit the caps.
+ */
+interface RoofSplitting {
+  readonly split: boolean;
+  readonly flat: boolean;
+}
+
+/** The planner's switches — the realistic page's levers; the product takes the defaults. */
+export interface FootprintPlanOptions {
+  /**
+   * #1660: L-, T-, U- and Z-shaped footprints pitched over their 2–3
+   * rectangles; `true` by default. Off is `main`'s rule, every footprint below
+   * {@link FOOTPRINT_GABLE_MIN_RECTANGULARITY} flat (`?levers=-split-roofs`).
+   */
+  readonly splitRoofs?: boolean;
+}
+
+/** One measured footprint's plan — the second half of {@link measureFootprint}. */
+function planFootprint(
+  measured: Measured,
+  land: LandClassMask,
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  seed: number,
+  maxVertices: number,
+  others: {
+    readonly grid: RingGrid;
+    readonly own: number;
+    readonly porches: RingGrid;
+    readonly driveways: RingGrid;
+  },
+  party: readonly PartyWall[],
+  roofing: RoofSplitting,
+): FootprintPlan {
+  const { building, centroid, drawn, road, segments, urbanClass, lowest, area, part, use } =
+    measured;
+  const { storeys, wallHeight, base, floor, eaves } = measured;
+  const share = (stream: number): number => footprintShare(seed, centroid.x, centroid.z, stream);
+  const beside: BesideTheRoad = { along: 0, lateral: 0, distance: 0 };
+  const groundAt = (x: number, z: number): number => {
+    nearestOnRoadSegments(road, segments, x, z, beside);
+    return terrainHeightAt(profile, origin, seed, beside.along, beside.lateral, land);
+  };
   const rectangle = minimumAreaRectangle(drawn);
   const rectangularity = rectangle.area > 0 ? Math.abs(signedArea(drawn)) / rectangle.area : 0;
+  // #1635: a terraced footprint — one with a party wall — is flat, whatever the gable rule says.
+  const terraced = party.length > 0;
+  // #1660: an L, T, U or Z as 2 or 3 rectangles, each pitched; a rectangle as its snapped self.
+  const split = roofing.split && !roofing.flat ? rectanglesOf(drawn) : undefined;
   const pitched =
-    area <= FOOTPRINT_GABLE_MAX_AREA &&
-    rectangularity >= FOOTPRINT_GABLE_MIN_RECTANGULARITY &&
-    wallHeight <= FOOTPRINT_GABLE_MAX_EAVES_METRES &&
-    (use === 'residential' || use === 'farmland');
+    !roofing.flat &&
+    pitchedFootprint({
+      area,
+      rectangularity,
+      wallHeight,
+      use,
+      terraced,
+      rectilinear: split !== undefined,
+    });
+  // The rectangles a pitched roof is built over, the largest first. A split of one is a
+  // rectangle or a near-rectangle, which plans as before on the minimum-area rectangle;
+  // two or three is the notch fix.
+  const roofRectangles: readonly Rectangle[] =
+    split === undefined || split.length === 1 ? [rectangle] : split;
+  // Gutters, the downpipe, the dormers and the chimney: on the largest only.
+  const main = roofRectangles[0] as Rectangle;
+  const shared: {
+    readonly party?: { readonly walls: readonly PartyWall[]; readonly eaves: number };
+  } = terraced ? { party: { walls: party, eaves } } : {};
   // #1581: a pitched roof is a gable or, seeded, a hip; a barn is always a gable.
   const roof: FootprintRoof = !pitched
     ? 'flat'
@@ -3408,7 +4181,7 @@ function planFootprint(
       : (ROOF_PITCHES_DEGREES[
           Math.floor(share(STREAM_PITCH) * ROOF_PITCHES_DEGREES.length)
         ] as number);
-  const front = part ? undefined : doorEdgeOf(drawn, road, nearSegments);
+  const front = part ? undefined : doorEdgeOf(drawn, road, segments, party);
   const frontFrame = front === undefined ? undefined : edgeFrameOf(drawn, front.edge);
   const residential = use === 'residential';
   const withChimney = roof !== 'flat' && residential && share(STREAM_CHIMNEY) < CHIMNEY_SHARE;
@@ -3432,38 +4205,22 @@ function planFootprint(
   const flags =
     (residential ? STYLE_SASH : 0) +
     (residential && share(STREAM_SHUTTERS) < SHUTTER_SHARE ? STYLE_SHUTTERS : 0) +
-    (roof === 'flat' ? 0 : STYLE_EAVES) +
+    (roof === 'flat' ? STYLE_FLAT_ROOF : STYLE_EAVES) +
     (brickFoundation ? STYLE_BRICK_FOUNDATION : 0) +
-    (use === 'commercial' ? STYLE_COMMERCIAL : 0);
+    (use === 'commercial' ? STYLE_COMMERCIAL : 0) +
+    // #1636: a tower in a covered urban class is glazed; with no class, as before.
+    (urbanClass !== 'unknown' && storeys >= GLAZED_MIN_STOREYS ? STYLE_GLAZED : 0);
   const wallStyle: Style = [wallClad, flags, 0, -1];
   const roofStyle: Style = shingled
     ? [cladOf(CLAD_SHINGLE, SHINGLE_COURSE_METRES), 0, 0, -1]
     : NO_STYLE;
-  const frontBays = front === undefined ? 0 : baysOf(front.length);
-  const garage =
-    front !== undefined &&
-    frontFrame !== undefined &&
-    residential &&
-    frontBays >= GARAGE_MIN_BAYS &&
-    share(STREAM_GARAGE) < GARAGE_SHARE
-      ? garageOf(
-          {
-            length: front.length,
-            bays: frontBays,
-            bay: share(STREAM_GARAGE_END) < 0.5 ? 0 : frontBays - 1,
-          },
-          frontFrame,
-          road,
-          nearSegments,
-          { ring: drawn, others },
-          groundAt,
-        )
-      : undefined;
-  // #1590: a shop's front on a commercial building's front wall, where it is long enough.
+  // #1590: a shop's front on a commercial building's front wall, where it is
+  // long enough; since #1636 on every building's in a city centre, its wall
+  // facing the route, whatever the floors above are.
   const shop =
     front !== undefined &&
     frontFrame !== undefined &&
-    use === 'commercial' &&
+    (use === 'commercial' || urbanClass === 'city-centre') &&
     front.length >= SHOP_FRONT_MIN_WALL_METRES
       ? shopOf(
           front.length,
@@ -3499,6 +4256,27 @@ function planFootprint(
             stripes: share(STREAM_AWNING_STRIPES),
             depth: share(STREAM_AWNING_DEPTH),
           },
+        )
+      : undefined;
+  const frontBays = front === undefined ? 0 : baysOf(front.length);
+  const garage =
+    front !== undefined &&
+    frontFrame !== undefined &&
+    residential &&
+    shop === undefined &&
+    frontBays >= GARAGE_MIN_BAYS &&
+    share(STREAM_GARAGE) < GARAGE_SHARE
+      ? garageOf(
+          {
+            length: front.length,
+            bays: frontBays,
+            bay: share(STREAM_GARAGE_END) < 0.5 ? 0 : frontBays - 1,
+          },
+          frontFrame,
+          road,
+          segments,
+          { ring: drawn, others },
+          groundAt,
         )
       : undefined;
   // #1589: whether a porch's ring is clear of the road. The front edge's
@@ -3538,6 +4316,7 @@ function planFootprint(
     front !== undefined &&
     frontFrame !== undefined &&
     residential &&
+    shop === undefined &&
     share(STREAM_FRONT_PORCH) < FRONT_PORCH.share
       ? frontPorchOf(
           {
@@ -3578,6 +4357,7 @@ function planFootprint(
   const picture =
     storeys === 1 &&
     residential &&
+    shop === undefined &&
     frontBays >= 3 &&
     frontBays % 2 === 1 &&
     share(STREAM_PICTURE) < PICTURE_SHARE
@@ -3591,24 +4371,19 @@ function planFootprint(
     clad: wallClad,
     flags,
     picture,
-    ...(roof === 'gable' ? { gableAxis: [rectangle.ux, rectangle.uz] as const } : {}),
+    ...(roof === 'gable' ? { gableAxis: [main.ux, main.uz] as const } : {}),
+    ...(roof === 'gable' && roofRectangles.length > 1 ? { gableRectangles: roofRectangles } : {}),
   };
   // The slope the gutters' downpipe and the dormers are on: the one facing the front.
   const facing =
-    frontFrame === undefined
-      ? 1
-      : frontFrame.nx * -rectangle.uz + frontFrame.nz * rectangle.ux >= 0
-        ? 1
-        : -1;
+    frontFrame === undefined ? 1 : frontFrame.nx * -main.uz + frontFrame.nz * main.ux >= 0 ? 1 : -1;
   // The downpipe's end: away from the garage, where it is on that slope's wall.
   const garageEnd =
     garage === undefined
       ? share(STREAM_GARAGE_END) < 0.5
         ? 1
         : -1
-      : (garage.plan.x - rectangle.cx) * rectangle.ux +
-            (garage.plan.z - rectangle.cz) * rectangle.uz >=
-          0
+      : (garage.plan.x - main.cx) * main.ux + (garage.plan.z - main.cz) * main.uz >= 0
         ? 1
         : -1;
   const withDormers =
@@ -3654,36 +4429,49 @@ function planFootprint(
         clapboard ? { metres: [cladOf(brickFoundation ? CLAD_BRICK : CLAD_BLOCK), 0, 0, -1] } : {},
       );
     }
-    ringWalls(writing.wall, rings, [floor, eaves, floor], { windows });
+    ringWalls(writing.wall, rings, [floor, eaves, floor], { windows, ...shared });
     if (roof === 'flat') {
       flatRoof(writing.roof, rings, eaves);
-      ringWalls(writing.parapet, rings, [eaves, eaves + PARAPET_METRES, floor], { inside: true });
-      // #1590: a commercial roof's parapet under a cornice.
-      if (withCornice && use === 'commercial' && !part) {
-        cornice(writing.trim, drawn, eaves + PARAPET_METRES);
+      ringWalls(writing.parapet, rings, [eaves, eaves + PARAPET_METRES, floor], {
+        inside: true,
+        ...shared,
+      });
+      // #1590: a commercial roof's parapet under a cornice; since #1635 a terraced roof's too.
+      if (withCornice && (use === 'commercial' || terraced) && !part) {
+        cornice(writing.trim, drawn, eaves + PARAPET_METRES, shared.party);
         drew.cornice = true;
       }
     } else {
-      const ridge = pitchedRoof(writing, rectangle, [eaves, floor], roof, pitchDegrees, {
+      const ridge = pitchedRoof(writing, main, [eaves, floor], roof, pitchDegrees, {
         roof: roofStyle,
         gable: wallStyle,
         ...(residential
           ? { gutters: { side: facing, end: -garageEnd, ground: base + FOUNDATION_METRES } }
           : {}),
       });
+      // #1660: every other rectangle at the same pitch and eaves, and wearing the same shape.
+      // The chimney stands on the highest ridge — the widest rectangle's — so it clears them all.
+      let stack = { rectangle: main, ridge };
+      for (const other of roofRectangles.slice(1)) {
+        const its = pitchedRoof(writing, other, [eaves, floor], roof, pitchDegrees, {
+          roof: roofStyle,
+          gable: wallStyle,
+        });
+        if (its.top > stack.ridge.top) stack = { rectangle: other, ridge: its };
+      }
       if (withChimney) {
         const end = share(STREAM_CHIMNEY) < CHIMNEY_SHARE / 2 ? 1 : -1;
-        chimney(writing.chimney, rectangle, ridge, [eaves, floor], end);
+        chimney(writing.chimney, stack.rectangle, stack.ridge, [eaves, floor], end);
       }
       if (withDormers) {
         // Clear of the chimney: one in the middle, or two either side of it.
-        const reach = Math.min(ridge.half, rectangle.halfLong);
+        const reach = Math.min(ridge.half, main.halfLong);
         const count =
           reach >= DORMER_TWO_REACH_METRES ? 2 : reach >= DORMER_ONE_REACH_METRES ? 1 : 0;
         if (count > 0) {
           drew.dormers = dormers(
             writing,
-            rectangle,
+            main,
             [eaves, floor],
             ridge,
             pitchDegrees,
@@ -3702,7 +4490,7 @@ function planFootprint(
       );
       if (shop !== undefined) shopFront(writing.shopfront, frontFrame, floor, shop);
       // #1589: a porch, written when it is first read, replaces the canopy.
-      if (frontPorchSpec === undefined && withPorch) {
+      if (frontPorchSpec === undefined && withPorch && shop === undefined) {
         porch(writing.trim, frontFrame, floor, withPosts);
       }
       if (garage !== undefined) {
@@ -3728,6 +4516,13 @@ function planFootprint(
   let built = build(holed, true);
   if (!fits(built.writing) && built.drew.cornice) built = build(holed, false);
   if (holed && !fits(built.writing)) built = build(false, false);
+  // #1660: a split roof that will not fit falls back to the flat one — never truncated.
+  if (roofRectangles.length > 1 && roof !== 'flat' && !fits(built.writing)) {
+    return planFootprint(measured, land, profile, origin, seed, maxVertices, others, party, {
+      ...roofing,
+      flat: true,
+    });
+  }
   const { writing, drew } = built;
 
   const triangles = Object.fromEntries(
@@ -3740,9 +4535,10 @@ function planFootprint(
       return porchWriting;
     });
   }
-  // #1585: a house model, where one fits the footprint (`house-models.ts`).
+  // #1585: a house model, where one fits the footprint (`house-models.ts`) — and since
+  // #1635 never on a terraced one, which a detached model would stand apart from its row.
   const fitting =
-    part || frontFrame === undefined
+    part || terraced || frontFrame === undefined
       ? []
       : houseModelsFitting({
           long: 2 * rectangle.halfLong,

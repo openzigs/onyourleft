@@ -21,7 +21,7 @@
  */
 
 import type { RouteProfile } from '@onyourleft/domain';
-import type { BuildingFeature, LandUseFeature } from '@onyourleft/map-features';
+import type { BuildingFeature, LandUseFeature, PlaceFeature } from '@onyourleft/map-features';
 
 import { buildingBeside, landBeside, rectangleBeside } from '../footprint-fixtures-testing';
 import { northRoute } from '../route-fixtures-testing';
@@ -33,6 +33,8 @@ import type { WorldCorridor } from '../world-data/corridor';
  * - `village`: residential, about 8 % coverage of 2-storey (6 m) houses;
  * - `full-village`: the same at about 13 % coverage, just under a town's
  *   15 %, so a sweep that miscounts its own land by a fifth reads it as one;
+ * - `thin-town`: residential, about 17 % coverage of 2-storey houses: a
+ *   town, but under the place prior's 25 % (#1632);
  * - `town`: residential, about 26 % coverage of 2-storey houses;
  * - `city-height`: residential, about 44 % coverage of 2-storey houses, six
  *   of them 18 m (6 storeys) near the stretch's middle;
@@ -40,7 +42,7 @@ import type { WorldCorridor } from '../world-data/corridor';
  *   commercial (±150 m of the road) and residential beyond.
  */
 export type UrbanStretchKind =
-  'rural' | 'village' | 'full-village' | 'town' | 'city-height' | 'city-commerce';
+  'rural' | 'village' | 'full-village' | 'thin-town' | 'town' | 'city-height' | 'city-commerce';
 
 export interface UrbanStretch {
   readonly kind: UrbanStretchKind;
@@ -54,6 +56,16 @@ export interface UrbanFixtureOptions {
   readonly length?: number;
   /** Stretches along the road where no map data was read: no tile covers them. */
   readonly uncovered?: readonly { readonly from: number; readonly to: number }[];
+  /**
+   * #1632: place points, each `along` the road and `out` metres to its west.
+   * None by default.
+   */
+  readonly places?: readonly (Pick<PlaceFeature, 'kind' | 'kindDetail' | 'populationRank'> & {
+    readonly along: number;
+    readonly out: number;
+  })[];
+  /** Where the road starts, degrees north (#1636, for the realistic page's `place`). */
+  readonly latitude?: number;
 }
 
 /** A footprint's side, in metres. */
@@ -71,6 +83,7 @@ const COMMERCIAL_REACH = 150;
 const GRID: Readonly<Record<Exclude<UrbanStretchKind, 'rural'>, readonly [number, number]>> = {
   village: [3, 7],
   'full-village': [3, 11],
+  'thin-town': [4, 11],
   town: [6, 11],
   'city-height': [8, 14],
   'city-commerce': [7, 14],
@@ -93,7 +106,11 @@ export function urbanFixture(
   readonly corridor: WorldCorridor;
 } {
   const length = options.length ?? 3_000;
-  const profile = northRoute(length, () => 10);
+  const profile = northRoute(
+    length,
+    () => 10,
+    options.latitude === undefined ? {} : { latitude: options.latitude },
+  );
   const origin = corridorOrigin(profile);
   const landUse: LandUseFeature[] = [];
   const buildings: BuildingFeature[] = [];
@@ -163,6 +180,41 @@ export function urbanFixture(
       buildings,
       paths: [],
       streets: [],
+      // A north road: `x` is metres west of it and `z` the distance along it.
+      places: (options.places ?? []).map(({ along, out, ...place }) => ({
+        ...place,
+        x: out,
+        z: along,
+      })),
+    },
+  };
+}
+
+/**
+ * A city centre — #1636: a `city-height` stretch from 900 m to 2 100 m (the
+ * realistic page's town), rural land either side, and two more towers in it
+ * 40 m left of the road, a 16 m square each: 27 m high (nine storeys, a
+ * curtain wall) at 1 430 m and 24 m (eight) at 1 570 m.
+ */
+export function cityCentreFixture(latitude?: number): ReturnType<typeof urbanFixture> {
+  const fixture = urbanFixture(
+    [
+      { kind: 'rural', from: 100, to: 900 },
+      { kind: 'city-height', from: 900, to: 2_100 },
+      { kind: 'rural', from: 2_100, to: 2_900 },
+    ],
+    latitude === undefined ? {} : { latitude },
+  );
+  const { profile, origin } = fixture;
+  return {
+    ...fixture,
+    corridor: {
+      ...fixture.corridor,
+      buildings: [
+        ...fixture.corridor.buildings,
+        buildingBeside(profile, origin, [rectangleBeside(1_430, -40, 16, 16)], 27),
+        buildingBeside(profile, origin, [rectangleBeside(1_570, -40, 16, 16)], 24),
+      ],
     },
   };
 }

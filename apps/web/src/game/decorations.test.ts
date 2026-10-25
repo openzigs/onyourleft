@@ -148,9 +148,10 @@ describe('where a holiday’s decorations go — #1624', () => {
     expect(decorationsFor(streets, undefined, PROBE)).toEqual([]);
     expect(decorationsFor(streets, 'winter-lights', { halloween: [probe()] })).toEqual([]);
     expect(decorationsFor(streets, 'halloween', { halloween: [] })).toEqual([]);
-    // The product's own table places nothing yet: #1625 to #1627 fill it.
+    // The product's own table places both holidays' sets: Halloween's is
+    // #1625's (`halloween.test.ts`), the winter lights #1626's (`winter-lights.test.ts`).
     for (const holiday of ['halloween', 'winter-lights'] as const) {
-      expect(decorationsFor(streets, holiday, HOLIDAY_DECORATIONS)).toEqual([]);
+      expect(decorationsFor(streets, holiday, HOLIDAY_DECORATIONS).length).toBeGreaterThan(0);
     }
   });
 

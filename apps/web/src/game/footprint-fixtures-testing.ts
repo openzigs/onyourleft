@@ -470,6 +470,238 @@ export function richmondStreetFixture(latitude = FIXTURE_LATITUDE): {
   };
 }
 
+/** A ring as `(x, y)` corners in metres, from its own origin: `x` along the road and `y` out from it. */
+export type ShapeCorners = readonly (readonly [number, number])[];
+
+/**
+ * #1660's shapes, each a ring of corners from its own origin: an L (14 × 10 m
+ * with a 6 × 5 m notch), a T, a U, a Z (two rectangles stepped), a box at
+ * 0.9 rectangularity (14 × 10 m less a 3.5 × 4 m corner), a 12-gon, and a
+ * quadrilateral with one edge 20° off the others' axis.
+ */
+export const ROOF_SHAPES = {
+  ell: [
+    [0, 0],
+    [14, 0],
+    [14, 5],
+    [8, 5],
+    [8, 10],
+    [0, 10],
+  ],
+  tee: [
+    [4.5, 0],
+    [9.5, 0],
+    [9.5, 6],
+    [14, 6],
+    [14, 10],
+    [0, 10],
+    [0, 6],
+    [4.5, 6],
+  ],
+  you: [
+    [0, 0],
+    [14, 0],
+    [14, 10],
+    [10, 10],
+    [10, 5],
+    [4, 5],
+    [4, 10],
+    [0, 10],
+  ],
+  zed: [
+    [0, 0],
+    [8, 0],
+    [8, 4],
+    [14, 4],
+    [14, 9],
+    [6, 9],
+    [6, 5],
+    [0, 5],
+  ],
+  notched: [
+    [0, 0],
+    [14, 0],
+    [14, 6],
+    [10.5, 6],
+    [10.5, 10],
+    [0, 10],
+  ],
+  dodecagon: Array.from({ length: 12 }, (_, index) => {
+    const angle = (2 * Math.PI * index) / 12 + 0.1;
+    return [6 + 6 * Math.cos(angle), 6 + 6 * Math.sin(angle)] as const;
+  }),
+  skewed: [
+    [0, 0],
+    [14, 0],
+    [14 + 10 * Math.tan((20 * Math.PI) / 180), 10],
+    [0, 10],
+  ],
+} as const satisfies Readonly<Record<string, ShapeCorners>>;
+
+/** One of {@link ROOF_SHAPES}. */
+export type RoofShapeName = keyof typeof ROOF_SHAPES;
+
+/** A shape's corners as `(along, lateral)` pairs, its origin at `(along, lateral)`. */
+export function shapeBeside(
+  corners: ShapeCorners,
+  along: number,
+  lateral: number,
+): readonly (readonly [number, number])[] {
+  return corners.map(([x, y]) => [along + x, lateral + y] as const);
+}
+
+/**
+ * #1660's cap fixture: a U whose two arms are 120 m long and 1.6 m wide, a
+ * 1 m base across their ends, and a one-sided saw-tooth of 0.7 m every 5.1 m
+ * along all four of the arms' long walls — each tooth within the snap of the
+ * axis, and too deep for #1540's 0.5 m simplification to remove, so its
+ * walls alone are past `FOOTPRINT_MAX_FAR_TRIANGLES` once more vertices than
+ * `FOOTPRINT_MAX_VERTICES` are kept.
+ */
+export function sawToothYou(): ShapeCorners {
+  const teeth = 0.7;
+  const length = 120;
+  const arm = 1.6;
+  const gap = 2;
+  const step = 5.1;
+  // A long wall from `from` to `to` along x at `y`, its teeth pointing `into` the arm.
+  const wall = (from: number, to: number, y: number, into: number): [number, number][] => {
+    const out: [number, number][] = [];
+    const count = Math.round(Math.abs(to - from) / step);
+    for (let k = 0; k <= count; k += 1) {
+      const x = from + ((to - from) * k) / count;
+      out.push([x, k % 2 === 1 && k < count ? y + into * teeth : y]);
+    }
+    return out;
+  };
+  return [
+    // The first arm's outer wall, out along y = 0; its end; its inner wall back.
+    ...wall(0, length, 0, 1),
+    ...wall(length, 1, arm, -1),
+    // The base, then the second arm's inner wall out and its outer wall back.
+    ...wall(1, length, arm + gap, 1),
+    ...wall(length, 0, 2 * arm + gap, -1),
+  ];
+}
+
+/**
+ * #1635's fixture: a terraced street, for the owner's by-eye pair on the
+ * realistic page (`?town=terrace`). Along 400 m of level road from 1 000 m,
+ * both sides, rows of houses that share their side walls: each 6 to 9 m along
+ * the road by 12 m deep, its front 14 m out, of a height drawn from a short
+ * list so that neighbours are now the same height and now not, and a 6 m
+ * alley after every eighth. Residential land to 1 200 m and commercial
+ * beyond, as `mixedTownFixture` lays its land, so the press classes the
+ * street a town. Every number is drawn from a fixed sequence.
+ */
+export function terraceStreetFixture(latitude = FIXTURE_LATITUDE): {
+  readonly profile: RouteProfile;
+  readonly origin: CorridorOrigin;
+  readonly corridor: WorldCorridor;
+} {
+  const profile = northRoute(3_000, () => 10, { latitude });
+  const origin = corridorOrigin(profile);
+  let state = 0x16_35;
+  const next = (): number => {
+    // A 32-bit xorshift: a fixed sequence, not a seed the ride reads.
+    state ^= state << 13;
+    state ^= state >>> 17;
+    state ^= state << 5;
+    return (state >>> 0) / 0x1_0000_0000;
+  };
+  const heights = [9, 9, 9, 12, 6, 15] as const;
+  const buildings: BuildingFeature[] = [];
+  for (const side of [1, -1]) {
+    let along = 1_000;
+    let inRow = 0;
+    while (along < 1_400) {
+      const width = 6 + Math.floor(next() * 4);
+      const height = heights[Math.floor(next() * heights.length)] ?? 9;
+      buildings.push(
+        buildingBeside(
+          profile,
+          origin,
+          [rectangleBeside(along + width / 2, side * 20, width, 12)],
+          height,
+        ),
+      );
+      along += width;
+      inRow += 1;
+      if (inRow === 8) {
+        along += 6;
+        inRow = 0;
+      }
+    }
+  }
+  return {
+    profile,
+    origin,
+    corridor: {
+      routeId: 'terrace-street',
+      origin,
+      covered: () => true,
+      coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
+      landUse: [
+        landBeside(profile, origin, 'landuse', 'residential', 950, 1_200, -70, 70),
+        landBeside(profile, origin, 'landuse', 'commercial', 1_200, 1_450, -70, 70),
+      ],
+      buildings,
+      paths: [],
+      streets: [],
+    },
+  };
+}
+
+/**
+ * #1637's fixture: a city centre along 1 km of level road from 1 000 m, both
+ * sides — commercial land 260 m either side, and blocks 20 × 20 m every 25 m
+ * along and across, 15 m (five storeys) high, from 32 m out to 252 m, so
+ * #1633 reads it as `city-centre` (about 57 % coverage, a median of five
+ * storeys) and the first 32 m beside the road is built-up land with no
+ * footprint: the frontage #1637's terraced blocks fill. A park 40 m along by
+ * 56 m deep beside the road on the right from 1 400 m, which no block may
+ * stand on. No street is mapped. `use` is the land's: `residential` is the
+ * same blocks on land the map calls houses.
+ */
+export function cityCentreFixture(
+  latitude = FIXTURE_LATITUDE,
+  use: 'commercial' | 'residential' = 'commercial',
+): {
+  readonly profile: RouteProfile;
+  readonly origin: CorridorOrigin;
+  readonly corridor: WorldCorridor;
+} {
+  const profile = northRoute(3_000, () => 10, { latitude });
+  const origin = corridorOrigin(profile);
+  const buildings: BuildingFeature[] = [];
+  for (let along = 1_012.5; along < 2_000; along += 25) {
+    for (let lateral = 42; lateral < 252; lateral += 25) {
+      for (const side of [1, -1]) {
+        buildings.push(
+          buildingBeside(profile, origin, [rectangleBeside(along, side * lateral, 20, 20)], 15),
+        );
+      }
+    }
+  }
+  return {
+    profile,
+    origin,
+    corridor: {
+      routeId: 'city-centre',
+      origin,
+      covered: () => true,
+      coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
+      landUse: [
+        landBeside(profile, origin, 'landuse', use, 1_000, 2_000, -260, 260),
+        landBeside(profile, origin, 'landuse', 'park', 1_400, 1_440, 4, 60),
+      ],
+      buildings,
+      paths: [],
+      streets: [],
+    },
+  };
+}
+
 /**
  * #1542's countryside, for the owner's by-eye pair on the realistic page
  * (`?town=countryside`): from 900 m to 2 100 m of a level road, fields either

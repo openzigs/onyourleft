@@ -20,9 +20,11 @@ import {
   PROBE_DECORATIONS,
   surfacesWithLevers,
   treesWithLevers,
+  splitRoofsWithLevers,
   urbanClassWithLevers,
   windowRevealsWithLevers,
   overhangShadowsWithLevers,
+  weatheringWithLevers,
 } from './config';
 import { ANCHOR_KINDS, HOLIDAY_DECORATIONS } from '../../src/game/decorations';
 import { PLACES } from '../../src/demo/synthetic-road';
@@ -84,9 +86,31 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     expect(parseConfig('?town=richmond').town).toBe('richmond');
     // #1542: the countryside, for its levers.
     expect(parseConfig('?town=countryside').town).toBe('countryside');
+    // #1635: the terraced street, with `-urban-class` its control.
+    expect(parseConfig('?town=terrace').town).toBe('terrace');
     expect(configQuery(parseConfig('?town=countryside&levers=-land-planting'))).toBe(
       '?levers=-land-planting&town=countryside',
     );
+    // #1637: the city centre's street, whose before is its urban class off.
+    expect(parseConfig('?town=city-street').town).toBe('city-street');
+    expect(configQuery(parseConfig('?town=city-street&levers=-urban-class'))).toBe(
+      '?levers=-urban-class&town=city-street',
+    );
+    // #1636: a city centre, for its shop fronts and its tower.
+    expect(parseConfig('?town=city').town).toBe('city');
+    expect(configQuery(parseConfig('?town=city&at=1430'))).toBe('?at=1430&town=city');
+  });
+
+  it('rides the city centre through #1636’s fixture, which is where it is wired', () => {
+    const harness = readFileSync(
+      fileURLToPath(new URL('../realistic-harness.ts', import.meta.url)),
+      'utf8',
+    );
+    expect(harness).toContain("config.town === 'city'");
+    expect(harness).toContain('? cityCentreFixture(latitude)');
+    // #1637's own city centre, for its street and terraced blocks.
+    expect(harness).toContain("config.town === 'city-street'");
+    expect(harness).toContain('? cityStreetscapeFixture(latitude)');
   });
 
   it('switches #1542’s three changes off one by one, and none unless asked', () => {
@@ -198,6 +222,28 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     );
   });
 
+  it('builds the mapped facades’ weathering, as the product does, unless #1661’s lever takes it out', () => {
+    expect(LEVERS).toContain('weathering');
+    expect(weatheringWithLevers([])).toBe(true);
+    // No OTHER lever touches it.
+    expect(weatheringWithLevers(LEVERS.filter((lever) => lever !== 'weathering'))).toBe(true);
+    expect(weatheringWithLevers(parseConfig('?levers=-weathering').leversOff)).toBe(false);
+    expect(configQuery(parseConfig('?town=mixed&levers=-weathering'))).toBe(
+      `?levers=${encodeURIComponent('-weathering')}&town=mixed`,
+    );
+    // And #1658's and #1659's levers are not this one.
+    expect(overhangShadowsWithLevers(parseConfig('?levers=-weathering').leversOff)).toBe(true);
+    expect(windowRevealsWithLevers(parseConfig('?levers=-weathering').leversOff)).toBe(true);
+  });
+
+  it('hands #1661’s parsed lever to the owner’s page, which is where it is wired', () => {
+    const harness = readFileSync(
+      fileURLToPath(new URL('../realistic-harness.ts', import.meta.url)),
+      'utf8',
+    );
+    expect(harness).toContain('weatheringOf(view, weatheringWithLevers(config.leversOff));');
+  });
+
   it('plans the town with its urban class, as the press does, unless #1634’s lever takes it out', () => {
     expect(LEVERS).toContain('urban-class');
     expect(urbanClassWithLevers([])).toBe(true);
@@ -207,13 +253,27 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     expect(configQuery(parseConfig('?town=mixed&levers=-urban-class'))).toBe(
       `?levers=${encodeURIComponent('-urban-class')}&town=mixed`,
     );
-    // Wired where the harness plans the town, read as text as #1659's lever is above.
+    // Wired where the harness plans the town, read as text as #1659's lever is above. Since
+    // #1660 the harness plans it in `town.ts`, which `town.test.ts` reads by its plans.
     const harness = readFileSync(
       fileURLToPath(new URL('../realistic-harness.ts', import.meta.url)),
       'utf8',
     );
-    expect(harness).toContain('const urban = urbanClassWithLevers(config.leversOff)');
-    expect(harness).toMatch(/FOOTPRINT_MAX_VERTICES,\s+urban,\s+\);/);
+    expect(harness).toContain('plannedTown(mixed, config.leversOff)');
+    const town = readFileSync(fileURLToPath(new URL('./town.ts', import.meta.url)), 'utf8');
+    expect(town).toContain('const urban = urbanClassWithLevers(leversOff)');
+    expect(town).toMatch(/FOOTPRINT_MAX_VERTICES,\s+urban,/);
+  });
+
+  it('pitches the split houses, as the product does, unless #1660’s lever takes it out', () => {
+    expect(LEVERS).toContain('split-roofs');
+    expect(splitRoofsWithLevers([])).toBe(true);
+    // No OTHER lever touches it.
+    expect(splitRoofsWithLevers(LEVERS.filter((lever) => lever !== 'split-roofs'))).toBe(true);
+    expect(splitRoofsWithLevers(parseConfig('?levers=-split-roofs').leversOff)).toBe(false);
+    expect(configQuery(parseConfig('?town=mixed&levers=-split-roofs'))).toBe(
+      `?levers=${encodeURIComponent('-split-roofs')}&town=mixed`,
+    );
   });
 
   it('builds both surfaces’ shaders, bounded, as the product does, unless a #1523 lever takes one out', () => {

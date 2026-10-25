@@ -21,11 +21,11 @@
  * | `at` | hold the rider still this far along the route, for a screenshot | metres |
  * | `panel` | the on-screen controls | `1` (default), `0` for a clean screenshot |
  * | `layers` | layers switched OFF, for their share of the GPU (#616) | `-sky`, `-surfaces`, `-vegetation`, `-impostors`, `-structures`, `-water`, `-riders`, `-grounding`, comma-separated; default none |
- * | `levers` | #619's levers switched OFF, for a before/after pair at one rung — since #622 its air and since #1274 its crag, for a by-eye pair, since #1283 the generated trees and #1294 the generated firs, for both, since #1523 the ground blend and the road wear, for a cost pair, #1523's bounds on both, for a before/after pair, since #1534 the villages' cleared ground, for both, since #1523 the firs' depth pre-pass, for a before/after pair, since #1541 the people, for both, since #1542 the countryside's planting, field boundaries, ground clutter, broken roadside hedge and small stones, for both, since #1622 the holiday decorations, for any `date` without its holiday, since #1659 the mapped windows' reveals, for both, since #1658 the mapped walls' overhang shadows, for both, and since #1634 the urban class (an untagged footprint's storeys), for both | `-foliage-order`, `-texture-bias`, `-air`, `-crag`, `-generated-trees`, `-generated-conifers`, `-ground-blend`, `-road-wear`, `-surface-bounds`, `-settlement-clearing`, `-fir-prepass`, `-people`, `-land-planting`, `-land-boundaries`, `-ground-clutter`, `-hedge-breaks`, `-small-stones`, `-decorations`, `-window-reveals`, `-overhang-shadows`, `-urban-class`, comma-separated; default none |
+ * | `levers` | #619's levers switched OFF, for a before/after pair at one rung — since #622 its air and since #1274 its crag, for a by-eye pair, since #1283 the generated trees and #1294 the generated firs, for both, since #1523 the ground blend and the road wear, for a cost pair, #1523's bounds on both, for a before/after pair, since #1534 the villages' cleared ground, for both, since #1523 the firs' depth pre-pass, for a before/after pair, since #1541 the people, for both, since #1542 the countryside's planting, field boundaries, ground clutter, broken roadside hedge and small stones, for both, since #1622 the holiday decorations, for any `date` without its holiday, since #1659 the mapped windows' reveals, for both, since #1658 the mapped walls' overhang shadows, for both, since #1634 the urban class (an untagged footprint's storeys), for both, since #1660 the split roofs of L-, T- and U-shaped houses, for both, since #1661 the mapped facades' weathering, for both, and since #1626 the mapped doors' winter wreath, for a cost pair | `-foliage-order`, `-texture-bias`, `-air`, `-crag`, `-generated-trees`, `-generated-conifers`, `-ground-blend`, `-road-wear`, `-surface-bounds`, `-settlement-clearing`, `-fir-prepass`, `-people`, `-land-planting`, `-land-boundaries`, `-ground-clutter`, `-hedge-breaks`, `-small-stones`, `-decorations`, `-window-reveals`, `-overhang-shadows`, `-urban-class`, `-split-roofs`, `-weathering`, `-facade-wreath`, comma-separated; default none |
  * | `facing` | which way the route is turned, relative to the sun (#702, `route.ts` §"Which way it faces") | `sun`, `away`; default the route unturned, which looks 110° to 160° away from the sun |
- * | `town` | ride through a mapped town instead of `route.ts`' road (#1581): `footprint-fixtures-testing.ts` §`mixedTownFixture`'s mixed footprints, planned, drawn and lotted as a ride's corridor is, from 900 m to 2 100 m; since #1585 `richmond`, `footprint-fixtures-testing.ts` §`richmondStreetFixture`'s narrow lots drawn as house models beside square ones drawn as extrusions, from 900 m to 1 500 m; since #1542 `countryside`, `footprint-fixtures-testing.ts` §`countrysideFixture`'s fields, woods and a park, from 900 m to 2 100 m, for #1542's levers | `mixed`, `richmond`, `countryside`; default none |
+ * | `town` | ride through a mapped town instead of `route.ts`' road (#1581): `footprint-fixtures-testing.ts` §`mixedTownFixture`'s mixed footprints, planned, drawn and lotted as a ride's corridor is, from 900 m to 2 100 m; since #1585 `richmond`, `footprint-fixtures-testing.ts` §`richmondStreetFixture`'s narrow lots drawn as house models beside square ones drawn as extrusions, from 900 m to 1 500 m; since #1542 `countryside`, `footprint-fixtures-testing.ts` §`countrysideFixture`'s fields, woods and a park, from 900 m to 2 100 m, for #1542's levers; since #1635 `terrace`, `footprint-fixtures-testing.ts` §`terraceStreetFixture`'s rows of terraced houses, from 900 m to 2 100 m, with `levers=-urban-class` its control; since #1636 `city`, `testing/urban-fixtures.ts` §`cityCentreFixture`'s city centre, its route-facing ground floors shop fronts and a nine-storey tower a curtain wall, from 900 m to 2 100 m; since #1637 `city-street`, `footprint-fixtures-testing.ts` §`cityCentreFixture`'s city centre, its street and its terraced blocks, from 900 m to 2 100 m, whose before is `levers=-urban-class` | `mixed`, `richmond`, `countryside`, `terrace`, `city`, `city-street`; default none |
  * | `date` | the rider's local day the ride starts on (#1622), in either world: its holiday (`season.ts` §`holidayOn`) and the route's season. A malformed or impossible day is REFUSED | `YYYY-MM-DD`; default this device's own day |
- * | `decorations` | #1624's probe: one small box on every decoration anchor of every village in reach, for either holiday, in place of the product's table (`decorations.ts` §`HOLIDAY_DECORATIONS`, which places nothing yet). Pair it with a `date` in a holiday and `route=village`; `levers=-decorations` is its control | `probe`; default the product's table |
+ * | `decorations` | #1624's probe: one small box on every decoration anchor of every village in reach, for either holiday, in place of the product's table (`decorations.ts` §`HOLIDAY_DECORATIONS`: since #1625 Halloween's pumpkins, and nothing yet for winter lights). Pair it with a `date` in a holiday and `route=village`; `levers=-decorations` is its control | `probe`; default the product's table |
  * | `place` | where every road is ridden (#1623), for the route's own season: `south`, the same road mirrored into the southern hemisphere; `nordic`, far enough north that a winter's snow lies to sea level (`route.ts` §`PLACES`) | `south`, `nordic`; default 51.5° N, every road where it was |
  * | `route` | which of `route.ts`' roads is ridden (#1559): absent, the valley road every Part Z and Part AH row was taken on; `village`, `route.ts` §`villageRoute`, a level road through two villages, for validation 0002 AE2 (`at=820` holds the first one's church and shops in frame). Refused beside `town`, which is a road of its own | `village`; default none |
  *
@@ -207,12 +207,40 @@ export type Layer = (typeof LAYERS)[number];
  *   use, area and its tagged neighbours. The owner's BY-EYE pair, and the
  *   tablet's cost pair (taller boxes add fill, not draw calls). Only a `town`
  *   has a class; on `route.ts`' road the two are the same picture. The
- *   product always builds the class.
+ *   product always builds the class. Since #1637 off also takes a city
+ *   centre's street and terraced blocks with it — `town=city-street`'s before.
+ *
+ * - `split-roofs` — #1660: L-, T-, U- and Z-shaped mapped houses pitched over
+ *   their 2–3 rectangles (`rectilinear-roofs.ts`), and no roof over a notch.
+ *   Off plans every footprint by `main`'s rule, every one below 0.85
+ *   rectangularity flat behind its parapet. Read at load, as
+ *   `generated-trees` is, since plans are built at ride start. The owner's
+ *   BY-EYE pair and the tablet's cost pair; pair it with `town=mixed`, whose
+ *   every fifth house is an L. The product always splits.
+ *
+ * - `weathering` — #1661: the mapped facades' weathering — the photograph
+ *   laid per building and its repeat broken, splash grime at a wall's foot,
+ *   streaks under the sills, a flat roof's drip, a roof's eaves courses and
+ *   moss, a parged plinth (`three-renderer.ts` §`weatheringOf`). Off builds
+ *   both facade programs without the term — its functions and splices left
+ *   out, not a uniform at zero, as `road-wear` does — so every mapped wall is
+ *   as freshly rendered as before #1661: the tablet's COST pair and the
+ *   owner's BY-EYE pair. Pair it with `town=mixed`: on `route.ts`' road there
+ *   is no mapped building. The product always builds the weathering.
+ *
+ * - `facade-wreath` — #1626: the wreath the facade draws on every mapped
+ *   front door while the winter lights are on (`three-renderer.ts`
+ *   §`facadeWreathOf`). Off writes the wreath's uniform 0 whatever the
+ *   holiday: the proof that the wreath costs no call (the frame's calls are
+ *   the same either way) and the owner's BY-EYE pair. Pair it with a `date`
+ *   in the winter lights and `town=mixed`: only a town has mapped buildings.
+ *   The product always draws the wreath.
  */
 export const LEVERS = [
   'air',
   'crag',
   'decorations',
+  'facade-wreath',
   'fir-prepass',
   'foliage-order',
   'generated-conifers',
@@ -228,9 +256,11 @@ export const LEVERS = [
   'road-wear',
   'settlement-clearing',
   'small-stones',
+  'split-roofs',
   'surface-bounds',
   'texture-bias',
   'urban-class',
+  'weathering',
   'window-reveals',
 ] as const;
 
@@ -259,7 +289,8 @@ export interface RealisticPageConfig {
    * A mapped town to ride through — #1581's by-eye pair for the owner, near a
    * town and inside one. `undefined` is `route.ts`' road, with no corridor.
    */
-  readonly town: 'mixed' | 'richmond' | 'countryside' | undefined;
+  readonly town:
+    'mixed' | 'richmond' | 'countryside' | 'terrace' | 'city' | 'city-street' | undefined;
   /**
    * #1559: `route.ts` §`villageRoute` instead of its default road, for
    * validation 0002 AE2. `undefined` is the default road, unchanged.
@@ -420,6 +451,15 @@ export function firPrepassWithLevers(leversOff: readonly Lever[]): DepthPrepassM
 }
 
 /**
+ * Whether this run draws the mapped doors' winter wreath — #1626: as the
+ * product does, unless `facade-wreath` is off. `realistic-harness.ts` hands
+ * it to `three-renderer.ts` §`facadeWreathOf`.
+ */
+export function facadeWreathWithLevers(leversOff: readonly Lever[]): boolean {
+  return !leversOff.includes('facade-wreath');
+}
+
+/**
  * Whether this run builds the mapped windows' reveals — #1659: as the product
  * does, unless `window-reveals` is off. `realistic-harness.ts` hands it to
  * `three-renderer.ts` §`windowRevealsOf`.
@@ -438,6 +478,15 @@ export function overhangShadowsWithLevers(leversOff: readonly Lever[]): boolean 
 }
 
 /**
+ * Whether this run builds the mapped facades' weathering — #1661: as the
+ * product does, unless `weathering` is off. `realistic-harness.ts` hands it
+ * to `three-renderer.ts` §`weatheringOf`.
+ */
+export function weatheringWithLevers(leversOff: readonly Lever[]): boolean {
+  return !leversOff.includes('weathering');
+}
+
+/**
  * Whether this run plans the town's footprints with its urban class — #1634:
  * as the product's press does, unless `urban-class` is off.
  * `realistic-harness.ts` hands the class, or `NO_URBAN_CLASS`, to
@@ -445,6 +494,16 @@ export function overhangShadowsWithLevers(leversOff: readonly Lever[]): boolean 
  */
 export function urbanClassWithLevers(leversOff: readonly Lever[]): boolean {
   return !leversOff.includes('urban-class');
+}
+
+/**
+ * Whether this run pitches L-, T-, U- and Z-shaped mapped houses over their
+ * 2–3 rectangles — #1660: the product always does; `-split-roofs` plans every
+ * footprint by `main`'s rule, every one below 0.85 rectangularity flat. Read
+ * at load, as `generated-trees` is, because plans are built at ride start.
+ */
+export function splitRoofsWithLevers(leversOff: readonly Lever[]): boolean {
+  return !leversOff.includes('split-roofs');
 }
 
 /** A configuration from a query string. @see RealisticPageConfig */
@@ -485,7 +544,11 @@ export function parseConfig(search: string): RealisticPageConfig {
     leversOff: leversFrom(params.get('levers')),
     facing: params.has('facing') ? oneOf('facing', ['sun', 'away'] as const, 'sun') : undefined,
     town: params.has('town')
-      ? oneOf('town', ['mixed', 'richmond', 'countryside'] as const, 'mixed')
+      ? oneOf(
+          'town',
+          ['mixed', 'richmond', 'countryside', 'terrace', 'city', 'city-street'] as const,
+          'mixed',
+        )
       : undefined,
     route: params.has('route') ? routeFrom(params) : undefined,
     date: params.has('date') ? dateFrom(params.get('date') ?? '') : undefined,
@@ -533,8 +596,9 @@ export function seasonWithLevers(
  * (`decorations.ts` §`ANCHOR_KINDS`), for both holidays. It exists so that
  * the browser gate's "one call for the belt" cannot pass over a belt with
  * nothing in it, and it lives on this page alone: `realistic.html` is built
- * only by `vite.browser.config.ts`, so no rider reaches it. #1625 and #1626
- * replace it with the real sets in the same spec.
+ * only by `vite.browser.config.ts`, so no rider reaches it. Since #1625 the
+ * gate rides Halloween on the product's own pumpkins instead
+ * (`realistic-town.browser.spec.ts`); #1626 does the same for winter lights.
  */
 const PROBE: DecorationKind = {
   item: 'probe',
