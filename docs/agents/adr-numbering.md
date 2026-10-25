@@ -12,6 +12,13 @@ It has the same authority as the root file. Where the text below says "this file
 
 ## Which numbers were taken, and by what (from CLAUDE.md §7, "ADRs")
 
+  ⚠️ **0056 is [ADR 0056](../adr/0056-the-demos-shipped-map-under-odbl.md)**, taken by
+  [#1644](https://github.com/openzigs/onyourleft/issues/1644) on 2026-10-24 for the demo's shipped
+  map under ODbL 1.0, on the owner's rulings of that day on
+  [#1643](https://github.com/openzigs/onyourleft/issues/1643), and **Proposed**, for the owner's
+  acceptance. It supersedes ADR 0054 D-1 item 2 and D-3.5 in part, for the demo build only.
+  ⚠️ **0055 is claimed, not free**: [#1631](https://github.com/openzigs/onyourleft/issues/1631)'s
+  title names it, which is why #1644 took 0056.
   ⚠️ **0054 is [ADR 0054](../adr/0054-towns-from-real-map-data.md)**, taken by
   [#1538](https://github.com/openzigs/onyourleft/issues/1538) on 2026-10-21 for towns from real map
   data, on the owner's ruling of that day on [#1533](https://github.com/openzigs/onyourleft/issues/1533),

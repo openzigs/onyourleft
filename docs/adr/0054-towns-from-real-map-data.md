@@ -408,3 +408,12 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   the mapped height. What still holds, unchanged: `roof:shape` and the OSM building type are not in
   the archive, and reading them is still
   [#1557](https://github.com/openzigs/onyourleft/issues/1557).
+- **2026-10-24** — **The demo build ships OpenStreetMap-derived records, under
+  [ADR 0056](0056-the-demos-shipped-map-under-odbl.md) (Proposed that day, on the owner's rulings of
+  2026-10-24 on [#1643](https://github.com/openzigs/onyourleft/issues/1643)).** D-1 item 2's reason,
+  *"the records arrive per route, on the rider's device"*, and D-3.5's consequence that nothing
+  OpenStreetMap-derived is Publicly Used, stop being true for the demo build: each preset route's
+  decoded corridor is baked into a file in the demo's gitignored output and offered under ODbL 1.0.
+  What still stands, unchanged: D-1 item 2's statement (nothing derived from an external source is
+  committed), and D-3.5 for the `worldCorridors` store, whose contents never leave the device and
+  which the bake never reads. ADR 0056 D-1 says exactly which sentences it supersedes.
