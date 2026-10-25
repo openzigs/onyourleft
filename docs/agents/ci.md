@@ -375,7 +375,20 @@ command, locally.
 gate's as well), and prints each test Playwright counts as `did not run`, plus one `::error`
 annotation on Actions with the same list.
 
-<!-- nightly-shard-measurements -->
+**Measured on #1675's pull request** (Playwright's own `passed (…)` figure, which it rounds to a
+tenth of a minute; headroom is 1 − that over 840 s):
+
+| Run | Half 1 CPU | Half 1 | Headroom | Half 2 CPU | Half 2 | Headroom |
+|---|---|--:|--:|---|--:|--:|
+| [40151121747](https://github.com/openzigs/onyourleft/actions/runs/40151121747) | EPYC 9V74 | 342 s, 83 cases | 59 % | EPYC 7763 | 444 s, 5 cases | 47 % |
+| [40152222482](https://github.com/openzigs/onyourleft/actions/runs/40152222482) attempt 1 | Xeon 8573C | 342 s | 59 % | EPYC 7763 | 462 s | 45 % |
+| 40152222482 attempt 2 | EPYC 9V45 | 258 s | 69 % | EPYC 9V45 | 246 s | 71 % |
+
+⚠️ **The second half is the one to watch**: `realistic.browser.spec.ts` grows by one load of the
+owner's page per lever (#1657 added the fifth), about 60 to 90 s each on the EPYC 7763, so one or
+two more levers bring it under 40 % there. The next cut is that file's own describes divided
+between two jobs, not a longer stop. The first half has not yet been measured on a 7763.
+
 
 #### 23m39s of 25 — #1051
 
