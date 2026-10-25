@@ -808,7 +808,7 @@ export const REALISTIC_STREET_TRIANGLES = 25_024;
  *
  * The belt spends it (`three-renderer.ts` §`decorationGeometry`);
  * `realistic-budget.test.ts` holds it inside the frame, and
- * `realistic.browser.spec.ts` reads the belt's triangles off its mesh on the
+ * `realistic-town.browser.spec.ts` reads the belt's triangles off its mesh on the
  * owner's page against it.
  */
 export const REALISTIC_DECORATION_TRIANGLES = 12_000;
