@@ -494,7 +494,8 @@ export interface FootprintPlan {
    * How built-up the stretch of route it stands beside is — #1633
    * (`urban-class.ts`), read at the route distance its centroid is nearest;
    * `unknown` where the press had no map, or no class, there. What #1634–#1637
-   * style a footprint by; nothing draws from it yet.
+   * style a footprint by: since #1634 an untagged footprint's storeys
+   * ({@link untaggedStoreys}).
    */
   readonly urban: UrbanClass;
   /**
@@ -529,7 +530,11 @@ export const STOREY_METRES = 3;
  */
 export const BAY_METRES = 36 / 10;
 
-/** The storeys a building with no mapped height has: **2**. */
+/**
+ * The storeys a building with no mapped height has: **2** — and, since #1634,
+ * only where the press had no urban class for it (`unknown`); elsewhere
+ * {@link untaggedStoreys} chooses.
+ */
 export const DEFAULT_STOREYS = 2;
 
 /** The most outer vertices a planned footprint keeps: **48**. */
@@ -860,6 +865,8 @@ const STREAM_PORCH_SIDE = 24;
 const STREAM_PORCH_ROOF = 25;
 /** #1585: which of the house models that fit a footprint it is drawn as. */
 const STREAM_HOUSE_MODEL = 31;
+/** #1634: an untagged footprint's storeys. */
+const STREAM_STOREYS = 32;
 
 /** The key under which {@link slotHash} hashes footprints, apart from every other placement. */
 const FOOTPRINT_KEY = 0x15_40;
@@ -1133,6 +1140,152 @@ export function storeysFor(heightMetres: number | null): number {
     return levels;
   }
   return Math.max(1, Math.round(heightMetres / STOREY_METRES));
+}
+
+/** The least and most storeys an untagged footprint is chosen between, inclusive. */
+export type StoreysRange = readonly [least: number, most: number];
+
+/**
+ * #1634's table, the conservative rule (the research's open question 4 on
+ * #1628): the storeys an untagged footprint is chosen between, by urban class
+ * and by use — residential, every other use, and a large commercial footprint
+ * ({@link LARGE_COMMERCIAL_AREA}). `unknown` is today's
+ * {@link DEFAULT_STOREYS}, whatever the use.
+ */
+export const UNTAGGED_STOREYS: Readonly<
+  Record<
+    UrbanClass,
+    {
+      readonly residential: StoreysRange;
+      readonly other: StoreysRange;
+      readonly large: StoreysRange;
+    }
+  >
+> = {
+  unknown: {
+    residential: [DEFAULT_STOREYS, DEFAULT_STOREYS],
+    other: [DEFAULT_STOREYS, DEFAULT_STOREYS],
+    large: [DEFAULT_STOREYS, DEFAULT_STOREYS],
+  },
+  rural: { residential: [1, 2], other: [1, 2], large: [1, 2] },
+  village: { residential: [1, 2], other: [1, 2], large: [1, 2] },
+  town: { residential: [2, 3], other: [2, 4], large: [2, 4] },
+  'city-centre': { residential: [3, 4], other: [3, 4], large: [4, 5] },
+};
+
+/** A commercial footprint is large from this area, square metres: **1 500** (#1634). */
+export const LARGE_COMMERCIAL_AREA = 1_500;
+
+/** How near a tagged footprint's centroid is for it to be a neighbour: **100 m** (#1634). */
+export const TAGGED_NEIGHBOUR_METRES = 100;
+
+/** How many tagged neighbours an untagged footprint needs before they decide: **2** (#1634). */
+export const TAGGED_NEIGHBOURS_MIN = 2;
+
+/**
+ * The most storeys an untagged footprint in a `city-centre` is clamped up to
+ * by its tagged neighbours: **12** (#1634). Outside a city centre the clamp
+ * never goes above the table's most.
+ */
+export const UNTAGGED_CITY_MAX_STOREYS = 12;
+
+/**
+ * The storeys of a footprint with no mapped height — #1634, finishing ADR 0054
+ * D-7's "chosen by `kind` and footprint area and hashed per footprint".
+ *
+ * `share` is the footprint's seeded draw in `[0, 1)`, which picks a whole
+ * number of storeys in {@link UNTAGGED_STOREYS}' range for `urban` and `use`.
+ * `neighbours` is the median storeys of the tagged footprints within
+ * {@link TAGGED_NEIGHBOUR_METRES}, or `undefined` where there are fewer than
+ * {@link TAGGED_NEIGHBOURS_MIN}: with one, the pick is clamped to within a
+ * storey of it — and may go below the table, and in a `city-centre` above it
+ * to {@link UNTAGGED_CITY_MAX_STOREYS}, the only way an untagged building is a
+ * tower. ⚠️ `unknown` is {@link DEFAULT_STOREYS}, neighbours or not: with no
+ * class the world is today's (ADR 0054 D-4).
+ */
+export function untaggedStoreys(
+  urban: UrbanClass,
+  use: FootprintUse,
+  area: number,
+  neighbours: number | undefined,
+  share: number,
+): number {
+  if (urban === 'unknown') return DEFAULT_STOREYS;
+  const row = UNTAGGED_STOREYS[urban];
+  const [least, most] =
+    use === 'residential'
+      ? row.residential
+      : use === 'commercial' && area >= LARGE_COMMERCIAL_AREA
+        ? row.large
+        : row.other;
+  const picked = least + Math.min(most - least, Math.floor(share * (most - least + 1)));
+  if (neighbours === undefined) return picked;
+  const ceiling = urban === 'city-centre' ? UNTAGGED_CITY_MAX_STOREYS : most;
+  const clamped = Math.min(Math.max(picked, Math.ceil(neighbours - 1)), Math.floor(neighbours + 1));
+  return Math.max(1, Math.min(clamped, ceiling));
+}
+
+/** The side of a cell of {@link TaggedNeighbours}' grid: {@link TAGGED_NEIGHBOUR_METRES}. */
+const TAGGED_CELL_METRES = TAGGED_NEIGHBOUR_METRES;
+
+/** A cell's key: a number, 16 bits an axis about 0x8000 — thousands of kilometres of 100 m cells. */
+function taggedCell(ix: number, iz: number): number {
+  return (ix + 0x8000) * 0x1_0000 + (iz + 0x8000);
+}
+
+/**
+ * The corridor's footprints with a mapped height, by centroid — #1634, built
+ * once a planning. Only `building` features, as `urban-class.ts` counts them:
+ * a `building_part` stands inside its building.
+ */
+class TaggedNeighbours {
+  /** `x, z, storeys` triples by cell, keyed as `mapped-buildings.ts` keys its cells. */
+  readonly #cells = new Map<number, number[]>();
+  /** Scratch: the storeys of one query's neighbours. */
+  readonly #near: number[] = [];
+
+  constructor(buildings: readonly BuildingFeature[]) {
+    for (const building of buildings) {
+      const outer = building.rings[0];
+      if (building.kind !== 'building' || building.heightMetres === null) continue;
+      if (!Number.isFinite(building.heightMetres) || outer === undefined || outer.length < 6) {
+        continue;
+      }
+      const { x, z } = centroidOf(outer);
+      const key = taggedCell(
+        Math.floor(x / TAGGED_CELL_METRES),
+        Math.floor(z / TAGGED_CELL_METRES),
+      );
+      const cell = this.#cells.get(key) ?? [];
+      cell.push(x, z, storeysFor(building.heightMetres));
+      this.#cells.set(key, cell);
+    }
+  }
+
+  /** The median storeys of the tagged footprints within reach of `(x, z)`; `undefined` for too few. */
+  medianNear(x: number, z: number): number | undefined {
+    const near = this.#near;
+    near.length = 0;
+    const ix = Math.floor(x / TAGGED_CELL_METRES);
+    const iz = Math.floor(z / TAGGED_CELL_METRES);
+    const reach = TAGGED_NEIGHBOUR_METRES * TAGGED_NEIGHBOUR_METRES;
+    for (let dx = -1; dx <= 1; dx += 1) {
+      for (let dz = -1; dz <= 1; dz += 1) {
+        const cell = this.#cells.get(taggedCell(ix + dx, iz + dz));
+        if (cell === undefined) continue;
+        for (let at = 0; at + 2 < cell.length; at += 3) {
+          const ex = (cell[at] as number) - x;
+          const ez = (cell[at + 1] as number) - z;
+          if (ex * ex + ez * ez <= reach) near.push(cell[at + 2] as number);
+        }
+      }
+    }
+    if (near.length < TAGGED_NEIGHBOURS_MIN) return undefined;
+    near.sort((a, b) => a - b);
+    const middle = Math.floor(near.length / 2);
+    const upper = near[middle] as number;
+    return near.length % 2 === 1 ? upper : ((near[middle - 1] as number) + upper) / 2;
+  }
 }
 
 /** A role's triangles while a plan is built: {@link FOOTPRINT_VERTEX_FLOATS} numbers a vertex. */
@@ -2701,6 +2854,8 @@ export function footprintPlans(
   // neighbour's porch and drive, and a driveway off a neighbour's porch.
   const porches = new RingGrid([]);
   const driveways = new RingGrid([]);
+  // #1634: the tagged footprints an untagged one is chosen beside — only with a class.
+  const tagged = urban === undefined ? undefined : new TaggedNeighbours(corridor.buildings);
   for (const [index, building] of corridor.buildings.entries()) {
     const planned = planFootprint(
       building,
@@ -2711,7 +2866,7 @@ export function footprintPlans(
       origin,
       seed,
       maxVertices,
-      { grid: others, own: index, porches, driveways },
+      { grid: others, own: index, porches, driveways, tagged },
     );
     if (typeof planned === 'string') {
       counts[planned] += 1;
@@ -3117,6 +3272,7 @@ function planFootprint(
     readonly own: number;
     readonly porches: RingGrid;
     readonly driveways: RingGrid;
+    readonly tagged: TaggedNeighbours | undefined;
   },
 ): FootprintPlan | Exclude<FootprintVerdict, 'kept'> {
   const outer = building.rings[0];
@@ -3200,17 +3356,27 @@ function planFootprint(
   const minHeight = raised ?? 0;
   const span =
     building.heightMetres === null ? null : Math.max(0, building.heightMetres - minHeight);
-  const storeys = storeysFor(span);
+  const landClass = land.classAt(centroid.x, centroid.z);
+  const use = footprintUse(landClass, kindAt(corridor, centroid.x, centroid.z));
+  const share = (stream: number): number => footprintShare(seed, centroid.x, centroid.z, stream);
+  // #1634: a mapped height is P-10's and #1629's; an untagged one is chosen.
+  const storeys =
+    span !== null
+      ? storeysFor(span)
+      : untaggedStoreys(
+          urbanClass,
+          use,
+          area,
+          urbanClass === 'unknown' ? undefined : others.tagged?.medianNear(centroid.x, centroid.z),
+          share(STREAM_STOREYS),
+        );
   const wallHeight = span !== null && span > 0 ? span : storeys * STOREY_METRES;
   const base = part ? lowest + minHeight : lowest - FOUNDATION_METRES;
   const floor = part ? base : highest + PLINTH_TOP_METRES;
   const eaves = floor + wallHeight;
 
-  const landClass = land.classAt(centroid.x, centroid.z);
-  const use = footprintUse(landClass, kindAt(corridor, centroid.x, centroid.z));
   const rectangle = minimumAreaRectangle(drawn);
   const rectangularity = rectangle.area > 0 ? Math.abs(signedArea(drawn)) / rectangle.area : 0;
-  const share = (stream: number): number => footprintShare(seed, centroid.x, centroid.z, stream);
   const pitched =
     area <= FOOTPRINT_GABLE_MAX_AREA &&
     rectangularity >= FOOTPRINT_GABLE_MIN_RECTANGULARITY &&

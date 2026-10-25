@@ -56,7 +56,11 @@ import {
   type WorldQualityState,
 } from '../src/game/quality';
 import { realisticWorldNotice, type RealisticWorldOutcome } from '../src/game/realistic-assets';
-import { footprintPlans, mappedTown } from '../src/game/footprint-buildings';
+import {
+  FOOTPRINT_MAX_VERTICES,
+  footprintPlans,
+  mappedTown,
+} from '../src/game/footprint-buildings';
 import {
   countrysideFixture,
   mixedTownFixture,
@@ -66,6 +70,7 @@ import { landClassMask } from '../src/game/land-class';
 import { mappedBuildingsOf } from '../src/game/mapped-buildings';
 import type { SceneFrame } from '../src/game/port';
 import { corridorOrigin } from '../src/game/terrain';
+import { NO_URBAN_CLASS, urbanClassMap } from '../src/game/urban-class';
 import { deviceToday } from '../src/game/season';
 import { routeHemisphere, routeLatitudeMagnitude } from '../src/game/world';
 import {
@@ -92,6 +97,7 @@ import {
   firPrepassWithLevers,
   surfacesWithLevers,
   treesWithLevers,
+  urbanClassWithLevers,
   windowRevealsWithLevers,
   countrysideWithLevers,
   type Layer,
@@ -356,7 +362,18 @@ async function run(): Promise<void> {
   const town = ((): Parameters<typeof rideFrame>[0]['town'] => {
     if (mixed === undefined) return undefined;
     const land = landClassMask(mixed.corridor);
-    const { plans } = footprintPlans(mixed.corridor, land, profile, origin);
+    // #1634: and its urban class, as the press builds it, unless the lever is off.
+    const urban = urbanClassWithLevers(config.leversOff)
+      ? urbanClassMap(mixed.corridor, land, profile)
+      : NO_URBAN_CLASS;
+    const { plans } = footprintPlans(
+      mixed.corridor,
+      land,
+      profile,
+      origin,
+      FOOTPRINT_MAX_VERTICES,
+      urban,
+    );
     return {
       corridor: mixed.corridor,
       land,
