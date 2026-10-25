@@ -36,6 +36,7 @@ import type { QualitySettings } from '../game/quality';
 import { groundOf } from '../game/people';
 import { placedRiders, sceneFrame, type SceneInput } from '../game/scene';
 import { scatterSeed } from '../game/scatter';
+import type { GameSensors } from '../game/sensors';
 import { GameSimulation, type GameState } from '../game/simulation';
 import { NO_LAND_CLASS } from '../game/land-class';
 import { corridorOrigin, type CorridorOrigin } from '../game/terrain';
@@ -60,6 +61,12 @@ export interface DemoPlayer {
   readonly status: DemoStatus;
   /** The lead rider's simulation state, as the HUD reads a real rider's. */
   readonly state: GameState;
+  /**
+   * The lead rider's scripted cadence and heart rate now, as the HUD reads a
+   * real rider's sensors — #1650. Always live and paired: a demo never shows
+   * "Sensor lost".
+   */
+  readonly sensors: GameSensors;
   /** Milliseconds of ride: the caller's clock, while playing, and only then. */
   readonly rideMs: number;
   play(): void;
@@ -144,6 +151,9 @@ export function createDemoPlayer(
     },
     get state() {
       return ride.simulation.state;
+    },
+    get sensors() {
+      return ride.riders.current().lead;
     },
     get rideMs() {
       return rideMs;

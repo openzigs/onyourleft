@@ -7,10 +7,24 @@
  * ## WCAG 2.2 SC 2.2.2, Pause, Stop, Hide
  *
  * The demo moves for longer than five seconds, so it can be paused and
- * stopped, with real `<button>`s at least `CONTROL_MINIMUM_PIXELS` square as
- * the ride HUD's are (`DEMO_CONTROL_PIXELS`), in the HUD's own `oyl-hud__control` style. A visitor who
- * asked for reduced motion is shown a still frame and a Play button: the demo
- * does not move until they press it.
+ * stopped — with the ride HUD's own two controls (#1650), *Pause* and the one
+ * a ride calls *End ride*, here *Play* and *Stop*. A visitor who asked for
+ * reduced motion is shown a still frame and a Play button: the demo does not
+ * move until they press it.
+ *
+ * ## The stats are the ride HUD's — #1650
+ *
+ * Over the world is `game/hud/HudCore.tsx`, the HUD every ride shows, which
+ * `HudPanel` renders on a rider's own ride: the same readings, elevation
+ * strip and route plan, read from the lead rider's simulation state and
+ * scripted sensors as a ride reads a rider's. Not `HudPanel` itself, which
+ * carries a room's and a workout's controls the demo build may not bundle
+ * (`HudCore.tsx` says which). No trainer line, workout strip, standings or
+ * room report is ever passed to it, and its one live region stays empty.
+ *
+ * The stage is the game's own (`oyl-game--riding`), held to the box between
+ * the page's heading and its source offer rather than to the viewport, so
+ * the offer (#1645) is never under it.
  *
  * ## Hidden means paused
  *
@@ -22,8 +36,14 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 
+import type { RouteProfile } from '@onyourleft/domain';
+
+import { HudCore } from '../game/hud/HudCore';
+import { PlanTrace } from '../game/hud/PlanTrace';
 import type { GameRenderer, GameView } from '../game/port';
 import type { QualitySettings } from '../game/quality';
+import type { GameSensors } from '../game/sensors';
+import type { GameState } from '../game/simulation';
 import { createDemoPlayer, type DemoStatus } from './player';
 import { parseDemoQuery } from './query';
 import { DemoSourceOffer } from './SourceOffer';
@@ -43,16 +63,19 @@ export interface DemoPageProps {
   readonly publish: (snapshot: DemoSnapshot) => void;
 }
 
-/**
- * The side of the demo's controls, CSS pixels: `HudPanel.tsx`
- * §`CONTROL_MINIMUM_PIXELS`, the ride HUD's. Written out because importing
- * `HudPanel.tsx` bundles the ride's room and instance modules, which
- * `tools/demo/forbidden-modules.ts` refuses; `DemoPage.test.tsx` holds the two
- * equal.
- */
-export const DEMO_CONTROL_PIXELS = 72;
+/** What the HUD's two controls say on the demo. */
+const DEMO_LABELS = { resume: 'Play', end: 'Stop' } as const;
 
-const CONTROL_SIZE = { minWidth: DEMO_CONTROL_PIXELS, minHeight: DEMO_CONTROL_PIXELS };
+/** What the demo says on screen about whose numbers these are — #1650. */
+export const DEMO_LABEL = 'Demo: scripted riders, not a real ride';
+
+/** What the HUD reads, refreshed with every published snapshot. */
+interface HudView {
+  readonly state: GameState;
+  readonly sensors: GameSensors;
+  readonly profile: RouteProfile;
+  readonly rideSeconds: number;
+}
 
 /** The page. */
 export function DemoPage(props: DemoPageProps) {
@@ -61,6 +84,7 @@ export function DemoPage(props: DemoPageProps) {
   const stageRef = useRef<DemoStage | undefined>(undefined);
   const [status, setStatus] = useState<DemoStatus>(props.reducedMotion ? 'paused' : 'playing');
   const [notice, setNotice] = useState<string | undefined>(undefined);
+  const [hud, setHud] = useState<HudView | undefined>(undefined);
   const { renderer, drawnWorld, frames, reducedMotion, observeInView, publish } = props;
 
   useEffect(() => {
@@ -77,6 +101,12 @@ export function DemoPage(props: DemoPageProps) {
       publish: (snapshot) => {
         setStatus(snapshot.state);
         setNotice(snapshot.notice);
+        setHud({
+          state: player.state,
+          sensors: player.sensors,
+          profile: player.profile,
+          rideSeconds: player.rideMs / 1000,
+        });
         publish(snapshot);
       },
     });
@@ -102,34 +132,57 @@ export function DemoPage(props: DemoPageProps) {
       <h1>On Your Left</h1>
       {query.ok ? (
         <>
-          <div style={{ flex: 1, minHeight: 0 }}>
-            <canvas
-              ref={canvasRef}
-              role="img"
-              aria-label={`A demo ride in the game: the ${query.preset.id} preset, ridden by scripted riders.`}
-              style={{ display: 'block', width: '100%', height: '100%' }}
-            />
+          <p
+            className="oyl-demo__label"
+            style={{
+              background: 'var(--oyl-color-hud-surface)',
+              color: 'var(--oyl-color-hud-ink)',
+              margin: 0,
+              padding: 'var(--oyl-space-xs) var(--oyl-space-sm)',
+            }}
+          >
+            {DEMO_LABEL}
+          </p>
+          <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+            <section
+              className="oyl-game oyl-game--riding"
+              aria-label="Demo ride"
+              // The game's stage, held to this box rather than the viewport.
+              style={{ position: 'absolute' }}
+            >
+              <canvas
+                ref={canvasRef}
+                className="oyl-game__world"
+                role="img"
+                aria-label={`A demo ride in the game: the ${query.preset.id} preset, ridden by scripted riders.`}
+              />
+              {hud === undefined ? null : (
+                <HudCore
+                  state={hud.state}
+                  profile={hud.profile}
+                  cadence={hud.sensors.cadence}
+                  heartRate={hud.sensors.heartRate}
+                  // The ride clock: it stops while the demo is paused.
+                  movingSeconds={hud.rideSeconds}
+                  units="metric"
+                  labels={DEMO_LABELS}
+                  touchLock={false}
+                  // The demo has no pacer: no *Pacer —* (owner, 2026-10-25).
+                  withoutPacer
+                  paused={!playing}
+                  onPause={() => (playing ? stageRef.current?.pause() : stageRef.current?.play())}
+                  onEnd={() => stageRef.current?.stop()}
+                  // The HUD's one live region stays off in the demo (#1650).
+                  announcement=""
+                  routeFigure={
+                    <PlanTrace profile={hud.profile} distance={hud.state.ride.distance} />
+                  }
+                />
+              )}
+            </section>
           </div>
           {/* Mounted before it has text, so a screen reader announces the change. */}
           <p role="status">{notice}</p>
-          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-            <button
-              type="button"
-              className="oyl-hud__control"
-              style={CONTROL_SIZE}
-              onClick={() => (playing ? stageRef.current?.pause() : stageRef.current?.play())}
-            >
-              {playing ? 'Pause' : 'Play'}
-            </button>
-            <button
-              type="button"
-              className="oyl-hud__control"
-              style={CONTROL_SIZE}
-              onClick={() => stageRef.current?.stop()}
-            >
-              Stop
-            </button>
-          </div>
         </>
       ) : (
         <p>{query.message}</p>

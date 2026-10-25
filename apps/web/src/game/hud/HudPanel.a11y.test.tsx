@@ -13,7 +13,8 @@
 import type React from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { HudPanel, CONTROL_MINIMUM_PIXELS } from './HudPanel';
+import { CONTROL_MINIMUM_PIXELS } from './HudCore';
+import { HudPanel } from './HudPanel';
 import { RIDE_SIZE_CLASS } from '../../design/Button';
 import { NO_READING, type HudInput } from './fields';
 import { atStartLine } from '../simulation';
