@@ -3811,6 +3811,36 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     expect(Math.abs(luminance(shadow.far) - luminance(shadow.farOff))).toBeLessThan(4);
   });
 
+  test('#1661 a mapped render wall is grimed 0.3 m above its floor and not 1.5 m up, and neither with -weathering', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { weathering } = await realistic(harnessRun);
+    const rgb = (values: readonly number[]): string => values.map((c) => c.toFixed(0)).join('/');
+    const measured =
+      `a render wall seen from ${weathering.metres.toFixed(0)} m: ${rgb(weathering.near)} 0.3 m ` +
+      `above its floor against ${rgb(weathering.far)} 1.5 m up; ${rgb(weathering.nearOff)} and ` +
+      `${rgb(weathering.farOff)} with -weathering`;
+    testInfo.annotations.push({ type: 'a mapped wall’s weathering', description: measured });
+    console.log(`a mapped wall’s weathering — ${measured}`);
+    const luminance = (values: readonly number[]): number =>
+      0.2126 * (values[0] ?? 0) + 0.7152 * (values[1] ?? 0) + 0.0722 * (values[2] ?? 0);
+    expect(weathering.aimed).toBe(true);
+    for (const values of [weathering.near, weathering.far, weathering.nearOff, weathering.farOff]) {
+      expect(values).toHaveLength(3);
+    }
+    const apart = luminance(weathering.far) - luminance(weathering.near);
+    const apartOff = luminance(weathering.farOff) - luminance(weathering.nearOff);
+    // The grime takes at least 16 % of the light at 0.3 m on the youngest
+    // building (`WEATHERING.splash`), which AgX draws at about 40 % of its
+    // size; the tile-breaking noise moves either reading a level or two.
+    expect(apart).toBeGreaterThan(8);
+    // THE CONTROL: with the term out of the program, main's 0.4 m band at the
+    // foot is all that darkens the lower place, by a few levels ...
+    expect(apartOff).toBeLessThan(6);
+    // ... and the grime is what more than that is, past the gate's tolerance of 4.
+    expect(apart - apartOff).toBeGreaterThan(4);
+  });
+
   test('#1586 a town’s edge is drawn when the fields beyond it fill the structure cap', async ({
     harnessRun,
   }, testInfo) => {

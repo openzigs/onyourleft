@@ -89,6 +89,7 @@ import {
   realisticTextureReport,
   setRealisticTrees,
   threeGameRenderer,
+  weatheringOf,
   windowRevealsOf,
 } from '../src/game/three-renderer';
 import {
@@ -104,6 +105,7 @@ import {
   urbanClassWithLevers,
   windowRevealsWithLevers,
   overhangShadowsWithLevers,
+  weatheringWithLevers,
   countrysideWithLevers,
   type Layer,
   type Lever,
@@ -448,6 +450,9 @@ async function run(): Promise<void> {
   // #1658's cost pair: the mapped walls without the sun's shadow under their
   // eaves, the term out of the facade's program, as the reveals' is.
   overhangShadowsOf(view, overhangShadowsWithLevers(config.leversOff));
+  // #1661's cost pair: the mapped facades without their weathering, the term
+  // out of both of the facade's programs, as the shadows' is.
+  weatheringOf(view, weatheringWithLevers(config.leversOff));
   // #1274's by-eye pair: a steep bank in ambientCG's rock face, or — the crag
   // off — in the scree's photograph, as it was. The ground's material is built
   // with the realistic belts, so this too is applied again after a rung change.

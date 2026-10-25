@@ -378,7 +378,7 @@ export const FACADE_RAILING = -5;
  *   than #1581's casements), {@link STYLE_SHUTTERS}, {@link STYLE_EAVES} (an
  *   overhanging roof shades the wall's top) and
  *   {@link STYLE_BRICK_FOUNDATION} (a clapboard wall's foundation band is
- *   brick, not block).
+ *   brick, not block); since #1661 {@link STYLE_FLAT_ROOF} (a parapet above).
  * - **`width`**: a windowed wall's bay, in metres — what pairs its windows;
  *   a dormer's or a garage's face's width.
  * - **`extra`**: a windowed wall's picture-window bay on the ground storey,
@@ -427,6 +427,13 @@ export const STYLE_BRICK_FOUNDATION = 8;
  * its door's face a shop's glazed door in a recess. @see STYLE_FLOATS
  */
 export const STYLE_COMMERCIAL = 16;
+/**
+ * `flags`: a wall under a flat roof's parapet — #1661, where the parapet's
+ * drip streaks it (`facade.ts` §`WEATHERING`). A gable end carries no
+ * {@link STYLE_EAVES} either, so the want of that flag does not say the roof
+ * is flat. Bit **64**: 32 is #1636's. @see STYLE_FLOATS
+ */
+export const STYLE_FLAT_ROOF = 64;
 
 /** What a plan is clad in — #1588. */
 export interface FootprintCladding {
@@ -3432,7 +3439,7 @@ function planFootprint(
   const flags =
     (residential ? STYLE_SASH : 0) +
     (residential && share(STREAM_SHUTTERS) < SHUTTER_SHARE ? STYLE_SHUTTERS : 0) +
-    (roof === 'flat' ? 0 : STYLE_EAVES) +
+    (roof === 'flat' ? STYLE_FLAT_ROOF : STYLE_EAVES) +
     (brickFoundation ? STYLE_BRICK_FOUNDATION : 0) +
     (use === 'commercial' ? STYLE_COMMERCIAL : 0);
   const wallStyle: Style = [wallClad, flags, 0, -1];

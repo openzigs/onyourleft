@@ -23,6 +23,7 @@ import {
   urbanClassWithLevers,
   windowRevealsWithLevers,
   overhangShadowsWithLevers,
+  weatheringWithLevers,
 } from './config';
 import { ANCHOR_KINDS, HOLIDAY_DECORATIONS } from '../../src/game/decorations';
 import { PLACES } from '../../src/demo/synthetic-road';
@@ -196,6 +197,28 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     expect(harness).toContain(
       'overhangShadowsOf(view, overhangShadowsWithLevers(config.leversOff));',
     );
+  });
+
+  it('builds the mapped facades’ weathering, as the product does, unless #1661’s lever takes it out', () => {
+    expect(LEVERS).toContain('weathering');
+    expect(weatheringWithLevers([])).toBe(true);
+    // No OTHER lever touches it.
+    expect(weatheringWithLevers(LEVERS.filter((lever) => lever !== 'weathering'))).toBe(true);
+    expect(weatheringWithLevers(parseConfig('?levers=-weathering').leversOff)).toBe(false);
+    expect(configQuery(parseConfig('?town=mixed&levers=-weathering'))).toBe(
+      `?levers=${encodeURIComponent('-weathering')}&town=mixed`,
+    );
+    // And #1658's and #1659's levers are not this one.
+    expect(overhangShadowsWithLevers(parseConfig('?levers=-weathering').leversOff)).toBe(true);
+    expect(windowRevealsWithLevers(parseConfig('?levers=-weathering').leversOff)).toBe(true);
+  });
+
+  it('hands #1661’s parsed lever to the owner’s page, which is where it is wired', () => {
+    const harness = readFileSync(
+      fileURLToPath(new URL('../realistic-harness.ts', import.meta.url)),
+      'utf8',
+    );
+    expect(harness).toContain('weatheringOf(view, weatheringWithLevers(config.leversOff));');
   });
 
   it('plans the town with its urban class, as the press does, unless #1634’s lever takes it out', () => {
