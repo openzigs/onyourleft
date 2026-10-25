@@ -81,6 +81,7 @@ import {
 import { FOUNDATION_METRES } from './buildings';
 import { landClassMask } from './land-class';
 import { nearestOnRoadSegments, roadSegmentsNear, type BesideTheRoad } from './road-grid';
+import { rectanglesOf } from './rectilinear-roofs';
 import { northRoute } from './route-fixtures-testing';
 import { corridorOrigin, ROAD_WIDTH_METRES, type CorridorOrigin } from './terrain';
 import type { RouteProfile } from '@onyourleft/domain';
@@ -144,6 +145,9 @@ const residential = town.filter((plan) =>
   verticesOf(plan, 'wall').some((vertex) => (vertex.flags & STYLE_SASH) !== 0),
 );
 const pitched = town.filter((plan) => plan.roof !== 'flat');
+
+/** Whether a plan's roof is #1660's, over 2 or 3 rectangles. */
+const split = (plan: FootprintPlan): boolean => (rectanglesOf(plan.footprint)?.length ?? 1) > 1;
 
 describe('the US sash window — #1588, facade.ts', () => {
   /** A residential wall's style: sash, a bay of `width` metres, no picture window. */
@@ -397,6 +401,8 @@ describe('the plans are clad — #1588, over the mixed town', () => {
           expect(marked).toBe(0);
           continue;
         }
+        // #1660's split roofs read each wall against its own rectangle: `split-roofs.test.ts`.
+        if (split(plan)) continue;
         const { ux, uz } = minimumAreaRectangle(plan.footprint);
         const a = quad.find((vertex) => vertex.u === 0) as Vertex;
         const b = quad.find((vertex) => vertex.u > 0) as Vertex;
@@ -494,7 +500,8 @@ describe('the plans are clad — #1588, over the mixed town', () => {
 
 describe('gutters, a downpipe and dormers — #1588', () => {
   it('hangs a gutter under each long eave of every residential pitched roof, and a downpipe to the ground', () => {
-    const houses = pitched.filter((plan) => residential.includes(plan));
+    // #1660's split roofs hang theirs on the largest rectangle: `split-roofs.test.ts`.
+    const houses = pitched.filter((plan) => residential.includes(plan) && !split(plan));
     expect(houses.length).toBeGreaterThan(30);
     for (const plan of houses) {
       const rectangle = minimumAreaRectangle(plan.footprint);

@@ -58,6 +58,7 @@ import { FOUNDATION_METRES } from './buildings';
 import { landClassMask, NO_LAND_CLASS, type LandClassMask } from './land-class';
 import { ROAD_CLEARANCE_METRES, terrainHeightAt } from './landform';
 import { REALISTIC_TRIANGLES } from './realistic-budget';
+import { rectanglesOf } from './rectilinear-roofs';
 import { nearestOnRoadSegments, roadSegmentsNear, type BesideTheRoad } from './road-grid';
 import { hairpinRoute, northRoute } from './route-fixtures-testing';
 import { scatterSeed } from './scatter';
@@ -606,10 +607,11 @@ describe('the roof rule — P-11', () => {
     ).toBeCloseTo(1, 2);
   });
 
-  it('puts a flat roof on an L of a like area, and on a 30 m tower', () => {
-    expect(planned('ell').roof).toBe('flat');
+  it('puts a flat roof on a 30 m tower, and since #1660 pitches an L of a like area', () => {
+    expect(planned('ell').roof).not.toBe('flat');
     expect(planned('tower').roof).toBe('flat');
-    expect(planned('ell').triangles.parapet.length).toBeGreaterThan(0);
+    expect(planned('tower').triangles.parapet.length).toBeGreaterThan(0);
+    expect(planned('ell').triangles.parapet).toHaveLength(0);
     expect(planned('gable').triangles.parapet).toHaveLength(0);
   });
 
@@ -659,7 +661,9 @@ describe('the surfaces — #1540’s table, with #1548’s swap', () => {
     expect(planned('tower').surfaces).toStrictEqual({ wall: 'concrete', roof: 'flat-roof' });
     expect(planned('commercial').surfaces.wall).toBe('render');
     expect(planned('industrial').surfaces.wall).toBe('corrugated');
-    expect(planned('barn').surfaces).toStrictEqual({ wall: 'planks', roof: 'flat-roof' });
+    // #1660: the L-shaped barn is pitched now, so the table dresses it as a pitched farm building.
+    expect(planned('barn').surfaces.wall).toBe(wallSurfaceOf('farmland', 2, 'gable', 0));
+    expect(planned('barn').surfaces.roof).not.toBe('flat-roof');
     expect(planned('farmhouse').surfaces.wall).toBe('brick');
     expect(['roof-tiles', 'slate']).toContain(planned('gable').surfaces.roof);
     const { plans } = footprintPlans(fixture.corridor, mask, fixture.profile, fixture.origin);
@@ -849,8 +853,9 @@ describe('the shape’s detail — #1581, over the mixed town', () => {
     for (const plan of pitched) {
       const eaves = eavesOf(plan);
       const above = verticesOf(plan, 'wall').filter(([, y]) => (y as number) > eaves + 1e-3);
+      // #1660: two a rectangle, and an L's roof is two.
       if (plan.roof === 'hip') expect(above).toStrictEqual([]);
-      else expect(above).toHaveLength(2);
+      else expect(above).toHaveLength(2 * (rectanglesOf(plan.footprint)?.length ?? 1));
     }
   });
 
@@ -862,6 +867,8 @@ describe('the shape’s detail — #1581, over the mixed town', () => {
       const low = Math.min(...roof.map(([, y]) => y as number));
       const fall = EAVES_OVERHANG_METRES * Math.tan((plan.pitchDegrees * Math.PI) / 180);
       expect(low).toBeCloseTo(eaves - fall, 3);
+      // #1660's split roofs reach past their own rectangles, not this one: `split-roofs.test.ts`.
+      if ((rectanglesOf(plan.footprint)?.length ?? 1) > 1) continue;
       // And the roof's reach past the footprint's rectangle is the overhang.
       const rectangle = minimumAreaRectangle(plan.footprint);
       let reach = 0;

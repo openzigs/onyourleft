@@ -56,22 +56,16 @@ import {
   type WorldQualityState,
 } from '../src/game/quality';
 import { realisticWorldNotice, type RealisticWorldOutcome } from '../src/game/realistic-assets';
-import {
-  FOOTPRINT_MAX_VERTICES,
-  footprintPlans,
-  mappedTown,
-} from '../src/game/footprint-buildings';
+import { mappedTown } from '../src/game/footprint-buildings';
 import {
   countrysideFixture,
   mixedTownFixture,
   richmondStreetFixture,
   terraceStreetFixture,
 } from '../src/game/footprint-fixtures-testing';
-import { landClassMask } from '../src/game/land-class';
 import { mappedBuildingsOf } from '../src/game/mapped-buildings';
 import type { SceneFrame } from '../src/game/port';
 import { corridorOrigin } from '../src/game/terrain';
-import { NO_URBAN_CLASS, urbanClassMap } from '../src/game/urban-class';
 import { deviceToday } from '../src/game/season';
 import { routeHemisphere, routeLatitudeMagnitude } from '../src/game/world';
 import {
@@ -102,7 +96,6 @@ import {
   firPrepassWithLevers,
   surfacesWithLevers,
   treesWithLevers,
-  urbanClassWithLevers,
   windowRevealsWithLevers,
   overhangShadowsWithLevers,
   countrysideWithLevers,
@@ -121,6 +114,7 @@ import {
   routeDigest,
   villageRoute,
 } from '../src/demo/synthetic-road';
+import { plannedTown } from './realistic/town';
 import { frameCensus, type FrameCensus } from './realistic/village';
 
 /** How long the scene runs before anything is sampled: shader compiles, first uploads. */
@@ -384,19 +378,8 @@ async function run(): Promise<void> {
   publish({ routeDigest: routeDigest(profile) });
   const town = ((): Parameters<typeof rideFrame>[0]['town'] => {
     if (mixed === undefined) return undefined;
-    const land = landClassMask(mixed.corridor);
-    // #1634: and its urban class, as the press builds it, unless the lever is off.
-    const urban = urbanClassWithLevers(config.leversOff)
-      ? urbanClassMap(mixed.corridor, land, profile)
-      : NO_URBAN_CLASS;
-    const { plans } = footprintPlans(
-      mixed.corridor,
-      land,
-      profile,
-      origin,
-      FOOTPRINT_MAX_VERTICES,
-      urban,
-    );
+    // #1634's urban class and #1660's split roofs, as the press builds them, unless a lever is off.
+    const { land, plans } = plannedTown(mixed, config.leversOff);
     return {
       corridor: mixed.corridor,
       land,

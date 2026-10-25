@@ -62,6 +62,21 @@
  * footprint can have forty walls, and the openings `buildings.ts` cuts would
  * not fit in {@link FOOTPRINT_MAX_TRIANGLES}.
  *
+ * ## Split roofs (#1660, the owner's ruling (b) of 2026-10-24)
+ *
+ * The rectangularity gate is not the only way to a pitched roof: a footprint
+ * that snaps to 1 to 3 rectangles (`rectilinear-roofs.ts` §`rectanglesOf`) —
+ * an L, a T, a U, a Z — passes it, and its roof is one pitched roof a
+ * rectangle, at one pitch from one eaves, gable or hip as one draw says for
+ * them all. Same-pitch roofs over overlapping rectangles meet in the right
+ * valleys by the depth test alone. The gutters, the downpipe and the dormers
+ * are the largest rectangle's; the chimney stands on the highest ridge. A
+ * one-rectangle split is the minimum-area rectangle where it is that to a
+ * centimetre, so a rectangle plans as before, and its snapped self otherwise,
+ * so no roof hangs over a notch. A split roof that would not fit the caps is
+ * planned flat, never truncated. `?levers=-split-roofs`
+ * ({@link FootprintPlanOptions}) is `main`'s rule.
+ *
  * ## The detail (#1581, the owner's ruling of 2026-10-22)
  *
  * #1549 drew these plans as boxes, and the owner's verdict was that they
@@ -225,6 +240,7 @@ import { MASONRY_TINT, packedInstanceTint } from './instance-tint';
 import { kindAt, type LandClass, type LandClassMask } from './land-class';
 import { ROAD_CLEARANCE_METRES, terrainHeightAt } from './landform';
 import { REALISTIC_TRIANGLES } from './realistic-budget';
+import { rectanglesOf, type Rectangle } from './rectilinear-roofs';
 import type { StructureSurface } from './realistic-assets';
 import {
   nearestOnRoadSegments,
@@ -1094,16 +1110,6 @@ function convexHull(ring: Ring): [number, number][] {
   return [...lower.slice(0, -1), ...upper.slice(0, -1)];
 }
 
-/** A rectangle: its centre, its long axis (unit) and its half-lengths along and across it. */
-interface Rectangle {
-  readonly cx: number;
-  readonly cz: number;
-  readonly ux: number;
-  readonly uz: number;
-  readonly halfLong: number;
-  readonly halfShort: number;
-}
-
 /**
  * The minimum-area rectangle around a ring — by its hull's edges, one of
  * which a minimum-area rectangle always has a side along — with its long axis
@@ -1511,6 +1517,43 @@ interface Windows {
    * stands the gable's triangle on its top and so has no eaves over it (#1658).
    */
   readonly gableAxis?: readonly [x: number, z: number];
+  /**
+   * #1660: a split gable roof's rectangles. A wall is then a gable end where
+   * it stands on no rectangle's long side ({@link gableEndAmong}).
+   */
+  readonly gableRectangles?: readonly Rectangle[];
+}
+
+/** How near a wall must stand to a rectangle's side to be under its eaves: **0.5 m** (#1660). */
+const EAVES_SIDE_METRES = 0.5;
+
+/**
+ * Whether the wall from `(ax, az)` to `(bx, bz)` is a gable end of a split
+ * gable roof — #1660: it runs along no rectangle's long side, so no eaves
+ * overhang it. A wall that is one wing's end and another's side (an L's
+ * outer wall, where the wings meet) is under the side's eaves.
+ */
+function gableEndAmong(
+  rectangles: readonly Rectangle[],
+  ends: readonly [ax: number, az: number, bx: number, bz: number],
+): boolean {
+  const [ax, az, bx, bz] = ends;
+  const length = Math.hypot(bx - ax, bz - az);
+  const mx = (ax + bx) / 2;
+  const mz = (az + bz) / 2;
+  for (const each of rectangles) {
+    const along = Math.abs(((bx - ax) * each.ux + (bz - az) * each.uz) / length);
+    if (along < Math.SQRT1_2) continue;
+    const a = (mx - each.cx) * each.ux + (mz - each.cz) * each.uz;
+    const c = -(mx - each.cx) * each.uz + (mz - each.cz) * each.ux;
+    if (
+      Math.abs(Math.abs(c) - each.halfShort) <= EAVES_SIDE_METRES &&
+      Math.abs(a) <= each.halfLong + EAVES_SIDE_METRES
+    ) {
+      return false;
+    }
+  }
+  return true;
 }
 
 /** How {@link ringWalls} draws. */
@@ -1662,10 +1705,13 @@ function wallPiece(
   ];
   if (windows !== undefined) {
     const axis = windows.gableAxis;
-    // A gable end (its edge across the long axis) carries no eaves flag.
+    // A gable end (its edge across the long axis) carries no eaves flag; since #1660 a split
+    // roof's is one under no rectangle's long side.
     const gableEnd =
-      axis !== undefined &&
-      Math.abs(((bx - ax) * axis[0] + (bz - az) * axis[1]) / length) < Math.SQRT1_2;
+      windows.gableRectangles === undefined
+        ? axis !== undefined &&
+          Math.abs(((bx - ax) * axis[0] + (bz - az) * axis[1]) / length) < Math.SQRT1_2
+        : gableEndAmong(windows.gableRectangles, ends);
     const flags =
       gableEnd && Math.floor(windows.flags / STYLE_EAVES) % 2 === 1
         ? windows.flags - STYLE_EAVES
@@ -2991,7 +3037,8 @@ const porchSegments: number[] = [];
 
 /**
  * Whether a footprint's roof is pitched — #1540's P-11: small, rectangular,
- * low, and residential or farmland; and since #1635 not terraced, since a
+ * low, and residential or farmland — since #1660 rectangular or 1 to 3
+ * rectangles; and since #1635 not terraced, since a
  * terraced roof is flat behind its parapet and cornice. One named rule, so a
  * later one extends it rather than copying it.
  */
@@ -3001,12 +3048,14 @@ function pitchedFootprint(footprint: {
   readonly wallHeight: number;
   readonly use: FootprintUse;
   readonly terraced: boolean;
+  /** #1660: whether it is 1 to 3 rectangles ({@link rectanglesOf}), which replaces the rectangularity gate. */
+  readonly rectilinear: boolean;
 }): boolean {
-  const { area, rectangularity, wallHeight, use, terraced } = footprint;
+  const { area, rectangularity, wallHeight, use, terraced, rectilinear } = footprint;
   return (
     !terraced &&
     area <= FOOTPRINT_GABLE_MAX_AREA &&
-    rectangularity >= FOOTPRINT_GABLE_MIN_RECTANGULARITY &&
+    (rectilinear || rectangularity >= FOOTPRINT_GABLE_MIN_RECTANGULARITY) &&
     wallHeight <= FOOTPRINT_GABLE_MAX_EAVES_METRES &&
     (use === 'residential' || use === 'farmland')
   );
@@ -3225,6 +3274,7 @@ export function footprintPlans(
   origin: CorridorOrigin,
   maxVertices: number = FOOTPRINT_MAX_VERTICES,
   urban?: UrbanClassMap,
+  options: FootprintPlanOptions = {},
 ): { readonly plans: readonly FootprintPlan[]; readonly verdicts: FootprintVerdicts } {
   const seed = scatterSeed(profile);
   const counts: Record<FootprintVerdict, number> = {
@@ -3281,6 +3331,7 @@ export function footprintPlans(
         maxVertices,
         { grid: others, own: index, porches, driveways },
         party.get(index) ?? NO_PARTY_WALLS,
+        { split: options.splitRoofs ?? true, flat: false },
       ),
     );
   }
@@ -3821,6 +3872,26 @@ function measureFootprint(
   };
 }
 
+/**
+ * How a plan's roof may be split — #1660: `split`, the product's, roofs an L,
+ * T, U or Z over its rectangles ({@link rectanglesOf}); `flat` is the
+ * fallback for a split roof that would not fit the caps.
+ */
+interface RoofSplitting {
+  readonly split: boolean;
+  readonly flat: boolean;
+}
+
+/** The planner's switches — the realistic page's levers; the product takes the defaults. */
+export interface FootprintPlanOptions {
+  /**
+   * #1660: L-, T-, U- and Z-shaped footprints pitched over their 2–3
+   * rectangles; `true` by default. Off is `main`'s rule, every footprint below
+   * {@link FOOTPRINT_GABLE_MIN_RECTANGULARITY} flat (`?levers=-split-roofs`).
+   */
+  readonly splitRoofs?: boolean;
+}
+
 /** One measured footprint's plan — the second half of {@link measureFootprint}. */
 function planFootprint(
   measured: Measured,
@@ -3836,6 +3907,7 @@ function planFootprint(
     readonly driveways: RingGrid;
   },
   party: readonly PartyWall[],
+  roofing: RoofSplitting,
 ): FootprintPlan {
   const { building, centroid, drawn, road, segments, urbanClass, lowest, area, part, use } =
     measured;
@@ -3850,7 +3922,25 @@ function planFootprint(
   const rectangularity = rectangle.area > 0 ? Math.abs(signedArea(drawn)) / rectangle.area : 0;
   // #1635: a terraced footprint — one with a party wall — is flat, whatever the gable rule says.
   const terraced = party.length > 0;
-  const pitched = pitchedFootprint({ area, rectangularity, wallHeight, use, terraced });
+  // #1660: an L, T, U or Z as 2 or 3 rectangles, each pitched; a rectangle as its snapped self.
+  const split = roofing.split && !roofing.flat ? rectanglesOf(drawn) : undefined;
+  const pitched =
+    !roofing.flat &&
+    pitchedFootprint({
+      area,
+      rectangularity,
+      wallHeight,
+      use,
+      terraced,
+      rectilinear: split !== undefined,
+    });
+  // The rectangles a pitched roof is built over, the largest first. A split of one is a
+  // rectangle or a near-rectangle, which plans as before on the minimum-area rectangle;
+  // two or three is the notch fix.
+  const roofRectangles: readonly Rectangle[] =
+    split === undefined || split.length === 1 ? [rectangle] : split;
+  // Gutters, the downpipe, the dormers and the chimney: on the largest only.
+  const main = roofRectangles[0] as Rectangle;
   const shared: {
     readonly party?: { readonly walls: readonly PartyWall[]; readonly eaves: number };
   } = terraced ? { party: { walls: party, eaves } } : {};
@@ -4049,24 +4139,19 @@ function planFootprint(
     clad: wallClad,
     flags,
     picture,
-    ...(roof === 'gable' ? { gableAxis: [rectangle.ux, rectangle.uz] as const } : {}),
+    ...(roof === 'gable' ? { gableAxis: [main.ux, main.uz] as const } : {}),
+    ...(roof === 'gable' && roofRectangles.length > 1 ? { gableRectangles: roofRectangles } : {}),
   };
   // The slope the gutters' downpipe and the dormers are on: the one facing the front.
   const facing =
-    frontFrame === undefined
-      ? 1
-      : frontFrame.nx * -rectangle.uz + frontFrame.nz * rectangle.ux >= 0
-        ? 1
-        : -1;
+    frontFrame === undefined ? 1 : frontFrame.nx * -main.uz + frontFrame.nz * main.ux >= 0 ? 1 : -1;
   // The downpipe's end: away from the garage, where it is on that slope's wall.
   const garageEnd =
     garage === undefined
       ? share(STREAM_GARAGE_END) < 0.5
         ? 1
         : -1
-      : (garage.plan.x - rectangle.cx) * rectangle.ux +
-            (garage.plan.z - rectangle.cz) * rectangle.uz >=
-          0
+      : (garage.plan.x - main.cx) * main.ux + (garage.plan.z - main.cz) * main.uz >= 0
         ? 1
         : -1;
   const withDormers =
@@ -4125,26 +4210,36 @@ function planFootprint(
         drew.cornice = true;
       }
     } else {
-      const ridge = pitchedRoof(writing, rectangle, [eaves, floor], roof, pitchDegrees, {
+      const ridge = pitchedRoof(writing, main, [eaves, floor], roof, pitchDegrees, {
         roof: roofStyle,
         gable: wallStyle,
         ...(residential
           ? { gutters: { side: facing, end: -garageEnd, ground: base + FOUNDATION_METRES } }
           : {}),
       });
+      // #1660: every other rectangle at the same pitch and eaves, and wearing the same shape.
+      // The chimney stands on the highest ridge — the widest rectangle's — so it clears them all.
+      let stack = { rectangle: main, ridge };
+      for (const other of roofRectangles.slice(1)) {
+        const its = pitchedRoof(writing, other, [eaves, floor], roof, pitchDegrees, {
+          roof: roofStyle,
+          gable: wallStyle,
+        });
+        if (its.top > stack.ridge.top) stack = { rectangle: other, ridge: its };
+      }
       if (withChimney) {
         const end = share(STREAM_CHIMNEY) < CHIMNEY_SHARE / 2 ? 1 : -1;
-        chimney(writing.chimney, rectangle, ridge, [eaves, floor], end);
+        chimney(writing.chimney, stack.rectangle, stack.ridge, [eaves, floor], end);
       }
       if (withDormers) {
         // Clear of the chimney: one in the middle, or two either side of it.
-        const reach = Math.min(ridge.half, rectangle.halfLong);
+        const reach = Math.min(ridge.half, main.halfLong);
         const count =
           reach >= DORMER_TWO_REACH_METRES ? 2 : reach >= DORMER_ONE_REACH_METRES ? 1 : 0;
         if (count > 0) {
           drew.dormers = dormers(
             writing,
-            rectangle,
+            main,
             [eaves, floor],
             ridge,
             pitchDegrees,
@@ -4189,6 +4284,13 @@ function planFootprint(
   let built = build(holed, true);
   if (!fits(built.writing) && built.drew.cornice) built = build(holed, false);
   if (holed && !fits(built.writing)) built = build(false, false);
+  // #1660: a split roof that will not fit falls back to the flat one — never truncated.
+  if (roofRectangles.length > 1 && roof !== 'flat' && !fits(built.writing)) {
+    return planFootprint(measured, land, profile, origin, seed, maxVertices, others, party, {
+      ...roofing,
+      flat: true,
+    });
+  }
   const { writing, drew } = built;
 
   const triangles = Object.fromEntries(

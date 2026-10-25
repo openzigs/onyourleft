@@ -832,6 +832,9 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         party walls (`partyWallsOf`, an edge grid, never all
                         pairs) drawn only above a lower neighbour, plain, and
                         a flat roof under a cornice (`town=terrace`);
+                        since #1660 an L, T, U or Z pitched over its 2–3
+                        rectangles (`rectilinear-roofs.ts`), flat where a
+                        split would pass the caps (`-split-roofs`);
                         ≤ 640 triangles
                         by role, built ONCE at ride start by `GameView`, and
                         drawn by #1549 (`mapped-buildings.ts`). Since #1550 the
