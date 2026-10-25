@@ -466,6 +466,8 @@ export interface FootprintPlan {
   /** Metres, local: the plinth's foot — or, for a part on a `min_height`, its base. */
   readonly base: number;
   readonly storeys: number;
+  /** Metres, local: where the walls end and the roof starts. #1657's ground blob is cast from it. */
+  readonly eaves: number;
   readonly roof: FootprintRoof;
   /** A pitched roof's pitch, degrees, seeded ({@link ROOF_PITCHES_DEGREES}); 0 on a flat one. */
   readonly pitchDegrees: number;
@@ -3594,6 +3596,7 @@ function planFootprint(
     footprint: Float32Array.from(drawn),
     base,
     storeys,
+    eaves,
     roof,
     pitchDegrees,
     surfaces: { wall: wallSurface, roof: roofSurface },

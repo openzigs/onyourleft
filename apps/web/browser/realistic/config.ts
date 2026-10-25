@@ -173,6 +173,14 @@ export type Layer = (typeof LAYERS)[number];
  *   tablet's COST pair and the owner's BY-EYE pair. Pair it with `town=mixed`
  *   or `town=richmond`: on `route.ts`' road there is no mapped building. The
  *   product always builds the reveals.
+ *
+ * - `mapped-blobs` — #1657: the ground blob under every drawn mapped building
+ *   (`three-renderer.ts` §`MappedBuildingBelt.grounded`). Off hands no mapped
+ *   building to the blob belt, which is the picture and the cost before
+ *   #1657: the tablet's COST pair (two triangles a building, and the blended
+ *   ground under it) and the owner's BY-EYE pair. Only a town has mapped
+ *   buildings, so pair it with `town=mixed`; on `route.ts`' road the two are
+ *   the same picture. The product always grounds them.
  */
 export const LEVERS = [
   'air',
@@ -187,6 +195,7 @@ export const LEVERS = [
   'hedge-breaks',
   'land-boundaries',
   'land-planting',
+  'mapped-blobs',
   'people',
   'road-wear',
   'settlement-clearing',

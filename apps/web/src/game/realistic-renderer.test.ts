@@ -58,10 +58,12 @@ import { corridorOrigin, roadCorridor } from './terrain';
 import { worldStyle } from './world';
 import {
   HARD_SWAP_TREE_LEVELS,
+  MAPPED_BUILDING_MAX,
   REALISTIC_BICYCLE_TRIANGLES,
   REALISTIC_GROUND_BLOBS,
   REALISTIC_NEAR_MESHES,
   REALISTIC_STREET_TRIANGLES,
+  REALISTIC_STRUCTURE_ITEMS,
   REALISTIC_TREE_LEVELS,
 } from './realistic-budget';
 import { bandFade, treeSlots, type TreeLevels } from './tree-levels';
@@ -2882,7 +2884,10 @@ describe('the vegetation belt names what it drew as meshes, for the ground blobs
     expect(byKind(0)).toEqual([10, 18, 25, 35, 45, 55]);
     expect(byKind(6)).toEqual([23, 30, 37, 44, 51, 58, 65, 72]);
     expect(byKind(-6)).toEqual([10, 16, 22, 28, 34, 40, 46, 52, 58, 64, 70, 76]);
-    expect(list.count).toBe(REALISTIC_GROUND_BLOBS - 36);
+    // The belt's room less the structures' and, since #1657, the mapped buildings'.
+    expect(list.count).toBe(
+      REALISTIC_GROUND_BLOBS - REALISTIC_STRUCTURE_ITEMS - MAPPED_BUILDING_MAX,
+    );
     for (const caster of list.casters.slice(0, list.count)) {
       expect(caster.round).toBe(true);
       expect(caster.halfAlong).toBe(caster.halfAcross);
