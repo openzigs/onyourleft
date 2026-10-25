@@ -9178,7 +9178,11 @@ function sideRoadGeometry(roads: readonly SideRoad[]): BufferGeometry {
  * its fullest has 16 lamp posts and 8 bollards (`streets.ts` §`furnish`), a
  * frame holds two villages at most, and only what is within
  * `streets.ts` §`FURNITURE_DRAW_METRES` of the camera is drawn — so the cut
- * past this never binds on a village the rules built.
+ * past this never binds on a village the rules built. Since #1637 a city
+ * centre's street stands a lamp post every 16 m on each side, about 30 in
+ * reach, and its bollards only at side roads' mouths: `city-streetscape.test.ts`
+ * holds every kind under this on #1540's dense town read as a city centre,
+ * with a side road every 60 m. Not raised.
  */
 export const FURNITURE_CAPACITY = 64;
 

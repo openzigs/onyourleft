@@ -87,6 +87,11 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     expect(configQuery(parseConfig('?town=countryside&levers=-land-planting'))).toBe(
       '?levers=-land-planting&town=countryside',
     );
+    // #1637: the city centre, whose before is its urban class off.
+    expect(parseConfig('?town=city').town).toBe('city');
+    expect(configQuery(parseConfig('?town=city&levers=-urban-class'))).toBe(
+      '?levers=-urban-class&town=city',
+    );
   });
 
   it('switches #1542’s three changes off one by one, and none unless asked', () => {

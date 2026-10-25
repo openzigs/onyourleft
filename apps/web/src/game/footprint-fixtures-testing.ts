@@ -471,6 +471,56 @@ export function richmondStreetFixture(latitude = FIXTURE_LATITUDE): {
 }
 
 /**
+ * #1637's fixture: a city centre along 1 km of level road from 1 000 m, both
+ * sides — commercial land 260 m either side, and blocks 20 × 20 m every 25 m
+ * along and across, 15 m (five storeys) high, from 32 m out to 252 m, so
+ * #1633 reads it as `city-centre` (about 57 % coverage, a median of five
+ * storeys) and the first 32 m beside the road is built-up land with no
+ * footprint: the frontage #1637's terraced blocks fill. A park 40 m along by
+ * 56 m deep beside the road on the right from 1 400 m, which no block may
+ * stand on. No street is mapped. `use` is the land's: `residential` is the
+ * same blocks on land the map calls houses.
+ */
+export function cityCentreFixture(
+  latitude = FIXTURE_LATITUDE,
+  use: 'commercial' | 'residential' = 'commercial',
+): {
+  readonly profile: RouteProfile;
+  readonly origin: CorridorOrigin;
+  readonly corridor: WorldCorridor;
+} {
+  const profile = northRoute(3_000, () => 10, { latitude });
+  const origin = corridorOrigin(profile);
+  const buildings: BuildingFeature[] = [];
+  for (let along = 1_012.5; along < 2_000; along += 25) {
+    for (let lateral = 42; lateral < 252; lateral += 25) {
+      for (const side of [1, -1]) {
+        buildings.push(
+          buildingBeside(profile, origin, [rectangleBeside(along, side * lateral, 20, 20)], 15),
+        );
+      }
+    }
+  }
+  return {
+    profile,
+    origin,
+    corridor: {
+      routeId: 'city-centre',
+      origin,
+      covered: () => true,
+      coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
+      landUse: [
+        landBeside(profile, origin, 'landuse', use, 1_000, 2_000, -260, 260),
+        landBeside(profile, origin, 'landuse', 'park', 1_400, 1_440, 4, 60),
+      ],
+      buildings,
+      paths: [],
+      streets: [],
+    },
+  };
+}
+
+/**
  * #1542's countryside, for the owner's by-eye pair on the realistic page
  * (`?town=countryside`): from 900 m to 2 100 m of a level road, fields either
  * side with a gap between two of them, a field set back behind open ground, a

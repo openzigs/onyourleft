@@ -106,13 +106,45 @@
  * ({@link DoorPath.walk}). `people.ts` walks them; nothing here places a
  * person.
  *
+ * ## A city centre's street — #1637
+ *
+ * Where the ride's urban class (`urban-class.ts`, #1633) is `city-centre`,
+ * the street is a city's, by {@link CITY_STREET_RULE}: the pavement is
+ * {@link CITY_PAVEMENT_WIDTH_METRES} wide, lamp posts stand every
+ * {@link CITY_LAMP_SPACING_METRES}, and a bench and its bin every
+ * {@link CITY_BENCH_SPACING_METRES} of an unbroken run — about twice as dense
+ * as a village's. Every other class, `unknown` included, is
+ * {@link VILLAGE_STREET_RULE}: today's street, byte for byte.
+ *
+ * A city centre is where map data was read, and no procedural village stands
+ * there (`settlements.ts` §`siteOnMappedLand`), so a city centre's pavements
+ * are laid by a rule of their own: along every stretch of road the class calls
+ * `city-centre`, in pieces {@link CITY_STREET_METRES} long (a whole number of
+ * lamp and bench spacings, so both run on across a piece's end), on both sides —
+ * or, where a sidewalk is mapped beside the road on one side only (#1551), on
+ * that side. ⚠️ Unlike a village's, where the road was read and no sidewalk
+ * is mapped a city's street still has both: a city centre's sidewalks are
+ * rarely mapped as ways of their own, and a downtown street without its
+ * pavements is not one. Each piece is a {@link VillageStreet} with no front paths and no
+ * decorations' anchors. The rules a village's pavement keeps hold unchanged:
+ * never on the carriageway, never on water. It is broken over each mapped side
+ * road's mouth on its own side, with its kerb dropped beside it (#1565), and a
+ * pair of **bollards** stands at each end of a run there — at crossings and
+ * junctions, as #1565's dropped kerbs are; a piece's own ends, which are no
+ * break in the street, have none.
+ *
+ * ⚠️ **No new furniture kind and no new model**: a city's street is the same
+ * four instanced kinds, more of them, inside `three-renderer.ts`
+ * §`FURNITURE_CAPACITY` (#1536's cap, held by `city-streetscape.test.ts` on
+ * #1540's dense town).
+ *
  * Pure, and names no rendering library.
  */
 
 import { distanceOnRoute, elevationAt, type RouteProfile } from '@onyourleft/domain';
 
 import { buildingPlan, isBuiltKind, type BuiltKind } from './buildings';
-import { VILLAGE_MOUTH_HALF_METRES } from './cross-streets';
+import { SIDE_ROAD_WIDTHS, VILLAGE_MOUTH_HALF_METRES, type Junction } from './cross-streets';
 import { villageAnchors, type DecorationAnchor, type DoorOfPlot } from './decorations';
 import { NO_PAVEMENT_DATA, type PavementSide, type PavementSides } from './footways';
 import { terrainHeightAt } from './landform';
@@ -128,6 +160,7 @@ import {
   type Plot,
 } from './settlements';
 import { drawnRoadFrame, ROAD_WIDTH_METRES, type CorridorOrigin } from './terrain';
+import type { UrbanClassMap } from './urban-class';
 import { inWater, waterways } from './waterways';
 
 /** How far from the centreline the kerb's face stands, in metres: the road's own edge, **3.5**. */
@@ -138,6 +171,9 @@ export const KERB_HEIGHT_METRES = 0.12;
 
 /** How wide the pavement is, kerb included, in metres: **2**. */
 export const PAVEMENT_WIDTH_METRES = 2;
+
+/** How wide a city centre's pavement is, kerb included, in metres: **3.5** — #1637. */
+export const CITY_PAVEMENT_WIDTH_METRES = 3.5;
 
 /**
  * How far below the road the pavement's back face reaches, in metres:
@@ -232,6 +268,85 @@ export interface FurnitureItem {
  * spaced evenly about the run's middle and never among the bollards.
  */
 export const LAMP_SPACING_METRES = 24;
+
+/** How far apart a city centre's lamp posts stand, in metres: **16** — #1637, by the same rule. */
+export const CITY_LAMP_SPACING_METRES = 16;
+
+/**
+ * How far apart a city centre's benches stand along an unbroken run, in
+ * metres: **48**, three lamp spacings — #1637: each half-way between two
+ * lamp posts, the first between the first and the second, and its bin beside
+ * it. A village's street has one bench a run, and its crossroads breaks each
+ * side into two runs of about 90 m: one bench in about 90 m of a side, where
+ * a city centre has one in 48 — about twice as dense.
+ */
+export const CITY_BENCH_SPACING_METRES = 48;
+
+/**
+ * How long one piece of a city centre's street is, in metres: **96** —
+ * #1637: six {@link CITY_LAMP_SPACING_METRES}, so the lamp posts of one piece
+ * and the next are one spacing apart, and two {@link CITY_BENCH_SPACING_METRES},
+ * so its benches are too. The pieces start at the route's start; the last is
+ * shorter where the route is not a whole number of them. Short enough that a
+ * frame's pieces cost no more than the two villages' streets
+ * `realistic-budget.ts` §`REALISTIC_STREET_TRIANGLES` counts
+ * ({@link CITY_PAVEMENT_TRIANGLES_PER_PIECE}).
+ */
+export const CITY_STREET_METRES = 96;
+
+/**
+ * The most triangles one piece of a city centre's street can be: **584** —
+ * #1637: both sides, each {@link CITY_STREET_METRES} in
+ * {@link PAVEMENT_STEP_METRES} sections of six triangles and its two ends; a
+ * section dropped over a mouth takes twelve and its break adds four, so a
+ * broken piece is never heavier. A frame's 460 m view overlaps six pieces at
+ * most, 3 504, inside the two villages' pavements and front paths
+ * `realistic-budget.ts` §`REALISTIC_STREET_TRIANGLES` counts (4 288).
+ *
+ * @test-facing held by `city-streetscape.test.ts`
+ */
+export const CITY_PAVEMENT_TRIANGLES_PER_PIECE =
+  2 * (6 * Math.ceil(CITY_STREET_METRES / PAVEMENT_STEP_METRES) + 4);
+
+/** How far from a side road's edge a city's pavement stops, in metres: **0.5** — `cross-streets.ts`' margin. */
+const CITY_MOUTH_MARGIN_METRES = 0.5;
+
+/** How a street is laid: its pavement's width, its lamp posts' spacing and its benches' — #1637. */
+export interface StreetRule {
+  readonly width: number;
+  readonly lampSpacing: number;
+  /** Metres between benches along a run; `0` is #1536's one bench a run. */
+  readonly benchSpacing: number;
+}
+
+/** A village's street, and every class's but a city centre's: #1535's and #1536's. */
+export const VILLAGE_STREET_RULE: StreetRule = Object.freeze({
+  width: PAVEMENT_WIDTH_METRES,
+  lampSpacing: LAMP_SPACING_METRES,
+  benchSpacing: 0,
+});
+
+/** A city centre's street — #1637. @see the header */
+export const CITY_STREET_RULE: StreetRule = Object.freeze({
+  width: CITY_PAVEMENT_WIDTH_METRES,
+  lampSpacing: CITY_LAMP_SPACING_METRES,
+  benchSpacing: CITY_BENCH_SPACING_METRES,
+});
+
+/**
+ * The rule a street is laid by at `along` (any lap's odometer): a city
+ * centre's where `urban` calls it `city-centre`, a village's everywhere else
+ * and wherever there is no class.
+ */
+export function streetRuleAt(
+  profile: RouteProfile,
+  urban: UrbanClassMap | undefined,
+  along: number,
+): StreetRule {
+  return urban !== undefined && urban.classAt(distanceOnRoute(profile, along)) === 'city-centre'
+    ? CITY_STREET_RULE
+    : VILLAGE_STREET_RULE;
+}
 
 /** How far in from the pavement's back edge a lamp post stands, in metres: **0.35**. */
 export const LAMP_SETBACK_METRES = 0.35;
@@ -330,7 +445,11 @@ export const WALK_FROM_KERB_METRES = 0.9;
 
 /** One village's street: which village, where along the road, its pavements and what stands on them. */
 export interface VillageStreet {
-  /** The village's site on the route's first lap: one street per place, whichever lap. */
+  /**
+   * The village's site on the route's first lap: one street per place,
+   * whichever lap. Since #1637 a city centre's street piece is `−1 −` its
+   * piece's index, so the two never share one.
+   */
   readonly wrappedSite: number;
   /** Where its pavements start and end, on the odometer of the lap they were found on. */
   readonly from: number;
@@ -361,18 +480,43 @@ type Known = VillageStreet | null;
  * Every street of each route, by site, built on first sight — per
  * {@link PavementSides} and land-class mask, both of which a ride fixes when
  * it starts: since #1564 a street's front paths stand on the ground the mask
- * levels. @see the header
+ * levels. Since #1637 per urban class and mapped junctions too, which a ride
+ * also fixes when it starts; with no class, under {@link NO_CLASS}. @see the header
  */
 const built = new WeakMap<
-  LandClassMask,
-  WeakMap<PavementSides, WeakMap<RouteProfile, Map<number, Known>>>
+  object,
+  WeakMap<
+    readonly Junction[],
+    WeakMap<LandClassMask, WeakMap<PavementSides, WeakMap<RouteProfile, Map<number, Known>>>>
+  >
 >();
+
+/** The key {@link built} files a street laid with no urban class under. */
+const NO_CLASS = Object.freeze({});
+
+/** No mapped junction: the key {@link built} files a street laid without any under. */
+const NO_JUNCTIONS: readonly Junction[] = Object.freeze([]);
+
+/** `map`'s entry for `key`, made on first ask. */
+function entryOf<K extends object, V>(map: WeakMap<K, V>, key: K, made: () => V): V {
+  let found = map.get(key);
+  if (found === undefined) {
+    found = made();
+    map.set(key, found);
+  }
+  return found;
+}
 
 /**
  * Every village street whose pavements overlap the odometer span
  * `[fromMetres, toMetres)`, each once however many laps of a loop the span
  * covers. The same objects every call, so a renderer can tell "the same
  * streets" from "different ones" by identity.
+ *
+ * Since #1637, with the ride's urban class, every piece of a city centre's
+ * street there too, after the villages (@see the header); `junctions` are the
+ * corridor's mapped ones (`cross-streets.ts` §`mappedJunctions`), over whose
+ * mouths a city's pavement is broken. With no class there are none.
  */
 export function streetsAt(
   profile: RouteProfile,
@@ -382,27 +526,19 @@ export function streetsAt(
   toMetres: number,
   sides: PavementSides = NO_PAVEMENT_DATA,
   land: LandClassMask = NO_LAND_CLASS,
+  urban?: UrbanClassMap,
+  junctions: readonly Junction[] = NO_JUNCTIONS,
 ): readonly VillageStreet[] {
   const { sites, span } = siteSpacing(profile);
   const reach = VILLAGE_METRES / 2 + PLOT_METRES;
   const first = Math.floor((fromMetres - reach) / span);
   // Never more sites than the route has — `settlements.ts` §`settlementsAt`'s bound.
   const last = Math.min(Math.floor((toMetres + reach) / span), first + sites + 1);
-  let byLand = built.get(land);
-  if (byLand === undefined) {
-    byLand = new WeakMap();
-    built.set(land, byLand);
-  }
-  let bySides = byLand.get(sides);
-  if (bySides === undefined) {
-    bySides = new WeakMap();
-    byLand.set(sides, bySides);
-  }
-  let known = bySides.get(profile);
-  if (known === undefined) {
-    known = new Map();
-    bySides.set(profile, known);
-  }
+  const byJunctions = entryOf(built, urban ?? NO_CLASS, () => new WeakMap());
+  const byLand = entryOf(byJunctions, junctions, () => new WeakMap());
+  const bySides = entryOf(byLand, land, () => new WeakMap());
+  const byProfile = entryOf(bySides, sides, () => new WeakMap());
+  const known = entryOf(byProfile, profile, () => new Map<number, Known>());
   const found: VillageStreet[] = [];
   for (let index = first; index <= last; index += 1) {
     const site = siteAt(profile, seed, index);
@@ -411,7 +547,7 @@ export function streetsAt(
     if (siteOnMappedLand(profile, origin, site, land)) continue;
     let street = known.get(site.wrappedSite);
     if (street === undefined) {
-      street = streetOf(profile, origin, seed, site.wrappedSite, index, sides, land);
+      street = streetOf(profile, origin, seed, site.wrappedSite, index, sides, land, urban);
       known.set(site.wrappedSite, street);
     }
     if (street === null || found.includes(street)) continue;
@@ -419,7 +555,141 @@ export function streetsAt(
     const lap = (index - site.wrappedSite) * span;
     if (street.from + lap < toMetres && street.to + lap >= fromMetres) found.push(street);
   }
+  if (urban !== undefined) {
+    cityStreetsAt(
+      profile,
+      origin,
+      seed,
+      fromMetres,
+      toMetres,
+      sides,
+      urban,
+      junctions,
+      known,
+      found,
+    );
+  }
   return found;
+}
+
+/**
+ * #1637: every piece of a city centre's street overlapping `[fromMetres,
+ * toMetres)`, into `found` — each once, whichever lap — built on first sight
+ * into `known` under `−1 −` its piece's index. @see the header
+ */
+function cityStreetsAt(
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  seed: number,
+  fromMetres: number,
+  toMetres: number,
+  sides: PavementSides,
+  urban: UrbanClassMap,
+  junctions: readonly Junction[],
+  known: Map<number, Known>,
+  found: VillageStreet[],
+): void {
+  const total: number = profile.totalDistance;
+  if (!(total > 0)) return;
+  const pieces = Math.ceil(total / CITY_STREET_METRES);
+  const firstLap = profile.loop ? Math.floor(fromMetres / total) : 0;
+  const lastLap = profile.loop ? Math.floor(toMetres / total) : 0;
+  for (let lap = firstLap; lap <= lastLap; lap += 1) {
+    const offset = lap * total;
+    const firstPiece = Math.max(0, Math.floor((fromMetres - offset) / CITY_STREET_METRES));
+    const lastPiece = Math.min(pieces - 1, Math.floor((toMetres - offset) / CITY_STREET_METRES));
+    for (let piece = firstPiece; piece <= lastPiece; piece += 1) {
+      const key = -1 - piece;
+      let street = known.get(key);
+      if (street === undefined) {
+        street = cityStreetOf(profile, origin, seed, piece, sides, urban, junctions);
+        known.set(key, street);
+      }
+      if (street === null || found.includes(street)) continue;
+      if (street.from + offset < toMetres && street.to + offset >= fromMetres) found.push(street);
+    }
+  }
+}
+
+/** Whether a city's pavement stands on `side` where the map says `here` — #1637. @see the header */
+function citySide(here: PavementSide, side: 1 | -1): boolean {
+  return here === 'unknown' || here === 'none' || onSide(here, side);
+}
+
+/** Half the span of road a mapped side road's mouth takes from a city's pavement on `side`; 0 for none. */
+function mouthHalfOf(junction: Junction, side: 1 | -1): number {
+  let half = 0;
+  for (const arm of junction.arms) {
+    if (arm.side !== side) continue;
+    // An arm meeting the road at a slant crosses more of the pavement.
+    const slant = Math.max(0.5, Math.sin((arm.angleDegrees * Math.PI) / 180));
+    half = Math.max(half, SIDE_ROAD_WIDTHS[arm.widthClass] / 2 / slant);
+  }
+  return half === 0 ? 0 : half + CITY_MOUTH_MARGIN_METRES;
+}
+
+/** Piece `piece` of a city centre's street, on the first lap, or `null` where none is laid. */
+function cityStreetOf(
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  seed: number,
+  piece: number,
+  sides: PavementSides,
+  urban: UrbanClassMap,
+  junctions: readonly Junction[],
+): Known {
+  const total: number = profile.totalDistance;
+  const start = piece * CITY_STREET_METRES;
+  const end = Math.min(total, start + CITY_STREET_METRES);
+  // A piece's ends are no break in the street — but where a route that is not
+  // a loop starts and ends.
+  const cuts = [start, end].filter((at) => profile.loop || (at > 0 && at < total));
+  const city = (along: number): boolean =>
+    urban.classAt(distanceOnRoute(profile, along)) === 'city-centre';
+  let any = false;
+  for (let along = start; along <= end && !any; along += PAVEMENT_STEP_METRES) any = city(along);
+  if (!any) return null;
+  const mesh = new MeshBuilder();
+  const furniture: FurnitureItem[] = [];
+  const walks: Float32Array[] = [];
+  for (const side of [1, -1] as const) {
+    const mouths: { readonly from: number; readonly to: number }[] = [];
+    for (const junction of junctions) {
+      const half = mouthHalfOf(junction, side);
+      if (half === 0) continue;
+      // Its copy on this lap and on the laps either side, for a loop's seam.
+      for (const lap of profile.loop ? [-total, 0, total] : [0]) {
+        const at = junction.along + lap;
+        if (at + half >= start && at - half <= end) mouths.push({ from: at - half, to: at + half });
+      }
+    }
+    lay(
+      mesh,
+      furniture,
+      profile,
+      origin,
+      seed,
+      side,
+      start,
+      end,
+      (along) => city(along) && citySide(sides.sideAt(along), side),
+      mouths,
+      walks,
+      urban,
+      cuts,
+    );
+  }
+  if (mesh.triangles === 0) return null;
+  return {
+    wrappedSite: -1 - piece,
+    from: start,
+    to: end,
+    pavement: mesh.done(),
+    furniture,
+    doorPaths: [],
+    walks,
+    anchors: [],
+  };
 }
 
 /** The street of the village at `site` (unwrapped `index`), or `null` if it has no pavement. */
@@ -431,6 +701,7 @@ function streetOf(
   index: number,
   sides: PavementSides,
   land: LandClassMask,
+  urban: UrbanClassMap | undefined,
 ): Known {
   const site = siteAt(profile, seed, index);
   if (site === undefined) return null;
@@ -484,6 +755,7 @@ function streetOf(
         undefined,
         [mouth],
         walks,
+        urban,
       );
     } else {
       range = street;
@@ -504,6 +776,7 @@ function streetOf(
         allowed,
         [mouth],
         walks,
+        urban,
       );
     }
     if (laid) {
@@ -514,10 +787,18 @@ function streetOf(
         along >= range.start &&
         along <= range.end &&
         allowed(along) &&
-        sectionAt(profile, origin, ways, side, along, false) !== undefined;
+        sectionAt(
+          profile,
+          origin,
+          ways,
+          side,
+          along,
+          false,
+          streetRuleAt(profile, urban, along).width,
+        ) !== undefined;
       for (const plot of plots) {
         if (plot.side !== side) continue;
-        const path = doorPathOf(profile, origin, seed, ways, plot, lap, paved, land);
+        const path = doorPathOf(profile, origin, seed, ways, plot, lap, paved, land, urban);
         if (path !== undefined) {
           doorPaths.push(path);
           doors.push({ plot, path });
@@ -574,6 +855,7 @@ function doorPathOf(
   lap: number,
   paved: (along: number) => boolean,
   land: LandClassMask,
+  urban: UrbanClassMap | undefined,
 ): DoorPath | undefined {
   if (!isBuiltKind(plot.kind)) return undefined;
   const door = frontDoorOf(plot.kind, plot.variant);
@@ -593,15 +875,15 @@ function doorPathOf(
   const rightZ = -faceX;
   const doorX = house.x + rightX * door.x + faceX * door.z;
   const doorZ = house.z + rightZ * door.x + faceZ * door.z;
+  // #1637: from under the back of the pavement as it is laid in front of the plot.
+  const width = streetRuleAt(profile, urban, plot.along - lap).width;
   const length =
-    plot.lateral -
-    door.z -
-    (KERB_LATERAL_METRES + PAVEMENT_WIDTH_METRES - DOOR_PATH_UNDER_PAVEMENT_METRES);
+    plot.lateral - door.z - (KERB_LATERAL_METRES + width - DOOR_PATH_UNDER_PAVEMENT_METRES);
   if (!(length > 0) || length > DOOR_PATH_MOST_METRES) return undefined;
   // From the pavement end, `s` = 0, to the door, `s` = `length`.
   const startX = doorX + faceX * length;
   const startZ = doorZ + faceZ * length;
-  const mouth = nearestOnDrawnRoad(profile, origin, startX, startZ, PAVEMENT_WIDTH_METRES * 4);
+  const mouth = nearestOnDrawnRoad(profile, origin, startX, startZ, width * 4);
   if (mouth === undefined || !paved(mouth.along)) return undefined;
   const pavementTop =
     elevationAt(profile, distanceOnRoute(profile, mouth.along)) -
@@ -660,8 +942,19 @@ export function doorPathFor(
   seed: number,
   plot: Plot,
   paved: (along: number) => boolean = () => true,
+  urban?: UrbanClassMap,
 ): DoorPath | undefined {
-  return doorPathOf(profile, origin, seed, waterways(profile, seed), plot, 0, paved, NO_LAND_CLASS);
+  return doorPathOf(
+    profile,
+    origin,
+    seed,
+    waterways(profile, seed),
+    plot,
+    0,
+    paved,
+    NO_LAND_CLASS,
+    urban,
+  );
 }
 
 /** One cross-section of a front path: its two edges, its top and its skirts' foot. */
@@ -720,9 +1013,12 @@ export function pavementAlong(
   side: 1 | -1,
   start: number,
   end: number,
+  urban?: UrbanClassMap,
 ): PavementMesh | undefined {
   const mesh = new MeshBuilder();
-  return lay(mesh, [], profile, origin, seed, side, start, end) ? mesh.done() : undefined;
+  return lay(mesh, [], profile, origin, seed, side, start, end, undefined, [], [], urban)
+    ? mesh.done()
+    : undefined;
 }
 
 /**
@@ -739,9 +1035,23 @@ export function furnitureAlong(
   side: 1 | -1,
   start: number,
   end: number,
+  urban?: UrbanClassMap,
 ): readonly FurnitureItem[] {
   const furniture: FurnitureItem[] = [];
-  lay(new MeshBuilder(), furniture, profile, origin, seed, side, start, end);
+  lay(
+    new MeshBuilder(),
+    furniture,
+    profile,
+    origin,
+    seed,
+    side,
+    start,
+    end,
+    undefined,
+    [],
+    [],
+    urban,
+  );
   return furniture;
 }
 
@@ -756,6 +1066,8 @@ interface Section {
   readonly y: number;
   /** How high the kerb stands here: {@link KERB_HEIGHT_METRES}, or dropped beside a mouth (#1565). */
   readonly kerb: number;
+  /** How wide the pavement is here, kerb included: its street's rule's (#1637). */
+  readonly width: number;
   /** Out from the road, on this side. */
   readonly outX: number;
   readonly outZ: number;
@@ -765,6 +1077,11 @@ interface Section {
  * Lays one side's pavement from `start` to `end` (odometer), as strips broken
  * wherever a section is dropped, and furnishes each strip (#1536). Whether any
  * strip was laid.
+ *
+ * Since #1637 each section is laid by its street's rule ({@link streetRuleAt}),
+ * and a strip is broken where the rule changes; a strip's end at one of
+ * `cuts` is a city street piece's end rather than the street's, and has no
+ * bollards.
  */
 function lay(
   mesh: MeshBuilder,
@@ -778,6 +1095,8 @@ function lay(
   allowed: (along: number) => boolean = () => true,
   mouths: readonly { readonly from: number; readonly to: number }[] = [],
   walks: Float32Array[] = [],
+  urban?: UrbanClassMap,
+  cuts: readonly number[] = [],
 ): boolean {
   const ways = waterways(profile, seed);
   // #1565: no pavement over a side road's mouth, and a dropped kerb beside it.
@@ -791,19 +1110,28 @@ function lay(
   const steps = Math.max(1, Math.ceil((end - start) / PAVEMENT_STEP_METRES));
   const before = mesh.triangles;
   let run: Section[] = [];
+  let rule = VILLAGE_STREET_RULE;
+  const cut = (along: number): boolean => cuts.some((at) => Math.abs(at - along) < 1e-6);
   const close = (): void => {
     if (run.length >= 2) {
       mesh.strip(run, side);
-      furnish(run, furniture);
+      const first = (run[0] as Section).along;
+      const last = (run[run.length - 1] as Section).along;
+      furnish(run, furniture, rule, cut(first), cut(last));
       walks.push(walkOf(run));
     }
     run = [];
   };
   for (let step = 0; step <= steps; step += 1) {
     const along = start + ((end - start) * step) / steps;
+    const here = streetRuleAt(profile, urban, along);
+    if (here !== rule) {
+      close();
+      rule = here;
+    }
     const section =
       allowed(along) && !inMouth(along)
-        ? sectionAt(profile, origin, ways, side, along, besideMouth(along))
+        ? sectionAt(profile, origin, ways, side, along, besideMouth(along), rule.width)
         : undefined;
     if (section === undefined) close();
     else run.push(section);
@@ -820,15 +1148,16 @@ function sectionAt(
   side: 1 | -1,
   along: number,
   dropped: boolean,
+  width: number,
 ): Section | undefined {
   const wrapped = distanceOnRoute(profile, along);
   const frame = drawnRoadFrame(profile, origin, wrapped);
   if (frame === undefined) return undefined;
-  const middle = KERB_LATERAL_METRES + PAVEMENT_WIDTH_METRES / 2;
+  const middle = KERB_LATERAL_METRES + width / 2;
   if (inWater(ways, profile, wrapped, middle * side)) return undefined;
   const outX = frame.normalX * side;
   const outZ = frame.normalZ * side;
-  const outer = KERB_LATERAL_METRES + PAVEMENT_WIDTH_METRES;
+  const outer = KERB_LATERAL_METRES + width;
   // Off EVERY stretch of the drawn road, at each of its three edges. @see the header
   for (const lateral of [KERB_LATERAL_METRES, middle, outer]) {
     const x = frame.x + outX * lateral;
@@ -844,6 +1173,7 @@ function sectionAt(
     outerZ: frame.z + outZ * outer,
     y: elevationAt(profile, wrapped) - origin.elevation,
     kerb: dropped ? DROPPED_KERB_HEIGHT_METRES : KERB_HEIGHT_METRES,
+    width,
     outX,
     outZ,
   };
@@ -878,8 +1208,21 @@ function walkOf(run: readonly Section[]): Float32Array {
  *   together; at the run's middle where it has none), facing
  *   the road, and a **bin** {@link BIN_BESIDE_METRES} along from it — only on
  *   a run long enough to hold both clear of the bollards.
+ *
+ * Since #1637 by its street's `rule`: a city centre's lamp posts are
+ * {@link CITY_LAMP_SPACING_METRES} apart, its benches and their bins one every
+ * {@link CITY_BENCH_SPACING_METRES} (half-way between the first lamp post and
+ * the second, and every three spacings on; the village's one bench on a run
+ * too short for that), each at the back of its wider pavement; and an end
+ * that is only a piece's end (`startCut`, `endCut`) has no bollards.
  */
-function furnish(run: readonly Section[], into: FurnitureItem[]): void {
+function furnish(
+  run: readonly Section[],
+  into: FurnitureItem[],
+  rule: StreetRule = VILLAGE_STREET_RULE,
+  startCut = false,
+  endCut = false,
+): void {
   const start = (run[0] as Section).along;
   const end = (run[run.length - 1] as Section).along;
   const length = end - start;
@@ -903,32 +1246,40 @@ function furnish(run: readonly Section[], into: FurnitureItem[]): void {
       rotation: Math.atan2(-outX / out, -outZ / out),
     });
   };
-  const back = PAVEMENT_WIDTH_METRES;
+  const back = rule.width;
+  const spacing = rule.lampSpacing;
   const lamps: number[] = [];
-  for (
-    let along = start + LAMP_SPACING_METRES / 2;
-    along <= end - LAMP_SPACING_METRES / 2 + 1e-9;
-    along += LAMP_SPACING_METRES
-  ) {
+  for (let along = start + spacing / 2; along <= end - spacing / 2 + 1e-9; along += spacing) {
     lamps.push(along);
     place('lamp-post', along, back - LAMP_SETBACK_METRES);
   }
   for (const inset of BOLLARD_ENDS_METRES) {
     if (length < 2 * inset) continue;
-    place('bollard', start + inset, BOLLARD_INSET_METRES);
-    place('bollard', end - inset, BOLLARD_INSET_METRES);
+    if (!startCut) place('bollard', start + inset, BOLLARD_INSET_METRES);
+    if (!endCut) place('bollard', end - inset, BOLLARD_INSET_METRES);
   }
   const clear = (BOLLARD_ENDS_METRES[1] as number) + 1;
   if (length < 2 * (clear + BIN_BESIDE_METRES)) return;
-  const pair = Math.max(0, Math.floor((lamps.length - 2) / 2));
-  const bench =
-    lamps.length >= 2
-      ? ((lamps[pair] as number) + (lamps[pair + 1] as number)) / 2
-      : lamps.length === 1
-        ? (lamps[0] as number) + LAMP_SPACING_METRES / 4
-        : (start + end) / 2;
-  place('bench', bench, back - BENCH_SETBACK_METRES);
-  place('bin', bench + BIN_BESIDE_METRES, back - BENCH_SETBACK_METRES);
+  const benches: number[] = [];
+  // #1637: a city's, every `benchSpacing`, between the lamp posts.
+  const every = rule.benchSpacing > 0 ? Math.round(rule.benchSpacing / spacing) : 0;
+  for (let pair = 0; every > 0 && pair + 1 < lamps.length; pair += every) {
+    benches.push(((lamps[pair] as number) + (lamps[pair + 1] as number)) / 2);
+  }
+  if (benches.length === 0) {
+    const pair = Math.max(0, Math.floor((lamps.length - 2) / 2));
+    benches.push(
+      lamps.length >= 2
+        ? ((lamps[pair] as number) + (lamps[pair + 1] as number)) / 2
+        : lamps.length === 1
+          ? (lamps[0] as number) + spacing / 4
+          : (start + end) / 2,
+    );
+  }
+  for (const bench of benches) {
+    place('bench', bench, back - BENCH_SETBACK_METRES);
+    place('bin', bench + BIN_BESIDE_METRES, back - BENCH_SETBACK_METRES);
+  }
 }
 
 /**
@@ -973,9 +1324,9 @@ class MeshBuilder {
       // The pavement, looking up.
       this.#quad(
         [a.innerX, top(a), a.innerZ, a.along, 0],
-        [a.outerX, top(a), a.outerZ, a.along, PAVEMENT_WIDTH_METRES],
+        [a.outerX, top(a), a.outerZ, a.along, a.width],
         [b.innerX, top(b), b.innerZ, b.along, 0],
-        [b.outerX, top(b), b.outerZ, b.along, PAVEMENT_WIDTH_METRES],
+        [b.outerX, top(b), b.outerZ, b.along, b.width],
         [0, 1, 0],
       );
       // The back, looking away from the road.
@@ -999,8 +1350,8 @@ class MeshBuilder {
       this.#quad(
         [end.innerX, end.y, end.innerZ, 0, 0],
         [end.innerX, top(end), end.innerZ, 0, KERB_HEIGHT_METRES],
-        [end.outerX, foot(end), end.outerZ, PAVEMENT_WIDTH_METRES, -PAVEMENT_FOOTING_METRES],
-        [end.outerX, top(end), end.outerZ, PAVEMENT_WIDTH_METRES, KERB_HEIGHT_METRES],
+        [end.outerX, foot(end), end.outerZ, end.width, -PAVEMENT_FOOTING_METRES],
+        [end.outerX, top(end), end.outerZ, end.width, KERB_HEIGHT_METRES],
         [ax, 0, az],
       );
     }

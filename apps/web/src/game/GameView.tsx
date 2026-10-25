@@ -1583,7 +1583,8 @@ export function GameView(props: GameViewProps): JSX.Element {
           urban,
         );
         mappedBuildingsRef.current = mappedBuildingsOf(plans);
-        mappedTownRef.current = mappedTown(worldCorridorRef.current, plans);
+        // #1637: carrying the urban class, which the lots and the streets read.
+        mappedTownRef.current = mappedTown(worldCorridorRef.current, plans, urban);
       }
       setState(simulation.state);
       setChosen(route);

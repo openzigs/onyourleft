@@ -220,9 +220,17 @@ import {
   type DrawnRoadPoints,
 } from './road-grid';
 import { scatterSeed } from './scatter';
-import { footprintIndexOf, type MappedTown } from './settlements';
+import {
+  footprintIndexOf,
+  LOT_FLOATS,
+  lotSpacing,
+  lotStands,
+  placeLot,
+  type MappedTown,
+} from './settlements';
+import { CITY_PAVEMENT_WIDTH_METRES, KERB_LATERAL_METRES } from './streets';
 import { slotHash, uniformFrom } from './seeded';
-import { ROAD_WIDTH_METRES, type CorridorOrigin } from './terrain';
+import { drawnRoadFrame, ROAD_WIDTH_METRES, type CorridorOrigin } from './terrain';
 import type { UrbanClass, UrbanClassMap } from './urban-class';
 import type { WorldCorridor } from './world-data/corridor';
 
@@ -2889,7 +2897,137 @@ export function footprintPlans(
       plans.push(planned);
     }
   }
+  // #1637: and a city centre's lots, as terraced blocks, off every one kept.
+  // Not footprints of the corridor's, so no verdict counts them.
+  if (urban !== undefined) {
+    plans.push(
+      ...terracePlans(corridor, land, urban, profile, origin, seed, maxVertices, plans, {
+        grid: others,
+        own: -1,
+        porches,
+        driveways,
+        tagged,
+        terrace: true,
+      }),
+    );
+  }
   return { plans: paintTown(plans), verdicts: counts };
+}
+
+/**
+ * How far a terraced block's front stands back from a city centre's
+ * pavement, in metres: **0.5** — #1637, so its shop fronts and their doors
+ * stand at the back of `streets.ts` §`CITY_PAVEMENT_WIDTH_METRES`, with no
+ * front path.
+ */
+export const TERRACE_GAP_METRES = 0.5;
+
+/** How deep a terraced block is, from its front back, in metres: **12** — #1637. */
+export const TERRACE_DEPTH_METRES = 12;
+
+/** How many storeys a terraced block has, seeded per plot and side: **3 or 4** — #1637. */
+export const TERRACE_STOREYS: readonly number[] = [3, 4];
+
+/** The key a terraced block's storeys are hashed under, apart from every other draw. */
+const TERRACE_KEY = 0x16_37;
+
+/** The terraced block `terracePlans` is deciding, as `settlements.ts` §`placeLot` writes one. */
+const terraceScratch = new Float64Array(LOT_FLOATS);
+
+/**
+ * A city centre's lots — #1637. Where the ride's urban class is
+ * `city-centre`, the lot plots `settlements.ts` §`lotsAt` divides the route
+ * into ({@link lotSpacing}) are terraced blocks instead of its houses: on each
+ * side of each plot, a block from the plot's start to its end — so blocks are
+ * packed edge to edge with no side yard — from
+ * {@link TERRACE_GAP_METRES} behind the city's pavement to
+ * {@link TERRACE_DEPTH_METRES} behind that, {@link TERRACE_STOREYS} high,
+ * planned as a commercial footprint is ({@link planFootprint}): a flat roof
+ * behind its parapet under #1590's cornice, a shop front on the wall turned to
+ * the road, and no porch, driveway or garage, all of which are a house's.
+ *
+ * A block stands only where a lot would: on built-up land at its middle and
+ * corners and clear of every footprint kept, its driveway included
+ * (`settlements.ts` §`lotStands`, #1550's rules 1 to 3), and then by every
+ * rule a mapped footprint keeps — never on wood, water or park, and off every
+ * stretch of the road by its clearance (ADR 0054 D-5.2, D-5.4).
+ *
+ * The first lap only: a plan stands in the corridor's frame, once a place.
+ */
+function terracePlans(
+  corridor: WorldCorridor,
+  land: LandClassMask,
+  urban: UrbanClassMap,
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  seed: number,
+  maxVertices: number,
+  kept: readonly FootprintPlan[],
+  others: PlanNeighbours,
+): FootprintPlan[] {
+  if (land.bytes === 0) return [];
+  const index = footprintIndexOf(
+    kept.flatMap((plan) =>
+      plan.driveway.length > 0 ? [plan.footprint, plan.driveway] : [plan.footprint],
+    ),
+  );
+  const { plots, span } = lotSpacing(profile);
+  const total: number = profile.totalDistance;
+  const front = KERB_LATERAL_METRES + CITY_PAVEMENT_WIDTH_METRES + TERRACE_GAP_METRES;
+  const back = front + TERRACE_DEPTH_METRES;
+  const lot = { x: span / 2, back: -TERRACE_DEPTH_METRES / 2, front: TERRACE_DEPTH_METRES / 2 };
+  const planned: FootprintPlan[] = [];
+  for (let plot = 0; plot < plots; plot += 1) {
+    const along = (plot + 0.5) * span;
+    if (urban.classAt(along) !== 'city-centre') continue;
+    const middle = drawnRoadFrame(profile, origin, along);
+    const start = drawnRoadFrame(profile, origin, plot * span);
+    const end = drawnRoadFrame(profile, origin, Math.min(total, (plot + 1) * span));
+    if (middle === undefined || start === undefined || end === undefined) continue;
+    for (const side of [1, -1] as const) {
+      const out = (front + back) / 2;
+      // Facing the road, as a lot does: back along the normal from its side.
+      const rotation = Math.atan2(-middle.normalX * side, -middle.normalZ * side);
+      placeLot(
+        terraceScratch,
+        middle.x + middle.normalX * out * side,
+        middle.z + middle.normalZ * out * side,
+        lot,
+        rotation,
+      );
+      if (!lotStands(land, index, terraceScratch)) continue;
+      const at = (frame: typeof start, lateral: number): [number, number] => [
+        frame.x + frame.normalX * lateral * side,
+        frame.z + frame.normalZ * lateral * side,
+      ];
+      const ring = Float32Array.from([
+        ...at(start, front),
+        ...at(end, front),
+        ...at(end, back),
+        ...at(start, back),
+      ]);
+      const draw = uniformFrom(slotHash(seed, plot, TERRACE_KEY + (side === 1 ? 1 : 2)), 0);
+      const storeys = TERRACE_STOREYS[seededEntry(draw, TERRACE_STOREYS.length)] as number;
+      const plan = planFootprint(
+        {
+          kind: 'building',
+          heightMetres: storeys * STOREY_METRES,
+          minHeightMetres: null,
+          rings: [ring],
+        },
+        corridor,
+        land,
+        urban,
+        profile,
+        origin,
+        seed,
+        maxVertices,
+        others,
+      );
+      if (typeof plan !== 'string') planned.push(plan);
+    }
+  }
+  return planned;
 }
 
 /** The entry a seeded draw in `[0, 1)` comes to, of `count`. */
@@ -3056,8 +3194,16 @@ function paintTown(plans: readonly FootprintPlan[]): FootprintPlan[] {
  * land-use polygon's box: so each answer is kept, by the place to the
  * decimetre, and a lot's place is a pure function of the route, so every
  * later frame and lap is a lookup.
+ *
+ * `urban`, since #1637, is the ride's urban class, built at the press beside
+ * the plans: carried on the town for `settlements.ts` §`lotsAt` and
+ * `streets.ts` (`MappedTown.urban`).
  */
-export function mappedTown(corridor: WorldCorridor, plans: readonly FootprintPlan[]): MappedTown {
+export function mappedTown(
+  corridor: WorldCorridor,
+  plans: readonly FootprintPlan[],
+  urban?: UrbanClassMap,
+): MappedTown {
   // #1588: a lot keeps off a driveway as it does off the house.
   const index = footprintIndexOf(
     plans.flatMap((plan) =>
@@ -3067,6 +3213,8 @@ export function mappedTown(corridor: WorldCorridor, plans: readonly FootprintPla
   // Keyed by decimetre, x then z: two small integers, never a boxed number.
   const commercial = new Map<number, Map<number, boolean>>();
   const town: MappedTown = {
+    // #1637: the ride's urban class, which the lots and the streets read.
+    ...(urban === undefined ? {} : { urban }),
     overlaps: (lot) => index.overlaps(lot),
     commercialAt(x, z) {
       const column = Math.round(x * 10);
@@ -3271,6 +3419,17 @@ function porchOnRead(
   }
 }
 
+/** What a plan is kept off, and what it is planned beside. @see planFootprint */
+interface PlanNeighbours {
+  readonly grid: RingGrid;
+  readonly own: number;
+  readonly porches: RingGrid;
+  readonly driveways: RingGrid;
+  readonly tagged: TaggedNeighbours | undefined;
+  /** #1637: a city centre's terraced block, which is commercial whatever the land under it. */
+  readonly terrace?: boolean;
+}
+
 /** One footprint: its plan, or the verdict that dropped it. */
 function planFootprint(
   building: BuildingFeature,
@@ -3281,13 +3440,7 @@ function planFootprint(
   origin: CorridorOrigin,
   seed: number,
   maxVertices: number,
-  others: {
-    readonly grid: RingGrid;
-    readonly own: number;
-    readonly porches: RingGrid;
-    readonly driveways: RingGrid;
-    readonly tagged: TaggedNeighbours | undefined;
-  },
+  others: PlanNeighbours,
 ): FootprintPlan | Exclude<FootprintVerdict, 'kept'> {
   const outer = building.rings[0];
   if (outer === undefined || outer.length < 6) return 'too-small';
@@ -3371,7 +3524,11 @@ function planFootprint(
   const span =
     building.heightMetres === null ? null : Math.max(0, building.heightMetres - minHeight);
   const landClass = land.classAt(centroid.x, centroid.z);
-  const use = footprintUse(landClass, kindAt(corridor, centroid.x, centroid.z));
+  // #1637: a terraced block is a shop below and flats above, on any land.
+  const use =
+    others.terrace === true
+      ? 'commercial'
+      : footprintUse(landClass, kindAt(corridor, centroid.x, centroid.z));
   const share = (stream: number): number => footprintShare(seed, centroid.x, centroid.z, stream);
   // #1634: a mapped height is P-10's and #1629's; an untagged one is chosen.
   const storeys =

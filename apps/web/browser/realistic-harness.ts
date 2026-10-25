@@ -62,6 +62,7 @@ import {
   mappedTown,
 } from '../src/game/footprint-buildings';
 import {
+  cityCentreFixture,
   countrysideFixture,
   mixedTownFixture,
   richmondStreetFixture,
@@ -370,7 +371,9 @@ async function run(): Promise<void> {
         ? richmondStreetFixture(latitude)
         : config.town === 'countryside'
           ? countrysideFixture(latitude)
-          : undefined;
+          : config.town === 'city'
+            ? cityCentreFixture(latitude)
+            : undefined;
   // #1559: or the level road through two villages, for validation 0002 AE2.
   const profile =
     mixed?.profile ??
@@ -398,7 +401,7 @@ async function run(): Promise<void> {
       corridor: mixed.corridor,
       land,
       buildings: mappedBuildingsOf(plans),
-      lots: mappedTown(mixed.corridor, plans),
+      lots: mappedTown(mixed.corridor, plans, urban),
     };
   })();
   const loopFrom = town === undefined ? LOOP_FROM_METRES : TOWN_FROM_METRES;

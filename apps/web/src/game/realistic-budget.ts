@@ -762,6 +762,10 @@ export const REALISTIC_FRAME_TRIANGLES = 300_000;
  * (2 264), and only what is within `streets.ts` §`FURNITURE_DRAW_METRES` of
  * the camera is drawn at all.
  *
+ * Since #1637 a city centre's street is laid in pieces instead
+ * (`streets.ts` §`CITY_PAVEMENT_TRIANGLES_PER_PIECE`, 584 each), six at most
+ * in a frame: 3 504, inside the two rows above. Not raised.
+ *
  * ⚠️ **Outside {@link REALISTIC_FRAME_TRIANGLES}, by that constant's own
  * rule**: a street is the SAME triangles in both worlds, as the corridor, the
  * terrain and the water are, so it does not change with the world. It adds
