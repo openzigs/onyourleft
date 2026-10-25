@@ -232,6 +232,9 @@ export default defineConfig({
         // origin, through the product's port and reader, into IndexedDB.
         // `corridor-harness.ts` says what it does and does not prove.
         corridor: 'browser/corridor.html',
+        // #1624: the holiday decorations' one call and steady glow, in a real
+        // context. `decoration-harness.ts` says what it draws.
+        decoration: 'browser/decoration.html',
       },
     },
     // Sourcemaps so a failure in CI names a line of ours rather than a column

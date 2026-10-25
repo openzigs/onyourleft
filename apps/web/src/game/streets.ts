@@ -113,6 +113,7 @@ import { distanceOnRoute, elevationAt, type RouteProfile } from '@onyourleft/dom
 
 import { buildingPlan, isBuiltKind, type BuiltKind } from './buildings';
 import { VILLAGE_MOUTH_HALF_METRES } from './cross-streets';
+import { villageAnchors, type DecorationAnchor, type DoorOfPlot } from './decorations';
 import { NO_PAVEMENT_DATA, type PavementSide, type PavementSides } from './footways';
 import { terrainHeightAt } from './landform';
 import { distanceToDrawnRoad, nearestOnDrawnRoad } from './road-grid';
@@ -345,6 +346,12 @@ export interface VillageStreet {
    * `x, y, z` a section, corridor frame.
    */
   readonly walks: readonly Float32Array[];
+  /**
+   * #1624: where a holiday's decorations may stand in this village — its
+   * lamp posts, doorsteps, eaves and crossroads green, never its church
+   * plot (`decorations.ts` §`villageAnchors`). Built with the street, once.
+   */
+  readonly anchors: readonly DecorationAnchor[];
 }
 
 /** One village's street, or `null` where its site has no village or no pavement. */
@@ -456,6 +463,7 @@ function streetOf(
   const read = wasRead(sides, street.start, street.end);
   const ways = waterways(profile, seed);
   const doorPaths: DoorPath[] = [];
+  const doors: DoorOfPlot[] = [];
   for (const [at, side] of ([1, -1] as const).entries()) {
     const own = spans[at];
     let laid: boolean;
@@ -510,12 +518,16 @@ function streetOf(
       for (const plot of plots) {
         if (plot.side !== side) continue;
         const path = doorPathOf(profile, origin, seed, ways, plot, lap, paved, land);
-        if (path !== undefined) doorPaths.push(path);
+        if (path !== undefined) {
+          doorPaths.push(path);
+          doors.push({ plot, path });
+        }
       }
     }
   }
   if (mesh.triangles === 0) return null;
-  return { wrappedSite, from, to, pavement: mesh.done(), furniture, doorPaths, walks };
+  const anchors = villageAnchors(profile, origin, seed, site, doors, furniture, land);
+  return { wrappedSite, from, to, pavement: mesh.done(), furniture, doorPaths, walks, anchors };
 }
 
 /** Each built kind's front door in each variant, building-local, as its plan cuts it. */

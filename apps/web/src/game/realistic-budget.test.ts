@@ -56,6 +56,7 @@ import {
   REALISTIC_RIDER_SURFACES,
   REALISTIC_TOWN_SURFACES,
   REALISTIC_BUILD_BYTES,
+  REALISTIC_DECORATION_TRIANGLES,
   MAPPED_BUILDING_MAX,
   MAPPED_BUILDING_TRIANGLES,
   REALISTIC_FRAME_TRIANGLES,
@@ -503,6 +504,16 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
     ).toBeLessThanOrEqual(REALISTIC_FRAME_TRIANGLES);
     // And the figure the rungs spend is the one `realistic-budget.ts` states.
     expect(structureItems).toBe(REALISTIC_STRUCTURE_ITEMS);
+  });
+
+  it('holds it with the holiday decorations at their ceiling too, inside the frame — #1624', () => {
+    const { vegetation, riders, structureItems, blobs, gantries } = worstFrame();
+    const worst =
+      vegetation + riders + structureItems * REALISTIC_TRIANGLES.structure + blobs + gantries;
+    expect(worst + REALISTIC_DECORATION_TRIANGLES).toBeLessThanOrEqual(REALISTIC_FRAME_TRIANGLES);
+    // Non-vacuity: a real share — room for an item of eight boxes on each of
+    // two full villages' 116 anchors.
+    expect(REALISTIC_DECORATION_TRIANGLES).toBeGreaterThanOrEqual(116 * 8 * 12);
   });
 
   it('holds it with a covered town at MAPPED_BUILDING_MAX, the structure term unchanged — #1549', () => {
