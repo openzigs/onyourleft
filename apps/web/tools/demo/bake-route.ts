@@ -503,38 +503,74 @@ const WEB = fileURLToPath(new URL('../../', import.meta.url));
 export const PRESET_ROUTES_DIRECTORY = join(WEB, 'demo', 'routes');
 export const BAKED_ROUTES_DIRECTORY = join(WEB, 'demo', 'dist', 'routes');
 
+/**
+ * `--strip`: writes `--gpx`'s line, stripped, as the preset route's GPX in
+ * `directory`. Returns the path written.
+ */
+export function stripPresetGpx(args: BakeArguments, directory: string): string {
+  if (args.gpx === undefined) throw new Error('demo:bake: --strip needs --gpx <your file>');
+  const out = join(directory, `${args.route}.gpx`);
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(out, strippedGpx(routeLineOf(readFileSync(args.gpx, 'utf8')).points));
+  return out;
+}
+
+/** What a bake reads: the GPX, and for a preset route its committed record. */
+export interface BakeInput {
+  readonly gpx: string;
+  readonly recordPath: string;
+  /** The preset route's committed record, whole; `undefined` for a GPX named with `--gpx`. */
+  readonly committed: PresetRecord | undefined;
+}
+
+const normalised = (gpx: string): string => gpx.replace(/\r\n/g, '\n').trimEnd();
+
+/**
+ * Reads a bake's inputs. A preset route — the committed GPX in `directory` —
+ * is held to its committed record, before a byte of the archive is read: a
+ * GPX that carries anything but its line is refused (it would be published
+ * beside the route), and so is one with no whole provenance. A GPX named
+ * with `--gpx` (CI's fixture, a trial line) has no record and makes none.
+ */
+export function readBakeInput(args: BakeArguments, directory: string): BakeInput {
+  const gpxPath = args.gpx ?? join(directory, `${args.route}.gpx`);
+  const gpx = readFileSync(gpxPath, 'utf8');
+  const recordPath = join(directory, `${args.route}.bake.json`);
+  if (args.gpx !== undefined) {
+    if (args.record) throw new Error('demo:bake: --record is for a preset route, so not with --gpx');
+    return { gpx, recordPath, committed: undefined };
+  }
+  const personal = personalGpxFields(gpx);
+  if (personal.length > 0) {
+    throw new Error(
+      `demo:bake: the committed GPX carries ${personal.join(', ')}; commit only its line, ` +
+        'written by `demo:bake -- --route <id> --gpx <your file> --strip`',
+    );
+  }
+  // Nothing but the line: a waypoint or a route the decoder ignores would be published too.
+  if (normalised(gpx) !== normalised(strippedGpx(routeLineOf(gpx).points))) {
+    throw new Error(
+      'demo:bake: the committed GPX carries more than its line (a waypoint, a route or another ' +
+        'element); commit only its line, written by `demo:bake -- --route <id> --gpx <your file> --strip`',
+    );
+  }
+  const committed: unknown = existsSync(recordPath)
+    ? JSON.parse(readFileSync(recordPath, 'utf8'))
+    : undefined;
+  assertProvenance(committed);
+  return { gpx, recordPath, committed };
+}
+
 async function main(): Promise<void> {
   const args = parseBakeArguments(process.argv.slice(2));
-  const gpxPath = args.gpx ?? join(PRESET_ROUTES_DIRECTORY, `${args.route}.gpx`);
-  const gpx = readFileSync(gpxPath, 'utf8');
   if (args.strip) {
-    if (args.gpx === undefined) throw new Error('demo:bake: --strip needs --gpx <your file>');
-    const out = join(PRESET_ROUTES_DIRECTORY, `${args.route}.gpx`);
-    mkdirSync(PRESET_ROUTES_DIRECTORY, { recursive: true });
-    writeFileSync(out, strippedGpx(routeLineOf(gpx).points));
+    const out = stripPresetGpx(args, PRESET_ROUTES_DIRECTORY);
     console.log(
       `demo:bake: wrote ${out}, its line and elevations only; trim its ends if a home is near either`,
     );
     return;
   }
-  // A preset route — the committed GPX — is held to its committed record,
-  // before a byte of the archive is read. A GPX named with `--gpx` (CI's
-  // fixture, a trial line) has no record and makes none.
-  const recordPath = join(PRESET_ROUTES_DIRECTORY, `${args.route}.bake.json`);
-  let committed: unknown;
-  if (args.gpx === undefined) {
-    const personal = personalGpxFields(gpx);
-    if (personal.length > 0) {
-      throw new Error(
-        `demo:bake: the committed GPX carries ${personal.join(', ')}; commit only its line, ` +
-          'written by `demo:bake -- --route <id> --gpx <your file> --strip`',
-      );
-    }
-    committed = existsSync(recordPath) ? JSON.parse(readFileSync(recordPath, 'utf8')) : undefined;
-    assertProvenance(committed);
-  } else if (args.record) {
-    throw new Error('demo:bake: --record is for a preset route, so not with --gpx');
-  }
+  const { gpx, recordPath, committed } = readBakeInput(args, PRESET_ROUTES_DIRECTORY);
   const { archive, archiveUrl } = archiveOf(args.archive);
   const baked = await bakeRoute({
     routeId: args.route,
@@ -545,7 +581,7 @@ async function main(): Promise<void> {
       console.log(line);
     },
   });
-  if (args.gpx === undefined) {
+  if (committed !== undefined) {
     const next = settleRecord(committed, recordOf(baked.entry), args.record);
     if (next !== undefined) {
       writeFileSync(recordPath, `${JSON.stringify(next, null, 2)}\n`);

@@ -41,10 +41,12 @@ import {
   parseBakeArguments,
   personalGpxFields,
   provenanceFindings,
+  readBakeInput,
   recordDrift,
   recordOf,
   routeLineOf,
   settleRecord,
+  stripPresetGpx,
   strippedGpx,
   writeBakedRoute,
   type ManifestEntry,
@@ -447,5 +449,86 @@ describe('demo:bake’s arguments and its committed record — #1651, ADR 0056 D
     expect(personalGpxFields(stripped)).toStrictEqual([]);
     expect(routeLineOf(stripped).points).toStrictEqual(routeLineOf(recorded).points);
     expect(stripped).not.toContain('gpxtpx');
+  });
+});
+
+describe('demo:bake’s preset-route inputs — #1651, ADR 0056 D-7', () => {
+  const record = {
+    gpx: {
+      licence: 'CC0-1.0',
+      source: 'my own ride, recorded on a head unit',
+      confirmed: '2026-11-01',
+    },
+  };
+  const strippedFixture = (): string => strippedGpx(routeLineOf(fixtureGpx()).points);
+  const argumentsFor = (extra: string[] = []) => parseBakeArguments(['--route', 'climb', ...extra]);
+
+  /** A directory standing in for `demo/routes/`, with the files given. */
+  function presetDirectory(files: Record<string, string>): string {
+    const directory = mkdtempSync(join(scratch, 'preset-'));
+    for (const [name, text] of Object.entries(files)) writeFileSync(join(directory, name), text);
+    return directory;
+  }
+
+  it('reads a stripped GPX with its whole record, and CRLF line ends', () => {
+    const directory = presetDirectory({
+      'climb.gpx': strippedFixture().replace(/\n/g, '\r\n'),
+      'climb.bake.json': JSON.stringify(record),
+    });
+    const input = readBakeInput(argumentsFor(), directory);
+    expect(input.committed).toStrictEqual(record);
+    expect(input.recordPath).toBe(join(directory, 'climb.bake.json'));
+  });
+
+  it('refuses a preset GPX that still carries a time, an extension or a name, naming them', () => {
+    const directory = presetDirectory({
+      'climb.gpx': fixtureGpx(),
+      'climb.bake.json': JSON.stringify(record),
+    });
+    expect(() => readBakeInput(argumentsFor(), directory)).toThrow(
+      /carries <time>, <extensions>, <metadata>, <name>, creator=/,
+    );
+  });
+
+  it('refuses a preset GPX with a waypoint or a route beside its line', () => {
+    for (const extra of ['<wpt lat="1" lon="2"></wpt>', '<rte><rtept lat="1" lon="2"/></rte>']) {
+      const directory = presetDirectory({
+        'climb.gpx': strippedFixture().replace('<trk>', `${extra}<trk>`),
+        'climb.bake.json': JSON.stringify(record),
+      });
+      expect(() => readBakeInput(argumentsFor(), directory)).toThrow(/more than its line/);
+    }
+  });
+
+  it('refuses a preset route with no record, or an incomplete one, before any archive is read', () => {
+    const none = presetDirectory({ 'climb.gpx': strippedFixture() });
+    expect(() => readBakeInput(argumentsFor(), none)).toThrow(/bake\.json/);
+    const partial = presetDirectory({
+      'climb.gpx': strippedFixture(),
+      'climb.bake.json': JSON.stringify({ gpx: { ...record.gpx, licence: 'ODbL-1.0' } }),
+    });
+    expect(() => readBakeInput(argumentsFor(), partial)).toThrow(/gpx\.licence/);
+  });
+
+  it('takes a GPX named with --gpx with no record and makes none, and refuses --record with it', () => {
+    const directory = presetDirectory({});
+    const path = join(directory, 'trial.gpx');
+    writeFileSync(path, fixtureGpx());
+    const input = readBakeInput(argumentsFor(['--gpx', path]), directory);
+    expect(input.committed).toBeUndefined();
+    expect(input.gpx).toBe(fixtureGpx());
+    expect(() => readBakeInput(argumentsFor(['--gpx', path, '--record']), directory)).toThrow(
+      /--record is for a preset route/,
+    );
+  });
+
+  it('--strip writes the line to the preset directory, and needs --gpx', () => {
+    const directory = presetDirectory({});
+    const path = join(directory, 'mine.gpx');
+    writeFileSync(path, fixtureGpx());
+    expect(() => stripPresetGpx(argumentsFor(['--strip']), directory)).toThrow(/needs --gpx/);
+    const out = stripPresetGpx(argumentsFor(['--gpx', path, '--strip']), directory);
+    expect(out).toBe(join(directory, 'climb.gpx'));
+    expect(readFileSync(out, 'utf8')).toBe(strippedFixture());
   });
 });
