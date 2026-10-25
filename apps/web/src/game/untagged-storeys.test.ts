@@ -175,6 +175,25 @@ describe('tagged neighbours win — two or more within 100 m (#1634)', () => {
     expect(untaggedStoreys('city-centre', 'residential', 100, 9.5, 0)).toBe(9);
   });
 
+  it('takes the mean of the two middle storeys for an even count of neighbours, through the grid', () => {
+    // Four tagged neighbours: two of 10 storeys and two of 3, so the median is 6.5.
+    const mixed = [house(560, 60, 30), house(640, 60, 30), house(600, 120, 9), house(600, 130, 9)];
+    expect(storeysFor(9)).toBe(3);
+    const plan = theUntagged(plansIn([house(600, 60), ...mixed], everywhere('city-centre')));
+    expect(plan.storeys).toBeGreaterThanOrEqual(6);
+    expect(plan.storeys).toBeLessThanOrEqual(7);
+  });
+
+  it('counts no building_part as a tagged neighbour', () => {
+    const parts = towers.map((tower) => ({
+      ...tower,
+      kind: 'building_part' as const,
+      minHeightMetres: 0,
+    }));
+    const plan = theUntagged(plansIn([house(600, 60), ...parts], everywhere('city-centre')));
+    expect(plan.storeys).toBeLessThanOrEqual(4);
+  });
+
   it('leaves `unknown` at today’s 2, beside towers or not', () => {
     const plan = theUntagged(plansIn([house(600, 60), ...towers], everywhere('unknown')));
     expect(plan.storeys).toBe(DEFAULT_STOREYS);

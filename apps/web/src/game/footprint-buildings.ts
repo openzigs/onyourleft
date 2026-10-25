@@ -1222,7 +1222,7 @@ export function untaggedStoreys(
   if (neighbours === undefined) return picked;
   const ceiling = urban === 'city-centre' ? UNTAGGED_CITY_MAX_STOREYS : most;
   const clamped = Math.min(Math.max(picked, Math.ceil(neighbours - 1)), Math.floor(neighbours + 1));
-  return Math.max(1, Math.min(clamped, ceiling));
+  return Math.min(clamped, ceiling);
 }
 
 /** The side of a cell of {@link TaggedNeighbours}' grid: {@link TAGGED_NEIGHBOUR_METRES}. */
