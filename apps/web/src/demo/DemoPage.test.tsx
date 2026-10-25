@@ -141,6 +141,20 @@ describe('the demo page — #1647', () => {
     expect(shown.frames.ran).toBeGreaterThan(ran);
   });
 
+  it('keeps its status region mounted, empty, before there is anything to say', async () => {
+    await page();
+    const region = mounted?.container.querySelector('[role="status"]');
+    expect(region).not.toBeNull();
+    expect(region?.textContent).toBe('');
+  });
+
+  it('runs no frame callback when the page loads in a hidden tab', async () => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+    const shown = await page();
+    await shown.step(TWO_SECONDS);
+    expect(shown.frames.ran).toBe(0);
+  });
+
   it('runs no frame callback while the canvas is out of view', async () => {
     const shown = await page();
     await shown.step(30);

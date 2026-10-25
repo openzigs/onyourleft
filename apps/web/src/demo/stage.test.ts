@@ -15,7 +15,11 @@ import {
   qualitySettings,
   worldRung,
 } from '../game/quality';
-import { realisticWorldNotice, type RealisticWorldOutcome } from '../game/realistic-assets';
+import {
+  REALISTIC_WORLD_LEFT_NOTICE,
+  realisticWorldNotice,
+  type RealisticWorldOutcome,
+} from '../game/realistic-assets';
 import { createDemoPlayer } from './player';
 import { CLIMB_PRESET } from './presets';
 import { startDemoStage, type DemoSnapshot } from './stage';
@@ -132,5 +136,35 @@ describe('the demo stage — #1647', () => {
     await Promise.resolve();
     expect(view.qualities.at(-1)?.world).toBe('realistic');
     expect(snapshots.at(-1)?.notice).toBeUndefined();
+  });
+
+  it('steps down the product ladder on slow frames, and says so on leaving realism', () => {
+    const { frames, view, stage, snapshots } = stageWith();
+    stage.play();
+    frames.step(2000, 50);
+    expect(view.qualities.length).toBeGreaterThan(1);
+    expect(view.qualities.at(-1)?.world).toBe('stylised');
+    expect(snapshots.at(-1)).toMatchObject({
+      world: 'stylised',
+      notice: REALISTIC_WORLD_LEFT_NOTICE,
+    });
+  });
+
+  it('does not put realism back when the files arrive after the ladder left it', async () => {
+    let arrive: (outcome: RealisticWorldOutcome) => void = () => undefined;
+    const { frames, view, stage, snapshots } = stageWith(
+      new Promise((resolve) => {
+        arrive = resolve;
+      }),
+    );
+    stage.play();
+    frames.step(2000, 50);
+    expect(view.qualities.at(-1)?.world).toBe('stylised');
+    const settings = view.qualities.length;
+    arrive({ loaded: true });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(view.qualities).toHaveLength(settings);
+    expect(snapshots.at(-1)?.world).toBe('stylised');
   });
 });

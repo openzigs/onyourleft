@@ -29,10 +29,10 @@ export class SteppedFrames implements FrameScheduler {
   get pending(): number {
     return this.#pending.size;
   }
-  /** Run every pending callback once per step, `steps` 60 Hz steps. */
-  step(steps = 1): void {
+  /** Run every pending callback once per step, `steps` steps of `stepMs` (60 Hz by default). */
+  step(steps = 1, stepMs = 1000 / 60): void {
     for (let index = 0; index < steps; index += 1) {
-      this.nowMs += 1000 / 60;
+      this.nowMs += stepMs;
       const due = [...this.#pending.values()];
       this.#pending.clear();
       for (const callback of due) {

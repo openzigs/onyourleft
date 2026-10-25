@@ -110,7 +110,8 @@ export function DemoPage(props: DemoPageProps) {
               style={{ display: 'block', width: '100%', height: '100%' }}
             />
           </div>
-          {notice === undefined ? null : <p role="status">{notice}</p>}
+          {/* Mounted before it has text, so a screen reader announces the change. */}
+          <p role="status">{notice}</p>
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
             <button
               type="button"
