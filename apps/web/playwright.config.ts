@@ -352,7 +352,9 @@ export default defineConfig({
   timeout: 60_000,
   expect: { timeout: 15_000 },
   retries: 0,
-  reporter: [['list']],
+  // `not-run-reporter.ts` names each test a run did not reach and fails the
+  // run for it (#1675): Playwright's own summary only counts them.
+  reporter: [['list'], ['./browser/not-run-reporter.ts']],
   // Everything this gate generates lands under the harness build directory,
   // which `.gitignore` and `scripts/check-repo-rules.sh` both already handle by
   // its name. A failure artefact outside it would be a file the repository

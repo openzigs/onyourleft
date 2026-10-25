@@ -349,6 +349,34 @@ test that fails only under coverage, so it has to say which; the read needs no p
 in the body rather than costing the issue. Close the issue once a nightly run is green. The job that runs the checks is
 read-only, pins its actions to the same SHAs as `rules.yml`, and runs on `ubuntu-latest`.
 
+#### Two nightly browser shards — #1675
+
+⚠️ **The nightly browser checks are two jobs since [#1675](https://github.com/openzigs/onyourleft/issues/1675)**,
+and a reviewer who remembers one `Nightly browser checks` step running `test:browser:nightly` is
+reading the old file. On one worker the whole set took 804 s of its 840 s stop (`GATE_BUDGET_MS`)
+on run [40141730529](https://github.com/openzigs/onyourleft/actions/runs/40141730529), and runs
+40139013583 and 40138498505 stopped there with 9 to 15 tests not run. Per file, from that run's
+log: `realistic.browser.spec.ts` 346 s (404 s on 40139013583), `game.browser.spec.ts` 337 s, and
+the four default-world files 111 s together.
+
+- `test:browser:nightly:shard-1`, in the `heavy` job: every nightly spec but the realistic page.
+- `test:browser:nightly:shard-2`, in `browser-2`: `realistic.browser.spec.ts`, whose levers each
+  add a load of the owner's page, alone on its runner.
+
+Split **by file**, not with Playwright's `--shard`, which balances by test count and would have
+put the game spec's 54 cases alone in one half; the game spec's loads share a worker fixture, so
+dividing that file pays for them twice. Both halves keep one worker and the 840 s stop.
+`nightly-split.test.ts` holds every spec with a nightly describe in exactly one half, each half in
+a job of its own, and the `report` job over both. `test:browser:nightly` stays the whole set as one
+command, locally.
+
+**A test a run did not reach is named, and fails the run**:
+`apps/web/browser/not-run-reporter.ts` is a reporter of every run the config makes (the required
+gate's as well), and prints each test Playwright counts as `did not run`, plus one `::error`
+annotation on Actions with the same list.
+
+<!-- nightly-shard-measurements -->
+
 #### 23m39s of 25 — #1051
 
 ⚠️ **Four days after #866's 887 s the job was back at 1 400 s on the 7763**, and PR #1047's run
