@@ -18,11 +18,25 @@
  * or `'unsafe-eval'`, or a `<script>` before the policy. A `<meta>` policy
  * covers only what comes after it, so a script before it would run unchecked.
  *
+ * ## `'unsafe-eval'` on the demo page, and on no other
+ *
+ * **Owner ruling on #1683, 2026-10-25:** the demo page may say
+ * `'unsafe-eval'`, because the KTX2 transcoder (`basis_transcoder.js`, an
+ * Emscripten build with embind) builds its functions with `new Function`, and
+ * without it the realistic world cannot load — while the owner's ruling on
+ * #1643 is that it loads from the start. The demo takes no input beyond a
+ * fixed preset name, holds no data and makes no outside requests. So
+ * {@link UNSAFE_EVAL_PAGE} is the one page the check lets say it, by its path;
+ * every other page this plugin is given still fails the build on it, and
+ * `'unsafe-inline'` fails it everywhere. The rider app's policy is unchanged.
+ *
  * ⚠️ `frame-ancestors` cannot be set from a `<meta>` (the CSP spec ignores it
  * there); it is a response header the hosting site sets.
  */
 
 import { createHash } from 'node:crypto';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import type { Plugin } from 'vite';
 
@@ -35,22 +49,38 @@ const POLICY = /<meta\s+http-equiv="Content-Security-Policy"\s+content="([^"]*)"
 const CHARSET_WITHIN = 768;
 const INLINE_SCRIPT = /<script(?![^>]*\ssrc=)[^>]*>([\s\S]*?)<\/script>/gi;
 
+/**
+ * The one page whose policy may say `'unsafe-eval'`: `demo/index.html` —
+ * the owner's ruling on #1683, 2026-10-25. @see the module comment
+ */
+export const UNSAFE_EVAL_PAGE = fileURLToPath(new URL('../../demo/index.html', import.meta.url));
+
 /** The CSP source expression a browser compares an inline script's text against. */
 export function scriptHash(text: string): string {
   return `'sha256-${createHash('sha256').update(text, 'utf8').digest('base64')}'`;
 }
 
-/** `html` with every inline script's hash added to its policy's `script-src`. */
-export function withInlineScriptHashes(html: string): string {
+/**
+ * `html` with every inline script's hash added to its policy's `script-src`.
+ *
+ * @param page the file `html` was read from, which decides whether it may say
+ *   `'unsafe-eval'` — only {@link UNSAFE_EVAL_PAGE} may.
+ */
+export function withInlineScriptHashes(html: string, page: string): string {
   const policy = POLICY.exec(html);
   if (policy === null) {
     throw new Error('oyl-demo-csp: the page has no <meta http-equiv="Content-Security-Policy">');
   }
   const content = policy[1] ?? '';
-  if (/'unsafe-(?:inline|eval)'/.test(content)) {
+  if (content.includes("'unsafe-inline'")) {
     throw new Error(
-      "oyl-demo-csp: the policy says 'unsafe-inline' or 'unsafe-eval'; an inline script is " +
-        'allowed by its hash',
+      "oyl-demo-csp: the policy says 'unsafe-inline'; an inline script is allowed by its hash",
+    );
+  }
+  if (content.includes("'unsafe-eval'") && resolve(page) !== UNSAFE_EVAL_PAGE) {
+    throw new Error(
+      `oyl-demo-csp: the policy of ${page} says 'unsafe-eval', which only the demo page may ` +
+        "(the owner's ruling on #1683)",
     );
   }
   const firstScript = html.search(/<script[\s>]/i);
@@ -82,7 +112,7 @@ export function inlineScriptHashes(): Plugin {
     name: 'oyl-demo-csp',
     transformIndexHtml: {
       order: 'post',
-      handler: (html) => withInlineScriptHashes(html),
+      handler: (html, { filename }) => withInlineScriptHashes(html, filename),
     },
   };
 }
