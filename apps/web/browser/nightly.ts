@@ -161,8 +161,9 @@ export const NIGHTLY_CHECKS: readonly NightlyCheck[] = [
       'the owner’s page’s `date` and `place`, for #1623’s cost and by-eye pairs: that the ' +
       'route’s autumn and winter change the frame and not its draw calls, triangles or ' +
       'fetched files. The season itself is held in the required suite by ' +
-      '`seasonal-nature.test.ts`, `world.test.ts` §"#1623" and ' +
-      '`mapped-building-belt.test.ts` §"#1623".',
+      '`seasonal-nature.test.ts`, `world.test.ts` §"#1623", ' +
+      '`mapped-building-belt.test.ts` §"#1623", and the view’s own staging of it by ' +
+      '`realistic-textures.test.ts` §"#1623".',
   },
   {
     spec: 'reflow.browser.spec.ts',
