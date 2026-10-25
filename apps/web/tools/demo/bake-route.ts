@@ -537,7 +537,8 @@ export function readBakeInput(args: BakeArguments, directory: string): BakeInput
   const gpx = readFileSync(gpxPath, 'utf8');
   const recordPath = join(directory, `${args.route}.bake.json`);
   if (args.gpx !== undefined) {
-    if (args.record) throw new Error('demo:bake: --record is for a preset route, so not with --gpx');
+    if (args.record)
+      throw new Error('demo:bake: --record is for a preset route, so not with --gpx');
     return { gpx, recordPath, committed: undefined };
   }
   const personal = personalGpxFields(gpx);
