@@ -168,7 +168,7 @@ export const NIGHTLY_CHECKS: readonly NightlyCheck[] = [
     describe: 'the realistic page’s holiday decorations — #1624',
     seconds: 'two more loads of the owner’s page',
     why:
-      'the decoration belt’s cost in the REALISTIC world, on the owner’s page with its probe: ' +
+      'the decoration belt’s cost in the REALISTIC world, on the owner’s page on Halloween: ' +
       'the frame at or under `REALISTIC_WOODED_DRAW_CALLS`, exactly one call for the belt ' +
       'against `levers=-decorations`, and its triangles inside `REALISTIC_DECORATION_TRIANGLES`. ' +
       'Cost, in a world a rider chooses. Still required: the same one-call delta in the ' +

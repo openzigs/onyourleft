@@ -148,10 +148,10 @@ describe('where a holiday’s decorations go — #1624', () => {
     expect(decorationsFor(streets, undefined, PROBE)).toEqual([]);
     expect(decorationsFor(streets, 'winter-lights', { halloween: [probe()] })).toEqual([]);
     expect(decorationsFor(streets, 'halloween', { halloween: [] })).toEqual([]);
-    // The product's own table places nothing yet: #1625 to #1627 fill it.
-    for (const holiday of ['halloween', 'winter-lights'] as const) {
-      expect(decorationsFor(streets, holiday, HOLIDAY_DECORATIONS)).toEqual([]);
-    }
+    // The product's own table places nothing for winter lights yet: #1626
+    // and #1627 fill it. Halloween's is #1625's, below.
+    expect(decorationsFor(streets, 'winter-lights', HOLIDAY_DECORATIONS)).toEqual([]);
+    expect(decorationsFor(streets, 'halloween', HOLIDAY_DECORATIONS).length).toBeGreaterThan(0);
   });
 
   it('offers each anchor to the kinds in order, and gives it one item at most', () => {

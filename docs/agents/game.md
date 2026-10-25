@@ -945,7 +945,10 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         both sides in 96 m pieces, lamps every 16 m, a bench
                         every 48 m, bollards only at mapped side roads'
                         mouths — inside `FURNITURE_CAPACITY` and
-                        `REALISTIC_STREET_TRIANGLES`, neither raised
+                        `REALISTIC_STREET_TRIANGLES`, neither raised. Since
+                        #1625 Halloween's pumpkins stand on a HOUSE door's step
+                        (`buildings.ts` §`frontDoorOf`, a doorstep anchor's
+                        `step`), as lathe shapes (`DecorationShape`)
     src/game/footways.ts
                         footways from the corridor's map data (#1551) —
                         `pavementSides`, the side of the drawn road's NORMAL a

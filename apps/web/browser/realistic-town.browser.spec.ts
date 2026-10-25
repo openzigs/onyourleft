@@ -12,10 +12,10 @@
  * - **The mapped-blobs lever** (#1657): `levers=-mapped-blobs` takes the
  *   mapped buildings' ground blobs out of the mixed town's frame, and nothing
  *   else.
- * - **The holiday decorations** (#1624): with `decorations=probe` and a day in
- *   Halloween, every anchor of the village in reach carries one box
- *   (`realistic/config.ts` §`PROBE_DECORATIONS`); with `levers=-decorations`
- *   there is no holiday. The difference is exactly one draw call, in both
+ * - **The holiday decorations** (#1624, #1625): on a day in Halloween, the
+ *   village in reach carries the product's own pumpkins and jack-o'-lanterns
+ *   (`decorations.ts` §`HOLIDAY_DECORATIONS`; until #1625 a probe box on
+ *   every anchor); with `levers=-decorations` there is no holiday. The difference is exactly one draw call, in both
  *   worlds, and its control is the belt's own triangles read off its mesh,
  *   which must be above nought — so a belt with nothing in it cannot pass by
  *   adding no call. The stylised world's half is NOT nightly: it runs in the
@@ -141,24 +141,25 @@ test.describe('the realistic page’s city centre — #1636', { tag: NIGHTLY }, 
 });
 
 /**
- * #1624: the village road's hold, on Halloween, with the probe on every
- * anchor in reach — and the same with the holiday switched off.
+ * #1624, #1625: the village road's hold, on Halloween, with the product's
+ * own pumpkins on the houses in reach — and the same with the holiday
+ * switched off.
  */
-const DECORATED = `?ladder=0&panel=0&seconds=1&at=${String(VILLAGE_HOLD_METRES)}&route=village&date=2026-10-31&decorations=probe`;
+const DECORATED = `?ladder=0&panel=0&seconds=1&at=${String(VILLAGE_HOLD_METRES)}&route=village&date=2026-10-31`;
 
 test.describe('the realistic page’s holiday decorations, stylised — #1624', () => {
-  test('draws the probe on every anchor in reach in ONE call more than with decorations off', async ({
+  test('draws Halloween’s pumpkins on the houses in reach in ONE call more than with decorations off', async ({
     page,
   }) => {
     test.setTimeout(REALISTIC_LOAD_BUDGET_MS);
     const on = await ride(page, `${DECORATED}&world=stylised`, 'stylised');
     const off = await ride(page, `${DECORATED}&world=stylised&levers=-decorations`, 'stylised');
     console.log(
-      `#1624 stylised: ${String(on.result.lastFrame.calls)} draw calls with the probe ` +
+      `#1624 stylised: ${String(on.result.lastFrame.calls)} draw calls with the pumpkins ` +
         `(${JSON.stringify(on.page.decorations)}), ${String(off.result.lastFrame.calls)} without`,
     );
     expect(off.result.leversOff).toEqual(['decorations']);
-    // The control: the belt holds the probe, so the delta is not vacuous.
+    // The control: the belt holds pumpkins, so the delta is not vacuous.
     expect(on.page.decorations?.triangles ?? 0).toBeGreaterThan(0);
     expect(on.page.decorations?.triangles ?? 0).toBeLessThanOrEqual(REALISTIC_DECORATION_TRIANGLES);
     expect(off.page.decorations?.triangles).toBe(0);
@@ -171,7 +172,7 @@ test.describe('the realistic page’s holiday decorations, stylised — #1624', 
 });
 
 test.describe('the realistic page’s holiday decorations — #1624', { tag: NIGHTLY }, () => {
-  test('draws the probe in ONE call, inside the frame’s calls and its own triangles, fetching nothing more', async ({
+  test('draws Halloween’s pumpkins in ONE call, inside the frame’s calls and its own triangles, fetching nothing more', async ({
     page,
   }) => {
     test.setTimeout(3 * REALISTIC_LOAD_BUDGET_MS);
@@ -182,13 +183,13 @@ test.describe('the realistic page’s holiday decorations — #1624', { tag: NIG
       if (!request.url().startsWith('blob:')) fetched.push(new URL(request.url()).pathname);
     });
     const on = await ride(page, DECORATED);
-    const withProbe = [...fetched].sort();
+    const withPumpkins = [...fetched].sort();
     fetched.length = 0;
     const off = await ride(page, `${DECORATED}&levers=-decorations`);
     const without = [...fetched].sort();
     console.log(
       `#1624 realistic: ${String(on.result.lastFrame.calls)} draw calls and ` +
-        `${String(on.result.lastFrame.triangles)} triangles with the probe ` +
+        `${String(on.result.lastFrame.triangles)} triangles with the pumpkins ` +
         `(${JSON.stringify(on.page.decorations)}), ${String(off.result.lastFrame.calls)} and ` +
         `${String(off.result.lastFrame.triangles)} without`,
     );
@@ -199,9 +200,9 @@ test.describe('the realistic page’s holiday decorations — #1624', { tag: NIG
     expect(on.result.lastFrame.triangles - off.result.lastFrame.triangles).toBe(
       on.page.decorations?.triangles,
     );
-    // Zero bytes (ruling (c)): the probe is boxes from numbers, so the page
+    // Zero bytes (ruling (c)): the pumpkins are built from numbers, so the page
     // fetches exactly what it fetches with no holiday.
-    expect(withProbe).toEqual(without);
+    expect(withPumpkins).toEqual(without);
     expect(off.result.rung).toBe(on.result.rung);
 
     // ⚠️ **The ceiling is held on the wooded frame it was set for, not on the
@@ -211,11 +212,13 @@ test.describe('the realistic page’s holiday decorations — #1624', { tag: NIG
     // and in the pinned Chromium) — every structure kind, the furniture's
     // four kinds, the pavements and the people. The belt's own share of it is
     // the one call held above; since #1689 the village frame is frozen at
-    // `REALISTIC_VILLAGE_DRAW_CALLS` by its own test below. With the probe and
-    // a holiday on, the wooded hold is the frame THIS ceiling counts.
-    const wooded = await ride(page, `${HELD}&date=2026-10-31&decorations=probe`);
+    // `REALISTIC_VILLAGE_DRAW_CALLS` by its own test below, and #1625's
+    // pumpkins add no call to it past the belt's one, the delta held above.
+    // With the pumpkins and a holiday on, the wooded hold is the frame THIS
+    // ceiling counts.
+    const wooded = await ride(page, `${HELD}&date=2026-10-31`);
     console.log(
-      `#1624 at=2550 with the probe: ${String(wooded.result.lastFrame.calls)} draw calls ` +
+      `#1624 at=2550 on Halloween: ${String(wooded.result.lastFrame.calls)} draw calls ` +
         `(${JSON.stringify(wooded.page.decorations)})`,
     );
     expect(wooded.result.lastFrame.calls).toBeLessThanOrEqual(REALISTIC_WOODED_DRAW_CALLS);
@@ -229,8 +232,9 @@ test.describe('the realistic page’s village frame, frozen — #1689', { tag: N
   }) => {
     test.setTimeout(REALISTIC_LOAD_BUDGET_MS);
     // #1624's frame: the village hold, the ladder held at the top rung, on
-    // Halloween with the probe on every anchor in reach — so the decoration
-    // belt's one call is inside the figure, as the owner's ruling counts it.
+    // Halloween — since #1625 with the product's own pumpkins in reach rather
+    // than the probe — so the decoration belt's one call is inside the
+    // figure, as the owner's ruling counts it.
     const village = await ride(page, DECORATED);
     console.log(
       `#1689 route=village at=${String(VILLAGE_HOLD_METRES)}, decorated: ` +
@@ -238,7 +242,7 @@ test.describe('the realistic page’s village frame, frozen — #1689', { tag: N
         `${String(village.result.drawCalls)}), ${String(village.result.lastFrame.triangles)} ` +
         `triangles, frozen at ${String(REALISTIC_VILLAGE_DRAW_CALLS)}`,
     );
-    // Not vacuous: the village is in frame, and the belt holds the probe.
+    // Not vacuous: the village is in frame, and the belt holds pumpkins.
     const census = village.page.census;
     if (census === undefined) throw new Error('the page published no census');
     expect(census.structures.church.inView).toBeGreaterThanOrEqual(1);

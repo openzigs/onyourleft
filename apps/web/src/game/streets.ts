@@ -143,7 +143,7 @@
 
 import { distanceOnRoute, elevationAt, type RouteProfile } from '@onyourleft/domain';
 
-import { buildingPlan, isBuiltKind, type BuiltKind } from './buildings';
+import { frontDoorOf, isBuiltKind } from './buildings';
 import { SIDE_ROAD_WIDTHS, VILLAGE_MOUTH_HALF_METRES, type Junction } from './cross-streets';
 import { villageAnchors, type DecorationAnchor, type DoorOfPlot } from './decorations';
 import { NO_PAVEMENT_DATA, type PavementSide, type PavementSides } from './footways';
@@ -820,35 +820,6 @@ function streetOf(
   if (mesh.triangles === 0) return null;
   const anchors = villageAnchors(profile, origin, seed, site, doors, furniture, land);
   return { wrappedSite, from, to, pavement: mesh.done(), furniture, doorPaths, walks, anchors };
-}
-
-/** Each built kind's front door in each variant, building-local, as its plan cuts it. */
-const doors = new Map<string, { readonly x: number; readonly z: number } | null>();
-
-/**
- * Where a building's front door is, building-local (`+z` faces the road): of
- * the doors its plan (`buildings.ts` §`buildingPlan`) cuts in a wall facing
- * `+z`, the one nearest the middle, at the middle of its sill on the wall's
- * face. `null` where it has none.
- */
-function frontDoorOf(
-  kind: BuiltKind,
-  variant: number,
-): { readonly x: number; readonly z: number } | null {
-  const key = `${kind}:${String(variant)}`;
-  const known = doors.get(key);
-  if (known !== undefined) return known;
-  let best: { readonly x: number; readonly z: number } | null = null;
-  for (const opening of buildingPlan(kind, variant).openings) {
-    if (opening.kind !== 'door' || opening.face.normal[2] < 0.99) continue;
-    const us = opening.outline.map((point) => point[0]);
-    const u = (Math.min(...us) + Math.max(...us)) / 2;
-    const x = opening.face.origin[0] + opening.face.right[0] * u;
-    const z = opening.face.origin[2] + opening.face.right[2] * u;
-    if (best === null || Math.abs(x) < Math.abs(best.x)) best = { x, z };
-  }
-  doors.set(key, best);
-  return best;
 }
 
 /**
