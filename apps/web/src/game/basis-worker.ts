@@ -62,6 +62,9 @@ const oylBasis = BASIS;
 BASIS = (module) => {
   const started = module.onRuntimeInitialized;
   module.onRuntimeInitialized = () => {
+    // A start that arrives after it was declared failed is not a start: three's
+    // handler answering as well would give each transcode two answers.
+    if (oylStartFailure !== undefined) return;
     oylStarted = oylStartFailure === undefined;
     oylWaiting = [];
     started();
@@ -90,8 +93,15 @@ self.addEventListener('message', (event) => {
 });
 `;
 
-/** Marks a worker function this module has already wrapped. */
-const SETTLES = Symbol('oyl.basis-worker-settles');
+/**
+ * Marks a worker function this module has already wrapped. `Symbol.for`, not
+ * `Symbol`: the static it marks belongs to three, which is evaluated once,
+ * while this module may be evaluated again (`vi.resetModules`, Vite HMR) — a
+ * module-local symbol would not see the mark and the source would be wrapped
+ * twice, declaring `let oylStarted` twice: a SyntaxError and a worker that
+ * never runs.
+ */
+const SETTLES = Symbol.for('oyl.basis-worker-settles');
 
 type WorkerFunction = (() => void) & { [SETTLES]?: true };
 

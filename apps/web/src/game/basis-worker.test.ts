@@ -18,7 +18,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { runInNewContext } from 'node:vm';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { settlingBasisWorker } from './basis-worker';
 
@@ -177,6 +177,26 @@ describe('a transcoder that cannot start — #1683', () => {
     }
   });
 
+  it('does not let three answer as well when the transcoder starts after it failed', async () => {
+    let module: BasisModule | undefined;
+    const worker = run(SETTLING, (m) => {
+      module = m;
+      m.initializeBasis = () => undefined;
+      m.KTX2File = class {
+        isValid = () => false;
+        close = () => undefined;
+        delete = () => undefined;
+      };
+      return undefined;
+    });
+    worker.send(init);
+    worker.emit('error', { message: 'Aborted' });
+    module?.onRuntimeInitialized();
+    worker.send(transcode(9));
+    await settled();
+    expect(worker.posted.map(({ id }) => id)).toEqual([9]);
+  });
+
   it('says nothing once the transcoder has started: three answers, once', async () => {
     const worker = run(SETTLING, (module) => {
       module.initializeBasis = () => undefined;
@@ -210,6 +230,15 @@ describe('the worker source it gives KTX2Loader', () => {
     ).toBe(true);
     expect(source.trimEnd().endsWith('}')).toBe(true);
     expect(source).toContain('#1683');
+  });
+
+  it('is wrapped once even by a second instance of the module', async () => {
+    vi.resetModules();
+    const again = await import('./basis-worker');
+    expect(again.settlingBasisWorker).not.toBe(settlingBasisWorker);
+    const wrappedAgain = again.settlingBasisWorker(SETTLING);
+    expect(wrappedAgain).toBe(SETTLING);
+    expect(SETTLING.toString().split('let oylStarted').length - 1).toBe(1);
   });
 
   it('is wrapped once however often it is asked, and is never called', () => {
