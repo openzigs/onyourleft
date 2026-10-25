@@ -670,3 +670,22 @@ describe('held on a race’s start line — #785', () => {
     expect(pending).toBeGreaterThan(0);
   });
 });
+
+describe('a start up the road — #1647', () => {
+  it('starts the rider at startMetres, on the gradient there, and rides on from it', () => {
+    const simulation = new GameSimulation({ ...hillyRoute(), startMetres: 700 });
+    expect(simulation.state.ride.distance).toBe(700);
+    // Past the hill's top at 500 m, so downhill: the gradient of the start, not of 0 m.
+    expect(simulation.state.grade).toBeLessThan(0);
+    expect(simulation.drawnAt(0).riderDistance).toBe(700);
+    simulation.advanceTo(0, PEDALLING);
+    simulation.advanceTo(5_000, PEDALLING);
+    expect(simulation.state.ride.distance).toBeGreaterThan(700);
+  });
+
+  it('starts every ride that names no start on the start line, as before', () => {
+    const simulation = new GameSimulation(hillyRoute());
+    expect(simulation.state.ride.distance).toBe(0);
+    expect(simulation.state.grade).toBeGreaterThan(0);
+  });
+});

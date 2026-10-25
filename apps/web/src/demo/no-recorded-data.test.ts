@@ -62,9 +62,14 @@ function importsOf(file: string): Import[] {
   return found;
 }
 
-/** A relative specifier resolved to a file under `src/`, or `undefined` for a package. */
+/**
+ * A relative specifier resolved to a file under `src/`, or `undefined` for a
+ * package or for an asset Vite hands over as a URL (`./models/colormap.png?url`,
+ * reached since #1647 through the game's scenery), which holds no code.
+ */
 function resolveRelative(from: string, specifier: string): string | undefined {
   if (!specifier.startsWith('.')) return undefined;
+  if (/\?url$/.test(specifier)) return undefined;
   const base = resolve(dirname(from), specifier);
   for (const candidate of [base, `${base}.ts`, `${base}.tsx`, join(base, 'index.ts')]) {
     try {

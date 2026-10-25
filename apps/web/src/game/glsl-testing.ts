@@ -18,9 +18,10 @@
  * anything else rather than a guess: a body of `float|vec3 name = expr;`
  * statements and one `return expr;`; `+ - * /` over floats and `vec3`s with a
  * float broadcast to a `vec3`; unary minus; `.x .y .z` (and `.r .g .b`);
- * `vec3(…)` of one or three floats; and `cos`, `sin`, `floor`, `max`, `dot`
- * and `cross`. Evaluated in double precision, where the GPU uses single, so a
- * comparison needs a tolerance of about 1e-6 of the values compared.
+ * `vec3(…)` of one or three floats; and `cos`, `sin`, `floor`, `max`, `dot`,
+ * `cross`, and since #1623 `smoothstep` of floats and `mix` by a float.
+ * Evaluated in double precision, where the GPU uses single, so a comparison
+ * needs a tolerance of about 1e-6 of the values compared.
  */
 
 /** A value in the subset: a float, or a `vec3`. */
@@ -87,6 +88,17 @@ const FUNCTIONS: Readonly<Record<string, (args: readonly GlslValue[]) => GlslVal
   sin: ([a]) => Math.sin(scalar(a ?? 0, 'sin')),
   floor: ([a]) => Math.floor(scalar(a ?? 0, 'floor')),
   max: ([a, b]) => elementwise(a ?? 0, b ?? 0, Math.max),
+  // #1623: GLSL's own definitions — a Hermite step clamped to [0, 1], and a
+  // blend by a float, of two floats or two `vec3`s.
+  smoothstep: ([from, to, x]) => {
+    const [low, high] = [scalar(from ?? 0, 'smoothstep'), scalar(to ?? 0, 'smoothstep')];
+    const t = Math.min(1, Math.max(0, (scalar(x ?? 0, 'smoothstep') - low) / (high - low)));
+    return t * t * (3 - 2 * t);
+  },
+  mix: ([a, b, t]) => {
+    const share = scalar(t ?? 0, 'mix');
+    return elementwise(a ?? 0, b ?? 0, (x, y) => x * (1 - share) + y * share);
+  },
   dot: ([a, b]) => {
     const [x, y] = [vector(a ?? 0, 'dot'), vector(b ?? 0, 'dot')];
     return x[0] * y[0] + x[1] * y[1] + x[2] * y[2];

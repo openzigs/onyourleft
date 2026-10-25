@@ -9,7 +9,7 @@
  * ## What it is, and what it is not
  *
  * It rides the **product's own renderer** — `three-renderer.ts`, the same
- * `threeGameRenderer` `main.tsx` hands `GameView` — along `realistic/route.ts`
+ * `threeGameRenderer` `main.tsx` hands `GameView` — along `src/demo/synthetic-road.ts`
  * at 9 m/s, with the cranks turning at the pacer's gear, and lets the product's
  * own two-ladder policy (`quality.ts` §`nextWorldQuality`) move the rung from
  * the frame times, as `GameView` does with `nextQuality`. So what the owner
@@ -56,7 +56,11 @@ import {
   type WorldQualityState,
 } from '../src/game/quality';
 import { realisticWorldNotice, type RealisticWorldOutcome } from '../src/game/realistic-assets';
-import { footprintPlans, mappedTown } from '../src/game/footprint-buildings';
+import {
+  FOOTPRINT_MAX_VERTICES,
+  footprintPlans,
+  mappedTown,
+} from '../src/game/footprint-buildings';
 import {
   countrysideFixture,
   mixedTownFixture,
@@ -66,6 +70,7 @@ import { landClassMask } from '../src/game/land-class';
 import { mappedBuildingsOf } from '../src/game/mapped-buildings';
 import type { SceneFrame } from '../src/game/port';
 import { corridorOrigin } from '../src/game/terrain';
+import { NO_URBAN_CLASS, urbanClassMap } from '../src/game/urban-class';
 import { deviceToday } from '../src/game/season';
 import { routeHemisphere, routeLatitudeMagnitude } from '../src/game/world';
 import {
@@ -79,6 +84,7 @@ import {
   loadRealisticWorld,
   loadSceneryModels,
   mappedBlobsShownOf,
+  overhangShadowsOf,
   realisticSurfacesOf,
   realisticTextureReport,
   setRealisticTrees,
@@ -95,7 +101,9 @@ import {
   firPrepassWithLevers,
   surfacesWithLevers,
   treesWithLevers,
+  urbanClassWithLevers,
   windowRevealsWithLevers,
+  overhangShadowsWithLevers,
   countrysideWithLevers,
   type Layer,
   type Lever,
@@ -106,7 +114,12 @@ import { rideFrame, RIDE_METRES_PER_SECOND } from './realistic/frame';
 import { installLayerSwitch, type LayerCensus } from './realistic/layers';
 import { describe, guarded, MAXIMUM_FRAME_GAP_MS, MeasurementClock } from './realistic/loop';
 import { readoutLine, takeOverReporting } from './realistic/reporting';
-import { realisticRoute, routeDigest, villageRoute } from './realistic/route';
+import {
+  placeLatitude,
+  realisticRoute,
+  routeDigest,
+  villageRoute,
+} from '../src/demo/synthetic-road';
 import { frameCensus, type FrameCensus } from './realistic/village';
 
 /** How long the scene runs before anything is sampled: shader compiles, first uploads. */
@@ -348,24 +361,39 @@ async function run(): Promise<void> {
   // or the mixed town's straight road, with its corridor, land and buildings
   // built once, as `GameView` builds a ride's at the press.
   // #1585: or the Richmond street, its narrow lots drawn as house models.
+  // #1623: each at `place`, for the route's own season.
+  const latitude = placeLatitude(config.place);
   const mixed =
     config.town === 'mixed'
-      ? mixedTownFixture()
+      ? mixedTownFixture(latitude)
       : config.town === 'richmond'
-        ? richmondStreetFixture()
+        ? richmondStreetFixture(latitude)
         : config.town === 'countryside'
-          ? countrysideFixture()
+          ? countrysideFixture(latitude)
           : undefined;
   // #1559: or the level road through two villages, for validation 0002 AE2.
   const profile =
     mixed?.profile ??
-    (config.route === 'village' ? villageRoute(config.facing) : realisticRoute(config.facing));
+    (config.route === 'village'
+      ? villageRoute(config.facing, config.place)
+      : realisticRoute(config.facing, config.place));
   const origin = mixed?.origin ?? corridorOrigin(profile);
   publish({ routeDigest: routeDigest(profile) });
   const town = ((): Parameters<typeof rideFrame>[0]['town'] => {
     if (mixed === undefined) return undefined;
     const land = landClassMask(mixed.corridor);
-    const { plans } = footprintPlans(mixed.corridor, land, profile, origin);
+    // #1634: and its urban class, as the press builds it, unless the lever is off.
+    const urban = urbanClassWithLevers(config.leversOff)
+      ? urbanClassMap(mixed.corridor, land, profile)
+      : NO_URBAN_CLASS;
+    const { plans } = footprintPlans(
+      mixed.corridor,
+      land,
+      profile,
+      origin,
+      FOOTPRINT_MAX_VERTICES,
+      urban,
+    );
     return {
       corridor: mixed.corridor,
       land,
@@ -417,6 +445,9 @@ async function run(): Promise<void> {
   // #1659's cost pair: the mapped windows without their reveals, the term out
   // of the facade's program. A setting of the module's, read at every compile.
   windowRevealsOf(view, windowRevealsWithLevers(config.leversOff));
+  // #1658's cost pair: the mapped walls without the sun's shadow under their
+  // eaves, the term out of the facade's program, as the reveals' is.
+  overhangShadowsOf(view, overhangShadowsWithLevers(config.leversOff));
   // #1274's by-eye pair: a steep bank in ambientCG's rock face, or — the crag
   // off — in the scree's photograph, as it was. The ground's material is built
   // with the realistic belts, so this too is applied again after a rung change.

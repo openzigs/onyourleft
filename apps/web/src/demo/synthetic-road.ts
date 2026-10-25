@@ -16,6 +16,14 @@
  *
  * Latitude 51.5°, the fixtures' latitude, for the same sun.
  *
+ * ## Why it lives in `src/demo/` — #1647
+ *
+ * It was `apps/web/browser/realistic/route.ts`. The demo player rides the same
+ * meander ({@link presetRoad}), and shipped code never imports from
+ * `apps/web/browser/`, so the module moved here, where the owner's page and the
+ * demo both import it. Nothing in it changed: `route.test.ts` still pins
+ * {@link realisticRoute}'s digest.
+ *
  * ## The village road — #1559
  *
  * That road passes farmsteads and no village (validation 0002 §"AE2 cannot be
@@ -54,9 +62,31 @@ import {
   type RouteProfile,
 } from '@onyourleft/domain';
 
-import { SUN_AZIMUTH_DEGREES } from '../../src/game/world';
+import { SUN_AZIMUTH_DEGREES } from '../game/world';
 
 const LATITUDE = 51.5;
+
+/**
+ * Where `?place=` puts a road — #1623, for the route's season on the owner's
+ * page: `south`, the same road mirrored into the southern hemisphere, where 20
+ * October is spring; `nordic`, at {@link NORDIC_LATITUDE}, where a winter's
+ * snow lies to sea level (`world.ts` §"How far a winter brings the snow
+ * down"), which at 51.5° N it does not. Absent, every road is where it was.
+ */
+export const PLACES = ['south', 'nordic'] as const;
+
+/** A place `?place=` names. @see PLACES */
+export type Place = (typeof PLACES)[number];
+
+/** `nordic`'s latitude, degrees north: well inside `world.ts`' sea-level winter snow. */
+const NORDIC_LATITUDE = 61;
+
+/** The latitude a road at `place` runs from, degrees north; 51.5 with no place. */
+export function placeLatitude(place: Place | undefined): number {
+  if (place === 'south') return -LATITUDE;
+  if (place === 'nordic') return NORDIC_LATITUDE;
+  return LATITUDE;
+}
 const METRES_PER_DEGREE = 111_320;
 
 /** How long the route is. Long enough for a 30 s run at 9 m/s never to reach its end. */
@@ -115,8 +145,8 @@ export function facingTurn(facing: Facing): number {
  * The route, as the product profiles it — turned to `facing` if one is given,
  * and otherwise exactly the route every Part Z and Part AH row was taken on.
  */
-export function realisticRoute(facing?: Facing): RouteProfile {
-  return meanderingRoute(DEFAULT_START_LONGITUDE, realisticElevation, facing);
+export function realisticRoute(facing?: Facing, place?: Place): RouteProfile {
+  return meanderingRoute(DEFAULT_START_LONGITUDE, realisticElevation, facing, place);
 }
 
 /** Where the default route starts, degrees east: the fixtures' longitude. */
@@ -156,8 +186,23 @@ export const VILLAGE_HOLD_METRES = 820;
  * low, dry ground; the valley, the lake and the bridge stay the default
  * route's. Turned to `facing` as that one is.
  */
-export function villageRoute(facing?: Facing): RouteProfile {
-  return meanderingRoute(VILLAGE_START_LONGITUDE, () => VILLAGE_ELEVATION_METRES, facing);
+export function villageRoute(facing?: Facing, place?: Place): RouteProfile {
+  return meanderingRoute(VILLAGE_START_LONGITUDE, () => VILLAGE_ELEVATION_METRES, facing, place);
+}
+
+/**
+ * A demo preset's road — #1647: the meander {@link realisticRoute} rides, from
+ * the same start, `lengthMetres` long, at `elevation` metres `along` it.
+ *
+ * The same meander so that the demo rides the bends the owner's page was
+ * built to show off, rather than the straight line due east along the equator
+ * that `runner.ts` §`demoRouteProfile` lays for its tests. Unturned.
+ */
+export function presetRoad(
+  elevation: (along: number) => number,
+  lengthMetres: number,
+): RouteProfile {
+  return meanderingRoute(DEFAULT_START_LONGITUDE, elevation, undefined, undefined, lengthMetres);
 }
 
 /**
@@ -190,21 +235,27 @@ export function routeDigest(profile: RouteProfile): string {
   return (hash >>> 0).toString(16).padStart(8, '0');
 }
 
-/** The ±25° meander from `longitude` at 51.5° north, at `elevation`, turned to `facing`. */
+/**
+ * The ±25° meander from `longitude` at 51.5° north — or at `place` (#1623) —
+ * `length` long, at `elevation`, turned to `facing`.
+ */
 function meanderingRoute(
   longitude: number,
   elevation: (along: number) => number,
   facing: Facing | undefined,
+  place: Place | undefined,
+  length: number = ROUTE_METRES,
 ): RouteProfile {
+  const latitude = placeLatitude(place);
   const points: RoutePoint[] = [];
   let east = 0;
   let north = 0;
   const step = 10;
-  const perLongitude = METRES_PER_DEGREE * Math.cos((LATITUDE * Math.PI) / 180);
-  for (let along = 0; along <= ROUTE_METRES; along += step) {
+  const perLongitude = METRES_PER_DEGREE * Math.cos((latitude * Math.PI) / 180);
+  for (let along = 0; along <= length; along += step) {
     points.push({
       position: geographicPosition(
-        degreesLatitude(LATITUDE + north / METRES_PER_DEGREE),
+        degreesLatitude(latitude + north / METRES_PER_DEGREE),
         degreesLongitude(longitude + east / perLongitude),
       ),
       elevation: altitudeMetres(elevation(along)),

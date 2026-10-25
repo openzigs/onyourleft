@@ -82,9 +82,11 @@ import {
   drawsFacade,
   readsVertexTint,
   refillMappedBuildings,
+  ROOF_SNOW,
   setMappedBuildingsMerged,
   WorldLamps,
 } from './three-renderer';
+import { glslFunction } from './glsl-testing';
 
 /** A texture three would have loaded: the fields a material and a release read. */
 function aTexture(): never {
@@ -940,5 +942,73 @@ describe('the house models in the belt — #1585', () => {
     expect(belt.modelMesh.geometry.drawRange.count).toBe(0);
     expect(belt.modelMesh.visible).toBe(false);
     expect(stats.buildings).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * Snow on the roofs, by the route's real season — #1623: the facade's
+ * program mixes what faces up toward the roofs' snow by `oylRoofSnow`
+ * (`world.ts` §`roofSnowIn`, written by the view each realistic frame), and
+ * leaves a wall alone. Evaluated from the program three is handed.
+ */
+describe('a roof under snow, and a wall without it — #1623', () => {
+  const program = (): { fragment: string; uniforms: Record<string, unknown> } => {
+    const material = aBelt().materialOf('roof-tiles');
+    const shader = {
+      uniforms: {} as Record<string, unknown>,
+      vertexShader:
+        '#include <common>\n#include <begin_vertex>\n#include <color_vertex>\n#include <fog_pars_vertex>\n#include <fog_vertex>',
+      fragmentShader:
+        '#include <common>\n#include <clipping_planes_fragment>\n#include <map_fragment>\n#include <color_fragment>\n#include <roughnessmap_fragment>\n#include <metalnessmap_fragment>\n#include <normal_fragment_begin>\n#include <normal_fragment_maps>\n#include <fog_pars_fragment>\n#include <fog_fragment>',
+    };
+    material?.onBeforeCompile(shader as never, undefined as never);
+    return { fragment: shader.fragmentShader, uniforms: shader.uniforms };
+  };
+  /** sRGB to linear, as three decodes a colour for the shader. */
+  const linear = (packed: number): readonly [number, number, number] => {
+    const decode = (channel: number): number => {
+      const c = channel / 255;
+      return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    };
+    return [decode((packed >> 16) & 0xff), decode((packed >> 8) & 0xff), decode(packed & 0xff)];
+  };
+  const TILE: readonly [number, number, number] = [0.3, 0.09, 0.05];
+  const snowed = (up: number, snow: number): readonly number[] => {
+    const drawn = glslFunction(program().fragment, 'oylSnowedRoof')(TILE, up, snow);
+    if (typeof drawn === 'number') throw new Error('oylSnowedRoof returned a float');
+    return drawn;
+  };
+  const apart = (a: readonly number[], b: readonly number[]): number =>
+    Math.hypot(...a.map((each, at) => each - (b[at] ?? 0)));
+
+  it('splices the snow after the normals, by the surface’s facing, reading the season’s uniform', () => {
+    const { fragment, uniforms } = program();
+    const at = fragment.indexOf(
+      'diffuseColor.rgb = oylSnowedRoof(diffuseColor.rgb, dot(normalize(nonPerturbedNormal)',
+    );
+    expect(at).toBeGreaterThan(fragment.indexOf('#include <normal_fragment_maps>'));
+    expect(fragment).toContain('uniform float oylRoofSnow;');
+    expect(uniforms['oylRoofSnow']).toEqual({ value: 0 });
+  });
+
+  it('shades a roof’s up-facing fragment toward the snow on a snowy day, and a wall not at all', () => {
+    const snow = linear(ROOF_SNOW);
+    // A 30° roof, under a full cover.
+    const roof = snowed(Math.cos(Math.PI / 6), 1);
+    for (let channel = 0; channel < 3; channel += 1) {
+      expect(roof[channel]).toBeCloseTo(snow[channel] ?? 0, 5);
+    }
+    expect(apart(roof, snow)).toBeLessThan(apart(TILE, snow));
+    // A wall faces sideways, and a 70° spire sheds it.
+    expect(snowed(0, 1)).toEqual(TILE);
+    expect(snowed(Math.cos((70 * Math.PI) / 180), 1)).toEqual(TILE);
+    // A 50° roof holds some, less than a flat one.
+    const steep = snowed(Math.cos((50 * Math.PI) / 180), 1);
+    expect(apart(steep, snow)).toBeGreaterThan(apart(snowed(1, 1), snow));
+    expect(apart(steep, snow)).toBeLessThan(apart(TILE, snow));
+  });
+
+  it('draws every roof exactly as before with no snow — the season-free picture', () => {
+    for (const up of [0, 0.5, 0.8, 1]) expect(snowed(up, 0)).toEqual(TILE);
   });
 });

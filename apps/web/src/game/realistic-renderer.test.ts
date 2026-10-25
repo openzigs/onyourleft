@@ -2639,7 +2639,8 @@ describe('every realistic tree, shrub, rock and building wears a seeded tint —
     const treeKey = (
       tree.parts[0]?.material as unknown as { customProgramCacheKey: () => string }
     ).customProgramCacheKey();
-    expect(treeKey).toMatch(/\|oyl-tree-dither$/);
+    // #1623: a broadleaf's, which also turns in autumn, by its own program.
+    expect(treeKey).toMatch(/\|oyl-tree-dither\|oyl-autumn$/);
   });
 
   it('refuses to teach one material as a tree and as something else', () => {

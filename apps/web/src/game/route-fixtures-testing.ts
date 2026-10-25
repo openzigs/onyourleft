@@ -35,13 +35,15 @@ const METRES_PER_DEGREE_LATITUDE = 111_320;
 export function northRoute(
   length: number,
   elevation: (along: number) => number,
-  options: { readonly loop?: boolean } = {},
+  /** `latitude`, since #1623: where the road starts, degrees north; {@link FIXTURE_LATITUDE} by default. */
+  options: { readonly loop?: boolean; readonly latitude?: number } = {},
 ): RouteProfile {
   const points: RoutePoint[] = [];
+  const from = options.latitude ?? FIXTURE_LATITUDE;
   for (let along = 0; along <= length + 1e-9; along += 10) {
     points.push({
       position: geographicPosition(
-        degreesLatitude(FIXTURE_LATITUDE + along / METRES_PER_DEGREE_LATITUDE),
+        degreesLatitude(from + along / METRES_PER_DEGREE_LATITUDE),
         degreesLongitude(-0.12),
       ),
       elevation: altitudeMetres(elevation(along)),

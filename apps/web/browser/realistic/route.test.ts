@@ -22,15 +22,24 @@ import { FURNITURE_KINDS, streetsAt } from '../../src/game/streets';
 import { corridorOrigin } from '../../src/game/terrain';
 import { waterways } from '../../src/game/waterways';
 import { auditWetGround } from '../../src/game/wet-ground-testing';
-import { SUN_AZIMUTH_DEGREES } from '../../src/game/world';
+import { mixedTownFixture } from '../../src/game/footprint-fixtures-testing';
+import { natureOn } from '../../src/game/season';
+import {
+  routeHemisphere,
+  routeLatitudeMagnitude,
+  snowCoverIn,
+  SUN_AZIMUTH_DEGREES,
+  worldStyle,
+} from '../../src/game/world';
 import { rideFrame } from './frame';
 import {
+  placeLatitude,
   realisticRoute,
   routeDigest,
   VILLAGE_HOLD_METRES,
   villageRoute,
   type Facing,
-} from './route';
+} from '../../src/demo/synthetic-road';
 import { frameCensus } from './village';
 
 // #702: every Part Z step holds on the route as the page rides it by default,
@@ -278,5 +287,41 @@ describe('the village road — #1559, validation 0002 AE2', () => {
     expect(census.structures.church.carried).toBe(0);
     expect(census.structures['shop-row'].carried).toBe(0);
     expect(census.streets).toBe(0);
+  });
+});
+
+describe('`?place=` — the page’s roads where their season shows — #1623', () => {
+  const on = (month: number, day: number) => ({ year: 2026, month, day });
+  const natureOf = (profile: ReturnType<typeof realisticRoute>, day: ReturnType<typeof on>) =>
+    natureOn(day, routeHemisphere(profile), routeLatitudeMagnitude(profile));
+
+  it('leaves every road where it was with no place', () => {
+    expect(routeDigest(realisticRoute(undefined, undefined))).toBe(routeDigest(realisticRoute()));
+    expect(placeLatitude(undefined)).toBe(51.5);
+  });
+
+  it('mirrors the road into the south, where 20 October is spring', () => {
+    const north = realisticRoute();
+    const south = realisticRoute(undefined, 'south');
+    expect(routeHemisphere(south)).toBe('south');
+    expect(routeLatitudeMagnitude(south)).toBeCloseTo(routeLatitudeMagnitude(north), 1);
+    expect(natureOf(north, on(10, 20)).autumn).toBeGreaterThan(0.8);
+    expect(natureOf(south, on(10, 20)).autumn).toBe(0);
+  });
+
+  it('rides `nordic` where a winter’s snow lies on the road’s own ground, and July’s does not', () => {
+    for (const profile of [
+      realisticRoute(undefined, 'nordic'),
+      villageRoute(undefined, 'nordic'),
+      mixedTownFixture(placeLatitude('nordic')).profile,
+    ]) {
+      const world = worldStyle(profile);
+      expect(routeHemisphere(profile)).toBe('north');
+      expect(snowCoverIn(world, natureOf(profile, on(1, 15)).winter)).toBe(1);
+      expect(snowCoverIn(world, natureOf(profile, on(7, 15)).winter)).toBe(0);
+    }
+    // And at 51.5° N, where every row was taken, a January lays none at sea level.
+    const town = mixedTownFixture().profile;
+    expect(snowCoverIn(worldStyle(town), natureOf(town, on(1, 15)).winter)).toBe(0);
   });
 });

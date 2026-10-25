@@ -20,9 +20,12 @@ import {
   PROBE_DECORATIONS,
   surfacesWithLevers,
   treesWithLevers,
+  urbanClassWithLevers,
   windowRevealsWithLevers,
+  overhangShadowsWithLevers,
 } from './config';
 import { ANCHOR_KINDS, HOLIDAY_DECORATIONS } from '../../src/game/decorations';
+import { PLACES } from '../../src/demo/synthetic-road';
 import { REALISTIC_TREE_SETS, REALISTIC_TREES_DEFAULT } from '../../src/game/realistic-assets';
 
 describe('the realistic page’s configuration — ADR 0026 D-12', () => {
@@ -52,6 +55,7 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
       route: undefined,
       date: undefined,
       decorations: undefined,
+      place: undefined,
     });
   });
 
@@ -168,6 +172,48 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
       'utf8',
     );
     expect(harness).toContain('windowRevealsOf(view, windowRevealsWithLevers(config.leversOff));');
+  });
+
+  it('builds the mapped walls’ overhang shadows, as the product does, unless #1658’s lever takes them out', () => {
+    expect(LEVERS).toContain('overhang-shadows');
+    expect(overhangShadowsWithLevers([])).toBe(true);
+    // No OTHER lever touches them.
+    expect(overhangShadowsWithLevers(LEVERS.filter((lever) => lever !== 'overhang-shadows'))).toBe(
+      true,
+    );
+    expect(overhangShadowsWithLevers(parseConfig('?levers=-overhang-shadows').leversOff)).toBe(
+      false,
+    );
+    // And #1659's lever is not this one.
+    expect(windowRevealsWithLevers(parseConfig('?levers=-overhang-shadows').leversOff)).toBe(true);
+  });
+
+  it('hands #1658’s parsed lever to the owner’s page, which is where it is wired', () => {
+    const harness = readFileSync(
+      fileURLToPath(new URL('../realistic-harness.ts', import.meta.url)),
+      'utf8',
+    );
+    expect(harness).toContain(
+      'overhangShadowsOf(view, overhangShadowsWithLevers(config.leversOff));',
+    );
+  });
+
+  it('plans the town with its urban class, as the press does, unless #1634’s lever takes it out', () => {
+    expect(LEVERS).toContain('urban-class');
+    expect(urbanClassWithLevers([])).toBe(true);
+    // No OTHER lever touches it.
+    expect(urbanClassWithLevers(LEVERS.filter((lever) => lever !== 'urban-class'))).toBe(true);
+    expect(urbanClassWithLevers(parseConfig('?levers=-urban-class').leversOff)).toBe(false);
+    expect(configQuery(parseConfig('?town=mixed&levers=-urban-class'))).toBe(
+      `?levers=${encodeURIComponent('-urban-class')}&town=mixed`,
+    );
+    // Wired where the harness plans the town, read as text as #1659's lever is above.
+    const harness = readFileSync(
+      fileURLToPath(new URL('../realistic-harness.ts', import.meta.url)),
+      'utf8',
+    );
+    expect(harness).toContain('const urban = urbanClassWithLevers(config.leversOff)');
+    expect(harness).toMatch(/FOOTPRINT_MAX_VERTICES,\s+urban,\s+\);/);
   });
 
   it('builds both surfaces’ shaders, bounded, as the product does, unless a #1523 lever takes one out', () => {
@@ -412,5 +458,28 @@ describe('nearest-rank percentiles', () => {
 
   it('says NaN for nothing timed, never zero', () => {
     expect(Number.isNaN(percentiles([]).p50)).toBe(true);
+  });
+});
+
+describe('where the page’s roads are ridden, for the route’s own season — #1623', () => {
+  it('rides every road where it was when the URL names no place', () => {
+    expect(parseConfig('').place).toBeUndefined();
+    expect(DEFAULT_CONFIG.place).toBeUndefined();
+  });
+
+  it('reads each place, and writes it back as the same configuration', () => {
+    for (const place of PLACES) {
+      const config = parseConfig(`?place=${place}&date=2026-01-15&town=mixed`);
+      expect(config.place).toBe(place);
+      expect(parseConfig(configQuery(config))).toEqual(config);
+    }
+  });
+
+  it('refuses a place it does not know, as it refuses an unknown lever', () => {
+    for (const bad of ['north', 'South', '', 'far']) {
+      expect(() => parseConfig(`?place=${encodeURIComponent(bad)}`)).toThrow(
+        /place is one of south, nordic/,
+      );
+    }
   });
 });
