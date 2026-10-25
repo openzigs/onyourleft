@@ -470,7 +470,7 @@ export const REALISTIC_WOODED_DRAW_CALLS = 35;
  * decides that when the device checks resume; the call count does not depend
  * on the GPU, so the pinned Chromium counts what the tablet would.
  *
- * @test-facing held by `realistic.browser.spec.ts` §"#1689", which counts the
+ * @test-facing held by `realistic-town.browser.spec.ts` §"#1689", which counts the
  * frame at the WebGL entry points
  */
 export const REALISTIC_VILLAGE_DRAW_CALLS = 57;
@@ -833,7 +833,7 @@ export const REALISTIC_STREET_TRIANGLES = 25_024;
  *
  * The belt spends it (`three-renderer.ts` §`decorationGeometry`);
  * `realistic-budget.test.ts` holds it inside the frame, and
- * `realistic.browser.spec.ts` reads the belt's triangles off its mesh on the
+ * `realistic-town.browser.spec.ts` reads the belt's triangles off its mesh on the
  * owner's page against it.
  */
 export const REALISTIC_DECORATION_TRIANGLES = 12_000;
