@@ -7,7 +7,7 @@
  */
 
 import type { FullResult, Suite, TestCase, TestResult } from '@playwright/test/reporter';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import config from '../playwright.config';
 
@@ -44,6 +44,12 @@ async function run(tests: TestCase[], status: FullResult['status'], began = true
   log.mockRestore();
   return { printed, returned };
 }
+
+// Off unless a case turns it on: CI itself sets `CI`, and the cases that read
+// the printed lines must read the same lines there as on a laptop.
+beforeEach(() => {
+  vi.stubEnv('CI', '');
+});
 
 afterEach(() => {
   vi.unstubAllEnvs();
