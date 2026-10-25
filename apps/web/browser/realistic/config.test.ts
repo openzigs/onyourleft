@@ -91,6 +91,18 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     expect(configQuery(parseConfig('?town=countryside&levers=-land-planting'))).toBe(
       '?levers=-land-planting&town=countryside',
     );
+    // #1636: a city centre, for its shop fronts and its tower.
+    expect(parseConfig('?town=city').town).toBe('city');
+    expect(configQuery(parseConfig('?town=city&at=1430'))).toBe('?at=1430&town=city');
+  });
+
+  it('rides the city centre through #1636’s fixture, which is where it is wired', () => {
+    const harness = readFileSync(
+      fileURLToPath(new URL('../realistic-harness.ts', import.meta.url)),
+      'utf8',
+    );
+    expect(harness).toContain("config.town === 'city'");
+    expect(harness).toContain('? cityCentreFixture(latitude)');
   });
 
   it('switches #1542’s three changes off one by one, and none unless asked', () => {

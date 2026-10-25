@@ -117,6 +117,29 @@ test.describe('the realistic page’s mapped-blobs lever — #1657', { tag: NIGH
   });
 });
 
+test.describe('the realistic page’s city centre — #1636', { tag: NIGHTLY }, () => {
+  test('draws a city centre’s shop fronts and its tower inside the page’s 35 calls', async ({
+    page,
+  }) => {
+    test.setTimeout(2 * REALISTIC_LOAD_BUDGET_MS);
+    // Inside `cityCentreFixture`'s city, held between its two towers; the
+    // people off, so the frame is the city's and the road's.
+    for (const at of [1_430, 1_500]) {
+      const city = await ride(
+        page,
+        `?ladder=0&panel=0&seconds=1&town=city&at=${String(at)}&levers=-people`,
+      );
+      console.log(
+        `#1636 town=city at=${String(at)}: ${String(city.result.lastFrame.triangles)} triangles in ` +
+          `${String(city.result.lastFrame.calls)} draw calls`,
+      );
+      expect(city.result.lastFrame.calls).toBeGreaterThan(0);
+      expect(city.result.lastFrame.calls).toBeLessThanOrEqual(REALISTIC_WOODED_DRAW_CALLS);
+    }
+    expect(REALISTIC_WOODED_DRAW_CALLS).toBe(35);
+  });
+});
+
 /**
  * #1624: the village road's hold, on Halloween, with the probe on every
  * anchor in reach — and the same with the holiday switched off.

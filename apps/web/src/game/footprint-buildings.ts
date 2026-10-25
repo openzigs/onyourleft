@@ -408,7 +408,8 @@ export const FACADE_RAILING = -5;
  *   than #1581's casements), {@link STYLE_SHUTTERS}, {@link STYLE_EAVES} (an
  *   overhanging roof shades the wall's top) and
  *   {@link STYLE_BRICK_FOUNDATION} (a clapboard wall's foundation band is
- *   brick, not block); since #1661 {@link STYLE_FLAT_ROOF} (a parapet above).
+ *   brick, not block); since #1661 {@link STYLE_FLAT_ROOF} (a parapet above);
+ *   since #1636 {@link STYLE_GLAZED} (a tower's curtain wall).
  * - **`width`**: a windowed wall's bay, in metres — what pairs its windows;
  *   a dormer's or a garage's face's width.
  * - **`extra`**: a windowed wall's picture-window bay on the ground storey,
@@ -457,6 +458,17 @@ export const STYLE_BRICK_FOUNDATION = 8;
  * its door's face a shop's glazed door in a recess. @see STYLE_FLOATS
  */
 export const STYLE_COMMERCIAL = 16;
+/**
+ * `flags`: a tower's curtain wall — #1636: glazing bands every storey over
+ * spandrels, with thin mullions, drawn by the shader in place of windows
+ * (`facade.ts` §`CURTAIN_WALL`) on a building of {@link GLAZED_MIN_STOREYS}
+ * or more. @see STYLE_FLOATS
+ */
+export const STYLE_GLAZED = 32;
+
+/** The least storeys a building has whose walls are a curtain wall — #1636: **9**. */
+export const GLAZED_MIN_STOREYS = 9;
+
 /**
  * `flags`: a wall under a flat roof's parapet — #1661, where the parapet's
  * drip streaks it (`facade.ts` §`WEATHERING`). A gable end carries no
@@ -3989,36 +4001,20 @@ function planFootprint(
     (residential && share(STREAM_SHUTTERS) < SHUTTER_SHARE ? STYLE_SHUTTERS : 0) +
     (roof === 'flat' ? STYLE_FLAT_ROOF : STYLE_EAVES) +
     (brickFoundation ? STYLE_BRICK_FOUNDATION : 0) +
-    (use === 'commercial' ? STYLE_COMMERCIAL : 0);
+    (use === 'commercial' ? STYLE_COMMERCIAL : 0) +
+    // #1636: a tower in a covered urban class is glazed; with no class, as before.
+    (urbanClass !== 'unknown' && storeys >= GLAZED_MIN_STOREYS ? STYLE_GLAZED : 0);
   const wallStyle: Style = [wallClad, flags, 0, -1];
   const roofStyle: Style = shingled
     ? [cladOf(CLAD_SHINGLE, SHINGLE_COURSE_METRES), 0, 0, -1]
     : NO_STYLE;
-  const frontBays = front === undefined ? 0 : baysOf(front.length);
-  const garage =
-    front !== undefined &&
-    frontFrame !== undefined &&
-    residential &&
-    frontBays >= GARAGE_MIN_BAYS &&
-    share(STREAM_GARAGE) < GARAGE_SHARE
-      ? garageOf(
-          {
-            length: front.length,
-            bays: frontBays,
-            bay: share(STREAM_GARAGE_END) < 0.5 ? 0 : frontBays - 1,
-          },
-          frontFrame,
-          road,
-          segments,
-          { ring: drawn, others },
-          groundAt,
-        )
-      : undefined;
-  // #1590: a shop's front on a commercial building's front wall, where it is long enough.
+  // #1590: a shop's front on a commercial building's front wall, where it is
+  // long enough; since #1636 on every building's in a city centre, its wall
+  // facing the route, whatever the floors above are.
   const shop =
     front !== undefined &&
     frontFrame !== undefined &&
-    use === 'commercial' &&
+    (use === 'commercial' || urbanClass === 'city-centre') &&
     front.length >= SHOP_FRONT_MIN_WALL_METRES
       ? shopOf(
           front.length,
@@ -4054,6 +4050,27 @@ function planFootprint(
             stripes: share(STREAM_AWNING_STRIPES),
             depth: share(STREAM_AWNING_DEPTH),
           },
+        )
+      : undefined;
+  const frontBays = front === undefined ? 0 : baysOf(front.length);
+  const garage =
+    front !== undefined &&
+    frontFrame !== undefined &&
+    residential &&
+    shop === undefined &&
+    frontBays >= GARAGE_MIN_BAYS &&
+    share(STREAM_GARAGE) < GARAGE_SHARE
+      ? garageOf(
+          {
+            length: front.length,
+            bays: frontBays,
+            bay: share(STREAM_GARAGE_END) < 0.5 ? 0 : frontBays - 1,
+          },
+          frontFrame,
+          road,
+          segments,
+          { ring: drawn, others },
+          groundAt,
         )
       : undefined;
   // #1589: whether a porch's ring is clear of the road. The front edge's
@@ -4093,6 +4110,7 @@ function planFootprint(
     front !== undefined &&
     frontFrame !== undefined &&
     residential &&
+    shop === undefined &&
     share(STREAM_FRONT_PORCH) < FRONT_PORCH.share
       ? frontPorchOf(
           {
@@ -4133,6 +4151,7 @@ function planFootprint(
   const picture =
     storeys === 1 &&
     residential &&
+    shop === undefined &&
     frontBays >= 3 &&
     frontBays % 2 === 1 &&
     share(STREAM_PICTURE) < PICTURE_SHARE
@@ -4265,7 +4284,7 @@ function planFootprint(
       );
       if (shop !== undefined) shopFront(writing.shopfront, frontFrame, floor, shop);
       // #1589: a porch, written when it is first read, replaces the canopy.
-      if (frontPorchSpec === undefined && withPorch) {
+      if (frontPorchSpec === undefined && withPorch && shop === undefined) {
         porch(writing.trim, frontFrame, floor, withPosts);
       }
       if (garage !== undefined) {

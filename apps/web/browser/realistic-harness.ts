@@ -64,6 +64,7 @@ import {
   terraceStreetFixture,
 } from '../src/game/footprint-fixtures-testing';
 import { mappedBuildingsOf } from '../src/game/mapped-buildings';
+import { cityCentreFixture } from '../src/game/testing/urban-fixtures';
 import type { SceneFrame } from '../src/game/port';
 import { corridorOrigin } from '../src/game/terrain';
 import { deviceToday } from '../src/game/season';
@@ -369,7 +370,9 @@ async function run(): Promise<void> {
           ? countrysideFixture(latitude)
           : config.town === 'terrace'
             ? terraceStreetFixture(latitude)
-            : undefined;
+            : config.town === 'city'
+              ? cityCentreFixture(latitude)
+              : undefined;
   // #1559: or the level road through two villages, for validation 0002 AE2.
   const profile =
     mixed?.profile ??

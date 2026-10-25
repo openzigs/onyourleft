@@ -145,6 +145,16 @@ export const NIGHTLY_CHECKS: readonly NightlyCheck[] = [
   },
   {
     spec: 'realistic-town.browser.spec.ts',
+    describe: 'the realistic page’s city centre — #1636',
+    seconds: 'two more loads of the owner’s page',
+    why:
+      'the owner’s page’s `town=city`, for #1636’s screenshots: that a city centre’s shop ' +
+      'fronts and tower stay inside the page’s 35 calls. An instrument of a page that ships ' +
+      'in no build; the shop fronts and the curtain wall are held in the required suite by ' +
+      '`city-centre.test.ts`, and the belt’s six calls by the same.',
+  },
+  {
+    spec: 'realistic-town.browser.spec.ts',
     describe: 'the realistic page’s mapped-blobs lever — #1657',
     seconds: 'two more loads of the owner’s page',
     why:

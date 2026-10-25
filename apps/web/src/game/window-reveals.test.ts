@@ -379,8 +379,9 @@ describe('the shader’s reveal — #1659', () => {
     const { fragment } = compiled();
     expect(fragment).toContain(`const float oylRecess = ${String(REVEAL_DEPTH_METRES)};`);
     expect(fragment).toContain(`const float oylGraze = ${String(REVEAL_GRAZE)};`);
-    // The sash's (every sash kind and the dormer's) and the casement's, and the definition.
-    expect(fragment.match(/oylRevealOf\(/g)?.length).toBe(3);
+    // The sash's (every sash kind and the dormer's) and the casement's, since
+    // #1636 the curtain wall's, and the definition.
+    expect(fragment.match(/oylRevealOf\(/g)?.length).toBe(4);
     expect(fragment).toContain('oylRevealOf(oylLocal, oylLo, oylHi, pw, e, s,');
     expect(fragment).toContain('oylRevealOf(oylAt * oylToM, oylLo * oylToM, oylHi * oylToM,');
     // The dormer's sash is a sash, and is asked with the face's view.
@@ -399,8 +400,9 @@ describe('the shader’s reveal — #1659', () => {
     );
     expect(fragment).toContain('lit = step(0.0001, oylFacing) * oylFront;');
     // The sash, the commercial window and the dormer/shopfront sash each take
-    // the wall's light on a lit side and REVEAL.shade on one facing away.
-    expect(fragment.split('(1.0 - oylRevealShade * (1.0 - oylSideLit))').length - 1).toBe(3);
+    // the wall's light on a lit side and REVEAL.shade on one facing away; since
+    // #1636 the curtain wall its mullion's.
+    expect(fragment.split('(1.0 - oylRevealShade * (1.0 - oylSideLit))').length - 1).toBe(4);
   });
 
   it('shadows the glass under the head and the sun-side jamb, and the wall under the sill', () => {
