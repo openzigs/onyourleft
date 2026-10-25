@@ -53,7 +53,7 @@ Read on **2026-10-24**.
 
 | What | Where | Finding |
 |---|---|---|
-| The layer's fields | `https://docs.protomaps.com/basemaps/layers`, through a fetch tool that returns a summary of the page | `places`: `kind` (`country`, `region`, `locality`, `macrohood`, `neighbourhood`), `kind_detail`, `capital`, `population`, `population_rank` (integer), `wikidata`, and the names |
+| The layer's fields | `https://docs.protomaps.com/basemaps/layers` (read as a summary, so secondary; the authority for every field is the `Places.java` row below, at a pinned commit) | `places`: `kind` (`country`, `region`, `locality`, `macrohood`, `neighbourhood`), `kind_detail`, `capital`, `population`, `population_rank` (integer), `wikidata`, and the names |
 | How the archive writes them | protomaps/basemaps `tiles/src/main/java/com/protomaps/basemap/layers/Places.java` at [`c809cd18`](https://github.com/protomaps/basemaps/blob/c809cd1833/tiles/src/main/java/com/protomaps/basemap/layers/Places.java) (tiles 4.14.9, the last change to that file before the archive's 4.15.2, and identical to `main` on that day) | `place=city/town/village` becomes `kind=locality`; `place=suburb` becomes `kind=neighbourhood` with `kind_detail=suburb`; `place=quarter` becomes `kind=macrohood`. `kind_detail` is written from the OSM `place` tag. **The zoom table's default `maxzoom` is 15, and `locality`, `neighbourhood` and `macrohood` keep it** (only `country` and `region` stop earlier; the 99 in `getZoomsPops` is the fallback for a feature no rule matches). `population_rank` is `i + 1` for the highest of 18 population breaks the population reaches, so **1 to 18**, and a `wikidata` config row may override it. A label grid thins points: at z15, 16-pixel cells of at most 3 points each |
 | Whether places reach the corridor's z15 tiles | The published archive `basemap-us-20260914.pmtiles`, decoded by hand with a throwaway script (never committed) that read only `kind`, `kind_detail` and `population_rank` and printed counts | The table below |
 
@@ -109,9 +109,9 @@ What it shows:
    value (`neighbourhood`, `locality`, `isolated_dwelling`, `farm`, `allotments`, anything new), or
    none, drops the point. In the archive `place=suburb` is `kind=neighbourhood` with
    `kind_detail=suburb`, and `place=quarter` is `kind=macrohood` with `kind_detail=quarter`.
-3. **`population_rank`**, an integer from **0 to 18** inclusive (Context: the archive writes 1 to 18;
-   0 is admitted for a feature with no population). A value that is not an integer, or is outside
-   that range, drops the point.
+3. **`population_rank`**, an integer from **1 to 18** inclusive (Context: the archive writes 1 to 18,
+   and a `wikidata` config row that overrides it is held to the same range). A value that is absent,
+   not an integer, or outside that range drops the point; no `0` is admitted, as nothing cited writes one.
 4. **The point's position**, projected into the corridor frame exactly as the other layers' geometry
    is. A `places` feature that is not a point drops.
 5. **A bound on the count.** The decoder stops at a per-layer count of places, a new limit in
@@ -141,7 +141,7 @@ the question returns to the owner; it does not become option C by default.
 
 1. **Only as a prior, and only upwards from `town`.** A window that `urban-class.ts` §`classify`
    puts at `town`, and that is **borderline** — its footprint coverage at least
-   `PLACE_PRIOR_MIN_COVERAGE`, **0.25** (between `TOWN_COVERAGE` 0.15 and `CITY_COVERAGE` 0.35) — is
+   `PLACE_PRIOR_MIN_COVERAGE`, **0.25** (at or above `TOWN_COVERAGE` 0.15, with **no upper bound**: a window of `CITY_COVERAGE` 0.35 or more that `classify()` still returns as `town`, for want of mapped heights, is the motivating case and must not be capped out) — is
    lifted to `city-centre` when a **lifting point** lies within `PLACE_PRIOR_REACH_METRES`, **800 m**,
    of the window's centre on the drawn road. Both numbers are provisional until #1630's readings, as
    every threshold in `urban-class.ts` is, and are named there beside the rule.
@@ -158,7 +158,7 @@ the question returns to the owner; it does not become option C by default.
 5. **The points that are held and lift nothing.** `town`, `village`, `hamlet` and `quarter` points
    are read and held because the list in D-2 is the owner's ruling. Their only permitted use, later,
    is as a further prior in `urban-class.ts` under D-5.3 and D-5.4; any other use is a change to
-   this ADR.
+   this ADR. #1632 should prove these points are held and never shown.
 
 ### D-6 — Where it is held: the ODbL store `worldCorridors`
 
