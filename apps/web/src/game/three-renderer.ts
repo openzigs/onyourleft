@@ -170,6 +170,7 @@ import {
   HalfFloatType,
   InstancedBufferAttribute,
   InstancedMesh,
+  LatheGeometry,
   LinearFilter,
   LinearMipmapLinearFilter,
   LoadingManager,
@@ -664,8 +665,10 @@ import { NO_SEASON, type Holiday, type Season } from './season';
 import {
   decorationsFor,
   HOLIDAY_DECORATIONS,
+  PUMPKIN,
   type DecorationItem,
   type DecorationKind,
+  type DecorationShape,
   type ItemTable,
 } from './decorations';
 
@@ -9441,20 +9444,66 @@ export function decorationMaterials(world: 'stylised' | 'realistic'): {
   };
 }
 
-/** A unit box's 36 corners (twelve triangles, unindexed) and their normals. */
-const DECORATION_BOX = ((): {
+/** One decoration shape in the unit box about the origin: its corners, unindexed, and their normals. */
+interface DecorationTemplate {
   readonly positions: Float32Array;
   readonly normals: Float32Array;
-} => {
-  const box = new BoxGeometry(1, 1, 1).toNonIndexed();
-  const positions = Float32Array.from(box.getAttribute('position').array);
-  const normals = Float32Array.from(box.getAttribute('normal').array);
-  box.dispose();
-  return { positions, normals };
-})();
+}
 
-/** The triangles one decoration part is: a box, **12**. */
-export const DECORATION_PART_TRIANGLES = DECORATION_BOX.positions.length / 9;
+function decorationTemplate(made: BufferGeometry): DecorationTemplate {
+  const flat = made.index === null ? made : made.toNonIndexed();
+  const positions = Float32Array.from(flat.getAttribute('position').array);
+  const normals = Float32Array.from(flat.getAttribute('normal').array);
+  made.dispose();
+  flat.dispose();
+  return { positions, normals };
+}
+
+/**
+ * A pumpkin — #1625: `decorations.ts` §`PUMPKIN`'s lathe, its radii ribbed,
+ * stood in the unit box (its foot at `y = −0.5`) and smooth-shaded.
+ */
+function pumpkinGeometry(): BufferGeometry {
+  const lathe = new LatheGeometry(
+    PUMPKIN.profile.map(([radius, up]) => new Vector2(radius, up - 0.5)),
+    PUMPKIN.segments,
+  );
+  const position = lathe.getAttribute('position');
+  for (let at = 0; at < position.count; at += 1) {
+    const x = position.getX(at);
+    const z = position.getZ(at);
+    const rib = 1 + PUMPKIN.ribDepth * Math.cos(PUMPKIN.ribs * Math.atan2(x, z));
+    position.setXYZ(at, x * rib, position.getY(at), z * rib);
+  }
+  lathe.computeVertexNormals();
+  return lathe;
+}
+
+/** Every {@link DecorationShape}, built once. @see DecorationShape */
+const DECORATION_TEMPLATES: Readonly<Record<DecorationShape, DecorationTemplate>> = {
+  box: decorationTemplate(new BoxGeometry(1, 1, 1)),
+  pumpkin: decorationTemplate(pumpkinGeometry()),
+  stalk: decorationTemplate(new CylinderGeometry(0.5, 0.5, 1, 5, 1, true)),
+  face: decorationTemplate(new PlaneGeometry(1, 1)),
+};
+
+/** The triangles one part of `shape` is — #1625. @see DecorationShape */
+export function decorationShapeTriangles(shape: DecorationShape = 'box'): number {
+  return DECORATION_TEMPLATES[shape].positions.length / 9;
+}
+
+/**
+ * The triangles one box part is: **12**.
+ *
+ * @test-facing `decoration-belt.test.ts` counts its probe's boxes by it; since
+ * #1625 the belt counts every shape by {@link decorationKindTriangles}
+ */
+export const DECORATION_PART_TRIANGLES = decorationShapeTriangles('box');
+
+/** The triangles one item of `kind` is, every part together — #1625. */
+export function decorationKindTriangles(kind: DecorationKind): number {
+  return kind.parts.reduce((sum, part) => sum + decorationShapeTriangles(part.shape), 0);
+}
 
 /** Reused by {@link decorationGeometry}, so a rebuild allocates no colour. */
 const DECORATION_SCRATCH = new Color();
@@ -9476,7 +9525,7 @@ export function decorationGeometry(
   for (const item of items) {
     const kind = byName.get(item.item);
     if (kind === undefined) continue;
-    const adds = kind.parts.length * DECORATION_PART_TRIANGLES;
+    const adds = decorationKindTriangles(kind);
     if (triangles + adds > REALISTIC_DECORATION_TRIANGLES) continue;
     triangles += adds;
     drawn.push({ item, kind });
@@ -9486,13 +9535,15 @@ export function decorationGeometry(
   const normals = new Float32Array(vertices * 3);
   const colours = new Float32Array(vertices * 3);
   const glow = new Float32Array(vertices);
-  const box = DECORATION_BOX;
   let at = 0;
   for (const { item, kind } of drawn) {
-    const { x, y, z, yaw } = item.anchor;
+    const { x, z, yaw } = item.anchor;
+    // #1625: on its step's top where it stands on one, else on its anchor.
+    const y = item.base;
     const cos = Math.cos(yaw);
     const sin = Math.sin(yaw);
     for (const part of kind.parts) {
+      const box = DECORATION_TEMPLATES[part.shape ?? 'box'];
       DECORATION_SCRATCH.set(part.colour);
       const [width, height, depth] = part.size;
       const [px, py, pz] = part.at;
@@ -9501,9 +9552,22 @@ export function decorationGeometry(
         const lx = (box.positions[corner] as number) * width + px;
         const ly = (box.positions[corner + 1] as number) * height + py;
         const lz = (box.positions[corner + 2] as number) * depth + pz;
-        const nx = box.normals[corner] as number;
-        const ny = box.normals[corner + 1] as number;
-        const nz = box.normals[corner + 2] as number;
+        // A normal goes through the inverse of the part's scale, so a
+        // squat pumpkin is shaded as squat (#1625); a flat part keeps its own.
+        let nx = box.normals[corner] as number;
+        let ny = box.normals[corner + 1] as number;
+        let nz = box.normals[corner + 2] as number;
+        if (width > 0 && height > 0 && depth > 0) {
+          nx /= width;
+          ny /= height;
+          nz /= depth;
+          const length = Math.hypot(nx, ny, nz);
+          if (length > 0) {
+            nx /= length;
+            ny /= length;
+            nz /= length;
+          }
+        }
         positions[at * 3] = x + lx * cos + lz * sin;
         positions[at * 3 + 1] = y + ly;
         positions[at * 3 + 2] = z - lx * sin + lz * cos;
@@ -9677,6 +9741,7 @@ export function decorationGlowProbe(
       {
         anchor: { kind: 'green', x: 0, y: 0, z: 0, yaw: 0, clear: 1, hash: 0 },
         item: 'box',
+        base: 0,
         seed: 0,
       },
     ],

@@ -13,7 +13,8 @@
  *    materials, while the same box unmarked — the control — is lit with the
  *    light at it and dark with the light away.
  * 3. **Steady, under reduced motion too** (WCAG 2.3.1): two frames a second
- *    apart, with and without `prefers-reduced-motion`, read the same colours.
+ *    apart, with and without `prefers-reduced-motion`, read the same colours —
+ *    since #1625 the product's own jack-o'-lantern face as well as the box.
  */
 
 import { expect, test, type Page } from '@playwright/test';
@@ -106,6 +107,31 @@ test.describe('the holiday decorations’ belt — #1624', () => {
         const second = await glowOf(page, world, 'away', true);
         expect(second, world).toEqual(first);
         expect(brightness(first), world).toBeGreaterThan(150);
+      }
+    });
+
+    test(`keeps Halloween’s jack-o’-lantern faces steady: two frames a second apart read the same, ${reducedMotion} — #1625`, async ({
+      page,
+    }) => {
+      await page.emulateMedia({ reducedMotion });
+      await open(page);
+      const faceOf = (world: 'stylised' | 'realistic') =>
+        page.evaluate((w) => {
+          const harness = window.__oylDecoration;
+          if (harness === undefined) throw new Error('no harness');
+          return harness.halloweenFace(w);
+        }, world);
+      for (const world of ['stylised', 'realistic'] as const) {
+        const first = await faceOf(world);
+        await page.waitForTimeout(1_000);
+        const second = await faceOf(world);
+        expect(second.pixel, world).toEqual(first.pixel);
+        // And it glows its own colour with the light turned away from it.
+        first.pixel.forEach((channel, at) => {
+          expect(Math.abs(channel - (first.colour[at] as number)), world).toBeLessThanOrEqual(
+            CHANNEL_TOLERANCE,
+          );
+        });
       }
     });
   }

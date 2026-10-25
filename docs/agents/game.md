@@ -921,7 +921,10 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         §`DecorationBelt` in ONE call for every village within
                         `FURNITURE_DRAW_METRES`, glow and all
                         (`withDecorationGlow`, no lamp, no uniform), inside
-                        `REALISTIC_DECORATION_TRIANGLES`
+                        `REALISTIC_DECORATION_TRIANGLES`. Since #1625
+                        Halloween's pumpkins stand on a HOUSE door's step
+                        (`buildings.ts` §`frontDoorOf`, a doorstep anchor's
+                        `step`), as lathe shapes (`DecorationShape`)
     src/game/footways.ts
                         footways from the corridor's map data (#1551) —
                         `pavementSides`, the side of the drawn road's NORMAL a

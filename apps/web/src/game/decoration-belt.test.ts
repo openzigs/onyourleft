@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   ANCHOR_KINDS,
+  decorationsFor,
   HOLIDAY_DECORATIONS,
   type DecorationKind,
   type ItemTable,
@@ -30,6 +31,8 @@ import {
   DECORATION_PART_TRIANGLES,
   DecorationBelt,
   decorationGeometry,
+  decorationKindTriangles,
+  decorationShapeTriangles,
 } from './three-renderer';
 
 /**
@@ -179,6 +182,74 @@ describe('the decoration belt — #1624', () => {
     expect(belt.triangles % perItem).toBe(0);
     // An item whose kind the table does not hold is not drawn at all.
     expect(decorationGeometry([], [PROBE]).getAttribute('position').count).toBe(0);
+  });
+});
+
+describe('the belt’s Halloween set — #1625', () => {
+  const halloween = HOLIDAY_DECORATIONS.halloween ?? [];
+
+  it('builds each shape from its own triangles: a pumpkin 96, a stalk 10, a face 2', () => {
+    expect(decorationShapeTriangles('box')).toBe(DECORATION_PART_TRIANGLES);
+    expect(decorationShapeTriangles('pumpkin')).toBe(96);
+    expect(decorationShapeTriangles('stalk')).toBe(10);
+    expect(decorationShapeTriangles('face')).toBe(2);
+    // A pumpkin and its stalk inside the issue's 80 to 140; a face adds 6.
+    const plain = halloween.find((kind) => kind.item === 'pumpkin');
+    const jack = halloween.find((kind) => kind.item === 'jack-o-lantern');
+    if (plain === undefined || jack === undefined) throw new Error('no Halloween kinds');
+    expect(decorationKindTriangles(plain)).toBe(106);
+    expect(decorationKindTriangles(jack) - decorationKindTriangles(plain)).toBe(6);
+  });
+
+  it('stands each item on its base, its pumpkins’ feet exactly there', () => {
+    const camera = cameraWith(2);
+    const belt = new DecorationBelt('stylised');
+    belt.update(STREETS, camera, 'halloween', HOLIDAY_DECORATIONS);
+    expect(belt.triangles).toBeGreaterThan(0);
+    // The belt's vertices, every one at or above some item's base, and the
+    // lowest of all at the lowest base.
+    const items = decorationsFor(
+      STREETS.filter((street) => inReach(street, camera)),
+      'halloween',
+      HOLIDAY_DECORATIONS,
+    );
+    const position = belt.mesh.geometry.getAttribute('position');
+    let lowest = Number.POSITIVE_INFINITY;
+    for (let at = 0; at < position.count; at += 1) lowest = Math.min(lowest, position.getY(at));
+    expect(lowest).toBeCloseTo(Math.min(...items.map((item) => item.base)), 4);
+    // One item alone: its geometry's foot is its base, and not its anchor's
+    // height, which is the front path's end, below the step.
+    const one = items.find((item) => Math.abs(item.base - item.anchor.y) > 0.05);
+    if (one === undefined) throw new Error('no item whose step stands off its path');
+    const alone = decorationGeometry([one], halloween).getAttribute('position');
+    let foot = Number.POSITIVE_INFINITY;
+    for (let at = 0; at < alone.count; at += 1) foot = Math.min(foot, alone.getY(at));
+    expect(foot).toBeCloseTo(one.base, 4);
+    belt.dispose();
+  });
+
+  it('stays under REALISTIC_DECORATION_TRIANGLES with two villages in reach, at its heaviest on every house', () => {
+    const camera = cameraWith(2);
+    const reached = STREETS.filter((street) => inReach(street, camera));
+    const belt = new DecorationBelt('realistic');
+    belt.update(STREETS, camera, 'halloween', HOLIDAY_DECORATIONS);
+    const items = decorationsFor(reached, 'halloween', HOLIDAY_DECORATIONS);
+    const wanted = items.reduce((sum, item) => {
+      const kind = halloween.find((each) => each.item === item.item);
+      return sum + (kind === undefined ? 0 : decorationKindTriangles(kind));
+    }, 0);
+    // Every item drawn — none dropped at the ceiling — and under it.
+    expect(belt.triangles).toBe(wanted);
+    expect(belt.triangles).toBeGreaterThan(0);
+    expect(belt.triangles).toBeLessThan(REALISTIC_DECORATION_TRIANGLES);
+    // The worst a draw could do: the heaviest arrangement on every house step in reach.
+    const houses = reached
+      .flatMap((street) => street.anchors)
+      .filter((anchor) => anchor.step?.building === 'building').length;
+    const heaviest = Math.max(...halloween.map((kind) => decorationKindTriangles(kind)));
+    expect(houses).toBeGreaterThan(5);
+    expect(houses * heaviest).toBeLessThan(REALISTIC_DECORATION_TRIANGLES);
+    belt.dispose();
   });
 });
 

@@ -28,6 +28,24 @@
  * | `green` | `settlements.ts` §`everyVillagePlot`'s middle plot, the crossroads, which is never built | either side of the side road's mouth, on each side of the road |
  * | `porch-step` | — | **none yet**: no village building draws a porch, in either world. Porches are drawn on mapped houses (`footprint-buildings.ts` §`frontPorchOf`) and lots (`buildings.ts` §`LOT_PORCH`), which are not villages. The kind is in the type so #1625's table can name it; it places nothing until a village draws a porch |
  *
+ * A `doorstep` of a built plot also carries the door's own **step**
+ * ({@link AnchorStep}, #1625): the block `buildings.ts` lays before every
+ * door, its top and its tread. A kind that stands on a step
+ * ({@link DecorationKind.onStepOf}) is placed only on an anchor whose step is
+ * the door of one of its buildings, stands on that step's top, and only where
+ * every one of its parts lies inside the tread.
+ *
+ * ## Halloween — #1625
+ *
+ * {@link HOLIDAY_DECORATIONS}' Halloween set is four arrangements of one to
+ * three pumpkins, a jack-o'-lantern in three of them, on the door step of a
+ * HOUSE (`building`) only: never a shop row's, a barn's or a shed's, and the
+ * church's anchors are never made. Each anchor is offered them in turn at
+ * {@link HALLOWEEN_CHANCE} each, so about **46 %** of the houses with a front
+ * path get one — the owner's research suggested 40 to 60 %. A pumpkin is a
+ * ribbed lathe ({@link PUMPKIN}) with a stalk; a jack-o'-lantern's face is
+ * three small quads that glow, steady, and is simple rather than frightening.
+ *
  * ⚠️ **Never the church plot**: a church's door and eaves are not decorated —
  * {@link villageAnchors} drops every anchor of a plot whose kind is
  * `church`. Its pavement and the lamp posts on it are the street's, not the
@@ -50,7 +68,7 @@
 
 import { distanceOnRoute, type RouteProfile } from '@onyourleft/domain';
 
-import { buildingPlan, isBuiltKind, type BuiltKind } from './buildings';
+import { buildingPlan, frontDoorOf, isBuiltKind, type BuiltKind } from './buildings';
 import { VILLAGE_MOUTH_HALF_METRES } from './cross-streets';
 import type { LandClassMask } from './land-class';
 import { terrainHeightAt } from './landform';
@@ -80,6 +98,20 @@ export const ANCHOR_KINDS: readonly AnchorKind[] = [
   'green',
 ];
 
+/**
+ * A door's step under a `doorstep` anchor — #1625. The tread is item-local
+ * to the anchor: `x` across the door from `-halfWidth` to `halfWidth`, `z`
+ * out from the wall from 0 to `depth`.
+ */
+export interface AnchorStep {
+  /** The step's top, corridor-frame height in metres. */
+  readonly top: number;
+  readonly halfWidth: number;
+  readonly depth: number;
+  /** What the step is the door of. */
+  readonly building: BuiltKind;
+}
+
 /** One place an item may stand, in the corridor's local metres. */
 export interface DecorationAnchor {
   readonly kind: AnchorKind;
@@ -92,7 +124,21 @@ export interface DecorationAnchor {
   readonly clear: number;
   /** The anchor's own hash, from the route's seed, its village and its place in it. */
   readonly hash: number;
+  /** A `doorstep`'s door step, where its building lays one — #1625. */
+  readonly step?: AnchorStep;
 }
+
+/**
+ * What one part is made of — #1625. Each fills the box its
+ * {@link DecorationPart.size} spans about its {@link DecorationPart.at}:
+ *
+ * - `box` — the box itself, **12** triangles (the default).
+ * - `pumpkin` — a ribbed lathe ({@link PUMPKIN}), its widest ribs on the
+ *   box's sides, its foot on the box's floor, **96** triangles.
+ * - `stalk` — an open cylinder, **10** triangles.
+ * - `face` — one flat quad in the box's middle, facing `+z`, **2** triangles.
+ */
+export type DecorationShape = 'box' | 'pumpkin' | 'stalk' | 'face';
 
 /** One box of an item, item-local: `+z` faces the road, `y` up from the anchor. */
 export interface DecorationPart {
@@ -102,6 +148,8 @@ export interface DecorationPart {
   readonly at: readonly [number, number, number];
   /** Its colour, sRGB, as `0xrrggbb`. */
   readonly colour: number;
+  /** What it is made of; a box where this is absent. */
+  readonly shape?: DecorationShape;
   /**
    * Whether it glows: drawn its own colour whatever the light, in the belt's
    * one call (`three-renderer.ts` §`DecorationBelt`). Steady — nothing about
@@ -122,23 +170,206 @@ export interface DecorationKind {
   readonly radius: number;
   /** Its boxes, built from these numbers in both worlds. */
   readonly parts: readonly DecorationPart[];
+  /**
+   * Where present, it stands only on the door step of one of these buildings
+   * — on the step's top, every part inside its tread — #1625. @see AnchorStep
+   */
+  readonly onStepOf?: readonly BuiltKind[];
 }
 
 /** The kinds each holiday places, in the order an anchor is offered them. */
 export type ItemTable = Readonly<Partial<Record<Holiday, readonly DecorationKind[]>>>;
 
 /**
- * What a ride decorates with: **nothing yet**. #1625 (Halloween), #1626 and
- * #1627 (winter lights) fill it; until then a holiday places no item, and the
- * belt is not drawn. The owner's page registers a probe instead
- * (`browser/realistic/config.ts` §`PROBE_DECORATIONS`), which no rider reaches.
+ * A pumpkin's shape, unit-sized — #1625: a lathe of {@link PUMPKIN.profile}
+ * (`[radius, height]` pairs from its foot up to the middle of its top)
+ * turned in {@link PUMPKIN.segments} steps, every radius scaled by
+ * `1 + ribDepth · cos(ribs · θ)` so it has {@link PUMPKIN.ribs} ribs, θ
+ * turning from `+z`. Its widest rib reaches exactly 0.5, so a pumpkin fills
+ * its part's box. Open at the foot, which stands on a step; 96 triangles.
+ * `three-renderer.ts` builds it from these numbers.
  */
-export const HOLIDAY_DECORATIONS: ItemTable = {};
+export const PUMPKIN: {
+  readonly segments: number;
+  readonly ribs: number;
+  readonly ribDepth: number;
+  readonly profile: readonly (readonly [number, number])[];
+} = {
+  segments: 16,
+  ribs: 8,
+  ribDepth: 0.05,
+  profile: [
+    [0.27, 0],
+    [0.5 / 1.05, 0.45],
+    [0.38, 0.94],
+    [0, 1],
+  ],
+};
+
+/**
+ * How far forward of its middle a unit pumpkin's surface is, at `x` across
+ * and `y` up (both unit, `y` from its foot): the faceted surface
+ * `three-renderer.ts` draws, so a face set on it is neither sunk in it nor
+ * floating off it.
+ */
+export function pumpkinFrontAt(x: number, y: number): number {
+  const { profile, segments, ribs, ribDepth } = PUMPKIN;
+  let radius = 0;
+  for (let at = 1; at < profile.length; at += 1) {
+    const [r0, y0] = profile[at - 1] as readonly [number, number];
+    const [r1, y1] = profile[at] as readonly [number, number];
+    if (y <= y1 || at === profile.length - 1) {
+      radius = r0 + ((r1 - r0) * (Math.min(Math.max(y, y0), y1) - y0)) / (y1 - y0);
+      break;
+    }
+  }
+  const corner = (step: number): readonly [number, number] => {
+    const theta = (step * 2 * Math.PI) / segments;
+    const r = radius * (1 + ribDepth * Math.cos(ribs * theta));
+    return [Math.sin(theta) * r, Math.cos(theta) * r];
+  };
+  const side = Math.abs(x);
+  for (let step = 0; step < segments / 4; step += 1) {
+    const [ax, az] = corner(step);
+    const [bx, bz] = corner(step + 1);
+    if (side <= bx) return az + ((bz - az) * (side - ax)) / (bx - ax);
+  }
+  return 0;
+}
+
+/** Halloween's lit colours, sRGB — #1625: held under "lights no colour past white". */
+const PUMPKIN_ORANGE = 0xd0691c;
+const PUMPKIN_PALE = 0xd88a3a;
+const STALK_GREEN = 0x5b5a26;
+/** A jack-o'-lantern's face: it glows, drawn its own colour whatever the light. */
+const FACE_GLOW = 0xffc24a;
+
+/** A pumpkin's height for its width. */
+const PUMPKIN_SQUAT = 0.8;
+
+/** Where a pumpkin's middle stands out from the wall: the middle of a door step's tread. */
+const ON_THE_STEP = 0.175;
+
+/**
+ * One pumpkin's parts, `diameter` wide, its middle `x` across the door and
+ * `z` out from the wall, its foot on the step: a body, a stalk and — for a
+ * jack-o'-lantern — a face of two eyes and a mouth, each set just proud of
+ * the body's surface where it is.
+ */
+function pumpkin(
+  x: number,
+  z: number,
+  diameter: number,
+  colour: number,
+  lantern: boolean,
+): DecorationPart[] {
+  const height = diameter * PUMPKIN_SQUAT;
+  const parts: DecorationPart[] = [
+    {
+      shape: 'pumpkin',
+      size: [diameter, height, diameter],
+      at: [x, height / 2, z],
+      colour,
+      glows: false,
+    },
+    {
+      shape: 'stalk',
+      size: [diameter * 0.12, height * 0.2, diameter * 0.12],
+      at: [x, height * 1.02, z],
+      colour: STALK_GREEN,
+      glows: false,
+    },
+  ];
+  if (!lantern) return parts;
+  // Two square eyes and a wide mouth: friendly, not frightening.
+  // [across, up, width, height], each a share of the pumpkin's own.
+  const features: readonly (readonly [number, number, number, number])[] = [
+    [-0.17, 0.62, 0.1, 0.12],
+    [0.17, 0.62, 0.1, 0.12],
+    [0, 0.34, 0.26, 0.1],
+  ];
+  for (const [across, up, width, tall] of features) {
+    // Proud of the surface at its edges and its middle, by 4 mm.
+    const front = Math.max(
+      pumpkinFrontAt(across - width / 2, up),
+      pumpkinFrontAt(across, up),
+      pumpkinFrontAt(across + width / 2, up),
+    );
+    parts.push({
+      shape: 'face',
+      size: [width * diameter, tall * height, 0],
+      at: [x + across * diameter, up * height, z + front * diameter + 0.004],
+      colour: FACE_GLOW,
+      glows: true,
+    });
+  }
+  return parts;
+}
+
+/**
+ * The share of the anchors each Halloween kind takes before the next is
+ * offered — #1625: four kinds at 0.145 each place on `1 − 0.855⁴`, about
+ * 46 %, of the houses with a front path. @see the header
+ */
+export const HALLOWEEN_CHANCE = 0.145;
+
+/**
+ * How far a Halloween item reaches from its anchor, metres: the tread's
+ * corner from the door's middle. The step is what holds it; this keeps it
+ * off a carriageway no front path could reach.
+ */
+const HALLOWEEN_RADIUS = 0.75;
+
+/** One Halloween kind: on a house's door step only. */
+function halloween(item: string, parts: readonly DecorationPart[]): DecorationKind {
+  return {
+    item,
+    anchors: ['porch-step', 'doorstep'],
+    chance: HALLOWEEN_CHANCE,
+    radius: HALLOWEEN_RADIUS,
+    parts,
+    onStepOf: ['building'],
+  };
+}
+
+/**
+ * The Halloween kinds — #1625: one to three pumpkins either side of a house's
+ * door, on its step. Every number keeps every part inside a house door's step
+ * (`buildings.ts` §`DOOR`, 1 m wide, and §`DOOR_STEP_*`: a tread 1.3 m by
+ * 0.35 m), which {@link decorationsFor} checks again for every anchor.
+ */
+const HALLOWEEN: readonly DecorationKind[] = [
+  halloween('jack-o-lantern', pumpkin(0.49, ON_THE_STEP, 0.3, PUMPKIN_ORANGE, true)),
+  halloween('pumpkin', pumpkin(-0.5, ON_THE_STEP, 0.28, PUMPKIN_PALE, false)),
+  halloween('pumpkin-pair', [
+    ...pumpkin(-0.49, ON_THE_STEP, 0.3, PUMPKIN_ORANGE, true),
+    ...pumpkin(0.51, ON_THE_STEP, 0.26, PUMPKIN_PALE, false),
+  ]),
+  halloween('pumpkin-trio', [
+    ...pumpkin(0.49, ON_THE_STEP, 0.3, PUMPKIN_ORANGE, true),
+    ...pumpkin(0.245, ON_THE_STEP, 0.18, PUMPKIN_PALE, false),
+    ...pumpkin(-0.52, ON_THE_STEP, 0.24, PUMPKIN_ORANGE, false),
+  ]),
+];
+
+/**
+ * What a ride decorates with — Halloween's pumpkins since #1625; #1626 and
+ * #1627 add winter lights. A holiday the table names nothing for places no
+ * item, and the belt is not drawn. The owner's page may register a probe
+ * instead (`browser/realistic/config.ts` §`PROBE_DECORATIONS`), which no
+ * rider reaches.
+ */
+export const HOLIDAY_DECORATIONS: ItemTable = { halloween: HALLOWEEN };
 
 /** One item placed: where, which kind, and a seed of its own for its variation. */
 export interface DecorationItem {
   readonly anchor: DecorationAnchor;
   readonly item: string;
+  /**
+   * The height its item-local `y = 0` stands at: its anchor's, or for a kind
+   * that stands on a step that step's top — #1625.
+   */
+  readonly base: number;
   /** A `uint32` drawn from the anchor's hash, for whatever the item varies by. */
   readonly seed: number;
 }
@@ -204,13 +435,18 @@ export function villageAnchors(
     z: number,
     yaw: number,
     clear: number,
+    step?: AnchorStep,
   ): void => {
     const hash = slotHash(
       seed,
       site.wrappedSite * ANCHORS_PER_VILLAGE + found.length,
       DECORATION_KEY,
     );
-    found.push({ kind, x, y, z, yaw, clear, hash });
+    found.push(
+      step === undefined
+        ? { kind, x, y, z, yaw, clear, hash }
+        : { kind, x, y, z, yaw, clear, hash, step },
+    );
   };
   const clearOf = (x: number, z: number): number =>
     distanceToDrawnRoad(profile, origin, x, z, SETBACK_METRES + PLOT_METRES) -
@@ -233,11 +469,10 @@ export function villageAnchors(
     const towardX = (path.walk[0] as number) - doorX;
     const towardZ = (path.walk[2] as number) - doorZ;
     const yaw = Math.atan2(towardX, towardZ);
-    add('doorstep', doorX, doorY, doorZ, yaw, clearOf(doorX, doorZ));
-    if (!isBuiltKind(plot.kind)) continue;
-    const top = eavesOf(plot.kind, plot.variant);
-    const frame = drawnRoadFrame(profile, origin, distanceOnRoute(profile, plot.along));
-    if (top === null || frame === undefined) continue;
+    if (!isBuiltKind(plot.kind)) {
+      add('doorstep', doorX, doorY, doorZ, yaw, clearOf(doorX, doorZ));
+      continue;
+    }
     // The building stands where `settlements.ts` §`standing` stands it.
     const ground = terrainHeightAt(
       profile,
@@ -247,6 +482,27 @@ export function villageAnchors(
       plot.lateral * plot.side,
       land,
     );
+    // #1625: the step its plan lays before the very door the path ends at.
+    const door = frontDoorOf(plot.kind, plot.variant);
+    add(
+      'doorstep',
+      doorX,
+      doorY,
+      doorZ,
+      yaw,
+      clearOf(doorX, doorZ),
+      door === null
+        ? undefined
+        : {
+            top: ground + door.step.top,
+            halfWidth: door.step.halfWidth,
+            depth: door.step.depth,
+            building: plot.kind,
+          },
+    );
+    const top = eavesOf(plot.kind, plot.variant);
+    const frame = drawnRoadFrame(profile, origin, distanceOnRoute(profile, plot.along));
+    if (top === null || frame === undefined) continue;
     add('eave', doorX, ground + top, doorZ, yaw, clearOf(doorX, doorZ));
   }
 
@@ -301,11 +557,14 @@ export function decorationsFor(
       for (const [which, kind] of offered.entries()) {
         if (!kind.anchors.includes(anchor.kind)) continue;
         if (kind.radius > anchor.clear) continue;
+        const step = kind.onStepOf === undefined ? undefined : anchor.step;
+        if (kind.onStepOf !== undefined && (step === undefined || !fitsStep(kind, step))) continue;
         const stream = which * 2;
         if (!(uniformFrom(anchor.hash, stream + STREAM_TAKES) < kind.chance)) continue;
         items.push({
           anchor,
           item: kind.item,
+          base: step === undefined ? anchor.y : step.top,
           seed: slotHash(anchor.hash, which, STREAM_SEED),
         });
         break;
@@ -313,4 +572,20 @@ export function decorationsFor(
     }
   }
   return items;
+}
+
+/**
+ * Whether a kind that stands on a step may stand on this one — #1625: the
+ * step is the door of one of its buildings, and every part's box lies inside
+ * the tread, item-local. @see AnchorStep
+ */
+function fitsStep(kind: DecorationKind, step: AnchorStep): boolean {
+  if (kind.onStepOf?.includes(step.building) !== true) return false;
+  return kind.parts.every(({ size, at }) => {
+    const [width, , depth] = size;
+    const [x, , z] = at;
+    return (
+      Math.abs(x) + width / 2 <= step.halfWidth && z - depth / 2 >= 0 && z + depth / 2 <= step.depth
+    );
+  });
 }
