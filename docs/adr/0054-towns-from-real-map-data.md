@@ -415,6 +415,14 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   part**: the `places` layer is read, for its `kind`, `kind_detail`, `population_rank` and position
   only, from the z15 tiles D-2.3 already fetches, as a prior for the urban class. It also adds a
   fifth kind of record to **D-3.3**'s sentence: *place points with `kind`, `kind_detail` and
-  `population_rank`*. ADR 0055 is **Proposed** until the owner accepts it on #1631, and until then
-  D-2.2 and D-3.3 read as above. What still holds, unchanged: `pois` is not read, no name from any
+  `population_rank`*. ADR 0055 was accepted by the owner on #1631 on 2026-10-25. What still holds, unchanged: `pois` is not read, no name from any
   layer is read, `addr_housenumber` is dropped, no OSM identifier is kept, D-5.7, and D-3.1 to D-3.6.
+- **2026-10-24** — **The demo build ships OpenStreetMap-derived records, under
+  [ADR 0056](0056-the-demos-shipped-map-under-odbl.md) (accepted by the owner on 2026-10-25, on the owner's rulings of
+  2026-10-24 on [#1643](https://github.com/openzigs/onyourleft/issues/1643)).** D-1 item 2's reason,
+  *"the records arrive per route, on the rider's device"*, and D-3.5's consequence that nothing
+  OpenStreetMap-derived is Publicly Used, stop being true for the demo build: each preset route's
+  decoded corridor is baked into a file in the demo's gitignored output and offered under ODbL 1.0.
+  What still stands, unchanged: D-1 item 2's statement (nothing derived from an external source is
+  committed), and D-3.5 for the `worldCorridors` store, whose contents never leave the device and
+  which the bake never reads. ADR 0056 D-1 says exactly which sentences it supersedes.

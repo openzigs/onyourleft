@@ -16,9 +16,13 @@ It has the same authority as the root file. Where the text below says "this file
   taken by [#1631](https://github.com/openzigs/onyourleft/issues/1631) on 2026-10-24 for the `places`
   layer's kind and rank read from the corridor tiles already fetched, never a name, on the owner's
   ruling (a) of that day on [#1628](https://github.com/openzigs/onyourleft/issues/1628). It was
-  claimed by #1631 when that issue was filed, and is **Proposed** until the owner accepts it there.
+  claimed by #1631 when that issue was filed, and was **accepted** by the owner there on 2026-10-25.
   It supersedes ADR 0054 D-2.2 in part. A reviewer who remembers this sentence offering 0055 is
   reading the old file.
+  ⚠️ **0056 is [ADR 0056](../adr/0056-the-demos-shipped-map-under-odbl.md)**, taken by
+  [#1644](https://github.com/openzigs/onyourleft/issues/1644) on 2026-10-24 for the demo's shipped
+  map under ODbL 1.0, on the owner's rulings of that day on
+  [#1643](https://github.com/openzigs/onyourleft/issues/1643), and **accepted** by the owner on 2026-10-25. It supersedes ADR 0054 D-1 item 2 and D-3.5 in part, for the demo build only.
   ⚠️ **0054 is [ADR 0054](../adr/0054-towns-from-real-map-data.md)**, taken by
   [#1538](https://github.com/openzigs/onyourleft/issues/1538) on 2026-10-21 for towns from real map
   data, on the owner's ruling of that day on [#1533](https://github.com/openzigs/onyourleft/issues/1533),

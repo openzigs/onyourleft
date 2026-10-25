@@ -1,8 +1,6 @@
 # ADR 0055: Place kinds and ranks from the corridor tiles already read, never a name — ADR 0054 D-2.2 superseded in part
 
-- **Status**: Proposed, 2026-10-24. The owner accepts or rejects it on
-  [#1631](https://github.com/openzigs/onyourleft/issues/1631); until then
-  [#1632](https://github.com/openzigs/onyourleft/issues/1632), which builds it, is blocked
+- **Status**: **Accepted, 2026-10-25**, on the owner's ruling of that day on [#1631](https://github.com/openzigs/onyourleft/issues/1631), with D-8 Q1 (the rank gate, rank 9 and up) and Q2 (the town, village, hamlet and quarter points kept). Proposed 2026-10-24
 - **Date**: 2026-10-24
 - **Deciders**: **the owner**, on ruling (a) of 2026-10-24 on
   [#1628](https://github.com/openzigs/onyourleft/issues/1628), quoted in Context. Drafted by the
