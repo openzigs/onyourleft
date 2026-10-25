@@ -54,6 +54,7 @@ import { advance, airDensityKilogramsPerCubicMetre } from '@onyourleft/physics';
 import type { GameSensors } from '../game/sensors';
 import type { DemoKit, DemoPreset, RiderScript, RouteSection } from './script';
 import { scriptedSample } from './script';
+import { presetRoad } from './synthetic-road';
 
 /** The spacing of the points a preset's road is laid out on. */
 const ROUTE_POINT_SPACING_METRES = 10;
@@ -97,6 +98,26 @@ export function demoRouteProfile(sections: readonly RouteSection[]): RouteProfil
   return routeProfile(points);
 }
 
+/**
+ * A preset's road as the demo player draws it — #1647: the preset's sections'
+ * heights laid along `synthetic-road.ts`' meander, which is the road the
+ * owner's realistic page rides. {@link demoRouteProfile}'s straight equator
+ * road stays what `runner.test.ts` pins its digests on.
+ */
+export function demoRoad(sections: readonly RouteSection[]): RouteProfile {
+  const length = sections.reduce((sum, section) => sum + section.lengthMetres, 0);
+  return presetRoad((along) => {
+    let elevation = ROAD_START_ALTITUDE_METRES;
+    let from = 0;
+    for (const section of sections) {
+      const within = Math.min(section.lengthMetres, Math.max(0, along - from));
+      elevation += (within * section.gradePercent) / 100;
+      from += section.lengthMetres;
+    }
+    return elevation;
+  }, length);
+}
+
 /** One scripted rider at one instant. */
 export interface DemoRiderTick {
   readonly label: string;
@@ -137,7 +158,8 @@ export interface DemoRide {
 
 const AIR_DENSITY = airDensityKilogramsPerCubicMetre(altitudeMetres(0), degreesCelsius(15));
 
-const CONDITIONS: RideConditions = {
+/** The air and the mass every demo rider rides in: a bot's mass, sea-level air at 15 °C. */
+export const DEMO_RIDE_CONDITIONS: RideConditions = {
   totalMass: kilograms(BOT_MASS_KILOGRAMS),
   airDensityKilogramsPerCubicMetre: AIR_DENSITY,
 };
@@ -182,10 +204,13 @@ function frameOf(rideSeconds: Seconds, riders: readonly DemoRiderTick[]): DemoFr
  * Each {@link DemoRide.sample} hands each rider's scripted power at the new
  * time, and the gradient at its current odometer, to `advance` for the
  * interval since the last sample — the shape `GameSimulation.advanceTo` gives a
- * real rider's latest reading.
+ * real rider's latest reading. `profile` is the road they ride: the
+ * player hands it {@link demoRoad}, the road it draws.
  */
-export function createDemoRide(preset: DemoPreset): DemoRide {
-  const profile = demoRouteProfile(preset.route);
+export function createDemoRide(
+  preset: DemoPreset,
+  profile: RouteProfile = demoRouteProfile(preset.route),
+): DemoRide {
   const gradeUnder = (state: RideState): GradePercent =>
     gradeAt(profile, distanceOnRoute(profile, state.distance));
 
@@ -211,7 +236,7 @@ export function createDemoRide(preset: DemoPreset): DemoRide {
         if (before === undefined) throw new RangeError('a demo rider went missing');
         const grade = gradeUnder(before.state);
         const power = scriptedSample(script, rideSeconds).watts;
-        const state = advance(before.state, { power, grade, duration }, CONDITIONS);
+        const state = advance(before.state, { power, grade, duration }, DEMO_RIDE_CONDITIONS);
         return tickFor(script, state, grade, rideSeconds);
       });
       last = rideSeconds;

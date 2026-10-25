@@ -120,6 +120,11 @@ const PAUSE_AND_RESUME_CALLS: Readonly<Record<string, { pause: number; resume: n
   // pairing-code reader's, and since #530 the side camera's picture
   // sampler's — each released with the camera. Not a ride.
   [join('camera', 'browser-camera.ts')]: { pause: 3, resume: 0 },
+  // The demo's Pause button (#1647) and the stage it presses, pausing the
+  // demo's scripted riders. Not a ride: the demo records nothing and reaches
+  // no recorder (`demo/no-recorded-data.test.ts`).
+  [join('demo', 'DemoPage.tsx')]: { pause: 1, resume: 0 },
+  [join('demo', 'stage.ts')]: { pause: 1, resume: 0 },
   // The Web Audio context, resumed inside a press. Not a ride.
   [join('game', 'audio-cues.ts')]: { pause: 0, resume: 1 },
   [join('game', 'web-audio.ts')]: { pause: 0, resume: 1 },

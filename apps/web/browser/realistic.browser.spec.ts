@@ -52,7 +52,12 @@ import { MAPPED_BUILDING_MAX, REALISTIC_WOODED_DRAW_CALLS } from '../src/game/re
 
 import { NIGHTLY } from './nightly';
 import { LAYERS } from './realistic/config';
-import { realisticRoute, routeDigest, VILLAGE_HOLD_METRES, villageRoute } from './realistic/route';
+import {
+  realisticRoute,
+  routeDigest,
+  VILLAGE_HOLD_METRES,
+  villageRoute,
+} from '../src/demo/synthetic-road';
 import type { RealisticSample } from './realistic-harness';
 
 /** A realistic load's budget: the same 31 MiB `game.browser.spec.ts` §#607 pays for. */

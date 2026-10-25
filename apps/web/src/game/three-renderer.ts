@@ -15720,11 +15720,10 @@ export interface SceneMaterial {
 
 /**
  * Which world a view is drawing — for the owner's harness page, which says so
- * on screen (D-7's "and says so"), and for the browser gate.
- *
- * @unwired reached only from the harness pages under `apps/web/browser/`. The
- * shipped app does not need to ask: `GameView` decides the world a ride is on
- * and says so itself when a load fails or a hot device leaves realism (#475).
+ * on screen (D-7's "and says so"), for the browser gate, and since #1647 for
+ * the demo, which publishes it as `window.__oylDemo.world` (`demo/stage.ts`).
+ * The rider app does not need to ask: `GameView` decides the world a ride is
+ * on and says so itself when a load fails or a hot device leaves realism (#475).
  */
 export function drawnWorldOf(view: GameView): QualitySettings['world'] {
   return view instanceof ThreeGameView ? view.drawnWorld : 'stylised';

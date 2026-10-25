@@ -6,7 +6,7 @@ import { REALISTIC_LADDER, type QualitySettings } from '../../src/game/quality';
 import { STRUCTURE_KINDS, type SceneryKind } from '../../src/game/scatter';
 import { corridorOrigin } from '../../src/game/terrain';
 import { rideFrame } from './frame';
-import { VILLAGE_HOLD_METRES, realisticRoute, villageRoute } from './route';
+import { VILLAGE_HOLD_METRES, realisticRoute, villageRoute } from '../../src/demo/synthetic-road';
 
 const profile = realisticRoute();
 const origin = corridorOrigin(profile);

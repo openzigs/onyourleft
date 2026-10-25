@@ -1,0 +1,30 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+import { describe, expect, it } from 'vitest';
+
+import { CLIMB_PRESET, GROUP_PRESET, SPRINT_PRESET } from './presets';
+import { parseDemoQuery } from './query';
+
+describe("the demo page's query — #1647", () => {
+  it.each([
+    ['?preset=climb', CLIMB_PRESET],
+    ['?preset=sprint', SPRINT_PRESET],
+    ['?preset=group', GROUP_PRESET],
+    ['preset=group', GROUP_PRESET],
+    ['', CLIMB_PRESET],
+    ['?', CLIMB_PRESET],
+  ])('%j rides its preset', (search, preset) => {
+    expect(parseDemoQuery(search)).toEqual({ ok: true, preset });
+  });
+
+  it.each([
+    ['?speed=2', 'This demo has no setting called “speed”.'],
+    ['?preset=climb&world=stylised', 'This demo has no setting called “world”.'],
+    ['?preset=sprnt', 'This demo’s preset is one of climb, sprint, group, not “sprnt”.'],
+    ['?preset=', 'This demo’s preset is one of climb, sprint, group, not “”.'],
+    ['?preset=Climb', 'This demo’s preset is one of climb, sprint, group, not “Climb”.'],
+    ['?preset=climb&preset=sprint', 'This demo’s “preset” setting is given more than once.'],
+  ])('refuses %j, saying why, rather than riding the default', (search, message) => {
+    expect(parseDemoQuery(search)).toEqual({ ok: false, message });
+  });
+});

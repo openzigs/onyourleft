@@ -16,6 +16,14 @@
  *
  * Latitude 51.5°, the fixtures' latitude, for the same sun.
  *
+ * ## Why it lives in `src/demo/` — #1647
+ *
+ * It was `apps/web/browser/realistic/route.ts`. The demo player rides the same
+ * meander ({@link presetRoad}), and shipped code never imports from
+ * `apps/web/browser/`, so the module moved here, where the owner's page and the
+ * demo both import it. Nothing in it changed: `route.test.ts` still pins
+ * {@link realisticRoute}'s digest.
+ *
  * ## The village road — #1559
  *
  * That road passes farmsteads and no village (validation 0002 §"AE2 cannot be
@@ -54,7 +62,7 @@ import {
   type RouteProfile,
 } from '@onyourleft/domain';
 
-import { SUN_AZIMUTH_DEGREES } from '../../src/game/world';
+import { SUN_AZIMUTH_DEGREES } from '../game/world';
 
 const LATITUDE = 51.5;
 const METRES_PER_DEGREE = 111_320;
@@ -161,6 +169,21 @@ export function villageRoute(facing?: Facing): RouteProfile {
 }
 
 /**
+ * A demo preset's road — #1647: the meander {@link realisticRoute} rides, from
+ * the same start, `lengthMetres` long, at `elevation` metres `along` it.
+ *
+ * The same meander so that the demo rides the bends the owner's page was
+ * built to show off, rather than the straight line due east along the equator
+ * that `runner.ts` §`demoRouteProfile` lays for its tests. Unturned.
+ */
+export function presetRoad(
+  elevation: (along: number) => number,
+  lengthMetres: number,
+): RouteProfile {
+  return meanderingRoute(DEFAULT_START_LONGITUDE, elevation, undefined, lengthMetres);
+}
+
+/**
  * A short fingerprint of a route — #1559: FNV-1a over its positions to 1e-9 of
  * a degree, its heights to the millimetre and its length to the metre, as
  * eight hex digits. The page publishes it so the browser gate can see that the
@@ -190,18 +213,19 @@ export function routeDigest(profile: RouteProfile): string {
   return (hash >>> 0).toString(16).padStart(8, '0');
 }
 
-/** The ±25° meander from `longitude` at 51.5° north, at `elevation`, turned to `facing`. */
+/** The ±25° meander from `longitude` at 51.5° north, `length` long, at `elevation`, turned to `facing`. */
 function meanderingRoute(
   longitude: number,
   elevation: (along: number) => number,
   facing: Facing | undefined,
+  length: number = ROUTE_METRES,
 ): RouteProfile {
   const points: RoutePoint[] = [];
   let east = 0;
   let north = 0;
   const step = 10;
   const perLongitude = METRES_PER_DEGREE * Math.cos((LATITUDE * Math.PI) / 180);
-  for (let along = 0; along <= ROUTE_METRES; along += step) {
+  for (let along = 0; along <= length; along += step) {
     points.push({
       position: geographicPosition(
         degreesLatitude(LATITUDE + north / METRES_PER_DEGREE),

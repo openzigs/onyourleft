@@ -288,6 +288,15 @@ export interface SimulationSetup {
    * `hud/fields.ts` §`windReading`, from {@link GameState.headwindMetresPerSecond}.
    */
   readonly wind?: Wind | undefined;
+  /**
+   * Where on the route the rider starts, in odometer metres — #1647, for the
+   * demo's group preset, whose HUD rider starts 30 m up the road from the
+   * rider at the back (`demo/presets.ts` §`GROUP_PRESET`).
+   *
+   * Absent is the start line, `START_OF_RIDE`, which is every ride a rider
+   * starts: nothing in the app passes it.
+   */
+  readonly startMetres?: number | undefined;
 }
 
 /** What one call to {@link GameSimulation.advanceTo} did. */
@@ -498,11 +507,15 @@ export class GameSimulation {
   constructor(setup: SimulationSetup) {
     this.#setup = setup;
     this.#course = botCourseFor(setup);
+    const start: RideState =
+      setup.startMetres === undefined
+        ? START_OF_RIDE
+        : { ...START_OF_RIDE, distance: metres(setup.startMetres) };
     this.#state = {
-      ride: START_OF_RIDE,
+      ride: start,
       elapsed: seconds(0),
       ridden: seconds(0),
-      grade: gradeAtDistance(setup.profile, START_OF_RIDE.distance),
+      grade: gradeAtDistance(setup.profile, start.distance),
       input: { power: watts(0), live: false },
       // On the start line from the first frame rather than from the first tick:
       // `GameView` renders a scene before the loop has run once, and a bot that
@@ -516,7 +529,7 @@ export class GameSimulation {
       // run once, and a wind that appeared a tick late would show a rider a
       // dash for the field they had just set — indistinguishable from the
       // still-air ride they did not choose.
-      ...headwindField(this.#headwindAt(START_OF_RIDE.distance)),
+      ...headwindField(this.#headwindAt(start.distance)),
     };
   }
 

@@ -1,0 +1,136 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+/**
+ * The demo's loop — #1647: which frames it asks for, which world it draws,
+ * and what it says when the realistic world will not load. The renderer and
+ * the frame clock are replaced; the player, the pacer and the ladder are the
+ * real ones.
+ */
+
+import { describe, expect, it } from 'vitest';
+
+import {
+  INITIAL_QUALITY,
+  INITIAL_REALISTIC_QUALITY,
+  qualitySettings,
+  worldRung,
+} from '../game/quality';
+import { realisticWorldNotice, type RealisticWorldOutcome } from '../game/realistic-assets';
+import { createDemoPlayer } from './player';
+import { CLIMB_PRESET } from './presets';
+import { startDemoStage, type DemoSnapshot } from './stage';
+import { fakeDrawnWorld, fakeRenderer, SteppedFrames, type FakeView } from './stage-testing';
+
+function stageWith(outcome: Promise<RealisticWorldOutcome> = new Promise(() => undefined)) {
+  const frames = new SteppedFrames();
+  const { renderer, views } = fakeRenderer(outcome);
+  const player = createDemoPlayer(CLIMB_PRESET);
+  const snapshots: DemoSnapshot[] = [];
+  const stage = startDemoStage({
+    canvas: {} as HTMLCanvasElement,
+    renderer,
+    drawnWorld: fakeDrawnWorld,
+    player,
+    frames,
+    publish: (snapshot) => void snapshots.push(snapshot),
+  });
+  return { frames, view: views[0] as FakeView, player, stage, snapshots };
+}
+
+describe('the demo stage — #1647', () => {
+  it('draws one still frame of a paused player, and then asks for nothing', () => {
+    const { frames, view, player } = stageWith();
+    frames.step(10);
+    expect(view.rendered).toHaveLength(1);
+    expect(frames.pending).toBe(0);
+    expect(player.state.ride.distance).toBe(0);
+  });
+
+  it('asks for a frame on every frame while playing, and draws the ride moving', () => {
+    const { frames, view, stage, player, snapshots } = stageWith();
+    stage.play();
+    frames.step(120);
+    expect(view.rendered.length).toBeGreaterThan(100);
+    expect(frames.pending).toBe(1);
+    expect(player.state.ride.distance).toBeGreaterThan(0);
+    const last = snapshots.at(-1);
+    expect(last).toMatchObject({ state: 'playing', preset: 'climb' });
+    expect(last?.framesDrawn).toBe(view.rendered.length);
+    expect(last?.distance).toBe(player.state.ride.distance);
+  });
+
+  it.each([
+    [
+      'the page is hidden',
+      (stage: ReturnType<typeof stageWith>['stage'], seen: boolean) => stage.setPageVisible(seen),
+    ],
+    [
+      'the canvas is scrolled out of view',
+      (stage: ReturnType<typeof stageWith>['stage'], seen: boolean) => stage.setInView(seen),
+    ],
+  ])('runs no frame callback while %s, and rides none of that time', (_what, set) => {
+    const { frames, view, stage, player } = stageWith();
+    stage.play();
+    frames.step(60);
+    const drawn = view.rendered.length;
+    const at = player.state.ride.distance;
+    set(stage, false);
+    const ran = frames.ran;
+    frames.step(600);
+    expect(frames.ran).toBe(ran);
+    expect(frames.pending).toBe(0);
+    expect(view.rendered).toHaveLength(drawn);
+    set(stage, true);
+    frames.step(1);
+    // The first frame back draws where the riders were, not ten seconds on.
+    expect(player.state.ride.distance).toBe(at);
+    frames.step(60);
+    expect(player.state.ride.distance).toBeGreaterThan(at);
+    expect(player.state.ride.distance - at).toBeLessThan(20);
+  });
+
+  it('a pause asks for one still frame and then nothing; play asks again', () => {
+    const { frames, view, stage } = stageWith();
+    stage.play();
+    frames.step(30);
+    stage.pause();
+    frames.step(1);
+    const drawn = view.rendered.length;
+    frames.step(120);
+    expect(view.rendered).toHaveLength(drawn);
+    expect(frames.pending).toBe(0);
+    stage.play();
+    frames.step(10);
+    expect(view.rendered.length).toBeGreaterThan(drawn);
+  });
+
+  it('starts in the realistic world, at the top of its ladder', () => {
+    const { view, snapshots } = stageWith();
+    expect(view.qualities[0]).toEqual(worldRung(INITIAL_REALISTIC_QUALITY));
+    expect(snapshots[0]?.world).toBe('realistic');
+  });
+
+  it('falls back to the stylised world when the realistic world cannot load, and says so', async () => {
+    const outcome: RealisticWorldOutcome = { loaded: false, offline: false, detail: 'refused' };
+    const { frames, view, snapshots } = stageWith(Promise.resolve(outcome));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(view.qualities.at(-1)).toEqual(qualitySettings(INITIAL_QUALITY.level));
+    expect(view.qualities.at(-1)?.world).toBe('stylised');
+    const notice = realisticWorldNotice(outcome);
+    expect(notice).toBeDefined();
+    expect(snapshots.at(-1)).toMatchObject({ world: 'stylised', notice });
+    // And the paused page draws the stylised world it now holds.
+    const drawn = view.rendered.length;
+    frames.step(1);
+    expect(view.rendered).toHaveLength(drawn + 1);
+  });
+
+  it('stays realistic, and says nothing, when the realistic world loads', async () => {
+    const { view, snapshots } = stageWith(Promise.resolve({ loaded: true }));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(view.qualities.at(-1)?.world).toBe('realistic');
+    expect(snapshots.at(-1)?.notice).toBeUndefined();
+  });
+});

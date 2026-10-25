@@ -7,7 +7,7 @@ import type { SceneFrame } from '../../src/game/port';
 import { INITIAL_QUALITY, worldRung } from '../../src/game/quality';
 import { corridorOrigin } from '../../src/game/terrain';
 import { rideFrame } from './frame';
-import { VILLAGE_HOLD_METRES, villageRoute } from './route';
+import { VILLAGE_HOLD_METRES, villageRoute } from '../../src/demo/synthetic-road';
 import { frameCensus, inView } from './village';
 
 /** A frame held on the village road, whose camera the cases below look through. */

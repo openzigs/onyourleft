@@ -30,7 +30,7 @@ import {
   VILLAGE_HOLD_METRES,
   villageRoute,
   type Facing,
-} from './route';
+} from '../../src/demo/synthetic-road';
 import { frameCensus } from './village';
 
 // #702: every Part Z step holds on the route as the page rides it by default,
