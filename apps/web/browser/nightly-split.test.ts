@@ -11,8 +11,8 @@
  * checks less than it did. `check:test-split` is the Vitest half's own gate;
  * this is the browser half and the workflows.
  *
- * Since #1285 the required check is one job over several shards (four since
- * #1362, which split the browser gate in two), and the same
+ * Since #1285 the required check is one job over several shards (five since
+ * #1720, which split the browser gate in three by spec file), and the same
  * thing must not happen there by another road: a shard the aggregating job
  * does not wait for, that job renamed, or its verdict weakened. Those are the
  * last describe in this file.
@@ -239,6 +239,20 @@ const NIGHTLY_SHARE = 0.6;
  */
 const LOADS_OF_THE_PAGE = /\b(?:ride|ridden)\(\s*page\b/g;
 
+/**
+ * Whether a positional argument of `playwright test` selects this spec — #1720.
+ * As Playwright 1.63 reads one (`forceRegExp`, then `createFileMatcher`): a
+ * `/…/flags` literal as written, anything else as a case-insensitive pattern,
+ * tested against the file's absolute path.
+ */
+function selects(filter: string, spec: string): boolean {
+  const literal = /^\/(.*)\/([gi]*)$/.exec(filter);
+  const pattern = literal
+    ? new RegExp(String(literal[1]), String(literal[2]).replace('g', ''))
+    : new RegExp(filter, 'i');
+  return pattern.test(join(BROWSER, spec));
+}
+
 /** The command a browser shard's `Browser gate` step runs, wrapper and all. */
 const gateCommand = (script: string): string =>
   `timeout --verbose --kill-after=10s ${String(GATE_STEP_MS / 1000)}s pnpm run ${script}`;
@@ -380,24 +394,33 @@ describe('the browser gate is split into a required run and a nightly one — #8
     expect(rules).not.toContain('pnpm run test:browser\n');
   });
 
-  it('divides the chromium run between the shard scripts, every case in exactly one, and the game run in one — #1362', () => {
+  it('divides the chromium run between the shard scripts by spec file, every spec in exactly one, and the game run in one — #1362, #1720', () => {
     const scripts = shardScripts();
-    const total = scripts.length;
-    expect(total).toBeGreaterThanOrEqual(2);
+    expect(scripts.length).toBeGreaterThanOrEqual(2);
     const [chromium = '', game = ''] = playwrightRuns(webScripts()['test:browser']);
     const BUILD =
       /^vite build && vite build --config vite\.browser\.config\.ts \|\| exit 1; playwright test /;
     const shardsWithGame: string[] = [];
-    scripts.forEach(([name, script], index) => {
+    const filtersOf = new Map<string, string[]>();
+    for (const [name, script] of scripts) {
       const runs = playwrightRuns(script);
-      // The whole gate's chromium run, with this shard's slice of it: the same
-      // project, workers and stop, so a shard is never run under a looser one.
-      expect(runs[0], name).toBe(
-        chromium.replace(
-          '--project chromium ',
-          `--project chromium --shard ${String(index + 1)}/${String(total)} `,
-        ),
-      );
+      // The whole gate's chromium run, with this shard's spec files after it:
+      // the same project, workers and stop, so a shard is never run under a
+      // looser one, and no `--shard`, which would drop cases from a list.
+      const run = String(runs[0]);
+      expect(run.startsWith(`${chromium} `), name).toBe(true);
+      const filters = run.slice(chromium.length).trim().split(/\s+/);
+      for (const filter of filters) {
+        // A file filter, not an option: `--grep` and the like would narrow
+        // the run past what the lists below account for.
+        expect(filter.startsWith('-'), `${name}: ${filter}`).toBe(false);
+        // A stale entry names nothing, and hides a spec renamed out of it.
+        expect(
+          SPECS.filter((spec) => selects(filter, spec)),
+          `${name}: ${filter} names no spec`,
+        ).not.toEqual([]);
+      }
+      filtersOf.set(name, filters);
       // A failed build ends the step before any run starts.
       expect(script, name).toMatch(BUILD);
       if (runs.length === 2) {
@@ -410,9 +433,30 @@ describe('the browser gate is split into a required run and a nightly one — #8
       } else {
         // One run, and the script's status is that run's.
         expect(runs, name).toHaveLength(1);
-        expect(script.endsWith(`playwright test ${String(runs[0])}`), name).toBe(true);
+        expect(script.endsWith(`playwright test ${run}`), name).toBe(true);
       }
-    });
+    }
+    // Every spec the chromium project reads is in exactly one shard's list: in
+    // none, a new spec runs in no required job; in two, it runs twice.
+    const project = PROJECTS.find((one) => one.name === 'chromium');
+    expect(project).toBeDefined();
+    const chromiumSpecs = SPECS.filter(
+      (spec) => project !== undefined && runs(project, spec, 'a check'),
+    );
+    expect(chromiumSpecs.length).toBe(SPECS.length - 1);
+    for (const spec of chromiumSpecs) {
+      const homes = [...filtersOf]
+        .filter(([, filters]) => filters.some((filter) => selects(filter, spec)))
+        .map(([name]) => name);
+      expect(homes, spec).toHaveLength(1);
+    }
+    // The game spec is the game run's, and in no chromium list.
+    for (const [name, filters] of filtersOf) {
+      expect(
+        filters.filter((filter) => selects(filter, 'game.browser.spec.ts')),
+        name,
+      ).toEqual([]);
+    }
     // The game run is in one shard: in none it leaves the gate, in two it
     // runs twice.
     expect(shardsWithGame).toHaveLength(1);
@@ -559,6 +603,7 @@ describe('the nightly workflow runs what left the required job, and cannot pass 
         'pnpm run test:required',
         'timeout --verbose --kill-after=10s 825s pnpm run test:browser:shard-1',
         'timeout --verbose --kill-after=10s 825s pnpm run test:browser:shard-2',
+        'timeout --verbose --kill-after=10s 825s pnpm run test:browser:shard-3',
       ]),
     );
     expect(commands).not.toContain('pnpm run test:browser:nightly');

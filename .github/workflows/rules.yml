@@ -7,10 +7,10 @@
 # review", and CLAUDE.md says rule SCOPE001 "fails the build". This workflow is
 # what makes those statements true. Until it existed they were not.
 #
-# Since #1285 the work is done by jobs side by side -- the SHARDS, four since
-# #1362 -- and one more, `rules`, that does nothing but fail unless every one
+# Since #1285 the work is done by jobs side by side -- the SHARDS, five since
+# #1720 -- and one more, `rules`, that does nothing but fail unless every one
 # of them succeeded. `main` requires a status check whose context is exactly
-# "Repository rules", and that fourth job is the one that carries the name: a
+# "Repository rules", and that last job is the one that carries the name: a
 # shard reports under its own context, which `main` does not require, so a red
 # shard blocks a merge ONLY through the job at the bottom of this file. The
 # owner's ruling of 2026-10-12 (#1280, #1285): one job of 23 minutes on the
@@ -20,9 +20,10 @@
 #            every checker and its suite, the instance image, the Capacitor
 #            and third-party-notices gates
 #   tests    the accessibility gate and the Vitest suite
-#   browser-1, browser-2
-#            the pinned Chromium and the browser gate (#63), half each since
-#            #1362: jsdom implements no WebGL, so MapLibre cannot be
+#   browser-1, browser-2, browser-3
+#            the pinned Chromium and the browser gate (#63), a third each
+#            since #1720 (halves since #1362), divided by spec file on
+#            measured time: jsdom implements no WebGL, so MapLibre cannot be
 #            constructed there at all, and "which hosts does the map engine
 #            actually contact" is a question only a browser answers
 #
@@ -387,8 +388,12 @@ jobs:
     # -- #1285". ⚠️ NOT a bound on a Vitest hang: Vitest cannot interrupt a
     # synchronous case, so one that never returns runs until this cancels the
     # job, and the `rules` job then reports the cancelled shard as red.
-    # 448 to 461 s on the slower runner.
-    timeout-minutes: 15
+    # 448 to 461 s on the slower runner. ⚠️ 16 minutes since #1720, which
+    # added the first rows to the measured table since this shard grew: it
+    # took 604 to 635 s on the last five green `main` runs and 636 s on the
+    # EPYC 7763 in #1720's own, 264 s inside 15 minutes, short of the five
+    # minutes nightly-split.test.ts holds every stop clear of.
+    timeout-minutes: 16
     steps:
       - name: Check out the repository
         # Pinned to a full commit SHA, as in the `checks` shard, which has the
@@ -503,7 +508,7 @@ jobs:
       # a `Tests outside coverage` step here is reading the old file.
       # `check:test-split` still fails a file in no Vitest run.
 
-  # --- Shards 3 and 4 of 4: the browser gate (#63), in two halves (#1362) ---------
+  # --- Shards 3 to 5 of 5: the browser gate (#63), in three parts (#1362, #1720) --
   #
   # It buys the only assertions in the repository that a real engine makes:
   # that MapLibre initialises against the style we build, that `addProtocol`
@@ -529,8 +534,20 @@ jobs:
   # has the measurements; nightly-split.test.ts holds that each shard script
   # runs in exactly one job, that together they are `test:browser` with every
   # case in exactly one shard, and that `rules` needs both.
+  #
+  # ⚠️ THREE jobs since #1720, and divided by SPEC FILE rather than by
+  # `--shard`, and a reviewer who remembers `--shard 1/2` is reading the old
+  # file. `--shard` divides by case count, and `browser-1` held 924 cases and
+  # about two thirds of the `chromium` time: 618 s of its 720 s stop on an EPYC
+  # 7763, 1.16 times. Each `test:browser:shard-N` now names its spec files,
+  # chosen from per-file times measured on `main` so the three finish
+  # together, and `browser-3` runs the `game` project after its part.
+  # nightly-split.test.ts holds every spec the `chromium` project reads in
+  # exactly one shard's list, and goes red on a spec in none, so a NEW spec
+  # file goes into a list in the same pull request (docs/agents/ci.md
+  # section 4c "Three browser shards -- #1720" says which).
   browser-1:
-    name: Browser gate (1 of 2)
+    name: Browser gate (1 of 3)
     runs-on: ubuntu-latest
     # @see the `checks` shard's stop. The stops nested inside this one, on the
     # slower runner (docs/agents/ci.md section 4c "Shards -- #1285" has the
@@ -655,20 +672,18 @@ jobs:
       # could not name. GNU
       # coreutils `timeout`, on the runner image; locally `pnpm run
       # test:browser` is the whole gate in one command, both halves and the
-      # game run, without it. ⚠️ Since #1362 this step is the first half of
-      # the `chromium` run (`--shard 1/2`) and no `game` run: `browser-2` has
-      # the second half and the game run.
+      # game run, without it. ⚠️ Since #1720 this step is the `chromium` run
+      # over this shard's own spec files and no `game` run: `browser-2` and
+      # `browser-3` have the other files, and `browser-3` the game run.
       - name: Browser gate
         timeout-minutes: 14
         run: timeout --verbose --kill-after=10s 825s pnpm run test:browser:shard-1
 
-  # The second half (#1362): every step, stop and pin is `browser-1`'s, whose
-  # comments say why; only the gate's command differs. `test:browser:shard-2`
-  # runs the `chromium` project's second half (`--shard 2/2`) and then the
-  # `game` project alone, as the one job did since #1128, so the game's loads
-  # still have the CPU to themselves.
+  # The second part (#1362, #1720): every step, stop and pin is `browser-1`'s,
+  # whose comments say why; only the gate's command differs.
+  # `test:browser:shard-2` runs the `chromium` project over its own spec files.
   browser-2:
-    name: Browser gate (2 of 2)
+    name: Browser gate (2 of 3)
     runs-on: ubuntu-latest
     # @see `browser-1`'s stop, which has this arithmetic too.
     timeout-minutes: 25
@@ -709,6 +724,53 @@ jobs:
         timeout-minutes: 14
         run: timeout --verbose --kill-after=10s 825s pnpm run test:browser:shard-2
 
+  # The third part (#1720): every step, stop and pin is `browser-1`'s, whose
+  # comments say why; only the gate's command differs. `test:browser:shard-3`
+  # runs the `chromium` project over its own spec files and then the `game`
+  # project alone, as the one job did since #1128, so the game's loads still
+  # have the CPU to themselves.
+  browser-3:
+    name: Browser gate (3 of 3)
+    runs-on: ubuntu-latest
+    # @see `browser-1`'s stop, which has this arithmetic too.
+    timeout-minutes: 25
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Record the runner's CPU
+        run: lscpu | grep -E '^(Model name|Thread|Core|Socket|CPU\(s\))'
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Enable pnpm through corepack
+        env:
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+        run: |
+          corepack enable pnpm
+          pnpm --version
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Drop the unrelated Chrome apt source
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/google-chrome.list \
+                     /etc/apt/sources.list.d/google-chrome.sources
+
+      - name: Install the pinned Chromium
+        timeout-minutes: 10
+        run: pnpm --filter @onyourleft/web exec playwright install --with-deps chromium
+
+      - name: Browser gate
+        timeout-minutes: 14
+        run: timeout --verbose --kill-after=10s 825s pnpm run test:browser:shard-3
+
   # --- The required check ---------------------------------------------------------
   #
   # ⚠️ THE NAME IS LOAD-BEARING. `main` requires a status check whose context is
@@ -739,7 +801,7 @@ jobs:
   # it reports a failure here as `success`.
   rules:
     name: Repository rules
-    needs: [checks, tests, browser-1, browser-2]
+    needs: [checks, tests, browser-1, browser-2, browser-3]
     if: always()
     runs-on: ubuntu-latest
     # A checkout and one bash script: seconds. Five minutes is a stop.
