@@ -57,9 +57,9 @@ const PORT = 4319;
  * ⚠️ The one above previews `browser/` — the harness — and an offline claim
  * about the product has to be measured against `apps/web/dist`, which that
  * server does not serve. So there are two `webServer` entries, not two
- * Playwright projects and emphatically not two CI jobs for them: since #1362
- * the gate is two jobs, `browser-1` and `browser-2`, which divide the cases
- * and not the servers — each starts both — and which the job named
+ * Playwright projects and emphatically not two CI jobs for them: since #1720
+ * the gate is three jobs, `browser-1` to `browser-3`, which divide the spec
+ * files and not the servers — each starts both — and which the job named
  * `Repository rules` waits for (docs/agents/ci.md §4c).
  *
  * ⚠️ **The product server serves a single-page app**, with Vite's default

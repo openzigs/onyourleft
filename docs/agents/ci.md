@@ -14,7 +14,7 @@ It has the same authority as the root file. Where the text below says "this file
 
 ⚠️ **Since [#1285](https://github.com/openzigs/onyourleft/issues/1285) `Repository rules` is
 shards side by side — `checks`, `tests` and, since [#1362](https://github.com/openzigs/onyourleft/issues/1362),
-the browser gate in two halves, `browser-1` and `browser-2` (§"Two browser shards — #1362") — and one
+the browser gate in three parts, `browser-1` to `browser-3` (§"Three browser shards — #1720") — and one
 more job that carries the required name and fails unless every shard succeeded.** A reviewer who remembers one job of
 twenty-odd minutes is reading the old file, and so is every "in this same job", "the job's stop"
 and "a second job could not block a merge" in the dated sections below: each was true when it was
@@ -1226,6 +1226,57 @@ the table above:
   files are slower per case than `browser-2`'s. When a row brings `browser-1` within about three
   minutes of its stop, the next move is a third shard (`--shard N/3`, a script and a job, each in
   `needs:`), which with no file over about two minutes now divides the time as well as the count.
+
+#### Three browser shards — #1720
+
+⚠️ **The browser gate is three jobs since [#1720](https://github.com/openzigs/onyourleft/issues/1720),
+`browser-1` to `browser-3`, each running the spec files its script names, and a reviewer who
+remembers `--shard 1/2` is reading the old file.** `--shard` divided by case count, and `browser-1`
+had grown to 924 to 928 cases and about two thirds of the `chromium` time: on `main` its `chromium`
+run took 618 s of its 720 s stop on an EPYC 7763 (1.16 times), 418 s on a 9V45 and 512 s on a 9V74,
+and on PR #1716 633, 499 and 643 s. The config's own minimum is 1.15 times (#1603).
+
+**How the files were divided.** From the log of `main` run
+[40200968492](https://github.com/openzigs/onyourleft/actions/runs/40200968492), the slower of the
+two latest green runs, each spec file's time in its worker: the first case's start to the last
+case's end, as the list reporter prints them (`rideview` 303 s, `ride` 241 s, `pre-ride` 189 s,
+`ride-room` 186 s, `ride-workout` 175 s, `list-detail` 157 s, and 38 more files under 145 s; 2 700 s
+in all). The files were then assigned to three shards to make the slowest finish earliest,
+simulating what Playwright does with them: files in path order, each to the first of three
+workers to come free, and the `game` run's 75 s after the third shard's part. The simulated
+`chromium` parts were 327, 328 and 251 s (and 75 s of game run) against the 624 s that run's
+`browser-1` took.
+
+| Script | Job | Spec files | Cases at #1720 |
+|---|---|--:|--:|
+| `test:browser:shard-1` | `browser-1` | 18 (`rideview`, `ride`, `pre-ride`, `shell` …) | 887 |
+| `test:browser:shard-2` | `browser-2` | 18 (`list-detail`, `controls-first`, `corridor` …) | 439 |
+| `test:browser:shard-3` | `browser-3` | 12 (`ride-room`, `ride-workout`, `links` …), then the `game` run | 434, then 64 |
+
+`playwright test --list` over each script's arguments gives 887 + 439 + 434 cases in 14 + 18 + 12
+files, the 1 760 cases in 44 files of the whole `chromium` project (the other four listed files
+hold only `@nightly` describes). **No stop moved**: each part keeps 720 s and three workers, the
+game run 85 s, the wrapper 825 s and its 14 minutes, each job its 25 minutes and the browser
+install its ten. Nothing left the gate, moved to nightly, or is retried. `test:browser` is
+unchanged, the whole gate in one command, locally.
+
+**A file filter is a pattern over the path**, which is how Playwright 1.63 reads a positional
+argument (`forceRegExp`, case-insensitive, against the absolute path). Each is written
+`/<name>.browser.spec.ts`, with the slash, because `room.browser.spec.ts` alone also selects
+`ride-room.browser.spec.ts`.
+
+`nightly-split.test.ts` holds that each script is the whole gate's `chromium` run with file filters
+after it and nothing else (no `--shard`, no option), that each filter selects at least one spec,
+that **every spec the `chromium` project reads is selected by exactly one script** — so a spec in
+none, in two, or renamed out of its list is a red case, as is a filter that selects two files —
+that the game spec is in no list and the `game` run in exactly one script, and through §"Shards —
+#1285"'s tests that `rules` needs all three and each has a column in the table below.
+
+⚠️ **Where a new spec file goes**: into the list of the shard whose last measured `chromium` part
+was shortest, in the same pull request; `nightly-split.test.ts` is red until it is in one. When a
+row of the table brings any part within 1.4 times of its 720 s stop, re-read the per-file times
+from that run's log and re-divide the files, or add a fourth script and job (in `needs:`, with a
+column here). Not a longer stop, and not a check moved to nightly without the owner's ruling.
 
 ⚠️ **The runner is two cores, not four, and that is what bounds all of this.** `ubuntu-latest`
 reports four vCPUs, and `lscpu` on it reads `Thread(s) per core: 2`, `Core(s) per socket: 2` (run
