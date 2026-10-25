@@ -72,6 +72,19 @@ const PORT = 4319;
 const PRODUCT_PORT = 4320;
 
 /**
+ * The **demo** build's port — #1648. A third server, for the reason the
+ * product has a second: what the demo is measured to fetch has to be measured
+ * against `demo/dist`, the files an embedding site serves, and neither server
+ * above serves them. `test:browser` and every script that starts these servers
+ * builds it first (`vite preview` refuses a missing `dist`).
+ *
+ * ⚠️ **Its own origin, and no storage state for it**: {@link FOLLOW_THE_DEVICE}
+ * names the other two origins only, so a demo page starts with empty storage
+ * and `shell-demo.browser.spec.ts` can assert it is still empty after a ride.
+ */
+const DEMO_PORT = 4321;
+
+/**
  * The bind address, written down once.
  *
  * ⚠️ **`vite preview` defaults to `localhost`, and that is not the same thing
@@ -95,6 +108,8 @@ const HOST = '127.0.0.1';
 export const HARNESS_ORIGIN = `http://${HOST}:${String(PORT)}`;
 /** Where `apps/web/dist` is served from. The product, not the gate's own pages. */
 export const PRODUCT_ORIGIN = `http://${HOST}:${String(PRODUCT_PORT)}`;
+/** Where `apps/web/demo/dist` is served from — #1648. */
+export const DEMO_ORIGIN = `http://${HOST}:${String(DEMO_PORT)}`;
 
 /**
  * The flags every browser this gate launches is given.
@@ -388,6 +403,15 @@ export default defineConfig({
       // the harness.
       command: `pnpm exec vite preview --host ${HOST} --port ${String(PRODUCT_PORT)} --strictPort`,
       url: PRODUCT_ORIGIN,
+      reuseExistingServer: false,
+      timeout: 60_000,
+      stdout: 'pipe',
+    },
+    {
+      // The demo (#1648): `vite.demo.config.ts` serves `demo/dist`, which
+      // `test:browser` builds first.
+      command: `pnpm exec vite preview --config vite.demo.config.ts --host ${HOST} --port ${String(DEMO_PORT)} --strictPort`,
+      url: DEMO_ORIGIN,
       reuseExistingServer: false,
       timeout: 60_000,
       stdout: 'pipe',
