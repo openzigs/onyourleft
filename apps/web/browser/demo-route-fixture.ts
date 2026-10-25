@@ -21,7 +21,11 @@ import { countingSource } from '../src/world-data/archive-testing';
 import { bakeRoute, strippedGpx, writeBakedRoute } from '../tools/demo/bake-route';
 import type { ManifestEntry } from '../tools/demo/bake-route';
 import type { RoutePointTuple } from '../tools/demo/route-bundle';
-import { buildCorridorFixtureArchive, corridorFixtureRoute } from './corridor-fixture';
+import {
+  buildCorridorFixtureArchive,
+  corridorFixtureRoute,
+  expectedCorridorCounts,
+} from './corridor-fixture';
 
 /** The fixture route's id: `?route=fixture`. */
 export const FIXTURE_ROUTE_ID = 'fixture';
@@ -50,6 +54,16 @@ export async function bakeFixtureRouteInto(directory: string): Promise<ManifestE
   });
   writeBakedRoute(directory, baked);
   return baked.entry;
+}
+
+/**
+ * What the demo reports of the fixture route's corridor (`baked-route.ts`
+ * §`CorridorCounts`): `expectedCorridorCounts`, decoded in Node, less the
+ * place points, which the demo does not count (ADR 0055 D-5.4).
+ */
+export function expectedRouteCounts(): Omit<ReturnType<typeof expectedCorridorCounts>, 'places'> {
+  const { tiles, buildings, landUse, paths, streets } = expectedCorridorCounts();
+  return { tiles, buildings, landUse, paths, streets };
 }
 
 /** Every file in a baked `routes/` directory, by its path relative to the demo's page. */

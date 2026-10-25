@@ -16,8 +16,12 @@ import { join } from 'node:path';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { corridorFixtureRoute, expectedCorridorCounts } from '../../browser/corridor-fixture';
-import { bakeFixtureRouteInto, routeFilesIn } from '../../browser/demo-route-fixture';
+import { corridorFixtureRoute } from '../../browser/corridor-fixture';
+import {
+  bakeFixtureRouteInto,
+  expectedRouteCounts,
+  routeFilesIn,
+} from '../../browser/demo-route-fixture';
 import { CORRIDOR_READER_VERSION } from '../game/world-data/corridor';
 import type { ManifestEntry } from '../../tools/demo/bake-route';
 import { encodeRouteBundle, readRouteBundle } from '../../tools/demo/route-bundle';
@@ -77,7 +81,7 @@ describe('a baked route, read into memory — #1652', () => {
     const { read, asked } = reader(files);
     const loaded = await loadBakedRoute('fixture', read);
     if (loaded.kind !== 'ready') throw new Error(`not ready: ${loaded.notice}`);
-    const expected = expectedCorridorCounts();
+    const expected = expectedRouteCounts();
     expect(loaded.route.counts).toEqual(expected);
     // Read back off the corridor the scene is handed, not off the counts.
     const { corridor } = loaded.route;
@@ -102,8 +106,8 @@ describe('a baked route, read into memory — #1652', () => {
     });
     const loaded = await loadBakedRoute('fixture', reader(servedWithBundle(bytes)).read);
     if (loaded.kind !== 'ready') throw new Error('not ready');
-    expect(loaded.route.counts.tiles).toBe(expectedCorridorCounts().tiles - 1);
-    expect(loaded.route.corridor.coveredBoxes.length).toBe(expectedCorridorCounts().tiles - 1);
+    expect(loaded.route.counts.tiles).toBe(expectedRouteCounts().tiles - 1);
+    expect(loaded.route.corridor.coveredBoxes.length).toBe(expectedRouteCounts().tiles - 1);
   });
 
   it.each([

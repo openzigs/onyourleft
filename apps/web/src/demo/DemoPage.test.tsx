@@ -16,8 +16,11 @@ import { join } from 'node:path';
 import { act } from 'react';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
-import { expectedCorridorCounts } from '../../browser/corridor-fixture';
-import { bakeFixtureRouteInto, routeFilesIn } from '../../browser/demo-route-fixture';
+import {
+  bakeFixtureRouteInto,
+  expectedRouteCounts,
+  routeFilesIn,
+} from '../../browser/demo-route-fixture';
 import type { RealisticWorldOutcome } from '../game/realistic-assets';
 import { ODBL_LICENCE_URL, OSM_ATTRIBUTION } from '../map/basemap';
 import { OSM_COPYRIGHT_URL } from '../../tools/demo/route-bundle';
@@ -293,7 +296,7 @@ describe('the demo page on a baked route — #1652', () => {
     const shown = await page({ search: '?preset=climb&route=fixture', readFile: served() });
     await until(() => shown.last()?.mapData !== undefined);
     await shown.step(10);
-    expect(shown.last()?.mapData).toEqual({ route: 'fixture', counts: expectedCorridorCounts() });
+    expect(shown.last()?.mapData).toEqual({ route: 'fixture', counts: expectedRouteCounts() });
     expect(shown.last()?.mappedBuildings).toBeGreaterThan(0);
     expect(credit()).toBe(OSM_ATTRIBUTION);
   });

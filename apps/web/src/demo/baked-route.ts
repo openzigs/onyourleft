@@ -70,14 +70,17 @@ export const BAKED_ROUTE_UNAVAILABLE = corridorStateText({
 /** Reads one of the demo's own files, by its path relative to the page. */
 export type ReadDemoFile = (path: string) => Promise<Uint8Array<ArrayBuffer>>;
 
-/** How many of each feature a route's corridor holds — what `__oylDemo` reports. */
+/**
+ * How many of each feature a route's corridor holds — what `__oylDemo`
+ * reports. Not the place points: ADR 0055 D-5.4 admits one reader of them,
+ * `urban-class.ts` (`places-never-shown.test.ts`).
+ */
 export interface CorridorCounts {
   readonly tiles: number;
   readonly buildings: number;
   readonly landUse: number;
   readonly paths: number;
   readonly streets: number;
-  readonly places: number;
 }
 
 /** A baked route, decoded: the road the riders ride and the map data drawn beside it. */
@@ -95,7 +98,13 @@ export type BakedRouteLoad =
   | { readonly kind: 'ready'; readonly route: BakedRoute }
   | { readonly kind: 'failed'; readonly notice: string };
 
-/** The SHA-256 of `bytes`, as lower-case hex. */
+/**
+ * The SHA-256 of `bytes`, as lower-case hex. ⚠️ `crypto.subtle` is there only
+ * in a secure context — `https:`, or a loopback address — so a page served
+ * over plain `http:` from anywhere else cannot check the digest, and rides
+ * the synthetic road with {@link BAKED_ROUTE_UNAVAILABLE} rather than draw
+ * data it did not check.
+ */
 async function sha256Hex(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
   const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
   return [...digest].map((byte) => byte.toString(16).padStart(2, '0')).join('');
@@ -160,7 +169,6 @@ async function load(id: string, read: ReadDemoFile): Promise<BakedRoute | undefi
       landUse: features.landUse.length,
       paths: features.paths.length,
       streets: features.streets.length,
-      places: features.places.length,
     },
   };
 }

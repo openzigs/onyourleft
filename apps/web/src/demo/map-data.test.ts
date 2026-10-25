@@ -15,8 +15,11 @@ import { join } from 'node:path';
 
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
-import { expectedCorridorCounts } from '../../browser/corridor-fixture';
-import { bakeFixtureRouteInto, routeFilesIn } from '../../browser/demo-route-fixture';
+import {
+  bakeFixtureRouteInto,
+  expectedRouteCounts,
+  routeFilesIn,
+} from '../../browser/demo-route-fixture';
 import { NO_LAND_CLASS } from '../game/land-class';
 import type { SceneInput } from '../game/scene';
 import { INITIAL_QUALITY, qualitySettings } from '../game/quality';
@@ -62,13 +65,13 @@ describe('the demo player on a baked route — #1652', () => {
   it('rides the route’s road, and hands the scene its corridor, land and mapped town', () => {
     const player = createDemoPlayer(CLIMB_PRESET, { reducedMotion: false, route });
     expect(player.profile).toBe(route.profile);
-    expect(player.mapData).toEqual({ route: 'fixture', counts: expectedCorridorCounts() });
+    expect(player.mapData).toEqual({ route: 'fixture', counts: expectedRouteCounts() });
     const frame = player.frame(RUNG);
     // The mapped buildings the renderer's belt draws from: the fixture's
     // residential block, planned, and nothing invented.
     const plans = frame.mappedBuildings?.buildings.plans ?? [];
     expect(plans.length).toBeGreaterThan(0);
-    expect(plans.length).toBeLessThanOrEqual(expectedCorridorCounts().buildings);
+    expect(plans.length).toBeLessThanOrEqual(expectedRouteCounts().buildings);
   });
 
   it('plans its camera tour on the route it rides, not the preset’s synthetic road', () => {
@@ -140,7 +143,7 @@ describe('the demo stage on a baked route — #1652', () => {
   it('publishes the route and its counts, and the mapped buildings of the frame it drew', () => {
     const { snapshots, view } = stage(true);
     const last = snapshots.at(-1);
-    expect(last?.mapData).toEqual({ route: 'fixture', counts: expectedCorridorCounts() });
+    expect(last?.mapData).toEqual({ route: 'fixture', counts: expectedRouteCounts() });
     const drawn = view.rendered.at(-1)?.mappedBuildings?.buildings.plans.length;
     expect(drawn).toBeGreaterThan(0);
     expect(last?.mappedBuildings).toBe(drawn);

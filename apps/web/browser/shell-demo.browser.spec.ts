@@ -93,8 +93,7 @@ import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { DEMO_ORIGIN } from '../playwright.config';
 import { OSM_ATTRIBUTION } from '../src/map/basemap';
 import { filesUnder } from '../tools/demo/demo-output';
-import { expectedCorridorCounts } from './corridor-fixture';
-import { bakeFixtureRouteInto, routeFilesIn } from './demo-route-fixture';
+import { bakeFixtureRouteInto, expectedRouteCounts, routeFilesIn } from './demo-route-fixture';
 
 const DIST = fileURLToPath(new URL('../demo/dist', import.meta.url));
 /** Where the fixture route is baked for the #1652 case: ignored and pruned, as every `dist/` is. */
@@ -489,7 +488,7 @@ test.describe('the demo, built and served — #1648', () => {
       const watched = await watch(context, page, { realistic: false, routes });
       await ridesFiveSeconds(page, 'climb', '&route=fixture');
       const now = await last(page);
-      expect(now?.mapData).toEqual({ route: 'fixture', counts: expectedCorridorCounts() });
+      expect(now?.mapData).toEqual({ route: 'fixture', counts: expectedRouteCounts() });
       expect(now?.mappedBuildings ?? 0).toBeGreaterThan(0);
       // Every snapshot of the run carries it: the credit is owed for the whole run.
       const snapshots = (await gate(page)).snapshots;
