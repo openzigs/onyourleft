@@ -388,8 +388,12 @@ jobs:
     # -- #1285". ⚠️ NOT a bound on a Vitest hang: Vitest cannot interrupt a
     # synchronous case, so one that never returns runs until this cancels the
     # job, and the `rules` job then reports the cancelled shard as red.
-    # 448 to 461 s on the slower runner.
-    timeout-minutes: 15
+    # 448 to 461 s on the slower runner. ⚠️ 16 minutes since #1720, which
+    # added the first rows to the measured table since this shard grew: it
+    # took 604 to 635 s on the last five green `main` runs and 636 s on the
+    # EPYC 7763 in #1720's own, 264 s inside 15 minutes, short of the five
+    # minutes nightly-split.test.ts holds every stop clear of.
+    timeout-minutes: 16
     steps:
       - name: Check out the repository
         # Pinned to a full commit SHA, as in the `checks` shard, which has the

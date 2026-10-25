@@ -1147,16 +1147,15 @@ shard, and the scripts name every shard of the total, so no case is in none or i
 columns are each shard's `Browser gate` step. ⚠️ **The `tests` column is from a run whose `tests`
 shard was red on the one case that reads this table, before this table existed**; every other case
 passed and its duration is the suite's. **This is the table `nightly-split.test.ts` reads**: a row
-added here moves every bound, a cell that is not a whole number fails the test, and a shard with no
-column fails it too.
+added here moved every bound, a cell that is not a whole number fails the test, and a shard with no
+column fails it too. ⚠️ **Since #1720 the table it reads is §"Three browser shards — #1720"'s**, and
+this one is the record.
 
-<!-- shard-measurements:start -->
 | Run | Wall | `checks` on | checks | `tests` on | tests | `browser-1` on | browser-1 | `browser-2` on | browser-2 | Gate starts | browser-1 step | browser-2 step |
 |---|--:|---|--:|---|--:|---|--:|---|--:|--:|--:|--:|
 | [38725274938](https://github.com/openzigs/onyourleft/actions/runs/38725274938) attempt 1 (#1363) | 501 | EPYC 9V74 | 215 | EPYC 7763 | 489 | EPYC 9V74 | 477 | EPYC 7763 | 303 | 38 | 439 | 263 |
 | attempt 2 | 512 | EPYC 7763 | 292 | EPYC 7763 | 495 | EPYC 9V74 | 488 | EPYC 7763 | 302 | 40 | 447 | 262 |
 | attempt 3 | 621 | Xeon 6973P-C | 179 | EPYC 7763 | 507 | **EPYC 7763** | 603 | EPYC 9V45 | 207 | 37 | 564 | 172 |
-<!-- shard-measurements:end -->
 
 - **The halves are not even, and that is `--shard`'s rule rather than a choice.** It divides by
   case count, whole files at a time, and `ride.browser.spec.ts` (423 cases, about 430 s of summed
@@ -1271,6 +1270,60 @@ that **every spec the `chromium` project reads is selected by exactly one script
 none, in two, or renamed out of its list is a red case, as is a filter that selects two files —
 that the game spec is in no list and the `game` run in exactly one script, and through §"Shards —
 #1285"'s tests that `rules` needs all three and each has a column in the table below.
+
+**Measured** on this change's own pull request, run
+[40223475813](https://github.com/openzigs/onyourleft/actions/runs/40223475813), attempts 2 to 4.
+Columns as in §"Shards — #1285" (job seconds, `started_at` to `completed_at`; `Wall` is the attempt
+starting to `Repository rules` completing); `Gate starts` is the latest of the three shards'
+`Browser gate` step starts, and each `step` column that shard's `Browser gate` step. **This is the
+table `nightly-split.test.ts` reads**: a row added here moves every bound, a cell that is not a
+whole number fails the test, and a shard with no column fails it too. ⚠️ The `tests` column is from
+runs whose `tests` shard was red on the one case that reads this table, before it existed; every
+other case passed.
+
+<!-- shard-measurements:start -->
+| Run | Wall | `checks` on | checks | `tests` on | tests | `browser-1` on | browser-1 | `browser-2` on | browser-2 | `browser-3` on | browser-3 | Gate starts | browser-1 step | browser-2 step | browser-3 step |
+|---|--:|---|--:|---|--:|---|--:|---|--:|---|--:|--:|--:|--:|--:|
+| 40223475813 attempt 2 | 491 | EPYC 9V45 | 223 | EPYC 9V74 | 476 | **EPYC 7763** | 424 | EPYC 9V45 | 295 | EPYC 9V74 | 388 | 34 | 389 | 258 | 352 |
+| attempt 3 | 525 | EPYC 7763 | 315 | EPYC 9V74 | 509 | Xeon 8573C | 413 | **EPYC 7763** | 435 | EPYC 9V45 | 260 | 36 | 377 | 397 | 229 |
+| attempt 4 | 653 | EPYC 9V74 | 320 | EPYC 7763 | 636 | **EPYC 7763** | 514 | **EPYC 7763** | 401 | Xeon 8573C | 389 | 51 | 459 | 360 | 344 |
+<!-- shard-measurements:end -->
+
+**Each part's `chromium` run against its 720 s stop** (Playwright's own `passed (…)` figure; the
+`game` run after `browser-3`'s part against its 85 s):
+
+| Attempt | `browser-1` | `browser-2` | `browser-3` | `game` run |
+|---|--:|--:|--:|--:|
+| 1 | 6.5 m on the EPYC 7763, 1.85 times | 4.5 m on a 9V74, 2.67 times | 4.3 m on a Xeon 8573C, 2.79 times | 1.1 m |
+| 2 | 6.4 m on the EPYC 7763, 1.88 times | 4.2 m on a 9V45, 2.86 times | 4.6 m on a 9V74, 2.61 times | 1.1 m |
+| 3 | 6.1 m on a Xeon 8573C, 1.97 times | 6.5 m on the EPYC 7763, 1.85 times | 3.1 m on a 9V45, 3.87 times | 39 s |
+| 4 | **7.5 m on the EPYC 7763, 1.60 times** | 5.9 m on the EPYC 7763, 2.03 times | 4.5 m on a Xeon 8573C, 2.67 times | 1.1 m |
+
+- **Every part kept at least 1.60 times its stop on four attempts**, against 1.12 to 1.16 times for
+  `browser-1` on the EPYC 7763 before. On the 7763 `browser-1` took 6.4 to 7.5 m and `browser-2`
+  5.9 to 6.5 m: the two heavy parts now finish within about a minute of each other there, and
+  `browser-3` with its game run is the shortest. The `game` run is unchanged: 85 s is still #1128's
+  1.2 times its slowest green run, and this change did not move it.
+- ⚠️ **The `tests` shard's stop is 16 minutes since this change**, not 15: these rows are the first
+  since that shard grew (604 to 635 s on the last five green `main` runs, 636 s in attempt 4), and
+  636 s is 264 s inside 15 minutes, short of the five `nightly-split.test.ts` holds every stop
+  clear of. It is a stop on a hang, not a budget (§"Shards — #1285"), so it moved rather than the
+  test's five minutes.
+- ⚠️ **Attempt 1 is not in the bounds table, as #1285 left out its own slow-mirror run.** Its
+  `Install the pinned Chromium` took 566 s in `browser-2` and 570 s in `browser-3` (17 to 34 s on
+  every other attempt): the Ubuntu 26.04 runner's mirror, inside the step's own ten-minute stop.
+  So its `Browser gate` steps started 580 and 585 s in and `Repository rules` reported 934 s after
+  the attempt began; with it, the `Gate starts` bound (three minutes inside the job) and the
+  `Wall` bound (under 900 s) would be red on a mirror this repository does not control. The parts
+  themselves were the table's first row above. `nightly-split.test.ts`'s unmeasured bound, the
+  install at its ten minutes plus the gate's 14, still ends inside the job's 25.
+- ⚠️ **Attempt 4's `browser-2` was red on one case**: `motion.browser.spec.ts`'s "a ride route
+  asked for while a menu fade is animating ends the fade" saw Ride commit 497 ms after it was asked
+  for, against its 200 ms. On the other seven runs read (two of `main`, four attempts here, each the
+  file's seven such readings) the same reading was 5 to 54 ms, so it was one stall rather than the
+  new neighbours' steady load; the case did not fail in the 40 failed `Repository rules` runs before
+  this change. Its timing sensitivity is the case's own, and this change neither retried nor
+  loosened it.
 
 ⚠️ **Where a new spec file goes**: into the list of the shard whose last measured `chromium` part
 was shortest, in the same pull request; `nightly-split.test.ts` is red until it is in one. When a
