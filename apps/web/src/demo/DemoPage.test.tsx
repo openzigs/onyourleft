@@ -14,6 +14,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { CONTROL_MINIMUM_PIXELS } from '../game/hud/HudPanel';
 import { activateWithKeyboard, mount, settle, type Mounted } from '../testing/mount';
 import { DEMO_CONTROL_PIXELS, DemoPage } from './DemoPage';
+import { REFERENCE_ASPECT } from '../game/camera';
+import type { SceneFrame } from '../game/port';
+import { projectThrough } from './camera-tour-testing';
 import type { DemoSnapshot } from './stage';
 import { fakeDrawnWorld, fakeRenderer, SteppedFrames } from './stage-testing';
 
@@ -31,11 +34,13 @@ interface Page {
   readonly button: (name: string) => HTMLButtonElement | undefined;
   readonly step: (steps: number) => Promise<void>;
   readonly setInView: (inView: boolean) => void;
+  /** The last frame the renderer was handed. */
+  readonly drawn: () => SceneFrame | undefined;
 }
 
 async function page(options: { search?: string; reducedMotion?: boolean } = {}): Promise<Page> {
   const frames = new SteppedFrames();
-  const { renderer } = fakeRenderer(new Promise(() => undefined));
+  const { renderer, views } = fakeRenderer(new Promise(() => undefined));
   const snapshots: DemoSnapshot[] = [];
   let inViewChange: ((inView: boolean) => void) | undefined;
   mounted = await mount(
@@ -68,6 +73,7 @@ async function page(options: { search?: string; reducedMotion?: boolean } = {}):
       });
     },
     setInView: (inView) => inViewChange?.(inView),
+    drawn: () => views[0]?.rendered.at(-1),
   };
 }
 
@@ -147,6 +153,33 @@ describe('the demo page — #1647', () => {
     expect(region).not.toBeNull();
     expect(region?.textContent).toBe('');
   });
+
+  it.each([
+    [true, 'the overhead shot itself, the rider centred'],
+    [false, 'half way through the blend into it'],
+  ])(
+    'with reduced motion %s, half a second into the overhead shot is %s — #1649',
+    async (reducedMotion) => {
+      const shown = await page({ reducedMotion });
+      if (reducedMotion) await activateWithKeyboard(shown.button('Play') as HTMLButtonElement);
+      // `camera-tour.ts` §`DEMO_TOURS`: the climb's overhead shot starts at 20 s.
+      await act(async () => {
+        shown.frames.step(42, 500);
+        await Promise.resolve();
+      });
+      const frame = shown.drawn();
+      const rider = frame?.markers[0];
+      if (frame === undefined || rider === undefined) throw new Error('nothing drawn');
+      const at = projectThrough(
+        frame.camera,
+        { x: rider.x, y: rider.y + 1, z: rider.z },
+        REFERENCE_ASPECT,
+      );
+      const offCentre = Math.abs(at.x) + Math.abs(at.y);
+      if (reducedMotion) expect(offCentre).toBeLessThan(1e-6);
+      else expect(offCentre).toBeGreaterThan(0.02);
+    },
+  );
 
   it('runs no frame callback when the page loads in a hidden tab', async () => {
     Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });

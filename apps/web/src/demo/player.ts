@@ -33,9 +33,19 @@ import { seconds, type RouteProfile } from '@onyourleft/domain';
 import { simulatedCrankAngle } from '../game/bicycle';
 import type { SceneFrame } from '../game/port';
 import type { QualitySettings } from '../game/quality';
-import { sceneFrame } from '../game/scene';
+import { groundOf } from '../game/people';
+import { placedRiders, sceneFrame, type SceneInput } from '../game/scene';
+import { scatterSeed } from '../game/scatter';
 import { GameSimulation, type GameState } from '../game/simulation';
+import { NO_LAND_CLASS } from '../game/land-class';
 import { corridorOrigin, type CorridorOrigin } from '../game/terrain';
+import {
+  cameraAt,
+  planTour,
+  reducedMotionTour,
+  type CameraTour,
+  type TourWorld,
+} from './camera-tour';
 import { createDemoRide, DEMO_RIDE_CONDITIONS, demoRoad, type DemoRide } from './runner';
 import type { DemoPreset } from './script';
 
@@ -66,7 +76,12 @@ export interface DemoPlayer {
    * a page that was hidden, or scrolled out of view, was not ridden.
    */
   holdClock(): void;
-  /** The frame to draw now, with the scenery budget of `rung`. Advances nothing. */
+  /** The camera tour the frames are shot with (#1649). */
+  readonly tour: CameraTour;
+  /**
+   * The frame to draw now, with the scenery budget of `rung`, shot by the
+   * camera tour (#1649). Advances nothing.
+   */
   frame(rung: Pick<QualitySettings, 'scatterItems' | 'structureItems' | 'people'>): SceneFrame;
 }
 
@@ -75,14 +90,30 @@ interface Ride {
   readonly riders: DemoRide;
 }
 
+/** How the player moves its camera. */
+export interface DemoPlayerOptions {
+  /**
+   * Whether the visitor asked for reduced motion: the tour's blends and its
+   * roadside pan become cuts (`camera-tour.ts` §`reducedMotionTour`).
+   */
+  readonly reducedMotion: boolean;
+}
+
 /**
  * Play `preset`. A player starts paused on its start line, on a still frame,
  * until it is told to play — which is what a visitor who asked for reduced
  * motion sees.
  */
-export function createDemoPlayer(preset: DemoPreset): DemoPlayer {
+export function createDemoPlayer(
+  preset: DemoPreset,
+  options: DemoPlayerOptions = { reducedMotion: false },
+): DemoPlayer {
   const profile = demoRoad(preset.route);
   const origin: CorridorOrigin = corridorOrigin(profile);
+  const planned = planTour(preset);
+  const tour = options.reducedMotion ? reducedMotionTour(planned) : planned;
+  // The ground the renderer draws: the demo's road carries no mapped land.
+  const groundAt = groundOf(profile, origin, scatterSeed(profile), NO_LAND_CLASS);
   const lead = preset.riders[0];
   if (lead === undefined) throw new RangeError('a demo preset must have at least one rider');
 
@@ -107,6 +138,7 @@ export function createDemoPlayer(preset: DemoPreset): DemoPlayer {
   return {
     preset,
     profile,
+    tour,
     get status() {
       return status;
     },
@@ -145,7 +177,7 @@ export function createDemoPlayer(preset: DemoPreset): DemoPlayer {
     frame(rung) {
       const drawn = ride.simulation.drawnAt(rideMs);
       const others = ride.riders.current().riders.slice(1);
-      return sceneFrame({
+      const input: SceneInput = {
         profile,
         origin,
         state: ride.simulation.state,
@@ -160,7 +192,16 @@ export function createDemoPlayer(preset: DemoPreset): DemoPlayer {
           distanceMetres: rider.state.distance,
           speedMetresPerSecond: rider.state.speed,
         })),
-      });
+      };
+      const frame = sceneFrame(input);
+      const world: TourWorld = {
+        corridor: frame.corridor,
+        profile,
+        origin,
+        riderLateral: placedRiders(input, frame.corridor)[0]?.lateral ?? 0,
+        groundAt,
+      };
+      return { ...frame, camera: cameraAt(tour, rideMs / 1000, drawn, world) };
     },
   };
 }

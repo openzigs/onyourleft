@@ -66,7 +66,7 @@ export function DemoPage(props: DemoPageProps) {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!query.ok || canvas === null) return undefined;
-    const player = createDemoPlayer(query.preset);
+    const player = createDemoPlayer(query.preset, { reducedMotion });
     if (!reducedMotion) player.play();
     const stage = startDemoStage({
       canvas,
