@@ -80,7 +80,7 @@ const PRODUCT_PORT = 4320;
  *
  * ⚠️ **Its own origin, and no storage state for it**: {@link FOLLOW_THE_DEVICE}
  * names the other two origins only, so a demo page starts with empty storage
- * and `demo.browser.spec.ts` can assert it is still empty after a ride.
+ * and `shell-demo.browser.spec.ts` can assert it is still empty after a ride.
  */
 const DEMO_PORT = 4321;
 

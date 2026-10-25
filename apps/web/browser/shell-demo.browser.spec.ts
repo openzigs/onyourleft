@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
+ * (Named `shell-demo`, not `demo`, on purpose: `--shard` cuts by file name, and
+ * this name puts the file in `browser-2`, the half with the room —
+ * `nightly-split.test.ts` holds it.)
+ *
  * The demo's browser gate — #1648: the built demo, served from `demo/dist` by
  * the config's third server, plays, asks nothing of the network beyond its own
  * files, makes no Bluetooth call, sends no trainer command, and stores nothing
@@ -116,6 +120,8 @@ interface Gate {
   readonly snapshots: Snapshot[];
   /** The most distinct colours one drawn frame has held since {@link probeFrames}. */
   readonly colours: number;
+  /** Every `securitypolicyviolation` the page raised: what the policy refused, by blocked URI. */
+  readonly violations: string[];
 }
 
 interface Watched {
@@ -140,8 +146,20 @@ interface Stored {
 
 /** The init script: the Bluetooth recorder and the snapshot recorder. Runs before the page's script. */
 function installRecorders(): void {
-  const gate = { calls: [] as string[], snapshots: [] as Snapshot[], colours: 0, probe: false };
+  const gate = {
+    calls: [] as string[],
+    snapshots: [] as Snapshot[],
+    colours: 0,
+    probe: false,
+    violations: [] as string[],
+  };
   Object.defineProperty(window, '__oylGate', { value: gate });
+  // The demo's policy refuses a foreign fetch before `context.route` sees it,
+  // so the request recorder cannot tell an attempt from nothing: the policy's
+  // own report can.
+  document.addEventListener('securitypolicyviolation', (event) => {
+    gate.violations.push(`${event.violatedDirective}: ${event.blockedURI}`);
+  });
   const refuse = (name: string): never => {
     gate.calls.push(name);
     throw new Error(`The demo's browser gate refuses ${name}`);
@@ -232,7 +250,14 @@ async function watch(
       watched.foreign.push(url.href);
       return route.abort();
     }
-    const path = url.pathname === '/' ? 'index.html' : decodeURIComponent(url.pathname.slice(1));
+    // A malformed escape (`/%E0`) is a path the build does not have, not a handler error.
+    let path = url.pathname.slice(1);
+    try {
+      path = decodeURIComponent(path);
+    } catch {
+      path = `${path} (malformed escape)`;
+    }
+    if (url.pathname === '/') path = 'index.html';
     if (!files.has(path)) watched.missing.push(url.pathname);
     if (!realistic && path.startsWith('realistic/')) {
       return route.fulfill({ status: 404, body: '' });
@@ -255,6 +280,7 @@ function gate(page: Page): Promise<Gate> {
       calls: [...recorded.calls],
       snapshots: [...recorded.snapshots],
       colours: recorded.colours,
+      violations: [...recorded.violations],
     };
   });
 }
@@ -295,6 +321,7 @@ async function findings(context: BrowserContext, page: Page, watched: Watched): 
     ...watched.foreign.map((url) => `request to another origin: ${url}`),
     ...watched.missing.map((path) => `request for a path not in demo/dist: ${path}`),
     ...(await gate(page)).calls.map((call) => `Bluetooth call: ${call}`),
+    ...(await gate(page)).violations.map((each) => `policy refused: ${each}`),
   ];
   const now = await stored(context, page);
   for (const [key, value] of Object.entries(now)) {
@@ -405,7 +432,9 @@ test.describe('the demo, built and served — #1648', () => {
       expect(watched.requests).toContain(`${DEMO_ORIGIN}/?preset=${preset}`);
       expect(watched.requests.some((url) => /\/assets\/[^/]+\.js$/.test(url))).toBe(true);
       // The climb is the one ride audited over the realistic world's load.
-      expect(watched.requests.some((url) => url.includes('/realistic/'))).toBe(true);
+      if (preset === 'climb') {
+        expect(watched.requests.some((url) => url.includes('/realistic/'))).toBe(true);
+      }
     });
   }
 
@@ -447,6 +476,19 @@ test.describe('the demo, built and served — #1648', () => {
       expect(await findings(context, page, watched)).toContain(
         'request to another origin: https://example.org/',
       );
+    });
+
+    test('a fetch the policy refuses is found, though no request reaches the network', async ({
+      context,
+      page,
+    }) => {
+      const watched = await watch(context, page, { realistic: false, rewrite: withoutTheDemo });
+      await openControl(page);
+      await page.evaluate(() => fetch('https://example.org/telemetry').catch(() => undefined));
+      expect(watched.foreign).toEqual([]);
+      expect(await findings(context, page, watched)).toEqual([
+        'policy refused: connect-src: https://example.org/telemetry',
+      ]);
     });
 
     test('a fetch to a path the build does not have is found', async ({ context, page }) => {

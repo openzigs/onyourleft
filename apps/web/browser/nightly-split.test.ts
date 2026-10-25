@@ -418,6 +418,22 @@ describe('the browser gate is split into a required run and a nightly one — #8
     expect(shardsWithGame).toHaveLength(1);
   });
 
+  it('puts the demo spec in the second browser shard, which has the room: browser-1 ran 678 s of its 720 — #1648’s review', () => {
+    // `--shard` cuts the file-ordered list by case count, so a file's name
+    // decides its shard. On run 40211206815 `browser-1` (EPYC 7763) took 678 s
+    // of CHROMIUM_PART_MS with the demo's eight cases in it, 1.06 times, and
+    // `browser-2` (a 9V74) 5.5 m with 825: the demo spec's realistic-world
+    // climb is the costliest case it holds. `ride.browser.spec.ts` is in the
+    // second shard, and everything that sorts after it is too. Renaming this
+    // file back to `demo.browser.spec.ts` puts it in `browser-1` again and
+    // takes that shard's margin below 1.15.
+    const demo = SPECS.filter(
+      (name) => /demo\.browser\.spec\.ts$/.test(name) && !name.startsWith('demo-'),
+    );
+    expect(demo).toEqual(['shell-demo.browser.spec.ts']);
+    expect(demo[0]! > 'ride.browser.spec.ts').toBe(true);
+  });
+
   it('holds both Playwright stops and the builds inside the step’s wrapper, so each stop names its own run — #651', () => {
     // Until #651 they summed to 815 s against a 765 s wrapper, and a `chromium`
     // run that used its 720 s left the game run 35 s of its 85. What the step
