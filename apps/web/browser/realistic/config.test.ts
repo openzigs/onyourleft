@@ -19,6 +19,7 @@ import {
   surfacesWithLevers,
   treesWithLevers,
   windowRevealsWithLevers,
+  overhangShadowsWithLevers,
 } from './config';
 import { REALISTIC_TREE_SETS, REALISTIC_TREES_DEFAULT } from '../../src/game/realistic-assets';
 
@@ -164,6 +165,30 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
       'utf8',
     );
     expect(harness).toContain('windowRevealsOf(view, windowRevealsWithLevers(config.leversOff));');
+  });
+
+  it('builds the mapped walls’ overhang shadows, as the product does, unless #1658’s lever takes them out', () => {
+    expect(LEVERS).toContain('overhang-shadows');
+    expect(overhangShadowsWithLevers([])).toBe(true);
+    // No OTHER lever touches them.
+    expect(overhangShadowsWithLevers(LEVERS.filter((lever) => lever !== 'overhang-shadows'))).toBe(
+      true,
+    );
+    expect(overhangShadowsWithLevers(parseConfig('?levers=-overhang-shadows').leversOff)).toBe(
+      false,
+    );
+    // And #1659's lever is not this one.
+    expect(windowRevealsWithLevers(parseConfig('?levers=-overhang-shadows').leversOff)).toBe(true);
+  });
+
+  it('hands #1658’s parsed lever to the owner’s page, which is where it is wired', () => {
+    const harness = readFileSync(
+      fileURLToPath(new URL('../realistic-harness.ts', import.meta.url)),
+      'utf8',
+    );
+    expect(harness).toContain(
+      'overhangShadowsOf(view, overhangShadowsWithLevers(config.leversOff));',
+    );
   });
 
   it('builds both surfaces’ shaders, bounded, as the product does, unless a #1523 lever takes one out', () => {

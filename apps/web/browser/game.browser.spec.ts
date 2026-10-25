@@ -3775,6 +3775,42 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     expect(Math.abs(luminance(reveal.jambOff) - luminance(reveal.glassOff))).toBeLessThan(4);
   });
 
+  test('#1658 a sunlit mapped wall is in its eaves’ shadow 0.3 m under them and not 1.5 m under, and neither with -overhang-shadows', async ({
+    harnessRun,
+  }, testInfo) => {
+    const { overhangShadow: shadow } = await realistic(harnessRun);
+    const rgb = (values: readonly number[]): string => values.map((c) => c.toFixed(0)).join('/');
+    const measured =
+      `a wall ${shadow.wallMetres.toFixed(1)} m high seen from ${shadow.metres.toFixed(0)} m, the sun ` +
+      `${shadow.sunDegrees.toFixed(0)}° high and square to it: ${rgb(shadow.near)} 0.3 m under the ` +
+      `eaves against ${rgb(shadow.far)} 1.5 m under; ${rgb(shadow.nearOff)} and ` +
+      `${rgb(shadow.farOff)} with -overhang-shadows`;
+    testInfo.annotations.push({
+      type: 'the shadow under a mapped wall’s eaves',
+      description: measured,
+    });
+    console.log(`the shadow under a mapped wall’s eaves — ${measured}`);
+    const luminance = (values: readonly number[]): number =>
+      0.2126 * (values[0] ?? 0) + 0.7152 * (values[1] ?? 0) + 0.0722 * (values[2] ?? 0);
+    expect(shadow.aimed).toBe(true);
+    for (const values of [shadow.near, shadow.far, shadow.nearOff, shadow.farOff]) {
+      expect(values).toHaveLength(3);
+    }
+    // In the shadow, the wall's colour keeps about 0.6 of its light: past the
+    // gate's tolerance of 4 that #1659's control is held to, three times over.
+    // Measured locally (SwiftShader, 2026-10-24), a wall 5 m high from 5 m:
+    // 126/138/143 0.3 m under the eaves against 142/154/159 1.5 m under;
+    // 146/158/164 and 142/154/159 with the lever.
+    expect(luminance(shadow.far) - luminance(shadow.near)).toBeGreaterThan(12);
+    // THE CONTROL: with the term out of the program, #1588's 0.6 m band reaches
+    // neither place, so the near one is no darker than the far one (it read
+    // 4 lighter: the same wall, a metre higher) ...
+    expect(luminance(shadow.nearOff) - luminance(shadow.farOff)).toBeGreaterThan(-4);
+    // ... and it is the shadow, not the wall, that darkened the near place.
+    expect(luminance(shadow.nearOff) - luminance(shadow.near)).toBeGreaterThan(12);
+    expect(Math.abs(luminance(shadow.far) - luminance(shadow.farOff))).toBeLessThan(4);
+  });
+
   test('#1586 a town’s edge is drawn when the fields beyond it fill the structure cap', async ({
     harnessRun,
   }, testInfo) => {

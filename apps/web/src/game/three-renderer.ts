@@ -269,6 +269,7 @@ import {
   DOOR_IN_FACE,
   DORMER_SASH,
   FACADE_AO,
+  OVERHANG_SHADOW,
   FOUNDATION,
   GARAGE_DOOR,
   LOT_CLAPBOARD_COURSE_METRES,
@@ -294,6 +295,7 @@ import {
 import { FRONT_PORCH } from './porch';
 import { placedPoint, type HousePlacement } from './house-models';
 import {
+  EAVES_OVERHANG_METRES,
   BAY_METRES,
   CLAD_BLOCK,
   CLAD_BRICK,
@@ -13624,6 +13626,12 @@ export function drawsFacade(material: Material): boolean {
 let windowRevealsBuilt = true;
 
 /**
+ * Whether the facade's program is built with #1658's overhang shadows:
+ * always, in the product. @see overhangShadowsOf
+ */
+let overhangShadowsBuilt = true;
+
+/**
  * The define a facade material carries for {@link windowRevealsBuilt} — 1
  * built, 0 not — read by its `onBeforeCompile`. ⚠️ **A define, not the cache
  * key**: `withAtmosphere`, spliced after the facade, captures the key it
@@ -13634,15 +13642,33 @@ let windowRevealsBuilt = true;
  */
 const WINDOW_REVEALS_DEFINE = 'OYL_WINDOW_REVEALS';
 
+/** The define for {@link overhangShadowsBuilt} — #1658, as {@link WINDOW_REVEALS_DEFINE} is #1659's. */
+const OVERHANG_SHADOWS_DEFINE = 'OYL_OVERHANG_SHADOWS';
+
 /** Whether `material` is built with #1659's window reveals, by its define. */
 function revealsBuiltIn(material: Material): boolean {
   return (material as { defines?: Record<string, unknown> }).defines?.[WINDOW_REVEALS_DEFINE] !== 0;
 }
 
-/** Sets `material`'s {@link WINDOW_REVEALS_DEFINE} to {@link windowRevealsBuilt}. */
-function defineWindowReveals(material: Material): void {
+/** Whether `material` is built with #1658's overhang shadows, by its define. */
+function overhangsBuiltIn(material: Material): boolean {
+  return (
+    (material as { defines?: Record<string, unknown> }).defines?.[OVERHANG_SHADOWS_DEFINE] !== 0
+  );
+}
+
+/**
+ * Sets `material`'s {@link WINDOW_REVEALS_DEFINE} to {@link windowRevealsBuilt}
+ * and, since #1658, its {@link OVERHANG_SHADOWS_DEFINE} to
+ * {@link overhangShadowsBuilt}.
+ */
+function defineFacadeLevers(material: Material): void {
   const carrier = material as { defines?: Record<string, unknown> };
-  carrier.defines = { ...carrier.defines, [WINDOW_REVEALS_DEFINE]: windowRevealsBuilt ? 1 : 0 };
+  carrier.defines = {
+    ...carrier.defines,
+    [WINDOW_REVEALS_DEFINE]: windowRevealsBuilt ? 1 : 0,
+    [OVERHANG_SHADOWS_DEFINE]: overhangShadowsBuilt ? 1 : 0,
+  };
 }
 
 /**
@@ -13663,7 +13689,25 @@ export function windowRevealsOf(view: GameView, on: boolean): void {
   if (view instanceof ThreeGameView) view.facadesRecompiled();
 }
 
-/** `facade.ts`' layout, as the GLSL constants {@link FACADE_FRAGMENT_GLSL} reads. */
+/**
+ * Builds every mapped building's facade with #1658's overhang shadows — the
+ * sun's own shadow under the eaves, on a wall the sun lights — or, `on`
+ * false, without them: the term's function and its splice left out of the
+ * program ({@link overhangGlsl}), so every wall under eaves has #1588's
+ * symmetric band, as before #1658. As {@link windowRevealsOf} does, a setting
+ * of the module's, and the materials already in `view`'s scene are compiled
+ * again.
+ *
+ * @test-facing the owner's page's `-overhang-shadows` lever
+ * (`realistic-harness.ts`) and the browser gate's read of it
+ * (`game-harness.ts` §`overhangShadowProbe`); the product always builds them
+ */
+export function overhangShadowsOf(view: GameView, on: boolean): void {
+  overhangShadowsBuilt = on;
+  if (view instanceof ThreeGameView) view.facadesRecompiled();
+}
+
+/** `facade.ts`' layout, as the GLSL constants {@link facadeFragmentGlsl} reads. */
 const FACADE_CONSTANTS_GLSL = /* glsl */ `
   const float oylWinL = ${glslFloat(WINDOW_IN_BAY.left)};
   const float oylWinR = ${glslFloat(WINDOW_IN_BAY.right)};
@@ -13836,7 +13880,7 @@ const CLADDING_HELPERS_GLSL = /* glsl */ `
  * #1659's reveal, in GLSL — `facade.ts` §`revealOf` and its sill's shadow,
  * from the same numbers. `p` is a point of an opening `lo` to `hi`, metres on
  * the face; `e` and `s` the eye and the sun in the face's frame
- * ({@link FACADE_FRAGMENT_GLSL}'s `oylFaceU`, `oylFaceUp`, `oylFaceN`). Out:
+ * ({@link facadeFragmentGlsl}'s `oylFaceU`, `oylFaceUp`, `oylFaceN`). Out:
  * `q`, the glass seen through `p`; `seen`, how much of `p` shows glass rather
  * than the opening's side; `lit`, whether that side faces the sun; `shade`,
  * the glass at `q` in the shadow of the head and the sun-side jamb.
@@ -13893,13 +13937,37 @@ function revealGlsl(built: boolean): string {
 }
 
 /**
+ * #1658's overhang shadow, in GLSL — `facade.ts` §`overhangShadowAt` from
+ * the same numbers: how much of a point `below` metres under an edge
+ * `projection` metres proud is in the sun's shadow (`s`, the sun in the
+ * face's frame), softened over `pw` and at most the wall's height `wall`
+ * deep; and {@link OVERHANG_SHADOW}'s constants, which the shade's splice in
+ * {@link facadeFragmentGlsl} reads. With `overhang-shadows` off
+ * (`realistic/config.ts` §`LEVERS`) none of it is built.
+ */
+function overhangGlsl(built: boolean): string {
+  if (!built) return '';
+  return /* glsl */ `
+  const float oylOverhangShade = ${glslFloat(OVERHANG_SHADOW.shade)};
+  const float oylOverhangSquare = ${glslFloat(OVERHANG_SHADOW.square)};
+  const float oylEavesEdge = ${glslFloat(OVERHANG_SHADOW.edge)};
+  const float oylEavesOverhang = ${glslFloat(EAVES_OVERHANG_METRES)};
+  float oylOverhangShadow(float below, float projection, vec3 s, float pw, float wall) {
+    float oylDepth = min(projection * max(s.y, 0.0) / max(s.z, 0.0001), wall);
+    return step(0.0001, s.z) * (1.0 - smoothstep(oylDepth - pw, oylDepth + pw, below));
+  }
+`;
+}
+
+/**
  * {@link CLADDING_HELPERS_GLSL}, a mapped building's varyings, #1659's reveal
  * ({@link revealGlsl}) and its sash window, which since #1659 takes the eye
  * and the sun in the face's frame (`e`, `s`) for the reveal, and gives back
  * the opening's `side` seen past the glass, whether it is `sideLit`, and the
- * wall in its sill's shadow (`sillShade`).
+ * wall in its sill's shadow (`sillShade`); since #1658 the overhang's
+ * shadow ({@link overhangGlsl}).
  */
-function facadeCommonGlsl(reveals: boolean): string {
+function facadeCommonGlsl(reveals: boolean, overhangs: boolean): string {
   return /* glsl */ `
   uniform float oylFacadeOn;
   uniform vec3 oylSunWorld;
@@ -13908,6 +13976,7 @@ function facadeCommonGlsl(reveals: boolean): string {
   varying vec3 vOylTrim;
   ${CLADDING_HELPERS_GLSL}
   ${revealGlsl(reveals)}
+  ${overhangGlsl(overhangs)}
   void oylSash(
     vec2 p, vec2 pw, vec3 win, float bay, float paired, float picture, float shutters, vec3 e, vec3 s,
     out float frame, out float glass, out float reveal, out float shutter, out float sill,
@@ -13948,6 +14017,18 @@ function facadeCommonGlsl(reveals: boolean): string {
 }
 
 /**
+ * #1658's splice into the shade (§3 of {@link facadeFragmentGlsl}): on a wall
+ * under eaves the sun lights, the darker of #1588's band and the sun's shadow
+ * from the eaves' edge, `facade.ts` §`eavesShadeAt` — how dark it is fading
+ * as the sun comes round to graze the wall. `oylEavesShade` is the band's.
+ */
+const OVERHANG_SHADE_GLSL = /* glsl */ `
+      float oylBelowTop = (oylTop - vOylFacade.y) * oylStoreyM;
+      float oylSunShadow = 1.0 - (1.0 - oylOverhangShade) * clamp(oylSunF.z / oylOverhangSquare, 0.0, 1.0)
+        * oylOverhangShadow(oylBelowTop - oylEavesEdge, oylEavesOverhang, oylSunF, oylMw.y, oylTop * oylStoreyM);
+      oylEavesShade = mix(oylEavesShade, min(oylEavesShade, oylSunShadow), oylFlag(oylFlags, oylEavesFlag));`;
+
+/**
  * Whether a bay has a window at all, as a GLSL expression over `oylCell`,
  * `oylTopShare` (a window's top as a share of its storey: #1581's casement's
  * or, since #1588, a sash's) and `vOylFacade` (`facade.ts` §`facadePartAt`'s
@@ -13985,12 +14066,17 @@ export const FACADE_SHOWN_GLSL =
  *    and the sun read in the face's frame (`oylFaceN`, `oylFaceU`,
  *    `oylFaceUp`, from the face's derivatives; the sun {@link FACADE_SUN}'s).
  * 3. **The shade**: a wall darkened under overhanging eaves and at its foot.
+ *    Since #1658, on a wall the sun lights, the darker of that band and the
+ *    sun's own shadow from the eaves' edge, as deep as the sun's slant makes
+ *    it (`oylOverhangShadow`, {@link overhangGlsl}); with `overhangs` false,
+ *    the band alone, as before.
  *
  * ⚠️ `vOylTint` is #1549's ({@link withVertexTint}), read here in `main` —
  * after every declaration — so that one window in five is a lit room by
  * where it is on which building, not the same window on every house.
  */
-const FACADE_FRAGMENT_GLSL = /* glsl */ `
+function facadeFragmentGlsl(overhangs: boolean): string {
+  return /* glsl */ `
   float oylGlass = 0.0;
   float oylFlat = 0.0;
   float oylRough = 0.6;
@@ -14221,7 +14307,9 @@ const FACADE_FRAGMENT_GLSL = /* glsl */ `
       float oylUnderEaves = oylFlag(oylFlags, oylEavesFlag)
         * (1.0 - smoothstep(0.0, oylAoEavesM, (oylTop - vOylFacade.y) * oylStoreyM));
       float oylAtFoot = 1.0 - smoothstep(0.0, oylAoBaseM, vOylFacade.y * oylStoreyM);
-      diffuseColor.rgb *= (1.0 - (1.0 - oylAoEaves) * oylUnderEaves) * (1.0 - (1.0 - oylAoBase) * oylAtFoot);
+      float oylEavesShade = 1.0 - (1.0 - oylAoEaves) * oylUnderEaves;
+      ${overhangs ? OVERHANG_SHADE_GLSL : ''}
+      diffuseColor.rgb *= oylEavesShade * (1.0 - (1.0 - oylAoBase) * oylAtFoot);
     } else if (oylTop < -0.5 && oylTop > -1.5) {
       vec2 oylAt = vOylFacade.xy;
       vec2 oylW = oylFw * 0.5;
@@ -14386,6 +14474,7 @@ const FACADE_FRAGMENT_GLSL = /* glsl */ `
     }
   }
 `;
+}
 
 /**
  * Teaches a mapped building's material #1581's facade: the windows of every
@@ -14400,7 +14489,7 @@ const FACADE_FRAGMENT_GLSL = /* glsl */ `
 function withFacade<M extends Material>(material: M): M {
   if (FACADE_TAUGHT.has(material)) return material;
   FACADE_TAUGHT.add(material);
-  defineWindowReveals(material);
+  defineFacadeLevers(material);
   const earlier = material.onBeforeCompile.bind(material);
   const earlierKey = material.customProgramCacheKey();
   const spliced = "#1581's facade";
@@ -14424,14 +14513,14 @@ function withFacade<M extends Material>(material: M): M {
     let fragment = replacedOrThrown(
       shader.fragmentShader,
       '#include <common>',
-      `#include <common>\n${facadeCommonGlsl(revealsBuiltIn(material))}`,
+      `#include <common>\n${facadeCommonGlsl(revealsBuiltIn(material), overhangsBuiltIn(material))}`,
       'fragment',
       spliced,
     );
     fragment = replacedOrThrown(
       fragment,
       '#include <color_fragment>',
-      `#include <color_fragment>\n${FACADE_FRAGMENT_GLSL}`,
+      `#include <color_fragment>\n${facadeFragmentGlsl(overhangsBuiltIn(material))}`,
       'fragment',
       spliced,
     );
@@ -17421,7 +17510,7 @@ class ThreeGameView implements GameView {
     }
   }
 
-  /** @see windowRevealsOf — every facade material in the scene, compiled again. */
+  /** @see windowRevealsOf, overhangShadowsOf — every facade material in the scene, compiled again. */
   facadesRecompiled(): void {
     this.#scene.traverse((node) => {
       const { material } = node as { material?: Material | Material[] };
@@ -17431,7 +17520,7 @@ class ThreeGameView implements GameView {
           ? []
           : [material]) {
         if (!drawsFacade(each)) continue;
-        defineWindowReveals(each);
+        defineFacadeLevers(each);
         each.needsUpdate = true;
       }
     });
