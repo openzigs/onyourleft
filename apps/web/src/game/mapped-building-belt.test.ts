@@ -86,6 +86,7 @@ import {
   setMappedBuildingsMerged,
   WorldLamps,
 } from './three-renderer';
+import { WREATH_BERRY, WREATH_GREEN } from './decorations';
 import { glslFunction } from './glsl-testing';
 
 /** A texture three would have loaded: the fields a material and a release read. */
@@ -1010,5 +1011,78 @@ describe('a roof under snow, and a wall without it — #1623', () => {
 
   it('draws every roof exactly as before with no snow — the season-free picture', () => {
     for (const up of [0, 0.5, 0.8, 1]) expect(snowed(up, 0)).toEqual(TILE);
+  });
+});
+
+/**
+ * The winter lights' wreath on a mapped front door — #1626: the facade's
+ * program draws it on the door's own quad by `oylWreath` (written by the view
+ * from the ride's holiday), so it costs no triangle and no call. Evaluated
+ * from the program three is handed.
+ */
+describe('a wreath on a mapped door in the winter lights — #1626', () => {
+  const program = (): { fragment: string; uniforms: Record<string, { value: unknown }> } => {
+    const material = aBelt().materialOf('brick');
+    const shader = {
+      uniforms: {} as Record<string, { value: unknown }>,
+      vertexShader:
+        '#include <common>\n#include <begin_vertex>\n#include <color_vertex>\n#include <fog_pars_vertex>\n#include <fog_vertex>',
+      fragmentShader:
+        '#include <common>\n#include <clipping_planes_fragment>\n#include <map_fragment>\n#include <color_fragment>\n#include <roughnessmap_fragment>\n#include <metalnessmap_fragment>\n#include <normal_fragment_begin>\n#include <normal_fragment_maps>\n#include <fog_pars_fragment>\n#include <fog_fragment>',
+    };
+    material?.onBeforeCompile(shader as never, undefined as never);
+    return { fragment: shader.fragmentShader, uniforms: shader.uniforms };
+  };
+  const DOOR: readonly [number, number, number] = [0.3, 0.2, 0.1];
+  const wreathed = (x: number, y: number, on: number): readonly number[] => {
+    const drawn = glslFunction(program().fragment, 'oylWreathed')(DOOR, x, y, on);
+    if (typeof drawn === 'number') throw new Error('oylWreathed returned a float');
+    return drawn;
+  };
+  const linear = (packed: number): readonly number[] =>
+    [(packed >> 16) & 0xff, (packed >> 8) & 0xff, packed & 0xff].map((channel) => {
+      const c = channel / 255;
+      return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    });
+  const near = (a: readonly number[], b: readonly number[]): void => {
+    for (let channel = 0; channel < 3; channel += 1) {
+      expect(a[channel]).toBeCloseTo(b[channel] ?? 0, 4);
+    }
+  };
+
+  it('splices the wreath onto the door’s own quad, reading the season’s uniform and nothing that moves', () => {
+    const { fragment, uniforms } = program();
+    expect(fragment).toContain('uniform float oylWreath;');
+    expect(fragment).toContain(
+      'diffuseColor.rgb = oylWreathed(diffuseColor.rgb, (oylAt.x - 0.5) * oylDoorW, oylAt.y * oylDoorH, oylWreath);',
+    );
+    expect(uniforms['oylWreath']).toEqual({ value: 0 });
+    // Steady (WCAG 2.3.1): the wreath's term reads no time, no clock, no sine.
+    const start = fragment.indexOf('vec3 oylWreathed(');
+    const body = fragment.slice(start, fragment.indexOf('\n  }', start));
+    expect(start).toBeGreaterThan(-1);
+    expect(body).not.toMatch(/time|clock|sin\(/i);
+  });
+
+  it('draws an evergreen ring and a bow on the door with the winter lights on, and nothing with them off', () => {
+    const green = linear(WREATH_GREEN);
+    const berry = linear(WREATH_BERRY);
+    // On the ring, either side and above.
+    near(wreathed(0.195, 1.35, 1), green);
+    near(wreathed(-0.195, 1.35, 1), green);
+    near(wreathed(0, 1.35 + 0.195, 1), green);
+    // The bow under it.
+    near(wreathed(0, 1.35 - 0.24, 1), berry);
+    // The hole in the middle, and the door away from it, are the door.
+    near(wreathed(0, 1.35, 1), DOOR);
+    near(wreathed(0.4, 0.5, 1), DOOR);
+    // Off: the door everywhere, as before #1626.
+    for (const [x, y] of [
+      [0.195, 1.35],
+      [0, 1.11],
+      [0, 1.35],
+    ] as const) {
+      near(wreathed(x, y, 0), DOOR);
+    }
   });
 });

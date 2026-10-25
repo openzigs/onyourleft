@@ -14,7 +14,7 @@ It has the same authority as the root file. Where the text below says "this file
 
 ⚠️ **Since [#1285](https://github.com/openzigs/onyourleft/issues/1285) `Repository rules` is
 shards side by side — `checks`, `tests` and, since [#1362](https://github.com/openzigs/onyourleft/issues/1362),
-the browser gate in two halves, `browser-1` and `browser-2` (§"Two browser shards — #1362") — and one
+the browser gate in three parts, `browser-1` to `browser-3` (§"Three browser shards — #1720") — and one
 more job that carries the required name and fails unless every shard succeeded.** A reviewer who remembers one job of
 twenty-odd minutes is reading the old file, and so is every "in this same job", "the job's stop"
 and "a second job could not block a merge" in the dated sections below: each was true when it was
@@ -405,10 +405,12 @@ mapped blobs, 114 s for the decorations' three, and 143 s and 126 s for #1623's 
 |---|---|---|---|--:|--:|
 | `test:browser:nightly:shard-1` | `heavy` | every nightly spec but the page's | (#1675) | — | — |
 | `test:browser:nightly:shard-2` | `browser-2` | `realistic.browser.spec.ts` | #616, #1623 | 6 | 337 s |
-| `test:browser:nightly:shard-3` | `browser-3` | `realistic-trees.browser.spec.ts` | #1283, #1294, #1523 | 5 | 259 s |
-| `test:browser:nightly:shard-4` | `browser-4` | `realistic-town.browser.spec.ts` | #1559, #1657, #1624 | 6 | 234 s |
+| `test:browser:nightly:shard-3` | `browser-3` | `realistic-trees.browser.spec.ts`, since #1626 `realistic-wreath.browser.spec.ts` | #1283, #1294, #1523, #1626 | 7 | 259 s |
+| `test:browser:nightly:shard-4` | `browser-4` | `realistic-town.browser.spec.ts` | #1559, #1624 (#1625, #1626), #1689 | 6 | — |
+| `test:browser:nightly:shard-5` | `browser-5` | `realistic-mapped.browser.spec.ts` | #1657, #1636 | 3 | — |
 
-The last column is the sum of those cases on the one-job run, not a run of the shard. Split by
+The last column is the sum of those cases on the one-job run, not a run of the shard; #1626's
+loads (one in the town's shard, the wreath's two in the trees') came after it. Split by
 describe into files, as #1675 split by file, so each shard is still a file filter that
 `nightly-split.test.ts` can hold every nightly spec to exactly one of; the load they share is
 `apps/web/browser/realistic-ride.ts`. The same test now also holds **each shard's loads of the page
@@ -416,12 +418,19 @@ times the slowest load measured** (72 s, #1623's case on that run) **at or under
 stop**: 7 loads is the most one shard may hold, so a lever that would take a shard past it is a red
 case in the required suite, not a nightly run that stops. It counts `ride(page` and `ridden(page`
 calls in each nightly describe, and refuses a realistic spec whose loads it counts as none.
-`report` needs all four jobs.
+`report` needs every job.
 
-**Where the next lever's describe goes**: shard 2 holds 6 loads (432 s of the 504 s cap), so a
-describe with two or more loads there is a red case. Put it in the shard with the fewest loads
-(shard 3 or 4 hold 5 and 6); if every shard would pass 7, add `realistic-<name>.browser.spec.ts`,
-a `test:browser:nightly:shard-5` script and a `browser-5` job copied from `browser-4`, name the new
+⚠️ **Five shards since the combined PR that merged #1626, #1636 and #1689 together.** Each added one
+load to `realistic-town.browser.spec.ts` and each passed alone; together the file held 9 loads, past
+the 7 a shard may hold. The mapped towns' describes (#1657's lever, #1636's city centre) moved to
+`realistic-mapped.browser.spec.ts` in `browser-5`, by the procedure below; the heading keeps
+#1698's name because the spec files cite it. The loads column counts as the test does, lexically:
+#1636's case loads the page twice in one loop, so `browser-5` makes four loads.
+
+**Where the next lever's describe goes**: shards 2, 3, 4 and 5 hold 6, 7, 6 and 3 loads (504 s is
+the cap: 7 loads), so a describe with one load in shard 3 is a red case. Put it in the shard with the
+fewest loads (shard 5); if every shard would pass 7, add `realistic-<name>.browser.spec.ts`,
+a `test:browser:nightly:shard-6` script and a `browser-6` job copied from `browser-5`, name the new
 `spec` in `nightly.ts`, and add the job to `report`'s `needs`. The load count is lexical, so a
 load made through an alias of `ride` or a direct `page.goto` of the page is not counted: call `ride`.
 
@@ -1138,16 +1147,15 @@ shard, and the scripts name every shard of the total, so no case is in none or i
 columns are each shard's `Browser gate` step. ⚠️ **The `tests` column is from a run whose `tests`
 shard was red on the one case that reads this table, before this table existed**; every other case
 passed and its duration is the suite's. **This is the table `nightly-split.test.ts` reads**: a row
-added here moves every bound, a cell that is not a whole number fails the test, and a shard with no
-column fails it too.
+added here moved every bound, a cell that is not a whole number fails the test, and a shard with no
+column fails it too. ⚠️ **Since #1720 the table it reads is §"Three browser shards — #1720"'s**, and
+this one is the record.
 
-<!-- shard-measurements:start -->
 | Run | Wall | `checks` on | checks | `tests` on | tests | `browser-1` on | browser-1 | `browser-2` on | browser-2 | Gate starts | browser-1 step | browser-2 step |
 |---|--:|---|--:|---|--:|---|--:|---|--:|--:|--:|--:|
 | [38725274938](https://github.com/openzigs/onyourleft/actions/runs/38725274938) attempt 1 (#1363) | 501 | EPYC 9V74 | 215 | EPYC 7763 | 489 | EPYC 9V74 | 477 | EPYC 7763 | 303 | 38 | 439 | 263 |
 | attempt 2 | 512 | EPYC 7763 | 292 | EPYC 7763 | 495 | EPYC 9V74 | 488 | EPYC 7763 | 302 | 40 | 447 | 262 |
 | attempt 3 | 621 | Xeon 6973P-C | 179 | EPYC 7763 | 507 | **EPYC 7763** | 603 | EPYC 9V45 | 207 | 37 | 564 | 172 |
-<!-- shard-measurements:end -->
 
 - **The halves are not even, and that is `--shard`'s rule rather than a choice.** It divides by
   case count, whole files at a time, and `ride.browser.spec.ts` (423 cases, about 430 s of summed
@@ -1217,6 +1225,116 @@ the table above:
   files are slower per case than `browser-2`'s. When a row brings `browser-1` within about three
   minutes of its stop, the next move is a third shard (`--shard N/3`, a script and a job, each in
   `needs:`), which with no file over about two minutes now divides the time as well as the count.
+
+#### Three browser shards — #1720
+
+⚠️ **The browser gate is three jobs since [#1720](https://github.com/openzigs/onyourleft/issues/1720),
+`browser-1` to `browser-3`, each running the spec files its script names, and a reviewer who
+remembers `--shard 1/2` is reading the old file.** `--shard` divided by case count, and `browser-1`
+had grown to 924 to 928 cases and about two thirds of the `chromium` time: on `main` its `chromium`
+run took 618 s of its 720 s stop on an EPYC 7763 (1.16 times), 418 s on a 9V45 and 512 s on a 9V74,
+and on PR #1716 633, 499 and 643 s. The config's own minimum is 1.15 times (#1603).
+
+**How the files were divided.** From the log of `main` run
+[40200968492](https://github.com/openzigs/onyourleft/actions/runs/40200968492), the slower of the
+two latest green runs, each spec file's time in its worker: the first case's start to the last
+case's end, as the list reporter prints them (`rideview` 303 s, `ride` 241 s, `pre-ride` 189 s,
+`ride-room` 186 s, `ride-workout` 175 s, `list-detail` 157 s, and 38 more files under 145 s; 2 700 s
+in all). The files were then assigned to three shards to make the slowest finish earliest,
+simulating what Playwright does with them: files in path order, each to the first of three
+workers to come free, and the `game` run's 75 s after the third shard's part. The simulated
+`chromium` parts were 327, 328 and 251 s (and 75 s of game run) against the 624 s that run's
+`browser-1` took.
+
+| Script | Job | Spec files | Cases at #1720 |
+|---|---|--:|--:|
+| `test:browser:shard-1` | `browser-1` | 18 (`rideview`, `ride`, `pre-ride`, `shell` …) | 887 |
+| `test:browser:shard-2` | `browser-2` | 18 (`list-detail`, `controls-first`, `corridor` …) | 439 |
+| `test:browser:shard-3` | `browser-3` | 12 (`ride-room`, `ride-workout`, `links` …), then the `game` run | 434, then 64 |
+
+⚠️ **Since [#1648](https://github.com/openzigs/onyourleft/issues/1648) `browser-3` names 13 files**:
+`shell-demo.browser.spec.ts`, the demo's eight cases and the costliest of them a realistic-world
+climb, went to the shard with the most room, `browser-3` (its `chromium` part 3.1 to 4.6 m of
+720 s on #1720's runs below). The table keeps #1720's counts as the record.
+
+`playwright test --list` over each script's arguments gives 887 + 439 + 434 cases in 14 + 18 + 12
+files, the 1 760 cases in 44 files of the whole `chromium` project (the other four listed files
+hold only `@nightly` describes). **No stop moved**: each part keeps 720 s and three workers, the
+game run 85 s, the wrapper 825 s and its 14 minutes, each job its 25 minutes and the browser
+install its ten. Nothing left the gate, moved to nightly, or is retried. `test:browser` is
+unchanged, the whole gate in one command, locally.
+
+**A file filter is a pattern over the path**, which is how Playwright 1.63 reads a positional
+argument (`forceRegExp`, case-insensitive, against the absolute path). Each is written
+`/<name>.browser.spec.ts`, with the slash, because `room.browser.spec.ts` alone also selects
+`ride-room.browser.spec.ts`.
+
+`nightly-split.test.ts` holds that each script is the whole gate's `chromium` run with file filters
+after it and nothing else (no `--shard`, no option), that each filter selects at least one spec,
+that **every spec the `chromium` project reads is selected by exactly one script** — so a spec in
+none, in two, or renamed out of its list is a red case, as is a filter that selects two files —
+that the game spec is in no list and the `game` run in exactly one script, and through §"Shards —
+#1285"'s tests that `rules` needs all three and each has a column in the table below.
+
+**Measured** on this change's own pull request, run
+[40223475813](https://github.com/openzigs/onyourleft/actions/runs/40223475813), attempts 2 to 4.
+Columns as in §"Shards — #1285" (job seconds, `started_at` to `completed_at`; `Wall` is the attempt
+starting to `Repository rules` completing); `Gate starts` is the latest of the three shards'
+`Browser gate` step starts, and each `step` column that shard's `Browser gate` step. **This is the
+table `nightly-split.test.ts` reads**: a row added here moves every bound, a cell that is not a
+whole number fails the test, and a shard with no column fails it too. ⚠️ The `tests` column is from
+runs whose `tests` shard was red on the one case that reads this table, before it existed; every
+other case passed.
+
+<!-- shard-measurements:start -->
+| Run | Wall | `checks` on | checks | `tests` on | tests | `browser-1` on | browser-1 | `browser-2` on | browser-2 | `browser-3` on | browser-3 | Gate starts | browser-1 step | browser-2 step | browser-3 step |
+|---|--:|---|--:|---|--:|---|--:|---|--:|---|--:|--:|--:|--:|--:|
+| 40223475813 attempt 2 | 491 | EPYC 9V45 | 223 | EPYC 9V74 | 476 | **EPYC 7763** | 424 | EPYC 9V45 | 295 | EPYC 9V74 | 388 | 34 | 389 | 258 | 352 |
+| attempt 3 | 525 | EPYC 7763 | 315 | EPYC 9V74 | 509 | Xeon 8573C | 413 | **EPYC 7763** | 435 | EPYC 9V45 | 260 | 36 | 377 | 397 | 229 |
+| attempt 4 | 653 | EPYC 9V74 | 320 | EPYC 7763 | 636 | **EPYC 7763** | 514 | **EPYC 7763** | 401 | Xeon 8573C | 389 | 51 | 459 | 360 | 344 |
+<!-- shard-measurements:end -->
+
+**Each part's `chromium` run against its 720 s stop** (Playwright's own `passed (…)` figure; the
+`game` run after `browser-3`'s part against its 85 s):
+
+| Attempt | `browser-1` | `browser-2` | `browser-3` | `game` run |
+|---|--:|--:|--:|--:|
+| 1 | 6.5 m on the EPYC 7763, 1.85 times | 4.5 m on a 9V74, 2.67 times | 4.3 m on a Xeon 8573C, 2.79 times | 1.1 m |
+| 2 | 6.4 m on the EPYC 7763, 1.88 times | 4.2 m on a 9V45, 2.86 times | 4.6 m on a 9V74, 2.61 times | 1.1 m |
+| 3 | 6.1 m on a Xeon 8573C, 1.97 times | 6.5 m on the EPYC 7763, 1.85 times | 3.1 m on a 9V45, 3.87 times | 39 s |
+| 4 | **7.5 m on the EPYC 7763, 1.60 times** | 5.9 m on the EPYC 7763, 2.03 times | 4.5 m on a Xeon 8573C, 2.67 times | 1.1 m |
+
+- **Every part kept at least 1.60 times its stop on four attempts**, against 1.12 to 1.16 times for
+  `browser-1` on the EPYC 7763 before. On the 7763 `browser-1` took 6.4 to 7.5 m and `browser-2`
+  5.9 to 6.5 m: the two heavy parts now finish within about a minute of each other there, and
+  `browser-3` with its game run is the shortest. The `game` run is unchanged: 85 s is still #1128's
+  1.2 times its slowest green run, and this change did not move it.
+- ⚠️ **The `tests` shard's stop is 16 minutes since this change**, not 15: these rows are the first
+  since that shard grew (604 to 635 s on the last five green `main` runs, 636 s in attempt 4), and
+  636 s is 264 s inside 15 minutes, short of the five `nightly-split.test.ts` holds every stop
+  clear of. It is a stop on a hang, not a budget (§"Shards — #1285"), so it moved rather than the
+  test's five minutes.
+- ⚠️ **Attempt 1 is not in the bounds table, as #1285 left out its own slow-mirror run.** Its
+  `Install the pinned Chromium` took 566 s in `browser-2` and 570 s in `browser-3` (17 to 34 s on
+  every other attempt): the Ubuntu 26.04 runner's mirror, inside the step's own ten-minute stop.
+  So its `Browser gate` steps started 580 and 585 s in and `Repository rules` reported 934 s after
+  the attempt began; with it, the `Gate starts` bound (three minutes inside the job) and the
+  `Wall` bound (under 900 s) would be red on a mirror this repository does not control. The parts
+  themselves were the table's first row above. `nightly-split.test.ts`'s unmeasured bound, the
+  install at its ten minutes plus the gate's 14, still ends inside the job's 25.
+- ⚠️ **Attempt 4's `browser-2` was red on one case**: `motion.browser.spec.ts`'s "a ride route
+  asked for while a menu fade is animating ends the fade" saw Ride commit 497 ms after it was asked
+  for, against its 200 ms. On the other seven runs read (two of `main`, four attempts here, each the
+  file's seven such readings) the same reading was 5 to 54 ms, so it was one stall rather than the
+  new neighbours' steady load; the case did not fail in the 40 failed `Repository rules` runs before
+  this change. Its timing sensitivity is the case's own, and this change neither retried nor
+  loosened it.
+
+⚠️ **Where a new spec file goes**: into the list of the shard whose last measured `chromium` part
+was shortest, in the same pull request; `nightly-split.test.ts` is red until it is in one. When a
+row of the table brings any part within 1.4 times of its 720 s stop, re-read the per-file times
+from that run's log and re-divide the files, or add a fourth script and job (in `needs:`, with a
+column here). Not a longer stop, and not a check moved to nightly without the owner's ruling.
 
 ⚠️ **The runner is two cores, not four, and that is what bounds all of this.** `ubuntu-latest`
 reports four vCPUs, and `lscpu` on it reads `Thread(s) per core: 2`, `Core(s) per socket: 2` (run

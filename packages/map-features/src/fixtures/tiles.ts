@@ -71,7 +71,10 @@ export const EARTH: LayerSpec = {
   ],
 };
 
-/** Layers that are never read: they carry names. */
+/**
+ * A layer that is never read (`pois`: it carries names), and a `places` point
+ * that carries no `kind_detail` or `population_rank`, so it is dropped (#1632).
+ */
 const UNREAD_NAMED_LAYERS: readonly LayerSpec[] = [
   {
     name: 'pois',
@@ -430,7 +433,65 @@ export function buildingPartTile(): Uint8Array {
   ]);
 }
 
-/** The six named fixtures, for the walks that run over all of them. */
+/**
+ * The value every place in {@link placesTile} carries under `name`, `name:en`
+ * and `wikidata` (#1632, ADR 0055 D-3). Shaped as a Protomaps identifier —
+ * lower-case letters and `_` — on purpose: the decoder's identifier reader
+ * would admit it, so a decoder that looked `name` up at all would carry it
+ * into its result, and the test that it never appears could go red.
+ */
+export const PLACE_SENTINEL = 'zz_sentinel_name';
+
+/**
+ * The places of {@link placesTile}: every kind and detail ADR 0055 D-2 keeps,
+ * in tile pixels. Made up; nothing here is a real place.
+ */
+export const PLACE_FIXTURE_POINTS: readonly {
+  readonly kind: 'locality' | 'neighbourhood' | 'macrohood';
+  readonly kindDetail: 'city' | 'town' | 'village' | 'hamlet' | 'suburb' | 'quarter';
+  readonly populationRank: number;
+  readonly at: readonly [number, number];
+}[] = [
+  { kind: 'locality', kindDetail: 'city', populationRank: 11, at: [1200, 1200] },
+  { kind: 'locality', kindDetail: 'town', populationRank: 7, at: [2800, 900] },
+  { kind: 'locality', kindDetail: 'village', populationRank: 4, at: [600, 3100] },
+  { kind: 'locality', kindDetail: 'hamlet', populationRank: 1, at: [3500, 3500] },
+  { kind: 'neighbourhood', kindDetail: 'suburb', populationRank: 3, at: [2100, 2500] },
+  { kind: 'macrohood', kindDetail: 'quarter', populationRank: 18, at: [1700, 400] },
+];
+
+/**
+ * A `places` layer of {@link PLACE_FIXTURE_POINTS} (#1632), each point also
+ * carrying {@link PLACE_SENTINEL} as its name, `name:en` and `wikidata`, a
+ * `population`, a `capital`, the `pmap:*` fields and an id — none of which
+ * the decoder may read.
+ */
+export function placesTile(): Uint8Array {
+  return encodeTile([
+    EARTH,
+    {
+      name: 'places',
+      features: PLACE_FIXTURE_POINTS.map((place, index) => ({
+        id: POISON.id + index,
+        type: 1,
+        tags: {
+          ...poisonTags,
+          name: PLACE_SENTINEL,
+          'name:en': PLACE_SENTINEL,
+          wikidata: PLACE_SENTINEL,
+          population: 271_828 + index,
+          capital: 'yes',
+          kind: place.kind,
+          kind_detail: place.kindDetail,
+          population_rank: place.populationRank,
+        },
+        geometry: points([place.at]),
+      })),
+    },
+  ]);
+}
+
+/** The seven named fixtures, for the walks that run over all of them. */
 export const NAMED_FIXTURES: Readonly<Record<string, () => Uint8Array>> = {
   residentialBlock: residentialBlockTile,
   woodWithHole: woodWithHoleTile,
@@ -438,4 +499,5 @@ export const NAMED_FIXTURES: Readonly<Record<string, () => Uint8Array>> = {
   sidewalk: sidewalkTile,
   buildingPart: buildingPartTile,
   streets: streetsTile,
+  places: placesTile,
 };

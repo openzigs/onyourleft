@@ -13,7 +13,9 @@
  *    materials, while the same box unmarked — the control — is lit with the
  *    light at it and dark with the light away.
  * 3. **Steady, under reduced motion too** (WCAG 2.3.1): two frames a second
- *    apart, with and without `prefers-reduced-motion`, read the same colours.
+ *    apart, with and without `prefers-reduced-motion`, read the same colours —
+ *    since #1625 the product's own jack-o'-lantern face and since #1626 its
+ *    winter bulbs, as well as the box.
  */
 
 import { expect, test, type Page } from '@playwright/test';
@@ -106,6 +108,40 @@ test.describe('the holiday decorations’ belt — #1624', () => {
         const second = await glowOf(page, world, 'away', true);
         expect(second, world).toEqual(first);
         expect(brightness(first), world).toBeGreaterThan(150);
+      }
+    });
+
+    test(`keeps the holidays’ own glowing parts steady — Halloween’s faces (#1625), the winter lights’ bulbs (#1626): two frames a second apart read the same, ${reducedMotion}`, async ({
+      page,
+    }) => {
+      await page.emulateMedia({ reducedMotion });
+      await open(page);
+      const glowsOf = (world: 'stylised' | 'realistic', holiday: 'halloween' | 'winter-lights') =>
+        page.evaluate(
+          ([w, h]) => {
+            const harness = window.__oylDecoration;
+            if (harness === undefined) throw new Error('no harness');
+            return harness.holidayGlows(w, h);
+          },
+          [world, holiday] as const,
+        );
+      for (const holiday of ['halloween', 'winter-lights'] as const) {
+        for (const world of ['stylised', 'realistic'] as const) {
+          const first = await glowsOf(world, holiday);
+          await page.waitForTimeout(1_000);
+          const second = await glowsOf(world, holiday);
+          expect(first.length, `${holiday} ${world}`).toBeGreaterThan(0);
+          expect(second.map((each) => each.pixel)).toEqual(first.map((each) => each.pixel));
+          // And each glows its own colour with the light turned away from it.
+          for (const { pixel, colour } of first) {
+            pixel.forEach((channel, at) => {
+              expect(
+                Math.abs(channel - (colour[at] as number)),
+                `${holiday} ${world}`,
+              ).toBeLessThanOrEqual(CHANNEL_TOLERANCE);
+            });
+          }
+        }
       }
     });
   }

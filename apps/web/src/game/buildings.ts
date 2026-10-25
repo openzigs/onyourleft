@@ -186,6 +186,12 @@ export const WINDOW = { width: 1, height: 1.3 } as const;
 /** A house's and a shop's door: **1.0 wide by 2.0 high**, its threshold on the plinth. */
 export const DOOR = { width: 1, height: 2 } as const;
 
+/** How far a door's step runs past the door on each side, in metres: **0.15**. */
+export const DOOR_STEP_OVERRUN_METRES = 0.15;
+
+/** How far a door's step stands out from its wall — its tread's depth — in metres: **0.35**. */
+export const DOOR_STEP_DEPTH_METRES = 0.35;
+
 /** The first floor's line on the outside of a house, in metres: **2.7**. */
 export const FIRST_FLOOR_METRES = 2.7;
 
@@ -674,11 +680,11 @@ function buildOpening(
     });
   } else {
     sillOrStep(soup, face, {
-      u0: hole.u0 - 0.15,
-      u1: hole.u1 + 0.15,
+      u0: hole.u0 - DOOR_STEP_OVERRUN_METRES,
+      u1: hole.u1 + DOOR_STEP_OVERRUN_METRES,
       v0: 0,
       v1: hole.v0,
-      w: 0.35,
+      w: DOOR_STEP_DEPTH_METRES,
     });
   }
 }
@@ -1282,6 +1288,64 @@ export function buildingPlan(
   else if (kind === 'shop-row') shopRow(soup, which, withOpenings);
   else shed(soup, which);
   return { kind, variant: which, triangles: soup.triangles, openings: soup.openings };
+}
+
+/** A building's front door, building-local (`+z` faces the road). @see frontDoorOf */
+export interface FrontDoor {
+  /** The middle of its sill on the wall's face. */
+  readonly x: number;
+  readonly z: number;
+  /**
+   * The top of the step {@link buildingPlan} lays before it — #1625: its
+   * height, and its tread's half-width across the door and its depth out from
+   * the wall ({@link DOOR_STEP_DEPTH_METRES}).
+   */
+  readonly step: {
+    readonly top: number;
+    readonly halfWidth: number;
+    readonly depth: number;
+  };
+}
+
+/** Each built kind's front door in each variant, as its plan cuts it. */
+const frontDoors = new Map<string, FrontDoor | null>();
+
+/**
+ * Where a building's front door is, building-local: of the doors its plan
+ * ({@link buildingPlan}) cuts in a wall facing `+z`, the one nearest the
+ * middle, at the middle of its sill on the wall's face, with the step laid
+ * before it. `null` where it has none. `streets.ts` lays a front path to it
+ * (#1564) and `decorations.ts` stands Halloween's pumpkins on its step (#1625).
+ */
+export function frontDoorOf(kind: BuiltKind, variant: number): FrontDoor | null {
+  const key = `${kind}:${String(variant)}`;
+  const known = frontDoors.get(key);
+  if (known !== undefined) return known;
+  let best: FrontDoor | null = null;
+  for (const opening of buildingPlan(kind, variant).openings) {
+    if (opening.kind !== 'door' || opening.face.normal[2] < 0.99) continue;
+    const us = opening.outline.map((point) => point[0]);
+    const vs = opening.outline.map((point) => point[1]);
+    const u0 = Math.min(...us);
+    const u1 = Math.max(...us);
+    const u = (u0 + u1) / 2;
+    const x = opening.face.origin[0] + opening.face.right[0] * u;
+    const z = opening.face.origin[2] + opening.face.right[2] * u;
+    if (best !== null && Math.abs(x) >= Math.abs(best.x)) continue;
+    best = {
+      x,
+      z,
+      step: {
+        // The step's top is the door's threshold: `buildOpening` lays it from
+        // the face's foot up to the hole's bottom.
+        top: opening.face.origin[1] + Math.min(...vs),
+        halfWidth: (u1 - u0) / 2 + DOOR_STEP_OVERRUN_METRES,
+        depth: DOOR_STEP_DEPTH_METRES,
+      },
+    };
+  }
+  frontDoors.set(key, best);
+  return best;
 }
 
 /**

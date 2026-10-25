@@ -1740,8 +1740,9 @@ export type WorldCorridorTileState =
  * sentence: building footprint polygons with `kind`, `height` and
  * `min_height`; land-use polygons with `kind`; water polygons; footway lines
  * with `kind` and `kind_detail`; street lines with `kind`, `kind_detail` and
- * whether each is a bridge or a tunnel; and which tiles were read and when — no OSM
- * identifier, no name, no address.
+ * whether each is a bridge or a tunnel; place points with `kind`, `kind_detail`
+ * and `population_rank` (ADR 0055 D-6.1, #1632); and which tiles were read and
+ * when — no OSM identifier, no name, no address.
  *
  * ⚠️ **It never leaves the device** (ADR 0054 D-3.5): no account export, no
  * sync, no instance call. That is the only thing keeping ODbL §4.4

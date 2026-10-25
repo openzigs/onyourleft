@@ -154,6 +154,7 @@ describe('demo:bake draws what a ride would get — #1651', () => {
       landUse: features.landUse.length,
       paths: features.paths.length,
       streets: features.streets.length,
+      places: features.places.length,
     }).toStrictEqual(expected);
     expect(baked.entry.tiles).toStrictEqual({ planned: expected.tiles, covered: expected.tiles });
     expect(bundle.readerVersion).toBe(CORRIDOR_READER_VERSION);

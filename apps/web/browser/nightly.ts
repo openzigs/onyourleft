@@ -134,6 +134,17 @@ export const NIGHTLY_CHECKS: readonly NightlyCheck[] = [
       '§"asks for the generated broadleaves".',
   },
   {
+    spec: 'realistic-wreath.browser.spec.ts',
+    describe: 'the realistic page’s mapped doors’ wreath — #1626',
+    seconds: 'two loads of the owner’s page',
+    why:
+      'the mapped doors’ winter wreath in the REALISTIC world, on the owner’s page in the ' +
+      'mixed town: the same draw calls and triangles with it forced off (`-facade-wreath`), ' +
+      'so the wreath costs no call. Cost, in a world a rider chooses; what the wreath draws, ' +
+      'and that it follows the ride’s holiday, is held in the required suite by ' +
+      '`mapped-building-belt.test.ts` §"#1626" and `winter-lights-wiring.test.tsx`.',
+  },
+  {
     spec: 'realistic-town.browser.spec.ts',
     describe: 'the realistic page’s village road — #1559',
     seconds: 'one more load of the owner’s page, about 18 s on a Mac',
@@ -144,7 +155,17 @@ export const NIGHTLY_CHECKS: readonly NightlyCheck[] = [
       'by `realistic/route.test.ts` §"the village road".',
   },
   {
-    spec: 'realistic-town.browser.spec.ts',
+    spec: 'realistic-mapped.browser.spec.ts',
+    describe: 'the realistic page’s city centre — #1636',
+    seconds: 'two more loads of the owner’s page',
+    why:
+      'the owner’s page’s `town=city`, for #1636’s screenshots: that a city centre’s shop ' +
+      'fronts and tower stay inside the page’s 35 calls. An instrument of a page that ships ' +
+      'in no build; the shop fronts and the curtain wall are held in the required suite by ' +
+      '`city-centre.test.ts`, and the belt’s six calls by the same.',
+  },
+  {
+    spec: 'realistic-mapped.browser.spec.ts',
     describe: 'the realistic page’s mapped-blobs lever — #1657',
     seconds: 'two more loads of the owner’s page',
     why:
@@ -156,14 +177,26 @@ export const NIGHTLY_CHECKS: readonly NightlyCheck[] = [
   {
     spec: 'realistic-town.browser.spec.ts',
     describe: 'the realistic page’s holiday decorations — #1624',
-    seconds: 'two more loads of the owner’s page',
+    seconds: 'three more loads of the owner’s page',
     why:
-      'the decoration belt’s cost in the REALISTIC world, on the owner’s page with its probe: ' +
+      'the decoration belt’s cost in the REALISTIC world, on the owner’s page on Halloween and ' +
+      '(#1626) in the winter lights: ' +
       'the frame at or under `REALISTIC_WOODED_DRAW_CALLS`, exactly one call for the belt ' +
       'against `levers=-decorations`, and its triangles inside `REALISTIC_DECORATION_TRIANGLES`. ' +
       'Cost, in a world a rider chooses. Still required: the same one-call delta in the ' +
       'stylised world on the same page (`the realistic page’s holiday decorations, stylised — ' +
       '#1624`), and the belt’s one call, glow and steadiness in `decoration.browser.spec.ts`.',
+  },
+  {
+    spec: 'realistic-town.browser.spec.ts',
+    describe: 'the realistic page’s village frame, frozen — #1689',
+    seconds: 'one more load of the owner’s page, about 14 s on a Mac',
+    why:
+      'the owner’s freeze of the realistic village frame (#1689): the decorated village hold ' +
+      'drawn in exactly `REALISTIC_VILLAGE_DRAW_CALLS` calls. Cost, in a world a rider ' +
+      'chooses, read off a page that ships in no build; the furniture merge it counts is held ' +
+      'in the required suite by `realistic-renderer.test.ts` §"the street furniture" and the ' +
+      'stylised world’s one call a surface by `game.browser.spec.ts` §"#1536".',
   },
   {
     spec: 'realistic.browser.spec.ts',

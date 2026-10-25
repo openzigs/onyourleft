@@ -28,15 +28,20 @@ import {
   KEY_KIND,
   KEY_KIND_DETAIL,
   KEY_MIN_HEIGHT,
+  KEY_POPULATION_RANK,
   LAYER_GEOMETRY_TYPES,
   LAYER_KEPT_GEOMETRY,
   MAX_EXTENT,
   MAX_HEIGHT_METRES,
   MAX_KIND_LENGTH,
+  MAX_POPULATION_RANK,
   MIN_EXTENT,
+  MIN_POPULATION_RANK,
   MVT_VERSION,
   OTHER_ROAD_KIND,
   OTHER_STREET_KIND_DETAILS,
+  PLACE_KIND_DETAILS,
+  PLACE_KINDS,
   READ_LAYERS,
   STREET_KINDS,
   GEOMETRY_LINE,
@@ -49,6 +54,7 @@ import type {
   DecodeRefusal,
   LandUseFeature,
   PathFeature,
+  PlaceFeature,
   Ring,
   StreetFeature,
   StreetGrade,
@@ -77,7 +83,12 @@ import type {
  * Only the layers {@link READ_LAYERS} names are decoded; every other layer is
  * skipped by its length after its name is compared. Of those, only `kind`,
  * `kind_detail`, `height`, `min_height`, `is_bridge` and `is_tunnel` are ever
- * looked at (`schema.ts`).
+ * looked at — and in `places`, only `kind`, `kind_detail` and
+ * `population_rank` (#1632, ADR 0055 D-3), so a place's name, `wikidata` or
+ * `population` is never turned into a value (`schema.ts`).
+ *
+ * `places` is read up to `limits.maxPlacesPerTile` points and no further: the
+ * decoder stops there rather than refusing the tile.
  *
  * The frame is the game's (`projection.ts`), and the output is `Float32Array`:
  * float32 spacing is about 4 mm at 50 km from the origin and about 3 cm at a few
@@ -145,11 +156,13 @@ interface FramedLayer {
     minHeight: number;
     isBridge: number;
     isTunnel: number;
+    populationRank: number;
   };
   /** Decoded values by index, filled as features ask for them. */
   readonly identifiers: Map<number, string | null>;
   readonly heights: Map<number, number | null>;
   readonly flags: Map<number, boolean>;
+  readonly ranks: Map<number, number | null>;
 }
 
 function decodeChecked(
@@ -184,7 +197,7 @@ function decodeChecked(
   if (!sawEarth && !found.has('water')) return { reason: 'wrong-schema' };
 
   // 2. Frame every read layer and count its features: the feature limit is
-  // held for all four before any feature of any of them is decoded.
+  // held for all five before any feature of any of them is decoded.
   const framed: FramedLayer[] = [];
   for (const name of READ_LAYERS) {
     const range = found.get(name);
@@ -205,10 +218,14 @@ function decodeChecked(
   const buildings: BuildingFeature[] = [];
   const paths: PathFeature[] = [];
   const streets: StreetFeature[] = [];
+  const places: PlaceFeature[] = [];
   for (const layer of framed) {
     state.layer = layer.name;
     const project = new Projector(tile, origin, layer.extent);
     for (let f = 0; f < layer.features.length; f += 2) {
+      // ADR 0055 D-2.5: the decoder stops at the bound, and the rest of the
+      // layer is never decoded.
+      if (layer.name === 'places' && places.length >= limits.maxPlacesPerTile) break;
       decodeFeature(
         bytes,
         layer,
@@ -217,12 +234,12 @@ function decodeChecked(
         project,
         limits,
         state,
-        { landUse, buildings, paths, streets },
+        { landUse, buildings, paths, streets, places },
       );
     }
   }
   state.layer = null;
-  return { tile, landUse, buildings, paths, streets };
+  return { tile, landUse, buildings, paths, streets, places };
 }
 
 /** The layer's name if it is one this package reads or checks for, else `null`. Never decodes it. */
@@ -295,7 +312,18 @@ function frameLayer(
   // No values-per-layer limit: each value is at least two bytes of the tile, so
   // `maxBytes` bounds this table (about 4x the tile's size in memory).
   const values = new Uint32Array(valueCount * 2);
-  const keys = { kind: -1, kindDetail: -1, height: -1, minHeight: -1, isBridge: -1, isTunnel: -1 };
+  const keys = {
+    kind: -1,
+    kindDetail: -1,
+    height: -1,
+    minHeight: -1,
+    isBridge: -1,
+    isTunnel: -1,
+    populationRank: -1,
+  };
+  // ADR 0055 D-3: in `places`, only its three keys are ever matched, so no
+  // other key of a place - a height, a flag, its name - has a value decoded.
+  const isPlaces = name === 'places';
   let f = 0;
   let v = 0;
   let k = 0;
@@ -315,7 +343,10 @@ function frameLayer(
         if (bytesEqualAscii(bytes, range.start, range.end, KEY_KIND)) keys.kind = k;
         else if (bytesEqualAscii(bytes, range.start, range.end, KEY_KIND_DETAIL))
           keys.kindDetail = k;
-        else if (bytesEqualAscii(bytes, range.start, range.end, KEY_HEIGHT)) keys.height = k;
+        else if (isPlaces) {
+          if (bytesEqualAscii(bytes, range.start, range.end, KEY_POPULATION_RANK))
+            keys.populationRank = k;
+        } else if (bytesEqualAscii(bytes, range.start, range.end, KEY_HEIGHT)) keys.height = k;
         else if (bytesEqualAscii(bytes, range.start, range.end, KEY_MIN_HEIGHT)) keys.minHeight = k;
         else if (bytesEqualAscii(bytes, range.start, range.end, KEY_IS_BRIDGE)) keys.isBridge = k;
         else if (bytesEqualAscii(bytes, range.start, range.end, KEY_IS_TUNNEL)) keys.isTunnel = k;
@@ -335,6 +366,7 @@ function frameLayer(
     identifiers: new Map(),
     heights: new Map(),
     flags: new Map(),
+    ranks: new Map(),
   };
 }
 
@@ -388,6 +420,7 @@ interface Sinks {
   readonly buildings: BuildingFeature[];
   readonly paths: PathFeature[];
   readonly streets: StreetFeature[];
+  readonly places: PlaceFeature[];
 }
 
 /**
@@ -445,6 +478,14 @@ function decodeFeature(
   if (type !== LAYER_KEPT_GEOMETRY[layer.name]) return;
 
   const attributes = readTags(bytes, layer, tags);
+  if (layer.name === 'places') {
+    const place = placeOf(attributes);
+    if (place === null) return;
+    if (geometry === null) throw new Malformed();
+    const point = decodePoint(bytes, geometry, layer, project);
+    if (point !== null) sinks.places.push({ ...place, x: point.x, z: point.z });
+    return;
+  }
   const kind = attributes.kind;
   if (kind === null && layer.name !== 'water') return;
   if (layer.name === 'buildings' && !(BUILDING_KINDS as readonly string[]).includes(kind ?? '')) {
@@ -494,6 +535,22 @@ interface Attributes {
   minHeight: number | null;
   isBridge: boolean;
   isTunnel: boolean;
+  populationRank: number | null;
+}
+
+/** A place's three fields, or `null` when any is outside ADR 0055 D-2's lists. */
+function placeOf(
+  attributes: Attributes,
+): Pick<PlaceFeature, 'kind' | 'kindDetail' | 'populationRank'> | null {
+  const { kind, kindDetail, populationRank } = attributes;
+  if (!(PLACE_KINDS as readonly (string | null)[]).includes(kind)) return null;
+  if (!(PLACE_KIND_DETAILS as readonly (string | null)[]).includes(kindDetail)) return null;
+  if (populationRank === null) return null;
+  return {
+    kind: kind as PlaceFeature['kind'],
+    kindDetail: kindDetail as PlaceFeature['kindDetail'],
+    populationRank,
+  };
 }
 
 /** A street's grade separation: a bridge over anything a tunnel is not, either way not at grade. */
@@ -503,7 +560,10 @@ function gradeOf(attributes: Attributes): StreetGrade {
   return 'ground';
 }
 
-/** Reads the six keys' values. Every other key's value is skipped without being decoded. */
+/**
+ * Reads the values of the keys `frameLayer` matched: six, or `places`' three.
+ * Every other key's value is skipped without being decoded.
+ */
 function readTags(
   bytes: Uint8Array,
   layer: FramedLayer,
@@ -516,6 +576,7 @@ function readTags(
     minHeight: null,
     isBridge: false,
     isTunnel: false,
+    populationRank: null,
   };
   if (tags === null) return out;
   const reader = new ProtoReader(bytes, tags.start, tags.end);
@@ -531,8 +592,38 @@ function readTags(
     else if (key === layer.keys.minHeight) out.minHeight = cachedHeight(bytes, layer, value);
     else if (key === layer.keys.isBridge) out.isBridge = cachedFlag(bytes, layer, value);
     else if (key === layer.keys.isTunnel) out.isTunnel = cachedFlag(bytes, layer, value);
+    else if (key === layer.keys.populationRank) {
+      out.populationRank = cachedRank(bytes, layer, value);
+    }
   }
   return out;
+}
+
+function cachedRank(bytes: Uint8Array, layer: FramedLayer, index: number): number | null {
+  let value = layer.ranks.get(index);
+  if (value === undefined) {
+    value = rankValue(bytes, layer, index);
+    layer.ranks.set(index, value);
+  }
+  return value;
+}
+
+/**
+ * A numeric value that is an integer in `[MIN_POPULATION_RANK,
+ * MAX_POPULATION_RANK]`, else `null` (ADR 0055 D-2.3). A string, a boolean, a
+ * fraction, a negative, 0 or 19 is `null`, and the point is dropped.
+ */
+function rankValue(bytes: Uint8Array, layer: FramedLayer, index: number): number | null {
+  const value = numericValue(bytes, layer, index);
+  if (
+    value === null ||
+    !Number.isInteger(value) ||
+    value < MIN_POPULATION_RANK ||
+    value > MAX_POPULATION_RANK
+  ) {
+    return null;
+  }
+  return value;
 }
 
 function cachedFlag(bytes: Uint8Array, layer: FramedLayer, index: number): boolean {
@@ -621,6 +712,15 @@ function asciiIdentifier(bytes: Uint8Array, start: number, end: number): string 
 
 /** A numeric value in `[0, MAX_HEIGHT_METRES]`, else `null`. */
 function heightValue(bytes: Uint8Array, layer: FramedLayer, index: number): number | null {
+  const result = numericValue(bytes, layer, index);
+  if (result === null || !Number.isFinite(result) || result < 0 || result > MAX_HEIGHT_METRES) {
+    return null;
+  }
+  return result;
+}
+
+/** A value of any of the MVT's numeric types, else `null`. */
+function numericValue(bytes: Uint8Array, layer: FramedLayer, index: number): number | null {
   const reader = new ProtoReader(
     bytes,
     layer.values[index * 2] as number,
@@ -640,9 +740,6 @@ function heightValue(bytes: Uint8Array, layer: FramedLayer, index: number): numb
       reader.skip(wire);
       result = null;
     }
-  }
-  if (result === null || !Number.isFinite(result) || result < 0 || result > MAX_HEIGHT_METRES) {
-    return null;
   }
   return result;
 }
@@ -804,6 +901,34 @@ function decodeGeometry(
   if (isLine) finishLine();
   else if (open) throw new Malformed(); // the last ring never closed
   return isLine ? lines : polygons;
+}
+
+/**
+ * A point feature's one point, projected (#1632). A `MoveTo` of one point is
+ * all a place carries; a multipoint is `null` and its feature dropped, as
+ * nothing in ADR 0055 says which of its points is the place. Anything else is
+ * malformed, and so is a coordinate outside the layer's extent and buffer.
+ */
+function decodePoint(
+  bytes: Uint8Array,
+  range: { start: number; end: number },
+  layer: FramedLayer,
+  project: Projector,
+): { x: number; z: number } | null {
+  const reader = new ProtoReader(bytes, range.start, range.end);
+  if (reader.atEnd()) throw new Malformed();
+  const command = reader.uint32();
+  const count = command >>> 3;
+  if ((command & 7) !== MOVE_TO || count === 0) throw new Malformed();
+  if (count !== 1) return null;
+  const px = zigzag(reader.uint32());
+  const py = zigzag(reader.uint32());
+  if (!reader.atEnd()) throw new Malformed();
+  const low = -COORDINATE_BUFFER_EXTENTS * layer.extent;
+  const high = (1 + COORDINATE_BUFFER_EXTENTS) * layer.extent;
+  if (px < low || px > high || py < low || py > high) throw new Malformed();
+  const out = project.project(Int32Array.of(px, py), 2);
+  return { x: out[0] as number, z: out[1] as number };
 }
 
 function zigzag(value: number): number {

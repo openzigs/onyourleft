@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * (Named `shell-demo`, not `demo`, on purpose: `--shard` cuts by file name, and
- * this name puts the file in `browser-2`, the half with the room —
- * `nightly-split.test.ts` holds it.)
+ * (Named `shell-demo` since #1648's review, when `--shard` cut by file name
+ * and this name put the file in the half with the room. Since #1720 each
+ * shard names its files, and this one is named in `test:browser:shard-3`, the
+ * shard with the most room — `nightly-split.test.ts` holds it.)
  *
  * The demo's browser gate — #1648: the built demo, served from `demo/dist` by
  * the config's third server, plays, asks nothing of the network beyond its own

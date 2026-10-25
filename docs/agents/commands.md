@@ -267,10 +267,10 @@ pnpm run build
 # them in a real headless Chromium through Playwright. ⚠️ **Two builds and two
 # preview servers since #408**: an offline claim about the PRODUCT cannot be
 # measured against the harness, so `playwright.config.ts` serves `dist` on 4320
-# beside `browser/dist` on 4319, and since #1648 `demo/dist` on 4321. ⚠️ TWO CI jobs since #1362 — the shards
-# `browser-1` and `browser-2`, which the job named `Repository rules` waits for
-# (§4c §"Two browser shards — #1362") — and each runs half of this command, as
-# `test:browser:shard-1` and `test:browser:shard-2` below; this is the whole. ⚠️ Two Playwright PROJECTS
+# beside `browser/dist` on 4319, and since #1648 `demo/dist` on 4321. ⚠️ THREE CI jobs since #1720 — the shards
+# `browser-1` to `browser-3`, which the job named `Repository rules` waits for
+# (§4c §"Three browser shards — #1720") — and each runs its own spec files of
+# this command, as `test:browser:shard-1` to `-3` below; this is the whole. ⚠️ Two Playwright PROJECTS
 # since #651 — `chromium`, and `game` LAST — in one run and one browser; §4c
 # says why the game spec is last and why it is not split further. ⚠️ Since
 # #1128 they are TWO runs in this one command: `chromium` on three workers,
@@ -315,22 +315,26 @@ pnpm run test:browser:nightly
 
 # The nightly checks as CI runs them, in four jobs (#1675, #1698, §4c §"Four
 # nightly browser shards"): the first every nightly spec but the realistic
-# page's, then `realistic.browser.spec.ts`, `realistic-trees.browser.spec.ts`
-# and `realistic-town.browser.spec.ts`, one each, on one worker under the same
+# page's, then `realistic.browser.spec.ts`, `realistic-trees.browser.spec.ts`,
+# `realistic-town.browser.spec.ts` and `realistic-mapped.browser.spec.ts`, one
+# each, on one worker under the same
 # 840 s stop. `nightly-split.test.ts` holds every nightly spec in exactly one,
 # and each shard's realistic loads inside 60 % of the stop.
 pnpm run test:browser:nightly:shard-1
 pnpm run test:browser:nightly:shard-2
 pnpm run test:browser:nightly:shard-3
 pnpm run test:browser:nightly:shard-4
+pnpm run test:browser:nightly:shard-5
 
-# The browser gate as CI runs it, in two halves (#1362, §4c §"Two browser
-# shards"): each builds both pages and runs half the `chromium` project with
-# Playwright's `--shard`, on the whole gate's workers and stop; the second
-# runs the `game` project after its half. Together they are `test:browser`,
-# every case in exactly one, which `nightly-split.test.ts` holds.
+# The browser gate as CI runs it, in three parts (#1720, §4c §"Three browser
+# shards"): each builds both pages and runs the `chromium` project over the
+# spec files it names, on the whole gate's workers and stop; the third runs
+# the `game` project after its part. Together they are `test:browser`, every
+# spec in exactly one, which `nightly-split.test.ts` holds: a NEW spec file
+# goes into one of these lists in the same pull request, or that test is red.
 pnpm run test:browser:shard-1
 pnpm run test:browser:shard-2
+pnpm run test:browser:shard-3
 
 # The same gate with its HOSTED block turned on (#63). Renders the same harness
 # page against a real PMTiles archive over the internet and prints #63's eighth

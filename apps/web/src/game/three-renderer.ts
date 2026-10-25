@@ -170,6 +170,7 @@ import {
   HalfFloatType,
   InstancedBufferAttribute,
   InstancedMesh,
+  LatheGeometry,
   LinearFilter,
   LinearMipmapLinearFilter,
   LoadingManager,
@@ -285,10 +286,13 @@ import {
   SASH_TOP_SHARE,
   SHINGLE,
   SHOP_DOOR,
+  CURTAIN_WALL,
   SHOP_FRONT,
   SHUTTER,
   SIGN_MOULDING_METRES,
   SILL,
+  streakShareOf,
+  WEATHERING,
   WINDOW_IN_BAY,
   WINDOW_SILL_METRES,
 } from './facade';
@@ -323,7 +327,9 @@ import {
   STYLE_BRICK_FOUNDATION,
   STYLE_COMMERCIAL,
   STYLE_EAVES,
+  STYLE_FLAT_ROOF,
   STYLE_FLOATS,
+  STYLE_GLAZED,
   STYLE_OFFSET,
   STYLE_SASH,
   STYLE_SHUTTERS,
@@ -497,7 +503,10 @@ import type { Billboard } from './billboards';
 import {
   FURNITURE_DRAW_METRES,
   FURNITURE_KINDS,
+  FURNITURE_SURFACES,
+  type FurnitureItem,
   type FurnitureKind,
+  type FurnitureSurface,
   type PavementMesh,
   type VillageStreet,
 } from './streets';
@@ -664,8 +673,12 @@ import { NO_SEASON, type Holiday, type Season } from './season';
 import {
   decorationsFor,
   HOLIDAY_DECORATIONS,
+  PUMPKIN,
+  WREATH_BERRY,
+  WREATH_GREEN,
   type DecorationItem,
   type DecorationKind,
+  type DecorationShape,
   type ItemTable,
 } from './decorations';
 
@@ -1959,7 +1972,7 @@ const BIN_GREEN = 0x2f4a3a;
 const FURNITURE_STYLE: Readonly<
   Record<
     FurnitureKind,
-    { readonly surface: 'painted' | 'planks'; readonly parts: readonly FurniturePart[] }
+    { readonly surface: FurnitureSurface; readonly parts: readonly FurniturePart[] }
   >
 > = {
   'lamp-post': {
@@ -2101,6 +2114,9 @@ export const LIT_COLOURS: readonly number[] = [
   ),
   // #1623. The snow a roof wears.
   ROOF_SNOW,
+  // #1626. The winter lights' wreath, on a village door and drawn on a mapped one.
+  WREATH_GREEN,
+  WREATH_BERRY,
 ];
 
 /**
@@ -7795,6 +7811,8 @@ const TINT_APPLY_GLSL = /* glsl */ `
 const SEASON = {
   oylAutumn: { value: 0 },
   oylRoofSnow: { value: 0 },
+  /** #1626: 1 while the ride's holiday is the winter lights — the mapped doors' wreath. */
+  oylWreath: { value: 0 },
 };
 
 /**
@@ -9178,7 +9196,11 @@ function sideRoadGeometry(roads: readonly SideRoad[]): BufferGeometry {
  * its fullest has 16 lamp posts and 8 bollards (`streets.ts` §`furnish`), a
  * frame holds two villages at most, and only what is within
  * `streets.ts` §`FURNITURE_DRAW_METRES` of the camera is drawn — so the cut
- * past this never binds on a village the rules built.
+ * past this never binds on a village the rules built. Since #1637 a city
+ * centre's street stands a lamp post every 16 m on each side, about 30 in
+ * reach, and its bollards only at side roads' mouths: `city-streetscape.test.ts`
+ * holds every kind under this on #1540's dense town read as a city centre,
+ * with a side road every 60 m. Not raised.
  */
 export const FURNITURE_CAPACITY = 64;
 
@@ -9219,11 +9241,73 @@ function furnitureGeometry(kind: FurnitureKind, world: 'stylised' | 'realistic')
 }
 
 /**
+ * Every piece in `items` as one geometry: `shapes`' own, each piece's turned
+ * by its yaw as three's `makeRotationY` turns it and stood where it stands —
+ * the transform the instanced draw made on the GPU until #1689, made here
+ * once. Every shape carries the same attributes, unindexed.
+ */
+function furnitureSurfaceGeometry(
+  items: readonly FurnitureItem[],
+  shapes: ReadonlyMap<FurnitureKind, BufferGeometry>,
+): BufferGeometry {
+  const [first] = shapes.values();
+  const names = first === undefined ? [] : Object.keys(first.attributes);
+  let vertices = 0;
+  for (const item of items) {
+    vertices += (shapes.get(item.kind) as BufferGeometry).getAttribute('position').count;
+  }
+  const geometry = new BufferGeometry();
+  for (const name of names) {
+    const size = (first as BufferGeometry).getAttribute(name).itemSize;
+    const out = new Float32Array(vertices * size);
+    let at = 0;
+    for (const item of items) {
+      const source = (shapes.get(item.kind) as BufferGeometry).getAttribute(name);
+      const values = source.array as Float32Array;
+      if (name === 'position' || name === 'normal') {
+        const cos = Math.cos(item.rotation);
+        const sin = Math.sin(item.rotation);
+        const [dx, dy, dz] = name === 'position' ? [item.x, item.y, item.z] : [0, 0, 0];
+        for (let each = 0; each < values.length; each += 3) {
+          const x = values[each] as number;
+          const z = values[each + 2] as number;
+          out[at + each] = cos * x + sin * z + dx;
+          out[at + each + 1] = (values[each + 1] as number) + dy;
+          out[at + each + 2] = -sin * x + cos * z + dz;
+        }
+      } else {
+        out.set(values, at);
+      }
+      at += values.length;
+    }
+    geometry.setAttribute(name, new BufferAttribute(out, size));
+  }
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+/**
  * The street furniture on the pavements in view — #1536 (`streets.ts`
- * §`furnish`): **one instanced draw a kind**, four at most, and none where a
- * frame holds no street. Only what stands within `streets.ts`
- * §`FURNITURE_DRAW_METRES` of the camera is drawn, which is its level of
- * detail: a piece is either drawn whole or not at all.
+ * §`furnish`): **one merged mesh and one draw call a surface**
+ * ({@link FURNITURE_SURFACES}), two at most, and none where a frame holds no
+ * street. Only what stands within `streets.ts` §`FURNITURE_DRAW_METRES` of the
+ * camera is drawn, which is its level of detail: a piece is either drawn whole
+ * or not at all.
+ *
+ * ⚠️ **It was one instanced draw a KIND, four, until #1689**, and a reviewer
+ * who remembers four is reading the belt before the village frame was frozen.
+ * The lamp post, the bollard and the bin wore three materials made from the
+ * same numbers; they now wear one, and every piece of a surface is merged into
+ * one geometry, so the frame draws the same triangles in the same places in
+ * two calls. Instancing cannot do that — an instanced draw is ONE shape — and
+ * three's `BatchedMesh` draws through `WEBGL_multi_draw`, which the owner's
+ * page's counter does not see (`browser/realistic/draws.ts`).
+ *
+ * ⚠️ **Rebuilt only when the pieces in reach change**, as
+ * {@link PavementBelt} is when its streets do: `streets.ts` hands every frame
+ * the same objects for the same villages, and a piece is fixed in the
+ * corridor's frame, so a frame whose pieces in reach are the last frame's
+ * uploads nothing — where the instanced draw uploaded every matrix every frame.
  *
  * A belt per world, as {@link PavementBelt} is: the stylised view's is
  * painted by {@link FURNITURE_STYLE}, lit or flat by the rung; the realistic
@@ -9231,12 +9315,19 @@ function furnitureGeometry(kind: FurnitureKind, world: 'stylised' | 'realistic')
  * Poly Haven's `dark_planks`, breathing the realistic air.
  */
 export class FurnitureBelt {
-  readonly #meshes = new Map<FurnitureKind, InstancedMesh>();
+  readonly #meshes = new Map<FurnitureSurface, Mesh>();
   readonly #materials = new Map<
-    FurnitureKind,
+    FurnitureSurface,
     { readonly lit: Material; readonly flat: Material }
   >();
-  readonly #matrix = new Matrix4();
+  /** Each surface's kinds' shapes, one piece's, unindexed. */
+  readonly #shapes = new Map<FurnitureSurface, Map<FurnitureKind, BufferGeometry>>();
+  /** The pieces each surface's mesh holds, in the order it holds them. */
+  readonly #held = new Map<FurnitureSurface, readonly FurnitureItem[]>();
+  /** This frame's pieces in reach, a surface's — reused, so a frame allocates nothing. */
+  readonly #inReach = new Map<FurnitureSurface, FurnitureItem[]>();
+  /** How many of each kind the last frame drew. @see drawnOf */
+  readonly #drawn = new Map<FurnitureKind, number>();
   #shown = true;
   /** Whether the browser gate has turned the furniture off — its control. */
   #switchedOn = true;
@@ -9245,8 +9336,7 @@ export class FurnitureBelt {
     world: 'stylised' | 'realistic',
     planks?: { readonly colour: Texture; readonly normal: Texture },
   ) {
-    for (const kind of FURNITURE_KINDS) {
-      const surface = FURNITURE_STYLE[kind].surface;
+    for (const surface of FURNITURE_SURFACES) {
       let materials: { readonly lit: Material; readonly flat: Material };
       if (world === 'realistic') {
         const finish = STRUCTURE_SURFACE_FINISH[surface];
@@ -9272,29 +9362,44 @@ export class FurnitureBelt {
           flat: constructed(new MeshBasicMaterial({ vertexColors: true })),
         };
       }
-      this.#materials.set(kind, materials);
-      const mesh = new InstancedMesh(
-        furnitureGeometry(kind, world),
-        materials.lit,
-        FURNITURE_CAPACITY,
-      );
-      mesh.instanceMatrix.setUsage(DynamicDrawUsage);
-      mesh.count = 0;
-      // Spread along a village and moved every frame: three's culling would
-      // test a sphere nobody keeps up to date, and four calls are all it saves.
+      this.#materials.set(surface, materials);
+      const shapes = new Map<FurnitureKind, BufferGeometry>();
+      for (const kind of FURNITURE_KINDS) {
+        if (FURNITURE_STYLE[kind].surface !== surface) continue;
+        const built = furnitureGeometry(kind, world);
+        shapes.set(kind, built.index === null ? built : built.toNonIndexed());
+        if (built.index !== null) built.dispose();
+      }
+      this.#shapes.set(surface, shapes);
+      this.#held.set(surface, []);
+      this.#inReach.set(surface, []);
+      const mesh = new Mesh(new BufferGeometry(), materials.lit);
+      // Spread along a village: a sphere about two villages' pieces culls
+      // nothing a rider would miss, and two calls are all it could save.
       mesh.frustumCulled = false;
       mesh.visible = false;
-      this.#meshes.set(kind, mesh);
+      this.#meshes.set(surface, mesh);
     }
+    for (const kind of FURNITURE_KINDS) this.#drawn.set(kind, 0);
   }
 
   addTo(scene: Scene): void {
     for (const mesh of this.#meshes.values()) scene.add(mesh);
   }
 
-  /** One kind's mesh. For the browser gate's counts and the jsdom suite. */
-  meshOf(kind: FurnitureKind): InstancedMesh {
-    return this.#meshes.get(kind) as InstancedMesh;
+  /** One surface's mesh. For the jsdom suite. */
+  meshOf(surface: FurnitureSurface): Mesh {
+    return this.#meshes.get(surface) as Mesh;
+  }
+
+  /** One piece of `kind`, in its own frame: the shape every piece of it is drawn from. */
+  shapeOf(kind: FurnitureKind): BufferGeometry {
+    return this.#shapes.get(FURNITURE_STYLE[kind].surface)?.get(kind) as BufferGeometry;
+  }
+
+  /** How many pieces of `kind` the last frame drew. @see furnitureCountsOf */
+  drawnOf(kind: FurnitureKind): number {
+    return this.#drawn.get(kind) ?? 0;
   }
 
   setShown(on: boolean): void {
@@ -9309,8 +9414,8 @@ export class FurnitureBelt {
 
   /** Shades the furniture, or stops shading it — #286. @see QualitySettings.shading */
   setShading(shading: QualitySettings['shading']): void {
-    for (const [kind, mesh] of this.#meshes) {
-      mesh.material = (this.#materials.get(kind) as { lit: Material; flat: Material })[shading];
+    for (const [surface, mesh] of this.#meshes) {
+      mesh.material = (this.#materials.get(surface) as { lit: Material; flat: Material })[shading];
     }
   }
 
@@ -9319,34 +9424,47 @@ export class FurnitureBelt {
     streets: readonly VillageStreet[],
     camera: { readonly x: number; readonly z: number },
   ): void {
-    for (const mesh of this.#meshes.values()) mesh.count = 0;
+    for (const kind of FURNITURE_KINDS) this.#drawn.set(kind, 0);
+    for (const reach of this.#inReach.values()) reach.length = 0;
     if (this.#shown && this.#switchedOn) {
       for (const street of streets) {
         for (const item of street.furniture) {
           if (Math.hypot(item.x - camera.x, item.z - camera.z) > FURNITURE_DRAW_METRES) continue;
-          const mesh = this.#meshes.get(item.kind) as InstancedMesh;
-          if (mesh.count >= FURNITURE_CAPACITY) continue;
-          this.#matrix.makeRotationY(item.rotation).setPosition(item.x, item.y, item.z);
-          mesh.setMatrixAt(mesh.count, this.#matrix);
-          mesh.count += 1;
+          const drawn = this.#drawn.get(item.kind) ?? 0;
+          if (drawn >= FURNITURE_CAPACITY) continue;
+          this.#drawn.set(item.kind, drawn + 1);
+          this.#inReach.get(FURNITURE_STYLE[item.kind].surface)?.push(item);
         }
       }
     }
-    for (const mesh of this.#meshes.values()) {
-      mesh.instanceMatrix.needsUpdate = mesh.count > 0;
-      mesh.visible = mesh.count > 0;
+    for (const [surface, mesh] of this.#meshes) {
+      const reach = this.#inReach.get(surface) as FurnitureItem[];
+      if (!sameFurniture(reach, this.#held.get(surface) as readonly FurnitureItem[])) {
+        this.#held.set(surface, [...reach]);
+        mesh.geometry.dispose();
+        mesh.geometry = furnitureSurfaceGeometry(
+          reach,
+          this.#shapes.get(surface) as ReadonlyMap<FurnitureKind, BufferGeometry>,
+        );
+      }
+      mesh.visible = this.#shown && reach.length > 0;
     }
   }
 
   dispose(): void {
-    for (const [kind, mesh] of this.#meshes) {
+    for (const [surface, mesh] of this.#meshes) {
       mesh.geometry.dispose();
-      const materials = this.#materials.get(kind);
+      for (const shape of this.#shapes.get(surface)?.values() ?? []) shape.dispose();
+      const materials = this.#materials.get(surface);
       materials?.lit.dispose();
       if (materials !== undefined && materials.flat !== materials.lit) materials.flat.dispose();
-      mesh.dispose();
     }
   }
+}
+
+/** Whether two lists hold the same pieces, by identity, in the same order. */
+function sameFurniture(first: readonly FurnitureItem[], second: readonly FurnitureItem[]): boolean {
+  return first.length === second.length && first.every((item, index) => item === second[index]);
 }
 
 /**
@@ -9441,20 +9559,69 @@ export function decorationMaterials(world: 'stylised' | 'realistic'): {
   };
 }
 
-/** A unit box's 36 corners (twelve triangles, unindexed) and their normals. */
-const DECORATION_BOX = ((): {
+/** One decoration shape in the unit box about the origin: its corners, unindexed, and their normals. */
+interface DecorationTemplate {
   readonly positions: Float32Array;
   readonly normals: Float32Array;
-} => {
-  const box = new BoxGeometry(1, 1, 1).toNonIndexed();
-  const positions = Float32Array.from(box.getAttribute('position').array);
-  const normals = Float32Array.from(box.getAttribute('normal').array);
-  box.dispose();
-  return { positions, normals };
-})();
+}
 
-/** The triangles one decoration part is: a box, **12**. */
-export const DECORATION_PART_TRIANGLES = DECORATION_BOX.positions.length / 9;
+function decorationTemplate(made: BufferGeometry): DecorationTemplate {
+  const flat = made.index === null ? made : made.toNonIndexed();
+  const positions = Float32Array.from(flat.getAttribute('position').array);
+  const normals = Float32Array.from(flat.getAttribute('normal').array);
+  made.dispose();
+  flat.dispose();
+  return { positions, normals };
+}
+
+/**
+ * A pumpkin — #1625: `decorations.ts` §`PUMPKIN`'s lathe, its radii ribbed,
+ * stood in the unit box (its foot at `y = −0.5`) and smooth-shaded.
+ */
+function pumpkinGeometry(): BufferGeometry {
+  const lathe = new LatheGeometry(
+    PUMPKIN.profile.map(([radius, up]) => new Vector2(radius, up - 0.5)),
+    PUMPKIN.segments,
+  );
+  const position = lathe.getAttribute('position');
+  for (let at = 0; at < position.count; at += 1) {
+    const x = position.getX(at);
+    const z = position.getZ(at);
+    const rib = 1 + PUMPKIN.ribDepth * Math.cos(PUMPKIN.ribs * Math.atan2(x, z));
+    position.setXYZ(at, x * rib, position.getY(at), z * rib);
+  }
+  lathe.computeVertexNormals();
+  return lathe;
+}
+
+/** Every {@link DecorationShape}, built once. @see DecorationShape */
+const DECORATION_TEMPLATES: Readonly<Record<DecorationShape, DecorationTemplate>> = {
+  box: decorationTemplate(new BoxGeometry(1, 1, 1)),
+  pumpkin: decorationTemplate(pumpkinGeometry()),
+  stalk: decorationTemplate(new CylinderGeometry(0.5, 0.5, 1, 5, 1, true)),
+  face: decorationTemplate(new PlaneGeometry(1, 1)),
+  // #1626: a bulb, and a wreath's ring — outer radius 0.5, tube 0.1 — in xy.
+  bulb: decorationTemplate(new OctahedronGeometry(0.5, 0)),
+  wreath: decorationTemplate(new TorusGeometry(0.4, 0.1, 4, 10).scale(1, 1, 5)),
+};
+
+/** The triangles one part of `shape` is — #1625. @see DecorationShape */
+export function decorationShapeTriangles(shape: DecorationShape = 'box'): number {
+  return DECORATION_TEMPLATES[shape].positions.length / 9;
+}
+
+/**
+ * The triangles one box part is: **12**.
+ *
+ * @test-facing `decoration-belt.test.ts` counts its probe's boxes by it; since
+ * #1625 the belt counts every shape by {@link decorationKindTriangles}
+ */
+export const DECORATION_PART_TRIANGLES = decorationShapeTriangles('box');
+
+/** The triangles one item of `kind` is, every part together — #1625. */
+export function decorationKindTriangles(kind: DecorationKind): number {
+  return kind.parts.reduce((sum, part) => sum + decorationShapeTriangles(part.shape), 0);
+}
 
 /** Reused by {@link decorationGeometry}, so a rebuild allocates no colour. */
 const DECORATION_SCRATCH = new Color();
@@ -9476,7 +9643,7 @@ export function decorationGeometry(
   for (const item of items) {
     const kind = byName.get(item.item);
     if (kind === undefined) continue;
-    const adds = kind.parts.length * DECORATION_PART_TRIANGLES;
+    const adds = decorationKindTriangles(kind);
     if (triangles + adds > REALISTIC_DECORATION_TRIANGLES) continue;
     triangles += adds;
     drawn.push({ item, kind });
@@ -9486,13 +9653,15 @@ export function decorationGeometry(
   const normals = new Float32Array(vertices * 3);
   const colours = new Float32Array(vertices * 3);
   const glow = new Float32Array(vertices);
-  const box = DECORATION_BOX;
   let at = 0;
   for (const { item, kind } of drawn) {
-    const { x, y, z, yaw } = item.anchor;
+    const { x, z, yaw } = item.anchor;
+    // #1625: on its step's top where it stands on one, else on its anchor.
+    const y = item.base;
     const cos = Math.cos(yaw);
     const sin = Math.sin(yaw);
     for (const part of kind.parts) {
+      const box = DECORATION_TEMPLATES[part.shape ?? 'box'];
       DECORATION_SCRATCH.set(part.colour);
       const [width, height, depth] = part.size;
       const [px, py, pz] = part.at;
@@ -9501,9 +9670,22 @@ export function decorationGeometry(
         const lx = (box.positions[corner] as number) * width + px;
         const ly = (box.positions[corner + 1] as number) * height + py;
         const lz = (box.positions[corner + 2] as number) * depth + pz;
-        const nx = box.normals[corner] as number;
-        const ny = box.normals[corner + 1] as number;
-        const nz = box.normals[corner + 2] as number;
+        // A normal goes through the inverse of the part's scale, so a
+        // squat pumpkin is shaded as squat (#1625); a flat part keeps its own.
+        let nx = box.normals[corner] as number;
+        let ny = box.normals[corner + 1] as number;
+        let nz = box.normals[corner + 2] as number;
+        if (width > 0 && height > 0 && depth > 0) {
+          nx /= width;
+          ny /= height;
+          nz /= depth;
+          const length = Math.hypot(nx, ny, nz);
+          if (length > 0) {
+            nx /= length;
+            ny /= length;
+            nz /= length;
+          }
+        }
         positions[at * 3] = x + lx * cos + lz * sin;
         positions[at * 3 + 1] = y + ly;
         positions[at * 3 + 2] = z - lx * sin + lz * cos;
@@ -9677,6 +9859,7 @@ export function decorationGlowProbe(
       {
         anchor: { kind: 'green', x: 0, y: 0, z: 0, yaw: 0, clear: 1, hash: 0 },
         item: 'box',
+        base: 0,
         seed: 0,
       },
     ],
@@ -14168,6 +14351,31 @@ export function setMappedFacadeShown(on: boolean): void {
 }
 
 /**
+ * Whether the mapped doors' wreath is drawn while the winter lights are on —
+ * #1626: always, in the product. @see facadeWreathOf
+ */
+let facadeWreathShown = true;
+
+/** The mapped doors' wreath for a ride's season — #1626: 1 in the winter lights, else 0. */
+function wreathOf(season: Season): number {
+  return facadeWreathShown && season.holiday === 'winter-lights' ? 1 : 0;
+}
+
+/**
+ * Draws the mapped doors' wreath in the winter lights, or — the browser
+ * gate's control — never, for the proof that it costs no call: the wreath is
+ * a term on the door's own quad, so a frame draws the same calls without it.
+ * Applied to the view's season at once.
+ *
+ * @test-facing the browser gate's `facade-wreath` lever, read by
+ * `realistic-harness.ts`; the product always draws the wreath
+ */
+export function facadeWreathOf(view: GameView, on: boolean): void {
+  facadeWreathShown = on;
+  if (view instanceof ThreeGameView) SEASON.oylWreath.value = wreathOf(view.season);
+}
+
+/**
  * Whether a material draws #1581's windows and doors from its vertices.
  *
  * @test-facing held by `mapped-building-belt.test.ts` §"the mapped buildings’
@@ -14190,6 +14398,12 @@ let windowRevealsBuilt = true;
 let overhangShadowsBuilt = true;
 
 /**
+ * Whether the facade's program is built with #1661's weathering: always, in
+ * the product. @see weatheringOf
+ */
+let weatheringBuilt = true;
+
+/**
  * The define a facade material carries for {@link windowRevealsBuilt} — 1
  * built, 0 not — read by its `onBeforeCompile`. ⚠️ **A define, not the cache
  * key**: `withAtmosphere`, spliced after the facade, captures the key it
@@ -14203,6 +14417,9 @@ const WINDOW_REVEALS_DEFINE = 'OYL_WINDOW_REVEALS';
 /** The define for {@link overhangShadowsBuilt} — #1658, as {@link WINDOW_REVEALS_DEFINE} is #1659's. */
 const OVERHANG_SHADOWS_DEFINE = 'OYL_OVERHANG_SHADOWS';
 
+/** The define for {@link weatheringBuilt} — #1661, as {@link WINDOW_REVEALS_DEFINE} is #1659's. */
+const WEATHERING_DEFINE = 'OYL_WEATHERING';
+
 /** Whether `material` is built with #1659's window reveals, by its define. */
 function revealsBuiltIn(material: Material): boolean {
   return (material as { defines?: Record<string, unknown> }).defines?.[WINDOW_REVEALS_DEFINE] !== 0;
@@ -14215,10 +14432,16 @@ function overhangsBuiltIn(material: Material): boolean {
   );
 }
 
+/** Whether `material` is built with #1661's weathering, by its define. */
+function weatheringBuiltIn(material: Material): boolean {
+  return (material as { defines?: Record<string, unknown> }).defines?.[WEATHERING_DEFINE] !== 0;
+}
+
 /**
  * Sets `material`'s {@link WINDOW_REVEALS_DEFINE} to {@link windowRevealsBuilt}
  * and, since #1658, its {@link OVERHANG_SHADOWS_DEFINE} to
- * {@link overhangShadowsBuilt}.
+ * {@link overhangShadowsBuilt}; since #1661 its {@link WEATHERING_DEFINE} to
+ * {@link weatheringBuilt}.
  */
 function defineFacadeLevers(material: Material): void {
   const carrier = material as { defines?: Record<string, unknown> };
@@ -14226,6 +14449,7 @@ function defineFacadeLevers(material: Material): void {
     ...carrier.defines,
     [WINDOW_REVEALS_DEFINE]: windowRevealsBuilt ? 1 : 0,
     [OVERHANG_SHADOWS_DEFINE]: overhangShadowsBuilt ? 1 : 0,
+    [WEATHERING_DEFINE]: weatheringBuilt ? 1 : 0,
   };
 }
 
@@ -14262,6 +14486,25 @@ export function windowRevealsOf(view: GameView, on: boolean): void {
  */
 export function overhangShadowsOf(view: GameView, on: boolean): void {
   overhangShadowsBuilt = on;
+  if (view instanceof ThreeGameView) view.facadesRecompiled();
+}
+
+/**
+ * Builds every mapped building's facade with #1661's weathering — the
+ * photograph's repeat broken and laid differently on each building, splash
+ * grime at a wall's foot, streaks under the sills, a flat roof's drip, a
+ * roof's eaves courses and its moss, a parged plinth — or, `on` false,
+ * without it: its functions and every splice of it left out of both programs
+ * ({@link weatheringGlsl}), as {@link overhangShadowsOf} leaves #1658's. A
+ * setting of the module's, and the materials already in `view`'s scene are
+ * compiled again.
+ *
+ * @test-facing the owner's page's `-weathering` lever (`realistic-harness.ts`)
+ * and the browser gate's read of it (`game-harness.ts` §`weatheringProbe`);
+ * the product always builds it
+ */
+export function weatheringOf(view: GameView, on: boolean): void {
+  weatheringBuilt = on;
   if (view instanceof ThreeGameView) view.facadesRecompiled();
 }
 
@@ -14354,6 +14597,13 @@ const FACADE_CONSTANTS_GLSL = /* glsl */ `
   const float oylSignTop = ${glslFloat(FACADE_SIGN)};
   const float oylAwningTop = ${glslFloat(FACADE_AWNING)};
   const float oylCommercialFlag = ${glslFloat(STYLE_COMMERCIAL)};
+  const float oylGlazedFlag = ${glslFloat(STYLE_GLAZED)};
+  const float oylCurtainSpandrel = ${glslFloat(CURTAIN_WALL.spandrel)};
+  const float oylCurtainMullion = ${glslFloat(CURTAIN_WALL.mullion)};
+  const float oylCurtainModule = ${glslFloat(CURTAIN_WALL.module)};
+  const vec3 oylCurtainGlassC = ${glslVec(CURTAIN_WALL.glassColour)};
+  const vec3 oylCurtainSpandrelC = ${glslVec(CURTAIN_WALL.spandrelColour)};
+  const vec3 oylCurtainMullionC = ${glslVec(CURTAIN_WALL.mullionColour)};
   const float oylCwL = ${glslFloat(COMMERCIAL_WINDOW_IN_BAY.left)};
   const float oylCwR = ${glslFloat(COMMERCIAL_WINDOW_IN_BAY.right)};
   const float oylCwB = ${glslFloat(COMMERCIAL_WINDOW_IN_BAY.bottom)};
@@ -14518,6 +14768,225 @@ function overhangGlsl(built: boolean): string {
 }
 
 /**
+ * #1661's hash, in GLSL — `facade.ts` §`weatheringHash`: what the vertex
+ * shader lays a building's photograph by and the fragment shader weathers it
+ * by, from its seeded tint.
+ */
+const WEATHER_HASH_GLSL = /* glsl */ `
+  float oylWeatherHash(float a, float b) {
+    return fract(sin(mod(a, 1000.0) * 127.1 + mod(b, 1000.0) * 311.7) * 43758.5453);
+  }
+`;
+
+/**
+ * #1661's photograph laid per building, in GLSL — `facade.ts`
+ * §`photographShiftOf`, from a building's decoded tint: a half turn or none,
+ * and a shift along each texture coordinate, in repeats.
+ */
+const WEATHER_PHOTO_GLSL = /* glsl */ `
+  ${WEATHER_HASH_GLSL}
+  float oylPhotoTurnOf(vec3 tint) {
+    return oylWeatherHash(tint.y * 1000.0 + 41.0, tint.z * 1000.0) < 0.5 ? -1.0 : 1.0;
+  }
+  float oylPhotoShiftUOf(vec3 tint) {
+    return oylWeatherHash(tint.x * 1000.0 + 13.0, tint.y * 1000.0);
+  }
+  float oylPhotoShiftVOf(vec3 tint) {
+    return oylWeatherHash(tint.z * 1000.0 + 29.0, tint.x * 1000.0);
+  }
+`;
+
+/**
+ * #1661's photograph, laid per building in the vertex shader — `facade.ts`
+ * §`photographShiftOf`: the map's and the normal map's coordinates turned a
+ * half turn or not, and shifted, by the building's seeded tint, so that
+ * neighbours wearing one photograph do not share one brick's phase. Three
+ * builds the normal map's frame from its coordinates' derivatives, so the
+ * relief turns with the colour. No texture is fetched twice. And the
+ * fragment's place in the world, for the weathering's noise.
+ */
+const WEATHER_VERTEX_GLSL = /* glsl */ `
+vOylWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;
+float oylPhotoTurn = oylPhotoTurnOf(vOylTint);
+vec2 oylPhotoShift = vec2(oylPhotoShiftUOf(vOylTint), oylPhotoShiftVOf(vOylTint));
+#ifdef USE_MAP
+vMapUv = vMapUv * oylPhotoTurn + oylPhotoShift;
+#endif
+#ifdef USE_NORMALMAP
+vNormalMapUv = vNormalMapUv * oylPhotoTurn + oylPhotoShift;
+#endif`;
+
+/**
+ * #1661's weathering, in GLSL — `facade.ts` §`weatheringAt`, a function an
+ * effect, from {@link WEATHERING}'s numbers: the shared hash and value noise,
+ * a building's age from its tint, and each effect's share or multiplier,
+ * every one with detail fading to its mean over the fragment's footprint
+ * `pw`. `surface` bakes in how much of a sill's streak this material's walls
+ * show (`streakShareOf`) and whether its plinth is parged. With `weathering`
+ * off (`realistic/config.ts` §`LEVERS`) none of it is built.
+ */
+function weatheringGlsl(built: boolean, surface: StructureSurface): string {
+  if (!built) return '';
+  const { tile, splash, streak, drip, courses, moss, parging } = WEATHERING;
+  const parged = surface === 'render' || surface === 'concrete';
+  return /* glsl */ `
+  varying vec3 vOylWorld;
+  const float oylYoungest = ${glslFloat(WEATHERING.youngest)};
+  const float oylTileNear = ${glslFloat(tile.scales[0])};
+  const float oylTileFar = ${glslFloat(tile.scales[1])};
+  const float oylTileNearW = ${glslFloat(tile.weights[0])};
+  const float oylTileFarW = ${glslFloat(tile.weights[1])};
+  const float oylTileStrength = ${glslFloat(tile.strength)};
+  const float oylSplashLow = ${glslFloat(splash.top[0])};
+  const float oylSplashHigh = ${glslFloat(splash.top[1])};
+  const float oylSplashSolid = ${glslFloat(splash.solid)};
+  const float oylSplashEdge = ${glslFloat(splash.edge)};
+  const float oylSplashStrength = ${glslFloat(splash.strength)};
+  const float oylSplashGrey = ${glslFloat(splash.grey)};
+  const float oylStreakM = ${glslFloat(streak.metres)};
+  const float oylStreakCol = ${glslFloat(streak.column)};
+  const float oylStreakStrength = ${glslFloat(streak.strength)};
+  const float oylStreakShare = ${glslFloat(streakShareOf(surface))};
+  const float oylDripM = ${glslFloat(drip.metres)};
+  const float oylDripCol = ${glslFloat(drip.column)};
+  const float oylDripStrength = ${glslFloat(drip.strength)};
+  const float oylCoursesM = ${glslFloat(courses.metres)};
+  const float oylCoursesStrength = ${glslFloat(courses.strength)};
+  const float oylMossScale = ${glslFloat(moss.scale)};
+  const float oylMossDetail = ${glslFloat(moss.detail)};
+  const float oylMossLow = ${glslFloat(moss.cover[0])};
+  const float oylMossHigh = ${glslFloat(moss.cover[1])};
+  const float oylMossFaceLow = ${glslFloat(moss.facing[0])};
+  const float oylMossFaceHigh = ${glslFloat(moss.facing[1])};
+  const float oylMossStrength = ${glslFloat(moss.strength)};
+  const vec3 oylMossC = ${glslVec(moss.colour)};
+  const float oylPargeLift = ${glslFloat(parging.lighten)};
+  const float oylPargeRough = ${glslFloat(parging.rough)};
+  const float oylParged = ${parged ? '1.0' : '0.0'};
+  const float oylFlatRoofFlag = ${glslFloat(STYLE_FLAT_ROOF)};
+  ${WEATHER_HASH_GLSL}
+  float oylWeatherNoise(float a, float b) {
+    float ia = floor(a);
+    float ib = floor(b);
+    float fa = a - ia;
+    float fb = b - ib;
+    float ua = fa * fa * (3.0 - 2.0 * fa);
+    float ub = fb * fb * (3.0 - 2.0 * fb);
+    float lo = mix(oylWeatherHash(ia, ib), oylWeatherHash(ia + 1.0, ib), ua);
+    float hi = mix(oylWeatherHash(ia, ib + 1.0), oylWeatherHash(ia + 1.0, ib + 1.0), ua);
+    return mix(lo, hi, ub);
+  }
+  float oylWeatherAgeOf(vec3 tint) {
+    return oylWeatherHash(tint.x * 1000.0, tint.y * 1000.0 + tint.z * 7000.0);
+  }
+  float oylWeatherShare(float age) {
+    return oylYoungest + (1.0 - oylYoungest) * age;
+  }
+  float oylWeatherColumn(float along, float width, float seed, float pw) {
+    return mix(0.4 + 1.2 * oylWeatherHash(floor(along / width), seed), 1.0, oylFadeOf(pw / width));
+  }
+  float oylWeatherTile(float a, float b, float pw) {
+    float n1 = mix(oylWeatherNoise(a / oylTileNear, b / oylTileNear), 0.5, oylFadeOf(pw / oylTileNear));
+    float n2 = mix(oylWeatherNoise(a / oylTileFar + 31.7, b / oylTileFar + 11.3), 0.5, oylFadeOf(pw / oylTileFar));
+    return 1.0 + 2.0 * oylTileStrength * (oylTileNearW * n1 + oylTileFarW * n2 - 0.5);
+  }
+  float oylWeatherSplash(float up, float a, float age, float pw) {
+    float broken = mix(oylWeatherNoise(a / oylSplashEdge, 7.0), 0.5, oylFadeOf(pw / oylSplashEdge));
+    float height = mix(oylSplashLow, oylSplashHigh, broken);
+    return oylWeatherShare(age) * (1.0 - smoothstep(oylSplashSolid * height, height, up));
+  }
+  float oylWeatherStreak(float below, float across, float halfWidth, float a, float share, float age, float pw) {
+    float under = smoothstep(-pw, pw, below) * (1.0 - smoothstep(0.0, oylStreakM, below));
+    float within = 1.0 - smoothstep(halfWidth - pw, halfWidth + pw, abs(across));
+    return oylStreakStrength * share * oylWeatherShare(age) * under * within * oylWeatherColumn(a, oylStreakCol, 5.0, pw);
+  }
+  float oylWeatherDrip(float below, float a, float age, float pw) {
+    float under = smoothstep(-pw, pw, below) * (1.0 - smoothstep(0.0, oylDripM, below));
+    return oylDripStrength * oylWeatherShare(age) * under * oylWeatherColumn(a, oylDripCol, 9.0, pw);
+  }
+  float oylWeatherCourses(float upSlope, float age) {
+    return oylCoursesStrength * oylWeatherShare(age) * (1.0 - smoothstep(0.0, oylCoursesM, upSlope));
+  }
+  float oylWeatherUpright(float upFacing) {
+    return 1.0 - step(0.3, upFacing);
+  }
+  float oylWeatherPlaneA(float upFacing, float nx, float nz, float wx, float wz) {
+    return upFacing > 0.7 ? wx : (abs(nx) > abs(nz) ? wz : wx);
+  }
+  float oylWeatherPlaneB(float upFacing, float wy, float wz) {
+    return upFacing > 0.7 ? wz : wy;
+  }
+  float oylWeatherGrime(float upFacing, float faceOn, float up, float a, float age, float pw) {
+    return oylWeatherUpright(upFacing) * faceOn * oylWeatherSplash(up, a, age, pw);
+  }
+  float oylWeatherPlinth(float upFacing, float faceOn, float top, float kind, float up) {
+    return oylWeatherUpright(upFacing) * faceOn * (1.0 - step(0.5, top)) * (1.0 - step(0.5, kind)) * (1.0 - step(0.0, up));
+  }
+  float oylWeatherDripOn(float flags, float below, float a, float age, float pw) {
+    return oylFlag(flags, oylFlatRoofFlag) * oylWeatherDrip(below, a, age, pw);
+  }
+  float oylWeatherMoss(float a, float b, float facing, float age, float pw) {
+    float where = smoothstep(oylMossLow, oylMossHigh, oylWeatherNoise(a / oylMossScale + 3.1, b / oylMossScale + 5.7));
+    float thick = mix(0.4 + 1.2 * oylWeatherNoise(a / oylMossDetail + 8.3, b / oylMossDetail + 1.9), 1.0, oylFadeOf(pw / oylMossDetail));
+    float up = smoothstep(oylMossFaceLow, oylMossFaceHigh, facing);
+    return oylMossStrength * oylWeatherShare(age) * where * thick * up;
+  }
+`;
+}
+
+/**
+ * #1661's splice into the cladding (§1 of {@link facadeFragmentGlsl}), after
+ * every cladding branch and under the openings, so that the glass is never
+ * grimed: the face's plane in the world and its footprint, its building's
+ * age; the photograph's tile broken; a pitched roof's eaves courses and moss
+ * on what faces up; splash grime at the foot of every plain or windowed face
+ * — a plinth's too — and a render or concrete plinth parged. Its locals
+ * (`oylAge`, `oylWpw`) are read by the sills' streaks and the drip after it.
+ */
+const WEATHER_CLADDING_GLSL = /* glsl */ `
+    // #1661: the weathering. Derivatives here, out of every per-fragment branch.
+    vec3 oylWN = normalize(cross(dFdx(vOylWorld), dFdy(vOylWorld)));
+    float oylWpw = max(max(max(fwidth(vOylWorld.x), fwidth(vOylWorld.y)), fwidth(vOylWorld.z)), 0.00001);
+    float oylUpFacing = abs(oylWN.y);
+    vec2 oylPlane = vec2(
+      oylWeatherPlaneA(oylUpFacing, oylWN.x, oylWN.z, vOylWorld.x, vOylWorld.z),
+      oylWeatherPlaneB(oylUpFacing, vOylWorld.y, vOylWorld.z)
+    );
+    float oylAge = oylWeatherAgeOf(vOylTint);
+    float oylFaceOn = step(-0.5, oylTop);
+    diffuseColor.rgb *= oylWeatherTile(oylPlane.x, oylPlane.y, oylWpw);
+    float oylPitched = step(0.3, oylUpFacing) * (1.0 - step(0.97, oylUpFacing));
+    diffuseColor.rgb *= 1.0 - oylPitched * oylFaceOn * oylWeatherCourses(vOylFacade.y, oylAge);
+    diffuseColor.rgb = mix(diffuseColor.rgb, oylMossC, oylFaceOn * oylWeatherMoss(oylPlane.x, oylPlane.y, oylUpFacing, oylAge, oylWpw));
+    float oylUp = mix(vOylFacade.y, vOylFacade.y * oylStoreyM, oylStoreyed);
+    float oylGrime = oylWeatherGrime(oylUpFacing, oylFaceOn, oylUp, oylPlane.x, oylAge, oylWpw);
+    diffuseColor.rgb = mix(diffuseColor.rgb, vec3(dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722))), oylSplashGrey * oylGrime)
+      * (1.0 - oylSplashStrength * oylGrime);
+    float oylPlinth = oylWeatherPlinth(oylUpFacing, oylFaceOn, oylTop, oylKind, oylUp);
+    float oylParging = oylParged * oylPlinth;
+    diffuseColor.rgb *= 1.0 + oylPargeLift * oylParging;
+    oylFlat = max(oylFlat, oylParging);
+    oylRough = mix(oylRough, oylPargeRough, oylParging);`;
+
+/** #1661's streaks under a sash's sill (§2 of {@link facadeFragmentGlsl}): its span and overrun. */
+const WEATHER_SASH_STREAK_GLSL = /* glsl */ `
+        float oylSillSpan = mix(oylWinW * 0.5, oylWinW + oylMullion * 0.5, oylPaired) + oylSillOver;
+        diffuseColor.rgb *= 1.0 - oylShown * oylWeatherStreak(
+          oylSillM - oylSillDepth - oylP.y, oylP.x, oylSillSpan, oylM.x, oylStreakAt, oylAge, oylMw.x
+        );`;
+
+/** #1661's streaks under a casement's sill (§2 of {@link facadeFragmentGlsl}), in metres. */
+const WEATHER_CASEMENT_STREAK_GLSL = /* glsl */ `
+        diffuseColor.rgb *= 1.0 - oylShown * oylWeatherStreak(
+          (oylWB - oylSillU - oylAt.y) * oylStoreyM, (oylAt.x - 0.5) * vOylStyle.z,
+          (0.5 - oylWL + oylSillA) * vOylStyle.z, oylM.x, oylStreakAt, oylAge, oylMw.x
+        );`;
+
+/** #1661's drip down a flat roof's wall from its parapet (§3 of {@link facadeFragmentGlsl}). */
+const WEATHER_DRIP_GLSL = /* glsl */ `
+      diffuseColor.rgb *= 1.0 - oylWeatherDripOn(oylFlags, (oylTop - vOylFacade.y) * oylStoreyM, oylM.x, oylAge, oylMw.y);`;
+
+/**
  * {@link CLADDING_HELPERS_GLSL}, a mapped building's varyings, #1659's reveal
  * ({@link revealGlsl}) and its sash window, which since #1659 takes the eye
  * and the sun in the face's frame (`e`, `s`) for the reveal, and gives back
@@ -14525,7 +14994,12 @@ function overhangGlsl(built: boolean): string {
  * wall in its sill's shadow (`sillShade`); since #1658 the overhang's
  * shadow ({@link overhangGlsl}).
  */
-function facadeCommonGlsl(reveals: boolean, overhangs: boolean): string {
+function facadeCommonGlsl(
+  reveals: boolean,
+  overhangs: boolean,
+  weathering: boolean,
+  surface: StructureSurface,
+): string {
   return /* glsl */ `
   uniform float oylFacadeOn;
   uniform vec3 oylSunWorld;
@@ -14535,6 +15009,7 @@ function facadeCommonGlsl(reveals: boolean, overhangs: boolean): string {
   ${CLADDING_HELPERS_GLSL}
   ${revealGlsl(reveals)}
   ${overhangGlsl(overhangs)}
+  ${weatheringGlsl(weathering, surface)}
   void oylSash(
     vec2 p, vec2 pw, vec3 win, float bay, float paired, float picture, float shutters, vec3 e, vec3 s,
     out float frame, out float glass, out float reveal, out float shutter, out float sill,
@@ -14587,6 +15062,55 @@ const OVERHANG_SHADE_GLSL = /* glsl */ `
       oylEavesShade = mix(oylEavesShade, min(oylEavesShade, oylSunShadow), oylFlag(oylFlags, oylEavesFlag));`;
 
 /**
+ * #1636's curtain wall, in GLSL — `facade.ts` §`curtainWallPartAt` from the
+ * same numbers: in every storey up to the eaves, glass over an opaque
+ * spandrel with a transom between, and mullions at an even module across
+ * each bay; faded far off to the three parts' mean by their shares. The
+ * glass is flat — a dark pane that gives back the sky through the finish
+ * (`oylGlass`) — until #1662 puts rooms behind it.
+ */
+const CURTAIN_WALL_GLSL = /* glsl */ `
+        float oylBayW = max(vOylStyle.z, 0.1);
+        float oylModules = max(1.0, floor(oylBayW / oylCurtainModule + 0.5));
+        float oylModW = oylBayW / oylModules;
+        vec2 oylP = vec2(oylAt.x * oylBayW, oylAt.y * oylStoreyM);
+        float oylOnWall = step(0.0, oylCell.y) * (1.0 - step(vOylFacade.z, vOylFacade.y));
+        float oylMull = oylLine(oylP.x / oylModW, oylCurtainMullion * 0.5 / oylModW, oylMw.x / oylModW);
+        float oylTransomBar = oylBand(oylP.y, oylCurtainSpandrel - oylCurtainMullion * 0.5, oylCurtainSpandrel + oylCurtainMullion * 0.5, oylMw.y);
+        float oylBars = max(oylMull, oylTransomBar);
+        float oylSpandrel = (1.0 - smoothstep(oylCurtainSpandrel - oylMw.y, oylCurtainSpandrel + oylMw.y, oylP.y)) * (1.0 - oylBars);
+        // As every window kind's since #1659: the glass set back behind its mullions, the
+        // transom and the next storey's spandrel, its side seen past it and the sun's shadow on it.
+        float oylK = floor(oylP.x / oylModW);
+        vec2 oylLo = vec2(oylK * oylModW + oylCurtainMullion * 0.5, oylCurtainSpandrel + oylCurtainMullion * 0.5);
+        vec2 oylHi = vec2((oylK + 1.0) * oylModW - oylCurtainMullion * 0.5, oylStoreyM);
+        vec2 oylQ;
+        float oylSeen;
+        float oylSideLit;
+        float oylShadeOn;
+        oylRevealOf(oylP, oylLo, oylHi, oylMw, oylEyeF, oylSunF, oylQ, oylSeen, oylSideLit, oylShadeOn);
+        float oylOpen = (1.0 - oylSpandrel) * (1.0 - oylBars);
+        float oylPaneOn = oylOpen * oylSeen;
+        float oylSide = oylOpen * (1.0 - oylSeen);
+        vec3 oylPaneC = oylCurtainGlassC * (1.0 - oylRevealShade * oylShadeOn);
+        vec3 oylSideC = oylCurtainMullionC * (1.0 - oylRevealShade * (1.0 - oylSideLit));
+        vec3 oylDrawn = mix(
+          mix(mix(oylPaneC, oylCurtainSpandrelC, oylSpandrel), oylCurtainMullionC, oylBars),
+          oylSideC,
+          oylSide
+        );
+        float oylBarShare = min(1.0, oylCurtainMullion / oylModW + oylCurtainMullion / oylStoreyM);
+        float oylSpandrelShare = (oylCurtainSpandrel / oylStoreyM) * (1.0 - oylBarShare);
+        vec3 oylMean = oylCurtainMullionC * oylBarShare + oylCurtainSpandrelC * oylSpandrelShare
+          + oylCurtainGlassC * max(0.0, 1.0 - oylBarShare - oylSpandrelShare);
+        float oylFade = oylFadeOf(max(oylMw.x / oylModW, oylMw.y / oylStoreyM));
+        diffuseColor.rgb = mix(diffuseColor.rgb, mix(oylDrawn, oylMean, oylFade), oylOnWall);
+        oylGlass = oylPaneOn * (1.0 - oylFade) * oylOnWall;
+        oylFlat = max(oylFlat, oylOnWall);
+        oylRough = mix(oylRough, 0.3, oylOnWall);
+        oylTilt = 0.0;`;
+
+/**
  * Whether a bay has a window at all, as a GLSL expression over `oylCell`,
  * `oylTopShare` (a window's top as a share of its storey: #1581's casement's
  * or, since #1588, a sash's) and `vOylFacade` (`facade.ts` §`facadePartAt`'s
@@ -14629,11 +15153,18 @@ export const FACADE_SHOWN_GLSL =
  *    it (`oylOverhangShadow`, {@link overhangGlsl}); with `overhangs` false,
  *    the band alone, as before.
  *
+ * Since #1661, with `weathering`, each step weathers its own part
+ * ({@link weatheringGlsl}): after the cladding and under the openings, the
+ * photograph's repeat broken, a roof's eaves courses and moss, a face's
+ * splash grime and a plinth's parging ({@link WEATHER_CLADDING_GLSL}); in
+ * the openings, the wall under each sill streaked; in the shade, a flat
+ * roof's wall dripped on from its parapet. Without it, none of it is built.
+ *
  * ⚠️ `vOylTint` is #1549's ({@link withVertexTint}), read here in `main` —
  * after every declaration — so that one window in five is a lit room by
  * where it is on which building, not the same window on every house.
  */
-function facadeFragmentGlsl(overhangs: boolean): string {
+function facadeFragmentGlsl(overhangs: boolean, weathering: boolean): string {
   return /* glsl */ `
   float oylGlass = 0.0;
   float oylFlat = 0.0;
@@ -14745,6 +15276,7 @@ function facadeFragmentGlsl(overhangs: boolean): string {
       oylFlat = 1.0;
       oylRough = 0.85;
     }
+    ${weathering ? WEATHER_CLADDING_GLSL : ''}
     // 2. The openings.
     if (oylTop > 0.0) {
       vec2 oylCell = floor(vOylFacade.xy);
@@ -14756,8 +15288,11 @@ function facadeFragmentGlsl(overhangs: boolean): string {
       float oylShown = ${FACADE_SHOWN_GLSL};
       vec3 oylWall = diffuseColor.rgb;
       float oylLit = step(0.8, oylWindowHash(oylCell + floor(vOylTint.xy * 1000.0)));
+      ${weathering ? 'float oylStreakAt = mix(oylStreakShare, 1.0, step(abs(oylKind - oylClapboard), 0.5));' : ''}
       vec3 oylRoom = mix(vec3(0.012, 0.014, 0.018), vec3(0.09, 0.07, 0.045), oylLit);
-      if (oylSashOn > 0.5) {
+      if (oylFlag(oylFlags, oylGlazedFlag) > 0.5) {
+        ${CURTAIN_WALL_GLSL}
+      } else if (oylSashOn > 0.5) {
         float oylBayW = vOylStyle.z;
         vec2 oylP = vec2((oylAt.x - 0.5) * oylBayW, oylAt.y * oylStoreyM);
         float oylPicture = (1.0 - step(0.5, oylCell.y)) * (1.0 - step(0.5, abs(oylCell.x - vOylStyle.w)));
@@ -14806,6 +15341,7 @@ function facadeFragmentGlsl(overhangs: boolean): string {
         vec3 oylMean = mix(oylWall, mix(vOylTrim, oylRoom, 0.75), oylArea);
         float oylFade = oylFadeOf(max(oylMw.x / oylBayW, oylMw.y / oylStoreyM));
         diffuseColor.rgb = mix(oylDrawn, oylMean, oylFade);
+        ${weathering ? WEATHER_SASH_STREAK_GLSL : ''}
         float oylParts = max(max(max(oylFrameOn, oylSillOn), oylShutterOn), oylSideOn) * (1.0 - oylFade);
         oylGlass = oylPaneOn * (1.0 - oylFade);
         oylFlat = max(oylFlat, oylParts);
@@ -14858,6 +15394,7 @@ function facadeFragmentGlsl(overhangs: boolean): string {
         vec3 oylMean = mix(oylWall, mix(vOylTrim, oylPane, 0.75), oylArea);
         float oylFade = clamp(max(oylW.x, oylW.y) * 8.0 - 0.5, 0.0, 1.0);
         diffuseColor.rgb = mix(oylDrawn, oylMean, oylFade);
+        ${weathering ? WEATHER_CASEMENT_STREAK_GLSL : ''}
         oylGlass = oylPaneShare * (1.0 - oylFade);
         oylFlat = max(oylFlat, max(oylOuter, oylSill) * (1.0 - oylFade));
       }
@@ -14868,6 +15405,7 @@ function facadeFragmentGlsl(overhangs: boolean): string {
       float oylEavesShade = 1.0 - (1.0 - oylAoEaves) * oylUnderEaves;
       ${overhangs ? OVERHANG_SHADE_GLSL : ''}
       diffuseColor.rgb *= oylEavesShade * (1.0 - (1.0 - oylAoBase) * oylAtFoot);
+      ${weathering ? WEATHER_DRIP_GLSL : ''}
     } else if (oylTop < -0.5 && oylTop > -1.5) {
       vec2 oylAt = vOylFacade.xy;
       vec2 oylW = oylFw * 0.5;
@@ -14904,6 +15442,8 @@ function facadeFragmentGlsl(overhangs: boolean): string {
         diffuseColor.rgb = mix(oylRecess, mix(vOylTrim, oylShopPane, oylPane), oylIn);
         oylGlass = oylPane;
       }
+      // #1626: the winter lights' wreath, on the door's own quad.
+      diffuseColor.rgb = oylWreathed(diffuseColor.rgb, (oylAt.x - 0.5) * oylDoorW, oylAt.y * oylDoorH, oylWreath);
     } else if (oylTop < -1.5 && oylTop > -2.5) {
       diffuseColor.rgb = vColor.rgb;
       oylFlat = 1.0;
@@ -15058,6 +15598,48 @@ const ROOF_SNOW_GLSL = (() => {
 })();
 
 /**
+ * A wreath on a mapped building's front door, in metres of the door's face —
+ * #1626: its middle {@link WREATH_UP} above the door's foot, an evergreen ring
+ * between {@link WREATH_RING}'s radii and a bow below it, in
+ * `decorations.ts`' `WREATH_GREEN` and `WREATH_BERRY`.
+ */
+const WREATH_UP = 1.35;
+const WREATH_RING: readonly [number, number] = [0.15, 0.24];
+/** The bow's half-width and half-height, metres. */
+const WREATH_BOW: readonly [number, number] = [0.055, 0.04];
+
+/**
+ * The wreath, in GLSL — #1626: `colour` with the wreath drawn over it where
+ * `on` is 1, at `x` across from the door's middle and `y` up from its foot,
+ * metres. Squared radii, so it needs no root. ⚠️ **Steady**: no time, no
+ * clock and no `sin` — it reads nothing but where it is and `on`, which the
+ * view writes from the ride's holiday (`setSeason`). 0 calls and 0 triangles:
+ * it is drawn on the door's own quad. `mapped-building-belt.test.ts`
+ * §"#1626" evaluates it from the program three is handed.
+ */
+const WREATH_GLSL = (() => {
+  const green = new Color(WREATH_GREEN);
+  const berry = new Color(WREATH_BERRY);
+  const vec = (c: Color): string => `vec3(${c.r.toFixed(6)}, ${c.g.toFixed(6)}, ${c.b.toFixed(6)})`;
+  const [inner, outer] = WREATH_RING;
+  const [bowX, bowY] = WREATH_BOW;
+  const edge = 0.01;
+  return /* glsl */ `
+  vec3 oylWreathed(vec3 colour, float x, float y, float on) {
+    float up = y - ${glslFloat(WREATH_UP)};
+    float r2 = x * x + up * up;
+    float ring = smoothstep(${glslFloat((inner - edge) ** 2)}, ${glslFloat((inner + edge) ** 2)}, r2)
+      * (1.0 - smoothstep(${glslFloat((outer - edge) ** 2)}, ${glslFloat((outer + edge) ** 2)}, r2));
+    float below = up + ${glslFloat(outer)};
+    float bow = (1.0 - smoothstep(${glslFloat(bowX - edge)}, ${glslFloat(bowX)}, max(x, -x)))
+      * (1.0 - smoothstep(${glslFloat(bowY - edge)}, ${glslFloat(bowY)}, max(below, -below)));
+    vec3 drawn = mix(mix(colour, ${vec(green)}, ring), ${vec(berry)}, bow);
+    return mix(colour, drawn, on);
+  }
+`;
+})();
+
+/**
  * Teaches a mapped building's material #1581's facade: the windows of every
  * storey, the front door in its surround, and the painted trim — from vertex
  * attributes, `oylFacade` (`footprint-buildings.ts` §`FACADE_FLOATS`),
@@ -15067,7 +15649,7 @@ const ROOF_SNOW_GLSL = (() => {
  * whose varying it reads. Throws, as the tint does, if three's program no
  * longer holds an include it is spliced at. Idempotent.
  */
-function withFacade<M extends Material>(material: M): M {
+function withFacade<M extends Material>(material: M, surface: StructureSurface): M {
   if (FACADE_TAUGHT.has(material)) return material;
   FACADE_TAUGHT.add(material);
   defineFacadeLevers(material);
@@ -15080,30 +15662,34 @@ function withFacade<M extends Material>(material: M): M {
     shader.uniforms.oylSunWorld = FACADE_SUN.oylSunWorld;
     // #1623: the snow a roof carries, from the route's season.
     shader.uniforms.oylRoofSnow = SEASON.oylRoofSnow;
+    // #1661: the photograph laid per building, and the world for the weathering's noise.
+    const weathered = weatheringBuiltIn(material);
+    // #1626: the winter lights' wreath on the front door.
+    shader.uniforms.oylWreath = SEASON.oylWreath;
     shader.vertexShader = replacedOrThrown(
       replacedOrThrown(
         shader.vertexShader,
         '#include <common>',
-        '#include <common>\nattribute vec4 oylFacade;\nattribute vec4 oylStyle;\nattribute vec3 oylTrim;\nvarying vec4 vOylFacade;\nvarying vec4 vOylStyle;\nvarying vec3 vOylTrim;',
+        `#include <common>\nattribute vec4 oylFacade;\nattribute vec4 oylStyle;\nattribute vec3 oylTrim;\nvarying vec4 vOylFacade;\nvarying vec4 vOylStyle;\nvarying vec3 vOylTrim;${weathered ? `\nvarying vec3 vOylWorld;\n${WEATHER_PHOTO_GLSL}` : ''}`,
         'vertex',
         spliced,
       ),
       '#include <begin_vertex>',
-      '#include <begin_vertex>\nvOylFacade = oylFacade;\nvOylStyle = oylStyle;\nvOylTrim = oylTrim;',
+      `#include <begin_vertex>\nvOylFacade = oylFacade;\nvOylStyle = oylStyle;\nvOylTrim = oylTrim;${weathered ? WEATHER_VERTEX_GLSL : ''}`,
       'vertex',
       spliced,
     );
     let fragment = replacedOrThrown(
       shader.fragmentShader,
       '#include <common>',
-      `#include <common>\n${facadeCommonGlsl(revealsBuiltIn(material), overhangsBuiltIn(material))}\nuniform float oylRoofSnow;\n${ROOF_SNOW_GLSL}`,
+      `#include <common>\n${facadeCommonGlsl(revealsBuiltIn(material), overhangsBuiltIn(material), weathered, surface)}\nuniform float oylRoofSnow;\n${ROOF_SNOW_GLSL}\nuniform float oylWreath;\n${WREATH_GLSL}`,
       'fragment',
       spliced,
     );
     fragment = replacedOrThrown(
       fragment,
       '#include <color_fragment>',
-      `#include <color_fragment>\n${facadeFragmentGlsl(overhangsBuiltIn(material))}`,
+      `#include <color_fragment>\n${facadeFragmentGlsl(overhangsBuiltIn(material), weathered)}`,
       'fragment',
       spliced,
     );
@@ -15130,7 +15716,8 @@ function withFacade<M extends Material>(material: M): M {
       spliced,
     );
   };
-  material.customProgramCacheKey = () => `${earlierKey}|oyl-facade`;
+  // #1661: the weathering bakes in the surface's streak share and parging.
+  material.customProgramCacheKey = () => `${earlierKey}|oyl-facade-${surface}`;
   return material;
 }
 
@@ -15157,7 +15744,10 @@ function mappedBuildingMaterial(
     }),
   );
   return withAtmosphere(
-    withFacade(withVertexTint(maps === undefined ? material : withTextureLodBias(material))),
+    withFacade(
+      withVertexTint(maps === undefined ? material : withTextureLodBias(material)),
+      surface,
+    ),
   );
 }
 
@@ -16926,7 +17516,7 @@ export function sideRoadMeshOf(
 /**
  * Turns a view's street furniture off, or on again — #1536. The browser
  * gate's control: with it off, the frame must change by the pixels the
- * furniture covered, and lose one draw call a kind.
+ * furniture covered, and lose one draw call a surface (#1689).
  *
  * @test-facing the browser gate's control switch, read by `game-harness.ts`;
  * the product always draws it.
@@ -16946,10 +17536,7 @@ export function furnitureShownOf(view: GameView, on: boolean): void {
 export function furnitureCountsOf(view: GameView): Readonly<Record<FurnitureKind, number>> {
   const belt = view instanceof ThreeGameView ? view.furnitureBelt : undefined;
   const counts = {} as Record<FurnitureKind, number>;
-  for (const kind of FURNITURE_KINDS) {
-    const mesh = belt?.meshOf(kind);
-    counts[kind] = mesh?.visible === true ? mesh.count : 0;
-  }
+  for (const kind of FURNITURE_KINDS) counts[kind] = belt?.drawnOf(kind) ?? 0;
   return counts;
 }
 
@@ -17582,6 +18169,7 @@ class ThreeGameView implements GameView {
       FOLIAGE.oylWindTime.value = frame.water.seconds;
       // #1623: this view's season, for the reason the breeze's clock is written here.
       SEASON.oylAutumn.value = this.#season.nature.autumn;
+      SEASON.oylWreath.value = wreathOf(this.#season);
       FOLIAGE.oylSunToward.value
         .set(frame.world.sun.x, frame.world.sun.y, frame.world.sun.z)
         .normalize();
@@ -17954,6 +18542,8 @@ class ThreeGameView implements GameView {
   setSeason(season: Season): void {
     this.#season = season;
     SEASON.oylAutumn.value = season.nature.autumn;
+    // #1626: the mapped doors' wreath, while the winter lights are on.
+    SEASON.oylWreath.value = wreathOf(season);
   }
 
   /** @see seasonOf */

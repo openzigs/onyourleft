@@ -21,6 +21,7 @@ import {
   FIXTURE_TILE,
   HOSTILE_FIXTURES,
   lakeTile,
+  placesTile,
   RESIDENTIAL_FOOTPRINTS,
   residentialBlockTile,
   sidewalkTile,
@@ -418,7 +419,7 @@ describe('packing', () => {
       line,
     }));
     const back = await unpackCorridorFeatures(
-      await packCorridorFeatures({ landUse: [], buildings: [], paths: [], streets }),
+      await packCorridorFeatures({ landUse: [], buildings: [], paths: [], streets, places: [] }),
     );
     expect(back.streets.map((street) => street.grade)).toStrictEqual([
       'ground',
@@ -440,6 +441,7 @@ describe('packing', () => {
           line: Float32Array.from([0, 0, 0, 100]),
         },
       ],
+      places: [],
     };
     const first = new Uint8Array(await (await packCorridorFeatures(features)).arrayBuffer());
     const second = new Uint8Array(await (await packCorridorFeatures(features)).arrayBuffer());
@@ -485,6 +487,33 @@ describe('packing', () => {
     const bytes = async (features: typeof inOrder.features) =>
       new Uint8Array(await (await packCorridorFeatures(features)).arrayBuffer());
     expect(await bytes(reversed.features)).toStrictEqual(await bytes(inOrder.features));
+  });
+
+  it('keeps each place’s kind, detail and rank, and its point to the centimetre (#1632)', async () => {
+    const plan = planCorridor(lineNorth(1_000), []) as CorridorPlan;
+    const outcome = await read(plan, memoryArchive(() => placesTile()).archive);
+    if (outcome.kind !== 'read') throw new Error(outcome.kind);
+    expect(outcome.features.places.length).toBeGreaterThan(0);
+    const back = await unpackCorridorFeatures(await packCorridorFeatures(outcome.features));
+    expect(back.places.map((p) => [p.kind, p.kindDetail, p.populationRank])).toStrictEqual(
+      outcome.features.places.map((p) => [p.kind, p.kindDetail, p.populationRank]),
+    );
+    back.places.forEach((place, index) => {
+      const before = outcome.features.places[index];
+      expect(Math.abs(place.x - (before?.x ?? Number.NaN))).toBeLessThanOrEqual(0.005 + 1e-3);
+      expect(Math.abs(place.z - (before?.z ?? Number.NaN))).toBeLessThanOrEqual(0.005 + 1e-3);
+    });
+  });
+
+  it('refuses a blob of the reader before places (#1632)', async () => {
+    const json = new Blob([
+      JSON.stringify({ v: 2, landUse: [], buildings: [], paths: [], streets: [] }),
+    ])
+      .stream()
+      .pipeThrough(new CompressionStream('gzip'));
+    await expect(
+      unpackCorridorFeatures(new Blob([await new Response(json).arrayBuffer()])),
+    ).rejects.toThrow(/not a version/);
   });
 
   it('refuses a blob it did not write', async () => {

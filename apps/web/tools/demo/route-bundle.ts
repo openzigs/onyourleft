@@ -23,8 +23,9 @@
  *   is `corridor.ts` §`planCorridor` of the route's line, so a reader recomputes
  *   it;
  * - `features`: `corridor.ts` §`packedCorridorFeatures` — the very value the
- *   rider's store gzips (`v: 2`; every coordinate an integer number of
- *   centimetres in the corridor frame, whose origin is the route's first
+ *   rider's store gzips (`v: 3` since #1632 added the place points; every
+ *   coordinate an integer number of centimetres in the corridor frame, whose
+ *   origin is the route's first
  *   point, `x` metres WEST and `z` metres north). No OSM id, no name, no
  *   address: the decoder never keeps them (ADR 0054 D-2.2).
  *

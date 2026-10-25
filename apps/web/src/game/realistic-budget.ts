@@ -451,6 +451,31 @@ export const REALISTIC_TREE_LEVELS: TreeLevels = {
 export const REALISTIC_WOODED_DRAW_CALLS = 35;
 
 /**
+ * The most draw calls the owner's page may make on its village frame —
+ * `route=village` held at `synthetic-road.ts` §`VILLAGE_HOLD_METRES`, the top
+ * rung, on Halloween with #1624's probe on every anchor in reach: **57**.
+ *
+ * ⚠️ **A freeze, not a budget** — owner ruling on #1689, 2026-10-25. That
+ * frame made 58 calls on `main` with no decoration, against the page's
+ * {@link REALISTIC_WOODED_DRAW_CALLS} of 35, and no gate saw it: every village
+ * feature since #1534 had added calls there. The ruling froze it at its count
+ * plus one for the decoration belt (59), and has each merge lower it in the
+ * same pull request: #1689's own merged the street furniture's lamp posts,
+ * bollards and bins, three materials made from the same numbers, into one
+ * mesh, and the bench into another (`three-renderer.ts` §`FurnitureBelt`),
+ * 58 to 56 calls with the same triangles, so 57. From here a feature that
+ * adds a village call removes one, or asks the owner.
+ *
+ * ⚠️ **Not the village's real ceiling.** The tablet pair (#733 / #1537)
+ * decides that when the device checks resume; the call count does not depend
+ * on the GPU, so the pinned Chromium counts what the tablet would.
+ *
+ * @test-facing held by `realistic-town.browser.spec.ts` §"#1689", which counts the
+ * frame at the WebGL entry points
+ */
+export const REALISTIC_VILLAGE_DRAW_CALLS = 57;
+
+/**
  * The trees as they were drawn before #617 — the nearest six as full meshes,
  * a hard swap to the impostor, no middle level and no band — ranked together,
  * as {@link REALISTIC_TREE_LEVELS} ranks them.
@@ -762,6 +787,10 @@ export const REALISTIC_FRAME_TRIANGLES = 300_000;
  * (2 264), and only what is within `streets.ts` §`FURNITURE_DRAW_METRES` of
  * the camera is drawn at all.
  *
+ * Since #1637 a city centre's street is laid in pieces instead
+ * (`streets.ts` §`CITY_PAVEMENT_TRIANGLES_PER_PIECE`, 584 each), six at most
+ * in a frame: 3 504, inside the two rows above. Not raised.
+ *
  * ⚠️ **Outside {@link REALISTIC_FRAME_TRIANGLES}, by that constant's own
  * rule**: a street is the SAME triangles in both worlds, as the corridor, the
  * terrain and the water are, so it does not change with the world. It adds
@@ -812,6 +841,21 @@ export const REALISTIC_STREET_TRIANGLES = 25_024;
  * owner's page against it.
  */
 export const REALISTIC_DECORATION_TRIANGLES = 12_000;
+
+/**
+ * The winter lights' share of {@link REALISTIC_DECORATION_TRIANGLES} — #1626:
+ * **8 000**. Every lamp post wound (96 triangles), every eave strung (72) and
+ * every house and shop door wreathed (92) in TWO villages in reach — the most
+ * the belt draws at once — measured on the fixtures at 3 844 a village at
+ * most (7 264 for the corner fixture's pair), rounded up. The rest, **4 000**,
+ * is headroom left for #1627's village-square tree, which shows in the same
+ * holiday and the same call.
+ *
+ * @test-facing held by `decoration-belt.test.ts` §"#1626", which sums the
+ * winter set at its heaviest on the densest fixture against it; the belt
+ * spends {@link REALISTIC_DECORATION_TRIANGLES} whole
+ */
+export const REALISTIC_WINTER_LIGHTS_TRIANGLES = 8_000;
 
 /**
  * The most triangles the people may add to a realistic frame — #1541:

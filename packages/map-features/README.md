@@ -11,8 +11,8 @@ map data and names no rendering library.** The archive read is #1539's one modul
 
 | Module | What it is |
 |---|---|
-| `src/decode.ts` | `decodeTile`: the four layers ADR 0054 D-2.2 reads, and of each only `kind`, `kind_detail`, `height`, `min_height` and the geometry. A refusal, never a throw |
-| `src/limits.ts` | The five bounds, with what each sits above on the published archive |
+| `src/decode.ts` | `decodeTile`: the four layers ADR 0054 D-2.2 reads, and of each only `kind`, `kind_detail`, `height`, `min_height` and the geometry; and since #1632 ([ADR 0055](../../docs/adr/0055-place-kinds-and-ranks-from-the-corridor-never-a-name.md)) `places`, of which only `kind`, `kind_detail`, `population_rank` and the point, never a name. A refusal, never a throw |
+| `src/limits.ts` | The five bounds, with what each sits above on the published archive, and the count of places kept a tile (#1632), at which the decoder stops |
 | `src/schema.ts` | What is read: the layers, the keys, the geometry types each layer carries, the footway set (#1551) |
 | `src/protobuf.ts` | A bounded protobuf reader: every read is inside its message or a refusal |
 | `src/refusal.ts` | `describeRefusal`: the layer and the limit, never a coordinate or the tile's `x`/`y` (ADR 0004 D) |

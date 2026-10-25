@@ -43,6 +43,7 @@ import {
   type DecodeRefusal,
   type LandUseFeature,
   type PathFeature,
+  type PlaceFeature,
   type StreetFeature,
   type StreetGrade,
   type TileId,
@@ -74,9 +75,13 @@ export const READ_TIMEOUT_MS = 120_000;
  * Bumped when the decode, or the fields this keeps, change — so a record kept
  * by an older reader is read again rather than trusted (`records.ts`
  * §`WorldCorridorRecord.readerVersion`). **2** since #1565, which keeps the
- * streets a version-1 record never decoded.
+ * streets a version-1 record never decoded; **3** since #1632 (ADR 0055
+ * D-6.2), which keeps the place points a version-2 record never decoded. The
+ * port trusts a record only at exactly this version, so a version-2 row is
+ * read again here, and a version-3 row met by version-2 code is read again
+ * there, never decoded as its own.
  */
-export const CORRIDOR_READER_VERSION = 2;
+export const CORRIDOR_READER_VERSION = 3;
 
 /** What the chooser says about the corridor, and what a ride starts from. */
 export type CorridorState =
@@ -107,6 +112,14 @@ export interface WorldCorridor {
   readonly paths: readonly PathFeature[];
   /** #1565: the streets the cross streets are found from (`cross-streets.ts`). */
   readonly streets: readonly StreetFeature[];
+  /**
+   * #1632: the place points, read only by `urban-class.ts` as a prior
+   * (ADR 0055 D-5). Never shown, and never named: a point holds a kind, a
+   * detail and a rank. Optional so that a corridor built by hand — a test's,
+   * a harness's — needs no edit: absent is none, as an empty list is. Every
+   * corridor the product builds ({@link worldCorridorOf}) carries it.
+   */
+  readonly places?: readonly PlaceFeature[];
 }
 
 /** One tile of a corridor, and why it holds what it holds. */
@@ -323,6 +336,7 @@ export interface CorridorFeatures {
   readonly buildings: readonly BuildingFeature[];
   readonly paths: readonly PathFeature[];
   readonly streets: readonly StreetFeature[];
+  readonly places: readonly PlaceFeature[];
 }
 
 /** What {@link readCorridorTiles} came to. */
@@ -475,12 +489,14 @@ export async function readCorridorTiles(options: CorridorReadOptions): Promise<C
     const buildings: BuildingFeature[] = [];
     const paths: PathFeature[] = [];
     const streets: StreetFeature[] = [];
+    const places: PlaceFeature[] = [];
     for (const decoded of decodedTiles) {
       if (decoded === undefined) continue;
       for (const feature of decoded.landUse) landUse.push(feature);
       for (const feature of decoded.buildings) buildings.push(feature);
       for (const feature of decoded.paths) paths.push(feature);
       for (const feature of decoded.streets) streets.push(feature);
+      for (const feature of decoded.places) places.push(feature);
     }
     const tiles = plan.tiles.map((tile) => {
       const state = states.get(key(tile));
@@ -490,7 +506,7 @@ export async function readCorridorTiles(options: CorridorReadOptions): Promise<C
       kind: 'read',
       identity: opening.identity,
       tiles,
-      features: { landUse, buildings, paths, streets },
+      features: { landUse, buildings, paths, streets, places },
     };
   } finally {
     whole.done();
@@ -502,9 +518,11 @@ export async function readCorridorTiles(options: CorridorReadOptions): Promise<C
 /** Centimetres: far finer than a drawn edge, and half the bytes of float32 text. */
 const PACK_SCALE = 100;
 
+/** The packed format's version: 2 since #1565 added the streets, 3 since #1632 added the places. */
+const PACKED_VERSION = 3;
+
 interface PackedFeatures {
-  /** 2 since #1565, which added {@link streets}. */
-  readonly v: 2;
+  readonly v: typeof PACKED_VERSION;
   readonly landUse: readonly { layer: 'landuse' | 'water'; kind: string; rings: number[][] }[];
   readonly buildings: readonly {
     kind: 'building' | 'building_part';
@@ -515,6 +533,14 @@ interface PackedFeatures {
   readonly paths: readonly { kind: string; detail: string; line: number[] }[];
   /** `g` is the street's grade (#1565); a record without one is read as at grade. */
   readonly streets: readonly { kind: string; detail: string; g?: StreetGrade; line: number[] }[];
+  /** #1632: a place's kind, detail, rank and point (`x`, `z` in centimetres). */
+  readonly places: readonly {
+    kind: PlaceFeature['kind'];
+    detail: PlaceFeature['kindDetail'];
+    rank: number;
+    x: number;
+    z: number;
+  }[];
 }
 
 const toInts = (values: Float32Array): number[] =>
@@ -581,7 +607,7 @@ export type PackedCorridorFeatures = PackedFeatures;
 /** The features in their packed shape, before compression — the store's and the demo's (#1651). */
 export function packedCorridorFeatures(features: CorridorFeatures): PackedCorridorFeatures {
   return {
-    v: 2,
+    v: PACKED_VERSION,
     landUse: features.landUse.map((f) => ({
       layer: f.layer,
       kind: f.kind,
@@ -604,6 +630,13 @@ export function packedCorridorFeatures(features: CorridorFeatures): PackedCorrid
       g: f.grade,
       line: toInts(f.line),
     })),
+    places: features.places.map((f) => ({
+      kind: f.kind,
+      detail: f.kindDetail,
+      rank: f.populationRank,
+      x: Math.round(f.x * PACK_SCALE),
+      z: Math.round(f.z * PACK_SCALE),
+    })),
   };
 }
 
@@ -623,7 +656,9 @@ export async function unpackCorridorFeatures(blob: Blob): Promise<CorridorFeatur
 
 /** The features a packed value holds. Throws for one that is not a version this reads. */
 export function corridorFeaturesOfPacked(packed: PackedCorridorFeatures): CorridorFeatures {
-  if (packed.v !== 2) throw new Error('worldCorridors.features: not a version this reads');
+  if (packed.v !== PACKED_VERSION) {
+    throw new Error('worldCorridors.features: not a version this reads');
+  }
   return {
     landUse: packed.landUse.map((f) => ({
       layer: f.layer,
@@ -646,6 +681,13 @@ export function corridorFeaturesOfPacked(packed: PackedCorridorFeatures): Corrid
       kindDetail: f.detail,
       grade: f.g === 'bridge' || f.g === 'tunnel' ? f.g : 'ground',
       line: fromInts(f.line),
+    })),
+    places: packed.places.map((f) => ({
+      kind: f.kind,
+      kindDetail: f.detail,
+      populationRank: f.rank,
+      x: f.x / PACK_SCALE,
+      z: f.z / PACK_SCALE,
     })),
   };
 }
@@ -697,5 +739,6 @@ export function worldCorridorOf(
     buildings: features.buildings,
     paths: features.paths,
     streets: features.streets,
+    places: features.places,
   };
 }

@@ -782,7 +782,11 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         commercial land) along the route's road where the land
                         is mapped built-up and no mapped footprint stands —
                         every corner on built-up land, never on wood, water or
-                        park, nothing where no tile was read
+                        park, nothing where no tile was read. Since #1637 none
+                        where the urban class is `city-centre`: there
+                        `footprint-buildings.ts` §`terracePlans` plans 3–4
+                        storey terraced shops at the press, edge to edge,
+                        drawn with the mapped buildings
     src/game/land-class.ts
                         what the ground is where map data was read (#1546) — a
                         sparse 5 m mask built ONCE at the press from the ride's
@@ -828,6 +832,13 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         (`porch.ts`, shared with a lot's farmhouse), kept
                         off the road's clearance, shortened or dropped, its
                         triangles written when first read, not at the press;
+                        since #1635 a terrace in a `town` or `city-centre`:
+                        party walls (`partyWallsOf`, an edge grid, never all
+                        pairs) drawn only above a lower neighbour, plain, and
+                        a flat roof under a cornice (`town=terrace`);
+                        since #1660 an L, T, U or Z pitched over its 2–3
+                        rectangles (`rectilinear-roofs.ts`), flat where a
+                        split would pass the caps (`-split-roofs`);
                         ≤ 640 triangles
                         by role, built ONCE at ride start by `GameView`, and
                         drawn by #1549 (`mapped-buildings.ts`). Since #1550 the
@@ -876,7 +887,14 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         Since #1658 a sunlit wall under eaves has the sun's own
                         shadow from the eaves' edge (`eavesShadeAt`, the
                         shader's `oylOverhangShadow`); `-overhang-shadows`
-                        builds it out
+                        builds it out. Since #1661 every mapped face is
+                        weathered (`WEATHERING`, `weatheringAt`, the shader's
+                        `oylWeather*`; the photograph laid per building by
+                        `photographShiftOf`); `-weathering` builds it out.
+                        Since #1636 a `city-centre` front wall
+                        has a shop front whatever its use, and a tower of
+                        `GLAZED_MIN_STOREYS` a curtain wall (`STYLE_GLAZED`,
+                        `curtainWallPartAt`); the realistic page's `town=city`
     src/game/building-paint.ts
                         what a realistic building is painted (#1581): each wall
                         and roof surface's multipliers, the trim's and the
@@ -921,7 +939,20 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         §`DecorationBelt` in ONE call for every village within
                         `FURNITURE_DRAW_METRES`, glow and all
                         (`withDecorationGlow`, no lamp, no uniform), inside
-                        `REALISTIC_DECORATION_TRIANGLES`
+                        `REALISTIC_DECORATION_TRIANGLES`. Since #1637 a
+                        `city-centre` stretch (`MappedTown.urban`) has a
+                        city's street, which no village is: 3.5 m pavements
+                        both sides in 96 m pieces, lamps every 16 m, a bench
+                        every 48 m, bollards only at mapped side roads'
+                        mouths — inside `FURNITURE_CAPACITY` and
+                        `REALISTIC_STREET_TRIANGLES`, neither raised. Since
+                        #1625 Halloween's pumpkins stand on a HOUSE door's step
+                        (`buildings.ts` §`frontDoorOf`, a doorstep anchor's
+                        `step`), as lathe shapes (`DecorationShape`). Since
+                        #1626 the winter lights wind lamp posts, string eaves
+                        and wreathe village doors in the belt; a MAPPED door's
+                        wreath is the facade's `WREATH_GLSL` (`oylWreath`, 0
+                        calls), its gate control the `facade-wreath` lever
     src/game/footways.ts
                         footways from the corridor's map data (#1551) —
                         `pavementSides`, the side of the drawn road's NORMAL a
