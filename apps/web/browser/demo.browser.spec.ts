@@ -28,6 +28,12 @@
  *   installed before the page's own script, not only the last: on SwiftShader
  *   the quality ladder can step a ride out of the realistic world (#1683), and
  *   a reading of the last snapshot alone would miss what came before.
+ * - **The frame.** The same setter reads the canvas back with `readPixels`
+ *   when asked. `stage.ts` publishes right after `view.render`, in the same
+ *   task, so the read sees the frame just drawn: the drawing buffer is not
+ *   preserved, and a read from anywhere else sees whatever the compositor left,
+ *   which on a frame the pacer did not draw is a cleared buffer (#1648's first
+ *   CI run, where a poll from outside the frame never saw the group ride).
  *
  * ## Each recorder has its control
  *
@@ -38,6 +44,12 @@
  * and one `localStorage` key — each makes {@link findings} non-empty, which is
  * what fails the preset cases. And every preset case asserts the request
  * recorder saw the page and its script.
+ *
+ * ⚠️ **A control's page is the demo's own `index.html` with its module script
+ * taken out**, under the same recorders: what a control proves is that the
+ * recorder sees, and the demo's code adds nothing to that but a realistic-world
+ * load, which on SwiftShader holds a CPU for a minute and is paid by the
+ * preset cases already.
  *
  * ## What it does NOT prove
  *
@@ -70,6 +82,13 @@ const POLICY = /<meta\s+http-equiv="Content-Security-Policy"[^>]*\/>/;
  * load holds the CPU: `demo-world.browser.spec.ts` gives the same load 150 s.
  */
 const FRAMES_BUDGET_MS = 90_000;
+/**
+ * A small window. SwiftShader fills pixels on the CPU, so a frame's cost goes
+ * with the canvas's area, and nothing this gate claims depends on the size:
+ * at Playwright's 1280 × 720 the demo drew 60 frames in 20 to 40 s on a busy
+ * machine, beside two other workers.
+ */
+const VIEWPORT = { width: 480, height: 360 };
 
 interface Snapshot {
   readonly state: string;
@@ -83,6 +102,8 @@ interface Gate {
   readonly calls: string[];
   /** Every `__oylDemo` snapshot, in order. */
   readonly snapshots: Snapshot[];
+  /** The most distinct colours one drawn frame has held since {@link probeFrames}. */
+  readonly colours: number;
 }
 
 interface Watched {
@@ -107,7 +128,7 @@ interface Stored {
 
 /** The init script: the Bluetooth recorder and the snapshot recorder. Runs before the page's script. */
 function installRecorders(): void {
-  const gate = { calls: [] as string[], snapshots: [] as unknown[] };
+  const gate = { calls: [] as string[], snapshots: [] as Snapshot[], colours: 0, probe: false };
   Object.defineProperty(window, '__oylGate', { value: gate });
   const refuse = (name: string): never => {
     gate.calls.push(name);
@@ -133,12 +154,36 @@ function installRecorders(): void {
       value: () => refuse(`characteristic.${name}`),
     });
   }
-  let last: unknown;
+  /** How many distinct colours the canvas's drawing buffer holds now. */
+  const colours = (): number => {
+    const canvas = document.querySelector('canvas');
+    const gl = canvas?.getContext('webgl2') ?? canvas?.getContext('webgl');
+    if (canvas === null || canvas === undefined || gl === null || gl === undefined) return 0;
+    const pixels = new Uint8Array(canvas.width * canvas.height * 4);
+    gl.readPixels(0, 0, canvas.width, canvas.height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+    const seen = new Set<number>();
+    for (let at = 0; at < pixels.length; at += 4 * 97) {
+      seen.add(
+        (pixels[at] ?? 0) * 0x1000000 +
+          (pixels[at + 1] ?? 0) * 0x10000 +
+          (pixels[at + 2] ?? 0) * 0x100 +
+          (pixels[at + 3] ?? 0),
+      );
+    }
+    return seen.size;
+  };
+  let last: Snapshot | undefined;
   Object.defineProperty(window, '__oylDemo', {
     configurable: true,
     get: () => last,
     set: (snapshot: Snapshot) => {
+      // A frame was drawn just now, in this task, when the count moved.
+      const drawn = snapshot.framesDrawn > (last?.framesDrawn ?? 0);
       last = snapshot;
+      if (gate.probe && drawn) {
+        gate.colours = Math.max(gate.colours, colours());
+        if (gate.colours > 1) gate.probe = false;
+      }
       gate.snapshots.push({
         state: snapshot.state,
         world: snapshot.world,
@@ -183,7 +228,11 @@ async function watch(
 function gate(page: Page): Promise<Gate> {
   return page.evaluate(() => {
     const recorded = (window as unknown as { __oylGate: Gate }).__oylGate;
-    return { calls: [...recorded.calls], snapshots: [...recorded.snapshots] };
+    return {
+      calls: [...recorded.calls],
+      snapshots: [...recorded.snapshots],
+      colours: recorded.colours,
+    };
   });
 }
 
@@ -234,36 +283,24 @@ async function findings(context: BrowserContext, page: Page, watched: Watched): 
   return found;
 }
 
-/** How many distinct colours the canvas's drawing buffer holds, read inside a frame. */
-function coloursInAFrame(page: Page): Promise<number> {
-  return page.evaluate(
-    () =>
-      new Promise<number>((resolve) => {
-        // A frame callback queued now runs after the demo's own in the next
-        // frame, before the buffer is presented and cleared
-        // (`preserveDrawingBuffer` is false), so it reads what was drawn.
-        requestAnimationFrame(() => {
-          const canvas = document.querySelector('canvas');
-          const gl = canvas?.getContext('webgl2') ?? canvas?.getContext('webgl');
-          if (canvas === null || canvas === undefined || gl === null || gl === undefined) {
-            resolve(0);
-            return;
-          }
-          const pixels = new Uint8Array(canvas.width * canvas.height * 4);
-          gl.readPixels(0, 0, canvas.width, canvas.height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
-          const seen = new Set<number>();
-          for (let at = 0; at < pixels.length; at += 4 * 97) {
-            seen.add(
-              (pixels[at] ?? 0) * 0x1000000 +
-                (pixels[at + 1] ?? 0) * 0x10000 +
-                (pixels[at + 2] ?? 0) * 0x100 +
-                (pixels[at + 3] ?? 0),
-            );
-          }
-          resolve(seen.size);
-        });
-      }),
-  );
+/** Ask the snapshot setter to read back each frame drawn from now until one holds two colours. */
+function probeFrames(page: Page): Promise<void> {
+  return page.evaluate(() => {
+    (window as unknown as { __oylGate: { probe: boolean } }).__oylGate.probe = true;
+  });
+}
+
+/** The demo's own page with its module script taken out: a control's page, which runs no demo. */
+function withoutTheDemo(html: string): string {
+  const without = html.replace(/<script type="module"[^>]*><\/script>/, '');
+  expect(without).not.toBe(html);
+  return without;
+}
+
+/** Load a control's page, which publishes no snapshot. */
+async function openControl(page: Page): Promise<void> {
+  await page.goto(`${DEMO_ORIGIN}/?preset=climb`);
+  expect(await page.evaluate(() => typeof window.__oylDemo)).toBe('undefined');
 }
 
 async function open(page: Page, preset: string): Promise<void> {
@@ -273,19 +310,36 @@ async function open(page: Page, preset: string): Promise<void> {
 
 /** Ride `preset` for at least five seconds, and hold that it played. */
 async function ridesFiveSeconds(page: Page, preset: string): Promise<void> {
+  const started = performance.now();
+  // Printed, never asserted (a timing assertion on a shared runner is a
+  // flake): how long each phase took, for the budget arithmetic.
+  const phase = (name: string): void =>
+    console.info(
+      `demo ${preset}: ${name} at ${((performance.now() - started) / 1000).toFixed(1)} s`,
+    );
   await open(page, preset);
+  phase('first snapshot');
   await page.waitForTimeout(5_000);
-  await expect.poll(async () => (await last(page))?.distance).toBeGreaterThan(0);
+  await expect
+    .poll(async () => (await last(page))?.distance, { timeout: FRAMES_BUDGET_MS })
+    .toBeGreaterThan(0);
   await expect
     .poll(async () => (await last(page))?.framesDrawn, { timeout: FRAMES_BUDGET_MS })
     .toBeGreaterThanOrEqual(60);
-  await expect.poll(() => coloursInAFrame(page), { timeout: FRAMES_BUDGET_MS }).toBeGreaterThan(1);
+  phase('60 frames');
+  await probeFrames(page);
+  await expect
+    .poll(async () => (await gate(page)).colours, { timeout: FRAMES_BUDGET_MS })
+    .toBeGreaterThan(1);
+  phase('a frame read back');
   const snapshots = (await gate(page)).snapshots;
   expect(snapshots.every((each) => each.state === 'playing')).toBe(true);
   expect(snapshots.at(-1)?.distance ?? 0).toBeGreaterThan(0);
 }
 
 test.describe('the demo, built and served — #1648', () => {
+  test.use({ viewport: VIEWPORT });
+
   for (const preset of PRESETS) {
     test(`${preset}: plays, and asks nothing of the network, Bluetooth or storage`, async ({
       context,
@@ -354,13 +408,12 @@ test.describe('the demo, built and served — #1648', () => {
       context,
       page,
     }) => {
-      test.setTimeout(2 * FRAMES_BUDGET_MS);
       const watched = await watch(context, page, (html) => {
-        const without = html.replace(POLICY, '');
-        expect(without).not.toBe(html);
+        const without = withoutTheDemo(html).replace(POLICY, '');
+        expect(without).not.toContain('Content-Security-Policy');
         return without;
       });
-      await open(page, 'climb');
+      await openControl(page);
       expect(await findings(context, page, watched)).toEqual([]);
       await page.evaluate(() => fetch('https://example.org/').catch(() => undefined));
       expect(await findings(context, page, watched)).toContain(
@@ -369,9 +422,8 @@ test.describe('the demo, built and served — #1648', () => {
     });
 
     test('a fetch to a path the build does not have is found', async ({ context, page }) => {
-      test.setTimeout(2 * FRAMES_BUDGET_MS);
-      const watched = await watch(context, page);
-      await open(page, 'climb');
+      const watched = await watch(context, page, withoutTheDemo);
+      await openControl(page);
       await page.evaluate(() => fetch('/not-in-the-build.js').catch(() => undefined));
       expect(await findings(context, page, watched)).toContain(
         'request for a path not in demo/dist: /not-in-the-build.js',
@@ -379,9 +431,8 @@ test.describe('the demo, built and served — #1648', () => {
     });
 
     test('a requestDevice and a writeValue are found', async ({ context, page }) => {
-      test.setTimeout(2 * FRAMES_BUDGET_MS);
-      const watched = await watch(context, page);
-      await open(page, 'climb');
+      const watched = await watch(context, page, withoutTheDemo);
+      await openControl(page);
       const refused = await page.evaluate(() => {
         const outcomes: string[] = [];
         const scope = window as unknown as {
@@ -418,9 +469,8 @@ test.describe('the demo, built and served — #1648', () => {
     });
 
     test('one localStorage key is found', async ({ context, page }) => {
-      test.setTimeout(2 * FRAMES_BUDGET_MS);
-      const watched = await watch(context, page);
-      await open(page, 'climb');
+      const watched = await watch(context, page, withoutTheDemo);
+      await openControl(page);
       await page.evaluate(() => localStorage.setItem('oyl-demo-gate-control', '1'));
       expect(await findings(context, page, watched)).toEqual(['stored localStorage: 1']);
     });
