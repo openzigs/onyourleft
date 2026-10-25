@@ -167,6 +167,8 @@ export function DemoPage(props: DemoPageProps) {
                   units="metric"
                   labels={DEMO_LABELS}
                   touchLock={false}
+                  // The demo has no pacer: no *Pacer —* (owner, 2026-10-25).
+                  withoutPacer
                   paused={!playing}
                   onPause={() => (playing ? stageRef.current?.pause() : stageRef.current?.play())}
                   onEnd={() => stageRef.current?.stop()}

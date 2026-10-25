@@ -582,6 +582,12 @@ function withPowerToWeight(reading: HudReading, wattsPerKilogram: number | undef
 }
 
 /**
+ * The key of the dashed gap field a ride with nobody to chase shows. The demo
+ * (#1650) leaves it out: it has no pacer to chase, ever. @see HudCoreProps.withoutPacer
+ */
+export const EMPTY_GAP_KEY = 'gap';
+
+/**
  * The gap fields: one per rider being chased, or a single dashed one.
  *
  * ⚠️ The placeholder carries the **pacer's** label rather than no label,
@@ -591,7 +597,7 @@ function withPowerToWeight(reading: HudReading, wattsPerKilogram: number | undef
 function gapReadings(input: HudInput): readonly HudReading[] {
   const chases = input.chases ?? [];
   if (chases.length === 0) {
-    return [{ key: 'gap', label: LABELS.bot, value: NO_READING, unit: '', stale: false }];
+    return [{ key: EMPTY_GAP_KEY, label: LABELS.bot, value: NO_READING, unit: '', stale: false }];
   }
   return chases.map((chase) => gapReading(chase));
 }

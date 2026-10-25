@@ -169,6 +169,16 @@ describe('the demo’s stats overlay — #1650', () => {
     });
   });
 
+  it('has no pacer field: the demo has no pacer, so no dashed *Pacer* (owner, 2026-10-25)', async () => {
+    const frames = await page('?preset=sprint');
+    await step(frames, 20, 100);
+    const labels = [...document.querySelectorAll('.oyl-hud dt')].map((each) => each.textContent);
+    // The readings are there, so an empty list is not what passes this.
+    expect(labels).toEqual(expect.arrayContaining(['Power', 'Cadence', 'Heart rate']));
+    expect(labels).not.toContain('Pacer');
+    expect(document.querySelector('.oyl-hud')?.textContent).not.toMatch(/pacer/i);
+  });
+
   it('shows no trainer line, workout strip, standings or room report, and says nothing aloud', async () => {
     const frames = await page('?preset=group');
     await step(frames, 20, 100);

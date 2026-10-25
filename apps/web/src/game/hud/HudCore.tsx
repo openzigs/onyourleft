@@ -33,6 +33,7 @@ import { TOUCH_LOCK_EXEMPT, useTouchLock } from '../../design/touch-lock';
 import { TouchLockButton } from '../../design/TouchLockButton';
 
 import {
+  EMPTY_GAP_KEY,
   MOVING_TIME_KEY,
   givesWayToTheRoom,
   hudReadings,
@@ -94,6 +95,13 @@ export interface HudCoreProps extends SharedProps {
   readonly moreActions?: ReactNode;
   /** After the actions panel in the document: a race's standings (#1347). */
   readonly afterActions?: ReactNode;
+  /**
+   * Leaves out the dashed *Pacer* field a ride with nobody to chase shows.
+   * The demo's (owner ruling of 2026-10-25, #1650): the demo has no pacer, so
+   * *Pacer —* would name a field it can never fill. A rider's ride keeps it,
+   * because there a pacer is one choice away. A chased rider's gap still shows.
+   */
+  readonly withoutPacer?: boolean;
 }
 
 /** The id the notice toggle's `aria-controls` names. One HUD per page. */
@@ -112,7 +120,9 @@ export const PANEL_NAMES: Readonly<Record<ReadingTier, string>> = {
 
 /** The HUD every ride shows. @see HudCoreProps */
 export function HudCore(props: HudCoreProps): JSX.Element {
-  const readings = hudReadings(props);
+  const all = hudReadings(props);
+  const readings =
+    props.withoutPacer === true ? all.filter((reading) => reading.key !== EMPTY_GAP_KEY) : all;
   // #1312: the lap's time joins the lap's number in the strip's sentence.
   const elevation = profileReading(props.state, props.profile, props.lapSeconds);
   // #1312: a lap gives way to every other notice. @see HudPanelProps.lapNotice
