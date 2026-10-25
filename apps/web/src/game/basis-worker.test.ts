@@ -8,23 +8,36 @@
  *
  * The control is three's worker as it ships: given a transcoder that cannot
  * start, it answers nothing, ever — the hang #1683 found.
+ *
+ * ⚠️ **Read off the installed file, not imported**: `three-seam.test.ts`
+ * allows one importer of three, `three-renderer.ts`. The function is sliced
+ * out of `KTX2Loader.js`'s text, which is the text `toString` would give.
  */
 
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { runInNewContext } from 'node:vm';
 
-import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
 import { describe, expect, it } from 'vitest';
 
 import { settlingBasisWorker } from './basis-worker';
 
-/** What three's types do not declare: the worker's source and the constants it is written with. */
-const THREE_WORKER = KTX2Loader as unknown as {
-  BasisWorker: () => void;
-  EngineFormat: unknown;
-  EngineType: unknown;
-  TranscoderFormat: unknown;
-  BasisFormat: unknown;
-};
+const KTX2_LOADER = readFileSync(
+  createRequire(import.meta.url).resolve('three/examples/jsm/loaders/KTX2Loader.js'),
+  'utf8',
+);
+const WORKER_STARTS = 'KTX2Loader.BasisWorker = function () {';
+
+/** `KTX2Loader.BasisWorker`, as the installed `three` declares it. */
+function shippedWorker(): () => void {
+  const start = KTX2_LOADER.indexOf(WORKER_STARTS);
+  const end = KTX2_LOADER.indexOf('\n};', start);
+  if (start === -1 || end === -1) {
+    throw new Error('KTX2Loader.js no longer declares BasisWorker as this test reads it');
+  }
+  const text = KTX2_LOADER.slice(start + 'KTX2Loader.BasisWorker = '.length, end + 2);
+  return runInNewContext(`(${text})`) as () => void;
+}
 
 /** Emscripten's module object, as three's worker hands it to `BASIS`. */
 interface BasisModule {
@@ -57,10 +70,11 @@ function run(worker: () => void, basis: (module: BasisModule) => unknown): Runni
   runInNewContext(fn.substring(fn.indexOf('{') + 1, fn.lastIndexOf('}')), {
     self,
     BASIS: basis,
-    _EngineFormat: THREE_WORKER.EngineFormat,
-    _EngineType: THREE_WORKER.EngineType,
-    _TranscoderFormat: THREE_WORKER.TranscoderFormat,
-    _BasisFormat: THREE_WORKER.BasisFormat,
+    // What `KTX2Loader.init` writes ahead of the body; no case here transcodes far enough to read them.
+    _EngineFormat: {},
+    _EngineType: {},
+    _TranscoderFormat: {},
+    _BasisFormat: {},
     console: { error: () => undefined, warn: () => undefined },
   });
   const dispatch = (type: string, event: object): void => {
@@ -85,7 +99,7 @@ const neverStarts = (): void => undefined;
 /** Emscripten's start failing: its ready promise rejects, and nobody else holds it. */
 const rejects = (reason: Error) => (): Promise<never> => Promise.reject(reason);
 
-const SHIPPED = THREE_WORKER.BasisWorker;
+const SHIPPED = shippedWorker();
 const SETTLING = settlingBasisWorker(SHIPPED);
 const EVAL_REFUSED = new EvalError("'unsafe-eval' is not an allowed source of script");
 
