@@ -10,8 +10,9 @@ the [Open Database License 1.0](https://opendatacommons.org/licenses/odbl/1-0/) 
 records what that licence asks of the project, where each obligation is met, and which obligations
 the project deliberately does not trigger, with the exact condition that would trigger them.
 
-It is a summary. The decisions are ADR 0012 D-5, ADR 0032 D-5 and ADR 0054 D-3; where this page and
-an ADR disagree, the ADR wins.
+It is a summary. The decisions are ADR 0012 D-5, ADR 0032 D-5 and ADR 0054 D-3, and, for the demo
+build, [ADR 0056](adr/0056-the-demos-shipped-map-under-odbl.md); where this page and an ADR
+disagree, the ADR wins.
 
 ## What is held, where, and under what licence
 
@@ -67,6 +68,39 @@ published. **The day any of the store's records leaves a device** (an instance c
 a shared route carrying its corridor, a write-up given footprints, a sync of the store), §4.4 and
 §4.6 come back, and that change is a **superseding ADR** that publishes the store under ODbL 1.0
 and decides §4.6 a or b, never a code change or a review note.
+
+## The demo's shipped bundle
+
+[ADR 0056](adr/0056-the-demos-shipped-map-under-odbl.md), **Proposed** on 2026-10-24 on the owner's
+rulings of that day on [#1643](https://github.com/openzigs/onyourleft/issues/1643). Nothing below is
+built until the owner accepts it and the bake script
+([#1651](https://github.com/openzigs/onyourleft/issues/1651)) lands; until then the demo rides the
+synthetic road and draws no OpenStreetMap data.
+
+- **What is in it.** Per preset route, one file in the demo's build output (`apps/web/demo/dist`,
+  gitignored, never committed; a SHA-256 per route may be): the decoded corridor records the
+  renderer reads (footprints, land use, water, footways and streets, with the fields ADR 0054 D-3.3
+  lists and no OSM identifier, name or address), the route's line and elevation from a GPX the owner
+  supplies, stripped to latitude, longitude and elevation (ADR 0056 D-2, D-7), and the licence,
+  source and notice. No owner, route id or device time.
+- **Its licence.** It is a Derivative Database that is Publicly Used, so it is offered **under ODbL
+  1.0** (§4.4 a.i). Shipping it in a build Publicly Conveys it, so the file carries the licence's
+  URI and a notice file sits beside it (§4.2 b and d). The notice is ODbL §4.3 a's example:
+  *"Contains information from OpenStreetMap, which is made available here under the Open Database
+  License (ODbL)."*
+- **Where it is offered (§4.6 a, the entire database).** As the plain file next to the demo, and as
+  an asset on a GitHub release. A video made from it names the release asset's URL. A site that
+  embeds the demo complies by serving the output unchanged (ADR 0056 D-4).
+- **Where attribution is shown.** `© OpenStreetMap contributors` (`basemap.ts` §`OSM_ATTRIBUTION`)
+  in the demo frame whenever bundle data is drawn, with the §4.3 notice reachable from the demo, and
+  burned into every exported video frame drawn from it (ADR 0056 D-8).
+- **CI never bakes OpenStreetMap data.** The demo's browser gate runs on a bundle baked from the
+  synthetic corridor fixture, so no test artefact carries an ODbL obligation (ADR 0056 D-9).
+
+⚠️ **The on-device store is unchanged.** ADR 0054 D-3.5 still binds `worldCorridors` whole: nothing
+in it leaves the device, the bake never reads it, and the share-alike reasoning in the section above
+still holds for it. The bundle is a separate database, made at build time from the archive, and it
+is the only OpenStreetMap-derived database this project publishes.
 
 ## What does not change
 

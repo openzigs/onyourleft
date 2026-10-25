@@ -312,3 +312,11 @@ sound on §4.5 a alone.
 Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
 
 - **2026-10-21** — **The successor D-3.2 requires now exists: [ADR 0054](0054-towns-from-real-map-data.md) D-3, accepted that day.** It holds OpenStreetMap records (land use, building footprints and footways for a route's corridor) in a separate, owner-scoped store declared ODbL 1.0, which never leaves the device. This ADR's decisions for the stores it covers are unchanged; ADR 0054 D-3 governs that one store, including why D-2's first reason does not hold for it.
+- **2026-10-24** — **A Publicly Used OSM-derived database is proposed: the demo build's baked route
+  data, under [ADR 0056](0056-the-demos-shipped-map-under-odbl.md)** (Proposed that day, on the
+  owner's rulings of 2026-10-24 on [#1643](https://github.com/openzigs/onyourleft/issues/1643)). For
+  that one database D-2's *"Nothing in Phase 1 Publicly Uses anything"* and D-4's *"§4.6 is not the
+  plan"* no longer describe the project: ADR 0056 offers it under ODbL 1.0 and decides §4.6 a, as
+  D-4's last paragraph asks a successor to. It also reads the ODbL text first-hand from
+  `opendatacommons.org` on 2026-10-24, which D-6 could not. This ADR's decisions for segments are
+  unchanged.
