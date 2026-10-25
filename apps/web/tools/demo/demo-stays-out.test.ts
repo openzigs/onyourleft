@@ -39,6 +39,26 @@ describe('the rider app carries none of the demo — #1645', () => {
     ).toEqual(['src/demo/routes/climb.json', 'demo/index.html', 'demo/route.bin']);
   });
 
+  it('finds a baked route among the product build’s files, wherever it was emitted (#1651)', () => {
+    expect(
+      demoInProduct(
+        ROOT,
+        [join(ROOT, 'src/main.tsx')],
+        [
+          'index.html',
+          'routes/LICENCE-ODbL.txt',
+          'assets/climb.0123456789abcdef.bin',
+          'assets/index.js',
+          'routes\\routes.json',
+        ],
+      ),
+    ).toEqual([
+      'routes/LICENCE-ODbL.txt',
+      'assets/climb.0123456789abcdef.bin',
+      'routes\\routes.json',
+    ]);
+  });
+
   it('fails the product build over one', () => {
     expect(() => {
       runPlugin({
