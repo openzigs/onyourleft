@@ -17,8 +17,9 @@
  * 2. **`glow`** — one box built and worn as the belt builds and wears its
  *    items, under one directional light at its face or turned away and no
  *    other light: the pixel at its middle, marked glowing or not.
- * 3. **`halloweenFace`** — since #1625, the same for the product's own
- *    jack-o'-lantern face colour, glowing, the light turned away.
+ * 3. **`holidayGlows`** — since #1625, the same for each glowing colour of the
+ *    product's own set for a holiday (#1625's faces, #1626's bulbs), the
+ *    light turned away.
  *
  * ⚠️ Not the product's frame: the owner's page (`realistic-town.browser.spec.ts`)
  * is where the belt's one call is held inside a real view's frame.
@@ -31,6 +32,7 @@ import {
   type ItemTable,
 } from '../src/game/decorations';
 import { plannerCornerRoute } from '../src/game/route-fixtures-testing';
+import type { Holiday } from '../src/game/season';
 import { streetsAt } from '../src/game/streets';
 import { corridorOrigin } from '../src/game/terrain';
 import {
@@ -55,15 +57,15 @@ declare global {
         glows: boolean,
       ): DecorationPixel;
       /**
-       * #1625: the product's Halloween face — the first glowing part of
-       * `decorations.ts` §`HOLIDAY_DECORATIONS`' Halloween set — built and
-       * worn as {@link glow}'s box is, with the light turned away: its pixel,
-       * and the colour it is painted, 0–255 sRGB.
+       * #1625, #1626: each glowing colour of `decorations.ts`
+       * §`HOLIDAY_DECORATIONS`' set for `holiday`, built and worn as
+       * {@link glow}'s box is, with the light turned away: its pixel, and the
+       * colour it is painted, 0–255 sRGB.
        */
-      halloweenFace(world: 'stylised' | 'realistic'): {
-        readonly pixel: DecorationPixel;
-        readonly colour: DecorationPixel;
-      };
+      holidayGlows(
+        world: 'stylised' | 'realistic',
+        holiday: Holiday,
+      ): readonly { readonly pixel: DecorationPixel; readonly colour: DecorationPixel }[];
     };
   }
 }
@@ -102,18 +104,21 @@ function calls(): { shown: number; hidden: number; triangles: number } {
   return decorationCallsProbe(canvas(), streets, camera, PROBE_TABLE);
 }
 
-function halloweenFace(world: 'stylised' | 'realistic'): {
-  pixel: DecorationPixel;
-  colour: DecorationPixel;
-} {
-  const face = (HOLIDAY_DECORATIONS.halloween ?? [])
-    .flatMap((kind) => kind.parts)
-    .find((part) => part.glows);
-  if (face === undefined) throw new Error('the Halloween set has no glowing face');
-  return {
-    pixel: decorationGlowProbe(canvas(), world, 'away', face.colour, true),
-    colour: [(face.colour >> 16) & 0xff, (face.colour >> 8) & 0xff, face.colour & 0xff],
-  };
+function holidayGlows(
+  world: 'stylised' | 'realistic',
+  holiday: Holiday,
+): { pixel: DecorationPixel; colour: DecorationPixel }[] {
+  const colours = new Set(
+    (HOLIDAY_DECORATIONS[holiday] ?? [])
+      .flatMap((kind) => kind.parts)
+      .filter((part) => part.glows)
+      .map((part) => part.colour),
+  );
+  if (colours.size === 0) throw new Error(`the ${holiday} set has nothing that glows`);
+  return [...colours].map((colour) => ({
+    pixel: decorationGlowProbe(canvas(), world, 'away', colour, true),
+    colour: [(colour >> 16) & 0xff, (colour >> 8) & 0xff, colour & 0xff],
+  }));
 }
 
 window.__oylDecoration = {
@@ -121,5 +126,5 @@ window.__oylDecoration = {
   calls,
   glow: (world, light, glows) =>
     decorationGlowProbe(canvas(), world, light, GLOW_PROBE_COLOUR, glows),
-  halloweenFace,
+  holidayGlows,
 };

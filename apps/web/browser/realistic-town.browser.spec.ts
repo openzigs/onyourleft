@@ -15,7 +15,10 @@
  * - **The holiday decorations** (#1624, #1625): on a day in Halloween, the
  *   village in reach carries the product's own pumpkins and jack-o'-lanterns
  *   (`decorations.ts` §`HOLIDAY_DECORATIONS`; until #1625 a probe box on
- *   every anchor); with `levers=-decorations` there is no holiday. The difference is exactly one draw call, in both
+ *   every anchor); with `levers=-decorations` there is no holiday. Since
+ *   #1626 the same on 20 Dec in the winter lights (the mapped doors' wreath,
+ *   drawn in the facade, is `realistic-wreath.browser.spec.ts`', in another
+ *   shard). The difference is exactly one draw call, in both
  *   worlds, and its control is the belt's own triangles read off its mesh,
  *   which must be above nought — so a belt with nothing in it cannot pass by
  *   adding no call. The stylised world's half is NOT nightly: it runs in the
@@ -39,6 +42,7 @@ import {
   MAPPED_BUILDING_MAX,
   REALISTIC_DECORATION_TRIANGLES,
   REALISTIC_VILLAGE_DRAW_CALLS,
+  REALISTIC_WINTER_LIGHTS_TRIANGLES,
   REALISTIC_WOODED_DRAW_CALLS,
 } from '../src/game/realistic-budget';
 
@@ -169,13 +173,42 @@ test.describe('the realistic page’s holiday decorations, stylised — #1624', 
       on.page.decorations?.triangles,
     );
   });
+
+  test('draws the winter lights and the village doors’ wreaths in ONE call more, inside the page’s ceiling — #1626', async ({
+    page,
+  }) => {
+    test.setTimeout(REALISTIC_LOAD_BUDGET_MS);
+    const on = await ride(page, `${WINTER}&world=stylised`, 'stylised');
+    const off = await ride(page, `${WINTER}&world=stylised&levers=-decorations`, 'stylised');
+    console.log(
+      `#1626 stylised: ${String(on.result.lastFrame.calls)} draw calls with the winter lights ` +
+        `(${JSON.stringify(on.page.decorations)}), ${String(off.result.lastFrame.calls)} without`,
+    );
+    expect(on.page.decorations?.triangles ?? 0).toBeGreaterThan(0);
+    expect(on.page.decorations?.triangles ?? 0).toBeLessThanOrEqual(
+      REALISTIC_WINTER_LIGHTS_TRIANGLES,
+    );
+    expect(off.page.decorations?.triangles).toBe(0);
+    expect(on.result.lastFrame.calls - off.result.lastFrame.calls).toBe(1);
+    expect(on.result.lastFrame.triangles - off.result.lastFrame.triangles).toBe(
+      on.page.decorations?.triangles,
+    );
+    // The stylised village frame is inside the page's ceiling with them.
+    expect(on.result.lastFrame.calls).toBeLessThanOrEqual(REALISTIC_WOODED_DRAW_CALLS);
+  });
 });
+
+/**
+ * #1626: the village road's hold in the winter lights — lamp posts wound,
+ * eaves strung, village doors wreathed — and the same with the holiday off.
+ */
+const WINTER = `?ladder=0&panel=0&seconds=1&at=${String(VILLAGE_HOLD_METRES)}&route=village&date=2026-12-20`;
 
 test.describe('the realistic page’s holiday decorations — #1624', { tag: NIGHTLY }, () => {
   test('draws Halloween’s pumpkins in ONE call, inside the frame’s calls and its own triangles, fetching nothing more', async ({
     page,
   }) => {
-    test.setTimeout(3 * REALISTIC_LOAD_BUDGET_MS);
+    test.setTimeout(4 * REALISTIC_LOAD_BUDGET_MS);
     const fetched: string[] = [];
     // What the page fetched over the network: not the `blob:` URLs it makes
     // of what it has already decoded, which are new names every load.
@@ -223,6 +256,26 @@ test.describe('the realistic page’s holiday decorations — #1624', { tag: NIG
     );
     expect(wooded.result.lastFrame.calls).toBeLessThanOrEqual(REALISTIC_WOODED_DRAW_CALLS);
     expect(wooded.result.lastFrame.calls).toBe(FRAME_DRAW_CALLS_AT_2550);
+
+    // #1626: the winter lights on the same hold, against the same frame with
+    // no holiday. ⚠️ **One load shared, not one each**: this shard's loads are
+    // held inside 60 % of its stop (`nightly-split.test.ts`, #1698), and the
+    // frame with no holiday is the same on 31 Oct and 20 Dec — 58 calls and
+    // 153 681 triangles on both, measured 2026-10-25 in the pinned Chromium —
+    // because the route's season is uniforms and colours, not geometry.
+    const winter = await ride(page, WINTER);
+    console.log(
+      `#1626 realistic: ${String(winter.result.lastFrame.calls)} draw calls with the winter ` +
+        `lights (${JSON.stringify(winter.page.decorations)}), ${String(off.result.lastFrame.calls)} without`,
+    );
+    expect(winter.page.decorations?.triangles ?? 0).toBeGreaterThan(0);
+    expect(winter.page.decorations?.triangles ?? 0).toBeLessThanOrEqual(
+      REALISTIC_WINTER_LIGHTS_TRIANGLES,
+    );
+    expect(winter.result.lastFrame.calls - off.result.lastFrame.calls).toBe(1);
+    expect(winter.result.lastFrame.triangles - off.result.lastFrame.triangles).toBe(
+      winter.page.decorations?.triangles,
+    );
   });
 });
 

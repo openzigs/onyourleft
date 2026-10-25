@@ -21,7 +21,10 @@ import {
   type DecorationKind,
   type ItemTable,
 } from './decorations';
-import { REALISTIC_DECORATION_TRIANGLES } from './realistic-budget';
+import {
+  REALISTIC_DECORATION_TRIANGLES,
+  REALISTIC_WINTER_LIGHTS_TRIANGLES,
+} from './realistic-budget';
 import { plannerCornerRoute } from './route-fixtures-testing';
 import { FURNITURE_DRAW_METRES, streetsAt, type VillageStreet } from './streets';
 import { corridorOrigin } from './terrain';
@@ -249,6 +252,46 @@ describe('the belt’s Halloween set — #1625', () => {
     const heaviest = Math.max(...halloween.map((kind) => decorationKindTriangles(kind)));
     expect(houses).toBeGreaterThan(5);
     expect(houses * heaviest).toBeLessThan(REALISTIC_DECORATION_TRIANGLES);
+    belt.dispose();
+  });
+});
+
+describe('the belt’s winter lights — #1626', () => {
+  const winter = HOLIDAY_DECORATIONS['winter-lights'] ?? [];
+
+  it('builds a bulb of 8 triangles and a wreath of 80', () => {
+    expect(decorationShapeTriangles('bulb')).toBe(8);
+    expect(decorationShapeTriangles('wreath')).toBe(80);
+    // The issue's bulb is 2 to 8 triangles; a lamp post's twelve, 96.
+    const post = winter.find((kind) => kind.item === 'post-lights');
+    if (post === undefined) throw new Error('no post lights');
+    expect(decorationKindTriangles(post)).toBe(12 * 8);
+  });
+
+  it('stays inside its share with two villages in reach at their heaviest, leaving #1627 its headroom', () => {
+    const camera = cameraWith(2);
+    const reached = STREETS.filter((street) => inReach(street, camera));
+    // Every winter kind on every anchor it may take: the most a draw could place.
+    const heaviest: ItemTable = {
+      'winter-lights': winter.map((kind) => ({ ...kind, chance: 1 })),
+    };
+    const items = decorationsFor(reached, 'winter-lights', heaviest);
+    const worst = items.reduce((sum, item) => {
+      const kind = winter.find((each) => each.item === item.item);
+      return sum + (kind === undefined ? 0 : decorationKindTriangles(kind));
+    }, 0);
+    expect(new Set(items.map((item) => item.item)).size).toBe(winter.length);
+    expect(worst).toBeGreaterThan(REALISTIC_WINTER_LIGHTS_TRIANGLES / 2);
+    expect(worst).toBeLessThanOrEqual(REALISTIC_WINTER_LIGHTS_TRIANGLES);
+    // #1627's tree has the rest.
+    expect(
+      REALISTIC_DECORATION_TRIANGLES - REALISTIC_WINTER_LIGHTS_TRIANGLES,
+    ).toBeGreaterThanOrEqual(4_000);
+    // And the belt draws the product's own draw whole, in both worlds alike.
+    const belt = new DecorationBelt('realistic');
+    belt.update(STREETS, camera, 'winter-lights', HOLIDAY_DECORATIONS);
+    expect(belt.triangles).toBeGreaterThan(0);
+    expect(belt.triangles).toBeLessThanOrEqual(worst);
     belt.dispose();
   });
 });

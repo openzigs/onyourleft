@@ -77,6 +77,7 @@ import {
   atmosphereOf,
   decorationBeltOf,
   decorationKindsOf,
+  facadeWreathOf,
   firDepthPrepassOf,
   foliageOrderedOf,
   groundBlendOf,
@@ -94,6 +95,7 @@ import {
 import {
   configQuery,
   decorationsWithConfig,
+  facadeWreathWithLevers,
   parseConfig,
   percentiles,
   rungWithLevers,
@@ -461,6 +463,9 @@ async function run(): Promise<void> {
   mappedBlobsShownOf(view, !config.leversOff.includes('mapped-blobs'));
   // #1624: the product's decorations, or with `decorations=probe` the probe.
   decorationKindsOf(view, decorationsWithConfig(config));
+  // #1626's cost pair: the mapped doors' winter wreath, or never. A setting
+  // of the module's, applied to the season told above.
+  facadeWreathOf(view, facadeWreathWithLevers(config.leversOff));
   const resize = (): void => view.resize(canvas.clientWidth, canvas.clientHeight);
   resize();
   addEventListener('resize', resize);

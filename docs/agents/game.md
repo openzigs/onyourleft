@@ -948,7 +948,11 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `REALISTIC_STREET_TRIANGLES`, neither raised. Since
                         #1625 Halloween's pumpkins stand on a HOUSE door's step
                         (`buildings.ts` §`frontDoorOf`, a doorstep anchor's
-                        `step`), as lathe shapes (`DecorationShape`)
+                        `step`), as lathe shapes (`DecorationShape`). Since
+                        #1626 the winter lights wind lamp posts, string eaves
+                        and wreathe village doors in the belt; a MAPPED door's
+                        wreath is the facade's `WREATH_GLSL` (`oylWreath`, 0
+                        calls), its gate control the `facade-wreath` lever
     src/game/footways.ts
                         footways from the corridor's map data (#1551) —
                         `pavementSides`, the side of the drawn road's NORMAL a

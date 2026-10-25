@@ -405,10 +405,11 @@ mapped blobs, 114 s for the decorations' three, and 143 s and 126 s for #1623's 
 |---|---|---|---|--:|--:|
 | `test:browser:nightly:shard-1` | `heavy` | every nightly spec but the page's | (#1675) | — | — |
 | `test:browser:nightly:shard-2` | `browser-2` | `realistic.browser.spec.ts` | #616, #1623 | 6 | 337 s |
-| `test:browser:nightly:shard-3` | `browser-3` | `realistic-trees.browser.spec.ts` | #1283, #1294, #1523 | 5 | 259 s |
-| `test:browser:nightly:shard-4` | `browser-4` | `realistic-town.browser.spec.ts` | #1559, #1657, #1624 | 6 | 234 s |
+| `test:browser:nightly:shard-3` | `browser-3` | `realistic-trees.browser.spec.ts`, since #1626 `realistic-wreath.browser.spec.ts` | #1283, #1294, #1523, #1626 | 7 | 259 s |
+| `test:browser:nightly:shard-4` | `browser-4` | `realistic-town.browser.spec.ts` | #1559, #1657, #1624 (#1625, #1626) | 7 | 234 s |
 
-The last column is the sum of those cases on the one-job run, not a run of the shard. Split by
+The last column is the sum of those cases on the one-job run, not a run of the shard; #1626's
+loads (one in the town's shard, the wreath's two in the trees') came after it. Split by
 describe into files, as #1675 split by file, so each shard is still a file filter that
 `nightly-split.test.ts` can hold every nightly spec to exactly one of; the load they share is
 `apps/web/browser/realistic-ride.ts`. The same test now also holds **each shard's loads of the page
