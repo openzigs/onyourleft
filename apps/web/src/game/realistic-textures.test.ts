@@ -46,10 +46,18 @@ import { mixedTownFixture } from './footprint-fixtures-testing';
 import { GROUND_BLOB_LIFT_METRES } from './ground-blob';
 import { landClassMask } from './land-class';
 import { mappedBuildingsOf } from './mapped-buildings';
-import { REALISTIC_LADDER } from './quality';
+import type { GameView } from './port';
+import { qualitySettings, REALISTIC_LADDER } from './quality';
 import { sceneFrame } from './scene';
+import { seasonOn, type Season } from './season';
 import { atStartLine } from './simulation';
-import type { SunStyle } from './world';
+import {
+  groundColourIn,
+  roofSnowIn,
+  routeHemisphere,
+  routeLatitudeMagnitude,
+  type SunStyle,
+} from './world';
 import { FOLIAGE_TINT, packedInstanceTint } from './instance-tint';
 import {
   REALISTIC_REMOTE_RIDERS,
@@ -1599,6 +1607,181 @@ describe('the mapped buildings’ blobs, through the drawing a view builds — #
       expect(draw().count).toBe(grounded.count);
     } finally {
       drawing.dispose();
+    }
+  }, 120_000);
+});
+
+/**
+ * A WebGL 2 context that draws nothing, and answers what three's
+ * `WebGLRenderer` asks while it is built, prefilters a sky and binds a
+ * program — #1623's review. It is not a GPU. It lets a VIEW exist in Node, so
+ * the steps a view takes before it draws (`ThreeGameView.#stage`) run as a
+ * ride runs them. What the GPU then draws is the browser gate's business.
+ */
+function blindWebGl2(): unknown {
+  const names = new Map<string, number>();
+  const constant = (name: string): number => {
+    let value = names.get(name);
+    if (value === undefined) {
+      value = 0x8000 + names.size;
+      names.set(name, value);
+    }
+    return value;
+  };
+  return new Proxy(
+    {},
+    {
+      get(_target, property) {
+        if (typeof property !== 'string') return undefined;
+        if (/^[A-Z0-9_]+$/.test(property)) return constant(property);
+        return (...args: unknown[]): unknown => {
+          switch (property) {
+            case 'getParameter':
+              if (args[0] === constant('VERSION')) return 'WebGL 2.0';
+              if (args[0] === constant('SHADING_LANGUAGE_VERSION')) return 'WebGL GLSL ES 3.00';
+              if (args[0] === constant('SCISSOR_BOX') || args[0] === constant('VIEWPORT')) {
+                return new Int32Array([0, 0, 1, 1]);
+              }
+              return 16;
+            case 'getShaderPrecisionFormat':
+              return { precision: 23, rangeMin: 127, rangeMax: 127 };
+            case 'getSupportedExtensions':
+              return [];
+            case 'getContextAttributes':
+              return { alpha: false, antialias: false };
+            case 'getShaderParameter':
+              return true;
+            case 'getProgramParameter':
+              // Linked, with no active uniform or attribute to enumerate.
+              return args[1] === constant('LINK_STATUS') ? true : 0;
+            case 'getShaderInfoLog':
+            case 'getProgramInfoLog':
+              return '';
+            default:
+              return property.startsWith('create') ? {} : null;
+          }
+        };
+      },
+    },
+  );
+}
+
+/** A canvas as `WebGLRenderer` and a view use one, holding a {@link blindWebGl2}. */
+function blindCanvas(): HTMLCanvasElement {
+  const context = blindWebGl2();
+  return {
+    width: 1,
+    height: 1,
+    style: {},
+    getContext: () => context,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+  } as unknown as HTMLCanvasElement;
+}
+
+/** What a three view holds that this reads: the ground mesh, and the mapped buildings' belt. */
+interface StagedView {
+  readonly terrainMesh: { readonly material: unknown };
+  readonly mappedBuildings: { materialOf(surface: 'roof-tiles'): unknown } | undefined;
+}
+
+describe('the route’s winter, staged by a view on the loaded world — #1623', () => {
+  it('snows the realistic ground and roofs from the frame, and leaves the stylised world season-free', async () => {
+    // `ThreeGameView.render` itself, on the loaded world: what `#stage` hands
+    // the terrain, read back off the ground mesh's own material, and what it
+    // writes for the roofs, read back through a mapped roof's own program as
+    // three binds it. A 61° N town on 20 January lies under a full winter.
+    const renderer = await loadedOn(TABLET);
+    const town = mixedTownFixture(61);
+    const land = landClassMask(town.corridor);
+    const start = atStartLine(town.profile);
+    const buildings = mappedBuildingsOf(
+      footprintPlans(town.corridor, land, town.profile, town.origin).plans,
+    );
+    // A fresh frame for each draw, since a frame's ground is lent and the next
+    // build reuses it, and built by the SAME module graph as the renderer
+    // `loadedOn` imported fresh, whose terrain checks that lease.
+    const scene = await import('./scene');
+    const framed = (): ReturnType<typeof sceneFrame> =>
+      scene.sceneFrame({
+        profile: town.profile,
+        origin: town.origin,
+        state: { ...start, ride: { ...start.ride, distance: metres(1_300) } },
+        worldCorridor: town.corridor,
+        landClass: land,
+        mappedBuildings: buildings,
+        structureItems: REALISTIC_STRUCTURE_ITEMS,
+      });
+    const frame = framed();
+    const on = (month: number, day: number): Season =>
+      seasonOn(
+        { year: 2026, month, day },
+        routeHemisphere(town.profile),
+        routeLatitudeMagnitude(town.profile),
+        true,
+      );
+    const winter = on(1, 20);
+    const summer = on(7, 15);
+    // Non-vacuity: a full winter here, which whitens the ground and the roofs.
+    expect(winter.nature.winter).toBe(1);
+    expect(summer.nature.winter).toBe(0);
+    const snowedGround = groundColourIn(frame.world, 1);
+    expect(snowedGround).not.toBe(frame.world.groundColour);
+    expect(roofSnowIn(frame.world, 1)).toBeGreaterThan(0.5);
+
+    const top = REALISTIC_LADDER[0];
+    if (top === undefined) throw new Error('no realistic rung');
+    // `WebGLRenderer`'s animation loop, which a view never starts, is stopped
+    // on `self` when it is disposed: Node has no frame clock to stop.
+    vi.stubGlobal('requestAnimationFrame', () => 0);
+    vi.stubGlobal('cancelAnimationFrame', () => undefined);
+    undo.push(() => vi.unstubAllGlobals());
+    const realistic = renderer.threeGameRenderer.create(blindCanvas(), top);
+    const stylised = renderer.threeGameRenderer.create(blindCanvas(), qualitySettings(0));
+    try {
+      expect(renderer.drawnWorldOf(realistic)).toBe('realistic');
+      expect(renderer.drawnWorldOf(stylised)).toBe('stylised');
+      const groundOf = (view: GameView): number =>
+        (
+          (view as unknown as StagedView).terrainMesh.material as { color: { getHex(): number } }
+        ).color.getHex();
+      const roofSnow = (): unknown => {
+        const roof = (realistic as unknown as StagedView).mappedBuildings?.materialOf(
+          'roof-tiles',
+        ) as { onBeforeCompile(shader: unknown, renderer: unknown): void } | undefined;
+        if (roof === undefined) throw new Error('the frame drew no mapped roof');
+        const shader = {
+          uniforms: {} as Record<string, { value: unknown } | undefined>,
+          // The chunks the facade's splices anchor on, as three's own program holds them.
+          vertexShader:
+            '#include <common>\n#include <begin_vertex>\n#include <color_vertex>\n#include <fog_pars_vertex>\n#include <fog_vertex>',
+          fragmentShader:
+            '#include <common>\n#include <clipping_planes_fragment>\n#include <map_fragment>\n#include <color_fragment>\n#include <roughnessmap_fragment>\n#include <metalnessmap_fragment>\n#include <normal_fragment_begin>\n#include <normal_fragment_maps>\n#include <fog_pars_fragment>\n#include <fog_fragment>',
+        };
+        roof.onBeforeCompile(shader, undefined);
+        return shader.uniforms['oylRoofSnow']?.value;
+      };
+
+      realistic.setSeason(winter);
+      realistic.render(framed());
+      expect(groundOf(realistic)).toBe(snowedGround);
+      expect(roofSnow()).toBe(roofSnowIn(frame.world, 1));
+
+      // The stylised world draws no season on the same snowy day: its own
+      // ground, and the roofs' uniform, which both worlds share, back to 0.
+      stylised.setSeason(winter);
+      stylised.render(framed());
+      expect(groundOf(stylised)).toBe(frame.world.groundColour);
+      expect(roofSnow()).toBe(0);
+
+      // And the realistic world's summer is today's ground, with bare roofs.
+      realistic.setSeason(summer);
+      realistic.render(framed());
+      expect(groundOf(realistic)).toBe(frame.world.groundColour);
+      expect(roofSnow()).toBe(0);
+    } finally {
+      stylised.destroy();
+      realistic.destroy();
     }
   }, 120_000);
 });

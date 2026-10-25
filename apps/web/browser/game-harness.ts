@@ -126,6 +126,8 @@ import { waterways } from '../src/game/waterways';
 import { landClassMask, NO_LAND_CLASS } from '../src/game/land-class';
 import {
   COMMERCIAL_WINDOW_IN_BAY,
+  facadePartAt,
+  OVERHANG_SHADOW,
   REVEAL_DEPTH_METRES,
   REVEAL_GRAZE,
   SASH,
@@ -140,6 +142,7 @@ import {
   mappedTown,
   STOREY_METRES,
   STYLE_COMMERCIAL,
+  STYLE_EAVES,
   STYLE_OFFSET,
   STYLE_SASH,
   type FootprintPlan,
@@ -244,8 +247,13 @@ import {
   waterReflectsOf,
   remoteRiderControlOf,
   windowRevealsOf,
+  overhangShadowsOf,
 } from '../src/game/three-renderer';
-import { parseConfig, windowRevealsWithLevers } from './realistic/config';
+import {
+  overhangShadowsWithLevers,
+  parseConfig,
+  windowRevealsWithLevers,
+} from './realistic/config';
 import { MAXIMUM_DRAWN_SET } from '../src/net/interest';
 import { bannerPlace, standPoint } from '../src/game/gantry';
 import { billboardsAt } from '../src/game/billboards';
@@ -1600,6 +1608,8 @@ const NO_WORLD: WorldStyle = {
   // use: no rider ever sees it, and a *plausible* sun here would let a spec
   // that stopped reading the real one go on passing.
   sun: { x: 0, y: 1, z: 0, ambient: 0, direct: 0 },
+  // #1623: no snow, for the same reason.
+  snow: { bareColour: 0, aboveSnowMetres: 0, winterLoweringMetres: 0 },
 };
 
 /** One pixel out of the drawing buffer, in readPixels coordinates (origin bottom left). */
@@ -4029,6 +4039,257 @@ function windowRevealProbe(
     };
   } finally {
     windowRevealsOf(view, true);
+  }
+}
+
+/** What {@link overhangShadowProbe} publishes — #1658. */
+interface OverhangShadowMeasurement {
+  /** Whether a mapped wall under eaves was found facing the road, with plain wall at both heights. */
+  readonly aimed: boolean;
+  /** How far the camera is from the wall, and how high the wall's top is above its floor, metres. */
+  readonly metres: number;
+  readonly wallMetres: number;
+  /** The sun's elevation, degrees, square to the wall. */
+  readonly sunDegrees: number;
+  /** The wall {@link OVERHANG_PROBE_BELOW} under the eaves' edge, with the shadows built. */
+  readonly near: readonly number[];
+  readonly far: readonly number[];
+  /** The same two places with `-overhang-shadows`: #1588's band alone, which reaches neither. */
+  readonly nearOff: readonly number[];
+  readonly farOff: readonly number[];
+}
+
+/** How far under the eaves' edge {@link overhangShadowProbe} reads the wall: **0.3 m** and **1.5 m**. */
+const OVERHANG_PROBE_BELOW = [0.3, 1.5] as const;
+
+/** How far {@link overhangShadowProbe}'s camera is from the wall: **5 m**. */
+const OVERHANG_PROBE_METRES = 5;
+
+/** The sun {@link overhangShadowProbe} sets, square to the wall: **60°** high. */
+const OVERHANG_PROBE_SUN_DEGREES = 60;
+
+const NO_OVERHANG_SHADOW: OverhangShadowMeasurement = {
+  aimed: false,
+  metres: 0,
+  wallMetres: 0,
+  sunDegrees: 0,
+  near: [],
+  far: [],
+  nearOff: [],
+  farOff: [],
+};
+
+/**
+ * #1658: the sun's shadow under a mapped wall's eaves reaches the screen.
+ * #1581's mixed town (`?town=mixed`'s): of the walls under eaves
+ * (`STYLE_EAVES`) that face the road, 8 to 40 m from it somewhere from
+ * 1 000 m along it, on a house with no porch, garage or shop front, the
+ * nearest bay line with plain wall either side (`facade.ts` §`facadePartAt`)
+ * at both heights read, and a camera {@link OVERHANG_PROBE_METRES} out from
+ * it, level, between the two. The sun is turned square to that wall at
+ * {@link OVERHANG_PROBE_SUN_DEGREES}, so that the shadow is
+ * `EAVES_OVERHANG_METRES · tan 60°` deep below the eaves' edge (`facade.ts`
+ * §`overhangShadowDepth`): the wall 0.3 m under the edge
+ * (`OVERHANG_SHADOW.edge` under the wall's top) is in it, and 1.5 m under is
+ * not. Read with the shadows built, and with them taken out as the owner's
+ * `&levers=-overhang-shadows` takes them (`overhangShadowsOf`): the control,
+ * in which #1588's 0.6 m band reaches neither place, so the two are the same
+ * wall in the same sun.
+ */
+function overhangShadowProbe(
+  view: ReturnType<typeof threeGameRenderer.create>,
+  gl: WebGL2RenderingContext,
+  canvas: HTMLCanvasElement,
+): OverhangShadowMeasurement {
+  const town = mixedTownFixture();
+  const { profile, origin, corridor } = town;
+  const land = landClassMask(corridor);
+  const plans = footprintPlans(corridor, land, profile, origin).plans;
+  const mappedBuildings = mappedBuildingsOf(plans);
+  const stride = FOOTPRINT_VERTEX_FLOATS;
+  type Point3 = { readonly x: number; readonly y: number; readonly z: number };
+  interface Line {
+    /** The bay line's foot, on the wall, and the wall's outward normal. */
+    readonly foot: Point3;
+    readonly nx: number;
+    readonly nz: number;
+    /** The wall's top above its foot, metres. */
+    readonly height: number;
+  }
+  const [nearBelow, farBelow] = OVERHANG_PROBE_BELOW;
+  // Every bay line of a wall under eaves with plain wall either side of it at both heights.
+  const lines: Line[] = [];
+  for (const plan of plans) {
+    if (plan.porch || plan.garage || plan.shop.front) continue;
+    const walls = plan.triangles.wall;
+    for (let at = 0; at + 6 * stride <= walls.length; at += 6 * stride) {
+      const f = (vertex: number, k: number): number => walls[at + vertex * stride + k] as number;
+      const top = f(0, FACADE_OFFSET + 2);
+      const skip = f(0, FACADE_OFFSET + 3);
+      const flags = f(0, STYLE_OFFSET + 1);
+      if (!(top > 0) || (flags & STYLE_EAVES) === 0) continue;
+      const style = { flags, width: f(0, STYLE_OFFSET + 2), extra: f(0, STYLE_OFFSET + 3) };
+      let a: Point3 | undefined;
+      let b: Point3 | undefined;
+      let bays = 0;
+      let floor = Number.POSITIVE_INFINITY;
+      for (let vertex = 0; vertex < 6; vertex += 1) floor = Math.min(floor, f(vertex, 1));
+      for (let vertex = 0; vertex < 6; vertex += 1) {
+        if (f(vertex, 1) !== floor) continue;
+        const point = { x: f(vertex, 0), y: floor, z: f(vertex, 2) };
+        if (f(vertex, FACADE_OFFSET) === 0) a = point;
+        else {
+          b = point;
+          bays = f(vertex, FACADE_OFFSET);
+        }
+      }
+      if (a === undefined || b === undefined || bays < 2) continue;
+      const height = top * STOREY_METRES;
+      if (height < OVERHANG_SHADOW.edge + farBelow + 0.5) continue;
+      const length = Math.hypot(b.x - a.x, b.z - a.z);
+      const bay = length / bays;
+      const plain = (k: number): boolean =>
+        [nearBelow, farBelow].every((below) =>
+          [-0.15, 0, 0.15].every((off) =>
+            [-0.1, 0, 0.1].every(
+              (up) =>
+                facadePartAt(
+                  k + off / bay,
+                  (height - OVERHANG_SHADOW.edge - below + up) / STOREY_METRES,
+                  top,
+                  skip,
+                  style,
+                ) === 'wall',
+            ),
+          ),
+        );
+      for (let k = 1; k < bays; k += 1) {
+        if (!plain(k)) continue;
+        lines.push({
+          foot: {
+            x: a.x + ((b.x - a.x) / length) * k * bay,
+            y: floor,
+            z: a.z + ((b.z - a.z) / length) * k * bay,
+          },
+          nx: f(0, 3),
+          nz: f(0, 5),
+          height,
+        });
+      }
+    }
+  }
+  // The nearest such line facing the road, from 1 000 m on.
+  const start = atStartLine(profile);
+  let chosen: { readonly along: number; readonly line: Line } | undefined;
+  for (let along = 1_000; along <= 2_000 && chosen === undefined; along += 50) {
+    const road = drawnRoadFrame(profile, origin, along);
+    if (road === undefined) continue;
+    let nearest = Number.POSITIVE_INFINITY;
+    for (const line of lines) {
+      const distance = Math.hypot(road.x - line.foot.x, road.z - line.foot.z);
+      const facing =
+        ((road.x - line.foot.x) * line.nx + (road.z - line.foot.z) * line.nz) / distance;
+      if (distance < 8 || distance > 40 || facing < 0.7) continue;
+      if (distance < nearest) {
+        nearest = distance;
+        chosen = { along, line };
+      }
+    }
+  }
+  if (chosen === undefined) return NO_OVERHANG_SHADOW;
+  const { line } = chosen;
+  // A point `below` metres under the eaves' edge, a little proud of the wall.
+  const under = (below: number): Point3 => ({
+    x: line.foot.x + line.nx * 0.01,
+    y: line.foot.y + line.height - OVERHANG_SHADOW.edge - below,
+    z: line.foot.z + line.nz * 0.01,
+  });
+  const nearPoint = under(nearBelow);
+  const farPoint = under(farBelow);
+  // The eye: out from the wall, level, between the two heights; aimed square at the wall.
+  const eye = {
+    x: line.foot.x + line.nx * OVERHANG_PROBE_METRES,
+    y: (nearPoint.y + farPoint.y) / 2,
+    z: line.foot.z + line.nz * OVERHANG_PROBE_METRES,
+  };
+  const headingX = -line.nx;
+  const headingZ = -line.nz;
+  const base = sceneFrame({
+    profile,
+    origin,
+    state: { ...start, ride: { ...start.ride, distance: metres(chosen.along) } },
+    worldCorridor: corridor,
+    landClass: land,
+    mappedBuildings,
+    structureItems: REALISTIC_STRUCTURE_ITEMS,
+  });
+  // The sun square to the wall, 60° high.
+  const elevation = (OVERHANG_PROBE_SUN_DEGREES * Math.PI) / 180;
+  const across = Math.hypot(line.nx, line.nz);
+  const frame: SceneFrame = {
+    ...base,
+    scatter: [],
+    markers: [],
+    world: {
+      ...base.world,
+      sun: {
+        ...base.world.sun,
+        x: (line.nx / across) * Math.cos(elevation),
+        y: Math.sin(elevation),
+        z: (line.nz / across) * Math.cos(elevation),
+      },
+    },
+    camera: {
+      ...base.camera,
+      x: eye.x + headingX * CAMERA_BEHIND_METRES,
+      z: eye.z + headingZ * CAMERA_BEHIND_METRES,
+      headingX,
+      headingZ,
+      eyeRoadY: eye.y - CAMERA_ABOVE_METRES,
+      targetRoadY: eye.y,
+    },
+  };
+  const meanAt = (point: Point3): number[] => {
+    // A column 0.2 m tall and three pixels wide: a clapboard course or more, so
+    // that the read is the wall's and not where on its course it falls.
+    const top = pixelFor(frame, canvas, { ...point, y: point.y + 0.1 });
+    const bottom = pixelFor(frame, canvas, { ...point, y: point.y - 0.1 });
+    const x = Math.round((top.x + bottom.x) / 2) - 1;
+    const y0 = Math.round(Math.min(top.y, bottom.y));
+    const rows = Math.max(1, Math.round(Math.abs(top.y - bottom.y)));
+    const pixels = readRegion(gl, x, y0, 3, rows);
+    const sums = [0, 0, 0];
+    for (let at = 0; at < pixels.length; at += 4) {
+      for (let channel = 0; channel < 3; channel += 1) {
+        sums[channel] = (sums[channel] ?? 0) + (pixels[at + channel] ?? 0);
+      }
+    }
+    return sums.map((sum) => sum / (pixels.length / 4));
+  };
+  view.render(frame);
+  view.render(frame);
+  const near = meanAt(nearPoint);
+  const far = meanAt(farPoint);
+  // The owner's lever, read as the page reads it.
+  overhangShadowsOf(
+    view,
+    overhangShadowsWithLevers(parseConfig('?levers=-overhang-shadows').leversOff),
+  );
+  try {
+    view.render(frame);
+    view.render(frame);
+    return {
+      aimed: true,
+      metres: OVERHANG_PROBE_METRES,
+      wallMetres: line.height,
+      sunDegrees: OVERHANG_PROBE_SUN_DEGREES,
+      near,
+      far,
+      nearOff: meanAt(nearPoint),
+      farOff: meanAt(farPoint),
+    };
+  } finally {
+    overhangShadowsOf(view, true);
   }
 }
 
@@ -6554,6 +6815,8 @@ export interface RealisticMeasurement {
   readonly mappedFacade: MappedFacadeMeasurement;
   /** #1659: a mapped casement's jamb from the side, with its reveal and without. @see windowRevealProbe */
   readonly windowReveal: WindowRevealMeasurement;
+  /** #1658: a sunlit mapped wall under its eaves, with the overhang's shadow and without. @see overhangShadowProbe */
+  readonly overhangShadow: OverhangShadowMeasurement;
   /** #1586: a mapped town's edge, with fields beyond filling the structure cap. @see townEdgeProbe */
   readonly townEdge: TownEdgeMeasurement;
   /** #1550: procedural lots in a mapped town with no footprints. @see lotsProbe */
@@ -8676,6 +8939,7 @@ const NO_REALISTIC: RealisticMeasurement = {
   mappedTown: NO_MAPPED_TOWN,
   mappedFacade: NO_MAPPED_FACADE,
   windowReveal: NO_WINDOW_REVEAL,
+  overhangShadow: NO_OVERHANG_SHADOW,
   townEdge: NO_TOWN_EDGE,
   lots: NO_LOTS,
   tint: {
@@ -10246,6 +10510,10 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   const windowReveal = windowRevealProbe(view, gl, canvas);
   phaseEnds('realistic: a mapped window’s reveal — #1659');
 
+  // #1658, on the same view: a sunlit mapped wall under its eaves, with the overhang's shadow and without.
+  const overhangShadow = overhangShadowProbe(view, gl, canvas);
+  phaseEnds('realistic: the shadow under a mapped wall’s eaves — #1658');
+
   // #1586, on the same view: a town's edge, the fields beyond it filling the structure cap.
   const townEdge = townEdgeProbe(view);
   phaseEnds('realistic: a town’s edge — #1586');
@@ -10498,6 +10766,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     mappedTown,
     mappedFacade,
     windowReveal,
+    overhangShadow,
     townEdge,
     lots,
     tint,

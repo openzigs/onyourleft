@@ -50,17 +50,48 @@
  * | Air density | ISO 2533:1975, through `@onyourleft/physics`. Every constant in it is cited in `packages/physics/README.md` §2 |
  * | {@link TREE_LINE_AT_EQUATOR_METRES}, {@link TREE_LINE_SEA_LEVEL_LATITUDE_DEGREES} | Two published anchors — equatorial tree lines in the Andes and on Kilimanjaro sit near 3 900–4 000 m, and the northern tree line reaches the coast near 70° N. **The straight line between them is this repository's own approximation**, not anybody's table |
  * | {@link SNOW_BAND_METRES} | **This repository's own.** Tree line and snow line are separated by a few hundred metres to a kilometre and no single published figure applies everywhere |
+ * | {@link WINTER_SNOW_SEA_LEVEL_LATITUDE_DEGREES}, {@link WINTER_SNOW_LINE_METRES_PER_DEGREE} | **This repository's own** — #1623, a judgement stated as one: deep in a winter, snow lies to sea level around the Baltic and southern Scandinavia and not on the coasts of the North Sea's south or the Channel, and it lies from the middle hundreds of metres in the Alps. The straight line between those is this repository's approximation, not anybody's table. §"How far a winter brings the snow down" below has its figures |
  * | {@link FOG_OCCLUSION_AT_VIEW_END} | **This repository's own**, and it is a requirement rather than a taste: #241 keeps `VIEW_AHEAD_METRES` at 400 and hides the corridor's cut end with depth instead of extending it. The density follows from this number and from `terrain.ts`'s own view distance, so the two cannot drift |
  * | The eight sRGB endpoints | **This repository's own**, chosen to satisfy the properties `world.test.ts` asserts — the sky's blue channel is always its largest, the ground brightens monotonically from vegetation through rock to snow — rather than to match any image |
  * | {@link SUN_ELEVATION_AT_EQUATOR_DEGREES}, {@link SUN_ELEVATION_AT_POLE_DEGREES} | The *fall* from equator to pole is plane geometry, the same fact {@link warmth} rests on. The two ends of the band are **this repository's own** — the top so that a vertical face is not unlit, the bottom so that no lit colour clips, which `three-renderer.test.ts` checks against {@link PEAK_IRRADIANCE} rather than taking on trust |
  * | {@link SUN_AZIMUTH_DEGREES}, {@link SUN_AMBIENT_SHARE} | **This repository's own.** Each carries its requirement at its own declaration, and each has a `world.test.ts` assertion that goes red if it is set to zero |
  *
+ * ## How far a winter brings the snow down — #1623
+ *
+ * With no winter, snow starts to lie at the tree line and covers the ground
+ * {@link SNOW_BAND_METRES} above it. A full winter (`season.ts` §`Nature`'s
+ * `winter` at 1) brings that start down to {@link SNOW_BAND_METRES} below the
+ * winter snow line, where a winter's snow is complete, never up: the winter
+ * snow line falls {@link WINTER_SNOW_LINE_METRES_PER_DEGREE} metres for every
+ * degree from the equator and reaches sea level at
+ * {@link WINTER_SNOW_SEA_LEVEL_LATITUDE_DEGREES}. A part winter brings it down
+ * that share of the way. At the latitudes the line crosses:
+ *
+ * | Latitude | Tree line: snow starts with no winter | Winter snow line: complete | A full winter's snow starts | Brought down by |
+ * |---|---|---|---|---|
+ * | 40° | 1 671 m | 2 700 m | 1 671 m | 0 m |
+ * | 45° | 1 393 m | 1 950 m | 950 m | 443 m |
+ * | 50° | 1 114 m | 1 200 m | 200 m | 914 m |
+ * | 55° | 836 m | 450 m | −550 m | 1 386 m |
+ * | 60° | 557 m | −300 m | −1 300 m | 1 857 m |
+ * | 65° | 279 m | −1 050 m | −2 050 m | 2 329 m |
+ *
+ * So a sea-level route at 60° is white in mid-January and one at 50° is not,
+ * and below about 40° no winter brings snow lower than the tree line —
+ * `season.ts` §`natureOn` has already faded the season itself out by the
+ * tropics. Only the realistic world draws it (`three-renderer.ts`
+ * §`groundColourIn`'s caller); {@link worldStyle}'s `groundColour` is the
+ * ground with no winter, exactly as before #1623.
+ *
  * ## What it deliberately does not model
  *
- * Weather, season, time of day and aerosol load. None of them is in a
- * `RouteProfile`, and inventing one would make the world stop being a function
- * of the route — which is the one property that keeps #240 clear of ADR 0009
- * entirely. A route ridden twice looks the same twice, and that is the trade.
+ * Weather, time of day and aerosol load. None of them is in a `RouteProfile`,
+ * and inventing one would make the world stop being a function of the route
+ * — which is the one property that keeps #240 clear of ADR 0009 entirely. A
+ * route ridden twice looks the same twice, and that is the trade. The season
+ * is not in a `RouteProfile` either, and since #1623 it is still not in a
+ * {@link WorldStyle}: {@link snowCoverIn} takes it as an argument, from the
+ * calendar `season.ts` reads, so the world stays a function of the route.
  */
 
 import { altitudeMetres, degreesCelsius } from '@onyourleft/domain';
@@ -89,6 +120,21 @@ export interface WorldStyle {
   readonly fogDensity: number;
   /** Where the light comes from, and how much of it — #286. @see SunStyle */
   readonly sun: SunStyle;
+  /** Where snow lies on the ground, and how far a winter brings it down — #1623. @see snowCoverIn */
+  readonly snow: SnowCover;
+}
+
+/**
+ * Where snow lies on a route's ground — #1623. Numbers about the route and no
+ * season: {@link snowCoverIn} is handed the winter.
+ */
+export interface SnowCover {
+  /** The ground with no snow on it at all: what grows there, or rock above the tree line. Packed 0xRRGGBB. */
+  readonly bareColour: number;
+  /** How far the route's mean altitude is above where snow starts to lie with no winter, metres; negative below. */
+  readonly aboveSnowMetres: number;
+  /** How far a full winter brings that start down, metres; 0 where it brings it no lower. */
+  readonly winterLoweringMetres: number;
 }
 
 /**
@@ -169,6 +215,18 @@ export const TREE_LINE_SEA_LEVEL_LATITUDE_DEGREES = 70;
 
 /** How far above the local tree line the ground is taken as permanent snow. */
 export const SNOW_BAND_METRES = 1000;
+
+/**
+ * The latitude a full winter's snow lies complete at sea level from, degrees:
+ * **58** — #1623. This repository's own. @see the provenance table above
+ */
+export const WINTER_SNOW_SEA_LEVEL_LATITUDE_DEGREES = 58;
+
+/**
+ * How far a full winter's snow line rises for each degree toward the equator,
+ * metres: **150** — #1623. This repository's own. @see the provenance table above
+ */
+export const WINTER_SNOW_LINE_METRES_PER_DEGREE = 150;
 
 /**
  * How much of the horizon's colour the corridor's cut end has taken on: 0.95.
@@ -509,18 +567,49 @@ export function worldStyle(profile: RouteProfile): WorldStyle {
   const thinness = clamp01((1 - densityRatio) / THIN_AIR_FULL_SCALE);
 
   const sky = mix(mix(SKY_POLAR, SKY_TROPICAL, warmth), SKY_THIN_AIR, thinness);
+  const snow = snowCover(warmth, altitude, latitude);
   return {
     skyColour: sky,
     // Haze is what the fog is coloured with, and thin air has less of it, so
     // the horizon of an alpine route is very nearly its sky.
     horizonColour: mix(HORIZON_HAZE, sky, thinness),
-    groundColour: groundColour(warmth, altitude, treeLineMetres(latitude)),
+    groundColour: groundColourIn({ snow }, 0),
     fogDensity: Math.max(MINIMUM_FOG_DENSITY, SEA_LEVEL_FOG_DENSITY * densityRatio),
     // On the latitude axis alone, and deliberately not on the altitude one:
     // thinner air makes a sun *harsher*, which is a contrast and a colour
     // rather than a direction, and #286 adds a direction. @see sunFor
     sun: sunFor(warmth),
+    snow,
   };
+}
+
+/**
+ * How much of the ground snow covers, 0 to 1, in a winter 0 to 1 deep (`season.ts`
+ * §`Nature.winter`) — #1623. At no winter it is the snow above the tree line
+ * that {@link worldStyle}'s `groundColour` has always drawn.
+ * @see the header's §"How far a winter brings the snow down"
+ */
+export function snowCoverIn(world: Pick<WorldStyle, 'snow'>, winter: number): number {
+  const { aboveSnowMetres, winterLoweringMetres } = world.snow;
+  return clamp01((aboveSnowMetres + clamp01(winter) * winterLoweringMetres) / SNOW_BAND_METRES);
+}
+
+/**
+ * The ground's colour in a winter 0 to 1 deep — #1623: the colour the realistic
+ * world's ground mesh is drawn in (`three-renderer.ts` §`#stage`), and at no
+ * winter exactly {@link worldStyle}'s `groundColour`, which is this at 0.
+ */
+export function groundColourIn(world: Pick<WorldStyle, 'snow'>, winter: number): number {
+  return mix(world.snow.bareColour, SNOW, snowCoverIn(world, winter));
+}
+
+/**
+ * How much snow a level roof carries, 0 to 1 — #1623: the ground's cover, and
+ * only in a winter, in its depth. A roof is warmer than the ground under it, so
+ * in a summer even a roof above the tree line is bare.
+ */
+export function roofSnowIn(world: Pick<WorldStyle, 'snow'>, winter: number): number {
+  return clamp01(winter) * snowCoverIn(world, winter);
 }
 
 /**
@@ -573,30 +662,43 @@ export function treeLineMetres(latitudeDegrees: number): number {
 }
 
 /**
- * Vegetation, then rock, then snow.
+ * Where snow lies on a route, from its warmth, altitude and latitude — #1623.
  *
- * The two stages are separate rather than one blend because they answer
- * different questions: below the tree line the ground is *what grows there*,
- * which depends on latitude; above it the ground is *what is left*, which does
- * not.
+ * Vegetation, then rock, then snow, as before #1623: snow starts at the tree
+ * line, so `aboveSnowMetres` is the altitude above it, and a winter brings
+ * that start down by `winterLoweringMetres`. The two stages of the bare ground
+ * are separate rather than one blend because they answer different questions:
+ * below the tree line the ground is *what grows there*, which depends on
+ * latitude; above it the ground is *what is left*, which does not.
  *
  * ⚠️ **`treeLineMetres` is exactly 0 at and above 70° of latitude, and the
  * division below is safe there in two steps rather than one.** No `NaN` is
  * reachable: `0 / 0` would produce one, and it cannot happen, because an
- * altitude of 0 with a tree line of 0 satisfies `>=` and takes the branch
- * above. What is left is a route above 70° that is *below sea level*, where
+ * altitude of 0 with a tree line of 0 satisfies `>=` and takes the rock
+ * branch. What is left is a route above 70° that is *below sea level*, where
  * `-430 / 0` is `-Infinity`; `clamp01` maps that to 0 and the answer is
  * vegetation. That is the right answer — polar land below sea level is not
  * bare rock — but it arrives by a route worth writing down, because a reader
  * checking this line for a divide-by-zero finds one and has to reconstruct
  * both steps to see that it is fine.
  */
-function groundColour(warmth: number, altitudeMetresValue: number, treeLineMetres: number): number {
-  if (altitudeMetresValue >= treeLineMetres) {
-    return mix(ROCK, SNOW, clamp01((altitudeMetresValue - treeLineMetres) / SNOW_BAND_METRES));
-  }
-  const vegetation = mix(VEGETATION_POLAR, VEGETATION_TROPICAL, warmth);
-  return mix(vegetation, ROCK, clamp01(altitudeMetresValue / treeLineMetres));
+function snowCover(warmth: number, altitudeMetresValue: number, latitude: number): SnowCover {
+  const treeLine = treeLineMetres(latitude);
+  const bareColour =
+    altitudeMetresValue >= treeLine
+      ? ROCK
+      : mix(
+          mix(VEGETATION_POLAR, VEGETATION_TROPICAL, warmth),
+          ROCK,
+          clamp01(altitudeMetresValue / treeLine),
+        );
+  const winterSnowLine =
+    (WINTER_SNOW_SEA_LEVEL_LATITUDE_DEGREES - latitude) * WINTER_SNOW_LINE_METRES_PER_DEGREE;
+  return {
+    bareColour,
+    aboveSnowMetres: altitudeMetresValue - treeLine,
+    winterLoweringMetres: Math.max(0, treeLine - (winterSnowLine - SNOW_BAND_METRES)),
+  };
 }
 
 /**

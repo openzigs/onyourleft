@@ -166,3 +166,14 @@ export function urbanFixture(
     },
   };
 }
+
+/**
+ * `corridor` with no height mapped on any footprint — #1634's untagged
+ * footprints, which most of a downtown's may be.
+ */
+export function untaggedCorridor(corridor: WorldCorridor): WorldCorridor {
+  return {
+    ...corridor,
+    buildings: corridor.buildings.map((building) => ({ ...building, heightMetres: null })),
+  };
+}

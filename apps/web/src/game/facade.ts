@@ -90,6 +90,16 @@
  * - **the sill's shadow** down the wall below it ({@link SILL}'s depth), a
  *   `shadow`.
  *
+ * ## The overhang's shadow (#1658)
+ *
+ * Under a pitched roof's eaves a wall the sun lights is in the sun's own
+ * shadow from the eaves' edge down, as deep as the sun's slant makes it
+ * ({@link overhangShadowDepth}, {@link overhangShadowAt}, the shader's
+ * `oylOverhangShadow`); a wall the sun is behind keeps #1588's soft band
+ * ({@link FACADE_AO}), and {@link eavesShadeAt} is both. A cornice's and an
+ * awning's shadow are not drawn: a wall's floats do not say that a cornice is
+ * over it, nor a shop front's that an awning is.
+ *
  * ## The porch (#1589)
  *
  * A front porch's railing is one quad (`footprint-buildings.ts`
@@ -110,6 +120,7 @@ import {
   CLAD_SHINGLE,
   DOOR_FACE,
   DOOR_SURROUND_METRES,
+  EAVES_OVERHANG_METRES,
   FACADE_DOOR,
   FACADE_DORMER,
   FACADE_GARAGE,
@@ -119,12 +130,15 @@ import {
   FACADE_SIGN,
   FACADE_RAILING,
   GARAGE,
+  ROOF_PITCHES_DEGREES,
+  ROOF_THICKNESS_METRES,
   STOREY_METRES,
   STYLE_COMMERCIAL,
   STYLE_SASH,
   STYLE_SHUTTERS,
 } from './footprint-buildings';
 import { FRONT_PORCH } from './porch';
+import { SUN_ELEVATION_AT_POLE_DEGREES } from './world';
 
 /** How far a window's sill is above its own floor: **0.9 m**, as a procedural house's is. */
 export const WINDOW_SILL_METRES = 0.9;
@@ -392,6 +406,108 @@ export const FACADE_AO = {
   soffit: 0.65,
   porchFloor: 0.72,
 } as const;
+
+/** The middle of `footprint-buildings.ts` §`ROOF_PITCHES_DEGREES`: the pitch the eaves' edge is placed for. */
+const MIDDLE_PITCH_DEGREES =
+  [...ROOF_PITCHES_DEGREES].sort((a, b) => a - b)[Math.floor(ROOF_PITCHES_DEGREES.length / 2)] ??
+  35;
+
+/**
+ * The sun's own shadow under an overhang — #1658: in the shadow, a wall keeps
+ * `shade` of its light, as #1659's reveal does ({@link REVEAL}'s `shade`), at
+ * a sun square to it at the lowest sun the world has
+ * (`world.ts` §`SUN_ELEVATION_AT_POLE_DEGREES`, whose cosine is `square`)
+ * and less as the sun comes round to graze it: a wall the sun grazes has
+ * little of its light to lose. `edge` is how far the eaves' edge is below the
+ * wall's top: a pitched roof's overhang falls by its slope across
+ * `footprint-buildings.ts` §`EAVES_OVERHANG_METRES`, and its fascia is
+ * `ROOF_THICKNESS_METRES` deep under that. ⚠️ A wall's floats do not carry its
+ * roof's pitch, so the edge is placed for the middle pitch: on the shallowest
+ * roof it is 9 cm too low and on the steepest 12 cm too high.
+ */
+export const OVERHANG_SHADOW = {
+  shade: REVEAL.shade,
+  square: Math.cos((SUN_ELEVATION_AT_POLE_DEGREES * Math.PI) / 180),
+  edge:
+    ROOF_THICKNESS_METRES +
+    EAVES_OVERHANG_METRES * Math.tan((MIDDLE_PITCH_DEGREES * Math.PI) / 180),
+} as const;
+
+/** GLSL's `smoothstep`, and with `lo === hi` a step at it. */
+function smoothstep(lo: number, hi: number, x: number): number {
+  if (!(hi > lo)) return x < lo ? 0 : 1;
+  const t = Math.min(1, Math.max(0, (x - lo) / (hi - lo)));
+  return t * t * (3 - 2 * t);
+}
+
+/**
+ * How far down a wall a horizontal edge `projection` metres proud of it
+ * throws the sun's shadow — #1658: `projection · s.y / s.z`, with the sun
+ * `sun` in the face's frame, at most the wall's height `wall`; none where the
+ * sun is behind the face.
+ *
+ * @test-facing held by `overhang-shadows.test.ts`; the shader's `oylOverhangShadow`
+ */
+export function overhangShadowDepth(
+  projection: number,
+  sun: FaceDirection,
+  wall = Number.POSITIVE_INFINITY,
+): number {
+  const [, up, out] = sun;
+  if (!(out > 0)) return 0;
+  return Math.min((projection * Math.max(up, 0)) / out, wall);
+}
+
+/**
+ * How much of a point `below` metres under an overhang's edge is in its
+ * shadow, 0 to 1 — #1658, the shader's `oylOverhangShadow`: all of it inside
+ * {@link overhangShadowDepth}, none past it, softened over `pw`, the
+ * fragment's footprint in metres, so that the edge is crisp near and never
+ * crawls, and at a far fade is the footprint's mean.
+ *
+ * @test-facing held by `overhang-shadows.test.ts`; the product draws it in the shader
+ */
+export function overhangShadowAt(
+  below: number,
+  projection: number,
+  sun: FaceDirection,
+  pw = 0,
+  wall = Number.POSITIVE_INFINITY,
+): number {
+  if (!(sun[2] > 0)) return 0;
+  const depth = overhangShadowDepth(projection, sun, wall);
+  return 1 - smoothstep(depth - pw, depth + pw, below);
+}
+
+/**
+ * What share of its light a point `below` metres under a wall's top keeps
+ * under its eaves — #1658, the shader's §"3. The shade": #1588's soft band
+ * ({@link FACADE_AO}'s `eaves` over `eavesMetres`) on a face the sun is behind,
+ * and on one it lights the darker of that and the sun's shadow from the
+ * eaves' edge ({@link OVERHANG_SHADOW}), {@link EAVES_OVERHANG_METRES} proud.
+ * With `shadows` false, #1588's band alone on every face: the owner's
+ * `-overhang-shadows`, which is `main` before #1658.
+ *
+ * @test-facing held by `overhang-shadows.test.ts`; the product draws it in the shader
+ */
+export function eavesShadeAt(
+  below: number,
+  sun: FaceDirection,
+  options: { readonly pw?: number; readonly wall?: number; readonly shadows?: boolean } = {},
+): number {
+  const ao = 1 - (1 - FACADE_AO.eaves) * (1 - smoothstep(0, FACADE_AO.eavesMetres, below));
+  if (options.shadows === false) return ao;
+  const strength =
+    (1 - OVERHANG_SHADOW.shade) * Math.min(1, Math.max(0, sun[2] / OVERHANG_SHADOW.square));
+  const shadow = overhangShadowAt(
+    below - OVERHANG_SHADOW.edge,
+    EAVES_OVERHANG_METRES,
+    sun,
+    options.pw ?? 0,
+    options.wall,
+  );
+  return Math.min(ao, 1 - strength * shadow);
+}
 
 /**
  * A porch's railing — #1589: what shows between its rails and balusters, as

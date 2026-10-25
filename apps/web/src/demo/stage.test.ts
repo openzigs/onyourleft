@@ -13,6 +13,8 @@ import {
   INITIAL_QUALITY,
   INITIAL_REALISTIC_QUALITY,
   qualitySettings,
+  REALISTIC_LADDER,
+  SUSTAINED_SAMPLES,
   worldRung,
 } from '../game/quality';
 import {
@@ -24,6 +26,16 @@ import { createDemoPlayer } from './player';
 import { CLIMB_PRESET } from './presets';
 import { startDemoStage, type DemoSnapshot } from './stage';
 import { fakeDrawnWorld, fakeRenderer, SteppedFrames, type FakeView } from './stage-testing';
+
+/**
+ * Slow frames enough to walk off the bottom of the realistic ladder and no
+ * more: each rung takes {@link SUSTAINED_SAMPLES} slow frames, and the pacer's
+ * first frame has no frame time to give. Stepping further only rides the real
+ * player down the stylised ladder too, which is what made these tests slow.
+ */
+const FRAMES_TO_LEAVE_REALISM = 1 + REALISTIC_LADDER.length * SUSTAINED_SAMPLES;
+/** A frame time the ladder reads as slow — over `FRAME_MS_REDUCE_ABOVE`. */
+const SLOW_FRAME_MS = 50;
 
 function stageWith(outcome: Promise<RealisticWorldOutcome> = new Promise(() => undefined)) {
   const frames = new SteppedFrames();
@@ -41,10 +53,7 @@ function stageWith(outcome: Promise<RealisticWorldOutcome> = new Promise(() => u
   return { frames, view: views[0] as FakeView, player, stage, snapshots };
 }
 
-// Two cases ride a hundred seconds of the simulation frame by frame: 1.2 s on
-// a quiet machine, and past Vitest's default 5 s on a loaded CI runner (#1683's
-// PR, twice running).
-describe('the demo stage — #1647', { timeout: 30_000 }, () => {
+describe('the demo stage — #1647', () => {
   it('draws one still frame of a paused player, and then asks for nothing', () => {
     const { frames, view, player } = stageWith();
     frames.step(10);
@@ -144,7 +153,7 @@ describe('the demo stage — #1647', { timeout: 30_000 }, () => {
   it('steps down the product ladder on slow frames, and says so on leaving realism', () => {
     const { frames, view, stage, snapshots } = stageWith();
     stage.play();
-    frames.step(2000, 50);
+    frames.step(FRAMES_TO_LEAVE_REALISM, SLOW_FRAME_MS);
     expect(view.qualities.length).toBeGreaterThan(1);
     expect(view.qualities.at(-1)?.world).toBe('stylised');
     expect(snapshots.at(-1)).toMatchObject({
@@ -161,7 +170,7 @@ describe('the demo stage — #1647', { timeout: 30_000 }, () => {
       }),
     );
     stage.play();
-    frames.step(2000, 50);
+    frames.step(FRAMES_TO_LEAVE_REALISM, SLOW_FRAME_MS);
     expect(view.qualities.at(-1)?.world).toBe('stylised');
     const settings = view.qualities.length;
     arrive({ loaded: true });
