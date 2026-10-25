@@ -15,7 +15,7 @@ import { denseTownFixture } from './footprint-fixtures-testing';
 import { landClassMask } from './land-class';
 import { circuitRoute, hairpinRoute } from './route-fixtures-testing';
 import { corridorOrigin } from './terrain';
-import { urbanFixture, type UrbanStretch } from './testing/urban-fixtures';
+import { untaggedCorridor, urbanFixture, type UrbanStretch } from './testing/urban-fixtures';
 import { NO_URBAN_CLASS, urbanClassMap, type UrbanClass } from './urban-class';
 
 /** The class of every 100 m window of a fixture, from its middle. */
@@ -251,5 +251,125 @@ describe('urbanClassMap — handed to the footprints at the press (#1633)', () =
     const map = urbanClassMap(town.corridor, landClassMask(town.corridor), town.profile);
     // 8 × 8 m houses on a 12 m grid to 215 m out: well past a town's coverage.
     expect(map.classAt(700)).toBe('town');
+  });
+});
+
+/** A city locality of rank 10, 400 m west of the road at 1 300 m along (#1632). */
+const CITY_POINT = {
+  kind: 'locality',
+  kindDetail: 'city',
+  populationRank: 10,
+  along: 1_300,
+  out: 400,
+} as const;
+
+type FixturePlaces = NonNullable<NonNullable<Parameters<typeof urbanFixture>[1]>['places']>;
+
+/** Every window's class from 1 000 m to 1 600 m, with the given stretch and places. */
+function withPlaces(
+  kind: UrbanStretch['kind'],
+  places: FixturePlaces,
+  uncovered?: { from: number; to: number }[],
+): UrbanClass[] {
+  const fixture = urbanFixture([{ kind, from: 1_000, to: 1_600 }], {
+    places,
+    ...(uncovered === undefined ? {} : { uncovered }),
+  });
+  const map = urbanClassMap(fixture.corridor, landClassMask(fixture.corridor), fixture.profile);
+  return windows((along) => map.classAt(along), 1_000, 1_600);
+}
+
+describe('urbanClassMap — the place prior (#1632, ADR 0055 D-5)', () => {
+  const town = Array<UrbanClass>(6).fill('town');
+  const city = Array<UrbanClass>(6).fill('city-centre');
+
+  it('lifts a borderline town to a city centre with a city locality within reach, and not without', () => {
+    expect(withPlaces('town', [])).toEqual(town);
+    expect(withPlaces('town', [CITY_POINT])).toEqual(city);
+  });
+
+  it('lifts it with a suburb of any rank, too', () => {
+    expect(
+      withPlaces('town', [
+        { kind: 'neighbourhood', kindDetail: 'suburb', populationRank: 1, along: 1_300, out: 50 },
+      ]),
+    ).toEqual(city);
+  });
+
+  it('lifts a town of a city centre’s coverage with no mapped height: no upper bound on coverage', () => {
+    const fixture = urbanFixture([{ kind: 'city-height', from: 1_000, to: 1_400 }], {
+      places: [{ ...CITY_POINT, along: 1_200 }],
+    });
+    const classes = (corridor: typeof fixture.corridor): UrbanClass[] => {
+      const map = urbanClassMap(corridor, landClassMask(corridor), fixture.profile);
+      return windows((along) => map.classAt(along), 1_000, 1_400);
+    };
+    expect(classes(untaggedCorridor({ ...fixture.corridor, places: [] }))).toEqual(
+      Array(4).fill('town'),
+    );
+    expect(classes(untaggedCorridor(fixture.corridor))).toEqual(Array(4).fill('city-centre'));
+  });
+
+  it('does not lift a town under the prior’s coverage', () => {
+    expect(withPlaces('thin-town', [])).toEqual(town);
+    expect(withPlaces('thin-town', [CITY_POINT])).toEqual(town);
+  });
+
+  it('does not lift with a city below the rank gate, and does at it', () => {
+    expect(withPlaces('town', [{ ...CITY_POINT, populationRank: 8 }])).toEqual(town);
+    expect(withPlaces('town', [{ ...CITY_POINT, populationRank: 9 }])).toEqual(city);
+  });
+
+  it('does not lift with a city beyond reach of every window', () => {
+    // The nearest window centre is 1 050 m along: 820 m west of it is out of reach, 780 m in.
+    expect(withPlaces('town', [{ ...CITY_POINT, along: 1_050, out: 820 }])).toEqual(town);
+    expect(withPlaces('town', [{ ...CITY_POINT, along: 1_050, out: 780 }])).not.toEqual(town);
+  });
+
+  it.each([
+    ['locality', 'town'],
+    ['locality', 'village'],
+    ['locality', 'hamlet'],
+    ['macrohood', 'quarter'],
+  ] as const)('never lifts with a %s/%s point, whatever its rank', (kind, kindDetail) => {
+    expect(
+      withPlaces('town', [
+        { kind, kindDetail, populationRank: 18, along: 1_300, out: 0 },
+        { kind, kindDetail, populationRank: 10, along: 1_300, out: 10 },
+      ]),
+    ).toEqual(town);
+  });
+
+  it('leaves rural and village built form as it is with a city inside it', () => {
+    const at = { ...CITY_POINT, populationRank: 18, out: 0 };
+    expect(withPlaces('rural', [at])).toEqual(Array(6).fill('rural'));
+    expect(withPlaces('village', [at])).toEqual(Array(6).fill('village'));
+  });
+
+  it('leaves a window with no corridor unknown, whatever places exist nearby', () => {
+    expect(
+      withPlaces(
+        'town',
+        [
+          { ...CITY_POINT, out: 0 },
+          { kind: 'neighbourhood', kindDetail: 'suburb', populationRank: 4, along: 1_300, out: 0 },
+        ],
+        [{ from: 1_000, to: 1_600 }],
+      ),
+    ).toEqual(Array(6).fill('unknown'));
+  });
+
+  it('is applied before the smoothing: a lift too short to stand is smoothed away', () => {
+    const fixture = urbanFixture(
+      [
+        { kind: 'thin-town', from: 1_000, to: 1_400 },
+        { kind: 'town', from: 1_400, to: 1_500 },
+        { kind: 'thin-town', from: 1_500, to: 1_900 },
+      ],
+      { places: [{ ...CITY_POINT, along: 1_450, out: 0 }] },
+    );
+    const map = urbanClassMap(fixture.corridor, landClassMask(fixture.corridor), fixture.profile);
+    // Only the middle window is a borderline town; lifted alone, it is shorter than a run.
+    expect(windows((along) => map.classAt(along), 1_000, 1_900)).toEqual(Array(9).fill('town'));
   });
 });

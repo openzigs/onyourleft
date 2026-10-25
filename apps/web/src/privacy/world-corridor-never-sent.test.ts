@@ -19,13 +19,38 @@
  * another name. ADR 0054 D-3.5's payload test (#1539: every export, sync and
  * write-up payload built from a populated store, with no byte of it inside) is
  * the one that reads what is actually sent.
+ *
+ * #1632 (ADR 0055 D-7.2): the scan holds for a corridor that holds place
+ * points, and the last case reads one through the port `main.tsx` builds: the
+ * read asks the archive for nothing more than the same corridor without places
+ * asks for, makes no other request, and no request carries a place's name.
  */
 
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { describe, expect, it } from 'vitest';
+import { corridorTileCover } from '@onyourleft/map-features';
+import { PLACE_SENTINEL, placesTile, sidewalkTile } from '@onyourleft/map-features/testing';
+import { openActivityStore } from '@onyourleft/store';
+import {
+  ATHLETE_A,
+  createStoreHarness,
+  resetFixtureIds,
+  routeFor,
+  seedAthletes,
+} from '@onyourleft/store/testing';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import { CORRIDOR_HALF_WIDTH_METRES } from '../game/world-data/corridor';
+import {
+  buildArchive,
+  countingSource,
+  tilesRequested,
+  type ArchiveTile,
+} from '../world-data/archive-testing';
+import { createWorldCorridorPort } from '../world-data/corridor-port';
+import { corridorArchiveFrom } from '../world-data/corridor-source';
 
 /** The names that reach the store. Any of them in a module is that module reaching it. */
 const CORRIDOR_NAMES = ['worldCorridors', 'getWorldCorridor', 'WorldCorridorRecord'] as const;
@@ -90,5 +115,62 @@ describe('no instance module names the world corridor store — #1545', () => {
       offenders,
       'the world corridor store is ODbL data that never leaves the device (ADR 0054 D-3.5)',
     ).toStrictEqual([]);
+  });
+});
+
+describe('a corridor that holds places sends nothing more — #1632, ADR 0055 D-4, D-7.2', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  /** Reads `route`'s corridor through the product's port over `tiles`, and what it asked for. */
+  async function readOver(tile: () => Uint8Array) {
+    resetFixtureIds();
+    const harness = createStoreHarness();
+    await seedAthletes(harness, [ATHLETE_A]);
+    const route = routeFor(ATHLETE_A);
+    await harness.write((store) => store.putRoute(route));
+    const tiles: ArchiveTile[] = corridorTileCover(
+      route.profile.positions,
+      CORRIDOR_HALF_WIDTH_METRES + 2_000,
+      2_000,
+    ).map((at) => ({ x: at.x, y: at.y, bytes: tile() }));
+    const bytes = await buildArchive({ tiles });
+    const source = countingSource(bytes);
+    const store = openActivityStore(harness.databaseName);
+    try {
+      const state = await createWorldCorridorPort({
+        store,
+        owner: ATHLETE_A,
+        basemap: () => ({ archiveUrl: 'https://tiles.example.org/b.pmtiles', attribution: '' }),
+        archive: () => corridorArchiveFrom(source),
+        mapTilesOn: () => true,
+        realisticOn: () => true,
+        recording: () => false,
+        now: () => new Date('2026-10-25T12:00:00Z'),
+        yieldToIdle: () => Promise.resolve(),
+      }).load({ id: route.id, profile: route.profile }, new AbortController().signal, () => {});
+      return { state, calls: source.calls, requested: tilesRequested(tiles, bytes, source.calls) };
+    } finally {
+      store.close();
+      await harness.destroy();
+    }
+  }
+
+  it('asks the archive for the same tiles with places as without, and makes no other request', async () => {
+    const fetches = vi.fn(() => Promise.reject(new TypeError('no network in this test')));
+    vi.stubGlobal('fetch', fetches);
+    const withPlaces = await readOver(placesTile);
+    const without = await readOver(sidewalkTile);
+    // Not vacuous: the read holds places, with names in the tiles they came from.
+    expect(withPlaces.state.kind === 'ready' && withPlaces.state.corridor.places?.length).toBe(
+      6 * withPlaces.requested.length,
+    );
+    expect(withPlaces.requested.length).toBeGreaterThan(0);
+    expect(withPlaces.requested).toStrictEqual(without.requested);
+    expect(withPlaces.calls.length).toBe(without.calls.length);
+    expect(fetches).not.toHaveBeenCalled();
+    expect(JSON.stringify(withPlaces.calls)).not.toContain(PLACE_SENTINEL);
+    expect(JSON.stringify(withPlaces.state)).not.toContain(PLACE_SENTINEL);
   });
 });

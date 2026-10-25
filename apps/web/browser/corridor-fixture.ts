@@ -24,6 +24,7 @@ import {
   lakeTile,
   line,
   outerRing,
+  points,
   polygon,
   rectangle,
   residentialBlockTile,
@@ -110,11 +111,41 @@ export const CORRIDOR_FIXTURE_VERDICTS: FootprintVerdicts = {
   'too-large': 0,
 };
 
+/**
+ * #1632: the sidewalk tile with a `places` layer of a town, a village and a
+ * hamlet point — kinds ADR 0055 D-5.5 holds and that lift nothing, so the
+ * world drawn is the one without them. A tile is a run of layer messages, so
+ * the places layer is the second tile's bytes after the first's.
+ */
+export function sidewalkWithPlacesTile(): Uint8Array {
+  const sidewalk = sidewalkTile();
+  const places = encodeTile([
+    {
+      name: 'places',
+      features: (
+        [
+          ['town', 7, 900],
+          ['village', 4, 2000],
+          ['hamlet', 1, 3100],
+        ] as const
+      ).map(([detail, rank, row]) => ({
+        type: 1,
+        tags: { kind: 'locality', kind_detail: detail, population_rank: rank },
+        geometry: points([[2000, row]]),
+      })),
+    },
+  ]);
+  const out = new Uint8Array(sidewalk.length + places.length);
+  out.set(sidewalk);
+  out.set(places, sidewalk.length);
+  return out;
+}
+
 const FIXTURES = [
   residentialBlockTile,
   woodWithHoleTile,
   lakeTile,
-  sidewalkTile,
+  sidewalkWithPlacesTile,
   roadsideWoodTile,
 ] as const;
 
@@ -212,6 +243,7 @@ export function expectedCorridorCounts(): {
   readonly landUse: number;
   readonly paths: number;
   readonly streets: number;
+  readonly places: number;
 } {
   const plan = planCorridor(corridorFixtureRoute().positions, []);
   if (plan === undefined) throw new Error('the fixture route plans no corridor');
@@ -219,6 +251,7 @@ export function expectedCorridorCounts(): {
   let landUse = 0;
   let paths = 0;
   let streets = 0;
+  let places = 0;
   for (const tile of corridorFixtureTiles()) {
     const decoded = decodeTile(tile.bytes, { z: 15, x: tile.x, y: tile.y }, plan.frame);
     if ('reason' in decoded) throw new Error(`a fixture tile was refused: ${decoded.reason}`);
@@ -226,8 +259,9 @@ export function expectedCorridorCounts(): {
     landUse += decoded.landUse.length;
     paths += decoded.paths.length;
     streets += decoded.streets.length;
+    places += decoded.places.length;
   }
-  return { tiles: plan.requestable.length, buildings, landUse, paths, streets };
+  return { tiles: plan.requestable.length, buildings, landUse, paths, streets, places };
 }
 
 /** One item a frame stands in the world, and the class of the ground under it — #1546. */

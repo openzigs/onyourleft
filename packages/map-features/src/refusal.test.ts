@@ -15,6 +15,7 @@ const UNLIMITED: DecodeLimits = {
   maxVerticesPerFeature: Number.POSITIVE_INFINITY,
   maxVerticesPerTile: Number.POSITIVE_INFINITY,
   maxRingsPerPolygon: Number.POSITIVE_INFINITY,
+  maxPlacesPerTile: Number.POSITIVE_INFINITY,
 };
 
 /** Every maximal run of digits in a string. */
@@ -37,6 +38,7 @@ function locationDigits(bytes: Uint8Array): Set<string> {
       ...lifted.landUse.flatMap((f) => f.rings),
       ...lifted.buildings.flatMap((f) => f.rings),
       ...lifted.paths.map((p) => p.line),
+      ...lifted.places.map((p) => Float32Array.of(p.x, p.z)),
     ];
     for (const array of arrays) {
       for (const value of array) {

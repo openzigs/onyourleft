@@ -302,6 +302,8 @@ export interface CorridorHarness {
   readonly paths: number;
   /** #1565: the streets the corridor kept. */
   readonly streets: number;
+  /** #1632: the place points the corridor kept. */
+  readonly places: number;
   readonly sceneDigest: string;
   readonly proceduralDigest: string;
   readonly milliseconds: number;
@@ -499,6 +501,7 @@ async function run(): Promise<CorridorHarness> {
     landUse: ready?.landUse.length ?? 0,
     paths: ready?.paths.length ?? 0,
     streets: ready?.streets.length ?? 0,
+    places: ready?.places?.length ?? 0,
     sceneDigest: digestOf(ready),
     proceduralDigest: digestOf(undefined),
     milliseconds,
@@ -534,6 +537,7 @@ void run().then(
       landUse: 0,
       paths: 0,
       streets: 0,
+      places: 0,
       sceneDigest: '',
       proceduralDigest: '',
       milliseconds: 0,

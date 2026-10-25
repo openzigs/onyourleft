@@ -7,16 +7,22 @@ import { describe, expect, it } from 'vitest';
 import { decodeTile } from './decode';
 import {
   buildingPartTile,
+  DROPPED_PLACE_FIXTURES,
   FIXTURE_EXTENT,
   FIXTURE_FRAME,
   FIXTURE_TILE,
   footprintTile,
   footwayTile,
   HOSTILE_FIXTURES,
+  KEPT_PLACE,
   LIMIT_NAMES,
   lakeTile,
   millionLineToTile,
   NAMED_FIXTURES,
+  PLACE_FIXTURE_POINTS,
+  PLACE_SENTINEL,
+  placesTile,
+  placesTileOf,
   POISON,
   RESIDENTIAL_FOOTPRINTS,
   residentialBlockTile,
@@ -29,7 +35,12 @@ import {
   WOOD_OUTER,
   woodWithHoleTile,
 } from './testing';
-import { DEFAULT_DECODE_LIMITS, MAX_FEATURES_PER_LAYER, MAX_VERTICES_PER_TILE } from './limits';
+import {
+  DEFAULT_DECODE_LIMITS,
+  MAX_FEATURES_PER_LAYER,
+  MAX_PLACES_PER_TILE,
+  MAX_VERTICES_PER_TILE,
+} from './limits';
 import type { DecodedTile, DecodeRefusal } from './types';
 
 function decoded(bytes: Uint8Array): DecodedTile {
@@ -234,6 +245,8 @@ describe('decodeTile returns only the fields P-4 names', () => {
         'kindDetail',
         'grade',
         'line',
+        'places',
+        'populationRank',
       ];
       for (const key of keys) expect(allowed).toContain(key);
       const poisonValues: unknown[] = Object.values(POISON);
@@ -249,6 +262,63 @@ describe('decodeTile returns only the fields P-4 names', () => {
       expect(text).not.toContain(POISON.pmapKind);
     });
   }
+});
+
+describe('decodeTile reads places: the kind and the rank, never the name (#1632, ADR 0055)', () => {
+  it('keeps every kind and detail ADR 0055 D-2 lists, with its rank, at its point', () => {
+    const tile = decoded(placesTile());
+    expect(tile.places.map((p) => [p.kind, p.kindDetail, p.populationRank])).toStrictEqual(
+      PLACE_FIXTURE_POINTS.map((p) => [p.kind, p.kindDetail, p.populationRank]),
+    );
+    PLACE_FIXTURE_POINTS.forEach((place, index) => {
+      const want = expectedMetres(place.at[0], place.at[1]);
+      const got = tile.places[index];
+      expect(Math.abs((got?.x ?? Number.NaN) - want.x)).toBeLessThan(0.01);
+      expect(Math.abs((got?.z ?? Number.NaN) - want.z)).toBeLessThan(0.01);
+    });
+  });
+
+  it('carries no name, wikidata or population: the sentinel is nowhere in the result', () => {
+    const tile = decoded(placesTile());
+    // Not vacuous: the sentinel's places were decoded.
+    expect(tile.places).toHaveLength(PLACE_FIXTURE_POINTS.length);
+    const text = JSON.stringify(tile);
+    expect(text).not.toContain(PLACE_SENTINEL);
+    expect(text).not.toContain('271828');
+    expect(text).not.toContain('yes');
+    expect(Object.keys(tile.places[0] ?? {}).sort()).toStrictEqual([
+      'kind',
+      'kindDetail',
+      'populationRank',
+      'x',
+      'z',
+    ]);
+  });
+
+  it('a tile with no places layer has none, and #1544’s residential block’s detail-less place is dropped', () => {
+    expect(decoded(sidewalkTile()).places).toStrictEqual([]);
+    expect(decoded(residentialBlockTile()).places).toStrictEqual([]);
+  });
+
+  for (const fixture of DROPPED_PLACE_FIXTURES) {
+    it(`${fixture.name}: dropped without throwing; the tile and the other place stand`, () => {
+      const result = decodeTile(fixture.bytes(), FIXTURE_TILE, FIXTURE_FRAME);
+      if ('reason' in result) throw new Error(`refused: ${result.reason}`);
+      expect(result.buildings).toHaveLength(1);
+      expect(result.places.map((p) => [p.kind, p.kindDetail, p.populationRank])).toStrictEqual([
+        [KEPT_PLACE.kind, KEPT_PLACE.kindDetail, KEPT_PLACE.populationRank],
+      ]);
+    });
+  }
+
+  it(`stops at ${String(MAX_PLACES_PER_TILE)} places a tile, and the tile is not refused`, () => {
+    const over = decoded(placesTileOf(MAX_PLACES_PER_TILE + 5));
+    expect(over.places).toHaveLength(MAX_PLACES_PER_TILE);
+    // The kept ones are the first: every place past the bound has rank 11.
+    expect(over.places.every((p) => p.populationRank === 10)).toBe(true);
+    expect(over.buildings).toHaveLength(1);
+    expect(decoded(placesTileOf(MAX_PLACES_PER_TILE)).places).toHaveLength(MAX_PLACES_PER_TILE);
+  });
 });
 
 describe('decodeTile refuses hostile input, and never throws', () => {

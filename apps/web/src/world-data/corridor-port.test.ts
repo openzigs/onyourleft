@@ -18,9 +18,11 @@ import {
   type GeographicPosition,
   type RouteProfile,
 } from '@onyourleft/domain';
-import { corridorTileCover, tileBounds } from '@onyourleft/map-features';
+import { corridorTileCover, tileBounds, type PlaceFeature } from '@onyourleft/map-features';
 import {
   lakeTile,
+  PLACE_SENTINEL,
+  placesTile,
   residentialBlockTile,
   sidewalkTile,
   woodWithHoleTile,
@@ -41,7 +43,12 @@ import {
 } from '@onyourleft/store/testing';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { CORRIDOR_HALF_WIDTH_METRES, type CorridorState } from '../game/world-data/corridor';
+import {
+  CORRIDOR_HALF_WIDTH_METRES,
+  CORRIDOR_READER_VERSION,
+  packCorridorFeatures,
+  type CorridorState,
+} from '../game/world-data/corridor';
 import { circuitRoute } from '../game/route-fixtures-testing';
 import { insideZone, type CoordinateAt } from '../privacy/boundaries';
 import {
@@ -52,7 +59,7 @@ import {
   type CountingSource,
 } from './archive-testing';
 import { lazyWorldCorridorPort, readingCorridorOnSave } from './corridor-lazy';
-import { createWorldCorridorPort, type WorldCorridorPort } from './corridor-port';
+import { createWorldCorridorPort, routeDigestOf, type WorldCorridorPort } from './corridor-port';
 import { corridorArchiveFrom } from './corridor-source';
 
 const ARCHIVE_URL = 'https://tiles.example.org/basemap-us-test.pmtiles';
@@ -181,6 +188,121 @@ describe('read once, then from the store', () => {
     expect(kept?.halfWidthMetres).toBe(CORRIDOR_HALF_WIDTH_METRES);
     expect(kept?.tiles.length).toBeGreaterThan(0);
     expect(kept?.tiles.every((tile) => tile.state === 'covered')).toBe(true);
+  });
+});
+
+describe('#1632 place points: kept, read back, and a row of another reader version read again', () => {
+  /** The route's corridor with every other tile #1632's places fixture. */
+  function tilesWithPlaces(profile: RouteProfile): ArchiveTile[] {
+    return corridorTiles(profile).map((tile, index) =>
+      index % 2 === 0 ? { ...tile, bytes: placesTile() } : tile,
+    );
+  }
+
+  function placesOf(state: CorridorState): readonly PlaceFeature[] {
+    if (state.kind !== 'ready') throw new Error(`not ready: ${state.kind}`);
+    return state.corridor.places ?? [];
+  }
+
+  /** The kept row's features, as JSON text. */
+  async function keptText(route: RouteRecord): Promise<string> {
+    const kept = await harness.read((store) => store.getWorldCorridor(ATHLETE_A, route.id));
+    if (kept === undefined) throw new Error('nothing kept');
+    const json = kept.features.stream().pipeThrough(new DecompressionStream('gzip'));
+    return new Response(json).text();
+  }
+
+  /** Keeps a row for `route` as another reader would have: its version, and its packed blob. */
+  async function keepRow(route: RouteRecord, readerVersion: number, features: Blob): Promise<void> {
+    const covered = corridorTileCover(route.profile.positions, CORRIDOR_HALF_WIDTH_METRES, 600);
+    // It matches the route in everything but its reader version.
+    const routeDigest = await routeDigestOf(route.profile.positions);
+    await harness.write((store) =>
+      store.putWorldCorridor({
+        owner: ATHLETE_A,
+        routeId: route.id,
+        routeDigest,
+        archive: { url: ARCHIVE_URL, identity: '"fixture-1"' },
+        readerVersion,
+        halfWidthMetres: CORRIDOR_HALF_WIDTH_METRES,
+        readAt: '2026-10-20T12:00:00.000Z',
+        tiles: covered.map((tile) => ({ x: tile.x, y: tile.y, state: 'covered' as const })),
+        features,
+        licence: 'ODbL-1.0',
+      }),
+    );
+  }
+
+  /** A gzip blob of `value` as JSON, as a packed `features` is. */
+  async function gzipJson(value: unknown): Promise<Blob> {
+    const stream = new Blob([JSON.stringify(value)])
+      .stream()
+      .pipeThrough(new CompressionStream('gzip'));
+    return new Blob([await new Response(stream).arrayBuffer()]);
+  }
+
+  it('reads a corridor that holds places, keeps it, and a fresh store hands back the same places', async () => {
+    const route = await savedRoute();
+    const source = countingSource(await buildArchive({ tiles: tilesWithPlaces(route.profile) }));
+    const first = placesOf(await load(portOver(freshStore(), source, on()), route));
+    // Every kind ADR 0055 D-2 keeps is held, the ones that lift nothing too (D-5.5).
+    expect(new Set(first.map((place) => place.kindDetail))).toStrictEqual(
+      new Set(['city', 'town', 'village', 'hamlet', 'suburb', 'quarter']),
+    );
+    const calls = source.calls.length;
+
+    for (const store of stores) store.close();
+    const second = await load(portOver(freshStore(), source, on()), route);
+    expect(source.calls.length).toBe(calls);
+    expect(placesOf(second)).toStrictEqual(first);
+    const kept = await harness.read((store) => store.getWorldCorridor(ATHLETE_A, route.id));
+    expect(kept?.readerVersion).toBe(CORRIDOR_READER_VERSION);
+    expect(CORRIDOR_READER_VERSION).toBe(3);
+    // No name, `wikidata` or population reached the store (ADR 0055 D-3).
+    const text = await keptText(route);
+    expect(text).toContain('"places"');
+    expect(text).not.toContain(PLACE_SENTINEL);
+  });
+
+  it('reads again a row kept at reader version 2, with no places, rather than trusting it', async () => {
+    const route = await savedRoute();
+    const source = countingSource(await buildArchive({ tiles: tilesWithPlaces(route.profile) }));
+    await keepRow(
+      route,
+      2,
+      await gzipJson({ v: 2, landUse: [], buildings: [], paths: [], streets: [] }),
+    );
+
+    const state = await load(portOver(freshStore(), source, on()), route);
+    expect(source.calls.length).toBeGreaterThan(0);
+    expect(placesOf(state).length).toBeGreaterThan(0);
+    const kept = await harness.read((store) => store.getWorldCorridor(ATHLETE_A, route.id));
+    expect(kept?.readerVersion).toBe(CORRIDOR_READER_VERSION);
+  });
+
+  it('reads again a row kept by a newer reader, rather than decoding it as its own', async () => {
+    // A version-3 row met by version-2 code is this: a row of a reader version
+    // other than its own, whose blob it could otherwise parse. Trusted only at
+    // exactly its own version, never at a later one.
+    const route = await savedRoute();
+    const source = countingSource(await buildArchive({ tiles: tilesWithPlaces(route.profile) }));
+    await keepRow(
+      route,
+      CORRIDOR_READER_VERSION + 1,
+      await packCorridorFeatures({
+        landUse: [],
+        buildings: [],
+        paths: [],
+        streets: [],
+        places: [],
+      }),
+    );
+
+    const state = await load(portOver(freshStore(), source, on()), route);
+    expect(source.calls.length).toBeGreaterThan(0);
+    expect(placesOf(state).length).toBeGreaterThan(0);
+    const kept = await harness.read((store) => store.getWorldCorridor(ATHLETE_A, route.id));
+    expect(kept?.readerVersion).toBe(CORRIDOR_READER_VERSION);
   });
 });
 
