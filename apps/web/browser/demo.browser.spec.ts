@@ -51,6 +51,18 @@
  * load, which on SwiftShader holds a CPU for a minute and is paid by the
  * preset cases already.
  *
+ * ## One realistic load
+ *
+ * The demo starts loading the realistic world at once, and on SwiftShader that
+ * load holds a CPU for most of a minute: three of them in the `browser-1`
+ * shard took it past its 720 s stop with 20 cases not run (#1648's second CI
+ * run). So the **climb** rides over the real load, and is the case that
+ * audits the realistic world's code for requests, Bluetooth and storage; the
+ * sprint, the group and the reduced-motion case are each answered 404 for
+ * the realistic files, so they ride the stylised world the demo falls back to
+ * (ADR 0026 D-7) and each is audited over that. That the realistic world
+ * DRAWS in the demo, under its policy, is `demo-world.browser.spec.ts`'s.
+ *
  * ## What it does NOT prove
  *
  * - **GPU cost on a phone.** This is SwiftShader on a CI runner: it proves the
@@ -194,14 +206,22 @@ function installRecorders(): void {
   });
 }
 
-/**
- * Record every request `context` makes, and install the recorders.
- * `rewrite`, if given, changes the page's HTML on its way in — a control's.
- */
+interface WatchOptions {
+  /** Changes the page's HTML on its way in — a control's. */
+  readonly rewrite?: (html: string) => string;
+  /**
+   * Whether the realistic world's files are served. When `false` each is
+   * answered 404 (and still recorded), so the demo draws the stylised world
+   * and says why — see the header's §"One realistic load".
+   */
+  readonly realistic: boolean;
+}
+
+/** Record every request `context` makes, and install the recorders. */
 async function watch(
   context: BrowserContext,
   page: Page,
-  rewrite?: (html: string) => string,
+  { rewrite, realistic }: WatchOptions,
 ): Promise<Watched> {
   const files = new Set(filesUnder(DIST));
   const watched: Watched = { requests: [], foreign: [], missing: [] };
@@ -214,6 +234,9 @@ async function watch(
     }
     const path = url.pathname === '/' ? 'index.html' : decodeURIComponent(url.pathname.slice(1));
     if (!files.has(path)) watched.missing.push(url.pathname);
+    if (!realistic && path.startsWith('realistic/')) {
+      return route.fulfill({ status: 404, body: '' });
+    }
     if (rewrite !== undefined && path === 'index.html') {
       const response = await route.fetch();
       return route.fulfill({ response, body: rewrite(await response.text()) });
@@ -346,7 +369,7 @@ test.describe('the demo, built and served — #1648', () => {
       page,
     }) => {
       test.setTimeout(3 * FRAMES_BUDGET_MS);
-      const watched = await watch(context, page);
+      const watched = await watch(context, page, { realistic: preset === 'climb' });
       await ridesFiveSeconds(page, preset);
       if (preset === 'climb') {
         // Pause holds the distance.
@@ -381,6 +404,8 @@ test.describe('the demo, built and served — #1648', () => {
       // would pass the line above.
       expect(watched.requests).toContain(`${DEMO_ORIGIN}/?preset=${preset}`);
       expect(watched.requests.some((url) => /\/assets\/[^/]+\.js$/.test(url))).toBe(true);
+      // The climb is the one ride audited over the realistic world's load.
+      expect(watched.requests.some((url) => url.includes('/realistic/'))).toBe(true);
     });
   }
 
@@ -392,7 +417,7 @@ test.describe('the demo, built and served — #1648', () => {
       page,
     }) => {
       test.setTimeout(2 * FRAMES_BUDGET_MS);
-      const watched = await watch(context, page);
+      const watched = await watch(context, page, { realistic: false });
       await open(page, 'climb');
       await expect(page.getByRole('button', { name: 'Play' })).toBeVisible();
       await page.waitForTimeout(2_000);
@@ -408,10 +433,13 @@ test.describe('the demo, built and served — #1648', () => {
       context,
       page,
     }) => {
-      const watched = await watch(context, page, (html) => {
-        const without = withoutTheDemo(html).replace(POLICY, '');
-        expect(without).not.toContain('Content-Security-Policy');
-        return without;
+      const watched = await watch(context, page, {
+        realistic: false,
+        rewrite: (html) => {
+          const without = withoutTheDemo(html).replace(POLICY, '');
+          expect(without).not.toContain('Content-Security-Policy');
+          return without;
+        },
       });
       await openControl(page);
       expect(await findings(context, page, watched)).toEqual([]);
@@ -422,7 +450,7 @@ test.describe('the demo, built and served — #1648', () => {
     });
 
     test('a fetch to a path the build does not have is found', async ({ context, page }) => {
-      const watched = await watch(context, page, withoutTheDemo);
+      const watched = await watch(context, page, { realistic: false, rewrite: withoutTheDemo });
       await openControl(page);
       await page.evaluate(() => fetch('/not-in-the-build.js').catch(() => undefined));
       expect(await findings(context, page, watched)).toContain(
@@ -431,7 +459,7 @@ test.describe('the demo, built and served — #1648', () => {
     });
 
     test('a requestDevice and a writeValue are found', async ({ context, page }) => {
-      const watched = await watch(context, page, withoutTheDemo);
+      const watched = await watch(context, page, { realistic: false, rewrite: withoutTheDemo });
       await openControl(page);
       const refused = await page.evaluate(() => {
         const outcomes: string[] = [];
@@ -469,7 +497,7 @@ test.describe('the demo, built and served — #1648', () => {
     });
 
     test('one localStorage key is found', async ({ context, page }) => {
-      const watched = await watch(context, page, withoutTheDemo);
+      const watched = await watch(context, page, { realistic: false, rewrite: withoutTheDemo });
       await openControl(page);
       await page.evaluate(() => localStorage.setItem('oyl-demo-gate-control', '1'));
       expect(await findings(context, page, watched)).toEqual(['stored localStorage: 1']);
