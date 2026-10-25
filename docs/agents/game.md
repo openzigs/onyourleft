@@ -867,7 +867,12 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         vertex's `FACADE_FLOATS`, so no triangle, texture or
                         draw call; `facadePartAt` and `claddingPartAt` are the
                         TypeScript twins the tests hold the layout with.
-                        `setMappedFacadeShown` is the browser gate's control
+                        `setMappedFacadeShown` is the browser gate's control.
+                        Since #1659 every window kind's reveal moves with the
+                        view and the sun (`revealOf`, the shader's
+                        `oylRevealOf`, reading the face frame `oylFaceN`,
+                        `oylFaceU`, `oylFaceUp`, `oylToSunV`, `oylToEyeV`);
+                        the realistic page's `-window-reveals` builds it out
     src/game/building-paint.ts
                         what a realistic building is painted (#1581): each wall
                         and roof surface's multipliers, the trim's and the

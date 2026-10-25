@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -15,6 +18,7 @@ import {
   seasonWithLevers,
   surfacesWithLevers,
   treesWithLevers,
+  windowRevealsWithLevers,
 } from './config';
 import { REALISTIC_TREE_SETS, REALISTIC_TREES_DEFAULT } from '../../src/game/realistic-assets';
 
@@ -137,6 +141,29 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     expect(parseConfig('').leversOff).toEqual([]);
     expect(() => parseConfig('?levers=-texture')).toThrow(/levers is a comma-separated list/);
     expect(() => parseConfig('?levers=texture-bias')).toThrow(/levers is a comma-separated list/);
+  });
+
+  it('builds the mapped windows’ reveals, as the product does, unless #1659’s lever takes them out', () => {
+    expect(LEVERS).toContain('window-reveals');
+    expect(windowRevealsWithLevers([])).toBe(true);
+    // No OTHER lever touches them.
+    expect(windowRevealsWithLevers(LEVERS.filter((lever) => lever !== 'window-reveals'))).toBe(
+      true,
+    );
+    expect(windowRevealsWithLevers(parseConfig('?levers=-window-reveals').leversOff)).toBe(false);
+    expect(configQuery(parseConfig('?town=mixed&levers=-window-reveals'))).toBe(
+      `?levers=${encodeURIComponent('-window-reveals')}&town=mixed`,
+    );
+  });
+
+  it('hands the parsed lever to the owner’s page, which is where it is wired — #1659', () => {
+    // Read as text, as early.test.ts reads the HTML: the harness is a page
+    // entry that cannot be imported. Deleting the call leaves the parse green.
+    const harness = readFileSync(
+      fileURLToPath(new URL('../realistic-harness.ts', import.meta.url)),
+      'utf8',
+    );
+    expect(harness).toContain('windowRevealsOf(view, windowRevealsWithLevers(config.leversOff));');
   });
 
   it('builds both surfaces’ shaders, bounded, as the product does, unless a #1523 lever takes one out', () => {
