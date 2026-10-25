@@ -290,3 +290,19 @@ describe('the city centre, in the shader — #1636', () => {
     expect(NO_URBAN_CLASS.classAt(1_500)).toBe('unknown');
   });
 });
+
+describe('the shop front’s gates — #1636 review', () => {
+  it('draws no canopy over a shop front: its trim is the town twin’s less the canopy, never more', () => {
+    expect(city.length).toBe(town.length);
+    let lessCanopy = 0;
+    city.forEach((plan, at) => {
+      const twin = town[at] as FootprintPlan;
+      if (!plan.shop.front) return;
+      const shopTrim = plan.triangles.trim.length;
+      const townTrim = twin.triangles.trim.length;
+      expect(shopTrim).toBeLessThanOrEqual(townTrim);
+      if (shopTrim < townTrim) lessCanopy += 1;
+    });
+    expect(lessCanopy).toBeGreaterThan(0);
+  });
+});
