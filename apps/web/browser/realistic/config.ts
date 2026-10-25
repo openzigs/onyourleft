@@ -25,6 +25,7 @@
  * | `facing` | which way the route is turned, relative to the sun (#702, `route.ts` §"Which way it faces") | `sun`, `away`; default the route unturned, which looks 110° to 160° away from the sun |
  * | `town` | ride through a mapped town instead of `route.ts`' road (#1581): `footprint-fixtures-testing.ts` §`mixedTownFixture`'s mixed footprints, planned, drawn and lotted as a ride's corridor is, from 900 m to 2 100 m; since #1585 `richmond`, `footprint-fixtures-testing.ts` §`richmondStreetFixture`'s narrow lots drawn as house models beside square ones drawn as extrusions, from 900 m to 1 500 m; since #1542 `countryside`, `footprint-fixtures-testing.ts` §`countrysideFixture`'s fields, woods and a park, from 900 m to 2 100 m, for #1542's levers | `mixed`, `richmond`, `countryside`; default none |
  * | `date` | the rider's local day the ride starts on (#1622), in either world: its holiday (`season.ts` §`holidayOn`) and the route's season. A malformed or impossible day is REFUSED | `YYYY-MM-DD`; default this device's own day |
+ * | `place` | where every road is ridden (#1623), for the route's own season: `south`, the same road mirrored into the southern hemisphere; `nordic`, far enough north that a winter's snow lies to sea level (`route.ts` §`PLACES`) | `south`, `nordic`; default 51.5° N, every road where it was |
  * | `route` | which of `route.ts`' roads is ridden (#1559): absent, the valley road every Part Z and Part AH row was taken on; `village`, `route.ts` §`villageRoute`, a level road through two villages, for validation 0002 AE2 (`at=820` holds the first one's church and shops in frame). Refused beside `town`, which is a road of its own | `village`; default none |
  *
  * ⚠️ **Unknown parameters and values are REFUSED**, as #457's page refused
@@ -43,7 +44,7 @@ import {
 } from '../../src/game/season';
 import type { DepthPrepassMode, RealisticSurfaces } from '../../src/game/three-renderer';
 
-import type { Facing } from './route';
+import { PLACES, type Facing, type Place } from './route';
 
 /**
  * The layers `?layers=` can switch off — #616. What each one holds, in both
@@ -241,6 +242,11 @@ export interface RealisticPageConfig {
    * device's own day, as a ride reads it (`season.ts` §`deviceToday`).
    */
   readonly date: CalendarDay | undefined;
+  /**
+   * #1623: where every road is ridden, for the route's season. `undefined` is
+   * 51.5° N, every road where it was. @see route.ts §PLACES
+   */
+  readonly place: Place | undefined;
 }
 
 /** The ride the owner is asked to look at: the realistic world, the ladder running. */
@@ -258,6 +264,7 @@ export const DEFAULT_CONFIG: RealisticPageConfig = {
   town: undefined,
   route: undefined,
   date: undefined,
+  place: undefined,
 };
 
 const KNOWN = new Set([
@@ -274,6 +281,7 @@ const KNOWN = new Set([
   'town',
   'route',
   'date',
+  'place',
 ]);
 
 /**
@@ -427,6 +435,7 @@ export function parseConfig(search: string): RealisticPageConfig {
       : undefined,
     route: params.has('route') ? routeFrom(params) : undefined,
     date: params.has('date') ? dateFrom(params.get('date') ?? '') : undefined,
+    place: params.has('place') ? oneOf('place', PLACES, 'south') : undefined,
   };
 }
 
@@ -502,6 +511,7 @@ export function configQuery(config: RealisticPageConfig): string {
       `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
     );
   }
+  if (config.place !== undefined) params.set('place', config.place);
   const query = params.toString();
   return query === '' ? '' : `?${query}`;
 }

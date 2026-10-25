@@ -154,6 +154,17 @@ export const NIGHTLY_CHECKS: readonly NightlyCheck[] = [
       'required suite by `mapped-blobs.test.ts`.',
   },
   {
+    spec: 'realistic.browser.spec.ts',
+    describe: 'the route’s own season, in the realistic world — #1623',
+    seconds: 'seven more loads of the owner’s page, about 90 s on a Mac',
+    why:
+      'the owner’s page’s `date` and `place`, for #1623’s cost and by-eye pairs: that the ' +
+      'route’s autumn and winter change the frame and not its draw calls, triangles or ' +
+      'fetched files. The season itself is held in the required suite by ' +
+      '`seasonal-nature.test.ts`, `world.test.ts` §"#1623" and ' +
+      '`mapped-building-belt.test.ts` §"#1623".',
+  },
+  {
     spec: 'reflow.browser.spec.ts',
     describe: 'the dark palette — #672, nightly since #1076',
     seconds: 'about 22 s on the EPYC 7763 (run 37131982824): six walks of every route',

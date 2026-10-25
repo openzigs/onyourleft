@@ -132,6 +132,7 @@ import {
   WorldLamps,
   LIT_COLOURS,
   BRIDGE_COLOUR,
+  ROOF_SNOW,
   sceneryColours,
 } from './three-renderer';
 import { SASH, SASH_TOP_SHARE, WINDOW_IN_BAY, WINDOW_SILL_METRES, facadePartAt } from './facade';
@@ -1657,6 +1658,7 @@ function frameWithScatter(): SceneFrame {
       // intensities are *solved* and a made-up pair would be a world this
       // program cannot produce. @see world.ts §`sunFor`
       sun: worldStyle(routeProfile(flatRouteAt(120))).sun,
+      snow: { bareColour: 0x557744, aboveSnowMetres: -500, winterLoweringMetres: 0 },
     },
     scatter: [item({ kind: 'tree-conifer', z: 30 }), item({ kind: 'rock', z: 60 })],
     // #458. A real landform, from a real corridor, so this frame is one the
@@ -1823,6 +1825,8 @@ describe('the world has a light direction — #286', () => {
     // is no longer one a kind: every kind's colours are required to be there
     // instead, which is the same claim without the count.
     expect(LIT_COLOURS).toContain(BRIDGE_COLOUR);
+    // #1623: the snow a roof wears is lit like the roof under it.
+    expect(LIT_COLOURS).toContain(ROOF_SNOW);
     expect(LIT_COLOURS.length).toBeGreaterThan(SCENERY_KINDS.length + 2 + BICYCLE_COLOURS.length);
     for (const kind of SCENERY_KINDS) {
       for (const colour of sceneryColours(kind)) {

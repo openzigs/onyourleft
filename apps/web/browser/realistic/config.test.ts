@@ -20,6 +20,7 @@ import {
   treesWithLevers,
   windowRevealsWithLevers,
 } from './config';
+import { PLACES } from './route';
 import { REALISTIC_TREE_SETS, REALISTIC_TREES_DEFAULT } from '../../src/game/realistic-assets';
 
 describe('the realistic page’s configuration — ADR 0026 D-12', () => {
@@ -48,6 +49,7 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
       town: 'mixed',
       route: undefined,
       date: undefined,
+      place: undefined,
     });
   });
 
@@ -389,5 +391,28 @@ describe('nearest-rank percentiles', () => {
 
   it('says NaN for nothing timed, never zero', () => {
     expect(Number.isNaN(percentiles([]).p50)).toBe(true);
+  });
+});
+
+describe('where the page’s roads are ridden, for the route’s own season — #1623', () => {
+  it('rides every road where it was when the URL names no place', () => {
+    expect(parseConfig('').place).toBeUndefined();
+    expect(DEFAULT_CONFIG.place).toBeUndefined();
+  });
+
+  it('reads each place, and writes it back as the same configuration', () => {
+    for (const place of PLACES) {
+      const config = parseConfig(`?place=${place}&date=2026-01-15&town=mixed`);
+      expect(config.place).toBe(place);
+      expect(parseConfig(configQuery(config))).toEqual(config);
+    }
+  });
+
+  it('refuses a place it does not know, as it refuses an unknown lever', () => {
+    for (const bad of ['north', 'South', '', 'far']) {
+      expect(() => parseConfig(`?place=${encodeURIComponent(bad)}`)).toThrow(
+        /place is one of south, nordic/,
+      );
+    }
   });
 });

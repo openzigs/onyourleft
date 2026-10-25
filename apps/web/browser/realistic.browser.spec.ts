@@ -395,3 +395,74 @@ test.describe('the realistic page’s mapped-blobs lever — #1657', { tag: NIGH
     expect(off.result.rung).toBe(grounded.result.rung);
   });
 });
+
+test.describe('the route’s own season, in the realistic world — #1623', { tag: NIGHTLY }, () => {
+  type Ridden = Awaited<ReturnType<typeof ride>> & {
+    readonly files: readonly string[];
+    readonly shot: Buffer;
+  };
+
+  /** Rides `query` on `date`: the run, the realistic files its load fetched, and its held frame. */
+  const ridden = async (page: Page, query: string, date: string): Promise<Ridden> => {
+    const fetched: string[] = [];
+    const listen = (request: { url: () => string }): void => {
+      const file = /\/realistic\/([^/?]+)$/.exec(new URL(request.url()).pathname)?.[1];
+      if (file !== undefined) fetched.push(file);
+    };
+    page.on('request', listen);
+    const run = await ride(page, `${query}&date=${date}`);
+    page.off('request', listen);
+    const shot = await page.screenshot();
+    await test.info().attach(`${query}&date=${date}`, { body: shot, contentType: 'image/png' });
+    return { ...run, files: [...new Set(fetched)].sort(), shot };
+  };
+
+  /** The same frame in the same calls, from the same files, as `july`. */
+  const costsNothing = (run: Ridden, july: Ridden): void => {
+    // Not vacuous: the page fetched the world it draws.
+    expect(july.files.length).toBeGreaterThan(10);
+    // A season is uniforms on materials already drawn, and no call of its own.
+    expect(run.result.lastFrame.calls).toBe(july.result.lastFrame.calls);
+    expect(run.result.lastFrame.triangles).toBe(july.result.lastFrame.triangles);
+    expect(run.result.drawCalls).toBe(july.result.drawCalls);
+    // No texture, no sky and no model is added: the same files, the same bytes held.
+    expect(run.files).toEqual(july.files);
+    expect(run.page.textures?.bytes).toBe(july.page.textures?.bytes);
+    expect(run.result.rung).toBe(july.result.rung);
+  };
+
+  test('turns a northern route’s broadleaves on 20 October and not its southern mirror’s, at no cost', async ({
+    page,
+  }) => {
+    test.setTimeout(5 * REALISTIC_LOAD_BUDGET_MS);
+    const july = await ridden(page, HELD, '2026-07-15');
+    const julyAgain = await ridden(page, HELD, '2026-07-15');
+    const october = await ridden(page, HELD, '2026-10-20');
+    const southJuly = await ridden(page, `${HELD}&place=south`, '2026-07-15');
+    const southOctober = await ridden(page, `${HELD}&place=south`, '2026-10-20');
+    console.log(
+      `#1623 at=2550, held: ${String(july.result.lastFrame.calls)} draw calls in July, ` +
+        `${String(october.result.lastFrame.calls)} on 20 October; ` +
+        `${String(july.files.length)} realistic files fetched each`,
+    );
+    costsNothing(october, july);
+    costsNothing(southOctober, southJuly);
+    // The control: the same date twice is the same frame, to the pixel.
+    expect(julyAgain.shot.equals(july.shot)).toBe(true);
+    // 51.5° N on 20 October is deep in its autumn: its broadleaves turn.
+    expect(october.shot.equals(july.shot)).toBe(false);
+    // 51.5° S on 20 October is spring, and its July a winter that lays no
+    // snow at sea level: neither turns a leaf, so the two are one frame.
+    expect(southOctober.shot.equals(southJuly.shot)).toBe(true);
+  });
+
+  test('lays a winter’s snow on a nordic town’s ground and roofs, at no cost', async ({ page }) => {
+    test.setTimeout(3 * REALISTIC_LOAD_BUDGET_MS);
+    const town = '?town=mixed&place=nordic&ladder=0&panel=0&seconds=1&at=1100';
+    const july = await ridden(page, town, '2026-07-15');
+    const january = await ridden(page, town, '2026-01-15');
+    costsNothing(january, july);
+    // The ground and the roofs are drawn under the route's own winter.
+    expect(january.shot.equals(july.shot)).toBe(false);
+  });
+});

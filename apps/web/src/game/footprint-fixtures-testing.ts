@@ -13,7 +13,7 @@ import type { RouteProfile } from '@onyourleft/domain';
 import type { BuildingFeature, LandUseFeature } from '@onyourleft/map-features';
 
 import type { FootprintVerdict } from './footprint-buildings';
-import { northRoute } from './route-fixtures-testing';
+import { FIXTURE_LATITUDE, northRoute } from './route-fixtures-testing';
 import { corridorOrigin, drawnRoadFrame, type CorridorOrigin } from './terrain';
 import type { WorldCorridor } from './world-data/corridor';
 
@@ -343,12 +343,12 @@ export function rowTownFixture(): {
  * commercial beyond, so a high street of flat roofs follows the houses. Every
  * number is drawn from a fixed sequence, so the town is the same every run.
  */
-export function mixedTownFixture(): {
+export function mixedTownFixture(latitude = FIXTURE_LATITUDE): {
   readonly profile: RouteProfile;
   readonly origin: CorridorOrigin;
   readonly corridor: WorldCorridor;
 } {
-  const profile = northRoute(3_000, () => 10);
+  const profile = northRoute(3_000, () => 10, { latitude });
   const origin = corridorOrigin(profile);
   let state = 0x15_81;
   const next = (): number => {
@@ -430,12 +430,12 @@ export function mixedTownFixture(): {
  * footprint is a rectangle square to the road, with no height mapped, so
  * each is two storeys (#1540's default).
  */
-export function richmondStreetFixture(): {
+export function richmondStreetFixture(latitude = FIXTURE_LATITUDE): {
   readonly profile: RouteProfile;
   readonly origin: CorridorOrigin;
   readonly corridor: WorldCorridor;
 } {
-  const profile = northRoute(3_000, () => 10);
+  const profile = northRoute(3_000, () => 10, { latitude });
   const origin = corridorOrigin(profile);
   const buildings: BuildingFeature[] = [];
   for (let along = 1_000, lot = 0; along < 1_400; along += 10, lot += 1) {
@@ -477,12 +477,12 @@ export function richmondStreetFixture(): {
  * wood on each side and a park — every class #1542 plants and bounds by. No
  * building. Every tile covered.
  */
-export function countrysideFixture(): {
+export function countrysideFixture(latitude = FIXTURE_LATITUDE): {
   readonly profile: RouteProfile;
   readonly origin: CorridorOrigin;
   readonly corridor: WorldCorridor;
 } {
-  const profile = northRoute(3_000, () => 10);
+  const profile = northRoute(3_000, () => 10, { latitude });
   const origin = corridorOrigin(profile);
   const land = (kind: string, from: number, to: number, near: number, far: number) =>
     landBeside(profile, origin, 'landuse', kind, from, to, near, far);
