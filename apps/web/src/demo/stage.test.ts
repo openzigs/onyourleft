@@ -41,7 +41,10 @@ function stageWith(outcome: Promise<RealisticWorldOutcome> = new Promise(() => u
   return { frames, view: views[0] as FakeView, player, stage, snapshots };
 }
 
-describe('the demo stage — #1647', () => {
+// Two cases ride a hundred seconds of the simulation frame by frame: 1.2 s on
+// a quiet machine, and past Vitest's default 5 s on a loaded CI runner (#1683's
+// PR, twice running).
+describe('the demo stage — #1647', { timeout: 30_000 }, () => {
   it('draws one still frame of a paused player, and then asks for nothing', () => {
     const { frames, view, player } = stageWith();
     frames.step(10);
