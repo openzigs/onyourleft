@@ -4268,6 +4268,9 @@ function overhangShadowProbe(
     }
     return sums.map((sum) => sum / (pixels.length / 4));
   };
+  // #1661: the shadow alone — the weathering's grime and tile-breaking noise
+  // differ between the two heights, and are held by their own probe.
+  weatheringOf(view, false);
   view.render(frame);
   view.render(frame);
   const near = meanAt(nearPoint);
@@ -4292,6 +4295,7 @@ function overhangShadowProbe(
     };
   } finally {
     overhangShadowsOf(view, true);
+    weatheringOf(view, true);
   }
 }
 
