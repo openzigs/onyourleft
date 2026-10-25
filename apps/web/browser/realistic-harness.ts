@@ -71,6 +71,8 @@ import { routeHemisphere, routeLatitudeMagnitude } from '../src/game/world';
 import {
   drawnWorldOf,
   atmosphereOf,
+  decorationBeltOf,
+  decorationKindsOf,
   firDepthPrepassOf,
   foliageOrderedOf,
   groundBlendOf,
@@ -85,6 +87,7 @@ import {
 } from '../src/game/three-renderer';
 import {
   configQuery,
+  decorationsWithConfig,
   parseConfig,
   percentiles,
   rungWithLevers,
@@ -256,6 +259,12 @@ declare global {
        * the camera's view. Absent with the result. @see frameCensus
        */
       readonly census?: FrameCensus;
+      /**
+       * #1624: the decoration belt of the world drawn, read off its mesh when
+       * the result was published — its triangles (nought where it is not
+       * drawn) and how many times its geometry was built. Absent with the result.
+       */
+      readonly decorations?: { readonly triangles: number; readonly rebuilds: number };
     };
   }
 }
@@ -420,6 +429,8 @@ async function run(): Promise<void> {
   // #1657's cost and by-eye pair: the mapped buildings grounded, or as they
   // were before it. A setting of the view's, so it survives a rung change.
   mappedBlobsShownOf(view, !config.leversOff.includes('mapped-blobs'));
+  // #1624: the product's decorations, or with `decorations=probe` the probe.
+  decorationKindsOf(view, decorationsWithConfig(config));
   const resize = (): void => view.resize(canvas.clientWidth, canvas.clientHeight);
   resize();
   addEventListener('resize', resize);
@@ -545,7 +556,10 @@ async function run(): Promise<void> {
         drawn === undefined
           ? undefined
           : frameCensus(drawn, canvas.clientWidth / Math.max(1, canvas.clientHeight));
-      publish({ result, layers, census });
+      const belt = decorationBeltOf(view);
+      const decorations =
+        belt === undefined ? undefined : { triangles: belt.triangles, rebuilds: belt.rebuilds };
+      publish({ result, layers, census, decorations });
       // #1559: for `adb logcat`, as the result is — AE2's row says what was in frame.
       if (census !== undefined) console.log(`OYL-REALISTIC-CENSUS ${JSON.stringify(census)}`);
       console.log(`OYL-REALISTIC ${JSON.stringify(result)}`);

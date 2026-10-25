@@ -908,7 +908,16 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `footways.ts` instead. Since #1564 each built plot
                         whose pavement is laid has one path to its building's
                         front door (read off `buildingPlan`), merged into the
-                        pavements' one call, one geometry group a path
+                        pavements' one call, one geometry group a path.
+                        Since #1624 a street also carries its holiday
+                        decoration ANCHORS (`decorations.ts` §`villageAnchors`:
+                        lamp posts, doorsteps, eaves, the crossroads green;
+                        never the church plot, never within an item's radius
+                        of the carriageway), drawn by `three-renderer.ts`
+                        §`DecorationBelt` in ONE call for every village within
+                        `FURNITURE_DRAW_METRES`, glow and all
+                        (`withDecorationGlow`, no lamp, no uniform), inside
+                        `REALISTIC_DECORATION_TRIANGLES`
     src/game/footways.ts
                         footways from the corridor's map data (#1551) —
                         `pavementSides`, the side of the drawn road's NORMAL a

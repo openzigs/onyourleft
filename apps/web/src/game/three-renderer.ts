@@ -546,6 +546,7 @@ import {
   MAPPED_BUILDING_DRAW_CALLS,
   MAPPED_BUILDING_MAX,
   MAPPED_BUILDING_TRIANGLES,
+  REALISTIC_DECORATION_TRIANGLES,
   REALISTIC_GROUND_BLOBS,
   REALISTIC_NEAR_MESHES,
   REALISTIC_REMOTE_RIDERS,
@@ -656,7 +657,14 @@ import {
   type WaterSurface,
 } from './waterways';
 import type { SunStyle, WorldStyle } from './world';
-import { NO_SEASON, type Season } from './season';
+import { NO_SEASON, type Holiday, type Season } from './season';
+import {
+  decorationsFor,
+  HOLIDAY_DECORATIONS,
+  type DecorationItem,
+  type DecorationKind,
+  type ItemTable,
+} from './decorations';
 
 /*
  * ⚠️ **The camera's four numbers lived here until #424 and do not any more** —
@@ -9205,6 +9213,414 @@ export class FurnitureBelt {
 }
 
 /**
+ * The vertex attribute that marks a decoration's vertex as glowing — #1624:
+ * 1 drawn its own colour whatever the light, 0 lit as any other surface.
+ * @see withDecorationGlow
+ */
+export const DECORATION_GLOW_ATTRIBUTE = 'oylGlow';
+
+/**
+ * Teaches a lit material the decorations' glow — #1624: a vertex whose
+ * {@link DECORATION_GLOW_ATTRIBUTE} is 1 leaves the lighting with its own
+ * colour, so a lit bulb and the lantern it hangs from share ONE draw call,
+ * with no lamp and no second mesh. Spliced in just after three's
+ * `opaque_fragment`, which writes the lit colour out, and before the tone
+ * mapping and the fog, so a glowing part still goes into the fog as anything
+ * else does.
+ *
+ * ⚠️ **Steady** (WCAG 2.3.1): it adds no uniform at all — nothing here, or
+ * anywhere that updates the belt, changes it from frame to frame, so a rider
+ * under `prefers-reduced-motion` sees exactly what anyone else does.
+ *
+ * Chained after whatever the material already does, and keyed apart, for
+ * {@link withSurfaceDetail}'s reason; a three bump that moved a chunk throws.
+ */
+function withDecorationGlow<M extends Material>(material: M): M {
+  const earlier = material.onBeforeCompile.bind(material);
+  const earlierKey = material.customProgramCacheKey();
+  const spliced = "#1624's glow";
+  material.onBeforeCompile = (shader, renderer) => {
+    earlier(shader, renderer);
+    shader.vertexShader = replacedOrThrown(
+      replacedOrThrown(
+        shader.vertexShader,
+        '#include <common>',
+        `#include <common>\nattribute float ${DECORATION_GLOW_ATTRIBUTE};\nvarying float vOylGlow;`,
+        'vertex',
+        spliced,
+      ),
+      '#include <color_vertex>',
+      `#include <color_vertex>\n\tvOylGlow = ${DECORATION_GLOW_ATTRIBUTE};`,
+      'vertex',
+      spliced,
+    );
+    shader.fragmentShader = replacedOrThrown(
+      replacedOrThrown(
+        shader.fragmentShader,
+        '#include <common>',
+        '#include <common>\nvarying float vOylGlow;',
+        'fragment',
+        spliced,
+      ),
+      '#include <opaque_fragment>',
+      '#include <opaque_fragment>\n\tgl_FragColor.rgb = mix(gl_FragColor.rgb, diffuseColor.rgb, vOylGlow);',
+      'fragment',
+      spliced,
+    );
+  };
+  material.customProgramCacheKey = () => `${earlierKey}|oyl-decoration-glow`;
+  return material;
+}
+
+/**
+ * The decorations' two materials in a world — #1624: the stylised world's
+ * lit and flat, and the realistic world's one, physically based and
+ * breathing its air. White, because the paint is in the vertex colour; the
+ * lit ones glow where a vertex says (the flat one draws every vertex its own
+ * colour already).
+ */
+export function decorationMaterials(world: 'stylised' | 'realistic'): {
+  readonly lit: Material;
+  readonly flat: Material;
+} {
+  if (world === 'realistic') {
+    const material = withAtmosphere(
+      withDecorationGlow(
+        constructed(
+          new MeshStandardMaterial({
+            color: 0xffffff,
+            roughness: 0.8,
+            metalness: 0,
+            vertexColors: true,
+          }),
+        ),
+      ),
+    );
+    return { lit: material, flat: material };
+  }
+  return {
+    lit: withDecorationGlow(constructed(new MeshLambertMaterial({ vertexColors: true }))),
+    flat: constructed(new MeshBasicMaterial({ vertexColors: true })),
+  };
+}
+
+/** A unit box's 36 corners (twelve triangles, unindexed) and their normals. */
+const DECORATION_BOX = ((): {
+  readonly positions: Float32Array;
+  readonly normals: Float32Array;
+} => {
+  const box = new BoxGeometry(1, 1, 1).toNonIndexed();
+  const positions = Float32Array.from(box.getAttribute('position').array);
+  const normals = Float32Array.from(box.getAttribute('normal').array);
+  box.dispose();
+  return { positions, normals };
+})();
+
+/** The triangles one decoration part is: a box, **12**. */
+export const DECORATION_PART_TRIANGLES = DECORATION_BOX.positions.length / 9;
+
+/** Reused by {@link decorationGeometry}, so a rebuild allocates no colour. */
+const DECORATION_SCRATCH = new Color();
+
+/**
+ * Every item as one geometry — #1624: each item's boxes, turned by its
+ * anchor's yaw and stood on its anchor, coloured by vertex, with the glow in
+ * {@link DECORATION_GLOW_ATTRIBUTE}. An item whose kind `kinds` does not
+ * name is skipped, and so is any item that would take the geometry past
+ * `realistic-budget.ts` §`REALISTIC_DECORATION_TRIANGLES`: whole items only.
+ */
+export function decorationGeometry(
+  items: readonly DecorationItem[],
+  kinds: readonly DecorationKind[],
+): BufferGeometry {
+  const byName = new Map(kinds.map((kind) => [kind.item, kind]));
+  const drawn: { readonly item: DecorationItem; readonly kind: DecorationKind }[] = [];
+  let triangles = 0;
+  for (const item of items) {
+    const kind = byName.get(item.item);
+    if (kind === undefined) continue;
+    const adds = kind.parts.length * DECORATION_PART_TRIANGLES;
+    if (triangles + adds > REALISTIC_DECORATION_TRIANGLES) continue;
+    triangles += adds;
+    drawn.push({ item, kind });
+  }
+  const vertices = triangles * 3;
+  const positions = new Float32Array(vertices * 3);
+  const normals = new Float32Array(vertices * 3);
+  const colours = new Float32Array(vertices * 3);
+  const glow = new Float32Array(vertices);
+  const box = DECORATION_BOX;
+  let at = 0;
+  for (const { item, kind } of drawn) {
+    const { x, y, z, yaw } = item.anchor;
+    const cos = Math.cos(yaw);
+    const sin = Math.sin(yaw);
+    for (const part of kind.parts) {
+      DECORATION_SCRATCH.set(part.colour);
+      const [width, height, depth] = part.size;
+      const [px, py, pz] = part.at;
+      for (let corner = 0; corner < box.positions.length; corner += 3) {
+        // Item-local, then turned about y as three's `rotation.y` turns.
+        const lx = (box.positions[corner] as number) * width + px;
+        const ly = (box.positions[corner + 1] as number) * height + py;
+        const lz = (box.positions[corner + 2] as number) * depth + pz;
+        const nx = box.normals[corner] as number;
+        const ny = box.normals[corner + 1] as number;
+        const nz = box.normals[corner + 2] as number;
+        positions[at * 3] = x + lx * cos + lz * sin;
+        positions[at * 3 + 1] = y + ly;
+        positions[at * 3 + 2] = z - lx * sin + lz * cos;
+        normals[at * 3] = nx * cos + nz * sin;
+        normals[at * 3 + 1] = ny;
+        normals[at * 3 + 2] = -nx * sin + nz * cos;
+        colours[at * 3] = DECORATION_SCRATCH.r;
+        colours[at * 3 + 1] = DECORATION_SCRATCH.g;
+        colours[at * 3 + 2] = DECORATION_SCRATCH.b;
+        glow[at] = part.glows ? 1 : 0;
+        at += 1;
+      }
+    }
+  }
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new BufferAttribute(positions, 3));
+  geometry.setAttribute('normal', new BufferAttribute(normals, 3));
+  geometry.setAttribute('color', new BufferAttribute(colours, 3));
+  geometry.setAttribute(DECORATION_GLOW_ATTRIBUTE, new BufferAttribute(glow, 1));
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+/**
+ * The holiday's decorations on every village in reach — #1624 (epic #1621):
+ * **one merged, vertex-coloured mesh and ONE draw call** however many
+ * villages and items, and none where there is no item (no holiday, the
+ * switch off, or a table that names nothing for the holiday). Owner ruling
+ * (c) of 2026-10-24: one call in total, and no downloaded byte.
+ *
+ * A village is in reach while any of its anchors is within `streets.ts`
+ * §`FURNITURE_DRAW_METRES` of the camera, and then ALL of its items are
+ * drawn, so riding through a village changes nothing.
+ *
+ * ⚠️ **Rebuilt only when the SET of villages in reach changes** — one coming
+ * into reach or leaving it — or the holiday or the table does, as
+ * {@link PavementBelt} is: `streets.ts` hands every frame the same objects
+ * for the same villages, and an item is fixed in the corridor's frame, so a
+ * frame whose villages are the last frame's uploads nothing.
+ * {@link DecorationBelt.rebuilds} counts the rebuilds, for the suite.
+ *
+ * Lit and glowing parts share the call: {@link withDecorationGlow}. A belt
+ * per world, as {@link PavementBelt} is, of the SAME triangles in both
+ * (ADR 0026 D-3): the stylised view's lit or flat by the rung (#286), the
+ * realistic world's physically based and in its air.
+ */
+export class DecorationBelt {
+  readonly #mesh: Mesh;
+  readonly #materials: { readonly lit: Material; readonly flat: Material };
+  /** The villages the mesh holds, in the order it holds them. */
+  #held: readonly VillageStreet[] = [];
+  #heldHoliday: Holiday | undefined;
+  #heldKinds: ItemTable | undefined;
+  /** This frame's villages in reach — reused, so a frame allocates nothing. */
+  readonly #reach: VillageStreet[] = [];
+  #shown = true;
+  #rebuilds = 0;
+
+  constructor(world: 'stylised' | 'realistic') {
+    this.#materials = decorationMaterials(world);
+    this.#mesh = new Mesh(new BufferGeometry(), this.#materials.lit);
+    this.#mesh.visible = false;
+  }
+
+  addTo(scene: Scene): void {
+    scene.add(this.#mesh);
+  }
+
+  /** The mesh. For the browser gate's counts and the jsdom suite. */
+  get mesh(): Mesh {
+    return this.#mesh;
+  }
+
+  /** How many times the geometry has been built — #1624's "uploads nothing". */
+  get rebuilds(): number {
+    return this.#rebuilds;
+  }
+
+  /** How many triangles the mesh draws: nought where it is not drawn. */
+  get triangles(): number {
+    if (!this.#mesh.visible) return 0;
+    return this.#mesh.geometry.getAttribute('position').count / 3;
+  }
+
+  setShown(on: boolean): void {
+    this.#shown = on;
+    if (!on) this.#mesh.visible = false;
+  }
+
+  /** Shades the decorations, or stops shading them — #286. @see QualitySettings.shading */
+  setShading(shading: QualitySettings['shading']): void {
+    this.#mesh.material = this.#materials[shading];
+  }
+
+  /** This frame's streets, where the camera is, the holiday on and what it places. */
+  update(
+    streets: readonly VillageStreet[],
+    camera: { readonly x: number; readonly z: number },
+    holiday: Holiday | undefined,
+    kinds: ItemTable,
+  ): void {
+    const reach = this.#reach;
+    reach.length = 0;
+    if (this.#shown && holiday !== undefined) {
+      for (const street of streets) if (inReach(street, camera)) reach.push(street);
+    }
+    if (
+      !sameStreets(reach, this.#held) ||
+      holiday !== this.#heldHoliday ||
+      kinds !== this.#heldKinds
+    ) {
+      this.#held = reach.length === 0 ? NO_STREETS : [...reach];
+      this.#heldHoliday = holiday;
+      this.#heldKinds = kinds;
+      const items = decorationsFor(this.#held, holiday, kinds);
+      const geometry = decorationGeometry(
+        items,
+        holiday === undefined ? NO_DECORATION_KINDS : (kinds[holiday] ?? NO_DECORATION_KINDS),
+      );
+      this.#mesh.geometry.dispose();
+      this.#mesh.geometry = geometry;
+      this.#rebuilds += 1;
+    }
+    this.#mesh.visible = this.#mesh.geometry.getAttribute('position').count > 0;
+  }
+
+  dispose(): void {
+    this.#mesh.geometry.dispose();
+    this.#materials.lit.dispose();
+    if (this.#materials.flat !== this.#materials.lit) this.#materials.flat.dispose();
+  }
+}
+
+/**
+ * What {@link decorationGlowProbe} read: one box's middle pixel, `[r, g, b]` 0–255.
+ *
+ * @test-facing read by `browser/decoration-harness.ts` and its spec
+ */
+export type DecorationPixel = readonly [number, number, number];
+
+/**
+ * The decorations' glow in a real context — #1624, for the browser gate,
+ * which cannot import three (`three-seam.test.ts`): ONE box of `colour`
+ * facing the camera, built by {@link decorationGeometry} and worn in
+ * `world`'s lit {@link decorationMaterials}, under one directional light at
+ * its face or turned away and no other light, and the pixel at its middle.
+ *
+ * @test-facing read by `browser/decoration-harness.ts`; the product draws the
+ * belt through {@link DecorationBelt} only
+ */
+export function decorationGlowProbe(
+  canvas: HTMLCanvasElement,
+  world: 'stylised' | 'realistic',
+  light: 'toward' | 'away',
+  colour: number,
+  glows: boolean,
+): DecorationPixel {
+  const renderer = new WebGLRenderer({ canvas, antialias: false, preserveDrawingBuffer: true });
+  renderer.setPixelRatio(1);
+  renderer.setSize(16, 16, false);
+  renderer.setClearColor(0x000000, 1);
+  const kind: DecorationKind = {
+    item: 'box',
+    anchors: ['green'],
+    chance: 1,
+    radius: 0,
+    parts: [{ size: [2, 2, 0.2], at: [0, 0, 0], colour, glows }],
+  };
+  const geometry = decorationGeometry(
+    [
+      {
+        anchor: { kind: 'green', x: 0, y: 0, z: 0, yaw: 0, clear: 1, hash: 0 },
+        item: 'box',
+        seed: 0,
+      },
+    ],
+    [kind],
+  );
+  const { lit } = decorationMaterials(world);
+  const scene = new Scene();
+  scene.add(new Mesh(geometry, lit));
+  const sun = new DirectionalLight(0xffffff, 1);
+  sun.position.set(0, 0, light === 'toward' ? 1 : -1);
+  scene.add(sun);
+  const eye = new PerspectiveCamera(20, 1, 0.1, 20);
+  eye.position.set(0, 0, 5);
+  eye.lookAt(0, 0, 0);
+  renderer.render(scene, eye);
+  const gl = renderer.getContext();
+  const pixel = new Uint8Array(4);
+  gl.readPixels(8, 8, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
+  geometry.dispose();
+  lit.dispose();
+  renderer.dispose();
+  return [pixel[0] ?? 0, pixel[1] ?? 0, pixel[2] ?? 0];
+}
+
+/**
+ * The decoration belt's draw calls in a real context — #1624: a
+ * {@link DecorationBelt} holding `streets`' items for Halloween from
+ * `kinds`, as a view at `camera` would, alone in a scene and drawn from
+ * straight above, then hidden and drawn again. Three's own
+ * `renderer.info.render.calls` for each, and the belt's triangles.
+ *
+ * @test-facing read by `browser/decoration-harness.ts`; the product's belt is
+ * drawn in the view's own frame, which `realistic.browser.spec.ts` counts
+ */
+export function decorationCallsProbe(
+  canvas: HTMLCanvasElement,
+  streets: readonly VillageStreet[],
+  camera: { readonly x: number; readonly z: number },
+  kinds: ItemTable,
+): { readonly shown: number; readonly hidden: number; readonly triangles: number } {
+  const renderer = new WebGLRenderer({ canvas, antialias: false });
+  renderer.setSize(64, 32, false);
+  const belt = new DecorationBelt('stylised');
+  const scene = new Scene();
+  belt.addTo(scene);
+  belt.update(streets, camera, 'halloween', kinds);
+  const triangles = belt.triangles;
+  const sphere = belt.mesh.geometry.boundingSphere;
+  const x = sphere?.center.x ?? camera.x;
+  const z = sphere?.center.z ?? camera.z;
+  const eye = new PerspectiveCamera(60, 2, 1, 5_000);
+  eye.position.set(x, 3 * (sphere?.radius ?? 200), z + 1);
+  eye.lookAt(x, 0, z);
+  renderer.render(scene, eye);
+  const shown = renderer.info.render.calls;
+  belt.setShown(false);
+  renderer.render(scene, eye);
+  const hidden = renderer.info.render.calls;
+  belt.dispose();
+  renderer.dispose();
+  return { shown, hidden, triangles };
+}
+
+/** No kinds: what a holiday the table does not name places. */
+const NO_DECORATION_KINDS: readonly DecorationKind[] = [];
+
+/** Whether any of a village's anchors is within `FURNITURE_DRAW_METRES` of the camera, in plan. */
+function inReach(
+  street: VillageStreet,
+  camera: { readonly x: number; readonly z: number },
+): boolean {
+  const reach = FURNITURE_DRAW_METRES * FURNITURE_DRAW_METRES;
+  for (const anchor of street.anchors) {
+    const dx = anchor.x - camera.x;
+    const dz = anchor.z - camera.z;
+    if (dx * dx + dz * dz <= reach) return true;
+  }
+  return false;
+}
+
+/**
  * The stylised world's wordmark, once loaded — #966. Module state for
  * {@link sceneryGeometries}' reason: a view is built synchronously, so the
  * texture is loaded first, by {@link loadGameWordmark}.
@@ -15240,6 +15656,8 @@ class RealisticDrawing {
   readonly furniture: FurnitureBelt;
   /** Who walks them, and the footways — #1541. */
   readonly people: PeopleBelt;
+  /** The holiday's decorations on the villages in reach — #1624. */
+  readonly decorations: DecorationBelt;
   readonly environment: Texture;
   /** The road's and the ground's photographic materials. @see setSurfaces */
   #road: MeshStandardMaterial;
@@ -15326,6 +15744,7 @@ class RealisticDrawing {
     this.pavements = new PavementBelt('realistic', world.structures.get('paving'));
     this.furniture = new FurnitureBelt('realistic', world.structures.get('planks'));
     this.people = new PeopleBelt(world.body);
+    this.decorations = new DecorationBelt('realistic');
     this.#casterLists = [this.vegetation.grounded, this.#structureCasters, NO_BLOB_CASTERS];
     this.#road = this.#roadMaterial();
     this.#ground = this.#groundMaterial();
@@ -15402,6 +15821,7 @@ class RealisticDrawing {
     this.pavements.addTo(scene);
     this.furniture.addTo(scene);
     this.people.addTo(scene);
+    this.decorations.addTo(scene);
   }
 
   setShown(on: boolean): void {
@@ -15417,6 +15837,7 @@ class RealisticDrawing {
     this.pavements.setShown(on);
     this.furniture.setShown(on);
     this.people.setShown(on);
+    this.decorations.setShown(on);
     // #626: shown only by the view, on a rung that grounds riders by contact.
     if (!on) this.shadows.setShown(false);
   }
@@ -15574,6 +15995,7 @@ class RealisticDrawing {
     this.pavements.dispose();
     this.furniture.dispose();
     this.people.dispose();
+    this.decorations.dispose();
     this.#road.dispose();
     this.#ground.dispose();
     this.environment.dispose();
@@ -16276,6 +16698,29 @@ export function furnitureCountsOf(view: GameView): Readonly<Record<FurnitureKind
 }
 
 /**
+ * What each holiday decorates with on this view — #1624. The product's is
+ * `decorations.ts` §`HOLIDAY_DECORATIONS`; the owner's page hands its probe
+ * here (`browser/realistic/config.ts` §`PROBE_DECORATIONS`), which no rider
+ * reaches.
+ *
+ * @test-facing read by `realistic-harness.ts` and the suite; the product
+ * always decorates with its own table
+ */
+export function decorationKindsOf(view: GameView, kinds: ItemTable): void {
+  if (view instanceof ThreeGameView) view.decorationKinds = kinds;
+}
+
+/**
+ * The decoration belt of the world a view drew last — #1624.
+ *
+ * @test-facing read by `realistic-harness.ts`, which publishes its triangles,
+ * and by the suite; the product reads the belt nowhere but in `render`
+ */
+export function decorationBeltOf(view: GameView): DecorationBelt | undefined {
+  return view instanceof ThreeGameView ? view.decorationBelt : undefined;
+}
+
+/**
  * How many pavement triangles a view drew in its last frame, in the world it
  * drew — #1535: nought away from a village.
  *
@@ -16639,6 +17084,8 @@ class ThreeGameView implements GameView {
   #riderKit: RiderKit = RIDER_KITS.rider;
   /** What {@link setSeason} was last told. #1623 to #1627 draw from it. */
   #season: Season = NO_SEASON;
+  /** What each holiday decorates with — #1624: the product's, or the owner's page's probe. @see decorationKindsOf */
+  #decorationKinds: ItemTable = HOLIDAY_DECORATIONS;
   /** Which surfaces' shaders the realistic road and ground are built with. @see realisticSurfacesOf */
   #surfaces: RealisticSurfaces = REALISTIC_SURFACES_DRAWN;
   /** The riders' contact shadows — #426. One draw for all of them. */
@@ -16744,6 +17191,8 @@ class ThreeGameView implements GameView {
   readonly #pavements = new PavementBelt('stylised');
   /** The stylised world's street furniture — #1536. The realistic world draws its own. */
   readonly #furniture = new FurnitureBelt('stylised');
+  /** The stylised world's holiday decorations — #1624. The realistic world draws its own. */
+  readonly #decorations = new DecorationBelt('stylised');
   /** The cross streets — #1565: ONE belt for both worlds, in whatever the road wears. */
   readonly #sideRoads: SideRoadBelt;
   /**
@@ -16831,6 +17280,8 @@ class ThreeGameView implements GameView {
     this.#pavements.addTo(this.#scene);
     // #1536: what stands on them.
     this.#furniture.addTo(this.#scene);
+    // #1624: and the holiday's decorations.
+    this.#decorations.addTo(this.#scene);
 
     // #349, #368. Added here rather than in `render`, so that a frame carrying
     // no rider draws nothing rather than adding one on the frame it appears.
@@ -16975,6 +17426,16 @@ class ThreeGameView implements GameView {
     // #1536: and what stands on them, within reach of the camera.
     this.#realistic?.furniture.update(frame.streets, frame.camera);
     this.#furniture.update(frame.streets, frame.camera);
+    // #1624: the holiday's decorations on the villages in reach, in ONE call;
+    // none with no holiday. The hidden world's draw nothing.
+    const holiday = this.#season.holiday;
+    this.#realistic?.decorations.update(
+      frame.streets,
+      frame.camera,
+      holiday,
+      this.#decorationKinds,
+    );
+    this.#decorations.update(frame.streets, frame.camera, holiday, this.#decorationKinds);
     // #1541: and who walks them, in the realistic world only.
     this.#realistic?.people.update(frame.people);
     this.#updateMarkers(
@@ -17148,6 +17609,7 @@ class ThreeGameView implements GameView {
     this.#logos.setShown(!realistic);
     this.#pavements.setShown(!realistic);
     this.#furniture.setShown(!realistic);
+    this.#decorations.setShown(!realistic);
     // #783: shown in both worlds — in the realistic one it draws only the
     // remote riders `realisticRemoteSplit` hands it, and nothing on a frame
     // with none. @see #updateMarkers
@@ -17409,6 +17871,16 @@ class ThreeGameView implements GameView {
     return this.#drawing === 'realistic' ? this.#realistic?.furniture : this.#furniture;
   }
 
+  /** @see decorationBeltOf — the drawn world's. */
+  get decorationBelt(): DecorationBelt | undefined {
+    return this.#drawing === 'realistic' ? this.#realistic?.decorations : this.#decorations;
+  }
+
+  /** @see decorationKindsOf */
+  set decorationKinds(kinds: ItemTable) {
+    this.#decorationKinds = kinds;
+  }
+
   /** @see realisticSurfacesOf */
   realisticSurfaces(surfaces: RealisticSurfaces): void {
     this.#surfaces = surfaces;
@@ -17594,6 +18066,7 @@ class ThreeGameView implements GameView {
     this.#logos.setShading(shading);
     this.#pavements.setShading(shading);
     this.#furniture.setShading(shading);
+    this.#decorations.setShading(shading);
   }
 
   /**
@@ -17694,6 +18167,7 @@ class ThreeGameView implements GameView {
     this.#logos.dispose();
     this.#pavements.dispose();
     this.#furniture.dispose();
+    this.#decorations.dispose();
     this.#sideRoads.dispose();
     this.#lighting.dispose();
     this.#riders.dispose();

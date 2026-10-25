@@ -743,9 +743,10 @@ export interface Plot {
  * Every plot of a village, built or not, in plot order and the right side
  * before the left — #460's layout. #1534 clears the trees off every one of
  * them (an empty plot is a garden or a green, not a wood); #1535 lays a
- * pavement only along the built ones, {@link villagePlots}.
+ * pavement only along the built ones, {@link villagePlots}; #1624 finds the
+ * crossroads green on the middle one (`decorations.ts` §`villageAnchors`).
  */
-function everyVillagePlot(
+export function everyVillagePlot(
   seed: number,
   village: Site,
 ): readonly (Plot & { readonly built: boolean })[] {

@@ -23,7 +23,7 @@
  * with the owner's exceptions, named below: #1076's of 2026-10-03 and
  * #1137's of 2026-10-05. Any further exception is the owner's ruling,
  * recorded here and in docs/agents/ci.md §4c.
- * Seven of the thirteen describes below draw the REALISTIC world, which is a rung
+ * Eight of the fourteen describes below draw the REALISTIC world, which is a rung
  * a rider chooses in Settings and is off by default (ADR 0026 D-3), or
  * measure the owner's instruments for it. The other six are the DEFAULT
  * world, every rider's, and each is an owner's exception. One is #1076's: the
@@ -152,6 +152,18 @@ export const NIGHTLY_CHECKS: readonly NightlyCheck[] = [
       'takes the mapped buildings’ ground blobs out of the frame it drew, and nothing else. ' +
       'An instrument of a page that ships in no build; the blobs themselves are held in the ' +
       'required suite by `mapped-blobs.test.ts`.',
+  },
+  {
+    spec: 'realistic.browser.spec.ts',
+    describe: 'the realistic page’s holiday decorations — #1624',
+    seconds: 'two more loads of the owner’s page',
+    why:
+      'the decoration belt’s cost in the REALISTIC world, on the owner’s page with its probe: ' +
+      'the frame at or under `REALISTIC_WOODED_DRAW_CALLS`, exactly one call for the belt ' +
+      'against `levers=-decorations`, and its triangles inside `REALISTIC_DECORATION_TRIANGLES`. ' +
+      'Cost, in a world a rider chooses. Still required: the same one-call delta in the ' +
+      'stylised world on the same page (`the realistic page’s holiday decorations, stylised — ' +
+      '#1624`), and the belt’s one call, glow and steadiness in `decoration.browser.spec.ts`.',
   },
   {
     spec: 'reflow.browser.spec.ts',
