@@ -255,6 +255,9 @@ jobs:
 
   # `realistic-trees.browser.spec.ts`: the page's tree levers (#1283, #1294,
   # #1523). As `browser-2`, whose comment says why it is a job of its own.
+  # A deliberate copy of `browser-2` (and `browser-4` of both), not a matrix:
+  # `nightly-split.test.ts` holds each shard in a job of its own, so a change
+  # to one job's steps or SHA pins is made in all three.
   browser-3:
     name: Nightly browser checks (3 of 4)
     runs-on: ubuntu-latest

@@ -418,6 +418,13 @@ case in the required suite, not a nightly run that stops. It counts `ride(page` 
 calls in each nightly describe, and refuses a realistic spec whose loads it counts as none.
 `report` needs all four jobs.
 
+**Where the next lever's describe goes**: shard 2 holds 6 loads (432 s of the 504 s cap), so a
+describe with two or more loads there is a red case. Put it in the shard with the fewest loads
+(shard 3 or 4 hold 5 and 6); if every shard would pass 7, add `realistic-<name>.browser.spec.ts`,
+a `test:browser:nightly:shard-5` script and a `browser-5` job copied from `browser-4`, name the new
+`spec` in `nightly.ts`, and add the job to `report`'s `needs`. The load count is lexical, so a
+load made through an alias of `ride` or a direct `page.goto` of the page is not counted: call `ride`.
+
 
 #### 23m39s of 25 — #1051
 
