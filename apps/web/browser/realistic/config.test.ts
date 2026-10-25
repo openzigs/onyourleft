@@ -20,6 +20,7 @@ import {
   PROBE_DECORATIONS,
   surfacesWithLevers,
   treesWithLevers,
+  urbanClassWithLevers,
   windowRevealsWithLevers,
   overhangShadowsWithLevers,
 } from './config';
@@ -195,6 +196,24 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     expect(harness).toContain(
       'overhangShadowsOf(view, overhangShadowsWithLevers(config.leversOff));',
     );
+  });
+
+  it('plans the town with its urban class, as the press does, unless #1634’s lever takes it out', () => {
+    expect(LEVERS).toContain('urban-class');
+    expect(urbanClassWithLevers([])).toBe(true);
+    // No OTHER lever touches it.
+    expect(urbanClassWithLevers(LEVERS.filter((lever) => lever !== 'urban-class'))).toBe(true);
+    expect(urbanClassWithLevers(parseConfig('?levers=-urban-class').leversOff)).toBe(false);
+    expect(configQuery(parseConfig('?town=mixed&levers=-urban-class'))).toBe(
+      `?levers=${encodeURIComponent('-urban-class')}&town=mixed`,
+    );
+    // Wired where the harness plans the town, read as text as #1659's lever is above.
+    const harness = readFileSync(
+      fileURLToPath(new URL('../realistic-harness.ts', import.meta.url)),
+      'utf8',
+    );
+    expect(harness).toContain('const urban = urbanClassWithLevers(config.leversOff)');
+    expect(harness).toMatch(/FOOTPRINT_MAX_VERTICES,\s+urban,\s+\);/);
   });
 
   it('builds both surfaces’ shaders, bounded, as the product does, unless a #1523 lever takes one out', () => {
