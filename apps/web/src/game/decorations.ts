@@ -137,8 +137,11 @@ export interface DecorationAnchor {
  *   box's sides, its foot on the box's floor, **96** triangles.
  * - `stalk` — an open cylinder, **10** triangles.
  * - `face` — one flat quad in the box's middle, facing `+z`, **2** triangles.
+ * - `bulb` — an octahedron, **8** triangles (#1626).
+ * - `wreath` — a ring in the box's `xy` plane, facing `+z`, **80** triangles
+ *   (#1626).
  */
-export type DecorationShape = 'box' | 'pumpkin' | 'stalk' | 'face';
+export type DecorationShape = 'box' | 'pumpkin' | 'stalk' | 'face' | 'bulb' | 'wreath';
 
 /** One box of an item, item-local: `+z` faces the road, `y` up from the anchor. */
 export interface DecorationPart {
@@ -353,13 +356,157 @@ const HALLOWEEN: readonly DecorationKind[] = [
 ];
 
 /**
- * What a ride decorates with — Halloween's pumpkins since #1625; #1626 and
- * #1627 add winter lights. A holiday the table names nothing for places no
- * item, and the belt is not drawn. The owner's page may register a probe
- * instead (`browser/realistic/config.ts` §`PROBE_DECORATIONS`), which no
- * rider reaches.
+ * A bulb's size, metres: **12 cm** across — #1626: twice a real festoon
+ * bulb's, so that from the saddle it reads as a coloured dot in daylight, as
+ * the owner accepted for v1 (no bloom, #703); at 6 cm it was a pixel at most.
  */
-export const HOLIDAY_DECORATIONS: ItemTable = { halloween: HALLOWEEN };
+export const BULB_METRES = 0.12;
+
+/**
+ * The winter lights' colours, sRGB — #1626: warm white and soft colours, and
+ * no red, so no string alternates red and white. Every bulb glows, steady.
+ */
+export const BULB_WARM_WHITE = 0xffe6b8;
+const BULB_SOFT: readonly number[] = [BULB_WARM_WHITE, 0xffc574, 0xb4e2a4, 0xb0ccff];
+
+/**
+ * A wreath's evergreen and its berries and bow, sRGB — #1626: lit, so held
+ * under "lights no colour past white"; the door's facade draws the mapped
+ * buildings' wreaths in the same two (`three-renderer.ts` §`WREATH_GLSL`).
+ */
+export const WREATH_GREEN = 0x2f5a2c;
+export const WREATH_BERRY = 0xa3242a;
+
+/**
+ * How many bulbs wind a lamp post, and from where to where up it, metres:
+ * **12**, from 1.4 m to 4.6 m — under the lamp's arm, which leaves the post
+ * at 5.2 m (`three-renderer.ts` §`FURNITURE_STYLE`).
+ */
+const POST_BULBS = 12;
+const POST_FROM = 1.4;
+const POST_TO = 4.6;
+
+/**
+ * How far out from the post's middle a bulb's middle is, metres: the post is
+ * 0.06 to 0.07 m across its radius, so a bulb touches it. Never further, so
+ * no bulb on a post is ever over the carriageway the post stands back from.
+ */
+const POST_WIND = 0.12;
+
+/** A lamp post wound with warm-white bulbs, a spiral up the post. */
+function postLights(): DecorationPart[] {
+  return Array.from({ length: POST_BULBS }, (_, at) => {
+    const turn = at * 0.75 * Math.PI;
+    return {
+      shape: 'bulb',
+      size: [BULB_METRES, BULB_METRES, BULB_METRES],
+      at: [
+        Math.sin(turn) * POST_WIND,
+        POST_FROM + ((POST_TO - POST_FROM) * at) / (POST_BULBS - 1),
+        Math.cos(turn) * POST_WIND,
+      ],
+      colour: BULB_WARM_WHITE,
+      glows: true,
+    } satisfies DecorationPart;
+  });
+}
+
+/**
+ * How many bulbs string along the eaves above a door, and how wide, metres:
+ * **9** over **2.4 m**, the door's middle in the string's — narrower than any
+ * village house's front, so the string never reaches past a corner.
+ */
+const EAVE_BULBS = 9;
+const EAVE_HALF = 1.2;
+
+/** A string of soft-coloured bulbs under the eaves, sagging a little between its ends. */
+function eaveLights(): DecorationPart[] {
+  return Array.from({ length: EAVE_BULBS }, (_, at) => {
+    const across = -EAVE_HALF + (2 * EAVE_HALF * at) / (EAVE_BULBS - 1);
+    const sag = 0.06 * (1 - (across / EAVE_HALF) ** 2);
+    return {
+      shape: 'bulb',
+      size: [BULB_METRES, BULB_METRES, BULB_METRES],
+      at: [across, -0.12 - sag, 0.22],
+      colour: BULB_SOFT[at % BULB_SOFT.length] as number,
+      glows: true,
+    } satisfies DecorationPart;
+  });
+}
+
+/**
+ * A wreath on a village door, on its step's frame: an evergreen ring and a
+ * bow, its middle 1.45 m above the threshold, just proud of the wall. A
+ * village door is cut in triangles (`buildings.ts`), so its wreath is too;
+ * a mapped building's door is drawn in the shader, and so is its wreath.
+ */
+function doorWreath(): DecorationPart[] {
+  return [
+    {
+      shape: 'wreath',
+      size: [0.46, 0.46, 0.08],
+      at: [0, 1.45, 0.05],
+      colour: WREATH_GREEN,
+      glows: false,
+    },
+    {
+      size: [0.1, 0.07, 0.03],
+      at: [0, 1.45 - 0.2, 0.095],
+      colour: WREATH_BERRY,
+      glows: false,
+    },
+  ];
+}
+
+/**
+ * The share of their anchors the winter kinds take — #1626: most lamp posts,
+ * and about half the eaves and the doors. Seeded, as every kind is.
+ */
+export const WINTER_CHANCE = { post: 0.75, eaves: 0.5, wreath: 0.5 } as const;
+
+/**
+ * The winter lights' kinds — #1626, about 1 Dec to 6 Jan. Steady (WCAG
+ * 2.3.1): every bulb glows its own colour and nothing changes from frame to
+ * frame. No religious symbol: lights, an evergreen wreath and a bow. Never the
+ * church (its anchors are never made), and never over the road: a post's
+ * bulbs wind the post, and an eave's string hangs from the house.
+ */
+const WINTER_LIGHTS: readonly DecorationKind[] = [
+  {
+    item: 'post-lights',
+    anchors: ['lamp-post'],
+    chance: WINTER_CHANCE.post,
+    radius: POST_WIND + BULB_METRES / 2,
+    parts: postLights(),
+  },
+  {
+    item: 'eave-lights',
+    anchors: ['eave'],
+    chance: WINTER_CHANCE.eaves,
+    radius: EAVE_HALF + BULB_METRES,
+    parts: eaveLights(),
+  },
+  {
+    item: 'wreath',
+    anchors: ['doorstep'],
+    chance: WINTER_CHANCE.wreath,
+    radius: 0.3,
+    parts: doorWreath(),
+    onStepOf: ['building', 'shop-row'],
+  },
+];
+
+/**
+ * What a ride decorates with — Halloween's pumpkins since #1625, and since
+ * #1626 the winter lights; #1627 adds the green's tree. A holiday the table
+ * names nothing for places no item, and the belt is not drawn. The owner's
+ * page may register a probe instead (`browser/realistic/config.ts`
+ * §`PROBE_DECORATIONS`), which no rider reaches.
+ */
+export const HOLIDAY_DECORATIONS: ItemTable = {
+  halloween: HALLOWEEN,
+  'winter-lights': WINTER_LIGHTS,
+};
 
 /** One item placed: where, which kind, and a seed of its own for its variation. */
 export interface DecorationItem {

@@ -666,6 +666,8 @@ import {
   decorationsFor,
   HOLIDAY_DECORATIONS,
   PUMPKIN,
+  WREATH_BERRY,
+  WREATH_GREEN,
   type DecorationItem,
   type DecorationKind,
   type DecorationShape,
@@ -2104,6 +2106,9 @@ export const LIT_COLOURS: readonly number[] = [
   ),
   // #1623. The snow a roof wears.
   ROOF_SNOW,
+  // #1626. The winter lights' wreath, on a village door and drawn on a mapped one.
+  WREATH_GREEN,
+  WREATH_BERRY,
 ];
 
 /**
@@ -7798,6 +7803,8 @@ const TINT_APPLY_GLSL = /* glsl */ `
 const SEASON = {
   oylAutumn: { value: 0 },
   oylRoofSnow: { value: 0 },
+  /** #1626: 1 while the ride's holiday is the winter lights — the mapped doors' wreath. */
+  oylWreath: { value: 0 },
 };
 
 /**
@@ -9485,6 +9492,9 @@ const DECORATION_TEMPLATES: Readonly<Record<DecorationShape, DecorationTemplate>
   pumpkin: decorationTemplate(pumpkinGeometry()),
   stalk: decorationTemplate(new CylinderGeometry(0.5, 0.5, 1, 5, 1, true)),
   face: decorationTemplate(new PlaneGeometry(1, 1)),
+  // #1626: a bulb, and a wreath's ring — outer radius 0.5, tube 0.1 — in xy.
+  bulb: decorationTemplate(new OctahedronGeometry(0.5, 0)),
+  wreath: decorationTemplate(new TorusGeometry(0.4, 0.1, 4, 10).scale(1, 1, 5)),
 };
 
 /** The triangles one part of `shape` is — #1625. @see DecorationShape */
@@ -14233,6 +14243,31 @@ export function setMappedFacadeShown(on: boolean): void {
 }
 
 /**
+ * Whether the mapped doors' wreath is drawn while the winter lights are on —
+ * #1626: always, in the product. @see facadeWreathOf
+ */
+let facadeWreathShown = true;
+
+/** The mapped doors' wreath for a ride's season — #1626: 1 in the winter lights, else 0. */
+function wreathOf(season: Season): number {
+  return facadeWreathShown && season.holiday === 'winter-lights' ? 1 : 0;
+}
+
+/**
+ * Draws the mapped doors' wreath in the winter lights, or — the browser
+ * gate's control — never, for the proof that it costs no call: the wreath is
+ * a term on the door's own quad, so a frame draws the same calls without it.
+ * Applied to the view's season at once.
+ *
+ * @test-facing the browser gate's `facade-wreath` lever, read by
+ * `realistic-harness.ts`; the product always draws the wreath
+ */
+export function facadeWreathOf(view: GameView, on: boolean): void {
+  facadeWreathShown = on;
+  if (view instanceof ThreeGameView) SEASON.oylWreath.value = wreathOf(view.season);
+}
+
+/**
  * Whether a material draws #1581's windows and doors from its vertices.
  *
  * @test-facing held by `mapped-building-belt.test.ts` §"the mapped buildings’
@@ -14969,6 +15004,8 @@ function facadeFragmentGlsl(overhangs: boolean): string {
         diffuseColor.rgb = mix(oylRecess, mix(vOylTrim, oylShopPane, oylPane), oylIn);
         oylGlass = oylPane;
       }
+      // #1626: the winter lights' wreath, on the door's own quad.
+      diffuseColor.rgb = oylWreathed(diffuseColor.rgb, (oylAt.x - 0.5) * oylDoorW, oylAt.y * oylDoorH, oylWreath);
     } else if (oylTop < -1.5 && oylTop > -2.5) {
       diffuseColor.rgb = vColor.rgb;
       oylFlat = 1.0;
@@ -15123,6 +15160,48 @@ const ROOF_SNOW_GLSL = (() => {
 })();
 
 /**
+ * A wreath on a mapped building's front door, in metres of the door's face —
+ * #1626: its middle {@link WREATH_UP} above the door's foot, an evergreen ring
+ * between {@link WREATH_RING}'s radii and a bow below it, in
+ * `decorations.ts`' `WREATH_GREEN` and `WREATH_BERRY`.
+ */
+const WREATH_UP = 1.35;
+const WREATH_RING: readonly [number, number] = [0.15, 0.24];
+/** The bow's half-width and half-height, metres. */
+const WREATH_BOW: readonly [number, number] = [0.055, 0.04];
+
+/**
+ * The wreath, in GLSL — #1626: `colour` with the wreath drawn over it where
+ * `on` is 1, at `x` across from the door's middle and `y` up from its foot,
+ * metres. Squared radii, so it needs no root. ⚠️ **Steady**: no time, no
+ * clock and no `sin` — it reads nothing but where it is and `on`, which the
+ * view writes from the ride's holiday (`setSeason`). 0 calls and 0 triangles:
+ * it is drawn on the door's own quad. `mapped-building-belt.test.ts`
+ * §"#1626" evaluates it from the program three is handed.
+ */
+const WREATH_GLSL = (() => {
+  const green = new Color(WREATH_GREEN);
+  const berry = new Color(WREATH_BERRY);
+  const vec = (c: Color): string => `vec3(${c.r.toFixed(6)}, ${c.g.toFixed(6)}, ${c.b.toFixed(6)})`;
+  const [inner, outer] = WREATH_RING;
+  const [bowX, bowY] = WREATH_BOW;
+  const edge = 0.01;
+  return /* glsl */ `
+  vec3 oylWreathed(vec3 colour, float x, float y, float on) {
+    float up = y - ${glslFloat(WREATH_UP)};
+    float r2 = x * x + up * up;
+    float ring = smoothstep(${glslFloat((inner - edge) ** 2)}, ${glslFloat((inner + edge) ** 2)}, r2)
+      * (1.0 - smoothstep(${glslFloat((outer - edge) ** 2)}, ${glslFloat((outer + edge) ** 2)}, r2));
+    float below = up + ${glslFloat(outer)};
+    float bow = (1.0 - smoothstep(${glslFloat(bowX - edge)}, ${glslFloat(bowX)}, max(x, -x)))
+      * (1.0 - smoothstep(${glslFloat(bowY - edge)}, ${glslFloat(bowY)}, max(below, -below)));
+    vec3 drawn = mix(mix(colour, ${vec(green)}, ring), ${vec(berry)}, bow);
+    return mix(colour, drawn, on);
+  }
+`;
+})();
+
+/**
  * Teaches a mapped building's material #1581's facade: the windows of every
  * storey, the front door in its surround, and the painted trim — from vertex
  * attributes, `oylFacade` (`footprint-buildings.ts` §`FACADE_FLOATS`),
@@ -15145,6 +15224,8 @@ function withFacade<M extends Material>(material: M): M {
     shader.uniforms.oylSunWorld = FACADE_SUN.oylSunWorld;
     // #1623: the snow a roof carries, from the route's season.
     shader.uniforms.oylRoofSnow = SEASON.oylRoofSnow;
+    // #1626: the winter lights' wreath on the front door.
+    shader.uniforms.oylWreath = SEASON.oylWreath;
     shader.vertexShader = replacedOrThrown(
       replacedOrThrown(
         shader.vertexShader,
@@ -15161,7 +15242,7 @@ function withFacade<M extends Material>(material: M): M {
     let fragment = replacedOrThrown(
       shader.fragmentShader,
       '#include <common>',
-      `#include <common>\n${facadeCommonGlsl(revealsBuiltIn(material), overhangsBuiltIn(material))}\nuniform float oylRoofSnow;\n${ROOF_SNOW_GLSL}`,
+      `#include <common>\n${facadeCommonGlsl(revealsBuiltIn(material), overhangsBuiltIn(material))}\nuniform float oylRoofSnow;\n${ROOF_SNOW_GLSL}\nuniform float oylWreath;\n${WREATH_GLSL}`,
       'fragment',
       spliced,
     );
@@ -17647,6 +17728,7 @@ class ThreeGameView implements GameView {
       FOLIAGE.oylWindTime.value = frame.water.seconds;
       // #1623: this view's season, for the reason the breeze's clock is written here.
       SEASON.oylAutumn.value = this.#season.nature.autumn;
+      SEASON.oylWreath.value = wreathOf(this.#season);
       FOLIAGE.oylSunToward.value
         .set(frame.world.sun.x, frame.world.sun.y, frame.world.sun.z)
         .normalize();
@@ -18019,6 +18101,8 @@ class ThreeGameView implements GameView {
   setSeason(season: Season): void {
     this.#season = season;
     SEASON.oylAutumn.value = season.nature.autumn;
+    // #1626: the mapped doors' wreath, while the winter lights are on.
+    SEASON.oylWreath.value = wreathOf(season);
   }
 
   /** @see seasonOf */

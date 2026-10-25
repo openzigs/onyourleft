@@ -814,6 +814,21 @@ export const REALISTIC_STREET_TRIANGLES = 25_024;
 export const REALISTIC_DECORATION_TRIANGLES = 12_000;
 
 /**
+ * The winter lights' share of {@link REALISTIC_DECORATION_TRIANGLES} — #1626:
+ * **8 000**. Every lamp post wound (96 triangles), every eave strung (72) and
+ * every house and shop door wreathed (92) in TWO villages in reach — the most
+ * the belt draws at once — measured on the fixtures at 3 844 a village at
+ * most (7 264 for the corner fixture's pair), rounded up. The rest, **4 000**,
+ * is headroom left for #1627's village-square tree, which shows in the same
+ * holiday and the same call.
+ *
+ * @test-facing held by `decoration-belt.test.ts` §"#1626", which sums the
+ * winter set at its heaviest on the densest fixture against it; the belt
+ * spends {@link REALISTIC_DECORATION_TRIANGLES} whole
+ */
+export const REALISTIC_WINTER_LIGHTS_TRIANGLES = 8_000;
+
+/**
  * The most triangles the people may add to a realistic frame — #1541:
  * **32 000**, sixteen bodies (`people.ts` §`PEOPLE_NEAR_MAX`) of at most
  * 2 000 each (`people-body.ts` §`PERSON_MAX_TRIANGLES`), in one draw call;

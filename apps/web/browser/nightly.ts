@@ -134,6 +134,17 @@ export const NIGHTLY_CHECKS: readonly NightlyCheck[] = [
       '§"asks for the generated broadleaves".',
   },
   {
+    spec: 'realistic-wreath.browser.spec.ts',
+    describe: 'the realistic page’s mapped doors’ wreath — #1626',
+    seconds: 'two loads of the owner’s page',
+    why:
+      'the mapped doors’ winter wreath in the REALISTIC world, on the owner’s page in the ' +
+      'mixed town: the same draw calls and triangles with it forced off (`-facade-wreath`), ' +
+      'so the wreath costs no call. Cost, in a world a rider chooses; what the wreath draws, ' +
+      'and that it follows the ride’s holiday, is held in the required suite by ' +
+      '`mapped-building-belt.test.ts` §"#1626" and `winter-lights-wiring.test.tsx`.',
+  },
+  {
     spec: 'realistic-town.browser.spec.ts',
     describe: 'the realistic page’s village road — #1559',
     seconds: 'one more load of the owner’s page, about 18 s on a Mac',
@@ -156,9 +167,10 @@ export const NIGHTLY_CHECKS: readonly NightlyCheck[] = [
   {
     spec: 'realistic-town.browser.spec.ts',
     describe: 'the realistic page’s holiday decorations — #1624',
-    seconds: 'two more loads of the owner’s page',
+    seconds: 'three more loads of the owner’s page',
     why:
-      'the decoration belt’s cost in the REALISTIC world, on the owner’s page on Halloween: ' +
+      'the decoration belt’s cost in the REALISTIC world, on the owner’s page on Halloween and ' +
+      '(#1626) in the winter lights: ' +
       'the frame at or under `REALISTIC_WOODED_DRAW_CALLS`, exactly one call for the belt ' +
       'against `levers=-decorations`, and its triangles inside `REALISTIC_DECORATION_TRIANGLES`. ' +
       'Cost, in a world a rider chooses. Still required: the same one-call delta in the ' +
