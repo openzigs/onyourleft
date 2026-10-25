@@ -777,6 +777,43 @@ export const REALISTIC_FRAME_TRIANGLES = 300_000;
 export const REALISTIC_STREET_TRIANGLES = 25_024;
 
 /**
+ * The most triangles a frame's holiday decorations may add — #1624:
+ * **12 000**, in either world, in ONE draw call (`three-renderer.ts`
+ * §`DecorationBelt`).
+ *
+ * | | anchors |
+ * |---|--:|
+ * | Lamp posts: a village at its fullest (`streets.ts` §`furnish`) | 16 |
+ * | Doorsteps: every plot but the two at its crossroads built, less the church (`settlements.ts` §`everyVillagePlot`) | 19 |
+ * | Eaves: one over each of those doors | 19 |
+ * | The green: two either side of the crossroads' mouth, on both sides | 4 |
+ * | A village | 58 |
+ * | Two villages in reach at most (`streets.ts` §`PAVEMENT_TRIANGLES_PER_VILLAGE`'s reason) | 116 |
+ *
+ * At most one item an anchor (`decorations.ts` §`decorationsFor`), so the
+ * frame's worst is 116 items; 12 000 is about a hundred triangles each — eight
+ * boxes — rounded up. ⚠️ **A hard bound, not an estimate**: the belt places
+ * no item that would take it past this, whatever #1625 to #1627 register, so
+ * an item set that would not fit shows up as items missing at the far end of
+ * the frame's villages, and `decorations.test.ts` holds the product's own
+ * table to fitting whole.
+ *
+ * ⚠️ **INSIDE {@link REALISTIC_FRAME_TRIANGLES}**, unlike the streets: the
+ * items are the same triangles in both worlds, which by that constant's own
+ * rule would leave them out, but they are new triangles on frames that
+ * already carry the village's buildings, so `realistic-budget.test.ts` adds
+ * this to the worst frame the caps allow and holds the sum. No texture and
+ * no file: every item is boxes from numbers, coloured by vertex, so the
+ * realistic set's bytes do not change (ruling (c), 2026-10-24).
+ *
+ * The belt spends it (`three-renderer.ts` §`decorationGeometry`);
+ * `realistic-budget.test.ts` holds it inside the frame, and
+ * `realistic.browser.spec.ts` reads the belt's triangles off its mesh on the
+ * owner's page against it.
+ */
+export const REALISTIC_DECORATION_TRIANGLES = 12_000;
+
+/**
  * The most triangles the people may add to a realistic frame — #1541:
  * **32 000**, sixteen bodies (`people.ts` §`PEOPLE_NEAR_MAX`) of at most
  * 2 000 each (`people-body.ts` §`PERSON_MAX_TRIANGLES`), in one draw call;

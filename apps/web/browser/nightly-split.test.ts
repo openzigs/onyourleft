@@ -207,6 +207,16 @@ function shardScripts(): [name: string, script: string][] {
     .sort(([a], [b]) => Number(a.split('-').pop()) - Number(b.split('-').pop()));
 }
 
+/**
+ * The scripts CI runs the nightly browser checks as, one per nightly job —
+ * #1675. `test:browser:nightly:shard-1`, `…-2`, …, in their order.
+ */
+function nightlyShardScripts(): [name: string, script: string][] {
+  return Object.entries(webScripts())
+    .filter(([name]) => /^test:browser:nightly:shard-\d+$/.test(name))
+    .sort(([a], [b]) => Number(a.split('-').pop()) - Number(b.split('-').pop()));
+}
+
 /** The command a browser shard's `Browser gate` step runs, wrapper and all. */
 const gateCommand = (script: string): string =>
   `timeout --verbose --kill-after=10s ${String(GATE_STEP_MS / 1000)}s pnpm run ${script}`;
@@ -277,6 +287,9 @@ describe('the browser gate is split into a required run and a nightly one — #8
       required.map((project) => String(project.name)).sort(),
     );
     expect(projectsOf(scripts['test:browser:nightly'])).toEqual(['nightly']);
+    for (const [name] of nightlyShardScripts()) {
+      expect(projectsOf(scripts[name]), name).toEqual(['nightly']);
+    }
   });
 
   it('runs the chromium project on its workers and stop, then the game project alone on its stop, and fails if either fails — #1128', () => {
@@ -403,9 +416,86 @@ describe('the nightly workflow runs what left the required job, and cannot pass 
   const runCommands = (workflow: string): string[] =>
     [...workflow.matchAll(/^\s+run: (.+)$/gm)].map((match) => String(match[1]).trim());
 
-  it('runs the uninstrumented Vitest files and the nightly browser checks', () => {
-    expect(runCommands(nightly)).toEqual(
-      expect.arrayContaining(['pnpm run test:uninstrumented', 'pnpm run test:browser:nightly']),
+  it('runs the uninstrumented Vitest files, and each half of the nightly browser checks in a job of its own — #1675', () => {
+    const commands = runCommands(nightly);
+    expect(commands).toContain('pnpm run test:uninstrumented');
+    // The whole set in one command is the LOCAL form: on one worker it reached
+    // its 840 s stop with tests not run (#1675), and beside its halves it
+    // would run every case twice.
+    expect(commands).not.toContain('pnpm run test:browser:nightly');
+    const shards = nightlyShardScripts();
+    expect(shards.length).toBeGreaterThanOrEqual(2);
+    const jobs = [...jobsOf(nightly)];
+    const homes = shards.map(([name]) => {
+      const where = jobs.filter(([, job]) => job.includes(`run: pnpm run ${name}\n`));
+      expect(
+        where.map(([id]) => id),
+        name,
+      ).toHaveLength(1);
+      expect(
+        commands.filter((command) => command === `pnpm run ${name}`),
+        name,
+      ).toHaveLength(1);
+      return where[0]?.[0];
+    });
+    // A runner each: two halves on one runner would share its CPU, which is
+    // the cost one worker exists to avoid (#651).
+    expect(new Set(homes).size).toBe(shards.length);
+  });
+
+  it('divides the nightly checks between its halves by file, every nightly spec in exactly one — #1675', () => {
+    const [whole = ''] = playwrightRuns(webScripts()['test:browser:nightly']);
+    expect(whole).toBe('--project nightly --workers 1');
+    const tagged = [...new Set(NIGHTLY_CHECKS.map((check) => check.spec))];
+    const filtersOf = new Map(
+      nightlyShardScripts().map(([name, script]) => {
+        const runs = playwrightRuns(script);
+        expect(runs, name).toHaveLength(1);
+        const run = String(runs[0]);
+        // The whole run's project and worker, with this half's files after it.
+        expect(run.startsWith(`${whole} `), name).toBe(true);
+        expect(script, name).toMatch(
+          /^vite build && vite build --config vite\.browser\.config\.ts && playwright test /,
+        );
+        const filters = run.slice(whole.length).trim().split(/\s+/);
+        // Playwright reads a positional argument as a pattern over the path.
+        for (const filter of filters) {
+          expect(
+            tagged.filter((spec) => new RegExp(filter).test(spec)),
+            `${name}: ${filter} names no nightly spec`,
+          ).not.toEqual([]);
+        }
+        return [name, filters] as const;
+      }),
+    );
+    for (const spec of tagged) {
+      const halves = [...filtersOf]
+        .filter(([, filters]) => filters.some((filter) => new RegExp(filter).test(spec)))
+        .map(([name]) => name);
+      // In none, a new nightly spec runs nowhere; in two, it runs twice.
+      expect(halves, spec).toHaveLength(1);
+    }
+  });
+
+  it('runs every nightly job on the standard runner, on actions pinned to a commit — CLAUDE.md §8', () => {
+    for (const [id, job] of jobsOf(nightly)) {
+      expect(jobField(job, 'runs-on'), id).toBe('ubuntu-latest');
+    }
+    const uses = [...nightly.matchAll(/^ +uses: (\S+)/gm)].map((match) => String(match[1]));
+    for (const action of uses) expect(action).toMatch(/^[\w-]+\/[\w-]+@[0-9a-f]{40}$/);
+  });
+
+  it('reports a red run of any job, the second browser half included — #1675', () => {
+    const jobs = jobsOf(nightly);
+    const report = jobs.get('report') ?? '';
+    const needs = (jobField(report, 'needs') ?? '')
+      .replace(/^\[|\]$/g, '')
+      .split(',')
+      .map((id) => id.trim());
+    expect(needs.sort()).toEqual([...jobs.keys()].filter((id) => id !== 'report').sort());
+    // Over every job it needs, not one named job's result.
+    expect(report).toContain(
+      "(contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))",
     );
   });
 

@@ -27,6 +27,14 @@
  * is seen — with each frame's triangles and draw calls printed, which are the
  * figures validation 0002's #1283 and #1294 rows start from.
  *
+ * And since #1624, a sixth: **the holiday decorations**. With
+ * `decorations=probe` and a day in Halloween, every anchor of the village in
+ * reach carries one box (`realistic/config.ts` §`PROBE_DECORATIONS`); with
+ * `levers=-decorations` there is no holiday. The difference is exactly one
+ * draw call, in both worlds, and its control is the belt's own triangles read
+ * off its mesh, which must be above nought — so a belt with nothing in it
+ * cannot pass by adding no call.
+ *
  * And since #1559, a fifth: **the village road**. `?route=village` rides
  * `route.ts` §`villageRoute`, and its hold at `VILLAGE_HOLD_METRES` is
  * validation 0002 AE2's frame: the page's census of the frame it drew holds a
@@ -48,7 +56,11 @@ import {
   type RealisticModel,
 } from '../src/game/realistic-assets';
 import { GROUND_BLOB_TRIANGLES } from '../src/game/ground-blob';
-import { MAPPED_BUILDING_MAX, REALISTIC_WOODED_DRAW_CALLS } from '../src/game/realistic-budget';
+import {
+  MAPPED_BUILDING_MAX,
+  REALISTIC_DECORATION_TRIANGLES,
+  REALISTIC_WOODED_DRAW_CALLS,
+} from '../src/game/realistic-budget';
 
 import { NIGHTLY } from './nightly';
 import { LAYERS } from './realistic/config';
@@ -123,6 +135,7 @@ type Published = NonNullable<Window['__oylRealistic']>;
 async function ride(
   page: Page,
   query: string,
+  world: 'realistic' | 'stylised' = 'realistic',
 ): Promise<{ result: RealisticSample; page: Published }> {
   const response = await page.goto(`/realistic.html${query}`);
   expect(
@@ -142,9 +155,11 @@ async function ride(
   if (published === undefined || result === undefined) {
     throw new Error(`realistic.html${query} published no result`);
   }
-  // Not vacuous: the realistic world itself, not the stylised fallback.
-  expect(published.outcome?.loaded, JSON.stringify(published.outcome)).toBe(true);
-  expect(result.world).toBe('realistic');
+  if (world === 'realistic') {
+    // Not vacuous: the realistic world itself, not the stylised fallback.
+    expect(published.outcome?.loaded, JSON.stringify(published.outcome)).toBe(true);
+  }
+  expect(result.world).toBe(world);
   return { result, page: published };
 }
 
@@ -398,5 +413,88 @@ test.describe('the realistic page’s mapped-blobs lever — #1657', { tag: NIGH
     // No call of its own: the blobs are the one belt's instances.
     expect(grounded.result.lastFrame.calls - off.result.lastFrame.calls).toBeLessThanOrEqual(1);
     expect(off.result.rung).toBe(grounded.result.rung);
+  });
+});
+
+/**
+ * #1624: the village road's hold, on Halloween, with the probe on every
+ * anchor in reach — and the same with the holiday switched off.
+ */
+const DECORATED = `?ladder=0&panel=0&seconds=1&at=${String(VILLAGE_HOLD_METRES)}&route=village&date=2026-10-31&decorations=probe`;
+
+test.describe('the realistic page’s holiday decorations, stylised — #1624', () => {
+  test('draws the probe on every anchor in reach in ONE call more than with decorations off', async ({
+    page,
+  }) => {
+    test.setTimeout(REALISTIC_LOAD_BUDGET_MS);
+    const on = await ride(page, `${DECORATED}&world=stylised`, 'stylised');
+    const off = await ride(page, `${DECORATED}&world=stylised&levers=-decorations`, 'stylised');
+    console.log(
+      `#1624 stylised: ${String(on.result.lastFrame.calls)} draw calls with the probe ` +
+        `(${JSON.stringify(on.page.decorations)}), ${String(off.result.lastFrame.calls)} without`,
+    );
+    expect(off.result.leversOff).toEqual(['decorations']);
+    // The control: the belt holds the probe, so the delta is not vacuous.
+    expect(on.page.decorations?.triangles ?? 0).toBeGreaterThan(0);
+    expect(on.page.decorations?.triangles ?? 0).toBeLessThanOrEqual(REALISTIC_DECORATION_TRIANGLES);
+    expect(off.page.decorations?.triangles).toBe(0);
+    expect(on.result.lastFrame.calls - off.result.lastFrame.calls).toBe(1);
+    // The same triangles more, and no others: the belt is all that differs.
+    expect(on.result.lastFrame.triangles - off.result.lastFrame.triangles).toBe(
+      on.page.decorations?.triangles,
+    );
+  });
+});
+
+test.describe('the realistic page’s holiday decorations — #1624', { tag: NIGHTLY }, () => {
+  test('draws the probe in ONE call, inside the frame’s calls and its own triangles, fetching nothing more', async ({
+    page,
+  }) => {
+    test.setTimeout(3 * REALISTIC_LOAD_BUDGET_MS);
+    const fetched: string[] = [];
+    // What the page fetched over the network: not the `blob:` URLs it makes
+    // of what it has already decoded, which are new names every load.
+    page.on('request', (request) => {
+      if (!request.url().startsWith('blob:')) fetched.push(new URL(request.url()).pathname);
+    });
+    const on = await ride(page, DECORATED);
+    const withProbe = [...fetched].sort();
+    fetched.length = 0;
+    const off = await ride(page, `${DECORATED}&levers=-decorations`);
+    const without = [...fetched].sort();
+    console.log(
+      `#1624 realistic: ${String(on.result.lastFrame.calls)} draw calls and ` +
+        `${String(on.result.lastFrame.triangles)} triangles with the probe ` +
+        `(${JSON.stringify(on.page.decorations)}), ${String(off.result.lastFrame.calls)} and ` +
+        `${String(off.result.lastFrame.triangles)} without`,
+    );
+    expect(on.page.decorations?.triangles ?? 0).toBeGreaterThan(0);
+    expect(on.page.decorations?.triangles ?? 0).toBeLessThanOrEqual(REALISTIC_DECORATION_TRIANGLES);
+    expect(off.page.decorations?.triangles).toBe(0);
+    expect(on.result.lastFrame.calls - off.result.lastFrame.calls).toBe(1);
+    expect(on.result.lastFrame.triangles - off.result.lastFrame.triangles).toBe(
+      on.page.decorations?.triangles,
+    );
+    // Zero bytes (ruling (c)): the probe is boxes from numbers, so the page
+    // fetches exactly what it fetches with no holiday.
+    expect(withProbe).toEqual(without);
+    expect(off.result.rung).toBe(on.result.rung);
+
+    // ⚠️ **The ceiling is held on the wooded frame it was set for, not on the
+    // village's.** #1624 asked for the village view at or under
+    // `REALISTIC_WOODED_DRAW_CALLS`, and on `main` before #1624 that frame
+    // already makes 58 calls with no decoration at all (2026-10-24, on a Mac
+    // and in the pinned Chromium) — every structure kind, the furniture's
+    // four kinds, the pavements and the people. The belt's own share of it is
+    // the one call held above; the village frame's 58 is reported in #1624's
+    // pull request rather than hidden under a looser number here. With the
+    // probe and a holiday on, the wooded hold is the frame the ceiling counts.
+    const wooded = await ride(page, `${HELD}&date=2026-10-31&decorations=probe`);
+    console.log(
+      `#1624 at=2550 with the probe: ${String(wooded.result.lastFrame.calls)} draw calls ` +
+        `(${JSON.stringify(wooded.page.decorations)})`,
+    );
+    expect(wooded.result.lastFrame.calls).toBeLessThanOrEqual(REALISTIC_WOODED_DRAW_CALLS);
+    expect(wooded.result.lastFrame.calls).toBe(FRAME_DRAW_CALLS_AT_2550);
   });
 });

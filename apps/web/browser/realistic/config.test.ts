@@ -16,10 +16,13 @@ import {
   percentiles,
   rungWithLevers,
   seasonWithLevers,
+  decorationsWithConfig,
+  PROBE_DECORATIONS,
   surfacesWithLevers,
   treesWithLevers,
   windowRevealsWithLevers,
 } from './config';
+import { ANCHOR_KINDS, HOLIDAY_DECORATIONS } from '../../src/game/decorations';
 import { REALISTIC_TREE_SETS, REALISTIC_TREES_DEFAULT } from '../../src/game/realistic-assets';
 
 describe('the realistic page’s configuration — ADR 0026 D-12', () => {
@@ -48,6 +51,7 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
       town: 'mixed',
       route: undefined,
       date: undefined,
+      decorations: undefined,
     });
   });
 
@@ -313,6 +317,7 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
       '?facing=away',
       '?date=2026-10-31&levers=-decorations',
       '?world=stylised&date=0999-01-06',
+      '?date=2026-10-31&decorations=probe&route=village',
     ]) {
       const config = parseConfig(search);
       expect(parseConfig(configQuery(config))).toEqual(config);
@@ -322,6 +327,24 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
   it('writes `date` back as the zero-padded `YYYY-MM-DD` it was read from — #1622', () => {
     expect(configQuery(parseConfig('?date=2026-10-31'))).toBe('?date=2026-10-31');
     expect(configQuery(parseConfig('?date=0999-01-06'))).toBe('?date=0999-01-06');
+  });
+});
+
+describe('the page’s decoration probe — #1624', () => {
+  it('decorates with the product’s table unless the URL asks for the probe, and refuses any other', () => {
+    expect(parseConfig('').decorations).toBeUndefined();
+    expect(decorationsWithConfig(parseConfig(''))).toBe(HOLIDAY_DECORATIONS);
+    const probe = decorationsWithConfig(parseConfig('?decorations=probe'));
+    expect(probe).toBe(PROBE_DECORATIONS);
+    // Both holidays, every anchor kind, every anchor taken: a probe that
+    // placed nothing would let the browser gate's one call pass vacuously.
+    for (const holiday of ['halloween', 'winter-lights'] as const) {
+      const [kind] = probe[holiday] ?? [];
+      expect(kind?.anchors).toEqual(ANCHOR_KINDS);
+      expect(kind?.chance).toBe(1);
+      expect(kind?.parts).toHaveLength(1);
+    }
+    expect(() => parseConfig('?decorations=pumpkins')).toThrow(/decorations is one of probe/);
   });
 });
 

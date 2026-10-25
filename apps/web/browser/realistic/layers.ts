@@ -64,6 +64,7 @@ import { SCENERY_KINDS, type SceneryKind } from '../../src/game/scatter';
 import {
   BridgeBelt,
   ContactShadowBelt,
+  DecorationBelt,
   FurnitureBelt,
   GantryBelt,
   GroundBlobBelt,
@@ -157,6 +158,8 @@ export const LAYER_OWNERS: ReadonlyMap<{ prototype: object }, Ownership> = new M
   // #1541: and who walks them, realistic only. Their own cost pair is the
   // `-people` lever (`config.ts` §`LEVERS`), which places nobody.
   [PeopleBelt, 'structures'],
+  // #1624: the holiday's decorations on the villages, in both worlds.
+  [DecorationBelt, 'structures'],
   [RiderBelt, 'riders'],
   [RealisticRiderBelt, 'riders'],
   [ContactShadowBelt, 'riders'],

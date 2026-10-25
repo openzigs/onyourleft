@@ -34,6 +34,10 @@
 #   D-3); the one is the reflow walk's DARK palette (#1076, the owner's
 #   ruling of 2026-10-03), whose light-palette twin stays required. `nightly-split.test.ts`, in the required suite, fails a tag that
 #   list does not name and a script or workflow that stops running them.
+#   Since #1675 CI runs it in two halves, `test:browser:nightly:shard-1` in
+#   the `heavy` job and `test:browser:nightly:shard-2` in `browser-2`, and
+#   the reporter `apps/web/browser/not-run-reporter.ts` names any test a run
+#   did not reach and fails the run for it.
 #
 # And, since #1280 (the owner's ruling of 2026-10-12), the one thing here that
 # is a REPORT rather than a check:
@@ -67,9 +71,11 @@ on:
       - .github/workflows/nightly.yml
       - apps/web/browser/nightly.ts
       - apps/web/browser/game.browser.spec.ts
+      - apps/web/browser/not-run-reporter.ts
       - apps/web/browser/realistic.browser.spec.ts
       - apps/web/browser/reflow.browser.spec.ts
       - apps/web/playwright.config.ts
+      - apps/web/package.json
       - apps/web/src/game/near-field.test.ts
       - apps/web/src/game/realistic-textures.test.ts
       - package.json
@@ -140,8 +146,21 @@ jobs:
 
       # One worker: the realistic loads draw on the CPU through SwiftShader,
       # and two of them side by side took about twice as long each (#651).
-      - name: Nightly browser checks
-        run: pnpm run test:browser:nightly
+      # ⚠️ HALF the nightly browser checks since #1675, and a reviewer who
+      # remembers this step running `test:browser:nightly` is reading the old
+      # file: on one worker the whole set took 804 s of its 840 s stop
+      # (run 40141730529) and three runs stopped there with 9 to 15 not run.
+      # This half is every nightly spec but `realistic.browser.spec.ts`, which
+      # the `browser-2` job below runs on a runner of its own, so it still
+      # has the CPU to itself. Split by FILE rather than with `--shard`, which
+      # balances by test count and would have put the game spec's 54 cases
+      # alone in one half and every other file in the other: the game spec's
+      # loads share one worker fixture, so dividing that file would pay for
+      # them twice. nightly-split.test.ts holds every nightly spec in exactly
+      # one half. docs/agents/ci.md section 4c "Two nightly browser shards --
+      # #1675" has the measurements.
+      - name: Nightly browser checks (1 of 2)
+        run: pnpm run test:browser:nightly:shard-1
 
       # --- The coverage report (#1280) ----------------------------------------
       #
@@ -181,17 +200,62 @@ jobs:
           retention-days: 7
           if-no-files-found: warn
 
+  # The second half of the nightly browser checks (#1675): the owner's
+  # realistic page, `realistic.browser.spec.ts`, whose levers each add a load
+  # of the page. Every step and pin is `heavy`'s, whose comments say why.
+  browser-2:
+    name: Nightly browser checks (2 of 2)
+    runs-on: ubuntu-latest
+    # A stop, not a budget: the Playwright run stops itself at 840 s
+    # (playwright.config.ts GATE_BUDGET_MS), about 90 s into the job.
+    timeout-minutes: 20
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Record the runner's CPU
+        run: lscpu | grep -E '^(Model name|Thread|Core|Socket|CPU\(s\))'
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Enable pnpm through corepack
+        env:
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+        run: |
+          corepack enable pnpm
+          pnpm --version
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Drop the unrelated Chrome apt source
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/google-chrome.list \
+                     /etc/apt/sources.list.d/google-chrome.sources
+
+      - name: Install the pinned Chromium
+        run: pnpm --filter @onyourleft/web exec playwright install --with-deps chromium
+
+      - name: Nightly browser checks (2 of 2)
+        run: pnpm run test:browser:nightly:shard-2
+
   # A red nightly run has to be SEEN, or moving a check here is deleting it.
   # Opens an issue the first time, and comments on it while it stays open.
   report:
     name: Report a red run
-    needs: heavy
+    # Both jobs since #1675: a red second half has to open the issue too.
+    needs: [heavy, browser-2]
     # `result` rather than `failure()`: a job stopped by its timeout-minutes
     # ends `cancelled`, not `failed`, and a hung run must be reported too.
     # (A run cancelled by hand is reported as well; that is the cheaper error.)
     if: >-
       always() && github.event_name != 'pull_request' &&
-      (needs.heavy.result == 'failure' || needs.heavy.result == 'cancelled')
+      (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))
     runs-on: ubuntu-latest
     timeout-minutes: 5
     # This job's token may write issues and nothing else -- not contents, not

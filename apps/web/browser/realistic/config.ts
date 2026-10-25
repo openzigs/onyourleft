@@ -25,6 +25,7 @@
  * | `facing` | which way the route is turned, relative to the sun (#702, `route.ts` §"Which way it faces") | `sun`, `away`; default the route unturned, which looks 110° to 160° away from the sun |
  * | `town` | ride through a mapped town instead of `route.ts`' road (#1581): `footprint-fixtures-testing.ts` §`mixedTownFixture`'s mixed footprints, planned, drawn and lotted as a ride's corridor is, from 900 m to 2 100 m; since #1585 `richmond`, `footprint-fixtures-testing.ts` §`richmondStreetFixture`'s narrow lots drawn as house models beside square ones drawn as extrusions, from 900 m to 1 500 m; since #1542 `countryside`, `footprint-fixtures-testing.ts` §`countrysideFixture`'s fields, woods and a park, from 900 m to 2 100 m, for #1542's levers | `mixed`, `richmond`, `countryside`; default none |
  * | `date` | the rider's local day the ride starts on (#1622), in either world: its holiday (`season.ts` §`holidayOn`) and the route's season. A malformed or impossible day is REFUSED | `YYYY-MM-DD`; default this device's own day |
+ * | `decorations` | #1624's probe: one small box on every decoration anchor of every village in reach, for either holiday, in place of the product's table (`decorations.ts` §`HOLIDAY_DECORATIONS`, which places nothing yet). Pair it with a `date` in a holiday and `route=village`; `levers=-decorations` is its control | `probe`; default the product's table |
  * | `route` | which of `route.ts`' roads is ridden (#1559): absent, the valley road every Part Z and Part AH row was taken on; `village`, `route.ts` §`villageRoute`, a level road through two villages, for validation 0002 AE2 (`at=820` holds the first one's church and shops in frame). Refused beside `town`, which is a road of its own | `village`; default none |
  *
  * ⚠️ **Unknown parameters and values are REFUSED**, as #457's page refused
@@ -32,6 +33,12 @@
  * name, and a table of numbers cannot show that it did.
  */
 
+import {
+  ANCHOR_KINDS,
+  HOLIDAY_DECORATIONS,
+  type DecorationKind,
+  type ItemTable,
+} from '../../src/game/decorations';
 import type { CountrysideLever } from '../../src/game/land-class';
 import type { RealisticTrees } from '../../src/game/realistic-assets';
 import {
@@ -241,6 +248,11 @@ export interface RealisticPageConfig {
    * device's own day, as a ride reads it (`season.ts` §`deviceToday`).
    */
   readonly date: CalendarDay | undefined;
+  /**
+   * #1624: what the holidays decorate with — `probe` for {@link PROBE_DECORATIONS},
+   * `undefined` for the product's own table.
+   */
+  readonly decorations: 'probe' | undefined;
 }
 
 /** The ride the owner is asked to look at: the realistic world, the ladder running. */
@@ -258,6 +270,7 @@ export const DEFAULT_CONFIG: RealisticPageConfig = {
   town: undefined,
   route: undefined,
   date: undefined,
+  decorations: undefined,
 };
 
 const KNOWN = new Set([
@@ -274,6 +287,7 @@ const KNOWN = new Set([
   'town',
   'route',
   'date',
+  'decorations',
 ]);
 
 /**
@@ -427,6 +441,9 @@ export function parseConfig(search: string): RealisticPageConfig {
       : undefined,
     route: params.has('route') ? routeFrom(params) : undefined,
     date: params.has('date') ? dateFrom(params.get('date') ?? '') : undefined,
+    decorations: params.has('decorations')
+      ? oneOf('decorations', ['probe'] as const, 'probe')
+      : undefined,
   };
 }
 
@@ -460,6 +477,30 @@ export function seasonWithLevers(
     place.absLatitude,
     !config.leversOff.includes('decorations'),
   );
+}
+
+/**
+ * #1624's probe: ONE small box, standing on every anchor of every kind
+ * (`decorations.ts` §`ANCHOR_KINDS`), for both holidays. It exists so that
+ * the browser gate's "one call for the belt" cannot pass over a belt with
+ * nothing in it, and it lives on this page alone: `realistic.html` is built
+ * only by `vite.browser.config.ts`, so no rider reaches it. #1625 and #1626
+ * replace it with the real sets in the same spec.
+ */
+const PROBE: DecorationKind = {
+  item: 'probe',
+  anchors: ANCHOR_KINDS,
+  chance: 1,
+  radius: 0.15,
+  parts: [{ size: [0.3, 0.3, 0.3], at: [0, 0.15, 0], colour: 0xe07a1f, glows: false }],
+};
+
+/** {@link PROBE} for every holiday. */
+export const PROBE_DECORATIONS: ItemTable = { halloween: [PROBE], 'winter-lights': [PROBE] };
+
+/** What this run decorates with — #1624. `realistic-harness.ts` hands it to `decorationKindsOf`. */
+export function decorationsWithConfig(config: Pick<RealisticPageConfig, 'decorations'>): ItemTable {
+  return config.decorations === 'probe' ? PROBE_DECORATIONS : HOLIDAY_DECORATIONS;
 }
 
 /**
@@ -502,6 +543,7 @@ export function configQuery(config: RealisticPageConfig): string {
       `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
     );
   }
+  if (config.decorations !== undefined) params.set('decorations', config.decorations);
   const query = params.toString();
   return query === '' ? '' : `?${query}`;
 }
