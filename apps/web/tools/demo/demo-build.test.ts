@@ -12,7 +12,7 @@
  * not — the forbidden-module check against Rolldown's real output.
  */
 
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -104,5 +104,35 @@ describe('the demo build refuses a trainer module — #1645', () => {
         `export const none: Partial<typeof control> = {};\n`,
     );
     await expect(buildDemo(join(scratch, 'types'), entry)).resolves.toBeUndefined();
+  }, 60_000);
+});
+
+describe('the demo build keeps the baked routes — #1651', () => {
+  /** A `routes/` as `demo:bake` leaves it, under `outDir`, and a stale file the build must clear. */
+  function seed(outDir: string, withNotice: boolean): Buffer {
+    const routes = join(outDir, 'routes');
+    mkdirSync(routes, { recursive: true });
+    writeFileSync(join(outDir, 'stale.txt'), 'from an earlier build');
+    const bytes = Buffer.from([0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 0xff]);
+    writeFileSync(join(routes, 'climb.0123456789abcdef.bin'), bytes);
+    writeFileSync(join(routes, 'routes.json'), '{}\n');
+    if (withNotice) writeFileSync(join(routes, 'LICENCE-ODbL.txt'), 'notice\n');
+    return bytes;
+  }
+
+  it('carries a bake across the build, which empties everything else', async () => {
+    const outDir = join(scratch, 'routes-kept');
+    const bytes = seed(outDir, true);
+    await buildDemo(outDir);
+    expect(readFileSync(join(outDir, 'routes/climb.0123456789abcdef.bin'))).toStrictEqual(bytes);
+    expect(existsSync(join(outDir, 'routes/LICENCE-ODbL.txt'))).toBe(true);
+    expect(existsSync(join(outDir, 'stale.txt'))).toBe(false);
+    expect(existsSync(join(outDir, 'index.html'))).toBe(true);
+  }, 60_000);
+
+  it('fails the build for a route with no ODbL notice beside it', async () => {
+    const outDir = join(scratch, 'routes-no-notice');
+    seed(outDir, false);
+    await expect(buildDemo(outDir)).rejects.toThrow(/oyl-demo-routes[\s\S]*no LICENCE-ODbL\.txt/);
   }, 60_000);
 });

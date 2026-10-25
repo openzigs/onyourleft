@@ -36,7 +36,13 @@ export function demoInProduct(
   const modules = moduleIds
     .map((id) => relative(root, id.replace(/\?.*$/, '')).replace(/\\/g, '/'))
     .filter((rel) => DEMO_SOURCE_DIRECTORIES.some((directory) => rel.startsWith(directory)));
-  const files = fileNames.filter((name) => name.replace(/\\/g, '/').startsWith('demo/'));
+  // #1651: a baked route is the demo's data wherever it lands — under `demo/`,
+  // in a `routes/` directory, or as a `.bin` anywhere — and the precache is
+  // derived from these names, so none may reach it.
+  const files = fileNames.filter((name) => {
+    const path = name.replace(/\\/g, '/');
+    return path.startsWith('demo/') || path.startsWith('routes/') || path.endsWith('.bin');
+  });
   return [...modules, ...files];
 }
 

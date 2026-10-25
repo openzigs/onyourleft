@@ -20,7 +20,11 @@ apps/                 AGPL-3.0-or-later, without exception
                         src/demo/. No trainer, Bluetooth, network or storage
                         module may be in its bundle (tools/demo/), and none of
                         it may be in the product's. docs/architecture.md's
-                        component table has the row.
+                        component table has the row. Since #1651 (ADR 0056)
+                        `demo:bake -- --route <id>` bakes a preset route's map
+                        data from the owner's demo/routes/<id>.gpx into
+                        demo/dist/routes/ only (tools/demo/bake-route.ts);
+                        CI bakes only the synthetic corridor fixture.
     browser/            the browser gate (#63) — the one place a real browser runs;
                         a harness page driving the map adapter, and its Playwright
                         spec, and since #63's cold-load criterion the PMTiles

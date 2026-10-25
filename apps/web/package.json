@@ -15,6 +15,7 @@
     "realistic:stage": "node --import ./tools/ts-extensionless-resolve.mjs tools/realistic/stage-into-apk.ts",
     "build": "tsc --noEmit --project tsconfig.json && vite build",
     "build:demo": "vite build --config vite.demo.config.ts",
+    "demo:bake": "node --experimental-transform-types --import ./tools/ts-extensionless-resolve.mjs tools/demo/bake-route.ts",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit --project tsconfig.json",
     "test": "vitest run",

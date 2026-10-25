@@ -413,16 +413,17 @@ export async function readCorridorTiles(options: CorridorReadOptions): Promise<C
       if (insideBounds(tile, opening.bounds)) queue.push(tile);
       else states.set(key(tile), 'outside-archive');
     }
-    const landUse: LandUseFeature[] = [];
-    const buildings: BuildingFeature[] = [];
-    const paths: PathFeature[] = [];
-    const streets: StreetFeature[] = [];
+    // #1651: each tile's features are kept in its own slot and joined in the
+    // queue's order at the end, so the features' order is the plan's and not
+    // the order the tiles happened to arrive in. Two reads of one archive then
+    // pack to the same bytes, which the demo's bake is checked against.
+    const decodedTiles: (CorridorFeatures | undefined)[] = [];
     let done = 0;
     let arrived = 0;
     const of = queue.length;
     options.progress(done, of);
 
-    const one = async (tile: TileId): Promise<void> => {
+    const one = async (tile: TileId, index: number): Promise<void> => {
       const own = linkedSignal(whole.signal, options.tileTimeoutMs ?? TILE_TIMEOUT_MS);
       try {
         const bytes = await archive.tile(tile, own.signal);
@@ -439,10 +440,7 @@ export async function readCorridorTiles(options: CorridorReadOptions): Promise<C
           return;
         }
         states.set(key(tile), 'covered');
-        for (const feature of decoded.landUse) landUse.push(feature);
-        for (const feature of decoded.buildings) buildings.push(feature);
-        for (const feature of decoded.paths) paths.push(feature);
-        for (const feature of decoded.streets) streets.push(feature);
+        decodedTiles[index] = decoded;
       } catch (error) {
         states.set(key(tile), 'refused');
         const failure =
@@ -461,9 +459,10 @@ export async function readCorridorTiles(options: CorridorReadOptions): Promise<C
     const worker = async (): Promise<void> => {
       while (next < queue.length) {
         if (whole.signal.aborted || options.mustStop?.() === true) return;
-        const tile = queue[next] as TileId;
+        const index = next;
+        const tile = queue[index] as TileId;
         next += 1;
-        await one(tile);
+        await one(tile, index);
       }
     };
     await Promise.all(Array.from({ length: Math.min(CORRIDOR_CONCURRENCY, of) }, worker));
@@ -472,6 +471,17 @@ export async function readCorridorTiles(options: CorridorReadOptions): Promise<C
     // and an all-refused corridor is not worth keeping over a later read.
     if (of > 0 && arrived === 0) return { kind: 'offline' };
 
+    const landUse: LandUseFeature[] = [];
+    const buildings: BuildingFeature[] = [];
+    const paths: PathFeature[] = [];
+    const streets: StreetFeature[] = [];
+    for (const decoded of decodedTiles) {
+      if (decoded === undefined) continue;
+      for (const feature of decoded.landUse) landUse.push(feature);
+      for (const feature of decoded.buildings) buildings.push(feature);
+      for (const feature of decoded.paths) paths.push(feature);
+      for (const feature of decoded.streets) streets.push(feature);
+    }
     const tiles = plan.tiles.map((tile) => {
       const state = states.get(key(tile));
       return state === undefined ? tile : { x: tile.x, y: tile.y, state };
@@ -538,9 +548,39 @@ export async function streamBytes(
   return out;
 }
 
-/** The features as the store keeps them: gzip over JSON, coordinates in centimetres. */
-export async function packCorridorFeatures(features: CorridorFeatures): Promise<Blob> {
-  const packed: PackedFeatures = {
+/**
+ * Gzip, with the header's two machine-dependent fields fixed — #1651.
+ *
+ * RFC 1952 §2.3.1: bytes 4–7 are the modification time and byte 9 the
+ * operating system that wrote the stream. `CompressionStream` writes a zero
+ * time, but its OS byte is zlib's `OS_CODE` for the platform it was built on —
+ * **19 on macOS, 3 on Linux** — so the same features packed on a laptop and on
+ * a CI runner differed in one byte. Both are set here: the time to 0 ("none")
+ * and the OS to 255 ("unknown"). Neither is covered by the CRC, which is over
+ * the data, and no reader acts on either.
+ */
+export async function gzipBytes(bytes: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> {
+  const out = await streamBytes(
+    new Blob([bytes]).stream().pipeThrough(new CompressionStream('gzip')),
+  );
+  out.fill(0, 4, 8);
+  out[9] = 0xff;
+  return out;
+}
+
+/** The decompressed bytes of a gzip stream. */
+export async function gunzipBytes(
+  bytes: Uint8Array<ArrayBuffer>,
+): Promise<Uint8Array<ArrayBuffer>> {
+  return streamBytes(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip')));
+}
+
+/** The JSON value of a corridor's features as they are packed: what the store's blob holds. */
+export type PackedCorridorFeatures = PackedFeatures;
+
+/** The features in their packed shape, before compression — the store's and the demo's (#1651). */
+export function packedCorridorFeatures(features: CorridorFeatures): PackedCorridorFeatures {
+  return {
     v: 2,
     landUse: features.landUse.map((f) => ({
       layer: f.layer,
@@ -565,15 +605,24 @@ export async function packCorridorFeatures(features: CorridorFeatures): Promise<
       line: toInts(f.line),
     })),
   };
-  const json = new Blob([JSON.stringify(packed)]);
-  const gzipped = json.stream().pipeThrough(new CompressionStream('gzip'));
-  return new Blob([await streamBytes(gzipped)], { type: 'application/gzip' });
+}
+
+/** The features as the store keeps them: gzip over JSON, coordinates in centimetres. */
+export async function packCorridorFeatures(features: CorridorFeatures): Promise<Blob> {
+  const json = new TextEncoder().encode(JSON.stringify(packedCorridorFeatures(features)));
+  return new Blob([await gzipBytes(json)], { type: 'application/gzip' });
 }
 
 /** Reads back what {@link packCorridorFeatures} packed. Throws for a blob it did not write. */
 export async function unpackCorridorFeatures(blob: Blob): Promise<CorridorFeatures> {
-  const json = blob.stream().pipeThrough(new DecompressionStream('gzip'));
-  const packed = JSON.parse(new TextDecoder().decode(await streamBytes(json))) as PackedFeatures;
+  const json = await gunzipBytes(new Uint8Array(await blob.arrayBuffer()));
+  return corridorFeaturesOfPacked(
+    JSON.parse(new TextDecoder().decode(json)) as PackedCorridorFeatures,
+  );
+}
+
+/** The features a packed value holds. Throws for one that is not a version this reads. */
+export function corridorFeaturesOfPacked(packed: PackedCorridorFeatures): CorridorFeatures {
   if (packed.v !== 2) throw new Error('worldCorridors.features: not a version this reads');
   return {
     landUse: packed.landUse.map((f) => ({
