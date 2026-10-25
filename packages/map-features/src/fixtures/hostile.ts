@@ -7,14 +7,26 @@
  */
 
 import {
+  MAX_PLACES_PER_TILE,
   MAX_RINGS_PER_POLYGON,
   MAX_TILE_BYTES,
   MAX_FEATURES_PER_LAYER,
   MAX_VERTICES_PER_FEATURE,
   MAX_VERTICES_PER_TILE,
 } from '../limits';
-import { command, encodeTile, outerRing, polygon, rectangle, zigzag } from '../testing/mvt-encoder';
-import type { DecodeRefusal } from '../types';
+import {
+  command,
+  encodeTile,
+  line,
+  outerRing,
+  points,
+  polygon,
+  rectangle,
+  zigzag,
+  type FeatureSpec,
+  type TagValue,
+} from '../testing/mvt-encoder';
+import type { DecodeRefusal, PlaceFeature } from '../types';
 import { tileOverLimit } from './limits';
 import { EARTH } from './tiles';
 
@@ -46,6 +58,167 @@ export function millionLineToTile(): Uint8Array {
   return encodeTile([
     EARTH,
     { name: 'roads', features: [{ type: 2, tags: { kind: 'path' }, geometry }] },
+  ]);
+}
+
+/** A `places` point, with the given tags, at a pixel. */
+function placeAt(
+  tags: Readonly<Record<string, TagValue>>,
+  at: readonly [number, number] = [2000, 2000],
+): FeatureSpec {
+  return { type: 1, tags, geometry: points([at]) };
+}
+
+/** A place every edge fixture also carries, which must be kept: the drop is not the whole layer's. */
+export const KEPT_PLACE_TAGS = { kind: 'locality', kind_detail: 'city', population_rank: 10 };
+
+/** {@link KEPT_PLACE_TAGS}' point as the decoder hands it back, less its position. */
+export const KEPT_PLACE: Pick<PlaceFeature, 'kind' | 'kindDetail' | 'populationRank'> = {
+  kind: 'locality',
+  kindDetail: 'city',
+  populationRank: 10,
+};
+
+/** A tile of a building and a `places` layer of the kept place and then `edge`. */
+function placesWith(edge: FeatureSpec): Uint8Array {
+  return encodeTile([
+    EARTH,
+    {
+      name: 'buildings',
+      features: [{ type: 3, tags: { kind: 'building' }, geometry: square }],
+    },
+    { name: 'places', features: [placeAt(KEPT_PLACE_TAGS, [1000, 1000]), edge] },
+  ]);
+}
+
+export interface DroppedPlaceFixture {
+  readonly name: string;
+  readonly bytes: () => Uint8Array;
+}
+
+/**
+ * Places ADR 0055 D-2 does not admit (#1632): each tile decodes, keeps its
+ * building and {@link KEPT_PLACE}, and drops the other point without throwing.
+ */
+export const DROPPED_PLACE_FIXTURES: readonly DroppedPlaceFixture[] = [
+  {
+    name: 'an unknown kind (country)',
+    bytes: () => placesWith(placeAt({ kind: 'country', kind_detail: 'city', population_rank: 12 })),
+  },
+  {
+    name: 'an unknown kind (one no archive writes)',
+    bytes: () =>
+      placesWith(placeAt({ kind: 'metropolis', kind_detail: 'city', population_rank: 12 })),
+  },
+  {
+    name: 'an unknown kind_detail (neighbourhood)',
+    bytes: () =>
+      placesWith(
+        placeAt({ kind: 'neighbourhood', kind_detail: 'neighbourhood', population_rank: 4 }),
+      ),
+  },
+  {
+    name: 'an unknown kind_detail (isolated_dwelling)',
+    bytes: () =>
+      placesWith(
+        placeAt({ kind: 'locality', kind_detail: 'isolated_dwelling', population_rank: 1 }),
+      ),
+  },
+  {
+    name: 'no kind_detail',
+    bytes: () => placesWith(placeAt({ kind: 'locality', population_rank: 9 })),
+  },
+  {
+    name: 'a negative population_rank',
+    bytes: () =>
+      placesWith(placeAt({ kind: 'locality', kind_detail: 'city', population_rank: -3 })),
+  },
+  {
+    name: 'a population_rank of 0',
+    bytes: () => placesWith(placeAt({ kind: 'locality', kind_detail: 'city', population_rank: 0 })),
+  },
+  {
+    name: 'a population_rank above the bound (19)',
+    bytes: () =>
+      placesWith(placeAt({ kind: 'locality', kind_detail: 'city', population_rank: 19 })),
+  },
+  {
+    name: 'a population_rank that is not an integer (9.5)',
+    bytes: () =>
+      placesWith(placeAt({ kind: 'locality', kind_detail: 'city', population_rank: 9.5 })),
+  },
+  {
+    name: 'a population_rank that is a string',
+    bytes: () =>
+      placesWith(placeAt({ kind: 'locality', kind_detail: 'city', population_rank: '12' })),
+  },
+  {
+    name: 'no population_rank',
+    bytes: () => placesWith(placeAt({ kind: 'locality', kind_detail: 'city' })),
+  },
+  {
+    name: 'a polygon instead of a point',
+    bytes: () =>
+      placesWith({
+        type: 3,
+        tags: KEPT_PLACE_TAGS,
+        geometry: polygon([outerRing(rectangle(1500, 1500, 1700, 1700))]),
+      }),
+  },
+  {
+    name: 'a line instead of a point',
+    bytes: () =>
+      placesWith({
+        type: 2,
+        tags: KEPT_PLACE_TAGS,
+        geometry: line([
+          [
+            [1500, 1500],
+            [1700, 1700],
+          ],
+        ]),
+      }),
+  },
+  {
+    name: 'a multipoint',
+    bytes: () =>
+      placesWith({
+        type: 1,
+        tags: KEPT_PLACE_TAGS,
+        geometry: points([
+          [1500, 1500],
+          [1700, 1700],
+        ]),
+      }),
+  },
+];
+
+/**
+ * A building, then `count` places on a grid, the first `MAX_PLACES_PER_TILE`
+ * of rank 10 and every one after it of rank 11, so a decoder that read past
+ * the bound shows it in the ranks it hands back.
+ */
+export function placesTileOf(count: number): Uint8Array {
+  const features: FeatureSpec[] = [];
+  for (let k = 0; k < count; k++) {
+    features.push(
+      placeAt(
+        {
+          kind: 'locality',
+          kind_detail: 'town',
+          population_rank: k < MAX_PLACES_PER_TILE ? 10 : 11,
+        },
+        [100 + (k % 60) * 60, 100 + Math.floor(k / 60) * 60],
+      ),
+    );
+  }
+  return encodeTile([
+    EARTH,
+    {
+      name: 'buildings',
+      features: [{ type: 3, tags: { kind: 'building' }, geometry: square }],
+    },
+    { name: 'places', features },
   ]);
 }
 
@@ -222,6 +395,42 @@ export const HOSTILE_FIXTURES: readonly HostileFixture[] = [
         },
       ]),
     refusal: { reason: 'malformed', layer: 'roads' },
+  },
+  {
+    name: 'a place point far outside the tile',
+    bytes: () =>
+      encodeTile([
+        EARTH,
+        {
+          name: 'places',
+          features: [
+            {
+              type: 1,
+              tags: KEPT_PLACE_TAGS,
+              geometry: [command(1, 1), zigzag(3 * 4096), zigzag(100)],
+            },
+          ],
+        },
+      ]),
+    refusal: { reason: 'malformed', layer: 'places' },
+  },
+  {
+    name: 'a place point with a LineTo after it',
+    bytes: () =>
+      encodeTile([
+        EARTH,
+        {
+          name: 'places',
+          features: [
+            {
+              type: 1,
+              tags: KEPT_PLACE_TAGS,
+              geometry: [command(1, 1), zigzag(100), zigzag(100), command(2, 1), 2, 2],
+            },
+          ],
+        },
+      ]),
+    refusal: { reason: 'malformed', layer: 'places' },
   },
   {
     name: 'a group wire type',

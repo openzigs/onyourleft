@@ -47,6 +47,7 @@ function fixtureCorridor() {
     buildings: [],
     paths: [],
     streets,
+    places: [],
   });
 }
 
@@ -90,6 +91,7 @@ describe('#1540 the plans’ verdicts — the browser case’s fixture', () => {
       buildings,
       paths: [],
       streets: [],
+      places: [],
     });
     const { verdicts } = footprintPlans(corridor, landClassMask(corridor), profile, origin);
     expect(verdicts).toStrictEqual(CORRIDOR_FIXTURE_VERDICTS);

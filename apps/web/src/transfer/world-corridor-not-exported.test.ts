@@ -9,6 +9,10 @@
  * and reads every file it produced for any trace of one — the table's name,
  * the corridor's own fields, a feature value as the decoded JSON spells it,
  * and the packed bytes themselves, raw or in base64.
+ *
+ * #1632 (ADR 0055 D-7.2): the corridor holds place points — the fixture's,
+ * and in the last export case ones the product decoded and packed from tiles
+ * whose places carry a name — and none of them, nor the name, is exported.
  */
 
 import {
@@ -22,9 +26,17 @@ import {
   worldCorridorFeaturesFor,
   worldCorridorFor,
 } from '@onyourleft/store/testing';
+import { decodeTile } from '@onyourleft/map-features';
+import {
+  FIXTURE_FRAME,
+  FIXTURE_TILE,
+  PLACE_SENTINEL,
+  placesTile,
+} from '@onyourleft/map-features/testing';
 import { TABLE, type WorldCorridorRecord } from '@onyourleft/store';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { packCorridorFeatures } from '../game/world-data/corridor';
 import { exportEverything } from './export-everything';
 import type { DownloadableFile } from './store-port';
 
@@ -80,6 +92,7 @@ async function tracesOf(
     corridor.routeDigest,
     corridor.archive.identity,
     corridor.readAt,
+    PLACE_SENTINEL,
     base64.slice(16, 56),
     ...featureValues(),
   ];
@@ -94,14 +107,37 @@ async function tracesOf(
   return found;
 }
 
+/** A corridor's features as the product packs them, from a tile whose places carry names (#1632). */
+async function packedPlaces(): Promise<Blob> {
+  const decoded = decodeTile(placesTile(), FIXTURE_TILE, FIXTURE_FRAME);
+  if ('reason' in decoded) throw new Error(decoded.reason);
+  expect(decoded.places.length).toBeGreaterThan(0);
+  return packCorridorFeatures({
+    landUse: [],
+    buildings: [],
+    paths: [],
+    streets: [],
+    places: decoded.places,
+  });
+}
+
 describe('the account export carries no world corridor — #1545', () => {
-  it.each(['fit', 'gpx', 'tcx'] as const)(
-    'finds no trace of one in any file of a %s export',
-    async (format) => {
+  it.each([
+    ['fit', 'fixture'],
+    ['gpx', 'fixture'],
+    ['tcx', 'fixture'],
+    ['fit', 'decoded places'],
+  ] as const)(
+    'finds no trace of one in any file of a %s export, its features the %s',
+    async (format, features) => {
       await seedAthletes(harness);
       const route = routeFor(ATHLETE_A);
       const ride = rideFor(ATHLETE_A, { routeId: route.id, hasPosition: true });
-      const corridor = await worldCorridorFor(ATHLETE_A, route.id);
+      const corridor = await worldCorridorFor(
+        ATHLETE_A,
+        route.id,
+        features === 'fixture' ? {} : { features: await packedPlaces() },
+      );
       await harness.write(async (store) => {
         await store.putRoute(route);
         await store.putActivity(ride);
@@ -151,6 +187,8 @@ describe('the account export carries no world corridor — #1545', () => {
     const found = await tracesOf(corridor, [planted, raw]);
     expect(found).toContain('manifest.json: worldCorridors');
     expect(found).toContain('manifest.json: 12.4375');
+    // #1632: a place's point is a marker too.
+    expect(found).toContain('manifest.json: 365.4375');
     expect(found).toContain('corridor.bin: the packed features');
   });
 });

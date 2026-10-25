@@ -21,7 +21,7 @@
  */
 
 import type { RouteProfile } from '@onyourleft/domain';
-import type { BuildingFeature, LandUseFeature } from '@onyourleft/map-features';
+import type { BuildingFeature, LandUseFeature, PlaceFeature } from '@onyourleft/map-features';
 
 import { buildingBeside, landBeside, rectangleBeside } from '../footprint-fixtures-testing';
 import { northRoute } from '../route-fixtures-testing';
@@ -33,6 +33,8 @@ import type { WorldCorridor } from '../world-data/corridor';
  * - `village`: residential, about 8 % coverage of 2-storey (6 m) houses;
  * - `full-village`: the same at about 13 % coverage, just under a town's
  *   15 %, so a sweep that miscounts its own land by a fifth reads it as one;
+ * - `thin-town`: residential, about 17 % coverage of 2-storey houses: a
+ *   town, but under the place prior's 25 % (#1632);
  * - `town`: residential, about 26 % coverage of 2-storey houses;
  * - `city-height`: residential, about 44 % coverage of 2-storey houses, six
  *   of them 18 m (6 storeys) near the stretch's middle;
@@ -40,7 +42,7 @@ import type { WorldCorridor } from '../world-data/corridor';
  *   commercial (±150 m of the road) and residential beyond.
  */
 export type UrbanStretchKind =
-  'rural' | 'village' | 'full-village' | 'town' | 'city-height' | 'city-commerce';
+  'rural' | 'village' | 'full-village' | 'thin-town' | 'town' | 'city-height' | 'city-commerce';
 
 export interface UrbanStretch {
   readonly kind: UrbanStretchKind;
@@ -54,6 +56,14 @@ export interface UrbanFixtureOptions {
   readonly length?: number;
   /** Stretches along the road where no map data was read: no tile covers them. */
   readonly uncovered?: readonly { readonly from: number; readonly to: number }[];
+  /**
+   * #1632: place points, each `along` the road and `out` metres to its west.
+   * None by default.
+   */
+  readonly places?: readonly (Pick<PlaceFeature, 'kind' | 'kindDetail' | 'populationRank'> & {
+    readonly along: number;
+    readonly out: number;
+  })[];
 }
 
 /** A footprint's side, in metres. */
@@ -71,6 +81,7 @@ const COMMERCIAL_REACH = 150;
 const GRID: Readonly<Record<Exclude<UrbanStretchKind, 'rural'>, readonly [number, number]>> = {
   village: [3, 7],
   'full-village': [3, 11],
+  'thin-town': [4, 11],
   town: [6, 11],
   'city-height': [8, 14],
   'city-commerce': [7, 14],
@@ -163,6 +174,12 @@ export function urbanFixture(
       buildings,
       paths: [],
       streets: [],
+      // A north road: `x` is metres west of it and `z` the distance along it.
+      places: (options.places ?? []).map(({ along, out, ...place }) => ({
+        ...place,
+        x: out,
+        z: along,
+      })),
     },
   };
 }

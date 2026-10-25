@@ -68,6 +68,22 @@ export interface StreetFeature {
   readonly line: Float32Array;
 }
 
+/**
+ * A point from `places` (#1632, ADR 0055 D-2): what kind of settlement stands
+ * there and roughly how big, **never which one** — no name, no `wikidata`, no
+ * `population`, no id is ever decoded (D-3).
+ */
+export interface PlaceFeature {
+  readonly kind: 'locality' | 'neighbourhood' | 'macrohood';
+  /** The OSM `place` value. */
+  readonly kindDetail: 'city' | 'town' | 'village' | 'hamlet' | 'suburb' | 'quarter';
+  /** An integer from 1 to 18; a point with any other is dropped. */
+  readonly populationRank: number;
+  /** The point, in local metres: `x` WEST and `z` north, as every other feature. */
+  readonly x: number;
+  readonly z: number;
+}
+
 export interface DecodedTile {
   readonly tile: TileId;
   readonly landUse: readonly LandUseFeature[];
@@ -75,6 +91,8 @@ export interface DecodedTile {
   readonly paths: readonly PathFeature[];
   /** #1565: the streets, for the cross streets at their junctions with the route. */
   readonly streets: readonly StreetFeature[];
+  /** #1632: the place points, at most `DecodeLimits.maxPlacesPerTile` of them. */
+  readonly places: readonly PlaceFeature[];
 }
 
 /**

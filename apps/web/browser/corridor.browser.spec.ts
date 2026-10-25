@@ -25,6 +25,13 @@ import {
 } from './corridor-fixture';
 import type { CorridorHarness } from './corridor-harness';
 
+/**
+ * Every request the fixture route's read makes of the archive (#1632), header,
+ * directories and tiles together. Pinned so that a read which fetched
+ * anything more for the places — a lower zoom, a second range — goes red.
+ */
+const CORRIDOR_ARCHIVE_REQUESTS = 11;
+
 async function readCorridor(page: Page, query = '', timeout = 30_000): Promise<CorridorHarness> {
   const response = await page.goto(`${HARNESS_ORIGIN}/corridor.html${query}`);
   expect(response?.ok()).toBe(true);
@@ -52,10 +59,16 @@ test.describe('#1539 corridor read', () => {
     expect(corridor.landUse).toBe(expected.landUse);
     expect(corridor.paths).toBe(expected.paths);
     expect(corridor.streets).toBe(expected.streets);
+    // #1632: the places come from the tiles already read (ADR 0055 D-4).
+    expect(expected.places).toBeGreaterThan(0);
+    expect(corridor.places).toBe(expected.places);
     // Only a load that asks for the town's timing pays for it (#1604).
     expect(corridor.townRatios).toStrictEqual([]);
     const archive = requested.filter((url) => url.endsWith(`/${CORRIDOR_ARCHIVE_FILE}`));
     expect(archive.length).toBeGreaterThan(expected.tiles);
+    // #1632, ADR 0055 D-4: no extra request for the places. 11 for this route
+    // before the fixture held places and 11 after, measured on 2026-10-25.
+    expect(archive.length).toBe(CORRIDOR_ARCHIVE_REQUESTS);
     const origins = new Set(requested.map((url) => new URL(url).origin));
     expect([...origins]).toStrictEqual([HARNESS_ORIGIN]);
     // The floor for the fixture's corridor at this origin, for the PR body.
