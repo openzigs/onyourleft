@@ -14695,6 +14695,24 @@ function weatheringGlsl(built: boolean, surface: StructureSurface): string {
   float oylWeatherCourses(float upSlope, float age) {
     return oylCoursesStrength * oylWeatherShare(age) * (1.0 - smoothstep(0.0, oylCoursesM, upSlope));
   }
+  float oylWeatherUpright(float upFacing) {
+    return 1.0 - step(0.3, upFacing);
+  }
+  float oylWeatherPlaneA(float upFacing, float nx, float nz, float wx, float wz) {
+    return upFacing > 0.7 ? wx : (abs(nx) > abs(nz) ? wz : wx);
+  }
+  float oylWeatherPlaneB(float upFacing, float wy, float wz) {
+    return upFacing > 0.7 ? wz : wy;
+  }
+  float oylWeatherGrime(float upFacing, float faceOn, float up, float a, float age, float pw) {
+    return oylWeatherUpright(upFacing) * faceOn * oylWeatherSplash(up, a, age, pw);
+  }
+  float oylWeatherPlinth(float upFacing, float faceOn, float top, float kind, float up) {
+    return oylWeatherUpright(upFacing) * faceOn * (1.0 - step(0.5, top)) * (1.0 - step(0.5, kind)) * (1.0 - step(0.0, up));
+  }
+  float oylWeatherDripOn(float flags, float below, float a, float age, float pw) {
+    return oylFlag(flags, oylFlatRoofFlag) * oylWeatherDrip(below, a, age, pw);
+  }
   float oylWeatherMoss(float a, float b, float facing, float age, float pw) {
     float where = smoothstep(oylMossLow, oylMossHigh, oylWeatherNoise(a / oylMossScale + 3.1, b / oylMossScale + 5.7));
     float thick = mix(0.4 + 1.2 * oylWeatherNoise(a / oylMossDetail + 8.3, b / oylMossDetail + 1.9), 1.0, oylFadeOf(pw / oylMossDetail));
@@ -14718,20 +14736,21 @@ const WEATHER_CLADDING_GLSL = /* glsl */ `
     vec3 oylWN = normalize(cross(dFdx(vOylWorld), dFdy(vOylWorld)));
     float oylWpw = max(max(max(fwidth(vOylWorld.x), fwidth(vOylWorld.y)), fwidth(vOylWorld.z)), 0.00001);
     float oylUpFacing = abs(oylWN.y);
-    float oylAlongW = abs(oylWN.x) > abs(oylWN.z) ? vOylWorld.z : vOylWorld.x;
-    vec2 oylPlane = oylUpFacing > 0.7 ? vOylWorld.xz : vec2(oylAlongW, vOylWorld.y);
+    vec2 oylPlane = vec2(
+      oylWeatherPlaneA(oylUpFacing, oylWN.x, oylWN.z, vOylWorld.x, vOylWorld.z),
+      oylWeatherPlaneB(oylUpFacing, vOylWorld.y, vOylWorld.z)
+    );
     float oylAge = oylWeatherAgeOf(vOylTint);
     float oylFaceOn = step(-0.5, oylTop);
     diffuseColor.rgb *= oylWeatherTile(oylPlane.x, oylPlane.y, oylWpw);
     float oylPitched = step(0.3, oylUpFacing) * (1.0 - step(0.97, oylUpFacing));
     diffuseColor.rgb *= 1.0 - oylPitched * oylFaceOn * oylWeatherCourses(vOylFacade.y, oylAge);
     diffuseColor.rgb = mix(diffuseColor.rgb, oylMossC, oylFaceOn * oylWeatherMoss(oylPlane.x, oylPlane.y, oylUpFacing, oylAge, oylWpw));
-    float oylUpright = 1.0 - step(0.3, oylUpFacing);
     float oylUp = mix(vOylFacade.y, vOylFacade.y * oylStoreyM, oylStoreyed);
-    float oylGrime = oylUpright * oylFaceOn * oylWeatherSplash(oylUp, oylPlane.x, oylAge, oylWpw);
+    float oylGrime = oylWeatherGrime(oylUpFacing, oylFaceOn, oylUp, oylPlane.x, oylAge, oylWpw);
     diffuseColor.rgb = mix(diffuseColor.rgb, vec3(dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722))), oylSplashGrey * oylGrime)
       * (1.0 - oylSplashStrength * oylGrime);
-    float oylPlinth = oylUpright * oylFaceOn * (1.0 - step(0.5, oylTop)) * (1.0 - step(0.5, oylKind)) * (1.0 - step(0.0, oylUp));
+    float oylPlinth = oylWeatherPlinth(oylUpFacing, oylFaceOn, oylTop, oylKind, oylUp);
     float oylParging = oylParged * oylPlinth;
     diffuseColor.rgb *= 1.0 + oylPargeLift * oylParging;
     oylFlat = max(oylFlat, oylParging);
@@ -14753,8 +14772,7 @@ const WEATHER_CASEMENT_STREAK_GLSL = /* glsl */ `
 
 /** #1661's drip down a flat roof's wall from its parapet (§3 of {@link facadeFragmentGlsl}). */
 const WEATHER_DRIP_GLSL = /* glsl */ `
-      diffuseColor.rgb *= 1.0 - oylFlag(oylFlags, oylFlatRoofFlag)
-        * oylWeatherDrip((oylTop - vOylFacade.y) * oylStoreyM, oylM.x, oylAge, oylMw.y);`;
+      diffuseColor.rgb *= 1.0 - oylWeatherDripOn(oylFlags, (oylTop - vOylFacade.y) * oylStoreyM, oylM.x, oylAge, oylMw.y);`;
 
 /**
  * {@link CLADDING_HELPERS_GLSL}, a mapped building's varyings, #1659's reveal

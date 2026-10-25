@@ -422,7 +422,7 @@ function shaderFunctions(source: string, names: readonly string[]): Record<strin
   const functions: string[] = [];
   // The weathering's own, and the fade they share with #1581's layout.
   for (const match of source.matchAll(
-    /float (oylWeather\w+|oylPhoto\w+|oylFadeOf)\(([^)]*)\) \{/g,
+    /float (oylWeather\w+|oylPhoto\w+|oylFadeOf|oylFlag)\(([^)]*)\) \{/g,
   )) {
     let depth = 1;
     let end = (match.index ?? 0) + match[0].length;
@@ -533,6 +533,49 @@ describe('the weathering, in the shader — #1661', () => {
     expect(constantOf(fragment, 'oylFlatRoofFlag')).toBe(STYLE_FLAT_ROOF);
   });
 
+  it('puts each effect on the faces the issue names: the program’s own classification, run', () => {
+    const { fragment } = compiled('render');
+    const run = shaderFunctions(fragment, [
+      'oylWeatherPlaneA',
+      'oylWeatherPlaneB',
+      'oylWeatherGrime',
+      'oylWeatherPlinth',
+      'oylWeatherDripOn',
+      'oylWeatherSplash',
+      'oylWeatherDrip',
+    ]);
+    const f = (name: string): Run => {
+      const found = run[name];
+      if (found === undefined) throw new Error(`no ${name}`);
+      return found;
+    };
+    // The wall's plane: x-facing walls run along z, z-facing along x, roofs along x and z.
+    expect(f('oylWeatherPlaneA')(0, 1, 0, 10, 20)).toBe(20);
+    expect(f('oylWeatherPlaneA')(0, 0, 1, 10, 20)).toBe(10);
+    expect(f('oylWeatherPlaneB')(0, 5, 20)).toBe(5);
+    expect(f('oylWeatherPlaneA')(1, 0, 0, 10, 20)).toBe(10);
+    expect(f('oylWeatherPlaneB')(1, 5, 20)).toBe(20);
+    // Splash grimes an upright, drawn face and never a roof.
+    const wall = f('oylWeatherGrime')(0, 1, 0.1, 3, 1, 0.01);
+    expect(wall).toBeGreaterThan(0);
+    expect(wall).toBe(f('oylWeatherSplash')(0.1, 3, 1, 0.01));
+    expect(f('oylWeatherGrime')(1, 1, 0.1, 3, 1, 0.01)).toBe(0);
+    expect(f('oylWeatherGrime')(0, 0, 0.1, 3, 1, 0.01)).toBe(0);
+    // Parging is on the plinth only: upright, drawn, a wall (kind < 0.5) with no roof height, below the floor.
+    expect(f('oylWeatherPlinth')(0, 1, -1, 0, -0.2)).toBe(1);
+    expect(f('oylWeatherPlinth')(0, 1, -1, 0, 0.2)).toBe(0);
+    expect(f('oylWeatherPlinth')(0, 1, 1, 0, -0.2)).toBe(0);
+    expect(f('oylWeatherPlinth')(0, 1, -1, 1, -0.2)).toBe(0);
+    expect(f('oylWeatherPlinth')(1, 1, -1, 0, -0.2)).toBe(0);
+    expect(f('oylWeatherPlinth')(0, 0, -1, 0, -0.2)).toBe(0);
+    // The drip drips on a face whose style carries the flat-roof flag, and on no other.
+    const flat = f('oylWeatherDripOn')(STYLE_FLAT_ROOF, 0.2, 3, 1, 0.01);
+    expect(flat).toBeGreaterThan(0);
+    expect(flat).toBe(f('oylWeatherDrip')(0.2, 3, 1, 0.01));
+    expect(f('oylWeatherDripOn')(0, 0.2, 3, 1, 0.01)).toBe(0);
+    expect(f('oylWeatherDripOn')(STYLE_FLAT_ROOF - 1, 0.2, 3, 1, 0.01)).toBe(0);
+  });
+
   it('bakes each surface’s share of a sill’s streak and its parging into its own program', () => {
     const brick = compiled('brick');
     const render = compiled('render');
@@ -565,7 +608,10 @@ describe('the weathering, in the shader — #1661', () => {
     expect(fragment).toContain(
       'oylWeatherMoss(oylPlane.x, oylPlane.y, oylUpFacing, oylAge, oylWpw)',
     );
-    expect(fragment).toContain('oylWeatherSplash(oylUp, oylPlane.x, oylAge, oylWpw)');
+    expect(fragment).toContain(
+      'oylWeatherGrime(oylUpFacing, oylFaceOn, oylUp, oylPlane.x, oylAge, oylWpw)',
+    );
+    expect(fragment).toContain('oylWeatherPlinth(oylUpFacing, oylFaceOn, oylTop, oylKind, oylUp)');
     expect(fragment).toContain('float oylAge = oylWeatherAgeOf(vOylTint);');
     // A sill's streak in both window branches, after the window is drawn.
     const streaks = [...fragment.matchAll(/oylWeatherStreak\(\n/g)].map((m) => m.index);
@@ -575,9 +621,11 @@ describe('the weathering, in the shader — #1661', () => {
       expect(each).toBeLessThan(shade);
     }
     // The drip after the shade, on a flat roof's wall.
-    const drip = fragment.indexOf('oylWeatherDrip((oylTop - vOylFacade.y) * oylStoreyM');
+    const drip = fragment.indexOf(
+      'oylWeatherDripOn(oylFlags, (oylTop - vOylFacade.y) * oylStoreyM',
+    );
     expect(drip).toBeGreaterThan(shade);
-    expect(fragment).toContain('oylFlag(oylFlags, oylFlatRoofFlag)');
+    expect(fragment).toContain('oylFlag(flags, oylFlatRoofFlag)');
     // #1658's band and the foot's band, untouched.
     expect(fragment).toContain(
       'float oylAtFoot = 1.0 - smoothstep(0.0, oylAoBaseM, vOylFacade.y * oylStoreyM);',
