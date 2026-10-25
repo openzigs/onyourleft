@@ -100,6 +100,17 @@
  * awning's shadow are not drawn: a wall's floats do not say that a cornice is
  * over it, nor a shop front's that an awning is.
  *
+ * ## The tower (#1636)
+ *
+ * A building of `footprint-buildings.ts` §`GLAZED_MIN_STOREYS` or more in a
+ * covered urban class carries `STYLE_GLAZED`, and its walls are a curtain
+ * wall in place of windows ({@link CURTAIN_WALL}, {@link curtainWallPartAt}):
+ * a band of glass every storey over an opaque spandrel, a transom between
+ * them and thin mullions at an even module across each bay. **No texture and
+ * no new material**: the flag is a bit of the style the wall already carries.
+ * The glass is drawn flat, a dark pane giving back the sky: the rooms behind
+ * it are #1662's.
+ *
  * ## The porch (#1589)
  *
  * A front porch's railing is one quad (`footprint-buildings.ts`
@@ -134,6 +145,7 @@ import {
   ROOF_THICKNESS_METRES,
   STOREY_METRES,
   STYLE_COMMERCIAL,
+  STYLE_GLAZED,
   STYLE_SASH,
   STYLE_SHUTTERS,
 } from './footprint-buildings';
@@ -655,6 +667,54 @@ function inSillShadow(x: number, y: number, sill: Opening, view: FacadeView): bo
   );
 }
 
+/**
+ * A curtain wall — #1636, in metres: the opaque `spandrel` at the foot of
+ * each storey, the width of a `mullion` and of the transom over the
+ * spandrel, and the `module` the mullions are spaced at, as near as a whole
+ * number of them fits a bay; and its colours, linear: the glass, a dark pane
+ * that gives back the sky, the spandrel's panel and the mullions' aluminium.
+ */
+export const CURTAIN_WALL = {
+  spandrel: 0.9,
+  mullion: 0.06,
+  module: 1.5,
+  glassColour: [0.03, 0.045, 0.06] as Rgb,
+  spandrelColour: [0.11, 0.12, 0.13] as Rgb,
+  mullionColour: [0.33, 0.34, 0.35] as Rgb,
+} as const;
+
+/**
+ * The part of a curtain wall at `(x, y)` — #1636: `x` metres across a bay
+ * `bay` wide, `y` metres up from its storey's floor. A mullion or the
+ * transom is `frame`, the spandrel `panel`, and the rest `glass` — set
+ * {@link REVEAL_DEPTH_METRES} behind the mullions, the transom and the next
+ * storey's spandrel, so that, as every window kind since #1659, it shows a
+ * `reveal` from the side and in the sun's shadow ({@link revealOf}); `view`
+ * is {@link viewOf}'s where none is named.
+ *
+ * @test-facing held by `city-centre.test.ts`; the product draws it in the shader
+ */
+export function curtainWallPartAt(
+  x: number,
+  y: number,
+  bay: number,
+  view: FacadeView = viewOf(),
+): FacadePart {
+  const { spandrel, mullion, module } = CURTAIN_WALL;
+  const modules = Math.max(1, Math.round(bay / module));
+  const width = bay / modules;
+  if (offWhole(x / width) * width <= mullion / 2) return 'frame';
+  if (Math.abs(y - spandrel) <= mullion / 2) return 'frame';
+  if (y < spandrel) return 'panel';
+  const k = Math.floor(x / width);
+  const opening: Opening = {
+    lo: [k * width + mullion / 2, spandrel + mullion / 2],
+    hi: [(k + 1) * width - mullion / 2, STOREY_METRES],
+  };
+  const seen = revealOf(x, y, opening, view);
+  return seen.side || seen.shaded ? 'reveal' : 'glass';
+}
+
 /** A sash window's size and place in its face, in metres. */
 interface Sash {
   readonly width: number;
@@ -810,6 +870,11 @@ export function facadePartAt(
   const storey = Math.floor(v);
   const x = u - bay;
   const y = v - storey;
+  if (style !== undefined && (style.flags & STYLE_GLAZED) !== 0) {
+    // #1636: a tower's curtain wall, every storey up to the eaves.
+    if (storey < 0 || v > top) return 'wall';
+    return curtainWallPartAt(x * style.width, y * STOREY_METRES, style.width, viewOf(style));
+  }
   const commercial = style !== undefined && (style.flags & STYLE_COMMERCIAL) !== 0;
   const w = commercial ? COMMERCIAL_WINDOW_IN_BAY : WINDOW_IN_BAY;
   const sash = style !== undefined && (style.flags & STYLE_SASH) !== 0;

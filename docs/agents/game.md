@@ -876,7 +876,10 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         Since #1658 a sunlit wall under eaves has the sun's own
                         shadow from the eaves' edge (`eavesShadeAt`, the
                         shader's `oylOverhangShadow`); `-overhang-shadows`
-                        builds it out
+                        builds it out. Since #1636 a `city-centre` front wall
+                        has a shop front whatever its use, and a tower of
+                        `GLAZED_MIN_STOREYS` a curtain wall (`STYLE_GLAZED`,
+                        `curtainWallPartAt`); the realistic page's `town=city`
     src/game/building-paint.ts
                         what a realistic building is painted (#1581): each wall
                         and roof surface's multipliers, the trim's and the

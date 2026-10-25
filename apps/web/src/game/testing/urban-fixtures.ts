@@ -54,6 +54,8 @@ export interface UrbanFixtureOptions {
   readonly length?: number;
   /** Stretches along the road where no map data was read: no tile covers them. */
   readonly uncovered?: readonly { readonly from: number; readonly to: number }[];
+  /** Where the road starts, degrees north (#1636, for the realistic page's `place`). */
+  readonly latitude?: number;
 }
 
 /** A footprint's side, in metres. */
@@ -93,7 +95,11 @@ export function urbanFixture(
   readonly corridor: WorldCorridor;
 } {
   const length = options.length ?? 3_000;
-  const profile = northRoute(length, () => 10);
+  const profile = northRoute(
+    length,
+    () => 10,
+    options.latitude === undefined ? {} : { latitude: options.latitude },
+  );
   const origin = corridorOrigin(profile);
   const landUse: LandUseFeature[] = [];
   const buildings: BuildingFeature[] = [];
@@ -163,6 +169,35 @@ export function urbanFixture(
       buildings,
       paths: [],
       streets: [],
+    },
+  };
+}
+
+/**
+ * A city centre — #1636: a `city-height` stretch from 900 m to 2 100 m (the
+ * realistic page's town), rural land either side, and two more towers in it
+ * 40 m left of the road, a 16 m square each: 27 m high (nine storeys, a
+ * curtain wall) at 1 430 m and 24 m (eight) at 1 570 m.
+ */
+export function cityCentreFixture(latitude?: number): ReturnType<typeof urbanFixture> {
+  const fixture = urbanFixture(
+    [
+      { kind: 'rural', from: 100, to: 900 },
+      { kind: 'city-height', from: 900, to: 2_100 },
+      { kind: 'rural', from: 2_100, to: 2_900 },
+    ],
+    latitude === undefined ? {} : { latitude },
+  );
+  const { profile, origin } = fixture;
+  return {
+    ...fixture,
+    corridor: {
+      ...fixture.corridor,
+      buildings: [
+        ...fixture.corridor.buildings,
+        buildingBeside(profile, origin, [rectangleBeside(1_430, -40, 16, 16)], 27),
+        buildingBeside(profile, origin, [rectangleBeside(1_570, -40, 16, 16)], 24),
+      ],
     },
   };
 }

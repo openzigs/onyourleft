@@ -68,6 +68,7 @@ import {
 } from '../src/game/footprint-fixtures-testing';
 import { landClassMask } from '../src/game/land-class';
 import { mappedBuildingsOf } from '../src/game/mapped-buildings';
+import { cityCentreFixture } from '../src/game/testing/urban-fixtures';
 import type { SceneFrame } from '../src/game/port';
 import { corridorOrigin } from '../src/game/terrain';
 import { NO_URBAN_CLASS, urbanClassMap } from '../src/game/urban-class';
@@ -370,7 +371,9 @@ async function run(): Promise<void> {
         ? richmondStreetFixture(latitude)
         : config.town === 'countryside'
           ? countrysideFixture(latitude)
-          : undefined;
+          : config.town === 'city'
+            ? cityCentreFixture(latitude)
+            : undefined;
   // #1559: or the level road through two villages, for validation 0002 AE2.
   const profile =
     mixed?.profile ??

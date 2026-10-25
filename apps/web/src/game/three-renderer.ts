@@ -285,6 +285,7 @@ import {
   SASH_TOP_SHARE,
   SHINGLE,
   SHOP_DOOR,
+  CURTAIN_WALL,
   SHOP_FRONT,
   SHUTTER,
   SIGN_MOULDING_METRES,
@@ -324,6 +325,7 @@ import {
   STYLE_COMMERCIAL,
   STYLE_EAVES,
   STYLE_FLOATS,
+  STYLE_GLAZED,
   STYLE_OFFSET,
   STYLE_SASH,
   STYLE_SHUTTERS,
@@ -14354,6 +14356,13 @@ const FACADE_CONSTANTS_GLSL = /* glsl */ `
   const float oylSignTop = ${glslFloat(FACADE_SIGN)};
   const float oylAwningTop = ${glslFloat(FACADE_AWNING)};
   const float oylCommercialFlag = ${glslFloat(STYLE_COMMERCIAL)};
+  const float oylGlazedFlag = ${glslFloat(STYLE_GLAZED)};
+  const float oylCurtainSpandrel = ${glslFloat(CURTAIN_WALL.spandrel)};
+  const float oylCurtainMullion = ${glslFloat(CURTAIN_WALL.mullion)};
+  const float oylCurtainModule = ${glslFloat(CURTAIN_WALL.module)};
+  const vec3 oylCurtainGlassC = ${glslVec(CURTAIN_WALL.glassColour)};
+  const vec3 oylCurtainSpandrelC = ${glslVec(CURTAIN_WALL.spandrelColour)};
+  const vec3 oylCurtainMullionC = ${glslVec(CURTAIN_WALL.mullionColour)};
   const float oylCwL = ${glslFloat(COMMERCIAL_WINDOW_IN_BAY.left)};
   const float oylCwR = ${glslFloat(COMMERCIAL_WINDOW_IN_BAY.right)};
   const float oylCwB = ${glslFloat(COMMERCIAL_WINDOW_IN_BAY.bottom)};
@@ -14587,6 +14596,55 @@ const OVERHANG_SHADE_GLSL = /* glsl */ `
       oylEavesShade = mix(oylEavesShade, min(oylEavesShade, oylSunShadow), oylFlag(oylFlags, oylEavesFlag));`;
 
 /**
+ * #1636's curtain wall, in GLSL — `facade.ts` §`curtainWallPartAt` from the
+ * same numbers: in every storey up to the eaves, glass over an opaque
+ * spandrel with a transom between, and mullions at an even module across
+ * each bay; faded far off to the three parts' mean by their shares. The
+ * glass is flat — a dark pane that gives back the sky through the finish
+ * (`oylGlass`) — until #1662 puts rooms behind it.
+ */
+const CURTAIN_WALL_GLSL = /* glsl */ `
+        float oylBayW = max(vOylStyle.z, 0.1);
+        float oylModules = max(1.0, floor(oylBayW / oylCurtainModule + 0.5));
+        float oylModW = oylBayW / oylModules;
+        vec2 oylP = vec2(oylAt.x * oylBayW, oylAt.y * oylStoreyM);
+        float oylOnWall = step(0.0, oylCell.y) * (1.0 - step(vOylFacade.z, vOylFacade.y));
+        float oylMull = oylLine(oylP.x / oylModW, oylCurtainMullion * 0.5 / oylModW, oylMw.x / oylModW);
+        float oylTransomBar = oylBand(oylP.y, oylCurtainSpandrel - oylCurtainMullion * 0.5, oylCurtainSpandrel + oylCurtainMullion * 0.5, oylMw.y);
+        float oylBars = max(oylMull, oylTransomBar);
+        float oylSpandrel = (1.0 - smoothstep(oylCurtainSpandrel - oylMw.y, oylCurtainSpandrel + oylMw.y, oylP.y)) * (1.0 - oylBars);
+        // As every window kind's since #1659: the glass set back behind its mullions, the
+        // transom and the next storey's spandrel, its side seen past it and the sun's shadow on it.
+        float oylK = floor(oylP.x / oylModW);
+        vec2 oylLo = vec2(oylK * oylModW + oylCurtainMullion * 0.5, oylCurtainSpandrel + oylCurtainMullion * 0.5);
+        vec2 oylHi = vec2((oylK + 1.0) * oylModW - oylCurtainMullion * 0.5, oylStoreyM);
+        vec2 oylQ;
+        float oylSeen;
+        float oylSideLit;
+        float oylShadeOn;
+        oylRevealOf(oylP, oylLo, oylHi, oylMw, oylEyeF, oylSunF, oylQ, oylSeen, oylSideLit, oylShadeOn);
+        float oylOpen = (1.0 - oylSpandrel) * (1.0 - oylBars);
+        float oylPaneOn = oylOpen * oylSeen;
+        float oylSide = oylOpen * (1.0 - oylSeen);
+        vec3 oylPaneC = oylCurtainGlassC * (1.0 - oylRevealShade * oylShadeOn);
+        vec3 oylSideC = oylCurtainMullionC * (1.0 - oylRevealShade * (1.0 - oylSideLit));
+        vec3 oylDrawn = mix(
+          mix(mix(oylPaneC, oylCurtainSpandrelC, oylSpandrel), oylCurtainMullionC, oylBars),
+          oylSideC,
+          oylSide
+        );
+        float oylBarShare = min(1.0, oylCurtainMullion / oylModW + oylCurtainMullion / oylStoreyM);
+        float oylSpandrelShare = (oylCurtainSpandrel / oylStoreyM) * (1.0 - oylBarShare);
+        vec3 oylMean = oylCurtainMullionC * oylBarShare + oylCurtainSpandrelC * oylSpandrelShare
+          + oylCurtainGlassC * max(0.0, 1.0 - oylBarShare - oylSpandrelShare);
+        float oylFade = oylFadeOf(max(oylMw.x / oylModW, oylMw.y / oylStoreyM));
+        diffuseColor.rgb = mix(diffuseColor.rgb, mix(oylDrawn, oylMean, oylFade), oylOnWall);
+        oylGlass = oylPaneOn * (1.0 - oylFade) * oylOnWall;
+        oylFlat = max(oylFlat, oylOnWall);
+        oylRough = mix(oylRough, 0.3, oylOnWall);
+        oylTilt = 0.0;`;
+
+/**
  * Whether a bay has a window at all, as a GLSL expression over `oylCell`,
  * `oylTopShare` (a window's top as a share of its storey: #1581's casement's
  * or, since #1588, a sash's) and `vOylFacade` (`facade.ts` §`facadePartAt`'s
@@ -14757,7 +14815,9 @@ function facadeFragmentGlsl(overhangs: boolean): string {
       vec3 oylWall = diffuseColor.rgb;
       float oylLit = step(0.8, oylWindowHash(oylCell + floor(vOylTint.xy * 1000.0)));
       vec3 oylRoom = mix(vec3(0.012, 0.014, 0.018), vec3(0.09, 0.07, 0.045), oylLit);
-      if (oylSashOn > 0.5) {
+      if (oylFlag(oylFlags, oylGlazedFlag) > 0.5) {
+        ${CURTAIN_WALL_GLSL}
+      } else if (oylSashOn > 0.5) {
         float oylBayW = vOylStyle.z;
         vec2 oylP = vec2((oylAt.x - 0.5) * oylBayW, oylAt.y * oylStoreyM);
         float oylPicture = (1.0 - step(0.5, oylCell.y)) * (1.0 - step(0.5, abs(oylCell.x - vOylStyle.w)));
