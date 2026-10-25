@@ -5,9 +5,9 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
 import { SOURCE_CODE_URL } from '../privacy/policy';
-import { DEMO_LICENCE_URL, DEMO_NOTICES_PATH, DemoPlaceholder } from './DemoPlaceholder';
+import { DEMO_LICENCE_URL, DEMO_NOTICES_PATH, DemoSourceOffer } from './SourceOffer';
 
-const markup = renderToStaticMarkup(<DemoPlaceholder />);
+const markup = renderToStaticMarkup(<DemoSourceOffer />);
 
 /** The text of the link whose href is `href`, or undefined if there is none. */
 function linkText(href: string): string | undefined {

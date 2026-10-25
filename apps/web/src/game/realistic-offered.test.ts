@@ -46,6 +46,16 @@ const APPS = fileURLToPath(new URL('../../../', import.meta.url));
 /** The one module the product ships that may offer it, behind the rider's choice. */
 const OFFERED_FROM = 'web/src/game/GameView.tsx';
 
+/**
+ * The demo's modules — #1647. The demo is not the rider app: it is its own
+ * page and build (`vite.demo.config.ts`), shown to visitors of a website who
+ * have no settings to choose from, and the owner ruled on #1643 that it loads
+ * the realistic world from the start. Nothing the rider app ships can reach
+ * these files (`tools/demo/demo-stays-out.ts`), so D-3's "chosen by the
+ * rider" still holds of every ride a rider rides.
+ */
+const DEMO_OFFERS = new Set(['web/src/demo/stage.ts', 'web/src/demo/main.tsx']);
+
 /** The modules that define the realistic path, and so may name it. */
 const DEFINING = new Set([
   // The seam: it DECLARES `GameRenderer.loadRealisticWorld` so the renderer can
@@ -125,7 +135,7 @@ describe('the realistic world is offered only through the rider’s choice — A
 
   it('lets no module the product ships reach for the realistic world but the one that offers it', () => {
     const offenders = files
-      .filter((file) => !DEFINING.has(file) && file !== OFFERED_FROM)
+      .filter((file) => !DEFINING.has(file) && file !== OFFERED_FROM && !DEMO_OFFERS.has(file))
       .flatMap((file) =>
         waysInOf(readFileSync(join(APPS, file), 'utf8')).map((way) => `${file}: ${way}`),
       );
@@ -143,6 +153,11 @@ describe('the realistic world is offered only through the rider’s choice — A
     expect(codeOf('// readRealisticWorldChoice(storage)')).not.toMatch(
       /\breadRealisticWorldChoice\(/,
     );
+    // Nor is the demo's: each file it names does reach for the world, so a
+    // name left here after the demo stopped is a red test, not a hole.
+    for (const file of DEMO_OFFERS) {
+      expect(waysInOf(readFileSync(join(APPS, file), 'utf8')), file).not.toEqual([]);
+    }
   });
 
   it('is off unless the device holds exactly the choice the setting writes', () => {

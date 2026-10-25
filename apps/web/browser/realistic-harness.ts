@@ -9,7 +9,7 @@
  * ## What it is, and what it is not
  *
  * It rides the **product's own renderer** — `three-renderer.ts`, the same
- * `threeGameRenderer` `main.tsx` hands `GameView` — along `realistic/route.ts`
+ * `threeGameRenderer` `main.tsx` hands `GameView` — along `src/demo/synthetic-road.ts`
  * at 9 m/s, with the cranks turning at the pacer's gear, and lets the product's
  * own two-ladder policy (`quality.ts` §`nextWorldQuality`) move the rung from
  * the frame times, as `GameView` does with `nextQuality`. So what the owner
@@ -114,7 +114,7 @@ import { rideFrame, RIDE_METRES_PER_SECOND } from './realistic/frame';
 import { installLayerSwitch, type LayerCensus } from './realistic/layers';
 import { describe, guarded, MAXIMUM_FRAME_GAP_MS, MeasurementClock } from './realistic/loop';
 import { readoutLine, takeOverReporting } from './realistic/reporting';
-import { placeLatitude, realisticRoute, routeDigest, villageRoute } from './realistic/route';
+import { placeLatitude, realisticRoute, routeDigest, villageRoute } from '../src/demo/synthetic-road';
 import { frameCensus, type FrameCensus } from './realistic/village';
 
 /** How long the scene runs before anything is sampled: shader compiles, first uploads. */

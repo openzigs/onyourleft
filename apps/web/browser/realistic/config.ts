@@ -51,7 +51,7 @@ import {
 } from '../../src/game/season';
 import type { DepthPrepassMode, RealisticSurfaces } from '../../src/game/three-renderer';
 
-import { PLACES, type Facing, type Place } from './route';
+import { PLACES, type Facing, type Place } from '../../src/demo/synthetic-road';
 
 /**
  * The layers `?layers=` can switch off — #616. What each one holds, in both

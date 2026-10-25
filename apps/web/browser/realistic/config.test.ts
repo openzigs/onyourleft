@@ -25,7 +25,7 @@ import {
   overhangShadowsWithLevers,
 } from './config';
 import { ANCHOR_KINDS, HOLIDAY_DECORATIONS } from '../../src/game/decorations';
-import { PLACES } from './route';
+import { PLACES } from '../../src/demo/synthetic-road';
 import { REALISTIC_TREE_SETS, REALISTIC_TREES_DEFAULT } from '../../src/game/realistic-assets';
 
 describe('the realistic page’s configuration — ADR 0026 D-12', () => {

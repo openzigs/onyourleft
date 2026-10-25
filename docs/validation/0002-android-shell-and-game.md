@@ -2625,7 +2625,7 @@ riding at 9 m/s, first reported seeing no buildings at all; they are on screen f
 by the owner**: fine horizontal banding in the water, a hard straight edge with no bank where water
 meets grass, a light seam across the road where the deck begins, and plain grey block parapets.
 ⚠️ **There is no lake on this route**: `waterways()` returns `lakes: []`, although
-`realistic/route.ts` says its valley floor is there for one. All five are
+`src/demo/synthetic-road.ts` says its valley floor is there for one. All five are
 [#501](https://github.com/openzigs/onyourleft/issues/501).
 
 **`OYL-REALISTIC-LOAD` — `capacitorAtStart` / `androidBridgeAtStart`, and any `OYL-REALISTIC-BRIDGE` or
@@ -2881,7 +2881,7 @@ route as Part Z (§"Build and install"), from a `main` that has #506 in it.
 | Step | What to do | What should happen |
 |---|---|---|
 | AE1 | Z6's 30-second realistic row, with its `dumpsys` block: `?panel=0&ladder=0`, held beside the first farmstead as AA3 was | Draw calls and GPU p50 / p90 / p99 against AA3's **35 calls and GPU 5 / 8 / 12 ms**. Triangles, if the page reports them |
-| AE2 | The same row in a **village**, with the church and the shops in frame: since [#1559](https://github.com/openzigs/onyourleft/issues/1559), `?world=realistic&panel=0&ladder=0&at=820&route=village` — the owner's page on its village road (`browser/realistic/route.ts` §`villageRoute`), held 45 m short of the first village's row of shops with its church about 125 m up the road. Record the page's `census` beside the row (`window.__oylRealistic.census`: each structure kind carried and in the camera's view, the streets, the pavement's triangles and the furniture), so the row says what was in frame | The same figures. This is the view the 35 structure meshes are justified against |
+| AE2 | The same row in a **village**, with the church and the shops in frame: since [#1559](https://github.com/openzigs/onyourleft/issues/1559), `?world=realistic&panel=0&ladder=0&at=820&route=village` — the owner's page on its village road (`src/demo/synthetic-road.ts` §`villageRoute`), held 45 m short of the first village's row of shops with its church about 125 m up the road. Record the page's `census` beside the row (`window.__oylRealistic.census`: each structure kind carried and in the camera's view, the streets, the pavement's triangles and the furniture), so the row says what was in frame | The same figures. This is the view the 35 structure meshes are justified against |
 | AE3 | Ride the realistic world past a village and on into fields, at your usual speed | Is every house there? Do the **field walls, hedges and fences** end where they did not before — and does that read as wrong from a saddle? |
 
 ### AE results
@@ -3156,7 +3156,7 @@ does not disturb a cool-down, and before the tablet is restored:
   shed at 1 050–1 100 m, and a shed, a house and a barn at 3 700–3 800 m. Both are farmsteads, with
   no church and no shops. The default URL still rides that route, unchanged.
 - **AE2 since [#1559](https://github.com/openzigs/onyourleft/issues/1559)**: the page has a second
-  road, `&route=village` (`browser/realistic/route.ts` §`villageRoute`): the same meander, level at
+  road, `&route=village` (`src/demo/synthetic-road.ts` §`villageRoute`): the same meander, level at
   30 m, from a start 0.05° east, so its seed lays two villages beside it (their rows of shops at
   about 865 m and 3 445 m, their churches at about 945 m and 3 495 m). Hold it with
   `location.href = '/harness/realistic.html?world=realistic&panel=0&ladder=0&at=820&route=village'`,
@@ -3479,7 +3479,7 @@ page's route, measured for #622 at every 50 m from 300 to 3 800 m, heads between
 away from it — so the page showed only the side AWAY from the sun, and this paragraph sent the side
 TOWARDS it to a stretch of the owner's own saved route that runs south-west, ridden in the product.
 `facing=sun` now turns the page's route about its first point so it meanders about the sun's own
-azimuth, and `facing=away` about the opposite one (`browser/realistic/route.ts` §"Which way it
+azimuth, and `facing=away` about the opposite one (`src/demo/synthetic-road.ts` §"Which way it
 faces"); without `facing` the route is unturned, byte for byte the one every Part Z and AH row was
 taken on. AH-622-5 is taken on the page that way.
 
@@ -3489,7 +3489,7 @@ taken on. AH-622-5 is taken on the page that way.
 | AH-622-2 | **Cool again (AH3, 25–26 °C)**, install #622's merge the same way, then **after**: AH1–AH7, AH4's URL unchanged. `RUN=622-after` |
 | AH-622-3 | Write both rows into the table above. **Triangles / frame** and **draw calls** should not change at all between them (the page's draw-call column is `calls / frames` over a window, rounded, so read it beside the browser gate's `#616 all layers on` line, which printed **38 on both `main` and #622's head** in CI; if the two builds' columns differ here, say so rather than explain it); the measured columns against #616's spread |
 | AH-622-4 | **By eye, away from the sun**, on the after build, before the tablet is restored: hold at `realistic.html?world=realistic&panel=0&ladder=0&at=2550` and look at the distant ground and hills ahead and to either side; then add `&levers=-air` (the fog as it was before #622, one colour for every direction and no valley haze) and look again. Then hold at `&at=1650`, on the route's valley floor, and compare the two the same way. ⚠️ That floor is only 15 m below the middle of the route's elevation, so the haze there is 1.075×, not the full 1.25× — the valley half of this step is weak on this route, and so is AH-622-5's, which rides the same route turned; AH-622-6 is the test of the valley haze |
-| AH-622-5 | **By eye, towards the sun**, on the page since [#702](https://github.com/openzigs/onyourleft/issues/702): hold at `realistic.html?world=realistic&panel=0&ladder=0&at=2550&facing=sun` — the same route turned about its start so it meanders about the sun's azimuth, 225°, the south-west (`browser/realistic/route.ts` §"Which way it faces") — and look at the horizon ahead and to either side; then add `&levers=-air` and look again. Then the same pair with `facing=away`, which turns the route to face directly away from the sun (the page without `facing` already looks 110° to 160° away, which is AH-622-4). Then both at `&at=1650`, on the valley floor. ⚠️ `facing` turns the route and the world beside it together: the sun and the sky stay where they are, and the scenery is the same seeded world — the same valley, lake, bridge and walls — turned with the road. Without it the page is byte for byte the route every Part Z and AH row was taken on (`route.test.ts` pins its digest) |
+| AH-622-5 | **By eye, towards the sun**, on the page since [#702](https://github.com/openzigs/onyourleft/issues/702): hold at `realistic.html?world=realistic&panel=0&ladder=0&at=2550&facing=sun` — the same route turned about its start so it meanders about the sun's azimuth, 225°, the south-west (`src/demo/synthetic-road.ts` §"Which way it faces") — and look at the horizon ahead and to either side; then add `&levers=-air` and look again. Then the same pair with `facing=away`, which turns the route to face directly away from the sun (the page without `facing` already looks 110° to 160° away, which is AH-622-4). Then both at `&at=1650`, on the valley floor. ⚠️ `facing` turns the route and the world beside it together: the sun and the sky stay where they are, and the scenery is the same seeded world — the same valley, lake, bridge and walls — turned with the road. Without it the page is byte for byte the route every Part Z and AH row was taken on (`route.test.ts` pins its digest) |
 | AH-622-6 | **By eye, the valley haze on a flat route with one big climb**, in the product: a saved route that is mostly flat with a single climb of 150 m or more. Ride the flat and look at the distance, then ride the same stretch on a local build with `REALISTIC_VALLEY_HAZE` set to 1 (the product has no lever for it; the page's `-air` has one, but the page's route is not this shape). Because the haze starts below the MIDPOINT of the elevation range (above), the whole flat is hazed at the full 1.25× |
 
 | #622 by eye | Answer |
