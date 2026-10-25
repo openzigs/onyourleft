@@ -828,6 +828,10 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         (`porch.ts`, shared with a lot's farmhouse), kept
                         off the road's clearance, shortened or dropped, its
                         triangles written when first read, not at the press;
+                        since #1635 a terrace in a `town` or `city-centre`:
+                        party walls (`partyWallsOf`, an edge grid, never all
+                        pairs) drawn only above a lower neighbour, plain, and
+                        a flat roof under a cornice (`town=terrace`);
                         ≤ 640 triangles
                         by role, built ONCE at ride start by `GameView`, and
                         drawn by #1549 (`mapped-buildings.ts`). Since #1550 the

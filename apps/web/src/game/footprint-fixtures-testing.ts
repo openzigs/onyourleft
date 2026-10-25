@@ -471,6 +471,74 @@ export function richmondStreetFixture(latitude = FIXTURE_LATITUDE): {
 }
 
 /**
+ * #1635's fixture: a terraced street, for the owner's by-eye pair on the
+ * realistic page (`?town=terrace`). Along 400 m of level road from 1 000 m,
+ * both sides, rows of houses that share their side walls: each 6 to 9 m along
+ * the road by 12 m deep, its front 14 m out, of a height drawn from a short
+ * list so that neighbours are now the same height and now not, and a 6 m
+ * alley after every eighth. Residential land to 1 200 m and commercial
+ * beyond, as `mixedTownFixture` lays its land, so the press classes the
+ * street a town. Every number is drawn from a fixed sequence.
+ */
+export function terraceStreetFixture(latitude = FIXTURE_LATITUDE): {
+  readonly profile: RouteProfile;
+  readonly origin: CorridorOrigin;
+  readonly corridor: WorldCorridor;
+} {
+  const profile = northRoute(3_000, () => 10, { latitude });
+  const origin = corridorOrigin(profile);
+  let state = 0x16_35;
+  const next = (): number => {
+    // A 32-bit xorshift: a fixed sequence, not a seed the ride reads.
+    state ^= state << 13;
+    state ^= state >>> 17;
+    state ^= state << 5;
+    return (state >>> 0) / 0x1_0000_0000;
+  };
+  const heights = [9, 9, 9, 12, 6, 15] as const;
+  const buildings: BuildingFeature[] = [];
+  for (const side of [1, -1]) {
+    let along = 1_000;
+    let inRow = 0;
+    while (along < 1_400) {
+      const width = 6 + Math.floor(next() * 4);
+      const height = heights[Math.floor(next() * heights.length)] ?? 9;
+      buildings.push(
+        buildingBeside(
+          profile,
+          origin,
+          [rectangleBeside(along + width / 2, side * 20, width, 12)],
+          height,
+        ),
+      );
+      along += width;
+      inRow += 1;
+      if (inRow === 8) {
+        along += 6;
+        inRow = 0;
+      }
+    }
+  }
+  return {
+    profile,
+    origin,
+    corridor: {
+      routeId: 'terrace-street',
+      origin,
+      covered: () => true,
+      coveredBoxes: [{ minX: -1_000, maxX: 1_000, minZ: -500, maxZ: 3_500 }],
+      landUse: [
+        landBeside(profile, origin, 'landuse', 'residential', 950, 1_200, -70, 70),
+        landBeside(profile, origin, 'landuse', 'commercial', 1_200, 1_450, -70, 70),
+      ],
+      buildings,
+      paths: [],
+      streets: [],
+    },
+  };
+}
+
+/**
  * #1542's countryside, for the owner's by-eye pair on the realistic page
  * (`?town=countryside`): from 900 m to 2 100 m of a level road, fields either
  * side with a gap between two of them, a field set back behind open ground, a
