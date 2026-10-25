@@ -2931,6 +2931,9 @@ export const TERRACE_STOREYS: readonly number[] = [3, 4];
 /** The key a terraced block's storeys are hashed under, apart from every other draw. */
 const TERRACE_KEY = 0x16_37;
 
+/** The road's stretches near the block `terracePlans` is deciding. */
+const terraceSegments: number[] = [];
+
 /** The terraced block `terracePlans` is deciding, as `settlements.ts` §`placeLot` writes one. */
 const terraceScratch = new Float64Array(LOT_FLOATS);
 
@@ -2950,7 +2953,8 @@ const terraceScratch = new Float64Array(LOT_FLOATS);
  * corners and clear of every footprint kept, its driveway included
  * (`settlements.ts` §`lotStands`, #1550's rules 1 to 3), and then by every
  * rule a mapped footprint keeps — never on wood, water or park, and off every
- * stretch of the road by its clearance (ADR 0054 D-5.2, D-5.4).
+ * stretch of the road by its clearance (ADR 0054 D-5.2, D-5.4), and with no
+ * wall on the pavement even where a bend's chord sags toward it.
  *
  * The first lap only: a plan stands in the corridor's frame, once a place.
  */
@@ -3006,6 +3010,16 @@ function terracePlans(
         ...at(end, back),
         ...at(start, back),
       ]);
+      // The front is a chord between two frames: on a curve's outside it sags
+      // toward the road, so measure the ring itself, not the frames it joins.
+      const reach = span + back + KERB_LATERAL_METRES + CITY_PAVEMENT_WIDTH_METRES;
+      const road = roadSegmentsNear(profile, origin, middle.x, middle.z, reach, terraceSegments);
+      if (
+        terraceSegments.length > 0 &&
+        ringToRoad(ring, road, terraceSegments) < KERB_LATERAL_METRES + CITY_PAVEMENT_WIDTH_METRES
+      ) {
+        continue;
+      }
       const draw = uniformFrom(slotHash(seed, plot, TERRACE_KEY + (side === 1 ? 1 : 2)), 0);
       const storeys = TERRACE_STOREYS[seededEntry(draw, TERRACE_STOREYS.length)] as number;
       const plan = planFootprint(

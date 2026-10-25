@@ -14,7 +14,7 @@ import { describe, expect, it } from 'vitest';
 import type { RouteProfile } from '@onyourleft/domain';
 
 import type { Junction } from './cross-streets';
-import { cityCentreFixture, denseTownFixture } from './footprint-fixtures-testing';
+import { cityCentreFixture, denseTownFixture, landBeside } from './footprint-fixtures-testing';
 import {
   FOOTPRINT_MAX_VERTICES,
   footprintPlans,
@@ -30,7 +30,7 @@ import { ROAD_CLEARANCE_METRES } from './landform';
 import { MappedSelection, mappedBuildingsOf, selectMappedBuildings } from './mapped-buildings';
 import { MAPPED_BUILDING_DRAW_CALLS, MAPPED_BUILDING_TRIANGLES } from './realistic-budget';
 import { distanceToDrawnRoad, nearestOnDrawnRoad } from './road-grid';
-import { northRoute } from './route-fixtures-testing';
+import { hairpinRoute, northRoute } from './route-fixtures-testing';
 import { scatterSeed } from './scatter';
 import type { SceneFrame } from './port';
 import { sceneFrame, type SceneInput } from './scene';
@@ -59,6 +59,7 @@ import {
 } from './streets';
 import { corridorOrigin, drawnRoadFrame } from './terrain';
 import { FURNITURE_CAPACITY } from './three-renderer';
+import type { WorldCorridor } from './world-data/corridor';
 import { NO_URBAN_CLASS, urbanClassMap, type UrbanClass, type UrbanClassMap } from './urban-class';
 
 /** Every stretch of every route `urban`, whatever the map says. */
@@ -412,7 +413,7 @@ describe('what a city centre’s street costs — #1637', () => {
 
 describe('a city centre’s lots — #1637', () => {
   const terraces = (plans: readonly FootprintPlan[]) =>
-    plans.filter((plan) => plan.urban === 'city-centre' && plan.storeys < 5);
+    plans.filter((plan) => plan.urban === 'city-centre' && TERRACE_STOREYS.includes(plan.storeys));
 
   it('are terraced blocks: 3 or 4 storeys, a flat roof under a cornice, a shop front, no porch, drive or garage', () => {
     const frame = frameAt(CITY, 1_500);
@@ -528,10 +529,73 @@ describe('a city centre’s lots — #1637', () => {
         expect(Math.min(...out)).toBeCloseTo(front, 1);
         expect(Math.max(...out)).toBeCloseTo(front + TERRACE_DEPTH_METRES, 1);
         // Its long front is a whole plot, so the next block's wall is its own.
-        const xs = Array.from(plan.footprint).filter((_, index) => index % 2 === 1);
-        expect(Math.max(...xs) - Math.min(...xs)).toBeCloseTo(span, 1);
+        const zs = Array.from(plan.footprint).filter((_, index) => index % 2 === 1);
+        expect(Math.max(...zs) - Math.min(...zs)).toBeCloseTo(span, 1);
       }
     }
+  });
+
+  it('keeps every wall of every block off the pavement, on a bend too', () => {
+    // The chord between a plot's two ends sags toward the road on a curve's outside.
+    let kept = 0;
+    let least = Number.POSITIVE_INFINITY;
+    for (const radius of [30, 60]) {
+      const profile = hairpinRoute(radius);
+      const origin = corridorOrigin(profile);
+      const corridor: WorldCorridor = {
+        routeId: 'bend',
+        origin,
+        covered: () => true,
+        coveredBoxes: [{ minX: -2_000, maxX: 2_000, minZ: -2_000, maxZ: 2_000 }],
+        // In 10 m pieces: a quad from end to end would cut every curve.
+        landUse: Array.from({ length: Math.ceil(profile.totalDistance / 10) }, (_, piece) =>
+          landBeside(
+            profile,
+            origin,
+            'landuse',
+            'commercial',
+            piece * 10,
+            Math.min(piece * 10 + 11, profile.totalDistance),
+            -40,
+            40,
+          ),
+        ),
+        buildings: [],
+        paths: [],
+        streets: [],
+      };
+      const land = landClassMask(corridor);
+      const { plans } = footprintPlans(
+        corridor,
+        land,
+        profile,
+        origin,
+        FOOTPRINT_MAX_VERTICES,
+        everywhere('city-centre'),
+      );
+      const blocks = terraces(plans);
+      kept += blocks.length;
+      for (const plan of blocks) {
+        const ring = plan.footprint;
+        for (let at = 0; at + 1 < ring.length; at += 2) {
+          const next = (at + 2) % ring.length;
+          const ax = ring[at] as number;
+          const az = ring[at + 1] as number;
+          const dx = (ring[next] as number) - ax;
+          const dz = (ring[next + 1] as number) - az;
+          for (let step = 0; step <= 40; step += 1) {
+            const t = step / 40;
+            least = Math.min(
+              least,
+              distanceToDrawnRoad(profile, origin, ax + dx * t, az + dz * t, 60),
+            );
+          }
+        }
+      }
+    }
+    // Non-vacuity: the straighter stretches still carry blocks.
+    expect(kept).toBeGreaterThan(5);
+    expect(least).toBeGreaterThanOrEqual(KERB_LATERAL_METRES + CITY_PAVEMENT_WIDTH_METRES - 0.01);
   });
 
   it('stands none on the park, and none within the road’s clearance', () => {
