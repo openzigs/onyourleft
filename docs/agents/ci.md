@@ -1252,6 +1252,11 @@ workers to come free, and the `game` run's 75 s after the third shard's part. Th
 | `test:browser:shard-2` | `browser-2` | 18 (`list-detail`, `controls-first`, `corridor` …) | 439 |
 | `test:browser:shard-3` | `browser-3` | 12 (`ride-room`, `ride-workout`, `links` …), then the `game` run | 434, then 64 |
 
+⚠️ **Since [#1648](https://github.com/openzigs/onyourleft/issues/1648) `browser-3` names 13 files**:
+`shell-demo.browser.spec.ts`, the demo's eight cases and the costliest of them a realistic-world
+climb, went to the shard with the most room, `browser-3` (its `chromium` part 3.1 to 4.6 m of
+720 s on #1720's runs below). The table keeps #1720's counts as the record.
+
 `playwright test --list` over each script's arguments gives 887 + 439 + 434 cases in 14 + 18 + 12
 files, the 1 760 cases in 44 files of the whole `chromium` project (the other four listed files
 hold only `@nightly` describes). **No stop moved**: each part keeps 720 s and three workers, the

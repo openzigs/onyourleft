@@ -267,7 +267,7 @@ pnpm run build
 # them in a real headless Chromium through Playwright. ⚠️ **Two builds and two
 # preview servers since #408**: an offline claim about the PRODUCT cannot be
 # measured against the harness, so `playwright.config.ts` serves `dist` on 4320
-# beside `browser/dist` on 4319. ⚠️ THREE CI jobs since #1720 — the shards
+# beside `browser/dist` on 4319, and since #1648 `demo/dist` on 4321. ⚠️ THREE CI jobs since #1720 — the shards
 # `browser-1` to `browser-3`, which the job named `Repository rules` waits for
 # (§4c §"Three browser shards — #1720") — and each runs its own spec files of
 # this command, as `test:browser:shard-1` to `-3` below; this is the whole. ⚠️ Two Playwright PROJECTS

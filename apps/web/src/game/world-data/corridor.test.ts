@@ -428,6 +428,67 @@ describe('packing', () => {
     ]);
   });
 
+  it('packs to the same bytes on any machine: no time, and the OS byte "unknown" (#1651)', async () => {
+    const features = {
+      landUse: [],
+      buildings: [],
+      paths: [],
+      streets: [
+        {
+          kind: 'minor_road',
+          kindDetail: 'residential',
+          grade: 'ground' as const,
+          line: Float32Array.from([0, 0, 0, 100]),
+        },
+      ],
+      places: [],
+    };
+    const first = new Uint8Array(await (await packCorridorFeatures(features)).arrayBuffer());
+    const second = new Uint8Array(await (await packCorridorFeatures(features)).arrayBuffer());
+    expect(second).toStrictEqual(first);
+    // RFC 1952 §2.3.1: MTIME is bytes 4-7 and OS byte 9, which zlib sets from
+    // the platform it was built on (19 on macOS, 3 on Linux).
+    expect([...first.slice(4, 8)]).toStrictEqual([0, 0, 0, 0]);
+    expect(first[9]).toBe(0xff);
+  });
+
+  it("keeps the plan's order of features, whatever order the tiles arrive in (#1651)", async () => {
+    const plan = planCorridor(lineNorth(3_000), []) as CorridorPlan;
+    const fixtures = [residentialBlockTile, sidewalkTile, lakeTile, woodWithHoleTile];
+    const index = (tile: TileId): number =>
+      plan.requestable.findIndex((t) => t.x === tile.x && t.y === tile.y);
+    // Every tile a different fixture, so a tile out of place moves features.
+    const bytesFor = (tile: TileId) =>
+      (fixtures[index(tile) % fixtures.length] as () => Uint8Array)();
+    const delayed = (delay: (at: number) => number): CorridorArchive => ({
+      open: () =>
+        Promise.resolve({
+          kind: 'open',
+          identity: '"memory"',
+          bounds: { west: -180, south: -85, east: 180, north: 85 },
+        }),
+      tile: async (tile) => {
+        await new Promise((resolve) => setTimeout(resolve, delay(index(tile))));
+        return bytesFor(tile);
+      },
+    });
+    const n = plan.requestable.length;
+    expect(n).toBeGreaterThan(CORRIDOR_CONCURRENCY);
+    const inOrder = await read(
+      plan,
+      delayed(() => 0),
+    );
+    // The first tiles the slowest: within each batch of four, the last asked arrives first.
+    const reversed = await read(
+      plan,
+      delayed((at) => 3 * (n - at)),
+    );
+    if (inOrder.kind !== 'read' || reversed.kind !== 'read') throw new Error('not read');
+    const bytes = async (features: typeof inOrder.features) =>
+      new Uint8Array(await (await packCorridorFeatures(features)).arrayBuffer());
+    expect(await bytes(reversed.features)).toStrictEqual(await bytes(inOrder.features));
+  });
+
   it('keeps each place’s kind, detail and rank, and its point to the centimetre (#1632)', async () => {
     const plan = planCorridor(lineNorth(1_000), []) as CorridorPlan;
     const outcome = await read(plan, memoryArchive(() => placesTile()).archive);

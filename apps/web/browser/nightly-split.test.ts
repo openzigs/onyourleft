@@ -345,7 +345,7 @@ describe('the browser gate is split into a required run and a nightly one — #8
     expect(CHROMIUM_PART_MS + GAME_PART_MS).toBeLessThanOrEqual(GATE_BUDGET_MS);
     // A failed build ends the step before either run starts.
     expect(script).toMatch(
-      /^vite build && vite build --config vite\.browser\.config\.ts \|\| exit 1; playwright test --project chromium /,
+      /^vite build && vite build --config vite\.browser\.config\.ts && vite build --config vite\.demo\.config\.ts \|\| exit 1; playwright test --project chromium /,
     );
     // The game run is not skipped when the chromium run fails (`;`, not
     // `&&`), and the step fails when EITHER did.
@@ -399,7 +399,7 @@ describe('the browser gate is split into a required run and a nightly one — #8
     expect(scripts.length).toBeGreaterThanOrEqual(2);
     const [chromium = '', game = ''] = playwrightRuns(webScripts()['test:browser']);
     const BUILD =
-      /^vite build && vite build --config vite\.browser\.config\.ts \|\| exit 1; playwright test /;
+      /^vite build && vite build --config vite\.browser\.config\.ts && vite build --config vite\.demo\.config\.ts \|\| exit 1; playwright test /;
     const shardsWithGame: string[] = [];
     const filtersOf = new Map<string, string[]>();
     for (const [name, script] of scripts) {
@@ -462,6 +462,25 @@ describe('the browser gate is split into a required run and a nightly one — #8
     expect(shardsWithGame).toHaveLength(1);
   });
 
+  it('puts the demo spec in browser-3, the shard with the most room — #1648’s review, #1720', () => {
+    // On run 40211206815, under `--shard 1/2`, `browser-1` (EPYC 7763) took
+    // 678 s of CHROMIUM_PART_MS with the demo's eight cases in it, 1.06 times:
+    // the demo spec's realistic-world climb is the costliest case it holds.
+    // Since #1720 each shard names its spec files, so the file's name no
+    // longer decides its shard and this list does. `browser-3` is the
+    // lightest of the three (§4c §"Three browser shards — #1720": 3.1 to
+    // 4.6 m of its 720 s on #1720's runs, against 6.1 to 6.5 m for
+    // `browser-1`), so the demo spec is named there.
+    const demo = SPECS.filter(
+      (name) => /demo\.browser\.spec\.ts$/.test(name) && !name.startsWith('demo-'),
+    );
+    expect(demo).toEqual(['shell-demo.browser.spec.ts']);
+    const homes = shardScripts()
+      .filter(([, script]) => script.includes(' /shell-demo.browser.spec.ts'))
+      .map(([name]) => name);
+    expect(homes).toEqual(['test:browser:shard-3']);
+  });
+
   it('holds both Playwright stops and the builds inside the step’s wrapper, so each stop names its own run — #651', () => {
     // Until #651 they summed to 815 s against a 765 s wrapper, and a `chromium`
     // run that used its 720 s left the game run 35 s of its 85. What the step
@@ -471,7 +490,14 @@ describe('the browser gate is split into a required run and a nightly one — #8
     // prints its first line 11 s in, and 3 s between the `chromium` run ending
     // and the `game` run starting. So the wrapper holds both stops with 6 s to
     // spare, not 10.
-    const BUILDS_MS = 14_000;
+    // ⚠️ 16 s since #1648, which added a third build (the demo, 0.55 s by its
+    // own count and 0.75 s between the lines either side of it) and a third
+    // web server: from the last build to Playwright's first line took 8.4 to
+    // 8.7 s on an EPYC 7763 (#1648's runs 40204135405 and 40207767424) against
+    // 7.2 s on `main` (40200968492), and 6.3 s on a 9V45 (40209448380) against
+    // 5.4 s (40199437881). That is about 2 s more, and the wrapper now holds
+    // both stops with 4 s to spare.
+    const BUILDS_MS = 16_000;
     expect(CHROMIUM_PART_MS + GAME_PART_MS + BUILDS_MS).toBeLessThanOrEqual(GATE_STEP_MS);
   });
 });
@@ -521,7 +547,7 @@ describe('the nightly workflow runs what left the required job, and cannot pass 
         // The whole run's project and worker, with this half's files after it.
         expect(run.startsWith(`${whole} `), name).toBe(true);
         expect(script, name).toMatch(
-          /^vite build && vite build --config vite\.browser\.config\.ts && playwright test /,
+          /^vite build && vite build --config vite\.browser\.config\.ts && vite build --config vite\.demo\.config\.ts && playwright test /,
         );
         const filters = run.slice(whole.length).trim().split(/\s+/);
         // Playwright reads a positional argument as a pattern over the path.
