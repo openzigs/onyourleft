@@ -4085,7 +4085,8 @@ const NO_OVERHANG_SHADOW: OverhangShadowMeasurement = {
  * #1658: the sun's shadow under a mapped wall's eaves reaches the screen.
  * #1581's mixed town (`?town=mixed`'s): of the walls under eaves
  * (`STYLE_EAVES`) that face the road, 8 to 40 m from it somewhere from
- * 1 000 m along it, on a house with no porch, garage or shop front, the
+ * 1 000 m along it, on a four-cornered house with no porch, garage or shop
+ * front, the
  * nearest bay line with plain wall either side (`facade.ts` §`facadePartAt`)
  * at both heights read, and a camera {@link OVERHANG_PROBE_METRES} out from
  * it, level, between the two. The sun is turned square to that wall at
@@ -4123,6 +4124,10 @@ function overhangShadowProbe(
   const lines: Line[] = [];
   for (const plan of plans) {
     if (plan.porch || plan.garage || plan.shop.front) continue;
+    // A four-cornered house only: since #1660 an L's short wall by its notch
+    // came first, beside the other wing's eaves, whose own geometry darkens the
+    // wall's top with the shader's shadow out — not the control this reads.
+    if (plan.footprint.length !== 8) continue;
     const walls = plan.triangles.wall;
     for (let at = 0; at + 6 * stride <= walls.length; at += 6 * stride) {
       const f = (vertex: number, k: number): number => walls[at + vertex * stride + k] as number;
