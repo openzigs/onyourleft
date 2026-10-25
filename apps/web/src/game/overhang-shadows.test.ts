@@ -107,7 +107,8 @@ describe('the overhang’s shadow, in the twin — #1658', () => {
   });
 
   it('places the eaves’ edge for the middle pitch, under the fascia', () => {
-    const middle = [...ROOF_PITCHES_DEGREES].sort((a, b) => a - b)[2] ?? Number.NaN;
+    const sorted = [...ROOF_PITCHES_DEGREES].sort((a, b) => a - b);
+    const middle = sorted[Math.floor(sorted.length / 2)] ?? Number.NaN;
     expect(middle).toBe(35);
     expect(OVERHANG_SHADOW.edge).toBeCloseTo(
       ROOF_THICKNESS_METRES + EAVES_OVERHANG_METRES * Math.tan(radians(middle)),

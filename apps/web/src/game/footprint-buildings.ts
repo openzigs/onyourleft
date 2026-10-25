@@ -1321,6 +1321,11 @@ interface Windows {
   readonly flags: number;
   /** #1588: the door edge's picture-window bay on the ground storey, or −1. */
   readonly picture: number;
+  /**
+   * The long axis (unit) of a gable roof: a wall across it is a gable end, which
+   * stands the gable's triangle on its top and so has no eaves over it (#1658).
+   */
+  readonly gableAxis?: readonly [x: number, z: number];
 }
 
 /** How {@link ringWalls} draws. */
@@ -1397,9 +1402,18 @@ function ringWalls(
       ];
       if (windows !== undefined) {
         const front = index === 0 && i === windows.doorEdge;
+        const axis = windows.gableAxis;
+        // A gable end (its edge across the long axis) carries no eaves flag.
+        const gableEnd =
+          axis !== undefined &&
+          Math.abs(((bx - ax) * axis[0] + (bz - az) * axis[1]) / length) < Math.SQRT1_2;
+        const flags =
+          gableEnd && Math.floor(windows.flags / STYLE_EAVES) % 2 === 1
+            ? windows.flags - STYLE_EAVES
+            : windows.flags;
         const style: Style = [
           windows.clad,
-          windows.flags,
+          flags,
           bays > 0 ? length / bays : 0,
           front && bays > 0 ? windows.picture : -1,
         ];
@@ -3411,6 +3425,7 @@ function planFootprint(
     clad: wallClad,
     flags,
     picture,
+    ...(roof === 'gable' ? { gableAxis: [rectangle.ux, rectangle.uz] as const } : {}),
   };
   // The slope the gutters' downpipe and the dormers are on: the one facing the front.
   const facing =

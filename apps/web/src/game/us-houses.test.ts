@@ -384,13 +384,32 @@ describe('the plans are clad — #1588, over the mixed town', () => {
     expect(block).toBeGreaterThan(brick);
   });
 
-  it('marks the walls under an overhanging roof, and no flat roof’s', () => {
+  it('marks the walls under an overhanging roof, no flat roof’s and no gable end’s', () => {
+    let ends = 0;
+    let sides = 0;
     for (const plan of town) {
-      for (const vertex of verticesOf(plan, 'wall')) {
-        if (vertex.top <= 0) continue;
-        expect((vertex.flags & STYLE_EAVES) !== 0).toBe(plan.roof !== 'flat');
+      const walls = verticesOf(plan, 'wall');
+      for (let at = 0; at + 6 <= walls.length; at += 6) {
+        const quad = walls.slice(at, at + 6);
+        if ((quad[0] as Vertex).top <= 0) continue;
+        const marked = (quad[0] as Vertex).flags & STYLE_EAVES;
+        if (plan.roof === 'flat') {
+          expect(marked).toBe(0);
+          continue;
+        }
+        const { ux, uz } = minimumAreaRectangle(plan.footprint);
+        const a = quad.find((vertex) => vertex.u === 0) as Vertex;
+        const b = quad.find((vertex) => vertex.u > 0) as Vertex;
+        const length = Math.hypot(b.x - a.x, b.z - a.z);
+        const along = Math.abs(((b.x - a.x) * ux + (b.z - a.z) * uz) / length);
+        const gableEnd = plan.roof === 'gable' && along < Math.SQRT1_2;
+        expect(marked !== 0).toBe(!gableEnd);
+        if (gableEnd) ends += 1;
+        else sides += 1;
       }
     }
+    expect(ends).toBeGreaterThan(0);
+    expect(sides).toBeGreaterThan(0);
   });
 
   it('gives a residential wall its bay in metres, and shutters to some houses', () => {
