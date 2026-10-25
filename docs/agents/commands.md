@@ -313,6 +313,13 @@ pnpm run test:browser
 # name and a test in both runs or in neither.
 pnpm run test:browser:nightly
 
+# The nightly checks as CI runs them, in two jobs (#1675, §4c §"Two nightly
+# browser shards"): the first every nightly spec but `realistic.browser.spec.ts`,
+# the second that spec alone, each on one worker under the same 840 s stop.
+# `nightly-split.test.ts` holds every nightly spec in exactly one.
+pnpm run test:browser:nightly:shard-1
+pnpm run test:browser:nightly:shard-2
+
 # The browser gate as CI runs it, in two halves (#1362, §4c §"Two browser
 # shards"): each builds both pages and runs half the `chromium` project with
 # Playwright's `--shard`, on the whole gate's workers and stop; the second
