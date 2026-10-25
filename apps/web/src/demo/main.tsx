@@ -13,6 +13,7 @@
 
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
+import { FileLoader } from 'three';
 
 import '../design/theme.css';
 import {
@@ -56,6 +57,19 @@ function publish(snapshot: DemoSnapshot): void {
   window.__oylDemo = snapshot;
 }
 
+/**
+ * One of the demo's own files — a baked route's (#1652) — through three's own
+ * loader, as the realistic world's files are read (`three-renderer.ts`
+ * §`productRealisticLoaders`): same-origin under the page's `connect-src
+ * 'self'`, and no network primitive named in the client (`no-network.test.ts`).
+ * Held in memory and nowhere else: three's `Cache` is off unless enabled.
+ */
+async function readFile(path: string): Promise<Uint8Array<ArrayBuffer>> {
+  return new Uint8Array(
+    (await new FileLoader().setResponseType('arraybuffer').loadAsync(path)) as ArrayBuffer,
+  );
+}
+
 async function start(): Promise<void> {
   const root = document.getElementById('root');
   if (root === null) {
@@ -74,6 +88,7 @@ async function start(): Promise<void> {
         reducedMotion={matchMedia('(prefers-reduced-motion: reduce)').matches}
         observeInView={observeInView}
         publish={publish}
+        readFile={readFile}
       />
     </StrictMode>,
   );

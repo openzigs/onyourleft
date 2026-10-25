@@ -68,6 +68,10 @@ export const DEMO_FORBIDDEN_PATHS: readonly ForbiddenPath[] = [
   { path: 'apps/web/src/instance/', why: 'a rider’s instance, over the network' },
   { path: 'apps/web/src/camera/', why: 'the camera' },
   { path: 'apps/web/src/world-data/corridor-source.ts', why: 'reads map tiles over the network' },
+  {
+    path: 'apps/web/src/world-data/corridor-port.ts',
+    why: 'keeps a rider’s corridor in IndexedDB; the demo’s map data stays in memory (#1652)',
+  },
   { path: 'packages/store/src/activity-store.ts', why: 'the IndexedDB store of a rider’s data' },
 ];
 

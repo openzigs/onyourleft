@@ -55,6 +55,13 @@ export const ROUTE_BUNDLE_FORMAT = 'onyourleft-demo-route';
 /** Bumped when the shape of {@link RouteBundle} changes. */
 export const ROUTE_BUNDLE_VERSION = 1;
 
+/**
+ * A route id: it becomes a file name, so nothing that could leave the
+ * directory. Here rather than in `bake-route.ts`, which re-exports it, so the
+ * demo's loader (#1652) refuses the same ids the bake does.
+ */
+export const ROUTE_ID = /^[a-z0-9][a-z0-9-]{0,62}$/;
+
 /** OpenStreetMap's copyright and licence page: the source credited with the data (ADR 0056 D-3.2). */
 export const OSM_COPYRIGHT_URL = 'https://www.openstreetmap.org/copyright';
 

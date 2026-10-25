@@ -33,13 +33,17 @@ import { seconds, type RouteProfile } from '@onyourleft/domain';
 import { simulatedCrankAngle } from '../game/bicycle';
 import type { SceneFrame } from '../game/port';
 import type { QualitySettings } from '../game/quality';
+import { FOOTPRINT_MAX_VERTICES, footprintPlans, mappedTown } from '../game/footprint-buildings';
+import { landClassMask, NO_LAND_CLASS } from '../game/land-class';
+import { mappedBuildingsOf } from '../game/mapped-buildings';
 import { groundOf } from '../game/people';
 import { placedRiders, sceneFrame, type SceneInput } from '../game/scene';
 import { scatterSeed } from '../game/scatter';
 import type { GameSensors } from '../game/sensors';
 import { GameSimulation, type GameState } from '../game/simulation';
-import { NO_LAND_CLASS } from '../game/land-class';
 import { corridorOrigin, type CorridorOrigin } from '../game/terrain';
+import { urbanClassMap } from '../game/urban-class';
+import type { BakedRoute, CorridorCounts } from './baked-route';
 import {
   cameraAt,
   planTour,
@@ -86,6 +90,13 @@ export interface DemoPlayer {
   /** The camera tour the frames are shot with (#1649). */
   readonly tour: CameraTour;
   /**
+   * The baked route this ride was given, by id, and its corridor's counts —
+   * #1652. `undefined` on the synthetic road. Fixed for the whole run, as a
+   * ride's corridor is fixed at its start (ADR 0054 D-2.4), and what the
+   * page's OpenStreetMap credit is keyed on.
+   */
+  readonly mapData: { readonly route: string; readonly counts: CorridorCounts } | undefined;
+  /**
    * The frame to draw now, with the scenery budget of `rung`, shot by the
    * camera tour (#1649). Advances nothing.
    */
@@ -104,6 +115,12 @@ export interface DemoPlayerOptions {
    * roadside pan become cuts (`camera-tour.ts` §`reducedMotionTour`).
    */
   readonly reducedMotion: boolean;
+  /**
+   * #1652: a baked route to ride instead of the preset's synthetic road — its
+   * road, and its map data drawn beside it. The preset's riders, scripts and
+   * tour are kept.
+   */
+  readonly route?: BakedRoute | undefined;
 }
 
 /**
@@ -115,12 +132,34 @@ export function createDemoPlayer(
   preset: DemoPreset,
   options: DemoPlayerOptions = { reducedMotion: false },
 ): DemoPlayer {
-  const profile = demoRoad(preset.route);
+  const baked = options.route;
+  const profile = baked?.profile ?? demoRoad(preset.route);
   const origin: CorridorOrigin = corridorOrigin(profile);
-  const planned = planTour(preset);
+  const planned = planTour(preset, undefined, profile);
   const tour = options.reducedMotion ? reducedMotionTour(planned) : planned;
-  // The ground the renderer draws: the demo's road carries no mapped land.
-  const groundAt = groundOf(profile, origin, scatterSeed(profile), NO_LAND_CLASS);
+  // #1652: a baked route's corridor, and everything a ride builds from it ONCE
+  // at the press (`GameView.tsx`), built once here: the land-class mask, the
+  // urban class, the footprints' plans, the belt's index and the lots' town.
+  const corridor = baked?.corridor;
+  const land = corridor === undefined ? undefined : landClassMask(corridor);
+  const mapped = ((): Pick<SceneInput, 'mappedBuildings' | 'mappedTown'> => {
+    if (corridor === undefined || land === undefined) return {};
+    const urban = urbanClassMap(corridor, land, profile);
+    const { plans } = footprintPlans(
+      corridor,
+      land,
+      profile,
+      origin,
+      FOOTPRINT_MAX_VERTICES,
+      urban,
+    );
+    return {
+      mappedBuildings: mappedBuildingsOf(plans),
+      mappedTown: mappedTown(corridor, plans, urban),
+    };
+  })();
+  // The ground the renderer draws: the synthetic road carries no mapped land.
+  const groundAt = groundOf(profile, origin, scatterSeed(profile), land ?? NO_LAND_CLASS);
   const lead = preset.riders[0];
   if (lead === undefined) throw new RangeError('a demo preset must have at least one rider');
 
@@ -146,6 +185,7 @@ export function createDemoPlayer(
     preset,
     profile,
     tour,
+    mapData: baked === undefined ? undefined : { route: baked.id, counts: baked.counts },
     get status() {
       return status;
     },
@@ -202,6 +242,9 @@ export function createDemoPlayer(
           distanceMetres: rider.state.distance,
           speedMetresPerSecond: rider.state.speed,
         })),
+        ...(corridor === undefined ? {} : { worldCorridor: corridor }),
+        ...(land === undefined ? {} : { landClass: land }),
+        ...mapped,
       };
       const frame = sceneFrame(input);
       const world: TourWorld = {

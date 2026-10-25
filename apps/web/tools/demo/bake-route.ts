@@ -61,7 +61,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { open } from 'node:fs/promises';
-import { basename, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
@@ -92,13 +92,13 @@ import {
   OSM_COPYRIGHT_URL,
   ROUTE_BUNDLE_FORMAT,
   ROUTE_BUNDLE_VERSION,
+  ROUTE_ID,
   ROUTE_LINE_LICENCE,
   type RoutePointTuple,
   type UncoveredTile,
 } from './route-bundle';
 
-/** A route id: it becomes a file name, so nothing that could leave the directory. */
-export const ROUTE_ID = /^[a-z0-9][a-z0-9-]{0,62}$/;
+export { ROUTE_ID };
 
 /** The GPX as the bake keeps it: the points' three numbers, and the profile a ride would build. */
 export interface RouteLine {
@@ -497,7 +497,9 @@ export function parseBakeArguments(argv: readonly string[]): BakeArguments {
   return { route, gpx, archive, record, strip };
 }
 
-const WEB = fileURLToPath(new URL('../../', import.meta.url));
+// Not `new URL('../../', import.meta.url)`, which Vite rewrites as an asset's
+// URL under a jsdom test (#1652's `DemoPage.test.tsx` bakes the fixture route).
+const WEB = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 /** Where the committed GPX and record live, and where the bake writes. */
 export const PRESET_ROUTES_DIRECTORY = join(WEB, 'demo', 'routes');

@@ -175,14 +175,16 @@ const PLAN_STEP_SECONDS = 0.05;
  * Plan `preset`'s tour: ride the preset once through the runner, at the
  * simulation's 20 Hz, and note where the lead is each second, so that a
  * roadside shot can stand where the lead will pass. Deterministic, as the
- * ride is.
+ * ride is. `profile` is the road the ride is drawn on: the preset's own, or
+ * since #1652 a baked route's (`baked-route.ts`).
  */
 export function planTour(
   preset: DemoPreset,
   shots: readonly TourShot[] = DEMO_TOURS[preset.id],
+  profile: RouteProfile = demoRoad(preset.route),
 ): CameraTour {
   if (shots.length === 0) throw new RangeError('a camera tour needs at least one shot');
-  const ride = createDemoRide(preset, demoRoad(preset.route));
+  const ride = createDemoRide(preset, profile);
   const leadMetres: number[] = [];
   const end = ride.profile.totalDistance;
   const stepsPerSecond = Math.round(1 / PLAN_STEP_SECONDS);

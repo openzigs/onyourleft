@@ -45,6 +45,7 @@ async function page(search: string, reducedMotion = false): Promise<SteppedFrame
       frames={frames}
       reducedMotion={reducedMotion}
       observeInView={() => () => undefined}
+      readFile={(path) => Promise.reject(new Error(`no ${path}`))}
       // As `main.tsx` publishes it.
       publish={(snapshot) => {
         window.__oylDemo = snapshot;
