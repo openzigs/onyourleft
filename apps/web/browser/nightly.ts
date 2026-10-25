@@ -156,7 +156,7 @@ export const NIGHTLY_CHECKS: readonly NightlyCheck[] = [
   {
     spec: 'realistic.browser.spec.ts',
     describe: 'the route’s own season, in the realistic world — #1623',
-    seconds: 'seven more loads of the owner’s page, about 90 s on a Mac',
+    seconds: 'four more loads of the owner’s page, about 60 s on a Mac',
     why:
       'the owner’s page’s `date` and `place`, for #1623’s cost and by-eye pairs: that the ' +
       'route’s autumn and winter change the frame and not its draw calls, triangles or ' +

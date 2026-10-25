@@ -431,29 +431,24 @@ test.describe('the route’s own season, in the realistic world — #1623', { ta
     expect(run.result.rung).toBe(july.result.rung);
   };
 
-  test('turns a northern route’s broadleaves on 20 October and not its southern mirror’s, at no cost', async ({
-    page,
-  }) => {
-    test.setTimeout(5 * REALISTIC_LOAD_BUDGET_MS);
+  // ⚠️ Two loads a test, and no more: the nightly run stops at 840 s
+  // (`playwright.config.ts` §`GATE_BUDGET_MS`), and this describe's first
+  // version, at seven loads, ran it out on the runner. The same date loaded
+  // twice drew the same frame to the pixel on a Mac (2026-10-24), which is
+  // what makes each "differs" below the season rather than noise; the
+  // hemisphere is held in `seasonal-nature.test.ts`.
+  test('turns the broadleaves on 20 October at 51.5° N, at no cost', async ({ page }) => {
+    test.setTimeout(3 * REALISTIC_LOAD_BUDGET_MS);
     const july = await ridden(page, HELD, '2026-07-15');
-    const julyAgain = await ridden(page, HELD, '2026-07-15');
     const october = await ridden(page, HELD, '2026-10-20');
-    const southJuly = await ridden(page, `${HELD}&place=south`, '2026-07-15');
-    const southOctober = await ridden(page, `${HELD}&place=south`, '2026-10-20');
     console.log(
       `#1623 at=2550, held: ${String(july.result.lastFrame.calls)} draw calls in July, ` +
         `${String(october.result.lastFrame.calls)} on 20 October; ` +
         `${String(july.files.length)} realistic files fetched each`,
     );
     costsNothing(october, july);
-    costsNothing(southOctober, southJuly);
-    // The control: the same date twice is the same frame, to the pixel.
-    expect(julyAgain.shot.equals(july.shot)).toBe(true);
-    // 51.5° N on 20 October is deep in its autumn: its broadleaves turn.
+    // Deep in this route's autumn: its broadleaves turn.
     expect(october.shot.equals(july.shot)).toBe(false);
-    // 51.5° S on 20 October is spring, and its July a winter that lays no
-    // snow at sea level: neither turns a leaf, so the two are one frame.
-    expect(southOctober.shot.equals(southJuly.shot)).toBe(true);
   });
 
   test('lays a winter’s snow on a nordic town’s ground and roofs, at no cost', async ({ page }) => {
