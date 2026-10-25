@@ -64,6 +64,8 @@ import { kindAt, type LandClassMask } from './land-class';
 import {
   drawnRoadPoints,
   nearestOnRoadSegments,
+  nearestOnWholeRoad,
+  otherRoadWithin,
   roadSegmentsNear,
   type BesideTheRoad,
 } from './road-grid';
@@ -256,7 +258,6 @@ export function urbanClassMap(
     }
     return false;
   };
-  const sweepNear: number[] = [];
   const sweepBeside: BesideTheRoad = { along: 0, lateral: 0, distance: 0 };
   const road = drawnRoadPoints(profile, origin);
   const points = road.points;
@@ -279,6 +280,29 @@ export function urbanClassMap(
     const normalZ = dx / length;
     const x0 = points[point * 2] as number;
     const z0 = points[point * 2 + 1] as number;
+    // #1696: each half of the normal is cleared at once where it can be. Every sample on it is the
+    // centre of a disc through this road point and inside the disc of its far end, so where no other
+    // stretch of road comes into that one, none is nearer any sample than this point is. The own
+    // stretch is the segments whose every point is strictly within the tolerance. A millimetre of
+    // slack sends a tie at the disc's edge — a loop's closing segment ends on its first point — to
+    // the search below, which breaks it as the cells did.
+    const far = reach * URBAN_SAMPLE_METRES;
+    const leftClear = !otherRoadWithin(
+      road,
+      x0 - normalX * far,
+      z0 - normalZ * far,
+      far + 1e-3,
+      along,
+      alongTolerance,
+    );
+    const rightClear = !otherRoadWithin(
+      road,
+      x0 + normalX * far,
+      z0 + normalZ * far,
+      far + 1e-3,
+      along,
+      alongTolerance,
+    );
     for (let step = -reach; step <= reach; step += 1) {
       const lateral = step * URBAN_SAMPLE_METRES;
       const x = x0 + normalX * lateral;
@@ -286,10 +310,11 @@ export function urbanClassMap(
       // Counted only by the sweep at the road point nearest it, as step 2 counts a footprint once: where
       // the route passes within the sweep of itself, a second pass reaches the same land and must not
       // count it again, or coverage is divided by the number of passes.
-      if (step !== 0) {
-        const nearRoad = roadSegmentsNear(profile, origin, x, z, Math.abs(lateral) + 1, sweepNear);
+      // #1696: and where that half is not clear, from the road's tree of boxes rather than its cells,
+      // which within `|lateral|` of a sample 250 m out held a few hundred segments.
+      if (step !== 0 && !(step < 0 ? leftClear : rightClear)) {
         if (
-          nearestOnRoadSegments(nearRoad, sweepNear, x, z, sweepBeside) &&
+          nearestOnWholeRoad(road, x, z, Math.abs(lateral) + 1, sweepBeside) &&
           Math.abs(sweepBeside.along - along) > alongTolerance
         ) {
           continue;
