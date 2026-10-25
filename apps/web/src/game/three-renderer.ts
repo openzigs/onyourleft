@@ -9709,7 +9709,7 @@ export function decorationGlowProbe(
  * `renderer.info.render.calls` for each, and the belt's triangles.
  *
  * @test-facing read by `browser/decoration-harness.ts`; the product's belt is
- * drawn in the view's own frame, which `realistic.browser.spec.ts` counts
+ * drawn in the view's own frame, which `realistic-town.browser.spec.ts` counts
  */
 export function decorationCallsProbe(
   canvas: HTMLCanvasElement,

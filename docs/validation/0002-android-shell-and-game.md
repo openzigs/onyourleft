@@ -3162,7 +3162,7 @@ does not disturb a cool-down, and before the tablet is restored:
   `location.href = '/harness/realistic.html?world=realistic&panel=0&ladder=0&at=820&route=village'`,
   wait 30 s, and take Z6's `dumpsys` block as for AE1. Read the page's census too (the log's
   `OYL-REALISTIC-CENSUS` line, or `window.__oylRealistic.census`). It must show `church` and `shop-row` with `inView` of at least 1, or
-  the row is not of a village in frame. The browser gate (`realistic.browser.spec.ts` §"the
+  the row is not of a village in frame. The browser gate (`realistic-town.browser.spec.ts` §"the
   realistic page's village road — #1559", nightly) and `realistic/route.test.ts` §"the village
   road" hold that hold to both, on the desktop and on the tablet's 16 : 10 frame.
 

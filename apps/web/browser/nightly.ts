@@ -122,7 +122,7 @@ export const NIGHTLY_CHECKS: readonly NightlyCheck[] = [
       'realistic world; `realistic.html` is not a gate and ships in no build.',
   },
   {
-    spec: 'realistic.browser.spec.ts',
+    spec: 'realistic-trees.browser.spec.ts',
     describe: 'the realistic page’s tree levers — #1283, #1294',
     seconds: 'about 54 s: three more loads of the owner’s page',
     why:
@@ -134,7 +134,7 @@ export const NIGHTLY_CHECKS: readonly NightlyCheck[] = [
       '§"asks for the generated broadleaves".',
   },
   {
-    spec: 'realistic.browser.spec.ts',
+    spec: 'realistic-town.browser.spec.ts',
     describe: 'the realistic page’s village road — #1559',
     seconds: 'one more load of the owner’s page, about 18 s on a Mac',
     why:
@@ -144,7 +144,7 @@ export const NIGHTLY_CHECKS: readonly NightlyCheck[] = [
       'by `realistic/route.test.ts` §"the village road".',
   },
   {
-    spec: 'realistic.browser.spec.ts',
+    spec: 'realistic-town.browser.spec.ts',
     describe: 'the realistic page’s mapped-blobs lever — #1657',
     seconds: 'two more loads of the owner’s page',
     why:
@@ -154,7 +154,7 @@ export const NIGHTLY_CHECKS: readonly NightlyCheck[] = [
       'required suite by `mapped-blobs.test.ts`.',
   },
   {
-    spec: 'realistic.browser.spec.ts',
+    spec: 'realistic-town.browser.spec.ts',
     describe: 'the realistic page’s holiday decorations — #1624',
     seconds: 'two more loads of the owner’s page',
     why:

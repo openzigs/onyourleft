@@ -361,7 +361,8 @@ the four default-world files 111 s together.
 
 - `test:browser:nightly:shard-1`, in the `heavy` job: every nightly spec but the realistic page.
 - `test:browser:nightly:shard-2`, in `browser-2`: `realistic.browser.spec.ts`, whose levers each
-  add a load of the owner's page, alone on its runner.
+  add a load of the owner's page, alone on its runner. ⚠️ Since #1698 that page is three files in
+  three jobs: see "Four nightly browser shards — #1698" below.
 
 Split **by file**, not with Playwright's `--shard`, which balances by test count and would have
 put the game spec's 54 cases alone in one half; the game spec's loads share a worker fixture, so
@@ -388,6 +389,41 @@ tenth of a minute; headroom is 1 − that over 840 s):
 owner's page per lever (#1657 added the fifth), about 60 to 90 s each on the EPYC 7763, so one or
 two more levers bring it under 40 % there. The next cut is that file's own describes divided
 between two jobs, not a longer stop. The first half has not yet been measured on a 7763.
+
+
+#### Four nightly browser shards — #1698
+
+⚠️ **The owner's realistic page is three spec files in three jobs since
+[#1698](https://github.com/openzigs/onyourleft/issues/1698)**, and a reviewer who remembers
+`browser-2` running every realistic case is reading the old file. On combined PR #1693's run
+[40188796060](https://github.com/openzigs/onyourleft/actions/runs/40188796060) (EPYC 7763) that one
+file's eight cases, 17 loads of the page, all passed and still reached the 840 s stop: 68 s for
+#616's two loads, 148 s and 111 s for the tree levers' five, 43 s for the village, 77 s for the
+mapped blobs, 114 s for the decorations' three, and 143 s and 126 s for #1623's four.
+
+| Script | Job | Spec | Describes | Loads | On 40188796060 |
+|---|---|---|---|--:|--:|
+| `test:browser:nightly:shard-1` | `heavy` | every nightly spec but the page's | (#1675) | — | — |
+| `test:browser:nightly:shard-2` | `browser-2` | `realistic.browser.spec.ts` | #616, #1623 | 6 | 337 s |
+| `test:browser:nightly:shard-3` | `browser-3` | `realistic-trees.browser.spec.ts` | #1283, #1294, #1523 | 5 | 259 s |
+| `test:browser:nightly:shard-4` | `browser-4` | `realistic-town.browser.spec.ts` | #1559, #1657, #1624 | 6 | 234 s |
+
+The last column is the sum of those cases on the one-job run, not a run of the shard. Split by
+describe into files, as #1675 split by file, so each shard is still a file filter that
+`nightly-split.test.ts` can hold every nightly spec to exactly one of; the load they share is
+`apps/web/browser/realistic-ride.ts`. The same test now also holds **each shard's loads of the page
+times the slowest load measured** (72 s, #1623's case on that run) **at or under 60 % of the 840 s
+stop**: 7 loads is the most one shard may hold, so a lever that would take a shard past it is a red
+case in the required suite, not a nightly run that stops. It counts `ride(page` and `ridden(page`
+calls in each nightly describe, and refuses a realistic spec whose loads it counts as none.
+`report` needs all four jobs.
+
+**Where the next lever's describe goes**: shard 2 holds 6 loads (432 s of the 504 s cap), so a
+describe with two or more loads there is a red case. Put it in the shard with the fewest loads
+(shard 3 or 4 hold 5 and 6); if every shard would pass 7, add `realistic-<name>.browser.spec.ts`,
+a `test:browser:nightly:shard-5` script and a `browser-5` job copied from `browser-4`, name the new
+`spec` in `nightly.ts`, and add the job to `report`'s `needs`. The load count is lexical, so a
+load made through an alias of `ride` or a direct `page.goto` of the page is not counted: call `ride`.
 
 
 #### 23m39s of 25 — #1051

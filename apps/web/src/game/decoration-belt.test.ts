@@ -9,7 +9,7 @@
  * What jsdom cannot do — draw, and read a colour back — the browser gate
  * does: `decoration.browser.spec.ts` (the glow under a light turned away,
  * two frames a second apart, `renderer.info.render.calls` with and without
- * the belt) and `realistic.browser.spec.ts` (the owner's page, one call).
+ * the belt) and `realistic-town.browser.spec.ts` (the owner's page, one call).
  */
 
 import { describe, expect, it } from 'vitest';

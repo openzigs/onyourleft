@@ -18,7 +18,7 @@
  *    items, under one directional light at its face or turned away and no
  *    other light: the pixel at its middle, marked glowing or not.
  *
- * ⚠️ Not the product's frame: the owner's page (`realistic.browser.spec.ts`)
+ * ⚠️ Not the product's frame: the owner's page (`realistic-town.browser.spec.ts`)
  * is where the belt's one call is held inside a real view's frame.
  */
 
