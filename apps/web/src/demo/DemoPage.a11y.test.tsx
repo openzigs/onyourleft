@@ -7,7 +7,8 @@
  * `routes.a11y.test.tsx` cannot reach it: the demo is its own page and build,
  * not a route of the app's shell. So its markup is audited here, playing and
  * refused, and its controls are held to WCAG 2.2 SC 2.2.2's "a mechanism to
- * pause or stop": named buttons, reachable by keyboard.
+ * pause or stop": named buttons, reachable by keyboard. Since #1650 those are
+ * the ride HUD's own controls, and the HUD over the world is audited with it.
  */
 
 import { afterEach, describe, expect, it } from 'vitest';
@@ -51,6 +52,8 @@ describe('the demo page is accessible — #1647', () => {
     ['refusing its query', '?preset=nowhere', false],
   ])('passes the audit while %s', async (_what, search, reducedMotion) => {
     await show(search, reducedMotion);
+    // #1650: the stats overlay — the ride HUD's own — is part of what is audited.
+    expect(document.querySelector('.oyl-hud') !== null).toBe(search !== '?preset=nowhere');
     const violations = auditAccessibility(document);
     expect(violations, formatViolations(violations)).toEqual([]);
   });

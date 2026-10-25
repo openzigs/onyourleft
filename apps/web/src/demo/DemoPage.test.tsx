@@ -11,9 +11,9 @@
 import { act } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { CONTROL_MINIMUM_PIXELS } from '../game/hud/HudPanel';
+import { CONTROL_MINIMUM_PIXELS } from '../game/hud/HudCore';
 import { activateWithKeyboard, mount, settle, type Mounted } from '../testing/mount';
-import { DEMO_CONTROL_PIXELS, DemoPage } from './DemoPage';
+import { DemoPage } from './DemoPage';
 import type { DemoSnapshot } from './stage';
 import { fakeDrawnWorld, fakeRenderer, SteppedFrames } from './stage-testing';
 
@@ -168,7 +168,6 @@ describe('the demo page — #1647', () => {
   });
 
   it('sizes its controls as the ride HUD sizes its own', async () => {
-    expect(DEMO_CONTROL_PIXELS).toBe(CONTROL_MINIMUM_PIXELS);
     const shown = await page();
     for (const name of ['Pause', 'Stop']) {
       const button = shown.button(name);
