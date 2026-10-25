@@ -114,7 +114,12 @@ import { rideFrame, RIDE_METRES_PER_SECOND } from './realistic/frame';
 import { installLayerSwitch, type LayerCensus } from './realistic/layers';
 import { describe, guarded, MAXIMUM_FRAME_GAP_MS, MeasurementClock } from './realistic/loop';
 import { readoutLine, takeOverReporting } from './realistic/reporting';
-import { placeLatitude, realisticRoute, routeDigest, villageRoute } from '../src/demo/synthetic-road';
+import {
+  placeLatitude,
+  realisticRoute,
+  routeDigest,
+  villageRoute,
+} from '../src/demo/synthetic-road';
 import { frameCensus, type FrameCensus } from './realistic/village';
 
 /** How long the scene runs before anything is sampled: shader compiles, first uploads. */
