@@ -217,6 +217,28 @@ function nightlyShardScripts(): [name: string, script: string][] {
     .sort(([a], [b]) => Number(a.split('-').pop()) - Number(b.split('-').pop()));
 }
 
+/**
+ * The slowest load of the owner's realistic page measured on a nightly
+ * runner, in seconds — #1698. Run 40188796060, an AMD EPYC 7763: #1623's
+ * autumn case took 143 s for its two loads and their screenshots, where the
+ * page's other cases took 38 to 55 s a load. That run's one realistic job
+ * reached its 840 s stop with all eight cases green, 17 loads in all.
+ *
+ * ⚠️ **A recorded figure, not a derived one**, for the reason
+ * `measuredShards` gives: no Vitest case can ask the Actions API. A slower
+ * load measured later is a new figure here.
+ */
+const SLOWEST_REALISTIC_LOAD_S = 72;
+
+/** The most of its stop a nightly shard may fill: #1698's 40 % headroom. */
+const NIGHTLY_SHARE = 0.6;
+
+/**
+ * A load of the realistic page in a spec's code: `realistic-ride.ts`'
+ * `ride(page, …)`, or #1623's `ridden(page, …)`, which wraps it.
+ */
+const LOADS_OF_THE_PAGE = /\b(?:ride|ridden)\(\s*page\b/g;
+
 /** The command a browser shard's `Browser gate` step runs, wrapper and all. */
 const gateCommand = (script: string): string =>
   `timeout --verbose --kill-after=10s ${String(GATE_STEP_MS / 1000)}s pnpm run ${script}`;
@@ -474,6 +496,37 @@ describe('the nightly workflow runs what left the required job, and cannot pass 
         .map(([name]) => name);
       // In none, a new nightly spec runs nowhere; in two, it runs twice.
       expect(halves, spec).toHaveLength(1);
+    }
+  });
+
+  it('holds each nightly shard’s loads of the realistic page inside 60 % of its stop, at the slowest load measured — #1698', () => {
+    const bodies = [...taggedBodies()];
+    const loadsIn = (spec: string): number =>
+      bodies
+        .filter(([key]) => key.startsWith(`${spec} › `))
+        .reduce((sum, [, body]) => sum + (body.match(LOADS_OF_THE_PAGE)?.length ?? 0), 0);
+    // The control: every spec that loads the page through `realistic-ride.ts`
+    // and has a nightly describe is counted at one load or more, so a helper
+    // renamed past the pattern is a red case rather than a shard of nothing.
+    const realistic = SPECS.filter(
+      (spec) =>
+        codeOf(spec).includes("from './realistic-ride'") &&
+        bodies.some(([key]) => key.startsWith(`${spec} › `)),
+    );
+    expect(realistic.length).toBeGreaterThan(0);
+    for (const spec of realistic) expect(loadsIn(spec), spec).toBeGreaterThan(0);
+
+    const whole = '--project nightly --workers 1';
+    const budget = NIGHTLY_SHARE * (GATE_BUDGET_MS / 1000);
+    for (const [name, script] of nightlyShardScripts()) {
+      const filters = String(playwrightRuns(script)[0]).slice(whole.length).trim().split(/\s+/);
+      const loads = realistic
+        .filter((spec) => filters.some((filter) => new RegExp(filter).test(spec)))
+        .reduce((sum, spec) => sum + loadsIn(spec), 0);
+      expect(
+        loads * SLOWEST_REALISTIC_LOAD_S,
+        `${name}: ${String(loads)} loads of the realistic page`,
+      ).toBeLessThanOrEqual(budget);
     }
   });
 

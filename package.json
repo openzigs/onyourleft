@@ -24,6 +24,8 @@
     "test:browser:nightly": "pnpm --filter @onyourleft/web run test:browser:nightly",
     "test:browser:nightly:shard-1": "pnpm --filter @onyourleft/web run test:browser:nightly:shard-1",
     "test:browser:nightly:shard-2": "pnpm --filter @onyourleft/web run test:browser:nightly:shard-2",
+    "test:browser:nightly:shard-3": "pnpm --filter @onyourleft/web run test:browser:nightly:shard-3",
+    "test:browser:nightly:shard-4": "pnpm --filter @onyourleft/web run test:browser:nightly:shard-4",
     "test:browser:shard-1": "pnpm --filter @onyourleft/web run test:browser:shard-1",
     "test:browser:shard-2": "pnpm --filter @onyourleft/web run test:browser:shard-2",
     "check:a11y-suite": "node scripts/check-a11y-suite.mjs",
