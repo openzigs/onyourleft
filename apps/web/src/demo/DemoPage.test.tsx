@@ -392,6 +392,30 @@ describe('the demo page’s showcase — #1653', () => {
     expect(caption()?.textContent).toBe('');
   });
 
+  it('shoots the showcase with its own tour: overhead at 55 s, where the group’s tour is behind', async () => {
+    const centred = async (search: string): Promise<number> => {
+      const shown = await page({ search });
+      await act(async () => {
+        shown.frames.step(110, 500);
+        await Promise.resolve();
+      });
+      const frame = shown.drawn();
+      const rider = frame?.markers[0];
+      if (frame === undefined || rider === undefined) throw new Error('nothing drawn');
+      const at = projectThrough(
+        frame.camera,
+        { x: rider.x, y: rider.y + 1, z: rider.z },
+        REFERENCE_ASPECT,
+      );
+      mounted?.unmount();
+      mounted = undefined;
+      return Math.abs(at.x) + Math.abs(at.y);
+    };
+    // `showcase.ts`: overhead from 50 s; `camera-tour.ts` §`DEMO_TOURS.group`: behind from 45 s.
+    expect(await centred('?showcase')).toBeLessThan(1e-6);
+    expect(await centred('?preset=group')).toBeGreaterThan(0.02);
+  });
+
   it('has no caption region, and runs no timeline, without ?showcase', async () => {
     const shown = await page({ search: '?preset=group' });
     await shown.step(10);
