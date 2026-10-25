@@ -527,6 +527,37 @@ describe('unchanged elsewhere — #1660', () => {
   });
 });
 
+describe('a skewed quadrilateral — #1660', () => {
+  /** A `long` x `short` metre quadrilateral whose far side is sheared `degrees` off square. */
+  const skewed = (long: number, short: number, degrees: number): ShapeCorners => {
+    const shear = short * Math.tan((degrees * Math.PI) / 180);
+    return [
+      [0, 0],
+      [long, 0],
+      [long + shear, short],
+      [shear, short],
+    ];
+  };
+
+  it.each([1, 2, 4, 6, 7.5])(
+    'plans a quadrilateral %d degrees off square exactly as with the split off',
+    (degrees) => {
+      for (const [long, short] of [
+        [12, 9],
+        [16, 12],
+      ] as const) {
+        const shape = [[skewed(long, short, degrees), 300, 30, 6]] as const;
+        const on = plansOf(shape, true)[0] as FootprintPlan;
+        const off = plansOf(shape, false)[0] as FootprintPlan;
+        expect(on.roof).toBe(off.roof);
+        for (const role of FOOTPRINT_ROLES) {
+          expect(Array.from(on.triangles[role])).toStrictEqual(Array.from(off.triangles[role]));
+        }
+      }
+    },
+  );
+});
+
 describe('the caps — #1660', () => {
   it('keeps every split plan within 640 near and 200 far', () => {
     const plans = plansOf(

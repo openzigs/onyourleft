@@ -1111,31 +1111,6 @@ function convexHull(ring: Ring): [number, number][] {
 }
 
 /**
- * A split that is one rectangle within this of the minimum-area one is that
- * one — #1660: **1 cm**. A mapped rectangle's corners, in `Float32` a
- * kilometre from the origin, put the two a few millimetres apart; a ring
- * snapped from walls a degree or more off square puts them further.
- */
-const SAME_RECTANGLE_METRES = 0.01;
-
-/**
- * Whether two rectangles are one to {@link SAME_RECTANGLE_METRES} — #1660:
- * their centres, their half-lengths, and their long axes either way along.
- */
-function sameRectangle(a: Rectangle, b: Rectangle): boolean {
-  const close = (p: number, q: number): boolean => Math.abs(p - q) <= SAME_RECTANGLE_METRES;
-  return (
-    close(a.cx, b.cx) &&
-    close(a.cz, b.cz) &&
-    close(a.halfLong, b.halfLong) &&
-    close(a.halfShort, b.halfShort) &&
-    // Their axes within the same of each other at the rectangle's ends.
-    (Math.abs(a.halfLong - a.halfShort) <= SAME_RECTANGLE_METRES ||
-      Math.abs(a.ux * b.uz - a.uz * b.ux) * a.halfLong <= SAME_RECTANGLE_METRES)
-  );
-}
-
-/**
  * The minimum-area rectangle around a ring — by its hull's edges, one of
  * which a minimum-area rectangle always has a side along — with its long axis
  * named. #1540's roof rule reads its area and its long side.
@@ -3959,13 +3934,11 @@ function planFootprint(
       terraced,
       rectilinear: split !== undefined,
     });
-  // The rectangles a pitched roof is built over, the largest first. Where the split is one
-  // rectangle that is the minimum-area one to a millimetre, that one, so a rectangle plans as
-  // before; otherwise the split's, which is the notch fix.
+  // The rectangles a pitched roof is built over, the largest first. A split of one is a
+  // rectangle or a near-rectangle, which plans as before on the minimum-area rectangle;
+  // two or three is the notch fix.
   const roofRectangles: readonly Rectangle[] =
-    split === undefined || (split.length === 1 && sameRectangle(split[0] as Rectangle, rectangle))
-      ? [rectangle]
-      : split;
+    split === undefined || split.length === 1 ? [rectangle] : split;
   // Gutters, the downpipe, the dormers and the chimney: on the largest only.
   const main = roofRectangles[0] as Rectangle;
   const shared: {
