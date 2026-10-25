@@ -16,7 +16,7 @@ import {
 } from '../../src/game/footprint-buildings';
 import { landClassMask, type LandClassMask } from '../../src/game/land-class';
 import type { CorridorOrigin } from '../../src/game/terrain';
-import { NO_URBAN_CLASS, urbanClassMap } from '../../src/game/urban-class';
+import { NO_URBAN_CLASS, urbanClassMap, type UrbanClassMap } from '../../src/game/urban-class';
 import type { WorldCorridor } from '../../src/game/world-data/corridor';
 import type { RouteProfile } from '@onyourleft/domain';
 
@@ -33,7 +33,12 @@ export interface TownFixture {
 export function plannedTown(
   town: TownFixture,
   leversOff: readonly Lever[],
-): { readonly land: LandClassMask; readonly plans: readonly FootprintPlan[] } {
+): {
+  readonly land: LandClassMask;
+  readonly plans: readonly FootprintPlan[];
+  /** #1637: the urban class the plans were built with, which the lots and streets read. */
+  readonly urban: UrbanClassMap;
+} {
   const land = landClassMask(town.corridor);
   // #1634: its urban class, as the press builds it, unless the lever is off.
   const urban = urbanClassWithLevers(leversOff)
@@ -49,5 +54,5 @@ export function plannedTown(
     // #1660: the L-, T-, U- and Z-shaped houses' split roofs, unless the lever is off.
     { splitRoofs: splitRoofsWithLevers(leversOff) },
   );
-  return { land, plans };
+  return { land, plans, urban };
 }

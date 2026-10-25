@@ -782,7 +782,11 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         commercial land) along the route's road where the land
                         is mapped built-up and no mapped footprint stands —
                         every corner on built-up land, never on wood, water or
-                        park, nothing where no tile was read
+                        park, nothing where no tile was read. Since #1637 none
+                        where the urban class is `city-centre`: there
+                        `footprint-buildings.ts` §`terracePlans` plans 3–4
+                        storey terraced shops at the press, edge to edge,
+                        drawn with the mapped buildings
     src/game/land-class.ts
                         what the ground is where map data was read (#1546) — a
                         sparse 5 m mask built ONCE at the press from the ride's
@@ -935,7 +939,13 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         §`DecorationBelt` in ONE call for every village within
                         `FURNITURE_DRAW_METRES`, glow and all
                         (`withDecorationGlow`, no lamp, no uniform), inside
-                        `REALISTIC_DECORATION_TRIANGLES`
+                        `REALISTIC_DECORATION_TRIANGLES`. Since #1637 a
+                        `city-centre` stretch (`MappedTown.urban`) has a
+                        city's street, which no village is: 3.5 m pavements
+                        both sides in 96 m pieces, lamps every 16 m, a bench
+                        every 48 m, bollards only at mapped side roads'
+                        mouths — inside `FURNITURE_CAPACITY` and
+                        `REALISTIC_STREET_TRIANGLES`, neither raised
     src/game/footways.ts
                         footways from the corridor's map data (#1551) —
                         `pavementSides`, the side of the drawn road's NORMAL a

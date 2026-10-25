@@ -23,7 +23,7 @@
  * | `layers` | layers switched OFF, for their share of the GPU (#616) | `-sky`, `-surfaces`, `-vegetation`, `-impostors`, `-structures`, `-water`, `-riders`, `-grounding`, comma-separated; default none |
  * | `levers` | #619's levers switched OFF, for a before/after pair at one rung — since #622 its air and since #1274 its crag, for a by-eye pair, since #1283 the generated trees and #1294 the generated firs, for both, since #1523 the ground blend and the road wear, for a cost pair, #1523's bounds on both, for a before/after pair, since #1534 the villages' cleared ground, for both, since #1523 the firs' depth pre-pass, for a before/after pair, since #1541 the people, for both, since #1542 the countryside's planting, field boundaries, ground clutter, broken roadside hedge and small stones, for both, since #1622 the holiday decorations, for any `date` without its holiday, since #1659 the mapped windows' reveals, for both, since #1658 the mapped walls' overhang shadows, for both, since #1634 the urban class (an untagged footprint's storeys), for both, since #1660 the split roofs of L-, T- and U-shaped houses, for both, and since #1661 the mapped facades' weathering, for both | `-foliage-order`, `-texture-bias`, `-air`, `-crag`, `-generated-trees`, `-generated-conifers`, `-ground-blend`, `-road-wear`, `-surface-bounds`, `-settlement-clearing`, `-fir-prepass`, `-people`, `-land-planting`, `-land-boundaries`, `-ground-clutter`, `-hedge-breaks`, `-small-stones`, `-decorations`, `-window-reveals`, `-overhang-shadows`, `-urban-class`, `-split-roofs`, `-weathering`, comma-separated; default none |
  * | `facing` | which way the route is turned, relative to the sun (#702, `route.ts` §"Which way it faces") | `sun`, `away`; default the route unturned, which looks 110° to 160° away from the sun |
- * | `town` | ride through a mapped town instead of `route.ts`' road (#1581): `footprint-fixtures-testing.ts` §`mixedTownFixture`'s mixed footprints, planned, drawn and lotted as a ride's corridor is, from 900 m to 2 100 m; since #1585 `richmond`, `footprint-fixtures-testing.ts` §`richmondStreetFixture`'s narrow lots drawn as house models beside square ones drawn as extrusions, from 900 m to 1 500 m; since #1542 `countryside`, `footprint-fixtures-testing.ts` §`countrysideFixture`'s fields, woods and a park, from 900 m to 2 100 m, for #1542's levers; since #1635 `terrace`, `footprint-fixtures-testing.ts` §`terraceStreetFixture`'s rows of terraced houses, from 900 m to 2 100 m, with `levers=-urban-class` its control; since #1636 `city`, `testing/urban-fixtures.ts` §`cityCentreFixture`'s city centre, its route-facing ground floors shop fronts and a nine-storey tower a curtain wall, from 900 m to 2 100 m | `mixed`, `richmond`, `countryside`, `terrace`, `city`; default none |
+ * | `town` | ride through a mapped town instead of `route.ts`' road (#1581): `footprint-fixtures-testing.ts` §`mixedTownFixture`'s mixed footprints, planned, drawn and lotted as a ride's corridor is, from 900 m to 2 100 m; since #1585 `richmond`, `footprint-fixtures-testing.ts` §`richmondStreetFixture`'s narrow lots drawn as house models beside square ones drawn as extrusions, from 900 m to 1 500 m; since #1542 `countryside`, `footprint-fixtures-testing.ts` §`countrysideFixture`'s fields, woods and a park, from 900 m to 2 100 m, for #1542's levers; since #1635 `terrace`, `footprint-fixtures-testing.ts` §`terraceStreetFixture`'s rows of terraced houses, from 900 m to 2 100 m, with `levers=-urban-class` its control; since #1636 `city`, `testing/urban-fixtures.ts` §`cityCentreFixture`'s city centre, its route-facing ground floors shop fronts and a nine-storey tower a curtain wall, from 900 m to 2 100 m; since #1637 `city-street`, `footprint-fixtures-testing.ts` §`cityCentreFixture`'s city centre, its street and its terraced blocks, from 900 m to 2 100 m, whose before is `levers=-urban-class` | `mixed`, `richmond`, `countryside`, `terrace`, `city`, `city-street`; default none |
  * | `date` | the rider's local day the ride starts on (#1622), in either world: its holiday (`season.ts` §`holidayOn`) and the route's season. A malformed or impossible day is REFUSED | `YYYY-MM-DD`; default this device's own day |
  * | `decorations` | #1624's probe: one small box on every decoration anchor of every village in reach, for either holiday, in place of the product's table (`decorations.ts` §`HOLIDAY_DECORATIONS`, which places nothing yet). Pair it with a `date` in a holiday and `route=village`; `levers=-decorations` is its control | `probe`; default the product's table |
  * | `place` | where every road is ridden (#1623), for the route's own season: `south`, the same road mirrored into the southern hemisphere; `nordic`, far enough north that a winter's snow lies to sea level (`route.ts` §`PLACES`) | `south`, `nordic`; default 51.5° N, every road where it was |
@@ -207,7 +207,8 @@ export type Layer = (typeof LAYERS)[number];
  *   use, area and its tagged neighbours. The owner's BY-EYE pair, and the
  *   tablet's cost pair (taller boxes add fill, not draw calls). Only a `town`
  *   has a class; on `route.ts`' road the two are the same picture. The
- *   product always builds the class.
+ *   product always builds the class. Since #1637 off also takes a city
+ *   centre's street and terraced blocks with it — `town=city-street`'s before.
  *
  * - `split-roofs` — #1660: L-, T-, U- and Z-shaped mapped houses pitched over
  *   their 2–3 rectangles (`rectilinear-roofs.ts`), and no roof over a notch.
@@ -279,7 +280,8 @@ export interface RealisticPageConfig {
    * A mapped town to ride through — #1581's by-eye pair for the owner, near a
    * town and inside one. `undefined` is `route.ts`' road, with no corridor.
    */
-  readonly town: 'mixed' | 'richmond' | 'countryside' | 'terrace' | 'city' | undefined;
+  readonly town:
+    'mixed' | 'richmond' | 'countryside' | 'terrace' | 'city' | 'city-street' | undefined;
   /**
    * #1559: `route.ts` §`villageRoute` instead of its default road, for
    * validation 0002 AE2. `undefined` is the default road, unchanged.
@@ -524,7 +526,11 @@ export function parseConfig(search: string): RealisticPageConfig {
     leversOff: leversFrom(params.get('levers')),
     facing: params.has('facing') ? oneOf('facing', ['sun', 'away'] as const, 'sun') : undefined,
     town: params.has('town')
-      ? oneOf('town', ['mixed', 'richmond', 'countryside', 'terrace', 'city'] as const, 'mixed')
+      ? oneOf(
+          'town',
+          ['mixed', 'richmond', 'countryside', 'terrace', 'city', 'city-street'] as const,
+          'mixed',
+        )
       : undefined,
     route: params.has('route') ? routeFrom(params) : undefined,
     date: params.has('date') ? dateFrom(params.get('date') ?? '') : undefined,

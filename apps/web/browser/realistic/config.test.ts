@@ -91,6 +91,11 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     expect(configQuery(parseConfig('?town=countryside&levers=-land-planting'))).toBe(
       '?levers=-land-planting&town=countryside',
     );
+    // #1637: the city centre's street, whose before is its urban class off.
+    expect(parseConfig('?town=city-street').town).toBe('city-street');
+    expect(configQuery(parseConfig('?town=city-street&levers=-urban-class'))).toBe(
+      '?levers=-urban-class&town=city-street',
+    );
     // #1636: a city centre, for its shop fronts and its tower.
     expect(parseConfig('?town=city').town).toBe('city');
     expect(configQuery(parseConfig('?town=city&at=1430'))).toBe('?at=1430&town=city');
@@ -103,6 +108,9 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     );
     expect(harness).toContain("config.town === 'city'");
     expect(harness).toContain('? cityCentreFixture(latitude)');
+    // #1637's own city centre, for its street and terraced blocks.
+    expect(harness).toContain("config.town === 'city-street'");
+    expect(harness).toContain('? cityStreetscapeFixture(latitude)');
   });
 
   it('switches #1542’s three changes off one by one, and none unless asked', () => {

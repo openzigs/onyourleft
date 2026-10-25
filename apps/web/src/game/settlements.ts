@@ -103,6 +103,7 @@ import {
 import { slotHash, uniformFrom } from './seeded';
 import { leastSquaredNearRoad, squaredToSegment } from './road-grid';
 import { drawnRoadFrame, type CorridorOrigin } from './terrain';
+import type { UrbanClassMap } from './urban-class';
 import { inWater, waterways } from './waterways';
 import { treeLineMetres } from './world';
 
@@ -945,6 +946,14 @@ export interface MappedFootprintIndex {
 export interface MappedTown extends MappedFootprintIndex {
   /** Whether the `landuse.kind` at `(x, z)` is `commercial`. Kept per place after the first ask. */
   commercialAt(x: number, z: number): boolean;
+  /**
+   * The ride's urban class (`urban-class.ts`, #1633), built at the press —
+   * #1637: {@link lotsAt} builds no lot where it is `city-centre`, whose lots
+   * are terraced blocks (`footprint-buildings.ts` §`footprintPlans`), and
+   * `streets.ts` lays a city centre's street there. Absent is no class: every
+   * stretch is today's.
+   */
+  readonly urban?: UrbanClassMap | undefined;
 }
 
 /** No footprints and no commercial land: what a ride with no corridor is handed. */
@@ -1000,6 +1009,10 @@ export function lotSpacing(profile: RouteProfile): {
  *    every mapped footprint and off every stretch of the road. One that is
  *    not is drawn without it: a lot's porch is one shape, so it is dropped,
  *    never shortened.
+ * 7. Since #1637 **no lot where the ride's urban class is `city-centre`**
+ *    ({@link MappedTown.urban}): there a lot is a terraced block, planned at
+ *    the press as a footprint is (`footprint-buildings.ts` §`terracePlans`),
+ *    and drawn with the mapped buildings. Every other class is today's.
  *
  * **Along the route's own road only**: the game draws one road, and a lot
  * beside a mapped side street the game does not draw would face nothing.
@@ -1027,6 +1040,8 @@ export function lotsAt(
     if (!profile.loop && (plot < 0 || plot >= plots)) continue;
     const along = (plot + 0.5) * span;
     if (along < fromMetres || along >= toMetres) continue;
+    // #1637: a city centre's lots are its terraced blocks, planned at the press.
+    if (mapped.urban?.classAt(distanceOnRoute(profile, along)) === 'city-centre') continue;
     const wrappedPlot = ((plot % plots) + plots) % plots;
     const frame = frameAt(profile, origin, distanceOnRoute(profile, along));
     if (frame === undefined) continue;

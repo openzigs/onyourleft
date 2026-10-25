@@ -58,6 +58,9 @@ import {
 import { realisticWorldNotice, type RealisticWorldOutcome } from '../src/game/realistic-assets';
 import { mappedTown } from '../src/game/footprint-buildings';
 import {
+  // #1637's city centre, whose street and terraced blocks `town=city-street` rides;
+  // `town=city` is #1636's, from `testing/urban-fixtures.ts`.
+  cityCentreFixture as cityStreetscapeFixture,
   countrysideFixture,
   mixedTownFixture,
   richmondStreetFixture,
@@ -372,7 +375,9 @@ async function run(): Promise<void> {
             ? terraceStreetFixture(latitude)
             : config.town === 'city'
               ? cityCentreFixture(latitude)
-              : undefined;
+              : config.town === 'city-street'
+                ? cityStreetscapeFixture(latitude)
+                : undefined;
   // #1559: or the level road through two villages, for validation 0002 AE2.
   const profile =
     mixed?.profile ??
@@ -384,12 +389,12 @@ async function run(): Promise<void> {
   const town = ((): Parameters<typeof rideFrame>[0]['town'] => {
     if (mixed === undefined) return undefined;
     // #1634's urban class and #1660's split roofs, as the press builds them, unless a lever is off.
-    const { land, plans } = plannedTown(mixed, config.leversOff);
+    const { land, plans, urban } = plannedTown(mixed, config.leversOff);
     return {
       corridor: mixed.corridor,
       land,
       buildings: mappedBuildingsOf(plans),
-      lots: mappedTown(mixed.corridor, plans),
+      lots: mappedTown(mixed.corridor, plans, urban),
     };
   })();
   const loopFrom = town === undefined ? LOOP_FROM_METRES : TOWN_FROM_METRES;
