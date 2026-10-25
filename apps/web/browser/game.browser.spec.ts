@@ -75,6 +75,7 @@ import {
 } from '../src/game/realistic-budget';
 import { MAXIMUM_DRAWN_SET } from '../src/net/interest';
 import { SIDE_ROAD_FRAME_TRIANGLES } from '../src/game/cross-streets';
+import { FURNITURE_SURFACES } from '../src/game/streets';
 import { PERSON_ANIMATION_MAX_BYTES, PERSON_MAX_TRIANGLES } from '../src/game/people-body';
 import { SURFACE_WEAR_ALLOWANCE, WORN_ROAD_CONTRAST_FLOOR } from '../src/game/road-wear';
 
@@ -1815,7 +1816,7 @@ test.describe('a village and its fields — #460', () => {
     expectAPavement(settlement.pavement, testInfo, 'stylised');
   });
 
-  test('stands lamp posts, bollards, benches and bins on it, one call a kind, and none in open country — #1536', async ({
+  test('stands lamp posts, bollards, benches and bins on it, one call a surface, and none in open country — #1536', async ({
     harnessRun,
   }, testInfo) => {
     const { settlement } = await harness(harnessRun);
@@ -1908,7 +1909,8 @@ function expectDoorPaths(
 
 /**
  * #1536's browser-gate half, for either world, on #1535's frames: every kind
- * of street furniture drawn beside the village, one draw call a kind; with it
+ * of street furniture drawn beside the village, one draw call a surface
+ * (#1689: the lamp post, bollard and bin share the painted one); with it
  * switched off the frame loses exactly those calls and the pixels it covered;
  * and a frame in open country draws none of it.
  */
@@ -1928,8 +1930,8 @@ function expectStreetFurniture(
     expect(counts[kind], kind).toBeGreaterThan(0);
     expect(countsOpen[kind], kind).toBe(0);
   }
-  // One instanced draw a kind, however many pieces.
-  expect(drawCalls - drawCallsOff).toBe(kinds.length);
+  // One merged draw a surface, however many pieces and kinds — #1689.
+  expect(drawCalls - drawCallsOff).toBe(FURNITURE_SURFACES.length);
   // It reaches the drawing buffer.
   expect(pixels).toBeGreaterThan(100);
 }
@@ -3870,7 +3872,7 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     expect(apart).toBeGreaterThan(8);
   });
 
-  test('stands its street furniture on it, the bench in Poly Haven’s planks, one call a kind — #1536', async ({
+  test('stands its street furniture on it, the bench in Poly Haven’s planks, one call a surface — #1536', async ({
     harnessRun,
   }, testInfo) => {
     const { pavement } = await realistic(harnessRun);

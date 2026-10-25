@@ -497,7 +497,10 @@ import type { Billboard } from './billboards';
 import {
   FURNITURE_DRAW_METRES,
   FURNITURE_KINDS,
+  FURNITURE_SURFACES,
+  type FurnitureItem,
   type FurnitureKind,
+  type FurnitureSurface,
   type PavementMesh,
   type VillageStreet,
 } from './streets';
@@ -1959,7 +1962,7 @@ const BIN_GREEN = 0x2f4a3a;
 const FURNITURE_STYLE: Readonly<
   Record<
     FurnitureKind,
-    { readonly surface: 'painted' | 'planks'; readonly parts: readonly FurniturePart[] }
+    { readonly surface: FurnitureSurface; readonly parts: readonly FurniturePart[] }
   >
 > = {
   'lamp-post': {
@@ -9219,11 +9222,73 @@ function furnitureGeometry(kind: FurnitureKind, world: 'stylised' | 'realistic')
 }
 
 /**
+ * Every piece in `items` as one geometry: `shapes`' own, each piece's turned
+ * by its yaw as three's `makeRotationY` turns it and stood where it stands —
+ * the transform the instanced draw made on the GPU until #1689, made here
+ * once. Every shape carries the same attributes, unindexed.
+ */
+function furnitureSurfaceGeometry(
+  items: readonly FurnitureItem[],
+  shapes: ReadonlyMap<FurnitureKind, BufferGeometry>,
+): BufferGeometry {
+  const [first] = shapes.values();
+  const names = first === undefined ? [] : Object.keys(first.attributes);
+  let vertices = 0;
+  for (const item of items) {
+    vertices += (shapes.get(item.kind) as BufferGeometry).getAttribute('position').count;
+  }
+  const geometry = new BufferGeometry();
+  for (const name of names) {
+    const size = (first as BufferGeometry).getAttribute(name).itemSize;
+    const out = new Float32Array(vertices * size);
+    let at = 0;
+    for (const item of items) {
+      const source = (shapes.get(item.kind) as BufferGeometry).getAttribute(name);
+      const values = source.array as Float32Array;
+      if (name === 'position' || name === 'normal') {
+        const cos = Math.cos(item.rotation);
+        const sin = Math.sin(item.rotation);
+        const [dx, dy, dz] = name === 'position' ? [item.x, item.y, item.z] : [0, 0, 0];
+        for (let each = 0; each < values.length; each += 3) {
+          const x = values[each] as number;
+          const z = values[each + 2] as number;
+          out[at + each] = cos * x + sin * z + dx;
+          out[at + each + 1] = (values[each + 1] as number) + dy;
+          out[at + each + 2] = -sin * x + cos * z + dz;
+        }
+      } else {
+        out.set(values, at);
+      }
+      at += values.length;
+    }
+    geometry.setAttribute(name, new BufferAttribute(out, size));
+  }
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+/**
  * The street furniture on the pavements in view — #1536 (`streets.ts`
- * §`furnish`): **one instanced draw a kind**, four at most, and none where a
- * frame holds no street. Only what stands within `streets.ts`
- * §`FURNITURE_DRAW_METRES` of the camera is drawn, which is its level of
- * detail: a piece is either drawn whole or not at all.
+ * §`furnish`): **one merged mesh and one draw call a surface**
+ * ({@link FURNITURE_SURFACES}), two at most, and none where a frame holds no
+ * street. Only what stands within `streets.ts` §`FURNITURE_DRAW_METRES` of the
+ * camera is drawn, which is its level of detail: a piece is either drawn whole
+ * or not at all.
+ *
+ * ⚠️ **It was one instanced draw a KIND, four, until #1689**, and a reviewer
+ * who remembers four is reading the belt before the village frame was frozen.
+ * The lamp post, the bollard and the bin wore three materials made from the
+ * same numbers; they now wear one, and every piece of a surface is merged into
+ * one geometry, so the frame draws the same triangles in the same places in
+ * two calls. Instancing cannot do that — an instanced draw is ONE shape — and
+ * three's `BatchedMesh` draws through `WEBGL_multi_draw`, which the owner's
+ * page's counter does not see (`browser/realistic/draws.ts`).
+ *
+ * ⚠️ **Rebuilt only when the pieces in reach change**, as
+ * {@link PavementBelt} is when its streets do: `streets.ts` hands every frame
+ * the same objects for the same villages, and a piece is fixed in the
+ * corridor's frame, so a frame whose pieces in reach are the last frame's
+ * uploads nothing — where the instanced draw uploaded every matrix every frame.
  *
  * A belt per world, as {@link PavementBelt} is: the stylised view's is
  * painted by {@link FURNITURE_STYLE}, lit or flat by the rung; the realistic
@@ -9231,12 +9296,19 @@ function furnitureGeometry(kind: FurnitureKind, world: 'stylised' | 'realistic')
  * Poly Haven's `dark_planks`, breathing the realistic air.
  */
 export class FurnitureBelt {
-  readonly #meshes = new Map<FurnitureKind, InstancedMesh>();
+  readonly #meshes = new Map<FurnitureSurface, Mesh>();
   readonly #materials = new Map<
-    FurnitureKind,
+    FurnitureSurface,
     { readonly lit: Material; readonly flat: Material }
   >();
-  readonly #matrix = new Matrix4();
+  /** Each surface's kinds' shapes, one piece's, unindexed. */
+  readonly #shapes = new Map<FurnitureSurface, Map<FurnitureKind, BufferGeometry>>();
+  /** The pieces each surface's mesh holds, in the order it holds them. */
+  readonly #held = new Map<FurnitureSurface, readonly FurnitureItem[]>();
+  /** This frame's pieces in reach, a surface's — reused, so a frame allocates nothing. */
+  readonly #inReach = new Map<FurnitureSurface, FurnitureItem[]>();
+  /** How many of each kind the last frame drew. @see drawnOf */
+  readonly #drawn = new Map<FurnitureKind, number>();
   #shown = true;
   /** Whether the browser gate has turned the furniture off — its control. */
   #switchedOn = true;
@@ -9245,8 +9317,7 @@ export class FurnitureBelt {
     world: 'stylised' | 'realistic',
     planks?: { readonly colour: Texture; readonly normal: Texture },
   ) {
-    for (const kind of FURNITURE_KINDS) {
-      const surface = FURNITURE_STYLE[kind].surface;
+    for (const surface of FURNITURE_SURFACES) {
       let materials: { readonly lit: Material; readonly flat: Material };
       if (world === 'realistic') {
         const finish = STRUCTURE_SURFACE_FINISH[surface];
@@ -9272,29 +9343,44 @@ export class FurnitureBelt {
           flat: constructed(new MeshBasicMaterial({ vertexColors: true })),
         };
       }
-      this.#materials.set(kind, materials);
-      const mesh = new InstancedMesh(
-        furnitureGeometry(kind, world),
-        materials.lit,
-        FURNITURE_CAPACITY,
-      );
-      mesh.instanceMatrix.setUsage(DynamicDrawUsage);
-      mesh.count = 0;
-      // Spread along a village and moved every frame: three's culling would
-      // test a sphere nobody keeps up to date, and four calls are all it saves.
+      this.#materials.set(surface, materials);
+      const shapes = new Map<FurnitureKind, BufferGeometry>();
+      for (const kind of FURNITURE_KINDS) {
+        if (FURNITURE_STYLE[kind].surface !== surface) continue;
+        const built = furnitureGeometry(kind, world);
+        shapes.set(kind, built.index === null ? built : built.toNonIndexed());
+        if (built.index !== null) built.dispose();
+      }
+      this.#shapes.set(surface, shapes);
+      this.#held.set(surface, []);
+      this.#inReach.set(surface, []);
+      const mesh = new Mesh(new BufferGeometry(), materials.lit);
+      // Spread along a village: a sphere about two villages' pieces culls
+      // nothing a rider would miss, and two calls are all it could save.
       mesh.frustumCulled = false;
       mesh.visible = false;
-      this.#meshes.set(kind, mesh);
+      this.#meshes.set(surface, mesh);
     }
+    for (const kind of FURNITURE_KINDS) this.#drawn.set(kind, 0);
   }
 
   addTo(scene: Scene): void {
     for (const mesh of this.#meshes.values()) scene.add(mesh);
   }
 
-  /** One kind's mesh. For the browser gate's counts and the jsdom suite. */
-  meshOf(kind: FurnitureKind): InstancedMesh {
-    return this.#meshes.get(kind) as InstancedMesh;
+  /** One surface's mesh. For the jsdom suite. */
+  meshOf(surface: FurnitureSurface): Mesh {
+    return this.#meshes.get(surface) as Mesh;
+  }
+
+  /** One piece of `kind`, in its own frame: the shape every piece of it is drawn from. */
+  shapeOf(kind: FurnitureKind): BufferGeometry {
+    return this.#shapes.get(FURNITURE_STYLE[kind].surface)?.get(kind) as BufferGeometry;
+  }
+
+  /** How many pieces of `kind` the last frame drew. @see furnitureCountsOf */
+  drawnOf(kind: FurnitureKind): number {
+    return this.#drawn.get(kind) ?? 0;
   }
 
   setShown(on: boolean): void {
@@ -9309,8 +9395,8 @@ export class FurnitureBelt {
 
   /** Shades the furniture, or stops shading it — #286. @see QualitySettings.shading */
   setShading(shading: QualitySettings['shading']): void {
-    for (const [kind, mesh] of this.#meshes) {
-      mesh.material = (this.#materials.get(kind) as { lit: Material; flat: Material })[shading];
+    for (const [surface, mesh] of this.#meshes) {
+      mesh.material = (this.#materials.get(surface) as { lit: Material; flat: Material })[shading];
     }
   }
 
@@ -9319,34 +9405,47 @@ export class FurnitureBelt {
     streets: readonly VillageStreet[],
     camera: { readonly x: number; readonly z: number },
   ): void {
-    for (const mesh of this.#meshes.values()) mesh.count = 0;
+    for (const kind of FURNITURE_KINDS) this.#drawn.set(kind, 0);
+    for (const reach of this.#inReach.values()) reach.length = 0;
     if (this.#shown && this.#switchedOn) {
       for (const street of streets) {
         for (const item of street.furniture) {
           if (Math.hypot(item.x - camera.x, item.z - camera.z) > FURNITURE_DRAW_METRES) continue;
-          const mesh = this.#meshes.get(item.kind) as InstancedMesh;
-          if (mesh.count >= FURNITURE_CAPACITY) continue;
-          this.#matrix.makeRotationY(item.rotation).setPosition(item.x, item.y, item.z);
-          mesh.setMatrixAt(mesh.count, this.#matrix);
-          mesh.count += 1;
+          const drawn = this.#drawn.get(item.kind) ?? 0;
+          if (drawn >= FURNITURE_CAPACITY) continue;
+          this.#drawn.set(item.kind, drawn + 1);
+          this.#inReach.get(FURNITURE_STYLE[item.kind].surface)?.push(item);
         }
       }
     }
-    for (const mesh of this.#meshes.values()) {
-      mesh.instanceMatrix.needsUpdate = mesh.count > 0;
-      mesh.visible = mesh.count > 0;
+    for (const [surface, mesh] of this.#meshes) {
+      const reach = this.#inReach.get(surface) as FurnitureItem[];
+      if (!sameFurniture(reach, this.#held.get(surface) as readonly FurnitureItem[])) {
+        this.#held.set(surface, [...reach]);
+        mesh.geometry.dispose();
+        mesh.geometry = furnitureSurfaceGeometry(
+          reach,
+          this.#shapes.get(surface) as ReadonlyMap<FurnitureKind, BufferGeometry>,
+        );
+      }
+      mesh.visible = this.#shown && reach.length > 0;
     }
   }
 
   dispose(): void {
-    for (const [kind, mesh] of this.#meshes) {
+    for (const [surface, mesh] of this.#meshes) {
       mesh.geometry.dispose();
-      const materials = this.#materials.get(kind);
+      for (const shape of this.#shapes.get(surface)?.values() ?? []) shape.dispose();
+      const materials = this.#materials.get(surface);
       materials?.lit.dispose();
       if (materials !== undefined && materials.flat !== materials.lit) materials.flat.dispose();
-      mesh.dispose();
     }
   }
+}
+
+/** Whether two lists hold the same pieces, by identity, in the same order. */
+function sameFurniture(first: readonly FurnitureItem[], second: readonly FurnitureItem[]): boolean {
+  return first.length === second.length && first.every((item, index) => item === second[index]);
 }
 
 /**
@@ -16926,7 +17025,7 @@ export function sideRoadMeshOf(
 /**
  * Turns a view's street furniture off, or on again — #1536. The browser
  * gate's control: with it off, the frame must change by the pixels the
- * furniture covered, and lose one draw call a kind.
+ * furniture covered, and lose one draw call a surface (#1689).
  *
  * @test-facing the browser gate's control switch, read by `game-harness.ts`;
  * the product always draws it.
@@ -16946,10 +17045,7 @@ export function furnitureShownOf(view: GameView, on: boolean): void {
 export function furnitureCountsOf(view: GameView): Readonly<Record<FurnitureKind, number>> {
   const belt = view instanceof ThreeGameView ? view.furnitureBelt : undefined;
   const counts = {} as Record<FurnitureKind, number>;
-  for (const kind of FURNITURE_KINDS) {
-    const mesh = belt?.meshOf(kind);
-    counts[kind] = mesh?.visible === true ? mesh.count : 0;
-  }
+  for (const kind of FURNITURE_KINDS) counts[kind] = belt?.drawnOf(kind) ?? 0;
   return counts;
 }
 
