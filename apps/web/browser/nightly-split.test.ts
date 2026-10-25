@@ -430,9 +430,10 @@ describe('the browser gate is split into a required run and a nightly one — #8
     // ⚠️ 16 s since #1648, which added a third build (the demo, 0.55 s by its
     // own count and 0.75 s between the lines either side of it) and a third
     // web server: from the last build to Playwright's first line took 8.4 to
-    // 8.7 s on #1648's runs 40204135405 and 40207767424, against 7.2 to 7.4 s
-    // on `main` (40200968492, 40199437881). That is about 2 s more, and the
-    // wrapper now holds both stops with 4 s to spare.
+    // 8.7 s on an EPYC 7763 (#1648's runs 40204135405 and 40207767424) against
+    // 7.2 s on `main` (40200968492), and 6.3 s on a 9V45 (40209448380) against
+    // 5.4 s (40199437881). That is about 2 s more, and the wrapper now holds
+    // both stops with 4 s to spare.
     const BUILDS_MS = 16_000;
     expect(CHROMIUM_PART_MS + GAME_PART_MS + BUILDS_MS).toBeLessThanOrEqual(GATE_STEP_MS);
   });
