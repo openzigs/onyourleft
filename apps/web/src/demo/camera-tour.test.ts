@@ -50,13 +50,18 @@ interface Shot {
   readonly frame: SceneFrame;
 }
 
-/** Ride `player` at 20 Hz for `forSeconds`, keeping every frame it would draw. */
-function film(player: DemoPlayer, forSeconds: number): Shot[] {
+/**
+ * Ride `player` at 20 Hz for `forSeconds`, keeping every frame it would draw,
+ * or, given `only`, every frame of those shots: the ride still advances at
+ * 20 Hz, but a frame nobody reads is never built.
+ */
+function film(player: DemoPlayer, forSeconds: number, only?: ReadonlySet<ShotKind>): Shot[] {
   player.play();
   const shots: Shot[] = [];
   for (let ms = 0; ms <= forSeconds * 1000; ms += FRAME_MS) {
     player.advance(ms);
     const placed = shotAt(player.tour, player.rideMs / 1000);
+    if (only !== undefined && !only.has(placed.shot.kind)) continue;
     shots.push({
       seconds: player.rideMs / 1000,
       kind: placed.shot.kind,
@@ -96,6 +101,9 @@ const filmOf = (preset: DemoPreset) => {
   if (found === undefined) throw new Error(`no film of ${preset.id}`);
   return found;
 };
+
+/** The shots the reduced-motion test reads frames of. */
+const CHECKED_UNDER_REDUCED_MOTION: ReadonlySet<ShotKind> = new Set(['overhead', 'roadside']);
 
 describe('the demo camera tour — #1649', () => {
   it('every preset tour opens behind the rider, has all three shots, and blends for at most 1.5 s', () => {
@@ -327,7 +335,12 @@ describe('the demo camera tour — #1649', () => {
       for (const preset of DEMO_PRESETS) {
         const player = createDemoPlayer(preset, { reducedMotion: true });
         expect(player.tour.shots.map((shot) => shot.into)).not.toContain('blend');
-        const shots = film(player, 2 * lapSeconds(player.tour));
+        // One lap holds every shot of the tour, and only the overhead and
+        // roadside frames are read: #1716's coverage run took 46 s filming two
+        // laps of every frame of every preset.
+        const shots = film(player, lapSeconds(player.tour), CHECKED_UNDER_REDUCED_MOTION);
+        expect(shots.some((shot) => shot.kind === 'overhead')).toBe(true);
+        expect(shots.some((shot) => shot.kind === 'roadside')).toBe(true);
         for (const shot of shots) {
           if (shot.kind !== 'overhead') continue;
           // From its first frame, overhead is overhead: the rider is centred.
