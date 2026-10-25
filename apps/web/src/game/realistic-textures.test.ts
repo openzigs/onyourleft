@@ -34,14 +34,28 @@ import { fileURLToPath } from 'node:url';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { metres } from '@onyourleft/domain';
 import { KIT_COLOURS } from '@onyourleft/store';
 
 import { TRANSCODER_FILES, transcoderSource } from '../../tools/basis/transcoder-plugin';
 
 import { KIT_PALETTE, PACER_KIT, type RiderKit } from './bicycle';
 import { WOOD_SWAY_SHARE } from './foliage-light';
+import { footprintPlans, minimumAreaRectangle } from './footprint-buildings';
+import { mixedTownFixture } from './footprint-fixtures-testing';
+import { GROUND_BLOB_LIFT_METRES } from './ground-blob';
+import { landClassMask } from './land-class';
+import { mappedBuildingsOf } from './mapped-buildings';
+import { REALISTIC_LADDER } from './quality';
+import { sceneFrame } from './scene';
+import { atStartLine } from './simulation';
+import type { SunStyle } from './world';
 import { FOLIAGE_TINT, packedInstanceTint } from './instance-tint';
-import { REALISTIC_REMOTE_RIDERS, REALISTIC_TREE_LEVELS } from './realistic-budget';
+import {
+  REALISTIC_REMOTE_RIDERS,
+  REALISTIC_STRUCTURE_ITEMS,
+  REALISTIC_TREE_LEVELS,
+} from './realistic-budget';
 import { treeSlots } from './tree-levels';
 import {
   albedoBytes,
@@ -1490,6 +1504,101 @@ describe('the generated trees, loaded and drawn through the product’s own path
     for (const { full, prepass } of prepasses) {
       expect(full.renderOrder).toBe(0);
       expect(prepass.renderOrder).toBeLessThan(0);
+    }
+  }, 120_000);
+});
+
+describe('the mapped buildings’ blobs, through the drawing a view builds — #1657', () => {
+  /** A sun straight overhead: no throw, so a blob's middle is its caster's. */
+  const OVERHEAD: SunStyle = { x: 0, y: 1, z: 0, ambient: 0.4, direct: 0.6 };
+
+  it('grounds the drawn mapped buildings in `groundScenery`, after the procedural blobs, and none with the lever off', async () => {
+    // `RealisticDrawing.groundScenery` itself, not a copy of its steps
+    // (`mapped-blobs.test.ts` runs the belts): the drawing a view builds from
+    // the loaded world, handed #1581's mixed town as a ride's frame is, in the
+    // order `ThreeGameView.render` calls it. Read back off the blob belt's own
+    // mesh, which is what the GPU is handed.
+    const renderer = await loadedOn(TABLET);
+    const drawing = renderer.realisticDrawingOfLoadedWorld();
+    if (drawing === undefined) throw new Error('no realistic world is loaded');
+    try {
+      const rung = REALISTIC_LADDER[0];
+      if (rung === undefined) throw new Error('no realistic rung');
+      drawing.setBudget(rung.scatterItems + rung.structureItems, rung.structureItems);
+      const mixed = mixedTownFixture();
+      const land = landClassMask(mixed.corridor);
+      const buildings = mappedBuildingsOf(
+        footprintPlans(mixed.corridor, land, mixed.profile, mixed.origin).plans,
+      );
+      const start = atStartLine(mixed.profile);
+      const frame = sceneFrame({
+        profile: mixed.profile,
+        origin: mixed.origin,
+        state: { ...start, ride: { ...start.ride, distance: metres(1_300) } },
+        worldCorridor: mixed.corridor,
+        landClass: land,
+        mappedBuildings: buildings,
+        structureItems: REALISTIC_STRUCTURE_ITEMS,
+      });
+      const draw = (): { count: number; matrices: number[] } => {
+        drawing.updateMapped(frame.mappedBuildings, frame.scatter, frame.billboards.length);
+        drawing.updateScenery(frame.scatter, frame.camera);
+        drawing.groundScenery(
+          frame.scatter,
+          frame.camera,
+          frame.corridor,
+          frame.terrain.mesh,
+          OVERHEAD,
+        );
+        const mesh = drawing.grounding.mesh;
+        return { count: mesh.count, matrices: Array.from(mesh.instanceMatrix.array) };
+      };
+
+      const grounded = draw();
+      const mapped = drawing.mapped;
+      if (mapped === undefined) throw new Error('the frame carried no mapped buildings');
+      // Non-vacuity: the town is drawn, and some procedural scenery is grounded too.
+      expect(mapped.stats.buildings).toBeGreaterThan(0);
+      drawing.mappedBlobsShown(false);
+      const off = draw();
+      expect(off.count).toBeGreaterThan(0);
+
+      // One blob a drawn mapped building on the ground the frame built, after
+      // the procedural ones. That ground starts at the corridor's first row,
+      // behind the rider: a blob whose middle is behind it has nothing to lie
+      // on (`GroundBlobBelt.update`'s rule, #620's), and none is drawn.
+      const [first, second] = frame.corridor.centre;
+      if (first === undefined || second === undefined) throw new Error('the frame has no road');
+      const middles: { x: number; z: number }[] = [];
+      for (let place = 0; ; place += 1) {
+        const drawn = mapped.drawnAt(place);
+        if (drawn === undefined) break;
+        const rectangle = minimumAreaRectangle(buildings.plans[drawn.plan]!.footprint);
+        const ahead =
+          (rectangle.cx - first.x) * (second.x - first.x) +
+          (rectangle.cz - first.z) * (second.z - first.z);
+        if (ahead > 0) middles.push({ x: rectangle.cx, z: rectangle.cz });
+      }
+      expect(middles.length).toBeGreaterThan(mapped.stats.buildings / 2);
+      expect(grounded.count - off.count).toBe(middles.length);
+      // The procedural blobs keep their slots: the first `off.count` are the same.
+      expect(grounded.matrices.slice(0, off.count * 16)).toEqual(
+        off.matrices.slice(0, off.count * 16),
+      );
+      // And each added blob is its building's, at its footprint's rectangle.
+      middles.forEach((middle, place) => {
+        const m = (at: number): number => grounded.matrices[(off.count + place) * 16 + at]!;
+        // The middle is lifted along the ground's normal (column 1).
+        const x = m(12) - m(4) * GROUND_BLOB_LIFT_METRES;
+        const z = m(14) - m(6) * GROUND_BLOB_LIFT_METRES;
+        expect(Math.hypot(x - middle.x, z - middle.z)).toBeLessThan(0.01);
+      });
+
+      // Shown again, the same frame grounds them again.
+      drawing.mappedBlobsShown(true);
+      expect(draw().count).toBe(grounded.count);
+    } finally {
+      drawing.dispose();
     }
   }, 120_000);
 });

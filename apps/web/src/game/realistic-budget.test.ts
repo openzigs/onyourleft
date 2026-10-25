@@ -566,18 +566,24 @@ describe('the set as a whole inside the budget — ADR 0026 D-6', () => {
     }
   });
 
-  it('counts a ground blob under every mesh and structure a frame can draw, inside #620’s 124 — #620', () => {
+  it('counts a ground blob under every mesh, structure and mapped building a frame can draw, inside 196 — #620, #1657', () => {
     const { blobs, structureItems } = worstFrame();
     // Every tree at the full or middle level, the band between them, every
-    // shrub and rock mesh, and every structure the richest realistic rung
-    // carries: the belt's capacity, and so the most a frame can submit.
+    // shrub and rock mesh, every structure the richest realistic rung
+    // carries, and since #1657 every mapped building the belt draws: the
+    // belt's capacity, and so the most a frame can submit.
     const trees = REALISTIC_TREE_LEVELS.near + REALISTIC_TREE_LEVELS.middle + 1;
     expect(REALISTIC_GROUND_BLOBS).toBe(
-      trees + REALISTIC_NEAR_MESHES.shrub + REALISTIC_NEAR_MESHES.rock + structureItems,
+      trees +
+        REALISTIC_NEAR_MESHES.shrub +
+        REALISTIC_NEAR_MESHES.rock +
+        structureItems +
+        MAPPED_BUILDING_MAX,
     );
-    expect(REALISTIC_GROUND_BLOBS).toBe(62);
+    // #620's 62, raised by the town's 36 (the owner's ruling (d) on #1657) and no more.
+    expect(REALISTIC_GROUND_BLOBS).toBe(62 + 36);
     expect(GROUND_BLOB_TRIANGLES).toBe(2);
-    expect(blobs).toBeLessThanOrEqual(124);
+    expect(blobs).toBe(124 + 72);
     console.log(
       `#620: ${String(REALISTIC_GROUND_BLOBS)} ground blobs at most, ${String(blobs)} triangles`,
     );

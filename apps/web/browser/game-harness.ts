@@ -73,6 +73,7 @@ import type { KitColour } from '@onyourleft/store';
 
 import {
   CAMERA_ABOVE_METRES,
+  CAMERA_BEHIND_METRES,
   NEAR_PLANE_METRES,
   cameraRig,
   verticalHalfTangent,
@@ -123,13 +124,24 @@ import {
 } from '../src/game/streets';
 import { waterways } from '../src/game/waterways';
 import { landClassMask, NO_LAND_CLASS } from '../src/game/land-class';
-import { SASH, SASH_TOP_SHARE, WINDOW_IN_BAY, WINDOW_SILL_METRES } from '../src/game/facade';
+import {
+  COMMERCIAL_WINDOW_IN_BAY,
+  REVEAL_DEPTH_METRES,
+  REVEAL_GRAZE,
+  SASH,
+  SASH_TOP_SHARE,
+  WINDOW_IN_BAY,
+  WINDOW_SILL_METRES,
+} from '../src/game/facade';
 import {
   FACADE_OFFSET,
   FOOTPRINT_VERTEX_FLOATS,
   footprintPlans,
   mappedTown,
   STOREY_METRES,
+  STYLE_COMMERCIAL,
+  STYLE_OFFSET,
+  STYLE_SASH,
   type FootprintPlan,
 } from '../src/game/footprint-buildings';
 import {
@@ -231,7 +243,9 @@ import {
   waterFresnelOf,
   waterReflectsOf,
   remoteRiderControlOf,
+  windowRevealsOf,
 } from '../src/game/three-renderer';
+import { parseConfig, windowRevealsWithLevers } from './realistic/config';
 import { MAXIMUM_DRAWN_SET } from '../src/net/interest';
 import { bannerPlace, standPoint } from '../src/game/gantry';
 import { billboardsAt } from '../src/game/billboards';
@@ -3765,6 +3779,259 @@ function mappedFacadeProbe(
   }
 }
 
+/** What {@link windowRevealProbe} publishes — #1659. */
+interface WindowRevealMeasurement {
+  /** Whether a mapped casement was found in the frame, seen from the side, to aim at. */
+  readonly aimed: boolean;
+  /** Whether it is #1590's commercial window — #1581's casement laid out taller — rather than #1581's. */
+  readonly commercial: boolean;
+  /** How far the camera is from the window, and how far off square it is seen, in degrees. */
+  readonly metres: number;
+  readonly slantDegrees: number;
+  /** The strip inside the far jamb the slant uncovers: its width predicted in metres, and on screen. */
+  readonly stripMetres: number;
+  readonly stripPixels: number;
+  /** The strip, and the glass beside it, with the reveals built. */
+  readonly jamb: readonly number[];
+  readonly glass: readonly number[];
+  /** The same two places with `-window-reveals`: both glass, the control. */
+  readonly jambOff: readonly number[];
+  readonly glassOff: readonly number[];
+}
+
+/** How far {@link windowRevealProbe}'s camera is from the window it is aimed at: **4 m**. */
+const REVEAL_PROBE_METRES = 4;
+
+const NO_WINDOW_REVEAL: WindowRevealMeasurement = {
+  aimed: false,
+  commercial: false,
+  metres: 0,
+  slantDegrees: 0,
+  stripMetres: 0,
+  stripPixels: 0,
+  jamb: [],
+  glass: [],
+  jambOff: [],
+  glassOff: [],
+};
+
+/**
+ * #1659: a mapped casement's jamb shows its reveal, seen from the side.
+ * #1581's mixed town (`?town=mixed`'s): of the casements on a wall that faces
+ * the road, 8 to 40 m from the rider somewhere from 1 000 m along it, the
+ * nearest, and an oblique camera aimed at it — {@link REVEAL_PROBE_METRES}
+ * from the window and 45° off square to its −u side, at the pane's height —
+ * so that the strip the slant uncovers inside its +u jamb,
+ * `REVEAL_DEPTH_METRES` along the slant wide (`facade.ts` §`revealOf`), is
+ * several pixels across. ⚠️ The rider's own camera never comes near enough:
+ * from the road the strip was 2.1 px at best. ⚠️ The mixed town's walls are
+ * all sash or commercial (880 window walls, none #1581's plain casement,
+ * counted 2026-10-24), so a commercial window — #1581's casement laid out
+ * taller, drawn by the same branch of the shader — is aimed at where no plain
+ * one is, above the shop front on its ground storey, and the measurement says
+ * which. The glass beside the strip is half-way from it to the mullion, in
+ * the lower pane. Read with the reveals built, and with them taken out as the
+ * owner's `&levers=-window-reveals` takes them (`windowRevealsOf`): the
+ * control, in which both places are the same glass.
+ */
+function windowRevealProbe(
+  view: ReturnType<typeof threeGameRenderer.create>,
+  gl: WebGL2RenderingContext,
+  canvas: HTMLCanvasElement,
+): WindowRevealMeasurement {
+  const town = mixedTownFixture();
+  const { profile, origin, corridor } = town;
+  const land = landClassMask(corridor);
+  const plans = footprintPlans(corridor, land, profile, origin).plans;
+  const mappedBuildings = mappedBuildingsOf(plans);
+  const stride = FOOTPRINT_VERTEX_FLOATS;
+  type Point3 = { readonly x: number; readonly y: number; readonly z: number };
+  interface Casement {
+    readonly a: Point3;
+    readonly ux: number;
+    readonly uz: number;
+    readonly nx: number;
+    readonly nz: number;
+    readonly bay: number;
+    readonly k: number;
+    readonly floor: number;
+    readonly storey: number;
+    readonly commercial: boolean;
+  }
+  // Every casement on a wall: its wall's bottom corner, along and out, its bay and storey's floor.
+  const casements: Casement[] = [];
+  for (const plan of plans) {
+    const walls = plan.triangles.wall;
+    for (let at = 0; at + 6 * stride <= walls.length; at += 6 * stride) {
+      const f = (vertex: number, k: number): number => walls[at + vertex * stride + k] as number;
+      const top = f(0, FACADE_OFFSET + 2);
+      const skip = f(0, FACADE_OFFSET + 3);
+      const flags = f(0, STYLE_OFFSET + 1);
+      if (!(top > 0) || (flags & STYLE_SASH) !== 0) continue;
+      const commercial = (flags & STYLE_COMMERCIAL) !== 0;
+      const laid = commercial ? COMMERCIAL_WINDOW_IN_BAY : WINDOW_IN_BAY;
+      let a: Point3 | undefined;
+      let b: Point3 | undefined;
+      let bays = 0;
+      let floor = Number.POSITIVE_INFINITY;
+      for (let vertex = 0; vertex < 6; vertex += 1) floor = Math.min(floor, f(vertex, 1));
+      for (let vertex = 0; vertex < 6; vertex += 1) {
+        if (f(vertex, 1) !== floor) continue;
+        const point = { x: f(vertex, 0), y: floor, z: f(vertex, 2) };
+        if (f(vertex, FACADE_OFFSET) === 0) a = point;
+        else {
+          b = point;
+          bays = f(vertex, FACADE_OFFSET);
+        }
+      }
+      if (a === undefined || b === undefined || bays < 1) continue;
+      const length = Math.hypot(b.x - a.x, b.z - a.z);
+      for (let storey = 0; storey + laid.top <= top; storey += 1) {
+        for (let k = 0; k < bays; k += 1) {
+          if (storey === 0 && k === skip) continue;
+          casements.push({
+            a,
+            ux: (b.x - a.x) / length,
+            uz: (b.z - a.z) / length,
+            nx: f(0, 3),
+            nz: f(0, 5),
+            bay: length / bays,
+            k,
+            floor: floor + storey * STOREY_METRES,
+            storey,
+            commercial,
+          });
+        }
+      }
+    }
+  }
+  // The nearest casement facing the road, from 1 000 m on; a commercial one above its shop front.
+  const start = atStartLine(profile);
+  let chosen: { readonly along: number; readonly casement: Casement } | undefined;
+  for (let along = 1_000; along <= 2_000 && chosen === undefined; along += 50) {
+    const road = drawnRoadFrame(profile, origin, along);
+    if (road === undefined) continue;
+    let nearest = Number.POSITIVE_INFINITY;
+    for (const c of casements) {
+      if (c.commercial && c.storey === 0) continue;
+      const mx = c.a.x + c.ux * (c.k + 0.5) * c.bay;
+      const mz = c.a.z + c.uz * (c.k + 0.5) * c.bay;
+      const distance = Math.hypot(road.x - mx, road.z - mz);
+      const facing = ((road.x - mx) * c.nx + (road.z - mz) * c.nz) / distance;
+      if (distance < 8 || distance > 40 || facing < 0.5) continue;
+      // A plain casement before a commercial one.
+      const rank = distance + (c.commercial ? 1_000 : 0);
+      if (rank < nearest) {
+        nearest = rank;
+        chosen = { along, casement: c };
+      }
+    }
+  }
+  if (chosen === undefined) return NO_WINDOW_REVEAL;
+  const c = chosen.casement;
+  const w = c.commercial ? COMMERCIAL_WINDOW_IN_BAY : WINDOW_IN_BAY;
+  // The lower pane's middle, between its frame and the transom.
+  const paneUp = ((w.bottom + w.frameUp + w.transom) / 2) * STOREY_METRES;
+  // A point `m` metres along the wall from its corner and `up` above the storey's floor, a little proud.
+  const on = (m: number, up: number): Point3 => ({
+    x: c.a.x + c.ux * m + c.nx * 0.01,
+    y: c.floor + up,
+    z: c.a.z + c.uz * m + c.nz * 0.01,
+  });
+  const middle = on((c.k + 0.5) * c.bay, paneUp);
+  // The eye: out from the wall and toward −u, 45° off square; the camera level, aimed at the window.
+  const out = REVEAL_PROBE_METRES * Math.SQRT1_2;
+  const eye = {
+    x: middle.x + c.nx * out - c.ux * out,
+    y: middle.y,
+    z: middle.z + c.nz * out - c.uz * out,
+  };
+  const headingX = (c.ux - c.nx) * Math.SQRT1_2;
+  const headingZ = (c.uz - c.nz) * Math.SQRT1_2;
+  const base = sceneFrame({
+    profile,
+    origin,
+    state: { ...start, ride: { ...start.ride, distance: metres(chosen.along) } },
+    worldCorridor: corridor,
+    landClass: land,
+    mappedBuildings,
+    structureItems: REALISTIC_STRUCTURE_ITEMS,
+  });
+  const frame: SceneFrame = {
+    ...base,
+    scatter: [],
+    markers: [],
+    camera: {
+      ...base.camera,
+      x: eye.x + headingX * CAMERA_BEHIND_METRES,
+      z: eye.z + headingZ * CAMERA_BEHIND_METRES,
+      headingX,
+      headingZ,
+      eyeRoadY: eye.y - CAMERA_ABOVE_METRES,
+      targetRoadY: eye.y,
+    },
+  };
+  // The slant the shader reads, and the strip it uncovers inside the +u jamb.
+  const to = { x: eye.x - middle.x, z: eye.z - middle.z };
+  const distance = Math.hypot(to.x, to.z);
+  const ex = (to.x * c.ux + to.z * c.uz) / distance;
+  const ez = (to.x * c.nx + to.z * c.nz) / distance;
+  const strip = (REVEAL_DEPTH_METRES * Math.abs(ex)) / Math.max(ez, REVEAL_GRAZE);
+  const jambAt = (c.k + w.right - w.frameAcross) * c.bay;
+  const mullion = (c.k + 0.5 + w.barAcross) * c.bay;
+  const stripInner = jambAt - strip;
+  const p0 = pixelFor(frame, canvas, on(jambAt, paneUp));
+  const p1 = pixelFor(frame, canvas, on(stripInner, paneUp));
+  const aim = {
+    commercial: c.commercial,
+    frame,
+    jamb: on(jambAt - strip / 2, paneUp),
+    glass: on((stripInner + mullion) / 2, paneUp),
+    metres: distance,
+    slantDegrees: (Math.atan2(Math.abs(ex), ez) * 180) / Math.PI,
+    stripMetres: strip,
+    stripPixels: Math.hypot(p1.x - p0.x, p1.y - p0.y),
+  };
+
+  const meanAt = (point: Point3): number[] => {
+    const centre = pixelFor(aim.frame, canvas, point);
+    // A column of three: the strip is a few pixels wide, and as tall as the pane.
+    const pixels = readRegion(gl, Math.round(centre.x), Math.round(centre.y) - 1, 1, 3);
+    const sums = [0, 0, 0];
+    for (let at = 0; at < pixels.length; at += 4) {
+      for (let channel = 0; channel < 3; channel += 1) {
+        sums[channel] = (sums[channel] ?? 0) + (pixels[at + channel] ?? 0);
+      }
+    }
+    return sums.map((sum) => sum / 3);
+  };
+  const bare = aim.frame;
+  view.render(bare);
+  view.render(bare);
+  const jamb = meanAt(aim.jamb);
+  const glass = meanAt(aim.glass);
+  // The owner's lever, read as the page reads it.
+  windowRevealsOf(view, windowRevealsWithLevers(parseConfig('?levers=-window-reveals').leversOff));
+  try {
+    view.render(bare);
+    view.render(bare);
+    return {
+      aimed: true,
+      commercial: aim.commercial,
+      metres: aim.metres,
+      slantDegrees: aim.slantDegrees,
+      stripMetres: aim.stripMetres,
+      stripPixels: aim.stripPixels,
+      jamb,
+      glass,
+      jambOff: meanAt(aim.jamb),
+      glassOff: meanAt(aim.glass),
+    };
+  } finally {
+    windowRevealsOf(view, true);
+  }
+}
+
 /** What {@link townEdgeProbe} publishes — #1586. */
 interface TownEdgeMeasurement {
   /** The procedural structures and billboards in the frame: the issue's frame fills the cap with them. */
@@ -6285,6 +6552,8 @@ export interface RealisticMeasurement {
   readonly mappedTown: MappedTownMeasurement;
   /** #1581: a mapped house's window, with its facade and without. @see mappedFacadeProbe */
   readonly mappedFacade: MappedFacadeMeasurement;
+  /** #1659: a mapped casement's jamb from the side, with its reveal and without. @see windowRevealProbe */
+  readonly windowReveal: WindowRevealMeasurement;
   /** #1586: a mapped town's edge, with fields beyond filling the structure cap. @see townEdgeProbe */
   readonly townEdge: TownEdgeMeasurement;
   /** #1550: procedural lots in a mapped town with no footprints. @see lotsProbe */
@@ -8406,6 +8675,7 @@ const NO_REALISTIC: RealisticMeasurement = {
   levelling: NO_LEVELLING,
   mappedTown: NO_MAPPED_TOWN,
   mappedFacade: NO_MAPPED_FACADE,
+  windowReveal: NO_WINDOW_REVEAL,
   townEdge: NO_TOWN_EDGE,
   lots: NO_LOTS,
   tint: {
@@ -9972,6 +10242,10 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
   const mappedFacade = mappedFacadeProbe(view, gl, canvas);
   phaseEnds('realistic: a mapped house’s windows — #1581');
 
+  // #1659, on the same view: a mapped casement's jamb from the side, with its reveal and without.
+  const windowReveal = windowRevealProbe(view, gl, canvas);
+  phaseEnds('realistic: a mapped window’s reveal — #1659');
+
   // #1586, on the same view: a town's edge, the fields beyond it filling the structure cap.
   const townEdge = townEdgeProbe(view);
   phaseEnds('realistic: a town’s edge — #1586');
@@ -10223,6 +10497,7 @@ async function realisticProbe(): Promise<RealisticMeasurement> {
     levelling,
     mappedTown,
     mappedFacade,
+    windowReveal,
     townEdge,
     lots,
     tint,

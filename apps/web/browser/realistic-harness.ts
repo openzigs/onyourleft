@@ -76,10 +76,12 @@ import {
   groundBlendOf,
   loadRealisticWorld,
   loadSceneryModels,
+  mappedBlobsShownOf,
   realisticSurfacesOf,
   realisticTextureReport,
   setRealisticTrees,
   threeGameRenderer,
+  windowRevealsOf,
 } from '../src/game/three-renderer';
 import {
   configQuery,
@@ -90,6 +92,7 @@ import {
   firPrepassWithLevers,
   surfacesWithLevers,
   treesWithLevers,
+  windowRevealsWithLevers,
   countrysideWithLevers,
   type Layer,
   type Lever,
@@ -402,6 +405,9 @@ async function run(): Promise<void> {
   // setting of the view's, so it survives a rung change; and set BEFORE the
   // crag below, because a ground rebuilt with its blend starts at every share.
   realisticSurfacesOf(view, surfacesWithLevers(config.leversOff));
+  // #1659's cost pair: the mapped windows without their reveals, the term out
+  // of the facade's program. A setting of the module's, read at every compile.
+  windowRevealsOf(view, windowRevealsWithLevers(config.leversOff));
   // #1274's by-eye pair: a steep bank in ambientCG's rock face, or — the crag
   // off — in the scree's photograph, as it was. The ground's material is built
   // with the realistic belts, so this too is applied again after a rung change.
@@ -411,6 +417,9 @@ async function run(): Promise<void> {
   // before #622. A setting of the view's, so it survives a rung change.
   const airOn = !config.leversOff.includes('air');
   atmosphereOf(view, { table: airOn ? 'directional' : 'flattened', valley: airOn });
+  // #1657's cost and by-eye pair: the mapped buildings grounded, or as they
+  // were before it. A setting of the view's, so it survives a rung change.
+  mappedBlobsShownOf(view, !config.leversOff.includes('mapped-blobs'));
   const resize = (): void => view.resize(canvas.clientWidth, canvas.clientHeight);
   resize();
   addEventListener('resize', resize);

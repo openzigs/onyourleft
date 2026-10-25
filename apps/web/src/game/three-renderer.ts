@@ -278,6 +278,8 @@ import {
   PICTURE,
   RAILING,
   REVEAL,
+  REVEAL_DEPTH_METRES,
+  REVEAL_GRAZE,
   SASH,
   SASH_TOP_SHARE,
   SHINGLE,
@@ -311,6 +313,7 @@ import {
   FOOTPRINT_SURFACES,
   FOOTPRINT_VERTEX_FLOATS,
   GARAGE,
+  minimumAreaRectangle,
   ROOF_ROLES,
   SHINGLE_COURSE_METRES,
   STOREY_METRES,
@@ -412,6 +415,7 @@ import {
   groundUnderBlob,
   placeGroundBlob,
   roadClip,
+  type BlobCaster,
   type BlobCasters,
   type GroundBlob,
   type GroundPoint,
@@ -540,6 +544,7 @@ import {
 } from './road-wear';
 import {
   MAPPED_BUILDING_DRAW_CALLS,
+  MAPPED_BUILDING_MAX,
   MAPPED_BUILDING_TRIANGLES,
   REALISTIC_GROUND_BLOBS,
   REALISTIC_NEAR_MESHES,
@@ -13612,6 +13617,52 @@ export function drawsFacade(material: Material): boolean {
   return FACADE_TAUGHT.has(material);
 }
 
+/**
+ * Whether the facade's program is built with #1659's window reveals: always,
+ * in the product. @see windowRevealsOf
+ */
+let windowRevealsBuilt = true;
+
+/**
+ * The define a facade material carries for {@link windowRevealsBuilt} — 1
+ * built, 0 not — read by its `onBeforeCompile`. ⚠️ **A define, not the cache
+ * key**: `withAtmosphere`, spliced after the facade, captures the key it
+ * wraps as a string when the material is made, so a key that changed later
+ * never reached three and the program was never compiled again (the browser
+ * gate's control read the same pixels both ways). Three keys every program on
+ * its material's defines as they are at compile time.
+ */
+const WINDOW_REVEALS_DEFINE = 'OYL_WINDOW_REVEALS';
+
+/** Whether `material` is built with #1659's window reveals, by its define. */
+function revealsBuiltIn(material: Material): boolean {
+  return (material as { defines?: Record<string, unknown> }).defines?.[WINDOW_REVEALS_DEFINE] !== 0;
+}
+
+/** Sets `material`'s {@link WINDOW_REVEALS_DEFINE} to {@link windowRevealsBuilt}. */
+function defineWindowReveals(material: Material): void {
+  const carrier = material as { defines?: Record<string, unknown> };
+  carrier.defines = { ...carrier.defines, [WINDOW_REVEALS_DEFINE]: windowRevealsBuilt ? 1 : 0 };
+}
+
+/**
+ * Builds every mapped building's facade with #1659's window reveals, or —
+ * `on` false — without them: the term's two functions built empty
+ * (`revealGlsl`), so that the program holds none of it, as `road-wear`'s
+ * lever takes its code out rather than a uniform to zero. A setting of the
+ * module's, as the facade's uniforms are, taken by every facade material
+ * made after it; the materials already in `view`'s scene take it too, and
+ * are compiled again.
+ *
+ * @test-facing the owner's page's `-window-reveals` lever
+ * (`realistic-harness.ts`) and the browser gate's read of it
+ * (`game-harness.ts` §`windowRevealProbe`); the product always builds them
+ */
+export function windowRevealsOf(view: GameView, on: boolean): void {
+  windowRevealsBuilt = on;
+  if (view instanceof ThreeGameView) view.facadesRecompiled();
+}
+
 /** `facade.ts`' layout, as the GLSL constants {@link FACADE_FRAGMENT_GLSL} reads. */
 const FACADE_CONSTANTS_GLSL = /* glsl */ `
   const float oylWinL = ${glslFloat(WINDOW_IN_BAY.left)};
@@ -13644,9 +13695,9 @@ const FACADE_CONSTANTS_GLSL = /* glsl */ `
   const float oylShutterGap = ${glslFloat(SHUTTER.gap)};
   const float oylLouvre = ${glslFloat(SHUTTER.louvre)};
   const float oylShutterMargin = ${glslFloat(SHUTTER.margin)};
-  const float oylRevealHead = ${glslFloat(REVEAL.head)};
-  const float oylRevealJamb = ${glslFloat(REVEAL.jamb)};
   const float oylRevealShade = ${glslFloat(REVEAL.shade)};
+  const float oylRecess = ${glslFloat(REVEAL_DEPTH_METRES)};
+  const float oylGraze = ${glslFloat(REVEAL_GRAZE)};
   const float oylSillOver = ${glslFloat(SILL.overrun)};
   const float oylSillDepth = ${glslFloat(SILL.depth)};
   const float oylDormerW = ${glslFloat(DORMER_SASH.width)};
@@ -13781,51 +13832,120 @@ const CLADDING_HELPERS_GLSL = /* glsl */ `
   }
 `;
 
-/** {@link CLADDING_HELPERS_GLSL}, a mapped building's varyings, and its sash window. */
-const FACADE_COMMON_GLSL = /* glsl */ `
+/**
+ * #1659's reveal, in GLSL — `facade.ts` §`revealOf` and its sill's shadow,
+ * from the same numbers. `p` is a point of an opening `lo` to `hi`, metres on
+ * the face; `e` and `s` the eye and the sun in the face's frame
+ * ({@link FACADE_FRAGMENT_GLSL}'s `oylFaceU`, `oylFaceUp`, `oylFaceN`). Out:
+ * `q`, the glass seen through `p`; `seen`, how much of `p` shows glass rather
+ * than the opening's side; `lit`, whether that side faces the sun; `shade`,
+ * the glass at `q` in the shadow of the head and the sun-side jamb.
+ *
+ * With `window-reveals` off (`realistic/config.ts` §`LEVERS`) the same two
+ * functions are built empty, so the program holds none of the term and every
+ * window kind is drawn flat, as a decal: the cost pair's "before".
+ */
+function revealGlsl(built: boolean): string {
+  if (!built) {
+    return /* glsl */ `
+  void oylRevealOf(
+    vec2 p, vec2 lo, vec2 hi, vec2 pw, vec3 e, vec3 s,
+    out vec2 q, out float seen, out float lit, out float shade
+  ) {
+    q = p;
+    seen = 1.0;
+    lit = 1.0;
+    shade = 0.0;
+  }
+  float oylSillShadeOf(vec2 p, vec2 lo, vec2 hi, vec2 pw, vec3 s) {
+    return 0.0;
+  }
+`;
+  }
+  return /* glsl */ `
+  void oylRevealOf(
+    vec2 p, vec2 lo, vec2 hi, vec2 pw, vec3 e, vec3 s,
+    out vec2 q, out float seen, out float lit, out float shade
+  ) {
+    vec2 oylShift = oylRecess * e.xy / max(e.z, oylGraze);
+    q = p - oylShift;
+    seen = oylRect(q, lo, hi, pw);
+    // The side the eye's ray met first: the axis it left the opening by at the shallower depth.
+    vec2 oylBeyond = max(max(lo - q, q - hi), vec2(0.0)) / max(abs(oylShift), vec2(0.00001));
+    float oylJambSide = step(oylBeyond.y, oylBeyond.x);
+    float oylFacing = mix(sign(oylShift.y) * s.y, sign(oylShift.x) * s.x, oylJambSide);
+    float oylFront = step(0.0001, s.z);
+    lit = step(0.0001, oylFacing) * oylFront;
+    vec2 oylCast = oylRecess * vec2(abs(s.x), max(s.y, 0.0)) / max(s.z, 0.001);
+    float oylUnderHead = smoothstep(hi.y - oylCast.y - pw.y, hi.y - oylCast.y + pw.y, q.y);
+    float oylByJamb = s.x > 0.0
+      ? smoothstep(hi.x - oylCast.x - pw.x, hi.x - oylCast.x + pw.x, q.x)
+      : (s.x < 0.0 ? 1.0 - smoothstep(lo.x + oylCast.x - pw.x, lo.x + oylCast.x + pw.x, q.x) : 0.0);
+    shade = oylFront * max(oylUnderHead, oylByJamb);
+  }
+  float oylSillShadeOf(vec2 p, vec2 lo, vec2 hi, vec2 pw, vec3 s) {
+    vec2 oylCast = oylSillDepth * s.xy / max(s.z, 0.001);
+    return step(0.0001, s.z)
+      * oylBand(p.y, lo.y - max(oylCast.y, 0.0), lo.y, pw.y)
+      * oylBand(p.x, lo.x - max(oylCast.x, 0.0), hi.x - min(oylCast.x, 0.0), pw.x);
+  }
+`;
+}
+
+/**
+ * {@link CLADDING_HELPERS_GLSL}, a mapped building's varyings, #1659's reveal
+ * ({@link revealGlsl}) and its sash window, which since #1659 takes the eye
+ * and the sun in the face's frame (`e`, `s`) for the reveal, and gives back
+ * the opening's `side` seen past the glass, whether it is `sideLit`, and the
+ * wall in its sill's shadow (`sillShade`).
+ */
+function facadeCommonGlsl(reveals: boolean): string {
+  return /* glsl */ `
   uniform float oylFacadeOn;
   uniform vec3 oylSunWorld;
   varying vec4 vOylFacade;
   varying vec4 vOylStyle;
   varying vec3 vOylTrim;
   ${CLADDING_HELPERS_GLSL}
+  ${revealGlsl(reveals)}
   void oylSash(
-    vec2 p, vec2 pw, vec3 win, float bay, float paired, float picture, float shutters, float sun,
-    out float frame, out float glass, out float reveal, out float shutter, out float sill
+    vec2 p, vec2 pw, vec3 win, float bay, float paired, float picture, float shutters, vec3 e, vec3 s,
+    out float frame, out float glass, out float reveal, out float shutter, out float sill,
+    out float side, out float sideLit, out float sillShade
   ) {
     float oylHalfW = win.x * 0.5;
     float oylHead = win.z + win.y;
     float oylAcross = mix(p.x, abs(p.x) - (oylHalfW + oylMullion * 0.5), paired);
     float oylSpan = mix(oylHalfW, win.x + oylMullion * 0.5, paired);
     float oylOuter = oylRect(p, vec2(-oylSpan, win.z), vec2(oylSpan, oylHead), pw);
-    float oylInner = oylBand(oylAcross, -oylHalfW + oylSashFrame, oylHalfW - oylSashFrame, pw.x)
-      * oylBand(p.y, win.z + oylSashFrame, oylHead - oylSashFrame, pw.y);
+    // #1659: across this one window, unfolded, so that its +u jamb is on its +u side.
+    vec2 oylLocal = vec2(p.x - paired * sign(p.x) * (oylHalfW + oylMullion * 0.5), p.y);
+    vec2 oylLo = vec2(-oylHalfW + oylSashFrame, win.z + oylSashFrame);
+    vec2 oylHi = vec2(oylHalfW - oylSashFrame, oylHead - oylSashFrame);
+    float oylInner = oylRect(oylLocal, oylLo, oylHi, pw);
+    vec2 oylQ;
+    float oylSeen;
+    oylRevealOf(oylLocal, oylLo, oylHi, pw, e, s, oylQ, oylSeen, sideLit, reveal);
+    // The meeting rail is the sashes', behind the frame: where the glass is seen.
     float oylRailOn = (1.0 - picture)
-      * (1.0 - smoothstep(oylRail * 0.5 - pw.y, oylRail * 0.5 + pw.y, abs(p.y - (win.z + win.y * 0.5))));
-    glass = oylInner * (1.0 - oylRailOn) * oylOuter;
-    frame = max(oylOuter - glass, 0.0);
-    float oylToward = sun * mix(1.0, sign(p.x), paired);
-    float oylUnderHead = smoothstep(
-      oylHead - oylSashFrame - oylRevealHead - pw.y,
-      oylHead - oylSashFrame - oylRevealHead + pw.y,
-      p.y
-    );
-    float oylByJamb = abs(oylToward) * smoothstep(
-      oylHalfW - oylSashFrame - oylRevealJamb - pw.x,
-      oylHalfW - oylSashFrame - oylRevealJamb + pw.x,
-      oylToward * oylAcross
-    );
-    reveal = max(oylUnderHead, oylByJamb);
+      * (1.0 - smoothstep(oylRail * 0.5 - pw.y, oylRail * 0.5 + pw.y, abs(oylQ.y - (win.z + win.y * 0.5))));
+    float oylOpen = oylInner * oylOuter;
+    glass = oylOpen * oylSeen * (1.0 - oylRailOn);
+    side = oylOpen * (1.0 - oylSeen);
+    frame = max(oylOuter - glass - side, 0.0);
     float oylShutterW = win.x * oylShutterShare;
     float oylOut = mix(abs(p.x), oylAcross, paired);
     float oylFits = step(2.0 * (oylSpan + oylShutterGap + oylShutterW + oylShutterMargin), bay);
     shutter = shutters * (1.0 - picture) * oylFits
       * oylBand(oylOut, oylHalfW + oylShutterGap, oylHalfW + oylShutterGap + oylShutterW, pw.x)
       * oylBand(p.y, win.z, oylHead, pw.y);
-    sill = oylRect(p, vec2(-oylSpan - oylSillOver, win.z - oylSillDepth), vec2(oylSpan + oylSillOver, win.z), pw)
-      * (1.0 - oylOuter);
+    vec2 oylSillLo = vec2(-oylSpan - oylSillOver, win.z - oylSillDepth);
+    vec2 oylSillHi = vec2(oylSpan + oylSillOver, win.z);
+    sill = oylRect(p, oylSillLo, oylSillHi, pw) * (1.0 - oylOuter);
+    sillShade = oylSillShadeOf(p, oylSillLo, oylSillHi, pw, s) * (1.0 - sill) * (1.0 - oylOuter);
   }
 `;
+}
 
 /**
  * Whether a bay has a window at all, as a GLSL expression over `oylCell`,
@@ -13857,10 +13977,13 @@ export const FACADE_SHOWN_GLSL =
  *    — and a driveway's slabs. Each fades to its mean as #1581's windows do.
  * 2. **The openings**: #1581's casements, or US sash windows (`STYLE_SASH`)
  *    with their meeting rail, a pair in a wide bay, a picture window, the
- *    shutters, and the inset reveal's shadow on the side the sun is on — the
- *    sun's direction across the face (`oylSunAcross`) is {@link FACADE_SUN}'s,
- *    against the face's `u` from its derivatives; a dormer's sash; a
- *    garage's panelled door.
+ *    shutters; a dormer's sash; a garage's panelled door. Since #1659 every
+ *    window kind's inset reveal (`oylRevealOf`, {@link revealGlsl}): the
+ *    glass shifted by the recess along the eye's slant, the opening's side
+ *    it uncovers lit or not by the sun, and the head's, the sun-side jamb's
+ *    and the sill's shadows as deep as the sun's slant makes them — the eye
+ *    and the sun read in the face's frame (`oylFaceN`, `oylFaceU`,
+ *    `oylFaceUp`, from the face's derivatives; the sun {@link FACADE_SUN}'s).
  * 3. **The shade**: a wall darkened under overhanging eaves and at its foot.
  *
  * ⚠️ `vOylTint` is #1549's ({@link withVertexTint}), read here in `main` —
@@ -13874,6 +13997,14 @@ const FACADE_FRAGMENT_GLSL = /* glsl */ `
   float oylTilt = 0.0;
   // The sun's side along the face's u, from the face's own derivatives: outside every branch.
   float oylSun = 0.0;
+  // #1659: the face's frame, in view space and every one unit length, outside
+  // the block so that the reveal (and #1658) read it: the face's outward
+  // normal, along its u, up it toward +v, toward the sun and toward the eye.
+  vec3 oylFaceN;
+  vec3 oylFaceU;
+  vec3 oylFaceUp;
+  vec3 oylToSunV;
+  vec3 oylToEyeV;
   {
     vec3 oylQx = dFdx(vViewPosition);
     vec3 oylQy = dFdy(vViewPosition);
@@ -13883,12 +14014,27 @@ const FACADE_FRAGMENT_GLSL = /* glsl */ `
     float oylAlongLength = length(oylAlongU);
     float oylSunAcross = oylAlongLength > 1e-8 ? dot(oylAlongU / oylAlongLength, oylToSun) : 0.0;
     oylSun = step(0.0, dot(oylN, oylToSun)) * sign(oylSunAcross) * step(0.15, abs(oylSunAcross));
+    oylFaceN = oylN;
+    oylFaceU = oylAlongLength > 1e-8 ? oylAlongU / oylAlongLength : vec3(0.0);
+    vec3 oylAlongV = -(cross(oylQy, oylN) * dFdx(vOylFacade.y) + cross(oylN, oylQx) * dFdy(vOylFacade.y));
+    vec3 oylUpward = cross(oylFaceN, oylFaceU);
+    float oylUpLength = length(oylUpward);
+    oylFaceUp = oylUpLength > 1e-8
+      ? oylUpward / oylUpLength * (dot(oylUpward, oylAlongV) < 0.0 ? -1.0 : 1.0)
+      : vec3(0.0);
+    oylToSunV = oylToSun;
+    // ⚠️ three's vViewPosition is already the NEGATED view position
+    // (vViewPosition = - mvPosition.xyz), so it points to the eye as it is.
+    oylToEyeV = normalize(vViewPosition);
   }
   vec2 oylFw = max(fwidth(vOylFacade.xy), vec2(0.00001));
   if (oylFacadeOn < 0.5) {
     // The control: the photograph alone, as #1549 drew it.
   } else {
     float oylTop = vOylFacade.z;
+    // #1659: the eye and the sun in the face's frame, for every window's reveal.
+    vec3 oylEyeF = vec3(dot(oylToEyeV, oylFaceU), dot(oylToEyeV, oylFaceUp), dot(oylToEyeV, oylFaceN));
+    vec3 oylSunF = vec3(dot(oylToSunV, oylFaceU), dot(oylToSunV, oylFaceUp), dot(oylToSunV, oylFaceN));
     float oylKind = floor(vOylStyle.x + 0.0001);
     float oylCourse = max(vOylStyle.x - oylKind, 0.001);
     float oylFlags = vOylStyle.y;
@@ -13978,21 +14124,37 @@ const FACADE_FRAGMENT_GLSL = /* glsl */ `
         float oylRevealOn;
         float oylShutterOn;
         float oylSillOn;
+        float oylSideOn;
+        float oylSideLit;
+        float oylSillShade;
         oylSash(
           oylP, oylMw, vec3(oylWinW, oylSashH, oylSillM), oylBayW, oylPaired, oylPicture,
-          oylFlag(oylFlags, oylShuttersFlag), oylSun,
-          oylFrameOn, oylPaneOn, oylRevealOn, oylShutterOn, oylSillOn
+          oylFlag(oylFlags, oylShuttersFlag), oylEyeF, oylSunF,
+          oylFrameOn, oylPaneOn, oylRevealOn, oylShutterOn, oylSillOn,
+          oylSideOn, oylSideLit, oylSillShade
         );
         oylFrameOn *= oylShown;
         oylPaneOn *= oylShown;
         oylShutterOn *= oylShown;
         oylSillOn *= oylShown;
+        oylSideOn *= oylShown;
+        oylSillShade *= oylShown;
         vec3 oylPane = (oylRoom + vec3(0.03, 0.04, 0.05) * smoothstep(oylSillM, oylSillM + oylSashH, oylP.y))
           * (1.0 - oylRevealShade * oylRevealOn);
         float oylSlat = oylLine(oylP.y / oylLouvre, 0.15, oylMw.y / oylLouvre);
         vec3 oylShutterC = vOylTrim * (0.92 - 0.25 * oylSlat);
+        // #1659: the opening's side is the wall's, in the sun or out of it.
+        vec3 oylSideC = oylWall * (1.0 - oylRevealShade * (1.0 - oylSideLit));
         vec3 oylDrawn = mix(
-          mix(mix(mix(oylWall, oylShutterC, oylShutterOn), vOylTrim, oylFrameOn), vOylTrim * 0.85, oylSillOn),
+          mix(
+            mix(
+              mix(mix(oylWall * (1.0 - oylRevealShade * oylSillShade), oylShutterC, oylShutterOn), vOylTrim, oylFrameOn),
+              vOylTrim * 0.85,
+              oylSillOn
+            ),
+            oylSideC,
+            oylSideOn
+          ),
           oylPane,
           oylPaneOn
         );
@@ -14000,7 +14162,7 @@ const FACADE_FRAGMENT_GLSL = /* glsl */ `
         vec3 oylMean = mix(oylWall, mix(vOylTrim, oylRoom, 0.75), oylArea);
         float oylFade = oylFadeOf(max(oylMw.x / oylBayW, oylMw.y / oylStoreyM));
         diffuseColor.rgb = mix(oylDrawn, oylMean, oylFade);
-        float oylParts = max(max(oylFrameOn, oylSillOn), oylShutterOn) * (1.0 - oylFade);
+        float oylParts = max(max(max(oylFrameOn, oylSillOn), oylShutterOn), oylSideOn) * (1.0 - oylFade);
         oylGlass = oylPaneOn * (1.0 - oylFade);
         oylFlat = max(oylFlat, oylParts);
         oylTilt *= 1.0 - min(1.0, oylParts + oylGlass);
@@ -14013,26 +14175,41 @@ const FACADE_FRAGMENT_GLSL = /* glsl */ `
         float oylWT = mix(oylWinT, oylCwT, oylComOn);
         float oylWTr = mix(oylTransom, oylCwTransom, oylComOn);
         float oylOuter = oylRect(oylAt, vec2(oylWL, oylWB), vec2(oylWR, oylWT), oylW) * oylShown;
-        float oylInner = oylRect(
-          oylAt,
-          vec2(oylWL + oylFrameA, oylWB + oylFrameU),
-          vec2(oylWR - oylFrameA, oylWT - oylFrameU),
-          oylW
-        );
+        vec2 oylLo = vec2(oylWL + oylFrameA, oylWB + oylFrameU);
+        vec2 oylHi = vec2(oylWR - oylFrameA, oylWT - oylFrameU);
+        float oylInner = oylRect(oylAt, oylLo, oylHi, oylW);
+        // #1659: the reveal, in metres — the bay as wide as the wall's style lays it.
+        vec2 oylToM = vec2(vOylStyle.z, oylStoreyM);
+        vec2 oylQ;
+        float oylSeen;
+        float oylSideLit;
+        float oylShadeOn;
+        oylRevealOf(oylAt * oylToM, oylLo * oylToM, oylHi * oylToM, oylW * oylToM, oylEyeF, oylSunF, oylQ, oylSeen, oylSideLit, oylShadeOn);
+        // The mullion and the transom are the glazing's, behind the frame: where the glass is seen.
+        vec2 oylGlassAt = oylQ / oylToM;
         float oylBars = max(
-          1.0 - smoothstep(oylBarA - oylW.x, oylBarA + oylW.x, abs(oylAt.x - 0.5)),
-          1.0 - smoothstep(oylBarU - oylW.y, oylBarU + oylW.y, abs(oylAt.y - oylWTr))
+          1.0 - smoothstep(oylBarA - oylW.x, oylBarA + oylW.x, abs(oylGlassAt.x - 0.5)),
+          1.0 - smoothstep(oylBarU - oylW.y, oylBarU + oylW.y, abs(oylGlassAt.y - oylWTr))
         );
-        float oylPaneShare = oylInner * (1.0 - oylBars) * oylShown;
-        float oylFrame = max(oylOuter - oylPaneShare, 0.0);
-        float oylSill = oylRect(
-          oylAt,
-          vec2(oylWL - oylSillA, oylWB - oylSillU),
-          vec2(oylWR + oylSillA, oylWB),
-          oylW
-        ) * oylShown;
+        float oylPaneShare = oylInner * oylSeen * (1.0 - oylBars) * oylShown;
+        float oylSide = oylInner * (1.0 - oylSeen) * oylShown;
+        float oylFrame = max(oylOuter - oylPaneShare - oylSide, 0.0);
+        vec2 oylSillLo = vec2(oylWL - oylSillA, oylWB - oylSillU);
+        vec2 oylSillHi = vec2(oylWR + oylSillA, oylWB);
+        float oylSill = oylRect(oylAt, oylSillLo, oylSillHi, oylW) * oylShown;
+        float oylSillShade = oylSillShadeOf(oylAt * oylToM, oylSillLo * oylToM, oylSillHi * oylToM, oylW * oylToM, oylSunF)
+          * (1.0 - oylSill) * (1.0 - oylOuter) * oylShown;
         vec3 oylPane = oylRoom + vec3(0.03, 0.04, 0.05) * smoothstep(oylWB, oylWT, oylAt.y);
-        vec3 oylDrawn = mix(mix(mix(oylWall, vOylTrim, oylFrame), vOylTrim * 0.85, oylSill), oylPane, oylPaneShare);
+        vec3 oylSideC = oylWall * (1.0 - oylRevealShade * (1.0 - oylSideLit));
+        vec3 oylDrawn = mix(
+          mix(
+            mix(mix(oylWall * (1.0 - oylRevealShade * oylSillShade), vOylTrim, oylFrame), vOylTrim * 0.85, oylSill),
+            oylSideC,
+            oylSide
+          ),
+          oylPane * (1.0 - oylRevealShade * oylShadeOn),
+          oylPaneShare
+        );
         float oylArea = (oylWR - oylWL) * (oylWT - oylWB) * oylShown;
         vec3 oylMean = mix(oylWall, mix(vOylTrim, oylPane, 0.75), oylArea);
         float oylFade = clamp(max(oylW.x, oylW.y) * 8.0 - 0.5, 0.0, 1.0);
@@ -14099,15 +14276,29 @@ const FACADE_FRAGMENT_GLSL = /* glsl */ `
       float oylRevealOn;
       float oylShutterOn;
       float oylSillOn;
+      float oylSideOn;
+      float oylSideLit;
+      float oylSillShade;
       oylSash(
-        oylP, oylMw, oylWin, oylFaceW, 0.0, 0.0, 0.0, oylSun,
-        oylFrameOn, oylPaneOn, oylRevealOn, oylShutterOn, oylSillOn
+        oylP, oylMw, oylWin, oylFaceW, 0.0, 0.0, 0.0, oylEyeF, oylSunF,
+        oylFrameOn, oylPaneOn, oylRevealOn, oylShutterOn, oylSillOn,
+        oylSideOn, oylSideLit, oylSillShade
       );
       vec3 oylPane = vec3(0.012, 0.014, 0.018) * (1.0 - oylRevealShade * oylRevealOn) + vec3(0.03, 0.04, 0.05);
-      diffuseColor.rgb = mix(mix(mix(diffuseColor.rgb, vOylTrim, oylFrameOn), vOylTrim * 0.85, oylSillOn), oylPane, oylPaneOn);
+      vec3 oylFront = diffuseColor.rgb;
+      vec3 oylSideC = oylFront * (1.0 - oylRevealShade * (1.0 - oylSideLit));
+      diffuseColor.rgb = mix(
+        mix(
+          mix(mix(oylFront * (1.0 - oylRevealShade * oylSillShade), vOylTrim, oylFrameOn), vOylTrim * 0.85, oylSillOn),
+          oylSideC,
+          oylSideOn
+        ),
+        oylPane,
+        oylPaneOn
+      );
       oylGlass = oylPaneOn;
       oylFlat = 1.0;
-      oylTilt *= 1.0 - min(1.0, oylFrameOn + oylPaneOn + oylSillOn);
+      oylTilt *= 1.0 - min(1.0, oylFrameOn + oylPaneOn + oylSillOn + oylSideOn);
     } else if (abs(oylTop - oylGarageTop) < 0.5) {
       // A garage door: a panelled leaf in its surround, in the trim's paint.
       float oylFaceW = vOylStyle.z;
@@ -14209,6 +14400,7 @@ const FACADE_FRAGMENT_GLSL = /* glsl */ `
 function withFacade<M extends Material>(material: M): M {
   if (FACADE_TAUGHT.has(material)) return material;
   FACADE_TAUGHT.add(material);
+  defineWindowReveals(material);
   const earlier = material.onBeforeCompile.bind(material);
   const earlierKey = material.customProgramCacheKey();
   const spliced = "#1581's facade";
@@ -14232,7 +14424,7 @@ function withFacade<M extends Material>(material: M): M {
     let fragment = replacedOrThrown(
       shader.fragmentShader,
       '#include <common>',
-      `#include <common>\n${FACADE_COMMON_GLSL}`,
+      `#include <common>\n${facadeCommonGlsl(revealsBuiltIn(material))}`,
       'fragment',
       spliced,
     );
@@ -14381,7 +14573,9 @@ export interface DrawnMappedBuilding {
  *   `min_height` has no plinth and no grounding.
  * - **#621's tint** is a vertex attribute here, not the instance colour's
  *   third channel: there is no instance. @see withVertexTint
- * - **No ground blob** (#620): `realistic-budget.ts` §`MAPPED_BUILDING_TRIANGLES`.
+ * - **A ground blob under each drawn building** — #1657: its footprint's
+ *   minimum-area rectangle, worked out at the refill and read by
+ *   `GroundBlobBelt` every frame. @see grounded
  * - **Never culled as a whole** (`frustumCulled` off): the buildings in reach
  *   stand all round the rider, so a sphere about them always holds the camera.
  */
@@ -14415,6 +14609,8 @@ export class MappedBuildingBelt {
   /** Each drawn building's first vertex in the models' buffer, or -1 for an extrusion. */
   readonly #modelAt: Int32Array;
   readonly #selection = new MappedSelection();
+  /** The drawn buildings as ground-blob casters, written at a refill. @see grounded */
+  readonly #grounded = blobCasters(MAPPED_BUILDING_MAX);
   /** Where each surface's range starts, and where its next triangle goes, in vertices. */
   readonly #starts = new Int32Array(MAPPED_BUILDING_DRAW_CALLS);
   readonly #cursors = new Int32Array(MAPPED_BUILDING_DRAW_CALLS);
@@ -14560,6 +14756,17 @@ export class MappedBuildingBelt {
     return this.#shown && this.#switchedOn && this.#carried;
   }
 
+  /**
+   * The ground-blob casters under what this belt draws — #1657: one a drawn
+   * building, near or far, extrusion or house model, nearest first; none
+   * while it draws nothing ({@link drawing}). Written at {@link refill} and
+   * only read here, so a frame that is not a refill reads one flag and
+   * allocates nothing.
+   */
+  get grounded(): BlobCasters {
+    return this.drawing ? this.#grounded : NO_BLOB_CASTERS;
+  }
+
   #applyVisible(): void {
     this.mesh.visible = this.drawing && this.#stats.triangles - this.#stats.modelTriangles > 0;
     this.modelMesh.visible = this.drawing && this.#stats.modelled > 0;
@@ -14662,6 +14869,7 @@ export class MappedBuildingBelt {
         attribute.needsUpdate = true;
       }
     }
+    this.#groundSelection();
     this.#stats = {
       buildings: selection.count,
       near: selection.near,
@@ -14674,6 +14882,25 @@ export class MappedBuildingBelt {
     };
     this.#applyVisible();
     return this.#stats;
+  }
+
+  /**
+   * Each drawn building as a ground-blob caster — #1657: its footprint's
+   * minimum-area rectangle (`footprint-buildings.ts` §`minimumAreaRectangle`),
+   * its middle, its long axis as the yaw, its half extents, and the height of
+   * its eaves above its foot. Once a refill, never a frame.
+   */
+  #groundSelection(): void {
+    const selection = this.#selection;
+    const into = this.#grounded;
+    into.count = 0;
+    for (let at = 0; at < selection.count; at += 1) {
+      const caster = into.casters[at];
+      if (caster === undefined) break;
+      const plan = this.buildings.plans[selection.plans[at] as number] as FootprintPlan;
+      groundMappedBuilding(plan, caster);
+      into.count += 1;
+    }
   }
 
   /** The browser gate's control: a group — a draw call — per building and surface. */
@@ -14831,6 +15058,41 @@ export class MappedBuildingBelt {
   }
 }
 
+/** A list of no ground-blob casters: what a belt that draws nothing hands the blob belt. */
+const NO_BLOB_CASTERS: BlobCasters = { casters: [], count: 0 };
+
+/**
+ * #1657: puts the mapped buildings' list last in `lists` (slot 2), the belt's
+ * `grounded` while they are shown and drawn, none otherwise. Apart from the
+ * view so a Node test runs the line the product runs.
+ */
+export function mappedBlobList(
+  lists: BlobCasters[],
+  shown: boolean,
+  mapped: MappedBuildingBelt | undefined,
+): void {
+  lists[2] = shown && mapped !== undefined ? mapped.grounded : NO_BLOB_CASTERS;
+}
+
+/**
+ * Writes `plan` into `caster` as #1657 grounds it: a rectangle, not round,
+ * at its footprint's minimum-area rectangle, turned so that +Z runs along the
+ * rectangle's long axis, as tall as its eaves stand above its foot.
+ */
+function groundMappedBuilding(plan: FootprintPlan, caster: BlobCaster): void {
+  const rectangle = minimumAreaRectangle(plan.footprint);
+  caster.x = rectangle.cx;
+  caster.y = plan.base + FOUNDATION_METRES;
+  caster.z = rectangle.cz;
+  caster.yaw = Math.atan2(rectangle.ux, rectangle.uz);
+  caster.round = false;
+  caster.halfAlong = rectangle.halfLong;
+  caster.halfAcross = rectangle.halfShort;
+  caster.centreAlong = 0;
+  caster.height = Math.max(0, plan.eaves - plan.base - FOUNDATION_METRES);
+  caster.strength = 1;
+}
+
 /**
  * One frame's turn of the mapped buildings — #1549, `RealisticDrawing`'s
  * rule, apart from the view so a test can ride it: refills `belt` when the
@@ -14956,10 +15218,7 @@ export function setTreeLevels(levels: TreeLevels): void {
  * - The road's and the ground's photographic materials, swapped onto the
  *   stylised meshes, so the road stays one mesh and one draw call (#425).
  * - The environment map, prefiltered from the sky with this view's own
- *   renderer — a `PMREMGenerator` needs one, which is why this is built in the
- *   view and not at load. The generator is disposed as soon as the map exists,
- *   releasing its ping-pong target (`realistic-budget.ts`
- *   §`environmentMapBytes`).
+ *   renderer ({@link prefilteredSky}), which it is handed and owns.
  */
 class RealisticDrawing {
   readonly vegetation: RealisticVegetationBelt;
@@ -14995,8 +15254,14 @@ class RealisticDrawing {
   #surfaces: RealisticSurfaces;
   /** This frame's structures, as ground-blob casters — #620. @see groundScenery */
   readonly #structureCasters = blobCasters(REALISTIC_STRUCTURE_ITEMS);
-  /** Both lists the blob belt reads, made once. */
-  readonly #casterLists: readonly BlobCasters[];
+  /**
+   * The three lists the blob belt reads, made once: the vegetation's, the
+   * structures' and, since #1657, the mapped buildings', which
+   * {@link groundScenery} points at the mapped belt's own each frame.
+   */
+  readonly #casterLists: BlobCasters[];
+  /** Whether the mapped buildings are grounded — #1657's lever. @see mappedBlobsShownOf */
+  #mappedBlobs = true;
   /** The rung's scenery budget, as the structure belts spend it. @see setBudget */
   #budget = Number.POSITIVE_INFINITY;
   /** The rung's structures — what the procedural and the mapped buildings share. @see setBudget */
@@ -15019,7 +15284,13 @@ class RealisticDrawing {
 
   constructor(
     world: RealisticWorld,
-    renderer: WebGLRenderer,
+    /** The renderer's `capabilities.getMaxAnisotropy()`. */
+    maxAnisotropy: number,
+    /**
+     * The sky prefiltered with the view's own renderer, which this drawing
+     * owns and disposes. @see prefilteredSky
+     */
+    environment: Texture,
     fields: {
       readonly span: { value: number };
       readonly count: { value: number };
@@ -15037,7 +15308,7 @@ class RealisticDrawing {
     this.#world = world;
     this.#fields = fields;
     this.#surfaces = surfaces;
-    const anisotropy = Math.min(REALISTIC_ANISOTROPY, renderer.capabilities.getMaxAnisotropy());
+    const anisotropy = Math.min(REALISTIC_ANISOTROPY, maxAnisotropy);
     for (const texture of surfaceMapsOf(world)) texture.anisotropy = anisotropy;
     this.vegetation = new RealisticVegetationBelt(world.vegetation, treeLevels);
     this.structures = new RealisticStructureBelts(world.structures);
@@ -15055,12 +15326,10 @@ class RealisticDrawing {
     this.pavements = new PavementBelt('realistic', world.structures.get('paving'));
     this.furniture = new FurnitureBelt('realistic', world.structures.get('planks'));
     this.people = new PeopleBelt(world.body);
-    this.#casterLists = [this.vegetation.grounded, this.#structureCasters];
+    this.#casterLists = [this.vegetation.grounded, this.#structureCasters, NO_BLOB_CASTERS];
     this.#road = this.#roadMaterial();
     this.#ground = this.#groundMaterial();
-    const generator = new PMREMGenerator(renderer);
-    this.environment = generator.fromEquirectangular(world.sky.texture).texture;
-    generator.dispose();
+    this.environment = environment;
   }
 
   get road(): MeshStandardMaterial {
@@ -15276,7 +15545,15 @@ class RealisticDrawing {
       (kind) => this.structures.heightOf(kind),
       this.#structureCasters,
     );
+    // #1657: the mapped buildings' blobs, written at their refill, read last
+    // so that the procedural blobs keep the slots they had before them.
+    mappedBlobList(this.#casterLists, this.#mappedBlobs, this.#mapped);
     this.grounding.update(this.#casterLists, corridor, terrain, sun);
+  }
+
+  /** @see mappedBlobsShownOf */
+  mappedBlobsShown(on: boolean): void {
+    this.#mappedBlobs = on;
   }
 
   /** How many scenery items the last frame drew, every belt together. */
@@ -15301,6 +15578,43 @@ class RealisticDrawing {
     this.#ground.dispose();
     this.environment.dispose();
   }
+}
+
+/**
+ * The environment map, prefiltered from `sky` with `renderer` — a
+ * `PMREMGenerator` needs one, which is why a view builds it and not the load.
+ * The generator is disposed as soon as the map exists, releasing its
+ * ping-pong target (`realistic-budget.ts` §`environmentMapBytes`).
+ */
+function prefilteredSky(renderer: WebGLRenderer, sky: Texture): Texture {
+  const generator = new PMREMGenerator(renderer);
+  const environment = generator.fromEquirectangular(sky).texture;
+  generator.dispose();
+  return environment;
+}
+
+/**
+ * The realistic world's drawing, built from the loaded world as a view builds
+ * it — #1657 — but with no GPU: no anisotropy, and an empty map where a
+ * view's renderer would prefilter the sky. `undefined` when no world is loaded.
+ *
+ * @test-facing `realistic-textures.test.ts` runs a ride's frame through its
+ * `updateMapped`, `updateScenery` and `groundScenery`, and reads the mapped
+ * buildings' blobs back off its `grounding` mesh; a view builds its own in
+ * `#applyWorld`
+ */
+export function realisticDrawingOfLoadedWorld(): RealisticDrawing | undefined {
+  const world = realisticWorld;
+  return world === undefined
+    ? undefined
+    : new RealisticDrawing(
+        world,
+        1,
+        new DataTexture(),
+        { span: { value: 1 }, count: { value: 1 }, treeLine: { value: 0 } },
+        RIDER_KITS.rider,
+        REALISTIC_SURFACES_DRAWN,
+      );
 }
 
 /**
@@ -15827,6 +16141,19 @@ export function mappedBuildingsShownOf(view: GameView, on: boolean): void {
 }
 
 /**
+ * Grounds a view's buildings from map data, or stops — #1657. The owner's
+ * page's lever (`&levers=-mapped-blobs`): off, no mapped building is handed
+ * to the ground-blob belt, which is the picture and the cost before #1657.
+ * A setting of the view's, so it holds across a rung change.
+ *
+ * @test-facing the realistic page's lever, read by `realistic-harness.ts`;
+ * the product always grounds them.
+ */
+export function mappedBlobsShownOf(view: GameView, on: boolean): void {
+  if (view instanceof ThreeGameView) view.mappedBlobsShown(on);
+}
+
+/**
  * What a view's buildings from map data drew at its last refill, and the
  * belt itself — #1549, for the browser gate's counts. `undefined` before a
  * realistic frame has carried any.
@@ -16280,6 +16607,8 @@ class ThreeGameView implements GameView {
   #clearOfTheCamera = true;
   /** Whether the realistic world's ground blobs are drawn. @see showGroundBlobsOf */
   #groundBlobsShown = true;
+  /** Whether the mapped buildings are grounded — #1657. @see mappedBlobsShownOf */
+  #mappedBlobsShown = true;
   /** Reused every frame: `#placeCamera` allocated a `Vector3` per frame until #424 (NFR-3). */
   readonly #lookAt = new Vector3();
   readonly #roadGeometry = new BufferGeometry();
@@ -16798,12 +17127,14 @@ class ThreeGameView implements GameView {
       if (this.#realistic === undefined) {
         this.#realistic = new RealisticDrawing(
           loaded,
-          this.#renderer,
+          this.#renderer.capabilities.getMaxAnisotropy(),
+          prefilteredSky(this.#renderer, loaded.sky.texture),
           this.#terrain.fields,
           this.#riderKit,
           this.#surfaces,
         );
         this.#realistic.addTo(this.#scene);
+        this.#realistic.mappedBlobsShown(this.#mappedBlobsShown);
         this.#realistic.setBudget(
           this.#quality.scatterItems + this.#quality.structureItems,
           this.#quality.structureItems,
@@ -17001,6 +17332,12 @@ class ThreeGameView implements GameView {
     this.#realistic?.mappedShown(on);
   }
 
+  /** @see mappedBlobsShownOf */
+  mappedBlobsShown(on: boolean): void {
+    this.#mappedBlobsShown = on;
+    this.#realistic?.mappedBlobsShown(on);
+  }
+
   /** @see mappedBuildingStatsOf */
   get mappedBuildings(): MappedBuildingBelt | undefined {
     return this.#realistic?.mapped;
@@ -17082,6 +17419,22 @@ class ThreeGameView implements GameView {
       this.#road.material = drawing.road;
       this.#terrain.setPhotographic(drawing.ground);
     }
+  }
+
+  /** @see windowRevealsOf — every facade material in the scene, compiled again. */
+  facadesRecompiled(): void {
+    this.#scene.traverse((node) => {
+      const { material } = node as { material?: Material | Material[] };
+      for (const each of Array.isArray(material)
+        ? material
+        : material === undefined
+          ? []
+          : [material]) {
+        if (!drawsFacade(each)) continue;
+        defineWindowReveals(each);
+        each.needsUpdate = true;
+      }
+    });
   }
 
   /** @see realisticSurfaceUniformsOf */
