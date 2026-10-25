@@ -3,13 +3,16 @@
 /**
  * What the demo build writes besides its bundle, and what it must not — #1645.
  *
- * ## Only two directories of `public/`
+ * ## Only three directories of `public/`
  *
  * The product's `public/` holds the web app manifest, its icons, the pose
  * model and the map glyphs as well as the realistic world. The demo needs the
- * realistic world (the owner's ruling on #1643: it loads from the start) and
- * the licence texts (AGPL §6: the bundle is conveyed to every visitor), and
- * nothing else. So the config sets `publicDir: false` and this copies
+ * realistic world (the owner's ruling on #1643: it loads from the start), the
+ * licence texts (AGPL §6: the bundle is conveyed to every visitor) and the
+ * glyphs — `banner-atlas.ts` letters the gantries' banners from
+ * `glyphs/Roboto-Regular/0-255.pbf`, which was a 404 on the demo's own origin
+ * until #1683, and the font's licence is in that directory — and nothing
+ * else. So the config sets `publicDir: false` and this copies
  * {@link DEMO_PUBLIC_DIRECTORIES} after the bundle is written. It copies the
  * committed files and adds none, so `REALISTIC_BUILD_BYTES` does not move.
  *
@@ -27,7 +30,7 @@ import { join, relative, resolve } from 'node:path';
 import type { Plugin } from 'vite';
 
 /** The directories of `public/` the demo ships, under the same names. */
-export const DEMO_PUBLIC_DIRECTORIES = ['realistic', 'licences'] as const;
+export const DEMO_PUBLIC_DIRECTORIES = ['realistic', 'licences', 'glyphs'] as const;
 
 /** Every file under `directory`, as `/`-separated paths relative to it. */
 export function filesUnder(directory: string): string[] {

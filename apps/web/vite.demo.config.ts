@@ -58,7 +58,7 @@ export default defineConfig({
   root: fileURLToPath(new URL('./demo', import.meta.url)),
   base: './',
   // ⚠️ None of the app's `public/`: it holds the manifest and its icons. The
-  // two directories the demo ships are copied by `demoOutput`.
+  // three directories the demo ships are copied by `demoOutput`.
   publicDir: false,
   build: {
     // `demo/dist`: already ignored by `.gitignore`'s `dist/` and pruned by

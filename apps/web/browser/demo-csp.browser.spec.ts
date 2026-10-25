@@ -20,12 +20,12 @@ import { fileURLToPath } from 'node:url';
 
 import { expect, test, type Page } from '@playwright/test';
 
-import { withInlineScriptHashes } from '../tools/demo/content-security';
+import { UNSAFE_EVAL_PAGE, withInlineScriptHashes } from '../tools/demo/content-security';
 import { withThemeSelection } from '../tools/theme/theme-selection-plugin';
 
 const DEMO_ORIGIN = 'http://demo.test';
 const SOURCE = readFileSync(fileURLToPath(new URL('../demo/index.html', import.meta.url)), 'utf8');
-const BUILT = withInlineScriptHashes(withThemeSelection(SOURCE, '/index.html'));
+const BUILT = withInlineScriptHashes(withThemeSelection(SOURCE, '/index.html'), UNSAFE_EVAL_PAGE);
 const POLICY = /<meta\s+http-equiv="Content-Security-Policy"[^>]*\/>/;
 
 interface Load {

@@ -75,11 +75,13 @@ describe('the demo build ships no worker and no manifest — #1645', () => {
   });
 });
 
-describe('the demo build copies two directories of public/, and only those', () => {
-  it('copies the realistic world and the licences, and leaves the manifest and icons behind', () => {
+describe('the demo build copies three directories of public/, and only those', () => {
+  it('copies the realistic world, the licences and the glyphs, and leaves the manifest and icons behind', () => {
     const publicDirectory = directory();
     write(join(publicDirectory, 'realistic/road.ktx2'), 'road');
     write(join(publicDirectory, 'licences/third-party.txt'), 'notices');
+    // #1683: the banners' glyphs, with the font's licence beside them.
+    write(join(publicDirectory, 'glyphs/Roboto-Regular/0-255.pbf'), 'glyphs');
     write(join(publicDirectory, 'manifest.webmanifest'), '{}');
     write(join(publicDirectory, 'icon-192.png'));
     write(join(publicDirectory, 'pose/model.task'));
@@ -89,11 +91,12 @@ describe('the demo build copies two directories of public/, and only those', () 
     const plugin = pluginFor(publicDirectory, root);
     plugin.writeBundle();
     expect(filesUnder(join(root, 'dist')).sort()).toEqual([
+      'glyphs/Roboto-Regular/0-255.pbf',
       'licences/third-party.txt',
       'realistic/basis/basis_transcoder.wasm',
       'realistic/road.ktx2',
     ]);
-    expect(DEMO_PUBLIC_DIRECTORIES).toEqual(['realistic', 'licences']);
+    expect(DEMO_PUBLIC_DIRECTORIES).toEqual(['realistic', 'licences', 'glyphs']);
     expect(() => {
       plugin.closeBundle();
     }).not.toThrow();

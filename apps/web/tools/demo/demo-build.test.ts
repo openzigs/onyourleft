@@ -53,9 +53,9 @@ describe('the demo build, as it is shipped — #1645', () => {
     const theme = /<script id="oyl-theme-selection">([\s\S]*?)<\/script>/.exec(html)?.[1];
     expect(theme).toBeDefined();
     expect(html).toContain(
-      `script-src 'self' 'wasm-unsafe-eval' ${scriptHash(theme ?? '')}; worker-src`,
+      `script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval' ${scriptHash(theme ?? '')}; worker-src`,
     );
-    expect(html).toContain("connect-src 'self';");
+    expect(html).toContain("connect-src 'self' blob:;");
     // `base: './'`: every reference is relative, so it works from any path.
     expect(html).toMatch(/<script type="module" crossorigin src="\.\/assets\/[^"]+\.js">/);
     expect(html).not.toMatch(/(?:src|href)="\/(?!\/)/);
@@ -65,6 +65,9 @@ describe('the demo build, as it is shipped — #1645', () => {
     const files = filesUnder(outDir);
     expect(files).toContain('realistic/basis/basis_transcoder.wasm');
     expect(files).toContain('licences/third-party.txt');
+    // #1683: the banners' glyph range, and the font's licence beside it.
+    expect(files).toContain('glyphs/Roboto-Regular/0-255.pbf');
+    expect(files).toContain('glyphs/Roboto-Regular/Apache-2.0.txt');
     const realistic = filesUnder(join(WEB, 'public/realistic'));
     expect(realistic.length).toBeGreaterThan(0);
     for (const file of realistic) expect(files).toContain(`realistic/${file}`);
@@ -74,9 +77,9 @@ describe('the demo build, as it is shipped — #1645', () => {
     const files = filesUnder(outDir);
     expect(workerOrManifest(files)).toEqual([]);
     expect(existsSync(join(outDir, 'sw.js'))).toBe(false);
-    // Nor anything else of public/ but the two directories.
+    // Nor anything else of public/ but the three directories.
     expect(
-      files.filter((file) => !/^(?:assets|realistic|licences)\/|^index\.html$/.test(file)),
+      files.filter((file) => !/^(?:assets|realistic|licences|glyphs)\/|^index\.html$/.test(file)),
     ).toEqual([]);
   }, 60_000);
 });

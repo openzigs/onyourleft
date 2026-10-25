@@ -333,7 +333,7 @@ export interface CorridorHarness {
   readonly junctions: readonly DrawnJunction[];
   /** #1633: the read corridor's route's length, which {@link urbanRuns} spans. */
   readonly routeMetres: number;
-  /** #1633: the urban class's runs along the read corridor's route; empty with no corridor. */
+  /** #1633: the urban class's runs along the read corridor's route; empty for `?long` or no corridor. */
   readonly urbanRuns: readonly UrbanRun[];
   /** #1633: the same along the synthetic city ({@link cityRuns}); empty for `?long`. */
   readonly cityRuns: readonly UrbanRun[];
@@ -416,8 +416,13 @@ async function run(): Promise<CorridorHarness> {
   const mask = ready === undefined ? undefined : landClassMask(ready);
   const maskMilliseconds = performance.now() - maskStarted;
   // #1633: the urban map, once, beside the mask, as the press builds it.
+  // Not for `?long` (#1694): no spec reads it there, and its sweep of a 250 km
+  // route was two thirds of that page's time — 5.2 s of 8.2 s on a laptop,
+  // which took the 600-tile test to its 30 s limit on a CI runner.
   const urban =
-    ready === undefined || mask === undefined ? undefined : urbanClassMap(ready, mask, profile);
+    ready === undefined || mask === undefined || LONG
+      ? undefined
+      : urbanClassMap(ready, mask, profile);
   // #1540: the plans, once, as a ride's start would make them — handed that map.
   const planStarted = performance.now();
   const verdicts =
