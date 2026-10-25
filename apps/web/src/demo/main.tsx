@@ -20,6 +20,7 @@ import {
   loadGameWordmark,
   loadSceneryModels,
   readFileBytes,
+  seasonOf,
   threeGameRenderer,
 } from '../game/three-renderer';
 import { DemoPage } from './DemoPage';
@@ -77,6 +78,8 @@ async function start(): Promise<void> {
         publish={publish}
         // #1652: a baked route's files, same-origin, into memory.
         readFile={readFileBytes}
+        // #1653: the season the view holds, which the showcase reads back.
+        drawnSeason={seasonOf}
       />
     </StrictMode>,
   );

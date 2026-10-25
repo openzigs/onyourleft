@@ -27,6 +27,18 @@
  * (`DemoPlayer.holdClock`), so a visitor who scrolls back finds the riders
  * where they left them.
  *
+ * ## The showcase — #1653
+ *
+ * Given a {@link ShowcaseRun}, every tick reads the timeline at the ride's
+ * time (`showcase.ts` §`showcaseAt`) and applies what changed: the world
+ * through the quality ladder's own rungs, the season through
+ * `GameView.setSeason` from a fixed date (`season.ts` §`seasonOn`, never the
+ * viewer's clock), the people and the countryside through the frame
+ * (`player.ts` §`FrameFeatures`). What it publishes is read back from the
+ * renderer — the world it draws, the season it holds — and from the frame
+ * it was handed, never from the timeline. At the timeline's end the ride
+ * starts again from 0, without a reload.
+ *
  * ## The clock is the scheduler's
  *
  * Each frame's time is the timestamp {@link FrameScheduler.request} hands its
@@ -34,7 +46,7 @@
  * and in the video render (#1655).
  */
 
-import type { GameRenderer, GameView } from '../game/port';
+import type { GameRenderer, GameView, SceneFrame } from '../game/port';
 import { FramePacer } from '../game/frame-pacer';
 import {
   INITIAL_QUALITY,
@@ -45,9 +57,16 @@ import {
   type WorldQualityState,
 } from '../game/quality';
 import { REALISTIC_WORLD_LEFT_NOTICE, realisticWorldNotice } from '../game/realistic-assets';
-import { NO_SEASON } from '../game/season';
+import { NO_SEASON, parseCalendarDay, seasonOn, type Season } from '../game/season';
+import { routeHemisphere, routeLatitudeMagnitude } from '../game/world';
 import type { CorridorCounts } from './baked-route';
-import type { DemoPlayer, DemoStatus } from './player';
+import type { DemoPlayer, DemoStatus, FrameFeatures } from './player';
+import {
+  NO_SEASON_DATE,
+  showcaseAt,
+  type ShowcaseFeature,
+  type ShowcaseTimeline,
+} from './showcase';
 import type { DemoPresetId } from './script';
 
 /** Asks for one frame, as `requestAnimationFrame` does. */
@@ -83,6 +102,39 @@ export interface DemoSnapshot {
    * the bundle, so a corridor that never reached the scene reads 0.
    */
   readonly mappedBuildings: number;
+  /**
+   * #1653: every showcase cue skipped this pass for a feature this run cannot
+   * draw, by `showcase.ts` §`cueName`. Empty when nothing was, and on a run
+   * with no showcase.
+   */
+  readonly skipped: readonly string[];
+  /** #1653: the showcase, as it stands; `undefined` on a run with no showcase. */
+  readonly showcase: ShowcaseSnapshot | undefined;
+}
+
+/** What the showcase publishes, every value read back from the renderer or the frame drawn. */
+export interface ShowcaseSnapshot {
+  /** Which pass of the timeline this is, from 1. */
+  readonly pass: number;
+  /** Ride seconds into this pass. */
+  readonly seconds: number;
+  /** How many of the timeline's cues have fired this pass, skipped ones included. */
+  readonly fired: number;
+  /** The caption on screen, if any. */
+  readonly caption: string | undefined;
+  /** The holiday the VIEW holds (`drawnSeason`), `none` for none. */
+  readonly holiday: string;
+  /** How many people the last frame drawn carried (`SceneFrame.people`). */
+  readonly people: number;
+  /** A digest of the last frame's scenery kinds, which #1542's countryside changes. */
+  readonly scenery: number;
+}
+
+/** A showcase to run on the stage — #1653. */
+export interface ShowcaseRun {
+  readonly timeline: ShowcaseTimeline;
+  /** The features this build has (`showcase-features.ts`). */
+  readonly features: ReadonlySet<ShowcaseFeature>;
 }
 
 export interface DemoStageOptions {
@@ -94,6 +146,21 @@ export interface DemoStageOptions {
   readonly frames: FrameScheduler;
   /** Called with every snapshot, after every drawn frame and every change. */
   readonly publish: (snapshot: DemoSnapshot) => void;
+  /** #1653: the showcase to run, if any. */
+  readonly showcase?: ShowcaseRun | undefined;
+  /** The season a view holds — `three-renderer.ts` §`seasonOf` in the demo. */
+  readonly drawnSeason?: ((view: GameView) => Season | undefined) | undefined;
+}
+
+/** FNV-1a over a frame's scenery kinds: changes when the countryside does. */
+function sceneryDigest(frame: SceneFrame): number {
+  let hash = 0x811c9dc5;
+  for (const item of frame.scatter) {
+    for (let at = 0; at < item.kind.length; at += 1) {
+      hash = Math.imul(hash ^ item.kind.charCodeAt(at), 0x01000193) >>> 0;
+    }
+  }
+  return hash;
 }
 
 export interface DemoStage {
@@ -130,6 +197,55 @@ export function startDemoStage(options: DemoStageOptions): DemoStage {
   let framesDrawn = 0;
   let mappedBuildings = 0;
   let notice: string | undefined;
+  // #1653: the showcase's state, and what it last applied.
+  const showcase = options.showcase;
+  let pass = 1;
+  let realisticLoaded = false;
+  let realisticLeft = false;
+  let appliedWorld: 'stylised' | 'realistic' | undefined;
+  let appliedDate: string | undefined;
+  let features: FrameFeatures | undefined;
+  let lastFrame: SceneFrame | undefined;
+  let shown: ReturnType<typeof showcaseAt> | undefined;
+  const can = (feature: ShowcaseFeature): boolean =>
+    showcase !== undefined &&
+    showcase.features.has(feature) &&
+    (feature !== 'realistic' || (realisticLoaded && !realisticLeft)) &&
+    (feature !== 'countryside' || player.mapData !== undefined);
+
+  /** Tell the view what the timeline says now, where it changed. */
+  const applyShowcase = (): void => {
+    if (showcase === undefined) return;
+    const state = showcaseAt(showcase.timeline, player.rideMs / 1000, can);
+    shown = state;
+    if (state.world !== appliedWorld) {
+      appliedWorld = state.world;
+      const next: WorldQualityState =
+        state.world === 'realistic'
+          ? INITIAL_REALISTIC_QUALITY
+          : { realistic: false, quality: INITIAL_QUALITY };
+      if (next.realistic !== quality.realistic) {
+        quality = next;
+        view.setQuality(worldRung(quality));
+        pacer = new FramePacer();
+      }
+    }
+    if (state.date !== appliedDate) {
+      appliedDate = state.date;
+      const day = parseCalendarDay(state.date);
+      view.setSeason(
+        state.date === NO_SEASON_DATE || day === undefined
+          ? NO_SEASON
+          : seasonOn(
+              day,
+              routeHemisphere(player.profile),
+              routeLatitudeMagnitude(player.profile),
+              true,
+            ),
+      );
+    }
+    features = { people: state.people, countryside: state.countryside };
+  };
 
   const publish = (): void => {
     options.publish({
@@ -141,6 +257,22 @@ export function startDemoStage(options: DemoStageOptions): DemoStage {
       notice,
       mapData: player.mapData,
       mappedBuildings,
+      skipped: shown?.skipped ?? [],
+      showcase:
+        shown === undefined
+          ? undefined
+          : {
+              pass,
+              seconds: player.rideMs / 1000,
+              fired: shown.fired,
+              caption: shown.caption,
+              holiday: options.drawnSeason?.(view)?.holiday ?? 'none',
+              people:
+                lastFrame?.people === undefined
+                  ? 0
+                  : lastFrame.people.near.length + lastFrame.people.far.length,
+              scenery: lastFrame === undefined ? 0 : sceneryDigest(lastFrame),
+            },
     });
   };
 
@@ -150,18 +282,30 @@ export function startDemoStage(options: DemoStageOptions): DemoStage {
     handle = undefined;
     if (!seen()) return;
     player.advance(nowMs);
+    if (showcase !== undefined && player.rideMs >= showcase.timeline.seconds * 1000) {
+      // The timeline's end: the ride from its start line, without a reload.
+      player.stop();
+      player.play();
+      player.advance(nowMs);
+      pass += 1;
+    }
+    applyShowcase();
     const paced = pacer.frame(nowMs, worldRung(quality).frameCap);
     if (paced.frameMs !== undefined && paced.frameMs <= LONGEST_FRAME_MS) {
       const next = nextWorldQuality(quality, { frameMs: paced.frameMs });
       if (next.realistic !== quality.realistic || next.quality.level !== quality.quality.level) {
         view.setQuality(worldRung(next));
-        if (quality.realistic && !next.realistic) notice = REALISTIC_WORLD_LEFT_NOTICE;
+        if (quality.realistic && !next.realistic) {
+          notice = REALISTIC_WORLD_LEFT_NOTICE;
+          realisticLeft = true;
+        }
       }
       quality = next;
     }
     if (paced.draw || redrawOwed) {
-      const frame = player.frame(worldRung(quality));
+      const frame = player.frame(worldRung(quality), features);
       view.render(frame);
+      lastFrame = frame;
       mappedBuildings = frame.mappedBuildings?.buildings.plans.length ?? 0;
       framesDrawn += 1;
       redrawOwed = false;
@@ -192,6 +336,14 @@ export function startDemoStage(options: DemoStageOptions): DemoStage {
   };
 
   void renderer.loadRealisticWorld().then((outcome) => {
+    realisticLoaded = outcome.loaded;
+    // #1653: a showcase in its stylised moment is told only that the world failed.
+    if (!destroyed && showcase !== undefined && !quality.realistic) {
+      if (!outcome.loaded) notice = realisticWorldNotice(outcome);
+      redraw();
+      publish();
+      return;
+    }
     // The page may have gone, or the ladder left realism, while the files arrived.
     if (destroyed || !quality.realistic) return;
     if (outcome.loaded) {
@@ -205,6 +357,7 @@ export function startDemoStage(options: DemoStageOptions): DemoStage {
     publish();
   });
 
+  applyShowcase();
   publish();
   schedule();
 

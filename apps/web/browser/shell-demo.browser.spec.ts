@@ -122,6 +122,13 @@ interface Snapshot {
   /** #1652: the baked route's corridor counts, or `undefined` on the synthetic road. */
   readonly mapData?: { readonly route: string; readonly counts: Record<string, number> };
   readonly mappedBuildings?: number;
+  /** #1653: the showcase cues skipped, and the showcase as it stands. */
+  readonly skipped?: readonly string[];
+  readonly showcase?: {
+    readonly seconds: number;
+    readonly caption?: string;
+    readonly holiday: string;
+  };
 }
 
 interface Gate {
@@ -234,6 +241,8 @@ function installRecorders(): void {
         ...(snapshot.mappedBuildings === undefined
           ? {}
           : { mappedBuildings: snapshot.mappedBuildings }),
+        ...(snapshot.skipped === undefined ? {} : { skipped: snapshot.skipped }),
+        ...(snapshot.showcase === undefined ? {} : { showcase: snapshot.showcase }),
       });
     },
   });
@@ -561,6 +570,40 @@ test.describe('the demo, built and served — #1648', () => {
         page.getByRole('status').filter({ hasText: 'Towns from map data' }),
       ).toContainText('Towns from map data: not available for this route');
       await expect(page.getByText(/OpenStreetMap/)).toHaveCount(0);
+      expect(await findings(context, page, watched)).toEqual([]);
+    });
+  });
+
+  test.describe('the showcase — #1653', () => {
+    test('captions its moments, tells the real view the season, skips what it cannot draw, and asks nothing', async ({
+      context,
+      page,
+    }) => {
+      test.setTimeout(3 * FRAMES_BUDGET_MS);
+      // The realistic world answered 404: its moment is skipped, visibly.
+      const watched = await watch(context, page, { realistic: false });
+      await open(page, 'group', '&showcase');
+      const caption = page.locator('.oyl-demo__caption');
+      await expect(caption).toHaveAttribute('role', 'status');
+      await expect(caption).toHaveText('The stylised world', { timeout: FRAMES_BUDGET_MS });
+      // Past the season's first moment: the season the VIEW holds, read back
+      // through `three-renderer.ts` §`seasonOf`, is Halloween's.
+      await expect
+        .poll(async () => (await last(page))?.showcase?.seconds ?? 0, {
+          timeout: FRAMES_BUDGET_MS,
+        })
+        .toBeGreaterThan(35);
+      const now = await last(page);
+      expect(now?.showcase?.holiday).toBe('halloween');
+      expect(now?.world).toBe('stylised');
+      expect(now?.skipped).toEqual(
+        expect.arrayContaining(['world realistic at 7', 'caption at 7.5']),
+      );
+      const captions = new Set(
+        (await gate(page)).snapshots.flatMap((each) => each.showcase?.caption ?? []),
+      );
+      expect(captions).not.toContain('And the realistic world');
+      expect(captions).toContain('The season from the date: Halloween');
       expect(await findings(context, page, watched)).toEqual([]);
     });
   });

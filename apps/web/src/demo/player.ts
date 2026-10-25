@@ -41,6 +41,7 @@ import { placedRiders, sceneFrame, type SceneInput } from '../game/scene';
 import { scatterSeed } from '../game/scatter';
 import type { GameSensors } from '../game/sensors';
 import { GameSimulation, type GameState } from '../game/simulation';
+import type { CountrysideLever } from '../game/land-class';
 import { corridorOrigin, type CorridorOrigin } from '../game/terrain';
 import { urbanClassMap } from '../game/urban-class';
 import type { BakedRoute, CorridorCounts } from './baked-route';
@@ -49,6 +50,7 @@ import {
   planTour,
   reducedMotionTour,
   type CameraTour,
+  type TourShot,
   type TourWorld,
 } from './camera-tour';
 import { createDemoRide, DEMO_RIDE_CONDITIONS, demoRoad, type DemoRide } from './runner';
@@ -98,10 +100,35 @@ export interface DemoPlayer {
   readonly mapData: { readonly route: string; readonly counts: CorridorCounts } | undefined;
   /**
    * The frame to draw now, with the scenery budget of `rung`, shot by the
-   * camera tour (#1649). Advances nothing.
+   * camera tour (#1649). Advances nothing. `features` switches the people and
+   * #1542's countryside off for the showcase (#1653); both are on by default,
+   * as on every ride.
    */
-  frame(rung: Pick<QualitySettings, 'scatterItems' | 'structureItems' | 'people'>): SceneFrame;
+  frame(
+    rung: Pick<QualitySettings, 'scatterItems' | 'structureItems' | 'people'>,
+    features?: FrameFeatures,
+  ): SceneFrame;
 }
+
+/** What the showcase switches in a frame — #1653. */
+export interface FrameFeatures {
+  /** The people (#1541): off draws nobody, on draws the rung's. */
+  readonly people: boolean;
+  /** #1542's countryside: off is every lever off, the world before it. */
+  readonly countryside: boolean;
+}
+
+/** On, as every ride draws. */
+const ALL_FEATURES: FrameFeatures = { people: true, countryside: true };
+
+/** Every one of #1542's levers: the countryside switched off. */
+const COUNTRYSIDE_OFF: readonly CountrysideLever[] = [
+  'planting',
+  'boundaries',
+  'clutter',
+  'hedge-breaks',
+  'small-stones',
+];
 
 interface Ride {
   readonly simulation: GameSimulation;
@@ -121,6 +148,8 @@ export interface DemoPlayerOptions {
    * tour are kept.
    */
   readonly route?: BakedRoute | undefined;
+  /** #1653: the tour's shots, the showcase's, in place of the preset's own. */
+  readonly shots?: readonly TourShot[] | undefined;
 }
 
 /**
@@ -135,7 +164,7 @@ export function createDemoPlayer(
   const baked = options.route;
   const profile = baked?.profile ?? demoRoad(preset.route);
   const origin: CorridorOrigin = corridorOrigin(profile);
-  const planned = planTour(preset, undefined, profile);
+  const planned = planTour(preset, options.shots, profile);
   const tour = options.reducedMotion ? reducedMotionTour(planned) : planned;
   // #1652: a baked route's corridor, and everything a ride builds from it ONCE
   // at the press (`GameView.tsx`), built once here: the land-class mask, the
@@ -224,7 +253,7 @@ export function createDemoPlayer(
     holdClock() {
       lastNowMs = undefined;
     },
-    frame(rung) {
+    frame(rung, features = ALL_FEATURES) {
       const drawn = ride.simulation.drawnAt(rideMs);
       const others = ride.riders.current().riders.slice(1);
       const input: SceneInput = {
@@ -234,7 +263,8 @@ export function createDemoPlayer(
         riderDistance: drawn.riderDistance,
         scatterItems: rung.scatterItems,
         structureItems: rung.structureItems,
-        people: rung.people,
+        people: features.people ? rung.people : 0,
+        ...(features.countryside ? {} : { countrysideOff: COUNTRYSIDE_OFF }),
         crankAngle: simulatedCrankAngle(drawn.riderDistance),
         pedalling: status === 'playing',
         remoteRiders: others.map((rider, index) => ({

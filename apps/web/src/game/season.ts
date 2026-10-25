@@ -85,11 +85,10 @@ export function deviceToday(): CalendarDay {
 
 /**
  * Parse a strict `YYYY-MM-DD` that names a real day; `undefined` otherwise.
- *
- * @unwired reached only from the owner's page under `apps/web/browser/`
- * (`realistic/config.ts` §`dateFrom`, its `?date=`), which the wiring gate
- * deliberately does not count as an entry point. A ride reads its day from
- * the device (`deviceToday`), never from text.
+ * Read by the owner's page (`realistic/config.ts` §`dateFrom`, its `?date=`)
+ * and by the demo's showcase (`demo/stage.ts`, #1653), whose season moments
+ * are fixed dates. A ride reads its day from the device (`deviceToday`),
+ * never from text.
  */
 export function parseCalendarDay(text: string): CalendarDay | undefined {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);

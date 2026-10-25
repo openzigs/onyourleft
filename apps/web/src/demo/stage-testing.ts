@@ -8,6 +8,7 @@
 import type { GameRenderer, GameView, SceneFrame } from '../game/port';
 import type { QualitySettings } from '../game/quality';
 import type { RealisticWorldOutcome } from '../game/realistic-assets';
+import type { Season } from '../game/season';
 import type { FrameScheduler } from './stage';
 
 /** A frame clock that runs only when the test says, and counts what it was asked. */
@@ -46,6 +47,8 @@ export class SteppedFrames implements FrameScheduler {
 export interface FakeView extends GameView {
   readonly rendered: SceneFrame[];
   readonly qualities: QualitySettings[];
+  /** Every season the view was told, in order (#1653). */
+  readonly seasons: Season[];
 }
 
 export function fakeRenderer(outcome: Promise<RealisticWorldOutcome>): {
@@ -57,14 +60,16 @@ export function fakeRenderer(outcome: Promise<RealisticWorldOutcome>): {
     create(_canvas, settings) {
       const rendered: SceneFrame[] = [];
       const qualities: QualitySettings[] = [settings];
+      const seasons: Season[] = [];
       const view: FakeView = {
         rendered,
         qualities,
+        seasons,
         render: (frame) => void rendered.push(frame),
         prepare: () => Promise.resolve(),
         setQuality: (next) => void qualities.push(next),
         setRiderKit: () => undefined,
-        setSeason: () => undefined,
+        setSeason: (season) => void seasons.push(season),
         resize: () => undefined,
         destroy: () => undefined,
         hasContext: true,
@@ -80,4 +85,9 @@ export function fakeRenderer(outcome: Promise<RealisticWorldOutcome>): {
 /** What a fake view says it is drawing: the world of the last rung it was handed. */
 export function fakeDrawnWorld(view: GameView): QualitySettings['world'] {
   return (view as FakeView).qualities.at(-1)?.world ?? 'stylised';
+}
+
+/** The season a fake view holds: the last it was told, as `three-renderer.ts` §`seasonOf` reads a real one's. */
+export function fakeDrawnSeason(view: GameView): Season | undefined {
+  return (view as FakeView).seasons.at(-1);
 }

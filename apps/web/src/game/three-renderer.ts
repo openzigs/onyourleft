@@ -12978,10 +12978,9 @@ export function riderKitsOf(
 }
 
 /**
- * The season a view holds — #1622.
- *
- * @test-facing `season-wiring.test.tsx` reads it to hold `ThreeGameView.setSeason`
- * to what the product's renderer keeps, in jsdom.
+ * The season a view holds — #1622. `season-wiring.test.tsx` reads it to hold
+ * `ThreeGameView.setSeason` to what the product's renderer keeps, in jsdom,
+ * and the demo's showcase (#1653, `demo/main.tsx`) publishes what it reads.
  */
 export function seasonOf(view: GameView): Season | undefined {
   return view instanceof ThreeGameView ? view.season : undefined;

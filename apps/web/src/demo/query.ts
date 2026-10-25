@@ -7,6 +7,7 @@
  * |---|---|---|
  * | `preset` | which preset is ridden (`presets.ts`) | `climb`, `sprint`, `group`; default `climb` |
  * | `route` | a baked route's map data and road, read from `routes/` (#1652, `baked-route.ts`) | a route id `demo:bake` wrote; absent rides the synthetic road |
+ * | `showcase` | the feature-showcase timeline (#1653, `showcase.ts`), ridden by the `group` preset | present, with no value; `preset`, if given, must be `group` |
  *
  * ⚠️ **Unknown parameters and values are REFUSED**, with a sentence the page
  * shows, as `browser/realistic/config.ts` refuses them: an embedding site that
@@ -19,7 +20,10 @@ import { DEMO_PRESETS } from './presets';
 import type { DemoPreset } from './script';
 
 /** The parameters the page understands. */
-const KNOWN = new Set(['preset', 'route']);
+const KNOWN = new Set(['preset', 'route', 'showcase']);
+
+/** The preset the showcase is ridden by: its last moment is a group (#1653). */
+export const SHOWCASE_PRESET_ID = 'group';
 
 /** What a query asks for, or why it is refused. */
 export type DemoQuery =
@@ -28,6 +32,8 @@ export type DemoQuery =
       readonly preset: DemoPreset;
       /** The baked route asked for, if any: an id in `bake-route.ts`' shape, not yet known to exist. */
       readonly route?: string;
+      /** #1653: whether the showcase timeline runs. */
+      readonly showcase?: true;
     }
   | { readonly ok: false; readonly message: string };
 
@@ -42,16 +48,33 @@ export function parseDemoQuery(search: string): DemoQuery {
       return { ok: false, message: `This demo’s “${key}” setting is given more than once.` };
     }
   }
-  const asked = params.get('preset') ?? 'climb';
+  const showcase = params.get('showcase');
+  if (showcase !== null && showcase !== '') {
+    return {
+      ok: false,
+      message: `This demo’s “showcase” setting takes no value, not “${showcase}”.`,
+    };
+  }
+  if (showcase !== null && (params.get('preset') ?? SHOWCASE_PRESET_ID) !== SHOWCASE_PRESET_ID) {
+    return {
+      ok: false,
+      message: `This demo’s showcase is ridden by the ${SHOWCASE_PRESET_ID} preset.`,
+    };
+  }
+  const asked = params.get('preset') ?? (showcase === null ? 'climb' : SHOWCASE_PRESET_ID);
   const preset = DEMO_PRESETS.find((each) => each.id === asked);
   if (preset === undefined) {
     const names = DEMO_PRESETS.map((each) => each.id).join(', ');
     return { ok: false, message: `This demo’s preset is one of ${names}, not “${asked}”.` };
   }
   const route = params.get('route');
-  if (route === null) return { ok: true, preset };
-  if (!ROUTE_ID.test(route)) {
+  if (route !== null && !ROUTE_ID.test(route)) {
     return { ok: false, message: `This demo has no route called “${route}”.` };
   }
-  return { ok: true, preset, route };
+  return {
+    ok: true,
+    preset,
+    ...(route === null ? {} : { route }),
+    ...(showcase === null ? {} : { showcase: true as const }),
+  };
 }

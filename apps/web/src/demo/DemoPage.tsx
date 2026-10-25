@@ -38,6 +38,14 @@
  * synthetic road neither is shown: nothing is owed. A file that cannot be
  * read rides the synthetic road and says so in the status line.
  *
+ * ## The showcase — #1653
+ *
+ * `?showcase` runs `showcase.ts`' timeline on the group preset: its shots are
+ * the camera tour, and the stage applies its world, season, people and
+ * countryside. Its caption is plain text in its own polite `role="status"`
+ * region, in the HUD's tokens, above the stage, so it covers no panel and is
+ * never read over a sentence.
+ *
  * ## Hidden means paused
  *
  * `visibilitychange` and an `IntersectionObserver` on the canvas tell the
@@ -57,6 +65,7 @@ import { PlanTrace } from '../game/hud/PlanTrace';
 import type { GameRenderer, GameView } from '../game/port';
 import type { QualitySettings } from '../game/quality';
 import type { GameSensors } from '../game/sensors';
+import type { Season } from '../game/season';
 import type { GameState } from '../game/simulation';
 import {
   BAKED_ROUTE_NOTICE_FILE,
@@ -66,6 +75,8 @@ import {
   type ReadDemoFile,
 } from './baked-route';
 import { createDemoPlayer, type DemoStatus } from './player';
+import { SHOWCASE_TIMELINE, showcaseShots } from './showcase';
+import { featuresInBuild } from './showcase-features';
 import { parseDemoQuery } from './query';
 import { DemoSourceOffer } from './SourceOffer';
 import { startDemoStage, type DemoSnapshot, type DemoStage, type FrameScheduler } from './stage';
@@ -84,6 +95,8 @@ export interface DemoPageProps {
   readonly publish: (snapshot: DemoSnapshot) => void;
   /** Reads one of the demo's own files, relative to the page — a baked route's (#1652). */
   readonly readFile: ReadDemoFile;
+  /** The season a view holds — `three-renderer.ts` §`seasonOf` — for the showcase (#1653). */
+  readonly drawnSeason?: ((view: GameView) => Season | undefined) | undefined;
 }
 
 /** What the HUD's two controls say on the demo. */
@@ -142,8 +155,10 @@ export function DemoPage(props: DemoPageProps) {
   const stageRef = useRef<DemoStage | undefined>(undefined);
   const [status, setStatus] = useState<DemoStatus>(props.reducedMotion ? 'paused' : 'playing');
   const [notice, setNotice] = useState<string | undefined>(undefined);
+  const [caption, setCaption] = useState<string | undefined>(undefined);
   const [hud, setHud] = useState<HudView | undefined>(undefined);
   const { renderer, drawnWorld, frames, reducedMotion, observeInView, publish, readFile } = props;
+  const { drawnSeason } = props;
   const asked = query.ok ? query.route : undefined;
   const [load, setLoad] = useState<RouteLoad>(
     asked === undefined ? { kind: 'none' } : { kind: 'loading' },
@@ -169,7 +184,12 @@ export function DemoPage(props: DemoPageProps) {
     const canvas = canvasRef.current;
     if (!query.ok || canvas === null || load.kind === 'loading') return undefined;
     const route = load.kind === 'ready' ? load.route : undefined;
-    const player = createDemoPlayer(query.preset, { reducedMotion, route });
+    const showcase = query.showcase === true;
+    const player = createDemoPlayer(query.preset, {
+      reducedMotion,
+      route,
+      shots: showcase ? showcaseShots(SHOWCASE_TIMELINE) : undefined,
+    });
     if (!reducedMotion) player.play();
     const stage = startDemoStage({
       canvas,
@@ -177,9 +197,12 @@ export function DemoPage(props: DemoPageProps) {
       drawnWorld,
       player,
       frames,
+      showcase: showcase ? { timeline: SHOWCASE_TIMELINE, features: featuresInBuild() } : undefined,
+      drawnSeason,
       publish: (snapshot) => {
         setStatus(snapshot.state);
         setNotice(snapshot.notice);
+        setCaption(snapshot.showcase?.caption);
         setHud({
           state: player.state,
           sensors: player.sensors,
@@ -204,7 +227,17 @@ export function DemoPage(props: DemoPageProps) {
       stage.destroy();
       stageRef.current = undefined;
     };
-  }, [query, load, renderer, drawnWorld, frames, reducedMotion, observeInView, publish]);
+  }, [
+    query,
+    load,
+    renderer,
+    drawnWorld,
+    drawnSeason,
+    frames,
+    reducedMotion,
+    observeInView,
+    publish,
+  ]);
 
   const playing = status === 'playing';
   const routeNotice = load.kind === 'failed' ? load.notice : undefined;
@@ -224,6 +257,23 @@ export function DemoPage(props: DemoPageProps) {
           >
             {DEMO_LABEL}
           </p>
+          {query.showcase === true ? (
+            // Mounted before it has text, so each caption is announced; polite,
+            // as `role="status"` is, so it never cuts a sentence off.
+            <p
+              role="status"
+              className="oyl-demo__caption"
+              style={{
+                background: 'var(--oyl-color-hud-surface)',
+                color: 'var(--oyl-color-hud-ink)',
+                margin: 0,
+                minHeight: '1.5em',
+                padding: 'var(--oyl-space-xs) var(--oyl-space-sm)',
+              }}
+            >
+              {caption}
+            </p>
+          ) : null}
           <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
             <section
               className="oyl-game oyl-game--riding"
