@@ -167,6 +167,17 @@ export const NIGHTLY_CHECKS: readonly NightlyCheck[] = [
   },
   {
     spec: 'realistic.browser.spec.ts',
+    describe: 'the realistic page’s village frame, frozen — #1689',
+    seconds: 'one more load of the owner’s page, about 14 s on a Mac',
+    why:
+      'the owner’s freeze of the realistic village frame (#1689): the decorated village hold ' +
+      'drawn in exactly `REALISTIC_VILLAGE_DRAW_CALLS` calls. Cost, in a world a rider ' +
+      'chooses, read off a page that ships in no build; the furniture merge it counts is held ' +
+      'in the required suite by `realistic-renderer.test.ts` §"the street furniture" and the ' +
+      'stylised world’s one call a surface by `game.browser.spec.ts` §"#1536".',
+  },
+  {
+    spec: 'realistic.browser.spec.ts',
     describe: 'the route’s own season, in the realistic world — #1623',
     seconds: 'four more loads of the owner’s page, about 60 s on a Mac',
     why:

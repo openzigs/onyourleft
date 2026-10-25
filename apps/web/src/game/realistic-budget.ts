@@ -451,6 +451,31 @@ export const REALISTIC_TREE_LEVELS: TreeLevels = {
 export const REALISTIC_WOODED_DRAW_CALLS = 35;
 
 /**
+ * The most draw calls the owner's page may make on its village frame —
+ * `route=village` held at `synthetic-road.ts` §`VILLAGE_HOLD_METRES`, the top
+ * rung, on Halloween with #1624's probe on every anchor in reach: **57**.
+ *
+ * ⚠️ **A freeze, not a budget** — owner ruling on #1689, 2026-10-25. That
+ * frame made 58 calls on `main` with no decoration, against the page's
+ * {@link REALISTIC_WOODED_DRAW_CALLS} of 35, and no gate saw it: every village
+ * feature since #1534 had added calls there. The ruling froze it at its count
+ * plus one for the decoration belt (59), and has each merge lower it in the
+ * same pull request: #1689's own merged the street furniture's lamp posts,
+ * bollards and bins, three materials made from the same numbers, into one
+ * mesh, and the bench into another (`three-renderer.ts` §`FurnitureBelt`),
+ * 58 to 56 calls with the same triangles, so 57. From here a feature that
+ * adds a village call removes one, or asks the owner.
+ *
+ * ⚠️ **Not the village's real ceiling.** The tablet pair (#733 / #1537)
+ * decides that when the device checks resume; the call count does not depend
+ * on the GPU, so the pinned Chromium counts what the tablet would.
+ *
+ * @test-facing held by `realistic.browser.spec.ts` §"#1689", which counts the
+ * frame at the WebGL entry points
+ */
+export const REALISTIC_VILLAGE_DRAW_CALLS = 57;
+
+/**
  * The trees as they were drawn before #617 — the nearest six as full meshes,
  * a hard swap to the impostor, no middle level and no band — ranked together,
  * as {@link REALISTIC_TREE_LEVELS} ranks them.

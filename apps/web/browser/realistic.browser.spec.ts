@@ -35,6 +35,11 @@
  * off its mesh, which must be above nought — so a belt with nothing in it
  * cannot pass by adding no call.
  *
+ * And since #1689, a seventh: **the village frame's freeze**. The decorated
+ * village hold draws exactly `realistic-budget.ts`
+ * §`REALISTIC_VILLAGE_DRAW_CALLS` calls, so a feature that adds a village call
+ * is red until it removes one, and a merge that saves one lowers the number.
+ *
  * And since #1559, a fifth: **the village road**. `?route=village` rides
  * `route.ts` §`villageRoute`, and its hold at `VILLAGE_HOLD_METRES` is
  * validation 0002 AE2's frame: the page's census of the frame it drew holds a
@@ -59,6 +64,7 @@ import { GROUND_BLOB_TRIANGLES } from '../src/game/ground-blob';
 import {
   MAPPED_BUILDING_MAX,
   REALISTIC_DECORATION_TRIANGLES,
+  REALISTIC_VILLAGE_DRAW_CALLS,
   REALISTIC_WOODED_DRAW_CALLS,
 } from '../src/game/realistic-budget';
 
@@ -486,9 +492,9 @@ test.describe('the realistic page’s holiday decorations — #1624', { tag: NIG
     // already makes 58 calls with no decoration at all (2026-10-24, on a Mac
     // and in the pinned Chromium) — every structure kind, the furniture's
     // four kinds, the pavements and the people. The belt's own share of it is
-    // the one call held above; the village frame's 58 is reported in #1624's
-    // pull request rather than hidden under a looser number here. With the
-    // probe and a holiday on, the wooded hold is the frame the ceiling counts.
+    // the one call held above; since #1689 the village frame is frozen at
+    // `REALISTIC_VILLAGE_DRAW_CALLS` by its own test below. With the probe and
+    // a holiday on, the wooded hold is the frame THIS ceiling counts.
     const wooded = await ride(page, `${HELD}&date=2026-10-31&decorations=probe`);
     console.log(
       `#1624 at=2550 with the probe: ${String(wooded.result.lastFrame.calls)} draw calls ` +
@@ -496,6 +502,39 @@ test.describe('the realistic page’s holiday decorations — #1624', { tag: NIG
     );
     expect(wooded.result.lastFrame.calls).toBeLessThanOrEqual(REALISTIC_WOODED_DRAW_CALLS);
     expect(wooded.result.lastFrame.calls).toBe(FRAME_DRAW_CALLS_AT_2550);
+  });
+});
+
+test.describe('the realistic page’s village frame, frozen — #1689', { tag: NIGHTLY }, () => {
+  test('draws the decorated village hold in exactly REALISTIC_VILLAGE_DRAW_CALLS calls', async ({
+    page,
+  }) => {
+    test.setTimeout(REALISTIC_LOAD_BUDGET_MS);
+    // #1624's frame: the village hold, the ladder held at the top rung, on
+    // Halloween with the probe on every anchor in reach — so the decoration
+    // belt's one call is inside the figure, as the owner's ruling counts it.
+    const village = await ride(page, DECORATED);
+    console.log(
+      `#1689 route=village at=${String(VILLAGE_HOLD_METRES)}, decorated: ` +
+        `${String(village.result.lastFrame.calls)} draw calls a frame (the page's mean ` +
+        `${String(village.result.drawCalls)}), ${String(village.result.lastFrame.triangles)} ` +
+        `triangles, frozen at ${String(REALISTIC_VILLAGE_DRAW_CALLS)}`,
+    );
+    // Not vacuous: the village is in frame, and the belt holds the probe.
+    const census = village.page.census;
+    if (census === undefined) throw new Error('the page published no census');
+    expect(census.structures.church.inView).toBeGreaterThanOrEqual(1);
+    expect(census.structures['shop-row'].inView).toBeGreaterThanOrEqual(1);
+    for (const [kind, counted] of Object.entries(census.furniture)) {
+      expect(counted.inView, kind).toBeGreaterThan(0);
+    }
+    expect(village.page.decorations?.triangles ?? 0).toBeGreaterThan(0);
+    // The freeze: no call more — and none fewer, so a merge that saves one
+    // lowers the number in the same pull request (the ruling's step 3).
+    expect(village.result.lastFrame.calls).toBeLessThanOrEqual(REALISTIC_VILLAGE_DRAW_CALLS);
+    expect(village.result.lastFrame.calls).toBe(REALISTIC_VILLAGE_DRAW_CALLS);
+    // A held frame's mean is its count (#1294).
+    expect(village.result.drawCalls).toBe(village.result.lastFrame.calls);
   });
 });
 

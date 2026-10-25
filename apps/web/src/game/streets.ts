@@ -206,12 +206,23 @@ export interface PavementMesh {
 
 /**
  * What stands on a pavement — #1536: a lamp post, a bollard, a bench and a
- * bin. Each is one instanced draw (`three-renderer.ts` §`FurnitureBelt`).
+ * bin. Each surface they wear is one draw (`three-renderer.ts` §`FurnitureBelt`).
  */
 export type FurnitureKind = 'lamp-post' | 'bollard' | 'bench' | 'bin';
 
 /** Every {@link FurnitureKind}, in a fixed order. */
 export const FURNITURE_KINDS: readonly FurnitureKind[] = ['lamp-post', 'bollard', 'bench', 'bin'];
+
+/**
+ * What the street furniture is drawn in, a material and a draw call each —
+ * #1689: **painted** (the lamp post, the bollard and the bin) and **planks**
+ * (the bench). `three-renderer.ts` §`FURNITURE_STYLE` says which kind wears
+ * which.
+ */
+export const FURNITURE_SURFACES = ['painted', 'planks'] as const;
+
+/** One of {@link FURNITURE_SURFACES}. */
+export type FurnitureSurface = (typeof FURNITURE_SURFACES)[number];
 
 /**
  * One piece of street furniture, standing on the pavement's top in the
