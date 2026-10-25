@@ -427,7 +427,13 @@ describe('the browser gate is split into a required run and a nightly one — #8
     // prints its first line 11 s in, and 3 s between the `chromium` run ending
     // and the `game` run starting. So the wrapper holds both stops with 6 s to
     // spare, not 10.
-    const BUILDS_MS = 14_000;
+    // ⚠️ 16 s since #1648, which added a third build (the demo, 0.55 s by its
+    // own count and 0.75 s between the lines either side of it) and a third
+    // web server: from the last build to Playwright's first line took 8.4 to
+    // 8.7 s on #1648's runs 40204135405 and 40207767424, against 7.2 to 7.4 s
+    // on `main` (40200968492, 40199437881). That is about 2 s more, and the
+    // wrapper now holds both stops with 4 s to spare.
+    const BUILDS_MS = 16_000;
     expect(CHROMIUM_PART_MS + GAME_PART_MS + BUILDS_MS).toBeLessThanOrEqual(GATE_STEP_MS);
   });
 });
