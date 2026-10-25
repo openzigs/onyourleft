@@ -291,6 +291,7 @@ import {
   WINDOW_IN_BAY,
   WINDOW_SILL_METRES,
 } from './facade';
+import { settlingBasisWorker } from './basis-worker';
 import { FRONT_PORCH } from './porch';
 import { placedPoint, type HousePlacement } from './house-models';
 import {
@@ -5968,6 +5969,11 @@ export function compressedRealisticLoaders(
   extensions: CompressionExtensions,
   transcoderPath: string = `${import.meta.env.BASE_URL}${REALISTIC_TRANSCODER_DIRECTORY}`,
 ): RealisticLoaders & { readonly dispose: () => void } {
+  // #1683: a transcoder that cannot start fails the load instead of hanging it.
+  // `KTX2Loader` reads its worker's source off this static, which three's
+  // types do not declare. @see basis-worker.ts
+  const withWorker = KTX2Loader as unknown as { BasisWorker: () => void };
+  withWorker.BasisWorker = settlingBasisWorker(withWorker.BasisWorker);
   const ktx2 = new KTX2Loader()
     .setTranscoderPath(transcoderPath)
     // `detectSupport` reads `renderer.extensions` and nothing else of it.
