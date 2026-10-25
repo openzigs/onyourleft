@@ -408,3 +408,13 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   the mapped height. What still holds, unchanged: `roof:shape` and the OSM building type are not in
   the archive, and reading them is still
   [#1557](https://github.com/openzigs/onyourleft/issues/1557).
+- **2026-10-24** — **`places` kind and rank, never a name: see
+  [ADR 0055](0055-place-kinds-and-ranks-from-the-corridor-never-a-name.md)**
+  ([#1631](https://github.com/openzigs/onyourleft/issues/1631), on the owner's ruling (a) of that day
+  on [#1628](https://github.com/openzigs/onyourleft/issues/1628)). ADR 0055 supersedes **D-2.2 in
+  part**: the `places` layer is read, for its `kind`, `kind_detail`, `population_rank` and position
+  only, from the z15 tiles D-2.3 already fetches, as a prior for the urban class. It also adds a
+  fifth kind of record to **D-3.3**'s sentence: *place points with `kind`, `kind_detail` and
+  `population_rank`*. ADR 0055 is **Proposed** until the owner accepts it on #1631, and until then
+  D-2.2 and D-3.3 read as above. What still holds, unchanged: `pois` is not read, no name from any
+  layer is read, `addr_housenumber` is dropped, no OSM identifier is kept, D-5.7, and D-3.1 to D-3.6.
