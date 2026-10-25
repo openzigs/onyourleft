@@ -1,0 +1,12 @@
+{
+  "gpx": {
+    "licence": "CC0-1.0",
+    "source": "a 3 km section of the owner's own ride, exported from Strava, ends far from any home",
+    "confirmed": "2026-10-25"
+  },
+  "sha256": "c4a0883d449ca8ee2492fb83c4c1dac5a32031e16c47ff6601efe9f65f328873",
+  "archiveUrl": "https://tiles.openzigs.com/basemap-us-20260914.pmtiles",
+  "archiveIdentity": "\"d4b735992cf20fdb02af9ea09e097f8f-183\"",
+  "gpxSha256": "1c5b7ed9c4835b1b37da99f5bf8c97bac24213d59c97c4a8f6373105a5edc837",
+  "readerVersion": 3
+}
