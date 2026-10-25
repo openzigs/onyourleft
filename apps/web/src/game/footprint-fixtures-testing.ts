@@ -470,6 +470,120 @@ export function richmondStreetFixture(latitude = FIXTURE_LATITUDE): {
   };
 }
 
+/** A ring as `(x, y)` corners in metres, from its own origin: `x` along the road and `y` out from it. */
+export type ShapeCorners = readonly (readonly [number, number])[];
+
+/**
+ * #1660's shapes, each a ring of corners from its own origin: an L (14 × 10 m
+ * with a 6 × 5 m notch), a T, a U, a Z (two rectangles stepped), a box at
+ * 0.9 rectangularity (14 × 10 m less a 3.5 × 4 m corner), a 12-gon, and a
+ * quadrilateral with one edge 20° off the others' axis.
+ */
+export const ROOF_SHAPES = {
+  ell: [
+    [0, 0],
+    [14, 0],
+    [14, 5],
+    [8, 5],
+    [8, 10],
+    [0, 10],
+  ],
+  tee: [
+    [4.5, 0],
+    [9.5, 0],
+    [9.5, 6],
+    [14, 6],
+    [14, 10],
+    [0, 10],
+    [0, 6],
+    [4.5, 6],
+  ],
+  you: [
+    [0, 0],
+    [14, 0],
+    [14, 10],
+    [10, 10],
+    [10, 5],
+    [4, 5],
+    [4, 10],
+    [0, 10],
+  ],
+  zed: [
+    [0, 0],
+    [8, 0],
+    [8, 4],
+    [14, 4],
+    [14, 9],
+    [6, 9],
+    [6, 5],
+    [0, 5],
+  ],
+  notched: [
+    [0, 0],
+    [14, 0],
+    [14, 6],
+    [10.5, 6],
+    [10.5, 10],
+    [0, 10],
+  ],
+  dodecagon: Array.from({ length: 12 }, (_, index) => {
+    const angle = (2 * Math.PI * index) / 12 + 0.1;
+    return [6 + 6 * Math.cos(angle), 6 + 6 * Math.sin(angle)] as const;
+  }),
+  skewed: [
+    [0, 0],
+    [14, 0],
+    [14 + 10 * Math.tan((20 * Math.PI) / 180), 10],
+    [0, 10],
+  ],
+} as const satisfies Readonly<Record<string, ShapeCorners>>;
+
+/** One of {@link ROOF_SHAPES}. */
+export type RoofShapeName = keyof typeof ROOF_SHAPES;
+
+/** A shape's corners as `(along, lateral)` pairs, its origin at `(along, lateral)`. */
+export function shapeBeside(
+  corners: ShapeCorners,
+  along: number,
+  lateral: number,
+): readonly (readonly [number, number])[] {
+  return corners.map(([x, y]) => [along + x, lateral + y] as const);
+}
+
+/**
+ * #1660's cap fixture: a U whose two arms are 120 m long and 1.6 m wide, a
+ * 1 m base across their ends, and a one-sided saw-tooth of 0.7 m every 5.1 m
+ * along all four of the arms' long walls — each tooth within the snap of the
+ * axis, and too deep for #1540's 0.5 m simplification to remove, so its
+ * walls alone are past `FOOTPRINT_MAX_FAR_TRIANGLES` once more vertices than
+ * `FOOTPRINT_MAX_VERTICES` are kept.
+ */
+export function sawToothYou(): ShapeCorners {
+  const teeth = 0.7;
+  const length = 120;
+  const arm = 1.6;
+  const gap = 2;
+  const step = 5.1;
+  // A long wall from `from` to `to` along x at `y`, its teeth pointing `into` the arm.
+  const wall = (from: number, to: number, y: number, into: number): [number, number][] => {
+    const out: [number, number][] = [];
+    const count = Math.round(Math.abs(to - from) / step);
+    for (let k = 0; k <= count; k += 1) {
+      const x = from + ((to - from) * k) / count;
+      out.push([x, k % 2 === 1 && k < count ? y + into * teeth : y]);
+    }
+    return out;
+  };
+  return [
+    // The first arm's outer wall, out along y = 0; its end; its inner wall back.
+    ...wall(0, length, 0, 1),
+    ...wall(length, 1, arm, -1),
+    // The base, then the second arm's inner wall out and its outer wall back.
+    ...wall(1, length, arm + gap, 1),
+    ...wall(length, 0, 2 * arm + gap, -1),
+  ];
+}
+
 /**
  * #1635's fixture: a terraced street, for the owner's by-eye pair on the
  * realistic page (`?town=terrace`). Along 400 m of level road from 1 000 m,

@@ -20,6 +20,7 @@ import {
   PROBE_DECORATIONS,
   surfacesWithLevers,
   treesWithLevers,
+  splitRoofsWithLevers,
   urbanClassWithLevers,
   windowRevealsWithLevers,
   overhangShadowsWithLevers,
@@ -209,13 +210,27 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     expect(configQuery(parseConfig('?town=mixed&levers=-urban-class'))).toBe(
       `?levers=${encodeURIComponent('-urban-class')}&town=mixed`,
     );
-    // Wired where the harness plans the town, read as text as #1659's lever is above.
+    // Wired where the harness plans the town, read as text as #1659's lever is above. Since
+    // #1660 the harness plans it in `town.ts`, which `town.test.ts` reads by its plans.
     const harness = readFileSync(
       fileURLToPath(new URL('../realistic-harness.ts', import.meta.url)),
       'utf8',
     );
-    expect(harness).toContain('const urban = urbanClassWithLevers(config.leversOff)');
-    expect(harness).toMatch(/FOOTPRINT_MAX_VERTICES,\s+urban,\s+\);/);
+    expect(harness).toContain('plannedTown(mixed, config.leversOff)');
+    const town = readFileSync(fileURLToPath(new URL('./town.ts', import.meta.url)), 'utf8');
+    expect(town).toContain('const urban = urbanClassWithLevers(leversOff)');
+    expect(town).toMatch(/FOOTPRINT_MAX_VERTICES,\s+urban,/);
+  });
+
+  it('pitches the split houses, as the product does, unless #1660’s lever takes it out', () => {
+    expect(LEVERS).toContain('split-roofs');
+    expect(splitRoofsWithLevers([])).toBe(true);
+    // No OTHER lever touches it.
+    expect(splitRoofsWithLevers(LEVERS.filter((lever) => lever !== 'split-roofs'))).toBe(true);
+    expect(splitRoofsWithLevers(parseConfig('?levers=-split-roofs').leversOff)).toBe(false);
+    expect(configQuery(parseConfig('?town=mixed&levers=-split-roofs'))).toBe(
+      `?levers=${encodeURIComponent('-split-roofs')}&town=mixed`,
+    );
   });
 
   it('builds both surfaces’ shaders, bounded, as the product does, unless a #1523 lever takes one out', () => {
