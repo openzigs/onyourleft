@@ -84,6 +84,8 @@ describe('the realistic page’s configuration — ADR 0026 D-12', () => {
     expect(parseConfig('?town=richmond').town).toBe('richmond');
     // #1542: the countryside, for its levers.
     expect(parseConfig('?town=countryside').town).toBe('countryside');
+    // #1635: the terraced street, with `-urban-class` its control.
+    expect(parseConfig('?town=terrace').town).toBe('terrace');
     expect(configQuery(parseConfig('?town=countryside&levers=-land-planting'))).toBe(
       '?levers=-land-planting&town=countryside',
     );
