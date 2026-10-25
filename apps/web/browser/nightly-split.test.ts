@@ -331,7 +331,7 @@ describe('the browser gate is split into a required run and a nightly one — #8
     expect(CHROMIUM_PART_MS + GAME_PART_MS).toBeLessThanOrEqual(GATE_BUDGET_MS);
     // A failed build ends the step before either run starts.
     expect(script).toMatch(
-      /^vite build && vite build --config vite\.browser\.config\.ts \|\| exit 1; playwright test --project chromium /,
+      /^vite build && vite build --config vite\.browser\.config\.ts && vite build --config vite\.demo\.config\.ts \|\| exit 1; playwright test --project chromium /,
     );
     // The game run is not skipped when the chromium run fails (`;`, not
     // `&&`), and the step fails when EITHER did.
@@ -386,7 +386,7 @@ describe('the browser gate is split into a required run and a nightly one — #8
     expect(total).toBeGreaterThanOrEqual(2);
     const [chromium = '', game = ''] = playwrightRuns(webScripts()['test:browser']);
     const BUILD =
-      /^vite build && vite build --config vite\.browser\.config\.ts \|\| exit 1; playwright test /;
+      /^vite build && vite build --config vite\.browser\.config\.ts && vite build --config vite\.demo\.config\.ts \|\| exit 1; playwright test /;
     const shardsWithGame: string[] = [];
     scripts.forEach(([name, script], index) => {
       const runs = playwrightRuns(script);
@@ -477,7 +477,7 @@ describe('the nightly workflow runs what left the required job, and cannot pass 
         // The whole run's project and worker, with this half's files after it.
         expect(run.startsWith(`${whole} `), name).toBe(true);
         expect(script, name).toMatch(
-          /^vite build && vite build --config vite\.browser\.config\.ts && playwright test /,
+          /^vite build && vite build --config vite\.browser\.config\.ts && vite build --config vite\.demo\.config\.ts && playwright test /,
         );
         const filters = run.slice(whole.length).trim().split(/\s+/);
         // Playwright reads a positional argument as a pattern over the path.
