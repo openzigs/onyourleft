@@ -420,9 +420,10 @@ function shaderFunctions(source: string, names: readonly string[]): Record<strin
     (match) => `const ${match[1] ?? ''} = ${match[2] ?? ''};`,
   );
   const functions: string[] = [];
-  // The weathering's own, and the fade they share with #1581's layout.
+  // The weathering's own, and the fade they share with #1581's layout; since
+  // #1735 the guards that skip an effect where it is nought, and the band.
   for (const match of source.matchAll(
-    /float (oylWeather\w+|oylPhoto\w+|oylFadeOf|oylFlag)\(([^)]*)\) \{/g,
+    /(?:float|bool) (oylWeather\w+|oylPhoto\w+|oylFadeOf|oylFlag|oylBand|oyl\w+Near)\(([^)]*)\) \{/g,
   )) {
     let depth = 1;
     let end = (match.index ?? 0) + match[0].length;
@@ -470,10 +471,9 @@ function shaderFunctions(source: string, names: readonly string[]): Record<strin
 
 describe('the weathering, in the shader — #1661', () => {
   it('runs the twin’s rule: the program’s own functions give the twin’s every effect', () => {
-    const { fragment } = compiled('brick');
+    const { fragment, vertex } = compiled('brick');
     const run = shaderFunctions(fragment, [
       'oylWeatherHash',
-      'oylWeatherAgeOf',
       'oylWeatherTile',
       'oylWeatherSplash',
       'oylWeatherStreak',
@@ -520,8 +520,10 @@ describe('the weathering, in the shader — #1661', () => {
         }
       }
     }
+    // #1735: the age is the building's, worked out in the vertex shader.
     const tint = { x: 0.031, y: -0.02, z: 0.05 };
-    expect(f('oylWeatherAgeOf')(tint)).toBe(weatheringAgeOf([tint.x, tint.y, tint.z]));
+    const ageOf = shaderFunctions(vertex, ['oylWeatherAgeOf']).oylWeatherAgeOf;
+    expect(ageOf?.(tint)).toBe(weatheringAgeOf([tint.x, tint.y, tint.z]));
     // The strengths are the twin's, read by the splices that multiply by them.
     expect(constantOf(fragment, 'oylSplashStrength')).toBe(splash.strength);
     expect(constantOf(fragment, 'oylSplashGrey')).toBe(splash.grey);
@@ -612,7 +614,7 @@ describe('the weathering, in the shader — #1661', () => {
       'oylWeatherGrime(oylUpFacing, oylFaceOn, oylUp, oylPlane.x, oylAge, oylWpw)',
     );
     expect(fragment).toContain('oylWeatherPlinth(oylUpFacing, oylFaceOn, oylTop, oylKind, oylUp)');
-    expect(fragment).toContain('float oylAge = oylWeatherAgeOf(vOylTint);');
+    expect(fragment).toContain('float oylAge = vOylAge;');
     // A sill's streak in both window branches, after the window is drawn.
     const streaks = [...fragment.matchAll(/oylWeatherStreak\(\n/g)].map((m) => m.index);
     expect(streaks).toHaveLength(2);
@@ -621,9 +623,8 @@ describe('the weathering, in the shader — #1661', () => {
       expect(each).toBeLessThan(shade);
     }
     // The drip after the shade, on a flat roof's wall.
-    const drip = fragment.indexOf(
-      'oylWeatherDripOn(oylFlags, (oylTop - vOylFacade.y) * oylStoreyM',
-    );
+    const drip = fragment.indexOf('float oylDripBelow = (oylTop - vOylFacade.y) * oylStoreyM;');
+    expect(fragment).toContain('oylWeatherDripOn(oylFlags, oylDripBelow, oylM.x, oylAge, oylMw.y)');
     expect(drip).toBeGreaterThan(shade);
     expect(fragment).toContain('oylFlag(flags, oylFlatRoofFlag)');
     // #1658's band and the foot's band, untouched.
@@ -723,6 +724,244 @@ describe('the weathering, in the shader — #1661', () => {
     const any = (fragment: string): number =>
       resolved(fragment).match(/\btexture(?:2D|Cube)?\s*\(/g)?.length ?? 0;
     expect(any(on.fragment)).toBe(any(off.fragment));
+  });
+});
+
+/** The block in `source` opened by `head`, from `head` to its closing brace. */
+function blockAfter(source: string, head: string): string {
+  const start = source.indexOf(head);
+  if (start < 0) throw new Error(`the program has no ${JSON.stringify(head)}`);
+  let depth = 0;
+  for (let end = start; end < source.length; end += 1) {
+    if (source[end] === '{') depth += 1;
+    if (source[end] === '}') {
+      depth -= 1;
+      if (depth === 0) return source.slice(start, end + 1);
+    }
+  }
+  throw new Error(`${JSON.stringify(head)} is never closed`);
+}
+
+describe('the facade program’s cost, with every effect still drawn — #1735', () => {
+  it('folds each noise lattice coordinate under a thousand once, and still gives the twin’s noise across the fold', () => {
+    const { fragment } = compiled();
+    const noise = blockAfter(fragment, 'float oylWeatherNoise(float a, float b) {');
+    expect(noise.match(/\bmod\(/g)).toHaveLength(2);
+    expect(noise.match(/oylWeatherHashFolded\(/g)).toHaveLength(4);
+    expect(noise).not.toMatch(/oylWeatherHash\(/);
+    const run = shaderFunctions(fragment, ['oylWeatherTile', 'oylWeatherMoss', 'oylWeatherSplash']);
+    const { tile, moss, splash } = WEATHERING;
+    // Lattice cells either side of 999 → 0 for each octave: −1 folds to 999, whose next is 0.
+    const folds = [-0.5, 998.5, 999.5, 1999.5, -1000.5];
+    for (const scale of [tile.scales[0], tile.scales[1], moss.scale, moss.detail, splash.edge]) {
+      for (const fa of folds) {
+        for (const fb of folds) {
+          const a = fa * scale;
+          const b = fb * scale;
+          for (const pw of [0.001, 0.2]) {
+            expect(run.oylWeatherTile?.(a, b, pw)).toBeCloseTo(
+              light({ effect: 'tile' }, at([a, b], 1, pw)),
+              9,
+            );
+            expect(run.oylWeatherMoss?.(a, b, 1, 1, pw)).toBeCloseTo(
+              weatheringAt({ effect: 'moss', facing: 1 }, at([a, b], 1, pw)).moss,
+              9,
+            );
+            const grime = run.oylWeatherSplash?.(0.2, a, 1, pw) ?? Number.NaN;
+            expect(1 - splash.strength * grime).toBeCloseTo(
+              weatheringAt({ effect: 'splash', up: 0.2 }, at([a, b], 1, pw)).light,
+              9,
+            );
+          }
+        }
+      }
+    }
+  });
+
+  it('works a building’s age out once a vertex, not once a fragment', () => {
+    const { vertex, fragment } = compiled();
+    expect(vertex).toContain('flat varying float vOylAge;');
+    expect(fragment).toContain('flat varying float vOylAge;');
+    const aged = vertex.indexOf('vOylAge = oylWeatherAgeOf(vOylTint);');
+    expect(aged).toBeGreaterThan(vertex.indexOf('vOylTint = oylTintOf(oylTint);'));
+    expect(fragment).not.toContain('oylWeatherAgeOf');
+    expect(fragment).toContain('float oylAge = vOylAge;');
+  });
+
+  it('takes the world’s derivatives once, for the face’s normal and its footprint alike', () => {
+    const { fragment } = compiled();
+    expect(fragment.match(/dFdx\(vOylWorld\)/g)).toHaveLength(1);
+    expect(fragment.match(/dFdy\(vOylWorld\)/g)).toHaveLength(1);
+    expect(fragment).not.toContain('fwidth(vOylWorld');
+    expect(fragment).toContain('vec3 oylWN = normalize(cross(oylWdx, oylWdy));');
+    expect(fragment).toContain('vec3 oylWfw = abs(oylWdx) + abs(oylWdy);');
+  });
+
+  it('works the moss out only on a face that faces up past its lowest facing, where it is not nought', () => {
+    const { fragment } = compiled();
+    const run = shaderFunctions(fragment, ['oylWeatherMoss']);
+    const mossOf = run.oylWeatherMoss;
+    if (mossOf === undefined) throw new Error('no oylWeatherMoss');
+    const low = constantOf(fragment, 'oylMossFaceLow');
+    expect(low).toBe(WEATHERING.moss.facing[0]);
+    let grown = 0;
+    let patches = 0;
+    for (let k = 0; k < 400; k += 1) {
+      const a = k * 1.37 - 200;
+      const b = k * 0.93 + 7;
+      for (const pw of [0.001, 0.3]) {
+        // At and under the guard's facing, the effect is nought: skipping it changes nothing.
+        expect(mossOf(a, b, low, 1, pw)).toBe(0);
+        expect(mossOf(a, b, low * 0.5, 1, pw)).toBe(0);
+        // Past it, some of the roof is mossed, and the early return out of a patch changes nothing.
+        const up = mossOf(a, b, 1, 1, pw);
+        const twin = weatheringAt({ effect: 'moss', facing: 1 }, at([a, b], 1, pw)).moss;
+        expect(up).toBeCloseTo(twin, 9);
+        if (up > 0) grown += 1;
+        else patches += 1;
+      }
+    }
+    expect(grown).toBeGreaterThan(50);
+    expect(patches).toBeGreaterThan(50);
+    const guarded = blockAfter(fragment, 'if (oylFaceOn > 0.5 && oylUpFacing > oylMossFaceLow) {');
+    expect(guarded).toContain(
+      'oylWeatherMoss(oylPlane.x, oylPlane.y, oylUpFacing, oylAge, oylWpw)',
+    );
+    expect(fragment.match(/oylWeatherMoss\(oylPlane/g)).toHaveLength(1);
+  });
+
+  it('works the splash out only under its highest top on an upright face, where it is not nought', () => {
+    const { fragment } = compiled('render');
+    const run = shaderFunctions(fragment, ['oylWeatherGrime']);
+    const grimeOf = run.oylWeatherGrime;
+    if (grimeOf === undefined) throw new Error('no oylWeatherGrime');
+    const high = constantOf(fragment, 'oylSplashHigh');
+    expect(high).toBe(WEATHERING.splash.top[1]);
+    let grimed = 0;
+    for (let k = 0; k < 300; k += 1) {
+      const a = k * 0.173 - 20;
+      for (const pw of [0.001, 0.2]) {
+        expect(grimeOf(0, 1, high, a, 1, pw)).toBe(0);
+        expect(grimeOf(0, 1, high + 0.5, a, 1, pw)).toBe(0);
+        expect(grimeOf(0.3, 1, 0.1, a, 1, pw)).toBe(0);
+        expect(grimeOf(0, 0, 0.1, a, 1, pw)).toBe(0);
+        if (grimeOf(0, 1, 0.1, a, 1, pw) > 0) grimed += 1;
+      }
+    }
+    expect(grimed).toBe(600);
+    const guarded = blockAfter(
+      fragment,
+      'if (oylUp < oylSplashHigh && oylFaceOn > 0.5 && oylUpFacing < 0.3) {',
+    );
+    expect(guarded).toContain(
+      'oylWeatherGrime(oylUpFacing, oylFaceOn, oylUp, oylPlane.x, oylAge, oylWpw)',
+    );
+    expect(guarded).toContain('* (1.0 - oylSplashStrength * oylGrime);');
+  });
+
+  it('works a sill’s streak and a parapet’s drip out only near them, where they are not nought', () => {
+    const { fragment } = compiled();
+    const run = shaderFunctions(fragment, [
+      'oylStreakNear',
+      'oylDripNear',
+      'oylWeatherStreak',
+      'oylWeatherDripOn',
+    ]);
+    const { oylStreakNear: near, oylDripNear: dripNear } = run;
+    const { oylWeatherStreak: streakOf, oylWeatherDripOn: dripOf } = run;
+    if (!near || !dripNear || !streakOf || !dripOf)
+      throw new Error('a guard or an effect is missing');
+    const counted = { near: 0, far: 0, dark: 0, dripNear: 0, dripFar: 0, dripped: 0 };
+    for (let below = -0.3; below <= 1.4; below += 0.01) {
+      for (let across = -1; across <= 1; across += 0.05) {
+        for (const pw of [0.002, 0.05]) {
+          for (const shown of [0, 1]) {
+            const isNear = Boolean(near(shown, below, across, 0.55, pw));
+            const dark = shown * streakOf(below, across, 0.55, across * 7, 1, 1, pw);
+            if (isNear) counted.near += 1;
+            else {
+              counted.far += 1;
+              expect(dark).toBe(0);
+            }
+            if (dark > 0) counted.dark += 1;
+          }
+          for (const flags of [0, STYLE_FLAT_ROOF, STYLE_FLAT_ROOF + STYLE_EAVES]) {
+            const isNear = Boolean(dripNear(flags, below, pw));
+            const drip = dripOf(flags, below, across * 7, 1, pw);
+            if (isNear) counted.dripNear += 1;
+            else {
+              counted.dripFar += 1;
+              expect(drip).toBe(0);
+            }
+            if (drip > 0) counted.dripped += 1;
+          }
+        }
+      }
+    }
+    for (const value of Object.values(counted)) expect(value).toBeGreaterThan(100);
+    // Each splice asks its guard first.
+    const streaks = [...fragment.matchAll(/if \(oylStreakNear\(oylShown, oylStreakBelow, /g)];
+    expect(streaks).toHaveLength(2);
+    for (const each of streaks) {
+      const guarded = blockAfter(fragment.slice(each.index), 'if (oylStreakNear(');
+      expect(guarded).toContain('oylWeatherStreak(\n');
+    }
+    expect(fragment.match(/oylWeatherStreak\(\n/g)).toHaveLength(2);
+    const dripped = blockAfter(fragment, 'if (oylDripNear(oylFlags, oylDripBelow, oylMw.y)) {');
+    expect(dripped).toContain('oylWeatherDripOn(oylFlags, oylDripBelow, oylM.x, oylAge, oylMw.y)');
+  });
+
+  it('works a window’s reveal out only in its opening, where its outs are not multiplied by nought', () => {
+    const { fragment } = compiled();
+    // The sash's (and so the dormer's), the casement's and the curtain wall's.
+    const sites = [
+      ['if (oylOpen > 0.0) {\n      oylRevealOf(oylLocal, ', 'vec2 oylQ = oylLocal;'],
+      [
+        'if (oylInner * oylShown > 0.0) {\n          oylRevealOf(oylAt * oylToM, ',
+        'vec2 oylQ = oylAt * oylToM;',
+      ],
+      ['if (oylOpen > 0.0) {\n          oylRevealOf(oylP, ', 'vec2 oylQ = oylP;'],
+    ] as const;
+    for (const [guard, unshifted] of sites) {
+      const at = fragment.indexOf(guard);
+      expect(at, guard).toBeGreaterThan(0);
+      // Out of the opening: the glass unshifted, all of it seen, the side lit, no shade.
+      const before = fragment.slice(at - 200, at);
+      expect(before).toContain(unshifted);
+      expect(before).toMatch(/(?:oylSeen|float oylSeen) = 1\.0;/);
+    }
+    // Every call of the reveal is one of the three, and the sash's opening is
+    // the product its glass and its side are multiplied by.
+    expect(fragment.match(/oylRevealOf\(/g)).toHaveLength(4);
+    expect(fragment).toContain('glass = oylOpen * oylSeen * (1.0 - oylRailOn);');
+    expect(fragment).toContain('side = oylOpen * (1.0 - oylSeen);');
+    expect(fragment).toContain(
+      'float oylPaneShare = oylInner * oylSeen * (1.0 - oylBars) * oylShown;',
+    );
+    expect(fragment).toContain('float oylSide = oylInner * (1.0 - oylSeen) * oylShown;');
+    expect(fragment).toContain('float oylPaneOn = oylOpen * oylSeen;');
+  });
+
+  it('works a sill’s shadow out only under the sill, where its band is not nought', () => {
+    const { fragment } = compiled();
+    const band = shaderFunctions(fragment, ['oylBand']).oylBand;
+    if (band === undefined) throw new Error('no oylBand');
+    for (let k = 0; k < 200; k += 1) {
+      const lo = 0.8 + (k % 7) * 0.1;
+      const cast = (k % 11) * 0.05;
+      const pw = 0.001 + (k % 5) * 0.01;
+      // The sill's shadow's band runs from its cast's foot up to the sill's foot, softened by pw.
+      expect(band(lo + pw, lo - cast, lo, pw)).toBe(0);
+      expect(band(lo + pw + 0.3, lo - cast, lo, pw)).toBe(0);
+      if (cast > 0.05) expect(band(lo - cast * 0.5, lo - cast, lo, pw)).toBeGreaterThan(0);
+    }
+    expect(fragment).toContain(
+      'return step(0.0001, s.z)\n      * oylBand(p.y, lo.y - max(oylCast.y, 0.0), lo.y, pw.y)',
+    );
+    expect(fragment).toContain('sillShade = p.y < oylSillLo.y + pw.y\n      ? oylSillShadeOf(p, ');
+    expect(fragment).toContain(
+      'float oylSillShade = oylAt.y < oylSillLo.y + oylW.y\n          ? oylSillShadeOf(oylAt * oylToM, ',
+    );
   });
 });
 

@@ -15011,11 +15011,16 @@ function overhangGlsl(built: boolean): string {
 /**
  * #1661's hash, in GLSL — `facade.ts` §`weatheringHash`: what the vertex
  * shader lays a building's photograph by and the fragment shader weathers it
- * by, from its seeded tint.
+ * by, from its seeded tint. Since #1735 in two: `oylWeatherHashFolded` takes
+ * its numbers already folded under a thousand, so that the noise folds each
+ * lattice coordinate once rather than once a corner.
  */
 const WEATHER_HASH_GLSL = /* glsl */ `
+  float oylWeatherHashFolded(float a, float b) {
+    return fract(sin(a * 127.1 + b * 311.7) * 43758.5453);
+  }
   float oylWeatherHash(float a, float b) {
-    return fract(sin(mod(a, 1000.0) * 127.1 + mod(b, 1000.0) * 311.7) * 43758.5453);
+    return oylWeatherHashFolded(mod(a, 1000.0), mod(b, 1000.0));
   }
 `;
 
@@ -15035,6 +15040,9 @@ const WEATHER_PHOTO_GLSL = /* glsl */ `
   float oylPhotoShiftVOf(vec3 tint) {
     return oylWeatherHash(tint.z * 1000.0 + 29.0, tint.x * 1000.0);
   }
+  float oylWeatherAgeOf(vec3 tint) {
+    return oylWeatherHash(tint.x * 1000.0, tint.y * 1000.0 + tint.z * 7000.0);
+  }
 `;
 
 /**
@@ -15044,10 +15052,13 @@ const WEATHER_PHOTO_GLSL = /* glsl */ `
  * neighbours wearing one photograph do not share one brick's phase. Three
  * builds the normal map's frame from its coordinates' derivatives, so the
  * relief turns with the colour. No texture is fetched twice. And the
- * fragment's place in the world, for the weathering's noise.
+ * fragment's place in the world, for the weathering's noise; since #1735 the
+ * building's age, which is the building's and so is worked out once a vertex
+ * rather than once a fragment.
  */
 const WEATHER_VERTEX_GLSL = /* glsl */ `
 vOylWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;
+vOylAge = oylWeatherAgeOf(vOylTint);
 float oylPhotoTurn = oylPhotoTurnOf(vOylTint);
 vec2 oylPhotoShift = vec2(oylPhotoShiftUOf(vOylTint), oylPhotoShiftVOf(vOylTint));
 #ifdef USE_MAP
@@ -15072,6 +15083,7 @@ function weatheringGlsl(built: boolean, surface: StructureSurface): string {
   const parged = surface === 'render' || surface === 'concrete';
   return /* glsl */ `
   varying vec3 vOylWorld;
+  flat varying float vOylAge;
   const float oylYoungest = ${glslFloat(WEATHERING.youngest)};
   const float oylTileNear = ${glslFloat(tile.scales[0])};
   const float oylTileFar = ${glslFloat(tile.scales[1])};
@@ -15113,12 +15125,13 @@ function weatheringGlsl(built: boolean, surface: StructureSurface): string {
     float fb = b - ib;
     float ua = fa * fa * (3.0 - 2.0 * fa);
     float ub = fb * fb * (3.0 - 2.0 * fb);
-    float lo = mix(oylWeatherHash(ia, ib), oylWeatherHash(ia + 1.0, ib), ua);
-    float hi = mix(oylWeatherHash(ia, ib + 1.0), oylWeatherHash(ia + 1.0, ib + 1.0), ua);
+    float ma = mod(ia, 1000.0);
+    float mb = mod(ib, 1000.0);
+    float na = ma + 1.0 - 1000.0 * step(998.5, ma);
+    float nb = mb + 1.0 - 1000.0 * step(998.5, mb);
+    float lo = mix(oylWeatherHashFolded(ma, mb), oylWeatherHashFolded(na, mb), ua);
+    float hi = mix(oylWeatherHashFolded(ma, nb), oylWeatherHashFolded(na, nb), ua);
     return mix(lo, hi, ub);
-  }
-  float oylWeatherAgeOf(vec3 tint) {
-    return oylWeatherHash(tint.x * 1000.0, tint.y * 1000.0 + tint.z * 7000.0);
   }
   float oylWeatherShare(float age) {
     return oylYoungest + (1.0 - oylYoungest) * age;
@@ -15166,8 +15179,16 @@ function weatheringGlsl(built: boolean, surface: StructureSurface): string {
   float oylWeatherDripOn(float flags, float below, float a, float age, float pw) {
     return oylFlag(flags, oylFlatRoofFlag) * oylWeatherDrip(below, a, age, pw);
   }
+  bool oylStreakNear(float shown, float below, float across, float halfWidth, float pw) {
+    return shown > 0.0 && below > -pw && below < oylStreakM && abs(across) < halfWidth + pw;
+  }
+  bool oylDripNear(float flags, float below, float pw) {
+    return oylFlag(flags, oylFlatRoofFlag) > 0.5 && below > -pw && below < oylDripM;
+  }
   float oylWeatherMoss(float a, float b, float facing, float age, float pw) {
     float where = smoothstep(oylMossLow, oylMossHigh, oylWeatherNoise(a / oylMossScale + 3.1, b / oylMossScale + 5.7));
+    // #1735: out of a patch it is nought, so its thickness is not worked out — an 8 m patch's, so a branch its pixels take together.
+    if (where <= 0.0) return 0.0;
     float thick = mix(0.4 + 1.2 * oylWeatherNoise(a / oylMossDetail + 8.3, b / oylMossDetail + 1.9), 1.0, oylFadeOf(pw / oylMossDetail));
     float up = smoothstep(oylMossFaceLow, oylMossFaceHigh, facing);
     return oylMossStrength * oylWeatherShare(age) * where * thick * up;
@@ -15185,24 +15206,38 @@ function weatheringGlsl(built: boolean, surface: StructureSurface): string {
  * (`oylAge`, `oylWpw`) are read by the sills' streaks and the drip after it.
  */
 const WEATHER_CLADDING_GLSL = /* glsl */ `
-    // #1661: the weathering. Derivatives here, out of every per-fragment branch.
-    vec3 oylWN = normalize(cross(dFdx(vOylWorld), dFdy(vOylWorld)));
-    float oylWpw = max(max(max(fwidth(vOylWorld.x), fwidth(vOylWorld.y)), fwidth(vOylWorld.z)), 0.00001);
+    // #1661: the weathering. Derivatives here, out of every per-fragment branch;
+    // since #1735 one pair of them, for the face's normal and its footprint alike
+    // (fwidth is |dFdx| + |dFdy|), and the building's age from its vertices.
+    vec3 oylWdx = dFdx(vOylWorld);
+    vec3 oylWdy = dFdy(vOylWorld);
+    vec3 oylWN = normalize(cross(oylWdx, oylWdy));
+    vec3 oylWfw = abs(oylWdx) + abs(oylWdy);
+    float oylWpw = max(max(max(oylWfw.x, oylWfw.y), oylWfw.z), 0.00001);
     float oylUpFacing = abs(oylWN.y);
     vec2 oylPlane = vec2(
       oylWeatherPlaneA(oylUpFacing, oylWN.x, oylWN.z, vOylWorld.x, vOylWorld.z),
       oylWeatherPlaneB(oylUpFacing, vOylWorld.y, vOylWorld.z)
     );
-    float oylAge = oylWeatherAgeOf(vOylTint);
+    float oylAge = vOylAge;
     float oylFaceOn = step(-0.5, oylTop);
     diffuseColor.rgb *= oylWeatherTile(oylPlane.x, oylPlane.y, oylWpw);
     float oylPitched = step(0.3, oylUpFacing) * (1.0 - step(0.97, oylUpFacing));
     diffuseColor.rgb *= 1.0 - oylPitched * oylFaceOn * oylWeatherCourses(vOylFacade.y, oylAge);
-    diffuseColor.rgb = mix(diffuseColor.rgb, oylMossC, oylFaceOn * oylWeatherMoss(oylPlane.x, oylPlane.y, oylUpFacing, oylAge, oylWpw));
+    // #1735: moss only where it can be — on a drawn face that faces up past its
+    // lowest facing, where oylWeatherMoss is nought — a face's, so a branch its
+    // pixels take together. A wall pays none of its two noises.
+    if (oylFaceOn > 0.5 && oylUpFacing > oylMossFaceLow) {
+      diffuseColor.rgb = mix(diffuseColor.rgb, oylMossC, oylWeatherMoss(oylPlane.x, oylPlane.y, oylUpFacing, oylAge, oylWpw));
+    }
     float oylUp = mix(vOylFacade.y, vOylFacade.y * oylStoreyM, oylStoreyed);
-    float oylGrime = oylWeatherGrime(oylUpFacing, oylFaceOn, oylUp, oylPlane.x, oylAge, oylWpw);
-    diffuseColor.rgb = mix(diffuseColor.rgb, vec3(dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722))), oylSplashGrey * oylGrime)
-      * (1.0 - oylSplashStrength * oylGrime);
+    // #1735: the splash only under its highest top, on an upright drawn face,
+    // where oylWeatherGrime is nought: a band along the wall's foot.
+    if (oylUp < oylSplashHigh && oylFaceOn > 0.5 && oylUpFacing < 0.3) {
+      float oylGrime = oylWeatherGrime(oylUpFacing, oylFaceOn, oylUp, oylPlane.x, oylAge, oylWpw);
+      diffuseColor.rgb = mix(diffuseColor.rgb, vec3(dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722))), oylSplashGrey * oylGrime)
+        * (1.0 - oylSplashStrength * oylGrime);
+    }
     float oylPlinth = oylWeatherPlinth(oylUpFacing, oylFaceOn, oylTop, oylKind, oylUp);
     float oylParging = oylParged * oylPlinth;
     diffuseColor.rgb *= 1.0 + oylPargeLift * oylParging;
@@ -15212,20 +15247,30 @@ const WEATHER_CLADDING_GLSL = /* glsl */ `
 /** #1661's streaks under a sash's sill (§2 of {@link facadeFragmentGlsl}): its span and overrun. */
 const WEATHER_SASH_STREAK_GLSL = /* glsl */ `
         float oylSillSpan = mix(oylWinW * 0.5, oylWinW + oylMullion * 0.5, oylPaired) + oylSillOver;
-        diffuseColor.rgb *= 1.0 - oylShown * oylWeatherStreak(
-          oylSillM - oylSillDepth - oylP.y, oylP.x, oylSillSpan, oylM.x, oylStreakAt, oylAge, oylMw.x
-        );`;
+        float oylStreakBelow = oylSillM - oylSillDepth - oylP.y;
+        if (oylStreakNear(oylShown, oylStreakBelow, oylP.x, oylSillSpan, oylMw.x)) {
+          diffuseColor.rgb *= 1.0 - oylShown * oylWeatherStreak(
+            oylStreakBelow, oylP.x, oylSillSpan, oylM.x, oylStreakAt, oylAge, oylMw.x
+          );
+        }`;
 
 /** #1661's streaks under a casement's sill (§2 of {@link facadeFragmentGlsl}), in metres. */
 const WEATHER_CASEMENT_STREAK_GLSL = /* glsl */ `
-        diffuseColor.rgb *= 1.0 - oylShown * oylWeatherStreak(
-          (oylWB - oylSillU - oylAt.y) * oylStoreyM, (oylAt.x - 0.5) * vOylStyle.z,
-          (0.5 - oylWL + oylSillA) * vOylStyle.z, oylM.x, oylStreakAt, oylAge, oylMw.x
-        );`;
+        float oylStreakBelow = (oylWB - oylSillU - oylAt.y) * oylStoreyM;
+        float oylStreakAcross = (oylAt.x - 0.5) * vOylStyle.z;
+        float oylStreakHalf = (0.5 - oylWL + oylSillA) * vOylStyle.z;
+        if (oylStreakNear(oylShown, oylStreakBelow, oylStreakAcross, oylStreakHalf, oylMw.x)) {
+          diffuseColor.rgb *= 1.0 - oylShown * oylWeatherStreak(
+            oylStreakBelow, oylStreakAcross, oylStreakHalf, oylM.x, oylStreakAt, oylAge, oylMw.x
+          );
+        }`;
 
 /** #1661's drip down a flat roof's wall from its parapet (§3 of {@link facadeFragmentGlsl}). */
 const WEATHER_DRIP_GLSL = /* glsl */ `
-      diffuseColor.rgb *= 1.0 - oylWeatherDripOn(oylFlags, (oylTop - vOylFacade.y) * oylStoreyM, oylM.x, oylAge, oylMw.y);`;
+      float oylDripBelow = (oylTop - vOylFacade.y) * oylStoreyM;
+      if (oylDripNear(oylFlags, oylDripBelow, oylMw.y)) {
+        diffuseColor.rgb *= 1.0 - oylWeatherDripOn(oylFlags, oylDripBelow, oylM.x, oylAge, oylMw.y);
+      }`;
 
 /**
  * {@link CLADDING_HELPERS_GLSL}, a mapped building's varyings, #1659's reveal
@@ -15266,13 +15311,20 @@ function facadeCommonGlsl(
     vec2 oylLo = vec2(-oylHalfW + oylSashFrame, win.z + oylSashFrame);
     vec2 oylHi = vec2(oylHalfW - oylSashFrame, oylHead - oylSashFrame);
     float oylInner = oylRect(oylLocal, oylLo, oylHi, pw);
-    vec2 oylQ;
-    float oylSeen;
-    oylRevealOf(oylLocal, oylLo, oylHi, pw, e, s, oylQ, oylSeen, sideLit, reveal);
+    float oylOpen = oylInner * oylOuter;
+    // #1735: the reveal only in the opening. Outside it every one of its outs
+    // is multiplied by the opening's nought, so the wall round a window, most
+    // of a facade, pays none of it.
+    vec2 oylQ = oylLocal;
+    float oylSeen = 1.0;
+    sideLit = 1.0;
+    reveal = 0.0;
+    if (oylOpen > 0.0) {
+      oylRevealOf(oylLocal, oylLo, oylHi, pw, e, s, oylQ, oylSeen, sideLit, reveal);
+    }
     // The meeting rail is the sashes', behind the frame: where the glass is seen.
     float oylRailOn = (1.0 - picture)
       * (1.0 - smoothstep(oylRail * 0.5 - pw.y, oylRail * 0.5 + pw.y, abs(oylQ.y - (win.z + win.y * 0.5))));
-    float oylOpen = oylInner * oylOuter;
     glass = oylOpen * oylSeen * (1.0 - oylRailOn);
     side = oylOpen * (1.0 - oylSeen);
     frame = max(oylOuter - glass - side, 0.0);
@@ -15285,7 +15337,10 @@ function facadeCommonGlsl(
     vec2 oylSillLo = vec2(-oylSpan - oylSillOver, win.z - oylSillDepth);
     vec2 oylSillHi = vec2(oylSpan + oylSillOver, win.z);
     sill = oylRect(p, oylSillLo, oylSillHi, pw) * (1.0 - oylOuter);
-    sillShade = oylSillShadeOf(p, oylSillLo, oylSillHi, pw, s) * (1.0 - sill) * (1.0 - oylOuter);
+    // #1735: the sill's shadow only under the sill, where its band is not nought.
+    sillShade = p.y < oylSillLo.y + pw.y
+      ? oylSillShadeOf(p, oylSillLo, oylSillHi, pw, s) * (1.0 - sill) * (1.0 - oylOuter)
+      : 0.0;
   }
 `;
 }
@@ -15297,10 +15352,13 @@ function facadeCommonGlsl(
  * as the sun comes round to graze the wall. `oylEavesShade` is the band's.
  */
 const OVERHANG_SHADE_GLSL = /* glsl */ `
-      float oylBelowTop = (oylTop - vOylFacade.y) * oylStoreyM;
-      float oylSunShadow = 1.0 - (1.0 - oylOverhangShade) * clamp(oylSunF.z / oylOverhangSquare, 0.0, 1.0)
-        * oylOverhangShadow(oylBelowTop - oylEavesEdge, oylEavesOverhang, oylSunF, oylMw.y, oylTop * oylStoreyM);
-      oylEavesShade = mix(oylEavesShade, min(oylEavesShade, oylSunShadow), oylFlag(oylFlags, oylEavesFlag));`;
+      // #1735: on a wall with eaves only — the building's flag, so a branch its pixels take together.
+      if (oylFlag(oylFlags, oylEavesFlag) > 0.5) {
+        float oylBelowTop = (oylTop - vOylFacade.y) * oylStoreyM;
+        float oylSunShadow = 1.0 - (1.0 - oylOverhangShade) * clamp(oylSunF.z / oylOverhangSquare, 0.0, 1.0)
+          * oylOverhangShadow(oylBelowTop - oylEavesEdge, oylEavesOverhang, oylSunF, oylMw.y, oylTop * oylStoreyM);
+        oylEavesShade = min(oylEavesShade, oylSunShadow);
+      }`;
 
 /**
  * #1636's curtain wall, in GLSL — `facade.ts` §`curtainWallPartAt` from the
@@ -15325,12 +15383,15 @@ const CURTAIN_WALL_GLSL = /* glsl */ `
         float oylK = floor(oylP.x / oylModW);
         vec2 oylLo = vec2(oylK * oylModW + oylCurtainMullion * 0.5, oylCurtainSpandrel + oylCurtainMullion * 0.5);
         vec2 oylHi = vec2((oylK + 1.0) * oylModW - oylCurtainMullion * 0.5, oylStoreyM);
-        vec2 oylQ;
-        float oylSeen;
-        float oylSideLit;
-        float oylShadeOn;
-        oylRevealOf(oylP, oylLo, oylHi, oylMw, oylEyeF, oylSunF, oylQ, oylSeen, oylSideLit, oylShadeOn);
         float oylOpen = (1.0 - oylSpandrel) * (1.0 - oylBars);
+        // #1735: only where the glass is open, as the sash's.
+        vec2 oylQ = oylP;
+        float oylSeen = 1.0;
+        float oylSideLit = 1.0;
+        float oylShadeOn = 0.0;
+        if (oylOpen > 0.0) {
+          oylRevealOf(oylP, oylLo, oylHi, oylMw, oylEyeF, oylSunF, oylQ, oylSeen, oylSideLit, oylShadeOn);
+        }
         float oylPaneOn = oylOpen * oylSeen;
         float oylSide = oylOpen * (1.0 - oylSeen);
         vec3 oylPaneC = oylCurtainGlassC * (1.0 - oylRevealShade * oylShadeOn);
@@ -15601,11 +15662,14 @@ function facadeFragmentGlsl(overhangs: boolean, weathering: boolean): string {
         float oylInner = oylRect(oylAt, oylLo, oylHi, oylW);
         // #1659: the reveal, in metres — the bay as wide as the wall's style lays it.
         vec2 oylToM = vec2(vOylStyle.z, oylStoreyM);
-        vec2 oylQ;
-        float oylSeen;
-        float oylSideLit;
-        float oylShadeOn;
-        oylRevealOf(oylAt * oylToM, oylLo * oylToM, oylHi * oylToM, oylW * oylToM, oylEyeF, oylSunF, oylQ, oylSeen, oylSideLit, oylShadeOn);
+        // #1735: only in the opening, as the sash's: outside it every out is multiplied by nought.
+        vec2 oylQ = oylAt * oylToM;
+        float oylSeen = 1.0;
+        float oylSideLit = 1.0;
+        float oylShadeOn = 0.0;
+        if (oylInner * oylShown > 0.0) {
+          oylRevealOf(oylAt * oylToM, oylLo * oylToM, oylHi * oylToM, oylW * oylToM, oylEyeF, oylSunF, oylQ, oylSeen, oylSideLit, oylShadeOn);
+        }
         // The mullion and the transom are the glazing's, behind the frame: where the glass is seen.
         vec2 oylGlassAt = oylQ / oylToM;
         float oylBars = max(
@@ -15618,8 +15682,10 @@ function facadeFragmentGlsl(overhangs: boolean, weathering: boolean): string {
         vec2 oylSillLo = vec2(oylWL - oylSillA, oylWB - oylSillU);
         vec2 oylSillHi = vec2(oylWR + oylSillA, oylWB);
         float oylSill = oylRect(oylAt, oylSillLo, oylSillHi, oylW) * oylShown;
-        float oylSillShade = oylSillShadeOf(oylAt * oylToM, oylSillLo * oylToM, oylSillHi * oylToM, oylW * oylToM, oylSunF)
-          * (1.0 - oylSill) * (1.0 - oylOuter) * oylShown;
+        float oylSillShade = oylAt.y < oylSillLo.y + oylW.y
+          ? oylSillShadeOf(oylAt * oylToM, oylSillLo * oylToM, oylSillHi * oylToM, oylW * oylToM, oylSunF)
+            * (1.0 - oylSill) * (1.0 - oylOuter) * oylShown
+          : 0.0;
         vec3 oylPane = oylRoom + vec3(0.03, 0.04, 0.05) * smoothstep(oylWB, oylWT, oylAt.y);
         vec3 oylSideC = oylWall * (1.0 - oylRevealShade * (1.0 - oylSideLit));
         vec3 oylDrawn = mix(
@@ -15911,7 +15977,7 @@ function withFacade<M extends Material>(material: M, surface: StructureSurface):
       replacedOrThrown(
         shader.vertexShader,
         '#include <common>',
-        `#include <common>\nattribute vec4 oylFacade;\nattribute vec4 oylStyle;\nattribute vec3 oylTrim;\nvarying vec4 vOylFacade;\nvarying vec4 vOylStyle;\nvarying vec3 vOylTrim;${weathered ? `\nvarying vec3 vOylWorld;\n${WEATHER_PHOTO_GLSL}` : ''}`,
+        `#include <common>\nattribute vec4 oylFacade;\nattribute vec4 oylStyle;\nattribute vec3 oylTrim;\nvarying vec4 vOylFacade;\nvarying vec4 vOylStyle;\nvarying vec3 vOylTrim;${weathered ? `\nvarying vec3 vOylWorld;\nflat varying float vOylAge;\n${WEATHER_PHOTO_GLSL}` : ''}`,
         'vertex',
         spliced,
       ),
