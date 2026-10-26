@@ -1017,10 +1017,16 @@ export function claddingPartAt(clad: number, x: number, y: number): CladdingPart
  * - `youngest`: the share of every effect a building shows at age 0
  *   ({@link weatheringAgeOf}); at age 1 it shows all of it.
  * - `tile`: the photograph's light moved up to `strength` either way by
- *   world-space value noise at two `scales`, in `weights`, so that a brick's
- *   repeat no longer reads along a 20 m wall. No second texture fetch: IQ's
- *   two-fetch technique doubles wall texture bandwidth, #1523's scarce
- *   resource.
+ *   world-space value noise at `scale`, so that a brick's repeat no longer
+ *   reads along a 20 m wall. No second texture fetch: IQ's two-fetch
+ *   technique doubles wall texture bandwidth, #1523's scarce resource. Since
+ *   #1735's second pass one octave, not two (1.7 m and 4.3 m, weighted 0.6
+ *   and 0.4, at 0.05): four hashes a fragment rather than eight, at about
+ *   the octaves' weighted middle scale (2.74 m) and their combined spread
+ *   (0.05 × √(0.6² + 0.4²)).
+ * - `fade`: #1735's second pass, every effect but parging faded out between
+ *   these distances from the eye, in metres ({@link weatheringNearOf}), so
+ *   that a far wall skips the work.
  * - `splash`: grime at a wall's foot, solid to `solid` of the way up a band
  *   whose top the noise breaks between `top`'s two heights, every `edge`
  *   along the wall; at full age it takes `strength` of the light and greys it
@@ -1039,7 +1045,8 @@ export function claddingPartAt(clad: number, x: number, y: number): CladdingPart
  */
 export const WEATHERING = {
   youngest: 0.5,
-  tile: { scales: [1.7, 4.3], weights: [0.6, 0.4], strength: 0.05 },
+  tile: { scale: 2.7, strength: 0.036 },
+  fade: [40, 80],
   splash: { top: [0.6, 1.0], solid: 0.4, edge: 0.45, strength: 0.35, grey: 0.35 },
   streak: { metres: 1.0, column: 0.04, strength: 0.22, brick: 0.5 },
   drip: { metres: 0.5, column: 0.06, strength: 0.22 },
@@ -1162,6 +1169,18 @@ export function weatheringAgeOf(tint: readonly [number, number, number]): number
   return weatheringHash(tint[0] * 1000, tint[1] * 1000 + tint[2] * 7000);
 }
 
+/**
+ * How much of its weathering a fragment `distance` metres from the eye shows
+ * — #1735's second pass: all of it up to {@link WEATHERING}'s `fade[0]`, none
+ * past `fade[1]`, smooth between. The shader's `oylWeatherNearOf`, which
+ * scales every effect but parging by it and skips them where it is nought.
+ *
+ * @test-facing held by `weathering.test.ts`; the product computes it in the shader
+ */
+export function weatheringNearOf(distance: number): number {
+  return 1 - smoothstep(WEATHERING.fade[0], WEATHERING.fade[1], distance);
+}
+
 /** How much of an effect a building of `age` shows. */
 function ageShareOf(age: number): number {
   return WEATHERING.youngest + (1 - WEATHERING.youngest) * age;
@@ -1218,11 +1237,9 @@ export function weatheringAt(term: WeatheringTerm, at: WeatheringAt): Weathered 
   const none: Weathered = { light: 1, grey: 0, moss: 0 };
   switch (term.effect) {
     case 'tile': {
-      const { scales, weights, strength } = WEATHERING.tile;
-      const [near, far] = scales;
-      const n1 = mixOf(weatheringNoise(a / near, b / near), 0.5, fadeOf(pw / near));
-      const n2 = mixOf(weatheringNoise(a / far + 31.7, b / far + 11.3), 0.5, fadeOf(pw / far));
-      return { ...none, light: 1 + 2 * strength * (weights[0] * n1 + weights[1] * n2 - 0.5) };
+      const { scale, strength } = WEATHERING.tile;
+      const n = mixOf(weatheringNoise(a / scale, b / scale), 0.5, fadeOf(pw / scale));
+      return { ...none, light: 1 + 2 * strength * (n - 0.5) };
     }
     case 'splash': {
       const { top, solid, edge, strength, grey } = WEATHERING.splash;

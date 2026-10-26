@@ -24,6 +24,7 @@ import {
   weatheringAgeOf,
   weatheringAt,
   weatheringHash,
+  weatheringNearOf,
   type WeatheringAt,
   type WeatheringTerm,
 } from './facade';
@@ -229,7 +230,7 @@ describe('the weathering, effect by effect, in the twin — #1661', () => {
     expect(light({ effect: 'parging', parged: false }, at([0, -0.2]))).toBe(1);
   });
 
-  it('breaks the photograph’s repeat with two scales of noise, either way of its light', () => {
+  it('breaks the photograph’s repeat with noise, either way of its light', () => {
     let lighter = 0;
     let darker = 0;
     for (let along = 0; along < 20; along += 0.25) {
@@ -604,7 +605,7 @@ describe('the weathering, in the shader — #1661', () => {
     expect(weather).toBeGreaterThan(cladding);
     expect(weather).toBeLessThan(openings);
     expect(fragment).toContain(
-      'diffuseColor.rgb *= oylWeatherTile(oylPlane.x, oylPlane.y, oylWpw);',
+      'diffuseColor.rgb *= mix(1.0, oylWeatherTile(oylPlane.x, oylPlane.y, oylWpw), oylNear);',
     );
     expect(fragment).toContain('oylWeatherCourses(vOylFacade.y, oylAge)');
     expect(fragment).toContain(
@@ -753,7 +754,7 @@ describe('the facade program’s cost, with every effect still drawn — #1735',
     const { tile, moss, splash } = WEATHERING;
     // Lattice cells either side of 999 → 0 for each octave: −1 folds to 999, whose next is 0.
     const folds = [-0.5, 998.5, 999.5, 1999.5, -1000.5];
-    for (const scale of [tile.scales[0], tile.scales[1], moss.scale, moss.detail, splash.edge]) {
+    for (const scale of [tile.scale, moss.scale, moss.detail, splash.edge]) {
       for (const fa of folds) {
         for (const fb of folds) {
           const a = fa * scale;
@@ -906,14 +907,19 @@ describe('the facade program’s cost, with every effect still drawn — #1735',
     }
     for (const value of Object.values(counted)) expect(value).toBeGreaterThan(100);
     // Each splice asks its guard first.
-    const streaks = [...fragment.matchAll(/if \(oylStreakNear\(oylShown, oylStreakBelow, /g)];
+    const streaks = [
+      ...fragment.matchAll(/if \(oylNear > 0\.0 && oylStreakNear\(oylShown, oylStreakBelow, /g),
+    ];
     expect(streaks).toHaveLength(2);
     for (const each of streaks) {
-      const guarded = blockAfter(fragment.slice(each.index), 'if (oylStreakNear(');
+      const guarded = blockAfter(fragment.slice(each.index), 'if (oylNear > 0.0 && oylStreakNear(');
       expect(guarded).toContain('oylWeatherStreak(\n');
     }
     expect(fragment.match(/oylWeatherStreak\(\n/g)).toHaveLength(2);
-    const dripped = blockAfter(fragment, 'if (oylDripNear(oylFlags, oylDripBelow, oylMw.y)) {');
+    const dripped = blockAfter(
+      fragment,
+      'if (oylNear > 0.0 && oylDripNear(oylFlags, oylDripBelow, oylMw.y)) {',
+    );
     expect(dripped).toContain('oylWeatherDripOn(oylFlags, oylDripBelow, oylM.x, oylAge, oylMw.y)');
   });
 
@@ -968,6 +974,84 @@ describe('the facade program’s cost, with every effect still drawn — #1735',
     expect(fragment).toContain(
       'float oylSillShade = oylAt.y < oylSillLo.y + oylW.y\n          ? oylSillShadeOf(oylAt * oylToM, ',
     );
+  });
+});
+
+describe('the facade program on the tablet’s GPU tier — #1735’s second pass', () => {
+  it('lays the tile’s noise in one octave, four hashes a fragment, at the two octaves’ middle scale and spread', () => {
+    const { fragment } = compiled();
+    const tile = blockAfter(fragment, 'float oylWeatherTile(float a, float b, float pw) {');
+    // One value noise (four hashes) where there were two.
+    expect(tile.match(/oylWeatherNoise\(/g)).toHaveLength(1);
+    expect(constantOf(fragment, 'oylTileScale')).toBe(WEATHERING.tile.scale);
+    expect(constantOf(fragment, 'oylTileStrength')).toBe(WEATHERING.tile.strength);
+    // The look the owner approved: the old octaves' weighted scale, 0.6 × 1.7 + 0.4 × 4.3 m,
+    // and their combined spread, 0.05 × √(0.6² + 0.4²), so that the light moves as much.
+    expect(Math.abs(WEATHERING.tile.scale - 2.74)).toBeLessThan(0.1);
+    expect(WEATHERING.tile.strength).toBeCloseTo(0.05 * Math.hypot(0.6, 0.4), 3);
+  });
+
+  it('fades the weathering out between its two distances from the eye: the program’s own function, the twin’s', () => {
+    const { fragment } = compiled();
+    const [from, to] = WEATHERING.fade;
+    expect(constantOf(fragment, 'oylFadeNear')).toBe(from);
+    expect(constantOf(fragment, 'oylFadeFar')).toBe(to);
+    const nearOf = shaderFunctions(fragment, ['oylWeatherNearOf']).oylWeatherNearOf;
+    if (nearOf === undefined) throw new Error('no oylWeatherNearOf');
+    let last = 1;
+    for (let distance = 0; distance <= 200; distance += 0.5) {
+      const near = nearOf(distance);
+      expect(near).toBe(weatheringNearOf(distance));
+      // All of it near, none of it far, never coming back with distance.
+      if (distance <= from) expect(near).toBe(1);
+      if (distance >= to) expect(near).toBe(0);
+      expect(near).toBeLessThanOrEqual(last);
+      last = near;
+    }
+    expect(weatheringNearOf((from + to) / 2)).toBeCloseTo(0.5, 12);
+  });
+
+  it('scales every effect but parging by the fade, and works none of them out where it is nought', () => {
+    const { fragment } = compiled('render');
+    const fade = fragment.indexOf('float oylNear = oylWeatherNearOf(length(vViewPosition));');
+    expect(fade).toBeGreaterThan(-1);
+    // The derivatives stay out of the branch, where every pixel of a quad takes them.
+    expect(fragment.indexOf('vec3 oylWdx = dFdx(vOylWorld);')).toBeLessThan(fade);
+    const faded = blockAfter(fragment, 'if (oylNear > 0.0) {');
+    expect(faded).toContain(
+      'diffuseColor.rgb *= mix(1.0, oylWeatherTile(oylPlane.x, oylPlane.y, oylWpw), oylNear);',
+    );
+    expect(faded).toContain(
+      'diffuseColor.rgb *= 1.0 - oylNear * oylPitched * oylFaceOn * oylWeatherCourses(',
+    );
+    expect(faded).toContain(
+      'oylNear * oylWeatherMoss(oylPlane.x, oylPlane.y, oylUpFacing, oylAge, oylWpw)',
+    );
+    expect(faded).toContain(
+      'float oylGrime = oylNear * oylWeatherGrime(oylUpFacing, oylFaceOn, oylUp, oylPlane.x, oylAge, oylWpw);',
+    );
+    // Each is called once, and so only inside the branch.
+    for (const call of [
+      /oylWeatherTile\(oylPlane/g,
+      /oylWeatherCourses\(vOylFacade/g,
+      /oylWeatherMoss\(oylPlane/g,
+      /oylWeatherGrime\(oylUpFacing/g,
+    ]) {
+      expect(fragment.match(call)).toHaveLength(1);
+    }
+    // Parging is the plinth's render, not wear: it stays at every distance.
+    expect(faded).not.toContain('oylWeatherPlinth(');
+    expect(fragment.indexOf('oylWeatherPlinth(oylUpFacing')).toBeGreaterThan(fade + faded.length);
+    // The sills' streaks and the parapet's drip ask the fade first, and are scaled by it.
+    const streaks = [...fragment.matchAll(/if \(oylNear > 0\.0 && oylStreakNear\(/g)];
+    expect(streaks).toHaveLength(2);
+    expect(
+      fragment.match(/diffuseColor\.rgb \*= 1\.0 - oylNear \* oylShown \* oylWeatherStreak\(\n/g),
+    ).toHaveLength(2);
+    expect(fragment).toContain(
+      'if (oylNear > 0.0 && oylDripNear(oylFlags, oylDripBelow, oylMw.y)) {',
+    );
+    expect(fragment).toContain('diffuseColor.rgb *= 1.0 - oylNear * oylWeatherDripOn(');
   });
 });
 

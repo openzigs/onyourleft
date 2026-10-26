@@ -15085,10 +15085,9 @@ function weatheringGlsl(built: boolean, surface: StructureSurface): string {
   varying vec3 vOylWorld;
   flat varying float vOylAge;
   const float oylYoungest = ${glslFloat(WEATHERING.youngest)};
-  const float oylTileNear = ${glslFloat(tile.scales[0])};
-  const float oylTileFar = ${glslFloat(tile.scales[1])};
-  const float oylTileNearW = ${glslFloat(tile.weights[0])};
-  const float oylTileFarW = ${glslFloat(tile.weights[1])};
+  const float oylTileScale = ${glslFloat(tile.scale)};
+  const float oylFadeNear = ${glslFloat(WEATHERING.fade[0])};
+  const float oylFadeFar = ${glslFloat(WEATHERING.fade[1])};
   const float oylTileStrength = ${glslFloat(tile.strength)};
   const float oylSplashLow = ${glslFloat(splash.top[0])};
   const float oylSplashHigh = ${glslFloat(splash.top[1])};
@@ -15140,9 +15139,11 @@ function weatheringGlsl(built: boolean, surface: StructureSurface): string {
     return mix(0.4 + 1.2 * oylWeatherHash(floor(along / width), seed), 1.0, oylFadeOf(pw / width));
   }
   float oylWeatherTile(float a, float b, float pw) {
-    float n1 = mix(oylWeatherNoise(a / oylTileNear, b / oylTileNear), 0.5, oylFadeOf(pw / oylTileNear));
-    float n2 = mix(oylWeatherNoise(a / oylTileFar + 31.7, b / oylTileFar + 11.3), 0.5, oylFadeOf(pw / oylTileFar));
-    return 1.0 + 2.0 * oylTileStrength * (oylTileNearW * n1 + oylTileFarW * n2 - 0.5);
+    float n = mix(oylWeatherNoise(a / oylTileScale, b / oylTileScale), 0.5, oylFadeOf(pw / oylTileScale));
+    return 1.0 + 2.0 * oylTileStrength * (n - 0.5);
+  }
+  float oylWeatherNearOf(float distance) {
+    return 1.0 - smoothstep(oylFadeNear, oylFadeFar, distance);
   }
   float oylWeatherSplash(float up, float a, float age, float pw) {
     float broken = mix(oylWeatherNoise(a / oylSplashEdge, 7.0), 0.5, oylFadeOf(pw / oylSplashEdge));
@@ -15222,22 +15223,29 @@ const WEATHER_CLADDING_GLSL = /* glsl */ `
     );
     float oylAge = vOylAge;
     float oylFaceOn = step(-0.5, oylTop);
-    diffuseColor.rgb *= oylWeatherTile(oylPlane.x, oylPlane.y, oylWpw);
-    float oylPitched = step(0.3, oylUpFacing) * (1.0 - step(0.97, oylUpFacing));
-    diffuseColor.rgb *= 1.0 - oylPitched * oylFaceOn * oylWeatherCourses(vOylFacade.y, oylAge);
-    // #1735: moss only where it can be — on a drawn face that faces up past its
-    // lowest facing, where oylWeatherMoss is nought — a face's, so a branch its
-    // pixels take together. A wall pays none of its two noises.
-    if (oylFaceOn > 0.5 && oylUpFacing > oylMossFaceLow) {
-      diffuseColor.rgb = mix(diffuseColor.rgb, oylMossC, oylWeatherMoss(oylPlane.x, oylPlane.y, oylUpFacing, oylAge, oylWpw));
-    }
     float oylUp = mix(vOylFacade.y, vOylFacade.y * oylStoreyM, oylStoreyed);
-    // #1735: the splash only under its highest top, on an upright drawn face,
-    // where oylWeatherGrime is nought: a band along the wall's foot.
-    if (oylUp < oylSplashHigh && oylFaceOn > 0.5 && oylUpFacing < 0.3) {
-      float oylGrime = oylWeatherGrime(oylUpFacing, oylFaceOn, oylUp, oylPlane.x, oylAge, oylWpw);
-      diffuseColor.rgb = mix(diffuseColor.rgb, vec3(dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722))), oylSplashGrey * oylGrime)
-        * (1.0 - oylSplashStrength * oylGrime);
+    // #1735 (second pass): every effect but parging faded out with the
+    // distance from the eye, and none of it worked out past the fade, where
+    // oylNear is nought. Pixels take this branch together except along the
+    // one line on the screen where the fade ends.
+    float oylNear = oylWeatherNearOf(length(vViewPosition));
+    if (oylNear > 0.0) {
+      diffuseColor.rgb *= mix(1.0, oylWeatherTile(oylPlane.x, oylPlane.y, oylWpw), oylNear);
+      float oylPitched = step(0.3, oylUpFacing) * (1.0 - step(0.97, oylUpFacing));
+      diffuseColor.rgb *= 1.0 - oylNear * oylPitched * oylFaceOn * oylWeatherCourses(vOylFacade.y, oylAge);
+      // #1735: moss only where it can be — on a drawn face that faces up past its
+      // lowest facing, where oylWeatherMoss is nought — a face's, so a branch its
+      // pixels take together. A wall pays none of its two noises.
+      if (oylFaceOn > 0.5 && oylUpFacing > oylMossFaceLow) {
+        diffuseColor.rgb = mix(diffuseColor.rgb, oylMossC, oylNear * oylWeatherMoss(oylPlane.x, oylPlane.y, oylUpFacing, oylAge, oylWpw));
+      }
+      // #1735: the splash only under its highest top, on an upright drawn face,
+      // where oylWeatherGrime is nought: a band along the wall's foot.
+      if (oylUp < oylSplashHigh && oylFaceOn > 0.5 && oylUpFacing < 0.3) {
+        float oylGrime = oylNear * oylWeatherGrime(oylUpFacing, oylFaceOn, oylUp, oylPlane.x, oylAge, oylWpw);
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722))), oylSplashGrey * oylGrime)
+          * (1.0 - oylSplashStrength * oylGrime);
+      }
     }
     float oylPlinth = oylWeatherPlinth(oylUpFacing, oylFaceOn, oylTop, oylKind, oylUp);
     float oylParging = oylParged * oylPlinth;
@@ -15249,8 +15257,8 @@ const WEATHER_CLADDING_GLSL = /* glsl */ `
 const WEATHER_SASH_STREAK_GLSL = /* glsl */ `
         float oylSillSpan = mix(oylWinW * 0.5, oylWinW + oylMullion * 0.5, oylPaired) + oylSillOver;
         float oylStreakBelow = oylSillM - oylSillDepth - oylP.y;
-        if (oylStreakNear(oylShown, oylStreakBelow, oylP.x, oylSillSpan, oylMw.x)) {
-          diffuseColor.rgb *= 1.0 - oylShown * oylWeatherStreak(
+        if (oylNear > 0.0 && oylStreakNear(oylShown, oylStreakBelow, oylP.x, oylSillSpan, oylMw.x)) {
+          diffuseColor.rgb *= 1.0 - oylNear * oylShown * oylWeatherStreak(
             oylStreakBelow, oylP.x, oylSillSpan, oylM.x, oylStreakAt, oylAge, oylMw.x
           );
         }`;
@@ -15260,8 +15268,8 @@ const WEATHER_CASEMENT_STREAK_GLSL = /* glsl */ `
         float oylStreakBelow = (oylWB - oylSillU - oylAt.y) * oylStoreyM;
         float oylStreakAcross = (oylAt.x - 0.5) * vOylStyle.z;
         float oylStreakHalf = (0.5 - oylWL + oylSillA) * vOylStyle.z;
-        if (oylStreakNear(oylShown, oylStreakBelow, oylStreakAcross, oylStreakHalf, oylMw.x)) {
-          diffuseColor.rgb *= 1.0 - oylShown * oylWeatherStreak(
+        if (oylNear > 0.0 && oylStreakNear(oylShown, oylStreakBelow, oylStreakAcross, oylStreakHalf, oylMw.x)) {
+          diffuseColor.rgb *= 1.0 - oylNear * oylShown * oylWeatherStreak(
             oylStreakBelow, oylStreakAcross, oylStreakHalf, oylM.x, oylStreakAt, oylAge, oylMw.x
           );
         }`;
@@ -15269,8 +15277,8 @@ const WEATHER_CASEMENT_STREAK_GLSL = /* glsl */ `
 /** #1661's drip down a flat roof's wall from its parapet (§3 of {@link facadeFragmentGlsl}). */
 const WEATHER_DRIP_GLSL = /* glsl */ `
       float oylDripBelow = (oylTop - vOylFacade.y) * oylStoreyM;
-      if (oylDripNear(oylFlags, oylDripBelow, oylMw.y)) {
-        diffuseColor.rgb *= 1.0 - oylWeatherDripOn(oylFlags, oylDripBelow, oylM.x, oylAge, oylMw.y);
+      if (oylNear > 0.0 && oylDripNear(oylFlags, oylDripBelow, oylMw.y)) {
+        diffuseColor.rgb *= 1.0 - oylNear * oylWeatherDripOn(oylFlags, oylDripBelow, oylM.x, oylAge, oylMw.y);
       }`;
 
 /**
