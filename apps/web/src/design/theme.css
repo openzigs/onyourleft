@@ -4613,6 +4613,23 @@ select.oyl-input {
 }
 
 /*
+ * #664. The full third-party notices, shown on Credits. Licence texts are
+ * hard-wrapped at about 80 columns and some draw with spaces, so the face is
+ * monospace and the breaks are kept; `pre-wrap` and `anywhere` let a line
+ * that is wider than a phone wrap rather than make the page, or the block,
+ * scroll sideways — a scrolling block would be one more thing a keyboard
+ * has to reach (axe's `scrollable-region-focusable`).
+ */
+.oyl-notices {
+  margin: var(--oyl-space-md) 0;
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  font-size: var(--oyl-font-size-sm);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/*
  * The summary panel: a description list laid out as cards.
  *
  * `dl` rather than a table because it is a set of name/value pairs and not a

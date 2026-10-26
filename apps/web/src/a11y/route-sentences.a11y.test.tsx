@@ -157,6 +157,15 @@
  * approved paragraph beside the press says it in full). "A finished write-up
  * replaces …" moves behind the section's ⓘ, and is still recorded.
  *
+ * ⚠️ **Re-recorded by #664**, when Credits stopped linking the third-party
+ * notices (a link opened them over the app in the Android WebView, with no
+ * way back) and shows them on the screen instead. One line is ADDED, the
+ * toggle "Show the full notices", and one is REWORDED, in the record in the
+ * same commit: "That document ships inside this app, so it opens without a
+ * network." is "They ship inside this app, so they open here without a
+ * network.", because there is no document to open any more, only the
+ * notices on the screen. Nothing is dropped.
+ *
  * ## What it does not check
  *
  * That a sentence is in the same ORDER, or visible — `kept-visible.a11y.test`

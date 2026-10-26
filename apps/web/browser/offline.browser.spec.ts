@@ -557,30 +557,41 @@ test.describe('a cold start with the network off', () => {
     }
   });
 
-  test('opens the third-party notices the credits screen links, offline — #664', async () => {
-    // The same shape as the #597 case above, for the software notices: the
-    // link is read off the rendered screen, opening it is a navigation, and
-    // the worker must answer it with the document rather than the shell. The
-    // notices sit in `public/licences/`, which `precache.ts` does not exclude,
-    // so they are precached like the Apache-2.0 text beside them — ~125 KiB,
-    // and a licence notice a rider can read with the network off.
+  test('shows the third-party notices on the credits screen, offline — #664', async () => {
+    // The notices are read into the screen rather than linked: a link opened
+    // the `.txt` over the app inside the Android WebView, with no way back
+    // (`credits/notices-document.ts`). They come from a chunk of their own,
+    // which the precache is derived to include (#406), so this is the same
+    // question as the #597 case above — can a rider read the licence with the
+    // network off — asked of the screen rather than of a URL. The page must
+    // not navigate: the screen is still Credits once the notices are shown.
     const second = await session(profile);
     await second.context.setOffline(true);
+    const scripts: { readonly url: string; readonly fromWorker: boolean }[] = [];
+    second.page.on('response', (response) => {
+      if (response.url().startsWith(PRODUCT_ORIGIN) && response.url().endsWith('.js')) {
+        scripts.push({ url: response.url(), fromWorker: response.fromServiceWorker() });
+      }
+    });
     try {
       await second.page.goto(`${PRODUCT_ORIGIN}/#/about/credits`);
       await expect(second.page.locator('h1')).toHaveText('Credits');
-      const link = second.page.locator('[data-terms="software"] a', {
-        hasText: 'the full third-party notices',
-      });
-      await expect(link).toBeVisible();
       await expect(second.page.locator('[data-terms="software"] li').first()).toBeVisible();
-      const href = await link.evaluate((anchor) => (anchor as HTMLAnchorElement).href);
-      expect(href).toBe(`${PRODUCT_ORIGIN}/licences/third-party.txt`);
-
-      const opened = await second.page.goto(href);
-      expect(opened?.status(), 'the notices did not open offline').toBe(200);
-      expect(opened?.fromServiceWorker(), 'the notices were not served by the worker').toBe(true);
-      expect((await opened?.text()) ?? '').toMatch(/^THIRD-PARTY SOFTWARE IN ON YOUR LEFT/);
+      const show = second.page.getByRole('button', { name: 'Show the full notices' });
+      await expect(show).toHaveAttribute('aria-pressed', 'false');
+      await show.click();
+      const shown = second.page.locator('[data-terms="software"] [data-notices-document]');
+      await expect(shown).toBeVisible();
+      expect((await shown.textContent()) ?? '').toMatch(/^THIRD-PARTY SOFTWARE IN ON YOUR LEFT/);
+      await expect(shown).toContainText('Cole Bemis');
+      await expect(show).toHaveAttribute('aria-pressed', 'true');
+      await expect(second.page.locator('h1')).toHaveText('Credits');
+      expect(second.page.url()).toBe(`${PRODUCT_ORIGIN}/#/about/credits`);
+      expect(scripts.length, 'no script was loaded at all').toBeGreaterThan(0);
+      expect(
+        scripts.filter((script) => !script.fromWorker).map((script) => script.url),
+        'a script was not served by the worker',
+      ).toEqual([]);
     } finally {
       await second.close();
     }

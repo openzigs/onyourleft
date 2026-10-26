@@ -33,8 +33,9 @@ import { ASSET_MANIFEST_SOURCE } from '../credits/source';
 import { creditsFrom, NOTHING_ASKED_LICENCES, SHIPPED_LICENCE_TEXTS } from '../credits/credits';
 import { parseAssetManifest } from '../credits/manifest';
 import { parseNotices, THIRD_PARTY_NOTICES_URL } from '../credits/notices';
+import { loadNoticesDocument } from '../credits/notices-document';
 import { THIRD_PARTY_CONTENTS_SOURCE } from '../credits/notices-source';
-import { mount, queryAll, type Mounted } from '../testing/mount';
+import { activateWithKeyboard, mount, queryAll, settle, type Mounted } from '../testing/mount';
 import { ODBL_LICENCE_URL, OSM_ATTRIBUTION } from '../map/basemap';
 import {
   ODBL_LICENCE_URL as FIT_ODBL_LICENCE_URL,
@@ -503,9 +504,13 @@ describe('the software this app includes — #664', () => {
     expect(software()).not.toContain(':capacitor-android');
   });
 
-  it('links the full notices document this app ships, relative to the page', async () => {
+  it('does not link the notices document away from the app — the Android shell trap', async () => {
+    // A `target="_blank"` link to it loaded the `.txt` over the app inside the
+    // Android WebView, and back then left the app: `notices-document.ts` says
+    // why. The document is shown on this screen instead; the file itself is
+    // still served at the URL, for a browser and the demo page.
     await render(undefined, NOTICES);
-    expect(hrefs()).toContain(THIRD_PARTY_NOTICES_URL);
+    expect(hrefs()).not.toContain(THIRD_PARTY_NOTICES_URL);
     expect(THIRD_PARTY_NOTICES_URL).toBe('./licences/third-party.txt');
   });
 
@@ -532,6 +537,110 @@ describe('the software this app includes — #664', () => {
       expect(software()).toContain(`${item.name} ${item.version}, under ${item.licence}`);
     }
     expect(software()).not.toContain('This list may be incomplete');
+  });
+});
+
+/**
+ * A whole notices document, standing in for the committed one: the
+ * Lucide/Feather case, an ISC manifest whose LICENSE also carries MIT.
+ */
+const DOCUMENT = [
+  'THIRD-PARTY SOFTWARE IN ON YOUR LEFT',
+  '',
+  '========================================================================',
+  'lucide-react 1.48.0 — ISC',
+  '',
+  'ISC License',
+  '',
+  'The MIT License (MIT) (for portions derived from Feather)',
+  'Copyright (c) 2013-2023 Cole Bemis',
+].join('\n');
+
+function showNotices(): HTMLButtonElement {
+  const button = queryAll<HTMLButtonElement>(
+    mounted?.container ?? document,
+    '[data-terms="software"] button',
+  ).find((candidate) => candidate.textContent === 'Show the full notices');
+  if (button === undefined) {
+    throw new Error('Credits has no "Show the full notices" control');
+  }
+  return button;
+}
+
+function shownDocument(): string | undefined {
+  return (
+    mounted?.container.querySelector('[data-terms="software"] [data-notices-document]')
+      ?.textContent ?? undefined
+  );
+}
+
+async function renderWithDocument(load: () => Promise<string>): Promise<Mounted> {
+  const result = await mount(<CreditsView notices={NOTICES} noticesDocument={load} />);
+  mounted = result;
+  return result;
+}
+
+describe('the full notices, read inside the app — #664', () => {
+  it('shows nothing of the document until a rider asks, and reads nothing either', async () => {
+    const load = vi.fn(() => Promise.resolve(DOCUMENT));
+    await renderWithDocument(load);
+    expect(shownDocument()).toBeUndefined();
+    expect(load).not.toHaveBeenCalled();
+    expect(showNotices().getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('renders the whole document on the screen when the toggle is pressed, by keyboard', async () => {
+    await renderWithDocument(() => Promise.resolve(DOCUMENT));
+    await activateWithKeyboard(showNotices());
+    await settle();
+    expect(showNotices().getAttribute('aria-pressed')).toBe('true');
+    // Verbatim, both halves of the Lucide/Feather licence.
+    expect(shownDocument()).toBe(DOCUMENT);
+    expect(shownDocument()).toContain('Cole Bemis');
+  });
+
+  it('hides it again, and shows it again without a second read', async () => {
+    const load = vi.fn(() => Promise.resolve(DOCUMENT));
+    await renderWithDocument(load);
+    await activateWithKeyboard(showNotices());
+    await settle();
+    await activateWithKeyboard(showNotices());
+    await settle();
+    expect(shownDocument()).toBeUndefined();
+    expect(showNotices().getAttribute('aria-pressed')).toBe('false');
+    await activateWithKeyboard(showNotices());
+    await settle();
+    expect(shownDocument()).toBe(DOCUMENT);
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+
+  it('says it is reading while the document loads', async () => {
+    await renderWithDocument(() => new Promise<string>(() => undefined));
+    await activateWithKeyboard(showNotices());
+    await settle();
+    expect(software()).toContain('Reading the notices this app carries.');
+    expect(shownDocument()).toBeUndefined();
+  });
+
+  it('says so when the document cannot be read, rather than showing an empty block', async () => {
+    await renderWithDocument(() => Promise.reject(new Error('chunk failed')));
+    await activateWithKeyboard(showNotices());
+    await settle();
+    expect(software()).toContain('could not be read just now');
+    expect(shownDocument()).toBeUndefined();
+    expect(software()).not.toContain('Reading the notices this app carries.');
+  });
+
+  it('shows the real committed document by default', async () => {
+    // Read back through the screen's own default, not a fixture: the screen a
+    // rider opens renders what `check:notices` holds.
+    // Read once first, so the module is loaded and one `settle` is enough.
+    const committed = await loadNoticesDocument();
+    mounted = await mount(<CreditsView />);
+    await activateWithKeyboard(showNotices());
+    await settle();
+    expect(shownDocument()).toBe(committed);
+    expect(shownDocument()).toMatch(/^THIRD-PARTY SOFTWARE IN ON YOUR LEFT/);
   });
 });
 
