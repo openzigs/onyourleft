@@ -15187,7 +15187,8 @@ function weatheringGlsl(built: boolean, surface: StructureSurface): string {
   }
   float oylWeatherMoss(float a, float b, float facing, float age, float pw) {
     float where = smoothstep(oylMossLow, oylMossHigh, oylWeatherNoise(a / oylMossScale + 3.1, b / oylMossScale + 5.7));
-    // #1735: out of a patch it is nought, so its thickness is not worked out — an 8 m patch's, so a branch its pixels take together.
+    // #1735: out of a patch it is nought, so its thickness is not worked out.
+    // Pixels take this together except at a patch's edge.
     if (where <= 0.0) return 0.0;
     float thick = mix(0.4 + 1.2 * oylWeatherNoise(a / oylMossDetail + 8.3, b / oylMossDetail + 1.9), 1.0, oylFadeOf(pw / oylMossDetail));
     float up = smoothstep(oylMossFaceLow, oylMossFaceHigh, facing);

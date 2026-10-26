@@ -828,6 +828,12 @@ describe('the facade program’s cost, with every effect still drawn — #1735',
       'oylWeatherMoss(oylPlane.x, oylPlane.y, oylUpFacing, oylAge, oylWpw)',
     );
     expect(fragment.match(/oylWeatherMoss\(oylPlane/g)).toHaveLength(1);
+    // The early return out of a patch changes no pixel, so only its text can hold it: it
+    // comes before the thickness noise, which is the work it skips.
+    const mossFn = blockAfter(fragment, 'float oylWeatherMoss(');
+    const early = mossFn.indexOf('if (where <= 0.0) return 0.0;');
+    expect(early).toBeGreaterThanOrEqual(0);
+    expect(early).toBeLessThan(mossFn.indexOf('float thick ='));
   });
 
   it('works the splash out only under its highest top on an upright face, where it is not nought', () => {
