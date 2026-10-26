@@ -53,8 +53,9 @@
     the rider needs to know it is not a moderator's decision and has no appeal. The terms say it
     can happen and do not say how.
   - **Blocking is in the terms (owner, 2026-10-23).** The app blocks a rider from a race's result
-    since #1516; section 3 uses the app's own approved wording, including that the app cannot undo
-    a block yet.
+    since #1516; section 3 uses the app's own approved wording. Since #1529 the app lists a rider's
+    blocks and undoes one on the Instance screen, and section 3 says so (⚠️ draft wording awaiting
+    the owner's approval).
   - **Export and delete while suspended are in the terms (owner, 2026-10-23).** The app offers
     both beside the statements on the Instance screen since #1517 (section 6).
   - **Reporting child sexual abuse material (owner, 2026-10-23).** The operator is in the United
@@ -102,8 +103,8 @@ place they are.
   a person, the race marks it beside their name, for everybody in the race, and tells the
   moderator. A mark is not a decision. A person looks at it.
 - **You can block another rider** from a race's result. From your next ride, neither of you is
-  named to the other in a race, and a public room keeps you apart. The rider is not told. The app
-  cannot undo a block yet.
+  named to the other in a race, and a public room keeps you apart. The rider is not told. You can
+  undo a block on the Instance screen.
 
 ## 4. What you must not do
 

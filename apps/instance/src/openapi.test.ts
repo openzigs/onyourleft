@@ -339,6 +339,14 @@ const HAPPY_CALLS: Readonly<Record<string, HappyCall>> = {
       reason: 'For the Tuesday group',
     }),
   listBlocks: async (world) => send(world, 'GET', '/v1/blocks', (await signedIn(world)).token),
+  // #1529: with a block in it, so the answer's items are checked against the schema.
+  listBlockHandles: async (world) => {
+    const { token } = await signedIn(world);
+    await send(world, 'POST', `/v1/blocks/${await anotherAthlete(world)}`, token);
+    return send(world, 'GET', '/v1/blocks/handles', token);
+  },
+  unblockByHandle: async (world) =>
+    send(world, 'DELETE', `/v1/blocks/handles/${'0'.repeat(32)}`, (await signedIn(world)).token),
   blockAthlete: async (world) =>
     send(world, 'POST', `/v1/blocks/${await anotherAthlete(world)}`, (await signedIn(world)).token),
   unblockAthlete: async (world) =>

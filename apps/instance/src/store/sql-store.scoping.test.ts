@@ -357,6 +357,10 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   },
   putBlock: { notAScopedRead: 'a write' },
   deleteBlock: { notAScopedRead: 'a write; scoping is sql-store.moderation.test.ts’s' },
+  deleteBlockByHandle: {
+    notAScopedRead:
+      'a write; another athlete’s handle deleting nothing is sql-store.moderation.test.ts’s (#1529)',
+  },
   putReport: { notAScopedRead: 'a write' },
   moderate: { notAScopedRead: 'a moderator’s write; sql-store.moderation.test.ts' },
   logRefusedAction: { notAScopedRead: 'a write to the moderators’ log; moderation.test.ts' },

@@ -281,6 +281,10 @@ export interface BlockTable {
   /** No foreign key: `eraseAthlete` removes the rows naming an erased athlete (migration 0007). */
   readonly blocked_athlete_id: string;
   readonly created_at: number;
+  /** Opaque and random, never the blocked athlete's id: the column's default makes it (migration 0035, #1529). */
+  readonly handle: Generated<string>;
+  /** The name a race's result showed the blocker on the row they blocked from, or `NULL` (#1529). */
+  readonly shown_name: string | null;
 }
 
 /** A report (#83): the reporter's row, or the room's own for a flag (#789, migration 0031). */

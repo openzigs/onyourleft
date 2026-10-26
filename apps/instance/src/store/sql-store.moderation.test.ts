@@ -190,6 +190,73 @@ describe('blocks (#83)', () => {
   });
 });
 
+describe('a block’s handle and the name it was made under (#1529)', () => {
+  async function threeAthletes(): Promise<StoreHarness> {
+    harness = await createStoreHarness();
+    await harness.write(async (store) => {
+      for (const athlete of [ATHLETE_A, ATHLETE_B, ATHLETE_C]) {
+        await store.putAthlete({
+          id: athlete,
+          displayName: athlete,
+          createdAt: 1,
+          registrationState: 'active',
+        });
+      }
+    });
+    return harness;
+  }
+
+  it('gives every block its own opaque handle, never the blocked id, and keeps the name shown', async () => {
+    const h = await threeAthletes();
+    await h.write(async (store) => {
+      await store.putBlock(ATHLETE_A, ATHLETE_B, 2, 'Bea');
+      await store.putBlock(ATHLETE_A, ATHLETE_C, 3);
+    });
+    const held = await h.read((store) => store.listBlocks(ATHLETE_A));
+    expect(held.map((block) => [block.blockedAthleteId, block.shownName])).toEqual([
+      [ATHLETE_B, 'Bea'],
+      [ATHLETE_C, null],
+    ]);
+    for (const block of held) {
+      expect(block.handle).toMatch(/^[0-9a-f]{32}$/);
+      expect(block.handle).not.toContain(block.blockedAthleteId);
+    }
+    expect(new Set(held.map((block) => block.handle)).size).toBe(2);
+  });
+
+  it('lifts a block by its handle for the blocker only: another athlete’s handle deletes nothing', async () => {
+    const h = await threeAthletes();
+    await h.write((store) => store.putBlock(ATHLETE_A, ATHLETE_B, 2, 'Bea'));
+    const [block] = await h.read((store) => store.listBlocks(ATHLETE_A));
+    const handle = block?.handle ?? '';
+    // B, and C, holding A's handle: the row is A's, so nothing goes.
+    expect(await h.write((store) => store.deleteBlockByHandle(ATHLETE_B, handle))).toBe(false);
+    expect(await h.write((store) => store.deleteBlockByHandle(ATHLETE_C, handle))).toBe(false);
+    expect(await h.read(async (store) => (await store.sight(ATHLETE_B, ATHLETE_A))?.blocked)).toBe(
+      true,
+    );
+    expect(await h.write((store) => store.deleteBlockByHandle(ATHLETE_A, handle))).toBe(true);
+    expect(await h.read(async (store) => (await store.sight(ATHLETE_A, ATHLETE_B))?.blocked)).toBe(
+      false,
+    );
+    expect(await h.read((store) => store.listBlocks(ATHLETE_A))).toEqual([]);
+  });
+
+  it('forgets the name when the blocked athlete erases their account, and keeps the block (#899)', async () => {
+    const h = await threeAthletes();
+    await h.write(async (store) => {
+      await store.putBlock(ATHLETE_A, ATHLETE_B, 2, 'Bea');
+      await store.putBlock(ATHLETE_A, ATHLETE_C, 3, 'Cy');
+    });
+    await h.write((store) => store.eraseAthlete(ATHLETE_B));
+    const held = await h.read((store) => store.listBlocks(ATHLETE_A));
+    expect(held.map((block) => [block.blockedAthleteId, block.shownName])).toEqual([
+      [ATHLETE_B, null],
+      [ATHLETE_C, 'Cy'],
+    ]);
+  });
+});
+
 describe('the moderators’ two lists, read a page at a time (#961, #1166)', () => {
   it('reads every entry of a log longer than one page, oldest first, through the paged read', async () => {
     const h = await seeded();

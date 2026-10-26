@@ -35,6 +35,7 @@ import {
   type InstanceStorage,
 } from '../instance/instance-port';
 import type { InstanceSend, OpenInstanceSocket } from '../instance/instance-transport';
+import { createBlocksPort } from '../instance/blocks-port';
 import { createModerationPort } from '../instance/moderation-port';
 import { INSTANCE_ACCOUNT_STORAGE_KEY } from '../instance/sign-in';
 import { ensureLocalAthlete, LOCAL_ATHLETE } from '../local-athlete';
@@ -392,5 +393,45 @@ describe('blocking a rider from a race’s result, through the real instance —
     expect(list.body).toEqual({ athleteIds: [annaIs.athleteId] });
     expect(await names(bea)).toEqual([null, 'Bea']);
     expect(await names(anna)).toEqual(['Anna', null]);
+
+    // #1529: Bea's device lists the block by the name the row showed and a
+    // handle, sealed, never by Anna's id — and undoes it by the handle.
+    const blocks = (loadedFrom: LoadedFrom = LOADED_LOCALLY) =>
+      createBlocksPort({
+        storage: bea.storage,
+        loadedFrom,
+        signingKey: bea.dependencies.signingKey,
+        send,
+      });
+    send.mockClear();
+    const read = await blocks().read();
+    expect(read).toEqual({
+      kind: 'blocks',
+      blocks: [
+        {
+          handle: expect.stringMatching(/^[0-9a-f]{32}$/) as unknown,
+          name: 'Anna',
+          blockedAt: expect.any(Number) as unknown,
+        },
+      ],
+    });
+    expect(JSON.stringify(read)).not.toContain(annaIs.athleteId);
+    const handle = read.kind === 'blocks' ? (read.blocks[0]?.handle ?? '') : '';
+
+    // A copy a website served sends nothing for either (D-11).
+    const website = blocks(LOADED_FROM_A_WEBSITE);
+    expect(await website.read()).toEqual({ kind: 'unreachable' });
+    expect(await website.unblock(handle)).toEqual({ kind: 'unreachable' });
+    expect(await blocks().read()).toMatchObject({ kind: 'blocks', blocks: [{ name: 'Anna' }] });
+
+    expect(await blocks().unblock(handle)).toEqual({ kind: 'unblocked' });
+    expect(plaintextPhaseTwo(send)).toEqual([]);
+    expect(paths(send)).toContain('POST /v1/sealed');
+    // Read back the three ways: the device's list, the instance's, and the result.
+    expect(await blocks().read()).toEqual({ kind: 'blocks', blocks: [] });
+    const after = await w.call('GET', '/v1/blocks', { token: beaIs.token, signer: beaIs.signer });
+    expect(after.body).toEqual({ athleteIds: [] });
+    expect(await names(bea)).toEqual(['Anna', 'Bea']);
+    expect(await names(anna)).toEqual(['Anna', 'Bea']);
   });
 });

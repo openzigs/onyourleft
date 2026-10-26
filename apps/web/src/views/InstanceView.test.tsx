@@ -45,6 +45,8 @@ import {
   TERMS_CHANGED_TEXT,
 } from './InstanceView';
 import { ACCOUNT_NOTICES_TEXT } from './InstanceDevices';
+import type { BlocksPort } from '../instance/blocks-port';
+import { BLOCKS_TEXT } from './BlocksPanel';
 
 let mounted: Mounted | undefined;
 
@@ -280,6 +282,43 @@ describe('the link to Moderation, for the instance’s moderator only — #955',
     await settle();
     expect(moderateLink()).toBeUndefined();
     expect(moderation.calls).toEqual([]);
+  });
+});
+
+describe('the riders this rider blocked — #1529', () => {
+  function blocksPort() {
+    const calls: string[] = [];
+    const port: BlocksPort = {
+      read: () => {
+        calls.push('read');
+        return Promise.resolve({
+          kind: 'blocks',
+          blocks: [{ handle: 'a'.repeat(32), name: 'Ann', blockedAt: 1_790_000_000 }],
+        });
+      },
+      unblock: () => Promise.resolve({ kind: 'unblocked' }),
+    };
+    return { port, calls };
+  }
+
+  it('lists them once this device is signed in', async () => {
+    const blocks = blocksPort();
+    mounted = await mount(
+      <InstanceView port={scriptedInstance({ connected: true }).port} blocks={blocks.port} />,
+    );
+    await settle();
+    expect(text()).toContain(BLOCKS_TEXT.heading);
+    expect(text()).toContain('Ann, blocked 2026-09-21');
+  });
+
+  it('is not asked for, or drawn, before this device connects', async () => {
+    const blocks = blocksPort();
+    mounted = await mount(
+      <InstanceView port={scriptedInstance({ connected: false }).port} blocks={blocks.port} />,
+    );
+    await settle();
+    expect(text()).not.toContain(BLOCKS_TEXT.heading);
+    expect(blocks.calls).toEqual([]);
   });
 });
 

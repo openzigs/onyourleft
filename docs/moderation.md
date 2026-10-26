@@ -174,7 +174,7 @@ The same rules hold for **making** a public room and for **seeing** the listing 
 | Action | What happens |
 |---|---|
 | **Block** a rider | Neither rider can see or reach the other, whoever blocked whom. The blocked rider is not told: every request they make about the blocker gets exactly the answer a request about nobody gets. A block is kept for any well-formed id, whether or not anybody holds it, so a rider's own list of blocks says nothing about who exists. A rider can hold at most 1,000 blocks. |
-| **Unblock** | Removes the rider's own block. It cannot remove a block the other rider made. |
+| **Unblock** | Removes the rider's own block. It cannot remove a block the other rider made. In the app, the Instance screen lists the rider's blocks and undoes one (#1529), by a handle the instance makes for each block, never the blocked rider's id. A block made from a race's result is listed with the name the result showed the rider; one made by id, one made before the instance kept names, or one of a rider who has since deleted their account is listed with no name. |
 | **Report** a rider | Sends the rider's id and a reason (up to 1,000 characters) to your queue. A rider can make at most **5 reports an hour**, and a report about an id nobody holds counts toward the 5 like any other. It is kept, closed as `no_such_athlete`, and never reaches your queue. A rider can report someone they have blocked. The answer is the same whether or not that rider exists. |
 
 ## Notices from anybody: the notice page
@@ -393,8 +393,11 @@ the screen, *Report* beside it opens the three reasons, and one press of a reaso
 two presses from the name. The app says whether it was sent; it never says what you did about it.
 A rider blocks another from a race's result (#1516): *Block* beside each name, and a question
 before anything is sent. It is not on the ride's screen, where a phone on its side has no room
-for it, and not in a group ride, which names nobody. The app cannot yet list or undo a rider's
-blocks: it never holds another rider's athlete id, so it has nothing to show them by.
+for it, and not in a group ride, which names nobody. The app lists and undoes a rider's blocks
+on the Instance screen (#1529): it never holds another rider's athlete id, so it reads them from
+`GET /v1/blocks/handles`, each by an opaque handle and the name the result showed, and undoes one
+with `DELETE /v1/blocks/handles/{handle}`. The instance keeps that name only for the blocker's
+list, and forgets it if the blocked rider deletes their account; the block itself is kept (#899).
 
 ## What you cannot do, yet
 

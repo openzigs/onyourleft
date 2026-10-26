@@ -2,6 +2,8 @@
 
 import type { StatementsPort } from '../instance/statements-port';
 import { StatementsPanel } from './StatementsPanel';
+import type { BlocksPort } from '../instance/blocks-port';
+import { BlocksPanel } from './BlocksPanel';
 import { useCallback, useEffect, useId, useState, type JSX } from 'react';
 
 import { Button } from '../design/Button';
@@ -180,6 +182,7 @@ export function InstanceView({
   sync,
   hostedSettings,
   statements,
+  blocks,
 }: {
   /**
    * The statements of reasons about this rider's account (#910): read once
@@ -187,6 +190,8 @@ export function InstanceView({
    * sign in, and is the one who most needs to read why.
    */
   readonly statements?: StatementsPort | undefined;
+  /** The riders this rider blocked, to undo a block by (#1529): drawn only once signed in. */
+  readonly blocks?: BlocksPort | undefined;
   readonly port?: InstancePort | undefined;
   /** Asked, once connected, whether this account moderates the instance (#955). */
   readonly moderation?: ModerationPort | undefined;
@@ -510,6 +515,9 @@ export function InstanceView({
       {state.kind === 'connected' && hostedSettings !== undefined ? (
         <HostedServicePanel port={hostedSettings} />
       ) : null}
+
+      {/* #1529: only for a device signed in, as the hosted service above. */}
+      {state.kind === 'connected' && blocks !== undefined ? <BlocksPanel port={blocks} /> : null}
 
       {state.kind === 'connected' ? (
         <section className="oyl-panel" aria-labelledby="oyl-instance-devices">

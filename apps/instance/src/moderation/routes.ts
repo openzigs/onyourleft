@@ -558,6 +558,51 @@ export const MODERATION_ROUTES: readonly Route[] = [
       json({ athleteIds: await moderationOf(context).blocks(callerId(context)) }),
   },
   {
+    method: 'GET',
+    path: '/v1/blocks/handles',
+    // ADR 0047 D-7's phase 2 names "`GET`, `POST` and `DELETE /v1/blocks…`".
+    sealed: 'only',
+    operationId: 'listBlockHandles',
+    reaches: 'own',
+    summary:
+      'The blocks this athlete made, newest first, each by an opaque handle and never by athlete id (#1529): the app never holds another rider’s id. Each carries the name a race’s result showed them on the row they blocked from, or null for a block made by id, made before the instance kept names, or of a rider since erased.',
+    identity: true,
+    auth: 'session',
+    errors: ['unauthenticated'],
+    response: {
+      contentType: 'application/json',
+      schema: object({
+        blocks: {
+          type: 'array',
+          items: object({ handle: string, name: nullableString, blockedAt: integer }),
+        },
+      }),
+    },
+    handle: async (context) =>
+      json({ blocks: await moderationOf(context).heldBlocks(callerId(context)) }),
+  },
+  {
+    method: 'DELETE',
+    path: '/v1/blocks/handles/{handle}',
+    // ADR 0047 D-7's phase 2 names "`GET`, `POST` and `DELETE /v1/blocks…`".
+    sealed: 'only',
+    operationId: 'unblockByHandle',
+    reaches: {
+      exempt:
+        'names one of the caller’s own blocks by its opaque handle, never an athlete; deletes only the caller’s own row, and answers 204 whether or not there was one (#1529)',
+    },
+    summary:
+      'Remove a block this athlete made, by the handle `GET /v1/blocks/handles` gave it (#1529). Answers the same whether or not there was one; another athlete’s handle removes nothing.',
+    identity: true,
+    auth: 'session',
+    errors: ['unauthenticated'],
+    response: { contentType: 'none' },
+    handle: async (context) => {
+      await moderationOf(context).unblockByHandle(callerId(context), context.params.handle ?? '');
+      return noContent();
+    },
+  },
+  {
     method: 'POST',
     path: '/v1/blocks/{athleteId}',
     // #1210: phase 2 of ADR 0047 D-7.
