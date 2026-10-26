@@ -266,6 +266,12 @@ describe('never on the church plot, never in the carriageway, never outside a se
   });
 });
 
-/** What {@link serialise} gives FARMLAND's probe, taken when this file was written. */
-const PINNED_COUNT = 136;
-const PINNED_DIGEST = 341_446_077;
+/**
+ * What {@link serialise} gives FARMLAND's probe, taken when this file was
+ * written — and re-taken for #1566, which moves the villages' plots on
+ * purpose (136 items and `341_446_077` until then): the plots either side of
+ * a crossroads are always built now, so their doorsteps and eaves are always
+ * anchors.
+ */
+const PINNED_COUNT = 140;
+const PINNED_DIGEST = 1_133_424_754;

@@ -786,7 +786,17 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         where the urban class is `city-centre`: there
                         `footprint-buildings.ts` §`terracePlans` plans 3–4
                         storey terraced shops at the press, edge to edge,
-                        drawn with the mapped buildings
+                        drawn with the mapped buildings. Since #1566 a
+                        village is laid out by plot — a row of shops and a
+                        main-street block either side of the crossroads,
+                        houses toward the ends, no neighbour alike in shape,
+                        model or paint (`everyVillagePlot`), a lot's shape by
+                        the same rule — and each house and block carries the
+                        #1585 model (`ScatterItem.house`) the realistic world
+                        draws it as (`three-renderer.ts` §`VillageHouseBelt`:
+                        one call, in view, nearest first, inside the 23 040
+                        term after every structure no model stands for;
+                        `levers=-village-models` is its pair)
     src/game/land-class.ts
                         what the ground is where map data was read (#1546) — a
                         sparse 5 m mask built ONCE at the press from the ride's
@@ -908,8 +918,11 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         chimney's brick by each vertex's `oylPart`; since #1589
                         a lot's porch (`LOT_PORCH_STEP`), without which every
                         structure material folds the farmhouse's porch away
-                        (`withLotPorch`). A village house carries none and is
-                        drawn as it was
+                        (`withLotPorch`). Since #1566 a village's houses and
+                        shops are painted as a lot is, a model wears its wall
+                        entry as a hue (`lotModelPaint`), and the joinery's
+                        timber (`planks`) is stained by its `trim` entry, the
+                        wall's and roof's summed
     src/game/streets.ts a village's kerbed pavements (#1535) — along each side's
                         BUILT plots (`settlements.ts` §`siteAt`, §`villagePlots`,
                         the houses' own decision), on the road's edge, never on

@@ -81,6 +81,7 @@ import {
   SideRoadBelt,
   SkyDome,
   TerrainBelt,
+  VillageHouseBelt,
   WaterBelt,
   WorldLamps,
 } from '../../src/game/three-renderer';
@@ -160,6 +161,8 @@ export const LAYER_OWNERS: ReadonlyMap<{ prototype: object }, Ownership> = new M
   [PeopleBelt, 'structures'],
   // #1624: the holiday's decorations on the villages, in both worlds.
   [DecorationBelt, 'structures'],
+  // #1566: the villages' houses as #1585's models, realistic only.
+  [VillageHouseBelt, 'structures'],
   [RiderBelt, 'riders'],
   [RealisticRiderBelt, 'riders'],
   [ContactShadowBelt, 'riders'],

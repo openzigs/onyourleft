@@ -228,6 +228,15 @@ export type Layer = (typeof LAYERS)[number];
  *   owner's BY-EYE pair. Pair it with `town=mixed`: on `route.ts`' road there
  *   is no mapped building. The product always builds the weathering.
  *
+ * - `village-models` — #1566: the procedural villages' houses and
+ *   main-street blocks drawn as #1585's models (`three-renderer.ts`
+ *   §`VillageHouseBelt`). Off draws every plot as its procedural building,
+ *   as before the models — its plot layout and its paint stay: the owner's
+ *   BY-EYE pair and the tablet's cost pair (one draw call, and the models'
+ *   triangles inside the structure term). Pair it with `route=village`: the
+ *   default road's villages are far from its holds. The product always
+ *   draws the models.
+ *
  * - `facade-wreath` — #1626: the wreath the facade draws on every mapped
  *   front door while the winter lights are on (`three-renderer.ts`
  *   §`facadeWreathOf`). Off writes the wreath's uniform 0 whatever the
@@ -260,6 +269,7 @@ export const LEVERS = [
   'surface-bounds',
   'texture-bias',
   'urban-class',
+  'village-models',
   'weathering',
   'window-reveals',
 ] as const;

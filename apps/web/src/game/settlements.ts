@@ -37,6 +37,13 @@
  * with its own silhouette (`buildings.ts`, since #500 with its doors and
  * windows facing the road).
  *
+ * Since #1566 a village is laid out by plot (`everyVillagePlot`): a row of
+ * shops and a main-street block either side of its crossroads, houses toward
+ * its ends, no two neighbours alike in shape, house model or paint; and its
+ * houses and shops are painted (`building-paint.ts` §`lotPaint`). Each house
+ * and block carries the #1585 model the realistic world may draw it as
+ * (`ScatterItem.house`), where the model's whole length clears the road.
+ *
  * ⚠️ **A signpost carries no words.** No real name, no brand, no copied
  * signage: a white board on a post says "a place" and nothing more.
  *
@@ -85,6 +92,12 @@ import {
 import { lotPaint } from './building-paint';
 import { BUILDING_VARIANTS, LOT_PORCH_FRONT_METRES } from './buildings';
 import {
+  MAIN_STREET_MODEL,
+  plotModelFootprint,
+  VILLAGE_HOUSE_MODELS,
+  type PlotModelFootprint,
+} from './house-models';
+import {
   builtUpOrWater,
   COUNTRYSIDE,
   fieldGround,
@@ -95,6 +108,7 @@ import {
 } from './land-class';
 import { ROAD_CLEARANCE_METRES, fieldSpanMetres, terrainHeightAt } from './landform';
 import {
+  SCATTER_VARIANT_SLOTS,
   SETTLEMENT_GRADE_PERCENT,
   SETTLEMENT_TREE_LINE_FRACTION,
   type ScatterItem,
@@ -738,7 +752,27 @@ export interface Plot {
   readonly kind: StructureKind;
   readonly lateral: number;
   readonly variant: number;
+  /**
+   * What it is painted — #1566, `building-paint.ts` §`lotPaint`'s packed wall
+   * and roof, as a #1550 lot is: a house and a row of shops, never the church.
+   */
+  readonly paint?: number;
+  /**
+   * The house model it may be drawn as in the realistic world — #1566, its
+   * place in `house-models.ts` §`HOUSE_MODELS`: one of
+   * {@link VILLAGE_HOUSE_MODELS} on a house's plot, {@link MAIN_STREET_MODEL}
+   * on a main-street block's. A candidate only: `settlementsAt` keeps it on
+   * the item where the model's whole length is off the road and the water.
+   */
+  readonly house?: number;
 }
+
+/** The stream a village's turn through its shapes and its models is drawn from — #1566. */
+const STREAM_TURN_VARIANT = 0;
+const STREAM_TURN_MODEL = 1;
+
+/** The key a village's turns are hashed under, apart from its plots' — #1566. */
+const VILLAGE_TURN_KEY = SITE_KEY + 3;
 
 /**
  * Every plot of a village, built or not, in plot order and the right side
@@ -746,6 +780,29 @@ export interface Plot {
  * them (an empty plot is a garden or a green, not a wood); #1535 lays a
  * pavement only along the built ones, {@link villagePlots}; #1624 finds the
  * crossroads green on the middle one (`decorations.ts` §`villageAnchors`).
+ *
+ * ## By plot position — #1566
+ *
+ * - **The centre is commercial.** The plots either side of the crossroads
+ *   (the middle plot, empty since #1565) are always built, and each side of
+ *   the street has a **row of shops** on one and a **main-street block** on
+ *   the other, crossed over, so the block faces a row of shops across the
+ *   road. A block is a `shop-row` item carrying {@link MAIN_STREET_MODEL}:
+ *   the realistic world draws it as the three-storey brick building where it
+ *   has room, and everything else as the row of shops it also is.
+ * - **Houses toward the ends**, and the church at the far end on the site's
+ *   own side, as before.
+ * - **No two neighbours alike.** A plot's neighbours are the next plot on
+ *   either side along its side of the street and the plot across the road.
+ *   With `s` 0 on the right and 1 on the left, a house's shape is
+ *   `(plot + s + t) mod 6` (so its procedural shape, the variant taken modulo
+ *   the two or three a kind has, differs from all three; the rows of shops
+ *   share one, `t`, and differ from their neighbours in model), its house model
+ *   `(plot + 5s + u) mod 11` of {@link VILLAGE_HOUSE_MODELS} (which differs
+ *   from the two diagonally across as well: 1, 4, 5 and 6 are never 0 mod
+ *   11), and its paint `lotPaint`'s, whose own rule holds the same five apart.
+ *   `t` and `u` are the village's turns, seeded per site, so two villages are
+ *   not the same street.
  */
 export function everyVillagePlot(
   seed: number,
@@ -753,28 +810,68 @@ export function everyVillagePlot(
 ): readonly (Plot & { readonly built: boolean })[] {
   const plots = Math.floor(VILLAGE_METRES / PLOT_METRES) + 1;
   const middle = Math.floor(plots / 2);
+  const turns = slotHash(seed, village.wrappedSite, VILLAGE_TURN_KEY);
+  const turnVariant = Math.floor(uniformFrom(turns, STREAM_TURN_VARIANT) * SCATTER_VARIANT_SLOTS);
+  const turnModel = Math.floor(uniformFrom(turns, STREAM_TURN_MODEL) * VILLAGE_HOUSE_MODELS.length);
   const every: (Plot & { readonly built: boolean })[] = [];
   for (let plot = 0; plot < plots; plot += 1) {
     const along = village.centre - village.half + plot * PLOT_METRES;
     for (const plotSide of [1, -1] as const) {
-      const hash = slotHash(
-        seed,
-        village.wrappedSite * 64 + plot,
-        SITE_KEY + (plotSide === 1 ? 1 : 2),
-      );
-      // The church at the far end on the site's own side, the shops just past
-      // the middle on the other, houses on every other plot — and since #1565
-      // nothing on the middle plot of either side, which is the village's
-      // crossroads (`cross-streets.ts` §`villageJunction`, at its centre).
+      const s = plotSide === 1 ? 0 : 1;
+      const hash = slotHash(seed, village.wrappedSite * 64 + plot, SITE_KEY + 1 + s);
+      // The church at the far end on the site's own side, the commercial
+      // plots either side of the middle, houses on every other plot — and
+      // since #1565 nothing on the middle plot of either side, which is the
+      // village's crossroads (`cross-streets.ts` §`villageJunction`).
+      const central = Math.abs(plot - middle) === 1;
+      // #1566: the row of shops past the middle on the side across from the
+      // church (#460's), and before it on the church's side; the main-street
+      // block on the other two.
+      const shopsSide = plot === middle + 1 ? -village.side : village.side;
       const [kind, lateral]: readonly [StructureKind, number] =
         plot === plots - 1 && plotSide === village.side
           ? ['church', CHURCH_SETBACK_METRES]
-          : plot === middle + 1 && plotSide === -village.side
+          : central
             ? ['shop-row', SETBACK_METRES - 1]
             : ['building', SETBACK_METRES];
-      const built = plot !== middle && uniformFrom(hash, STREAM_PLOT) < PLOT_BUILT_SHARE;
-      const variant = Math.min(5, Math.floor(uniformFrom(hash, STREAM_VARIANT) * 6));
-      every.push({ along, side: plotSide, kind, lateral, variant, built });
+      const built =
+        plot !== middle && (central || uniformFrom(hash, STREAM_PLOT) < PLOT_BUILT_SHARE);
+      // A village's rows of shops share one shape: its centre is one street
+      // front, and a second shape is four more draw calls in the realistic
+      // world (a mesh a surface and shape, `three-renderer.ts`
+      // §`RealisticStructureBelts`) for plots a main-street block mostly hides.
+      const variant =
+        kind === 'shop-row'
+          ? turnVariant
+          : (((plot + s + turnVariant) % SCATTER_VARIANT_SLOTS) + SCATTER_VARIANT_SLOTS) %
+            SCATTER_VARIANT_SLOTS;
+      const models = VILLAGE_HOUSE_MODELS.length;
+      const house =
+        kind === 'building'
+          ? VILLAGE_HOUSE_MODELS[(((plot + 5 * s + turnModel) % models) + models) % models]
+          : kind === 'shop-row' && plotSide !== shopsSide
+            ? MAIN_STREET_MODEL
+            : undefined;
+      every.push({
+        along,
+        side: plotSide,
+        kind,
+        lateral,
+        variant,
+        built,
+        ...(kind === 'church'
+          ? {}
+          : {
+              paint: lotPaint(
+                seed,
+                village.wrappedSite * 64 + plot,
+                plotSide,
+                kind === 'building',
+                false,
+              ),
+            }),
+        ...(house === undefined ? {} : { house }),
+      });
     }
   }
   return every;
@@ -788,7 +885,15 @@ export function everyVillagePlot(
 export function villagePlots(seed: number, village: Site): readonly Plot[] {
   return everyVillagePlot(seed, village)
     .filter((plot) => plot.built)
-    .map(({ along, side, kind, lateral, variant }) => ({ along, side, kind, lateral, variant }));
+    .map(({ along, side, kind, lateral, variant, paint, house }) => ({
+      along,
+      side,
+      kind,
+      lateral,
+      variant,
+      ...(paint === undefined ? {} : { paint }),
+      ...(house === undefined ? {} : { house }),
+    }));
 }
 
 /** The villages and farmsteads, and their signposts. */
@@ -823,6 +928,12 @@ function settlementsAt(
     if (site.kind === 'village') {
       villages.push([centre - half - PLOT_METRES, centre + half + PLOT_METRES]);
       for (const plot of everyVillagePlot(seed, site)) {
+        // #1566: a plot that may hold a model holds the ground its whole
+        // length takes, in either world, so no tree stands in its back rooms.
+        const model =
+          plot.house === undefined
+            ? undefined
+            : plotModelFootprint(plot.house, STRUCTURE_FOOTPRINTS[plot.kind].front);
         // #1534: the plot is the village's ground whether or not it is built
         // on — an empty plot is a garden or a green, not a wood.
         pushFootprint(
@@ -834,20 +945,32 @@ function settlementsAt(
           plot.lateral,
           plot.side,
           PLOT_METRES / 2,
+          model,
         );
         if (!plot.built) continue;
+        const item = standing(
+          profile,
+          origin,
+          seed,
+          plot.kind,
+          plot.along,
+          plot.lateral * plot.side,
+          plot.variant,
+          'road',
+          land,
+        );
         admit(
-          standing(
-            profile,
-            origin,
-            seed,
-            plot.kind,
-            plot.along,
-            plot.lateral * plot.side,
-            plot.variant,
-            'road',
-            land,
-          ),
+          item === undefined
+            ? undefined
+            : {
+                ...item,
+                ...(plot.paint === undefined ? {} : { paint: plot.paint }),
+                ...(plot.house !== undefined &&
+                model !== undefined &&
+                modelStands(profile, origin, seed, item, plot, model)
+                  ? { house: plot.house }
+                  : {}),
+              },
           plot.along,
         );
       }
@@ -1033,6 +1156,9 @@ export function lotsAt(
 ): void {
   if (mask.bytes === 0) return;
   const { plots, span } = lotSpacing(profile);
+  const lotTurn = Math.floor(
+    uniformFrom(slotHash(seed, 0, LOT_KEY + 3), STREAM_TURN_VARIANT) * SCATTER_VARIANT_SLOTS,
+  );
   const first = Math.floor(fromMetres / span) - 1;
   // Never more plots than the route has. @see settlementsAt's bound.
   const last = Math.min(Math.floor(toMetres / span), first + plots + 1);
@@ -1060,7 +1186,12 @@ export function lotsAt(
       ) {
         continue;
       }
-      const variant = Math.min(5, Math.floor(uniformFrom(hash, STREAM_VARIANT) * 6));
+      // #1566: no lot's shape is the next lot's on its side or the lot's across
+      // the road — `everyVillagePlot`'s rule, turned by the ride's seed.
+      const variant =
+        (((wrappedPlot + (side === 1 ? 0 : 1) + lotTurn) % SCATTER_VARIANT_SLOTS) +
+          SCATTER_VARIANT_SLOTS) %
+        SCATTER_VARIANT_SLOTS;
       const item = standing(
         profile,
         origin,
@@ -1827,7 +1958,11 @@ export interface SettlementFootprint {
   readonly depth: number;
 }
 
-/** The piece of ground one plot or building takes. @see SettlementFootprint */
+/**
+ * The piece of ground one plot or building takes — and since #1566 a plot's
+ * house model's too, where it may hold one (`model`, in the item's frame).
+ * @see SettlementFootprint
+ */
 function pushFootprint(
   profile: RouteProfile,
   origin: CorridorOrigin,
@@ -1837,6 +1972,7 @@ function pushFootprint(
   lateral: number,
   side: number,
   leastHalf: number,
+  model?: PlotModelFootprint,
 ): void {
   if (footprints === undefined) return;
   const frame = frameAt(profile, origin, distanceOnRoute(profile, along));
@@ -1844,6 +1980,8 @@ function pushFootprint(
   // A building faces the road, so its own `x` runs along it and its `back`
   // reaches away from it.
   const shape = STRUCTURE_FOOTPRINTS[kind];
+  const half = Math.max(shape.x, model?.x ?? 0);
+  const back = Math.min(shape.back, model?.back ?? 0);
   footprints.push({
     along,
     x: frame.x,
@@ -1852,9 +1990,35 @@ function pushFootprint(
     alongZ: -frame.normalX,
     acrossX: frame.normalX * side,
     acrossZ: frame.normalZ * side,
-    half: Math.max(shape.x, leastHalf) + SETTLEMENT_MARGIN_METRES,
-    depth: lateral - shape.back + SETTLEMENT_MARGIN_METRES,
+    half: Math.max(half, leastHalf) + SETTLEMENT_MARGIN_METRES,
+    depth: lateral - back + SETTLEMENT_MARGIN_METRES,
   });
+}
+
+/**
+ * Whether a village plot's house model may stand where its item does — #1566:
+ * its whole length, from the building's front back
+ * ({@link plotModelFootprint}), off every stretch of the road by
+ * {@link ROAD_CLEARANCE_METRES}, as {@link structuresAt} holds every
+ * structure, and its back end out of the water, as {@link buildable} holds
+ * its front. A plot where either fails is drawn as its kind in both worlds.
+ */
+function modelStands(
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  seed: number,
+  item: ScatterItem,
+  plot: Plot,
+  model: PlotModelFootprint,
+): boolean {
+  if (footprintClearance(profile, origin, item, model) < ROAD_CLEARANCE_METRES) return false;
+  const wrapped = distanceOnRoute(profile, plot.along);
+  return !inWater(
+    waterways(profile, seed),
+    profile,
+    wrapped,
+    (plot.lateral - model.back) * plot.side,
+  );
 }
 
 /** Whether a point in plan stands on a piece of a settlement's ground. */

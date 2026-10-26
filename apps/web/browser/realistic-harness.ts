@@ -89,8 +89,11 @@ import {
   realisticTextureReport,
   setRealisticTrees,
   threeGameRenderer,
+  villageHouseStatsOf,
+  villageModelsShownOf,
   weatheringOf,
   windowRevealsOf,
+  type VillageHouseStats,
 } from '../src/game/three-renderer';
 import {
   configQuery,
@@ -281,6 +284,12 @@ declare global {
        * drawn) and how many times its geometry was built. Absent with the result.
        */
       readonly decorations?: { readonly triangles: number; readonly rebuilds: number };
+      /**
+       * #1566: the village models drawn on the last frame before the result
+       * was published — houses, triangles and the structure items they took.
+       * Absent with the result, or before a realistic frame.
+       */
+      readonly villageHouses?: VillageHouseStats;
     };
   }
 }
@@ -461,6 +470,9 @@ async function run(): Promise<void> {
   // #1657's cost and by-eye pair: the mapped buildings grounded, or as they
   // were before it. A setting of the view's, so it survives a rung change.
   mappedBlobsShownOf(view, !config.leversOff.includes('mapped-blobs'));
+  // #1566's by-eye and cost pair: the villages' houses as #1585's models, or
+  // as their procedural buildings. A setting of the view's, as the blobs' is.
+  villageModelsShownOf(view, !config.leversOff.includes('village-models'));
   // #1624: the product's decorations, or with `decorations=probe` the probe.
   decorationKindsOf(view, decorationsWithConfig(config));
   // #1626's cost pair: the mapped doors' winter wreath, or never. A setting
@@ -594,7 +606,14 @@ async function run(): Promise<void> {
       const belt = decorationBeltOf(view);
       const decorations =
         belt === undefined ? undefined : { triangles: belt.triangles, rebuilds: belt.rebuilds };
-      publish({ result, layers, census, decorations });
+      const villageHouses = villageHouseStatsOf(view);
+      publish({
+        result,
+        layers,
+        census,
+        decorations,
+        ...(villageHouses === undefined ? {} : { villageHouses }),
+      });
       // #1559: for `adb logcat`, as the result is — AE2's row says what was in frame.
       if (census !== undefined) console.log(`OYL-REALISTIC-CENSUS ${JSON.stringify(census)}`);
       console.log(`OYL-REALISTIC ${JSON.stringify(result)}`);

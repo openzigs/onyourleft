@@ -147,6 +147,7 @@ import {
   lotSidingPaints,
   ROOF_PAINTS,
   SHINGLE_PAINTS,
+  WALL_PAINTS,
 } from './building-paint';
 import {
   fogFactor,
@@ -3450,7 +3451,7 @@ describe('what the realistic structures cost in meshes — #482', () => {
 });
 
 describe('a lot’s paint reaches its instance and its materials — #1581', () => {
-  it('writes a lot’s wall and roof in the channels its walls’ and roof’s materials read, and nought for a village house', () => {
+  it('writes a lot’s wall and roof in the channels its walls’ and roof’s materials read, and nought for an unpainted house', () => {
     const belts = new RealisticStructureBelts(new Map());
     const lot: ScatterItem = item({ kind: 'building', x: 0, z: 20, paint: lotPaint(0, 3, 1) });
     const house: ScatterItem = item({ kind: 'building', x: 0, z: 40 });
@@ -3469,17 +3470,48 @@ describe('a lot’s paint reaches its instance and its materials — #1581', () 
       expect(wall).toBe(lotPaintChannel(lot.paint, 'wall'));
       expect(roof).toBe(lotPaintChannel(lot.paint, 'roof'));
       expect(wall).toBeGreaterThan(0);
-      // The village house is drawn as it was: no paint.
+      // A house no rule painted is drawn as it was: no paint.
       expect(channelsOf(mesh, 1).slice(0, 2)).toStrictEqual([0, 0]);
     }
     expect(readsLotPaint(brick.material as never)).toBe('wall');
     expect(readsLotPaint(tiles.material as never)).toBe('roof');
-    // Glass and the joinery's timber are never painted.
+    // Glass is never painted; since #1566 the joinery's timber is stained by its trim entry.
     const glass = belts.beltOf('glass')?.meshesOf('building')[0];
     expect(readsLotPaint(glass?.material as never)).toBeUndefined();
     const planks = belts.beltOf('planks')?.meshesOf('building')[0];
     expect(planks).toBeDefined();
-    expect(readsLotPaint(planks?.material as never)).toBeUndefined();
+    expect(readsLotPaint(planks?.material as never)).toBe('trim');
+    belts.dispose();
+  });
+
+  it('stains the joinery by the sum of its wall’s and roof’s entries, and never clads it — #1566', () => {
+    const belts = new RealisticStructureBelts(new Map());
+    const material = belts.beltOf('planks')?.meshesOf('building')[0]?.material as never as {
+      onBeforeCompile: (shader: unknown, renderer: unknown) => void;
+    };
+    const shader = {
+      uniforms: {},
+      vertexShader:
+        '#include <common>\n#include <begin_vertex>\n#include <color_vertex>\n#include <fog_pars_vertex>\n#include <fog_vertex>',
+      fragmentShader:
+        '#include <common>\n#include <clipping_planes_fragment>\n#include <map_fragment>\n#include <color_fragment>\n#include <fog_pars_fragment>\n#include <fog_fragment>',
+    };
+    material.onBeforeCompile(shader, undefined);
+    // The planks' own first five, the joinery's stains.
+    const planks = WALL_PAINTS.planks ?? [];
+    expect(planks.length).toBeGreaterThanOrEqual(LOT_PAINTS);
+    expect(shader.vertexShader).toContain(`const vec3 oylLotPaints[${String(LOT_PAINTS)}]`);
+    expect(shader.vertexShader).toContain(
+      `vec3(${(planks[1] ?? []).map((each) => (Number.isInteger(each) ? `${String(each)}.0` : String(each))).join(', ')})`,
+    );
+    expect(shader.vertexShader).toContain('int oylRoofCode = int(instanceColor.y + 0.5) - 1;');
+    expect(shader.vertexShader).toMatch(
+      /int oylTrim = \(min\(oylCode % 8, 4\) \+ min\(oylRoofCode % 8, 4\)\) % 5;/,
+    );
+    expect(shader.vertexShader).toContain('vOylPaint = oylLotPaints[oylTrim];');
+    // Read the wall's channel for its code, then never as cladding.
+    expect(shader.vertexShader).toContain('int oylCode = int(instanceColor.x + 0.5) - 1;');
+    expect(shader.vertexShader).toContain('oylCode = -1;');
     belts.dispose();
   });
 

@@ -590,10 +590,48 @@ describe('#1581 a lot is painted unlike the lots beside it', () => {
     }
   });
 
-  it('control: a village’s houses, on land no map covered, carry no paint', () => {
+  it('since #1566 a village’s houses and shops, on land no map covered, are painted too, and its church is not', () => {
     const today = structuresAt(straight, residential.origin, residential.seed, 0, 2_000, ALL);
     const houses = today.filter((item) => BUILT.has(item.kind));
     expect(houses.length).toBeGreaterThan(0);
-    for (const house of houses) expect(house.paint).toBeUndefined();
+    for (const house of houses) {
+      expect(lotPaintChannel(house.paint, 'wall'), house.kind).toBeGreaterThan(0);
+      expect(lotPaintChannel(house.paint, 'roof'), house.kind).toBeGreaterThan(0);
+    }
+    const churches = today.filter((item) => item.kind === 'church');
+    expect(churches.length).toBeGreaterThan(0);
+    for (const church of churches) expect(church.paint).toBeUndefined();
+  });
+
+  it('#1566: no lot is built in the shape of the next lot on its side or the lot across the road', () => {
+    const start = atStartLine(straight);
+    const frame = sceneFrame({
+      profile: straight,
+      origin: residential.origin,
+      state: { ...start, ride: { ...start.ride, distance: metres(700) } },
+      worldCorridor: residential.corridor,
+      landClass: residential.land,
+    });
+    const lots = frame.scatter.filter((item) => item.kind === 'building');
+    expect(lots.length).toBeGreaterThan(10);
+    const { span } = lotSpacing(straight);
+    let neighbours = 0;
+    for (const lot of lots) {
+      const here = besideAt(straight, residential.origin, 700, lot);
+      for (const other of lots) {
+        if (other === lot) continue;
+        const there = besideAt(straight, residential.origin, 700, other);
+        const plots = Math.round(Math.abs(there.along - here.along) / span);
+        const across = Math.sign(there.across) !== Math.sign(here.across);
+        if ((plots === 1 && !across) || (plots === 0 && across)) {
+          // A farmhouse has two shapes (`buildings.ts` §`BUILDING_VARIANTS`) and
+          // the stylised house three (`scenery-models.ts` §`MAXIMUM_SCENERY_VARIANTS`).
+          expect(other.variant % 2).not.toBe(lot.variant % 2);
+          expect(other.variant % 3).not.toBe(lot.variant % 3);
+          neighbours += 1;
+        }
+      }
+    }
+    expect(neighbours).toBeGreaterThan(lots.length / 2);
   });
 });
