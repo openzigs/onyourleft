@@ -1644,9 +1644,28 @@ describe('the village models and the procedural belts, through the drawing a vie
       drawing.updateScenery(frame.scatter, frame.camera);
       expect(drawing.villageHouses.stats.houses).toBe(0);
       const every = drawing.structures.drawnItems;
-      // A term the models take most of: the belts are held to what is left,
+      // The smallest term in which a model fits beside what no model stands
+      // for. It is read off the frame, not written down: it moves with every
+      // structure's price, and #1617's rounded hedge (274 triangles where the
+      // box was 12) took it from 8 to 12 on this frame.
+      let tightest = 0;
+      for (
+        let structureItems = 1;
+        structureItems <= REALISTIC_STRUCTURE_ITEMS;
+        structureItems += 1
+      ) {
+        drawing.setBudget(10_000, structureItems);
+        drawing.updateScenery(frame.scatter, frame.camera);
+        if (drawing.villageHouses.stats.houses > 0) {
+          tightest = structureItems;
+          break;
+        }
+      }
+      expect(tightest).toBeGreaterThan(0);
+      expect(tightest + 7).toBeLessThanOrEqual(REALISTIC_STRUCTURE_ITEMS);
+      // Terms the models take most of: the belts are held to what is left,
       // read back off the structure belts' own drawn count.
-      for (const structureItems of [9, 12, 16]) {
+      for (const structureItems of [tightest, tightest + 3, tightest + 7]) {
         drawing.setBudget(10_000, structureItems);
         drawing.updateScenery(frame.scatter, frame.camera);
         const modelled = drawing.villageHouses.stats;
