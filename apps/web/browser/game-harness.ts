@@ -11330,6 +11330,14 @@ async function treeLevelRun(): Promise<TreeLevelMeasurement> {
       400,
     ),
     markers: [],
+    // ⚠️ #1566: no village street. Since #1566 the plots either side of a
+    // village's crossroads are always built and paved, and at 400 m on this
+    // road that puts a pavement beside the rider where the hand-over's seven
+    // trees, 12 to 18 m to the left, are walked out: with the street in the
+    // frame they changed 2 pixels of the picture (measured 2026-10-26), and
+    // the probe needs them to change none. A village's own ground is never
+    // planted (#1534); the trees are the probe's, not the world's.
+    streets: [],
   };
   const { woodedPicture, ...probed } = treeLevelProbe(wooded, level, 640, 360, top, (view, gl) => {
     // The breeze moves again for #630's own probe, and is held after it.
