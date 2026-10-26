@@ -113,9 +113,11 @@ services:
 
   # Cloudflare Tunnel (ADR 0037 D-8). Outbound only. Pinned by digest, as
   # every image here is: `docker buildx imagetools inspect
-  # cloudflare/cloudflared:2026.9.3`, read 2026-09-29. Apache-2.0.
+  # cloudflare/cloudflared:2026.10.3`, read 2026-10-26. Apache-2.0. 2026.10.2 is
+  # the first release that no longer trusts the eight weak-keyed eMudhra
+  # (emSign) intermediates (Cloudflare's notice of 2026-10-20): stay at or above it.
   tunnel:
-    image: cloudflare/cloudflared:2026.9.3@sha256:072c067d25ccbe61d46e18f0d0723255f2bb5304f7317caa95b27031520ff92c
+    image: cloudflare/cloudflared:2026.10.3@sha256:faa8e0a1475f137c910be6025f43c8e4092fdd35461b31e19fd1390657a1ff39
     command: ['tunnel', '--no-autoupdate', 'run']
     environment:
       TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?set CLOUDFLARE_TUNNEL_TOKEN in .env beside this file}
