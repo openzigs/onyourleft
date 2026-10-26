@@ -26,6 +26,17 @@ describe("the demo page's query — #1647", () => {
   });
 
   it.each([
+    ['?showcase', { ok: true, preset: GROUP_PRESET, showcase: true }],
+    ['?showcase=&preset=group', { ok: true, preset: GROUP_PRESET, showcase: true }],
+    [
+      '?showcase&route=upstate-climb',
+      { ok: true, preset: GROUP_PRESET, route: 'upstate-climb', showcase: true },
+    ],
+  ])('%j runs the showcase on the group preset — #1653', (search, expected) => {
+    expect(parseDemoQuery(search)).toEqual(expected);
+  });
+
+  it.each([
     ['?speed=2', 'This demo has no setting called “speed”.'],
     ['?preset=climb&world=stylised', 'This demo has no setting called “world”.'],
     ['?preset=sprnt', 'This demo’s preset is one of climb, sprint, group, not “sprnt”.'],
@@ -36,6 +47,8 @@ describe("the demo page's query — #1647", () => {
     ['?route=', 'This demo has no route called “”.'],
     ['?route=Upstate', 'This demo has no route called “Upstate”.'],
     ['?route=a&route=b', 'This demo’s “route” setting is given more than once.'],
+    ['?showcase=on', 'This demo’s “showcase” setting takes no value, not “on”.'],
+    ['?showcase&preset=climb', 'This demo’s showcase is ridden by the group preset.'],
   ])('refuses %j, saying why, rather than riding the default', (search, message) => {
     expect(parseDemoQuery(search)).toEqual({ ok: false, message });
   });

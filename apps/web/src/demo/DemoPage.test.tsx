@@ -32,8 +32,15 @@ import { DemoPage } from './DemoPage';
 import { REFERENCE_ASPECT } from '../game/camera';
 import type { SceneFrame } from '../game/port';
 import { projectThrough } from './camera-tour-testing';
+import { SHOWCASE_GROUP, SHOWCASE_VILLAGE_GROUP } from './showcase';
 import type { DemoSnapshot } from './stage';
-import { fakeDrawnWorld, fakeRenderer, SteppedFrames } from './stage-testing';
+import {
+  fakeDrawnDecorations,
+  fakeDrawnSeason,
+  fakeDrawnWorld,
+  fakeRenderer,
+  SteppedFrames,
+} from './stage-testing';
 
 let mounted: Mounted | undefined;
 
@@ -84,6 +91,8 @@ async function page(options: PageOptions = {}): Promise<Page> {
       }}
       publish={(snapshot) => void snapshots.push(snapshot)}
       readFile={options.readFile ?? NO_FILES}
+      drawnSeason={fakeDrawnSeason}
+      drawnDecorations={fakeDrawnDecorations}
     />,
   );
   await settle();
@@ -363,5 +372,86 @@ describe('the demo page on a baked route — #1652', () => {
     expect(status()).toBe(BAKED_ROUTE_UNAVAILABLE);
     expect(credit()).toBeUndefined();
     expect(document.querySelector('summary')).toBeNull();
+  });
+});
+
+describe('the demo page’s showcase — #1653', () => {
+  const caption = (): HTMLElement | null =>
+    document.querySelector<HTMLElement>('.oyl-demo__caption');
+
+  it('captions its moments in a polite status region in the HUD’s tokens, mounted before it has text', async () => {
+    const shown = await page({ search: '?showcase', outcome: Promise.resolve({ loaded: true }) });
+    expect(caption()?.getAttribute('role')).toBe('status');
+    expect(caption()?.getAttribute('aria-live')).toBeNull();
+    expect(caption()?.textContent).toBe('');
+    expect(caption()?.style.background).toBe('var(--oyl-color-hud-surface)');
+    expect(caption()?.style.color).toBe('var(--oyl-color-hud-ink)');
+    await act(async () => {
+      shown.frames.step(2, 1000);
+      await Promise.resolve();
+    });
+    expect(shown.last()?.preset).toBe('group');
+    expect(caption()?.textContent).toBe('The stylised world');
+    expect(shown.last()?.showcase?.caption).toBe('The stylised world');
+    await act(async () => {
+      shown.frames.step(5, 1000);
+      await Promise.resolve();
+    });
+    expect(caption()?.textContent).toBe('');
+  });
+
+  it('shoots the showcase with its own tour: overhead at 55 s, where the group’s tour is behind', async () => {
+    const centred = async (search: string): Promise<number> => {
+      const shown = await page({ search });
+      await act(async () => {
+        shown.frames.step(110, 500);
+        await Promise.resolve();
+      });
+      const frame = shown.drawn();
+      const rider = frame?.markers[0];
+      if (frame === undefined || rider === undefined) throw new Error('nothing drawn');
+      const at = projectThrough(
+        frame.camera,
+        { x: rider.x, y: rider.y + 1, z: rider.z },
+        REFERENCE_ASPECT,
+      );
+      mounted?.unmount();
+      mounted = undefined;
+      return Math.abs(at.x) + Math.abs(at.y);
+    };
+    // `showcase.ts`: overhead from 50 s; `camera-tour.ts` §`DEMO_TOURS.group`: behind from 45 s.
+    expect(await centred('?showcase')).toBeLessThan(1e-6);
+    expect(await centred('?preset=group')).toBeGreaterThan(0.02);
+  });
+
+  it('rides the season on the village stretch: the view’s decorations are published, and the HUD is the drawn ride’s', async () => {
+    const shown = await page({ search: '?showcase' });
+    /** The HUD's *To go*, in kilometres, and what the drawn road has left. */
+    const toGo = (): string | null | undefined =>
+      [...document.querySelectorAll('.oyl-hud dt')].find((each) => each.textContent === 'To go')
+        ?.nextElementSibling?.textContent;
+    const left = (sections: readonly { readonly lengthMetres: number }[]): string =>
+      `${((sections.reduce((sum, each) => sum + each.lengthMetres, 0) - (shown.last()?.distance ?? 0)) / 1000).toFixed(2)} km`;
+    await act(async () => {
+      shown.frames.step(66, 500);
+      await Promise.resolve();
+    });
+    expect(shown.last()?.showcase).toMatchObject({ stretch: 'route', decorations: 0 });
+    expect(toGo()).toBe(left(SHOWCASE_GROUP.route));
+    await act(async () => {
+      shown.frames.step(4, 500);
+      await Promise.resolve();
+    });
+    expect(shown.last()?.showcase).toMatchObject({ stretch: 'village', holiday: 'halloween' });
+    expect(shown.last()?.showcase?.decorations).toBeGreaterThan(0);
+    expect(toGo()).toBe(left(SHOWCASE_VILLAGE_GROUP.route));
+  });
+
+  it('has no caption region, and runs no timeline, without ?showcase', async () => {
+    const shown = await page({ search: '?preset=group' });
+    await shown.step(10);
+    expect(caption()).toBeNull();
+    expect(shown.last()?.showcase).toBeUndefined();
+    expect(shown.last()?.skipped).toEqual([]);
   });
 });

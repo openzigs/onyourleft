@@ -65,6 +65,7 @@ describe('the demo page is accessible — #1647', () => {
     ['playing', '?preset=climb', false],
     ['paused for reduced motion', '?preset=group', true],
     ['refusing its query', '?preset=nowhere', false],
+    ['running the showcase', '?showcase', false],
   ])('passes the audit while %s', async (_what, search, reducedMotion) => {
     await show(search, reducedMotion);
     // #1650: the stats overlay — the ride HUD's own — is part of what is audited.

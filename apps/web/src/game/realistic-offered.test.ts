@@ -52,9 +52,14 @@ const OFFERED_FROM = 'web/src/game/GameView.tsx';
  * have no settings to choose from, and the owner ruled on #1643 that it loads
  * the realistic world from the start. Nothing the rider app ships can reach
  * these files (`tools/demo/demo-stays-out.ts`), so D-3's "chosen by the
- * rider" still holds of every ride a rider rides.
+ * rider" still holds of every ride a rider rides. Since #1653 the showcase's
+ * timeline (`showcase.ts`) names the realistic world as one of its moments.
  */
-const DEMO_OFFERS = new Set(['web/src/demo/stage.ts', 'web/src/demo/main.tsx']);
+const DEMO_OFFERS = new Set([
+  'web/src/demo/stage.ts',
+  'web/src/demo/main.tsx',
+  'web/src/demo/showcase.ts',
+]);
 
 /** The modules that define the realistic path, and so may name it. */
 const DEFINING = new Set([
