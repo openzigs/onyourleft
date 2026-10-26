@@ -273,7 +273,18 @@ describe('the arrangement a route produces — #341', () => {
     // items in 968 places, below, exactly as #1534 left them — and the
     // structures are 16 fewer over the sweep: the middle plot's houses, seen
     // in every frame that holds them.
-    expect(digest(placed.map(serialise))).toBe('6f8fe1a7');
+    //
+    // ⚠️ **And regenerated for #1566, which moves the arrangement on purpose**
+    // — `6f8fe1a7` before it. A village is laid out by plot: the plots either
+    // side of its crossroads, both sides, are always built and commercial (a
+    // row of shops, or a main-street block, which is a row of shops in this
+    // digest), one plot nearer the road than a house, and a plot that may hold
+    // a house model clears its whole length of trees. The natural scenery did
+    // not move on this fixture — 6 661 items in 968 places, below — and the
+    // structures are as many: what moved is which kind stands on four plots a
+    // village, and where. `settlements-variety.test.ts` asserts the layout and
+    // names no coordinate.
+    expect(digest(placed.map(serialise))).toBe('31116546');
   });
 
   it('places the same scenery IN PLAN as it did before the terrain — #458', () => {
@@ -293,7 +304,12 @@ describe('the arrangement a route produces — #341', () => {
     //
     // ⚠️ **#1565 moved it, and it was `66dea453` until then** — the village's
     // crossroads, as above, and only that.
-    expect(digest(placed.map(serialisePlan))).toBe('6b432fa3');
+    //
+    // ⚠️ **#1566 moved it, and it was `6b432fa3` until then** — the village's
+    // commercial centre, as above, and the variant this one carries: a
+    // village house's shape is its plot's rule now, unlike its neighbours',
+    // and a village's rows of shops share one.
+    expect(digest(placed.map(serialisePlan))).toBe('417f2463');
   });
 
   it('places exactly what it did before #1534 with the settlements’ ground left wooded — #1534’s control', () => {
@@ -307,14 +323,21 @@ describe('the arrangement a route produces — #341', () => {
     // the house on a village's middle plot is its crossroads now, so with the
     // ground left wooded one tree it used to clear (`clearOfBuildings`)
     // stands, in eight frames, and the structures are #1565's 16 fewer.
+    //
+    // ⚠️ **#1566 moved this control too (and its variants, as above), and it was `0be00237` / `a196f437`,
+    // 6 960 natural items in 1 020 places until then**: its structures are the
+    // sweep's above, whose commercial centre moved, and with the ground left
+    // wooded one tree `clearOfBuildings` held off the house that stood on a
+    // plot beside the crossroads stands beside the row of shops there now, a
+    // metre nearer the road, in eight frames.
     const wooded = sweep(true);
     const natural = wooded.filter((item) =>
       (SCATTER_KINDS as readonly string[]).includes(item.kind),
     );
-    expect(digest(wooded.map(serialise))).toBe('0be00237');
-    expect(digest(wooded.map(serialisePlan))).toBe('a196f437');
-    expect(natural.length).toBe(6960);
-    expect(new Set(natural.map((item) => `${item.x},${item.z}`)).size).toBe(1020);
+    expect(digest(wooded.map(serialise))).toBe('01218942');
+    expect(digest(wooded.map(serialisePlan))).toBe('37f179e3');
+    expect(natural.length).toBe(6968);
+    expect(new Set(natural.map((item) => `${item.x},${item.z}`)).size).toBe(1021);
     expect(wooded.length - natural.length).toBe(1901);
   });
 

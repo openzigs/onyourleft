@@ -219,11 +219,21 @@ export interface ScatterItem {
   readonly variant: number;
   /**
    * What a procedural lot is painted — #1581, `building-paint.ts`
-   * §`lotPaint`'s packed wall and roof. Only #1550's lots carry one; every
-   * other item is drawn as its photographs are. Like the variant it changes
-   * what stands somewhere, never where.
+   * §`lotPaint`'s packed wall and roof. #1550's lots carry one, and since
+   * #1566 a village's houses and shops; every other item is drawn as its
+   * photographs are. Like the variant it changes what stands somewhere,
+   * never where.
    */
   readonly paint?: number;
+  /**
+   * The house model a village plot may be drawn as in the realistic world —
+   * #1566, its place in `house-models.ts` §`HOUSE_MODELS`, only where the
+   * model's whole length clears every stretch of the road and stands out of
+   * the water. The stylised world draws the item as its kind and variant;
+   * the realistic world draws the model where the structure term has room
+   * for it (`three-renderer.ts` §`VillageHouseBelt`) and the kind elsewhere.
+   */
+  readonly house?: number;
 }
 
 /**

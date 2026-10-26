@@ -15,6 +15,7 @@ import {
   LOT_CLAD_STEP,
   LOT_PAINTS,
   lotClad,
+  lotModelPaint,
   lotPaint,
   lotPaintChannel,
   lotPaintEntry,
@@ -237,5 +238,36 @@ describe('a paint as a house model wears it — #1585', () => {
   it('keeps two neighbours `paintTown` painted apart apart, as a model wears them', () => {
     const worn = (WALL_PAINTS.render ?? []).map((paint) => modelPaint(paint).join());
     expect(new Set(worn).size).toBe(worn.length);
+  });
+});
+
+describe('a village plot’s house model wears its plot’s wall paint — #1566', () => {
+  it('as a hue, from the house paints for a house and from brick for a main-street block', () => {
+    for (let plot = 0; plot < 10; plot += 1) {
+      for (const side of [1, -1] as const) {
+        const packed = lotPaint(3, plot, side, true);
+        const entry = lotPaintEntry(packed, 'wall');
+        expect(lotModelPaint(packed, true)).toEqual(
+          modelPaint(lotSidingPaints()[entry] ?? [1, 1, 1]),
+        );
+        const block = lotPaint(3, plot, side, false);
+        expect(lotModelPaint(block, false)).toEqual(
+          modelPaint((WALL_PAINTS.brick ?? [])[lotPaintEntry(block, 'wall')] ?? [1, 1, 1]),
+        );
+      }
+    }
+  });
+
+  it('gives neighbours other hues, and an unpainted plot the photograph', () => {
+    const here = lotModelPaint(lotPaint(3, 4, 1, true), true);
+    for (const other of [
+      lotPaint(3, 5, 1, true),
+      lotPaint(3, 3, 1, true),
+      lotPaint(3, 4, -1, true),
+    ]) {
+      expect(lotModelPaint(other, true)).not.toEqual(here);
+    }
+    expect(lotModelPaint(undefined, true)).toEqual([1, 1, 1]);
+    expect(lotModelPaint(0, false)).toEqual([1, 1, 1]);
   });
 });

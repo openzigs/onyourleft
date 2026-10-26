@@ -84,6 +84,10 @@ const EXEMPT: Readonly<
 > = {
   blockAthlete: { answersAlike: (subject) => ({ path: `/v1/blocks/${subject}` }) },
   unblockAthlete: { answersAlike: (subject) => ({ path: `/v1/blocks/${subject}` }) },
+  unblockByHandle: {
+    heldElsewhere:
+      'names one of the caller’s own blocks by its opaque handle, never an athlete; the store deletes only the caller’s own row (#1529, store/sql-store.moderation.test.ts)',
+  },
   reportAthlete: {
     answersAlike: (subject) => ({
       path: '/v1/reports',
@@ -161,6 +165,8 @@ const NOT_AN_ATHLETE: Readonly<Record<string, string>> = {
   kind: 'a kind of sync item; the item read or written is the CALLER’s own (#776)',
   key: 'the key of one of the CALLER’s own sync items (#776)',
   jobId: 'one of the CALLER’s own analysis jobs; the store reads only the caller’s (#1095)',
+  handle:
+    'one of the CALLER’s own blocks, by an opaque random handle that is never an athlete id (#1529)',
   route:
     'the SHA-256 of a route’s canonical GPX (#331); the riders behind it are each asked of the choke point',
 };

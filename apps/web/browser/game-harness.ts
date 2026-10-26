@@ -3089,6 +3089,15 @@ interface PeopleMeasurement {
   readonly triangles: number;
   readonly animationBytes: number;
   /**
+   * #1618, read off the belt: how many of a body's triangles fade a colour
+   * across them (corners of two regions), and how far its clothes and its skin
+   * stand off the bare body as the animation texture holds them, metres at a
+   * person's 1.75 m.
+   */
+  readonly blendedTriangles: number;
+  readonly clothesStandOff: number;
+  readonly skinStandOff: number;
+  /**
    * How many pixels of a box around the nearest body in frame, and around the
    * nearest impostor, change when the people are switched off: what is drawn
    * is a person, at the place `people.ts` put them.
@@ -3115,6 +3124,9 @@ const NO_PEOPLE_MEASURED: PeopleMeasurement = {
   drawCalls: -1,
   triangles: -1,
   animationBytes: -1,
+  blendedTriangles: -1,
+  clothesStandOff: Number.NaN,
+  skinStandOff: Number.NaN,
   bodyPixels: -1,
   impostorPixels: -1,
   bodyFragments: -1,
@@ -3321,6 +3333,9 @@ function peopleProbe(
     drawCalls,
     triangles: belt?.triangles ?? -1,
     animationBytes: belt?.animationBytes ?? -1,
+    blendedTriangles: belt?.blendedTriangles ?? -1,
+    clothesStandOff: (belt?.standOff.clothes ?? Number.NaN) * 1.75,
+    skinStandOff: (belt?.standOff.skin ?? Number.NaN) * 1.75,
     bodyPixels,
     impostorPixels,
     bodyFragments: fragments.length,
@@ -11330,6 +11345,14 @@ async function treeLevelRun(): Promise<TreeLevelMeasurement> {
       400,
     ),
     markers: [],
+    // ⚠️ #1566: no village street. Since #1566 the plots either side of a
+    // village's crossroads are always built and paved, and at 400 m on this
+    // road that puts a pavement beside the rider where the hand-over's seven
+    // trees, 12 to 18 m to the left, are walked out: with the street in the
+    // frame they changed 2 pixels of the picture (measured 2026-10-26), and
+    // the probe needs them to change none. A village's own ground is never
+    // planted (#1534); the trees are the probe's, not the world's.
+    streets: [],
   };
   const { woodedPicture, ...probed } = treeLevelProbe(wooded, level, 640, 360, top, (view, gl) => {
     // The breeze moves again for #630's own probe, and is held after it.

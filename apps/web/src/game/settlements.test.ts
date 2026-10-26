@@ -21,6 +21,7 @@ import {
   steadyClimb,
   valleyRoute,
 } from './route-fixtures-testing';
+import { MAIN_STREET_MODEL, plotModelFootprint } from './house-models';
 import { SCATTER_KINDS, scatterAt, scatterSeed, type ScatterItem } from './scatter';
 import { ROAD_CLEARANCE_METRES } from './landform';
 import { sceneFrame } from './scene';
@@ -28,6 +29,7 @@ import {
   BUILDING_CLEARANCE_METRES,
   CHURCH_SETBACK_METRES,
   SETBACK_METRES,
+  SITE_LAND_REACH_METRES,
   STRUCTURE_FOOTPRINTS,
   SETTLEMENT_MARGIN_METRES,
   STRUCTURE_MAX_ITEMS,
@@ -571,15 +573,27 @@ describe('no tree, shrub or rock stands on a settlement’s ground — #1534', (
     }
   });
 
-  it('holds the ground of an empty plot too, and reaches no further than a farm’s yard', () => {
+  it('holds the ground of an empty plot too, and reaches no further than a main-street block’s back yard', () => {
     // A plot left empty is still a piece, so the pieces outnumber what is built.
     expect(footprints.length).toBeGreaterThan(buildings.length);
     const deepest = CHURCH_SETBACK_METRES - STRUCTURE_FOOTPRINTS.church.back;
+    // #1566: a plot that may hold a model holds its whole length — the
+    // main-street block's, 24 m deep, is the deepest — and was a farm's yard
+    // (30 m and a barn's depth) before it.
+    const block =
+      SETBACK_METRES -
+      1 -
+      plotModelFootprint(MAIN_STREET_MODEL, STRUCTURE_FOOTPRINTS['shop-row'].front).back;
+    const reach = Math.max(deepest, 30 - STRUCTURE_FOOTPRINTS.barn.back, block);
     for (const piece of footprints) {
-      expect(piece.depth).toBeLessThanOrEqual(
-        Math.max(deepest, 30 - STRUCTURE_FOOTPRINTS.barn.back) + SETTLEMENT_MARGIN_METRES,
-      );
+      expect(piece.depth).toBeLessThanOrEqual(reach + SETTLEMENT_MARGIN_METRES);
     }
+    // And the map is sampled as far as the deepest reaches (#1546).
+    expect(reach + SETTLEMENT_MARGIN_METRES).toBeLessThanOrEqual(SITE_LAND_REACH_METRES);
+    expect(Math.max(...footprints.map((piece) => piece.depth))).toBeCloseTo(
+      block + SETTLEMENT_MARGIN_METRES,
+      6,
+    );
   });
 
   it('records the ground whatever the structures’ budget keeps', () => {

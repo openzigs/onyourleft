@@ -116,7 +116,17 @@ async function page(options: PageOptions = {}): Promise<Page> {
 /** 60 Hz steps in two seconds of clock. */
 const TWO_SECONDS = 120;
 
-describe('the demo page — #1647', () => {
+/**
+ * ⚠️ **Fifteen seconds rather than Vitest's five**, for
+ * `showcase-stage.test.ts` §`RIDE_TIMEOUT_MS`'s reason: these cases ride the
+ * page for many seconds of clock. Under the nightly coverage run (#1732) the
+ * showcase's own tour took 3.8 s to 5.6 s and timed out twice, and the pause
+ * case reached 4.8 s. A stop on a hung ride, not a budget; the assertions are
+ * unchanged.
+ */
+const RIDE_TIMEOUT_MS = 15_000;
+
+describe('the demo page — #1647', { timeout: RIDE_TIMEOUT_MS }, () => {
   it('rides the preset its query names', async () => {
     const shown = await page({ search: '?preset=group' });
     await shown.step(60);
@@ -375,7 +385,7 @@ describe('the demo page on a baked route — #1652', () => {
   });
 });
 
-describe('the demo page’s showcase — #1653', () => {
+describe('the demo page’s showcase — #1653', { timeout: RIDE_TIMEOUT_MS }, () => {
   const caption = (): HTMLElement | null =>
     document.querySelector<HTMLElement>('.oyl-demo__caption');
 

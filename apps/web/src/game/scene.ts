@@ -81,6 +81,8 @@ import { NO_PAVEMENT_DATA, pavementSides } from './footways';
 import { BILLBOARD_FOOTPRINT } from './logo-board';
 import {
   NO_PEOPLE,
+  besideSideRoads,
+  clearOfPavements,
   footwayWalks,
   groundOf,
   peopleAt,
@@ -374,7 +376,8 @@ export function sceneFrame(input: SceneInput): SceneFrame {
     streets,
     // #1541: the people on those streets' pavements and the corridor's
     // footways, near the rider, at the ride's own clock.
-    people: people(input, streets, camera, seed),
+    // #1619: and off the side roads, drawn or mapped, as off the road.
+    people: people(input, streets, camera, seed, sideRoads),
     // #458. Built from the corridor just built, so the ground's innermost
     // column is the road's outermost one — `landform.ts` says why that is the
     // whole of the no-crack guarantee. Every band, whatever the rung: the
@@ -415,6 +418,7 @@ function people(
   streets: readonly VillageStreet[],
   camera: CameraPose,
   seed: number,
+  sideRoads: readonly SideRoad[],
 ): PeopleInView {
   const near = input.people ?? 0;
   if (near <= 0) return NO_PEOPLE;
@@ -425,7 +429,10 @@ function people(
     distanceToDrawnRoad(profile, origin, x, z, reach);
   const lines = streets.flatMap((street) => streetWalks(street, road, rule));
   if (input.worldCorridor !== undefined) {
-    lines.push(...footwayWalks(input.worldCorridor, profile, origin, land, rule));
+    // #1620: and the mapped footways off those streets' pavements, which walk them already.
+    lines.push(
+      ...clearOfPavements(footwayWalks(input.worldCorridor, profile, origin, land, rule), streets),
+    );
   }
   return peopleAt(lines, {
     x: camera.x,
@@ -433,7 +440,8 @@ function people(
     seconds: ghostClock(input.state),
     near,
     rule,
-    road,
+    // #1619: nobody on a side road this frame draws, either.
+    road: besideSideRoads(road, sideRoads),
     ground: groundOf(profile, origin, seed, land),
   });
 }

@@ -1561,3 +1561,8 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   `POST /v1/blocks/{athleteId}` could not be called for them. It is marked `only` from the first, as every other room route's
   HTTP side is: it never existed in plaintext. It is listed in
   `apps/instance/src/sealed/phase-two.ts`. The body above is not edited. (#1516)
+
+- **2026-10-26** — **Two more phase-2 routes** (#1529). `GET /v1/blocks/handles` and
+  `DELETE /v1/blocks/handles/{handle}` list and undo the caller's own blocks by an opaque handle,
+  because the app never holds another rider's athlete id. Both are marked `only` from the first and
+  are listed in `apps/instance/src/sealed/phase-two.ts`. The body above is not edited. (#1529)

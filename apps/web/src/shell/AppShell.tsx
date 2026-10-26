@@ -60,6 +60,7 @@ import type { InstancePort } from '../instance/instance-port';
 import type { ModerationPort } from '../instance/moderation-port';
 import type { SyncPort } from '../instance/sync-port';
 import type { StatementsPort } from '../instance/statements-port';
+import type { BlocksPort } from '../instance/blocks-port';
 import { UnitsProvider } from '../units/context';
 import type { UnitsPort } from '../units/store-port';
 import type { AthleteKitColourPort } from '../athlete/kit-colour-port';
@@ -527,6 +528,11 @@ export interface AppShellProps {
    */
   readonly statements?: StatementsPort | undefined;
   /**
+   * The riders this rider blocked (#1529) — `instance/blocks-port.ts`
+   * §`createBlocksPort`, built in `main.tsx` and nowhere else.
+   */
+  readonly blocks?: BlocksPort | undefined;
+  /**
    * The Moderation screen's port (#955) — `instance/moderation-port.ts`
    * §`createModerationPort`, built in `main.tsx` and nowhere else. The
    * Instance screen asks it whether to link to Moderation at all.
@@ -775,6 +781,7 @@ function viewFor(
           sync={props.sync}
           hostedSettings={props.hostedSettings}
           statements={props.statements}
+          blocks={props.blocks}
         />
       );
     case 'moderation':

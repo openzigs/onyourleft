@@ -337,8 +337,11 @@ export const ROOM_ROUTES: readonly Route[] = [
       if (moderation === undefined) return errorResponse('unavailable');
       const athleteId = await roomsOf(context).namedResultRider(caller, roomId, row);
       if (athleteId === undefined) return new Response(null, { status: 204 });
+      // #1529: the name this result showed the caller on that row, so their
+      // list of blocks can say whom without ever naming an id.
+      const shownName = published.value.rows[row - 1]?.displayName ?? undefined;
       return moderationAnswer(
-        await moderation.block(caller.athleteId, athleteId),
+        await moderation.block(caller.athleteId, athleteId, shownName),
         () => new Response(null, { status: 204 }),
       );
     },

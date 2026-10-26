@@ -161,7 +161,17 @@ function at(snapshots: readonly DemoSnapshot[], seconds: number): DemoSnapshot |
     .at(-1);
 }
 
-describe('the showcase on the stage — #1653', () => {
+/**
+ * ⚠️ **Fifteen seconds rather than Vitest's five**, for
+ * `loop-from-import.test.tsx` §`RIDE_TIMEOUT_MS`'s reason: each case rides the
+ * demo for a minute or more of frames, and the countryside case rides it twice.
+ * About 1.1 s alone, it took 3.5 s to 5.5 s under the nightly coverage run
+ * (#1732), and timed out once at 5 474 ms. A stop on a hung ride, not a
+ * budget; the assertions are unchanged.
+ */
+const RIDE_TIMEOUT_MS = 15_000;
+
+describe('the showcase on the stage — #1653', { timeout: RIDE_TIMEOUT_MS }, () => {
   it('a world cue changes the world the renderer draws', async () => {
     const { snapshots } = await run({ seconds: 12 });
     expect(at(snapshots, 6)?.world).toBe('stylised');

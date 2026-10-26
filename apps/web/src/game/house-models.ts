@@ -364,3 +364,86 @@ export function placedPoint(
     placement.cz + along * az + across * ax,
   ];
 }
+
+// --- On a procedural plot — #1566 -------------------------------------------
+
+/**
+ * The models a procedural village's HOUSE plot may be drawn as — #1566, by
+ * their place in {@link HOUSE_MODELS}: every residential model whose door is
+ * on an END. A plot's house faces the road with its long axis running back
+ * from it, on a plot 18 m wide (`settlements.ts` §`PLOT_METRES`); the one
+ * side-fronted model is 19 m along its door side and would stand in both
+ * neighbours' gardens, so it is drawn on mapped footprints only. Eleven, a
+ * prime, which `settlements.ts` §`everyVillagePlot` steps through so that no
+ * neighbour shares one.
+ */
+export const VILLAGE_HOUSE_MODELS: readonly number[] = HOUSE_MODELS.flatMap((model, index) =>
+  model.use === 'residential' && model.front === 'end' ? [index] : [],
+);
+
+/**
+ * The model a village's main-street block is drawn as — #1566: Orzechu's
+ * three-storey brick building with its shop, by its place in
+ * {@link HOUSE_MODELS}.
+ */
+export const MAIN_STREET_MODEL: number = HOUSE_MODELS.findIndex(
+  (model) => model.use === 'commercial',
+);
+
+/** A model's ground on a plot, in the plot item's own frame. @see plotModelFootprint */
+export interface PlotModelFootprint {
+  /** Half its width across. */
+  readonly x: number;
+  /** How far behind the item its back end stands (negative), and its front end ahead. */
+  readonly back: number;
+  readonly front: number;
+}
+
+/**
+ * The ground a model takes on a procedural plot, in the plot item's own frame
+ * (`settlements.ts` §`Footprint`'s convention) — #1566. Its front end stands
+ * where the procedural building's front does, `front` metres ahead of the
+ * item, and it reaches its whole length back from there.
+ */
+export function plotModelFootprint(
+  index: number,
+  front: number,
+  models: readonly HouseModel[] = HOUSE_MODELS,
+): PlotModelFootprint {
+  const model = models[index];
+  if (model === undefined) throw new Error('no such house model');
+  return { x: model.depth / 2, back: front - model.length, front };
+}
+
+/**
+ * Lays `models[index]` on a procedural plot — #1566: an item standing at
+ * `(x, y, z)` and facing `rotation` (a yaw, as three applies it: toward
+ * `(sin, cos)`, the road), the model's door end toward the road and its front
+ * end `front` metres ahead of the item, as {@link plotModelFootprint}
+ * measures it. Never stretched: a plot has no footprint to stretch it to.
+ */
+export function placeOnPlot(
+  index: number,
+  x: number,
+  y: number,
+  z: number,
+  rotation: number,
+  front: number,
+  models: readonly HouseModel[] = HOUSE_MODELS,
+): HousePlacement {
+  const model = models[index];
+  if (model === undefined) throw new Error('no such house model');
+  const ax = Math.sin(rotation);
+  const az = Math.cos(rotation);
+  const middle = front - model.length / 2;
+  return {
+    model: index,
+    cx: x + ax * middle,
+    cz: z + az * middle,
+    y0: y,
+    ax,
+    az,
+    stretchX: 1,
+    stretchZ: 1,
+  };
+}

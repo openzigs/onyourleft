@@ -62,6 +62,11 @@ export const PHASE_TWO_SEALED_ROUTES: readonly PhaseOneRoute[] = [
   only('GET', '/v1/blocks', BLOCKS_AND_REPORTS),
   only('POST', '/v1/blocks/{athleteId}', BLOCKS_AND_REPORTS),
   only('DELETE', '/v1/blocks/{athleteId}', BLOCKS_AND_REPORTS),
+  // #1529: a rider's own blocks by handle, for an app that holds no other
+  // rider's id. In D-7's own row, which names "`GET`, `POST` and `DELETE
+  // /v1/blocks…`": sealed-only from the first, never in plaintext.
+  only('GET', '/v1/blocks/handles', BLOCKS_AND_REPORTS),
+  only('DELETE', '/v1/blocks/handles/{handle}', BLOCKS_AND_REPORTS),
   only('POST', '/v1/reports', BLOCKS_AND_REPORTS),
   only('POST', '/v1/rooms', ROOMS),
   only('POST', '/v1/rooms/join', ROOMS),

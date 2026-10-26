@@ -184,6 +184,8 @@ interface Fixture {
   readonly carl: Rider;
   readonly content: string;
   readonly reportId: number;
+  /** Bea's block of an id nobody holds, by its handle (#1529). */
+  readonly beaBlockHandle: string;
 }
 
 /** A moderator (the owner), Bea with a ride, a note and a second device, and a report about Carl. */
@@ -218,8 +220,13 @@ async function fixture(): Promise<Fixture> {
   });
   const queue = await w.call('GET', '/v1/moderation/reports', { token: w.owner.token });
   const reportId = (queue.body as { reports: { reportId: number }[] }).reports[0]?.reportId ?? 0;
+  // #1529: a block of Bea's to name by its handle, of an id nobody holds.
+  await w.call('POST', '/v1/blocks/nobody-holds-this', { token: bea.token });
+  const held = await w.call('GET', '/v1/blocks/handles', { token: bea.token });
+  const beaBlockHandle = (held.body as { blocks: { handle: string }[] }).blocks[0]?.handle ?? '';
+  expect(beaBlockHandle).toMatch(/^[0-9a-f]{32}$/);
   await w.history.idle();
-  return { w, bea, second, carl, content, reportId };
+  return { w, bea, second, carl, content, reportId, beaBlockHandle };
 }
 
 /** A path with its `{name}` segments filled from the fixture, and a body that would DO something. */
@@ -236,7 +243,8 @@ function requestFor(route: PhaseOneRoute, f: Fixture): { path: string; body?: un
     .replace('{jobId}', 'job-1')
     .replace('{route}', 'a'.repeat(64))
     .replace('{roomId}', 'room-1')
-    .replace('{statementId}', '1');
+    .replace('{statementId}', '1')
+    .replace('{handle}', f.beaBlockHandle);
   const reason = { reason: 'Checked against the rules' };
   const bodies: Record<string, unknown> = {
     'POST /v1/auth/link-codes': {},
@@ -526,7 +534,7 @@ describe('the edge’s token opens nothing (#1192, ADR 0047 D-8)', () => {
     const f = await fixture();
     const edge = await testDevice();
     const before = everyRow(f.w.path);
-    expect(PHASE_TWO_SEALED_ROUTES.length).toBe(25);
+    expect(PHASE_TWO_SEALED_ROUTES.length).toBe(27);
     for (const route of PHASE_TWO_SEALED_ROUTES) {
       const { path, body } = requestFor(route, f);
       const tried = await asTheEdge(f, edge, f.bea.token, route.method, path, body);

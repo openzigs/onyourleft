@@ -150,6 +150,8 @@ const CLIENT_MODULES = [
   'sync.ts',
   'sync-port.ts',
   'moderation-port.ts',
+  // #1529: a rider's own blocks, by handle.
+  'blocks-port.ts',
   // #1210: the room routes' HTTP side (ADR 0047 D-7 phase 2).
   '../net/room-port.ts',
   '../net/rooms-port.ts',
