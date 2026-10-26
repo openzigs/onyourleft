@@ -16,7 +16,7 @@ import type { BlocksPort, HeldBlock } from '../instance/blocks-port';
  * lets the two meet again. A rider with no block, or no instance, sees
  * nothing here.
  *
- * ⚠️ Draft wording awaiting the owner's approval.
+ * The owner's approved wording (2026-10-26, on #1529).
  */
 export const BLOCKS_TEXT = {
   heading: 'Riders you blocked',

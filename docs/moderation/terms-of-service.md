@@ -54,8 +54,8 @@
     can happen and do not say how.
   - **Blocking is in the terms (owner, 2026-10-23).** The app blocks a rider from a race's result
     since #1516; section 3 uses the app's own approved wording. Since #1529 the app lists a rider's
-    blocks and undoes one on the Instance screen, and section 3 says so (⚠️ draft wording awaiting
-    the owner's approval).
+    blocks and undoes one on the Instance screen, and section 3 says so (owner's wording
+    approved 2026-10-26, on #1529).
   - **Export and delete while suspended are in the terms (owner, 2026-10-23).** The app offers
     both beside the statements on the Instance screen since #1517 (section 6).
   - **Reporting child sexual abuse material (owner, 2026-10-23).** The operator is in the United

@@ -41,8 +41,8 @@
  * A press asks first: a block holds until the rider undoes it, on the
  * Instance screen (#1529, `views/BlocksPanel.tsx`), by a handle the instance
  * made for it, since this device never holds the id to unblock by. Every
- * sentence of it is the owner's approved wording (2026-10-21, on #1530) but
- * the last, which #1529 changed: ⚠️ a draft awaiting the owner's approval.
+ * sentence of it is the owner's approved wording (2026-10-21, on #1530; the
+ * last, which #1529 changed, approved 2026-10-26).
  */
 
 import { useEffect, useRef, useState, type JSX } from 'react';
@@ -84,7 +84,7 @@ export const RACE_REFERENCES_TEXT =
 
 /**
  * #1516: every word of *Block* on a result. The owner's approved wording
- * (2026-10-21, on #1530), but for the question's last sentence (#1529, ⚠️ draft).
+ * (2026-10-21, on #1530); the question's last sentence is #1529's, approved 2026-10-26.
  */
 export const RACE_BLOCK_TEXT = {
   /** The control: "Block", and the rider's name visually hidden after it. */
