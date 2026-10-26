@@ -7,10 +7,11 @@
  * only that feature's module has: the season clock's `seasonOn` (#1622), which
  * `stage.ts` tells the view the season with, the people's `PEOPLE_NEAR_MAX`
  * (#1541), and the countryside's `countrysideWithout` (#1542), the one reader
- * of the levers `player.ts` switches. A namespace import, so that a build without
- * one — or a test that mocks the module without it (`showcase.test.ts`) —
- * reads `undefined` here and the timeline skips its cues, rather than failing
- * to build or drawing a stand-in.
+ * of the levers `player.ts` switches. A namespace import, so that a test that
+ * mocks a module without its export (`showcase.test.ts`) reads `undefined`
+ * here and the timeline skips its cues rather than drawing a stand-in. A real
+ * build without an export would not bundle at all: `stage.ts` named-imports
+ * `seasonOn` and `parseCalendarDay`.
  *
  * This says what the BUILD has. Whether a run can draw a feature — the
  * realistic world loaded, map data given — is `stage.ts`' to add.

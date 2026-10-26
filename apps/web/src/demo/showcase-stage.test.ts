@@ -20,7 +20,11 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { bakeFixtureRouteInto, routeFilesIn } from '../../browser/demo-route-fixture';
-import { realisticWorldNotice, type RealisticWorldOutcome } from '../game/realistic-assets';
+import {
+  REALISTIC_WORLD_LEFT_NOTICE,
+  realisticWorldNotice,
+  type RealisticWorldOutcome,
+} from '../game/realistic-assets';
 import { loadBakedRoute, type BakedRoute } from './baked-route';
 import { createDemoPlayer } from './player';
 import { CLIMB_PRESET, GROUP_PRESET } from './presets';
@@ -83,6 +87,8 @@ interface RunOptions {
   readonly preset?: DemoPreset;
   /** Ride seconds to step through; one pass by default. */
   readonly seconds?: number;
+  /** Milliseconds a frame takes; over a second by default, so the ladder never sees a frame time. */
+  readonly stepMs?: number;
 }
 
 /** The showcase on a stage with every browser seam replaced, stepped from ride time 0. */
@@ -110,7 +116,8 @@ async function run(options: RunOptions = {}): Promise<Run> {
   // The realistic world's load settles before the ride starts.
   await Promise.resolve();
   await Promise.resolve();
-  frames.step(Math.ceil(((options.seconds ?? timeline.seconds) * 1000) / STEP_MS), STEP_MS);
+  const stepMs = options.stepMs ?? STEP_MS;
+  frames.step(Math.ceil(((options.seconds ?? timeline.seconds) * 1000) / stepMs), stepMs);
   return { snapshots, view: views[0] as FakeView, frames };
 }
 
@@ -152,6 +159,36 @@ describe('the showcase on the stage — #1653', () => {
       'And the realistic world',
     );
     expect(snapshots.at(-1)?.notice).toBe(realisticWorldNotice(FAILED));
+  });
+
+  it('does not put the realistic world back on the next pass once the ladder has left it', async () => {
+    // Slow frames walk the ladder off the realistic world after its cue; the
+    // timeline loops and its cue comes round again on a device the ladder
+    // judged unable to draw it.
+    const timeline: ShowcaseTimeline = {
+      seconds: 6,
+      cues: [
+        { at: 0, kind: 'shot', shot: 'behind', into: 'cut' },
+        { at: 0, kind: 'world', world: 'stylised' },
+        { at: 1, kind: 'world', world: 'realistic' },
+      ],
+    };
+    const { snapshots, view } = await run({ timeline, seconds: 14, stepMs: 50 });
+    // The cue at 1 s made the world realistic once; the ladder then left it.
+    const worlds = view.qualities.map((each) => each.world);
+    expect(worlds.slice(worlds.lastIndexOf('realistic'))).toEqual(
+      worlds
+        .slice(worlds.lastIndexOf('realistic'))
+        .map((_, index) => (index === 0 ? 'realistic' : 'stylised')),
+    );
+    expect(pass(snapshots, 1).some((each) => each.world === 'realistic')).toBe(true);
+    // The second pass rides all of its length in the stylised world.
+    expect(pass(snapshots, 2).length).toBeGreaterThan(0);
+    expect(pass(snapshots, 2).every((each) => each.world === 'stylised')).toBe(true);
+    const last = snapshots.at(-1);
+    expect(last?.showcase?.pass).toBeGreaterThan(1);
+    expect(last).toMatchObject({ world: 'stylised', notice: REALISTIC_WORLD_LEFT_NOTICE });
+    expect(last?.skipped).toContain('world realistic at 1');
   });
 
   it('a season cue changes the season the view holds: none, then Halloween, then winter lights', async () => {
