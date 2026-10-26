@@ -84,7 +84,11 @@ describe('the blocks port — #1529', () => {
 
   it('sends nothing for a handle the instance never made, nor from a device signed in nowhere', async () => {
     const instance = scripted(204, null);
-    expect(await port(instance.send).unblock('../account')).toEqual({ kind: 'unreachable' });
+    for (const handle of ['../account', 'not-a-handle', HANDLE.toUpperCase()]) {
+      expect(await port(instance.send).unblock(handle)).toEqual({ kind: 'unreachable' });
+    }
+    // Not even the instance's keys were asked for.
+    expect(instance.seen).toEqual([]);
     const nowhere = port(instance.send, { ...signedInStorage(), getItem: () => null });
     expect(await nowhere.read()).toEqual({ kind: 'not-connected' });
     expect(await nowhere.unblock(HANDLE)).toEqual({ kind: 'unreachable' });
