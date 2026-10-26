@@ -317,7 +317,9 @@ function runStep(
   const result = spawnSync('bash', ['--noprofile', '--norc', '-eo', 'pipefail', script], {
     cwd,
     encoding: 'utf8',
-    env: { ...process.env, ...environment, PATH: `${bin}:${process.env.PATH ?? ''}` },
+    // A fixed system PATH behind the stubs rather than the developer's own, so
+    // a real `jarsigner` or `java` installed locally can never answer instead.
+    env: { ...process.env, ...environment, PATH: `${bin}:/usr/bin:/bin` },
   });
   return { status: result.status ?? -1, log: `${result.stdout}${result.stderr}` };
 }
