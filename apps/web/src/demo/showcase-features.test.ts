@@ -11,9 +11,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { featuresInBuild } from './showcase-features';
-import { createDemoPlayer } from './player';
-import { GROUP_PRESET } from './presets';
-import { SHOWCASE_TIMELINE, showcaseShots } from './showcase';
+import { SHOWCASE_TIMELINE, showcaseRides } from './showcase';
 import { startDemoStage, type DemoSnapshot } from './stage';
 import { fakeDrawnSeason, fakeDrawnWorld, fakeRenderer, SteppedFrames } from './stage-testing';
 
@@ -30,10 +28,7 @@ describe('a showcase feature that is not in the build — #1653', () => {
   it('has its cues skipped and listed in __oylDemo.skipped, and no caption claims it', async () => {
     const frames = new SteppedFrames();
     const { renderer, views } = fakeRenderer(Promise.resolve({ loaded: true }));
-    const player = createDemoPlayer(GROUP_PRESET, {
-      reducedMotion: false,
-      shots: showcaseShots(SHOWCASE_TIMELINE),
-    });
+    const { player, village } = showcaseRides(SHOWCASE_TIMELINE, { reducedMotion: false });
     player.play();
     const snapshots: DemoSnapshot[] = [];
     startDemoStage({
@@ -43,7 +38,7 @@ describe('a showcase feature that is not in the build — #1653', () => {
       drawnSeason: fakeDrawnSeason,
       player,
       frames,
-      showcase: { timeline: SHOWCASE_TIMELINE, features: featuresInBuild() },
+      showcase: { timeline: SHOWCASE_TIMELINE, features: featuresInBuild(), village },
       publish: (snapshot) => void snapshots.push(snapshot),
     });
     // The realistic world's load settles.

@@ -17567,10 +17567,10 @@ export function decorationKindsOf(view: GameView, kinds: ItemTable): void {
 }
 
 /**
- * The decoration belt of the world a view drew last — #1624.
- *
- * @test-facing read by `realistic-harness.ts`, which publishes its triangles,
- * and by the suite; the product reads the belt nowhere but in `render`
+ * The decoration belt of the world a view drew last — #1624. Read by
+ * `realistic-harness.ts`, which publishes its triangles, by the suite, and by
+ * the demo's showcase (#1653, `demo/main.tsx`), which publishes them too; the
+ * rider app reads the belt nowhere but in `render`.
  */
 export function decorationBeltOf(view: GameView): DecorationBelt | undefined {
   return view instanceof ThreeGameView ? view.decorationBelt : undefined;

@@ -41,7 +41,9 @@ describe('the showcase timeline — #1653', () => {
 
   it('captions every moment: each switch after the start has a caption naming its feature', () => {
     const moments = SHOWCASE_TIMELINE.cues.filter(
-      (cue) => cue.at > 0 && cue.kind !== 'caption' && cue.kind !== 'shot',
+      // A shot is the camera's and a stretch is the road's: neither is a feature.
+      (cue) =>
+        cue.at > 0 && cue.kind !== 'caption' && cue.kind !== 'shot' && cue.kind !== 'stretch',
     );
     expect(moments.map((cue) => cue.kind).sort()).toEqual([
       'countryside',
@@ -68,7 +70,7 @@ describe('the showcase timeline — #1653', () => {
 
   it('sets every switch at 0, so every pass starts from the same world', () => {
     const atZero = SHOWCASE_TIMELINE.cues.filter((cue) => cue.at === 0).map((cue) => cue.kind);
-    expect(atZero.sort()).toEqual(['countryside', 'people', 'season', 'shot', 'world']);
+    expect(atZero.sort()).toEqual(['countryside', 'people', 'season', 'shot', 'stretch', 'world']);
   });
 
   it('passes the season fixed dates, never a clock', () => {
@@ -86,16 +88,20 @@ describe('the showcase timeline — #1653', () => {
         date: 'none',
         people: false,
         countryside: false,
+        stretch: 'route',
         caption: 'The stylised world',
       },
     ],
     [8, { world: 'realistic', caption: 'And the realistic world' }],
     [12, { world: 'realistic', caption: undefined }],
     [18, { countryside: true, caption: 'Countryside planted by what the map says the land is' }],
-    [27, { people: true, caption: 'People on the pavements and paths' }],
-    [36, { date: '2026-10-31', caption: 'The season from the date: Halloween' }],
-    [44, { date: '2026-12-20', caption: 'And winter lights in December' }],
-    [52, { caption: 'Ride as a group' }],
+    [27, { people: true, stretch: 'route', caption: 'People on the pavements and paths' }],
+    [
+      36,
+      { date: '2026-10-31', stretch: 'village', caption: 'The season from the date: Halloween' },
+    ],
+    [44, { date: '2026-12-20', stretch: 'village', caption: 'And winter lights in December' }],
+    [52, { stretch: 'village', caption: 'Ride as a group' }],
     [
       71.9,
       {
@@ -103,6 +109,7 @@ describe('the showcase timeline — #1653', () => {
         date: '2026-12-20',
         people: true,
         countryside: true,
+        stretch: 'route',
         caption: undefined,
       },
     ],
@@ -143,7 +150,7 @@ describe('the showcase timeline — #1653', () => {
   });
 
   it('counts every cue fired, skipped ones included', () => {
-    expect(showcaseAt(SHOWCASE_TIMELINE, 0, ALL).fired).toBe(5);
+    expect(showcaseAt(SHOWCASE_TIMELINE, 0, ALL).fired).toBe(6);
     expect(showcaseAt(SHOWCASE_TIMELINE, SHOWCASE_TIMELINE.seconds, ALL).fired).toBe(
       SHOWCASE_TIMELINE.cues.length,
     );

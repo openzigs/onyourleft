@@ -128,6 +128,10 @@ interface Snapshot {
     readonly seconds: number;
     readonly caption?: string;
     readonly holiday: string;
+    /** Which ride the last frame came from: the run's road or the village stretch. */
+    readonly stretch: string;
+    /** The decoration triangles the real view drew, off its belt (`decorationBeltOf`). */
+    readonly decorations: number;
   };
 }
 
@@ -575,7 +579,7 @@ test.describe('the demo, built and served — #1648', () => {
   });
 
   test.describe('the showcase — #1653', () => {
-    test('captions its moments, tells the real view the season, skips what it cannot draw, and asks nothing', async ({
+    test('captions its moments, tells the real view the season, draws its decorations, skips what it cannot draw, and asks nothing', async ({
       context,
       page,
     }) => {
@@ -596,6 +600,20 @@ test.describe('the demo, built and served — #1648', () => {
       const now = await last(page);
       expect(now?.showcase?.holiday).toBe('halloween');
       expect(now?.world).toBe('stylised');
+      // In the village stretch, the real view's decoration belt holds
+      // Halloween's (`three-renderer.ts` §`decorationBeltOf`); before the
+      // season, on the group's road, it held none.
+      expect(now?.showcase?.stretch).toBe('village');
+      expect(now?.showcase?.decorations).toBeGreaterThan(0);
+      const before = (await gate(page)).snapshots.filter(
+        (each) => each.showcase !== undefined && each.showcase.seconds < 34,
+      );
+      expect(before.length).toBeGreaterThan(0);
+      expect(
+        before.every(
+          (each) => each.showcase?.stretch === 'route' && each.showcase.decorations === 0,
+        ),
+      ).toBe(true);
       expect(now?.skipped).toEqual(
         expect.arrayContaining(['world realistic at 7', 'caption at 7.5']),
       );

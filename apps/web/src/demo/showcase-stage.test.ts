@@ -4,8 +4,10 @@
  * The showcase on the stage — #1653. Each cue is shown to change what is
  * drawn by reading the renderer back — the world its last rung draws
  * (`fakeDrawnWorld`, as `three-renderer.ts` §`drawnWorldOf` reads a real
- * view's), the season it was told (`fakeDrawnSeason`, as §`seasonOf`) — and
- * the frame it was handed, never the timeline's own state.
+ * view's), the season it was told (`fakeDrawnSeason`, as §`seasonOf`), the
+ * decorations its own `DecorationBelt` drew (`fakeDrawnDecorations`, as
+ * §`decorationBeltOf`) — and the frame it was handed, never the timeline's
+ * own state.
  *
  * The clock steps 1.1 s a frame: a gap over a second is never a frame time to
  * the quality ladder (`stage.ts` §`LONGEST_FRAME_MS`), so the fake renderer is
@@ -20,23 +22,28 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { bakeFixtureRouteInto, routeFilesIn } from '../../browser/demo-route-fixture';
+import type { SceneFrame } from '../game/port';
 import {
   REALISTIC_WORLD_LEFT_NOTICE,
   realisticWorldNotice,
   type RealisticWorldOutcome,
 } from '../game/realistic-assets';
 import { loadBakedRoute, type BakedRoute } from './baked-route';
-import { createDemoPlayer } from './player';
-import { CLIMB_PRESET, GROUP_PRESET } from './presets';
+import { projectThrough } from './camera-tour-testing';
+import { createDemoPlayer, type DemoPlayer } from './player';
+import { CLIMB_PRESET } from './presets';
 import type { DemoPreset } from './script';
 import {
+  SHOWCASE_GROUP,
   SHOWCASE_TIMELINE,
+  showcaseRides,
   showcaseShots,
   type ShowcaseFeature,
   type ShowcaseTimeline,
 } from './showcase';
 import { startDemoStage, type DemoSnapshot } from './stage';
 import {
+  fakeDrawnDecorations,
   fakeDrawnSeason,
   fakeDrawnWorld,
   fakeRenderer,
@@ -74,6 +81,9 @@ afterAll(() => {
 
 interface Run {
   readonly snapshots: DemoSnapshot[];
+  /** The ride each snapshot was published with, for the HUD, its distance then, and the run's. */
+  readonly drawn: { readonly ride: DemoPlayer; readonly distance: number; readonly run: number }[];
+  readonly village: DemoPlayer;
   readonly view: FakeView;
   readonly frames: SteppedFrames;
 }
@@ -83,7 +93,7 @@ interface RunOptions {
   readonly route?: BakedRoute;
   readonly timeline?: ShowcaseTimeline;
   readonly reducedMotion?: boolean;
-  /** The group's, as `query.ts` rides the showcase, unless a case needs another road. */
+  /** The showcase's own group (`showcase.ts` §`SHOWCASE_GROUP`), unless a case needs another road. */
   readonly preset?: DemoPreset;
   /** Ride seconds to step through; one pass by default. */
   readonly seconds?: number;
@@ -96,29 +106,39 @@ async function run(options: RunOptions = {}): Promise<Run> {
   const timeline = options.timeline ?? SHOWCASE_TIMELINE;
   const frames = new SteppedFrames();
   const { renderer, views } = fakeRenderer(Promise.resolve(options.outcome ?? LOADED));
-  const player = createDemoPlayer(options.preset ?? GROUP_PRESET, {
-    reducedMotion: options.reducedMotion ?? false,
-    route: options.route,
-    shots: showcaseShots(timeline),
-  });
-  if (options.reducedMotion !== true) player.play();
+  const reducedMotion = options.reducedMotion ?? false;
+  const rides = showcaseRides(timeline, { reducedMotion, route: options.route });
+  const player =
+    options.preset === undefined
+      ? rides.player
+      : createDemoPlayer(options.preset, {
+          reducedMotion,
+          route: options.route,
+          shots: showcaseShots(timeline),
+        });
+  if (!reducedMotion) player.play();
   const snapshots: DemoSnapshot[] = [];
+  const drawn: { ride: DemoPlayer; distance: number; run: number }[] = [];
   startDemoStage({
     canvas: {} as HTMLCanvasElement,
     renderer,
     drawnWorld: fakeDrawnWorld,
     drawnSeason: fakeDrawnSeason,
+    drawnDecorations: fakeDrawnDecorations,
     player,
     frames,
-    showcase: { timeline, features: ALL_FEATURES },
-    publish: (snapshot) => void snapshots.push(snapshot),
+    showcase: { timeline, features: ALL_FEATURES, village: rides.village },
+    publish: (snapshot, ride) => {
+      snapshots.push(snapshot);
+      drawn.push({ ride, distance: ride.state.ride.distance, run: player.state.ride.distance });
+    },
   });
   // The realistic world's load settles before the ride starts.
   await Promise.resolve();
   await Promise.resolve();
   const stepMs = options.stepMs ?? STEP_MS;
   frames.step(Math.ceil(((options.seconds ?? timeline.seconds) * 1000) / stepMs), stepMs);
-  return { snapshots, view: views[0] as FakeView, frames };
+  return { snapshots, drawn, village: rides.village, view: views[0] as FakeView, frames };
 }
 
 /**
@@ -315,12 +335,143 @@ describe('the showcase on the stage — #1653', () => {
     expect(digest(2)).toBe(digest(1));
   });
 
+  it('a season cue puts the holiday’s decorations in the scene, on the village stretch: read off the view’s belt', async () => {
+    const { snapshots, drawn, village } = await run({ seconds: 70 });
+    const drawnFrames = pass(snapshots);
+    const between = (from: number, to: number): DemoSnapshot[] =>
+      drawnFrames.filter(
+        (each) => (each.showcase?.seconds ?? 0) >= from && (each.showcase?.seconds ?? 0) < to,
+      );
+    // On the run's road, before the season: no holiday and no village.
+    expect(between(0, 34).length).toBeGreaterThan(10);
+    expect(
+      between(0, 34).every(
+        (each) => each.showcase?.stretch === 'route' && each.showcase.decorations === 0,
+      ),
+    ).toBe(true);
+    // On the village stretch from the season's first moment to the roadside
+    // cut; Halloween's decorations, then the winter lights', on every frame
+    // of the season's two moments.
+    expect(between(34, 62).every((each) => each.showcase?.stretch === 'village')).toBe(true);
+    const halloween = between(34, 42);
+    const winter = between(42, 50);
+    expect(halloween.length).toBeGreaterThan(5);
+    for (const each of [...halloween, ...winter]) {
+      expect(each.showcase?.decorations, String(each.showcase?.seconds)).toBeGreaterThan(0);
+    }
+    expect(halloween.every((each) => each.showcase?.holiday === 'halloween')).toBe(true);
+    expect(winter.every((each) => each.showcase?.holiday === 'winter-lights')).toBe(true);
+    // Each holiday places its own: the two moments draw different decorations.
+    expect(halloween.at(-1)?.showcase?.decorations).not.toBe(winter.at(-1)?.showcase?.decorations);
+    // Back on the run's road at the roadside cut, which has no village.
+    expect(
+      between(62, 70).every(
+        (each) => each.showcase?.stretch === 'route' && each.showcase.decorations === 0,
+      ),
+    ).toBe(true);
+    // The HUD reads the ride drawn: the village's, while it is drawn.
+    snapshots.forEach((each, index) => {
+      expect(drawn[index]?.ride === village).toBe(each.showcase?.stretch === 'village');
+      expect(each.distance).toBe(drawn[index]?.distance);
+    });
+  });
+
+  it('without the village stretch, the season moments draw no decoration: the group’s road has no village', async () => {
+    const { snapshots } = await run({
+      seconds: 50,
+      timeline: {
+        ...SHOWCASE_TIMELINE,
+        cues: SHOWCASE_TIMELINE.cues.filter((cue) => cue.kind !== 'stretch'),
+      },
+    });
+    const seasonal = pass(snapshots).filter((each) => (each.showcase?.seconds ?? 0) >= 34);
+    expect(seasonal.length).toBeGreaterThan(5);
+    expect(seasonal.every((each) => each.showcase?.holiday !== 'none')).toBe(true);
+    expect(seasonal.every((each) => each.showcase?.decorations === 0)).toBe(true);
+  });
+
+  it.each([
+    ['landscape', 16 / 9],
+    ['portrait', 9 / 16],
+  ])('the group overhead frames all four riders together (%s)', async (_, aspect) => {
+    const { view, snapshots } = await run({ seconds: 62 });
+    /** The furthest any rider's hips are from the middle of the frame, as the renderer aims it. */
+    const worst = (frame: SceneFrame): number =>
+      Math.max(
+        ...frame.markers.map((marker) => {
+          const seen = projectThrough(
+            frame.camera,
+            { x: marker.x, y: marker.y + 1, z: marker.z },
+            aspect,
+          );
+          return seen.depth > 0 ? Math.max(Math.abs(seen.x), Math.abs(seen.y)) : Infinity;
+        }),
+      );
+    // From the end of the overhead's blend to the roadside cut.
+    const overhead = view.rendered.filter((_, index) => {
+      const seconds = snapshots.filter((each) => each.framesDrawn === index + 1).at(-1)
+        ?.showcase?.seconds;
+      return seconds !== undefined && seconds >= 51.5 && seconds < 62;
+    });
+    expect(overhead.length).toBeGreaterThan(5);
+    for (const frame of overhead) {
+      expect(frame.markers).toHaveLength(SHOWCASE_GROUP.riders.length);
+      expect(worst(frame)).toBeLessThan(0.9);
+    }
+  });
+
+  it('publishes the drawn ride’s distance: the village’s on its stretch, where the run’s differs', async () => {
+    // The climb's lone rider rides harder than the group: the two rides part.
+    const { snapshots, drawn, village } = await run({ preset: CLIMB_PRESET, seconds: 40 });
+    const stretch = drawn.filter((each) => each.ride === village);
+    expect(stretch.length).toBeGreaterThan(3);
+    expect(stretch.every((each) => each.distance !== each.run)).toBe(true);
+    snapshots.forEach((each, index) => expect(each.distance).toBe(drawn[index]?.distance));
+  });
+
+  it('plays, pauses and stops the village stretch’s ride with the run’s, so both keep one clock', async () => {
+    const frames = new SteppedFrames();
+    const { renderer } = fakeRenderer(Promise.resolve(LOADED));
+    const { player, village } = showcaseRides(SHOWCASE_TIMELINE, { reducedMotion: false });
+    player.play();
+    const stage = startDemoStage({
+      canvas: {} as HTMLCanvasElement,
+      renderer,
+      drawnWorld: fakeDrawnWorld,
+      player,
+      frames,
+      showcase: { timeline: SHOWCASE_TIMELINE, features: ALL_FEATURES, village },
+      publish: () => undefined,
+    });
+    await Promise.resolve();
+    frames.step(20, 500);
+    expect(village.status).toBe('playing');
+    expect(village.rideMs).toBe(player.rideMs);
+    stage.pause();
+    expect(village.status).toBe('paused');
+    // Ten seconds of clock while paused, with a still frame drawn in them.
+    frames.step(20, 500);
+    stage.play();
+    frames.step(20, 500);
+    expect(village.rideMs).toBeGreaterThan(0);
+    expect(village.rideMs).toBe(player.rideMs);
+    stage.stop();
+    expect(village.status).toBe('stopped');
+    expect(village.rideMs).toBe(0);
+    stage.play();
+    frames.step(10, 500);
+    expect(village.rideMs).toBe(player.rideMs);
+  });
+
   it('under reduced motion, waits for Play, and every camera move is a cut', async () => {
     const { snapshots } = await run({ reducedMotion: true, seconds: 10 });
-    // Every rider on its start line: the group's lead starts 30 m up the road.
-    expect(snapshots.every((each) => each.state === 'paused' && each.distance === 30)).toBe(true);
-    expect(snapshots.at(-1)?.showcase?.fired).toBe(5);
-    const player = createDemoPlayer(GROUP_PRESET, {
+    // Every rider on its start line: the lead starts at the head of the group.
+    const start = SHOWCASE_GROUP.riders[0]?.startMetres;
+    expect(snapshots.every((each) => each.state === 'paused' && each.distance === start)).toBe(
+      true,
+    );
+    expect(snapshots.at(-1)?.showcase?.fired).toBe(6);
+    const player = createDemoPlayer(SHOWCASE_GROUP, {
       reducedMotion: true,
       shots: showcaseShots(SHOWCASE_TIMELINE),
     });

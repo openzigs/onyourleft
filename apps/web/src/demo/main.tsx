@@ -15,7 +15,9 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import '../design/theme.css';
+import type { GameView } from '../game/port';
 import {
+  decorationBeltOf,
   drawnWorldOf,
   loadGameWordmark,
   loadSceneryModels,
@@ -54,6 +56,11 @@ function observeInView(element: Element, onChange: (inView: boolean) => void): (
   return () => observer.disconnect();
 }
 
+/** How many decoration triangles the view drew last: its belt's, read off the scene. */
+function drawnDecorations(view: GameView): number {
+  return decorationBeltOf(view)?.triangles ?? 0;
+}
+
 function publish(snapshot: DemoSnapshot): void {
   window.__oylDemo = snapshot;
 }
@@ -80,6 +87,8 @@ async function start(): Promise<void> {
         readFile={readFileBytes}
         // #1653: the season the view holds, which the showcase reads back.
         drawnSeason={seasonOf}
+        // #1653: the decorations the view drew, which the showcase reads back.
+        drawnDecorations={drawnDecorations}
       />
     </StrictMode>,
   );

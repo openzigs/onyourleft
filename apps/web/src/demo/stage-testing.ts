@@ -5,10 +5,12 @@
  * frame clock — for `stage.test.ts` and `DemoPage.test.tsx` (#1647).
  */
 
+import { HOLIDAY_DECORATIONS } from '../game/decorations';
 import type { GameRenderer, GameView, SceneFrame } from '../game/port';
 import type { QualitySettings } from '../game/quality';
 import type { RealisticWorldOutcome } from '../game/realistic-assets';
 import type { Season } from '../game/season';
+import { DecorationBelt } from '../game/three-renderer';
 import type { FrameScheduler } from './stage';
 
 /** A frame clock that runs only when the test says, and counts what it was asked. */
@@ -49,6 +51,12 @@ export interface FakeView extends GameView {
   readonly qualities: QualitySettings[];
   /** Every season the view was told, in order (#1653). */
   readonly seasons: Season[];
+  /**
+   * The product's own decoration belt, updated on every render with the
+   * frame's streets and camera and the holiday the view holds, as
+   * `ThreeGameView.render` updates its own (#1653).
+   */
+  readonly decorations: DecorationBelt;
 }
 
 export function fakeRenderer(outcome: Promise<RealisticWorldOutcome>): {
@@ -61,11 +69,21 @@ export function fakeRenderer(outcome: Promise<RealisticWorldOutcome>): {
       const rendered: SceneFrame[] = [];
       const qualities: QualitySettings[] = [settings];
       const seasons: Season[] = [];
+      const decorations = new DecorationBelt('stylised');
       const view: FakeView = {
         rendered,
         qualities,
         seasons,
-        render: (frame) => void rendered.push(frame),
+        decorations,
+        render: (frame) => {
+          rendered.push(frame);
+          decorations.update(
+            frame.streets,
+            frame.camera,
+            seasons.at(-1)?.holiday,
+            HOLIDAY_DECORATIONS,
+          );
+        },
         prepare: () => Promise.resolve(),
         setQuality: (next) => void qualities.push(next),
         setRiderKit: () => undefined,
@@ -90,4 +108,9 @@ export function fakeDrawnWorld(view: GameView): QualitySettings['world'] {
 /** The season a fake view holds: the last it was told, as `three-renderer.ts` §`seasonOf` reads a real one's. */
 export function fakeDrawnSeason(view: GameView): Season | undefined {
   return (view as FakeView).seasons.at(-1);
+}
+
+/** The decoration triangles a fake view drew last, as `three-renderer.ts` §`decorationBeltOf` reads a real one's. */
+export function fakeDrawnDecorations(view: GameView): number {
+  return (view as FakeView).decorations.triangles;
 }

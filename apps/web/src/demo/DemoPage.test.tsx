@@ -32,8 +32,15 @@ import { DemoPage } from './DemoPage';
 import { REFERENCE_ASPECT } from '../game/camera';
 import type { SceneFrame } from '../game/port';
 import { projectThrough } from './camera-tour-testing';
+import { SHOWCASE_GROUP, SHOWCASE_VILLAGE_GROUP } from './showcase';
 import type { DemoSnapshot } from './stage';
-import { fakeDrawnSeason, fakeDrawnWorld, fakeRenderer, SteppedFrames } from './stage-testing';
+import {
+  fakeDrawnDecorations,
+  fakeDrawnSeason,
+  fakeDrawnWorld,
+  fakeRenderer,
+  SteppedFrames,
+} from './stage-testing';
 
 let mounted: Mounted | undefined;
 
@@ -85,6 +92,7 @@ async function page(options: PageOptions = {}): Promise<Page> {
       publish={(snapshot) => void snapshots.push(snapshot)}
       readFile={options.readFile ?? NO_FILES}
       drawnSeason={fakeDrawnSeason}
+      drawnDecorations={fakeDrawnDecorations}
     />,
   );
   await settle();
@@ -414,6 +422,29 @@ describe('the demo page’s showcase — #1653', () => {
     // `showcase.ts`: overhead from 50 s; `camera-tour.ts` §`DEMO_TOURS.group`: behind from 45 s.
     expect(await centred('?showcase')).toBeLessThan(1e-6);
     expect(await centred('?preset=group')).toBeGreaterThan(0.02);
+  });
+
+  it('rides the season on the village stretch: the view’s decorations are published, and the HUD is the drawn ride’s', async () => {
+    const shown = await page({ search: '?showcase' });
+    /** The HUD's *To go*, in kilometres, and what the drawn road has left. */
+    const toGo = (): string | null | undefined =>
+      [...document.querySelectorAll('.oyl-hud dt')].find((each) => each.textContent === 'To go')
+        ?.nextElementSibling?.textContent;
+    const left = (sections: readonly { readonly lengthMetres: number }[]): string =>
+      `${((sections.reduce((sum, each) => sum + each.lengthMetres, 0) - (shown.last()?.distance ?? 0)) / 1000).toFixed(2)} km`;
+    await act(async () => {
+      shown.frames.step(66, 500);
+      await Promise.resolve();
+    });
+    expect(shown.last()?.showcase).toMatchObject({ stretch: 'route', decorations: 0 });
+    expect(toGo()).toBe(left(SHOWCASE_GROUP.route));
+    await act(async () => {
+      shown.frames.step(4, 500);
+      await Promise.resolve();
+    });
+    expect(shown.last()?.showcase).toMatchObject({ stretch: 'village', holiday: 'halloween' });
+    expect(shown.last()?.showcase?.decorations).toBeGreaterThan(0);
+    expect(toGo()).toBe(left(SHOWCASE_VILLAGE_GROUP.route));
   });
 
   it('has no caption region, and runs no timeline, without ?showcase', async () => {

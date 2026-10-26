@@ -75,7 +75,7 @@ import {
   type ReadDemoFile,
 } from './baked-route';
 import { createDemoPlayer, type DemoStatus } from './player';
-import { SHOWCASE_TIMELINE, showcaseShots } from './showcase';
+import { SHOWCASE_TIMELINE, showcaseRides } from './showcase';
 import { featuresInBuild } from './showcase-features';
 import { parseDemoQuery } from './query';
 import { DemoSourceOffer } from './SourceOffer';
@@ -97,6 +97,11 @@ export interface DemoPageProps {
   readonly readFile: ReadDemoFile;
   /** The season a view holds — `three-renderer.ts` §`seasonOf` — for the showcase (#1653). */
   readonly drawnSeason?: ((view: GameView) => Season | undefined) | undefined;
+  /**
+   * How many decoration triangles a view drew last — `three-renderer.ts`
+   * §`decorationBeltOf`'s — for the showcase (#1653).
+   */
+  readonly drawnDecorations?: ((view: GameView) => number) | undefined;
 }
 
 /** What the HUD's two controls say on the demo. */
@@ -158,7 +163,7 @@ export function DemoPage(props: DemoPageProps) {
   const [caption, setCaption] = useState<string | undefined>(undefined);
   const [hud, setHud] = useState<HudView | undefined>(undefined);
   const { renderer, drawnWorld, frames, reducedMotion, observeInView, publish, readFile } = props;
-  const { drawnSeason } = props;
+  const { drawnSeason, drawnDecorations } = props;
   const asked = query.ok ? query.route : undefined;
   const [load, setLoad] = useState<RouteLoad>(
     asked === undefined ? { kind: 'none' } : { kind: 'loading' },
@@ -184,12 +189,12 @@ export function DemoPage(props: DemoPageProps) {
     const canvas = canvasRef.current;
     if (!query.ok || canvas === null || load.kind === 'loading') return undefined;
     const route = load.kind === 'ready' ? load.route : undefined;
-    const showcase = query.showcase === true;
-    const player = createDemoPlayer(query.preset, {
-      reducedMotion,
-      route,
-      shots: showcase ? showcaseShots(SHOWCASE_TIMELINE) : undefined,
-    });
+    // #1653: the showcase rides its own close group, and a village stretch.
+    const rides =
+      query.showcase === true
+        ? showcaseRides(SHOWCASE_TIMELINE, { reducedMotion, route })
+        : undefined;
+    const player = rides?.player ?? createDemoPlayer(query.preset, { reducedMotion, route });
     if (!reducedMotion) player.play();
     const stage = startDemoStage({
       canvas,
@@ -197,17 +202,22 @@ export function DemoPage(props: DemoPageProps) {
       drawnWorld,
       player,
       frames,
-      showcase: showcase ? { timeline: SHOWCASE_TIMELINE, features: featuresInBuild() } : undefined,
+      showcase:
+        rides === undefined
+          ? undefined
+          : { timeline: SHOWCASE_TIMELINE, features: featuresInBuild(), village: rides.village },
       drawnSeason,
-      publish: (snapshot) => {
+      drawnDecorations,
+      publish: (snapshot, drawn) => {
         setStatus(snapshot.state);
         setNotice(snapshot.notice);
         setCaption(snapshot.showcase?.caption);
+        // The drawn ride's numbers; the credit is keyed on the run's map data.
         setHud({
-          state: player.state,
-          sensors: player.sensors,
-          profile: player.profile,
-          rideSeconds: player.rideMs / 1000,
+          state: drawn.state,
+          sensors: drawn.sensors,
+          profile: drawn.profile,
+          rideSeconds: drawn.rideMs / 1000,
           mapData: player.mapData !== undefined,
         });
         publish(snapshot);
@@ -233,6 +243,7 @@ export function DemoPage(props: DemoPageProps) {
     renderer,
     drawnWorld,
     drawnSeason,
+    drawnDecorations,
     frames,
     reducedMotion,
     observeInView,

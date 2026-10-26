@@ -39,6 +39,13 @@
  * it was handed, never from the timeline. At the timeline's end the ride
  * starts again from 0, without a reload.
  *
+ * A `stretch` cue switches which ride is drawn: the run's, or the village
+ * stretch's (`showcase.ts` §`SHOWCASE_VILLAGE_ROAD`), where the season's
+ * decorations stand. Both are ridden on the one clock, played, paused, stopped
+ * and looped together, so a cut to either lands where it is now; the HUD is
+ * the drawn ride's (`publish`'s `drawn`), and the decorations published are
+ * the view's own (`drawnDecorations`).
+ *
  * ## The clock is the scheduler's
  *
  * Each frame's time is the timestamp {@link FrameScheduler.request} hands its
@@ -65,6 +72,7 @@ import {
   NO_SEASON_DATE,
   showcaseAt,
   type ShowcaseFeature,
+  type ShowcaseStretch,
   type ShowcaseTimeline,
 } from './showcase';
 import type { DemoPresetId } from './script';
@@ -128,6 +136,13 @@ export interface ShowcaseSnapshot {
   readonly people: number;
   /** A digest of the last frame's scenery kinds, which #1542's countryside changes. */
   readonly scenery: number;
+  /** Which ride the last frame drawn came from. */
+  readonly stretch: ShowcaseStretch;
+  /**
+   * How many triangles of the holiday's decorations the VIEW drew in its last
+   * frame (`drawnDecorations`): none with no holiday or no village in reach.
+   */
+  readonly decorations: number;
 }
 
 /** A showcase to run on the stage — #1653. */
@@ -135,6 +150,11 @@ export interface ShowcaseRun {
   readonly timeline: ShowcaseTimeline;
   /** The features this build has (`showcase-features.ts`). */
   readonly features: ReadonlySet<ShowcaseFeature>;
+  /**
+   * The village stretch's ride (`showcase.ts` §`showcaseRides`), drawn while
+   * the timeline says `village`, and ridden alongside the run's throughout.
+   */
+  readonly village: DemoPlayer;
 }
 
 export interface DemoStageOptions {
@@ -144,12 +164,21 @@ export interface DemoStageOptions {
   readonly drawnWorld: (view: GameView) => QualitySettings['world'];
   readonly player: DemoPlayer;
   readonly frames: FrameScheduler;
-  /** Called with every snapshot, after every drawn frame and every change. */
-  readonly publish: (snapshot: DemoSnapshot) => void;
+  /**
+   * Called with every snapshot, after every drawn frame and every change, and
+   * the ride being drawn — `player`, or a showcase's village stretch — for
+   * the HUD to read.
+   */
+  readonly publish: (snapshot: DemoSnapshot, drawn: DemoPlayer) => void;
   /** #1653: the showcase to run, if any. */
   readonly showcase?: ShowcaseRun | undefined;
   /** The season a view holds — `three-renderer.ts` §`seasonOf` in the demo. */
   readonly drawnSeason?: ((view: GameView) => Season | undefined) | undefined;
+  /**
+   * How many decoration triangles a view drew last — `three-renderer.ts`
+   * §`decorationBeltOf`'s, in the demo (#1653).
+   */
+  readonly drawnDecorations?: ((view: GameView) => number) | undefined;
 }
 
 /** FNV-1a over a frame's scenery kinds: changes when the countryside does. */
@@ -206,7 +235,17 @@ export function startDemoStage(options: DemoStageOptions): DemoStage {
   let appliedDate: string | undefined;
   let features: FrameFeatures | undefined;
   let lastFrame: SceneFrame | undefined;
+  let lastStretch: ShowcaseStretch = 'route';
   let shown: ReturnType<typeof showcaseAt> | undefined;
+  /** Every ride the stage rides: the run's, and a showcase's village stretch. */
+  const rides: readonly DemoPlayer[] =
+    showcase === undefined ? [player] : [player, showcase.village];
+  // The village rides as the run does from the start: a caller plays the run
+  // before the stage is built unless the visitor asked for reduced motion.
+  if (showcase !== undefined && player.status === 'playing') showcase.village.play();
+  /** The ride the timeline says is drawn now. */
+  const drawn = (): DemoPlayer =>
+    showcase !== undefined && shown?.stretch === 'village' ? showcase.village : player;
   const can = (feature: ShowcaseFeature): boolean =>
     showcase !== undefined &&
     showcase.features.has(feature) &&
@@ -248,32 +287,38 @@ export function startDemoStage(options: DemoStageOptions): DemoStage {
   };
 
   const publish = (): void => {
-    options.publish({
-      state: player.status,
-      preset: player.preset.id,
-      world: options.drawnWorld(view),
-      framesDrawn,
-      distance: player.state.ride.distance,
-      notice,
-      mapData: player.mapData,
-      mappedBuildings,
-      skipped: shown?.skipped ?? [],
-      showcase:
-        shown === undefined
-          ? undefined
-          : {
-              pass,
-              seconds: player.rideMs / 1000,
-              fired: shown.fired,
-              caption: shown.caption,
-              holiday: options.drawnSeason?.(view)?.holiday ?? 'none',
-              people:
-                lastFrame?.people === undefined
-                  ? 0
-                  : lastFrame.people.near.length + lastFrame.people.far.length,
-              scenery: lastFrame === undefined ? 0 : sceneryDigest(lastFrame),
-            },
-    });
+    const ride = drawn();
+    options.publish(
+      {
+        state: player.status,
+        preset: player.preset.id,
+        world: options.drawnWorld(view),
+        framesDrawn,
+        distance: ride.state.ride.distance,
+        notice,
+        mapData: player.mapData,
+        mappedBuildings,
+        skipped: shown?.skipped ?? [],
+        showcase:
+          shown === undefined
+            ? undefined
+            : {
+                pass,
+                seconds: player.rideMs / 1000,
+                fired: shown.fired,
+                caption: shown.caption,
+                holiday: options.drawnSeason?.(view)?.holiday ?? 'none',
+                people:
+                  lastFrame?.people === undefined
+                    ? 0
+                    : lastFrame.people.near.length + lastFrame.people.far.length,
+                scenery: lastFrame === undefined ? 0 : sceneryDigest(lastFrame),
+                stretch: lastStretch,
+                decorations: options.drawnDecorations?.(view) ?? 0,
+              },
+      },
+      ride,
+    );
   };
 
   const seen = (): boolean => pageVisible && inView && !destroyed;
@@ -281,12 +326,14 @@ export function startDemoStage(options: DemoStageOptions): DemoStage {
   const tick = (nowMs: number): void => {
     handle = undefined;
     if (!seen()) return;
-    player.advance(nowMs);
+    for (const ride of rides) ride.advance(nowMs);
     if (showcase !== undefined && player.rideMs >= showcase.timeline.seconds * 1000) {
       // The timeline's end: the ride from its start line, without a reload.
-      player.stop();
-      player.play();
-      player.advance(nowMs);
+      for (const ride of rides) {
+        ride.stop();
+        ride.play();
+        ride.advance(nowMs);
+      }
       pass += 1;
     }
     applyShowcase();
@@ -303,9 +350,11 @@ export function startDemoStage(options: DemoStageOptions): DemoStage {
       quality = next;
     }
     if (paced.draw || redrawOwed) {
-      const frame = player.frame(worldRung(quality), features);
+      const ride = drawn();
+      const frame = ride.frame(worldRung(quality), features);
       view.render(frame);
       lastFrame = frame;
+      lastStretch = ride === player ? 'route' : 'village';
       mappedBuildings = frame.mappedBuildings?.buildings.plans.length ?? 0;
       framesDrawn += 1;
       redrawOwed = false;
@@ -324,7 +373,7 @@ export function startDemoStage(options: DemoStageOptions): DemoStage {
   const idle = (): void => {
     if (handle !== undefined) frames.cancel(handle);
     handle = undefined;
-    player.holdClock();
+    for (const ride of rides) ride.holdClock();
     // A pacer that saw the last frame before a gap would hand the ladder the
     // gap as one frame's time.
     pacer = new FramePacer();
@@ -363,18 +412,18 @@ export function startDemoStage(options: DemoStageOptions): DemoStage {
 
   return {
     play() {
-      player.play();
+      for (const ride of rides) ride.play();
       publish();
       schedule();
     },
     pause() {
-      player.pause();
+      for (const ride of rides) ride.pause();
       idle();
       redraw();
       publish();
     },
     stop() {
-      player.stop();
+      for (const ride of rides) ride.stop();
       idle();
       redraw();
       publish();
