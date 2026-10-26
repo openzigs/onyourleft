@@ -20,51 +20,63 @@ vi.mock('../game/season', async (importOriginal) => {
   return { ...(await importOriginal<typeof import('../game/season')>()), seasonOn: undefined };
 });
 
-describe('a showcase feature that is not in the build — #1653', () => {
-  it('is not among the build’s features; the others are', () => {
-    expect([...featuresInBuild()].sort()).toEqual(['countryside', 'people', 'realistic']);
-  });
+/**
+ * ⚠️ **Fifteen seconds rather than Vitest's five**, for
+ * `showcase-stage.test.ts` §`RIDE_TIMEOUT_MS`'s reason: the skipped-cue case
+ * rides the whole showcase, and took 4.0 s under the nightly coverage run
+ * (#1732). A stop on a hung ride, not a budget; the assertions are unchanged.
+ */
+const RIDE_TIMEOUT_MS = 15_000;
 
-  it('has its cues skipped and listed in __oylDemo.skipped, and no caption claims it', async () => {
-    const frames = new SteppedFrames();
-    const { renderer, views } = fakeRenderer(Promise.resolve({ loaded: true }));
-    const { player, village } = showcaseRides(SHOWCASE_TIMELINE, { reducedMotion: false });
-    player.play();
-    const snapshots: DemoSnapshot[] = [];
-    startDemoStage({
-      canvas: {} as HTMLCanvasElement,
-      renderer,
-      drawnWorld: fakeDrawnWorld,
-      drawnSeason: fakeDrawnSeason,
-      player,
-      frames,
-      showcase: { timeline: SHOWCASE_TIMELINE, features: featuresInBuild(), village },
-      publish: (snapshot) => void snapshots.push(snapshot),
+describe(
+  'a showcase feature that is not in the build — #1653',
+  { timeout: RIDE_TIMEOUT_MS },
+  () => {
+    it('is not among the build’s features; the others are', () => {
+      expect([...featuresInBuild()].sort()).toEqual(['countryside', 'people', 'realistic']);
     });
-    // The realistic world's load settles.
-    await Promise.resolve();
-    // 50 s of ride at 4 Hz: past both season moments.
-    frames.step(200, 250);
-    const last = snapshots.at(-1);
-    // The season's cues, and the captions that name it: and no other skip is the season's.
-    const seasonal = /^season |^caption at (34\.5|42\.5)$/;
-    expect(last?.skipped.filter((each) => seasonal.test(each))).toEqual([
-      'season none at 0',
-      'season 2026-10-31 at 34',
-      'caption at 34.5',
-      'season 2026-12-20 at 42',
-      'caption at 42.5',
-    ]);
-    // The synthetic road has no map data, so the countryside is skipped too, and says so.
-    expect(last?.skipped).toEqual(
-      expect.arrayContaining(['countryside off at 0', 'countryside on at 16', 'caption at 16.5']),
-    );
-    const shown = new Set(snapshots.map((each) => each.showcase?.caption).filter(Boolean));
-    expect([...shown].some((caption) => /season|Halloween|winter/i.test(caption ?? ''))).toBe(
-      false,
-    );
-    // The view was told no season by the showcase: only the stage's opening one.
-    expect(views[0]?.seasons.every((season) => season.holiday === undefined)).toBe(true);
-    expect(last?.showcase?.holiday).toBe('none');
-  });
-});
+
+    it('has its cues skipped and listed in __oylDemo.skipped, and no caption claims it', async () => {
+      const frames = new SteppedFrames();
+      const { renderer, views } = fakeRenderer(Promise.resolve({ loaded: true }));
+      const { player, village } = showcaseRides(SHOWCASE_TIMELINE, { reducedMotion: false });
+      player.play();
+      const snapshots: DemoSnapshot[] = [];
+      startDemoStage({
+        canvas: {} as HTMLCanvasElement,
+        renderer,
+        drawnWorld: fakeDrawnWorld,
+        drawnSeason: fakeDrawnSeason,
+        player,
+        frames,
+        showcase: { timeline: SHOWCASE_TIMELINE, features: featuresInBuild(), village },
+        publish: (snapshot) => void snapshots.push(snapshot),
+      });
+      // The realistic world's load settles.
+      await Promise.resolve();
+      // 50 s of ride at 4 Hz: past both season moments.
+      frames.step(200, 250);
+      const last = snapshots.at(-1);
+      // The season's cues, and the captions that name it: and no other skip is the season's.
+      const seasonal = /^season |^caption at (34\.5|42\.5)$/;
+      expect(last?.skipped.filter((each) => seasonal.test(each))).toEqual([
+        'season none at 0',
+        'season 2026-10-31 at 34',
+        'caption at 34.5',
+        'season 2026-12-20 at 42',
+        'caption at 42.5',
+      ]);
+      // The synthetic road has no map data, so the countryside is skipped too, and says so.
+      expect(last?.skipped).toEqual(
+        expect.arrayContaining(['countryside off at 0', 'countryside on at 16', 'caption at 16.5']),
+      );
+      const shown = new Set(snapshots.map((each) => each.showcase?.caption).filter(Boolean));
+      expect([...shown].some((caption) => /season|Halloween|winter/i.test(caption ?? ''))).toBe(
+        false,
+      );
+      // The view was told no season by the showcase: only the stage's opening one.
+      expect(views[0]?.seasons.every((season) => season.holiday === undefined)).toBe(true);
+      expect(last?.showcase?.holiday).toBe('none');
+    });
+  },
+);
