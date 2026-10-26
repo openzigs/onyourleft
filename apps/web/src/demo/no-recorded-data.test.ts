@@ -31,10 +31,16 @@ import { describe, expect, it } from 'vitest';
 const DEMO = dirname(fileURLToPath(import.meta.url));
 const SOURCE = resolve(DEMO, '..');
 
-/** A module specifier, or a path under `src/`, that a demo module may not reach. */
+/**
+ * A module specifier, or a path under `src/`, that a demo module may not reach.
+ * #1652: nor `world-data/corridor-port.ts`, which keeps a rider's corridor in
+ * IndexedDB and reads their privacy zones — the demo's map data is read into
+ * memory (`baked-route.ts`) and stays there.
+ */
 function forbidden(target: string): boolean {
   return (
     /^@onyourleft\/(store|fit)(\/|$)/.test(target) ||
+    /^world-data\/corridor-port(\.ts)?$/.test(target) ||
     /^ride\//.test(target) ||
     /ghost/i.test(target) ||
     /activit/i.test(target)
@@ -97,7 +103,7 @@ describe('src/demo/ imports no recorded data', () => {
   });
 
   it.each(DEMO_FILES.map((file) => [relative(DEMO, file), file] as const))(
-    '%s imports nothing from the store, the FIT codec, ride/ or an activity or ghost module',
+    '%s imports nothing from the store, the FIT codec, ride/, corridor-port.ts or an activity or ghost module',
     (_name, file) => {
       const reached = importsOf(file).map((each) => nameOf(file, each.specifier));
       expect(reached.filter(forbidden)).toEqual([]);
@@ -131,10 +137,17 @@ describe('src/demo/ imports no recorded data', () => {
       'ride/controller.ts',
       'game/ghost-source.ts',
       'transfer/export-activity.ts',
+      'world-data/corridor-port.ts',
     ]) {
       expect(forbidden(target), target).toBe(true);
     }
-    for (const target of ['@onyourleft/domain', '@onyourleft/physics', 'game/sensors.ts']) {
+    for (const target of [
+      '@onyourleft/domain',
+      '@onyourleft/physics',
+      'game/sensors.ts',
+      'game/world-data/corridor.ts',
+      'world-data/corridor-port.test.ts',
+    ]) {
       expect(forbidden(target), target).toBe(false);
     }
   });

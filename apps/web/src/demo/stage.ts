@@ -46,6 +46,7 @@ import {
 } from '../game/quality';
 import { REALISTIC_WORLD_LEFT_NOTICE, realisticWorldNotice } from '../game/realistic-assets';
 import { NO_SEASON } from '../game/season';
+import type { CorridorCounts } from './baked-route';
 import type { DemoPlayer, DemoStatus } from './player';
 import type { DemoPresetId } from './script';
 
@@ -70,6 +71,18 @@ export interface DemoSnapshot {
   readonly distance: number;
   /** What the page says about the world, if anything. */
   readonly notice: string | undefined;
+  /**
+   * #1652: the baked route the run was given and its corridor's feature
+   * counts, or `undefined` on the synthetic road. The browser gate checks the
+   * counts against the fixture bundle's.
+   */
+  readonly mapData: { readonly route: string; readonly counts: CorridorCounts } | undefined;
+  /**
+   * #1652: how many mapped buildings the last frame handed to the renderer
+   * carried — read off that frame (`SceneFrame.mappedBuildings`), not off
+   * the bundle, so a corridor that never reached the scene reads 0.
+   */
+  readonly mappedBuildings: number;
 }
 
 export interface DemoStageOptions {
@@ -115,6 +128,7 @@ export function startDemoStage(options: DemoStageOptions): DemoStage {
   let handle: number | undefined;
   let pacer = new FramePacer();
   let framesDrawn = 0;
+  let mappedBuildings = 0;
   let notice: string | undefined;
 
   const publish = (): void => {
@@ -125,6 +139,8 @@ export function startDemoStage(options: DemoStageOptions): DemoStage {
       framesDrawn,
       distance: player.state.ride.distance,
       notice,
+      mapData: player.mapData,
+      mappedBuildings,
     });
   };
 
@@ -144,7 +160,9 @@ export function startDemoStage(options: DemoStageOptions): DemoStage {
       quality = next;
     }
     if (paced.draw || redrawOwed) {
-      view.render(player.frame(worldRung(quality)));
+      const frame = player.frame(worldRung(quality));
+      view.render(frame);
+      mappedBuildings = frame.mappedBuildings?.buildings.plans.length ?? 0;
       framesDrawn += 1;
       redrawOwed = false;
       publish();

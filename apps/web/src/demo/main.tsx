@@ -19,6 +19,7 @@ import {
   drawnWorldOf,
   loadGameWordmark,
   loadSceneryModels,
+  readFileBytes,
   threeGameRenderer,
 } from '../game/three-renderer';
 import { DemoPage } from './DemoPage';
@@ -74,6 +75,8 @@ async function start(): Promise<void> {
         reducedMotion={matchMedia('(prefers-reduced-motion: reduce)').matches}
         observeInView={observeInView}
         publish={publish}
+        // #1652: a baked route's files, same-origin, into memory.
+        readFile={readFileBytes}
       />
     </StrictMode>,
   );

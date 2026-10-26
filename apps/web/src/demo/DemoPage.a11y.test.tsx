@@ -11,7 +11,14 @@
  * the ride HUD's own controls, and the HUD over the world is audited with it.
  */
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { Blob as NodeBlob } from 'node:buffer';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+
+import { bakeFixtureRouteInto, routeFilesIn } from '../../browser/demo-route-fixture';
 
 import {
   accessibleName,
@@ -20,6 +27,7 @@ import {
   tabbableElements,
 } from '../a11y/audit';
 import { mount, settle, type Mounted } from '../testing/mount';
+import type { ReadDemoFile } from './baked-route';
 import { DemoPage } from './DemoPage';
 import { fakeDrawnWorld, fakeRenderer, SteppedFrames } from './stage-testing';
 
@@ -30,7 +38,13 @@ afterEach(() => {
   mounted = undefined;
 });
 
-async function show(search: string, reducedMotion = false): Promise<void> {
+const NO_FILES: ReadDemoFile = (path) => Promise.reject(new Error(`no ${path}`));
+
+async function show(
+  search: string,
+  reducedMotion = false,
+  readFile: ReadDemoFile = NO_FILES,
+): Promise<void> {
   mounted = await mount(
     <DemoPage
       search={search}
@@ -40,6 +54,7 @@ async function show(search: string, reducedMotion = false): Promise<void> {
       reducedMotion={reducedMotion}
       observeInView={() => () => undefined}
       publish={() => undefined}
+      readFile={readFile}
     />,
   );
   await settle();
@@ -72,5 +87,50 @@ describe('the demo page is accessible — #1647', () => {
       .filter((element) => element.tagName === 'BUTTON')
       .map((element) => accessibleName(element));
     expect(names).toEqual(['Play', 'Stop']);
+  });
+});
+
+describe('the demo page on a baked route is accessible — #1652', () => {
+  const scratch = mkdtempSync(join(tmpdir(), 'oyl-demo-a11y-'));
+  let files: Map<string, Uint8Array<ArrayBuffer>>;
+
+  // jsdom's `Blob` has no `stream`, which `corridor.ts`' gzip reads through.
+  beforeAll(async () => {
+    vi.stubGlobal('Blob', NodeBlob);
+    await bakeFixtureRouteInto(scratch);
+    files = routeFilesIn(scratch);
+  });
+
+  afterAll(() => {
+    vi.unstubAllGlobals();
+    rmSync(scratch, { recursive: true, force: true });
+  });
+
+  it('passes the audit with the credit and the “Map data” notice open, reached by keyboard', async () => {
+    await show('?preset=climb&route=fixture', false, (path) => {
+      const bytes = files.get(path);
+      return bytes === undefined ? Promise.reject(new Error(path)) : Promise.resolve(bytes);
+    });
+    for (let turn = 0; turn < 50 && document.querySelector('summary') === null; turn += 1) {
+      await settle();
+    }
+    const summary = document.querySelector('summary');
+    expect(summary).not.toBeNull();
+    expect(tabbableElements(document)).toContain(summary);
+    expect(accessibleName(summary as Element)).toBe('Map data');
+    (summary?.parentElement as HTMLDetailsElement).open = true;
+    const violations = auditAccessibility(document);
+    expect(violations, formatViolations(violations)).toEqual([]);
+    const names = tabbableElements(document)
+      .filter((element) => element.tagName === 'A')
+      .map((element) => accessibleName(element));
+    expect(names).toEqual(
+      expect.arrayContaining([
+        'OpenStreetMap',
+        'Open Database License',
+        'This route’s map data',
+        'Its licence notice',
+      ]),
+    );
   });
 });

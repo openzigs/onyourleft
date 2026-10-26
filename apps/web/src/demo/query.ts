@@ -6,6 +6,7 @@
  * | Parameter | What | Values |
  * |---|---|---|
  * | `preset` | which preset is ridden (`presets.ts`) | `climb`, `sprint`, `group`; default `climb` |
+ * | `route` | a baked route's map data and road, read from `routes/` (#1652, `baked-route.ts`) | a route id `demo:bake` wrote; absent rides the synthetic road |
  *
  * ⚠️ **Unknown parameters and values are REFUSED**, with a sentence the page
  * shows, as `browser/realistic/config.ts` refuses them: an embedding site that
@@ -13,15 +14,21 @@
  * was wrong.
  */
 
+import { ROUTE_ID } from '../../tools/demo/route-bundle';
 import { DEMO_PRESETS } from './presets';
 import type { DemoPreset } from './script';
 
 /** The parameters the page understands. */
-const KNOWN = new Set(['preset']);
+const KNOWN = new Set(['preset', 'route']);
 
 /** What a query asks for, or why it is refused. */
 export type DemoQuery =
-  | { readonly ok: true; readonly preset: DemoPreset }
+  | {
+      readonly ok: true;
+      readonly preset: DemoPreset;
+      /** The baked route asked for, if any: an id in `bake-route.ts`' shape, not yet known to exist. */
+      readonly route?: string;
+    }
   | { readonly ok: false; readonly message: string };
 
 /** Read `search` — `location.search`, with or without its `?`. */
@@ -41,5 +48,10 @@ export function parseDemoQuery(search: string): DemoQuery {
     const names = DEMO_PRESETS.map((each) => each.id).join(', ');
     return { ok: false, message: `This demo’s preset is one of ${names}, not “${asked}”.` };
   }
-  return { ok: true, preset };
+  const route = params.get('route');
+  if (route === null) return { ok: true, preset };
+  if (!ROUTE_ID.test(route)) {
+    return { ok: false, message: `This demo has no route called “${route}”.` };
+  }
+  return { ok: true, preset, route };
 }

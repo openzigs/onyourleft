@@ -6063,6 +6063,20 @@ function productRealisticLoaders(): RealisticLoaders {
 }
 
 /**
+ * One same-origin file's bytes, through three's own loader as the realistic
+ * world's glyphs are read just above: the demo's baked route (#1652,
+ * `demo/baked-route.ts`), handed to its page by `demo/main.tsx`. Here because
+ * this is the one module that may name `three` (`three-seam.test.ts`), and a
+ * loader rather than a `fetch` because the client names no network primitive
+ * (`no-network.test.ts`). Nothing is kept: three's `Cache` is off.
+ */
+export async function readFileBytes(url: string): Promise<Uint8Array<ArrayBuffer>> {
+  return new Uint8Array(
+    (await new FileLoader().setResponseType('arraybuffer').loadAsync(url)) as ArrayBuffer,
+  );
+}
+
+/**
  * What a realistic texture is held as on the GPU — #618. A block format by
  * name, `RGBA8 (fallback)` for a KTX2 texture the device could not take
  * compressed, `half-float` for the sky and `image` for a picture three

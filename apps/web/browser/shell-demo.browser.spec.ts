@@ -72,10 +72,12 @@
  *
  * - **GPU cost on a phone.** This is SwiftShader on a CI runner: it proves the
  *   demo draws frames, not how hot or how smooth it is on a visitor's device.
- * - **That a real baked route bundle is correct.** Until #1652 lands the demo
- *   rides the synthetic road; after it, this gate builds with a bundle baked
- *   from `corridor-fixture.ts` (no OSM data in a gate artefact), so a bundle
- *   baked from a real GPX is not what is measured here.
+ * - **That a real baked route bundle is correct.** Since #1652 the baked
+ *   case rides a bundle `demo:bake`'s own code bakes from `corridor-fixture.ts`
+ *   (`demo-route-fixture.ts`; no OSM data in a gate artefact, ADR 0056 D-9),
+ *   served beside the build as `routes/` is, so a bundle baked from a real
+ *   GPX is not what is measured here. Its counts are checked against
+ *   `corridor-fixture.ts` §`expectedCorridorCounts`, decoded in Node.
  * - **"After a full preset"** is the gate's lifecycle of a preset — load, play
  *   for at least five seconds, and (for the climb) pause, play and stop — not
  *   the preset's whole scripted length, which is up to fifteen minutes.
@@ -83,14 +85,19 @@
  *   assertion that its power reading changes belongs with it.
  */
 
+import { mkdirSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 
 import { DEMO_ORIGIN } from '../playwright.config';
+import { OSM_ATTRIBUTION } from '../src/map/basemap';
 import { filesUnder } from '../tools/demo/demo-output';
+import { bakeFixtureRouteInto, expectedRouteCounts, routeFilesIn } from './demo-route-fixture';
 
 const DIST = fileURLToPath(new URL('../demo/dist', import.meta.url));
+/** Where the fixture route is baked for the #1652 case: ignored and pruned, as every `dist/` is. */
+const FIXTURE_ROUTES = fileURLToPath(new URL('./dist/demo-routes', import.meta.url));
 const PRESETS = ['climb', 'sprint', 'group'] as const;
 const POLICY = /<meta\s+http-equiv="Content-Security-Policy"[^>]*\/>/;
 /**
@@ -112,6 +119,9 @@ interface Snapshot {
   readonly world: string;
   readonly framesDrawn: number;
   readonly distance: number;
+  /** #1652: the baked route's corridor counts, or `undefined` on the synthetic road. */
+  readonly mapData?: { readonly route: string; readonly counts: Record<string, number> };
+  readonly mappedBuildings?: number;
 }
 
 interface Gate {
@@ -220,6 +230,10 @@ function installRecorders(): void {
         world: snapshot.world,
         framesDrawn: snapshot.framesDrawn,
         distance: snapshot.distance,
+        ...(snapshot.mapData === undefined ? {} : { mapData: snapshot.mapData }),
+        ...(snapshot.mappedBuildings === undefined
+          ? {}
+          : { mappedBuildings: snapshot.mappedBuildings }),
       });
     },
   });
@@ -234,15 +248,21 @@ interface WatchOptions {
    * and says why — see the header's §"One realistic load".
    */
   readonly realistic: boolean;
+  /**
+   * #1652: files served under `routes/` as if `demo:bake` had written them
+   * into `demo/dist`, by path relative to the page (`./routes/<name>`).
+   */
+  readonly routes?: ReadonlyMap<string, Uint8Array>;
 }
 
 /** Record every request `context` makes, and install the recorders. */
 async function watch(
   context: BrowserContext,
   page: Page,
-  { rewrite, realistic }: WatchOptions,
+  { rewrite, realistic, routes }: WatchOptions,
 ): Promise<Watched> {
   const files = new Set(filesUnder(DIST));
+  for (const path of routes?.keys() ?? []) files.add(path.replace(/^\.\//, ''));
   const watched: Watched = { requests: [], foreign: [], missing: [] };
   await context.route('**/*', async (route) => {
     const url = new URL(route.request().url());
@@ -262,6 +282,14 @@ async function watch(
     if (!files.has(path)) watched.missing.push(url.pathname);
     if (!realistic && path.startsWith('realistic/')) {
       return route.fulfill({ status: 404, body: '' });
+    }
+    const baked = routes?.get(`./${path}`);
+    if (baked !== undefined) {
+      return route.fulfill({
+        status: 200,
+        contentType: path.endsWith('.json') ? 'application/json' : 'application/octet-stream',
+        body: Buffer.from(baked),
+      });
     }
     if (rewrite !== undefined && path === 'index.html') {
       const response = await route.fetch();
@@ -354,13 +382,13 @@ async function openControl(page: Page): Promise<void> {
   expect(await page.evaluate(() => typeof window.__oylDemo)).toBe('undefined');
 }
 
-async function open(page: Page, preset: string): Promise<void> {
-  await page.goto(`${DEMO_ORIGIN}/?preset=${preset}`);
+async function open(page: Page, preset: string, query = ''): Promise<void> {
+  await page.goto(`${DEMO_ORIGIN}/?preset=${preset}${query}`);
   await expect.poll(() => last(page), { timeout: FRAMES_BUDGET_MS }).toBeDefined();
 }
 
 /** Ride `preset` for at least five seconds, and hold that it played. */
-async function ridesFiveSeconds(page: Page, preset: string): Promise<void> {
+async function ridesFiveSeconds(page: Page, preset: string, query = ''): Promise<void> {
   const started = performance.now();
   // Printed, never asserted (a timing assertion on a shared runner is a
   // flake): how long each phase took, for the budget arithmetic.
@@ -368,7 +396,7 @@ async function ridesFiveSeconds(page: Page, preset: string): Promise<void> {
     console.info(
       `demo ${preset}: ${name} at ${((performance.now() - started) / 1000).toFixed(1)} s`,
     );
-  await open(page, preset);
+  await open(page, preset, query);
   phase('first snapshot');
   await page.waitForTimeout(5_000);
   await expect
@@ -438,6 +466,104 @@ test.describe('the demo, built and served — #1648', () => {
       }
     });
   }
+
+  test.describe('on a baked route — #1652', () => {
+    /** The corners layout (`theme.css`, 46 rem and up, taller than 30 rem): the credit in its corner. */
+    test.use({ viewport: { width: 800, height: 600 } });
+    let routes: Map<string, Uint8Array<ArrayBuffer>>;
+    let bundle = '';
+
+    test.beforeAll(async () => {
+      rmSync(FIXTURE_ROUTES, { recursive: true, force: true });
+      mkdirSync(FIXTURE_ROUTES, { recursive: true });
+      bundle = `routes/${(await bakeFixtureRouteInto(FIXTURE_ROUTES)).file}`;
+      routes = routeFilesIn(FIXTURE_ROUTES);
+    });
+
+    test('draws the fixture bundle’s map data from memory, credits it, and stores nothing', async ({
+      context,
+      page,
+    }) => {
+      test.setTimeout(3 * FRAMES_BUDGET_MS);
+      const watched = await watch(context, page, { realistic: false, routes });
+      await ridesFiveSeconds(page, 'climb', '&route=fixture');
+      const now = await last(page);
+      expect(now?.mapData).toEqual({ route: 'fixture', counts: expectedRouteCounts() });
+      expect(now?.mappedBuildings ?? 0).toBeGreaterThan(0);
+      // Every snapshot of the run carries it: the credit is owed for the whole run.
+      const snapshots = (await gate(page)).snapshots;
+      expect(snapshots.every((each) => each.mapData?.route === 'fixture')).toBe(true);
+      // Read from the demo's own files, through the page's loader, and nowhere else.
+      expect(watched.requests).toContain(`${DEMO_ORIGIN}/routes/routes.json`);
+      expect(watched.requests).toContain(`${DEMO_ORIGIN}/${bundle}`);
+
+      // The credit: the constant, in the HUD's region, inside the viewport, and under no panel.
+      const credit = page
+        .getByRole('region', { name: 'Ride metrics' })
+        .getByText(OSM_ATTRIBUTION, { exact: true });
+      await expect(credit).toBeVisible();
+      const placed = await credit.evaluate((element) => {
+        const box = element.getBoundingClientRect();
+        const overlaps = (other: DOMRect): boolean =>
+          other.width > 0 &&
+          other.height > 0 &&
+          other.left < box.right &&
+          box.left < other.right &&
+          other.top < box.bottom &&
+          box.top < other.bottom;
+        const covering = [...document.querySelectorAll('.oyl-hud__panel')]
+          .filter((panel) => overlaps(panel.getBoundingClientRect()))
+          .map((panel) => panel.className);
+        // Its two ends and its middle, half way down: in from the ends by the
+        // backing's rounded corners, which a hit test does not count as it.
+        const middle = (box.top + box.bottom) / 2;
+        const points = [box.left + 8, (box.left + box.right) / 2, box.right - 8].map(
+          (x) => [x, middle] as const,
+        );
+        return {
+          inside:
+            box.left >= 0 &&
+            box.top >= 0 &&
+            box.right <= window.innerWidth &&
+            box.bottom <= window.innerHeight &&
+            box.width > 0,
+          covering,
+          onTop: points.every(([x, y]) => element.contains(document.elementFromPoint(x, y))),
+        };
+      });
+      expect(placed).toEqual({ inside: true, covering: [], onTop: true });
+
+      // The ODbL notice, opened from the keyboard, offers the file itself.
+      const summary = page.locator('summary', { hasText: 'Map data' });
+      await summary.focus();
+      await page.keyboard.press('Enter');
+      const offer = page.getByRole('link', { name: 'This route’s map data' });
+      await expect(offer).toBeVisible();
+      expect(await offer.getAttribute('href')).toBe(`./${bundle}`);
+      await expect(page.getByText(/Contains information from OpenStreetMap/)).toBeVisible();
+
+      expect(await findings(context, page, watched)).toEqual([]);
+    });
+
+    test('control: a truncated bundle rides the synthetic road, says so, and credits nothing', async ({
+      context,
+      page,
+    }) => {
+      test.setTimeout(3 * FRAMES_BUDGET_MS);
+      const whole = routes.get(`./${bundle}`);
+      if (whole === undefined) throw new Error('no fixture bundle');
+      const truncated = new Map(routes);
+      truncated.set(`./${bundle}`, whole.slice(0, whole.length >> 1));
+      const watched = await watch(context, page, { realistic: false, routes: truncated });
+      await ridesFiveSeconds(page, 'climb', '&route=fixture');
+      expect((await last(page))?.mapData).toBeUndefined();
+      await expect(
+        page.getByRole('status').filter({ hasText: 'Towns from map data' }),
+      ).toContainText('Towns from map data: not available for this route');
+      await expect(page.getByText(/OpenStreetMap/)).toHaveCount(0);
+      expect(await findings(context, page, watched)).toEqual([]);
+    });
+  });
 
   test.describe('under reduced motion', () => {
     test.use({ reducedMotion: 'reduce' });

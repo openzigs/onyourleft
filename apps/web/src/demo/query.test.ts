@@ -18,12 +18,24 @@ describe("the demo page's query — #1647", () => {
   });
 
   it.each([
+    ['?preset=climb&route=upstate-climb', CLIMB_PRESET, 'upstate-climb'],
+    ['?route=fixture&preset=group', GROUP_PRESET, 'fixture'],
+    ['?route=fixture', CLIMB_PRESET, 'fixture'],
+  ])('%j rides its preset on the baked route it names — #1652', (search, preset, route) => {
+    expect(parseDemoQuery(search)).toEqual({ ok: true, preset, route });
+  });
+
+  it.each([
     ['?speed=2', 'This demo has no setting called “speed”.'],
     ['?preset=climb&world=stylised', 'This demo has no setting called “world”.'],
     ['?preset=sprnt', 'This demo’s preset is one of climb, sprint, group, not “sprnt”.'],
     ['?preset=', 'This demo’s preset is one of climb, sprint, group, not “”.'],
     ['?preset=Climb', 'This demo’s preset is one of climb, sprint, group, not “Climb”.'],
     ['?preset=climb&preset=sprint', 'This demo’s “preset” setting is given more than once.'],
+    ['?route=../secret', 'This demo has no route called “../secret”.'],
+    ['?route=', 'This demo has no route called “”.'],
+    ['?route=Upstate', 'This demo has no route called “Upstate”.'],
+    ['?route=a&route=b', 'This demo’s “route” setting is given more than once.'],
   ])('refuses %j, saying why, rather than riding the default', (search, message) => {
     expect(parseDemoQuery(search)).toEqual({ ok: false, message });
   });

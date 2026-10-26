@@ -8,8 +8,23 @@
  * which is what the demo's browser gate (#1648) reads.
  */
 
+import { Blob as NodeBlob } from 'node:buffer';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { act } from 'react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+
+import {
+  bakeFixtureRouteInto,
+  expectedRouteCounts,
+  routeFilesIn,
+} from '../../browser/demo-route-fixture';
+import type { RealisticWorldOutcome } from '../game/realistic-assets';
+import { ODBL_LICENCE_URL, OSM_ATTRIBUTION } from '../map/basemap';
+import { OSM_COPYRIGHT_URL } from '../../tools/demo/route-bundle';
+import { BAKED_ROUTE_UNAVAILABLE, type ReadDemoFile } from './baked-route';
 
 import { CONTROL_MINIMUM_PIXELS } from '../game/hud/HudCore';
 import { activateWithKeyboard, mount, settle, type Mounted } from '../testing/mount';
@@ -38,9 +53,20 @@ interface Page {
   readonly drawn: () => SceneFrame | undefined;
 }
 
-async function page(options: { search?: string; reducedMotion?: boolean } = {}): Promise<Page> {
+/** A reader with no files: the synthetic road's cases never ask it for one. */
+const NO_FILES: ReadDemoFile = (path) => Promise.reject(new Error(`no ${path}`));
+
+interface PageOptions {
+  readonly search?: string;
+  readonly reducedMotion?: boolean;
+  readonly readFile?: ReadDemoFile;
+  /** What the realistic world's load comes to; never, by default. */
+  readonly outcome?: Promise<RealisticWorldOutcome>;
+}
+
+async function page(options: PageOptions = {}): Promise<Page> {
   const frames = new SteppedFrames();
-  const { renderer, views } = fakeRenderer(new Promise(() => undefined));
+  const { renderer, views } = fakeRenderer(options.outcome ?? new Promise(() => undefined));
   const snapshots: DemoSnapshot[] = [];
   let inViewChange: ((inView: boolean) => void) | undefined;
   mounted = await mount(
@@ -57,6 +83,7 @@ async function page(options: { search?: string; reducedMotion?: boolean } = {}):
         };
       }}
       publish={(snapshot) => void snapshots.push(snapshot)}
+      readFile={options.readFile ?? NO_FILES}
     />,
   );
   await settle();
@@ -225,5 +252,116 @@ describe('the demo page — #1647', () => {
     expect(document.querySelector('canvas')).toBeNull();
     expect(shown.last()).toBeUndefined();
     expect(shown.frames.requested).toBe(0);
+  });
+});
+
+describe('the demo page on a baked route — #1652', () => {
+  const scratch = mkdtempSync(join(tmpdir(), 'oyl-demo-page-'));
+  let files: Map<string, Uint8Array<ArrayBuffer>>;
+  let bundlePath = '';
+
+  // `corridor.ts` gzips and gunzips through `Blob.stream`, which a browser's
+  // `Blob` has and jsdom's lacks: Node's own, for the bake and the page's
+  // loader, as the browser gate (`shell-demo.browser.spec.ts`) has a real one.
+  beforeAll(async () => {
+    vi.stubGlobal('Blob', NodeBlob);
+    bundlePath = `./routes/${(await bakeFixtureRouteInto(scratch)).file}`;
+    files = routeFilesIn(scratch);
+  });
+
+  afterAll(() => {
+    vi.unstubAllGlobals();
+    rmSync(scratch, { recursive: true, force: true });
+  });
+
+  const served =
+    (overrides: ReadonlyMap<string, Uint8Array<ArrayBuffer>> = new Map()): ReadDemoFile =>
+    (path) => {
+      const bytes = overrides.get(path) ?? files.get(path);
+      return bytes === undefined ? Promise.reject(new Error(path)) : Promise.resolve(bytes);
+    };
+
+  /** Settle until `done`, the loader's digest and gunzip taking a few turns. */
+  async function until(done: () => boolean): Promise<void> {
+    for (let turn = 0; turn < 50 && !done(); turn += 1) await settle();
+    expect(done()).toBe(true);
+  }
+
+  const credit = (): string | null | undefined =>
+    mounted?.container.querySelector('.oyl-hud__attribution')?.textContent;
+  const status = (): string | null | undefined =>
+    mounted?.container.querySelector('[role="status"]:not([data-oyl-announcer])')?.textContent;
+
+  it('rides the route, reports its corridor’s counts, and credits OpenStreetMap', async () => {
+    const shown = await page({ search: '?preset=climb&route=fixture', readFile: served() });
+    await until(() => shown.last()?.mapData !== undefined);
+    await shown.step(10);
+    expect(shown.last()?.mapData).toEqual({ route: 'fixture', counts: expectedRouteCounts() });
+    expect(shown.last()?.mappedBuildings).toBeGreaterThan(0);
+    expect(credit()).toBe(OSM_ATTRIBUTION);
+  });
+
+  it('keeps the credit for the whole run when the world drawn is the stylised one', async () => {
+    const shown = await page({
+      search: '?preset=climb&route=fixture',
+      readFile: served(),
+      outcome: Promise.resolve({ loaded: false, offline: false, detail: 'refused' }),
+    });
+    await until(() => shown.last()?.mapData !== undefined);
+    await shown.step(10);
+    expect(shown.last()?.world).toBe('stylised');
+    expect(credit()).toBe(OSM_ATTRIBUTION);
+  });
+
+  it('offers the ODbL notice, the licence and the file from a keyboard-reachable “Map data”', async () => {
+    const shown = await page({ search: '?preset=climb&route=fixture', readFile: served() });
+    await until(() => shown.last()?.mapData !== undefined);
+    const summary = [...document.querySelectorAll('summary')].find(
+      (each) => each.textContent === 'Map data',
+    );
+    if (summary === undefined) throw new Error('no “Map data” disclosure');
+    const details = summary.parentElement as HTMLDetailsElement;
+    expect(details.open).toBe(false);
+    await activateWithKeyboard(summary);
+    expect(details.open).toBe(true);
+    expect(details.textContent).toContain(
+      'Contains information from OpenStreetMap, which is made available here under the Open Database License (ODbL).',
+    );
+    const links = [...details.querySelectorAll('a')].map((each) => each.getAttribute('href'));
+    expect(links).toEqual([
+      OSM_COPYRIGHT_URL,
+      ODBL_LICENCE_URL,
+      ODBL_LICENCE_URL,
+      bundlePath,
+      './routes/LICENCE-ODbL.txt',
+    ]);
+  });
+
+  it('on the synthetic road shows no credit and no “Map data”: nothing is owed', async () => {
+    const shown = await page({ search: '?preset=climb' });
+    await shown.step(10);
+    expect(shown.last()?.mapData).toBeUndefined();
+    expect(credit()).toBeUndefined();
+    expect(document.querySelector('summary')).toBeNull();
+    expect(mounted?.container.textContent).not.toMatch(/OpenStreetMap/);
+  });
+
+  it('rides the synthetic road on a truncated file, and says so — never a crash', async () => {
+    const whole = files.get(bundlePath) as Uint8Array<ArrayBuffer>;
+    const shown = await page({
+      search: '?preset=climb&route=fixture',
+      readFile: served(new Map([[bundlePath, whole.slice(0, whole.length >> 1)]])),
+    });
+    await until(() => shown.last() !== undefined);
+    await shown.step(60);
+    expect(shown.last()).toMatchObject({
+      mapData: undefined,
+      mappedBuildings: 0,
+      state: 'playing',
+    });
+    expect(shown.last()?.distance).toBeGreaterThan(0);
+    expect(status()).toBe(BAKED_ROUTE_UNAVAILABLE);
+    expect(credit()).toBeUndefined();
+    expect(document.querySelector('summary')).toBeNull();
   });
 });

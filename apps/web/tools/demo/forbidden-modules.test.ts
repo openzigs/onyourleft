@@ -80,6 +80,20 @@ describe('what the demo may never bundle — #1645', () => {
     expect(found[3]).toMatch(/node_modules\/dexie\/dist\/dexie\.mjs \(the IndexedDB adapter/);
   });
 
+  it('finds the rider’s corridor store, so the demo’s map data cannot reach IndexedDB — #1652', () => {
+    const found = forbiddenModules(
+      [join(REPOSITORY, 'apps/web/src/world-data/corridor-port.ts')],
+      REPOSITORY,
+    );
+    expect(found).toEqual([
+      'apps/web/src/world-data/corridor-port.ts (keeps a rider’s corridor in IndexedDB; the demo’s map data stays in memory (#1652))',
+    ]);
+    // What the demo's loader does use is not refused.
+    expect(
+      forbiddenModules([join(REPOSITORY, 'apps/web/src/game/world-data/corridor.ts')], REPOSITORY),
+    ).toEqual([]);
+  });
+
   it('passes what the demo may use, including a sibling whose name only starts the same', () => {
     expect(
       forbiddenModules(
