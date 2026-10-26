@@ -477,6 +477,13 @@ export interface VillageStreet {
    */
   readonly walks: readonly Float32Array[];
   /**
+   * #1620: how wide the pavement under each of {@link walks} is, kerb
+   * included, in metres — its street's rule's (#1637), one a walk. The
+   * pavement reaches {@link WALK_FROM_KERB_METRES} in from a walk and the rest
+   * of this out from it, which `people.ts` §`clearOfPavements` reads.
+   */
+  readonly walkWidths: readonly number[];
+  /**
    * #1624: where a holiday's decorations may stand in this village — its
    * lamp posts, doorsteps, eaves and crossroads green, never its church
    * plot (`decorations.ts` §`villageAnchors`). Built with the street, once.
@@ -662,7 +669,7 @@ function cityStreetOf(
   if (!any) return null;
   const mesh = new MeshBuilder();
   const furniture: FurnitureItem[] = [];
-  const walks: Float32Array[] = [];
+  const walks: Walks = { lines: [], widths: [] };
   for (const side of [1, -1] as const) {
     const mouths: { readonly from: number; readonly to: number }[] = [];
     for (const junction of junctions) {
@@ -698,7 +705,8 @@ function cityStreetOf(
     pavement: mesh.done(),
     furniture,
     doorPaths: [],
-    walks,
+    walks: walks.lines,
+    walkWidths: walks.widths,
     anchors: [],
   };
 }
@@ -722,7 +730,7 @@ function streetOf(
   const plots = villagePlots(seed, site);
   const mesh = new MeshBuilder();
   const furniture: FurnitureItem[] = [];
-  const walks: Float32Array[] = [];
+  const walks: Walks = { lines: [], widths: [] };
   let from = Number.POSITIVE_INFINITY;
   let to = Number.NEGATIVE_INFINITY;
   const spans = ([1, -1] as const).map((side) => {
@@ -819,7 +827,17 @@ function streetOf(
   }
   if (mesh.triangles === 0) return null;
   const anchors = villageAnchors(profile, origin, seed, site, doors, furniture, land);
-  return { wrappedSite, from, to, pavement: mesh.done(), furniture, doorPaths, walks, anchors };
+  return {
+    wrappedSite,
+    from,
+    to,
+    pavement: mesh.done(),
+    furniture,
+    doorPaths,
+    walks: walks.lines,
+    walkWidths: walks.widths,
+    anchors,
+  };
 }
 
 /**
@@ -899,14 +917,29 @@ function doorPathOf(
   }
   const mesh = new MeshBuilder();
   mesh.path(sections, { x: rightX, z: rightZ });
-  // #1541: its middle, which a person walks.
-  const walk = new Float32Array(sections.length * 3);
-  sections.forEach((section, at) => {
-    walk[at * 3] = (section.leftX + section.rightX) / 2;
-    walk[at * 3 + 1] = section.y;
-    walk[at * 3 + 2] = (section.leftZ + section.rightZ) / 2;
-  });
-  return { along: plot.along - lap, side: plot.side, mesh: mesh.done(), walk };
+  // #1541: its middle, which a person walks — #1620: from the pavement's back,
+  // on its top, and not from under it, where the path's start is
+  // {@link DOOR_PATH_UNDER_PAVEMENT_METRES} hidden beneath the pavement and a
+  // person on it would stand with their feet in the pavement.
+  const walk: number[] = [
+    startX - faceX * DOOR_PATH_UNDER_PAVEMENT_METRES,
+    pavementTop,
+    startZ - faceZ * DOOR_PATH_UNDER_PAVEMENT_METRES,
+  ];
+  for (const section of sections) {
+    if (section.s <= DOOR_PATH_UNDER_PAVEMENT_METRES) continue;
+    walk.push(
+      (section.leftX + section.rightX) / 2,
+      section.y,
+      (section.leftZ + section.rightZ) / 2,
+    );
+  }
+  return {
+    along: plot.along - lap,
+    side: plot.side,
+    mesh: mesh.done(),
+    walk: Float32Array.from(walk),
+  };
 }
 
 /**
@@ -998,7 +1031,7 @@ export function pavementAlong(
   urban?: UrbanClassMap,
 ): PavementMesh | undefined {
   const mesh = new MeshBuilder();
-  return lay(mesh, [], profile, origin, seed, side, start, end, undefined, [], [], urban)
+  return lay(mesh, [], profile, origin, seed, side, start, end, undefined, [], undefined, urban)
     ? mesh.done()
     : undefined;
 }
@@ -1031,10 +1064,16 @@ export function furnitureAlong(
     end,
     undefined,
     [],
-    [],
+    { lines: [], widths: [] },
     urban,
   );
   return furniture;
+}
+
+/** Each run's walk as {@link lay} lays it, and its pavement's width (#1620). */
+interface Walks {
+  readonly lines: Float32Array[];
+  readonly widths: number[];
 }
 
 /** One cross-section of a pavement: where its three edges are, and which way is along. */
@@ -1076,7 +1115,7 @@ function lay(
   end: number,
   allowed: (along: number) => boolean = () => true,
   mouths: readonly { readonly from: number; readonly to: number }[] = [],
-  walks: Float32Array[] = [],
+  walks: Walks = { lines: [], widths: [] },
   urban?: UrbanClassMap,
   cuts: readonly number[] = [],
 ): boolean {
@@ -1100,7 +1139,8 @@ function lay(
       const first = (run[0] as Section).along;
       const last = (run[run.length - 1] as Section).along;
       furnish(run, furniture, rule, cut(first), cut(last));
-      walks.push(walkOf(run));
+      walks.lines.push(walkOf(run));
+      walks.widths.push(rule.width);
     }
     run = [];
   };

@@ -82,6 +82,7 @@ import { BILLBOARD_FOOTPRINT } from './logo-board';
 import {
   NO_PEOPLE,
   besideSideRoads,
+  clearOfPavements,
   footwayWalks,
   groundOf,
   peopleAt,
@@ -428,7 +429,10 @@ function people(
     distanceToDrawnRoad(profile, origin, x, z, reach);
   const lines = streets.flatMap((street) => streetWalks(street, road, rule));
   if (input.worldCorridor !== undefined) {
-    lines.push(...footwayWalks(input.worldCorridor, profile, origin, land, rule));
+    // #1620: and the mapped footways off those streets' pavements, which walk them already.
+    lines.push(
+      ...clearOfPavements(footwayWalks(input.worldCorridor, profile, origin, land, rule), streets),
+    );
   }
   return peopleAt(lines, {
     x: camera.x,
