@@ -31,6 +31,13 @@
  * ({@link regionOf}), and a person's seeded colours (`people.ts`
  * §`personLook`) paint each region in the one draw.
  *
+ * Since #1618 by FACE ({@link dressed}): each triangle is one region, and a
+ * vertex on a seam is drawn once a region, so where top meets bottoms or a
+ * sleeve meets the forearm the colour changes on an edge instead of fading
+ * across a triangle. And the clothes stand off the body
+ * ({@link CLOTHES_STAND_OFF}), flaring at each hem ({@link HEM_FLARE}), so the
+ * silhouette is everyday clothes and shoes rather than leggings and bare feet.
+ *
  * ## The animation texture
  *
  * Each kept vertex's position and normal, at {@link GAIT_PHASES} phases of the
@@ -287,6 +294,137 @@ export interface BodyLandmarks {
   readonly headZ: number;
   /** The top of the head: the body's highest point. */
   readonly crownY: number;
+}
+
+/**
+ * How far out from the body each region's clothes stand, along the body's
+ * normal, as a share of its height — #1618: a top and bottoms about 1.3 cm
+ * off the skin and shoes 1.75 cm, so a person reads as clothed rather than
+ * painted, and nothing at all for skin. Hair lies close. @see dressed
+ */
+export const CLOTHES_STAND_OFF: Readonly<Record<PersonRegion, number>> = {
+  [PersonRegion.skin]: 0,
+  [PersonRegion.top]: 0.0075,
+  [PersonRegion.bottoms]: 0.0075,
+  [PersonRegion.shoes]: 0.01,
+  [PersonRegion.hair]: 0.003,
+};
+
+/**
+ * How much further out a hem stands, as a share of the height — #1618: where
+ * clothes end, at a sleeve, a trouser leg over a shoe, a top's hem over the
+ * bottoms and its neck, the edge flares **0.008** (1.4 cm) more, so the
+ * silhouette is looser there and not a second skin. @see dressed
+ */
+export const HEM_FLARE = 0.008;
+
+/** The regions that are clothes: a top, bottoms and shoes. */
+function isClothes(region: PersonRegion): boolean {
+  return (
+    region === PersonRegion.top || region === PersonRegion.bottoms || region === PersonRegion.shoes
+  );
+}
+
+/**
+ * Which region a face is when its corners disagree, the first first:
+ * clothes over hair over skin, so a seam's triangles go to the clothes and a
+ * sleeve or a hem ends on a whole triangle. @see dressed
+ */
+const FACE_PRECEDENCE: readonly PersonRegion[] = [
+  PersonRegion.shoes,
+  PersonRegion.bottoms,
+  PersonRegion.top,
+  PersonRegion.hair,
+  PersonRegion.skin,
+];
+
+/** A body dressed by FACE — #1618. @see dressed */
+export interface Dressed {
+  /** For each drawn vertex, the kept vertex it is: its column in the animation texture. */
+  readonly column: Uint32Array;
+  /** For each drawn vertex, its region: every corner of a triangle has the triangle's. */
+  readonly region: Uint8Array;
+  /** Three indices a triangle, into the drawn vertices. */
+  readonly indices: Uint32Array;
+  /**
+   * For each kept vertex, how far its clothes stand out along its normal, as a
+   * share of the body's height: the most of its faces' {@link CLOTHES_STAND_OFF},
+   * and {@link HEM_FLARE} more where clothes meet another region.
+   */
+  readonly standOff: Float32Array;
+}
+
+/**
+ * A body's triangles dressed by face rather than by vertex — #1618. Each
+ * triangle takes the region most of its corners have (and where all three
+ * differ, the first of them in clothes-first order); a kept vertex whose
+ * triangles are of more than one region is drawn once for each, every copy
+ * the same column of the animation texture, so the seam is a hard edge
+ * between two colours rather than a fade across a triangle — and costs no
+ * texture and no triangle. `indices` are three a triangle into the kept
+ * vertices; `regions` is each kept vertex's (`regionOf`).
+ */
+export function dressed(indices: ArrayLike<number>, regions: ArrayLike<number>): Dressed {
+  const columns = regions.length;
+  const faces = Math.floor(indices.length / 3);
+  const faceRegion = new Uint8Array(faces);
+  for (let face = 0; face < faces; face += 1) {
+    const a = regions[indices[face * 3] as number] as PersonRegion;
+    const b = regions[indices[face * 3 + 1] as number] as PersonRegion;
+    const c = regions[indices[face * 3 + 2] as number] as PersonRegion;
+    faceRegion[face] =
+      a === b || a === c
+        ? a
+        : b === c
+          ? b
+          : (FACE_PRECEDENCE.find((region) => region === a || region === b || region === c) ?? a);
+  }
+  const standOff = new Float32Array(columns);
+  const seen = new Uint8Array(columns * 8);
+  for (let face = 0; face < faces; face += 1) {
+    const region = faceRegion[face] as PersonRegion;
+    for (let corner = 0; corner < 3; corner += 1) {
+      const vertex = indices[face * 3 + corner] as number;
+      standOff[vertex] = Math.max(standOff[vertex] as number, CLOTHES_STAND_OFF[region]);
+      seen[vertex * 8 + region] = 1;
+    }
+  }
+  for (let vertex = 0; vertex < columns; vertex += 1) {
+    let kinds = 0;
+    let clothes = false;
+    for (let region = 0; region < 8; region += 1) {
+      if (seen[vertex * 8 + region] !== 1) continue;
+      kinds += 1;
+      if (isClothes(region as PersonRegion)) clothes = true;
+    }
+    if (kinds > 1 && clothes) standOff[vertex] = (standOff[vertex] as number) + HEM_FLARE;
+  }
+  // One drawn vertex for each kept vertex and region its faces use.
+  const drawnOf = new Map<number, number>();
+  const column: number[] = [];
+  const region: number[] = [];
+  const out = new Uint32Array(faces * 3);
+  for (let face = 0; face < faces; face += 1) {
+    const kind = faceRegion[face] as number;
+    for (let corner = 0; corner < 3; corner += 1) {
+      const vertex = indices[face * 3 + corner] as number;
+      const key = vertex * 8 + kind;
+      let drawn = drawnOf.get(key);
+      if (drawn === undefined) {
+        drawn = column.length;
+        drawnOf.set(key, drawn);
+        column.push(vertex);
+        region.push(kind);
+      }
+      out[face * 3 + corner] = drawn;
+    }
+  }
+  return {
+    column: Uint32Array.from(column),
+    region: Uint8Array.from(region),
+    indices: out,
+    standOff,
+  };
 }
 
 /**

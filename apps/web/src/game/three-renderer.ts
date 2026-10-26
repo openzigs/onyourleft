@@ -443,8 +443,10 @@ import {
   ANIMATION_BYTES_PER_TEXEL,
   ANIMATION_ROWS,
   PERSON_MAX_TRIANGLES,
+  PersonRegion,
   animationRow,
   clusterDecimate,
+  dressed,
   regionOf,
   vertexNormals,
 } from './people-body';
@@ -12340,6 +12342,13 @@ export class PeopleBelt {
   readonly #farMotion: InstancedBufferAttribute;
   /** The body's triangles, as cut. */
   readonly triangles: number;
+  /**
+   * How far a body's clothes stand off it, and its skin, as baked — #1618:
+   * the mean distance, at a unit height, between each vertex as the
+   * animation texture holds it at the walk's first phase and the same vertex
+   * posed bare. Skin moves only beside a hem. For the browser gate's read-back.
+   */
+  readonly standOff: { readonly clothes: number; readonly skin: number };
   readonly #matrix = new Matrix4();
   readonly #position = new Vector3();
   readonly #turn = new Quaternion();
@@ -12351,6 +12360,7 @@ export class PeopleBelt {
   constructor(body: Object3D) {
     const baked = bakedPeople(body);
     this.triangles = baked.geometry.index === null ? 0 : baked.geometry.index.count / 3;
+    this.standOff = baked.standOff;
     this.#animation = baked.animation;
     this.#bodyLooks = new InstancedBufferAttribute(new Float32Array(PEOPLE_NEAR_MAX * 4), 4);
     this.#bodyMotion = new InstancedBufferAttribute(new Float32Array(PEOPLE_NEAR_MAX * 4), 4);
@@ -12491,6 +12501,8 @@ interface BakedPeople {
   readonly geometry: BufferGeometry;
   readonly animation: DataTexture;
   readonly vertices: number;
+  /** @see PeopleBelt.standOff */
+  readonly standOff: { readonly clothes: number; readonly skin: number };
 }
 
 /** A bone turned about a WORLD axis through its own joint, by `angle`. */
@@ -12561,25 +12573,55 @@ function bakedPeople(body: Object3D): BakedPeople {
     crownY: highest,
   };
 
-  // The geometry the instances share: each kept vertex's column, its region,
-  // and its rest place at unit height (for the bounds only — the shader reads
-  // the texture).
-  const rest = new Float32Array(kept * 3);
-  const column = new Float32Array(kept);
-  const region = new Float32Array(kept);
+  // Each kept vertex's region, then the body dressed by face — #1618: a
+  // seam's vertex drawn once a region, all its copies one column of the
+  // texture, and how far each column's clothes stand off the body.
+  const regions = new Uint8Array(kept);
+  const plain = new Float32Array(kept * 3);
   for (let vertex = 0; vertex < kept; vertex += 1) {
     const from = cut.kept[vertex] as number;
-    rest[vertex * 3] = (positions[from * 3] as number) / restHeight;
-    rest[vertex * 3 + 1] = ((positions[from * 3 + 1] as number) - lowest) / restHeight;
-    rest[vertex * 3 + 2] = (positions[from * 3 + 2] as number) / restHeight;
-    column[vertex] = vertex;
     const bone = mesh.skeleton.bones[dominant[from] as number];
-    region[vertex] = regionOf(
+    regions[vertex] = regionOf(
       bone?.name ?? '',
       positions[from * 3 + 1] as number,
       positions[from * 3 + 2] as number,
       landmarks,
     );
+    plain[vertex * 3] = positions[from * 3] as number;
+    plain[vertex * 3 + 1] = positions[from * 3 + 1] as number;
+    plain[vertex * 3 + 2] = positions[from * 3 + 2] as number;
+  }
+  const dress = dressed(cut.indices, regions);
+  // The clothes stood off along the rest body's own normals, in the body's
+  // units, BEFORE it is posed: so they bend with the joint they are on.
+  const restNormals = vertexNormals(plain, cut.indices);
+  const clothed = new Float32Array(kept * 3);
+  for (let vertex = 0; vertex < kept; vertex += 1) {
+    const out = (dress.standOff[vertex] as number) * restHeight;
+    for (let axis = 0; axis < 3; axis += 1) {
+      clothed[vertex * 3 + axis] =
+        (plain[vertex * 3 + axis] as number) + (restNormals[vertex * 3 + axis] as number) * out;
+    }
+  }
+
+  // The geometry the instances share: each drawn vertex's column, its region,
+  // and its rest place at unit height (for the bounds only — the shader reads
+  // the texture).
+  const drawn = dress.column.length;
+  const rest = new Float32Array(drawn * 3);
+  const normal = new Float32Array(drawn * 3);
+  const column = new Float32Array(drawn);
+  const region = new Float32Array(drawn);
+  for (let vertex = 0; vertex < drawn; vertex += 1) {
+    const of = dress.column[vertex] as number;
+    rest[vertex * 3] = (clothed[of * 3] as number) / restHeight;
+    rest[vertex * 3 + 1] = ((clothed[of * 3 + 1] as number) - lowest) / restHeight;
+    rest[vertex * 3 + 2] = (clothed[of * 3 + 2] as number) / restHeight;
+    for (let axis = 0; axis < 3; axis += 1) {
+      normal[vertex * 3 + axis] = restNormals[of * 3 + axis] as number;
+    }
+    column[vertex] = of;
+    region[vertex] = dress.region[vertex] as number;
   }
   const geometry = new BufferGeometry();
   geometry.setAttribute('position', new BufferAttribute(rest, 3));
@@ -12590,8 +12632,8 @@ function bakedPeople(body: Object3D): BakedPeople {
   // FLAT_SHADED by three, whose fragment then takes each triangle's own normal
   // from screen derivatives and never reads the smooth one the vertex wrote.
   // That is the faceted face and clothes the owner saw on PR #1615 (#1541).
-  geometry.setAttribute('normal', new BufferAttribute(vertexNormals(rest, cut.indices), 3));
-  geometry.setIndex(new BufferAttribute(cut.indices, 1));
+  geometry.setAttribute('normal', new BufferAttribute(normal, 3));
+  geometry.setIndex(new BufferAttribute(dress.indices, 1));
   geometry.computeBoundingSphere();
 
   // The poses, baked.
@@ -12623,6 +12665,7 @@ function bakedPeople(body: Object3D): BakedPeople {
   const data = new Uint16Array(width * height * 4);
   const scratch = new Vector3();
   const posed = new Float32Array(kept * 3);
+  const standOff = { clothes: 0, skin: 0 };
   GAITS.forEach((gait, gaitAt) => {
     for (let phase = 0; phase < GAIT_PHASES; phase += 1) {
       ordered.forEach((bone, at) => {
@@ -12654,16 +12697,47 @@ function bakedPeople(body: Object3D): BakedPeople {
       let floor = Number.POSITIVE_INFINITY;
       for (let vertex = 0; vertex < kept; vertex += 1) {
         const from = cut.kept[vertex] as number;
+        // #1618: the clothed body, posed by the source vertex's own weights.
         scratch.set(
-          positions[from * 3] as number,
-          positions[from * 3 + 1] as number,
-          positions[from * 3 + 2],
+          clothed[vertex * 3] as number,
+          clothed[vertex * 3 + 1] as number,
+          clothed[vertex * 3 + 2],
         );
         mesh.applyBoneTransform(from, scratch);
         posed[vertex * 3] = scratch.x / restHeight;
         posed[vertex * 3 + 1] = scratch.y / restHeight;
         posed[vertex * 3 + 2] = scratch.z / restHeight;
         floor = Math.min(floor, posed[vertex * 3 + 1] as number);
+      }
+      // #1618: at the walk's first phase, how far the baked clothes stand off
+      // the same body posed bare — what the texture holds, by region.
+      if (gaitAt === 0 && phase === 0) {
+        const sums = { clothes: 0, skin: 0 };
+        const counts = { clothes: 0, skin: 0 };
+        for (let vertex = 0; vertex < kept; vertex += 1) {
+          const kind = regions[vertex] as number;
+          const into =
+            kind === PersonRegion.skin
+              ? 'skin'
+              : kind === PersonRegion.hair
+                ? undefined
+                : 'clothes';
+          if (into === undefined) continue;
+          scratch.set(
+            plain[vertex * 3] as number,
+            plain[vertex * 3 + 1] as number,
+            plain[vertex * 3 + 2],
+          );
+          mesh.applyBoneTransform(cut.kept[vertex] as number, scratch);
+          sums[into] += Math.hypot(
+            (posed[vertex * 3] as number) - scratch.x / restHeight,
+            (posed[vertex * 3 + 1] as number) - scratch.y / restHeight,
+            (posed[vertex * 3 + 2] as number) - scratch.z / restHeight,
+          );
+          counts[into] += 1;
+        }
+        standOff.clothes = counts.clothes === 0 ? 0 : sums.clothes / counts.clothes;
+        standOff.skin = counts.skin === 0 ? 0 : sums.skin / counts.skin;
       }
       // Planted on the ground, and a run's flight above it.
       const lift = pose.lift / 1.75 - floor;
@@ -12689,7 +12763,7 @@ function bakedPeople(body: Object3D): BakedPeople {
   animation.magFilter = NearestFilter;
   animation.generateMipmaps = false;
   animation.needsUpdate = true;
-  return { geometry, animation, vertices: kept };
+  return { geometry, animation, vertices: kept, standOff };
 }
 
 /** Packed sRGB `0xRRGGBB` in a float, to linear RGB — the GLSL both people materials share. */
@@ -12939,6 +13013,13 @@ export function peopleDrawnOf(view: GameView):
       readonly far: readonly { readonly x: number; readonly z: number; readonly height: number }[];
       readonly triangles: number;
       readonly animationBytes: number;
+      /**
+       * #1618: how many of a body's triangles have corners of two regions —
+       * a colour faded across a triangle; nought where each seam is an edge.
+       */
+      readonly blendedTriangles: number;
+      /** #1618: @see PeopleBelt.standOff */
+      readonly standOff: { readonly clothes: number; readonly skin: number };
     }
   | undefined {
   const belt = view instanceof ThreeGameView ? view.people : undefined;
@@ -12955,11 +13036,25 @@ export function peopleDrawnOf(view: GameView):
       return { x: at.x, z: at.z, height: scale.y };
     });
   };
+  const geometry = belt.bodies.geometry;
+  const region = geometry.getAttribute('oylRegion');
+  const index = geometry.index;
+  let blendedTriangles = 0;
+  if (index !== null) {
+    for (let at = 0; at + 2 < index.count; at += 3) {
+      const a = region.getX(index.getX(at));
+      if (region.getX(index.getX(at + 1)) !== a || region.getX(index.getX(at + 2)) !== a) {
+        blendedTriangles += 1;
+      }
+    }
+  }
   return {
     near: read(belt.bodies),
     far: read(belt.impostors),
     triangles: belt.triangles,
     animationBytes: belt.animationBytes,
+    blendedTriangles,
+    standOff: belt.standOff,
   };
 }
 

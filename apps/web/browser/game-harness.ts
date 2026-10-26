@@ -3089,6 +3089,15 @@ interface PeopleMeasurement {
   readonly triangles: number;
   readonly animationBytes: number;
   /**
+   * #1618, read off the belt: how many of a body's triangles fade a colour
+   * across them (corners of two regions), and how far its clothes and its skin
+   * stand off the bare body as the animation texture holds them, metres at a
+   * person's 1.75 m.
+   */
+  readonly blendedTriangles: number;
+  readonly clothesStandOff: number;
+  readonly skinStandOff: number;
+  /**
    * How many pixels of a box around the nearest body in frame, and around the
    * nearest impostor, change when the people are switched off: what is drawn
    * is a person, at the place `people.ts` put them.
@@ -3115,6 +3124,9 @@ const NO_PEOPLE_MEASURED: PeopleMeasurement = {
   drawCalls: -1,
   triangles: -1,
   animationBytes: -1,
+  blendedTriangles: -1,
+  clothesStandOff: Number.NaN,
+  skinStandOff: Number.NaN,
   bodyPixels: -1,
   impostorPixels: -1,
   bodyFragments: -1,
@@ -3321,6 +3333,9 @@ function peopleProbe(
     drawCalls,
     triangles: belt?.triangles ?? -1,
     animationBytes: belt?.animationBytes ?? -1,
+    blendedTriangles: belt?.blendedTriangles ?? -1,
+    clothesStandOff: (belt?.standOff.clothes ?? Number.NaN) * 1.75,
+    skinStandOff: (belt?.standOff.skin ?? Number.NaN) * 1.75,
     bodyPixels,
     impostorPixels,
     bodyFragments: fragments.length,
