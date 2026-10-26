@@ -525,6 +525,17 @@ export interface Block {
   readonly athleteId: string;
   readonly blockedAthleteId: string;
   readonly createdAt: number;
+  /**
+   * Opaque and random, never {@link blockedAthleteId} (#1529): what the app
+   * lists and undoes a block by, since it never holds another rider's id.
+   */
+  readonly handle: string;
+  /**
+   * The name a race's result showed the blocker on the row they blocked
+   * from (#1529), or `null`: a block made by id, made before migration 0035,
+   * or of an athlete since erased.
+   */
+  readonly shownName: string | null;
 }
 
 /**
@@ -1531,10 +1542,25 @@ export interface SqlStore {
   /** A room's finish order is every rider's, by design: not athlete-scoped. */
   listRoomResults(roomId: string): Promise<readonly Result[]>;
 
-  /** Block (#83). Idempotent: blocking twice keeps the first row. */
-  putBlock(athleteId: string, blockedAthleteId: string, at: number): Promise<void>;
+  /**
+   * Block (#83). Idempotent: blocking twice keeps the first row. `shownName`
+   * is the name a race's result showed the blocker (#1529); a block by id has
+   * none.
+   */
+  putBlock(
+    athleteId: string,
+    blockedAthleteId: string,
+    at: number,
+    shownName?: string,
+  ): Promise<void>;
   /** Unblock. `false` when this athlete had no such block. */
   deleteBlock(athleteId: string, blockedAthleteId: string): Promise<boolean>;
+  /**
+   * Unblock by the block's {@link Block.handle} (#1529), and ONLY this
+   * athlete's own: another athlete's handle deletes nothing. `false` when
+   * this athlete had no such block.
+   */
+  deleteBlockByHandle(athleteId: string, handle: string): Promise<boolean>;
   listBlocks(athleteId: string): Promise<readonly Block[]>;
   /**
    * What `viewerId` may know of `subjectId`, in ONE query (#83, #891's
@@ -1903,6 +1929,8 @@ const blockFrom = (row: Selectable<BlockTable>): Block => ({
   athleteId: row.athlete_id,
   blockedAthleteId: row.blocked_athlete_id,
   createdAt: row.created_at,
+  handle: row.handle,
+  shownName: row.shown_name,
 });
 
 const reportFrom = (row: Selectable<ReportTable>): Report => ({
@@ -4177,11 +4205,16 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
         ).map(resultFrom),
       ),
 
-    putBlock: (athleteId, blockedAthleteId, at) =>
+    putBlock: (athleteId, blockedAthleteId, at, shownName) =>
       exclusive(async () => {
         await db
           .insertInto('block')
-          .values({ athlete_id: athleteId, blocked_athlete_id: blockedAthleteId, created_at: at })
+          .values({
+            athlete_id: athleteId,
+            blocked_athlete_id: blockedAthleteId,
+            created_at: at,
+            shown_name: shownName ?? null,
+          })
           .onConflict((conflict) =>
             conflict.columns(['athlete_id', 'blocked_athlete_id']).doNothing(),
           )
@@ -4194,6 +4227,16 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
           .deleteFrom('block')
           .where('athlete_id', '=', athleteId)
           .where('blocked_athlete_id', '=', blockedAthleteId)
+          .executeTakeFirst();
+        return deleted.numDeletedRows > 0n;
+      }),
+
+    deleteBlockByHandle: (athleteId, handle) =>
+      exclusive(async () => {
+        const deleted = await db
+          .deleteFrom('block')
+          .where('athlete_id', '=', athleteId)
+          .where('handle', '=', handle)
           .executeTakeFirst();
         return deleted.numDeletedRows > 0n;
       }),
@@ -5257,7 +5300,14 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
             // Another athlete's block OF this one is KEPT (#899): it is the
             // blocker's row, and deleting it would shrink their list and tell
             // them the id they blocked was a real account — as a block of an
-            // id nobody ever held is kept (#891's review).
+            // id nobody ever held is kept (#891's review). Only the name a
+            // race's result showed the blocker goes from it (#1529): it is
+            // this athlete's, and an erased athlete's name is kept nowhere.
+            await trx
+              .updateTable('block')
+              .set({ shown_name: null })
+              .where('blocked_athlete_id', '=', athleteId)
+              .execute();
             await trx.deleteFrom('athlete').where('id', '=', athleteId).execute();
             return held.map((row) => row.content_sha256);
           }),

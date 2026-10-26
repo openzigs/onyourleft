@@ -116,6 +116,22 @@ export const MAXIMUM_REASON_LENGTH = 1000;
  */
 export const MAXIMUM_BLOCKS = 1000;
 
+/**
+ * One of a rider's own blocks as the app reads it (#1529): an opaque handle
+ * to undo it by, the name a race's result showed them when they made it
+ * (`null` for a block made by id, or before the instance kept names, or of a
+ * rider since erased), and when. Never the blocked athlete's id.
+ */
+export interface HeldBlock {
+  readonly handle: string;
+  readonly name: string | null;
+  /** Unix seconds. */
+  readonly blockedAt: number;
+}
+
+/** A block's handle: the 16 random bytes migration 0035's default writes, in hex. */
+const BLOCK_HANDLE = /^[0-9a-f]{32}$/;
+
 /** What a report about an id nobody holds is closed as, the moment it is made. */
 export const NO_SUCH_ATHLETE_OUTCOME = 'no_such_athlete';
 
@@ -182,9 +198,21 @@ export interface Moderation {
    */
   readonly soleModerator: boolean;
 
-  block(athleteId: string, target: string): Promise<ModerationResult<null>>;
+  /**
+   * `shownName` is the name a race's result showed the caller on the row
+   * they blocked from (#1529), kept so their list can say whom; a block by
+   * id has none.
+   */
+  block(athleteId: string, target: string, shownName?: string): Promise<ModerationResult<null>>;
   unblock(athleteId: string, target: string): Promise<void>;
   blocks(athleteId: string): Promise<readonly string[]>;
+  /**
+   * The caller's own blocks by {@link HeldBlock.handle}, never by athlete id
+   * (#1529): what the app lists, since it never holds another rider's id.
+   */
+  heldBlocks(athleteId: string): Promise<readonly HeldBlock[]>;
+  /** Lifts the caller's own block by its handle; anything else changes nothing. */
+  unblockByHandle(athleteId: string, handle: string): Promise<void>;
   report(athleteId: string, target: unknown, reason: unknown): Promise<ModerationResult<null>>;
   /**
    * A report from inside a room (#789): the reporter names a SEAT, the room
@@ -433,7 +461,7 @@ export function createModeration(options: ModerationOptions): Moderation {
     roleOf,
     soleModerator,
 
-    async block(athleteId, target) {
+    async block(athleteId, target, shownName) {
       // Stored for ANY well-formed id, whether or not anybody holds it, and
       // never asked whether they do: `GET /v1/blocks` then lists exactly what
       // the caller asked for, and tells them nothing about who is here.
@@ -448,7 +476,7 @@ export function createModeration(options: ModerationOptions): Moderation {
           },
         ]);
       }
-      await store.putBlock(athleteId, target, seconds());
+      await store.putBlock(athleteId, target, seconds(), shownName);
       return { ok: true, value: null };
     },
 
@@ -458,6 +486,20 @@ export function createModeration(options: ModerationOptions): Moderation {
 
     async blocks(athleteId) {
       return (await store.listBlocks(athleteId)).map((block) => block.blockedAthleteId);
+    },
+
+    async heldBlocks(athleteId) {
+      return (await store.listBlocks(athleteId))
+        .map((block) => ({
+          handle: block.handle,
+          name: block.shownName,
+          blockedAt: block.createdAt,
+        }))
+        .sort((a, b) => b.blockedAt - a.blockedAt || (a.handle < b.handle ? -1 : 1));
+    },
+
+    async unblockByHandle(athleteId, handle) {
+      if (BLOCK_HANDLE.test(handle)) await store.deleteBlockByHandle(athleteId, handle);
     },
 
     async report(athleteId, target, reason) {

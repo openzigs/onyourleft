@@ -130,3 +130,72 @@ describe('blocking a rider from a race’s result — #1516', () => {
     expect(await blocks(bea)).toEqual([]);
   });
 });
+
+/**
+ * **Seeing and undoing those blocks — #1529**: the app never holds another
+ * rider's athlete id, so it reads its blocks from `GET /v1/blocks/handles`,
+ * each by an opaque handle and the name the result showed it, and undoes one
+ * with `DELETE /v1/blocks/handles/{handle}`. Read back through the result
+ * itself, where the names come back, and the blocker's own list.
+ */
+describe('seeing and undoing a block made from a race’s result — #1529', () => {
+  type Held = { handle: string; name: string | null; blockedAt: number };
+  const handles = async (w: IdentityInstance, rider: Rider): Promise<Held[]> => {
+    const answer = await w.call('GET', '/v1/blocks/handles', { token: rider.token });
+    expect(answer.status).toBe(200);
+    return (answer.body as { blocks: Held[] }).blocks;
+  };
+  const unblock = (w: IdentityInstance, rider: Rider, handle: string) =>
+    w.call('DELETE', `/v1/blocks/handles/${handle}`, { token: rider.token });
+
+  it('lists the block by the name the row showed and a handle, never an athlete id', async () => {
+    const { w, anna, bea, block } = await finishedRace();
+    expect((await block(bea, 1)).status).toBe(204);
+    const held = await handles(w, bea);
+    expect(held).toEqual([
+      {
+        handle: expect.stringMatching(/^[0-9a-f]{32}$/) as unknown,
+        name: 'Anna',
+        blockedAt: expect.any(Number) as unknown,
+      },
+    ]);
+    // Nothing in the answer is Anna's id.
+    expect(JSON.stringify(held)).not.toContain(anna.athleteId);
+    expect(await handles(w, anna)).toEqual([]);
+  });
+
+  it('lists a block made by id with no name: a name is kept only from a row the caller was shown', async () => {
+    const { w, bea, cat } = await finishedRace();
+    expect((await w.call('POST', `/v1/blocks/${bea.athleteId}`, { token: cat.token })).status).toBe(
+      204,
+    );
+    expect((await handles(w, cat)).map((each) => each.name)).toEqual([null]);
+  });
+
+  it('undoes the block by its handle: the names come back on the result, and the list is empty', async () => {
+    const { w, bea, anna, block, blocks, names } = await finishedRace();
+    await block(bea, 1);
+    const [held] = await handles(w, bea);
+    expect((await unblock(w, bea, held?.handle ?? '')).status).toBe(204);
+    expect(await handles(w, bea)).toEqual([]);
+    expect(await blocks(bea)).toEqual([]);
+    expect(await names(bea)).toEqual(['Anna', 'Bea', 'Cat']);
+    expect(await names(anna)).toEqual(['Anna', 'Bea', 'Cat']);
+  });
+
+  it('undoes nothing for another rider’s handle, or one that is not a handle, and answers the same', async () => {
+    const { w, bea, anna, cat, block, names } = await finishedRace();
+    await block(bea, 1);
+    const [held] = await handles(w, bea);
+    for (const [rider, handle] of [
+      [anna, held?.handle ?? ''],
+      [cat, held?.handle ?? ''],
+      [bea, '0'.repeat(32)],
+      [bea, 'not-a-handle'],
+    ] as const) {
+      expect((await unblock(w, rider, handle)).status).toBe(204);
+    }
+    expect((await handles(w, bea)).map((each) => each.name)).toEqual(['Anna']);
+    expect(await names(anna)).toEqual(['Anna', null, 'Cat']);
+  });
+});

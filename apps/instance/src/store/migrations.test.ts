@@ -93,7 +93,8 @@ const FIXTURE_ROWS: Readonly<Record<string, string>> = {
   email_recovery_token: `INSERT INTO email_recovery_token (token_sha256, athlete_id, expires_at, used_at) VALUES ('${'6'.repeat(64)}', 'a', 9, NULL)`,
   // The columns named, so migration 0018's `requested_by_key` is NULL (#1193).
   recovery_email_confirmation: `INSERT INTO recovery_email_confirmation (token_sha256, athlete_id, address, expires_at, used_at) VALUES ('${'7'.repeat(64)}', 'a', 'a@example.org', 10, NULL)`,
-  block: `INSERT INTO block VALUES ('a', 'b', 10)`,
+  // The columns named, so migration 0035's handle is its default and its name NULL (#1529).
+  block: `INSERT INTO block (athlete_id, blocked_athlete_id, created_at) VALUES ('a', 'b', 10)`,
   report: `INSERT INTO report (id, athlete_id, target_athlete_id, reason, created_at) VALUES (1, 'a', 'b', 'Why', 11)`,
   invite_code: `INSERT INTO invite_code VALUES ('${'8'.repeat(64)}', 'a', 13, NULL)`,
   sync_item: `INSERT INTO sync_item (seq, athlete_id, kind, item_key, digest, body, received_at, deleted_at) VALUES (1, 'a', 'write-up', 'ride-1', '${'9'.repeat(64)}', x'7b7d', 14, NULL)`,
