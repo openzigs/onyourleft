@@ -25,8 +25,12 @@ import {
   HOUSE_MODELS,
   houseModelFits,
   houseModelsFitting,
+  MAIN_STREET_MODEL,
   placedPoint,
   placeHouseModel,
+  placeOnPlot,
+  plotModelFootprint,
+  VILLAGE_HOUSE_MODELS,
   type HouseFitInput,
 } from './house-models';
 import { landClassMask } from './land-class';
@@ -355,3 +359,43 @@ describe('the plans a ride makes — #1585', () => {
 
 /** How many of the mixed town's plans fit a model, as measured. */
 const MIXED_TOWN_MODELLED = 0;
+
+describe('a model on a procedural plot — #1566', () => {
+  it('offers a village house every end-fronted residential model, eleven, and its block the shop', () => {
+    expect(VILLAGE_HOUSE_MODELS).toHaveLength(11);
+    for (const index of VILLAGE_HOUSE_MODELS) {
+      expect(HOUSE_MODELS[index]?.use).toBe('residential');
+      expect(HOUSE_MODELS[index]?.front).toBe('end');
+    }
+    // The side-fronted one is 19 m along its door: wider than a plot's 18.
+    const side = HOUSE_MODELS.findIndex((model) => model.front === 'side');
+    expect(VILLAGE_HOUSE_MODELS).not.toContain(side);
+    expect(HOUSE_MODELS[MAIN_STREET_MODEL]?.id).toBe('old_american_brick_shop');
+  });
+
+  it('stands its front end where the building’s front is, its length behind, turned to the road and never stretched', () => {
+    const index = VILLAGE_HOUSE_MODELS[3] as number;
+    const model = HOUSE_MODELS[index];
+    if (model === undefined) throw new Error('no model');
+    // An item at (10, 2, 40) facing +X — toward a road on its right.
+    const rotation = Math.PI / 2;
+    const placement = placeOnPlot(index, 10, 2, 40, rotation, 4.5);
+    expect(placement.stretchX).toBe(1);
+    expect(placement.stretchZ).toBe(1);
+    const front = placedPoint(placement, model.length / 2, 0, model.depth / 2);
+    expect(front[0]).toBeCloseTo(14.5, 9);
+    expect(front[1]).toBeCloseTo(2, 9);
+    expect(Math.abs(front[2] - 40)).toBeCloseTo(model.depth / 2, 9);
+    const back = placedPoint(placement, -model.length / 2, 0, 0);
+    expect(back[0]).toBeCloseTo(14.5 - model.length, 9);
+    expect(back[2]).toBeCloseTo(40, 9);
+    // The footprint it is held to says the same, in the item's frame.
+    expect(plotModelFootprint(index, 4.5)).toEqual({
+      x: model.depth / 2,
+      back: 4.5 - model.length,
+      front: 4.5,
+    });
+    expect(() => placeOnPlot(HOUSE_MODELS.length, 0, 0, 0, 0, 0)).toThrow();
+    expect(() => plotModelFootprint(-1, 0)).toThrow();
+  });
+});

@@ -24,6 +24,11 @@
  *   exactly `realistic-budget.ts` §`REALISTIC_VILLAGE_DRAW_CALLS` calls, so a
  *   feature that adds a village call is red until it removes one, and a merge
  *   that saves one lowers the number.
+ * - **The village's house models** (#1566): on that same hold the houses and
+ *   main-street blocks in view are #1585's models, in one call (the page's
+ *   `villageHouses`), and with `levers=-village-models` none is and the frame
+ *   draws more calls than the frozen figure — the procedural houses' shapes
+ *   and surfaces the models replace.
  *
  * ⚠️ **The mapped towns' describes — the mapped-blobs lever (#1657) and the
  * city centre (#1636) — are in `realistic-mapped.browser.spec.ts`** since the
@@ -40,6 +45,7 @@
 import { expect, test } from '@playwright/test';
 
 import {
+  MAPPED_BUILDING_TRIANGLES,
   REALISTIC_DECORATION_TRIANGLES,
   REALISTIC_VILLAGE_DRAW_CALLS,
   REALISTIC_WINTER_LIGHTS_TRIANGLES,
@@ -251,11 +257,44 @@ test.describe('the realistic page’s village frame, frozen — #1689', { tag: N
       expect(counted.inView, kind).toBeGreaterThan(0);
     }
     expect(village.page.decorations?.triangles ?? 0).toBeGreaterThan(0);
+    // #1566: the houses and blocks in view are models, inside the figure.
+    expect(village.page.villageHouses?.houses ?? 0).toBeGreaterThan(5);
+    expect(village.page.villageHouses?.triangles ?? 0).toBeLessThanOrEqual(
+      MAPPED_BUILDING_TRIANGLES,
+    );
     // The freeze: no call more — and none fewer, so a merge that saves one
     // lowers the number in the same pull request (the ruling's step 3).
     expect(village.result.lastFrame.calls).toBeLessThanOrEqual(REALISTIC_VILLAGE_DRAW_CALLS);
     expect(village.result.lastFrame.calls).toBe(REALISTIC_VILLAGE_DRAW_CALLS);
     // A held frame's mean is its count (#1294).
     expect(village.result.drawCalls).toBe(village.result.lastFrame.calls);
+  });
+});
+
+test.describe('the realistic page’s village house models — #1566', { tag: NIGHTLY }, () => {
+  test('draws the village hold’s houses as their kinds with -village-models, in more calls than the frozen figure', async ({
+    page,
+  }) => {
+    test.setTimeout(REALISTIC_LOAD_BUDGET_MS);
+    // #1689's frame with the models off. Its own frame with them on is the
+    // freeze above, at exactly `REALISTIC_VILLAGE_DRAW_CALLS` with more than
+    // five houses modelled — one load here, not two (`nightly-split.test.ts`).
+    const off = await ride(page, `${DECORATED}&levers=-village-models`);
+    console.log(
+      `#1566 route=village at=${String(VILLAGE_HOLD_METRES)}, -village-models: ` +
+        `${String(off.result.lastFrame.calls)} draw calls, ` +
+        `${String(off.result.lastFrame.triangles)} triangles, ` +
+        `${JSON.stringify(off.page.villageHouses)}`,
+    );
+    expect(off.result.leversOff).toEqual(['village-models']);
+    // Not vacuous: the same village in view, its houses drawn as their kinds.
+    const census = off.page.census;
+    if (census === undefined) throw new Error('the page published no census');
+    expect(census.structures.building.inView).toBeGreaterThan(5);
+    expect(census.structures['shop-row'].inView).toBeGreaterThanOrEqual(1);
+    expect(off.page.villageHouses?.houses).toBe(0);
+    // The models save calls: the houses' two shapes in four surfaces each, and
+    // the blocks' rows of shops, against the models' one call.
+    expect(off.result.lastFrame.calls).toBeGreaterThan(REALISTIC_VILLAGE_DRAW_CALLS);
   });
 });

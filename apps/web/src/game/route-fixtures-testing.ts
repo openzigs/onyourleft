@@ -278,6 +278,36 @@ export function hairpinRoute(radius: number, hand: 'right' | 'left' = 'right'): 
 }
 
 /**
+ * A LEVEL hairpin with long legs — #1566: `leg` metres north at 50 m, a
+ * right-hand bend of `radius`, and `leg` metres back south, the two legs
+ * `2 × radius` apart. Level and low, so villages stand on both legs (the
+ * climbing {@link hairpinRoute} is too steep to build on), and a building on
+ * the inside of one leg reaches toward the other.
+ */
+export function levelHairpinRoute(radius: number, leg: number): RouteProfile {
+  const metresPerDegreeLongitude =
+    METRES_PER_DEGREE_LATITUDE * Math.cos((FIXTURE_LATITUDE * Math.PI) / 180);
+  const points: RoutePoint[] = [];
+  const push = (east: number, north: number): void => {
+    points.push({
+      position: geographicPosition(
+        degreesLatitude(FIXTURE_LATITUDE + north / METRES_PER_DEGREE_LATITUDE),
+        degreesLongitude(-0.12 + east / metresPerDegreeLongitude),
+      ),
+      elevation: altitudeMetres(50),
+    });
+  };
+  for (let north = 0; north < leg; north += 10) push(0, north);
+  const steps = Math.max(6, Math.round((Math.PI * radius) / 5));
+  for (let step = 0; step <= steps; step += 1) {
+    const angle = (step / steps) * Math.PI;
+    push(radius * (1 - Math.cos(angle)), leg + radius * Math.sin(angle));
+  }
+  for (let north = leg - 10; north >= 0; north -= 10) push(2 * radius, north);
+  return routeProfile(points);
+}
+
+/**
  * A corner — #546: 400 m north, a bend of `radius` through `degrees` (90 by
  * default) to the `hand` side (right by default), and 400 m on along the new
  * heading, level all the way. #499's fixtures are 180° hairpins and S-bends; a single corner that

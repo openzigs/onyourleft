@@ -250,6 +250,7 @@ import {
   AWNING_STRIPE_PAINT,
   DOOR_PAINTS,
   LOT_PAINTS,
+  lotModelPaint,
   lotPaintChannel,
   paintChannelOf,
   LOT_CLAD_STEP,
@@ -298,7 +299,7 @@ import {
 } from './facade';
 import { settlingBasisWorker } from './basis-worker';
 import { FRONT_PORCH } from './porch';
-import { placedPoint, type HousePlacement } from './house-models';
+import { HOUSE_MODELS, placedPoint, placeOnPlot, type HousePlacement } from './house-models';
 import {
   EAVES_OVERHANG_METRES,
   BAY_METRES,
@@ -13934,9 +13935,9 @@ export const REALISTIC_PRIMITIVE_SKIP: ReadonlySet<SceneryKind> = new Set<Scener
 /**
  * How many triangles one realistic structure of a kind is drawn with, every
  * surface together — what `realistic-budget.ts` §`REALISTIC_TRIANGLES` holds a
- * structure to, since it is built here rather than read off a file.
- *
- * @test-facing held by `realistic-budget.test.ts`
+ * structure to, since it is built here rather than read off a file — and
+ * since #1566 a procedural structure's price in the term the village models
+ * share ({@link VillageHouseBelt}). Held by `realistic-budget.test.ts`.
  */
 export function realisticStructureTriangles(kind: StructureKind): number {
   let heaviest = 0;
@@ -13947,10 +13948,10 @@ export function realisticStructureTriangles(kind: StructureKind): number {
 }
 
 /**
- * How many triangles one shape of a realistic structure is drawn with — #500.
- *
- * @test-facing held by `realistic-budget.test.ts` §"the SAME triangles in both
- * worlds", shape by shape against the stylised belt's mesh
+ * How many triangles one shape of a realistic structure is drawn with — #500;
+ * {@link realisticStructureTriangles}' heaviest. Held by
+ * `realistic-budget.test.ts` §"the SAME triangles in both worlds", shape by
+ * shape against the stylised belt's mesh.
  */
 export function realisticStructureTrianglesOf(kind: StructureKind, variant: number): number {
   let total = 0;
@@ -14025,7 +14026,7 @@ function structureMaterials(
 }
 
 /** The materials {@link withLotPaint} has taught, and the channel each reads. */
-const LOT_PAINT_TAUGHT = new WeakMap<Material, 'wall' | 'roof'>();
+const LOT_PAINT_TAUGHT = new WeakMap<Material, 'wall' | 'roof' | 'trim'>();
 
 /**
  * Which instance channel a structure material reads a lot's paint from, or
@@ -14034,7 +14035,7 @@ const LOT_PAINT_TAUGHT = new WeakMap<Material, 'wall' | 'roof'>();
  * @test-facing held by `three-renderer.test.ts` §"#1581", which asserts the
  * brick, roof-tiles, planks and glass materials
  */
-export function readsLotPaint(material: Material): 'wall' | 'roof' | undefined {
+export function readsLotPaint(material: Material): 'wall' | 'roof' | 'trim' | undefined {
   return LOT_PAINT_TAUGHT.get(material);
 }
 
@@ -14114,8 +14115,12 @@ export const LOT_CLADDING_GLSL = /* glsl */ `
  */
 function withLotPaint<M extends Material>(material: M, surface: StructureSurface): M {
   // ⚠️ `planks` has a wall list for a mapped barn, but on a lot it is the
-  // joinery and the door, which stay timber: a lot's own walls are never planks.
-  const channel = surface === 'planks' ? undefined : paintChannelOf(surface);
+  // joinery and the door, which stay timber: a lot's own walls are never
+  // planks. Since #1566 that timber is stained, by its `trim` entry — the
+  // wall's and the roof's entries summed, modulo the list — from the same
+  // list, so a house's window frames and door are not most neighbours' (one diagonal one shares its trim), and
+  // never clad: clapboard is the walls', not the joinery's.
+  const channel = surface === 'planks' ? 'trim' : paintChannelOf(surface);
   const paints = paintsOf(surface);
   if (channel === undefined || paints === undefined || LOT_PAINT_TAUGHT.has(material)) {
     return material;
@@ -14127,8 +14132,8 @@ function withLotPaint<M extends Material>(material: M, surface: StructureSurface
       .map((rgb) => `vec3(${rgb.map(glslFloat).join(', ')})`)
       .join(', ');
   const entries = listOf(paints);
-  const clad = listOf(channel === 'wall' ? lotSidingPaints() : SHINGLE_PAINTS);
-  const read = channel === 'wall' ? 'x' : 'y';
+  const clad = listOf(channel === 'roof' ? SHINGLE_PAINTS : lotSidingPaints());
+  const read = channel === 'roof' ? 'y' : 'x';
   const spliced = "#1581's lot paint";
   const earlier = material.onBeforeCompile.bind(material);
   const earlierKey = material.customProgramCacheKey();
@@ -14159,6 +14164,17 @@ function withLotPaint<M extends Material>(material: M, surface: StructureSurface
         'vOylLotNormal = normal;',
         '#ifdef USE_INSTANCING_COLOR',
         `int oylCode = int(instanceColor.${read} + 0.5) - 1;`,
+        // #1566: the joinery's stain, from both channels, and never clad.
+        ...(channel === 'trim'
+          ? [
+              'int oylRoofCode = int(instanceColor.y + 0.5) - 1;',
+              'if (oylCode >= 0 && oylRoofCode >= 0) {',
+              `  int oylTrim = (min(oylCode % ${String(LOT_CLAD_STEP)}, ${String(LOT_PAINTS - 1)}) + min(oylRoofCode % ${String(LOT_CLAD_STEP)}, ${String(LOT_PAINTS - 1)})) % ${count};`,
+              '  vOylPaint = oylLotPaints[oylTrim];',
+              '}',
+              'oylCode = -1;',
+            ]
+          : []),
         'if (oylCode >= 0) {',
         `  int oylEntry = min(oylCode % ${String(LOT_CLAD_STEP)}, ${String(LOT_PAINTS - 1)});`,
         // #1589: the wall channel carries a porch above the cladding, so the cladding is one bit.
@@ -16420,42 +16436,20 @@ export class MappedBuildingBelt {
   #appendModel(plan: FootprintPlan, placement: HousePlacement, at: number): number {
     const model = this.#houses?.models[placement.model];
     if (model === undefined) return at;
-    const [red, green, blue] = modelPaint(mappedRolePaint(plan, 'wall'));
-    const { ax, az, stretchX, stretchZ } = placement;
-    const position = this.#modelPosition.array as Float32Array;
-    const normal = this.#modelNormal.array as Float32Array;
-    const uv = this.#modelUv.array as Float32Array;
-    const colour = this.#modelColour.array as Float32Array;
-    const tint = this.#modelTint.array as Float32Array;
-    const vertices = model.triangles * 3;
-    for (let vertex = 0; vertex < vertices; vertex += 1) {
-      const to = at + vertex;
-      const [x, y, z] = placedPoint(
-        placement,
-        model.position[vertex * 3] as number,
-        model.position[vertex * 3 + 1] as number,
-        model.position[vertex * 3 + 2] as number,
-      );
-      position[to * 3] = x;
-      position[to * 3 + 1] = y;
-      position[to * 3 + 2] = z;
-      const along = (model.normal[vertex * 3] as number) / stretchX;
-      const up = model.normal[vertex * 3 + 1] as number;
-      const across = (model.normal[vertex * 3 + 2] as number) / stretchZ;
-      const nx = along * ax - across * az;
-      const nz = along * az + across * ax;
-      const length = Math.hypot(nx, up, nz) || 1;
-      normal[to * 3] = nx / length;
-      normal[to * 3 + 1] = up / length;
-      normal[to * 3 + 2] = nz / length;
-      uv[to * 2] = model.uv[vertex * 2] as number;
-      uv[to * 2 + 1] = model.uv[vertex * 2 + 1] as number;
-      colour[to * 3] = red;
-      colour[to * 3 + 1] = green;
-      colour[to * 3 + 2] = blue;
-      tint[to] = plan.tint;
-    }
-    return at + vertices;
+    return writeHouseModel(
+      model,
+      placement,
+      modelPaint(mappedRolePaint(plan, 'wall')),
+      plan.tint,
+      {
+        position: this.#modelPosition.array as Float32Array,
+        normal: this.#modelNormal.array as Float32Array,
+        uv: this.#modelUv.array as Float32Array,
+        colour: this.#modelColour.array as Float32Array,
+        tint: this.#modelTint.array as Float32Array,
+      },
+      at,
+    );
   }
 
   /** Writes one role of a plan from vertex `at`; returns the vertex after it. */
@@ -16543,6 +16537,437 @@ export class MappedBuildingBelt {
     for (const material of this.#materials.values()) material.dispose();
     this.modelMesh.geometry.dispose();
     (this.modelMesh.material as Material).dispose();
+  }
+}
+
+/** What one {@link VillageHouseBelt.update} drew — #1566. */
+export interface VillageHouseStats {
+  /** The plots drawn as house models. */
+  readonly houses: number;
+  readonly triangles: number;
+  /** Of the frame's structure items, how many the models took: their triangles at the structure term's price. */
+  readonly items: number;
+  /**
+   * The most items the procedural belts may admit this frame, in their own
+   * order, so that what they draw and the models stay inside the term —
+   * `+Infinity` with nothing modelled, which leaves their budget as it was.
+   */
+  readonly procedural: number;
+  /** How many times the models' buffer has been rewritten, over the belt's life. */
+  readonly rewrites: number;
+}
+
+/**
+ * The procedural villages' houses and main-street blocks drawn as #1585's
+ * house models — #1566, the owner's ruling of 2026-10-23 (the same set, the
+ * same atlas, no model of its own).
+ *
+ * - **Which.** A structure item carrying a model (`settlements.ts`
+ *   §`everyVillagePlot`, `ScatterItem.house`), in view, nearest first, while
+ *   the structure term has room — the rung's structure items at
+ *   `REALISTIC_TRIANGLES.structure`, #1586's pooled term, applied per frame.
+ *   Every structure in view that no model stands for (the church, a row of
+ *   shops, a wall, a signpost) is priced first, at its kind's heaviest shape
+ *   (`realisticStructureTriangles`), so a model never pushes one of those out,
+ *   and a main-street block at its row of shops'; then each house, nearest
+ *   first, at its model's triangles, or at its kind's where the model does
+ *   not fit, and is drawn as its kind; then each block, nearest first, where
+ *   what is left holds its model. The procedural belts are then held to what is left
+ *   ({@link VillageHouseStats.procedural}), counted in THEIR order — every
+ *   item in view, structures first — and stopped at the first structure the
+ *   rest of the term cannot hold, so the two together never pass it.
+ *   ⚠️ **No near level, unlike a mapped plan's**: a village drawn half
+ *   in models and half in its kinds would spend the calls of both, and the
+ *   village frame's calls are frozen (`realistic-budget.ts`
+ *   §`REALISTIC_VILLAGE_DRAW_CALLS`); the term is what bounds a far model's
+ *   triangles.
+ * - **Where.** Its door end toward the road, its front where the
+ *   procedural building's is, reaching back over the plot's ground
+ *   (`house-models.ts` §`placeOnPlot`). Never stretched.
+ * - **Painted** by its plot's wall entry as a model wears a paint
+ *   (`building-paint.ts` §`lotModelPaint`), with #621's tint, as a vertex
+ *   colour: neighbours are other hues.
+ * - **One mesh, one material** — `houseModelMaterial`, the mapped models'
+ *   own material and atlas: one draw call, whatever the count, and none
+ *   with nothing modelled. The procedural belts are handed every OTHER
+ *   structure ({@link update}'s return), so a modelled plot is not drawn twice.
+ *
+ * Rewritten only when the modelled set changes, so a frame that keeps the
+ * same houses allocates nothing and writes nothing.
+ */
+export class VillageHouseBelt {
+  readonly mesh: Mesh;
+  readonly #houses: RealisticHouses | undefined;
+  readonly #position: BufferAttribute;
+  readonly #normal: BufferAttribute;
+  readonly #uv: BufferAttribute;
+  readonly #colour: BufferAttribute;
+  readonly #tint: BufferAttribute;
+  /** The items the procedural belts draw this frame, reused. */
+  readonly #procedural: ScatterItem[] = [];
+  /** Which of the frame's items are modelled, by their place in it; grown, never shrunk. */
+  #modelled = new Uint8Array(64);
+  /** The frame's structure items in view, by place, and their distances: grown, never shrunk. */
+  #order = new Int32Array(64);
+  #distance = new Float64Array(64);
+  /** What the buffer holds: x, z, model and paint a house, for {@link update}'s comparison. */
+  #held = new Float64Array(4 * REALISTIC_STRUCTURE_ITEMS);
+  #heldCount = 0;
+  readonly #grounded = blobCasters(REALISTIC_STRUCTURE_ITEMS);
+  #stats: VillageHouseStats = {
+    houses: 0,
+    triangles: 0,
+    items: 0,
+    procedural: Number.POSITIVE_INFINITY,
+    rewrites: 0,
+  };
+  #shown = true;
+  #switchedOn = true;
+  /** Each structure kind's heaviest realistic shape, its price in the term. */
+  readonly #price = new Map<SceneryKind, number>();
+
+  /** @param houses the house models and their atlas (#1585); without them nothing is modelled. */
+  constructor(houses: RealisticHouses | undefined) {
+    this.#houses = houses;
+    if (houses !== undefined) {
+      for (const kind of STRUCTURE_KINDS) this.#price.set(kind, realisticStructureTriangles(kind));
+    }
+    const attribute = (size: number): BufferAttribute =>
+      new BufferAttribute(new Float32Array(MAPPED_BUILDING_TRIANGLES * 3 * size), size).setUsage(
+        DynamicDrawUsage,
+      );
+    this.#position = attribute(3);
+    this.#normal = attribute(3);
+    this.#uv = attribute(2);
+    this.#colour = attribute(3);
+    this.#tint = attribute(1);
+    const geometry = new BufferGeometry();
+    geometry.setAttribute('position', this.#position);
+    geometry.setAttribute('normal', this.#normal);
+    geometry.setAttribute('uv', this.#uv);
+    geometry.setAttribute('color', this.#colour);
+    geometry.setAttribute('oylTint', this.#tint);
+    geometry.setDrawRange(0, 0);
+    this.mesh = new Mesh(geometry, houseModelMaterial(houses?.atlas));
+    this.mesh.frustumCulled = false;
+    this.mesh.visible = false;
+  }
+
+  addTo(scene: Scene): void {
+    scene.add(this.mesh);
+  }
+
+  setShown(on: boolean): void {
+    this.#shown = on;
+    this.#applyVisible();
+  }
+
+  /** @see villageModelsShownOf */
+  switchOn(on: boolean): void {
+    this.#switchedOn = on;
+  }
+
+  /** What the last {@link update} drew. */
+  get stats(): VillageHouseStats {
+    return this.#stats;
+  }
+
+  /** The ground-blob casters under the modelled houses — #620's, as the structures' are. */
+  get grounded(): BlobCasters {
+    return this.#shown ? this.#grounded : NO_BLOB_CASTERS;
+  }
+
+  #applyVisible(): void {
+    this.mesh.visible = this.#shown && this.#stats.houses > 0;
+  }
+
+  /**
+   * Chooses the frame's modelled houses from `items`, inside `structureItems`
+   * structures at the structure term's price, and returns every item the
+   * procedural belts should draw — `items` itself when nothing is modelled.
+   * @see VillageHouseBelt
+   */
+  update(
+    items: readonly ScatterItem[],
+    pose: CameraPose,
+    structureItems: number,
+  ): readonly ScatterItem[] {
+    const houses = this.#houses;
+    const price = REALISTIC_TRIANGLES.structure;
+    const pool = Math.max(0, Math.min(structureItems, REALISTIC_STRUCTURE_ITEMS)) * price;
+    if (this.#modelled.length < items.length) {
+      this.#modelled = new Uint8Array(items.length * 2);
+      this.#order = new Int32Array(items.length * 2);
+      this.#distance = new Float64Array(items.length * 2);
+    }
+    const modelled = this.#modelled;
+    modelled.fill(0, 0, items.length);
+    let count = 0;
+    if (houses !== undefined && this.#switchedOn) {
+      // The structures in view, nearest first: an insertion sort over a few
+      // dozen, in arrays kept between frames, so nothing is allocated.
+      for (let at = 0; at < items.length; at += 1) {
+        const item = items[at] as ScatterItem;
+        if (!isStructureKind(item.kind) || !inView(item, pose)) continue;
+        const distance = Math.hypot(item.x - pose.x, item.z - pose.z);
+        let to = count;
+        while (to > 0 && (this.#distance[to - 1] as number) > distance) {
+          this.#order[to] = this.#order[to - 1] as number;
+          this.#distance[to] = this.#distance[to - 1] as number;
+          to -= 1;
+        }
+        this.#order[to] = at;
+        this.#distance[to] = distance;
+        count += 1;
+      }
+    }
+    // First what no model can stand for — the church, the rows of shops, the
+    // walls, hedges, fences and signposts — at its own price, and a
+    // main-street block at its row of shops' price: a model never takes the
+    // term from a structure that would be drawn as nothing else.
+    let spent = 0;
+    for (let rank = 0; rank < count; rank += 1) {
+      const item = items[this.#order[rank] as number] as ScatterItem;
+      const model = item.house === undefined ? undefined : houses?.models[item.house];
+      if (model === undefined || item.kind !== 'building') {
+        spent += this.#price.get(item.kind) ?? price;
+      }
+    }
+    // Then the houses, nearest first: a model where the rest holds it, its
+    // kind where that does. The houses before the blocks, because a house
+    // left as its kind brings back its kind's meshes, a call a surface and
+    // shape (`RealisticStructureBelts`), and a block left as its row of shops
+    // is drawn in the mesh the other row of shops already is.
+    let modelTriangles = 0;
+    let drawn = 0;
+    for (const blocks of [false, true]) {
+      for (let rank = 0; rank < count; rank += 1) {
+        const at = this.#order[rank] as number;
+        const item = items[at] as ScatterItem;
+        const model = item.house === undefined ? undefined : houses?.models[item.house];
+        if (model === undefined || (item.kind === 'building') === blocks) continue;
+        // A block's own price is already spent; its model costs the difference.
+        const kind = this.#price.get(item.kind) ?? price;
+        const cost = blocks ? model.triangles - kind : model.triangles;
+        if (drawn < REALISTIC_STRUCTURE_ITEMS && spent + cost <= pool) {
+          spent += cost;
+          modelTriangles += model.triangles;
+          modelled[at] = 1;
+          drawn += 1;
+        } else if (!blocks) {
+          spent += kind;
+        }
+      }
+    }
+    const procedural = this.#procedural;
+    procedural.length = 0;
+    // What the procedural belts may admit, as they admit: in the list's
+    // order, every item in view spending one, and a structure its price.
+    let admits = Number.POSITIVE_INFINITY;
+    if (drawn > 0) {
+      admits = 0;
+      let left = pool - modelTriangles;
+      let open = true;
+      for (let at = 0; at < items.length; at += 1) {
+        if (modelled[at] === 1) continue;
+        const item = items[at] as ScatterItem;
+        procedural.push(item);
+        if (!open || !inView(item, pose)) continue;
+        if (isStructureKind(item.kind)) {
+          const cost = this.#price.get(item.kind) ?? price;
+          if (cost > left) {
+            open = false;
+            continue;
+          }
+          left -= cost;
+        }
+        admits += 1;
+      }
+    }
+    this.#write(items, drawn);
+    this.#stats = {
+      houses: drawn,
+      triangles: modelTriangles,
+      items: Math.ceil(modelTriangles / price),
+      procedural: admits,
+      rewrites: this.#stats.rewrites + (this.#rewrote ? 1 : 0),
+    };
+    this.#applyVisible();
+    return drawn > 0 ? procedural : items;
+  }
+
+  /** Whether the last {@link #write} rewrote the buffer. */
+  #rewrote = false;
+
+  /** Writes the modelled items into the buffer, unless it already holds exactly them. */
+  #write(items: readonly ScatterItem[], drawn: number): void {
+    this.#rewrote = false;
+    const held = this.#held;
+    let same = drawn === this.#heldCount;
+    let place = 0;
+    for (let at = 0; same && at < items.length; at += 1) {
+      if (this.#modelled[at] === 0) continue;
+      const item = items[at] as ScatterItem;
+      same =
+        held[place * 4] === item.x &&
+        held[place * 4 + 1] === item.z &&
+        held[place * 4 + 2] === item.house &&
+        held[place * 4 + 3] === (item.paint ?? 0);
+      place += 1;
+    }
+    if (same) return;
+    this.#rewrote = true;
+    this.#grounded.count = 0;
+    let vertex = 0;
+    place = 0;
+    for (let at = 0; at < items.length; at += 1) {
+      if (this.#modelled[at] === 0) continue;
+      const item = items[at] as ScatterItem;
+      held[place * 4] = item.x;
+      held[place * 4 + 1] = item.z;
+      held[place * 4 + 2] = item.house ?? -1;
+      held[place * 4 + 3] = item.paint ?? 0;
+      place += 1;
+      vertex = this.#append(item, vertex);
+    }
+    this.#heldCount = drawn;
+    const geometry = this.mesh.geometry;
+    geometry.setDrawRange(0, vertex);
+    for (const attribute of [this.#position, this.#normal, this.#uv, this.#colour, this.#tint]) {
+      attribute.clearUpdateRanges();
+      if (vertex > 0) {
+        attribute.addUpdateRange(0, vertex * attribute.itemSize);
+        attribute.needsUpdate = true;
+      }
+    }
+  }
+
+  /** Writes one plot's model from vertex `at`, and its ground blob; returns the vertex after it. */
+  #append(item: ScatterItem, at: number): number {
+    const index = item.house ?? -1;
+    const geometry = this.#houses?.models[index];
+    const model = HOUSE_MODELS[index];
+    if (geometry === undefined || model === undefined) return at;
+    const front = STRUCTURE_FOOTPRINTS[item.kind as StructureKind].front;
+    const placement = placeOnPlot(index, item.x, item.y, item.z, item.rotation, front);
+    const [red, green, blue] = lotModelPaint(item.paint, item.kind === 'building');
+    const tint = packedInstanceTint(item.x, item.z, realisticTints.masonry);
+    at = writeHouseModel(
+      geometry,
+      placement,
+      [red, green, blue],
+      tint,
+      {
+        position: this.#position.array as Float32Array,
+        normal: this.#normal.array as Float32Array,
+        uv: this.#uv.array as Float32Array,
+        colour: this.#colour.array as Float32Array,
+        tint: this.#tint.array as Float32Array,
+      },
+      at,
+    );
+    const caster = this.#grounded.casters[this.#grounded.count];
+    if (caster !== undefined) {
+      // A structure's own frame, as `structureCasters` writes one: along the
+      // way it faces, its middle half its length behind its front.
+      caster.x = item.x;
+      caster.y = item.y;
+      caster.z = item.z;
+      caster.yaw = item.rotation;
+      caster.round = false;
+      caster.halfAlong = model.length / 2;
+      caster.halfAcross = model.depth / 2;
+      caster.centreAlong = front - model.length / 2;
+      caster.height = model.height;
+      caster.strength = 1;
+      this.#grounded.count += 1;
+    }
+    return at;
+  }
+
+  dispose(): void {
+    this.mesh.geometry.dispose();
+    (this.mesh.material as Material).dispose();
+  }
+}
+
+/** The arrays one house model is written into. @see writeHouseModel */
+interface HouseModelArrays {
+  readonly position: Float32Array;
+  readonly normal: Float32Array;
+  readonly uv: Float32Array;
+  readonly colour: Float32Array;
+  readonly tint: Float32Array;
+}
+
+/**
+ * Writes a house model's every vertex from vertex `at`, placed by
+ * `house-models.ts` §`placedPoint`, its normal turned with it and taken
+ * through the stretch's inverse, in one colour and one tint — #1585's
+ * mapped models and, since #1566, the villages'. Returns the vertex after it.
+ */
+function writeHouseModel(
+  model: HouseGeometry,
+  placement: HousePlacement,
+  colour: Rgb,
+  tint: number,
+  into: HouseModelArrays,
+  at: number,
+): number {
+  const [red, green, blue] = colour;
+  const { ax, az, stretchX, stretchZ } = placement;
+  const vertices = model.triangles * 3;
+  for (let vertex = 0; vertex < vertices; vertex += 1) {
+    const to = at + vertex;
+    const [x, y, z] = placedPoint(
+      placement,
+      model.position[vertex * 3] as number,
+      model.position[vertex * 3 + 1] as number,
+      model.position[vertex * 3 + 2] as number,
+    );
+    into.position[to * 3] = x;
+    into.position[to * 3 + 1] = y;
+    into.position[to * 3 + 2] = z;
+    const along = (model.normal[vertex * 3] as number) / stretchX;
+    const up = model.normal[vertex * 3 + 1] as number;
+    const across = (model.normal[vertex * 3 + 2] as number) / stretchZ;
+    const nx = along * ax - across * az;
+    const nz = along * az + across * ax;
+    const length = Math.hypot(nx, up, nz) || 1;
+    into.normal[to * 3] = nx / length;
+    into.normal[to * 3 + 1] = up / length;
+    into.normal[to * 3 + 2] = nz / length;
+    into.uv[to * 2] = model.uv[vertex * 2] as number;
+    into.uv[to * 2 + 1] = model.uv[vertex * 2 + 1] as number;
+    into.colour[to * 3] = red;
+    into.colour[to * 3 + 1] = green;
+    into.colour[to * 3 + 2] = blue;
+    into.tint[to] = tint;
+  }
+  return at + vertices;
+}
+
+/**
+ * Copies `from`'s casters onto the end of `into`'s, as far as `into` has room
+ * — #1566: the village models' blobs after the procedural structures', in the
+ * structures' one list. Allocates nothing.
+ */
+export function appendCasters(into: BlobCasters, from: BlobCasters): void {
+  for (let at = 0; at < from.count; at += 1) {
+    const caster = into.casters[into.count];
+    const source = from.casters[at];
+    if (caster === undefined || source === undefined) return;
+    caster.x = source.x;
+    caster.y = source.y;
+    caster.z = source.z;
+    caster.yaw = source.yaw;
+    caster.round = source.round;
+    caster.halfAlong = source.halfAlong;
+    caster.halfAcross = source.halfAcross;
+    caster.centreAlong = source.centreAlong;
+    caster.height = source.height;
+    caster.strength = source.strength;
+    into.count += 1;
   }
 }
 
@@ -16730,6 +17155,8 @@ class RealisticDrawing {
   readonly people: PeopleBelt;
   /** The holiday's decorations on the villages in reach — #1624. */
   readonly decorations: DecorationBelt;
+  /** The villages' houses and main-street blocks as #1585's models — #1566. */
+  readonly villageHouses: VillageHouseBelt;
   readonly environment: Texture;
   /** The road's and the ground's photographic materials. @see setSurfaces */
   #road: MeshStandardMaterial;
@@ -16764,6 +17191,10 @@ class RealisticDrawing {
   #structureCap = Number.POSITIVE_INFINITY;
   /** What the last refill left the procedural structures, re-applied on every frame that carries the town. */
   #mappedCap = Number.POSITIVE_INFINITY;
+  /** What this frame's village models left the procedural belts — #1566. @see updateScenery */
+  #villageLeft = Number.POSITIVE_INFINITY;
+  /** The structures the procedural belts drew this frame: the scenery less the modelled houses. */
+  #procedural: readonly ScatterItem[] = [];
   /** The ride's buildings from map data, once a frame has carried them — #1549. */
   #mapped: MappedBuildingBelt | undefined;
   /** Whether the browser gate has switched them off. @see mappedBuildingsShownOf */
@@ -16817,6 +17248,7 @@ class RealisticDrawing {
     this.furniture = new FurnitureBelt('realistic', world.structures.get('planks'));
     this.people = new PeopleBelt(world.body);
     this.decorations = new DecorationBelt('realistic');
+    this.villageHouses = new VillageHouseBelt(world.houses);
     this.#casterLists = [this.vegetation.grounded, this.#structureCasters, NO_BLOB_CASTERS];
     this.#road = this.#roadMaterial();
     this.#ground = this.#groundMaterial();
@@ -16894,6 +17326,7 @@ class RealisticDrawing {
     this.furniture.addTo(scene);
     this.people.addTo(scene);
     this.decorations.addTo(scene);
+    this.villageHouses.addTo(scene);
   }
 
   setShown(on: boolean): void {
@@ -16910,6 +17343,7 @@ class RealisticDrawing {
     this.furniture.setShown(on);
     this.people.setShown(on);
     this.decorations.setShown(on);
+    this.villageHouses.setShown(on);
     // #626: shown only by the view, on a rung that grounds riders by contact.
     if (!on) this.shadows.setShown(false);
   }
@@ -16917,8 +17351,26 @@ class RealisticDrawing {
   /** Every scenery belt, handed the same frame. */
   updateScenery(items: readonly ScatterItem[], pose: CameraPose): void {
     this.vegetation.update(items, pose);
-    this.structures.update(items, pose);
+    // #1566: the village houses in reach as models, inside the structures'
+    // share, and the procedural belts handed the rest with what is left.
+    const share = Math.min(this.#budget, this.#structureCap, this.#structureItems);
+    this.#procedural = this.villageHouses.update(items, pose, share);
+    const left = this.villageHouses.stats.procedural;
+    if (left !== this.#villageLeft) {
+      this.#villageLeft = left;
+      this.#applyStructureBudget();
+    }
+    this.structures.update(this.#procedural, pose);
     this.primitives.update(items, pose);
+  }
+
+  /** The procedural structures' budget: the rung's, inside the mapped buildings' and the village models' shares. */
+  #structureBudget(): number {
+    return Math.min(this.#budget, this.#structureCap, this.#villageLeft);
+  }
+
+  #applyStructureBudget(): void {
+    this.structures.setBudget(this.#structureBudget());
   }
 
   /**
@@ -16936,7 +17388,7 @@ class RealisticDrawing {
     if (structureItems !== this.#structureItems) this.#mapped?.invalidate();
     this.#structureItems = structureItems;
     this.vegetation.setBudget(items);
-    this.structures.setBudget(Math.min(items, this.#structureCap));
+    this.#applyStructureBudget();
     this.primitives.setBudget(items);
   }
 
@@ -17001,7 +17453,7 @@ class RealisticDrawing {
   #capStructures(cap: number): void {
     if (cap === this.#structureCap) return;
     this.#structureCap = cap;
-    this.structures.setBudget(Math.min(this.#budget, cap));
+    this.#applyStructureBudget();
   }
 
   /** The mapped buildings' belt, once a frame has carried them — #1549. */
@@ -17031,13 +17483,16 @@ class RealisticDrawing {
     terrain: TerrainMesh,
     sun: SunStyle,
   ): void {
+    // #1566: the structures the procedural belts drew, and then the village
+    // models', each in its own footprint.
     structureCasters(
-      items,
+      this.villageHouses.stats.houses > 0 ? this.#procedural : items,
       pose,
-      Math.min(this.#budget, this.#structureCap),
+      this.#structureBudget(),
       (kind) => this.structures.heightOf(kind),
       this.#structureCasters,
     );
+    appendCasters(this.#structureCasters, this.villageHouses.grounded);
     // #1657: the mapped buildings' blobs, written at their refill, read last
     // so that the procedural blobs keep the slots they had before them.
     mappedBlobList(this.#casterLists, this.#mappedBlobs, this.#mapped);
@@ -17051,7 +17506,12 @@ class RealisticDrawing {
 
   /** How many scenery items the last frame drew, every belt together. */
   get sceneryDrawn(): number {
-    return this.vegetation.drawnItems + this.structures.drawnItems + this.primitives.drawnItems;
+    return (
+      this.vegetation.drawnItems +
+      this.structures.drawnItems +
+      this.primitives.drawnItems +
+      this.villageHouses.stats.houses
+    );
   }
 
   dispose(): void {
@@ -17068,6 +17528,7 @@ class RealisticDrawing {
     this.furniture.dispose();
     this.people.dispose();
     this.decorations.dispose();
+    this.villageHouses.dispose();
     this.#road.dispose();
     this.#ground.dispose();
     this.environment.dispose();
@@ -17662,6 +18123,31 @@ export function mappedBuildingStatsOf(
 }
 
 /**
+ * Draws a view's village houses and main-street blocks as #1585's models, or
+ * as their kinds — #1566. The owner's page's lever
+ * (`&levers=-village-models`): off, every plot is drawn as its procedural
+ * building, which is the picture and the cost before #1566's models (its
+ * placement and paint stay). A setting of the view's, so it holds across a
+ * rung change.
+ *
+ * @test-facing the realistic page's lever, read by `realistic-harness.ts`;
+ * the product always draws the models
+ */
+export function villageModelsShownOf(view: GameView, on: boolean): void {
+  if (view instanceof ThreeGameView) view.villageModelsShown(on);
+}
+
+/**
+ * What a view's village models drew on its last frame — #1566, for the
+ * browser gate's counts. `undefined` before a realistic frame.
+ *
+ * @test-facing read by `realistic-harness.ts`; the product reads the stats nowhere
+ */
+export function villageHouseStatsOf(view: GameView): VillageHouseStats | undefined {
+  return view instanceof ThreeGameView ? view.villageHouses : undefined;
+}
+
+/**
  * Turns a view's village pavements off, or on again — #1535. The browser
  * gate's control: with them off, the probe aimed at a pavement must read
  * something else there, or it was never reading the pavement.
@@ -18122,6 +18608,8 @@ class ThreeGameView implements GameView {
   #groundBlobsShown = true;
   /** Whether the mapped buildings are grounded — #1657. @see mappedBlobsShownOf */
   #mappedBlobsShown = true;
+  /** Whether the villages' houses are drawn as #1585's models — #1566. @see villageModelsShownOf */
+  #villageModelsShown = true;
   /** Reused every frame: `#placeCamera` allocated a `Vector3` per frame until #424 (NFR-3). */
   readonly #lookAt = new Vector3();
   readonly #roadGeometry = new BufferGeometry();
@@ -18675,6 +19163,7 @@ class ThreeGameView implements GameView {
         );
         this.#realistic.addTo(this.#scene);
         this.#realistic.mappedBlobsShown(this.#mappedBlobsShown);
+        this.#realistic.villageHouses.switchOn(this.#villageModelsShown);
         this.#realistic.setBudget(
           this.#quality.scatterItems + this.#quality.structureItems,
           this.#quality.structureItems,
@@ -18889,6 +19378,17 @@ class ThreeGameView implements GameView {
   /** @see mappedBuildingStatsOf */
   get mappedBuildings(): MappedBuildingBelt | undefined {
     return this.#realistic?.mapped;
+  }
+
+  /** @see villageModelsShownOf */
+  villageModelsShown(on: boolean): void {
+    this.#villageModelsShown = on;
+    this.#realistic?.villageHouses.switchOn(on);
+  }
+
+  /** @see villageHouseStatsOf */
+  get villageHouses(): VillageHouseStats | undefined {
+    return this.#realistic?.villageHouses.stats;
   }
 
   /** @see pavementsShownOf */

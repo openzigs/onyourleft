@@ -269,7 +269,8 @@ describe('the village road — #1559, validation 0002 AE2', () => {
       }),
       TABLET_ASPECT,
     );
-    expect(census.structures['shop-row']).toEqual({ carried: 1, inView: 0 });
+    // #1566: four, the commercial plots either side of the crossroads, on both sides.
+    expect(census.structures['shop-row']).toEqual({ carried: 4, inView: 0 });
   });
 
   it('is a hold the default road cannot give: no church or shop row in its frame there', () => {

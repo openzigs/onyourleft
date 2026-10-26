@@ -453,7 +453,7 @@ export const REALISTIC_WOODED_DRAW_CALLS = 35;
 /**
  * The most draw calls the owner's page may make on its village frame —
  * `route=village` held at `synthetic-road.ts` §`VILLAGE_HOLD_METRES`, the top
- * rung, on Halloween with #1624's probe on every anchor in reach: **57**.
+ * rung, on Halloween with #1624's probe on every anchor in reach: **50**.
  *
  * ⚠️ **A freeze, not a budget** — owner ruling on #1689, 2026-10-25. That
  * frame made 58 calls on `main` with no decoration, against the page's
@@ -466,6 +466,19 @@ export const REALISTIC_WOODED_DRAW_CALLS = 35;
  * 58 to 56 calls with the same triangles, so 57. From here a feature that
  * adds a village call removes one, or asks the owner.
  *
+ * ⚠️ **57 → 50 with #1566**, which added a call and took eight: the houses in
+ * view are #1585's house models, all in ONE call (`three-renderer.ts`
+ * §`VillageHouseBelt`), where the procedural houses had been a mesh a shape
+ * and surface — two shapes in four surfaces; and a village's rows of shops
+ * share one shape (`settlements.ts` §`everyVillagePlot`), so its four
+ * commercial plots cost the one row of shops' four. Measured 2026-10-26 in
+ * the pinned Chromium: 50 on the hold, and 57 with `levers=-village-models`
+ * (`realistic-town.browser.spec.ts` §"#1566"), which is `main`'s figure
+ * before #1566. The ruling has the number follow a saving down in the same
+ * pull request. The call count is not the tablet's cost: the models'
+ * triangles are (about 9 700 more on the hold, inside the structure term),
+ * and that is validation 0002 Part AH's row.
+ *
  * ⚠️ **Not the village's real ceiling.** The tablet pair (#733 / #1537)
  * decides that when the device checks resume; the call count does not depend
  * on the GPU, so the pinned Chromium counts what the tablet would.
@@ -473,7 +486,7 @@ export const REALISTIC_WOODED_DRAW_CALLS = 35;
  * @test-facing held by `realistic-town.browser.spec.ts` §"#1689", which counts the
  * frame at the WebGL entry points
  */
-export const REALISTIC_VILLAGE_DRAW_CALLS = 57;
+export const REALISTIC_VILLAGE_DRAW_CALLS = 50;
 
 /**
  * The trees as they were drawn before #617 — the nearest six as full meshes,

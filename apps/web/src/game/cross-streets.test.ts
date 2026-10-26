@@ -617,7 +617,7 @@ describe('a procedural village’s crossroads — #1565', () => {
     }
   });
 
-  it('takes the village’s middle plot on both sides: nothing is built there, and the shops stand past it', () => {
+  it('takes the village’s middle plot on both sides: nothing is built there, and the shops stand either side of it', () => {
     let shops = 0;
     for (const village of villages) {
       const plots = villagePlots(SEED, village);
@@ -625,12 +625,13 @@ describe('a procedural village’s crossroads — #1565', () => {
       for (const plot of plots) {
         expect(Math.abs(plot.along - village.centre), plot.kind).toBeGreaterThan(PLOT_METRES - 1);
       }
+      // #1566: the plots either side of the crossroads, both sides of the road.
       for (const plot of plots.filter((each) => each.kind === 'shop-row')) {
         shops += 1;
-        expect(plot.along - village.centre).toBeCloseTo(PLOT_METRES, 5);
+        expect(Math.abs(plot.along - village.centre)).toBeCloseTo(PLOT_METRES, 5);
       }
     }
-    expect(shops).toBeGreaterThan(0);
+    expect(shops).toBe(4 * villages.length);
   });
 
   it('is in every frame that can see it, with no map data at all', () => {

@@ -356,6 +356,22 @@ export function lotPaint(
 }
 
 /**
+ * The colour a village plot's house MODEL wears — #1566: its packed
+ * {@link lotPaint}'s wall entry, as a model wears a paint
+ * ({@link modelPaint}): a house's from the house paints (`render`'s, the
+ * siding's when it is clad, which are the same first {@link LOT_PAINTS}), and
+ * a main-street block's from `brick`'s, since the block is brick and never
+ * clad. Unpainted is the photograph, `[1, 1, 1]`. Each neighbour's entry
+ * differs (`lotPaint`'s rule), so each neighbour's model is another hue.
+ */
+export function lotModelPaint(packed: number | undefined, house: boolean): Rgb {
+  const entry = lotPaintEntry(packed, 'wall');
+  const list = house ? lotSidingPaints() : (WALL_PAINTS.brick ?? []);
+  const paint = entry < 0 ? undefined : list[entry];
+  return paint === undefined ? AS_PHOTOGRAPHED : modelPaint(paint);
+}
+
+/**
  * What a lot's packed {@link lotPaint} says of one channel, as the instance
  * colour carries it: its entry, and since #1588 {@link LOT_CLAD_STEP} for its
  * cladding, **plus one**, so that nought — an item no lot rule painted, and
@@ -370,10 +386,9 @@ export function lotPaintChannel(packed: number | undefined, channel: 'wall' | 'r
 
 /**
  * A lot's paint entry in one channel, or −1 for none — #1588, the shader's
- * own decoding (`three-renderer.ts` §`withLotPaint`), in TypeScript.
- *
- * @test-facing held by `building-paint.test.ts` and `settlements-lots.test.ts`;
- * the product decodes it in the shader
+ * own decoding (`three-renderer.ts` §`withLotPaint`), in TypeScript; since
+ * #1566 also what a village plot's house model is painted by
+ * ({@link lotModelPaint}).
  */
 export function lotPaintEntry(packed: number | undefined, channel: 'wall' | 'roof'): number {
   const value = lotPaintChannel(packed, channel);

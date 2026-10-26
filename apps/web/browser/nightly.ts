@@ -199,6 +199,17 @@ export const NIGHTLY_CHECKS: readonly NightlyCheck[] = [
       'stylised world’s one call a surface by `game.browser.spec.ts` §"#1536".',
   },
   {
+    spec: 'realistic-town.browser.spec.ts',
+    describe: 'the realistic page’s village house models — #1566',
+    seconds: 'one more load of the owner’s page',
+    why:
+      'the owner’s page’s `-village-models` lever, for #1566’s cost and by-eye pairs: that ' +
+      'the village hold drawn with its houses as their kinds makes more calls than the frozen ' +
+      'figure the models hold it to. Cost, in a world a rider chooses, read off a page that ' +
+      'ships in no build; the models’ choice, placement and term are held in the required ' +
+      'suite by `village-house-belt.test.ts`, and the plots by `settlements-variety.test.ts`.',
+  },
+  {
     spec: 'realistic.browser.spec.ts',
     describe: 'the route’s own season, in the realistic world — #1623',
     seconds: 'four more loads of the owner’s page, about 60 s on a Mac',
