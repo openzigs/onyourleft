@@ -313,9 +313,11 @@ describe('the overhang’s shadow, in the shader — #1658', () => {
       'oylOverhangShadow(oylBelowTop - oylEavesEdge, oylEavesOverhang, oylSunF, oylMw.y, oylTop * oylStoreyM)',
     );
     expect(fragment).toContain('clamp(oylSunF.z / oylOverhangSquare, 0.0, 1.0)');
+    // #1735: on a wall with eaves only, by the building's flag, a branch its pixels take together.
     expect(fragment).toContain(
-      'oylEavesShade = mix(oylEavesShade, min(oylEavesShade, oylSunShadow), oylFlag(oylFlags, oylEavesFlag));',
+      'if (oylFlag(oylFlags, oylEavesFlag) > 0.5) {\n        float oylBelowTop',
     );
+    expect(fragment).toContain('oylEavesShade = min(oylEavesShade, oylSunShadow);');
     expect(fragment).toContain(
       'diffuseColor.rgb *= oylEavesShade * (1.0 - (1.0 - oylAoBase) * oylAtFoot);',
     );
