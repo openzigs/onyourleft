@@ -6305,6 +6305,44 @@ describe('#524 — the ride keeps the process alive while it is active', () => {
     next.controller.dispose();
   });
 
+  /** A ride left mid-way by a controller that went away, as a crash leaves one. */
+  async function aRecoverableRide(): Promise<RecordingSessionId> {
+    const first = benchWith();
+    await first.controller.pair('trainer');
+    await first.controller.start();
+    await ride(first, 4);
+    first.controller.dispose();
+    return recordingSessionId(first.sessionIds[0] ?? '');
+  }
+
+  it('lets a continued recovered ride’s service go when that ride stops', async () => {
+    const id = await aRecoverableRide();
+    const port = recordingPort();
+    const next = benchWith({ keepAlive: port });
+    await next.controller.refreshRecoverable();
+    expect(await next.controller.continueRecovered(id)).toBe(true);
+    await ride(next, 2);
+    next.controller.armStop();
+    await next.controller.confirmStop();
+    expect(port.calls).toEqual(['keep', 'sleep']);
+    next.controller.dispose();
+    expect(port.calls).toEqual(['keep', 'sleep']);
+  });
+
+  it('asks for nothing when a recovered ride is discarded from the offer', async () => {
+    // The offer is not a ride in progress: a ride thrown away from it is never
+    // ridden again, so there is no service to start or to let go.
+    const discarded = await aRecoverableRide();
+    const port = recordingPort();
+    const next = benchWith({ keepAlive: port });
+    await next.controller.refreshRecoverable();
+    expect(next.controller.getSnapshot().recoverable.map((r) => r.id)).toContain(discarded);
+    expect(await next.controller.discardRecovered(discarded)).toBe(true);
+    expect(next.controller.getSnapshot().recoverable.map((r) => r.id)).not.toContain(discarded);
+    expect(port.calls).toEqual([]);
+    next.controller.dispose();
+  });
+
   it('lets the process sleep when the controller goes away mid-ride', async () => {
     const port = recordingPort();
     const rig = benchWith({ keepAlive: port });
