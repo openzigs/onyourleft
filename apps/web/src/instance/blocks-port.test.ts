@@ -62,6 +62,7 @@ describe('the blocks port — #1529', () => {
     ['a handle that is not one', { handle: '../../v1/account', name: 'Ann', blockedAt: 1 }],
     ['a name longer than any display name', { handle: HANDLE, name: 'x'.repeat(33), blockedAt: 1 }],
     ['no day', { handle: HANDLE, name: 'Ann' }],
+    ['a day no calendar can draw', { handle: HANDLE, name: 'Ann', blockedAt: 8_640_000_000_001 }],
   ] as const) {
     it(`reads an answer holding ${why} as no answer`, async () => {
       const instance = scripted(200, { blocks: [row] });

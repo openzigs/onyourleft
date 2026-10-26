@@ -499,6 +499,7 @@ export function createModeration(options: ModerationOptions): Moderation {
     },
 
     async unblockByHandle(athleteId, handle) {
+      // Defence in depth: a malformed handle matches no row anyway, so no test depends on this guard.
       if (BLOCK_HANDLE.test(handle)) await store.deleteBlockByHandle(athleteId, handle);
     },
 

@@ -62,6 +62,9 @@ export interface BlocksPort {
 /** A handle as the instance makes one (`apps/instance` §migration 0035): 16 random bytes, in hex. */
 const HANDLE = /^[0-9a-f]{32}$/;
 
+/** The last second a `Date` can hold (8.64e12 ms): past it the panel's day() throws while drawing. */
+const LATEST_DAY = 8_640_000_000_000;
+
 function heldBlockFrom(value: unknown): HeldBlock | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
   const row = value as Record<string, unknown>;
@@ -75,7 +78,8 @@ function heldBlockFrom(value: unknown): HeldBlock | undefined {
     ) ||
     typeof blockedAt !== 'number' ||
     !Number.isSafeInteger(blockedAt) ||
-    blockedAt < 0
+    blockedAt < 0 ||
+    blockedAt > LATEST_DAY
   ) {
     return undefined;
   }
