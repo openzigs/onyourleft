@@ -13906,7 +13906,7 @@ function withLotPaint<M extends Material>(material: M, surface: StructureSurface
   // joinery and the door, which stay timber: a lot's own walls are never
   // planks. Since #1566 that timber is stained, by its `trim` entry — the
   // wall's and the roof's entries summed, modulo the list — from the same
-  // list, so a house's window frames and door are not its neighbour's, and
+  // list, so a house's window frames and door are not most neighbours' (one diagonal one shares its trim), and
   // never clad: clapboard is the walls', not the joinery's.
   const channel = surface === 'planks' ? 'trim' : paintChannelOf(surface);
   const paints = paintsOf(surface);

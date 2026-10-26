@@ -42,6 +42,7 @@ import {
 } from './settlements';
 import { atStartLine } from './simulation';
 import { corridorOrigin, drawnRoadFrame } from './terrain';
+import { inWater, waterways } from './waterways';
 
 const ALL = { maxItems: 1_000_000, riderMetres: 0 } as const;
 
@@ -276,6 +277,50 @@ describe('a model only where its whole length stands — #1566', () => {
     }
     expect(kept).toBeGreaterThan(0);
     expect(dropped).toBeGreaterThan(0);
+  });
+
+  it('drops the model, and keeps the house, where its back end would stand in water', () => {
+    // A circuit whose seed puts a village's house with its front dry and its
+    // back end in a stream or on a bank, a long way from the road's clearance.
+    const profile = circuitRoute(3_000);
+    const seed = scatterSeed(profile) ^ (19 * 7919);
+    const origin = corridorOrigin(profile);
+    const items = structuresAt(profile, origin, seed, 0, profile.totalDistance, ALL);
+    let wet = 0;
+    let dry = 0;
+    for (const village of villagesOf(profile, seed)) {
+      for (const plot of everyVillagePlot(seed, village).filter((each) => each.built)) {
+        if (plot.house === undefined) continue;
+        const frame = drawnRoadFrame(profile, origin, distanceOnRoute(profile, plot.along));
+        if (frame === undefined) continue;
+        const x = frame.x + frame.normalX * plot.lateral * plot.side;
+        const z = frame.z + frame.normalZ * plot.lateral * plot.side;
+        const standing = items.find(
+          (each) =>
+            each.kind === plot.kind && Math.abs(each.x - x) < 1e-6 && Math.abs(each.z - z) < 1e-6,
+        );
+        if (standing === undefined) continue;
+        const ground = groundOf(standing, plot.house);
+        const backInWater = inWater(
+          waterways(profile, seed),
+          profile,
+          distanceOnRoute(profile, plot.along),
+          (plot.lateral - ground.back) * plot.side,
+        );
+        if (backInWater) {
+          wet += 1;
+          // The control: the road is not what dropped it.
+          expect(footprintClearance(profile, origin, standing, ground)).toBeGreaterThanOrEqual(
+            ROAD_CLEARANCE_METRES,
+          );
+          expect(standing.house).toBeUndefined();
+        } else if (standing.house !== undefined) {
+          dry += 1;
+        }
+      }
+    }
+    expect(wet).toBeGreaterThan(0);
+    expect(dry).toBeGreaterThan(0);
   });
 
   it('clears the trees off every model’s whole length, in either world', () => {

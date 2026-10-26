@@ -48,6 +48,10 @@ import { landClassMask } from './land-class';
 import { mappedBuildingsOf } from './mapped-buildings';
 import type { GameView } from './port';
 import { qualitySettings, REALISTIC_LADDER } from './quality';
+import { northRoute } from './route-fixtures-testing';
+import { scatterSeed } from './scatter';
+import { siteAt, siteSpacing, type Site } from './settlements';
+import { corridorOrigin } from './terrain';
 import { sceneFrame } from './scene';
 import { seasonOn, type Season } from './season';
 import { atStartLine } from './simulation';
@@ -1605,6 +1609,52 @@ describe('the mapped buildings’ blobs, through the drawing a view builds — #
       // Shown again, the same frame grounds them again.
       drawing.mappedBlobsShown(true);
       expect(draw().count).toBe(grounded.count);
+    } finally {
+      drawing.dispose();
+    }
+  }, 120_000);
+});
+
+describe('the village models and the procedural belts, through the drawing a view builds — #1566', () => {
+  it('holds the procedural structures to what the models leave of the structure term', async () => {
+    const renderer = await loadedOn(TABLET);
+    const drawing = renderer.realisticDrawingOfLoadedWorld();
+    if (drawing === undefined) throw new Error('no realistic world is loaded');
+    try {
+      const profile = northRoute(20_000, () => 50);
+      const seed = scatterSeed(profile);
+      let village: Site | undefined;
+      for (let index = 0; village === undefined && index < siteSpacing(profile).sites; index += 1) {
+        const site = siteAt(profile, seed, index);
+        if (site?.kind === 'village') village = site;
+      }
+      if (village === undefined) throw new Error('the route has no village');
+      const start = atStartLine(profile);
+      const frame = sceneFrame({
+        profile,
+        origin: corridorOrigin(profile),
+        state: {
+          ...start,
+          ride: { ...start.ride, distance: metres(village.centre - village.half - 40) },
+        },
+        structureItems: REALISTIC_STRUCTURE_ITEMS,
+      });
+      // The control: with no model drawn, the belts draw every structure.
+      drawing.setBudget(10_000, 6);
+      drawing.updateScenery(frame.scatter, frame.camera);
+      expect(drawing.villageHouses.stats.houses).toBe(0);
+      const every = drawing.structures.drawnItems;
+      // A term the models take most of: the belts are held to what is left,
+      // read back off the structure belts' own drawn count.
+      for (const structureItems of [9, 12, 16]) {
+        drawing.setBudget(10_000, structureItems);
+        drawing.updateScenery(frame.scatter, frame.camera);
+        const modelled = drawing.villageHouses.stats;
+        expect(modelled.houses).toBeGreaterThan(0);
+        expect(Number.isFinite(modelled.procedural)).toBe(true);
+        expect(modelled.procedural).toBeLessThan(every);
+        expect(drawing.structures.drawnItems).toBe(modelled.procedural);
+      }
     } finally {
       drawing.dispose();
     }
