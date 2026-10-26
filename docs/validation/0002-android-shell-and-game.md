@@ -2901,6 +2901,95 @@ against AA3's GPU 5 / 8 / 12 ms held at one farmstead.
 **Phone (OEM, model, Android, WebView):** Google Pixel Tablet, Android 17, WebView 153.0.8010.36
 **Build:** debug, `main` at `cfa8956`, 2026-09-25
 
+### AE4 — a mapped town in frame ([#1553](https://github.com/openzigs/onyourleft/issues/1553))
+
+**Added 2026-10-26** by #1553, phase B's tablet row (#1533). Checked with `grep 'AE4'` for a
+duplicate id first: AE3 is taken (the village ride above), so this step is AE4. #733 lists it as
+A37. It changes no resistance, so no trainer is needed.
+
+**Why it has two halves.** #1553 asked for one committed `realistic:stage` US route whose corridor
+holds a town with footprints. **No such route exists.** The staged page (`realistic.html`) rides
+only synthetic roads. Its towns (`?town=`) are fixtures with no OpenStreetMap data in them, as every
+test's are. They are planned, levelled, drawn and lotted by the code a ride's corridor goes through
+(#1547, #1549, #1550, `browser/realistic/town.ts`). The product rides real corridors, but it
+publishes no draw calls or triangles, it cannot hold the rider at `at=`, and it has no levers. So:
+
+- **AE4a** measures the page's mapped town. It gives the numbers and the 5-minute Part AH run,
+  with the levers as the control.
+- **AE4b** rides a real town from the US archive in the product, offline. It gives the by-eye check
+  and the screenshots, with the Map tiles switch as the control.
+
+**The control.** Phase B merged on 2026-10-22/23, so there is no pre-B `main` to take a "before" on
+(the revision of 2026-10-23 on #1553). Both rows come from **one build**: `main` at the time it is
+run, staged as for the AH runs (Part AH §"Build and install"). #1547's levelling, #1549's merged
+buildings and #1550's lots have no lever. So AE4a's control has two rows on the same build. One has
+every later phase-B lever off. The other is AE2's procedural village hold, which stands for the
+world with no map data.
+
+**The hard limit is #1523's.** The top rung stays off the GPU ceiling: in AE4a's 5-minute run with
+everything on, **GPU p50 below 848 MHz** and **frames over 20 ms at most 0.2 %**. If it fails, the
+change that broke it is reverted or levered off, and the owner rules. `MAPPED_BUILDING_MAX` and
+`REALISTIC_STRUCTURE_ITEMS` (#1549) are not raised to make it pass.
+
+**The route is named by its id and a distance in metres, and by nothing else.** Write no
+coordinates, no place name and no screenshot of the map into this file, the issue or a commit.
+
+| Step | What to do | What should happen |
+|---|---|---|
+| AE4a1 | **The town, held.** AE1's procedure (§"#506's AE1 and AE2 in the same session"), at `realistic.html?world=realistic&panel=0&ladder=0&town=mixed&at=1300&levers=-people`. That is `town=mixed` (`footprint-fixtures-testing.ts` §`mixedTownFixture`) at **1 300 m**, in its residential stretch, the hold `realistic-mapped.browser.spec.ts` §"the mapped-blobs lever" takes. `-people` because Part AJ measures the people on their own | Draw calls, triangles (the `OYL-REALISTIC` line) and Z6's `dumpsys` block. Draw calls within the page's 35 (`REALISTIC_WOODED_DRAW_CALLS`) |
+| AE4a2 | **The same hold, the phase-B levers off**: AE4a1's URL with `&levers=-people,-urban-class,-split-roofs,-window-reveals,-overhang-shadows,-weathering,-mapped-blobs,-facade-wreath` | The same readings. The difference from AE4a1 is what #1634, #1660, #1659, #1658, #1661, #1657 and #1626 add |
+| AE4a3 | **The world with no map data**: AE2's hold, `&route=village&at=820&levers=-people` | The same readings. The difference from AE4a1 is what a mapped town costs over a procedural village |
+| AE4a4 | **5 minutes held at the town**: AH1–AH7, with AH4's URL as `realistic.html?world=realistic&panel=0&ladder=0&seconds=30&soak=6&town=mixed&at=1300&levers=-people` and the sampler run for **300 s** (`realistic-sampler.sh 300 …`), not 1 200. `RUN=1553-town` | One row of `realistic-summary.mjs`. **The hard limit is read here** |
+| AE4a5 | **Cool again (AH3, 25–26 °C)**, same build: AE4a4 with AE4a2's levers. `RUN=1553-town-levers-off` | One row. A row inside the limit while AE4a4 is outside it names the levered changes as the cost |
+| AE4b1 | **Choose a route once, online.** In the product, Settings: the realistic world, and Map tiles **on**. Pick one of your own saved routes that passes through a town (houses, not fields) that is outside **every** privacy zone on the device; the read skips a tile that touches a zone (P-7). Choose it on the ride screen and start a ride. **"© OpenStreetMap contributors"** on the ride screen means its corridor was read and stored (#1539, #1552). End the ride | The credit is shown. Without it there is no map data in the ride, and AE4b measures nothing |
+| AE4b2 | **Record the route by id**: with the route open on the Routes screen, `node apps/mobile/tools/webview-probe.mjs "location.pathname"` prints `/routes/selected/<id>`. Write the id and the distance in metres from the route's start to the town's first house | An id and a number of metres. No name and no coordinate |
+| AE4b3 | **Aeroplane mode on**, then ride the route through the town in the product at your usual speed, with `dumpsys gfxinfo` reset at the start and read at the end, as AE3's ride was | The credit is still shown offline, because the stored corridor is used. The by-eye check: **no building in a wood, none on the road, none floating** above the ground or sunk into it. **Three screenshots**: the town ahead, a street side at walking distance, and the edge where the town meets the fields |
+| AE4b4 | **The control, offline**: Settings, Map tiles **off**, and the same stretch again | No credit, and today's procedural world (a village if the seed lays one). This is the "no data" picture beside AE4b3's |
+
+```bash
+# AE4a4: the 5-minute run. Part AH's block, with these three lines in place of theirs.
+RUN=1553-town
+node apps/mobile/tools/webview-probe.mjs \
+  "location.href = '/harness/realistic.html?world=realistic&panel=0&ladder=0&seconds=30&soak=6&town=mixed&at=1300&levers=-people'"
+"$ADB" shell "nohup sh /data/local/tmp/realistic-sampler.sh 300 'VRI-dev\.openzigs\.onyourleft/' /data/local/tmp/oyl/$RUN $PID > /dev/null 2>&1 &"
+```
+
+⚠️ **Do not pair a `?layers=` with `town=`** as a shortcut to the town's share. The mapped buildings'
+belt (`three-renderer.ts` §`MappedBuildingBelt`) is not in `layers.ts` §`LAYER_OWNERS`. With a layer
+switched off the page may refuse the run as "could not place". That was read from the source and
+not run, so the levers are the control here.
+
+The columns are #1523's, as `realistic-summary.mjs` prints them. #1553 asked for GPU p50 / p90 / p99.
+The summary prints the Mali clock's mean / p50 / p90, as #1523's own table does, and so does this
+table. In a 300-second run the sampler takes `dumpsys meminfo` at half its length (150 s), not at
+minute 10. The summary's `skin min 20 °C` column is the last block, about minute 5.
+
+#### AE4 results
+
+| Reading | AE4a1 / AE4a4: town, all on | AE4a2 / AE4a5: phase-B levers off | AE4a3: procedural village |
+|---|---|---|---|
+| Draw calls at the hold | | | |
+| Triangles at the hold | | | |
+| GPU mean / p50 / p90, MHz (5 min) | | | — |
+| Present p99, ms (5 min) | | | — |
+| Frames over 20 ms, % (5 min) | | | — |
+| CPU both, % (5 min) | | | — |
+| GL mtrack, MiB (5 min) | | | — |
+| Skin before → at minute 5, °C | | | — |
+| **Hard limit** (p50 < 848 MHz, > 20 ms ≤ 0.2 %) | | | — |
+
+| Step | As described? | What was seen, or measured |
+|---|---|---|
+| AE4b1 | | |
+| AE4b2 | | Route id: · town at: m |
+| AE4b3 | | `gfxinfo`: frames, janky, frame and GPU percentiles. By eye: woods / road / floating. Screenshots: 1 · 2 · 3 |
+| AE4b4 | | |
+
+**Phone (OEM, model, Android, WebView):**
+**Build:** debug, `main` at
+
+Post both tables on #1553 and on #733 (A37). #1553 is closed by hand once they are in.
+
 ---
 
 ## Part AF — does the shell reach a plain-`http:` model server on the LAN? ([#519](https://github.com/openzigs/onyourleft/issues/519))
