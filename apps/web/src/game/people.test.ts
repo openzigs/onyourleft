@@ -23,6 +23,7 @@ import {
   PERSON_CLEARANCE_METRES,
   PERSON_HALF_WIDTH_METRES,
   RUNNER_SHARE,
+  clearOfPavements,
   footwayWalks,
   streetWalks,
   peopleAt,
@@ -41,7 +42,13 @@ import { scatterSeed } from './scatter';
 import { sceneFrame } from './scene';
 import { siteAt, siteSpacing, type Site } from './settlements';
 import { atStartLine } from './simulation';
-import { KERB_LATERAL_METRES, PAVEMENT_WIDTH_METRES, streetsAt } from './streets';
+import {
+  KERB_LATERAL_METRES,
+  PAVEMENT_WIDTH_METRES,
+  WALK_FROM_KERB_METRES,
+  streetsAt,
+  type VillageStreet,
+} from './streets';
 import { ROAD_WIDTH_METRES, corridorOrigin, drawnRoadFrame } from './terrain';
 import type { WorldCorridor } from './world-data/corridor';
 
@@ -358,6 +365,116 @@ describe('people in a ride’s frame — #1541, through `sceneFrame`', () => {
     }
     expect(ruled).toBeGreaterThan(0);
     expect(over).toBeGreaterThan(0);
+  });
+});
+
+describe('a pavement walked once, in a village with a mapped sidewalk — #1620', () => {
+  const FARMLAND = northRoute(6_000, () => 40);
+  const ORIGIN = corridorOrigin(FARMLAND);
+  const SEED = scatterSeed(FARMLAND);
+  const { sites } = siteSpacing(FARMLAND);
+  const village = [...Array(sites).keys()]
+    .map((index) => siteAt(FARMLAND, SEED, index))
+    .find((site): site is Site => site?.kind === 'village') as Site;
+  // A sidewalk mapped 4.6 m out on the right, through the village: inside the
+  // 3.5 to 5.5 m its pavement is laid on there.
+  const sidewalk: number[] = [];
+  for (let at = village.centre - 150; at <= village.centre + 150; at += 2) {
+    const road = drawnRoadFrame(FARMLAND, ORIGIN, at);
+    if (road === undefined) continue;
+    sidewalk.push(road.x + road.normalX * 4.6, road.z + road.normalZ * 4.6);
+  }
+  const corridor: WorldCorridor = {
+    routeId: 'people-mapped-pavement',
+    origin: ORIGIN,
+    covered: () => true,
+    coveredBoxes: [],
+    landUse: [],
+    buildings: [],
+    paths: [{ kind: 'path', kindDetail: 'sidewalk', line: Float32Array.from(sidewalk) }],
+    streets: [],
+  };
+
+  function frameAt(second: number): ReturnType<typeof sceneFrame> {
+    const start = atStartLine(FARMLAND);
+    return sceneFrame({
+      profile: FARMLAND,
+      origin: ORIGIN,
+      state: {
+        ...start,
+        ride: { ...start.ride, distance: metres(village.centre) },
+        elapsed: seconds(second),
+        ridden: seconds(second),
+      },
+      people: PEOPLE_NEAR_MAX,
+      worldCorridor: corridor,
+    });
+  }
+
+  /** The pavement's top under `(x, z)`, read off the nearest walk; `undefined` off every pavement. */
+  function pavementTop(
+    streets: readonly VillageStreet[],
+    x: number,
+    z: number,
+  ): number | undefined {
+    let best: { off: number; y: number } | undefined;
+    for (const street of streets) {
+      street.walks.forEach((walk, index) => {
+        const reach = (street.walkWidths[index] as number) - WALK_FROM_KERB_METRES;
+        for (let at = 0; at + 5 < walk.length; at += 3) {
+          const ax = walk[at] as number;
+          const az = walk[at + 2] as number;
+          const dx = (walk[at + 3] as number) - ax;
+          const dz = (walk[at + 5] as number) - az;
+          const span = dx * dx + dz * dz;
+          const t = span > 0 ? Math.min(1, Math.max(0, ((x - ax) * dx + (z - az) * dz) / span)) : 0;
+          const off = Math.hypot(x - (ax + dx * t), z - (az + dz * t));
+          if (off > reach || (best !== undefined && off >= best.off)) continue;
+          const ay = walk[at + 1] as number;
+          best = { off, y: ay + ((walk[at + 4] as number) - ay) * t };
+        }
+      });
+    }
+    return best?.y;
+  }
+
+  it('stands nobody below the pavement they are on, and somebody is on it', () => {
+    const streets = frameAt(0).streets ?? [];
+    expect(streets.length).toBeGreaterThan(0);
+    let onIt = 0;
+    for (let second = 0; second < 600; second += 3) {
+      for (const person of (frameAt(second).people ?? NO_PEOPLE).near) {
+        const top = pavementTop(streets, person.x, person.z);
+        if (top === undefined) continue;
+        onIt += 1;
+        expect(person.y).toBeGreaterThanOrEqual(top - 0.005);
+      }
+    }
+    expect(onIt).toBeGreaterThan(0);
+  });
+
+  it('breaks a mapped line over a pavement and keeps its density; a line clear of every street is the same line', () => {
+    const streets = frameAt(0).streets ?? [];
+    const lines = footwayWalks(corridor, FARMLAND, ORIGIN, NO_LAND_CLASS);
+    expect(lines.length).toBe(1);
+    const line = lines[0] as WalkLine;
+    const cleared = clearOfPavements(lines, streets);
+    expect(cleared).not.toContain(line);
+    expect(cleared.length).toBeGreaterThan(0);
+    for (const piece of cleared) {
+      expect(piece.perMetre).toBe(line.perMetre);
+      for (let at = 0; at < piece.points.length; at += 3) {
+        expect(
+          pavementTop(streets, piece.points[at] as number, piece.points[at + 2] as number),
+        ).toBeUndefined();
+      }
+    }
+    // The same pieces next frame, so nobody on them moves.
+    expect(clearOfPavements(lines, streets)).toEqual(cleared);
+    expect(clearOfPavements(lines, streets)[0]).toBe(cleared[0]);
+    // Far from any street: untouched.
+    const away = walkLine(straight(9_000, 100), 3, 'footway', 0.05, 7, ALONG_Z, true);
+    expect(clearOfPavements(away, streets)[0]).toBe(away[0]);
   });
 });
 

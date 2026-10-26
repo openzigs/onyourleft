@@ -31,6 +31,16 @@
  * off: a mapped sidewalk a little nearer the road than a person's half-width
  * then puts somebody's shoulder over the kerb line.
  *
+ * ## A pavement walked once — #1620
+ *
+ * Where a village's (or a city centre's) pavement is laid on the side a
+ * sidewalk is mapped (#1551), the mapped line and the pavement's own walk
+ * would both be walked, and a person on the mapped one stands on the ground
+ * under the pavement, a kerb's height below its top. So a mapped footway is
+ * broken wherever it is ON a drawn pavement ({@link clearOfPavements}): the
+ * pavement's own walk carries its people, at its own density and on its top,
+ * and the mapped line carries its people everywhere else.
+ *
  * ## Who walks, and how many
  *
  * By settlement size (phase A) and land use (phase B), in people per metre of
@@ -73,7 +83,7 @@ import { terrainHeightAt } from './landform';
 import { distanceToDrawnRoad, nearestOnDrawnRoad } from './road-grid';
 import { slotHash, uniformFrom } from './seeded';
 import { PLOT_METRES, VILLAGE_METRES } from './settlements';
-import type { VillageStreet } from './streets';
+import { WALK_FROM_KERB_METRES, type VillageStreet } from './streets';
 import { ROAD_WIDTH_METRES, type CorridorOrigin } from './terrain';
 import { CORRIDOR_HALF_WIDTH_METRES, type WorldCorridor } from './world-data/corridor';
 
@@ -159,6 +169,8 @@ export interface WalkLine {
   readonly along: Float32Array;
   readonly length: number;
   readonly kind: WalkKind;
+  /** People per metre of it, as it was built: what a piece of it carries (#1620). */
+  readonly perMetre: number;
   /** How many people walk it. */
   readonly people: number;
   /** The seed of its people. */
@@ -330,6 +342,7 @@ function lineOf(kept: readonly number[], kind: WalkKind, perMetre: number, key: 
     along,
     length,
     kind,
+    perMetre,
     people,
     key,
     minX,
@@ -452,6 +465,148 @@ export function footwayWalks(
   cached.push({ profile, land, rule, lines });
   footwayLines.set(corridor, cached);
   return lines;
+}
+
+/** A street's pavements as {@link clearOfPavements} reads them: segments, reaches, and their box. */
+interface PavementBands {
+  /** Every walk's segments, five floats a segment: `ax, az, bx, bz` and the pavement's reach. */
+  readonly segments: Float32Array;
+  readonly minX: number;
+  readonly maxX: number;
+  readonly minZ: number;
+  readonly maxZ: number;
+}
+
+const bandsOf = new WeakMap<VillageStreet, PavementBands>();
+
+/**
+ * A street's pavements as bands round its walks: each reaches
+ * `streets.ts` §`WALK_FROM_KERB_METRES` in, to the kerb, and its width less
+ * that out, to its back — so a band read the same distance both ways reaches
+ * the back and, kerbside, only onto the carriageway the rule already keeps
+ * people off. Built once a street.
+ */
+function pavementBands(street: VillageStreet): PavementBands {
+  const known = bandsOf.get(street);
+  if (known !== undefined) return known;
+  const segments: number[] = [];
+  let minX = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let minZ = Number.POSITIVE_INFINITY;
+  let maxZ = Number.NEGATIVE_INFINITY;
+  street.walks.forEach((walk, index) => {
+    const reach = (street.walkWidths[index] ?? 0) - WALK_FROM_KERB_METRES;
+    for (let at = 0; at + 5 < walk.length; at += 3) {
+      const ax = walk[at] as number;
+      const az = walk[at + 2] as number;
+      const bx = walk[at + 3] as number;
+      const bz = walk[at + 5] as number;
+      segments.push(ax, az, bx, bz, reach);
+      minX = Math.min(minX, ax - reach, bx - reach);
+      maxX = Math.max(maxX, ax + reach, bx + reach);
+      minZ = Math.min(minZ, az - reach, bz - reach);
+      maxZ = Math.max(maxZ, az + reach, bz + reach);
+    }
+  });
+  const bands = { segments: Float32Array.from(segments), minX, maxX, minZ, maxZ };
+  bandsOf.set(street, bands);
+  return bands;
+}
+
+/** Whether `(x, z)` is on any of `bands`' pavements. */
+function onPavement(bands: readonly PavementBands[], x: number, z: number): boolean {
+  for (const band of bands) {
+    if (x < band.minX || x > band.maxX || z < band.minZ || z > band.maxZ) continue;
+    const s = band.segments;
+    for (let at = 0; at + 4 < s.length; at += 5) {
+      const ax = s[at] as number;
+      const az = s[at + 1] as number;
+      const dx = (s[at + 2] as number) - ax;
+      const dz = (s[at + 3] as number) - az;
+      const span = dx * dx + dz * dz;
+      const t = span > 0 ? Math.min(1, Math.max(0, ((x - ax) * dx + (z - az) * dz) / span)) : 0;
+      if (Math.hypot(x - (ax + dx * t), z - (az + dz * t)) <= (s[at + 4] as number)) return true;
+    }
+  }
+  return false;
+}
+
+/** Each mapped line's pieces off the pavements, by the streets it was cut against. */
+const offPavements = new WeakMap<
+  WalkLine,
+  { streets: readonly VillageStreet[]; lines: readonly WalkLine[] }
+>();
+
+/**
+ * `lines`, every mapped footway among them broken wherever it is on the
+ * pavement of one of `streets` — #1620. @see the header's "A pavement walked
+ * once"
+ *
+ * A pavement's own walk and a front path are kept whole. A footway whose box
+ * meets no street's is the same line, so its people stand where they stood;
+ * one that does is cut once for the streets it meets, and again only when
+ * those change. Each piece carries the line's own density.
+ */
+export function clearOfPavements(
+  lines: readonly WalkLine[],
+  streets: readonly VillageStreet[],
+): readonly WalkLine[] {
+  if (streets.length === 0) return lines;
+  const all = streets.map((street) => ({ street, bands: pavementBands(street) }));
+  const out: WalkLine[] = [];
+  for (const line of lines) {
+    if (line.kind === 'pavement' || line.kind === 'door-path') {
+      out.push(line);
+      continue;
+    }
+    const meets = all.filter(
+      ({ bands }) =>
+        line.maxX >= bands.minX &&
+        line.minX <= bands.maxX &&
+        line.maxZ >= bands.minZ &&
+        line.minZ <= bands.maxZ,
+    );
+    if (meets.length === 0) {
+      out.push(line);
+      continue;
+    }
+    const known = offPavements.get(line);
+    if (
+      known !== undefined &&
+      known.streets.length === meets.length &&
+      known.streets.every((street, index) => street === meets[index]?.street)
+    ) {
+      out.push(...known.lines);
+      continue;
+    }
+    const bands = meets.map((entry) => entry.bands);
+    const runs: number[][] = [];
+    let run: number[] = [];
+    let cut = false;
+    const close = (): void => {
+      if (run.length >= 6) runs.push(run);
+      run = [];
+    };
+    for (let at = 0; at + 2 < line.points.length; at += 3) {
+      const x = line.points[at] as number;
+      const z = line.points[at + 2] as number;
+      if (onPavement(bands, x, z)) {
+        cut = true;
+        close();
+        continue;
+      }
+      run.push(x, line.points[at + 1] as number, z);
+    }
+    close();
+    const pieces = cut
+      ? runs.map((kept, index) =>
+          lineOf(kept, line.kind, line.perMetre, slotHash(line.key, index, 0x1620)),
+        )
+      : [line];
+    offPavements.set(line, { streets: meets.map((entry) => entry.street), lines: pieces });
+    out.push(...pieces);
+  }
+  return out;
 }
 
 /** What {@link peopleAt} needs beyond the lines. */
