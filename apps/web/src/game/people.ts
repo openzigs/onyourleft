@@ -31,6 +31,15 @@
  * off: a mapped sidewalk a little nearer the road than a person's half-width
  * then puts somebody's shoulder over the kerb line.
  *
+ * **And off every drawn side road** (#1619), by the same half-width off its
+ * edge ({@link besideSideRoads}): OSM often marks a sidewalk's crossing of a
+ * side street as a node rather than a `footway=crossing` way, so the mapped
+ * line runs on across the mouth. A mapped footway is broken over the
+ * corridor's mapped junctions' arms once ({@link footwayWalks}); a person
+ * still on any side road the frame draws — a village's crossroads too — is
+ * not drawn. A village's pavement is already broken over its mouths
+ * (`streets.ts`).
+ *
  * ## Who walks, and how many
  *
  * By settlement size (phase A) and land use (phase B), in people per metre of
@@ -66,11 +75,13 @@
 
 import type { RouteProfile } from '@onyourleft/domain';
 
+import { SIDE_ROAD_WIDTHS, mappedJunctions, type Junction, type SideRoad } from './cross-streets';
 import { FOOTWAY_MAX_LINES, FOOTWAY_MAX_METRES, footwayNetwork } from './footways';
 import { GAITS, STRIDE_PER_HEIGHT, wrappedPhase, type Gait } from './gait';
 import { kindAt, type LandClassMask } from './land-class';
 import { terrainHeightAt } from './landform';
 import { distanceToDrawnRoad, nearestOnDrawnRoad } from './road-grid';
+import { scatterSeed } from './scatter';
 import { slotHash, uniformFrom } from './seeded';
 import { PLOT_METRES, VILLAGE_METRES } from './settlements';
 import type { VillageStreet } from './streets';
@@ -260,6 +271,119 @@ export function villageDensity(houses: number): number {
 export type RoadDistance = (x: number, z: number, reach: number) => number;
 
 /**
+ * A side road as the rule reads it — #1619: its centreline segments, four
+ * floats a segment, and each one's half-width. `cross-streets.ts` §`SideRoad`
+ * is one; {@link armLines} makes them from a junction's arms.
+ */
+export type SideRoadLines = Pick<SideRoad, 'segments' | 'halfWidths'>;
+
+/**
+ * Every arm of `junctions` as {@link SideRoadLines}, from the main
+ * carriageway's edge outwards — #1619: the mapped side roads a corridor's
+ * footways are broken over once, before any of them is in view. An arm's line
+ * starts on the route's centreline (`cross-streets.ts` §`armFrom`); its first
+ * half a road's width is the main road's, which the rule already keeps people
+ * off, and read as a side road it would reach the far pavement of a wide road.
+ */
+export function armLines(junctions: readonly Junction[]): readonly SideRoadLines[] {
+  const lines: SideRoadLines[] = [];
+  for (const junction of junctions) {
+    for (const arm of junction.arms) {
+      const half = SIDE_ROAD_WIDTHS[arm.widthClass] / 2;
+      const segments: number[] = [];
+      let travelled = 0;
+      const line = arm.line;
+      for (let at = 0; at + 3 < line.length; at += 2) {
+        let ax = line[at] as number;
+        let az = line[at + 1] as number;
+        const bx = line[at + 2] as number;
+        const bz = line[at + 3] as number;
+        const length = Math.hypot(bx - ax, bz - az);
+        const skip = ROAD_WIDTH_METRES / 2 - travelled;
+        travelled += length;
+        if (!(length > 0) || skip >= length) continue;
+        if (skip > 0) {
+          ax += ((bx - ax) * skip) / length;
+          az += ((bz - az) * skip) / length;
+        }
+        segments.push(ax, az, bx, bz);
+      }
+      if (segments.length === 0) continue;
+      lines.push({
+        segments: Float32Array.from(segments),
+        halfWidths: new Float32Array(segments.length / 4).fill(half),
+      });
+    }
+  }
+  return lines;
+}
+
+/** The side of a cell of {@link besideSideRoads}' index, in metres. */
+const SIDE_ROAD_CELL_METRES = 32;
+
+/**
+ * `road`, with every side road of `sides` read as more of it — #1619. Where a
+ * side road is nearer than the main road, the answer is how far `(x, z)` is
+ * from that side road's centreline less its half-width, plus the MAIN road's
+ * half-width: so {@link PERSON_CLEARANCE_METRES} keeps a person a half-width
+ * off a side road's edge exactly as it keeps them off the main road's, whatever
+ * the side road's width. A side road is searched only out to the rule's own
+ * reach ({@link PERSON_CLEARANCE_METRES} and a metre); past it the answer is
+ * `road`'s. `road` itself where there is no side road.
+ */
+export function besideSideRoads(road: RoadDistance, sides: readonly SideRoadLines[]): RoadDistance {
+  if (sides.length === 0) return road;
+  const mainHalf = ROAD_WIDTH_METRES / 2;
+  // Every segment, five floats: `ax, az, bx, bz, half`.
+  const flat: number[] = [];
+  const cells = new Map<string, number[]>();
+  for (const side of sides) {
+    const s = side.segments;
+    for (let segment = 0; segment * 4 + 3 < s.length; segment += 1) {
+      const ax = s[segment * 4] as number;
+      const az = s[segment * 4 + 1] as number;
+      const bx = s[segment * 4 + 2] as number;
+      const bz = s[segment * 4 + 3] as number;
+      const half = side.halfWidths[segment] as number;
+      const index = flat.length / 5;
+      flat.push(ax, az, bx, bz, half);
+      const margin = half + PERSON_CLEARANCE_METRES + 1;
+      const fromX = Math.floor((Math.min(ax, bx) - margin) / SIDE_ROAD_CELL_METRES);
+      const toX = Math.floor((Math.max(ax, bx) + margin) / SIDE_ROAD_CELL_METRES);
+      const fromZ = Math.floor((Math.min(az, bz) - margin) / SIDE_ROAD_CELL_METRES);
+      const toZ = Math.floor((Math.max(az, bz) + margin) / SIDE_ROAD_CELL_METRES);
+      for (let cx = fromX; cx <= toX; cx += 1) {
+        for (let cz = fromZ; cz <= toZ; cz += 1) {
+          const key = `${cx},${cz}`;
+          const cell = cells.get(key);
+          if (cell === undefined) cells.set(key, [index]);
+          else cell.push(index);
+        }
+      }
+    }
+  }
+  return (x, z, reach) => {
+    let nearest = road(x, z, reach);
+    const cell = cells.get(
+      `${Math.floor(x / SIDE_ROAD_CELL_METRES)},${Math.floor(z / SIDE_ROAD_CELL_METRES)}`,
+    );
+    if (cell === undefined) return nearest;
+    for (const index of cell) {
+      const at = index * 5;
+      const ax = flat[at] as number;
+      const az = flat[at + 1] as number;
+      const dx = (flat[at + 2] as number) - ax;
+      const dz = (flat[at + 3] as number) - az;
+      const span = dx * dx + dz * dz;
+      const t = span > 0 ? Math.min(1, Math.max(0, ((x - ax) * dx + (z - az) * dz) / span)) : 0;
+      const off = Math.hypot(x - (ax + dx * t), z - (az + dz * t));
+      nearest = Math.min(nearest, off - (flat[at + 4] as number) + mainHalf);
+    }
+    return nearest;
+  };
+}
+
+/**
  * One line, `x, y, z` a point (or `x, z` with `stride` 2, every `y` read
  * later), broken wherever a point comes within
  * {@link PERSON_CLEARANCE_METRES} of the road — the rule, unless `rule` is
@@ -412,7 +536,11 @@ const footwayLines = new WeakMap<
 /**
  * The corridor's mapped footways as lines people walk — #1551's network,
  * bounded as `footways.ts` bounds it, each line's density and kind from the
- * land at its middle. Built once per corridor. @see the header
+ * land at its middle, broken over the main road and — #1619 — over every arm
+ * of the corridor's mapped junctions (`cross-streets.ts` §`mappedJunctions`,
+ * found once a corridor, with the seed `scene.ts` finds them with), so a
+ * mapped sidewalk running on across a side street's mouth turns back at its
+ * kerb. Built once per corridor. @see the header
  */
 export function footwayWalks(
   corridor: WorldCorridor,
@@ -430,7 +558,10 @@ export function footwayWalks(
     maxLines: FOOTWAY_MAX_LINES,
     maxMetres: FOOTWAY_MAX_METRES,
   });
-  const road: RoadDistance = (x, z, reach) => distanceToDrawnRoad(profile, origin, x, z, reach);
+  const road = besideSideRoads(
+    (x, z, reach) => distanceToDrawnRoad(profile, origin, x, z, reach),
+    armLines(mappedJunctions(corridor, profile, origin, scatterSeed(profile))),
+  );
   const lines: WalkLine[] = [];
   network.lines.forEach((line, index) => {
     const middle = Math.floor(line.length / 4) * 2;
