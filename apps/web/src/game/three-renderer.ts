@@ -1290,6 +1290,115 @@ const FENCE_POST_METRES = 0.12;
  */
 const FENCE_END_POST_Z = BOUNDARY_PIECE_METRES / 2 - FENCE_POST_METRES / 2;
 
+/** A hedge's half-width at its widest, in metres: **0.55**, the box's it replaces. */
+const HEDGE_HALF_WIDTH_METRES = 0.55;
+
+/** How high a hedge's top stands at its highest, in metres: **1.3**, the box's. */
+const HEDGE_TOP_METRES = 1.3;
+
+/** How far into the ground a hedge is set, in metres: **0.5**, as every field boundary is. */
+const HEDGE_FOOT_METRES = 0.5;
+
+/** How many rings a hedge is lofted through along its piece: **17**, a ring every 46 cm. */
+const HEDGE_RINGS = 17;
+
+/** How many faces each ring has, foot to foot over the top: **8**. */
+const HEDGE_PROFILE_FACES = 8;
+
+/** How much a hedge's surface is carved in from its box, at most: **0.14** of its reach. */
+const HEDGE_ROUGHNESS = 0.14;
+
+/** How far in from each end a hedge starts to taper, in metres: **1.2**. */
+const HEDGE_TAPER_METRES = 1.2;
+
+/** How wide and how high a hedge is at its very end, of its middle's: **0.45** and **0.55**. */
+const HEDGE_END_SHARE = { width: 0.45, height: 0.55 } as const;
+
+/**
+ * A hedge's shape — #1617: rounded and irregular rather than a box, its ends
+ * tapering, so that a short stretch of it (#1542's `hedge-breaks`) reads as
+ * planting and not as a box set on the verge. Built from numbers, as the box
+ * was (ADR 0009); nothing is downloaded, and it wears the photograph the box
+ * wore (`realistic-assets.ts` §`REALISTIC_STRUCTURE_SURFACES`, Poly Haven's
+ * `forest_leaves_02`, already admitted).
+ *
+ * A loft along `+z` through {@link HEDGE_RINGS} rings, each a rounded arch of
+ * {@link HEDGE_PROFILE_FACES} faces from its foot on one side, over the top,
+ * to its foot on the other — `|cos|`, `|sin|` to the power 0.6, a box with its
+ * corners rounded. Every point is carved in from that arch by a fixed sum of
+ * sines along the run and round the arch, by up to {@link HEDGE_ROUGHNESS}, so
+ * the top is lumpy and the sides bulge; over the last
+ * {@link HEDGE_TAPER_METRES} of each end it narrows and falls to
+ * {@link HEDGE_END_SHARE}, and closes on a point at the piece's end. The
+ * bottom is open: it is {@link HEDGE_FOOT_METRES} under the ground.
+ *
+ * ⚠️ **Carved IN, never out**: every vertex is inside the box it replaces —
+ * 1.1 m by 8 m, its top at 1.3 m — so `settlements.ts`
+ * §`STRUCTURE_FOOTPRINTS` and the room `scenery.ts` measures it by hold
+ * unchanged (`boundary-footprint.test.ts`). 272 triangles: under a
+ * structure's ceiling (`realistic-budget.ts` §`REALISTIC_TRIANGLES`), and the
+ * same shape in both worlds. One shape, so still one instanced hedge draw.
+ */
+function hedgeGeometry(): BufferGeometry {
+  const half = BOUNDARY_PIECE_METRES / 2;
+  const reach = HEDGE_TOP_METRES + HEDGE_FOOT_METRES;
+  const last = half - HEDGE_TAPER_METRES / 4;
+  const positions: number[] = [];
+  const index: number[] = [];
+  const smooth = (t: number): number => {
+    const c = Math.min(1, Math.max(0, t));
+    return c * c * (3 - 2 * c);
+  };
+  for (let ring = 0; ring < HEDGE_RINGS; ring += 1) {
+    const z = -last + (2 * last * ring) / (HEDGE_RINGS - 1);
+    const taper = smooth((half - Math.abs(z)) / HEDGE_TAPER_METRES);
+    const width = HEDGE_END_SHARE.width + (1 - HEDGE_END_SHARE.width) * taper;
+    const height = HEDGE_END_SHARE.height + (1 - HEDGE_END_SHARE.height) * taper;
+    for (let face = 0; face <= HEDGE_PROFILE_FACES; face += 1) {
+      const angle = (Math.PI * face) / HEDGE_PROFILE_FACES;
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+      // 0 to 1: how far this point is carved in.
+      const carve =
+        0.5 +
+        0.25 * Math.sin(2.1 * z + 1.3 * angle + 0.4) +
+        0.25 * Math.sin(3.7 * z - 2.2 * angle + 1.9);
+      const keep = 1 - HEDGE_ROUGHNESS * carve;
+      positions.push(
+        Math.sign(cos) * Math.abs(cos) ** 0.6 * HEDGE_HALF_WIDTH_METRES * width * keep,
+        -HEDGE_FOOT_METRES + Math.abs(sin) ** 0.6 * reach * height * keep,
+        z,
+      );
+    }
+  }
+  const row = HEDGE_PROFILE_FACES + 1;
+  for (let ring = 0; ring + 1 < HEDGE_RINGS; ring += 1) {
+    for (let face = 0; face < HEDGE_PROFILE_FACES; face += 1) {
+      const a = ring * row + face;
+      const b = a + 1;
+      const c = a + row;
+      const d = c + 1;
+      index.push(a, b, c, b, d, c);
+    }
+  }
+  // Each end closed on a point at the piece's end, a third of the way up.
+  const tipY = -HEDGE_FOOT_METRES + reach * HEDGE_END_SHARE.height * 0.6;
+  const back = positions.length / 3;
+  positions.push(0, tipY, -half);
+  const front = back + 1;
+  positions.push(0, tipY, half);
+  const end = (HEDGE_RINGS - 1) * row;
+  for (let face = 0; face < HEDGE_PROFILE_FACES; face += 1) {
+    index.push(face + 1, face, back);
+    index.push(end + face, end + face + 1, front);
+  }
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new BufferAttribute(new Float32Array(positions), 3));
+  geometry.setIndex(index);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
 /**
  * The field boundaries and the signpost #460 adds, each built from numbers
  * typed here — nothing is downloaded and nothing traced, ADR 0009. The
@@ -1300,7 +1409,8 @@ const FENCE_END_POST_Z = BOUNDARY_PIECE_METRES / 2 - FENCE_POST_METRES / 2;
  */
 const BOUNDARY_STYLE = {
   wall: [{ colour: 0x9b9486, geometry: () => block(0.55, 1.1 + 0.5, 8, 0, -0.5) }],
-  hedge: [{ colour: 0x3e5e2e, geometry: () => block(1.1, 1.3 + 0.5, 8, 0, -0.5) }],
+  // #1617: rounded, irregular and tapering, where it was a box.
+  hedge: [{ colour: 0x3e5e2e, geometry: hedgeGeometry }],
   fence: [
     {
       colour: 0x8a6f4f,
