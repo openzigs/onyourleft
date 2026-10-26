@@ -3635,7 +3635,8 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
       `clearance ${people.clearance.toFixed(2)} m with the rule (${people.drawn.join(' bodies, ')} impostors), ` +
       `${people.clearanceOff.toFixed(2)} m without (${people.drawnOff.join(' bodies, ')} impostors); ` +
       `${String(people.drawCalls)} draw calls; ${String(people.triangles)} triangles a body; ` +
-      `${String(people.animationBytes)} bytes of animation; pixels changed: body ${String(people.bodyPixels)}, impostor ${String(people.impostorPixels)}`;
+      `${String(people.animationBytes)} bytes of animation; pixels changed: body ${String(people.bodyPixels)}, impostor ${String(people.impostorPixels)}; ` +
+      `${String(people.blendedTriangles)} triangles fading a colour; clothes stand off ${people.clothesStandOff.toFixed(4)} m, skin ${people.skinStandOff.toFixed(4)} m`;
     testInfo.annotations.push({ type: 'people', description: measured });
     console.log(`people — ${measured}`);
     // Somebody was drawn, so the rule had somebody to hold.
@@ -3653,6 +3654,12 @@ test.describe('the realistic world — ADR 0026', { tag: NIGHTLY }, () => {
     // What is drawn is a person, where `people.ts` put them, near and far.
     expect(people.bodyPixels).toBeGreaterThan(10);
     expect(people.impostorPixels).toBeGreaterThan(0);
+    // #1618: every seam an edge, no colour faded across a triangle, and the
+    // clothes standing off the body — a centimetre and more — where the skin
+    // stays, in the mean, under half that.
+    expect(people.blendedTriangles).toBe(0);
+    expect(people.clothesStandOff).toBeGreaterThan(0.01);
+    expect(people.skinStandOff).toBeLessThan(people.clothesStandOff / 2);
   });
 
   test('#1541 people up close: a body is smooth-shaded, never compiled FLAT_SHADED', async ({
