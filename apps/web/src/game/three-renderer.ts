@@ -1335,7 +1335,7 @@ const HEDGE_END_SHARE = { width: 0.45, height: 0.55 } as const;
  * ⚠️ **Carved IN, never out**: every vertex is inside the box it replaces —
  * 1.1 m by 8 m, its top at 1.3 m — so `settlements.ts`
  * §`STRUCTURE_FOOTPRINTS` and the room `scenery.ts` measures it by hold
- * unchanged (`boundary-footprint.test.ts`). 272 triangles: under a
+ * unchanged (`boundary-footprint.test.ts`). 276 triangles: under a
  * structure's ceiling (`realistic-budget.ts` §`REALISTIC_TRIANGLES`), and the
  * same shape in both worlds. One shape, so still one instanced hedge draw.
  */
@@ -1381,7 +1381,7 @@ function hedgeGeometry(): BufferGeometry {
       index.push(a, b, c, b, d, c);
     }
   }
-  // Each end closed on a point at the piece's end, a third of the way up.
+  // Each end closed on a point at the piece's end, about 9 cm above the ground.
   const tipY = -HEDGE_FOOT_METRES + reach * HEDGE_END_SHARE.height * 0.6;
   const back = positions.length / 3;
   positions.push(0, tipY, -half);
@@ -1392,6 +1392,10 @@ function hedgeGeometry(): BufferGeometry {
     index.push(face + 1, face, back);
     index.push(end + face, end + face + 1, front);
   }
+  // The tip stands above the ground, so one face under each end shuts the
+  // opening the open bottom would leave there.
+  index.push(0, HEDGE_PROFILE_FACES, back);
+  index.push(end + HEDGE_PROFILE_FACES, end, front);
   const geometry = new BufferGeometry();
   geometry.setAttribute('position', new BufferAttribute(new Float32Array(positions), 3));
   geometry.setIndex(index);

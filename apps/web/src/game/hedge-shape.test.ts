@@ -142,4 +142,44 @@ describe('the hedge’s shape — #1617', () => {
     expect(inMiddle.top).toBeGreaterThan(1.1);
     expect(inMiddle.half).toBeGreaterThan(0.45);
   });
+
+  it('faces every triangle outward, and shuts each end’s opening above the ground', () => {
+    const geometry = realisticStructureGeometry('hedge', 'hedge');
+    if (geometry === undefined) throw new Error('no realistic hedge');
+    const position = geometry.getAttribute('position') as Readable;
+    const index = geometry.index ?? { count: position.count, getX: (i: number): number => i };
+    const at = (i: number): [number, number, number] => [
+      position.getX(i),
+      position.getY(i),
+      position.getZ(i),
+    ];
+    const shutBy = { back: 0, front: 0 };
+    for (let t = 0; t < index.count; t += 3) {
+      const a = at(index.getX(t));
+      const b = at(index.getX(t + 1));
+      const c = at(index.getX(t + 2));
+      const u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]] as const;
+      const v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]] as const;
+      const n = [
+        u[1] * v[2] - u[2] * v[1],
+        u[2] * v[0] - u[0] * v[2],
+        u[0] * v[1] - u[1] * v[0],
+      ] as const;
+      const centroid = [
+        (a[0] + b[0] + c[0]) / 3,
+        (a[1] + b[1] + c[1]) / 3,
+        (a[2] + b[2] + c[2]) / 3,
+      ] as const;
+      // Out from the hedge's spine: its own ring's, or the middle for an end.
+      const capped = Math.abs(centroid[2]) > half - 0.25;
+      const out =
+        n[0] * centroid[0] + n[1] * (centroid[1] - 0.2) + n[2] * (capped ? centroid[2] : 0);
+      expect(out).toBeGreaterThan(0);
+      if (capped && n[1] < 0) shutBy[centroid[2] < 0 ? 'back' : 'front'] += 1;
+    }
+    // Each end's tip stands above the ground, so a face under it shuts the opening.
+    expect(shutBy.back).toBe(1);
+    expect(shutBy.front).toBe(1);
+    geometry.dispose();
+  });
 });
