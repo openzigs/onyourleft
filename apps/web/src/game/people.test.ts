@@ -10,7 +10,9 @@
 import { describe, expect, it } from 'vitest';
 
 import { metres, seconds } from '@onyourleft/domain';
-import type { LandUseFeature, PathFeature } from '@onyourleft/map-features';
+import type { LandUseFeature, PathFeature, StreetFeature } from '@onyourleft/map-features';
+
+import { mappedJunctions, type Junction } from './cross-streets';
 
 import { STRIDE_PER_HEIGHT } from './gait';
 import {
@@ -23,6 +25,8 @@ import {
   PERSON_CLEARANCE_METRES,
   PERSON_HALF_WIDTH_METRES,
   RUNNER_SHARE,
+  armLines,
+  besideSideRoads,
   footwayWalks,
   streetWalks,
   peopleAt,
@@ -31,6 +35,7 @@ import {
   walkLine,
   type PeopleOptions,
   type RoadDistance,
+  type SideRoadLines,
   type WalkLine,
 } from './people';
 import { NO_LAND_CLASS, type LandClass, type LandClassMask } from './land-class';
@@ -358,6 +363,237 @@ describe('people in a ride’s frame — #1541, through `sceneFrame`', () => {
     }
     expect(ruled).toBeGreaterThan(0);
     expect(over).toBeGreaterThan(0);
+  });
+});
+
+describe('people kept off the drawn side roads — #1619', () => {
+  const FARMLAND = northRoute(6_000, () => 40);
+  const ORIGIN = corridorOrigin(FARMLAND);
+  const SEED = scatterSeed(FARMLAND);
+  const { sites } = siteSpacing(FARMLAND);
+  const village = [...Array(sites).keys()]
+    .map((index) => siteAt(FARMLAND, SEED, index))
+    .find((site): site is Site => site?.kind === 'village') as Site;
+  // Away from any village: a mapped sidewalk 6 m to the right, running on
+  // across the mouth of a side street that leaves square to the right.
+  const along = (village.centre + 1_000) % FARMLAND.totalDistance;
+  const here = drawnRoadFrame(FARMLAND, ORIGIN, along);
+  if (here === undefined) throw new Error('no road');
+  const sidewalk = (): Float32Array => {
+    const points: number[] = [];
+    for (let at = along - 200; at <= along + 200; at += 2) {
+      const road = drawnRoadFrame(FARMLAND, ORIGIN, at);
+      if (road === undefined) continue;
+      points.push(road.x + road.normalX * 6, road.z + road.normalZ * 6);
+    }
+    return Float32Array.from(points);
+  };
+  const sideStreet: StreetFeature = {
+    kind: 'minor_road',
+    kindDetail: 'residential',
+    grade: 'ground',
+    line: Float32Array.from([
+      here.x,
+      here.z,
+      here.x + here.normalX * 70,
+      here.z + here.normalZ * 70,
+    ]),
+  };
+  const corridorWith = (streets: readonly StreetFeature[]): WorldCorridor => ({
+    routeId: `people-side-road-${String(streets.length)}`,
+    origin: ORIGIN,
+    covered: () => true,
+    coveredBoxes: [],
+    landUse: [],
+    buildings: [],
+    paths: [{ kind: 'path', kindDetail: 'sidewalk', line: sidewalk() }],
+    streets,
+  });
+  const withStreet = corridorWith([sideStreet]);
+  const withoutStreet = corridorWith([]);
+
+  /** How far `(x, z)` is inside the edge of the nearest of `roads`: positive on it. */
+  function intoSideRoad(roads: readonly SideRoadLines[], x: number, z: number): number {
+    let deepest = Number.NEGATIVE_INFINITY;
+    for (const road of roads) {
+      const s = road.segments;
+      for (let segment = 0; segment * 4 + 3 < s.length; segment += 1) {
+        const ax = s[segment * 4] as number;
+        const az = s[segment * 4 + 1] as number;
+        const dx = (s[segment * 4 + 2] as number) - ax;
+        const dz = (s[segment * 4 + 3] as number) - az;
+        const span = dx * dx + dz * dz;
+        const t = span > 0 ? Math.min(1, Math.max(0, ((x - ax) * dx + (z - az) * dz) / span)) : 0;
+        const off = Math.hypot(x - (ax + dx * t), z - (az + dz * t));
+        deepest = Math.max(deepest, (road.halfWidths[segment] as number) - off);
+      }
+    }
+    return deepest;
+  }
+
+  function frameAt(
+    second: number,
+    corridor: WorldCorridor,
+    extra: Partial<Parameters<typeof sceneFrame>[0]> = {},
+  ): ReturnType<typeof sceneFrame> {
+    const start = atStartLine(FARMLAND);
+    return sceneFrame({
+      profile: FARMLAND,
+      origin: ORIGIN,
+      state: {
+        ...start,
+        ride: { ...start.ride, distance: metres(along) },
+        elapsed: seconds(second),
+        ridden: seconds(second),
+      },
+      people: PEOPLE_NEAR_MAX,
+      worldCorridor: corridor,
+      ...extra,
+    });
+  }
+
+  it('puts nobody on a side road whose mouth a mapped sidewalk runs across, as without the street somebody stands there', () => {
+    const roads = frameAt(0, withStreet).sideRoads ?? [];
+    expect(roads.length).toBeGreaterThan(0);
+    let seen = 0;
+    let onItWithout = 0;
+    for (let second = 0; second < 600; second += 3) {
+      for (const person of [...(frameAt(second, withStreet).people ?? NO_PEOPLE).near]) {
+        seen += 1;
+        expect(intoSideRoad(roads, person.x, person.z)).toBeLessThanOrEqual(
+          -PERSON_HALF_WIDTH_METRES,
+        );
+      }
+      // The control: the same sidewalk with no street mapped across it.
+      for (const person of (frameAt(second, withoutStreet).people ?? NO_PEOPLE).near) {
+        if (intoSideRoad(roads, person.x, person.z) > -PERSON_HALF_WIDTH_METRES) onItWithout += 1;
+      }
+    }
+    expect(seen).toBeGreaterThan(0);
+    expect(onItWithout).toBeGreaterThan(0);
+  });
+
+  it('breaks the mapped sidewalk over the side street, so a walker turns back at its kerb', () => {
+    const junctions = mappedJunctions(withStreet, FARMLAND, ORIGIN, SEED);
+    expect(junctions.length).toBe(1);
+    const arms = armLines(junctions);
+    const lines = footwayWalks(withStreet, FARMLAND, ORIGIN, NO_LAND_CLASS);
+    // One line becomes two, one each side of the mouth; with no street, one.
+    expect(lines.length).toBe(2);
+    expect(footwayWalks(withoutStreet, FARMLAND, ORIGIN, NO_LAND_CLASS).length).toBe(1);
+    for (const line of lines) {
+      for (let at = 0; at < line.points.length; at += 3) {
+        const x = line.points[at] as number;
+        const z = line.points[at + 2] as number;
+        expect(intoSideRoad(arms, x, z)).toBeLessThanOrEqual(-PERSON_HALF_WIDTH_METRES);
+      }
+    }
+  });
+
+  it('puts nobody on a village’s crossroads, which no map breaks a sidewalk over, and the rule off does', () => {
+    const line: number[] = [];
+    for (let at = village.centre - 100; at <= village.centre + 100; at += 2) {
+      const road = drawnRoadFrame(FARMLAND, ORIGIN, at);
+      if (road === undefined) continue;
+      line.push(road.x + road.normalX * 6, road.z + road.normalZ * 6);
+    }
+    const corridor: WorldCorridor = {
+      ...withoutStreet,
+      routeId: 'people-village-crossroads',
+      paths: [{ kind: 'path', kindDetail: 'sidewalk', line: Float32Array.from(line) }],
+    };
+    const frame = (second: number, onTheRoad: boolean): ReturnType<typeof sceneFrame> => {
+      const start = atStartLine(FARMLAND);
+      return sceneFrame({
+        profile: FARMLAND,
+        origin: ORIGIN,
+        state: {
+          ...start,
+          ride: { ...start.ride, distance: metres(village.centre) },
+          elapsed: seconds(second),
+          ridden: seconds(second),
+        },
+        people: PEOPLE_NEAR_MAX,
+        worldCorridor: corridor,
+        peopleOnTheRoad: onTheRoad,
+      });
+    };
+    const roads = (frame(0, false).sideRoads ?? []).filter(
+      (road) => road.junction.source === 'village',
+    );
+    expect(roads.length).toBe(1);
+    let seen = 0;
+    let over = 0;
+    for (let second = 0; second < 600; second += 3) {
+      for (const person of [...(frame(second, false).people ?? NO_PEOPLE).near]) {
+        seen += 1;
+        expect(intoSideRoad(roads, person.x, person.z)).toBeLessThanOrEqual(
+          -PERSON_HALF_WIDTH_METRES,
+        );
+      }
+      for (const person of (frame(second, true).people ?? NO_PEOPLE).near) {
+        if (intoSideRoad(roads, person.x, person.z) > -PERSON_HALF_WIDTH_METRES) over += 1;
+      }
+    }
+    expect(seen).toBeGreaterThan(0);
+    expect(over).toBeGreaterThan(0);
+  });
+
+  it('reads a mapped arm from the main road’s edge, so it never reaches the far pavement of a wide road', () => {
+    // A highway leaving square to the right of a road along `x = 0`, at `z = 0`.
+    const junction: Junction = {
+      along: 0,
+      source: 'mapped',
+      arms: [
+        {
+          side: 1,
+          angleDegrees: 90,
+          widthClass: 'highway',
+          line: Float32Array.from([0, 0, 70, 0]),
+        },
+      ],
+    };
+    const road = besideSideRoads(ALONG_Z, armLines([junction]));
+    // On the arm, past the main road's edge: the side road's.
+    expect(road(10, 0, 5)).toBeLessThan(PERSON_CLEARANCE_METRES);
+    // Across the main road from it, 4.5 m out — a highway's half-width from its junction: the main road's.
+    expect(road(-4.5, 0, 5)).toBe(4.5);
+  });
+
+  it('drops a person between two kept points who stands on a side road, and reads its own width', () => {
+    // A side road square across a line at `x = 6`, `z` 0 to 100: 3.5 m wide, at `z = 50`.
+    const road = besideSideRoads(ALONG_Z, [
+      {
+        segments: Float32Array.from([4, 50, 40, 50]),
+        halfWidths: Float32Array.from([1.75]),
+      },
+    ]);
+    // Off its edge by a person's half-width exactly reads as the main road's clearance.
+    expect(road(6, 50 + 1.75 + PERSON_HALF_WIDTH_METRES, 5)).toBeCloseTo(PERSON_CLEARANCE_METRES);
+    expect(road(6, 50, 5)).toBeLessThan(PERSON_CLEARANCE_METRES);
+    // Far from it, the main road's own answer.
+    expect(road(6, 10, 5)).toBe(6);
+    // A line with only its two ends, so nothing breaks it: the rule between points drops them.
+    const line = walkLine(
+      [6, 0, 0, 6, 0, 2, 6, 0, 98, 6, 0, 100],
+      3,
+      'footway',
+      0.5,
+      9,
+      ALONG_Z,
+      true,
+    );
+    let kept = 0;
+    for (let second = 0; second < 200; second += 1) {
+      const people = peopleAt(line, options({ x: 6, z: 50, seconds: second, road }));
+      for (const person of people.near) {
+        kept += 1;
+        expect(Math.abs(person.z - 50)).toBeGreaterThanOrEqual(
+          1.75 + PERSON_HALF_WIDTH_METRES - 1e-6,
+        );
+      }
+    }
+    expect(kept).toBeGreaterThan(0);
   });
 });
 
