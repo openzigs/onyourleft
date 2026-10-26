@@ -12709,9 +12709,28 @@ function bakedPeople(body: Object3D): BakedPeople {
         posed[vertex * 3 + 2] = scratch.z / restHeight;
         floor = Math.min(floor, posed[vertex * 3 + 1] as number);
       }
+      // Planted on the ground, and a run's flight above it.
+      const lift = pose.lift / 1.75 - floor;
+      for (let vertex = 0; vertex < kept; vertex += 1) {
+        posed[vertex * 3 + 1] = (posed[vertex * 3 + 1] as number) + lift;
+      }
+      const normals = vertexNormals(posed, cut.indices);
+      const row = animationRow(gaitAt, phase);
+      for (let vertex = 0; vertex < kept; vertex += 1) {
+        const at = (row * width + vertex) * 4;
+        const normalAt = ((row + ANIMATION_ROWS / 2) * width + vertex) * 4;
+        for (let axis = 0; axis < 3; axis += 1) {
+          data[at + axis] = DataUtils.toHalfFloat(posed[vertex * 3 + axis] as number);
+          data[normalAt + axis] = DataUtils.toHalfFloat(normals[vertex * 3 + axis] as number);
+        }
+        data[at + 3] = DataUtils.toHalfFloat(1);
+        data[normalAt + 3] = DataUtils.toHalfFloat(0);
+      }
       // #1618: at the walk's first phase, how far the baked clothes stand off
-      // the same body posed bare — what the texture holds, by region.
+      // the same body posed bare — read back out of the texture's own
+      // half floats, by region.
       if (gaitAt === 0 && phase === 0) {
+        const at = row * width;
         const sums = { clothes: 0, skin: 0 };
         const counts = { clothes: 0, skin: 0 };
         for (let vertex = 0; vertex < kept; vertex += 1) {
@@ -12729,32 +12748,16 @@ function bakedPeople(body: Object3D): BakedPeople {
             plain[vertex * 3 + 2],
           );
           mesh.applyBoneTransform(cut.kept[vertex] as number, scratch);
+          const texel = (at + vertex) * 4;
           sums[into] += Math.hypot(
-            (posed[vertex * 3] as number) - scratch.x / restHeight,
-            (posed[vertex * 3 + 1] as number) - scratch.y / restHeight,
-            (posed[vertex * 3 + 2] as number) - scratch.z / restHeight,
+            DataUtils.fromHalfFloat(data[texel] as number) - scratch.x / restHeight,
+            DataUtils.fromHalfFloat(data[texel + 1] as number) - lift - scratch.y / restHeight,
+            DataUtils.fromHalfFloat(data[texel + 2] as number) - scratch.z / restHeight,
           );
           counts[into] += 1;
         }
         standOff.clothes = counts.clothes === 0 ? 0 : sums.clothes / counts.clothes;
         standOff.skin = counts.skin === 0 ? 0 : sums.skin / counts.skin;
-      }
-      // Planted on the ground, and a run's flight above it.
-      const lift = pose.lift / 1.75 - floor;
-      for (let vertex = 0; vertex < kept; vertex += 1) {
-        posed[vertex * 3 + 1] = (posed[vertex * 3 + 1] as number) + lift;
-      }
-      const normals = vertexNormals(posed, cut.indices);
-      const row = animationRow(gaitAt, phase);
-      for (let vertex = 0; vertex < kept; vertex += 1) {
-        const at = (row * width + vertex) * 4;
-        const normalAt = ((row + ANIMATION_ROWS / 2) * width + vertex) * 4;
-        for (let axis = 0; axis < 3; axis += 1) {
-          data[at + axis] = DataUtils.toHalfFloat(posed[vertex * 3 + axis] as number);
-          data[normalAt + axis] = DataUtils.toHalfFloat(normals[vertex * 3 + axis] as number);
-        }
-        data[at + 3] = DataUtils.toHalfFloat(1);
-        data[normalAt + 3] = DataUtils.toHalfFloat(0);
       }
     }
   });

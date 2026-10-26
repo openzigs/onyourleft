@@ -319,6 +319,9 @@ export const CLOTHES_STAND_OFF: Readonly<Record<PersonRegion, number>> = {
 export const HEM_FLARE = 0.008;
 
 /** The regions that are clothes: a top, bottoms and shoes. */
+/** Slots per vertex for its regions: one past the highest {@link PersonRegion}. */
+const REGION_SLOTS = Math.max(...Object.values(PersonRegion)) + 1;
+
 function isClothes(region: PersonRegion): boolean {
   return (
     region === PersonRegion.top || region === PersonRegion.bottoms || region === PersonRegion.shoes
@@ -380,20 +383,20 @@ export function dressed(indices: ArrayLike<number>, regions: ArrayLike<number>):
           : (FACE_PRECEDENCE.find((region) => region === a || region === b || region === c) ?? a);
   }
   const standOff = new Float32Array(columns);
-  const seen = new Uint8Array(columns * 8);
+  const seen = new Uint8Array(columns * REGION_SLOTS);
   for (let face = 0; face < faces; face += 1) {
     const region = faceRegion[face] as PersonRegion;
     for (let corner = 0; corner < 3; corner += 1) {
       const vertex = indices[face * 3 + corner] as number;
       standOff[vertex] = Math.max(standOff[vertex] as number, CLOTHES_STAND_OFF[region]);
-      seen[vertex * 8 + region] = 1;
+      seen[vertex * REGION_SLOTS + region] = 1;
     }
   }
   for (let vertex = 0; vertex < columns; vertex += 1) {
     let kinds = 0;
     let clothes = false;
-    for (let region = 0; region < 8; region += 1) {
-      if (seen[vertex * 8 + region] !== 1) continue;
+    for (let region = 0; region < REGION_SLOTS; region += 1) {
+      if (seen[vertex * REGION_SLOTS + region] !== 1) continue;
       kinds += 1;
       if (isClothes(region as PersonRegion)) clothes = true;
     }
@@ -408,7 +411,7 @@ export function dressed(indices: ArrayLike<number>, regions: ArrayLike<number>):
     const kind = faceRegion[face] as number;
     for (let corner = 0; corner < 3; corner += 1) {
       const vertex = indices[face * 3 + corner] as number;
-      const key = vertex * 8 + kind;
+      const key = vertex * REGION_SLOTS + kind;
       let drawn = drawnOf.get(key);
       if (drawn === undefined) {
         drawn = column.length;
