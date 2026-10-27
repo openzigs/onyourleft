@@ -89,7 +89,7 @@ export const ATTRIBUTION_LICENCES: readonly string[] = ['CC-BY-4.0'];
  * 2 is that each copy of the font "contains the above copyright notice and
  * this license" — the same shape as Apache-2.0 §4(a). The notice is the
  * credit's creator, and travels in each font's name table too; the licence is
- * the copy linked here.
+ * the copy shown in the Credits screen.
  *
  * ⚠️ Every licence here must have a {@link SHIPPED_LICENCE_TEXTS} entry, or
  * {@link creditsFrom} reports the work as shipping without its licence.

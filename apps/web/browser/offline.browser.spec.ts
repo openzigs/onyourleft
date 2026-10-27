@@ -557,7 +557,10 @@ test.describe('a cold start with the network off', () => {
       ).toMatch(/^\s*Apache License\s+Version 2\.0, January 2004/);
       await expect(second.page.locator('h1')).toHaveText('Credits');
       expect(second.page.url()).toBe(`${PRODUCT_ORIGIN}/#/about/credits`);
-      expect(scripts.length, 'no script was loaded at all').toBeGreaterThan(0);
+      expect(
+        scripts.some((script) => /Apache-2\.0-[^/]*\.js$/.test(script.url) && script.fromWorker),
+        'the Apache-2.0 licence chunk was not served by the worker',
+      ).toBe(true);
       expect(
         scripts.filter((script) => !script.fromWorker).map((script) => script.url),
         'a script was not served by the worker',
