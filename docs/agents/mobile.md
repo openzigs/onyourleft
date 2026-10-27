@@ -35,7 +35,9 @@ From the layout tree of CLAUDE.md §2, under `apps/`:
                         Since #672 `resources.ts` reads a `res/values*` file
                         the same way, and `night-colours.test.ts` holds
                         `oyl_canvas` in `res/values` and `res/values-night` to
-                        `apps/web`'s two `canvas` tokens — imported by a
+                        the `canvas` token of the palette the web client's
+                        default theme comes to in each (dark in both since
+                        #999) — imported by a
                         relative path, app to app, which the boundary rule
                         permits and the workspace cannot spell otherwise
                         (`@onyourleft/web` already depends on this package) —
