@@ -11,9 +11,11 @@
  * three things (`hosted-consent.test.ts` and `hosted-instance-policy.test.ts`
  * hold them together).
  *
- * ⚠️ **DRAFT wording, awaiting the owner's approval.** The owner ruled on
- * #1104 that B1 and B2 are approved with the pull request that ships them;
- * that pull request quotes every string below.
+ * **Approved by the owner on PR #1303 on 2026-10-12** (*"1303 looks good"*),
+ * which quoted every string below; #1104's ruling of 2026-10-26 then changed
+ * "own machine" to "its own machine or its own private network", because the
+ * instance's model may be anywhere on its private network
+ * (`apps/instance` §`history/address.ts`), never only on its own host.
  *
  * ## The rulings the wording is bound by
  *
@@ -113,8 +115,9 @@ export function hostedInstanceConsent(endpoint: string): HostedInstanceConsent {
         'one.',
     ],
     notNeeded:
-      'You do not need this. Everything else in the app works without it, and a model on your ' +
-      "instance's own machine can write the same analysis without sending anything to a service.",
+      'You do not need this. Everything else in the app works without it, and a model your ' +
+      'instance runs on its own machine or its own private network can write the same analysis ' +
+      'without sending anything to a service.',
     offUntilOn: 'This is off. It stays off until you agree, and you can withdraw it at any time.',
   };
 }
@@ -138,7 +141,7 @@ export const HOSTED_PANEL_HEADING = 'A hosted model service, on your own key';
 /** What the section is, before anything is asked of the rider. */
 export const HOSTED_PANEL_LEAD =
   'Your instance can send a ride you ask it to analyse to a hosted model service instead of ' +
-  'using a model on its own machine — but only on a key of your own, and only after you agree ' +
+  'using a model on its own machine or its own private network — but only on a key of your own, and only after you agree ' +
   'to that service by its address. This app has no key of its own and suggests no service. ' +
   'Nothing is sent to any service until you have stored a key and agreed below.';
 

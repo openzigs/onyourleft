@@ -92,7 +92,8 @@ describe('the side camera’s instance switches in the privacy policy (#1106)', 
     expect(POLICY).not.toContain(
       "This is the only way this app's own code sends a picture anywhere",
     );
-    // What is still true, and still said: the count of network calls did not change.
-    expect(POLICY).toContain('contains exactly four network calls');
+    // What is still true, and still said: #1106 did not change the count of
+    // network calls (five since #1539's corridor, #1104).
+    expect(POLICY).toContain('contains exactly five network calls');
   });
 });

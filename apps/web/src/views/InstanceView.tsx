@@ -44,8 +44,10 @@ import { SyncPanel } from './SyncPanel';
  * `InstancePort.current`, which reads them from the instance — never from the
  * form — so after a reload the screen says what the instance holds (#777).
  *
- * ⚠️ **Every sentence here is DRAFT wording awaiting the owner's approval**
- * (#880): it is new disclosure text.
+ * ⚠️ **Every sentence here is rider-facing disclosure**, and the owner
+ * approves each change to one in the pull request that ships it (#880
+ * shipped the first; #1104 the saved workouts, workout goals and the
+ * write-up line).
  */
 
 /**
@@ -60,7 +62,8 @@ export const INSTANCE_RECEIVES: readonly string[] = [
   'Your internet address and your device or browser type, as any server you connect to sees them.',
   'Connecting itself sends no ride, route, position or heart rate of yours.',
   'Only if you make or join a private room: the route of a room you make, the code you type to join one, your power and cadence while you ride in it, the weight you declare once as you join, and a race’s result.',
-  'Only if you sync with it, which needs the instance’s card: your rides, whole, with their positions and heart rate, their write-ups and side-camera reports, a summary of each, and your goals, notes and documents. They are sealed on this device for the instance alone, and stay on this device too. Nothing is synced until you press Sync now.',
+  'Only if you sync with it, which needs the instance’s card: your rides, whole, with their positions and heart rate, their write-ups and side-camera reports, a summary of each, your goals, notes and documents, your saved workouts and your workout goals. They are sealed on this device for the instance alone, and stay on this device too. Nothing is synced until you press Sync now.',
+  'Only if you ask it for one: a ride’s numbers for a write-up, sealed, and — if you store your own key for a hosted service there and agree to it — that key, sealed, and your list of words to mask with your privacy zones.',
 ];
 
 export const INSTANCE_RECEIVES_LEAD = 'What the instance receives from this app';

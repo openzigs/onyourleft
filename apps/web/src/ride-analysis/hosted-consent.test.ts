@@ -60,7 +60,7 @@ describe('the hosted consent (#1104 B1), as drafted for the owner', () => {
         "If the service's address changes, you are asked again before anything is sent to the new one.",
       ],
       notNeeded:
-        "You do not need this. Everything else in the app works without it, and a model on your instance's own machine can write the same analysis without sending anything to a service.",
+        'You do not need this. Everything else in the app works without it, and a model your instance runs on its own machine or its own private network can write the same analysis without sending anything to a service.',
       offUntilOn: 'This is off. It stays off until you agree, and you can withdraw it at any time.',
     });
   });
@@ -114,7 +114,7 @@ describe('the hosted consent (#1104 B1), as drafted for the owner', () => {
 describe('the rest of what a rider reads (#1251), as drafted', () => {
   it('is these words', () => {
     expect(HOSTED_PANEL_LEAD).toBe(
-      'Your instance can send a ride you ask it to analyse to a hosted model service instead of using a model on its own machine — but only on a key of your own, and only after you agree to that service by its address. This app has no key of its own and suggests no service. Nothing is sent to any service until you have stored a key and agreed below.',
+      'Your instance can send a ride you ask it to analyse to a hosted model service instead of using a model on its own machine or its own private network — but only on a key of your own, and only after you agree to that service by its address. This app has no key of its own and suggests no service. Nothing is sent to any service until you have stored a key and agreed below.',
     );
     expect(HOSTED_KEY_SEALED_ONLY).toBe(
       'Your key is sealed on this device so that only your instance can open it, and is accepted only over that sealed connection, never in plain text. This device does not keep it.',

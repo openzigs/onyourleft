@@ -129,6 +129,13 @@ describe('the Connect screen — #777, #778', () => {
     expect(sync).toContain('sealed on this device for the instance alone');
     expect(sync).toContain('Nothing is synced until you press Sync now');
     expect(sync).not.toContain('does not offer Sync yet');
+    // #1104 (F-3): what a sync also sends since #1100 and #1237.
+    expect(sync).toContain('your saved workouts and your workout goals');
+    // #1104 (F-3): what the instance receives without a sync.
+    const ask = INSTANCE_RECEIVES.find((line) => line.includes('Only if you ask it for one'));
+    expect(ask).toContain('a ride’s numbers for a write-up, sealed');
+    expect(ask).toContain('your list of words to mask with your privacy zones');
+    expect(INSTANCE_KEPT_VISIBLE).toContain(ask);
     expect(INSTANCE_KEPT_VISIBLE).toContain(room);
     expect(INSTANCE_KEPT_VISIBLE).toContain(sync);
     const scripted = scriptedInstance();

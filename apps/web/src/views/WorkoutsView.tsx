@@ -639,8 +639,8 @@ export function WorkoutsView({ port, now, save, selected }: WorkoutsViewProps): 
         <p>
           {shown.kind === 'missing'
             ? 'No workout with that address is saved on this device. It may have been deleted, ' +
-              'or the link may have come from another device — workouts are never copied ' +
-              'between them.'
+              'or it may be saved only on another of your devices, and not yet brought here by ' +
+              'a sync with your instance.'
             : 'It is stored on this device and could not be read back. Reload the page to try ' +
               'again.'}
         </p>

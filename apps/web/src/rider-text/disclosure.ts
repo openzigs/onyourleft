@@ -21,7 +21,7 @@ export const RIDER_TEXT_DISCLOSURE_LEAD =
 
 /** The rest of the first paragraph: what the instance does with it, and what is sent. */
 export const RIDER_TEXT_DISCLOSURE_DETAIL =
-  'When an instance is connected, your goals, notes and documents are copied to it when it syncs. It keeps a searchable copy so the analysis can look back at your history, and that copy is worked out by a model on that machine, not sent anywhere else to do it. When you ask for an analysis, the parts that match are sent to the model you set up — on your own computer, or, if you turned it on, a service you chose, after the details on your list are masked.';
+  'When an instance is connected, your goals, notes and documents are copied to it when it syncs. It keeps a searchable copy so the analysis can look back at your history, and that copy is worked out by a model on that machine or its own private network, not sent anywhere else to do it. When you ask your instance for an analysis, the model it uses may read the parts that match, and if you agreed to a hosted service there, those parts are sent to that service after the details on your list are masked.';
 
 /** The second paragraph: a model reads this text, and what that can mean. */
 export const RIDER_TEXT_MODEL_WARNING =

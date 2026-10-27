@@ -20,13 +20,11 @@
  * > visible to the user). A deletion dialogue that implies more than the
  * > architecture can deliver is the worst outcome.
  *
- * Here the answer is unusually good and should be said rather than assumed:
- * **there is nowhere else to ask.** Owner decision D6 means nothing has been
- * uploaded, so "delete my data" is complete rather than a request — which is a
- * stronger guarantee than a networked product can make, and the reason #57
- * rejected replication to peers we do not control. That changes the day
- * [#7](https://github.com/openzigs/onyourleft/issues/7) lands, and
- * {@link ERASE_CANNOT_REACH} is where the sentence will have to change with it.
+ * Until instances shipped the answer was **there is nowhere else to ask**.
+ * Since ADR 0036 a rider can sync to an instance and ask it for analyses, so
+ * an erase is complete on this device only, and {@link ERASE_CANNOT_REACH}
+ * says where the other copies are (#1104 removed the screen's "There is no
+ * server" sentence, which had stopped being true).
  *
  * ## The consequence a rider will not expect
  *
@@ -224,12 +222,20 @@ export const ERASE_CANNOT_REACH: readonly string[] = [
   // still sends a hosted service no picture. The instance keeps none, so the
   // instance line below needs no change for it.
   'a photograph your instance sent on to a hosted service you agreed to, which is a copy that service holds',
+  // #1104 (G-1): since #1251 the rider's instance can send a ride's numbers,
+  // and the parts of their history its model looks up, masked, on to a
+  // hosted service on the rider's own key (`apps/instance`
+  // §`analysis/hosted.ts`). That service's copy is not the instance's to
+  // erase, nor this device's.
+  'a ride’s numbers and the parts of your history your instance sent to a service you agreed to, which is a copy that service holds',
   'a photograph you copied off this device yourself, which is wherever you copied it to',
   // #777, #778. An erase forgets this device's sign-in to an instance
   // (`instance/instance-port.ts` §`instanceEraser`) and sends nothing; the
   // account the instance holds, and anything it received, are the instance's.
-  // ⚠️ Draft wording awaiting the owner's approval (#880).
-  'your account on an instance you connected to, and anything it received, which is a copy that instance holds',
+  // #1104 (G-2) names what it also works out for the rider: the history
+  // index (ADR 0040), the analyses it wrote (ADR 0046 D-12), a hosted key,
+  // the consent and the masking list (#1251).
+  'your account on an instance you connected to, and anything it received or worked out for you — what you synced, the searchable copy it keeps for the analysis, the analyses it wrote, any key of yours it holds, your agreement to a service, and your list of words to mask with your privacy zones — which is a copy that instance holds',
 ];
 
 /** The reason an erase is refused, or `undefined` when it is not. */

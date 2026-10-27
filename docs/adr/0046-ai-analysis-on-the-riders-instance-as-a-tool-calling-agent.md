@@ -1159,3 +1159,22 @@ Until 2026-10-07 this section was §"Owner questions left open".
   feature's own consent; the consent says *"A ride analysis never sends it a picture"*). The
   device-held hosted path of ADR 0035 D-9 C still ships beside this one until #1103 removes it, so
   ADR 0029's entry quoting that consent still governs it. The body above is not edited. (#1251)
+- **2026-10-26** — **D-12's job-row retention is what the code does, and the *"what was sent"*
+  log is deferred.** The owner's rulings on [#1104](https://github.com/openzigs/onyourleft/issues/1104):
+  1. **Retention.** On `main`, `pruneAnalysisJobs` deletes every ended job's events after 7 days, and
+     the job row only of a job that holds no write-up. A finished job keeps its row, its whole input
+     with it (the side-camera pose summary included when one was sent), until the athlete is
+     erased. D-12 said the job rows are kept 7 days, and Q2 said the pose summary is *"not kept with
+     the result"*. The owner ruled to **change the policy to match the code, not the code**: a
+     succeeded job keeps its input, pose summary included, with the account until the account is
+     erased; deleting the ride does not remove it; the account export carries the write-up and not
+     the input. The privacy policy says so in *A ride analysed on your instance* and the instance
+     table. This supersedes D-12's 7 days for a succeeded job's row and Q2's *"not kept with the
+     result"* for the job's input. A job that ends without a write-up still has its row deleted after 7
+     days, and every job's events are deleted after 7 days.
+  2. **The *"what was sent"* log** (D-10, D-12) is **built after launch**, as
+     [#1741](https://github.com/openzigs/onyourleft/issues/1741). Nothing keeps or shows one today,
+     and until #1741 ships nothing the app or the policy says promises one. D-12's paragraph on how
+     long the log is kept, and Q2's *"records only that one was sent"*, apply when #1741 builds it.
+
+  The body above is not edited. (#1104)
