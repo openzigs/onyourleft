@@ -45,6 +45,8 @@ import {
   TERMS_CHANGED_TEXT,
 } from './InstanceView';
 import { ACCOUNT_NOTICES_TEXT } from './InstanceDevices';
+import { ERASE_ACCOUNT_TEXT } from './EraseAccount';
+import { ERASE_REFUSAL_TEXT, type StatementsPort } from '../instance/statements-port';
 import type { BlocksPort } from '../instance/blocks-port';
 import { BLOCKS_TEXT } from './BlocksPanel';
 
@@ -110,9 +112,12 @@ describe('the Connect screen — #777, #778', () => {
     expect(said).toContain('earlier names');
     expect(said).toContain('Connecting itself sends no ride, route, position or heart rate');
     expect(said).not.toContain('Nothing else from this version of the app');
-    // No screen removes what the instance holds: the sentence says whom to ask.
+    // #906: what the instance holds is deleted from this screen, or by its operator.
+    expect(DISCONNECT_KEEPS_RIDES).toContain(
+      'delete your account on the instance from this screen',
+    );
     expect(DISCONNECT_KEEPS_RIDES).toContain('ask whoever runs the instance');
-    expect(DISCONNECT_KEEPS_RIDES).not.toContain('erased on the instance');
+    expect(DISCONNECT_KEEPS_RIDES).not.toContain('this app cannot remove it');
   });
 
   it('lists what a private room and a sync send, before Connect and kept visible — #778, #1195', async () => {
@@ -600,5 +605,139 @@ describe('the account-change notices and a revoke, on the device list — #1208'
     expect(text()).toContain(ACCOUNT_CHANGES_UNAVAILABLE_TEXT['not-revoked']);
     expect(text()).not.toContain(AFTER_REVOKE_TEXT);
     expect(text()).not.toContain(REVOKE_MARK_TEXT['added-since']);
+  });
+});
+
+describe('deleting the account on the instance from the Instance screen — #906', () => {
+  /**
+   * A statements port with no statements, whose deletion does what the real
+   * one does to this device (`statements-port.test.ts` holds that against a
+   * real instance): on `erased`, the sign-in is forgotten — here, the scripted
+   * instance stops being connected — and nothing else.
+   */
+  function erasing(
+    scripted: ReturnType<typeof scriptedInstance>,
+    outcome: Awaited<ReturnType<StatementsPort['eraseAccount']>>,
+  ): { readonly port: StatementsPort; readonly asked: () => number } {
+    let asked = 0;
+    return {
+      asked: () => asked,
+      port: {
+        read: () => Promise.resolve({ kind: 'statements', statements: [] }),
+        appeal: () => Promise.reject(new Error('no appeal in this test')),
+        exportAccount: () => Promise.reject(new Error('no export in this test')),
+        eraseAccount: () => {
+          asked += 1;
+          if (outcome.kind === 'erased') scripted.held.connected = false;
+          return Promise.resolve(outcome);
+        },
+      },
+    };
+  }
+
+  it('asks first, says nothing on this device is deleted, and sends nothing until confirmed', async () => {
+    const scripted = scriptedInstance({ connected: true });
+    const statements = erasing(scripted, { kind: 'erased' });
+    mounted = await mount(<InstanceView port={scripted.port} statements={statements.port} />);
+    await settle();
+    expect(text()).toContain(ERASE_ACCOUNT_TEXT.heading);
+    await activateWithKeyboard(button(ERASE_ACCOUNT_TEXT.erase));
+    await settle();
+    expect(text()).toContain(ERASE_ACCOUNT_TEXT.confirm);
+    expect(ERASE_ACCOUNT_TEXT.confirm).toContain('Nothing on this device is deleted');
+    expect(ERASE_ACCOUNT_TEXT.confirm).toContain('everything this instance holds about you');
+    expect(statements.asked()).toBe(0);
+    await activateWithKeyboard(button(ERASE_ACCOUNT_TEXT.keep));
+    await settle();
+    expect(text()).not.toContain(ERASE_ACCOUNT_TEXT.confirm);
+    expect(statements.asked()).toBe(0);
+    expect(text()).toContain('Lanes of the Weald');
+  });
+
+  it('deletes it on confirmation, and the screen READ BACK shows this device disconnected', async () => {
+    const scripted = scriptedInstance({ connected: true });
+    const statements = erasing(scripted, { kind: 'erased' });
+    mounted = await mount(<InstanceView port={scripted.port} statements={statements.port} />);
+    await settle();
+    await activateWithKeyboard(button(ERASE_ACCOUNT_TEXT.erase));
+    await settle();
+    await activateWithKeyboard(button(ERASE_ACCOUNT_TEXT.confirmErase));
+    await settle();
+    expect(statements.asked()).toBe(1);
+    // What shows is what the port reads now, not what the press assumed.
+    expect(scripted.calls.filter((call) => call === 'current').length).toBeGreaterThan(1);
+    expect(text()).toContain(ERASE_ACCOUNT_TEXT.erased);
+    expect(text()).not.toContain('Lanes of the Weald');
+    expect(text()).not.toContain(ERASE_ACCOUNT_TEXT.heading);
+    expect(button('Connect')).toBeDefined();
+  });
+
+  it('says why when the instance does not delete it, and stays signed in', async () => {
+    const scripted = scriptedInstance({ connected: true });
+    const statements = erasing(scripted, { kind: 'refused', text: ERASE_REFUSAL_TEXT });
+    mounted = await mount(<InstanceView port={scripted.port} statements={statements.port} />);
+    await settle();
+    await activateWithKeyboard(button(ERASE_ACCOUNT_TEXT.erase));
+    await settle();
+    await activateWithKeyboard(button(ERASE_ACCOUNT_TEXT.confirmErase));
+    await settle();
+    expect(statements.asked()).toBe(1);
+    expect(text()).toContain(ERASE_REFUSAL_TEXT);
+    expect(text()).not.toContain(ERASE_ACCOUNT_TEXT.erased);
+    expect(text()).toContain('Lanes of the Weald');
+  });
+
+  it('cannot be kept once the deletion is sent: the confirmation stays until the answer', async () => {
+    const scripted = scriptedInstance({ connected: true });
+    let answer: (outcome: Awaited<ReturnType<StatementsPort['eraseAccount']>>) => void = () => {};
+    const port: StatementsPort = {
+      ...erasing(scripted, { kind: 'erased' }).port,
+      eraseAccount: () =>
+        new Promise((resolve) => {
+          answer = (outcome) => {
+            scripted.held.connected = false;
+            resolve(outcome);
+          };
+        }),
+    };
+    mounted = await mount(<InstanceView port={scripted.port} statements={port} />);
+    await settle();
+    await activateWithKeyboard(button(ERASE_ACCOUNT_TEXT.erase));
+    await settle();
+    await activateWithKeyboard(button(ERASE_ACCOUNT_TEXT.confirmErase));
+    await settle();
+    expect(button(ERASE_ACCOUNT_TEXT.keep).getAttribute('aria-disabled')).toBe('true');
+    await activateWithKeyboard(button(ERASE_ACCOUNT_TEXT.keep));
+    await settle();
+    expect(text()).toContain(ERASE_ACCOUNT_TEXT.confirm);
+    answer({ kind: 'erased' });
+    await settle();
+    expect(text()).toContain(ERASE_ACCOUNT_TEXT.erased);
+  });
+
+  it('is not offered to a device that is not signed in', async () => {
+    const signedOut = scriptedInstance({
+      connected: true,
+      state: { kind: 'signed-out', origin: 'https://ride.example' },
+    });
+    mounted = await mount(
+      <InstanceView
+        port={signedOut.port}
+        statements={erasing(signedOut, { kind: 'erased' }).port}
+      />,
+    );
+    await settle();
+    expect(text()).toContain('Not signed in');
+    expect(text()).not.toContain(ERASE_ACCOUNT_TEXT.heading);
+    mounted.unmount();
+    const notConnected = scriptedInstance({ connected: false });
+    mounted = await mount(
+      <InstanceView
+        port={notConnected.port}
+        statements={erasing(notConnected, { kind: 'erased' }).port}
+      />,
+    );
+    await settle();
+    expect(text()).not.toContain(ERASE_ACCOUNT_TEXT.heading);
   });
 });

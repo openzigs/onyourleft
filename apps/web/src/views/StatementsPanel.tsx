@@ -4,6 +4,7 @@ import { useCallback, useEffect, useId, useState, type JSX } from 'react';
 
 import { Button } from '../design/Button';
 import { StatusMessage } from '../design/StatusMessage';
+import { ERASE_ACCOUNT_TEXT, EraseAccountControl } from './EraseAccount';
 import {
   MAXIMUM_APPEAL_GROUNDS,
   type RiderAppeal,
@@ -87,16 +88,14 @@ export const YOUR_DATA_TEXT = {
   link: 'Save the copy (a JSON file)',
   file: 'onyourleft-instance-account.json',
   unreadable: 'The instance did not answer, so nothing was saved. Try again later.',
-  erase: 'Delete my account on this instance',
+  erase: ERASE_ACCOUNT_TEXT.erase,
   confirm:
     'This deletes your account and everything this instance holds about you, and cannot be ' +
     'undone. It cannot reach a copy anyone already saved, or another instance. The moderation ' +
     'log is kept. The rides on this device stay here.',
-  confirmErase: 'Delete it',
-  keep: 'Keep my account',
-  erased:
-    'Your account on this instance was deleted, and this device is no longer signed in to it. ' +
-    'Your rides are still on this device.',
+  confirmErase: ERASE_ACCOUNT_TEXT.confirmErase,
+  keep: ERASE_ACCOUNT_TEXT.keep,
+  erased: ERASE_ACCOUNT_TEXT.erased,
 } as const;
 
 /** A moment, in UTC, so the screen says the same thing wherever it is read. */
@@ -247,8 +246,6 @@ function YourData({
   const [href, setHref] = useState<string | undefined>(undefined);
   const [unreadable, setUnreadable] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [confirming, setConfirming] = useState(false);
-  const [refusal, setRefusal] = useState<string | undefined>(undefined);
   const [erased, setErased] = useState(false);
   useEffect(
     () => () => {
@@ -298,55 +295,14 @@ function YourData({
           {YOUR_DATA_TEXT.unreadable}
         </StatusMessage>
       ) : null}
-      {confirming ? (
-        <>
-          <p>{YOUR_DATA_TEXT.confirm}</p>
-          <Button
-            variant="danger"
-            unavailable={busy}
-            onClick={() => {
-              if (busy) return;
-              setBusy(true);
-              void port.eraseAccount().then((outcome) => {
-                setBusy(false);
-                if (outcome.kind === 'erased') {
-                  setErased(true);
-                  onErased();
-                } else {
-                  setRefusal(outcome.text);
-                }
-              });
-            }}
-          >
-            {YOUR_DATA_TEXT.confirmErase}
-          </Button>{' '}
-          <Button
-            variant="secondary"
-            onClick={() => {
-              setConfirming(false);
-              setRefusal(undefined);
-            }}
-          >
-            {YOUR_DATA_TEXT.keep}
-          </Button>
-        </>
-      ) : (
-        <p>
-          <Button
-            variant="danger"
-            onClick={() => {
-              setConfirming(true);
-            }}
-          >
-            {YOUR_DATA_TEXT.erase}
-          </Button>
-        </p>
-      )}
-      {refusal === undefined ? null : (
-        <StatusMessage tone="warning" label="Not deleted" live>
-          {refusal}
-        </StatusMessage>
-      )}
+      <EraseAccountControl
+        port={port}
+        words={YOUR_DATA_TEXT}
+        onErased={() => {
+          setErased(true);
+          onErased();
+        }}
+      />
     </div>
   );
 }
