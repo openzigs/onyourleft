@@ -34,7 +34,14 @@ import type { ActivityId } from '@onyourleft/store';
 import type { ScreenedWriteUp } from '@onyourleft/analysis';
 
 import type { InstanceJobSource } from './instance-job';
-import type { AskOutcome } from './ride-analysis-port';
+
+/**
+ * How an ask ended (#804's shape, kept here since #1103 removed the device's
+ * own run): saved with the ride, replacing any write-up it had; or nothing
+ * saved, any earlier write-up untouched, with a sentence from a fixed table.
+ */
+export type AskOutcome =
+  { readonly kind: 'written' } | { readonly kind: 'failed'; readonly text: string };
 
 /** What the page shows while a job is followed. Only screened text. */
 export interface InstanceJobView {

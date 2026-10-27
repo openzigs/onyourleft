@@ -28,7 +28,6 @@ import { describe, expect, it } from 'vitest';
 import type { TestContext } from 'vitest';
 
 import { endpointDecision } from '../../../web/src/camera/analysis-endpoint';
-import { hostedModelDecision } from '../../../web/src/camera/hosted-model';
 import { instanceAddress } from '../../../web/src/instance/address';
 import {
   DATA_PATHS,
@@ -261,11 +260,11 @@ describe('the declaration filed on Play', () => {
     expect(health.length).toBeGreaterThanOrEqual(2);
   });
 
-  it('answers both health rows as collected, optional and SHARED — #804, #803', () => {
-    // #804's press sends a ride's heart rate, power and cadence, as numbers,
-    // to the rider's own computer — collected. #803 sends the same to a hosted
-    // model on the rider's own key, a third party the rider chose — shared
-    // (the owner's ruling 4 on #795), re-filed in the same pull request.
+  it('answers both health rows as collected, optional and SHARED — #1102, #1251', () => {
+    // #804 made them collected and #803 shared, by the device's own paths.
+    // #1103 removed both; a write-up asked of the rider's instance (#1102)
+    // keeps them collected, and the instance's hosted path (#1251), a third
+    // party the rider agreed to by name, keeps them shared.
     for (const dataType of [
       'Health and fitness — health info',
       'Health and fitness — fitness info',
@@ -276,10 +275,13 @@ describe('the declaration filed on Play', () => {
       expect(answer?.shared, dataType).toBe(true);
       expect(answer?.optional, dataType).toBe(true);
       expect(answer?.purposes, dataType).toStrictEqual(['App functionality']);
-      expect(answer?.why, dataType).toContain('#804');
-      expect(answer?.why, dataType).toContain('their own network');
-      expect(answer?.why, dataType).toContain('#803');
-      expect(answer?.why, dataType).toContain('hosted model service the rider chose');
+      expect(answer?.why, dataType).toContain('#1102');
+      expect(answer?.why, dataType).toContain('#1251');
+      expect(answer?.why, dataType).toContain('That service is a third party, hence shared');
+      // The two device paths #1103 removed are not described as live.
+      expect(answer?.why, dataType).not.toContain('off again whenever the app is opened');
+      expect(answer?.why, dataType).not.toContain('is sent to the source they chose');
+      expect(answer?.why, dataType).not.toContain('are sent as numbers to the source they chose');
     }
   });
 
@@ -292,7 +294,7 @@ describe('the declaration filed on Play', () => {
     );
     expect(fitness?.why).toContain('total climb (the height gained over the section');
     expect(fitness?.why).toContain('a difference between two heights and never an altitude');
-    expect(fitness?.why).toContain('No position, altitude, date or identifier is sent');
+    expect(fitness?.why).toContain('no position, altitude, date or identifier is in the numbers');
   });
 
   it('answers the photos row as collected and optional — #387 — and, since #1106, shared', () => {
@@ -668,14 +670,11 @@ describe('each path’s encryption answer is the one the client enforces — #56
     expect(pathById('own-computer').encryptedInTransit).toBe(plain.endpoint === undefined);
   });
 
-  it('a hosted model refuses a plain http address, so that path is encrypted', () => {
-    const plain = hostedModelDecision({
-      address: 'http://models.example',
-      model: 'a-model',
-      key: 'a-key',
-    });
-    expect(plain.refusal).toBe('not-https');
-    expect(pathById('hosted-model').encryptedInTransit).toBe(plain.model === undefined);
+  it('names no path to a hosted model from the device — #1103', () => {
+    // The device sends a hosted model nothing since #1103; the rider's
+    // instance does, and that leg is the instance's.
+    expect(DATA_PATHS.map((path) => path.id)).not.toContain('hosted-model');
+    expect(pathById('own-computer').dataTypes).toStrictEqual(['Photos and videos']);
   });
 
   it('an instance refuses plain http across a network, and admits it only to this device', () => {
@@ -708,7 +707,8 @@ describe('the privacy policy agrees with the section-level answers — #562', ()
     expect(policySection('Pictures sent to your own computer')).toContain(
       'not encrypted on the way',
     );
-    expect(policySection('A ride sent to your own computer')).toContain('not encrypted on the way');
+    // #1103 removed *A ride sent to your own computer*, and the path with it.
+    expect(POLICY).not.toContain('## A ride sent to your own computer');
   });
 
   it('says everything else travels encrypted, naming the one exception', () => {

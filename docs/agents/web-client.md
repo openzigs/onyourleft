@@ -422,7 +422,8 @@ apps/                 AGPL-3.0-or-later, without exception
                         row can be hand-edited. ⚠️ A failed, cancelled or
                         withheld ask keeps the earlier write-up and says why
                         ABOVE it (the owner's ruling of 2026-09-29); with no
-                        model set up it is one sentence and a link to Camera
+                        instance it is one sentence (since #1103 no link to
+                        Camera: the device sets up no model of its own)
     src/instance/       the client half of signing in to an instance (#772) and
                         of linking this device to an athlete (#773): the local
                         athlete first, then the device key, then challenge →
@@ -747,67 +748,23 @@ apps/                 AGPL-3.0-or-later, without exception
                         `input.test.ts` walks a built input for all of it. A
                         gap is coverage, never a zero; W/kg only with a real
                         mass; the pose summary only with camera consent and
-                        never in a section. ⚠️ Called since #804 (below).
-                        Since #811 `runner.ts` runs a template's steps through
-                        `model-step-port.ts` — per-step and per-run time and
-                        token budgets, one parse-repair re-ask, a failed
-                        section LEFT OUT, the #798 screen and one rewrite —
-                        and saves nothing: a caller keeps a write-up only on
-                        `written`. Time is a `RunnerClock` it is handed.
-                        ⚠️ Its two `@unwired` tags came off with #804 —
-                        a reviewer who remembers them is reading the old
-                        file. Since #802
-                        `own-computer-step.ts` is the step port to the rider's
-                        own computer: text only (a step with any other field,
-                        a byte array or a `data:` URL is refused as
-                        `not-numbers` before a byte is sent), `finish_reason`
-                        read, the runner's signal handed to the request. It
-                        sends through `camera/analysis-transport.ts`
-                        §`riderModelStepPort`, which hands it the client's ONE
-                        `fetch`; ⚠️ it is NOT in that module because that
-                        module builds pictures and this one must reach none.
-                        Since #804 `ride-analysis.ts` is the post-ride ASK
-                        behind `ride-analysis-port.ts`: one press on a ride's
-                        page (`RideWriteUpControl.tsx`, the only caller) reads
-                        the ride, runs the agent through the step port
-                        `main.tsx` builds with `riderModelStepSource`, and
-                        saves ONLY a `ScreenedWriteUp`, replacing the ride's
-                        write-up; any failure leaves the earlier one as it
-                        was. The rider's own computer is offered first.
-                        ⚠️ Since #803 there IS a hosted source — a reviewer
-                        who remembers "no hosted STEP port until #803" is
-                        reading the old file: `hosted-step.ts` sends each step
-                        through `CameraController.askHostedModel`, which
-                        checks the hosted consent on EVERY step, to
-                        `camera/hosted-transport.ts`'s one `fetch`. Only a
-                        step the runner SEALED is sent (`sealed-step.ts`: a
-                        brand no literal satisfies, and a `WeakSet` checked
-                        by identity at run time); `sealed-step.test.ts` fails
-                        if any production module but `runner.ts` names
-                        `sealStep`. No `response_format` hint goes to a hosted
-                        service. ⚠️ The port is an
-                        optional prop, so `ride-analysis-wiring.test.tsx`
-                        drives the real shell at the detail route with it
-                        built as `main.tsx` builds it. ⚠️ Since #805 the
-                        control is RENDERED by `detail/RideWriteUpSection.tsx`
-                        rather than straight by the page, keeps its ask
-                        controls in the tab order (`aria-disabled`) while a
-                        run goes, and says beside them what will be sent, in
-                        ADR 0035 D-9 B's words, marked kept-visible. A port
-                        remembers a server that refused the `response_format`
-                        hint and stops offering it (#805, from #831's review).
-                        ⚠️ **Since #1094 the platform-free core is NOT here**:
-                        `runner.ts`, `template*.ts`, `input.ts`, `history.ts`,
-                        `model-step-port.ts`, `sealed-step.ts` and
-                        `hosted-mask.ts` moved to `packages/analysis`
-                        (`@onyourleft/analysis`, Apache-2.0, ADR 0046 D-4),
-                        imported from there unchanged. What stays here is
-                        everything that reads a store, names a transport or
-                        renders: `read-input.ts`, `ride-summary.ts`,
-                        `ride-analysis.ts`, `own-computer-step.ts`,
-                        `hosted-step.ts` and every `.tsx`. The tests that read
-                        the app or the shell stayed too, as `*-app.test.ts`
-                        and `runner-native.test.ts` beside them
+                        never in a section. Called by the instance ask (below).
+                        ⚠️ **Since #1103 the device runs no write-up of its
+                        own**, and a reviewer who remembers `runner.ts`,
+                        `own-computer-step.ts`, `hosted-step.ts`,
+                        `ride-analysis.ts`, `ride-analysis-port.ts` or
+                        `RideWriteUpControl.tsx` is reading the old file:
+                        the device's runner, the write-up asked of the rider's
+                        own computer and the hosted model on a key kept on the
+                        device went together (ADR 0046 D-1, owner ruling 1 of
+                        2026-10-04). A write-up is asked of the rider's
+                        INSTANCE only (#1102): `instance-analysis.ts` behind
+                        `instance-analysis-port.ts`, pressed from
+                        `InstanceWriteUpControl.tsx`, screened again and saved
+                        on the device. Write-ups saved by the old paths still
+                        render, with their source in words. The platform-free
+                        core is `packages/analysis` (#1094); what stays here
+                        reads a store, names a transport or renders.
                         ⚠️ Since #1251 it also holds the rider's OWN hosted
                         key and hosted consent on their instance:
                         `hosted-settings.ts` (the sealed calls, `pastedKey`

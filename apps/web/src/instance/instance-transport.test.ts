@@ -183,7 +183,7 @@ describe('the one transport to an instance — #777', () => {
  * ADR 0036 D-3 (d): a picture never leaves through the instance. What reaches
  * this module is what `instance/` imports, so no module there may import from
  * the camera or name a frame — read off the parsed imports, as
- * `camera/hosted-transport.test.ts` does for its own module.
+ * `camera/no-picture-reachable.test.ts` does for the camera graph.
  */
 describe('no camera type can reach the instance module — ADR 0036 D-3 (d)', () => {
   const DIRECTORY = fileURLToPath(new URL('.', import.meta.url));

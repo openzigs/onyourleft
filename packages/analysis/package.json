@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "license": "Apache-2.0",
-  "description": "The platform-free core of a model-written ride write-up: the runner, the templates, the input builder, the history passages, the write-up screen and its angle matchers, and the hosted mask (ADR 0046 D-4, D-5). No platform API, no store, no model SDK.",
+  "description": "The platform-free core of a model-written ride write-up: the templates, the input builder, the history passages, the write-up screen and its angle matchers, and the hosted mask (ADR 0046 D-4, D-5). No platform API, no store, no model SDK.",
   "exports": {
     ".": "./src/index.ts",
     "./testing": "./src/testing.ts"

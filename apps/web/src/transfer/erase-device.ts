@@ -160,12 +160,11 @@ export const ERASE_REMOVES: readonly string[] = [
   // cascades `riderTexts`. The instance's synced copy is not this device's to
   // erase — see the instance line in {@link ERASE_CANNOT_REACH}.
   'your goals, your notes on your rides and the documents you added for the analysis',
-  // #518. Not a store row: the address, model name and key of a hosted model
-  // the rider set up are kept in `localStorage` (`camera/hosted-model.ts`),
-  // where `deleteAthlete` cannot see them. A key to the rider's own account at
-  // somebody else's service is the last thing an erase should leave behind.
-  // {@link eraseDevice} is what makes the line true.
-  'the address, model name and key you entered for a hosted model',
+  // #1103: no line for a hosted model's key any more. From #518 it was kept in
+  // `localStorage` and this list named it; #1103 deletes it at the first launch
+  // (`camera/retired-hosted-key.ts`), so no device holds one to erase. An
+  // erase still forgets it, and the note that it was deleted, in case either
+  // is somehow left ({@link eraseDevice}'s `retiredHostedKey`).
   // #1428. Not a store row: since #1305 the last target each trainer
   // acknowledged, and when, is kept in `localStorage`
   // (`ride/trainer-target-memory.ts`), keyed by the trainer's device id — on
@@ -202,17 +201,16 @@ export const ERASE_CANNOT_REACH: readonly string[] = [
   // instance, by name.
   'a photograph you sent to your own machine to be analysed, which is a copy that machine holds',
   // #518, ADR 0029's 2026-09-28 amendment. The hosted service is a third party
-  // and keeps what it keeps; this project cannot compel a deletion. #803
-  // re-read it: the hosted path now sends a ride's numbers when the rider asks
-  // for an analysis (ADR 0029's 2026-09-29 amendment), so the line names them
-  // as well as a question — a line about a question alone would understate
-  // what that service may hold.
-  'a question or a ride’s numbers you sent to a service you chose, on your own key, which is a copy that service holds',
-  // #804, from #828's review. The post-ride ask sends a ride's NUMBERS to the
-  // rider's own computer (ADR 0035 D-9 B), and the privacy policy's erase
-  // paragraph already says an erase cannot reach that copy;
-  // `erase-device.test.ts` holds the two texts together.
-  'a ride’s numbers you sent to your own computer for a write-up, which is a copy that computer holds',
+  // and keeps what it keeps; this project cannot compel a deletion. #1103
+  // removed the path that sent it (ADR 0046 D-1), and the owner ruled on
+  // 2026-10-26 (#1104 G-4) that the line is KEPT in the past tense: a rider
+  // who used it before still has a copy out there.
+  'a question or a ride’s numbers this app sent, before this version, to a service you chose on a key kept on this device, which is a copy that service holds',
+  // #804, from #828's review, and in the past tense since #1103 for the same
+  // ruling: the post-ride ask sent a ride's NUMBERS to the rider's own
+  // computer (ADR 0035 D-9 B, withdrawn). The privacy policy's erase paragraph
+  // says the same; `erase-device.test.ts` holds the two texts together.
+  'a ride’s numbers this app sent, before this version, to your own computer for a write-up, which is a copy that computer holds',
   // #1106: **ADR 0029 D-4's SECOND line, which the comment above said was not
   // here** — *"a photograph you sent to a hosted model, which is a copy that
   // service holds"*. It is true now, by one path: with the rider's own consent
@@ -367,8 +365,8 @@ export async function eraseDevice(
     readonly drafts?: EraseSideStores | undefined;
     /** The palette choice (#672) — `design/theme-selection.ts` §`themeEraser`. */
     readonly theme?: EraseSideStores | undefined;
-    /** The hosted model and its key (#518) — `camera/hosted-model.ts` §`hostedModelEraser`. */
-    readonly hostedModel?: EraseSideStores | undefined;
+    /** A hosted key from before #1103, and the note that it was deleted — `camera/retired-hosted-key.ts` §`retiredHostedKeyEraser`. */
+    readonly retiredHostedKey?: EraseSideStores | undefined;
     /** This device's sign-in to an instance (#777) — `instance/instance-port.ts` §`instanceEraser`. */
     readonly instance?: EraseSideStores | undefined;
     /** The note of jobs asked of the instance and not yet seen to end (#1102) — `ride-analysis/instance-analysis.ts` §`instanceAnalysisEraser`. */
@@ -381,7 +379,7 @@ export async function eraseDevice(
   const counts = await store.deleteAthlete(athleteId);
   options.drafts?.forget();
   options.theme?.forget();
-  options.hostedModel?.forget();
+  options.retiredHostedKey?.forget();
   options.instance?.forget();
   options.instanceAnalysis?.forget();
   options.trainerTargets?.forget();

@@ -132,11 +132,11 @@ describe('what the consent screen states', () => {
 });
 
 describe('the decision', () => {
-  const acknowledged = { acknowledgedBystanders: true, allowLocal: true, allowHosted: false };
+  const acknowledged = { acknowledgedBystanders: true, allowLocal: true };
 
   it('records a local consent once the bystander sentence is acknowledged', () => {
     expect(consentDecision(acknowledged)).toStrictEqual({
-      consent: { local: true, hosted: false },
+      consent: { local: true },
       refusal: undefined,
     });
   });
@@ -153,37 +153,24 @@ describe('the decision', () => {
       consentDecision({
         acknowledgedBystanders: true,
         allowLocal: false,
-        allowHosted: false,
       }).refusal,
     ).toBe('nothing-agreed');
   });
 
-  it('granting the local answer does not grant the hosted one', () => {
+  it('grants nothing beyond the camera on this device (#1103: no hosted answer is left)', () => {
     // #382's own criterion, and the failure it prevents: *"a single 'allow
     // camera' toggle that silently also permits third-party egress"*.
-    const decision = consentDecision(acknowledged);
-    expect(decision.consent?.local).toBe(true);
-    expect(decision.consent?.hosted).toBe(false);
-  });
-
-  it('refuses a hosted answer that has no local one under it', () => {
-    expect(
-      consentDecision({
-        acknowledgedBystanders: true,
-        allowLocal: false,
-        allowHosted: true,
-      }).refusal,
-    ).toBe('hosted-without-local');
+    expect(Object.keys(consentDecision(acknowledged).consent ?? {})).toStrictEqual(['local']);
   });
 
   it('a device nobody has answered on has agreed to nothing', () => {
-    expect(NO_CONSENT).toStrictEqual({ local: false, hosted: false });
+    expect(NO_CONSENT).toStrictEqual({ local: false });
   });
 
   it('has a sentence for every refusal it can return', () => {
     // Total over the union rather than sampled: a refusal added without words
     // renders `undefined` at a rider.
-    for (const refusal of ['not-acknowledged', 'nothing-agreed', 'hosted-without-local'] as const) {
+    for (const refusal of ['not-acknowledged', 'nothing-agreed'] as const) {
       expect(CONSENT_REFUSAL_TEXT[refusal].length).toBeGreaterThan(20);
     }
   });

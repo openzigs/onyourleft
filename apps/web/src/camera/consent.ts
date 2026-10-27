@@ -35,25 +35,16 @@
  * is then the whole remedy, and a reviewer of #382 should read it that way
  * rather than as a softener."*
  *
- * ## Two answers, not one
+ * ## One answer
  *
- * Owner decision D-B: a hosted model is permitted **on the rider's own key,
- * opted into, never default and never silent**. The failure that prevents is a
- * single "allow camera" toggle that silently also permits third-party egress,
- * so {@link CameraConsent} has two independent members and
- * {@link consentDecision} never infers one from the other.
- *
- * ⚠️ **Since #518 the hosted answer IS offered, and a reviewer who remembers
- * "modelled here and NOT offered on any screen" is reading the old file.** The
- * owner ruled on 2026-09-28 (ADR 0029's amendment of that date): a hosted
- * model on the rider's own key, **numbers only and never a picture**, off by
- * default and separately consented. So `hosted` is set by
- * `session.ts` §`CameraController.agreeToHosted` — its own switch on the Camera
- * screen, beside the wording `hosted-model.ts` §`HOSTED_CONSENT` quotes from
- * that amendment — and by nothing else: the camera's own consent control still
- * passes `allowHosted: false`. What it grants is a question sent to a service
- * the rider typed; it grants no picture anywhere, and the name `CameraConsent`
- * is historical rather than a claim that the hosted path carries one.
+ * ⚠️ **Since #1103 there is one answer, and a reviewer who remembers a second
+ * member, `hosted`, is reading the old file.** From #518 to #1103 the camera's
+ * consent also carried the device-held hosted model's own switch (owner
+ * decision D-B: on the rider's own key, opted into, never default, never
+ * inferred from this one). #1103 removed that path with the device-held key
+ * (ADR 0046 D-1): a hosted model is now agreed to on the rider's instance,
+ * naming its address (`ride-analysis/hosted-consent.ts`), and is no camera
+ * answer at all. Nothing in this answer permits third-party egress.
  */
 
 /**
@@ -145,7 +136,7 @@ export const CONSENT_STATEMENT: readonly string[] = [
   SCREENSHOT_SENTENCE,
 ];
 
-/** Both answers a rider can give. @see consentDecision */
+/** The answer a rider can give. @see consentDecision */
 export interface CameraConsent {
   /**
    * Turn the camera on, on this device, for this device's own use.
@@ -153,29 +144,13 @@ export interface CameraConsent {
    * Everything this pull request builds sits under this one answer.
    */
   readonly local: boolean;
-  /**
-   * Send a question to a service the rider has chosen — owner decision D-B,
-   * ADR 0029 D-7, narrowed by the owner's 2026-09-28 *"numbers only"* ruling:
-   * the hosted path is never sent a picture. Set only by
-   * `CameraController.agreeToHosted`, and separable from `local` *by
-   * construction*, which is #382's own criterion.
-   */
-  readonly hosted: boolean;
 }
 
 /** The state of a device nobody has agreed to anything on. */
-export const NO_CONSENT: CameraConsent = { local: false, hosted: false };
+export const NO_CONSENT: CameraConsent = { local: false };
 
-/**
- * Why a consent was refused.
- *
- * `hosted-without-local` is the one worth reading twice. A rider cannot agree
- * to send a picture somewhere without agreeing to take one, and modelling that
- * as a refusal rather than as an implication is the point: an implication would
- * be the code inferring one answer from the other, which is exactly what #382
- * forbids.
- */
-export type ConsentRefusal = 'not-acknowledged' | 'nothing-agreed' | 'hosted-without-local';
+/** Why a consent was refused. */
+export type ConsentRefusal = 'not-acknowledged' | 'nothing-agreed';
 
 /** Whether consent may be recorded, and why not when it may not. */
 export interface ConsentDecision {
@@ -203,33 +178,17 @@ export interface ConsentAnswers {
    */
   readonly acknowledgedBystanders: boolean;
   readonly allowLocal: boolean;
-  /** @see CameraConsent.hosted — only `CameraController.agreeToHosted` passes `true`. */
-  readonly allowHosted: boolean;
 }
 
-/**
- * Whether these answers record a consent.
- *
- * ⚠️ **Granting the local answer grants nothing else**, which is the property
- * `consent.test.ts` asserts by name: the returned `hosted` is the rider's own
- * `allowHosted` and is never derived from `allowLocal`. Deleting that
- * independence — returning `hosted: input.allowLocal`, which is what a single
- * toggle looks like in code — turns that test red.
- */
+/** Whether these answers record a consent. */
 export function consentDecision(input: ConsentAnswers): ConsentDecision {
-  if (!input.allowLocal && !input.allowHosted) {
+  if (!input.allowLocal) {
     return { consent: undefined, refusal: 'nothing-agreed' };
-  }
-  if (input.allowHosted && !input.allowLocal) {
-    return { consent: undefined, refusal: 'hosted-without-local' };
   }
   if (!input.acknowledgedBystanders) {
     return { consent: undefined, refusal: 'not-acknowledged' };
   }
-  return {
-    consent: { local: input.allowLocal, hosted: input.allowHosted },
-    refusal: undefined,
-  };
+  return { consent: { local: true }, refusal: undefined };
 }
 
 /** One sentence per refusal, for the screen. */
@@ -237,6 +196,4 @@ export const CONSENT_REFUSAL_TEXT: Readonly<Record<ConsentRefusal, string>> = {
   'not-acknowledged':
     'Tick the box to say you have read what happens to anyone else in the room, then turn the camera on.',
   'nothing-agreed': 'The camera stays off until you say it may be on.',
-  'hosted-without-local':
-    'A picture cannot be sent anywhere unless the camera may take one on this device first.',
 };

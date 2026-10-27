@@ -277,7 +277,6 @@ function SessionScreen({
       acknowledgedBystanders: acknowledged,
       allowLocal: true,
       // ⚠️ Hard `false`: `camera/consent.ts` §`CameraConsent.hosted`.
-      allowHosted: false,
     });
     if (decision.consent === undefined) {
       setRefused(true);

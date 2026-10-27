@@ -18,7 +18,7 @@ import { CameraController } from './session';
 import { manualSchedule, scriptedCamera, stillRoom } from './testing';
 import { browserSecureWindow } from './secure-window-testing';
 
-const AGREED = { acknowledgedBystanders: true, allowLocal: true, allowHosted: false } as const;
+const AGREED = { acknowledgedBystanders: true, allowLocal: true } as const;
 
 /** Lets every pending promise run: a macrotask, so the whole chain has settled. */
 async function settle(): Promise<void> {
@@ -139,7 +139,7 @@ describe('consent for presence is not consent for anything else', () => {
     }
     expect(r.controller.riderPresence()).toBe('present');
     // Not the hosted opt-in: the consent is exactly what the rider gave.
-    expect(r.controller.state().consent).toStrictEqual({ local: true, hosted: false });
+    expect(r.controller.state().consent).toStrictEqual({ local: true });
     // Not the analysis path, nor the keep: no frame was taken, none reached a
     // sink, and nothing was counted as a picture.
     expect(r.camera.calls).not.toContain('capture');

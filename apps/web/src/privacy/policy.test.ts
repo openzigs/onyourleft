@@ -80,10 +80,11 @@ describe('the published privacy policy', () => {
     expect(text).toContain('A second phone you pair as a side camera');
     // ⚠️ Three since #518, whose hosted question is the third; four since
     // #777, whose instance sign-in is the fourth; five since #1539, whose
-    // realistic-world corridor is the fifth (#1104). Each count it made false
-    // is pinned gone as the one before it was.
-    expect(text).toContain('exactly **five** network calls');
-    expect(text).not.toContain('exactly **four** network calls');
+    // realistic-world corridor is the fifth (#1104); and FOUR again since
+    // #1103, which removed #518's hosted transport from the device. Each count
+    // it made false is pinned gone as the one before it was.
+    expect(text).toContain('exactly **four** network calls');
+    expect(text).not.toContain('exactly **five** network calls');
     expect(text).not.toContain('exactly **three** network calls');
     expect(text).not.toContain('exactly **two** network calls');
     expect(text).not.toContain('exactly **one** network call');

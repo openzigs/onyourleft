@@ -117,7 +117,7 @@ type LoadState =
  * - **A ride analysis**: threshold power is `rider.thresholdPower` in every
  *   ride analysis' input (`@onyourleft/analysis` §`rideAnalysisInput`), read
  *   by `ride-analysis/read-input.ts` and sent by `ride-analysis/instance-job.ts`
- *   and `camera/hosted-model.ts`, whichever model the rider chose.
+ *   to the rider's instance, whichever model it then asks.
  * - **A re-plan during the ride**: the threshold is the divisor of each
  *   block's `meanPowerShare` (`workout/replan-session.ts` §`summaryOf`); the
  *   request (`workout/replan-job.ts` §`replanInput`) carries that share and

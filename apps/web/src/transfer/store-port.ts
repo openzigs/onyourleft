@@ -283,11 +283,13 @@ export interface TransferPort {
    */
   readonly theme: DraftStore;
   /**
-   * The hosted model's address, model name and key in `localStorage` (#518),
-   * so an erase can forget them. Required for `theme`'s reason: a caller
-   * cannot build an erase that silently leaves a key behind.
+   * A hosted model's key this device kept before #1103, and the note that it
+   * was deleted, in `localStorage` — `camera/retired-hosted-key.ts`. The first
+   * launch after #1103 deletes the key; an erase forgets both all the same.
+   * Required for `theme`'s reason: a caller cannot build an erase that
+   * silently leaves a key behind.
    */
-  readonly hostedModel: DraftStore;
+  readonly retiredHostedKey: DraftStore;
   /**
    * This device's sign-in to an instance and its address in `localStorage`
    * (#777), so an erase can forget them — `instance/instance-port.ts`

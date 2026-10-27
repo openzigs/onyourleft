@@ -68,12 +68,7 @@ import {
   platformMediaDevices,
 } from './camera/browser-camera';
 import { readAnalysisEndpoint } from './camera/analysis-endpoint';
-import {
-  riderAnalysisPort,
-  riderAnalysisSource,
-  riderModelStepSource,
-} from './camera/analysis-transport';
-import { createRideAnalysis, platformRunnerClock } from './ride-analysis/ride-analysis';
+import { riderAnalysisPort, riderAnalysisSource } from './camera/analysis-transport';
 import {
   createInstanceAnalysis,
   instanceAnalysisEraser,
@@ -88,12 +83,13 @@ import {
 import type { HostedSettingsPort } from './ride-analysis/hosted-settings-port';
 import { jobSessionOf } from './ride-analysis/instance-job';
 import { createReplanPort, type ReplanPort } from './workout/replan-port';
-import type { RideAnalysisPort } from './ride-analysis/ride-analysis-port';
-import { hostedStepPort } from './ride-analysis/hosted-step';
-import { hostedModelEraser, readHostedModel } from './camera/hosted-model';
-import { hostedModelPort } from './camera/hosted-transport';
 import { readMaskingGuard } from '@onyourleft/analysis';
 import { keepThisRide } from './camera/keep';
+import {
+  deviceRetiredKeyStorage,
+  retireDeviceHostedKey,
+  retiredHostedKeyEraser,
+} from './camera/retired-hosted-key';
 import { shellCameraNotice } from './camera/shell-camera';
 import { CameraController } from './camera/session';
 import { documentForeground, SecureWindow } from './camera/secure-window';
@@ -862,7 +858,7 @@ function buildTransferPort(corridors: WorldCorridorPort): TransferPort | undefin
     save: saveWithAnchor,
     drafts: browserDraftStorage(typeof localStorage === 'undefined' ? undefined : localStorage),
     theme: themeEraser(window),
-    hostedModel: hostedModelEraser(),
+    retiredHostedKey: retiredHostedKeyEraser(deviceRetiredKeyStorage()),
     instance: instanceEraser(typeof localStorage === 'undefined' ? undefined : localStorage),
     instanceAnalysis: instanceAnalysisEraser(
       typeof localStorage === 'undefined' ? undefined : localStorage,
@@ -912,8 +908,8 @@ function buildAthleteKitColourPort(): AthleteKitColourPort {
 }
 
 /**
- * The rider's words to mask (#839), over the same connection. The hosted
- * transport reads the same row for every request (`buildCameraController`).
+ * The rider's words to mask (#839), over the same connection. A hosted
+ * write-up sends the instance the same row before every job (#1251).
  */
 function buildMaskedWordsPort(): MaskedWordsPort {
   return { store: localStore(), athleteId: LOCAL_ATHLETE };
@@ -1214,47 +1210,6 @@ async function buildRiderAnalysis(): Promise<() => ReturnType<typeof riderAnalys
 }
 
 /**
- * The post-ride ask (#804): one press on a ride's page runs the analysis agent
- * on the rider's own computer and saves the screened write-up with the ride.
- *
- * ⚠️ **The step port is built by `riderModelStepSource`, not here**, for the
- * reason `buildRiderAnalysis` gives: inside the Android shell it must be the
- * native request, and that choice has to be somewhere a test can see it.
- * The hosted model (#803) is the second source, and the rider's own computer
- * is offered first when both are set up (ruling 7). It is offered only while
- * the rider has turned it on since the app was opened and a service is saved,
- * and every step goes through `CameraController.askHostedModel`, which checks
- * the hosted consent again — `ride-analysis/hosted-step.ts`. With no camera
- * there is no controller to hold that consent, so there is no hosted source.
- *
- * The camera's consent is read at the press, not now: it is held in memory
- * and turned on on the Camera screen, and the pose summary goes into the
- * input only while it covers the camera (the owner's ruling 5 on #795).
- */
-async function buildRideAnalysis(camera: CameraController | undefined): Promise<RideAnalysisPort> {
-  const nativeShell = isNativeShell(platformCapacitor());
-  const computer = await riderModelStepSource(
-    nativeShell,
-    async () => (await import('@onyourleft/mobile')).capacitorAnalysisPost(),
-    readAnalysisEndpoint,
-  );
-  return createRideAnalysis({
-    store: localStore(),
-    athleteId: LOCAL_ATHLETE,
-    computer,
-    ...(camera === undefined
-      ? {}
-      : { hosted: () => hostedStepPort(camera, () => readHostedModel() !== undefined) }),
-    // #839: the preview masks with the same guard the transport reads.
-    hostedGuard: async () => readMaskingGuard(localStore(), LOCAL_ATHLETE),
-    nativeShell,
-    cameraConsented: () => camera?.state().consent.local ?? false,
-    clock: platformRunnerClock(),
-    now: () => unixSeconds(Math.floor(Date.now() / 1000)),
-  });
-}
-
-/**
  * A write-up asked of the rider's instance (#1102, ADR 0046 D-1): the ONE
  * production place it is built, so `check:wiring` reports
  * `createInstanceAnalysis` if this goes. Over the sealed session the Connect
@@ -1455,23 +1410,11 @@ async function buildCameraController(
   // #387. The rider's own computer — `analysis` is looked up on every press
   // rather than once, so switching it off on the Camera screen stops the next
   // request. With nothing saved it answers `undefined` and nothing can be sent.
-  // #518. The rider's hosted service, looked up on every press as well, and
-  // reached only after the rider has turned it on since the app was opened —
-  // `CameraController.askHostedModel` checks that first. It is sent a
-  // question, never a picture, and it is an `https:` origin, so the WebView's
-  // own `fetch` carries it on both platforms.
-  // #839. Every hosted request is masked with the rider's own guard — their
-  // word list and privacy zones, read afresh for each request — and a
-  // request whose guard cannot be read is not sent.
-  const hosted = (): ReturnType<typeof hostedModelPort> =>
-    hostedModelPort(readHostedModel(), {
-      guard: async () => readMaskingGuard(localStore(), LOCAL_ATHLETE),
-    });
   if (!isNativeShell(platformCapacitor())) {
     // #1061, ADR 0044 D-12: a browser cannot stop a screenshot, so the flag's
     // owner is built over nothing — and the consent says so.
     const secureWindow = new SecureWindow(NO_SECURE_WINDOW, documentForeground());
-    return new CameraController({ port, keep, analysis, hosted, secureWindow });
+    return new CameraController({ port, keep, analysis, secureWindow });
   }
   // #383. The **only** thing the shell changes is what a rider is told when
   // Android refuses: "open this device's settings" is right for a browser and
@@ -1497,18 +1440,19 @@ async function buildCameraController(
     port,
     keep,
     analysis,
-    hosted,
     notices: (kind) => shellCameraNotice(kind, mobile.ANDROID_CAMERA_DENIED),
     secureWindow,
   });
 }
 
 async function render(athlete: AthleteRecord | undefined): Promise<void> {
+  // #1103: a hosted key this device still holds from before is deleted before
+  // anything is drawn, and the Camera page says so once.
+  retireDeviceHostedKey(deviceRetiredKeyStorage());
   // Built once per tab, for the reason `buildCameraController` gives — and
   // before the platform, because the ride controller reads its presence (#390).
   const riderAnalysis = await buildRiderAnalysis();
   const camera = await buildCameraController(riderAnalysis);
-  const rideAnalysis = await buildRideAnalysis(camera);
   // #529. One per tab, like the camera: the tablet's pairing is held by the
   // port so that leaving the Camera screen to ride does not end it. None
   // where there is no WebRTC — both side-camera screens then say so.
@@ -1644,7 +1588,6 @@ async function render(athlete: AthleteRecord | undefined): Promise<void> {
           transfer={buildTransferPort(worldCorridorPort)}
           library={buildLibraryPort()}
           detail={buildDetailPort()}
-          rideAnalysis={rideAnalysis}
           {...(instanceAnalysis === undefined ? {} : { instanceAnalysis })}
           analysis={buildAnalysisPort()}
           segments={buildSegmentPort()}

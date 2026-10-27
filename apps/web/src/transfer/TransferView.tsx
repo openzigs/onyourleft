@@ -1114,7 +1114,7 @@ function ErasePanel({
       const outcome = await eraseDevice(port.store, port.athleteId, {
         drafts: port.drafts,
         theme: port.theme,
-        hostedModel: port.hostedModel,
+        retiredHostedKey: port.retiredHostedKey,
         instance: port.instance,
         instanceAnalysis: port.instanceAnalysis,
         trainerTargets: port.trainerTargets,

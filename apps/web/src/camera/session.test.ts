@@ -17,7 +17,7 @@ import { cleanFrameBytes, manualSchedule, scriptedCamera } from './testing';
 import type { CapturedFrame } from './camera-port';
 import { browserSecureWindow } from './secure-window-testing';
 
-const AGREED = { acknowledgedBystanders: true, allowLocal: true, allowHosted: false } as const;
+const AGREED = { acknowledgedBystanders: true, allowLocal: true } as const;
 
 function controllerFor(camera: ReturnType<typeof scriptedCamera>, sink?: CapturedFrame[]) {
   const timers = manualSchedule();
@@ -46,7 +46,7 @@ describe('the camera is off by default', () => {
     const camera = scriptedCamera();
     const { controller } = controllerFor(camera);
     expect(controller.state().live).toBe(false);
-    expect(controller.state().consent).toStrictEqual({ local: false, hosted: false });
+    expect(controller.state().consent).toStrictEqual({ local: false });
     expect(controller.state().problem).toBe('no-consent');
   });
 

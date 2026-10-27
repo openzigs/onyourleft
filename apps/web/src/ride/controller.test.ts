@@ -6057,7 +6057,7 @@ describe('#390 — a trainer holding a target at an empty bike', () => {
     });
     const rig = benchWith({ presence: camera });
     benchSeconds = () => rig.bench.now;
-    camera.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    camera.agree({ acknowledgedBystanders: true, allowLocal: true });
     await camera.turnOn();
     camera.watchPresence(true);
 

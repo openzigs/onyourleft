@@ -181,15 +181,16 @@ describe('what the rider is told before they press it', () => {
     expect(text).toContain('copied off this device');
   });
 
-  it('names the copy a hosted service holds of a question and of a ride’s numbers — #518, #803', () => {
+  it('names the copy a hosted service holds of a question and of a ride’s numbers, in the past tense since #1103 — #518, #803', () => {
     // ADR 0029's 2026-09-28 amendment wrote the line for a question; #803
-    // sends a ride's numbers there too, and the line says so. Not a picture.
+    // sent a ride's numbers there too. #1103 removed the path, and the owner
+    // ruled (#1104 G-4, 2026-10-26) the line stays, in the past tense.
     expect(ERASE_CANNOT_REACH).toContain(
-      'a question or a ride’s numbers you sent to a service you chose, on your own key, which is a copy that service holds',
+      'a question or a ride’s numbers this app sent, before this version, to a service you chose on a key kept on this device, which is a copy that service holds',
     );
   });
 
-  it('names the ride’s numbers sent to a hosted service, as the privacy policy does — #803', () => {
+  it('names the ride’s numbers sent to a hosted service, as the privacy policy does — #803, #1103', () => {
     const policy = readFileSync(
       fileURLToPath(new URL('../../../../docs/privacy-policy.md', import.meta.url)),
       'utf8',
@@ -199,11 +200,10 @@ describe('what the rider is told before they press it', () => {
       policy.indexOf('## Children'),
     );
     const straight = (text: string): string => text.replace(/[‘’]/g, "'").replace(/\s+/g, ' ');
-    expect(straight(erase)).toContain(
-      "a question or a ride's numbers you sent to a service you chose, which is a copy that service holds",
-    );
-    const line = ERASE_CANNOT_REACH.find((entry) => straight(entry).includes('service you chose'));
-    expect(straight(line ?? '')).toContain("a question or a ride's numbers");
+    const said =
+      "a question or a ride's numbers this app sent, before this version, to a service you chose on a key kept on this device, which is a copy that service holds";
+    expect(straight(erase)).toContain(said);
+    expect(ERASE_CANNOT_REACH.map(straight)).toContain(said);
   });
 
   it('names the rider’s goals, ride notes and documents among what an erase removes — #836', () => {
@@ -213,8 +213,11 @@ describe('what the rider is told before they press it', () => {
     expect(text).toContain('documents you added');
   });
 
-  it('names the hosted service’s key among what an erase removes — #518', () => {
-    expect(ERASE_REMOVES.join(' ')).toContain('key you entered for a hosted model');
+  it('names no hosted key among what an erase removes: #1103 deletes it at launch', () => {
+    // From #518 the list named it, because this device kept it. #1103 deletes
+    // it on the first launch (`camera/retired-hosted-key.ts`), so the line
+    // would name something no device holds.
+    expect(ERASE_REMOVES.join(' ')).not.toContain('key you entered for a hosted model');
   });
 
   it('names the remembered trainer target, here and in the policy’s device-storage table — #1428', () => {
@@ -326,7 +329,7 @@ describe('what the rider is told before they press it', () => {
     expect(straight(line ?? '')).toContain('which is a copy that instance holds');
   });
 
-  it('names the ride’s numbers sent to the rider’s own computer, as the privacy policy does — #804', () => {
+  it('names the ride’s numbers sent to the rider’s own computer, in the past tense, as the privacy policy does — #804, #1103', () => {
     const policy = readFileSync(
       fileURLToPath(new URL('../../../../docs/privacy-policy.md', import.meta.url)),
       'utf8',
@@ -336,15 +339,12 @@ describe('what the rider is told before they press it', () => {
       policy.indexOf('## Children'),
     );
     const straight = (text: string): string => text.replace(/[‘’]/g, "'").replace(/\s+/g, ' ');
+    const said =
+      "a ride's numbers this app sent, before this version, to your own computer for a write-up, which is a copy that computer holds";
     // The policy's erase paragraph says it…
-    expect(straight(erase)).toContain("a ride's numbers you sent to your own computer");
-    expect(straight(erase)).toContain('which is a copy that computer holds');
+    expect(straight(erase)).toContain(said);
     // …and so does the screen, before the rider presses anything.
-    const line = ERASE_CANNOT_REACH.find((entry) =>
-      straight(entry).includes("a ride's numbers you sent to your own computer"),
-    );
-    expect(line).toBeDefined();
-    expect(straight(line ?? '')).toContain('which is a copy that computer holds');
+    expect(ERASE_CANNOT_REACH.map(straight)).toContain(said);
   });
 });
 
@@ -508,10 +508,10 @@ describe('erasing, against the real store', () => {
     const forgotten: string[] = [];
     await harness.write(async (store) =>
       eraseDevice(store, ATHLETE_A, {
-        hostedModel: { forget: () => void forgotten.push('hosted-model') },
+        retiredHostedKey: { forget: () => void forgotten.push('retired-hosted-key') },
       }),
     );
-    expect(forgotten).toStrictEqual(['hosted-model']);
+    expect(forgotten).toStrictEqual(['retired-hosted-key']);
   });
 
   it('forgets this device’s sign-in to an instance after the cascade, over real storage (#777)', async () => {
@@ -610,7 +610,7 @@ describe('erasing, against the real store', () => {
     };
     await expect(
       eraseDevice(refusing, ATHLETE_A, {
-        hostedModel: { forget: () => void forgotten.push('hosted-model') },
+        retiredHostedKey: { forget: () => void forgotten.push('retired-hosted-key') },
       }),
     ).rejects.toThrow('refused');
     expect(forgotten).toStrictEqual([]);

@@ -1114,3 +1114,13 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   device-held path, which still ships beside it until
   [#1103](https://github.com/openzigs/onyourleft/issues/1103) removes it, the hosted consent the app
   ships stays the one the last 2026-09-29 entry above quotes; a second entry records that removal. The body above is not edited. (#1104)
+- **2026-10-27** — **The device-held hosted key and the device's hosted consent are gone.** The
+  2026-10-26 entry above said a second entry would record this. [#1103](https://github.com/openzigs/onyourleft/issues/1103)
+  removed the hosted model on a key kept on the device (ADR 0046 D-1), its consent on the Camera
+  page, and the camera consent's second answer (`hosted`) that held it. The only hosted consent is
+  the one the 2026-10-26 entry quotes, recorded on the rider's instance and naming the service's
+  address. A key a device still held is deleted on the first launch of the version that removed the
+  path, and the rider is told once, on the Camera page. Nothing else on the device is deleted. The
+  erase list keeps the two copies a rider may have sent before, in the past tense (owner ruling of
+  2026-10-26 on #1104, G-4). The own-computer PICTURE path (D-6, the 2026-09-19 entry's Q1) is not
+  changed. The body above is not edited. (#1103)

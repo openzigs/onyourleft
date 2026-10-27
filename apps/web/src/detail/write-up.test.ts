@@ -9,19 +9,17 @@
  * files that render a write-up hold no way to turn text into markup.
  */
 
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { unixSeconds } from '@onyourleft/domain';
 import { activityId, athleteId, type RideWriteUpRecord } from '@onyourleft/store';
 import { describe, expect, it } from 'vitest';
 
-import { HOSTED_CONSENT } from '../camera/hosted-model';
+import { SOURCE_ROOT } from '../camera/import-walk-testing';
 import { stripComments } from '../units/no-inline-units';
 import {
-  COMPUTER_SENDS,
-  COMPUTER_SENDS_LEAD,
-  HOSTED_SENDS,
   INSTANCE_SENDS,
   INSTANCE_SENDS_LEAD,
   missingSectionsText,
@@ -74,42 +72,62 @@ describe('the approved wording, word for word (ADR 0035 D-9)', () => {
     expect(approved).toMatch(/^Written by the model you chose/);
     expect(`${WRITE_UP_FRAMING_LEAD} ${WRITE_UP_FRAMING_REST}`).toBe(approved);
   });
+});
 
-  // B and C as ADR 0035's 2026-09-29 amendment completed them (#845). The
-  // body's D-9 still quotes the originals, and an ADR body is never edited.
-  it('says what the rider’s own computer is sent in wording B, as amended — #845', () => {
-    const approved = quotedAfter('**B, as amended:**', '**C, as amended:**');
-    expect(approved.length).toBeGreaterThan(400);
-    expect(approved).toContain("its distance, and each section's gradient and total climb");
-    expect(`${COMPUTER_SENDS_LEAD} ${COMPUTER_SENDS}`).toBe(approved);
+/** Every production source file under `apps/web/src`, comments stripped. */
+function productionSources(): { readonly path: string; readonly code: string }[] {
+  const found: { readonly path: string; readonly code: string }[] = [];
+  const walk = (directory: string): void => {
+    for (const name of readdirSync(directory)) {
+      const path = join(directory, name);
+      if (statSync(path).isDirectory()) {
+        walk(path);
+      } else if (
+        /\.tsx?$/.test(name) &&
+        !/(\.test\.tsx?|-testing\.tsx?|testing\.tsx?)$/.test(name)
+      ) {
+        found.push({ path, code: stripComments(readFileSync(path, 'utf8')) });
+      }
+    }
+  };
+  walk(SOURCE_ROOT);
+  return found;
+}
+
+/**
+ * #1103 withdrew ADR 0035 D-9 B (the own-computer paragraph) and the device's
+ * D-9 C (the hosted consent on a key kept here), with the paths they
+ * described. ADR 0035 gains an amendment saying so (ADR 0013: an ADR's body is
+ * never edited), and no screen may still say either.
+ */
+describe('wordings B and C, withdrawn with their paths — #1103', () => {
+  /** A phrase from each that nothing else in the app says. */
+  const B = "that ride's numbers go to the computer you set up";
+  const C = 'This sends your ride to a service you have chosen, using your own key.';
+
+  it('ADR 0035’s newest amendment records both as withdrawn', () => {
+    const adr = read(ADR_0035);
+    const entry = asProse(adr.slice(adr.lastIndexOf('\n- **')));
+    expect(entry).toContain('#1103');
+    expect(entry).toContain('D-9 B is withdrawn');
+    expect(entry).toContain('D-9 C is withdrawn on this device');
   });
 
-  it('stands wording C, as amended, beside the hosted ask, all but the sentence about the switch — #803, #845, #847', () => {
-    // The NEWEST C: #847's entry replaced #845's test-question sentence.
-    const approved = quotedAfter('**C, as amended:**', '| Artefact', true);
-    expect(approved.length).toBeGreaterThan(900);
-    expect(approved).toContain(
-      "When you press 'Send a test question to the service', the app sends it one test question",
-    );
-    expect(`${HOSTED_SENDS.join(' ')} ${HOSTED_CONSENT.offUntilOn}`).toBe(approved);
-    // More than the headline: #838's review found only the first sentence here.
-    expect(HOSTED_SENDS.length).toBe(5);
+  it('no production module says either any more', () => {
+    const sources = productionSources();
+    // The vacuous pass: a walk over nothing finds nothing.
+    expect(sources.length).toBeGreaterThan(300);
+    const saying = sources
+      .filter(({ code }) => code.includes(B) || code.includes(C))
+      .map(({ path }) => path);
+    expect(saying).toStrictEqual([]);
   });
 
-  it('would notice the body’s original B and C, which no longer ship — the control', () => {
-    const originalB = quotedAfter('**B — own computer', '**C — hosted');
-    const originalC = quotedAfter('**C — hosted', '⚠️ **A says');
-    expect(originalB.length).toBeGreaterThan(400);
-    expect(originalC.length).toBeGreaterThan(900);
-    expect(`${COMPUTER_SENDS_LEAD} ${COMPUTER_SENDS}`).not.toBe(originalB);
-    expect(`${HOSTED_SENDS.join(' ')} ${HOSTED_CONSENT.offUntilOn}`).not.toBe(originalC);
-  });
-
-  it('would notice #845’s C, which said the test question goes on a save — the control, #847', () => {
-    const c845 = quotedAfter('**C, as amended:**', '⚠️ **The test question');
-    expect(c845).toContain('When you save a service, the app sends it one test question');
-    expect(c845).not.toBe(quotedAfter('**C, as amended:**', '| Artefact', true));
-    expect(`${HOSTED_SENDS.join(' ')} ${HOSTED_CONSENT.offUntilOn}`).not.toBe(c845);
+  it('would notice B and C where they were — the control', () => {
+    // Both are still quoted in ADR 0035, where the walk above does not look.
+    const adr = asProse(read(ADR_0035));
+    expect(adr).toContain(B);
+    expect(adr).toContain(C);
   });
 });
 

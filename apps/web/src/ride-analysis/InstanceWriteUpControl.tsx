@@ -18,8 +18,7 @@
  *   order while a job goes (`aria-disabled`, #805), and a press then is
  *   refused here.
  * - **A live region**, polite, rendered from the start, saying the phase and
- *   the step — the page's own pattern (`RideWriteUpControl.tsx`), never the
- *   HUD's announcer — and then how it ended, from the controller's fixed
+ *   the step — the page's own pattern since #804, never the HUD's announcer — and then how it ended, from the controller's fixed
  *   tables. Never a model's words.
  * - **Each section as it arrives, only after this device screened it**, under
  *   the framing (ADR 0035 D-9 A), one React text node each. A withdrawal takes
@@ -45,16 +44,16 @@ import {
   INSTANCE_SENDS_LEAD,
   WRITE_UP_FRAMING_LEAD,
   WRITE_UP_FRAMING_REST,
+  WRITE_UP_SAVED,
 } from '../detail/write-up';
 import { hostedPressSends } from './hosted-consent';
 import type { InstanceJobSource } from './instance-job';
 import type {
+  AskOutcome,
   InstanceAnalysisPort,
   InstanceAskOutcome,
   InstanceJobView,
 } from './instance-analysis-port';
-import type { AskOutcome } from './ride-analysis-port';
-import { WRITE_UP_SAVED } from './RideWriteUpControl';
 
 /** The press, by source. */
 export const INSTANCE_ASK_LABEL: Readonly<Record<InstanceJobSource, string>> = {

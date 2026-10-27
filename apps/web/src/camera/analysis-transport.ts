@@ -12,13 +12,11 @@
  * Play Data Safety answers that describe it, because ADR 0029's amendment says
  * the three *"move together or not at all"*.
  *
- * ⚠️ **Since [#802](https://github.com/openzigs/onyourleft/issues/802) the same
- * call also carries the ride analysis's text steps** — a ride's numbers, never
- * a picture — to the same address, through {@link riderModelStepPort}. Their
- * body is not built here, because this module builds pictures into requests by
- * design and the ride analysis must reach no picture type: it is
- * `ride-analysis/own-computer-step.ts` §`stepRequestBody`, and the section
- * below describes the picture request only.
+ * ⚠️ **Pictures only, since [#1103](https://github.com/openzigs/onyourleft/issues/1103).**
+ * From #802 to #1103 the same call also carried a ride analysis's text steps
+ * to the same address. #1103 removed that path (ADR 0046 D-1): a write-up is
+ * asked of the rider's instance, through the one instance module. A reviewer
+ * who remembers `riderModelStepPort` here is reading the old file.
  *
  * ## What leaves, exactly
  *
@@ -86,8 +84,6 @@ import {
   type NativeAnalysisPost,
   type NativeAnalysisReply,
 } from './http-body';
-import type { ModelStepPort } from '@onyourleft/analysis';
-import { ownComputerStepPort } from '../ride-analysis/own-computer-step';
 
 export type {
   AnalysisSend,
@@ -113,8 +109,8 @@ export const MAXIMUM_ANSWER_TOKENS = 400;
 
 /**
  * The platform's own `fetch` — **the one call this client makes to it**, which
- * `privacy/no-network.test.ts` counts. The picture port and, since #802, the
- * ride analysis's step port both default to it; neither names `fetch` itself.
+ * `privacy/no-network.test.ts` counts. The picture port defaults to it and
+ * does not name `fetch` itself.
  */
 const platformSend: AnalysisSend = async (url, init) => fetch(url, init);
 
@@ -360,59 +356,4 @@ export async function riderAnalysisSource(
   }
   const native = await loadNative();
   return () => riderAnalysisPort(endpoint(), { send, native });
-}
-
-/**
- * **The ride analysis's step port to the rider's own computer, with the
- * platform's `fetch` behind it** — [#802](https://github.com/openzigs/onyourleft/issues/802).
- *
- * The port itself is `ride-analysis/own-computer-step.ts`, which carries text
- * and never a picture and so has to live apart from this module; what it
- * cannot do on its own is reach the network, because this module holds the
- * client's ONE `fetch` (`privacy/no-network.test.ts`). So this hands it that
- * `fetch` — or, inside the Android shell, the native request, exactly as
- * {@link riderAnalysisPort} is handed one — and nothing else.
- *
- * `undefined` for the reason {@link riderAnalysisPort} gives: with nothing
- * configured and switched on there is no object that could send anything.
- *
- * ⚠️ **Called through {@link riderModelStepSource}, which `main.tsx` hands to
- * the post-ride ask (#804)** — and the ask sends only on the ride page's press:
- * `own-computer-step.test.ts` §"sends nothing without a press" names the one
- * module that may start a run.
- */
-export function riderModelStepPort(
-  endpoint: AnalysisEndpoint | undefined,
-  options: AnalysisTransportOptions = {},
-): ModelStepPort | undefined {
-  return ownComputerStepPort(endpoint, {
-    send: options.send ?? platformSend,
-    ...(options.native === undefined ? {} : { native: options.native }),
-  });
-}
-
-/**
- * **Which way a ride's numbers leave this device**: the platform's `fetch` in
- * a browser, Capacitor's native HTTP inside the Android shell (#553) — the
- * same choice as {@link riderAnalysisSource}, for the ride analysis's text
- * steps (#804). The returned function looks the endpoint up again on every
- * call, so switching the computer off stops the next ask.
- *
- * ⚠️ Here rather than inline in `main.tsx` for {@link riderAnalysisSource}'s
- * reason: `native` is optional, so a composition root that stopped passing it
- * inside the shell would still typecheck, and the WebView's `fetch` is blocked
- * there as mixed content. `analysis-transport.test.ts` drives both branches.
- */
-export async function riderModelStepSource(
-  nativeShell: boolean,
-  loadNative: () => Promise<NativeAnalysisPost>,
-  endpoint: () => AnalysisEndpoint | undefined,
-  send?: AnalysisSend,
-): Promise<() => ModelStepPort | undefined> {
-  const base = send === undefined ? {} : { send };
-  if (!nativeShell) {
-    return () => riderModelStepPort(endpoint(), base);
-  }
-  const native = await loadNative();
-  return () => riderModelStepPort(endpoint(), { ...base, native });
 }

@@ -58,22 +58,23 @@ function trainerModulesReachedFrom(
 }
 
 describe('the ride analysis reaches no trainer (#811, CLAUDE.md §6)', () => {
-  it('walks the runner and its port, so the walk is not over nothing', () => {
+  it('walks the templates, the input and the instance ask, so the walk is not over nothing', () => {
+    // #1103 removed the device's own runner and its port, and the ask and the
+    // press that started it (`runner.ts`, `model-step-port.ts`,
+    // `own-computer-step.ts`, `ride-analysis.ts`, `RideWriteUpControl.tsx`).
+    // What is left builds a ride's input and screens a write-up, and the
+    // instance's ask (#1102) is the one press.
     expect(ANALYSIS_MODULES).toEqual(
       expect.arrayContaining([
-        `${ANALYSIS_ROOT}/runner.ts`,
-        `${ANALYSIS_ROOT}/model-step-port.ts`,
         `${ANALYSIS_ROOT}/template/template.ts`,
         `${ANALYSIS_ROOT}/input.ts`,
-        'ride-analysis/own-computer-step.ts',
-        // #804: the ask, its port and the press on the ride's page.
-        'ride-analysis/ride-analysis.ts',
-        'ride-analysis/ride-analysis-port.ts',
-        'ride-analysis/RideWriteUpControl.tsx',
+        `${ANALYSIS_ROOT}/screen/write-up-screen.ts`,
+        'ride-analysis/instance-analysis.ts',
+        'ride-analysis/InstanceWriteUpControl.tsx',
       ]),
     );
-    // And past one level: the runner reaches the screen's matchers through the screen.
-    expect(importWalk().closure([`${ANALYSIS_ROOT}/runner.ts`]).modules).toContain(
+    // And past one level: a template reaches the screen's matchers through the screen.
+    expect(importWalk().closure([`${ANALYSIS_ROOT}/template/template.ts`]).modules).toContain(
       `${ANALYSIS_ROOT}/screen/angle-claims.ts`,
     );
   });
@@ -90,8 +91,8 @@ describe('the ride analysis reaches no trainer (#811, CLAUDE.md §6)', () => {
   // without coverage. So about three times the slowest of all of those, as
   // docs/agents/ci.md §4c asks. It is a timeout, not a performance claim.
   it('goes red on a planted import of the ride controller, however far down', () => {
-    // The runner's own source with one line added, and — separately — the same
-    // line two modules away, in the screen it imports.
+    // A template's own source with one line added, and — separately — the
+    // same line two modules away, in the screen it imports.
     const planted = (target: string) => (path: string) => {
       const source = readFromDisk(path);
       // The specifier is relative to the planted module, wherever it is (#1094).
@@ -103,14 +104,12 @@ describe('the ride analysis reaches no trainer (#811, CLAUDE.md §6)', () => {
         ? `${source}\nimport { createRideController } from '${controller}';\n`
         : source;
     };
-    // #802: and in the step port to the rider's own computer.
+    // And in the instance's ask and its press (#1102).
     for (const target of [
-      `${ANALYSIS_ROOT}/runner.ts`,
+      `${ANALYSIS_ROOT}/template/template.ts`,
       `${ANALYSIS_ROOT}/screen/write-up-screen.ts`,
-      'ride-analysis/own-computer-step.ts',
-      // #804: the ask and the press.
-      'ride-analysis/ride-analysis.ts',
-      'ride-analysis/RideWriteUpControl.tsx',
+      'ride-analysis/instance-analysis.ts',
+      'ride-analysis/InstanceWriteUpControl.tsx',
     ]) {
       expect(
         trainerModulesReachedFrom(importWalk(planted(target)), ANALYSIS_MODULES),

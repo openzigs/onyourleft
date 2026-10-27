@@ -18,7 +18,6 @@
 import { AGENT_TOOL_DISCLOSURES } from '@onyourleft/analysis';
 import { describe, expect, it } from 'vitest';
 
-import { MASKING_LIMIT } from '../camera/hosted-model';
 import {
   HOSTED_AGREED_TEXT,
   HOSTED_ANSWER_REFUSAL_TEXT,
@@ -31,6 +30,7 @@ import {
   HOSTED_TEST_BUTTON,
   HOSTED_TEST_UNREADABLE,
   HOSTED_UNREADABLE,
+  MASKING_LIMIT,
   hostedAgreeLabel,
   hostedConsentElsewhere,
   hostedConsentMoved,

@@ -123,7 +123,7 @@ async function framingPhone(time: ReturnType<typeof virtualTime>) {
     port: camera.port,
     schedule: () => () => undefined,
   });
-  controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+  controller.agree({ acknowledgedBystanders: true, allowLocal: true });
   const session = new SideCameraSession({
     camera: controller,
     clock: time.clock,

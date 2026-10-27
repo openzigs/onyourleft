@@ -132,7 +132,7 @@ async function tablet(
       : {}),
   });
   if (options.agreed !== false) {
-    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true });
   }
   mounted = await mount(<SideCameraControl controller={controller} pairing={port} />);
   await settle();

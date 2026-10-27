@@ -68,7 +68,7 @@ export async function emptyTransferPort(options: { readonly withRide?: boolean }
     save: () => undefined,
     drafts: { forget: () => undefined },
     theme: { forget: () => undefined },
-    hostedModel: { forget: () => undefined },
+    retiredHostedKey: { forget: () => undefined },
     instance: { forget: () => undefined },
     instanceAnalysis: { forget: () => undefined },
     trainerTargets: { forget: () => undefined },

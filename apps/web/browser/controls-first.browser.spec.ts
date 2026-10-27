@@ -314,8 +314,8 @@ const TUCKING_WHEN_POPULATED: Partial<Record<RouteId, readonly string[]>> = {
   // is read before it is acted on, so each has one short line and no ⓘ.
   moderation: ['The record'],
   // #1439: what a new write-up does to the ride's saved one is behind the
-  // section's ⓘ; the section has a heading only once a model or an instance
-  // is set up, which the populated ports are.
+  // section's ⓘ; the section has a heading only once an instance is
+  // connected or a write-up is saved (#1103), which the populated ports are.
   'activity-detail': ['A write-up by your model'],
 };
 

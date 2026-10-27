@@ -95,5 +95,5 @@ name a wire format but no platform. The routing work (#70) goes in the same file
 and any model SDK or schema library (`ai`, `@ai-sdk/*`, `zod`, …), which its tests are held to as well.
 Like `packages/fit` it has two tsconfigs, and **`tsconfig.platform-free.json` is the one that enforces**
 (`lib: ["ES2024"]`, `types: []`, everything under `src/` but `*.test.ts`); the wide `tsconfig.json`
-admits `@types/node` because a few tests read files. Its one declared global is `AbortController`, in
-`src/abort.d.ts`, which only the runner uses — every runtime the core targets has it.
+admits `@types/node` because a few tests read files. It declares no global since #1103 removed the
+runner, and with it `src/abort.d.ts`, which declared `AbortController` for it.

@@ -2,14 +2,20 @@
 // @vitest-environment jsdom
 
 /**
- * **A model's write-up on a ride's page** — #805.
+ * **A model's write-up on a ride's page** — #805, and since #1103 asked of
+ * the rider's instance only.
  *
  * Rendered inside the real detail view, over the stub store and a scripted
- * {@link RideAnalysisPort}. ⚠️ **The pairs that matter most are the ones a
+ * {@link InstanceAnalysisPort}. ⚠️ **The pairs that matter most are the ones a
  * rider could confuse** — `views/CreditsView.test.tsx`'s precedent: nothing
  * asked against written, withheld against failed, and a new write-up against
  * the earlier one left standing after a failure. Each is held apart by the
  * WORDS each renders, never by a class or a colour.
+ *
+ * A write-up saved by a path #1103 removed — the rider's own computer, or a
+ * hosted model on a key kept on the device — still renders, screened, with
+ * where it was asked in words: those rows are seeded here as a store holds
+ * them, and read back through the page.
  */
 
 import { unixSeconds } from '@onyourleft/domain';
@@ -18,33 +24,31 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import type {
   AskOutcome,
-  RideAnalysisPort,
-  RideWriteUpSource,
-} from '../ride-analysis/ride-analysis-port';
-import {
-  ASK_LABEL,
-  WRITE_UP_EXPLANATION,
-  WRITE_UP_HEADING,
-  WRITE_UP_REPLACES,
-  WRITE_UP_SAVED,
-} from '../ride-analysis/RideWriteUpControl';
+  InstanceAnalysisPort,
+  InstanceAskOutcome,
+} from '../ride-analysis/instance-analysis-port';
+import { INSTANCE_ASK_LABEL } from '../ride-analysis/InstanceWriteUpControl';
 import { RideWriteUpSection } from './RideWriteUpSection';
 import { SIDE_CAMERA_HEADING } from './SideCameraSection';
 import { activateWithKeyboard, mount, settle, type Mounted } from '../testing/mount';
 import { ActivityDetailView } from '../views/ActivityDetailView';
+import { INSTANCE_ROUTE } from '../shell/routes';
 
 import type { WriteUpOverview } from './load';
 import { stubActivity, stubDetail, type StubRide } from './testing';
 import {
+  WRITE_UP_CANNOT_ASK_HERE,
   WRITE_UP_EARLIER,
   WRITE_UP_EARLIER_NOT_READ,
   WRITE_UP_EARLIER_READING,
   WRITE_UP_FRAMING_LEAD,
   WRITE_UP_FRAMING_REST,
+  WRITE_UP_HEADING,
+  WRITE_UP_NO_INSTANCE_BEFORE,
   WRITE_UP_NOT_ASKED,
   WRITE_UP_POSE_TEXT,
-  WRITE_UP_SET_UP_BEFORE,
-  WRITE_UP_SET_UP_LINK,
+  WRITE_UP_REPLACES,
+  WRITE_UP_SAVED,
   WRITE_UP_SOURCE_TEXT,
   WRITE_UP_UNREADABLE,
   WRITE_UP_WITHHELD_SAVED,
@@ -58,9 +62,9 @@ function writeUp(text: string, overrides: Partial<RideWriteUpRecord> = {}): Ride
     activityId: RIDE,
     athleteId: ATHLETE,
     text,
-    templateId: 'ride-write-up',
+    templateId: 'ride-write-up-agent',
     templateVersion: '1',
-    source: 'computer',
+    source: 'instance-local',
     includedPose: false,
     missingSections: [],
     writtenAt: unixSeconds(1_800_000_000),
@@ -68,24 +72,23 @@ function writeUp(text: string, overrides: Partial<RideWriteUpRecord> = {}): Ride
   };
 }
 
-interface Ask {
-  readonly source: RideWriteUpSource;
-  settle(outcome: AskOutcome): void;
-}
-
-function scriptedPort(sources: readonly RideWriteUpSource[]): RideAnalysisPort & {
-  readonly asks: Ask[];
+/** An instance this device is signed in to (or not), whose jobs a test ends by hand. */
+function scriptedInstance(connected = true): InstanceAnalysisPort & {
+  readonly asks: ((outcome: AskOutcome) => void)[];
 } {
-  const asks: Ask[] = [];
+  const asks: ((outcome: AskOutcome) => void)[] = [];
   return {
     asks,
-    availableSources: () => sources,
-    previewHostedRequest: async () => Promise.resolve({ kind: 'shown', steps: [], total: 1 }),
-    hostedPreviewSeen: () => true,
-    askForRideWriteUp: async (_id, source) =>
-      new Promise<AskOutcome>((resolve) => {
-        asks.push({ source, settle: resolve });
+    connected: () => connected,
+    availableSources: () => (connected ? ['instance-local'] : []),
+    hostedEndpoint: () => undefined,
+    pendingJob: () => false,
+    ask: async () =>
+      new Promise<InstanceAskOutcome>((resolve) => {
+        asks.push(resolve);
       }),
+    followAgain: async () => Promise.resolve({ kind: 'detached' }),
+    cancel: async () => Promise.resolve(),
   };
 }
 
@@ -101,14 +104,18 @@ afterEach(() => {
 
 async function open(
   ride: Partial<MutableRide>,
-  port: RideAnalysisPort | undefined,
+  instance: InstanceAnalysisPort | undefined,
 ): Promise<MutableRide> {
   const held: MutableRide = { activity: stubActivity(), channels: {}, laps: [], ...ride };
   document.documentElement.lang = 'en';
   mounted = await mount(
     <main>
       <h1>Ride details</h1>
-      <ActivityDetailView port={stubDetail(ATHLETE, held)} activityId={RIDE} writeUp={port} />
+      <ActivityDetailView
+        port={stubDetail(ATHLETE, held)}
+        activityId={RIDE}
+        instanceWriteUp={instance}
+      />
     </main>,
   );
   await settle();
@@ -142,19 +149,16 @@ function button(label: string): HTMLButtonElement {
   return found;
 }
 
+const ASK = INSTANCE_ASK_LABEL['instance-local'];
+
 /** Whether `first` comes before `second` in the document. */
 function before(first: Node, second: Node): boolean {
   return (first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
 }
 
 describe('what the section says before a press, layered — #1439', () => {
-  it('is one plain sentence in view, what a new write-up does behind the ⓘ, and what is sent once', async () => {
-    await open({}, scriptedPort(['computer']));
-    const lead = [...(section()?.querySelectorAll('p') ?? [])].find(
-      (paragraph) => paragraph.textContent === WRITE_UP_EXPLANATION,
-    );
-    expect(lead, 'the plain sentence is not on the section').toBeDefined();
-    expect(lead?.closest('details')).toBeNull();
+  it('says what a new write-up does behind the ⓘ, and what is sent once', async () => {
+    await open({}, scriptedInstance());
     // The press's mechanics are the explanation, behind the heading's ⓘ.
     const help = section()?.querySelector('.oyl-section-head details.oyl-section-help');
     expect(help?.textContent).toContain(WRITE_UP_REPLACES);
@@ -170,20 +174,20 @@ describe('text, and only text', () => {
     '<b>bold</b> **strong** [a link](https://example.com) javascript:alert(1) https://example.com/x\nA second line.';
 
   it('shows markup, markdown, a javascript: string and a URL as literal characters', async () => {
-    await open({ writeUp: writeUp(HOSTILE) }, scriptedPort(['computer']));
+    await open({ writeUp: writeUp(HOSTILE) }, scriptedInstance());
     const shown = quote();
     expect(shown?.textContent).toBe(HOSTILE);
     // No element of any kind was made from it: one text node, and no link.
     expect(shown?.childElementCount).toBe(0);
     expect(shown?.childNodes).toHaveLength(1);
     expect(section()?.querySelectorAll('b')).toHaveLength(0);
-    // With a model set up the section holds no link of its own at all, so
-    // any link in it would be one made from the text.
+    // Signed in, the section holds no link of its own at all, so any link in
+    // it would be one made from the text.
     expect(section()?.querySelectorAll('a')).toHaveLength(0);
   });
 
   it('frames it with ADR 0035 D-9 A, above the text', async () => {
-    await open({ writeUp: writeUp('A steady ride.') }, scriptedPort(['computer']));
+    await open({ writeUp: writeUp('A steady ride.') }, scriptedInstance());
     const framing = [...(section()?.querySelectorAll('p') ?? [])].find((paragraph) =>
       paragraph.textContent.startsWith(WRITE_UP_FRAMING_LEAD),
     );
@@ -195,30 +199,58 @@ describe('text, and only text', () => {
     await open(
       {
         writeUp: writeUp('A steady ride.', {
-          source: 'hosted',
+          source: 'instance-hosted',
           includedPose: true,
           missingSections: [1, 3],
         }),
       },
-      scriptedPort(['computer']),
+      scriptedInstance(),
     );
-    expect(text()).toContain(WRITE_UP_SOURCE_TEXT.hosted);
+    expect(text()).toContain(WRITE_UP_SOURCE_TEXT['instance-hosted']);
     expect(text()).toContain(WRITE_UP_POSE_TEXT.included);
     expect(text()).toContain(
       'Sections 2 and 4 could not be analysed, so the write-up says nothing about them.',
     );
     mounted?.unmount();
-    await open({ writeUp: writeUp('A steady ride.') }, scriptedPort(['computer']));
-    expect(text()).toContain(WRITE_UP_SOURCE_TEXT.computer);
+    await open({ writeUp: writeUp('A steady ride.') }, scriptedInstance());
+    expect(text()).toContain(WRITE_UP_SOURCE_TEXT['instance-local']);
     expect(text()).toContain(WRITE_UP_POSE_TEXT['left-out']);
     expect(text()).not.toContain('could not be analysed');
+  });
+});
+
+describe('a write-up saved before #1103 survives it', () => {
+  it.each([
+    ['the rider’s own computer', 'computer'],
+    ['a hosted model on a key kept on the device', 'hosted'],
+  ] as const)(
+    'one written by %s still renders, screened, with where it was asked',
+    async (_what, source) => {
+      for (const instance of [scriptedInstance(), scriptedInstance(false), undefined]) {
+        await open({ writeUp: writeUp('An earlier ride, written up.', { source }) }, instance);
+        expect(quote()?.textContent).toBe('An earlier ride, written up.');
+        expect(text()).toContain(WRITE_UP_FRAMING_LEAD);
+        expect(text()).toContain(WRITE_UP_SOURCE_TEXT[source]);
+        mounted?.unmount();
+        mounted = undefined;
+      }
+    },
+  );
+
+  it('and is still screened on display: one the screen would not pass is withheld', async () => {
+    await open(
+      { writeUp: writeUp('Your knee opened to 142°.', { source: 'computer' }) },
+      undefined,
+    );
+    expect(text()).toContain(WRITE_UP_WITHHELD_SAVED);
+    expect(quote()).toBeNull();
   });
 });
 
 describe('screened before shown, even from the store', () => {
   it('withholds a saved row the screen would not pass, and shows none of its words', async () => {
     const edited = 'Your knee opened to 142° at the bottom. A lovely ride.';
-    await open({ writeUp: writeUp(edited) }, scriptedPort(['computer']));
+    await open({ writeUp: writeUp(edited) }, scriptedInstance());
     expect(text()).toContain(WRITE_UP_WITHHELD_SAVED);
     expect(quote()).toBeNull();
     expect(document.body.textContent).not.toContain('A lovely ride');
@@ -226,7 +258,7 @@ describe('screened before shown, even from the store', () => {
   });
 
   it('says so, in words, when the row will not decode', async () => {
-    await open({ writeUp: 'unreadable' }, scriptedPort(['computer']));
+    await open({ writeUp: 'unreadable' }, scriptedInstance());
     expect(text()).toContain(WRITE_UP_UNREADABLE);
     expect(quote()).toBeNull();
   });
@@ -234,12 +266,12 @@ describe('screened before shown, even from the store', () => {
 
 describe('the pairs that must not look alike', () => {
   it('nothing asked, against written', async () => {
-    await open({}, scriptedPort(['computer']));
+    await open({}, scriptedInstance());
     const nothing = text();
     expect(nothing).toContain(WRITE_UP_NOT_ASKED);
     expect(nothing).not.toContain(WRITE_UP_FRAMING_LEAD);
     mounted?.unmount();
-    await open({ writeUp: writeUp('A steady ride.') }, scriptedPort(['computer']));
+    await open({ writeUp: writeUp('A steady ride.') }, scriptedInstance());
     const written = text();
     expect(written).toContain(WRITE_UP_FRAMING_LEAD);
     expect(written).toContain('A steady ride.');
@@ -249,17 +281,17 @@ describe('the pairs that must not look alike', () => {
   it('withheld, against failed', async () => {
     const withheldText = 'Withheld: the model’s write-up did not pass this app’s checks.';
     const failedText = 'Failed: the model took too long.';
-    const port = scriptedPort(['computer']);
+    const port = scriptedInstance();
     await open({}, port);
-    await activateWithKeyboard(button(ASK_LABEL.computer.first));
-    port.asks[0]?.settle({ kind: 'failed', text: withheldText });
+    await activateWithKeyboard(button(ASK));
+    port.asks[0]?.({ kind: 'failed', text: withheldText });
     await settle();
     const withheld = text();
     mounted?.unmount();
-    const again = scriptedPort(['computer']);
+    const again = scriptedInstance();
     await open({}, again);
-    await activateWithKeyboard(button(ASK_LABEL.computer.first));
-    again.asks[0]?.settle({ kind: 'failed', text: failedText });
+    await activateWithKeyboard(button(ASK));
+    again.asks[0]?.({ kind: 'failed', text: failedText });
     await settle();
     const failed = text();
     expect(withheld).toContain(withheldText);
@@ -267,7 +299,7 @@ describe('the pairs that must not look alike', () => {
     expect(withheld).not.toBe(failed);
     // And a SAVED row withheld by the screen says a third thing again.
     mounted?.unmount();
-    await open({ writeUp: writeUp('At 142° the knee.') }, scriptedPort(['computer']));
+    await open({ writeUp: writeUp('At 142° the knee.') }, scriptedInstance());
     expect(text()).toContain(WRITE_UP_WITHHELD_SAVED);
     expect(text()).not.toContain(withheldText);
     expect(text()).not.toContain(failedText);
@@ -276,12 +308,12 @@ describe('the pairs that must not look alike', () => {
   it('a new write-up, against the earlier one left standing after a failure', async () => {
     // The owner's ruling of 2026-09-29: a run that fails keeps the saved one,
     // and the reason is shown ABOVE it.
-    const port = scriptedPort(['computer']);
+    const port = scriptedInstance();
     const ride = await open({ writeUp: writeUp('The first write-up.') }, port);
     expect(text()).not.toContain(WRITE_UP_EARLIER);
 
-    await activateWithKeyboard(button(ASK_LABEL.computer.first));
-    port.asks[0]?.settle({ kind: 'failed', text: 'The model took too long.' });
+    await activateWithKeyboard(button(ASK));
+    port.asks[0]?.({ kind: 'failed', text: 'The model took too long.' });
     await settle();
     expect(quote()?.textContent).toBe('The first write-up.');
     expect(text()).toContain(WRITE_UP_EARLIER);
@@ -295,8 +327,8 @@ describe('the pairs that must not look alike', () => {
 
     // A run that is written replaces it, and the page reads it back.
     ride.writeUp = writeUp('The second write-up.');
-    await activateWithKeyboard(button(ASK_LABEL.computer.first));
-    port.asks[1]?.settle({ kind: 'written' });
+    await activateWithKeyboard(button(ASK));
+    port.asks[1]?.({ kind: 'written' });
     await settle();
     await settle();
     expect(liveRegion()).toBe(WRITE_UP_SAVED);
@@ -308,7 +340,7 @@ describe('the pairs that must not look alike', () => {
 
 describe('between a write-up being saved and it being read back — #816', () => {
   /** The section alone, with a read-back the test settles by hand. */
-  async function openSection(port: RideAnalysisPort): Promise<{
+  async function openSection(port: InstanceAnalysisPort): Promise<{
     resolve(overview: WriteUpOverview): void;
     reject(error: unknown): void;
   }> {
@@ -318,7 +350,7 @@ describe('between a write-up being saved and it being read back — #816', () =>
       <main>
         <h1>Ride details</h1>
         <RideWriteUpSection
-          port={port}
+          instance={port}
           activityId={RIDE}
           initial={{ kind: 'saved', record: writeUp('The first write-up.') }}
           reread={async () =>
@@ -342,10 +374,10 @@ describe('between a write-up being saved and it being read back — #816', () =>
   }
 
   it('says the write-up still shown is the earlier one until the new one is read back', async () => {
-    const port = scriptedPort(['computer']);
+    const port = scriptedInstance();
     const readBack = await openSection(port);
-    await activateWithKeyboard(button(ASK_LABEL.computer.first));
-    port.asks[0]?.settle({ kind: 'written' });
+    await activateWithKeyboard(button(ASK));
+    port.asks[0]?.({ kind: 'written' });
     await settle();
     expect(liveRegion()).toBe(WRITE_UP_SAVED);
     expect(quote()?.textContent).toBe('The first write-up.');
@@ -360,10 +392,10 @@ describe('between a write-up being saved and it being read back — #816', () =>
   });
 
   it('catches a read-back that fails, and still does not pass the old write-up off as the new one', async () => {
-    const port = scriptedPort(['computer']);
+    const port = scriptedInstance();
     const readBack = await openSection(port);
-    await activateWithKeyboard(button(ASK_LABEL.computer.first));
-    port.asks[0]?.settle({ kind: 'written' });
+    await activateWithKeyboard(button(ASK));
+    port.asks[0]?.({ kind: 'written' });
     await settle();
     // Vitest fails the run on an unhandled rejection, so this also holds the catch.
     readBack.reject(new Error('the store went away'));
@@ -374,26 +406,38 @@ describe('between a write-up being saved and it being read back — #816', () =>
   });
 });
 
-describe('the fallback: no model set up', () => {
-  it.each([
-    ['no port', undefined],
-    ['no source set up', scriptedPort([])],
-  ])('with %s, is one sentence and a link, and asks nothing', async (_what, port) => {
-    await open({}, port);
+describe('with nothing to ask', () => {
+  it('in a browser that cannot hold an instance sign-in, is one sentence, with no link, and asks nothing (#1103)', async () => {
+    await open({}, undefined);
     expect(section()).toBeNull();
     expect(document.body.textContent).not.toContain(WRITE_UP_HEADING);
-    const link = [...document.querySelectorAll('a')].find(
-      (candidate) => candidate.textContent === WRITE_UP_SET_UP_LINK,
+    const sentence = [...document.querySelectorAll('p')].find(
+      (paragraph) => paragraph.textContent === WRITE_UP_CANNOT_ASK_HERE,
     );
-    expect(link?.getAttribute('href')).toBe('#/camera');
-    expect(link?.parentElement?.textContent).toContain(WRITE_UP_SET_UP_BEFORE);
+    expect(sentence).toBeDefined();
+    // No link: the Connect screen cannot help in this browser. And no
+    // "Camera page" link, which pointed at a set-up #1103 removed.
+    expect(sentence?.querySelector('a')).toBeNull();
+    expect(document.querySelector('a[href="#/camera"]')).toBeNull();
     expect(document.querySelectorAll('button')).toHaveLength(0);
-    expect(port?.asks ?? []).toHaveLength(0);
+  });
+
+  it('signed in to no instance, is one sentence and a link to connect one, and asks nothing', async () => {
+    const port = scriptedInstance(false);
+    await open({}, port);
+    expect(section()).toBeNull();
+    const link = [...document.querySelectorAll('a')].find(
+      (candidate) => candidate.textContent === INSTANCE_ROUTE.title,
+    );
+    expect(link?.getAttribute('href')).toBe(`#${INSTANCE_ROUTE.path}`);
+    expect(link?.parentElement?.textContent).toContain(WRITE_UP_NO_INSTANCE_BEFORE);
+    expect(document.querySelectorAll('button')).toHaveLength(0);
+    expect(port.asks).toHaveLength(0);
   });
 
   it('still shows a saved write-up, with the same sentence in place of the control', async () => {
-    await open({ writeUp: writeUp('A steady ride.') }, scriptedPort([]));
-    expect(text()).toContain(WRITE_UP_SET_UP_BEFORE);
+    await open({ writeUp: writeUp('A steady ride.') }, undefined);
+    expect(text()).toContain(WRITE_UP_CANNOT_ASK_HERE);
     expect(quote()?.textContent).toBe('A steady ride.');
     expect(document.querySelectorAll('button')).toHaveLength(0);
   });
@@ -404,7 +448,7 @@ describe('the fallback: no model set up', () => {
         writeUp: writeUp('A steady ride.'),
         sideCamera: 'unreadable',
       },
-      scriptedPort(['computer']),
+      scriptedInstance(),
     );
     const camera = [...document.querySelectorAll('h3')].find(
       (heading) => heading.textContent === SIDE_CAMERA_HEADING,

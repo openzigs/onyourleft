@@ -42,7 +42,7 @@ async function filming(options: { readonly condition?: SideLinkCondition } = {})
     port: camera.port,
     schedule: manualSchedule().schedule,
   });
-  controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+  controller.agree({ acknowledgedBystanders: true, allowLocal: true });
   const link = scriptedLink(options.condition);
   const time = virtualTime();
   const session = new SideCameraSession({ camera: controller, link, ...time });
@@ -169,7 +169,7 @@ describe('the 30 seconds after the link is lost', () => {
       port: camera.port,
       schedule: manualSchedule().schedule,
     });
-    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true });
     const link = scriptedLink();
     const time = virtualTime();
     const session = new SideCameraSession({ camera: controller, link, ...time });
@@ -224,7 +224,7 @@ describe('who can start and stop it', () => {
       port: camera.port,
       schedule: manualSchedule().schedule,
     });
-    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true });
     const link = scriptedLink();
     const session = new SideCameraSession({ camera: controller, link, ...virtualTime() });
 
@@ -287,7 +287,7 @@ describe('who can start and stop it', () => {
       port: camera.port,
       schedule: manualSchedule().schedule,
     });
-    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true });
     const link = scriptedLink();
     const session = new SideCameraSession({ camera: controller, link, ...virtualTime() });
     const on = session.turnOnForFraming();
@@ -307,7 +307,7 @@ describe('who can start and stop it', () => {
       port: camera.port,
       schedule: manualSchedule().schedule,
     });
-    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true });
     const link = scriptedLink();
     const session = new SideCameraSession({ camera: controller, link, ...virtualTime() });
     const on = session.turnOnForFraming();
@@ -340,7 +340,7 @@ describe('who can start and stop it', () => {
       port: camera.port,
       schedule: manualSchedule().schedule,
     });
-    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true });
     const session = new SideCameraSession({ camera: controller, ...virtualTime() });
     await session.turnOnForFraming();
     expect(session.state()).toMatchObject({
@@ -414,7 +414,7 @@ describe('taking a link after the camera is on — #529', () => {
       port: camera.port,
       schedule: manualSchedule().schedule,
     });
-    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true });
     const time = virtualTime();
     const session = new SideCameraSession({ camera: controller, ...time });
     await session.turnOnForFraming();
@@ -495,7 +495,7 @@ describe('the pictures — #530, ADR 0033 D-3, D-5 and D-8', () => {
       port: camera.port,
       schedule: manualSchedule().schedule,
     });
-    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true });
     const link = scriptedLink();
     const time = virtualTime();
     const session = new SideCameraSession({ camera: controller, link, ...time });
@@ -542,7 +542,7 @@ describe('the pictures — #530, ADR 0033 D-3, D-5 and D-8', () => {
       port: camera.port,
       schedule: manualSchedule().schedule,
     });
-    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true });
     let asked = 0;
     let release: () => void = () => undefined;
     const slow = {
@@ -581,7 +581,7 @@ describe('the pictures — #530, ADR 0033 D-3, D-5 and D-8', () => {
       port: camera.port,
       schedule: manualSchedule().schedule,
     });
-    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true });
     const link = scriptedLink();
     const time = virtualTime();
     time.advance(90_000);
@@ -639,7 +639,7 @@ describe('every picture tick is recorded — #1112', () => {
       port: camera.port,
       schedule: manualSchedule().schedule,
     });
-    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true });
     let held: Promise<void> | undefined;
     const staged = {
       turnOn: async () => controller.turnOn(),
@@ -763,7 +763,7 @@ describe('every picture tick is recorded — #1112', () => {
       port: camera.port,
       schedule: manualSchedule().schedule,
     });
-    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true });
     const link = scriptedLink();
     const time = virtualTime();
     const session = new SideCameraSession({ camera: controller, link, ...time, timings });

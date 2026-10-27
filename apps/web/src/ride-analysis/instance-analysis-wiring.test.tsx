@@ -38,7 +38,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   WRITE_UP_EARLIER,
+  WRITE_UP_HEADING,
   WRITE_UP_NO_INSTANCE_BEFORE,
+  WRITE_UP_SAVED,
   WRITE_UP_SOURCE_TEXT,
 } from '../detail/write-up';
 import { AppShell } from '../shell/AppShell';
@@ -67,7 +69,6 @@ import {
   INSTANCE_CANCEL_LABEL,
   INSTANCE_WITHDRAWN,
 } from './InstanceWriteUpControl';
-import { WRITE_UP_HEADING, WRITE_UP_SAVED } from './RideWriteUpControl';
 
 const NO_BLUETOOTH: CapabilityProbe = { bluetooth: undefined, secureContext: true };
 

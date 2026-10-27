@@ -73,7 +73,6 @@ import type { CapabilityProbe } from '../support/bluetooth-support';
 import type { ShellSupportPort } from '../support/shell-support-port';
 import type { AnalysisPort } from '../analysis/store-port';
 import type { DetailPort } from '../detail/store-port';
-import type { RideAnalysisPort } from '../ride-analysis/ride-analysis-port';
 import type { HostedSettingsPort } from '../ride-analysis/hosted-settings-port';
 import type { InstanceAnalysisPort } from '../ride-analysis/instance-analysis-port';
 import type { BasemapConfig } from '../map/basemap';
@@ -384,14 +383,6 @@ export interface AppShellProps {
    */
   readonly detail?: DetailPort | undefined;
   /**
-   * The post-ride ask (#804): one press on a ride's page runs the analysis
-   * agent on the model the rider set up and saves the write-up with the ride.
-   * `undefined` offers no control. ⚠️ Optional, so a `main.tsx` that left it
-   * out would be green in `check:wiring` (§4j §Limits);
-   * `ride-analysis/ride-analysis-wiring.test.tsx` is what goes red for that.
-   */
-  readonly rideAnalysis?: RideAnalysisPort | undefined;
-  /**
    * A write-up asked of the rider's instance (#1102, ADR 0046 D-1): started,
    * streamed, cancelled and resumed on a ride's page, then screened and saved
    * on this device. ⚠️ Optional, so a `main.tsx` that left it out would be
@@ -622,7 +613,6 @@ function viewFor(
           detail={props.detail}
           map={props.map}
           basemap={props.basemap}
-          writeUp={props.rideAnalysis}
           instanceWriteUp={props.instanceAnalysis}
           riderText={props.riderText}
         />
@@ -634,7 +624,6 @@ function viewFor(
           activityId={match.parameter}
           map={props.map}
           basemap={props.basemap}
-          writeUp={props.rideAnalysis}
           instanceWriteUp={props.instanceAnalysis}
           riderText={props.riderText}
         />
