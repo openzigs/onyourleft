@@ -267,7 +267,9 @@ apps/                 AGPL-3.0-or-later, without exception
                         exactly that reason. Since #664 it also lists the
                         SOFTWARE the app includes, read from the contents of
                         the third-party notices `check:notices` generates and
-                        gates (§4g), and links the full document
+                        gates (§4g), and shows the full document on the
+                        screen (`credits/notices-document.ts`) — never a
+                        link, which left the app in the Android WebView
     src/demo/           the demo's scripted bot riders (#1646, epic #1643): authored
                         power, cadence and heart-rate scripts (`script.ts`), three
                         presets (`presets.ts`: climb, sprint, group) and a runner
