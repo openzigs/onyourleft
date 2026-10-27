@@ -33,6 +33,16 @@ an iPhone**, and Chrome on Linux needs `chrome://flags/#enable-experimental-web-
 No browser can record in the background, so the tab has to stay open. Mobile and desktop clients are
 the answer to all of that, and they come later.
 
+### Installing the Android app: Google Play or the direct download
+
+The Android app comes two ways: from **Google Play**, and as a **direct download**, the APK attached
+to each [GitHub release](https://github.com/openzigs/onyourleft/releases). The two copies cannot
+update each other, because each is signed with a different key: Google Play signs its copy with
+Google's key. **Moving from one to the other means uninstalling the app first, and uninstalling
+deletes the rides on the device.** Export them, or sync them with an instance, before you switch.
+The app's About page says which copy you have. Why, and how each is built:
+[`apps/mobile/RELEASE.md`](apps/mobile/RELEASE.md) §11.
+
 ### Planning a route
 
 The **Routes** page imports a route from a GPX file, and **Draw a route** builds one here: place

@@ -29,7 +29,7 @@
  * can be perfectly accessible and say something false.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -364,5 +364,64 @@ describe('where the rides are, per platform and per instance — #1450', () => {
       state: { kind: 'signed-out', origin: 'https://ride.example' },
     });
     expect((await said(false, instance)).sentence).toBe(BROWSER_WITH_INSTANCE);
+  });
+});
+
+/**
+ * Which copy of the app this is — #1745. A Play install and a direct-download
+ * install cannot update each other, and switching means an uninstall that
+ * deletes the rides on the device, so the Android app says which one it is.
+ * The sentences are literals here for the reason at the top of this file.
+ */
+describe('the About page names the channel the Android app came from', () => {
+  const HEADING = 'Which copy of the app this is';
+  const SWITCHING =
+    'Moving from one to the other means uninstalling this app first, and uninstalling deletes ' +
+    'the rides on this device — export them, or sync them with an instance, before you switch.';
+  const PLAY =
+    'This copy was installed from Google Play. The app is also offered as a direct download, an ' +
+    'APK file from its releases on GitHub, and the two cannot update each other, because each is ' +
+    `signed with a different key. ${SWITCHING}`;
+  const DIRECT =
+    'This copy is the direct download: an APK file, installed from outside Google Play. The copy ' +
+    'on Google Play and this one cannot update each other, because each is signed with a ' +
+    `different key. ${SWITCHING}`;
+  const NOT_RELEASED =
+    'This copy was not built by a release, so it is neither the Google Play copy nor the direct ' +
+    'download, and neither of those can update it. Moving to one of them means uninstalling this ' +
+    'app first, and uninstalling deletes the rides on this device — export them, or sync them ' +
+    'with an instance, before you switch.';
+
+  async function section(props: Parameters<typeof AboutView>[0]): Promise<string | undefined> {
+    const mounted = await mount(<AboutView {...props} />);
+    const heading = queryAll(mounted.container, 'h2').find((h) => h.textContent === HEADING);
+    const text = heading?.parentElement?.querySelector('p')?.textContent ?? undefined;
+    mounted.unmount();
+    return text;
+  }
+
+  it('says Google Play in a Play build', async () => {
+    expect(await section({ nativeShell: true, releaseChannel: 'play' })).toBe(PLAY);
+  });
+
+  it('says the direct download in an APK build', async () => {
+    expect(await section({ nativeShell: true, releaseChannel: 'direct' })).toBe(DIRECT);
+  });
+
+  it('claims neither channel in an app no release built', async () => {
+    expect(await section({ nativeShell: true, releaseChannel: undefined })).toBe(NOT_RELEASED);
+  });
+
+  it('reads the channel from the build when nothing is passed', async () => {
+    vi.stubEnv('VITE_OYL_RELEASE_CHANNEL', 'play');
+    try {
+      expect(await section({ nativeShell: true })).toBe(PLAY);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('is not shown in a browser, which has neither channel', async () => {
+    expect(await section({ nativeShell: false, releaseChannel: 'play' })).toBeUndefined();
   });
 });

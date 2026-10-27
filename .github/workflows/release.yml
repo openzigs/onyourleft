@@ -57,8 +57,32 @@ jobs:
       # The shell wraps apps/web's build — capacitor.config.ts sets
       # `webDir: '../web/dist'` — so this has to run before `cap sync` has
       # anything to copy. `cap sync` says so when it has not.
-      - run: pnpm --filter @onyourleft/web run build
-      - run: pnpm --filter @onyourleft/mobile exec cap sync android
+      #
+      # ⚠️ Built TWICE since #1745, once per channel. The About page in the
+      # app names the channel it came from, read from VITE_OYL_RELEASE_CHANNEL
+      # (apps/web/src/support/release-channel.ts), because a Play install and
+      # a direct-download install cannot update each other (RELEASE.md §11).
+      # The Play build's synced assets are set aside here, and Assemble puts
+      # them in place for the App Bundle after the APK is built from the
+      # direct one. Both builds finish before the key is decoded, so nothing
+      # but Gradle and a file copy runs while it is on disk.
+      - name: Build the web client for Google Play
+        env:
+          VITE_OYL_RELEASE_CHANNEL: play
+        run: |
+          set -euo pipefail
+          pnpm --filter @onyourleft/web run build
+          pnpm --filter @onyourleft/mobile exec cap sync android
+          rm -rf "${RUNNER_TEMP}/public-play"
+          cp -R apps/mobile/android/app/src/main/assets/public "${RUNNER_TEMP}/public-play"
+
+      - name: Build the web client for the direct download
+        env:
+          VITE_OYL_RELEASE_CHANNEL: direct
+        run: |
+          set -euo pipefail
+          pnpm --filter @onyourleft/web run build
+          pnpm --filter @onyourleft/mobile exec cap sync android
 
       # ⚠️ Signing is conditional on the secret being present, so a fork can run
       # this workflow and get an installable unsigned artefact without holding
@@ -136,23 +160,36 @@ jobs:
           # A variable rather than a secret — the signing step above says why.
           ANDROID_KEY_ALIAS: ${{ vars.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        # The App Bundle (#958) is built in the same Gradle invocation as the
-        # APK, so the one set of injected signing properties signs both. Google
-        # Play accepts a new app only as an `.aab`; the APK stays the
-        # direct-download artefact and the GitHub Release asset. Both are signed
-        # with the UPLOAD key — under Play App Signing Google re-signs what it
-        # serves, which is why a Play install and a direct-download install
-        # cannot update each other (apps/mobile/RELEASE.md §11).
+        # The App Bundle (#958) is built beside the APK. Google Play accepts a
+        # new app only as an `.aab`; the APK stays the direct-download artefact
+        # and the GitHub Release asset. Both are signed with the UPLOAD key —
+        # under Play App Signing Google re-signs what it serves, which is why a
+        # Play install and a direct-download install cannot update each other
+        # (apps/mobile/RELEASE.md §11).
+        #
+        # ⚠️ Two Gradle invocations since #1745, because the two carry
+        # different web assets: the APK the direct build, the bundle the Play
+        # build set aside above. Both go through `gradle` below, so a bundle
+        # built without the injected signing properties cannot be written by
+        # forgetting to repeat them; the bundle step would refuse it anyway.
         run: |
           if [ "${SIGNED}" = "true" ]; then
-            ./gradlew assembleRelease bundleRelease \
-              -Pandroid.injected.signing.store.file="${RUNNER_TEMP}/upload.jks" \
-              -Pandroid.injected.signing.store.password="${ANDROID_KEYSTORE_PASSWORD}" \
-              -Pandroid.injected.signing.key.alias="${ANDROID_KEY_ALIAS}" \
-              -Pandroid.injected.signing.key.password="${ANDROID_KEY_PASSWORD}"
+            variant=Release
+            gradle() {
+              ./gradlew "$@" \
+                -Pandroid.injected.signing.store.file="${RUNNER_TEMP}/upload.jks" \
+                -Pandroid.injected.signing.store.password="${ANDROID_KEYSTORE_PASSWORD}" \
+                -Pandroid.injected.signing.key.alias="${ANDROID_KEY_ALIAS}" \
+                -Pandroid.injected.signing.key.password="${ANDROID_KEY_PASSWORD}"
+            }
           else
-            ./gradlew assembleDebug bundleDebug
+            variant=Debug
+            gradle() { ./gradlew "$@"; }
           fi
+          gradle "assemble${variant}"
+          rm -rf app/src/main/assets/public
+          cp -R "${RUNNER_TEMP}/public-play" app/src/main/assets/public
+          gradle "bundle${variant}"
 
       - name: Remove the key before anything else runs
         if: always()
@@ -286,6 +323,16 @@ jobs:
               echo "::error::The release App Bundle does not verify as signed."
               exit 1
             fi
+            # ⚠️ #1745: a jar with UNSIGNED ENTRIES still prints `jar
+            # verified.` and exits 0; the only sign is a warning further down,
+            # "This jar contains unsigned entries which have not been
+            # integrity-checked." `-strict` would catch it and would also fail
+            # every run on the self-signed and no-timestamp warnings, which
+            # the upload key always raises, so the warning is read instead.
+            if grep -q 'unsigned entries' "${RUNNER_TEMP}/bundle-verify.txt"; then
+              echo "::error::The release App Bundle has entries that are not signed."
+              exit 1
+            fi
             keytool -printcert -jarfile "${aab}" > "${RUNNER_TEMP}/bundle-certs.txt"
             cat "${RUNNER_TEMP}/bundle-certs.txt"
             if grep -q 'CN=Android Debug' "${RUNNER_TEMP}/bundle-certs.txt"; then
@@ -342,3 +389,6 @@ jobs:
         with:
           files: apps/mobile/android/app/build/outputs/apk/**/*.apk
           fail_on_unmatched_files: true
+          # #1745: every release says it is the direct download and that it
+          # and the Play copy do not mix. ⚠️ Never run: no tag has been pushed.
+          body_path: apps/mobile/release-notes.md
