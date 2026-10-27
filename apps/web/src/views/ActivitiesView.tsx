@@ -630,8 +630,9 @@ export function ActivitiesView({
               Ride not found
             </h2>
             <p>
-              No ride with that address is stored on this device. It may have been deleted, or the
-              link may have come from another device — rides are never copied between them.
+              No ride with that address is stored on this device. It may have been deleted, or it
+              may be saved only on another of your devices, and not yet brought here by a sync with
+              your instance.
             </p>
           </>
         ) : (

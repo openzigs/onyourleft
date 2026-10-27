@@ -29,6 +29,19 @@ const POLICY = asProse(read('docs/privacy-policy.md'));
 const WORDS = `${INSTANCE_SENDS_LEAD} ${INSTANCE_SENDS}`;
 
 describe('the instance paragraph in the privacy policy (#1102, #1104 B3)', () => {
+  // #1104 (review): the retention words are pinned in the table row as well as
+  // in the bullet below it; a pin on the whole policy is met by either alone.
+  it('keeps the same retention facts in the "Analysis jobs and write-ups" table row', () => {
+    const row = read('docs/privacy-policy.md')
+      .split('\n')
+      .find((line) => line.startsWith('| Analysis jobs and write-ups |'));
+    expect(row, 'the table row').toBeDefined();
+    expect(row).toContain('A job that ends without a write-up is deleted after 7 days');
+    expect(row).toContain('with your account until your account there is erased');
+    expect(row).toContain('Deleting the ride does not remove them');
+    expect(row).not.toContain('kept for 7 days');
+  });
+
   it('is there word for word, as the page says it', () => {
     expect(WORDS.length).toBeGreaterThan(400);
     expect(POLICY).toContain(WORDS);
@@ -45,8 +58,19 @@ describe('the instance paragraph in the privacy policy (#1102, #1104 B3)', () =>
   it.each(
     [
       'encrypted end to end to your instance',
-      'for 7 days',
-      'The side camera’s measurements are not kept with it',
+      // #1104 C-3, the owner's ruling of 2026-10-26: the policy says what the
+      // code keeps — a finished job keeps its input until the account goes.
+      'A job that ends without a write-up is deleted after 7 days',
+      'the side camera’s measurements included, if they were sent — are kept with your account until your account there is erased',
+      'Deleting the ride, here or on your instance, does not remove them',
+      'The write-up is in your account’s export there, and the ride’s numbers are not',
+      // #1104 C-4: no route serves the kept write-up to a device; a sync does.
+      'Another of your devices shows the write-up once this device has synced the ride’s write-up there',
+      // #1104 C-2, ADR 0040 D-11.
+      'How the model looks things up: with the searchable copy your instance keeps of what you synced',
+      '| A searchable copy of what you synced, for the analysis |',
+      'with a model on its own machine or its own private network, never a service',
+      'your instance deletes its passages in the same step. Erasing this device does not reach it',
       'never the ride’s numbers or the model’s words',
       'your instance stops the analysis at its next step',
       "A ride's numbers sent to your instance, when you ask for an analysis of it",
@@ -56,5 +80,16 @@ describe('the instance paragraph in the privacy policy (#1102, #1104 B3)', () =>
     ].map((each) => each.replaceAll('’', "'")),
   )('says %s', (fact) => {
     expect(POLICY).toContain(fact);
+  });
+
+  it.each(
+    [
+      // #1104 C-3 and C-4: both were false of the code on main.
+      'The side camera’s measurements are not kept with it',
+      'the write-up as it was written — for 7 days',
+      'so another of your devices can show it',
+    ].map((each) => each.replaceAll('’', "'")),
+  )('no longer says %s', (claim) => {
+    expect(POLICY).not.toContain(claim);
   });
 });

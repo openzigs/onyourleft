@@ -967,6 +967,12 @@ describe('#670 — a selected ride', () => {
     expect(document.body.textContent).toContain(
       'No ride with that address is stored on this device',
     );
+    // #1104 (Q2): a sync brings rides to this device (#1195), so the page no
+    // longer says they are never copied between devices.
+    expect(document.body.textContent).not.toContain('never copied');
+    expect(document.body.textContent).toContain(
+      'not yet brought here by a sync with your instance',
+    );
   });
 
   it('says another athlete’s ride is not found, even though this device holds it', async () => {

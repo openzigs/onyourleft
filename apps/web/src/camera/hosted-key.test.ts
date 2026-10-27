@@ -222,8 +222,8 @@ describe('what the filed statements say', () => {
   it('the privacy policy names the hosted exception, as numbers and never a picture', () => {
     expect(policy).toContain('## Questions sent to a service you chose, on your own key');
     expect(policy).toContain('never a picture');
-    // Four since #777 (an instance sign-in); the hosted question is still one of them.
-    expect(policy).toContain('exactly **four** network calls');
+    // Five since #1539 (#1104); the hosted question is still one of them.
+    expect(policy).toContain('exactly **five** network calls');
   });
 
   it('Play’s Photos and videos row still says THIS path is never sent a picture — and is shared since #1106, for another', () => {

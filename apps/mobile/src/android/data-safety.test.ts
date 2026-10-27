@@ -379,6 +379,8 @@ describe('the declaration filed on Play', () => {
     ).toStrictEqual([
       'Health and fitness — health info',
       'Health and fitness — fitness info',
+      // #1104: a document's text can reach a hosted service, masked.
+      'Files and docs',
       'App activity — Other user-generated content',
       'Photos and videos',
     ]);
@@ -469,10 +471,16 @@ describe('the declaration filed on Play', () => {
       expect(answer?.why, dataType).toContain('which needs the instance’s card');
       expect(instance?.dataTypes, dataType).toContain(dataType);
     }
-    // The rider's own copy on an instance they chose is not a third party:
-    // the row sync alone moves stays unshared. (The rider's own text is shared
-    // since #1251, by the hosted service, not by the sync — the case below.)
-    expect(row('Files and docs')?.shared).toBe(false);
+    // The rider's own copy on an instance they chose is not a third party.
+    // Files and docs is shared since #1104 (the owner's ruling of
+    // 2026-10-26), by the hosted service the documents' text can reach
+    // through `history_search`, not by the sync.
+    expect(row('Files and docs')?.shared).toBe(true);
+    expect(row('Files and docs')?.why).toContain('those parts are sent to it, masked first');
+    expect(row('Files and docs')?.why).toContain('that service is a third party, hence shared');
+    expect(row('App activity — Other user-generated content')?.why).toContain(
+      'The instance keeps a searchable copy',
+    );
     expect(row('Files and docs')?.why).not.toContain('Nothing is uploaded');
     expect(row('Health and fitness — health info')?.why).not.toContain(
       'sends none of it to an instance',
@@ -883,7 +891,7 @@ describe('block summaries sent during a ride, for a re-plan (#1245, ADR 0048 D-1
     const answer = row('App activity — Other user-generated content');
     expect(answer).toMatchObject({ collected: true, shared: true, optional: true });
     expect(answer?.why).toContain(
-      'go to their instance with each block summary, sealed, and the model on the instance’s own machine may look up',
+      'go to their instance with each block summary, sealed, and the model on the instance’s own machine or its own private network may look up',
     );
     expect(answer?.why).toContain(
       'what the rider wrote about their goals and the blocks of their saved workouts, if synced',

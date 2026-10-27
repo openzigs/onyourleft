@@ -571,6 +571,12 @@ describe('#670 — a selected workout', () => {
     expect(view.container.querySelector('#oyl-selected-heading')?.textContent).toBe(
       'Workout not found',
     );
+    // #1104 (F-1): saved workouts sync both ways since #1253, so the page no
+    // longer says they are never copied between devices.
+    expect(view.container.textContent).not.toContain('never copied');
+    expect(view.container.textContent).toContain(
+      'not yet brought here by a sync with your instance',
+    );
     // #670's review (N1): the builder is not drawn under a chosen workout;
     // the list's *Build a workout* is the way back to it, and the primary.
     expect(view.container.querySelector('#workout-name')).toBeNull();

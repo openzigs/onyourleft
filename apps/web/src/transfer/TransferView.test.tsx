@@ -1193,7 +1193,11 @@ describe('TransferView — what it may say about another platform', () => {
 
     // #35: a dialogue that implies more than the architecture can deliver is
     // the worst outcome. These are the three sentences that stop it doing that.
-    expect(document.body.textContent).toContain('nowhere else to ask');
+    // #1104 (G-3): "There is no server … nowhere else to ask" stopped being
+    // true when instances shipped; the screen now says the erase is local.
+    expect(document.body.textContent).not.toContain('There is no server');
+    expect(document.body.textContent).not.toContain('nowhere else to ask');
+    expect(document.body.textContent).toContain('it is finished on this device only');
     expect(document.body.textContent).toContain('already exported');
     expect(document.body.textContent).toContain('signs as a new identity');
   });

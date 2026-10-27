@@ -259,7 +259,9 @@ describe('what the rider is told before they press it', () => {
     // with it, as this comment asked.
     // Eight since #1106, whose instance path can send a photograph on to a
     // hosted service the rider agreed to: ADR 0029 D-4's second line, true at last.
-    expect(ERASE_CANNOT_REACH.length).toBeLessThanOrEqual(8);
+    // Nine since #1104 (G-1): the instance sends a ride's numbers and looked-up
+    // history on to a hosted service the rider agreed to (#1251).
+    expect(ERASE_CANNOT_REACH.length).toBeLessThanOrEqual(9);
   });
 
   it('names the photograph an instance sent on to a hosted service, as the privacy policy does — #1106', () => {
@@ -277,6 +279,33 @@ describe('what the rider is told before they press it', () => {
     // The policy's erase paragraph says it, and so does the screen before the press.
     expect(straight(erase)).toContain(line);
     expect(ERASE_CANNOT_REACH).toContain(line);
+  });
+
+  it('names the ride’s numbers and history an instance sent on to a hosted service, as the privacy policy does — #1104', () => {
+    const policy = readFileSync(
+      fileURLToPath(new URL('../../../../docs/privacy-policy.md', import.meta.url)),
+      'utf8',
+    );
+    const erase = policy.slice(
+      policy.indexOf('## Deleting your data'),
+      policy.indexOf('## Children'),
+    );
+    const straight = (text: string): string => text.replace(/[‘’]/g, "'").replace(/\s+/g, ' ');
+    const line =
+      "a ride's numbers and the parts of your history your instance sent to a service you agreed to, which is a copy that service holds";
+    expect(straight(erase)).toContain(line);
+    expect(ERASE_CANNOT_REACH.map(straight)).toContain(line);
+    // And the instance's own copy names what it worked out, not only what it
+    // received: the screen in a clause, the policy item by item.
+    expect(ERASE_CANNOT_REACH.join(' ')).toContain('anything it received or worked out for you');
+    for (const held of [
+      'the searchable copy it keeps for the analysis',
+      'the analyses it wrote',
+      'any key of yours it holds',
+      'your list of words to mask, and your privacy zones (their names, where they are and how large)',
+    ]) {
+      expect(straight(erase), held).toContain(held);
+    }
   });
 
   it('names what an instance holds, as the privacy policy does — #777, #778', () => {

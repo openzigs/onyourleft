@@ -143,7 +143,7 @@ export const INSTANCE_SENDS =
   'how it went section by section. If the side camera filmed the ride, and you agreed to the ' +
   'camera, it also gets how a few measurements of your riding position changed between the start ' +
   'and the end of filming. Never a picture. Your instance writes the analysis with a model on its ' +
-  'own machine, and the model may look up what is already on your instance: short summaries of ' +
+  'own machine or its own private network, and the model may look up what is already on your instance: short summaries of ' +
   'your recent rides, summaries of older rides, what you wrote about your goals, your notes and ' +
   'documents, your saved workouts, and earlier write-ups. Nothing is sent until you press the ' +
   'button. Once you have pressed it, the analysis can finish while the app is closed.';

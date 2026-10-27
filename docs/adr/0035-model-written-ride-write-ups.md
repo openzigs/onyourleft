@@ -653,3 +653,15 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   [#1103](https://github.com/openzigs/onyourleft/issues/1103) removes it, as the 2026-10-07 entry
   above records. **D-9 C is not replaced yet**: #1104's B1, the hosted consent, is not approved,
   and its entry here lands with the pull request that ships it. The body above is not edited.
+- **2026-10-26** — **D-9 C is replaced, for the instance's hosted path, by [#1104](https://github.com/openzigs/onyourleft/issues/1104)'s B1; and
+  B3 says "its own machine or its own private network".** The 2026-10-09 entry above said D-9 C was
+  not replaced yet. B1 shipped in [#1303](https://github.com/openzigs/onyourleft/pull/1303), approved
+  by the owner on 2026-10-12, and ADR 0029's 2026-10-26 entry quotes it. D-9 C's device wording stays
+  on the device-held path until [#1103](https://github.com/openzigs/onyourleft/issues/1103) removes
+  it, as D-9 B's does. The owner ruled on 2026-10-26 that *"a model on its own machine"* in B3 becomes
+  *"a model on its own machine or its own private network"*, because the instance's model address
+  may be any host on its private network (`apps/instance` §`history/address.ts`), never a public
+  one. So B3, as `apps/web/src/detail/write-up.ts` §`INSTANCE_SENDS` and the privacy policy now say
+  it, reads *"Your instance writes the analysis with a model on its own machine or its own private
+  network, and the model may look up what is already on your instance"*, and is otherwise the text
+  the 2026-10-09 entry quotes. The body above is not edited. (#1104)

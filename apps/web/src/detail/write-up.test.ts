@@ -130,11 +130,13 @@ const RECORD: RideWriteUpRecord = {
  * word. ⚠️ **Drafts awaiting the owner's approval** — the approval is a dated
  * comment on #1104 before this ships, and a reworded approval changes the
  * constant AND this pin in the same commit, where a reviewer sees both.
+ * #1104's ruling of 2026-10-26 changed B3's "own machine" to "its own
+ * machine or its own private network", and this pin with it.
  */
 describe('the instance paragraph and the no-instance sentence, as drafted on #1104 (#1102)', () => {
   it('says what a job sends in B3, word for word', () => {
     expect(`${INSTANCE_SENDS_LEAD} ${INSTANCE_SENDS}`).toBe(
-      "A ride analysed on your instance, when you ask for an analysis. When you press the button on a ride's page, that ride's numbers go to your instance: heart rate, cadence and power, your weight and watts per kilogram, your threshold power, if you set one, how long the ride lasted, its distance, and each section's gradient and total climb, and how it went section by section. If the side camera filmed the ride, and you agreed to the camera, it also gets how a few measurements of your riding position changed between the start and the end of filming. Never a picture. Your instance writes the analysis with a model on its own machine, and the model may look up what is already on your instance: short summaries of your recent rides, summaries of older rides, what you wrote about your goals, your notes and documents, your saved workouts, and earlier write-ups. Nothing is sent until you press the button. Once you have pressed it, the analysis can finish while the app is closed.",
+      "A ride analysed on your instance, when you ask for an analysis. When you press the button on a ride's page, that ride's numbers go to your instance: heart rate, cadence and power, your weight and watts per kilogram, your threshold power, if you set one, how long the ride lasted, its distance, and each section's gradient and total climb, and how it went section by section. If the side camera filmed the ride, and you agreed to the camera, it also gets how a few measurements of your riding position changed between the start and the end of filming. Never a picture. Your instance writes the analysis with a model on its own machine or its own private network, and the model may look up what is already on your instance: short summaries of your recent rides, summaries of older rides, what you wrote about your goals, your notes and documents, your saved workouts, and earlier write-ups. Nothing is sent until you press the button. Once you have pressed it, the analysis can finish while the app is closed.",
     );
   });
 
