@@ -1630,7 +1630,7 @@ rule is that CI must not accumulate knowledge this file does not carry.
 |---|---|
 | Triggers | a pushed tag matching `v*`, and `workflow_dispatch` |
 | Job | `Build and publish the APK` |
-| What it does | decodes an upload key **if this repository has one**, assembles, **verifies the packaged APK**, uploads it as a workflow artefact, publishes a GitHub Release on a tag, and removes the key before anything else runs |
+| What it does | decodes an upload key **if this repository has one**, assembles the APK and the App Bundle in one Gradle invocation, **verifies the packaged APK and the `.aab`** (signed, not the debug certificate, target API at least `REL002`'s floor; the bundle's with `jarsigner`, `keytool` and a SHA-256-pinned bundletool, #958), uploads both as workflow artefacts (`android-apk`, `android-aab`), publishes **only the APK** to a GitHub Release on a tag, and removes the key before anything else runs. ⚠️ The `.aab` never goes to Play from CI: that needs a service-account credential, a separate decision ([`apps/mobile/RELEASE.md`](../../apps/mobile/RELEASE.md) §11) |
 | Permissions | ⚠️ `contents: write` — **the only workflow here that is not read-only**, because writing a Release needs it |
 
 ⚠️ **It has run, and this paragraph used to say it never had** — a reviewer who remembers "treat
