@@ -25,8 +25,11 @@ account**, on the same screen.
 If you no longer have the app, or it can no longer sign in to the instance:
 
 - **For the project's own instance**, email **[matt@openzigs.ai](mailto:matt@openzigs.ai)**, the
-  maintainer who runs it. Say which name you used there and roughly when you connected. Do not put
-  a request about your own data in a public issue.
+  maintainer who runs it. Include one of the recovery codes you were shown when you connected: the
+  maintainer deletes an account only when the code matches it, so nobody can have your account
+  deleted by knowing your name. If you no longer have a code either, say so, and the maintainer will
+  ask how else you can show the account is yours. Do not put a request about your own data in a
+  public issue.
 - **For anybody else's instance**, ask whoever runs it. This project cannot reach another instance's
   data, and cannot delete it for you.
 
