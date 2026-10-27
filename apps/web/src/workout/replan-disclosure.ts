@@ -129,11 +129,11 @@ const WHAT_IS_NEVER_SENT =
 
 /** Who answers, what the model may look up (`replan-tools.ts`), and that it goes no further. */
 const WHO_IS_ASKED =
-  'Your instance asks a model on its own machine whether to suggest one change to the blocks ' +
+  'Your instance asks a model on its own machine or its own private network whether to suggest one change to the blocks ' +
   'you have not ridden yet. The model may look up what you wrote about your goals and the ' +
   'blocks of your saved workouts, if you synced them. It answers with one change from a fixed ' +
   'list, or none: never with words, and never with a number of watts. None of it is sent on to ' +
-  "a hosted service: this app asks only for the model on your instance's own machine, " +
+  "a hosted service: this app asks only for the model on your instance's own machine or its own private network, " +
   'whatever key you stored there.';
 
 /**

@@ -302,7 +302,7 @@ describe('what the rider is told before they press it', () => {
       'the searchable copy it keeps for the analysis',
       'the analyses it wrote',
       'any key of yours it holds',
-      'your list of words to mask with your privacy zones',
+      'your list of words to mask, and your privacy zones (their names, where they are and how large)',
     ]) {
       expect(straight(erase), held).toContain(held);
     }

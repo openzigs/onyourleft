@@ -134,7 +134,13 @@ describe('the Connect screen — #777, #778', () => {
     // #1104 (F-3): what the instance receives without a sync.
     const ask = INSTANCE_RECEIVES.find((line) => line.includes('Only if you ask it for one'));
     expect(ask).toContain('a ride’s numbers for a write-up, sealed');
-    expect(ask).toContain('your list of words to mask with your privacy zones');
+    expect(ask).toContain(
+      'your list of words to mask, and your privacy zones: their names, where they are and how large',
+    );
+    expect(ask).not.toContain('to mask with your privacy zones');
+    // #1104 (review): the two other things that go to the instance without a sync.
+    expect(ask).toContain('a summary of each block you have ridden, for a re-plan during the ride');
+    expect(ask).toContain('the side camera’s pictures');
     expect(INSTANCE_KEPT_VISIBLE).toContain(ask);
     expect(INSTANCE_KEPT_VISIBLE).toContain(room);
     expect(INSTANCE_KEPT_VISIBLE).toContain(sync);

@@ -136,12 +136,12 @@ describe('what the disclosure says: what, when, to whom, and off per ride', () =
       'This sends a summary of each block you ride to your instance, during the ride.',
     );
     expect(disclosure.paragraphs[2]).toContain('sealed on this device so that only your instance');
-    expect(TEXT).toContain('a model on its own machine');
+    expect(TEXT).toContain('a model on its own machine or its own private network');
   });
 
   it('says no hosted service is sent it, and has no hosted form (#1244 asks instance-local only)', () => {
     expect(TEXT).toContain(
-      "None of it is sent on to a hosted service: this app asks only for the model on your instance's own machine, whatever key you stored there.",
+      "None of it is sent on to a hosted service: this app asks only for the model on your instance's own machine or its own private network, whatever key you stored there.",
     );
     // The one mention of a service is the sentence that says it is sent to none.
     expect(
@@ -434,11 +434,13 @@ describe('what the text says of this device, held to its code (#1244)', () => {
     expect(TEXT).toContain(GOAL_NAMED_BY.timeInRangeMinutes);
   });
 
-  it('"this app asks only for the model on your instance’s own machine": the one source it can name', () => {
+  it('"this app asks only for the model on your instance’s own machine or its own private network": the one source it can name', () => {
     expect(REPLAN_SOURCE).toBe('instance-local');
     expect(built.source).toBe('instance-local');
     expect(JSON.stringify(built)).not.toContain('hosted');
-    expect(TEXT).toContain("this app asks only for the model on your instance's own machine");
+    expect(TEXT).toContain(
+      "this app asks only for the model on your instance's own machine or its own private network",
+    );
   });
 
   it('"never more often than every 3 minutes": the session’s own interval', () => {
@@ -460,7 +462,7 @@ describe('what the text says of this device, held to its code (#1244)', () => {
     // The request around it: the input, and the two fixed words the policy speaks of.
     expect(Object.keys(built).sort()).toStrictEqual(['input', 'source', 'templateVersion']);
     expect(POLICY).toContain(
-      "two fixed words that say it is a re-plan and that the model on your instance's own machine is to answer it",
+      "two fixed words that say it is a re-plan and that the model on your instance's own machine or its own private network is to answer it",
     );
   });
 

@@ -63,7 +63,7 @@ export const INSTANCE_RECEIVES: readonly string[] = [
   'Connecting itself sends no ride, route, position or heart rate of yours.',
   'Only if you make or join a private room: the route of a room you make, the code you type to join one, your power and cadence while you ride in it, the weight you declare once as you join, and a race’s result.',
   'Only if you sync with it, which needs the instance’s card: your rides, whole, with their positions and heart rate, their write-ups and side-camera reports, a summary of each, your goals, notes and documents, your saved workouts and your workout goals. They are sealed on this device for the instance alone, and stay on this device too. Nothing is synced until you press Sync now.',
-  'Only if you ask it for one: a ride’s numbers for a write-up, sealed, and — if you store your own key for a hosted service there and agree to it — that key, sealed, and your list of words to mask with your privacy zones.',
+  'Only if you ask it for one: a ride’s numbers for a write-up, sealed, and — if you store your own key for a hosted service there and agree to it — that key, sealed, and your list of words to mask, and your privacy zones: their names, where they are and how large. Only if you switch them on: a summary of each block you have ridden, for a re-plan during the ride, and the side camera’s pictures, both sealed.',
 ];
 
 export const INSTANCE_RECEIVES_LEAD = 'What the instance receives from this app';

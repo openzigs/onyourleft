@@ -29,6 +29,19 @@ const POLICY = asProse(read('docs/privacy-policy.md'));
 const WORDS = `${INSTANCE_SENDS_LEAD} ${INSTANCE_SENDS}`;
 
 describe('the instance paragraph in the privacy policy (#1102, #1104 B3)', () => {
+  // #1104 (review): the retention words are pinned in the table row as well as
+  // in the bullet below it; a pin on the whole policy is met by either alone.
+  it('keeps the same retention facts in the "Analysis jobs and write-ups" table row', () => {
+    const row = read('docs/privacy-policy.md')
+      .split('\n')
+      .find((line) => line.startsWith('| Analysis jobs and write-ups |'));
+    expect(row, 'the table row').toBeDefined();
+    expect(row).toContain('A job that ends without a write-up is deleted after 7 days');
+    expect(row).toContain('with your account until your account there is erased');
+    expect(row).toContain('Deleting the ride does not remove them');
+    expect(row).not.toContain('kept for 7 days');
+  });
+
   it('is there word for word, as the page says it', () => {
     expect(WORDS.length).toBeGreaterThan(400);
     expect(POLICY).toContain(WORDS);
@@ -47,7 +60,7 @@ describe('the instance paragraph in the privacy policy (#1102, #1104 B3)', () =>
       'encrypted end to end to your instance',
       // #1104 C-3, the owner's ruling of 2026-10-26: the policy says what the
       // code keeps — a finished job keeps its input until the account goes.
-      'An analysis that does not finish is deleted after 7 days',
+      'A job that ends without a write-up is deleted after 7 days',
       'the side camera’s measurements included, if they were sent — are kept with your account until your account there is erased',
       'Deleting the ride, here or on your instance, does not remove them',
       'The write-up is in your account’s export there, and the ride’s numbers are not',

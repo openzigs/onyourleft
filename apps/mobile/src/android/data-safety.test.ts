@@ -891,7 +891,7 @@ describe('block summaries sent during a ride, for a re-plan (#1245, ADR 0048 D-1
     const answer = row('App activity — Other user-generated content');
     expect(answer).toMatchObject({ collected: true, shared: true, optional: true });
     expect(answer?.why).toContain(
-      'go to their instance with each block summary, sealed, and the model on the instance’s own machine may look up',
+      'go to their instance with each block summary, sealed, and the model on the instance’s own machine or its own private network may look up',
     );
     expect(answer?.why).toContain(
       'what the rider wrote about their goals and the blocks of their saved workouts, if synced',

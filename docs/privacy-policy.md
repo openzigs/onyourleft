@@ -92,7 +92,7 @@ you can switch on *Re-plan during the ride* for that ride.
 While it is on, as each block begins, and never more often than every 3 minutes, this device sends
 your instance a summary of each block you have ridden so far — never a second-by-second recording,
 and never where you are — sealed so that only your instance can open it, with the workout's blocks
-and your workout goals, the heart rates you chose included. A model on your instance's own machine
+and your workout goals, the heart rates you chose included. A model on your instance's own machine or its own private network
 may suggest one change to the blocks you have not ridden yet. It is not sent on to a hosted
 service: this app never asks one for a re-plan. It is off at the start of every ride, and nothing
 is sent until you switch it on for that ride. A heart-rate hold on its own sends nothing anywhere:
@@ -315,8 +315,8 @@ already knows, your name there, and a room you make, join and ride in.
 | A searchable copy of what you synced, for the analysis | your instance cuts your synced write-ups, ride summaries, goals, notes and documents into short passages and works out a searchable copy of each with a model on its own machine or its own private network, never a service, so that an analysis can look back at your history. It is not in the instance's export, which says only that the copy exists, which model made it and how many passages it holds | when you sync | goes when its source goes: delete a ride, write-up, goal, note or document here and sync, and your instance deletes its passages in the same step. Erasing this device does not reach it; it is erased with your account on the instance: ask the instance's operator, as described under **Deleting what an instance holds** below |
 | A ride you said may be raced, as another rider's ghost | **only if you tick *May be raced* on a ride's page and then sync** ([#331](https://github.com/openzigs/onyourleft/issues/331)), and only for a ride on one of your saved routes that none of your privacy zones comes near. This device then tells the instance a fingerprint of that route (a SHA-256 of its points and heights, never the route itself). Another rider on the same instance who holds the same route, imported from the same file, and asks to race a ghost on it may be sent that ride: your display name and your speed, second by second. Never a position, a date, your heart rate or your power, and never a list of riders: one ghost at a time. A rider you blocked, or who blocked you, is not sent it. They race it on their own screen during their ride, and the app does not keep it | when you sync after ticking it | untick *May be raced* and sync: the instance stops sending it at once, and forgets the fingerprint. Add a privacy zone near the route and sync, and it stops too. To have everything erased, ask the instance's operator, as described under **Deleting what an instance holds** below |
 | Asking for another rider's ghost | **only if you switch on *Race another rider's ghost*** before a ride ([#331](https://github.com/openzigs/onyourleft/issues/331)): when you press *Ride*, a fingerprint of the route (a SHA-256 of its points and heights, never the route) is sent to your instance, sealed for it alone. It answers with at most one rider who agreed to be raced on that route: their display name and their speed. This device holds that only for the ride, and keeps none of it afterwards | when you press *Ride* with the switch on | — |
-| Analysis jobs and write-ups | when you ask for an analysis, the ride's numbers go to your instance. An analysis that does not finish is deleted after 7 days. One that finishes keeps its write-up and the ride's numbers it was written from — the side camera's measurements included, if they were sent — with your account until your account there is erased; its progress is deleted after 7 days. The write-up is in your account's export there, and the ride's numbers are not. Another of your devices shows the write-up once this device has synced the ride's write-up there. See **A ride analysed on your instance** below | when you press the button on a ride's page | erased with your account on the instance: ask the instance's operator, as described under **Deleting what an instance holds** below. Deleting the ride does not remove them |
-| Block summaries, for a re-plan during the ride | **only if you switch on *Re-plan during the ride* for a ride**: a summary of each block you have ridden so far — how long it lasted, your mean and highest heart rate, how long your heart rate was inside the range you chose, your mean power as a share of your threshold power, your mean cadence, and how many times the target had to be eased — with the blocks of the workout as it stands, a heart-rate hold's range in beats per minute included, and your workout goals, the heart rates you chose included and the time you want to spend in your range left out, sealed for that instance alone. Never a second-by-second recording, a position, a date or a name. A model on your instance's own machine reads it; this app never asks a hosted service for a re-plan. Your instance keeps each request and its answer for 7 days. See **Block summaries sent to your instance during a ride** below | during a ride, as a block begins, and never more often than every 3 minutes, while the switch is on | switch it off and nothing more is sent — *Switch re-plans off*, beside *End workout*, while the workout runs; it then stays off for the rest of that workout; each request ages out of your instance after 7 days, and is erased with your account on the instance: ask the instance's operator, as described under **Deleting what an instance holds** below |
+| Analysis jobs and write-ups | when you ask for an analysis, the ride's numbers go to your instance. A job that ends without a write-up is deleted after 7 days. One that finishes keeps its write-up and the ride's numbers it was written from — the side camera's measurements included, if they were sent — with your account until your account there is erased; its progress is deleted after 7 days. The write-up is in your account's export there, and the ride's numbers are not. Another of your devices shows the write-up once this device has synced the ride's write-up there. See **A ride analysed on your instance** below | when you press the button on a ride's page | erased with your account on the instance: ask the instance's operator, as described under **Deleting what an instance holds** below. Deleting the ride does not remove them |
+| Block summaries, for a re-plan during the ride | **only if you switch on *Re-plan during the ride* for a ride**: a summary of each block you have ridden so far — how long it lasted, your mean and highest heart rate, how long your heart rate was inside the range you chose, your mean power as a share of your threshold power, your mean cadence, and how many times the target had to be eased — with the blocks of the workout as it stands, a heart-rate hold's range in beats per minute included, and your workout goals, the heart rates you chose included and the time you want to spend in your range left out, sealed for that instance alone. Never a second-by-second recording, a position, a date or a name. A model on your instance's own machine or its own private network reads it; this app never asks a hosted service for a re-plan. Your instance keeps each request and its answer for 7 days. See **Block summaries sent to your instance during a ride** below | during a ride, as a block begins, and never more often than every 3 minutes, while the switch is on | switch it off and nothing more is sent — *Switch re-plans off*, beside *End workout*, while the workout runs; it then stays off for the rest of that workout; each request ages out of your instance after 7 days, and is erased with your account on the instance: ask the instance's operator, as described under **Deleting what an instance holds** below |
 | A hosted model key you paste | held by your instance, encrypted, and used only for what you asked it to send that service: your own analyses and, if you separately agreed to that, your side camera's pictures. It is never sent back to this device. See **Questions your instance sends to a service you agreed to** below | when you paste it | removed when you press *Remove my key from my instance*, and erased with your account on the instance |
 | Your hosted consent | the address of the service you agreed to, and when, kept by your instance with your account and in its export | when you tick the box that agrees to it | withdrawn when you untick it, or when you store a key for another service; erased with your account on the instance |
 | Your words to mask and your privacy zones | copied to your instance so it can mask what it sends to a service — the list, and each zone's name, where it is and how large — kept with your account and in its export | when you agree to a hosted service there, and again each time you ask for an analysis by it | erased with your account on the instance: ask the instance's operator, as described under **Deleting what an instance holds** below |
@@ -487,7 +487,7 @@ and, beside the switch:
   not store the picture: it is not written to its database, to a file or to its logs, and it is
   gone when the answer has been sent. That is what the software this project publishes does; an
   instance is run by its operator, who controls that machine.
-- **Which model:** the one your instance's operator set up on the instance's own machine for
+- **Which model:** the one your instance's operator set up on the instance's own machine or its own private network for
   pictures. If none is set up, your instance says so, no picture is looked at, and the Camera page
   tells you.
 - **What the tablet keeps:** the same as when it looks at the pictures itself, described under **A
@@ -560,7 +560,7 @@ closed.
   it is sent with no id, and the analysis then says nothing about how long ago your other rides
   were.
 - **What your instance keeps:** the analysis job — the ride's numbers it was sent, its progress and
-  the write-up as it was written. An analysis that does not finish is deleted after 7 days. When one
+  the write-up as it was written. A job that ends without a write-up is deleted after 7 days. When one
   finishes, its progress is deleted after 7 days, and its write-up and the ride's numbers it was
   written from — the side camera's measurements included, if they were sent — are kept with your
   account until your account there is erased. Deleting the ride, here or on your instance, does not
@@ -661,7 +661,7 @@ with it:
 >
 > It never sends a second-by-second recording, where you are, the date, your name, the workout's name, the labels of its blocks or a number of watts. It is sealed on this device so that only your instance can open it.
 >
-> Your instance asks a model on its own machine whether to suggest one change to the blocks you have not ridden yet. The model may look up what you wrote about your goals and the blocks of your saved workouts, if you synced them. It answers with one change from a fixed list, or none: never with words, and never with a number of watts. None of it is sent on to a hosted service: this app asks only for the model on your instance's own machine, whatever key you stored there.
+> Your instance asks a model on its own machine or its own private network whether to suggest one change to the blocks you have not ridden yet. The model may look up what you wrote about your goals and the blocks of your saved workouts, if you synced them. It answers with one change from a fixed list, or none: never with words, and never with a number of watts. None of it is sent on to a hosted service: this app asks only for the model on your instance's own machine or its own private network, whatever key you stored there.
 >
 > This device checks every suggestion against your workout goals and the workout you loaded, and works out every target itself. A change it accepts starts at the next block, never in the one you are riding, and you can press 'Keep the plan' before then. You can switch re-plans off while the workout runs, and nothing more is sent for that workout.
 >
@@ -685,7 +685,7 @@ with it:
   asked how hard it feels — and not the time you want to spend in your range, which this app
   leaves out. Two counts this device keeps for the ride: how many times the plan has changed, and
   which request this is. And two fixed words that say it is a re-plan and that the model on your
-  instance's own machine is to answer it. Nothing else: there is no place in the request for
+  instance's own machine or its own private network is to answer it. Nothing else: there is no place in the request for
   anything more. No effort check-in is sent.
 - **When:** during the ride, and only while the switch is on for that ride: as a block begins, and
   never less than 3 minutes after the last time. Nothing is sent before you switch it on, while the
@@ -697,7 +697,7 @@ with it:
 - **To whom:** the instance you connected, over the same connection as everything else the app
   sends it. It is encrypted end to end to your instance, so Cloudflare, which carries the traffic
   to the project's own instance, sees only ciphertext. It is never sent in plain text.
-- **No hosted service:** this app asks only for the model on your instance's own machine. It never
+- **No hosted service:** this app asks only for the model on your instance's own machine or its own private network. It never
   asks a hosted service for a re-plan, and a key you stored on your instance is not used for one.
 - **What comes back:** one change from a fixed list, with one reason from a fixed list, or nothing.
   No sentence a model wrote is shown or spoken: the sentence you read is this app's own. It gives
@@ -849,7 +849,7 @@ numbers and the parts of your history your instance sent to a service you agreed
 copy that service holds, your account on an instance you connected to, and anything it received
 or worked out for you — what you synced, the searchable copy it keeps for the analysis, the
 analyses it wrote, any key of yours it holds, your agreement to a service, and your list of words
-to mask with your privacy zones — which is a copy that instance holds and which you ask its
+to mask, and your privacy zones (their names, where they are and how large) — which is a copy that instance holds and which you ask its
 operator to erase (see **Deleting what an instance holds**), and Cloudflare's record of recent map requests —
 your IP address, the time, and your device or browser type — which we cannot delete on request and
 which ages out of what our Cloudflare account can see after 7 days.
