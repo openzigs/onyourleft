@@ -160,7 +160,7 @@
  * ⚠️ **Re-recorded by #664**, when Credits stopped linking the third-party
  * notices (a link opened them over the app in the Android WebView, with no
  * way back) and shows them on the screen instead. One line is ADDED, the
- * toggle "Show the full notices", and one is REWORDED, in the record in the
+ * disclosure "Read the full notices", and one is REWORDED, in the record in the
  * same commit: "That document ships inside this app, so it opens without a
  * network." is "They ship inside this app, so they open here without a
  * network.", because there is no document to open any more, only the

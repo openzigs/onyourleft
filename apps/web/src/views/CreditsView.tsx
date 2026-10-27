@@ -14,7 +14,6 @@ import { parseNotices, type IncludedSoftware } from '../credits/notices';
 import { loadNoticesDocument } from '../credits/notices-document';
 import { THIRD_PARTY_CONTENTS_SOURCE } from '../credits/notices-source';
 import { ASSET_MANIFEST_SOURCE } from '../credits/source';
-import { Button } from '../design/Button';
 import { StatusMessage } from '../design/StatusMessage';
 import { ODBL_LICENCE_URL, ODBL_NOTICE, OSM_ATTRIBUTION } from '../map/basemap';
 
@@ -77,7 +76,7 @@ import { ODBL_LICENCE_URL, ODBL_NOTICE, OSM_ATTRIBUTION } from '../map/basemap';
  *
  * ⚠️ **The document is shown here, not linked.** A `target="_blank"` link to
  * it opened over the app inside the Android shell and left the rider with no
- * way back — `credits/notices-document.ts` says why — so a toggle reads it
+ * way back — `credits/notices-document.ts` says why — so a disclosure reads it
  * into the page on demand instead.
  */
 
@@ -209,19 +208,22 @@ type DocumentState =
   | { readonly kind: 'failed' };
 
 /**
- * The whole notices document, read into the page when a rider asks — #664.
+ * The whole notices document, read into the page when a rider opens it — #664.
  *
- * Read once: hiding it and showing it again does not read it a second time.
- * A read that fails says so, rather than leaving the toggle pressed over
- * nothing.
+ * A `<details>`, not a button: the notices are something to read, not
+ * something a rider came to this screen to do, and #666's "first control
+ * above the fold" counts a button at the foot of Credits as a control a
+ * rider must scroll to, where a `<summary>` is where explanation goes
+ * (`browser/reflow-harness.tsx` §`firstControl`). Read once: closing it and
+ * opening it again does not read it a second time. A read that fails says
+ * so, rather than leaving an open disclosure over nothing.
  */
 function FullNotices({ load }: { readonly load: () => Promise<string> }): JSX.Element {
   const [state, setState] = useState<DocumentState>({ kind: 'hidden' });
   const read = useRef<string | undefined>(undefined);
-  const shown = state.kind !== 'hidden';
 
-  const toggle = (): void => {
-    if (shown) {
+  const toggled = (open: boolean): void => {
+    if (!open) {
       setState({ kind: 'hidden' });
       return;
     }
@@ -242,12 +244,13 @@ function FullNotices({ load }: { readonly load: () => Promise<string> }): JSX.El
   };
 
   return (
-    <>
-      <p>
-        <Button variant="toggle" pressed={shown} onClick={toggle}>
-          Show the full notices
-        </Button>
-      </p>
+    <details
+      className="oyl-notices-more"
+      onToggle={(event) => {
+        toggled(event.currentTarget.open);
+      }}
+    >
+      <summary>Read the full notices</summary>
       {state.kind === 'loading' ? (
         <StatusMessage tone="info" label="Opening" live>
           Reading the notices this app carries.
@@ -264,7 +267,7 @@ function FullNotices({ load }: { readonly load: () => Promise<string> }): JSX.El
           {state.text}
         </pre>
       ) : null}
-    </>
+    </details>
   );
 }
 

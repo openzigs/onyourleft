@@ -556,15 +556,19 @@ const DOCUMENT = [
   'Copyright (c) 2013-2023 Cole Bemis',
 ].join('\n');
 
-function showNotices(): HTMLButtonElement {
-  const button = queryAll<HTMLButtonElement>(
+function showNotices(): HTMLElement {
+  const summary = queryAll<HTMLElement>(
     mounted?.container ?? document,
-    '[data-terms="software"] button',
-  ).find((candidate) => candidate.textContent === 'Show the full notices');
-  if (button === undefined) {
-    throw new Error('Credits has no "Show the full notices" control');
+    '[data-terms="software"] details > summary',
+  ).find((candidate) => candidate.textContent === 'Read the full notices');
+  if (summary === undefined) {
+    throw new Error('Credits has no "Read the full notices" disclosure');
   }
-  return button;
+  return summary;
+}
+
+function isOpen(): boolean {
+  return (showNotices().parentElement as HTMLDetailsElement).open;
 }
 
 function shownDocument(): string | undefined {
@@ -586,20 +590,20 @@ describe('the full notices, read inside the app — #664', () => {
     await renderWithDocument(load);
     expect(shownDocument()).toBeUndefined();
     expect(load).not.toHaveBeenCalled();
-    expect(showNotices().getAttribute('aria-pressed')).toBe('false');
+    expect(isOpen()).toBe(false);
   });
 
-  it('renders the whole document on the screen when the toggle is pressed, by keyboard', async () => {
+  it('renders the whole document on the screen when the disclosure is opened, by keyboard', async () => {
     await renderWithDocument(() => Promise.resolve(DOCUMENT));
     await activateWithKeyboard(showNotices());
     await settle();
-    expect(showNotices().getAttribute('aria-pressed')).toBe('true');
+    expect(isOpen()).toBe(true);
     // Verbatim, both halves of the Lucide/Feather licence.
     expect(shownDocument()).toBe(DOCUMENT);
     expect(shownDocument()).toContain('Cole Bemis');
   });
 
-  it('hides it again, and shows it again without a second read', async () => {
+  it('hides it when closed, and shows it again without a second read', async () => {
     const load = vi.fn(() => Promise.resolve(DOCUMENT));
     await renderWithDocument(load);
     await activateWithKeyboard(showNotices());
@@ -607,7 +611,7 @@ describe('the full notices, read inside the app — #664', () => {
     await activateWithKeyboard(showNotices());
     await settle();
     expect(shownDocument()).toBeUndefined();
-    expect(showNotices().getAttribute('aria-pressed')).toBe('false');
+    expect(isOpen()).toBe(false);
     await activateWithKeyboard(showNotices());
     await settle();
     expect(shownDocument()).toBe(DOCUMENT);

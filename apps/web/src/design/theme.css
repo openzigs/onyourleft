@@ -4620,6 +4620,29 @@ select.oyl-input {
  * scroll sideways — a scrolling block would be one more thing a keyboard
  * has to reach (axe's `scrollable-region-focusable`).
  */
+.oyl-notices-more > summary {
+  /* A control, so the 44 px target `.oyl-status__more > summary` holds. */
+  display: flex;
+  align-items: center;
+  gap: var(--oyl-space-xs);
+  min-height: 2.75rem;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
+.oyl-notices-more > summary::-webkit-details-marker {
+  display: none;
+}
+
+.oyl-notices-more > summary::before {
+  content: '▸' / '';
+}
+
+.oyl-notices-more[open] > summary::before {
+  content: '▾' / '';
+}
+
 .oyl-notices {
   margin: var(--oyl-space-md) 0;
   font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;

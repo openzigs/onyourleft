@@ -577,14 +577,16 @@ test.describe('a cold start with the network off', () => {
       await second.page.goto(`${PRODUCT_ORIGIN}/#/about/credits`);
       await expect(second.page.locator('h1')).toHaveText('Credits');
       await expect(second.page.locator('[data-terms="software"] li').first()).toBeVisible();
-      const show = second.page.getByRole('button', { name: 'Show the full notices' });
-      await expect(show).toHaveAttribute('aria-pressed', 'false');
-      await show.click();
+      const disclosure = second.page.locator('[data-terms="software"] details', {
+        has: second.page.locator('summary', { hasText: 'Read the full notices' }),
+      });
+      await expect(disclosure).not.toHaveAttribute('open');
+      await disclosure.locator('summary').click();
       const shown = second.page.locator('[data-terms="software"] [data-notices-document]');
       await expect(shown).toBeVisible();
       expect((await shown.textContent()) ?? '').toMatch(/^THIRD-PARTY SOFTWARE IN ON YOUR LEFT/);
       await expect(shown).toContainText('Cole Bemis');
-      await expect(show).toHaveAttribute('aria-pressed', 'true');
+      await expect(disclosure).toHaveAttribute('open');
       await expect(second.page.locator('h1')).toHaveText('Credits');
       expect(second.page.url()).toBe(`${PRODUCT_ORIGIN}/#/about/credits`);
       expect(scripts.length, 'no script was loaded at all').toBeGreaterThan(0);

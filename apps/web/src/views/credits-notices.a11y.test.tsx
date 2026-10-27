@@ -4,7 +4,7 @@
 /**
  * Credits with the full third-party notices shown — #664, audited in line
  * with `holiday-switch.a11y.test.tsx`: the real shell, at the real route,
- * before and after *Show the full notices* is operated from the keyboard
+ * before and after *Read the full notices* is opened from the keyboard
  * alone. `routes.a11y.test.tsx` audits Credits as it first renders, with the
  * notices hidden; this is the state it cannot reach.
  */
@@ -31,10 +31,14 @@ afterEach(() => {
   globalThis.location.hash = '';
 });
 
-function showNotices(): HTMLButtonElement | undefined {
-  return queryAll<HTMLButtonElement>(document.body, 'button').find(
-    (each) => accessibleName(each) === 'Show the full notices',
+function showNotices(): HTMLElement | undefined {
+  return queryAll<HTMLElement>(document.body, 'main details > summary').find(
+    (each) => accessibleName(each) === 'Read the full notices',
   );
+}
+
+function isOpen(): boolean | undefined {
+  return (showNotices()?.parentElement as HTMLDetailsElement | null | undefined)?.open;
 }
 
 function expectClean(where: string): void {
@@ -43,7 +47,7 @@ function expectClean(where: string): void {
 }
 
 describe('Credits — the full third-party notices (#664)', () => {
-  it('is a named toggle, reachable and operable by keyboard, and the screen passes the audit with the notices shown', async () => {
+  it('is a named disclosure, reachable and operable by keyboard, and the screen passes the audit with the notices shown', async () => {
     // Read once first, so the chunk's module is loaded and one settle is enough.
     const committed = await loadNoticesDocument();
     globalThis.location.hash = '#/about/credits';
@@ -52,13 +56,13 @@ describe('Credits — the full third-party notices (#664)', () => {
 
     const toggle = showNotices();
     expect(toggle).toBeDefined();
-    expect(toggle?.getAttribute('aria-pressed')).toBe('false');
+    expect(isOpen()).toBe(false);
     expect(tabbableElements(document)).toContain(toggle);
     expectClean('Credits, notices hidden');
 
     if (toggle !== undefined) await activateWithKeyboard(toggle);
     await settle();
-    expect(showNotices()?.getAttribute('aria-pressed')).toBe('true');
+    expect(isOpen()).toBe(true);
     expect(document.querySelector('[data-notices-document]')?.textContent).toBe(committed);
     expectClean('Credits, notices shown');
   });
