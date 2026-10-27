@@ -687,6 +687,34 @@ describe('deleting the account on the instance from the Instance screen — #906
     expect(text()).toContain('Lanes of the Weald');
   });
 
+  it('cannot be kept once the deletion is sent: the confirmation stays until the answer', async () => {
+    const scripted = scriptedInstance({ connected: true });
+    let answer: (outcome: Awaited<ReturnType<StatementsPort['eraseAccount']>>) => void = () => {};
+    const port: StatementsPort = {
+      ...erasing(scripted, { kind: 'erased' }).port,
+      eraseAccount: () =>
+        new Promise((resolve) => {
+          answer = (outcome) => {
+            scripted.held.connected = false;
+            resolve(outcome);
+          };
+        }),
+    };
+    mounted = await mount(<InstanceView port={scripted.port} statements={port} />);
+    await settle();
+    await activateWithKeyboard(button(ERASE_ACCOUNT_TEXT.erase));
+    await settle();
+    await activateWithKeyboard(button(ERASE_ACCOUNT_TEXT.confirmErase));
+    await settle();
+    expect(button(ERASE_ACCOUNT_TEXT.keep).getAttribute('aria-disabled')).toBe('true');
+    await activateWithKeyboard(button(ERASE_ACCOUNT_TEXT.keep));
+    await settle();
+    expect(text()).toContain(ERASE_ACCOUNT_TEXT.confirm);
+    answer({ kind: 'erased' });
+    await settle();
+    expect(text()).toContain(ERASE_ACCOUNT_TEXT.erased);
+  });
+
   it('is not offered to a device that is not signed in', async () => {
     const signedOut = scriptedInstance({
       connected: true,

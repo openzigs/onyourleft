@@ -73,7 +73,11 @@ export function EraseAccountControl({
           </Button>{' '}
           <Button
             variant="secondary"
+            unavailable={busy}
             onClick={() => {
+              // The DELETE is already sent: the confirmation stays until its
+              // answer, so *Keep* can never be followed by "deleted".
+              if (busy) return;
               setConfirming(false);
               setRefusal(undefined);
             }}
