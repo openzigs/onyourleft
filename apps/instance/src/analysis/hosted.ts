@@ -60,8 +60,10 @@ import { createHostedModel } from './model.ts';
 import type { AgentMessage, ModelConnection, ToolCallRequest } from './model-turn.ts';
 import type { OpenedHostedKey } from './source.ts';
 
+import { MASKING_ITEM_KEY } from './masking-item.ts';
+
 /** The key of the one `masking` item an athlete holds. */
-export const MASKING_ITEM_KEY = 'guard';
+export { MASKING_ITEM_KEY };
 
 /** The `masking` item's body, as the device writes it. */
 export interface MaskingItemBody {

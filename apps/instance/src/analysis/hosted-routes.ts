@@ -98,7 +98,7 @@ export const HOSTED_ROUTES: readonly Route[] = [
     path: '/v1/analysis/hosted/key',
     operationId: 'setHostedModelKey',
     summary:
-      'Store your own hosted model key, encrypted under the instance’s secret, replacing any you stored. `url` is the service’s `https:` base URL. A key at another origin than your consent names withdraws that consent; one at the same origin keeps it. `reasoningTokens` (DRAFT wording) is optional: say your model reasons before it answers, and the tokens one turn may spend on that, 1 to 16384, beside the answer’s own 1 024; absent or null, the instance finds out from the model’s replies. It replaces the figure of any earlier key. The operator of this instance could technically read a key you store here. `unavailable` on an instance with no secret to encrypt it under, before the key is read.',
+      'Store your own hosted model key, encrypted under the instance’s secret, replacing any you stored. `url` is the service’s `https:` base URL. A key at another origin than your consent names withdraws that consent, and deletes the masking list (your words to mask and privacy zones) this instance held for it; one at the same origin keeps both. `reasoningTokens` (DRAFT wording) is optional: say your model reasons before it answers, and the tokens one turn may spend on that, 1 to 16384, beside the answer’s own 1 024; absent or null, the instance finds out from the model’s replies. It replaces the figure of any earlier key. The operator of this instance could technically read a key you store here. `unavailable` on an instance with no secret to encrypt it under, before the key is read.',
     request: {
       type: 'object',
       properties: {
@@ -123,7 +123,7 @@ export const HOSTED_ROUTES: readonly Route[] = [
     path: '/v1/analysis/hosted/key',
     operationId: 'clearHostedModelKey',
     summary:
-      'Clear the hosted model key you stored, scrubbed from the database. The operator’s own key is cleared only by `operator model-key clear`.',
+      'Clear the hosted model key you stored, scrubbed from the database, and delete the masking list (your words to mask and privacy zones) this instance held for it (#1251). The operator’s own key is cleared only by `operator model-key clear`.',
     errors: ['unauthenticated', 'unavailable'],
     handle: async (context) => {
       const got = ready(context);
@@ -157,7 +157,7 @@ export const HOSTED_ROUTES: readonly Route[] = [
     path: '/v1/analysis/hosted/consent',
     operationId: 'withdrawHostedConsent',
     summary:
-      'Withdraw your hosted consent. No hosted job of yours runs until you record one again.',
+      'Withdraw your hosted consent, and delete the masking list (your words to mask and privacy zones) this instance held for it (#1251). No hosted job of yours runs until you record one again, and the app sends the list again when you do.',
     errors: ['unauthenticated', 'unavailable'],
     handle: async (context) => {
       const got = ready(context);

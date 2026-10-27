@@ -26,7 +26,7 @@ import {
   HOSTED_TEST_QUESTION,
   HOSTED_TEST_SYSTEM,
 } from './hosted-test.ts';
-import { MASKING_ITEM_KEY } from './hosted.ts';
+import { MASKING_ITEM_KEY, readMaskingGuard } from './hosted.ts';
 
 let world: IdentityInstance | undefined;
 afterEach(async () => {
@@ -256,6 +256,86 @@ describe('a rider’s own hosted consent (#1199, ADR 0046 Q10)', () => {
     const answer = await world.call('POST', '/v1/analysis/hosted/consent', { token, body });
     expect(answer.status).toBe(400);
     expect(await world.freshRead((store) => store.getHostedConsent(athleteId))).toBeUndefined();
+  });
+});
+
+describe('the masking list goes with the consent and the key (#1251, owner ruling 2026-10-26)', () => {
+  /** What the app stores before it records a consent (`hosted-settings.ts` §`sendMaskingGuard`). */
+  const MASKING_BODY = JSON.stringify({ words: ['Zennor'], zones: [] });
+
+  /** One rider (of two) holding a key, a consent naming its origin, and a masking list. */
+  async function agreed() {
+    const synced = await syncWorld(2);
+    world = synced.world;
+    const [a, b] = synced.riders;
+    for (const each of [a!, b!]) {
+      await world.call('POST', '/v1/analysis/hosted/key', { token: each.token, body: KEY_BODY });
+      const put = await world.call('POST', `/v1/sync/items/masking/${MASKING_ITEM_KEY}`, {
+        token: each.token,
+        body: { body: MASKING_BODY },
+      });
+      expect(put.status, JSON.stringify(put.body)).toBe(200);
+      await world.call('POST', '/v1/analysis/hosted/consent', {
+        token: each.token,
+        body: { endpoint: 'https://models.example' },
+      });
+    }
+    return { w: world, a: a!, b: b! };
+  }
+
+  /** The masking list as a hosted job reads it (`hosted.ts` §`readMaskingGuard`), from a fresh store. */
+  const guardOf = (w: IdentityInstance, athleteId: string) =>
+    w.freshRead((store) => readMaskingGuard(store, athleteId));
+
+  it.each([
+    ['withdrawing the consent', 'DELETE', '/v1/analysis/hosted/consent', undefined],
+    ['removing the key', 'DELETE', '/v1/analysis/hosted/key', undefined],
+    [
+      'storing a key at another origin, which withdraws the consent',
+      'POST',
+      '/v1/analysis/hosted/key',
+      { ...KEY_BODY, url: 'https://elsewhere.example/v1' },
+    ],
+  ] as const)('is deleted on %s, and only the caller’s', async (_why, method, path, body) => {
+    const { w, a, b } = await agreed();
+    expect(await guardOf(w, a.athleteId)).toEqual({ words: ['Zennor'], zones: [] });
+
+    const answer = await w.call(method, path, {
+      token: a.token,
+      ...(body === undefined ? {} : { body }),
+    });
+    expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+
+    expect(await guardOf(w, a.athleteId)).toBeUndefined();
+    // Read back as the app would: the item is gone from the rider's own route.
+    const read = await w.call('GET', `/v1/sync/items/masking/${MASKING_ITEM_KEY}`, {
+      token: a.token,
+    });
+    expect(read.status).toBe(404);
+    // Another rider's list is untouched.
+    expect(await guardOf(w, b.athleteId)).toEqual({ words: ['Zennor'], zones: [] });
+  });
+
+  it('is kept by a key rotated at the same origin, which keeps the consent', async () => {
+    const { w, a } = await agreed();
+    const rotated = await w.call('POST', '/v1/analysis/hosted/key', {
+      token: a.token,
+      body: { ...KEY_BODY, url: 'https://models.example/v2', key: 'sk-rotated' },
+    });
+    expect((rotated.body as HostedStatus).consent?.origin).toBe('https://models.example');
+    expect(await guardOf(w, a.athleteId)).toEqual({ words: ['Zennor'], zones: [] });
+  });
+
+  it('is held again once the app sends it with a new agreement', async () => {
+    const { w, a } = await agreed();
+    await w.call('DELETE', '/v1/analysis/hosted/consent', { token: a.token });
+    expect(await guardOf(w, a.athleteId)).toBeUndefined();
+    const again = await w.call('POST', `/v1/sync/items/masking/${MASKING_ITEM_KEY}`, {
+      token: a.token,
+      body: { body: MASKING_BODY },
+    });
+    expect(again.status, JSON.stringify(again.body)).toBe(200);
+    expect(await guardOf(w, a.athleteId)).toEqual({ words: ['Zennor'], zones: [] });
   });
 });
 

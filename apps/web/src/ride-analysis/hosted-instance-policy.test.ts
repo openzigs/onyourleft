@@ -52,6 +52,9 @@ describe('the hosted consent in the privacy policy (#1251, #1104 B1)', () => {
       'It is not a switch on this device and it does not turn itself off',
       'If you store a key for a different service, your instance withdraws it',
       'If it cannot be sent, no analysis is asked for.',
+      // The owner's ruling of 2026-10-26 (#1104 B1-a, C-9), which the instance carries out.
+      'Your instance keeps it with your account and in its export, and deletes it when you withdraw your agreement or remove your key.',
+      'removed when you withdraw your agreement or remove your key, and erased with your account on the instance',
       'Your instance tells the app only whether the service answered, never what it said.',
       'What this device keeps: not the key.',
       `press ${HOSTED_REMOVE_BUTTON}`,
