@@ -35,9 +35,9 @@ the answer to all of that, and they come later.
 
 ### Installing the Android app: Google Play or the direct download
 
-The Android app comes two ways: from **Google Play**, and as a **direct download**, the APK attached
-to each [GitHub release](https://github.com/openzigs/onyourleft/releases). The two copies cannot
-update each other, because each is signed with a different key: Google Play signs its copy with
+The Android app is meant to come two ways: from **Google Play** once it is listed there, and as a
+**direct download**, the APK attached to a [GitHub release](https://github.com/openzigs/onyourleft/releases)
+once one is published. Neither exists yet. The two copies cannot update each other, because each is signed with a different key: Google Play signs its copy with
 Google's key. **Moving from one to the other means uninstalling the app first, and uninstalling
 deletes the rides on the device.** Export them, or sync them with an instance, before you switch.
 The app's About page says which copy you have. Why, and how each is built:

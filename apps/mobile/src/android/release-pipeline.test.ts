@@ -428,12 +428,14 @@ describe('the web client is built once per channel (#1745)', () => {
     const match = lines
       .slice(start, end)
       .join('\n')
-      .match(/VITE_OYL_RELEASE_CHANNEL:\s*(\S+)/);
+      .match(/VITE_OYL_RELEASE_CHANNEL:\s*(.+)/);
     return match?.[1];
   }
 
   it('builds for Google Play first and sets its synced assets aside', () => {
-    expect(stepChannel('Build the web client for Google Play')).toBe('play');
+    expect(stepChannel('Build the web client for Google Play')).toBe(
+      "${{ secrets.ANDROID_KEYSTORE_BASE64 != '' && 'play' || '' }}",
+    );
     const script = stepScript('Build the web client for Google Play');
     expect(script).toContain('pnpm --filter @onyourleft/web run build');
     expect(script).toContain('cap sync android');
@@ -443,7 +445,9 @@ describe('the web client is built once per channel (#1745)', () => {
   });
 
   it('leaves the direct build in place for the APK', () => {
-    expect(stepChannel('Build the web client for the direct download')).toBe('direct');
+    expect(stepChannel('Build the web client for the direct download')).toBe(
+      "${{ secrets.ANDROID_KEYSTORE_BASE64 != '' && 'direct' || '' }}",
+    );
     const script = stepScript('Build the web client for the direct download');
     expect(script).toContain('pnpm --filter @onyourleft/web run build');
     expect(script).toContain('cap sync android');

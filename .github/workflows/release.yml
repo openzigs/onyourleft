@@ -68,7 +68,9 @@ jobs:
       # but Gradle and a file copy runs while it is on disk.
       - name: Build the web client for Google Play
         env:
-          VITE_OYL_RELEASE_CHANNEL: play
+          # Only a build holding the upload key is a release; a fork's or a
+          # keyless manual run's debug build claims no channel.
+          VITE_OYL_RELEASE_CHANNEL: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' && 'play' || '' }}
         run: |
           set -euo pipefail
           pnpm --filter @onyourleft/web run build
@@ -78,7 +80,7 @@ jobs:
 
       - name: Build the web client for the direct download
         env:
-          VITE_OYL_RELEASE_CHANNEL: direct
+          VITE_OYL_RELEASE_CHANNEL: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' && 'direct' || '' }}
         run: |
           set -euo pipefail
           pnpm --filter @onyourleft/web run build
@@ -169,13 +171,13 @@ jobs:
         #
         # ⚠️ Two Gradle invocations since #1745, because the two carry
         # different web assets: the APK the direct build, the bundle the Play
-        # build set aside above. Both go through `gradle` below, so a bundle
+        # build set aside above. Both go through `run_gradle` below, so a bundle
         # built without the injected signing properties cannot be written by
         # forgetting to repeat them; the bundle step would refuse it anyway.
         run: |
           if [ "${SIGNED}" = "true" ]; then
             variant=Release
-            gradle() {
+            run_gradle() {
               ./gradlew "$@" \
                 -Pandroid.injected.signing.store.file="${RUNNER_TEMP}/upload.jks" \
                 -Pandroid.injected.signing.store.password="${ANDROID_KEYSTORE_PASSWORD}" \
@@ -184,12 +186,12 @@ jobs:
             }
           else
             variant=Debug
-            gradle() { ./gradlew "$@"; }
+            run_gradle() { ./gradlew "$@"; }
           fi
-          gradle "assemble${variant}"
+          run_gradle "assemble${variant}"
           rm -rf app/src/main/assets/public
           cp -R "${RUNNER_TEMP}/public-play" app/src/main/assets/public
-          gradle "bundle${variant}"
+          run_gradle "bundle${variant}"
 
       - name: Remove the key before anything else runs
         if: always()

@@ -1,7 +1,7 @@
 ## Which copy of the app this is
 
 The APK attached to this release is the **direct download** of On Your Left for Android. The app is
-also on **Google Play**, and the two copies cannot update each other, because each is signed with a
+also offered on **Google Play** once its listing is live, and the two copies cannot update each other, because each is signed with a
 different key: Google Play signs its copy with Google's key.
 
 **Moving from one to the other means uninstalling the app first, and uninstalling deletes the rides

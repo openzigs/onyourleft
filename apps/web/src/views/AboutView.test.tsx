@@ -409,7 +409,12 @@ describe('the About page names the channel the Android app came from', () => {
   });
 
   it('claims neither channel in an app no release built', async () => {
-    expect(await section({ nativeShell: true, releaseChannel: undefined })).toBe(NOT_RELEASED);
+    vi.stubEnv('VITE_OYL_RELEASE_CHANNEL', '');
+    try {
+      expect(await section({ nativeShell: true, releaseChannel: undefined })).toBe(NOT_RELEASED);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it('reads the channel from the build when nothing is passed', async () => {
