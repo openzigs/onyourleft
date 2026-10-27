@@ -136,15 +136,22 @@ jobs:
           # A variable rather than a secret — the signing step above says why.
           ANDROID_KEY_ALIAS: ${{ vars.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        # The App Bundle (#958) is built in the same Gradle invocation as the
+        # APK, so the one set of injected signing properties signs both. Google
+        # Play accepts a new app only as an `.aab`; the APK stays the
+        # direct-download artefact and the GitHub Release asset. Both are signed
+        # with the UPLOAD key — under Play App Signing Google re-signs what it
+        # serves, which is why a Play install and a direct-download install
+        # cannot update each other (apps/mobile/RELEASE.md §11).
         run: |
           if [ "${SIGNED}" = "true" ]; then
-            ./gradlew assembleRelease \
+            ./gradlew assembleRelease bundleRelease \
               -Pandroid.injected.signing.store.file="${RUNNER_TEMP}/upload.jks" \
               -Pandroid.injected.signing.store.password="${ANDROID_KEYSTORE_PASSWORD}" \
               -Pandroid.injected.signing.key.alias="${ANDROID_KEY_ALIAS}" \
               -Pandroid.injected.signing.key.password="${ANDROID_KEY_PASSWORD}"
           else
-            ./gradlew assembleDebug
+            ./gradlew assembleDebug bundleDebug
           fi
 
       - name: Remove the key before anything else runs
@@ -228,6 +235,79 @@ jobs:
           fi
           echo "Signed as required, targeting API ${target}."
 
+      # bundletool reads the manifest out of an `.aab`; `aapt2 dump badging`
+      # reads only an APK, and the bundle's manifest is in protobuf form.
+      # Fetched from Google's GitHub release, pinned by version AND by SHA-256,
+      # the same reason an action is pinned to a commit: a release asset can be
+      # replaced. The digest is GitHub's own for the asset:
+      #   gh release view -R google/bundletool 1.18.3 --json assets --jq '.assets[].digest'
+      - name: Fetch bundletool
+        env:
+          BUNDLETOOL_VERSION: '1.18.3'
+          BUNDLETOOL_SHA256: 'a099cfa1543f55593bc2ed16a70a7c67fe54b1747bb7301f37fdfd6d91028e29'
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 -o "${RUNNER_TEMP}/bundletool.jar" \
+            "https://github.com/google/bundletool/releases/download/${BUNDLETOOL_VERSION}/bundletool-all-${BUNDLETOOL_VERSION}.jar"
+          echo "${BUNDLETOOL_SHA256}  ${RUNNER_TEMP}/bundletool.jar" | sha256sum -c -
+
+      # ⚠️ The bundle's half of the step above, and for the same reason: a green
+      # `bundleRelease` is not a signed bundle. An `.aab` is signed with the JAR
+      # scheme, so this is `jarsigner` rather than `apksigner`, and ⚠️
+      # `jarsigner -verify` EXITS 0 ON AN UNSIGNED FILE — it prints "jar is
+      # unsigned." — so the verdict is read from what it prints, never from its
+      # status. Executed by apps/mobile/src/android/release-pipeline.test.ts
+      # against stub tools, so each refusal is seen to fire.
+      - name: Verify the bundle is signed and targets the required API level
+        env:
+          SIGNED: ${{ steps.signing.outputs.signed }}
+          # The same floor as the APK step; release-pipeline.test.ts asserts
+          # every copy of it agrees with variables.gradle.
+          MINIMUM_TARGET_SDK: '36'
+        run: |
+          set -euo pipefail
+          # The directory test first: under `pipefail` a `find` over a missing
+          # directory kills the step before the annotation below can say why.
+          bundles=apps/mobile/android/app/build/outputs/bundle
+          aab=""
+          if [ -d "${bundles}" ]; then
+            aab="$(find "${bundles}" -name '*.aab' -type f | sort | head -1)"
+          fi
+          if [ -z "${aab}" ]; then
+            echo "::error::Assemble produced no App Bundle."
+            exit 1
+          fi
+          echo "Verifying ${aab}"
+
+          if [ "${SIGNED}" = "true" ]; then
+            jarsigner -verify "${aab}" > "${RUNNER_TEMP}/bundle-verify.txt" 2>&1 || true
+            cat "${RUNNER_TEMP}/bundle-verify.txt"
+            if ! grep -qx 'jar verified.' "${RUNNER_TEMP}/bundle-verify.txt"; then
+              echo "::error::The release App Bundle does not verify as signed."
+              exit 1
+            fi
+            keytool -printcert -jarfile "${aab}" > "${RUNNER_TEMP}/bundle-certs.txt"
+            cat "${RUNNER_TEMP}/bundle-certs.txt"
+            if grep -q 'CN=Android Debug' "${RUNNER_TEMP}/bundle-certs.txt"; then
+              echo "::error::The release App Bundle is signed with the Android debug certificate."
+              exit 1
+            fi
+          fi
+
+          target="$(java -jar "${RUNNER_TEMP}/bundletool.jar" dump manifest --bundle="${aab}" \
+            --xpath=/manifest/uses-sdk/@android:targetSdkVersion | tr -d '[:space:]')"
+          case "${target}" in
+            '' | *[!0-9]*)
+              echo "::error::The bundle's manifest declares no numeric targetSdkVersion."
+              exit 1
+              ;;
+          esac
+          if [ "${target}" -lt "${MINIMUM_TARGET_SDK}" ]; then
+            echo "::error::The App Bundle targets API ${target}, below the required ${MINIMUM_TARGET_SDK}."
+            exit 1
+          fi
+          echo "Bundle signed as required, targeting API ${target}."
+
       # ⚠️ Not the same thing as the release below, and not redundant with it.
       # The release step only runs on a tag, so before #95 a `workflow_dispatch`
       # run built an APK and threw it away — which made #95's definition of done
@@ -240,6 +320,17 @@ jobs:
         with:
           name: android-apk
           path: apps/mobile/android/app/build/outputs/apk/**/*.apk
+          if-no-files-found: error
+
+      # The App Bundle, as a workflow artefact ONLY (#958). It is what goes to
+      # Play Console's internal testing track, by hand: uploading it from here
+      # would need a Play service-account credential, which is a separate
+      # decision, and it is not a GitHub Release asset because nobody can
+      # install an `.aab` directly.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: android-aab
+          path: apps/mobile/android/app/build/outputs/bundle/**/*.aab
           if-no-files-found: error
 
       # The AGPL-native distribution path, independent of any store — #95's sixth
