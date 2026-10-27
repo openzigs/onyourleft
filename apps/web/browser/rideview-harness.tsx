@@ -867,6 +867,14 @@ export interface RideViewMeasurement {
         readonly text: string;
         readonly inDisclosure: boolean;
         readonly onTop: boolean;
+        /**
+         * The computed ink of the notice and of its label, and the first
+         * painted background behind it — what the light and dark contrast
+         * cases read (#647, #654 ruling 2).
+         */
+        readonly colour: string;
+        readonly labelColour: string;
+        readonly background: string;
       }
     | undefined;
   /**
@@ -1604,6 +1612,10 @@ function keepScreenOnNotice(): RideViewMeasurement['keepScreenOn'] {
     text: textOf(notice),
     inDisclosure: notice.closest('details') !== null || notice.querySelector('details') !== null,
     onTop: hit !== null && (hit === notice || notice.contains(hit)),
+    colour: window.getComputedStyle(notice).color,
+    labelColour: window.getComputedStyle(notice.querySelector('.oyl-status__label') ?? notice)
+      .color,
+    background: backgroundBehind(notice),
   };
 }
 
