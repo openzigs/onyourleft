@@ -29,7 +29,11 @@ import type { TestContext } from 'vitest';
 
 import { endpointDecision } from '../../../web/src/camera/analysis-endpoint';
 import { instanceAddress } from '../../../web/src/instance/address';
+import { ACCOUNT_DELETION_PATH, ACCOUNT_DELETION_URL } from '../../../web/src/privacy/policy';
+import { ERASE_ACCOUNT_TEXT } from '../../../web/src/views/erase-account-text';
 import {
+  ACCOUNT_DELETION_IN_APP,
+  ACCOUNT_DELETION_WEB_PAGE,
   DATA_PATHS,
   DATA_SAFETY_SECTION_ANSWERS,
   DELETION_REQUEST_EMAIL,
@@ -635,7 +639,14 @@ describe('the section-level answers filed on Play — #562', () => {
     expect(deletionRequests.answer).toBe(true);
     expect(DELETION_REQUEST_EMAIL).toBe('matt@openzigs.ai');
     expect(deletionRequests.how).toContain(DELETION_REQUEST_EMAIL);
+    // #906: the in-app path, by the label its button carries, and the web page.
     expect(deletionRequests.how).toContain('#906');
+    expect(ACCOUNT_DELETION_IN_APP).toBe(ERASE_ACCOUNT_TEXT.erase);
+    expect(deletionRequests.how).toContain(ACCOUNT_DELETION_IN_APP);
+    expect(ACCOUNT_DELETION_WEB_PAGE).toBe(ACCOUNT_DELETION_URL);
+    expect(deletionRequests.how).toContain(ACCOUNT_DELETION_WEB_PAGE);
+    expect(deletionRequests.how).not.toContain('until');
+    expect(deletionRequests.why).not.toContain('until #906');
     for (const answer of [encryptedInTransit, deletionRequests]) {
       expect(answer.why).toContain('2026-09-30');
     }
@@ -716,6 +727,14 @@ describe('the privacy policy agrees with the section-level answers — #562', ()
     expect(leaves).toContain('encrypted on the way');
     expect(leaves).toContain('except');
     expect(leaves).toContain('your own computer');
+  });
+
+  it('the web page for requesting deletion gives the same address — #906', () => {
+    const page = readFileSync(
+      new URL(`../../../../${ACCOUNT_DELETION_PATH}`, import.meta.url),
+      'utf8',
+    );
+    expect(page).toContain(DELETION_REQUEST_EMAIL);
   });
 
   it('names the deletion address where it says how to delete, and in Contact', () => {

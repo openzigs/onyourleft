@@ -37,6 +37,20 @@ const REPOSITORY = 'https://github.com/openzigs/onyourleft';
 export const PRIVACY_POLICY_URL = `${REPOSITORY}/blob/main/${PRIVACY_POLICY_PATH}`;
 
 /**
+ * The web page for requesting account deletion (#906 item 4): Google Play's
+ * account-deletion requirement asks an app that creates an account for a web
+ * link, beside the in-app path, where a rider can ask for the account to be
+ * deleted. It is the URL to paste into Play Console's *Delete account URL*
+ * field, and like the policy's it is derived from the path, so
+ * `policy.test.ts` fails if the page is renamed. A GitHub page: no paid
+ * service (ADR 0036 D-7).
+ */
+export const ACCOUNT_DELETION_PATH = 'docs/delete-your-account.md';
+
+/** The published page for requesting account deletion. `blob/main`, as the policy's. */
+export const ACCOUNT_DELETION_URL = `${REPOSITORY}/blob/main/${ACCOUNT_DELETION_PATH}`;
+
+/**
  * Where the Corresponding Source of the running app is.
  *
  * ⚠️ **This is an obligation, not a courtesy, and ADR 0025 makes it a

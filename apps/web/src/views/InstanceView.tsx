@@ -2,6 +2,7 @@
 
 import type { StatementsPort } from '../instance/statements-port';
 import { StatementsPanel } from './StatementsPanel';
+import { ERASE_ACCOUNT_TEXT, EraseAccountPanel } from './EraseAccount';
 import type { BlocksPort } from '../instance/blocks-port';
 import { BlocksPanel } from './BlocksPanel';
 import { useCallback, useEffect, useId, useState, type JSX } from 'react';
@@ -27,7 +28,7 @@ import { SyncPanel } from './SyncPanel';
 /**
  * The Connect screen (#777, #778): an instance's address, signing in with this
  * device's key, what the instance holds, this athlete's devices on it (#773),
- * and disconnecting.
+ * disconnecting, and deleting the account on the instance (#906).
  *
  * ## Before anything is sent, the rider is told what will be
  *
@@ -93,8 +94,9 @@ export const VOICE_CHAT_IS_DISCORD =
 export const DISCONNECT_KEEPS_RIDES =
   'Disconnecting removes the instance’s address and this device’s sign-in from this device, and ' +
   'ends the sign-in on the instance. Every ride stays on this device. What the instance already ' +
-  'holds stays there: this app cannot remove it, so ask whoever runs the instance. For the ' +
-  'project’s own instance, that is its maintainer, as the privacy policy’s Contact section says.';
+  'holds stays there. To have it deleted, delete your account on the instance from this screen ' +
+  'while you are signed in, or ask whoever runs the instance. For the project’s own instance, ' +
+  'that is its maintainer, as the privacy policy’s Contact section says.';
 
 /** Every sentence this route must never tuck away, connected or not — #666. */
 export const INSTANCE_KEPT_VISIBLE: readonly string[] = [
@@ -190,7 +192,8 @@ export function InstanceView({
   /**
    * The statements of reasons about this rider's account (#910): read once
    * the device has an instance, signed in or not — a suspended rider cannot
-   * sign in, and is the one who most needs to read why.
+   * sign in, and is the one who most needs to read why. The same port deletes
+   * the account on the instance, for a rider who is signed in (#906).
    */
   readonly statements?: StatementsPort | undefined;
   /** The riders this rider blocked, to undo a block by (#1529): drawn only once signed in. */
@@ -216,6 +219,8 @@ export function InstanceView({
   const [busy, setBusy] = useState(false);
   const [refusal, setRefusal] = useState<string | undefined>(undefined);
   const [recoveryCodes, setRecoveryCodes] = useState<readonly string[] | undefined>(undefined);
+  /** This screen deleted the account on the instance (#906): said once the device is disconnected. */
+  const [erased, setErased] = useState(false);
   const addressId = useId();
   const nameId = useId();
   const cardId = useId();
@@ -252,6 +257,7 @@ export function InstanceView({
     if (port === undefined) return;
     setBusy(true);
     setRefusal(undefined);
+    setErased(false);
     const outcome = await port.connect(address, name, card);
     setBusy(false);
     if (outcome.kind === 'refused') {
@@ -296,6 +302,11 @@ export function InstanceView({
     return (
       <section className="oyl-panel" aria-labelledby="oyl-instance-connect">
         <h2 id="oyl-instance-connect">Connect</h2>
+        {erased ? (
+          <StatusMessage tone="success" live>
+            {ERASE_ACCOUNT_TEXT.erased}
+          </StatusMessage>
+        ) : null}
         <form
           className="oyl-trainer__form"
           onSubmit={(event) => {
@@ -539,6 +550,22 @@ export function InstanceView({
             }}
           />
         </section>
+      ) : null}
+
+      {/* #906: only for a device signed in; a suspended rider is offered it
+          with their data, in the statements above (#1517). */}
+      {state.kind === 'connected' && statements !== undefined ? (
+        <EraseAccountPanel
+          port={statements}
+          onErased={() => {
+            setErased(true);
+            setRecoveryCodes(undefined);
+            setDevices(undefined);
+            setChanges(undefined);
+            setRevoked(undefined);
+            void read();
+          }}
+        />
       ) : null}
 
       <Receives />

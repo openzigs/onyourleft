@@ -124,6 +124,7 @@ import { describe, expect, it } from 'vitest';
 
 import { basemapOrigin, readBasemapConfig } from '../map/basemap';
 import { stripComments } from '../units/no-inline-units';
+import { ERASE_ACCOUNT_TEXT } from '../views/erase-account-text';
 
 const SOURCE_ROOT = fileURLToPath(new URL('..', import.meta.url));
 
@@ -1502,8 +1503,10 @@ function policySection(markdown: string, heading: string): string {
 /**
  * Deleting instructions the policy may not give, because nothing in this build
  * carries them out (#892's review): no in-app screen removes a device or
- * changes the name, and no instance route erases an account. If one is built,
- * its phrase comes off this list in the same change that ships it.
+ * changes the name. If one is built, its phrase comes off this list in the
+ * same change that ships it — as erasing the account's did with #906, whose
+ * press on the Instance screen (`views/EraseAccount.tsx`) calls
+ * `DELETE /v1/account`, and which `InstanceView.test.tsx` holds is built.
  *
  * ⚠️ A denylist is a TRIPWIRE, not a proof (#892's second review): a synonym —
  * "delete your account on the instance" — is on no list and passes it. What
@@ -1515,10 +1518,6 @@ function policySection(markdown: string, heading: string): string {
 const UNBUILT_DELETION_PATHS: readonly string[] = [
   'remove the device from your account on the instance',
   'change it on the instance',
-  'erase your account on the instance',
-  'until you erase your account',
-  'until it is erased on the instance',
-  'erase it on the instance',
 ];
 
 /**
@@ -1530,7 +1529,8 @@ const UNBUILT_DELETION_PATHS: readonly string[] = [
  * that removes a hosted model key the rider stored, by its label
  * (`ride-analysis/hosted-consent.ts` §`HOSTED_REMOVE_BUTTON`), and unticking
  * the hosted consent. `HostedServicePanel.test.tsx` is what holds that they
- * are built.
+ * are built. #906's press that erases the account is named beside the
+ * operator in each cell, never in place of it, so it needs no exemption here.
  */
 function deletionRouteFaults(section: string): readonly string[] {
   const rows = section
@@ -1713,19 +1713,21 @@ describe('the instance is disclosed, class by class — #778', () => {
   });
 
   it('offers only ways of deleting that this build has — #892 review', () => {
-    // No screen removes a device or changes the name, and nothing a rider can
-    // reach erases an account: `DELETE /v1/account` (#893) is a sync route,
-    // which a running instance answers `unavailable` because `instance.ts`
-    // hands the handler no sync, and no screen calls it. A policy
-    // telling a rider to do those "on the instance" names paths that do not
-    // exist, so each such instruction is refused, here and across the policy.
+    // No screen removes a device or changes the name. A policy telling a rider
+    // to do those "on the instance" names paths that do not exist, so each
+    // such instruction is refused, here and across the policy. Erasing the
+    // account IS built since #906, by the press the policy names.
     const whole = normalised(policy);
     for (const claim of UNBUILT_DELETION_PATHS) {
       expect(whole, claim).not.toContain(claim);
     }
-    // What IS true: disconnecting, and asking the operator — the maintainer,
-    // for the project's own instance, through the policy's contact route.
-    expect(section).toContain('disconnecting is all this version of the app can do');
+    // What IS true: erasing the account from the app (#906), and asking the
+    // operator — the maintainer, for the project's own instance, through the
+    // policy's contact route — for that and for what the app cannot do.
+    expect(section).not.toContain('disconnecting is all this version of the app can do');
+    expect(section).toContain('you can erase your account on an instance from the app');
+    expect(section).toContain(normalised(`press *${ERASE_ACCOUNT_TEXT.erase}*`));
+    expect(section).toContain('nothing on this device is deleted');
     expect(section).toContain("ask the instance's operator");
     expect(section).toContain("for the project's own instance, that is this project's maintainer");
     expect(section).toContain('as described under contact below');
@@ -1738,10 +1740,11 @@ describe('the instance is disclosed, class by class — #778', () => {
     expect(section).toContain('ask privately by email');
   });
 
-  it('names only Disconnect, the operator or Discord in every "how to delete it" cell — #892 second review', () => {
+  it('names only Disconnect, the operator, Discord or a built press in every "how to delete it" cell — #892 second review', () => {
     expect(deletionRouteFaults(policySection(policy, 'An instance you connect to'))).toEqual([]);
-    // The prose paragraph under the table says the same.
-    expect(section).toContain('disconnecting is all this version of the app can do');
+    // The prose paragraph under the table says the same: the operator for
+    // what this build cannot do — a device, a name (#906 items 1 and 2).
+    expect(section).toContain('this version of the app cannot remove a device from your account');
     expect(section).toContain("ask the instance's operator to do them");
   });
 

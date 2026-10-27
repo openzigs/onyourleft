@@ -644,6 +644,18 @@ export const SECTION_ANSWERS_PLAY_HELP = {
 /** Where a rider sends a request to delete what this project holds. #562. */
 export const DELETION_REQUEST_EMAIL = 'matt@openzigs.ai';
 
+/**
+ * The web page for requesting account deletion (#906 item 4), which Play
+ * Console's account-deletion field takes. `data-safety.test.ts` holds it equal
+ * to `ACCOUNT_DELETION_URL` in `apps/web/src/privacy/policy.ts`, where it is
+ * derived from the page's path.
+ */
+export const ACCOUNT_DELETION_WEB_PAGE =
+  'https://github.com/openzigs/onyourleft/blob/main/docs/delete-your-account.md';
+
+/** The label of the press that deletes the account on an instance (#906 item 3). */
+export const ACCOUNT_DELETION_IN_APP = 'Delete my account on this instance';
+
 /** Play's *"Is all of the user data collected by your app encrypted in transit?"* */
 export interface EncryptedInTransitAnswer {
   readonly answer: boolean;
@@ -692,8 +704,8 @@ export const DATA_SAFETY_SECTION_ANSWERS: DataSafetySectionAnswers = {
   },
   deletionRequests: {
     answer: true,
-    how: `by email to ${DELETION_REQUEST_EMAIL}, until in-app deletion on an instance (#906) ships`,
-    why: `the owner’s decision of 2026-09-30 (#562): Yes. What this project holds about a rider is their account on the project’s own instance — its device keys, display name and earlier names, account id and any linked Discord id, which private rooms they made or joined and their results in any race they rode there, and, while a room they made is open, its route, which erasing the account ends the room and deletes — and everything the rider synced to it (#1195): their rides and their files, write-ups, side-camera reports, ride summaries, goals, notes, documents and saved workouts, the searchable copy the instance computed from them, and the analyses it wrote — and a request to ${DELETION_REQUEST_EMAIL} is how it is deleted until #906 adds deletion in the app. Cloudflare’s record of map and instance requests (the IP address, the time, and the device or browser type) is Cloudflare’s, not this project’s: this project can see it for up to 7 days and cannot delete it on request, and how long Cloudflare itself keeps it is not something this project controls or can confirm. This answer rests on the deletion requests this project can act on, not on that record. A picture sent to the rider’s own computer, or a ride’s numbers this app sent there before #1103, is held by that computer, and anything the rider’s instance sent to a hosted service on the rider’s own key, or this app sent to one before #1103, is held by that service, not by this project. Everything else is on the device, where Files → Erase this device deletes it`,
+    how: `in the app, with “${ACCOUNT_DELETION_IN_APP}” on the Instance screen (#906), or by email to ${DELETION_REQUEST_EMAIL}; the web page ${ACCOUNT_DELETION_WEB_PAGE} says both`,
+    why: `the owner’s decision of 2026-09-30 (#562): Yes. What this project holds about a rider is their account on the project’s own instance — its device keys, display name and earlier names, account id and any linked Discord id, which private rooms they made or joined and their results in any race they rode there, and, while a room they made is open, its route, which erasing the account ends the room and deletes — and everything the rider synced to it (#1195): their rides and their files, write-ups, side-camera reports, ride summaries, goals, notes, documents and saved workouts, the searchable copy the instance computed from them, and the analyses it wrote — and the rider deletes it in the app (#906), with “${ACCOUNT_DELETION_IN_APP}” on the Instance screen, or by a request to ${DELETION_REQUEST_EMAIL}, which is also the way for a rider who no longer has the app. Cloudflare’s record of map and instance requests (the IP address, the time, and the device or browser type) is Cloudflare’s, not this project’s: this project can see it for up to 7 days and cannot delete it on request, and how long Cloudflare itself keeps it is not something this project controls or can confirm. This answer rests on the deletion requests this project can act on, not on that record. A picture sent to the rider’s own computer, or a ride’s numbers this app sent there before #1103, is held by that computer, and anything the rider’s instance sent to a hosted service on the rider’s own key, or this app sent to one before #1103, is held by that service, not by this project. Everything else is on the device, where Files → Erase this device deletes it`,
   },
 };
 

@@ -133,11 +133,26 @@ both on 2026-09-30 and enters them in Play Console:
   can be plain `http:` without being named as an exception (`DATA_PATHS`, each
   held to the address rule in `apps/web` that decides it).
 - **Do you provide a way for users to request that their data is deleted? Yes**:
-  by email to `DELETION_REQUEST_EMAIL` (matt@openzigs.ai), named in the privacy
-  policy, until in-app deletion on an instance
-  ([#906](https://github.com/openzigs/onyourleft/issues/906)) ships. ⚠️ Play's
-  separate **account-deletion** requirement — a web link as well as an in-app
-  path, for an app that lets a rider create an account — is #906's, not this.
+  in the app, with *Delete my account on this instance* on the Instance screen
+  ([#906](https://github.com/openzigs/onyourleft/issues/906)), or by email to
+  `DELETION_REQUEST_EMAIL` (matt@openzigs.ai), named in the privacy policy.
+  ⚠️ **This used to say "by email, until in-app deletion ships"; a reader who
+  remembers that is reading the old file** (#906, 2026-10-27).
+
+**Play's account-deletion requirement is met by #906**, separately from that
+answer: an app that lets a rider create an account — this one does, on an
+instance, at *Connect* — must offer both an in-app path and a web link.
+
+- **In the app:** *Delete my account on this instance*, on the Instance screen
+  while signed in (`apps/web/src/views/EraseAccount.tsx`). It calls
+  `DELETE /v1/account` with the step-up the instance requires, a statement
+  signed just then by the device's key, and deletes nothing on the device.
+- **The web link:** `ACCOUNT_DELETION_URL` from
+  `apps/web/src/privacy/policy.ts`, derived from the path of
+  [`docs/delete-your-account.md`](../../docs/delete-your-account.md) as the
+  policy's URL is, so `policy.test.ts` fails if the page moves. It names the
+  app, the in-app path, the email route, and what is deleted and kept, and
+  needs no paid service: it is a page of this public repository.
 
 #95's fifth criterion asks a reviewer to confirm the **merged** manifest supports
 the "no location collection" claim — since #558, the claim that the app does
@@ -659,8 +674,12 @@ to its wording is held for the owner's approval.
       never one typed by hand (§4).
 - [ ] Data Safety: the answers in `src/android/data-safety.ts`, with the two
       section answers of 2026-09-30 (§4): **encrypted in transit: Yes**, except a
-      picture or a ride's numbers sent to the rider's own computer; **deletion: by
-      email to matt@openzigs.ai**.
+      picture or a ride's numbers sent to the rider's own computer; **deletion:
+      Yes, in the app or by email to matt@openzigs.ai** (#906).
+- [ ] Data Safety, account deletion: the app lets a rider create an account (on
+      an instance), so answer that it does, and paste `ACCOUNT_DELETION_URL`
+      from `apps/web/src/privacy/policy.ts` into the delete-account URL field,
+      never one typed by hand (§4, #906).
 - [ ] Health apps declaration (§4).
 - [ ] Content rating questionnaire.
 - [ ] Target audience: **adults; not likely to be accessed by children** (owner ruling).
