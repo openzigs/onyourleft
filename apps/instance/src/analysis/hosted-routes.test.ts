@@ -326,6 +326,22 @@ describe('the masking list goes with the consent and the key (#1251, owner rulin
     expect(await guardOf(w, a.athleteId)).toEqual({ words: ['Zennor'], zones: [] });
   });
 
+  it('is kept where the operator’s own key still serves the account after the rider’s goes', async () => {
+    const { w, a } = await agreed();
+    await w.freshRead((store) =>
+      store.putHostedModelKey(a.athleteId, {
+        url: 'https://models.example/v1',
+        model: 'operators',
+        iv: new Uint8Array(12),
+        ciphertext: new Uint8Array([1]),
+        setAt: 5,
+      }),
+    );
+    const cleared = await w.call('DELETE', '/v1/analysis/hosted/key', { token: a.token });
+    expect((cleared.body as HostedStatus).key?.setBy).toBe('operator-command');
+    expect(await guardOf(w, a.athleteId)).toEqual({ words: ['Zennor'], zones: [] });
+  });
+
   it('is held again once the app sends it with a new agreement', async () => {
     const { w, a } = await agreed();
     await w.call('DELETE', '/v1/analysis/hosted/consent', { token: a.token });
