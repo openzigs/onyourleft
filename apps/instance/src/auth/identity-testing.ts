@@ -39,6 +39,7 @@ import {
 import { importSecretKey, ownHostedKeyState } from '../analysis/hosted-key.ts';
 import { createHostedSettings } from '../analysis/hosted-settings.ts';
 import { hostedBehindMasking, readMaskingGuard } from '../analysis/hosted.ts';
+import { forgetMaskingOnRefusal } from '../analysis/masking-item.ts';
 import { hostedForPictures } from '../camera/hosted-pictures.ts';
 import type { PictureConnection } from '../camera/picture-model.ts';
 import { createSidePose } from '../camera/side-pose.ts';
@@ -469,6 +470,7 @@ export async function startIdentityInstance(
       hostedKey: ownKey,
       recordedConsent: async (athleteId) => (await store.getHostedConsent(athleteId))?.origin,
       guard: (athleteId) => readMaskingGuard(store, athleteId),
+      refusedForNoConsentOrKey: forgetMaskingOnRefusal(store, () => clock.ms),
       behindMasking: (key, guard) =>
         hostedBehindMasking(
           key,

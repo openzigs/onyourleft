@@ -22,6 +22,7 @@ import { createHostedSettings, type HostedSettings } from './analysis/hosted-set
 import { agentEngine, replanEngine } from './analysis/engine.ts';
 import type { SourceOptions } from './analysis/source.ts';
 import { hostedBehindMasking, readMaskingGuard } from './analysis/hosted.ts';
+import { forgetMaskingOnRefusal } from './analysis/masking-item.ts';
 import {
   ANALYSIS_SWEEP_PERIOD_MS,
   createAnalysisJobs,
@@ -583,6 +584,9 @@ export async function startInstance(options: InstanceOptions): Promise<StartedIn
         // #1223: every hosted request masked by the athlete's own guard (#1101).
         guard: (athleteId) => readMaskingGuard(reading, athleteId),
         behindMasking: (key, guard) => hostedBehindMasking(key, guard, options.hostedFetch),
+        // #1251: a hosted job refused for no consent or key, after another device
+        // sent the list again, deletes it as a withdrawal does.
+        refusedForNoConsentOrKey: forgetMaskingOnRefusal(store, now),
       };
       hostedSettings = createHostedSettings({ store, secret: () => secretKey, now, sources });
       // #1106: a side-camera picture, shown to the local model the operator

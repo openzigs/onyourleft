@@ -263,12 +263,20 @@ exercised and the result installed **without cutting a tag** — which is what �
 is for. The GitHub Release step still runs only on a tag.
 
 **It builds an Android App Bundle too** ([#958](https://github.com/openzigs/onyourleft/issues/958)),
-because Play accepts a new app only as an `.aab`. `bundleRelease` runs in the
-same Gradle invocation as `assembleRelease`, so the one set of injected signing
-properties signs both; an unsigned run builds `bundleDebug` beside
-`assembleDebug`. A second step verifies the bundle as the first verifies the
+because Play accepts a new app only as an `.aab`. Since
+[#1745](https://github.com/openzigs/onyourleft/issues/1745) `bundleRelease` runs
+in a second Gradle invocation after `assembleRelease`, through the one shell
+function that adds the injected signing properties, so both are signed; an
+unsigned run builds `bundleDebug` after `assembleDebug`. Two invocations
+because the two carry different web assets: the web client is built once per
+channel (`VITE_OYL_RELEASE_CHANNEL`, `direct` for the APK and `play` for the
+bundle), so the app's About page can name the channel it came from (§11). A
+second step verifies the bundle as the first verifies the
 APK: signed (`jarsigner -verify`, whose verdict is read from what it prints,
-because ⚠️ **it exits 0 on an unsigned file**), not with the Android debug
+because ⚠️ **it exits 0 on an unsigned file**, and since #1745 also refused when
+it warns of **unsigned entries**, which it prints beside `jar verified.` with
+exit 0; `-strict` is not used because the upload key's self-signed and
+no-timestamp warnings would fail every run), not with the Android debug
 certificate (`keytool -printcert -jarfile`), and targeting at least the `REL002`
 floor, read out of the bundle's own manifest with
 [bundletool](https://github.com/google/bundletool) `dump manifest`. `aapt2 dump
@@ -597,8 +605,14 @@ signature differs from the installed app's, so:
   app's data, and the device is where a rider's rides are (CLAUDE.md §1). Export
   or sync before switching.
 
-Both channels remain; the README and the release notes should say which one a
-rider is on and that they do not mix. A lost upload key can be reset through
+Both channels remain, and since [#1745](https://github.com/openzigs/onyourleft/issues/1745)
+each place a rider meets the app says which channel it is and that they do not
+mix: the README's *Installing the Android app*, every GitHub Release's notes
+(`apps/mobile/release-notes.md`, the release step's `body_path`), the Play
+listing's full description (the paragraph below), and the app's own About page,
+which reads the channel from the build (`VITE_OYL_RELEASE_CHANNEL`, §6) rather
+than from any typed string. `release-pipeline.test.ts` pins the sentence in the
+first three. A lost upload key can be reset through
 Play Console support, because Google holds the signing key; a lost upload key
 still ends direct-APK updates for good, which is §9's last paragraph.
 
@@ -633,7 +647,14 @@ to its wording is held for the owner's approval.
 - [ ] Create the app: name _On Your Left_, default language, **app** (not game), **free**.
 - [ ] Store listing: short and full description, 512 px icon, 1024×500 feature
       graphic, phone and tablet screenshots. Hold every word and screenshot to
-      §4's wording checklist.
+      §4's wording checklist. The full description carries this paragraph
+      (#1745), word for word:
+
+      > This is the Google Play copy of On Your Left. The app is also offered as
+      > a direct download from its releases on GitHub, and the two copies cannot
+      > update each other. Moving from one to the other means uninstalling the
+      > app first, and uninstalling deletes the rides on the device: export
+      > them, or sync them with an instance, before you switch.
 - [ ] Privacy policy URL: `PRIVACY_POLICY_URL` from `apps/web/src/privacy/policy.ts`,
       never one typed by hand (§4).
 - [ ] Data Safety: the answers in `src/android/data-safety.ts`, with the two

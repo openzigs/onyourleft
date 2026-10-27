@@ -2408,6 +2408,7 @@
     "Masking reduces what is sent; it does not guarantee that nothing personal gets through.",
     "So that your instance can mask, this device sends it your list of words to mask and your privacy zones — their names, where they are and how large — when you agree, and again each time you ask for a ride analysis by this service.",
     "They are sealed on the way, and your instance keeps them with your account.",
+    "Your instance deletes them when you withdraw or remove your key.",
     "Your key is held by your instance, encrypted, and is sent only to https://models.example.",
     "It is never sent back to this device and is never put in a file the app or your instance exports.",
     "When you press 'Send a test question', your instance sends it one test question, containing none of your data, to check it answers.",
