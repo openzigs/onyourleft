@@ -10,6 +10,7 @@ import {
   type CreditedWork,
 } from '../credits/credits';
 import { parseAssetManifest, type AssetEntry } from '../credits/manifest';
+import { loadShippedLicence, READABLE_LICENCES } from '../credits/licence-documents';
 import { parseNotices, type IncludedSoftware } from '../credits/notices';
 import { loadNoticesDocument } from '../credits/notices-document';
 import { THIRD_PARTY_CONTENTS_SOURCE } from '../credits/notices-source';
@@ -45,7 +46,7 @@ import { ODBL_LICENCE_URL, ODBL_NOTICE, OSM_ATTRIBUTION } from '../map/basemap';
  * The first section is what the app **must** credit. The second — since
  * #597 — is work whose licence asks for no credit but does ask for a copy of
  * the licence to travel with it (Apache-2.0: the map's Roboto glyphs and the
- * pose model), and each links the copy this app ships. The third is offered
+ * pose model), and each copy this app ships is shown in it (#1744). The third is offered
  * anyway, for assets whose licence asks for nothing. They are separate, and
  * the courtesy one says in words that nothing is owed, because #358's third
  * bullet is that the screen *"must not imply an obligation that does not
@@ -77,7 +78,9 @@ import { ODBL_LICENCE_URL, ODBL_NOTICE, OSM_ATTRIBUTION } from '../map/basemap';
  * ⚠️ **The document is shown here, not linked.** A `target="_blank"` link to
  * it opened over the app inside the Android shell and left the rider with no
  * way back — `credits/notices-document.ts` says why — so a disclosure reads it
- * into the page on demand instead.
+ * into the page on demand instead. ⚠️ Since #1744 the same goes for the
+ * licence texts the licence-copy section names (Apache-2.0, OFL-1.1): a
+ * disclosure per licence, read through `credits/licence-documents.ts`.
  */
 
 export interface CreditsViewProps {
@@ -102,6 +105,12 @@ export interface CreditsViewProps {
    * hand in a fixture document, or one that fails to load.
    */
   readonly noticesDocument?: () => Promise<string>;
+  /**
+   * Reads one shipped licence text. Defaults to
+   * `credits/licence-documents.ts` §`loadShippedLicence`; a prop so a test can
+   * hand in a fixture, or one that fails to load — #1744.
+   */
+  readonly licenceText?: (licence: string) => Promise<string>;
   /**
    * Works the build copies in rather than commits — #618. Defaults to
    * `credits.ts` §`COPIED_WORKS`; a prop so a fixture manifest can be rendered
@@ -207,8 +216,20 @@ type DocumentState =
   | { readonly kind: 'shown'; readonly text: string }
   | { readonly kind: 'failed' };
 
+/** What a {@link ReadInPlace} disclosure says and marks its text with. */
+interface ReadInPlaceProps {
+  readonly load: () => Promise<string>;
+  readonly summary: string;
+  readonly reading: string;
+  readonly failedLabel: string;
+  readonly failed: string;
+  /** A `data-*` attribute set on the shown text, for tests and the browser gate. */
+  readonly marker: Readonly<Record<`data-${string}`, string>>;
+}
+
 /**
- * The whole notices document, read into the page when a rider opens it — #664.
+ * A document this app ships, read into the page when a rider opens it —
+ * #664 for the notices, #1744 for the licence texts.
  *
  * A `<details>`, not a button: the notices are something to read, not
  * something a rider came to this screen to do, and #666's "first control
@@ -218,7 +239,14 @@ type DocumentState =
  * opening it again does not read it a second time. A read that fails says
  * so, rather than leaving an open disclosure over nothing.
  */
-function FullNotices({ load }: { readonly load: () => Promise<string> }): JSX.Element {
+function ReadInPlace({
+  load,
+  summary,
+  reading,
+  failedLabel,
+  failed,
+  marker,
+}: ReadInPlaceProps): JSX.Element {
   const [state, setState] = useState<DocumentState>({ kind: 'hidden' });
   const read = useRef<string | undefined>(undefined);
 
@@ -250,20 +278,19 @@ function FullNotices({ load }: { readonly load: () => Promise<string> }): JSX.El
         toggled(event.currentTarget.open);
       }}
     >
-      <summary>Read the full notices</summary>
+      <summary>{summary}</summary>
       {state.kind === 'loading' ? (
         <StatusMessage tone="info" label="Opening" live>
-          Reading the notices this app carries.
+          {reading}
         </StatusMessage>
       ) : null}
       {state.kind === 'failed' ? (
-        <StatusMessage tone="warning" label="Could not open the notices" live>
-          The notices this app carries could not be read just now. The list below is still every
-          package they cover.
+        <StatusMessage tone="warning" label={failedLabel} live>
+          {failed}
         </StatusMessage>
       ) : null}
       {state.kind === 'shown' ? (
-        <pre className="oyl-notices" data-notices-document="">
+        <pre className="oyl-notices" {...marker}>
           {state.text}
         </pre>
       ) : null}
@@ -271,10 +298,41 @@ function FullNotices({ load }: { readonly load: () => Promise<string> }): JSX.El
   );
 }
 
+/**
+ * The licence texts the licence-copy section's works ask to travel with them,
+ * one disclosure each, in place of the `target="_blank"` link that left the
+ * app inside the Android shell — #1744.
+ */
+function ShippedLicences({
+  works,
+  load,
+}: {
+  readonly works: readonly CreditedWork[];
+  readonly load: (licence: string) => Promise<string>;
+}): JSX.Element {
+  const named = new Set(works.map((work) => work.licence));
+  return (
+    <>
+      {READABLE_LICENCES.filter((licence) => named.has(licence)).map((licence) => (
+        <ReadInPlace
+          key={licence}
+          load={() => load(licence)}
+          summary={`Read the ${licence} licence`}
+          reading={`Reading the ${licence} licence this app carries.`}
+          failedLabel="Could not open the licence"
+          failed={`The ${licence} licence this app carries could not be read just now.`}
+          marker={{ 'data-licence-text': licence }}
+        />
+      ))}
+    </>
+  );
+}
+
 export function CreditsView({
   manifest,
   notices,
   noticesDocument = loadNoticesDocument,
+  licenceText = loadShippedLicence,
   copied = COPIED_WORKS,
 }: CreditsViewProps): JSX.Element {
   const credits = useMemo(
@@ -330,9 +388,10 @@ export function CreditsView({
           <p>
             Each of these is published under a licence that does not ask to be credited on a screen,
             but does ask that a copy of the licence travel with the work. That copy ships inside
-            this app, and the licence named beside each work opens it.
+            this app, and each licence named beside a work can be read in full below.
           </p>
           <WorkList works={credits.licenceCopy} />
+          <ShippedLicences works={credits.licenceCopy} load={licenceText} />
         </div>
       )}
 
@@ -403,7 +462,14 @@ export function CreditsView({
           travel with the software, and the full third-party notices reproduce each one word for
           word. They ship inside this app, so they open here without a network.
         </p>
-        <FullNotices load={noticesDocument} />
+        <ReadInPlace
+          load={noticesDocument}
+          summary="Read the full notices"
+          reading="Reading the notices this app carries."
+          failedLabel="Could not open the notices"
+          failed="The notices this app carries could not be read just now. The list below is still every package they cover."
+          marker={{ 'data-notices-document': '' }}
+        />
         {software.app.length === 0 || software.problems.length > 0 ? (
           <StatusMessage tone="warning" label="This list may be incomplete">
             <p>
