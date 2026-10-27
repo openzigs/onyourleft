@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * The Android shell is the page's colour before the page paints, in both
- * palettes (#672 part b).
+ * The Android shell is the page's colour before the page paints, whatever the
+ * device's own mode (#672 part b, #999).
  *
- * `res/values/colors.xml` and `res/values-night/colors.xml` each declare
- * `oyl_canvas`, and this holds each equal to the web client's own canvas
- * token for that palette — imported from `apps/web`, not copied, so the two
- * cannot drift. And it holds the themes and `MainActivity` to actually USE
+ * `res/values/colors.xml` (a device in light mode) and
+ * `res/values-night/colors.xml` (dark mode) each declare `oyl_canvas`, and
+ * this holds each equal to the canvas of the palette the page STARTS in on
+ * such a device — `theme-selection.ts` §`DEFAULT_THEME_CHOICE`, resolved for
+ * that mode, imported from `apps/web` rather than copied so the two cannot
+ * drift. Since #992 that is dark on both: #999 found the light file still
+ * held the light canvas, a white frame before a dark page. And it holds the themes and `MainActivity` to actually USE
  * it, because a colour declared and read by nothing is a resource that
  * passes this file and changes nothing on the screen.
  *
@@ -30,7 +33,8 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { COLOUR_TOKENS, DARK_COLOUR_TOKENS } from '../../../web/src/design/tokens';
+import { DEFAULT_THEME_CHOICE, resolveTheme } from '../../../web/src/design/theme-selection';
+import { DARK_COLOUR_TOKENS, paletteColours } from '../../../web/src/design/tokens';
 
 import { styleItems, valueResources } from './resources';
 
@@ -43,13 +47,19 @@ const lightDrawables = valueResources(read('res/values/colors.xml'), 'drawable')
 const nightDrawables = valueResources(read('res/values-night/colors.xml'), 'drawable');
 const styles = read('res/values/styles.xml');
 
+/** The canvas the page starts in on a device that does or does not prefer dark. */
+const startingCanvas = (devicePrefersDark: boolean): string =>
+  paletteColours(resolveTheme(DEFAULT_THEME_CHOICE, devicePrefersDark)).canvas;
+
 describe('the shell before the page paints is the page’s canvas — #672', () => {
-  it('is the light canvas token in the light palette', () => {
-    expect(lightColours.get('oyl_canvas')?.toLowerCase()).toBe(COLOUR_TOKENS.canvas);
+  it('is the canvas the page starts in on a device in light mode — #999', () => {
+    expect(lightColours.get('oyl_canvas')?.toLowerCase()).toBe(startingCanvas(false));
+    // The default is dark (#992), so this is the dark canvas, not white.
+    expect(lightColours.get('oyl_canvas')?.toLowerCase()).toBe(DARK_COLOUR_TOKENS.canvas);
   });
 
-  it('is the dark canvas token in the device’s dark mode', () => {
-    expect(nightColours.get('oyl_canvas')?.toLowerCase()).toBe(DARK_COLOUR_TOKENS.canvas);
+  it('is the canvas the page starts in on a device in dark mode', () => {
+    expect(nightColours.get('oyl_canvas')?.toLowerCase()).toBe(startingCanvas(true));
   });
 
   it('declares nothing in the night file the light file does not', () => {
@@ -64,12 +74,14 @@ describe('the shell before the page paints is the page’s canvas — #672', () 
     ).toBe('@color/oyl_canvas');
   });
 
-  it('paints the launch window with the canvas in dark mode, and the splash picture in light (Android 7 to 11)', () => {
+  it('paints the launch window with the canvas in either mode (Android 7 to 11) — #999', () => {
+    // Not Capacitor's splash picture in light mode: it is white, which is the
+    // flash before a page that starts dark.
     expect(styleItems(styles, 'AppTheme.NoActionBarLaunch')?.get('android:background')).toBe(
       '@drawable/oyl_launch_background',
     );
     expect(nightDrawables.get('oyl_launch_background')).toBe('@color/oyl_canvas');
-    expect(lightDrawables.get('oyl_launch_background')).toBe('@drawable/splash');
+    expect(lightDrawables.get('oyl_launch_background')).toBe('@color/oyl_canvas');
   });
 
   it('paints the window behind the WebView with it', () => {

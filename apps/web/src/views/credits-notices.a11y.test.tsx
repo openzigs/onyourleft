@@ -17,6 +17,7 @@ import {
   formatViolations,
   tabbableElements,
 } from '../a11y/audit';
+import { loadShippedLicence } from '../credits/licence-documents';
 import { loadNoticesDocument } from '../credits/notices-document';
 import { AppShell } from '../shell/AppShell';
 import type { CapabilityProbe } from '../support/bluetooth-support';
@@ -65,5 +66,29 @@ describe('Credits — the full third-party notices (#664)', () => {
     expect(isOpen()).toBe(true);
     expect(document.querySelector('[data-notices-document]')?.textContent).toBe(committed);
     expectClean('Credits, notices shown');
+  });
+});
+
+describe('Credits — the shipped licence texts (#1744)', () => {
+  it('is a named disclosure per licence, operable by keyboard, and the screen passes the audit with both shown', async () => {
+    const texts = {
+      'Apache-2.0': await loadShippedLicence('Apache-2.0'),
+      'OFL-1.1': await loadShippedLicence('OFL-1.1'),
+    };
+    globalThis.location.hash = '#/about/credits';
+    mounted = await mount(<AppShell capabilities={NO_BLUETOOTH} />);
+    await settle();
+
+    for (const [licence, text] of Object.entries(texts)) {
+      const toggle = queryAll<HTMLElement>(document.body, 'main details > summary').find(
+        (each) => accessibleName(each) === `Read the ${licence} licence`,
+      );
+      expect(toggle, licence).toBeDefined();
+      expect(tabbableElements(document)).toContain(toggle);
+      if (toggle !== undefined) await activateWithKeyboard(toggle);
+      await settle();
+      expect(document.querySelector(`[data-licence-text="${licence}"]`)?.textContent).toBe(text);
+    }
+    expectClean('Credits, licence texts shown');
   });
 });

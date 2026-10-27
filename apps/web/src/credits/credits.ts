@@ -89,7 +89,7 @@ export const ATTRIBUTION_LICENCES: readonly string[] = ['CC-BY-4.0'];
  * 2 is that each copy of the font "contains the above copyright notice and
  * this license" — the same shape as Apache-2.0 §4(a). The notice is the
  * credit's creator, and travels in each font's name table too; the licence is
- * the copy linked here.
+ * the copy shown in the Credits screen.
  *
  * ⚠️ Every licence here must have a {@link SHIPPED_LICENCE_TEXTS} entry, or
  * {@link creditsFrom} reports the work as shipping without its licence.
@@ -116,6 +116,11 @@ export const NOTHING_ASKED_LICENCES: readonly string[] = ['CC0-1.0'];
  * copies into `dist` verbatim and the service worker precaches;
  * `credits.test.ts` holds each one byte-identical to the canonical text
  * `LIC005` pins.
+ *
+ * ⚠️ **Credits does not link these** (#1744): a `target="_blank"` link opened
+ * the `.txt` over the app inside the Android shell, and back left the app.
+ * The screen reads each one into the page through `licence-documents.ts`,
+ * which imports these same files; the URLs are still served for a browser.
  */
 export const SHIPPED_LICENCE_TEXTS: Readonly<Record<string, string>> = {
   'Apache-2.0': './licences/Apache-2.0.txt',
@@ -126,17 +131,17 @@ export const SHIPPED_LICENCE_TEXTS: Readonly<Record<string, string>> = {
 };
 
 /**
- * The licence texts a credit can point at.
+ * The licence texts a credit can LINK to.
  *
- * A shipped copy, or a canonical URL that is published and stable. A licence
- * absent from both renders as its identifier alone, which is still a true
+ * A canonical URL that is published and stable. A shipped copy is not linked
+ * but shown on the screen (#1744, {@link SHIPPED_LICENCE_TEXTS}). A licence
+ * that is neither renders as its identifier alone, which is still a true
  * statement — a guessed URL is not, and CC BY 4.0 §3(a)(1)(A)(iii) asks for a
  * notice *referring to this Public License* rather than to something like it.
  */
 const LICENCE_TEXTS: Readonly<Record<string, string>> = {
   'CC-BY-4.0': 'https://creativecommons.org/licenses/by/4.0/',
   'CC0-1.0': 'https://creativecommons.org/publicdomain/zero/1.0/',
-  ...SHIPPED_LICENCE_TEXTS,
 };
 
 /**
@@ -161,7 +166,10 @@ export function externalLink(url: string | undefined): string | undefined {
   return /^https?:\/\//i.test(url) ? url : undefined;
 }
 
-/** Where a licence's own text is published, or `undefined`. */
+/**
+ * Where a licence's own text is published, or `undefined` — including for a
+ * licence this app ships a copy of, which the screen shows instead (#1744).
+ */
 export function licenceLink(licence: string): string | undefined {
   return LICENCE_TEXTS[licence];
 }

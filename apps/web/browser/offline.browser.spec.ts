@@ -524,34 +524,47 @@ test.describe('a cold start with the network off', () => {
     }
   });
 
-  test('opens the licence text the credits screen links, not the app shell — #597', async () => {
-    // The credits screen links the Apache-2.0 text this app ships beside the
-    // Roboto glyphs and the pose model. Opening it is a NAVIGATION, and the
-    // worker used to answer every navigation with the shell — so a controlled
-    // page showed the home screen where the licence should have been, online
-    // or off. The link is read off the rendered screen rather than typed here,
-    // so a screen that stopped linking it fails too.
+  test('shows the Apache-2.0 text the credits screen offers, offline — #597, #1744', async () => {
+    // The Apache-2.0 text ships beside the Roboto glyphs and the pose model.
+    // #597 found a controlled page showed the home screen where the licence
+    // should have been; since #1744 the screen reads the text into itself
+    // rather than linking it, because the link opened the `.txt` over the app
+    // inside the Android shell and back then left the app. So the question is
+    // asked of the screen, as the #664 case below asks it of the notices: the
+    // text arrives in a chunk the worker serves, and the page never navigates.
     const second = await session(profile);
     await second.context.setOffline(true);
+    const scripts: { readonly url: string; readonly fromWorker: boolean }[] = [];
+    second.page.on('response', (response) => {
+      if (response.url().startsWith(PRODUCT_ORIGIN) && response.url().endsWith('.js')) {
+        scripts.push({ url: response.url(), fromWorker: response.fromServiceWorker() });
+      }
+    });
     try {
       await second.page.goto(`${PRODUCT_ORIGIN}/#/about/credits`);
       await expect(second.page.locator('h1')).toHaveText('Credits');
-      const link = second.page.locator('[data-terms="licence-copy"] a', {
-        hasText: 'Apache-2.0',
+      const section = second.page.locator('[data-terms="licence-copy"]');
+      await expect(section.locator('a[href*="licences/"]')).toHaveCount(0);
+      const disclosure = section.locator('details', {
+        has: second.page.locator('summary', { hasText: 'Read the Apache-2.0 licence' }),
       });
-      await expect(link.first()).toBeVisible();
-      const href = await link.first().evaluate((anchor) => (anchor as HTMLAnchorElement).href);
-      expect(href).toBe(`${PRODUCT_ORIGIN}/licences/Apache-2.0.txt`);
-
-      const opened = await second.page.goto(href);
-      expect(opened?.status(), 'the licence text did not open offline').toBe(200);
-      expect(opened?.fromServiceWorker(), 'the licence text was not served by the worker').toBe(
-        true,
-      );
-      const body = (await opened?.text()) ?? '';
-      expect(body, 'the navigation was answered with something other than the licence').toMatch(
-        /^\s*Apache License\s+Version 2\.0, January 2004/,
-      );
+      await disclosure.locator('summary').click();
+      const shown = section.locator('[data-licence-text="Apache-2.0"]');
+      await expect(shown).toBeVisible();
+      expect(
+        (await shown.textContent()) ?? '',
+        'the screen showed something other than the licence',
+      ).toMatch(/^\s*Apache License\s+Version 2\.0, January 2004/);
+      await expect(second.page.locator('h1')).toHaveText('Credits');
+      expect(second.page.url()).toBe(`${PRODUCT_ORIGIN}/#/about/credits`);
+      expect(
+        scripts.some((script) => /Apache-2\.0-[^/]*\.js$/.test(script.url) && script.fromWorker),
+        'the Apache-2.0 licence chunk was not served by the worker',
+      ).toBe(true);
+      expect(
+        scripts.filter((script) => !script.fromWorker).map((script) => script.url),
+        'a script was not served by the worker',
+      ).toEqual([]);
     } finally {
       await second.close();
     }
