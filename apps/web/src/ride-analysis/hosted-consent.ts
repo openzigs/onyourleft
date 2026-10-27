@@ -44,6 +44,9 @@
  *    its own copy (`apps/instance` §`analysis/hosted.ts`), and until this
  *    issue nothing in the app sent it one — so every hosted job would have
  *    been refused. #1104 B6 has the approved policy row for it.
+ * 4. **#1104 B1-a, after it**: *"Your instance deletes them when you withdraw
+ *    or remove your key."* — the owner's ruling of 2026-10-26, which the
+ *    instance carries out (`apps/instance` §`analysis/hosted-settings.ts`).
  *
  * It names no vendor and no model (ADR 0031 D-4): the service is named by the
  * address the rider typed.
@@ -76,7 +79,7 @@ export interface HostedInstanceConsent {
 
 /**
  * #1104 B1 for `endpoint` — the origin the consent names, for example
- * `https://api.example.com`. See the file comment for the three departures
+ * `https://api.example.com`. See the file comment for the four departures
  * from the draft.
  */
 export function hostedInstanceConsent(endpoint: string): HostedInstanceConsent {
@@ -105,7 +108,8 @@ export function hostedInstanceConsent(endpoint: string): HostedInstanceConsent {
       'So that your instance can mask, this device sends it your list of words to mask and your ' +
         'privacy zones — their names, where they are and how large — when you agree, and again ' +
         'each time you ask for a ride analysis by this service. They are sealed on the way, and ' +
-        'your instance keeps them with your account.',
+        'your instance keeps them with your account. Your instance deletes them when you ' +
+        'withdraw or remove your key.',
       `Your key is held by your instance, encrypted, and is sent only to ${endpoint}. It is never ` +
         'sent back to this device and is never put in a file the app or your instance exports. ' +
         HOSTED_KEY_OPERATOR_CAN_READ,

@@ -22,6 +22,14 @@
  *   and when. A key stored at ANOTHER origin withdraws it, in the store's
  *   own transaction (`sql-store.ts` §`putAthleteHostedKey`); a key rotated at
  *   the same origin keeps it.
+ * - **Not the masking list**, which is a sync item (`hosted.ts`
+ *   §`MASKING_ITEM_KEY`) — but it goes with these. The owner's ruling of
+ *   2026-10-26 on #1104 (B1-a, C-9): withdrawing the consent, or removing the
+ *   key, **deletes** it, and so does a key at another origin, because that
+ *   withdraws the consent. It is tombstoned as a sync delete is, AFTER the
+ *   consent or the key is gone: in between, no hosted job can run, so nothing
+ *   is sent unmasked if the second write fails. The app sends it again when
+ *   the rider next agrees.
  *
  * ⚠️ **Every route that reaches this is sealed-only** (ADR 0047 D-7, D-13;
  * `sealed/phase-one.ts`): a pasted key is accepted from anywhere, but only
@@ -49,6 +57,7 @@ import {
   sealHostedKey,
   type SecretKey,
 } from './hosted-key.ts';
+import { MASKING_ITEM_KEY } from './masking-item.ts';
 
 /**
  * What the instance says when it has no `OYL_INSTANCE_SECRET_KEY` to seal a
@@ -133,6 +142,7 @@ export interface HostedSettingsOptions {
     | 'putHostedConsent'
     | 'getHostedConsent'
     | 'clearHostedConsent'
+    | 'deleteSyncItem'
   >;
   /** The instance's secret, or `undefined` when it has none. */
   readonly secret: () => Promise<SecretKey | undefined>;
@@ -173,6 +183,16 @@ export function createHostedSettings(options: HostedSettingsOptions): HostedSett
   const testLimit = createRateLimiter(options.tests ?? DEFAULT_HOSTED_TESTS, options.now);
   /** Riders whose test question is out now: one at a time. */
   const testing = new Set<string>();
+
+  /** Tombstone the athlete's masking list (#1251, owner ruling 2026-10-26). */
+  async function forgetMasking(athleteId: string): Promise<void> {
+    await store.deleteSyncItem(
+      athleteId,
+      'masking',
+      MASKING_ITEM_KEY,
+      Math.floor(options.now() / 1000),
+    );
+  }
 
   async function status(athleteId: string): Promise<HostedStatus> {
     const own = await store.getAthleteHostedKey(athleteId);
@@ -236,6 +256,7 @@ export function createHostedSettings(options: HostedSettingsOptions): HostedSett
       if (!url.ok || model === undefined || key === undefined || problems.length > 0) {
         return { ok: false, code: 'validation_failed', fields: problems };
       }
+      const agreed = await store.getHostedConsent(caller.athleteId);
       const sealed = await sealHostedKey(secret, {
         athleteId: caller.athleteId,
         url: url.url.href,
@@ -250,12 +271,18 @@ export function createHostedSettings(options: HostedSettingsOptions): HostedSett
         setAt: Math.floor(options.now() / 1000),
       });
       if (put.outcome === 'no-athlete') return { ok: false, code: 'not_found' };
-      return { ok: true, value: await status(caller.athleteId) };
+      const now = await status(caller.athleteId);
+      // The store withdrew a consent naming another origin: its list goes with it.
+      if (agreed !== undefined && now.consent === null) await forgetMasking(caller.athleteId);
+      return { ok: true, value: now };
     },
 
     async clearKey(caller) {
       await store.clearAthleteHostedKey(caller.athleteId);
-      return status(caller.athleteId);
+      const now = await status(caller.athleteId);
+      // Only the operator's own key can still be held here, and its command removes it.
+      if (now.key === null) await forgetMasking(caller.athleteId);
+      return now;
     },
 
     async recordConsent(caller, body) {
@@ -280,6 +307,7 @@ export function createHostedSettings(options: HostedSettingsOptions): HostedSett
 
     async withdrawConsent(caller) {
       await store.clearHostedConsent(caller.athleteId);
+      await forgetMasking(caller.athleteId);
       return status(caller.athleteId);
     },
 
