@@ -789,6 +789,84 @@ for (const viewport of EASED_VIEWPORTS) {
 }
 
 /**
+ * #647 on a phone. The acceptance criteria ask for the notice's layout at the
+ * phone viewports as well as the tablets, and the Ride tab is one column
+ * there. The rule is the tablets': the sentence whole, in no disclosure, on
+ * top at its centre, inside the width, and its bottom and *Pause* / *Stop*
+ * clear of the fold by {@link FOLD_MARGIN_PIXELS}. Below that the page
+ * scrolls on a phone, as it always did; what may not scroll away is the
+ * safety sentence or the controls that end the ride.
+ */
+const KEEP_ALIVE_PHONES: readonly Viewport[] = [
+  { name: 'the narrowest phone — 320×568', width: 320, height: 568 },
+  { name: 'a phone — 360×800', width: 360, height: 800 },
+  { name: 'a phone — 390×844', width: 390, height: 844 },
+  { name: 'a phone — 412×915', width: 412, height: 915 },
+];
+
+for (const viewport of KEEP_ALIVE_PHONES) {
+  test(`a ride that may stop with the screen off, on a phone — #647 — ${viewport.name}`, async ({
+    page,
+  }, testInfo) => {
+    await open(page, viewport, KEEP_ALIVE_FAILED);
+    const seen = await measure(page);
+    const notice = seen.keepScreenOn;
+    expect(notice?.text).toBe(KEEP_SCREEN_ON_TEXT);
+    expect(notice?.inDisclosure).toBe(false);
+    expect(notice?.onTop).toBe(true);
+    expect(seen.scrollY).toBe(0);
+    expect(notice?.box.left ?? -1).toBeGreaterThanOrEqual(0);
+    expect(notice?.box.right ?? Infinity).toBeLessThanOrEqual(viewport.width + SUBPIXEL_TOLERANCE);
+
+    const ending = seen.controls.filter((each) => each.name === 'Pause' || each.name === 'Stop');
+    expect(ending.map((each) => each.name).sort()).toEqual(['Pause', 'Stop']);
+    const lowest = lowestOf(ending);
+    const controlMargin = foldMargin(lowest.box.bottom, viewport);
+    const noticeMargin = foldMargin(notice?.box.bottom ?? Infinity, viewport);
+    const note =
+      `Pause / Stop ${controlMargin.toFixed(1)} px; the notice ${noticeMargin.toFixed(1)} px, ` +
+      `${(notice?.box.height ?? 0).toFixed(0)} px tall — at ${String(viewport.width)}×${String(viewport.height)}`;
+    testInfo.annotations.push({
+      type: 'keep the screen on, phone, margin to the fold',
+      description: note,
+    });
+    console.log(`keep the screen on, on a phone — ${viewport.name} — ${note}`);
+    expect(noticeMargin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+    expect(controlMargin, note).toBeGreaterThanOrEqual(FOLD_MARGIN_PIXELS);
+  });
+}
+
+/**
+ * #647, under #654's ruling 2: the notice is an existing `StatusMessage` tone,
+ * and its pair must pass in both palettes. Measured here as painted: the
+ * sentence's ink and its label's against the notice's own surface, at
+ * {@link AA_TEXT}. The game HUD's copy needs no dark run, because the HUD
+ * declares no dark token (`tokens.test.ts`, "declares no HUD token").
+ */
+for (const scheme of ['light', 'dark'] as const) {
+  test(`#647 — the keep-the-screen-on notice meets AA for text — ${scheme}`, async ({
+    page,
+  }, testInfo) => {
+    await page.emulateMedia({ colorScheme: scheme });
+    await open(page, TABLET_IN_THE_SHELL, KEEP_ALIVE_FAILED);
+    const notice = (await measure(page)).keepScreenOn;
+    if (notice === undefined) throw new Error('no keep-the-screen-on notice on the page');
+    const sentence = contrastRatio(hexOf(notice.colour), hexOf(notice.background));
+    const label = contrastRatio(hexOf(notice.labelColour), hexOf(notice.background));
+    const note = `sentence ${notice.colour} and label ${notice.labelColour} on ${notice.background}: ${sentence.toFixed(2)}:1 and ${label.toFixed(2)}:1 — ${scheme}`;
+    testInfo.annotations.push({ type: '#647 contrast', description: note });
+    console.log(`#647 — the keep-the-screen-on notice — ${note}`);
+    // The apparatus: the two schemes paint two different surfaces, so the
+    // dark case is not the light one measured twice.
+    expect(notice.background, note).toBe(
+      scheme === 'dark' ? 'rgb(51, 40, 15)' : 'rgb(251, 239, 218)',
+    );
+    expect(sentence, note).toBeGreaterThanOrEqual(AA_TEXT);
+    expect(label, note).toBeGreaterThanOrEqual(AA_TEXT);
+  });
+}
+
+/**
  * #692 — room for a standing notice at in-shell tablet sizes.
  *
  * ## What was wrong, measured
