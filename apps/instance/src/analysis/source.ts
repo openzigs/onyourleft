@@ -91,6 +91,14 @@ export interface SourceOptions {
    * §`hostedBehindMasking`, which a guard is REQUIRED to call.
    */
   readonly behindMasking?: (key: OpenedHostedKey, guard: MaskingGuard) => ModelConnection;
+  /**
+   * Called, and awaited, when a hosted job is refused because `athleteId` has
+   * no recorded consent or no key of their own (#1251). A second device may
+   * have uploaded the masking list after the rider withdrew; the instance
+   * does not keep a list for a rider who cannot use it, so this deletes it.
+   * A throw here is swallowed: the refusal stands either way.
+   */
+  readonly refusedForNoConsentOrKey?: (athleteId: string) => Promise<void>;
 }
 
 /** The athlete's guard, or `undefined` for any way it cannot be had. */
@@ -103,6 +111,14 @@ async function guardFor(
     return await options.guard(athleteId);
   } catch {
     return undefined;
+  }
+}
+
+async function forgetOnRefusal(options: SourceOptions, athleteId: string): Promise<void> {
+  try {
+    await options.refusedForNoConsentOrKey?.(athleteId);
+  } catch {
+    // The job is refused whether or not the list could be deleted.
   }
 }
 
@@ -124,8 +140,14 @@ export async function modelForSource(
   const recorded =
     options.recordedConsent === undefined ? undefined : await options.recordedConsent(athleteId);
   const consented = recorded === undefined ? undefined : hostedOriginOf(recorded);
-  if (consented === undefined) return { ok: false, failure: 'hosted_unavailable' };
+  if (consented === undefined) {
+    await forgetOnRefusal(options, athleteId);
+    return { ok: false, failure: 'hosted_unavailable' };
+  }
   const held = await options.hostedKey(athleteId);
+  if (held.kind !== 'held' || held.athleteId !== athleteId) {
+    await forgetOnRefusal(options, athleteId);
+  }
   if (
     held.kind !== 'held' ||
     held.athleteId !== athleteId ||

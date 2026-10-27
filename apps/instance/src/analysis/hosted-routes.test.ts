@@ -533,6 +533,22 @@ describe('the test question (#1251, #1104 B1 question 2)', () => {
     expect(sent).toEqual([]);
   });
 
+  it.each([
+    ['no recorded consent (withdrawn on another device)', { consent: false }],
+    ['no key of the rider’s own', { key: false }],
+  ] as const)(
+    'deletes a masking list another device sent again, once refused for %s (#1251)',
+    async (_name, has) => {
+      const { ask, sent, rider } = await ready([{ kind: 'text', text: 'ready' }], has);
+      const item = () =>
+        world!.call('GET', `/v1/sync/items/masking/${MASKING_ITEM_KEY}`, { token: rider.token });
+      expect((await item()).status).toBe(200);
+      expect((await ask()).body).toEqual({ result: 'not-ready', reasoned: false });
+      expect(sent).toEqual([]);
+      expect((await item()).status).toBe(404);
+    },
+  );
+
   it('never uses another rider’s key: a rider with only a consent is not-ready', async () => {
     const { ask, sent, other } = await ready([{ kind: 'text', text: 'ready' }]);
     await world!.call('POST', '/v1/analysis/hosted/consent', {
