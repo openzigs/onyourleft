@@ -46,20 +46,18 @@
  *
  * ## The entries, and the ones still to come
  *
- * The four hosted modules; and **every** non-test module under
- * `ride-analysis/`, derived rather than listed, so #809's input builder is
- * walked today and #810's prompt builders and #811's runner are walked the day
- * they land there. ⚠️ A step-request type or body builder added to
- * `analysis-transport.ts` itself CANNOT be walked: that module carries
- * pictures by design, for `side-pose` and `connection-check`. So #802 put the
- * ride-analysis request and its builder in a module of their own,
- * `ride-analysis/own-computer-step.ts`, which the derivation above walks, and
- * moved the send types it needs out of the transport into `http-body.ts`; and
- * §"the body carries no picture" holds every body a real run sends through it
- * to {@link pictureBodyFaults}. #803 did the same for the hosted path: its
- * step port is `ride-analysis/hosted-step.ts`, walked by the same derivation,
- * and §"the body carries no picture" holds every body a real run sends through
- * the hosted transport.
+ * **Every** non-test module under `ride-analysis/`, derived rather than
+ * listed, and every module of `@onyourleft/analysis`. ⚠️ A step-request type
+ * or body builder added to `analysis-transport.ts` itself CANNOT be walked:
+ * that module carries pictures by design, for `side-pose` and
+ * `connection-check`.
+ *
+ * ⚠️ **#1103 removed two entries, with their paths**: the hosted model on a
+ * key kept on the device (`camera/hosted-*.ts`, #518) and the write-up asked
+ * of the rider's own computer (`ride-analysis/own-computer-step.ts`, #802;
+ * `ride-analysis/hosted-step.ts`, #803). A write-up is now asked of the
+ * rider's instance, and §"the body carries no picture" holds the job request
+ * it sends to {@link pictureBodyFaults}.
  */
 
 import { readdirSync } from 'node:fs';
@@ -70,20 +68,11 @@ import { describe, expect, it } from 'vitest';
 import { stripComments } from '../units/no-inline-units';
 import type { RideAnalysisInput } from '@onyourleft/analysis';
 
-import { analysisRequestBody, riderModelStepPort } from './analysis-transport';
-import { endpointDecision } from './analysis-endpoint';
-import { acceptHistoryAnswer } from '@onyourleft/analysis';
-import { runAnalysis } from '@onyourleft/analysis';
+import { analysisRequestBody } from './analysis-transport';
 import { capturedFrame } from './frame';
-import { HOSTED_PROMPTS, type HostedQuestion } from './hosted-port';
-import { hostedModelPort, hostedRequestBody } from './hosted-transport';
 import { SIDE_POSE_PATH, sidePoseRequest } from './instance-pose';
-import { hostedModelDecision } from './hosted-model';
-import { CameraController } from './session';
-import { cleanFrameBytes, manualSchedule, scriptedCamera } from './testing';
-import { hostedStepPort } from '../ride-analysis/hosted-step';
+import { cleanFrameBytes } from './testing';
 import { analysisJobRequest } from '../ride-analysis/instance-job';
-import { modelServer, STILL_CLOCK } from '../ride-analysis/model-server-testing';
 import {
   analysisModules,
   ANALYSIS_ROOT,
@@ -94,9 +83,6 @@ import {
   type ReadSource,
 } from './import-walk-testing';
 import { largestArrayIn, PICTURE_NAME, pictureBodyFaults } from './no-picture-testing';
-import { patternsOnlyGuard } from '@onyourleft/analysis/testing';
-import { PATTERNS_ONLY } from '@onyourleft/analysis';
-import { browserSecureWindow } from './secure-window-testing';
 
 /** The modules #799 names as picture modules whatever their code says. */
 const MINIMUM_PICTURE_MODULES = [
@@ -106,14 +92,6 @@ const MINIMUM_PICTURE_MODULES = [
   'camera/shell-camera.ts',
   'camera/pose-runtime.ts',
   'camera/pose-worker.ts',
-] as const;
-
-/** The hosted path (#518, #760). */
-const HOSTED_ENTRIES = [
-  'camera/hosted-port.ts',
-  'camera/hosted-transport.ts',
-  'camera/hosted-model.ts',
-  'camera/useHostedCheck.ts',
 ] as const;
 
 /** The non-test modules directly under `directory`, as paths under `src`. */
@@ -138,7 +116,6 @@ const HISTORY_ENTRIES = ['instance/sync.ts'] as const;
  * templates, the input builder and the history's retrieval moved.
  */
 const ENTRIES = [
-  ...HOSTED_ENTRIES,
   ...HISTORY_ENTRIES,
   ...modulesUnder('ride-analysis'),
   ...analysisModules(),
@@ -170,8 +147,6 @@ describe('the module graph (#799)', () => {
     expect(ENTRIES).toContain(`${ANALYSIS_ROOT}/history.ts`);
     expect(ENTRIES).toContain('ride-analysis/ride-summary.ts');
     expect(ENTRIES).toContain('instance/sync.ts');
-    // #802: the step port to the rider's own computer, and what it imports.
-    expect(ENTRIES).toContain('ride-analysis/own-computer-step.ts');
     // #1102: the job request to the rider's instance, and its controller.
     expect(ENTRIES).toContain('ride-analysis/instance-job.ts');
     expect(ENTRIES).toContain('ride-analysis/instance-analysis.ts');
@@ -366,127 +341,11 @@ describe('the body carries no picture (#799)', () => {
     expect(pictureBodyFaults(body, largest)).not.toStrictEqual([]);
   });
 
-  it.each(Object.keys(HOSTED_PROMPTS) as HostedQuestion[])(
-    'passes the hosted %s body the transport really sends',
-    (question) => {
-      expect(
-        pictureBodyFaults(hostedRequestBody('m', { question }, PATTERNS_ONLY), largest),
-      ).toStrictEqual([]);
-    },
-  );
-
   it.each([
     ['hosted', hostedShapedStep],
     ['own-computer', ownComputerShapedStep],
   ] as const)('passes a %s-shaped step carrying the input as text', (_path, step) => {
     expect(pictureBodyFaults(step(JSON.stringify(INPUT)), largest)).toStrictEqual([]);
-  });
-
-  it('passes every body a real run sends to the rider’s own computer (#802)', async () => {
-    const bodies: unknown[] = [];
-    const port = riderModelStepPort(
-      endpointDecision({ address: 'http://192.168.1.20:8080', model: 'm', switchedOn: true })
-        .endpoint,
-      {
-        send: async (_url, init) => {
-          const body = JSON.parse(typeof init.body === 'string' ? init.body : '') as {
-            response_format?: {
-              json_schema: { schema: { properties: { section?: { enum: number[] } } } };
-            };
-          };
-          bodies.push(body);
-          // A section answers for its own index, the position step its notes,
-          // the summary in prose: every step of a real run is reached.
-          const section = body.response_format?.json_schema.schema.properties.section?.enum[0];
-          const content =
-            body.response_format === undefined
-              ? 'A steady ride.'
-              : JSON.stringify(
-                  section === undefined ? { notes: 'Held.' } : { section, notes: 'Steady.' },
-                );
-          return Promise.resolve(
-            new Response(
-              JSON.stringify({ choices: [{ message: { content }, finish_reason: 'stop' }] }),
-            ),
-          );
-        },
-      },
-    );
-    const withPose: RideAnalysisInput = {
-      ...INPUT,
-      pose: { source: 'tablet', posed: 300, noRider: 2, unreadable: 1, differences: { knee: -2 } },
-    };
-    const outcome = await runAnalysis(withPose, {
-      port: port as NonNullable<typeof port>,
-      clock: {
-        now: () => 0,
-        delay: () => ({ elapsed: new Promise<void>(() => undefined), cancel: () => undefined }),
-      },
-      signal: new AbortController().signal,
-      // #835: a passage of the rider's history, so the history step is reached too.
-      history:
-        acceptHistoryAnswer(
-          { passages: [{ kind: 'note', label: 'Your note', text: 'Hill repeats felt strong.' }] },
-          { limit: 6, characters: 5_400 },
-        ) ?? [],
-    });
-    // Three sections, the position step, the history step and the summary: a whole run.
-    expect(outcome.kind).toBe('written');
-    expect(outcome.kind === 'written' && outcome.history).toBe('used');
-    expect(bodies).toHaveLength(6);
-    for (const body of bodies) {
-      expect(pictureBodyFaults(body, largestArrayIn(withPose))).toStrictEqual([]);
-    }
-  });
-
-  it('passes every body a real run sends to the hosted model (#803)', async () => {
-    const bodies: unknown[] = [];
-    const server = modelServer();
-    const service = hostedModelDecision({
-      address: 'https://models.example.invalid',
-      model: 'm',
-      key: 'fixture-hosted-key',
-    }).model;
-    const camera = new CameraController({
-      secureWindow: browserSecureWindow(),
-      port: scriptedCamera().port,
-      schedule: manualSchedule().schedule,
-      hosted: () =>
-        hostedModelPort(service, {
-          guard: patternsOnlyGuard,
-          send: async (url, init) => {
-            bodies.push(JSON.parse(typeof init.body === 'string' ? init.body : '') as unknown);
-            return server.send(url, init);
-          },
-        }),
-    });
-    camera.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
-    camera.agreeToHosted(true);
-    const port = hostedStepPort(camera, () => true);
-    const withPose: RideAnalysisInput = {
-      ...INPUT,
-      pose: { source: 'tablet', posed: 300, noRider: 2, unreadable: 1, differences: { knee: -2 } },
-    };
-    const outcome = await runAnalysis(withPose, {
-      port: port as NonNullable<typeof port>,
-      clock: STILL_CLOCK,
-      signal: new AbortController().signal,
-      // #835: a passage of the rider's history, which the hosted path refuses to send (ADR 0040 D-9).
-      history:
-        acceptHistoryAnswer(
-          { passages: [{ kind: 'note', label: 'Your note', text: 'Hill repeats felt strong.' }] },
-          { limit: 6, characters: 5_400 },
-        ) ?? [],
-    });
-    // Three sections, the position step and the summary: the history step is
-    // refused before a byte of it is sent, and the run goes on without it.
-    expect(outcome.kind).toBe('written');
-    expect(outcome.kind === 'written' && outcome.history).toBe('failed');
-    expect(bodies).toHaveLength(5);
-    expect(JSON.stringify(bodies)).not.toContain('Hill repeats');
-    for (const body of bodies) {
-      expect(pictureBodyFaults(body, largestArrayIn(withPose))).toStrictEqual([]);
-    }
   });
 
   it('fails the own-computer transport’s real picture body, on both of the first two rules', () => {
@@ -604,15 +463,6 @@ describe('the body carries no picture (#799)', () => {
         ],
       };
       expect(pictureBodyFaults(body, none)).toStrictEqual([]);
-    });
-
-    it('passes the hosted body the transport really sends, for a ride with no sections', () => {
-      expect(
-        pictureBodyFaults(
-          hostedRequestBody('m', { question: 'connection-check' }, PATTERNS_ONLY),
-          none,
-        ),
-      ).toStrictEqual([]);
     });
 
     it('still bounds a messages or content list that is not messages or parts', () => {

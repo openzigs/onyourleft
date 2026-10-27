@@ -56,7 +56,7 @@ describe('usePairingScan', () => {
         return Promise.reject(new Error('the chunk would not load'));
       },
     });
-    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true });
     await controller.turnOn();
     const timer = ownedTicks();
     let told = 0;

@@ -90,8 +90,6 @@ import {
   DevicesView,
 } from '../views/DevicesView';
 import {
-  COMPUTER_SENDS,
-  COMPUTER_SENDS_LEAD,
   INSTANCE_SENDS,
   INSTANCE_SENDS_LEAD,
   WRITE_UP_FRAMING_LEAD,
@@ -100,7 +98,6 @@ import {
   WRITE_UP_SOURCE_TEXT,
 } from '../detail/write-up';
 import { ACTIVITY_DETAIL_KEPT_VISIBLE } from '../views/ActivityDetailView';
-import { WRITE_UP_EXPLANATION } from '../ride-analysis/RideWriteUpControl';
 import { RACE_CONSENT_SENTENCE } from '../detail/RaceConsentSection';
 import { RIDER_TEXT_KEPT_VISIBLE } from '../rider-text/disclosure';
 import { ACTIVITIES_KEPT_VISIBLE } from '../views/ActivitiesView';
@@ -240,7 +237,7 @@ const KEPT: Record<RouteId, Kept> = {
     // #1013: a camera notice is kept whole; the walk meets only `no-consent`.
     elsewhere: [...CAMERA_AGREED_KEPT_VISIBLE, ...CAMERA_NOTICE_SENTENCES],
     reason:
-      '“Your own computer” and the hosted model (#518) render only once the camera is agreed to, which the walk never does; it is mounted agreed below',
+      '“Your own computer” and the side camera’s pictures on the instance render only once the camera is agreed to, which the walk never does; it is mounted agreed below',
   },
   'side-camera': { sentences: SIDE_CAMERA_KEPT_VISIBLE },
   // The walk hands Files a store holding one ride, so its export panel — and
@@ -317,12 +314,10 @@ const KEPT: Record<RouteId, Kept> = {
   'activity-detail': {
     sentences: [],
     // #805, carried from #831's review: what leaves the device, and when, on
-    // the ride's page — the ask's explanation and the approved words of what
-    // it sends (ADR 0035 D-9 B). The populated fixture sets up the ask.
+    // the ride's page. Since #1103 that is the instance paragraph alone: the
+    // own-computer ask and its words (ADR 0035 D-9 B) are gone.
     // #793: what the "may be raced" box allows, and that sharing is not it.
     populated: [
-      WRITE_UP_EXPLANATION,
-      `${COMPUTER_SENDS_LEAD} ${COMPUTER_SENDS}`,
       // #1102: what a write-up asked of the rider's instance sends (#1104 B3).
       // The populated fixture is signed in to an instance.
       `${INSTANCE_SENDS_LEAD} ${INSTANCE_SENDS}`,
@@ -775,7 +770,7 @@ describe('#666 — safety and privacy sentences are never in a closed disclosure
       port: scriptedCamera().port,
       schedule: manualSchedule().schedule,
     });
-    controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    controller.agree({ acknowledgedBystanders: true, allowLocal: true });
     mounted = await mount(
       <main>
         <CameraView

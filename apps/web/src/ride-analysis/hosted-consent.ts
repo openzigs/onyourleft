@@ -49,7 +49,14 @@
  * address the rider typed.
  */
 
-import { MASKING_LIMIT } from '../camera/hosted-model';
+/**
+ * What masking cannot promise, in one sentence — in the consent below and at
+ * the start of Settings' masked-words caveat (`athlete/MaskedWordsPanel.tsx`
+ * §`MASKED_WORDS_CAVEAT`), shared so the two cannot drift (#1048). Here since
+ * #1103 removed `camera/hosted-model.ts`, where it was first written.
+ */
+export const MASKING_LIMIT =
+  'Masking reduces what is sent; it does not guarantee that nothing personal gets through.';
 
 /** The press that sends the test question, named in the consent itself. */
 export const HOSTED_TEST_BUTTON = 'Send a test question';

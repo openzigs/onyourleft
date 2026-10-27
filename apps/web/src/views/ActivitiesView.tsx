@@ -119,7 +119,6 @@ export interface ActivitiesViewProps {
   readonly detail?: ActivityDetailViewProps['port'];
   readonly map?: ActivityDetailViewProps['map'];
   readonly basemap?: ActivityDetailViewProps['basemap'];
-  readonly writeUp?: ActivityDetailViewProps['writeUp'];
   readonly instanceWriteUp?: ActivityDetailViewProps['instanceWriteUp'];
   readonly riderText?: ActivityDetailViewProps['riderText'];
 }
@@ -245,7 +244,6 @@ export function ActivitiesView({
   detail,
   map,
   basemap,
-  writeUp,
   instanceWriteUp,
   riderText,
 }: ActivitiesViewProps): JSX.Element {
@@ -618,7 +616,6 @@ export function ActivitiesView({
               activityId={shown.row.id}
               map={map}
               basemap={basemap}
-              writeUp={writeUp}
               instanceWriteUp={instanceWriteUp}
               riderText={riderText}
               embedded

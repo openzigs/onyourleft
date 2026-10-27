@@ -68,7 +68,7 @@
  */
 
 import type { UnixSeconds } from '@onyourleft/domain';
-import type { ActivityId, AthleteId, SyncBaseRecord } from '@onyourleft/store';
+import type { ActivityId, AthleteId, RideWriteUpRecord, SyncBaseRecord } from '@onyourleft/store';
 
 import {
   ANALYSIS_AGENT_TEMPLATE_V1,
@@ -93,8 +93,18 @@ import type {
   InstanceJobView,
   RideInProgressWatch,
 } from './instance-analysis-port';
-import type { RideAnalysisStore } from './ride-analysis';
-import { readRideInput } from './read-input';
+import { readRideInput, type RideInputStore } from './read-input';
+
+/** A write-up record whose text passed the screen (#798). */
+export type ScreenedRideWriteUp = Omit<RideWriteUpRecord, 'text'> & {
+  readonly text: ScreenedWriteUp;
+};
+
+/** What the ask reads and writes. `ActivityStore` satisfies it as it stands. */
+export interface RideAnalysisStore extends RideInputStore {
+  /** Replaces the ride's write-up. Only ever handed screened text. */
+  putRideWriteUp(record: ScreenedRideWriteUp): Promise<void>;
+}
 
 /** Where this device notes the jobs it started and has not seen end (#1102). Ids only. */
 export const PENDING_JOBS_STORAGE_KEY = 'oyl.analysis.pending-jobs.v1';

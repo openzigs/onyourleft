@@ -5,21 +5,21 @@
  * [#839](https://github.com/openzigs/onyourleft/issues/839), epic #795.
  *
  * The owner's ruling of 2026-09-29: everything the AI analysis sends to the
- * rider's **hosted** model passes through one masking function on the device
- * first. The rider's own computer, and later their own instance, get the full
- * text; a third party gets it masked.
+ * rider's **hosted** model passes through one masking function first — on the
+ * rider's instance since #1103. The instance's own model gets the full text;
+ * a third party gets it masked.
  *
  * ## One seam
  *
- * {@link maskForHosted} is the function, and `camera/hosted-transport.ts`
- * §`hostedRequestBody` is its one caller on the wire: every message of every
- * hosted request body goes through it, and the transport will not build a
- * body without a {@link MaskingGuard} (`hosted-transport.ts` §`hostedModelPort`
- * requires one, and a guard that cannot be read is a request not sent). The
- * preview on a ride's page (`ride-analysis.ts` §`previewHostedRequest`) calls
- * the same function over the same steps, so what the rider reads is what
- * leaves. `hosted-mask-reachable.test.ts` holds both with the details
- * `personal-details-testing.ts` plants.
+ * {@link maskForHosted} is the function, and the rider's instance is its one
+ * caller on the wire since #1103 (`apps/instance` §`analysis/hosted.ts`
+ * §`hostedBehindMasking`): every message of every hosted request goes through
+ * it, and the instance builds no hosted connection without a
+ * {@link MaskingGuard}. Until #1103 the device sent a hosted model requests of
+ * its own, through `camera/hosted-transport.ts`, and masked them here too;
+ * that path is gone. The device still builds the guard
+ * ({@link readMaskingGuard}) and gives it to the instance before a hosted
+ * job.
  *
  * It has the no-picture check's shape (#799, #822) on purpose: one seam, test
  * support that plants what must not leave, and a walk proving no hosted
@@ -604,9 +604,10 @@ export interface MaskingStore<Owner> {
 
 /**
  * This rider's guard, read from the store: their word list and their privacy
- * zones. ⚠️ **Rejects when either cannot be read**, and the transport answers
- * that by sending nothing (`hosted-transport.ts` §`not-masked`) — a request
- * masked with half a guard would look masked and not be.
+ * zones. ⚠️ **Rejects when either cannot be read**, and the device answers
+ * that by giving the instance nothing, so no hosted job is asked for
+ * (`apps/web` §`ride-analysis/hosted-settings.ts` §`sendMaskingGuard`) — a
+ * request masked with half a guard would look masked and not be.
  */
 export async function readMaskingGuard<Owner>(
   store: MaskingStore<Owner>,

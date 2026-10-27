@@ -77,7 +77,7 @@ async function screen(
     port: scriptedCamera().port,
     schedule: manualSchedule().schedule,
   });
-  controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+  controller.agree({ acknowledgedBystanders: true, allowLocal: true });
   let asked = 0;
   let service = options.service ?? { kind: 'none' };
   mounted = await mount(

@@ -106,8 +106,8 @@ describe('the thresholds card says where each threshold goes — #1342', () => {
   });
 
   it('a ride analysis carries the threshold power, and not the threshold heart rate', () => {
-    // 'instance-local' stands for every source: the hosted-model and own-computer
-    // paths take the same `RideAnalysisInput`, which has no heart-rate field.
+    // 'instance-local' stands for every source: the instance's hosted path
+    // takes the same `RideAnalysisInput`, which has no heart-rate field.
     const request = analysisJobRequest(analysisInput(), 'template-1', 'instance-local');
     const sent = JSON.stringify(request);
     expect(request.input.rider.thresholdPower).toBe(THRESHOLD_POWER);

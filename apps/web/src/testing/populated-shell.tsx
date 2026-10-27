@@ -66,7 +66,6 @@ import type { SidePairingPort } from '../camera/side-pairing-port';
 import { scriptedSidePairing } from '../camera/testing';
 import { SIDE_OBSERVATION_SENTENCES, SIDE_REPORT_OBSERVED } from '../camera/side-report-wording';
 import { stubActivity, stubDetail, stubLap } from '../detail/testing';
-import type { AskOutcome, RideAnalysisPort } from '../ride-analysis/ride-analysis-port';
 import type {
   InstanceAnalysisPort,
   InstanceAskOutcome,
@@ -449,21 +448,6 @@ const POPULATED_WRITE_UP: RideWriteUpRecord = {
 };
 
 /**
- * The post-ride ask, set up with the rider's own computer (#805, carried from
- * #831's review): without it every route gate built the shell with no port,
- * so the ask control and what it says is sent were never laid out. It never
- * answers — a walk never presses it.
- */
-function rideAnalysisPort(): RideAnalysisPort {
-  return {
-    availableSources: () => ['computer'],
-    previewHostedRequest: async () => Promise.resolve({ kind: 'shown', steps: [], total: 1 }),
-    hostedPreviewSeen: () => true,
-    askForRideWriteUp: async () => new Promise<AskOutcome>(() => undefined),
-  };
-}
-
-/**
  * A write-up asked of the rider's instance (#1102): connected on the
  * populated walk, so its press and what it says is sent are laid out, and not
  * on the empty one, so its one no-instance sentence is. It never answers — a
@@ -840,7 +824,6 @@ export function PopulatedShell({
       }
       library={stubLibrary(ATHLETE, rides)}
       detail={detailPort(populated)}
-      rideAnalysis={rideAnalysisPort()}
       instanceAnalysis={instanceAnalysisPort(populated)}
       analysis={stubAnalysis(
         ATHLETE,

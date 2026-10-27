@@ -20,11 +20,11 @@ import { useEffect, useId, useState, type JSX } from 'react';
 
 import { parseMaskedWords } from '@onyourleft/store';
 
-import { MASKING_LIMIT } from '../camera/hosted-model';
 import { Button } from '../design/Button';
 import { KeptVisible } from '../design/KeptVisible';
 import { SectionHeading } from '../design/SectionHelp';
 import { StatusMessage } from '../design/StatusMessage';
+import { MASKING_LIMIT } from '../ride-analysis/hosted-consent';
 import { addedMaskedWord, MASKED_WORD_REFUSAL_TEXT } from './masked-words';
 import type { MaskedWordsPort } from './masked-words-port';
 
@@ -37,9 +37,13 @@ export const MASKED_WORDS_LEAD =
 /**
  * What masking cannot promise, and who is sent the text unmasked. Kept visible
  * (#1040, the owner's ruling of 2026-10-03): it is about what leaves, so it is
- * never behind the section's ⓘ, where #839 and #1031 had put it.
+ * never behind the section's ⓘ, where #839 and #1031 had put it. Since #1103
+ * the model that reads it in full is the instance's own, not a computer this
+ * device sends a ride to: that path is gone (ADR 0046 D-1, ADR 0040 D-9).
  */
-export const MASKED_WORDS_CAVEAT = `${MASKING_LIMIT} Your own computer is sent the text in full.`;
+export const MASKED_WORDS_CAVEAT =
+  `${MASKING_LIMIT} A model your instance runs on its own machine or its own private network ` +
+  'is sent the text in full.';
 
 export const MASKED_WORDS_NO_STORE =
   'This browser has no local store, so a list made here would be forgotten as soon as the page reloaded.';

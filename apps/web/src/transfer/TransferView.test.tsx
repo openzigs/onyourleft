@@ -98,7 +98,7 @@ async function openPort(): Promise<TransferPort> {
     save: (file) => saved.push(file),
     drafts: { forget: () => forgotten.push('draft') },
     theme: { forget: () => forgotten.push('theme') },
-    hostedModel: { forget: () => forgotten.push('hosted-model') },
+    retiredHostedKey: { forget: () => forgotten.push('retired-hosted-key') },
     instance: { forget: () => forgotten.push('instance') },
     instanceAnalysis: { forget: () => forgotten.push('instance-analysis') },
     trainerTargets: { forget: () => forgotten.push('trainer-targets') },
@@ -1022,9 +1022,9 @@ describe('TransferView — what it may say about another platform', () => {
     // half-drawn route is, and the erase forgets both through the port.
     expect([...forgotten].sort()).toStrictEqual([
       'draft',
-      'hosted-model',
       'instance',
       'instance-analysis',
+      'retired-hosted-key',
       'theme',
       'trainer-targets',
     ]);

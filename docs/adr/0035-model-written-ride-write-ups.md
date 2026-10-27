@@ -665,3 +665,14 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   it, reads *"Your instance writes the analysis with a model on its own machine or its own private
   network, and the model may look up what is already on your instance"*, and is otherwise the text
   the 2026-10-09 entry quotes. The body above is not edited. (#1104)
+- **2026-10-27** — **D-9 B is withdrawn, and D-9 C is withdrawn on this device, with the paths
+  they described.** [#1103](https://github.com/openzigs/onyourleft/issues/1103) removed the
+  on-device runner, the write-up asked of the rider's own computer, and the hosted model on a key
+  kept on the device (ADR 0046 D-1; owner ruling 1 of 2026-10-04). A write-up is now asked of the
+  rider's instance only, and what the press says it sends is #1104's B3, as the 2026-10-09 and
+  2026-10-26 entries above record. A hosted model is agreed to on the instance in #1104's B1, as the
+  2026-10-26 entry above records, and nowhere else. So D-9 B's paragraph and D-9 C's device wording
+  are shown nowhere in the app: `apps/web/src/detail/write-up.test.ts` walks every production module
+  for a phrase of each and fails on one. A write-up saved by either path before this version still
+  renders, screened, and still says where it was asked (D-9 A is unchanged). D-8's *"Nothing is sent
+  in the background"* is narrowed as ADR 0046 D-7 says. The body above is not edited. (#1103)

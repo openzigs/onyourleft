@@ -15,7 +15,7 @@ From the layout tree of CLAUDE.md §2, from `packages/`:
 ```
 packages/             Apache-2.0, without exception
   analysis/           the platform-free core of a model-written ride write-up
-                      (#1094, ADR 0046 D-4, D-5) — the runner, the templates,
+                      (#1094, ADR 0046 D-4, D-5) — the templates,
                       the input builder, the history passages, the write-up
                       screen and the angle matchers it shares with
                       `apps/web`'s source scan, the pose summary's shape, the
@@ -28,10 +28,9 @@ packages/             Apache-2.0, without exception
                       imports `MAXIMUM_WRITE_UP_CHARACTERS` and
                       `parseMaskedWords` from HERE, never the reverse. Two
                       tsconfigs, as `fit`'s: `tsconfig.platform-free.json` is
-                      the one that enforces, over everything but the tests,
-                      and `src/abort.d.ts` declares the one non-ES2024 global
-                      the runner uses, `AbortController`. `sealStep` is in
-                      `./testing`, never in the barrel
+                      the one that enforces, over everything but the tests.
+                      No runner since #1103: the device's own run went with
+                      its write-up paths, and with it `src/abort.d.ts`
   domain/             units, core types, validation, signing, analysis (#25)
     analysis/           the power-duration curve and the critical-power fit (#75),
                         the training zones (#78), the per-ride load metrics

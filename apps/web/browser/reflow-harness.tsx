@@ -424,7 +424,7 @@ function transferPort(store: ActivityStore): TransferPort {
     instanceAnalysis: { forget: () => undefined },
     trainerTargets: { forget: () => undefined },
     theme: { forget: () => undefined },
-    hostedModel: { forget: () => undefined },
+    retiredHostedKey: { forget: () => undefined },
     athleteRow: localAthleteRecord(now),
   };
 }

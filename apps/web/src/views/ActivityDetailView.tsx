@@ -97,7 +97,6 @@ import { MAXIMUM_RIDE_NOTE_CHARACTERS } from '@onyourleft/store';
 import { RiderTextBox } from '../rider-text/RiderTextBox';
 import type { RiderTextPort } from '../rider-text/rider-text-port';
 import { NOTE_WORDS } from '../rider-text/words';
-import type { RideAnalysisPort } from '../ride-analysis/ride-analysis-port';
 import type { InstanceAnalysisPort } from '../ride-analysis/instance-analysis-port';
 import {
   CHART_POINTS,
@@ -159,14 +158,9 @@ export interface ActivityDetailViewProps {
    */
   readonly preferences?: PreferenceStorage | undefined;
   /**
-   * The post-ride ask (#804), or `undefined` for none — and then no control is
-   * offered, and `detail/RideWriteUpSection.tsx` says where one is set up
-   * (#805). `ride-analysis/RideWriteUpControl.tsx` is the press.
-   */
-  readonly writeUp?: RideAnalysisPort | undefined;
-  /**
-   * A write-up asked of the rider's instance (#1102), or `undefined` for the
-   * page as #805 built it.
+   * A write-up asked of the rider's instance (#1102), or `undefined` where
+   * this browser cannot hold a sign-in: `detail/RideWriteUpSection.tsx` then
+   * says in one sentence that no write-up can be asked for here (#1103).
    */
   readonly instanceWriteUp?: InstanceAnalysisPort | undefined;
   /**
@@ -232,7 +226,6 @@ export function ActivityDetailView({
   map,
   basemap,
   preferences,
-  writeUp,
   instanceWriteUp,
   riderText,
   embedded = false,
@@ -621,11 +614,10 @@ export function ActivityDetailView({
         #804, #805. A model's write-up of this ride, on every ride's page and
         below the side camera's report, never in place of it (ADR 0035 D-3):
         the saved one, screened again, and the press that asks for a new one.
-        It sends nothing until that is pressed. With no model set up it is
-        one sentence and a link.
+        It sends nothing until that is pressed. With no instance it is one
+        sentence.
       */}
       <RideWriteUpSection
-        port={writeUp}
         instance={instanceWriteUp}
         activityId={activity.id}
         initial={savedWriteUp}

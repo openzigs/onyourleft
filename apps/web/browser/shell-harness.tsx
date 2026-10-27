@@ -780,7 +780,7 @@ async function probeTheAnalysis(address: string | null): Promise<unknown> {
     schedule: () => () => undefined,
     analysis: () => riderAnalysisPort(endpoint),
   });
-  controller.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+  controller.agree({ acknowledgedBystanders: true, allowLocal: true });
   await controller.turnOn();
   try {
     const outcome = await controller.askAboutPicture('connection-check').outcome;
@@ -846,7 +846,7 @@ function main(): void {
   });
 
   if (wantsCamera) {
-    camera.agree({ acknowledgedBystanders: true, allowLocal: true, allowHosted: false });
+    camera.agree({ acknowledgedBystanders: true, allowLocal: true });
     void camera.turnOn();
   }
 

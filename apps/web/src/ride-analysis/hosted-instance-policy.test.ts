@@ -60,7 +60,8 @@ describe('the hosted consent in the privacy policy (#1251, #1104 B1)', () => {
       '| Your words to mask and your privacy zones | copied to your instance so it can mask what it sends to a service',
       '| Your hosted consent | the address of the service you agreed to, and when',
       // The short version and the sharing line.
-      'The fourth thing you can agree to: your instance sending a ride to a service you hold your own key for.',
+      // The third since #1103 removed the second (#1104 C-6).
+      'The third thing you can agree to: your instance sending a ride to a service you hold your own key for.',
       "the operator's key is never used for you",
       'a ride your instance sends, masked, to a service you hold your own key for and agreed to by its address, for an analysis you asked for',
     ].map((each) => each.replaceAll('’', "'")),
