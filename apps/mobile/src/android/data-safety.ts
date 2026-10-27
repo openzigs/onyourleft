@@ -453,9 +453,9 @@ export const DATA_SAFETY_DECLARATION: readonly DataSafetyAnswer[] = [
     // ruled on 2026-09-28 (ADR 0029's amendment of that date): a hosted model
     // on the rider's own key, *"NUMBERS ONLY and never a picture"*, and in
     // terms that Photos and videos stays `shared: false`.
-    // `apps/web/src/camera/hosted-transport.test.ts` §"a picture cannot reach
-    // it" holds that by type, at run time and by what the modules can name, so
-    // this row is unchanged by the hosted path, and its `why` says so.
+    // `apps/web/src/camera/no-picture-reachable.test.ts` holds that by what
+    // the modules can import, so this row is unchanged by the hosted path,
+    // and its `why` says so.
     //
     // **`optional: true`**: off until the rider sets up a computer and
     // switches it on, and the app works in full without it.
