@@ -7,6 +7,11 @@ import type { InstancePort } from '../instance/instance-port';
 import { PRIVACY_POLICY_URL, SOURCE_CODE_URL } from '../privacy/policy';
 import { MAX_DATA_LOSS_SECONDS } from '../recording/recorder';
 import { hrefFor, routeById } from '../shell/routes';
+import {
+  buildReleaseChannel,
+  releaseChannelText,
+  type ReleaseChannel,
+} from '../support/release-channel';
 import { InstancePages } from './InstancePages';
 import { useInstanceKnown, whereRidesAreText } from './where-rides-are';
 
@@ -72,10 +77,19 @@ import { useInstanceKnown, whereRidesAreText } from './where-rides-are';
  *
  * Since #965 the page opens with the owner's full logo (`brand/Brand.tsx`);
  * its words are text.
+ *
+ * ## Which copy of the app this is — #1745
+ *
+ * In the Android app only, a section names the channel the copy came from —
+ * Google Play or the direct download — read from the build
+ * (`support/release-channel.ts`), and says the two cannot update each other
+ * and that switching means an uninstall that deletes the rides on the device.
+ * A browser has neither channel, so it is not shown there.
  */
 export function AboutView({
   instance,
   nativeShell = false,
+  releaseChannel = buildReleaseChannel(),
 }: {
   /**
    * The rider's instance, for its own pages (#907): none, and the section is
@@ -85,6 +99,8 @@ export function AboutView({
   readonly instance?: InstancePort | undefined;
   /** Running inside the Android app rather than a browser — #1450, as History's #1438. */
   readonly nativeShell?: boolean | undefined;
+  /** The channel this build was released through — #1745. The build's own, unless a test says otherwise. */
+  readonly releaseChannel?: ReleaseChannel | undefined;
 }): JSX.Element {
   const instanceKnown = useInstanceKnown(instance);
   return (
@@ -118,6 +134,13 @@ export function AboutView({
             instance too. Now History's own sentence, per platform and per instance. */}
           <p>{whereRidesAreText(nativeShell, instanceKnown)}</p>
         </div>
+
+        {nativeShell ? (
+          <div>
+            <h2>Which copy of the app this is</h2>
+            <p>{releaseChannelText(releaseChannel)}</p>
+          </div>
+        ) : null}
 
         <div>
           <h2>If the app closes mid-ride</h2>
