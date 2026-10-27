@@ -89,7 +89,7 @@ export const FILES_KEPT_VISIBLE: readonly string[] = [
   // EVERYTHING, and what it cannot reach, stay here.
   ...ERASE_CANNOT_REACH,
   'This removes everything this device holds about you.',
-  'It does not reach a copy held anywhere else — the list below says where — so when this finishes, it is finished on this device only.',
+  'When this finishes, it is finished on this device only.',
   'What this cannot reach:',
   'Erasing the signing key cannot be undone, and it cannot be recreated.',
   'Rides you have already exported go on verifying forever, but after this the device signs as a new identity.',
@@ -1180,9 +1180,8 @@ function ErasePanel({
         </SectionHeading>
         <KeptVisible>
           <p>
-            This removes everything this device holds about you. It does not reach a copy held
-            anywhere else &mdash; the list below says where &mdash; so when this finishes, it is
-            finished on this device only.
+            This removes everything this device holds about you. When this finishes, it is finished
+            on this device only.
           </p>
           <p className="oyl-muted">What this cannot reach:</p>
           <ul>

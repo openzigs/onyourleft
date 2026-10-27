@@ -232,10 +232,11 @@ export const ERASE_CANNOT_REACH: readonly string[] = [
   // #777, #778. An erase forgets this device's sign-in to an instance
   // (`instance/instance-port.ts` §`instanceEraser`) and sends nothing; the
   // account the instance holds, and anything it received, are the instance's.
-  // #1104 (G-2) names what it also works out for the rider: the history
-  // index (ADR 0040), the analyses it wrote (ADR 0046 D-12), a hosted key,
-  // the consent and the masking list (#1251).
-  'your account on an instance you connected to, and anything it received or worked out for you — what you synced, the searchable copy it keeps for the analysis, the analyses it wrote, any key of yours it holds, your agreement to a service, and your list of words to mask with your privacy zones — which is a copy that instance holds',
+  // #1104 (G-2): and what it worked out for the rider — the history index
+  // (ADR 0040), the analyses it wrote (ADR 0046 D-12). The privacy policy's
+  // erase paragraph names each of them; this line stays short because the
+  // list is kept visible and #1026 holds the Files rows to 2x.
+  'your account on an instance you connected to, and anything it received or worked out for you, which is a copy that instance holds',
 ];
 
 /** The reason an erase is refused, or `undefined` when it is not. */

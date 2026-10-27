@@ -295,7 +295,9 @@ describe('what the rider is told before they press it', () => {
       "a ride's numbers and the parts of your history your instance sent to a service you agreed to, which is a copy that service holds";
     expect(straight(erase)).toContain(line);
     expect(ERASE_CANNOT_REACH.map(straight)).toContain(line);
-    // And the instance's own copy names what it worked out, not only what it received.
+    // And the instance's own copy names what it worked out, not only what it
+    // received: the screen in a clause, the policy item by item.
+    expect(ERASE_CANNOT_REACH.join(' ')).toContain('anything it received or worked out for you');
     for (const held of [
       'the searchable copy it keeps for the analysis',
       'the analyses it wrote',
@@ -303,7 +305,6 @@ describe('what the rider is told before they press it', () => {
       'your list of words to mask with your privacy zones',
     ]) {
       expect(straight(erase), held).toContain(held);
-      expect(ERASE_CANNOT_REACH.join(' '), held).toContain(held);
     }
   });
 
