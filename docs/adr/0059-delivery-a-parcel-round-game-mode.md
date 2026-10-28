@@ -282,10 +282,14 @@ renamed, an issue renumbered — and may not change a decision. In particular:
 
 Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
 
-- **2026-10-28** — **D-2.2's list is no longer the whole set #1807's test forbids; the test is wider,
-  never narrower.** Made under the owner's acceptance of D-2 on 2026-10-28, on the review of #1842.
-  D-2.1 and D-2.3 are unchanged; this records what now holds them. Three facts:
-  (1) **The forbidden set adds every trainer-control writer**, the half below the seam that carries
+- **2026-10-28** — **The owner's ruling of 2026-10-28 on
+  [#1807](https://github.com/openzigs/onyourleft/issues/1807)**, taken while reviewing #1842, settles
+  two points of D-2.2, and (3) records how the test holds them. **(1) widens D-2.2's forbidden set;
+  (2) is a narrower reading of its words "any chain of static imports"**, which the owner accepted as
+  such ("By name is enough"; splitting the domain package instead was offered and not chosen). D-2.1
+  and D-2.3 are unchanged. Delivery still may never import, call or receive a trainer-control
+  function or writer.
+  (1) **The forbidden set adds every trainer-control writer** (owner ruling, "Accept the amendment"), the half below the seam that carries
   the bytes and imports the protocol's types only, so it was reachable without touching a module
   D-2.2 names. They are found by rule over every non-test module under `apps/` and `packages/`, not
   written down: a GATT write (`writeValue…`, `BleClient.write…`), a `write` that names a control
@@ -299,9 +303,10 @@ Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has b
   `packages/sensors/protocol/src/simulator-bridge.ts`, `packages/sensors/src/simulator/ftms.ts`,
   `packages/sensors/src/simulator/vendor-control.ts` and `apps/web/src/game/gradient.ts`, beside
   two browser-gate harnesses. A writer added later is forbidden the day it lands.
-  (2) **"Any chain of static imports" is read by name**: a barrel's `export … from` is followed only
+  (2) **"Any chain of static imports" is read by name** (owner ruling): a barrel's `export … from` is followed only
   for the names a Delivery module asks of it, so a value from `@onyourleft/domain` does not count as
-  reaching `trainer/simulation.ts`, which that barrel also re-exports. A namespace import, a dynamic
+  reaching `trainer/simulation.ts`, which that barrel also re-exports, even though loading the barrel
+  evaluates that module. A namespace import, a dynamic
   import and `export *` are followed for every name asked.
   (3) **The walk fails closed** on what it cannot follow: any `import.meta.glob`, any `import.meta`
   member but `url`, `env` and `hot`, and a `Worker` or `SharedWorker` built from anything but a
