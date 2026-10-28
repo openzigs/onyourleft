@@ -949,7 +949,9 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         lamp posts, doorsteps, eaves, the crossroads green;
                         never the church plot, never within an item's radius
                         of the carriageway or, since #1690, of the village's
-                        crossroads side road), drawn by `three-renderer.ts`
+                        crossroads side road; since #1627 one village-square
+                        tree a village on its green, in the winter lights),
+                        drawn by `three-renderer.ts`
                         §`DecorationBelt` in ONE call for every village within
                         `FURNITURE_DRAW_METRES`, glow and all
                         (`withDecorationGlow`, no lamp, no uniform), inside

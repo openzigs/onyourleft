@@ -33,7 +33,7 @@ import {
 
 import { mount, queryAll, settle, type Mounted } from '../testing/mount';
 
-import { HOLIDAY_DECORATIONS } from './decorations';
+import { HOLIDAY_DECORATIONS, TREE_GREEN } from './decorations';
 import { GameView, type GamePort, type RidableRoute } from './GameView';
 import { HOLIDAY_DECORATIONS_STORAGE_KEY } from './holiday-preference';
 import { mappedBuildingsOf } from './mapped-buildings';
@@ -147,11 +147,24 @@ function wreathOnTheFacade(): unknown {
   }
 }
 
+/** sRGB to linear, as three's `Color.set` takes a hex into the belt's colours. */
+function toLinear(channel: number): number {
+  const proportion = channel / 255;
+  return proportion < 0.04045
+    ? proportion * 0.0773993808
+    : Math.pow(proportion * 0.9478672986 + 0.0521327014, 2.4);
+}
+
+/** #1627: the village-square tree's evergreen as the belt's colour attribute holds it. */
+const TREE_LINEAR = [16, 8, 0].map((shift) => toLinear((TREE_GREEN >> shift) & 0xff));
+
 /**
  * Start a ride on `day`; update a belt as the view does with the last frame
- * and season it was handed, and read the wreath off a facade material.
+ * and season it was handed, and read the wreath off a facade material — and,
+ * since #1627, how many of the belt's vertices are the village tree's tiers,
+ * found by their colour.
  */
-async function rideOn(day: CalendarDay): Promise<{ bulbs: number; wreath: unknown }> {
+async function rideOn(day: CalendarDay): Promise<{ bulbs: number; wreath: unknown; tree: number }> {
   mounted = await mount(
     <GameView
       port={PORT}
@@ -191,11 +204,19 @@ async function rideOn(day: CalendarDay): Promise<{ bulbs: number; wreath: unknow
   const belt = new DecorationBelt('stylised');
   try {
     belt.update(frame.streets, { x: at.x, z: at.z }, season.holiday, HOLIDAY_DECORATIONS);
-    if (!belt.mesh.visible) return { bulbs: 0, wreath };
+    if (!belt.mesh.visible) return { bulbs: 0, wreath, tree: 0 };
     const glow = belt.mesh.geometry.getAttribute(DECORATION_GLOW_ATTRIBUTE);
     let bulbs = 0;
     for (let index = 0; index < glow.count; index += 1) if (glow.getX(index) === 1) bulbs += 1;
-    return { bulbs, wreath };
+    const colour = belt.mesh.geometry.getAttribute('color');
+    let tree = 0;
+    for (let index = 0; index < colour.count; index += 1) {
+      const rgb = [colour.getX(index), colour.getY(index), colour.getZ(index)];
+      if (rgb.every((channel, at) => Math.abs(channel - (TREE_LINEAR[at] as number)) < 1e-5)) {
+        tree += 1;
+      }
+    }
+    return { bulbs, wreath, tree };
   } finally {
     belt.dispose();
   }
@@ -219,13 +240,39 @@ describe('the winter lights, from the device’s day to the belt and the doors �
     { year: 2027, month: 1, day: 7 },
   ]) {
     it(`light nothing on a ride started on ${String(day.day)}/${String(day.month)}`, async () => {
-      expect(await rideOn(day)).toEqual({ bulbs: 0, wreath: 0 });
+      expect(await rideOn(day)).toEqual({ bulbs: 0, wreath: 0, tree: 0 });
     });
   }
 
   it('light nothing on 20 Dec with the Settings switch off', async () => {
     localStorage.setItem(HOLIDAY_DECORATIONS_STORAGE_KEY, 'off');
-    expect(await rideOn({ year: 2026, month: 12, day: 20 })).toEqual({ bulbs: 0, wreath: 0 });
+    expect(await rideOn({ year: 2026, month: 12, day: 20 })).toEqual({
+      bulbs: 0,
+      wreath: 0,
+      tree: 0,
+    });
+  });
+});
+
+describe('the village-square tree, from the device’s day to the belt — #1627', () => {
+  it('stands on a ride started on 20 Dec: its four tiers’ vertices are in the belt’s mesh', async () => {
+    const ride = await rideOn({ year: 2026, month: 12, day: 20 });
+    // One tree, four closed ten-sided cones: 4 × 20 triangles, 3 vertices each.
+    expect(ride.tree).toBe(4 * 20 * 3);
+  });
+
+  for (const day of [
+    { year: 2027, month: 1, day: 7 },
+    { year: 2026, month: 10, day: 31 },
+  ]) {
+    it(`stands nowhere on a ride started on ${String(day.day)}/${String(day.month)}`, async () => {
+      expect((await rideOn(day)).tree).toBe(0);
+    });
+  }
+
+  it('stands nowhere on 20 Dec with the Settings switch off', async () => {
+    localStorage.setItem(HOLIDAY_DECORATIONS_STORAGE_KEY, 'off');
+    expect((await rideOn({ year: 2026, month: 12, day: 20 })).tree).toBe(0);
   });
 });
 
