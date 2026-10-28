@@ -9734,6 +9734,9 @@ const DECORATION_TEMPLATES: Readonly<Record<DecorationShape, DecorationTemplate>
   // #1626: a bulb, and a wreath's ring — outer radius 0.5, tube 0.1 — in xy.
   bulb: decorationTemplate(new OctahedronGeometry(0.5, 0)),
   wreath: decorationTemplate(new TorusGeometry(0.4, 0.1, 4, 10).scale(1, 1, 5)),
+  // #1627: the village-square tree's tiers and its trunk, closed.
+  cone: decorationTemplate(new ConeGeometry(0.5, 1, 10, 1, false)),
+  trunk: decorationTemplate(new CylinderGeometry(0.5, 0.5, 1, 8, 1, false)),
 };
 
 /** The triangles one part of `shape` is — #1625. @see DecorationShape */
@@ -9763,11 +9766,15 @@ const DECORATION_SCRATCH = new Color();
  * {@link DECORATION_GLOW_ATTRIBUTE}. An item whose kind `kinds` does not
  * name is skipped, and so is any item that would take the geometry past
  * `realistic-budget.ts` §`REALISTIC_DECORATION_TRIANGLES`: whole items only.
+ * `counted`, where given, is cleared and left holding how many items of each
+ * kind were kept — #1627.
  */
 export function decorationGeometry(
   items: readonly DecorationItem[],
   kinds: readonly DecorationKind[],
+  counted?: Map<string, number>,
 ): BufferGeometry {
+  counted?.clear();
   const byName = new Map(kinds.map((kind) => [kind.item, kind]));
   const drawn: { readonly item: DecorationItem; readonly kind: DecorationKind }[] = [];
   let triangles = 0;
@@ -9778,6 +9785,7 @@ export function decorationGeometry(
     if (triangles + adds > REALISTIC_DECORATION_TRIANGLES) continue;
     triangles += adds;
     drawn.push({ item, kind });
+    counted?.set(kind.item, (counted.get(kind.item) ?? 0) + 1);
   }
   const vertices = triangles * 3;
   const positions = new Float32Array(vertices * 3);
@@ -9874,6 +9882,8 @@ export class DecorationBelt {
   readonly #reach: VillageStreet[] = [];
   #shown = true;
   #rebuilds = 0;
+  /** How many items of each kind the mesh holds — #1627. */
+  readonly #drawn = new Map<string, number>();
 
   constructor(world: 'stylised' | 'realistic') {
     this.#materials = decorationMaterials(world);
@@ -9899,6 +9909,19 @@ export class DecorationBelt {
   get triangles(): number {
     if (!this.#mesh.visible) return 0;
     return this.#mesh.geometry.getAttribute('position').count / 3;
+  }
+
+  /**
+   * How many items of the kind named `item` the mesh draws — #1627: nought
+   * where it is not drawn. Counted as {@link decorationGeometry} keeps them,
+   * whole items under its ceiling only.
+   *
+   * @test-facing the owner's page publishes the village-square trees by it
+   * (`browser/realistic-harness.ts`)
+   */
+  itemsDrawn(item: string): number {
+    if (!this.#mesh.visible) return 0;
+    return this.#drawn.get(item) ?? 0;
   }
 
   setShown(on: boolean): void {
@@ -9935,6 +9958,7 @@ export class DecorationBelt {
       const geometry = decorationGeometry(
         items,
         holiday === undefined ? NO_DECORATION_KINDS : (kinds[holiday] ?? NO_DECORATION_KINDS),
+        this.#drawn,
       );
       this.#mesh.geometry.dispose();
       this.#mesh.geometry = geometry;

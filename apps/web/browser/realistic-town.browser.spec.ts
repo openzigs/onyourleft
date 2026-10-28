@@ -48,7 +48,6 @@ import {
   MAPPED_BUILDING_TRIANGLES,
   REALISTIC_DECORATION_TRIANGLES,
   REALISTIC_VILLAGE_DRAW_CALLS,
-  REALISTIC_WINTER_LIGHTS_TRIANGLES,
   REALISTIC_WOODED_DRAW_CALLS,
 } from '../src/game/realistic-budget';
 
@@ -130,7 +129,7 @@ test.describe('the realistic page’s holiday decorations, stylised — #1624', 
   test('draws the winter lights and the village doors’ wreaths in ONE call more, inside the page’s ceiling — #1626', async ({
     page,
   }) => {
-    test.setTimeout(REALISTIC_LOAD_BUDGET_MS);
+    test.setTimeout(2 * REALISTIC_LOAD_BUDGET_MS);
     const on = await ride(page, `${WINTER}&world=stylised`, 'stylised');
     const off = await ride(page, `${WINTER}&world=stylised&levers=-decorations`, 'stylised');
     console.log(
@@ -138,16 +137,24 @@ test.describe('the realistic page’s holiday decorations, stylised — #1624', 
         `(${JSON.stringify(on.page.decorations)}), ${String(off.result.lastFrame.calls)} without`,
     );
     expect(on.page.decorations?.triangles ?? 0).toBeGreaterThan(0);
-    expect(on.page.decorations?.triangles ?? 0).toBeLessThanOrEqual(
-      REALISTIC_WINTER_LIGHTS_TRIANGLES,
-    );
+    // #1627: the lights and the village-square trees share the belt's ceiling.
+    expect(on.page.decorations?.triangles ?? 0).toBeLessThanOrEqual(REALISTIC_DECORATION_TRIANGLES);
+    expect(on.page.decorations?.trees ?? 0).toBeGreaterThanOrEqual(1);
     expect(off.page.decorations?.triangles).toBe(0);
+    expect(off.page.decorations?.trees).toBe(0);
     expect(on.result.lastFrame.calls - off.result.lastFrame.calls).toBe(1);
     expect(on.result.lastFrame.triangles - off.result.lastFrame.triangles).toBe(
       on.page.decorations?.triangles,
     );
     // The stylised village frame is inside the page's ceiling with them.
     expect(on.result.lastFrame.calls).toBeLessThanOrEqual(REALISTIC_WOODED_DRAW_CALLS);
+    // #1627: the tree draws no depth pre-pass, so with the firs' pre-pass
+    // switched off the frame and the belt are exactly what they were.
+    const prepassOff = await ride(page, `${WINTER}&world=stylised&levers=-fir-prepass`, 'stylised');
+    expect(prepassOff.result.leversOff).toEqual(['fir-prepass']);
+    expect(prepassOff.page.decorations?.trees).toBe(on.page.decorations?.trees);
+    expect(prepassOff.page.decorations?.triangles).toBe(on.page.decorations?.triangles);
+    expect(prepassOff.result.lastFrame.calls).toBe(on.result.lastFrame.calls);
   });
 });
 
@@ -222,9 +229,11 @@ test.describe('the realistic page’s holiday decorations — #1624', { tag: NIG
         `lights (${JSON.stringify(winter.page.decorations)}), ${String(off.result.lastFrame.calls)} without`,
     );
     expect(winter.page.decorations?.triangles ?? 0).toBeGreaterThan(0);
+    // #1627: the lights and the village-square trees share the belt's ceiling.
     expect(winter.page.decorations?.triangles ?? 0).toBeLessThanOrEqual(
-      REALISTIC_WINTER_LIGHTS_TRIANGLES,
+      REALISTIC_DECORATION_TRIANGLES,
     );
+    expect(winter.page.decorations?.trees ?? 0).toBeGreaterThanOrEqual(1);
     expect(winter.result.lastFrame.calls - off.result.lastFrame.calls).toBe(1);
     expect(winter.result.lastFrame.triangles - off.result.lastFrame.triangles).toBe(
       winter.page.decorations?.triangles,

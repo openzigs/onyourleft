@@ -66,6 +66,7 @@ import {
   richmondStreetFixture,
   terraceStreetFixture,
 } from '../src/game/footprint-fixtures-testing';
+import { VILLAGE_TREE } from '../src/game/decorations';
 import { mappedBuildingsOf } from '../src/game/mapped-buildings';
 import { cityCentreFixture } from '../src/game/testing/urban-fixtures';
 import type { SceneFrame } from '../src/game/port';
@@ -283,7 +284,12 @@ declare global {
        * the result was published — its triangles (nought where it is not
        * drawn) and how many times its geometry was built. Absent with the result.
        */
-      readonly decorations?: { readonly triangles: number; readonly rebuilds: number };
+      readonly decorations?: {
+        readonly triangles: number;
+        readonly rebuilds: number;
+        /** #1627: the village-square trees the belt draws. */
+        readonly trees: number;
+      };
       /**
        * #1566: the village models drawn on the last frame before the result
        * was published — houses, triangles and the structure items they took.
@@ -605,7 +611,13 @@ async function run(): Promise<void> {
           : frameCensus(drawn, canvas.clientWidth / Math.max(1, canvas.clientHeight));
       const belt = decorationBeltOf(view);
       const decorations =
-        belt === undefined ? undefined : { triangles: belt.triangles, rebuilds: belt.rebuilds };
+        belt === undefined
+          ? undefined
+          : {
+              triangles: belt.triangles,
+              rebuilds: belt.rebuilds,
+              trees: belt.itemsDrawn(VILLAGE_TREE),
+            };
       const villageHouses = villageHouseStatsOf(view);
       publish({
         result,

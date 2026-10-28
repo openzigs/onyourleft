@@ -15,12 +15,25 @@
  * 3. **Steady, under reduced motion too** (WCAG 2.3.1): two frames a second
  *    apart, with and without `prefers-reduced-motion`, read the same colours —
  *    since #1625 the product's own jack-o'-lantern face and since #1626 its
- *    winter bulbs, as well as the box.
+ *    winter bulbs — and since #1627 the village-square tree's baubles among
+ *    them — as well as the box.
  */
 
 import { expect, test, type Page } from '@playwright/test';
 
+import { HOLIDAY_DECORATIONS, VILLAGE_TREE } from '../src/game/decorations';
 import type { DecorationPixel } from '../src/game/three-renderer';
+
+/** #1627: every colour the village-square tree's baubles glow, as 0–255 sRGB. */
+const TREE_GLOWS: readonly (readonly number[])[] = [
+  ...new Set(
+    (HOLIDAY_DECORATIONS['winter-lights'] ?? [])
+      .filter((kind) => kind.item === VILLAGE_TREE)
+      .flatMap((kind) => kind.parts)
+      .filter((part) => part.glows)
+      .map((part) => part.colour),
+  ),
+].map((colour) => [(colour >> 16) & 0xff, (colour >> 8) & 0xff, colour & 0xff]);
 
 /**
  * `decoration-harness.ts` §`GLOW_PROBE_COLOUR`, 0xc06030, as 0–255 sRGB.
@@ -111,7 +124,7 @@ test.describe('the holiday decorations’ belt — #1624', () => {
       }
     });
 
-    test(`keeps the holidays’ own glowing parts steady — Halloween’s faces (#1625), the winter lights’ bulbs (#1626): two frames a second apart read the same, ${reducedMotion}`, async ({
+    test(`keeps the holidays’ own glowing parts steady — Halloween’s faces (#1625), the winter lights’ bulbs (#1626) and the village tree’s baubles (#1627): two frames a second apart read the same, ${reducedMotion}`, async ({
       page,
     }) => {
       await page.emulateMedia({ reducedMotion });
@@ -131,6 +144,13 @@ test.describe('the holiday decorations’ belt — #1624', () => {
           await page.waitForTimeout(1_000);
           const second = await glowsOf(world, holiday);
           expect(first.length, `${holiday} ${world}`).toBeGreaterThan(0);
+          // #1627: the tree's every bauble colour is among those read.
+          if (holiday === 'winter-lights') {
+            expect(TREE_GLOWS.length).toBeGreaterThan(0);
+            for (const colour of TREE_GLOWS) {
+              expect(first.map((each) => [...each.colour])).toContainEqual(colour);
+            }
+          }
           expect(second.map((each) => each.pixel)).toEqual(first.map((each) => each.pixel));
           // And each glows its own colour with the light turned away from it.
           for (const { pixel, colour } of first) {
