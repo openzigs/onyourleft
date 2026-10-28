@@ -248,6 +248,15 @@ function deepFreeze<T>(value: T): T {
 }
 
 describe('the safety criteria, by name — #1242', () => {
+  /*
+   * ⚠️ **Inside the seeded loop, each `expect` is asked only when its own
+   * condition has already failed** (`if (!(value <= limit)) expect(value)…`),
+   * so a failure still reports through the matcher and a pass costs a
+   * comparison. Nearly all of this test's time went to `expect` itself: run
+   * under the nightly's coverage it took up to 5.1 s against its 5 s
+   * timeout (#1721), with the validator under test taking under a twentieth
+   * of it. Same 400 seeds, same checks.
+   */
   it('no proposal raises a target above the envelope', () => {
     const EPSILON = 1e-9;
     const acceptedKinds = new Set<string>();
@@ -464,8 +473,16 @@ describe('the safety criteria, by name — #1242', () => {
 
         const result = validateProposal(proposal, state, goals, athlete, machine, seconds(now));
         if (!result.ok) {
-          expect(REPLAN_RULES).toContain(result.rule);
-          if (!valid) {
+          if (!REPLAN_RULES.includes(result.rule)) expect(REPLAN_RULES).toContain(result.rule);
+          const refusedByP1 =
+            Object.keys(result).length === 3 &&
+            result.ok === false &&
+            result.rule === 'P1' &&
+            Object.keys(result.record).length === 3 &&
+            result.record.decision === 'refused' &&
+            result.record.rule === 'P1' &&
+            result.record.at === now;
+          if (!valid && !refusedByP1) {
             expect(result).toStrictEqual({
               ok: false,
               rule: 'P1',
@@ -477,10 +494,11 @@ describe('the safety criteria, by name — #1242', () => {
 
         acceptedCount += 1;
         const decoded = decodeProposal(proposal);
-        expect(decoded).toBeDefined();
+        if (decoded === undefined) expect(decoded).toBeDefined();
         acceptedKinds.add(decoded?.move.kind ?? '');
-        expect(state.enabled && state.control && state.heartRatePaired).toBe(true);
-        expect(state.paused || state.rescue).toBe(false);
+        const switchedOn = state.enabled && state.control && state.heartRatePaired;
+        if (!switchedOn) expect(switchedOn).toBe(true);
+        if (state.paused || state.rescue) expect(state.paused || state.rescue).toBe(false);
 
         // Where the rider is, worked out here.
         let current = 0;
@@ -490,8 +508,8 @@ describe('the safety criteria, by name — #1242', () => {
           current = index;
           if (position < end) break;
         }
-        expect(end - position).toBeGreaterThanOrEqual(30);
-        expect(result.fromBlock).toBe(current + 1);
+        if (!(end - position >= 30)) expect(end - position).toBeGreaterThanOrEqual(30);
+        if (result.fromBlock !== current + 1) expect(result.fromBlock).toBe(current + 1);
 
         const before = plan.blocks;
         const next = result.plan.blocks;
@@ -500,11 +518,11 @@ describe('the safety criteria, by name — #1242', () => {
         }
         // The block being ridden, everything before it, and so the warm-up.
         for (let index = 0; index <= current; index += 1) {
-          expect(next[index]).toBe(before[index]);
+          if (next[index] !== before[index]) expect(next[index]).toBe(before[index]);
         }
         // The cool-down.
-        expect(next.at(-1)).toBe(before.at(-1));
-        expect(current).toBeLessThan(before.length - 1);
+        if (next.at(-1) !== before.at(-1)) expect(next.at(-1)).toBe(before.at(-1));
+        if (!(current < before.length - 1)) expect(current).toBeLessThan(before.length - 1);
 
         for (const [index, entry] of next.entries()) {
           const old = next.length === before.length ? before[index] : undefined;
@@ -514,7 +532,7 @@ describe('the safety criteria, by name — #1242', () => {
             old !== undefined && old.block.kind === entry.block.kind && !swappedIn
               ? sharesOf(old.block)
               : undefined;
-          if (next.length !== before.length) {
+          if (next.length !== before.length && !before.includes(entry)) {
             // A shorter plan is the old one with blocks taken out, untouched.
             expect(before).toContain(entry);
           }
@@ -522,40 +540,53 @@ describe('the safety criteria, by name — #1242', () => {
             // Above the envelope only where it already was, and never higher.
             const allowed = Math.max(ceiling, oldShares?.[at] ?? Number.NEGATIVE_INFINITY);
             const untouched = next.length !== before.length;
-            if (!untouched) {
+            if (!untouched && !(value <= allowed + EPSILON)) {
               expect(value).toBeLessThanOrEqual(allowed + EPSILON);
             }
             // P4: never more than 10 % above the share it joined the plan with.
-            expect(value).toBeLessThanOrEqual((sharesOf(entry.base)[at] ?? 0) * 1.1 + EPSILON);
+            const joined = (sharesOf(entry.base)[at] ?? 0) * 1.1 + EPSILON;
+            if (!(value <= joined)) expect(value).toBeLessThanOrEqual(joined);
           }
           if (swappedIn && old !== undefined) {
             // P4, #1296: a swap raises the highest share by 5 % at most; #1300:
             // over a hold's start share, and hold against hold like with like.
             for (const [value, from] of comparedWith(entry.block, old.block)) {
-              expect(value).toBeLessThanOrEqual(from * 1.05 + EPSILON);
+              if (!(value <= from * 1.05 + EPSILON)) {
+                expect(value).toBeLessThanOrEqual(from * 1.05 + EPSILON);
+              }
             }
           }
           // P4, #1300: whatever has been swapped in and scaled since, never more
           // than 10 % above the share this place was LOADED with. A rise that
           // compounds over the block replaced each time is seen here.
           const place = places[index];
-          expect(place).toBeDefined();
+          if (place === undefined) expect(place).toBeDefined();
           if (place !== undefined) {
             // A hold swapped for a hold: the +10 % divides each rise by the
             // place's loaded START share, so a ceiling's rise is measured in
             // that share and not in the ceiling's own (#1304, ruling 2).
             const loadedStart = place.kind === 'heart-rate-hold' ? place.startShare : undefined;
             for (const [value, from] of comparedWith(entry.block, place)) {
-              expect(value).toBeLessThanOrEqual(from + (loadedStart ?? from) * 0.1 + EPSILON);
+              const limit = from + (loadedStart ?? from) * 0.1 + EPSILON;
+              if (!(value <= limit)) expect(value).toBeLessThanOrEqual(limit);
             }
           }
         }
 
         const totalAfter = totalOf(next.map((entry) => entry.block));
-        expect(totalAfter).toBeLessThanOrEqual(Math.max(longest, total));
-        expect(result.plan.revision).toBe(plan.revision + 1);
-        expect(() => validateWorkout(result.workout)).not.toThrow();
-        expect(result.workout.blocks).toStrictEqual(next.map((entry) => entry.block));
+        if (!(totalAfter <= Math.max(longest, total))) {
+          expect(totalAfter).toBeLessThanOrEqual(Math.max(longest, total));
+        }
+        if (result.plan.revision !== plan.revision + 1) {
+          expect(result.plan.revision).toBe(plan.revision + 1);
+        }
+        // Throws, and so fails the test, on a workout that is not valid.
+        validateWorkout(result.workout);
+        const blocks = next.map((entry) => entry.block);
+        const sameBlocks =
+          result.workout.blocks.length === blocks.length &&
+          result.workout.blocks.every((block, index) => block === blocks[index]);
+        if (!sameBlocks) expect(result.workout.blocks).toStrictEqual(blocks);
         plan = result.plan;
       }
 
@@ -567,7 +598,8 @@ describe('the safety criteria, by name — #1242', () => {
         for (const entry of plan.blocks) {
           if (!libraryBlocks.has(entry.base) || loaded.blocks.includes(entry.base)) {
             for (const value of sharesOf(entry.block)) {
-              expect(value).toBeLessThanOrEqual(envelope(entry.block.kind) + EPSILON);
+              const limit = envelope(entry.block.kind) + EPSILON;
+              if (!(value <= limit)) expect(value).toBeLessThanOrEqual(limit);
             }
           }
         }
