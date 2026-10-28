@@ -188,7 +188,13 @@ describe('no place in words — #1812, DL11', () => {
         now,
         readings: [],
         events: deliveryEvents(owed),
-        preference: DEFAULT_ANNOUNCEMENTS,
+        // #1812: Delivery follows the setting, so announcements on, every reading never.
+        preference: {
+          ...DEFAULT_ANNOUNCEMENTS,
+          enabled: true,
+          powerEverySeconds: 'never',
+          distanceEvery: 'never',
+        },
       });
       state = heard.state;
       owed = deliverySpoken(owed, heard.kind);

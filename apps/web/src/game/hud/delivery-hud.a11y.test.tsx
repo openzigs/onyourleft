@@ -111,7 +111,13 @@ function heard(
     now,
     readings: [],
     events: deliveryEvents(owed),
-    preference: DEFAULT_ANNOUNCEMENTS,
+    // #1812: Delivery follows the setting, so announcements on, every reading never.
+    preference: {
+      ...DEFAULT_ANNOUNCEMENTS,
+      enabled: true,
+      powerEverySeconds: 'never',
+      distanceEvery: 'never',
+    },
   });
   return {
     owed: deliverySpoken(owed, said.kind),
@@ -160,7 +166,7 @@ describe('a Delivery round on the HUD — #1812', () => {
     expect(text(document.querySelector('.oyl-hud'))).toBe(ordinary.text);
   });
 
-  it('speaks a delivery, a crash and the round’s end through the one region, with announcements off, and audits clean', async () => {
+  it('speaks a delivery, a crash and the round’s end through the one region, with announcements on, and audits clean', async () => {
     let round: Round = startRound(3);
     let owed = NOTHING_OWED;
     let state = INITIAL_ANNOUNCER;

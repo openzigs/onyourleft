@@ -326,16 +326,13 @@ describe('priority is an ORDER, not a politeness', () => {
     // spoken to everyone, and ranked below the climb (see below).
     // #782: and the room's lost connection, for the same reason.
     // #785: and a race's countdown, start and end.
-    // #1812: and a Delivery round's four (`delivery-announce.test.ts`).
+    // #1812: and none of a Delivery round's four, by the owner's ruling of
+    // 2026-10-28 (`delivery-announce.test.ts`). That ruling is not about `lap-ended`.
     expect(ALWAYS_SPOKEN).toEqual([
       ...PRIORITY.slice(0, 3),
       'side-camera-lost',
       'room-lost',
       'room-race',
-      'delivery-round-over',
-      'delivery-crash',
-      'delivery-missed',
-      'delivery-delivered',
     ]);
     // #1312, third pass: a lap's summary is NOT one of them.
     expect(ALWAYS_SPOKEN).not.toContain('lap-ended');

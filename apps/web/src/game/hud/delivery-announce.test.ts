@@ -93,14 +93,43 @@ describe('Delivery’s place in the announcer’s order — #1812, rank 5g', () 
       expect(at('delivery-delivered')).toBeLessThan(at(reading));
     }
   });
+});
 
-  it('says all four with announcements off, the default', () => {
-    for (const kind of DELIVERY_KINDS) expect(ALWAYS_SPOKEN).toContain(kind);
-    const caller = new Caller(DEFAULT_ANNOUNCEMENTS);
-    caller.owed = oweRoundChange(NOTHING_OWED, startRound(3), recordDelivery(startRound(3), 0));
-    caller.call(0);
-    expect(caller.said.map((each) => each.text)).toEqual([
-      'Delivered to the 1st house. 2 houses left.',
+/**
+ * The owner's ruling of 2026-10-28 on #1812: Delivery's announcements follow
+ * the rider's announcement setting ("Only when announcements on"). It decides
+ * nothing about #1316's `lap-ended`.
+ */
+describe('Delivery follows the rider’s announcement setting — #1812, the owner’s ruling of 2026-10-28', () => {
+  /** A delivery, a crash and a miss owed, then the round's end: all four kinds offered. */
+  function rideARound(preference: AnnouncementPreference): readonly string[] {
+    const caller = new Caller(preference);
+    const round = startRound(3);
+    const delivered = recordDelivery(round, 0);
+    const missed = recordMiss(delivered, 1);
+    caller.owed = oweCrash(
+      oweRoundChange(oweRoundChange(NOTHING_OWED, round, delivered), delivered, missed),
+    );
+    caller.ride(0, 6);
+    const ended = recordMiss(missed, 2);
+    caller.owed = oweRoundOver(caller.owed, ended, endRound(FRESH_WEEK, ended));
+    caller.ride(7, 12);
+    return caller.said.map((each) => each.kind);
+  }
+
+  it('says no delivery, miss, crash or round’s end with announcements off, the default', () => {
+    for (const kind of DELIVERY_KINDS) expect(ALWAYS_SPOKEN).not.toContain(kind);
+    expect(DEFAULT_ANNOUNCEMENTS.enabled).toBe(false);
+    expect(rideARound(DEFAULT_ANNOUNCEMENTS)).toEqual([]);
+  });
+
+  it('says each of the four with announcements on (every reading set to never)', () => {
+    expect(QUIET.enabled).toBe(true);
+    expect(rideARound(QUIET)).toEqual([
+      'delivery-crash',
+      'delivery-missed',
+      'delivery-delivered',
+      'delivery-round-over',
     ]);
   });
 });

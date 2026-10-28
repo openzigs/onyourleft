@@ -203,15 +203,13 @@
  * round (DL2). A lower event behind a higher one is dropped by this core, so
  * the caller offers each on every call until it comes back as `kind`, the
  * "owed" rule of #647 — `hud/delivery-announce.ts` holds it, one sentence per
- * kind at most, so what is owed never grows into a queue. ⚠️ **In
- * {@link ALWAYS_SPOKEN}**, all four: a Delivery round is a game the rider
- * chose, each sentence is the result of the rider's own throw or of the round
- * (a status message, SC 4.1.3), and nothing else on the stage speaks it — with
- * announcements off (the default) a rider with a screen reader would throw
- * parcels and hear nothing of where they landed. The owner may reverse it: it
- * is four entries in one array and their line in `announce.test.ts`.
+ * kind at most, so what is owed never grows into a queue. ⚠️ **Not in
+ * {@link ALWAYS_SPOKEN}**, none of the four: they follow the rider's
+ * announcement setting, said only when announcements are on. That is the
+ * owner's ruling of 2026-10-28 on #1812 ("Only when announcements on"), which
+ * reversed this PR's first cut. It decides nothing about #1316's `lap-ended`.
  *
- * ## ⚠️ Ten kinds are spoken with announcements OFF — {@link ALWAYS_SPOKEN}
+ * ## ⚠️ Six kinds are spoken with announcements OFF — {@link ALWAYS_SPOKEN}
  *
  * #395's table says the safety rows are *"on when announcements are on"*, and
  * this module departs from that cell on purpose. Those three sentences were
@@ -342,11 +340,7 @@ export const ALWAYS_SPOKEN: readonly AnnouncementKind[] = [
   'room-lost',
   // #785: a race held, started and over is the room's word on what the rider is doing. Rank 5a″.
   'room-race',
-  // #1812: a Delivery round's end, a crash, a miss and a delivery. Rank 5g.
-  'delivery-round-over',
-  'delivery-crash',
-  'delivery-missed',
-  'delivery-delivered',
+  // #1812: no Delivery kind. The owner's ruling of 2026-10-28: they follow the setting. Rank 5g.
 ];
 
 /**
