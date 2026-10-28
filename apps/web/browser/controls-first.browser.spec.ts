@@ -288,6 +288,9 @@ const TUCKING_SECTIONS: Partial<Record<RouteId, readonly string[]>> = {
     // #1433: what the order is for — the zoom keeps the top two.
     'Ride screen readings',
     'Game world',
+    // #1813: what Delivery is and what its assist changes; each control's
+    // own sentence stays under it.
+    'Delivery',
     // #787: what the draft indicator shows and says, and that it is not the
     // room's own switch.
     'Draft',
