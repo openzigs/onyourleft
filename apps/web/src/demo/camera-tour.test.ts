@@ -52,14 +52,21 @@ interface Shot {
 
 /**
  * Ride `player` at 20 Hz for `forSeconds`, keeping every frame it would draw,
- * or, given `only`, every frame of those shots: the ride still advances at
- * 20 Hz, but a frame nobody reads is never built.
+ * or, given `only`, every frame of those shots, or, given `atMs`, the frames
+ * at those clock times: the ride still advances at 20 Hz, but a frame nobody
+ * reads is never built.
  */
-function film(player: DemoPlayer, forSeconds: number, only?: ReadonlySet<ShotKind>): Shot[] {
+function film(
+  player: DemoPlayer,
+  forSeconds: number,
+  only?: ReadonlySet<ShotKind>,
+  atMs?: ReadonlySet<number>,
+): Shot[] {
   player.play();
   const shots: Shot[] = [];
   for (let ms = 0; ms <= forSeconds * 1000; ms += FRAME_MS) {
     player.advance(ms);
+    if (atMs !== undefined && !atMs.has(ms)) continue;
     const placed = shotAt(player.tour, player.rideMs / 1000);
     if (only !== undefined && !only.has(placed.shot.kind)) continue;
     shots.push({
@@ -137,18 +144,23 @@ describe('the demo camera tour — #1649', () => {
       for (const preset of DEMO_PRESETS) {
         const { player, shots } = filmOf(preset);
         const lap = lapSeconds(player.tour);
-        const poses = Array.from({ length: 10 }, (_, index) => {
-          const at = Math.round(((index + 0.5) * lap * 1000) / 10 / FRAME_MS) * FRAME_MS;
+        const times = Array.from(
+          { length: 10 },
+          (_, index) => Math.round(((index + 0.5) * lap * 1000) / 10 / FRAME_MS) * FRAME_MS,
+        );
+        const poses = times.map((at) => {
           const shot = shots[at / FRAME_MS];
           if (shot === undefined) throw new Error(`no frame at ${at} ms`);
           const pose: Readonly<Record<string, number>> = { ...shot.frame.camera };
           return Object.values(pose).map((value) => value.toFixed(6));
         });
-        // A second player, filmed afresh, shoots the same.
-        const again = film(createDemoPlayer(preset), lap);
-        for (let index = 0; index < 10; index += 1) {
-          const at = Math.round(((index + 0.5) * lap * 1000) / 10 / FRAME_MS);
-          expect(again[at]?.frame.camera).toEqual(shots[at]?.frame.camera);
+        // A second player, filmed afresh, shoots the same. It rides the whole
+        // lap but builds only the ten frames compared: #1721's nightly
+        // coverage run took up to 24 s building every frame of it.
+        const again = film(createDemoPlayer(preset), lap, undefined, new Set(times));
+        expect(again).toHaveLength(10);
+        for (const [index, at] of times.entries()) {
+          expect(again[index]?.frame.camera).toEqual(shots[at / FRAME_MS]?.frame.camera);
         }
         pins[preset.id] = createHash('sha256').update(JSON.stringify(poses)).digest('hex');
       }
