@@ -239,6 +239,7 @@ import { frontOf, houseModelsFitting, placeHouseModel, type HousePlacement } fro
 import { MASONRY_TINT, packedInstanceTint } from './instance-tint';
 import { kindAt, type LandClass, type LandClassMask } from './land-class';
 import { ROAD_CLEARANCE_METRES, terrainHeightAt } from './landform';
+import type { AnchorKind } from './decorations';
 import { REALISTIC_TRIANGLES } from './realistic-budget';
 import { rectanglesOf, type Rectangle } from './rectilinear-roofs';
 import type { StructureSurface } from './realistic-assets';
@@ -548,6 +549,14 @@ export interface FootprintPlan {
   /** Whether it has a front porch — #1589. */
   readonly porch: boolean;
   /**
+   * Where a parcel is left at its front door — #1808: a house's
+   * {@link FrontStep}, at the foot of its front porch's steps where it has a
+   * porch and on its doorstep where it has none. `undefined` for every plan
+   * that is not a house with a front door: a part, a shop, a building with no
+   * use but a home's, one with no wall facing the road.
+   */
+  readonly frontStep: FrontStep | undefined;
+  /**
    * How built-up the stretch of route it stands beside is — #1633
    * (`urban-class.ts`), read at the route distance its centroid is nearest;
    * `unknown` where the press had no map, or no class, there. What #1634–#1637
@@ -576,6 +585,26 @@ export interface FootprintPlan {
   /** Walls and roof only — #1549's far level, ≤ {@link FOOTPRINT_MAX_FAR_TRIANGLES}. */
   readonly farTriangleCount: number;
 }
+
+/**
+ * A house's front step — #1808, the mapped house's counterpart of a village
+ * plot's `doorstep` anchor (`decorations.ts` §`DecorationAnchor`): a point in
+ * local metres and a yaw toward the road. Planned with the rest of the house,
+ * from the front wall its door is drawn on, so it is where the drawn door is.
+ */
+export interface FrontStep {
+  /** `porch-step` at the foot of a front porch's steps; `doorstep` before a door with none. */
+  readonly kind: Extract<AnchorKind, 'doorstep' | 'porch-step'>;
+  readonly x: number;
+  /** The height it stands at: the door's floor, or the ground at the porch steps' foot. */
+  readonly y: number;
+  readonly z: number;
+  /** Yaw, radians: three's, so an item's own `+z` faces out from the wall, to the road. */
+  readonly yaw: number;
+}
+
+/** How far out from its wall a doorstep stands with no porch: **0.5 m**, on the ground before the door. */
+export const DOORSTEP_OUT_METRES = 0.5;
 
 /** A storey, in metres: **3.0** (P-10, the owner's ruling of 2026-10-21). */
 export const STOREY_METRES = 3;
@@ -4501,6 +4530,33 @@ function planFootprint(
     }
     return { writing, drew };
   };
+  // #1808: a house's front step, before the door just drawn or at its porch steps' foot.
+  const stepOnFront = (
+    kind: FrontStep['kind'],
+    a: number,
+    n: number,
+    y: number,
+  ): FrontStep | undefined =>
+    frontFrame === undefined
+      ? undefined
+      : {
+          kind,
+          x: frontFrame.mx + frontFrame.ex * a + frontFrame.nx * n,
+          y,
+          z: frontFrame.mz + frontFrame.ez * a + frontFrame.nz * n,
+          yaw: Math.atan2(frontFrame.nx, frontFrame.nz),
+        };
+  const frontStep =
+    !residential || shop !== undefined
+      ? undefined
+      : frontPorchSpec === undefined
+        ? stepOnFront('doorstep', 0, DOORSTEP_OUT_METRES, floor)
+        : stepOnFront(
+            'porch-step',
+            frontPorchSpec.stepsAt,
+            frontPorchSpec.depth + frontPorchSpec.steps * FRONT_PORCH.step.tread,
+            frontPorchSpec.ground,
+          );
   const porchCount = frontPorchSpec === undefined ? 0 : porchTriangleCount(frontPorchSpec);
   const fits = (writing: Writing): boolean =>
     FOOTPRINT_ROLES.reduce((sum, role) => sum + trianglesOf(writing[role]), 0) + porchCount <=
@@ -4598,6 +4654,7 @@ function planFootprint(
       cornice: drew.cornice,
     },
     porch: frontPorchSpec !== undefined,
+    frontStep,
     urban: urbanClass,
     model,
     tint: packedInstanceTint(centroid.x, centroid.z, MASONRY_TINT),
