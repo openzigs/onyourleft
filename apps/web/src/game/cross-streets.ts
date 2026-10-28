@@ -63,7 +63,9 @@
  * road in view, and {@link boardsClearOfSideRoads} every billboard; a
  * village's pavement is broken at its crossroads with a dropped kerb either
  * side (`streets.ts`). A mapped building is #1540's, which reads
- * {@link onSideRoad} when it lands.
+ * {@link onSideRoad} when it lands. A village's holiday decorations measure
+ * their clearance against its crossroads ({@link villageSideRoad},
+ * {@link distanceToSideRoads}) as well as the main road — #1690.
  *
  * ⚠️ **Location data** (ADR 0004 D): nothing here formats a message. It reads
  * a street's `kind`, `kindDetail` and line, and never a name, which #1544
@@ -900,6 +902,23 @@ function sideRoadOf(
   return road;
 }
 
+/**
+ * A procedural village's crossroads as it is drawn — #1690: its
+ * {@link villageJunction}'s side roads on `land`, the same arms, stopped
+ * where they stop, that {@link sideRoadsAt} draws for that village.
+ * `decorations.ts` §`villageAnchors` measures a decoration's clearance
+ * against it.
+ */
+export function villageSideRoad(
+  profile: RouteProfile,
+  origin: CorridorOrigin,
+  seed: number,
+  site: Site,
+  land: LandClassMask = NO_LAND_CLASS,
+): SideRoad {
+  return sideRoadOf(villageJunction(profile, origin, site), profile, origin, seed, land);
+}
+
 /** Every village's crossroads of each route, by its site on the first lap. */
 const villages = new WeakMap<RouteProfile, Map<number, Junction>>();
 
@@ -1043,6 +1062,33 @@ export function onSideRoad(
     }
   }
   return false;
+}
+
+/**
+ * How far `(x, z)` is from the nearest edge of any side road in `roads`, in
+ * metres — #1690: each arm's centreline less its half-width, so negative on
+ * one, and infinite where `roads` has none.
+ */
+export function distanceToSideRoads(roads: readonly SideRoad[], x: number, z: number): number {
+  let nearest = Number.POSITIVE_INFINITY;
+  for (const road of roads) {
+    const s = road.segments;
+    for (let segment = 0; segment * 4 + 3 < s.length; segment += 1) {
+      const off =
+        Math.sqrt(
+          squaredToSegment(
+            x,
+            z,
+            s[segment * 4] as number,
+            s[segment * 4 + 1] as number,
+            s[segment * 4 + 2] as number,
+            s[segment * 4 + 3] as number,
+          ),
+        ) - (road.halfWidths[segment] as number);
+      if (off < nearest) nearest = off;
+    }
+  }
+  return nearest;
 }
 
 /**
