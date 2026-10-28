@@ -13,6 +13,7 @@ import { metres, type RouteProfile } from '@onyourleft/domain';
 import type { StreetFeature, StreetGrade } from '@onyourleft/map-features';
 
 import {
+  distanceToSideRoads,
   JUNCTION_TOLERANCE_METRES,
   mappedJunctions,
   onSideRoad,
@@ -27,6 +28,7 @@ import {
   SIDE_ROADS_PER_FRAME,
   sideRoadsAt,
   STREET_MAX_METRES,
+  villageSideRoad,
   widthClassOf,
   type Junction,
   type SideRoad,
@@ -632,6 +634,37 @@ describe('a procedural village’s crossroads — #1565', () => {
       }
     }
     expect(shops).toBe(4 * villages.length);
+  });
+
+  it('is the side road drawn for the village, and measures a point to its edge — #1690', () => {
+    for (const village of villages) {
+      const [drawn] = sideRoadsAt(
+        FARMLAND,
+        ORIGIN,
+        SEED,
+        village.centre - 100,
+        village.centre + 100,
+        village.centre,
+      ).filter((road) => road.junction.source === 'village') as [SideRoad];
+      const own = villageSideRoad(FARMLAND, ORIGIN, SEED, village);
+      expect(own.segments.length).toBeGreaterThan(0);
+      expect([...own.segments]).toEqual([...drawn.segments]);
+      expect([...own.halfWidths]).toEqual([...drawn.halfWidths]);
+    }
+    const road = villageSideRoad(FARMLAND, ORIGIN, SEED, villages[0] as Site);
+    const half = SIDE_ROAD_WIDTHS.minor / 2;
+    // On an arm's centreline is minus its half-width; square off it, the rest.
+    const [ax, az, bx, bz] = road.segments as unknown as [number, number, number, number];
+    const mx = (ax + bx) / 2;
+    const mz = (az + bz) / 2;
+    expect(distanceToSideRoads([road], mx, mz)).toBeCloseTo(-half, 6);
+    const length = Math.hypot(bx - ax, bz - az);
+    const across = { x: -(bz - az) / length, z: (bx - ax) / length };
+    expect(distanceToSideRoads([road], mx + across.x * 5, mz + across.z * 5)).toBeCloseTo(
+      5 - half,
+      6,
+    );
+    expect(distanceToSideRoads([], mx, mz)).toBe(Number.POSITIVE_INFINITY);
   });
 
   it('is in every frame that can see it, with no map data at all', () => {
