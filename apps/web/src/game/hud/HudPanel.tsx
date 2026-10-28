@@ -69,6 +69,7 @@ import { RaceStandings } from './RaceStandings';
 import { RoomReport, type RoomReportTarget } from './RoomReport';
 import type { RoomReportAnswer, RoomReportReason } from '../../net/room-session';
 import type { RaceStandingsView } from '../room-ride';
+import type { ThrowInputPort } from '../delivery/throw-input-port';
 import { WorkoutStrip } from '../../workout/WorkoutGraph';
 import type { WorkoutGraphInput } from '../../workout/workout-graph';
 
@@ -269,6 +270,14 @@ export interface HudPanelProps extends Omit<HudInput, 'units'> {
    * live region, because it says nothing that changes.
    */
   readonly attribution?: string | undefined;
+  /**
+   * A Delivery round's throws — #1810, ADR 0059 D-5: where a press on the
+   * HUD's throw control, or a key, hands the throw the rider asked for. With
+   * it the HUD shows `ThrowControl` in its actions panel, inside the touch
+   * lock and exempt from none of it; `undefined` on every other ride, which
+   * until #1816 runs a round is every ride.
+   */
+  readonly throwing?: ThrowInputPort | undefined;
 }
 
 /** What the ride HUD's two controls say. @see HudCoreProps.labels */
