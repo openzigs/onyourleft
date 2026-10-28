@@ -11,20 +11,23 @@
 import { distanceOnRoute, type RouteProfile } from '@onyourleft/domain';
 import { describe, expect, it } from 'vitest';
 
+import { distanceToSideRoads, VILLAGE_MOUTH_HALF_METRES, villageSideRoad } from './cross-streets';
 import {
   ANCHOR_KINDS,
   decorationsFor,
   GREEN_CLEAR_METRES,
+  GREEN_SIDE_ROAD_CLEAR_METRES,
   HOLIDAY_DECORATIONS,
   villageAnchors,
   type AnchorKind,
+  type DecorationAnchor,
   type DecorationItem,
   type DecorationKind,
   type ItemTable,
 } from './decorations';
 import { distanceToDrawnRoad } from './road-grid';
 import { NO_LAND_CLASS } from './land-class';
-import { circuitRoute, hairpinRoute, northRoute } from './route-fixtures-testing';
+import { circuitRoute, cornerRoute, hairpinRoute, northRoute } from './route-fixtures-testing';
 import { scatterSeed } from './scatter';
 import { fmix32, mixInto } from './seeded';
 import {
@@ -228,7 +231,7 @@ describe('never on the church plot, never in the carriageway, never outside a se
     // A village laid by hand along a hairpin's first leg, its crossroads
     // green 15 m out on each side: on the right that is 3 m from the second
     // leg's centreline, inside its carriageway.
-    const greensOn = (profile: RouteProfile): readonly { clear: number }[] => {
+    const greensOn = (profile: RouteProfile): readonly DecorationAnchor[] => {
       const site: Site = {
         kind: 'village',
         site: 0,
@@ -249,9 +252,69 @@ describe('never on the church plot, never in the carriageway, never outside a se
     };
     // The control: on a straight road, both sides' greens, two a side.
     expect(greensOn(northRoute(1_000, () => 40))).toHaveLength(4);
-    const hairpin = greensOn(hairpinRoute(9));
+    const profile = hairpinRoute(9);
+    const hairpin = greensOn(profile);
     expect(hairpin).toHaveLength(2);
-    for (const green of hairpin) expect(green.clear).toBeGreaterThanOrEqual(GREEN_CLEAR_METRES);
+    // Since #1690 an anchor's `clear` is to the nearer of the road and the
+    // side road, so the road's own clearance is measured here.
+    const origin = corridorOrigin(profile);
+    for (const green of hairpin) {
+      expect(green.clear).toBeLessThanOrEqual(GREEN_CLEAR_METRES);
+      expect(
+        distanceToDrawnRoad(profile, origin, green.x, green.z, 50) - ROAD_WIDTH_METRES / 2,
+      ).toBeGreaterThanOrEqual(GREEN_CLEAR_METRES);
+    }
+  });
+
+  it('makes no green anchor on its own crossroads’ side road, on the inside of a bend — #1690', () => {
+    // A village laid by hand at the middle of a 25 m right-hand corner. The
+    // green stands 15 m out and about 6 m along from the crossroads, each
+    // on its own frame: on the outside of the bend that spreads it away from
+    // the side road, and on the inside it swings onto it.
+    const profile = cornerRoute(25);
+    const origin = corridorOrigin(profile);
+    const seed = scatterSeed(profile);
+    const site: Site = {
+      kind: 'village',
+      site: 0,
+      wrappedSite: 0,
+      centre: 400 + (Math.PI / 2) * 25 * 0.5,
+      half: 90,
+      side: 1,
+    };
+    const crossroads = [villageSideRoad(profile, origin, seed, site)];
+    // Non-vacuity: the green's places, found as the rule finds them — the
+    // middle plot's lateral either side of the mouth — and at least one of
+    // them is within a half-width of the side road's centreline: on it, a
+    // negative distance from its edge.
+    const offset = (VILLAGE_MOUTH_HALF_METRES + PLOT_METRES / 2) / 2;
+    const [middle] = everyVillagePlot(seed, site).filter(
+      (plot) => !plot.built && Math.abs(plot.along - site.centre) < 1e-6,
+    );
+    expect(middle).toBeDefined();
+    const places = [-1, 1].flatMap((plotSide) =>
+      [-offset, offset].map((step) => {
+        const frame = drawnRoadFrame(profile, origin, site.centre + step);
+        if (frame === undefined) throw new Error('no frame');
+        const lateral = (middle?.lateral ?? 0) * plotSide;
+        return distanceToSideRoads(
+          crossroads,
+          frame.x + frame.normalX * lateral,
+          frame.z + frame.normalZ * lateral,
+        );
+      }),
+    );
+    expect(Math.min(...places)).toBeLessThan(0);
+    const greens = villageAnchors(profile, origin, seed, site, [], [], NO_LAND_CLASS).filter(
+      (anchor) => anchor.kind === 'green',
+    );
+    // The outside's two stand; the inside's two are not made.
+    expect(greens).toHaveLength(2);
+    for (const green of greens) {
+      const fromSideRoad = distanceToSideRoads(crossroads, green.x, green.z);
+      expect(fromSideRoad).toBeGreaterThanOrEqual(GREEN_SIDE_ROAD_CLEAR_METRES);
+      expect(green.clear).toBeLessThanOrEqual(fromSideRoad);
+    }
   });
 
   it('places no item wider than its anchor’s clearance from the carriageway', () => {
@@ -264,6 +327,37 @@ describe('never on the church plot, never in the carriageway, never outside a se
     expect(wide.some((item) => item.anchor.kind === 'lamp-post')).toBe(false);
     for (const { anchor } of wide) expect(anchor.clear).toBeGreaterThanOrEqual(3);
   });
+
+  it('places no item wider than its anchor’s clearance from its crossroads’ side road — #1690', () => {
+    // On a straight road a green anchor is 11.5 m from the carriageway and
+    // about 3.4 m from its side road's edge: a 3.5 m footprint fits the one
+    // and not the other.
+    const seed = scatterSeed(FARMLAND);
+    const origin = corridorOrigin(FARMLAND);
+    const streets = streetsOf(FARMLAND);
+    const crossroads = villagesOf(FARMLAND).map((site) =>
+      villageSideRoad(FARMLAND, origin, seed, site),
+    );
+    const greens = streets.flatMap((street) =>
+      street.anchors.filter((anchor) => anchor.kind === 'green'),
+    );
+    expect(greens.length).toBeGreaterThanOrEqual(4);
+    for (const green of greens) {
+      const fromRoad =
+        distanceToDrawnRoad(FARMLAND, origin, green.x, green.z, 50) - ROAD_WIDTH_METRES / 2;
+      expect(fromRoad).toBeGreaterThan(3.5);
+      expect(distanceToSideRoads(crossroads, green.x, green.z)).toBeLessThan(3.5);
+    }
+    const kind = probe(3.5);
+    const placed = decorationsFor(streets, 'halloween', { halloween: [kind] });
+    expect(placed.some((item) => item.anchor.kind === 'green')).toBe(false);
+    for (const { anchor } of decorationsFor(streets, 'halloween', PROBE)) {
+      expect(
+        distanceToSideRoads(crossroads, anchor.x, anchor.z),
+        anchor.kind,
+      ).toBeGreaterThanOrEqual(anchor.clear);
+    }
+  });
 });
 
 /**
@@ -271,7 +365,9 @@ describe('never on the church plot, never in the carriageway, never outside a se
  * written — and re-taken for #1566, which moves the villages' plots on
  * purpose (136 items and `341_446_077` until then): the plots either side of
  * a crossroads are always built now, so their doorsteps and eaves are always
- * anchors.
+ * anchors. Re-taken again for #1690 (`1_133_424_754` until then): the twelve
+ * green anchors' `clear` is now to their side road's edge, about 3.38 m, not
+ * the carriageway's 11.5 m. Nothing else moved and no item came or went.
  */
 const PINNED_COUNT = 140;
-const PINNED_DIGEST = 1_133_424_754;
+const PINNED_DIGEST = 1_659_013_172;

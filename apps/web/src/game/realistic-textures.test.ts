@@ -61,6 +61,7 @@ import {
   routeHemisphere,
   routeLatitudeMagnitude,
   type SunStyle,
+  vergeSlushIn,
 } from './world';
 import { FOLIAGE_TINT, packedInstanceTint } from './instance-tint';
 import {
@@ -1830,11 +1831,29 @@ describe('the route’s winter, staged by a view on the loaded world — #1623',
         roof.onBeforeCompile(shader, undefined);
         return shader.uniforms['oylRoofSnow']?.value;
       };
+      // #1692: the verge's slush, read back through the ground's own program.
+      const vergeSlush = (view: GameView): unknown => {
+        const ground = (view as unknown as StagedView).terrainMesh.material as {
+          onBeforeCompile(shader: unknown, renderer: unknown): void;
+        };
+        const shader = {
+          uniforms: {} as Record<string, { value: unknown } | undefined>,
+          vertexShader:
+            '#include <common>\n#include <fog_pars_vertex>\nvoid main() {\n#include <begin_vertex>\n#include <uv_vertex>\n#include <fog_vertex>\n}',
+          fragmentShader:
+            '#include <common>\n#include <normalmap_pars_fragment>\n#include <fog_pars_fragment>\nvoid main() {\n#include <map_fragment>\n#include <color_fragment>\n#include <alphamap_fragment>\n#include <normal_fragment_maps>\n#include <fog_fragment>\n}',
+          defines: {},
+        };
+        ground.onBeforeCompile(shader, undefined);
+        return shader.uniforms['oylVergeSlush']?.value;
+      };
 
       realistic.setSeason(winter);
       realistic.render(framed());
       expect(groundOf(realistic)).toBe(snowedGround);
       expect(roofSnow()).toBe(roofSnowIn(frame.world, 1));
+      expect(vergeSlushIn(frame.world, 1)).toBeGreaterThan(0.5);
+      expect(vergeSlush(realistic)).toBe(vergeSlushIn(frame.world, 1));
 
       // The stylised world draws no season on the same snowy day: its own
       // ground, and the roofs' uniform, which both worlds share, back to 0.
@@ -1842,12 +1861,14 @@ describe('the route’s winter, staged by a view on the loaded world — #1623',
       stylised.render(framed());
       expect(groundOf(stylised)).toBe(frame.world.groundColour);
       expect(roofSnow()).toBe(0);
+      expect(vergeSlush(realistic)).toBe(0);
 
       // And the realistic world's summer is today's ground, with bare roofs.
       realistic.setSeason(summer);
       realistic.render(framed());
       expect(groundOf(realistic)).toBe(frame.world.groundColour);
       expect(roofSnow()).toBe(0);
+      expect(vergeSlush(realistic)).toBe(0);
     } finally {
       stylised.destroy();
       realistic.destroy();
