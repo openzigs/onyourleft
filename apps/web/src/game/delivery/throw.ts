@@ -61,6 +61,13 @@
  * #1809 asked for them to be proposed in its pull request. Nothing else here
  * hard-codes them, so an approved change is a change to a constant.
  *
+ * ## Which side *the next house* is on — #1810
+ *
+ * A key or a press asks for a throw left, right, or toward the next house
+ * (`throw-input.ts`); {@link throwSideFor} turns the last into a side here,
+ * where the round and its targets are, so the HUD's input module imports
+ * nothing of a round.
+ *
  * ## Nothing here leaves the ride
  *
  * Parcels, landings and targets are held in memory for the ride only (DL11),
@@ -68,6 +75,7 @@
  */
 
 import { recordDelivery, type Round } from './round';
+import type { ThrowIntent } from './throw-input';
 
 /** The game's tick, in seconds: `simulation.ts` §`SIMULATION_STEP_SECONDS`, pinned by the test. */
 export const DELIVERY_TICK_SECONDS = 0.05;
@@ -304,4 +312,32 @@ export function stepThrows(state: ThrowState, input: ThrowInput): ThrowStep {
     inFlight = flying;
   }
   return { state: { tick, readyAt, inFlight }, round, landings, thrown };
+}
+
+/** What {@link throwSideFor} needs of the round being ridden. */
+export interface ThrowSideInput {
+  readonly targets: readonly ThrowTarget[];
+  readonly round: Round;
+  /** The rider's simulated distance along the route, in metres. */
+  readonly along: number;
+}
+
+/**
+ * The side a throw the rider asked for (`throw-input.ts`, #1810) goes to, or
+ * `undefined` for *the next house* when no house is left to deliver to. The
+ * next house is the nearest one still expecting a parcel whose throw window
+ * has not closed behind the rider: a house passed and not yet counted missed
+ * is behind, not next. Unwired with the rest of this module: #1816 calls it
+ * when `GameView` takes the intent the HUD's throw control hands it, and
+ * hands the side to {@link stepThrows} as `throwTo`.
+ */
+export function throwSideFor(intent: ThrowIntent, input: ThrowSideInput): ThrowSide | undefined {
+  if (intent !== 'next-house') return intent;
+  let next: ThrowTarget | undefined;
+  for (const target of input.targets) {
+    if (input.round.houses[target.position] !== 'expecting') continue;
+    if (target.along + THROW_WINDOW_AFTER_METRES < input.along) continue;
+    if (next === undefined || target.along < next.along) next = target;
+  }
+  return next?.side;
 }
