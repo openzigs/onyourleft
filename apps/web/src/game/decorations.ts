@@ -53,10 +53,14 @@
  *
  * ⚠️ **Never in the carriageway**: every anchor records its distance from the
  * carriageway's edge (`road-grid.ts` §`distanceToDrawnRoad`, the WHOLE road,
- * so a hairpin's other leg counts) and {@link decorationsFor} places no item
- * whose footprint {@link DecorationKind.radius} is wider than that. A green
- * anchor in water, or nearer the road than {@link GREEN_CLEAR_METRES}, is not
- * made at all.
+ * so a hairpin's other leg counts) or from the edge of the village's own
+ * crossroads (`cross-streets.ts` §`villageSideRoad`, the side road as it is
+ * drawn — #1690), whichever is nearer, and {@link decorationsFor} places no
+ * item whose footprint {@link DecorationKind.radius} is wider than that. A
+ * green anchor in water, nearer the road than {@link GREEN_CLEAR_METRES} or
+ * nearer the side road than {@link GREEN_SIDE_ROAD_CLEAR_METRES}, is not made
+ * at all: on a bend the green's inner side swings toward the side road's
+ * line, and a tight enough one puts it on the side road.
  *
  * A village with no street (`streets.ts` returns none where no pavement can
  * be laid) has no anchors either: a lamp post, a front path and a crossroads
@@ -69,7 +73,12 @@
 import { distanceOnRoute, type RouteProfile } from '@onyourleft/domain';
 
 import { buildingPlan, frontDoorOf, isBuiltKind, type BuiltKind } from './buildings';
-import { VILLAGE_MOUTH_HALF_METRES } from './cross-streets';
+import {
+  distanceToSideRoads,
+  SIDE_ROAD_SCENERY_MARGIN_METRES,
+  VILLAGE_MOUTH_HALF_METRES,
+  villageSideRoad,
+} from './cross-streets';
 import type { LandClassMask } from './land-class';
 import { terrainHeightAt } from './landform';
 import { distanceToDrawnRoad } from './road-grid';
@@ -120,7 +129,10 @@ export interface DecorationAnchor {
   readonly z: number;
   /** Yaw, radians: three's, so an item's own `+z` ends up facing the road. */
   readonly yaw: number;
-  /** How far the point is from the carriageway's edge, metres. */
+  /**
+   * How far the point is from the nearest carriageway's edge, metres: the
+   * main road's or, since #1690, its village's crossroads side road's.
+   */
   readonly clear: number;
   /** The anchor's own hash, from the route's seed, its village and its place in it. */
   readonly hash: number;
@@ -528,6 +540,15 @@ export interface DecorationItem {
  */
 export const GREEN_CLEAR_METRES = 4;
 
+/**
+ * How far from its crossroads side road's edge a green anchor must be,
+ * metres — #1690: **1.5**, `cross-streets.ts`
+ * §`SIDE_ROAD_SCENERY_MARGIN_METRES`, what a scattered tree keeps. The side
+ * road has no pavement, so this is a verge, not {@link GREEN_CLEAR_METRES}.
+ * On a straight road a green anchor is about 3.4 m from it.
+ */
+export const GREEN_SIDE_ROAD_CLEAR_METRES = SIDE_ROAD_SCENERY_MARGIN_METRES;
+
 /** The hash key every anchor's hash is drawn under — its own, so no other placement correlates. */
 const DECORATION_KEY = 0x16_2400;
 
@@ -595,9 +616,13 @@ export function villageAnchors(
         : { kind, x, y, z, yaw, clear, hash, step },
     );
   };
-  const clearOf = (x: number, z: number): number =>
+  const fromRoad = (x: number, z: number): number =>
     distanceToDrawnRoad(profile, origin, x, z, SETBACK_METRES + PLOT_METRES) -
     ROAD_WIDTH_METRES / 2;
+  // #1690: the village's crossroads, as it is drawn. @see the header
+  const crossroads = [villageSideRoad(profile, origin, seed, site, land)];
+  const fromSideRoad = (x: number, z: number): number => distanceToSideRoads(crossroads, x, z);
+  const clearOf = (x: number, z: number): number => Math.min(fromRoad(x, z), fromSideRoad(x, z));
 
   for (const item of furniture) {
     if (item.kind !== 'lamp-post') continue;
@@ -667,8 +692,9 @@ export function villageAnchors(
       if (inWater(ways, profile, wrapped, lateral)) continue;
       const x = frame.x + frame.normalX * lateral;
       const z = frame.z + frame.normalZ * lateral;
+      if (!(fromRoad(x, z) >= GREEN_CLEAR_METRES)) continue;
+      if (!(fromSideRoad(x, z) >= GREEN_SIDE_ROAD_CLEAR_METRES)) continue;
       const clear = clearOf(x, z);
-      if (!(clear >= GREEN_CLEAR_METRES)) continue;
       const y = terrainHeightAt(profile, origin, seed, wrapped, lateral, land);
       add(
         'green',
