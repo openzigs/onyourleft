@@ -17,7 +17,7 @@
  */
 
 import { createHash, type Hash } from 'node:crypto';
-import { getHeapStatistics, GCProfiler } from 'node:v8';
+import { getHeapStatistics, GCProfiler, setFlagsFromString } from 'node:v8';
 
 import { describe, expect, it } from 'vitest';
 
@@ -110,19 +110,28 @@ function hashDrawn(belt: GroundBlobBelt, hash: Hash): void {
  * cost (about 18 KiB) inside it; with that taken off (see the test) the bound is
  * tightened to 256, #1839. On Node 24, the pinned one, an optimised `update`
  * leaves nothing and a window is almost always exactly 0 bytes; the most one
- * showed in 60 was 8.4 KB, a compiler's one-off. It catches an array of 32
- * numbers made once a frame, and the `subarray` a blob #1674 removed many times
- * over; it does not see one of 20, which the test it replaces did not either.
+ * showed in 120 was 9.1 KB, a compiler's one-off that the next window does not
+ * repeat, which is why a window that fails is followed by another. It catches
+ * an array of 28 numbers made once a frame, and the `subarray` a blob #1674
+ * removed many times over; it does not see one of 24, which the test it
+ * replaces did not either (it saw 32).
  */
 const BYTES_PER_FRAME = 256;
 /**
- * Frames run before the first window. Until the compiler has made `update` and
- * what it calls fully optimised, which takes about 250 frames of this belt with
- * or without coverage, every frame boxes its numbers: 8 to 23 KiB a frame, the
- * whole of that being the compiler's, not ours. So the windows are the rest of
- * the warm-up: see {@link MAX_WINDOWS}.
+ * Calls of a function before V8 compiles it with its last, allocation-free tier
+ * (`--invocation-count-for-turbofan`): the test sets it to {@link TURBOFAN_AFTER_CALLS}
+ * and puts it back to V8's default of 3000. Until a function is compiled
+ * `update` boxes its numbers, 8 to 23 KiB a frame, none of it ours, and at the
+ * default that takes about 250 frames of this belt (a measured 1.3 s of the
+ * test under coverage, 3.0 s on the nightly: #1839), which was most of the
+ * time. At 300 it takes about 20. The measurement is of the same optimised
+ * code, reached sooner; a Node whose V8 lacks the flag only prints that it does
+ * not know it, and takes the longer way, through the extra windows.
  */
-const WARM_FRAMES = 150;
+const TURBOFAN_AFTER_CALLS = 300;
+const TURBOFAN_DEFAULT_CALLS = 3000;
+/** Frames run before the first window, past what the compiler needs at {@link TURBOFAN_AFTER_CALLS}. */
+const WARM_FRAMES = 60;
 /** Frames in a window. */
 const WINDOW_FRAMES = 40;
 /**
@@ -135,51 +144,63 @@ const WINDOW_FRAMES = 40;
  */
 const MAX_WINDOWS = 12;
 
+/** Windows of frames on one belt until one is quiet enough, or the attempts run out. */
+function windowsOnABelt(): { measured: boolean; attempts: string[]; drawn: number } {
+  const frame = frameOn(hairpinRoute(30), 650);
+  const lists = castersBeside(frame.corridor.centre);
+  const belt = new GroundBlobBelt();
+  const sun = SUNS[1] as SunStyle;
+  let drawn = 0;
+  const frames = (count: number): void => {
+    for (let at = 0; at < count; at += 1) {
+      belt.update(lists, frame.corridor, frame.terrain.mesh, sun);
+      drawn += belt.mesh.count;
+    }
+  };
+  /** Heap growth across `count` frames, and the collections that ran meanwhile. */
+  const measure = (count: number): { grew: number; collected: number } => {
+    const profiler = new GCProfiler();
+    profiler.start();
+    const before = getHeapStatistics().used_heap_size;
+    frames(count);
+    const after = getHeapStatistics().used_heap_size;
+    return { grew: after - before, collected: profiler.stop().statistics.length };
+  };
+  frames(WARM_FRAMES);
+  // The first measurement of anything costs the harness about 18 KiB, so a
+  // window of no frames is taken first, and again before each window: what
+  // the measuring itself leaves is taken off, and only the frames are held
+  // to the bound.
+  measure(0);
+  const attempts: string[] = [];
+  let measured = false;
+  for (let attempt = 0; attempt < MAX_WINDOWS && !measured; attempt += 1) {
+    const empty = measure(0);
+    const run = measure(WINDOW_FRAMES);
+    if (run.collected > 0 || empty.collected > 0) {
+      attempts.push(`collected ${run.collected + empty.collected}×`);
+      continue;
+    }
+    const leftBehind = run.grew - empty.grew;
+    attempts.push(`${leftBehind} B`);
+    measured = Math.abs(leftBehind) < BYTES_PER_FRAME * WINDOW_FRAMES;
+  }
+  belt.dispose();
+  return { measured, attempts, drawn };
+}
+
 describe('GroundBlobBelt.update — #1674', () => {
   it('allocates nothing on a frame', () => {
-    const frame = frameOn(hairpinRoute(30), 650);
-    const lists = castersBeside(frame.corridor.centre);
-    const belt = new GroundBlobBelt();
-    const sun = SUNS[1] as SunStyle;
-    let sink = 0;
-    const frames = (count: number): void => {
-      for (let at = 0; at < count; at += 1) {
-        belt.update(lists, frame.corridor, frame.terrain.mesh, sun);
-        sink += belt.mesh.count;
-      }
-    };
-    /** Heap growth across `count` frames, and the collections that ran meanwhile. */
-    const measure = (count: number): { grew: number; collected: number } => {
-      const profiler = new GCProfiler();
-      profiler.start();
-      const before = getHeapStatistics().used_heap_size;
-      frames(count);
-      const after = getHeapStatistics().used_heap_size;
-      return { grew: after - before, collected: profiler.stop().statistics.length };
-    };
-    frames(WARM_FRAMES);
-    // The first measurement of anything costs the harness about 18 KiB, so a
-    // window of no frames is taken first, and again before each window: what
-    // the measuring itself leaves is taken off, and only the frames are held
-    // to the bound.
-    measure(0);
-    const attempts: string[] = [];
-    let measured = false;
-    for (let attempt = 0; attempt < MAX_WINDOWS && !measured; attempt += 1) {
-      const empty = measure(0);
-      const run = measure(WINDOW_FRAMES);
-      if (run.collected > 0 || empty.collected > 0) {
-        attempts.push(`collected ${run.collected + empty.collected}×`);
-        continue;
-      }
-      const leftBehind = run.grew - empty.grew;
-      attempts.push(`${leftBehind} B`);
-      measured = Math.abs(leftBehind) < BYTES_PER_FRAME * WINDOW_FRAMES;
+    setFlagsFromString(`--invocation-count-for-turbofan=${TURBOFAN_AFTER_CALLS}`);
+    let result: ReturnType<typeof windowsOnABelt>;
+    try {
+      result = windowsOnABelt();
+    } finally {
+      setFlagsFromString(`--invocation-count-for-turbofan=${TURBOFAN_DEFAULT_CALLS}`);
     }
-    belt.dispose();
-    expect(measured, attempts.join(', ')).toBe(true);
+    expect(result.measured, result.attempts.join(', ')).toBe(true);
     // Non-vacuity: every frame drew blobs.
-    expect(sink).toBeGreaterThan(0);
+    expect(result.drawn).toBeGreaterThan(0);
   });
 
   it('draws byte for byte what it drew before #1674', () => {
