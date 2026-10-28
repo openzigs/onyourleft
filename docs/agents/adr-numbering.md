@@ -15,8 +15,8 @@ It has the same authority as the root file. Where the text below says "this file
   ⚠️ **0059 is [ADR 0059](../adr/0059-delivery-a-parcel-round-game-mode.md)**, taken by
   [#1804](https://github.com/openzigs/onyourleft/issues/1804) on 2026-10-28 for Delivery, the
   parcel-round game mode, on the owner's rulings DL1, DL4, DL5, DL6, DL6b and DL11 of 2026-10-27 on
-  the epic [#1803](https://github.com/openzigs/onyourleft/issues/1803). It is **Proposed** until the
-  owner accepts it. It skipped **0057, claimed by [#1748](https://github.com/openzigs/onyourleft/issues/1748)**
+  the epic [#1803](https://github.com/openzigs/onyourleft/issues/1803). The owner **accepted** it the
+  same day. It skipped **0057, claimed by [#1748](https://github.com/openzigs/onyourleft/issues/1748)**
   (store fees the publisher pays), and **0058, claimed by
   [#1752](https://github.com/openzigs/onyourleft/issues/1752)** (iOS screen capture on the camera
   screens), each by its title and both unwritten on that day. **The next free number is 0060.** A

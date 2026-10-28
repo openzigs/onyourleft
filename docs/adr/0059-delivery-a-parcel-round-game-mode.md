@@ -1,8 +1,9 @@
 # ADR 0059: Delivery, a parcel-round game mode — its own expression, no game event reaches the trainer, its own draw-call ceiling, no stored targets, and the touch lock kept whole
 
-- **Status**: Proposed. It records the owner's rulings DL1, DL4, DL5, DL6, DL6b and DL11 of
-  2026-10-27 on the epic [#1803](https://github.com/openzigs/onyourleft/issues/1803), and stays
-  Proposed until the owner accepts it in its pull request
+- **Status**: **Accepted, 2026-10-28**, on the owner's ruling of that day on
+  [#1804](https://github.com/openzigs/onyourleft/issues/1804), with D-6 answered as written: a crash
+  costs points only. It records the owner's rulings DL1, DL4, DL5, DL6, DL6b and DL11 of 2026-10-27 on
+  the epic [#1803](https://github.com/openzigs/onyourleft/issues/1803). Proposed 2026-10-28
 - **Date**: 2026-10-28
 - **Deciders**: **the owner**, on the rulings of 2026-10-27 quoted in Context. Drafted by the author
   for that approval. D-2's choice of the crash penalty (points only) is the author's reading of
