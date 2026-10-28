@@ -647,6 +647,8 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         that had stopped listening while every target reported
                         success. `ride/controller.ts` §`simulationControl`
                         refuses the handle and this supplies the sentence
+    src/game/delivery/delivery-cannot-reach-trainer.test.ts
+                        DL5 (ADR 0059 D-2, #1807): no module under `delivery/` reaches the trainer-command seam, this port, `gradient.ts` or `ride/trainer.ts` by any static import chain
     src/game/rider.ts   what the rider and their bicycle weigh together, what
                         air they ride through, and — since #365 — **how much of
                         it they are pushing**. ⚠️ `RideConditions.coefficients`
