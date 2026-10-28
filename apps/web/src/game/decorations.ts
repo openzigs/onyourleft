@@ -62,6 +62,17 @@
  * at all: on a bend the green's inner side swings toward the side road's
  * line, and a tight enough one puts it on the side road.
  *
+ * ## The village-square tree — #1627
+ *
+ * The winter lights' fourth kind is ONE tree a village
+ * ({@link DecorationKind.perVillage}), on one of its crossroads green's
+ * anchors, chosen by their rolls: a trunk, four stacked cones and twenty
+ * steady baubles, {@link TREE_HEIGHT_METRES} tall, 272 triangles, in the
+ * belt's one call. A green anchor's clearance is also to the nearest of the
+ * village's buildings (the shop rows beside the crossroads, as
+ * `settlements.ts` stands them, or their house model's larger ground), so
+ * its footprint stands on the green and on nothing built.
+ *
  * A village with no street (`streets.ts` returns none where no pavement can
  * be laid) has no anchors either: a lamp post, a front path and a crossroads
  * all belong to the street.
@@ -73,6 +84,7 @@
 import { distanceOnRoute, type RouteProfile } from '@onyourleft/domain';
 
 import { buildingPlan, frontDoorOf, isBuiltKind, type BuiltKind } from './buildings';
+import { plotModelFootprint } from './house-models';
 import {
   distanceToSideRoads,
   SIDE_ROAD_SCENERY_MARGIN_METRES,
@@ -84,7 +96,15 @@ import { terrainHeightAt } from './landform';
 import { distanceToDrawnRoad } from './road-grid';
 import type { Holiday } from './season';
 import { slotHash, uniformFrom } from './seeded';
-import { everyVillagePlot, PLOT_METRES, SETBACK_METRES, type Plot, type Site } from './settlements';
+import {
+  everyVillagePlot,
+  PLOT_METRES,
+  SETBACK_METRES,
+  STRUCTURE_FOOTPRINTS,
+  type Footprint,
+  type Plot,
+  type Site,
+} from './settlements';
 import type { DoorPath, FurnitureItem } from './streets';
 import { drawnRoadFrame, ROAD_WIDTH_METRES, type CorridorOrigin } from './terrain';
 import { inWater, waterways } from './waterways';
@@ -152,8 +172,12 @@ export interface DecorationAnchor {
  * - `bulb` — an octahedron, **8** triangles (#1626).
  * - `wreath` — a ring in the box's `xy` plane, facing `+z`, **80** triangles
  *   (#1626).
+ * - `cone` — a closed cone, its base on the box's floor and its point at
+ *   the middle of its top, ten sides, **20** triangles (#1627).
+ * - `trunk` — a closed cylinder, eight sides, **32** triangles (#1627).
  */
-export type DecorationShape = 'box' | 'pumpkin' | 'stalk' | 'face' | 'bulb' | 'wreath';
+export type DecorationShape =
+  'box' | 'pumpkin' | 'stalk' | 'face' | 'bulb' | 'wreath' | 'cone' | 'trunk';
 
 /** One box of an item, item-local: `+z` faces the road, `y` up from the anchor. */
 export interface DecorationPart {
@@ -190,6 +214,12 @@ export interface DecorationKind {
    * — on the step's top, every part inside its tread — #1625. @see AnchorStep
    */
   readonly onStepOf?: readonly BuiltKind[];
+  /**
+   * `'one'` — #1627: at most one of a village's anchors is offered it, the
+   * one of those it may stand on whose roll is lowest, and it still rolls
+   * under {@link chance} there. Absent, every anchor is offered it.
+   */
+  readonly perVillage?: 'one';
 }
 
 /** The kinds each holiday places, in the order an anchor is offered them. */
@@ -476,12 +506,115 @@ function doorWreath(): DecorationPart[] {
  */
 export const WINTER_CHANCE = { post: 0.75, eaves: 0.5, wreath: 0.5 } as const;
 
+/** The village-square tree's {@link DecorationKind.item} — #1627. */
+export const VILLAGE_TREE = 'village-tree';
+
+/**
+ * The village-square tree's evergreen and its trunk, sRGB — #1627: lit, so
+ * held under "lights no colour past white", and a green of its own, darker
+ * than {@link WREATH_GREEN}, so a test can find the tree's vertices in the
+ * belt's mesh by it.
+ */
+export const TREE_GREEN = 0x1f4a29;
+export const TREE_TRUNK = 0x5a3b24;
+
+/**
+ * How tall the village-square tree is, metres: **6** — #1627 asked for 5 to
+ * 7, so that it reads among the two-storey houses at 120 m, the edge of
+ * `streets.ts` §`FURNITURE_DRAW_METRES`.
+ */
+export const TREE_HEIGHT_METRES = 6;
+
+/**
+ * The tree's four tiers, from the bottom: where each cone's base stands, how
+ * tall it is and how wide its base, metres. Each tier's base is inside the
+ * one below, which covers it, and the top tier's point is
+ * {@link TREE_HEIGHT_METRES}.
+ */
+const TREE_TIERS: readonly (readonly [number, number, number])[] = [
+  [0.7, 2.1, 2.8],
+  [1.9, 1.9, 2.3],
+  [3.0, 1.7, 1.8],
+  [4.1, TREE_HEIGHT_METRES - 4.1, 1.2],
+];
+
+/** The tree's trunk: how wide and how tall, metres, from the ground into the bottom tier. */
+const TREE_TRUNK_WIDTH = 0.36;
+const TREE_TRUNK_HEIGHT = 0.9;
+
+/**
+ * How many baubles hang on each tier, from the bottom — **20** in all, inside
+ * #1627's 12 to 24 — and how big each is, metres: **0.2**, an octahedron that
+ * reads as a coloured dot at 120 m, as {@link BULB_METRES} does at 60 m.
+ */
+const TREE_BAUBLES: readonly number[] = [7, 6, 4, 3];
+export const BAUBLE_METRES = 0.2;
+
+/** How far up its tier a bauble hangs, as a share of the tier's height: below the next tier's skirt. */
+const BAUBLE_UP = 0.2;
+
+/**
+ * How far out from the tier's surface a bauble's middle is, metres: a ten-sided
+ * cone's faces are 5 % inside its corners, so a bauble set on the corners'
+ * circle and this far out is proud of every face and touches the tree.
+ */
+const BAUBLE_PROUD = 0.03;
+
+/**
+ * The village-square tree — #1627: a short trunk, four stacked cones and
+ * {@link TREE_BAUBLES} baubles in {@link BULB_SOFT}'s colours, every bauble
+ * glowing and steady. Owner ruling (b) of 2026-10-24: built from numbers, no
+ * asset, and no religious symbol — so no star or angel on top, only baubles.
+ * Not the generated firs, which draw a depth pre-pass: this is one more item
+ * in the belt's one call. 272 triangles.
+ */
+function villageTree(): DecorationPart[] {
+  const parts: DecorationPart[] = [
+    {
+      shape: 'trunk',
+      size: [TREE_TRUNK_WIDTH, TREE_TRUNK_HEIGHT, TREE_TRUNK_WIDTH],
+      at: [0, TREE_TRUNK_HEIGHT / 2, 0],
+      colour: TREE_TRUNK,
+      glows: false,
+    },
+  ];
+  let bauble = 0;
+  for (const [tier, [base, height, width]] of TREE_TIERS.entries()) {
+    parts.push({
+      shape: 'cone',
+      size: [width, height, width],
+      at: [0, base + height / 2, 0],
+      colour: TREE_GREEN,
+      glows: false,
+    });
+    const count = TREE_BAUBLES[tier] as number;
+    const out = (width / 2) * (1 - BAUBLE_UP) + BAUBLE_PROUD;
+    for (let at = 0; at < count; at += 1) {
+      // Each tier's ring turned half a gap from the one below.
+      const turn = ((at + (tier % 2) / 2) / count) * 2 * Math.PI;
+      parts.push({
+        shape: 'bulb',
+        size: [BAUBLE_METRES, BAUBLE_METRES, BAUBLE_METRES],
+        at: [Math.sin(turn) * out, base + height * BAUBLE_UP, Math.cos(turn) * out],
+        colour: BULB_SOFT[bauble % BULB_SOFT.length] as number,
+        glows: true,
+      });
+      bauble += 1;
+    }
+  }
+  return parts;
+}
+
 /**
  * The winter lights' kinds — #1626, about 1 Dec to 6 Jan. Steady (WCAG
  * 2.3.1): every bulb glows its own colour and nothing changes from frame to
  * frame. No religious symbol: lights, an evergreen wreath and a bow. Never the
  * church (its anchors are never made), and never over the road: a post's
- * bulbs wind the post, and an eave's string hangs from the house.
+ * bulbs wind the post, and an eave's string hangs from the house. Since
+ * #1627, ONE village-square tree a village, on a green anchor
+ * ({@link DecorationKind.perVillage}): the crossroads' middle plot, which
+ * is never built, so its footprint — its bottom tier's base — is held off
+ * the carriageway and the side road by the anchor's clearance.
  */
 const WINTER_LIGHTS: readonly DecorationKind[] = [
   {
@@ -506,11 +639,19 @@ const WINTER_LIGHTS: readonly DecorationKind[] = [
     parts: doorWreath(),
     onStepOf: ['building', 'shop-row'],
   },
+  {
+    item: VILLAGE_TREE,
+    anchors: ['green'],
+    chance: 1,
+    radius: (TREE_TIERS[0] as readonly [number, number, number])[2] / 2,
+    parts: villageTree(),
+    perVillage: 'one',
+  },
 ];
 
 /**
  * What a ride decorates with — Halloween's pumpkins since #1625, and since
- * #1626 the winter lights; #1627 adds the green's tree. A holiday the table
+ * #1626 the winter lights, with the green's tree since #1627. A holiday the table
  * names nothing for places no item, and the belt is not drawn. The owner's
  * page may register a probe instead (`browser/realistic/config.ts`
  * §`PROBE_DECORATIONS`), which no rider reaches.
@@ -682,7 +823,14 @@ export function villageAnchors(
   // on both sides of the side road's mouth.
   const ways = waterways(profile, seed);
   const offset = (VILLAGE_MOUTH_HALF_METRES + PLOT_METRES / 2) / 2;
-  for (const plot of everyVillagePlot(seed, site)) {
+  const plots = everyVillagePlot(seed, site);
+  // #1627: the village's buildings, so what stands on the green stands clear of them.
+  const buildings = plots.flatMap((plot) => {
+    if (!plot.built) return [];
+    const frame = drawnRoadFrame(profile, origin, distanceOnRoute(profile, plot.along));
+    return frame === undefined ? [] : [buildingOf(plot, frame)];
+  });
+  for (const plot of plots) {
     if (plot.built || Math.abs(plot.along - site.centre) > 1e-6) continue;
     for (const along of [plot.along - offset, plot.along + offset]) {
       const wrapped = distanceOnRoute(profile, along);
@@ -694,7 +842,10 @@ export function villageAnchors(
       const z = frame.z + frame.normalZ * lateral;
       if (!(fromRoad(x, z) >= GREEN_CLEAR_METRES)) continue;
       if (!(fromSideRoad(x, z) >= GREEN_SIDE_ROAD_CLEAR_METRES)) continue;
-      const clear = clearOf(x, z);
+      const clear = Math.min(
+        clearOf(x, z),
+        ...buildings.map((building) => distanceToFootprint(building, x, z)),
+      );
       const y = terrainHeightAt(profile, origin, seed, wrapped, lateral, land);
       add(
         'green',
@@ -709,12 +860,70 @@ export function villageAnchors(
   return found;
 }
 
+/** A built plot's building in plan: where it stands, which way it faces, and the ground it takes. */
+interface BuildingInPlan {
+  readonly x: number;
+  readonly z: number;
+  /** Its own `+x`, the way along the road, and `+z`, toward it. */
+  readonly cos: number;
+  readonly sin: number;
+  readonly footprint: Footprint;
+}
+
+/**
+ * A built plot's building as `settlements.ts` §`standing` stands it, facing
+ * the road — #1627: the ground its kind takes or, where its plot may hold a
+ * house model (#1566), the larger of the two, as `settlements.ts`
+ * §`pushFootprint` clears it.
+ */
+function buildingOf(
+  plot: Plot,
+  frame: {
+    readonly x: number;
+    readonly z: number;
+    readonly normalX: number;
+    readonly normalZ: number;
+  },
+): BuildingInPlan {
+  const lateral = plot.lateral * plot.side;
+  const rotation = Math.atan2(-frame.normalX * plot.side, -frame.normalZ * plot.side);
+  const shape = STRUCTURE_FOOTPRINTS[plot.kind];
+  const model = plot.house === undefined ? undefined : plotModelFootprint(plot.house, shape.front);
+  return {
+    x: frame.x + frame.normalX * lateral,
+    z: frame.z + frame.normalZ * lateral,
+    cos: Math.cos(rotation),
+    sin: Math.sin(rotation),
+    footprint: {
+      x: Math.max(shape.x, model?.x ?? 0),
+      back: Math.min(shape.back, model?.back ?? 0),
+      front: Math.max(shape.front, model?.front ?? 0),
+    },
+  };
+}
+
+/** How far `(x, z)` is from a building's footprint, metres: nought on it. */
+function distanceToFootprint(building: BuildingInPlan, x: number, z: number): number {
+  const dx = x - building.x;
+  const dz = z - building.z;
+  // Into the building's own frame, as three's `rotation.y` turns it back.
+  const across = dx * building.cos - dz * building.sin;
+  const ahead = dx * building.sin + dz * building.cos;
+  const { footprint } = building;
+  return Math.hypot(
+    Math.max(0, Math.abs(across) - footprint.x),
+    Math.max(0, footprint.back - ahead, ahead - footprint.front),
+  );
+}
+
 /**
  * The items for `holiday` on every village's anchors, in village and anchor
  * order: none with no holiday, and none where `kinds` names none for it. Each
  * anchor offers itself to the holiday's kinds in order, and takes the first
  * that may stand there, rolls under its {@link DecorationKind.chance} and is
- * no wider than the anchor's clearance from the carriageway. @see the header
+ * no wider than the anchor's clearance from the carriageway — and, for a kind
+ * one a village ({@link DecorationKind.perVillage}), is the village's anchor
+ * it was offered to. @see the header
  */
 export function decorationsFor(
   villages: readonly { readonly anchors: readonly DecorationAnchor[] }[],
@@ -726,14 +935,16 @@ export function decorationsFor(
   if (offered === undefined || offered.length === 0) return [];
   const items: DecorationItem[] = [];
   for (const village of villages) {
+    // #1627: the one anchor each one-a-village kind is offered to.
+    const chosen = offered.map((kind, which) =>
+      kind.perVillage === 'one' ? lowestRoll(village.anchors, kind, which) : undefined,
+    );
     for (const anchor of village.anchors) {
       for (const [which, kind] of offered.entries()) {
-        if (!kind.anchors.includes(anchor.kind)) continue;
-        if (kind.radius > anchor.clear) continue;
+        if (!mayStand(kind, anchor)) continue;
+        if (kind.perVillage === 'one' && chosen[which] !== anchor) continue;
         const step = kind.onStepOf === undefined ? undefined : anchor.step;
-        if (kind.onStepOf !== undefined && (step === undefined || !fitsStep(kind, step))) continue;
-        const stream = which * 2;
-        if (!(uniformFrom(anchor.hash, stream + STREAM_TAKES) < kind.chance)) continue;
+        if (!(rollOf(anchor, which) < kind.chance)) continue;
         items.push({
           anchor,
           item: kind.item,
@@ -745,6 +956,41 @@ export function decorationsFor(
     }
   }
   return items;
+}
+
+/** The roll an anchor makes for the holiday's `which`th kind, 0 to 1. */
+function rollOf(anchor: DecorationAnchor, which: number): number {
+  return uniformFrom(anchor.hash, which * 2 + STREAM_TAKES);
+}
+
+/**
+ * Whether `kind` may stand on `anchor`: an anchor of its kinds, no narrower
+ * than its footprint, and on a step it fits where it stands on one.
+ */
+function mayStand(kind: DecorationKind, anchor: DecorationAnchor): boolean {
+  if (!kind.anchors.includes(anchor.kind)) return false;
+  if (kind.radius > anchor.clear) return false;
+  if (kind.onStepOf === undefined) return true;
+  return anchor.step !== undefined && fitsStep(kind, anchor.step);
+}
+
+/** Of the anchors `kind` may stand on, the one whose roll for it is lowest — #1627. */
+function lowestRoll(
+  anchors: readonly DecorationAnchor[],
+  kind: DecorationKind,
+  which: number,
+): DecorationAnchor | undefined {
+  let best: DecorationAnchor | undefined;
+  let lowest = Number.POSITIVE_INFINITY;
+  for (const anchor of anchors) {
+    if (!mayStand(kind, anchor)) continue;
+    const roll = rollOf(anchor, which);
+    if (roll < lowest) {
+      lowest = roll;
+      best = anchor;
+    }
+  }
+  return best;
 }
 
 /**
