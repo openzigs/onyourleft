@@ -275,3 +275,40 @@ renamed, an issue renumbered — and may not change a decision. In particular:
   Not Confirm 14); #1816's tablet step is where it is felt.
 - **The world starts decoding an address or a name** for the houses it draws. D-4 item 5 assumes
   ADR 0054 D-2.2 and ADR 0055 D-3 keep them out.
+
+---
+
+## Amendments
+
+Appended under [ADR 0013](0013-adr-amendments.md). Nothing above this line has been edited.
+
+- **2026-10-28** — **The owner's ruling of 2026-10-28 on
+  [#1807](https://github.com/openzigs/onyourleft/issues/1807)**, taken while reviewing #1842, settles
+  two points of D-2.2, and (3) records how the test holds them. **(1) widens D-2.2's forbidden set;
+  (2) is a narrower reading of its words "any chain of static imports"**, which the owner accepted as
+  such ("By name is enough"; splitting the domain package instead was offered and not chosen). D-2.1
+  and D-2.3 are unchanged. Delivery still may never import, call or receive a trainer-control
+  function or writer.
+  (1) **The forbidden set adds every trainer-control writer** (owner ruling, "Accept the amendment"), the half below the seam that carries
+  the bytes and imports the protocol's types only, so it was reachable without touching a module
+  D-2.2 names. They are found by rule over every non-test module under `apps/` and `packages/`, not
+  written down: a GATT write (`writeValue…`, `BleClient.write…`), a `write` that names a control
+  point, a method named for a trainer command (`setTargetPower`, `setTargetResistance`,
+  `setTargetResistanceLevel`, `setSimulationParameters`, `letGo`, `requestControl`,
+  `writeControlPoint`), and a `write` in a module declaring a `…ControlPoint` interface. On this
+  date that finds `packages/sensors/web-bluetooth/src/fitness-machine-channel.ts`
+  (`createFitnessMachineChannel`), `apps/mobile/src/ble/fitness-machine-channel.ts`,
+  `apps/mobile/src/ble/ble-client.ts`, `apps/web/src/validation/capture.ts`,
+  `apps/web/src/ride/controller.ts`, `packages/sensors/protocol/src/fitness-machine-control.ts`,
+  `packages/sensors/protocol/src/simulator-bridge.ts`, `packages/sensors/src/simulator/ftms.ts`,
+  `packages/sensors/src/simulator/vendor-control.ts` and `apps/web/src/game/gradient.ts`, beside
+  two browser-gate harnesses. A writer added later is forbidden the day it lands.
+  (2) **"Any chain of static imports" is read by name** (owner ruling): a barrel's `export … from` is followed only
+  for the names a Delivery module asks of it, so a value from `@onyourleft/domain` does not count as
+  reaching `trainer/simulation.ts`, which that barrel also re-exports, even though loading the barrel
+  evaluates that module. A namespace import, a dynamic
+  import and `export *` are followed for every name asked.
+  (3) **The walk fails closed** on what it cannot follow: any `import.meta.glob`, any `import.meta`
+  member but `url`, `env` and `hot`, and a `Worker` or `SharedWorker` built from anything but a
+  literal `new URL('…', import.meta.url)`, which is followed into the module it names. The test is
+  `apps/web/src/game/delivery/delivery-cannot-reach-trainer.test.ts`. (#1807)

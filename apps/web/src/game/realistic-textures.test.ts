@@ -41,6 +41,7 @@ import { TRANSCODER_FILES, transcoderSource } from '../../tools/basis/transcoder
 
 import { KIT_PALETTE, PACER_KIT, type RiderKit } from './bicycle';
 import { WOOD_SWAY_SHARE } from './foliage-light';
+import { HOLIDAY_DECORATIONS, VILLAGE_TREE } from './decorations';
 import { footprintPlans, minimumAreaRectangle } from './footprint-buildings';
 import { mixedTownFixture } from './footprint-fixtures-testing';
 import { GROUND_BLOB_LIFT_METRES } from './ground-blob';
@@ -48,9 +49,10 @@ import { landClassMask } from './land-class';
 import { mappedBuildingsOf } from './mapped-buildings';
 import type { GameView } from './port';
 import { qualitySettings, REALISTIC_LADDER } from './quality';
-import { northRoute } from './route-fixtures-testing';
+import { northRoute, plannerCornerRoute } from './route-fixtures-testing';
 import { scatterSeed } from './scatter';
 import { siteAt, siteSpacing, type Site } from './settlements';
+import { streetsAt } from './streets';
 import { corridorOrigin } from './terrain';
 import { sceneFrame } from './scene';
 import { seasonOn, type Season } from './season';
@@ -1872,6 +1874,66 @@ describe('the route’s winter, staged by a view on the loaded world — #1623',
     } finally {
       stylised.destroy();
       realistic.destroy();
+    }
+  }, 120_000);
+});
+
+describe('the village-square tree, in the realistic world: no depth pre-pass — #1627', () => {
+  /** three's `LessEqualDepth`, which this file may not import. */
+  const LESS_EQUAL_DEPTH = 3;
+
+  it('draws the decoration belt with its own depth test, outside the firs’ pre-pass set, whatever `-fir-prepass` says', async () => {
+    // The drawing a view builds from the loaded world, generated firs and
+    // all, so the pre-pass the tree must stay out of exists here. The
+    // stylised world builds none, and its `-fir-prepass` lever does nothing.
+    const renderer = await loadedOn(TABLET, 'generated');
+    const drawing = renderer.realisticDrawingOfLoadedWorld();
+    if (drawing === undefined) throw new Error('no realistic world is loaded');
+    try {
+      const firs = drawing.vegetation.depthPrepasses;
+      // Non-vacuity: this world draws firs after a pre-pass.
+      expect(firs.length).toBeGreaterThan(0);
+      const corner = plannerCornerRoute(150);
+      const streets = streetsAt(corner, corridorOrigin(corner), 2, 0, corner.totalDistance);
+      const anchor = streets[0]?.anchors[0];
+      if (anchor === undefined) throw new Error('the fixture has no village');
+      const belt = drawing.decorations;
+      belt.update(streets, { x: anchor.x, z: anchor.z }, 'winter-lights', HOLIDAY_DECORATIONS);
+      // Non-vacuity: the belt holds a tree.
+      expect(belt.itemsDrawn(VILLAGE_TREE)).toBeGreaterThanOrEqual(1);
+      const mesh = belt.mesh;
+      const material = mesh.material as unknown as {
+        depthFunc: number;
+        depthWrite: boolean;
+        readonly colorWrite: boolean;
+        customProgramCacheKey(): string;
+      };
+      // Not one of the firs' meshes, nor wearing a material they or their
+      // pre-passes wear.
+      // Booleans, since a failing identity check would print a three mesh.
+      expect(firs.some(({ full, prepass }) => full === mesh || prepass === mesh)).toBe(false);
+      expect(
+        firs.some(
+          ({ full, prepass }) =>
+            full.material === mesh.material || prepass.material === mesh.material,
+        ),
+      ).toBe(false);
+      // No pre-pass child, no pre-pass program, and it writes its colour.
+      expect(mesh.children.length).toBe(0);
+      expect(material.customProgramCacheKey()).not.toContain('oyl-depth-prepass');
+      expect(material.colorWrite).toBe(true);
+      // Drawn with its own test, with the pre-pass on, off and the gate's
+      // control alike: nothing the lever moves reaches the belt.
+      for (const mode of ['drawn', 'off', 'unprepared'] as const) {
+        drawing.vegetation.setDepthPrepass(mode);
+        (mesh.onBeforeRender as () => void)();
+        expect(material.depthFunc, mode).toBe(LESS_EQUAL_DEPTH);
+        expect(material.depthWrite, mode).toBe(true);
+        (mesh.onAfterRender as () => void)();
+        expect(mesh.children.length, mode).toBe(0);
+      }
+    } finally {
+      drawing.dispose();
     }
   }, 120_000);
 });
