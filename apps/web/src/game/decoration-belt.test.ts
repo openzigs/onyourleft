@@ -18,6 +18,7 @@ import {
   ANCHOR_KINDS,
   decorationsFor,
   HOLIDAY_DECORATIONS,
+  VILLAGE_TREE,
   type DecorationKind,
   type ItemTable,
 } from './decorations';
@@ -257,7 +258,10 @@ describe('the belt’s Halloween set — #1625', () => {
 });
 
 describe('the belt’s winter lights — #1626', () => {
-  const winter = HOLIDAY_DECORATIONS['winter-lights'] ?? [];
+  // The lights, the wreath and the bows: #1627's tree is its own share, below.
+  const winter = (HOLIDAY_DECORATIONS['winter-lights'] ?? []).filter(
+    (kind) => kind.item !== VILLAGE_TREE,
+  );
 
   it('builds a bulb of 8 triangles and a wreath of 80', () => {
     expect(decorationShapeTriangles('bulb')).toBe(8);
@@ -291,7 +295,58 @@ describe('the belt’s winter lights — #1626', () => {
     const belt = new DecorationBelt('realistic');
     belt.update(STREETS, camera, 'winter-lights', HOLIDAY_DECORATIONS);
     expect(belt.triangles).toBeGreaterThan(0);
-    expect(belt.triangles).toBeLessThanOrEqual(worst);
+    // #1627: and the trees on top of the lights.
+    const tree = (HOLIDAY_DECORATIONS['winter-lights'] ?? []).find(
+      (kind) => kind.item === VILLAGE_TREE,
+    );
+    if (tree === undefined) throw new Error('no village-square tree');
+    expect(belt.triangles).toBeLessThanOrEqual(worst + 2 * decorationKindTriangles(tree));
+    belt.dispose();
+  });
+});
+
+describe('the belt’s village-square tree — #1627', () => {
+  const winter = HOLIDAY_DECORATIONS['winter-lights'] ?? [];
+  const tree = winter.find((kind) => kind.item === VILLAGE_TREE) as DecorationKind;
+
+  it('stays under REALISTIC_DECORATION_TRIANGLES with the winter lights at their heaviest, both villages in reach', () => {
+    const camera = cameraWith(2);
+    const reached = STREETS.filter((street) => inReach(street, camera));
+    const heaviest: ItemTable = {
+      'winter-lights': winter.map((kind) => ({ ...kind, chance: 1 })),
+    };
+    const items = decorationsFor(reached, 'winter-lights', heaviest);
+    // Non-vacuity: a tree in each village in reach, among every other kind.
+    expect(items.filter((item) => item.item === VILLAGE_TREE)).toHaveLength(2);
+    expect(new Set(items.map((item) => item.item)).size).toBe(winter.length);
+    const worst = items.reduce((sum, item) => {
+      const kind = winter.find((each) => each.item === item.item);
+      return sum + (kind === undefined ? 0 : decorationKindTriangles(kind));
+    }, 0);
+    expect(decorationKindTriangles(tree)).toBe(272);
+    expect(worst).toBeLessThanOrEqual(REALISTIC_DECORATION_TRIANGLES);
+    // So the belt keeps every one of them, the trees with the rest.
+    const belt = new DecorationBelt('realistic');
+    belt.update(STREETS, camera, 'winter-lights', heaviest);
+    expect(belt.triangles).toBe(worst);
+    expect(belt.itemsDrawn(VILLAGE_TREE)).toBe(2);
+    belt.dispose();
+  });
+
+  it('counts the trees it draws, and none where it is not drawn', () => {
+    const camera = cameraWith(1);
+    const belt = new DecorationBelt('stylised');
+    belt.update(STREETS, camera, 'winter-lights', HOLIDAY_DECORATIONS);
+    expect(belt.itemsDrawn(VILLAGE_TREE)).toBe(1);
+    belt.update(STREETS, camera, 'halloween', HOLIDAY_DECORATIONS);
+    expect(belt.itemsDrawn(VILLAGE_TREE)).toBe(0);
+    belt.update(STREETS, camera, 'winter-lights', HOLIDAY_DECORATIONS);
+    expect(belt.itemsDrawn(VILLAGE_TREE)).toBe(1);
+    // Hidden, before the next frame rebuilds it: not drawn, so none counted.
+    belt.setShown(false);
+    expect(belt.itemsDrawn(VILLAGE_TREE)).toBe(0);
+    belt.update(STREETS, camera, 'winter-lights', HOLIDAY_DECORATIONS);
+    expect(belt.itemsDrawn(VILLAGE_TREE)).toBe(0);
     belt.dispose();
   });
 });

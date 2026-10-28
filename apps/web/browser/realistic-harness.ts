@@ -66,6 +66,7 @@ import {
   richmondStreetFixture,
   terraceStreetFixture,
 } from '../src/game/footprint-fixtures-testing';
+import { HOLIDAY_DECORATIONS, VILLAGE_TREE } from '../src/game/decorations';
 import { mappedBuildingsOf } from '../src/game/mapped-buildings';
 import { cityCentreFixture } from '../src/game/testing/urban-fixtures';
 import type { SceneFrame } from '../src/game/port';
@@ -76,6 +77,7 @@ import {
   drawnWorldOf,
   atmosphereOf,
   decorationBeltOf,
+  decorationKindTriangles,
   decorationKindsOf,
   facadeWreathOf,
   firDepthPrepassOf,
@@ -128,6 +130,12 @@ import {
 import { plannedTown } from './realistic/town';
 import { frameCensus, type FrameCensus } from './realistic/village';
 
+/** #1627: one village-square tree's triangles, as the belt counts them. */
+const VILLAGE_TREE_KIND = HOLIDAY_DECORATIONS['winter-lights']?.find(
+  (kind) => kind.item === VILLAGE_TREE,
+);
+const VILLAGE_TREE_TRIANGLES =
+  VILLAGE_TREE_KIND === undefined ? 0 : decorationKindTriangles(VILLAGE_TREE_KIND);
 /** How long the scene runs before anything is sampled: shader compiles, first uploads. */
 const WARM_UP_SECONDS = 3;
 /** Where a long ride starts, wraps back to, and how much road it rides before it does. */
@@ -283,7 +291,17 @@ declare global {
        * the result was published — its triangles (nought where it is not
        * drawn) and how many times its geometry was built. Absent with the result.
        */
-      readonly decorations?: { readonly triangles: number; readonly rebuilds: number };
+      readonly decorations?: {
+        readonly triangles: number;
+        readonly rebuilds: number;
+        /** #1627: the village-square trees the belt draws. */
+        readonly trees: number;
+        /**
+         * #1627: one tree's triangles, from the product's own count, so the
+         * spec can hold the lights to their share beside the trees.
+         */
+        readonly treeTriangles: number;
+      };
       /**
        * #1566: the village models drawn on the last frame before the result
        * was published — houses, triangles and the structure items they took.
@@ -605,7 +623,14 @@ async function run(): Promise<void> {
           : frameCensus(drawn, canvas.clientWidth / Math.max(1, canvas.clientHeight));
       const belt = decorationBeltOf(view);
       const decorations =
-        belt === undefined ? undefined : { triangles: belt.triangles, rebuilds: belt.rebuilds };
+        belt === undefined
+          ? undefined
+          : {
+              triangles: belt.triangles,
+              rebuilds: belt.rebuilds,
+              trees: belt.itemsDrawn(VILLAGE_TREE),
+              treeTriangles: VILLAGE_TREE_TRIANGLES,
+            };
       const villageHouses = villageHouseStatsOf(view);
       publish({
         result,
