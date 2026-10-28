@@ -24,7 +24,7 @@
 > [spike 0005](0005-live-racing-patent-read.md), [spike 0006](0006-camera-bike-fit-patent-read.md),
 > [spike 0020](0020-fit-from-one-side-camera-patent-rechart.md) and
 > [spike 0022](0022-re-plans-during-the-ride-patent-chart.md) carry. **No landscape search was
-> run.** An engineer ran ten keyword searches on one day, opened six patents, and read two
+> run.** An engineer ran ten keyword searches on one day, opened five patents, and read two
 > public registers. A freedom-to-operate opinion is a systematic search plus a legal conclusion by
 > somebody qualified to give one; this is neither. Nor is §2 or §3 a trademark or copyright
 > clearance. **Anyone citing this spike as clearance is misusing it.**
@@ -176,7 +176,7 @@ needed for the chain.
 
 - **No recorded document from Atari Games Corporation to Midway Games West, Inc.** was found by these
   two searches. The USPTO's patent assignment data, as Google Patents shows it on the page for US
-  5,240,417 (§4.3), records a *"CHANGE OF NAME; ASSIGNOR: ATARI GAMES CORPORATION"* to Midway Games
+  5,240,417 (§5.2, §5.3), records a *"CHANGE OF NAME; ASSIGNOR: ATARI GAMES CORPORATION"* to Midway Games
   West Inc., recorded 2001-06-18. That is a **patent** record. Whether the same change of name
   carries the copyrights is a legal question, not answered here.
 - **"PA 76-300" in the 2008 and 2009 documents is not PA 276-300 as written.** The catalogue marks
@@ -225,7 +225,7 @@ granted patents** (`country=US&type=PATENT&status=GRANT`), first 50 results read
 | 4 | `("delivery game" OR "delivering newspapers" OR "newspaper delivery" OR "paperboy")` + `(game OR "video game")` | none | 43 | none on point by title |
 | 5 | throw + target + pedal/cycling + game | `A63B` | 510 | '752 (§5.4) |
 | 6 | throw + target + pedal/cycling | `A63F13` | 955 | '652 (§5.4) |
-| 7 | throw/toss + game/virtual environment | `A63B22/0605` | 29 | '417 (§5.2), '235 (§5.5) |
+| 7 | throw/toss + game/virtual environment | `A63B22/0605` | 29 | '417 (§5.2), '235 (§5.2, §5.3) |
 | 8 | throw/toss/projectile + target + pedal/cycling | `A63B71/0622` | 241 | none new |
 | 9 | Two claims-field (`CL=`) searches, throw-at-target and delivery-to-houses with an exercise device | none | 4 997 and 369 | none: the field did not narrow the results, which were vehicle and network patents |
 
@@ -310,8 +310,8 @@ cannot tell.
 | **A crash penalty** | Absent. The penalty touches points and the virtual rider, never the trainer (DL5) | Absent | Absent | Absent |
 | **The trainer gets the road's grade** (the existing game, unchanged by Delivery) | **Needs reading by counsel**, for completeness only: claims 11, 38, 40 and 51 recite resistance or power assistance to simulate terrain, but each also requires the bicycle support assembly this project does not make. The patent is reported expired | Not relevant | Not relevant | Not relevant |
 
-**None of the six is on point for Delivery's mechanics as read.** That is the result of ten
-searches and six patents on one day. It is not clearance. The two families most worth a lawyer's
+**None of the five is on point for Delivery's mechanics as read.** That is the result of ten
+searches and five patents on one day. It is not clearance. The two families most worth a lawyer's
 time are the live Dugan family (§5.4) and anything these searches could not reach (§7 Question 5).
 
 ---
@@ -375,5 +375,5 @@ for a page of 50. A page with no `data` key is a failed fetch, not an empty resu
 - **Delivery changes shape**: a camera throw (would meet '219's element, though expired), a shared
   week across riders (the step-sharing claims' group element), a room (DL9), or a brand controller
   (DL8). Each would need this chart re-run.
-- **Anyone reads this as clearance.** It is ten searches, six patents and two registers, read by an
+- **Anyone reads this as clearance.** It is ten searches, five patents and two registers, read by an
   engineer on one day.
