@@ -2,6 +2,7 @@
 
 import { DEFAULT_BLOBS_PATH, DEFAULT_DATABASE_PATH } from '../server-config.ts';
 import {
+  accountErase,
   backup,
   CommandError,
   instanceKey,
@@ -29,6 +30,7 @@ const USAGE = `usage: node src/operator/cli.ts <command>
   instance-key init | show | rotate [--drop-old] [--serial-above <n>] | rotate-identity [--compromised] | reset
   load-accounts add     (the public keys \`race-load keys\` printed, on standard input)
   load-accounts erase
+  account-erase [--confirm]   (the rider's recovery code on standard input)
 `;
 
 function flag(args: string[], name: string): string | undefined {
@@ -188,6 +190,21 @@ export async function runCommand(
         } else {
           throw new CommandError(USAGE);
         }
+        break;
+      }
+      case 'account-erase': {
+        const confirm = has(args, '--confirm');
+        // Anything else on the line is refused, and never echoed: it may be
+        // the rider's recovery code, which belongs on standard input (#1802).
+        if (args.length > 0) {
+          throw new CommandError(
+            'account-erase reads the recovery code from standard input, never from the command line. Nothing was erased.',
+          );
+        }
+        report = await accountErase(paths, {
+          input: await (env.readStandardInput ?? (() => Promise.resolve('')))(),
+          confirm,
+        });
         break;
       }
       default:

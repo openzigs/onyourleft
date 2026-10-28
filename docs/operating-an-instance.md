@@ -627,6 +627,50 @@ backs up a populated instance while it is open and writing, restores the snapsho
 place, and reads a known activity record back through the store. Restoring **on a second machine**
 is an owner's step — see [issue #733](https://github.com/openzigs/onyourleft/issues/733).
 
+## Erasing a rider's account when they email to ask
+
+```bash
+node src/operator/cli.ts account-erase              # what it would erase; erases nothing
+node src/operator/cli.ts account-erase --confirm    # erases it
+```
+
+**When to use it:** a rider who no longer has the app, or whose app can no longer sign in, emails to
+have their account deleted — the route [`docs/delete-your-account.md`](delete-your-account.md) gives
+them, "Ask for it to be deleted, without the app". A rider who still has the app deletes their own
+account from it; this command is not for that, and not for an account you have only a name for.
+
+**The rider's recovery code proves the account is theirs** (the owner's ruling of 2026-10-27), never
+a display name, which is neither unique nor secret. The command reads the code from **standard
+input**, one line, in either case, with or without its hyphens or spaces. It refuses a code given on
+the command line, because the line ends up in the shell's history and the process list, and it
+prints the code nowhere. Paste it at a prompt that does not echo, rather than into the command:
+
+```bash
+read -rs CODE   # paste the code from the email, then Enter
+printf '%s\n' "$CODE" | docker exec -i <container> node src/operator/cli.ts account-erase
+printf '%s\n' "$CODE" | docker exec -i <container> node src/operator/cli.ts account-erase --confirm
+unset CODE
+```
+
+Without `--confirm` it erases nothing and prints the **one** account the code matches: its id and
+how many device keys, activities, open rooms it made and race results it holds, never a name or a
+coordinate. With `--confirm` it erases that account exactly as a rider's own erasure from the app does
+(`DELETE /v1/account`): every room it made is ended and its route deleted first, then every file no
+other rider also sent, then every row the account owns. The moderation log is kept, as it is for any
+erasure. It reads the account back as gone, and prints the same counts with `"erased": true`.
+
+A code that is not the shape of one, matches no account on this instance, or was already used
+**erases nothing**, and the command says which. Ask the rider for a code they have not used. If they
+have none left, the command cannot help: the delete page tells them the maintainer will ask how else
+they can show the account is theirs, and that is a judgement for you to make, not for this command.
+After an erasure the account's codes went with it, so the same code then matches nothing.
+
+The instance can stay running: the command works through the same store, and a session the account
+held is refused from that moment. One thing it does not share with the running instance is the lock
+that orders ending a room against making one on the same route (`apps/instance/src/rooms/rooms.ts`),
+so a room made on that route in the same instant could lose its route file. Stop the instance first
+if that matters to you. The test is `apps/instance/src/operator/account-erase.test.ts`.
+
 ## Upgrading
 
 Migrations are **an explicit step the deploy runs before the new version starts**, never something

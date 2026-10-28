@@ -1208,6 +1208,13 @@ export interface SqlStore {
   hasRecoveryCode(athleteId: string, codeSha256: string): Promise<boolean>;
   /** Spend a recovery code, whoever's it is: the code is what names the athlete. */
   takeRecoveryCode(codeSha256: string, now: number): Promise<Take<{ readonly athleteId: string }>>;
+  /**
+   * The recovery code whose SHA-256 is `codeSha256`, spent or not, whoever's it
+   * is — read, never spent: the code is what names the athlete. Only the
+   * operator's `account-erase` reads it (#1802), to find the account an
+   * emailed request proves is the sender's.
+   */
+  findRecoveryCode(codeSha256: string): Promise<RecoveryCode | undefined>;
 
   /** Mint a link code, and log `link_code_minted` by its minter at `at`, together (#1193). */
   putLinkCode(code: Omit<LinkCode, 'usedAt'>, at: number): Promise<void>;
@@ -2928,6 +2935,16 @@ export function createSqlStore(db: Kysely<InstanceDatabase>): SqlStore {
             .where('used_at', 'is', null)
             .executeTakeFirst()) !== undefined,
       ),
+
+    findRecoveryCode: (codeSha256) =>
+      exclusive(async () => {
+        const row = await db
+          .selectFrom('recovery_code')
+          .selectAll()
+          .where('code_sha256', '=', codeSha256)
+          .executeTakeFirst();
+        return row === undefined ? undefined : recoveryCodeFrom(row);
+      }),
 
     takeRecoveryCode: (codeSha256, now) =>
       exclusive(() =>
