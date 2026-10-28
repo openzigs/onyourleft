@@ -150,9 +150,27 @@ describe('the assist setting keeps a missed house on the round — #1806 for #18
     expect(outcome.next).toEqual({ day: 2, houses: FIRST_DAY_HOUSES, score: 0 });
   });
 
+  it('keeps the round length when only some houses are missed', () => {
+    let round = startRound(5, { assisted: true });
+    round = recordDelivery(round, 0);
+    round = recordDelivery(round, 1);
+    round = recordDelivery(round, 2);
+    round = recordMiss(round, 3);
+    round = recordMiss(round, 4);
+    const outcome = endRound({ day: 1, houses: 5, score: 0 }, round);
+    expect(outcome).toMatchObject({ delivered: 3, missed: 2, nextHouses: 5 });
+    expect(outcome.next).toEqual({ day: 2, houses: 5, score: 3 });
+  });
+
   it('carries the assist through a recorded outcome, and still adds one for a perfect round', () => {
     const round = deliverAll(startRound(5, { assisted: true }));
     expect(round.assisted).toBe(true);
     expect(endRound(FRESH_WEEK, round).nextHouses).toBe(6);
+  });
+});
+
+describe('FRESH_WEEK is shared, so it cannot be changed at runtime', () => {
+  it('is frozen', () => {
+    expect(Object.isFrozen(FRESH_WEEK)).toBe(true);
   });
 });

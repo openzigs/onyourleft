@@ -68,7 +68,11 @@ export interface WeekProgress {
 }
 
 /** A week nobody has ridden yet. */
-export const FRESH_WEEK: WeekProgress = { day: 1, houses: FIRST_DAY_HOUSES, score: 0 };
+export const FRESH_WEEK: WeekProgress = Object.freeze({
+  day: 1,
+  houses: FIRST_DAY_HOUSES,
+  score: 0,
+});
 
 /** What ending a round decided. */
 export interface RoundOutcome {
