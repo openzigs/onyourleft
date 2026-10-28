@@ -198,6 +198,12 @@ describe('the throw control on the HUD — #1810', () => {
     }
   });
 
+  it('wraps its row of buttons, as the HUD’s controls do, rather than overflow a narrow panel', () => {
+    // SC 1.4.10: three 72 px buttons can be wider than a landscape phone's actions panel.
+    expect(declared('.oyl-hud__throw-buttons', 'flex-wrap')).toEqual(['wrap']);
+    expect(declared('.oyl-hud__controls', 'flex-wrap')).toEqual(['wrap']);
+  });
+
   it('is drawn in the HUD control’s tokens, each pair AA in every theme', () => {
     const ink = tokenOf(declared('.oyl-hud__control', 'color')[0]);
     const surface = tokenOf(declared('.oyl-hud__control', 'background')[0]);

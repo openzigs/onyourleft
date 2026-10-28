@@ -149,6 +149,23 @@ const throwButtons = (): HTMLButtonElement[] =>
     `[role="group"][aria-label="${THROW_CONTROL_NAME}"] button`,
   );
 
+/**
+ * A key on a focused control, as a browser handles it: Enter or Space presses
+ * a focused button (a click with `detail` 0) unless a handler took the key.
+ * jsdom does neither the press nor the focus a tap leaves behind in Chromium
+ * (the Android WebView included), so both are done here.
+ */
+function keyOn(control: HTMLElement, key: string): KeyboardEvent {
+  control.focus();
+  const event = press(key, control);
+  if (!event.defaultPrevented && (key === 'Enter' || key === ' ')) {
+    act(() => {
+      control.click();
+    });
+  }
+  return event;
+}
+
 /** A key from a keyboard or a remote, with nothing focused: it lands on the page. */
 function press(key: string, on: Element = document.body): KeyboardEvent {
   const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
@@ -173,7 +190,7 @@ describe('throwing from the HUD with the touch lock off — #1810', () => {
     await ride();
 
     const left = press('ArrowLeft');
-    press('Enter');
+    press('ArrowUp');
     press('PageDown');
 
     expect(thrown()).toEqual(['left', 'right', 'right']);
@@ -209,7 +226,7 @@ describe('throwing from the HUD with the touch lock on — #1810, ADR 0059 D-5',
     tap(button('Left'));
 
     press('ArrowLeft');
-    press(' ');
+    press('ArrowUp');
 
     expect(thrown()).toEqual(['left', 'right']);
   });
@@ -276,6 +293,60 @@ describe('a focused control keeps its key — #1810', () => {
 
     expect(thrown()).toEqual([]);
     expect(space.defaultPrevented).toBe(false);
+  });
+});
+
+describe('a remote after a tap left a HUD button focused — owner ruling 2026-10-28', () => {
+  const locked = (): string | null => button(TOUCH_LOCK_NAME).getAttribute('aria-pressed');
+
+  it('Enter or Space on a focused Lock throws nothing, and does what it always does', async () => {
+    for (const key of ['Enter', ' ']) {
+      await ride();
+      tap(button(TOUCH_LOCK_NAME));
+      expect(locked()).toBe('true');
+
+      // Enter or Space turns the lock off at once (`TouchLockButton`): Delivery changes nothing.
+      const event = keyOn(button(TOUCH_LOCK_NAME), key);
+
+      expect(event.defaultPrevented, JSON.stringify(key)).toBe(false);
+      expect(locked(), JSON.stringify(key)).toBe('false');
+      expect(thrown(), JSON.stringify(key)).toEqual([]);
+      mounted?.unmount();
+      mounted = undefined;
+    }
+  });
+
+  it('Enter or Space on a focused Pause throws nothing, and pauses as it always does', async () => {
+    await ride();
+    tap(button('Pause'));
+    expect(pauses).toBe(1);
+
+    keyOn(button('Pause'), 'Enter');
+    keyOn(button('Pause'), ' ');
+
+    expect(pauses).toBe(3);
+    expect(thrown()).toEqual([]);
+  });
+
+  it('ArrowUp on a focused Lock throws toward the next house and leaves the lock on', async () => {
+    await ride();
+    tap(button(TOUCH_LOCK_NAME));
+
+    const event = keyOn(button(TOUCH_LOCK_NAME), 'ArrowUp');
+
+    expect(thrown()).toEqual(['right']);
+    expect(event.defaultPrevented).toBe(true);
+    expect(locked()).toBe('true');
+  });
+
+  it('ArrowUp on a focused Pause throws and does not pause', async () => {
+    await ride();
+    tap(button('Pause'));
+
+    keyOn(button('Pause'), 'ArrowUp');
+
+    expect(thrown()).toEqual(['right']);
+    expect(pauses).toBe(1);
   });
 });
 

@@ -64,7 +64,7 @@ export function ThrowControl(props: ThrowControlProps): JSX.Element {
     const onKey = (event: KeyboardEvent): void => {
       const intent = intentOfKey(event);
       if (intent === undefined) return;
-      // The key is the throw's now: Space, the arrows and Page Down would
+      // The key is the throw's now: the arrows and Page Up or Down would
       // otherwise also scroll the ride screen.
       event.preventDefault();
       port.throwParcel(intent);

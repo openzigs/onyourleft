@@ -27,22 +27,25 @@
  * volume and media keys are not bound here: whether they reach the page at
  * all waits for spike #1819 (owner ruling 2026-10-28, DL7 revised).
  *
- * {@link THROW_KEYS} is this project's own proposed map, for the owner's
- * approval in #1810's pull request. A one-button remote most often sends
- * Enter or Space, so those throw toward the next house, which is the one
- * throw that needs no choice; a presentation clicker's two buttons send
- * Page Up and Page Down, so those throw left and right; and a keyboard's
- * arrows do the same as a clicker's, with the up arrow toward the next house.
+ * {@link THROW_KEYS} is the owner's map (ruling of 2026-10-28 on #1810's
+ * pull request): a presentation clicker's two buttons send Page Up and Page
+ * Down, so those throw left and right; a keyboard's arrows do the same, with
+ * the up arrow toward the next house.
  *
- * ## A focused control keeps its key
+ * ⚠️ **Enter and Space are not throw keys** ("Don't bind Enter/Space"). A tap
+ * on a HUD button usually leaves it focused, and Enter or Space then presses
+ * it: bound to a throw, a remote's first press after a tap on *Lock* or
+ * *Pause* would either be lost to the button or take the button's job from
+ * it. Unbound, they keep their normal job on a focused control, and no throw
+ * key is one a button acts on, so a remote sending throw keys can never turn
+ * the touch lock off or pause the ride.
  *
- * {@link intentOfKey} takes no key a focused control would act on: none at
- * all from a form field, where a key types or moves a value, and no Enter or
- * Space from a button, a link or any other control those keys activate. So
- * Enter on a focused *Pause* pauses and throws nothing. It takes nothing with
- * Ctrl, Alt or Meta held (a browser or system shortcut), nothing a handler
- * already took (`defaultPrevented`), and nothing from a held key's repeats: a
- * held key throws once.
+ * ## A focused field keeps its key
+ *
+ * {@link intentOfKey} takes no key from a form field, where a key types or
+ * moves a value. It takes nothing with Ctrl, Alt or Meta held (a browser or
+ * system shortcut), nothing a handler already took (`defaultPrevented`), and
+ * nothing from a held key's repeats: a held key throws once.
  *
  * ## The touch lock is not this module's
  *
@@ -58,8 +61,8 @@ export const THROW_INTENTS = ['left', 'right', 'next-house'] as const;
 export type ThrowIntent = (typeof THROW_INTENTS)[number];
 
 /**
- * The default key map, by `KeyboardEvent.key`. This project's own, for the
- * owner's approval in #1810's pull request; the header says why each key.
+ * The default key map, by `KeyboardEvent.key`: the owner's, of 2026-10-28.
+ * No Enter and no Space; the header says why.
  */
 export const THROW_KEYS: Readonly<Record<string, ThrowIntent>> = Object.freeze({
   ArrowLeft: 'left',
@@ -67,17 +70,10 @@ export const THROW_KEYS: Readonly<Record<string, ThrowIntent>> = Object.freeze({
   ArrowRight: 'right',
   PageDown: 'right',
   ArrowUp: 'next-house',
-  Enter: 'next-house',
-  ' ': 'next-house',
 });
 
 /** Where every key is the field's own: it types, or moves a value. */
 const FIELD = 'input, select, textarea, [contenteditable]:not([contenteditable="false"])';
-
-/** What Enter or Space activates when it has focus. */
-const ACTIVATED_BY_KEY =
-  'button, a[href], summary, [role="button"], [role="link"], [role="checkbox"], ' +
-  '[role="switch"], [role="radio"], [role="tab"], [role="menuitem"], [role="option"]';
 
 /** The parts of a key event {@link intentOfKey} reads. */
 export type ThrowKeyEvent = Pick<
@@ -87,7 +83,7 @@ export type ThrowKeyEvent = Pick<
 
 /**
  * The throw a key asks for, or `undefined` when it asks for none — because it
- * is not in {@link THROW_KEYS}, or because it belongs to a focused control, a
+ * is not in {@link THROW_KEYS}, or because it belongs to a focused field, a
  * shortcut, a handler that already took it, or a held key's repeat.
  */
 export function intentOfKey(event: ThrowKeyEvent): ThrowIntent | undefined {
@@ -97,11 +93,6 @@ export function intentOfKey(event: ThrowKeyEvent): ThrowIntent | undefined {
   const intent = Object.hasOwn(THROW_KEYS, event.key) ? THROW_KEYS[event.key] : undefined;
   if (intent === undefined) return undefined;
   const target = event.target;
-  if (target instanceof Element) {
-    if (target.closest(FIELD) !== null) return undefined;
-    if ((event.key === 'Enter' || event.key === ' ') && target.closest(ACTIVATED_BY_KEY) !== null) {
-      return undefined;
-    }
-  }
+  if (target instanceof Element && target.closest(FIELD) !== null) return undefined;
   return intent;
 }

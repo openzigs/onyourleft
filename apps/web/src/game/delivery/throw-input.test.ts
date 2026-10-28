@@ -60,12 +60,27 @@ describe('the throw intents — #1810', () => {
 });
 
 describe('a key — #1810', () => {
-  it('maps the proposed default keys to their throws', () => {
+  it('maps the owner’s keys to their throws, and no others', () => {
+    expect({ ...THROW_KEYS }).toEqual({
+      ArrowLeft: 'left',
+      PageUp: 'left',
+      ArrowRight: 'right',
+      PageDown: 'right',
+      ArrowUp: 'next-house',
+    });
     expect(
-      ['ArrowLeft', 'PageUp', 'ArrowRight', 'PageDown', 'ArrowUp', 'Enter', ' '].map((name) =>
+      ['ArrowLeft', 'PageUp', 'ArrowRight', 'PageDown', 'ArrowUp'].map((name) =>
         intentOfKey(key(name)),
       ),
-    ).toEqual(['left', 'left', 'right', 'right', 'next-house', 'next-house', 'next-house']);
+    ).toEqual(['left', 'left', 'right', 'right', 'next-house']);
+  });
+
+  it('asks for no throw on Enter or Space, focused on a control or not (owner, 2026-10-28)', () => {
+    const button = placed(document.createElement('button'));
+    for (const target of [document.body, placed(document.createElement('div')), button]) {
+      expect(intentOfKey(key('Enter', { target }))).toBeUndefined();
+      expect(intentOfKey(key(' ', { target }))).toBeUndefined();
+    }
   });
 
   it('asks for no throw from a key not in the map, nor from a name on the object prototype', () => {
@@ -107,30 +122,12 @@ describe('a key — #1810', () => {
     expect(intentOfKey(key('ArrowRight', { target: editable }))).toBeUndefined();
   });
 
-  it('leaves Enter and Space to a focused button, and throws on the arrows from one', () => {
+  it('throws on the arrows and page keys from a focused button, which no button acts on', () => {
     const button = placed(document.createElement('button'));
     const inside = button.appendChild(document.createElement('span'));
-    for (const target of [button, inside]) {
-      expect(intentOfKey(key('Enter', { target }))).toBeUndefined();
-      expect(intentOfKey(key(' ', { target }))).toBeUndefined();
-    }
     expect(intentOfKey(key('ArrowLeft', { target: button }))).toBe('left');
-    expect(intentOfKey(key('PageDown', { target: button }))).toBe('right');
-  });
-
-  it('leaves Enter to a link and to a control with a role Enter activates', () => {
-    const link = placed(document.createElement('a'));
-    link.href = '#here';
-    expect(intentOfKey(key('Enter', { target: link }))).toBeUndefined();
-    const toggle = placed(document.createElement('div'));
-    toggle.setAttribute('role', 'switch');
-    expect(intentOfKey(key(' ', { target: toggle }))).toBeUndefined();
-  });
-
-  it('throws toward the next house on Enter or Space with no control focused', () => {
-    const panel = placed(document.createElement('div'));
-    expect(intentOfKey(key('Enter', { target: panel }))).toBe('next-house');
-    expect(intentOfKey(key(' ', { target: document.body }))).toBe('next-house');
+    expect(intentOfKey(key('PageDown', { target: inside }))).toBe('right');
+    expect(intentOfKey(key('ArrowUp', { target: button }))).toBe('next-house');
   });
 });
 

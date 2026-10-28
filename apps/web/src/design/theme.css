@@ -6568,7 +6568,9 @@ select.oyl-input {
 /* #1810: A DELIVERY ROUND'S THROWS, a row of three ride-time controls under
    *Pause* and *End ride*, each at #94's 72 px floor (set inline from
    CONTROL_MINIMUM_PIXELS). Only a Delivery round shows it, and until #1816
-   no ride runs one, so no browser spec measures where it lands yet. */
+   no ride runs one, so no browser spec measures where it lands yet. The row
+   wraps, as .oyl-hud__controls does, rather than overflow a landscape
+   phone's narrow actions panel. */
 .oyl-hud__throws {
   display: grid;
   gap: var(--oyl-space-xs);
@@ -6577,6 +6579,7 @@ select.oyl-input {
 
 .oyl-hud__throw-buttons {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--oyl-space-sm);
 }
 
