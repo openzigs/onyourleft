@@ -2,6 +2,7 @@
 
 import { describe, expect, it } from 'vitest';
 
+import { AA_LARGE_TEXT_OR_NON_TEXT } from '../design/contrast';
 import {
   groundBlend,
   ROAD_EDGE_METRES,
@@ -10,15 +11,17 @@ import {
   stoneBlend,
   treeLineHeight,
   VERGE_BLEND_METRES,
+  VERGE_SLUSH,
 } from './ground-blend';
+import { glslFunction } from './glsl-testing';
 import { NO_LAND_CLASS } from './land-class';
-import { terrainCorridor, VERGE_METRES } from './landform';
+import { TERRAIN_MOTTLE, terrainCorridor, VERGE_METRES } from './landform';
 import { REALISTIC_SURFACES } from './realistic-assets';
-import { hillRoute } from './route-fixtures-testing';
+import { hillRoute, northRoute } from './route-fixtures-testing';
 import { scatterSeed } from './scatter';
-import { corridorOrigin, roadCorridor } from './terrain';
+import { corridorOrigin, MARKING_COLOUR, roadCorridor } from './terrain';
 import { photographicGroundMaterial } from './three-renderer';
-import { treeLineMetres } from './world';
+import { groundColourIn, snowCoverIn, treeLineMetres, vergeSlushIn, worldStyle } from './world';
 
 const up = (degrees: number): number => Math.cos((degrees * Math.PI) / 180);
 
@@ -81,7 +84,8 @@ describe('the realistic ground’s blend — #627', () => {
     expect(shader.fragmentShader).toContain('if (oylRockShare - oylCragShare > 0.0)');
     // The world's colour leads: each photograph over its own mean, times it.
     expect(shader.fragmentShader).toContain('/ max(textureLod(rockMap, vec2(0.5), 16.0).rgb');
-    expect(shader.fragmentShader).toContain('oylGroundWorld * vColor.rgb');
+    expect(shader.fragmentShader).toContain('vec3 oylSurfaces = vColor.rgb');
+    expect(shader.fragmentShader).toContain('+ oylGroundWorld * (oylRockTexel');
     // Mixed in after the patchwork, which the surface detail splices in after
     // `color_fragment`: #460's fields show where the grass does.
     const patchwork = shader.fragmentShader.indexOf('fieldTone');
@@ -196,8 +200,8 @@ describe('the bare rock a steep bank wears — #1274', () => {
     expect(fragment).toContain('/ max(textureLod(cragMap, vec2(0.5), 16.0).rgb');
     expect(fragment).toContain('textureGrad(cragNormalMap, cragUv, cragDx, cragDy).xyz');
     // The loose stone keeps only what the crag leaves, in both places.
-    expect(fragment).toContain('+ oylRockTexel * (oylRockShare - oylCragShare)');
-    expect(fragment).toContain('+ oylCragTexel * oylCragShare);');
+    expect(fragment).toContain('(oylRockTexel * (oylRockShare - oylCragShare)');
+    expect(fragment).toContain('+ oylCragTexel * oylCragShare));');
     expect(fragment).toContain('float oylScreeShare = oylRockShare - oylCragShare;');
     // At 3 m a repeat: this repository's figure, the scan's page stating none.
     expect(REALISTIC_SURFACES.crag.tileMetres).toBe(3);
@@ -260,5 +264,89 @@ describe('the ground blend’s derivatives, taken once — #1523', () => {
     );
     bounded.material.dispose();
     before.material.dispose();
+  });
+});
+
+/**
+ * The road's edge in snow — #1692. In a snowy winter the ground beside the
+ * road is the snow, and the verge multiplied the snow by its photograph: white
+ * beside the road's white edge line, and the edge of the road stopped reading.
+ * The verge now mixes toward ploughed slush by `world.ts` §`vergeSlushIn`,
+ * and this reads the verge's colour from the program three is handed
+ * (`oylSlushedVerge`), at the edge line, under a full winter on a 61° N road
+ * at sea level — `?place=nordic` on the owner's page.
+ */
+describe('the road’s edge line against a snowy verge — #1692', () => {
+  const nordic = worldStyle(northRoute(1_000, () => 0, { latitude: 61 }));
+  type Rgb = readonly [number, number, number];
+  /** sRGB to linear, as three decodes a colour for the shader. */
+  const linear = (packed: number): Rgb => {
+    const decode = (channel: number): number => {
+      const c = channel / 255;
+      return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    };
+    return [decode((packed >> 16) & 0xff), decode((packed >> 8) & 0xff), decode(packed & 0xff)];
+  };
+  /** WCAG 2.2's relative luminance, of a colour already linear. */
+  const luminance = ([r, g, b]: readonly number[]): number =>
+    0.2126 * (r ?? 0) + 0.7152 * (g ?? 0) + 0.0722 * (b ?? 0);
+  const contrast = (a: number, b: number): number =>
+    (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+  const slushed = (world: Rgb, slush: number): readonly number[] => {
+    const { shader, material } = compiledGround(ALL_SURFACES);
+    material.dispose();
+    const drawn = glslFunction(shader.fragmentShader, 'oylSlushedVerge')(world, slush);
+    if (typeof drawn === 'number') throw new Error('oylSlushedVerge returned a float');
+    return drawn;
+  };
+  const line = luminance(linear(MARKING_COLOUR));
+
+  it('draws the verge beside the edge line at 3:1 or more from the line in a full winter', () => {
+    // Non-vacuity: the ground there is the snow, and the verge is all of the
+    // ground at the road's edge, where the edge line's outer side is.
+    expect(snowCoverIn(nordic, 1)).toBe(1);
+    expect(groundBlend(ROAD_EDGE_METRES, 1, 0, 1e6).verge).toBe(1);
+    const snow = linear(groundColourIn(nordic, 1));
+    const verge = slushed(snow, vergeSlushIn(nordic, 1));
+    // The landform's mottle at its brightest is the verge's worst case.
+    expect(contrast(line, luminance(verge) * (1 + TERRAIN_MOTTLE))).toBeGreaterThanOrEqual(
+      AA_LARGE_TEXT_OR_NON_TEXT,
+    );
+    // And it is the slush, in the shader as in the constant.
+    const slush = linear(VERGE_SLUSH);
+    for (let channel = 0; channel < 3; channel += 1) {
+      expect(verge[channel]).toBeCloseTo(slush[channel] ?? 0, 5);
+    }
+    // The control: the verge as it was before #1692, the snow beside the line.
+    expect(contrast(line, luminance(snow))).toBeLessThan(1.5);
+  });
+
+  it('mixes the slush into the verge’s term alone, by the season’s uniform', () => {
+    const { shader, material } = compiledGround(ALL_SURFACES);
+    material.dispose();
+    const fragment = shader.fragmentShader;
+    expect(fragment).toContain('uniform float oylVergeSlush;');
+    expect(shader.uniforms['oylVergeSlush']).toEqual({ value: 0 });
+    expect(fragment).toContain(
+      'vec3 oylVergeWorld = oylSlushedVerge(oylGroundWorld, oylVergeSlush);',
+    );
+    expect(fragment).toContain('* (oylVergeWorld * oylVergeTexel * oylVergeShare');
+    // Every ground shares the one uniform the view writes.
+    expect(compiledGround(ALL_SURFACES).shader.uniforms['oylVergeSlush']).toBe(
+      shader.uniforms['oylVergeSlush'],
+    );
+  });
+
+  it('draws the verge exactly as before with no winter, and in a winter with no snow', () => {
+    const grass: Rgb = [0.1, 0.2, 0.05];
+    expect(slushed(grass, 0)).toEqual(grass);
+    for (const latitude of [0, 46, 61, 75]) {
+      for (const altitude of [0, 1_600, 3_000]) {
+        const world = worldStyle(northRoute(1_000, () => altitude, { latitude }));
+        expect(vergeSlushIn(world, 0)).toBe(0);
+      }
+    }
+    // 50° N at sea level: a winter there lays no snow, and the verge stays earth.
+    expect(vergeSlushIn(worldStyle(northRoute(1_000, () => 0, { latitude: 50 })), 1)).toBe(0);
   });
 });

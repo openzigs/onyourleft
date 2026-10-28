@@ -42,6 +42,19 @@ import { treeLineMetres } from './world';
  */
 export const VERGE_BLEND_METRES: readonly [number, number] = [0.45, 0.9];
 
+/**
+ * The verge in a snowy winter: grey, ploughed slush where the snow meets the
+ * road — #1692. Packed sRGB, **0x6f6c66**, this repository's own, a little
+ * brown for the grit in it. The ground's snow (`world.ts`) beside the road's
+ * white edge line (`terrain.ts` §`MARKING_COLOUR`) measures 1.03:1, and
+ * the edge of the road stopped reading; this measures about 4.6:1 against the
+ * line, past WCAG 2.2's 3:1 for a non-text graphic, which
+ * `ground-blend.test.ts` holds from the shader three is handed. The verge
+ * mixes toward it by `world.ts` §`vergeSlushIn`, over the verge's own band
+ * ({@link VERGE_BLEND_METRES}), in the ground's one draw call.
+ */
+export const VERGE_SLUSH = 0x6f6c66;
+
 /** The road's half-width, from which the verge is measured. */
 export const ROAD_EDGE_METRES = ROAD_WIDTH_METRES / 2;
 
