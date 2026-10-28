@@ -10,6 +10,11 @@
  * round's obstacles at its start and stepping them once for each simulation
  * step; until then only its tests reach it.
  *
+ * ⚠️ **For #1816: step the obstacles only on a simulation step that actually
+ * ran** — never while the ride is paused or stopped. A rolling obstacle still
+ * crosses a rider whose speed is nought, so stepping on a tick the rider did
+ * not ride would cost a point for not moving.
+ *
  * ## A crash costs points, and nothing else (ADR 0059 D-2 item 4)
  *
  * A {@link Crash} is a score delta and nothing more. It does not slow the
@@ -40,6 +45,15 @@
  * {@link AVOIDABLE_FASTEST_METRES_PER_SECOND} at every drawn line, and the
  * test sweeps that.
  *
+ * ## The round's score, and only the round's (owner's ruling of 2026-10-28)
+ *
+ * {@link scoreAfter} keeps the day's round score **never below nought at any
+ * moment**: a crash at nought costs nothing, so two crashes and then three
+ * deliveries score 3. A crash comes off the round's score only. The week's
+ * score is `round.ts` §`endRound`'s, deliveries only, and nothing here
+ * reaches it: this module imports nothing from `round.ts` or
+ * `delivery-progress.ts`.
+ *
  * ## Our own roster (DL1)
  *
  * A wheelie bin, a hand trolley and a traffic cone, each rolling loose across
@@ -61,12 +75,12 @@
  * it to `bicycle.ts`: that module imports `@onyourleft/store` and the design
  * tokens, and this one may reach nothing it does not need (ADR 0059 D-2).
  *
- * ## The numbers are this project's own, proposed for the owner's approval
+ * ## The numbers are this project's own, approved by the owner on 2026-10-28
  *
  * {@link OBSTACLE_SIGHT_METRES}, {@link OBSTACLE_SPACING_METRES}, the on-time
  * and avoidable speed ranges, {@link OBSTACLE_KINDS} and
- * {@link CRASH_SCORE_DELTA}. #1811 asked for them to be proposed in its pull
- * request; nothing else here hard-codes them.
+ * {@link CRASH_SCORE_DELTA}, as proposed in #1811's pull request; nothing
+ * else here hard-codes them.
  *
  * ## Nothing here leaves the ride
  *
@@ -78,7 +92,6 @@
 
 import { fmix32, mixInto, uniformFrom } from '../seeded';
 
-import type { Round } from './round';
 import { CARRIAGEWAY_HALF_WIDTH_METRES, DELIVERY_TICK_SECONDS } from './throw';
 
 /** How far ahead of the rider an obstacle is set going, in metres. */
@@ -86,8 +99,8 @@ export const OBSTACLE_SIGHT_METRES = 60;
 
 /**
  * The stretch of road each obstacle is placed in, in metres. Two obstacles
- * are never closer than {@link OBSTACLE_SIGHT_METRES}, so one is passed
- * before the next is set going.
+ * are never closer than {@link OBSTACLE_SIGHT_METRES}, so the next is set
+ * going no sooner than the rider reaches the last.
  */
 export const OBSTACLE_SPACING_METRES = 250;
 
@@ -283,7 +296,7 @@ export function stepObstacles(state: ObstacleState, input: ObstacleInput): Obsta
       'the rider needs a finite distance and lateral offset, and a finite speed not below zero',
     );
   }
-  if (obstacles.length !== state.crashed.length) {
+  if (obstacles.length !== state.crashed.length || obstacles.length !== state.startedAt.length) {
     refuse('the state is for a different number of obstacles');
   }
   const tick = state.tick + 1;
@@ -326,14 +339,20 @@ export function stepObstacles(state: ObstacleState, input: ObstacleInput): Obsta
   return { state: { tick, startedAt, crashed }, crashes };
 }
 
+/** One change to the round's score, in the order it happened: a delivery, a point on, or a crash. */
+export type ScoreChange = 'delivery' | Crash;
+
 /**
- * The round's score: a point for each delivery, with every crash's
- * {@link Crash.scoreDelta} taken off, never below nought.
+ * The round's score after `change`: a delivery is a point on, a crash its
+ * {@link Crash.scoreDelta}, and the score is never below nought at any moment,
+ * so a crash at nought costs nothing. #1816 reports a delivery here only when
+ * `round.ts` §`recordDelivery` settled a house.
  */
-export function roundScore(round: Round, crashes: readonly Crash[]): number {
-  const delivered = round.houses.filter((outcome) => outcome === 'delivered').length;
-  return Math.max(
-    0,
-    crashes.reduce((score, crash) => score + crash.scoreDelta, delivered),
-  );
+export function scoreAfter(score: number, change: ScoreChange): number {
+  return Math.max(0, score + (change === 'delivery' ? 1 : change.scoreDelta));
+}
+
+/** The round's score after `changes`, in order, from nought: {@link scoreAfter} at each. */
+export function roundScore(changes: readonly ScoreChange[]): number {
+  return changes.reduce(scoreAfter, 0);
 }

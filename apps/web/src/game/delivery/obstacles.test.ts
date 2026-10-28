@@ -7,6 +7,7 @@ import {
   BICYCLE_LENGTH_METRES,
   RIDER_HALF_WIDTH_METRES as BICYCLE_HALF_WIDTH,
 } from '../bicycle';
+import type { PreferenceStorage } from '../hud/announce-preference';
 import { LINE_HOME_OFFSET_METRES, LINE_LIMIT_METRES } from '../racing-line';
 import {
   AVOIDABLE_FASTEST_METRES_PER_SECOND,
@@ -25,10 +26,13 @@ import {
   RIDER_BEHIND_METRES,
   RIDER_HALF_WIDTH_METRES,
   roundScore,
+  type ScoreChange,
+  scoreAfter,
   startObstacles,
   stepObstacles,
 } from './obstacles';
-import { recordDelivery, startRound } from './round';
+import { readDeliveryProgress, writeDeliveryProgress } from './delivery-progress';
+import { endRound, FRESH_WEEK, recordDelivery, type Round, startRound } from './round';
 import { CARRIAGEWAY_HALF_WIDTH_METRES, DELIVERY_TICK_SECONDS } from './throw';
 
 /**
@@ -209,14 +213,61 @@ describe('the crash carries points and nothing for the trainer (DL5, ADR 0059 D-
     expect(CRASH_SCORE_DELTA).toBeLessThan(0);
   });
 
-  it('takes a point off the round’s score for each crash, never below nought', () => {
-    let round = startRound(4);
-    round = recordDelivery(recordDelivery(recordDelivery(round, 0), 1), 2);
+  it('takes a point off the round’s score for each crash', () => {
     const crash: Crash = { scoreDelta: CRASH_SCORE_DELTA };
-    expect(roundScore(round, [])).toBe(3);
-    expect(roundScore(round, [crash])).toBe(3 + CRASH_SCORE_DELTA);
-    expect(roundScore(round, [crash, crash])).toBe(3 + 2 * CRASH_SCORE_DELTA);
-    expect(roundScore(round, [crash, crash, crash, crash, crash])).toBe(0);
+    expect(roundScore(['delivery', 'delivery', 'delivery'])).toBe(3);
+    expect(roundScore(['delivery', 'delivery', 'delivery', crash])).toBe(3 + CRASH_SCORE_DELTA);
+    expect(scoreAfter(3, crash)).toBe(3 + CRASH_SCORE_DELTA);
+    expect(scoreAfter(3, 'delivery')).toBe(4);
+  });
+});
+
+describe('the round’s score is never below nought at any moment (owner’s ruling, 2026-10-28)', () => {
+  const crash: Crash = { scoreDelta: CRASH_SCORE_DELTA };
+
+  it('costs nothing for a crash at nought: two crashes, then three deliveries, score 3', () => {
+    expect(roundScore([crash, crash, 'delivery', 'delivery', 'delivery'])).toBe(3);
+    expect(scoreAfter(0, crash)).toBe(0);
+  });
+
+  it('and the reverse, three deliveries then two crashes, scores 1', () => {
+    expect(roundScore(['delivery', 'delivery', 'delivery', crash, crash])).toBe(1);
+  });
+});
+
+/** Disk-backed storage: strings under keys, a fresh object over them on each call, as a reload. */
+function deviceOver(disk: Map<string, string>): PreferenceStorage {
+  return {
+    getItem: (key) => disk.get(key) ?? null,
+    setItem: (key, value) => {
+      disk.set(key, value);
+    },
+  };
+}
+
+describe('crashes come off the day’s round only, never the week’s (owner’s ruling, 2026-10-28)', () => {
+  it('keeps every delivery in the week’s score after crashes, read back from the device', () => {
+    const second: Obstacle = { ...BIN, along: BIN.along + OBSTACLE_SPACING_METRES };
+    const { crashes } = ride([BIN, second], 7.5, 0);
+    expect(crashes).toHaveLength(2);
+
+    let round: Round = startRound(4);
+    const changes: ScoreChange[] = [...crashes];
+    for (const position of [0, 1, 2]) {
+      round = recordDelivery(round, position);
+      changes.push('delivery');
+    }
+    changes.push(...crashes);
+    // The day's round: 0, 0, then 3 deliveries, then two crashes off.
+    expect(roundScore(changes)).toBe(1);
+
+    const disk = new Map<string, string>();
+    const week = readDeliveryProgress(deviceOver(disk));
+    expect(week).toEqual(FRESH_WEEK);
+    const outcome = endRound(week, round);
+    expect(outcome.weekScore).toBe(3);
+    expect(writeDeliveryProgress(deviceOver(disk), outcome.next)).toBe(true);
+    expect(readDeliveryProgress(deviceOver(disk)).score).toBe(3);
   });
 });
 
@@ -328,6 +379,13 @@ describe('no message formats a position, a speed or a seed (CLAUDE.md §6)', () 
         rider: { along: 0, lateral: 0, speed: 1 },
         obstacles: [BIN, BIN],
       }),
+    ).toThrow(/different number of obstacles/);
+  });
+
+  it('refuses a state whose set-going record is for another round’s obstacles', () => {
+    const state = { ...startObstacles([BIN]), startedAt: [undefined, undefined] };
+    expect(() =>
+      stepObstacles(state, { rider: { along: 0, lateral: 0, speed: 1 }, obstacles: [BIN] }),
     ).toThrow(/different number of obstacles/);
   });
 });
