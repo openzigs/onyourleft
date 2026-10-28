@@ -6,7 +6,7 @@ import { resolveExtensionless } from '../node-imports.ts';
 
 /**
  * `node src/operator/cli.ts <command> …` — the operator's commands (#791):
- * `migrate`, `backup`, `restore`, `verify`, `room-open`, `model-key`, `instance-key`, `load-accounts`. `commands.ts` says
+ * `migrate`, `backup`, `restore`, `verify`, `room-open`, `model-key`, `instance-key`, `load-accounts`, `account-erase`. `commands.ts` says
  * what each does. The resolve hook goes first, as in `main.ts`.
  *
  * The data it works on is where the instance keeps it: `OYL_INSTANCE_DATABASE`
@@ -18,7 +18,8 @@ registerHooks({ resolve: resolveExtensionless });
 
 /**
  * Standard input, whole: `model-key set` reads the key from it and from
- * nowhere else, and `load-accounts add` the public keys.
+ * nowhere else, `load-accounts add` the public keys, and `account-erase` the
+ * rider's recovery code.
  */
 async function readStandardInput(): Promise<string> {
   const chunks: Uint8Array[] = [];

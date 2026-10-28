@@ -25,6 +25,7 @@ import {
   type InstanceKeys,
 } from '../keys/instance-keys.ts';
 import { randomHex } from '../auth/crypto.ts';
+import { recoveryCodeSha256 } from '../auth/identity.ts';
 import { createDiskBlobStore } from '../blob/disk-blob-store.ts';
 import { createRooms } from '../rooms/rooms.ts';
 import { readServerConfig } from '../server-config.ts';
@@ -48,6 +49,7 @@ import { createSync } from '../sync/sync.ts';
  * | `model-key clear` | the hosted key gone, scrubbed from the database's free pages and its log |
  * | `load-accounts add` | an APPROVED throwaway account, `Load N`, for each public key on standard input — what `tools/race-load.ts keys` printed — marked as the load run's (#1383) |
  * | `load-accounts erase` | every account `load-accounts add` made, erased as a rider's own erasure does it, and how many |
+ * | `account-erase [--confirm]` | ONE rider's account, found by a recovery code on standard input that the rider emailed: its id and counts, and with `--confirm` erased as their own erasure does it (#1802) |
  *
  * ⚠️ `restore` ends by ROTATING the encryption key (#1189, ADR 0047 D-5),
  * once the data is checked and in place, so a restored instance never serves
@@ -672,6 +674,80 @@ export async function loadAccountsErase(paths: DataPaths) {
       erased: athletes.length,
       remaining: (await store.listLoadAthletes()).length,
     };
+  } finally {
+    await store.close();
+  }
+}
+
+/**
+ * `account-erase [--confirm]` (#1802): ONE rider's account, erased when a
+ * recovery code the rider sent — by email, the route
+ * `docs/delete-your-account.md` gives a rider without the app — matches it.
+ * The owner's ruling of 2026-10-27: the code proves the account is the
+ * sender's, never a display name, which is neither unique nor secret.
+ *
+ * The code is read from standard input (`input`), never the command line,
+ * and is printed nowhere: not in the report, and not in a refusal. A code
+ * that is not the shape of one, matches no account, or was already used
+ * erases nothing and says which. Without `confirm` it erases nothing and
+ * says what it would: the account's id and counts, never a name or a
+ * coordinate. With it, the erasure is the rider's own
+ * (`sync/routes.ts` §`eraseAccount`) — every room the account made closed
+ * first, then its files and every row it owns — and is read back.
+ */
+export async function accountErase(
+  paths: DataPaths,
+  options: { readonly input: string; readonly confirm: boolean },
+) {
+  const codeSha256 = await recoveryCodeSha256(options.input.trim());
+  if (codeSha256 === undefined) {
+    throw new CommandError(
+      'Standard input does not hold a recovery code: sixteen letters and digits, as the rider was shown them, hyphens and spaces allowed. Nothing was erased.',
+    );
+  }
+  if (!existsSync(paths.database)) throw new CommandError('There is no database here.');
+  const store = openServingStore(paths.database);
+  try {
+    const code = await store.findRecoveryCode(codeSha256);
+    if (code === undefined) {
+      throw new CommandError(
+        'No account on this instance holds that recovery code. Nothing was erased.',
+      );
+    }
+    if (code.usedAt !== null) {
+      throw new CommandError(
+        'That recovery code was already used, so it no longer proves the account is the sender’s: ask them for one they have not used. Nothing was erased.',
+      );
+    }
+    const { athleteId } = code;
+    const holds = {
+      athleteId,
+      deviceKeys: (await store.listDeviceKeys(athleteId)).length,
+      activities: await store.countActivityRecords(athleteId),
+      openRoomsMade: await store.countOpenPrivateRoomsMadeBy(athleteId),
+      results: (await store.listResults(athleteId)).length,
+    };
+    if (!options.confirm) {
+      return {
+        command: 'account-erase',
+        ...holds,
+        erased: false,
+        next: 'Nothing was erased. Run it again with --confirm, the same code on standard input, to erase this account.',
+      };
+    }
+    const sync = createSync({ store, blobs: createDiskBlobStore(paths.blobs) });
+    const rooms = createRooms({
+      store,
+      routes: createDiskBlobStore(join(paths.blobs, 'rooms')),
+      nameFor: () => Promise.resolve(undefined),
+      now: () => Date.now(),
+    });
+    await rooms.closeRoomsMadeBy(athleteId);
+    await sync.eraseAccount(athleteId);
+    if ((await store.getAthlete(athleteId)) !== undefined) {
+      throw new CommandError('The account is still here after its erasure: run it again.');
+    }
+    return { command: 'account-erase', ...holds, erased: true };
   } finally {
     await store.close();
   }
