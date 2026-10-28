@@ -21,7 +21,14 @@ import { hillRoute, northRoute } from './route-fixtures-testing';
 import { scatterSeed } from './scatter';
 import { corridorOrigin, MARKING_COLOUR, roadCorridor } from './terrain';
 import { photographicGroundMaterial } from './three-renderer';
-import { groundColourIn, snowCoverIn, treeLineMetres, vergeSlushIn, worldStyle } from './world';
+import {
+  groundColourIn,
+  roofSnowIn,
+  snowCoverIn,
+  treeLineMetres,
+  vergeSlushIn,
+  worldStyle,
+} from './world';
 
 const up = (degrees: number): number => Math.cos((degrees * Math.PI) / 180);
 
@@ -308,7 +315,8 @@ describe('the road’s edge line against a snowy verge — #1692', () => {
     expect(groundBlend(ROAD_EDGE_METRES, 1, 0, 1e6).verge).toBe(1);
     const snow = linear(groundColourIn(nordic, 1));
     const verge = slushed(snow, vergeSlushIn(nordic, 1));
-    // The landform's mottle at its brightest is the verge's worst case.
+    // The landform's mottle at its brightest; the verge photograph's own texel
+    // spread is not bounded here, and the albedo has headroom at winter 1.
     expect(contrast(line, luminance(verge) * (1 + TERRAIN_MOTTLE))).toBeGreaterThanOrEqual(
       AA_LARGE_TEXT_OR_NON_TEXT,
     );
@@ -332,9 +340,26 @@ describe('the road’s edge line against a snowy verge — #1692', () => {
     );
     expect(fragment).toContain('* (oylVergeWorld * oylVergeTexel * oylVergeShare');
     // Every ground shares the one uniform the view writes.
-    expect(compiledGround(ALL_SURFACES).shader.uniforms['oylVergeSlush']).toBe(
-      shader.uniforms['oylVergeSlush'],
-    );
+    const other = compiledGround(ALL_SURFACES);
+    other.material.dispose();
+    expect(other.shader.uniforms['oylVergeSlush']).toBe(shader.uniforms['oylVergeSlush']);
+  });
+
+  it('mixes linearly: half slush is the midpoint between the ground and the slush', () => {
+    const snow = linear(groundColourIn(nordic, 1));
+    const slush = linear(VERGE_SLUSH);
+    const half = slushed(snow, 0.5);
+    for (let channel = 0; channel < 3; channel += 1) {
+      expect(half[channel]).toBeCloseTo(((snow[channel] ?? 0) + (slush[channel] ?? 0)) / 2, 5);
+    }
+  });
+
+  it('is slush wherever the ground is snow, not only in a full winter', () => {
+    for (const winter of [0.1, 0.3, 0.6, 1]) {
+      expect(vergeSlushIn(nordic, winter)).toBe(snowCoverIn(nordic, winter));
+    }
+    // Non-vacuity: in a part winter the roofs' share (winter x cover) is smaller.
+    expect(vergeSlushIn(nordic, 0.75)).toBeGreaterThan(roofSnowIn(nordic, 0.75));
   });
 
   it('draws the verge exactly as before with no winter, and in a winter with no snow', () => {

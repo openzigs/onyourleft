@@ -47,8 +47,8 @@ export const VERGE_BLEND_METRES: readonly [number, number] = [0.45, 0.9];
  * road — #1692. Packed sRGB, **0x6f6c66**, this repository's own, a little
  * brown for the grit in it. The ground's snow (`world.ts`) beside the road's
  * white edge line (`terrain.ts` §`MARKING_COLOUR`) measures 1.03:1, and
- * the edge of the road stopped reading; this measures about 4.6:1 against the
- * line, past WCAG 2.2's 3:1 for a non-text graphic, which
+ * the edge of the road stopped reading; this measures about 4.6:1 in albedo against the
+ * line (the drawn frame, lit and photographed, measures about 2.1:1), past WCAG 2.2's 3:1 for a non-text graphic, which
  * `ground-blend.test.ts` holds from the shader three is handed. The verge
  * mixes toward it by `world.ts` §`vergeSlushIn`, over the verge's own band
  * ({@link VERGE_BLEND_METRES}), in the ground's one draw call.
