@@ -680,6 +680,20 @@ function takeRefusal(outcome: Take<object>['outcome'], prefix: 'challenge' | 'co
 
 const EMAIL = /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,63}$/;
 
+/** A recovery code once {@link normalisedCode} has read it: sixteen of {@link CODE_ALPHABET}. */
+const RECOVERY_CODE = new RegExp(`^[${CODE_ALPHABET}]{16}$`);
+
+/**
+ * The SHA-256 the store keeps of a recovery code as a rider typed it — in
+ * either case, with or without its hyphens or spaces — or `undefined` when
+ * what was typed is not the shape of one (#1802: the operator's
+ * `account-erase`, which is handed a code from an email).
+ */
+export async function recoveryCodeSha256(typed: string): Promise<string | undefined> {
+  const code = normalisedCode(typed);
+  return RECOVERY_CODE.test(code) ? sha256Hex(code) : undefined;
+}
+
 /** Fresh recovery codes, and the SHA-256s the store keeps of them. */
 async function freshRecoveryCodes(): Promise<{ codes: string[]; sha256s: string[] }> {
   const codes = Array.from({ length: RECOVERY_CODE_COUNT }, readableCode);

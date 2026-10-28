@@ -542,8 +542,11 @@ OYL_INSTANCE_COMMIT="$(git rev-parse HEAD)" pnpm --filter @onyourleft/instance s
 # server never migrates), `backup <dir> [--keep N] [--copy-to <dir>]` (an
 # online VACUUM INTO and the blobs), `restore <snapshot> [--force]` (checked
 # against the snapshot's manifest), `verify`, and `room-open <id> --kind
-# ride|race --length <m>` (until #784/#785), and `load-accounts add|erase`
-# (#1383, below). They act on OYL_INSTANCE_DATABASE
+# ride|race --length <m>` (until #784/#785), `load-accounts add|erase`
+# (#1383, below), and `account-erase [--confirm]` (#1802: one rider's account,
+# found by the recovery code they emailed, read from standard input and never
+# printed; erased only with --confirm, as their own erasure does it; its test is
+# src/operator/account-erase.test.ts). They act on OYL_INSTANCE_DATABASE
 # and OYL_INSTANCE_BLOBS. docs/operating-an-instance.md says what each does.
 pnpm --filter @onyourleft/instance run operator migrate
 

@@ -418,13 +418,13 @@ import {
 } from './contact-shadow';
 import {
   blobCasters,
+  blobRoadClip,
   GROUND_BLOB_CORE,
   GROUND_BLOB_DARKNESS,
   GROUND_BLOB_LIFT_METRES,
   groundBlobAxes,
   groundUnderBlob,
   placeGroundBlob,
-  roadClip,
   type BlobCaster,
   type BlobCasters,
   type GroundBlob,
@@ -538,6 +538,7 @@ import {
   ROCK_SLOPE_DEGREES,
   SCREE_BAND_METRES,
   VERGE_BLEND_METRES,
+  VERGE_SLUSH,
 } from './ground-blend';
 import {
   CARRIAGEWAY_HALF_METRES,
@@ -671,7 +672,7 @@ import {
   type BridgePart,
   type WaterSurface,
 } from './waterways';
-import { groundColourIn, roofSnowIn, type SunStyle, type WorldStyle } from './world';
+import { groundColourIn, roofSnowIn, vergeSlushIn, type SunStyle, type WorldStyle } from './world';
 import { NO_SEASON, type Holiday, type Season } from './season';
 import {
   decorationsFor,
@@ -3952,8 +3953,8 @@ export class GroundBlobBelt {
 
   /**
    * One blob per caster in each list, under this frame's sun, on this frame's
-   * ground, clipped off this frame's road. Allocates nothing; stops at the
-   * belt's capacity.
+   * ground, clipped off this frame's road. Allocates nothing — held by
+   * `ground-blob-belt.test.ts` (#1674); stops at the belt's capacity.
    */
   update(
     lists: readonly BlobCasters[],
@@ -3982,13 +3983,7 @@ export class GroundBlobBelt {
           continue;
         }
         groundBlobAxes(blob, ground, axes);
-        roadClip(
-          corridor.centre,
-          blob.x,
-          blob.z,
-          Math.max(blob.halfAlong, blob.halfAcross),
-          this.#planes,
-        );
+        blobRoadClip(corridor.centre, blob, this.#planes);
         const lift = GROUND_BLOB_LIFT_METRES;
         this.#matrix.set(
           axes[0] as number,
@@ -4009,8 +4004,15 @@ export class GroundBlobBelt {
           1,
         );
         this.#mesh.setMatrixAt(slot, this.#matrix);
-        first.set(this.#planes.subarray(0, 3), slot * 3);
-        second.set(this.#planes.subarray(3, 6), slot * 3);
+        // Element by element: a `subarray` view is an allocation (#1674).
+        const planes = this.#planes;
+        const clip = slot * 3;
+        first[clip] = planes[0] as number;
+        first[clip + 1] = planes[1] as number;
+        first[clip + 2] = planes[2] as number;
+        second[clip] = planes[3] as number;
+        second[clip + 1] = planes[4] as number;
+        second[clip + 2] = planes[5] as number;
         strength[slot] = caster.strength;
         slot += 1;
       }
@@ -7942,6 +7944,8 @@ const TINT_APPLY_GLSL = /* glsl */ `
 const SEASON = {
   oylAutumn: { value: 0 },
   oylRoofSnow: { value: 0 },
+  /** #1692: how much of the verge is ploughed slush (`world.ts` §`vergeSlushIn`). */
+  oylVergeSlush: { value: 0 },
   /** #1626: 1 while the ride's holiday is the winter lights — the mapped doors' wreath. */
   oylWreath: { value: 0 },
 };
@@ -11442,6 +11446,23 @@ vOylGroundUp = normalize(mat3(modelMatrix) * normal).y;
 `;
 
 /**
+ * The verge's colour in a winter, in GLSL — #1692: the world's colour there
+ * (the ground's snow, in a snowy winter) mixed toward `ground-blend.ts`
+ * §`VERGE_SLUSH` by `slush` (`world.ts` §`vergeSlushIn`), so the road's white
+ * edge line has grey beside it rather than white. At 0 it is `world`, exactly:
+ * the verge as it was before #1692. `ground-blend.test.ts` §"#1692" evaluates
+ * it from the program three is handed.
+ */
+const VERGE_SLUSH_GLSL = (() => {
+  const linear = new Color(VERGE_SLUSH);
+  return /* glsl */ `
+vec3 oylSlushedVerge(vec3 world, float slush) {
+  return mix(world, vec3(${linear.r.toFixed(6)}, ${linear.g.toFixed(6)}, ${linear.b.toFixed(6)}), slush);
+}
+`;
+})();
+
+/**
  * The blend's shares, its samplers, and the normal map as the blend reads it.
  *
  * ⚠️ **Branched, so the two new surfaces cost nothing where they are not**
@@ -11467,6 +11488,7 @@ uniform sampler2D cragMap;
 uniform sampler2D cragNormalMap;
 uniform float treeLine;
 uniform vec4 groundShares;
+uniform float oylVergeSlush;
 varying vec3 vOylGround;
 varying float vOylGroundUp;
 float oylVergeShare = 0.0;
@@ -11480,6 +11502,7 @@ ${bounded ? GROUND_DERIVATIVE_GLOBALS : ''}
 vec2 oylVergeUv() { return vOylGround.xz / ${glslFloat(REALISTIC_SURFACES.verge.tileMetres)}; }
 vec2 oylRockUv() { return vOylGround.xz / ${glslFloat(REALISTIC_SURFACES.rock.tileMetres)}; }
 vec2 oylCragUv() { return vOylGround.xz / ${glslFloat(REALISTIC_SURFACES.crag.tileMetres)}; }
+${VERGE_SLUSH_GLSL}
 vec3 oylGroundNormal(vec2 grassUv) {
   vec3 grass = texture2D(normalMap, grassUv).xyz;
 ${groundDerivatives(bounded, false)}
@@ -11582,14 +11605,19 @@ ${groundDerivatives(bounded, true)}
 `;
 }
 
-/** Mixed in over the grass and its patchwork, times the landform's own vertex colour. */
+/**
+ * Mixed in over the grass and its patchwork, times the landform's own vertex
+ * colour. Since #1692 the verge's term is in its own winter colour
+ * ({@link VERGE_SLUSH_GLSL}) and the stone's in the world's.
+ */
 const GROUND_BLEND_MIX = /* glsl */ `
 {
   float oylOther = oylVergeShare + oylRockShare;
-  vec3 oylSurfaces = oylGroundWorld * vColor.rgb
-    * (oylVergeTexel * oylVergeShare
-      + oylRockTexel * (oylRockShare - oylCragShare)
-      + oylCragTexel * oylCragShare);
+  vec3 oylVergeWorld = oylSlushedVerge(oylGroundWorld, oylVergeSlush);
+  vec3 oylSurfaces = vColor.rgb
+    * (oylVergeWorld * oylVergeTexel * oylVergeShare
+      + oylGroundWorld * (oylRockTexel * (oylRockShare - oylCragShare)
+        + oylCragTexel * oylCragShare));
   diffuseColor.rgb = diffuseColor.rgb * (1.0 - oylOther) + oylSurfaces;
 }
 `;
@@ -11651,6 +11679,8 @@ export function photographicGroundMaterial(
       shader.uniforms['cragNormalMap'] = { value: blend.crag?.normal };
       shader.uniforms['treeLine'] = blend.treeLine;
       shader.uniforms['groundShares'] = { value: shares };
+      // #1692: the season's, shared by every ground, written by the view that draws.
+      shader.uniforms['oylVergeSlush'] = SEASON.oylVergeSlush;
       shader.fragmentShader = shader.fragmentShader
         .replace(
           '#include <normalmap_pars_fragment>',
@@ -18999,6 +19029,8 @@ class ThreeGameView implements GameView {
     // and the roofs' snow from the same cover. The stylised world draws no season.
     const winter = this.#drawing === 'realistic' ? this.#season.nature.winter : 0;
     SEASON.oylRoofSnow.value = roofSnowIn(frame.world, winter);
+    // #1692: and the verge's ploughed slush, so the road's edge line still reads.
+    SEASON.oylVergeSlush.value = vergeSlushIn(frame.world, winter);
     this.#terrain.update(
       frame.terrain.mesh,
       winter === 0 ? frame.world.groundColour : groundColourIn(frame.world, winter),

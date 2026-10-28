@@ -613,6 +613,20 @@ export function roofSnowIn(world: Pick<WorldStyle, 'snow'>, winter: number): num
 }
 
 /**
+ * How much of the verge beside the road is ploughed slush rather than snow, 0
+ * to 1 — #1692: the ground's own snow cover ({@link snowCoverIn}) in any winter,
+ * so the verge is slush wherever the ground is white, not only at a full winter
+ * (a cover that saturates long before winter reaches 1 would leave the verge
+ * white beside the line through most of a snowy season). A snowy verge drawn white beside
+ * the road's white edge line hid the road's edge; the slush is
+ * `ground-blend.ts` §`VERGE_SLUSH`, drawn by the ground's own shader. With no
+ * winter it is 0 and the verge is drawn exactly as before #1692.
+ */
+export function vergeSlushIn(world: Pick<WorldStyle, 'snow'>, winter: number): number {
+  return winter > 0 ? snowCoverIn(world, winter) : 0;
+}
+
+/**
  * Which half of the world a route is in — #1622, for `season.ts`
  * §`natureOn`: the sign of the mean SIGNED latitude, which {@link worldStyle}
  * drops by reading magnitudes, and is left untouched by.
