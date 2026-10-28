@@ -489,6 +489,22 @@ describe('recovery and link codes (#773)', () => {
     expect((await opened.read((store) => store.listRecoveryCodes(ATHLETE_C)))[0]?.usedAt).toBe(50);
   });
 
+  it('finds a recovery code by its hash alone, whoever’s it is, without spending it (#1802)', async () => {
+    const opened = await world();
+    const [code] = await opened.read((store) => store.listRecoveryCodes(ATHLETE_B));
+    if (code === undefined) throw new Error('no fixture code');
+    expect(await opened.read((store) => store.findRecoveryCode(code.codeSha256))).toEqual(code);
+    expect(code).toMatchObject({ athleteId: ATHLETE_B, usedAt: null });
+    expect(await opened.read((store) => store.findRecoveryCode('f0'.repeat(32)))).toBeUndefined();
+    // Read, not spent: it can still be spent once, and is found as spent after.
+    expect(
+      (await opened.write((store) => store.takeRecoveryCode(code.codeSha256, 60))).outcome,
+    ).toBe('taken');
+    expect((await opened.read((store) => store.findRecoveryCode(code.codeSha256)))?.usedAt).toBe(
+      60,
+    );
+  });
+
   it('spends a link code once, and not after it expired', async () => {
     const opened = await world();
     const [code] = await opened.read((store) => store.listLinkCodes(ATHLETE_A));

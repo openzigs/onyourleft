@@ -191,6 +191,9 @@ const SCOPING: Readonly<Record<keyof SqlStore, Entry>> = {
   takeChallenge: { notAScopedRead: 'spends a nonce, issued before any athlete is named (#772)' },
   pruneChallenges: { notAScopedRead: 'a write over challenges, which belong to no athlete' },
   takeRecoveryCode: { notAScopedRead: 'recovery: the code is what names the athlete (#773)' },
+  findRecoveryCode: {
+    notAScopedRead: 'the operator’s account-erase: the code is what names the athlete (#1802)',
+  },
   hasRecoveryCode: {
     notAScopedRead:
       'a yes or no, keyed by the athlete: sql-store.identity.test.ts holds it to its own athlete (#898)',

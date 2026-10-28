@@ -375,10 +375,9 @@ describe('no per-frame work for the mapped blobs — #1657, #240 NFR-3', () => {
   });
 
   /*
-   * ⚠️ **The caster fill, not `GroundBlobBelt.update`.** On `main` the belt's
-   * update itself is collected under on every attempt in Node (#1657's PR
-   * records it), whatever list it is handed, so it is left out of this
-   * window: what #1657 adds to a frame is the fill below.
+   * ⚠️ **The caster fill, not `GroundBlobBelt.update`.** What #1657 adds to a
+   * frame is the fill below; the belt's update is held to the same rule by
+   * `ground-blob-belt.test.ts` (#1674).
    */
   it('allocates nothing filling the casters on a frame that is not a refill', () => {
     const frame = townFrame(1_510);
