@@ -20,6 +20,7 @@ import {
   buildingBeside,
   landBeside,
   rectangleBeside,
+  richmondStreetFixture,
   rowTownFixture,
 } from '../footprint-fixtures-testing';
 import { landClassMask } from '../land-class';
@@ -367,6 +368,85 @@ describe('#1808 — only houses with a front step', () => {
   });
 });
 
+describe('#1808 — a malformed plan is passed over, not the round refused', () => {
+  it('skips a plan with a non-finite front step or centroid, says nothing, and picks the rest', () => {
+    const clean = pickRoundTargets(townInput({ houses: MOST_HOUSES }), 7);
+    // Two houses the clean round takes, so passing them over is asked something.
+    const brokenStep = planOf(townPlans, clean.targets[1] as DeliveryTarget);
+    const brokenCentroid = planOf(townPlans, clean.targets[3] as DeliveryTarget);
+    const malformed = townPlans.map((plan, index) => {
+      const step = plan.frontStep as NonNullable<FootprintPlan['frontStep']>;
+      if (index === brokenStep) return { ...plan, frontStep: { ...step, yaw: Number.NaN } };
+      if (index === brokenCentroid) {
+        return { ...plan, centroid: { x: plan.centroid.x, z: Number.NaN } };
+      }
+      return plan;
+    });
+    // The same town with those two houses given no front step: what skipping them is.
+    const without = malformed.map((plan, index) =>
+      index === brokenStep || index === brokenCentroid ? { ...plan, frontStep: undefined } : plan,
+    );
+    const pick = pickRoundTargets(
+      townInput({ buildings: mappedBuildingsOf(malformed), houses: MOST_HOUSES }),
+      7,
+    );
+    expect(pick.complete).toBe(true);
+    expect(pick).toEqual(
+      pickRoundTargets(
+        townInput({ buildings: mappedBuildingsOf(without), houses: MOST_HOUSES }),
+        7,
+      ),
+    );
+    for (const target of pick.targets) {
+      expect(Number.isFinite(target.yaw)).toBe(true);
+      const index = townPlans.findIndex(
+        (plan) => plan.frontStep?.x === target.x && plan.frontStep.z === target.z,
+      );
+      expect(index).not.toBe(brokenStep);
+      expect(index).not.toBe(brokenCentroid);
+    }
+  });
+});
+
+describe('#1808 — never a house drawn as a model', () => {
+  // #1585's street: houses a model fits, beside square ones no model fits.
+  const street = richmondStreetFixture();
+  const streetPlans = plansOf(street.corridor, street.profile, street.origin);
+  const streetInput = (buildings: readonly FootprintPlan[]): TargetPickInput => ({
+    buildings: mappedBuildingsOf(buildings),
+    profile: street.profile,
+    origin: street.origin,
+    riderDistance: 850,
+    houses: MOST_HOUSES,
+  });
+
+  it('passes over every modelled house, and picks the extruded ones beside them', () => {
+    const modelled = streetPlans.filter(
+      (plan) => plan.model !== undefined && plan.frontStep !== undefined,
+    );
+    // The fixture is asked something: modelled houses with a front step in reach of the road.
+    expect(modelled.length).toBeGreaterThan(MOST_HOUSES);
+    let picked = 0;
+    for (const seed of [1, 2, 3, 4]) {
+      const pick = pickRoundTargets(streetInput(streetPlans), seed);
+      for (const target of pick.targets) {
+        const plan = streetPlans[planOf(streetPlans, target)] as FootprintPlan;
+        expect(plan.model, `round position ${String(target.position)}`).toBeUndefined();
+        picked += 1;
+      }
+    }
+    expect(picked).toBeGreaterThan(0);
+    // The control: with the models taken off the same plans, modelled houses are picked.
+    const unmodelled = streetPlans.map((plan) => ({ ...plan, model: undefined }));
+    const wereModelled = [1, 2, 3, 4].some((seed) =>
+      pickRoundTargets(streetInput(unmodelled), seed).targets.some(
+        (target) => streetPlans[planOf(streetPlans, target)]?.model !== undefined,
+      ),
+    );
+    expect(wereModelled).toBe(true);
+  });
+});
+
 describe('#1808 — fewer houses than the round wants', () => {
   it('returns every house there is, and says the round is short', () => {
     const profile = northRoute(2_000, () => 10);
@@ -523,41 +603,14 @@ describe('#1808 — never a name', () => {
 });
 
 describe('#1808 — errors name the field and the constraint, never a coordinate', () => {
-  it('refuses a malformed plan without its coordinates', () => {
-    const plan = townPlans.find((each) => each.frontStep !== undefined) as FootprintPlan;
-    const step = plan.frontStep as NonNullable<FootprintPlan['frontStep']>;
-    const malformed = { ...plan, frontStep: { ...step, x: Number.NaN } };
-    const input = townInput({ buildings: mappedBuildingsOf([malformed]) });
-    expect(() => pickRoundTargets(input, 1)).toThrow(RangeError);
-    let message = '';
-    try {
-      pickRoundTargets(input, 1);
-    } catch (error) {
-      message = (error as Error).message;
-    }
-    expect(message).toMatch(/front step/);
-    // None of the fixture's coordinate digits: no digit at all.
-    expect(message).not.toMatch(/\d/);
-    for (const value of [step.z, step.y, plan.centroid.x, plan.centroid.z]) {
-      expect(message).not.toContain(String(Math.trunc(Math.abs(value))));
-    }
-  });
-
-  it('refuses a plan with no finite centroid without its coordinates', () => {
-    const plan = townPlans[0] as FootprintPlan;
-    // NaN, not an infinity: `mappedBuildingsOf`'s cell loop never ends on an infinite centroid.
-    const malformed = { ...plan, centroid: { x: plan.centroid.x, z: Number.NaN } };
-    const input = townInput({ buildings: mappedBuildingsOf([malformed]) });
-    expect(() => pickRoundTargets(input, 1)).toThrow(/centroid/);
-    expect(() => pickRoundTargets(input, 1)).not.toThrow(/\d/);
-  });
-
   it.each([0, MOST_HOUSES + 1, 2.5, Number.NaN])('refuses a round of %s houses', (houses) => {
     expect(() => pickRoundTargets(townInput({ houses }), 1)).toThrow(/round size/);
   });
 
-  it.each([-1, 2.5, 2 ** 32, Number.NaN])('refuses a seed of %s', (seed) => {
-    expect(() => pickRoundTargets(townInput(), seed)).toThrow(/seed/);
+  it('refuses a seed that is not a 32-bit whole number', () => {
+    for (const seed of [-1, 2.5, 2 ** 32, Number.NaN]) {
+      expect(() => pickRoundTargets(townInput(), seed)).toThrow(/seed/);
+    }
   });
 
   it('refuses a rider distance that is not a distance, without it', () => {

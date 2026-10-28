@@ -222,6 +222,7 @@ import {
   TRIM_PAINTS,
 } from './building-paint';
 import { DOOR, FOUNDATION_METRES, PLINTH_TOP_METRES } from './buildings';
+import type { AnchorKind } from './decorations';
 import {
   FRONT_PORCH,
   hipFits,
@@ -239,7 +240,6 @@ import { frontOf, houseModelsFitting, placeHouseModel, type HousePlacement } fro
 import { MASONRY_TINT, packedInstanceTint } from './instance-tint';
 import { kindAt, type LandClass, type LandClassMask } from './land-class';
 import { ROAD_CLEARANCE_METRES, terrainHeightAt } from './landform';
-import type { AnchorKind } from './decorations';
 import { REALISTIC_TRIANGLES } from './realistic-budget';
 import { rectanglesOf, type Rectangle } from './rectilinear-roofs';
 import type { StructureSurface } from './realistic-assets';
@@ -554,6 +554,10 @@ export interface FootprintPlan {
    * porch and on its doorstep where it has none. `undefined` for every plan
    * that is not a house with a front door: a part, a shop, a building with no
    * use but a home's, one with no wall facing the road.
+   *
+   * ⚠️ It is the EXTRUSION's front step. A plan with a {@link model} is drawn
+   * as that model wherever the model is drawn, and the model's door is not on
+   * this point nor has it this porch: `delivery/targets.ts` never picks one.
    */
   readonly frontStep: FrontStep | undefined;
   /**

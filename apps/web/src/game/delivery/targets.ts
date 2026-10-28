@@ -14,6 +14,15 @@
  * A target is a mapped house's front step (`footprint-buildings.ts`
  * §`FrontStep`): the foot of its porch steps, or its doorstep. A plan with
  * none (a shop, a part, a building that is not a home) is never a target.
+ *
+ * ⚠️ **Nor is a house drawn as a model** (`house-models.ts`, #1585). Its front
+ * step is its extrusion's, and near the rider, with the models loaded, the
+ * renderer draws the model instead (`mapped-buildings.ts`
+ * §`selectMappedBuildings`, `three-renderer.ts`' `modelled` branch): the
+ * extrusion's porch is not drawn, and the model records which face its door
+ * is on but not where along it the door stands. The same plan is drawn as its
+ * extrusion when far or with the models unloaded, so its door would move
+ * during the window it is a target in. A modelled plan is passed over.
  * Nothing is fetched or decoded for Delivery: the pick reads the plans
  * `mapped-buildings.ts` §`mappedBuildingsOf` indexed at the press.
  *
@@ -31,6 +40,16 @@
  * selection at {@link TargetPickInput.triangleBudget} with neither; that the
  * frame's own selection keeps the picked houses is #1816's, which runs the
  * round inside a ride.
+ *
+ * ⚠️ **When the renderer re-selects, for #1816**: once per refill chunk
+ * (`realistic-budget.ts` §`MAPPED_CHUNK_METRES`, 100 m), on the first frame
+ * after the rider passes the chunk's start, at wherever the rider is on that
+ * frame, and its selection then stands until the next chunk. The pick
+ * samples each chunk exactly at its start, and every whole metre between,
+ * which asks about selections the renderer never makes: conservative, since
+ * it may pass over a house that would stay drawn. It cannot see the other
+ * way: a house at the edge of the budget may be selected at the chunk's start
+ * and not at the frame's position just past it. #1816 proves the frame's.
  *
  * ## The seed is the ride's, and nothing keeps it (DL11, ADR 0059 D-4)
  *
@@ -53,7 +72,8 @@
  * {@link TARGET_MOST_FROM_ROAD_METRES} and {@link TARGET_TAKE_SHARE}.
  *
  * No error message here formats a coordinate, a distance or a seed
- * (CLAUDE.md §6, ADR 0004 D): each names the field and the constraint.
+ * (CLAUDE.md §6, ADR 0004 D): each names the field and the constraint. A
+ * malformed plan is not an error: it is passed over, and nothing is said.
  */
 
 import type { RouteProfile } from '@onyourleft/domain';
@@ -163,21 +183,21 @@ function refuse(constraint: string): never {
   throw new RangeError(`Delivery target pick: ${constraint}`);
 }
 
-/** A plan whose front step or centroid is not finite cannot be placed. No value is formatted. */
-function checkPlan(plan: FootprintPlan): void {
-  if (!Number.isFinite(plan.centroid.x) || !Number.isFinite(plan.centroid.z)) {
-    refuse('a mapped building’s centroid needs a finite x and z');
-  }
+/**
+ * A plan's front step, where it could be a target: a step with a finite
+ * point and yaw, on a plan with no model (the header). A malformed step is
+ * passed over rather than refusing the round. (A plan with no finite
+ * centroid needs no check here: the selection never draws it.)
+ */
+function stepOf(plan: FootprintPlan): FrontStep | undefined {
   const step = plan.frontStep;
-  if (step === undefined) return;
-  if (
-    !Number.isFinite(step.x) ||
-    !Number.isFinite(step.y) ||
-    !Number.isFinite(step.z) ||
-    !Number.isFinite(step.yaw)
-  ) {
-    refuse('a mapped building’s front step needs a finite x, y, z and yaw');
-  }
+  if (step === undefined || plan.model !== undefined) return undefined;
+  const finite =
+    Number.isFinite(step.x) &&
+    Number.isFinite(step.y) &&
+    Number.isFinite(step.z) &&
+    Number.isFinite(step.yaw);
+  return finite ? step : undefined;
 }
 
 /**
@@ -205,7 +225,6 @@ export function pickRoundTargets(
     refuse('the rider’s distance is a finite number of metres, not below zero');
   }
   if (!(triangleBudget >= 0)) refuse('the triangle budget is a number, not below zero');
-  for (const plan of buildings.plans) checkPlan(plan);
 
   const total = profile.totalDistance;
   /** The earliest a window may open: the start of the chunk after the rider's. */
@@ -216,7 +235,7 @@ export function pickRoundTargets(
 
   const candidates: Candidate[] = [];
   buildings.plans.forEach((plan, index) => {
-    const step = plan.frontStep;
+    const step = stepOf(plan);
     if (step === undefined) return;
     const near = nearestOnDrawnRoad(profile, origin, step.x, step.z, TARGET_MOST_FROM_ROAD_METRES);
     if (near === undefined) return;
