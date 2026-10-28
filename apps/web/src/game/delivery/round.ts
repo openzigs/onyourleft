@@ -137,9 +137,15 @@ export interface RoundTally {
   readonly delivered: number;
   readonly missed: number;
   /**
-   * The round's score: one point a delivery, the point {@link endRound} adds
-   * to the week's. The one place the HUD reads it from, so a penalty that
-   * changes it (#1811) changes it here.
+   * The round's score with no crash in it: one point a delivery, so never
+   * below zero. The HUD's *Score* and the round's-end sentence read it here.
+   *
+   * ⚠️ Crashes (#1811, PR #1844) are not counted here. The owner's rulings of
+   * 2026-10-28 on #1811 say a crash comes off the round's score, which never
+   * goes below zero at any moment, and comes off nothing else: the week's
+   * score, {@link endRound}'s `weekScore`, counts deliveries only. #1816,
+   * which wires both, must hand the HUD and the round's end the round's score
+   * with crashes in it, from #1844's module, in place of this one.
    */
   readonly score: number;
 }

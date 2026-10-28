@@ -178,7 +178,8 @@
  * of it — #327's *"spoken 'in the draft' / 'out of the draft' transition, off
  * by default"*. A transition, never the percentage on a cadence: a share of
  * drag moves with every metre of gap, and a sentence each time it did would be
- * the continuous speech #396 exists to prevent. The LOWEST event, below a lap:
+ * the continuous speech #396 exists to prevent. The lowest of a ride's own
+ * events, below a lap — only a Delivery round's (rank 5g) sit below it:
  * nothing about a draft is the machine under the rider (the trainer is sent
  * the rider's own road whatever the draft, ADR 0038 D-4), and it is true for as
  * long as the rider holds the wheel, so a window's wait costs nothing. Dropped,
@@ -196,7 +197,8 @@
  * so it never competes with a room's events at all. Above every reading,
  * because each is true of one moment. Among the four: the round's end first,
  * because it is the round's last word and must never be dropped; then a
- * crash, which explains a slow-down the rider is feeling the effect of; then
+ * crash, which costs the round a point and nothing else (ADR 0059 D-2: no
+ * slow-down, and nothing is felt, because the trainer is sent the same); then
  * a miss before a delivery, because a missed house drops out of the next
  * round (DL2). A lower event behind a higher one is dropped by this core, so
  * the caller offers each on every call until it comes back as `kind`, the

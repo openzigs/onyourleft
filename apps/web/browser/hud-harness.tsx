@@ -310,6 +310,8 @@ export interface DeliveryMeasurement {
   }[];
   /** Every OTHER field's box on the stage, by label: laid out at no size when it gives way. */
   readonly others: readonly { readonly label: string; readonly box: Box }[];
+  /** The ride's controls, `.oyl-hud__actions` (Pause / End ride): the panel and each control in it. */
+  readonly actions: readonly { readonly label: string; readonly box: Box }[];
   /** The part of the stage a rider sees with no scrolling. */
   readonly screen: Box;
 }
@@ -915,6 +917,13 @@ function measureDelivery(): DeliveryMeasurement[] {
       others: fields
         .filter((each) => !DELIVERY_LABELS.includes(label(each)))
         .map((each) => ({ label: label(each), box: boxOf(each) as Box })),
+      actions: [...stage.querySelectorAll('.oyl-hud__actions')].flatMap((panel) => [
+        { label: 'the ride controls', box: boxOf(panel) as Box },
+        ...[...panel.querySelectorAll('button')].map((control) => ({
+          label: textOf(control),
+          box: boxOf(control) as Box,
+        })),
+      ]),
       screen: {
         left: bounds.left,
         top: bounds.top,

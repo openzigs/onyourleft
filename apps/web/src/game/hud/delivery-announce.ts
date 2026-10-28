@@ -29,7 +29,11 @@
  * owed is bounded by four sentences however fast the parcels land: the
  * continuous-speech failure #396 exists to prevent cannot start here. The
  * round's end supersedes everything owed before it, because its sentence
- * carries the round's counts and is the round's last word.
+ * carries the round's counts and is the round's last word — but a delivery or
+ * a miss still waiting to be said is not lost to it: the round's end starts
+ * with that house ("Delivered to the 12th house. Round over: …"), so every
+ * house's result is said. A crash still owed is not: its point is already in
+ * the round's score, which the round's end says.
  *
  * ## No place in words
  *
@@ -151,9 +155,22 @@ export function oweCrash(owed: DeliveryOwed): DeliveryOwed {
   return { ...owed, crashes: owed.crashes + 1 };
 }
 
-/** Owe the round's end. It supersedes everything owed before it. */
-export function oweRoundOver(round: Round, outcome: RoundOutcome): DeliveryOwed {
-  return { ...NOTHING_OWED, roundOver: roundOverSentence(round, outcome) };
+/**
+ * Owe the round's end. It supersedes everything owed before it, and starts
+ * with the misses and deliveries still owed, so no house's result goes
+ * unsaid: "Missed the 7th house. Delivered to the 8th house. Round over: …".
+ * Their houses-left count is dropped, because the round's end says the round.
+ */
+export function oweRoundOver(
+  owed: DeliveryOwed,
+  round: Round,
+  outcome: RoundOutcome,
+): DeliveryOwed {
+  const lead: string[] = [];
+  if (owed.missed.length > 0) lead.push(`Missed ${theHouses(owed.missed)}.`);
+  if (owed.delivered.length > 0) lead.push(`Delivered to ${theHouses(owed.delivered)}.`);
+  const sentence = roundOverSentence(round, outcome);
+  return { ...NOTHING_OWED, roundOver: [...lead, sentence].join(' ') };
 }
 
 /** What to offer `announce.ts` on this call: one event per kind owed. */

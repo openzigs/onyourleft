@@ -241,7 +241,7 @@ describe('each said once, in the order chosen, through the real core — #1812',
   it('never drops the round’s end: a fault in the same window goes first, and the end is said after it, once', () => {
     const caller = new Caller();
     const round = recordMiss(recordDelivery(startRound(2), 0), 1);
-    caller.owed = oweRoundOver(round, endRound(FRESH_WEEK, round));
+    caller.owed = oweRoundOver(caller.owed, round, endRound(FRESH_WEEK, round));
     const fault = { kind: 'trainer-lost', text: 'Control lost.' } as const;
     caller.call(0, [fault]);
     caller.ride(1, 20);
@@ -252,7 +252,7 @@ describe('each said once, in the order chosen, through the real core — #1812',
   it('never drops the round’s end behind a crash, a miss or a delivery offered after it', () => {
     const caller = new Caller();
     const round = recordDelivery(startRound(3), 0);
-    caller.owed = oweRoundOver(round, endRound(FRESH_WEEK, round));
+    caller.owed = oweRoundOver(caller.owed, round, endRound(FRESH_WEEK, round));
     // Whatever the round's own events try to add later, nothing displaces it.
     caller.owed = oweCrash(caller.owed);
     caller.owed = oweRoundChange(caller.owed, round, recordDelivery(round, 1));
@@ -260,14 +260,55 @@ describe('each said once, in the order chosen, through the real core — #1812',
     expect(caller.said.map((each) => each.kind)).toEqual(['delivery-round-over']);
   });
 
-  it('lets the round’s end supersede what was owed before it', () => {
+  it('lets the round’s end supersede what was owed before it, and start with the house still owed', () => {
     const caller = new Caller();
     const round = startRound(3);
     const delivered = recordDelivery(round, 0);
     caller.owed = oweCrash(oweRoundChange(NOTHING_OWED, round, delivered));
-    caller.owed = oweRoundOver(delivered, endRound(FRESH_WEEK, delivered));
+    caller.owed = oweRoundOver(caller.owed, delivered, endRound(FRESH_WEEK, delivered));
     caller.ride(0, 20);
-    expect(caller.said.map((each) => each.kind)).toEqual(['delivery-round-over']);
+    expect(caller.said).toEqual([
+      {
+        at: 0,
+        kind: 'delivery-round-over',
+        text: 'Delivered to the 1st house. Round over: 1 of 3 houses delivered, a score of 1. The round on day 2 has 1 house.',
+      },
+    ]);
+  });
+
+  it('never loses the last house to the round’s end: still waiting on the window, it starts the round’s end', () => {
+    const caller = new Caller();
+    let round: Round = startRound(2);
+    caller.owed = oweRoundChange(caller.owed, round, recordDelivery(round, 0));
+    round = recordDelivery(round, 0);
+    caller.call(0);
+    // The last house lands inside the window of the first, and the round
+    // ends before that window closes, so its own sentence never had a turn.
+    const last = recordMiss(round, 1);
+    caller.owed = oweRoundChange(caller.owed, round, last);
+    caller.call(1);
+    caller.owed = oweRoundOver(caller.owed, last, endRound(FRESH_WEEK, last));
+    caller.ride(2, 20);
+    expect(caller.said.map((each) => each.text)).toEqual([
+      'Delivered to the 1st house. 1 house left.',
+      'Missed the 2nd house. Round over: 1 of 2 houses delivered, a score of 1. The round on day 2 has 1 house.',
+    ]);
+  });
+
+  it('starts the round’s end with a miss and a delivery both still owed, the miss first', () => {
+    const round = startRound(3);
+    const settled = recordMiss(recordDelivery(recordDelivery(round, 0), 1), 2);
+    const owed = oweRoundOver(
+      oweRoundChange(NOTHING_OWED, round, settled),
+      settled,
+      endRound(FRESH_WEEK, settled),
+    );
+    expect(deliveryEvents(owed)).toEqual([
+      {
+        kind: 'delivery-round-over',
+        text: 'Missed the 3rd house. Delivered to the 1st and 2nd houses. Round over: 2 of 3 houses delivered, a score of 2. The round on day 2 has 2 houses.',
+      },
+    ]);
   });
 
   it('says a whole round once each: every delivery, every miss, then the end', () => {
@@ -286,7 +327,7 @@ describe('each said once, in the order chosen, through the real core — #1812',
     caller.ride(10, 14);
     step(recordDelivery(round, 3));
     caller.ride(15, 19);
-    caller.owed = oweRoundOver(round, endRound(FRESH_WEEK, round));
+    caller.owed = oweRoundOver(caller.owed, round, endRound(FRESH_WEEK, round));
     caller.ride(20, 40);
     expect(caller.said.map((each) => each.text)).toEqual([
       'Delivered to the 1st house. 3 houses left.',

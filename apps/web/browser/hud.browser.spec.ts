@@ -177,6 +177,7 @@ interface DeliveryMeasurement {
     readonly valueOverflows: boolean;
   }[];
   readonly others: readonly { readonly label: string; readonly box: Box }[];
+  readonly actions: readonly { readonly label: string; readonly box: Box }[];
   readonly screen: Box;
 }
 
@@ -804,13 +805,21 @@ for (const viewport of VIEWPORTS) {
  * — and 141.5 px for a room ride, whose *Draft* phrase and gauge are the same
  * line. A third row is 209.3 px upright. Whether those 13 px stay clear of the
  * leaning rider is measured in a real ride, which this page is not: that is
- * #1816's, beside `ride-room.browser.spec.ts` §"#1356".
+ * #1816's, beside `ride-room.browser.spec.ts` §"#1356" (written on #1816).
  *
- * ## The control
+ * ## The ride's controls
+ *
+ * Neither field is over the ride's controls, `.oyl-hud__actions` (Pause and
+ * End ride): not the panel and not either button, at every viewport and on
+ * both round stages. A rider reaching for Pause mid-round must find it.
+ *
+ * ## The controls
  *
  * The same page with that rule undone puts a third row in the secondary panel
  * on an upright phone, so "no row" can fail. (On a phone on its side the
- * round fits in two rows even then, so the control is upright.)
+ * round fits in two rows even then, so the control is upright.) And a
+ * *Houses* field moved onto Pause is seen to overlap it, so "over no ride
+ * control" can fail too.
  */
 const DELIVERY_LABELS = ['Houses', 'Score'] as const;
 
@@ -840,6 +849,25 @@ function rows(stage: DeliveryMeasurement): number {
     .filter((each) => laidOut(each.box) && inside(each.box, panel))
     .map((each) => Math.round(each.box.top));
   return new Set(tops).size;
+}
+
+/**
+ * The ride controls a box lands on: `.oyl-hud__actions` and each button in it.
+ * Throws when the stage has no Pause and no End ride, so a harness that
+ * stopped rendering them cannot pass over nothing.
+ */
+function onARideControl(box: Box, stage: DeliveryMeasurement): string[] {
+  const labels = stage.actions.map((each) => each.label);
+  if (
+    !labels.includes('the ride controls') ||
+    !labels.includes('Pause') ||
+    !labels.includes('End ride')
+  ) {
+    throw new Error(
+      `the ${stage.stage} Delivery stage has no Pause and End ride: ${labels.join(', ')}`,
+    );
+  }
+  return stage.actions.filter((each) => boxesOverlap(box, each.box)).map((each) => each.label);
 }
 
 function deliveryStage(measured: HudMeasurement, stage: string): DeliveryMeasurement {
@@ -887,6 +915,7 @@ for (const viewport of VIEWPORTS) {
               `${name}: ${field.label} lands on ${other.label}`,
             ).toBe(false);
           }
+          expect(onARideControl(field.box, round), `${name}: ${field.label} lands on`).toEqual([]);
         }
         const pacer = round.others.find((each) => each.label === 'Pacer');
         expect(pacer, `${name}: no pacer field in the list`).toBeDefined();
@@ -913,5 +942,35 @@ test.describe('#1812 — the Delivery measurement can see a third row at all', (
     if (measured === undefined) throw new Error('the HUD harness published no measurement');
     expect(rows(deliveryStage(measured, 'none'))).toBe(2);
     expect(rows(deliveryStage(measured, 'start'))).toBe(3);
+  });
+});
+
+test.describe('#1812 — the Delivery measurement can see a field on a ride control at all', () => {
+  test('finds Houses on Pause when it is moved there', async ({ page }) => {
+    const portrait = VIEWPORTS.find((viewport) => viewport.name === 'portrait');
+    if (portrait === undefined) throw new Error('no portrait viewport to control at');
+    await measure(page, portrait);
+    // Move the start stage's Houses field onto its own Pause button.
+    await page.evaluate(() => {
+      const stage = document.querySelector('[data-oyl-delivery-stage="start"]');
+      const houses = [...(stage?.querySelectorAll<HTMLElement>('.oyl-hud__field') ?? [])].find(
+        (each) => each.querySelector('.oyl-hud__label')?.textContent?.trim() === 'Houses',
+      );
+      const pause = [...(stage?.querySelectorAll('.oyl-hud__actions button') ?? [])].find(
+        (each) => each.textContent?.trim() === 'Pause',
+      );
+      if (houses === undefined || pause === undefined) throw new Error('no Houses or no Pause');
+      const from = houses.getBoundingClientRect();
+      const to = pause.getBoundingClientRect();
+      houses.style.transform = `translate(${String(to.left - from.left)}px, ${String(to.top - from.top)}px)`;
+    });
+    const measured = await page.evaluate(() => window.__oylHudMeasure?.());
+    if (measured === undefined) throw new Error('the HUD harness published no measurement');
+    const start = deliveryStage(measured, 'start');
+    const houses = start.fields.find((each) => each.label === 'Houses');
+    if (houses === undefined) throw new Error('no Houses field on the start stage');
+    expect(onARideControl(houses.box, start)).toEqual(
+      expect.arrayContaining(['the ride controls', 'Pause']),
+    );
   });
 });

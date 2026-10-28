@@ -183,7 +183,7 @@ describe('a Delivery round on the HUD — #1812', () => {
       }
     }
     const ended = recordMiss(recordMiss(round, 1), 2);
-    owed = oweRoundOver(ended, endRound(WEEK, ended));
+    owed = oweRoundOver(owed, ended, endRound(WEEK, ended));
     for (const now of [7, 8, 9, 10]) {
       const next = heard(owed, state, now);
       owed = next.owed;

@@ -239,7 +239,7 @@ describe('no place in words — #1812, DL11', () => {
       }
     }
 
-    owed = oweRoundOver(round, endRound(week, round));
+    owed = oweRoundOver(owed, round, endRound(week, round));
     const end = lastTick * DELIVERY_TICK_SECONDS;
     for (let now = end; now <= end + 10; now += 1) speak(now);
     await mounted.rerender(panel(hud(), announcement));
