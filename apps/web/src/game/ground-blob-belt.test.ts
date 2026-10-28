@@ -191,7 +191,6 @@ function windowsOnABelt(): { measured: boolean; attempts: string[]; drawn: numbe
 
 describe('GroundBlobBelt.update — #1674', () => {
   it('allocates nothing on a frame', () => {
-    const t0 = performance.now();
     setFlagsFromString(`--invocation-count-for-turbofan=${TURBOFAN_AFTER_CALLS}`);
     let result: ReturnType<typeof windowsOnABelt>;
     try {
@@ -199,8 +198,6 @@ describe('GroundBlobBelt.update — #1674', () => {
     } finally {
       setFlagsFromString(`--invocation-count-for-turbofan=${TURBOFAN_DEFAULT_CALLS}`);
     }
-    // eslint-disable-next-line no-console
-    console.log(`TIMING-1839 allocation test ${Math.round(performance.now() - t0)} ms; windows: ${result.attempts.join(', ')}`);
     expect(result.measured, result.attempts.join(', ')).toBe(true);
     // Non-vacuity: every frame drew blobs.
     expect(result.drawn).toBeGreaterThan(0);
