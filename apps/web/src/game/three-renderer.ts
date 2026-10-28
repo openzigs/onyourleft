@@ -418,13 +418,13 @@ import {
 } from './contact-shadow';
 import {
   blobCasters,
+  blobRoadClip,
   GROUND_BLOB_CORE,
   GROUND_BLOB_DARKNESS,
   GROUND_BLOB_LIFT_METRES,
   groundBlobAxes,
   groundUnderBlob,
   placeGroundBlob,
-  roadClip,
   type BlobCaster,
   type BlobCasters,
   type GroundBlob,
@@ -3952,8 +3952,8 @@ export class GroundBlobBelt {
 
   /**
    * One blob per caster in each list, under this frame's sun, on this frame's
-   * ground, clipped off this frame's road. Allocates nothing; stops at the
-   * belt's capacity.
+   * ground, clipped off this frame's road. Allocates nothing — held by
+   * `ground-blob-belt.test.ts` (#1674); stops at the belt's capacity.
    */
   update(
     lists: readonly BlobCasters[],
@@ -3982,13 +3982,7 @@ export class GroundBlobBelt {
           continue;
         }
         groundBlobAxes(blob, ground, axes);
-        roadClip(
-          corridor.centre,
-          blob.x,
-          blob.z,
-          Math.max(blob.halfAlong, blob.halfAcross),
-          this.#planes,
-        );
+        blobRoadClip(corridor.centre, blob, this.#planes);
         const lift = GROUND_BLOB_LIFT_METRES;
         this.#matrix.set(
           axes[0] as number,
@@ -4009,8 +4003,15 @@ export class GroundBlobBelt {
           1,
         );
         this.#mesh.setMatrixAt(slot, this.#matrix);
-        first.set(this.#planes.subarray(0, 3), slot * 3);
-        second.set(this.#planes.subarray(3, 6), slot * 3);
+        // Element by element: a `subarray` view is an allocation (#1674).
+        const planes = this.#planes;
+        const clip = slot * 3;
+        first[clip] = planes[0] as number;
+        first[clip + 1] = planes[1] as number;
+        first[clip + 2] = planes[2] as number;
+        second[clip] = planes[3] as number;
+        second[clip + 1] = planes[4] as number;
+        second[clip + 2] = planes[5] as number;
         strength[slot] = caster.strength;
         slot += 1;
       }
