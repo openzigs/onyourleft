@@ -647,8 +647,10 @@ prints the code nowhere. Paste it at a prompt that does not echo, rather than in
 
 ```bash
 read -rs CODE   # paste the code from the email, then Enter
-printf '%s\n' "$CODE" | docker exec -i <container> node src/operator/cli.ts account-erase
-printf '%s\n' "$CODE" | docker exec -i <container> node src/operator/cli.ts account-erase --confirm
+docker compose stop instance   # before --confirm: see below
+printf '%s\n' "$CODE" | docker compose run --rm --no-deps -T instance node src/operator/cli.ts account-erase
+printf '%s\n' "$CODE" | docker compose run --rm --no-deps -T instance node src/operator/cli.ts account-erase --confirm
+docker compose start instance
 unset CODE
 ```
 
@@ -665,11 +667,13 @@ have none left, the command cannot help: the delete page tells them the maintain
 they can show the account is theirs, and that is a judgement for you to make, not for this command.
 After an erasure the account's codes went with it, so the same code then matches nothing.
 
-The instance can stay running: the command works through the same store, and a session the account
-held is refused from that moment. One thing it does not share with the running instance is the lock
-that orders ending a room against making one on the same route (`apps/instance/src/rooms/rooms.ts`),
-so a room made on that route in the same instant could lose its route file. Stop the instance first
-if that matters to you. The test is `apps/instance/src/operator/account-erase.test.ts`.
+**Stop the instance before `--confirm`.** Two locks the erasure relies on hold only inside one
+process: the one that orders ending a room against making one on the same route
+(`apps/instance/src/rooms/rooms.ts`), and the one that keeps a file another rider sends at the same
+moment from being deleted as this account's (`apps/instance/src/sync/content-lock.ts`). A command run
+beside a live instance shares neither, so a room or an identical upload in the same instant could
+lose its file. The dry run without `--confirm` reads only, and is safe with the instance running.
+`load-accounts erase` has the same limit. The test is `apps/instance/src/operator/account-erase.test.ts`.
 
 ## Upgrading
 
