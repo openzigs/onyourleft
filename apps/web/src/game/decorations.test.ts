@@ -368,6 +368,8 @@ describe('never on the church plot, never in the carriageway, never outside a se
  * anchors. Re-taken again for #1690 (`1_133_424_754` until then): the twelve
  * green anchors' `clear` is now to their side road's edge, about 3.38 m, not
  * the carriageway's 11.5 m. Nothing else moved and no item came or went.
+ * And for #1627 (`1_659_013_172` until then): a green's `clear` is now also
+ * to the nearest building's footprint, the shop row beside it, about 1.69 m.
  */
 const PINNED_COUNT = 140;
-const PINNED_DIGEST = 1_659_013_172;
+const PINNED_DIGEST = 747_615_285;

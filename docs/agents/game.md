@@ -647,6 +647,14 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         that had stopped listening while every target reported
                         success. `ride/controller.ts` §`simulationControl`
                         refuses the handle and this supplies the sentence
+    src/game/delivery/delivery-cannot-reach-trainer.test.ts
+                        DL5 (ADR 0059 D-2, #1807): no module under
+                        `delivery/` reaches, by any static import chain,
+                        the trainer-command seam, `trainer-port.ts`,
+                        `gradient.ts`, `ride/trainer.ts` or any module
+                        that writes to a trainer (found by rule, ADR 0059
+                        §Amendments). Fails closed on `import.meta.glob`
+                        and on a worker it cannot name
     src/game/rider.ts   what the rider and their bicycle weigh together, what
                         air they ride through, and — since #365 — **how much of
                         it they are pushing**. ⚠️ `RideConditions.coefficients`
@@ -958,7 +966,9 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         lamp posts, doorsteps, eaves, the crossroads green;
                         never the church plot, never within an item's radius
                         of the carriageway or, since #1690, of the village's
-                        crossroads side road), drawn by `three-renderer.ts`
+                        crossroads side road; since #1627 one village-square
+                        tree a village on its green, in the winter lights),
+                        drawn by `three-renderer.ts`
                         §`DecorationBelt` in ONE call for every village within
                         `FURNITURE_DRAW_METRES`, glow and all
                         (`withDecorationGlow`, no lamp, no uniform), inside
