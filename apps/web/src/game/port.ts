@@ -331,6 +331,19 @@ export interface SceneFrame {
    * world, ADR 0054 D-6).
    */
   readonly mappedBuildings?: MappedBuildingsInView;
+  /**
+   * A Delivery round's parcels in flight, the markers on the houses still on
+   * the round, and its obstacles — #1814 (`delivery/in-view.ts`
+   * §`deliveryInView`). Drawn in both worlds in at most three calls
+   * (`three-renderer.ts` §`DeliveryBelt`), and the view builds nothing of it
+   * until a frame carries one. **Absent on every ordinary ride.**
+   *
+   * ⚠️ **Nothing supplies it yet**, and that is the hole `check-wiring.mjs`
+   * §Limits says no gate here can see — an optional field nobody fills. #1816
+   * fills it when it runs a round inside a game ride; until then only the
+   * browser gate's `delivery-harness.ts` hands a view one.
+   */
+  readonly delivery?: DeliveryInView | undefined;
 }
 
 /** What {@link SceneFrame.water} carries. */
@@ -339,6 +352,38 @@ export interface WaterFrame {
   readonly bridges: readonly BridgePart[];
   /** Seconds, for the ripples. */
   readonly seconds: number;
+}
+
+/**
+ * Which of Delivery's obstacles — `delivery/obstacles.ts` §`ObstacleKind`,
+ * restated so that nothing the view reaches imports Delivery's modules before
+ * #1816 wires them. `delivery/in-view.ts` builds {@link DeliveryInView} from
+ * the roster, so a kind added there and not here does not typecheck.
+ */
+export type DeliveryObstacleKind = 'bin' | 'trolley' | 'cone';
+
+/** One Delivery piece, in the corridor's local metres, and its yaw: three's, so its own `+z` faces `yaw`. */
+export interface DeliveryPiece {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+  readonly yaw: number;
+}
+
+/** An obstacle, and which of the roster it is. */
+export interface DeliveryObstaclePiece extends DeliveryPiece {
+  readonly kind: DeliveryObstacleKind;
+}
+
+/**
+ * What {@link SceneFrame.delivery} carries — #1814: one Delivery frame's
+ * pieces, placed by `delivery/in-view.ts` §`deliveryInView`. Placements and
+ * kinds, never meshes, on {@link SceneFrame.scatter}'s argument.
+ */
+export interface DeliveryInView {
+  readonly parcels: readonly DeliveryPiece[];
+  readonly markers: readonly DeliveryPiece[];
+  readonly obstacles: readonly DeliveryObstaclePiece[];
 }
 
 /** What {@link SceneFrame.terrain} carries. */
