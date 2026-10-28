@@ -296,7 +296,11 @@ describe('the belt’s winter lights — #1626', () => {
     belt.update(STREETS, camera, 'winter-lights', HOLIDAY_DECORATIONS);
     expect(belt.triangles).toBeGreaterThan(0);
     // #1627: and the trees on top of the lights.
-    expect(belt.triangles).toBeLessThanOrEqual(worst + 2 * 272);
+    const tree = (HOLIDAY_DECORATIONS['winter-lights'] ?? []).find(
+      (kind) => kind.item === VILLAGE_TREE,
+    );
+    if (tree === undefined) throw new Error('no village-square tree');
+    expect(belt.triangles).toBeLessThanOrEqual(worst + 2 * decorationKindTriangles(tree));
     belt.dispose();
   });
 });

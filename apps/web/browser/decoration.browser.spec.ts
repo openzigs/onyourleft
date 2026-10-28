@@ -15,8 +15,8 @@
  * 3. **Steady, under reduced motion too** (WCAG 2.3.1): two frames a second
  *    apart, with and without `prefers-reduced-motion`, read the same colours —
  *    since #1625 the product's own jack-o'-lantern face and since #1626 its
- *    winter bulbs — and since #1627 the village-square tree's baubles among
- *    them — as well as the box.
+ *    winter bulbs — and since #1627 the village-square tree's bauble colours
+ *    among them (by colour, not the tree's own geometry) — as well as the box.
  */
 
 import { expect, test, type Page } from '@playwright/test';
@@ -144,7 +144,11 @@ test.describe('the holiday decorations’ belt — #1624', () => {
           await page.waitForTimeout(1_000);
           const second = await glowsOf(world, holiday);
           expect(first.length, `${holiday} ${world}`).toBeGreaterThan(0);
-          // #1627: the tree's every bauble colour is among those read.
+          // #1627: the tree's every bauble colour is among those read. This
+          // probes one box per glowing COLOUR, not the tree's own geometry,
+          // and the baubles' colours are the eave bulbs' (`BULB_SOFT`), so it
+          // goes red only if the tree loses every glowing part. Steadiness is
+          // the glow material's, which the tree shares with every bulb.
           if (holiday === 'winter-lights') {
             expect(TREE_GLOWS.length).toBeGreaterThan(0);
             for (const colour of TREE_GLOWS) {

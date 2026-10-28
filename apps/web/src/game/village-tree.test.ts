@@ -366,6 +366,9 @@ describe('the village-square tree — #1627', () => {
         const fits = street.anchors.filter(
           (anchor) => anchor.kind === 'green' && anchor.clear >= TREE.radius,
         );
+        // `decorations.ts` §`rollOf` draws `which * 2 + STREAM_TAKES`; this
+        // restates it with `STREAM_TAKES` (not exported) at its value, 0. If
+        // that stream moves, this goes red for that reason, not the choice.
         const rolls = fits.map((anchor) => uniformFrom(anchor.hash, which * 2));
         const lowest = fits[rolls.indexOf(Math.min(...rolls))];
         const tree = trees.find((item) => street.anchors.includes(item.anchor));
