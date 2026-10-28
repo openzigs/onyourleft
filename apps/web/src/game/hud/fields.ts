@@ -48,6 +48,7 @@ import type { UnitSystem } from '@onyourleft/store';
 
 import { formatDuration } from '../../format';
 import { formatDistance, formatSpeed, type Measurement } from '../../units/format';
+import { DAYS_IN_WEEK, roundTally, type Round, type WeekProgress } from '../delivery/round';
 import type { GhostOutcome } from '../ghost-outcome';
 import type { GameState } from '../simulation';
 
@@ -278,6 +279,20 @@ export interface ChosenRider {
   readonly wattsPerKilogram?: number | undefined;
 }
 
+/**
+ * A Delivery round, on the HUD — #1812 (epic #1803, the owner's rulings DL2
+ * and DL10 of 2026-10-27). The round as `delivery/round.ts` holds it and the
+ * week it is ridden in: **counts only**, because a house is a position on the
+ * round and nothing here knows which house in the town stands for it (DL11).
+ * There is no field on this type that could carry a name, an address or a
+ * place, and {@link deliveryReadings} reads only the two it declares.
+ */
+export interface DeliveryHud {
+  readonly round: Round;
+  /** The week the round is ridden in: its `day` is the round's day. */
+  readonly week: WeekProgress;
+}
+
 /** Everything the HUD needs. */
 export interface HudInput {
   readonly state: GameState;
@@ -303,6 +318,13 @@ export interface HudInput {
    * held for it, so its fields never appear or vanish mid-ride.
    */
   readonly room?: RoomHud | undefined;
+  /**
+   * The Delivery round, on a Delivery ride — #1812. Absent on every other
+   * ride, so an ordinary ride's HUD reads exactly as it did. Chosen at the
+   * start of the ride and held for it, as {@link room} is, so its fields never
+   * appear or vanish mid-ride.
+   */
+  readonly delivery?: DeliveryHud | undefined;
   /**
    * Which units the rider reads in (#238).
    *
@@ -444,6 +466,9 @@ export function hudReadings(input: HudInput): readonly HudReading[] {
     ...gapReadings(input),
     ...roomReadings(input.room),
     ...wind,
+    // #1812: after the wind, so a Delivery ride agrees with every other ride
+    // about where each field is, and an ordinary ride has none of these.
+    ...deliveryReadings(input.delivery),
   ];
 }
 
@@ -459,7 +484,8 @@ export function isRoomReading(reading: HudReading): boolean {
  * Whether a reading gives way to the room's on a phone — #1356: the pacer's
  * gap, the ghost's gap (and the dashed field that stands in for both) and the
  * wind. `theme.css` §"A ROOM RIDE ON A PHONE" hides them while a room's
- * readings are on the HUD, and says what that costs.
+ * readings are on the HUD, and says what that costs. Since #1812 they give way
+ * to a Delivery round's readings the same way.
  */
 export function givesWayToTheRoom(reading: HudReading): boolean {
   return reading.key === 'gap' || reading.key.startsWith('gap-') || reading.key === 'wind';
@@ -528,6 +554,51 @@ function roomReadings(room: RoomHud | undefined): readonly HudReading[] {
       stale: false,
     },
     ...(room.draftShown === true ? [draftField(room.draft)] : []),
+  ];
+}
+
+/** The key of the Delivery round's houses field — #1812. @see deliveryReadings */
+export const DELIVERY_HOUSES_KEY = 'delivery-houses';
+
+/** The key of the Delivery round's score field — #1812. @see deliveryReadings */
+export const DELIVERY_SCORE_KEY = 'delivery-score';
+
+/** Whether a reading is one of a Delivery round's — #1812. */
+export function isDeliveryReading(reading: HudReading): boolean {
+  return reading.key.startsWith('delivery-');
+}
+
+/**
+ * The Delivery round's two fields — #1812: the houses still to deliver, with
+ * the round's delivered and missed counts under them, and the round's score,
+ * with the day of the week under it. Two fields rather than five, because on
+ * a phone the secondary tier has height for two rows, and `theme.css`
+ * §"A ROOM RIDE ON A PHONE" lets the pacer's gap and the wind give way to
+ * these as they do to a room's. Words are this project's own (DL1): a house
+ * is counted, never named, and nothing here names a place (DL11, ADR 0055).
+ */
+function deliveryReadings(delivery: DeliveryHud | undefined): readonly HudReading[] {
+  if (delivery === undefined) return [];
+  const tally = roundTally(delivery.round);
+  return [
+    {
+      key: DELIVERY_HOUSES_KEY,
+      label: 'Houses',
+      value: String(tally.expecting),
+      unit: 'left',
+      stale: false,
+      // A no-break space binds each count to its word, so a narrow track
+      // breaks the phrase after the comma and never between "2" and "missed".
+      detail: `${String(tally.delivered)}\u00a0delivered, ${String(tally.missed)}\u00a0missed`,
+    },
+    {
+      key: DELIVERY_SCORE_KEY,
+      label: 'Score',
+      value: String(tally.score),
+      unit: '',
+      stale: false,
+      detail: `Day ${String(delivery.week.day)} of ${String(DAYS_IN_WEEK)}`,
+    },
   ];
 }
 

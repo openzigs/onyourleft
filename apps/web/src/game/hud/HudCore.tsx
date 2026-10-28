@@ -37,6 +37,7 @@ import {
   MOVING_TIME_KEY,
   givesWayToTheRoom,
   hudReadings,
+  isDeliveryReading,
   isRoomReading,
   profileReading,
   readingTier,
@@ -360,6 +361,8 @@ function fieldClass(reading: HudReading): string {
     ...(reading.key === MOVING_TIME_KEY ? ['oyl-hud__field--moving'] : []),
     // #1356: on a phone a room's readings take the places of these.
     ...(isRoomReading(reading) ? ['oyl-hud__field--room'] : []),
+    // #1812: and a Delivery round's, the same way (`theme.css` §"A ROOM RIDE ON A PHONE").
+    ...(isDeliveryReading(reading) ? ['oyl-hud__field--delivery'] : []),
     ...(givesWayToTheRoom(reading) ? ['oyl-hud__field--gives-way'] : []),
   ].join(' ');
 }
