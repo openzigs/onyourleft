@@ -862,7 +862,8 @@ export const REALISTIC_DECORATION_TRIANGLES = 12_000;
  * the belt draws at once — measured on the fixtures at 3 844 a village at
  * most (7 264 for the corner fixture's pair), rounded up. The rest, **4 000**,
  * is headroom left for #1627's village-square tree, which shows in the same
- * holiday and the same call.
+ * holiday and the same call: it takes 272 triangles a village, one tree each,
+ * so 544 for the pair (`decoration-belt.test.ts` §"#1627").
  *
  * @test-facing held by `decoration-belt.test.ts` §"#1626", which sums the
  * winter set at its heaviest on the densest fixture against it; the belt

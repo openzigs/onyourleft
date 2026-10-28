@@ -16,6 +16,7 @@ import {
   BULB_METRES,
   decorationsFor,
   HOLIDAY_DECORATIONS,
+  VILLAGE_TREE,
   type DecorationItem,
   type DecorationKind,
   type DecorationPart,
@@ -103,8 +104,14 @@ describe('the winter lights — #1626', () => {
   });
 
   it('are lights on lamp posts and eaves and a wreath on doors: no symbol, and no red and white along a string', () => {
-    // The whole table, for the reviewer: three kinds, none of them a symbol.
-    expect(WINTER.map((kind) => kind.item)).toEqual(['post-lights', 'eave-lights', 'wreath']);
+    // The whole table, for the reviewer: four kinds since #1627's tree, none
+    // of them a symbol (the tree's own are `village-tree.test.ts`').
+    expect(WINTER.map((kind) => kind.item)).toEqual([
+      'post-lights',
+      'eave-lights',
+      'wreath',
+      VILLAGE_TREE,
+    ]);
     for (const kind of WINTER) {
       const bulbs = kind.parts.filter((part) => part.shape === 'bulb');
       for (const bulb of bulbs) {
@@ -115,6 +122,9 @@ describe('the winter lights — #1626', () => {
       }
       // A wreath is lit, not lit up.
       if (kind.item === 'wreath') expect(kind.parts.every((part) => !part.glows)).toBe(true);
+      // The tree's baubles glow, and nothing else of it does.
+      else if (kind.item === VILLAGE_TREE)
+        expect(kind.parts.filter((part) => part.glows)).toEqual(bulbs);
       else expect(bulbs.length, kind.item).toBe(kind.parts.length);
     }
   });
@@ -179,6 +189,6 @@ describe('the winter lights — #1626', () => {
         expect(item.base, name).toBe(item.anchor.step?.top);
       }
     }
-    expect([...kinds].sort()).toEqual(['eave-lights', 'post-lights', 'wreath']);
+    expect([...kinds].sort()).toEqual(['eave-lights', 'post-lights', VILLAGE_TREE, 'wreath']);
   });
 });
