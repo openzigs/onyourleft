@@ -727,6 +727,15 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `RouteProfile.grades` with no new engine, from
                         `plan.ts` §`planProgress`'s WRAPPED position — so lap
                         two's climb is announced and lap one's is not
+    src/game/hud/delivery-announce.ts
+                        a Delivery round through the HUD's one region (#1812,
+                        ADR 0059): a delivery, a miss, a crash and the round's
+                        end, ranked 5g in `announce.ts` and OWED until said, at
+                        most one sentence per kind, so none is dropped and none
+                        is said twice. A house is its place on the round ("the
+                        3rd house"), never a name or an address (DL11). The
+                        round's two HUD fields are `fields.ts`
+                        §`deliveryReadings`, last and absent on any other ride
     src/game/landform.ts
                         the ground beside the road (#458) — built from the SAME
                         centreline and normals as the road, so its innermost

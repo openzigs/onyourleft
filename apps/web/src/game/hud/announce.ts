@@ -36,6 +36,7 @@
  * | 5d | the heart-rate hold, as its sentence changes | event (#1240) | ADR 0048 D-12 | no |
  * | 5e | a lap of the course, as it ends | event (#1312) | #1312's criterion | no |
  * | 5f | into and out of a room's draft | event (#787) | #327's indicator criteria | no — and only with the draft indicator on |
+ * | 5g | a Delivery round's end, a crash, a miss and a delivery, in that order | event (#1812) | ADR 0059, DL2 | **yes** — #1812 |
  * | 6 | power off an acknowledged target | ≥ 10 % for ≥ 5 s | attested | no |
  * | 7 | distance to go | a distance tick | attested | no |
  * | 8 | power | a time cadence | attested | no |
@@ -65,6 +66,7 @@
  * | `plan-changed` | `ride/RideAnnouncer.tsx` and `GameView` | `RideWorkoutSnapshot.replan`, through `workout/replan-text.ts` §`planChangeAnnouncement` (#1244) |
  * | `lap-ended` | `GameView` | `hud/lap-text.ts` §`lapSummary`, over the laps `GameTrainerPort.courseLine` answers (#1312) |
  * | `room-draft` | `GameView` | `game/room-ride.ts` §`draftEvent`, from the room's own frame for this rider (#787) |
+ * | `delivery-*` | nothing yet: #1816 runs a round in a game ride | `hud/delivery-announce.ts` §`deliveryEvents` (#1812) |
  * | readings | `GameView` | `fields.ts` §`hudReadings` |
  *
  * ⚠️ **Rank 1 is broader than its name**, and the name was kept rather than
@@ -185,7 +187,29 @@
  * `GameView` only when the draft indicator is on (`game/draft-preference.ts`,
  * on by default) and announcements are on (off by default): two switches.
  *
- * ## ⚠️ Six kinds are spoken with announcements OFF — {@link ALWAYS_SPOKEN}
+ * ⚠️ **Rank 5g is #1812's**: a Delivery round (ADR 0059) — its end, a crash,
+ * a missed house and a delivered one, ranked in that order among themselves.
+ * BELOW every other event: a Delivery ride is a game laid over a ride, and
+ * nothing it says is the machine under the rider (the trainer is sent the
+ * road's grade and nothing else, DL5), the recording, or the ride's own
+ * figures, so it never costs one of those its place. Delivery is solo (DL9),
+ * so it never competes with a room's events at all. Above every reading,
+ * because each is true of one moment. Among the four: the round's end first,
+ * because it is the round's last word and must never be dropped; then a
+ * crash, which explains a slow-down the rider is feeling the effect of; then
+ * a miss before a delivery, because a missed house drops out of the next
+ * round (DL2). A lower event behind a higher one is dropped by this core, so
+ * the caller offers each on every call until it comes back as `kind`, the
+ * "owed" rule of #647 — `hud/delivery-announce.ts` holds it, one sentence per
+ * kind at most, so what is owed never grows into a queue. ⚠️ **In
+ * {@link ALWAYS_SPOKEN}**, all four: a Delivery round is a game the rider
+ * chose, each sentence is the result of the rider's own throw or of the round
+ * (a status message, SC 4.1.3), and nothing else on the stage speaks it — with
+ * announcements off (the default) a rider with a screen reader would throw
+ * parcels and hear nothing of where they landed. The owner may reverse it: it
+ * is four entries in one array and their line in `announce.test.ts`.
+ *
+ * ## ⚠️ Ten kinds are spoken with announcements OFF — {@link ALWAYS_SPOKEN}
  *
  * #395's table says the safety rows are *"on when announcements are on"*, and
  * this module departs from that cell on purpose. Those three sentences were
@@ -251,7 +275,11 @@ export type AnnouncementEvent =
   | { readonly kind: 'hold-changed'; readonly text: string }
   | { readonly kind: 'plan-changed'; readonly text: string }
   | { readonly kind: 'lap-ended'; readonly text: string }
-  | { readonly kind: 'room-draft'; readonly text: string };
+  | { readonly kind: 'room-draft'; readonly text: string }
+  | { readonly kind: 'delivery-round-over'; readonly text: string }
+  | { readonly kind: 'delivery-crash'; readonly text: string }
+  | { readonly kind: 'delivery-missed'; readonly text: string }
+  | { readonly kind: 'delivery-delivered'; readonly text: string };
 
 /** Every kind of sentence, events and readings together. */
 export type AnnouncementKind =
@@ -286,8 +314,14 @@ export const PRIORITY: readonly AnnouncementKind[] = [
   // accepted re-plan: that sentence is about the workout the trainer is
   // being driven through, and a lap is a figure about the ride. Rank 5e.
   'lap-ended',
-  // #787: into or out of a room's draft. The lowest event: rank 5f.
+  // #787: into or out of a room's draft. The lowest of the ride's events: rank 5f.
   'room-draft',
+  // #1812: a Delivery round, below every other event and above every
+  // reading. Rank 5g; the module note says why this order among the four.
+  'delivery-round-over',
+  'delivery-crash',
+  'delivery-missed',
+  'delivery-delivered',
   'power-off-target',
   'distance-tick',
   'power',
@@ -306,10 +340,15 @@ export const ALWAYS_SPOKEN: readonly AnnouncementKind[] = [
   'room-lost',
   // #785: a race held, started and over is the room's word on what the rider is doing. Rank 5a″.
   'room-race',
+  // #1812: a Delivery round's end, a crash, a miss and a delivery. Rank 5g.
+  'delivery-round-over',
+  'delivery-crash',
+  'delivery-missed',
+  'delivery-delivered',
 ];
 
 /**
- * What the announcer does with announcements off: the six status kinds and
+ * What the announcer does with announcements off: the {@link ALWAYS_SPOKEN} kinds and
  * nothing else — every reading and every optional event is `'never'`.
  */
 function statusOnly(preference: AnnouncementPreference): AnnouncementPreference {
