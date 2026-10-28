@@ -104,6 +104,37 @@ function hashDrawn(belt: GroundBlobBelt, hash: Hash): void {
   bytes(geometry.getAttribute('blobStrength').array, 1);
 }
 
+/**
+ * What a frame may leave on the heap, and the most one may take back. #1674 set
+ * 64 KiB over 200 frames, 328 bytes a frame, with the harness's own first-use
+ * cost (about 18 KiB) inside it; with that taken off (see the test) the bound is
+ * tightened to 256, #1839. On Node 24, the pinned one, an optimised `update`
+ * leaves nothing and a window is almost always exactly 0 bytes; the most one
+ * showed in 60 was 8.4 KB, a compiler's one-off. It catches an array of 32
+ * numbers made once a frame, and the `subarray` a blob #1674 removed many times
+ * over; it does not see one of 20, which the test it replaces did not either.
+ */
+const BYTES_PER_FRAME = 256;
+/**
+ * Frames run before the first window. Until the compiler has made `update` and
+ * what it calls fully optimised, which takes about 250 frames of this belt with
+ * or without coverage, every frame boxes its numbers: 8 to 23 KiB a frame, the
+ * whole of that being the compiler's, not ours. So the windows are the rest of
+ * the warm-up: see {@link MAX_WINDOWS}.
+ */
+const WARM_FRAMES = 150;
+/** Frames in a window. */
+const WINDOW_FRAMES = 40;
+/**
+ * Windows tried before giving up. One the bound or a collection spoiled, or
+ * one in which the heap shrank by more than the bound (a compiler dropping the
+ * code it replaced: -360 KB seen), is followed by another. The shrinking one
+ * says nothing, because it could have hidden a leak up to its own size. An
+ * allocation on every frame is over the bound in every window after the
+ * compiler is done, and that is what fails the test.
+ */
+const MAX_WINDOWS = 12;
+
 describe('GroundBlobBelt.update — #1674', () => {
   it('allocates nothing on a frame', () => {
     const frame = frameOn(hairpinRoute(30), 650);
@@ -117,22 +148,33 @@ describe('GroundBlobBelt.update — #1674', () => {
         sink += belt.mesh.count;
       }
     };
-    frames(400);
-    const attempts: string[] = [];
-    let measured = false;
-    for (let attempt = 0; attempt < 6 && !measured; attempt += 1) {
+    /** Heap growth across `count` frames, and the collections that ran meanwhile. */
+    const measure = (count: number): { grew: number; collected: number } => {
       const profiler = new GCProfiler();
       profiler.start();
       const before = getHeapStatistics().used_heap_size;
-      frames(200);
+      frames(count);
       const after = getHeapStatistics().used_heap_size;
-      const { statistics } = profiler.stop();
-      if (statistics.length > 0) {
-        attempts.push(`collected ${statistics.length}×`);
+      return { grew: after - before, collected: profiler.stop().statistics.length };
+    };
+    frames(WARM_FRAMES);
+    // The first measurement of anything costs the harness about 18 KiB, so a
+    // window of no frames is taken first, and again before each window: what
+    // the measuring itself leaves is taken off, and only the frames are held
+    // to the bound.
+    measure(0);
+    const attempts: string[] = [];
+    let measured = false;
+    for (let attempt = 0; attempt < MAX_WINDOWS && !measured; attempt += 1) {
+      const empty = measure(0);
+      const run = measure(WINDOW_FRAMES);
+      if (run.collected > 0 || empty.collected > 0) {
+        attempts.push(`collected ${run.collected + empty.collected}×`);
         continue;
       }
-      measured = true;
-      expect(after - before).toBeLessThan(64 * 1024);
+      const leftBehind = run.grew - empty.grew;
+      attempts.push(`${leftBehind} B`);
+      measured = Math.abs(leftBehind) < BYTES_PER_FRAME * WINDOW_FRAMES;
     }
     belt.dispose();
     expect(measured, attempts.join(', ')).toBe(true);
