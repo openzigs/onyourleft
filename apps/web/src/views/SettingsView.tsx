@@ -140,6 +140,12 @@ import type { UnitsPort } from '../units/store-port';
 import { readRealisticWorldChoice, writeRealisticWorldChoice } from '../game/world-preference';
 import { readHolidayDecorations, writeHolidayDecorations } from '../game/holiday-preference';
 import { readDraftReadingChoice, writeDraftReadingChoice } from '../game/draft-preference';
+import {
+  OBSTACLE_SETTINGS,
+  readDeliveryAssist,
+  writeDeliveryAssist,
+  type DeliveryAssist,
+} from '../game/delivery/assist-preference';
 import { presentationFor } from '../ride/MetricGrid';
 import type { RideMetricId } from '../ride/metrics';
 import {
@@ -663,6 +669,11 @@ export function SettingsView({
         />
 
         <GameWorldPanel storage={announcements === undefined ? deviceStorage() : announcements} />
+
+        {/* #1813: the assisted Delivery setting, beside the other game choices. */}
+        <DeliveryAssistPanel
+          storage={announcements === undefined ? deviceStorage() : announcements}
+        />
 
         {/* #787: whether a ride in a room shows and says this rider's draft. */}
         <DraftReadingPanel
@@ -1357,6 +1368,163 @@ function GameWorldPanel({
           />{' '}
           Holiday decorations
         </label>
+      </p>
+      {message === undefined ? null : (
+        <StatusMessage tone={message.tone} live>
+          {message.text}
+        </StatusMessage>
+      )}
+    </section>
+  );
+}
+
+/**
+ * What the assisted Delivery setting says (#1813). Each number in it is a
+ * constant in the module that applies it, and a test holds the sentence to
+ * that constant: `throw.ts` §`ASSISTED_THROW_SCALE`, `obstacles.ts`
+ * §`OBSTACLE_SPACING_METRES` and §`FEWER_OBSTACLES_KEEP_ONE_IN`.
+ */
+export const DELIVERY_ASSIST_TEXT = {
+  heading: 'Delivery',
+  about:
+    'Delivery is a round of houses in the trainer game: you throw parcels to doorsteps as you ride past. These choices make a round easier.',
+  stays:
+    'They change nothing on any other ride and nothing your trainer is sent. They are kept on this device only.',
+  widerLabel: 'Wider throw windows',
+  widerDetail:
+    'A parcel counts from three times as far along the road from the doorstep, so you have longer to throw.',
+  obstaclesLegend: 'Obstacles',
+  obstacles: {
+    normal: {
+      label: 'As usual',
+      detail: 'A bin, a trolley or a cone rolls across the road about every 250 metres.',
+    },
+    fewer: { label: 'Fewer', detail: 'Half as many: about one every 500 metres.' },
+    none: { label: 'None', detail: 'Nothing rolls across the road.' },
+  },
+  noFailLabel: 'Keep missed houses on the round',
+  noFailDetail: 'A house you miss stays on the next day’s round instead of dropping out.',
+} as const satisfies {
+  readonly [part: string]: unknown;
+  readonly obstacles: Readonly<
+    Record<(typeof OBSTACLE_SETTINGS)[number], { label: string; detail: string }>
+  >;
+};
+
+/**
+ * The assisted Delivery setting — #1813, the owner's ruling DL10: wider throw
+ * windows, fewer or no obstacles, and no fail, so the throw's timing need not
+ * be a barrier (WCAG 2.2 SC 2.2.1 is not leaned on for an exception).
+ *
+ * ⚠️ **A device choice**, as {@link GameWorldPanel}'s is
+ * (`game/delivery/assist-preference.ts`). Two switches and a group of three
+ * native radios, each control described by the visible sentence under it
+ * through `aria-describedby`, so a screen reader reads what it changes as
+ * well as its name. Every obstacle choice's sentence is also in the help, so
+ * the ones not chosen are still on the screen (#666), as
+ * {@link AppearancePanel} does. The `oyl-announce` class is on each
+ * switch's paragraph, for its 24×24 target, and not on the section: the
+ * announcement tests find their own groups as `.oyl-announce fieldset`.
+ * `oyl-delivery-assist` is the tests' hook.
+ */
+function DeliveryAssistPanel({
+  storage,
+}: {
+  readonly storage: PreferenceStorage | undefined;
+}): JSX.Element {
+  const [assist, setAssist] = useState<DeliveryAssist>(() => readDeliveryAssist(storage));
+  const [message, setMessage] = useState<PanelMessage | undefined>(undefined);
+  function keep(next: DeliveryAssist): void {
+    setAssist(next);
+    setMessage(
+      writeDeliveryAssist(storage, next)
+        ? { tone: 'success', text: ANNOUNCEMENTS_SAVED }
+        : { tone: 'warning', text: ANNOUNCEMENTS_NOT_KEPT },
+    );
+  }
+  const text = DELIVERY_ASSIST_TEXT;
+  return (
+    <section
+      className="oyl-panel oyl-delivery-assist"
+      aria-labelledby="oyl-delivery-assist-heading"
+    >
+      <SectionHeading
+        level={3}
+        id="oyl-delivery-assist-heading"
+        help={
+          <>
+            <p className="oyl-muted">{text.about}</p>
+            <p className="oyl-muted">{text.stays}</p>
+            {/* #666: every obstacle choice's sentence, the ones not chosen too. */}
+            <dl className="oyl-muted">
+              {OBSTACLE_SETTINGS.map((option) => (
+                <div key={option}>
+                  <dt>{text.obstacles[option].label}</dt>
+                  <dd>{text.obstacles[option].detail}</dd>
+                </div>
+              ))}
+            </dl>
+          </>
+        }
+      >
+        {text.heading}
+      </SectionHeading>
+      <p className="oyl-announce">
+        <label className="oyl-announce__switch">
+          <input
+            type="checkbox"
+            role="switch"
+            checked={assist.widerWindows}
+            aria-describedby="oyl-delivery-wider-detail"
+            onChange={(event) => {
+              keep({ ...assist, widerWindows: event.currentTarget.checked });
+            }}
+          />{' '}
+          {text.widerLabel}
+        </label>
+      </p>
+      <p id="oyl-delivery-wider-detail" className="oyl-muted">
+        {text.widerDetail}
+      </p>
+      <fieldset className="oyl-segmented" aria-describedby="oyl-delivery-obstacles-detail">
+        <legend>{text.obstaclesLegend}</legend>
+        <div className="oyl-segmented__options">
+          {OBSTACLE_SETTINGS.map((option) => (
+            <label key={option} htmlFor={`oyl-delivery-obstacles-${option}`}>
+              <input
+                type="radio"
+                id={`oyl-delivery-obstacles-${option}`}
+                name="oyl-delivery-obstacles"
+                value={option}
+                checked={assist.obstacles === option}
+                onChange={() => {
+                  keep({ ...assist, obstacles: option });
+                }}
+              />{' '}
+              {text.obstacles[option].label}
+            </label>
+          ))}
+        </div>
+      </fieldset>
+      <p id="oyl-delivery-obstacles-detail" className="oyl-muted">
+        {text.obstacles[assist.obstacles].detail}
+      </p>
+      <p className="oyl-announce">
+        <label className="oyl-announce__switch">
+          <input
+            type="checkbox"
+            role="switch"
+            checked={assist.noFail}
+            aria-describedby="oyl-delivery-no-fail-detail"
+            onChange={(event) => {
+              keep({ ...assist, noFail: event.currentTarget.checked });
+            }}
+          />{' '}
+          {text.noFailLabel}
+        </label>
+      </p>
+      <p id="oyl-delivery-no-fail-detail" className="oyl-muted">
+        {text.noFailDetail}
       </p>
       {message === undefined ? null : (
         <StatusMessage tone={message.tone} live>
