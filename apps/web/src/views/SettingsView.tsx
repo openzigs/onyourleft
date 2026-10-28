@@ -1469,7 +1469,7 @@ function DeliveryAssistPanel({
       >
         {text.heading}
       </SectionHeading>
-      <p className="oyl-announce">
+      <p className="oyl-announce tw:mb-xs">
         <label className="oyl-announce__switch">
           <input
             type="checkbox"
@@ -1483,7 +1483,7 @@ function DeliveryAssistPanel({
           {text.widerLabel}
         </label>
       </p>
-      <p id="oyl-delivery-wider-detail" className="oyl-muted">
+      <p id="oyl-delivery-wider-detail" className="oyl-muted tw:mt-0">
         {text.widerDetail}
       </p>
       <fieldset className="oyl-segmented" aria-describedby="oyl-delivery-obstacles-detail">
@@ -1506,10 +1506,10 @@ function DeliveryAssistPanel({
           ))}
         </div>
       </fieldset>
-      <p id="oyl-delivery-obstacles-detail" className="oyl-muted">
+      <p id="oyl-delivery-obstacles-detail" className="oyl-muted tw:mt-xs">
         {text.obstacles[assist.obstacles].detail}
       </p>
-      <p className="oyl-announce">
+      <p className="oyl-announce tw:mb-xs">
         <label className="oyl-announce__switch">
           <input
             type="checkbox"
@@ -1523,7 +1523,7 @@ function DeliveryAssistPanel({
           {text.noFailLabel}
         </label>
       </p>
-      <p id="oyl-delivery-no-fail-detail" className="oyl-muted">
+      <p id="oyl-delivery-no-fail-detail" className="oyl-muted tw:mt-0">
         {text.noFailDetail}
       </p>
       {message === undefined ? null : (
