@@ -7,7 +7,7 @@
  *
  * `?delivery=N` hands every frame N parcels, N house markers and N obstacles,
  * every obstacle kind among them, on the road ahead of the rider: what
- * `port.ts` §`SceneFrame.delivery` carries when #1816 runs a round, drawn by
+ * `port.ts` §`SceneFrame.delivery` carries on a ride running a round (#1816), drawn by
  * the product's own `three-renderer.ts` §`DeliveryBelt`. #1814 measured the
  * belt at three calls whatever the count, so the worst case is every kind in
  * view at once, which no single throw needs and which this always is.

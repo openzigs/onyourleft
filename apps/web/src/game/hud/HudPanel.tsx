@@ -274,8 +274,8 @@ export interface HudPanelProps extends Omit<HudInput, 'units'> {
    * A Delivery round's throws — #1810, ADR 0059 D-5: where a press on the
    * HUD's throw control, or a key, hands the throw the rider asked for. With
    * it the HUD shows `ThrowControl` in its actions panel, inside the touch
-   * lock and exempt from none of it; `undefined` on every other ride, which
-   * until #1816 runs a round is every ride.
+   * lock and exempt from none of it; `undefined` on every ride that runs no
+   * round, which is every ride but one `GameView` runs a round in (#1816).
    */
   readonly throwing?: ThrowInputPort | undefined;
 }
