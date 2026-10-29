@@ -219,6 +219,29 @@ describe('a round at the press — #1816', () => {
     });
     expect(none).toBeUndefined();
   });
+
+  it('is no round in a town with fewer houses than the week’s round, and keeps nothing (#1818)', () => {
+    // Houses for the first 300 m only: a few targets, fewer than the first day's round.
+    const short = deliveryTown('delivery-short', { lastAlong: 300 });
+    const pick = (houses: number): DeliveryRide | undefined => {
+      const storage = storageOf({
+        [DELIVERY_PROGRESS_STORAGE_KEY]: { day: 3, houses, score: 9 },
+      });
+      const ride = startDeliveryRide({
+        buildings: short.buildings,
+        profile: short.profile,
+        origin: short.origin,
+        riderDistance: 0,
+        storage,
+      });
+      // Nothing is kept at the press, round or none.
+      expect(readDeliveryProgress(storage)).toEqual({ day: 3, houses, score: 9 });
+      return ride;
+    };
+    // The control: the town holds a round of two, so the refusal below is about the count.
+    expect(pick(2)?.round.houses).toHaveLength(2);
+    expect(pick(FIRST_DAY_HOUSES)).toBeUndefined();
+  });
 });
 
 describe('a round ridden, step by step — #1816', () => {

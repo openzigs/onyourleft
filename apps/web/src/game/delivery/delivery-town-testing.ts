@@ -43,6 +43,11 @@ export interface DeliveryTown {
 export interface DeliveryTownLayout {
   readonly firstAlong?: number;
   readonly lateral?: number;
+  /**
+   * Where the houses stop: no house's middle at or past it, metres along.
+   * #1818 ends the town early, so it has too few houses for a round.
+   */
+  readonly lastAlong?: number;
 }
 
 /** #1817's layout: every house's point, and so every target's, a run of digits. */
@@ -60,7 +65,8 @@ export function deliveryTown(
   const origin = corridorOrigin(profile);
   const houses: BuildingFeature[] = [];
   const middle = layout.lateral ?? 12;
-  for (let along = layout.firstAlong ?? 50; along < DELIVERY_TOWN_METRES - 50; along += 14) {
+  const last = Math.min(layout.lastAlong ?? Infinity, DELIVERY_TOWN_METRES - 50);
+  for (let along = layout.firstAlong ?? 50; along < last; along += 14) {
     for (const lateral of [middle, -middle]) {
       houses.push(buildingBeside(profile, origin, [rectangleBeside(along, lateral, 8, 8)], 6));
     }

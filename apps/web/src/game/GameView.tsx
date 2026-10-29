@@ -184,6 +184,7 @@ import {
 import { hudReadings } from './hud/fields';
 import { useUnits } from '../units/context';
 import { gameDeliveryFromHash, gameRouteFromHash } from '../shell/routes';
+import { readDeliveryProgress } from './delivery/delivery-progress';
 import { deliveryInView } from './delivery/in-view';
 import {
   endDeliveryRide,
@@ -197,8 +198,11 @@ import type { ThrowInputPort } from './delivery/throw-input-port';
 import {
   deliveryEvents,
   deliverySpoken,
+  NO_ROUND_LABEL,
+  NO_ROUND_TEXT,
   NOTHING_OWED,
   oweCrash,
+  oweNoRound,
   oweRoundChange,
   oweRoundOver,
   type DeliveryOwed,
@@ -475,10 +479,11 @@ export interface GameViewProps {
   /**
    * Run a Delivery round in the ride — #1816, ADR 0059 (epic #1803). Read at
    * the press, and only for a solo ride on a corridor with mapped houses: a
-   * ride in a room never runs one (DL9), and a town the pick finds no house
-   * in has no round. Absent, the developer route decides
-   * (`shell/routes.ts` §`gameDeliveryFromHash`, `#/game?delivery=on`): the
-   * chooser does not offer Delivery yet, which is #1818's.
+   * ride in a room never runs one (DL9), and a town the pick finds too few
+   * houses in for the week's round has none (#1818). Absent — the product —
+   * the chooser's *Ride a Delivery round* decides, with the realistic world
+   * chosen (#1818, DL6), or the developer route (`shell/routes.ts`
+   * §`gameDeliveryFromHash`, `#/game?delivery=on`). A test sets it.
    *
    * ⚠️ **Nothing of a round reaches the trainer** (DL5, ADR 0059 D-2): the
    * round reads the simulation's distance and speed and writes to nothing but
@@ -681,6 +686,12 @@ export function GameView(props: GameViewProps): JSX.Element {
     if (value) setWithGhost(false);
   }, []);
   const [withPacer, setWithPacer] = useState(false);
+  /**
+   * Whether the rider switched on a Delivery round in the chooser — #1818.
+   * Per ride, like the pacer. The chooser asks for it only with the realistic
+   * world chosen (DL6): hidden, the switch asks for nothing.
+   */
+  const [withDelivery, setWithDelivery] = useState(false);
   const [intensity, setIntensity] = useState(String(DEFAULT_PACER_INTENSITY));
   /**
    * Where the rider said their hands are — #365.
@@ -793,6 +804,12 @@ export function GameView(props: GameViewProps): JSX.Element {
   const [worldNotice, setWorldNotice] = useState<
     { readonly text: string; readonly from: number } | undefined
   >(undefined);
+  /**
+   * The ride time from which the HUD says a Delivery round was asked for and
+   * the town had too few houses for it — #1818, on the world notice's rule.
+   * `undefined` on every ride that runs the round it asked for, or asked none.
+   */
+  const [noRoundFrom, setNoRoundFrom] = useState<number | undefined>(undefined);
   /**
    * The lap that has just ended, and the ride time it ended at — #1312. On
    * the HUD for `lap-text.ts` §`LAP_NOTICE_SECONDS` of ride, the world
@@ -1364,6 +1381,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       air: Wind | undefined,
       sitting: RidingPosition,
       riderGhost = false,
+      delivery = false,
     ): Promise<void> => {
       const profile = route.profile;
       // ⚠️ #400: FIRST, before the first `await` — this line runs inside the
@@ -1663,12 +1681,16 @@ export function GameView(props: GameViewProps): JSX.Element {
       // room never runs one), and only where the town has mapped houses to
       // pick from. Its seed is drawn inside `startDeliveryRide` and kept by
       // nothing (DL11); the week and the assist are this device's own.
+      // #1818: asked for by the chooser, which offers it only with the
+      // realistic world (DL6); and too few houses for the week's round is an
+      // ordinary ride the HUD says is one — and keeps nothing, so the week is
+      // as it was. A ride in a room runs none, and says nothing of it (DL9).
+      const deliveryAsked =
+        props.delivery ?? (delivery || gameDeliveryFromHash(globalThis.location.hash));
       deliveryOwedRef.current = NOTHING_OWED;
       throwAskedRef.current = undefined;
       deliveryRef.current =
-        (props.delivery ?? gameDeliveryFromHash(globalThis.location.hash)) &&
-        roomId === undefined &&
-        mappedBuildingsRef.current !== undefined
+        deliveryAsked && roomId === undefined && mappedBuildingsRef.current !== undefined
           ? startDeliveryRide({
               buildings: mappedBuildingsRef.current,
               profile,
@@ -1677,6 +1699,9 @@ export function GameView(props: GameViewProps): JSX.Element {
               storage: deviceStorage(),
             })
           : undefined;
+      const noRound = deliveryAsked && roomId === undefined && deliveryRef.current === undefined;
+      if (noRound) deliveryOwedRef.current = oweNoRound();
+      setNoRoundFrom(noRound ? simulation.state.elapsed : undefined);
       setState(simulation.state);
       setChosen(route);
       setPhase('riding');
@@ -1712,6 +1737,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       air: Wind | undefined,
       sitting: RidingPosition,
       riderGhost?: boolean,
+      delivery?: boolean,
     ): Promise<void> => {
       // #509: one press is one ride. @see startingRef
       if (startingRef.current) {
@@ -1719,7 +1745,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       }
       startingRef.current = true;
       try {
-        await begin(route, ghost, pacer, air, sitting, riderGhost);
+        await begin(route, ghost, pacer, air, sitting, riderGhost, delivery);
       } finally {
         startingRef.current = false;
       }
@@ -2177,10 +2203,9 @@ export function GameView(props: GameViewProps): JSX.Element {
           );
         }
       }
-      // #1812: the round's sentences, owed until said (`hud/delivery-announce.ts`).
-      if (deliveryRef.current !== undefined) {
-        events.push(...deliveryEvents(deliveryOwedRef.current));
-      }
+      // #1812: the round's sentences, owed until said (`hud/delivery-announce.ts`);
+      // and #1818's one sentence on a ride that asked for a round and has none.
+      events.push(...deliveryEvents(deliveryOwedRef.current));
       const heard = announce(announcerRef.current, {
         now: simulation.state.elapsed,
         readings,
@@ -2542,6 +2567,13 @@ export function GameView(props: GameViewProps): JSX.Element {
           windUnit={speedUnit(units)}
           position={position}
           onPosition={setPosition}
+          // #1818: a Delivery round, with the week this device kept, read
+          // here for `worldChosen`'s reason: a round ridden since is seen at once.
+          delivery={{
+            chosen: withDelivery,
+            onChoose: setWithDelivery,
+            week: readDeliveryProgress(deviceStorage()),
+          }}
           onStart={start}
           // #1221: whether this ride will be saved, said under Ride. The
           // recorder's moving time is subscribed (`useRideMovingSeconds`), so
@@ -2977,6 +3009,16 @@ export function GameView(props: GameViewProps): JSX.Element {
           (state?.elapsed ?? 0) - worldNotice.from >= STANDING_NOTICE_SECONDS ? undefined : (
             <StatusMessage key="world" tone="info" label="Standard world">
               {worldNotice.text}
+            </StatusMessage>
+          ),
+          // #1818: a Delivery round asked for, and too few mapped houses for
+          // it. The world notice's rule — STANDING_NOTICE_SECONDS of ride and
+          // then out of the way, and not `live`: the HUD's one region says it
+          // (`hud/delivery-announce.ts` §`NO_ROUND_TEXT`, with announcements on).
+          noRoundFrom === undefined ||
+          (state?.elapsed ?? 0) - noRoundFrom >= STANDING_NOTICE_SECONDS ? undefined : (
+            <StatusMessage key="no-round" tone="info" label={NO_ROUND_LABEL}>
+              {NO_ROUND_TEXT}
             </StatusMessage>
           ),
         ]}

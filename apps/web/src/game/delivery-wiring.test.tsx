@@ -28,6 +28,15 @@
  * so there is a crash. The shadow runs the same pure round
  * (`delivery/ride-round.ts`), and the HUD of the real ride is held to what it
  * predicts: a wiring that dropped a step, a throw or a crash is red there.
+ *
+ * ## Offered in the chooser — #1818
+ *
+ * The last block mounts the game with no `delivery` prop, as a rider reaches
+ * it, chooses *Ride a Delivery round* in the real chooser with the realistic
+ * world chosen, and reads what the ride did from the rendered HUD and the
+ * device's storage: a round where the town holds one; where it has too few
+ * houses, or none in reach, or no corridor at all, a notice in words, an
+ * ordinary ride and the week as it was; and the assist setting reaching it.
  */
 
 import { act } from 'react';
@@ -46,8 +55,10 @@ import { createRideController } from '../ride/controller';
 import { simulatedOpenTrainer } from '../ride/simulated-trainer-testing';
 import { mount, queryAll, settle, type Mounted } from '../testing/mount';
 
+import { DELIVERY_ASSIST_STORAGE_KEY, type DeliveryAssist } from './delivery/assist-preference';
 import { DELIVERY_PROGRESS_STORAGE_KEY, readDeliveryProgress } from './delivery/delivery-progress';
 import { deliveryTown } from './delivery/delivery-town-testing';
+import { pickRoundTargets } from './delivery/targets';
 import { startDeliveryRide, stepDeliveryRide, type DeliveryRide } from './delivery/ride-round';
 import { roundTally, type WeekProgress } from './delivery/round';
 import {
@@ -58,6 +69,7 @@ import {
 import { FOOTPRINT_MAX_VERTICES, footprintPlans } from './footprint-buildings';
 import { GameView, type GamePort, type RidableRoute } from './GameView';
 import { ANNOUNCEMENTS_STORAGE_KEY, DEFAULT_ANNOUNCEMENTS } from './hud/announce-preference';
+import { NO_ROUND_TEXT } from './hud/delivery-announce';
 import { landClassMask } from './land-class';
 import { mappedBuildingsOf } from './mapped-buildings';
 import type { GameRenderer, SceneFrame } from './port';
@@ -66,8 +78,11 @@ import { DELIVERY_VILLAGE_DRAW_CALLS, villageDrawCallCeiling } from './realistic
 import { DEFAULT_RIDING_POSITION, rideConditionsFor } from './rider';
 import { GameSimulation, type RiderInput } from './simulation';
 import { corridorOrigin } from './terrain';
+import { DELIVERY_CHOICE_TEXT } from './StageChooser';
 import { gameTrainerPortOver, type GameTrainerPort, type GradientTrainer } from './trainer-port';
 import { urbanClassMap } from './urban-class';
+import type { WorldCorridor } from './world-data/corridor';
+import { writeRealisticWorldChoice } from './world-preference';
 
 /**
  * What `GameView` offered the announcer, kind by kind — `trainer-wiring.test.tsx`'s
@@ -131,10 +146,17 @@ let pending: FrameRequestCallback[] = [];
 let mounted: Mounted | undefined;
 
 function port(): GamePort {
+  return portWith(town.corridor);
+}
+
+/** The game's port over `corridor` for {@link ROUTE}'s road; `undefined` reads no corridor at all. */
+function portWith(corridor: WorldCorridor | undefined): GamePort {
   return {
     listRoutes: () => Promise.resolve([ROUTE]),
     loadGhost: () => Promise.resolve(undefined),
-    loadWorldCorridor: () => Promise.resolve({ kind: 'ready', corridor: town.corridor }),
+    ...(corridor === undefined
+      ? {}
+      : { loadWorldCorridor: () => Promise.resolve({ kind: 'ready' as const, corridor }) }),
     readSensors: () => ({
       rider: { power: watts(powerAt(nowMs)), live: true, paired: true },
       cadence: { value: 88, live: true, paired: true },
@@ -868,6 +890,160 @@ describe('the recorded ride is unchanged by a Delivery round — #1816', () => {
         `${String(tally.delivered)}\u00a0delivered, ${String(tally.missed)}\u00a0missed`,
       );
       expect(withRound.recorded).toStrictEqual(without.recorded);
+    },
+  );
+});
+
+describe('offered in the chooser, with the too-few-houses fallback — #1818', () => {
+  /** A renderer for a ride that chose the realistic world, which does not load here. */
+  function realisticNotLoaded(): GameRenderer {
+    return {
+      ...capturingRenderer([]),
+      loadRealisticWorld: () =>
+        Promise.resolve({ loaded: false, offline: false, detail: 'no realistic world here' }),
+    };
+  }
+
+  it('rides a short town that has houses to pick, fewer than the round’s', () => {
+    const short = deliveryTown(ROUTE.id, { lastAlong: 220 });
+    const pick = pickRoundTargets({ ...short, riderDistance: 0, houses: WEEK.houses }, script.seed);
+    expect(pick.targets.length).toBeGreaterThan(0);
+    expect(pick.complete).toBe(false);
+  });
+
+  /** The chooser's switch, by its label. */
+  function deliverySwitch(): HTMLInputElement | undefined {
+    return queryAll<HTMLInputElement>(mounted?.container ?? document, 'input[role="switch"]').find(
+      (box) => (box.closest('label')?.textContent ?? '').includes(DELIVERY_CHOICE_TEXT.label),
+    );
+  }
+
+  /** The HUD's notices, as text. */
+  function notices(): string {
+    return mounted?.container.querySelector('.oyl-hud__notices')?.textContent ?? '';
+  }
+
+  /**
+   * Mount the game as a rider reaches it — no `delivery` prop — with the
+   * realistic world chosen unless `world` is false, switch the round on when
+   * `choose`, press *Ride* and ride `frames` frames with no throw.
+   */
+  async function chooseAndRide(options: {
+    readonly corridor?: WorldCorridor | undefined;
+    readonly choose: boolean;
+    readonly frames: number;
+  }): Promise<void> {
+    writeRealisticWorldChoice(localStorage, true);
+    stubSeed(script.seed);
+    mounted = await mount(
+      <GameView
+        port={portWith('corridor' in options ? options.corridor : town.corridor)}
+        renderer={() => Promise.resolve(realisticNotLoaded())}
+        now={() => nowMs}
+      />,
+    );
+    await settle();
+    if (options.choose) await clickThrough(deliverySwitch());
+    await clickThrough(buttonStarting('Ride '));
+    for (let index = 0; index < options.frames; index += 1) await pump();
+    await settle();
+  }
+
+  it('offers the round only with the realistic world chosen, the week’s progress beside it', async () => {
+    mounted = await mount(
+      <GameView port={port()} renderer={() => Promise.resolve(capturingRenderer([]))} />,
+    );
+    await settle();
+    expect(deliverySwitch()).toBeUndefined();
+    mounted.unmount();
+    writeRealisticWorldChoice(localStorage, true);
+    mounted = await mount(
+      <GameView port={port()} renderer={() => Promise.resolve(capturingRenderer([]))} />,
+    );
+    await settle();
+    expect(deliverySwitch()?.checked).toBe(false);
+    // The week the device kept, read through the real reader.
+    expect(mounted.container.textContent).toContain('Day 2 of 7 · 3 houses on the round');
+  });
+
+  it('starts a ride with the round on once it is chosen: its houses on the HUD', async () => {
+    await chooseAndRide({ choose: true, frames: 5 });
+    expect(field('Houses')).toEqual({ value: '3', detail: '0\u00a0delivered, 0\u00a0missed' });
+    expect(field('Score')?.detail).toBe(`Day ${String(WEEK.day)} of 7`);
+    expect(mounted?.container.querySelector('[aria-label="Throw a parcel"]')).not.toBeNull();
+    expect(notices()).not.toContain(NO_ROUND_TEXT);
+  });
+
+  it('starts an ordinary ride, saying nothing of Delivery, when it is not chosen', async () => {
+    await chooseAndRide({ choose: false, frames: 5 });
+    expect(field('Houses')).toBeUndefined();
+    expect(mounted?.container.querySelector('[aria-label="Throw a parcel"]')).toBeNull();
+    expect(notices()).not.toContain(NO_ROUND_TEXT);
+    expect(said).not.toContain(NO_ROUND_TEXT);
+  });
+
+  it.each([
+    // Houses for the first 220 m only: two to pick, fewer than the round's three.
+    // Ridden past them, so a short round would have missed them and moved the week.
+    {
+      town: 'too few houses',
+      corridor: deliveryTown(ROUTE.id, { lastAlong: 220 }).corridor,
+      frames: 330,
+    },
+    // #1856: every front step past a parcel's reach, so the pick finds none.
+    {
+      town: 'no house in reach',
+      corridor: deliveryTown(ROUTE.id, { lateral: 30 }).corridor,
+      frames: 20,
+    },
+    // No corridor read at all: no mapped house anywhere.
+    { town: 'no corridor', corridor: undefined, frames: 20 },
+  ])(
+    'says so in words over a town with $town, rides an ordinary ride, and keeps the week',
+    { timeout: 16_000 },
+    async ({ corridor, frames }) => {
+      await chooseAndRide({ corridor, choose: true, frames });
+      // An ordinary ride: no field, no throw control.
+      expect(field('Houses')).toBeUndefined();
+      expect(mounted?.container.querySelector('[aria-label="Throw a parcel"]')).toBeNull();
+      // Told in words: on the HUD's notices only while it stands, and said once through the region.
+      if (frames <= 20) expect(notices()).toContain(NO_ROUND_TEXT);
+      expect(said.filter((text) => text === NO_ROUND_TEXT)).toHaveLength(1);
+      await clickThrough(buttonStarting('End ride'));
+      // The week as it was, read back from the device by the real reader.
+      expect(readDeliveryProgress(localStorage)).toEqual(WEEK);
+    },
+  );
+
+  it('takes the notice down once it has stood its time', { timeout: 16_000 }, async () => {
+    await chooseAndRide({ corridor: undefined, choose: true, frames: 20 });
+    expect(notices()).toContain(NO_ROUND_TEXT);
+    // 15 s of ride, at four steps a frame: 75 frames, and a few over.
+    for (let index = 0; index < 80; index += 1) await pump();
+    await settle();
+    expect(notices()).not.toContain(NO_ROUND_TEXT);
+  });
+
+  it(
+    'carries the assist setting into the ride: a round of misses keeps its count (#1813)',
+    { timeout: 16_000 },
+    async () => {
+      const assist: DeliveryAssist = { widerWindows: false, obstacles: 'none', noFail: true };
+      localStorage.setItem(DELIVERY_ASSIST_STORAGE_KEY, JSON.stringify(assist));
+      await chooseAndRide({ choose: true, frames: FRAMES });
+      // Every house passed with no throw, so every one missed, as the HUD says.
+      expect(field('Houses')).toEqual({
+        value: '0',
+        detail: `0\u00a0delivered, ${String(WEEK.houses)}\u00a0missed`,
+      });
+      await clickThrough(buttonStarting('End ride'));
+      // No fail: tomorrow's round keeps all three houses. Without the assist,
+      // three misses of three would leave none, and end the week.
+      expect(readDeliveryProgress(localStorage)).toEqual({
+        day: WEEK.day + 1,
+        houses: WEEK.houses,
+        score: WEEK.score,
+      });
     },
   );
 });

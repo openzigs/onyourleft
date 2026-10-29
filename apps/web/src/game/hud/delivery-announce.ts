@@ -172,6 +172,32 @@ export function oweRoundOver(
   return { ...NOTHING_OWED, roundOver: [...lead, sentence].join(' ') };
 }
 
+/** The HUD notice's label for a ride that asked for a round and has none — #1818. */
+export const NO_ROUND_LABEL = 'Delivery';
+
+/**
+ * What a rider who chose a Delivery round is told when the press finds too
+ * few mapped houses for it — #1818, new rider-facing wording for the owner's
+ * approval. On the HUD as a notice, and said once through the one region as
+ * the round's last word (rank 5g, so only with announcements on: the owner's
+ * ruling of 2026-10-28 on #1812). It names no place and no number of houses
+ * the town has: only that there are too few, that the ride is an ordinary
+ * one, and that the week has not moved (`ride-round.ts` §"A town with too
+ * few houses for the round has no round").
+ */
+export const NO_ROUND_TEXT =
+  'Too few mapped houses on this route for today’s Delivery round, so this is an ordinary ' +
+  'ride. Your week is as it was.';
+
+/**
+ * Owe {@link NO_ROUND_TEXT}: a ride that asked for a round and has none. It
+ * is the only thing a ride with no round says about Delivery, so it is owed
+ * as the round's last word, and said once like any other (#1818).
+ */
+export function oweNoRound(): DeliveryOwed {
+  return { ...NOTHING_OWED, roundOver: NO_ROUND_TEXT };
+}
+
 /** What to offer `announce.ts` on this call: one event per kind owed. */
 export function deliveryEvents(owed: DeliveryOwed): readonly AnnouncementEvent[] {
   const events: AnnouncementEvent[] = [];
