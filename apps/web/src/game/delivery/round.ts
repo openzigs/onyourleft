@@ -82,7 +82,7 @@ export const FRESH_WEEK: WeekProgress = Object.freeze({
  */
 export interface RoundOutcome {
   readonly delivered: number;
-  /** Houses missed, counting any still expecting when the round ended. */
+  /** Houses missed. A house still expecting when the round ended was never reached, and is not one (#1857). */
   readonly missed: number;
   /** Every house on the round delivered. */
   readonly perfect: boolean;
@@ -185,14 +185,32 @@ function settle(round: Round, position: number, outcome: HouseOutcome): Round {
 
 /**
  * End the round ridden on `week`'s day, and say what the next ride starts
- * from. The round's own length is the count that was ridden; a house still
- * expecting when the round ends was not delivered, so it counts as missed.
+ * from. The round's own length is the count that was ridden.
+ *
+ * A house still expecting when the round ends is one the rider never reached
+ * (#1857, the owner's ruling of 2026-10-29): the ride ended before its throw
+ * window closed, so it is neither delivered nor missed, and counts for
+ * nothing. Which houses the rider had passed is `ride-round.ts`'
+ * §`endDeliveryRide`, which records each as missed before it ends the round
+ * here. So a round ended early keeps what was delivered and missed so far: a
+ * perfect round is one with every house delivered, and a round with no house
+ * reached at all leaves the week as it was, as a ride lost mid-round does.
  */
 export function endRound(week: WeekProgress, round: Round): RoundOutcome {
   const count = round.houses.length;
-  const delivered = round.houses.filter((outcome) => outcome === 'delivered').length;
-  const missed = count - delivered;
-  const perfect = missed === 0;
+  const { delivered, missed } = roundTally(round);
+  if (delivered + missed === 0) {
+    return {
+      delivered,
+      missed,
+      perfect: false,
+      nextHouses: week.houses,
+      weekScore: week.score,
+      weekOver: false,
+      next: week,
+    };
+  }
+  const perfect = delivered === count;
   const nextHouses = perfect
     ? Math.min(count + 1, MOST_HOUSES)
     : round.assisted
