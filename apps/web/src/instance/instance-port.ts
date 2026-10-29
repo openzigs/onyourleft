@@ -1508,12 +1508,15 @@ export function createInstancePort(dependencies: InstancePortDependencies): Inst
         if (code === 'validation_failed') {
           return { kind: 'refused', text: RENAME_REFUSAL_TEXT['bad-name'] };
         }
-        const said = (answer.body as { displayName?: unknown } | null)?.displayName;
-        const kept = checkDisplayName(typeof said === 'string' ? said : '');
-        if (answer.status !== 200 || !kept.ok) {
+        if (answer.status !== 200) {
           return { kind: 'refused', text: RENAME_REFUSAL_TEXT['no-answer'] };
         }
-        return { kind: 'renamed', displayName: kept.name };
+        // A 200 means the instance committed the rename: never tell the rider it
+        // was not changed because the echoed name fails this app's rule (version
+        // skew). The screen shows what the read-back says, not this value.
+        const said = (answer.body as { displayName?: unknown } | null)?.displayName;
+        const kept = checkDisplayName(typeof said === 'string' ? said : '');
+        return { kind: 'renamed', displayName: kept.ok ? kept.name : checked.name };
       } catch {
         return { kind: 'refused', text: RENAME_REFUSAL_TEXT['no-answer'] };
       }

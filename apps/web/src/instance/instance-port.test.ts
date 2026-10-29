@@ -13,7 +13,7 @@
  * those; the shape it is used through is written down here.
  */
 
-import { unixSeconds } from '@onyourleft/domain';
+import { checkDisplayName, unixSeconds } from '@onyourleft/domain';
 import { ensureDeviceSigningKey } from '@onyourleft/store';
 import { createStoreHarness, seedRide, type StoreHarness } from '@onyourleft/store/testing';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -36,6 +36,16 @@ import {
 import type { InstanceSend } from './instance-transport';
 import { INSTANCE_ACCOUNT_STORAGE_KEY } from './sign-in';
 import { LOADED_LOCALLY } from './testing';
+
+// Delegates to the real rule; a test makes this app's rule differ from the
+// instance's for one call, which is what a version skew between them looks like.
+const actualCheck = vi.hoisted(() => ({ run: undefined as unknown as typeof checkDisplayName }));
+
+vi.mock('@onyourleft/domain', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@onyourleft/domain')>();
+  actualCheck.run = actual.checkDisplayName;
+  return { ...actual, checkDisplayName: vi.fn(actual.checkDisplayName) };
+});
 
 interface IdentityInstance {
   readonly instance: { handler(request: Request): Promise<Response> };
@@ -515,6 +525,33 @@ describe('changing the name other riders see, sealed — #906 item 2', () => {
       text: RENAME_REFUSAL_TEXT.rate_limited,
     });
     expect(await first.port.current()).toMatchObject({ displayName: 'Anna D' });
+  });
+
+  it('names the bad name, not a silence, when the instance refuses one this app accepted', async () => {
+    const { first } = await signedIn();
+    // This app's rule lets a 40-character name through once; the instance's does not.
+    vi.mocked(checkDisplayName).mockImplementationOnce(() => ({ ok: true, name: 'x'.repeat(40) }));
+    expect(await first.port.rename('whatever')).toEqual({
+      kind: 'refused',
+      text: RENAME_REFUSAL_TEXT['bad-name'],
+    });
+    expect(await first.port.current()).toMatchObject({ displayName: 'Anna' });
+  });
+
+  it('says renamed when the instance committed it, though its echo fails this app rule', async () => {
+    const { first } = await signedIn();
+    const seen: string[] = [];
+    vi.mocked(checkDisplayName).mockImplementation((input) => {
+      seen.push(input);
+      // Only the echo, the last check of the call, is refused: the name was sent and kept.
+      return seen.length >= 3 ? { ok: false, problem: 'empty' } : actualCheck.run(input);
+    });
+    try {
+      expect(await first.port.rename('Anna B')).toEqual({ kind: 'renamed', displayName: 'Anna B' });
+    } finally {
+      vi.mocked(checkDisplayName).mockImplementation(actualCheck.run);
+    }
+    expect(await first.port.current()).toMatchObject({ displayName: 'Anna B' });
   });
 
   it('says this device is signed out when the instance no longer takes its sign-in', async () => {
