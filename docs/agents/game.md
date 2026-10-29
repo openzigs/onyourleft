@@ -1039,7 +1039,11 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         Since #1658 a sunlit wall under eaves has the sun's own
                         shadow from the eaves' edge (`eavesShadeAt`, the
                         shader's `oylOverhangShadow`); `-overhang-shadows`
-                        builds it out. Since #1661 every mapped face is
+                        builds it out. Since #1679 a cornice's too, on the
+                        walls flagged `STYLE_CORNICE` and the parapet face
+                        whose `skip` is its edge (`corniceShadeAt`), and an
+                        awning's on the shop front whose `skip` is its depth
+                        (`awningShadeAt`). Since #1661 every mapped face is
                         weathered (`WEATHERING`, `weatheringAt`, the shader's
                         `oylWeather*`; the photograph laid per building by
                         `photographShiftOf`); `-weathering` builds it out.
