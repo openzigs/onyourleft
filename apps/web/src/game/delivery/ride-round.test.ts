@@ -478,6 +478,19 @@ describe('the round’s end — #1816', () => {
     expect(endDeliveryRide(ride)).toMatchObject({ delivered: 0, missed: 1 });
   });
 
+  it('counts no house missed whose widened window the rider is still in when the ride ends (#1857)', () => {
+    const ride = withoutObstacles({ ...started(), widerWindows: true });
+    const first = ride.throwTargets[0] as ThrowTarget;
+    // Past the usual window's closing edge, inside the assist's wider one.
+    const along = first.along + THROW_WINDOW_AFTER_METRES + 1;
+    expect(along).toBeLessThan(first.along + THROW_WINDOW_AFTER_METRES * ASSISTED_THROW_SCALE);
+    const riding = rideTo(ride, along).ride;
+    expect(endDeliveryRide(riding)).toMatchObject({ delivered: 0, missed: 0 });
+    // Without the assist the same place has closed the window: the house is missed.
+    const plain = rideTo(withoutObstacles(started()), along).ride;
+    expect(endDeliveryRide(plain)).toMatchObject({ delivered: 0, missed: 1 });
+  });
+
   it('leaves the week as it was when the ride ends before any house is reached (#1857)', () => {
     const week: WeekProgress = { day: 2, houses: FIRST_DAY_HOUSES, score: 4 };
     const storage = storageOf({ [DELIVERY_PROGRESS_STORAGE_KEY]: week });
