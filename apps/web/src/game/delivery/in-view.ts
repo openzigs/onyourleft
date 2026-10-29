@@ -52,12 +52,10 @@
  * {@link PARCEL_LOB_METRES} above the straight line, down to the road at the
  * flight's end. It decides nothing.
  *
- * @unwired Nothing runs a Delivery round yet. #1816 gives this module its
- * production caller when it runs a round inside a game ride and hands
- * {@link deliveryInView}'s result to the view on `SceneFrame.delivery`; until
- * then only its tests and the browser gate's `delivery-harness.ts` reach it.
- * The frame's types are `port.ts`', so the view reaches none of Delivery's
- * modules before then.
+ * `GameView` hands {@link deliveryInView}'s result to the view on
+ * `SceneFrame.delivery` on every frame of a ride that runs a round (#1816);
+ * the browser gate's `delivery-harness.ts` hands it one too. The frame's
+ * types are `port.ts`', so the view itself reaches none of Delivery's modules.
  *
  * ## Nothing here leaves the ride
  *

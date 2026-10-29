@@ -5,9 +5,8 @@
  * owner's rulings DL6 and DL11 of 2026-10-27 (epic #1803), recorded as
  * ADR 0059 D-3 and D-4.
  *
- * @unwired Nothing runs a Delivery round yet. #1816 gives this module its
- * production caller when it runs a round inside a game ride, picking the
- * round's targets at its start; until then only its tests reach it.
+ * A game ride picks the round's targets at its start, through
+ * `ride-round.ts` (#1816).
  *
  * ## Only houses the town already draws
  *

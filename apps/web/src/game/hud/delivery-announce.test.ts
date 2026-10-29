@@ -15,6 +15,7 @@ import {
   FRESH_WEEK,
   recordDelivery,
   recordMiss,
+  roundTally,
   startRound,
   type Round,
 } from '../delivery/round';
@@ -112,7 +113,7 @@ describe('Delivery follows the rider’s announcement setting — #1812, the own
     );
     caller.ride(0, 6);
     const ended = recordMiss(missed, 2);
-    caller.owed = oweRoundOver(caller.owed, ended, endRound(FRESH_WEEK, ended));
+    caller.owed = oweRoundOver(caller.owed, endRound(FRESH_WEEK, ended), roundTally(ended).score);
     caller.ride(7, 12);
     return caller.said.map((each) => each.kind);
   }
@@ -209,19 +210,27 @@ describe('the sentences — #1812, the words for the owner’s approval', () => 
 
   it('says the round’s end, and what the next round holds', () => {
     const round = recordMiss(recordDelivery(recordDelivery(startRound(3), 0), 1), 2);
-    expect(roundOverSentence(round, endRound(FRESH_WEEK, round))).toBe(
+    expect(roundOverSentence(endRound(FRESH_WEEK, round), roundTally(round).score)).toBe(
       'Round over: 2 of 3 houses delivered, a score of 2. The round on day 2 has 2 houses.',
     );
     const one = recordMiss(recordDelivery(startRound(2), 0), 1);
-    expect(roundOverSentence(one, endRound(FRESH_WEEK, one))).toBe(
+    expect(roundOverSentence(endRound(FRESH_WEEK, one), roundTally(one).score)).toBe(
       'Round over: 1 of 2 houses delivered, a score of 1. The round on day 2 has 1 house.',
+    );
+  });
+
+  it('says the round’s score it is handed, crashes in it, and not the deliveries alone — #1816', () => {
+    const round = recordMiss(recordDelivery(recordDelivery(startRound(3), 0), 1), 2);
+    // Two delivered and one crash: the round's score is 1 (`obstacles.ts` §`scoreAfter`).
+    expect(roundOverSentence(endRound(FRESH_WEEK, round), 1)).toBe(
+      'Round over: 2 of 3 houses delivered, a score of 1. The round on day 2 has 2 houses.',
     );
   });
 
   it('says the week’s end on its last day, with the week’s score', () => {
     const round = recordDelivery(startRound(1), 0);
     const outcome = endRound({ day: 7, houses: 1, score: 30 }, round);
-    expect(roundOverSentence(round, outcome)).toBe(
+    expect(roundOverSentence(outcome, roundTally(round).score)).toBe(
       "Round over: 1 of 1 house delivered, a score of 1. That was the week's last round, and the week scored 31.",
     );
   });
@@ -229,7 +238,7 @@ describe('the sentences — #1812, the words for the owner’s approval', () => 
   it('says the week’s end when no house is left', () => {
     const round = recordMiss(startRound(1), 0);
     const outcome = endRound({ day: 4, houses: 1, score: 20 }, round);
-    expect(roundOverSentence(round, outcome)).toBe(
+    expect(roundOverSentence(outcome, roundTally(round).score)).toBe(
       'Round over: 0 of 1 house delivered, a score of 0. No houses are left on the round, so the week is over, with a score of 20.',
     );
   });
@@ -270,7 +279,7 @@ describe('each said once, in the order chosen, through the real core — #1812',
   it('never drops the round’s end: a fault in the same window goes first, and the end is said after it, once', () => {
     const caller = new Caller();
     const round = recordMiss(recordDelivery(startRound(2), 0), 1);
-    caller.owed = oweRoundOver(caller.owed, round, endRound(FRESH_WEEK, round));
+    caller.owed = oweRoundOver(caller.owed, endRound(FRESH_WEEK, round), roundTally(round).score);
     const fault = { kind: 'trainer-lost', text: 'Control lost.' } as const;
     caller.call(0, [fault]);
     caller.ride(1, 20);
@@ -281,7 +290,7 @@ describe('each said once, in the order chosen, through the real core — #1812',
   it('never drops the round’s end behind a crash, a miss or a delivery offered after it', () => {
     const caller = new Caller();
     const round = recordDelivery(startRound(3), 0);
-    caller.owed = oweRoundOver(caller.owed, round, endRound(FRESH_WEEK, round));
+    caller.owed = oweRoundOver(caller.owed, endRound(FRESH_WEEK, round), roundTally(round).score);
     // Whatever the round's own events try to add later, nothing displaces it.
     caller.owed = oweCrash(caller.owed);
     caller.owed = oweRoundChange(caller.owed, round, recordDelivery(round, 1));
@@ -294,7 +303,11 @@ describe('each said once, in the order chosen, through the real core — #1812',
     const round = startRound(3);
     const delivered = recordDelivery(round, 0);
     caller.owed = oweCrash(oweRoundChange(NOTHING_OWED, round, delivered));
-    caller.owed = oweRoundOver(caller.owed, delivered, endRound(FRESH_WEEK, delivered));
+    caller.owed = oweRoundOver(
+      caller.owed,
+      endRound(FRESH_WEEK, delivered),
+      roundTally(delivered).score,
+    );
     caller.ride(0, 20);
     expect(caller.said).toEqual([
       {
@@ -316,7 +329,7 @@ describe('each said once, in the order chosen, through the real core — #1812',
     const last = recordMiss(round, 1);
     caller.owed = oweRoundChange(caller.owed, round, last);
     caller.call(1);
-    caller.owed = oweRoundOver(caller.owed, last, endRound(FRESH_WEEK, last));
+    caller.owed = oweRoundOver(caller.owed, endRound(FRESH_WEEK, last), roundTally(last).score);
     caller.ride(2, 20);
     expect(caller.said.map((each) => each.text)).toEqual([
       'Delivered to the 1st house. 1 house left.',
@@ -329,8 +342,8 @@ describe('each said once, in the order chosen, through the real core — #1812',
     const settled = recordMiss(recordDelivery(recordDelivery(round, 0), 1), 2);
     const owed = oweRoundOver(
       oweRoundChange(NOTHING_OWED, round, settled),
-      settled,
       endRound(FRESH_WEEK, settled),
+      roundTally(settled).score,
     );
     expect(deliveryEvents(owed)).toEqual([
       {
@@ -356,7 +369,7 @@ describe('each said once, in the order chosen, through the real core — #1812',
     caller.ride(10, 14);
     step(recordDelivery(round, 3));
     caller.ride(15, 19);
-    caller.owed = oweRoundOver(caller.owed, round, endRound(FRESH_WEEK, round));
+    caller.owed = oweRoundOver(caller.owed, endRound(FRESH_WEEK, round), roundTally(round).score);
     caller.ride(20, 40);
     expect(caller.said.map((each) => each.text)).toEqual([
       'Delivered to the 1st house. 3 houses left.',

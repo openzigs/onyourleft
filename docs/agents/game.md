@@ -655,18 +655,39 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         that writes to a trainer (found by rule, ADR 0059
                         §Amendments). Fails closed on `import.meta.glob`
                         and on a worker it cannot name
+    src/game/delivery/ride-round.ts
+                        a Delivery round inside a game ride (#1816, ADR
+                        0059): started at the press (the week and the assist
+                        read from the device, the houses picked and the
+                        obstacles placed from ONE seed nothing keeps), stepped
+                        on exactly the simulation steps that ran (none while
+                        paused: `obstacles.ts` warns why), a house missed once
+                        its window has closed behind the rider with no parcel
+                        still coming, the round's score kept change by change
+                        through `obstacles.ts` §`roundScore` (crashes in it,
+                        never below nought), and the week's counts kept at the
+                        round's end or the ride's. `GameView` holds one per
+                        ride, solo only (DL9), read from the developer route
+                        `#/game?delivery=on` until #1818 offers it. ⚠️ **Nothing
+                        of it reaches the trainer** (DL5): it reads the
+                        simulation and writes to itself, the HUD and the frame;
+                        `game/delivery-wiring.test.tsx` rides one power trace
+                        with and without a round and holds the trainer's
+                        writes, each grade and its time, equal, and the same
+                        pair saved by the real ride controller reads back the
+                        same channels
     src/game/delivery/in-view.ts
                         what a Delivery frame draws (#1814): a marker on each
                         house still EXPECTING a parcel, a parcel only while it
                         flies, every obstacle where `obstacles.ts` has it,
                         placed on the frame's corridor as `scene.ts` places a
                         rider and dropped off its ends. It reaches the view on
-                        `port.ts` §`SceneFrame.delivery`, which nothing fills
-                        until #1816 (`@unwired`). ⚠️ The frame's types are
-                        `port.ts`' and the obstacles' footprints are restated
-                        in the renderer (pinned by `delivery-belt.test.ts`):
-                        a view that imported a `delivery/` module would make
-                        every unwired export there a `WIRE002`. `three-renderer.ts`
+                        `port.ts` §`SceneFrame.delivery`, which `GameView`
+                        fills on every frame of a ride running a round
+                        (#1816). ⚠️ The frame's types are `port.ts`' and the
+                        obstacles' footprints are restated in the renderer
+                        (pinned by `delivery-belt.test.ts`), so the view
+                        reaches no `delivery/` module. `three-renderer.ts`
                         §`DeliveryBelt` draws it in THREE instanced calls
                         whatever the count, the obstacles' three shapes sharing
                         one by a vertex-kind collapse, and a view builds the
@@ -786,7 +807,12 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         is said twice. A house is its place on the round ("the
                         3rd house"), never a name or an address (DL11). The
                         round's two HUD fields are `fields.ts`
-                        §`deliveryReadings`, last and absent on any other ride
+                        §`deliveryReadings`, last and absent on any other ride.
+                        Since #1816 *Score* and the round's-end sentence take
+                        the round's score WITH its crashes
+                        (`ride-round.ts` §`DeliveryRide.score`), never
+                        `round.ts` §`RoundTally.score`, which counts
+                        deliveries only
     src/game/landform.ts
                         the ground beside the road (#458) — built from the SAME
                         centreline and normals as the road, so its innermost

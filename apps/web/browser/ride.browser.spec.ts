@@ -95,7 +95,9 @@
  *   a re-plan waits;
  * - **`ride-room.browser.spec.ts`**: a race's standings (#1347), *Report*
  *   (#789), a room ride's HUD (#1356), a rider near (#1358), a room ride with
- *   sounds on (#1398), #1407, and sounds beside a side camera (#1409).
+ *   sounds on (#1398), #1407, and sounds beside a side camera (#1409);
+ * - **`ride-delivery.browser.spec.ts`**: a Delivery round's HUD and throw
+ *   control at its start and nearly over (#1816), a sixth file since.
  *
  * What more than one of them reads — the viewports, `openRide`, the
  * measuring and both-ways helpers — is `ride-stage.ts`, unchanged but for

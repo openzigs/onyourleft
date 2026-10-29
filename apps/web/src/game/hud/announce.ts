@@ -66,7 +66,7 @@
  * | `plan-changed` | `ride/RideAnnouncer.tsx` and `GameView` | `RideWorkoutSnapshot.replan`, through `workout/replan-text.ts` §`planChangeAnnouncement` (#1244) |
  * | `lap-ended` | `GameView` | `hud/lap-text.ts` §`lapSummary`, over the laps `GameTrainerPort.courseLine` answers (#1312) |
  * | `room-draft` | `GameView` | `game/room-ride.ts` §`draftEvent`, from the room's own frame for this rider (#787) |
- * | `delivery-*` | nothing yet: #1816 runs a round in a game ride | `hud/delivery-announce.ts` §`deliveryEvents` (#1812) |
+ * | `delivery-*` | `GameView`, on a ride running a round (#1816) | `hud/delivery-announce.ts` §`deliveryEvents` (#1812) |
  * | readings | `GameView` | `fields.ts` §`hudReadings` |
  *
  * ⚠️ **Rank 1 is broader than its name**, and the name was kept rather than

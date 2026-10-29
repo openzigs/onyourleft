@@ -6,6 +6,7 @@ import {
   ACTIVITY_DETAIL_ROUTE,
   ALL_ROUTES,
   CREDITS_ROUTE,
+  gameDeliveryFromHash,
   gameRouteFromHash,
   hrefFor,
   hrefForGameRoute,
@@ -200,6 +201,22 @@ describe('the trainer game with a route chosen — #1010', () => {
 
   it('reads a lone % as itself rather than throwing', () => {
     expect(gameRouteFromHash('#/game?route=%')).toBe('%');
+  });
+});
+
+describe('the trainer game’s developer route for a Delivery round — #1816', () => {
+  it('is still the game route, and asks for a round only with delivery=on', () => {
+    expect(routeForHash('#/game?delivery=on').id).toBe('game');
+    expect(gameDeliveryFromHash('#/game?delivery=on')).toBe(true);
+    expect(gameDeliveryFromHash('#/game?route=hill&delivery=on')).toBe(true);
+  });
+
+  it('asks for none with no query, another value, or another key', () => {
+    expect(gameDeliveryFromHash('#/game')).toBe(false);
+    expect(gameDeliveryFromHash('#/game?delivery=')).toBe(false);
+    expect(gameDeliveryFromHash('#/game?delivery=yes')).toBe(false);
+    expect(gameDeliveryFromHash('#/game?route=on')).toBe(false);
+    expect(gameDeliveryFromHash('')).toBe(false);
   });
 });
 

@@ -4,10 +4,8 @@
  * A Delivery round, through the HUD's one live region — #1812 (epic #1803,
  * resting on the owner's rulings DL2 and DL10 of 2026-10-27).
  *
- * @unwired Nothing runs a Delivery round yet. #1816 gives this module its
- * production caller when `GameView` runs a round inside a game ride and feeds
- * its events to `announce.ts` beside every other; until then only its tests
- * reach it.
+ * `GameView` feeds a round's events to `announce.ts` beside every other on a
+ * ride that runs one (#1816).
  *
  * ## What it decides
  *
@@ -113,13 +111,14 @@ function houses(count: number): string {
 }
 
 /**
- * What a round says at its end: the round as it was ridden, and what ending
- * it decided. The score is `round.ts` §`roundTally`'s, the one the HUD's
- * *Score* field shows, so the two cannot disagree.
+ * What a round says at its end: what ending it decided, and the round's
+ * `score` — #1816: the one with the crashes in it
+ * (`delivery/ride-round.ts` §`DeliveryRide.score`), which the HUD's *Score*
+ * field shows, so the two cannot disagree.
  */
-export function roundOverSentence(round: Round, outcome: RoundOutcome): string {
+export function roundOverSentence(outcome: RoundOutcome, score: number): string {
   const ridden = outcome.delivered + outcome.missed;
-  const lead = `Round over: ${String(outcome.delivered)} of ${houses(ridden)} delivered, a score of ${String(roundTally(round).score)}.`;
+  const lead = `Round over: ${String(outcome.delivered)} of ${houses(ridden)} delivered, a score of ${String(score)}.`;
   if (!outcome.weekOver) {
     return `${lead} The round on day ${String(outcome.next.day)} has ${houses(outcome.nextHouses)}.`;
   }
@@ -163,13 +162,13 @@ export function oweCrash(owed: DeliveryOwed): DeliveryOwed {
  */
 export function oweRoundOver(
   owed: DeliveryOwed,
-  round: Round,
   outcome: RoundOutcome,
+  score: number,
 ): DeliveryOwed {
   const lead: string[] = [];
   if (owed.missed.length > 0) lead.push(`Missed ${theHouses(owed.missed)}.`);
   if (owed.delivered.length > 0) lead.push(`Delivered to ${theHouses(owed.delivered)}.`);
-  const sentence = roundOverSentence(round, outcome);
+  const sentence = roundOverSentence(outcome, score);
   return { ...NOTHING_OWED, roundOver: [...lead, sentence].join(' ') };
 }
 
