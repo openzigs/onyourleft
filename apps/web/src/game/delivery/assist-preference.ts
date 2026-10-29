@@ -13,9 +13,9 @@
  * - {@link DeliveryAssist.noFail} is `round.ts` §`RoundOptions.assisted`: a
  *   missed house stays on the next round.
  *
- * The names are the modules' own so that #1816, which runs a round inside a
- * game ride, hands each part to its module as it is read here. Nothing in
- * this file decides what a part does.
+ * The names are the modules' own so that `ride-round.ts`, which runs a round
+ * inside a game ride (#1816), hands each part to its module as it is read
+ * here. Nothing in this file decides what a part does.
  *
  * ## On the device, like the other game preferences
  *
@@ -31,8 +31,8 @@
  *
  * ⚠️ **Nothing imported from the modules it describes, not even a type.**
  * The Settings screen imports this file, and the wiring gate counts a type
- * import as reaching a module: `obstacles.ts` would then be "shipped" with
- * none of its exports named until #1816 calls them. So the obstacle setting's
+ * import as reaching a module: `obstacles.ts` would then be reached from the
+ * Settings screen, whose page needs nothing of it. So the obstacle setting's
  * type is declared here and `obstacles.ts` takes it from this file.
  */
 

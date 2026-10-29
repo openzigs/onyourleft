@@ -115,7 +115,7 @@ import {
   type RoomFrame,
   type RoomRideState,
 } from './room-ride';
-import { GameSimulation, ghostClock, type GameState } from './simulation';
+import { GameSimulation, ghostClock, SIMULATION_STEP_SECONDS, type GameState } from './simulation';
 import { corridorOrigin } from './terrain';
 import type { GameRenderer, GameView as RendererView } from './port';
 import { NO_SENSORS, type GameSensors } from './sensors';
@@ -183,7 +183,27 @@ import {
 } from './hud/announce-preference';
 import { hudReadings } from './hud/fields';
 import { useUnits } from '../units/context';
-import { gameRouteFromHash } from '../shell/routes';
+import { gameDeliveryFromHash, gameRouteFromHash } from '../shell/routes';
+import { deliveryInView } from './delivery/in-view';
+import {
+  endDeliveryRide,
+  keepDeliveryWeek,
+  startDeliveryRide,
+  stepDeliveryRide,
+  type DeliveryRide,
+} from './delivery/ride-round';
+import { throwSideFor, type ThrowSide } from './delivery/throw';
+import type { ThrowInputPort } from './delivery/throw-input-port';
+import {
+  deliveryEvents,
+  deliverySpoken,
+  NOTHING_OWED,
+  oweCrash,
+  oweRoundChange,
+  oweRoundOver,
+  type DeliveryOwed,
+} from './hud/delivery-announce';
+import { lineOffsetAt, racingLine } from './racing-line';
 import {
   ghostDistanceAt,
   pacerGap,
@@ -452,6 +472,20 @@ export interface GameViewProps {
    * Absent, the picker's room panel says where to connect and offers nothing.
    */
   readonly rooms?: RoomsPort | undefined;
+  /**
+   * Run a Delivery round in the ride — #1816, ADR 0059 (epic #1803). Read at
+   * the press, and only for a solo ride on a corridor with mapped houses: a
+   * ride in a room never runs one (DL9), and a town the pick finds no house
+   * in has no round. Absent, the developer route decides
+   * (`shell/routes.ts` §`gameDeliveryFromHash`, `#/game?delivery=on`): the
+   * chooser does not offer Delivery yet, which is #1818's.
+   *
+   * ⚠️ **Nothing of a round reaches the trainer** (DL5, ADR 0059 D-2): the
+   * round reads the simulation's distance and speed and writes to nothing but
+   * itself, the HUD and the frame. `delivery-wiring.test.tsx` rides the same
+   * power trace with and without a round and holds the trainer's writes equal.
+   */
+  readonly delivery?: boolean | undefined;
 }
 
 type Phase = 'choosing' | 'riding' | 'paused';
@@ -1070,6 +1104,36 @@ export function GameView(props: GameViewProps): JSX.Element {
    */
   const gradientRef = useRef<GradientSession | undefined>(undefined);
   /**
+   * The Delivery round this ride runs, while it runs one — #1816. A ref for
+   * {@link gradientRef}'s reason: it is stepped in the tick, and the HUD
+   * reads it during the render the tick's `setState` schedules. Set at the
+   * press and held for the ride; `undefined` on every ordinary ride.
+   */
+  const deliveryRef = useRef<DeliveryRide | undefined>(undefined);
+  /** What is still to be said about the round, offered on every call until said (#1812). */
+  const deliveryOwedRef = useRef<DeliveryOwed>(NOTHING_OWED);
+  /** The throw the rider asked for since the last step that ran, already resolved to a side. */
+  const throwAskedRef = useRef<ThrowSide | undefined>(undefined);
+  /** Whether the loop is running: a throw asked for while the ride is paused is not taken. */
+  const loopRunningRef = useRef(false);
+  /**
+   * The HUD's throw control hands the ride its throws here — #1810, ADR 0059
+   * D-5. It asks for a throw and for nothing else: the side is resolved now,
+   * from the round as it stands, and the next simulation step takes it.
+   */
+  const throwPortRef = useRef<ThrowInputPort>({
+    throwParcel: (intent) => {
+      const ride = deliveryRef.current;
+      if (ride === undefined || !loopRunningRef.current) return;
+      const side = throwSideFor(intent, {
+        targets: ride.throwTargets,
+        round: ride.round,
+        along: ride.along,
+      });
+      if (side !== undefined) throwAskedRef.current = side;
+    },
+  });
+  /**
    * The room this ride is in, while it is in one — #782. A ref for
    * {@link gradientRef}'s reason: the loop reads it every frame, and its
    * `status()` is read during the render the tick schedules.
@@ -1213,6 +1277,14 @@ export function GameView(props: GameViewProps): JSX.Element {
         placeAcrossOf(roomRef.current?.standings()),
       );
       if (race !== undefined) trainerPortRef.current?.roomRaceEnded?.(race);
+      // #1816: a round the ride ends first is ended here, a house still
+      // expecting counted missed, and the week's counts kept for the next
+      // ride (#1806, DL11: counts only). A round that ended mid-ride was
+      // kept then, in the tick.
+      const delivery = deliveryRef.current;
+      if (delivery !== undefined && delivery.outcome === undefined) {
+        keepDeliveryWeek(deviceStorage(), endDeliveryRide(delivery));
+      }
     }
     // #782: leave the room — its socket, its reconnects and its hold on the
     // screen-off service go with the ride.
@@ -1586,6 +1658,24 @@ export function GameView(props: GameViewProps): JSX.Element {
         // #1637: carrying the urban class, which the lots and the streets read.
         mappedTownRef.current = mappedTown(worldCorridorRef.current, plans, urban);
       }
+      // #1816: a Delivery round, at the press — solo only (DL9: a ride in a
+      // room never runs one), and only where the town has mapped houses to
+      // pick from. Its seed is drawn inside `startDeliveryRide` and kept by
+      // nothing (DL11); the week and the assist are this device's own.
+      deliveryOwedRef.current = NOTHING_OWED;
+      throwAskedRef.current = undefined;
+      deliveryRef.current =
+        (props.delivery ?? gameDeliveryFromHash(globalThis.location.hash)) &&
+        roomId === undefined &&
+        mappedBuildingsRef.current !== undefined
+          ? startDeliveryRide({
+              buildings: mappedBuildingsRef.current,
+              profile,
+              origin: corridorOrigin(profile),
+              riderDistance: simulation.state.ride.distance,
+              storage: deviceStorage(),
+            })
+          : undefined;
       setState(simulation.state);
       setChosen(route);
       setPhase('riding');
@@ -1608,6 +1698,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       props.trainer,
       props.room,
       props.roomId,
+      props.delivery,
       soundsOut,
     ],
   );
@@ -1663,6 +1754,7 @@ export function GameView(props: GameViewProps): JSX.Element {
     const clock = props.now ?? (() => performance.now());
     let frame = 0;
     let lastFrameAt = clock();
+    loopRunningRef.current = true;
     // #476: which animation frames are drawn under the rung's cap, and what the
     // ladder is told about them. @see FramePacer
     const pacer = new FramePacer();
@@ -1797,10 +1889,11 @@ export function GameView(props: GameViewProps): JSX.Element {
       // (`simulation.ts` §`holdAt`). The trainer is still given the rider's own
       // road's grade at the line: nothing about a room reaches it.
       const race = roomRef.current?.race();
+      let stepsRun = 0;
       if (heldOnTheLine(race)) {
         simulation.holdAt(at);
       } else {
-        simulation.advanceTo(at, sensors.rider);
+        stepsRun = simulation.advanceTo(at, sensors.rider).steps;
       }
       if (race?.kind === 'running') {
         const dt = Math.max(0, (at - lastFrameAt) / 1000);
@@ -2083,6 +2176,10 @@ export function GameView(props: GameViewProps): JSX.Element {
           );
         }
       }
+      // #1812: the round's sentences, owed until said (`hud/delivery-announce.ts`).
+      if (deliveryRef.current !== undefined) {
+        events.push(...deliveryEvents(deliveryOwedRef.current));
+      }
       const heard = announce(announcerRef.current, {
         now: simulation.state.elapsed,
         readings,
@@ -2100,6 +2197,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       if (heard.kind === 'lap-ended') {
         lapOwedRef.current = undefined;
       }
+      deliveryOwedRef.current = deliverySpoken(deliveryOwedRef.current, heard.kind);
       if (heard.sentence === REPLANS_OFF_SAID) {
         replansOffOwedRef.current = false;
       }
@@ -2147,6 +2245,40 @@ export function GameView(props: GameViewProps): JSX.Element {
         simulation.correcting,
       );
 
+      // #1816: the Delivery round, stepped on exactly the simulation steps
+      // that ran on this frame (`delivery/ride-round.ts` §"The steps that
+      // ran") — none while the simulation owed none, and none while paused,
+      // when this loop does not run. It READS the ride and writes nothing the
+      // trainer is sent (DL5): the gradient above samples the simulation alone, and
+      // is sampled BEFORE this, so a fault in the round cannot stop the loop
+      // short of this frame's grade write.
+      const delivery = deliveryRef.current;
+      if (delivery !== undefined && stepsRun > 0) {
+        const line = racingLine(chosen.profile);
+        const stepped = stepDeliveryRide(delivery, {
+          ticks: stepsRun,
+          along: simulation.state.ride.distance,
+          speed: simulation.state.ride.speed,
+          // The rider's drawn line (`scene.ts` §`lateralOf`) as a rider alone
+          // on the road draws it; a pacer or ghost level with them eases them
+          // off it by at most a lane, which the obstacles do not see.
+          lateral: (along) => lineOffsetAt(line, along),
+          throwTo: throwAskedRef.current,
+        });
+        throwAskedRef.current = undefined;
+        deliveryRef.current = stepped.ride;
+        let owed = oweRoundChange(deliveryOwedRef.current, delivery.round, stepped.ride.round);
+        for (let crash = 0; crash < stepped.crashes; crash += 1) owed = oweCrash(owed);
+        const ended = stepped.ride.outcome;
+        if (ended !== undefined && delivery.outcome === undefined) {
+          owed = oweRoundOver(owed, ended, stepped.ride.score);
+          // Kept the moment the round ends, so a ride that goes on afterwards
+          // and is then lost keeps it too (#1806).
+          keepDeliveryWeek(deviceStorage(), ended);
+        }
+        deliveryOwedRef.current = owed;
+      }
+
       // #323's interpolation, on the frames that are drawn: `drawnAt` blends the
       // last two simulation steps at THIS instant, so a frame drawn at 20 fps
       // is placed exactly where one drawn at 60 would have been at that moment.
@@ -2161,7 +2293,7 @@ export function GameView(props: GameViewProps): JSX.Element {
       const prepared = view !== undefined && view === preparedViewRef.current;
       const waiting = !prepared && view !== undefined && view === preparingViewRef.current;
       if (drawn !== undefined && view !== undefined && !waiting) {
-        const frame = sceneFrame({
+        const scene = sceneFrame({
           profile: chosen.profile,
           origin,
           // #679: the board before a line reads in the rider's own units.
@@ -2203,6 +2335,32 @@ export function GameView(props: GameViewProps): JSX.Element {
             : { mappedBuildings: mappedBuildingsRef.current }),
           ...(mappedTownRef.current === undefined ? {} : { mappedTown: mappedTownRef.current }),
         });
+        // #1814, #1815: the round's parcels, markers and obstacles, on the
+        // frame's own corridor. A frame carrying them is held to Delivery's
+        // own village ceiling (`realistic-budget.ts` §`villageDrawCallCeiling`,
+        // DL6b); every ordinary ride's frame carries none and keeps the 50.
+        // Placed at the newest step and the time past it, so a parcel does
+        // not move at 20 Hz on a 60 Hz screen. ⚠️ That is up to one step
+        // (50 ms) AHEAD of where the rider is drawn, which `drawnAt` blends a
+        // step behind the newest state (#323): `in-view.ts` takes no time
+        // before a step, and a parcel drawn behind its throw would be worse.
+        // Where a parcel lands is the step's either way (`throw.ts`).
+        const round = deliveryRef.current;
+        const frame =
+          round === undefined
+            ? scene
+            : {
+                ...scene,
+                delivery: deliveryInView({
+                  corridor: scene.corridor,
+                  targets: round.targets,
+                  round: round.round,
+                  throws: round.throws,
+                  obstacles: round.obstacles,
+                  obstacleState: round.obstacleState,
+                  sinceStep: simulation.pendingSecondsAt(at) / SIMULATION_STEP_SECONDS,
+                }),
+              };
         if (prepared) {
           view.render(frame);
         } else {
@@ -2267,6 +2425,7 @@ export function GameView(props: GameViewProps): JSX.Element {
     frame = requestAnimationFrame(tick);
     return () => {
       cancelled = true;
+      loopRunningRef.current = false;
       cancelAnimationFrame(frame);
       observer?.disconnect();
       headroom.stop();
@@ -2527,6 +2686,18 @@ export function GameView(props: GameViewProps): JSX.Element {
               },
             })}
         standings={roomFrameRef.current?.standings}
+        // #1816: the round on the HUD — its houses and its score, crashes in
+        // it — and the throw control, only on a ride running a round.
+        {...(deliveryRef.current === undefined
+          ? {}
+          : {
+              delivery: {
+                round: deliveryRef.current.round,
+                week: deliveryRef.current.week,
+                score: deliveryRef.current.score,
+              },
+              throwing: throwPortRef.current,
+            })}
         onFollowNext={
           roomRef.current === undefined || (roomFrameRef.current?.remoteRiders.length ?? 0) === 0
             ? undefined

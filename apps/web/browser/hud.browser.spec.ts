@@ -805,7 +805,8 @@ for (const viewport of VIEWPORTS) {
  * — and 141.5 px for a room ride, whose *Draft* phrase and gauge are the same
  * line. A third row is 209.3 px upright. Whether those 13 px stay clear of the
  * leaning rider is measured in a real ride, which this page is not: that is
- * #1816's, beside `ride-room.browser.spec.ts` §"#1356" (written on #1816).
+ * #1816's, `ride-delivery.browser.spec.ts`, beside `ride-room.browser.spec.ts`
+ * §"#1356".
  *
  * ## The ride's controls
  *

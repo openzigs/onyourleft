@@ -291,6 +291,13 @@ export interface DeliveryHud {
   readonly round: Round;
   /** The week the round is ridden in: its `day` is the round's day. */
   readonly week: WeekProgress;
+  /**
+   * The round's score with every crash in it, never below nought — #1816,
+   * from `delivery/ride-round.ts` §`DeliveryRide.score`. Not
+   * `round.ts` §`RoundTally.score`, which counts deliveries only: the owner's
+   * ruling of 2026-10-28 on #1811 takes a crash off the round's score.
+   */
+  readonly score: number;
 }
 
 /** Everything the HUD needs. */
@@ -594,7 +601,7 @@ function deliveryReadings(delivery: DeliveryHud | undefined): readonly HudReadin
     {
       key: DELIVERY_SCORE_KEY,
       label: 'Score',
-      value: String(tally.score),
+      value: String(delivery.score),
       unit: '',
       stale: false,
       detail: `Day ${String(delivery.week.day)} of ${String(DAYS_IN_WEEK)}`,

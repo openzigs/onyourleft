@@ -10147,9 +10147,9 @@ const DELIVERY_OBSTACLE_KIND_ATTRIBUTE = 'oylObstacleKind';
 /**
  * Each obstacle's footprint, metres: `delivery/obstacles.ts` §`OBSTACLE_KINDS`'
  * half sizes, along the road and across it, so what the rider sees is what
- * the rider hits. ⚠️ **Restated, not imported**: nothing the view reaches may
- * import Delivery's modules before #1816 wires them (`port.ts`
- * §`DeliveryObstacleKind`), and `delivery-belt.test.ts` holds every drawn
+ * the rider hits. ⚠️ **Restated, not imported**: nothing the view reaches
+ * imports Delivery's modules (`port.ts` §`DeliveryObstacleKind`), and
+ * `delivery-belt.test.ts` holds every drawn
  * footprint to `OBSTACLE_KINDS`, so a change there and not here is red.
  */
 const DELIVERY_OBSTACLE_FOOTPRINTS: Readonly<

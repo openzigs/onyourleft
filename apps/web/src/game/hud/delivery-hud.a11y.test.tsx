@@ -22,7 +22,14 @@ import {
 
 import { auditAccessibility, formatViolations } from '../../a11y/audit';
 import { mount, type Mounted } from '../../testing/mount';
-import { endRound, recordDelivery, recordMiss, startRound, type Round } from '../delivery/round';
+import {
+  endRound,
+  recordDelivery,
+  recordMiss,
+  roundTally,
+  startRound,
+  type Round,
+} from '../delivery/round';
 import { atStartLine } from '../simulation';
 
 import { INITIAL_ANNOUNCER, announce, type AnnouncerState } from './announce';
@@ -62,7 +69,8 @@ function route(): ReturnType<typeof routeProfile> {
 
 const PROFILE = route();
 
-function panel(delivery: DeliveryHud | undefined, announcement = ''): JSX.Element {
+/** The HUD's round, with the score a ride with no crash in it has: its deliveries. */
+function panel(delivery: Omit<DeliveryHud, 'score'> | undefined, announcement = ''): JSX.Element {
   return (
     <main>
       <h1>Ride</h1>
@@ -75,7 +83,11 @@ function panel(delivery: DeliveryHud | undefined, announcement = ''): JSX.Elemen
         onEnd={() => undefined}
         paused={false}
         announcement={announcement}
-        delivery={delivery}
+        delivery={
+          delivery === undefined
+            ? undefined
+            : { ...delivery, score: roundTally(delivery.round).score }
+        }
       />
     </main>
   );
@@ -189,7 +201,7 @@ describe('a Delivery round on the HUD — #1812', () => {
       }
     }
     const ended = recordMiss(recordMiss(round, 1), 2);
-    owed = oweRoundOver(owed, ended, endRound(WEEK, ended));
+    owed = oweRoundOver(owed, endRound(WEEK, ended), roundTally(ended).score);
     for (const now of [7, 8, 9, 10]) {
       const next = heard(owed, state, now);
       owed = next.owed;

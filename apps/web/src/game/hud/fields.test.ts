@@ -1262,7 +1262,7 @@ describe('what gives way to a room’s readings on a phone — #1356', () => {
 describe('a Delivery round on the HUD — #1812', () => {
   const base = baseInput();
   const round = recordMiss(recordDelivery(recordDelivery(startRound(8), 0), 1), 2);
-  const delivery = { round, week: { day: 3, houses: 8, score: 11 } };
+  const delivery = { round, week: { day: 3, houses: 8, score: 11 }, score: 2 };
 
   it('shows the houses left, with the delivered and missed counts, and the round’s score with its day', () => {
     const shown = hudReadings({ ...base, delivery }).filter(isDeliveryReading);
@@ -1284,6 +1284,12 @@ describe('a Delivery round on the HUD — #1812', () => {
         detail: 'Day 3 of 7',
       },
     ]);
+  });
+
+  it('shows the round’s score it is handed, a crash in it, rather than the deliveries counted — #1816', () => {
+    // Two delivered and one crash: the round's score is 1 (`obstacles.ts` §`scoreAfter`).
+    const shown = hudReadings({ ...base, delivery: { ...delivery, score: 1 } });
+    expect(shown.find((each) => each.key === DELIVERY_SCORE_KEY)?.value).toBe('1');
   });
 
   it('follows the round as a parcel lands', () => {
@@ -1324,7 +1330,7 @@ describe('a Delivery round on the HUD — #1812', () => {
   it('shows a fresh round on day one as nothing delivered yet', () => {
     const fresh = hudReadings({
       ...base,
-      delivery: { round: startRound(FRESH_WEEK.houses), week: FRESH_WEEK },
+      delivery: { round: startRound(FRESH_WEEK.houses), week: FRESH_WEEK, score: 0 },
     }).filter(isDeliveryReading);
     expect(fresh.map((each) => [each.value, each.detail])).toEqual([
       ['8', '0\u00a0delivered, 0\u00a0missed'],

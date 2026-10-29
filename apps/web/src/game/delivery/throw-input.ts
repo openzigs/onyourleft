@@ -14,9 +14,10 @@
  * question rather than an accident. Which side *the next house* is on, and
  * what a throw does once asked for, are `throw.ts`'s (§`throwSideFor`).
  *
- * ⚠️ **It imports nothing**, and that is load-bearing: the HUD imports this
- * module, and an import of `throw.ts` or `round.ts` from here would put both
- * on the production path before #1816 runs a round (`check:wiring`).
+ * ⚠️ **It imports nothing**: the HUD imports this module, and nothing of a
+ * round comes with it. Until #1816 ran a round, an import of `throw.ts` or
+ * `round.ts` from here would have put both on the production path unwired
+ * (`check:wiring`); the round reaches the HUD through `GameView` instead.
  *
  * ## Keys: what the web view already receives
  *
