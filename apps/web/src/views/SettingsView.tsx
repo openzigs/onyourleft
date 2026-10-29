@@ -253,6 +253,13 @@ export const WEIGHT_WHERE_IT_GOES =
 export const ANNOUNCEMENTS_STAY_HERE = 'Off unless you turn it on, and kept on this device only.';
 
 /**
+ * What the Delivery choices touch (#1813): a privacy sentence, so it stays on
+ * the screen under the controls, not behind the section's ⓘ (`SectionHelp`).
+ */
+export const DELIVERY_ASSIST_STAYS_HERE =
+  'They change nothing on any other ride and nothing your trainer is sent. They are kept on this device only.';
+
+/**
  * The sentences on this screen that are never tucked behind a section's ⓘ
  * disclosure — #666. They are about what leaves the device and to whom, and
  * what a rider can lose: the map-tile host (#534's review, #558), where a
@@ -263,6 +270,7 @@ export const ANNOUNCEMENTS_STAY_HERE = 'Off unless you turn it on, and kept on t
 export const SETTINGS_KEPT_VISIBLE: readonly string[] = [
   WEIGHT_WHERE_IT_GOES,
   ANNOUNCEMENTS_STAY_HERE,
+  DELIVERY_ASSIST_STAYS_HERE,
   'opening a ride that has GPS asks',
   'sends the map area and your device’s IP address to',
   'It sends no ride data.',
@@ -1394,8 +1402,7 @@ export const DELIVERY_ASSIST_TEXT = {
   heading: 'Delivery',
   about:
     'Delivery is a round of houses in the trainer game: you throw parcels to doorsteps as you ride past. These choices make a round easier.',
-  stays:
-    'They change nothing on any other ride and nothing your trainer is sent. They are kept on this device only.',
+  stays: DELIVERY_ASSIST_STAYS_HERE,
   widerLabel: 'Wider throw windows',
   widerDetail:
     'A parcel counts from three times as far along the road from the doorstep, so you have longer to throw.',
@@ -1469,7 +1476,6 @@ function DeliveryAssistPanel({
         help={
           <>
             <p className="oyl-muted">{text.about}</p>
-            <p className="oyl-muted">{text.stays}</p>
             <dl className="oyl-muted">
               <div>
                 <dt>{text.widerLabel}</dt>
@@ -1547,6 +1553,9 @@ function DeliveryAssistPanel({
           {text.noFailLabel}
         </label>
       </p>
+      <KeptVisible>
+        <p className="oyl-muted">{text.stays}</p>
+      </KeptVisible>
       {message === undefined ? null : (
         <StatusMessage tone={message.tone} live>
           {message.text}

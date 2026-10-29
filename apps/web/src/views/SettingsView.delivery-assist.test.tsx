@@ -22,7 +22,9 @@ import { mount, queryAll } from '../testing/mount';
 import {
   ANNOUNCEMENTS_NOT_KEPT,
   ANNOUNCEMENTS_SAVED,
+  DELIVERY_ASSIST_STAYS_HERE,
   DELIVERY_ASSIST_TEXT,
+  SETTINGS_KEPT_VISIBLE,
   SettingsView,
 } from './SettingsView';
 
@@ -136,12 +138,24 @@ describe('the assisted Delivery setting on Settings — #1813', () => {
     }
     for (const sentence of [
       DELIVERY_ASSIST_TEXT.about,
-      DELIVERY_ASSIST_TEXT.stays,
       DELIVERY_ASSIST_TEXT.widerDetail,
       DELIVERY_ASSIST_TEXT.noFailDetail,
     ]) {
       expect(help).toContain(sentence);
     }
+    mounted.unmount();
+  });
+
+  it('keeps the sentence about what the choices touch on the screen, not behind the help', async () => {
+    const mounted = await settings(disk());
+    const panel = mounted.container.querySelector(PANEL);
+    const help = panel?.querySelector('.oyl-section-help') ?? null;
+    const visible = [...(panel?.querySelectorAll('p') ?? [])].filter(
+      (p) => help === null || !help.contains(p),
+    );
+    expect(visible.map((p) => p.textContent)).toContain(DELIVERY_ASSIST_STAYS_HERE);
+    expect(help?.textContent ?? '').not.toContain(DELIVERY_ASSIST_STAYS_HERE);
+    expect(SETTINGS_KEPT_VISIBLE).toContain(DELIVERY_ASSIST_STAYS_HERE);
     mounted.unmount();
   });
 
