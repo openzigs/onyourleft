@@ -5,10 +5,10 @@
  *
  * ⚠️ **A `*-port.ts` on purpose**: `check:wiring` then requires its one
  * method to have a production caller (§4j, `WIRE003`). `hud/ThrowControl.tsx`
- * calls it, for a press and for a key. What implements it is #1816's:
- * `GameView` takes the intent, resolves it to a side with `throw.ts`
- * §`throwSideFor` and steps the throw on the simulation tick. Until then no
- * production ride hands the HUD a port, so no rider sees the control.
+ * calls it, for a press and for a key. `GameView` implements it (#1816): it
+ * takes the intent, resolves it to a side with `throw.ts` §`throwSideFor`,
+ * and the next simulation step takes the throw (`ride-round.ts`). Only a
+ * ride running a round hands the HUD a port, so only there is the control.
  *
  * ⚠️ **One method, and it asks for a throw and nothing else.** No game event
  * may change what the trainer is sent (ADR 0059 D-2), so nothing a rider

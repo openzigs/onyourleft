@@ -816,7 +816,8 @@ export function routeForHash(hash: string): RouteDefinition {
  * The query and any nested fragment are dropped: no route is chosen by its
  * query, and silently matching `'/activities?x=1'` against nothing would
  * send a perfectly good deep link to the not-found page. (One query is READ,
- * by the trainer game and nobody else: {@link gameRouteFromHash}, #1010.) A **path** parameter
+ * by the trainer game and nobody else: {@link gameRouteFromHash}, #1010, and
+ * {@link gameDeliveryFromHash}, #1816.) A **path** parameter
  * is a different thing and is matched — see {@link matchHash}.
  */
 export function normaliseHash(hash: string): string {
@@ -904,6 +905,20 @@ export function gameRouteFromHash(hash: string): string | undefined {
   }
   const chosen = new URLSearchParams(query).get('route');
   return chosen === null || chosen === '' ? undefined : chosen;
+}
+
+/**
+ * Whether the game's developer route asks for a Delivery round — #1816:
+ * `#/game?delivery=on`, beside {@link hrefForGameRoute}'s `route`. A QUERY,
+ * for that one's reason: it is still the game route, and nothing starts a
+ * ride from a link — the rider still presses Ride, and `GameView` reads this
+ * at the press. The stage chooser does not offer Delivery yet (#1818), so
+ * this is how a developer, and #733's tablet step, switch it on. Only `on`
+ * is a yes; anything else, or nothing, is an ordinary ride.
+ */
+export function gameDeliveryFromHash(hash: string): boolean {
+  const query = /^[^?]*\?([^#]*)/.exec(hash)?.[1];
+  return query !== undefined && new URLSearchParams(query).get('delivery') === 'on';
 }
 
 /** The link to one segment's effort history (#67). */

@@ -22,7 +22,8 @@
  * focused or pressed with Enter either, and the lock lets keys through on
  * purpose (WCAG 2.2 SC 2.1.1).
  *
- * Mounted only on a ride that hands the HUD a port, which until #1816 is none.
+ * Mounted only on a ride that hands the HUD a port: one `GameView` runs a
+ * Delivery round in (#1816).
  */
 
 import { useEffect, type JSX } from 'react';

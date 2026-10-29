@@ -338,10 +338,11 @@ export interface SceneFrame {
    * (`three-renderer.ts` §`DeliveryBelt`), and the view builds nothing of it
    * until a frame carries one. **Absent on every ordinary ride.**
    *
-   * ⚠️ **Nothing supplies it yet**, and that is the hole `check-wiring.mjs`
-   * §Limits says no gate here can see — an optional field nobody fills. #1816
-   * fills it when it runs a round inside a game ride; until then only the
-   * browser gate's `delivery-harness.ts` hands a view one.
+   * ⚠️ **An optional field**, which is the hole `check-wiring.mjs` §Limits
+   * says no gate here can see. `GameView` fills it on every frame of a ride
+   * running a round (#1816), and `delivery-wiring.test.tsx` reads it back off
+   * the frames a renderer was handed; the browser gate's
+   * `delivery-harness.ts` hands a view one too.
    */
   readonly delivery?: DeliveryInView | undefined;
 }
@@ -356,8 +357,8 @@ export interface WaterFrame {
 
 /**
  * Which of Delivery's obstacles — `delivery/obstacles.ts` §`ObstacleKind`,
- * restated so that nothing the view reaches imports Delivery's modules before
- * #1816 wires them. `delivery/in-view.ts` builds {@link DeliveryInView} from
+ * restated so that nothing the view reaches imports Delivery's modules.
+ * `delivery/in-view.ts` builds {@link DeliveryInView} from
  * the roster, so a kind added there and not here does not typecheck.
  */
 export type DeliveryObstacleKind = 'bin' | 'trolley' | 'cone';

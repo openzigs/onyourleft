@@ -4,10 +4,9 @@
  * The Delivery round, as pure logic — #1806, resting on the owner's rulings
  * DL2 and DL11 of 2026-10-27 (epic #1803).
  *
- * Its one production caller so far is the HUD (#1812): `hud/fields.ts` reads
- * a round through {@link roundTally} and {@link DAYS_IN_WEEK}. Nothing runs a
- * round yet, so every export a ride would call carries its own exemption
- * naming #1816, which runs a round inside a game ride and wires them.
+ * A game ride runs a round through `ride-round.ts` (#1816), which starts,
+ * settles and ends it here, and the HUD (#1812) reads it through
+ * {@link roundTally} and {@link DAYS_IN_WEEK}.
  *
  * ## What it decides
  *
@@ -42,8 +41,6 @@ export const DAYS_IN_WEEK = 7;
 
 /**
  * The most a week can score: one point a delivery, every house on every day.
- *
- * @unwired #1816 runs a round inside a game ride; until then only tests and unwired Delivery modules reach it.
  */
 export const MOST_WEEK_SCORE = DAYS_IN_WEEK * MOST_HOUSES;
 
@@ -73,8 +70,6 @@ export interface WeekProgress {
 
 /**
  * A week nobody has ridden yet.
- *
- * @unwired #1816 runs a round inside a game ride; until then only tests and unwired Delivery modules reach it.
  */
 export const FRESH_WEEK: WeekProgress = Object.freeze({
   day: 1,
@@ -84,8 +79,6 @@ export const FRESH_WEEK: WeekProgress = Object.freeze({
 
 /**
  * What ending a round decided.
- *
- * @unwired #1816 runs a round inside a game ride; until then only tests and unwired Delivery modules reach it.
  */
 export interface RoundOutcome {
   readonly delivered: number;
@@ -105,8 +98,6 @@ export interface RoundOutcome {
 
 /**
  * What starting a round may ask for.
- *
- * @unwired #1816 runs a round inside a game ride; until then only tests and unwired Delivery modules reach it.
  */
 export interface RoundOptions {
   /** The assist setting (#1813). Off unless asked for. */
@@ -115,8 +106,6 @@ export interface RoundOptions {
 
 /**
  * Start a round of `houses` houses, every one of them expecting a parcel.
- *
- * @unwired #1816 runs a round inside a game ride; until then only tests and unwired Delivery modules reach it.
  */
 export function startRound(houses: number, options: RoundOptions = {}): Round {
   if (!Number.isInteger(houses) || houses < 1 || houses > MOST_HOUSES) {
@@ -143,9 +132,9 @@ export interface RoundTally {
    * ⚠️ Crashes (#1811, PR #1844) are not counted here. The owner's rulings of
    * 2026-10-28 on #1811 say a crash comes off the round's score, which never
    * goes below zero at any moment, and comes off nothing else: the week's
-   * score, {@link endRound}'s `weekScore`, counts deliveries only. #1816,
-   * which wires both, must hand the HUD and the round's end the round's score
-   * with crashes in it, from #1844's module, in place of this one.
+   * score, {@link endRound}'s `weekScore`, counts deliveries only. So since
+   * #1816 the HUD and the round's end are handed the round's score with the
+   * crashes in it, `ride-round.ts` §`DeliveryRide.score`, in place of this one.
    */
   readonly score: number;
 }
@@ -168,8 +157,6 @@ export function roundTally(round: Round): RoundTally {
 
 /**
  * A parcel landed on the house at this round position before the rider passed it.
- *
- * @unwired #1816 runs a round inside a game ride; until then only tests and unwired Delivery modules reach it.
  */
 export function recordDelivery(round: Round, position: number): Round {
   return settle(round, position, 'delivered');
@@ -177,8 +164,6 @@ export function recordDelivery(round: Round, position: number): Round {
 
 /**
  * The rider passed the throw window of the house at this round position with no delivery.
- *
- * @unwired #1816 runs a round inside a game ride; until then only tests and unwired Delivery modules reach it.
  */
 export function recordMiss(round: Round, position: number): Round {
   return settle(round, position, 'missed');
@@ -202,8 +187,6 @@ function settle(round: Round, position: number, outcome: HouseOutcome): Round {
  * End the round ridden on `week`'s day, and say what the next ride starts
  * from. The round's own length is the count that was ridden; a house still
  * expecting when the round ends was not delivered, so it counts as missed.
- *
- * @unwired #1816 runs a round inside a game ride; until then only tests and unwired Delivery modules reach it.
  */
 export function endRound(week: WeekProgress, round: Round): RoundOutcome {
   const count = round.houses.length;

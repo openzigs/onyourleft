@@ -32,6 +32,7 @@ import {
   FRESH_WEEK,
   endRound,
   recordMiss,
+  roundTally,
   startRound,
   type Round,
   type WeekProgress,
@@ -136,7 +137,7 @@ function panel(delivery: { round: Round; week: WeekProgress }, announcement: str
         onEnd={() => undefined}
         paused={false}
         announcement={announcement}
-        delivery={delivery}
+        delivery={{ ...delivery, score: roundTally(delivery.round).score }}
       />
     </main>
   );
@@ -245,7 +246,7 @@ describe('no place in words — #1812, DL11', () => {
       }
     }
 
-    owed = oweRoundOver(owed, round, endRound(week, round));
+    owed = oweRoundOver(owed, endRound(week, round), roundTally(round).score);
     const end = lastTick * DELIVERY_TICK_SECONDS;
     for (let now = end; now <= end + 10; now += 1) speak(now);
     await mounted.rerender(panel(hud(), announcement));

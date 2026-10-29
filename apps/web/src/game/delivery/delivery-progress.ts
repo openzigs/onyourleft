@@ -4,9 +4,8 @@
  * The Delivery week's progress, kept on the device between rides — #1806,
  * resting on the owner's ruling DL11 of 2026-10-27 (epic #1803).
  *
- * @unwired Nothing runs a Delivery round yet. #1816 gives this module its
- * production caller when it runs a round inside a game ride and keeps the
- * week between rides; until then only its tests reach it.
+ * A game ride reads the week at the press and keeps it at the round's end,
+ * through `ride-round.ts` (#1816).
  *
  * ## Counts only
  *

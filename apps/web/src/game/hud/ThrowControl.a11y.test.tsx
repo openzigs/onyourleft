@@ -5,8 +5,8 @@
  * The HUD's Delivery throw control — #1810: audited in the HUD the game
  * mounts, with its name, role and ride-time size, and its colours held to
  * the tokens. What a press and a key do is `HudPanel.throw.test.tsx`'s.
- * Where it lands on the stage is a layout claim for the browser gate, which
- * has no ride to measure it on until #1816 runs a round.
+ * Where it lands on the stage is a layout claim, not this file's: it is
+ * measured on a ride that runs a round (#1816), on the tablet.
  */
 
 import { readFileSync } from 'node:fs';
