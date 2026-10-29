@@ -277,6 +277,86 @@ describe('a ride in a room — #782, #783', () => {
     expect(queryAll(mounted?.container ?? document, 'ol')).toHaveLength(0);
   });
 
+  describe('other riders’ names on the road — #783', () => {
+    // jsdom lays nothing out, so the world's canvas is given the size a
+    // 16 : 9 stage would: the names are placed from it.
+    beforeEach(() => {
+      Object.defineProperty(HTMLCanvasElement.prototype, 'clientWidth', {
+        configurable: true,
+        get: () => 1280,
+      });
+      Object.defineProperty(HTMLCanvasElement.prototype, 'clientHeight', {
+        configurable: true,
+        get: () => 720,
+      });
+    });
+    afterEach(() => {
+      Reflect.deleteProperty(HTMLCanvasElement.prototype, 'clientWidth');
+      Reflect.deleteProperty(HTMLCanvasElement.prototype, 'clientHeight');
+    });
+
+    const namesOnTheRoad = (): readonly string[] =>
+      queryAll(mounted?.container ?? document, '.oyl-game__name').map(
+        (name) => name.textContent ?? '',
+      );
+
+    async function ride(race: boolean): Promise<readonly SceneFrame[]> {
+      const room = new ScriptedRoom();
+      const { drawn } = await rideInRoom(room);
+      room.accept();
+      room.welcome(0, race ? 'race' : 'ride');
+      if (race) {
+        room.name(1, 'Bea');
+        room.name(2, 'Cai');
+      }
+      for (let tick = 1; tick <= 4; tick += 1) {
+        // Two riders level with each other, so drawn side by side and their
+        // names clear of each other (`name-tags.ts` keeps one of two that meet).
+        room.frame(tick, [
+          frameRider(0, tick * 8),
+          frameRider(1, 14 + tick * 8),
+          frameRider(2, 14 + tick * 8),
+        ]);
+        if (race) {
+          room.standings(tick, [
+            standingsRider(2, -3, 3),
+            standingsRider(1, -1, 3),
+            standingsRider(0, 0, 3),
+          ]);
+        }
+        await pump(4);
+      }
+      return drawn;
+    }
+
+    it('writes over the world the names a race’s room sent, as text, and hides them from a screen reader', async () => {
+      const drawn = await ride(true);
+      const labelled = (drawn.at(-1)?.markers ?? []).map((marker) => marker.label);
+      expect(labelled.filter((label) => label !== undefined).sort()).toEqual(['Bea', 'Cai']);
+      expect([...namesOnTheRoad()].sort()).toEqual(['Bea', 'Cai']);
+      const layer = mounted?.container.querySelector('.oyl-game__names');
+      expect(layer?.getAttribute('aria-hidden')).toBe('true');
+      // The layer is put over the canvas it was measured from.
+      expect((layer as HTMLElement | null)?.style.width).toBe('1280px');
+      // Nothing but the name: no figure beside it on the road (ruling Q17).
+      for (const name of namesOnTheRoad()) expect(name).not.toMatch(/\d/);
+    });
+
+    it('writes no name in a group ride, whose room names nobody — until the rider follows one, by seat', async () => {
+      await ride(false);
+      expect(namesOnTheRoad()).toEqual([]);
+      const follow = queryAll<HTMLButtonElement>(mounted?.container ?? document, 'button').find(
+        (button) => (button.textContent ?? '').startsWith('Follow'),
+      );
+      await act(async () => {
+        follow?.click();
+        await Promise.resolve();
+      });
+      await pump(2);
+      expect(namesOnTheRoad()).toEqual(['Rider 2']);
+    });
+  });
+
   it('says in words that the room is lost, keeps riding, and rejoins by itself with a fresh ticket — #782', async () => {
     const room = new ScriptedRoom();
     const { drawn } = await rideInRoom(room);

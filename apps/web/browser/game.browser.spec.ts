@@ -37,6 +37,7 @@ import type {
   RideStartMeasurement,
   HorizonReading,
   LogoMeasurement,
+  NameTagMeasurement,
   OrientationAgreement,
   RealisticMeasurement,
   StylisedTextureMeasurement,
@@ -124,6 +125,11 @@ interface GameHarnessResult {
   readonly roadFarPixel: Pixel;
   readonly roadProbeRows: readonly [number, number];
   readonly riderFrame: { readonly landscape: RiderExtent; readonly portrait: RiderExtent };
+  /** #783. @see game-harness.ts §`nameTagProbe` */
+  readonly nameTag: {
+    readonly landscape: NameTagMeasurement;
+    readonly portrait: NameTagMeasurement;
+  };
   readonly line: {
     readonly on: LineMeasurement;
     readonly onUpright: LineMeasurement;
@@ -3233,6 +3239,45 @@ test.describe('the rider is prominent — #424', () => {
     expect(fixedLens.bottom - fixedLens.top - (expected.bottom - expected.top)).toBeGreaterThan(
       3 * RIDER_BOX_TOLERANCE,
     );
+  });
+});
+
+/**
+ * #783 — another rider's name lands over the rider the RENDERER drew.
+ *
+ * A name is DOM laid over the world (`name-tags.ts`), placed by `camera.ts`
+ * §`projectToFrame`, which restates the renderer's camera without `three`.
+ * jsdom holds the restatement to `riderFrameBox`; only a real draw can say it
+ * agrees with the camera three was actually given. `game-harness.ts`
+ * §`nameTagProbe` draws one named remote rider off to the side of the line,
+ * reads where they landed off the drawing buffer, and reports where the name
+ * was put.
+ */
+test.describe('another rider’s name is over the rider the renderer drew — #783', () => {
+  paysForTheLoad('', PLAIN_LOAD_BUDGET_MS);
+
+  test('across the frame inside the rider, and just above their helmet, landscape and upright', async ({
+    harnessRun,
+  }) => {
+    const { nameTag } = await harness(harnessRun);
+    for (const { tag, drawn } of [nameTag.landscape, nameTag.portrait]) {
+      // Non-vacuity: a rider was drawn, and a name was put somewhere.
+      expect(drawn.pixels).toBeGreaterThan(50);
+      expect(tag).toBeDefined();
+      const left = tag?.left ?? Number.NaN;
+      const top = tag?.top ?? Number.NaN;
+      expect(left).toBeGreaterThanOrEqual(drawn.left);
+      expect(left).toBeLessThanOrEqual(drawn.right);
+      // Above the top of the drawn helmet — `NAME_TAG_ABOVE_METRES` is under
+      // a tenth of the rider’s height — by less than a quarter of the
+      // rider's own drawn height and a little.
+      expect(top).toBeLessThan(drawn.top);
+      expect(drawn.top - top).toBeLessThan((drawn.bottom - drawn.top) * 0.25 + 0.01);
+      // ⚠️ The control: the same name mirrored across the middle of the
+      // frame — what a projection with its right-hand axis the wrong way round
+      // would give — is NOT over the rider, so the check above can fail.
+      expect(1 - left < drawn.left || 1 - left > drawn.right).toBe(true);
+    }
   });
 });
 
