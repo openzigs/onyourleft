@@ -125,6 +125,7 @@ import { describe, expect, it } from 'vitest';
 import { basemapOrigin, readBasemapConfig } from '../map/basemap';
 import { stripComments } from '../units/no-inline-units';
 import { ERASE_ACCOUNT_TEXT } from '../views/erase-account-text';
+import { CHANGE_NAME_TEXT } from '../views/instance-name-text';
 
 const SOURCE_ROOT = fileURLToPath(new URL('..', import.meta.url));
 
@@ -1694,6 +1695,8 @@ describe('the instance is disclosed, class by class — #778', () => {
     expect(section).toContain('each time you press connect with a name typed');
     expect(section).toContain('keeps it with your account only the first time it sees this device');
     expect(section).not.toContain('when it has not seen this device before');
+    // #906 item 2: the rename the Instance screen offers sends it too.
+    expect(section).toContain(normalised(`each time you press *${CHANGE_NAME_TEXT.change}*`));
     // Migration 0004's `display_name_change`.
     expect(section).toContain('also keeps each earlier name, and when it changed');
     expect(section).toContain('for moderation');
@@ -1713,10 +1716,11 @@ describe('the instance is disclosed, class by class — #778', () => {
   });
 
   it('offers only ways of deleting that this build has — #892 review', () => {
-    // No screen removes a device or changes the name. A policy telling a rider
-    // to do those "on the instance" names paths that do not exist, so each
-    // such instruction is refused, here and across the policy. Erasing the
-    // account IS built since #906, by the press the policy names.
+    // A policy telling a rider to remove a device or change the name "on the
+    // instance" names paths that do not exist — the app does both, on its
+    // Instance screen (#1208, #906 item 2) — so each such instruction is
+    // refused, here and across the policy. Erasing the account IS built since
+    // #906, by the press the policy names.
     const whole = normalised(policy);
     for (const claim of UNBUILT_DELETION_PATHS) {
       expect(whole, claim).not.toContain(claim);
@@ -1742,9 +1746,14 @@ describe('the instance is disclosed, class by class — #778', () => {
 
   it('names only Disconnect, the operator, Discord or a built press in every "how to delete it" cell — #892 second review', () => {
     expect(deletionRouteFaults(policySection(policy, 'An instance you connect to'))).toEqual([]);
-    // The prose paragraph under the table says the same: the operator for
-    // what this build cannot do — a device, a name (#906 items 1 and 2).
-    expect(section).toContain('this version of the app cannot remove a device from your account');
+    // The prose paragraph under the table says what this build does since
+    // #906 items 1 and 2 — revoke another device (#1208), change the name by
+    // the press the screen draws — and leaves the operator what it cannot.
+    expect(section).not.toContain('this version of the app cannot remove a device');
+    expect(section).not.toContain('cannot change or remove it');
+    expect(section).toContain('you can also revoke another of your devices');
+    expect(section).toContain(normalised(`with *${CHANGE_NAME_TEXT.change}*`));
+    expect(section).toContain('the app cannot remove the device you are using from your account');
     expect(section).toContain("ask the instance's operator to do them");
   });
 

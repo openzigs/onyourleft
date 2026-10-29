@@ -29,6 +29,7 @@ import {
   instanceEraser,
   TERMS_READ_STORAGE_KEY,
   INSTANCE_SESSION_STORAGE_KEY,
+  RENAME_REFUSAL_TEXT,
   type InstancePortDependencies,
   type InstanceStorage,
 } from './instance-port';
@@ -459,6 +460,97 @@ describe('disconnecting — #777', () => {
     up = false;
     await port.disconnect();
     expect(storage.map.size).toBe(0);
+  });
+});
+
+describe('changing the name other riders see, sealed — #906 item 2', () => {
+  async function signedIn() {
+    const world = await instance();
+    const send = wire(world);
+    const first = device(send);
+    await first.port.connect(testing.TEST_ORIGIN, 'Anna', await cardOf(world));
+    return { world, send, first };
+  }
+
+  it('changes it, and every device then reads the new name back from the instance', async () => {
+    const { send, first } = await signedIn();
+    const shown = await first.port.linkCode();
+    if (shown.kind !== 'shown') throw new Error('no link code');
+    const second = device(send);
+    expect(await second.port.link(shown.offer)).toEqual({ kind: 'connected' });
+    expect(await first.port.rename('  Anna B  ')).toEqual({
+      kind: 'renamed',
+      displayName: 'Anna B',
+    });
+    // Read back through the call the screen makes, on both devices.
+    expect(await first.port.current()).toMatchObject({ kind: 'connected', displayName: 'Anna B' });
+    expect(await second.port.current()).toMatchObject({ kind: 'connected', displayName: 'Anna B' });
+    // Only ever sealed: no plaintext request carried the name.
+    const plaintext = send.mock.calls.filter(
+      ([url]) => new URL(url as string).pathname === '/v1/auth/display-name',
+    );
+    expect(plaintext).toEqual([]);
+  });
+
+  it('sends no name the instance would refuse, and says what a name must be', async () => {
+    const { send, first } = await signedIn();
+    send.mockClear();
+    for (const bad of ['', '   ', 'x'.repeat(33), 'Ann‮a', 'An\u0007na']) {
+      expect(await first.port.rename(bad)).toEqual({
+        kind: 'refused',
+        text: RENAME_REFUSAL_TEXT['bad-name'],
+      });
+    }
+    expect(send).not.toHaveBeenCalled();
+    expect(await first.port.current()).toMatchObject({ displayName: 'Anna' });
+  });
+
+  it('says so when the instance limits renames, and keeps the last name it took', async () => {
+    const { first } = await signedIn();
+    for (const name of ['Anna B', 'Anna C', 'Anna D']) {
+      expect(await first.port.rename(name)).toMatchObject({ kind: 'renamed' });
+    }
+    expect(await first.port.rename('Anna E')).toEqual({
+      kind: 'refused',
+      text: RENAME_REFUSAL_TEXT.rate_limited,
+    });
+    expect(await first.port.current()).toMatchObject({ displayName: 'Anna D' });
+  });
+
+  it('says this device is signed out when the instance no longer takes its sign-in', async () => {
+    const { send, first } = await signedIn();
+    const shown = await first.port.linkCode();
+    if (shown.kind !== 'shown') throw new Error('no link code');
+    const second = device(send);
+    await second.port.link(shown.offer);
+    const listed = await first.port.devices();
+    const other =
+      listed.kind === 'listed'
+        ? (listed.devices.find((each) => !each.thisDevice)?.publicKey ?? '')
+        : '';
+    expect(await first.port.revokeDevice(other)).toEqual({ kind: 'revoked' });
+    expect(await second.port.rename('Not Anna')).toEqual({
+      kind: 'refused',
+      text: RENAME_REFUSAL_TEXT['signed-out'],
+    });
+    expect(await first.port.current()).toMatchObject({ displayName: 'Anna' });
+  });
+
+  it('says the name is not changed when the instance does not answer', async () => {
+    const { world, first } = await signedIn();
+    const real = wire(world);
+    const port = createInstancePort({
+      ...first.dependencies,
+      send: (url, init) =>
+        new URL(url).pathname !== '/v1/sealed'
+          ? real(url, init)
+          : Promise.reject(new TypeError('offline')),
+    });
+    expect(await port.rename('Anna B')).toEqual({
+      kind: 'refused',
+      text: RENAME_REFUSAL_TEXT['no-answer'],
+    });
+    expect(await first.port.current()).toMatchObject({ displayName: 'Anna' });
   });
 });
 

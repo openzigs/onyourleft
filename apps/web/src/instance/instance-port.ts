@@ -252,6 +252,15 @@ export type AcknowledgeOutcome =
 export type RevokeOutcome =
   { readonly kind: 'revoked' } | { readonly kind: 'unavailable'; readonly text: string };
 
+/**
+ * The display name changed (#906 item 2), as the instance answered it — or
+ * why it was not. The screen shows the name it reads back from
+ * {@link InstancePort.current}, not this one.
+ */
+export type RenameOutcome =
+  | { readonly kind: 'renamed'; readonly displayName: string }
+  | { readonly kind: 'refused'; readonly text: string };
+
 /** What the Connect screen may ask of an instance. */
 export interface InstancePort {
   /** The connection this device holds, read back from the instance. */
@@ -299,6 +308,13 @@ export interface InstancePort {
    * which needs a recovery code this screen does not ask for.
    */
   revokeDevice(publicKey: string): Promise<RevokeOutcome>;
+  /**
+   * Change the name other riders see on the instance (#906 item 2): sealed,
+   * `POST /v1/auth/display-name`. The instance keeps each earlier name, with
+   * when it changed, for moderation; the screen says so beside the press. A
+   * name `checkDisplayName` refuses is sent nowhere.
+   */
+  rename(displayName: string): Promise<RenameOutcome>;
   /**
    * The rider read the instance's terms of service in force since `version`
    * (#909): kept on this device for this instance, so the screen stops saying
@@ -418,6 +434,18 @@ export const ACCOUNT_CHANGES_UNAVAILABLE_TEXT = {
   'last-device':
     'That is the last key on your account, so this screen cannot revoke it: it needs one of your recovery codes.',
   'not-revoked': 'The instance did not answer, so that key is not revoked. Try again.',
+} as const;
+
+/**
+ * What the rider is told when their name on the instance was not changed
+ * (#906 item 2). ⚠️ Draft wording for the owner's approval.
+ */
+export const RENAME_REFUSAL_TEXT = {
+  'signed-out': DEVICES_UNAVAILABLE_TEXT['signed-out'],
+  'bad-name': CONNECT_REFUSAL_TEXT['bad-name'],
+  rate_limited:
+    'Your name there has been changed too many times lately, so it is not changed. Try again tomorrow.',
+  'no-answer': 'The instance did not answer, so your name there is not changed. Try again.',
 } as const;
 
 /** The longest recovery address this app will show: RFC 5321's 254. */
@@ -1455,6 +1483,39 @@ export function createInstancePort(dependencies: InstancePortDependencies): Inst
         };
       } catch {
         return { kind: 'unavailable', text: unavailable['not-revoked'] };
+      }
+    },
+
+    rename: async (displayName) => {
+      // The instance's own rule, checked first: a name it would refuse is sent nowhere.
+      const checked = checkDisplayName(displayName);
+      if (!checked.ok) return { kind: 'refused', text: RENAME_REFUSAL_TEXT['bad-name'] };
+      try {
+        // Sealed-only (#1210): the name crosses the edge only as ciphertext.
+        const session = await sealedSessionOf(dependencies, kit);
+        if (session.kind === 'closed') return { kind: 'refused', text: session.text };
+        const answer = await session.sealed.call('POST', '/v1/auth/display-name', {
+          token: session.token,
+          body: { displayName: checked.name },
+        });
+        if (answer.status === 401) {
+          return { kind: 'refused', text: RENAME_REFUSAL_TEXT['signed-out'] };
+        }
+        const code = (answer.body as { error?: { code?: unknown } } | null)?.error?.code;
+        if (code === 'rate_limited') {
+          return { kind: 'refused', text: RENAME_REFUSAL_TEXT.rate_limited };
+        }
+        if (code === 'validation_failed') {
+          return { kind: 'refused', text: RENAME_REFUSAL_TEXT['bad-name'] };
+        }
+        const said = (answer.body as { displayName?: unknown } | null)?.displayName;
+        const kept = checkDisplayName(typeof said === 'string' ? said : '');
+        if (answer.status !== 200 || !kept.ok) {
+          return { kind: 'refused', text: RENAME_REFUSAL_TEXT['no-answer'] };
+        }
+        return { kind: 'renamed', displayName: kept.name };
+      } catch {
+        return { kind: 'refused', text: RENAME_REFUSAL_TEXT['no-answer'] };
       }
     },
 
