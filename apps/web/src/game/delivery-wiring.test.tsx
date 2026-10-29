@@ -238,12 +238,20 @@ function buttonStarting(words: string): HTMLButtonElement | undefined {
   );
 }
 
+/**
+ * One animation frame, as a browser runs it: every callback asked for before
+ * the frame runs in it, with the one timestamp, and a callback asked for
+ * during it waits for the next. The clock moves once a frame, not once a
+ * callback, so another `requestAnimationFrame` consumer (the HUD's gamepad
+ * poll, #1821) cannot spend one of the ride's frames.
+ */
 async function pump(): Promise<void> {
-  const next = pending.shift();
-  if (next === undefined) throw new Error('the ride asked for no frame');
+  const due = pending;
+  if (due.length === 0) throw new Error('the ride asked for no frame');
+  pending = [];
   nowMs += FRAME_MS;
   await act(async () => {
-    next(nowMs);
+    for (const callback of due) callback(nowMs);
     await Promise.resolve();
     await Promise.resolve();
   });
