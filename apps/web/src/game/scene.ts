@@ -297,9 +297,15 @@ export interface SceneInput {
    * Where a Delivery round has steered the rider across the road, in metres
    * right of the centre line — #1820, `delivery/steer.ts`
    * §`steeredLateralFor`. It takes the racing line's place for the RIDER
-   * only, in {@link lateralOf}, so a rider level with the bot or the ghost
-   * still makes room as on the line; nobody else is steered. A drawing, never
+   * only, in {@link lateralOf}; nobody else is steered. A drawing, never
    * physics: `simulation.ts` never reads it.
+   *
+   * ⚠️ **A level rider does not make room correctly while steered.**
+   * {@link lateralOf}'s level-lane blend (#499) assumes both riders start from
+   * the line, so when the steered lane differs from the line the rider can be
+   * drawn inside a bot or ghost level with them, and drawn up to about 0.5 m
+   * from the offset the obstacles meet. #1853 carries the criterion that fixes
+   * both when it wires steering into a ride.
    *
    * ⚠️ **Optional the UNSAFE way round**, which `check-wiring.mjs` §Limits
    * names: a Delivery ride that forgot it draws the rider on the line while

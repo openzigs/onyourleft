@@ -131,6 +131,17 @@ describe('the keys ask for a lane change and nothing else', () => {
     ]);
   });
 
+  it('steers by the physical A and D keys on a layout where they type something else', () => {
+    // AZERTY's physical A types q, Cyrillic's ф and в, Greek's α and δ.
+    expect(steerIntentOfKey(key('ф', { code: 'KeyA' }))).toBe('lane-left');
+    expect(steerIntentOfKey(key('α', { code: 'KeyA' }))).toBe('lane-left');
+    expect(steerIntentOfKey(key('в', { code: 'KeyD' }))).toBe('lane-right');
+    expect(steerIntentOfKey(key('δ', { code: 'KeyD' }))).toBe('lane-right');
+    // The guards still apply to a key matched by its code.
+    expect(steerIntentOfKey(key('ф', { code: 'KeyA', repeat: true }))).toBeUndefined();
+    expect(steerIntentOfKey(key('ф', { code: 'KeyA', ctrlKey: true }))).toBeUndefined();
+  });
+
   it('binds no throw key, and neither Enter nor Space', () => {
     for (const name of [...Object.keys(THROW_KEYS), 'Enter', ' ']) {
       expect(Object.hasOwn(STEER_KEYS, name)).toBe(false);
@@ -457,6 +468,42 @@ describe('every lane layout is passable', () => {
       expect(steered.map(({ along, kind }) => ({ along, kind }))).toEqual(
         unsteered.map(({ along, kind }) => ({ along, kind })),
       );
+    }
+  });
+
+  it('places, with steering off, exactly the obstacles origin/main placed', () => {
+    // Literal values read off origin/main's `placeObstacles` (before #1820) for
+    // these seeds, so a change to the path the steered and unsteered rounds
+    // share goes red here rather than moving both sides of a self-comparison.
+    const pinned: Record<
+      number,
+      readonly (readonly [number, string, 'left' | 'right', number, number])[]
+    > = {
+      7: [
+        [205.85690733976662, 'trolley', 'right', 4.153147435888547, 3.05],
+        [494.7665168507956, 'trolley', 'left', 4.857694939434445, -3.05],
+        [602.6837469334714, 'bin', 'right', 3.33144593172368, 3.3],
+      ],
+      2_654_435_761: [
+        [167.61957236099988, 'trolley', 'left', 6.850099523263662, -3.05],
+        [496.912211549934, 'cone', 'right', 5.529830160511967, 2.7],
+        [617.5302099948749, 'bin', 'right', 6.094825952575614, 3.3],
+      ],
+    };
+    for (const [seed, expected] of Object.entries(pinned)) {
+      for (const steering of [undefined, false] as const) {
+        const placed = placeObstacles(ROUND, Number(seed), 'normal', steering);
+        expect(placed).toHaveLength(20);
+        expected.forEach(([along, kind, from, startAfter, across], slot) => {
+          const obstacle = placed[slot] as Obstacle;
+          expect(obstacle.along).toBeCloseTo(along, 9);
+          expect(obstacle.kind).toBe(kind);
+          expect(obstacle.from).toBe(from);
+          expect(obstacle.startAfter).toBeCloseTo(startAfter, 9);
+          // Across the road half a second into its crossing.
+          expect(obstacleAcross(obstacle, startAfter + 0.5)).toBeCloseTo(across, 9);
+        });
+      }
     }
   });
 
