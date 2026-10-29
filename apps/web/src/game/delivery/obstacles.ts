@@ -5,15 +5,14 @@
  * tick — #1811, resting on the owner's rulings DL1 and DL5 of 2026-10-27
  * (epic #1803), recorded as ADR 0059 D-1 and D-2.
  *
- * @unwired Nothing runs a Delivery round yet. #1816 gives this module its
- * production caller when it runs a round inside a game ride, placing the
- * round's obstacles at its start and stepping them once for each simulation
- * step; until then only its tests reach it.
+ * A game ride places the round's obstacles at its start and steps them once
+ * for each simulation step, through `ride-round.ts` (#1816).
  *
- * ⚠️ **For #1816: step the obstacles only on a simulation step that actually
- * ran** — never while the ride is paused or stopped. A rolling obstacle still
- * crosses a rider whose speed is nought, so stepping on a tick the rider did
- * not ride would cost a point for not moving.
+ * ⚠️ **The obstacles are stepped only on a simulation step that actually
+ * ran** — never while the ride is paused or stopped (`ride-round.ts` §"The
+ * steps that ran"). A rolling obstacle still crosses a rider whose speed is
+ * nought, so stepping on a tick the rider did not ride would cost a point for
+ * not moving.
  *
  * ## A crash costs points, and nothing else (ADR 0059 D-2 item 4)
  *
@@ -122,10 +121,19 @@ export const ON_TIME_SLOWEST_METRES_PER_SECOND = 6;
 /** The fastest seeded on-time speed: 9 m/s, 32.4 km/h. */
 export const ON_TIME_FASTEST_METRES_PER_SECOND = 9;
 
-/** The slow end of the speeds every obstacle must be avoidable within: 3 m/s, 10.8 km/h. */
+/**
+ * The slow end of the speeds every obstacle must be avoidable within: 3 m/s, 10.8 km/h.
+ *
+ * @test-facing the bound `obstacles.test.ts` sweeps every placed obstacle's
+ * avoidability over; placement is built to meet it and does not read it
+ */
 export const AVOIDABLE_SLOWEST_METRES_PER_SECOND = 3;
 
-/** The fast end of the speeds every obstacle must be avoidable within: 12 m/s, 43.2 km/h. */
+/**
+ * The fast end of the speeds every obstacle must be avoidable within: 12 m/s, 43.2 km/h.
+ *
+ * @test-facing the other bound of `obstacles.test.ts`' sweep, as above
+ */
 export const AVOIDABLE_FASTEST_METRES_PER_SECOND = 12;
 
 /** What one crash does to the round's score: one point off, as one delivery is one point on. */
@@ -374,8 +382,8 @@ export type ScoreChange = 'delivery' | Crash;
 /**
  * The round's score after `change`: a delivery is a point on, a crash its
  * {@link Crash.scoreDelta}, and the score is never below nought at any moment,
- * so a crash at nought costs nothing. #1816 reports a delivery here only when
- * `round.ts` §`recordDelivery` settled a house.
+ * so a crash at nought costs nothing. `ride-round.ts` (#1816) reports a
+ * delivery here only when `throw.ts` §`stepThrows` landed one on a house.
  */
 export function scoreAfter(score: number, change: ScoreChange): number {
   return Math.max(0, score + (change === 'delivery' ? 1 : change.scoreDelta));

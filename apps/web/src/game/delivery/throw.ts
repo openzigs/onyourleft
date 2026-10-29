@@ -4,9 +4,8 @@
  * The Delivery parcel throw, as pure logic on the game's own tick — #1809,
  * resting on the owner's rulings DL1 and DL2 of 2026-10-27 (epic #1803).
  *
- * @unwired Nothing runs a Delivery round yet. #1816 gives this module its
- * production caller when it runs a round inside a game ride, stepping it once
- * for each simulation step; until then only its tests reach it.
+ * A game ride steps it once for each simulation step, through
+ * `ride-round.ts` (#1816).
  *
  * ## What it decides
  *
@@ -354,9 +353,9 @@ export interface ThrowSideInput {
  * `undefined` for *the next house* when no house is left to deliver to. The
  * next house is the nearest one still expecting a parcel whose throw window
  * has not closed behind the rider: a house passed and not yet counted missed
- * is behind, not next. Unwired with the rest of this module: #1816 calls it
- * when `GameView` takes the intent the HUD's throw control hands it, and
- * hands the side to {@link stepThrows} as `throwTo`.
+ * is behind, not next. `GameView` calls it when it takes the intent the HUD's
+ * throw control hands it (#1816), and `ride-round.ts` hands the side to
+ * {@link stepThrows} as `throwTo`.
  */
 export function throwSideFor(intent: ThrowIntent, input: ThrowSideInput): ThrowSide | undefined {
   if (intent !== 'next-house') return intent;

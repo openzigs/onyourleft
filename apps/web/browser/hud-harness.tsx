@@ -149,7 +149,13 @@ import {
   type RouteProfile,
 } from '@onyourleft/domain';
 
-import { recordDelivery, recordMiss, startRound, type Round } from '../src/game/delivery/round';
+import {
+  recordDelivery,
+  recordMiss,
+  roundTally,
+  startRound,
+  type Round,
+} from '../src/game/delivery/round';
 import type { GhostOutcome } from '../src/game/ghost-outcome';
 import type { ChasedGap } from '../src/game/hud/fields';
 import { HudPanel } from '../src/game/hud/HudPanel';
@@ -564,7 +570,9 @@ function Harness(): JSX.Element {
             onEnd={() => undefined}
             announcement=""
             delivery={
-              round === undefined ? undefined : { round, week: { day, houses: 12, score: 0 } }
+              round === undefined
+                ? undefined
+                : { round, week: { day, houses: 12, score: 0 }, score: roundTally(round).score }
             }
           />
         </section>
