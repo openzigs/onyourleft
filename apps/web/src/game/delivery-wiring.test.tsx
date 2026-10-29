@@ -238,12 +238,20 @@ function buttonStarting(words: string): HTMLButtonElement | undefined {
   );
 }
 
+/**
+ * One animation frame, as a browser runs it: every callback asked for before
+ * the frame runs in it, with the one timestamp, and a callback asked for
+ * during it waits for the next. The clock moves once a frame, not once a
+ * callback, so another `requestAnimationFrame` consumer (the HUD's gamepad
+ * poll, #1821) cannot spend one of the ride's frames.
+ */
 async function pump(): Promise<void> {
-  const next = pending.shift();
-  if (next === undefined) throw new Error('the ride asked for no frame');
+  const due = pending;
+  if (due.length === 0) throw new Error('the ride asked for no frame');
+  pending = [];
   nowMs += FRAME_MS;
   await act(async () => {
-    next(nowMs);
+    for (const callback of due) callback(nowMs);
     await Promise.resolve();
     await Promise.resolve();
   });
@@ -642,7 +650,7 @@ describe('a Delivery round inside a game ride — #1816', () => {
     },
   );
 
-  it('keeps a round the ride ends first, every house still expecting counted missed', async () => {
+  it('keeps the week as it was when End ride comes before any house is reached (#1857)', async () => {
     stubSeed(script.seed);
     mounted = await mount(
       <GameView
@@ -658,8 +666,40 @@ describe('a Delivery round inside a game ride — #1816', () => {
     expect(field('Houses')?.value).toBe(String(WEEK.houses));
     expect(readDeliveryProgress(localStorage)).toEqual(WEEK);
     await clickThrough(buttonStarting('End ride'));
-    // Every house missed and no assist: none is left, so the week is over (`round.ts` §`endRound`).
-    expect(readDeliveryProgress(localStorage)).toEqual({ day: 1, houses: 8, score: 0 });
+    // No house passed, so none is delivered or missed, and a mis-pressed End
+    // ride does not reset the week to a fresh one (`round.ts` §`endRound`).
+    expect(readDeliveryProgress(localStorage)).toEqual(WEEK);
+  });
+
+  it('keeps the week with the houses passed counted missed when End ride comes mid-round (#1857)', async () => {
+    stubSeed(script.seed);
+    mounted = await mount(
+      <GameView
+        port={port()}
+        renderer={() => Promise.resolve(capturingRenderer([]))}
+        now={() => nowMs}
+        delivery
+      />,
+    );
+    await settle();
+    await clickThrough(buttonStarting('Ride '));
+    // Ride on without a throw until the first house's window has closed behind the rider.
+    for (let index = 0; index < FRAMES; index += 1) {
+      await pump();
+      if (field('Houses')?.detail.includes('1\u00a0missed')) break;
+    }
+    const houses = field('Houses');
+    expect(houses?.detail).toBe('0\u00a0delivered, 1\u00a0missed');
+    // The round is still going: houses are still to come, and nothing is kept yet.
+    expect(Number(houses?.value)).toBeGreaterThan(0);
+    expect(readDeliveryProgress(localStorage)).toEqual(WEEK);
+    await clickThrough(buttonStarting('End ride'));
+    // The week the device keeps differs from the one it held: the passed house is missed.
+    expect(readDeliveryProgress(localStorage)).toEqual({
+      day: WEEK.day + 1,
+      houses: WEEK.houses - 1,
+      score: WEEK.score,
+    });
   });
 
   it('runs no round on a ride in a room, which is solo’s alone (DL9)', async () => {

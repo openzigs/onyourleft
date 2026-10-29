@@ -111,6 +111,15 @@ export const PARCEL_FLIGHT_SECONDS = 1.2;
 export const PARCEL_FLIGHT_TICKS = Math.round(PARCEL_FLIGHT_SECONDS / DELIVERY_TICK_SECONDS);
 
 /**
+ * The deepest a parcel reaches from the road's centre line, in metres: how far
+ * it has flown sideways on the last tick of its flight, **12 m**. Worked out
+ * as `acrossAfter` works it out on that tick, so a target exactly this deep is
+ * caught on it. `targets.ts` §`TARGET_MOST_FROM_ROAD_METRES` is this (#1856).
+ */
+export const PARCEL_REACH_METRES =
+  PARCEL_THROW_SPEED_METRES_PER_SECOND * PARCEL_FLIGHT_TICKS * DELIVERY_TICK_SECONDS;
+
+/**
  * How near a target a parcel must be when it reaches the target's depth, in
  * metres along the route, to be caught there. This project's own number, for
  * the owner's approval in #1809's pull request.

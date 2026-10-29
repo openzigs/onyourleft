@@ -116,9 +116,27 @@ describe('the Delivery round — #1806, DL2', () => {
     expect(delivered.houses[0]).toBe('delivered');
   });
 
-  it('counts a house still expecting when the round ends as missed', () => {
-    const outcome = endRound(FRESH_WEEK, recordDelivery(startRound(3), 0));
-    expect(outcome).toMatchObject({ delivered: 1, missed: 2, perfect: false, nextHouses: 1 });
+  it('counts a house still expecting when the round ends as never reached: neither delivered nor missed (#1857)', () => {
+    const outcome = endRound(FRESH_WEEK, recordMiss(recordDelivery(startRound(4), 0), 1));
+    expect(outcome).toMatchObject({ delivered: 1, missed: 1, perfect: false, nextHouses: 3 });
+    expect(outcome.next).toEqual({ day: 2, houses: 3, score: 1 });
+    // Every house reached delivered is still not a perfect round while some were never reached.
+    const unmissed = endRound(FRESH_WEEK, recordDelivery(startRound(3), 0));
+    expect(unmissed).toMatchObject({ delivered: 1, missed: 0, perfect: false, nextHouses: 3 });
+  });
+
+  it('leaves the week as it was when a round ends with no house reached (#1857)', () => {
+    const week: WeekProgress = { day: DAYS_IN_WEEK, houses: 5, score: 22 };
+    const outcome = endRound(week, startRound(4));
+    expect(outcome).toEqual({
+      delivered: 0,
+      missed: 0,
+      perfect: false,
+      nextHouses: 5,
+      weekScore: 22,
+      weekOver: false,
+      next: week,
+    });
   });
 
   it('records by round position only, refusing one off the round', () => {
