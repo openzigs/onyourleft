@@ -34,9 +34,10 @@
  * - every request `instance/sync.ts` sends a scripted instance for the ride,
  *   its base64 FIT decoded as well.
  *
- * Each is scanned for a target's point and distances as JSON spells them and
- * as float64 and float32 bytes, its latitude and longitude at six decimals,
- * the seed in decimal and hex, and Delivery's own words. The last case plants
+ * Each is scanned for a target's point and distances as JSON spells them, as
+ * float64 and float32 bytes, and rounded or cut to fewer places; its latitude
+ * and longitude to three places and finer and as FIT semicircles; the seed in
+ * decimal, hex and as bytes; and Delivery's own words. The last block plants
  * each kind of trace, so the scan is seen to go red.
  *
  * `privacy/delivery-targets-never-sent.test.ts` holds the source half: no
@@ -399,7 +400,10 @@ afterAll(async () => {
 /** One thing a trace of the round would be, named so a failure says which. */
 interface Marker {
   readonly label: string;
+  /** Found anywhere in the text: a spelling long enough that only the round spells it. */
   readonly text?: string;
+  /** Found only as a whole number in the text, sign aside: a rounded spelling (see {@link roundedMarkers}). */
+  readonly number?: string;
   readonly bytes?: Uint8Array;
 }
 
@@ -436,6 +440,87 @@ function sixDecimals(degrees: number): string {
   return `${whole ?? ''}.${fraction.padEnd(6, '0').slice(0, 6)}`;
 }
 
+/** `value` cut, not rounded, to `places` decimals, as `toFixed` would spell it. */
+function cut(value: number, places: number): string {
+  const [whole, fraction = ''] = String(Math.abs(value)).split('.');
+  return places === 0
+    ? (whole ?? '')
+    : `${whole ?? ''}.${fraction.padEnd(places, '0').slice(0, places)}`;
+}
+
+/** How a writer rounding or cutting `value` to `places` decimals spells it, sign aside. */
+function spellings(value: number, places: number): string[] {
+  return [...new Set([Math.abs(value).toFixed(places), cut(value, places)])];
+}
+
+/**
+ * A local point or distance in whole metres is matched only from 100 m up. A
+ * one- or two-digit whole number is spelled by every ride (a cadence, a
+ * second, a lap count, any two digit bytes in a FIT file), and a target's `x`
+ * and `fromRoad` are under 25 m by rule (`targets.ts`
+ * §`TARGET_MOST_FROM_ROAD_METRES`), so no fixture can make theirs a number
+ * nothing else spells: for those the coarsest marker is a decimetre.
+ */
+const WHOLE_METRES_FROM = 100;
+
+/** Metres to 0 to 6 places: past that, the full spelling's own marker finds it as a prefix. */
+const METRE_PLACES = [0, 1, 2, 3, 4, 5, 6] as const;
+/** Degrees to 3 places (110 m) and finer, rounded or cut; {@link sixDecimals} adds the cut prefix. */
+const DEGREE_PLACES = [3, 4, 5, 6, 7, 8] as const;
+
+/**
+ * A target written at reduced precision — #1817's review: a debug label or
+ * a lap note with `x.toFixed(2)` in it is still the house — as whole numbers
+ * in the text, rounded or cut: metres to 0 to 6 places, degrees to 3 to 8.
+ *
+ * A rounded spelling is a prefix of real readings (the rider passes every
+ * house, so the distance stream holds `120.50…` beside a target at
+ * `120.51`), which is why these are matched as **whole numbers** rather
+ * than substrings: a stream's `120.5071…` is not `120.51`. What still could
+ * collide is a reading written at the same coarse precision; the fixture's
+ * houses stand off round numbers (`DISTINCTIVE_TOWN_LAYOUT`, 50.3719 m along
+ * and 12.4683 m out), so a target's centimetres are not a sample's, and the
+ * first case asserts the ride's own exports, rows and payload carry none of
+ * these numbers before any leak is planted.
+ */
+function roundedMarkers(name: string, target: DeliveryTarget): Marker[] {
+  const markers: Marker[] = [];
+  for (const field of ['distance', 'fromRoad', 'x', 'z'] as const) {
+    const value = target[field];
+    for (const places of METRE_PLACES) {
+      if (places === 0 && Math.abs(value) < WHOLE_METRES_FROM) continue;
+      for (const number of spellings(value, places)) {
+        markers.push({ label: `${name} ${field} to ${String(places)} places`, number });
+      }
+    }
+  }
+  const [latitude, longitude] = geographicOf(ORIGIN, target.x, target.z);
+  for (const [field, degrees] of [
+    ['latitude', latitude],
+    ['longitude', longitude],
+  ] as const) {
+    for (const places of DEGREE_PLACES) {
+      for (const number of spellings(degrees, places)) {
+        markers.push({ label: `${name} ${field} to ${String(places)} places`, number });
+      }
+    }
+    // A FIT position field: degrees as int32 semicircles, which `readActivityFile` may not decode back.
+    markers.push({ label: `${name} ${field} as semicircles`, bytes: semicircleBytes(degrees) });
+  }
+  return markers;
+}
+
+function semicircleBytes(degrees: number): Uint8Array {
+  const bytes = new Uint8Array(4);
+  new DataView(bytes.buffer).setInt32(0, Math.round((degrees * 2 ** 31) / 180), true);
+  return bytes;
+}
+
+/** Every whole number in `text`, sign aside: a run of digits with at most one fraction, not inside a longer one. */
+function numbersIn(text: string): Set<string> {
+  return new Set(text.match(/(?<![\d.])\d+(?:\.\d+)?(?!\.?\d)/g) ?? []);
+}
+
 function float64Bytes(value: number): Uint8Array {
   const bytes = new Uint8Array(8);
   new DataView(bytes.buffer).setFloat64(0, value, true);
@@ -453,7 +538,9 @@ function markersOf(targets: readonly DeliveryTarget[]): Marker[] {
   const markers: Marker[] = [
     { label: 'the seed', text: String(SEED) },
     { label: 'the seed in hex', text: SEED.toString(16) },
+    { label: 'the seed in upper-case hex', text: SEED.toString(16).toUpperCase() },
     { label: 'the seed as bytes', bytes: new Uint8Array(new Uint32Array([SEED]).buffer) },
+    { label: 'the seed as float64', bytes: float64Bytes(SEED) },
   ];
   for (const target of targets) {
     const name = `target ${String(target.position)}`;
@@ -469,6 +556,7 @@ function markersOf(targets: readonly DeliveryTarget[]): Marker[] {
     markers.push(
       { label: `${name} latitude`, text: sixDecimals(latitude) },
       { label: `${name} longitude`, text: sixDecimals(longitude) },
+      ...roundedMarkers(name, target),
     );
   }
   return markers;
@@ -485,13 +573,19 @@ function containsBytes(haystack: Uint8Array, needle: Uint8Array): boolean {
   return false;
 }
 
-/** A value as JSON, typed arrays spelled as arrays of their numbers. */
+/**
+ * A value as JSON, typed arrays spelled as arrays of their numbers — except
+ * raw bytes, whose 0 to 255 are no reading's numbers and would match a
+ * whole-metre marker by chance: {@link bytesWithin} scans those as bytes.
+ */
 function jsonOf(value: unknown): string {
-  return JSON.stringify(value, (_key, each: unknown) =>
-    ArrayBuffer.isView(each) && !(each instanceof DataView)
+  return JSON.stringify(value, (_key, each: unknown) => {
+    // By tag, not `instanceof`: a Blob read back in jsdom gives another realm's Uint8Array.
+    if (Object.prototype.toString.call(each) === '[object Uint8Array]') return 'bytes';
+    return ArrayBuffer.isView(each) && !(each instanceof DataView)
       ? Array.from(each as unknown as ArrayLike<number>)
-      : each,
-  );
+      : each;
+  });
 }
 
 const BASE64 = /^[A-Za-z0-9+/]{16,}={0,2}$/;
@@ -522,6 +616,7 @@ function scan(
 ) {
   const found: string[] = [];
   const lower = text.toLowerCase();
+  const numbers = numbersIn(text);
   for (const word of words ? DELIVERY_WORDS : []) {
     if (lower.includes(word)) found.push(`${where}: the word ${word}`);
   }
@@ -529,11 +624,15 @@ function scan(
     if (marker.text !== undefined && text.includes(marker.text)) {
       found.push(`${where}: ${marker.label}`);
     }
+    if (marker.number !== undefined && numbers.has(marker.number)) {
+      found.push(`${where}: ${marker.label}`);
+    }
     if (marker.bytes !== undefined && bytes !== undefined && containsBytes(bytes, marker.bytes)) {
       found.push(`${where}: ${marker.label}`);
     }
   }
-  return found;
+  // A rounded and a cut spelling can be one number: say it once.
+  return [...new Set(found)];
 }
 
 /** An activity file decoded as the import path decodes one, or `undefined` if it is not one. */
@@ -670,6 +769,10 @@ describe('a Delivery ride keeps no target — #1817, ADR 0059 D-4', () => {
     // The round ran over these houses: their markers were drawn on the ride's first frame.
     const drawnMarkers = ride.drawn[0]?.delivery?.markers ?? [];
     expect(drawnMarkers.length).toBe(WEEK.houses);
+    // And the scan looks for the houses the ride drew, not a re-run that could pick others.
+    for (const marker of drawnMarkers) {
+      expect(ride.targets.some(({ x, z }) => x === marker.x && z === marker.z)).toBe(true);
+    }
     // Settled, with deliveries: a parcel did go to a house.
     expect(ride.houses?.value).toBe('0');
     const delivered = Number(/^(\d+)/.exec(ride.houses?.detail ?? '')?.[1] ?? '0');
@@ -705,19 +808,6 @@ describe('a Delivery ride keeps no target — #1817, ADR 0059 D-4', () => {
       ...tracesInValue('its laps', laps, markers),
       ...tracesInValue('the library', summaries, markers),
     ]).toStrictEqual([]);
-  });
-
-  it('stores none of it in any table of the database', RIDE, async () => {
-    const ride = await theRide();
-    await ride.harness.discard();
-    const tables = await everyRow(ride.harness.databaseName);
-    // Not vacuous: the walk read the ride's own tables, with rows in them.
-    expect(tables.length).toBeGreaterThan(10);
-    expect(tables.reduce((sum, each) => sum + each.rows.length, 0)).toBeGreaterThan(2);
-    const markers = markersOf(ride.targets);
-    expect(
-      tables.flatMap(({ table, rows }) => tracesInValue(`table ${table}`, rows, markers)),
-    ).toStrictEqual([]);
   });
 
   it('keeps only the week’s counts on the device', RIDE, async () => {
@@ -812,6 +902,20 @@ describe('a Delivery ride keeps no target — #1817, ADR 0059 D-4', () => {
     expect(base64Within(pushes).some(isFit)).toBe(true);
     expect(tracesInValue('sync', instance.sent, markersOf(ride.targets))).toStrictEqual([]);
   });
+  // Last of the ride's cases, and in file order (Vitest's default, never shuffled here): sync
+  // has written its key and state into the same store, so the walk reads those rows too.
+  it('stores none of it in any table of the database', RIDE, async () => {
+    const ride = await theRide();
+    await ride.harness.discard();
+    const tables = await everyRow(ride.harness.databaseName);
+    // Not vacuous: the walk read the ride's own tables, with rows in them.
+    expect(tables.length).toBeGreaterThan(10);
+    expect(tables.reduce((sum, each) => sum + each.rows.length, 0)).toBeGreaterThan(2);
+    const markers = markersOf(ride.targets);
+    expect(
+      tables.flatMap(({ table, rows }) => tracesInValue(`table ${table}`, rows, markers)),
+    ).toStrictEqual([]);
+  });
 });
 
 describe('the scan can go red — #1817', () => {
@@ -872,5 +976,44 @@ describe('the scan can go red — #1817', () => {
     expect(found).toContain('ride.gpx: target 0 latitude');
     expect(found).toContain('ride.gpx: target 0 longitude');
     expect(found).toContain('ride.gpx, decoded: target 0 latitude');
+  });
+
+  it('finds a target written at reduced precision, and no reading that only starts like one', () => {
+    const [target] = planted;
+    if (target === undefined) throw new Error('no planted target');
+    // The review's leak: centimetres in a ride's name.
+    const name = `Ride ${target.x.toFixed(2)},${target.z.toFixed(2)}`;
+    expect(tracesInValue('ride', { name }, markers)).toEqual([
+      'ride: target 0 fromRoad to 2 places',
+      'ride: target 0 x to 2 places',
+      'ride: target 0 z to 2 places',
+    ]);
+    expect(tracesInValue('ride', { name: `Ride ${target.z.toFixed(0)}` }, markers)).toEqual([
+      'ride: target 0 z to 0 places',
+    ]);
+    const [latitude, longitude] = geographicOf(ORIGIN, target.x, target.z);
+    const note = `at ${latitude.toFixed(5)} ${longitude.toFixed(3)}`;
+    expect(tracesInValue('lap', { note }, markers)).toEqual([
+      'lap: target 0 latitude to 5 places',
+      'lap: target 0 longitude to 3 places',
+    ]);
+    const fit = new Uint8Array(Int32Array.of(Math.round((latitude * 2 ** 31) / 180)).buffer);
+    expect(tracesInValue('streamBlobs', [{ bytes: fit }], markers)).toEqual([
+      'streamBlobs, bytes: target 0 latitude as semicircles',
+    ]);
+    // A reading that starts with a target's rounded digits is not one: the rider passes every house.
+    expect(
+      tracesInValue('streams', { distance: Float64Array.of(120.5049, 120.3749), y: 7.8 }, markers),
+    ).toStrictEqual([]);
+  });
+
+  it('finds the seed spelled in upper-case hex and as float64 bytes', () => {
+    expect(scan('note', markers, `seed 0x${SEED.toString(16).toUpperCase()}`)).toEqual([
+      'note: the seed in upper-case hex',
+    ]);
+    expect(tracesInValue('streams', { seed: Float64Array.of(SEED) }, markers)).toEqual([
+      'streams: the seed',
+      'streams, bytes: the seed as float64',
+    ]);
   });
 });
