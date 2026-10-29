@@ -304,8 +304,12 @@ export function denseTownFixture(count = 2_000): {
  * From anywhere along its middle more than `MAPPED_BUILDING_MAX` stand within
  * the belt's reach and some stand past its near level, so the count, the
  * budget and the far level all bind in one fixture.
+ *
+ * #1856: `nearRow` moves the near rows in. At the 25 m default their
+ * doorsteps stand 20.5 m out, past a Delivery parcel's reach, so no house in
+ * the town can be a Delivery target; at 12 m they stand 7.5 m out, inside it.
  */
-export function rowTownFixture(): {
+export function rowTownFixture(nearRow = 25): {
   readonly profile: RouteProfile;
   readonly origin: CorridorOrigin;
   readonly corridor: WorldCorridor;
@@ -314,7 +318,7 @@ export function rowTownFixture(): {
   const origin = corridorOrigin(profile);
   const buildings: BuildingFeature[] = [];
   for (let along = 50; along < 2_950; along += 12) {
-    for (const lateral of [25, 60, -25, -60]) {
+    for (const lateral of [nearRow, 60, -nearRow, -60]) {
       buildings.push(buildingBeside(profile, origin, [rectangleBeside(along, lateral, 8, 8)], 6));
     }
   }
