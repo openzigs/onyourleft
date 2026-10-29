@@ -493,8 +493,9 @@ export const REALISTIC_VILLAGE_DRAW_CALLS = 50;
  * The most draw calls the owner's page may make on its village frame **while
  * a Delivery round runs** — the same hold as {@link REALISTIC_VILLAGE_DRAW_CALLS}'
  * (`route=village` at `VILLAGE_HOLD_METRES`, the top rung, on Halloween),
- * carrying #1814's worst case: **53**, proposed for the owner's approval on
- * #1815's pull request.
+ * carrying #1814's worst case: **53**, approved by the owner on 2026-10-29
+ * on #1815's pull request (#1851), on the desktop measurements; the tablet's
+ * reading is still owed under #1815.
  *
  * ⚠️ **It applies only while Delivery runs** — owner ruling DL6b of
  * 2026-10-27 on the epic #1803, recorded as ADR 0059 D-3. A frame carrying no
