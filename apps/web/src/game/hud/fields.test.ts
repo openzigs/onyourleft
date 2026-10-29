@@ -12,11 +12,14 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  DELIVERY_HOUSES_KEY,
+  DELIVERY_SCORE_KEY,
   MOVING_TIME_KEY,
   NO_READING,
   gapAgainst,
   givesWayToTheRoom,
   hudReadings,
+  isDeliveryReading,
   isRoomReading,
   profileReading,
   readingTier,
@@ -25,6 +28,7 @@ import {
 } from './fields';
 import { DRAFT_FULL_SCALE_PERCENT } from './draft-scale';
 import { atStartLine } from '../simulation';
+import { FRESH_WEEK, recordDelivery, recordMiss, startRound } from '../delivery/round';
 import {
   MAX_SIMULATED_GRADE_PERCENT,
   SIMULATION_SETPOINT_INTERVAL_SECONDS,
@@ -1252,5 +1256,94 @@ describe('what gives way to a room’s readings on a phone — #1356', () => {
   it('names nothing on a ride with no room as the room’s', () => {
     const solo: HudInput = { ...widestRoomRide, room: undefined };
     expect(hudReadings(solo).filter(isRoomReading)).toEqual([]);
+  });
+});
+
+describe('a Delivery round on the HUD — #1812', () => {
+  const base = baseInput();
+  const round = recordMiss(recordDelivery(recordDelivery(startRound(8), 0), 1), 2);
+  const delivery = { round, week: { day: 3, houses: 8, score: 11 } };
+
+  it('shows the houses left, with the delivered and missed counts, and the round’s score with its day', () => {
+    const shown = hudReadings({ ...base, delivery }).filter(isDeliveryReading);
+    expect(shown).toEqual([
+      {
+        key: DELIVERY_HOUSES_KEY,
+        label: 'Houses',
+        value: '5',
+        unit: 'left',
+        stale: false,
+        detail: '2\u00a0delivered, 1\u00a0missed',
+      },
+      {
+        key: DELIVERY_SCORE_KEY,
+        label: 'Score',
+        value: '2',
+        unit: '',
+        stale: false,
+        detail: 'Day 3 of 7',
+      },
+    ]);
+  });
+
+  it('follows the round as a parcel lands', () => {
+    const before = hudReadings({ ...base, delivery });
+    const after = hudReadings({
+      ...base,
+      delivery: { ...delivery, round: recordDelivery(round, 5) },
+    });
+    const houses = (readings: typeof before) =>
+      readings.find((each) => each.key === DELIVERY_HOUSES_KEY);
+    expect([houses(before)?.value, houses(before)?.detail]).toEqual([
+      '5',
+      '2\u00a0delivered, 1\u00a0missed',
+    ]);
+    expect([houses(after)?.value, houses(after)?.detail]).toEqual([
+      '4',
+      '3\u00a0delivered, 1\u00a0missed',
+    ]);
+  });
+
+  it('puts them last, after the wind, so every other field keeps its index, and in the secondary tier', () => {
+    // A ride with a wind set, so its field — the one that was last — is on it.
+    const windy: HudInput = { ...base, state: { ...base.state, headwindMetresPerSecond: 4 } };
+    const ordinary = hudReadings(windy).map((each) => each.key);
+    expect(ordinary.at(-1)).toBe('wind');
+    const keys = hudReadings({ ...windy, delivery }).map((each) => each.key);
+    expect(keys).toEqual([...ordinary, DELIVERY_HOUSES_KEY, DELIVERY_SCORE_KEY]);
+    for (const each of hudReadings({ ...base, delivery }).filter(isDeliveryReading)) {
+      expect(readingTier(each)).toBe('secondary');
+    }
+  });
+
+  it('is absent from an ordinary ride, whose HUD is unchanged', () => {
+    expect(hudReadings(base).filter(isDeliveryReading)).toEqual([]);
+    expect(hudReadings({ ...base, delivery: undefined })).toEqual(hudReadings(base));
+  });
+
+  it('shows a fresh round on day one as nothing delivered yet', () => {
+    const fresh = hudReadings({
+      ...base,
+      delivery: { round: startRound(FRESH_WEEK.houses), week: FRESH_WEEK },
+    }).filter(isDeliveryReading);
+    expect(fresh.map((each) => [each.value, each.detail])).toEqual([
+      ['8', '0\u00a0delivered, 0\u00a0missed'],
+      ['0', 'Day 1 of 7'],
+    ]);
+  });
+
+  it('leaves a phone six secondary readings beside the moving time, the round’s among them', () => {
+    // `theme.css` §"A ROOM RIDE ON A PHONE": the pacer's dashed field gives way.
+    const shown = hudReadings({ ...base, delivery })
+      .filter((each) => readingTier(each) === 'secondary')
+      .filter((each) => !givesWayToTheRoom(each) && each.key !== MOVING_TIME_KEY)
+      .map((each) => each.key);
+    expect(shown).toEqual([
+      'speed',
+      'gradient',
+      'remaining',
+      DELIVERY_HOUSES_KEY,
+      DELIVERY_SCORE_KEY,
+    ]);
   });
 });

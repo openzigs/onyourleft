@@ -82,6 +82,17 @@
  * {@link CRASH_SCORE_DELTA}, as proposed in #1811's pull request; nothing
  * else here hard-codes them.
  *
+ * ## Fewer or none, the assist setting (#1813, DL10)
+ *
+ * {@link placeObstacles} takes the assist's `ObstacleSetting`: `'normal'`,
+ * `'fewer'`, which keeps one in {@link FEWER_OBSTACLES_KEEP_ONE_IN} of the
+ * obstacles `'normal'` places, each where it would have been, and `'none'`.
+ * DL10 asked for **slower** obstacles as the middle choice, and in phase 0
+ * that would be harder, not easier: an obstacle is dodged by timing, and one
+ * that crosses more slowly is in the rider's line for longer, so more arrival
+ * speeds meet it. Fewer is what lowers the pressure while the rider cannot
+ * steer. The setting itself is `assist-preference.ts`'.
+ *
  * ## Nothing here leaves the ride
  *
  * Obstacles are placed from the round's in-memory seed (#1808, ADR 0059 D-4)
@@ -92,6 +103,7 @@
 
 import { fmix32, mixInto, uniformFrom } from '../seeded';
 
+import type { ObstacleSetting } from './assist-preference';
 import { CARRIAGEWAY_HALF_WIDTH_METRES, DELIVERY_TICK_SECONDS } from './throw';
 
 /** How far ahead of the rider an obstacle is set going, in metres. */
@@ -214,6 +226,13 @@ export function obstacleAcross(obstacle: Obstacle, seconds: number): number {
   return -towardRight * kerb + towardRight * travelled;
 }
 
+/**
+ * With the assist's obstacle setting `'fewer'`, one obstacle is kept in this many:
+ * **2**, so half as many, about one in each 500 m. This project's own number,
+ * for the owner's approval in #1813's pull request.
+ */
+export const FEWER_OBSTACLES_KEEP_ONE_IN = 2;
+
 /** Folded into the round's seed for the obstacles' own stream: any constant the target pick does not use. */
 const OBSTACLE_STREAM = 0x0b57_ac1e;
 
@@ -230,8 +249,14 @@ export interface ObstaclePlacementInput {
  * drawn when the round starts and never stored). The same seed and input
  * give the same obstacles. The first stands at least
  * {@link OBSTACLE_SIGHT_METRES} past `from`, so none is in sight at the start.
+ * `setting` is the assist's (#1813): `'fewer'` keeps one in
+ * {@link FEWER_OBSTACLES_KEEP_ONE_IN} of these, and `'none'` places none.
  */
-export function placeObstacles(input: ObstaclePlacementInput, seed: number): readonly Obstacle[] {
+export function placeObstacles(
+  input: ObstaclePlacementInput,
+  seed: number,
+  setting: ObstacleSetting = 'normal',
+): readonly Obstacle[] {
   const { from, to } = input;
   if (!Number.isInteger(seed) || seed < 0 || seed > 0xffff_ffff) {
     refuse('the seed is a whole number from 0 to 2³² − 1');
@@ -261,6 +286,10 @@ export function placeObstacles(input: ObstaclePlacementInput, seed: number): rea
       from: uniformFrom(hash, 2) < 0.5 ? 'left' : 'right',
       startAfter: OBSTACLE_SIGHT_METRES / onTime - kerbOffset(shape) / shape.speed,
     });
+  }
+  if (setting === 'none') return [];
+  if (setting === 'fewer') {
+    return obstacles.filter((_, slot) => slot % FEWER_OBSTACLES_KEEP_ONE_IN === 0);
   }
   return obstacles;
 }

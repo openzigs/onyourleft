@@ -37,6 +37,7 @@ import {
   MOVING_TIME_KEY,
   givesWayToTheRoom,
   hudReadings,
+  isDeliveryReading,
   isRoomReading,
   profileReading,
   readingTier,
@@ -47,6 +48,7 @@ import {
   type ReadingTier,
 } from './fields';
 import type { HudPanelProps } from './HudPanel';
+import { ThrowControl } from './ThrowControl';
 
 /**
  * The smallest a mid-ride control may be, in CSS pixels.
@@ -244,6 +246,15 @@ export function HudCore(props: HudCoreProps): JSX.Element {
             </button>
           )}
         </div>
+        {/*
+          #1810: a Delivery round's throws, under the controls a rider presses
+          every ride so those keep their places. Inside this region, so the
+          touch lock refuses a tap on them as on Pause: none is exempt
+          (ADR 0059 D-5). What the lock does to them is why it is handed in.
+        */}
+        {props.throwing === undefined ? null : (
+          <ThrowControl port={props.throwing} touchLocked={touchLocked} />
+        )}
         {props.moreActions}
       </div>
 
@@ -350,6 +361,8 @@ function fieldClass(reading: HudReading): string {
     ...(reading.key === MOVING_TIME_KEY ? ['oyl-hud__field--moving'] : []),
     // #1356: on a phone a room's readings take the places of these.
     ...(isRoomReading(reading) ? ['oyl-hud__field--room'] : []),
+    // #1812: and a Delivery round's, the same way (`theme.css` §"A ROOM RIDE ON A PHONE").
+    ...(isDeliveryReading(reading) ? ['oyl-hud__field--delivery'] : []),
     ...(givesWayToTheRoom(reading) ? ['oyl-hud__field--gives-way'] : []),
   ].join(' ');
 }

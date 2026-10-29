@@ -4,8 +4,10 @@ import { describe, expect, it } from 'vitest';
 
 import { SIMULATION_STEP_SECONDS } from '../simulation';
 import { ROAD_WIDTH_METRES } from '../terrain';
+import { TARGET_WINDOW_HALF_METRES } from './targets';
 import { endRound, FRESH_WEEK, recordMiss, type Round, startRound } from './round';
 import {
+  ASSISTED_THROW_SCALE,
   CARRIAGEWAY_HALF_WIDTH_METRES,
   DELIVERY_TICK_SECONDS,
   type Landing,
@@ -47,12 +49,20 @@ function throwAndFly(
   targets: readonly ThrowTarget[],
   round: Round,
   perCall = 1,
+  widerWindows?: boolean,
 ): { landings: Landing[]; round: Round; state: ThrowState } {
   const landings: Landing[] = [];
   let state = NO_PARCELS;
   let throwTo: ThrowSide | undefined = side;
   for (let called = 0; called * perCall <= PARCEL_FLIGHT_TICKS; called += 1) {
-    const step = stepThrows(state, { rider, targets, round, throwTo, ticks: perCall });
+    const step = stepThrows(state, {
+      rider,
+      targets,
+      round,
+      throwTo,
+      ticks: perCall,
+      ...(widerWindows === undefined ? {} : { widerWindows }),
+    });
     if (throwTo !== undefined) expect(step.thrown).toBe(true);
     throwTo = undefined;
     state = step.state;
@@ -376,5 +386,66 @@ describe('the Delivery parcel throw — #1809, DL1 and DL2', () => {
     expect(first.state).toEqual(before);
     expect(round.houses).toEqual(['expecting']);
     expect(NO_PARCELS).toEqual({ tick: 0, readyAt: 0, inFlight: [] });
+  });
+});
+
+describe('the assist setting’s wider windows — #1813, DL10', () => {
+  const wider = TARGET_CATCH_RADIUS_METRES * ASSISTED_THROW_SCALE;
+  const closesWider = 100 + THROW_WINDOW_AFTER_METRES * ASSISTED_THROW_SCALE;
+
+  it('keeps its windows inside the road each house reserves, and the closing edge inside the catch', () => {
+    expect(ASSISTED_THROW_SCALE).toBeGreaterThan(1);
+    expect(wider).toBe(4.5);
+    expect(THROW_WINDOW_AFTER_METRES * ASSISTED_THROW_SCALE).toBe(3);
+    expect(THROW_WINDOW_AFTER_METRES * ASSISTED_THROW_SCALE).toBeLessThan(wider);
+    expect(THROW_WINDOW_AFTER_METRES * ASSISTED_THROW_SCALE).toBeLessThanOrEqual(
+      TARGET_WINDOW_HALF_METRES,
+    );
+    expect(THROW_WINDOW_BEFORE_METRES).toBeLessThanOrEqual(TARGET_WINDOW_HALF_METRES);
+  });
+
+  it('catches a parcel up to three times as far from the doorstep, and no farther', () => {
+    const targets: ThrowTarget[] = [{ position: 0, along: 110, side: 'right', clear: NEAR_CLEAR }];
+    // The parcel crosses the doorstep's depth 5.1 m forward of the throw at 10 m/s.
+    const shortBy = (gap: number): Rider => ({ along: 110 - 5.1 - gap, speed: 10 });
+    const outside = throwAndFly(shortBy(wider + 0.1), 'right', targets, startRound(1), 1, true);
+    expect(outside.landings.map((landing) => landing.kind)).toEqual(['wasted']);
+    const inside = throwAndFly(shortBy(wider - 0.1), 'right', targets, startRound(1), 1, true);
+    expect(inside.landings.map((landing) => landing.kind)).toEqual(['delivery']);
+    expect(inside.round.houses).toEqual(['delivered']);
+    // …and the same throw at the default is wasted: the assist is what delivered it.
+    const usual = throwAndFly(shortBy(wider - 0.1), 'right', targets, startRound(1));
+    expect(usual.landings.map((landing) => landing.kind)).toEqual(['wasted']);
+  });
+
+  it('closes the window three times as far past the house', () => {
+    const targets: ThrowTarget[] = [{ position: 0, along: 100, side: 'right', clear: 8.4 }];
+    const before = throwAndFly(
+      { along: closesWider - 0.1, speed: 0 },
+      'right',
+      targets,
+      startRound(1),
+      1,
+      true,
+    );
+    expect(before.landings).toMatchObject([{ kind: 'delivery', position: 0 }]);
+    const after = throwAndFly(
+      { along: closesWider + 0.1, speed: 0 },
+      'right',
+      targets,
+      startRound(1),
+      1,
+      true,
+    );
+    expect(after.landings.map((landing) => landing.kind)).toEqual(['wasted']);
+  });
+
+  it('does not open the window any earlier, which would reach into the house before', () => {
+    const deep = 8.4;
+    const targets: ThrowTarget[] = [{ position: 0, along: 100, side: 'right', clear: deep }];
+    const from = 100 - THROW_WINDOW_BEFORE_METRES - 0.1;
+    const rider: Rider = { along: from, speed: (100 - from) / secondsToReach(deep) };
+    const { landings } = throwAndFly(rider, 'right', targets, startRound(1), 1, true);
+    expect(landings.map((landing) => landing.kind)).toEqual(['wasted']);
   });
 });

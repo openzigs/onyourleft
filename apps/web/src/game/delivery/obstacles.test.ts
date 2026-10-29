@@ -14,6 +14,7 @@ import {
   AVOIDABLE_SLOWEST_METRES_PER_SECOND,
   type Crash,
   CRASH_SCORE_DELTA,
+  FEWER_OBSTACLES_KEEP_ONE_IN,
   type Obstacle,
   obstacleAcross,
   OBSTACLE_KINDS,
@@ -387,5 +388,29 @@ describe('no message formats a position, a speed or a seed (CLAUDE.md §6)', () 
     expect(() =>
       stepObstacles(state, { rider: { along: 0, lateral: 0, speed: 1 }, obstacles: [BIN] }),
     ).toThrow(/different number of obstacles/);
+  });
+});
+
+describe('the assist setting places fewer obstacles, or none — #1813, DL10', () => {
+  const span = { from: 1_000, to: 1_000 + 12 * OBSTACLE_SPACING_METRES };
+
+  it('places as usual unless asked, and the same for `normal`', () => {
+    expect(placeObstacles(span, 7, 'normal')).toEqual(placeObstacles(span, 7));
+    expect(placeObstacles(span, 7)).toHaveLength(12);
+  });
+
+  it('keeps one in two for `fewer`, each exactly where `normal` puts it', () => {
+    expect(FEWER_OBSTACLES_KEEP_ONE_IN).toBe(2);
+    for (const seed of [1, 7, 0xdead_beef]) {
+      const usual = placeObstacles(span, seed);
+      const fewer = placeObstacles(span, seed, 'fewer');
+      expect(fewer).toEqual(usual.filter((_, slot) => slot % 2 === 0));
+      expect(fewer).toHaveLength(6);
+    }
+  });
+
+  it('places none for `none`, and still refuses a seed it could not use', () => {
+    expect(placeObstacles(span, 7, 'none')).toEqual([]);
+    expect(() => placeObstacles(span, -1, 'none')).toThrow(RangeError);
   });
 });

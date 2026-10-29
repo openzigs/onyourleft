@@ -10,6 +10,7 @@ import {
   MOST_HOUSES,
   recordDelivery,
   recordMiss,
+  roundTally,
   type Round,
   startRound,
   type WeekProgress,
@@ -133,6 +134,27 @@ describe('the Delivery round — #1806, DL2', () => {
     const next = recordDelivery(round, 0);
     expect(round.houses).toEqual(['expecting', 'expecting']);
     expect(next.houses).toEqual(['delivered', 'expecting']);
+  });
+});
+
+describe('the round, counted — #1812, for the HUD', () => {
+  it('counts each outcome, and scores one point a delivery', () => {
+    const round = recordMiss(recordDelivery(recordDelivery(startRound(5), 0), 3), 1);
+    expect(roundTally(round)).toEqual({ expecting: 2, delivered: 2, missed: 1, score: 2 });
+  });
+
+  it('scores what endRound adds to the week', () => {
+    const round = recordMiss(recordDelivery(startRound(4), 2), 0);
+    expect(endRound(FRESH_WEEK, round).weekScore - FRESH_WEEK.score).toBe(roundTally(round).score);
+  });
+
+  it('counts a fresh round as every house expecting', () => {
+    expect(roundTally(startRound(FIRST_DAY_HOUSES))).toEqual({
+      expecting: FIRST_DAY_HOUSES,
+      delivered: 0,
+      missed: 0,
+      score: 0,
+    });
   });
 });
 
