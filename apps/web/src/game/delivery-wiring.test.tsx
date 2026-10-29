@@ -830,6 +830,11 @@ describe('a Delivery round inside a game ride — #1816', () => {
     expect([...steered.values()].every((each) => each === undefined)).toBe(true);
     expect(field('Houses')).toBeUndefined();
     expect(mounted?.container.querySelector('[aria-label="Throw a parcel"]')).toBeNull();
+    // DL9: a ride in a room says nothing of Delivery, not even the no-round notice.
+    expect(mounted?.container.querySelector('.oyl-hud__notices')?.textContent ?? '').not.toContain(
+      NO_ROUND_TEXT,
+    );
+    expect(said).not.toContain(NO_ROUND_TEXT);
     await clickThrough(buttonStarting('End ride'));
     expect(localStorage.getItem(DELIVERY_PROGRESS_STORAGE_KEY)).toBe(JSON.stringify(WEEK));
   });
@@ -1096,7 +1101,7 @@ describe('offered in the chooser, with the too-few-houses fallback — #1818', (
     };
   }
 
-  it('rides a short town that has houses to pick, fewer than the round’s', () => {
+  it('fixture: the short town has houses to pick, but fewer than the round’s', () => {
     const short = deliveryTown(ROUTE.id, { lastAlong: 220 });
     const pick = pickRoundTargets({ ...short, riderDistance: 0, houses: WEEK.houses }, script.seed);
     expect(pick.targets.length).toBeGreaterThan(0);

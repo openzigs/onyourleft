@@ -76,6 +76,8 @@ interface Options {
   readonly onStart?: (route: RidableRoute, ghost: boolean, delivery?: boolean) => Promise<void>;
   /** #1818: the week a Delivery offer carries; absent, no offer is handed over. */
   readonly week?: { readonly day: number; readonly houses: number };
+  /** #1818: the switch already on, as a rider's earlier choice leaves it once the world is off. */
+  readonly switchedOn?: boolean;
 }
 
 /** The chooser with its own state, as `GameView` holds it. */
@@ -83,7 +85,7 @@ function Chooser(options: Options): JSX.Element {
   const [picked, setPicked] = useState<string | undefined>(undefined);
   const [withGhost, setWithGhost] = useState(false);
   const [position, setPosition] = useState<RidingPosition>(DEFAULT_RIDING_POSITION);
-  const [withDelivery, setWithDelivery] = useState(false);
+  const [withDelivery, setWithDelivery] = useState(options.switchedOn === true);
   const units = options.units ?? 'metric';
   const withPacer = options.intensity !== undefined;
   const intensity = options.intensity ?? '2.5';
@@ -525,6 +527,21 @@ describe('#1818 — a Delivery round in the loadout', () => {
     expect(deliverySwitch(tree.container)?.checked).toBe(true);
     await activateWithKeyboard(rideButton(tree.container));
     expect(asked).toEqual([false, true]);
+  });
+
+  it('asks for no round while the realistic world is not chosen, though the switch was left on (DL6)', async () => {
+    const asked: (boolean | undefined)[] = [];
+    const tree = await render({
+      worldChosen: false,
+      week: WEEK,
+      switchedOn: true,
+      onStart: async (_route, _ghost, delivery) => {
+        asked.push(delivery);
+        await Promise.resolve();
+      },
+    });
+    await activateWithKeyboard(rideButton(tree.container));
+    expect(asked).toEqual([false]);
   });
 
   it('names no other game in anything it says', async () => {
