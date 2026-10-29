@@ -483,11 +483,15 @@ const withRound = (): Promise<RideResult> => (withRoundRide ??= rideOnce(true));
 const without = (): Promise<RideResult> => (withoutRide ??= rideOnce(false));
 
 /**
- * A case that may ride one of the two shared rides, which the first to ask
- * pays for. PROVISIONAL, set from this Mac under coverage (1.1 s and 1.5 s)
- * and the first CI run's ratio to it; the nightly figures replace it.
+ * A case that may ride the two shared rides, which the first to ask pays
+ * for: about three times both rides together, as `docs/agents/ci.md` §4c
+ * asks of a case slow under coverage. The figures, 2026-10-29, the first case
+ * paying the round's ride and the DL5 case the plain one: 2 987 ms and
+ * 2 252 ms under coverage (nightly 40888263731, AMD EPYC 9V45), 2 347 ms and
+ * 1 775 ms without it (`Tests`, 40888263759, AMD EPYC 7763). A filtered run
+ * of one of them rides both, 5.2 s.
  */
-const SHARED_RIDE = { timeout: 20_000 } as const;
+const SHARED_RIDE = { timeout: 16_000 } as const;
 
 describe('a Delivery round inside a game ride — #1816', () => {
   it(
@@ -607,30 +611,26 @@ describe('a Delivery round inside a game ride — #1816', () => {
     expect(readDeliveryProgress(localStorage)).toEqual({ day: 1, houses: 8, score: 0 });
   });
 
-  it(
-    'runs no round on a ride in a room, which is solo’s alone (DL9)',
-    { timeout: 10_000 },
-    async () => {
-      const clock = new ManualClock();
-      const room = new ScriptedRoom();
-      const drawn: SceneFrame[] = [];
-      await rideTheTrace({
-        delivery: true,
-        drawn,
-        frames: 40,
-        room: {
-          room: roomPortOver(() => room.link(), { timers: clock, now: () => nowMs }),
-          roomId: 'room-1',
-        },
-      });
-      expect(drawn.length).toBeGreaterThan(30);
-      expect(drawn.every((frame) => frame.delivery === undefined)).toBe(true);
-      expect(field('Houses')).toBeUndefined();
-      expect(mounted?.container.querySelector('[aria-label="Throw a parcel"]')).toBeNull();
-      await clickThrough(buttonStarting('End ride'));
-      expect(localStorage.getItem(DELIVERY_PROGRESS_STORAGE_KEY)).toBe(JSON.stringify(WEEK));
-    },
-  );
+  it('runs no round on a ride in a room, which is solo’s alone (DL9)', async () => {
+    const clock = new ManualClock();
+    const room = new ScriptedRoom();
+    const drawn: SceneFrame[] = [];
+    await rideTheTrace({
+      delivery: true,
+      drawn,
+      frames: 40,
+      room: {
+        room: roomPortOver(() => room.link(), { timers: clock, now: () => nowMs }),
+        roomId: 'room-1',
+      },
+    });
+    expect(drawn.length).toBeGreaterThan(30);
+    expect(drawn.every((frame) => frame.delivery === undefined)).toBe(true);
+    expect(field('Houses')).toBeUndefined();
+    expect(mounted?.container.querySelector('[aria-label="Throw a parcel"]')).toBeNull();
+    await clickThrough(buttonStarting('End ride'));
+    expect(localStorage.getItem(DELIVERY_PROGRESS_STORAGE_KEY)).toBe(JSON.stringify(WEEK));
+  });
 
   it('takes no throw while the ride is paused, and the next one once it rides again', async () => {
     stubSeed(script.seed);
@@ -757,10 +757,12 @@ describe('the recorded ride is unchanged by a Delivery round — #1816', () => {
     };
   }
 
-  // PROVISIONAL, as `SHARED_RIDE`: two recorded rides, 4.2 s on this Mac under coverage.
+  // Two recorded rides: 5 393 ms under coverage (nightly 40888263731, AMD EPYC
+  // 9V45) and 3 951 ms without it (`Tests`, 40888263759), so about three times
+  // the slower, as `SHARED_RIDE`.
   it(
     'stores the same power, cadence, heart rate, distance and moving time with the round as without it',
-    { timeout: 60_000 },
+    { timeout: 16_000 },
     async () => {
       const without = await recordedRide(false);
       const withRound = await recordedRide(true);
