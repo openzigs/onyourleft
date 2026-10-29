@@ -41,7 +41,11 @@ import { corridorOrigin, drawnRoadPosition, type CorridorOrigin } from '../terra
 import type { UrbanClass } from '../urban-class';
 import type { WorldCorridor } from '../world-data/corridor';
 
-import { FIRST_DAY_HOUSES, MOST_HOUSES } from './round';
+import type { PreferenceStorage } from '../hud/announce-preference';
+
+import { DELIVERY_PROGRESS_STORAGE_KEY } from './delivery-progress';
+import { startDeliveryRide, stepDeliveryRide, type DeliveryRide } from './ride-round';
+import { FIRST_DAY_HOUSES, MOST_HOUSES, roundTally, startRound } from './round';
 import {
   drawRoundSeed,
   pickRoundTargets,
@@ -52,6 +56,18 @@ import {
   type TargetPick,
   type TargetPickInput,
 } from './targets';
+import {
+  CARRIAGEWAY_HALF_WIDTH_METRES,
+  DELIVERY_TICK_SECONDS,
+  NO_PARCELS,
+  PARCEL_FLIGHT_TICKS,
+  PARCEL_REACH_METRES,
+  PARCEL_THROW_SPEED_METRES_PER_SECOND,
+  stepThrows,
+  TARGET_CATCH_RADIUS_METRES,
+  THROW_WINDOW_BEFORE_METRES,
+  type ThrowTarget,
+} from './throw';
 
 /** A corridor of `buildings` about `origin`, all of it covered and none of it classed. */
 function corridorOf(origin: CorridorOrigin, buildings: readonly BuildingFeature[]): WorldCorridor {
@@ -75,7 +91,8 @@ function plansOf(
   return footprintPlans(corridor, landClassMask(corridor), profile, origin).plans;
 }
 
-const town = rowTownFixture();
+/** #1549's row town with its near rows moved in, so their front steps stand inside a parcel's reach (#1856). */
+const town = rowTownFixture(12);
 const townPlans = plansOf(town.corridor, town.profile, town.origin);
 const townBuildings = mappedBuildingsOf(townPlans);
 
@@ -622,5 +639,165 @@ describe('#1808 — errors name the field and the constraint, never a coordinate
 
   it('refuses a triangle budget below zero', () => {
     expect(() => pickRoundTargets(townInput({ triangleBudget: -1 }), 1)).toThrow(/budget/);
+  });
+});
+
+describe('#1856 — only houses a parcel can reach', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /**
+   * A street whose front steps stand at every depth from near the
+   * carriageway's edge to well past a parcel's reach: houses every 16 m,
+   * alternate sides, their middles 9 to 27 m from the centre line.
+   */
+  const SETBACKS = [9, 12, 14.5, 16, 17, 18.5, 20, 22, 24, 27];
+  const street = (() => {
+    const profile = northRoute(2_000, () => 10);
+    const origin = corridorOrigin(profile);
+    const buildings = Array.from({ length: 110 }, (_, index) => {
+      const lateral = (index % 2 === 0 ? 1 : -1) * (SETBACKS[index % SETBACKS.length] as number);
+      return buildingBeside(profile, origin, [rectangleBeside(100 + index * 16, lateral, 8, 8)], 6);
+    });
+    const plans = plansOf(corridorOf(origin, buildings), profile, origin);
+    return { profile, origin, buildings: mappedBuildingsOf(plans), plans };
+  })();
+
+  /** A device that kept a week whose round is the largest there is. */
+  function storageOf(): PreferenceStorage {
+    const items = new Map([
+      [DELIVERY_PROGRESS_STORAGE_KEY, JSON.stringify({ day: 1, houses: MOST_HOUSES, score: 0 })],
+    ]);
+    return {
+      getItem: (key) => items.get(key) ?? null,
+      setItem: (key, value) => {
+        items.set(key, value);
+      },
+    };
+  }
+
+  /** The round `ride-round.ts` starts at the press, from the start of `place`, with the seed `seed`. */
+  function roundOn(
+    seed: number,
+    place: Pick<TargetPickInput, 'buildings' | 'profile' | 'origin'> = street,
+  ): DeliveryRide | undefined {
+    vi.spyOn(globalThis.crypto, 'getRandomValues').mockImplementation(
+      <T extends ArrayBufferView>(array: T): T => {
+        (array as unknown as Uint32Array)[0] = seed;
+        return array;
+      },
+    );
+    return startDeliveryRide({ ...place, riderDistance: 0, storage: storageOf() });
+  }
+
+  const SPEED = 8;
+
+  /**
+   * Ride `ride` through `ride-round.ts` as `GameView` steps it, the rider drawn
+   * `lateral` metres right of the centre line: to each house's throw point in
+   * route order, one throw toward it there, and on through the whole flight.
+   */
+  function throwAtEveryHouse(ride: DeliveryRide, lateral: number): DeliveryRide {
+    let now = ride;
+    const step = (along: number, throwTo?: ThrowTarget['side']): void => {
+      now = stepDeliveryRide(now, {
+        ticks: 1,
+        along,
+        speed: SPEED,
+        lateral: () => lateral,
+        ...(throwTo === undefined ? {} : { throwTo }),
+      }).ride;
+    };
+    for (const target of ride.throwTargets) {
+      const across = CARRIAGEWAY_HALF_WIDTH_METRES + target.clear;
+      const from = target.along - SPEED * (across / PARCEL_THROW_SPEED_METRES_PER_SECOND);
+      // A throw from inside the house's window, which opens 20 m before it.
+      expect(from).toBeGreaterThanOrEqual(target.along - THROW_WINDOW_BEFORE_METRES);
+      step(from);
+      for (let tick = 0; tick <= PARCEL_FLIGHT_TICKS; tick += 1) {
+        step(now.along + SPEED * DELIVERY_TICK_SECONDS, tick === 0 ? target.side : undefined);
+      }
+    }
+    return now;
+  }
+
+  it('reaches as far as the throw does: its speed times its flight, from the centre line', () => {
+    expect(TARGET_MOST_FROM_ROAD_METRES).toBe(PARCEL_REACH_METRES);
+    expect(PARCEL_REACH_METRES).toBeCloseTo(12, 9);
+    // A step exactly that deep is caught on the flight's last tick, and one a
+    // centimetre deeper is not: the reach is the throw's own, to the tick.
+    const landed = (depth: number): string | undefined => {
+      const target: ThrowTarget = {
+        position: 0,
+        along: 100,
+        side: 'right',
+        clear: depth - CARRIAGEWAY_HALF_WIDTH_METRES,
+      };
+      const step = stepThrows(NO_PARCELS, {
+        rider: { along: 100, speed: 0 },
+        targets: [target],
+        round: startRound(1),
+        throwTo: 'right',
+        ticks: PARCEL_FLIGHT_TICKS,
+      });
+      return step.landings[0]?.kind;
+    };
+    expect(landed(PARCEL_REACH_METRES)).toBe('delivery');
+    expect(landed(PARCEL_REACH_METRES + 0.01)).toBe('wasted');
+  });
+
+  it('picks only houses a throw from inside their window delivers to, read back through the ride', () => {
+    // The street is asked something: front steps past the reach that the old
+    // 25 m took, as well as ones inside it.
+    const depths = street.plans.flatMap((plan) => {
+      const step = plan.frontStep;
+      if (step === undefined) return [];
+      const near = nearestOnDrawnRoad(street.profile, street.origin, step.x, step.z, 100);
+      return near === undefined ? [] : [near.distance];
+    });
+    expect(depths.some((depth) => depth > PARCEL_REACH_METRES && depth <= 25)).toBe(true);
+    let nearTheEdge = 0;
+    for (const seed of [1, 2, 3, 4, 5, 6]) {
+      const ride = roundOn(seed);
+      if (ride === undefined) throw new Error('the street gave no round');
+      expect(ride.targets.length).toBeGreaterThanOrEqual(FIRST_DAY_HOUSES);
+      const ridden = throwAtEveryHouse(ride, 0);
+      for (const target of ride.targets) {
+        expect(
+          ridden.round.houses[target.position],
+          `round position ${String(target.position)}`,
+        ).toBe('delivered');
+        if (target.fromRoad > PARCEL_REACH_METRES - TARGET_CATCH_RADIUS_METRES) nearTheEdge += 1;
+      }
+      expect(roundTally(ridden.round).delivered).toBe(ride.targets.length);
+    }
+    // The control the other way: the pick is no tighter than the reach, and
+    // takes houses a parcel only just reaches.
+    expect(nearTheEdge).toBeGreaterThan(0);
+  });
+
+  it('delivers the same wherever across the road the rider is drawn: the throw leaves from the centre line', () => {
+    const ride = roundOn(3);
+    if (ride === undefined) throw new Error('the street gave no round');
+    const centre = throwAtEveryHouse(ride, 0);
+    expect(roundTally(centre.round).delivered).toBe(ride.targets.length);
+    for (const lateral of [-CARRIAGEWAY_HALF_WIDTH_METRES, CARRIAGEWAY_HALF_WIDTH_METRES]) {
+      expect(throwAtEveryHouse(ride, lateral).round).toEqual(centre.round);
+    }
+  });
+
+  it('starts no round in a town with no house in reach, so the too-few-houses fallback is taken', () => {
+    // #1549's row town as it stands: every front step 20.5 m out or more.
+    const far = rowTownFixture();
+    const plans = plansOf(far.corridor, far.profile, far.origin);
+    expect(plans.filter((plan) => plan.frontStep !== undefined).length).toBeGreaterThan(
+      MOST_HOUSES,
+    );
+    const place = { buildings: mappedBuildingsOf(plans), profile: far.profile, origin: far.origin };
+    expect(
+      pickRoundTargets({ ...place, riderDistance: RIDER, houses: FIRST_DAY_HOUSES }, 1),
+    ).toEqual({ targets: [], wanted: FIRST_DAY_HOUSES, complete: false });
+    expect(roundOn(1, place)).toBeUndefined();
   });
 });

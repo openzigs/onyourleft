@@ -472,13 +472,89 @@ describe('the round’s end — #1816', () => {
     expect(later.ride.score).toBe(ride.score);
   });
 
-  it('ends a round the ride ends first, a house still expecting counted missed', () => {
+  it('ends a round the ride ends first, counting no house the rider has not reached (#1857)', () => {
     const ride = withoutObstacles(started());
     const first = ride.throwTargets[0] as ThrowTarget;
     const one = rideTo(rideTo(ride, throwPoint(first)).ride, throwPoint(first) + 12, first.side);
     expect(one.ride.outcome).toBeUndefined();
     const outcome = endDeliveryRide(one.ride);
-    expect(outcome).toMatchObject({ delivered: 1, missed: FIRST_DAY_HOUSES - 1 });
+    expect(outcome).toMatchObject({ delivered: 1, missed: 0, perfect: false });
+    // Not perfect, so no house is added; nothing missed, so none is dropped.
+    expect(outcome.next).toEqual({ day: 2, houses: FIRST_DAY_HOUSES, score: 1 });
+  });
+
+  it('keeps a day-2 round ended after two deliveries and one passed house as just those, read back from the device (#1857)', () => {
+    const week: WeekProgress = { day: 2, houses: FIRST_DAY_HOUSES, score: 4 };
+    const storage = storageOf({ [DELIVERY_PROGRESS_STORAGE_KEY]: week });
+    let ride = withoutObstacles(started(storage));
+    expect(ride.week).toEqual(week);
+    const [first, second, third, fourth] = ride.throwTargets as [
+      ThrowTarget,
+      ThrowTarget,
+      ThrowTarget,
+      ThrowTarget,
+    ];
+    for (const target of [first, second]) {
+      ride = rideTo(ride, throwPoint(target)).ride;
+      ride = rideTo(ride, ride.along + 1, target.side).ride;
+    }
+    // The third house passed with no throw, and the ride ended short of the fourth's window.
+    ride = rideTo(ride, third.along + THROW_WINDOW_AFTER_METRES + 2).ride;
+    expect(ride.along).toBeLessThan(fourth.along);
+    expect(roundTally(ride.round)).toEqual({
+      expecting: FIRST_DAY_HOUSES - 3,
+      delivered: 2,
+      missed: 1,
+      score: 2,
+    });
+    expect(ride.outcome).toBeUndefined();
+    const outcome = endDeliveryRide(ride);
+    expect(outcome).toMatchObject({ delivered: 2, missed: 1, perfect: false, weekOver: false });
+    expect(keepDeliveryWeek(storage, outcome)).toBe(true);
+    // Tomorrow, one house fewer for the one missed, and the two delivered scored:
+    // no fresh week from the five never reached.
+    expect(readDeliveryProgress(storage)).toEqual({
+      day: 3,
+      houses: FIRST_DAY_HOUSES - 1,
+      score: week.score + 2,
+    });
+  });
+
+  it('counts a house passed with a parcel still in the air as missed when the ride ends (#1857)', () => {
+    let ride = withoutObstacles(started());
+    const first = ride.throwTargets[0] as ThrowTarget;
+    // Thrown from the doorstep's own distance, inside the window but too late
+    // to land on it, and the rider past the window before the parcel comes down.
+    ride = rideTo(ride, first.along).ride;
+    ride = rideTo(ride, first.along + THROW_WINDOW_AFTER_METRES + 0.5, first.side).ride;
+    expect(ride.throws.inFlight).toHaveLength(1);
+    expect(ride.round.houses[first.position]).toBe('expecting');
+    expect(endDeliveryRide(ride)).toMatchObject({ delivered: 0, missed: 1 });
+  });
+
+  it('counts no house missed whose widened window the rider is still in when the ride ends (#1857)', () => {
+    const ride = withoutObstacles({ ...started(), widerWindows: true });
+    const first = ride.throwTargets[0] as ThrowTarget;
+    // Past the usual window's closing edge, inside the assist's wider one.
+    const along = first.along + THROW_WINDOW_AFTER_METRES + 1;
+    expect(along).toBeLessThan(first.along + THROW_WINDOW_AFTER_METRES * ASSISTED_THROW_SCALE);
+    const riding = rideTo(ride, along).ride;
+    expect(endDeliveryRide(riding)).toMatchObject({ delivered: 0, missed: 0 });
+    // Without the assist the same place has closed the window: the house is missed.
+    const plain = rideTo(withoutObstacles(started()), along).ride;
+    expect(endDeliveryRide(plain)).toMatchObject({ delivered: 0, missed: 1 });
+  });
+
+  it('leaves the week as it was when the ride ends before any house is reached (#1857)', () => {
+    const week: WeekProgress = { day: 2, houses: FIRST_DAY_HOUSES, score: 4 };
+    const storage = storageOf({ [DELIVERY_PROGRESS_STORAGE_KEY]: week });
+    const ride = started(storage);
+    const first = ride.throwTargets[0] as ThrowTarget;
+    const short = rideTo(ride, first.along - 30).ride;
+    const outcome = endDeliveryRide(short);
+    expect(outcome).toMatchObject({ delivered: 0, missed: 0, weekOver: false });
+    expect(keepDeliveryWeek(storage, outcome)).toBe(true);
+    expect(readDeliveryProgress(storage)).toEqual(week);
   });
 
   it('keeps the next day’s counts, which a fresh reader of the device reads back', () => {

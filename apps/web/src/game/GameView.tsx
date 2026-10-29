@@ -1292,10 +1292,11 @@ export function GameView(props: GameViewProps): JSX.Element {
         placeAcrossOf(roomRef.current?.standings()),
       );
       if (race !== undefined) trainerPortRef.current?.roomRaceEnded?.(race);
-      // #1816: a round the ride ends first is ended here, a house still
-      // expecting counted missed, and the week's counts kept for the next
-      // ride (#1806, DL11: counts only). A round that ended mid-ride was
-      // kept then, in the tick.
+      // #1816: a round the ride ends first is ended here, counting only the
+      // houses the rider has passed (#1857: one not yet reached is neither
+      // delivered nor missed), and the week's counts kept for the next ride
+      // (#1806, DL11: counts only). A round that ended mid-ride was kept
+      // then, in the tick.
       const delivery = deliveryRef.current;
       if (delivery !== undefined && delivery.outcome === undefined) {
         keepDeliveryWeek(deviceStorage(), endDeliveryRide(delivery));

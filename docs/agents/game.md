@@ -655,6 +655,20 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         that writes to a trainer (found by rule, ADR 0059
                         §Amendments). Fails closed on `import.meta.glob`
                         and on a worker it cannot name
+    src/transfer/delivery-targets-not-exported.test.tsx
+    src/privacy/delivery-targets-never-sent.test.ts
+                        DL11 (ADR 0059 D-4, #1817): a real recorded round
+                        over `delivery-town-testing.ts`
+                        §`DISTINCTIVE_TOWN_LAYOUT` leaves no target point,
+                        seed or Delivery word in the stored ride, any table,
+                        the device's `localStorage` (the week is its three
+                        counts), any FIT/GPX/TCX export or the sync payload;
+                        and, in source, nothing under `instance/`,
+                        `transfer/`, `recording/` or `apps/instance/`
+                        imports `delivery/` (through relative chains),
+                        `delivery/` calls no `console`, and every throw in
+                        it has a case whose message is held free of the
+                        fixture's digits, counted against the throw sites
     src/game/delivery/ride-round.ts
                         a Delivery round inside a game ride (#1816, ADR
                         0059): started at the press (the week and the assist
