@@ -293,6 +293,27 @@ export interface SceneInput {
    * safe way round, for {@link centreline}'s reason.
    */
   readonly countrysideOff?: readonly CountrysideLever[] | undefined;
+  /**
+   * Where a Delivery round has steered the rider across the road, in metres
+   * right of the centre line — #1820, `delivery/steer.ts`
+   * §`steeredLateralFor`. It takes the racing line's place for the RIDER
+   * only, in {@link lateralOf}; nobody else is steered. A drawing, never
+   * physics: `simulation.ts` never reads it.
+   *
+   * ⚠️ **A level rider does not make room correctly while steered.**
+   * {@link lateralOf}'s level-lane blend (#499) assumes both riders start from
+   * the line, so when the steered lane differs from the line the rider can be
+   * drawn inside a bot or ghost level with them, and drawn up to about 0.5 m
+   * from the offset the obstacles meet. #1853 carries the criterion that fixes
+   * both when it wires steering into a ride.
+   *
+   * ⚠️ **Optional the UNSAFE way round**, which `check-wiring.mjs` §Limits
+   * names: a Delivery ride that forgot it draws the rider on the line while
+   * the obstacles meet them in a lane. #1816's wiring has to read it back off
+   * the frame the renderer was handed. Absent on every other ride, a room ride
+   * included (DL9), and every ride until #1816 runs a round.
+   */
+  readonly steeredLateral?: number | undefined;
 }
 
 /** Another real rider, where to draw them — #783. @see SceneInput.remoteRiders */
@@ -714,6 +735,8 @@ interface Rider {
   readonly pedalling: boolean;
   /** The side of the line it moves to when level, where the kind's is not enough. @see LEVEL_LANES */
   readonly lane?: number | undefined;
+  /** Where a Delivery round steered it, in place of the line — the rider's only. @see SceneInput.steeredLateral */
+  readonly steered?: number | undefined;
 }
 
 /**
@@ -739,6 +762,7 @@ function ridersOnTheRoad(
       speed: input.state.ride.speed,
       crankAngle: input.crankAngle,
       pedalling: input.pedalling === true,
+      steered: input.steeredLateral,
     },
   ];
   const bot = input.state.bot;
@@ -822,8 +846,9 @@ function ridersOnTheRoad(
 }
 
 /**
- * How far across the road one rider is drawn: the line, eased toward
- * {@link LEVEL_LANES} by how level they are with the nearest other rider.
+ * How far across the road one rider is drawn: the line — or, for a rider a
+ * Delivery round steered, its lane (#1820) — eased toward {@link LEVEL_LANES}
+ * by how level they are with the nearest other rider.
  *
  * `line·(1 − g·w) + lane·side·w`, where `w` runs from 1 within a bicycle's
  * length of another rider to 0 at {@link LEVEL_FADE_METRES} beyond it, and `g`
@@ -843,7 +868,8 @@ function lateralOf(rider: Rider, riders: readonly Rider[], line: RacingLine): nu
       ),
     );
   }
-  const onLine = lineOffsetAt(line, rider.distance);
+  // #1820: a steered rider's lane is its line.
+  const onLine = rider.steered ?? lineOffsetAt(line, rider.distance);
   return (
     onLine * (1 - LINE_GIVEN_UP * level) +
     (rider.lane ?? LEVEL_LANES[rider.kind]) * SIDE_BY_SIDE_METRES * level

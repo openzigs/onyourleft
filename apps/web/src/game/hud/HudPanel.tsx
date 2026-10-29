@@ -69,6 +69,7 @@ import { RaceStandings } from './RaceStandings';
 import { RoomReport, type RoomReportTarget } from './RoomReport';
 import type { RoomReportAnswer, RoomReportReason } from '../../net/room-session';
 import type { RaceStandingsView } from '../room-ride';
+import type { SteerInputPort } from '../delivery/steer-port';
 import type { ThrowInputPort } from '../delivery/throw-input-port';
 import { WorkoutStrip } from '../../workout/WorkoutGraph';
 import type { WorkoutGraphInput } from '../../workout/workout-graph';
@@ -278,6 +279,13 @@ export interface HudPanelProps extends Omit<HudInput, 'units'> {
    * round, which is every ride but one `GameView` runs a round in (#1816).
    */
   readonly throwing?: ThrowInputPort | undefined;
+  /**
+   * A Delivery round's steering — #1820: where a lane key hands the lane
+   * change the rider asked for. With it the HUD listens for
+   * `steer.ts` §`STEER_KEYS` (`SteerKeys.tsx`), and draws nothing; `undefined`
+   * on every other ride, which until #1816 runs a round is every ride.
+   */
+  readonly steering?: SteerInputPort | undefined;
 }
 
 /** What the ride HUD's two controls say. @see HudCoreProps.labels */

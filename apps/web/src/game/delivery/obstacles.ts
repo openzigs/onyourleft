@@ -32,6 +32,18 @@
  * off the other, and is a hazard only while it is in the rider's drawn line.
  * The rider avoids it by arriving earlier or later — by power.
  *
+ * ## Standing in a lane, when the rider can steer (#1820)
+ *
+ * With lane steering (`steer.ts`), a static obstacle becomes allowed, provided
+ * another lane is clear. {@link placeObstacles} asked for a round the rider
+ * can steer makes {@link STANDING_OBSTACLE_SHARE} of its obstacles
+ * {@link StandingObstacle}s, each standing still in one seeded lane of
+ * `steer.ts` §`LANE_OFFSETS_METRES`; the rest cross as above. A placement
+ * holds one obstacle in each stretch of road, so no distance has more than one
+ * lane blocked, and the test sweeps that. A round the rider cannot steer — a
+ * room ride (DL9), or any ride that does not ask — places none, exactly as
+ * before.
+ *
  * An obstacle is **set going** when the rider comes within
  * {@link OBSTACLE_SIGHT_METRES} of it, waits there off the kerb for its
  * `startAfter` seconds, then crosses at its kind's speed. Placement chooses
@@ -103,6 +115,7 @@
 import { fmix32, mixInto, uniformFrom } from '../seeded';
 
 import type { ObstacleSetting } from './assist-preference';
+import { LANE_OFFSETS_METRES } from './steer';
 import { CARRIAGEWAY_HALF_WIDTH_METRES, DELIVERY_TICK_SECONDS } from './throw';
 
 /** How far ahead of the rider an obstacle is set going, in metres. */
@@ -169,8 +182,11 @@ export const OBSTACLE_KINDS: Readonly<Record<ObstacleKind, ObstacleShape>> = Obj
 
 const KIND_ORDER = Object.keys(OBSTACLE_KINDS) as readonly ObstacleKind[];
 
-/** One obstacle on the round, in memory for the ride only. */
-export interface Obstacle {
+/** One obstacle on the round, in memory for the ride only: one that crosses the road, or one that stands in a lane. */
+export type Obstacle = CrossingObstacle | StandingObstacle;
+
+/** An obstacle that crosses the carriageway, and is dodged by timing. */
+export interface CrossingObstacle {
   readonly kind: ObstacleKind;
   /** Its distance along the route, in metres: the odometer, as the rider's. */
   readonly along: number;
@@ -178,6 +194,21 @@ export interface Obstacle {
   readonly from: 'left' | 'right';
   /** Seconds it waits off the kerb after it is set going, before it crosses. */
   readonly startAfter: number;
+  /** It does not stand still. @see StandingObstacle.stands */
+  readonly stands?: undefined;
+}
+
+/** An obstacle that stands still in one lane, on a round the rider can steer, and is dodged by changing lane — #1820. */
+export interface StandingObstacle {
+  readonly kind: ObstacleKind;
+  /** Its distance along the route, in metres: the odometer, as the rider's. */
+  readonly along: number;
+  /** Where it stands across the road, in metres right of the centre line: one of `steer.ts` §`LANE_OFFSETS_METRES`. */
+  readonly stands: number;
+  /** It comes from no kerb. @see CrossingObstacle.from */
+  readonly from?: undefined;
+  /** It waits for nothing. @see CrossingObstacle.startAfter */
+  readonly startAfter?: undefined;
 }
 
 /** Points off the round's score. ⚠️ No other field: no grade, no power, no resistance (DL5). */
@@ -224,9 +255,10 @@ function kerbOffset(shape: ObstacleShape): number {
  * Where the middle of `obstacle` is across the road, `seconds` after it was
  * set going, in metres right of the centre line. Off the near kerb until its
  * `startAfter`, then crossing, then off the far kerb for good. #1814 draws it
- * here.
+ * here. A {@link StandingObstacle} is where it stands, at every moment.
  */
 export function obstacleAcross(obstacle: Obstacle, seconds: number): number {
+  if (obstacle.stands !== undefined) return obstacle.stands;
   const shape = OBSTACLE_KINDS[obstacle.kind];
   const kerb = kerbOffset(shape);
   const travelled = Math.min(2 * kerb, Math.max(0, (seconds - obstacle.startAfter) * shape.speed));
@@ -240,6 +272,13 @@ export function obstacleAcross(obstacle: Obstacle, seconds: number): number {
  * for the owner's approval in #1813's pull request.
  */
 export const FEWER_OBSTACLES_KEEP_ONE_IN = 2;
+
+/**
+ * On a round the rider can steer, the share of its obstacles that stand in a
+ * lane rather than cross: **one in two**, seeded. This project's own number,
+ * for the owner's approval in #1820's pull request.
+ */
+export const STANDING_OBSTACLE_SHARE = 0.5;
 
 /** Folded into the round's seed for the obstacles' own stream: any constant the target pick does not use. */
 const OBSTACLE_STREAM = 0x0b57_ac1e;
@@ -259,11 +298,15 @@ export interface ObstaclePlacementInput {
  * {@link OBSTACLE_SIGHT_METRES} past `from`, so none is in sight at the start.
  * `setting` is the assist's (#1813): `'fewer'` keeps one in
  * {@link FEWER_OBSTACLES_KEEP_ONE_IN} of these, and `'none'` places none.
+ * `steering` is whether the rider can change lane (#1820): with it,
+ * {@link STANDING_OBSTACLE_SHARE} of them stand in a seeded lane, each at the
+ * distance and of the kind it would have been; without it, none does.
  */
 export function placeObstacles(
   input: ObstaclePlacementInput,
   seed: number,
   setting: ObstacleSetting = 'normal',
+  steering = false,
 ): readonly Obstacle[] {
   const { from, to } = input;
   if (!Number.isInteger(seed) || seed < 0 || seed > 0xffff_ffff) {
@@ -279,6 +322,16 @@ export function placeObstacles(
   for (let slot = 0; slot < count; slot += 1) {
     const hash = mixInto(base, slot);
     const kind = KIND_ORDER[Math.floor(uniformFrom(hash, 1) * KIND_ORDER.length)] as ObstacleKind;
+    const along =
+      from +
+      slot * OBSTACLE_SPACING_METRES +
+      OBSTACLE_SIGHT_METRES +
+      uniformFrom(hash, 0) * (OBSTACLE_SPACING_METRES - OBSTACLE_SIGHT_METRES);
+    if (steering && uniformFrom(hash, 4) < STANDING_OBSTACLE_SHARE) {
+      const lane = Math.floor(uniformFrom(hash, 5) * LANE_OFFSETS_METRES.length);
+      obstacles.push({ kind, along, stands: LANE_OFFSETS_METRES[lane] as number });
+      continue;
+    }
     const shape = OBSTACLE_KINDS[kind];
     const onTime =
       ON_TIME_SLOWEST_METRES_PER_SECOND +
@@ -286,11 +339,7 @@ export function placeObstacles(
         (ON_TIME_FASTEST_METRES_PER_SECOND - ON_TIME_SLOWEST_METRES_PER_SECOND);
     obstacles.push({
       kind,
-      along:
-        from +
-        slot * OBSTACLE_SPACING_METRES +
-        OBSTACLE_SIGHT_METRES +
-        uniformFrom(hash, 0) * (OBSTACLE_SPACING_METRES - OBSTACLE_SIGHT_METRES),
+      along,
       from: uniformFrom(hash, 2) < 0.5 ? 'left' : 'right',
       startAfter: OBSTACLE_SIGHT_METRES / onTime - kerbOffset(shape) / shape.speed,
     });
