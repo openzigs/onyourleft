@@ -69,15 +69,21 @@ import { corridorOrigin } from './terrain';
 import { gameTrainerPortOver, type GameTrainerPort, type GradientTrainer } from './trainer-port';
 import { urbanClassMap } from './urban-class';
 
-/** What `GameView` offered the announcer, kind by kind — `trainer-wiring.test.tsx`'s seam. */
+/**
+ * What `GameView` offered the announcer, kind by kind — `trainer-wiring.test.tsx`'s
+ * seam — and every sentence the real announcer said, in order.
+ */
 const offered = vi.hoisted((): string[] => []);
+const said = vi.hoisted((): string[] => []);
 vi.mock('./hud/announce', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./hud/announce')>();
   return {
     ...actual,
     announce: (...args: Parameters<typeof actual.announce>) => {
       for (const event of args[1].events ?? []) offered.push(event.kind);
-      return actual.announce(...args);
+      const heard = actual.announce(...args);
+      if (heard.sentence !== undefined) said.push(heard.sentence);
+      return heard;
     },
   };
 });
@@ -168,6 +174,7 @@ beforeEach(() => {
   pending = [];
   nowMs = START_MS;
   offered.length = 0;
+  said.length = 0;
   localStorage.clear();
   localStorage.setItem(
     ANNOUNCEMENTS_STORAGE_KEY,
@@ -432,6 +439,12 @@ describe('a Delivery round inside a game ride — #1816', () => {
     ]) {
       expect(offered, kind).toContain(kind);
     }
+    // Each said once, never again (#647's owed rule, `hud/delivery-announce.ts`).
+    const round = said.filter((text) => /^(Delivered|Missed|Crashed|Round over)/.test(text));
+    expect(round.some((text) => text.startsWith('Delivered to the 1st house'))).toBe(true);
+    expect(round.some((text) => text.startsWith('Crashed into'))).toBe(true);
+    expect(round.filter((text) => text.includes('Round over'))).toHaveLength(1);
+    expect(new Set(round).size).toBe(round.length);
     // Every frame drawn carried the round, and so was held to Delivery's ceiling (DL6b).
     expect(drawn.length).toBeGreaterThan(100);
     for (const frame of drawn) {
@@ -463,21 +476,43 @@ describe('a Delivery round inside a game ride — #1816', () => {
     expect(withRound).toStrictEqual(without);
   });
 
-  it('keeps the week’s counts at the ride’s end: a fresh reader returns the next day', async () => {
+  it('keeps the week’s counts when the round ends: a fresh reader returns the next day', async () => {
     await rideTheTrace({ delivery: true });
-    await clickThrough(buttonStarting('End ride'));
-    const kept = readDeliveryProgress(localStorage);
     const tally = roundTally(script.ride.round);
-    expect(kept).toEqual({
+    const next = {
       day: WEEK.day + 1,
       houses: WEEK.houses - tally.missed,
       score: WEEK.score + tally.delivered,
-    });
+    };
+    // Kept the moment the round ended, with the ride still going.
+    expect(readDeliveryProgress(localStorage)).toEqual(next);
+    await clickThrough(buttonStarting('End ride'));
+    expect(readDeliveryProgress(localStorage)).toEqual(next);
     // Counts only (DL11): the stored value is the three numbers.
     const stored = JSON.parse(
       localStorage.getItem(DELIVERY_PROGRESS_STORAGE_KEY) ?? '{}',
     ) as object;
     expect(Object.keys(stored)).toEqual(['day', 'houses', 'score']);
+  });
+
+  it('keeps a round the ride ends first, every house still expecting counted missed', async () => {
+    stubSeed(script.seed);
+    mounted = await mount(
+      <GameView
+        port={port()}
+        renderer={() => Promise.resolve(capturingRenderer([]))}
+        now={() => nowMs}
+        delivery
+      />,
+    );
+    await settle();
+    await clickThrough(buttonStarting('Ride '));
+    for (let index = 0; index < 20; index += 1) await pump();
+    expect(field('Houses')?.value).toBe(String(WEEK.houses));
+    expect(readDeliveryProgress(localStorage)).toEqual(WEEK);
+    await clickThrough(buttonStarting('End ride'));
+    // Every house missed and no assist: none is left, so the week is over (`round.ts` §`endRound`).
+    expect(readDeliveryProgress(localStorage)).toEqual({ day: 1, houses: 8, score: 0 });
   });
 
   it('runs nothing of Delivery without the option: no round, no field, no throw, no frame, nothing kept', async () => {

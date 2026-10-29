@@ -1110,8 +1110,6 @@ export function GameView(props: GameViewProps): JSX.Element {
    * press and held for the ride; `undefined` on every ordinary ride.
    */
   const deliveryRef = useRef<DeliveryRide | undefined>(undefined);
-  /** Whether this ride's round has been kept on the device: once a round, at its end (#1806). */
-  const deliveryKeptRef = useRef(false);
   /** What is still to be said about the round, offered on every call until said (#1812). */
   const deliveryOwedRef = useRef<DeliveryOwed>(NOTHING_OWED);
   /** The throw the rider asked for since the last step that ran, already resolved to a side. */
@@ -1279,12 +1277,12 @@ export function GameView(props: GameViewProps): JSX.Element {
         placeAcrossOf(roomRef.current?.standings()),
       );
       if (race !== undefined) trainerPortRef.current?.roomRaceEnded?.(race);
-      // #1816: a round the ride ends is ended here, a house still expecting
-      // counted missed, and the week's counts kept for the next ride — once:
-      // a round that ended mid-ride was kept then (#1806, DL11: counts only).
+      // #1816: a round the ride ends first is ended here, a house still
+      // expecting counted missed, and the week's counts kept for the next
+      // ride (#1806, DL11: counts only). A round that ended mid-ride was
+      // kept then, in the tick.
       const delivery = deliveryRef.current;
-      if (delivery !== undefined && !deliveryKeptRef.current) {
-        deliveryKeptRef.current = true;
+      if (delivery !== undefined && delivery.outcome === undefined) {
         keepDeliveryWeek(deviceStorage(), endDeliveryRide(delivery));
       }
     }
@@ -1664,7 +1662,6 @@ export function GameView(props: GameViewProps): JSX.Element {
       // room never runs one), and only where the town has mapped houses to
       // pick from. Its seed is drawn inside `startDeliveryRide` and kept by
       // nothing (DL11); the week and the assist are this device's own.
-      deliveryKeptRef.current = false;
       deliveryOwedRef.current = NOTHING_OWED;
       throwAskedRef.current = undefined;
       deliveryRef.current =
@@ -1924,11 +1921,8 @@ export function GameView(props: GameViewProps): JSX.Element {
         if (ended !== undefined && delivery.outcome === undefined) {
           owed = oweRoundOver(owed, ended, stepped.ride.score);
           // Kept the moment the round ends, so a ride that goes on afterwards
-          // and is then lost keeps it too. Once (#1806).
-          if (!deliveryKeptRef.current) {
-            deliveryKeptRef.current = true;
-            keepDeliveryWeek(deviceStorage(), ended);
-          }
+          // and is then lost keeps it too (#1806).
+          keepDeliveryWeek(deviceStorage(), ended);
         }
         deliveryOwedRef.current = owed;
       }
