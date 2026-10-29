@@ -1895,37 +1895,6 @@ export function GameView(props: GameViewProps): JSX.Element {
       } else {
         stepsRun = simulation.advanceTo(at, sensors.rider).steps;
       }
-      // #1816: the Delivery round, stepped on exactly the simulation steps
-      // that ran on this frame (`delivery/ride-round.ts` §"The steps that
-      // ran") — none while the simulation owed none, and none while paused,
-      // when this loop does not run. It READS the ride and writes nothing the
-      // trainer is sent (DL5): the gradient below samples the simulation alone.
-      const delivery = deliveryRef.current;
-      if (delivery !== undefined && stepsRun > 0) {
-        const line = racingLine(chosen.profile);
-        const stepped = stepDeliveryRide(delivery, {
-          ticks: stepsRun,
-          along: simulation.state.ride.distance,
-          speed: simulation.state.ride.speed,
-          // The rider's drawn line (`scene.ts` §`lateralOf`) as a rider alone
-          // on the road draws it; a pacer or ghost level with them eases them
-          // off it by at most a lane, which the obstacles do not see.
-          lateral: (along) => lineOffsetAt(line, along),
-          throwTo: throwAskedRef.current,
-        });
-        throwAskedRef.current = undefined;
-        deliveryRef.current = stepped.ride;
-        let owed = oweRoundChange(deliveryOwedRef.current, delivery.round, stepped.ride.round);
-        for (let crash = 0; crash < stepped.crashes; crash += 1) owed = oweCrash(owed);
-        const ended = stepped.ride.outcome;
-        if (ended !== undefined && delivery.outcome === undefined) {
-          owed = oweRoundOver(owed, ended, stepped.ride.score);
-          // Kept the moment the round ends, so a ride that goes on afterwards
-          // and is then lost keeps it too (#1806).
-          keepDeliveryWeek(deviceStorage(), ended);
-        }
-        deliveryOwedRef.current = owed;
-      }
       if (race?.kind === 'running') {
         const dt = Math.max(0, (at - lastFrameAt) / 1000);
         const power = sensors.rider.live ? (sensors.rider.power as number) : 0;
@@ -2275,6 +2244,40 @@ export function GameView(props: GameViewProps): JSX.Element {
         simulation.state.ride.distance,
         simulation.correcting,
       );
+
+      // #1816: the Delivery round, stepped on exactly the simulation steps
+      // that ran on this frame (`delivery/ride-round.ts` §"The steps that
+      // ran") — none while the simulation owed none, and none while paused,
+      // when this loop does not run. It READS the ride and writes nothing the
+      // trainer is sent (DL5): the gradient above samples the simulation alone, and
+      // is sampled BEFORE this, so a fault in the round cannot stop the loop
+      // short of this frame's grade write.
+      const delivery = deliveryRef.current;
+      if (delivery !== undefined && stepsRun > 0) {
+        const line = racingLine(chosen.profile);
+        const stepped = stepDeliveryRide(delivery, {
+          ticks: stepsRun,
+          along: simulation.state.ride.distance,
+          speed: simulation.state.ride.speed,
+          // The rider's drawn line (`scene.ts` §`lateralOf`) as a rider alone
+          // on the road draws it; a pacer or ghost level with them eases them
+          // off it by at most a lane, which the obstacles do not see.
+          lateral: (along) => lineOffsetAt(line, along),
+          throwTo: throwAskedRef.current,
+        });
+        throwAskedRef.current = undefined;
+        deliveryRef.current = stepped.ride;
+        let owed = oweRoundChange(deliveryOwedRef.current, delivery.round, stepped.ride.round);
+        for (let crash = 0; crash < stepped.crashes; crash += 1) owed = oweCrash(owed);
+        const ended = stepped.ride.outcome;
+        if (ended !== undefined && delivery.outcome === undefined) {
+          owed = oweRoundOver(owed, ended, stepped.ride.score);
+          // Kept the moment the round ends, so a ride that goes on afterwards
+          // and is then lost keeps it too (#1806).
+          keepDeliveryWeek(deviceStorage(), ended);
+        }
+        deliveryOwedRef.current = owed;
+      }
 
       // #323's interpolation, on the frames that are drawn: `drawnAt` blends the
       // last two simulation steps at THIS instant, so a frame drawn at 20 fps

@@ -88,6 +88,19 @@ vi.mock('./hud/announce', async (importOriginal) => {
   };
 });
 
+/** Set by one case: the round's step then faults, as a RangeError guard in it would. */
+const roundFaults = vi.hoisted(() => ({ on: false }));
+vi.mock('./delivery/ride-round', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./delivery/ride-round')>();
+  return {
+    ...actual,
+    stepDeliveryRide: (...args: Parameters<typeof actual.stepDeliveryRide>) => {
+      if (roundFaults.on) throw new RangeError('the round faulted');
+      return actual.stepDeliveryRide(...args);
+    },
+  };
+});
+
 const town = deliveryTown('delivery-wiring');
 const ROUTE: RidableRoute = {
   id: 'delivery-wiring',
@@ -555,6 +568,44 @@ describe('a Delivery round inside a game ride — #1816', () => {
       const grades = plain.writes.map((each) => each.parameters.grade);
       expect(Math.max(...grades)).toBeGreaterThan(1);
       expect(round.writes).toStrictEqual(plain.writes);
+    },
+  );
+
+  it(
+    'sends the grade the plain ride sends on a frame, even when the round’s step faults on it (DL5)',
+    SHARED_RIDE,
+    async () => {
+      // A frame the plain ride writes on, after the first (which writes on the press).
+      const plain = (await without()).writes;
+      const second = plain[1];
+      if (second === undefined) throw new Error('the plain ride wrote once or never');
+      const frame = (second.atMs - START_MS) / FRAME_MS;
+      expect(Number.isInteger(frame)).toBe(true);
+      pending = [];
+      nowMs = START_MS;
+      stubSeed(script.seed);
+      const writes: Write[] = [];
+      mounted = await mount(
+        <GameView
+          port={port()}
+          trainer={trainerPort(writes)}
+          renderer={() => Promise.resolve(capturingRenderer([]))}
+          now={() => nowMs}
+          delivery
+        />,
+      );
+      await settle();
+      await clickThrough(buttonStarting('Ride '));
+      for (let index = 1; index < frame; index += 1) await pump();
+      roundFaults.on = true;
+      try {
+        await expect(pump()).rejects.toThrow('the round faulted');
+      } finally {
+        roundFaults.on = false;
+      }
+      await settle();
+      // The fault stopped the loop, but not before this frame's write.
+      expect(writes).toStrictEqual(plain.slice(0, 2));
     },
   );
 

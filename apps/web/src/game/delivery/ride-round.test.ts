@@ -318,6 +318,40 @@ describe('a round ridden, step by step — #1816', () => {
     expect(OBSTACLE_SIGHT_METRES).toBeGreaterThan(30);
   });
 
+  it('sweeps the road a step covered, from the distance it moved and not the speed it ends on', () => {
+    const bin = OBSTACLE_KINDS.bin;
+    const crossing = (along: number): DeliveryRide => ({
+      ...withoutObstacles(started()),
+      obstacles: [
+        {
+          kind: 'bin',
+          along,
+          from: 'left',
+          // Across the centre line on the step this test takes.
+          startAfter: -(CARRIAGEWAY_HALF_WIDTH_METRES + bin.halfWidth) / bin.speed,
+        },
+      ],
+      obstacleState: { tick: 0, startedAt: [0], crashed: [false] },
+    });
+    // A rider who covers 5 m in one step, ending it at a speed (1 m/s) that
+    // alone would sweep nothing behind them, still crashes into the bin 3 m
+    // back: the 5 m they covered say so.
+    const ridden = stepDeliveryRide(crossing(3), {
+      ticks: 1,
+      along: 5,
+      speed: 1,
+      lateral: CENTRE,
+    });
+    expect(ridden.crashes).toBe(1);
+    // And a rider who covered almost nothing, whatever speed they end on, has
+    // not run into a bin 3 m behind them.
+    const near = stepDeliveryRide(
+      { ...crossing(2), along: 5 },
+      { ticks: 1, along: 5.01, speed: 100, lateral: CENTRE },
+    );
+    expect(near.crashes).toBe(0);
+  });
+
   it('steps nothing on a frame no simulation step ran on', () => {
     const ride = started();
     const stepped = stepDeliveryRide(ride, {
