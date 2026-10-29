@@ -300,18 +300,15 @@ export interface SceneInput {
    * only, in {@link lateralOf}; nobody else is steered. A drawing, never
    * physics: `simulation.ts` never reads it.
    *
-   * ⚠️ **A level rider does not make room correctly while steered.**
-   * {@link lateralOf}'s level-lane blend (#499) assumes both riders start from
-   * the line, so when the steered lane differs from the line the rider can be
-   * drawn inside a bot or ghost level with them, and drawn up to about 0.5 m
-   * from the offset the obstacles meet. #1853 carries the criterion that fixes
-   * both when it wires steering into a ride.
+   * The rider is drawn there exactly, the offset the obstacles meet, and a
+   * bot or ghost level with them makes the room instead (#1853,
+   * {@link lateralOf}).
    *
    * ⚠️ **Optional the UNSAFE way round**, which `check-wiring.mjs` §Limits
    * names: a Delivery ride that forgot it draws the rider on the line while
-   * the obstacles meet them in a lane. #1816's wiring has to read it back off
-   * the frame the renderer was handed. Absent on every other ride, a room ride
-   * included (DL9), and every ride until #1816 runs a round.
+   * the obstacles meet them in a lane. `delivery-wiring.test.tsx` reads it
+   * back off the input every frame of a round was built from (#1853). Absent
+   * on every other ride, a room ride included (DL9).
    */
   readonly steeredLateral?: number | undefined;
 }
@@ -846,34 +843,55 @@ function ridersOnTheRoad(
 }
 
 /**
- * How far across the road one rider is drawn: the line — or, for a rider a
- * Delivery round steered, its lane (#1820) — eased toward {@link LEVEL_LANES}
- * by how level they are with the nearest other rider.
+ * How level two riders are: 1 within a bicycle's length of each other, 0 at
+ * {@link LEVEL_FADE_METRES} beyond it, and eased between.
+ */
+function levelness(one: Rider, other: Rider): number {
+  const gap = Math.abs(other.distance - one.distance);
+  return Math.min(
+    1,
+    Math.max(0, (BICYCLE_LENGTH_METRES + LEVEL_FADE_METRES - gap) / LEVEL_FADE_METRES),
+  );
+}
+
+/**
+ * How far across the road one rider is drawn: the line, eased toward
+ * {@link LEVEL_LANES} by how level they are with the nearest other rider.
  *
- * `line·(1 − g·w) + lane·side·w`, where `w` runs from 1 within a bicycle's
- * length of another rider to 0 at {@link LEVEL_FADE_METRES} beyond it, and `g`
- * is {@link LINE_GIVEN_UP}. At `w = 1` that is at most
- * `2.9·0.69 + 1.2 = 3.2 m` from the centre, which is {@link DRAWN_LIMIT_METRES}.
+ * `line·(1 − g·w) + lane·side·w`, where `w` is {@link levelness} with the
+ * nearest other rider and `g` is {@link LINE_GIVEN_UP}. At `w = 1` that is at
+ * most `2.9·0.69 + 1.2 = 3.2 m` from the centre, which is
+ * {@link DRAWN_LIMIT_METRES}.
+ *
+ * A rider a Delivery round steered (#1820) is drawn in its steered place
+ * exactly and gives up nothing, because that is the place the obstacles meet
+ * it (`delivery/ride-round.ts`), so a crash is drawn as one (#1853). The others
+ * make the room instead: each is eased, by its levelness with the steered
+ * rider, toward a place at least {@link SIDE_BY_SIDE_METRES} from them on its
+ * own side of them — the bot to the negative side, the ghost to the positive.
+ * Within a bicycle's length, where the levelness is 1, it is there, so nobody
+ * is drawn inside the rider; beyond, the bicycles are a length apart along the
+ * road, #499's own rule. Nobody jumps across the rider as they steer, because
+ * a side never changes and every term is continuous. A lane is at most 1.75 m
+ * from the centre, so that place is at most `1.75 + 1.2 = 2.95 m` out, inside
+ * {@link DRAWN_LIMIT_METRES}.
  */
 function lateralOf(rider: Rider, riders: readonly Rider[], line: RacingLine): number {
+  if (rider.steered !== undefined) return rider.steered;
   let level = 0;
   for (const other of riders) {
     if (other === rider) continue;
-    const gap = Math.abs(other.distance - rider.distance);
-    level = Math.max(
-      level,
-      Math.min(
-        1,
-        Math.max(0, (BICYCLE_LENGTH_METRES + LEVEL_FADE_METRES - gap) / LEVEL_FADE_METRES),
-      ),
-    );
+    level = Math.max(level, levelness(rider, other));
   }
-  // #1820: a steered rider's lane is its line.
-  const onLine = rider.steered ?? lineOffsetAt(line, rider.distance);
-  return (
-    onLine * (1 - LINE_GIVEN_UP * level) +
-    (rider.lane ?? LEVEL_LANES[rider.kind]) * SIDE_BY_SIDE_METRES * level
-  );
+  const side = rider.lane ?? LEVEL_LANES[rider.kind];
+  const drawn =
+    lineOffsetAt(line, rider.distance) * (1 - LINE_GIVEN_UP * level) +
+    side * SIDE_BY_SIDE_METRES * level;
+  const steered = riders.find((other) => other.steered !== undefined);
+  if (steered?.steered === undefined) return drawn;
+  const clear = steered.steered + side * SIDE_BY_SIDE_METRES;
+  const aside = side < 0 ? Math.min(drawn, clear) : Math.max(drawn, clear);
+  return drawn + (aside - drawn) * levelness(rider, steered);
 }
 
 /**

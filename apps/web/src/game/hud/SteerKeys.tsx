@@ -12,7 +12,8 @@
  * Keys are never stopped by the #1432 touch lock, as the throw keys are not
  * (`ThrowControl.tsx`).
  *
- * Mounted only on a ride that hands the HUD a port, which until #1816 is none.
+ * Mounted only on a ride that hands the HUD a port: one running a Delivery
+ * round (#1853).
  */
 
 import { useEffect } from 'react';

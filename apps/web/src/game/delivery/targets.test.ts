@@ -677,10 +677,15 @@ describe('#1856 — only houses a parcel can reach', () => {
     };
   }
 
-  /** The round `ride-round.ts` starts at the press, from the start of `place`, with the seed `seed`. */
+  /**
+   * The round `ride-round.ts` starts at the press, from the start of `place`,
+   * with the seed `seed`, the racing line `lineOffset` metres right of the
+   * centre line there: the steering starts from it (#1853).
+   */
   function roundOn(
     seed: number,
     place: Pick<TargetPickInput, 'buildings' | 'profile' | 'origin'> = street,
+    lineOffset = 0,
   ): DeliveryRide | undefined {
     vi.spyOn(globalThis.crypto, 'getRandomValues').mockImplementation(
       <T extends ArrayBufferView>(array: T): T => {
@@ -688,26 +693,32 @@ describe('#1856 — only houses a parcel can reach', () => {
         return array;
       },
     );
-    return startDeliveryRide({ ...place, riderDistance: 0, storage: storageOf() });
+    return startDeliveryRide({ ...place, riderDistance: 0, lineOffset, storage: storageOf() });
   }
 
   const SPEED = 8;
 
   /**
-   * Ride `ride` through `ride-round.ts` as `GameView` steps it, the rider drawn
-   * `lateral` metres right of the centre line: to each house's throw point in
-   * route order, one throw toward it there, and on through the whole flight.
+   * Ride `ride` through `ride-round.ts` as `GameView` steps it, the rider held
+   * where the round's steering was at the press: to each house's throw point
+   * in route order, one throw toward it there, and on through the whole
+   * flight. The steering is put back before every step, as `GameView`'s
+   * steer port replaces `DeliveryRide.steer` (#1853), so a rider started at a
+   * road edge is drawn there for the whole ride rather than drifting into the
+   * nearest lane.
    */
-  function throwAtEveryHouse(ride: DeliveryRide, lateral: number): DeliveryRide {
+  function throwAtEveryHouse(ride: DeliveryRide): DeliveryRide {
     let now = ride;
     const step = (along: number, throwTo?: ThrowTarget['side']): void => {
-      now = stepDeliveryRide(now, {
-        ticks: 1,
-        along,
-        speed: SPEED,
-        lateral: () => lateral,
-        ...(throwTo === undefined ? {} : { throwTo }),
-      }).ride;
+      now = stepDeliveryRide(
+        { ...now, steer: ride.steer },
+        {
+          ticks: 1,
+          along,
+          speed: SPEED,
+          ...(throwTo === undefined ? {} : { throwTo }),
+        },
+      ).ride;
     };
     for (const target of ride.throwTargets) {
       const across = CARRIAGEWAY_HALF_WIDTH_METRES + target.clear;
@@ -762,7 +773,7 @@ describe('#1856 — only houses a parcel can reach', () => {
       const ride = roundOn(seed);
       if (ride === undefined) throw new Error('the street gave no round');
       expect(ride.targets.length).toBeGreaterThanOrEqual(FIRST_DAY_HOUSES);
-      const ridden = throwAtEveryHouse(ride, 0);
+      const ridden = throwAtEveryHouse(ride);
       for (const target of ride.targets) {
         expect(
           ridden.round.houses[target.position],
@@ -780,10 +791,16 @@ describe('#1856 — only houses a parcel can reach', () => {
   it('delivers the same wherever across the road the rider is drawn: the throw leaves from the centre line', () => {
     const ride = roundOn(3);
     if (ride === undefined) throw new Error('the street gave no round');
-    const centre = throwAtEveryHouse(ride, 0);
+    expect(ride.steer.offset).toBe(0);
+    const centre = throwAtEveryHouse(ride);
     expect(roundTally(centre.round).delivered).toBe(ride.targets.length);
     for (const lateral of [-CARRIAGEWAY_HALF_WIDTH_METRES, CARRIAGEWAY_HALF_WIDTH_METRES]) {
-      expect(throwAtEveryHouse(ride, lateral).round).toEqual(centre.round);
+      const atEdge = roundOn(3, street, lateral);
+      if (atEdge === undefined) throw new Error('the street gave no round');
+      // The same round, its rider drawn at the road's edge.
+      expect(atEdge.targets).toEqual(ride.targets);
+      expect(atEdge.steer.offset).toBe(lateral);
+      expect(throwAtEveryHouse(atEdge).round).toEqual(centre.round);
     }
   });
 

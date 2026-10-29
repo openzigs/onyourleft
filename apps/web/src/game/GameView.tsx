@@ -192,6 +192,8 @@ import {
   stepDeliveryRide,
   type DeliveryRide,
 } from './delivery/ride-round';
+import { steeredLateralFor, steerToward } from './delivery/steer';
+import type { SteerInputPort } from './delivery/steer-port';
 import { throwSideFor, type ThrowSide } from './delivery/throw';
 import type { ThrowInputPort } from './delivery/throw-input-port';
 import {
@@ -1134,6 +1136,19 @@ export function GameView(props: GameViewProps): JSX.Element {
     },
   });
   /**
+   * The HUD's lane keys hand the ride its lane changes here — #1820, #1853.
+   * The lane is turned now (`steer.ts` §`steerToward`); where the rider is
+   * drawn moves only as the simulation steps it (`ride-round.ts`), so a press
+   * while paused, when the loop does not run, is not taken, as a throw is not.
+   */
+  const steerPortRef = useRef<SteerInputPort>({
+    steer: (intent) => {
+      const ride = deliveryRef.current;
+      if (ride === undefined || !loopRunningRef.current) return;
+      deliveryRef.current = { ...ride, steer: steerToward(ride.steer, intent) };
+    },
+  });
+  /**
    * The room this ride is in, while it is in one — #782. A ref for
    * {@link gradientRef}'s reason: the loop reads it every frame, and its
    * `status()` is read during the render the tick schedules.
@@ -1674,6 +1689,9 @@ export function GameView(props: GameViewProps): JSX.Element {
               profile,
               origin: corridorOrigin(profile),
               riderDistance: simulation.state.ride.distance,
+              // #1853: the steering starts from the racing line, never from
+              // where a level bot or ghost has eased the drawn rider.
+              lineOffset: lineOffsetAt(racingLine(profile), simulation.state.ride.distance),
               storage: deviceStorage(),
             })
           : undefined;
@@ -2255,15 +2273,12 @@ export function GameView(props: GameViewProps): JSX.Element {
       // short of this frame's grade write.
       const delivery = deliveryRef.current;
       if (delivery !== undefined && stepsRun > 0) {
-        const line = racingLine(chosen.profile);
+        // The rider's steering is stepped in it, and its offset is where the
+        // obstacles meet them and where the frame below draws them (#1853).
         const stepped = stepDeliveryRide(delivery, {
           ticks: stepsRun,
           along: simulation.state.ride.distance,
           speed: simulation.state.ride.speed,
-          // The rider's drawn line (`scene.ts` §`lateralOf`) as a rider alone
-          // on the road draws it; a pacer or ghost level with them eases them
-          // off it by at most a lane, which the obstacles do not see.
-          lateral: (along) => lineOffsetAt(line, along),
           throwTo: throwAskedRef.current,
         });
         throwAskedRef.current = undefined;
@@ -2335,6 +2350,13 @@ export function GameView(props: GameViewProps): JSX.Element {
             ? {}
             : { mappedBuildings: mappedBuildingsRef.current }),
           ...(mappedTownRef.current === undefined ? {} : { mappedTown: mappedTownRef.current }),
+          // #1853: where the round has steered the rider, the place the
+          // obstacles meet them; none on a ride with no round, or in a room
+          // (DL9). Optional the unsafe way round (`scene.ts`), so
+          // `delivery-wiring.test.tsx` reads it back off every frame's input.
+          steeredLateral: steeredLateralFor(deliveryRef.current?.steer, {
+            inRoom: roomRef.current !== undefined,
+          }),
         });
         // #1814, #1815: the round's parcels, markers and obstacles, on the
         // frame's own corridor. A frame carrying them is held to Delivery's
@@ -2688,7 +2710,8 @@ export function GameView(props: GameViewProps): JSX.Element {
             })}
         standings={roomFrameRef.current?.standings}
         // #1816: the round on the HUD — its houses and its score, crashes in
-        // it — and the throw control, only on a ride running a round.
+        // it — and the throw control and the lane keys (#1853), only on a
+        // ride running a round.
         {...(deliveryRef.current === undefined
           ? {}
           : {
@@ -2698,6 +2721,7 @@ export function GameView(props: GameViewProps): JSX.Element {
                 score: deliveryRef.current.score,
               },
               throwing: throwPortRef.current,
+              steering: steerPortRef.current,
             })}
         onFollowNext={
           roomRef.current === undefined || (roomFrameRef.current?.remoteRiders.length ?? 0) === 0
