@@ -283,7 +283,7 @@ export interface HudPanelProps extends Omit<HudInput, 'units'> {
    * A Delivery round's steering — #1820: where a lane key hands the lane
    * change the rider asked for. With it the HUD listens for
    * `steer.ts` §`STEER_KEYS` (`SteerKeys.tsx`), and draws nothing; `undefined`
-   * on every other ride, which until #1816 runs a round is every ride.
+   * on every ride that runs no round (#1853).
    */
   readonly steering?: SteerInputPort | undefined;
 }

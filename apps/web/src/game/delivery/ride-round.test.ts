@@ -20,8 +20,10 @@ import {
   CRASH_SCORE_DELTA,
   OBSTACLE_KINDS,
   OBSTACLE_SIGHT_METRES,
+  startObstacles,
   type Obstacle,
 } from './obstacles';
+import { LANE_CHANGE_SECONDS, LANE_OFFSETS_METRES, steerToward } from './steer';
 import {
   endDeliveryRide,
   keepDeliveryWeek,
@@ -83,14 +85,13 @@ function started(storage = storageOf(), riderDistance = 0): DeliveryRide {
     profile: town.profile,
     origin: town.origin,
     riderDistance,
+    lineOffset: 0,
     storage,
   });
   if (ride === undefined) throw new Error('the town gave no round');
   return ride;
 }
 
-/** The rider on a straight road on the centre line, as `GameView` hands it over. */
-const CENTRE = (): number => 0;
 const SPEED = 8;
 
 /** Ride `ride` on at {@link SPEED}, one step a call, to `along`, throwing `throwTo` on the first. */
@@ -108,7 +109,6 @@ function rideTo(
       ticks: 1,
       along: next,
       speed: SPEED,
-      lateral: CENTRE,
       ...(first && throwTo !== undefined ? { throwTo } : {}),
     });
     first = false;
@@ -163,7 +163,6 @@ describe('a round at the press — #1816', () => {
         ticks: 1,
         along: now.along + SPEED * DELIVERY_TICK_SECONDS,
         speed: SPEED,
-        lateral: CENTRE,
         throwTo: target.side,
       }).ride;
       // The last tick the parcel is in the air, and where the frame draws it then.
@@ -215,6 +214,7 @@ describe('a round at the press — #1816', () => {
       profile: empty.profile,
       origin: empty.origin,
       riderDistance: 0,
+      lineOffset: 0,
       storage: storageOf(),
     });
     expect(none).toBeUndefined();
@@ -261,7 +261,6 @@ describe('a round ridden, step by step — #1816', () => {
       ticks: 1,
       along: atEdge.ride.along + SPEED * DELIVERY_TICK_SECONDS,
       speed: SPEED,
-      lateral: CENTRE,
       throwTo: first.side,
     });
     expect(thrown.thrown).toBe(true);
@@ -340,14 +339,13 @@ describe('a round ridden, step by step — #1816', () => {
       ticks: 1,
       along: 5,
       speed: 1,
-      lateral: CENTRE,
     });
     expect(ridden.crashes).toBe(1);
     // And a rider who covered almost nothing, whatever speed they end on, has
     // not run into a bin 3 m behind them.
     const near = stepDeliveryRide(
       { ...crossing(2), along: 5 },
-      { ticks: 1, along: 5.01, speed: 100, lateral: CENTRE },
+      { ticks: 1, along: 5.01, speed: 100 },
     );
     expect(near.crashes).toBe(0);
   });
@@ -358,7 +356,6 @@ describe('a round ridden, step by step — #1816', () => {
       ticks: 0,
       along: 500,
       speed: SPEED,
-      lateral: CENTRE,
       throwTo: 'left',
     });
     expect(stepped.ride).toBe(ride);
@@ -373,14 +370,12 @@ describe('a round ridden, step by step — #1816', () => {
         ticks: 1,
         along: (300 * step) / 4,
         speed: SPEED,
-        lateral: CENTRE,
       }).ride;
     }
     const together = stepDeliveryRide(ride, {
       ticks: 4,
       along: 300,
       speed: SPEED,
-      lateral: CENTRE,
     });
     expect(together.ride).toEqual(apart);
   });
@@ -388,10 +383,69 @@ describe('a round ridden, step by step — #1816', () => {
   it('refuses a step of a part or a negative number of ticks, naming no position', () => {
     const ride = started();
     for (const ticks of [-1, 0.5]) {
-      expect(() => stepDeliveryRide(ride, { ticks, along: 1, speed: 1, lateral: CENTRE })).toThrow(
+      expect(() => stepDeliveryRide(ride, { ticks, along: 1, speed: 1 })).toThrow(
         'a Delivery ride step runs a whole number of ticks, 0 or more',
       );
     }
+  });
+});
+
+describe('a round the rider steers — #1853', () => {
+  /** The ride with one bin standing in `stands`, 40 m ahead, and nothing else in the road. */
+  function binIn(stands: number): DeliveryRide {
+    const ride = started();
+    return {
+      ...ride,
+      obstacles: [{ kind: 'bin', along: 40, stands }],
+      obstacleState: startObstacles([{ kind: 'bin', along: 40, stands }]),
+    };
+  }
+
+  it('places obstacles that stand in a lane, as a ride the rider can steer has', () => {
+    const { obstacles } = started();
+    expect(obstacles.length).toBeGreaterThan(0);
+    const standing = obstacles.filter((obstacle) => obstacle.stands !== undefined);
+    expect(standing.length).toBeGreaterThan(0);
+    for (const obstacle of standing) expect(LANE_OFFSETS_METRES).toContain(obstacle.stands);
+  });
+
+  it('starts in the lane nearest the racing line at the press, and from where the line is', () => {
+    const ride = startDeliveryRide({
+      buildings: town.buildings,
+      profile: town.profile,
+      origin: town.origin,
+      riderDistance: 0,
+      lineOffset: 1.5,
+      storage: storageOf(),
+    });
+    expect(ride?.steer).toEqual({ lane: 2, offset: 1.5 });
+  });
+
+  it('meets the obstacles at the steered offset: in the bin’s lane a crash, a lane away none', () => {
+    // The rider starts on the centre line, lane 1. A bin standing there is hit…
+    expect(rideTo(binIn(0), 60).crashes).toBe(1);
+    // …a bin a lane to the left is not, until the rider steers into it.
+    const left = LANE_OFFSETS_METRES[0] as number;
+    expect(rideTo(binIn(left), 60).crashes).toBe(0);
+    const steered = binIn(left);
+    expect(rideTo({ ...steered, steer: steerToward(steered.steer, 'lane-left') }, 60).crashes).toBe(
+      1,
+    );
+  });
+
+  it('steps the steering on each step that ran, so four in one call move it four steps’ worth', () => {
+    const ride = started();
+    const pressed = { ...ride, steer: steerToward(ride.steer, 'lane-left') };
+    const one = stepDeliveryRide(pressed, { ticks: 1, along: 0.4, speed: SPEED }).ride;
+    const four = stepDeliveryRide(pressed, { ticks: 4, along: 1.6, speed: SPEED }).ride;
+    const lane = (LANE_OFFSETS_METRES[1] as number) - (LANE_OFFSETS_METRES[0] as number);
+    const perStep = (lane * DELIVERY_TICK_SECONDS) / LANE_CHANGE_SECONDS;
+    expect(one.steer.offset).toBeCloseTo(-perStep, 9);
+    expect(four.steer.offset).toBeCloseTo(-4 * perStep, 9);
+    // A frame no step ran on moves it not at all.
+    expect(stepDeliveryRide(pressed, { ticks: 0, along: 5, speed: SPEED }).ride.steer).toBe(
+      pressed.steer,
+    );
   });
 });
 

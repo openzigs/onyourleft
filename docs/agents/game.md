@@ -718,7 +718,10 @@ From the layout tree of CLAUDE.md §2, under `apps/web/`:
                         `simulation.ts`. A room ride ignores it (DL9). With
                         steering, `obstacles.ts` may place an obstacle that
                         STANDS in one lane, one per stretch, so a lane is
-                        always clear. `@unwired` until #1816 runs a round
+                        always clear. Wired into the ride by #1853: the
+                        round holds the steer state and steps it, and the
+                        rider is drawn exactly where the obstacles meet them,
+                        a level bot or ghost making the room
     src/game/rider.ts   what the rider and their bicycle weigh together, what
                         air they ride through, and — since #365 — **how much of
                         it they are pushing**. ⚠️ `RideConditions.coefficients`
