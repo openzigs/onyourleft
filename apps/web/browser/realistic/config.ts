@@ -28,6 +28,7 @@
  * | `decorations` | #1624's probe: one small box on every decoration anchor of every village in reach, for either holiday, in place of the product's table (`decorations.ts` §`HOLIDAY_DECORATIONS`: since #1625 Halloween's pumpkins, and nothing yet for winter lights). Pair it with a `date` in a holiday and `route=village`; `levers=-decorations` is its control | `probe`; default the product's table |
  * | `place` | where every road is ridden (#1623), for the route's own season: `south`, the same road mirrored into the southern hemisphere; `nordic`, far enough north that a winter's snow lies to sea level (`route.ts` §`PLACES`) | `south`, `nordic`; default 51.5° N, every road where it was |
  * | `route` | which of `route.ts`' roads is ridden (#1559): absent, the valley road every Part Z and Part AH row was taken on; `village`, `route.ts` §`villageRoute`, a level road through two villages, for validation 0002 AE2 (`at=820` holds the first one's church and shops in frame). Refused beside `town`, which is a road of its own | `village`; default none |
+ * | `delivery` | #1815: a Delivery round's worst case on every frame, for the two village ceilings (`realistic-budget.ts` §`DELIVERY_VILLAGE_DRAW_CALLS`): this many parcels, house markers and obstacles each, placed on the road ahead of the rider (`realistic/delivery.ts`) and drawn by the product's own belt. Pair it with `route=village` and the frozen frame's query; absent, the frame carries no round, as an ordinary ride's does. More than the belt's 32 is REFUSED, because it would draw 32 under the name of more | `1` to `32`; default none |
  *
  * ⚠️ **Unknown parameters and values are REFUSED**, as #457's page refused
  * them: a typo in a soak URL would otherwise measure the default under another
@@ -321,6 +322,12 @@ export interface RealisticPageConfig {
    * 51.5° N, every road where it was. @see route.ts §PLACES
    */
   readonly place: Place | undefined;
+  /**
+   * #1815: how many of each Delivery piece every frame carries, ahead of the
+   * rider. `undefined` is a frame with no round, as an ordinary ride's.
+   * @see realistic/delivery.ts
+   */
+  readonly delivery: number | undefined;
 }
 
 /** The ride the owner is asked to look at: the realistic world, the ladder running. */
@@ -340,6 +347,7 @@ export const DEFAULT_CONFIG: RealisticPageConfig = {
   date: undefined,
   decorations: undefined,
   place: undefined,
+  delivery: undefined,
 };
 
 const KNOWN = new Set([
@@ -358,6 +366,7 @@ const KNOWN = new Set([
   'date',
   'decorations',
   'place',
+  'delivery',
 ]);
 
 /**
@@ -566,7 +575,30 @@ export function parseConfig(search: string): RealisticPageConfig {
       ? oneOf('decorations', ['probe'] as const, 'probe')
       : undefined,
     place: params.has('place') ? oneOf('place', PLACES, 'south') : undefined,
+    delivery: params.has('delivery') ? deliveryFrom(params.get('delivery') ?? '') : undefined,
   };
+}
+
+/**
+ * The most of each Delivery piece the product's belt draws:
+ * `three-renderer.ts` §`DELIVERY_PIECE_CAPACITY`, restated so that this
+ * module loads no renderer; `delivery.test.ts` holds the two equal.
+ */
+export const DELIVERY_PIECES_MOST = 32;
+
+/**
+ * `?delivery=20` — #1815. A whole number from 1 to {@link DELIVERY_PIECES_MOST},
+ * and anything else REFUSED: past the belt's capacity it draws the first 32
+ * and not the rest, so a URL asking for more would measure 32 under its name.
+ */
+function deliveryFrom(value: string): number {
+  const count = Number(value);
+  if (!Number.isInteger(count) || count < 1 || count > DELIVERY_PIECES_MOST) {
+    throw new Error(
+      `realistic: delivery is a whole number from 1 to ${String(DELIVERY_PIECES_MOST)}, not "${value}"`,
+    );
+  }
+  return count;
 }
 
 /**
@@ -668,6 +700,7 @@ export function configQuery(config: RealisticPageConfig): string {
   }
   if (config.decorations !== undefined) params.set('decorations', config.decorations);
   if (config.place !== undefined) params.set('place', config.place);
+  if (config.delivery !== undefined) params.set('delivery', String(config.delivery));
   const query = params.toString();
   return query === '' ? '' : `?${query}`;
 }

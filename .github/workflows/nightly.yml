@@ -73,6 +73,7 @@ on:
       - apps/web/browser/game.browser.spec.ts
       - apps/web/browser/not-run-reporter.ts
       - apps/web/browser/realistic.browser.spec.ts
+      - apps/web/browser/realistic-delivery.browser.spec.ts
       - apps/web/browser/realistic-ride.ts
       - apps/web/browser/realistic-mapped.browser.spec.ts
       - apps/web/browser/realistic-town.browser.spec.ts
@@ -346,8 +347,10 @@ jobs:
 
   # `realistic-mapped.browser.spec.ts`: the mapped-blobs lever (#1657) and
   # the city centre (#1636), out of `browser-4` since the combined PR that
-  # brought #1636 and #1689 together took it past 7 loads. As `browser-2`,
-  # whose comment says why it is a job of its own.
+  # brought #1636 and #1689 together took it past 7 loads; since #1815 also
+  # `realistic-delivery.browser.spec.ts`, Delivery's village ceiling, because
+  # `browser-4` holds 7. As `browser-2`, whose comment says why it is a job of
+  # its own.
   browser-5:
     name: Nightly browser checks (5 of 5)
     runs-on: ubuntu-latest

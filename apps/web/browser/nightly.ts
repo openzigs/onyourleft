@@ -175,6 +175,17 @@ export const NIGHTLY_CHECKS: readonly NightlyCheck[] = [
       'required suite by `mapped-blobs.test.ts`.',
   },
   {
+    spec: 'realistic-delivery.browser.spec.ts',
+    describe: 'the realistic page’s village frame, delivering — #1815',
+    seconds: 'one more load of the owner’s page',
+    why:
+      'Delivery’s own village ceiling (#1815, DL6b): the decorated village hold with a ' +
+      'round’s worst case drawn inside `DELIVERY_VILLAGE_DRAW_CALLS`. Cost, in a world a rider ' +
+      'chooses, read off a page that ships in no build. Still required: that an ordinary ' +
+      'frame is never held to it (`realistic-budget-village.test.ts`), and the belt’s three ' +
+      'calls whatever the count in both worlds’ materials (`delivery.browser.spec.ts`).',
+  },
+  {
     spec: 'realistic-town.browser.spec.ts',
     describe: 'the realistic page’s holiday decorations — #1624',
     seconds: 'three more loads of the owner’s page',
